@@ -29,7 +29,7 @@ if (existsSync(clientDist)) {
 
 const PORT = Number(process.env["PORT"] ?? 3001);
 app.listen(PORT, () => {
-  console.log(`dreamthedream web server → http://localhost:${PORT}`);
+  console.log(`Liminal web server → http://localhost:${PORT}`);
   console.log(`SSE stream         → http://localhost:${PORT}/api/stream`);
   console.log(`API key:           ${process.env["OPENROUTER_API_KEY"] ? "set" : "MISSING"}`);
 });

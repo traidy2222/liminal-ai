@@ -1,4 +1,4 @@
-import type { ToolRegistry, AgentEmitter, AgentHarness } from "@dreamthedream/core";
+import type { ToolRegistry, AgentEmitter, AgentHarness } from "@liminal/core";
 import { readFileTool } from "./read_file.js";
 import { writeFileTool } from "./write_file.js";
 import { listDirTool } from "./list_dir.js";

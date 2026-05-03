@@ -1,5 +1,5 @@
 {
-  "name": "@dreamthedream/tools",
+  "name": "@liminal/tools",
   "version": "0.1.0",
   "type": "module",
   "main": "./dist/index.js",
@@ -12,7 +12,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@dreamthedream/core": "*"
+    "@liminal/core": "*"
   },
   "devDependencies": {
     "typescript": "^5.6.0",

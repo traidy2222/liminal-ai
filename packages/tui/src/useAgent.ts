@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useReducer } from "react";
-import type { AgentHarness, AgentEventMap, ContextSnapshot } from "@dreamthedream/core";
+import type { AgentHarness, AgentEventMap, ContextSnapshot } from "@liminal/core";
 
 export type MessageEntry =
   | { kind: "user"; text: string }
@@ -325,7 +325,7 @@ export function useAgent(harness: AgentHarness) {
   );
 
   const resolveApproval = useCallback(
-    (decision: import("@dreamthedream/core").ApprovalDecision) => {
+    (decision: import("@liminal/core").ApprovalDecision) => {
       if (state.pendingApproval) {
         state.pendingApproval.resolve(decision);
         dispatch({ type: "approval_resolved" });

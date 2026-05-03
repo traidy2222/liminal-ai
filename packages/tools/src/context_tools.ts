@@ -1,4 +1,4 @@
-import type { ContextManager } from "@dreamthedream/core";
+import type { ContextManager } from "@liminal/core";
 import { defineTool } from "./helpers.js";
 
 /**

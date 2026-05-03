@@ -1,7 +1,7 @@
 import { Router } from "express";
 import type { AgentBridge } from "./agentBridge.js";
 import type { SSEManager } from "./sse.js";
-import type { ApprovalDecision } from "@dreamthedream/core";
+import type { ApprovalDecision } from "@liminal/core";
 
 export function createRouter(bridge: AgentBridge, sse: SSEManager): Router {
   const router = Router();

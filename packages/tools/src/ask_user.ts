@@ -1,4 +1,4 @@
-import type { AgentEmitter } from "@dreamthedream/core";
+import type { AgentEmitter } from "@liminal/core";
 import { defineTool } from "./helpers.js";
 
 export function createAskUserTool(emitter: AgentEmitter) {

@@ -12,8 +12,8 @@ import {
   type ToolResult,
   type ToolHandler,
   type AgentEventMap,
-} from "@dreamthedream/core";
-import { registerAllTools, INCEPTION_MESSAGES } from "@dreamthedream/tools";
+} from "@liminal/core";
+import { registerAllTools, INCEPTION_MESSAGES } from "@liminal/tools";
 
 // ─── Public types ─────────────────────────────────────────────────────────────
 

@@ -1,6 +1,6 @@
 import React from "react";
 import { Box, Text, useInput } from "ink";
-import type { AgentEventMap } from "@dreamthedream/core";
+import type { AgentEventMap } from "@liminal/core";
 
 interface Props {
   payload: AgentEventMap["tool_approval"];

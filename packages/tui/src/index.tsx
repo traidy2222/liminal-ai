@@ -3,8 +3,8 @@ import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import React from "react";
 import { render } from "ink";
-import { AgentHarness } from "@dreamthedream/core";
-import { registerAllTools, INCEPTION_MESSAGES } from "@dreamthedream/tools";
+import { AgentHarness } from "@liminal/core";
+import { registerAllTools, INCEPTION_MESSAGES } from "@liminal/tools";
 import { App } from "./App.js";
 
 // Load .env from monorepo root (cwd when running from packages/tui is that package dir)

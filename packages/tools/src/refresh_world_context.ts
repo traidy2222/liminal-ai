@@ -1,5 +1,5 @@
-import type { AgentHarness } from "@dreamthedream/core";
-import { buildWorldContextMessage } from "@dreamthedream/core";
+import type { AgentHarness } from "@liminal/core";
+import { buildWorldContextMessage } from "@liminal/core";
 import { defineTool } from "./helpers.js";
 
 /**

@@ -278,8 +278,8 @@ export class AgentHarness {
       baseURL: config.baseURL,
       maxRetries: 0,
       defaultHeaders: {
-        "HTTP-Referer": "https://github.com/dreamthedream",
-        "X-Title": "dreamthedream",
+        "HTTP-Referer": "https://github.com/liminal-ai",
+        "X-Title": "Liminal",
       },
     });
 

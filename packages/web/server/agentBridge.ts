@@ -1,7 +1,7 @@
-import { AgentHarness } from "@dreamthedream/core";
-import { registerAllTools, INCEPTION_MESSAGES } from "@dreamthedream/tools";
+import { AgentHarness } from "@liminal/core";
+import { registerAllTools, INCEPTION_MESSAGES } from "@liminal/tools";
 import type { SSEManager } from "./sse.js";
-import type { ApprovalDecision } from "@dreamthedream/core";
+import type { ApprovalDecision } from "@liminal/core";
 
 export class AgentBridge {
   readonly harness: AgentHarness;

@@ -1,5 +1,5 @@
 {
-  "name": "@dreamthedream/web",
+  "name": "@liminal/web",
   "version": "0.1.0",
   "type": "module",
   "scripts": {
@@ -10,8 +10,8 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@dreamthedream/core": "*",
-    "@dreamthedream/tools": "*",
+    "@liminal/core": "*",
+    "@liminal/tools": "*",
     "express": "^4.21.0",
     "cors": "^2.8.5",
     "dotenv": "^16.4.0"

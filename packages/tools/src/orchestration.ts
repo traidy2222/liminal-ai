@@ -1,4 +1,4 @@
-import type { AgentHarness, TaskOrchestrator, SubtaskResult } from "@dreamthedream/core";
+import type { AgentHarness, TaskOrchestrator, SubtaskResult } from "@liminal/core";
 import { defineTool } from "./helpers.js";
 import { createContextTools } from "./context_tools.js";
 
@@ -212,13 +212,13 @@ export function createOrchestrationTools(harness: AgentHarness) {
     handler: async (_args) => {
       const tasks = orchestrator
         .getAll()
-        .filter((t: import("@dreamthedream/core").TaskRecord) => t.parentTaskId !== undefined);
+        .filter((t: import("@liminal/core").TaskRecord) => t.parentTaskId !== undefined);
 
       if (tasks.length === 0) {
         return { ok: true, output: "(no sub-agents spawned yet)" };
       }
 
-      const lines = tasks.map((t: import("@dreamthedream/core").TaskRecord) => {
+      const lines = tasks.map((t: import("@liminal/core").TaskRecord) => {
         const statusIcon =
           t.status === "running"
             ? "⟳"

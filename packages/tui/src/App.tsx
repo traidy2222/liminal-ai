@@ -1,6 +1,6 @@
 import React from "react";
 import { Box, Text } from "ink";
-import type { AgentHarness } from "@dreamthedream/core";
+import type { AgentHarness } from "@liminal/core";
 import { useAgent, type MessageEntry } from "./useAgent.js";
 import { Header } from "./components/Header.js";
 import { StreamingText } from "./components/StreamingText.js";

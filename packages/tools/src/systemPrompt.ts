@@ -1,4 +1,4 @@
-import type { Message } from "@dreamthedream/core";
+import type { Message } from "@liminal/core";
 
 /**
  * Authoritative inception messages shared by the TUI and web server.
@@ -8,7 +8,7 @@ import type { Message } from "@dreamthedream/core";
 export const INCEPTION_MESSAGES: Message[] = [
   {
     role: "system",
-    content: `You are dreamthedream — a precise, capable AI agent with multi-agent orchestration.
+    content: `You are Liminal — a precise, capable AI agent with multi-agent orchestration.
 
 ## World Context
 At the very start of each session a [WORLD CONTEXT] block is injected with:

@@ -1,6 +1,6 @@
 import React from "react";
 import { Box, Text } from "ink";
-import type { ContextSnapshot } from "@dreamthedream/core";
+import type { ContextSnapshot } from "@liminal/core";
 
 interface Props {
   snapshot: ContextSnapshot | null;
@@ -16,7 +16,7 @@ export function Header({ snapshot, busy }: Props) {
   return (
     <Box borderStyle="single" paddingX={1} justifyContent="space-between">
       <Box gap={1}>
-        <Text bold color="cyan">dreamthedream</Text>
+        <Text bold color="cyan">Liminal</Text>
         {busy && <Text color="yellow">⟳</Text>}
       </Box>
       {snapshot ? (

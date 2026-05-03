@@ -49,7 +49,7 @@ async function main() {
 
   const model = process.env["EVAL_MODEL"] ?? "openai/gpt-4o-mini";
   console.log(
-    `\n${fmt(BOLD, "dreamthedream eval")}  ${fmt(DIM, `model: ${model}`)}\n`
+    `\n${fmt(BOLD, "Liminal eval")}  ${fmt(DIM, `model: ${model}`)}\n`
   );
   console.log(fmt(DIM, `Running ${ALL_SCENARIOS.length} scenarios…\n`));
 
