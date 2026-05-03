@@ -133,6 +133,11 @@ export class ContextManager {
     this.personaBlock = block;
   }
 
+  /** Clear hot-swapped persona so inception message[0] from config is used again. */
+  clearPersonaBlock(): void {
+    this.personaBlock = undefined;
+  }
+
   /**
    * Returns the effective inception messages, substituting message[0]'s content
    * with the active persona block override (if any).

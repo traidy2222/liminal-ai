@@ -6,7 +6,7 @@ import { runShellTool } from "./run_shell.js";
 import { webFetchTool } from "./web_fetch.js";
 import { webSearchTool } from "./web_search.js";
 import { createAskUserTool } from "./ask_user.js";
-import { rememberTool, recallTool, recallByTypeTool } from "./remember_recall.js";
+import { rememberTool, recallTool, recallByTypeTool, forgetTool, forgetTypeTool, memoryStatsTool } from "./remember_recall.js";
 import { thinkTool } from "./think.js";
 import { planTool } from "./plan.js";
 import { searchMemoryTool } from "./search_memory.js";
@@ -47,6 +47,9 @@ export function registerAllTools(
   registry.register(rememberTool);
   registry.register(recallTool);
   registry.register(recallByTypeTool);
+  registry.register(forgetTool);
+  registry.register(forgetTypeTool);
+  registry.register(memoryStatsTool);
   registry.register(searchMemoryTool);
   registry.register(suggestImprovementTool);
   registry.register(viewInsightsTool);
@@ -76,7 +79,8 @@ export function registerAllTools(
 
 export { createAskUserTool } from "./ask_user.js";
 export { INCEPTION_MESSAGES, buildInceptionMessages } from "./systemPrompt.js";
-export { buildPersonaBlock, resolvePreset, PERSONA_PRESETS } from "./persona_presets.js";
+export { buildPersonaBlock, buildRichPersonaBlock } from "./persona_presets.js";
+export type { PersonaProfile, SpeechStyle, PersonaTone } from "./persona_presets.js";
 export { createOrchestrationTools } from "./orchestration.js";
 export { createContextTools } from "./context_tools.js";
 export { createSetPersonaTool } from "./set_persona.js";

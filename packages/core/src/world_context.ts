@@ -94,6 +94,10 @@ interface SessionMemory {
   facts: Array<{ key: string; value: string }>;
   experiences: Array<{ key: string; value: string }>;
   entities: Array<{ key: string; value: string }>;
+  reflections: Array<{ value: string }>;
+  recipes: Array<{ value: string }>;
+  totalCount: number;
+  countByType: Record<string, number>;
 }
 
 // ─── Utilities ────────────────────────────────────────────────────────────────
@@ -536,22 +540,41 @@ async function gatherCodeStyle(): Promise<CodeStyle | null> {
 const NOTES_FILE = path.join(process.cwd(), ".agent_notes.json");
 const PROJ_BASENAME = path.basename(process.cwd()).toLowerCase();
 
+/** Stored note format — may be plain string (legacy) or timestamped object (new). */
+type MaybeStoredNote = string | { value: string; createdAt?: string; updatedAt?: string };
+
+function extractNoteValue(note: MaybeStoredNote): string {
+  return typeof note === "string" ? note : (note.value ?? "");
+}
+
+function extractNoteUpdatedAt(note: MaybeStoredNote): string | undefined {
+  return typeof note === "string" ? undefined : note.updatedAt;
+}
+
 async function gatherSessionMemory(): Promise<SessionMemory | null> {
   const raw = await tryReadFile(NOTES_FILE);
   if (!raw) return null;
 
-  let notes: Record<string, string>;
-  try { notes = JSON.parse(raw) as Record<string, string>; }
+  let rawNotes: Record<string, MaybeStoredNote>;
+  try { rawNotes = JSON.parse(raw) as Record<string, MaybeStoredNote>; }
   catch { return null; }
 
   const facts: SessionMemory["facts"] = [];
   const experiences: SessionMemory["experiences"] = [];
   const entities: SessionMemory["entities"] = [];
+  const reflectionCandidates: Array<{ value: string; updatedAt?: string }> = [];
+  const recipeCandidates: Array<{ value: string; updatedAt?: string }> = [];
+  const countByType: Record<string, number> = {};
 
-  for (const [fullKey, value] of Object.entries(notes)) {
+  for (const [fullKey, rawEntry] of Object.entries(rawNotes)) {
+    const value = extractNoteValue(rawEntry);
+    const updatedAt = extractNoteUpdatedAt(rawEntry);
     const colonIdx = fullKey.indexOf(":");
-    const type = colonIdx > 0 ? fullKey.slice(0, colonIdx) : null;
+    const type = colonIdx > 0 ? fullKey.slice(0, colonIdx) : "general";
     const key  = colonIdx > 0 ? fullKey.slice(colonIdx + 1) : fullKey;
+
+    // Count all entries by type (for summary)
+    countByType[type] = (countByType[type] ?? 0) + 1;
 
     if (type === "fact") {
       facts.push({ key, value: value.slice(0, 100) });
@@ -562,16 +585,45 @@ async function gatherSessionMemory(): Promise<SessionMemory | null> {
       if (key.toLowerCase().includes(PROJ_BASENAME) || value.toLowerCase().includes(PROJ_BASENAME)) {
         entities.push({ key, value: value.slice(0, 100) });
       }
+    } else if (type === "reflection") {
+      // Collect for recency-sorted injection (Reflexion protocol)
+      reflectionCandidates.push({ value, updatedAt });
+    } else if (type === "recipe") {
+      // Collect successful tool patterns for session start
+      recipeCandidates.push({ value, updatedAt });
     }
-    // Skip reflection, recipe, harness — too verbose for session start
+    // Skip harness:* — too verbose (improvement suggestions)
   }
 
-  // Keep only the 2 most recent experience entries (keys often contain dates)
+  // Keep only the 2 most recent experience entries (keys often contain dates/timestamps)
   experiences.sort((a, b) => b.key.localeCompare(a.key));
   experiences.splice(2);
 
-  const total = facts.length + experiences.length + entities.length;
-  return total > 0 ? { facts, experiences, entities } : null;
+  // Sort reflections by recency (newest first), keep top 3, condense to 120 chars
+  reflectionCandidates.sort((a, b) => {
+    const aT = a.updatedAt ?? "";
+    const bT = b.updatedAt ?? "";
+    return bT.localeCompare(aT);
+  });
+  const reflections = reflectionCandidates.slice(0, 3).map((r) => ({
+    value: r.value.slice(0, 120) + (r.value.length > 120 ? "…" : ""),
+  }));
+
+  // Sort recipes by recency, keep top 2
+  recipeCandidates.sort((a, b) => {
+    const aT = a.updatedAt ?? "";
+    const bT = b.updatedAt ?? "";
+    return bT.localeCompare(aT);
+  });
+  const recipes = recipeCandidates.slice(0, 2).map((r) => ({
+    value: r.value.slice(0, 120) + (r.value.length > 120 ? "…" : ""),
+  }));
+
+  const totalCount = Object.values(countByType).reduce((a, b) => a + b, 0);
+  const total = facts.length + experiences.length + entities.length + reflections.length + recipes.length;
+  return total > 0 || totalCount > 0
+    ? { facts, experiences, entities, reflections, recipes, totalCount, countByType }
+    : null;
 }
 
 // ─── Format helpers ───────────────────────────────────────────────────────────
@@ -706,14 +758,33 @@ export async function buildWorldContextMessage(options?: WorldContextOptions): P
   }
 
   // ── Session memory ────────────────────────────────────────────────────────────
-  if (memory && (memory.facts.length || memory.experiences.length || memory.entities.length)) {
+  if (memory && memory.totalCount > 0) {
     lines.push(sep("Session Memory"));
+    // Summary line — agent knows what it knows at a glance
+    const breakdown = Object.entries(memory.countByType)
+      .sort(([a], [b]) => a.localeCompare(b))
+      .map(([t, n]) => `${n} ${t}`)
+      .join(", ");
+    lines.push(`Memory: ${memory.totalCount} stored (${breakdown})`);
+    // Facts and entities
     for (const { key, value } of memory.facts)
       lines.push(`[fact] ${key} → ${value}`);
     for (const { key, value } of memory.entities)
       lines.push(`[entity] ${key} → ${value}`);
     for (const { key, value } of memory.experiences)
       lines.push(`[exp:${key}] ${value}`);
+    // Past failure lessons (Reflexion protocol — surfaces what was previously skipped)
+    if (memory.reflections.length > 0) {
+      lines.push(`Past failure lessons (${memory.reflections.length}):`);
+      for (const { value } of memory.reflections)
+        lines.push(`  - ${value}`);
+    }
+    // Successful patterns
+    if (memory.recipes.length > 0) {
+      lines.push(`Successful patterns (${memory.recipes.length}):`);
+      for (const { value } of memory.recipes)
+        lines.push(`  - ${value}`);
+    }
   }
 
   // ── Footer ────────────────────────────────────────────────────────────────────

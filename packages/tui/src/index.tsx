@@ -20,7 +20,7 @@ const harness = new AgentHarness({
   openRouterApiKey: apiKey,
   model: "minimax/minimax-m2.5:free",
   baseURL: "https://openrouter.ai/api/v1",
-  maxToolRoundsPerTurn: 500,
+  maxToolRoundsPerTurn: 128,
   // World context: auto-gather date/time/OS/shell; optionally include location
   // Set AGENT_LOCATION="City, Country" in .env to include physical location
   worldContext: process.env["AGENT_LOCATION"]

@@ -1,5 +1,5 @@
 import { defineTool } from "./helpers.js";
-import { loadNotes, atomicUpdate, makeTypedKey } from "./notes_store.js";
+import { loadNotes, loadRawNotes, atomicUpdate, makeTypedKey, type StoredNote } from "./notes_store.js";
 
 const MEMORY_TYPES = ["fact", "experience", "entity", "belief", "reflection", "recipe"] as const;
 type MemoryType = (typeof MEMORY_TYPES)[number];
@@ -98,6 +98,128 @@ export const recallByTypeTool = defineTool({
     return {
       ok: true,
       output: matches || `(no ${memType} memories stored)`,
+    };
+  },
+});
+
+// ─── New memory management tools ──────────────────────────────────────────────
+
+export const forgetTool = defineTool({
+  name: "forget",
+  description:
+    "WHAT: Delete a specific memory by exact key.\n" +
+    "WHEN: A stored fact is wrong, outdated, or no longer relevant.\n" +
+    "NOT WHEN: You want to clear an entire category — use forget_type instead.\n" +
+    "ARGS: key — exact key to delete (use search_memory or recall() first if unsure of the key).",
+  requiresApproval: false,
+  parameters: {
+    type: "object",
+    properties: {
+      key: { type: "string", description: "Exact key of the memory to delete" },
+    },
+    required: ["key"],
+    additionalProperties: false,
+  },
+  handler: async (args) => {
+    const targetKey = args["key"] as string;
+    let found = false;
+    await atomicUpdate((notes) => {
+      if (!(targetKey in notes)) return notes;
+      found = true;
+      const updated = { ...notes };
+      delete updated[targetKey];
+      return updated;
+    });
+    return found
+      ? { ok: true, output: `Deleted memory: "${targetKey}"` }
+      : { ok: false, error: `No memory found for key "${targetKey}". Use search_memory to find the correct key.` };
+  },
+});
+
+export const forgetTypeTool = defineTool({
+  name: "forget_type",
+  description:
+    "WHAT: Delete ALL memories of a given type at once.\n" +
+    "WHEN: Clearing stale beliefs after a project changes, resetting old reflections, pruning expired entities.\n" +
+    "NOT WHEN: You want to delete one specific entry — use forget(key) instead.\n" +
+    "WARNING: This is irreversible. Use recall_type or memory_stats to review first.\n" +
+    "ARGS: type — one of: fact, experience, entity, belief, reflection, recipe, harness.",
+  requiresApproval: false,
+  parameters: {
+    type: "object",
+    properties: {
+      type: {
+        type: "string",
+        enum: [...MEMORY_TYPES, "harness"],
+        description: `Memory category to clear: ${[...MEMORY_TYPES, "harness"].join(", ")}`,
+      },
+    },
+    required: ["type"],
+    additionalProperties: false,
+  },
+  handler: async (args) => {
+    const memType = args["type"] as string;
+    const prefix = `${memType}:`;
+    let count = 0;
+    await atomicUpdate((notes) => {
+      const updated: Record<string, string> = {};
+      for (const [k, v] of Object.entries(notes)) {
+        if (k.startsWith(prefix)) {
+          count++;
+        } else {
+          updated[k] = v;
+        }
+      }
+      return updated;
+    });
+    return {
+      ok: true,
+      output: count > 0
+        ? `Deleted ${count} ${memType} memor${count === 1 ? "y" : "ies"}.`
+        : `(no ${memType} memories found — nothing deleted)`,
+    };
+  },
+});
+
+export const memoryStatsTool = defineTool({
+  name: "memory_stats",
+  description:
+    "WHAT: Show a grouped summary of all stored memories with counts and recency info.\n" +
+    "WHEN: At session start to understand what you know, before searching, or to decide what to forget.\n" +
+    "ARGS: none.",
+  requiresApproval: false,
+  parameters: {
+    type: "object",
+    properties: {},
+    additionalProperties: false,
+  },
+  handler: async (_args) => {
+    const raw = await loadRawNotes();
+    const groups: Record<string, { count: number; newest?: string }> = {};
+    for (const [k, v] of Object.entries(raw)) {
+      const colon = k.indexOf(":");
+      const type = colon > 0 ? k.slice(0, colon) : "general";
+      const updatedAt = typeof v === "string" ? undefined : (v as StoredNote).updatedAt;
+      const existing = groups[type];
+      if (!existing) {
+        groups[type] = { count: 1, newest: updatedAt };
+      } else {
+        existing.count++;
+        if (updatedAt && (!existing.newest || updatedAt > existing.newest)) {
+          existing.newest = updatedAt;
+        }
+      }
+    }
+    const total = Object.values(groups).reduce((a, b) => a + b.count, 0);
+    if (total === 0) return { ok: true, output: "(no memories stored)" };
+    const lines = Object.entries(groups)
+      .sort(([a], [b]) => a.localeCompare(b))
+      .map(([type, g]) =>
+        `  ${type}: ${g.count}${g.newest ? ` (newest: ${g.newest.slice(0, 10)})` : ""}`
+      );
+    return {
+      ok: true,
+      output: `Total: ${total} memories\n${lines.join("\n")}`,
     };
   },
 });

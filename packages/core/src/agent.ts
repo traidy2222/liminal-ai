@@ -254,6 +254,20 @@ export class AgentHarness {
     });
   }
 
+  /**
+   * Restore inception identity from config (clears runtime persona override).
+   * Used when the user resets to the default agent voice.
+   */
+  resetPersona(): void {
+    this.currentPersona = undefined;
+    this.context.clearPersonaBlock();
+    const p = this.config.persona;
+    this.emitter.emit("persona_changed", {
+      name: p?.name ?? "Liminal",
+      description: p?.description ?? "Default inception identity restored.",
+    });
+  }
+
   /** Returns the currently active persona config, or undefined if default. */
   getCurrentPersona(): PersonaConfig | undefined {
     return this.currentPersona ?? this.config.persona;
@@ -469,6 +483,11 @@ export class AgentHarness {
     // Replace child's empty registry with the scoped one
     childHarness.registry = childRegistry;
     childHarness.abortSignal = abortController.signal;
+
+    // Propagate hook so depth-2+ children get harness-scoped tools (orchestration, context, …).
+    // Only the root had this set from registerAllTools — without inheritance, grandchildren
+    // would keep a stripped registry and never re-register.
+    childHarness.onChildCreated = this.onChildCreated;
 
     // Notify external code (orchestration tools) to register child-scoped tools
     // (e.g. spawn_agent closing over childHarness for grandchild support)
@@ -720,8 +739,10 @@ export class AgentHarness {
   ): Promise<Stream<OpenAI.Chat.Completions.ChatCompletionChunk>> {
     let lastErr: unknown;
 
+    const allowToollessRetry = this.config.allowToollessStreamRetry !== false;
     for (let attempt = 0; attempt <= this.maxRetries; attempt++) {
-      const useTools = tools.length > 0 && attempt < 2;
+      const useTools =
+        tools.length > 0 && (allowToollessRetry ? attempt < 2 : true);
       const useToolChoice = useTools && attempt === 0;
 
       const params: OpenAI.Chat.Completions.ChatCompletionCreateParamsStreaming = {
@@ -776,8 +797,13 @@ export class AgentHarness {
     };
   }
 
+  /**
+   * Clear conversation state. Persona override is preserved; call resetPersona() to clear it.
+   * World context will be re-injected on the next root send() (same as a fresh session).
+   */
   reset(): void {
     this.context.clear();
     this.roundCount = 0;
+    this.worldContextInjected = false;
   }
 }

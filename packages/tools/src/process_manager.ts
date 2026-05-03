@@ -33,6 +33,10 @@ export const runBackgroundTool = defineTool({
     "startup_wait_ms — ms to wait before returning so startup output is captured (default: 2000).",
   requiresApproval: true,
   dangerLevel: "destructive",
+  resourceLocks: (args) => {
+    const cwd = (args["cwd"] as string | undefined) ?? "cwd";
+    return [`shell:${cwd}`];
+  },
   parameters: {
     type: "object",
     properties: {

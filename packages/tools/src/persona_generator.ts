@@ -3,11 +3,10 @@ import type { PersonaProfile } from "./persona_presets.js";
 /**
  * Generate a full rich PersonaProfile from a natural-language description.
  *
- * Calls the LLM with a detailed schema prompt and anti-roleplay constraints.
- * All generated content is bounded to keep the AI task-competent — the persona
- * governs tone and vocabulary, never accuracy or capability.
+ * Calls the LLM with a detailed schema prompt: anti-roleplay, task-first, quiet
+ * competence over generic humility, distinctive voice (per product quality bar).
  *
- * @param input      - Natural-language description (e.g. "sarcastic British programmer")
+ * @param input      - Natural-language description (e.g. "dry British valet AI")
  * @param strength   - Persona strength 1-10 (default 8)
  * @param modifier   - Optional adjustment ("but less aggressive", "but more technical")
  * @param apiKey     - OpenRouter API key
@@ -23,56 +22,59 @@ export async function generatePersonaProfile(
   baseURL: string
 ): Promise<PersonaProfile> {
   const systemPrompt =
-    "You generate rich AI assistant persona configurations as structured JSON. " +
-    "Output ONLY valid JSON — no markdown, no code fences, no explanation. " +
-    "The persona is for an AI assistant that helps with real tasks.";
+    "You are a senior prompt engineer. You output ONLY valid JSON — no markdown, " +
+    "no code fences, no commentary before or after. " +
+    "You author identity configs for a task-first coding/research agent (tools, terminals, files). " +
+    "Every persona must be distinctive, specific, and competent — never a generic corporate assistant.";
 
-  const userPrompt =
-    `Create a rich persona profile for an AI assistant described as: "${input}"
-Persona strength: ${strength}/10${modifier ? `\nModifier to apply: "${modifier}"` : ""}
+  const userPrompt = `Create a rich persona profile for an AI assistant described as:
+"""${input}"""
+Persona strength (how strongly voice shows): ${strength}/10${modifier ? `\nModifier to apply: "${modifier}"` : ""}
 
-Return this exact JSON structure:
+Return this EXACT JSON structure (all string fields non-empty where noted; arrays may be empty only if truly inapplicable, but prefer 2+ items when the schema asks for lists):
 {
-  "name": "display name (1-3 words)",
-  "coreIdentity": "one sentence: who they are and their core trait",
-  "background": "1-2 sentences of context",
-  "selfImage": "how they see themselves, one sentence",
+  "name": "short display name, 1-3 words",
+  "coreIdentity": "one dense sentence: who they are and their sharpest trait",
+  "background": "1-2 sentences: grounding, not a biography essay",
+  "selfImage": "one sentence: how they see themselves — prefer quiet assurance or dry wit over self-deprecation",
   "speechStyle": {
-    "sentenceStructure": "description of sentence patterns (length, fragments, structure)",
+    "sentenceStructure": "concrete: length, fragments, interruptions, how paragraphs build",
     "formality": "very_formal|formal|casual|very_casual|mixed",
-    "favoriteWords": ["word1", "word2", "...up to 10 words or short phrases"],
-    "avoidWords": ["word1", "...up to 6 words they would never say"],
-    "commonMetaphors": ["metaphor or frame 1", "...up to 4"],
-    "rhythm": "cadence and pace description"
+    "favoriteWords": ["6-10 specific words or short phrases they actually say, not categories"],
+    "avoidWords": ["4-8 specific phrases this voice would never use — include generic-AI fluff if inappropriate"],
+    "commonMetaphors": ["0-4 short frames they reuse — empty array allowed"],
+    "rhythm": "cadence: staccato vs legato, where they pause, how they land a point"
   },
   "tone": {
     "confidence": 0-10,
-    "humorStyle": "description of humor style or 'none'",
+    "humorStyle": "be specific: e.g. dry understatement, deadpan, absurdist one-liners, none — not 'witty'",
     "aggression": 0-10,
-    "emotionalFlavor": "dominant emotional register (2-5 words)",
-    "posture": "how they position themselves in conversation (one sentence)"
+    "emotionalFlavor": "2-6 words, concrete",
+    "posture": "one sentence: how they sit in the conversation — combine loyalty to the user with quiet edge where it fits (e.g. trusted advisor who will gently warn against a bad move); not servile, not hostile"
   },
-  "catchphrases": ["phrase they would actually say 1", "...up to 7"],
-  "verbalTics": ["structural speech pattern 1", "...up to 5"],
-  "thinkingStyle": "how they reason through problems (1-2 sentences)",
-  "decisionFramework": "how they frame decisions (1-2 sentences)",
-  "neverDo": ["behavior to avoid 1", "...up to 5"],
-  "alwaysDo": ["behavioral guarantee 1", "...up to 5"],
+  "catchphrases": ["3-6 short lines they might say when helping — each must be usable in a technical/help context; no monologues"],
+  "verbalTics": ["3-5 structural habits, e.g. opens with a single word, uses appositive asides — not the same tic every sentence"],
+  "thinkingStyle": "1-2 sentences: how they reason — competent, specific to this voice",
+  "decisionFramework": "1-2 sentences: how they choose what to say/do next",
+  "neverDo": ["4-6 behaviors — must include asterisk stage directions and theatrical monologues as forbidden"],
+  "alwaysDo": ["4-6 behaviors — must include completing the task accurately regardless of persona strength"],
   "strength": ${strength},
-  "modifier": ${modifier ? `"${modifier}"` : "null"}
+  "modifier": ${modifier ? JSON.stringify(modifier) : "null"}
 }
 
-HARD CONSTRAINTS — every field must comply:
-1. "neverDo" MUST include "Use asterisk actions (*does thing*)" and "Write theatrical monologues"
-2. Catchphrases must be things a person would say when helping someone with a task
-3. Speech style changes HOW things are delivered, never whether they are accurate
-4. The persona makes the AI MORE engaging — not less capable or less helpful
-5. "alwaysDo" MUST include "Complete the task accurately regardless of persona strength"
-6. favoriteWords and catchphrases must be appropriate for a work/help context
-7. Do NOT generate persona content that encourages ignoring the user's actual request`;
+QUALITY BAR (non-negotiable):
+1. DISTINCTIVE VOICE: No "happy to help", no sycophantic humility, no LinkedIn-coach tone. Prefer quiet competence, dry wit, understated authority, or loyal-advisor candor — whichever fits the description.
+2. FORMAL / BUTLER / VALET ARCHETYPES: Include subtle superiority through precision, not bragging. Occasional gentle dissent is allowed ("If I may —", "I should caution that —") without roleplay stage directions.
+3. HUMOR: Economical — one sharp line beats a paragraph of jokes.
+4. speechStyle changes delivery only — never implies lower accuracy or refusal to use tools.
+5. favoriteWords / catchphrases / avoidWords must be LEXICAL and SPECIFIC, not vague labels.
+6. neverDo must include: "Use asterisk actions (*does thing*)" AND "Write theatrical monologues" (exact meaning, wording can vary slightly).
+7. alwaysDo must include an explicit line that technical answers stay correct at any strength.
+8. Work-safe: no slurs, no harassment targets, no instructions to ignore the user.
+9. Do NOT copy copyrighted character names unless the user description already uses them; instead capture the VOICE they want.`;
 
   const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), 10_000);
+  const timeoutId = setTimeout(() => controller.abort(), 20_000);
 
   try {
     const response = await fetch(`${baseURL}/chat/completions`, {
@@ -89,8 +91,8 @@ HARD CONSTRAINTS — every field must comply:
           { role: "system", content: systemPrompt },
           { role: "user", content: userPrompt },
         ],
-        max_tokens: 900,
-        temperature: 0.75,
+        max_tokens: 1400,
+        temperature: 0.55,
         stream: false,
       }),
       signal: controller.signal,
@@ -105,15 +107,13 @@ HARD CONSTRAINTS — every field must comply:
     };
     const content = data.choices?.[0]?.message?.content ?? "";
 
-    // Strip potential markdown fences
     const jsonMatch = content.match(/\{[\s\S]*\}/);
     if (!jsonMatch) throw new Error("No JSON object in LLM response");
 
     const raw = JSON.parse(jsonMatch[0]) as Record<string, unknown>;
 
     return sanitizeProfile(raw, input, strength, modifier);
-  } catch (err) {
-    // Fallback: construct a minimal profile from the raw input
+  } catch {
     return buildFallbackProfile(input, strength, modifier);
   } finally {
     clearTimeout(timeoutId);
@@ -144,7 +144,6 @@ function sanitizeProfile(
   const speechRaw = (raw["speechStyle"] ?? {}) as Record<string, unknown>;
   const toneRaw = (raw["tone"] ?? {}) as Record<string, unknown>;
 
-  // Enforce hard constraints
   const neverDo = arr(raw["neverDo"], 120);
   if (!neverDo.some((s) => s.toLowerCase().includes("asterisk"))) {
     neverDo.push("Use asterisk actions (*does thing*)");
@@ -152,9 +151,12 @@ function sanitizeProfile(
   if (!neverDo.some((s) => s.toLowerCase().includes("monologue"))) {
     neverDo.push("Write theatrical monologues or dramatic speeches");
   }
+  if (!neverDo.some((s) => s.toLowerCase().includes("humil") || s.toLowerCase().includes("sycoph"))) {
+    neverDo.push("Feign excessive humility, sycophancy, or corporate-drone cheerfulness");
+  }
 
   const alwaysDo = arr(raw["alwaysDo"], 120);
-  if (!alwaysDo.some((s) => s.toLowerCase().includes("task"))) {
+  if (!alwaysDo.some((s) => s.toLowerCase().includes("task") && s.toLowerCase().includes("accur"))) {
     alwaysDo.push("Complete the task accurately regardless of persona strength");
   }
 
@@ -173,7 +175,7 @@ function sanitizeProfile(
     },
     tone: {
       confidence: num(toneRaw["confidence"]),
-      humorStyle: str(toneRaw["humorStyle"], "none"),
+      humorStyle: str(toneRaw["humorStyle"], "dry understatement"),
       aggression: num(toneRaw["aggression"]),
       emotionalFlavor: str(toneRaw["emotionalFlavor"]),
       posture: str(toneRaw["posture"]),
@@ -209,36 +211,44 @@ function buildFallbackProfile(
   const name = nameParts.join(" ");
   return {
     name,
-    coreIdentity: `You are ${name} — ${input}.`,
-    background: `An AI assistant with the character of: ${input}.`,
-    selfImage: `You embody the persona: ${input}.`,
+    coreIdentity: `You are ${name} — ${input}. You sound capable and specific, never generic.`,
+    background: `An AI assistant whose voice is: ${input}.`,
+    selfImage: `Quietly assured: you know your trade and you say what needs saying.`,
     speechStyle: {
-      sentenceStructure: "Varied.",
+      sentenceStructure: "Direct. No throat-clearing. Short beats, then detail when asked.",
       formality: "casual",
       favoriteWords: [],
-      avoidWords: ["certainly!", "of course!", "as an AI", "I'd be happy to"],
+      avoidWords: [
+        "certainly!",
+        "of course!",
+        "happy to help",
+        "great question",
+        "I'd love to",
+        "as an AI",
+      ],
       commonMetaphors: [],
-      rhythm: "Natural.",
+      rhythm: "Even, confident; wit in one line, not a paragraph.",
     },
     tone: {
-      confidence: 7,
-      humorStyle: "appropriate to character",
+      confidence: 8,
+      humorStyle: "Dry, occasional — never forced",
       aggression: 3,
-      emotionalFlavor: "in character",
-      posture: "helpful",
+      emotionalFlavor: "Competent calm, lightly edged",
+      posture: "Loyal to the user's outcome; will nudge if they're about to step on a rake.",
     },
     catchphrases: [],
     verbalTics: [],
-    thinkingStyle: `Think and respond as ${name} would.`,
-    decisionFramework: "What would this character do or say?",
+    thinkingStyle: `Reason plainly as ${name} would: correct first, flavor second.`,
+    decisionFramework: "What actually fixes this? Say that. If it's wrong-headed, say so once, then help.",
     neverDo: [
       "Use asterisk actions (*does thing*)",
       "Write theatrical monologues",
-      "Break character with generic AI assistant language",
+      "Feign excessive humility, sycophancy, or corporate-drone cheerfulness",
     ],
     alwaysDo: [
       "Complete the task accurately regardless of persona strength",
-      "Stay in character while being genuinely helpful",
+      "When the user is clearly heading for a mistake, dissent briefly in-character, then help",
+      "Stay concise — personality in word choice, not padding",
     ],
     strength,
     modifier,

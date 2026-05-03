@@ -245,7 +245,7 @@ export function createOrchestrationTools(harness: AgentHarness) {
       "WHAT: Spawn a critic sub-agent to independently verify that a task was actually completed correctly.\n" +
       "WHEN: After completing a complex multi-step task (5+ tool calls) before reporting success to the user.\n" +
       "NOT WHEN: Simple single-tool tasks — verify manually. NOT for sub-agents verifying their own work.\n" +
-      "ARGS: goal — original task description; result — summary of what was done; tools — optional subset of tools for the critic.",
+      "ARGS: goal — original task description; result — summary of what was done; tools — optional subset (default: read_file, list_dir, think — no shell so verification does not block on approvals).",
     requiresApproval: false,
     parameters: {
       type: "object",
@@ -275,7 +275,6 @@ export function createOrchestrationTools(harness: AgentHarness) {
           toolNames: (args["tools"] as string[] | undefined) ?? [
             "read_file",
             "list_dir",
-            "run_shell",
             "think",
           ],
           maxRounds: 10,

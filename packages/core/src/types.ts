@@ -250,6 +250,11 @@ export interface AgentConfig {
    */
   sendTimeoutMs?: number;
   /**
+   * When false, stream retries always include the tool list (never omit tools on later attempts).
+   * Default true: attempts 2+ may retry without tools to escape broken tool-call loops.
+   */
+  allowToollessStreamRetry?: boolean;
+  /**
    * Initial persona for this harness session.
    * Can be changed at runtime via harness.setPersona(config, block).
    */
