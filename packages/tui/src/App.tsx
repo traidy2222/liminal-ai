@@ -23,7 +23,7 @@ export function App({ harness }: Props) {
 
   return (
     <Box flexDirection="column">
-      <Header snapshot={state.contextSnapshot} busy={state.busy} />
+      <Header snapshot={state.contextSnapshot} busy={state.busy} personaName={state.personaName} />
 
       <Box flexDirection="column" paddingX={1}>
         {state.messages.map((entry, i) => (

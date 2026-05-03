@@ -24,4 +24,5 @@ export type {
   ChildAgentConfig,
   SubtaskResult,
   WorldContextOptions,
+  PersonaConfig,
 } from "./types.js";

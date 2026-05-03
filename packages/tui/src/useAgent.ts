@@ -32,6 +32,8 @@ export interface AgentState {
   pendingAskUser: AgentEventMap["ask_user"] | null;
   error: string | null;
   busy: boolean;
+  /** Display name of the currently active persona. Default: "Liminal". */
+  personaName: string;
 }
 
 type Action =
@@ -51,7 +53,8 @@ type Action =
   | { type: "plan_step_done"; stepIndex: number }  // (#8 structured plan)
   | { type: "subtask_spawned"; taskId: string; parentTaskId: string; goal: string; depth: number }
   | { type: "subtask_complete"; taskId: string; ok: boolean }
-  | { type: "context_compressed"; beforePct: number; afterPct: number; rounds: number };
+  | { type: "context_compressed"; beforePct: number; afterPct: number; rounds: number }
+  | { type: "persona_changed"; name: string };
 
 function reducer(state: AgentState, action: Action): AgentState {
   switch (action.type) {
@@ -225,6 +228,9 @@ function reducer(state: AgentState, action: Action): AgentState {
             : m
         ),
       };
+
+    case "persona_changed":
+      return { ...state, personaName: action.name };
   }
 }
 
@@ -235,6 +241,7 @@ const initialState: AgentState = {
   pendingAskUser: null,
   error: null,
   busy: false,
+  personaName: "Liminal",
 };
 
 export function useAgent(harness: AgentHarness) {
@@ -311,6 +318,10 @@ export function useAgent(harness: AgentHarness) {
         afterPct: Math.round(afterFraction * 100),
         rounds: roundsCompressed,
       })
+    );
+    // Persona change — update header badge
+    emitter.on("persona_changed", ({ name }) =>
+      dispatch({ type: "persona_changed", name })
     );
     // ask_user_answered and approval_decision are informational — no UI state change needed
     // but they fire into the event stream for telemetry consumers

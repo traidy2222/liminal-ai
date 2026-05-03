@@ -6,6 +6,7 @@ import type {
   AccumulatedToolCall,
   ChildAgentConfig,
   SubtaskResult,
+  PersonaConfig,
 } from "./types.js";
 import { AgentEmitter } from "./events.js";
 import { ContextManager } from "./context.js";
@@ -187,6 +188,7 @@ const ORCHESTRATION_TOOL_NAMES = new Set([
   "check_context",          // closes over parent's ContextManager — child needs its own
   "compress_context",       // same
   "refresh_world_context",  // root-only; children skip world context entirely
+  "set_persona",            // closes over parent harness — child inherits parent's persona
 ]);
 
 // ADAPTIVE_HINTS removed — unified into buildAdaptiveHint() with ERROR_TAXONOMY (#9)
@@ -226,12 +228,35 @@ export class AgentHarness {
   /** True once world context has been injected (only happens on the first send() of a root agent). */
   private worldContextInjected = false;
 
+  /** Active persona. Set via setPersona(); defaults to config.persona or unnamed default. */
+  private currentPersona?: PersonaConfig;
+
   /**
    * Returns the ContextManager for use by context tools factory.
    * @internal — used by packages/tools createContextTools factory.
    */
   getContext(): ContextManager {
     return this.context;
+  }
+
+  /**
+   * Hot-swap the agent's persona without restarting the session.
+   * @param config - The new persona metadata (name, description, traits…)
+   * @param block  - The pre-built system-prompt string for the identity block.
+   *                 Built by tools/persona_presets.ts to avoid circular deps.
+   */
+  setPersona(config: PersonaConfig, block: string): void {
+    this.currentPersona = config;
+    this.context.setPersonaBlock(block);
+    this.emitter.emit("persona_changed", {
+      name: config.name,
+      description: config.description,
+    });
+  }
+
+  /** Returns the currently active persona config, or undefined if default. */
+  getCurrentPersona(): PersonaConfig | undefined {
+    return this.currentPersona ?? this.config.persona;
   }
 
   private get maxRetries() {
@@ -411,8 +436,9 @@ export class AgentHarness {
     }
 
     // ── Build child inception messages ──────────────────────────────────────
+    // Use getEffectiveInception() so children inherit any active persona override
     const childInceptionMessages: Message[] = [
-      ...this.config.context.inceptionMessages,
+      ...this.context.getEffectiveInception(),
       ...(childConfig.additionalContext
         ? [
             {

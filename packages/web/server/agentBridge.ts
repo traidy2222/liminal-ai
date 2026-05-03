@@ -56,6 +56,7 @@ export class AgentBridge {
     emitter.on("approval_decision", (p) => this.sse.send("approval_decision", p));
     emitter.on("context_compressed", (p) => this.sse.send("context_compressed", p));
     emitter.on("tool_timing", (p) => this.sse.send("tool_timing", p));
+    emitter.on("persona_changed", (p) => this.sse.send("persona_changed", p));
 
     emitter.on("tool_approval", (payload) => {
       this.pendingApprovals.set(payload.callId, payload.resolve);

@@ -28,7 +28,12 @@ export function App() {
       {/* Header */}
       <div style={styles.header}>
         <div style={styles.headerTitle}>
-          <span style={{ color: "#00d4ff", fontWeight: "bold" }}>dreamthedream</span>
+          <span style={{ color: "#00d4ff", fontWeight: "bold" }}>Liminal</span>
+          {state.personaName !== "Liminal" && (
+            <span style={{ color: "#cc66ff", marginLeft: 6, fontSize: 13 }}>
+              [{state.personaName}]
+            </span>
+          )}
           {state.busy && <span style={{ color: "#ffaa00", marginLeft: 8 }}>⟳</span>}
           {!state.connected && (
             <span style={{ color: "#ff4444", marginLeft: 8, fontSize: 12 }}>
@@ -150,7 +155,7 @@ export function App() {
           style={styles.input}
           value={input}
           onChange={(e) => setInput(e.target.value)}
-          placeholder={state.busy ? "Processing…" : "Message dreamthedream…"}
+          placeholder={state.busy ? "Processing…" : "Message Liminal…"}
           disabled={state.busy || !state.connected}
         />
         <button

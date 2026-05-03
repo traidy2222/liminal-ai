@@ -196,9 +196,28 @@ export interface AgentEventMap {
   };
   /** Wall-clock time for a tool handler execution. (#7) */
   tool_timing: { callId: string; name: string; durationMs: number };
+  /** Emitted when the agent's persona is changed via set_persona(). */
+  persona_changed: { name: string; description: string };
 }
 
 export type AgentEventName = keyof AgentEventMap;
+
+// ─── Persona ──────────────────────────────────────────────────────────────────
+
+/**
+ * Persona configuration — defines the agent's name, identity, and communication style.
+ * Changes tone and vocabulary only; operational protocols are immutable.
+ */
+export interface PersonaConfig {
+  /** Display name shown in UI (e.g. "JARVIS", "Liminal"). */
+  name: string;
+  /** One-sentence description of the agent's character. */
+  description: string;
+  /** 2-4 sentences describing HOW to speak: phrasing, tone, sentence style. */
+  voice?: string;
+  /** Short one-word personality descriptors (e.g. ["formal", "dry wit"]). */
+  traits?: string[];
+}
 
 // ─── Agent config ─────────────────────────────────────────────────────────────
 
@@ -230,6 +249,11 @@ export interface AgentConfig {
    * (#3 Hard Send Timeout)
    */
   sendTimeoutMs?: number;
+  /**
+   * Initial persona for this harness session.
+   * Can be changed at runtime via harness.setPersona(config, block).
+   */
+  persona?: PersonaConfig;
   /**
    * Dynamic world context injected as the very first message of a session.
    * Grounds the agent in real date/time, OS, shell, and CWD so it avoids

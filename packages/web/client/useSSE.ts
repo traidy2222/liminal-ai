@@ -38,6 +38,8 @@ export interface SSEState {
   connected: boolean;
   busy: boolean;
   error: string | null;
+  /** Display name of the currently active persona. */
+  personaName: string;
 }
 
 const ORCH_TOOLS = new Set(["spawn_agent", "wait_for_agents", "cancel_agent", "list_agents"]);
@@ -59,7 +61,8 @@ type Action =
   | { type: "subtask_spawned"; payload: { taskId: string; parentTaskId: string; goal: string; depth: number } }
   | { type: "subtask_complete"; payload: { taskId: string; ok: boolean } }
   | { type: "plan_step_done"; payload: { stepIndex: number } }      // (#8)
-  | { type: "context_compressed"; payload: { beforeFraction: number; afterFraction: number; roundsCompressed: number } }; // (#7)
+  | { type: "context_compressed"; payload: { beforeFraction: number; afterFraction: number; roundsCompressed: number } } // (#7)
+  | { type: "persona_changed"; payload: { name: string } };
 
 function reducer(state: SSEState, action: Action): SSEState {
   switch (action.type) {
@@ -240,6 +243,9 @@ function reducer(state: SSEState, action: Action): SSEState {
           },
         ],
       };
+
+    case "persona_changed":
+      return { ...state, personaName: action.payload.name };
   }
 }
 
@@ -254,6 +260,7 @@ export function useSSE() {
     connected: false,
     busy: false,
     error: null,
+    personaName: "Liminal",
   });
 
   useEffect(() => {
@@ -292,6 +299,10 @@ export function useSSE() {
     );
     es.addEventListener("context_compressed", (e: MessageEvent) =>
       dispatch({ type: "context_compressed", payload: JSON.parse(e.data) })
+    );
+    // Persona change — update header badge
+    es.addEventListener("persona_changed", (e: MessageEvent) =>
+      dispatch({ type: "persona_changed", payload: JSON.parse(e.data) })
     );
     // Informational-only events — no UI state change needed
     es.addEventListener("ask_user_answered", () => {});

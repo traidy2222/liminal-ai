@@ -20,6 +20,7 @@ import {
 import { suggestImprovementTool, viewInsightsTool } from "./meta_tools.js";
 import { createContextTools } from "./context_tools.js";
 import { createRefreshWorldContextTool } from "./refresh_world_context.js";
+import { createSetPersonaTool } from "./set_persona.js";
 
 /**
  * Register all tools onto a registry.
@@ -67,10 +68,15 @@ export function registerAllTools(
 
     // World context refresh — root-only, excluded from child registries
     registry.register(createRefreshWorldContextTool(harness));
+
+    // Inline persona switching — closes over this specific harness instance
+    registry.register(createSetPersonaTool(harness));
   }
 }
 
 export { createAskUserTool } from "./ask_user.js";
-export { INCEPTION_MESSAGES } from "./systemPrompt.js";
+export { INCEPTION_MESSAGES, buildInceptionMessages } from "./systemPrompt.js";
+export { buildPersonaBlock, resolvePreset, PERSONA_PRESETS } from "./persona_presets.js";
 export { createOrchestrationTools } from "./orchestration.js";
 export { createContextTools } from "./context_tools.js";
+export { createSetPersonaTool } from "./set_persona.js";

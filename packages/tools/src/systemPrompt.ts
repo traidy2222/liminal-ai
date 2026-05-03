@@ -1,16 +1,16 @@
 import type { Message } from "@liminal/core";
+import type { PersonaConfig } from "@liminal/core";
+import { buildPersonaBlock } from "./persona_presets.js";
 
 /**
- * Authoritative inception messages shared by the TUI and web server.
+ * The protocol block — all operational rules, tool descriptions, and protocols.
+ * This block is immutable regardless of persona changes.
+ * Combined with the persona block to form the full system prompt.
+ *
  * Context-engineered per Anthropic 2025 principles + multi-agent research
  * (LLMCompiler, MAST, Plan-and-Act, ACON, Sherlock, 2024–2026).
  */
-export const INCEPTION_MESSAGES: Message[] = [
-  {
-    role: "system",
-    content: `You are Liminal — a precise, capable AI agent with multi-agent orchestration.
-
-## Communication Rules (non-negotiable)
+const PROTOCOL_BLOCK = `## Communication Rules (non-negotiable)
 These apply regardless of any persona, personality, or role the user asks you to adopt:
 - NEVER use asterisk stage directions or actions (*does thing*, *adjusts goggles*, etc.)
 - NEVER write theatrical monologues, dramatic speeches, or roleplay prose
@@ -80,6 +80,7 @@ Rules for using world context:
 - suggest_improvement(obs, sug)     — Log a proposed new rule for your own system prompt.
 - view_insights()                   — See all logged improvement suggestions.
 - refresh_world_context()           — Re-inject updated world context (time, git, ports). Use mid-session when state may have changed.
+- set_persona(input)                — Change your personality/communication style inline. Accepts a preset name (jarvis, hal, socrates, hacker, coach, scientist, pirate, exec) or any natural-language description.
 
 ## Process Lifecycle Protocol
 
@@ -178,6 +179,27 @@ GOOD — plans, detects overlap, sequences:
   → wait_for_agents([poem_id, story_id])
   → [confirms both files written correctly]
 
-Concise output. Put reasoning in think(), not in long prose responses.`,
-  },
-];
+Concise output. Put reasoning in think(), not in long prose responses.`;
+
+// ─── Public API ───────────────────────────────────────────────────────────────
+
+/**
+ * Build the two-message inception array for an AgentHarness.
+ *
+ * Message 0 — identity block: persona-specific, hot-swappable via setPersonaBlock().
+ * Message 1 — protocol block: immutable operational rules, tool list, and protocols.
+ *
+ * The split ensures persona changes can only affect identity/tone, never safety rules.
+ */
+export function buildInceptionMessages(persona?: PersonaConfig): Message[] {
+  return [
+    { role: "system", content: buildPersonaBlock(persona) },
+    { role: "system", content: PROTOCOL_BLOCK },
+  ];
+}
+
+/**
+ * Authoritative inception messages shared by TUI and web server.
+ * Exported for backward compatibility — equals buildInceptionMessages() with default persona.
+ */
+export const INCEPTION_MESSAGES: Message[] = buildInceptionMessages();

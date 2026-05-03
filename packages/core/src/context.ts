@@ -115,9 +115,34 @@ function extractRounds(conv: Message[]): Round[] {
 export class ContextManager {
   private conversation: Message[] = [];
   private readonly config: ContextConfig;
+  /**
+   * When set, replaces the content of inceptionMessages[0] in all buildMessages calls.
+   * Used by set_persona tool to hot-swap the identity block without rebuilding the harness.
+   */
+  private personaBlock?: string;
 
   constructor(config: ContextConfig) {
     this.config = config;
+  }
+
+  /**
+   * Replace the identity block (message 0 of inception messages) with a new persona string.
+   * Takes effect on the next buildMessages() call.
+   */
+  setPersonaBlock(block: string): void {
+    this.personaBlock = block;
+  }
+
+  /**
+   * Returns the effective inception messages, substituting message[0]'s content
+   * with the active persona block override (if any).
+   */
+  getEffectiveInception(): Message[] {
+    const base = this.config.inceptionMessages;
+    if (!this.personaBlock) return base;
+    const [first, ...rest] = base;
+    if (!first) return base;
+    return [{ ...first, content: this.personaBlock } as Message, ...rest];
   }
 
   append(message: Message): void {
@@ -130,7 +155,7 @@ export class ContextManager {
   }
 
   buildMessages(): Message[] {
-    const inception = this.config.inceptionMessages;
+    const inception = this.getEffectiveInception();
     let messages = [...inception, ...this.conversation];
 
     const snap = this.computeSnapshot(messages);
@@ -301,7 +326,7 @@ export class ContextManager {
    * (#7 Structured Event Log — calls onCompressed callback)
    */
   forceCompress(anchorSummary: string): void {
-    const inception = this.config.inceptionMessages;
+    const inception = this.getEffectiveInception();
     const keepRecent = this.config.keepRecentRounds ?? 6;
     const rounds = extractRounds(this.conversation);
 
