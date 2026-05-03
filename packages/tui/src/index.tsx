@@ -18,7 +18,7 @@ if (!apiKey) {
 
 const harness = new AgentHarness({
   openRouterApiKey: apiKey,
-  model: "poolside/laguna-xs.2:free",
+  model: "minimax/minimax-m2.5:free",
   baseURL: "https://openrouter.ai/api/v1",
   maxToolRoundsPerTurn: 500,
   // World context: auto-gather date/time/OS/shell; optionally include location

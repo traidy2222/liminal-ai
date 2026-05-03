@@ -11,7 +11,7 @@ export class AgentBridge {
   constructor(private readonly sse: SSEManager) {
     this.harness = new AgentHarness({
       openRouterApiKey: process.env["OPENROUTER_API_KEY"] ?? "",
-      model: "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free",
+      model: "minimax/minimax-m2.5:free",
       baseURL: "https://openrouter.ai/api/v1",
       maxToolRoundsPerTurn: 500,
       // World context: auto-gather date/time/OS/shell; optionally include location
