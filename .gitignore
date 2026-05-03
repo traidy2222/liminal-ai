@@ -1,0 +1,5 @@
+node_modules/
+dist/
+.env
+.agent_notes.json
+*.js.map

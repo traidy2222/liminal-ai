@@ -1,0 +1,11 @@
+{
+  "name": "dreamthedream",
+  "private": true,
+  "workspaces": ["packages/*"],
+  "scripts": {
+    "build": "npm run build --workspaces --if-present",
+    "tui": "npm run start --workspace=packages/tui",
+    "web": "npm run start --workspace=packages/web",
+    "typecheck": "npm run typecheck --workspaces --if-present"
+  }
+}
