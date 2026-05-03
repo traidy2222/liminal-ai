@@ -3,3 +3,10 @@ dist/
 .env
 .agent_notes.json
 *.js.map
+
+# Agent-generated test artifacts (written during live sessions)
+packages/tui/*.txt
+packages/tui/*.md
+packages/tui/Python-API-Server/
+*.txt
+
