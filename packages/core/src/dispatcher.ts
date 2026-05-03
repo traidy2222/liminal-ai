@@ -92,12 +92,27 @@ export class ToolDispatcher {
    */
   private readonly resultCache = new Map<string, { result: ToolResult; expiresAt: number }>();
 
+  /**
+   * True if think() was called in the most recently completed round.
+   * Allows the NEXT round's destructive tools to pass the pre-flight check —
+   * models naturally call think() alone, then act in the following round.
+   */
+  private lastBatchHadThink = false;
+
   constructor(
     private readonly registry: ToolRegistry,
     private readonly emitter: AgentEmitter,
     private readonly orchestrator?: TaskOrchestrator,
     private readonly taskId?: string
   ) {}
+
+  /**
+   * Called by AgentHarness after each batch of tool calls completes.
+   * Tracks whether think() appeared so the next round's pre-flight can see it.
+   */
+  notifyBatchComplete(batchToolNames: string[]): void {
+    this.lastBatchHadThink = batchToolNames.includes("think");
+  }
 
   /**
    * Call a tool directly, bypassing approval/locking/events.
@@ -159,9 +174,11 @@ export class ToolDispatcher {
       }
     }
 
-    // Pre-flight: destructive tools require think() in the same round
+    // Pre-flight: destructive tools require think() in the same round OR the immediately
+    // preceding round. Models commonly call think() alone, then act in the next round.
     if (tool.dangerLevel === "destructive") {
-      const hasThink = batchToolNames?.includes("think") ?? false;
+      const hasThink =
+        (batchToolNames?.includes("think") ?? false) || this.lastBatchHadThink;
       if (!hasThink) {
         const result: ToolResult = {
           ok: false,

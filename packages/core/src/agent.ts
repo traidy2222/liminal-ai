@@ -614,6 +614,10 @@ export class AgentHarness {
         this.toolsUsedThisTurn.push(tc.name);
       }
 
+      // Tell dispatcher which tools ran this round so the NEXT round's
+      // pre-flight check can see if think() just fired (#10 danger pre-flight fix)
+      this.dispatcher.notifyBatchComplete(batchToolNames);
+
       for (let i = 0; i < toolCalls.length; i++) {
         const tc = toolCalls[i] as AccumulatedToolCall;
         const result = results[i]!;
