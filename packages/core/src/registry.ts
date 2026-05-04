@@ -3,6 +3,11 @@ import type { ToolDefinition } from "./types.js";
 
 export class ToolRegistry {
   private readonly tools = new Map<string, ToolDefinition>();
+  /** When true, only tools in activeToolNames are sent to the model API. */
+  private lazyToolLoading = false;
+  private readonly activeToolNames = new Set<string>();
+  /** Optional tool name -> family id (for inactive-tool error hints). */
+  private toolFamilyByName = new Map<string, string>();
 
   register(tool: ToolDefinition): void {
     if (this.tools.has(tool.name)) {
@@ -36,8 +41,93 @@ export class ToolRegistry {
     return [...this.tools.keys()].sort();
   }
 
+  /** When lazy loading is off, all registered tools are active. */
+  isLazyToolLoading(): boolean {
+    return this.lazyToolLoading;
+  }
+
+  setLazyToolLoading(enabled: boolean): void {
+    this.lazyToolLoading = enabled;
+    if (!enabled) {
+      this.activeToolNames.clear();
+    }
+  }
+
+  setToolFamilyLookup(map: ReadonlyMap<string, string>): void {
+    this.toolFamilyByName = new Map(map);
+  }
+
+  /** Copy family map from another registry (e.g. parent → child). */
+  copyToolFamiliesFrom(source: ToolRegistry): void {
+    this.toolFamilyByName = source.cloneToolFamilyMap();
+  }
+
+  cloneToolFamilyMap(): Map<string, string> {
+    return new Map(this.toolFamilyByName);
+  }
+
+  getSuggestedFamilyForTool(name: string): string | undefined {
+    return this.toolFamilyByName.get(name);
+  }
+
+  /**
+   * Sync lazy policy from parent after child registry is populated.
+   * Child active set = intersection(parent active, child registered names).
+   */
+  copyLazyPolicyFromParent(parent: ToolRegistry): void {
+    this.lazyToolLoading = parent.lazyToolLoading;
+    this.copyToolFamiliesFrom(parent);
+    if (!parent.lazyToolLoading) {
+      this.activeToolNames.clear();
+      return;
+    }
+    const childNames = new Set(this.getToolNames());
+    const seed = parent.getActiveToolNames().filter((n) => childNames.has(n));
+    this.seedActiveTools(seed);
+  }
+
+  isActive(name: string): boolean {
+    if (!this.lazyToolLoading) return true;
+    return this.activeToolNames.has(name);
+  }
+
+  /** Names of tools currently exposed to the model (lazy) or all (non-lazy). */
+  getActiveToolNames(): string[] {
+    if (!this.lazyToolLoading) return this.getToolNames();
+    return [...this.activeToolNames].sort();
+  }
+
+  /** Replace active set (lazy mode only). */
+  seedActiveTools(names: string[]): void {
+    if (!this.lazyToolLoading) return;
+    this.activeToolNames.clear();
+    for (const n of names) {
+      if (this.tools.has(n)) this.activeToolNames.add(n);
+    }
+  }
+
+  /** Add tools to active set; returns names that were newly activated. */
+  activate(names: readonly string[]): string[] {
+    if (!this.lazyToolLoading) return [];
+    const newly: string[] = [];
+    for (const n of names) {
+      if (!this.tools.has(n)) continue;
+      if (!this.activeToolNames.has(n)) {
+        this.activeToolNames.add(n);
+        newly.push(n);
+      }
+    }
+    return newly;
+  }
+
   toOpenAIFormat(): OpenAI.Chat.Completions.ChatCompletionTool[] {
-    return this.getAll().map((t) => ({
+    const defs = !this.lazyToolLoading
+      ? this.getAll()
+      : [...this.activeToolNames]
+          .sort()
+          .map((n) => this.tools.get(n))
+          .filter((t): t is ToolDefinition => t !== undefined);
+    return defs.map((t) => ({
       type: "function" as const,
       function: {
         name: t.name,

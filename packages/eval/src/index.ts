@@ -42,6 +42,7 @@ import {
 } from "./scenarios/research_grade.js";
 import { HARNESS_CAPABILITY_SCENARIOS } from "./scenarios/harness_capability.js";
 import { LONG_HORIZON_SCENARIOS } from "./scenarios/long_horizon.js";
+import { TOOL_LAZY_LOAD_SCENARIOS } from "./scenarios/tool_lazy_load.js";
 
 const ALL_SCENARIOS = [
   ...BASIC_SCENARIOS,
@@ -59,6 +60,7 @@ const ALL_SCENARIOS = [
   ...RESEARCH_GRADE_SCENARIOS,
   ...HARNESS_CAPABILITY_SCENARIOS,
   ...LONG_HORIZON_SCENARIOS,
+  ...TOOL_LAZY_LOAD_SCENARIOS,
 ];
 const REAL_SCENARIOS = ALL_SCENARIOS.filter((s) => !s.mocks || s.mocks.length === 0);
 

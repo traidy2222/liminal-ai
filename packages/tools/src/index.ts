@@ -36,6 +36,8 @@ import { suggestImprovementTool, viewInsightsTool } from "./meta_tools.js";
 import { createContextTools } from "./context_tools.js";
 import { createRefreshWorldContextTool } from "./refresh_world_context.js";
 import { createSetPersonaTool } from "./set_persona.js";
+import { createToolDiscoveryTools } from "./tool_activation.js";
+import { applyLazyRegistrationPolicy } from "./tool_catalog.js";
 // New tools — Upgrade IV
 import { gitStatusTool, gitDiffTool, gitLogTool, gitBranchTool, gitCommitTool } from "./git_tools.js";
 import { patchFileTool } from "./patch_file.js";
@@ -117,6 +119,10 @@ export function registerAllTools(
   registry.register(vaultGraphTool);
   registry.register(vaultDeleteTool);
 
+  const { listToolFamiliesTool, activateToolFamilyTool } = createToolDiscoveryTools(registry);
+  registry.register(listToolFamiliesTool);
+  registry.register(activateToolFamilyTool);
+
   if (harness) {
     // Orchestration tools (spawn_agent, wait_for_agents, cancel_agent, list_agents, verify_result)
     const orch = createOrchestrationTools(harness);
@@ -143,8 +149,11 @@ export function registerAllTools(
     // Harness-scoped multimodal + extraction tools
     registry.register(createUploadImageTool(harness));
     registry.register(createExtractStructuredTool(harness));
+  }
 
-    harness.getContext().refreshProtocolDynamic(harness.registry.getToolNames());
+  applyLazyRegistrationPolicy(registry, !!harness);
+  if (harness) {
+    harness.getContext().refreshProtocolDynamic(harness.registry.getActiveToolNames());
   }
 }
 
@@ -157,6 +166,7 @@ export {
 } from "./systemPrompt.js";
 export { buildPersonaBlock, buildRichPersonaBlock } from "./persona_presets.js";
 export type { PersonaProfile, SpeechStyle, PersonaTone } from "./persona_presets.js";
+export { applyLazyRegistrationPolicy, TOOL_FAMILIES } from "./tool_catalog.js";
 export { createOrchestrationTools } from "./orchestration.js";
 export { createContextTools } from "./context_tools.js";
 export { createSetPersonaTool } from "./set_persona.js";

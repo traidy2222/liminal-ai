@@ -97,6 +97,7 @@ PORT=3001
 Important optional variables:
 
 - `AGENT_WORKSPACE_ROOT`: workspace root for world context, notes, artifacts, and tool-relative paths.
+- `AGENT_TOOL_LAZY=1`: expose only a minimal tool list per round; use `list_tool_families` / `activate_tool_family` to load families (git, shell, vault, etc.).
 - `AGENT_SEND_TIMEOUT_MS`: max wall-clock time per message turn.
 - `AGENT_SAFETY_JUDGE=1`: enable heuristic + tiny LLM safety classifier.
 - `AGENT_VAULT_PATH`: Obsidian vault root for `vault_*` tools.

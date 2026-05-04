@@ -154,6 +154,17 @@ export class ToolDispatcher {
       return { ok: false, error: `Unknown tool: "${name}"` };
     }
 
+    if (!this.registry.isActive(name)) {
+      const fam = this.registry.getSuggestedFamilyForTool(name);
+      const hint = fam
+        ? `Call activate_tool_family with { "family": "${fam}" } (or list_tool_families).`
+        : `Call list_tool_families, then activate_tool_family.`;
+      return {
+        ok: false,
+        error: `Tool "${name}" is not loaded for this session. ${hint}`,
+      };
+    }
+
     let args: Record<string, unknown>;
     try {
       args = JSON.parse(argsJson) as Record<string, unknown>;

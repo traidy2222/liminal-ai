@@ -71,6 +71,9 @@ const GOOD_VS_BAD = `## Good vs bad parallel example
 BAD: two spawn_agents writing the same path → lock error.
 GOOD: different output paths, plan first, wait_for_agents, confirm files.`;
 
+const LAZY_TOOL_LOADING = `## Lazy tool loading
+Only a minimal tool set is visible to you until you load more. Call list_tool_families to see families and what is active, then activate_tool_family({ family: "<id>" }) before using tools in that family (e.g. git, shell, vault, code_intel).`;
+
 /**
  * Build extra protocol text from registered tool names (smaller for scoped child agents).
  */
@@ -78,6 +81,9 @@ export function buildProtocolDynamicSuffix(toolNames: Iterable<string>): string 
   const names = new Set(toolNames);
   if (names.size === 0) return "";
   const parts: string[] = [];
+  if (names.has("list_tool_families") || names.has("activate_tool_family")) {
+    parts.push(LAZY_TOOL_LOADING);
+  }
   if ([...names].some((n) => n === "run_shell" || n === "run_background")) {
     parts.push(PROCESS_LIFECYCLE);
   }
@@ -132,6 +138,8 @@ export const PROTOCOL_BLOCK = `${PROTOCOL_CORE}\n\n${buildProtocolDynamicSuffix(
     "recall_relevant",
     "search_memory",
     "memory_query",
+    "list_tool_families",
+    "activate_tool_family",
   ])
 )}`;
 

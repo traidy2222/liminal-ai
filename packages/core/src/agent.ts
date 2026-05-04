@@ -609,6 +609,8 @@ export class AgentHarness {
       childRegistry.register(tool);
     }
 
+    childRegistry.copyLazyPolicyFromParent(this.registry);
+
     const personaMsg = this.context.getEffectiveInception()[0]!;
     const coreRaw = this.config.context.inceptionMessages[1];
     const coreStr = typeof coreRaw?.content === "string" ? coreRaw.content : "";
@@ -660,7 +662,8 @@ export class AgentHarness {
     }
 
     const dyn =
-      this.config.context.protocolDynamicBuilder?.(childHarness.registry.getToolNames()) ?? "";
+      this.config.context.protocolDynamicBuilder?.(childHarness.registry.getActiveToolNames()) ??
+      "";
     childHarness.getContext().setInceptionOverride([
       personaMsg,
       {
@@ -890,7 +893,7 @@ export class AgentHarness {
       });
     }
 
-    this.context.refreshProtocolDynamic(this.registry.getToolNames());
+    this.context.refreshProtocolDynamic(this.registry.getActiveToolNames());
 
     // Context pressure alerts (#9): fire once per threshold per turn
     const snapBefore = this.context.snapshot();
