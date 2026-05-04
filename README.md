@@ -43,7 +43,7 @@ flowchart LR
   Harness --> Context[ContextManager]
   Harness --> Dispatcher[ToolDispatcher]
   Dispatcher --> Registry[ToolRegistry]
-  Registry --> Tools[@liminal/tools]
+  Registry --> Tools["@liminal/tools"]
   Dispatcher --> Locks[ResourceLockManager]
   Harness --> Orchestrator[TaskOrchestrator]
   Harness --> LLM[Model via OpenRouter/OpenAI API]
