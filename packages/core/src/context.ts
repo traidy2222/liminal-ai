@@ -120,9 +120,34 @@ export class ContextManager {
    * Used by set_persona tool to hot-swap the identity block without rebuilding the harness.
    */
   private personaBlock?: string;
+  /** ZipAct-style bounded summary injected after inception (not stored in conversation). */
+  private workingStateBlock = "";
+  /** ACON-style runtime notes appended to compression policy in summary blocks. */
+  private compressionNotes: string[] = [];
 
   constructor(config: ContextConfig) {
     this.config = config;
+  }
+
+  /** Replace the injected [WORKING STATE] block (empty string clears). */
+  setWorkingState(block: string): void {
+    this.workingStateBlock = block;
+  }
+
+  /** Append a line to compression policy (ACON-style guideline evolution via tools). */
+  appendCompressionGuidelineNote(note: string): void {
+    const t = note.trim();
+    if (t) this.compressionNotes.push(t);
+  }
+
+  private compressionPolicyPreamble(): string {
+    const parts: string[] = [];
+    const g = this.config.compressionGuideline?.trim();
+    if (g) parts.push(g);
+    if (this.compressionNotes.length > 0) {
+      parts.push("Runtime compression notes:\n" + this.compressionNotes.join("\n"));
+    }
+    return parts.join("\n\n");
   }
 
   /**
@@ -161,7 +186,16 @@ export class ContextManager {
 
   buildMessages(): Message[] {
     const inception = this.getEffectiveInception();
-    let messages = [...inception, ...this.conversation];
+    const working: Message[] = [];
+    const ws = this.workingStateBlock.trim();
+    if (ws) {
+      working.push({
+        role: "user",
+        content:
+          `[WORKING STATE — bounded task snapshot; refreshed each tool round]\n${ws}`,
+      });
+    }
+    let messages = [...inception, ...working, ...this.conversation];
 
     const snap = this.computeSnapshot(messages);
     if (snap.usageFraction >= this.config.thresholdFraction) {
@@ -260,10 +294,15 @@ export class ContextManager {
 
     // Build summary message
     const summaryLines = toCompress.map((r) => r.summary).join("\n");
+    const policy = this.compressionPolicyPreamble();
+    const policyBlock = policy
+      ? `\nCOMPRESSION POLICY:\n${policy}\n`
+      : "";
     const summaryMsg: Message = {
       role: "user",
       content:
         `[CONTEXT SUMMARY — ${toCompress.length} older round(s) compressed to save space]\n` +
+        policyBlock +
         summaryLines +
         `\n[End summary — use recall/search_memory to access any stored details]`,
     };
@@ -352,10 +391,13 @@ export class ContextManager {
     }
 
     const summaryLines = toCompress.map((r) => r.summary).join("\n");
+    const policy = this.compressionPolicyPreamble();
+    const policyBlock = policy ? `\nCOMPRESSION POLICY:\n${policy}\n` : "";
     const summaryMsg: Message = {
       role: "user",
       content:
         `[CONTEXT COMPRESSED — ${toCompress.length} round(s) summarized]\n` +
+        policyBlock +
         `Summary: ${anchorSummary}\nDetails:\n${summaryLines}\n` +
         `[End compressed block]`,
     };
@@ -385,5 +427,7 @@ export class ContextManager {
 
   clear(): void {
     this.conversation = [];
+    this.workingStateBlock = "";
+    this.compressionNotes = [];
   }
 }

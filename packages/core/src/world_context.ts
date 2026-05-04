@@ -17,7 +17,8 @@
  */
 import os from "node:os";
 import path from "node:path";
-import { readFile, access } from "node:fs/promises";
+import { readFile, access, readdir } from "node:fs/promises";
+import { getAgentVaultRoot, getExplicitAgentVaultPathFromEnv } from "./vault_path.js";
 import { execFile as execFileCb } from "node:child_process";
 import { promisify } from "node:util";
 
@@ -534,6 +535,82 @@ async function gatherCodeStyle(): Promise<CodeStyle | null> {
   return null;
 }
 
+// ─── 9a. Vault summary (Obsidian brain) ──────────────────────────────────────
+
+const VAULT_TYPE_FOLDERS = ["Facts", "Entities", "Reflections", "Recipes", "Tasks", "Notes"] as const;
+
+interface VaultNoteSummary {
+  title: string;
+  type: string;
+  updated: string;
+}
+
+interface VaultContextSummary {
+  totalNotes: number;
+  countByType: Record<string, number>;
+  recentNotes: VaultNoteSummary[];
+}
+
+/** Minimal frontmatter extraction — reads title, type, updated from a .md file header. */
+function extractVaultFrontmatterFields(raw: string): { title?: string; type?: string; updated?: string } {
+  const match = raw.match(/^---\r?\n([\s\S]*?)\r?\n---/);
+  if (!match) return {};
+  const fm: Record<string, string> = {};
+  for (const line of match[1]!.split("\n")) {
+    const colonIdx = line.indexOf(":");
+    if (colonIdx < 0) continue;
+    const key = line.slice(0, colonIdx).trim();
+    const val = line.slice(colonIdx + 1).trim().replace(/^["']|["']$/g, "");
+    if (key === "title" || key === "type" || key === "updated") {
+      fm[key] = val;
+    }
+  }
+  return fm;
+}
+
+async function gatherVaultSummary(): Promise<VaultContextSummary | null> {
+  const vaultDir = getAgentVaultRoot();
+
+  const countByType: Record<string, number> = {};
+  const allNotes: VaultNoteSummary[] = [];
+
+  for (const folder of VAULT_TYPE_FOLDERS) {
+    const dir = path.join(vaultDir, folder);
+    let files: string[];
+    try {
+      files = await readdir(dir);
+    } catch {
+      continue;
+    }
+
+    for (const file of files) {
+      if (!file.endsWith(".md")) continue;
+      try {
+        const raw = await readFile(path.join(dir, file), "utf8");
+        const fm = extractVaultFrontmatterFields(raw);
+        const type = fm.type ?? folder.toLowerCase().slice(0, -1); // remove plural 's'
+        countByType[type] = (countByType[type] ?? 0) + 1;
+        allNotes.push({
+          title:   fm.title   ?? file.slice(0, -3),
+          type,
+          updated: fm.updated ?? "",
+        });
+      } catch {
+        // skip unreadable files
+      }
+    }
+  }
+
+  if (allNotes.length === 0) return null;
+
+  allNotes.sort((a, b) => b.updated.localeCompare(a.updated));
+  return {
+    totalNotes: allNotes.length,
+    countByType,
+    recentNotes: allNotes.slice(0, 5),
+  };
+}
+
 // ─── 9. Session memory prefetch ───────────────────────────────────────────────
 
 // Notes stored at project root (matches packages/tools/src/notes_store.ts NOTES_PATH)
@@ -649,7 +726,7 @@ export async function buildWorldContextMessage(options?: WorldContextOptions): P
   const TIMEOUT = 1500;
 
   // Parallel gather — all results degrade to null on timeout/error
-  const [resources, project, git, tools, ports, style, memory] = await Promise.all([
+  const [resources, project, git, tools, ports, style, memory, vault] = await Promise.all([
     withDeadline(gatherResources(), TIMEOUT),
     withDeadline(gatherProject(),   TIMEOUT),
     withDeadline(gatherGit(),       TIMEOUT),
@@ -657,6 +734,7 @@ export async function buildWorldContextMessage(options?: WorldContextOptions): P
     withDeadline(scanActivePorts(), TIMEOUT),
     withDeadline(gatherCodeStyle(), TIMEOUT),
     withDeadline(gatherSessionMemory(), TIMEOUT),
+    withDeadline(gatherVaultSummary(), TIMEOUT),
   ]);
 
   // ── Core system ──────────────────────────────────────────────────────────────
@@ -785,6 +863,21 @@ export async function buildWorldContextMessage(options?: WorldContextOptions): P
       for (const { value } of memory.recipes)
         lines.push(`  - ${value}`);
     }
+  }
+
+  // ── Vault (Obsidian brain) ────────────────────────────────────────────────────
+  if (vault && vault.totalNotes > 0) {
+    lines.push(sep("Knowledge Vault"));
+    const breakdown = Object.entries(vault.countByType)
+      .sort(([a], [b]) => a.localeCompare(b))
+      .map(([t, n]) => `${n} ${t}`)
+      .join(", ");
+    lines.push(`Vault: ${vault.totalNotes} notes (${breakdown})`);
+    lines.push(`Recent: ${vault.recentNotes.map((n) => `[[${n.title}]]`).join("  ·  ")}`);
+  } else if (getExplicitAgentVaultPathFromEnv()) {
+    lines.push(sep("Knowledge Vault"));
+    lines.push(`Vault: empty — use vault_write() to start building your knowledge base.`);
+    lines.push(`Path: ${getAgentVaultRoot()}`);
   }
 
   // ── Footer ────────────────────────────────────────────────────────────────────

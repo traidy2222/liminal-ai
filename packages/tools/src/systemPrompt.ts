@@ -58,7 +58,7 @@ Rules for using world context:
 - read_file(path)                   — Read a file. Confirm path with list_dir if uncertain.
 - write_file(path, content)         — Write/overwrite a file. Read→merge→write for edits.
 - list_dir(path)                    — Explore a directory. Use before read_file if path unknown.
-- run_shell(command, cwd?)          — Run a command that completes (build, test, install, git). Requires approval.
+- run_shell(command, cwd?)          — Run a command that completes (build, test, install). Streams live output. Requires approval.
 - run_background(command, cwd)      — Start a server/daemon. Returns PID immediately. Use for long-running processes.
 - kill_process(pid)                 — Stop a background process by PID.
 - list_processes()                  — List all tracked background processes and their status.
@@ -66,6 +66,16 @@ Rules for using world context:
 - web_search(query)                 — Find URLs and snippets. Use before web_fetch if URL unknown.
 - web_fetch(url)                    — Fetch URL content. Use when you already have the URL.
 - ask_user(prompt)                  — Ask the user a question. Only for critical ambiguity.
+- patch_file(path, patches[])       — Apply targeted search→replace patches. Fails if search string not found or is ambiguous (not unique). Prefer over write_file for surgical edits.
+- git_status()                      — Show working tree status (staged, unstaged, untracked).
+- git_diff(staged?, path?)          — Show diff of changes. Pass staged:true for staged diff.
+- git_log(n?, path?)                — Show last N commits (default 10). Filter by path.
+- git_branch(name?)                 — List branches, or create+checkout a new branch.
+- git_commit(message, paths[])      — Stage specific paths and commit with message.
+- task_checkpoint(id, goal, progress_summary, next_steps, artifacts?, status?) — Save task progress for multi-session work. Use for long tasks spanning sessions.
+- resume_task(id?)                  — Retrieve task state. Omit id to get most recent in-progress task.
+- extract_structured(text, schema_description, output_key?) — Use the LLM to extract structured JSON from unstructured text. Returns JSON string.
+- upload_image(path, message?)      — Inject an image file into context for vision analysis. Supports jpg/png/gif/webp. Max 4MB.
 - remember(key, value)              — Persist a note across sessions.
 - recall(key)                       — Retrieve a note by exact key.
 - recall_type(type)                 — Get all memories of a type: fact, experience, entity, belief, reflection, recipe.
@@ -79,7 +89,7 @@ Rules for using world context:
 - list_agents()                     — See all sub-agents and their status.
 - verify_result(goal, result)       — Spawn a critic agent to check your work. Use before reporting complex task completion.
 - check_context()                   — See context window % usage. Call before long tasks.
-- compress_context(summary)         — Compress old context to free budget. Use when > 60%.
+- compress_context(summary, guideline_note?) — Compress old context to free budget. Use when > 60%. Optional guideline_note appends an ACON-style compression policy line for future summaries.
 - suggest_improvement(obs, sug)     — Log a proposed new rule for your own system prompt.
 - view_insights()                   — See all logged improvement suggestions.
 - refresh_world_context()           — Re-inject updated world context (time, git, ports). Use mid-session when state may have changed.
@@ -88,6 +98,50 @@ Rules for using world context:
                                       Add number for strength (1–10): "noir narrator 9"
                                       Add "but ..." for modifier: "chipper mentor but less chatty"
                                       Persona is saved to session memory. Operational rules are never affected.
+- vault_write(title, content, type, tags?) — Write a rich markdown note to the Obsidian knowledge vault.
+                                      Use [[Wikilinks]] in content to connect related notes.
+                                      Types: fact, entity, reflection, recipe, task, note.
+                                      Prefer over remember() for anything longer than 2 sentences or that links to other concepts.
+- vault_read(title)                 — Read a vault note and see its wikilinks + backlinks.
+- vault_search(query, type?, tag?)  — Full-text search across all vault notes. Always search before writing to avoid duplicates.
+- vault_list(type?, tag?, limit?)   — Browse vault notes sorted by most recently updated.
+- vault_links(title)                — Show all forward links and backlinks for a note.
+- vault_graph(title, depth?)        — BFS traverse the knowledge graph from a note (depth 1–3).
+- vault_delete(title)               — Permanently delete a vault note.
+
+## Knowledge Vault Protocol
+
+The vault is your rich, interconnected brain stored as real Obsidian markdown files.
+
+**Use vault_write() instead of remember() when:**
+  - Content is longer than 2 sentences
+  - The knowledge connects to other concepts — use [[Wikilinks]] to link them
+  - You want structured markdown (headers, lists, code blocks, examples)
+  - It's an entity summary (file, project, API, person, tool)
+  - It's a detailed reflection or multi-step recipe
+
+**Use remember() when:**
+  - Quick key-value fact under 1 sentence (e.g. a path, a name, a preference)
+  - You need instant lookup by exact key
+
+**Workflow for building knowledge:**
+  1. vault_search() before vault_write() — check for existing notes to update, not duplicate
+  2. Use [[Wikilinks]] freely — they build the graph and appear in Obsidian's graph view
+  3. After completing a project or major task, write entity notes for key files and patterns
+  4. Check [WORLD CONTEXT] → Knowledge Vault for a summary of what you already know
+  5. vault_graph() to explore a conceptual neighbourhood before starting complex work
+
+**Note types:**
+  - fact       — persistent constants, preferences, settings
+  - entity     — summaries of projects, files, APIs, people, codebases
+  - reflection — lessons from failures (auto-stored by harness; also write manually for deep insights)
+  - recipe     — successful multi-step patterns with tool sequences
+  - task       — in-progress work state (link to entities it touches)
+  - note       — research, observations, ideas, comparisons
+
+**Wikilinks:**
+  Always use [[Exact Note Title]] — Obsidian resolves these in graph view.
+  You can write [[Note That Doesn't Exist Yet]] — it becomes a planned link.
 
 ## Process Lifecycle Protocol
 

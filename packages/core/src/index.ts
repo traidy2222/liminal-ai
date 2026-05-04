@@ -7,6 +7,12 @@ export { StreamAccumulator } from "./streaming.js";
 export { TaskOrchestrator } from "./orchestrator.js";
 export type { TaskRecord, LockMode } from "./orchestrator.js";
 export { buildWorldContextMessage } from "./world_context.js";
+export { guardToolArgs } from "./tool_arg_guard.js";
+export {
+  normalizeAgentVaultRawPath,
+  getExplicitAgentVaultPathFromEnv,
+  getAgentVaultRoot,
+} from "./vault_path.js";
 export type {
   Message,
   ToolDefinition,
@@ -25,4 +31,5 @@ export type {
   SubtaskResult,
   WorldContextOptions,
   PersonaConfig,
+  TurnEndHarnessMetrics,
 } from "./types.js";

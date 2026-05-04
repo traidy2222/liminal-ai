@@ -112,6 +112,11 @@ export interface ContextConfig {
     afterFraction: number,
     roundsCompressed: number
   ) => void;
+  /**
+   * ACON-style: natural-language compression policy prepended to auto / manual
+   * compression summary blocks so the model knows what was preserved vs dropped.
+   */
+  compressionGuideline?: string;
 }
 
 export interface ContextSnapshot {
@@ -143,6 +148,16 @@ export interface SubtaskResult {
   rounds: number;
 }
 
+/** Emitted on turn_end for orchestration / eval surfaces (arXiv:2512.08296, 2601.06112). */
+export interface TurnEndHarnessMetrics {
+  /** Distinct tool names invoked at least once during this send(). */
+  toolsInvokedThisSend: string[];
+  /** Count of spawn_agent calls in this send(). */
+  spawnAgentCallsThisSend: number;
+  /** Size of the last completed parallel tool batch (0 if none). */
+  parallelToolCallsLastBatch: number;
+}
+
 // ─── Events ───────────────────────────────────────────────────────────────────
 
 export interface AgentEventMap {
@@ -167,7 +182,13 @@ export interface AgentEventMap {
   };
   /** Emitted when the user answers an ask_user prompt. (#7 Structured Event Log) */
   ask_user_answered: { prompt: string; answer: string };
-  turn_end: { contextSnapshot: ContextSnapshot };
+  turn_end: {
+    contextSnapshot: ContextSnapshot;
+    /** Wall-clock time for the entire send() call in ms. */
+    durationMs?: number;
+    /** MAS / ReliabilityBench-style telemetry for this send() (cumulative where noted). */
+    harnessMetrics?: TurnEndHarnessMetrics;
+  };
   error: { err: Error };
   subtask_spawned: {
     taskId: string;
@@ -180,6 +201,11 @@ export interface AgentEventMap {
     ok: boolean;
     output: string;
     rounds: number;
+  };
+  /** Live output delta from a running sub-agent, forwarded to the parent's emitter. */
+  subtask_output: {
+    taskId: string;
+    delta: string;
   };
   /** Emitted after an approval gate is resolved (approve/edit/reject). (#7) */
   approval_decision: {
@@ -245,7 +271,7 @@ export interface AgentConfig {
   maxConcurrentAgents?: number;
   /**
    * Hard wall-clock timeout for the entire send() call in ms.
-   * Default: 120_000 (2 minutes). Prevents hung streaming calls from blocking forever.
+   * Default: 600_000 (10 minutes). Prevents hung streaming calls from blocking forever.
    * (#3 Hard Send Timeout)
    */
   sendTimeoutMs?: number;
@@ -254,6 +280,11 @@ export interface AgentConfig {
    * Default true: attempts 2+ may retry without tools to escape broken tool-call loops.
    */
   allowToollessStreamRetry?: boolean;
+  /**
+   * When true, inject a bounded [WORKING STATE] user block after inception on each
+   * buildMessages (ZipAct-style). Updated by the harness after each tool batch.
+   */
+  workingStateEnabled?: boolean;
   /**
    * Initial persona for this harness session.
    * Can be changed at runtime via harness.setPersona(config, block).

@@ -1,8 +1,8 @@
 /**
  * Eval runner — runs behavioral scenario assertions against a live AgentHarness.
- * (#10 Eval Infrastructure — ReliabilityBench arXiv:2601.06112)
+ * (#10 Eval Infrastructure — ReliabilityBench arXiv:2601.06112, AgentNoiseBench arXiv:2602.11348)
  *
- * Scenarios use the real LLM (via OpenRouter) as integration tests.
+ * Scenarios use the real LLM (via OpenRouter) as integration tests unless mocked fully.
  * Set EVAL_MODEL env var to override the model (default: openai/gpt-4o-mini).
  * Set OPENROUTER_API_KEY env var to authenticate.
  */
@@ -19,7 +19,7 @@ import { registerAllTools, INCEPTION_MESSAGES } from "@liminal/tools";
 
 export interface TraceEvent {
   type: string;
-  /** Raw event payload from AgentEmitter. */
+  /** Raw event payload from the AgentEmitter. */
   payload: unknown;
   at: number;
 }
@@ -50,6 +50,16 @@ export interface Scenario {
   timeoutMs?: number;
   /** Max ReAct rounds. Default: 20. */
   maxRounds?: number;
+  /**
+   * ReliabilityBench-style pass@k: repeat the same userMessage k times (fresh harness each run).
+   * All k runs must satisfy assertions. Default 1.
+   */
+  passAtK?: number;
+  /**
+   * Semantic perturbations (ε): additional user messages treated as the same task.
+   * Assertions must pass for every variant. Default: only userMessage.
+   */
+  paraphrases?: string[];
 }
 
 export interface ScenarioResult {
@@ -59,6 +69,8 @@ export interface ScenarioResult {
   durationMs: number;
   /** Populated if harness.send() threw or timed out. */
   error?: string;
+  /** One result per ε-variant when paraphrases were used. */
+  variantErrors?: string[];
 }
 
 // ─── Trace helpers ────────────────────────────────────────────────────────────
@@ -102,6 +114,15 @@ export function traceGetSnapshot(
   return (ev.payload as AgentEventMap["turn_end"]).contextSnapshot;
 }
 
+/** harnessMetrics from last turn_end, if present. */
+export function traceGetHarnessMetrics(
+  trace: TraceEvent[]
+): AgentEventMap["turn_end"]["harnessMetrics"] | null {
+  const ev = trace.find((e) => e.type === "turn_end");
+  if (!ev) return null;
+  return (ev.payload as AgentEventMap["turn_end"]).harnessMetrics ?? null;
+}
+
 /**
  * Returns all tool_result payloads for the given tool name, in order.
  * Includes both successful and failed calls.
@@ -124,10 +145,7 @@ export function traceToolResults(
 const EVAL_MODEL = process.env["EVAL_MODEL"] ?? "openai/gpt-4o-mini";
 
 /** Build a minimal AgentConfig suitable for eval runs. */
-function makeEvalConfig(
-  maxRounds: number,
-  timeoutMs: number
-): AgentConfig {
+function makeEvalConfig(maxRounds: number, timeoutMs: number): AgentConfig {
   return {
     openRouterApiKey: process.env["OPENROUTER_API_KEY"] ?? "",
     model: EVAL_MODEL,
@@ -138,11 +156,17 @@ function makeEvalConfig(
       modelMaxTokens: 32_000,
       thresholdFraction: 0.8,
       inceptionMessages: INCEPTION_MESSAGES,
+      compressionGuideline:
+        "Preserve file paths, error codes, and user-stated constraints when summarizing older tool rounds.",
     },
   };
 }
 
-export async function runScenario(scenario: Scenario): Promise<ScenarioResult> {
+async function runSingleHarnessSend(scenario: Scenario, userMessage: string): Promise<{
+  trace: TraceEvent[];
+  runError?: string;
+  durationMs: number;
+}> {
   const t0 = Date.now();
   const trace: TraceEvent[] = [];
 
@@ -151,7 +175,6 @@ export async function runScenario(scenario: Scenario): Promise<ScenarioResult> {
   );
   registerAllTools(harness.registry, harness.emitter, harness);
 
-  // Inject mock handlers via registry.replace()
   for (const mock of scenario.mocks ?? []) {
     const existing = harness.registry.get(mock.toolName);
     if (!existing) continue;
@@ -159,12 +182,11 @@ export async function runScenario(scenario: Scenario): Promise<ScenarioResult> {
     const mockFn = mock.handler;
     harness.registry.replace({
       ...existing,
-      requiresApproval: false, // skip approval gate in eval
+      requiresApproval: false,
       handler: (args) => mockFn(args, originalHandler),
     });
   }
 
-  // Capture all named events into the trace
   const capturedEvents = [
     "text",
     "tool_start",
@@ -184,25 +206,30 @@ export async function runScenario(scenario: Scenario): Promise<ScenarioResult> {
     });
   }
 
-  // Auto-approve all tool approval gates (eval never blocks on human input)
   harness.emitter.on("tool_approval", (payload) => {
     payload.resolve({ decision: "approve" });
   });
 
-  // Auto-answer any ask_user prompts
   harness.emitter.on("ask_user", (payload) => {
     payload.resolve("(eval auto-answer: N/A)");
   });
 
   let runError: string | undefined;
   try {
-    await harness.send(scenario.userMessage);
+    await harness.send(userMessage);
   } catch (err) {
     runError = err instanceof Error ? err.message : String(err);
     trace.push({ type: "error", payload: { err: { message: runError } }, at: Date.now() });
   }
 
-  const assertionResults = scenario.assertions.map((a) => ({
+  return { trace, runError, durationMs: Date.now() - t0 };
+}
+
+function checkAssertions(
+  trace: TraceEvent[],
+  assertions: ScenarioAssertion[]
+): Array<{ name: string; passed: boolean }> {
+  return assertions.map((a) => ({
     name: a.name,
     passed: (() => {
       try {
@@ -212,14 +239,79 @@ export async function runScenario(scenario: Scenario): Promise<ScenarioResult> {
       }
     })(),
   }));
+}
 
-  const passed = assertionResults.every((a) => a.passed);
+/**
+ * ReliabilityBench-style pass@k: same scenario, k independent harness runs.
+ */
+export async function runScenarioPassAtK(scenario: Scenario, k: number): Promise<ScenarioResult> {
+  const runs: ScenarioResult[] = [];
+  for (let i = 0; i < k; i++) {
+    const r = await runScenario({
+      ...scenario,
+      passAtK: undefined,
+      paraphrases: undefined,
+    });
+    runs.push(r);
+  }
+  const passed = runs.every((r) => r.passed);
+  const assertions = runs.flatMap((r, i) =>
+    r.assertions.map((a) => ({
+      name: `[pass@${k} run ${i + 1}] ${a.name}`,
+      passed: a.passed,
+    }))
+  );
+  return {
+    scenario: `${scenario.name} (pass@${k})`,
+    passed,
+    assertions,
+    durationMs: runs.reduce((s, r) => s + r.durationMs, 0),
+    error: runs.find((r) => r.error)?.error,
+  };
+}
+
+export async function runScenario(scenario: Scenario): Promise<ScenarioResult> {
+  if (scenario.passAtK !== undefined && scenario.passAtK > 1) {
+    return runScenarioPassAtK(scenario, scenario.passAtK);
+  }
+
+  const variants = [scenario.userMessage, ...(scenario.paraphrases ?? [])];
+  const variantResults: Array<{
+    msg: string;
+    trace: TraceEvent[];
+    runError?: string;
+    durationMs: number;
+    assertions: Array<{ name: string; passed: boolean }>;
+  }> = [];
+
+  for (let vi = 0; vi < variants.length; vi++) {
+    const msg = variants[vi]!;
+    const { trace, runError, durationMs } = await runSingleHarnessSend(scenario, msg);
+    const assertions = checkAssertions(trace, scenario.assertions);
+    variantResults.push({ msg, trace, runError, durationMs, assertions });
+  }
+
+  const passed = variantResults.every(
+    (vr) => vr.assertions.every((a) => a.passed) && !vr.runError
+  );
+
+  const assertions = variantResults.flatMap((vr, vi) =>
+    vr.assertions.map((a) => ({
+      name: variants.length > 1 ? `[ε${vi}] ${a.name}` : a.name,
+      passed: a.passed,
+    }))
+  );
+
+  const variantErrors = variantResults
+    .map((vr, i) => (vr.runError ? `[variant ${i}] ${vr.runError}` : ""))
+    .filter(Boolean);
 
   return {
     scenario: scenario.name,
     passed,
-    assertions: assertionResults,
-    durationMs: Date.now() - t0,
-    error: runError,
+    assertions,
+    durationMs: variantResults.reduce((s, vr) => s + vr.durationMs, 0),
+    error: variantErrors[0],
+    variantErrors: variantErrors.length ? variantErrors : undefined,
   };
 }

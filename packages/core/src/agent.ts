@@ -224,6 +224,10 @@ export class AgentHarness {
   private lastUserMessage = "";
   private contextAlertFired60 = false;
   private contextAlertFired85 = false;
+  /** Wall-clock start time of the current send() call. */
+  private sendStartTime = 0;
+  /** Size of the most recent parallel tool batch (for turn_end metrics). */
+  private lastParallelToolBatchSize = 0;
 
   /** True once world context has been injected (only happens on the first send() of a root agent). */
   private worldContextInjected = false;
@@ -344,9 +348,12 @@ export class AgentHarness {
     this.lastUserMessage = userMessage;
     this.contextAlertFired60 = false;
     this.contextAlertFired85 = false;
+    this.lastParallelToolBatchSize = 0;
+    this.sendStartTime = Date.now();
 
     // Hard wall-clock timeout (#3 — ReliabilityBench arXiv:2601.06112)
-    const timeoutMs = this.config.sendTimeoutMs ?? 120_000;
+    // Default 10m: multi-round exploration (many read_file / list_dir) often exceeds 2m wall time.
+    const timeoutMs = this.config.sendTimeoutMs ?? 600_000;
     let timeoutHandle: ReturnType<typeof setTimeout> | undefined;
     const timeoutPromise = new Promise<never>((_, reject) => {
       timeoutHandle = setTimeout(
@@ -514,6 +521,11 @@ export class AgentHarness {
       depth: childDepth,
     });
 
+    // Forward child text output to parent as subtask_output events (live streaming)
+    childHarness.emitter.on("text", ({ delta }) => {
+      this.emitter.emit("subtask_output", { taskId: childId, delta });
+    });
+
     // ── Run child asynchronously ────────────────────────────────────────────
     const timeoutMs = childConfig.timeoutMs ?? 300_000;
     let timeoutId: ReturnType<typeof setTimeout> | undefined;
@@ -658,6 +670,22 @@ export class AgentHarness {
       for (const tc of toolCalls) {
         this.toolsUsedThisTurn.push(tc.name);
       }
+      this.lastParallelToolBatchSize = toolCalls.length;
+
+      if (this.config.workingStateEnabled) {
+        const outcomes = toolCalls
+          .map((tc, i) => {
+            const r = results[i]!;
+            return `${tc.name}:${r.ok ? "ok" : "fail"}`;
+          })
+          .join("; ");
+        this.context.setWorkingState(
+          `GOAL (truncated): ${this.lastUserMessage.slice(0, 240)}${this.lastUserMessage.length > 240 ? "…" : ""}\n` +
+            `LAST PARALLEL BATCH (${toolCalls.length}): ${batchToolNames.join(", ")}\n` +
+            `OUTCOMES: ${outcomes}\n` +
+            `SPAWN_AGENT CALLS THIS SEND: ${this.toolsUsedThisTurn.filter((n) => n === "spawn_agent").length}`
+        );
+      }
 
       // Tell dispatcher which tools ran this round so the NEXT round's
       // pre-flight check can see if think() just fired (#10 danger pre-flight fix)
@@ -729,7 +757,16 @@ export class AgentHarness {
       await this.runReActLoop(round + 1);
     } else {
       const snapshot = this.context.snapshot();
-      this.emitter.emit("turn_end", { contextSnapshot: snapshot });
+      this.emitter.emit("turn_end", {
+        contextSnapshot: snapshot,
+        durationMs: Date.now() - this.sendStartTime,
+        harnessMetrics: {
+          toolsInvokedThisSend: [...new Set(this.toolsUsedThisTurn)],
+          spawnAgentCallsThisSend: this.toolsUsedThisTurn.filter((n) => n === "spawn_agent")
+            .length,
+          parallelToolCallsLastBatch: this.lastParallelToolBatchSize,
+        },
+      });
     }
   }
 

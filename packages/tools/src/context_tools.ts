@@ -53,7 +53,8 @@ export function createContextTools(context: ContextManager) {
       "WHAT: Immediately compress old conversation rounds to free context budget.\n" +
       "WHEN: Context usage is above 60% and you have completed a major subtask whose full detail is no longer needed.\n" +
       "NOT WHEN: You might still need the detailed outputs from early rounds — use check_context first.\n" +
-      "ARGS: summary — brief description of completed work to anchor the compressed block.",
+      "ARGS: summary — brief description of completed work to anchor the compressed block; " +
+      "guideline_note — optional line appended to the compression policy (ACON-style evolution).",
     requiresApproval: false,
     parameters: {
       type: "object",
@@ -62,11 +63,20 @@ export function createContextTools(context: ContextManager) {
           type: "string",
           description: "What has been accomplished in the rounds being compressed",
         },
+        guideline_note: {
+          type: "string",
+          description:
+            "Optional note merged into future auto/manual compression summaries (e.g. 'always keep package.json versions').",
+        },
       },
       required: ["summary"],
       additionalProperties: false,
     },
     handler: async (args) => {
+      const note = args["guideline_note"] as string | undefined;
+      if (note?.trim()) {
+        context.appendCompressionGuidelineNote(note.trim());
+      }
       const before = context.snapshot();
       const pctBefore = Math.round(before.usageFraction * 100);
       context.forceCompress(args["summary"] as string);

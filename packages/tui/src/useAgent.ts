@@ -22,6 +22,7 @@ export type MessageEntry =
       goal: string;
       depth: number;
       status: "running" | "done" | "error" | "cancelled";
+      partialOutput: string;
     }
   | { kind: "context_compressed"; beforePct: number; afterPct: number; rounds: number };
 
@@ -53,6 +54,7 @@ type Action =
   | { type: "plan_step_done"; stepIndex: number }  // (#8 structured plan)
   | { type: "subtask_spawned"; taskId: string; parentTaskId: string; goal: string; depth: number }
   | { type: "subtask_complete"; taskId: string; ok: boolean }
+  | { type: "subtask_output"; taskId: string; delta: string }
   | { type: "context_compressed"; beforePct: number; afterPct: number; rounds: number }
   | { type: "persona_changed"; name: string };
 
@@ -201,8 +203,19 @@ function reducer(state: AgentState, action: Action): AgentState {
             goal: action.goal,
             depth: action.depth,
             status: "running",
+            partialOutput: "",
           },
         ],
+      };
+
+    case "subtask_output":
+      return {
+        ...state,
+        messages: state.messages.map((m) =>
+          m.kind === "subtask" && m.taskId === action.taskId
+            ? { ...m, partialOutput: m.partialOutput + action.delta }
+            : m
+        ),
       };
 
     case "context_compressed":
@@ -309,6 +322,9 @@ export function useAgent(harness: AgentHarness) {
     );
     emitter.on("subtask_complete", ({ taskId, ok }) =>
       dispatch({ type: "subtask_complete", taskId, ok })
+    );
+    emitter.on("subtask_output", ({ taskId, delta }) =>
+      dispatch({ type: "subtask_output", taskId, delta })
     );
     // New events (#7 Structured Event Log)
     emitter.on("context_compressed", ({ beforeFraction, afterFraction, roundsCompressed }) =>

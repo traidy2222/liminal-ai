@@ -27,7 +27,7 @@ npm run build -w packages/core && npx tsc --noEmit -p packages/tools/tsconfig.js
 
 There are no test runners — verification is done by typecheck + manual run.
 
-`.env` at the monorepo root requires `OPENROUTER_API_KEY`.
+`.env` at the monorepo root requires `OPENROUTER_API_KEY`. Optional: `AGENT_SEND_TIMEOUT_MS` (default 600000) caps wall-clock time for one full `send()` / ReAct run in TUI and web. For Obsidian, set `AGENT_VAULT_PATH` to your vault folder (absolute path); otherwise vault tools use `~/.agent_vault`.
 
 ## Architecture
 

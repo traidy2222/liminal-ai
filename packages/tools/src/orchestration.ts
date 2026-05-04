@@ -1,6 +1,7 @@
 import type { AgentHarness, TaskOrchestrator, SubtaskResult } from "@liminal/core";
 import { defineTool } from "./helpers.js";
 import { createContextTools } from "./context_tools.js";
+import { loadNotes } from "./notes_store.js";
 
 // ─── Helper ───────────────────────────────────────────────────────────────────
 
@@ -91,10 +92,35 @@ export function createOrchestrationTools(harness: AgentHarness) {
     },
     handler: async (args) => {
       try {
+        // Inject parent's facts + entities into child context so it isn't cold-started
+        let memoryContext = args["context"] as string | undefined;
+        try {
+          const notes = await loadNotes();
+          const facts = Object.entries(notes)
+            .filter(([k]) => k.startsWith("fact:"))
+            .slice(0, 6)
+            .map(([k, v]) => `  ${k.slice(5)}: ${v.slice(0, 80)}`)
+            .join("\n");
+          const entities = Object.entries(notes)
+            .filter(([k]) => k.startsWith("entity:"))
+            .slice(0, 4)
+            .map(([k, v]) => `  ${k.slice(7)}: ${v.slice(0, 80)}`)
+            .join("\n");
+          const memBlock = [
+            facts ? `[PARENT MEMORY — Facts]\n${facts}` : "",
+            entities ? `[PARENT MEMORY — Entities]\n${entities}` : "",
+          ].filter(Boolean).join("\n");
+          if (memBlock) {
+            memoryContext = memoryContext ? `${memoryContext}\n\n${memBlock}` : memBlock;
+          }
+        } catch {
+          // Non-fatal — proceed without injecting parent memory
+        }
+
         const { taskId } = harness.forkChild({
           goal: args["goal"] as string,
           toolNames: args["tools"] as string[] | undefined,
-          additionalContext: args["context"] as string | undefined,
+          additionalContext: memoryContext,
           maxRounds: args["max_rounds"] as number | undefined,
           timeoutMs: args["timeout_ms"] as number | undefined,
         });

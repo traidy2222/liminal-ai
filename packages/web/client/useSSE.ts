@@ -20,6 +20,7 @@ export type MessageEntry =
       goal: string;
       depth: number;
       status: "running" | "done" | "error" | "cancelled";
+      partialOutput: string;
     }
   | { kind: "context_compressed"; beforePct: number; afterPct: number; rounds: number };
 
@@ -60,6 +61,7 @@ type Action =
   | { type: "error"; payload: { message: string } }
   | { type: "subtask_spawned"; payload: { taskId: string; parentTaskId: string; goal: string; depth: number } }
   | { type: "subtask_complete"; payload: { taskId: string; ok: boolean } }
+  | { type: "subtask_output"; payload: { taskId: string; delta: string } }
   | { type: "plan_step_done"; payload: { stepIndex: number } }      // (#8)
   | { type: "context_compressed"; payload: { beforeFraction: number; afterFraction: number; roundsCompressed: number } } // (#7)
   | { type: "persona_changed"; payload: { name: string } };
@@ -198,8 +200,19 @@ function reducer(state: SSEState, action: Action): SSEState {
             goal: action.payload.goal,
             depth: action.payload.depth,
             status: "running",
+            partialOutput: "",
           },
         ],
+      };
+
+    case "subtask_output":
+      return {
+        ...state,
+        messages: state.messages.map((m) =>
+          m.kind === "subtask" && m.taskId === action.payload.taskId
+            ? { ...m, partialOutput: m.partialOutput + action.payload.delta }
+            : m
+        ),
       };
 
     case "subtask_complete":
@@ -303,6 +316,9 @@ export function useSSE() {
     // Persona change — update header badge
     es.addEventListener("persona_changed", (e: MessageEvent) =>
       dispatch({ type: "persona_changed", payload: JSON.parse(e.data) })
+    );
+    es.addEventListener("subtask_output", (e: MessageEvent) =>
+      dispatch({ type: "subtask_output", payload: JSON.parse(e.data) })
     );
     // Informational-only events — no UI state change needed
     es.addEventListener("ask_user_answered", () => {});

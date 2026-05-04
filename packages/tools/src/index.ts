@@ -2,7 +2,7 @@ import type { ToolRegistry, AgentEmitter, AgentHarness } from "@liminal/core";
 import { readFileTool } from "./read_file.js";
 import { writeFileTool } from "./write_file.js";
 import { listDirTool } from "./list_dir.js";
-import { runShellTool } from "./run_shell.js";
+import { createRunShellTool } from "./run_shell.js";
 import { webFetchTool } from "./web_fetch.js";
 import { webSearchTool } from "./web_search.js";
 import { createAskUserTool } from "./ask_user.js";
@@ -21,6 +21,22 @@ import { suggestImprovementTool, viewInsightsTool } from "./meta_tools.js";
 import { createContextTools } from "./context_tools.js";
 import { createRefreshWorldContextTool } from "./refresh_world_context.js";
 import { createSetPersonaTool } from "./set_persona.js";
+// New tools — Upgrade IV
+import { gitStatusTool, gitDiffTool, gitLogTool, gitBranchTool, gitCommitTool } from "./git_tools.js";
+import { patchFileTool } from "./patch_file.js";
+import { taskCheckpointTool, resumeTaskTool } from "./task_persistence.js";
+import { createExtractStructuredTool } from "./extract_structured.js";
+import { createUploadImageTool } from "./upload_image.js";
+// Obsidian brain — vault tools
+import {
+  vaultWriteTool,
+  vaultReadTool,
+  vaultSearchTool,
+  vaultListTool,
+  vaultLinksTool,
+  vaultGraphTool,
+  vaultDeleteTool,
+} from "./vault_tools.js";
 
 /**
  * Register all tools onto a registry.
@@ -35,8 +51,9 @@ export function registerAllTools(
   registry.register(planTool);
   registry.register(readFileTool);
   registry.register(writeFileTool);
+  registry.register(patchFileTool);
   registry.register(listDirTool);
-  registry.register(runShellTool);
+  registry.register(createRunShellTool(emitter));
   registry.register(runBackgroundTool);
   registry.register(killProcessTool);
   registry.register(listProcessesTool);
@@ -44,6 +61,13 @@ export function registerAllTools(
   registry.register(webFetchTool);
   registry.register(webSearchTool);
   registry.register(createAskUserTool(emitter));
+  registry.register(gitStatusTool);
+  registry.register(gitDiffTool);
+  registry.register(gitLogTool);
+  registry.register(gitBranchTool);
+  registry.register(gitCommitTool);
+  registry.register(taskCheckpointTool);
+  registry.register(resumeTaskTool);
   registry.register(rememberTool);
   registry.register(recallTool);
   registry.register(recallByTypeTool);
@@ -53,6 +77,14 @@ export function registerAllTools(
   registry.register(searchMemoryTool);
   registry.register(suggestImprovementTool);
   registry.register(viewInsightsTool);
+  // Obsidian brain
+  registry.register(vaultWriteTool);
+  registry.register(vaultReadTool);
+  registry.register(vaultSearchTool);
+  registry.register(vaultListTool);
+  registry.register(vaultLinksTool);
+  registry.register(vaultGraphTool);
+  registry.register(vaultDeleteTool);
 
   if (harness) {
     // Orchestration tools (spawn_agent, wait_for_agents, cancel_agent, list_agents, verify_result)
@@ -74,6 +106,10 @@ export function registerAllTools(
 
     // Inline persona switching — closes over this specific harness instance
     registry.register(createSetPersonaTool(harness));
+
+    // Harness-scoped multimodal + extraction tools
+    registry.register(createUploadImageTool(harness));
+    registry.register(createExtractStructuredTool(harness));
   }
 }
 

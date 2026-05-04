@@ -2,6 +2,7 @@ import type { ToolResult, ToolParameterSchema, PropertySchema, ApprovalDecision 
 import type { AgentEmitter } from "./events.js";
 import type { ToolRegistry } from "./registry.js";
 import type { TaskOrchestrator } from "./orchestrator.js";
+import { guardToolArgs } from "./tool_arg_guard.js";
 
 // ─── Schema validation (#5 — Tool Invocation Reliability arXiv:2601.16280) ────
 
@@ -124,6 +125,8 @@ export class ToolDispatcher {
   ): Promise<ToolResult> {
     const tool = this.registry.get(name);
     if (!tool) return { ok: false, error: `Unknown tool: "${name}"` };
+    const guardMsg = guardToolArgs(name, args);
+    if (guardMsg) return { ok: false, error: `[ARG GUARD] ${guardMsg}` };
     try {
       return await tool.handler(args);
     } catch (err) {
@@ -160,6 +163,13 @@ export class ToolDispatcher {
         ok: false,
         error: `Invalid args for "${name}": ${validationError}`,
       };
+      this.emitter.emit("tool_result", { callId, name, args, result });
+      return result;
+    }
+
+    const guardMsg = guardToolArgs(name, args);
+    if (guardMsg) {
+      const result: ToolResult = { ok: false, error: `[ARG GUARD] ${guardMsg}` };
       this.emitter.emit("tool_result", { callId, name, args, result });
       return result;
     }
@@ -270,7 +280,19 @@ export class ToolDispatcher {
     args: Record<string, unknown>
   ): Promise<ApprovalDecision> {
     return new Promise((resolve) => {
-      this.emitter.emit("tool_approval", { callId, name, args, resolve });
+      // Auto-reject if no human responds within 60 seconds
+      const autoRejectTimer = setTimeout(() => {
+        resolve({ decision: "reject", reason: "Approval timed out after 60 seconds (no response)" });
+      }, 60_000);
+      this.emitter.emit("tool_approval", {
+        callId,
+        name,
+        args,
+        resolve: (d) => {
+          clearTimeout(autoRejectTimer);
+          resolve(d);
+        },
+      });
     });
   }
 }

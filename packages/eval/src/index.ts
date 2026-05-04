@@ -7,7 +7,11 @@
  * Requires: OPENROUTER_API_KEY env var.
  */
 import { runScenario, type ScenarioResult } from "./runner.js";
-import { ALL_SCENARIOS } from "./scenarios/basic.js";
+import { ALL_SCENARIOS as BASIC_SCENARIOS } from "./scenarios/basic.js";
+import { RELIABILITY_SCENARIOS } from "./scenarios/reliability.js";
+import { NOISE_SCENARIOS } from "./scenarios/noise.js";
+
+const ALL_SCENARIOS = [...BASIC_SCENARIOS, ...RELIABILITY_SCENARIOS, ...NOISE_SCENARIOS];
 
 const RESET = "\x1b[0m";
 const GREEN = "\x1b[32m";

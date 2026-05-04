@@ -3,6 +3,15 @@ import { registerAllTools, INCEPTION_MESSAGES } from "@liminal/tools";
 import type { SSEManager } from "./sse.js";
 import type { ApprovalDecision } from "@liminal/core";
 
+/** Wall-clock cap for one user message. Env: AGENT_SEND_TIMEOUT_MS (ms), clamped 60s–60m. */
+function resolveSendTimeoutMs(): number {
+  const raw = process.env["AGENT_SEND_TIMEOUT_MS"];
+  if (raw === undefined || raw.trim() === "") return 600_000;
+  const n = parseInt(raw.trim(), 10);
+  if (!Number.isFinite(n)) return 600_000;
+  return Math.max(60_000, Math.min(n, 3_600_000));
+}
+
 export class AgentBridge {
   readonly harness: AgentHarness;
   private pendingApprovals = new Map<string, (d: ApprovalDecision) => void>();
@@ -11,9 +20,10 @@ export class AgentBridge {
   constructor(private readonly sse: SSEManager) {
     this.harness = new AgentHarness({
       openRouterApiKey: process.env["OPENROUTER_API_KEY"] ?? "",
-      model: "minimax/minimax-m2.5:free",
+      model: "openrouter/owl-alpha",
       baseURL: "https://openrouter.ai/api/v1",
       maxToolRoundsPerTurn: 128,
+      sendTimeoutMs: resolveSendTimeoutMs(),
       // World context: auto-gather date/time/OS/shell; optionally include location
       // Set AGENT_LOCATION="City, Country" in .env to include physical location
       worldContext: process.env["AGENT_LOCATION"]
@@ -50,6 +60,7 @@ export class AgentBridge {
 
     emitter.on("subtask_spawned", (p) => this.sse.send("subtask_spawned", p));
     emitter.on("subtask_complete", (p) => this.sse.send("subtask_complete", p));
+    emitter.on("subtask_output", (p) => this.sse.send("subtask_output", p));
 
     // New structured telemetry events (#7 — AgentTrace arXiv:2602.10133)
     emitter.on("ask_user_answered", (p) => this.sse.send("ask_user_answered", p));
