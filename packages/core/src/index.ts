@@ -1,3 +1,4 @@
+export { resolveWorkspaceRoot } from "./workspace_root.js";
 export { AgentHarness } from "./agent.js";
 export { AgentEmitter } from "./events.js";
 export { ContextManager } from "./context.js";

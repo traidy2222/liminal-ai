@@ -3,6 +3,7 @@
  */
 import path from "node:path";
 import ts from "typescript";
+import { resolveWorkspaceRoot } from "@liminal/core";
 import { defineTool } from "./helpers.js";
 
 export const symbolIndexTool = defineTool({
@@ -24,7 +25,7 @@ export const symbolIndexTool = defineTool({
     additionalProperties: false,
   },
   handler: async (args) => {
-    const cwd = path.resolve(process.cwd(), (args["cwd"] as string | undefined) ?? ".");
+    const cwd = path.resolve(resolveWorkspaceRoot(), (args["cwd"] as string | undefined) ?? ".");
     const maxFiles = Math.min(120, Math.max(5, (args["max_files"] as number | undefined) ?? 35));
     const cfgPath = ts.findConfigFile(cwd, ts.sys.fileExists, "tsconfig.json");
     if (!cfgPath) {

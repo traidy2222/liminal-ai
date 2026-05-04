@@ -4,6 +4,7 @@
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import path from "node:path";
+import { resolveWorkspaceRoot } from "@liminal/core";
 import { defineTool } from "./helpers.js";
 
 const execFileAsync = promisify(execFile);
@@ -33,7 +34,7 @@ export const runLintTool = defineTool({
     additionalProperties: false,
   },
   handler: async (args) => {
-    const cwd = path.resolve(process.cwd(), args["cwd"] as string);
+    const cwd = path.resolve(resolveWorkspaceRoot(), args["cwd"] as string);
     const mode = ((args["mode"] as string | undefined) ?? "tsc").toLowerCase();
     const npx = process.platform === "win32" ? "npx.cmd" : "npx";
     try {

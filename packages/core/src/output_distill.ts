@@ -5,6 +5,7 @@ import { mkdir, writeFile, readFile } from "node:fs/promises";
 import path from "node:path";
 import type OpenAI from "openai";
 import { completeChatJson, getFastModelSlug } from "./router.js";
+import { resolveWorkspaceRoot } from "./workspace_root.js";
 
 export interface DistilledOutput {
   source: { tool: string; arg: string; hash: string };
@@ -24,11 +25,11 @@ function shortHash(s: string): string {
 }
 
 export function artifactPathForHash(hash: string): string {
-  return path.join(process.cwd(), ".agent_artifacts", `${hash}.txt`);
+  return path.join(resolveWorkspaceRoot(), ".agent_artifacts", `${hash}.txt`);
 }
 
 export async function writeArtifact(hash: string, fullText: string): Promise<string> {
-  const dir = path.join(process.cwd(), ".agent_artifacts");
+  const dir = path.join(resolveWorkspaceRoot(), ".agent_artifacts");
   await mkdir(dir, { recursive: true });
   const p = artifactPathForHash(hash);
   await writeFile(p, fullText, "utf8");

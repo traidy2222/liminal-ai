@@ -3,6 +3,7 @@
  */
 import { readdir, stat } from "node:fs/promises";
 import path from "node:path";
+import { resolveWorkspaceRoot } from "./workspace_root.js";
 
 const MAX_ENTRIES_PER_DIR = 40;
 const MAX_DEPTH_PACKAGES = 2;
@@ -12,6 +13,8 @@ export interface RepoMapOptions {
   /** "packages" = depth-2 under ./packages if it exists; "root" = depth-1 under cwd */
   scope?: "packages" | "root";
   maxDepth?: number;
+  /** Defaults to {@link resolveWorkspaceRoot} / `AGENT_WORKSPACE_ROOT`. */
+  root?: string;
 }
 
 async function listOneLevel(dir: string, prefix: string): Promise<string[]> {
@@ -45,7 +48,7 @@ async function listOneLevel(dir: string, prefix: string): Promise<string[]> {
 
 /** Build compact text lines for [WORLD CONTEXT] or repo_map tool. */
 export async function gatherRepoMapLines(opts?: RepoMapOptions): Promise<string[]> {
-  const cwd = process.cwd();
+  const cwd = path.resolve(opts?.root?.trim() || resolveWorkspaceRoot());
   const scope = opts?.scope ?? "packages";
   const lines: string[] = [];
 

@@ -4,6 +4,7 @@
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import path from "node:path";
+import { resolveWorkspaceRoot } from "@liminal/core";
 import { defineTool } from "./helpers.js";
 
 const execFileAsync = promisify(execFile);
@@ -31,13 +32,14 @@ export const astGrepTool = defineTool({
   },
   handler: async (args) => {
     const pattern = args["pattern"] as string;
-    const root = path.resolve(process.cwd(), (args["path"] as string | undefined) ?? ".");
+    const ws = resolveWorkspaceRoot();
+    const root = path.resolve(ws, (args["path"] as string | undefined) ?? ".");
     const lang = (args["lang"] as string | undefined)?.trim();
     const npx = process.platform === "win32" ? "npx.cmd" : "npx";
     const argv = ["--yes", "@ast-grep/cli", ...(lang ? ["-l", lang] : []), "-p", pattern, root];
     try {
       const { stdout, stderr } = await execFileAsync(npx, argv, {
-        cwd: process.cwd(),
+        cwd: ws,
         maxBuffer: 4_000_000,
         timeout: 90_000,
       });

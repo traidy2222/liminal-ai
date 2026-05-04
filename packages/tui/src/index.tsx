@@ -1,6 +1,4 @@
-import { config } from "dotenv";
-import { join, dirname } from "node:path";
-import { fileURLToPath } from "node:url";
+import "./tuiWorkspaceBootstrap.js";
 import React from "react";
 import { render } from "ink";
 import { AgentHarness } from "@liminal/core";
@@ -10,9 +8,6 @@ import {
   buildProtocolDynamicSuffix,
 } from "@liminal/tools";
 import { App } from "./App.js";
-
-// Load .env from monorepo root (cwd when running from packages/tui is that package dir)
-config({ path: join(dirname(fileURLToPath(import.meta.url)), "../../../.env") });
 
 /** Wall-clock cap for one user message (entire ReAct run). Env override: AGENT_SEND_TIMEOUT_MS */
 function resolveSendTimeoutMs(): number {

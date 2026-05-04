@@ -4,8 +4,9 @@
 import { appendFile, mkdir, readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { rankDocumentsForQuery, type RankableDoc } from "./memory_rank.js";
+import { resolveWorkspaceRoot } from "./workspace_root.js";
 
-const GOLDEN_DIR = () => join(process.cwd(), ".agent_eval_runs", "golden");
+const GOLDEN_DIR = () => join(resolveWorkspaceRoot(), ".agent_eval_runs", "golden");
 const GOLDEN_FILE = () => join(GOLDEN_DIR(), "traces.jsonl");
 
 export interface GoldenEvalRecord {

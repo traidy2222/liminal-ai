@@ -4,6 +4,7 @@
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import path from "node:path";
+import { resolveWorkspaceRoot } from "@liminal/core";
 import { defineTool } from "./helpers.js";
 
 const execFileAsync = promisify(execFile);
@@ -27,7 +28,7 @@ export const runTestsTool = defineTool({
     additionalProperties: false,
   },
   handler: async (args) => {
-    const cwd = path.resolve(process.cwd(), args["cwd"] as string);
+    const cwd = path.resolve(resolveWorkspaceRoot(), args["cwd"] as string);
     const script = (args["script"] as string | undefined)?.trim() || "test";
     const npm = process.platform === "win32" ? "npm.cmd" : "npm";
     try {

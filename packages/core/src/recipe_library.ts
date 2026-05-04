@@ -5,8 +5,9 @@ import { readFile, writeFile, mkdir } from "node:fs/promises";
 import { join } from "node:path";
 import { createHash } from "node:crypto";
 import { rankDocumentsForQuery, type RankableDoc } from "./memory_rank.js";
+import { resolveWorkspaceRoot } from "./workspace_root.js";
 
-const STATS_PATH = () => join(process.cwd(), ".agent_recipe_stats.json");
+const STATS_PATH = () => join(resolveWorkspaceRoot(), ".agent_recipe_stats.json");
 
 type StatsFile = { entries: Record<string, { count: number; preview: string; lastAt: string }> };
 
@@ -22,7 +23,7 @@ async function loadStats(): Promise<StatsFile> {
 }
 
 async function saveStats(s: StatsFile): Promise<void> {
-  await mkdir(join(process.cwd()), { recursive: true });
+  await mkdir(resolveWorkspaceRoot(), { recursive: true });
   await writeFile(STATS_PATH(), JSON.stringify(s, null, 2), "utf8");
 }
 

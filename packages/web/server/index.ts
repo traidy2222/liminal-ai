@@ -1,6 +1,6 @@
 import { config } from "dotenv";
 import { fileURLToPath } from "node:url";
-import { join, dirname } from "node:path";
+import { join, dirname, resolve } from "node:path";
 import { existsSync } from "node:fs";
 import express from "express";
 import cors from "cors";
@@ -11,6 +11,15 @@ import { createRouter } from "./routes.js";
 // Load .env from monorepo root before AgentBridge reads OPENROUTER_API_KEY
 const __dirname = dirname(fileURLToPath(import.meta.url));
 config({ path: join(__dirname, "../../../.env") });
+
+const repoRoot = join(__dirname, "../../../");
+const targetRoot = resolve(process.env["AGENT_WORKSPACE_ROOT"]?.trim() || repoRoot);
+process.env["AGENT_WORKSPACE_ROOT"] = targetRoot;
+try {
+  process.chdir(targetRoot);
+} catch {
+  /* ignore */
+}
 
 const app = express();
 app.use(cors());

@@ -4,9 +4,11 @@
 import { createHash } from "node:crypto";
 import { readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import { fetchEmbeddings, cosineSimilarity } from "@liminal/core";
+import { fetchEmbeddings, cosineSimilarity, resolveWorkspaceRoot } from "@liminal/core";
 
-export const MEMORY_EMBED_INDEX_PATH = join(process.cwd(), ".agent_memory.index.json");
+export function memoryEmbedIndexPath(): string {
+  return join(resolveWorkspaceRoot(), ".agent_memory.index.json");
+}
 
 export interface NoteEmbedRow {
   hash: string;
@@ -26,7 +28,7 @@ export function hashNoteValue(value: string): string {
 
 export async function loadEmbedIndex(): Promise<MemoryEmbedIndex> {
   try {
-    const raw = await readFile(MEMORY_EMBED_INDEX_PATH, "utf8");
+    const raw = await readFile(memoryEmbedIndexPath(), "utf8");
     const j = JSON.parse(raw) as MemoryEmbedIndex;
     if (j.version !== 1 || !j.entries) return { version: 1, model: "", entries: {} };
     return j;
@@ -36,7 +38,7 @@ export async function loadEmbedIndex(): Promise<MemoryEmbedIndex> {
 }
 
 export async function saveEmbedIndex(idx: MemoryEmbedIndex): Promise<void> {
-  await writeFile(MEMORY_EMBED_INDEX_PATH, JSON.stringify(idx, null, 2), "utf8");
+  await writeFile(memoryEmbedIndexPath(), JSON.stringify(idx, null, 2), "utf8");
 }
 
 /** Upsert embeddings for keys whose value hash changed. */

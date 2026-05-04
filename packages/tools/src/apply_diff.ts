@@ -3,6 +3,7 @@
  */
 import { readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
+import { resolveWorkspaceRoot } from "@liminal/core";
 import { defineTool } from "./helpers.js";
 
 function parseHunkBody(lines: string[]): {
@@ -54,7 +55,7 @@ export const applyDiffTool = defineTool({
     additionalProperties: false,
   },
   handler: async (args) => {
-    const filePath = path.resolve(process.cwd(), args["path"] as string);
+    const filePath = path.resolve(resolveWorkspaceRoot(), args["path"] as string);
     const diffText = args["unified_diff"] as string;
     const chunks = diffText.split(/\n(?=@@)/);
     const hunkBlock = chunks.find((c) => c.trim().startsWith("@@")) ?? diffText;

@@ -5,6 +5,7 @@
 import path from "node:path";
 import type OpenAI from "openai";
 import { guardToolArgs } from "./tool_arg_guard.js";
+import { resolveWorkspaceRoot } from "./workspace_root.js";
 
 export type SafetyJudgeSource = "heuristic" | "llm" | "cache";
 
@@ -191,7 +192,7 @@ export class SafetyJudge {
       return { verdict: h, source: "heuristic" };
     }
     if (toolName === "write_file") {
-      const h = heuristicWriteFile(args, process.cwd());
+      const h = heuristicWriteFile(args, resolveWorkspaceRoot());
       if (h === null) return null;
       return { verdict: h, source: "heuristic" };
     }

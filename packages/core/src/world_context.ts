@@ -22,6 +22,7 @@ import { getAgentVaultRoot, getExplicitAgentVaultPathFromEnv } from "./vault_pat
 import { rankDocumentsForQuery, type RankableDoc } from "./memory_rank.js";
 import { cosineSimilarity, fetchEmbeddings } from "./embeddings.js";
 import { gatherRepoMapLines } from "./repo_map.js";
+import { resolveWorkspaceRoot } from "./workspace_root.js";
 import { formatFailureDigestForWorldContext } from "./failure_digest.js";
 import { formatGoldenEvalHints } from "./golden_eval.js";
 import { formatRecipeLibraryHints } from "./recipe_library.js";
@@ -39,6 +40,11 @@ export interface WorldContextOptions {
   notes?: string;
   /** Set true to skip injection entirely. Child agents always skip. */
   disabled?: boolean;
+  /**
+   * Absolute project / monorepo root for CWD line, git, notes paths, and repo map.
+   * Defaults to `AGENT_WORKSPACE_ROOT` or `process.cwd()`.
+   */
+  workspaceRoot?: string;
   /**
    * First user message of the session — used to surface BM25-ranked notes + vault
    * snippets under "Relevant memory" (root harness only).
@@ -123,12 +129,18 @@ async function withDeadline<T>(promise: Promise<T>, ms: number): Promise<T | nul
 }
 
 /** Run a command and return stdout, or null on any error/timeout. */
-async function exec(cmd: string, args: string[], timeoutMs = 500): Promise<string | null> {
+async function exec(
+  cmd: string,
+  args: string[],
+  timeoutMs = 500,
+  cwd?: string
+): Promise<string | null> {
   try {
     const { stdout, stderr } = await execFile(cmd, args, {
       timeout: timeoutMs,
       encoding: "utf8",
       windowsHide: true,
+      ...(cwd ? { cwd } : {}),
     });
     return (stdout || stderr).trim() || null;
   } catch {
@@ -136,9 +148,9 @@ async function exec(cmd: string, args: string[], timeoutMs = 500): Promise<strin
   }
 }
 
-/** Find a file by searching CWD upward (up to `maxLevels` directories). */
-async function findUpward(filename: string, maxLevels = 5): Promise<string | null> {
-  let dir = process.cwd();
+/** Find a file by searching upward from `startDir` (up to `maxLevels` directories). */
+async function findUpward(filename: string, startDir: string, maxLevels = 5): Promise<string | null> {
+  let dir = path.resolve(startDir);
   for (let i = 0; i < maxLevels; i++) {
     const candidate = path.join(dir, filename);
     try {
@@ -217,7 +229,7 @@ function getShellNote(shell: string): string {
 
 // ─── 2. System resources ──────────────────────────────────────────────────���──
 
-async function gatherResources(): Promise<ResourceInfo> {
+async function gatherResources(workspaceRoot: string): Promise<ResourceInfo> {
   const cpus = os.cpus();
   const base: ResourceInfo = {
     freeRamGB: os.freemem() / 1024 ** 3,
@@ -235,7 +247,7 @@ async function gatherResources(): Promise<ResourceInfo> {
       statfs?: (path: string) => Promise<{ bsize: number; bavail: number; blocks: number }>;
     };
     if (statfs) {
-      const stats = await statfs(process.cwd());
+      const stats = await statfs(workspaceRoot);
       base.diskFreeGB = (stats.bsize * stats.bavail) / 1024 ** 3;
       base.diskTotalGB = (stats.bsize * stats.blocks) / 1024 ** 3;
     }
@@ -261,8 +273,8 @@ const FRAMEWORK_PKGS: Record<string, string> = {
   jest: "Jest", vitest: "Vitest", playwright: "Playwright", cypress: "Cypress",
 };
 
-async function gatherProject(): Promise<ProjectInfo | null> {
-  const pkgPath = await findUpward("package.json");
+async function gatherProject(workspaceRoot: string): Promise<ProjectInfo | null> {
+  const pkgPath = await findUpward("package.json", workspaceRoot);
   if (!pkgPath) return null;
 
   const raw = await tryReadFile(pkgPath);
@@ -313,9 +325,11 @@ async function gatherProject(): Promise<ProjectInfo | null> {
 
 // ─── 4. Git context ───────────────────────────────────────────────────────────
 
-async function gatherGit(): Promise<GitInfo | null> {
-  const gitDir = await findUpward(".git");
+async function gatherGit(workspaceRoot: string): Promise<GitInfo | null> {
+  const gitDir = await findUpward(".git", workspaceRoot);
   if (!gitDir) return null;
+
+  const gitWorkTree = path.dirname(gitDir);
 
   const headRaw = await tryReadFile(gitDir);
   if (!headRaw) return null;
@@ -355,8 +369,8 @@ async function gatherGit(): Promise<GitInfo | null> {
 
   // Git status + commit age (shell calls — fast)
   const [statusOut, ageOut] = await Promise.all([
-    exec("git", ["status", "--short", "--porcelain"], 800),
-    exec("git", ["log", "-1", "--format=%cr"], 800),
+    exec("git", ["status", "--short", "--porcelain"], 800, gitWorkTree),
+    exec("git", ["log", "-1", "--format=%cr"], 800, gitWorkTree),
   ]);
 
   const isDirty = !!(statusOut && statusOut.trim().length > 0);
@@ -492,10 +506,10 @@ function gatherEnvInventory(): EnvInventory {
 
 // ─── 8. Code style ────────────────────────────────────────────────────────────
 
-async function gatherCodeStyle(): Promise<CodeStyle | null> {
+async function gatherCodeStyle(workspaceRoot: string): Promise<CodeStyle | null> {
   // Try Prettier config first
   for (const name of [".prettierrc", ".prettierrc.json"]) {
-    const fp = await findUpward(name);
+    const fp = await findUpward(name, workspaceRoot);
     if (!fp) continue;
     const raw = await tryReadFile(fp);
     if (!raw) continue;
@@ -515,7 +529,7 @@ async function gatherCodeStyle(): Promise<CodeStyle | null> {
   }
 
   // Try .editorconfig
-  const editorConfigPath = await findUpward(".editorconfig");
+  const editorConfigPath = await findUpward(".editorconfig", workspaceRoot);
   if (editorConfigPath) {
     const raw = await tryReadFile(editorConfigPath);
     if (raw) {
@@ -632,12 +646,6 @@ async function gatherVaultSummary(): Promise<VaultContextSummary | null> {
 
 // ─── 9. Session memory prefetch ───────────────────────────────────────────────
 
-// Notes stored at project root (matches packages/tools/src/notes_store.ts NOTES_PATH)
-const NOTES_FILE = path.join(process.cwd(), ".agent_notes.json");
-/** Same path as `packages/tools/src/memory_index.ts` — read-only in world context. */
-const MEMORY_EMBED_INDEX_PATH = path.join(process.cwd(), ".agent_memory.index.json");
-const PROJ_BASENAME = path.basename(process.cwd()).toLowerCase();
-
 /** Stored note format — may be plain string (legacy) or timestamped object (new). */
 type MaybeStoredNote =
   | string
@@ -658,8 +666,10 @@ function extractNoteUpdatedAt(note: MaybeStoredNote): string | undefined {
   return typeof note === "string" ? undefined : note.updatedAt;
 }
 
-async function gatherSessionMemory(): Promise<SessionMemory | null> {
-  const raw = await tryReadFile(NOTES_FILE);
+async function gatherSessionMemory(workspaceRoot: string): Promise<SessionMemory | null> {
+  const notesFile = path.join(workspaceRoot, ".agent_notes.json");
+  const projBasename = path.basename(workspaceRoot).toLowerCase();
+  const raw = await tryReadFile(notesFile);
   if (!raw) return null;
 
   let rawNotes: Record<string, MaybeStoredNote>;
@@ -689,7 +699,7 @@ async function gatherSessionMemory(): Promise<SessionMemory | null> {
       experiences.push({ key, value: value.slice(0, 120) });
     } else if (type === "entity") {
       // Only include entity memories relevant to this project
-      if (key.toLowerCase().includes(PROJ_BASENAME) || value.toLowerCase().includes(PROJ_BASENAME)) {
+      if (key.toLowerCase().includes(projBasename) || value.toLowerCase().includes(projBasename)) {
         entities.push({ key, value: value.slice(0, 100) });
       }
     } else if (type === "reflection") {
@@ -737,14 +747,17 @@ async function gatherSessionMemory(): Promise<SessionMemory | null> {
 async function gatherRelevantPrimedLines(
   seed: string,
   maxNotes: number,
-  maxVault: number
+  maxVault: number,
+  workspaceRoot: string
 ): Promise<string[]> {
   const trimmed = seed.trim();
   if (trimmed.length < 2) return [];
 
   const lines: string[] = [];
+  const notesFile = path.join(workspaceRoot, ".agent_notes.json");
+  const memoryEmbedIndexPath = path.join(workspaceRoot, ".agent_memory.index.json");
 
-  const rawNotes = await tryReadFile(NOTES_FILE);
+  const rawNotes = await tryReadFile(notesFile);
   if (rawNotes) {
     try {
       const parsed = JSON.parse(rawNotes) as Record<string, MaybeStoredNote>;
@@ -787,7 +800,7 @@ async function gatherRelevantPrimedLines(
 
       if (embedModel && apiKey) {
         try {
-          const rawIdx = await tryReadFile(MEMORY_EMBED_INDEX_PATH);
+          const rawIdx = await tryReadFile(memoryEmbedIndexPath);
           if (rawIdx) {
             const idx = JSON.parse(rawIdx) as { entries?: Record<string, { v?: number[] }> };
             const { vectors } = await fetchEmbeddings({
@@ -898,19 +911,24 @@ function fmtGB(gb: number): string {
 export async function buildWorldContextMessage(options?: WorldContextOptions): Promise<string | null> {
   if (options?.disabled === true) return null;
 
+  const workspaceRoot = path.resolve(
+    options?.workspaceRoot?.trim() || resolveWorkspaceRoot()
+  );
+  const processCwd = process.cwd();
+
   const TIMEOUT = 1500;
 
   // Parallel gather — all results degrade to null on timeout/error
   const [resources, project, git, tools, ports, style, memory, vault, repoMapLines] = await Promise.all([
-    withDeadline(gatherResources(), TIMEOUT),
-    withDeadline(gatherProject(),   TIMEOUT),
-    withDeadline(gatherGit(),       TIMEOUT),
+    withDeadline(gatherResources(workspaceRoot), TIMEOUT),
+    withDeadline(gatherProject(workspaceRoot), TIMEOUT),
+    withDeadline(gatherGit(workspaceRoot), TIMEOUT),
     withDeadline(probeInstalledTools(), TIMEOUT),
     withDeadline(scanActivePorts(), TIMEOUT),
-    withDeadline(gatherCodeStyle(), TIMEOUT),
-    withDeadline(gatherSessionMemory(), TIMEOUT),
+    withDeadline(gatherCodeStyle(workspaceRoot), TIMEOUT),
+    withDeadline(gatherSessionMemory(workspaceRoot), TIMEOUT),
     withDeadline(gatherVaultSummary(), TIMEOUT),
-    withDeadline(gatherRepoMapLines({ scope: "packages" }), TIMEOUT),
+    withDeadline(gatherRepoMapLines({ scope: "packages", root: workspaceRoot }), TIMEOUT),
   ]);
 
   // ── Core system ──────────────────────────────────────────────────────────────
@@ -922,7 +940,7 @@ export async function buildWorldContextMessage(options?: WorldContextOptions): P
   const offset  = getUtcOffset();
   const shell   = getShell();
   const osLabel = getOSLabel();
-  const cwd     = process.cwd();
+  const cwd     = workspaceRoot;
   const user    = getUsername();
   const home    = os.homedir();
   const host    = os.hostname();
@@ -1049,7 +1067,10 @@ export async function buildWorldContextMessage(options?: WorldContextOptions): P
   // ── Relevant memory (BM25 seed from first user message) ─────────────────────
   if (options?.firstUserMessage?.trim()) {
     const seed = options.firstUserMessage.trim();
-    const primed = await withDeadline(gatherRelevantPrimedLines(seed, 6, 6), TIMEOUT);
+    const primed = await withDeadline(
+      gatherRelevantPrimedLines(seed, 6, 6, workspaceRoot),
+      TIMEOUT
+    );
     if (primed && primed.length > 0) {
       lines.push(sep("Relevant memory"));
       for (const ln of primed) lines.push(ln);
@@ -1089,7 +1110,11 @@ export async function buildWorldContextMessage(options?: WorldContextOptions): P
   // ── Footer ────────────────────────────────────────────────────────────────────
   if (options?.notes) lines.push(`\nNotes:  ${options.notes}`);
   lines.push(`\nImportant: Use the date/time above (not training data). Use ${shell} syntax for all shell commands.`);
-  lines.push(`Relative paths resolve from: ${cwd}`);
+  lines.push(`Workspace root (agent paths, repo map): ${cwd}`);
+  if (processCwd !== workspaceRoot) {
+    lines.push(`Process cwd (may differ): ${processCwd}`);
+  }
+  lines.push(`Relative paths resolve from the workspace root above.`);
 
   return lines.join("\n");
 }

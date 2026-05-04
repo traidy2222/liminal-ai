@@ -1,3 +1,4 @@
+import "./evalWorkspaceBootstrap.js";
 /**
  * Eval runner — runs behavioral scenario assertions against a live AgentHarness.
  * (#10 Eval Infrastructure — ReliabilityBench arXiv:2601.06112, AgentNoiseBench arXiv:2602.11348)
@@ -11,6 +12,7 @@ import { join } from "node:path";
 import {
   AgentHarness,
   appendGoldenEvalRecord,
+  resolveWorkspaceRoot,
   type AgentConfig,
   type ToolResult,
   type ToolHandler,
@@ -370,7 +372,7 @@ export async function appendEvalRunJsonLine(result: ScenarioResult): Promise<voi
   if (process.env["AGENT_EVAL_JSON_SINK"] !== "1") return;
   evalJsonSinkChain = evalJsonSinkChain.then(async () => {
     try {
-      const dir = join(process.cwd(), ".agent_eval_runs");
+      const dir = join(resolveWorkspaceRoot(), ".agent_eval_runs");
       await mkdir(dir, { recursive: true });
       const line =
         JSON.stringify({
@@ -399,7 +401,7 @@ export async function writeEvalRunSummary(
 ): Promise<void> {
   if (process.env["AGENT_EVAL_JSON_SINK"] !== "1") return;
   try {
-    const dir = join(process.cwd(), ".agent_eval_runs");
+    const dir = join(resolveWorkspaceRoot(), ".agent_eval_runs");
     await mkdir(dir, { recursive: true });
     const ts = new Date(suiteStartedAt).toISOString().replace(/[:.]/g, "-");
     const latencies = results.map((r) => r.durationMs).sort((a, b) => a - b);

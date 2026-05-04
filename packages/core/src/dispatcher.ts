@@ -183,6 +183,9 @@ export class ToolDispatcher {
     }
 
     const stableCacheKey = tool.cacheable ? `${name}:${stableArgsJsonKey(JSON.stringify(args))}` : "";
+    // Approval policy: only destructive tools require explicit human approval.
+    // Cautious tools stay guarded by schema + arg guards + optional safety judge.
+    const requiresHumanApproval = tool.requiresApproval && tool.dangerLevel === "destructive";
 
     // Result cache lookup (#6 — Tool Cache Agent, stable key ignores JSON key order)
     if (stableCacheKey) {
@@ -234,7 +237,7 @@ export class ToolDispatcher {
     }
 
     try {
-      if (tool.requiresApproval) {
+      if (requiresHumanApproval) {
         let skipHumanApproval = false;
         if (this.safetyJudge) {
           const { verdict, source } = await this.safetyJudge.classify(
@@ -294,7 +297,7 @@ export class ToolDispatcher {
       const cacheKeyForRun = tool.cacheable ? `${name}:${stableArgsJsonKey(JSON.stringify(args))}` : "";
 
       let result: ToolResult;
-      if (cacheKeyForRun && !tool.requiresApproval) {
+      if (cacheKeyForRun && !requiresHumanApproval) {
         let work = this.inflight.get(cacheKeyForRun);
         if (!work) {
           work = runHandler();

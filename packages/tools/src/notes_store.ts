@@ -1,7 +1,11 @@
 import { readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
+import { resolveWorkspaceRoot } from "@liminal/core";
 
-export const NOTES_PATH = join(process.cwd(), ".agent_notes.json");
+/** Absolute path to `.agent_notes.json` (uses `AGENT_WORKSPACE_ROOT` / monorepo root). */
+export function notesPath(): string {
+  return join(resolveWorkspaceRoot(), ".agent_notes.json");
+}
 
 /** Build a typed key: "{type}:{key}" for structured memory (#3). */
 export function makeTypedKey(type: string, key: string): string {
@@ -47,7 +51,7 @@ export function getNoteValue(note: StoredNote | string): string {
  */
 export async function loadNotes(): Promise<Record<string, string>> {
   try {
-    const raw = await readFile(NOTES_PATH, "utf8");
+    const raw = await readFile(notesPath(), "utf8");
     const parsed = JSON.parse(raw) as RawNotesStore;
     const result: Record<string, string> = {};
     for (const [k, v] of Object.entries(parsed)) {
@@ -65,7 +69,7 @@ export async function loadNotes(): Promise<Record<string, string>> {
  */
 export async function loadRawNotes(): Promise<RawNotesStore> {
   try {
-    const raw = await readFile(NOTES_PATH, "utf8");
+    const raw = await readFile(notesPath(), "utf8");
     return JSON.parse(raw) as RawNotesStore;
   } catch {
     return {};
@@ -73,7 +77,7 @@ export async function loadRawNotes(): Promise<RawNotesStore> {
 }
 
 export async function saveNotes(notes: Record<string, string>): Promise<void> {
-  await writeFile(NOTES_PATH, JSON.stringify(notes, null, 2), "utf8");
+  await writeFile(notesPath(), JSON.stringify(notes, null, 2), "utf8");
 }
 
 // ─── Serialized write queue (#4 — H-MEM arXiv:2507.22925) ────────────────────
@@ -138,7 +142,7 @@ export async function atomicUpdate(
         };
       }
     }
-    await writeFile(NOTES_PATH, JSON.stringify(rich, null, 2), "utf8");
+    await writeFile(notesPath(), JSON.stringify(rich, null, 2), "utf8");
   });
   // Reset queue to resolved on error so one bad write doesn't block all future ones
   writeQueue = thisOp.catch(() => {});
@@ -170,7 +174,7 @@ export async function bumpNoteMetadata(keys: string[]): Promise<void> {
       };
       changed = true;
     }
-    if (changed) await writeFile(NOTES_PATH, JSON.stringify(rich, null, 2), "utf8");
+    if (changed) await writeFile(notesPath(), JSON.stringify(rich, null, 2), "utf8");
   });
   writeQueue = thisOp.catch(() => {});
   await thisOp;
@@ -187,7 +191,7 @@ export async function mergeNoteGraphFields(
     if (!prev || typeof prev === "string") return;
     const sn = prev as StoredNote;
     raw[key] = { ...sn, ...meta, updatedAt: new Date().toISOString() };
-    await writeFile(NOTES_PATH, JSON.stringify(raw, null, 2), "utf8");
+    await writeFile(notesPath(), JSON.stringify(raw, null, 2), "utf8");
   });
   writeQueue = thisOp.catch(() => {});
   await thisOp;

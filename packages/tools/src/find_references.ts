@@ -4,6 +4,7 @@
 import { readFile, readdir } from "node:fs/promises";
 import type { Dirent } from "node:fs";
 import path from "node:path";
+import { resolveWorkspaceRoot } from "@liminal/core";
 import { defineTool } from "./helpers.js";
 
 const TEXT_EXT = new Set([".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs", ".json", ".md"]);
@@ -56,7 +57,8 @@ export const findReferencesTool = defineTool({
   handler: async (args) => {
     const symbol = (args["symbol"] as string).trim();
     if (symbol.length < 2) return { ok: false, error: "symbol too short" };
-    const root = path.resolve(process.cwd(), (args["root"] as string | undefined) ?? ".");
+    const ws = resolveWorkspaceRoot();
+    const root = path.resolve(ws, (args["root"] as string | undefined) ?? ".");
     const maxFiles = Math.min(400, Math.max(10, (args["max_files"] as number | undefined) ?? 80));
     const files = await walkFiles(root, maxFiles);
     const hits: string[] = [];
@@ -71,7 +73,7 @@ export const findReferencesTool = defineTool({
       const lines = text.split("\n");
       for (let i = 0; i < lines.length; i++) {
         if (lines[i]!.includes(symbol)) {
-          hits.push(`${path.relative(process.cwd(), fp)}:${i + 1}: ${lines[i]!.trim().slice(0, 200)}`);
+          hits.push(`${path.relative(ws, fp)}:${i + 1}: ${lines[i]!.trim().slice(0, 200)}`);
           if (hits.length >= 120) break;
         }
       }
