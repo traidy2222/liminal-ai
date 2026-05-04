@@ -11,8 +11,20 @@ import { thinkTool } from "./think.js";
 import { planTool } from "./plan.js";
 import { searchMemoryTool } from "./search_memory.js";
 import { recallRelevantTool } from "./recall_relevant.js";
+import { memoryGraphTool } from "./memory_graph.js";
+import { readArtifactTool } from "./read_artifact.js";
+import { webResearchTool } from "./web_research.js";
+import { failureReviewTool } from "./failure_review.js";
 import { repoMapTool } from "./repo_map.js";
 import { memoryConsolidateTool } from "./memory_consolidate.js";
+import { memoryQueryTool } from "./memory_query.js";
+import { astGrepTool } from "./ast_grep.js";
+import { applyDiffTool } from "./apply_diff.js";
+import { runTestsTool } from "./run_tests.js";
+import { runLintTool } from "./run_lint.js";
+import { symbolIndexTool } from "./symbol_index.js";
+import { findReferencesTool } from "./find_references.js";
+import { browserOpenTool, browserActTool } from "./browser_tools.js";
 import { createOrchestrationTools } from "./orchestration.js";
 import {
   runBackgroundTool,
@@ -80,7 +92,20 @@ export function registerAllTools(
   registry.register(memoryStatsTool);
   registry.register(searchMemoryTool);
   registry.register(recallRelevantTool);
+  registry.register(memoryGraphTool);
+  registry.register(readArtifactTool);
+  registry.register(webResearchTool);
+  registry.register(failureReviewTool);
   registry.register(memoryConsolidateTool);
+  registry.register(memoryQueryTool);
+  registry.register(astGrepTool);
+  registry.register(applyDiffTool);
+  registry.register(runTestsTool);
+  registry.register(runLintTool);
+  registry.register(symbolIndexTool);
+  registry.register(findReferencesTool);
+  registry.register(browserOpenTool);
+  registry.register(browserActTool);
   registry.register(suggestImprovementTool);
   registry.register(viewInsightsTool);
   // Obsidian brain
@@ -94,13 +119,15 @@ export function registerAllTools(
 
   if (harness) {
     // Orchestration tools (spawn_agent, wait_for_agents, cancel_agent, list_agents, verify_result)
-    const { spawnAgentTool, waitForAgentsTool, cancelAgentTool, listAgentsTool, verifyResultTool } =
-      createOrchestrationTools(harness);
-    registry.register(spawnAgentTool);
-    registry.register(waitForAgentsTool);
-    registry.register(cancelAgentTool);
-    registry.register(listAgentsTool);
-    registry.register(verifyResultTool);
+    const orch = createOrchestrationTools(harness);
+    registry.register(orch.spawnAgentTool);
+    registry.register(orch.waitForAgentsTool);
+    registry.register(orch.cancelAgentTool);
+    registry.register(orch.listAgentsTool);
+    registry.register(orch.verifyResultTool);
+    registry.register(orch.evidenceCriticTool);
+    registry.register(orch.pathCriticTool);
+    registry.register(orch.policyCriticTool);
 
     // Context budget tools (check_context, compress_context) — close over harness context
     const { checkContextTool, compressContextTool } = createContextTools(harness.getContext());

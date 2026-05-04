@@ -12,6 +12,8 @@ import {
   traceHasTurnEnd,
   traceGetSnapshot,
   traceToolResults,
+  traceTerminatedCleanly,
+  traceGetHarnessMetrics,
 } from "../runner.js";
 
 // ─── Scenario 1: Basic smoke test ─────────────────────────────────────────────
@@ -239,10 +241,16 @@ export const planBeforeMultiStep: Scenario = {
     "Please plan these steps before executing them.",
   maxRounds: 20,
   timeoutMs: 60_000,
+  tags: ["smoke"],
   assertions: [
     {
-      name: "turn_end fires",
-      check: (trace) => traceHasTurnEnd(trace),
+      name: "clean harness shutdown (ok or round_cap)",
+      check: (trace) => {
+        const m = traceGetHarnessMetrics(trace);
+        const r = m?.terminationReason;
+        const okReason = !r || r === "ok" || r === "round_cap";
+        return traceTerminatedCleanly(trace) && okReason;
+      },
     },
     {
       name: "plan() tool was called",

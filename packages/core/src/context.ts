@@ -1,4 +1,10 @@
-import type { Message, ContextConfig, ContextSnapshot } from "./types.js";
+import type { Message, ContextConfig, ContextSnapshot, EpistemicState } from "./types.js";
+import {
+  emptyEpistemicState,
+  mergeEpistemicState,
+  renderEpistemicStateBlock,
+} from "./epistemic_state.js";
+import { estimateMessagesTokens } from "./token_estimate.js";
 
 // ─── Round grouping for compression ──────────────────────────────────────────
 
@@ -126,6 +132,8 @@ export class ContextManager {
   private protocolDynamicSuffix = "";
   /** ZipAct-style bounded summary injected after inception (not stored in conversation). */
   private workingStateBlock = "";
+  /** When set, rendered instead of raw workingStateBlock (structured epistemic snapshot). */
+  private epistemicState: EpistemicState | null = null;
   /** ACON-style runtime notes appended to compression policy in summary blocks. */
   private compressionNotes: string[] = [];
 
@@ -165,13 +173,40 @@ export class ContextManager {
     };
   }
 
-  /** Replace the injected [WORKING STATE] block (empty string clears). */
+  /** Replace the injected [WORKING STATE] block (empty string clears legacy string only). */
   setWorkingState(block: string): void {
     this.workingStateBlock = block;
+    if (this.epistemicState && block.trim()) {
+      this.epistemicState = mergeEpistemicState(this.epistemicState, {
+        harnessNotes: block.trim().slice(0, 1200),
+      });
+    }
   }
 
   getWorkingStateBlock(): string {
+    if (this.epistemicState) return renderEpistemicStateBlock(this.epistemicState);
     return this.workingStateBlock;
+  }
+
+  /** Start structured epistemic tracking for a new send (root working state). */
+  initEpistemicState(goal: string): void {
+    this.epistemicState = emptyEpistemicState(goal);
+    this.workingStateBlock = "";
+  }
+
+  /** Merge fields into the current epistemic snapshot (no-op if not initialized). */
+  patchEpistemicState(patch: Partial<EpistemicState>): void {
+    if (!this.epistemicState) return;
+    this.epistemicState = mergeEpistemicState(this.epistemicState, patch);
+  }
+
+  getEpistemicState(): EpistemicState | null {
+    return this.epistemicState;
+  }
+
+  /** Clear epistemic snapshot (e.g. new session). */
+  clearEpistemicState(): void {
+    this.epistemicState = null;
   }
 
   /** Append a line to compression policy (ACON-style guideline evolution via tools). */
@@ -247,10 +282,12 @@ export class ContextManager {
   buildMessages(): Message[] {
     const inception = this.getEffectiveInception();
     const working: Message[] = [];
-    const ws = this.workingStateBlock.trim();
+    const ws = this.epistemicState
+      ? renderEpistemicStateBlock(this.epistemicState)
+      : this.workingStateBlock.trim();
     if (ws) {
       working.push({
-        role: "user",
+        role: "system",
         content:
           `[WORKING STATE — bounded task snapshot; refreshed each tool round]\n${ws}`,
       });
@@ -285,7 +322,7 @@ export class ContextManager {
   }
 
   private computeSnapshot(messages: Message[]): ContextSnapshot {
-    const tokenCount = this.estimateTokens(messages);
+    const tokenCount = estimateMessagesTokens(messages);
     const usageFraction = tokenCount / this.config.modelMaxTokens;
     return {
       tokenCount,
@@ -293,23 +330,6 @@ export class ContextManager {
       usageFraction,
       masked: usageFraction >= this.config.thresholdFraction,
     };
-  }
-
-  private estimateTokens(messages: Message[]): number {
-    const total = messages.reduce((sum, m) => {
-      if (typeof m.content === "string") return sum + m.content.length;
-      if (Array.isArray(m.content)) {
-        return (
-          sum +
-          (m.content as Array<{ type: string; text?: string }>).reduce(
-            (s, p) => s + (typeof p.text === "string" ? p.text.length : 0),
-            0
-          )
-        );
-      }
-      return sum;
-    }, 0);
-    return Math.ceil(total / 4);
   }
 
   /**
@@ -354,6 +374,12 @@ export class ContextManager {
 
     // Build summary message
     const summaryLines = toCompress.map((r) => r.summary).join("\n");
+    const structured = JSON.stringify({
+      v: 1,
+      kind: "context_compression",
+      rounds_compressed: toCompress.length,
+      tool_round_summaries: toCompress.map((r) => r.summary.split("\n").filter(Boolean).slice(0, 16)),
+    }).slice(0, 14_000);
     const policy = this.compressionPolicyPreamble();
     const policyBlock = policy
       ? `\nCOMPRESSION POLICY:\n${policy}\n`
@@ -363,8 +389,11 @@ export class ContextManager {
       content:
         `[CONTEXT SUMMARY — ${toCompress.length} older round(s) compressed to save space]\n` +
         policyBlock +
-        summaryLines +
-        `\n[End summary — use recall/search_memory to access any stored details]`,
+        "```json\n" +
+        structured +
+        "\n```\n" +
+        `Human-readable digest:\n${summaryLines}\n` +
+        `[End summary — use recall/search_memory/memory_query to access any stored details]`,
     };
 
     // Reconstruct: insert summary before the first kept message, remove compressed messages
@@ -451,6 +480,12 @@ export class ContextManager {
     }
 
     const summaryLines = toCompress.map((r) => r.summary).join("\n");
+    const structured = JSON.stringify({
+      v: 1,
+      kind: "force_compress",
+      anchor: anchorSummary.slice(0, 2000),
+      tool_round_summaries: toCompress.map((r) => r.summary.split("\n").filter(Boolean).slice(0, 16)),
+    }).slice(0, 14_000);
     const policy = this.compressionPolicyPreamble();
     const policyBlock = policy ? `\nCOMPRESSION POLICY:\n${policy}\n` : "";
     const summaryMsg: Message = {
@@ -458,8 +493,11 @@ export class ContextManager {
       content:
         `[CONTEXT COMPRESSED — ${toCompress.length} round(s) summarized]\n` +
         policyBlock +
+        "```json\n" +
+        structured +
+        "\n```\n" +
         `Summary: ${anchorSummary}\nDetails:\n${summaryLines}\n` +
-        `[End compressed block]`,
+        `[End compressed block — use memory_query / recall for stored detail]`,
     };
 
     const firstRemovedIdx = Math.min(...removeIdxs);
@@ -488,6 +526,7 @@ export class ContextManager {
   clear(): void {
     this.conversation = [];
     this.workingStateBlock = "";
+    this.epistemicState = null;
     this.compressionNotes = [];
     this.protocolDynamicSuffix = "";
     this.inceptionOverride = undefined;

@@ -1,0 +1,29 @@
+{
+  "entries": {
+    "e42c02415659d115e66e": {
+      "count": 1,
+      "preview": "GOAL: Do this sequence: read_file packages/core/src/agent.ts; if d PATTERN: read_file → memory_query → repo_map → list_dir ROUNDS: 4",
+      "lastAt": "2026-05-04T10:30:03.931Z"
+    },
+    "904d2d14c6a7faa35345": {
+      "count": 1,
+      "preview": "GOAL: This is a 6-step task: 1) Call plan with >=6 explicit steps. PATTERN: plan → remember → remember → memory_query → plan → repo_map ROUNDS: 3",
+      "lastAt": "2026-05-04T10:30:05.041Z"
+    },
+    "a0185934100e0c2642d7": {
+      "count": 1,
+      "preview": "GOAL: Long background context Long background context Long backgro PATTERN: check_context → repo_map → read_file → list_dir → list_dir → read_file ROUNDS: 4",
+      "lastAt": "2026-05-04T10:32:15.834Z"
+    },
+    "83a60a59f3bc7c84ce04": {
+      "count": 1,
+      "preview": "GOAL: Strictly follow this order: think -> plan -> remember -> mem PATTERN: plan → remember → memory_query → repo_map ROUNDS: 5",
+      "lastAt": "2026-05-04T10:34:38.856Z"
+    },
+    "fc8bc225e10bee75723e": {
+      "count": 1,
+      "preview": "GOAL: Phase A: remember three facts with keys lh_a, lh_b, lh_c and PATTERN: memory_query → memory_query → memory_query → think → plan → remember → remember → remember → plan → memory_query → memory_qu",
+      "lastAt": "2026-05-04T10:36:20.699Z"
+    }
+  }
+}

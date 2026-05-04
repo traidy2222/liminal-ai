@@ -278,6 +278,11 @@ export function createOrchestrationTools(harness: AgentHarness) {
       properties: {
         goal: { type: "string", description: "Original task description" },
         result: { type: "string", description: "Summary of what was done" },
+        evidence_pack: {
+          type: "string",
+          description:
+            "Optional excerpts from read_file/web_fetch/etc. Bind critic claims to this evidence.",
+        },
         tools: {
           type: "array",
           items: { type: "string" },
@@ -289,15 +294,23 @@ export function createOrchestrationTools(harness: AgentHarness) {
     },
     handler: async (args) => {
       try {
+        const ev = (args["evidence_pack"] as string | undefined)?.trim();
+        const evBlock =
+          ev && ev.length > 20
+            ? `\n\nEVIDENCE PACK (ground truth excerpts — cite these, do not invent paths):\n${ev.slice(0, 12_000)}\n`
+            : "";
         const { promise } = harness.forkChild({
           goal:
-            `VERIFICATION TASK: Independently verify whether this goal was achieved.\n\n` +
-            `GOAL: ${args["goal"] as string}\n\n` +
-            `CLAIMED RESULT: ${args["result"] as string}\n\n` +
-            `Check the actual files/state/output. ` +
-            `Return EXACTLY one of:\n` +
-            `"✓ VERIFIED: [evidence of success]"\n` +
-            `"✗ ISSUES FOUND: [specific problems]"`,
+            `VERIFICATION TASK (Chain-of-Verification / CoVe). Verify GOAL vs CLAIMED RESULT using tools.\n\n` +
+            `GOAL:\n${args["goal"] as string}\n\n` +
+            `CLAIMED RESULT:\n${args["result"] as string}\n` +
+            evBlock +
+            `\nProcedure:\n` +
+            `1) Privately enumerate checks V1–V5: goal fit, each factual claim vs evidence/files, path/command realism, missing verification steps, residual risks.\n` +
+            `2) Use read_file / list_dir / think (and optional tools arg) — bind conclusions to inspected artifacts.\n` +
+            `3) Summarize briefly, then output EXACTLY ONE line:\n` +
+            `   "✓ VERIFIED: [evidence tied to checks]" OR\n` +
+            `   "✗ ISSUES FOUND: [specific failed checks]"`,
           toolNames: (args["tools"] as string[] | undefined) ?? [
             "read_file",
             "list_dir",
@@ -319,6 +332,120 @@ export function createOrchestrationTools(harness: AgentHarness) {
     },
   });
 
+  // ── evidence_critic / path_critic / policy_critic (CoVe-style specialized critics) ──
+  const evidenceCriticTool = defineTool({
+    name: "evidence_critic",
+    description:
+      "WHAT: Spawn a sub-agent that checks whether result_text is supported only by evidence_pack + optional file reads.\n" +
+      "WHEN: After a long answer — bind claims to tool excerpts.\n" +
+      "ARGS: result_text, evidence_pack; optional context_goal.",
+    requiresApproval: false,
+    parameters: {
+      type: "object",
+      properties: {
+        result_text: { type: "string", description: "Assistant or summary text to audit" },
+        evidence_pack: { type: "string", description: "Excerpts from read_file/web_fetch/etc." },
+        context_goal: { type: "string", description: "Original user goal (optional)" },
+      },
+      required: ["result_text", "evidence_pack"],
+      additionalProperties: false,
+    },
+    handler: async (args) => {
+      try {
+        const rt = args["result_text"] as string;
+        const ev = args["evidence_pack"] as string;
+        const g = (args["context_goal"] as string | undefined)?.trim() ?? "";
+        const { promise } = harness.forkChild({
+          goal:
+            `EVIDENCE_CRITIC: Every factual claim in RESULT_TEXT must appear in or follow from EVIDENCE_PACK (or files you read now).\n` +
+            (g ? `USER GOAL:\n${g}\n\n` : "") +
+            `RESULT_TEXT:\n${rt.slice(0, 10_000)}\n\nEVIDENCE_PACK:\n${ev.slice(0, 12_000)}\n\n` +
+            `End with exactly one line: "✓ EVIDENCE_OK: …" or "✗ EVIDENCE_ISSUES: …"`,
+          toolNames: ["read_file", "list_dir", "think"],
+          maxRounds: 8,
+          timeoutMs: 45_000,
+        });
+        const r = await promise;
+        return r.ok ? { ok: true, output: r.output } : { ok: false, error: r.output };
+      } catch (err) {
+        return { ok: false, error: err instanceof Error ? err.message : String(err) };
+      }
+    },
+  });
+
+  const pathCriticTool = defineTool({
+    name: "path_critic",
+    description:
+      "WHAT: Sub-agent checks that file paths mentioned in result_text exist under the repo (read_file/list_dir).\n" +
+      "WHEN: Answer cites many paths.\n" +
+      "ARGS: result_text.",
+    requiresApproval: false,
+    parameters: {
+      type: "object",
+      properties: {
+        result_text: { type: "string", description: "Text containing alleged paths" },
+      },
+      required: ["result_text"],
+      additionalProperties: false,
+    },
+    handler: async (args) => {
+      try {
+        const rt = args["result_text"] as string;
+        const { promise } = harness.forkChild({
+          goal:
+            `PATH_CRITIC: Extract file-like paths from RESULT_TEXT. For each, verify with read_file or list_dir.\n` +
+            `RESULT_TEXT:\n${rt.slice(0, 10_000)}\n\n` +
+            `End with one line: "✓ PATHS_OK: …" or "✗ PATH_ISSUES: …" listing any missing/bad paths.`,
+          toolNames: ["read_file", "list_dir", "think"],
+          maxRounds: 10,
+          timeoutMs: 50_000,
+        });
+        const r = await promise;
+        return r.ok ? { ok: true, output: r.output } : { ok: false, error: r.output };
+      } catch (err) {
+        return { ok: false, error: err instanceof Error ? err.message : String(err) };
+      }
+    },
+  });
+
+  const policyCriticTool = defineTool({
+    name: "policy_critic",
+    description:
+      "WHAT: Sub-agent checks whether result_text violates safety / policy (e.g. malware, credential theft, disallowed exfiltration).\n" +
+      "WHEN: Sensitive domains or high-risk edits.\n" +
+      "ARGS: result_text; optional policy_notes.",
+    requiresApproval: false,
+    parameters: {
+      type: "object",
+      properties: {
+        result_text: { type: "string" },
+        policy_notes: { type: "string", description: "Extra refusal / policy lines to enforce" },
+      },
+      required: ["result_text"],
+      additionalProperties: false,
+    },
+    handler: async (args) => {
+      try {
+        const rt = args["result_text"] as string;
+        const pol = (args["policy_notes"] as string | undefined)?.trim() ?? "";
+        const { promise } = harness.forkChild({
+          goal:
+            `POLICY_CRITIC: Check RESULT_TEXT against standard assistant safety (no malware, no stealing credentials, no bypassing security, no illegal instructions).\n` +
+            (pol ? `EXTRA POLICY:\n${pol.slice(0, 4000)}\n\n` : "") +
+            `RESULT_TEXT:\n${rt.slice(0, 10_000)}\n\n` +
+            `Use think() only. End with one line: "✓ POLICY_OK: …" or "✗ POLICY_ISSUES: …"`,
+          toolNames: ["think"],
+          maxRounds: 4,
+          timeoutMs: 30_000,
+        });
+        const r = await promise;
+        return r.ok ? { ok: true, output: r.output } : { ok: false, error: r.output };
+      } catch (err) {
+        return { ok: false, error: err instanceof Error ? err.message : String(err) };
+      }
+    },
+  });
+
   // Wire onChildCreated so grandchildren get fresh harness-scoped tools
   harness.onChildCreated = (child: AgentHarness) => {
     // Orchestration tools — close over child harness
@@ -328,11 +455,23 @@ export function createOrchestrationTools(harness: AgentHarness) {
     child.registry.register(childTools.cancelAgentTool);
     child.registry.register(childTools.listAgentsTool);
     child.registry.register(childTools.verifyResultTool);
+    child.registry.register(childTools.evidenceCriticTool);
+    child.registry.register(childTools.pathCriticTool);
+    child.registry.register(childTools.policyCriticTool);
     // Context tools — close over child's own ContextManager
     const { checkContextTool, compressContextTool } = createContextTools(child.getContext());
     child.registry.register(checkContextTool);
     child.registry.register(compressContextTool);
   };
 
-  return { spawnAgentTool, waitForAgentsTool, cancelAgentTool, listAgentsTool, verifyResultTool };
+  return {
+    spawnAgentTool,
+    waitForAgentsTool,
+    cancelAgentTool,
+    listAgentsTool,
+    verifyResultTool,
+    evidenceCriticTool,
+    pathCriticTool,
+    policyCriticTool,
+  };
 }

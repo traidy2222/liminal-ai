@@ -131,6 +131,27 @@ export interface ContextSnapshot {
   masked: boolean;
 }
 
+/** Structured working snapshot (COMPASS-style); rendered into [WORKING STATE]. */
+export interface EpistemicState {
+  goal: string;
+  subgoals: {
+    id: string;
+    status: "todo" | "doing" | "done" | "blocked";
+    note?: string;
+  }[];
+  hypotheses: {
+    claim: string;
+    confidence: "low" | "med" | "high";
+    evidence?: string[];
+  }[];
+  filesTouched: string[];
+  lastVerified?: { what: string; how: string; at: number };
+  openQuestions: string[];
+  budget: { usagePct: number; recallK: number; spareRounds: number };
+  /** Last tool batch / outcomes one-liner from harness. */
+  harnessNotes?: string;
+}
+
 // ─── Multi-agent orchestration ────────────────────────────────────────────────
 
 export interface ChildAgentConfig {
@@ -153,8 +174,13 @@ export interface SubtaskResult {
   rounds: number;
 }
 
+/** Why this send() ended (present on reliable turn_end emissions). */
+export type TurnEndTerminationReason = "ok" | "round_cap" | "timeout" | "error";
+
 /** Emitted on turn_end for orchestration / eval surfaces (arXiv:2512.08296, 2601.06112). */
 export interface TurnEndHarnessMetrics {
+  /** How the harness finished this send (optional for backward compatibility). */
+  terminationReason?: TurnEndTerminationReason;
   /** Distinct tool names invoked at least once during this send(). */
   toolsInvokedThisSend: string[];
   /** Count of spawn_agent calls in this send(). */
@@ -163,6 +189,8 @@ export interface TurnEndHarnessMetrics {
   parallelToolCallsLastBatch: number;
   /** Truncated [WORKING STATE] block for UIs / eval (optional). */
   workingStatePreview?: string;
+  /** Full structured epistemic snapshot at turn end (optional). */
+  epistemicState?: EpistemicState;
 }
 
 // ─── Events ───────────────────────────────────────────────────────────────────

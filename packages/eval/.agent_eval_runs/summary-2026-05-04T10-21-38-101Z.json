@@ -1,0 +1,28 @@
+{
+  "at": "2026-05-04T10:21:44.579Z",
+  "suiteStartedAt": "2026-05-04T10:21:38.101Z",
+  "total": 1,
+  "passed": 0,
+  "passRate": 0,
+  "latencyMsSuite": {
+    "p50": 6476,
+    "p95": 6476,
+    "max": 6476
+  },
+  "failures": [
+    {
+      "scenario": "research-memory-synthesis-chain",
+      "error": null,
+      "terminationReason": "error"
+    }
+  ],
+  "perScenario": [
+    {
+      "scenario": "research-memory-synthesis-chain",
+      "passed": false,
+      "durationMs": 6476,
+      "terminationReason": "error",
+      "toolResultOkCount": 0
+    }
+  ]
+}

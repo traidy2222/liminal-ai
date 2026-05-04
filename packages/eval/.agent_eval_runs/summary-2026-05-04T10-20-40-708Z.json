@@ -1,0 +1,112 @@
+{
+  "at": "2026-05-04T10:20:55.967Z",
+  "suiteStartedAt": "2026-05-04T10:20:40.708Z",
+  "total": 8,
+  "passed": 0,
+  "passRate": 0,
+  "latencyMsSuite": {
+    "p50": 3559,
+    "p95": 8402,
+    "max": 14964
+  },
+  "failures": [
+    {
+      "scenario": "long-horizon-plan-memory-code-critic (pass@2)",
+      "error": null,
+      "terminationReason": "error"
+    },
+    {
+      "scenario": "long-horizon-orchestration-merge-verify",
+      "error": null,
+      "terminationReason": "error"
+    },
+    {
+      "scenario": "long-horizon-distill-artifact-continuation",
+      "error": null,
+      "terminationReason": "error"
+    },
+    {
+      "scenario": "long-horizon-context-budget-discipline",
+      "error": null,
+      "terminationReason": "error"
+    },
+    {
+      "scenario": "long-horizon-critic-suite-coverage",
+      "error": null,
+      "terminationReason": "error"
+    },
+    {
+      "scenario": "long-horizon-code-ops-loop",
+      "error": null,
+      "terminationReason": "error"
+    },
+    {
+      "scenario": "long-horizon-ordered-protocol-compliance",
+      "error": null,
+      "terminationReason": "error"
+    },
+    {
+      "scenario": "long-horizon-memory-continuity-across-rounds (pass@2)",
+      "error": null,
+      "terminationReason": "error"
+    }
+  ],
+  "perScenario": [
+    {
+      "scenario": "long-horizon-plan-memory-code-critic (pass@2)",
+      "passed": false,
+      "durationMs": 14964,
+      "terminationReason": "error",
+      "toolResultOkCount": 0
+    },
+    {
+      "scenario": "long-horizon-orchestration-merge-verify",
+      "passed": false,
+      "durationMs": 8402,
+      "terminationReason": "error",
+      "toolResultOkCount": 0
+    },
+    {
+      "scenario": "long-horizon-distill-artifact-continuation",
+      "passed": false,
+      "durationMs": 5860,
+      "terminationReason": "error",
+      "toolResultOkCount": 0
+    },
+    {
+      "scenario": "long-horizon-context-budget-discipline",
+      "passed": false,
+      "durationMs": 4090,
+      "terminationReason": "error",
+      "toolResultOkCount": 0
+    },
+    {
+      "scenario": "long-horizon-critic-suite-coverage",
+      "passed": false,
+      "durationMs": 2918,
+      "terminationReason": "error",
+      "toolResultOkCount": 0
+    },
+    {
+      "scenario": "long-horizon-code-ops-loop",
+      "passed": false,
+      "durationMs": 1472,
+      "terminationReason": "error",
+      "toolResultOkCount": 0
+    },
+    {
+      "scenario": "long-horizon-ordered-protocol-compliance",
+      "passed": false,
+      "durationMs": 1586,
+      "terminationReason": "error",
+      "toolResultOkCount": 0
+    },
+    {
+      "scenario": "long-horizon-memory-continuity-across-rounds (pass@2)",
+      "passed": false,
+      "durationMs": 3559,
+      "terminationReason": "error",
+      "toolResultOkCount": 0
+    }
+  ]
+}

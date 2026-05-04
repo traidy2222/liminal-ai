@@ -5,8 +5,10 @@ import {
   atomicUpdate,
   makeTypedKey,
   bumpNoteMetadata,
+  mergeNoteGraphFields,
   type StoredNote,
 } from "./notes_store.js";
+import { rankDocumentsForQuery } from "@liminal/core";
 import { suggestWikilinkLine } from "./memory_autolink.js";
 
 const MEMORY_TYPES = ["fact", "experience", "entity", "belief", "reflection", "recipe"] as const;
@@ -41,6 +43,20 @@ export const rememberTool = defineTool({
     const storageKey = memType ? makeTypedKey(memType, rawKey) : rawKey;
     // Use atomic write queue (#4) to prevent concurrent sub-agent data loss
     await atomicUpdate((notes) => ({ ...notes, [storageKey]: value }));
+
+    if (process.env["AGENT_MEMORY_GRAPH"] === "1") {
+      const plain = await loadNotes();
+      const otherKeys = Object.keys(plain).filter((x) => x !== storageKey);
+      if (otherKeys.length > 0) {
+        const docs = otherKeys.map((id) => ({ id, text: `${id} ${plain[id]}` }));
+        const ranked = rankDocumentsForQuery(value.slice(0, 800), docs, { limit: 10 });
+        const linkKeys = ranked
+          .map((r) => r.id)
+          .filter((id) => id !== storageKey)
+          .slice(0, 5);
+        if (linkKeys.length > 0) await mergeNoteGraphFields(storageKey, { links: linkKeys });
+      }
+    }
 
     if (process.env["AGENT_MEMORY_AUTOLINK"] === "1") {
       const all = await loadNotes();
@@ -140,7 +156,8 @@ export const forgetTool = defineTool({
     "WHEN: A stored fact is wrong, outdated, or no longer relevant.\n" +
     "NOT WHEN: You want to clear an entire category — use forget_type instead.\n" +
     "ARGS: key — exact key to delete (use search_memory or recall() first if unsure of the key).",
-  requiresApproval: false,
+  requiresApproval: true,
+  dangerLevel: "cautious",
   parameters: {
     type: "object",
     properties: {
@@ -173,7 +190,8 @@ export const forgetTypeTool = defineTool({
     "NOT WHEN: You want to delete one specific entry — use forget(key) instead.\n" +
     "WARNING: This is irreversible. Use recall_type or memory_stats to review first.\n" +
     "ARGS: type — one of: fact, experience, entity, belief, reflection, recipe, harness.",
-  requiresApproval: false,
+  requiresApproval: true,
+  dangerLevel: "cautious",
   parameters: {
     type: "object",
     properties: {

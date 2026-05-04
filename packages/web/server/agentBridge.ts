@@ -1,5 +1,9 @@
 import { AgentHarness } from "@liminal/core";
-import { registerAllTools, INCEPTION_MESSAGES } from "@liminal/tools";
+import {
+  registerAllTools,
+  INCEPTION_MESSAGES,
+  buildProtocolDynamicSuffix,
+} from "@liminal/tools";
 import type { SSEManager } from "./sse.js";
 import type { ApprovalDecision } from "@liminal/core";
 
@@ -10,6 +14,17 @@ function resolveSendTimeoutMs(): number {
   const n = parseInt(raw.trim(), 10);
   if (!Number.isFinite(n)) return 600_000;
   return Math.max(60_000, Math.min(n, 3_600_000));
+}
+
+function resolveSafetyJudge():
+  | { enabled: true; model?: string }
+  | undefined {
+  if (process.env["AGENT_SAFETY_JUDGE"] !== "1") return undefined;
+  const model = process.env["AGENT_SAFETY_JUDGE_MODEL"]?.trim();
+  return {
+    enabled: true,
+    ...(model ? { model } : {}),
+  };
 }
 
 export class AgentBridge {
@@ -24,6 +39,8 @@ export class AgentBridge {
       baseURL: "https://openrouter.ai/api/v1",
       maxToolRoundsPerTurn: 128,
       sendTimeoutMs: resolveSendTimeoutMs(),
+      safetyJudge: resolveSafetyJudge(),
+      workingStateEnabled: true,
       // World context: auto-gather date/time/OS/shell; optionally include location
       // Set AGENT_LOCATION="City, Country" in .env to include physical location
       worldContext: process.env["AGENT_LOCATION"]
@@ -33,6 +50,7 @@ export class AgentBridge {
         modelMaxTokens: 128_000,
         thresholdFraction: 0.8,
         inceptionMessages: INCEPTION_MESSAGES,
+        protocolDynamicBuilder: (names) => buildProtocolDynamicSuffix(names),
       },
     });
 

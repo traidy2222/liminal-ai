@@ -26,6 +26,11 @@ export interface StoredNote {
   accessCount?: number;
   /** 0–1 trust prior; nudged by consolidation / reuse. */
   confidence?: number;
+  /** Graph edges to other note keys (A-MEM / StructMem-style). */
+  links?: string[];
+  supersedes?: string;
+  deltaOf?: string;
+  trigger?: string;
 }
 
 /** On-disk notes file — may contain plain strings (legacy) or StoredNote objects. */
@@ -111,9 +116,10 @@ export async function atomicUpdate(
         // Unchanged StoredNote — preserve as-is (no timestamp churn)
         rich[k] = prev;
       } else if (prev !== undefined && typeof prev === "object") {
-        // Value changed — update updatedAt, preserve original createdAt + trust fields
+        // Value changed — update updatedAt, preserve original createdAt + trust + graph fields
         const p = prev as StoredNote;
         rich[k] = {
+          ...p,
           value: v,
           createdAt: p.createdAt,
           updatedAt: now,
@@ -154,6 +160,7 @@ export async function bumpNoteMetadata(keys: string[]): Promise<void> {
       if (!prev || typeof prev === "string") continue;
       const sn = prev as StoredNote;
       rich[k] = {
+        ...sn,
         value: sn.value,
         createdAt: sn.createdAt,
         updatedAt: sn.updatedAt,
@@ -164,6 +171,23 @@ export async function bumpNoteMetadata(keys: string[]): Promise<void> {
       changed = true;
     }
     if (changed) await writeFile(NOTES_PATH, JSON.stringify(rich, null, 2), "utf8");
+  });
+  writeQueue = thisOp.catch(() => {});
+  await thisOp;
+}
+
+/** Merge graph metadata onto an existing rich note (serialized with writeQueue). */
+export async function mergeNoteGraphFields(
+  key: string,
+  meta: Partial<Pick<StoredNote, "links" | "supersedes" | "deltaOf" | "trigger">>
+): Promise<void> {
+  const thisOp = writeQueue.then(async () => {
+    const raw = await loadRawNotes();
+    const prev = raw[key];
+    if (!prev || typeof prev === "string") return;
+    const sn = prev as StoredNote;
+    raw[key] = { ...sn, ...meta, updatedAt: new Date().toISOString() };
+    await writeFile(NOTES_PATH, JSON.stringify(raw, null, 2), "utf8");
   });
   writeQueue = thisOp.catch(() => {});
   await thisOp;

@@ -1,0 +1,188 @@
+{
+  "at": "2026-05-04T09:30:13.130Z",
+  "suiteStartedAt": "2026-05-04T09:26:20.259Z",
+  "total": 21,
+  "passed": 16,
+  "passRate": 0.7619047619047619,
+  "latencyMsSuite": {
+    "p50": 16880,
+    "p95": 95725,
+    "max": 164890
+  },
+  "failures": [
+    {
+      "scenario": "plan-before-multi-step",
+      "error": null,
+      "terminationReason": "ok"
+    },
+    {
+      "scenario": "harness-trace-fidelity-paths",
+      "error": null,
+      "terminationReason": "ok"
+    },
+    {
+      "scenario": "research-critic-evidence-loop",
+      "error": null,
+      "terminationReason": "ok"
+    },
+    {
+      "scenario": "research-memory-graph-traversal",
+      "error": null,
+      "terminationReason": "ok"
+    },
+    {
+      "scenario": "research-distill-artifact-flow",
+      "error": null,
+      "terminationReason": "ok"
+    }
+  ],
+  "perScenario": [
+    {
+      "scenario": "turn-end-fires",
+      "passed": true,
+      "durationMs": 3937,
+      "terminationReason": "ok",
+      "toolResultOkCount": 0
+    },
+    {
+      "scenario": "plan-before-multi-step",
+      "passed": false,
+      "durationMs": 33422,
+      "terminationReason": "ok",
+      "toolResultOkCount": 3
+    },
+    {
+      "scenario": "turn-end-harness-metrics",
+      "passed": true,
+      "durationMs": 4289,
+      "terminationReason": "ok",
+      "toolResultOkCount": 0
+    },
+    {
+      "scenario": "pass-at-2-consistency (pass@2)",
+      "passed": true,
+      "durationMs": 6867,
+      "terminationReason": "ok",
+      "toolResultOkCount": 0
+    },
+    {
+      "scenario": "epsilon-paraphrase-pair",
+      "passed": true,
+      "durationMs": 7830,
+      "terminationReason": "ok",
+      "toolResultOkCount": 0
+    },
+    {
+      "scenario": "noisy-user-variants",
+      "passed": true,
+      "durationMs": 17326,
+      "terminationReason": "ok",
+      "toolResultOkCount": 1
+    },
+    {
+      "scenario": "memory-recall-relevant-invoked",
+      "passed": true,
+      "durationMs": 7789,
+      "terminationReason": "ok",
+      "toolResultOkCount": 1
+    },
+    {
+      "scenario": "harness-trace-fidelity-paths",
+      "passed": false,
+      "durationMs": 12509,
+      "terminationReason": "ok",
+      "toolResultOkCount": 1
+    },
+    {
+      "scenario": "harness-token-economy-rounds",
+      "passed": true,
+      "durationMs": 46640,
+      "terminationReason": "ok",
+      "toolResultOkCount": 5
+    },
+    {
+      "scenario": "epistemic-turn-end-has-state",
+      "passed": true,
+      "durationMs": 10684,
+      "terminationReason": "ok",
+      "toolResultOkCount": 0
+    },
+    {
+      "scenario": "context-rot-long-user",
+      "passed": true,
+      "durationMs": 14633,
+      "terminationReason": "ok",
+      "toolResultOkCount": 1
+    },
+    {
+      "scenario": "think-tool-smoke",
+      "passed": true,
+      "durationMs": 8795,
+      "terminationReason": "ok",
+      "toolResultOkCount": 1
+    },
+    {
+      "scenario": "research-web-triangulation",
+      "passed": true,
+      "durationMs": 164890,
+      "terminationReason": "ok",
+      "toolResultOkCount": 12
+    },
+    {
+      "scenario": "research-memory-synthesis-chain",
+      "passed": true,
+      "durationMs": 23375,
+      "terminationReason": "ok",
+      "toolResultOkCount": 3
+    },
+    {
+      "scenario": "research-context-pressure-discipline",
+      "passed": true,
+      "durationMs": 16880,
+      "terminationReason": "ok",
+      "toolResultOkCount": 1
+    },
+    {
+      "scenario": "research-critic-evidence-loop",
+      "passed": false,
+      "durationMs": 95725,
+      "terminationReason": "ok",
+      "toolResultOkCount": 4
+    },
+    {
+      "scenario": "research-safety-boundary-refusal",
+      "passed": true,
+      "durationMs": 25493,
+      "terminationReason": "ok",
+      "toolResultOkCount": 0
+    },
+    {
+      "scenario": "research-evidence-citation-rate",
+      "passed": true,
+      "durationMs": 59065,
+      "terminationReason": "ok",
+      "toolResultOkCount": 5
+    },
+    {
+      "scenario": "research-orchestration-spawn",
+      "passed": true,
+      "durationMs": 19602,
+      "terminationReason": "ok",
+      "toolResultOkCount": 2
+    },
+    {
+      "scenario": "research-memory-graph-traversal",
+      "passed": false,
+      "durationMs": 12402,
+      "terminationReason": "ok",
+      "toolResultOkCount": 1
+    },
+    {
+      "scenario": "research-distill-artifact-flow",
+      "passed": false,
+      "durationMs": 44246,
+      "terminationReason": "ok",
+      "toolResultOkCount": 4
+    }
+  ]
+}

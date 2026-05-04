@@ -1,8 +1,8 @@
 /**
  * Git-native tools — safe git operations without the approval gate.
  *
- * read-only tools (git_status, git_diff, git_log, git_branch) have dangerLevel "safe"
- * and run without approval. git_commit is "cautious" — no approval but logged.
+ * read-only tools (git_status, git_diff, git_log) are "safe".
+ * git_branch / git_commit require approval (mutating). Destructive git via run_shell.
  * Destructive operations (push, reset --hard, rebase) intentionally omitted — use run_shell.
  */
 import { exec } from "node:child_process";
@@ -127,8 +127,8 @@ export const gitBranchTool = defineTool({
     "WHEN: To see what branches exist, or to create a new feature branch.\n" +
     "NOT WHEN: Deleting branches — use run_shell.\n" +
     "ARGS: name — branch name to create+switch to (omit to list branches); cwd — optional working directory.",
-  requiresApproval: false,
-  dangerLevel: "safe",
+  requiresApproval: true,
+  dangerLevel: "cautious",
   cacheable: false,
   parameters: {
     type: "object",
@@ -164,7 +164,7 @@ export const gitCommitTool = defineTool({
     "WHEN: After completing a logical unit of work, to save progress with a meaningful message.\n" +
     "NOT WHEN: Pushing to remote — use run_shell for git push.\n" +
     "ARGS: message — commit message; files — array of file paths to stage (required); cwd — optional working directory.",
-  requiresApproval: false,
+  requiresApproval: true,
   dangerLevel: "cautious",
   parameters: {
     type: "object",

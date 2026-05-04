@@ -7,13 +7,18 @@
  *
  * Notes are stored as standard Obsidian markdown files with YAML frontmatter.
  * Folder layout mirrors note type:
- *   Facts/  Entities/  Reflections/  Recipes/  Tasks/  Notes/
+ *   Facts/  Entities/  Reflections/  Recipes/  Tasks/  Notes/  Episodes/
  */
 
 import { readFile, writeFile, mkdir, readdir, unlink } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { join, extname } from "node:path";
-import { getAgentVaultRoot, getExplicitAgentVaultPathFromEnv } from "@liminal/core";
+import {
+  getAgentVaultRoot,
+  getExplicitAgentVaultPathFromEnv,
+  rankDocumentsForQuery,
+  type RankableDoc,
+} from "@liminal/core";
 
 // ─── Vault path (configurable) ───────────────────────────────────────────────
 
@@ -29,11 +34,19 @@ const TYPE_FOLDER: Record<NoteType, string> = {
   recipe:     "Recipes",
   task:       "Tasks",
   note:       "Notes",
+  episode:    "Episodes",
 };
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
-export type NoteType = "fact" | "entity" | "reflection" | "recipe" | "task" | "note";
+export type NoteType =
+  | "fact"
+  | "entity"
+  | "reflection"
+  | "recipe"
+  | "task"
+  | "note"
+  | "episode";
 
 export interface NoteFrontmatter {
   title: string;
@@ -230,35 +243,60 @@ export async function listAllNotes(opts?: {
   return opts?.limit ? notes.slice(0, opts.limit) : notes;
 }
 
-/** Full-text + metadata search across the vault. Returns matches with snippets. */
+/** Full-text + metadata search across the vault (BM25-lite + recency + type). */
 export async function searchVault(
   query: string,
   opts?: { type?: NoteType; tag?: string }
 ): Promise<Array<{ note: VaultNote; snippet: string }>> {
   const notes = await listAllNotes({ type: opts?.type, tag: opts?.tag });
-  const q = query.toLowerCase();
-  const results: Array<{ note: VaultNote; snippet: string; score: number }> = [];
+  const q = query.trim();
+  if (!q) return [];
 
-  for (const note of notes) {
-    const haystack = `${note.title} ${note.tags.join(" ")} ${note.body}`.toLowerCase();
-    if (!haystack.includes(q)) continue;
+  const docs: RankableDoc[] = notes.map((note) => ({
+    id: note.slug,
+    text: `${note.title} ${note.tags.join(" ")} ${note.body}`,
+    updatedAt: note.updated,
+    memoryType: note.type,
+  }));
 
-    const idx = haystack.indexOf(q);
+  const ranked = rankDocumentsForQuery(q, docs, { limit: 80 });
+  const bySlug = new Map(notes.map((n) => [n.slug, n] as const));
+
+  const buildSnippet = (note: VaultNote, needle: string): string => {
+    const hay = note.body.toLowerCase();
+    const low = needle.toLowerCase();
+    let idx = hay.indexOf(low);
+    if (idx < 0) {
+      const toks = low.split(/\s+/).filter((t) => t.length > 1);
+      for (const t of toks) {
+        idx = hay.indexOf(t);
+        if (idx >= 0) break;
+      }
+    }
+    if (idx < 0) idx = 0;
     const bodyStart = Math.max(0, idx - 60);
     const bodyEnd = Math.min(note.body.length, idx + 120);
-    const snippet = `...${note.body.slice(bodyStart, bodyEnd).replace(/\n/g, " ").trim()}...`;
+    return `...${note.body.slice(bodyStart, bodyEnd).replace(/\n/g, " ").trim()}...`;
+  };
 
-    const score =
-      (note.title.toLowerCase().includes(q) ? 10 : 0) +
-      note.tags.filter((t) => t.includes(q)).length * 3 +
-      1;
-
-    results.push({ note, snippet, score });
+  if (ranked.length === 0) {
+    const qLower = q.toLowerCase();
+    const fallback: Array<{ note: VaultNote; snippet: string }> = [];
+    for (const note of notes) {
+      const haystack = `${note.title} ${note.tags.join(" ")} ${note.body}`.toLowerCase();
+      if (!haystack.includes(qLower)) continue;
+      fallback.push({ note, snippet: buildSnippet(note, q) });
+    }
+    return fallback;
   }
 
-  return results
-    .sort((a, b) => b.score - a.score)
-    .map(({ note, snippet }) => ({ note, snippet }));
+  return ranked
+    .map((r) => {
+      const note = bySlug.get(r.id);
+      if (!note) return null;
+      return { note, snippet: buildSnippet(note, q) };
+    })
+    .filter((x): x is { note: VaultNote; snippet: string } => x !== null);
 }
 
 // ─── Wikilinks ────────────────────────────────────────────────────────────────

@@ -1,0 +1,107 @@
+{
+  "at": "2026-05-04T10:36:20.702Z",
+  "suiteStartedAt": "2026-05-04T10:28:13.696Z",
+  "total": 8,
+  "passed": 1,
+  "passRate": 0.125,
+  "latencyMsSuite": {
+    "p50": 110012,
+    "p95": 244598,
+    "max": 357990
+  },
+  "failures": [
+    {
+      "scenario": "long-horizon-plan-memory-code-critic (pass@2)",
+      "error": null,
+      "terminationReason": "timeout"
+    },
+    {
+      "scenario": "long-horizon-orchestration-merge-verify",
+      "error": null,
+      "terminationReason": "ok"
+    },
+    {
+      "scenario": "long-horizon-distill-artifact-continuation",
+      "error": null,
+      "terminationReason": "ok"
+    },
+    {
+      "scenario": "long-horizon-critic-suite-coverage",
+      "error": null,
+      "terminationReason": "timeout"
+    },
+    {
+      "scenario": "long-horizon-code-ops-loop",
+      "error": null,
+      "terminationReason": "ok"
+    },
+    {
+      "scenario": "long-horizon-ordered-protocol-compliance",
+      "error": null,
+      "terminationReason": "ok"
+    },
+    {
+      "scenario": "long-horizon-memory-continuity-across-rounds (pass@2)",
+      "error": null,
+      "terminationReason": "ok"
+    }
+  ],
+  "perScenario": [
+    {
+      "scenario": "long-horizon-plan-memory-code-critic (pass@2)",
+      "passed": false,
+      "durationMs": 357990,
+      "terminationReason": "timeout",
+      "toolResultOkCount": 20
+    },
+    {
+      "scenario": "long-horizon-orchestration-merge-verify",
+      "passed": false,
+      "durationMs": 104695,
+      "terminationReason": "ok",
+      "toolResultOkCount": 3
+    },
+    {
+      "scenario": "long-horizon-distill-artifact-continuation",
+      "passed": false,
+      "durationMs": 110012,
+      "terminationReason": "ok",
+      "toolResultOkCount": 3
+    },
+    {
+      "scenario": "long-horizon-context-budget-discipline",
+      "passed": true,
+      "durationMs": 137229,
+      "terminationReason": "ok",
+      "toolResultOkCount": 6
+    },
+    {
+      "scenario": "long-horizon-critic-suite-coverage",
+      "passed": false,
+      "durationMs": 244598,
+      "terminationReason": "timeout",
+      "toolResultOkCount": 13
+    },
+    {
+      "scenario": "long-horizon-code-ops-loop",
+      "passed": false,
+      "durationMs": 54816,
+      "terminationReason": "ok",
+      "toolResultOkCount": 2
+    },
+    {
+      "scenario": "long-horizon-ordered-protocol-compliance",
+      "passed": false,
+      "durationMs": 88087,
+      "terminationReason": "ok",
+      "toolResultOkCount": 4
+    },
+    {
+      "scenario": "long-horizon-memory-continuity-across-rounds (pass@2)",
+      "passed": false,
+      "durationMs": 132143,
+      "terminationReason": "ok",
+      "toolResultOkCount": 9
+    }
+  ]
+}

@@ -134,7 +134,8 @@ export const killProcessTool = defineTool({
     "WHEN: After you're done with a server, or before restarting it, or to clean up after a task.\n" +
     "NOT WHEN: The process has already exited — check list_processes first if unsure.\n" +
     "ARGS: pid — process ID from run_background; signal — optional kill signal (default: SIGTERM).",
-  requiresApproval: false,
+  requiresApproval: true,
+  dangerLevel: "cautious",
   parameters: {
     type: "object",
     properties: {

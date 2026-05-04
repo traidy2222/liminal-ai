@@ -4,6 +4,7 @@ import type { ToolRegistry } from "./registry.js";
 import type { TaskOrchestrator } from "./orchestrator.js";
 import { guardToolArgs } from "./tool_arg_guard.js";
 import type { SafetyJudge } from "./safety_judge.js";
+import { stableArgsJsonKey } from "./json_stable.js";
 
 // ─── Schema validation (#5 — Tool Invocation Reliability arXiv:2601.16280) ────
 
@@ -90,9 +91,14 @@ function validateArgs(
 export class ToolDispatcher {
   /**
    * Per-dispatcher result cache for cacheable tools (#6 — Tool Cache Agent).
-   * Keyed by `${toolName}:${argsJson}`, value includes result + expiry timestamp.
+   * Keyed by `${toolName}:${stableArgsKey}`, value includes result + expiry timestamp.
    */
   private readonly resultCache = new Map<string, { result: ToolResult; expiresAt: number }>();
+
+  /**
+   * In-flight coalescing for identical cacheable calls (stable args, no approval gate).
+   */
+  private readonly inflight = new Map<string, Promise<ToolResult>>();
 
   /**
    * True if think() was called in the most recently completed round.
@@ -176,10 +182,11 @@ export class ToolDispatcher {
       return result;
     }
 
-    // Result cache lookup (#6 — Tool Cache Agent, 1.69× speedup)
-    if (tool.cacheable) {
-      const cacheKey = `${name}:${argsJson}`;
-      const cached = this.resultCache.get(cacheKey);
+    const stableCacheKey = tool.cacheable ? `${name}:${stableArgsJsonKey(JSON.stringify(args))}` : "";
+
+    // Result cache lookup (#6 — Tool Cache Agent, stable key ignores JSON key order)
+    if (stableCacheKey) {
+      const cached = this.resultCache.get(stableCacheKey);
       if (cached && Date.now() < cached.expiresAt) {
         this.emitter.emit("tool_result", { callId, name, args, result: cached.result });
         return cached.result;
@@ -258,20 +265,53 @@ export class ToolDispatcher {
           }
           if (decision.decision === "edit") {
             args = decision.editedArgs;
+            const reErr = validateArgs(tool.parameters, args);
+            if (reErr) {
+              const result: ToolResult = {
+                ok: false,
+                error: `Edited args for "${name}" failed validation: ${reErr}`,
+              };
+              this.emitter.emit("tool_result", { callId, name, args, result });
+              return result;
+            }
+            const reGuard = guardToolArgs(name, args);
+            if (reGuard) {
+              const result: ToolResult = { ok: false, error: `[ARG GUARD] ${reGuard}` };
+              this.emitter.emit("tool_result", { callId, name, args, result });
+              return result;
+            }
           }
         }
       }
 
-      // Tool timing instrumentation (#7 Structured Event Log — AgentTrace arXiv:2602.10133)
-      const t0 = Date.now();
-      const result = await tool.handler(args);
-      this.emitter.emit("tool_timing", { callId, name, durationMs: Date.now() - t0 });
+      const runHandler = async (): Promise<ToolResult> => {
+        const t0 = Date.now();
+        const result = await tool.handler(args);
+        this.emitter.emit("tool_timing", { callId, name, durationMs: Date.now() - t0 });
+        return result;
+      };
+
+      const cacheKeyForRun = tool.cacheable ? `${name}:${stableArgsJsonKey(JSON.stringify(args))}` : "";
+
+      let result: ToolResult;
+      if (cacheKeyForRun && !tool.requiresApproval) {
+        let work = this.inflight.get(cacheKeyForRun);
+        if (!work) {
+          work = runHandler();
+          this.inflight.set(cacheKeyForRun, work);
+          work.finally(() => {
+            if (this.inflight.get(cacheKeyForRun) === work) this.inflight.delete(cacheKeyForRun);
+          });
+        }
+        result = await work;
+      } else {
+        result = await runHandler();
+      }
 
       // Store successful result in cache if cacheable (#6)
-      if (tool.cacheable && result.ok) {
-        const cacheKey = `${name}:${argsJson}`;
+      if (tool.cacheable && result.ok && cacheKeyForRun) {
         const ttl = tool.cacheTtlMs ?? 30_000;
-        this.resultCache.set(cacheKey, { result, expiresAt: Date.now() + ttl });
+        this.resultCache.set(cacheKeyForRun, { result, expiresAt: Date.now() + ttl });
       }
 
       this.emitter.emit("tool_result", { callId, name, args, result });

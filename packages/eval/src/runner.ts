@@ -3,11 +3,14 @@
  * (#10 Eval Infrastructure — ReliabilityBench arXiv:2601.06112, AgentNoiseBench arXiv:2602.11348)
  *
  * Scenarios use the real LLM (via OpenRouter) as integration tests unless mocked fully.
- * Set EVAL_MODEL env var to override the model (default: openai/gpt-4o-mini).
+ * Eval model is pinned to openrouter/owl-alpha for comparability across runs.
  * Set OPENROUTER_API_KEY env var to authenticate.
  */
+import { appendFile, mkdir, writeFile } from "node:fs/promises";
+import { join } from "node:path";
 import {
   AgentHarness,
+  appendGoldenEvalRecord,
   type AgentConfig,
   type ToolResult,
   type ToolHandler,
@@ -64,6 +67,14 @@ export interface Scenario {
    * Assertions must pass for every variant. Default: only userMessage.
    */
   paraphrases?: string[];
+  /** Temporarily set process.env keys for this scenario run (restored after). */
+  env?: Record<string, string>;
+  /**
+   * Tags for timeoutFor() when `timeoutMs` is unset: smoke, retrieval, web, slow, critic.
+   */
+  tags?: string[];
+  /** When true, do not append to runs.jsonl (caller aggregates, e.g. CLI --repeat). */
+  skipJsonSink?: boolean;
 }
 
 export interface ScenarioResult {
@@ -75,6 +86,12 @@ export interface ScenarioResult {
   error?: string;
   /** One result per ε-variant when paraphrases were used. */
   variantErrors?: string[];
+  /** From last `turn_end` harnessMetrics (when present). */
+  terminationReason?: string | null;
+  /** Count of successful tool_result events in the captured trace. */
+  toolResultOkCount?: number;
+  /** Distinct tool names with at least one tool_result. */
+  distinctToolsInvoked?: string[];
 }
 
 // ─── Trace helpers ────────────────────────────────────────────────────────────
@@ -127,6 +144,12 @@ export function traceGetHarnessMetrics(
   return (ev.payload as AgentEventMap["turn_end"]).harnessMetrics ?? null;
 }
 
+/** turn_end includes structured epistemicState.goal (harness uplift). */
+export function traceHasEpistemicState(trace: TraceEvent[]): boolean {
+  const m = traceGetHarnessMetrics(trace);
+  return !!(m && m.epistemicState && typeof m.epistemicState.goal === "string");
+}
+
 /**
  * Returns all tool_result payloads for the given tool name, in order.
  * Includes both successful and failed calls.
@@ -144,9 +167,101 @@ export function traceToolResults(
     .map((e) => e.payload as AgentEventMap["tool_result"]);
 }
 
+/** Concatenate streamed assistant text + tool outputs for substring checks. */
+export function traceCollectTextBlob(trace: TraceEvent[]): string {
+  const parts: string[] = [];
+  for (const e of trace) {
+    if (e.type === "tool_result") {
+      const p = e.payload as AgentEventMap["tool_result"];
+      if (p.result.ok && typeof p.result.output === "string") parts.push(p.result.output);
+      else if (!p.result.ok && typeof p.result.error === "string") parts.push(p.result.error);
+    }
+    if (e.type === "text") {
+      const p = e.payload as AgentEventMap["text"];
+      if (typeof p.delta === "string") parts.push(p.delta);
+    }
+  }
+  return parts.join("\n");
+}
+
+/**
+ * True if the harness recorded a normal turn end (always true after harness hardening
+ * when send() completes, including round_cap / timeout / error paths).
+ */
+export function traceTerminatedCleanly(trace: TraceEvent[]): boolean {
+  return traceHasTurnEnd(trace);
+}
+
+/** At least one successful tool_result for `toolName`. */
+export function traceToolRanOk(trace: TraceEvent[], toolName: string): boolean {
+  return traceToolResults(trace, toolName).some((r) => r.result.ok);
+}
+
+/** Any candidate substring appears in streamed text or tool outputs. */
+export function traceMentionsAny(trace: TraceEvent[], candidates: string[]): boolean {
+  const blob = traceCollectTextBlob(trace);
+  return candidates.some((c) => c.length > 0 && blob.includes(c));
+}
+
+/**
+ * Wall-clock timeout for harness.send() when `scenario.timeoutMs` is unset.
+ * Tags: smoke 45s, retrieval 90s, web|slow 240s, critic 180s; default 60s.
+ */
+export function timeoutFor(scenario: Scenario): number {
+  if (scenario.timeoutMs != null) return scenario.timeoutMs;
+  const tags = new Set(scenario.tags ?? []);
+  const tiers: number[] = [];
+  if (tags.has("smoke")) tiers.push(45_000);
+  if (tags.has("retrieval")) tiers.push(90_000);
+  if (tags.has("web") || tags.has("slow")) tiers.push(240_000);
+  if (tags.has("critic")) tiers.push(180_000);
+  return tiers.length > 0 ? Math.max(...tiers) : 60_000;
+}
+
+function telemetryFromTraces(traces: TraceEvent[][]): Pick<
+  ScenarioResult,
+  "terminationReason" | "toolResultOkCount" | "distinctToolsInvoked"
+> {
+  let terminationReason: string | null = null;
+  const tools = new Set<string>();
+  let toolResultOkCount = 0;
+  for (const trace of traces) {
+    for (const e of trace) {
+      if (e.type === "turn_end") {
+        const m = (e.payload as AgentEventMap["turn_end"]).harnessMetrics;
+        if (m?.terminationReason) terminationReason = m.terminationReason;
+      }
+    }
+    for (const e of trace) {
+      if (e.type === "tool_result") {
+        const p = e.payload as AgentEventMap["tool_result"];
+        tools.add(p.name);
+        if (p.result.ok) toolResultOkCount += 1;
+      }
+    }
+  }
+  return {
+    terminationReason,
+    toolResultOkCount,
+    distinctToolsInvoked: [...tools].sort(),
+  };
+}
+
 // ─── Runner ───────────────────────────────────────────────────────────────────
 
-const EVAL_MODEL = process.env["EVAL_MODEL"] ?? "openai/gpt-4o-mini";
+const OWL_EVAL_MODEL = "openrouter/owl-alpha";
+
+function resolveEvalModel(): string {
+  const requested = process.env["EVAL_MODEL"]?.trim();
+  if (requested && requested !== OWL_EVAL_MODEL) {
+    throw new Error(
+      `EVAL_MODEL is pinned for this repo. Requested "${requested}", but only "${OWL_EVAL_MODEL}" is allowed.`
+    );
+  }
+  return OWL_EVAL_MODEL;
+}
+
+export const EVAL_MODEL = resolveEvalModel();
 
 /** Build a minimal AgentConfig suitable for eval runs. */
 function makeEvalConfig(maxRounds: number, timeoutMs: number): AgentConfig {
@@ -176,8 +291,15 @@ async function runSingleHarnessSend(scenario: Scenario, userMessage: string): Pr
   const t0 = Date.now();
   const trace: TraceEvent[] = [];
 
+  const envPatches = scenario.env ?? {};
+  const prevEnv: Record<string, string | undefined> = {};
+  for (const [k, v] of Object.entries(envPatches)) {
+    prevEnv[k] = process.env[k];
+    process.env[k] = v;
+  }
+
   const harness = new AgentHarness(
-    makeEvalConfig(scenario.maxRounds ?? 20, scenario.timeoutMs ?? 60_000)
+    makeEvalConfig(scenario.maxRounds ?? 20, timeoutFor(scenario))
   );
   registerAllTools(harness.registry, harness.emitter, harness);
 
@@ -226,9 +348,90 @@ async function runSingleHarnessSend(scenario: Scenario, userMessage: string): Pr
   } catch (err) {
     runError = err instanceof Error ? err.message : String(err);
     trace.push({ type: "error", payload: { err: { message: runError } }, at: Date.now() });
+  } finally {
+    for (const [k, v] of Object.entries(prevEnv)) {
+      if (v === undefined) delete process.env[k];
+      else process.env[k] = v;
+    }
   }
 
   return { trace, runError, durationMs: Date.now() - t0 };
+}
+
+/** Serialize JSONL writes when scenarios run in parallel. */
+let evalJsonSinkChain: Promise<void> = Promise.resolve();
+
+/** Await all pending appendEvalRunJsonLine writes (e.g. before summary). */
+export async function flushEvalJsonSink(): Promise<void> {
+  await evalJsonSinkChain;
+}
+
+export async function appendEvalRunJsonLine(result: ScenarioResult): Promise<void> {
+  if (process.env["AGENT_EVAL_JSON_SINK"] !== "1") return;
+  evalJsonSinkChain = evalJsonSinkChain.then(async () => {
+    try {
+      const dir = join(process.cwd(), ".agent_eval_runs");
+      await mkdir(dir, { recursive: true });
+      const line =
+        JSON.stringify({
+          at: new Date().toISOString(),
+          scenario: result.scenario,
+          passed: result.passed,
+          durationMs: result.durationMs,
+          error: result.error ?? null,
+          assertions: result.assertions,
+          terminationReason: result.terminationReason ?? null,
+          toolResultOkCount: result.toolResultOkCount ?? null,
+          distinctToolsInvoked: result.distinctToolsInvoked ?? null,
+        }) + "\n";
+      await appendFile(join(dir, "runs.jsonl"), line, "utf8");
+    } catch {
+      /* optional */
+    }
+  });
+  return evalJsonSinkChain;
+}
+
+/** Aggregate JSON summary for a full eval suite (requires AGENT_EVAL_JSON_SINK=1). */
+export async function writeEvalRunSummary(
+  results: ScenarioResult[],
+  suiteStartedAt: number
+): Promise<void> {
+  if (process.env["AGENT_EVAL_JSON_SINK"] !== "1") return;
+  try {
+    const dir = join(process.cwd(), ".agent_eval_runs");
+    await mkdir(dir, { recursive: true });
+    const ts = new Date(suiteStartedAt).toISOString().replace(/[:.]/g, "-");
+    const latencies = results.map((r) => r.durationMs).sort((a, b) => a - b);
+    const p50 = latencies[Math.floor((latencies.length - 1) * 0.5)] ?? 0;
+    const p95 = latencies[Math.floor((latencies.length - 1) * 0.95)] ?? 0;
+    const passed = results.filter((r) => r.passed).length;
+    const payload = {
+      at: new Date().toISOString(),
+      suiteStartedAt: new Date(suiteStartedAt).toISOString(),
+      total: results.length,
+      passed,
+      passRate: results.length > 0 ? passed / results.length : 0,
+      latencyMsSuite: { p50, p95, max: latencies[latencies.length - 1] ?? 0 },
+      failures: results
+        .filter((r) => !r.passed)
+        .map((r) => ({
+          scenario: r.scenario,
+          error: r.error ?? null,
+          terminationReason: r.terminationReason ?? null,
+        })),
+      perScenario: results.map((r) => ({
+        scenario: r.scenario,
+        passed: r.passed,
+        durationMs: r.durationMs,
+        terminationReason: r.terminationReason ?? null,
+        toolResultOkCount: r.toolResultOkCount ?? null,
+      })),
+    };
+    await writeFile(join(dir, `summary-${ts}.json`), JSON.stringify(payload, null, 2), "utf8");
+  } catch {
+    /* optional */
+  }
 }
 
 function checkAssertions(
@@ -257,6 +460,7 @@ export async function runScenarioPassAtK(scenario: Scenario, k: number): Promise
       ...scenario,
       passAtK: undefined,
       paraphrases: undefined,
+      skipJsonSink: true,
     });
     runs.push(r);
   }
@@ -267,13 +471,19 @@ export async function runScenarioPassAtK(scenario: Scenario, k: number): Promise
       passed: a.passed,
     }))
   );
-  return {
+  const last = runs[runs.length - 1]!;
+  const out: ScenarioResult = {
     scenario: `${scenario.name} (pass@${k})`,
     passed,
     assertions,
     durationMs: runs.reduce((s, r) => s + r.durationMs, 0),
     error: runs.find((r) => r.error)?.error,
+    terminationReason: last.terminationReason ?? null,
+    toolResultOkCount: last.toolResultOkCount,
+    distinctToolsInvoked: last.distinctToolsInvoked,
   };
+  await appendEvalRunJsonLine(out);
+  return out;
 }
 
 export async function runScenario(scenario: Scenario): Promise<ScenarioResult> {
@@ -312,12 +522,27 @@ export async function runScenario(scenario: Scenario): Promise<ScenarioResult> {
     .map((vr, i) => (vr.runError ? `[variant ${i}] ${vr.runError}` : ""))
     .filter(Boolean);
 
-  return {
+  const telem = telemetryFromTraces(variantResults.map((vr) => vr.trace));
+  const out: ScenarioResult = {
     scenario: scenario.name,
     passed,
     assertions,
     durationMs: variantResults.reduce((s, vr) => s + vr.durationMs, 0),
     error: variantErrors[0],
     variantErrors: variantErrors.length ? variantErrors : undefined,
+    ...telem,
   };
+  if (!scenario.skipJsonSink) {
+    await appendEvalRunJsonLine(out);
+  }
+  if (out.passed && (!scenario.mocks || scenario.mocks.length === 0)) {
+    const firstMsg = variants[0]!;
+    void appendGoldenEvalRecord({
+      scenario: scenario.name,
+      prompt: firstMsg.slice(0, 4000),
+      distinctTools: out.distinctToolsInvoked ?? [],
+      durationMs: out.durationMs,
+    });
+  }
+  return out;
 }

@@ -25,6 +25,7 @@ import {
   titleToSlug,
   getVaultDir,
 } from "./vault_store.js";
+import { suggestWikilinkLine } from "./memory_autolink.js";
 
 // ─── vault_write ──────────────────────────────────────────────────────────────
 
@@ -36,7 +37,7 @@ export const vaultWriteTool = defineTool({
     "connects to other concepts. Use [[Wikilinks]] in the body to link related notes.\n" +
     "TYPES: fact (persistent constants/preferences), entity (project/file/person summaries),\n" +
     "reflection (failure lessons), recipe (successful patterns), task (work-in-progress\n" +
-    "state), note (general research or observations).\n" +
+    "state), note (general research or observations), episode (auto session chunks).\n" +
     "Prefer vault_write() over remember() for richer, linked, or longer content.\n" +
     "ARGS: title — note title (lookup key); content — markdown body with [[Wikilinks]];\n" +
     "type — note type; tags — optional string array.",
@@ -56,7 +57,7 @@ export const vaultWriteTool = defineTool({
       },
       type: {
         type: "string",
-        enum: ["fact", "entity", "reflection", "recipe", "task", "note"],
+        enum: ["fact", "entity", "reflection", "recipe", "task", "note", "episode"],
         description: "Note type — determines vault subfolder",
       },
       tags: {
@@ -70,17 +71,36 @@ export const vaultWriteTool = defineTool({
   },
   handler: async (args) => {
     try {
+      let body = args["content"] as string;
+      const title = args["title"] as string;
+      const typ = args["type"] as NoteType;
+
       const { slug, wasCreated } = await writeVaultNote({
-        title:   args["title"]   as string,
-        body:    args["content"] as string,
-        type:    args["type"]    as NoteType,
-        tags:    args["tags"]    as string[] | undefined,
+        title,
+        body,
+        type: typ,
+        tags: args["tags"] as string[] | undefined,
       });
+
+      if (process.env["AGENT_MEMORY_AUTOLINK"] === "1" && !body.includes("[[")) {
+        const all = await listAllNotes({ limit: 80 });
+        const candidateTitles = all.map((n) => n.title).filter((t) => t !== title);
+        const extra = await suggestWikilinkLine({
+          title,
+          body,
+          candidateTitles,
+        });
+        if (extra) {
+          body = body + extra;
+          await writeVaultNote({ title, body, type: typ, tags: args["tags"] as string[] | undefined });
+        }
+      }
+
       const action = wasCreated ? "Created" : "Updated";
       const vault = getVaultDir();
       return {
         ok: true,
-        output: `${action} vault note: "${args["title"] as string}" (${args["type"] as string})\nSlug: ${slug}\nVault: ${vault}`,
+        output: `${action} vault note: "${title}" (${typ})\nSlug: ${slug}\nVault: ${vault}`,
       };
     } catch (err) {
       return { ok: false, error: err instanceof Error ? err.message : String(err) };
@@ -156,7 +176,7 @@ export const vaultSearchTool = defineTool({
       query: { type: "string", description: "Search query (substring match across title, tags, body)" },
       type: {
         type: "string",
-        enum: ["fact", "entity", "reflection", "recipe", "task", "note"],
+        enum: ["fact", "entity", "reflection", "recipe", "task", "note", "episode"],
         description: "Optional: filter by note type",
       },
       tag: { type: "string", description: "Optional: filter by tag" },
@@ -202,7 +222,7 @@ export const vaultListTool = defineTool({
     properties: {
       type: {
         type: "string",
-        enum: ["fact", "entity", "reflection", "recipe", "task", "note"],
+        enum: ["fact", "entity", "reflection", "recipe", "task", "note", "episode"],
         description: "Filter by note type",
       },
       tag: { type: "string", description: "Filter by tag" },

@@ -51,5 +51,26 @@ export type {
   WorldContextOptions,
   PersonaConfig,
   TurnEndHarnessMetrics,
+  TurnEndTerminationReason,
+  EpistemicState,
   AgentSafetyJudgeOptions,
 } from "./types.js";
+export { getFastModelSlug, completeChatJson } from "./router.js";
+export type { JsonCompletionResult } from "./router.js";
+export { rewriteQueryForRecall } from "./query_rewrite.js";
+export type { RewriteQueryResult } from "./query_rewrite.js";
+export {
+  emptyEpistemicState,
+  mergeEpistemicState,
+  renderEpistemicStateBlock,
+} from "./epistemic_state.js";
+export {
+  distillToolOutput,
+  shouldDistillToolOutput,
+  writeArtifact,
+  readArtifactText,
+  artifactPathForHash,
+} from "./output_distill.js";
+export type { DistilledOutput } from "./output_distill.js";
+export { appendFailureLog, failureLogPath } from "./failure_log.js";
+export { appendGoldenEvalRecord } from "./golden_eval.js";

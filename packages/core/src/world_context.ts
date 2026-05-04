@@ -22,6 +22,9 @@ import { getAgentVaultRoot, getExplicitAgentVaultPathFromEnv } from "./vault_pat
 import { rankDocumentsForQuery, type RankableDoc } from "./memory_rank.js";
 import { cosineSimilarity, fetchEmbeddings } from "./embeddings.js";
 import { gatherRepoMapLines } from "./repo_map.js";
+import { formatFailureDigestForWorldContext } from "./failure_digest.js";
+import { formatGoldenEvalHints } from "./golden_eval.js";
+import { formatRecipeLibraryHints } from "./recipe_library.js";
 import { execFile as execFileCb } from "node:child_process";
 import { promisify } from "node:util";
 
@@ -1045,13 +1048,26 @@ export async function buildWorldContextMessage(options?: WorldContextOptions): P
 
   // ── Relevant memory (BM25 seed from first user message) ─────────────────────
   if (options?.firstUserMessage?.trim()) {
-    const primed = await withDeadline(
-      gatherRelevantPrimedLines(options.firstUserMessage.trim(), 6, 6),
-      TIMEOUT
-    );
+    const seed = options.firstUserMessage.trim();
+    const primed = await withDeadline(gatherRelevantPrimedLines(seed, 6, 6), TIMEOUT);
     if (primed && primed.length > 0) {
       lines.push(sep("Relevant memory"));
       for (const ln of primed) lines.push(ln);
+    }
+    const failureDig = await withDeadline(formatFailureDigestForWorldContext(), 400);
+    if (failureDig) {
+      lines.push(sep("Failure digest"));
+      lines.push(failureDig);
+    }
+    const golden = await withDeadline(formatGoldenEvalHints(seed), 400);
+    if (golden) {
+      lines.push(sep("Golden eval demos"));
+      lines.push(golden);
+    }
+    const recipeLib = await withDeadline(formatRecipeLibraryHints(seed), 400);
+    if (recipeLib) {
+      lines.push(sep("Recipe library"));
+      lines.push(recipeLib);
     }
   }
 
