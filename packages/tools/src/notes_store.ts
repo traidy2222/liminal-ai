@@ -21,6 +21,11 @@ export interface StoredNote {
   value: string;
   createdAt: string; // ISO 8601
   updatedAt: string; // ISO 8601
+  /** Last time this note was returned by recall / search (trust signal). */
+  lastAccessedAt?: string;
+  accessCount?: number;
+  /** 0–1 trust prior; nudged by consolidation / reuse. */
+  confidence?: number;
 }
 
 /** On-disk notes file — may contain plain strings (legacy) or StoredNote objects. */
@@ -106,16 +111,60 @@ export async function atomicUpdate(
         // Unchanged StoredNote — preserve as-is (no timestamp churn)
         rich[k] = prev;
       } else if (prev !== undefined && typeof prev === "object") {
-        // Value changed — update updatedAt, preserve original createdAt
-        rich[k] = { value: v, createdAt: prev.createdAt, updatedAt: now };
+        // Value changed — update updatedAt, preserve original createdAt + trust fields
+        const p = prev as StoredNote;
+        rich[k] = {
+          value: v,
+          createdAt: p.createdAt,
+          updatedAt: now,
+          accessCount: p.accessCount ?? 0,
+          confidence: p.confidence ?? 0.5,
+          ...(p.lastAccessedAt ? { lastAccessedAt: p.lastAccessedAt } : {}),
+        };
       } else {
         // New key or migrating from legacy plain string — create fresh timestamps
-        rich[k] = { value: v, createdAt: now, updatedAt: now };
+        rich[k] = {
+          value: v,
+          createdAt: now,
+          updatedAt: now,
+          accessCount: 0,
+          confidence: 0.5,
+        };
       }
     }
     await writeFile(NOTES_PATH, JSON.stringify(rich, null, 2), "utf8");
   });
   // Reset queue to resolved on error so one bad write doesn't block all future ones
+  writeQueue = thisOp.catch(() => {});
+  await thisOp;
+}
+
+/** Increment access counters for retrieved keys (serialized with other note writes). */
+export async function bumpNoteMetadata(keys: string[]): Promise<void> {
+  const uniq = [...new Set(keys)].filter(Boolean);
+  if (uniq.length === 0) return;
+
+  const thisOp = writeQueue.then(async () => {
+    const raw = await loadRawNotes();
+    const now = new Date().toISOString();
+    const rich: RawNotesStore = { ...raw };
+    let changed = false;
+    for (const k of uniq) {
+      const prev = raw[k];
+      if (!prev || typeof prev === "string") continue;
+      const sn = prev as StoredNote;
+      rich[k] = {
+        value: sn.value,
+        createdAt: sn.createdAt,
+        updatedAt: sn.updatedAt,
+        accessCount: (sn.accessCount ?? 0) + 1,
+        lastAccessedAt: now,
+        confidence: sn.confidence ?? 0.5,
+      };
+      changed = true;
+    }
+    if (changed) await writeFile(NOTES_PATH, JSON.stringify(rich, null, 2), "utf8");
+  });
   writeQueue = thisOp.catch(() => {});
   await thisOp;
 }

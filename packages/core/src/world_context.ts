@@ -19,6 +19,9 @@ import os from "node:os";
 import path from "node:path";
 import { readFile, access, readdir } from "node:fs/promises";
 import { getAgentVaultRoot, getExplicitAgentVaultPathFromEnv } from "./vault_path.js";
+import { rankDocumentsForQuery, type RankableDoc } from "./memory_rank.js";
+import { cosineSimilarity, fetchEmbeddings } from "./embeddings.js";
+import { gatherRepoMapLines } from "./repo_map.js";
 import { execFile as execFileCb } from "node:child_process";
 import { promisify } from "node:util";
 
@@ -33,6 +36,11 @@ export interface WorldContextOptions {
   notes?: string;
   /** Set true to skip injection entirely. Child agents always skip. */
   disabled?: boolean;
+  /**
+   * First user message of the session — used to surface BM25-ranked notes + vault
+   * snippets under "Relevant memory" (root harness only).
+   */
+  firstUserMessage?: string;
 }
 
 // ─── Internal result types ────────────────────────────────────────────────────
@@ -537,7 +545,15 @@ async function gatherCodeStyle(): Promise<CodeStyle | null> {
 
 // ─── 9a. Vault summary (Obsidian brain) ──────────────────────────────────────
 
-const VAULT_TYPE_FOLDERS = ["Facts", "Entities", "Reflections", "Recipes", "Tasks", "Notes"] as const;
+const VAULT_TYPE_FOLDERS = [
+  "Facts",
+  "Entities",
+  "Reflections",
+  "Recipes",
+  "Tasks",
+  "Notes",
+  "Episodes",
+] as const;
 
 interface VaultNoteSummary {
   title: string;
@@ -615,10 +631,21 @@ async function gatherVaultSummary(): Promise<VaultContextSummary | null> {
 
 // Notes stored at project root (matches packages/tools/src/notes_store.ts NOTES_PATH)
 const NOTES_FILE = path.join(process.cwd(), ".agent_notes.json");
+/** Same path as `packages/tools/src/memory_index.ts` — read-only in world context. */
+const MEMORY_EMBED_INDEX_PATH = path.join(process.cwd(), ".agent_memory.index.json");
 const PROJ_BASENAME = path.basename(process.cwd()).toLowerCase();
 
 /** Stored note format — may be plain string (legacy) or timestamped object (new). */
-type MaybeStoredNote = string | { value: string; createdAt?: string; updatedAt?: string };
+type MaybeStoredNote =
+  | string
+  | {
+      value: string;
+      createdAt?: string;
+      updatedAt?: string;
+      lastAccessedAt?: string;
+      accessCount?: number;
+      confidence?: number;
+    };
 
 function extractNoteValue(note: MaybeStoredNote): string {
   return typeof note === "string" ? note : (note.value ?? "");
@@ -703,6 +730,151 @@ async function gatherSessionMemory(): Promise<SessionMemory | null> {
     : null;
 }
 
+/** BM25-ranked lines for session priming from notes + vault (no embeddings). */
+async function gatherRelevantPrimedLines(
+  seed: string,
+  maxNotes: number,
+  maxVault: number
+): Promise<string[]> {
+  const trimmed = seed.trim();
+  if (trimmed.length < 2) return [];
+
+  const lines: string[] = [];
+
+  const rawNotes = await tryReadFile(NOTES_FILE);
+  if (rawNotes) {
+    try {
+      const parsed = JSON.parse(rawNotes) as Record<string, MaybeStoredNote>;
+      const docs: RankableDoc[] = [];
+      for (const [fullKey, rawEntry] of Object.entries(parsed)) {
+        const value = extractNoteValue(rawEntry);
+        const updatedAt = extractNoteUpdatedAt(rawEntry);
+        const colonIdx = fullKey.indexOf(":");
+        const memType = colonIdx > 0 ? fullKey.slice(0, colonIdx) : undefined;
+        const accessCount =
+          typeof rawEntry === "object" && rawEntry !== null && "accessCount" in rawEntry
+            ? (rawEntry as { accessCount?: number }).accessCount
+            : undefined;
+        const confidence =
+          typeof rawEntry === "object" && rawEntry !== null && "confidence" in rawEntry
+            ? (rawEntry as { confidence?: number }).confidence
+            : undefined;
+        docs.push({
+          id: fullKey,
+          text: `${fullKey} ${value}`,
+          updatedAt,
+          memoryType: memType,
+          accessCount,
+          confidence,
+        });
+      }
+      const bmRanked = rankDocumentsForQuery(trimmed, docs, { limit: Math.max(maxNotes * 4, 48) });
+      const bmMax = Math.max(...bmRanked.map((r) => r.score), 1e-9);
+      const bmById = new Map<string, number>();
+      for (const r of bmRanked) bmById.set(r.id, r.score / bmMax);
+
+      const embedModel = process.env["AGENT_EMBED_MODEL"]?.trim();
+      const apiKey = process.env["OPENROUTER_API_KEY"]?.trim();
+      const baseURL = (process.env["OPENROUTER_BASE_URL"] ?? "https://openrouter.ai/api/v1").replace(
+        /\/$/,
+        ""
+      );
+
+      let orderedNoteIds: string[] = bmRanked.slice(0, maxNotes).map((r) => r.id);
+
+      if (embedModel && apiKey) {
+        try {
+          const rawIdx = await tryReadFile(MEMORY_EMBED_INDEX_PATH);
+          if (rawIdx) {
+            const idx = JSON.parse(rawIdx) as { entries?: Record<string, { v?: number[] }> };
+            const { vectors } = await fetchEmbeddings({
+              apiKey,
+              baseURL,
+              model: embedModel,
+              inputs: [trimmed.slice(0, 8000)],
+            });
+            const qv = vectors[0];
+            if (qv?.length) {
+              const semById = new Map<string, number>();
+              let semMax = 1e-9;
+              for (const [key, row] of Object.entries(idx.entries ?? {})) {
+                const v = row?.v;
+                if (!v?.length || v.length !== qv.length) continue;
+                const s = cosineSimilarity(qv, v);
+                semById.set(key, s);
+                if (s > semMax) semMax = s;
+              }
+              const allIds = new Set<string>([...bmById.keys(), ...semById.keys()]);
+              const fused: Array<{ id: string; score: number }> = [];
+              for (const id of allIds) {
+                const bm = bmById.get(id) ?? 0;
+                const sem = (semById.get(id) ?? 0) / semMax;
+                const hybrid = 0.55 * sem + 0.35 * bm + 0.1 * Math.max(sem, bm);
+                if (hybrid < 0.02) continue;
+                fused.push({ id, score: hybrid });
+              }
+              fused.sort((a, b) => b.score - a.score);
+              if (fused.length > 0) {
+                orderedNoteIds = fused.slice(0, maxNotes).map((x) => x.id);
+              }
+            }
+          }
+        } catch {
+          /* embeddings optional — keep BM25 order */
+        }
+      }
+
+      for (const id of orderedNoteIds) {
+        const rawEntry = parsed[id];
+        const v = extractNoteValue(rawEntry ?? "");
+        lines.push(`[${id}] ${v.slice(0, 160)}${v.length > 160 ? "…" : ""}`);
+      }
+    } catch {
+      /* malformed JSON */
+    }
+  }
+
+  const vaultDir = getAgentVaultRoot();
+  const vaultDocs: RankableDoc[] = [];
+  for (const folder of VAULT_TYPE_FOLDERS) {
+    const dir = path.join(vaultDir, folder);
+    let files: string[];
+    try {
+      files = await readdir(dir);
+    } catch {
+      continue;
+    }
+    for (const file of files) {
+      if (!file.endsWith(".md")) continue;
+      try {
+        const fp = path.join(dir, file);
+        const rawMd = await readFile(fp, "utf8");
+        const fm = extractVaultFrontmatterFields(rawMd);
+        const body = rawMd.replace(/^---\r?\n[\s\S]*?\r?\n---\r?\n?/, "").trim();
+        const title = fm.title ?? file.slice(0, -3);
+        const typ = fm.type ?? folder.toLowerCase().slice(0, -1);
+        const text = `${title} ${typ} ${body.slice(0, 1500)}`;
+        vaultDocs.push({
+          id: title,
+          text,
+          updatedAt: fm.updated,
+          memoryType: typ,
+        });
+      } catch {
+        /* skip */
+      }
+    }
+  }
+  if (vaultDocs.length > 0) {
+    const vr = rankDocumentsForQuery(trimmed, vaultDocs, { limit: maxVault });
+    for (const r of vr) {
+      lines.push(`Vault: [[${r.id}]]`);
+    }
+  }
+
+  return lines;
+}
+
 // ─── Format helpers ───────────────────────────────────────────────────────────
 
 function sep(title: string) {
@@ -726,7 +898,7 @@ export async function buildWorldContextMessage(options?: WorldContextOptions): P
   const TIMEOUT = 1500;
 
   // Parallel gather — all results degrade to null on timeout/error
-  const [resources, project, git, tools, ports, style, memory, vault] = await Promise.all([
+  const [resources, project, git, tools, ports, style, memory, vault, repoMapLines] = await Promise.all([
     withDeadline(gatherResources(), TIMEOUT),
     withDeadline(gatherProject(),   TIMEOUT),
     withDeadline(gatherGit(),       TIMEOUT),
@@ -735,6 +907,7 @@ export async function buildWorldContextMessage(options?: WorldContextOptions): P
     withDeadline(gatherCodeStyle(), TIMEOUT),
     withDeadline(gatherSessionMemory(), TIMEOUT),
     withDeadline(gatherVaultSummary(), TIMEOUT),
+    withDeadline(gatherRepoMapLines({ scope: "packages" }), TIMEOUT),
   ]);
 
   // ── Core system ──────────────────────────────────────────────────────────────
@@ -784,6 +957,11 @@ export async function buildWorldContextMessage(options?: WorldContextOptions): P
     lines.push(`${project.name}  ·  ${typeTag}  ·  ${project.packageManager}`);
     if (project.scripts.length > 0) lines.push(`Scripts:  ${project.scripts.join("  ·  ")}`);
     if (project.frameworks.length > 0) lines.push(`Deps:     ${project.frameworks.join("  ·  ")}`);
+  }
+
+  if (repoMapLines && repoMapLines.length > 0) {
+    lines.push(sep("Repo map"));
+    for (const ln of repoMapLines.slice(0, 80)) lines.push(ln);
   }
 
   // ── Git ──────────────────────────────────────────────────────────────────────
@@ -862,6 +1040,18 @@ export async function buildWorldContextMessage(options?: WorldContextOptions): P
       lines.push(`Successful patterns (${memory.recipes.length}):`);
       for (const { value } of memory.recipes)
         lines.push(`  - ${value}`);
+    }
+  }
+
+  // ── Relevant memory (BM25 seed from first user message) ─────────────────────
+  if (options?.firstUserMessage?.trim()) {
+    const primed = await withDeadline(
+      gatherRelevantPrimedLines(options.firstUserMessage.trim(), 6, 6),
+      TIMEOUT
+    );
+    if (primed && primed.length > 0) {
+      lines.push(sep("Relevant memory"));
+      for (const ln of primed) lines.push(ln);
     }
   }
 

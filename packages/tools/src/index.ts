@@ -10,6 +10,9 @@ import { rememberTool, recallTool, recallByTypeTool, forgetTool, forgetTypeTool,
 import { thinkTool } from "./think.js";
 import { planTool } from "./plan.js";
 import { searchMemoryTool } from "./search_memory.js";
+import { recallRelevantTool } from "./recall_relevant.js";
+import { repoMapTool } from "./repo_map.js";
+import { memoryConsolidateTool } from "./memory_consolidate.js";
 import { createOrchestrationTools } from "./orchestration.js";
 import {
   runBackgroundTool,
@@ -53,6 +56,7 @@ export function registerAllTools(
   registry.register(writeFileTool);
   registry.register(patchFileTool);
   registry.register(listDirTool);
+  registry.register(repoMapTool);
   registry.register(createRunShellTool(emitter));
   registry.register(runBackgroundTool);
   registry.register(killProcessTool);
@@ -75,6 +79,8 @@ export function registerAllTools(
   registry.register(forgetTypeTool);
   registry.register(memoryStatsTool);
   registry.register(searchMemoryTool);
+  registry.register(recallRelevantTool);
+  registry.register(memoryConsolidateTool);
   registry.register(suggestImprovementTool);
   registry.register(viewInsightsTool);
   // Obsidian brain
@@ -110,11 +116,18 @@ export function registerAllTools(
     // Harness-scoped multimodal + extraction tools
     registry.register(createUploadImageTool(harness));
     registry.register(createExtractStructuredTool(harness));
+
+    harness.getContext().refreshProtocolDynamic(harness.registry.getToolNames());
   }
 }
 
 export { createAskUserTool } from "./ask_user.js";
-export { INCEPTION_MESSAGES, buildInceptionMessages } from "./systemPrompt.js";
+export {
+  INCEPTION_MESSAGES,
+  buildInceptionMessages,
+  PROTOCOL_CORE,
+  buildProtocolDynamicSuffix,
+} from "./systemPrompt.js";
 export { buildPersonaBlock, buildRichPersonaBlock } from "./persona_presets.js";
 export type { PersonaProfile, SpeechStyle, PersonaTone } from "./persona_presets.js";
 export { createOrchestrationTools } from "./orchestration.js";

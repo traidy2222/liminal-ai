@@ -120,6 +120,10 @@ export class ContextManager {
    * Used by set_persona tool to hot-swap the identity block without rebuilding the harness.
    */
   private personaBlock?: string;
+  /** When set, replaces config.inceptionMessages entirely (e.g. child agents after tools registered). */
+  private inceptionOverride?: Message[];
+  /** Appended to inception protocol (message[1]) from `protocolDynamicBuilder`. */
+  private protocolDynamicSuffix = "";
   /** ZipAct-style bounded summary injected after inception (not stored in conversation). */
   private workingStateBlock = "";
   /** ACON-style runtime notes appended to compression policy in summary blocks. */
@@ -129,9 +133,45 @@ export class ContextManager {
     this.config = config;
   }
 
+  /** Recompute protocol suffix from current tool names (root + child registries). */
+  refreshProtocolDynamic(toolNames: string[]): void {
+    const builder = this.config.protocolDynamicBuilder;
+    this.protocolDynamicSuffix = builder ? builder(toolNames) : "";
+  }
+
+  /** Replace inception messages (used for child harness after scoped tools are registered). */
+  setInceptionOverride(messages: Message[] | undefined): void {
+    this.inceptionOverride = messages;
+  }
+
+  /**
+   * Token-aware hints for recall depth and round discipline (domain-agnostic).
+   */
+  getContextBudgetAdvice(): {
+    usageFraction: number;
+    headroomFraction: number;
+    recommendedRecallK: number;
+    suggestedMaxExtraRounds: number;
+  } {
+    const snap = this.computeSnapshot(this.buildMessages());
+    const headroom = Math.max(0, 1 - snap.usageFraction);
+    const recommendedRecallK = Math.max(3, Math.min(12, Math.floor(headroom * 24)));
+    const suggestedMaxExtraRounds = snap.usageFraction >= 0.75 ? 4 : snap.usageFraction >= 0.55 ? 8 : 16;
+    return {
+      usageFraction: snap.usageFraction,
+      headroomFraction: headroom,
+      recommendedRecallK,
+      suggestedMaxExtraRounds,
+    };
+  }
+
   /** Replace the injected [WORKING STATE] block (empty string clears). */
   setWorkingState(block: string): void {
     this.workingStateBlock = block;
+  }
+
+  getWorkingStateBlock(): string {
+    return this.workingStateBlock;
   }
 
   /** Append a line to compression policy (ACON-style guideline evolution via tools). */
@@ -168,11 +208,31 @@ export class ContextManager {
    * with the active persona block override (if any).
    */
   getEffectiveInception(): Message[] {
-    const base = this.config.inceptionMessages;
-    if (!this.personaBlock) return base;
-    const [first, ...rest] = base;
-    if (!first) return base;
-    return [{ ...first, content: this.personaBlock } as Message, ...rest];
+    const base = this.inceptionOverride ?? this.config.inceptionMessages;
+    const [first, second, ...tail] = base;
+    if (this.inceptionOverride) {
+      const firstOut: Message =
+        this.personaBlock && first
+          ? ({ ...first, content: this.personaBlock } as Message)
+          : (first as Message);
+      return firstOut ? [firstOut, ...base.slice(1)] : base;
+    }
+    const firstOut: Message =
+      this.personaBlock && first
+        ? ({ ...first, content: this.personaBlock } as Message)
+        : (first as Message);
+    if (!second || second.role !== "system") {
+      return firstOut ? [firstOut, ...base.slice(1)] : base;
+    }
+    const protocolBody =
+      typeof second.content === "string"
+        ? second.content +
+          (this.protocolDynamicSuffix.trim()
+            ? `\n\n${this.protocolDynamicSuffix.trim()}`
+            : "")
+        : second.content;
+    const secondOut = { ...second, content: protocolBody } as Message;
+    return [firstOut, secondOut, ...tail] as Message[];
   }
 
   append(message: Message): void {
@@ -429,5 +489,7 @@ export class ContextManager {
     this.conversation = [];
     this.workingStateBlock = "";
     this.compressionNotes = [];
+    this.protocolDynamicSuffix = "";
+    this.inceptionOverride = undefined;
   }
 }

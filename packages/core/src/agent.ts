@@ -12,6 +12,7 @@ import { AgentEmitter } from "./events.js";
 import { ContextManager } from "./context.js";
 import { ToolRegistry } from "./registry.js";
 import { ToolDispatcher } from "./dispatcher.js";
+import { SafetyJudge } from "./safety_judge.js";
 import { StreamAccumulator } from "./streaming.js";
 import { TaskOrchestrator } from "./orchestrator.js";
 import { buildWorldContextMessage } from "./world_context.js";
@@ -50,6 +51,14 @@ function isRetryable(err: unknown): boolean {
     err.message.toLowerCase().includes("provider")
   )
     return true;
+  return false;
+}
+
+/** Heuristic: assistant answer likely cites repo facts worth double-checking. */
+function shouldRunCriticPass(assistantText: string): boolean {
+  if (assistantText.length < 80) return false;
+  if (assistantText.includes("```")) return true;
+  if (/packages[/\\]|[/\\]src[/\\]|\.\/[a-z]/i.test(assistantText)) return true;
   return false;
 }
 
@@ -232,6 +241,13 @@ export class AgentHarness {
   /** True once world context has been injected (only happens on the first send() of a root agent). */
   private worldContextInjected = false;
 
+  /** Paths successfully read_file'd this send (working state). */
+  private filesReadThisTurn: string[] = [];
+  /** Last few tool outcome one-liners for working state. */
+  private recentToolOutcomeLines: string[] = [];
+  private proactiveCompressedThisSend = false;
+  private criticConsumedThisSend = false;
+
   /** Active persona. Set via setPersona(); defaults to config.persona or unnamed default. */
   private currentPersona?: PersonaConfig;
 
@@ -309,13 +325,6 @@ export class AgentHarness {
     this.orchestrator =
       config.orchestrator ?? new TaskOrchestrator();
 
-    this.dispatcher = new ToolDispatcher(
-      this.registry,
-      this.emitter,
-      this.orchestrator,
-      this.taskId
-    );
-
     this.client = new OpenAI({
       apiKey: config.openRouterApiKey,
       baseURL: config.baseURL,
@@ -325,6 +334,24 @@ export class AgentHarness {
         "X-Title": "Liminal",
       },
     });
+
+    const safetyJudge =
+      config.safetyJudge?.enabled === true
+        ? new SafetyJudge(this.client, {
+            model: config.safetyJudge.model ?? config.model,
+            timeoutMs: config.safetyJudge.timeoutMs,
+            cacheTtlMs: config.safetyJudge.cacheTtlMs,
+            failOpen: config.safetyJudge.failOpen,
+          })
+        : undefined;
+
+    this.dispatcher = new ToolDispatcher(
+      this.registry,
+      this.emitter,
+      this.orchestrator,
+      this.taskId,
+      safetyJudge
+    );
 
     // Register self in orchestrator
     this.orchestrator.register({
@@ -350,6 +377,10 @@ export class AgentHarness {
     this.contextAlertFired85 = false;
     this.lastParallelToolBatchSize = 0;
     this.sendStartTime = Date.now();
+    this.filesReadThisTurn = [];
+    this.recentToolOutcomeLines = [];
+    this.proactiveCompressedThisSend = false;
+    this.criticConsumedThisSend = false;
 
     // Hard wall-clock timeout (#3 — ReliabilityBench arXiv:2601.06112)
     // Default 10m: multi-round exploration (many read_file / list_dir) often exceeds 2m wall time.
@@ -367,7 +398,10 @@ export class AgentHarness {
       // Child agents (depth > 0) skip this — they inherit context from their parent.
       if (!this.worldContextInjected && this.agentDepth === 0) {
         this.worldContextInjected = true;
-        const worldCtx = await buildWorldContextMessage(this.config.worldContext);
+        const worldCtx = await buildWorldContextMessage({
+          ...this.config.worldContext,
+          firstUserMessage: userMessage,
+        });
         if (worldCtx) {
           this.context.append({ role: "user", content: worldCtx });
           // Brief acknowledgement so the model registers it as processed context,
@@ -456,18 +490,21 @@ export class AgentHarness {
       childRegistry.register(tool);
     }
 
-    // ── Build child inception messages ──────────────────────────────────────
-    // Use getEffectiveInception() so children inherit any active persona override
-    const childInceptionMessages: Message[] = [
-      ...this.context.getEffectiveInception(),
-      ...(childConfig.additionalContext
-        ? [
-            {
-              role: "user" as const,
-              content: `[SUBTASK CONTEXT] ${childConfig.additionalContext}`,
-            },
-          ]
-        : []),
+    const personaMsg = this.context.getEffectiveInception()[0]!;
+    const coreRaw = this.config.context.inceptionMessages[1];
+    const coreStr = typeof coreRaw?.content === "string" ? coreRaw.content : "";
+    const subtaskTail: Message[] = childConfig.additionalContext
+      ? [
+          {
+            role: "user" as const,
+            content: `[SUBTASK CONTEXT] ${childConfig.additionalContext}`,
+          },
+        ]
+      : [];
+    const childInceptionBase: Message[] = [
+      personaMsg,
+      { role: "system" as const, content: coreStr },
+      ...subtaskTail,
     ];
 
     // ── Create child harness ────────────────────────────────────────────────
@@ -481,7 +518,8 @@ export class AgentHarness {
       maxConcurrentAgents: this.maxConcurrentAgents,
       context: {
         ...this.config.context,
-        inceptionMessages: childInceptionMessages,
+        inceptionMessages: childInceptionBase,
+        protocolDynamicBuilder: undefined,
       },
       maxToolRoundsPerTurn:
         childConfig.maxRounds ?? this.config.maxToolRoundsPerTurn,
@@ -501,6 +539,17 @@ export class AgentHarness {
     if (depthAllowsOrchestration) {
       this.onChildCreated?.(childHarness);
     }
+
+    const dyn =
+      this.config.context.protocolDynamicBuilder?.(childHarness.registry.getToolNames()) ?? "";
+    childHarness.getContext().setInceptionOverride([
+      personaMsg,
+      {
+        role: "system",
+        content: coreStr + (dyn.trim() ? `\n\n${dyn.trim()}` : ""),
+      },
+      ...subtaskTail,
+    ]);
 
     // ── Register in orchestrator ────────────────────────────────────────────
     this.orchestrator.register({
@@ -579,6 +628,85 @@ export class AgentHarness {
     return { taskId: childId, promise };
   }
 
+  /** Episodic vault chunk (Obsidian) — one note per completed send when vault path is set. */
+  private async maybePersistEpisodeTurn(): Promise<void> {
+    if (process.env["AGENT_MEMORY_EPISODE"] === "0") return;
+    if (this.agentDepth > 0) return;
+    if (!process.env["AGENT_VAULT_PATH"]?.trim()) return;
+    if (!this.registry.has("vault_write")) return;
+    const title = `Episode ${new Date().toISOString().replace(/[:.]/g, "-")}`;
+    const body =
+      `## Session turn\n\n` +
+      `- User (truncated): ${this.lastUserMessage.slice(0, 1200)}\n\n` +
+      `- Distinct tools: ${[...new Set(this.toolsUsedThisTurn)].join(", ") || "(none)"}\n\n` +
+      `- ReAct rounds this send: ${this.roundCount}\n`;
+    try {
+      await this.dispatcher.directCall("vault_write", {
+        title,
+        content: body,
+        type: "episode",
+        tags: ["auto-harness"],
+      });
+    } catch {
+      /* optional */
+    }
+  }
+
+  /** MemReader-style extraction into typed remember() entries (env-gated). */
+  private async maybeAutoExtractMemories(): Promise<void> {
+    if (process.env["AGENT_MEMORY_AUTO_EXTRACT"] !== "1") return;
+    if (this.agentDepth > 0) return;
+    if (!this.registry.has("remember")) return;
+    if (this.toolsUsedThisTurn.length === 0) return;
+
+    const payload =
+      `User:\n${this.lastUserMessage.slice(0, 2000)}\n\n` +
+      `Tools used this send:\n${this.toolsUsedThisTurn.join(", ")}\n\n` +
+      `Last assistant:\n${(this.context.getLastAssistantMessage() ?? "").slice(0, 3000)}`;
+
+    try {
+      const res = await this.client.chat.completions.create({
+        model: this.config.model,
+        temperature: 0,
+        max_tokens: 400,
+        messages: [
+          {
+            role: "system",
+            content:
+              "Extract 0-5 durable memories for an agent JSON note store. Reply JSON only: " +
+              '{"memories":[{"type":"fact|entity|experience","key":"short_snake_case","value":"text"}]}. ' +
+              "Omit memories that are trivial or already implied. Empty array if nothing worth persisting.",
+          },
+          { role: "user", content: payload },
+        ],
+      });
+      const text = res.choices[0]?.message?.content?.trim() ?? "{}";
+      const m = text.match(/\{[\s\S]*\}/);
+      if (!m) return;
+      const parsed = JSON.parse(m[0]) as {
+        memories?: Array<{ type?: string; key?: string; value?: string }>;
+      };
+      const mems = parsed.memories ?? [];
+      const allowed = new Set(["fact", "entity", "experience", "belief", "reflection", "recipe"]);
+      for (const item of mems.slice(0, 5)) {
+        if (!item?.key || !item?.value) continue;
+        const typ = item.type;
+        if (typ && !allowed.has(typ)) continue;
+        try {
+          await this.dispatcher.directCall("remember", {
+            key: item.key.slice(0, 80),
+            value: item.value.slice(0, 4000),
+            ...(typ ? { type: typ } : {}),
+          });
+        } catch {
+          /* duplicate / schema */
+        }
+      }
+    } catch {
+      /* ignore */
+    }
+  }
+
   private async runReActLoop(round = 0): Promise<void> {
     // Check abort signal (set when orchestrator cancels this task)
     if (this.abortSignal?.aborted) return;
@@ -593,6 +721,8 @@ export class AgentHarness {
     }
 
     this.roundCount = round + 1;
+
+    this.context.refreshProtocolDynamic(this.registry.getToolNames());
 
     // Context pressure alerts (#9): fire once per threshold per turn
     const snapBefore = this.context.snapshot();
@@ -609,6 +739,51 @@ export class AgentHarness {
         role: "user",
         content: `[CONTEXT BUDGET: ${pctBefore}% used — consider calling compress_context() before continuing long tasks.]`,
       });
+    }
+
+    if (
+      !this.proactiveCompressedThisSend &&
+      pctBefore >= 65 &&
+      this.roundCount >= 2
+    ) {
+      const anchor = `Proactive compress at ~${pctBefore}% — recent tools: ${[
+        ...new Set(this.toolsUsedThisTurn),
+      ]
+        .slice(-10)
+        .join(", ")}`;
+      this.context.forceCompress(anchor);
+      this.proactiveCompressedThisSend = true;
+    }
+
+    const recallEvery = parseInt(process.env["AGENT_RECALL_EVERY_N"] ?? "0", 10);
+    if (
+      recallEvery > 0 &&
+      round > 0 &&
+      round % recallEvery === 0 &&
+      this.agentDepth === 0 &&
+      this.registry.has("recall_relevant")
+    ) {
+      try {
+        const seed = this.lastUserMessage.trim().slice(0, 400);
+        if (seed.length >= 8) {
+          const r = await this.dispatcher.directCall("recall_relevant", {
+            query: seed,
+            k: Math.min(
+              8,
+              Math.max(3, this.context.getContextBudgetAdvice().recommendedRecallK)
+            ),
+            scope: "both",
+          });
+          if (r.ok && typeof r.output === "string" && r.output.trim().length > 20) {
+            this.context.appendMessage({
+              role: "user",
+              content: `[Relevant memory — mid-turn recall]\n${r.output.slice(0, 3500)}`,
+            });
+          }
+        }
+      } catch {
+        /* optional */
+      }
     }
 
     const messages = this.context.buildMessages();
@@ -672,17 +847,49 @@ export class AgentHarness {
       }
       this.lastParallelToolBatchSize = toolCalls.length;
 
-      if (this.config.workingStateEnabled) {
+      for (let i = 0; i < toolCalls.length; i++) {
+        const tc = toolCalls[i]!;
+        const r = results[i]!;
+        const line = `${tc.name}:${r.ok ? "ok" : "fail"}`;
+        this.recentToolOutcomeLines.push(line.slice(0, 160));
+        if (this.recentToolOutcomeLines.length > 3) this.recentToolOutcomeLines.shift();
+        if (r.ok && tc.name === "read_file") {
+          try {
+            const a = JSON.parse(tc.argsJson) as { path?: string };
+            if (a.path) {
+              this.filesReadThisTurn.push(a.path);
+              if (this.filesReadThisTurn.length > 24) this.filesReadThisTurn.shift();
+            }
+          } catch {
+            /* ignore */
+          }
+        }
+      }
+
+      if (this.config.workingStateEnabled !== false) {
         const outcomes = toolCalls
           .map((tc, i) => {
             const r = results[i]!;
             return `${tc.name}:${r.ok ? "ok" : "fail"}`;
           })
           .join("; ");
+        const budget = this.context.getContextBudgetAdvice();
+        const caps = this.lastUserMessage.match(/\b[A-Z][a-z]{4,}[a-zA-Z]*\b/g);
+        const openHint = caps
+          ? [...new Set(caps)].slice(0, 8).join(", ")
+          : "(none heuristically extracted)";
+        const filesHint =
+          this.filesReadThisTurn.length > 0
+            ? this.filesReadThisTurn.slice(-8).join(" | ")
+            : "(none yet)";
         this.context.setWorkingState(
           `GOAL (truncated): ${this.lastUserMessage.slice(0, 240)}${this.lastUserMessage.length > 240 ? "…" : ""}\n` +
+            `CONTEXT: ~${Math.round(budget.usageFraction * 100)}% full · suggest recall_k≤${budget.recommendedRecallK} · spare rounds≈${budget.suggestedMaxExtraRounds}\n` +
             `LAST PARALLEL BATCH (${toolCalls.length}): ${batchToolNames.join(", ")}\n` +
             `OUTCOMES: ${outcomes}\n` +
+            `RECENT TOOL LINES: ${this.recentToolOutcomeLines.join(" · ")}\n` +
+            `FILES READ (recent): ${filesHint}\n` +
+            `OPEN ENTITIES (heuristic): ${openHint}\n` +
             `SPAWN_AGENT CALLS THIS SEND: ${this.toolsUsedThisTurn.filter((n) => n === "spawn_agent").length}`
         );
       }
@@ -756,6 +963,43 @@ export class AgentHarness {
 
       await this.runReActLoop(round + 1);
     } else {
+      let assistantText = "";
+      if (typeof assistantMessage.content === "string") {
+        assistantText = assistantMessage.content;
+      }
+      if (
+        process.env["AGENT_CRITIC"] === "1" &&
+        !this.criticConsumedThisSend &&
+        this.roundCount >= 3 &&
+        this.agentDepth === 0 &&
+        this.registry.has("verify_result") &&
+        shouldRunCriticPass(assistantText)
+      ) {
+        this.criticConsumedThisSend = true;
+        try {
+          const vr = await this.dispatcher.directCall("verify_result", {
+            goal: this.lastUserMessage.slice(0, 2000),
+            result: assistantText.slice(0, 12_000),
+          });
+          if (
+            vr.ok &&
+            typeof vr.output === "string" &&
+            (/ISSUES\s+FOUND|✗\s*ISSUES/i.test(vr.output) || /✗/.test(vr.output))
+          ) {
+            this.context.appendMessage({
+              role: "user",
+              content: `[CRITIC NOTES]\n${vr.output.slice(0, 4000)}`,
+            });
+            await this.runReActLoop(round);
+            return;
+          }
+        } catch {
+          /* optional */
+        }
+      }
+
+      await this.maybePersistEpisodeTurn();
+      await this.maybeAutoExtractMemories();
       const snapshot = this.context.snapshot();
       this.emitter.emit("turn_end", {
         contextSnapshot: snapshot,
@@ -765,6 +1009,7 @@ export class AgentHarness {
           spawnAgentCallsThisSend: this.toolsUsedThisTurn.filter((n) => n === "spawn_agent")
             .length,
           parallelToolCallsLastBatch: this.lastParallelToolBatchSize,
+          workingStatePreview: this.context.getWorkingStateBlock().trim().slice(0, 400),
         },
       });
     }

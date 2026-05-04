@@ -3,6 +3,7 @@ import type { AgentEmitter } from "./events.js";
 import type { ToolRegistry } from "./registry.js";
 import type { TaskOrchestrator } from "./orchestrator.js";
 import { guardToolArgs } from "./tool_arg_guard.js";
+import type { SafetyJudge } from "./safety_judge.js";
 
 // ─── Schema validation (#5 — Tool Invocation Reliability arXiv:2601.16280) ────
 
@@ -104,7 +105,8 @@ export class ToolDispatcher {
     private readonly registry: ToolRegistry,
     private readonly emitter: AgentEmitter,
     private readonly orchestrator?: TaskOrchestrator,
-    private readonly taskId?: string
+    private readonly taskId?: string,
+    private readonly safetyJudge?: SafetyJudge
   ) {}
 
   /**
@@ -226,24 +228,37 @@ export class ToolDispatcher {
 
     try {
       if (tool.requiresApproval) {
-        const decision = await this.requestApproval(callId, name, args);
-        // Emit approval decision for audit trail (#7 Structured Event Log)
-        this.emitter.emit("approval_decision", {
-          callId,
-          name,
-          decision: decision.decision,
-          ...(decision.decision === "edit" && { editedArgs: decision.editedArgs }),
-        });
-        if (decision.decision === "reject") {
-          const result: ToolResult = {
-            ok: false,
-            error: `Tool "${name}" rejected by user: ${decision.reason}`,
-          };
-          this.emitter.emit("tool_result", { callId, name, args, result });
-          return result;
+        let skipHumanApproval = false;
+        if (this.safetyJudge) {
+          const { verdict, source } = await this.safetyJudge.classify(
+            name,
+            args,
+            batchToolNames
+          );
+          this.emitter.emit("safety_check", { callId, name, source, verdict });
+          skipHumanApproval = verdict === "safe";
         }
-        if (decision.decision === "edit") {
-          args = decision.editedArgs;
+
+        if (!skipHumanApproval) {
+          const decision = await this.requestApproval(callId, name, args);
+          // Emit approval decision for audit trail (#7 Structured Event Log)
+          this.emitter.emit("approval_decision", {
+            callId,
+            name,
+            decision: decision.decision,
+            ...(decision.decision === "edit" && { editedArgs: decision.editedArgs }),
+          });
+          if (decision.decision === "reject") {
+            const result: ToolResult = {
+              ok: false,
+              error: `Tool "${name}" rejected by user: ${decision.reason}`,
+            };
+            this.emitter.emit("tool_result", { callId, name, args, result });
+            return result;
+          }
+          if (decision.decision === "edit") {
+            args = decision.editedArgs;
+          }
         }
       }
 

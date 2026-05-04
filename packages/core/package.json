@@ -10,7 +10,7 @@
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc --noEmit",
-    "test": "tsx --test src/tool_arg_guard.test.ts"
+    "test": "tsx --test src/tool_arg_guard.test.ts src/safety_judge.test.ts src/memory_rank.test.ts src/memory_retrieval_eval.test.ts"
   },
   "dependencies": {
     "openai": "^4.67.0"

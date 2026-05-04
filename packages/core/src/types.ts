@@ -117,6 +117,11 @@ export interface ContextConfig {
    * compression summary blocks so the model knows what was preserved vs dropped.
    */
   compressionGuideline?: string;
+  /**
+   * Appended to inception message[1] (protocol core) each send from registered tool names.
+   * Keeps core prompt small; expanded rules only when matching tools exist (e.g. child agents).
+   */
+  protocolDynamicBuilder?: (toolNames: string[]) => string;
 }
 
 export interface ContextSnapshot {
@@ -156,6 +161,8 @@ export interface TurnEndHarnessMetrics {
   spawnAgentCallsThisSend: number;
   /** Size of the last completed parallel tool batch (0 if none). */
   parallelToolCallsLastBatch: number;
+  /** Truncated [WORKING STATE] block for UIs / eval (optional). */
+  workingStatePreview?: string;
 }
 
 // ─── Events ───────────────────────────────────────────────────────────────────
@@ -214,6 +221,13 @@ export interface AgentEventMap {
     decision: "approve" | "edit" | "reject";
     editedArgs?: Record<string, unknown>;
   };
+  /** Advisory safety classifier result before optional human approval. (#safety-judge) */
+  safety_check: {
+    callId: string;
+    name: string;
+    source: "heuristic" | "llm" | "cache";
+    verdict: "safe" | "require_human";
+  };
   /** Emitted when context compression fires (auto or manual). (#7) */
   context_compressed: {
     beforeFraction: number;
@@ -234,6 +248,22 @@ export type AgentEventName = keyof AgentEventMap;
  * Persona configuration — defines the agent's name, identity, and communication style.
  * Changes tone and vocabulary only; operational protocols are immutable.
  */
+/** Optional LLM + heuristic gate to skip user approval for clearly safe calls. */
+export interface AgentSafetyJudgeOptions {
+  enabled: boolean;
+  /** Model slug for the 0/1 classifier (defaults to harness `model`). */
+  model?: string;
+  /** LLM call timeout in ms. Default 4000. */
+  timeoutMs?: number;
+  /** In-process verdict cache TTL in ms. Default 300_000. */
+  cacheTtlMs?: number;
+  /**
+   * When true, classifier errors/unknown parse → treat as safe (skip approval).
+   * Default false (fail closed → require human).
+   */
+  failOpen?: boolean;
+}
+
 export interface PersonaConfig {
   /** Display name shown in UI (e.g. "JARVIS", "Liminal"). */
   name: string;
@@ -300,6 +330,8 @@ export interface AgentConfig {
    * - { disabled: true }: skip injection entirely (child agents always skip)
    */
   worldContext?: WorldContextOptions;
+  /** When enabled, run heuristic + optional LLM check before `requiresApproval` prompts. */
+  safetyJudge?: AgentSafetyJudgeOptions;
 }
 
 // Re-export so consumers can type worldContext without importing world_context directly

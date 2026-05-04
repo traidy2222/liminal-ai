@@ -1,5 +1,13 @@
 import { defineTool } from "./helpers.js";
-import { loadNotes, loadRawNotes, atomicUpdate, makeTypedKey, type StoredNote } from "./notes_store.js";
+import {
+  loadNotes,
+  loadRawNotes,
+  atomicUpdate,
+  makeTypedKey,
+  bumpNoteMetadata,
+  type StoredNote,
+} from "./notes_store.js";
+import { suggestWikilinkLine } from "./memory_autolink.js";
 
 const MEMORY_TYPES = ["fact", "experience", "entity", "belief", "reflection", "recipe"] as const;
 type MemoryType = (typeof MEMORY_TYPES)[number];
@@ -33,6 +41,25 @@ export const rememberTool = defineTool({
     const storageKey = memType ? makeTypedKey(memType, rawKey) : rawKey;
     // Use atomic write queue (#4) to prevent concurrent sub-agent data loss
     await atomicUpdate((notes) => ({ ...notes, [storageKey]: value }));
+
+    if (process.env["AGENT_MEMORY_AUTOLINK"] === "1") {
+      const all = await loadNotes();
+      const candidateTitles = Object.keys(all)
+        .filter((k) => k !== storageKey)
+        .slice(0, 60);
+      const extra = await suggestWikilinkLine({
+        title: storageKey,
+        body: value,
+        candidateTitles,
+      });
+      if (extra && !value.includes("[[")) {
+        await atomicUpdate((notes) => ({
+          ...notes,
+          [storageKey]: (notes[storageKey] ?? value) + extra,
+        }));
+      }
+    }
+
     return { ok: true, output: `Remembered "${storageKey}"` };
   },
 });
@@ -55,10 +82,12 @@ export const recallTool = defineTool({
   handler: async (args) => {
     const notes = await loadNotes();
     if (args["key"]) {
-      const val = notes[args["key"] as string];
+      const key = args["key"] as string;
+      const val = notes[key];
+      if (val !== undefined) void bumpNoteMetadata([key]);
       return val !== undefined
         ? { ok: true, output: val }
-        : { ok: false, error: `No note found for key "${args["key"] as string}". Use search_memory if the key is uncertain.` };
+        : { ok: false, error: `No note found for key "${key}". Use search_memory if the key is uncertain.` };
     }
     const keys = Object.keys(notes);
     return {
@@ -217,9 +246,24 @@ export const memoryStatsTool = defineTool({
       .map(([type, g]) =>
         `  ${type}: ${g.count}${g.newest ? ` (newest: ${g.newest.slice(0, 10)})` : ""}`
       );
+
+    const staleCut = Date.now() - 90 * 86400 * 1000;
+    const staleKeys: string[] = [];
+    for (const [k, v] of Object.entries(raw)) {
+      const u =
+        typeof v === "object" && v !== null && "updatedAt" in v
+          ? new Date((v as StoredNote).updatedAt).getTime()
+          : NaN;
+      if (!Number.isNaN(u) && u < staleCut) staleKeys.push(k);
+    }
+    const staleLine =
+      staleKeys.length > 0
+        ? `\nStale (not updated in 90d, ${staleKeys.length} keys): ${staleKeys.slice(0, 25).join(", ")}${staleKeys.length > 25 ? "…" : ""}\n→ consider forget() or memory_consolidate()`
+        : "\nNo entries older than 90d by updatedAt.";
+
     return {
       ok: true,
-      output: `Total: ${total} memories\n${lines.join("\n")}`,
+      output: `Total: ${total} memories\n${lines.join("\n")}${staleLine}`,
     };
   },
 });

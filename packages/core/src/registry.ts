@@ -31,6 +31,11 @@ export class ToolRegistry {
     return [...this.tools.values()];
   }
 
+  /** Tool names currently registered (stable order). */
+  getToolNames(): string[] {
+    return [...this.tools.keys()].sort();
+  }
+
   toOpenAIFormat(): OpenAI.Chat.Completions.ChatCompletionTool[] {
     return this.getAll().map((t) => ({
       type: "function" as const,

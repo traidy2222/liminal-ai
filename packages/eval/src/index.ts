@@ -10,8 +10,16 @@ import { runScenario, type ScenarioResult } from "./runner.js";
 import { ALL_SCENARIOS as BASIC_SCENARIOS } from "./scenarios/basic.js";
 import { RELIABILITY_SCENARIOS } from "./scenarios/reliability.js";
 import { NOISE_SCENARIOS } from "./scenarios/noise.js";
+import { MEMORY_SCENARIOS } from "./scenarios/memory_retrieval.js";
+import { HARNESS_QUALITY_SCENARIOS } from "./scenarios/harness_quality.js";
 
-const ALL_SCENARIOS = [...BASIC_SCENARIOS, ...RELIABILITY_SCENARIOS, ...NOISE_SCENARIOS];
+const ALL_SCENARIOS = [
+  ...BASIC_SCENARIOS,
+  ...RELIABILITY_SCENARIOS,
+  ...NOISE_SCENARIOS,
+  ...MEMORY_SCENARIOS,
+  ...HARNESS_QUALITY_SCENARIOS,
+];
 
 const RESET = "\x1b[0m";
 const GREEN = "\x1b[32m";

@@ -13,7 +13,11 @@ import {
   type ToolHandler,
   type AgentEventMap,
 } from "@liminal/core";
-import { registerAllTools, INCEPTION_MESSAGES } from "@liminal/tools";
+import {
+  registerAllTools,
+  INCEPTION_MESSAGES,
+  buildProtocolDynamicSuffix,
+} from "@liminal/tools";
 
 // ─── Public types ─────────────────────────────────────────────────────────────
 
@@ -152,10 +156,12 @@ function makeEvalConfig(maxRounds: number, timeoutMs: number): AgentConfig {
     baseURL: "https://openrouter.ai/api/v1",
     maxToolRoundsPerTurn: maxRounds,
     sendTimeoutMs: timeoutMs,
+    workingStateEnabled: true,
     context: {
       modelMaxTokens: 32_000,
       thresholdFraction: 0.8,
       inceptionMessages: INCEPTION_MESSAGES,
+      protocolDynamicBuilder: (names) => buildProtocolDynamicSuffix(names),
       compressionGuideline:
         "Preserve file paths, error codes, and user-stated constraints when summarizing older tool rounds.",
     },

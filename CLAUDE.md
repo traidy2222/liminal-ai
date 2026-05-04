@@ -25,9 +25,13 @@ npx tsc --noEmit -p packages/web/tsconfig.json
 npm run build -w packages/core && npx tsc --noEmit -p packages/tools/tsconfig.json
 ```
 
-There are no test runners — verification is done by typecheck + manual run.
+Verification: `npm run typecheck`, `npm run test --workspace=@liminal/core` (tool arg guard + safety judge), and manual TUI/web runs.
 
-`.env` at the monorepo root requires `OPENROUTER_API_KEY`. Optional: `AGENT_SEND_TIMEOUT_MS` (default 600000) caps wall-clock time for one full `send()` / ReAct run in TUI and web. For Obsidian, set `AGENT_VAULT_PATH` to your vault folder (absolute path); otherwise vault tools use `~/.agent_vault`.
+`.env` at the monorepo root requires `OPENROUTER_API_KEY`. Optional: `AGENT_SEND_TIMEOUT_MS` (default 600000) caps wall-clock time for one full `send()` / ReAct run in TUI and web. For Obsidian, set `AGENT_VAULT_PATH` to your vault folder (absolute path); otherwise vault tools use `~/.agent_vault`. Optional: `AGENT_SAFETY_JUDGE=1` enables a heuristic + single-token LLM check before user approval on `requiresApproval` tools; `AGENT_SAFETY_JUDGE_MODEL` overrides the classifier model (defaults to the harness model).
+
+Memory / retrieval: `AGENT_EMBED_MODEL` enables OpenRouter `/embeddings` + on-disk `.agent_memory.index.json` (updated on note writes) for `recall_relevant` and hybrid **Relevant memory** priming in world context. `AGENT_MEMORY_AUTO_EXTRACT=1` runs one small completion at turn end and `directCall`s `remember` for durable extractions. `AGENT_MEMORY_EPISODE=0` disables per-turn `vault_write` episode chunks when a vault path is set. `AGENT_MEMORY_AUTOLINK=1` suggests wikilinks after `remember` / `vault_write`. `memory_consolidate` can take `prune_orphan_embeddings` to trim stale embedding rows.
+
+Harness quality: inception uses **PROTOCOL_CORE** + `buildProtocolDynamicSuffix(toolNames)` (smaller for scoped child agents). World context includes a **Repo map**; tool **repo_map** returns the same shallow tree on demand. `AGENT_RECALL_EVERY_N` mid-turn `recall_relevant` priming; proactive `forceCompress` at ~65% usage once per send; **working state** defaults on (web/TUI) with budget hints + `turn_end.workingStatePreview`. `AGENT_CRITIC=1` runs `verify_result` when the final answer looks code/path-heavy. `AGENT_SPECULATIVE_READS=1` augments `read_file` with a few resolved relative imports.
 
 ## Architecture
 
@@ -45,21 +49,24 @@ packages/tui    packages/web    — run directly via tsx, never compiled
 
 ### `packages/core` — the harness engine
 
-| File | Role |
-|------|------|
-| `agent.ts` | `AgentHarness` — the main class. Owns the ReAct loop (`runReActLoop`), retry logic, error recovery injection, per-turn state (tool error counts, context alerts, recipe recording). `forkChild()` spawns scoped child harnesses for parallel sub-agents. |
-| `dispatcher.ts` | `ToolDispatcher` — executes a single tool call: schema validation → danger pre-flight → resource lock → approval gate → handler → unlock. Has `directCall()` for internal housekeeping (bypasses approval/locking). |
-| `context.ts` | `ContextManager` — conversation history + ACON-lite compression. When token usage exceeds `thresholdFraction`, collapses old rounds into a structured summary block instead of blanking them individually. `forceCompress(summary)` is the manual trigger. |
-| `orchestrator.ts` | `ResourceLockManager` (alphabetical lock ordering, TTL eviction, 50ms polling) + `TaskOrchestrator` (task registry with complete/fail/cancel). Shared across all agents in a tree. |
-| `registry.ts` | `ToolRegistry` — simple Map with `register/get/getAll/has/toOpenAIFormat`. |
-| `events.ts` | `AgentEmitter` — typed wrapper around Node `EventEmitter`. Events: `text`, `tool_start`, `tool_delta`, `tool_approval`, `tool_result`, `ask_user`, `turn_end`, `error`, `subtask_spawned`, `subtask_complete`. |
-| `types.ts` | All shared interfaces. `ToolDefinition` includes `resourceLocks?` and `dangerLevel?` fields. `AgentConfig` carries orchestration depth/concurrency limits. |
+
+| File              | Role                                                                                                                                                                                                                                                       |
+| ----------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `agent.ts`        | `AgentHarness` — the main class. Owns the ReAct loop (`runReActLoop`), retry logic, error recovery injection, per-turn state (tool error counts, context alerts, recipe recording). `forkChild()` spawns scoped child harnesses for parallel sub-agents.   |
+| `dispatcher.ts`   | `ToolDispatcher` — executes a single tool call: schema validation → danger pre-flight → resource lock → approval gate → handler → unlock. Has `directCall()` for internal housekeeping (bypasses approval/locking).                                        |
+| `context.ts`      | `ContextManager` — conversation history + ACON-lite compression. When token usage exceeds `thresholdFraction`, collapses old rounds into a structured summary block instead of blanking them individually. `forceCompress(summary)` is the manual trigger. |
+| `orchestrator.ts` | `ResourceLockManager` (alphabetical lock ordering, TTL eviction, 50ms polling) + `TaskOrchestrator` (task registry with complete/fail/cancel). Shared across all agents in a tree.                                                                         |
+| `registry.ts`     | `ToolRegistry` — simple Map with `register/get/getAll/has/toOpenAIFormat`.                                                                                                                                                                                 |
+| `events.ts`       | `AgentEmitter` — typed wrapper around Node `EventEmitter`. Events: `text`, `tool_start`, `tool_delta`, `tool_approval`, `tool_result`, `ask_user`, `turn_end`, `error`, `subtask_spawned`, `subtask_complete`.                                             |
+| `types.ts`        | All shared interfaces. `ToolDefinition` includes `resourceLocks?` and `dangerLevel?` fields. `AgentConfig` carries orchestration depth/concurrency limits.                                                                                                 |
+
 
 ### `packages/tools` — all tool implementations
 
 `registerAllTools(registry, emitter, harness?)` in `index.ts` is the single registration point called by both entry points. Passing `harness` enables the five harness-scoped tool groups (orchestration + context).
 
 **Harness-scoped tools** (must NOT be copied parent→child; recreated per harness via `onChildCreated`):
+
 - `orchestration.ts` — `spawn_agent`, `wait_for_agents`, `cancel_agent`, `list_agents`, `verify_result`. Factory: `createOrchestrationTools(harness)`. Sets `harness.onChildCreated` to wire grandchildren.
 - `context_tools.ts` — `check_context`, `compress_context`. Factory: `createContextTools(context)`. Closes over a specific `ContextManager` instance.
 
