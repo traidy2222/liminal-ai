@@ -2,7 +2,7 @@
  * ReliabilityBench-style (arXiv:2601.06112) and harness telemetry checks.
  */
 import type { Scenario } from "../runner.js";
-import { traceHasTurnEnd, traceGetHarnessMetrics } from "../runner.js";
+import { traceHasTurnEnd, traceGetHarnessMetrics, traceCollectTextBlob } from "../runner.js";
 
 function queryOverlap(a: string, b: string): number {
   const toks = (s: string) =>
@@ -19,6 +19,18 @@ function queryOverlap(a: string, b: string): number {
   let inter = 0;
   for (const t of as) if (bs.has(t)) inter += 1;
   return inter / new Set([...as, ...bs]).size;
+}
+
+function collectedAssistantText(trace: Array<{ type: string; payload: unknown }>): string {
+  return trace
+    .filter((e) => e.type === "text")
+    .map((e) => {
+      const p = e.payload as { delta?: unknown; channel?: unknown };
+      if (typeof p.delta !== "string") return "";
+      if (p.channel === "trace") return "";
+      return p.delta;
+    })
+    .join("\n");
 }
 
 /** turn_end must carry harnessMetrics for orchestration / eval surfaces. */
@@ -187,6 +199,71 @@ export const antiLoopDuplicateIntentScenario: Scenario = {
   ],
 };
 
+export const introResponseQualityScenario: Scenario = {
+  name: "intro-response-quality",
+  userMessage:
+    "What can you do, what tools do you have, and what do you think about the world you are in?",
+  maxRounds: 8,
+  timeoutMs: 75_000,
+  assertions: [
+    { name: "turn_end fires", check: (trace) => traceHasTurnEnd(trace) },
+    {
+      name: "no debug leakage in assistant text",
+      check: (trace) => {
+        const text = collectedAssistantText(trace);
+        return !/(list_tool_families|activate_tool_family)\s*[\u2713✓]|^\s*\{\s*\}\s*$/im.test(text);
+      },
+    },
+    {
+      name: "tool disclosure uses active vs available framing",
+      check: (trace) => {
+        const text = collectedAssistantText(trace).toLowerCase();
+        return text.includes("active") && (text.includes("available") || text.includes("activation"));
+      },
+    },
+    {
+      name: "world view is context-bound",
+      check: (trace) => {
+        const text = collectedAssistantText(trace).toLowerCase();
+        return (
+          text.includes("based on current context") ||
+          text.includes("based on my current context") ||
+          text.includes("based on current sources")
+        );
+      },
+    },
+  ],
+};
+
+export const recencyAccuracyScenario: Scenario = {
+  name: "recency-accuracy-latest-version",
+  userMessage:
+    "What is the latest version of OpenFront? Verify from authoritative sources, include as-of date, and mention uncertainty if not verifiable.",
+  maxRounds: 10,
+  timeoutMs: 90_000,
+  assertions: [
+    { name: "turn_end fires", check: (trace) => traceHasTurnEnd(trace) },
+    {
+      name: "assistant includes as-of qualifier",
+      check: (trace) => /\bas of\b|\bas-of\b|\bupdated\b|\blast updated\b/i.test(traceCollectTextBlob(trace)),
+    },
+    {
+      name: "recency_check telemetry emitted",
+      check: (trace) => trace.some((e) => e.type === "recency_check"),
+    },
+    {
+      name: "recency check passes or uncertainty is explicit",
+      check: (trace) => {
+        const checks = trace.filter((e) => e.type === "recency_check");
+        const last = checks.at(-1)?.payload as { passed?: boolean } | undefined;
+        if (last?.passed === true) return true;
+        const blob = traceCollectTextBlob(trace).toLowerCase();
+        return /could not fully verify|provisional|uncertainty|cannot verify latest/.test(blob);
+      },
+    },
+  ],
+};
+
 export const RELIABILITY_SCENARIOS = [
   turnEndHarnessMetricsPresent,
   passAt2Consistency,
@@ -195,4 +272,6 @@ export const RELIABILITY_SCENARIOS = [
   vaultFirstOrderScenario,
   researchQueryDiversityScenario,
   antiLoopDuplicateIntentScenario,
+  introResponseQualityScenario,
+  recencyAccuracyScenario,
 ];

@@ -25,17 +25,20 @@ Most agent stacks are "model + tools + prompt". Liminal is focused on runtime gu
 
 ### 5-minute setup
 
-1) **Prerequisites**
+1. **Prerequisites**
+
 - Node.js 22+
 - npm 10+
 - Any OpenAI-compatible provider key (OpenRouter/OpenAI/xAI/Anthropic-compatible gateway)
 
-2) **Install**
+1. **Install**
+
 ```bash
 npm install
 ```
 
-3) **Create `.env`**
+1. **Create `.env`**
+
 ```bash
 AGENT_API_KEY=your_key_here
 AGENT_API_BASE_URL=https://openrouter.ai/api/v1
@@ -43,12 +46,14 @@ AGENT_MODEL=openrouter/owl-alpha
 PORT=3001
 ```
 
-4) **Build once**
+1. **Build once**
+
 ```bash
 npm run build
 ```
 
-5) **Run an interface**
+1. **Run an interface**
+
 ```bash
 npm run tui
 # or

@@ -5,6 +5,10 @@ function isAgentUiQuiet(): boolean {
   return process.env["AGENT_UI_VERBOSITY"]?.trim() === "quiet";
 }
 
+function isDiagnosticsEnabled(): boolean {
+  return process.env["AGENT_UI_DIAGNOSTICS"]?.trim() === "1";
+}
+
 function sanitizeDeltaText(text: string): string {
   return text
     .replace(/\uFFFD/g, "")
@@ -113,6 +117,7 @@ function reducer(state: AgentState, action: Action): AgentState {
     }
 
     case "trace_delta": {
+      if (!isDiagnosticsEnabled()) return state;
       const lastT = state.messages.at(-1);
       if (lastT?.kind === "trace") {
         return {
@@ -130,7 +135,7 @@ function reducer(state: AgentState, action: Action): AgentState {
     }
 
     case "provider_retry": {
-      if (isAgentUiQuiet()) return state;
+      if (isAgentUiQuiet() || !isDiagnosticsEnabled()) return state;
       const line =
         `⟳ Provider retry ${action.attempt}/${action.maxAttempts} in ${Math.round(action.backoffMs / 1000)}s: ` +
         `${action.message.slice(0, 220)}`;
@@ -156,6 +161,7 @@ function reducer(state: AgentState, action: Action): AgentState {
       };
 
     case "tool_start":
+      if (!isDiagnosticsEnabled()) return state;
       // Suppress generic card for think/plan — they render as special entries
       if (action.name === "think" || action.name === "plan") return state;
       // Also suppress cards for orchestration tools — they appear as subtask entries
@@ -180,6 +186,7 @@ function reducer(state: AgentState, action: Action): AgentState {
       };
 
     case "tool_delta": {
+      if (!isDiagnosticsEnabled()) return state;
       const messages = state.messages.map((m) =>
         m.kind === "tool_call" && m.callId === action.callId
           ? { ...m, argsJson: m.argsJson + action.argsDelta }
@@ -201,6 +208,7 @@ function reducer(state: AgentState, action: Action): AgentState {
       return { ...state, pendingApproval: null };
 
     case "tool_result": {
+      if (!isDiagnosticsEnabled()) return state;
       const baseMessages = stripTrailingProviderRetry(state.messages);
       return { ...state, messages: baseMessages
         .map((m) =>
@@ -251,20 +259,21 @@ function reducer(state: AgentState, action: Action): AgentState {
       return { ...state, error: action.msg, busy: false, messages: stripTrailingProviderRetry(state.messages) };
 
     case "think":
-      if (isAgentUiQuiet()) return state;
+      if (isAgentUiQuiet() || !isDiagnosticsEnabled()) return state;
       return {
         ...state,
         messages: [...state.messages, { kind: "think", content: action.content }],
       };
 
     case "plan":
-      if (isAgentUiQuiet()) return state;
+      if (isAgentUiQuiet() || !isDiagnosticsEnabled()) return state;
       return {
         ...state,
         messages: [...state.messages, { kind: "plan", steps: action.steps }],
       };
 
     case "subtask_spawned":
+      if (!isDiagnosticsEnabled()) return state;
       return {
         ...state,
         messages: [
@@ -282,6 +291,7 @@ function reducer(state: AgentState, action: Action): AgentState {
       };
 
     case "subtask_output":
+      if (!isDiagnosticsEnabled()) return state;
       return {
         ...state,
         messages: state.messages.map((m) =>
@@ -292,6 +302,7 @@ function reducer(state: AgentState, action: Action): AgentState {
       };
 
     case "context_compressed":
+      if (!isDiagnosticsEnabled()) return state;
       return {
         ...state,
         messages: [
@@ -306,6 +317,7 @@ function reducer(state: AgentState, action: Action): AgentState {
       };
 
     case "subtask_complete":
+      if (!isDiagnosticsEnabled()) return state;
       return {
         ...state,
         messages: state.messages.map((m) =>

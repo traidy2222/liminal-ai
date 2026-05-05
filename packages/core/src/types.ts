@@ -411,6 +411,12 @@ export interface AgentEventMap {
     summary: string;
     reason: string;
   };
+  recency_check: {
+    required: boolean;
+    passed: boolean;
+    reason: string;
+    attemptedRecovery: boolean;
+  };
 }
 
 export type AgentEventName = keyof AgentEventMap;

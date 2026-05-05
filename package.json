@@ -1,12 +1,17 @@
 {
   "name": "liminal",
   "private": true,
-  "workspaces": ["packages/*"],
+  "workspaces": [
+    "packages/*"
+  ],
   "scripts": {
     "build": "npm run build --workspaces --if-present",
     "tui": "npm run start --workspace=packages/tui",
-    "web": "npm run start --workspace=packages/web",
+    "web": "npm run dev --workspace=packages/web",
     "typecheck": "npm run typecheck --workspaces --if-present",
     "test": "npm run test --workspace=@liminal/core"
+  },
+  "devDependencies": {
+    "concurrently": "^9.2.1"
   }
 }

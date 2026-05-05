@@ -23,7 +23,10 @@ export function createRouter(bridge: AgentBridge, sse: SSEManager): Router {
   });
 
   router.get("/api/stream", (req, res) => {
-    sse.add(res);
+    // Keep SSE sockets alive across longer idle windows.
+    req.socket.setKeepAlive(true, 15_000);
+    req.socket.setTimeout(0);
+    sse.add(req, res);
   });
 
   router.post("/api/message", async (req, res) => {

@@ -189,7 +189,45 @@ function lexicalJaccard(a: string, b: string): number {
 function normalizeSearchDelta(text: string): string {
   return text
     .replace(/\uFFFD/g, "")
-    .replace(/([A-Za-z])⚙([A-Za-z])/g, "$1$2");
+    .replace(/([A-Za-z])⚙([A-Za-z])/g, "$1$2")
+    .replace(/<\/?longcat_[^>]*>/gi, "");
+}
+
+function hasPseudoToolMarkup(text: string): boolean {
+  const t = text.toLowerCase();
+  return (
+    t.includes("<longcat_tool_call>") ||
+    t.includes("<longcat_arg_key>") ||
+    t.includes("<longcat_arg_value>") ||
+    t.includes("</longcat_tool_call>")
+  );
+}
+
+function isFreshnessSensitivePrompt(text: string): boolean {
+  const t = text.toLowerCase();
+  return /\b(latest|current|today|recent|update|version|release|release notes|changelog|what's new|state of)\b/.test(
+    t
+  );
+}
+
+function hasFreshnessClaims(text: string): boolean {
+  const t = text.toLowerCase();
+  return /\b(latest|current|as of|today|recent|version|release|updated)\b/.test(t);
+}
+
+function hasAsOfQualifier(text: string): boolean {
+  return /\bas of\b|\bas-of\b|\bupdated\b|\blast updated\b/i.test(text);
+}
+
+function hasRecentYearEvidence(text: string): boolean {
+  const currentYear = new Date().getFullYear();
+  const years = [...text.matchAll(/\b(20\d{2})\b/g)].map((m) => parseInt(m[1]!, 10));
+  return years.some((y) => y >= currentYear - 1);
+}
+
+function hasAuthoritativeSourceHint(text: string): boolean {
+  const t = text.toLowerCase();
+  return /(github\.com\/.+\/releases|docs\.|official|release notes|changelog|blog\.)/.test(t);
 }
 
 function isVaultFirstStrictEnabled(): boolean {
@@ -203,8 +241,9 @@ function resolveVaultAutoWriteMode(): VaultAutoWriteMode {
   const raw = (process.env["AGENT_VAULT_AUTO_WRITE"] ?? "").trim().toLowerCase();
   if (raw === "0" || raw === "off" || raw === "false" || raw === "disabled") return "off";
   if (raw === "aggressive") return "aggressive";
-  // Default behavior: keep a wiki for research/knowledge turns.
-  return "research";
+  if (raw === "research") return "research";
+  // Default behavior: explicit-only persistence via tool calls.
+  return "off";
 }
 
 /**
@@ -408,10 +447,14 @@ export class AgentHarness {
   private ruleRecallInjectedThisSend = false;
   /** Extra stream continuation when model hits token limit (max 1 per send). */
   private lengthResumeRemaining = 0;
+  /** Retry budget when model emits pseudo tool markup instead of actual tool calls. */
+  private pseudoToolMarkupRetryRemaining = 1;
   /** One-shot nudge to cite a read path before turn_end(ok). */
   private finalizeCiteNudgeThisSend = false;
   /** One-shot nudge for research synthesis completeness before turn_end(ok). */
   private finalizeSynthesisNudgeThisSend = false;
+  /** One-shot nudge for recency-sensitive prompts before turn_end(ok). */
+  private finalizeRecencyNudgeThisSend = false;
   /** web_search query history for first-pass diversity + dedupe checks. */
   private webSearchQueriesThisTurn: string[] = [];
   /** Near-duplicate failed search intents for one-shot retry discipline. */
@@ -928,8 +971,13 @@ export class AgentHarness {
     this.ruleRecallInjectedThisSend = false;
     this.lengthResumeRemaining =
       parseInt(process.env["AGENT_LENGTH_RESUME_MAX"] ?? "1", 10) > 0 ? 1 : 0;
+    this.pseudoToolMarkupRetryRemaining = Math.max(
+      0,
+      Math.min(3, parseInt(process.env["AGENT_PSEUDO_TOOL_RETRY_MAX"] ?? "1", 10) || 1)
+    );
     this.finalizeCiteNudgeThisSend = false;
     this.finalizeSynthesisNudgeThisSend = false;
+    this.finalizeRecencyNudgeThisSend = false;
     this.dispatcher.resetTurnCounters();
     this.vaultMetrics = { reads: 0, searches: 0, writes: 0, skippedWrites: 0 };
     this.webSearchQueriesThisTurn = [];
@@ -1220,7 +1268,8 @@ export class AgentHarness {
 
   /** Episodic vault chunk (Obsidian) — one note per completed send when vault path is set. */
   private async maybePersistEpisodeTurn(): Promise<void> {
-    if (process.env["AGENT_MEMORY_EPISODE"] === "0") return;
+    // Explicit opt-in only: avoid silent auto-capture into vault.
+    if (process.env["AGENT_MEMORY_EPISODE"] !== "1") return;
     if (this.agentDepth > 0) return;
     if (!process.env["AGENT_VAULT_PATH"]?.trim()) return;
     if (!this.registry.has("vault_write")) return;
@@ -1600,6 +1649,27 @@ export class AgentHarness {
           "Continue exactly where you left off and finish.",
       });
       await this.runReActLoop(round);
+      return;
+    }
+
+    if (
+      toolCalls.length === 0 &&
+      this.pseudoToolMarkupRetryRemaining > 0 &&
+      hasPseudoToolMarkup(accumulator.accumulatedText)
+    ) {
+      this.pseudoToolMarkupRetryRemaining--;
+      this.context.appendMessage({
+        role: "user",
+        content:
+          "[FORMAT RECOVERY] Your previous output included pseudo tool markup tags instead of real function calls. " +
+          "Do not print XML/tool tags. If you need tools, emit proper tool calls only; otherwise provide normal assistant text.",
+      });
+      this.emitter.emit("text", {
+        delta:
+          "\n[HARNESS] Recovered from pseudo tool markup after retry/rate-limit path; requesting proper tool calls.\n",
+        channel: "trace",
+      });
+      await this.runReActLoop(round + 1);
       return;
     }
 
@@ -2063,6 +2133,50 @@ export class AgentHarness {
           await this.runReActLoop(round);
           return;
         }
+      }
+
+      const recencyRequired = isFreshnessSensitivePrompt(this.lastUserMessage);
+      if (recencyRequired) {
+        const evidenceBlob = this.evidenceLog.map((e) => e.excerpt).join("\n");
+        const recencyPassed =
+          (!hasFreshnessClaims(assistantText) || hasAsOfQualifier(assistantText)) &&
+          hasRecentYearEvidence(`${assistantText}\n${evidenceBlob}`) &&
+          hasAuthoritativeSourceHint(`${assistantText}\n${evidenceBlob}`);
+        this.emitter.emit("recency_check", {
+          required: true,
+          passed: recencyPassed,
+          reason: recencyPassed
+            ? "freshness_claims_grounded"
+            : "missing_as_of_or_recent_authoritative_evidence",
+          attemptedRecovery: !recencyPassed,
+        });
+        if (!recencyPassed && !this.finalizeRecencyNudgeThisSend) {
+          this.finalizeRecencyNudgeThisSend = true;
+          this.context.appendMessage({
+            role: "user",
+            content:
+              "[RECENCY CHECK] Your answer appears freshness-sensitive. Before finalizing: " +
+              "(1) verify latest/current/version claims against an authoritative source, " +
+              "(2) include an explicit 'as of <date>' qualifier, and " +
+              "(3) if sources conflict or latest cannot be verified, state uncertainty clearly.",
+          });
+          await this.runReActLoop(round);
+          return;
+        }
+        if (!recencyPassed) {
+          const caveat =
+            "\n\nAs of now, I could not fully verify the latest authoritative state. " +
+            "Treat version/current claims as provisional until confirmed from official release/docs sources.";
+          this.context.appendMessage({ role: "assistant", content: caveat });
+          this.emitter.emit("text", { delta: caveat, channel: "user" });
+        }
+      } else {
+        this.emitter.emit("recency_check", {
+          required: false,
+          passed: true,
+          reason: "not_freshness_sensitive",
+          attemptedRecovery: false,
+        });
       }
 
       await this.maybePersistEpisodeTurn();

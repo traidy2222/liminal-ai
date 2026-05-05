@@ -1,5 +1,7 @@
 import React, { useState, useRef, useEffect } from "react";
 import { useSSE, type MessageEntry } from "./useSSE.js";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 
 function ApprovalCountdown({
   receivedAt,
@@ -26,6 +28,7 @@ export function App() {
   const { state, sendMessage, sendApproval, sendAnswer, sendClearSession } = useSSE();
   const [input, setInput] = useState("");
   const [askAnswer, setAskAnswer] = useState("");
+  const [showDiagnostics, setShowDiagnostics] = useState(false);
   const bottomRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -91,6 +94,20 @@ export function App() {
         >
           New session
         </button>
+        <button
+          type="button"
+          style={{
+            ...styles.btn,
+            background: showDiagnostics ? "#224466" : "#222",
+            marginLeft: 8,
+            fontSize: 12,
+            padding: "6px 10px",
+          }}
+          onClick={() => setShowDiagnostics((v) => !v)}
+          title="Toggle diagnostic trace/tool transcript lines"
+        >
+          {showDiagnostics ? "Diagnostics on" : "Diagnostics off"}
+        </button>
       </div>
 
       {/* Messages */}
@@ -100,9 +117,14 @@ export function App() {
             Start a conversation…
           </div>
         )}
-        {state.messages.map((entry, i) => (
+        {state.messages
+          .filter((entry) => {
+            if (showDiagnostics) return true;
+            return entry.kind === "user" || entry.kind === "assistant";
+          })
+          .map((entry, i) => (
           <MessageView key={i} entry={entry} />
-        ))}
+          ))}
         {state.error && (
           <div style={{ color: "#ff4444", padding: "8px 0" }}>
             Error: {state.error}
@@ -162,6 +184,8 @@ export function App() {
             </div>
             <div style={{ marginBottom: 12 }}>{state.pendingAskUser.prompt}</div>
             <input
+              id="ask-user-answer"
+              name="askUserAnswer"
               autoFocus
               style={styles.answerInput}
               value={askAnswer}
@@ -192,6 +216,9 @@ export function App() {
       {/* Input */}
       <form style={styles.inputArea} onSubmit={handleSubmit}>
         <input
+          id="chat-message-input"
+          name="message"
+          autoComplete="off"
           style={styles.input}
           value={input}
           onChange={(e) => setInput(e.target.value)}
@@ -223,7 +250,33 @@ function MessageView({ entry }: { entry: MessageEntry }) {
     case "assistant":
       return (
         <div style={styles.assistantMsg}>
-          <span style={{ whiteSpace: "pre-wrap" }}>{entry.text}</span>
+          <ReactMarkdown
+            remarkPlugins={[remarkGfm]}
+            components={{
+              p: ({ children }) => <p style={styles.mdParagraph}>{children}</p>,
+              ul: ({ children }) => <ul style={styles.mdList}>{children}</ul>,
+              ol: ({ children }) => <ol style={styles.mdOrderedList}>{children}</ol>,
+              li: ({ children }) => <li style={styles.mdListItem}>{children}</li>,
+              h1: ({ children }) => <h1 style={styles.mdH1}>{children}</h1>,
+              h2: ({ children }) => <h2 style={styles.mdH2}>{children}</h2>,
+              h3: ({ children }) => <h3 style={styles.mdH3}>{children}</h3>,
+              code: ({ className, children }) => (
+                <code style={className ? styles.mdCodeBlock : styles.mdInlineCode}>{children}</code>
+              ),
+              pre: ({ children }) => <pre style={styles.mdPre}>{children}</pre>,
+              blockquote: ({ children }) => <blockquote style={styles.mdQuote}>{children}</blockquote>,
+              table: ({ children }) => (
+                <div style={styles.mdTableWrap}>
+                  <table style={styles.mdTable}>{children}</table>
+                </div>
+              ),
+              th: ({ children }) => <th style={styles.mdTableHead}>{children}</th>,
+              td: ({ children }) => <td style={styles.mdTableCell}>{children}</td>,
+              hr: () => <hr style={styles.mdHr} />,
+            }}
+          >
+            {entry.text}
+          </ReactMarkdown>
           {entry.streaming && <span style={{ color: "#00d4ff" }}>█</span>}
         </div>
       );
@@ -390,8 +443,85 @@ const styles = {
   assistantMsg: {
     padding: "6px 10px",
     color: "#44dd88",
-    whiteSpace: "pre-wrap" as const,
     lineHeight: 1.6,
+  },
+  mdParagraph: {
+    margin: "0 0 10px",
+    whiteSpace: "pre-wrap" as const,
+  },
+  mdList: {
+    margin: "0 0 10px 20px",
+  },
+  mdOrderedList: {
+    margin: "0 0 10px 20px",
+  },
+  mdListItem: {
+    margin: "2px 0",
+  },
+  mdH1: {
+    fontSize: 22,
+    margin: "8px 0",
+    color: "#7cf5a9",
+  },
+  mdH2: {
+    fontSize: 19,
+    margin: "8px 0",
+    color: "#7cf5a9",
+  },
+  mdH3: {
+    fontSize: 16,
+    margin: "8px 0",
+    color: "#7cf5a9",
+  },
+  mdInlineCode: {
+    background: "#1a1f1a",
+    border: "1px solid #2c3a2c",
+    borderRadius: 4,
+    padding: "1px 5px",
+    color: "#9bf2b8",
+  },
+  mdPre: {
+    margin: "10px 0",
+    padding: "10px 12px",
+    borderRadius: 6,
+    background: "#101510",
+    border: "1px solid #243024",
+    overflowX: "auto" as const,
+  },
+  mdCodeBlock: {
+    fontFamily: "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace",
+    color: "#9bf2b8",
+  },
+  mdQuote: {
+    margin: "10px 0",
+    padding: "4px 10px",
+    borderLeft: "3px solid #2d6a4f",
+    color: "#9acfb0",
+  },
+  mdTableWrap: {
+    overflowX: "auto" as const,
+    margin: "10px 0",
+  },
+  mdTable: {
+    width: "100%",
+    borderCollapse: "collapse" as const,
+    border: "1px solid #2a2a2a",
+  },
+  mdTableHead: {
+    textAlign: "left" as const,
+    border: "1px solid #2a2a2a",
+    padding: "6px 8px",
+    background: "#161616",
+  },
+  mdTableCell: {
+    border: "1px solid #2a2a2a",
+    padding: "6px 8px",
+    verticalAlign: "top" as const,
+  },
+  mdHr: {
+    border: "none",
+    borderTop: "1px solid #2d2d2d",
+    margin: "10px 0",
   },
   toolCard: {
     border: "1px solid #333",

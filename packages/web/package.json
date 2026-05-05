@@ -4,14 +4,17 @@
   "type": "module",
   "scripts": {
     "start": "node --import tsx/esm server/index.ts",
+    "dev": "concurrently \"npm run dev:server\" \"npm run dev:client\"",
     "dev:server": "node --import tsx/esm --watch server/index.ts",
-    "dev:client": "vite client/",
+    "dev:client": "vite client/ --port 5173",
     "build:client": "vite build client/",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
     "@liminal/core": "*",
     "@liminal/tools": "*",
+    "react-markdown": "^9.0.1",
+    "remark-gfm": "^4.0.0",
     "express": "^4.21.0",
     "cors": "^2.8.5",
     "dotenv": "^16.4.0"

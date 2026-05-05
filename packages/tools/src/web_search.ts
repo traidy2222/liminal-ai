@@ -11,8 +11,11 @@ function normalizeTemporalQuery(query: string): string {
   if (q.length < 4) return q;
   const lower = q.toLowerCase();
   const isLatestIntent =
-    /\blatest|news|update|current|today|this week|this month|recent|breaking\b/.test(lower);
+    /\blatest|news|update|current|today|this week|this month|recent|breaking|version|release|released|release notes|changelog|what's new\b/.test(
+      lower
+    );
   if (!isLatestIntent) return q;
+  if (/\b(in|during|from)\s+20\d{2}\b/.test(lower)) return q;
 
   const currentYear = new Date().getFullYear();
   const years = [...q.matchAll(/\b(20\d{2})\b/g)].map((m) => parseInt(m[1]!, 10));
@@ -98,12 +101,18 @@ export const webSearchTool = defineTool({
   },
   handler: async (args) => {
     const max = (args["max_results"] as number | undefined) ?? 5;
-    const query = normalizeTemporalQuery(args["query"] as string);
+    const inputQuery = args["query"] as string;
+    const query = normalizeTemporalQuery(inputQuery);
     const r = await runHtmlDdgSearch(query, max);
     if (!r.ok) return r;
+    const currentYear = new Date().getFullYear();
+    const anchored = query !== inputQuery;
+    const recencyHint = anchored
+      ? `Recency note: query anchored to current year ${currentYear}.\n`
+      : "";
     const output = r.hits
       .map((h, i) => `${i + 1}. ${h.title}\n   ${h.url}\n   ${h.snippet}`)
       .join("\n\n");
-    return { ok: true, output };
+    return { ok: true, output: `${recencyHint}${output}` };
   },
 });

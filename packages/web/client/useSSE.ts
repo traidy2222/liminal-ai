@@ -101,10 +101,10 @@ function reducer(state: SSEState, action: Action): SSEState {
       return { ...state, uiVerbosity: action.uiVerbosity };
 
     case "connected":
-      return { ...state, connected: true };
+      return { ...state, connected: true, error: null };
 
     case "disconnected":
-      return { ...state, connected: false };
+      return { ...state, connected: false, error: state.error ?? "Connection lost. Reconnecting..." };
 
     case "session_reset":
       return {
@@ -507,29 +507,47 @@ export function useSSE() {
 
   const sendMessage = useCallback(async (message: string) => {
     dispatch({ type: "user_message", text: message });
-    await fetch(`${SERVER}/api/message`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ message }),
-    });
+    try {
+      const r = await fetch(`${SERVER}/api/message`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ message }),
+      });
+      if (!r.ok) {
+        const payload = (await r.json().catch(() => ({}))) as { error?: string };
+        dispatch({ type: "error", payload: { message: payload.error ?? `Send failed (${r.status})` } });
+      }
+    } catch {
+      dispatch({ type: "error", payload: { message: "Message send failed. Check server connection." } });
+    }
   }, []);
 
   const sendApproval = useCallback(async (callId: string, decision: unknown) => {
-    await fetch(`${SERVER}/api/approve`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ callId, decision }),
-    });
-    dispatch({ type: "approval_resolved" });
+    try {
+      const r = await fetch(`${SERVER}/api/approve`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ callId, decision }),
+      });
+      if (r.ok) dispatch({ type: "approval_resolved" });
+      else dispatch({ type: "error", payload: { message: `Approval request failed (${r.status})` } });
+    } catch {
+      dispatch({ type: "error", payload: { message: "Approval request failed. Check server connection." } });
+    }
   }, []);
 
   const sendAnswer = useCallback(async (answer: string) => {
-    await fetch(`${SERVER}/api/answer`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ answer }),
-    });
-    dispatch({ type: "ask_user_resolved" });
+    try {
+      const r = await fetch(`${SERVER}/api/answer`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ answer }),
+      });
+      if (r.ok) dispatch({ type: "ask_user_resolved" });
+      else dispatch({ type: "error", payload: { message: `Answer submit failed (${r.status})` } });
+    } catch {
+      dispatch({ type: "error", payload: { message: "Answer submit failed. Check server connection." } });
+    }
   }, []);
 
   const sendClearSession = useCallback(async () => {

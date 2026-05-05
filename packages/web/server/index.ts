@@ -36,10 +36,21 @@ app.use(router);
 const clientDist = join(__dirname, "../client/dist");
 if (existsSync(clientDist)) {
   app.use(express.static(clientDist));
+} else {
+  app.get("/", (_req, res) => {
+    res
+      .status(200)
+      .type("text/plain")
+      .send(
+        "Liminal web API is running, but the web UI is not built here.\n" +
+          "Run `npm run web` from repo root for full dev UI (Vite on http://localhost:5173),\n" +
+          "or run `npm run build:client --workspace=packages/web` to serve static UI from this server."
+      );
+  });
 }
 
 const PORT = Number(process.env["PORT"] ?? 3001);
-app.listen(PORT, () => {
+const server = app.listen(PORT, () => {
   console.log(`Liminal web server → http://localhost:${PORT}`);
   console.log(`SSE stream         → http://localhost:${PORT}/api/stream`);
   const anyKeySet = Boolean(
@@ -51,3 +62,8 @@ app.listen(PORT, () => {
   );
   console.log(`API key:           ${anyKeySet ? "set" : "MISSING"}`);
 });
+
+// SSE-friendly server tuning: avoid idle keepalive/header timeouts closing streams.
+server.keepAliveTimeout = 75_000;
+server.headersTimeout = 90_000;
+server.requestTimeout = 0;
