@@ -1,4 +1,9 @@
-import { AgentHarness, maybeAttachSessionEventLog } from "@liminal/core";
+import {
+  AgentHarness,
+  maybeAttachSessionEventLog,
+  resolveProviderConfig,
+  saveRuntimePreferences,
+} from "@liminal/core";
 import {
   registerAllTools,
   INCEPTION_MESSAGES,
@@ -6,6 +11,7 @@ import {
 } from "@liminal/tools";
 import type { SSEManager } from "./sse.js";
 import type { ApprovalDecision } from "@liminal/core";
+import type { RuntimePreferences } from "@liminal/core";
 
 function resolveSafetyJudge():
   | { enabled: true; model?: string }
@@ -39,17 +45,20 @@ export class AgentBridge {
   private pendingApprovals = new Map<string, (d: ApprovalDecision) => void>();
   private pendingAskUser: ((answer: string) => void) | null = null;
 
-  constructor(private readonly sse: SSEManager) {
+  constructor(private readonly sse: SSEManager, runtimePreferences: RuntimePreferences | null = null) {
+    const provider = resolveProviderConfig(runtimePreferences?.provider);
     this.harness = new AgentHarness({
-      openRouterApiKey: process.env["OPENROUTER_API_KEY"] ?? "",
-      model: "openrouter/owl-alpha",
-      baseURL: "https://openrouter.ai/api/v1",
+      openRouterApiKey: provider.apiKey,
+      model: provider.model,
+      baseURL: provider.baseURL,
       maxToolRoundsPerTurn: 128,
       safetyJudge: resolveSafetyJudge(),
       workingStateEnabled: true,
       // World context: auto-gather date/time/OS/shell; optionally include location
       // Set AGENT_LOCATION="City, Country" in .env to include physical location
       worldContext: resolveWorldContext(),
+      runtimePreferences,
+      persistRuntimePreferences: async (prefs) => saveRuntimePreferences(prefs),
       context: {
         modelMaxTokens: 128_000,
         thresholdFraction: 0.8,
@@ -102,6 +111,10 @@ export class AgentBridge {
     emitter.on("drift_detected", (p) => this.sse.send("drift_detected", p));
     emitter.on("runtime_heartbeat", (p) => this.sse.send("runtime_heartbeat", p));
     emitter.on("vault_activity", (p) => this.sse.send("vault_activity", p));
+    emitter.on("runtime_pref_detected", (p) => this.sse.send("runtime_pref_detected", p));
+    emitter.on("runtime_pref_changed", (p) => this.sse.send("runtime_pref_changed", p));
+    emitter.on("runtime_pref_persisted", (p) => this.sse.send("runtime_pref_persisted", p));
+    emitter.on("runtime_pref_rejected", (p) => this.sse.send("runtime_pref_rejected", p));
 
     emitter.on("tool_approval", (payload) => {
       this.pendingApprovals.set(payload.callId, payload.resolve);

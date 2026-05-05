@@ -18,12 +18,17 @@ Liminal emits structured runtime events through the harness emitter. These power
 - `drift_detected`
 - `runtime_heartbeat`
 - `vault_activity`
+- `runtime_pref_detected`
+- `runtime_pref_changed`
+- `runtime_pref_persisted`
+- `runtime_pref_rejected`
 
 These events make long-run behavior inspectable and testable.
 
 ## Turn-End Metrics
 
 `turn_end` includes `harnessMetrics`, commonly containing:
+
 - tools invoked this send
 - spawn call count
 - parallel batch size
@@ -38,6 +43,10 @@ These events make long-run behavior inspectable and testable.
 - **drift_detected**: policy-level drift observation; may or may not trigger replan
 - **contract_violation**: pre-dispatch policy block
 - **vault_activity**: advisory and write/read/search telemetry, includes skips/reasons
+- **runtime_pref_detected**: internal LLM identified a user preference mutation intent
+- **runtime_pref_changed**: in-session preference patch applied
+- **runtime_pref_persisted**: preference file write succeeded
+- **runtime_pref_rejected**: risky change rejected or persistence failed
 
 ## Consumers
 
@@ -51,4 +60,3 @@ These events make long-run behavior inspectable and testable.
 - treat event ordering as part of UI correctness
 - preserve backwards compatibility for event payload fields where possible
 - add new events with matching eval assertions to avoid silent regressions
-

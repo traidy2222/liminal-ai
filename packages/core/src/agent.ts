@@ -28,6 +28,8 @@ import { completeChatJson, getFastModelSlug } from "./router.js";
 import { stableArgsJsonKey } from "./json_stable.js";
 import { HARNESS_RULE_RECALL_MESSAGE } from "./harness_rules.js";
 import { bumpRecipePattern } from "./recipe_library.js";
+import { resolveProviderConfig } from "./provider_config.js";
+import type { RuntimePreferences } from "./runtime_prefs.js";
 import {
   markEpistemicPlanStepDone,
   mergeExtractedSubgoals,
@@ -94,6 +96,19 @@ function isRetryable(err: unknown): boolean {
   return false;
 }
 
+function isRateLimitError(err: unknown): boolean {
+  if (err instanceof OpenAI.RateLimitError) return true;
+  if (err instanceof OpenAI.APIError && err.status === 429) return true;
+  const msg = describeError(err).toLowerCase();
+  return /\b429\b|rate.?limit|too many requests/.test(msg);
+}
+
+function isProviderUnavailableError(err: unknown): boolean {
+  if (err instanceof OpenAI.APIError && err.status != null && err.status >= 500) return true;
+  const msg = describeError(err).toLowerCase();
+  return /provider.*unavailable|temporarily unavailable|bad gateway|gateway|upstream/i.test(msg);
+}
+
 /** Heuristic: assistant answer likely cites repo facts worth double-checking. */
 function isEvidenceToolName(name: string): boolean {
   return (
@@ -115,9 +130,18 @@ function shouldRunCriticPass(assistantText: string): boolean {
 /** True when final text likely depends on repo paths / code (AGENT_CRITIC_REQUIRE path trigger). */
 function looksPathOrCodeHeavy(assistantText: string): boolean {
   if (assistantText.length < 40) return false;
-  if (/packages[/\\]|[/\\]src[/\\]|\.(ts|tsx|js|jsx|json|md)\b/i.test(assistantText)) return true;
+  // Require file/path-like context to avoid false positives like "Node.js".
+  if (/packages[/\\]|[/\\]src[/\\]|[A-Za-z0-9_.-]+[/\\][A-Za-z0-9_.-]+\.(ts|tsx|js|jsx|json|md)\b/i.test(assistantText)) return true;
   if (/`[^`]{3,}\.(ts|tsx|js|json)`/.test(assistantText)) return true;
   return false;
+}
+
+function isSimpleIntrospectionPrompt(userMessage: string): boolean {
+  const t = userMessage.toLowerCase();
+  return (
+    /\b(what model|which model|what harness|which harness|who are you|what are you running|what runtime)\b/.test(t) &&
+    t.length < 220
+  );
 }
 
 function normPathForMatch(p: string): string {
@@ -329,7 +353,7 @@ export class AgentHarness {
 
   private readonly context: ContextManager;
   private readonly dispatcher: ToolDispatcher;
-  private readonly client: OpenAI;
+  private client: OpenAI;
   private readonly maxAgentDepth: number;
   private readonly maxConcurrentAgents: number;
   /** Human approval TTL for destructive requiresApproval tools (dispatcher). */
@@ -398,6 +422,8 @@ export class AgentHarness {
   /** Long-horizon runtime state persisted by task_checkpoint and heartbeat events. */
   private executionState: ExecutionState | null = null;
   private vaultMetrics = { reads: 0, searches: 0, writes: 0, skippedWrites: 0 };
+  private runtimePreferences: RuntimePreferences | null = null;
+  private pendingRiskyPreferenceSummary: string | null = null;
 
   /**
    * Returns the ContextManager for use by context tools factory.
@@ -581,6 +607,158 @@ export class AgentHarness {
     return this.currentPersona ?? this.config.persona;
   }
 
+  private rebuildClient(): void {
+    this.client = new OpenAI({
+      apiKey: this.config.openRouterApiKey,
+      baseURL: this.config.baseURL,
+      maxRetries: 0,
+      defaultHeaders: {
+        "HTTP-Referer": "https://github.com/liminal-ai",
+        "X-Title": "Liminal",
+      },
+    });
+  }
+
+  private askUserDirect(prompt: string): Promise<string> {
+    return new Promise<string>((resolve) => {
+      this.emitter.emit("ask_user", { prompt, resolve });
+    });
+  }
+
+  private async maybeHandleRuntimePreferenceIntent(userMessage: string): Promise<void> {
+    if (this.agentDepth > 0) return;
+    if (!/\b(from now on|use model|switch model|use provider|default to|always use|set .*?(retry|timeout|verbosity|vault|safety|approval))\b/i.test(userMessage)) {
+      return;
+    }
+    const jr = await completeChatJson(this.client, {
+      model: getFastModelSlug(this.config.model),
+      messages: [
+        {
+          role: "system",
+          content:
+            "Extract runtime preference intent from user text. " +
+            "Return JSON object: {detected:boolean, summary:string, risky:boolean, changes:{provider?:{model?:string,baseURL?:string,keySource?:string},runtime?:{uiVerbosity?:'normal'|'quiet',vaultAutoWriteMode?:'off'|'research'|'aggressive',vaultFirstStrict?:boolean,approvalTimeoutMs?:number,destructiveGate?:'strict'|'balanced',rateLimitMaxRetries?:number,transient5xxMaxRetries?:number,retryMaxDelayMs?:number}}}. " +
+            "Only include fields explicitly requested or strongly implied. risky=true for reduced safety controls.",
+        },
+        { role: "user", content: userMessage.slice(0, 2000) },
+      ],
+      maxTokens: 600,
+      temperature: 0.1,
+    });
+    if (!jr.ok || typeof jr.parsed !== "object" || jr.parsed == null) return;
+    const parsed = jr.parsed as {
+      detected?: boolean;
+      summary?: string;
+      risky?: boolean;
+      changes?: Partial<RuntimePreferences>;
+    };
+    if (!parsed.detected || !parsed.changes) return;
+    const summary = (parsed.summary ?? "runtime preference change").slice(0, 240);
+    const risky = Boolean(parsed.risky);
+    this.emitter.emit("runtime_pref_detected", { summary, risky });
+
+    if (risky) {
+      this.pendingRiskyPreferenceSummary = summary;
+      const answer = (
+        await this.askUserDirect(
+          `Risky runtime preference change detected: ${summary}. ` +
+            `Reply exactly "confirm" to apply and persist, or anything else to reject.`
+        )
+      )
+        .trim()
+        .toLowerCase();
+      if (answer !== "confirm") {
+        this.emitter.emit("runtime_pref_rejected", { summary, reason: "user_rejected_or_not_confirmed" });
+        this.pendingRiskyPreferenceSummary = null;
+        return;
+      }
+      this.pendingRiskyPreferenceSummary = null;
+    }
+
+    this.applyRuntimePreferencePatch(parsed.changes);
+    let persisted = false;
+    if (this.config.persistRuntimePreferences) {
+      try {
+        const p = await this.config.persistRuntimePreferences(this.runtimePreferences!);
+        persisted = true;
+        if (typeof p === "string" && p.length > 0) {
+          this.emitter.emit("runtime_pref_persisted", { path: p });
+        }
+      } catch (err) {
+        this.emitter.emit("runtime_pref_rejected", {
+          summary,
+          reason: `persist_failed:${err instanceof Error ? err.message : String(err)}`,
+        });
+      }
+    }
+    this.emitter.emit("runtime_pref_changed", { summary, persisted });
+    this.emitter.emit("text", {
+      delta: `\n[Runtime] Applied preference change: ${summary}${persisted ? " (persisted)" : ""}\n`,
+      channel: "trace",
+    });
+  }
+
+  private applyRuntimePreferencePatch(patch: Partial<RuntimePreferences>): void {
+    const merged: RuntimePreferences = {
+      ...(this.runtimePreferences ?? { updatedAt: Date.now() }),
+      ...patch,
+      version: 1,
+      provider: {
+        ...(this.runtimePreferences?.provider ?? {}),
+        ...(patch.provider ?? {}),
+      },
+      runtime: {
+        ...(this.runtimePreferences?.runtime ?? {}),
+        ...(patch.runtime ?? {}),
+      },
+      updatedAt: Date.now(),
+    };
+    this.runtimePreferences = merged;
+    this.config.runtimePreferences = merged;
+
+    if (merged.provider?.model) {
+      this.config.model = merged.provider.model;
+    }
+    if (merged.provider?.baseURL) {
+      this.config.baseURL = merged.provider.baseURL;
+    }
+    if (merged.provider?.keySource || merged.provider?.baseURL || merged.provider?.model) {
+      const provider = resolveProviderConfig({
+        keySource: merged.provider?.keySource,
+        baseURL: this.config.baseURL,
+        model: this.config.model,
+      });
+      this.config.openRouterApiKey = provider.apiKey;
+      this.config.baseURL = provider.baseURL;
+      this.config.model = provider.model;
+      this.rebuildClient();
+    }
+    if (merged.runtime?.uiVerbosity) {
+      process.env["AGENT_UI_VERBOSITY"] = merged.runtime.uiVerbosity;
+    }
+    if (merged.runtime?.vaultAutoWriteMode) {
+      process.env["AGENT_VAULT_AUTO_WRITE"] = merged.runtime.vaultAutoWriteMode;
+    }
+    if (typeof merged.runtime?.vaultFirstStrict === "boolean") {
+      process.env["AGENT_VAULT_FIRST_STRICT"] = merged.runtime.vaultFirstStrict ? "1" : "0";
+    }
+    if (merged.runtime?.approvalTimeoutMs != null) {
+      process.env["AGENT_APPROVAL_TIMEOUT_MS"] = String(merged.runtime.approvalTimeoutMs);
+    }
+    if (merged.runtime?.destructiveGate) {
+      process.env["AGENT_DESTRUCTIVE_GATE"] = merged.runtime.destructiveGate;
+    }
+    if (merged.runtime?.rateLimitMaxRetries != null) {
+      process.env["AGENT_RATE_LIMIT_MAX_RETRIES"] = String(merged.runtime.rateLimitMaxRetries);
+    }
+    if (merged.runtime?.transient5xxMaxRetries != null) {
+      process.env["AGENT_TRANSIENT_5XX_MAX_RETRIES"] = String(merged.runtime.transient5xxMaxRetries);
+    }
+    if (merged.runtime?.retryMaxDelayMs != null) {
+      process.env["AGENT_RETRY_MAX_DELAY_MS"] = String(merged.runtime.retryMaxDelayMs);
+    }
+  }
+
   private getEvidencePackForCritic(): string {
     if (this.evidenceLog.length === 0) return "";
     return this.evidenceLog
@@ -599,9 +777,54 @@ export class AgentHarness {
   private get retryDelayMs() {
     return this.config.retryDelayMs ?? 1500;
   }
+  private get retryMaxDelayMs() {
+    const raw = process.env["AGENT_RETRY_MAX_DELAY_MS"]?.trim();
+    if (raw) {
+      const n = parseInt(raw, 10);
+      if (Number.isFinite(n)) return Math.max(1_000, Math.min(600_000, n));
+    }
+    // Default cap tuned so exponential retries can reach ~4 minutes.
+    return 240_000;
+  }
+  private get rateLimitMaxRetries() {
+    const cfg = this.config.maxRateLimitRetries;
+    if (typeof cfg === "number" && Number.isFinite(cfg)) return Math.max(0, cfg);
+    const raw = process.env["AGENT_RATE_LIMIT_MAX_RETRIES"]?.trim();
+    if (raw) {
+      const n = parseInt(raw, 10);
+      if (Number.isFinite(n)) return Math.max(0, n);
+    }
+    // 120 retries with capped exponential backoff handles prolonged provider throttling.
+    return 120;
+  }
+  private get transient5xxMaxRetries() {
+    const cfg = this.config.maxTransient5xxRetries;
+    if (typeof cfg === "number" && Number.isFinite(cfg)) return Math.max(0, cfg);
+    const raw = process.env["AGENT_TRANSIENT_5XX_MAX_RETRIES"]?.trim();
+    if (raw) {
+      const n = parseInt(raw, 10);
+      if (Number.isFinite(n)) return Math.max(0, n);
+    }
+    return 60;
+  }
+  private computeRetryDelayMs(
+    attempt: number,
+    mode: "normal" | "rate_limited" | "provider_unavailable"
+  ): number {
+    const boosted = mode === "rate_limited" || mode === "provider_unavailable";
+    // Boosted paths (429/5xx) target ~4 minutes by around retry 7.
+    const base = boosted ? Math.max(4_000, this.retryDelayMs) : this.retryDelayMs;
+    const exp = Math.min(attempt, 10);
+    const raw = Math.min(this.retryMaxDelayMs, Math.round(base * Math.pow(2, exp)));
+    const jitter = Math.round(raw * 0.2 * (Math.random() * 2 - 1));
+    return Math.max(250, raw + jitter);
+  }
 
   constructor(config: AgentConfig) {
     this.config = config;
+    this.runtimePreferences = config.runtimePreferences ?? null;
+    if (this.runtimePreferences?.provider?.model) this.config.model = this.runtimePreferences.provider.model;
+    if (this.runtimePreferences?.provider?.baseURL) this.config.baseURL = this.runtimePreferences.provider.baseURL;
     this.taskId = config.taskId ?? crypto.randomUUID();
     this.agentDepth = config.agentDepth ?? 0;
     this.maxAgentDepth = config.maxAgentDepth ?? 3;
@@ -635,6 +858,17 @@ export class AgentHarness {
         "X-Title": "Liminal",
       },
     });
+    if (this.runtimePreferences?.provider?.keySource) {
+      const provider = resolveProviderConfig({
+        keySource: this.runtimePreferences.provider.keySource,
+        baseURL: this.config.baseURL,
+        model: this.config.model,
+      });
+      this.config.openRouterApiKey = provider.apiKey;
+      this.config.baseURL = provider.baseURL;
+      this.config.model = provider.model;
+      this.rebuildClient();
+    }
 
     const safetyJudge =
       config.safetyJudge?.enabled === true
@@ -700,6 +934,7 @@ export class AgentHarness {
     this.vaultMetrics = { reads: 0, searches: 0, writes: 0, skippedWrites: 0 };
     this.webSearchQueriesThisTurn = [];
     this.failedSearchIntentCounts = new Map();
+    await this.maybeHandleRuntimePreferenceIntent(userMessage);
 
     if (this.config.workingStateEnabled !== false) {
       this.context.initEpistemicState(userMessage);
@@ -1735,6 +1970,10 @@ export class AgentHarness {
         this.agentDepth === 0 &&
         this.registry.has("verify_result") &&
         (distinctToolCount >= criticMinTools || looksPathOrCodeHeavy(assistantText));
+      const skipCriticForSimpleIntrospection =
+        distinctToolCount <= 1 &&
+        this.toolsUsedThisTurn.filter((n) => n !== "think" && n !== "plan").length === 0 &&
+        isSimpleIntrospectionPrompt(this.lastUserMessage);
       const runHeuristicCritic =
         process.env["AGENT_CRITIC"] === "1" &&
         !this.criticConsumedThisSend &&
@@ -1743,7 +1982,7 @@ export class AgentHarness {
         this.registry.has("verify_result") &&
         shouldRunCriticPass(assistantText);
 
-      if (runForcedCritic || runHeuristicCritic) {
+      if ((runForcedCritic || runHeuristicCritic) && !skipCriticForSimpleIntrospection) {
         this.criticConsumedThisSend = true;
         try {
           const vr = await this.dispatcher.directCall("verify_result", {
@@ -1863,20 +2102,32 @@ export class AgentHarness {
         lastErr = err;
         const msg = describeError(err);
 
-        if (!isRetryable(err) || attempt === this.maxRetries) {
+        const rateLimited = isRateLimitError(err);
+        const providerUnavailable = isProviderUnavailableError(err);
+        const maxRetriesForError = rateLimited
+          ? this.rateLimitMaxRetries
+          : providerUnavailable
+          ? this.transient5xxMaxRetries
+          : this.maxRetries;
+        if (!isRetryable(err) || attempt === maxRetriesForError) {
           throw new Error(msg);
         }
 
-        const delay = this.retryDelayMs * Math.pow(2, attempt);
+        const delay = this.computeRetryDelayMs(
+          attempt,
+          rateLimited ? "rate_limited" : providerUnavailable ? "provider_unavailable" : "normal"
+        );
         this.emitter.emit("provider_retry", {
           attempt: attempt + 1,
-          maxAttempts: this.maxRetries + 1,
+          maxAttempts: maxRetriesForError + 1,
           message: msg,
           backoffMs: delay,
         });
         if (!isUiQuiet()) {
           this.emitter.emit("text", {
-            delta: `\n⟳ ${msg} — retrying in ${Math.round(delay / 1000)}s (attempt ${attempt + 1}/${this.maxRetries})…\n`,
+            delta:
+              `\n⟳ ${msg} — retrying in ${Math.round(delay / 1000)}s ` +
+              `(attempt ${attempt + 1}/${maxRetriesForError})…\n`,
           });
         }
 

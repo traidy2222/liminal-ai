@@ -94,3 +94,12 @@ export type { DistilledOutput } from "./output_distill.js";
 export { appendFailureLog, failureLogPath } from "./failure_log.js";
 export { attachSessionEventLog, maybeAttachSessionEventLog } from "./session_event_log.js";
 export { appendGoldenEvalRecord } from "./golden_eval.js";
+export { resolveProviderConfig } from "./provider_config.js";
+export type { ProviderConfig, ProviderConfigOverrides } from "./provider_config.js";
+export {
+  RUNTIME_PREFS_FILE,
+  getRuntimePrefsPath,
+  loadRuntimePreferences,
+  saveRuntimePreferences,
+} from "./runtime_prefs.js";
+export type { RuntimePreferences, ProviderKeySource } from "./runtime_prefs.js";

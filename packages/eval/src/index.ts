@@ -11,7 +11,7 @@
  *   --any-pass       With --repeat: pass if any run passes (default: all k must pass).
  *
  * Exit code 0 = all scenarios passed. Exit code 1 = one or more failed.
- * Requires: OPENROUTER_API_KEY env var.
+ * Requires: AGENT_API_KEY (preferred) or provider-specific key env var.
  *
  * Optional: AGENT_EVAL_JSON_SINK=1 appends structured lines to .agent_eval_runs/runs.jsonl
  * and writes .agent_eval_runs/summary-<ts>.json after the suite.
@@ -212,8 +212,20 @@ async function runScenarioWithRepeat(
 }
 
 async function main() {
-  if (!process.env["OPENROUTER_API_KEY"]) {
-    console.error(fmt(RED, "✗ OPENROUTER_API_KEY is not set — eval requires a real API key."));
+  const hasKey = Boolean(
+    process.env["AGENT_API_KEY"] ||
+      process.env["OPENROUTER_API_KEY"] ||
+      process.env["OPENAI_API_KEY"] ||
+      process.env["ANTHROPIC_API_KEY"] ||
+      process.env["XAI_API_KEY"]
+  );
+  if (!hasKey) {
+    console.error(
+      fmt(
+        RED,
+        "✗ No provider API key set — define AGENT_API_KEY (preferred) or OPENROUTER/OPENAI/ANTHROPIC/XAI key."
+      )
+    );
     process.exit(1);
   }
 

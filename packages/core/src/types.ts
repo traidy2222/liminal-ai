@@ -1,6 +1,7 @@
 import type { ChatCompletionMessageParam } from "openai/resources/chat/completions.js";
 import type { TaskOrchestrator } from "./orchestrator.js";
 import type { WorldContextOptions } from "./world_context.js";
+import type { RuntimePreferences } from "./runtime_prefs.js";
 
 export type Message = ChatCompletionMessageParam;
 
@@ -395,6 +396,21 @@ export interface AgentEventMap {
     noteTitle?: string;
     reason?: string;
   };
+  runtime_pref_detected: {
+    summary: string;
+    risky: boolean;
+  };
+  runtime_pref_changed: {
+    summary: string;
+    persisted: boolean;
+  };
+  runtime_pref_persisted: {
+    path: string;
+  };
+  runtime_pref_rejected: {
+    summary: string;
+    reason: string;
+  };
 }
 
 export type AgentEventName = keyof AgentEventMap;
@@ -444,6 +460,16 @@ export interface AgentConfig {
   maxRetries?: number;
   /** Base delay in ms between retries — doubles each attempt (default: 1500) */
   retryDelayMs?: number;
+  /**
+   * Max retries specifically for provider rate-limit failures (429).
+   * Default: 120. Higher values allow much longer persistence under throttling.
+   */
+  maxRateLimitRetries?: number;
+  /**
+   * Max retries for transient provider-unavailable/server failures (5xx, bad gateway).
+   * Default: 60.
+   */
+  maxTransient5xxRetries?: number;
   /** Shared orchestrator instance. Root creates one; children receive same instance. */
   orchestrator?: TaskOrchestrator;
   /** Unique task ID for this harness instance. Auto-generated if not provided. */
@@ -488,6 +514,10 @@ export interface AgentConfig {
    * Default / env: AGENT_APPROVAL_TIMEOUT_MS (10s–600s, default 60s).
    */
   approvalTimeoutMs?: number;
+  /** Optional loaded runtime preferences used as session defaults/overrides. */
+  runtimePreferences?: RuntimePreferences | null;
+  /** Optional persistence hook invoked when runtime preferences are changed in-session. */
+  persistRuntimePreferences?: (prefs: RuntimePreferences) => Promise<string | void> | string | void;
 }
 
 // Re-export so consumers can type worldContext without importing world_context directly

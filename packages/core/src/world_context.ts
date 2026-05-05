@@ -1069,6 +1069,11 @@ export async function buildWorldContextMessage(options?: WorldContextOptions): P
   lines.push(`CWD:        ${cwd}`);
   lines.push(`User:       ${user} @ ${host}  →  ${home}`);
   lines.push(`Runtime:    Node.js ${process.version}`);
+  const configuredModel = process.env["AGENT_MODEL"]?.trim() || "openrouter/owl-alpha";
+  const configuredBaseURL =
+    process.env["AGENT_API_BASE_URL"]?.trim() || "https://openrouter.ai/api/v1";
+  lines.push(`Harness:    Liminal AgentHarness`);
+  lines.push(`LLM config: model=${configuredModel}  ·  baseURL=${configuredBaseURL}`);
 
   // ── Project ──────────────────────────────────────────────────────────────────
   if (project) {

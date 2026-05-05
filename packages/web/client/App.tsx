@@ -236,6 +236,13 @@ function MessageView({ entry }: { entry: MessageEntry }) {
         </div>
       );
 
+    case "provider_retry":
+      return (
+        <div style={styles.traceLine}>
+          <span style={{ color: "#ffaa00", fontSize: 12 }}>{entry.text}</span>
+        </div>
+      );
+
     case "tool_call": {
       const statusColors: Record<string, string> = {
         streaming: "#ffaa00",

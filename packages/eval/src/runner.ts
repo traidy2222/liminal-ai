@@ -12,6 +12,8 @@ import { join } from "node:path";
 import {
   AgentHarness,
   appendGoldenEvalRecord,
+  loadRuntimePreferences,
+  resolveProviderConfig,
   resolveWorkspaceRoot,
   type AgentConfig,
   type ToolResult,
@@ -276,28 +278,19 @@ function telemetryFromTraces(traces: TraceEvent[][]): Pick<
 
 // ─── Runner ───────────────────────────────────────────────────────────────────
 
-const OWL_EVAL_MODEL = "openrouter/owl-alpha";
-
-function resolveEvalModel(): string {
-  const requested = process.env["EVAL_MODEL"]?.trim();
-  if (requested && requested !== OWL_EVAL_MODEL) {
-    throw new Error(
-      `EVAL_MODEL is pinned for this repo. Requested "${requested}", but only "${OWL_EVAL_MODEL}" is allowed.`
-    );
-  }
-  return OWL_EVAL_MODEL;
-}
-
-export const EVAL_MODEL = resolveEvalModel();
+const runtimePreferences = await loadRuntimePreferences();
+const provider = resolveProviderConfig(runtimePreferences?.provider);
+export const EVAL_MODEL = process.env["EVAL_MODEL"]?.trim() || provider.model;
 
 /** Build a minimal AgentConfig suitable for eval runs. */
 function makeEvalConfig(maxRounds: number, timeoutMs: number): AgentConfig {
   return {
-    openRouterApiKey: process.env["OPENROUTER_API_KEY"] ?? "",
+    openRouterApiKey: provider.apiKey,
     model: EVAL_MODEL,
-    baseURL: "https://openrouter.ai/api/v1",
+    baseURL: provider.baseURL,
     maxToolRoundsPerTurn: maxRounds,
     workingStateEnabled: true,
+    runtimePreferences,
     context: {
       modelMaxTokens: 32_000,
       thresholdFraction: 0.8,

@@ -4,7 +4,13 @@ Use `.env.example` as canonical source. This document groups major flags by subs
 
 ## Core
 
+- `AGENT_API_KEY`
+- `AGENT_API_BASE_URL`
+- `AGENT_MODEL`
 - `OPENROUTER_API_KEY`
+- `OPENAI_API_KEY`
+- `ANTHROPIC_API_KEY`
+- `XAI_API_KEY`
 - `PORT`
 - `AGENT_WORKSPACE_ROOT`
 - `AGENT_TOOL_LAZY`
@@ -53,6 +59,9 @@ Use `.env.example` as canonical source. This document groups major flags by subs
 - `AGENT_CRITIC_EVIDENCE`
 - `AGENT_CRITIC_MIN_TOOLS`
 - `AGENT_FAILURE_LOG`
+- `AGENT_RATE_LIMIT_MAX_RETRIES`
+- `AGENT_TRANSIENT_5XX_MAX_RETRIES`
+- `AGENT_RETRY_MAX_DELAY_MS`
 
 ## Evaluation and Session Logging
 
@@ -65,6 +74,7 @@ Use `.env.example` as canonical source. This document groups major flags by subs
 - strict vault-first blocking is opt-in (`AGENT_VAULT_FIRST_STRICT=1`)
 - default vault auto-write behavior is research-oriented unless explicitly disabled
 - latest/current web queries are time-anchored to current year by tool normalization
+- conversational self-management persists approved settings into `.agent_runtime_prefs.json`
 
 ## Recommended Baseline Profiles
 

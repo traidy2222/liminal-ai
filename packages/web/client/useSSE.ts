@@ -9,6 +9,7 @@ function sanitizeDeltaText(text: string): string {
 export type MessageEntry =
   | { kind: "user"; text: string }
   | { kind: "assistant"; text: string; streaming: boolean }
+  | { kind: "provider_retry"; text: string }
   | {
       kind: "tool_call";
       callId: string;
@@ -88,6 +89,12 @@ type Action =
   | { type: "persona_changed"; payload: { name: string } }
   | { type: "session_reset" };
 
+function stripTrailingProviderRetry(messages: MessageEntry[]): MessageEntry[] {
+  const last = messages.at(-1);
+  if (last?.kind === "provider_retry") return messages.slice(0, -1);
+  return messages;
+}
+
 function reducer(state: SSEState, action: Action): SSEState {
   switch (action.type) {
     case "init_config":
@@ -139,12 +146,13 @@ function reducer(state: SSEState, action: Action): SSEState {
           messages: [...state.messages, { kind: "trace", text: action.payload.delta }],
         };
       }
-      const last = state.messages.at(-1);
+      const baseMessages = stripTrailingProviderRetry(state.messages);
+      const last = baseMessages.at(-1);
       if (last?.kind === "assistant" && last.streaming) {
         return {
           ...state,
           messages: [
-            ...state.messages.slice(0, -1),
+            ...baseMessages.slice(0, -1),
             { ...last, text: last.text + action.payload.delta },
           ],
         };
@@ -152,7 +160,7 @@ function reducer(state: SSEState, action: Action): SSEState {
       return {
         ...state,
         messages: [
-          ...state.messages,
+          ...baseMessages,
           { kind: "assistant", text: action.payload.delta, streaming: true },
         ],
       };
@@ -161,17 +169,17 @@ function reducer(state: SSEState, action: Action): SSEState {
     case "provider_retry": {
       if (state.uiVerbosity === "quiet") return state;
       const { attempt, maxAttempts, message, backoffMs } = action.payload;
-      const line = `⟳ Provider retry ${attempt}/${maxAttempts} in ${Math.round(backoffMs / 1000)}s: ${message.slice(0, 220)}\n`;
-      const lastT = state.messages.at(-1);
-      if (lastT?.kind === "trace") {
+      const line = `⟳ Provider retry ${attempt}/${maxAttempts} in ${Math.round(backoffMs / 1000)}s: ${message.slice(0, 220)}`;
+      const last = state.messages.at(-1);
+      if (last?.kind === "provider_retry") {
         return {
           ...state,
-          messages: [...state.messages.slice(0, -1), { kind: "trace", text: lastT.text + line }],
+          messages: [...state.messages.slice(0, -1), { kind: "provider_retry", text: line }],
         };
       }
       return {
         ...state,
-        messages: [...state.messages, { kind: "trace", text: line }],
+        messages: [...state.messages, { kind: "provider_retry", text: line }],
       };
     }
 
@@ -181,7 +189,7 @@ function reducer(state: SSEState, action: Action): SSEState {
       return {
         ...state,
         messages: [
-          ...state.messages,
+          ...stripTrailingProviderRetry(state.messages),
           { kind: "tool_call", callId: action.payload.callId, name, argsJson: "", status: "streaming" },
         ],
       };
@@ -256,13 +264,18 @@ function reducer(state: SSEState, action: Action): SSEState {
         ...state,
         busy: false,
         contextSnapshot: action.payload.contextSnapshot,
-        messages: state.messages.map((m) =>
+        messages: stripTrailingProviderRetry(state.messages).map((m) =>
           m.kind === "assistant" && m.streaming ? { ...m, streaming: false } : m
         ),
       };
 
     case "error":
-      return { ...state, busy: false, error: action.payload.message };
+      return {
+        ...state,
+        busy: false,
+        error: action.payload.message,
+        messages: stripTrailingProviderRetry(state.messages),
+      };
 
     case "subtask_spawned":
       return {
@@ -438,6 +451,40 @@ export function useSSE() {
       es.addEventListener("subtask_output", (e: MessageEvent) =>
         dispatch({ type: "subtask_output", payload: JSON.parse(e.data) })
       );
+      es.addEventListener("runtime_pref_detected", (e: MessageEvent) => {
+        const p = JSON.parse(e.data) as { summary: string; risky: boolean };
+        dispatch({
+          type: "text",
+          payload: {
+            channel: "trace",
+            delta: `\n[prefs] detected risky=${p.risky ? "yes" : "no"} ${p.summary}\n`,
+          },
+        });
+      });
+      es.addEventListener("runtime_pref_changed", (e: MessageEvent) => {
+        const p = JSON.parse(e.data) as { summary: string; persisted: boolean };
+        dispatch({
+          type: "text",
+          payload: {
+            channel: "trace",
+            delta: `\n[prefs] changed persisted=${p.persisted ? "yes" : "no"} ${p.summary}\n`,
+          },
+        });
+      });
+      es.addEventListener("runtime_pref_persisted", (e: MessageEvent) => {
+        const p = JSON.parse(e.data) as { path: string };
+        dispatch({
+          type: "text",
+          payload: { channel: "trace", delta: `\n[prefs] persisted path=${p.path}\n` },
+        });
+      });
+      es.addEventListener("runtime_pref_rejected", (e: MessageEvent) => {
+        const p = JSON.parse(e.data) as { summary: string; reason: string };
+        dispatch({
+          type: "text",
+          payload: { channel: "trace", delta: `\n[prefs] rejected ${p.summary} (${p.reason})\n` },
+        });
+      });
       es.addEventListener("ask_user_answered", () => {});
       es.addEventListener("approval_decision", () => {});
       es.addEventListener("tool_timing", () => {});

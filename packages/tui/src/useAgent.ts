@@ -15,6 +15,7 @@ function sanitizeDeltaText(text: string): string {
 export type MessageEntry =
   | { kind: "user"; text: string }
   | { kind: "assistant"; text: string; streaming: boolean }
+  | { kind: "provider_retry"; text: string }
   | {
       kind: "tool_call";
       callId: string;
@@ -79,6 +80,12 @@ type Action =
   | { type: "context_compressed"; beforePct: number; afterPct: number; rounds: number }
   | { type: "persona_changed"; name: string };
 
+function stripTrailingProviderRetry(messages: MessageEntry[]): MessageEntry[] {
+  const last = messages.at(-1);
+  if (last?.kind === "provider_retry") return messages.slice(0, -1);
+  return messages;
+}
+
 function reducer(state: AgentState, action: Action): AgentState {
   switch (action.type) {
     case "user_message":
@@ -90,15 +97,16 @@ function reducer(state: AgentState, action: Action): AgentState {
       };
 
     case "text_delta": {
-      const last = state.messages.at(-1);
+      const baseMessages = stripTrailingProviderRetry(state.messages);
+      const last = baseMessages.at(-1);
       if (last?.kind === "assistant" && last.streaming) {
         const updated = { ...last, text: last.text + action.delta };
-        return { ...state, messages: [...state.messages.slice(0, -1), updated] };
+        return { ...state, messages: [...baseMessages.slice(0, -1), updated] };
       }
       return {
         ...state,
         messages: [
-          ...state.messages,
+          ...baseMessages,
           { kind: "assistant", text: action.delta, streaming: true },
         ],
       };
@@ -125,18 +133,15 @@ function reducer(state: AgentState, action: Action): AgentState {
       if (isAgentUiQuiet()) return state;
       const line =
         `⟳ Provider retry ${action.attempt}/${action.maxAttempts} in ${Math.round(action.backoffMs / 1000)}s: ` +
-        `${action.message.slice(0, 220)}\n`;
-      const lastT = state.messages.at(-1);
-      if (lastT?.kind === "trace") {
+        `${action.message.slice(0, 220)}`;
+      const last = state.messages.at(-1);
+      if (last?.kind === "provider_retry") {
         return {
           ...state,
-          messages: [
-            ...state.messages.slice(0, -1),
-            { kind: "trace", text: lastT.text + line },
-          ],
+          messages: [...state.messages.slice(0, -1), { kind: "provider_retry", text: line }],
         };
       }
-      return { ...state, messages: [...state.messages, { kind: "trace", text: line }] };
+      return { ...state, messages: [...state.messages, { kind: "provider_retry", text: line }] };
     }
 
     case "session_reset":
@@ -163,8 +168,7 @@ function reducer(state: AgentState, action: Action): AgentState {
         return state;
       return {
         ...state,
-        messages: [
-          ...state.messages,
+        messages: stripTrailingProviderRetry(state.messages).concat([
           {
             kind: "tool_call",
             callId: action.callId,
@@ -172,7 +176,7 @@ function reducer(state: AgentState, action: Action): AgentState {
             argsJson: "",
             status: "streaming",
           },
-        ],
+        ]),
       };
 
     case "tool_delta": {
@@ -197,7 +201,8 @@ function reducer(state: AgentState, action: Action): AgentState {
       return { ...state, pendingApproval: null };
 
     case "tool_result": {
-      const messages = state.messages
+      const baseMessages = stripTrailingProviderRetry(state.messages);
+      return { ...state, messages: baseMessages
         .map((m) =>
           m.kind === "tool_call" && m.callId === action.callId
             ? { ...m, status: action.ok ? ("done" as const) : ("error" as const) }
@@ -210,8 +215,7 @@ function reducer(state: AgentState, action: Action): AgentState {
             output: action.output,
             ok: action.ok,
           },
-        ]);
-      return { ...state, messages };
+        ]) };
     }
 
     case "plan_step_done": {
@@ -237,14 +241,14 @@ function reducer(state: AgentState, action: Action): AgentState {
       return { ...state, pendingAskUser: null };
 
     case "turn_end": {
-      const messages = state.messages.map((m) =>
+      const messages = stripTrailingProviderRetry(state.messages).map((m) =>
         m.kind === "assistant" && m.streaming ? { ...m, streaming: false } : m
       );
       return { ...state, messages, contextSnapshot: action.snapshot, busy: false };
     }
 
     case "error":
-      return { ...state, error: action.msg, busy: false };
+      return { ...state, error: action.msg, busy: false, messages: stripTrailingProviderRetry(state.messages) };
 
     case "think":
       if (isAgentUiQuiet()) return state;
@@ -505,6 +509,30 @@ export function useAgent(harness: AgentHarness) {
           `\n[vault] action=${p.action} ok=${p.ok ? "yes" : "no"}` +
           `${p.noteTitle ? ` title="${p.noteTitle}"` : ""}` +
           `${p.reason ? ` reason="${p.reason}"` : ""}\n`,
+      })
+    );
+    emitter.on("runtime_pref_detected", (p) =>
+      dispatch({
+        type: "trace_delta",
+        delta: `\n[prefs] detected risky=${p.risky ? "yes" : "no"} ${p.summary}\n`,
+      })
+    );
+    emitter.on("runtime_pref_changed", (p) =>
+      dispatch({
+        type: "trace_delta",
+        delta: `\n[prefs] changed persisted=${p.persisted ? "yes" : "no"} ${p.summary}\n`,
+      })
+    );
+    emitter.on("runtime_pref_persisted", (p) =>
+      dispatch({
+        type: "trace_delta",
+        delta: `\n[prefs] persisted path=${p.path}\n`,
+      })
+    );
+    emitter.on("runtime_pref_rejected", (p) =>
+      dispatch({
+        type: "trace_delta",
+        delta: `\n[prefs] rejected ${p.summary} (${p.reason})\n`,
       })
     );
     // ask_user_answered and approval_decision are informational — no UI state change needed

@@ -23,40 +23,54 @@ Most agent stacks are "model + tools + prompt". Liminal is focused on runtime gu
 
 ## Fast Start
 
-### Prerequisites
+### 5-minute setup
 
+1) **Prerequisites**
 - Node.js 22+
 - npm 10+
-- OpenRouter/OpenAI-compatible API key
+- Any OpenAI-compatible provider key (OpenRouter/OpenAI/xAI/Anthropic-compatible gateway)
 
-### Install
-
+2) **Install**
 ```bash
 npm install
 ```
 
-### Minimal `.env`
-
+3) **Create `.env`**
 ```bash
-OPENROUTER_API_KEY=...
+AGENT_API_KEY=your_key_here
+AGENT_API_BASE_URL=https://openrouter.ai/api/v1
+AGENT_MODEL=openrouter/owl-alpha
 PORT=3001
 ```
 
-### Run
-
+4) **Build once**
 ```bash
 npm run build
+```
+
+5) **Run an interface**
+```bash
 npm run tui
 # or
 npm run web
 ```
 
-### Verify
+### Provider swap examples
 
-```bash
-npm run typecheck
-npm run test
-```
+- **OpenRouter**
+  - `AGENT_API_BASE_URL=https://openrouter.ai/api/v1`
+  - `AGENT_MODEL=openrouter/owl-alpha`
+- **OpenAI-compatible endpoint**
+  - `AGENT_API_BASE_URL=<your-compatible-base-url>`
+  - `AGENT_MODEL=<provider-model-slug>`
+- **Fallback key envs (if `AGENT_API_KEY` is unset)**
+  - `OPENROUTER_API_KEY`, `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `XAI_API_KEY`
+
+### What success looks like
+
+- TUI header shows model + context percentage.
+- Asking "what model/harness are you using?" returns explicit model/base URL and `Liminal AgentHarness`.
+- `npm run typecheck` and `npm run test --workspace=@liminal/core` both pass.
 
 ## Core Runtime Guarantees (Most Important)
 
@@ -133,7 +147,9 @@ npm run eval -w packages/eval
 Use `.env.example` for full options.
 
 - **Minimal stable**
-  - `OPENROUTER_API_KEY`
+  - `AGENT_API_KEY`
+  - `AGENT_API_BASE_URL`
+  - `AGENT_MODEL`
   - `PORT=3001`
 - **Safety-first**
   - `AGENT_SAFETY_JUDGE=1`
@@ -162,6 +178,17 @@ Deep technical docs live under `docs/`:
 - `[docs/telemetry-and-events.md](docs/telemetry-and-events.md)` — event catalog and observability semantics
 - `[docs/evaluation.md](docs/evaluation.md)` — eval scenarios, guarantees, and extension patterns
 - `[docs/troubleshooting.md](docs/troubleshooting.md)` — common failures and runbooks
+
+## Common Tasks
+
+- **Switch model/provider now (persisted):**
+  - "From now on use `<model-slug>` and persist this."
+- **Enable safer behavior:**
+  - set `AGENT_SAFETY_JUDGE=1`, `AGENT_DESTRUCTIVE_GATE=balanced`
+- **Research-heavy mode:**
+  - set `AGENT_QUERY_REWRITE=1`, `AGENT_RECALL_EVERY_N=3`, `AGENT_VAULT_AUTO_WRITE=research`
+- **Diagnose streaming/retry issues:**
+  - see `[docs/ui-streaming.md](docs/ui-streaming.md)` and `[docs/troubleshooting.md](docs/troubleshooting.md)`
 
 ## Contributing
 

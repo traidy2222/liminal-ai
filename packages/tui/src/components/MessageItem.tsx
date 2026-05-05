@@ -79,6 +79,18 @@ export function MessageItem({ entry, width }: Props) {
       );
     }
 
+    case "provider_retry": {
+      if (!entry.text.trim()) return null;
+      const t = entry.text.length > 240 ? entry.text.slice(0, 240) + "…" : entry.text;
+      return (
+        <Box paddingLeft={2} width={w}>
+          <Text color="yellow" dimColor wrap="truncate-end">
+            {t}
+          </Text>
+        </Box>
+      );
+    }
+
     /* ── Tool call ──────────────────────────────────────── */
     case "tool_call": {
       const { icon, color } = TOOL_STATUS[entry.status] ?? { icon: "?", color: "white" as const };
