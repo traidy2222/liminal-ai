@@ -59,5 +59,46 @@ export function guardToolArgs(
     }
   }
 
+  if (toolName === "plan") {
+    const steps = args["steps"];
+    if (Array.isArray(steps) && steps.length > 40) {
+      return "Plan exceeds maximum 40 steps; split into milestones/contracts.";
+    }
+    const contract = args["contract"];
+    if (contract && typeof contract === "object") {
+      const c = contract as Record<string, unknown>;
+      const maxSteps = Number(c["max_steps"] ?? 0);
+      const maxMinutes = Number(c["max_minutes"] ?? 0);
+      const maxToolCalls = Number(c["max_tool_calls"] ?? 0);
+      if (Number.isFinite(maxSteps) && maxSteps > 200) {
+        return "Execution contract max_steps too high (>200).";
+      }
+      if (Number.isFinite(maxMinutes) && maxMinutes > 10_080) {
+        return "Execution contract max_minutes too high (>10080).";
+      }
+      if (Number.isFinite(maxToolCalls) && maxToolCalls > 2_000) {
+        return "Execution contract max_tool_calls too high (>2000).";
+      }
+    }
+  }
+
+  if (toolName === "vault_write") {
+    const title = String(args["title"] ?? "").trim();
+    const content = String(args["content"] ?? "").trim();
+    if (!title) return "vault_write title must be non-empty.";
+    if (content.length < 80) {
+      return "vault_write content is too short for durable wiki storage (min 80 chars).";
+    }
+    if (content.length > 120_000) {
+      return "vault_write content exceeds max length (120k).";
+    }
+    if (
+      process.env["AGENT_VAULT_REQUIRE_LINKS"] === "1" &&
+      !content.includes("[[")
+    ) {
+      return "vault_write requires at least one [[Wikilink]] when AGENT_VAULT_REQUIRE_LINKS=1.";
+    }
+  }
+
   return null;
 }

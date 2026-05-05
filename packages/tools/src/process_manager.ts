@@ -216,6 +216,11 @@ export const readProcessOutputTool = defineTool({
     properties: {
       pid: { type: "number", description: "Process ID to read output from" },
       tail_chars: { type: "number", description: "Characters to return from end (default: 1000)" },
+      health_url: {
+        type: "string",
+        description:
+          "When AGENT_PROCESS_HEALTH=1, optional URL (e.g. http://127.0.0.1:4173/) to GET once and append status line",
+      },
     },
     required: ["pid"],
     additionalProperties: false,
@@ -223,6 +228,7 @@ export const readProcessOutputTool = defineTool({
   handler: async (args) => {
     const pid = args["pid"] as number;
     const tail = (args["tail_chars"] as number | undefined) ?? 1000;
+    const healthUrl = (args["health_url"] as string | undefined)?.trim();
     const record = registry.get(pid);
 
     if (!record) {
@@ -237,9 +243,22 @@ export const readProcessOutputTool = defineTool({
       ? "running"
       : `exited (code ${record.exitCode})`;
 
+    let healthLine = "";
+    if (process.env["AGENT_PROCESS_HEALTH"] === "1" && healthUrl) {
+      try {
+        const ac = new AbortController();
+        const t = setTimeout(() => ac.abort(), 3_000);
+        const r = await fetch(healthUrl, { method: "GET", signal: ac.signal });
+        clearTimeout(t);
+        healthLine = `\nHealth probe: GET ${healthUrl} → HTTP ${r.status}`;
+      } catch (e) {
+        healthLine = `\nHealth probe: GET ${healthUrl} → failed (${String(e).slice(0, 120)})`;
+      }
+    }
+
     return {
       ok: true,
-      output: `PID ${pid} [${status}]\n${output || "(no output yet)"}`,
+      output: `PID ${pid} [${status}]\n${output || "(no output yet)"}${healthLine}`,
     };
   },
 });

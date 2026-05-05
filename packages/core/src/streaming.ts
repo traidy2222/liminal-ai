@@ -1,6 +1,13 @@
 import type { AccumulatedToolCall, StreamChunk } from "./types.js";
 import type OpenAI from "openai";
 
+function sanitizeStreamText(text: string): string {
+  return text
+    .replace(/\uFFFD/g, "")
+    .replace(/([A-Za-z])⚙([A-Za-z])/g, "$1$2")
+    .replace(/[^\x09\x0A\x0D\x20-\x7E]/g, "");
+}
+
 export class StreamAccumulator {
   private text = "";
   private toolCallMap: Map<number, AccumulatedToolCall> = new Map();
@@ -16,8 +23,9 @@ export class StreamAccumulator {
     };
 
     if (delta.content) {
-      this.text += delta.content;
-      result.textDelta = delta.content;
+      const cleaned = sanitizeStreamText(delta.content);
+      this.text += cleaned;
+      result.textDelta = cleaned;
     }
 
     if (delta.tool_calls) {

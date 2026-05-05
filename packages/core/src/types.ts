@@ -152,6 +152,75 @@ export interface EpistemicState {
   harnessNotes?: string;
 }
 
+export interface ExecutionContract {
+  id: string;
+  title: string;
+  objective: string;
+  successCriteria: string[];
+  maxSteps: number;
+  maxMinutes: number;
+  maxToolCalls: number;
+  rollbackPlan?: string;
+  allowedTools?: string[];
+  status: "planned" | "active" | "verified" | "failed" | "cancelled";
+  startedAt?: number;
+  completedAt?: number;
+}
+
+export interface MilestonePlan {
+  id: string;
+  title: string;
+  objective: string;
+  status: "todo" | "doing" | "done" | "blocked";
+  contractIds: string[];
+}
+
+export interface MissionPlan {
+  id: string;
+  title: string;
+  objective: string;
+  horizon: "short" | "mid" | "long";
+  status: "planned" | "active" | "done" | "blocked";
+  milestoneIds: string[];
+}
+
+export interface CommitmentRule {
+  id: string;
+  label: string;
+  rationale: string;
+  severity: "low" | "med" | "high";
+  scope: "safety" | "architecture" | "quality" | "user_constraint";
+  pattern?: string;
+  blockedTools?: string[];
+}
+
+export interface RecoveryRecord {
+  at: number;
+  reason: string;
+  strategy: "retry" | "replan" | "escalate" | "ask_user";
+  notes?: string;
+}
+
+export interface ExecutionState {
+  version: 1;
+  mission: MissionPlan | null;
+  milestones: MilestonePlan[];
+  contracts: ExecutionContract[];
+  activeContractId?: string;
+  commitments: CommitmentRule[];
+  worldFacts: string[];
+  intentFacts: string[];
+  unresolvedQuestions: string[];
+  driftScore: number;
+  lastReplanAt?: number;
+  checkpoints: {
+    lastSavedAt?: number;
+    checkpointId?: string;
+    consecutiveFailures: number;
+  };
+  recoveryLog: RecoveryRecord[];
+}
+
 // ─── Multi-agent orchestration ────────────────────────────────────────────────
 
 export interface ChildAgentConfig {
@@ -191,18 +260,38 @@ export interface TurnEndHarnessMetrics {
   workingStatePreview?: string;
   /** Full structured epistemic snapshot at turn end (optional). */
   epistemicState?: EpistemicState;
+  /** Structured long-horizon execution state snapshot (optional). */
+  executionState?: ExecutionState;
+  vaultMetrics?: {
+    reads: number;
+    searches: number;
+    writes: number;
+    skippedWrites: number;
+  };
 }
 
 // ─── Events ───────────────────────────────────────────────────────────────────
 
 export interface AgentEventMap {
-  text: { delta: string };
+  /** Emitted at the start of each root/child send() with the user text (session logging). */
+  send_start: { userMessage: string; agentDepth: number };
+  /** Assistant-visible stream; `trace` is for harness noise (hidden when AGENT_UI_VERBOSITY=quiet). */
+  text: { delta: string; channel?: "user" | "trace" };
+  /** Provider transient error; UI may fold instead of chat-stuffing (AGENT_UI_VERBOSITY=quiet). */
+  provider_retry: {
+    attempt: number;
+    maxAttempts: number;
+    message: string;
+    backoffMs: number;
+  };
   tool_start: { callId: string; name: string };
   tool_delta: { callId: string; argsDelta: string };
   tool_approval: {
     callId: string;
     name: string;
     args: Record<string, unknown>;
+    /** Wall-clock ms until auto-reject if no human decision (for UI countdown). */
+    approvalTimeoutMs: number;
     resolve: (decision: ApprovalDecision) => void;
   };
   tool_result: {
@@ -266,6 +355,46 @@ export interface AgentEventMap {
   tool_timing: { callId: string; name: string; durationMs: number };
   /** Emitted when the agent's persona is changed via set_persona(). */
   persona_changed: { name: string; description: string };
+  execution_state: {
+    missionId?: string;
+    activeContractId?: string;
+    driftScore: number;
+    milestoneCount: number;
+    contractCount: number;
+  };
+  contract_transition: {
+    contractId: string;
+    status: ExecutionContract["status"];
+    reason?: string;
+  };
+  contract_violation: {
+    contractId?: string;
+    toolName: string;
+    reason: string;
+    severity: "low" | "med" | "high";
+  };
+  recovery_action: {
+    strategy: RecoveryRecord["strategy"];
+    reason: string;
+    notes?: string;
+  };
+  drift_detected: {
+    score: number;
+    reason: string;
+    triggeredReplan: boolean;
+  };
+  runtime_heartbeat: {
+    round: number;
+    uptimeMs: number;
+    activeContractId?: string;
+    driftScore: number;
+  };
+  vault_activity: {
+    action: "read" | "search" | "write" | "skip_write";
+    ok: boolean;
+    noteTitle?: string;
+    reason?: string;
+  };
 }
 
 export type AgentEventName = keyof AgentEventMap;
@@ -328,12 +457,6 @@ export interface AgentConfig {
   /** Max total concurrent agents (across all depths). Default: 8. */
   maxConcurrentAgents?: number;
   /**
-   * Hard wall-clock timeout for the entire send() call in ms.
-   * Default: 600_000 (10 minutes). Prevents hung streaming calls from blocking forever.
-   * (#3 Hard Send Timeout)
-   */
-  sendTimeoutMs?: number;
-  /**
    * When false, stream retries always include the tool list (never omit tools on later attempts).
    * Default true: attempts 2+ may retry without tools to escape broken tool-call loops.
    */
@@ -360,6 +483,11 @@ export interface AgentConfig {
   worldContext?: WorldContextOptions;
   /** When enabled, run heuristic + optional LLM check before `requiresApproval` prompts. */
   safetyJudge?: AgentSafetyJudgeOptions;
+  /**
+   * Max ms to wait for human approval on destructive `requiresApproval` tools.
+   * Default / env: AGENT_APPROVAL_TIMEOUT_MS (10s–600s, default 60s).
+   */
+  approvalTimeoutMs?: number;
 }
 
 // Re-export so consumers can type worldContext without importing world_context directly

@@ -10,6 +10,8 @@ import type {
   TurnEndHarnessMetrics,
   TurnEndTerminationReason,
   ToolResult,
+  ExecutionState,
+  ExecutionContract,
 } from "./types.js";
 import { AgentEmitter } from "./events.js";
 import { ContextManager } from "./context.js";
@@ -26,11 +28,39 @@ import { completeChatJson, getFastModelSlug } from "./router.js";
 import { stableArgsJsonKey } from "./json_stable.js";
 import { HARNESS_RULE_RECALL_MESSAGE } from "./harness_rules.js";
 import { bumpRecipePattern } from "./recipe_library.js";
+import {
+  markEpistemicPlanStepDone,
+  mergeExtractedSubgoals,
+  subgoalsFromPlanSteps,
+} from "./epistemic_state.js";
+import {
+  appendRecoveryRecord,
+  advanceExecutionStateForPlan,
+  createDefaultExecutionState,
+  markExecutionContractStatus,
+  updateDriftScore,
+} from "./execution_state.js";
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
 function sleep(ms: number) {
   return new Promise<void>((r) => setTimeout(r, ms));
+}
+
+function resolveApprovalTimeoutMs(config: AgentConfig): number {
+  if (config.approvalTimeoutMs != null && Number.isFinite(config.approvalTimeoutMs)) {
+    return Math.max(10_000, Math.min(600_000, config.approvalTimeoutMs));
+  }
+  const raw = process.env["AGENT_APPROVAL_TIMEOUT_MS"]?.trim();
+  if (raw) {
+    const n = parseInt(raw, 10);
+    if (Number.isFinite(n)) return Math.max(10_000, Math.min(600_000, n));
+  }
+  return 60_000;
+}
+
+function isUiQuiet(): boolean {
+  return process.env["AGENT_UI_VERBOSITY"] === "quiet";
 }
 
 /**
@@ -110,6 +140,47 @@ function hashString(s: string): string {
   let h = 5381;
   for (let i = 0; i < s.length; i++) h = ((h << 5) + h) ^ s.charCodeAt(i);
   return (h >>> 0).toString(16);
+}
+
+function normalizeIntentText(text: string): string {
+  return text.toLowerCase().replace(/[^a-z0-9\s]/g, " ").replace(/\s+/g, " ").trim();
+}
+
+function lexicalTokens(text: string): string[] {
+  return normalizeIntentText(text)
+    .split(" ")
+    .filter((t) => t.length >= 3);
+}
+
+function lexicalJaccard(a: string, b: string): number {
+  const as = new Set(lexicalTokens(a));
+  const bs = new Set(lexicalTokens(b));
+  if (as.size === 0 || bs.size === 0) return 0;
+  let inter = 0;
+  for (const t of as) if (bs.has(t)) inter += 1;
+  const union = new Set([...as, ...bs]).size;
+  return union > 0 ? inter / union : 0;
+}
+
+function normalizeSearchDelta(text: string): string {
+  return text
+    .replace(/\uFFFD/g, "")
+    .replace(/([A-Za-z])⚙([A-Za-z])/g, "$1$2");
+}
+
+function isVaultFirstStrictEnabled(): boolean {
+  // Strict blocking is opt-in only.
+  return process.env["AGENT_VAULT_FIRST_STRICT"] === "1";
+}
+
+type VaultAutoWriteMode = "off" | "research" | "aggressive";
+
+function resolveVaultAutoWriteMode(): VaultAutoWriteMode {
+  const raw = (process.env["AGENT_VAULT_AUTO_WRITE"] ?? "").trim().toLowerCase();
+  if (raw === "0" || raw === "off" || raw === "false" || raw === "disabled") return "off";
+  if (raw === "aggressive") return "aggressive";
+  // Default behavior: keep a wiki for research/knowledge turns.
+  return "research";
 }
 
 /**
@@ -261,6 +332,8 @@ export class AgentHarness {
   private readonly client: OpenAI;
   private readonly maxAgentDepth: number;
   private readonly maxConcurrentAgents: number;
+  /** Human approval TTL for destructive requiresApproval tools (dispatcher). */
+  private readonly approvalTimeoutMs: number;
   private running = false;
   private abortSignal?: AbortSignal;
 
@@ -313,9 +386,18 @@ export class AgentHarness {
   private lengthResumeRemaining = 0;
   /** One-shot nudge to cite a read path before turn_end(ok). */
   private finalizeCiteNudgeThisSend = false;
+  /** One-shot nudge for research synthesis completeness before turn_end(ok). */
+  private finalizeSynthesisNudgeThisSend = false;
+  /** web_search query history for first-pass diversity + dedupe checks. */
+  private webSearchQueriesThisTurn: string[] = [];
+  /** Near-duplicate failed search intents for one-shot retry discipline. */
+  private failedSearchIntentCounts = new Map<string, number>();
 
   /** Active persona. Set via setPersona(); defaults to config.persona or unnamed default. */
   private currentPersona?: PersonaConfig;
+  /** Long-horizon runtime state persisted by task_checkpoint and heartbeat events. */
+  private executionState: ExecutionState | null = null;
+  private vaultMetrics = { reads: 0, searches: 0, writes: 0, skippedWrites: 0 };
 
   /**
    * Returns the ContextManager for use by context tools factory.
@@ -323,6 +405,146 @@ export class AgentHarness {
    */
   getContext(): ContextManager {
     return this.context;
+  }
+
+  getExecutionState(): ExecutionState | null {
+    return this.executionState;
+  }
+
+  private getActiveContract(): ExecutionContract | null {
+    if (!this.executionState?.activeContractId) return null;
+    return this.executionState.contracts.find((c) => c.id === this.executionState!.activeContractId) ?? null;
+  }
+
+  private isLikelyKnowledgeTask(): boolean {
+    const t = this.lastUserMessage.toLowerCase();
+    return (
+      /research|learn|explain|why|how|compare|summar|document|wiki|knowledge|paper|reference|history|background|meaning|what is/.test(
+        t
+      ) && !/build|compile|typecheck|test|lint|run the tests|npm run/.test(t)
+    );
+  }
+
+  private hasVaultOrMemoryPrimingThisTurn(): boolean {
+    const used = new Set(this.toolsUsedThisTurn);
+    return (
+      used.has("memory_query") ||
+      used.has("recall_relevant") ||
+      used.has("vault_search") ||
+      used.has("vault_read")
+    );
+  }
+
+  private checkContractAndCommitments(
+    toolName: string,
+    args: Record<string, unknown>
+  ): { ok: true } | { ok: false; reason: string; severity: "low" | "med" | "high" } {
+    if (
+      isVaultFirstStrictEnabled() &&
+      toolName === "web_search" &&
+      this.isLikelyKnowledgeTask() &&
+      !this.hasVaultOrMemoryPrimingThisTurn()
+    ) {
+      this.emitter.emit("vault_activity", {
+        action: "search",
+        ok: false,
+        reason: "vault_first_blocked_web_search_without_memory_or_vault_priming",
+      });
+      return {
+        ok: false,
+        reason:
+          'Vault-first policy: call memory_query/recall_relevant or vault_search/vault_read before web_search for knowledge tasks.',
+        severity: "med",
+      };
+    }
+    if (
+      toolName === "web_search" &&
+      this.isLikelyKnowledgeTask() &&
+      !this.hasVaultOrMemoryPrimingThisTurn()
+    ) {
+      // Advisory telemetry only: we no longer hard-block web search.
+      this.emitter.emit("vault_activity", {
+        action: "search",
+        ok: false,
+        reason: "vault_first_advisory_no_priming_before_web_search",
+      });
+    }
+    if (toolName === "web_search") {
+      const query = typeof args["query"] === "string" ? args["query"].trim() : "";
+      if (query.length >= 8 && this.isLikelyKnowledgeTask()) {
+        const norm = normalizeIntentText(query);
+        const failed = this.failedSearchIntentCounts.get(norm) ?? 0;
+        if (failed >= 1) {
+          return {
+            ok: false,
+            reason:
+              "Repeated failed web_search intent detected. Rephrase with a different angle before retrying.",
+            severity: "med",
+          };
+        }
+        if (this.webSearchQueriesThisTurn.length < 3) {
+          for (const prior of this.webSearchQueriesThisTurn) {
+            const overlap = lexicalJaccard(prior, query);
+            if (overlap >= 0.72) {
+              return {
+                ok: false,
+                reason:
+                  `First-pass web_search queries must be diverse (overlap=${overlap.toFixed(2)}). ` +
+                  "Use a different intent bucket: origins/background, latest status, impact/metrics.",
+                severity: "low",
+              };
+            }
+          }
+        }
+      }
+    }
+    const state = this.executionState;
+    if (!state) return { ok: true };
+    const contract = this.getActiveContract();
+    if (contract?.allowedTools && contract.allowedTools.length > 0) {
+      if (!contract.allowedTools.includes(toolName)) {
+        return {
+          ok: false,
+          reason: `Tool "${toolName}" is not allowed by active contract ${contract.id}.`,
+          severity: "med",
+        };
+      }
+    }
+    for (const c of state.commitments) {
+      if (c.blockedTools?.includes(toolName)) {
+        return {
+          ok: false,
+          reason: `Blocked by commitment "${c.label}".`,
+          severity: c.severity,
+        };
+      }
+      if (c.pattern && toolName.includes(c.pattern)) {
+        return {
+          ok: false,
+          reason: `Tool "${toolName}" violates commitment pattern "${c.pattern}".`,
+          severity: c.severity,
+        };
+      }
+    }
+    return { ok: true };
+  }
+
+  /** Wall-clock ms for tool approval auto-reject (UI countdown, session logs). */
+  getApprovalTimeoutMs(): number {
+    return this.approvalTimeoutMs;
+  }
+
+  /** True while a send() / ReAct loop is in progress. */
+  getIsRunning(): boolean {
+    return this.running;
+  }
+
+  /**
+   * Clear chat transcript and re-enable world-context injection on next root send().
+   * Persona override is preserved (same as reset()).
+   */
+  clearConversation(): void {
+    this.reset();
   }
 
   /**
@@ -384,6 +606,7 @@ export class AgentHarness {
     this.agentDepth = config.agentDepth ?? 0;
     this.maxAgentDepth = config.maxAgentDepth ?? 3;
     this.maxConcurrentAgents = config.maxConcurrentAgents ?? 8;
+    this.approvalTimeoutMs = resolveApprovalTimeoutMs(config);
 
     this.emitter = new AgentEmitter();
     this.registry = new ToolRegistry();
@@ -428,7 +651,9 @@ export class AgentHarness {
       this.emitter,
       this.orchestrator,
       this.taskId,
-      safetyJudge
+      safetyJudge,
+      this.approvalTimeoutMs,
+      (toolName, args) => this.checkContractAndCommitments(toolName, args)
     );
 
     // Register self in orchestrator
@@ -443,8 +668,11 @@ export class AgentHarness {
     });
   }
 
-  async send(userMessage: string): Promise<void> {
+  async send(userMessage: string, options?: { freshContext?: boolean }): Promise<void> {
     if (this.running) throw new Error("Agent is already processing a message");
+    if (options?.freshContext === true && this.agentDepth === 0) {
+      this.reset();
+    }
     this.running = true;
 
     // Reset per-turn tracking state
@@ -467,6 +695,11 @@ export class AgentHarness {
     this.lengthResumeRemaining =
       parseInt(process.env["AGENT_LENGTH_RESUME_MAX"] ?? "1", 10) > 0 ? 1 : 0;
     this.finalizeCiteNudgeThisSend = false;
+    this.finalizeSynthesisNudgeThisSend = false;
+    this.dispatcher.resetTurnCounters();
+    this.vaultMetrics = { reads: 0, searches: 0, writes: 0, skippedWrites: 0 };
+    this.webSearchQueriesThisTurn = [];
+    this.failedSearchIntentCounts = new Map();
 
     if (this.config.workingStateEnabled !== false) {
       this.context.initEpistemicState(userMessage);
@@ -480,6 +713,14 @@ export class AgentHarness {
         },
       });
     }
+    this.executionState = createDefaultExecutionState(userMessage);
+    this.emitter.emit("execution_state", {
+      missionId: this.executionState.mission?.id,
+      activeContractId: this.executionState.activeContractId,
+      driftScore: this.executionState.driftScore,
+      milestoneCount: this.executionState.milestones.length,
+      contractCount: this.executionState.contracts.length,
+    });
 
     if (process.env["AGENT_QUERY_REWRITE"] === "1") {
       try {
@@ -493,18 +734,12 @@ export class AgentHarness {
       }
     }
 
-    // Hard wall-clock timeout (#3 — ReliabilityBench arXiv:2601.06112)
-    // Default 10m: multi-round exploration (many read_file / list_dir) often exceeds 2m wall time.
-    const timeoutMs = this.config.sendTimeoutMs ?? 600_000;
-    let timeoutHandle: ReturnType<typeof setTimeout> | undefined;
-    const timeoutPromise = new Promise<never>((_, reject) => {
-      timeoutHandle = setTimeout(
-        () => reject(new Error(`send() hard timeout after ${timeoutMs}ms — streaming API may be hung`)),
-        timeoutMs
-      );
-    });
-
     try {
+      this.emitter.emit("send_start", {
+        userMessage,
+        agentDepth: this.agentDepth,
+      });
+
       // Inject world context on the first turn of a root agent (#world-context).
       // Child agents (depth > 0) skip this — they inherit context from their parent.
       if (!this.worldContextInjected && this.agentDepth === 0) {
@@ -527,7 +762,7 @@ export class AgentHarness {
       }
 
       this.context.append({ role: "user", content: userMessage });
-      await Promise.race([this.runReActLoop(), timeoutPromise]);
+      await this.runReActLoop();
 
       // Episodic recipe recording (#7 AMA-Bench): persist successful patterns
       // Awaited with error boundary (#2 VIGIL) — no silent swallowing
@@ -543,6 +778,7 @@ export class AgentHarness {
         } catch (err) {
           this.emitter.emit("text", {
             delta: `\n[HARNESS] Recipe persist failed: ${err instanceof Error ? err.message : String(err)}\n`,
+            channel: "trace",
           });
         }
       }
@@ -551,14 +787,11 @@ export class AgentHarness {
       this.emitter.emit("error", {
         err: new Error(msg),
       });
-      const reason: TurnEndTerminationReason =
-        /send\(\) hard timeout after \d+ms/i.test(msg) ? "timeout" : "error";
-      this.emitTurnEnd(reason);
+      this.emitTurnEnd("error");
     } finally {
       if (!this.turnEndEmittedThisSend) {
         this.emitTurnEnd("error");
       }
-      clearTimeout(timeoutHandle);
       this.running = false;
     }
   }
@@ -776,7 +1009,7 @@ export class AgentHarness {
 
   /** MemReader-style extraction into typed remember() entries (env-gated). */
   private async maybeAutoExtractMemories(): Promise<void> {
-    if (process.env["AGENT_MEMORY_AUTO_EXTRACT"] !== "1") return;
+    if (process.env["AGENT_MEMORY_AUTO_EXTRACT"] === "0") return;
     if (this.agentDepth > 0) return;
     if (!this.registry.has("remember")) return;
     if (this.toolsUsedThisTurn.length === 0) return;
@@ -828,6 +1061,79 @@ export class AgentHarness {
     }
   }
 
+  private async maybeAutoWriteVaultNotes(): Promise<void> {
+    if (this.agentDepth > 0) return;
+    const mode = resolveVaultAutoWriteMode();
+    if (mode === "off") return;
+    if (!this.registry.has("vault_write")) return;
+    const hasResearchSignals =
+      this.isLikelyKnowledgeTask() ||
+      this.toolsUsedThisTurn.includes("web_search") ||
+      this.toolsUsedThisTurn.includes("web_fetch");
+    if (mode === "research" && !hasResearchSignals) return;
+    if (mode === "aggressive" && this.toolsUsedThisTurn.length < 3) return;
+    const assistant = (this.context.getLastAssistantMessage() ?? "").trim();
+    if (assistant.length < (mode === "aggressive" ? 120 : 80)) return;
+    const budget = Math.max(
+      1,
+      Math.min(20, parseInt(process.env["AGENT_VAULT_WRITE_BUDGET"] ?? "8", 10) || 8)
+    );
+    const existingWrites = this.toolsUsedThisTurn.filter((t) => t === "vault_write").length;
+    if (existingWrites >= budget) return;
+
+    const dateKey = new Date().toISOString().slice(0, 10);
+    const title = `Knowledge ${dateKey} ${hashString(this.lastUserMessage).slice(0, 8)}`;
+    const evidence = this.evidenceLog
+      .slice(-4)
+      .map((e) => `- ${e.name}: ${e.excerpt.replace(/\n/g, " ").slice(0, 180)}`)
+      .join("\n");
+    const tools = [...new Set(this.toolsUsedThisTurn)].slice(0, 12).join(", ");
+    const body =
+      `## Summary\n${assistant.slice(0, 1400)}\n\n` +
+      `## Evidence\n${evidence || "- (no explicit evidence excerpts captured)"}\n\n` +
+      `## Runtime\n- Tools used: ${tools}\n- Rounds: ${this.roundCount}\n\n` +
+      `## Next links\n- [[Tasks]]\n- [[Agent Runtime]]`;
+
+    const dedupeOn = process.env["AGENT_VAULT_DEDUPE"] !== "0";
+    if (dedupeOn && this.registry.has("vault_search")) {
+      const search = await this.dispatcher.directCall("vault_search", {
+        query: this.lastUserMessage.slice(0, 120),
+      });
+      if (search.ok && /Found\s+[1-9]/i.test(search.output)) {
+        this.vaultMetrics.skippedWrites += 1;
+        this.emitter.emit("vault_activity", {
+          action: "skip_write",
+          ok: true,
+          reason: "dedupe_preflight_found_existing_note",
+        });
+        return;
+      }
+    }
+
+    const wr = await this.dispatcher.directCall("vault_write", {
+      title,
+      content: body,
+      type: "note",
+      tags: ["auto-wiki", "knowledge", "harness"],
+    });
+    if (wr.ok) {
+      this.vaultMetrics.writes += 1;
+      this.emitter.emit("vault_activity", {
+        action: "write",
+        ok: true,
+        noteTitle: title,
+      });
+    } else {
+      this.vaultMetrics.skippedWrites += 1;
+      this.emitter.emit("vault_activity", {
+        action: "skip_write",
+        ok: false,
+        noteTitle: title,
+        reason: wr.error,
+      });
+    }
+  }
+
   private buildHarnessMetrics(reason: TurnEndTerminationReason): TurnEndHarnessMetrics {
     return {
       terminationReason: reason,
@@ -836,6 +1142,8 @@ export class AgentHarness {
       parallelToolCallsLastBatch: this.lastParallelToolBatchSize,
       workingStatePreview: this.context.getWorkingStateBlock().trim().slice(0, 400),
       epistemicState: this.context.getEpistemicState() ?? undefined,
+      executionState: this.executionState ?? undefined,
+      vaultMetrics: { ...this.vaultMetrics },
     };
   }
 
@@ -866,6 +1174,28 @@ export class AgentHarness {
     }
 
     this.roundCount = round + 1;
+    if (this.executionState) {
+      this.emitter.emit("runtime_heartbeat", {
+        round: this.roundCount,
+        uptimeMs: Date.now() - this.sendStartTime,
+        activeContractId: this.executionState.activeContractId,
+        driftScore: this.executionState.driftScore,
+      });
+      if (this.roundCount > 1 && this.roundCount % 4 === 0) {
+        const next = updateDriftScore(this.executionState, 0.06);
+        const triggeredReplan = next.driftScore >= 0.55;
+        this.executionState = triggeredReplan ? advanceExecutionStateForPlan(next, [
+          "Reconfirm mission objective and constraints",
+          "Regenerate milestone contracts from latest evidence",
+          "Continue execution under refreshed contracts",
+        ]) : next;
+        this.emitter.emit("drift_detected", {
+          score: this.executionState.driftScore,
+          reason: "periodic anti-drift cadence",
+          triggeredReplan,
+        });
+      }
+    }
 
     if (
       round === 1 &&
@@ -926,7 +1256,7 @@ export class AgentHarness {
       this.proactiveCompressedThisSend = true;
     }
 
-    const recallEvery = parseInt(process.env["AGENT_RECALL_EVERY_N"] ?? "0", 10);
+    const recallEvery = parseInt(process.env["AGENT_RECALL_EVERY_N"] ?? "2", 10);
     if (
       recallEvery > 0 &&
       round > 0 &&
@@ -992,7 +1322,7 @@ export class AgentHarness {
       const parsed = accumulator.processChunk(chunk);
 
       if (parsed.textDelta) {
-        this.emitter.emit("text", { delta: parsed.textDelta });
+        this.emitter.emit("text", { delta: parsed.textDelta, channel: "user" });
       }
 
       if (parsed.toolCallDelta) {
@@ -1110,6 +1440,125 @@ export class AgentHarness {
             /* ignore */
           }
         }
+        if (tc.name === "vault_read") {
+          if (r.ok) this.vaultMetrics.reads += 1;
+          this.emitter.emit("vault_activity", {
+            action: "read",
+            ok: r.ok,
+            reason: r.ok ? undefined : r.error,
+          });
+        } else if (tc.name === "vault_search") {
+          if (r.ok) this.vaultMetrics.searches += 1;
+          this.emitter.emit("vault_activity", {
+            action: "search",
+            ok: r.ok,
+            reason: r.ok ? undefined : r.error,
+          });
+        } else if (tc.name === "vault_write") {
+          if (r.ok) this.vaultMetrics.writes += 1;
+          else this.vaultMetrics.skippedWrites += 1;
+          this.emitter.emit("vault_activity", {
+            action: r.ok ? "write" : "skip_write",
+            ok: r.ok,
+            reason: r.ok ? undefined : r.error,
+          });
+        } else if (tc.name === "web_search") {
+          try {
+            const a = JSON.parse(tc.argsJson) as { query?: string };
+            if (typeof a.query === "string" && a.query.trim().length >= 4) {
+              const q = a.query.trim();
+              if (!this.webSearchQueriesThisTurn.some((x) => normalizeIntentText(x) === normalizeIntentText(q))) {
+                this.webSearchQueriesThisTurn.push(q);
+              }
+              if (!r.ok) {
+                const key = normalizeIntentText(q);
+                this.failedSearchIntentCounts.set(key, (this.failedSearchIntentCounts.get(key) ?? 0) + 1);
+              }
+            }
+          } catch {
+            /* ignore */
+          }
+        }
+      }
+
+      if (this.config.workingStateEnabled !== false && this.context.getEpistemicState()) {
+        for (let i = 0; i < toolCalls.length; i++) {
+          const tc = toolCalls[i]!;
+          const r = results[i]!;
+          if (!r.ok) continue;
+          if (tc.name === "plan") {
+            try {
+              const args = JSON.parse(tc.argsJson) as {
+                steps?: string[];
+                step_index?: number;
+              };
+              if (args.steps && args.steps.length > 0) {
+                this.context.patchEpistemicState({ subgoals: subgoalsFromPlanSteps(args.steps) });
+                if (this.executionState) {
+                  this.executionState = advanceExecutionStateForPlan(this.executionState, args.steps);
+                  const cid = this.executionState.activeContractId;
+                  if (cid) {
+                    this.emitter.emit("contract_transition", {
+                      contractId: cid,
+                      status: "active",
+                      reason: "plan() created/updated execution contracts",
+                    });
+                  }
+                }
+              } else if (typeof args.step_index === "number") {
+                const cur = this.context.getEpistemicState()?.subgoals ?? [];
+                this.context.patchEpistemicState({
+                  subgoals: markEpistemicPlanStepDone(cur, args.step_index),
+                });
+                if (this.executionState) {
+                  const target = this.executionState.contracts[args.step_index];
+                  if (target) {
+                    this.executionState = markExecutionContractStatus(
+                      this.executionState,
+                      target.id,
+                      "verified"
+                    );
+                    this.emitter.emit("contract_transition", {
+                      contractId: target.id,
+                      status: "verified",
+                      reason: "plan step marked complete",
+                    });
+                    const next = this.executionState.contracts.find((c) => c.status === "planned");
+                    if (next) {
+                      this.executionState = markExecutionContractStatus(
+                        this.executionState,
+                        next.id,
+                        "active"
+                      );
+                      this.emitter.emit("contract_transition", {
+                        contractId: next.id,
+                        status: "active",
+                        reason: "advance to next planned contract",
+                      });
+                    }
+                  }
+                }
+              }
+            } catch {
+              /* ignore bad plan args */
+            }
+          }
+          if (tc.name === "extract_structured") {
+            const out = r.output.trim();
+            if (out.startsWith("{")) {
+              try {
+                const parsed = JSON.parse(out) as Record<string, unknown>;
+                const merged = mergeExtractedSubgoals(
+                  this.context.getEpistemicState()?.subgoals ?? [],
+                  parsed["subgoals"]
+                );
+                if (merged) this.context.patchEpistemicState({ subgoals: merged });
+              } catch {
+                /* not JSON */
+              }
+            }
+          }
+        }
       }
 
       if (this.config.workingStateEnabled !== false) {
@@ -1143,6 +1592,15 @@ export class AgentHarness {
             spareRounds: budget.suggestedMaxExtraRounds,
           },
           harnessNotes,
+        });
+      }
+      if (this.executionState) {
+        this.emitter.emit("execution_state", {
+          missionId: this.executionState.mission?.id,
+          activeContractId: this.executionState.activeContractId,
+          driftScore: this.executionState.driftScore,
+          milestoneCount: this.executionState.milestones.length,
+          contractCount: this.executionState.contracts.length,
         });
       }
 
@@ -1188,6 +1646,8 @@ export class AgentHarness {
         });
       }
 
+      await this.context.elideStaleToolResults();
+
       // Per-tool error tracking + adaptive hints (#8)
       for (let i = 0; i < toolCalls.length; i++) {
         const tc = toolCalls[i] as AccumulatedToolCall;
@@ -1228,6 +1688,20 @@ export class AgentHarness {
             `${hint}\n` +
             `Reassess and try a different approach — do NOT retry with identical arguments.`,
         });
+        if (this.executionState) {
+          this.executionState = updateDriftScore(this.executionState, 0.15);
+          this.executionState = appendRecoveryRecord(this.executionState, {
+            at: Date.now(),
+            reason: "all_tools_failed",
+            strategy: "replan",
+            notes: errorSummary.slice(0, 500),
+          });
+          this.emitter.emit("recovery_action", {
+            strategy: "replan",
+            reason: "all tool calls failed in current round",
+            notes: errorSummary.slice(0, 200),
+          });
+        }
 
         // Reflexion auto-persist (#2 VIGIL): awaited with error boundary — no silent swallowing
         if (this.registry.has("remember")) {
@@ -1241,6 +1715,7 @@ export class AgentHarness {
           } catch (err) {
             this.emitter.emit("text", {
               delta: `\n[HARNESS] Reflexion persist failed: ${err instanceof Error ? err.message : String(err)}\n`,
+              channel: "trace",
             });
           }
         }
@@ -1250,7 +1725,7 @@ export class AgentHarness {
     } else {
       let assistantText = "";
       if (typeof assistantMessage.content === "string") {
-        assistantText = assistantMessage.content;
+        assistantText = normalizeSearchDelta(assistantMessage.content);
       }
       const criticMinTools = parseInt(process.env["AGENT_CRITIC_MIN_TOOLS"] ?? "4", 10);
       const distinctToolCount = new Set(this.toolsUsedThisTurn).size;
@@ -1320,7 +1795,39 @@ export class AgentHarness {
         return;
       }
 
+      const isResearchTask =
+        this.isLikelyKnowledgeTask() &&
+        this.toolsUsedThisTurn.includes("web_search") &&
+        !this.finalizeSynthesisNudgeThisSend;
+      if (isResearchTask) {
+        const hasTimeline = /\b(chronology|timeline|sequence|on\s+\w+\s+\d{1,2}|recently|earlier)\b/i.test(
+          assistantText
+        );
+        const sourceMentions =
+          (assistantText.match(/https?:\/\/|reuters|bbc|ap|al jazeera|wikipedia|france24|guardian|nyt/gi) ?? [])
+            .length;
+        const hasUncertainty = /\b(uncertain|unverified|fragile|confidence|may change|developing)\b/i.test(
+          assistantText
+        );
+        const hasOpenItems = /\b(open question|unknown|unresolved|to confirm|not yet clear)\b/i.test(
+          assistantText
+        );
+        if (!hasTimeline || sourceMentions < 2 || !hasUncertainty || !hasOpenItems) {
+          this.finalizeSynthesisNudgeThisSend = true;
+          this.context.appendMessage({
+            role: "user",
+            content:
+              "[SYNTHESIS CHECKLIST] Before finalizing research output, include: " +
+              "(1) a short timeline/sequence, (2) multi-source grounding (>=2 sources), " +
+              "(3) explicit uncertainty/fragility note for fast-moving facts, and (4) unresolved items.",
+          });
+          await this.runReActLoop(round);
+          return;
+        }
+      }
+
       await this.maybePersistEpisodeTurn();
+      await this.maybeAutoWriteVaultNotes();
       await this.maybeAutoExtractMemories();
       this.emitTurnEnd("ok");
     }
@@ -1361,9 +1868,17 @@ export class AgentHarness {
         }
 
         const delay = this.retryDelayMs * Math.pow(2, attempt);
-        this.emitter.emit("text", {
-          delta: `\n⟳ ${msg} — retrying in ${Math.round(delay / 1000)}s (attempt ${attempt + 1}/${this.maxRetries})…\n`,
+        this.emitter.emit("provider_retry", {
+          attempt: attempt + 1,
+          maxAttempts: this.maxRetries + 1,
+          message: msg,
+          backoffMs: delay,
         });
+        if (!isUiQuiet()) {
+          this.emitter.emit("text", {
+            delta: `\n⟳ ${msg} — retrying in ${Math.round(delay / 1000)}s (attempt ${attempt + 1}/${this.maxRetries})…\n`,
+          });
+        }
 
         await sleep(delay);
       }

@@ -1,8 +1,29 @@
 import React, { useState, useRef, useEffect } from "react";
 import { useSSE, type MessageEntry } from "./useSSE.js";
 
+function ApprovalCountdown({
+  receivedAt,
+  approvalTimeoutMs,
+}: {
+  receivedAt: number;
+  approvalTimeoutMs: number;
+}) {
+  const deadline = receivedAt + approvalTimeoutMs;
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const id = window.setInterval(() => setNow(Date.now()), 500);
+    return () => window.clearInterval(id);
+  }, [receivedAt, approvalTimeoutMs]);
+  const leftSec = Math.max(0, Math.ceil((deadline - now) / 1000));
+  return (
+    <div style={{ marginTop: 8, fontSize: 12, color: leftSec <= 10 ? "#ff8844" : "#888" }}>
+      Auto-reject in {leftSec}s (timeout {Math.round(approvalTimeoutMs / 1000)}s)
+    </div>
+  );
+}
+
 export function App() {
-  const { state, sendMessage, sendApproval, sendAnswer } = useSSE();
+  const { state, sendMessage, sendApproval, sendAnswer, sendClearSession } = useSSE();
   const [input, setInput] = useState("");
   const [askAnswer, setAskAnswer] = useState("");
   const bottomRef = useRef<HTMLDivElement>(null);
@@ -55,6 +76,21 @@ export function App() {
             </span>
           </div>
         )}
+        <button
+          type="button"
+          style={{
+            ...styles.btn,
+            background: "#333",
+            marginLeft: 12,
+            fontSize: 12,
+            padding: "6px 10px",
+          }}
+          disabled={state.busy}
+          title="Clear transcript; next message re-injects world context"
+          onClick={() => void sendClearSession()}
+        >
+          New session
+        </button>
       </div>
 
       {/* Messages */}
@@ -88,6 +124,10 @@ export function App() {
             <pre style={styles.argsPreview}>
               {JSON.stringify(state.pendingApproval.args, null, 2).slice(0, 400)}
             </pre>
+            <ApprovalCountdown
+              receivedAt={state.pendingApproval.receivedAt}
+              approvalTimeoutMs={state.pendingApproval.approvalTimeoutMs}
+            />
             <div style={styles.modalButtons}>
               <button
                 style={{ ...styles.btn, background: "#1a5c1a" }}
@@ -185,6 +225,14 @@ function MessageView({ entry }: { entry: MessageEntry }) {
         <div style={styles.assistantMsg}>
           <span style={{ whiteSpace: "pre-wrap" }}>{entry.text}</span>
           {entry.streaming && <span style={{ color: "#00d4ff" }}>█</span>}
+        </div>
+      );
+
+    case "trace":
+      return (
+        <div style={styles.traceLine}>
+          <span style={{ color: "#666", fontSize: 11 }}>[trace] </span>
+          <span style={{ whiteSpace: "pre-wrap", color: "#777", fontSize: 12 }}>{entry.text}</span>
         </div>
       );
 
@@ -459,5 +507,10 @@ const styles = {
     fontSize: 12,
     fontStyle: "italic",
     lineHeight: 1.5,
+  },
+  traceLine: {
+    paddingLeft: 12,
+    borderLeft: "2px solid #333",
+    lineHeight: 1.4,
   },
 };

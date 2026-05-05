@@ -35,6 +35,27 @@ export const planTool = defineTool({
         minimum: 0,
         description: "0-based index of the step just completed — provide to mark progress",
       },
+      mission_title: {
+        type: "string",
+        description: "Optional long-horizon mission title",
+      },
+      milestones: {
+        type: "array",
+        items: { type: "string" },
+        description: "Optional milestone list for long-horizon planning",
+      },
+      contract: {
+        type: "object",
+        properties: {
+          title: { type: "string" },
+          objective: { type: "string" },
+          success_criteria: { type: "array", items: { type: "string" } },
+          max_steps: { type: "number" },
+          max_minutes: { type: "number" },
+          max_tool_calls: { type: "number" },
+        },
+        description: "Optional bounded execution contract metadata",
+      },
     },
     additionalProperties: false,
   },
@@ -43,9 +64,29 @@ export const planTool = defineTool({
     const stepIndex = args["step_index"] as number | undefined;
 
     if (steps && steps.length > 0) {
+      const milestones = Array.isArray(args["milestones"]) ? (args["milestones"] as string[]) : [];
+      const missionTitle = typeof args["mission_title"] === "string" ? args["mission_title"] : "";
+      const contract = args["contract"] as
+        | {
+            title?: string;
+            objective?: string;
+            success_criteria?: string[];
+            max_steps?: number;
+            max_minutes?: number;
+            max_tool_calls?: number;
+          }
+        | undefined;
       return {
         ok: true as const,
-        output: `Plan recorded: ${steps.length} step(s).\n` +
+        output:
+          `Plan recorded: ${steps.length} step(s).\n` +
+          (missionTitle ? `Mission: ${missionTitle}\n` : "") +
+          (milestones.length > 0
+            ? `Milestones:\n${milestones.map((m, i) => `  M${i + 1}. ${m}`).join("\n")}\n`
+            : "") +
+          (contract
+            ? `Contract: ${contract.title ?? "untitled"} | max_steps=${contract.max_steps ?? "n/a"} max_minutes=${contract.max_minutes ?? "n/a"} max_tool_calls=${contract.max_tool_calls ?? "n/a"}\n`
+            : "") +
           steps.map((s, i) => `  ${i + 1}. ${s}`).join("\n"),
       };
     }

@@ -114,6 +114,10 @@ export const lhContextBudgetDiscipline: Scenario = {
     { name: "repo_map ok", check: (t) => traceToolRanOk(t, "repo_map") },
     { name: "read_file ok", check: (t) => traceToolRanOk(t, "read_file") },
     { name: "clean termination", check: (t) => traceTerminatedCleanly(t) },
+    {
+      name: "runtime heartbeat present",
+      check: (t) => t.some((e) => e.type === "runtime_heartbeat"),
+    },
   ],
 };
 
@@ -181,6 +185,76 @@ export const lhMemoryContinuityAcrossRound: Scenario = {
     },
     { name: "memory_query used", check: (t) => traceHasTool(t, "memory_query") },
     { name: "clean termination", check: (t) => traceTerminatedCleanly(t) },
+    {
+      name: "execution state emitted",
+      check: (t) => t.some((e) => e.type === "execution_state"),
+    },
+  ],
+};
+
+export const lhVaultGrowthAndReuse: Scenario = {
+  name: "long-horizon-vault-growth-and-reuse",
+  tags: ["slow", "retrieval"],
+  maxRounds: 24,
+  env: {
+    AGENT_VAULT_AUTO_WRITE: "aggressive",
+    AGENT_VAULT_DEDUPE: "1",
+    AGENT_VAULT_FIRST: "1",
+  },
+  userMessage:
+    "Research and summarize how context compression and tool dedup work, then write durable wiki knowledge " +
+    "using vault_write with links. Reuse vault by searching before writing.",
+  assertions: [
+    { name: "vault search used", check: (t) => traceHasTool(t, "vault_search") },
+    { name: "vault write attempted", check: (t) => traceHasTool(t, "vault_write") },
+    {
+      name: "vault activity observed",
+      check: (t) => t.some((e) => e.type === "vault_activity"),
+    },
+    { name: "clean termination", check: (t) => traceTerminatedCleanly(t) },
+  ],
+};
+
+export const lhResearchSynthesisChecklist: Scenario = {
+  name: "long-horizon-research-synthesis-checklist",
+  tags: ["slow", "retrieval"],
+  maxRounds: 20,
+  timeoutMs: 100_000,
+  userMessage:
+    "Do a brief research-style synthesis using web_search/web_fetch. " +
+    "Final answer must include a short timeline, multiple source references, uncertainty note, and unresolved item.",
+  assertions: [
+    { name: "web_search used", check: (t) => traceHasTool(t, "web_search") },
+    {
+      name: "final text has timeline + uncertainty + unresolved",
+      check: (t) => {
+        const blob = traceCollectTextBlob(t).toLowerCase();
+        const hasTimeline = /timeline|sequence|earlier|recently/.test(blob);
+        const hasUncertainty = /uncertain|fragile|developing|confidence/.test(blob);
+        const hasUnresolved = /unresolved|unknown|to confirm|not yet clear/.test(blob);
+        return hasTimeline && hasUncertainty && hasUnresolved;
+      },
+    },
+    { name: "clean termination", check: (t) => traceTerminatedCleanly(t) },
+  ],
+};
+
+export const lhStreamCleanlinessScenario: Scenario = {
+  name: "long-horizon-stream-cleanliness",
+  tags: ["slow"],
+  maxRounds: 12,
+  timeoutMs: 70_000,
+  userMessage:
+    "Think step-by-step for a short task, use one tool, then provide a concise answer.",
+  assertions: [
+    {
+      name: "no malformed stream glyphs in transcript",
+      check: (t) => {
+        const blob = traceCollectTextBlob(t);
+        return !/[A-Za-z]⚙[A-Za-z]|�/.test(blob);
+      },
+    },
+    { name: "clean termination", check: (t) => traceTerminatedCleanly(t) },
   ],
 };
 
@@ -193,5 +267,8 @@ export const LONG_HORIZON_SCENARIOS: Scenario[] = [
   lhCodeOpsLoop,
   lhOrderedProtocolCompliance,
   lhMemoryContinuityAcrossRound,
+  lhVaultGrowthAndReuse,
+  lhResearchSynthesisChecklist,
+  lhStreamCleanlinessScenario,
 ];
 

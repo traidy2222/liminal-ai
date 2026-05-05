@@ -8,4 +8,8 @@ export const HARNESS_RULE_RECALL_MESSAGE =
   `- **R-SEQ-SETUP**: When the user numbers prerequisites (e.g. "1) remember … 2) remember … 3) memory_graph"), execute them in order — do not skip earlier steps.\n` +
   `- **R-CITE-PATHS**: If you used repo_map, read_file, or list_dir, your final reply must cite at least one real path string that appeared in tool output (not invented).\n` +
   `- **R-DISTILL-HANDOFF**: If tool output contains NEXT_ACTIONS_JSON with read_artifact.hash, call read_artifact with that hash before finishing.\n` +
-  `- **R-ORCH-ID**: After spawn_agent, capture the returned task_id and pass it in task_ids to wait_for_agents.\n`;
+  `- **R-ORCH-ID**: After spawn_agent, capture the returned task_id and pass it in task_ids to wait_for_agents.\n` +
+  `- **R-CONTRACT-BOUNDS**: If a plan defines execution contract bounds (steps/time/tool budget), keep tool usage within those bounds or replan.\n` +
+  `- **R-COMMITMENT-CHECK**: Before destructive or risky actions, ensure they do not violate explicit commitments/invariants.\n` +
+  `- **R-SEARCH-DIVERSITY**: For the first research search pass, diversify intents (origins/background, latest status, impact/metrics) and avoid near-duplicate query wording.\n` +
+  `- **R-ONE-SHOT-RETRY**: If a tool intent fails twice with near-identical args, stop retrying and replan with a different approach.\n`;

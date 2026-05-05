@@ -36,6 +36,13 @@ export async function writeArtifact(hash: string, fullText: string): Promise<str
   return p;
 }
 
+/** Persist a large tool body for elision; returns stable hash + on-disk pointer path. */
+export async function stashToolBodyElide(content: string): Promise<{ hash: string; pointer: string }> {
+  const hash = shortHash(content);
+  const pointer = await writeArtifact(hash, content);
+  return { hash, pointer };
+}
+
 export async function readArtifactText(
   hash: string,
   range?: { startLine: number; endLine: number }

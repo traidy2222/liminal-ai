@@ -55,6 +55,12 @@ export type {
   TurnEndTerminationReason,
   EpistemicState,
   AgentSafetyJudgeOptions,
+  ExecutionState,
+  ExecutionContract,
+  MissionPlan,
+  MilestonePlan,
+  CommitmentRule,
+  RecoveryRecord,
 } from "./types.js";
 export { getFastModelSlug, completeChatJson } from "./router.js";
 export type { JsonCompletionResult } from "./router.js";
@@ -64,14 +70,27 @@ export {
   emptyEpistemicState,
   mergeEpistemicState,
   renderEpistemicStateBlock,
+  markEpistemicPlanStepDone,
+  mergeExtractedSubgoals,
+  subgoalsFromPlanSteps,
 } from "./epistemic_state.js";
+export {
+  createDefaultExecutionState,
+  advanceExecutionStateForPlan,
+  markExecutionContractStatus,
+  appendRecoveryRecord,
+  updateDriftScore,
+  renderExecutionStateBlock,
+} from "./execution_state.js";
 export {
   distillToolOutput,
   shouldDistillToolOutput,
   writeArtifact,
   readArtifactText,
   artifactPathForHash,
+  stashToolBodyElide,
 } from "./output_distill.js";
 export type { DistilledOutput } from "./output_distill.js";
 export { appendFailureLog, failureLogPath } from "./failure_log.js";
+export { attachSessionEventLog, maybeAttachSessionEventLog } from "./session_event_log.js";
 export { appendGoldenEvalRecord } from "./golden_eval.js";

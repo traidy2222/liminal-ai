@@ -4,6 +4,48 @@
  */
 import type { EpistemicState } from "./types.js";
 
+/** Map plan() steps[] into epistemic subgoals (harness-synced working state). */
+export function subgoalsFromPlanSteps(steps: string[]): EpistemicState["subgoals"] {
+  return steps.map((note, i) => ({
+    id: `plan:${i}`,
+    status: "todo" as const,
+    note: note.slice(0, 500),
+  }));
+}
+
+/** Mark one plan step done by 0-based index (matches plan tool step_index). */
+export function markEpistemicPlanStepDone(
+  subgoals: EpistemicState["subgoals"],
+  stepIndex: number
+): EpistemicState["subgoals"] {
+  if (stepIndex < 0 || stepIndex >= subgoals.length) return subgoals;
+  return subgoals.map((s, i) =>
+    i === stepIndex ? { ...s, status: "done" as const } : s
+  );
+}
+
+/**
+ * If extract_structured returned JSON with a `subgoals` array, normalize into epistemic rows.
+ */
+export function mergeExtractedSubgoals(
+  _existing: EpistemicState["subgoals"],
+  extracted: unknown
+): EpistemicState["subgoals"] | null {
+  if (!Array.isArray(extracted)) return null;
+  const next: EpistemicState["subgoals"] = [];
+  for (const item of extracted) {
+    if (!item || typeof item !== "object") continue;
+    const o = item as Record<string, unknown>;
+    const id = typeof o["id"] === "string" ? o["id"].slice(0, 64) : `ext:${next.length}`;
+    const st = o["status"];
+    const status =
+      st === "done" || st === "todo" || st === "doing" || st === "blocked" ? st : "todo";
+    const note = typeof o["note"] === "string" ? o["note"].slice(0, 500) : undefined;
+    next.push({ id, status, note });
+  }
+  return next.length > 0 ? next : null;
+}
+
 export function emptyEpistemicState(goal: string): EpistemicState {
   return {
     goal: goal.slice(0, 2000),

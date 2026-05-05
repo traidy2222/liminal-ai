@@ -6,6 +6,26 @@ export interface DdgHit {
   snippet: string;
 }
 
+function normalizeTemporalQuery(query: string): string {
+  const q = query.trim();
+  if (q.length < 4) return q;
+  const lower = q.toLowerCase();
+  const isLatestIntent =
+    /\blatest|news|update|current|today|this week|this month|recent|breaking\b/.test(lower);
+  if (!isLatestIntent) return q;
+
+  const currentYear = new Date().getFullYear();
+  const years = [...q.matchAll(/\b(20\d{2})\b/g)].map((m) => parseInt(m[1]!, 10));
+  if (years.length === 0) {
+    return `${q} ${currentYear}`;
+  }
+  const maxYear = Math.max(...years);
+  if (maxYear < currentYear) {
+    return q.replace(/\b20\d{2}\b/g, String(currentYear));
+  }
+  return q;
+}
+
 export async function runHtmlDdgSearch(
   query: string,
   max: number
@@ -56,7 +76,9 @@ export const webSearchTool = defineTool({
   name: "web_search",
   description:
     "WHAT: Search the web via DuckDuckGo and return ranked result titles, URLs, and snippets.\n" +
-    "WHEN: You need to find URLs, recent information, documentation, or answers to factual questions.\n" +
+    "WHEN: You need URLs, recent information, documentation, or answers not available in memory/vault.\n" +
+    "BEFORE USING: Check memory/vault first (memory_query or recall_relevant, then vault_search/vault_read) when the question may already be known.\n" +
+    "RESEARCH DISCIPLINE: For the first web-search batch, diversify query intents (origins/background, latest status, impact/metrics) and avoid lexical duplicates.\n" +
     "NOT WHEN: You already have the URL — call web_fetch directly instead.\n" +
     "ARGS: query — search query string; max_results — number of results to return (default: 5).",
   requiresApproval: false,
@@ -76,7 +98,8 @@ export const webSearchTool = defineTool({
   },
   handler: async (args) => {
     const max = (args["max_results"] as number | undefined) ?? 5;
-    const r = await runHtmlDdgSearch(args["query"] as string, max);
+    const query = normalizeTemporalQuery(args["query"] as string);
+    const r = await runHtmlDdgSearch(query, max);
     if (!r.ok) return r;
     const output = r.hits
       .map((h, i) => `${i + 1}. ${h.title}\n   ${h.url}\n   ${h.snippet}`)

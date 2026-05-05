@@ -86,6 +86,10 @@ export function createOrchestrationTools(harness: AgentHarness) {
           type: "number",
           description: "Timeout in ms before auto-cancellation (default: 300000)",
         },
+        contract: {
+          type: "string",
+          description: "Optional execution contract summary the child must follow",
+        },
       },
       required: ["goal"],
       additionalProperties: false,
@@ -117,10 +121,15 @@ export function createOrchestrationTools(harness: AgentHarness) {
           // Non-fatal — proceed without injecting parent memory
         }
 
+        const contract = typeof args["contract"] === "string" ? args["contract"].trim() : "";
+        const contractContext = contract
+          ? `[EXECUTION CONTRACT]\n${contract.slice(0, 3000)}`
+          : "";
+        const mergedContext = [memoryContext, contractContext].filter(Boolean).join("\n\n");
         const { taskId } = harness.forkChild({
           goal: args["goal"] as string,
           toolNames: args["tools"] as string[] | undefined,
-          additionalContext: memoryContext,
+          additionalContext: mergedContext || undefined,
           maxRounds: args["max_rounds"] as number | undefined,
           timeoutMs: args["timeout_ms"] as number | undefined,
         });
@@ -308,7 +317,8 @@ export function createOrchestrationTools(harness: AgentHarness) {
             `\nProcedure:\n` +
             `1) Privately enumerate checks V1–V5: goal fit, each factual claim vs evidence/files, path/command realism, missing verification steps, residual risks.\n` +
             `2) Use read_file / list_dir / think (and optional tools arg) — bind conclusions to inspected artifacts.\n` +
-            `3) Summarize briefly, then output EXACTLY ONE line:\n` +
+            `3) If this is research/news synthesis, verify timeline completeness, source spread, uncertainty/fragility callout, and unresolved items.\n` +
+            `4) Summarize briefly, then output EXACTLY ONE line:\n` +
             `   "✓ VERIFIED: [evidence tied to checks]" OR\n` +
             `   "✗ ISSUES FOUND: [specific failed checks]"`,
           toolNames: (args["tools"] as string[] | undefined) ?? [

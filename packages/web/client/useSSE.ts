@@ -1,5 +1,11 @@
 import { useEffect, useReducer, useCallback } from "react";
 
+function sanitizeDeltaText(text: string): string {
+  return text
+    .replace(/\uFFFD/g, "")
+    .replace(/([A-Za-z])⚙([A-Za-z])/g, "$1$2");
+}
+
 export type MessageEntry =
   | { kind: "user"; text: string }
   | { kind: "assistant"; text: string; streaming: boolean }
@@ -13,10 +19,11 @@ export type MessageEntry =
   | { kind: "tool_result"; callId: string; output: string; ok: boolean }
   | { kind: "think"; content: string }
   | { kind: "plan"; steps: string[] }
+  | { kind: "trace"; text: string }
   | {
       kind: "subtask";
       taskId: string;
-      parentTaskId: string;   // (#7 — enables agent tree reconstruction)
+      parentTaskId: string;
       goal: string;
       depth: number;
       status: "running" | "done" | "error" | "cancelled";
@@ -31,28 +38,42 @@ interface ContextSnapshot {
   masked: boolean;
 }
 
+export type PendingApprovalState = {
+  callId: string;
+  name: string;
+  args: Record<string, unknown>;
+  approvalTimeoutMs: number;
+  receivedAt: number;
+};
+
 export interface SSEState {
   messages: MessageEntry[];
   contextSnapshot: ContextSnapshot | null;
-  pendingApproval: { callId: string; name: string; args: Record<string, unknown> } | null;
+  pendingApproval: PendingApprovalState | null;
   pendingAskUser: { prompt: string } | null;
   connected: boolean;
   busy: boolean;
   error: string | null;
-  /** Display name of the currently active persona. */
   personaName: string;
+  /** From GET /api/config — when `quiet`, trace-channel text is hidden. */
+  uiVerbosity: "normal" | "quiet";
 }
 
 const ORCH_TOOLS = new Set(["spawn_agent", "wait_for_agents", "cancel_agent", "list_agents"]);
 
 type Action =
+  | { type: "init_config"; uiVerbosity: "normal" | "quiet" }
   | { type: "connected" }
   | { type: "disconnected" }
   | { type: "user_message"; text: string }
-  | { type: "text"; payload: { delta: string } }
+  | { type: "text"; payload: { delta: string; channel?: "user" | "trace" } }
+  | { type: "provider_retry"; payload: { attempt: number; maxAttempts: number; message: string; backoffMs: number } }
   | { type: "tool_start"; payload: { callId: string; name: string } }
   | { type: "tool_delta"; payload: { callId: string; argsDelta: string } }
-  | { type: "tool_approval"; payload: { callId: string; name: string; args: Record<string, unknown> } }
+  | {
+      type: "tool_approval";
+      payload: { callId: string; name: string; args: Record<string, unknown>; approvalTimeoutMs: number };
+    }
   | { type: "tool_result"; payload: { callId: string; name: string; args: Record<string, unknown>; ok: boolean; output: string } }
   | { type: "ask_user"; payload: { prompt: string } }
   | { type: "approval_resolved" }
@@ -62,17 +83,32 @@ type Action =
   | { type: "subtask_spawned"; payload: { taskId: string; parentTaskId: string; goal: string; depth: number } }
   | { type: "subtask_complete"; payload: { taskId: string; ok: boolean } }
   | { type: "subtask_output"; payload: { taskId: string; delta: string } }
-  | { type: "plan_step_done"; payload: { stepIndex: number } }      // (#8)
-  | { type: "context_compressed"; payload: { beforeFraction: number; afterFraction: number; roundsCompressed: number } } // (#7)
-  | { type: "persona_changed"; payload: { name: string } };
+  | { type: "plan_step_done"; payload: { stepIndex: number } }
+  | { type: "context_compressed"; payload: { beforeFraction: number; afterFraction: number; roundsCompressed: number } }
+  | { type: "persona_changed"; payload: { name: string } }
+  | { type: "session_reset" };
 
 function reducer(state: SSEState, action: Action): SSEState {
   switch (action.type) {
+    case "init_config":
+      return { ...state, uiVerbosity: action.uiVerbosity };
+
     case "connected":
       return { ...state, connected: true };
 
     case "disconnected":
       return { ...state, connected: false };
+
+    case "session_reset":
+      return {
+        ...state,
+        messages: [],
+        busy: false,
+        error: null,
+        contextSnapshot: null,
+        pendingApproval: null,
+        pendingAskUser: null,
+      };
 
     case "user_message":
       return {
@@ -83,6 +119,26 @@ function reducer(state: SSEState, action: Action): SSEState {
       };
 
     case "text": {
+      const ch = action.payload.channel ?? "user";
+      if (state.uiVerbosity === "quiet" && ch === "trace") {
+        return state;
+      }
+      if (ch === "trace") {
+        const lastT = state.messages.at(-1);
+        if (lastT?.kind === "trace") {
+          return {
+            ...state,
+            messages: [
+              ...state.messages.slice(0, -1),
+              { kind: "trace", text: lastT.text + action.payload.delta },
+            ],
+          };
+        }
+        return {
+          ...state,
+          messages: [...state.messages, { kind: "trace", text: action.payload.delta }],
+        };
+      }
       const last = state.messages.at(-1);
       if (last?.kind === "assistant" && last.streaming) {
         return {
@@ -102,9 +158,25 @@ function reducer(state: SSEState, action: Action): SSEState {
       };
     }
 
+    case "provider_retry": {
+      if (state.uiVerbosity === "quiet") return state;
+      const { attempt, maxAttempts, message, backoffMs } = action.payload;
+      const line = `⟳ Provider retry ${attempt}/${maxAttempts} in ${Math.round(backoffMs / 1000)}s: ${message.slice(0, 220)}\n`;
+      const lastT = state.messages.at(-1);
+      if (lastT?.kind === "trace") {
+        return {
+          ...state,
+          messages: [...state.messages.slice(0, -1), { kind: "trace", text: lastT.text + line }],
+        };
+      }
+      return {
+        ...state,
+        messages: [...state.messages, { kind: "trace", text: line }],
+      };
+    }
+
     case "tool_start": {
       const { name } = action.payload;
-      // Suppress cards for think/plan/orchestration tools
       if (name === "think" || name === "plan" || ORCH_TOOLS.has(name)) return state;
       return {
         ...state,
@@ -128,7 +200,13 @@ function reducer(state: SSEState, action: Action): SSEState {
     case "tool_approval":
       return {
         ...state,
-        pendingApproval: action.payload,
+        pendingApproval: {
+          callId: action.payload.callId,
+          name: action.payload.name,
+          args: action.payload.args,
+          approvalTimeoutMs: action.payload.approvalTimeoutMs ?? 60_000,
+          receivedAt: Date.now(),
+        },
         messages: state.messages.map((m) =>
           m.kind === "tool_call" && m.callId === action.payload.callId
             ? { ...m, status: "pending_approval" as const }
@@ -141,7 +219,6 @@ function reducer(state: SSEState, action: Action): SSEState {
 
     case "tool_result": {
       const { callId, name, args, ok, output } = action.payload;
-      // Intercept think/plan
       if (name === "think" && ok) {
         return {
           ...state,
@@ -154,7 +231,6 @@ function reducer(state: SSEState, action: Action): SSEState {
           messages: [...state.messages, { kind: "plan", steps: args["steps"] as string[] }],
         };
       }
-      // Suppress orchestration tool results (they show as subtask cards)
       if (ORCH_TOOLS.has(name)) return state;
 
       return {
@@ -274,65 +350,112 @@ export function useSSE() {
     busy: false,
     error: null,
     personaName: "Liminal",
+    uiVerbosity: "normal",
   });
 
   useEffect(() => {
-    const es = new EventSource(`${SERVER}/api/stream`);
+    let es: EventSource | null = null;
+    let cancelled = false;
+    let queuedText = "";
+    let queuedTrace = "";
+    let flushTimer: ReturnType<typeof setTimeout> | null = null;
+    const flush = () => {
+      flushTimer = null;
+      if (queuedText) {
+        dispatch({ type: "text", payload: { delta: queuedText, channel: "user" } });
+        queuedText = "";
+      }
+      if (queuedTrace) {
+        dispatch({ type: "text", payload: { delta: queuedTrace, channel: "trace" } });
+        queuedTrace = "";
+      }
+    };
+    const queueFlush = () => {
+      if (flushTimer) return;
+      flushTimer = setTimeout(flush, 40);
+    };
 
-    es.addEventListener("connected", () => dispatch({ type: "connected" }));
-    es.addEventListener("text", (e: MessageEvent) =>
-      dispatch({ type: "text", payload: JSON.parse(e.data) })
-    );
-    es.addEventListener("tool_start", (e: MessageEvent) =>
-      dispatch({ type: "tool_start", payload: JSON.parse(e.data) })
-    );
-    es.addEventListener("tool_delta", (e: MessageEvent) =>
-      dispatch({ type: "tool_delta", payload: JSON.parse(e.data) })
-    );
-    es.addEventListener("tool_approval", (e: MessageEvent) =>
-      dispatch({ type: "tool_approval", payload: JSON.parse(e.data) })
-    );
-    es.addEventListener("tool_result", (e: MessageEvent) =>
-      dispatch({ type: "tool_result", payload: JSON.parse(e.data) })
-    );
-    es.addEventListener("ask_user", (e: MessageEvent) =>
-      dispatch({ type: "ask_user", payload: JSON.parse(e.data) })
-    );
-    es.addEventListener("turn_end", (e: MessageEvent) =>
-      dispatch({ type: "turn_end", payload: JSON.parse(e.data) })
-    );
-    es.addEventListener("subtask_spawned", (e: MessageEvent) =>
-      dispatch({ type: "subtask_spawned", payload: JSON.parse(e.data) })
-    );
-    es.addEventListener("subtask_complete", (e: MessageEvent) =>
-      dispatch({ type: "subtask_complete", payload: JSON.parse(e.data) })
-    );
-    es.addEventListener("plan_step_done", (e: MessageEvent) =>
-      dispatch({ type: "plan_step_done", payload: JSON.parse(e.data) })
-    );
-    es.addEventListener("context_compressed", (e: MessageEvent) =>
-      dispatch({ type: "context_compressed", payload: JSON.parse(e.data) })
-    );
-    // Persona change — update header badge
-    es.addEventListener("persona_changed", (e: MessageEvent) =>
-      dispatch({ type: "persona_changed", payload: JSON.parse(e.data) })
-    );
-    es.addEventListener("subtask_output", (e: MessageEvent) =>
-      dispatch({ type: "subtask_output", payload: JSON.parse(e.data) })
-    );
-    // Informational-only events — no UI state change needed
-    es.addEventListener("ask_user_answered", () => {});
-    es.addEventListener("approval_decision", () => {});
-    es.addEventListener("tool_timing", () => {});
-    es.addEventListener("error", (e: MessageEvent) =>
-      dispatch({
-        type: "error",
-        payload: JSON.parse((e as MessageEvent).data ?? '{"message":"Connection error"}'),
-      })
-    );
-    es.onerror = () => dispatch({ type: "disconnected" });
+    void (async () => {
+      try {
+        const r = await fetch(`${SERVER}/api/config`);
+        if (r.ok) {
+          const cfg = (await r.json()) as { uiVerbosity?: string };
+          if (!cancelled && cfg.uiVerbosity === "quiet") {
+            dispatch({ type: "init_config", uiVerbosity: "quiet" });
+          }
+        }
+      } catch {
+        /* default normal */
+      }
+      if (cancelled) return;
 
-    return () => es.close();
+      es = new EventSource(`${SERVER}/api/stream`);
+
+      es.addEventListener("connected", () => dispatch({ type: "connected" }));
+      es.addEventListener("text", (e: MessageEvent) => {
+        const payload = JSON.parse(e.data) as { delta: string; channel?: "user" | "trace" };
+        const cleaned = sanitizeDeltaText(payload.delta);
+        if ((payload.channel ?? "user") === "trace") queuedTrace += cleaned;
+        else queuedText += cleaned;
+        queueFlush();
+      });
+      es.addEventListener("provider_retry", (e: MessageEvent) =>
+        dispatch({ type: "provider_retry", payload: JSON.parse(e.data) })
+      );
+      es.addEventListener("tool_start", (e: MessageEvent) =>
+        dispatch({ type: "tool_start", payload: JSON.parse(e.data) })
+      );
+      es.addEventListener("tool_delta", (e: MessageEvent) =>
+        dispatch({ type: "tool_delta", payload: JSON.parse(e.data) })
+      );
+      es.addEventListener("tool_approval", (e: MessageEvent) =>
+        dispatch({ type: "tool_approval", payload: JSON.parse(e.data) })
+      );
+      es.addEventListener("tool_result", (e: MessageEvent) =>
+        dispatch({ type: "tool_result", payload: JSON.parse(e.data) })
+      );
+      es.addEventListener("ask_user", (e: MessageEvent) =>
+        dispatch({ type: "ask_user", payload: JSON.parse(e.data) })
+      );
+      es.addEventListener("turn_end", (e: MessageEvent) =>
+        dispatch({ type: "turn_end", payload: JSON.parse(e.data) })
+      );
+      es.addEventListener("subtask_spawned", (e: MessageEvent) =>
+        dispatch({ type: "subtask_spawned", payload: JSON.parse(e.data) })
+      );
+      es.addEventListener("subtask_complete", (e: MessageEvent) =>
+        dispatch({ type: "subtask_complete", payload: JSON.parse(e.data) })
+      );
+      es.addEventListener("plan_step_done", (e: MessageEvent) =>
+        dispatch({ type: "plan_step_done", payload: JSON.parse(e.data) })
+      );
+      es.addEventListener("context_compressed", (e: MessageEvent) =>
+        dispatch({ type: "context_compressed", payload: JSON.parse(e.data) })
+      );
+      es.addEventListener("persona_changed", (e: MessageEvent) =>
+        dispatch({ type: "persona_changed", payload: JSON.parse(e.data) })
+      );
+      es.addEventListener("subtask_output", (e: MessageEvent) =>
+        dispatch({ type: "subtask_output", payload: JSON.parse(e.data) })
+      );
+      es.addEventListener("ask_user_answered", () => {});
+      es.addEventListener("approval_decision", () => {});
+      es.addEventListener("tool_timing", () => {});
+      es.addEventListener("error", (e: MessageEvent) =>
+        dispatch({
+          type: "error",
+          payload: JSON.parse((e as MessageEvent).data ?? '{"message":"Connection error"}'),
+        })
+      );
+      es.onerror = () => dispatch({ type: "disconnected" });
+    })();
+
+    return () => {
+      cancelled = true;
+      if (flushTimer) clearTimeout(flushTimer);
+      flush();
+      es?.close();
+    };
   }, []);
 
   const sendMessage = useCallback(async (message: string) => {
@@ -362,5 +485,21 @@ export function useSSE() {
     dispatch({ type: "ask_user_resolved" });
   }, []);
 
-  return { state, sendMessage, sendApproval, sendAnswer };
+  const sendClearSession = useCallback(async () => {
+    const r = await fetch(`${SERVER}/api/session/reset`, { method: "POST" });
+    if (r.ok) {
+      dispatch({ type: "session_reset" });
+      return;
+    }
+    let msg = `Session reset failed (${r.status})`;
+    try {
+      const j = (await r.json()) as { error?: string };
+      if (j.error) msg = j.error;
+    } catch {
+      /* ignore */
+    }
+    dispatch({ type: "error", payload: { message: msg } });
+  }, []);
+
+  return { state, sendMessage, sendApproval, sendAnswer, sendClearSession };
 }

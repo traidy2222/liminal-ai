@@ -10,7 +10,7 @@ import {
   upsertNoteEmbeddings,
   embedQueryAgainstIndex,
 } from "./memory_index.js";
-import { searchVault } from "./vault_store.js";
+import { searchVault, getBacklinks, extractWikilinks, findNote } from "./vault_store.js";
 
 function normBm25Scores(scores: number[]): number[] {
   const m = Math.max(...scores, 1e-9);
@@ -64,6 +64,19 @@ export const recallRelevantTool = defineTool({
         enum: ["notes", "vault", "both"],
         description: "Where to search (default both)",
       },
+      evidence_gaps: {
+        type: "array",
+        items: { type: "string" },
+        description: "Optional missing evidence statements for closed-loop retrieval",
+      },
+      max_refine_rounds: {
+        type: "number",
+        description: "Closed-loop refinement rounds for evidence gaps (default 1, max 3)",
+      },
+      expand_vault_neighbors: {
+        type: "boolean",
+        description: "When true, include linked neighbor notes from top vault hits",
+      },
     },
     required: ["query"],
     additionalProperties: false,
@@ -74,12 +87,19 @@ export const recallRelevantTool = defineTool({
     const hyde = typeof args["hyde"] === "string" ? args["hyde"].trim().slice(0, 2000) : "";
     const qArr = args["queries"] as string[] | undefined;
     const single = (args["query"] as string | undefined)?.trim() ?? "";
+    const evidenceGaps = Array.isArray(args["evidence_gaps"])
+      ? (args["evidence_gaps"] as unknown[]).map((x) => String(x).trim()).filter(Boolean)
+      : [];
+    const refineRounds = Math.max(1, Math.min(3, (args["max_refine_rounds"] as number | undefined) ?? 1));
     const queries: string[] =
       Array.isArray(qArr) && qArr.length > 0
         ? qArr.map((x) => String(x).trim()).filter(Boolean).slice(0, 8)
         : single
           ? [single]
           : [];
+    for (let i = 0; i < Math.min(evidenceGaps.length, refineRounds); i++) {
+      queries.push(`${queries[0] ?? single} ${evidenceGaps[i]}`);
+    }
     if (queries.length === 0) return { ok: false, error: "query or queries required" };
 
     const apiKey = process.env["OPENROUTER_API_KEY"] ?? "";
@@ -211,14 +231,55 @@ export const recallRelevantTool = defineTool({
     }
 
     if (scope === "vault" || scope === "both") {
-      const vq = queries.join(" ");
-      const vhits = await searchVault(vq, {});
+      const byTitle = new Map<
+        string,
+        { note: Awaited<ReturnType<typeof searchVault>>[number]["note"]; snippet: string; score: number }
+      >();
+      for (const q of queries.slice(0, 4)) {
+        const found = await searchVault(q, {});
+        found.slice(0, k + 8).forEach((hit, idx) => {
+          const existing = byTitle.get(hit.note.title);
+          const recencyBoost = Math.max(
+            0,
+            0.2 - (Date.now() - new Date(hit.note.updated).getTime()) / (1000 * 60 * 60 * 24 * 365) * 0.2
+          );
+          const rankScore = 1 / (idx + 1) + recencyBoost;
+          if (!existing || rankScore > existing.score) {
+            byTitle.set(hit.note.title, {
+              note: hit.note,
+              snippet: hit.snippet,
+              score: rankScore,
+            });
+          }
+        });
+      }
+      let vhits = [...byTitle.values()].sort((a, b) => b.score - a.score);
+      if (args["expand_vault_neighbors"] === true && vhits.length > 0) {
+        const seeds = vhits.slice(0, 3).map((h) => h.note.title);
+        for (const seed of seeds) {
+          const seedNote = await findNote(seed);
+          if (!seedNote) continue;
+          const fwd = extractWikilinks(seedNote.body).slice(0, 4);
+          const back = (await getBacklinks(seedNote.title)).slice(0, 4).map((n) => n.title);
+          for (const title of [...fwd, ...back]) {
+            if (byTitle.has(title)) continue;
+            const linked = await findNote(title);
+            if (!linked) continue;
+            byTitle.set(linked.title, {
+              note: linked,
+              snippet: linked.body.replace(/\s+/g, " ").slice(0, 180),
+              score: 0.15,
+            });
+          }
+        }
+        vhits = [...byTitle.values()].sort((a, b) => b.score - a.score);
+      }
       lines.push("## Vault");
       if (vhits.length === 0) lines.push("(no vault matches)");
       else {
-        for (const h of vhits.slice(0, k)) {
+        for (const h of vhits.slice(0, k + 4)) {
           lines.push(
-            `- [[${h.note.title}]] (${h.note.type}) — ${h.snippet.replace(/\s+/g, " ").slice(0, 180)}`
+            `- [[${h.note.title}]] (${h.note.type}) score=${h.score.toFixed(3)} — ${h.snippet.replace(/\s+/g, " ").slice(0, 180)}`
           );
         }
       }

@@ -1,22 +1,13 @@
 import "./tuiWorkspaceBootstrap.js";
 import React from "react";
 import { render } from "ink";
-import { AgentHarness } from "@liminal/core";
+import { AgentHarness, maybeAttachSessionEventLog } from "@liminal/core";
 import {
   registerAllTools,
   INCEPTION_MESSAGES,
   buildProtocolDynamicSuffix,
 } from "@liminal/tools";
 import { App } from "./App.js";
-
-/** Wall-clock cap for one user message (entire ReAct run). Env override: AGENT_SEND_TIMEOUT_MS */
-function resolveSendTimeoutMs(): number {
-  const raw = process.env["AGENT_SEND_TIMEOUT_MS"];
-  if (raw === undefined || raw.trim() === "") return 600_000;
-  const n = parseInt(raw.trim(), 10);
-  if (!Number.isFinite(n)) return 600_000;
-  return Math.max(60_000, Math.min(n, 3_600_000));
-}
 
 /** Heuristic + LLM 0/1 gate to skip approval on safe calls. Env: AGENT_SAFETY_JUDGE=1 */
 function resolveSafetyJudge():
@@ -30,6 +21,20 @@ function resolveSafetyJudge():
   };
 }
 
+function resolveWorldContext():
+  | { location: string; sessionMode?: "initializer" | "coding" }
+  | { sessionMode: "initializer" | "coding" }
+  | undefined {
+  const loc = process.env["AGENT_LOCATION"]?.trim();
+  const modeRaw = process.env["AGENT_SESSION_MODE"]?.trim().toLowerCase();
+  const sessionMode =
+    modeRaw === "initializer" || modeRaw === "coding" ? modeRaw : undefined;
+  if (!loc && !sessionMode) return undefined;
+  if (loc && sessionMode) return { location: loc, sessionMode };
+  if (loc) return { location: loc };
+  return { sessionMode: sessionMode! };
+}
+
 const apiKey = process.env["OPENROUTER_API_KEY"];
 if (!apiKey) {
   console.error("Error: OPENROUTER_API_KEY not found. Check the .env file at the monorepo root.");
@@ -41,14 +46,11 @@ const harness = new AgentHarness({
   model: "openrouter/owl-alpha",
   baseURL: "https://openrouter.ai/api/v1",
   maxToolRoundsPerTurn: 128,
-  sendTimeoutMs: resolveSendTimeoutMs(),
   safetyJudge: resolveSafetyJudge(),
   workingStateEnabled: true,
   // World context: auto-gather date/time/OS/shell; optionally include location
   // Set AGENT_LOCATION="City, Country" in .env to include physical location
-  worldContext: process.env["AGENT_LOCATION"]
-    ? { location: process.env["AGENT_LOCATION"] }
-    : undefined,
+  worldContext: resolveWorldContext(),
   context: {
     modelMaxTokens: 128_000,
     thresholdFraction: 0.8,
@@ -58,5 +60,6 @@ const harness = new AgentHarness({
 });
 
 registerAllTools(harness.registry, harness.emitter, harness);
+void maybeAttachSessionEventLog(harness.emitter, harness.taskId);
 
 render(<App harness={harness} />);

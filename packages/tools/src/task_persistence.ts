@@ -20,6 +20,13 @@ interface TaskState {
   status: "in_progress" | "completed" | "abandoned";
   createdAt: string;
   updatedAt: string;
+  execution_state?: {
+    mission?: string;
+    active_contract?: string;
+    drift_score?: number;
+    unresolved_questions?: string[];
+    recovery_count?: number;
+  };
 }
 
 export const taskCheckpointTool = defineTool({
@@ -55,6 +62,17 @@ export const taskCheckpointTool = defineTool({
         enum: ["in_progress", "completed", "abandoned"],
         description: "Task status (default: in_progress)",
       },
+      execution_state: {
+        type: "object",
+        properties: {
+          mission: { type: "string" },
+          active_contract: { type: "string" },
+          drift_score: { type: "number" },
+          unresolved_questions: { type: "array", items: { type: "string" } },
+          recovery_count: { type: "number" },
+        },
+        description: "Optional long-horizon runtime state snapshot",
+      },
     },
     required: ["id", "goal", "progress_summary", "next_steps"],
     additionalProperties: false,
@@ -78,6 +96,7 @@ export const taskCheckpointTool = defineTool({
       status,
       createdAt: existing?.createdAt ?? now,
       updatedAt: now,
+      execution_state: (args["execution_state"] as TaskState["execution_state"] | undefined) ?? existing?.execution_state,
     };
 
     await atomicUpdate((n) => ({ ...n, [taskKey]: JSON.stringify(task) }));
@@ -90,6 +109,9 @@ export const taskCheckpointTool = defineTool({
         `Goal: ${task.goal}\n` +
         `Progress: ${task.progress_summary.slice(0, 120)}${task.progress_summary.length > 120 ? "…" : ""}\n` +
         `Next steps: ${task.next_steps.length} remaining\n` +
+        (task.execution_state
+          ? `Execution state: mission="${task.execution_state.mission ?? "n/a"}" contract="${task.execution_state.active_contract ?? "n/a"}" drift=${task.execution_state.drift_score ?? 0}\n`
+          : "") +
         `Key: ${taskKey}`,
     };
   },
@@ -167,12 +189,16 @@ export const resumeTaskTool = defineTool({
 function formatTask(task: TaskState): string {
   const nextStepList = task.next_steps.map((s, i) => `  ${i + 1}. ${s}`).join("\n");
   const artifactList = task.artifacts.length > 0 ? `\nArtifacts: ${task.artifacts.join(", ")}` : "";
+  const runtime = task.execution_state
+    ? `\nRuntime state: mission=${task.execution_state.mission ?? "n/a"}, active_contract=${task.execution_state.active_contract ?? "n/a"}, drift=${task.execution_state.drift_score ?? 0}`
+    : "";
   return (
     `[RESUMED TASK: ${task.id}]\n` +
     `Goal: ${task.goal}\n\n` +
     `Progress so far:\n${task.progress_summary}\n\n` +
     `Next steps:\n${nextStepList}` +
     artifactList +
+    runtime +
     `\n\nLast updated: ${task.updatedAt.slice(0, 16).replace("T", " ")} UTC`
   );
 }

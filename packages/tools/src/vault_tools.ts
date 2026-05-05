@@ -17,6 +17,7 @@ import {
   writeVaultNote,
   findNote,
   searchVault,
+  findNearDuplicateNote,
   listAllNotes,
   getBacklinks,
   deleteVaultNote,
@@ -74,6 +75,18 @@ export const vaultWriteTool = defineTool({
       let body = args["content"] as string;
       const title = args["title"] as string;
       const typ = args["type"] as NoteType;
+      if (process.env["AGENT_VAULT_DEDUPE"] === "1") {
+        const dupes = await findNearDuplicateNote(title, body, { limit: 3, threshold: 0.5 });
+        if (dupes.length > 0) {
+          const best = dupes[0]!;
+          return {
+            ok: false,
+            error:
+              `Near-duplicate vault note detected: [[${best.note.title}]] score=${best.score.toFixed(3)}. ` +
+              `Search/update existing note instead of creating a new duplicate.`,
+          };
+        }
+      }
 
       const { slug, wasCreated } = await writeVaultNote({
         title,

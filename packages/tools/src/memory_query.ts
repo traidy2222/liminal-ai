@@ -79,6 +79,19 @@ export const memoryQueryTool = defineTool({
         items: { type: "string" },
         description: "Rerank: active sub-questions",
       },
+      evidence_gaps: {
+        type: "array",
+        items: { type: "string" },
+        description: "Hybrid mode: explicit missing evidence items for closed-loop retrieval",
+      },
+      max_refine_rounds: {
+        type: "number",
+        description: "Hybrid mode: max closed-loop refinement rounds",
+      },
+      prefer_recent_vault: {
+        type: "boolean",
+        description: "Hybrid mode: prioritize fresh vault pages and link-neighbor expansion",
+      },
     },
     required: ["mode"],
     additionalProperties: false,
@@ -124,6 +137,16 @@ export const memoryQueryTool = defineTool({
         };
         if (typeof args["hyde"] === "string" && args["hyde"].trim()) {
           payload["hyde"] = args["hyde"].trim().slice(0, 2000);
+        }
+        if (Array.isArray(args["evidence_gaps"])) {
+          payload["evidence_gaps"] = args["evidence_gaps"];
+        }
+        if (typeof args["max_refine_rounds"] === "number") {
+          payload["max_refine_rounds"] = args["max_refine_rounds"];
+        }
+        if (args["prefer_recent_vault"] === true) {
+          payload["scope"] = "both";
+          payload["expand_vault_neighbors"] = true;
         }
         const r = await recallRelevantTool.handler(payload);
         if (!r.ok) return r;

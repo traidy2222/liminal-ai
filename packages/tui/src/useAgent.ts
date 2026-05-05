@@ -1,5 +1,16 @@
-import { useCallback, useEffect, useReducer } from "react";
+import { useCallback, useEffect, useReducer, useRef } from "react";
 import type { AgentHarness, AgentEventMap, ContextSnapshot } from "@liminal/core";
+
+function isAgentUiQuiet(): boolean {
+  return process.env["AGENT_UI_VERBOSITY"]?.trim() === "quiet";
+}
+
+function sanitizeDeltaText(text: string): string {
+  return text
+    .replace(/\uFFFD/g, "")
+    .replace(/([A-Za-z])⚙([A-Za-z])/g, "$1$2")
+    .replace(/\r/g, "");
+}
 
 export type MessageEntry =
   | { kind: "user"; text: string }
@@ -15,6 +26,7 @@ export type MessageEntry =
   | { kind: "ask_user"; prompt: string }
   | { kind: "think"; content: string }
   | { kind: "plan"; steps: string[] }
+  | { kind: "trace"; text: string }
   | {
       kind: "subtask";
       taskId: string;
@@ -40,6 +52,15 @@ export interface AgentState {
 type Action =
   | { type: "user_message"; text: string }
   | { type: "text_delta"; delta: string }
+  | { type: "trace_delta"; delta: string }
+  | {
+      type: "provider_retry";
+      attempt: number;
+      maxAttempts: number;
+      message: string;
+      backoffMs: number;
+    }
+  | { type: "session_reset" }
   | { type: "tool_start"; callId: string; name: string }
   | { type: "tool_delta"; callId: string; argsDelta: string }
   | { type: "tool_approval"; payload: AgentEventMap["tool_approval"] }
@@ -82,6 +103,52 @@ function reducer(state: AgentState, action: Action): AgentState {
         ],
       };
     }
+
+    case "trace_delta": {
+      const lastT = state.messages.at(-1);
+      if (lastT?.kind === "trace") {
+        return {
+          ...state,
+          messages: [
+            ...state.messages.slice(0, -1),
+            { kind: "trace", text: lastT.text + action.delta },
+          ],
+        };
+      }
+      return {
+        ...state,
+        messages: [...state.messages, { kind: "trace", text: action.delta }],
+      };
+    }
+
+    case "provider_retry": {
+      if (isAgentUiQuiet()) return state;
+      const line =
+        `⟳ Provider retry ${action.attempt}/${action.maxAttempts} in ${Math.round(action.backoffMs / 1000)}s: ` +
+        `${action.message.slice(0, 220)}\n`;
+      const lastT = state.messages.at(-1);
+      if (lastT?.kind === "trace") {
+        return {
+          ...state,
+          messages: [
+            ...state.messages.slice(0, -1),
+            { kind: "trace", text: lastT.text + line },
+          ],
+        };
+      }
+      return { ...state, messages: [...state.messages, { kind: "trace", text: line }] };
+    }
+
+    case "session_reset":
+      return {
+        ...state,
+        messages: [],
+        busy: false,
+        error: null,
+        contextSnapshot: null,
+        pendingApproval: null,
+        pendingAskUser: null,
+      };
 
     case "tool_start":
       // Suppress generic card for think/plan — they render as special entries
@@ -180,12 +247,14 @@ function reducer(state: AgentState, action: Action): AgentState {
       return { ...state, error: action.msg, busy: false };
 
     case "think":
+      if (isAgentUiQuiet()) return state;
       return {
         ...state,
         messages: [...state.messages, { kind: "think", content: action.content }],
       };
 
     case "plan":
+      if (isAgentUiQuiet()) return state;
       return {
         ...state,
         messages: [...state.messages, { kind: "plan", steps: action.steps }],
@@ -259,21 +328,67 @@ const initialState: AgentState = {
 
 export function useAgent(harness: AgentHarness) {
   const [state, dispatch] = useReducer(reducer, initialState);
+  const queuedTextRef = useRef("");
+  const queuedTraceRef = useRef("");
+  const flushTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
     const { emitter } = harness;
+    const flush = () => {
+      flushTimerRef.current = null;
+      if (queuedTextRef.current) {
+        dispatch({ type: "text_delta", delta: queuedTextRef.current });
+        queuedTextRef.current = "";
+      }
+      if (queuedTraceRef.current) {
+        dispatch({ type: "trace_delta", delta: queuedTraceRef.current });
+        queuedTraceRef.current = "";
+      }
+    };
+    const queueFlush = () => {
+      if (flushTimerRef.current) return;
+      flushTimerRef.current = setTimeout(flush, 40);
+    };
+    const flushNow = () => {
+      if (flushTimerRef.current) clearTimeout(flushTimerRef.current);
+      flush();
+    };
 
-    emitter.on("text", ({ delta }) => dispatch({ type: "text_delta", delta }));
-    emitter.on("tool_start", ({ callId, name }) =>
-      dispatch({ type: "tool_start", callId, name })
+    emitter.on("text", ({ delta, channel }) => {
+      const ch = channel ?? "user";
+      if (isAgentUiQuiet() && ch === "trace") return;
+      const cleaned = sanitizeDeltaText(delta);
+      if (ch === "trace") {
+        queuedTraceRef.current += cleaned;
+        queueFlush();
+        return;
+      }
+      queuedTextRef.current += cleaned;
+      queueFlush();
+    });
+    emitter.on("provider_retry", (p) =>
+      dispatch({
+        type: "provider_retry",
+        attempt: p.attempt,
+        maxAttempts: p.maxAttempts,
+        message: p.message,
+        backoffMs: p.backoffMs,
+      })
     );
-    emitter.on("tool_delta", ({ callId, argsDelta }) =>
-      dispatch({ type: "tool_delta", callId, argsDelta })
-    );
-    emitter.on("tool_approval", (payload) =>
-      dispatch({ type: "tool_approval", payload })
-    );
+    emitter.on("tool_start", ({ callId, name }) => {
+      flushNow();
+      dispatch({ type: "tool_start", callId, name });
+    });
+    emitter.on("tool_delta", ({ callId, argsDelta }) => {
+      flushNow();
+      dispatch({ type: "tool_delta", callId, argsDelta });
+    });
+    emitter.on("tool_approval", (payload) => {
+      flushNow();
+      dispatch({ type: "tool_approval", payload });
+    });
     emitter.on("tool_result", ({ callId, name, args, result }) => {
+      flushNow();
       // Intercept think/plan — render as special entries
       if (name === "think" && result.ok) {
         dispatch({ type: "think", content: args["content"] as string });
@@ -308,24 +423,30 @@ export function useAgent(harness: AgentHarness) {
         output: result.ok ? result.output : result.error,
       });
     });
-    emitter.on("ask_user", (payload) =>
-      dispatch({ type: "ask_user", payload })
-    );
-    emitter.on("turn_end", ({ contextSnapshot }) =>
-      dispatch({ type: "turn_end", snapshot: contextSnapshot })
-    );
-    emitter.on("error", ({ err }) =>
-      dispatch({ type: "error", msg: err.message })
-    );
-    emitter.on("subtask_spawned", ({ taskId, parentTaskId, goal, depth }) =>
-      dispatch({ type: "subtask_spawned", taskId, parentTaskId, goal, depth })
-    );
-    emitter.on("subtask_complete", ({ taskId, ok }) =>
-      dispatch({ type: "subtask_complete", taskId, ok })
-    );
-    emitter.on("subtask_output", ({ taskId, delta }) =>
-      dispatch({ type: "subtask_output", taskId, delta })
-    );
+    emitter.on("ask_user", (payload) => {
+      flushNow();
+      dispatch({ type: "ask_user", payload });
+    });
+    emitter.on("turn_end", ({ contextSnapshot }) => {
+      flushNow();
+      dispatch({ type: "turn_end", snapshot: contextSnapshot });
+    });
+    emitter.on("error", ({ err }) => {
+      flushNow();
+      dispatch({ type: "error", msg: err.message });
+    });
+    emitter.on("subtask_spawned", ({ taskId, parentTaskId, goal, depth }) => {
+      flushNow();
+      dispatch({ type: "subtask_spawned", taskId, parentTaskId, goal, depth });
+    });
+    emitter.on("subtask_complete", ({ taskId, ok }) => {
+      flushNow();
+      dispatch({ type: "subtask_complete", taskId, ok });
+    });
+    emitter.on("subtask_output", ({ taskId, delta }) => {
+      flushNow();
+      dispatch({ type: "subtask_output", taskId, delta });
+    });
     // New events (#7 Structured Event Log)
     emitter.on("context_compressed", ({ beforeFraction, afterFraction, roundsCompressed }) =>
       dispatch({
@@ -339,8 +460,59 @@ export function useAgent(harness: AgentHarness) {
     emitter.on("persona_changed", ({ name }) =>
       dispatch({ type: "persona_changed", name })
     );
+    emitter.on("execution_state", (p) =>
+      dispatch({
+        type: "trace_delta",
+        delta:
+          `\n[runtime] mission=${p.missionId ?? "n/a"} contract=${p.activeContractId ?? "n/a"} ` +
+          `drift=${p.driftScore.toFixed(2)} milestones=${p.milestoneCount} contracts=${p.contractCount}\n`,
+      })
+    );
+    emitter.on("contract_transition", (p) =>
+      dispatch({
+        type: "trace_delta",
+        delta: `\n[contract] ${p.contractId} -> ${p.status}${p.reason ? ` (${p.reason})` : ""}\n`,
+      })
+    );
+    emitter.on("contract_violation", (p) =>
+      dispatch({
+        type: "trace_delta",
+        delta: `\n[contract violation] ${p.toolName}: ${p.reason}\n`,
+      })
+    );
+    emitter.on("recovery_action", (p) =>
+      dispatch({
+        type: "trace_delta",
+        delta: `\n[recovery] ${p.strategy}: ${p.reason}${p.notes ? ` (${p.notes})` : ""}\n`,
+      })
+    );
+    emitter.on("drift_detected", (p) =>
+      dispatch({
+        type: "trace_delta",
+        delta: `\n[drift] score=${p.score.toFixed(2)} replan=${p.triggeredReplan ? "yes" : "no"} (${p.reason})\n`,
+      })
+    );
+    emitter.on("runtime_heartbeat", (p) =>
+      dispatch({
+        type: "trace_delta",
+        delta: `\n[heartbeat] round=${p.round} uptime_ms=${p.uptimeMs} drift=${p.driftScore.toFixed(2)}\n`,
+      })
+    );
+    emitter.on("vault_activity", (p) =>
+      dispatch({
+        type: "trace_delta",
+        delta:
+          `\n[vault] action=${p.action} ok=${p.ok ? "yes" : "no"}` +
+          `${p.noteTitle ? ` title="${p.noteTitle}"` : ""}` +
+          `${p.reason ? ` reason="${p.reason}"` : ""}\n`,
+      })
+    );
     // ask_user_answered and approval_decision are informational — no UI state change needed
     // but they fire into the event stream for telemetry consumers
+    return () => {
+      if (flushTimerRef.current) clearTimeout(flushTimerRef.current);
+      flushNow();
+    };
   }, [harness]);
 
   const sendMessage = useCallback(
@@ -361,6 +533,17 @@ export function useAgent(harness: AgentHarness) {
     [state.pendingApproval]
   );
 
+  const dismissApprovalUi = useCallback(() => {
+    dispatch({ type: "approval_resolved" });
+  }, []);
+
+  const clearSession = useCallback(() => {
+    if (harness.getIsRunning()) return;
+    if (state.pendingApproval || state.pendingAskUser) return;
+    harness.clearConversation();
+    dispatch({ type: "session_reset" });
+  }, [harness, state.pendingApproval, state.pendingAskUser]);
+
   const resolveAskUser = useCallback(
     (answer: string) => {
       if (state.pendingAskUser) {
@@ -371,5 +554,17 @@ export function useAgent(harness: AgentHarness) {
     [state.pendingAskUser]
   );
 
-  return { state, sendMessage, resolveApproval, resolveAskUser };
+  const dismissAskUserUi = useCallback(() => {
+    dispatch({ type: "ask_user_resolved" });
+  }, []);
+
+  return {
+    state,
+    sendMessage,
+    resolveApproval,
+    resolveAskUser,
+    dismissApprovalUi,
+    dismissAskUserUi,
+    clearSession,
+  };
 }

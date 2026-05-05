@@ -5,6 +5,7 @@ import {
   renderEpistemicStateBlock,
 } from "./epistemic_state.js";
 import { estimateMessagesTokens } from "./token_estimate.js";
+import { stashToolBodyElide } from "./output_distill.js";
 
 // ─── Round grouping for compression ──────────────────────────────────────────
 
@@ -458,6 +459,57 @@ export class ContextManager {
    * the provided text. Called by the compress_context tool (#5).
    * (#7 Structured Event Log — calls onCompressed callback)
    */
+  /**
+   * Replace very large tool result bodies outside the last N tool rounds with
+   * `[TOOL_BODY_ELIDED …]` + artifact pointer (AGENT_TOOL_BODY_ELIDE=1).
+   */
+  async elideStaleToolResults(): Promise<void> {
+    if (process.env["AGENT_TOOL_BODY_ELIDE"] !== "1") return;
+    const minChars = Math.max(
+      2000,
+      parseInt(process.env["AGENT_TOOL_ELIDE_MIN_CHARS"] ?? "10000", 10) || 10_000
+    );
+    const keepRounds = Math.max(
+      1,
+      parseInt(process.env["AGENT_TOOL_ELIDE_KEEP_ROUNDS"] ?? "3", 10) || 3
+    );
+    const rounds = extractRounds(this.conversation);
+    const keepIdx = new Set<number>();
+    for (const r of rounds.slice(-keepRounds)) {
+      for (const idx of r.toolResultIdxs) keepIdx.add(idx);
+    }
+    const idToName = new Map<string, string>();
+    for (const m of this.conversation) {
+      if (m.role !== "assistant" || !("tool_calls" in m) || !Array.isArray(m.tool_calls)) continue;
+      for (const tc of m.tool_calls as Array<{ id: string; function?: { name?: string } }>) {
+        idToName.set(tc.id, tc.function?.name ?? "?");
+      }
+    }
+    for (let i = 0; i < this.conversation.length; i++) {
+      if (keepIdx.has(i)) continue;
+      const m = this.conversation[i];
+      if (!m || m.role !== "tool" || typeof m.content !== "string") continue;
+      if (m.content.startsWith("[TOOL_BODY_ELIDED") || m.content.startsWith("[observation masked"))
+        continue;
+      if (m.content.startsWith("ERROR:")) continue;
+      if (m.content.length < minChars) continue;
+      const id = "tool_call_id" in m ? (m.tool_call_id as string) : "";
+      const name = idToName.get(id) ?? "tool";
+      try {
+        const { hash, pointer } = await stashToolBodyElide(m.content);
+        const preview = m.content.slice(0, 400).replace(/\n/g, " ");
+        this.conversation[i] = {
+          ...m,
+          content:
+            `[TOOL_BODY_ELIDED tool=${name} original_chars=${m.content.length} hash=${hash}]\n` +
+            `Full body: ${pointer}\nPreview: ${preview}${m.content.length > 400 ? "…" : ""}`,
+        } as Message;
+      } catch {
+        /* keep original on artifact failure */
+      }
+    }
+  }
+
   forceCompress(anchorSummary: string): void {
     const inception = this.getEffectiveInception();
     const keepRecent = this.config.keepRecentRounds ?? 6;

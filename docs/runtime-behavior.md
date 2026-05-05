@@ -1,0 +1,73 @@
+# Runtime Behavior
+
+This document explains how Liminal behaves during real runs.
+
+## World Context Grounding
+
+Root sessions inject a world-context block once per fresh session. It includes:
+- current local date/time + timezone
+- OS/shell/path conventions
+- workspace root and project metadata
+- git state
+- available tools/signals
+- memory/vault summaries
+- repo map hints
+
+This anchors model behavior to the actual machine and date.
+
+## Execution State and Long-Horizon Planning
+
+Liminal tracks an `ExecutionState` model containing:
+- `mission`
+- `milestones`
+- `contracts`
+- `commitments`
+- `driftScore`
+- `recoveryLog`
+
+During runs, contract transitions and drift events are emitted for observability and eval assertions.
+
+## Drift and Recovery
+
+Drift score increases via periodic cadence and failure signals. When thresholds are crossed, replanning hints or state transitions can trigger.
+
+When all tools in a round fail:
+- error summary is appended
+- recovery hints are injected
+- recovery action is logged/emitted
+- optional reflection persistence is attempted
+
+## Finalization and Critic Pass
+
+Before turn completion, runtime may perform:
+- path citation nudges
+- synthesis checklist nudges for research outputs
+- `verify_result` critic checks for heavy/path-rich completions
+- memory auto-extraction
+- vault auto-write (policy dependent)
+
+These steps improve output quality and reduce silent regressions.
+
+## Vault Policy Semantics
+
+Current default behavior:
+- retrieval order guidance is advisory (memory -> vault -> web)
+- strict blocking before `web_search` is opt-in (`AGENT_VAULT_FIRST_STRICT=1`)
+- auto-write mode defaults to research-oriented persistence (unless disabled)
+
+## Temporal Anchoring
+
+Time-sensitive web queries (`latest/news/current/update`) are normalized to the current year unless the user explicitly asks for historical coverage.
+
+This prevents silent drift into stale years.
+
+## Runtime Heartbeats
+
+Each round can emit heartbeat telemetry including:
+- round index
+- uptime
+- drift score
+- active contract id
+
+Heartbeats are used by UI traces and eval assertions for long-horizon health checks.
+

@@ -2,6 +2,7 @@ node_modules/
 dist/
 .env
 .agent_notes.json
+.agent_sessions/
 *.js.map
 
 # Agent-generated test artifacts (written during live sessions)

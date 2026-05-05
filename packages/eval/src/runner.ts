@@ -94,6 +94,13 @@ export interface ScenarioResult {
   toolResultOkCount?: number;
   /** Distinct tool names with at least one tool_result. */
   distinctToolsInvoked?: string[];
+  /** Recovery events observed in trace (replan/retry/escalate/ask_user). */
+  recoveryActionCount?: number;
+  /** Contract policy violations observed in trace. */
+  contractViolationCount?: number;
+  /** Number of drift detections emitted in trace. */
+  driftDetections?: number;
+  vaultActivities?: number;
 }
 
 // ─── Trace helpers ────────────────────────────────────────────────────────────
@@ -222,11 +229,21 @@ export function timeoutFor(scenario: Scenario): number {
 
 function telemetryFromTraces(traces: TraceEvent[][]): Pick<
   ScenarioResult,
-  "terminationReason" | "toolResultOkCount" | "distinctToolsInvoked"
+  | "terminationReason"
+  | "toolResultOkCount"
+  | "distinctToolsInvoked"
+  | "recoveryActionCount"
+  | "contractViolationCount"
+  | "driftDetections"
+  | "vaultActivities"
 > {
   let terminationReason: string | null = null;
   const tools = new Set<string>();
   let toolResultOkCount = 0;
+  let recoveryActionCount = 0;
+  let contractViolationCount = 0;
+  let driftDetections = 0;
+  let vaultActivities = 0;
   for (const trace of traces) {
     for (const e of trace) {
       if (e.type === "turn_end") {
@@ -240,12 +257,20 @@ function telemetryFromTraces(traces: TraceEvent[][]): Pick<
         tools.add(p.name);
         if (p.result.ok) toolResultOkCount += 1;
       }
+      if (e.type === "recovery_action") recoveryActionCount += 1;
+      if (e.type === "contract_violation") contractViolationCount += 1;
+      if (e.type === "drift_detected") driftDetections += 1;
+      if (e.type === "vault_activity") vaultActivities += 1;
     }
   }
   return {
     terminationReason,
     toolResultOkCount,
     distinctToolsInvoked: [...tools].sort(),
+    recoveryActionCount,
+    contractViolationCount,
+    driftDetections,
+    vaultActivities,
   };
 }
 
@@ -272,7 +297,6 @@ function makeEvalConfig(maxRounds: number, timeoutMs: number): AgentConfig {
     model: EVAL_MODEL,
     baseURL: "https://openrouter.ai/api/v1",
     maxToolRoundsPerTurn: maxRounds,
-    sendTimeoutMs: timeoutMs,
     workingStateEnabled: true,
     context: {
       modelMaxTokens: 32_000,
@@ -328,6 +352,13 @@ async function runSingleHarnessSend(scenario: Scenario, userMessage: string): Pr
     "tool_timing",
     "subtask_spawned",
     "subtask_complete",
+    "execution_state",
+    "contract_transition",
+    "contract_violation",
+    "recovery_action",
+    "drift_detected",
+    "runtime_heartbeat",
+    "vault_activity",
   ] as const satisfies ReadonlyArray<keyof AgentEventMap>;
 
   for (const evName of capturedEvents) {
@@ -385,6 +416,10 @@ export async function appendEvalRunJsonLine(result: ScenarioResult): Promise<voi
           terminationReason: result.terminationReason ?? null,
           toolResultOkCount: result.toolResultOkCount ?? null,
           distinctToolsInvoked: result.distinctToolsInvoked ?? null,
+          recoveryActionCount: result.recoveryActionCount ?? null,
+          contractViolationCount: result.contractViolationCount ?? null,
+          driftDetections: result.driftDetections ?? null,
+          vaultActivities: result.vaultActivities ?? null,
         }) + "\n";
       await appendFile(join(dir, "runs.jsonl"), line, "utf8");
     } catch {

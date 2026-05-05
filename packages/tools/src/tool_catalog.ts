@@ -20,7 +20,7 @@ export const TOOL_FAMILIES: Record<string, { description: string; tools: readonl
   },
   tasks: {
     description: "Checkpoint and resume long tasks.",
-    tools: ["task_checkpoint", "resume_task"],
+    tools: ["task_checkpoint", "resume_task", "feature_checklist"],
   },
   memory_advanced: {
     description: "Typed memory CRUD, consolidation, graph, artifacts.",
@@ -97,6 +97,10 @@ export const CORE_ALWAYS_TOOLS_BASE: readonly string[] = [
   "list_dir",
   "recall_relevant",
   "search_memory",
+  "memory_query",
+  "vault_search",
+  "vault_read",
+  "vault_write",
   "ask_user",
   "list_tool_families",
   "activate_tool_family",

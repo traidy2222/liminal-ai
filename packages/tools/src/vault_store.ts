@@ -299,6 +299,31 @@ export async function searchVault(
     .filter((x): x is { note: VaultNote; snippet: string } => x !== null);
 }
 
+export async function findNearDuplicateNote(
+  title: string,
+  body: string,
+  opts?: { limit?: number; threshold?: number }
+): Promise<Array<{ note: VaultNote; score: number }>> {
+  const notes = await listAllNotes({ limit: 500 });
+  if (notes.length === 0) return [];
+  const query = `${title} ${body.slice(0, 800)}`.trim();
+  const docs: RankableDoc[] = notes.map((note) => ({
+    id: note.slug,
+    text: `${note.title} ${note.tags.join(" ")} ${note.body.slice(0, 2500)}`,
+    updatedAt: note.updated,
+    memoryType: note.type,
+  }));
+  const ranked = rankDocumentsForQuery(query, docs, {
+    limit: Math.max(1, Math.min(20, opts?.limit ?? 5)),
+  });
+  const threshold = opts?.threshold ?? 0.42;
+  const bySlug = new Map(notes.map((n) => [n.slug, n] as const));
+  return ranked
+    .filter((r) => r.score >= threshold)
+    .map((r) => ({ note: bySlug.get(r.id)!, score: r.score }))
+    .filter((x) => !!x.note);
+}
+
 // ─── Wikilinks ────────────────────────────────────────────────────────────────
 
 /** Extract all [[Wikilinks]] from text (deduped). */

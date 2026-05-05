@@ -1,4 +1,4 @@
-import { AgentHarness } from "@liminal/core";
+import { AgentHarness, maybeAttachSessionEventLog } from "@liminal/core";
 import {
   registerAllTools,
   INCEPTION_MESSAGES,
@@ -6,15 +6,6 @@ import {
 } from "@liminal/tools";
 import type { SSEManager } from "./sse.js";
 import type { ApprovalDecision } from "@liminal/core";
-
-/** Wall-clock cap for one user message. Env: AGENT_SEND_TIMEOUT_MS (ms), clamped 60s–60m. */
-function resolveSendTimeoutMs(): number {
-  const raw = process.env["AGENT_SEND_TIMEOUT_MS"];
-  if (raw === undefined || raw.trim() === "") return 600_000;
-  const n = parseInt(raw.trim(), 10);
-  if (!Number.isFinite(n)) return 600_000;
-  return Math.max(60_000, Math.min(n, 3_600_000));
-}
 
 function resolveSafetyJudge():
   | { enabled: true; model?: string }
@@ -27,8 +18,24 @@ function resolveSafetyJudge():
   };
 }
 
+function resolveWorldContext():
+  | { location: string; sessionMode?: "initializer" | "coding" }
+  | { sessionMode: "initializer" | "coding" }
+  | undefined {
+  const loc = process.env["AGENT_LOCATION"]?.trim();
+  const modeRaw = process.env["AGENT_SESSION_MODE"]?.trim().toLowerCase();
+  const sessionMode =
+    modeRaw === "initializer" || modeRaw === "coding" ? modeRaw : undefined;
+  if (!loc && !sessionMode) return undefined;
+  if (loc && sessionMode) return { location: loc, sessionMode };
+  if (loc) return { location: loc };
+  return { sessionMode: sessionMode! };
+}
+
 export class AgentBridge {
   readonly harness: AgentHarness;
+  /** No-op until maybeAttachSessionEventLog runs in constructor. */
+  private detachSessionLog: () => void = () => {};
   private pendingApprovals = new Map<string, (d: ApprovalDecision) => void>();
   private pendingAskUser: ((answer: string) => void) | null = null;
 
@@ -38,14 +45,11 @@ export class AgentBridge {
       model: "openrouter/owl-alpha",
       baseURL: "https://openrouter.ai/api/v1",
       maxToolRoundsPerTurn: 128,
-      sendTimeoutMs: resolveSendTimeoutMs(),
       safetyJudge: resolveSafetyJudge(),
       workingStateEnabled: true,
       // World context: auto-gather date/time/OS/shell; optionally include location
       // Set AGENT_LOCATION="City, Country" in .env to include physical location
-      worldContext: process.env["AGENT_LOCATION"]
-        ? { location: process.env["AGENT_LOCATION"] }
-        : undefined,
+      worldContext: resolveWorldContext(),
       context: {
         modelMaxTokens: 128_000,
         thresholdFraction: 0.8,
@@ -55,6 +59,10 @@ export class AgentBridge {
     });
 
     registerAllTools(this.harness.registry, this.harness.emitter, this.harness);
+    this.detachSessionLog = maybeAttachSessionEventLog(
+      this.harness.emitter,
+      this.harness.taskId
+    );
     this.wireEvents();
   }
 
@@ -62,6 +70,7 @@ export class AgentBridge {
     const { emitter } = this.harness;
 
     emitter.on("text", (p) => this.sse.send("text", p));
+    emitter.on("provider_retry", (p) => this.sse.send("provider_retry", p));
     emitter.on("tool_start", (p) => this.sse.send("tool_start", p));
     emitter.on("tool_delta", (p) => this.sse.send("tool_delta", p));
     emitter.on("tool_result", (p) =>
@@ -86,6 +95,13 @@ export class AgentBridge {
     emitter.on("context_compressed", (p) => this.sse.send("context_compressed", p));
     emitter.on("tool_timing", (p) => this.sse.send("tool_timing", p));
     emitter.on("persona_changed", (p) => this.sse.send("persona_changed", p));
+    emitter.on("execution_state", (p) => this.sse.send("execution_state", p));
+    emitter.on("contract_transition", (p) => this.sse.send("contract_transition", p));
+    emitter.on("contract_violation", (p) => this.sse.send("contract_violation", p));
+    emitter.on("recovery_action", (p) => this.sse.send("recovery_action", p));
+    emitter.on("drift_detected", (p) => this.sse.send("drift_detected", p));
+    emitter.on("runtime_heartbeat", (p) => this.sse.send("runtime_heartbeat", p));
+    emitter.on("vault_activity", (p) => this.sse.send("vault_activity", p));
 
     emitter.on("tool_approval", (payload) => {
       this.pendingApprovals.set(payload.callId, payload.resolve);
@@ -93,6 +109,7 @@ export class AgentBridge {
         callId: payload.callId,
         name: payload.name,
         args: payload.args,
+        approvalTimeoutMs: payload.approvalTimeoutMs,
       });
     });
 
@@ -115,5 +132,10 @@ export class AgentBridge {
     this.pendingAskUser(answer);
     this.pendingAskUser = null;
     return true;
+  }
+
+  /** Clear transcript; next user message re-injects world context (root). */
+  clearSession(): void {
+    this.harness.clearConversation();
   }
 }

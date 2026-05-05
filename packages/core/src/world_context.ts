@@ -36,6 +36,12 @@ const execFile = promisify(execFileCb);
 export interface WorldContextOptions {
   /** e.g. "Brisbane, Australia" — shown alongside timezone */
   location?: string;
+  /**
+   * Long-horizon harness mode (also read from AGENT_SESSION_MODE if unset).
+   * initializer — first session: scaffold features, progress file, init script.
+   * coding — later sessions: incremental work, read handoff artifacts first.
+   */
+  sessionMode?: "initializer" | "coding";
   /** Extra freeform text appended to the context block */
   notes?: string;
   /** Set true to skip injection entirely. Child agents always skip. */
@@ -901,6 +907,101 @@ function fmtGB(gb: number): string {
   return gb >= 100 ? `${Math.round(gb)} GB` : `${gb.toFixed(1)} GB`;
 }
 
+function resolveSessionMode(
+  options?: WorldContextOptions
+): "initializer" | "coding" | undefined {
+  if (options?.sessionMode === "initializer" || options?.sessionMode === "coding") {
+    return options.sessionMode;
+  }
+  const raw = process.env["AGENT_SESSION_MODE"]?.trim().toLowerCase();
+  if (raw === "initializer" || raw === "coding") return raw;
+  return undefined;
+}
+
+function sessionModeLines(mode: "initializer" | "coding"): string[] {
+  if (mode === "initializer") {
+    return [
+      sep("Session mode (INITIALIZER)"),
+      "This is the first session for a long-horizon goal. Before heavy implementation:",
+      "- Create agent_features.json (use feature_checklist) with granular items; set passes only after verification.",
+      "- Add AGENT_PROGRESS.md and append a short log after each milestone.",
+      "- Add init.sh (or document scripts) so later sessions can run the app and smoke-test quickly.",
+      "- Make an initial git commit when scaffolding is stable.",
+    ];
+  }
+  return [
+    sep("Session mode (CODING)"),
+    "Incremental work session. At start: read AGENT_PROGRESS.md (if present), agent_features.json, and git log.",
+    "Pick one failing or incomplete feature; finish it; verify; update passes and progress; leave merge-ready state.",
+  ];
+}
+
+interface TaskNotePayload {
+  id?: string;
+  goal?: string;
+  progress_summary?: string;
+  next_steps?: string[];
+  status?: string;
+  updatedAt?: string;
+}
+
+/** Resume snippets: progress file tail, latest in-progress task:* note, feature checklist preview. */
+async function gatherLongHorizonHandoffLines(workspaceRoot: string): Promise<string[]> {
+  const out: string[] = [];
+  const progressPath = path.join(workspaceRoot, "AGENT_PROGRESS.md");
+  const progress = await tryReadFile(progressPath);
+  if (progress?.trim()) {
+    const tail = progress.trim().slice(-1200);
+    out.push(sep("Long-horizon resume"));
+    out.push("AGENT_PROGRESS.md (tail):");
+    out.push(tail);
+  }
+
+  const notesPath = path.join(workspaceRoot, ".agent_notes.json");
+  const notesRaw = await tryReadFile(notesPath);
+  if (notesRaw) {
+    try {
+      const parsed = JSON.parse(notesRaw) as Record<string, unknown>;
+      let best: { key: string; payload: TaskNotePayload; t: number } | null = null;
+      for (const [key, val] of Object.entries(parsed)) {
+        if (!key.startsWith("task:")) continue;
+        const str = typeof val === "string" ? val : JSON.stringify(val);
+        let payload: TaskNotePayload;
+        try {
+          payload = JSON.parse(str) as TaskNotePayload;
+        } catch {
+          continue;
+        }
+        if (payload.status !== "in_progress") continue;
+        const t = Date.parse(payload.updatedAt ?? "") || 0;
+        if (!best || t > best.t) best = { key, payload, t };
+      }
+      if (best?.payload) {
+        const p = best.payload;
+        out.push(sep("Active task (from memory)"));
+        out.push(`Key: ${best.key}`);
+        if (p.goal)
+          out.push(`Goal: ${p.goal.slice(0, 400)}${p.goal.length > 400 ? "…" : ""}`);
+        if (p.progress_summary)
+          out.push(`Progress: ${p.progress_summary.slice(0, 600)}${p.progress_summary.length > 600 ? "…" : ""}`);
+        if (p.next_steps?.length)
+          out.push(`Next steps: ${p.next_steps.slice(0, 8).join(" → ")}`);
+      }
+    } catch {
+      /* ignore malformed notes */
+    }
+  }
+
+  const featPath = path.join(workspaceRoot, "agent_features.json");
+  const feat = await tryReadFile(featPath);
+  if (feat?.trim()) {
+    out.push(sep("Feature checklist (preview)"));
+    out.push(feat.trim().slice(0, 2500) + (feat.length > 2500 ? "\n…[truncated]" : ""));
+  }
+
+  return out;
+}
+
 // ─── Main export ──────────────────────────────────────────────────────────────
 
 /**
@@ -1105,6 +1206,16 @@ export async function buildWorldContextMessage(options?: WorldContextOptions): P
     lines.push(sep("Knowledge Vault"));
     lines.push(`Vault: empty — use vault_write() to start building your knowledge base.`);
     lines.push(`Path: ${getAgentVaultRoot()}`);
+  }
+
+  const sessionMode = resolveSessionMode(options);
+  if (sessionMode) {
+    for (const ln of sessionModeLines(sessionMode)) lines.push(ln);
+  }
+
+  const handoff = await withDeadline(gatherLongHorizonHandoffLines(workspaceRoot), 800);
+  if (handoff && handoff.length > 0) {
+    for (const ln of handoff) lines.push(ln);
   }
 
   // ── Footer ────────────────────────────────────────────────────────────────────

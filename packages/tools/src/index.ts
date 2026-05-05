@@ -42,6 +42,7 @@ import { applyLazyRegistrationPolicy } from "./tool_catalog.js";
 import { gitStatusTool, gitDiffTool, gitLogTool, gitBranchTool, gitCommitTool } from "./git_tools.js";
 import { patchFileTool } from "./patch_file.js";
 import { taskCheckpointTool, resumeTaskTool } from "./task_persistence.js";
+import { featureChecklistTool } from "./feature_checklist.js";
 import { createExtractStructuredTool } from "./extract_structured.js";
 import { createUploadImageTool } from "./upload_image.js";
 // Obsidian brain — vault tools
@@ -86,6 +87,7 @@ export function registerAllTools(
   registry.register(gitCommitTool);
   registry.register(taskCheckpointTool);
   registry.register(resumeTaskTool);
+  registry.register(featureChecklistTool);
   registry.register(rememberTool);
   registry.register(recallTool);
   registry.register(recallByTypeTool);

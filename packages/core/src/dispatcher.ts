@@ -106,13 +106,22 @@ export class ToolDispatcher {
    * models naturally call think() alone, then act in the following round.
    */
   private lastBatchHadThink = false;
+  /** Same-round / carry-forward preflight for destructive tools when AGENT_DESTRUCTIVE_GATE=balanced. */
+  private lastBatchHadPlan = false;
+  private vaultWritesThisTurn = 0;
+  private failedIntentCounts = new Map<string, number>();
 
   constructor(
     private readonly registry: ToolRegistry,
     private readonly emitter: AgentEmitter,
     private readonly orchestrator?: TaskOrchestrator,
     private readonly taskId?: string,
-    private readonly safetyJudge?: SafetyJudge
+    private readonly safetyJudge?: SafetyJudge,
+    private readonly approvalTimeoutMs: number = 60_000,
+    private readonly preDispatchPolicy?: (
+      toolName: string,
+      args: Record<string, unknown>
+    ) => { ok: true } | { ok: false; reason: string; severity: "low" | "med" | "high" }
   ) {}
 
   /**
@@ -121,6 +130,12 @@ export class ToolDispatcher {
    */
   notifyBatchComplete(batchToolNames: string[]): void {
     this.lastBatchHadThink = batchToolNames.includes("think");
+    this.lastBatchHadPlan = batchToolNames.includes("plan");
+  }
+
+  resetTurnCounters(): void {
+    this.vaultWritesThisTurn = 0;
+    this.failedIntentCounts.clear();
   }
 
   /**
@@ -192,6 +207,52 @@ export class ToolDispatcher {
       this.emitter.emit("tool_result", { callId, name, args, result });
       return result;
     }
+    if (this.preDispatchPolicy) {
+      const decision = this.preDispatchPolicy(name, args);
+      if (!decision.ok) {
+        this.emitter.emit("contract_violation", {
+          toolName: name,
+          reason: decision.reason,
+          severity: decision.severity,
+        });
+        const result: ToolResult = {
+          ok: false,
+          error: `Blocked by runtime policy: ${decision.reason}`,
+        };
+        this.emitter.emit("tool_result", { callId, name, args, result });
+        return result;
+      }
+    }
+    const intentKey = `${name}:${stableArgsJsonKey(JSON.stringify(args))}`;
+    if ((this.failedIntentCounts.get(intentKey) ?? 0) >= 2) {
+      const result: ToolResult = {
+        ok: false,
+        error:
+          `Blocked repeated failing intent for "${name}". ` +
+          "Apply one-shot retry discipline: think() and change arguments before trying again.",
+      };
+      this.emitter.emit("tool_result", { callId, name, args, result });
+      return result;
+    }
+    if (name === "vault_write") {
+      const budget = Math.max(
+        1,
+        Math.min(50, parseInt(process.env["AGENT_VAULT_WRITE_BUDGET"] ?? "8", 10) || 8)
+      );
+      if (this.vaultWritesThisTurn >= budget) {
+        this.emitter.emit("vault_activity", {
+          action: "skip_write",
+          ok: false,
+          reason: `vault_write_budget_exceeded_${budget}`,
+        });
+        const result: ToolResult = {
+          ok: false,
+          error: `vault_write budget exceeded for this send (${budget}). Consolidate notes before writing more.`,
+        };
+        this.emitter.emit("tool_result", { callId, name, args, result });
+        return result;
+      }
+    }
 
     const stableCacheKey = tool.cacheable ? `${name}:${stableArgsJsonKey(JSON.stringify(args))}` : "";
     // Approval policy: only destructive tools require explicit human approval.
@@ -210,14 +271,19 @@ export class ToolDispatcher {
     // Pre-flight: destructive tools require think() in the same round OR the immediately
     // preceding round. Models commonly call think() alone, then act in the next round.
     if (tool.dangerLevel === "destructive") {
+      const balanced = process.env["AGENT_DESTRUCTIVE_GATE"] === "balanced";
       const hasThink =
         (batchToolNames?.includes("think") ?? false) || this.lastBatchHadThink;
-      if (!hasThink) {
+      const hasPlan =
+        (batchToolNames?.includes("plan") ?? false) || this.lastBatchHadPlan;
+      const passes = hasThink || (balanced && hasPlan);
+      if (!passes) {
+        const hint = balanced
+          ? `Call think() or plan() in the same round first (or alone in the prior round).`
+          : `Call think() in the same round first (or alone in the prior round). Set AGENT_DESTRUCTIVE_GATE=balanced to also allow plan().`;
         const result: ToolResult = {
           ok: false,
-          error:
-            `Destructive tool "${name}" blocked: you must call think() in the same round first ` +
-            `to reason about what this command will do and confirm it is correct.`,
+          error: `Destructive tool "${name}" blocked: ${hint}`,
         };
         this.emitter.emit("tool_result", { callId, name, args, result });
         return result;
@@ -329,10 +395,16 @@ export class ToolDispatcher {
       }
 
       this.emitter.emit("tool_result", { callId, name, args, result });
+      if (name === "vault_write" && result.ok) {
+        this.vaultWritesThisTurn += 1;
+      }
+      if (result.ok) this.failedIntentCounts.delete(intentKey);
+      else this.failedIntentCounts.set(intentKey, (this.failedIntentCounts.get(intentKey) ?? 0) + 1);
       return result;
     } catch (err) {
       const error = err instanceof Error ? err.message : String(err);
       const result: ToolResult = { ok: false, error };
+      this.failedIntentCounts.set(intentKey, (this.failedIntentCounts.get(intentKey) ?? 0) + 1);
       this.emitter.emit("tool_result", { callId, name, args, result });
       return result;
     } finally {
@@ -348,15 +420,19 @@ export class ToolDispatcher {
     name: string,
     args: Record<string, unknown>
   ): Promise<ApprovalDecision> {
+    const ttl = this.approvalTimeoutMs;
     return new Promise((resolve) => {
-      // Auto-reject if no human responds within 60 seconds
       const autoRejectTimer = setTimeout(() => {
-        resolve({ decision: "reject", reason: "Approval timed out after 60 seconds (no response)" });
-      }, 60_000);
+        resolve({
+          decision: "reject",
+          reason: `Approval timed out after ${Math.round(ttl / 1000)} seconds (no response)`,
+        });
+      }, ttl);
       this.emitter.emit("tool_approval", {
         callId,
         name,
         args,
+        approvalTimeoutMs: ttl,
         resolve: (d) => {
           clearTimeout(autoRejectTimer);
           resolve(d);

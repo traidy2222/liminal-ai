@@ -12,7 +12,10 @@ export const PROTOCOL_NAMED_RULES = `## Named rules (IDs — refer in think() wh
 - **R-CITE-PATHS**: After repo_map / read_file / list_dir, final user-visible text must include ≥1 path substring that appeared verbatim in tool output.
 - **R-DISTILL-HANDOFF**: If tool output includes NEXT_ACTIONS_JSON with read_artifact.hash → call read_artifact before answering.
 - **R-ORCH-ID**: spawn_agent returns task_id → pass that id in wait_for_agents({ task_ids: [...] }).
-- **R-VERIFY-HEAVY**: ≥5 distinct tools in one send, or code/path-heavy final answer → verify_result(goal, result) before claiming done (when available).`;
+- **R-VERIFY-HEAVY**: ≥5 distinct tools in one send, or code/path-heavy final answer → verify_result(goal, result) before claiming done (when available).
+- **R-SEARCH-DIVERSITY**: First web-search pass for research must cover at least three intent buckets: origins/background, latest status, and impact/metrics.
+- **R-ONE-SHOT-RETRY**: Do not run the same failing intent with near-identical arguments more than twice; replan and change approach.
+- **R-TIME-ANCHOR**: For "latest/current/news/update" tasks, anchor search queries to the current world-context date/year unless the user explicitly asks for a historical period.`;
 
 /**
  * Compact protocol — always injected. Tool schemas live in the API tool list.
@@ -30,11 +33,12 @@ ${PROTOCOL_NAMED_RULES}
 - refresh_world_context() mid-session if git/ports/time may have changed.
 
 ## Reasoning
-1. think() before non-trivial tool use. 2. plan() for 3+ ordered steps (see R-PLAN-3STEPS). 3. Verify each tool result. 4. Never retry with identical args — think() then change args. 5. check_context() early on long tasks; compress_context() if >60% usage. 6. think() in the **same round** before run_shell / run_background (harness enforces).
+1. think() before non-trivial tool use. 2. plan() for 3+ ordered steps (see R-PLAN-3STEPS). 3. Verify each tool result. 4. Never retry with identical args — think() then change args. 5. check_context() early on long tasks; compress_context() if >60% usage. 6. think() in the **same round** before run_shell / run_background (harness enforces). 7. For research, diversify the first 3 web_search intents before going deep. 8. For time-sensitive research, include the current year/time anchor from world context in search queries and in final uncertainty notes.
 
 ## Tools
-Full argument schemas are in the function definitions. You have filesystem, shell (approval), git, web, memory, vault, agents, context, persona, and more. Destructive shell requires prior think() in that round.
+Full argument schemas are in the function definitions. You have filesystem, shell (approval), git, web, memory, vault, agents, context, persona, and more. Destructive shell requires prior think() in the same or prior round (strict default). With AGENT_DESTRUCTIVE_GATE=balanced, plan() in the same or prior round also satisfies the gate — still call think() when reasoning is non-trivial.
 When memory_query is available, prefer it for unified retrieval (exact / type / lexical / hybrid / graph modes).
+For knowledge-seeking tasks, default retrieval order is: memory_query/recall_relevant -> vault_search/vault_read -> web_search/web_fetch.
 
 ## Output
 Keep user-visible replies concise; put detail in think() / tool results. Cite paths and facts from tool output — do not invent implementation details.
@@ -42,7 +46,11 @@ For repo or file claims, cite \`path\` plus a short verbatim excerpt from tool o
 
 const PROCESS_LIFECYCLE = `## Process lifecycle
 Long-running servers/watchers → run_background (not run_shell). Confirm startup, use read_process_output, then kill_process when done.
-run_shell: completes (build, test, git, npm). run_background: daemons (vite, dev servers).`;
+run_shell: completes (build, test, git, npm). run_background: daemons (vite, dev servers).
+
+Static sites / simple HTTP: prefer \`npx serve <dir>\` or \`python -m http.server <port> --directory <dir>\` over ad-hoc custom server.js unless you need middleware. SPA with client-side routing may need a static server that supports fallback to index.html (e.g. serve with SPA mode or a small static preset — avoid inventing CORS-heavy proxies by default).
+
+When AGENT_PROCESS_HEALTH=1, read_process_output accepts optional health_url (e.g. http://127.0.0.1:4173/) to append a one-line HTTP status probe to the summary.`;
 
 const ORCHESTRATION = `## Sub-agent orchestration
 Spawn only when: independent work, real parallelism win, clear goal. Never spawn two writers on the same file — plan file ownership first.
@@ -50,7 +58,10 @@ Pattern: plan → spawn branches → wait_for_agents → merge → verify_result
 Limits: depth ≤3, ≤8 concurrent agents, grandchildren cannot spawn.`;
 
 const VAULT_PROTOCOL = `## Knowledge vault (Obsidian)
-Use vault_write for long or linked content with [[Wikilinks]]; remember() for one-line facts. vault_search before vault_write. Types: fact, entity, reflection, recipe, task, note, episode. [[Exact Title]] for links.`;
+Treat the vault as the world wiki and default source of truth for project/domain knowledge.
+Query order for factual tasks: 1) memory_query(scope: "both") or recall_relevant, 2) vault_search / vault_read, 3) web_search / web_fetch only if vault+memory are insufficient or stale.
+Use vault_write for long or linked content with [[Wikilinks]]; remember() for one-line facts. vault_search before vault_write. Types: fact, entity, reflection, recipe, task, note, episode. [[Exact Title]] for links.
+When you learn durable facts from code/web/user that are likely reusable, persist them (remember for atomic facts, vault_write for richer linked notes) before ending the turn.`;
 
 const MEMORY_AND_REFLEXION = `## Memory & reflexion
 Reflections/recipes may appear in world context. Prefer memory_query when available; else search_memory / recall_type. After repeated failures, remember(type: reflection). After big wins, suggest_improvement. memory_stats / forget / forget_type as needed.`;
@@ -59,7 +70,9 @@ const STRUCTURED_RETRY = `## Structured retry on tool failure
 1) think(diagnosis) 2) retry corrected 3) think(alternative) 4) alternative 5) if still stuck, ask_user with what you tried.`;
 
 const ERROR_RECOVERY = `## Error recovery (common)
-ENOENT → list_dir parent. HTTP 4xx → web_search. schema errors → re-read tool args. timeout → smaller scope or run_background. resource locked → list_agents / different file. Always pass cwd to shell tools; match path separator from world context.`;
+ENOENT → list_dir parent. HTTP 4xx → web_search. schema errors → re-read tool args. timeout → smaller scope or run_background. resource locked → list_agents / different file. Always pass cwd to shell tools; match path separator from world context.
+
+CORS / browser-only APIs: the agent runs server-side — fetch from tools is not a browser. If you need browser-only behavior, document that for the user or use a deliberate dev proxy; do not chain random public CORS proxies. Prefer same-origin static hosting or configure the real backend's CORS for known dev origins.`;
 
 const VERIFICATION = `## Verification
 For heavy tasks (5+ tool calls) or risky edits, call verify_result(goal, result) before telling the user you're done.`;
@@ -89,6 +102,14 @@ export function buildProtocolDynamicSuffix(toolNames: Iterable<string>): string 
   }
   if (names.has("spawn_agent")) {
     parts.push(ORCHESTRATION);
+  }
+  if (names.has("feature_checklist")) {
+    parts.push(
+      "## Long-horizon checklist (agent_features.json)\n" +
+        "Use feature_checklist to read or update the workspace checklist. " +
+        "Set passes only after verification (tests or manual check). " +
+        "Pair with AGENT_PROGRESS.md, task_checkpoint, and AGENT_SESSION_MODE (initializer|coding) in .env."
+    );
   }
   if ([...names].some((n) => n.startsWith("vault_"))) {
     parts.push(VAULT_PROTOCOL);
@@ -140,6 +161,7 @@ export const PROTOCOL_BLOCK = `${PROTOCOL_CORE}\n\n${buildProtocolDynamicSuffix(
     "memory_query",
     "list_tool_families",
     "activate_tool_family",
+    "feature_checklist",
   ])
 )}`;
 
