@@ -340,10 +340,22 @@ function MessageView({ entry }: { entry: MessageEntry }) {
       );
 
     case "plan":
+      {
+        const steps = Array.isArray(entry.steps) ? entry.steps : [];
+        if (steps.length === 0) {
+          return (
+            <div style={styles.planCard}>
+              <div style={{ color: "#4488ff", fontWeight: "bold", marginBottom: 6 }}>Plan</div>
+              <div style={{ color: "#888", fontSize: 13, lineHeight: 1.6 }}>
+                (No steps provided)
+              </div>
+            </div>
+          );
+        }
       return (
         <div style={styles.planCard}>
           <div style={{ color: "#4488ff", fontWeight: "bold", marginBottom: 6 }}>Plan</div>
-          {entry.steps.map((step, i) => {
+          {steps.map((step, i) => {
             const done = step.startsWith("✓");
             return (
               <div key={i} style={{ color: done ? "#44aa66" : "#888", fontSize: 13, lineHeight: 1.6 }}>
@@ -353,6 +365,7 @@ function MessageView({ entry }: { entry: MessageEntry }) {
           })}
         </div>
       );
+      }
 
     case "context_compressed":
       return (

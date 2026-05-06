@@ -136,8 +136,9 @@ function reducer(state: AgentState, action: Action): AgentState {
 
     case "provider_retry": {
       if (isAgentUiQuiet() || !isDiagnosticsEnabled()) return state;
+      const maxLabel = action.maxAttempts > 0 ? String(action.maxAttempts) : "∞";
       const line =
-        `⟳ Provider retry ${action.attempt}/${action.maxAttempts} in ${Math.round(action.backoffMs / 1000)}s: ` +
+        `⟳ Provider retry ${action.attempt}/${maxLabel} in ${Math.round(action.backoffMs / 1000)}s: ` +
         `${action.message.slice(0, 220)}`;
       const last = state.messages.at(-1);
       if (last?.kind === "provider_retry") {

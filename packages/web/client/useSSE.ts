@@ -169,7 +169,8 @@ function reducer(state: SSEState, action: Action): SSEState {
     case "provider_retry": {
       if (state.uiVerbosity === "quiet") return state;
       const { attempt, maxAttempts, message, backoffMs } = action.payload;
-      const line = `⟳ Provider retry ${attempt}/${maxAttempts} in ${Math.round(backoffMs / 1000)}s: ${message.slice(0, 220)}`;
+      const maxLabel = maxAttempts > 0 ? String(maxAttempts) : "∞";
+      const line = `⟳ Provider retry ${attempt}/${maxLabel} in ${Math.round(backoffMs / 1000)}s: ${message.slice(0, 220)}`;
       const last = state.messages.at(-1);
       if (last?.kind === "provider_retry") {
         return {
@@ -234,9 +235,14 @@ function reducer(state: SSEState, action: Action): SSEState {
         };
       }
       if (name === "plan" && ok) {
+        const steps = Array.isArray(args["steps"])
+          ? (args["steps"] as string[])
+          : typeof args["step_index"] === "number"
+          ? [`Step ${args["step_index"] as number} marked complete`]
+          : [];
         return {
           ...state,
-          messages: [...state.messages, { kind: "plan", steps: args["steps"] as string[] }],
+          messages: [...state.messages, { kind: "plan", steps }],
         };
       }
       if (ORCH_TOOLS.has(name)) return state;

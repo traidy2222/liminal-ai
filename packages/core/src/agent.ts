@@ -109,6 +109,10 @@ function isProviderUnavailableError(err: unknown): boolean {
   return /provider.*unavailable|temporarily unavailable|bad gateway|gateway|upstream/i.test(msg);
 }
 
+function isRetryForeverEnabled(): boolean {
+  return process.env["AGENT_RETRY_FOREVER"] === "1";
+}
+
 /** Heuristic: assistant answer likely cites repo facts worth double-checking. */
 function isEvidenceToolName(name: string): boolean {
   return (
@@ -188,18 +192,23 @@ function lexicalJaccard(a: string, b: string): number {
 
 function normalizeSearchDelta(text: string): string {
   return text
+    .replace(/<longcat_tool_call>[\s\S]*?<\/longcat_tool_call>/gi, "")
     .replace(/\uFFFD/g, "")
     .replace(/([A-Za-z])⚙([A-Za-z])/g, "$1$2")
-    .replace(/<\/?longcat_[^>]*>/gi, "");
+    .replace(/<\/?longcat_[^>]*>/gi, "")
+    .replace(/<\s*\/?\s*longcat[^>]*>/gi, "")
+    .replace(/\n{3,}/g, "\n\n");
 }
 
 function hasPseudoToolMarkup(text: string): boolean {
   const t = text.toLowerCase();
   return (
-    t.includes("<longcat_tool_call>") ||
-    t.includes("<longcat_arg_key>") ||
-    t.includes("<longcat_arg_value>") ||
-    t.includes("</longcat_tool_call>")
+    t.includes("<longcat_tool_call") ||
+    t.includes("<longcat_arg_key") ||
+    t.includes("<longcat_arg_value") ||
+    t.includes("</longcat_tool_call") ||
+    t.includes("<longcat_") ||
+    t.includes("</longcat_")
   );
 }
 
@@ -449,6 +458,10 @@ export class AgentHarness {
   private lengthResumeRemaining = 0;
   /** Retry budget when model emits pseudo tool markup instead of actual tool calls. */
   private pseudoToolMarkupRetryRemaining = 1;
+  /** Count of suppressed pseudo-markup stream chunks this send (for compact trace). */
+  private pseudoMarkupSuppressCountThisSend = 0;
+  /** Emit suppression trace at most once per send to avoid spam. */
+  private pseudoMarkupSuppressionNotifiedThisSend = false;
   /** One-shot nudge to cite a read path before turn_end(ok). */
   private finalizeCiteNudgeThisSend = false;
   /** One-shot nudge for research synthesis completeness before turn_end(ok). */
@@ -973,8 +986,10 @@ export class AgentHarness {
       parseInt(process.env["AGENT_LENGTH_RESUME_MAX"] ?? "1", 10) > 0 ? 1 : 0;
     this.pseudoToolMarkupRetryRemaining = Math.max(
       0,
-      Math.min(3, parseInt(process.env["AGENT_PSEUDO_TOOL_RETRY_MAX"] ?? "1", 10) || 1)
+      Math.min(3, parseInt(process.env["AGENT_PSEUDO_TOOL_RETRY_MAX"] ?? "2", 10) || 2)
     );
+    this.pseudoMarkupSuppressCountThisSend = 0;
+    this.pseudoMarkupSuppressionNotifiedThisSend = false;
     this.finalizeCiteNudgeThisSend = false;
     this.finalizeSynthesisNudgeThisSend = false;
     this.finalizeRecencyNudgeThisSend = false;
@@ -1606,7 +1621,19 @@ export class AgentHarness {
       const parsed = accumulator.processChunk(chunk);
 
       if (parsed.textDelta) {
-        this.emitter.emit("text", { delta: parsed.textDelta, channel: "user" });
+        if (hasPseudoToolMarkup(parsed.textDelta)) {
+          this.pseudoMarkupSuppressCountThisSend += 1;
+          if (!this.pseudoMarkupSuppressionNotifiedThisSend) {
+            this.pseudoMarkupSuppressionNotifiedThisSend = true;
+            this.emitter.emit("text", {
+              delta:
+                "\n[HARNESS] Suppressing pseudo tool markup from streamed assistant text (aggregating further matches).\n",
+              channel: "trace",
+            });
+          }
+        } else {
+          this.emitter.emit("text", { delta: parsed.textDelta, channel: "user" });
+        }
       }
 
       if (parsed.toolCallDelta) {
@@ -1630,10 +1657,31 @@ export class AgentHarness {
     }
 
     const toolCalls = accumulator.accumulatedToolCalls;
+    const accumulatedText = accumulator.accumulatedText;
     const assistantMessage = this.buildAssistantMessage(
-      accumulator.accumulatedText,
+      accumulatedText,
       toolCalls
     );
+
+    // If stream ended without an explicit finish reason, treat as potentially incomplete
+    // and request continuation before running finalization/verification logic.
+    if (
+      finishReason == null &&
+      toolCalls.length === 0 &&
+      accumulatedText.trim().length > 0 &&
+      this.lengthResumeRemaining > 0
+    ) {
+      this.lengthResumeRemaining--;
+      this.context.append(assistantMessage);
+      this.context.appendMessage({
+        role: "user",
+        content:
+          "[CONTINUE] The previous assistant message appears incomplete (no finish reason). " +
+          "Continue exactly where you left off and finish before verification/finalization.",
+      });
+      await this.runReActLoop(round);
+      return;
+    }
 
     if (
       finishReason === "length" &&
@@ -1671,6 +1719,14 @@ export class AgentHarness {
       });
       await this.runReActLoop(round + 1);
       return;
+    }
+    if (this.pseudoMarkupSuppressCountThisSend > 0) {
+      this.emitter.emit("text", {
+        delta:
+          `\n[HARNESS] Pseudo-markup chunks suppressed this send: ${this.pseudoMarkupSuppressCountThisSend}.\n`,
+        channel: "trace",
+      });
+      this.pseudoMarkupSuppressCountThisSend = 0;
     }
 
     this.context.append(assistantMessage);
@@ -2193,7 +2249,8 @@ export class AgentHarness {
     let lastErr: unknown;
 
     const allowToollessRetry = this.config.allowToollessStreamRetry !== false;
-    for (let attempt = 0; attempt <= this.maxRetries; attempt++) {
+    let attempt = 0;
+    while (true) {
       const useTools =
         tools.length > 0 && (allowToollessRetry ? attempt < 2 : true);
       const useToolChoice = useTools && attempt === 0;
@@ -2218,12 +2275,14 @@ export class AgentHarness {
 
         const rateLimited = isRateLimitError(err);
         const providerUnavailable = isProviderUnavailableError(err);
+        const retryForever = isRetryForeverEnabled();
         const maxRetriesForError = rateLimited
           ? this.rateLimitMaxRetries
           : providerUnavailable
           ? this.transient5xxMaxRetries
           : this.maxRetries;
-        if (!isRetryable(err) || attempt === maxRetriesForError) {
+        const cappedOut = attempt >= maxRetriesForError;
+        if (!isRetryable(err) || (cappedOut && !retryForever)) {
           throw new Error(msg);
         }
 
@@ -2233,7 +2292,7 @@ export class AgentHarness {
         );
         this.emitter.emit("provider_retry", {
           attempt: attempt + 1,
-          maxAttempts: maxRetriesForError + 1,
+          maxAttempts: retryForever ? 0 : maxRetriesForError + 1,
           message: msg,
           backoffMs: delay,
         });
@@ -2241,11 +2300,12 @@ export class AgentHarness {
           this.emitter.emit("text", {
             delta:
               `\n⟳ ${msg} — retrying in ${Math.round(delay / 1000)}s ` +
-              `(attempt ${attempt + 1}/${maxRetriesForError})…\n`,
+              `(attempt ${attempt + 1}/${retryForever ? "∞" : maxRetriesForError + 1})…\n`,
           });
         }
 
         await sleep(delay);
+        attempt += 1;
       }
     }
 

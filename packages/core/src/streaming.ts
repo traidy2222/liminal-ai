@@ -5,7 +5,8 @@ function sanitizeStreamText(text: string): string {
   return text
     .replace(/\uFFFD/g, "")
     .replace(/([A-Za-z])⚙([A-Za-z])/g, "$1$2")
-    .replace(/[^\x09\x0A\x0D\x20-\x7E]/g, "");
+    // Drop only control chars; keep Unicode punctuation (e.g. en dash for ranges: 3.5–4.0).
+    .replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/g, "");
 }
 
 export class StreamAccumulator {
