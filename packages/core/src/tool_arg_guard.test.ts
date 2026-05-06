@@ -20,3 +20,46 @@ test("guard blocks loopback web_fetch", () => {
 test("guard allows https example.com", () => {
   assert.equal(guardToolArgs("web_fetch", { url: "https://example.com/" }), null);
 });
+
+test("execute_code allows valid python snippet", () => {
+  assert.equal(
+    guardToolArgs("execute_code", {
+      language: "python",
+      code: "print(2 + 2)",
+      timeout_ms: 5_000,
+      cwd: ".",
+    }),
+    null
+  );
+});
+
+test("execute_code blocks dangerous process escape pattern", () => {
+  assert.match(
+    guardToolArgs("execute_code", {
+      language: "javascript",
+      code: "require('child_process').exec('whoami')",
+    }) ?? "",
+    /dangerous/i
+  );
+});
+
+test("execute_code blocks invalid timeout and cwd escape", () => {
+  assert.match(
+    guardToolArgs("execute_code", {
+      language: "python",
+      code: "print('x')",
+      timeout_ms: 999_999,
+      cwd: "../..",
+    }) ?? "",
+    /timeout_ms/i
+  );
+  assert.match(
+    guardToolArgs("execute_code", {
+      language: "python",
+      code: "print('x')",
+      timeout_ms: 20_000,
+      cwd: "../..",
+    }) ?? "",
+    /workspace-relative/i
+  );
+});

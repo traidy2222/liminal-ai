@@ -1,4 +1,5 @@
 import { useEffect, useReducer, useCallback } from "react";
+import type { ImageAttachment } from "./imageAttachments.js";
 
 function sanitizeDeltaText(text: string): string {
   return text
@@ -359,6 +360,11 @@ function reducer(state: SSEState, action: Action): SSEState {
 
 const SERVER = "http://localhost:3001";
 
+export interface OutgoingChatMessage {
+  text: string;
+  attachments?: ImageAttachment[];
+}
+
 export function useSSE() {
   const [state, dispatch] = useReducer(reducer, {
     messages: [],
@@ -511,13 +517,17 @@ export function useSSE() {
     };
   }, []);
 
-  const sendMessage = useCallback(async (message: string) => {
-    dispatch({ type: "user_message", text: message });
+  const sendMessage = useCallback(async (payload: OutgoingChatMessage) => {
+    const text = payload.text.trim();
+    const attachmentCount = payload.attachments?.length ?? 0;
+    const renderedUserMessage =
+      attachmentCount > 0 ? `${text || "(no text)"}\n[attached images: ${attachmentCount}]` : text;
+    dispatch({ type: "user_message", text: renderedUserMessage });
     try {
       const r = await fetch(`${SERVER}/api/message`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ message }),
+        body: JSON.stringify({ message: text, attachments: payload.attachments ?? [] }),
       });
       if (!r.ok) {
         const payload = (await r.json().catch(() => ({}))) as { error?: string };

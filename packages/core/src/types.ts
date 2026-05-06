@@ -271,6 +271,87 @@ export interface TurnEndHarnessMetrics {
   };
 }
 
+// ─── Document generation IR ───────────────────────────────────────────────────
+
+export interface DocStyleGenome {
+  id: string;
+  seed: string;
+  palette: { background: string; foreground: string; accent: string; muted: string };
+  typography: { heading: string; body: string; mono: string; scale: number[] };
+  spacing: { base: number; rhythm: number };
+  chart: { strokeWidth: number; cornerRadius: number; labelDensity: "low" | "med" | "high" };
+}
+
+export interface DocChunk {
+  id: string;
+  title: string;
+  intent: "slide" | "section";
+  bullets: string[];
+  narrative?: string;
+  audienceIntent?: string;
+  narrativeBeat?: string;
+  visualIntent?: string;
+  visuals?: Array<{ kind: "chart" | "image" | "table" | "quote"; note?: string }>;
+  status: "planned" | "composed" | "lint_failed" | "repaired" | "rendered";
+  lintIssues?: string[];
+}
+
+export interface DocumentIR {
+  id: string;
+  createdAt: string;
+  updatedAt: string;
+  title: string;
+  objective: string;
+  audience: string;
+  tone: string;
+  autonomyMode?: "max" | "guided" | "strict";
+  formatTargets: Array<"pptx" | "docx" | "pdf">;
+  semanticOutline: string[];
+  narrativeBeats?: string[];
+  chunks: DocChunk[];
+  style: DocStyleGenome;
+  claimSources?: Array<{
+    claim: string;
+    sources: string[];
+    sourceQuality?: "official" | "primary" | "secondary";
+    asOf?: string;
+    confidence: "low" | "med" | "high";
+  }>;
+  sourceMap?: Array<{ id: string; type: "web" | "local" | "generated"; ref: string; note?: string }>;
+  assetSelections?: Array<{ slideOrChunkId: string; kind: string; sourceRef: string; rationale?: string }>;
+  chartData?: Array<{ id: string; title: string; series: Array<{ label: string; values: number[] }>; labels: string[] }>;
+  lintHistory: Array<{ at: string; chunkId: string; issues: string[] }>;
+  repairHistory: Array<{ at: string; chunkId: string; action: string }>;
+  exports: Array<{ format: "pptx" | "docx" | "pdf"; path: string; generatedAt: string }>;
+  runState?: {
+    stage:
+      | "planned"
+      | "researching"
+      | "composing"
+      | "linting"
+      | "repairing"
+      | "rendering"
+      | "qa_scored"
+      | "exported";
+    retries: number;
+    failures: number;
+    warnings: string[];
+    repairBudget: { max: number; used: number };
+    stageTrace: Array<{ at: string; stage: string; note?: string }>;
+  };
+}
+
+export interface DocQualityReport {
+  docId: string;
+  score: number;
+  structureFidelity: number;
+  visualConsistency: number;
+  readabilityDensity: number;
+  factualCitationIntegrity: number;
+  exportCorrectness: number;
+  issues: string[];
+}
+
 // ─── Events ───────────────────────────────────────────────────────────────────
 
 export interface AgentEventMap {
@@ -411,6 +492,57 @@ export interface AgentEventMap {
     summary: string;
     reason: string;
   };
+  memory_retrieval_policy: {
+    intent: "introspection" | "knowledge" | "coding" | "execution";
+    source: string;
+    confidence?: number;
+    threshold?: number;
+    scope: "notes" | "vault" | "both";
+    maxAgeDays?: number;
+    minConfidence?: number;
+    minQueryOverlap?: number;
+    excludeTypes: string[];
+    autoRecallAllowed: boolean;
+    fallbackReason?: string;
+  };
+  over_inference_check: {
+    required: boolean;
+    passed: boolean;
+    reason: string;
+    attemptedRecovery: boolean;
+    source?: "llm" | "heuristic" | "none";
+    confidence?: number;
+    threshold?: number;
+    fixHint?: string;
+  };
+  doc_stage: {
+    docId: string;
+    stage:
+      | "planned"
+      | "chunk_composed"
+      | "chunk_linted"
+      | "chunk_repaired"
+      | "rendered"
+      | "exported"
+      | "qa_scored";
+    note?: string;
+  };
+  doc_lint: {
+    docId: string;
+    chunkId: string;
+    passed: boolean;
+    issues: string[];
+  };
+  doc_repair: {
+    docId: string;
+    chunkId: string;
+    action: string;
+  };
+  doc_export: {
+    docId: string;
+    format: "pptx" | "docx" | "pdf";
+    path: string;
+  };
   recency_check: {
     required: boolean;
     passed: boolean;
@@ -524,6 +656,14 @@ export interface AgentConfig {
   runtimePreferences?: RuntimePreferences | null;
   /** Optional persistence hook invoked when runtime preferences are changed in-session. */
   persistRuntimePreferences?: (prefs: RuntimePreferences) => Promise<string | void> | string | void;
+  /** Optional sidecar vision model configuration (Owl remains primary reasoning model). */
+  vision?: {
+    model?: string;
+    baseURL?: string;
+    apiKey?: string;
+    timeoutMs?: number;
+    maxImageBytes?: number;
+  };
 }
 
 // Re-export so consumers can type worldContext without importing world_context directly

@@ -1,4 +1,5 @@
 import { defineTool } from "./helpers.js";
+import { fetchWithRetry } from "./network_retry.js";
 
 export interface DdgHit {
   url: string;
@@ -36,10 +37,13 @@ export async function runHtmlDdgSearch(
   const q = encodeURIComponent(query);
   try {
     const url = `https://html.duckduckgo.com/html/?q=${q}`;
-    const res = await fetch(url, {
-      headers: { "User-Agent": "Mozilla/5.0 dreamthedream-agent/1.0" },
-      signal: AbortSignal.timeout(15_000),
-    });
+    const res = await fetchWithRetry(
+      url,
+      {
+        headers: { "User-Agent": "Mozilla/5.0 dreamthedream-agent/1.0" },
+      },
+      { timeoutMs: 15_000 }
+    );
 
     if (!res.ok) {
       return { ok: false, error: `HTTP ${res.status}` };

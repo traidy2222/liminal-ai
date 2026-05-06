@@ -2,6 +2,22 @@ import React, { useState, useRef, useEffect } from "react";
 import { useSSE, type MessageEntry } from "./useSSE.js";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
+import {
+  DEFAULT_IMAGE_ATTACHMENT_LIMITS,
+  normalizeImageAttachmentName,
+  parseDataUrlImage,
+  validateImageAttachments,
+  type ImageAttachment,
+} from "./imageAttachments.js";
+
+async function fileToDataUrl(file: File): Promise<string> {
+  return await new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result ?? ""));
+    reader.onerror = () => reject(new Error("Failed to read image"));
+    reader.readAsDataURL(file);
+  });
+}
 
 function ApprovalCountdown({
   receivedAt,
@@ -27,6 +43,9 @@ function ApprovalCountdown({
 export function App() {
   const { state, sendMessage, sendApproval, sendAnswer, sendClearSession } = useSSE();
   const [input, setInput] = useState("");
+  const [attachments, setAttachments] = useState<ImageAttachment[]>([]);
+  const [attachError, setAttachError] = useState<string | null>(null);
+  const [isDragOver, setIsDragOver] = useState(false);
   const [askAnswer, setAskAnswer] = useState("");
   const [showDiagnostics, setShowDiagnostics] = useState(false);
   const bottomRef = useRef<HTMLDivElement>(null);
@@ -35,12 +54,112 @@ export function App() {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [state.messages]);
 
+  const tryAddAttachments = (next: ImageAttachment[]) => {
+    const validation = validateImageAttachments(next, DEFAULT_IMAGE_ATTACHMENT_LIMITS);
+    if (!validation.ok) {
+      setAttachError(validation.error);
+      return false;
+    }
+    setAttachments(next);
+    setAttachError(null);
+    return true;
+  };
+
+  const addFilesAsAttachments = async (
+    files: FileList | File[],
+    source: ImageAttachment["source"]
+  ) => {
+    const incoming = Array.from(files);
+    if (incoming.length === 0) return;
+    const prepared: ImageAttachment[] = [];
+    for (const file of incoming) {
+      if (!file.type.startsWith("image/")) continue;
+      const dataUrl = await fileToDataUrl(file);
+      const parsed = parseDataUrlImage(dataUrl);
+      if (!parsed.ok) {
+        setAttachError(parsed.error);
+        return;
+      }
+      prepared.push({
+        name: normalizeImageAttachmentName(file.name, `image-${Date.now()}.png`),
+        mimeType: parsed.mimeType,
+        dataUrl,
+        sizeBytes: parsed.sizeBytes,
+        source,
+      });
+    }
+    if (prepared.length === 0) {
+      setAttachError("No supported images found.");
+      return;
+    }
+    void tryAddAttachments([...attachments, ...prepared]);
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (input.trim() && !state.busy) {
-      await sendMessage(input.trim());
-      setInput("");
+    if (state.busy) return;
+    if (!input.trim() && attachments.length === 0) return;
+    const validation = validateImageAttachments(attachments, DEFAULT_IMAGE_ATTACHMENT_LIMITS);
+    if (!validation.ok) {
+      setAttachError(validation.error);
+      return;
     }
+    await sendMessage({ text: input, attachments });
+    setInput("");
+    setAttachments([]);
+    setAttachError(null);
+  };
+
+  const handlePaste = async (e: React.ClipboardEvent<HTMLInputElement>) => {
+    const imageFiles = Array.from(e.clipboardData.files).filter((f) => f.type.startsWith("image/"));
+    if (imageFiles.length === 0) return;
+    e.preventDefault();
+    await addFilesAsAttachments(imageFiles, "clipboard");
+  };
+
+  const handleDrop = async (e: React.DragEvent<HTMLFormElement>) => {
+    e.preventDefault();
+    setIsDragOver(false);
+    if (state.busy) return;
+    await addFilesAsAttachments(e.dataTransfer.files, "drop");
+  };
+
+  const handleDragOver = (e: React.DragEvent<HTMLFormElement>) => {
+    e.preventDefault();
+    if (!state.busy) setIsDragOver(true);
+  };
+
+  const handleDragLeave = (e: React.DragEvent<HTMLFormElement>) => {
+    if (e.currentTarget.contains(e.relatedTarget as Node | null)) return;
+    setIsDragOver(false);
+  };
+
+  const removeAttachmentAt = (idx: number) => {
+    const next = attachments.filter((_, i) => i !== idx);
+    setAttachments(next);
+    if (next.length === 0) setAttachError(null);
+  };
+
+  const totalAttachmentKb = Math.round(
+    attachments.reduce((sum, item) => sum + item.sizeBytes, 0) / 1024
+  );
+
+  useEffect(() => {
+    if (!state.busy) return;
+    setIsDragOver(false);
+  }, [state.busy]);
+
+  useEffect(() => {
+    if (state.busy) return;
+    if (attachments.length > DEFAULT_IMAGE_ATTACHMENT_LIMITS.maxCount) {
+      setAttachments(attachments.slice(0, DEFAULT_IMAGE_ATTACHMENT_LIMITS.maxCount));
+    }
+  }, [attachments, state.busy]);
+
+  const canSend = !state.busy && (input.trim().length > 0 || attachments.length > 0);
+
+  const onSubmit = async (e: React.FormEvent) => {
+    await handleSubmit(e);
   };
 
   const pct = state.contextSnapshot
@@ -214,7 +333,40 @@ export function App() {
       )}
 
       {/* Input */}
-      <form style={styles.inputArea} onSubmit={handleSubmit}>
+      <form
+        style={{
+          ...styles.inputArea,
+          border: isDragOver ? "1px dashed #33ccff" : styles.inputArea.border,
+        }}
+        onSubmit={onSubmit}
+        onDragOver={handleDragOver}
+        onDragLeave={handleDragLeave}
+        onDrop={(e) => void handleDrop(e)}
+      >
+        {attachments.length > 0 && (
+          <div style={styles.attachmentsRow}>
+            {attachments.map((attachment, idx) => (
+              <div key={`${attachment.name}-${idx}`} style={styles.attachmentChip}>
+                <img src={attachment.dataUrl} alt={attachment.name} style={styles.attachmentPreview} />
+                <span style={styles.attachmentLabel}>
+                  {attachment.name} ({Math.round(attachment.sizeBytes / 1024)} KB)
+                </span>
+                <button
+                  type="button"
+                  style={styles.attachmentRemove}
+                  onClick={() => removeAttachmentAt(idx)}
+                  disabled={state.busy}
+                >
+                  x
+                </button>
+              </div>
+            ))}
+            <span style={styles.attachmentMeta}>
+              {attachments.length} image{attachments.length === 1 ? "" : "s"} ({totalAttachmentKb} KB)
+            </span>
+          </div>
+        )}
+        {attachError && <div style={styles.attachmentError}>{attachError}</div>}
         <input
           id="chat-message-input"
           name="message"
@@ -222,13 +374,14 @@ export function App() {
           style={styles.input}
           value={input}
           onChange={(e) => setInput(e.target.value)}
+          onPaste={(e) => void handlePaste(e)}
           placeholder={state.busy ? "Processing…" : "Message Liminal…"}
           disabled={state.busy || !state.connected}
         />
         <button
           type="submit"
           style={{ ...styles.btn, background: state.busy ? "#333" : "#005580" }}
-          disabled={state.busy || !input.trim()}
+          disabled={!canSend}
         >
           Send
         </button>
@@ -559,9 +712,11 @@ const styles = {
   },
   inputArea: {
     display: "flex",
+    flexDirection: "column" as const,
     gap: 8,
     padding: "12px 16px",
     borderTop: "1px solid #222",
+    border: "1px solid #222",
     background: "#111",
     flexShrink: 0,
   },
@@ -662,5 +817,45 @@ const styles = {
     paddingLeft: 12,
     borderLeft: "2px solid #333",
     lineHeight: 1.4,
+  },
+  attachmentsRow: {
+    display: "flex",
+    flexWrap: "wrap" as const,
+    gap: 8,
+    alignItems: "center",
+  },
+  attachmentChip: {
+    display: "flex",
+    alignItems: "center",
+    gap: 6,
+    background: "#1b2230",
+    border: "1px solid #2c3d57",
+    borderRadius: 6,
+    padding: "4px 6px",
+  },
+  attachmentPreview: {
+    width: 24,
+    height: 24,
+    objectFit: "cover" as const,
+    borderRadius: 4,
+  },
+  attachmentLabel: {
+    fontSize: 12,
+    color: "#b8d7ff",
+  },
+  attachmentRemove: {
+    border: "none",
+    background: "transparent",
+    color: "#ff7b7b",
+    cursor: "pointer",
+    fontSize: 12,
+  },
+  attachmentMeta: {
+    fontSize: 12,
+    color: "#7d8ea6",
+  },
+  attachmentError: {
+    color: "#ff6a6a",
+    fontSize: 12,
   },
 };

@@ -352,6 +352,13 @@ async function runSingleHarnessSend(scenario: Scenario, userMessage: string): Pr
     "drift_detected",
     "runtime_heartbeat",
     "vault_activity",
+    "recency_check",
+    "runtime_pref_detected",
+    "runtime_pref_changed",
+    "runtime_pref_persisted",
+    "runtime_pref_rejected",
+    "memory_retrieval_policy",
+    "over_inference_check",
   ] as const satisfies ReadonlyArray<keyof AgentEventMap>;
 
   for (const evName of capturedEvents) {

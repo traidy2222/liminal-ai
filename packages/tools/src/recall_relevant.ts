@@ -37,6 +37,50 @@ function rrfFuse(rankings: string[][], kConst = 60): Map<string, number> {
   return scores;
 }
 
+function parseIsoMs(s?: string): number | null {
+  if (!s) return null;
+  const t = new Date(s).getTime();
+  return Number.isFinite(t) ? t : null;
+}
+
+function tokenize(text: string): Set<string> {
+  return new Set(
+    text
+      .toLowerCase()
+      .replace(/[^a-z0-9\s]/g, " ")
+      .split(/\s+/)
+      .filter((x) => x.length >= 3)
+  );
+}
+
+function queryOverlap(a: string, b: string): number {
+  const as = tokenize(a);
+  const bs = tokenize(b);
+  if (as.size === 0 || bs.size === 0) return 0;
+  let inter = 0;
+  for (const t of as) if (bs.has(t)) inter += 1;
+  return inter / new Set([...as, ...bs]).size;
+}
+
+function tierWeight(opts: {
+  updatedAtMs: number | null;
+  lastAccessedMs: number | null;
+  confidence: number;
+  accessCount: number;
+}): number {
+  const now = Date.now();
+  const updatedDays = opts.updatedAtMs ? (now - opts.updatedAtMs) / 86_400_000 : 9999;
+  const accessedDays = opts.lastAccessedMs ? (now - opts.lastAccessedMs) / 86_400_000 : 9999;
+  const hot =
+    updatedDays <= 14 &&
+    opts.confidence >= 0.7 &&
+    (opts.accessCount >= 2 || accessedDays <= 30);
+  if (hot) return 1.2;
+  const warm = updatedDays <= 120 && opts.confidence >= 0.45;
+  if (warm) return 1.0;
+  return 0.62;
+}
+
 export const recallRelevantTool = defineTool({
   name: "recall_relevant",
   description:
@@ -73,6 +117,23 @@ export const recallRelevantTool = defineTool({
         type: "number",
         description: "Closed-loop refinement rounds for evidence gaps (default 1, max 3)",
       },
+      max_age_days: {
+        type: "number",
+        description: "Optional filter: exclude note/vault hits older than this age in days",
+      },
+      min_confidence: {
+        type: "number",
+        description: "Optional filter for notes: minimum confidence (0-1)",
+      },
+      min_query_overlap: {
+        type: "number",
+        description: "Optional filter: minimum token-overlap score with query (0-1)",
+      },
+      exclude_types: {
+        type: "array",
+        items: { type: "string" },
+        description: "Optional note type prefixes to exclude (e.g. fact, reflection)",
+      },
       expand_vault_neighbors: {
         type: "boolean",
         description: "When true, include linked neighbor notes from top vault hits",
@@ -90,6 +151,21 @@ export const recallRelevantTool = defineTool({
     const evidenceGaps = Array.isArray(args["evidence_gaps"])
       ? (args["evidence_gaps"] as unknown[]).map((x) => String(x).trim()).filter(Boolean)
       : [];
+    const maxAgeDays =
+      typeof args["max_age_days"] === "number" && Number.isFinite(args["max_age_days"])
+        ? Math.max(1, Math.min(3650, Math.round(args["max_age_days"])))
+        : undefined;
+    const minConfidence =
+      typeof args["min_confidence"] === "number" && Number.isFinite(args["min_confidence"])
+        ? Math.max(0, Math.min(1, args["min_confidence"]))
+        : undefined;
+    const minQueryOverlap =
+      typeof args["min_query_overlap"] === "number" && Number.isFinite(args["min_query_overlap"])
+        ? Math.max(0, Math.min(1, args["min_query_overlap"]))
+        : undefined;
+    const excludeTypes = Array.isArray(args["exclude_types"])
+      ? new Set((args["exclude_types"] as unknown[]).map((x) => String(x).trim().toLowerCase()).filter(Boolean))
+      : new Set<string>();
     const refineRounds = Math.max(1, Math.min(3, (args["max_refine_rounds"] as number | undefined) ?? 1));
     const queries: string[] =
       Array.isArray(qArr) && qArr.length > 0
@@ -184,12 +260,47 @@ export const recallRelevantTool = defineTool({
       const fused: Array<{ id: string; score: number; value: string }> = [];
       const allIds = new Set<string>([...rrfById.keys(), ...semN.keys(), ...bmById.keys()]);
       for (const id of allIds) {
+        const rv = raw[id];
+        const noteType = id.includes(":") ? id.slice(0, id.indexOf(":")).toLowerCase() : "";
+        if (noteType && excludeTypes.has(noteType)) continue;
+        const confidence =
+          typeof rv === "object" && rv !== null && "confidence" in rv
+            ? Number((rv as StoredNote).confidence ?? 0.5)
+            : 0.5;
+        if (minConfidence != null && confidence < minConfidence) continue;
+        const updatedAtMs =
+          typeof rv === "object" && rv !== null && "updatedAt" in rv
+            ? parseIsoMs((rv as StoredNote).updatedAt)
+            : null;
+        if (maxAgeDays != null && updatedAtMs != null) {
+          const ageDays = (Date.now() - updatedAtMs) / 86_400_000;
+          if (ageDays > maxAgeDays) continue;
+        }
+        const val = plain[id] ?? "";
+        if (minQueryOverlap != null) {
+          const ov = queryOverlap(queries.join(" "), `${id} ${val}`);
+          if (ov < minQueryOverlap) continue;
+        }
         const rrf = rrfById.get(id) ?? 0;
         const bm = bmById.get(id) ?? 0;
         const sem = semN.get(id) ?? 0;
-        const hybrid = 0.45 * sem + 0.35 * rrf + 0.2 * bm;
+        const accessedAtMs =
+          typeof rv === "object" && rv !== null && "lastAccessedAt" in rv
+            ? parseIsoMs((rv as StoredNote).lastAccessedAt)
+            : null;
+        const accessCount =
+          typeof rv === "object" && rv !== null && "accessCount" in rv
+            ? Number((rv as StoredNote).accessCount ?? 0)
+            : 0;
+        const tier = tierWeight({
+          updatedAtMs,
+          lastAccessedMs: accessedAtMs,
+          confidence,
+          accessCount,
+        });
+        const hybrid = (0.45 * sem + 0.35 * rrf + 0.2 * bm) * tier;
         if (hybrid < 0.008) continue;
-        fused.push({ id, score: hybrid, value: plain[id] ?? "" });
+        fused.push({ id, score: hybrid, value: val });
       }
       fused.sort((a, b) => b.score - a.score);
 
@@ -238,6 +349,15 @@ export const recallRelevantTool = defineTool({
       for (const q of queries.slice(0, 4)) {
         const found = await searchVault(q, {});
         found.slice(0, k + 8).forEach((hit, idx) => {
+          const updatedMs = new Date(hit.note.updated).getTime();
+          if (maxAgeDays != null && Number.isFinite(updatedMs)) {
+            const ageDays = (Date.now() - updatedMs) / 86_400_000;
+            if (ageDays > maxAgeDays) return;
+          }
+          if (minQueryOverlap != null) {
+            const ov = queryOverlap(queries.join(" "), `${hit.note.title} ${hit.snippet}`);
+            if (ov < minQueryOverlap) return;
+          }
           const existing = byTitle.get(hit.note.title);
           const recencyBoost = Math.max(
             0,

@@ -7,6 +7,7 @@ import {
   loadRawNotes,
   bumpNoteMetadata,
   getNoteValue,
+  getKeyType,
   type StoredNote,
 } from "./notes_store.js";
 import { rankDocumentsForQuery, type RankableDoc } from "@liminal/core";
@@ -16,6 +17,43 @@ import { memoryGraphTool } from "./memory_graph.js";
 const MEMORY_TYPES = ["fact", "experience", "entity", "belief", "reflection", "recipe"] as const;
 
 type Mode = "exact" | "type" | "lexical" | "hybrid" | "graph";
+
+function tokenize(text: string): Set<string> {
+  return new Set(
+    text
+      .toLowerCase()
+      .replace(/[^a-z0-9\s]/g, " ")
+      .split(/\s+/)
+      .filter((x) => x.length >= 3)
+  );
+}
+
+function queryOverlap(a: string, b: string): number {
+  const as = tokenize(a);
+  const bs = tokenize(b);
+  if (as.size === 0 || bs.size === 0) return 0;
+  let inter = 0;
+  for (const t of as) if (bs.has(t)) inter += 1;
+  return inter / new Set([...as, ...bs]).size;
+}
+
+function tierWeight(opts: {
+  updatedAt?: string;
+  lastAccessedAt?: string;
+  confidence: number;
+  accessCount: number;
+}): number {
+  const now = Date.now();
+  const updatedMs = opts.updatedAt ? new Date(opts.updatedAt).getTime() : NaN;
+  const accessedMs = opts.lastAccessedAt ? new Date(opts.lastAccessedAt).getTime() : NaN;
+  const updatedDays = Number.isFinite(updatedMs) ? (now - updatedMs) / 86_400_000 : 9999;
+  const accessedDays = Number.isFinite(accessedMs) ? (now - accessedMs) / 86_400_000 : 9999;
+  const hot = updatedDays <= 14 && opts.confidence >= 0.7 && (opts.accessCount >= 2 || accessedDays <= 30);
+  if (hot) return 1.2;
+  const warm = updatedDays <= 120 && opts.confidence >= 0.45;
+  if (warm) return 1.0;
+  return 0.62;
+}
 
 function rerankLines(
   lines: string[],
@@ -92,6 +130,23 @@ export const memoryQueryTool = defineTool({
         type: "boolean",
         description: "Hybrid mode: prioritize fresh vault pages and link-neighbor expansion",
       },
+      max_age_days: {
+        type: "number",
+        description: "Optional filter: exclude hits older than this age (days)",
+      },
+      min_confidence: {
+        type: "number",
+        description: "Optional filter for notes: minimum confidence (0-1)",
+      },
+      min_query_overlap: {
+        type: "number",
+        description: "Optional filter: minimum token-overlap score with query (0-1)",
+      },
+      exclude_types: {
+        type: "array",
+        items: { type: "string" },
+        description: "Optional note type prefixes to exclude",
+      },
     },
     required: ["mode"],
     additionalProperties: false,
@@ -102,6 +157,21 @@ export const memoryQueryTool = defineTool({
     const openQs = Array.isArray(args["open_questions"])
       ? (args["open_questions"] as unknown[]).map((x) => String(x).trim()).filter(Boolean)
       : [];
+    const maxAgeDays =
+      typeof args["max_age_days"] === "number" && Number.isFinite(args["max_age_days"])
+        ? Math.max(1, Math.min(3650, Math.round(args["max_age_days"])))
+        : undefined;
+    const minConfidence =
+      typeof args["min_confidence"] === "number" && Number.isFinite(args["min_confidence"])
+        ? Math.max(0, Math.min(1, args["min_confidence"]))
+        : undefined;
+    const minQueryOverlap =
+      typeof args["min_query_overlap"] === "number" && Number.isFinite(args["min_query_overlap"])
+        ? Math.max(0, Math.min(1, args["min_query_overlap"]))
+        : undefined;
+    const excludeTypes = Array.isArray(args["exclude_types"])
+      ? new Set((args["exclude_types"] as unknown[]).map((x) => String(x).trim().toLowerCase()).filter(Boolean))
+      : new Set<string>();
 
     const formatHit = (source: string, score: number, snippet: string) =>
       JSON.stringify({
@@ -148,6 +218,10 @@ export const memoryQueryTool = defineTool({
           payload["scope"] = "both";
           payload["expand_vault_neighbors"] = true;
         }
+        if (maxAgeDays != null) payload["max_age_days"] = maxAgeDays;
+        if (minConfidence != null) payload["min_confidence"] = minConfidence;
+        if (minQueryOverlap != null) payload["min_query_overlap"] = minQueryOverlap;
+        if (excludeTypes.size > 0) payload["exclude_types"] = [...excludeTypes];
         const r = await recallRelevantTool.handler(payload);
         if (!r.ok) return r;
         const lines = String(r.output).split("\n").filter(Boolean);
@@ -181,11 +255,45 @@ export const memoryQueryTool = defineTool({
         if (!memType || !(MEMORY_TYPES as readonly string[]).includes(memType)) {
           return { ok: false, error: `memory_type must be one of: ${MEMORY_TYPES.join(", ")}` };
         }
+        if (excludeTypes.has(memType.toLowerCase())) {
+          return { ok: true, output: `mode=type\n(no matches in excluded type: ${memType})` };
+        }
         const prefix = `${memType}:`;
-        const notes = await loadNotes();
-        const lines = Object.entries(notes)
+        const raw = await loadRawNotes();
+        const qForOverlap = [goalHint, ...openQs].join(" ").trim();
+        const rows = Object.entries(raw)
           .filter(([k]) => k.startsWith(prefix))
-          .map(([k, v]) => `${k}: ${v}`);
+          .map(([k, v]) => {
+            const plain = getNoteValue(v);
+            const meta = typeof v === "object" ? v : undefined;
+            return { k, plain, meta };
+          })
+          .filter((x) => {
+            if (x.meta && minConfidence != null && (x.meta.confidence ?? 0.5) < minConfidence) return false;
+            if (x.meta && maxAgeDays != null) {
+              const updatedMs = new Date(x.meta.updatedAt).getTime();
+              if (Number.isFinite(updatedMs)) {
+                const age = (Date.now() - updatedMs) / 86_400_000;
+                if (age > maxAgeDays) return false;
+              }
+            }
+            if (qForOverlap && minQueryOverlap != null) {
+              const ov = queryOverlap(qForOverlap, `${x.k} ${x.plain}`);
+              if (ov < minQueryOverlap) return false;
+            }
+            return true;
+          })
+          .map((x) => {
+            const w = tierWeight({
+              updatedAt: x.meta?.updatedAt,
+              lastAccessedAt: x.meta?.lastAccessedAt,
+              confidence: x.meta?.confidence ?? 0.5,
+              accessCount: x.meta?.accessCount ?? 0,
+            });
+            return { text: `${x.k}: ${x.plain}`, weight: w };
+          })
+          .sort((a, b) => b.weight - a.weight);
+        const lines = rows.map((x) => x.text);
         const rr = rerankLines(lines, goalHint, openQs);
         const jsonl = rr.map((ln, i) => formatHit(`type:${memType}:${i}`, 1 - i * 0.01, ln));
         return {
@@ -204,6 +312,8 @@ export const memoryQueryTool = defineTool({
         const docs: RankableDoc[] = [];
         for (const [k, v] of Object.entries(raw)) {
           if (typeFilter && !k.startsWith(`${typeFilter}:`)) continue;
+          const keyType = getKeyType(k)?.toLowerCase();
+          if (keyType && excludeTypes.has(keyType)) continue;
           const plain = getNoteValue(v);
           const updatedAt =
             typeof v === "object" && v !== null && "updatedAt" in v
@@ -219,6 +329,18 @@ export const memoryQueryTool = defineTool({
             typeof v === "object" && v !== null && "confidence" in v
               ? (v as StoredNote).confidence
               : undefined;
+          if (minConfidence != null && (confidence ?? 0.5) < minConfidence) continue;
+          if (maxAgeDays != null && updatedAt) {
+            const updatedMs = new Date(updatedAt).getTime();
+            if (Number.isFinite(updatedMs)) {
+              const age = (Date.now() - updatedMs) / 86_400_000;
+              if (age > maxAgeDays) continue;
+            }
+          }
+          if (minQueryOverlap != null) {
+            const ov = queryOverlap(query, `${k} ${plain}`);
+            if (ov < minQueryOverlap) continue;
+          }
           docs.push({
             id: k,
             text: `${k} ${plain}`,
@@ -229,8 +351,21 @@ export const memoryQueryTool = defineTool({
           });
         }
         const ranked = rankDocumentsForQuery(query, docs, { limit });
-        void bumpNoteMetadata(ranked.map((r) => r.id));
-        const lines = ranked.map((r) => {
+        const weighted = ranked
+          .map((r) => {
+            const rv = raw[r.id];
+            const meta = typeof rv === "object" ? (rv as StoredNote) : undefined;
+            const w = tierWeight({
+              updatedAt: meta?.updatedAt,
+              lastAccessedAt: meta?.lastAccessedAt,
+              confidence: meta?.confidence ?? 0.5,
+              accessCount: meta?.accessCount ?? 0,
+            });
+            return { ...r, score: r.score * w };
+          })
+          .sort((a, b) => b.score - a.score);
+        void bumpNoteMetadata(weighted.map((r) => r.id));
+        const lines = weighted.map((r) => {
           const plain = getNoteValue(raw[r.id]!);
           return `${r.id}: ${plain}`;
         });

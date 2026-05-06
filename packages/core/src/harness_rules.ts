@@ -12,4 +12,9 @@ export const HARNESS_RULE_RECALL_MESSAGE =
   `- **R-CONTRACT-BOUNDS**: If a plan defines execution contract bounds (steps/time/tool budget), keep tool usage within those bounds or replan.\n` +
   `- **R-COMMITMENT-CHECK**: Before destructive or risky actions, ensure they do not violate explicit commitments/invariants.\n` +
   `- **R-SEARCH-DIVERSITY**: For the first research search pass, diversify intents (origins/background, latest status, impact/metrics) and avoid near-duplicate query wording.\n` +
-  `- **R-ONE-SHOT-RETRY**: If a tool intent fails twice with near-identical args, stop retrying and replan with a different approach.\n`;
+  `- **R-ONE-SHOT-RETRY**: If a tool intent fails twice with near-identical args, stop retrying and replan with a different approach.\n` +
+  `- **R-ACTIVE-FIRST**: Prefer the narrowest currently active tool first; activate only one new family when required by missing capability.\n` +
+  `- **R-LIVE-DATA-HONESTY**: For live/current conditions claims, include source + observed/as-of time; if live data is unavailable, disclose fallback locality and uncertainty.\n` +
+  `- **R-USER-STANCE-EVIDENCE**: Do not assert user beliefs/preferences unless directly evidenced by the user's words in this session.\n` +
+  `- **R-QUESTION-NOT-BELIEF**: User questions/probes are not commitments; avoid turning them into declared beliefs.\n` +
+  `- **R-INFERENCE-LABEL**: If inferring user stance, mark it tentative and include confidence (low/med/high).\n`;

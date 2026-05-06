@@ -42,6 +42,12 @@ import {
   markExecutionContractStatus,
   updateDriftScore,
 } from "./execution_state.js";
+import {
+  inferTurnInference,
+  resolveMemoryPolicy,
+  evaluateOverInferenceSemantics,
+  type TurnInferenceResult,
+} from "./intent_inference.js";
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -63,6 +69,77 @@ function resolveApprovalTimeoutMs(config: AgentConfig): number {
 
 function isUiQuiet(): boolean {
   return process.env["AGENT_UI_VERBOSITY"] === "quiet";
+}
+
+function clampInt(n: number, min: number, max: number): number {
+  return Math.max(min, Math.min(max, Math.round(n)));
+}
+
+function resolveIntentConfidenceThreshold(): number {
+  const raw = process.env["AGENT_INTENT_CONFIDENCE_MIN"]?.trim();
+  const n = raw ? Number(raw) : 0.65;
+  if (!Number.isFinite(n)) return 0.65;
+  return Math.max(0.4, Math.min(0.95, n));
+}
+
+function normalizeRuntimePreferencePatch(patch: Partial<RuntimePreferences>): Partial<RuntimePreferences> {
+  const out: Partial<RuntimePreferences> = {};
+  if (patch.provider) {
+    const p: NonNullable<RuntimePreferences["provider"]> = {};
+    if (typeof patch.provider.model === "string" && patch.provider.model.trim().length > 0) {
+      p.model = patch.provider.model.trim().slice(0, 200);
+    }
+    if (typeof patch.provider.baseURL === "string" && patch.provider.baseURL.trim().length > 0) {
+      p.baseURL = patch.provider.baseURL.trim();
+    }
+    if (patch.provider.keySource) p.keySource = patch.provider.keySource;
+    if (Object.keys(p).length > 0) out.provider = p;
+  }
+  if (patch.runtime) {
+    const r: NonNullable<RuntimePreferences["runtime"]> = {};
+    if (patch.runtime.uiVerbosity) r.uiVerbosity = patch.runtime.uiVerbosity;
+    if (patch.runtime.vaultAutoWriteMode) r.vaultAutoWriteMode = patch.runtime.vaultAutoWriteMode;
+    if (typeof patch.runtime.vaultFirstStrict === "boolean") r.vaultFirstStrict = patch.runtime.vaultFirstStrict;
+    if (patch.runtime.destructiveGate) r.destructiveGate = patch.runtime.destructiveGate;
+    if (patch.runtime.approvalTimeoutMs != null && Number.isFinite(patch.runtime.approvalTimeoutMs)) {
+      r.approvalTimeoutMs = clampInt(patch.runtime.approvalTimeoutMs, 10_000, 600_000);
+    }
+    if (patch.runtime.rateLimitMaxRetries != null && Number.isFinite(patch.runtime.rateLimitMaxRetries)) {
+      r.rateLimitMaxRetries = clampInt(patch.runtime.rateLimitMaxRetries, 0, 500);
+    }
+    if (
+      patch.runtime.transient5xxMaxRetries != null &&
+      Number.isFinite(patch.runtime.transient5xxMaxRetries)
+    ) {
+      r.transient5xxMaxRetries = clampInt(patch.runtime.transient5xxMaxRetries, 0, 200);
+    }
+    if (patch.runtime.retryMaxDelayMs != null && Number.isFinite(patch.runtime.retryMaxDelayMs)) {
+      r.retryMaxDelayMs = clampInt(patch.runtime.retryMaxDelayMs, 1_000, 600_000);
+    }
+    if (Object.keys(r).length > 0) out.runtime = r;
+  }
+  return out;
+}
+
+function hasRuntimePreferenceChange(patch: Partial<RuntimePreferences>): boolean {
+  return Boolean(
+    (patch.provider && Object.keys(patch.provider).length > 0) ||
+      (patch.runtime && Object.keys(patch.runtime).length > 0)
+  );
+}
+
+function buildToolAwarenessSnapshot(registry: ToolRegistry): string {
+  const active = registry.getActiveToolNames();
+  const fam = registry
+    .getActiveFamilySummary(4)
+    .map((f) => `${f.family}(${f.active}/${f.total})`)
+    .join(", ");
+  const tail = active.slice(0, 12).join(", ") || "(none)";
+  return (
+    `TOOL STATE: lazy=${registry.isLazyToolLoading() ? "on" : "off"}, active_count=${active.length}\n` +
+    `ACTIVE FAMILIES: ${fam || "(none)"}\n` +
+    `ACTIVE TOOLS (sample): ${tail}`
+  );
 }
 
 /**
@@ -93,6 +170,9 @@ function isRetryable(err: unknown): boolean {
     err.message.toLowerCase().includes("provider")
   )
     return true;
+  const msg = describeError(err).toLowerCase();
+  if (/\b429\b|rate.?limit|too many requests|temporarily rate-limited|rate_limit_exceeded/.test(msg)) return true;
+  if (/econnreset|socket hang up|etimedout|network|fetch failed|und_err_socket/.test(msg)) return true;
   return false;
 }
 
@@ -106,7 +186,25 @@ function isRateLimitError(err: unknown): boolean {
 function isProviderUnavailableError(err: unknown): boolean {
   if (err instanceof OpenAI.APIError && err.status != null && err.status >= 500) return true;
   const msg = describeError(err).toLowerCase();
-  return /provider.*unavailable|temporarily unavailable|bad gateway|gateway|upstream/i.test(msg);
+  return /provider.*unavailable|temporarily unavailable|bad gateway|gateway|upstream|econnreset|socket hang up|etimedout/i.test(msg);
+}
+
+function getRetryAfterMsFromError(err: unknown): number | null {
+  const asAny = err as { headers?: Record<string, string | string[]>; message?: string } | null;
+  const retryAfter = asAny?.headers?.["retry-after"];
+  const raw = Array.isArray(retryAfter) ? retryAfter[0] : retryAfter;
+  if (raw) {
+    const secs = Number(raw);
+    if (Number.isFinite(secs)) return Math.max(0, Math.round(secs * 1000));
+    const ts = Date.parse(raw);
+    if (Number.isFinite(ts)) return Math.max(0, ts - Date.now());
+  }
+  const msg = String(asAny?.message ?? describeError(err));
+  const m = msg.match(/retry after\s+(\d+)\s*(ms|s|sec|seconds)?/i);
+  if (!m) return null;
+  const n = parseInt(m[1] ?? "0", 10);
+  const unit = (m[2] ?? "s").toLowerCase();
+  return unit.startsWith("ms") ? n : n * 1000;
 }
 
 function isRetryForeverEnabled(): boolean {
@@ -146,6 +244,22 @@ function isSimpleIntrospectionPrompt(userMessage: string): boolean {
     /\b(what model|which model|what harness|which harness|who are you|what are you running|what runtime)\b/.test(t) &&
     t.length < 220
   );
+}
+
+function hasUncertaintyMarkers(text: string): boolean {
+  return /\b(might|may|seems|appears|possibly|tentative|uncertain|likely|could be|inference)\b/i.test(text);
+}
+
+function hasOverconfidentUserStanceClaims(text: string): boolean {
+  const t = text.toLowerCase();
+  return (
+    /\b(you believe|you prefer|you are clearly|you definitely|you want|you support)\b/.test(t) &&
+    !hasUncertaintyMarkers(t)
+  );
+}
+
+function isOverInferenceGuardEnabled(): boolean {
+  return process.env["AGENT_OVERINFERENCE_GUARD"] !== "0";
 }
 
 function normPathForMatch(p: string): string {
@@ -190,6 +304,14 @@ function lexicalJaccard(a: string, b: string): number {
   return union > 0 ? inter / union : 0;
 }
 
+function hasUsefulRecallPayload(output: string, seed: string, minOverlap: number): boolean {
+  const t = output.trim();
+  if (!t || /\(no .*matches\)|^\(no matches\)$/im.test(t)) return false;
+  if (!seed.trim()) return true;
+  const overlap = lexicalJaccard(t.slice(0, 2500), seed.slice(0, 500));
+  return overlap >= minOverlap;
+}
+
 function normalizeSearchDelta(text: string): string {
   return text
     .replace(/<longcat_tool_call>[\s\S]*?<\/longcat_tool_call>/gi, "")
@@ -224,6 +346,23 @@ function hasFreshnessClaims(text: string): boolean {
   return /\b(latest|current|as of|today|recent|version|release|updated)\b/.test(t);
 }
 
+function hasLiveNowClaims(text: string): boolean {
+  const t = text.toLowerCase();
+  return /\b(right now|live now|currently|at the moment|current conditions|happening now)\b/.test(t);
+}
+
+function isDeckIntentPrompt(text: string): boolean {
+  const t = text.toLowerCase();
+  return /\b(deck|powerpoint|pptx|ppx|slides|slide deck)\b/.test(t);
+}
+
+function isVisionCentricPrompt(text: string): boolean {
+  const t = text.toLowerCase();
+  return /\b(image|screenshot|photo|diagram|figure|ocr|read text from|what's in this picture|what is in this image|analyze this image)\b/.test(
+    t
+  );
+}
+
 function hasAsOfQualifier(text: string): boolean {
   return /\bas of\b|\bas-of\b|\bupdated\b|\blast updated\b/i.test(text);
 }
@@ -237,6 +376,14 @@ function hasRecentYearEvidence(text: string): boolean {
 function hasAuthoritativeSourceHint(text: string): boolean {
   const t = text.toLowerCase();
   return /(github\.com\/.+\/releases|docs\.|official|release notes|changelog|blog\.)/.test(t);
+}
+
+function hasWeatherFreshEvidence(text: string): boolean {
+  const t = text.toLowerCase();
+  return (
+    (t.includes('"is_live": true') || t.includes("weather_lookup")) &&
+    (t.includes('"observed_at"') || t.includes("as of"))
+  );
 }
 
 function isVaultFirstStrictEnabled(): boolean {
@@ -404,6 +551,10 @@ export class AgentHarness {
   private client: OpenAI;
   private readonly maxAgentDepth: number;
   private readonly maxConcurrentAgents: number;
+  private spawnConcurrencyCap: number;
+  private providerDegradedUntilMs = 0;
+  private providerCircuitOpenUntilMs = 0;
+  private consecutiveProviderFailures = 0;
   /** Human approval TTL for destructive requiresApproval tools (dispatcher). */
   private readonly approvalTimeoutMs: number;
   private running = false;
@@ -468,6 +619,12 @@ export class AgentHarness {
   private finalizeSynthesisNudgeThisSend = false;
   /** One-shot nudge for recency-sensitive prompts before turn_end(ok). */
   private finalizeRecencyNudgeThisSend = false;
+  /** One-shot nudge for over-inference on user-stance readback. */
+  private finalizeInferenceNudgeThisSend = false;
+  /** One-shot guard for deck-intent requiring pptx render path. */
+  private finalizeDeckPipelineNudgeThisSend = false;
+  /** One-shot guard for vision-centric asks without sidecar usage. */
+  private finalizeVisionNudgeThisSend = false;
   /** web_search query history for first-pass diversity + dedupe checks. */
   private webSearchQueriesThisTurn: string[] = [];
   /** Near-duplicate failed search intents for one-shot retry discipline. */
@@ -480,6 +637,7 @@ export class AgentHarness {
   private vaultMetrics = { reads: 0, searches: 0, writes: 0, skippedWrites: 0 };
   private runtimePreferences: RuntimePreferences | null = null;
   private pendingRiskyPreferenceSummary: string | null = null;
+  private turnInference: TurnInferenceResult | null = null;
 
   /**
    * Returns the ContextManager for use by context tools factory.
@@ -499,12 +657,7 @@ export class AgentHarness {
   }
 
   private isLikelyKnowledgeTask(): boolean {
-    const t = this.lastUserMessage.toLowerCase();
-    return (
-      /research|learn|explain|why|how|compare|summar|document|wiki|knowledge|paper|reference|history|background|meaning|what is/.test(
-        t
-      ) && !/build|compile|typecheck|test|lint|run the tests|npm run/.test(t)
-    );
+    return this.turnInference?.intent === "knowledge";
   }
 
   private hasVaultOrMemoryPrimingThisTurn(): boolean {
@@ -683,7 +836,11 @@ export class AgentHarness {
 
   private async maybeHandleRuntimePreferenceIntent(userMessage: string): Promise<void> {
     if (this.agentDepth > 0) return;
-    if (!/\b(from now on|use model|switch model|use provider|default to|always use|set .*?(retry|timeout|verbosity|vault|safety|approval))\b/i.test(userMessage)) {
+    if (
+      !/\b(from now on|going forward|default to|always use|prefer|switch|change|set|be more autonomous|lower confirmations?|fewer confirmations?|quieter|verbosity|retry|timeout|approval|vault|provider|model)\b/i.test(
+        userMessage
+      )
+    ) {
       return;
     }
     const jr = await completeChatJson(this.client, {
@@ -694,7 +851,10 @@ export class AgentHarness {
           content:
             "Extract runtime preference intent from user text. " +
             "Return JSON object: {detected:boolean, summary:string, risky:boolean, changes:{provider?:{model?:string,baseURL?:string,keySource?:string},runtime?:{uiVerbosity?:'normal'|'quiet',vaultAutoWriteMode?:'off'|'research'|'aggressive',vaultFirstStrict?:boolean,approvalTimeoutMs?:number,destructiveGate?:'strict'|'balanced',rateLimitMaxRetries?:number,transient5xxMaxRetries?:number,retryMaxDelayMs?:number}}}. " +
-            "Only include fields explicitly requested or strongly implied. risky=true for reduced safety controls.",
+            "Only include fields explicitly requested or strongly implied. " +
+            "Treat requests for faster/more autonomous behavior as potentially implying reduced confirmations/guardrails. " +
+            "risky=true when safety controls are reduced (for example: lower approval friction, looser destructive gate). " +
+            "summary must be short and concrete.",
         },
         { role: "user", content: userMessage.slice(0, 2000) },
       ],
@@ -709,9 +869,15 @@ export class AgentHarness {
       changes?: Partial<RuntimePreferences>;
     };
     if (!parsed.detected || !parsed.changes) return;
+    const normalizedChanges = normalizeRuntimePreferencePatch(parsed.changes);
+    if (!hasRuntimePreferenceChange(normalizedChanges)) return;
     const summary = (parsed.summary ?? "runtime preference change").slice(0, 240);
     const risky = Boolean(parsed.risky);
     this.emitter.emit("runtime_pref_detected", { summary, risky });
+    this.emitter.emit("text", {
+      delta: `\n[Runtime] Detected preference intent: ${summary}${risky ? " (risky)" : ""}\n`,
+      channel: "trace",
+    });
 
     if (risky) {
       this.pendingRiskyPreferenceSummary = summary;
@@ -725,13 +891,22 @@ export class AgentHarness {
         .toLowerCase();
       if (answer !== "confirm") {
         this.emitter.emit("runtime_pref_rejected", { summary, reason: "user_rejected_or_not_confirmed" });
+        this.emitter.emit("text", {
+          delta: `\n[Runtime] Preference change rejected: ${summary} (confirmation not provided)\n`,
+          channel: "trace",
+        });
         this.pendingRiskyPreferenceSummary = null;
         return;
       }
       this.pendingRiskyPreferenceSummary = null;
     }
 
-    this.applyRuntimePreferencePatch(parsed.changes);
+    this.applyRuntimePreferencePatch(normalizedChanges);
+    this.emitter.emit("runtime_pref_changed", { summary, persisted: false });
+    this.emitter.emit("text", {
+      delta: `\n[Runtime] Applied preference change: ${summary}\n`,
+      channel: "trace",
+    });
     let persisted = false;
     if (this.config.persistRuntimePreferences) {
       try {
@@ -745,11 +920,19 @@ export class AgentHarness {
           summary,
           reason: `persist_failed:${err instanceof Error ? err.message : String(err)}`,
         });
+        this.emitter.emit("text", {
+          delta:
+            `\n[Runtime] Persist failed for preference change: ${summary} ` +
+            `(${err instanceof Error ? err.message : String(err)})\n`,
+          channel: "trace",
+        });
       }
     }
     this.emitter.emit("runtime_pref_changed", { summary, persisted });
     this.emitter.emit("text", {
-      delta: `\n[Runtime] Applied preference change: ${summary}${persisted ? " (persisted)" : ""}\n`,
+      delta:
+        `\n[Runtime] Preference change status: ${summary} -> ` +
+        `${persisted ? "persisted" : "applied (session only)"}\n`,
       channel: "trace",
     });
   }
@@ -788,6 +971,12 @@ export class AgentHarness {
       this.config.baseURL = provider.baseURL;
       this.config.model = provider.model;
       this.rebuildClient();
+      this.emitter.emit("text", {
+        delta:
+          `\n[Runtime] Effective provider updated: model=${this.config.model}, ` +
+          `baseURL=${this.config.baseURL}\n`,
+        channel: "trace",
+      });
     }
     if (merged.runtime?.uiVerbosity) {
       process.env["AGENT_UI_VERBOSITY"] = merged.runtime.uiVerbosity;
@@ -865,8 +1054,12 @@ export class AgentHarness {
   }
   private computeRetryDelayMs(
     attempt: number,
-    mode: "normal" | "rate_limited" | "provider_unavailable"
+    mode: "normal" | "rate_limited" | "provider_unavailable",
+    retryAfterMs?: number | null
   ): number {
+    if (typeof retryAfterMs === "number" && Number.isFinite(retryAfterMs) && retryAfterMs > 0) {
+      return Math.max(250, Math.min(this.retryMaxDelayMs, retryAfterMs));
+    }
     const boosted = mode === "rate_limited" || mode === "provider_unavailable";
     // Boosted paths (429/5xx) target ~4 minutes by around retry 7.
     const base = boosted ? Math.max(4_000, this.retryDelayMs) : this.retryDelayMs;
@@ -875,9 +1068,44 @@ export class AgentHarness {
     const jitter = Math.round(raw * 0.2 * (Math.random() * 2 - 1));
     return Math.max(250, raw + jitter);
   }
+  private get retryWallTimeMs() {
+    const raw = process.env["AGENT_RETRY_WALL_TIME_MS"]?.trim();
+    if (raw) {
+      const n = parseInt(raw, 10);
+      if (Number.isFinite(n)) return Math.max(10_000, Math.min(900_000, n));
+    }
+    return 120_000;
+  }
+  private get providerCircuitFailureThreshold() {
+    const raw = process.env["AGENT_PROVIDER_CIRCUIT_FAILURES"]?.trim();
+    if (raw) {
+      const n = parseInt(raw, 10);
+      if (Number.isFinite(n)) return Math.max(2, Math.min(20, n));
+    }
+    return 4;
+  }
+  private get providerCircuitCooldownMs() {
+    const raw = process.env["AGENT_PROVIDER_CIRCUIT_COOLDOWN_MS"]?.trim();
+    if (raw) {
+      const n = parseInt(raw, 10);
+      if (Number.isFinite(n)) return Math.max(5_000, Math.min(300_000, n));
+    }
+    return 45_000;
+  }
 
   constructor(config: AgentConfig) {
     this.config = config;
+    this.config.vision = {
+      model: config.vision?.model ?? process.env["AGENT_VISION_MODEL"]?.trim(),
+      baseURL: config.vision?.baseURL ?? process.env["AGENT_VISION_BASE_URL"]?.trim(),
+      apiKey: config.vision?.apiKey ?? process.env["AGENT_VISION_API_KEY"]?.trim(),
+      timeoutMs:
+        config.vision?.timeoutMs ??
+        (parseInt(process.env["AGENT_VISION_TIMEOUT_MS"] ?? "15000", 10) || 15_000),
+      maxImageBytes:
+        config.vision?.maxImageBytes ??
+        (parseInt(process.env["AGENT_VISION_MAX_IMAGE_BYTES"] ?? String(4 * 1024 * 1024), 10) || 4 * 1024 * 1024),
+    };
     this.runtimePreferences = config.runtimePreferences ?? null;
     if (this.runtimePreferences?.provider?.model) this.config.model = this.runtimePreferences.provider.model;
     if (this.runtimePreferences?.provider?.baseURL) this.config.baseURL = this.runtimePreferences.provider.baseURL;
@@ -885,6 +1113,7 @@ export class AgentHarness {
     this.agentDepth = config.agentDepth ?? 0;
     this.maxAgentDepth = config.maxAgentDepth ?? 3;
     this.maxConcurrentAgents = config.maxConcurrentAgents ?? 8;
+    this.spawnConcurrencyCap = this.maxConcurrentAgents;
     this.approvalTimeoutMs = resolveApprovalTimeoutMs(config);
 
     this.emitter = new AgentEmitter();
@@ -993,11 +1222,25 @@ export class AgentHarness {
     this.finalizeCiteNudgeThisSend = false;
     this.finalizeSynthesisNudgeThisSend = false;
     this.finalizeRecencyNudgeThisSend = false;
+    this.finalizeInferenceNudgeThisSend = false;
     this.dispatcher.resetTurnCounters();
     this.vaultMetrics = { reads: 0, searches: 0, writes: 0, skippedWrites: 0 };
     this.webSearchQueriesThisTurn = [];
     this.failedSearchIntentCounts = new Map();
+    this.turnInference = null;
     await this.maybeHandleRuntimePreferenceIntent(userMessage);
+    try {
+      this.turnInference = await inferTurnInference(this.client, this.config.model, userMessage);
+    } catch {
+      this.turnInference = {
+        intent: "knowledge",
+        stancePrompt: false,
+        overInferenceRisk: false,
+        confidence: 0.5,
+        source: "fallback_regex",
+        reason: "inference_exception_fallback",
+      };
+    }
 
     if (this.config.workingStateEnabled !== false) {
       this.context.initEpistemicState(userMessage);
@@ -1114,9 +1357,15 @@ export class AgentHarness {
       );
     }
     const running = this.orchestrator.runningCount();
-    if (running >= this.maxConcurrentAgents) {
+    const now = Date.now();
+    const inDegradedWindow = now < this.providerDegradedUntilMs;
+    const effectiveCap = inDegradedWindow ? this.spawnConcurrencyCap : this.maxConcurrentAgents;
+    if (!inDegradedWindow && this.spawnConcurrencyCap < this.maxConcurrentAgents) {
+      this.spawnConcurrencyCap = Math.min(this.maxConcurrentAgents, this.spawnConcurrencyCap + 1);
+    }
+    if (running >= effectiveCap) {
       throw new Error(
-        `Max concurrent agents (${this.maxConcurrentAgents}) reached — wait for some to complete before spawning more`
+        `Max concurrent agents (${effectiveCap}) reached — wait for some to complete before spawning more`
       );
     }
 
@@ -1523,6 +1772,11 @@ export class AgentHarness {
     }
 
     this.context.refreshProtocolDynamic(this.registry.getActiveToolNames());
+    if (this.config.workingStateEnabled !== false && this.context.getEpistemicState()) {
+      this.context.patchEpistemicState({
+        harnessNotes: buildToolAwarenessSnapshot(this.registry),
+      });
+    }
 
     // Context pressure alerts (#9): fire once per threshold per turn
     const snapBefore = this.context.snapshot();
@@ -1556,11 +1810,30 @@ export class AgentHarness {
     }
 
     const recallEvery = parseInt(process.env["AGENT_RECALL_EVERY_N"] ?? "2", 10);
+    const intent = this.turnInference?.intent ?? "knowledge";
+    const memoryPolicy = resolveMemoryPolicy(intent);
+    const inferenceThreshold = resolveIntentConfidenceThreshold();
+    if (this.agentDepth === 0) {
+      this.emitter.emit("memory_retrieval_policy", {
+        intent,
+        source: this.turnInference?.source ?? "turn_policy",
+        confidence: this.turnInference?.confidence,
+        threshold: inferenceThreshold,
+        scope: memoryPolicy.scope,
+        maxAgeDays: memoryPolicy.maxAgeDays,
+        minConfidence: memoryPolicy.minConfidence,
+        minQueryOverlap: memoryPolicy.minQueryOverlap,
+        excludeTypes: memoryPolicy.excludeTypes ?? [],
+        autoRecallAllowed: memoryPolicy.allowAutoRecall,
+        fallbackReason: this.turnInference?.fallbackReason,
+      });
+    }
     if (
       recallEvery > 0 &&
       round > 0 &&
       round % recallEvery === 0 &&
       this.agentDepth === 0 &&
+      memoryPolicy.allowAutoRecall &&
       (this.registry.has("recall_relevant") || this.registry.has("memory_query"))
     ) {
       try {
@@ -1581,20 +1854,58 @@ export class AgentHarness {
                 query: queries[0]!.slice(0, 800),
                 queries,
                 k,
-                scope: "both",
+                scope: memoryPolicy.scope,
                 goal_hint: this.lastUserMessage.slice(0, 500),
                 open_questions:
                   rw?.subQueries?.filter((q) => q.trim().length >= 4).slice(0, 8) ?? [],
+                ...(memoryPolicy.maxAgeDays != null ? { max_age_days: memoryPolicy.maxAgeDays } : {}),
+                ...(memoryPolicy.minConfidence != null
+                  ? { min_confidence: memoryPolicy.minConfidence }
+                  : {}),
+                ...(memoryPolicy.minQueryOverlap != null
+                  ? { min_query_overlap: memoryPolicy.minQueryOverlap }
+                  : {}),
+                ...(memoryPolicy.excludeTypes?.length
+                  ? { exclude_types: memoryPolicy.excludeTypes }
+                  : {}),
               }
             : {
                 query: queries[0]!.slice(0, 800),
                 queries,
                 k,
-                scope: "both",
+                scope: memoryPolicy.scope,
+                ...(memoryPolicy.maxAgeDays != null ? { max_age_days: memoryPolicy.maxAgeDays } : {}),
+                ...(memoryPolicy.minConfidence != null
+                  ? { min_confidence: memoryPolicy.minConfidence }
+                  : {}),
+                ...(memoryPolicy.minQueryOverlap != null
+                  ? { min_query_overlap: memoryPolicy.minQueryOverlap }
+                  : {}),
+                ...(memoryPolicy.excludeTypes?.length
+                  ? { exclude_types: memoryPolicy.excludeTypes }
+                  : {}),
               };
           if (rw?.hyde?.trim()) payload["hyde"] = rw.hyde.trim().slice(0, 1500);
+          this.emitter.emit("memory_retrieval_policy", {
+            intent,
+            source: useMq ? "memory_query" : "recall_relevant",
+            confidence: this.turnInference?.confidence,
+            threshold: inferenceThreshold,
+            scope: memoryPolicy.scope,
+            maxAgeDays: memoryPolicy.maxAgeDays,
+            minConfidence: memoryPolicy.minConfidence,
+            minQueryOverlap: memoryPolicy.minQueryOverlap,
+            excludeTypes: memoryPolicy.excludeTypes ?? [],
+            autoRecallAllowed: memoryPolicy.allowAutoRecall,
+            fallbackReason: this.turnInference?.fallbackReason,
+          });
           const r = await this.dispatcher.directCall(useMq ? "memory_query" : "recall_relevant", payload);
-          if (r.ok && typeof r.output === "string" && r.output.trim().length > 20) {
+          if (
+            r.ok &&
+            typeof r.output === "string" &&
+            r.output.trim().length > 20 &&
+            hasUsefulRecallPayload(r.output, seed, memoryPolicy.minQueryOverlap ?? 0.05)
+          ) {
             this.context.appendMessage({
               role: "user",
               content: `[Relevant memory — mid-turn recall]\n${r.output.slice(0, 3500)}`,
@@ -1604,6 +1915,21 @@ export class AgentHarness {
       } catch {
         /* optional */
       }
+    }
+    if (round > 0 && round % recallEvery === 0 && this.agentDepth === 0 && !memoryPolicy.allowAutoRecall) {
+      this.emitter.emit("memory_retrieval_policy", {
+        intent,
+        source: "auto_recall",
+        confidence: this.turnInference?.confidence,
+        threshold: inferenceThreshold,
+        scope: memoryPolicy.scope,
+        maxAgeDays: memoryPolicy.maxAgeDays,
+        minConfidence: memoryPolicy.minConfidence,
+        minQueryOverlap: memoryPolicy.minQueryOverlap,
+        excludeTypes: memoryPolicy.excludeTypes ?? [],
+        autoRecallAllowed: false,
+        fallbackReason: this.turnInference?.fallbackReason,
+      });
     }
 
     const messages = this.context.buildMessages();
@@ -2191,18 +2517,106 @@ export class AgentHarness {
         }
       }
 
-      const recencyRequired = isFreshnessSensitivePrompt(this.lastUserMessage);
+      if (
+        isDeckIntentPrompt(this.lastUserMessage) &&
+        !this.toolsUsedThisTurn.includes("doc_render_pptx") &&
+        !this.finalizeDeckPipelineNudgeThisSend
+      ) {
+        this.finalizeDeckPipelineNudgeThisSend = true;
+        this.context.appendMessage({
+          role: "user",
+          content:
+            "[PPTX COMPLETION GUARD] User requested a deck/PPTX. Before finalizing, run the document pipeline and produce artifacts: " +
+            "doc_plan -> doc_compose_chunk -> doc_lint_layout/doc_repair_chunk -> doc_render_pptx -> doc_export -> doc_quality_report. " +
+            "Do not finalize with markdown-only output unless pptx rendering fails; if it fails, return diagnostics and retry guidance.",
+        });
+        await this.runReActLoop(round);
+        return;
+      }
+
+      if (
+        isVisionCentricPrompt(this.lastUserMessage) &&
+        !this.toolsUsedThisTurn.includes("vision_analyze") &&
+        !this.finalizeVisionNudgeThisSend
+      ) {
+        this.finalizeVisionNudgeThisSend = true;
+        this.context.appendMessage({
+          role: "user",
+          content:
+            "[VISION COMPLETION GUARD] This looks image-centric. Before finalizing, use vision_analyze (and activate/load vision family if needed). " +
+            "If vision call fails, continue with explicit lower-confidence uncertainty notes instead of pretending image evidence was seen.",
+        });
+        await this.runReActLoop(round);
+        return;
+      }
+
+      const stancePrompt =
+        isOverInferenceGuardEnabled() &&
+        (this.turnInference?.stancePrompt || this.turnInference?.overInferenceRisk || false);
+      const heuristicRisk = stancePrompt && hasOverconfidentUserStanceClaims(assistantText);
+      let llmRisk = false;
+      let llmCheckConfidence: number | undefined;
+      let llmFixHint: string | undefined;
+      let llmCheckReason: string | undefined;
+      if (stancePrompt) {
+        const semantic = await evaluateOverInferenceSemantics(
+          this.client,
+          this.config.model,
+          this.lastUserMessage,
+          assistantText
+        );
+        llmRisk = !semantic.passed;
+        llmCheckConfidence = semantic.confidence;
+        llmFixHint = semantic.fixHint;
+        llmCheckReason = semantic.reason;
+      }
+      const overInferenceRisk = heuristicRisk || llmRisk;
+      this.emitter.emit("over_inference_check", {
+        required: stancePrompt,
+        passed: !overInferenceRisk,
+        reason: !stancePrompt
+          ? "not_user_stance_prompt"
+          : overInferenceRisk && llmRisk
+          ? `semantic_over_inference:${llmCheckReason ?? "failed"}`
+          : overInferenceRisk
+          ? "heuristic_overconfident_user_stance_without_uncertainty"
+          : "user_stance_framed_with_uncertainty",
+        attemptedRecovery: overInferenceRisk,
+        source: stancePrompt ? (llmRisk ? "llm" : heuristicRisk ? "heuristic" : "llm") : "none",
+        confidence: llmCheckConfidence,
+        threshold: resolveIntentConfidenceThreshold(),
+        fixHint: llmFixHint,
+      });
+      if (overInferenceRisk && !this.finalizeInferenceNudgeThisSend) {
+        this.finalizeInferenceNudgeThisSend = true;
+        this.context.appendMessage({
+          role: "user",
+          content:
+            "[OVER-INFERENCE CHECK] Rewrite using this structure: " +
+            "(1) What you explicitly said, (2) Possible inference (tentative + confidence low/med/high), " +
+            "(3) Open uncertainty. Do not treat user questions as confirmed beliefs. " +
+            (llmFixHint ? `Fix hint: ${llmFixHint}` : ""),
+        });
+        await this.runReActLoop(round);
+        return;
+      }
+
+      const liveNowClaimed = hasLiveNowClaims(assistantText);
+      const recencyRequired = isFreshnessSensitivePrompt(this.lastUserMessage) || liveNowClaimed;
       if (recencyRequired) {
         const evidenceBlob = this.evidenceLog.map((e) => e.excerpt).join("\n");
+        const weatherFresh = hasWeatherFreshEvidence(`${assistantText}\n${evidenceBlob}`);
         const recencyPassed =
           (!hasFreshnessClaims(assistantText) || hasAsOfQualifier(assistantText)) &&
-          hasRecentYearEvidence(`${assistantText}\n${evidenceBlob}`) &&
-          hasAuthoritativeSourceHint(`${assistantText}\n${evidenceBlob}`);
+          (hasRecentYearEvidence(`${assistantText}\n${evidenceBlob}`) || weatherFresh) &&
+          (hasAuthoritativeSourceHint(`${assistantText}\n${evidenceBlob}`) || weatherFresh);
         this.emitter.emit("recency_check", {
           required: true,
           passed: recencyPassed,
           reason: recencyPassed
             ? "freshness_claims_grounded"
+            : liveNowClaimed
+            ? "live_now_claim_missing_fresh_weather_evidence"
             : "missing_as_of_or_recent_authoritative_evidence",
           attemptedRecovery: !recencyPassed,
         });
@@ -2247,10 +2661,15 @@ export class AgentHarness {
     tools: OpenAI.Chat.Completions.ChatCompletionTool[]
   ): Promise<Stream<OpenAI.Chat.Completions.ChatCompletionChunk>> {
     let lastErr: unknown;
+    const retryStartedAt = Date.now();
 
     const allowToollessRetry = this.config.allowToollessStreamRetry !== false;
     let attempt = 0;
     while (true) {
+      if (Date.now() < this.providerCircuitOpenUntilMs) {
+        const sec = Math.ceil((this.providerCircuitOpenUntilMs - Date.now()) / 1000);
+        throw new Error(`Provider circuit open due to repeated upstream failures. Retry in ~${sec}s.`);
+      }
       const useTools =
         tools.length > 0 && (allowToollessRetry ? attempt < 2 : true);
       const useToolChoice = useTools && attempt === 0;
@@ -2265,10 +2684,12 @@ export class AgentHarness {
 
       try {
         // Pass abort signal as RequestOptions (second arg) so hung streams can be cancelled (#3)
-        return (await this.client.chat.completions.create(
+        const stream = (await this.client.chat.completions.create(
           params,
           ...(this.abortSignal ? [{ signal: this.abortSignal }] : [])
         )) as Stream<OpenAI.Chat.Completions.ChatCompletionChunk>;
+        this.consecutiveProviderFailures = 0;
+        return stream;
       } catch (err) {
         lastErr = err;
         const msg = describeError(err);
@@ -2282,14 +2703,38 @@ export class AgentHarness {
           ? this.transient5xxMaxRetries
           : this.maxRetries;
         const cappedOut = attempt >= maxRetriesForError;
-        if (!isRetryable(err) || (cappedOut && !retryForever)) {
+        const wallExceeded = Date.now() - retryStartedAt >= this.retryWallTimeMs;
+        if (!isRetryable(err) || (cappedOut && !retryForever) || wallExceeded) {
+          if (wallExceeded) {
+            throw new Error(
+              `Provider retries exceeded wall-time budget (${Math.round(this.retryWallTimeMs / 1000)}s). ` +
+                `Stopping to avoid stalled session; please retry shortly. Last error: ${msg}`
+            );
+          }
           throw new Error(msg);
         }
 
         const delay = this.computeRetryDelayMs(
           attempt,
-          rateLimited ? "rate_limited" : providerUnavailable ? "provider_unavailable" : "normal"
+          rateLimited ? "rate_limited" : providerUnavailable ? "provider_unavailable" : "normal",
+          getRetryAfterMsFromError(err)
         );
+        if (rateLimited || providerUnavailable) {
+          this.consecutiveProviderFailures += 1;
+          const minCap = Math.max(1, parseInt(process.env["AGENT_MIN_CONCURRENT_AGENTS"] ?? "1", 10) || 1);
+          this.spawnConcurrencyCap = Math.max(minCap, Math.floor(this.spawnConcurrencyCap / 2));
+          const cooldown = Math.max(delay, parseInt(process.env["AGENT_CONCURRENCY_COOLDOWN_MS"] ?? "45000", 10) || 45_000);
+          this.providerDegradedUntilMs = Date.now() + cooldown;
+          if (this.consecutiveProviderFailures >= this.providerCircuitFailureThreshold) {
+            this.providerCircuitOpenUntilMs = Date.now() + this.providerCircuitCooldownMs;
+            throw new Error(
+              `Provider circuit opened after ${this.consecutiveProviderFailures} consecutive upstream failures. ` +
+                `Cooldown ${Math.round(this.providerCircuitCooldownMs / 1000)}s before retry.`
+            );
+          }
+        } else {
+          this.consecutiveProviderFailures = 0;
+        }
         this.emitter.emit("provider_retry", {
           attempt: attempt + 1,
           maxAttempts: retryForever ? 0 : maxRetriesForError + 1,

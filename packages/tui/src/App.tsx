@@ -1,12 +1,14 @@
 import React, { useState, useCallback, useEffect, useRef, useMemo } from "react";
 import { Box, Text, useInput, useStdout } from "ink";
 import type { AgentHarness } from "@liminal/core";
+import { DEFAULT_IMAGE_ATTACHMENT_LIMITS, validateImageAttachments, type ImageAttachment } from "@liminal/core";
 import { useAgent } from "./useAgent.js";
 import { StatusBar } from "./components/StatusBar.js";
 import { MessageItem } from "./components/MessageItem.js";
 import { InputLine } from "./components/InputLine.js";
 import { ApprovalModal } from "./components/ApprovalModal.js";
 import { AskUserModal } from "./components/AskUserModal.js";
+import { extractImagePathsFromText, imagePathToAttachment, parseAttachCommand } from "./imageAttachments.js";
 
 /** Message window size; keep moderate to reduce redraw churn. */
 const WINDOW_SIZE = 90;
@@ -52,6 +54,8 @@ export function App({ harness }: Props) {
 
   /** Text the user is typing in the chat input. */
   const [chatInput, setChatInput] = useState("");
+  const [pendingAttachments, setPendingAttachments] = useState<ImageAttachment[]>([]);
+  const [inputStatus, setInputStatus] = useState<string | null>(null);
   /** Text the user is typing for an ask_user answer. */
   const [askInput, setAskInput] = useState("");
   /**
@@ -74,7 +78,12 @@ export function App({ harness }: Props) {
   const hasAskUser = !!state.pendingAskUser;
 
   // Estimate lines consumed by the bottom area
-  const inputAreaH = hasApproval ? 5 : hasAskUser ? 4 : 1;
+  const inputAreaH =
+    hasApproval
+      ? 5
+      : hasAskUser
+      ? 4
+      : 1 + (pendingAttachments.length > 0 ? 1 : 0) + (inputStatus ? 1 : 0);
   // Fixed layout rows to avoid terminal jitter/flicker:
   // status(1) + top divider(1) + top indicator(1) + bottom indicator(1) + error row(1) + bottom divider(1) + input
   const transcriptH = Math.max(4, rows - (1 + 1 + 1 + 1 + 1 + 1 + inputAreaH));
@@ -93,13 +102,58 @@ export function App({ harness }: Props) {
   const newerCount = safeOffset; // messages newer that were scrolled past
 
   /* ── Unified keyboard handler ─────────────────────────────────── */
-  const handleSend = useCallback(() => {
-    const txt = chatInput.trim();
-    if (!txt || state.busy) return;
-    sendMessage(txt);
+  const handleSend = useCallback(async () => {
+    if (state.busy) return;
+    const attachPath = parseAttachCommand(chatInput);
+    if (attachPath !== null) {
+      if (!attachPath) {
+        setInputStatus("Usage: /attach <image-path>");
+        return;
+      }
+      const attached = await imagePathToAttachment(attachPath);
+      if (!attached.ok) {
+        setInputStatus(attached.error);
+        return;
+      }
+      const next = [...pendingAttachments, attached.attachment];
+      const validation = validateImageAttachments(next, DEFAULT_IMAGE_ATTACHMENT_LIMITS);
+      if (!validation.ok) {
+        setInputStatus(validation.error);
+        return;
+      }
+      setPendingAttachments(next);
+      setChatInput("");
+      setInputStatus(`Attached ${attached.attachment.name}`);
+      return;
+    }
+
+    const { paths, remainingText } = extractImagePathsFromText(chatInput);
+    const inlineAttachments: ImageAttachment[] = [];
+    for (const p of paths) {
+      const parsed = await imagePathToAttachment(p);
+      if (!parsed.ok) {
+        setInputStatus(parsed.error);
+        return;
+      }
+      inlineAttachments.push(parsed.attachment);
+    }
+    const mergedAttachments = [...pendingAttachments, ...inlineAttachments];
+    const validation = validateImageAttachments(
+      mergedAttachments,
+      DEFAULT_IMAGE_ATTACHMENT_LIMITS
+    );
+    if (!validation.ok) {
+      setInputStatus(validation.error);
+      return;
+    }
+    if (!remainingText && mergedAttachments.length === 0) return;
+
+    sendMessage(remainingText, mergedAttachments);
     setChatInput("");
+    setPendingAttachments([]);
+    setInputStatus(null);
     setScrollOffset(0);
-  }, [chatInput, state.busy, sendMessage]);
+  }, [chatInput, pendingAttachments, sendMessage, state.busy]);
 
   useInput((char, key) => {
     const wheelDelta = parseMouseWheelDelta(char);
@@ -179,7 +233,7 @@ export function App({ harness }: Props) {
 
     /* ── Chat input ─────────────────────────────────────────────── */
     if (key.return) {
-      handleSend();
+      void handleSend();
       return;
     }
     if (key.backspace || key.delete) {
@@ -188,6 +242,7 @@ export function App({ harness }: Props) {
     }
     if (isPrintableInputChar(char) && !key.ctrl && !key.meta) {
       setChatInput((s) => s + char);
+      if (inputStatus) setInputStatus(null);
     }
   });
 
@@ -272,6 +327,8 @@ export function App({ harness }: Props) {
           value={chatInput}
           busy={state.busy}
           scrollOffset={scrollOffset}
+          attachments={pendingAttachments}
+          status={inputStatus}
           width={cols}
         />
       )}

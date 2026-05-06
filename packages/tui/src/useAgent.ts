@@ -1,5 +1,11 @@
 import { useCallback, useEffect, useReducer, useRef } from "react";
-import type { AgentHarness, AgentEventMap, ContextSnapshot } from "@liminal/core";
+import {
+  buildMessageWithImageAttachments,
+  type AgentEventMap,
+  type AgentHarness,
+  type ContextSnapshot,
+  type ImageAttachment,
+} from "@liminal/core";
 
 function isAgentUiQuiet(): boolean {
   return process.env["AGENT_UI_VERBOSITY"]?.trim() === "quiet";
@@ -557,9 +563,13 @@ export function useAgent(harness: AgentHarness) {
   }, [harness]);
 
   const sendMessage = useCallback(
-    (text: string) => {
-      dispatch({ type: "user_message", text });
-      void harness.send(text);
+    (text: string, attachments: ImageAttachment[] = []) => {
+      const userText =
+        attachments.length > 0
+          ? `${text.trim() || "(no text)"}\n[attached images: ${attachments.length}]`
+          : text;
+      dispatch({ type: "user_message", text: userText });
+      void harness.send(buildMessageWithImageAttachments(text, attachments));
     },
     [harness]
   );

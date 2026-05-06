@@ -39,15 +39,19 @@ export const TOOL_FAMILIES: Record<string, { description: string; tools: readonl
   },
   web: {
     description: "HTTP fetch, search, research, failure review.",
-    tools: ["web_fetch", "web_search", "web_research", "failure_review"],
+    tools: ["web_fetch", "web_search", "weather_lookup", "web_research", "failure_review"],
   },
   code_intel: {
     description: "AST search, tests, lint, symbol index, references.",
-    tools: ["ast_grep", "run_tests", "run_lint", "symbol_index", "find_references"],
+    tools: ["ast_grep", "run_tests", "run_lint", "symbol_index", "find_references", "execute_code"],
   },
   browser: {
     description: "Headless browser (Playwright, env-gated).",
     tools: ["browser_open", "browser_act"],
+  },
+  vision: {
+    description: "Sidecar vision analysis (image understanding while Owl remains primary reasoning model).",
+    tools: ["vision_analyze", "upload_image"],
   },
   meta: {
     description: "Harness improvement suggestions and insights.",
@@ -63,6 +67,24 @@ export const TOOL_FAMILIES: Record<string, { description: string; tools: readonl
       "vault_links",
       "vault_graph",
       "vault_delete",
+    ],
+  },
+  document: {
+    description: "Progressive document engine for PPTX/PPX, DOCX, and PDF (IR, composition, lint, repair, render, export, QA).",
+    tools: [
+      "doc_plan",
+      "doc_research_brief",
+      "doc_collect_sources",
+      "doc_select_assets",
+      "doc_generate_chart_data",
+      "doc_compose_chunk",
+      "doc_lint_layout",
+      "doc_repair_chunk",
+      "doc_render_pptx",
+      "doc_render_docx",
+      "doc_render_pdf",
+      "doc_export",
+      "doc_quality_report",
     ],
   },
   navigation: {
@@ -89,6 +111,30 @@ export const TOOL_FAMILIES: Record<string, { description: string; tools: readonl
   },
 };
 
+export interface FamilyActivitySummary {
+  family: string;
+  description: string;
+  active: number;
+  total: number;
+}
+
+/** Shared family activity summarizer for lazy-loading status views. */
+export function summarizeFamilyActivity(registry: ToolRegistry): FamilyActivitySummary[] {
+  const active = new Set(registry.getActiveToolNames());
+  const out: FamilyActivitySummary[] = [];
+  for (const [family, def] of Object.entries(TOOL_FAMILIES)) {
+    const present = def.tools.filter((t) => registry.has(t));
+    if (present.length === 0) continue;
+    out.push({
+      family,
+      description: def.description,
+      active: present.filter((t) => active.has(t)).length,
+      total: present.length,
+    });
+  }
+  return out.sort((a, b) => (b.active - a.active) || (a.family < b.family ? -1 : 1));
+}
+
 /** Tools always exposed to the model when AGENT_TOOL_LAZY=1 (minimal surface). */
 export const CORE_ALWAYS_TOOLS_BASE: readonly string[] = [
   "think",
@@ -106,17 +152,57 @@ export const CORE_ALWAYS_TOOLS_BASE: readonly string[] = [
   "activate_tool_family",
 ];
 
+/** Env-selected always-loaded profile used when AGENT_TOOL_LAZY=1. */
+const ALWAYS_TOOLS_PROFILE_ENV = "AGENT_ALWAYS_TOOLS_PROFILE";
+const ALWAYS_TOOLS_PROFILES = ["balanced", "knowledge_first", "max_autonomy"] as const;
+type AlwaysToolsProfile = (typeof ALWAYS_TOOLS_PROFILES)[number];
+
+const BALANCED_MEMORY_RELIABILITY_TOOLS = TOOL_FAMILIES.memory_advanced.tools.filter((t) =>
+  ["remember", "recall", "recall_type", "memory_stats"].includes(t)
+);
+const BALANCED_VAULT_RELIABILITY_TOOLS = TOOL_FAMILIES.vault.tools.filter((t) =>
+  ["vault_list", "vault_links"].includes(t)
+);
+
+const KNOWLEDGE_FIRST_TOOLS = [...TOOL_FAMILIES.memory_advanced.tools, ...TOOL_FAMILIES.vault.tools];
+const MAX_AUTONOMY_TOOLS = [
+  ...KNOWLEDGE_FIRST_TOOLS,
+  ...TOOL_FAMILIES.navigation.tools,
+  ...TOOL_FAMILIES.code_intel.tools.filter((t) => ["ast_grep", "symbol_index", "find_references"].includes(t)),
+  ...TOOL_FAMILIES.document.tools,
+  ...TOOL_FAMILIES.vision.tools,
+];
+
+function resolveAlwaysToolsProfile(): AlwaysToolsProfile {
+  const raw = (process.env[ALWAYS_TOOLS_PROFILE_ENV] ?? "balanced").trim().toLowerCase();
+  if (ALWAYS_TOOLS_PROFILES.includes(raw as AlwaysToolsProfile)) {
+    return raw as AlwaysToolsProfile;
+  }
+  return "balanced";
+}
+
+function getProfileSeedTools(profile: AlwaysToolsProfile): readonly string[] {
+  if (profile === "knowledge_first") {
+    return KNOWLEDGE_FIRST_TOOLS;
+  }
+  if (profile === "max_autonomy") {
+    return MAX_AUTONOMY_TOOLS;
+  }
+  // balanced: keep destructive/high-cost tools activation-only.
+  return [...BALANCED_MEMORY_RELIABILITY_TOOLS, ...BALANCED_VAULT_RELIABILITY_TOOLS];
+}
+
 /** Context tools only exist after registerAllTools(..., harness). */
 export const CORE_HARNESS_TOOLS: readonly string[] = ["check_context", "compress_context"];
 
 export function getCoreAlwaysToolNames(hasHarness: boolean): string[] {
-  const out: string[] = [...CORE_ALWAYS_TOOLS_BASE];
+  const out: string[] = [...CORE_ALWAYS_TOOLS_BASE, ...getProfileSeedTools(resolveAlwaysToolsProfile())];
   if (hasHarness) {
     out.push(...CORE_HARNESS_TOOLS);
     // Keep orchestration + critics visible without an extra activation step (common root path).
     out.push(...TOOL_FAMILIES.orchestration.tools);
   }
-  return out;
+  return [...new Set(out)];
 }
 
 /** Map tool name -> family id (for dispatcher hints). */

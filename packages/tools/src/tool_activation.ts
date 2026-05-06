@@ -1,6 +1,6 @@
 import type { ToolRegistry } from "@liminal/core";
 import { defineTool } from "./helpers.js";
-import { TOOL_FAMILIES } from "./tool_catalog.js";
+import { TOOL_FAMILIES, summarizeFamilyActivity } from "./tool_catalog.js";
 
 /**
  * Tools for discovering and loading tool families when AGENT_TOOL_LAZY=1.
@@ -23,16 +23,21 @@ export function createToolDiscoveryTools(registry: ToolRegistry) {
     },
     handler: async () => {
       const active = new Set(registry.getActiveToolNames());
+      const families = summarizeFamilyActivity(registry);
       const lines: string[] = [];
       lines.push(`Lazy tool loading: ${registry.isLazyToolLoading() ? "ON" : "OFF"}`);
       lines.push(`Active tool count: ${active.size}`);
       lines.push("");
       lines.push("Families (call activate_tool_family with { family: \"<id>\" }):");
-      for (const [id, def] of Object.entries(TOOL_FAMILIES)) {
-        const present = def.tools.filter((t) => registry.has(t));
-        if (present.length === 0) continue;
-        const activeHere = present.filter((t) => active.has(t)).length;
-        lines.push(`- ${id}: ${def.description} (${activeHere}/${present.length} active here)`);
+      for (const f of families) {
+        lines.push(`- ${f.family}: ${f.description} (${f.active}/${f.total} active here)`);
+      }
+      if (families.some((f) => f.family === "document")) {
+        lines.push("");
+        lines.push(`Note: "ppx" means PowerPoint/PPTX. Use document family + doc_render_pptx for deck artifacts.`);
+      }
+      if (families.some((f) => f.family === "vision")) {
+        lines.push(`Note: Vision sidecar available via "vision" family. Use vision_analyze when seeing an image would improve accuracy.`);
       }
       lines.push("");
       lines.push("Active tools:");

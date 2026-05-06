@@ -4,6 +4,7 @@
 import { defineTool } from "./helpers.js";
 import { runHtmlDdgSearch } from "./web_search.js";
 import { runWebFetch } from "./web_fetch.js";
+import { fetchWithRetry } from "./network_retry.js";
 
 async function synthesizeResearch(question: string, sources: { url: string; excerpt: string }[]): Promise<string> {
   const apiKey = process.env["OPENROUTER_API_KEY"] ?? "";
@@ -23,33 +24,37 @@ async function synthesizeResearch(question: string, sources: { url: string; exce
     .map((s, i) => `--- Source ${i + 1}: ${s.url}\n${s.excerpt.slice(0, 2500)}`)
     .join("\n\n");
   try {
-    const res = await fetch(`${base}/chat/completions`, {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${apiKey}`,
-        "Content-Type": "application/json",
-        "HTTP-Referer": "https://github.com/liminal-ai",
-        "X-Title": "Liminal-web-research",
+    const res = await fetchWithRetry(
+      `${base}/chat/completions`,
+      {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${apiKey}`,
+          "Content-Type": "application/json",
+          "HTTP-Referer": "https://github.com/liminal-ai",
+          "X-Title": "Liminal-web-research",
+        },
+        body: JSON.stringify({
+          model,
+          temperature: 0.1,
+          max_tokens: 900,
+          response_format: { type: "json_object" },
+          messages: [
+            {
+              role: "system",
+              content:
+                "You compare web sources for a factual question. Return JSON only: " +
+                '{"agreements": string[], "disagreements": string[], "confidence": "high"|"med"|"low"}',
+            },
+            {
+              role: "user",
+              content: `Question: ${question.slice(0, 500)}\n\nSources:\n${body.slice(0, 12_000)}`,
+            },
+          ],
+        }),
       },
-      body: JSON.stringify({
-        model,
-        temperature: 0.1,
-        max_tokens: 900,
-        response_format: { type: "json_object" },
-        messages: [
-          {
-            role: "system",
-            content:
-              "You compare web sources for a factual question. Return JSON only: " +
-              '{"agreements": string[], "disagreements": string[], "confidence": "high"|"med"|"low"}',
-          },
-          {
-            role: "user",
-            content: `Question: ${question.slice(0, 500)}\n\nSources:\n${body.slice(0, 12_000)}`,
-          },
-        ],
-      }),
-    });
+      { timeoutMs: 25_000 }
+    );
     if (!res.ok) return JSON.stringify({ agreements: [], disagreements: [`HTTP ${res.status}`], confidence: "low" });
     const json = (await res.json()) as { choices?: Array<{ message?: { content?: string } }> };
     return json.choices?.[0]?.message?.content?.trim() ?? "{}";

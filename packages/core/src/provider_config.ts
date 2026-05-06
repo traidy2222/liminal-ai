@@ -16,6 +16,12 @@ export interface ProviderConfigOverrides {
   keySource?: ProviderConfig["keySource"];
 }
 
+export interface VisionProviderConfig {
+  apiKey: string;
+  baseURL: string;
+  model: string;
+}
+
 const DEFAULT_BASE_URL = "https://openrouter.ai/api/v1";
 const DEFAULT_MODEL = "openrouter/owl-alpha";
 
@@ -46,6 +52,21 @@ export function resolveProviderConfig(overrides?: ProviderConfigOverrides): Prov
     baseURL,
     model,
     keySource: picked.key,
+  };
+}
+
+export function resolveVisionProviderConfig(): VisionProviderConfig {
+  const base = resolveProviderConfig();
+  return {
+    apiKey:
+      process.env["AGENT_VISION_API_KEY"]?.trim() ||
+      base.apiKey,
+    baseURL:
+      process.env["AGENT_VISION_BASE_URL"]?.trim() ||
+      base.baseURL,
+    model:
+      process.env["AGENT_VISION_MODEL"]?.trim() ||
+      base.model,
   };
 }
 

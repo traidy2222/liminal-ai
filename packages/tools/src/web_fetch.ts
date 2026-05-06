@@ -1,5 +1,6 @@
 import { defineTool } from "./helpers.js";
 import pdfParse from "pdf-parse";
+import { fetchWithRetry } from "./network_retry.js";
 
 export function unwrapRedirectUrl(url: string): string {
   const t = url.trim();
@@ -33,20 +34,23 @@ export async function runWebFetch(
 ): Promise<{ ok: true; output: string } | { ok: false; error: string }> {
   const url = unwrapRedirectUrl(urlIn);
   try {
-    const res = await fetch(url, {
-      headers: { "User-Agent": "Mozilla/5.0 dreamthedream-agent/1.0" },
-      signal: AbortSignal.timeout(20_000),
-      redirect: "follow",
-    });
+    const retried = await fetchWithRetry(
+      url,
+      {
+        headers: { "User-Agent": "Mozilla/5.0 dreamthedream-agent/1.0" },
+        redirect: "follow",
+      },
+      { timeoutMs: 20_000 }
+    );
 
-    if (!res.ok) {
-      return { ok: false, error: `HTTP ${res.status} ${res.statusText}` };
+    if (!retried.ok) {
+      return { ok: false, error: `HTTP ${retried.status} ${retried.statusText}` };
     }
 
-    const ct = (res.headers.get("content-type") ?? "").toLowerCase();
+    const ct = (retried.headers.get("content-type") ?? "").toLowerCase();
     if (ct.includes("application/pdf") || url.toLowerCase().endsWith(".pdf")) {
       try {
-        const buf = Buffer.from(await res.arrayBuffer());
+        const buf = Buffer.from(await retried.arrayBuffer());
         const data = await pdfParse(buf);
         const text = (data.text ?? "").replace(/\s+/g, " ").trim();
         return { ok: true, output: text.slice(0, maxChars) };
@@ -55,7 +59,7 @@ export async function runWebFetch(
       }
     }
 
-    const text = await res.text();
+    const text = await retried.text();
     const readable = await extractReadableHtml(text, url);
     const body =
       readable ??

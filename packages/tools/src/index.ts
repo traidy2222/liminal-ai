@@ -5,6 +5,7 @@ import { listDirTool } from "./list_dir.js";
 import { createRunShellTool } from "./run_shell.js";
 import { webFetchTool } from "./web_fetch.js";
 import { webSearchTool } from "./web_search.js";
+import { weatherLookupTool } from "./weather_lookup.js";
 import { createAskUserTool } from "./ask_user.js";
 import { rememberTool, recallTool, recallByTypeTool, forgetTool, forgetTypeTool, memoryStatsTool } from "./remember_recall.js";
 import { thinkTool } from "./think.js";
@@ -24,6 +25,7 @@ import { runTestsTool } from "./run_tests.js";
 import { runLintTool } from "./run_lint.js";
 import { symbolIndexTool } from "./symbol_index.js";
 import { findReferencesTool } from "./find_references.js";
+import { executeCodeTool } from "./execute_code.js";
 import { browserOpenTool, browserActTool } from "./browser_tools.js";
 import { createOrchestrationTools } from "./orchestration.js";
 import {
@@ -45,6 +47,20 @@ import { taskCheckpointTool, resumeTaskTool } from "./task_persistence.js";
 import { featureChecklistTool } from "./feature_checklist.js";
 import { createExtractStructuredTool } from "./extract_structured.js";
 import { createUploadImageTool } from "./upload_image.js";
+import { visionAnalyzeTool } from "./vision_analyze.js";
+import { docPlanTool } from "./doc_plan.js";
+import { docResearchBriefTool } from "./doc_research_brief.js";
+import { docCollectSourcesTool } from "./doc_collect_sources.js";
+import { docSelectAssetsTool } from "./doc_select_assets.js";
+import { docGenerateChartDataTool } from "./doc_generate_chart_data.js";
+import { docComposeChunkTool } from "./doc_compose_chunk.js";
+import { docLintLayoutTool } from "./doc_lint_layout.js";
+import { docRepairChunkTool } from "./doc_repair_chunk.js";
+import { docRenderPptxTool } from "./doc_render_pptx.js";
+import { docRenderDocxTool } from "./doc_render_docx.js";
+import { docRenderPdfTool } from "./doc_render_pdf.js";
+import { docExportTool } from "./doc_export.js";
+import { docQualityReportTool } from "./doc_quality_report.js";
 // Obsidian brain — vault tools
 import {
   vaultWriteTool,
@@ -79,6 +95,7 @@ export function registerAllTools(
   registry.register(readProcessOutputTool);
   registry.register(webFetchTool);
   registry.register(webSearchTool);
+  registry.register(weatherLookupTool);
   registry.register(createAskUserTool(emitter));
   registry.register(gitStatusTool);
   registry.register(gitDiffTool);
@@ -108,10 +125,12 @@ export function registerAllTools(
   registry.register(runLintTool);
   registry.register(symbolIndexTool);
   registry.register(findReferencesTool);
+  registry.register(executeCodeTool);
   registry.register(browserOpenTool);
   registry.register(browserActTool);
   registry.register(suggestImprovementTool);
   registry.register(viewInsightsTool);
+  registry.register(visionAnalyzeTool);
   // Obsidian brain
   registry.register(vaultWriteTool);
   registry.register(vaultReadTool);
@@ -120,6 +139,21 @@ export function registerAllTools(
   registry.register(vaultLinksTool);
   registry.register(vaultGraphTool);
   registry.register(vaultDeleteTool);
+  if (process.env["AGENT_DOC_ENGINE"] === "1") {
+    registry.register(docPlanTool);
+    registry.register(docResearchBriefTool);
+    registry.register(docCollectSourcesTool);
+    registry.register(docSelectAssetsTool);
+    registry.register(docGenerateChartDataTool);
+    registry.register(docComposeChunkTool);
+    registry.register(docLintLayoutTool);
+    registry.register(docRepairChunkTool);
+    registry.register(docRenderPptxTool);
+    registry.register(docRenderDocxTool);
+    registry.register(docRenderPdfTool);
+    registry.register(docExportTool);
+    registry.register(docQualityReportTool);
+  }
 
   const { listToolFamiliesTool, activateToolFamilyTool } = createToolDiscoveryTools(registry);
   registry.register(listToolFamiliesTool);

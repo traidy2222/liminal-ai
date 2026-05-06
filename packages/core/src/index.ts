@@ -61,6 +61,10 @@ export type {
   MilestonePlan,
   CommitmentRule,
   RecoveryRecord,
+  DocumentIR,
+  DocChunk,
+  DocStyleGenome,
+  DocQualityReport,
 } from "./types.js";
 export { getFastModelSlug, completeChatJson } from "./router.js";
 export type { JsonCompletionResult } from "./router.js";
@@ -94,8 +98,8 @@ export type { DistilledOutput } from "./output_distill.js";
 export { appendFailureLog, failureLogPath } from "./failure_log.js";
 export { attachSessionEventLog, maybeAttachSessionEventLog } from "./session_event_log.js";
 export { appendGoldenEvalRecord } from "./golden_eval.js";
-export { resolveProviderConfig } from "./provider_config.js";
-export type { ProviderConfig, ProviderConfigOverrides } from "./provider_config.js";
+export { resolveProviderConfig, resolveVisionProviderConfig } from "./provider_config.js";
+export type { ProviderConfig, ProviderConfigOverrides, VisionProviderConfig } from "./provider_config.js";
 export {
   RUNTIME_PREFS_FILE,
   getRuntimePrefsPath,
@@ -103,3 +107,12 @@ export {
   saveRuntimePreferences,
 } from "./runtime_prefs.js";
 export type { RuntimePreferences, ProviderKeySource } from "./runtime_prefs.js";
+export {
+  DEFAULT_IMAGE_ATTACHMENT_LIMITS,
+  isSupportedImageMimeType,
+  parseDataUrlImage,
+  normalizeImageAttachmentName,
+  validateImageAttachments,
+  buildMessageWithImageAttachments,
+} from "./image_attachments.js";
+export type { ImageAttachment, ImageAttachmentLimits, ImageAttachmentSource } from "./image_attachments.js";

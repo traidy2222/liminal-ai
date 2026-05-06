@@ -70,6 +70,23 @@ export class ToolRegistry {
     return this.toolFamilyByName.get(name);
   }
 
+  /** Active-family summary derived from tool->family mapping (for prompt/status snapshots). */
+  getActiveFamilySummary(limit = 6): Array<{ family: string; active: number; total: number }> {
+    const counts = new Map<string, { active: number; total: number }>();
+    for (const [tool, family] of this.toolFamilyByName.entries()) {
+      if (!this.tools.has(tool)) continue;
+      const row = counts.get(family) ?? { active: 0, total: 0 };
+      row.total += 1;
+      if (this.isActive(tool)) row.active += 1;
+      counts.set(family, row);
+    }
+    return [...counts.entries()]
+      .map(([family, c]) => ({ family, active: c.active, total: c.total }))
+      .filter((r) => r.total > 0)
+      .sort((a, b) => (b.active - a.active) || (a.family < b.family ? -1 : 1))
+      .slice(0, Math.max(1, limit));
+  }
+
   /**
    * Sync lazy policy from parent after child registry is populated.
    * Child active set = intersection(parent active, child registered names).

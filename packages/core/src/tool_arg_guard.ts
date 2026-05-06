@@ -4,6 +4,8 @@
  */
 const DANGEROUS_SHELL =
   /\brm\s+(-\S+\s+)*\/($|[\s;|&])|rm\s+.*--no-preserve-root|:\(\)\{|\|\s*:\s*&|mkfs\.|dd\s+if=\/dev\/|curl\s+.*\|\s*sh|wget\s+.*\|\s*sh|>\s*\/dev\/sd/i;
+const DANGEROUS_EXECUTE_CODE =
+  /\b(import\s+os|from\s+os\s+import|import\s+subprocess|from\s+subprocess\s+import|__import__\s*\(|child_process|require\s*\(\s*["']child_process["']\s*\)|process\.binding\s*\(|Deno\.run\s*\()/i;
 
 export function guardToolArgs(
   toolName: string,
@@ -59,6 +61,26 @@ export function guardToolArgs(
     }
   }
 
+  if (toolName === "weather_lookup") {
+    const location = String(args["location"] ?? "").trim();
+    if (location.length < 2 || location.length > 160) {
+      return "weather_lookup location must be 2-160 characters.";
+    }
+    const hint = args["country_hint"];
+    if (hint !== undefined) {
+      const c = String(hint).trim();
+      if (!/^[A-Za-z]{2}$/.test(c)) return "weather_lookup country_hint must be an ISO-2 code.";
+    }
+    const units = args["units"];
+    if (units !== undefined && units !== "metric" && units !== "imperial") {
+      return 'weather_lookup units must be "metric" or "imperial".';
+    }
+    const preferLive = args["prefer_live"];
+    if (preferLive !== undefined && typeof preferLive !== "boolean") {
+      return "weather_lookup prefer_live must be boolean when provided.";
+    }
+  }
+
   if (toolName === "plan") {
     const steps = args["steps"];
     if (Array.isArray(steps) && steps.length > 40) {
@@ -97,6 +119,35 @@ export function guardToolArgs(
       !content.includes("[[")
     ) {
       return "vault_write requires at least one [[Wikilink]] when AGENT_VAULT_REQUIRE_LINKS=1.";
+    }
+  }
+
+  if (toolName === "execute_code") {
+    const language = String(args["language"] ?? "");
+    if (language !== "python" && language !== "javascript") {
+      return 'execute_code language must be "python" or "javascript".';
+    }
+    const code = String(args["code"] ?? "");
+    if (code.length < 1) return "execute_code code must be non-empty.";
+    if (code.length > 100_000) return "execute_code code exceeds max length (100k).";
+    if (DANGEROUS_EXECUTE_CODE.test(code)) {
+      return "execute_code blocked potentially dangerous process/shell escape pattern.";
+    }
+    const timeoutMs = Number(args["timeout_ms"] ?? 30_000);
+    if (!Number.isFinite(timeoutMs) || timeoutMs < 1 || timeoutMs > 120_000) {
+      return "execute_code timeout_ms must be between 1 and 120000.";
+    }
+    const cwdRaw = args["cwd"];
+    if (cwdRaw !== undefined) {
+      const cwd = String(cwdRaw);
+      if (!cwd.trim()) return "execute_code cwd must be non-empty when provided.";
+      const normalized = cwd.replace(/\\/g, "/");
+      if (normalized.startsWith("/") || normalized.startsWith("..") || normalized.includes("/../")) {
+        return "execute_code cwd must stay within workspace-relative paths.";
+      }
+      if (/^[a-zA-Z]:\//.test(normalized)) {
+        return "execute_code cwd must be workspace-relative, not absolute.";
+      }
     }
   }
 
