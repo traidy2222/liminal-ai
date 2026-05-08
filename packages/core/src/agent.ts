@@ -46,6 +46,7 @@ import {
   inferTurnInference,
   resolveMemoryPolicy,
   evaluateOverInferenceSemantics,
+  isIdentityRecallLikePrompt,
   type TurnInferenceResult,
 } from "./intent_inference.js";
 
@@ -113,6 +114,47 @@ function isUiQuiet(): boolean {
 
 function clampInt(n: number, min: number, max: number): number {
   return Math.max(min, Math.min(max, Math.round(n)));
+}
+
+type LintSeverity = "error" | "warning";
+type LintMode = "tsc" | "eslint" | "command";
+
+interface LintDiagnostic {
+  file: string;
+  line: number;
+  column: number;
+  severity: LintSeverity;
+  code: string;
+  message: string;
+  source: LintMode;
+}
+
+interface LintEnvelope {
+  mode: LintMode;
+  cwd: string;
+  diagnostics: LintDiagnostic[];
+  summary: {
+    total: number;
+    errors: number;
+    warnings: number;
+    files: number;
+  };
+  raw_excerpt?: string;
+}
+
+function parseLintEnvelope(raw: string): LintEnvelope | null {
+  try {
+    const parsed = JSON.parse(raw) as Partial<LintEnvelope>;
+    if (!parsed || typeof parsed !== "object") return null;
+    if (!Array.isArray(parsed.diagnostics) || !parsed.summary || typeof parsed.mode !== "string") return null;
+    return parsed as LintEnvelope;
+  } catch {
+    return null;
+  }
+}
+
+function normalizeFilePathForCompare(p: string): string {
+  return p.replace(/\\/g, "/").toLowerCase();
 }
 
 function resolveIntentConfidenceThreshold(): number {
@@ -398,9 +440,17 @@ function lexicalJaccard(a: string, b: string): number {
   return union > 0 ? inter / union : 0;
 }
 
-function hasUsefulRecallPayload(output: string, seed: string, minOverlap: number): boolean {
+function hasUsefulRecallPayload(
+  output: string,
+  seed: string,
+  minOverlap: number,
+  opts?: { identityLike?: boolean }
+): boolean {
   const t = output.trim();
   if (!t || /\(no .*matches\)|^\(no matches\)$/im.test(t)) return false;
+  // Identity recall: skip Jaccard entirely. "Trai Darlington" has zero word overlap
+  // with "do you know my name?" — the name IS the useful payload.
+  if (opts?.identityLike) return true;
   if (!seed.trim()) return true;
   const overlap = lexicalJaccard(t.slice(0, 2500), seed.slice(0, 500));
   return overlap >= minOverlap;
@@ -685,6 +735,10 @@ export class AgentHarness {
 
   /** Paths successfully read_file'd this send (working state). */
   private filesReadThisTurn: string[] = [];
+  /** Count repeated full read_file calls per path in this send. */
+  private readFilePathCountsThisTurn = new Map<string, number>();
+  /** One-shot nudge when large read_file output is truncated/distilled. */
+  private largeReadPivotNudgeThisSend = false;
   /** Last few tool outcome one-liners for working state. */
   private recentToolOutcomeLines: string[] = [];
   private proactiveCompressedThisSend = false;
@@ -731,6 +785,10 @@ export class AgentHarness {
   private webSearchQueriesThisTurn: string[] = [];
   /** Near-duplicate failed search intents for one-shot retry discipline. */
   private failedSearchIntentCounts = new Map<string, number>();
+  /** Successful edit/write targets in this send, used for lint self-heal scoping. */
+  private changedFilesThisTurn = new Set<string>();
+  /** Related files observed from lint diagnostics in this send. */
+  private lintRelatedFilesThisTurn = new Set<string>();
 
   /** Active persona. Set via setPersona(); defaults to config.persona or unnamed default. */
   private currentPersona?: PersonaConfig;
@@ -770,6 +828,187 @@ export class AgentHarness {
       used.has("vault_search") ||
       used.has("vault_read")
     );
+  }
+
+  private rememberChangedPathFromToolCall(toolName: string, argsJson: string, ok: boolean): void {
+    if (!ok) return;
+    const editTools = new Set([
+      "write_file",
+      "patch_file",
+      "apply_diff",
+      "write_file_if_changed",
+      "search_replace_file",
+      "move_file",
+      "copy_file",
+      "copy_tree",
+      "multi_file_apply",
+      "refactor_plan_apply",
+    ]);
+    if (!editTools.has(toolName)) return;
+    try {
+      const args = JSON.parse(argsJson) as Record<string, unknown>;
+      const candidates: string[] = [];
+      for (const key of ["path", "to", "target", "target_path", "dest", "destination"]) {
+        const v = args[key];
+        if (typeof v === "string" && v.trim().length > 0) candidates.push(v.trim());
+      }
+      const arr = args["paths"];
+      if (Array.isArray(arr)) {
+        for (const it of arr) {
+          if (typeof it === "string" && it.trim().length > 0) candidates.push(it.trim());
+        }
+      }
+      for (const c of candidates) this.changedFilesThisTurn.add(c);
+    } catch {
+      /* ignore malformed args json */
+    }
+  }
+
+  private resolveSelfHealMode(): LintMode {
+    const raw = (process.env["AGENT_SELF_HEAL_LINT_MODE"] ?? "tsc").toLowerCase();
+    if (raw === "eslint" || raw === "command") return raw;
+    return "tsc";
+  }
+
+  private resolveSelfHealChangedFirstScope(): string[] {
+    const files = [...this.changedFilesThisTurn];
+    if (files.length === 0) return ["."];
+    return files.slice(0, 40);
+  }
+
+  private resolveSelfHealExpandedScope(changedScope: string[], diag: LintEnvelope): string[] {
+    const changed = new Set(changedScope.map(normalizeFilePathForCompare));
+    const all = new Set(changedScope);
+    for (const d of diag.diagnostics) {
+      if (typeof d.file === "string" && d.file.trim().length > 0) {
+        all.add(d.file.trim());
+        this.lintRelatedFilesThisTurn.add(d.file.trim());
+      }
+    }
+    for (const f of this.lintRelatedFilesThisTurn) all.add(f);
+    const ranked = [...all].sort((a, b) => {
+      const aChanged = changed.has(normalizeFilePathForCompare(a));
+      const bChanged = changed.has(normalizeFilePathForCompare(b));
+      if (aChanged !== bChanged) return aChanged ? -1 : 1;
+      return a.localeCompare(b);
+    });
+    return ranked.slice(0, 80);
+  }
+
+  private sortDiagnosticsForRepair(diag: LintEnvelope): LintDiagnostic[] {
+    return [...diag.diagnostics].sort((a, b) => {
+      const aSyntax = /parse|syntax|unexpected|token|ts1\d{3}/i.test(`${a.code} ${a.message}`);
+      const bSyntax = /parse|syntax|unexpected|token|ts1\d{3}/i.test(`${b.code} ${b.message}`);
+      if (aSyntax !== bSyntax) return aSyntax ? -1 : 1;
+      if (a.severity !== b.severity) return a.severity === "error" ? -1 : 1;
+      return `${a.file}:${a.line}:${a.column}`.localeCompare(`${b.file}:${b.line}:${b.column}`);
+    });
+  }
+
+  private async runLintSelfHealIfNeeded(): Promise<void> {
+    if (process.env["AGENT_SELF_HEAL_LINT"] !== "1") return;
+    if (this.agentDepth > 0) return;
+    if (!this.registry.has("run_lint")) return;
+    const changedFirstScope = this.resolveSelfHealChangedFirstScope();
+    if (changedFirstScope.length === 0) return;
+    const maxPasses = Math.max(
+      1,
+      Math.min(8, parseInt(process.env["AGENT_SELF_HEAL_MAX_PASSES"] ?? "4", 10) || 4)
+    );
+    const stopOnNoProgress = process.env["AGENT_SELF_HEAL_STOP_ON_NO_PROGRESS"] !== "0";
+    const repoWide = process.env["AGENT_SELF_HEAL_REPO_WIDE"] === "1";
+    const mode = this.resolveSelfHealMode();
+    const cwd = ".";
+    let scope = [...changedFirstScope];
+    let previousErrors = Number.POSITIVE_INFINITY;
+    let noProgress = 0;
+    let lastDiagCount = 0;
+
+    for (let pass = 1; pass <= maxPasses; pass++) {
+      const lintArgs: Record<string, unknown> = { cwd, mode, format: "structured" };
+      if (mode === "eslint") lintArgs["eslint_paths"] = scope;
+      const lintRes = await this.dispatcher.directCall("run_lint", lintArgs);
+      const body = lintRes.ok ? lintRes.output : lintRes.error;
+      const parsed = parseLintEnvelope(body);
+      if (!parsed) {
+        this.emitter.emit("lint_heal_result", {
+          status: "escalated",
+          passes: pass,
+          remainingDiagnostics: 0,
+          reason: "run_lint did not return structured diagnostics",
+        });
+        return;
+      }
+      const sorted = this.sortDiagnosticsForRepair(parsed);
+      const summary = parsed.summary;
+      lastDiagCount = summary.total;
+      this.emitter.emit("lint_heal_pass", {
+        pass,
+        maxPasses,
+        scope: scope.slice(0, 20),
+        mode,
+        diagnosticsTotal: summary.total,
+        errors: summary.errors,
+        warnings: summary.warnings,
+        changedFirst: pass === 1,
+      });
+      if (summary.errors === 0) {
+        this.emitter.emit("lint_heal_result", {
+          status: "success",
+          passes: pass,
+          remainingDiagnostics: summary.total,
+          reason: "no error-severity diagnostics remain",
+        });
+        return;
+      }
+      if (summary.errors >= previousErrors) noProgress++;
+      else noProgress = 0;
+      previousErrors = summary.errors;
+      if (stopOnNoProgress && noProgress >= 2) {
+        this.context.appendMessage({
+          role: "user",
+          content:
+            "[SELF-HEAL ESCALATION] Lint diagnostics are not improving after repeated passes. " +
+            "Summarize blockers with exact file:line references and propose a safer fix plan.",
+        });
+        this.emitter.emit("lint_heal_result", {
+          status: "escalated",
+          passes: pass,
+          remainingDiagnostics: summary.total,
+          reason: "no progress across two passes",
+        });
+        return;
+      }
+      const top = sorted.slice(0, 24);
+      const lines = top
+        .map((d) => `${d.file}:${d.line}:${d.column} [${d.severity}] ${d.code} ${d.message}`)
+        .join("\n");
+      this.context.appendMessage({
+        role: "user",
+        content:
+          "[SELF-HEAL LINT PASS] Fix the following diagnostics now using minimal targeted edits. " +
+          "Prioritize syntax/parser/type errors before style warnings.\n" +
+          `Pass ${pass}/${maxPasses}, scope: ${scope.join(", ")}\n` +
+          lines,
+      });
+      if (pass === 1) {
+        scope = this.resolveSelfHealExpandedScope(changedFirstScope, parsed);
+      } else if (repoWide && pass >= 2) {
+        scope = ["."];
+      }
+    }
+    this.context.appendMessage({
+      role: "user",
+      content:
+        "[SELF-HEAL ESCALATION] Lint self-heal pass budget exhausted. " +
+        "Provide unresolved diagnostics with file:line and ask for user direction if risky refactor is required.",
+    });
+    this.emitter.emit("lint_heal_result", {
+      status: "escalated",
+      passes: maxPasses,
+      remainingDiagnostics: lastDiagCount,
+      reason: "pass budget exhausted",
+    });
   }
 
   private checkContractAndCommitments(
@@ -1313,6 +1552,8 @@ export class AgentHarness {
     this.lastParallelToolBatchSize = 0;
     this.sendStartTime = Date.now();
     this.filesReadThisTurn = [];
+    this.readFilePathCountsThisTurn = new Map();
+    this.largeReadPivotNudgeThisSend = false;
     this.recentToolOutcomeLines = [];
     this.proactiveCompressedThisSend = false;
     this.criticConsumedThisSend = false;
@@ -1341,6 +1582,8 @@ export class AgentHarness {
     this.vaultMetrics = { reads: 0, searches: 0, writes: 0, skippedWrites: 0 };
     this.webSearchQueriesThisTurn = [];
     this.failedSearchIntentCounts = new Map();
+    this.changedFilesThisTurn = new Set();
+    this.lintRelatedFilesThisTurn = new Set();
     this.turnInference = null;
     await this.maybeHandleRuntimePreferenceIntent(userMessage);
     try {
@@ -1350,6 +1593,9 @@ export class AgentHarness {
         intent: "knowledge",
         stancePrompt: false,
         overInferenceRisk: false,
+        identityQuery: isIdentityRecallLikePrompt(userMessage),
+        deckIntent: false,
+        freshnessSensitive: false,
         confidence: 0.5,
         source: "fallback_regex",
         reason: "inference_exception_fallback",
@@ -1426,31 +1672,31 @@ export class AgentHarness {
           buildToolCapabilityManifest(this.registry),
       });
 
-      // Hard send timeout — enforces AGENT_SEND_TIMEOUT_MS as an actual abort,
-      // not just a metric. Protects against infinite hangs on huge completions.
-      const sendTimeoutMs = Math.max(
-        30_000,
-        parseInt(process.env["AGENT_SEND_TIMEOUT_MS"] ?? "600000", 10) || 600_000
-      );
-      let sendTimeoutId: ReturnType<typeof setTimeout> | undefined;
-      const sendTimeoutPromise = new Promise<never>((_, reject) => {
-        sendTimeoutId = setTimeout(
-          () =>
-            reject(
-              new Error(
-                `Send timeout after ${Math.round(sendTimeoutMs / 1000)}s. ` +
-                  "The model may be generating too much content in a single completion. " +
-                  "For large file generation (>200 lines), use multiple write_file calls in sections, " +
-                  "or use run_shell with a heredoc to write content incrementally."
-              )
-            ),
-          sendTimeoutMs
-        );
-      });
-      try {
-        await Promise.race([this.runReActLoop(), sendTimeoutPromise]);
-      } finally {
-        clearTimeout(sendTimeoutId);
+      // Send timeout is opt-in. By default we do not hard-abort long generations.
+      // Set AGENT_SEND_TIMEOUT_MS to a positive value to enforce a wall-clock abort.
+      const sendTimeoutRaw = parseInt(process.env["AGENT_SEND_TIMEOUT_MS"] ?? "0", 10) || 0;
+      const sendTimeoutMs = sendTimeoutRaw > 0 ? Math.max(30_000, sendTimeoutRaw) : 0;
+      if (sendTimeoutMs > 0) {
+        let sendTimeoutId: ReturnType<typeof setTimeout> | undefined;
+        const sendTimeoutPromise = new Promise<never>((_, reject) => {
+          sendTimeoutId = setTimeout(
+            () =>
+              reject(
+                new Error(
+                  `Send timeout after ${Math.round(sendTimeoutMs / 1000)}s. ` +
+                    "For large file generation, prefer sectioned write_file calls or run_shell with a heredoc."
+                )
+              ),
+            sendTimeoutMs
+          );
+        });
+        try {
+          await Promise.race([this.runReActLoop(), sendTimeoutPromise]);
+        } finally {
+          clearTimeout(sendTimeoutId);
+        }
+      } else {
+        await this.runReActLoop();
       }
 
       // Episodic recipe recording (#7 AMA-Bench): persist successful patterns
@@ -1537,7 +1783,9 @@ export class AgentHarness {
       childRegistry.register(tool);
     }
 
-    childRegistry.copyLazyPolicyFromParent(this.registry);
+    // NOTE: copyLazyPolicyFromParent is called AFTER onChildCreated below.
+    // It must run after all tools are registered so harness-scoped tools
+    // (spawn_agent, check_context, etc.) are included in the seeded active set.
 
     const personaMsg = this.context.getEffectiveInception()[0]!;
     const coreRaw = this.config.context.inceptionMessages[1];
@@ -1589,9 +1837,16 @@ export class AgentHarness {
       this.onChildCreated?.(childHarness);
     }
 
+    // Seed child active set AFTER onChildCreated so harness-scoped tools
+    // (spawn_agent, wait_for_agents, check_context, …) are included.
+    childRegistry.copyLazyPolicyFromParent(this.registry);
+
     const dyn =
       this.config.context.protocolDynamicBuilder?.(childHarness.registry.getActiveToolNames()) ??
       "";
+    const customSystemMsg: Message[] = childConfig.systemPrompt?.trim()
+      ? [{ role: "system" as const, content: childConfig.systemPrompt.trim() }]
+      : [];
     childHarness.getContext().setInceptionOverride([
       personaMsg,
       {
@@ -1599,6 +1854,7 @@ export class AgentHarness {
         content: coreStr + (dyn.trim() ? `\n\n${dyn.trim()}` : ""),
       },
       ...subtaskTail,
+      ...customSystemMsg,
     ]);
 
     // ── Register in orchestrator ────────────────────────────────────────────
@@ -1637,7 +1893,7 @@ export class AgentHarness {
         }, timeoutMs);
 
         childHarness
-          .send(childConfig.goal)
+          .send(childConfig.userPrompt?.trim() ?? childConfig.goal)
           .then(() => {
             clearTimeout(timeoutId);
             const output = childHarness.getLastAssistantMessage();
@@ -1955,7 +2211,7 @@ export class AgentHarness {
 
     const recallEvery = parseInt(process.env["AGENT_RECALL_EVERY_N"] ?? "2", 10);
     const intent = this.turnInference?.intent ?? "knowledge";
-    const memoryPolicy = resolveMemoryPolicy(intent);
+    const memoryPolicy = resolveMemoryPolicy(intent, { userMessage: this.lastUserMessage });
     const inferenceThreshold = resolveIntentConfidenceThreshold();
     if (this.agentDepth === 0) {
       this.emitter.emit("memory_retrieval_policy", {
@@ -1972,10 +2228,12 @@ export class AgentHarness {
         fallbackReason: this.turnInference?.fallbackReason,
       });
     }
-    if (
+    const round0PrimeEnabled = process.env["AGENT_MEMORY_PRIME_ROUND0"] !== "0";
+    const shouldPrimeThisRound =
       recallEvery > 0 &&
-      round > 0 &&
-      round % recallEvery === 0 &&
+      ((round > 0 && round % recallEvery === 0) || (round === 0 && round0PrimeEnabled));
+    if (
+      shouldPrimeThisRound &&
       this.agentDepth === 0 &&
       memoryPolicy.allowAutoRecall &&
       (this.registry.has("recall_relevant") || this.registry.has("memory_query"))
@@ -1985,7 +2243,18 @@ export class AgentHarness {
         const rw = this.recallRewriteThisSend;
         const sub =
           rw?.subQueries?.filter((q) => q.trim().length >= 4) ?? [];
-        const queries = sub.length > 0 ? sub : seed.length >= 8 ? [seed] : [];
+        const identityLike =
+          this.turnInference?.identityQuery ?? isIdentityRecallLikePrompt(this.lastUserMessage);
+        // Identity queries get purpose-built BM25 seeds first — the raw question
+        // ("do you know my name?") has zero lexical overlap with stored name facts.
+        const queries =
+          sub.length > 0
+            ? sub
+            : identityLike
+            ? ["user name", "what should i call user", "identity", "preferred name"]
+            : seed.length >= 8
+            ? [seed]
+            : [];
         if (queries.length > 0) {
           const k = Math.min(
             8,
@@ -2048,11 +2317,41 @@ export class AgentHarness {
             r.ok &&
             typeof r.output === "string" &&
             r.output.trim().length > 20 &&
-            hasUsefulRecallPayload(r.output, seed, memoryPolicy.minQueryOverlap ?? 0.05)
+            hasUsefulRecallPayload(r.output, seed, memoryPolicy.minQueryOverlap ?? 0.05, {
+              identityLike,
+            })
           ) {
             this.context.appendMessage({
               role: "user",
               content: `[Relevant memory — mid-turn recall]\n${r.output.slice(0, 3500)}`,
+            });
+          }
+        }
+
+        // For identity-like queries (name/who am I), BM25 IDF collapses for "user"
+        // because it appears in hundreds of note keys. Bypass BM25 with direct exact
+        // key lookups for known name-bearing keys.
+        if (identityLike && this.registry.has("memory_query")) {
+          const nameKeys = [
+            "entity:user_name",
+            "entity:user_full_name",
+            "entity:preferred_name",
+            "fact:user_name",
+            "fact:preferred_name",
+          ];
+          const nameHits: string[] = [];
+          for (const nameKey of nameKeys) {
+            try {
+              const nr = await this.dispatcher.directCall("memory_query", { mode: "exact", key: nameKey });
+              if (nr.ok && typeof nr.output === "string" && nr.output.trim().length > 10) {
+                nameHits.push(nr.output.trim());
+              }
+            } catch { /* optional */ }
+          }
+          if (nameHits.length > 0) {
+            this.context.appendMessage({
+              role: "user",
+              content: `[Identity recall — stored name]\n${nameHits.join("\n")}`,
             });
           }
         }
@@ -2312,6 +2611,7 @@ export class AgentHarness {
       for (let i = 0; i < toolCalls.length; i++) {
         const tc = toolCalls[i]!;
         const r = results[i]!;
+        this.rememberChangedPathFromToolCall(tc.name, tc.argsJson, r.ok);
         const line = `${tc.name}:${r.ok ? "ok" : "fail"}`;
         this.recentToolOutcomeLines.push(line.slice(0, 160));
         if (this.recentToolOutcomeLines.length > 3) this.recentToolOutcomeLines.shift();
@@ -2321,6 +2621,21 @@ export class AgentHarness {
             if (a.path) {
               this.filesReadThisTurn.push(a.path);
               if (this.filesReadThisTurn.length > 24) this.filesReadThisTurn.shift();
+              const key = a.path.replace(/\\/g, "/").toLowerCase();
+              const nextCount = (this.readFilePathCountsThisTurn.get(key) ?? 0) + 1;
+              this.readFilePathCountsThisTurn.set(key, nextCount);
+              if (nextCount === 2) {
+                const ext = key.split(".").pop() ?? "";
+                const browserRelevant = ["html", "htm", "js", "jsx", "ts", "tsx", "css"].includes(ext);
+                this.context.appendMessage({
+                  role: "user",
+                  content:
+                    "[SYSTEM NOTE] Repeated full read_file on the same path detected. Avoid looping on full-file reads. " +
+                    "Use targeted checks instead: read_file_chunked for large files, file_metadata/workspace_snapshot for integrity, " +
+                    "run_lint/run_tests for static verification, and browser_open/browser_act(include_console=true) for browser runtime errors " +
+                    (browserRelevant ? "on this frontend file." : "when reviewing web behavior."),
+                });
+              }
             }
           } catch {
             /* ignore */
@@ -2544,6 +2859,20 @@ export class AgentHarness {
           tool_call_id: tc.id,
           content,
         });
+        if (
+          tc.name === "read_file" &&
+          !this.largeReadPivotNudgeThisSend &&
+          /…\s*\d+\s+more\s+lines/i.test(content)
+        ) {
+          this.largeReadPivotNudgeThisSend = true;
+          this.context.appendMessage({
+            role: "user",
+            content:
+              "[SYSTEM NOTE] Large file read was truncated/distilled. Do NOT call full read_file again on the same path. " +
+              "Switch to targeted access: read_file_chunked, read_file with offset/limit, or file_metadata for integrity checks; " +
+              "then run verification tools (run_lint/run_tests/browser_open include_console=true) as appropriate.",
+          });
+        }
       }
 
       await this.context.elideStaleToolResults();
@@ -2620,6 +2949,8 @@ export class AgentHarness {
           }
         }
       }
+
+      await this.runLintSelfHealIfNeeded();
 
       await this.runReActLoop(round + 1);
     } else {
@@ -2745,7 +3076,7 @@ export class AgentHarness {
       }
 
       if (
-        isDeckIntentPrompt(this.lastUserMessage) &&
+        (this.turnInference?.deckIntent ?? isDeckIntentPrompt(this.lastUserMessage)) &&
         !this.toolsUsedThisTurn.includes("doc_render_pptx") &&
         !this.finalizeDeckPipelineNudgeThisSend
       ) {
@@ -2829,7 +3160,9 @@ export class AgentHarness {
       }
 
       const liveNowClaimed = hasLiveNowClaims(assistantText);
-      const recencyRequired = isFreshnessSensitivePrompt(this.lastUserMessage) || liveNowClaimed;
+      const recencyRequired =
+        (this.turnInference?.freshnessSensitive ?? isFreshnessSensitivePrompt(this.lastUserMessage)) ||
+        liveNowClaimed;
       if (recencyRequired) {
         const evidenceBlob = this.evidenceLog.map((e) => e.excerpt).join("\n");
         const weatherFresh = hasWeatherFreshEvidence(`${assistantText}\n${evidenceBlob}`);

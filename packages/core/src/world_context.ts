@@ -1067,7 +1067,7 @@ export async function buildWorldContextMessage(options?: WorldContextOptions): P
 
   lines.push(`Shell:      ${shell}  —  ${getShellNote(shell)}`);
   lines.push(`CWD:        ${cwd}`);
-  lines.push(`User:       ${user} @ ${host}  →  ${home}`);
+  lines.push(`OS account: ${user} @ ${host}  →  ${home}  (system username — not necessarily the user's preferred name; check memory for actual name)`);
   lines.push(`Runtime:    Node.js ${process.version}`);
   const configuredModel = process.env["AGENT_MODEL"]?.trim() || "openrouter/owl-alpha";
   const configuredBaseURL =

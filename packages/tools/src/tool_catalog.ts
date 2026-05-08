@@ -168,6 +168,11 @@ export const CORE_ALWAYS_TOOLS_BASE: readonly string[] = [
   "ask_user",
   "list_tool_families",
   "activate_tool_family",
+  // Web tools are read-only and needed in nearly every general task — always on.
+  "web_search",
+  "web_fetch",
+  "web_research",
+  "weather_lookup",
 ];
 
 /** Env-selected always-loaded profile used when AGENT_TOOL_LAZY=1. */

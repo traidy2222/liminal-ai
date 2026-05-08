@@ -92,6 +92,12 @@ Verification: `npm run typecheck`, `npm run test --workspace=@liminal/core`, and
 | `AGENT_SEND_TIMEOUT_MS` | `600000` | Wall-clock cap for one full `send()` / ReAct run |
 | `AGENT_SESSION_JSONL=1` | off | Append-only event trace → `.agent_sessions/<taskId>.jsonl` |
 | `AGENT_TOOL_BODY_ELIDE=1` | off | Replace huge tool results with artifact pointers |
+| `AGENT_SELF_HEAL_LINT=1` | off | Run bounded post-edit lint self-heal loop in `AgentHarness` |
+| `AGENT_SELF_HEAL_MAX_PASSES` | `4` | Max diagnose→fix→verify passes per send |
+| `AGENT_SELF_HEAL_REPO_WIDE=1` | off | Allow scope escalation to repo-wide lint after changed/related passes |
+| `AGENT_SELF_HEAL_STOP_ON_NO_PROGRESS=1` | on | Escalate after two non-improving passes |
+| `AGENT_SELF_HEAL_LINT_MODE` | `tsc` | Self-heal lint mode (`tsc` \| `eslint` \| `command`) |
+| `AGENT_LINT_ALLOWED_COMMANDS` | empty | Comma-separated allowlist for `run_lint` command mode |
 
 ### Retry & rate limit
 
@@ -345,6 +351,8 @@ Full pipeline for PPTX, DOCX, and PDF generation via an internal IR (DocumentIR)
 #### System prompt
 
 `systemPrompt.ts` exports `PROTOCOL_CORE` + `buildProtocolDynamicSuffix(toolNames)` — the single authoritative system prompt shared by TUI, web, and eval. Child agents receive a smaller suffix scoped to their tool set.
+
+Self-healing lint runtime: when `AGENT_SELF_HEAL_LINT=1`, `AgentHarness` tracks successful edit tools (`write_file`, `patch_file`, `apply_diff`, and advanced file edit tools), runs `run_lint` in structured mode with changed-first scope, expands to related diagnostic files, prioritizes syntax/type errors first, and emits `lint_heal_pass` / `lint_heal_result` telemetry for observability.
 
 ---
 

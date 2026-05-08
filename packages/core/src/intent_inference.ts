@@ -16,6 +16,12 @@ export interface TurnInferenceResult {
   intent: TurnIntentClass;
   stancePrompt: boolean;
   overInferenceRisk: boolean;
+  /** User is asking about their name / who they are / what to call them. */
+  identityQuery: boolean;
+  /** User wants a presentation, slide deck, or similar visual document. */
+  deckIntent: boolean;
+  /** User needs current, live, or recent information. */
+  freshnessSensitive: boolean;
   confidence: number;
   source: "llm" | "fallback_regex";
   reason: string;
@@ -62,9 +68,21 @@ function isUserStancePromptFallback(text: string): boolean {
 
 function isIdentityRecallPrompt(text: string): boolean {
   const t = text.toLowerCase();
-  return /\b(my real name|my name|what'?s my name|what is my name|do you know my name|who am i|what should you call me|call me)\b/.test(
+  return /\b(my real name|my name|what'?s my name|what is my name|do you know my name|who am i|what should you call me|call me|address me|my first name|my full name|have you stored my name|remember my name|know my name)\b/.test(
     t
   );
+}
+
+function isDeckIntentFallback(text: string): boolean {
+  return /\b(deck|powerpoint|pptx|ppx|slides|slide deck|presentation|keynote|slideshow|slide show)\b/i.test(text);
+}
+
+function isFreshnessSensitiveFallback(text: string): boolean {
+  return /\b(latest|current|today|recent|update|version|release|changelog|what'?s new|state of|newest|up.?to.?date|right now|live|happening now|at the moment|cutting.?edge)\b/i.test(text);
+}
+
+export function isIdentityRecallLikePrompt(text: string): boolean {
+  return isIdentityRecallPrompt(text);
 }
 
 function parseIntent(value: unknown): TurnIntentClass | null {
@@ -90,18 +108,23 @@ export async function inferTurnInference(
   model: string,
   userMessage: string
 ): Promise<TurnInferenceResult> {
-  const identityRecall = isIdentityRecallPrompt(userMessage);
   const fallbackIntent = classifyTurnIntentFallback(userMessage);
   const fallbackStance = isUserStancePromptFallback(userMessage);
-  const fallbackOverInference = false;
+  const fallbackIdentityQuery = isIdentityRecallPrompt(userMessage);
+  const fallbackDeckIntent = isDeckIntentFallback(userMessage);
+  const fallbackFreshnessSensitive = isFreshnessSensitiveFallback(userMessage);
+
   if (!isIntentInferenceEnabled()) {
     return {
-      intent: identityRecall ? "knowledge" : fallbackIntent,
-      stancePrompt: identityRecall ? false : fallbackStance,
-      overInferenceRisk: identityRecall ? false : fallbackOverInference,
+      intent: fallbackIdentityQuery ? "knowledge" : fallbackIntent,
+      stancePrompt: fallbackIdentityQuery ? false : fallbackStance,
+      overInferenceRisk: false,
+      identityQuery: fallbackIdentityQuery,
+      deckIntent: fallbackDeckIntent,
+      freshnessSensitive: fallbackFreshnessSensitive,
       confidence: 0.51,
       source: "fallback_regex",
-      reason: identityRecall ? "identity_recall_fast_path" : "intent_inference_disabled",
+      reason: fallbackIdentityQuery ? "identity_recall_fast_path" : "intent_inference_disabled",
       fallbackReason: "AGENT_INTENT_INFERENCE=0",
     };
   }
@@ -113,22 +136,29 @@ export async function inferTurnInference(
         role: "system",
         content:
           "Classify the user message for harness policy. " +
-          "Return JSON only: {intent:'introspection|knowledge|coding|execution',stancePrompt:boolean,overInferenceRisk:boolean,confidence:number,reason:string}. " +
-          "Use overInferenceRisk=true when the request invites speculative user-belief attribution.",
+          "Return JSON only: {intent:'introspection|knowledge|coding|execution',stancePrompt:boolean,overInferenceRisk:boolean," +
+          "identityQuery:boolean,deckIntent:boolean,freshnessSensitive:boolean,confidence:number,reason:string}. " +
+          "identityQuery=true when user asks about their name, what to call them, who they are, or whether you know/remember their name. " +
+          "deckIntent=true when user wants a presentation, slides, deck, slide show, or similar visual document. " +
+          "freshnessSensitive=true when user needs current, live, recent, or up-to-date information. " +
+          "overInferenceRisk=true when the request invites speculative user-belief attribution.",
       },
       { role: "user", content: userMessage.slice(0, 2000) },
     ],
-    maxTokens: 220,
+    maxTokens: 260,
     temperature: 0,
   });
   if (!jr.ok || typeof jr.parsed !== "object" || jr.parsed == null) {
     return {
-      intent: identityRecall ? "knowledge" : fallbackIntent,
-      stancePrompt: identityRecall ? false : fallbackStance,
-      overInferenceRisk: identityRecall ? false : fallbackOverInference,
+      intent: fallbackIdentityQuery ? "knowledge" : fallbackIntent,
+      stancePrompt: fallbackIdentityQuery ? false : fallbackStance,
+      overInferenceRisk: false,
+      identityQuery: fallbackIdentityQuery,
+      deckIntent: fallbackDeckIntent,
+      freshnessSensitive: fallbackFreshnessSensitive,
       confidence: 0.5,
       source: "fallback_regex",
-      reason: identityRecall ? "identity_recall_fast_path" : "llm_inference_failed",
+      reason: fallbackIdentityQuery ? "identity_recall_fast_path" : "llm_inference_failed",
       fallbackReason: jr.ok ? "invalid_json_shape" : jr.error,
     };
   }
@@ -138,40 +168,53 @@ export async function inferTurnInference(
   const confidenceRaw = Number(parsed["confidence"] ?? 0.5);
   const confidence = Number.isFinite(confidenceRaw) ? Math.max(0, Math.min(1, confidenceRaw)) : 0.5;
   const threshold = resolveIntentConfidenceThreshold();
+
+  // LLM-derived semantic flags — OR with regex fallback so neither path loses signal
+  const identityQuery = Boolean(parsed["identityQuery"]) || fallbackIdentityQuery;
+  const deckIntent = Boolean(parsed["deckIntent"]) || fallbackDeckIntent;
+  const freshnessSensitive = Boolean(parsed["freshnessSensitive"]) || fallbackFreshnessSensitive;
+
   if (confidence < threshold) {
     return {
-      intent: identityRecall ? "knowledge" : fallbackIntent,
-      stancePrompt: identityRecall ? false : fallbackStance,
-      overInferenceRisk: identityRecall ? false : fallbackOverInference,
+      intent: identityQuery ? "knowledge" : fallbackIntent,
+      stancePrompt: identityQuery ? false : fallbackStance,
+      overInferenceRisk: false,
+      identityQuery,
+      deckIntent,
+      freshnessSensitive,
       confidence,
       source: "fallback_regex",
-      reason: identityRecall ? "identity_recall_fast_path" : "llm_confidence_below_threshold",
+      reason: identityQuery ? "identity_recall_fast_path" : "llm_confidence_below_threshold",
       fallbackReason: `confidence=${confidence.toFixed(2)} < threshold=${threshold.toFixed(2)}`,
     };
   }
 
-  if (identityRecall) {
-    return {
-      intent: "knowledge",
-      stancePrompt: false,
-      overInferenceRisk: false,
-      confidence,
-      source: "llm",
-      reason: "identity_recall_fast_path",
-    };
-  }
-
   return {
-    intent,
-    stancePrompt: Boolean(parsed["stancePrompt"]),
-    overInferenceRisk: Boolean(parsed["overInferenceRisk"]),
+    intent: identityQuery ? "knowledge" : intent,
+    stancePrompt: identityQuery ? false : Boolean(parsed["stancePrompt"]),
+    overInferenceRisk: identityQuery ? false : Boolean(parsed["overInferenceRisk"]),
+    identityQuery,
+    deckIntent,
+    freshnessSensitive,
     confidence,
     source: "llm",
     reason: typeof parsed["reason"] === "string" ? parsed["reason"].slice(0, 200) : "classified_by_llm",
   };
 }
 
-export function resolveMemoryPolicy(intent: TurnIntentClass): MemoryPolicy {
+export function resolveMemoryPolicy(
+  intent: TurnIntentClass,
+  opts?: { userMessage?: string }
+): MemoryPolicy {
+  if (opts?.userMessage && isIdentityRecallPrompt(opts.userMessage)) {
+    return {
+      allowAutoRecall: true,
+      scope: "both",
+      maxAgeDays: 3650,
+      minConfidence: 0.1,
+      minQueryOverlap: 0.02,
+    };
+  }
   const debiasOn = process.env["AGENT_MEMORY_DEBIAS"] !== "0";
   if (!debiasOn) {
     return { allowAutoRecall: true, scope: "both" };
@@ -184,7 +227,8 @@ export function resolveMemoryPolicy(intent: TurnIntentClass): MemoryPolicy {
     0,
     Math.min(1, Number(process.env["AGENT_MEMORY_MIN_CONFIDENCE_DEFAULT"] ?? "0.35") || 0.35)
   );
-  const strictIntro = process.env["AGENT_MEMORY_INTROSPECTION_STRICT"] !== "0";
+  // Default is memory-first for introspection too; opt into stricter filtering explicitly.
+  const strictIntro = process.env["AGENT_MEMORY_INTROSPECTION_STRICT"] === "1";
   if (intent === "introspection" && strictIntro) {
     return {
       allowAutoRecall: false,

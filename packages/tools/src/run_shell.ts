@@ -46,7 +46,18 @@ export function createRunShellTool(emitter: AgentEmitter) {
       return new Promise<import("@liminal/core").ToolResult>((resolve) => {
         const isWindows = process.platform === "win32";
         const shellArgs = isWindows
-          ? ["cmd.exe", ["/c", command]]
+          ? [
+              "powershell.exe",
+              [
+                "-NoLogo",
+                "-NoProfile",
+                "-NonInteractive",
+                "-ExecutionPolicy",
+                "Bypass",
+                "-Command",
+                command,
+              ],
+            ]
           : ["/bin/sh", ["-c", command]];
 
         const child = spawn(shellArgs[0] as string, shellArgs[1] as string[], {

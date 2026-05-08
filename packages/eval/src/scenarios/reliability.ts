@@ -669,6 +669,98 @@ export const marketsNoFabricatedLiveScenario: Scenario = {
   ],
 };
 
+export const lintSelfHealPassTelemetryScenario: Scenario = {
+  name: "lint-self-heal-pass-telemetry",
+  userMessage: "Create a tiny TS change, run lint self-heal, and finish.",
+  maxRounds: 10,
+  timeoutMs: 60_000,
+  env: {
+    AGENT_SELF_HEAL_LINT: "1",
+    AGENT_SELF_HEAL_MAX_PASSES: "2",
+  },
+  mocks: [
+    {
+      toolName: "run_lint",
+      handler: async () => ({
+        ok: true,
+        output: JSON.stringify(
+          {
+            mode: "tsc",
+            cwd: ".",
+            diagnostics: [],
+            summary: { total: 0, errors: 0, warnings: 0, files: 0 },
+          },
+          null,
+          2
+        ),
+      }),
+    },
+  ],
+  assertions: [
+    { name: "turn_end fires", check: (trace) => traceHasTurnEnd(trace) },
+    {
+      name: "lint_heal_result emitted",
+      check: (trace) => trace.some((e) => e.type === "lint_heal_result"),
+    },
+  ],
+};
+
+export const lintSelfHealEscalationScenario: Scenario = {
+  name: "lint-self-heal-escalation",
+  userMessage: "Fix files and self-heal lint until blocked.",
+  maxRounds: 12,
+  timeoutMs: 75_000,
+  env: {
+    AGENT_SELF_HEAL_LINT: "1",
+    AGENT_SELF_HEAL_MAX_PASSES: "2",
+    AGENT_SELF_HEAL_STOP_ON_NO_PROGRESS: "1",
+  },
+  mocks: [
+    {
+      toolName: "run_lint",
+      handler: async () => ({
+        ok: true,
+        output: JSON.stringify(
+          {
+            mode: "tsc",
+            cwd: ".",
+            diagnostics: [
+              {
+                file: "src/app.ts",
+                line: 4,
+                column: 2,
+                severity: "error",
+                code: "TS1005",
+                message: "';' expected.",
+                source: "tsc",
+              },
+            ],
+            summary: { total: 1, errors: 1, warnings: 0, files: 1 },
+          },
+          null,
+          2
+        ),
+      }),
+    },
+  ],
+  assertions: [
+    { name: "turn_end fires", check: (trace) => traceHasTurnEnd(trace) },
+    {
+      name: "lint pass telemetry emitted",
+      check: (trace) => trace.some((e) => e.type === "lint_heal_pass"),
+    },
+    {
+      name: "lint escalation emitted",
+      check: (trace) =>
+        trace.some(
+          (e) =>
+            e.type === "lint_heal_result" &&
+            ((e.payload as { status?: string }).status === "escalated")
+        ),
+    },
+  ],
+};
+
 export const RELIABILITY_SCENARIOS = [
   turnEndHarnessMetricsPresent,
   passAt2Consistency,
@@ -689,4 +781,6 @@ export const RELIABILITY_SCENARIOS = [
   visionSidecarFallbackScenario,
   marketsQuoteStaleDisclosureScenario,
   marketsNoFabricatedLiveScenario,
+  lintSelfHealPassTelemetryScenario,
+  lintSelfHealEscalationScenario,
 ];

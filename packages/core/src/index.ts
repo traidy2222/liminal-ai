@@ -65,6 +65,9 @@ export type {
   DocChunk,
   DocStyleGenome,
   DocQualityReport,
+  SlideLayout,
+  BulletEmphasis,
+  BulletItem,
 } from "./types.js";
 export { getFastModelSlug, completeChatJson } from "./router.js";
 export type { JsonCompletionResult } from "./router.js";

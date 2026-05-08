@@ -58,37 +58,61 @@ export function createOrchestrationTools(harness: AgentHarness) {
     name: "spawn_agent",
     description:
       "WHAT: Spawn an independent sub-agent to work on a focused subtask. Returns immediately with a task_id.\n" +
-      "WHEN: The subtask is fully independent (touches different files/URLs than your current work), well-defined, and benefits from running in parallel.\n" +
-      "NOT WHEN: The subtask needs results from work you haven't finished yet — finish first, then spawn.\n" +
-      "NOT WHEN: Both you and the subtask would write the same file — that will cause a lock conflict.\n" +
-      "NOT WHEN: The task is trivial (1-2 tool calls) — just do it inline.\n" +
-      "ARGS: goal — clear single-sentence task description; tools — optional array of tool names to restrict the sub-agent to; " +
-      "context — optional extra context string; max_rounds — optional round limit; timeout_ms — optional ms timeout (default: 300000).",
+      "WHEN: Subtask is fully independent, well-defined, and benefits from parallelism.\n" +
+      "NOT WHEN: Subtask needs results you haven't produced yet. NOT WHEN: Both you and the sub-agent write the same file. NOT WHEN: Task is trivial (1-2 tool calls) — just do it inline.\n\n" +
+      "── PROMPT DESIGN (required for quality results) ───────────────────────────\n" +
+      "Always write system_prompt AND user_prompt. A bare goal= produces a cold, generic sub-agent with no role, no output contract, and no format expectations.\n\n" +
+      "system_prompt — sets the sub-agent's role, constraints, and output format. Write it as if briefing a specialist:\n" +
+      "  • What role is this agent playing? (research analyst, code author, critic, data extractor…)\n" +
+      "  • What are the constraints? (primary sources only, no hallucination, TypeScript only…)\n" +
+      "  • What must the output look like? (JSON schema, markdown sections, single verdict line…)\n" +
+      "  Example: \"You are a primary-source research analyst. Only cite .gov, official org, or top-tier press sources.\n" +
+      "           Output ONLY valid JSON: {summary: string, key_stats: string[], sources: string[]}.\"\n\n" +
+      "user_prompt — the full detailed task message. Include: what to research/build/check, scope boundaries,\n" +
+      "  required depth, any relevant context from your current work. More detail = better output.\n" +
+      "  Example: \"Research Southeast Asia EV adoption 2023-2025. Cover: market size (USD), YoY growth,\n" +
+      "           top 3 markets by volume, government subsidy programs active in 2024-2025, infrastructure\n" +
+      "           deployment metrics. Focus on official and primary sources. Do not speculate.\"\n\n" +
+      "goal — short label for orchestrator tracking only (shown in list_agents). Does NOT drive the sub-agent if user_prompt is set.\n\n" +
+      "── TOOL INHERITANCE ────────────────────────────────────────────────────────\n" +
+      "Sub-agents inherit ALL currently active tools by default. Only pass tools= to deliberately restrict\n" +
+      "(e.g. critic agents that must be read-only). Web/shell/document families active here are available inside the sub-agent.",
     requiresApproval: false,
     parameters: {
       type: "object",
       properties: {
-        goal: { type: "string", description: "Clear, single-sentence task description" },
+        goal: {
+          type: "string",
+          description: "Short label for orchestrator tracking (shown in list_agents). Used as the task message only if user_prompt is omitted.",
+        },
+        system_prompt: {
+          type: "string",
+          description: "Custom system message appended after the protocol core. Sets the sub-agent's role, constraints, and output format. STRONGLY RECOMMENDED — sub-agents without this produce generic results.",
+        },
+        user_prompt: {
+          type: "string",
+          description: "Full detailed task message sent as the sub-agent's first turn. Replace goal with a proper task description here. If omitted, goal is used instead.",
+        },
         tools: {
           type: "array",
           items: { type: "string" },
-          description: "Restrict sub-agent to these tool names (optional; omit for all tools)",
+          description: "Optional allowlist — restricts sub-agent to only these tools. Omit to inherit all currently active tools.",
         },
         context: {
           type: "string",
-          description: "Extra context to inject into the sub-agent's system prompt",
+          description: "Extra context injected into the sub-agent's [SUBTASK CONTEXT] block (in addition to auto-injected parent memory).",
         },
         max_rounds: {
           type: "number",
-          description: "Max ReAct rounds for this sub-agent",
+          description: "Max ReAct rounds for this sub-agent.",
         },
         timeout_ms: {
           type: "number",
-          description: "Timeout in ms before auto-cancellation (default: 300000)",
+          description: "Timeout in ms before auto-cancellation (default: 300000).",
         },
         contract: {
           type: "string",
-          description: "Optional execution contract summary the child must follow",
+          description: "Optional execution contract the sub-agent must follow (scope, success criteria, rollback plan).",
         },
       },
       required: ["goal"],
@@ -126,12 +150,18 @@ export function createOrchestrationTools(harness: AgentHarness) {
           ? `[EXECUTION CONTRACT]\n${contract.slice(0, 3000)}`
           : "";
         const mergedContext = [memoryContext, contractContext].filter(Boolean).join("\n\n");
+
+        const systemPrompt = typeof args["system_prompt"] === "string" ? args["system_prompt"].trim() : undefined;
+        const userPrompt = typeof args["user_prompt"] === "string" ? args["user_prompt"].trim() : undefined;
+
         const { taskId } = harness.forkChild({
           goal: args["goal"] as string,
           toolNames: args["tools"] as string[] | undefined,
           additionalContext: mergedContext || undefined,
           maxRounds: args["max_rounds"] as number | undefined,
           timeoutMs: args["timeout_ms"] as number | undefined,
+          systemPrompt,
+          userPrompt,
         });
         return {
           ok: true,

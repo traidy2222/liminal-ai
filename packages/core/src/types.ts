@@ -234,6 +234,17 @@ export interface ChildAgentConfig {
   maxRounds?: number;
   /** Timeout in ms before the child is auto-cancelled. Default: 300_000 (5 min). */
   timeoutMs?: number;
+  /**
+   * Custom system prompt appended to the protocol core as a final system message.
+   * Sets the sub-agent's role, constraints, and output format contract.
+   * Example: "You are a primary-source research analyst. Return JSON with keys: summary, key_stats[], sources[]."
+   */
+  systemPrompt?: string;
+  /**
+   * Task message sent as the first user turn (replaces goal as the send() message if provided).
+   * Write this as the full detailed task — what to do, what to include, what to avoid.
+   */
+  userPrompt?: string;
 }
 
 export interface SubtaskResult {
@@ -273,9 +284,27 @@ export interface TurnEndHarnessMetrics {
 
 // ─── Document generation IR ───────────────────────────────────────────────────
 
+export type SlideLayout =
+  | "hero"
+  | "kpi"
+  | "comparison"
+  | "timeline"
+  | "risk"
+  | "quote"
+  | "image_full"
+  | "summary"
+  | "default";
+
+export type BulletEmphasis = "accent" | "muted" | "heading" | "normal";
+
+/** A bullet is either a plain string (normal emphasis) or an object with explicit emphasis. */
+export type BulletItem = string | { text: string; emphasis?: BulletEmphasis };
+
 export interface DocStyleGenome {
   id: string;
   seed: string;
+  /** Human-readable style summary generated from style_intent (e.g. "dark navy + gold accent"). */
+  description?: string;
   palette: { background: string; foreground: string; accent: string; muted: string };
   typography: { heading: string; body: string; mono: string; scale: number[] };
   spacing: { base: number; rhythm: number };
@@ -286,7 +315,14 @@ export interface DocChunk {
   id: string;
   title: string;
   intent: "slide" | "section";
-  bullets: string[];
+  /** Explicit slide layout. If absent the renderer falls back to keyword inference. */
+  layout?: SlideLayout;
+  bullets: BulletItem[];
+  /** Visible footer text strip on the slide (≤200 chars, 12pt muted). Replaces narrative for on-slide use. */
+  slide_body?: string;
+  /** Presenter notes — exported to the notes pane only, never visible on slide. */
+  speaker_notes?: string;
+  /** @deprecated Use slide_body for on-slide text and speaker_notes for presenter notes. */
   narrative?: string;
   audienceIntent?: string;
   narrativeBeat?: string;
@@ -310,6 +346,8 @@ export interface DocumentIR {
   narrativeBeats?: string[];
   chunks: DocChunk[];
   style: DocStyleGenome;
+  /** Natural-language style summary shown to model during chunk composition. */
+  styleDescription?: string;
   claimSources?: Array<{
     claim: string;
     sources: string[];
@@ -548,6 +586,22 @@ export interface AgentEventMap {
     passed: boolean;
     reason: string;
     attemptedRecovery: boolean;
+  };
+  lint_heal_pass: {
+    pass: number;
+    maxPasses: number;
+    scope: string[];
+    mode: "tsc" | "eslint" | "command";
+    diagnosticsTotal: number;
+    errors: number;
+    warnings: number;
+    changedFirst: boolean;
+  };
+  lint_heal_result: {
+    status: "success" | "escalated" | "skipped";
+    passes: number;
+    remainingDiagnostics: number;
+    reason: string;
   };
 }
 
