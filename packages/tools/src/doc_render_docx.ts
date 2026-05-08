@@ -35,15 +35,17 @@ export const docRenderDocxTool = defineTool({
         })
       );
       for (const b of chunk.bullets) {
+        const text = typeof b === "string" ? b : b.text;
         children.push(
           new Paragraph({
-            text: b,
+            text,
             bullet: { level: 0 },
           })
         );
       }
-      if (chunk.narrative?.trim()) {
-        children.push(new Paragraph({ text: chunk.narrative }));
+      const visibleText = chunk.slide_body?.trim() || chunk.narrative?.trim();
+      if (visibleText) {
+        children.push(new Paragraph({ text: visibleText }));
       }
       chunk.status = "rendered";
     }

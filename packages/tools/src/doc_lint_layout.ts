@@ -1,5 +1,5 @@
 import { defineTool } from "./helpers.js";
-import { lintChunk, loadIR, saveIR, ensureRunState, setRunStage } from "./doc_engine.js";
+import { lintChunk, loadIR, saveIR, ensureRunState, setRunStage, getBulletText } from "./doc_engine.js";
 
 export const docLintLayoutTool = defineTool({
   name: "doc_lint_layout",
@@ -27,7 +27,7 @@ export const docLintLayoutTool = defineTool({
     const results: Array<{ chunk_id: string; passed: boolean; issues: string[] }> = [];
     for (const c of targets) {
       const issues = lintChunk(c);
-      if (requireCitations && /%|\bdata\b|\bstat\b|\brevenue\b|\bgrowth\b/i.test(`${c.title} ${c.bullets.join(" ")}`)) {
+      if (requireCitations && /%|\bdata\b|\bstat\b|\brevenue\b|\bgrowth\b/i.test(`${c.title} ${c.bullets.map(getBulletText).join(" ")}`)) {
         const claimLinked = (doc.claimSources ?? []).some((x) => x.sources.length > 0);
         if (!claimLinked) issues.push("citation_missing_for_factual_content");
       }

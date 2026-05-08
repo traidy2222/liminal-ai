@@ -1,6 +1,11 @@
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import { resolveWorkspaceRoot, type DocumentIR, type DocChunk, type DocQualityReport } from "@liminal/core";
+import { resolveWorkspaceRoot, type DocumentIR, type DocChunk, type DocQualityReport, type DocStyleGenome, type BulletItem } from "@liminal/core";
+
+/** Extract display text from a BulletItem (plain string or emphasis object). */
+export function getBulletText(b: BulletItem): string {
+  return typeof b === "string" ? b : b.text;
+}
 
 export type DocFormat = "pptx" | "docx" | "pdf";
 
@@ -62,7 +67,7 @@ function pickFromSeed<T>(seed: string, salt: string, options: T[]): T {
   return options[h % options.length]!;
 }
 
-export function synthesizeStyleGenome(seed: string) {
+export function synthesizeStyleGenome(seed: string): DocStyleGenome {
   const theme = pickFromSeed(seed, "theme", [
     { background: "#0B1020", foreground: "#F3F5FA", accent: "#7C8CFF", muted: "#AAB4D6" },
     { background: "#111827", foreground: "#F9FAFB", accent: "#22D3EE", muted: "#9CA3AF" },
@@ -76,6 +81,7 @@ export function synthesizeStyleGenome(seed: string) {
   return {
     id: `style-${slug(seed)}-${Date.now().toString(36)}`,
     seed,
+    description: undefined,
     palette: {
       background: theme.background,
       foreground: theme.foreground,
@@ -156,12 +162,13 @@ export async function loadIR(docId: string): Promise<DocumentIR> {
 export function lintChunk(chunk: DocChunk): string[] {
   const issues: string[] = [];
   if (!chunk.title.trim()) issues.push("missing_title");
-  if (chunk.bullets.length === 0 && !chunk.narrative?.trim()) issues.push("missing_content");
+  if (chunk.bullets.length === 0 && !chunk.narrative?.trim() && !chunk.slide_body?.trim()) issues.push("missing_content");
   if (chunk.bullets.length > 8) issues.push("bullet_overflow");
   for (const b of chunk.bullets) {
-    if (b.length > 140) issues.push("bullet_too_long");
+    if (getBulletText(b).length > 140) issues.push("bullet_too_long");
   }
   if (chunk.narrative && chunk.narrative.length > 500) issues.push("narrative_too_long");
+  if (chunk.slide_body && chunk.slide_body.length > 300) issues.push("slide_body_too_long");
   return [...new Set(issues)];
 }
 
@@ -172,11 +179,22 @@ export function repairChunk(chunk: DocChunk): { chunk: DocChunk; action: string 
     next.bullets = next.bullets.slice(0, 8);
     action = "trimmed_bullets_to_8";
   }
-  next.bullets = next.bullets.map((b) => (b.length > 140 ? `${b.slice(0, 137)}...` : b));
-  if (action === "none" && next.bullets.some((b) => b.endsWith("..."))) {
+  next.bullets = next.bullets.map((b) => {
+    const text = getBulletText(b);
+    if (text.length > 140) {
+      const trimmed = `${text.slice(0, 137)}...`;
+      return typeof b === "string" ? trimmed : { ...b, text: trimmed };
+    }
+    return b;
+  });
+  if (action === "none" && next.bullets.some((b) => getBulletText(b).endsWith("..."))) {
     action = "trimmed_long_bullets";
   }
-  if (next.bullets.length === 0 && !next.narrative?.trim()) {
+  if (next.slide_body && next.slide_body.length > 300) {
+    next.slide_body = `${next.slide_body.slice(0, 297)}...`;
+    if (action === "none") action = "trimmed_slide_body";
+  }
+  if (next.bullets.length === 0 && !next.narrative?.trim() && !next.slide_body?.trim()) {
     next.bullets = ["Add supporting point", "Add evidence", "Add next action"];
     action = "seeded_default_bullets";
   }
