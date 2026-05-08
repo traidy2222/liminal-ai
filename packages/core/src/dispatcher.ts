@@ -171,12 +171,20 @@ export class ToolDispatcher {
 
     if (!this.registry.isActive(name)) {
       const fam = this.registry.getSuggestedFamilyForTool(name);
+      const famSummary = this.registry
+        .getActiveFamilySummary(8)
+        .map((f) => `${f.family}(${f.active}/${f.total})`)
+        .join(", ");
       const hint = fam
         ? `Call activate_tool_family with { "family": "${fam}" } (or list_tool_families).`
         : `Call list_tool_families, then activate_tool_family.`;
       return {
         ok: false,
-        error: `Tool "${name}" is not loaded for this session. ${hint}`,
+        error:
+          `Tool "${name}" is not loaded for this session. ${hint}\n` +
+          `[TOOL_RECOVERY] lazy=${this.registry.isLazyToolLoading() ? "on" : "off"}; ` +
+          `suggested_family=${fam ?? "unknown"}; ` +
+          `active_families=${famSummary || "(none)"}`,
       };
     }
 

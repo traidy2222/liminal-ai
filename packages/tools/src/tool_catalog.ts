@@ -7,8 +7,22 @@ import type { ToolRegistry } from "@liminal/core";
 /** Tool families: id -> description + member tool names. */
 export const TOOL_FAMILIES: Record<string, { description: string; tools: readonly string[] }> = {
   files_edit: {
-    description: "Write and patch files (destructive edits).",
-    tools: ["write_file", "patch_file", "apply_diff"],
+    description: "Write/patch/refactor files and directory trees.",
+    tools: [
+      "write_file",
+      "write_file_if_changed",
+      "patch_file",
+      "apply_diff",
+      "search_replace_file",
+      "move_file",
+      "copy_file",
+      "copy_tree",
+      "mkdir_p",
+      "edit_preview",
+      "multi_file_apply",
+      "refactor_plan_apply",
+      "path_guard",
+    ],
   },
   shell: {
     description: "Shell and background processes.",
@@ -93,7 +107,7 @@ export const TOOL_FAMILIES: Record<string, { description: string; tools: readonl
   },
   navigation: {
     description: "Repository tree orientation.",
-    tools: ["repo_map"],
+    tools: ["repo_map", "workspace_snapshot", "file_metadata", "read_file_chunked", "read_file_with_imports"],
   },
   harness_ui: {
     description: "Persona, images, structured extraction (requires harness).",
@@ -174,6 +188,7 @@ const MAX_AUTONOMY_TOOLS = [
   ...TOOL_FAMILIES.navigation.tools,
   ...TOOL_FAMILIES.markets.tools,
   ...TOOL_FAMILIES.code_intel.tools.filter((t) => ["ast_grep", "symbol_index", "find_references"].includes(t)),
+  ...TOOL_FAMILIES.files_edit.tools,
   ...TOOL_FAMILIES.document.tools,
   ...TOOL_FAMILIES.vision.tools,
 ];

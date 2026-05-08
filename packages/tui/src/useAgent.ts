@@ -17,7 +17,7 @@ function isDiagnosticsEnabled(): boolean {
 
 function sanitizeDeltaText(text: string): string {
   return text
-    .replace(/\uFFFD/g, "")
+    .replace(/�/g, "")
     .replace(/\s*⚙\s*/g, " ")
     .replace(/\r/g, "");
 }
@@ -32,6 +32,8 @@ export type MessageEntry =
       name: string;
       argsJson: string;
       status: "streaming" | "pending_approval" | "running" | "done" | "error";
+      startedAt: number;
+      endedAt?: number;
     }
   | { kind: "tool_result"; callId: string; output: string; ok: boolean }
   | { kind: "ask_user"; prompt: string }
@@ -41,7 +43,7 @@ export type MessageEntry =
   | {
       kind: "subtask";
       taskId: string;
-      parentTaskId: string;   // (#7 — enables agent tree reconstruction)
+      parentTaskId: string;
       goal: string;
       depth: number;
       status: "running" | "done" | "error" | "cancelled";
@@ -56,7 +58,6 @@ export interface AgentState {
   pendingAskUser: AgentEventMap["ask_user"] | null;
   error: string | null;
   busy: boolean;
-  /** Display name of the currently active persona. Default: "Liminal". */
   personaName: string;
 }
 
@@ -83,7 +84,7 @@ type Action =
   | { type: "error"; msg: string }
   | { type: "think"; content: string }
   | { type: "plan"; steps: string[] }
-  | { type: "plan_step_done"; stepIndex: number }  // (#8 structured plan)
+  | { type: "plan_step_done"; stepIndex: number }
   | { type: "subtask_spawned"; taskId: string; parentTaskId: string; goal: string; depth: number }
   | { type: "subtask_complete"; taskId: string; ok: boolean }
   | { type: "subtask_output"; taskId: string; delta: string }
@@ -167,18 +168,16 @@ function reducer(state: AgentState, action: Action): AgentState {
         pendingAskUser: null,
       };
 
-    case "tool_start":
-      if (!isDiagnosticsEnabled()) return state;
+    case "tool_start": {
       // Suppress generic card for think/plan — they render as special entries
       if (action.name === "think" || action.name === "plan") return state;
-      // Also suppress cards for orchestration tools — they appear as subtask entries
+      // Suppress orchestration tools — they appear as subtask entries
       if (
         action.name === "spawn_agent" ||
         action.name === "wait_for_agents" ||
         action.name === "cancel_agent" ||
         action.name === "list_agents"
-      )
-        return state;
+      ) return state;
       return {
         ...state,
         messages: stripTrailingProviderRetry(state.messages).concat([
@@ -188,12 +187,13 @@ function reducer(state: AgentState, action: Action): AgentState {
             name: action.name,
             argsJson: "",
             status: "streaming",
+            startedAt: Date.now(),
           },
         ]),
       };
+    }
 
     case "tool_delta": {
-      if (!isDiagnosticsEnabled()) return state;
       const messages = state.messages.map((m) =>
         m.kind === "tool_call" && m.callId === action.callId
           ? { ...m, argsJson: m.argsJson + action.argsDelta }
@@ -211,30 +211,42 @@ function reducer(state: AgentState, action: Action): AgentState {
       return { ...state, messages, pendingApproval: action.payload };
     }
 
-    case "approval_resolved":
-      return { ...state, pendingApproval: null };
+    case "approval_resolved": {
+      // Transition the pending tool_call to "running" once the user approves
+      const pendingCallId = state.pendingApproval?.callId;
+      const messages = pendingCallId
+        ? state.messages.map((m) =>
+            m.kind === "tool_call" && m.callId === pendingCallId
+              ? { ...m, status: "running" as const }
+              : m
+          )
+        : state.messages;
+      return { ...state, pendingApproval: null, messages };
+    }
 
     case "tool_result": {
-      if (!isDiagnosticsEnabled()) return state;
       const baseMessages = stripTrailingProviderRetry(state.messages);
-      return { ...state, messages: baseMessages
-        .map((m) =>
-          m.kind === "tool_call" && m.callId === action.callId
-            ? { ...m, status: action.ok ? ("done" as const) : ("error" as const) }
-            : m
-        )
-        .concat([
-          {
-            kind: "tool_result",
-            callId: action.callId,
-            output: action.output,
-            ok: action.ok,
-          },
-        ]) };
+      const endedAt = Date.now();
+      return {
+        ...state,
+        messages: baseMessages
+          .map((m) =>
+            m.kind === "tool_call" && m.callId === action.callId
+              ? { ...m, status: action.ok ? ("done" as const) : ("error" as const), endedAt }
+              : m
+          )
+          .concat([
+            {
+              kind: "tool_result",
+              callId: action.callId,
+              output: action.output,
+              ok: action.ok,
+            },
+          ]),
+      };
     }
 
     case "plan_step_done": {
-      // Find the last plan entry and mark the step as done (#8)
       const msgs = [...state.messages];
       for (let i = msgs.length - 1; i >= 0; i--) {
         const m = msgs[i]!;
@@ -266,21 +278,20 @@ function reducer(state: AgentState, action: Action): AgentState {
       return { ...state, error: action.msg, busy: false, messages: stripTrailingProviderRetry(state.messages) };
 
     case "think":
-      if (isAgentUiQuiet() || !isDiagnosticsEnabled()) return state;
+      if (isAgentUiQuiet()) return state;
       return {
         ...state,
         messages: [...state.messages, { kind: "think", content: action.content }],
       };
 
     case "plan":
-      if (isAgentUiQuiet() || !isDiagnosticsEnabled()) return state;
+      if (isAgentUiQuiet()) return state;
       return {
         ...state,
         messages: [...state.messages, { kind: "plan", steps: action.steps }],
       };
 
     case "subtask_spawned":
-      if (!isDiagnosticsEnabled()) return state;
       return {
         ...state,
         messages: [
@@ -288,7 +299,7 @@ function reducer(state: AgentState, action: Action): AgentState {
           {
             kind: "subtask",
             taskId: action.taskId,
-            parentTaskId: action.parentTaskId,   // (#7)
+            parentTaskId: action.parentTaskId,
             goal: action.goal,
             depth: action.depth,
             status: "running",
@@ -298,7 +309,6 @@ function reducer(state: AgentState, action: Action): AgentState {
       };
 
     case "subtask_output":
-      if (!isDiagnosticsEnabled()) return state;
       return {
         ...state,
         messages: state.messages.map((m) =>
@@ -309,7 +319,6 @@ function reducer(state: AgentState, action: Action): AgentState {
       };
 
     case "context_compressed":
-      if (!isDiagnosticsEnabled()) return state;
       return {
         ...state,
         messages: [
@@ -324,7 +333,6 @@ function reducer(state: AgentState, action: Action): AgentState {
       };
 
     case "subtask_complete":
-      if (!isDiagnosticsEnabled()) return state;
       return {
         ...state,
         messages: state.messages.map((m) =>
@@ -412,7 +420,6 @@ export function useAgent(harness: AgentHarness) {
     });
     emitter.on("tool_result", ({ callId, name, args, result }) => {
       flushNow();
-      // Intercept think/plan — render as special entries
       if (name === "think" && result.ok) {
         dispatch({ type: "think", content: args["content"] as string });
         return;
@@ -423,12 +430,10 @@ export function useAgent(harness: AgentHarness) {
         if (steps && steps.length > 0) {
           dispatch({ type: "plan", steps });
         } else if (stepIndex !== undefined) {
-          // (#8) Mark step as done in the last plan entry
           dispatch({ type: "plan_step_done", stepIndex });
         }
         return;
       }
-      // Suppress results for orchestration tools (they show as subtask cards)
       if (
         name === "spawn_agent" ||
         name === "wait_for_agents" ||
@@ -470,7 +475,6 @@ export function useAgent(harness: AgentHarness) {
       flushNow();
       dispatch({ type: "subtask_output", taskId, delta });
     });
-    // New events (#7 Structured Event Log)
     emitter.on("context_compressed", ({ beforeFraction, afterFraction, roundsCompressed }) =>
       dispatch({
         type: "context_compressed",
@@ -479,7 +483,6 @@ export function useAgent(harness: AgentHarness) {
         rounds: roundsCompressed,
       })
     );
-    // Persona change — update header badge
     emitter.on("persona_changed", ({ name }) =>
       dispatch({ type: "persona_changed", name })
     );
@@ -554,8 +557,6 @@ export function useAgent(harness: AgentHarness) {
         delta: `\n[prefs] rejected ${p.summary} (${p.reason})\n`,
       })
     );
-    // ask_user_answered and approval_decision are informational — no UI state change needed
-    // but they fire into the event stream for telemetry consumers
     return () => {
       if (flushTimerRef.current) clearTimeout(flushTimerRef.current);
       flushNow();

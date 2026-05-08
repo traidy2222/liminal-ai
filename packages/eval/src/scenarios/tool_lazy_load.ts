@@ -178,6 +178,77 @@ export const TOOL_LAZY_LOAD_SCENARIOS: Scenario[] = [
     ],
   },
   {
+    name: "tool-lazy-load-files-edit-activation-hint",
+    env: { AGENT_TOOL_LAZY: "1", AGENT_ALWAYS_TOOLS_PROFILE: "balanced" },
+    userMessage:
+      "Call write_file once with path ./tmp-note.txt and content hello world. " +
+      "Do not activate any tool family first. Then explain blocker in one sentence.",
+    maxRounds: 16,
+    timeoutMs: 90_000,
+    assertions: [
+      {
+        name: "write_file initially blocked while inactive",
+        check: (trace) => {
+          const results = traceToolResults(trace, "write_file");
+          const first = results.at(0);
+          if (!first || first.result.ok) return false;
+          return /not loaded for this session/i.test(first.result.error);
+        },
+      },
+      {
+        name: "error suggests files_edit and includes recovery metadata",
+        check: (trace) => {
+          const results = traceToolResults(trace, "write_file");
+          const first = results.at(0);
+          if (!first || first.result.ok) return false;
+          return (
+            /activate_tool_family/i.test(first.result.error) &&
+            /files_edit/i.test(first.result.error) &&
+            /\[TOOL_RECOVERY\]/i.test(first.result.error) &&
+            /active_families=/i.test(first.result.error)
+          );
+        },
+      },
+      {
+        name: "turn_end fires",
+        check: (trace) => traceHasTurnEnd(trace),
+      },
+    ],
+  },
+  {
+    name: "tool-lazy-load-read-file-chunked-activation-hint",
+    env: { AGENT_TOOL_LAZY: "1", AGENT_ALWAYS_TOOLS_PROFILE: "balanced" },
+    userMessage:
+      "Call read_file_chunked once for path ./README.md with chunk_index 0. " +
+      "Do not activate any family first. Then explain blocker in one sentence.",
+    maxRounds: 16,
+    timeoutMs: 90_000,
+    assertions: [
+      {
+        name: "read_file_chunked initially blocked while inactive",
+        check: (trace) => {
+          const results = traceToolResults(trace, "read_file_chunked");
+          const first = results.at(0);
+          if (!first || first.result.ok) return false;
+          return /not loaded for this session/i.test(first.result.error);
+        },
+      },
+      {
+        name: "error suggests navigation activation",
+        check: (trace) => {
+          const results = traceToolResults(trace, "read_file_chunked");
+          const first = results.at(0);
+          if (!first || first.result.ok) return false;
+          return /activate_tool_family/i.test(first.result.error) && /navigation/i.test(first.result.error);
+        },
+      },
+      {
+        name: "turn_end fires",
+        check: (trace) => traceHasTurnEnd(trace),
+      },
+    ],
+  },
+  {
     name: "tool-lazy-load-markets-activation-hint",
     env: { AGENT_TOOL_LAZY: "1", AGENT_ALWAYS_TOOLS_PROFILE: "balanced" },
     userMessage:

@@ -3,7 +3,7 @@ import type { ImageAttachment } from "./imageAttachments.js";
 
 function sanitizeDeltaText(text: string): string {
   return text
-    .replace(/\uFFFD/g, "")
+    .replace(/�/g, "")
     .replace(/\s*⚙\s*/g, " ")
     .replace(/\r/g, "");
 }
@@ -17,7 +17,9 @@ export type MessageEntry =
       callId: string;
       name: string;
       argsJson: string;
-      status: "streaming" | "pending_approval" | "done" | "error";
+      status: "streaming" | "pending_approval" | "running" | "done" | "error";
+      startedAt: number;
+      endedAt?: number;
     }
   | { kind: "tool_result"; callId: string; output: string; ok: boolean }
   | { kind: "think"; content: string }
@@ -58,7 +60,6 @@ export interface SSEState {
   busy: boolean;
   error: string | null;
   personaName: string;
-  /** From GET /api/config — when `quiet`, trace-channel text is hidden. */
   uiVerbosity: "normal" | "quiet";
 }
 
@@ -193,7 +194,14 @@ function reducer(state: SSEState, action: Action): SSEState {
         ...state,
         messages: [
           ...stripTrailingProviderRetry(state.messages),
-          { kind: "tool_call", callId: action.payload.callId, name, argsJson: "", status: "streaming" },
+          {
+            kind: "tool_call",
+            callId: action.payload.callId,
+            name,
+            argsJson: "",
+            status: "streaming",
+            startedAt: Date.now(),
+          },
         ],
       };
     }
@@ -225,8 +233,18 @@ function reducer(state: SSEState, action: Action): SSEState {
         ),
       };
 
-    case "approval_resolved":
-      return { ...state, pendingApproval: null };
+    case "approval_resolved": {
+      // Transition the approved tool_call from pending_approval → running
+      const pendingCallId = state.pendingApproval?.callId;
+      const messages = pendingCallId
+        ? state.messages.map((m) =>
+            m.kind === "tool_call" && m.callId === pendingCallId
+              ? { ...m, status: "running" as const }
+              : m
+          )
+        : state.messages;
+      return { ...state, pendingApproval: null, messages };
+    }
 
     case "tool_result": {
       const { callId, name, args, ok, output } = action.payload;
@@ -249,12 +267,13 @@ function reducer(state: SSEState, action: Action): SSEState {
       }
       if (ORCH_TOOLS.has(name)) return state;
 
+      const endedAt = Date.now();
       return {
         ...state,
         messages: state.messages
           .map((m) =>
             m.kind === "tool_call" && m.callId === callId
-              ? { ...m, status: ok ? ("done" as const) : ("error" as const) }
+              ? { ...m, status: ok ? ("done" as const) : ("error" as const), endedAt }
               : m
           )
           .concat([{ kind: "tool_result", callId, output, ok }]),
@@ -552,8 +571,8 @@ export function useSSE() {
         body: JSON.stringify({ message: text, attachments: payload.attachments ?? [] }),
       });
       if (!r.ok) {
-        const payload = (await r.json().catch(() => ({}))) as { error?: string };
-        const message = payload.error ?? `Send failed (${r.status})`;
+        const p = (await r.json().catch(() => ({}))) as { error?: string };
+        const message = p.error ?? `Send failed (${r.status})`;
         dispatch({ type: "error", payload: { message } });
         return { ok: false, error: message };
       }

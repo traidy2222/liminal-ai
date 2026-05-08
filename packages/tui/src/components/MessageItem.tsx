@@ -1,34 +1,45 @@
 import React from "react";
 import { Box, Text } from "ink";
 import type { MessageEntry } from "../useAgent.js";
+import { ToolCallCard } from "./ToolCallCard.js";
 import { SubtaskCard } from "./SubtaskCard.js";
 
-const TOOL_STATUS: Record<
-  string,
-  { icon: string; color: "yellow" | "magenta" | "cyan" | "green" | "red" | "white" }
-> = {
-  streaming:        { icon: "…", color: "yellow" },
-  pending_approval: { icon: "⚠", color: "magenta" },
-  running:          { icon: "⟳", color: "cyan" },
-  done:             { icon: "✓", color: "green" },
-  error:            { icon: "✗", color: "red" },
-};
+const MAX_RESULT_LINES = 8;
+const MAX_RESULT_LINE_LEN = 180;
 
-/** Pull the most descriptive single arg to show beside the tool name. */
-function primaryArg(argsJson: string): string {
-  if (!argsJson) return "";
-  try {
-    const a = JSON.parse(argsJson) as Record<string, unknown>;
-    for (const k of ["path", "file_path", "command", "query", "url", "key", "goal", "topic", "pid", "task_id"]) {
-      const v = a[k];
-      if (typeof v === "string" && v) return v.slice(0, 70);
-      if (typeof v === "number") return String(v);
-    }
-    for (const v of Object.values(a)) {
-      if (typeof v === "string" && v) return v.slice(0, 70);
-    }
-  } catch { /* ignore */ }
-  return "";
+function renderToolResult(output: string, ok: boolean, w: number): React.ReactElement {
+  const lines = output.split("\n");
+  const shown = lines.slice(0, MAX_RESULT_LINES);
+  const remaining = lines.length - MAX_RESULT_LINES;
+  const maxLen = Math.max(20, w - 8);
+
+  return (
+    <Box paddingLeft={3} flexDirection="column">
+      {shown.map((line, i) => {
+        const truncated =
+          line.length > maxLen ? line.slice(0, maxLen - 1) + "…" : line;
+        return (
+          <Box key={i}>
+            <Text
+              color={ok ? "gray" : "red"}
+              dimColor={ok}
+              wrap="truncate-end"
+            >
+              {i === 0 ? "└ " : "  "}
+              {truncated || " "}
+            </Text>
+          </Box>
+        );
+      })}
+      {remaining > 0 && (
+        <Box paddingLeft={2}>
+          <Text dimColor color="gray">
+            … {remaining} more line{remaining !== 1 ? "s" : ""}
+          </Text>
+        </Box>
+      )}
+    </Box>
+  );
 }
 
 interface Props {
@@ -66,7 +77,7 @@ export function MessageItem({ entry, width }: Props) {
       );
     }
 
-    /* ── Trace (provider retries, harness lines) ────────── */
+    /* ── Trace (diagnostics only) ───────────────────────── */
     case "trace": {
       if (!entry.text.trim()) return null;
       const t = entry.text.length > 240 ? entry.text.slice(0, 240) + "…" : entry.text;
@@ -92,40 +103,25 @@ export function MessageItem({ entry, width }: Props) {
     }
 
     /* ── Tool call ──────────────────────────────────────── */
-    case "tool_call": {
-      const { icon, color } = TOOL_STATUS[entry.status] ?? { icon: "?", color: "white" as const };
-      const arg = primaryArg(entry.argsJson);
-      const nameAndArg = arg ? `${entry.name} · ${arg}` : entry.name;
-      const maxLabel = Math.max(10, w - 10);
-      const label =
-        nameAndArg.length > maxLabel ? nameAndArg.slice(0, maxLabel - 1) + "…" : nameAndArg;
-
+    case "tool_call":
       return (
-        <Box paddingLeft={2} gap={1} width={w} flexDirection="row">
-          <Text color="yellow">⚙</Text>
-          <Text color="white">{label}</Text>
-          <Text color={color} bold>{icon}</Text>
-          {entry.status === "pending_approval" && (
-            <Text color="magenta"> — press A to approve / R to reject</Text>
-          )}
+        <Box paddingLeft={1} width={w}>
+          <ToolCallCard
+            name={entry.name}
+            argsJson={entry.argsJson}
+            status={entry.status}
+            startedAt={entry.startedAt}
+            endedAt={entry.endedAt}
+          />
         </Box>
       );
-    }
 
     /* ── Tool result ────────────────────────────────────── */
-    case "tool_result": {
-      const raw = entry.output.length > 280 ? entry.output.slice(0, 280) + "…" : entry.output;
-      const oneLiner = raw.replace(/\n/g, " ↩ ");
-      return (
-        <Box paddingLeft={5} width={w}>
-          <Text color={entry.ok ? "gray" : "red"} dimColor={entry.ok} wrap="truncate-end">
-            └─ {oneLiner}
-          </Text>
-        </Box>
-      );
-    }
+    case "tool_result":
+      if (!entry.output.trim()) return null;
+      return renderToolResult(entry.output, entry.ok, w);
 
-    /* ── Ask-user (historical in transcript) ────────────── */
+    /* ── Ask-user (historical) ──────────────────────────── */
     case "ask_user":
       return (
         <Box flexDirection="column" paddingLeft={2} width={w}>
@@ -140,12 +136,13 @@ export function MessageItem({ entry, width }: Props) {
 
     /* ── Think ──────────────────────────────────────────── */
     case "think": {
-      const t = entry.content.length > 500 ? entry.content.slice(0, 500) + "…" : entry.content;
+      const t = entry.content.length > 1200 ? entry.content.slice(0, 1200) + "…" : entry.content;
       return (
-        <Box paddingLeft={2} width={w}>
-          <Text color="magenta" dimColor wrap="wrap">
-            ◈ {t}
-          </Text>
+        <Box paddingLeft={2} flexDirection="column" width={w}>
+          <Text color="magenta" dimColor bold>◈ thinking</Text>
+          <Box paddingLeft={2}>
+            <Text color="magenta" dimColor wrap="wrap">{t}</Text>
+          </Box>
         </Box>
       );
     }
@@ -158,11 +155,11 @@ export function MessageItem({ entry, width }: Props) {
           <Text color="cyan" bold>▸ Plan</Text>
           {entry.steps.map((step, i) => {
             const done = step.startsWith("✓");
+            const text = done ? step.slice(2) : step;
             return (
-              <Box key={i} paddingLeft={2}>
-                <Text color={done ? "green" : "gray"}>
-                  {i + 1}. {step}
-                </Text>
+              <Box key={i} paddingLeft={2} gap={1}>
+                <Text color={done ? "green" : "gray"}>{done ? "✓" : "○"}</Text>
+                <Text color={done ? "green" : "gray"}>{`${i + 1}. ${text}`}</Text>
               </Box>
             );
           })}

@@ -7,6 +7,21 @@ import { TOOL_FAMILIES, summarizeFamilyActivity } from "./tool_catalog.js";
  * Close over the same registry instance used by the harness.
  */
 export function createToolDiscoveryTools(registry: ToolRegistry) {
+  function recommendFamilyFromHint(raw: string): string | null {
+    const hint = raw.trim().toLowerCase();
+    if (!hint) return null;
+    if (/(write|edit|patch|create file|rewrite|modify file)/.test(hint)) return "files_edit";
+    if (/(shell|terminal|command|npm|build|test|install|process)/.test(hint)) return "shell";
+    if (/(git|commit|branch|diff|status|log)/.test(hint)) return "git";
+    if (/(weather|news|search|fetch|research|web)/.test(hint)) return "web";
+    if (/(price|stock|fx|crypto|commodity|market)/.test(hint)) return "markets";
+    if (/(vision|image|screenshot|ocr|diagram)/.test(hint)) return "vision";
+    if (/(memory|recall|remember|vault|obsidian|notes)/.test(hint)) return "memory_advanced";
+    if (/(powerpoint|pptx|ppx|slides|docx|pdf|document)/.test(hint)) return "document";
+    if (/(code|symbol|reference|lint|execute code|ast)/.test(hint)) return "code_intel";
+    return null;
+  }
+
   const listToolFamiliesTool = defineTool({
     name: "list_tool_families",
     description:
@@ -18,12 +33,20 @@ export function createToolDiscoveryTools(registry: ToolRegistry) {
     cacheable: false,
     parameters: {
       type: "object",
-      properties: {},
+      properties: {
+        task_hint: {
+          type: "string",
+          description: "Optional one-line hint about intended next action to suggest a family.",
+          minLength: 0,
+          maxLength: 240,
+        },
+      },
       additionalProperties: false,
     },
-    handler: async () => {
+    handler: async (args) => {
       const active = new Set(registry.getActiveToolNames());
       const families = summarizeFamilyActivity(registry);
+      const taskHint = String(args["task_hint"] ?? "");
       const lines: string[] = [];
       lines.push(`Lazy tool loading: ${registry.isLazyToolLoading() ? "ON" : "OFF"}`);
       lines.push(`Active tool count: ${active.size}`);
@@ -45,6 +68,15 @@ export function createToolDiscoveryTools(registry: ToolRegistry) {
       lines.push("");
       lines.push("Active tools:");
       lines.push([...active].sort().join(", ") || "(none)");
+      const recommendation = recommendFamilyFromHint(taskHint);
+      if (recommendation) {
+        lines.push("");
+        lines.push(`Recommended next family for this task_hint: ${recommendation}`);
+      }
+      lines.push("");
+      lines.push(
+        "Troubleshooting: if a tool says 'not loaded for this session', call list_tool_families({task_hint}) -> activate_tool_family({family}) -> retry."
+      );
       return { ok: true, output: lines.join("\n") };
     },
   });

@@ -55,6 +55,46 @@ function sleep(ms: number) {
   return new Promise<void>((r) => setTimeout(r, ms));
 }
 
+/**
+ * Wraps an async iterable so that each individual chunk must arrive within
+ * `timeoutMs`. Throws STREAM_CHUNK_TIMEOUT if the provider stalls mid-stream.
+ * The finally clause calls iter.return() to release the underlying connection.
+ */
+async function* withChunkTimeout<T>(
+  stream: AsyncIterable<T>,
+  timeoutMs: number
+): AsyncGenerator<T> {
+  const iter = stream[Symbol.asyncIterator]();
+  try {
+    while (true) {
+      let timerId: ReturnType<typeof setTimeout> | undefined;
+      const chunkPromise = iter.next();
+      const timeoutPromise = new Promise<never>((_, reject) => {
+        timerId = setTimeout(
+          () =>
+            reject(
+              new Error(
+                `STREAM_CHUNK_TIMEOUT: No data received for ${Math.round(timeoutMs / 1000)}s — ` +
+                  "provider may be stalled. For very large files (thousands of lines), consider writing in sections to reduce per-completion size."
+              )
+            ),
+          timeoutMs
+        );
+      });
+      let result: IteratorResult<T, unknown>;
+      try {
+        result = await Promise.race([chunkPromise, timeoutPromise]);
+      } finally {
+        clearTimeout(timerId);
+      }
+      if (result.done) break;
+      yield result.value;
+    }
+  } finally {
+    await iter.return?.();
+  }
+}
+
 function resolveApprovalTimeoutMs(config: AgentConfig): number {
   if (config.approvalTimeoutMs != null && Number.isFinite(config.approvalTimeoutMs)) {
     return Math.max(10_000, Math.min(600_000, config.approvalTimeoutMs));
@@ -128,17 +168,71 @@ function hasRuntimePreferenceChange(patch: Partial<RuntimePreferences>): boolean
   );
 }
 
-function buildToolAwarenessSnapshot(registry: ToolRegistry): string {
+function buildToolAwarenessSnapshot(registry: ToolRegistry, recentTools: string[] = []): string {
   const active = registry.getActiveToolNames();
+  const total = registry.getToolNames().length;
+  const inactive = Math.max(0, total - active.length);
   const fam = registry
-    .getActiveFamilySummary(4)
+    .getActiveFamilySummary(24)
     .map((f) => `${f.family}(${f.active}/${f.total})`)
     .join(", ");
-  const tail = active.slice(0, 12).join(", ") || "(none)";
+  const tail = active.slice(0, 16).join(", ") || "(none)";
+  const recent = [...new Set(recentTools)].slice(-12).join(", ") || "(none)";
+  const lazyHint = registry.isLazyToolLoading()
+    ? "REMINDER: when capability is missing, call list_tool_families then activate_tool_family for the nearest family."
+    : "REMINDER: lazy loading off; all registered tools are available.";
   return (
-    `TOOL STATE: lazy=${registry.isLazyToolLoading() ? "on" : "off"}, active_count=${active.length}\n` +
+    `TOOL STATE: lazy=${registry.isLazyToolLoading() ? "on" : "off"}, active_count=${active.length}, inactive_count=${inactive}, registered_total=${total}\n` +
     `ACTIVE FAMILIES: ${fam || "(none)"}\n` +
-    `ACTIVE TOOLS (sample): ${tail}`
+    `ACTIVE TOOLS (sample): ${tail}\n` +
+    `RECENT TOOLS THIS TURN: ${recent}\n` +
+    `${lazyHint}`
+  );
+}
+
+function buildToolCapabilityManifest(registry: ToolRegistry): string {
+  const allTools = registry.getToolNames();
+  const activeSet = new Set(registry.getActiveToolNames());
+  const byFamily = new Map<string, string[]>();
+  const unmapped: string[] = [];
+
+  for (const tool of allTools) {
+    const fam = registry.getSuggestedFamilyForTool(tool);
+    if (!fam) {
+      unmapped.push(tool);
+      continue;
+    }
+    const bucket = byFamily.get(fam) ?? [];
+    bucket.push(tool);
+    byFamily.set(fam, bucket);
+  }
+
+  const famLines = [...byFamily.entries()]
+    .sort(([a], [b]) => (a < b ? -1 : 1))
+    .map(([fam, tools]) => {
+      const sorted = [...tools].sort();
+      const active = sorted.filter((t) => activeSet.has(t));
+      const inactive = sorted.filter((t) => !activeSet.has(t));
+      return (
+        `- ${fam}: active=${active.length}/${sorted.length}\n` +
+        `  tools: ${sorted.join(", ")}\n` +
+        `  inactive_tools: ${inactive.length > 0 ? inactive.join(", ") : "(none)"}`
+      );
+    });
+
+  if (unmapped.length > 0) {
+    famLines.push(
+      `- unmapped: active=${unmapped.filter((t) => activeSet.has(t)).length}/${unmapped.length}\n` +
+      `  tools: ${unmapped.sort().join(", ")}`
+    );
+  }
+
+  return (
+    `TOOL CAPABILITY MANIFEST\n` +
+    `lazy_mode=${registry.isLazyToolLoading() ? "on" : "off"}; ` +
+    `registered_total=${allTools.length}; active_total=${activeSet.size}\n` +
+    `Families and tools:\n${famLines.join("\n")}\n` +
+    `Activation path: call list_tool_families (optionally with task_hint), then activate_tool_family({family}), then retry needed tool.`
   );
 }
 
@@ -449,6 +543,12 @@ const ERROR_TAXONOMY: Array<{
     template: "Re-read the tool description carefully. Check exact types (string vs number vs array). Use think() to construct the correct args.",
   },
   {
+    pattern: /STREAM_CHUNK_TIMEOUT|stream.*stalled|stream.*interrupted/i,
+    category: "STREAM_INTERRUPTED",
+    hint: "The model's output stream stalled mid-completion — provider stopped sending chunks.",
+    template: "For very large file generation (full applications, thousands of lines), break into sections using multiple write_file calls or use run_shell with a heredoc. Files up to ~1000 lines are fine in a single call; beyond that, generation time can exceed provider streaming limits.",
+  },
+  {
     pattern: /timeout|timed out|deadline exceeded/i,
     category: "TIMEOUT",
     hint: "Operation exceeded its time limit.",
@@ -500,7 +600,7 @@ function buildRecoveryHint(errorSummary: string): string {
 function buildAdaptiveHint(toolName: string, failCount: number): string {
   const toolHints: Record<string, string> = {
     read_file: "Use list_dir first to confirm the exact path exists before retrying.",
-    write_file: "Confirm the parent directory exists with list_dir; use absolute paths.",
+    write_file: "Confirm the parent directory exists with list_dir; use absolute paths. For very large files (full applications, >2000 lines), write in sections using multiple write_file calls or use run_shell with a heredoc — provider streaming timeouts can cut off completions that take many minutes to generate.",
     run_shell: "Check cwd and command syntax. For long processes, use run_background instead.",
     run_background: "Ensure the command is valid and cwd exists. Check startup_wait_ms.",
     web_fetch: "Verify the URL is correct with web_search first. Check for auth/redirects.",
@@ -774,6 +874,14 @@ export class AgentHarness {
   /** True while a send() / ReAct loop is in progress. */
   getIsRunning(): boolean {
     return this.running;
+  }
+
+  private refreshToolAwareness(reason?: string): void {
+    if (this.config.workingStateEnabled === false || !this.context.getEpistemicState()) return;
+    const suffix = reason ? `\nAWARENESS_REFRESH_REASON: ${reason}` : "";
+    this.context.patchEpistemicState({
+      harnessNotes: buildToolAwarenessSnapshot(this.registry, this.toolsUsedThisTurn) + suffix,
+    });
   }
 
   /**
@@ -1258,6 +1366,7 @@ export class AgentHarness {
           recallK: b0.recommendedRecallK,
           spareRounds: b0.suggestedMaxExtraRounds,
         },
+        harnessNotes: buildToolAwarenessSnapshot(this.registry, this.toolsUsedThisTurn),
       });
     }
     this.executionState = createDefaultExecutionState(userMessage);
@@ -1309,7 +1418,40 @@ export class AgentHarness {
       }
 
       this.context.append({ role: "user", content: userMessage });
-      await this.runReActLoop();
+      this.context.append({
+        role: "user",
+        content:
+          "[SYSTEM NOTE] Capability awareness preface (non-forcing): use this to know all available families/tools, " +
+          "then choose the minimal family activation only when needed.\n" +
+          buildToolCapabilityManifest(this.registry),
+      });
+
+      // Hard send timeout — enforces AGENT_SEND_TIMEOUT_MS as an actual abort,
+      // not just a metric. Protects against infinite hangs on huge completions.
+      const sendTimeoutMs = Math.max(
+        30_000,
+        parseInt(process.env["AGENT_SEND_TIMEOUT_MS"] ?? "600000", 10) || 600_000
+      );
+      let sendTimeoutId: ReturnType<typeof setTimeout> | undefined;
+      const sendTimeoutPromise = new Promise<never>((_, reject) => {
+        sendTimeoutId = setTimeout(
+          () =>
+            reject(
+              new Error(
+                `Send timeout after ${Math.round(sendTimeoutMs / 1000)}s. ` +
+                  "The model may be generating too much content in a single completion. " +
+                  "For large file generation (>200 lines), use multiple write_file calls in sections, " +
+                  "or use run_shell with a heredoc to write content incrementally."
+              )
+            ),
+          sendTimeoutMs
+        );
+      });
+      try {
+        await Promise.race([this.runReActLoop(), sendTimeoutPromise]);
+      } finally {
+        clearTimeout(sendTimeoutId);
+      }
 
       // Episodic recipe recording (#7 AMA-Bench): persist successful patterns
       // Awaited with error boundary (#2 VIGIL) — no silent swallowing
@@ -1778,11 +1920,7 @@ export class AgentHarness {
     }
 
     this.context.refreshProtocolDynamic(this.registry.getActiveToolNames());
-    if (this.config.workingStateEnabled !== false && this.context.getEpistemicState()) {
-      this.context.patchEpistemicState({
-        harnessNotes: buildToolAwarenessSnapshot(this.registry),
-      });
-    }
+    this.refreshToolAwareness("protocol_dynamic_refresh");
 
     // Context pressure alerts (#9): fire once per threshold per turn
     const snapBefore = this.context.snapshot();
@@ -1942,49 +2080,102 @@ export class AgentHarness {
     const tools = this.registry.toOpenAIFormat();
     const accumulator = new StreamAccumulator();
 
-    const stream = await this.streamWithRetry(messages, tools);
+    const chunkTimeoutMs = Math.max(
+      10_000,
+      parseInt(process.env["AGENT_STREAM_CHUNK_TIMEOUT_MS"] ?? "60000", 10) || 60_000
+    );
+    const maxStreamRetries = Math.max(
+      0,
+      parseInt(process.env["AGENT_STREAM_MAX_RETRIES"] ?? "3", 10) || 3
+    );
 
+    let stream = await this.streamWithRetry(messages, tools);
     let finishReason: string | null = null;
+    let streamAttempt = 0;
 
-    for await (const chunk of stream) {
-      // Check abort between chunks
-      if (this.abortSignal?.aborted) return;
+    streamLoop: while (true) {
+      try {
+        for await (const chunk of withChunkTimeout(stream, chunkTimeoutMs)) {
+          // Check abort between chunks
+          if (this.abortSignal?.aborted) return;
 
-      const parsed = accumulator.processChunk(chunk);
+          const parsed = accumulator.processChunk(chunk);
 
-      if (parsed.textDelta) {
-        if (hasPseudoToolMarkup(parsed.textDelta)) {
-          this.pseudoMarkupSuppressCountThisSend += 1;
-          if (!this.pseudoMarkupSuppressionNotifiedThisSend) {
-            this.pseudoMarkupSuppressionNotifiedThisSend = true;
-            this.emitter.emit("text", {
-              delta:
-                "\n[HARNESS] Suppressing pseudo tool markup from streamed assistant text (aggregating further matches).\n",
-              channel: "trace",
-            });
+          if (parsed.textDelta) {
+            if (hasPseudoToolMarkup(parsed.textDelta)) {
+              this.pseudoMarkupSuppressCountThisSend += 1;
+              if (!this.pseudoMarkupSuppressionNotifiedThisSend) {
+                this.pseudoMarkupSuppressionNotifiedThisSend = true;
+                this.emitter.emit("text", {
+                  delta:
+                    "\n[HARNESS] Suppressing pseudo tool markup from streamed assistant text (aggregating further matches).\n",
+                  channel: "trace",
+                });
+              }
+            } else {
+              this.emitter.emit("text", { delta: parsed.textDelta, channel: "user" });
+            }
           }
-        } else {
-          this.emitter.emit("text", { delta: parsed.textDelta, channel: "user" });
-        }
-      }
 
-      if (parsed.toolCallDelta) {
-        const { index, id, name, argsDelta } = parsed.toolCallDelta;
+          if (parsed.toolCallDelta) {
+            const { index, id, name, argsDelta } = parsed.toolCallDelta;
 
-        if (parsed.isNewTool && id && name) {
-          this.emitter.emit("tool_start", { callId: id, name });
-        }
+            if (parsed.isNewTool && id && name) {
+              this.emitter.emit("tool_start", { callId: id, name });
+            }
 
-        if (argsDelta) {
-          const tc = accumulator.accumulatedToolCalls[index];
-          if (tc) {
-            this.emitter.emit("tool_delta", { callId: tc.id, argsDelta });
+            if (argsDelta) {
+              const tc = accumulator.accumulatedToolCalls[index];
+              if (tc) {
+                this.emitter.emit("tool_delta", { callId: tc.id, argsDelta });
+              }
+            }
+          }
+
+          if (parsed.finishReason) {
+            finishReason = parsed.finishReason;
           }
         }
-      }
+        break streamLoop; // stream completed successfully
+      } catch (streamErr) {
+        // Never retry if the task was externally cancelled
+        if (this.abortSignal?.aborted) return;
 
-      if (parsed.finishReason) {
-        finishReason = parsed.finishReason;
+        const streamErrMsg = describeError(streamErr);
+        const isChunkTimeout = streamErrMsg.includes("STREAM_CHUNK_TIMEOUT");
+        const canRetry =
+          streamAttempt < maxStreamRetries && (isChunkTimeout || isRetryable(streamErr));
+
+        if (!canRetry) throw streamErr;
+
+        streamAttempt++;
+        const hadPartialContent =
+          accumulator.accumulatedText.length > 0 ||
+          accumulator.accumulatedToolCalls.length > 0;
+
+        accumulator.reset();
+        finishReason = null;
+
+        const retryLabel = isChunkTimeout
+          ? `stream stalled (${Math.round(chunkTimeoutMs / 1000)}s without data)`
+          : "stream connection reset";
+
+        if (hadPartialContent && !isUiQuiet()) {
+          this.emitter.emit("text", {
+            delta: `\n\n[⟳ ${retryLabel} — restarting stream (attempt ${streamAttempt}/${maxStreamRetries})…]\n\n`,
+            channel: "user",
+          });
+        }
+
+        this.emitter.emit("provider_retry", {
+          attempt: streamAttempt,
+          maxAttempts: maxStreamRetries + 1,
+          message: retryLabel,
+          backoffMs: Math.min(2000 * streamAttempt, 10_000),
+        });
+
+        await sleep(Math.min(2000 * streamAttempt, 10_000));
+        stream = await this.streamWithRetry(messages, tools);
       }
     }
 
@@ -2115,6 +2306,8 @@ export class AgentHarness {
         this.toolsUsedThisTurn.push(tc.name);
       }
       this.lastParallelToolBatchSize = toolCalls.length;
+      let awarenessNeedsRefresh = false;
+      let awarenessReason = "";
 
       for (let i = 0; i < toolCalls.length; i++) {
         const tc = toolCalls[i]!;
@@ -2172,7 +2365,20 @@ export class AgentHarness {
             /* ignore */
           }
         }
+        if (tc.name === "activate_tool_family" && r.ok) {
+          awarenessNeedsRefresh = true;
+          awarenessReason = "family_activation_success";
+        } else if (!r.ok && /not loaded for this session/i.test(r.error)) {
+          awarenessNeedsRefresh = true;
+          awarenessReason = "inactive_tool_error";
+          this.context.appendMessage({
+            role: "user",
+            content:
+              "[SYSTEM NOTE] A requested tool is inactive. Reconcile tool state now: call list_tool_families, activate one best-fit family, then retry with updated args.",
+          });
+        }
       }
+      if (awarenessNeedsRefresh) this.refreshToolAwareness(awarenessReason);
 
       if (this.config.workingStateEnabled !== false && this.context.getEpistemicState()) {
         for (let i = 0; i < toolCalls.length; i++) {
@@ -2272,7 +2478,8 @@ export class AgentHarness {
           `LAST PARALLEL BATCH (${toolCalls.length}): ${batchToolNames.join(", ")}\n` +
           `OUTCOMES: ${outcomes}\n` +
           `RECENT TOOL LINES: ${this.recentToolOutcomeLines.join(" · ")}\n` +
-          `SPAWN_AGENT CALLS THIS SEND: ${this.toolsUsedThisTurn.filter((n) => n === "spawn_agent").length}`;
+          `SPAWN_AGENT CALLS THIS SEND: ${this.toolsUsedThisTurn.filter((n) => n === "spawn_agent").length}\n` +
+          `${buildToolAwarenessSnapshot(this.registry, this.toolsUsedThisTurn)}`;
         this.context.patchEpistemicState({
           goal:
             this.lastUserMessage.slice(0, 500) +
