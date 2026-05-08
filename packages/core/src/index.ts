@@ -116,3 +116,11 @@ export {
   buildMessageWithImageAttachments,
 } from "./image_attachments.js";
 export type { ImageAttachment, ImageAttachmentLimits, ImageAttachmentSource } from "./image_attachments.js";
+export {
+  resolveInputShortcut,
+} from "./input_semantics.js";
+export type {
+  InputShortcutAction,
+  InputShortcutEvent,
+  InputShortcutContext,
+} from "./input_semantics.js";

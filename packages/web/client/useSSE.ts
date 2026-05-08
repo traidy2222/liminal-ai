@@ -4,7 +4,8 @@ import type { ImageAttachment } from "./imageAttachments.js";
 function sanitizeDeltaText(text: string): string {
   return text
     .replace(/\uFFFD/g, "")
-    .replace(/([A-Za-z])⚙([A-Za-z])/g, "$1$2");
+    .replace(/\s*⚙\s*/g, " ")
+    .replace(/\r/g, "");
 }
 
 export type MessageEntry =
@@ -365,6 +366,11 @@ export interface OutgoingChatMessage {
   attachments?: ImageAttachment[];
 }
 
+export interface SendMessageResult {
+  ok: boolean;
+  error?: string;
+}
+
 export function useSSE() {
   const [state, dispatch] = useReducer(reducer, {
     messages: [],
@@ -399,6 +405,10 @@ export function useSSE() {
       if (flushTimer) return;
       flushTimer = setTimeout(flush, 40);
     };
+    const flushNow = () => {
+      if (flushTimer) clearTimeout(flushTimer);
+      flush();
+    };
 
     void (async () => {
       try {
@@ -427,42 +437,54 @@ export function useSSE() {
       es.addEventListener("provider_retry", (e: MessageEvent) =>
         dispatch({ type: "provider_retry", payload: JSON.parse(e.data) })
       );
-      es.addEventListener("tool_start", (e: MessageEvent) =>
-        dispatch({ type: "tool_start", payload: JSON.parse(e.data) })
-      );
-      es.addEventListener("tool_delta", (e: MessageEvent) =>
-        dispatch({ type: "tool_delta", payload: JSON.parse(e.data) })
-      );
-      es.addEventListener("tool_approval", (e: MessageEvent) =>
-        dispatch({ type: "tool_approval", payload: JSON.parse(e.data) })
-      );
-      es.addEventListener("tool_result", (e: MessageEvent) =>
-        dispatch({ type: "tool_result", payload: JSON.parse(e.data) })
-      );
-      es.addEventListener("ask_user", (e: MessageEvent) =>
-        dispatch({ type: "ask_user", payload: JSON.parse(e.data) })
-      );
-      es.addEventListener("turn_end", (e: MessageEvent) =>
-        dispatch({ type: "turn_end", payload: JSON.parse(e.data) })
-      );
-      es.addEventListener("subtask_spawned", (e: MessageEvent) =>
-        dispatch({ type: "subtask_spawned", payload: JSON.parse(e.data) })
-      );
-      es.addEventListener("subtask_complete", (e: MessageEvent) =>
-        dispatch({ type: "subtask_complete", payload: JSON.parse(e.data) })
-      );
-      es.addEventListener("plan_step_done", (e: MessageEvent) =>
-        dispatch({ type: "plan_step_done", payload: JSON.parse(e.data) })
-      );
-      es.addEventListener("context_compressed", (e: MessageEvent) =>
-        dispatch({ type: "context_compressed", payload: JSON.parse(e.data) })
-      );
-      es.addEventListener("persona_changed", (e: MessageEvent) =>
-        dispatch({ type: "persona_changed", payload: JSON.parse(e.data) })
-      );
-      es.addEventListener("subtask_output", (e: MessageEvent) =>
-        dispatch({ type: "subtask_output", payload: JSON.parse(e.data) })
-      );
+      es.addEventListener("tool_start", (e: MessageEvent) => {
+        flushNow();
+        dispatch({ type: "tool_start", payload: JSON.parse(e.data) });
+      });
+      es.addEventListener("tool_delta", (e: MessageEvent) => {
+        flushNow();
+        dispatch({ type: "tool_delta", payload: JSON.parse(e.data) });
+      });
+      es.addEventListener("tool_approval", (e: MessageEvent) => {
+        flushNow();
+        dispatch({ type: "tool_approval", payload: JSON.parse(e.data) });
+      });
+      es.addEventListener("tool_result", (e: MessageEvent) => {
+        flushNow();
+        dispatch({ type: "tool_result", payload: JSON.parse(e.data) });
+      });
+      es.addEventListener("ask_user", (e: MessageEvent) => {
+        flushNow();
+        dispatch({ type: "ask_user", payload: JSON.parse(e.data) });
+      });
+      es.addEventListener("turn_end", (e: MessageEvent) => {
+        flushNow();
+        dispatch({ type: "turn_end", payload: JSON.parse(e.data) });
+      });
+      es.addEventListener("subtask_spawned", (e: MessageEvent) => {
+        flushNow();
+        dispatch({ type: "subtask_spawned", payload: JSON.parse(e.data) });
+      });
+      es.addEventListener("subtask_complete", (e: MessageEvent) => {
+        flushNow();
+        dispatch({ type: "subtask_complete", payload: JSON.parse(e.data) });
+      });
+      es.addEventListener("plan_step_done", (e: MessageEvent) => {
+        flushNow();
+        dispatch({ type: "plan_step_done", payload: JSON.parse(e.data) });
+      });
+      es.addEventListener("context_compressed", (e: MessageEvent) => {
+        flushNow();
+        dispatch({ type: "context_compressed", payload: JSON.parse(e.data) });
+      });
+      es.addEventListener("persona_changed", (e: MessageEvent) => {
+        flushNow();
+        dispatch({ type: "persona_changed", payload: JSON.parse(e.data) });
+      });
+      es.addEventListener("subtask_output", (e: MessageEvent) => {
+        flushNow();
+        dispatch({ type: "subtask_output", payload: JSON.parse(e.data) });
+      });
       es.addEventListener("runtime_pref_detected", (e: MessageEvent) => {
         const p = JSON.parse(e.data) as { summary: string; risky: boolean };
         dispatch({
@@ -517,7 +539,7 @@ export function useSSE() {
     };
   }, []);
 
-  const sendMessage = useCallback(async (payload: OutgoingChatMessage) => {
+  const sendMessage = useCallback(async (payload: OutgoingChatMessage): Promise<SendMessageResult> => {
     const text = payload.text.trim();
     const attachmentCount = payload.attachments?.length ?? 0;
     const renderedUserMessage =
@@ -531,10 +553,15 @@ export function useSSE() {
       });
       if (!r.ok) {
         const payload = (await r.json().catch(() => ({}))) as { error?: string };
-        dispatch({ type: "error", payload: { message: payload.error ?? `Send failed (${r.status})` } });
+        const message = payload.error ?? `Send failed (${r.status})`;
+        dispatch({ type: "error", payload: { message } });
+        return { ok: false, error: message };
       }
+      return { ok: true };
     } catch {
-      dispatch({ type: "error", payload: { message: "Message send failed. Check server connection." } });
+      const message = "Message send failed. Check server connection.";
+      dispatch({ type: "error", payload: { message } });
+      return { ok: false, error: message };
     }
   }, []);
 

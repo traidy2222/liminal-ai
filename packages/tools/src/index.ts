@@ -6,6 +6,7 @@ import { createRunShellTool } from "./run_shell.js";
 import { webFetchTool } from "./web_fetch.js";
 import { webSearchTool } from "./web_search.js";
 import { weatherLookupTool } from "./weather_lookup.js";
+import { marketsQuoteTool } from "./markets_quote.js";
 import { createAskUserTool } from "./ask_user.js";
 import { rememberTool, recallTool, recallByTypeTool, forgetTool, forgetTypeTool, memoryStatsTool } from "./remember_recall.js";
 import { thinkTool } from "./think.js";
@@ -96,6 +97,9 @@ export function registerAllTools(
   registry.register(webFetchTool);
   registry.register(webSearchTool);
   registry.register(weatherLookupTool);
+  if (process.env["AGENT_MARKETS_ENABLE"] !== "0") {
+    registry.register(marketsQuoteTool);
+  }
   registry.register(createAskUserTool(emitter));
   registry.register(gitStatusTool);
   registry.register(gitDiffTool);

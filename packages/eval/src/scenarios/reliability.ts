@@ -552,6 +552,123 @@ export const visionSidecarFallbackScenario: Scenario = {
   ],
 };
 
+export const marketsQuoteStaleDisclosureScenario: Scenario = {
+  name: "markets-quote-stale-disclosure",
+  userMessage:
+    "Get me AAPL and BTC-USD prices right now. If delayed, disclose it clearly with source and as-of.",
+  maxRounds: 8,
+  timeoutMs: 60_000,
+  mocks: [
+    {
+      toolName: "markets_quote",
+      handler: async () => ({
+        ok: true,
+        output: JSON.stringify(
+          {
+            requested_symbols: ["AAPL", "BTC-USD"],
+            quote_count: 2,
+            as_of: "2026-05-07T07:10:00Z",
+            provider_mode: "free_best_effort",
+            quotes: [
+              {
+                input_symbol: "AAPL",
+                symbol: "AAPL",
+                asset_type: "equity_etf",
+                price: 204.11,
+                currency: "USD",
+                bid: null,
+                ask: null,
+                change: 1.24,
+                change_pct: 0.61,
+                as_of: "2026-05-07T06:40:00Z",
+                source: "yahoo-finance",
+                fallback_level: "primary",
+                is_live: false,
+                delay_seconds: 1800,
+                confidence: "medium",
+                uncertainty_note: "Quote appears delayed for this symbol/exchange; use as provisional.",
+              },
+            ],
+          },
+          null,
+          2
+        ),
+      }),
+    },
+  ],
+  assertions: [
+    { name: "turn_end fires", check: (trace) => traceHasTurnEnd(trace) },
+    {
+      name: "markets_quote tool used",
+      check: (trace) =>
+        trace.some((e) => e.type === "tool_result" && (e.payload as { name?: string }).name === "markets_quote"),
+    },
+    {
+      name: "assistant includes as-of + delayed/uncertainty language",
+      check: (trace) => {
+        const t = traceCollectTextBlob(trace).toLowerCase();
+        return /(as of|as-of)/.test(t) && /(delayed|provisional|uncertain|stale)/.test(t);
+      },
+    },
+  ],
+};
+
+export const marketsNoFabricatedLiveScenario: Scenario = {
+  name: "markets-no-fabricated-live-claim",
+  userMessage: "Tell me the live exact gold and EURUSD prices now.",
+  maxRounds: 8,
+  timeoutMs: 60_000,
+  mocks: [
+    {
+      toolName: "markets_quote",
+      handler: async () => ({
+        ok: true,
+        output: JSON.stringify(
+          {
+            requested_symbols: ["gold", "EURUSD"],
+            quote_count: 2,
+            as_of: "2026-05-07T07:10:00Z",
+            provider_mode: "free_best_effort",
+            quotes: [
+              {
+                input_symbol: "gold",
+                symbol: "GC=F",
+                asset_type: "commodity",
+                price: 3340.4,
+                currency: "USD",
+                bid: null,
+                ask: null,
+                change: null,
+                change_pct: null,
+                as_of: null,
+                source: "unavailable",
+                fallback_level: "none",
+                is_live: false,
+                delay_seconds: null,
+                confidence: "low",
+                uncertainty_note:
+                  "No free provider returned a usable quote for this symbol right now. Try alternate ticker or retry shortly.",
+              },
+            ],
+          },
+          null,
+          2
+        ),
+      }),
+    },
+  ],
+  assertions: [
+    { name: "turn_end fires", check: (trace) => traceHasTurnEnd(trace) },
+    {
+      name: "assistant avoids unsupported exact-live certainty",
+      check: (trace) => {
+        const t = traceCollectTextBlob(trace).toLowerCase();
+        return !/\bexact\b.*\blive\b/.test(t) && /(could not|uncertain|provisional|not available|as of)/.test(t);
+      },
+    },
+  ],
+};
+
 export const RELIABILITY_SCENARIOS = [
   turnEndHarnessMetricsPresent,
   passAt2Consistency,
@@ -570,4 +687,6 @@ export const RELIABILITY_SCENARIOS = [
   weatherNoFabricatedLiveClaimScenario,
   visionSidecarUsageScenario,
   visionSidecarFallbackScenario,
+  marketsQuoteStaleDisclosureScenario,
+  marketsNoFabricatedLiveScenario,
 ];

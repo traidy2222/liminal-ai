@@ -41,6 +41,10 @@ export const TOOL_FAMILIES: Record<string, { description: string; tools: readonl
     description: "HTTP fetch, search, research, failure review.",
     tools: ["web_fetch", "web_search", "weather_lookup", "web_research", "failure_review"],
   },
+  markets: {
+    description: "Free best-effort market pricing for equities/ETFs, FX, commodities, and crypto.",
+    tools: ["markets_quote"],
+  },
   code_intel: {
     description: "AST search, tests, lint, symbol index, references.",
     tools: ["ast_grep", "run_tests", "run_lint", "symbol_index", "find_references", "execute_code"],
@@ -168,6 +172,7 @@ const KNOWLEDGE_FIRST_TOOLS = [...TOOL_FAMILIES.memory_advanced.tools, ...TOOL_F
 const MAX_AUTONOMY_TOOLS = [
   ...KNOWLEDGE_FIRST_TOOLS,
   ...TOOL_FAMILIES.navigation.tools,
+  ...TOOL_FAMILIES.markets.tools,
   ...TOOL_FAMILIES.code_intel.tools.filter((t) => ["ast_grep", "symbol_index", "find_references"].includes(t)),
   ...TOOL_FAMILIES.document.tools,
   ...TOOL_FAMILIES.vision.tools,

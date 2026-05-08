@@ -54,7 +54,15 @@ function classifyTurnIntentFallback(text: string): TurnIntentClass {
 
 function isUserStancePromptFallback(text: string): boolean {
   const t = text.toLowerCase();
+  if (isIdentityRecallPrompt(text)) return false;
   return /\b(my opinions?|what do i think|what are my views|read me back|summari[sz]e me|my stance|about me)\b/.test(
+    t
+  );
+}
+
+function isIdentityRecallPrompt(text: string): boolean {
+  const t = text.toLowerCase();
+  return /\b(my real name|my name|what'?s my name|what is my name|do you know my name|who am i|what should you call me|call me)\b/.test(
     t
   );
 }
@@ -82,16 +90,18 @@ export async function inferTurnInference(
   model: string,
   userMessage: string
 ): Promise<TurnInferenceResult> {
+  const identityRecall = isIdentityRecallPrompt(userMessage);
   const fallbackIntent = classifyTurnIntentFallback(userMessage);
   const fallbackStance = isUserStancePromptFallback(userMessage);
+  const fallbackOverInference = false;
   if (!isIntentInferenceEnabled()) {
     return {
-      intent: fallbackIntent,
-      stancePrompt: fallbackStance,
-      overInferenceRisk: false,
+      intent: identityRecall ? "knowledge" : fallbackIntent,
+      stancePrompt: identityRecall ? false : fallbackStance,
+      overInferenceRisk: identityRecall ? false : fallbackOverInference,
       confidence: 0.51,
       source: "fallback_regex",
-      reason: "intent_inference_disabled",
+      reason: identityRecall ? "identity_recall_fast_path" : "intent_inference_disabled",
       fallbackReason: "AGENT_INTENT_INFERENCE=0",
     };
   }
@@ -113,12 +123,12 @@ export async function inferTurnInference(
   });
   if (!jr.ok || typeof jr.parsed !== "object" || jr.parsed == null) {
     return {
-      intent: fallbackIntent,
-      stancePrompt: fallbackStance,
-      overInferenceRisk: false,
+      intent: identityRecall ? "knowledge" : fallbackIntent,
+      stancePrompt: identityRecall ? false : fallbackStance,
+      overInferenceRisk: identityRecall ? false : fallbackOverInference,
       confidence: 0.5,
       source: "fallback_regex",
-      reason: "llm_inference_failed",
+      reason: identityRecall ? "identity_recall_fast_path" : "llm_inference_failed",
       fallbackReason: jr.ok ? "invalid_json_shape" : jr.error,
     };
   }
@@ -130,13 +140,24 @@ export async function inferTurnInference(
   const threshold = resolveIntentConfidenceThreshold();
   if (confidence < threshold) {
     return {
-      intent: fallbackIntent,
-      stancePrompt: fallbackStance,
-      overInferenceRisk: false,
+      intent: identityRecall ? "knowledge" : fallbackIntent,
+      stancePrompt: identityRecall ? false : fallbackStance,
+      overInferenceRisk: identityRecall ? false : fallbackOverInference,
       confidence,
       source: "fallback_regex",
-      reason: "llm_confidence_below_threshold",
+      reason: identityRecall ? "identity_recall_fast_path" : "llm_confidence_below_threshold",
       fallbackReason: `confidence=${confidence.toFixed(2)} < threshold=${threshold.toFixed(2)}`,
+    };
+  }
+
+  if (identityRecall) {
+    return {
+      intent: "knowledge",
+      stancePrompt: false,
+      overInferenceRisk: false,
+      confidence,
+      source: "llm",
+      reason: "identity_recall_fast_path",
     };
   }
 

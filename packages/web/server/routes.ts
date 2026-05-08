@@ -79,10 +79,21 @@ export function createRouter(bridge: AgentBridge, sse: SSEManager): Router {
       res.status(400).json({ error: "message or attachments required" });
       return;
     }
+    if (bridge.harness.getIsRunning()) {
+      res.status(409).json({ error: "Agent is already processing a message" });
+      return;
+    }
     const persisted = await persistIncomingAttachments(normalizedAttachments);
     const normalizedMessage = buildMessageWithImageAttachments(msg, persisted);
-    void bridge.harness.send(normalizedMessage, { freshContext: Boolean(freshContext) });
-    res.json({ ok: true });
+    try {
+      await bridge.harness.send(normalizedMessage, { freshContext: Boolean(freshContext) });
+      res.json({ ok: true });
+    } catch (err) {
+      const message =
+        err instanceof Error ? err.message : "Failed to process message.";
+      const status = /already processing/i.test(message) ? 409 : 500;
+      res.status(status).json({ error: message });
+    }
   });
 
   router.post("/api/approve", (req, res) => {

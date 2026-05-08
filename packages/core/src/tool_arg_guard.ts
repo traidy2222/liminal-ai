@@ -151,5 +151,34 @@ export function guardToolArgs(
     }
   }
 
+  if (toolName === "markets_quote") {
+    const symbolsRaw = args["symbols"];
+    if (!Array.isArray(symbolsRaw) || symbolsRaw.length === 0) {
+      return "markets_quote symbols must be a non-empty array.";
+    }
+    if (symbolsRaw.length > 12) {
+      return "markets_quote symbols exceeds max batch size (12).";
+    }
+    for (const s of symbolsRaw) {
+      const sym = String(s ?? "").trim();
+      if (!sym) return "markets_quote symbol entries must be non-empty strings.";
+      if (sym.length > 40) return `markets_quote symbol too long: "${sym.slice(0, 40)}..."`;
+      if (!/^[A-Za-z0-9=._\-\/]+$/.test(sym)) {
+        return `markets_quote symbol contains unsupported characters: "${sym}"`;
+      }
+    }
+    const asset = args["asset_type"];
+    if (
+      asset !== undefined &&
+      asset !== "auto" &&
+      asset !== "equity_etf" &&
+      asset !== "fx" &&
+      asset !== "commodity" &&
+      asset !== "crypto"
+    ) {
+      return 'markets_quote asset_type must be one of "auto|equity_etf|fx|commodity|crypto".';
+    }
+  }
+
   return null;
 }

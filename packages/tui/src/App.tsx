@@ -3,6 +3,7 @@ import { Box, Text, useInput, useStdout } from "ink";
 import type { AgentHarness } from "@liminal/core";
 import { DEFAULT_IMAGE_ATTACHMENT_LIMITS, validateImageAttachments, type ImageAttachment } from "@liminal/core";
 import { useAgent } from "./useAgent.js";
+import { resolveInputShortcut } from "./inputSemantics.js";
 import { StatusBar } from "./components/StatusBar.js";
 import { MessageItem } from "./components/MessageItem.js";
 import { InputLine } from "./components/InputLine.js";
@@ -52,10 +53,15 @@ export function App({ harness }: Props) {
   const cols = stdout?.columns ?? 100;
   const rows = stdout?.rows ?? 30;
 
-  /** Text the user is typing in the chat input. */
-  const [chatInput, setChatInput] = useState("");
+  /** Multiline text buffer user is typing in the chat input. */
+  const [chatLines, setChatLines] = useState<string[]>([""]);
+  const [cursorRow, setCursorRow] = useState(0);
+  const [cursorCol, setCursorCol] = useState(0);
   const [pendingAttachments, setPendingAttachments] = useState<ImageAttachment[]>([]);
   const [inputStatus, setInputStatus] = useState<string | null>(null);
+  const [draftHistory, setDraftHistory] = useState<string[]>([]);
+  const [historyIndex, setHistoryIndex] = useState(-1);
+  const [historyDraft, setHistoryDraft] = useState("");
   /** Text the user is typing for an ask_user answer. */
   const [askInput, setAskInput] = useState("");
   /**
@@ -83,7 +89,7 @@ export function App({ harness }: Props) {
       ? 5
       : hasAskUser
       ? 4
-      : 1 + (pendingAttachments.length > 0 ? 1 : 0) + (inputStatus ? 1 : 0);
+      : Math.min(4, chatLines.length) + (pendingAttachments.length > 0 ? 1 : 0) + (inputStatus ? 1 : 0);
   // Fixed layout rows to avoid terminal jitter/flicker:
   // status(1) + top divider(1) + top indicator(1) + bottom indicator(1) + error row(1) + bottom divider(1) + input
   const transcriptH = Math.max(4, rows - (1 + 1 + 1 + 1 + 1 + 1 + inputAreaH));
@@ -102,9 +108,30 @@ export function App({ harness }: Props) {
   const newerCount = safeOffset; // messages newer that were scrolled past
 
   /* ── Unified keyboard handler ─────────────────────────────────── */
+  const currentDraft = useMemo(() => chatLines.join("\n"), [chatLines]);
+  const maxHistory = 30;
+
+  const setDraftText = useCallback((text: string) => {
+    const lines = text.length > 0 ? text.split("\n") : [""];
+    setChatLines(lines);
+    setCursorRow(lines.length - 1);
+    setCursorCol(lines[lines.length - 1]?.length ?? 0);
+  }, []);
+
+  const pushHistory = useCallback((text: string) => {
+    const trimmed = text.trim();
+    if (!trimmed) return;
+    setDraftHistory((prev) => {
+      if (prev[0] === trimmed) return prev;
+      return [trimmed, ...prev].slice(0, maxHistory);
+    });
+    setHistoryIndex(-1);
+    setHistoryDraft("");
+  }, []);
+
   const handleSend = useCallback(async () => {
     if (state.busy) return;
-    const attachPath = parseAttachCommand(chatInput);
+    const attachPath = parseAttachCommand(currentDraft);
     if (attachPath !== null) {
       if (!attachPath) {
         setInputStatus("Usage: /attach <image-path>");
@@ -122,12 +149,12 @@ export function App({ harness }: Props) {
         return;
       }
       setPendingAttachments(next);
-      setChatInput("");
+      setDraftText("");
       setInputStatus(`Attached ${attached.attachment.name}`);
       return;
     }
 
-    const { paths, remainingText } = extractImagePathsFromText(chatInput);
+    const { paths, remainingText } = extractImagePathsFromText(currentDraft);
     const inlineAttachments: ImageAttachment[] = [];
     for (const p of paths) {
       const parsed = await imagePathToAttachment(p);
@@ -149,11 +176,100 @@ export function App({ harness }: Props) {
     if (!remainingText && mergedAttachments.length === 0) return;
 
     sendMessage(remainingText, mergedAttachments);
-    setChatInput("");
+    pushHistory(currentDraft);
+    setDraftText("");
     setPendingAttachments([]);
     setInputStatus(null);
     setScrollOffset(0);
-  }, [chatInput, pendingAttachments, sendMessage, state.busy]);
+  }, [currentDraft, pendingAttachments, pushHistory, sendMessage, setDraftText, state.busy]);
+
+  const insertTextAtCursor = useCallback((text: string) => {
+    const lines = [...chatLines];
+    const row = Math.max(0, Math.min(cursorRow, lines.length - 1));
+    const col = Math.max(0, Math.min(cursorCol, lines[row]?.length ?? 0));
+    const line = lines[row] ?? "";
+    lines[row] = `${line.slice(0, col)}${text}${line.slice(col)}`;
+    setChatLines(lines);
+    setCursorRow(row);
+    setCursorCol(col + text.length);
+  }, [chatLines, cursorCol, cursorRow]);
+
+  const insertNewlineAtCursor = useCallback(() => {
+    const lines = [...chatLines];
+    const row = Math.max(0, Math.min(cursorRow, lines.length - 1));
+    const col = Math.max(0, Math.min(cursorCol, lines[row]?.length ?? 0));
+    const line = lines[row] ?? "";
+    const before = line.slice(0, col);
+    const after = line.slice(col);
+    lines[row] = before;
+    lines.splice(row + 1, 0, after);
+    setChatLines(lines);
+    setCursorRow(row + 1);
+    setCursorCol(0);
+  }, [chatLines, cursorCol, cursorRow]);
+
+  const backspaceAtCursor = useCallback(() => {
+    const lines = [...chatLines];
+    const row = Math.max(0, Math.min(cursorRow, lines.length - 1));
+    const col = Math.max(0, Math.min(cursorCol, lines[row]?.length ?? 0));
+    if (col > 0) {
+      const line = lines[row] ?? "";
+      lines[row] = `${line.slice(0, col - 1)}${line.slice(col)}`;
+      setChatLines(lines);
+      setCursorRow(row);
+      setCursorCol(col - 1);
+      return;
+    }
+    if (row === 0) return;
+    const prev = lines[row - 1] ?? "";
+    const curr = lines[row] ?? "";
+    lines[row - 1] = prev + curr;
+    lines.splice(row, 1);
+    setChatLines(lines);
+    setCursorRow(row - 1);
+    setCursorCol(prev.length);
+  }, [chatLines, cursorCol, cursorRow]);
+
+  const deleteAtCursor = useCallback(() => {
+    const lines = [...chatLines];
+    const row = Math.max(0, Math.min(cursorRow, lines.length - 1));
+    const col = Math.max(0, Math.min(cursorCol, lines[row]?.length ?? 0));
+    const line = lines[row] ?? "";
+    if (col < line.length) {
+      lines[row] = `${line.slice(0, col)}${line.slice(col + 1)}`;
+      setChatLines(lines);
+      return;
+    }
+    if (row >= lines.length - 1) return;
+    lines[row] = line + (lines[row + 1] ?? "");
+    lines.splice(row + 1, 1);
+    setChatLines(lines);
+  }, [chatLines, cursorCol, cursorRow]);
+
+  const applyHistory = useCallback((direction: "prev" | "next") => {
+    if (draftHistory.length === 0) return;
+    if (direction === "prev") {
+      if (historyIndex === -1) {
+        setHistoryDraft(currentDraft);
+        setHistoryIndex(0);
+        setDraftText(draftHistory[0] ?? currentDraft);
+        return;
+      }
+      const next = Math.min(historyIndex + 1, draftHistory.length - 1);
+      setHistoryIndex(next);
+      setDraftText(draftHistory[next] ?? currentDraft);
+      return;
+    }
+    if (historyIndex === -1) return;
+    const next = historyIndex - 1;
+    if (next < 0) {
+      setHistoryIndex(-1);
+      setDraftText(historyDraft);
+      return;
+    }
+    setHistoryIndex(next);
+    setDraftText(draftHistory[next] ?? "");
+  }, [currentDraft, draftHistory, historyDraft, historyIndex, setDraftText]);
 
   useInput((char, key) => {
     const wheelDelta = parseMouseWheelDelta(char);
@@ -220,10 +336,14 @@ export function App({ harness }: Props) {
 
     /* ── Shortcuts ──────────────────────────────────────────────── */
     if (key.ctrl && char === "k") {
+      setDraftText("");
+      setHistoryIndex(-1);
+      return;
+    }
+    if (key.ctrl && char === "l") {
       if (!state.busy) {
         clearSession();
         setScrollOffset(0);
-        setChatInput("");
       }
       return;
     }
@@ -232,16 +352,74 @@ export function App({ harness }: Props) {
     }
 
     /* ── Chat input ─────────────────────────────────────────────── */
+    const atStart = cursorRow === 0 && cursorCol === 0;
+    const lastRow = Math.max(0, chatLines.length - 1);
+    const atEnd = cursorRow === lastRow && cursorCol === (chatLines[lastRow]?.length ?? 0);
+    const canSend = !state.busy && (currentDraft.trim().length > 0 || pendingAttachments.length > 0);
+    const action = resolveInputShortcut(
+      {
+        key: key.return ? "Enter" : key.upArrow ? "ArrowUp" : key.downArrow ? "ArrowDown" : char,
+        shiftKey: key.shift,
+        ctrlKey: key.ctrl,
+        metaKey: key.meta,
+        altKey: false,
+      },
+      {
+        canSend,
+        busy: state.busy,
+        cursorAtStart: atStart,
+        cursorAtEnd: atEnd,
+      }
+    );
+    if (action === "send") {
+      void handleSend();
+      return;
+    }
+    if (action === "insert_newline") {
+      insertNewlineAtCursor();
+      return;
+    }
+    if (action === "history_prev") {
+      applyHistory("prev");
+      return;
+    }
+    if (action === "history_next") {
+      applyHistory("next");
+      return;
+    }
     if (key.return) {
       void handleSend();
       return;
     }
-    if (key.backspace || key.delete) {
-      setChatInput((s) => s.slice(0, -1));
+    if (key.backspace) {
+      backspaceAtCursor();
+      return;
+    }
+    if (key.delete) {
+      deleteAtCursor();
+      return;
+    }
+    if (key.leftArrow) {
+      if (cursorCol > 0) setCursorCol((c) => c - 1);
+      else if (cursorRow > 0) {
+        const prevLen = chatLines[cursorRow - 1]?.length ?? 0;
+        setCursorRow((r) => r - 1);
+        setCursorCol(prevLen);
+      }
+      return;
+    }
+    if (key.rightArrow) {
+      const lineLen = chatLines[cursorRow]?.length ?? 0;
+      if (cursorCol < lineLen) setCursorCol((c) => c + 1);
+      else if (cursorRow < chatLines.length - 1) {
+        setCursorRow((r) => r + 1);
+        setCursorCol(0);
+      }
       return;
     }
     if (isPrintableInputChar(char) && !key.ctrl && !key.meta) {
-      setChatInput((s) => s + char);
+      insertTextAtCursor(char);
+      if (historyIndex !== -1) setHistoryIndex(-1);
       if (inputStatus) setInputStatus(null);
     }
   });
@@ -324,7 +502,9 @@ export function App({ harness }: Props) {
       )}
       {!hasApproval && !hasAskUser && (
         <InputLine
-          value={chatInput}
+          lines={chatLines}
+          cursorRow={cursorRow}
+          cursorCol={cursorCol}
           busy={state.busy}
           scrollOffset={scrollOffset}
           attachments={pendingAttachments}

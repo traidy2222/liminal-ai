@@ -177,4 +177,37 @@ export const TOOL_LAZY_LOAD_SCENARIOS: Scenario[] = [
       },
     ],
   },
+  {
+    name: "tool-lazy-load-markets-activation-hint",
+    env: { AGENT_TOOL_LAZY: "1", AGENT_ALWAYS_TOOLS_PROFILE: "balanced" },
+    userMessage:
+      "Call markets_quote with symbols ['AAPL'] and asset_type 'equity_etf'. " +
+      "Do not activate any tool family first. Then explain the blocker in one sentence.",
+    maxRounds: 16,
+    timeoutMs: 90_000,
+    assertions: [
+      {
+        name: "markets_quote initially blocked while inactive",
+        check: (trace) => {
+          const results = traceToolResults(trace, "markets_quote");
+          const first = results.at(0);
+          if (!first || first.result.ok) return false;
+          return /not loaded for this session/i.test(first.result.error);
+        },
+      },
+      {
+        name: "error suggests markets activation",
+        check: (trace) => {
+          const results = traceToolResults(trace, "markets_quote");
+          const first = results.at(0);
+          if (!first || first.result.ok) return false;
+          return /activate_tool_family/i.test(first.result.error) && /markets/i.test(first.result.error);
+        },
+      },
+      {
+        name: "turn_end fires",
+        check: (trace) => traceHasTurnEnd(trace),
+      },
+    ],
+  },
 ];

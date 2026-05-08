@@ -2,6 +2,7 @@ import React, { useState, useRef, useEffect } from "react";
 import { useSSE, type MessageEntry } from "./useSSE.js";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
+import { resolveInputShortcut } from "./inputSemantics.js";
 import {
   DEFAULT_IMAGE_ATTACHMENT_LIMITS,
   normalizeImageAttachmentName,
@@ -48,11 +49,40 @@ export function App() {
   const [isDragOver, setIsDragOver] = useState(false);
   const [askAnswer, setAskAnswer] = useState("");
   const [showDiagnostics, setShowDiagnostics] = useState(false);
+  const [draftHistory, setDraftHistory] = useState<string[]>([]);
+  const [historyIndex, setHistoryIndex] = useState(-1);
+  const [historyDraft, setHistoryDraft] = useState("");
   const bottomRef = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLTextAreaElement>(null);
+
+  const maxHistory = 30;
+
+  const pushHistory = (value: string) => {
+    const trimmed = value.trim();
+    if (!trimmed) return;
+    setDraftHistory((prev) => {
+      if (prev[0] === trimmed) return prev;
+      return [trimmed, ...prev].slice(0, maxHistory);
+    });
+    setHistoryIndex(-1);
+    setHistoryDraft("");
+  };
+
+  const syncTextareaHeight = () => {
+    const el = inputRef.current;
+    if (!el) return;
+    el.style.height = "0px";
+    const next = Math.min(el.scrollHeight, 180);
+    el.style.height = `${Math.max(40, next)}px`;
+  };
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [state.messages]);
+
+  useEffect(() => {
+    syncTextareaHeight();
+  }, [input]);
 
   const tryAddAttachments = (next: ImageAttachment[]) => {
     const validation = validateImageAttachments(next, DEFAULT_IMAGE_ATTACHMENT_LIMITS);
@@ -104,13 +134,40 @@ export function App() {
       setAttachError(validation.error);
       return;
     }
-    await sendMessage({ text: input, attachments });
+    const result = await sendMessage({ text: input, attachments });
+    if (!result.ok) return;
+    pushHistory(input);
     setInput("");
     setAttachments([]);
     setAttachError(null);
   };
 
-  const handlePaste = async (e: React.ClipboardEvent<HTMLInputElement>) => {
+  const applyHistory = (direction: "prev" | "next") => {
+    if (draftHistory.length === 0) return;
+    if (direction === "prev") {
+      if (historyIndex === -1) {
+        setHistoryDraft(input);
+        setHistoryIndex(0);
+        setInput(draftHistory[0] ?? input);
+        return;
+      }
+      const nextIndex = Math.min(historyIndex + 1, draftHistory.length - 1);
+      setHistoryIndex(nextIndex);
+      setInput(draftHistory[nextIndex] ?? input);
+      return;
+    }
+    if (historyIndex === -1) return;
+    const nextIndex = historyIndex - 1;
+    if (nextIndex < 0) {
+      setHistoryIndex(-1);
+      setInput(historyDraft);
+      return;
+    }
+    setHistoryIndex(nextIndex);
+    setInput(draftHistory[nextIndex] ?? "");
+  };
+
+  const handlePaste = async (e: React.ClipboardEvent<HTMLElement>) => {
     const imageFiles = Array.from(e.clipboardData.files).filter((f) => f.type.startsWith("image/"));
     if (imageFiles.length === 0) return;
     e.preventDefault();
@@ -160,6 +217,70 @@ export function App() {
 
   const onSubmit = async (e: React.FormEvent) => {
     await handleSubmit(e);
+  };
+
+  const handleComposerKeyDown = async (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    const target = e.currentTarget;
+    const atStart = target.selectionStart === 0 && target.selectionEnd === 0;
+    const atEnd =
+      target.selectionStart === target.value.length &&
+      target.selectionEnd === target.value.length;
+    const action = resolveInputShortcut(
+      {
+        key: e.key,
+        shiftKey: e.shiftKey,
+        ctrlKey: e.ctrlKey,
+        metaKey: e.metaKey,
+        altKey: e.altKey,
+        isComposing: e.nativeEvent.isComposing,
+      },
+      {
+        canSend,
+        busy: state.busy,
+        cursorAtStart: atStart,
+        cursorAtEnd: atEnd,
+      }
+    );
+    if (action === "none") return;
+    e.preventDefault();
+    if (action === "send") {
+      if (!canSend) return;
+      const result = await sendMessage({ text: input, attachments });
+      if (!result.ok) return;
+      pushHistory(input);
+      setInput("");
+      setAttachments([]);
+      setAttachError(null);
+      return;
+    }
+    if (action === "insert_newline") {
+      const start = target.selectionStart;
+      const end = target.selectionEnd;
+      const next = `${input.slice(0, start)}\n${input.slice(end)}`;
+      setInput(next);
+      queueMicrotask(() => {
+        inputRef.current?.setSelectionRange(start + 1, start + 1);
+      });
+      return;
+    }
+    if (action === "history_prev") {
+      applyHistory("prev");
+      return;
+    }
+    if (action === "history_next") {
+      applyHistory("next");
+      return;
+    }
+    if (action === "clear_draft") {
+      setInput("");
+      setHistoryIndex(-1);
+      return;
+    }
+    if (action === "clear_session") {
+      if (state.busy) return;
+      await sendClearSession();
+      return;
+    }
   };
 
   const pct = state.contextSnapshot
@@ -367,24 +488,34 @@ export function App() {
           </div>
         )}
         {attachError && <div style={styles.attachmentError}>{attachError}</div>}
-        <input
-          id="chat-message-input"
-          name="message"
-          autoComplete="off"
-          style={styles.input}
-          value={input}
-          onChange={(e) => setInput(e.target.value)}
-          onPaste={(e) => void handlePaste(e)}
-          placeholder={state.busy ? "Processing…" : "Message Liminal…"}
-          disabled={state.busy || !state.connected}
-        />
-        <button
-          type="submit"
-          style={{ ...styles.btn, background: state.busy ? "#333" : "#005580" }}
-          disabled={!canSend}
-        >
-          Send
-        </button>
+        <div style={styles.composerRow}>
+          <textarea
+            id="chat-message-input"
+            name="message"
+            ref={inputRef}
+            rows={1}
+            style={styles.textarea}
+            value={input}
+            onChange={(e) => {
+              setInput(e.target.value);
+              if (historyIndex !== -1) setHistoryIndex(-1);
+            }}
+            onKeyDown={(e) => void handleComposerKeyDown(e)}
+            onPaste={(e) => void handlePaste(e)}
+            placeholder={state.busy ? "Processing…" : "Message Liminal…"}
+            disabled={state.busy || !state.connected}
+          />
+          <button
+            type="submit"
+            style={{ ...styles.btn, background: state.busy ? "#333" : "#005580" }}
+            disabled={!canSend}
+          >
+            Send
+          </button>
+        </div>
+        <div style={styles.shortcutHint}>
+          Enter send · Shift+Enter newline · Ctrl/Cmd+K clear draft · Ctrl/Cmd+L new session
+        </div>
       </form>
     </div>
   );
@@ -613,7 +744,8 @@ const styles = {
   },
   mdParagraph: {
     margin: "0 0 10px",
-    whiteSpace: "pre-wrap" as const,
+    whiteSpace: "normal" as const,
+    lineHeight: 1.6,
   },
   mdList: {
     margin: "0 0 10px 20px",
@@ -720,7 +852,12 @@ const styles = {
     background: "#111",
     flexShrink: 0,
   },
-  input: {
+  composerRow: {
+    display: "flex",
+    gap: 8,
+    alignItems: "flex-end",
+  },
+  textarea: {
     flex: 1,
     background: "#1a1a1a",
     border: "1px solid #333",
@@ -730,6 +867,15 @@ const styles = {
     fontSize: 14,
     fontFamily: "inherit",
     outline: "none",
+    resize: "none" as const,
+    minHeight: 40,
+    maxHeight: 180,
+    overflowY: "auto" as const,
+    lineHeight: 1.4,
+  },
+  shortcutHint: {
+    fontSize: 11,
+    color: "#6f7f93",
   },
   btn: {
     border: "none",

@@ -58,6 +58,7 @@ Full argument schemas are in the function definitions. You have filesystem, shel
 When memory_query is available, prefer it for unified retrieval (exact / type / lexical / hybrid / graph modes).
 For knowledge-seeking tasks, default retrieval order is: memory_query/recall_relevant -> vault_search/vault_read -> web_search/web_fetch.
 For weather/live-local conditions, prefer weather_lookup and report source + observed/as-of time; if fallback locality is used, disclose it explicitly.
+For market prices/costing (shares, FX, commodities, crypto), prefer markets_quote and always include as-of timestamp + source + uncertainty when delayed/stale.
 
 ## Runtime self-management
 You can infer and apply runtime preference instructions from natural language when the user asks for persistent behavior changes.
@@ -152,6 +153,11 @@ Pattern:
 3) continue reasoning/tool use using structured vision output.
 If vision fails, continue with lower confidence and state uncertainty.`;
 
+const MARKETS_PROTOCOL = `## Markets pricing (free best-effort)
+For price/costing requests on equities/ETFs, FX, commodities, or crypto, prefer markets_quote over generic web_search.
+In final answers, always include source + as-of timestamp and disclose if the quote is delayed/stale/fallback-derived.
+Never present unverified market prices as guaranteed live ticks.`;
+
 const LAZY_TOOL_LOADING = `## Lazy tool loading
 Only a minimal tool set is visible to you until you load more. Call list_tool_families to see families and what is active, then activate_tool_family({ family: "<id>" }) before using tools in that family (e.g. git, shell, vault, code_intel, vision).
 Always-loaded baseline profile is controlled by AGENT_ALWAYS_TOOLS_PROFILE:
@@ -226,6 +232,9 @@ export function buildProtocolDynamicSuffix(toolNames: Iterable<string>): string 
   }
   if (names.has("vision_analyze")) {
     parts.push(VISION_SIDEcar);
+  }
+  if (names.has("markets_quote")) {
+    parts.push(MARKETS_PROTOCOL);
   }
   parts.push(STRUCTURED_RETRY);
   parts.push(ERROR_RECOVERY);

@@ -625,6 +625,8 @@ export class AgentHarness {
   private finalizeDeckPipelineNudgeThisSend = false;
   /** One-shot guard for vision-centric asks without sidecar usage. */
   private finalizeVisionNudgeThisSend = false;
+  /** Max extra finalize replan loops allowed after a draft answer exists. */
+  private finalizeRetryBudgetThisSend = 1;
   /** web_search query history for first-pass diversity + dedupe checks. */
   private webSearchQueriesThisTurn: string[] = [];
   /** Near-duplicate failed search intents for one-shot retry discipline. */
@@ -1223,6 +1225,10 @@ export class AgentHarness {
     this.finalizeSynthesisNudgeThisSend = false;
     this.finalizeRecencyNudgeThisSend = false;
     this.finalizeInferenceNudgeThisSend = false;
+    this.finalizeRetryBudgetThisSend = Math.max(
+      0,
+      Math.min(2, parseInt(process.env["AGENT_FINALIZE_RETRY_BUDGET"] ?? "1", 10) || 1)
+    );
     this.dispatcher.resetTurnCounters();
     this.vaultMetrics = { reads: 0, searches: 0, writes: 0, skippedWrites: 0 };
     this.webSearchQueriesThisTurn = [];
@@ -2490,6 +2496,12 @@ export class AgentHarness {
         this.isLikelyKnowledgeTask() &&
         this.toolsUsedThisTurn.includes("web_search") &&
         !this.finalizeSynthesisNudgeThisSend;
+      const hasWebFetchEvidence = this.toolsUsedThisTurn.includes("web_fetch");
+      const substantiveDraftLikelyComplete =
+        assistantText.length >= 1800 ||
+        ((assistantText.match(/\n[-*]\s/g) ?? []).length >= 6 &&
+          (assistantText.match(/\b(source|sources|as of|uncertain|open|timeline|update)\b/gi) ?? []).length >= 3) ||
+        (hasWebFetchEvidence && distinctToolCount >= 6);
       if (isResearchTask) {
         const hasTimeline = /\b(chronology|timeline|sequence|on\s+\w+\s+\d{1,2}|recently|earlier)\b/i.test(
           assistantText
@@ -2504,16 +2516,24 @@ export class AgentHarness {
           assistantText
         );
         if (!hasTimeline || sourceMentions < 2 || !hasUncertainty || !hasOpenItems) {
-          this.finalizeSynthesisNudgeThisSend = true;
-          this.context.appendMessage({
-            role: "user",
-            content:
-              "[SYNTHESIS CHECKLIST] Before finalizing research output, include: " +
-              "(1) a short timeline/sequence, (2) multi-source grounding (>=2 sources), " +
-              "(3) explicit uncertainty/fragility note for fast-moving facts, and (4) unresolved items.",
-          });
-          await this.runReActLoop(round);
-          return;
+          if (this.finalizeRetryBudgetThisSend > 0 && !substantiveDraftLikelyComplete) {
+            this.finalizeRetryBudgetThisSend--;
+            this.finalizeSynthesisNudgeThisSend = true;
+            this.context.appendMessage({
+              role: "user",
+              content:
+                "[SYNTHESIS CHECKLIST] Before finalizing research output, include: " +
+                "(1) a short timeline/sequence, (2) multi-source grounding (>=2 sources), " +
+                "(3) explicit uncertainty/fragility note for fast-moving facts, and (4) unresolved items.",
+            });
+            await this.runReActLoop(round);
+            return;
+          }
+          const synthesisCaveat =
+            "\n\nCoverage note: this draft appears substantively complete, so I am finalizing without more fetch retries. " +
+            "Treat fine-grained chronology/source density as provisional where direct verification was blocked.";
+          this.context.appendMessage({ role: "assistant", content: synthesisCaveat });
+          this.emitter.emit("text", { delta: synthesisCaveat, channel: "user" });
         }
       }
 
@@ -2621,17 +2641,20 @@ export class AgentHarness {
           attemptedRecovery: !recencyPassed,
         });
         if (!recencyPassed && !this.finalizeRecencyNudgeThisSend) {
-          this.finalizeRecencyNudgeThisSend = true;
-          this.context.appendMessage({
-            role: "user",
-            content:
-              "[RECENCY CHECK] Your answer appears freshness-sensitive. Before finalizing: " +
-              "(1) verify latest/current/version claims against an authoritative source, " +
-              "(2) include an explicit 'as of <date>' qualifier, and " +
-              "(3) if sources conflict or latest cannot be verified, state uncertainty clearly.",
-          });
-          await this.runReActLoop(round);
-          return;
+          if (this.finalizeRetryBudgetThisSend > 0 && !substantiveDraftLikelyComplete) {
+            this.finalizeRetryBudgetThisSend--;
+            this.finalizeRecencyNudgeThisSend = true;
+            this.context.appendMessage({
+              role: "user",
+              content:
+                "[RECENCY CHECK] Your answer appears freshness-sensitive. Before finalizing: " +
+                "(1) verify latest/current/version claims against an authoritative source, " +
+                "(2) include an explicit 'as of <date>' qualifier, and " +
+                "(3) if sources conflict or latest cannot be verified, state uncertainty clearly.",
+            });
+            await this.runReActLoop(round);
+            return;
+          }
         }
         if (!recencyPassed) {
           const caveat =

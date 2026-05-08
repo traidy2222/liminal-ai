@@ -18,7 +18,7 @@ function isDiagnosticsEnabled(): boolean {
 function sanitizeDeltaText(text: string): string {
   return text
     .replace(/\uFFFD/g, "")
-    .replace(/([A-Za-z])⚙([A-Za-z])/g, "$1$2")
+    .replace(/\s*⚙\s*/g, " ")
     .replace(/\r/g, "");
 }
 

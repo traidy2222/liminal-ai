@@ -63,3 +63,27 @@ test("execute_code blocks invalid timeout and cwd escape", () => {
     /workspace-relative/i
   );
 });
+
+test("markets_quote validates symbols and asset_type", () => {
+  assert.equal(
+    guardToolArgs("markets_quote", {
+      symbols: ["AAPL", "EURUSD", "gold", "BTC-USD"],
+      asset_type: "auto",
+    }),
+    null
+  );
+  assert.match(
+    guardToolArgs("markets_quote", {
+      symbols: ["AAPL", "bad symbol !"],
+      asset_type: "equity_etf",
+    }) ?? "",
+    /unsupported characters/i
+  );
+  assert.match(
+    guardToolArgs("markets_quote", {
+      symbols: Array.from({ length: 20 }, () => "AAPL"),
+      asset_type: "equity_etf",
+    }) ?? "",
+    /max batch size/i
+  );
+});
