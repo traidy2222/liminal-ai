@@ -28,6 +28,8 @@ import { completeChatJson, getFastModelSlug } from "./router.js";
 import { stableArgsJsonKey } from "./json_stable.js";
 import { HARNESS_RULE_RECALL_MESSAGE } from "./harness_rules.js";
 import { bumpRecipePattern } from "./recipe_library.js";
+import { bumpRuleHits } from "./rule_stats.js";
+import { SharedMemoryBus } from "./shared_memory_bus.js";
 import { resolveProviderConfig } from "./provider_config.js";
 import type { RuntimePreferences } from "./runtime_prefs.js";
 import {
@@ -492,7 +494,13 @@ function hasFreshnessClaims(text: string): boolean {
 
 function hasLiveNowClaims(text: string): boolean {
   const t = text.toLowerCase();
-  return /\b(right now|live now|currently|at the moment|current conditions|happening now)\b/.test(t);
+  // Avoid bare "currently" (common in capability/session copy) — require phrasing that
+  // usually signals live external state, not static tool counts.
+  return (
+    /\b(right now|live now|at the moment|current conditions|happening now)\b/.test(t) ||
+    /\b(it'?s|it is|things are)\s+currently\b/.test(t) ||
+    /\bcurrently\s+(happening|unfolding|breaking|developing|raining|snowing|live)\b/.test(t)
+  );
 }
 
 function isDeckIntentPrompt(text: string): boolean {
@@ -684,6 +692,9 @@ const ORCHESTRATION_TOOL_NAMES = new Set([
   "compress_context",       // same
   "refresh_world_context",  // root-only; children skip world context entirely
   "set_persona",            // closes over parent harness — child inherits parent's persona
+  "decompose_goal",         // closes over harness (uses harness.config for LLM access)
+  "branch_explore",         // closes over harness.forkChild + harness.orchestrator
+  "verify_contract",        // closes over harness.getExecutionState()
 ]);
 
 // ADAPTIVE_HINTS removed — unified into buildAdaptiveHint() with ERROR_TAXONOMY (#9)
@@ -792,6 +803,8 @@ export class AgentHarness {
 
   /** Active persona. Set via setPersona(); defaults to config.persona or unnamed default. */
   private currentPersona?: PersonaConfig;
+  /** Cross-harness shared memory bus (created on root, propagated to children). */
+  readonly sharedBus: SharedMemoryBus;
   /** Long-horizon runtime state persisted by task_checkpoint and heartbeat events. */
   private executionState: ExecutionState | null = null;
   private vaultMetrics = { reads: 0, searches: 0, writes: 0, skippedWrites: 0 };
@@ -1467,9 +1480,38 @@ export class AgentHarness {
 
     this.emitter = new AgentEmitter();
     this.registry = new ToolRegistry();
+    // Shared memory bus: use provided one (child harness) or create a fresh root bus.
+    this.sharedBus = config.sharedBus ?? new SharedMemoryBus();
     // Wire onCompressed callback so context compression fires a structured event (#7)
+    // Wire semanticSummarizer when AGENT_COMPRESS_SEMANTIC=1 (uses fast model for causal narratives).
+    const semanticSummarizer =
+      process.env["AGENT_COMPRESS_SEMANTIC"] === "1" && config.agentDepth === 0
+        ? async (rawSummaries: string): Promise<string> => {
+            const jr = await completeChatJson(this.client, {
+              model: getFastModelSlug(config.model),
+              temperature: 0.1,
+              maxTokens: 300,
+              messages: [
+                {
+                  role: "system",
+                  content:
+                    "Summarize these tool-round one-liners as 2-3 concise causal sentences " +
+                    "explaining WHAT was investigated, WHY, and WHAT was found. " +
+                    'Return JSON: {"summary":"<causal narrative>"}. No bullet points.',
+                },
+                { role: "user", content: rawSummaries.slice(0, 3000) },
+              ],
+            });
+            if (jr.ok && typeof jr.parsed === "object" && jr.parsed !== null) {
+              const p = jr.parsed as { summary?: string };
+              if (p.summary && p.summary.trim().length > 20) return p.summary.trim();
+            }
+            return rawSummaries;
+          }
+        : undefined;
     this.context = new ContextManager({
       ...config.context,
+      semanticSummarizer,
       onCompressed: (before, after, rounds) => {
         this.emitter.emit("context_compressed", {
           beforeFraction: before,
@@ -1820,6 +1862,8 @@ export class AgentHarness {
       },
       maxToolRoundsPerTurn:
         childConfig.maxRounds ?? this.config.maxToolRoundsPerTurn,
+      // Propagate shared bus so siblings can communicate via publish/subscribe.
+      sharedBus: this.sharedBus,
     });
 
     // Replace child's empty registry with the scoped one
@@ -1866,6 +1910,7 @@ export class AgentHarness {
       startedAt: Date.now(),
       status: "running",
       abortController,
+      dependsOn: childConfig.dependsOn,
     });
 
     // ── Emit spawned event ──────────────────────────────────────────────────
@@ -2375,7 +2420,7 @@ export class AgentHarness {
       });
     }
 
-    const messages = this.context.buildMessages();
+    const messages = await this.context.buildMessages();
     const tools = this.registry.toOpenAIFormat();
     const accumulator = new StreamAccumulator();
 
@@ -2932,13 +2977,45 @@ export class AgentHarness {
           });
         }
 
-        // Reflexion auto-persist (#2 VIGIL): awaited with error boundary — no silent swallowing
+        // Reflexion auto-persist: semantic lesson extraction via fast model, then remember().
         if (this.registry.has("remember")) {
           const reflectionKey = `reflection:${hashString(this.lastUserMessage).slice(0, 12)}`;
-          const reflectionValue =
+          let reflectionValue =
             `[Round ${this.roundCount}] All tools failed. ` +
             `Errors: ${errorSummary.slice(0, 200)}. ` +
             `Task: ${this.lastUserMessage.slice(0, 80)}`;
+          // Semantic upgrade: ask fast model to extract a reusable lesson.
+          if (process.env["AGENT_REFLEXION_SEMANTIC"] !== "0") {
+            try {
+              const jr = await completeChatJson(this.client, {
+                model: getFastModelSlug(this.config.model),
+                temperature: 0,
+                maxTokens: 220,
+                messages: [
+                  {
+                    role: "system",
+                    content:
+                      "Diagnose this tool-failure round and extract a concise reusable lesson. " +
+                      'Return JSON: {"lesson":"<max 200 chars>","root_cause":"<max 100 chars>","fix_pattern":"<max 100 chars>"}. ' +
+                      "Be specific — name the tool that failed and why.",
+                  },
+                  {
+                    role: "user",
+                    content: `Task: ${this.lastUserMessage.slice(0, 300)}\nErrors: ${errorSummary.slice(0, 600)}`,
+                  },
+                ],
+              });
+              if (jr.ok && typeof jr.parsed === "object" && jr.parsed !== null) {
+                const p = jr.parsed as { lesson?: string; root_cause?: string; fix_pattern?: string };
+                if (p.lesson) {
+                  reflectionValue =
+                    `LESSON: ${p.lesson.slice(0, 200)} | ROOT: ${(p.root_cause ?? "").slice(0, 100)} | FIX: ${(p.fix_pattern ?? "").slice(0, 100)}`;
+                }
+              }
+            } catch {
+              /* keep fallback value */
+            }
+          }
           try {
             await this.dispatcher.directCall("remember", { key: reflectionKey, value: reflectionValue });
           } catch (err) {
@@ -2948,6 +3025,8 @@ export class AgentHarness {
             });
           }
         }
+        // Track which rules were mentioned in the error context for effectiveness stats.
+        void bumpRuleHits(errorSummary, true);
       }
 
       await this.runLintSelfHealIfNeeded();
@@ -3067,11 +3146,11 @@ export class AgentHarness {
             await this.runReActLoop(round);
             return;
           }
-          const synthesisCaveat =
-            "\n\nCoverage note: this draft appears substantively complete, so I am finalizing without more fetch retries. " +
-            "Treat fine-grained chronology/source density as provisional where direct verification was blocked.";
-          this.context.appendMessage({ role: "assistant", content: synthesisCaveat });
-          this.emitter.emit("text", { delta: synthesisCaveat, channel: "user" });
+          this.emitter.emit("synthesis_check", {
+            passed: false,
+            reason: "checklist_incomplete_substantive_draft",
+            substantiveDraftComplete: substantiveDraftLikelyComplete,
+          });
         }
       }
 
@@ -3159,10 +3238,17 @@ export class AgentHarness {
         return;
       }
 
+      const finalizeIntent = this.turnInference?.intent ?? "knowledge";
+      const userFreshnessExplicit = isFreshnessSensitivePrompt(this.lastUserMessage);
+      const inferredFreshness = Boolean(this.turnInference?.freshnessSensitive);
       const liveNowClaimed = hasLiveNowClaims(assistantText);
+      // On introspection turns, only run recency when the user explicitly asked for
+      // fresh/live info or the draft uses strong live-now phrasing — avoids false
+      // positives when a small model marks capability questions as freshness-sensitive.
       const recencyRequired =
-        (this.turnInference?.freshnessSensitive ?? isFreshnessSensitivePrompt(this.lastUserMessage)) ||
-        liveNowClaimed;
+        userFreshnessExplicit ||
+        liveNowClaimed ||
+        (finalizeIntent !== "introspection" && inferredFreshness);
       if (recencyRequired) {
         const evidenceBlob = this.evidenceLog.map((e) => e.excerpt).join("\n");
         const weatherFresh = hasWeatherFreshEvidence(`${assistantText}\n${evidenceBlob}`);
@@ -3195,13 +3281,6 @@ export class AgentHarness {
             await this.runReActLoop(round);
             return;
           }
-        }
-        if (!recencyPassed) {
-          const caveat =
-            "\n\nAs of now, I could not fully verify the latest authoritative state. " +
-            "Treat version/current claims as provisional until confirmed from official release/docs sources.";
-          this.context.appendMessage({ role: "assistant", content: caveat });
-          this.emitter.emit("text", { delta: caveat, channel: "user" });
         }
       } else {
         this.emitter.emit("recency_check", {
