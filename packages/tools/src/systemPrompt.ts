@@ -206,12 +206,67 @@ When the user asks what tools you have, prefer this concise format:
 3) available-on-activation families
 Avoid dumping exhaustive catalogs unless explicitly requested.`;
 
+export type ProtocolIntentHint =
+  | "introspection"
+  | "knowledge"
+  | "coding"
+  | "execution"
+  | "any";
+
+/**
+ * Build extra protocol text from registered tool names, optionally filtered by intent class.
+ *
+ * When `intentHint` is provided, heavy sections irrelevant to the intent are suppressed:
+ *   - coding: skip MARKETS_PROTOCOL, VAULT_PROTOCOL (heavy knowledge KB sections)
+ *   - execution: skip MARKETS_PROTOCOL, DOCUMENT_ENGINE
+ *   - introspection: skip MARKETS_PROTOCOL, DOCUMENT_ENGINE, VAULT_PROTOCOL, VISION_SIDECAR
+ *   - knowledge / any: include everything (default behaviour)
+ *
+ * This trims 300–800 tokens on focused tasks without losing any critical guardrails.
+ */
+export function buildAdaptiveProtocolSuffix(
+  toolNames: Iterable<string>,
+  intentHint: ProtocolIntentHint
+): string {
+  return buildProtocolDynamicSuffix(toolNames, intentHint);
+}
+
 /**
  * Build extra protocol text from registered tool names (smaller for scoped child agents).
  */
-export function buildProtocolDynamicSuffix(toolNames: Iterable<string>): string {
+export function buildProtocolDynamicSuffix(
+  toolNames: Iterable<string>,
+  intentHint: ProtocolIntentHint = "any"
+): string {
   const names = new Set(toolNames);
   if (names.size === 0) return "";
+
+  // Resolve intent: explicit arg wins; then env var; then "any" (full output).
+  const resolvedIntent: ProtocolIntentHint =
+    intentHint !== "any"
+      ? intentHint
+      : ((): ProtocolIntentHint => {
+          const env = process.env["AGENT_PROTOCOL_INTENT_HINT"]?.trim().toLowerCase();
+          if (
+            env === "coding" ||
+            env === "knowledge" ||
+            env === "execution" ||
+            env === "introspection"
+          ) {
+            return env;
+          }
+          return "any";
+        })();
+
+  // Intent-based suppression: drop heavy irrelevant sections to save 300–800 tokens.
+  const skipMarkets =
+    resolvedIntent === "coding" || resolvedIntent === "execution" || resolvedIntent === "introspection";
+  const skipVault =
+    resolvedIntent === "coding" || resolvedIntent === "introspection";
+  const skipDoc =
+    resolvedIntent === "coding" || resolvedIntent === "execution" || resolvedIntent === "introspection";
+  const skipVision = resolvedIntent === "introspection";
+
   const parts: string[] = [];
   if (names.has("list_tool_families") || names.has("activate_tool_family")) {
     parts.push(LAZY_TOOL_LOADING);
@@ -234,7 +289,7 @@ export function buildProtocolDynamicSuffix(toolNames: Iterable<string>): string 
         "Pair with AGENT_PROGRESS.md, task_checkpoint, and AGENT_SESSION_MODE (initializer|coding) in .env."
     );
   }
-  if ([...names].some((n) => n.startsWith("vault_"))) {
+  if (!skipVault && [...names].some((n) => n.startsWith("vault_"))) {
     parts.push(VAULT_PROTOCOL);
   }
   if (
@@ -269,13 +324,13 @@ export function buildProtocolDynamicSuffix(toolNames: Iterable<string>): string 
       "- After web_research returns, synthesize immediately — do not follow up with more searches on the same angle (R-RESEARCH-BUDGET)."
     );
   }
-  if (names.has("doc_plan")) {
+  if (!skipDoc && names.has("doc_plan")) {
     parts.push(DOCUMENT_ENGINE);
   }
-  if (names.has("vision_analyze")) {
+  if (!skipVision && names.has("vision_analyze")) {
     parts.push(VISION_SIDEcar);
   }
-  if (names.has("markets_quote")) {
+  if (!skipMarkets && names.has("markets_quote")) {
     parts.push(MARKETS_PROTOCOL);
   }
   parts.push(STRUCTURED_RETRY);
