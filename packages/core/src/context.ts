@@ -162,7 +162,7 @@ export class ContextManager {
     recommendedRecallK: number;
     suggestedMaxExtraRounds: number;
   } {
-    const snap = this.computeSnapshot(this.buildMessages());
+    const snap = this.computeSnapshot(this.buildMessagesSync());
     const headroom = Math.max(0, 1 - snap.usageFraction);
     const recommendedRecallK = Math.max(3, Math.min(12, Math.floor(headroom * 24)));
     const suggestedMaxExtraRounds = snap.usageFraction >= 0.75 ? 4 : snap.usageFraction >= 0.55 ? 8 : 16;
@@ -280,7 +280,7 @@ export class ContextManager {
     this.conversation.push(message);
   }
 
-  buildMessages(): Message[] {
+  async buildMessages(): Promise<Message[]> {
     const inception = this.getEffectiveInception();
     const working: Message[] = [];
     const ws = this.epistemicState
@@ -297,14 +297,30 @@ export class ContextManager {
 
     const snap = this.computeSnapshot(messages);
     if (snap.usageFraction >= this.config.thresholdFraction) {
-      messages = this.compressOldRounds(inception, this.conversation);
+      messages = await this.compressOldRounds(inception, this.conversation);
     }
 
     return messages;
   }
 
+  /** Synchronous message build (no semantic compression) — used for token counting only. */
+  buildMessagesSync(): Message[] {
+    const inception = this.getEffectiveInception();
+    const working: Message[] = [];
+    const ws = this.epistemicState
+      ? renderEpistemicStateBlock(this.epistemicState)
+      : this.workingStateBlock.trim();
+    if (ws) {
+      working.push({
+        role: "system",
+        content: `[WORKING STATE — bounded task snapshot; refreshed each tool round]\n${ws}`,
+      });
+    }
+    return [...inception, ...working, ...this.conversation];
+  }
+
   snapshot(): ContextSnapshot {
-    return this.computeSnapshot(this.buildMessages());
+    return this.computeSnapshot(this.buildMessagesSync());
   }
 
   /** Returns the last assistant text message (for subtask result extraction). */
@@ -343,7 +359,7 @@ export class ContextManager {
    * (#1 Fix Fallback Masking — KEEP_RECENT_ROUNDS unified here)
    * (#7 Structured Event Log — calls onCompressed callback)
    */
-  private compressOldRounds(inception: Message[], conv: Message[]): Message[] {
+  private async compressOldRounds(inception: Message[], conv: Message[]): Promise<Message[]> {
     const keepRecent = this.config.keepRecentRounds ?? 6;
     const rounds = extractRounds(conv);
 
@@ -375,6 +391,16 @@ export class ContextManager {
 
     // Build summary message
     const summaryLines = toCompress.map((r) => r.summary).join("\n");
+    // Semantic compression: if a summarizer is wired, produce a causal narrative.
+    let humanDigest = summaryLines;
+    if (this.config.semanticSummarizer) {
+      try {
+        const causal = await this.config.semanticSummarizer(summaryLines);
+        if (causal && causal.trim().length > 20) humanDigest = causal.trim();
+      } catch {
+        /* fall back to raw one-liners */
+      }
+    }
     const structured = JSON.stringify({
       v: 1,
       kind: "context_compression",
@@ -393,7 +419,7 @@ export class ContextManager {
         "```json\n" +
         structured +
         "\n```\n" +
-        `Human-readable digest:\n${summaryLines}\n` +
+        `Human-readable digest:\n${humanDigest}\n` +
         `[End summary — use recall/search_memory/memory_query to access any stored details]`,
     };
 
