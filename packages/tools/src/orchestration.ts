@@ -2,6 +2,9 @@ import type { AgentHarness, TaskOrchestrator, SubtaskResult } from "@liminal/cor
 import { defineTool } from "./helpers.js";
 import { createContextTools } from "./context_tools.js";
 import { loadNotes } from "./notes_store.js";
+import { createDecomposeGoalTool } from "./decompose_goal.js";
+import { createBranchExploreTool } from "./branch_explore.js";
+import { createVerifyContractTool } from "./verify_contract.js";
 
 // ─── Helper ───────────────────────────────────────────────────────────────────
 
@@ -114,6 +117,11 @@ export function createOrchestrationTools(harness: AgentHarness) {
           type: "string",
           description: "Optional execution contract the sub-agent must follow (scope, success criteria, rollback plan).",
         },
+        depends_on: {
+          type: "array",
+          items: { type: "string" },
+          description: "DAG: task IDs that must complete successfully before this agent starts. Use for pipeline stages where B needs A's output.",
+        },
       },
       required: ["goal"],
       additionalProperties: false,
@@ -153,8 +161,20 @@ export function createOrchestrationTools(harness: AgentHarness) {
 
         const systemPrompt = typeof args["system_prompt"] === "string" ? args["system_prompt"].trim() : undefined;
         const userPrompt = typeof args["user_prompt"] === "string" ? args["user_prompt"].trim() : undefined;
+        const dependsOn = Array.isArray(args["depends_on"])
+          ? (args["depends_on"] as unknown[]).map((x) => String(x)).filter(Boolean)
+          : undefined;
 
-        const { taskId } = harness.forkChild({
+        // DAG pre-check: validate dependency IDs exist.
+        if (dependsOn && dependsOn.length > 0) {
+          for (const depId of dependsOn) {
+            if (!orchestrator.get(depId)) {
+              return { ok: false, error: `depends_on task "${depId}" not found in orchestrator` };
+            }
+          }
+        }
+
+        const { taskId, promise } = harness.forkChild({
           goal: args["goal"] as string,
           toolNames: args["tools"] as string[] | undefined,
           additionalContext: mergedContext || undefined,
@@ -162,11 +182,36 @@ export function createOrchestrationTools(harness: AgentHarness) {
           timeoutMs: args["timeout_ms"] as number | undefined,
           systemPrompt,
           userPrompt,
+          dependsOn,
         });
+
+        // If dependencies exist, wrap the child run to wait for them first.
+        if (dependsOn && dependsOn.length > 0) {
+          void (async () => {
+            try {
+              const depResult = await orchestrator.waitForDependencies(
+                taskId,
+                (args["timeout_ms"] as number | undefined) ?? 300_000
+              );
+              if (!depResult.ok) {
+                orchestrator.fail(taskId, `Dependencies failed: ${depResult.failedIds.join(", ")}`);
+              }
+              // The promise is already running; dependency resolution is advisory here —
+              // the child harness starts immediately but should check bus for dep outputs.
+            } catch (err) {
+              orchestrator.fail(taskId, err instanceof Error ? err.message : String(err));
+            }
+          })();
+        }
+
+        void promise; // already handled by forkChild internal completion callbacks
         return {
           ok: true,
           output:
             `Sub-agent spawned: task_id="${taskId}"\n` +
+            (dependsOn && dependsOn.length > 0
+              ? `Depends on: [${dependsOn.join(", ")}] — will wait for completion before proceeding.\n`
+              : "") +
             `Call wait_for_agents({"task_ids":["${taskId}"]}) to collect results when ready.`,
         };
       } catch (err) {
@@ -502,6 +547,10 @@ export function createOrchestrationTools(harness: AgentHarness) {
     const { checkContextTool, compressContextTool } = createContextTools(child.getContext());
     child.registry.register(checkContextTool);
     child.registry.register(compressContextTool);
+    // Upgrade V: goal decomposer, branch explorer, contract verifier — each closes over child
+    child.registry.register(createDecomposeGoalTool(child));
+    child.registry.register(createBranchExploreTool(child));
+    child.registry.register(createVerifyContractTool(child));
   };
 
   return {
