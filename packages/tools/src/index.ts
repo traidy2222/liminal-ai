@@ -55,6 +55,10 @@ import { createRefreshWorldContextTool } from "./refresh_world_context.js";
 import { createSetPersonaTool } from "./set_persona.js";
 import { createToolDiscoveryTools } from "./tool_activation.js";
 import { applyLazyRegistrationPolicy } from "./tool_catalog.js";
+// New tools — Upgrade V
+import { createDecomposeGoalTool } from "./decompose_goal.js";
+import { createBranchExploreTool } from "./branch_explore.js";
+import { createVerifyContractTool } from "./verify_contract.js";
 // New tools — Upgrade IV
 import { gitStatusTool, gitDiffTool, gitLogTool, gitBranchTool, gitCommitTool } from "./git_tools.js";
 import { patchFileTool } from "./patch_file.js";
@@ -217,6 +221,11 @@ export function registerAllTools(
     // Harness-scoped multimodal + extraction tools
     registry.register(createUploadImageTool(harness));
     registry.register(createExtractStructuredTool(harness));
+
+    // Upgrade V: goal decomposer, branch explorer, contract verifier
+    registry.register(createDecomposeGoalTool(harness));
+    registry.register(createBranchExploreTool(harness));
+    registry.register(createVerifyContractTool(harness));
   }
 
   applyLazyRegistrationPolicy(registry, !!harness);
@@ -231,10 +240,14 @@ export {
   buildInceptionMessages,
   PROTOCOL_CORE,
   buildProtocolDynamicSuffix,
+  buildAdaptiveProtocolSuffix,
 } from "./systemPrompt.js";
+export type { ProtocolIntentHint } from "./systemPrompt.js";
 export { buildPersonaBlock, buildRichPersonaBlock } from "./persona_presets.js";
 export type { PersonaProfile, SpeechStyle, PersonaTone } from "./persona_presets.js";
 export { applyLazyRegistrationPolicy, TOOL_FAMILIES } from "./tool_catalog.js";
 export { createOrchestrationTools } from "./orchestration.js";
 export { createContextTools } from "./context_tools.js";
 export { createSetPersonaTool } from "./set_persona.js";
+export { loadPlugins } from "./plugin_loader.js";
+export type { PluginModule, PluginLoadResult } from "./plugin_loader.js";
