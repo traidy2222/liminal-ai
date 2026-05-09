@@ -17,6 +17,7 @@ export {
   memoryTypeBoost,
   recencyBoost,
   trustBoost,
+  spacedRepetitionDecay,
 } from "./memory_rank.js";
 export type { RankableDoc } from "./memory_rank.js";
 export { cosineSimilarity, fetchEmbeddings } from "./embeddings.js";
@@ -127,3 +128,12 @@ export type {
   InputShortcutEvent,
   InputShortcutContext,
 } from "./input_semantics.js";
+export { SharedMemoryBus } from "./shared_memory_bus.js";
+export type { BusListener } from "./shared_memory_bus.js";
+export {
+  bumpRuleHits,
+  extractRuleIds,
+  formatRuleStatsReport,
+  ruleStatsPath,
+} from "./rule_stats.js";
+export type { RuleStatEntry, RuleStats } from "./rule_stats.js";

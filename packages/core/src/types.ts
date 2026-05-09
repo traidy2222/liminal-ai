@@ -123,6 +123,13 @@ export interface ContextConfig {
    * Keeps core prompt small; expanded rules only when matching tools exist (e.g. child agents).
    */
   protocolDynamicBuilder?: (toolNames: string[]) => string;
+  /**
+   * Optional async callback that produces a 2-3 sentence causal narrative summary for a
+   * batch of compressed tool rounds. Used by AGENT_COMPRESS_SEMANTIC=1 to replace
+   * tool-name one-liners with causal summaries in compression blocks.
+   * Called with the raw one-liner summaries; returns a semantic paragraph.
+   */
+  semanticSummarizer?: (rawSummaries: string) => Promise<string>;
 }
 
 export interface ContextSnapshot {
@@ -245,6 +252,11 @@ export interface ChildAgentConfig {
    * Write this as the full detailed task — what to do, what to include, what to avoid.
    */
   userPrompt?: string;
+  /**
+   * DAG dependency task IDs — this child will be registered with these dependencies
+   * so the orchestrator can resolve them before starting execution.
+   */
+  dependsOn?: string[];
 }
 
 export interface SubtaskResult {
@@ -587,6 +599,12 @@ export interface AgentEventMap {
     reason: string;
     attemptedRecovery: boolean;
   };
+  /** Research finalize checklist: advisory only — never mutates assistant text. */
+  synthesis_check: {
+    passed: boolean;
+    reason: string;
+    substantiveDraftComplete: boolean;
+  };
   lint_heal_pass: {
     pass: number;
     maxPasses: number;
@@ -718,6 +736,12 @@ export interface AgentConfig {
     timeoutMs?: number;
     maxImageBytes?: number;
   };
+  /**
+   * Cross-harness shared memory bus for sibling/parent-child fact sharing within a session.
+   * Pass the same instance to all harnesses that should communicate.
+   * If not provided on root, one is created automatically and propagated to children.
+   */
+  sharedBus?: import("./shared_memory_bus.js").SharedMemoryBus;
 }
 
 // Re-export so consumers can type worldContext without importing world_context directly
