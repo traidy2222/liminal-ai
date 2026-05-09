@@ -77,6 +77,47 @@ export function recencyBoost(iso: string | undefined, nowMs: number): number {
   return 0.12 / (1 + days / 90);
 }
 
+/**
+ * Spaced repetition decay score — penalises notes that have not been accessed recently.
+ * Uses an exponential decay with configurable half-life (default: 30 days).
+ * Notes accessed recently resist decay regardless of creation date.
+ *
+ * Returns a multiplier in [0.25, 1.0]:
+ *   - 1.0 for notes accessed within 7 days
+ *   - 0.5 at ~30 days without access (half-life)
+ *   - 0.25 floor to prevent total suppression of old-but-valid facts
+ */
+export function spacedRepetitionDecay(opts: {
+  lastAccessedAt?: string;
+  accessCount?: number;
+  confidence?: number;
+  halfLifeDays?: number;
+  nowMs?: number;
+}): number {
+  const now = opts.nowMs ?? Date.now();
+  const halfLife = Math.max(1, opts.halfLifeDays ?? 30);
+  const floor = 0.25;
+  const ceiling = 1.0;
+
+  // Notes with high access counts resist decay (they've been proven useful).
+  const accessCount = Math.min(opts.accessCount ?? 0, 50);
+  const accessResistance = Math.min(0.4, accessCount * 0.008); // up to +0.4 resistance
+
+  if (!opts.lastAccessedAt) {
+    // Never accessed — decay is moderate; confidence lifts it somewhat.
+    const confLift = (opts.confidence ?? 0.5) * 0.15;
+    return Math.max(floor, 0.55 + confLift + accessResistance);
+  }
+
+  const t = new Date(opts.lastAccessedAt).getTime();
+  if (Number.isNaN(t)) return 0.6;
+
+  const daysSinceAccess = Math.max(0, (now - t) / 86_400_000);
+  const decayed = Math.pow(0.5, daysSinceAccess / halfLife);
+  const adjusted = Math.min(ceiling, decayed + accessResistance);
+  return Math.max(floor, adjusted);
+}
+
 /** Optional trust signal from StoredNote (Phase 2). */
 export function trustBoost(accessCount?: number, confidence?: number): number {
   const c = confidence ?? 0.5;
@@ -88,6 +129,8 @@ export interface RankableDoc {
   id: string;
   text: string;
   updatedAt?: string;
+  /** ISO timestamp of last retrieval — used for spaced repetition decay. */
+  lastAccessedAt?: string;
   memoryType?: string;
   accessCount?: number;
   confidence?: number;
@@ -118,12 +161,19 @@ export function rankDocumentsForQuery(
     const bm = bm25ForQuery(queryTerms, docTokenLists[i]!, df, N, avgdl);
     const sub =
       doc.text.toLowerCase().includes(qLower) && qLower.length >= 2 ? 0.25 : 0;
-    const score =
+    const decay = spacedRepetitionDecay({
+      lastAccessedAt: doc.lastAccessedAt,
+      accessCount: doc.accessCount,
+      confidence: doc.confidence,
+      nowMs: now,
+    });
+    const rawScore =
       bm +
       sub +
       memoryTypeBoost(doc.memoryType) +
       recencyBoost(doc.updatedAt, now) +
       trustBoost(doc.accessCount, doc.confidence);
+    const score = rawScore * decay;
     return { id: doc.id, score, doc };
   });
 
