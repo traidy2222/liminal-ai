@@ -75,6 +75,20 @@ export async function bumpRuleHits(context: string, preventedError = false): Pro
   }
 }
 
+/** Return a map of ruleId → hitCount for adaptive rule injection. */
+export async function getRuleHitCounts(): Promise<Map<string, number>> {
+  try {
+    const stats = await loadRuleStats();
+    const out = new Map<string, number>();
+    for (const [id, entry] of Object.entries(stats.rules)) {
+      out.set(id, entry.hitCount);
+    }
+    return out;
+  } catch {
+    return new Map();
+  }
+}
+
 /**
  * Format rule stats for display (e.g. in world context or suggest_improvement).
  * Returns top N rules by hit count with effectiveness ratio.

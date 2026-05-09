@@ -100,7 +100,8 @@ export {
 } from "./output_distill.js";
 export type { DistilledOutput } from "./output_distill.js";
 export { appendFailureLog, failureLogPath } from "./failure_log.js";
-export { attachSessionEventLog, maybeAttachSessionEventLog } from "./session_event_log.js";
+export { attachSessionEventLog, maybeAttachSessionEventLog, writeYieldSnapshot } from "./session_event_log.js";
+export type { YieldSnapshot } from "./session_event_log.js";
 export { appendGoldenEvalRecord } from "./golden_eval.js";
 export { resolveProviderConfig, resolveVisionProviderConfig } from "./provider_config.js";
 export type { ProviderConfig, ProviderConfigOverrides, VisionProviderConfig } from "./provider_config.js";

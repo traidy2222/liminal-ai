@@ -1,4 +1,4 @@
-import { useEffect, useReducer, useCallback } from "react";
+import { useEffect, useReducer, useCallback, useRef } from "react";
 import type { ImageAttachment } from "./imageAttachments.js";
 
 function sanitizeDeltaText(text: string): string {
@@ -234,7 +234,6 @@ function reducer(state: SSEState, action: Action): SSEState {
       };
 
     case "approval_resolved": {
-      // Transition the approved tool_call from pending_approval → running
       const pendingCallId = state.pendingApproval?.callId;
       const messages = pendingCallId
         ? state.messages.map((m) =>
@@ -380,6 +379,47 @@ function reducer(state: SSEState, action: Action): SSEState {
 
 const SERVER = "http://localhost:3001";
 
+// ─── Retry helpers ────────────────────────────────────────────────────────────
+
+function reconnectDelay(attempt: number): number {
+  // 300ms → 600ms → 1.2s → 2.4s → 4.8s → 8s cap, plus small jitter
+  return Math.min(300 * 2 ** attempt, 8_000) + Math.random() * 150;
+}
+
+function postDelay(attempt: number): number {
+  return Math.min(500 * 2 ** attempt, 8_000) + Math.random() * 200;
+}
+
+async function sleep(ms: number): Promise<void> {
+  return new Promise((r) => setTimeout(r, ms));
+}
+
+async function fetchWithRetry(
+  url: string,
+  init: RequestInit,
+  maxAttempts = 8
+): Promise<{ ok: boolean; status: number; body: unknown }> {
+  let lastErr = "";
+  for (let i = 0; i < maxAttempts; i++) {
+    if (i > 0) await sleep(postDelay(i - 1));
+    try {
+      const r = await fetch(url, init);
+      const body = await r.json().catch(() => ({}));
+      // 409 = agent busy; treat as success — first attempt got through
+      if (r.status === 409) return { ok: true, status: 409, body };
+      // 4xx client error — don't retry
+      if (r.status >= 400 && r.status < 500) return { ok: false, status: r.status, body };
+      if (r.ok) return { ok: true, status: r.status, body };
+      lastErr = (body as { error?: string }).error ?? `HTTP ${r.status}`;
+    } catch (e) {
+      lastErr = e instanceof Error ? e.message : "Network error";
+    }
+  }
+  return { ok: false, status: 0, body: { error: lastErr } };
+}
+
+// ─── React hook ───────────────────────────────────────────────────────────────
+
 export interface OutgoingChatMessage {
   text: string;
   attachments?: ImageAttachment[];
@@ -403,160 +443,196 @@ export function useSSE() {
     uiVerbosity: "normal",
   });
 
+  // Text-batching refs — stable across renders, safe to use inside EventSource callbacks.
+  const queuedText = useRef("");
+  const queuedTrace = useRef("");
+  const flushTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Reconnect state — managed outside React so it survives re-renders without effect re-runs.
+  const lastEventId = useRef<string | undefined>(undefined);
+  const reconnectAttempt = useRef(0);
+  const reconnectTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const esRef = useRef<EventSource | null>(null);
+  const cancelledRef = useRef(false);
+
   useEffect(() => {
-    let es: EventSource | null = null;
-    let cancelled = false;
-    let queuedText = "";
-    let queuedTrace = "";
-    let flushTimer: ReturnType<typeof setTimeout> | null = null;
+    cancelledRef.current = false;
+
     const flush = () => {
-      flushTimer = null;
-      if (queuedText) {
-        dispatch({ type: "text", payload: { delta: queuedText, channel: "user" } });
-        queuedText = "";
+      flushTimer.current = null;
+      if (queuedText.current) {
+        dispatch({ type: "text", payload: { delta: queuedText.current, channel: "user" } });
+        queuedText.current = "";
       }
-      if (queuedTrace) {
-        dispatch({ type: "text", payload: { delta: queuedTrace, channel: "trace" } });
-        queuedTrace = "";
+      if (queuedTrace.current) {
+        dispatch({ type: "text", payload: { delta: queuedTrace.current, channel: "trace" } });
+        queuedTrace.current = "";
       }
     };
     const queueFlush = () => {
-      if (flushTimer) return;
-      flushTimer = setTimeout(flush, 40);
+      if (!flushTimer.current) flushTimer.current = setTimeout(flush, 40);
     };
     const flushNow = () => {
-      if (flushTimer) clearTimeout(flushTimer);
+      if (flushTimer.current) { clearTimeout(flushTimer.current); flushTimer.current = null; }
       flush();
     };
 
-    void (async () => {
-      try {
-        const r = await fetch(`${SERVER}/api/config`);
-        if (r.ok) {
-          const cfg = (await r.json()) as { uiVerbosity?: string };
-          if (!cancelled && cfg.uiVerbosity === "quiet") {
-            dispatch({ type: "init_config", uiVerbosity: "quiet" });
-          }
+    // Fetch config once — fire-and-forget, never blocks the SSE connection.
+    fetch(`${SERVER}/api/config`)
+      .then((r) => r.ok ? r.json() : null)
+      .then((cfg: { uiVerbosity?: string } | null) => {
+        if (!cancelledRef.current && cfg?.uiVerbosity === "quiet") {
+          dispatch({ type: "init_config", uiVerbosity: "quiet" });
         }
-      } catch {
-        /* default normal */
-      }
-      if (cancelled) return;
+      })
+      .catch(() => { /* default normal */ });
 
-      es = new EventSource(`${SERVER}/api/stream`);
+    function connect() {
+      if (cancelledRef.current) return;
 
-      es.addEventListener("connected", () => dispatch({ type: "connected" }));
+      // Build URL — pass lastEventId as query param so server can replay missed events.
+      const eid = lastEventId.current;
+      const url = eid
+        ? `${SERVER}/api/stream?lastEventId=${encodeURIComponent(eid)}`
+        : `${SERVER}/api/stream`;
+
+      const es = new EventSource(url);
+      esRef.current = es;
+
+      es.addEventListener("connected", () => {
+        reconnectAttempt.current = 0;
+        dispatch({ type: "connected" });
+      });
+
+      // Grab the event ID from every event so we can resume after reconnect.
+      const trackId = (e: MessageEvent) => {
+        if (e.lastEventId) lastEventId.current = e.lastEventId;
+      };
+
       es.addEventListener("text", (e: MessageEvent) => {
+        trackId(e);
         const payload = JSON.parse(e.data) as { delta: string; channel?: "user" | "trace" };
         const cleaned = sanitizeDeltaText(payload.delta);
-        if ((payload.channel ?? "user") === "trace") queuedTrace += cleaned;
-        else queuedText += cleaned;
+        if ((payload.channel ?? "user") === "trace") queuedTrace.current += cleaned;
+        else queuedText.current += cleaned;
         queueFlush();
       });
-      es.addEventListener("provider_retry", (e: MessageEvent) =>
-        dispatch({ type: "provider_retry", payload: JSON.parse(e.data) })
-      );
+
+      es.addEventListener("provider_retry", (e: MessageEvent) => {
+        trackId(e);
+        dispatch({ type: "provider_retry", payload: JSON.parse(e.data) });
+      });
       es.addEventListener("tool_start", (e: MessageEvent) => {
-        flushNow();
+        trackId(e); flushNow();
         dispatch({ type: "tool_start", payload: JSON.parse(e.data) });
       });
       es.addEventListener("tool_delta", (e: MessageEvent) => {
-        flushNow();
+        trackId(e); flushNow();
         dispatch({ type: "tool_delta", payload: JSON.parse(e.data) });
       });
       es.addEventListener("tool_approval", (e: MessageEvent) => {
-        flushNow();
+        trackId(e); flushNow();
         dispatch({ type: "tool_approval", payload: JSON.parse(e.data) });
       });
       es.addEventListener("tool_result", (e: MessageEvent) => {
-        flushNow();
+        trackId(e); flushNow();
         dispatch({ type: "tool_result", payload: JSON.parse(e.data) });
       });
       es.addEventListener("ask_user", (e: MessageEvent) => {
-        flushNow();
+        trackId(e); flushNow();
         dispatch({ type: "ask_user", payload: JSON.parse(e.data) });
       });
       es.addEventListener("turn_end", (e: MessageEvent) => {
-        flushNow();
+        trackId(e); flushNow();
         dispatch({ type: "turn_end", payload: JSON.parse(e.data) });
       });
       es.addEventListener("subtask_spawned", (e: MessageEvent) => {
-        flushNow();
+        trackId(e); flushNow();
         dispatch({ type: "subtask_spawned", payload: JSON.parse(e.data) });
       });
       es.addEventListener("subtask_complete", (e: MessageEvent) => {
-        flushNow();
+        trackId(e); flushNow();
         dispatch({ type: "subtask_complete", payload: JSON.parse(e.data) });
       });
+      es.addEventListener("subtask_output", (e: MessageEvent) => {
+        trackId(e); flushNow();
+        dispatch({ type: "subtask_output", payload: JSON.parse(e.data) });
+      });
       es.addEventListener("plan_step_done", (e: MessageEvent) => {
-        flushNow();
+        trackId(e); flushNow();
         dispatch({ type: "plan_step_done", payload: JSON.parse(e.data) });
       });
       es.addEventListener("context_compressed", (e: MessageEvent) => {
-        flushNow();
+        trackId(e); flushNow();
         dispatch({ type: "context_compressed", payload: JSON.parse(e.data) });
       });
       es.addEventListener("persona_changed", (e: MessageEvent) => {
-        flushNow();
+        trackId(e); flushNow();
         dispatch({ type: "persona_changed", payload: JSON.parse(e.data) });
       });
-      es.addEventListener("subtask_output", (e: MessageEvent) => {
-        flushNow();
-        dispatch({ type: "subtask_output", payload: JSON.parse(e.data) });
+      es.addEventListener("error", (e: MessageEvent) => {
+        trackId(e); flushNow();
+        dispatch({ type: "error", payload: JSON.parse((e as MessageEvent).data ?? '{"message":"Agent error"}') });
       });
       es.addEventListener("runtime_pref_detected", (e: MessageEvent) => {
+        trackId(e);
         const p = JSON.parse(e.data) as { summary: string; risky: boolean };
-        dispatch({
-          type: "text",
-          payload: {
-            channel: "trace",
-            delta: `\n[prefs] detected risky=${p.risky ? "yes" : "no"} ${p.summary}\n`,
-          },
-        });
+        dispatch({ type: "text", payload: { channel: "trace", delta: `\n[prefs] detected risky=${p.risky ? "yes" : "no"} ${p.summary}\n` } });
       });
       es.addEventListener("runtime_pref_changed", (e: MessageEvent) => {
+        trackId(e);
         const p = JSON.parse(e.data) as { summary: string; persisted: boolean };
-        dispatch({
-          type: "text",
-          payload: {
-            channel: "trace",
-            delta: `\n[prefs] changed persisted=${p.persisted ? "yes" : "no"} ${p.summary}\n`,
-          },
-        });
+        dispatch({ type: "text", payload: { channel: "trace", delta: `\n[prefs] changed persisted=${p.persisted ? "yes" : "no"} ${p.summary}\n` } });
       });
       es.addEventListener("runtime_pref_persisted", (e: MessageEvent) => {
+        trackId(e);
         const p = JSON.parse(e.data) as { path: string };
-        dispatch({
-          type: "text",
-          payload: { channel: "trace", delta: `\n[prefs] persisted path=${p.path}\n` },
-        });
+        dispatch({ type: "text", payload: { channel: "trace", delta: `\n[prefs] persisted path=${p.path}\n` } });
       });
       es.addEventListener("runtime_pref_rejected", (e: MessageEvent) => {
+        trackId(e);
         const p = JSON.parse(e.data) as { summary: string; reason: string };
-        dispatch({
-          type: "text",
-          payload: { channel: "trace", delta: `\n[prefs] rejected ${p.summary} (${p.reason})\n` },
-        });
+        dispatch({ type: "text", payload: { channel: "trace", delta: `\n[prefs] rejected ${p.summary} (${p.reason})\n` } });
       });
-      es.addEventListener("ask_user_answered", () => {});
-      es.addEventListener("approval_decision", () => {});
-      es.addEventListener("tool_timing", () => {});
-      es.addEventListener("error", (e: MessageEvent) =>
-        dispatch({
-          type: "error",
-          payload: JSON.parse((e as MessageEvent).data ?? '{"message":"Connection error"}'),
-        })
-      );
-      es.onerror = () => dispatch({ type: "disconnected" });
-    })();
+
+      // Ack-only events — no UI effect needed.
+      ["ask_user_answered", "approval_decision", "tool_timing", "vault_activity",
+        "runtime_heartbeat", "drift_detected", "execution_state", "contract_transition",
+        "contract_violation", "recovery_action"].forEach((evt) => {
+        es.addEventListener(evt, trackId as EventListener);
+      });
+
+      // onerror fires for both transient errors (CONNECTING) and fatal closes (CLOSED).
+      es.onerror = () => {
+        if (cancelledRef.current) return;
+
+        // CONNECTING = browser is already retrying; CLOSED = browser gave up.
+        if (es.readyState === EventSource.CONNECTING) {
+          // Browser will retry on its own; just reflect the disconnected state.
+          dispatch({ type: "disconnected" });
+          return;
+        }
+
+        // CLOSED — browser gave up. Take over with our own backoff reconnect.
+        es.close();
+        esRef.current = null;
+        dispatch({ type: "disconnected" });
+
+        const delay = reconnectDelay(reconnectAttempt.current);
+        reconnectAttempt.current = Math.min(reconnectAttempt.current + 1, 6);
+        reconnectTimer.current = setTimeout(connect, delay);
+      };
+    }
+
+    connect();
 
     return () => {
-      cancelled = true;
-      if (flushTimer) clearTimeout(flushTimer);
-      flush();
-      es?.close();
+      cancelledRef.current = true;
+      if (flushTimer.current) clearTimeout(flushTimer.current);
+      if (reconnectTimer.current) clearTimeout(reconnectTimer.current);
+      esRef.current?.close();
+      esRef.current = null;
     };
-  }, []);
+  }, []); // stable — no deps needed, all state tracked via refs
 
   const sendMessage = useCallback(async (payload: OutgoingChatMessage): Promise<SendMessageResult> => {
     const text = payload.text.trim();
@@ -564,67 +640,68 @@ export function useSSE() {
     const renderedUserMessage =
       attachmentCount > 0 ? `${text || "(no text)"}\n[attached images: ${attachmentCount}]` : text;
     dispatch({ type: "user_message", text: renderedUserMessage });
-    try {
-      const r = await fetch(`${SERVER}/api/message`, {
+
+    const result = await fetchWithRetry(
+      `${SERVER}/api/message`,
+      {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ message: text, attachments: payload.attachments ?? [] }),
-      });
-      if (!r.ok) {
-        const p = (await r.json().catch(() => ({}))) as { error?: string };
-        const message = p.error ?? `Send failed (${r.status})`;
-        dispatch({ type: "error", payload: { message } });
-        return { ok: false, error: message };
-      }
-      return { ok: true };
-    } catch {
-      const message = "Message send failed. Check server connection.";
+      },
+      8
+    );
+
+    if (!result.ok) {
+      const message = (result.body as { error?: string }).error ?? `Send failed (${result.status})`;
       dispatch({ type: "error", payload: { message } });
       return { ok: false, error: message };
     }
+    return { ok: true };
   }, []);
 
   const sendApproval = useCallback(async (callId: string, decision: unknown) => {
-    try {
-      const r = await fetch(`${SERVER}/api/approve`, {
+    const result = await fetchWithRetry(
+      `${SERVER}/api/approve`,
+      {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ callId, decision }),
-      });
-      if (r.ok) dispatch({ type: "approval_resolved" });
-      else dispatch({ type: "error", payload: { message: `Approval request failed (${r.status})` } });
-    } catch {
-      dispatch({ type: "error", payload: { message: "Approval request failed. Check server connection." } });
+      },
+      6
+    );
+    if (result.ok) {
+      dispatch({ type: "approval_resolved" });
+    } else {
+      const message = (result.body as { error?: string }).error ?? `Approval failed (${result.status})`;
+      dispatch({ type: "error", payload: { message } });
     }
   }, []);
 
   const sendAnswer = useCallback(async (answer: string) => {
-    try {
-      const r = await fetch(`${SERVER}/api/answer`, {
+    const result = await fetchWithRetry(
+      `${SERVER}/api/answer`,
+      {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ answer }),
-      });
-      if (r.ok) dispatch({ type: "ask_user_resolved" });
-      else dispatch({ type: "error", payload: { message: `Answer submit failed (${r.status})` } });
-    } catch {
-      dispatch({ type: "error", payload: { message: "Answer submit failed. Check server connection." } });
+      },
+      6
+    );
+    if (result.ok) {
+      dispatch({ type: "ask_user_resolved" });
+    } else {
+      const message = (result.body as { error?: string }).error ?? `Answer failed (${result.status})`;
+      dispatch({ type: "error", payload: { message } });
     }
   }, []);
 
   const sendClearSession = useCallback(async () => {
-    const r = await fetch(`${SERVER}/api/session/reset`, { method: "POST" });
-    if (r.ok) {
+    const result = await fetchWithRetry(`${SERVER}/api/session/reset`, { method: "POST" }, 4);
+    if (result.ok) {
       dispatch({ type: "session_reset" });
       return;
     }
-    let msg = `Session reset failed (${r.status})`;
-    try {
-      const j = (await r.json()) as { error?: string };
-      if (j.error) msg = j.error;
-    } catch {
-      /* ignore */
-    }
+    const msg = (result.body as { error?: string }).error ?? `Session reset failed (${result.status})`;
     dispatch({ type: "error", payload: { message: msg } });
   }, []);
 

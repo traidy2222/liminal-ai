@@ -26,9 +26,11 @@ import { distillToolOutput, shouldDistillToolOutput } from "./output_distill.js"
 import { appendFailureLog } from "./failure_log.js";
 import { completeChatJson, getFastModelSlug } from "./router.js";
 import { stableArgsJsonKey } from "./json_stable.js";
-import { HARNESS_RULE_RECALL_MESSAGE } from "./harness_rules.js";
+import { HARNESS_RULE_RECALL_MESSAGE, buildAdaptiveRuleMessage } from "./harness_rules.js";
 import { bumpRecipePattern } from "./recipe_library.js";
-import { bumpRuleHits } from "./rule_stats.js";
+import { addCompressionGuideline, formatCompressionGuidelines } from "./compression_guidelines.js";
+import { bumpRuleHits, getRuleHitCounts } from "./rule_stats.js";
+import { writeYieldSnapshot } from "./session_event_log.js";
 import { SharedMemoryBus } from "./shared_memory_bus.js";
 import { resolveProviderConfig } from "./provider_config.js";
 import type { RuntimePreferences } from "./runtime_prefs.js";
@@ -688,6 +690,7 @@ const ORCHESTRATION_TOOL_NAMES = new Set([
   "evidence_critic",
   "path_critic",
   "policy_critic",
+  "reflect_debate",         // spawns child harnesses — must close over the correct harness
   "check_context",          // closes over parent's ContextManager — child needs its own
   "compress_context",       // same
   "refresh_world_context",  // root-only; children skip world context entirely
@@ -754,6 +757,10 @@ export class AgentHarness {
   private recentToolOutcomeLines: string[] = [];
   private proactiveCompressedThisSend = false;
   private criticConsumedThisSend = false;
+  /** Timestamp of the last compression event in this send (for ACON failure analysis). */
+  private lastCompressionTimestampThisSend = 0;
+  /** Whether ACON guideline analysis has fired this send (one-shot). */
+  private aconGuidelineAnalyzedThisSend = false;
   /** Cached query rewrite for mid-turn recall (AGENT_QUERY_REWRITE). */
   private recallRewriteThisSend: RewriteQueryResult | null = null;
   /** Evidence excerpts for evidence-bounded critic (AGENT_CRITIC_EVIDENCE). */
@@ -1513,6 +1520,7 @@ export class AgentHarness {
       ...config.context,
       semanticSummarizer,
       onCompressed: (before, after, rounds) => {
+        this.lastCompressionTimestampThisSend = Date.now();
         this.emitter.emit("context_compressed", {
           beforeFraction: before,
           afterFraction: after,
@@ -1599,6 +1607,8 @@ export class AgentHarness {
     this.recentToolOutcomeLines = [];
     this.proactiveCompressedThisSend = false;
     this.criticConsumedThisSend = false;
+    this.lastCompressionTimestampThisSend = 0;
+    this.aconGuidelineAnalyzedThisSend = false;
     this.recallRewriteThisSend = null;
     this.evidenceLog = [];
     this.turnEndEmittedThisSend = false;
@@ -1705,6 +1715,19 @@ export class AgentHarness {
         }
       }
 
+      // ACON adaptive compression: inject persisted guidelines so future compressions
+      // preserve information that previously caused errors after compression.
+      if (this.agentDepth === 0) {
+        try {
+          const guidelinePreamble = await formatCompressionGuidelines();
+          if (guidelinePreamble) {
+            this.context.appendCompressionGuidelineNote(guidelinePreamble);
+          }
+        } catch {
+          /* non-fatal */
+        }
+      }
+
       this.context.append({ role: "user", content: userMessage });
       this.context.append({
         role: "user",
@@ -1750,13 +1773,35 @@ export class AgentHarness {
           `PATTERN: ${this.toolsUsedThisTurn.join(" → ")}\n` +
           `ROUNDS: ${this.roundCount}`;
         try {
-          await this.dispatcher.directCall("remember", { key: recipeKey, value: recipeValue });
+          await this.dispatcher.directCall("remember", { key: recipeKey, value: recipeValue, actor_id: this.taskId });
           void bumpRecipePattern(recipeValue);
         } catch (err) {
           this.emitter.emit("text", {
             delta: `\n[HARNESS] Recipe persist failed: ${err instanceof Error ? err.message : String(err)}\n`,
             channel: "trace",
           });
+        }
+
+        // Trajectory episodic memory: store a richer replay note for few-shot recall.
+        // Includes the final answer excerpt so future similar tasks can use it as context.
+        if (this.agentDepth === 0) {
+          const trajectoryKey = `trajectory:${hashString(userMessage).slice(0, 12)}`;
+          const finalAnswer = this.context.getLastAssistantMessage() ?? "";
+          const trajectoryValue =
+            `GOAL: ${userMessage.slice(0, 120)}\n` +
+            `TOOL_SEQUENCE: ${this.toolsUsedThisTurn.join(" → ")}\n` +
+            `ROUNDS: ${this.roundCount}\n` +
+            `OUTCOME: ${finalAnswer.slice(0, 400)}`;
+          try {
+            await this.dispatcher.directCall("remember", {
+              key: trajectoryKey,
+              value: trajectoryValue,
+              type: "trajectory",
+              actor_id: this.taskId,
+            });
+          } catch {
+            /* non-fatal */
+          }
         }
       }
     } catch (err) {
@@ -2194,16 +2239,46 @@ export class AgentHarness {
       }
     }
 
+    // Session yield point — crash-recovery snapshot every AGENT_YIELD_EVERY_N rounds.
+    {
+      const yieldEvery = parseInt(process.env["AGENT_YIELD_EVERY_N"] ?? "0", 10);
+      if (yieldEvery > 0 && this.agentDepth === 0 && this.roundCount % yieldEvery === 0) {
+        const ctxSnap = this.context.snapshot();
+        const es = this.context.getEpistemicState();
+        const epSummary = es
+          ? es.subgoals.map((g) => `[${g.status}] ${g.id}${g.note ? ": " + g.note : ""}`).join("; ")
+          : undefined;
+        void writeYieldSnapshot({
+          taskId: this.taskId,
+          round: this.roundCount,
+          goal: this.lastUserMessage.slice(0, 2000),
+          toolsUsed: [...this.toolsUsedThisTurn],
+          usageFraction: ctxSnap.usageFraction,
+          tokenCount: ctxSnap.tokenCount,
+          epistemicSummary: epSummary,
+          savedAt: new Date().toISOString(),
+        });
+      }
+    }
+
     if (
       round === 1 &&
       process.env["AGENT_RULE_RECALL"] !== "0" &&
       !this.ruleRecallInjectedThisSend
     ) {
       this.ruleRecallInjectedThisSend = true;
-      this.context.appendMessage({
-        role: "system",
-        content: HARNESS_RULE_RECALL_MESSAGE,
-      });
+      // Adaptive injection: use rule stats to prioritize chronically violated rules.
+      // Falls back to the full static message if stats are unavailable.
+      let ruleMsg = HARNESS_RULE_RECALL_MESSAGE;
+      try {
+        const hitCounts = await getRuleHitCounts();
+        if (hitCounts.size > 0) {
+          ruleMsg = buildAdaptiveRuleMessage(0, hitCounts);
+        }
+      } catch {
+        /* fall back to static message */
+      }
+      this.context.appendMessage({ role: "system", content: ruleMsg });
     }
 
     if (
@@ -2423,6 +2498,9 @@ export class AgentHarness {
     const messages = await this.context.buildMessages();
     const tools = this.registry.toOpenAIFormat();
     const accumulator = new StreamAccumulator();
+    // PASTE: speculative tool dispatch — start safe tool calls while stream is still running.
+    const pasteEnabled = process.env["AGENT_PASTE"] === "1";
+    const speculativePromises = new Map<string, Promise<ToolResult>>();
 
     const chunkTimeoutMs = Math.max(
       10_000,
@@ -2466,6 +2544,30 @@ export class AgentHarness {
 
             if (parsed.isNewTool && id && name) {
               this.emitter.emit("tool_start", { callId: id, name });
+
+              // PASTE: when the model starts streaming a new tool call (index N),
+              // tool call N-1's args are complete. Speculatively dispatch if safe.
+              if (pasteEnabled && index > 0) {
+                const prevCall = accumulator.tryGetCompletedCall(index - 1);
+                if (prevCall && !speculativePromises.has(prevCall.id)) {
+                  const toolDef = this.registry.get(prevCall.name);
+                  const isSafe =
+                    toolDef &&
+                    !toolDef.requiresApproval &&
+                    (!toolDef.dangerLevel || toolDef.dangerLevel === "safe");
+                  if (isSafe) {
+                    speculativePromises.set(
+                      prevCall.id,
+                      this.dispatcher.dispatch(
+                        prevCall.id,
+                        prevCall.name,
+                        prevCall.argsJson,
+                        [] // batchToolNames will be re-derived after stream; empty is safe for pre-flight
+                      )
+                    );
+                  }
+                }
+              }
             }
 
             if (argsDelta) {
@@ -2498,6 +2600,7 @@ export class AgentHarness {
           accumulator.accumulatedToolCalls.length > 0;
 
         accumulator.reset();
+        speculativePromises.clear(); // discard PASTE results from failed stream attempt
         finishReason = null;
 
         const retryLabel = isChunkTimeout
@@ -2623,7 +2726,11 @@ export class AgentHarness {
       await Promise.all(
         toolCalls.map(async (tc, i) => {
           if (repIdx[i] !== i) return;
-          results[i] = await this.dispatcher.dispatch(tc.id, tc.name, tc.argsJson, batchToolNames);
+          // PASTE: reuse speculatively-started promise if available (result likely already ready).
+          const speculative = speculativePromises.get(tc.id);
+          results[i] = speculative
+            ? await speculative
+            : await this.dispatcher.dispatch(tc.id, tc.name, tc.argsJson, batchToolNames);
         })
       );
       for (let i = 0; i < toolCalls.length; i++) {
@@ -3027,6 +3134,48 @@ export class AgentHarness {
         }
         // Track which rules were mentioned in the error context for effectiveness stats.
         void bumpRuleHits(errorSummary, true);
+
+        // ACON adaptive compression: if a compression happened recently and we're now
+        // seeing tool errors, the compression may have dropped needed context. Ask the
+        // fast model to identify what to always preserve and persist it as a guideline.
+        if (
+          this.agentDepth === 0 &&
+          !this.aconGuidelineAnalyzedThisSend &&
+          this.lastCompressionTimestampThisSend > 0 &&
+          Date.now() - this.lastCompressionTimestampThisSend < 120_000
+        ) {
+          this.aconGuidelineAnalyzedThisSend = true;
+          void (async () => {
+            try {
+              const jr = await completeChatJson(this.client, {
+                model: getFastModelSlug(this.config.model),
+                temperature: 0,
+                maxTokens: 180,
+                messages: [
+                  {
+                    role: "system",
+                    content:
+                      "A context compression happened shortly before these tool errors. " +
+                      "Identify one concrete piece of information that was likely lost and caused the error. " +
+                      'Return JSON: {"preserve":"<one specific thing to always keep in future compressions, max 120 chars>","trigger":"<tool that failed>"}.',
+                  },
+                  {
+                    role: "user",
+                    content: `Task: ${this.lastUserMessage.slice(0, 200)}\nErrors: ${errorSummary.slice(0, 400)}`,
+                  },
+                ],
+              });
+              if (jr.ok && typeof jr.parsed === "object" && jr.parsed !== null) {
+                const p = jr.parsed as { preserve?: string; trigger?: string };
+                if (p.preserve && p.preserve.trim().length > 10) {
+                  await addCompressionGuideline(p.preserve.trim(), p.trigger);
+                }
+              }
+            } catch {
+              /* non-fatal */
+            }
+          })();
+        }
       }
 
       await this.runLintSelfHealIfNeeded();
@@ -3060,7 +3209,11 @@ export class AgentHarness {
       if ((runForcedCritic || runHeuristicCritic) && !skipCriticForSimpleIntrospection) {
         this.criticConsumedThisSend = true;
         try {
-          const vr = await this.dispatcher.directCall("verify_result", {
+          const criticTool =
+            process.env["AGENT_CRITIC_MODE"] === "debate" && this.registry.has("reflect_debate")
+              ? "reflect_debate"
+              : "verify_result";
+          const vr = await this.dispatcher.directCall(criticTool, {
             goal: this.lastUserMessage.slice(0, 2000),
             result: assistantText.slice(0, 12_000),
             ...(process.env["AGENT_CRITIC_EVIDENCE"] === "1"

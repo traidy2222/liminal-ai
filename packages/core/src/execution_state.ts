@@ -32,6 +32,31 @@ export function createDefaultExecutionState(goal: string): ExecutionState {
   };
 }
 
+export type ComplexityClass = "simple" | "standard" | "complex" | "marathon";
+
+/** Derive complexity class from plan step count. */
+export function estimateComplexityClass(stepCount: number): ComplexityClass {
+  if (stepCount <= 2) return "simple";
+  if (stepCount <= 5) return "standard";
+  if (stepCount <= 10) return "complex";
+  return "marathon";
+}
+
+/** Dynamic contract bounds — scale with complexity so a 2-step refactor and a
+ *  30-step research task don't share the same ceiling. */
+export function estimateContractBounds(complexity: ComplexityClass): {
+  maxSteps: number;
+  maxMinutes: number;
+  maxToolCalls: number;
+} {
+  switch (complexity) {
+    case "simple":   return { maxSteps: 6,  maxMinutes: 20,  maxToolCalls: 12 };
+    case "standard": return { maxSteps: 16, maxMinutes: 60,  maxToolCalls: 32 };
+    case "complex":  return { maxSteps: 32, maxMinutes: 150, maxToolCalls: 64 };
+    case "marathon": return { maxSteps: 60, maxMinutes: 300, maxToolCalls: 120 };
+  }
+}
+
 export function advanceExecutionStateForPlan(
   state: ExecutionState,
   steps: string[]
@@ -39,6 +64,8 @@ export function advanceExecutionStateForPlan(
   const now = Date.now();
   const nextMilestones: MilestonePlan[] = [];
   const nextContracts: ExecutionContract[] = [];
+  const complexity = estimateComplexityClass(steps.length);
+  const bounds = estimateContractBounds(complexity);
   for (let i = 0; i < steps.length; i++) {
     const id = `m:${now}:${i}`;
     const cid = `c:${now}:${i}`;
@@ -54,9 +81,9 @@ export function advanceExecutionStateForPlan(
       title: `Contract ${i + 1}`,
       objective: steps[i]!.slice(0, 800),
       successCriteria: [`Complete: ${steps[i]!.slice(0, 200)}`],
-      maxSteps: 12,
-      maxMinutes: 90,
-      maxToolCalls: 24,
+      maxSteps: bounds.maxSteps,
+      maxMinutes: bounds.maxMinutes,
+      maxToolCalls: bounds.maxToolCalls,
       status: i === 0 ? "active" : "planned",
       startedAt: i === 0 ? now : undefined,
     });

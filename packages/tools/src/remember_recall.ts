@@ -20,7 +20,7 @@ export const rememberTool = defineTool({
     "WHAT: Persist a key-value note that survives across turns and sessions.\n" +
     "WHEN: Important facts, user preferences, project-specific constants, or any info you'll need later.\n" +
     "NOT WHEN: Ephemeral per-turn state, intermediate calculation results, or info already in context.\n" +
-    "ARGS: key — short identifier; value — the text to store; type — optional category: fact, experience, entity, belief, reflection, recipe.",
+    "ARGS: key — short identifier; value — the text to store; type — optional category: fact, experience, entity, belief, reflection, recipe; actor_id — optional agent task ID for multi-agent attribution.",
   requiresApproval: false,
   parameters: {
     type: "object",
@@ -32,6 +32,10 @@ export const rememberTool = defineTool({
         enum: [...MEMORY_TYPES],
         description: `Optional memory category: ${MEMORY_TYPES.join(", ")}. Omit for general notes.`,
       },
+      actor_id: {
+        type: "string",
+        description: "Optional agent task ID for multi-agent attribution (who wrote this note).",
+      },
     },
     required: ["key", "value"],
     additionalProperties: false,
@@ -40,11 +44,15 @@ export const rememberTool = defineTool({
     const rawKey = args["key"] as string;
     const value = args["value"] as string;
     const memType = args["type"] as MemoryType | undefined;
+    const actorId = args["actor_id"] as string | undefined;
     const storageKey = memType ? makeTypedKey(memType, rawKey) : rawKey;
     // Use atomic write queue (#4) to prevent concurrent sub-agent data loss
-    await atomicUpdate((notes) => ({ ...notes, [storageKey]: value }));
+    await atomicUpdate((notes) => ({ ...notes, [storageKey]: value }), actorId);
 
-    if (process.env["AGENT_MEMORY_GRAPH"] === "1") {
+    // Graph link inference runs by default (AGENT_MEMORY_GRAPH=0 to disable).
+    // This makes related notes discoverable via neighbor expansion in recall_relevant
+    // without requiring the full vault graph feature flag.
+    if (process.env["AGENT_MEMORY_GRAPH"] !== "0") {
       const plain = await loadNotes();
       const otherKeys = Object.keys(plain).filter((x) => x !== storageKey);
       if (otherKeys.length > 0) {

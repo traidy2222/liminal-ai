@@ -531,6 +531,110 @@ export function createOrchestrationTools(harness: AgentHarness) {
     },
   });
 
+  // ── reflect_debate ───────────────────────────────────────────────────────────
+  // Multi-Agent Reflexion (MAR): spawn 3 persona-guided critics in parallel.
+  // Each analyzes from a distinct angle; parent resolves consensus.
+  const reflectDebateTool = defineTool({
+    name: "reflect_debate",
+    description:
+      "WHAT: Spawn 3 parallel persona-guided critics (correctness, security/risk, completeness) that debate the result, then return a consensus verdict.\n" +
+      "WHEN: After complex multi-step tasks where a single critic might miss issues. More thorough than verify_result.\n" +
+      "NOT WHEN: Simple tasks or when latency matters — this runs 3 sub-agents in parallel.\n" +
+      "ARGS: goal, result; optional evidence_pack (tool-output excerpts to ground critiques).",
+    requiresApproval: false,
+    parameters: {
+      type: "object",
+      properties: {
+        goal: { type: "string", description: "Original task description" },
+        result: { type: "string", description: "Summary of what was done / produced" },
+        evidence_pack: {
+          type: "string",
+          description: "Optional excerpts from tool outputs to ground critic claims",
+        },
+      },
+      required: ["goal", "result"],
+      additionalProperties: false,
+    },
+    handler: async (args) => {
+      try {
+        const goalText = args["goal"] as string;
+        const resultText = args["result"] as string;
+        const ev = (args["evidence_pack"] as string | undefined)?.trim() ?? "";
+        const evBlock = ev.length > 20
+          ? `\n\nEVIDENCE PACK:\n${ev.slice(0, 10_000)}\n`
+          : "";
+
+        const taskPrompt = (persona: string, focus: string, verdict: string) =>
+          `PERSONA: ${persona}\nFOCUS: ${focus}\n\nGOAL:\n${goalText}\n\nCLAIMED RESULT:\n${resultText}${evBlock}\n\n` +
+          `Use read_file / list_dir / think to ground your verdict in evidence. ` +
+          `End with exactly one line: "${verdict}: [key evidence]"`;
+
+        // Spawn all 3 critics in parallel
+        const critics = await Promise.all([
+          harness.forkChild({
+            goal: taskPrompt(
+              "Correctness Auditor",
+              "Logic correctness, factual accuracy, output matches stated goal",
+              "✓ CORRECT / ✗ CORRECTNESS_ISSUES"
+            ),
+            toolNames: ["read_file", "list_dir", "think"],
+            maxRounds: 8,
+            timeoutMs: 45_000,
+          }),
+          harness.forkChild({
+            goal: taskPrompt(
+              "Security & Risk Reviewer",
+              "Security vulnerabilities, dangerous side effects, credential/data exposure, irreversible actions",
+              "✓ SAFE / ✗ RISK_ISSUES"
+            ),
+            toolNames: ["read_file", "list_dir", "think"],
+            maxRounds: 8,
+            timeoutMs: 45_000,
+          }),
+          harness.forkChild({
+            goal: taskPrompt(
+              "Completeness Inspector",
+              "Missing edge cases, incomplete implementation, unstated assumptions, coverage gaps",
+              "✓ COMPLETE / ✗ COMPLETENESS_ISSUES"
+            ),
+            toolNames: ["read_file", "list_dir", "think"],
+            maxRounds: 8,
+            timeoutMs: 45_000,
+          }),
+        ]);
+
+        // Collect results
+        const [correctness, security, completeness] = await Promise.all(
+          critics.map((c) => c.promise)
+        );
+
+        const verdicts = [
+          { role: "Correctness", result: correctness! },
+          { role: "Security", result: security! },
+          { role: "Completeness", result: completeness! },
+        ];
+
+        const allOk = verdicts.every((v) => v.result.ok);
+        const sections = verdicts
+          .map((v) => `[${v.role} Critic]\n${v.result.output.slice(0, 600)}`)
+          .join("\n\n---\n\n");
+
+        const issueCount = verdicts.filter((v) => !v.result.ok || /✗/.test(v.result.output)).length;
+        const consensus =
+          issueCount === 0
+            ? "✓ DEBATE CONSENSUS: All 3 critics passed."
+            : `✗ DEBATE ISSUES: ${issueCount}/3 critics found problems — see details above.`;
+
+        const output = `${sections}\n\n${consensus}`;
+        return allOk && issueCount === 0
+          ? { ok: true, output }
+          : { ok: false, error: output };
+      } catch (err) {
+        return { ok: false, error: err instanceof Error ? err.message : String(err) };
+      }
+    },
+  });
+
   // Wire onChildCreated so grandchildren get fresh harness-scoped tools
   harness.onChildCreated = (child: AgentHarness) => {
     // Orchestration tools — close over child harness
@@ -543,6 +647,7 @@ export function createOrchestrationTools(harness: AgentHarness) {
     child.registry.register(childTools.evidenceCriticTool);
     child.registry.register(childTools.pathCriticTool);
     child.registry.register(childTools.policyCriticTool);
+    child.registry.register(childTools.reflectDebateTool);
     // Context tools — close over child's own ContextManager
     const { checkContextTool, compressContextTool } = createContextTools(child.getContext());
     child.registry.register(checkContextTool);
@@ -562,5 +667,6 @@ export function createOrchestrationTools(harness: AgentHarness) {
     evidenceCriticTool,
     pathCriticTool,
     policyCriticTool,
+    reflectDebateTool,
   };
 }

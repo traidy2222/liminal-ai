@@ -71,6 +71,22 @@ export class StreamAccumulator {
     return [...this.toolCallMap.values()];
   }
 
+  /**
+   * Return the accumulated tool call at `index` if its argsJson is syntactically
+   * complete (valid JSON). Used by PASTE to speculatively dispatch call[N-1]
+   * when the stream begins emitting call[N].
+   */
+  tryGetCompletedCall(index: number): AccumulatedToolCall | undefined {
+    const tc = this.toolCallMap.get(index);
+    if (!tc || !tc.id || !tc.name) return undefined;
+    try {
+      JSON.parse(tc.argsJson || "{}");
+      return tc;
+    } catch {
+      return undefined;
+    }
+  }
+
   reset(): void {
     this.text = "";
     this.toolCallMap.clear();

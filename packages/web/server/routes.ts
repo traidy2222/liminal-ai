@@ -85,15 +85,13 @@ export function createRouter(bridge: AgentBridge, sse: SSEManager): Router {
     }
     const persisted = await persistIncomingAttachments(normalizedAttachments);
     const normalizedMessage = buildMessageWithImageAttachments(msg, persisted);
-    try {
-      await bridge.harness.send(normalizedMessage, { freshContext: Boolean(freshContext) });
-      res.json({ ok: true });
-    } catch (err) {
-      const message =
-        err instanceof Error ? err.message : "Failed to process message.";
-      const status = /already processing/i.test(message) ? 409 : 500;
-      res.status(status).json({ error: message });
-    }
+    // Fire-and-forget: respond immediately so the HTTP connection is never held open for a full turn.
+    // Agent progress and errors surface exclusively via SSE events — no long-lived POST connection needed.
+    res.json({ ok: true });
+    bridge.harness.send(normalizedMessage, { freshContext: Boolean(freshContext) }).catch((err) => {
+      const message = err instanceof Error ? err.message : "Failed to process message.";
+      sse.send("error", { message });
+    });
   });
 
   router.post("/api/approve", (req, res) => {

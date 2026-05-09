@@ -1,7 +1,11 @@
-import React, { useState, useRef, useEffect } from "react";
+import React, { useState, useRef, useEffect, useCallback } from "react";
 import { useSSE, type MessageEntry } from "./useSSE.js";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
+import rehypeRaw from "rehype-raw";
+import { toPng } from "html-to-image";
+import { Prism as SyntaxHighlighter } from "react-syntax-highlighter";
+import { vscDarkPlus } from "react-syntax-highlighter/dist/esm/styles/prism";
 import { resolveInputShortcut } from "./inputSemantics.js";
 import {
   DEFAULT_IMAGE_ATTACHMENT_LIMITS,
@@ -97,6 +101,64 @@ function truncateOutput(text: string, maxLines = 12, maxLineLen = 200): string {
   return shown.join("\n");
 }
 
+// ── Rich media helpers ───────────────────────────────────────────────────────
+
+type VideoEmbed = { platform: "youtube" | "vimeo"; id: string };
+
+function detectVideoEmbed(url: string): VideoEmbed | null {
+  const yt = url.match(/(?:youtube\.com\/(?:watch\?.*v=|embed\/)|youtu\.be\/)([a-zA-Z0-9_-]{11})/);
+  if (yt) return { platform: "youtube", id: yt[1]! };
+  const vm = url.match(/vimeo\.com\/(?:video\/)?(\d+)/);
+  if (vm) return { platform: "vimeo", id: vm[1]! };
+  return null;
+}
+
+function VideoEmbedBlock({ embed }: { embed: VideoEmbed }) {
+  const src =
+    embed.platform === "youtube"
+      ? `https://www.youtube.com/embed/${embed.id}?rel=0`
+      : `https://player.vimeo.com/video/${embed.id}`;
+  return (
+    <div style={{ margin: "14px 0", borderRadius: 10, overflow: "hidden", background: "#0a0a0a", position: "relative", paddingBottom: "56.25%" }}>
+      <iframe
+        src={src}
+        style={{ position: "absolute", top: 0, left: 0, width: "100%", height: "100%", border: "none" }}
+        allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; fullscreen"
+        allowFullScreen
+      />
+    </div>
+  );
+}
+
+const ALERT_TYPES: Record<string, { icon: string; color: string; bg: string; label: string }> = {
+  NOTE:      { icon: "ℹ", color: "#58a6ff", bg: "#0d2137", label: "Note" },
+  TIP:       { icon: "💡", color: "#3fb950", bg: "#0a1f0a", label: "Tip" },
+  WARNING:   { icon: "⚠", color: "#d29922", bg: "#1c1400", label: "Warning" },
+  IMPORTANT: { icon: "◆", color: "#bc8cff", bg: "#150d2a", label: "Important" },
+  CAUTION:   { icon: "🔥", color: "#f85149", bg: "#1f0808", label: "Caution" },
+};
+
+// Detect GitHub-style alert blockquotes (> [!NOTE] / > [!WARNING] / etc.)
+// Works by inspecting the raw mdast node passed by react-markdown.
+function AlertCallout({ type, children }: { type: string; children: React.ReactNode }) {
+  const meta = ALERT_TYPES[type] ?? ALERT_TYPES["NOTE"]!;
+  return (
+    <div style={{
+      margin: "14px 0",
+      padding: "12px 16px",
+      background: meta.bg,
+      border: `1px solid ${meta.color}55`,
+      borderLeft: `4px solid ${meta.color}`,
+      borderRadius: 8,
+    }}>
+      <div style={{ color: meta.color, fontWeight: 700, fontSize: 12, letterSpacing: "0.06em", marginBottom: 6 }}>
+        {meta.icon} {meta.label.toUpperCase()}
+      </div>
+      <div style={{ color: "#ccd", lineHeight: 1.6 }}>{children}</div>
+    </div>
+  );
+}
+
 // ── Elapsed timer hook ───────────────────────────────────────────────────────
 
 function useElapsedMs(startedAt: number, active: boolean): number {
@@ -135,8 +197,13 @@ function ApprovalCountdown({
 // ── Tool card ────────────────────────────────────────────────────────────────
 
 type ToolCallEntry = Extract<MessageEntry, { kind: "tool_call" }>;
+type ToolResult = { output: string; ok: boolean };
 
-function ToolCard({ entry }: { entry: ToolCallEntry }) {
+const PREVIEW_LINES = 4;
+
+function ToolCard({ entry, result }: { entry: ToolCallEntry; result?: ToolResult }) {
+  const [expanded, setExpanded] = useState(false);
+
   const isActive =
     entry.status === "streaming" ||
     entry.status === "running" ||
@@ -152,6 +219,17 @@ function ToolCard({ entry }: { entry: ToolCallEntry }) {
   const sm = STATUS_META[entry.status] ?? STATUS_META["done"]!;
   const arg = parsePrimaryArg(entry.argsJson);
 
+  // Split output into preview vs overflow
+  const outputLines = result ? result.output.trimEnd().split("\n") : [];
+  const previewText = outputLines
+    .slice(0, PREVIEW_LINES)
+    .map((l) => (l.length > 200 ? l.slice(0, 199) + "…" : l))
+    .join("\n");
+  const extraLines = outputLines.length - PREVIEW_LINES;
+  const fullText = outputLines
+    .map((l) => (l.length > 200 ? l.slice(0, 199) + "…" : l))
+    .join("\n");
+
   return (
     <div
       style={{
@@ -161,8 +239,8 @@ function ToolCard({ entry }: { entry: ToolCallEntry }) {
         borderLeftStyle: "solid",
       }}
     >
+      {/* ── Header row ── */}
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-        {/* Left: category icon + name + primary arg */}
         <div style={{ display: "flex", alignItems: "center", gap: 8, minWidth: 0, flex: 1 }}>
           <span style={{ color: cat.color, fontSize: 14, flexShrink: 0 }}>{cat.icon}</span>
           <span style={{ color: "#dde", fontWeight: 700, flexShrink: 0 }}>{entry.name}</span>
@@ -181,7 +259,6 @@ function ToolCard({ entry }: { entry: ToolCallEntry }) {
             </span>
           )}
         </div>
-        {/* Right: elapsed + status badge */}
         <div style={{ display: "flex", alignItems: "center", gap: 8, flexShrink: 0 }}>
           {displayMs !== null && (
             <span style={{ color: "#555", fontSize: 11 }}>{formatElapsed(displayMs)}</span>
@@ -202,35 +279,47 @@ function ToolCard({ entry }: { entry: ToolCallEntry }) {
           </span>
         </div>
       </div>
-    </div>
-  );
-}
 
-// ── Tool result ──────────────────────────────────────────────────────────────
+      {/* ── Running pulse ── */}
+      {isActive && !result && (
+        <div style={{ marginTop: 6, display: "flex", alignItems: "center", gap: 6 }}>
+          <span style={{ color: "#335", fontSize: 11, fontStyle: "italic" }}>running…</span>
+        </div>
+      )}
 
-type ToolResultEntry = Extract<MessageEntry, { kind: "tool_result" }>;
-
-function ToolResultView({ entry }: { entry: ToolResultEntry }) {
-  if (!entry.output.trim()) return null;
-  const truncated = truncateOutput(entry.output);
-  return (
-    <div style={styles.toolResultWrap}>
-      <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 4 }}>
-        <span
-          style={{
-            fontSize: 10,
-            fontWeight: 700,
-            color: entry.ok ? "#44ff88" : "#ff4444",
-            letterSpacing: "0.05em",
-            textTransform: "uppercase" as const,
-          }}
-        >
-          {entry.ok ? "✓ output" : "✗ error"}
-        </span>
-      </div>
-      <pre style={{ ...styles.toolOutputPre, color: entry.ok ? "#888" : "#ff7766" }}>
-        {truncated}
-      </pre>
+      {/* ── Inline output ── */}
+      {result && result.output.trim() && (
+        <div style={{ marginTop: 7 }}>
+          <pre
+            style={{
+              ...styles.toolOutputPre,
+              color: result.ok ? "#778" : "#ff7766",
+              maxHeight: "none",
+              margin: 0,
+            }}
+          >
+            {expanded ? fullText : previewText}
+          </pre>
+          {extraLines > 0 && (
+            <button
+              type="button"
+              onClick={() => setExpanded((v) => !v)}
+              style={{
+                marginTop: 4,
+                background: "none",
+                border: "none",
+                color: "#445",
+                fontSize: 11,
+                cursor: "pointer",
+                padding: "2px 0",
+                fontFamily: "inherit",
+              }}
+            >
+              {expanded ? "▲ collapse" : `▼ ${extraLines} more line${extraLines !== 1 ? "s" : ""}`}
+            </button>
+          )}
+        </div>
+      )}
     </div>
   );
 }
@@ -292,7 +381,7 @@ function SubtaskView({ entry }: { entry: SubtaskEntry }) {
 
 // ── Main message view ────────────────────────────────────────────────────────
 
-function MessageView({ entry }: { entry: MessageEntry }) {
+function MessageView({ entry, toolResult }: { entry: MessageEntry; toolResult?: ToolResult }) {
   switch (entry.kind) {
     case "user":
       return (
@@ -307,32 +396,167 @@ function MessageView({ entry }: { entry: MessageEntry }) {
         <div style={styles.assistantMsg}>
           <ReactMarkdown
             remarkPlugins={[remarkGfm]}
+            rehypePlugins={[rehypeRaw]}
             components={{
-              p:          ({ children }) => <p style={styles.mdParagraph}>{children}</p>,
-              ul:         ({ children }) => <ul style={styles.mdList}>{children}</ul>,
-              ol:         ({ children }) => <ol style={styles.mdOrderedList}>{children}</ol>,
-              li:         ({ children }) => <li style={styles.mdListItem}>{children}</li>,
-              h1:         ({ children }) => <h1 style={styles.mdH1}>{children}</h1>,
-              h2:         ({ children }) => <h2 style={styles.mdH2}>{children}</h2>,
-              h3:         ({ children }) => <h3 style={styles.mdH3}>{children}</h3>,
-              code:       ({ className, children }) => (
-                <code style={className ? styles.mdCodeBlock : styles.mdInlineCode}>{children}</code>
-              ),
-              pre:        ({ children }) => <pre style={styles.mdPre}>{children}</pre>,
-              blockquote: ({ children }) => <blockquote style={styles.mdQuote}>{children}</blockquote>,
-              table:      ({ children }) => (
-                <div style={styles.mdTableWrap}>
-                  <table style={styles.mdTable}>{children}</table>
-                </div>
-              ),
-              th: ({ children }) => <th style={styles.mdTableHead}>{children}</th>,
-              td: ({ children }) => <td style={styles.mdTableCell}>{children}</td>,
-              hr: () => <hr style={styles.mdHr} />,
+              // ── Paragraphs: detect standalone video URLs and embed them ──
+              p({ node, children }) {
+                // Check if the sole child is a link to a video platform
+                const kids = node?.children ?? [];
+                if (kids.length === 1 && kids[0]?.type === "element" && (kids[0] as {tagName?: string}).tagName === "a") {
+                  const href = (kids[0] as {properties?: {href?: string}}).properties?.href ?? "";
+                  const embed = detectVideoEmbed(href);
+                  if (embed) return <VideoEmbedBlock embed={embed} />;
+                }
+                // remark-gfm autolinks: single text child that IS a video URL
+                if (kids.length === 1 && kids[0]?.type === "text") {
+                  const rawText = (kids[0] as {value?: string}).value ?? "";
+                  const embed = detectVideoEmbed(rawText.trim());
+                  if (embed) return <VideoEmbedBlock embed={embed} />;
+                }
+                return <p style={styles.mdParagraph}>{children}</p>;
+              },
+
+              // ── Images: render inline + detect video embeds via image syntax ──
+              img({ src, alt, title }) {
+                if (!src) return null;
+                const embed = detectVideoEmbed(src);
+                if (embed) return <VideoEmbedBlock embed={embed} />;
+                return (
+                  <span style={{ display: "block", margin: "12px 0" }}>
+                    <img
+                      src={src}
+                      alt={alt ?? ""}
+                      title={title ?? ""}
+                      loading="lazy"
+                      style={{
+                        maxWidth: "100%",
+                        borderRadius: 8,
+                        border: "1px solid #2a2a3a",
+                        display: "block",
+                      }}
+                    />
+                    {alt && (
+                      <span style={{ display: "block", textAlign: "center", color: "#556", fontSize: 11, marginTop: 4, fontStyle: "italic" }}>
+                        {alt}
+                      </span>
+                    )}
+                  </span>
+                );
+              },
+
+              // ── Links: open external in new tab, style nicely ──
+              a({ href, children }) {
+                return (
+                  <a
+                    href={href}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    style={{ color: "#66bbff", textDecoration: "none", borderBottom: "1px dotted #336" }}
+                  >
+                    {children}
+                  </a>
+                );
+              },
+
+              // ── Headings: each level gets its own accent color ──
+              h1({ children }) { return <h1 style={styles.mdH1}>{children}</h1>; },
+              h2({ children }) { return <h2 style={styles.mdH2}>{children}</h2>; },
+              h3({ children }) { return <h3 style={styles.mdH3}>{children}</h3>; },
+              h4({ children }) { return <h4 style={styles.mdH4}>{children}</h4>; },
+
+              ul({ children }) { return <ul style={styles.mdList}>{children}</ul>; },
+              ol({ children }) { return <ol style={styles.mdOrderedList}>{children}</ol>; },
+              li({ children }) { return <li style={styles.mdListItem}>{children}</li>; },
+
+              // ── Code: syntax highlighted blocks, styled inline ──
+              pre({ children }) { return <div style={{ margin: "10px 0" }}>{children}</div>; },
+              code({ className, children }) {
+                const lang = /language-(\w+)/.exec(className ?? "")?.[1];
+                const raw = String(children).replace(/\n$/, "");
+                if (lang) {
+                  return (
+                    <div style={{ borderRadius: 8, overflow: "hidden", margin: "10px 0", border: "1px solid #1e2430" }}>
+                      <div style={{
+                        display: "flex",
+                        justifyContent: "space-between",
+                        alignItems: "center",
+                        padding: "4px 12px",
+                        background: "#0e1218",
+                        borderBottom: "1px solid #1e2430",
+                      }}>
+                        <span style={{ color: "#4477aa", fontSize: 11, fontFamily: "monospace", letterSpacing: "0.04em" }}>{lang}</span>
+                      </div>
+                      <SyntaxHighlighter
+                        language={lang}
+                        style={vscDarkPlus}
+                        customStyle={{ margin: 0, borderRadius: 0, fontSize: 13, background: "#0d1117" }}
+                        showLineNumbers={raw.split("\n").length > 6}
+                        lineNumberStyle={{ color: "#333", minWidth: "2.5em" }}
+                        wrapLongLines
+                      >
+                        {raw}
+                      </SyntaxHighlighter>
+                    </div>
+                  );
+                }
+                return <code style={styles.mdInlineCode}>{children}</code>;
+              },
+
+              // ── Blockquotes: detect GitHub-style alerts, fall back to styled quote ──
+              blockquote({ node, children }) {
+                // Inspect the raw AST: first paragraph text for [!TYPE] marker
+                const firstPara = (node?.children ?? []).find((c) => (c as {type?: string}).type === "element" && (c as {tagName?: string}).tagName === "p");
+                const firstText = firstPara
+                  ? ((firstPara as {children?: Array<{type?: string; value?: string}>}).children ?? []).find((c) => c.type === "text")?.value ?? ""
+                  : "";
+                const alertMatch = firstText.trimStart().match(/^\[!(NOTE|TIP|WARNING|IMPORTANT|CAUTION)\]\s*/i);
+                if (alertMatch) {
+                  const type = alertMatch[1]!.toUpperCase();
+                  // Strip the [!TYPE] prefix from the first child text in rendered output
+                  const stripped = React.Children.map(children, (child, ci) => {
+                    if (ci !== 0) return child;
+                    if (React.isValidElement(child)) {
+                      const el = child as React.ReactElement<{ children?: React.ReactNode }>;
+                      const grandkids = React.Children.map(el.props.children, (gc, gi) => {
+                        if (gi !== 0) return gc;
+                        if (typeof gc === "string") return gc.replace(/^\[!(NOTE|TIP|WARNING|IMPORTANT|CAUTION)\]\s*/i, "");
+                        return gc;
+                      });
+                      return React.cloneElement(el, {}, ...(grandkids ?? []));
+                    }
+                    return child;
+                  });
+                  return <AlertCallout type={type}>{stripped}</AlertCallout>;
+                }
+                return <blockquote style={styles.mdQuote}>{children}</blockquote>;
+              },
+
+              // ── Tables ──
+              table({ children }) {
+                return (
+                  <div style={styles.mdTableWrap}>
+                    <table style={styles.mdTable}>{children}</table>
+                  </div>
+                );
+              },
+              th({ children }) { return <th style={styles.mdTableHead}>{children}</th>; },
+              td({ children }) { return <td style={styles.mdTableCell}>{children}</td>; },
+
+              // ── HR: glowing section divider ──
+              hr() {
+                return (
+                  <div style={{
+                    margin: "18px 0",
+                    height: 1,
+                    background: "linear-gradient(90deg, transparent, #334, #44ff8866, #334, transparent)",
+                  }} />
+                );
+              },
             }}
           >
             {entry.text}
           </ReactMarkdown>
-          {entry.streaming && <span style={{ color: "#33ccff" }}>█</span>}
+          {entry.streaming && <span style={{ color: "#33ccff", animation: "blink 1s step-end infinite" }}>█</span>}
         </div>
       );
 
@@ -352,10 +576,10 @@ function MessageView({ entry }: { entry: MessageEntry }) {
       );
 
     case "tool_call":
-      return <ToolCard entry={entry} />;
+      return <ToolCard entry={entry} result={toolResult} />;
 
     case "tool_result":
-      return <ToolResultView entry={entry} />;
+      return null; // rendered inline inside ToolCard via toolResult prop
 
     case "think":
       return (
@@ -447,8 +671,10 @@ export function App() {
   const [historyIndex, setHistoryIndex] = useState(-1);
   const [historyDraft, setHistoryDraft] = useState("");
   const bottomRef = useRef<HTMLDivElement>(null);
+  const messagesRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const submittingRef = useRef(false);
+  const [screenshotting, setScreenshotting] = useState(false);
 
   const maxHistory = 30;
 
@@ -595,6 +821,54 @@ export function App() {
 
   const canSend = !state.busy && (input.trim().length > 0 || attachments.length > 0);
 
+  const handleScreenshot = useCallback(async () => {
+    const el = messagesRef.current;
+    if (!el || screenshotting) return;
+    setScreenshotting(true);
+    try {
+      const fullHeight = el.scrollHeight;
+      const width = el.offsetWidth;
+
+      // Temporarily remove overflow clipping so toPng sees the full content.
+      // We mutate the live element — this causes a brief layout flash but ensures
+      // the renderer has all the live React-painted nodes to work with.
+      const savedOverflowY = el.style.overflowY;
+      const savedHeight = el.style.height;
+      const savedMaxHeight = el.style.maxHeight;
+      const savedFlex = el.style.flex;
+      el.style.overflowY = "visible";
+      el.style.height = `${fullHeight}px`;
+      el.style.maxHeight = "none";
+      el.style.flex = "none";
+
+      // Two animation frames so the browser repaints at the new size before capture.
+      await new Promise<void>((r) => requestAnimationFrame(() => requestAnimationFrame(() => r())));
+
+      const dataUrl = await toPng(el, {
+        pixelRatio: 2,
+        backgroundColor: "#0a0a0f",
+        width,
+        height: fullHeight,
+      });
+
+      // Restore immediately after capture.
+      el.style.overflowY = savedOverflowY;
+      el.style.height = savedHeight;
+      el.style.maxHeight = savedMaxHeight;
+      el.style.flex = savedFlex;
+
+      const ts = new Date().toISOString().replace(/[:.]/g, "-").slice(0, -1);
+      const link = document.createElement("a");
+      link.download = `liminal-${ts}.png`;
+      link.href = dataUrl;
+      link.click();
+    } catch (err) {
+      console.error("Screenshot failed:", err);
+    } finally {
+      setScreenshotting(false);
+    }
+  }, [screenshotting]);
+
   const handleComposerKeyDown = async (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     const target = e.currentTarget;
     const atStart = target.selectionStart === 0 && target.selectionEnd === 0;
@@ -641,6 +915,12 @@ export function App() {
     if (showTrace) return true;
     return entry.kind !== "trace" && entry.kind !== "provider_retry";
   });
+
+  // Build callId → result map so ToolCard can show output inline
+  const toolResultMap = new Map<string, ToolResult>();
+  for (const m of visibleMessages) {
+    if (m.kind === "tool_result") toolResultMap.set(m.callId, { output: m.output, ok: m.ok });
+  }
 
   // Find what tool is currently running (for header activity indicator)
   const activeToolCall = state.messages
@@ -710,18 +990,36 @@ export function App() {
           >
             {showTrace ? "Trace ●" : "Trace ○"}
           </button>
+          <button
+            type="button"
+            style={{
+              ...styles.headerBtn,
+              background: screenshotting ? "#1a2a1a" : "#141414",
+              opacity: screenshotting ? 0.6 : 1,
+              minWidth: 32,
+            }}
+            disabled={screenshotting || visibleMessages.length === 0}
+            onClick={() => void handleScreenshot()}
+            title="Screenshot conversation for sharing"
+          >
+            {screenshotting ? "⏳" : "📷"}
+          </button>
         </div>
       </div>
 
       {/* ── Messages ────────────────────────────────────────────── */}
-      <div style={styles.messages}>
+      <div ref={messagesRef} style={styles.messages}>
         {visibleMessages.length === 0 && !state.busy && (
           <div style={{ color: "#334", textAlign: "center", marginTop: 60, fontSize: 14 }}>
             Start a conversation…
           </div>
         )}
         {visibleMessages.map((entry, i) => (
-          <MessageView key={i} entry={entry} />
+          <MessageView
+            key={i}
+            entry={entry}
+            toolResult={entry.kind === "tool_call" ? toolResultMap.get(entry.callId) : undefined}
+          />
         ))}
         {state.error && (
           <div style={{ color: "#ff4444", padding: "8px 0", fontSize: 13 }}>
@@ -981,27 +1279,49 @@ const styles = {
     color: "#44dd88",
     lineHeight: 1.6,
   },
-  mdParagraph: { margin: "0 0 10px", whiteSpace: "normal" as const, lineHeight: 1.6 },
-  mdList: { margin: "0 0 10px 20px" },
-  mdOrderedList: { margin: "0 0 10px 20px" },
-  mdListItem: { margin: "2px 0" },
-  mdH1: { fontSize: 22, margin: "8px 0", color: "#7cf5a9" },
-  mdH2: { fontSize: 19, margin: "8px 0", color: "#7cf5a9" },
-  mdH3: { fontSize: 16, margin: "8px 0", color: "#7cf5a9" },
+  mdParagraph: { margin: "0 0 10px", whiteSpace: "normal" as const, lineHeight: 1.7 },
+  mdList: { margin: "0 0 10px 22px", lineHeight: 1.7 },
+  mdOrderedList: { margin: "0 0 10px 22px", lineHeight: 1.7 },
+  mdListItem: { margin: "3px 0" },
+  mdH1: {
+    fontSize: 22, margin: "18px 0 10px",
+    color: "#7cf5a9",
+    borderBottom: "1px solid #1e3a2a",
+    paddingBottom: 6,
+    fontWeight: 700,
+  },
+  mdH2: {
+    fontSize: 18, margin: "16px 0 8px",
+    color: "#66ccff",
+    fontWeight: 700,
+  },
+  mdH3: {
+    fontSize: 15, margin: "12px 0 6px",
+    color: "#cc88ff",
+    fontWeight: 600,
+  },
+  mdH4: {
+    fontSize: 13, margin: "10px 0 4px",
+    color: "#ffaa55",
+    fontWeight: 600,
+    textTransform: "uppercase" as const,
+    letterSpacing: "0.06em",
+  },
   mdInlineCode: {
-    background: "#131a13",
-    border: "1px solid #2a3a2a",
+    background: "#131820",
+    border: "1px solid #2a3040",
     borderRadius: 4,
     padding: "1px 5px",
     color: "#9bf2b8",
     fontFamily: "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace",
+    fontSize: "0.9em",
   },
   mdPre: {
     margin: "10px 0",
     padding: "10px 14px",
-    borderRadius: 6,
-    background: "#0d1410",
-    border: "1px solid #1e2e1e",
+    borderRadius: 8,
+    background: "#0d1117",
+    border: "1px solid #1e2430",
     overflowX: "auto" as const,
   },
   mdCodeBlock: {
@@ -1010,23 +1330,31 @@ const styles = {
     fontSize: 13,
   },
   mdQuote: {
-    margin: "10px 0",
-    padding: "4px 12px",
-    borderLeft: "3px solid #2d6a4f",
-    color: "#9acfb0",
+    margin: "12px 0",
+    padding: "8px 14px",
+    borderLeft: "3px solid #334466",
+    color: "#8899bb",
+    fontStyle: "italic" as const,
+    background: "#0d0f18",
+    borderRadius: "0 6px 6px 0",
   },
-  mdTableWrap: { overflowX: "auto" as const, margin: "10px 0" },
-  mdTable: { width: "100%", borderCollapse: "collapse" as const, border: "1px solid #2a2a2a" },
+  mdTableWrap: { overflowX: "auto" as const, margin: "12px 0", borderRadius: 8, overflow: "hidden" as const },
+  mdTable: { width: "100%", borderCollapse: "collapse" as const, background: "#0d0f14" },
   mdTableHead: {
     textAlign: "left" as const,
-    border: "1px solid #2a2a2a",
-    padding: "6px 8px",
-    background: "#111",
+    border: "1px solid #1e2230",
+    padding: "8px 12px",
+    background: "#111520",
+    color: "#aabbcc",
+    fontWeight: 700,
+    fontSize: 12,
+    letterSpacing: "0.04em",
   },
   mdTableCell: {
-    border: "1px solid #2a2a2a",
-    padding: "6px 8px",
+    border: "1px solid #1a1e2a",
+    padding: "7px 12px",
     verticalAlign: "top" as const,
+    color: "#99aabb",
   },
   mdHr: { border: "none", borderTop: "1px solid #222", margin: "10px 0" },
   toolCard: {

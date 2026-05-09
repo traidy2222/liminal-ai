@@ -138,6 +138,10 @@ export const recallRelevantTool = defineTool({
         type: "boolean",
         description: "When true, include linked neighbor notes from top vault hits",
       },
+      actor_id: {
+        type: "string",
+        description: "Optional filter: only return notes written by this agent task ID.",
+      },
     },
     required: ["query"],
     additionalProperties: false,
@@ -148,6 +152,7 @@ export const recallRelevantTool = defineTool({
     const hyde = typeof args["hyde"] === "string" ? args["hyde"].trim().slice(0, 2000) : "";
     const qArr = args["queries"] as string[] | undefined;
     const single = (args["query"] as string | undefined)?.trim() ?? "";
+    const actorIdFilter = typeof args["actor_id"] === "string" ? args["actor_id"].trim() : undefined;
     const evidenceGaps = Array.isArray(args["evidence_gaps"])
       ? (args["evidence_gaps"] as unknown[]).map((x) => String(x).trim()).filter(Boolean)
       : [];
@@ -268,6 +273,11 @@ export const recallRelevantTool = defineTool({
         const rv = raw[id];
         const noteType = id.includes(":") ? id.slice(0, id.indexOf(":")).toLowerCase() : "";
         if (noteType && excludeTypes.has(noteType)) continue;
+        if (actorIdFilter) {
+          const noteActorId = typeof rv === "object" && rv !== null && "actorId" in rv
+            ? (rv as StoredNote).actorId : undefined;
+          if (noteActorId !== actorIdFilter) continue;
+        }
         const confidence =
           typeof rv === "object" && rv !== null && "confidence" in rv
             ? Number((rv as StoredNote).confidence ?? 0.5)
@@ -309,9 +319,21 @@ export const recallRelevantTool = defineTool({
       }
       fused.sort((a, b) => b.score - a.score);
 
-      let top = fused.slice(0, k);
+      // Semantic near-miss dedup: remove entries with >85% token overlap with a
+      // higher-ranked result, so two near-identical notes don't both appear.
+      const dedupedFused: typeof fused = [];
+      for (const candidate of fused) {
+        const isDuplicate = dedupedFused.some((kept) => {
+          const ov = queryOverlap(`${candidate.id} ${candidate.value}`, `${kept.id} ${kept.value}`);
+          return ov >= 0.85;
+        });
+        if (!isDuplicate) dedupedFused.push(candidate);
+        if (dedupedFused.length >= k * 3) break; // early exit after enough candidates
+      }
 
-      if (process.env["AGENT_MEMORY_GRAPH"] === "1" && top.length > 0) {
+      let top = dedupedFused.slice(0, k);
+
+      if (process.env["AGENT_MEMORY_GRAPH"] !== "0" && top.length > 0) {
         const extra = new Map<string, { id: string; score: number; value: string }>();
         const floor = top.length > 0 ? top[top.length - 1]!.score * 0.35 : 0;
         for (const t of top.slice(0, Math.min(6, top.length))) {

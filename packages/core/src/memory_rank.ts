@@ -54,6 +54,8 @@ function bm25ForDoc(
 
 export function memoryTypeBoost(memoryType: string | undefined): number {
   switch (memoryType) {
+    case "trajectory":
+      return 0.22; // full episodic replay — highest utility for few-shot recall
     case "fact":
       return 0.15;
     case "entity":

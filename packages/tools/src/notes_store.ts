@@ -35,6 +35,8 @@ export interface StoredNote {
   supersedes?: string;
   deltaOf?: string;
   trigger?: string;
+  /** Agent task ID that wrote this note (actor-aware memory attribution). */
+  actorId?: string;
 }
 
 /** On-disk notes file — may contain plain strings (legacy) or StoredNote objects. */
@@ -98,10 +100,12 @@ let writeQueue: Promise<void> = Promise.resolve();
  *  - Unchanged key: StoredNote preserved exactly as-is (no timestamp churn)
  *  - Deleted key:   removed from the store
  *
+ * Pass `actorId` to attribute the write to a specific agent task ID.
  * On error the queue resets so one bad write doesn't block all future ones.
  */
 export async function atomicUpdate(
-  updater: (notes: Record<string, string>) => Record<string, string>
+  updater: (notes: Record<string, string>) => Record<string, string>,
+  actorId?: string
 ): Promise<void> {
   const thisOp = writeQueue.then(async () => {
     const raw = await loadRawNotes();
@@ -139,6 +143,7 @@ export async function atomicUpdate(
           updatedAt: now,
           accessCount: 0,
           confidence: 0.5,
+          ...(actorId ? { actorId } : {}),
         };
       }
     }

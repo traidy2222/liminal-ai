@@ -61,6 +61,7 @@ import { createBranchExploreTool } from "./branch_explore.js";
 import { createVerifyContractTool } from "./verify_contract.js";
 // New tools — Upgrade IV
 import { gitStatusTool, gitDiffTool, gitLogTool, gitBranchTool, gitCommitTool } from "./git_tools.js";
+import { gitCheckpointTool, gitRollbackTool } from "./git_checkpoint.js";
 import { patchFileTool } from "./patch_file.js";
 import { taskCheckpointTool, resumeTaskTool } from "./task_persistence.js";
 import { featureChecklistTool } from "./feature_checklist.js";
@@ -138,6 +139,8 @@ export function registerAllTools(
   registry.register(gitLogTool);
   registry.register(gitBranchTool);
   registry.register(gitCommitTool);
+  registry.register(gitCheckpointTool);
+  registry.register(gitRollbackTool);
   registry.register(taskCheckpointTool);
   registry.register(resumeTaskTool);
   registry.register(featureChecklistTool);
@@ -206,6 +209,7 @@ export function registerAllTools(
     registry.register(orch.evidenceCriticTool);
     registry.register(orch.pathCriticTool);
     registry.register(orch.policyCriticTool);
+    registry.register(orch.reflectDebateTool);
 
     // Context budget tools (check_context, compress_context) — close over harness context
     const { checkContextTool, compressContextTool } = createContextTools(harness.getContext());

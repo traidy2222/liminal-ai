@@ -17,7 +17,7 @@ export class SSEManager {
   private idCounter = 0;
   private eventCounter = 0;
   private readonly history: SSEEvent[] = [];
-  private readonly historyLimit = 500;
+  private readonly historyLimit = 2000;
   private heartbeatTimer: NodeJS.Timeout | null = null;
 
   add(req: Request, res: Response): string {
@@ -29,7 +29,7 @@ export class SSEManager {
     res.setHeader("X-Accel-Buffering", "no");
     res.setHeader("Access-Control-Allow-Origin", "*");
     res.flushHeaders();
-    res.write(`retry: 3000\n\n`);
+    res.write(`retry: 1000\n\n`);
 
     this.clients.set(id, { id, res });
     this.ensureHeartbeat();
@@ -45,8 +45,11 @@ export class SSEManager {
       this.clients.delete(id);
     });
 
-    const lastEventIdHeader = req.header("last-event-id");
-    const lastEventId = lastEventIdHeader ? Number.parseInt(lastEventIdHeader, 10) : NaN;
+    // Accept Last-Event-ID from header (native EventSource on reconnect) or query param
+    // (manual reconnect where we can't set headers).
+    const lastEventIdRaw =
+      req.header("last-event-id") ?? (req.query["lastEventId"] as string | undefined);
+    const lastEventId = lastEventIdRaw ? Number.parseInt(lastEventIdRaw, 10) : NaN;
     const hasLastEventId = Number.isFinite(lastEventId);
 
     // Send initial connected event with server-side cursor.
@@ -105,7 +108,7 @@ export class SSEManager {
       for (const id of dead) {
         this.clients.delete(id);
       }
-    }, 15_000);
+    }, 8_000);
   }
 
   get clientCount(): number {

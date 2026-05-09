@@ -1,8 +1,9 @@
 /**
  * Append-only JSONL session log for replay, debugging, and multi-window handoff.
  * Enable with AGENT_SESSION_JSONL=1; files under .agent_sessions/<sessionId>.jsonl
+ * Yield snapshots: AGENT_YIELD_EVERY_N=<n> writes _yield.json every N rounds for crash recovery.
  */
-import { mkdir, appendFile } from "node:fs/promises";
+import { mkdir, appendFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import type { AgentEmitter } from "./events.js";
 import type { AgentEventMap } from "./types.js";
@@ -139,6 +140,40 @@ export function attachSessionEventLog(emitter: AgentEmitter, sessionId: string):
     emitter.off("error", onError);
     emitter.off("approval_decision", onApproval);
   };
+}
+
+export interface YieldSnapshot {
+  taskId: string;
+  round: number;
+  goal: string;
+  toolsUsed: string[];
+  usageFraction: number;
+  tokenCount: number;
+  epistemicSummary?: string;
+  savedAt: string;
+}
+
+function yieldSnapshotPath(taskId: string): string {
+  const safe = taskId.replace(/[^a-zA-Z0-9._-]/g, "_").slice(0, 80);
+  return path.join(sessionLogDir(), `${safe}_yield.json`);
+}
+
+/**
+ * Write a crash-recovery yield snapshot to `.agent_sessions/<taskId>_yield.json`.
+ * Called every AGENT_YIELD_EVERY_N rounds when that env var is set.
+ */
+export async function writeYieldSnapshot(snapshot: YieldSnapshot): Promise<void> {
+  try {
+    const dir = sessionLogDir();
+    await mkdir(dir, { recursive: true });
+    await writeFile(
+      yieldSnapshotPath(snapshot.taskId),
+      JSON.stringify(snapshot, null, 2),
+      "utf8"
+    );
+  } catch {
+    /* non-fatal */
+  }
 }
 
 /** When AGENT_SESSION_JSONL=1, attach logging and return detach; otherwise return a no-op. */
