@@ -353,6 +353,7 @@ async function runSingleHarnessSend(scenario: Scenario, userMessage: string): Pr
     "runtime_heartbeat",
     "vault_activity",
     "recency_check",
+    "synthesis_check",
     "runtime_pref_detected",
     "runtime_pref_changed",
     "runtime_pref_persisted",

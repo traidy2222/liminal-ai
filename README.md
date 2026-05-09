@@ -77,6 +77,38 @@ npm run web
 - Asking "what model/harness are you using?" returns explicit model/base URL and `Liminal AgentHarness`.
 - `npm run typecheck` and `npm run test --workspace=@liminal/core` both pass.
 
+## What's New
+
+### Upgrade V — Intelligence & Autonomy
+
+**Spaced-repetition memory ranking** — `recall_relevant` now multiplies every BM25+recency score by an exponential decay factor (30-day half-life, 0.25 floor). Notes not accessed recently rank lower automatically; frequently-used notes resist decay. Configurable via `halfLifeDays` on `RankableDoc`.
+
+**Semantic context compression** — When the context window fills, old rounds can now be compressed into a causal narrative instead of raw tool-name one-liners. Enable with `AGENT_COMPRESS_SEMANTIC=1`. The harness passes a `semanticSummarizer` callback to `ContextManager` which calls the model to generate a coherent reasoning digest, preserving causal chain across very long sessions.
+
+**Automatic reflexion pipeline** — On all-tool-failure rounds the harness now extracts a structured lesson `{lesson, root_cause, fix_pattern}` via the model and stores it as a `reflection:` typed memory note. Future sessions surface this note via `recall_relevant`. Also bumps `rule_stats` error-prevented counters for any R-* rule IDs found in the error context.
+
+**Rule effectiveness tracking** — Named R-* protocol rules accumulate hit counts and errors-prevented stats in `.agent_rule_stats.json`. Use `formatRuleStatsReport()` to surface a leaderboard. Rule IDs are extracted automatically from error summaries and rule text via `extractRuleIds()`.
+
+**Task DAG scheduling** — `spawn_agent` now accepts a `depends_on` string array. The orchestrator's `waitForDependencies()` polls until all upstream tasks reach terminal state before the dependent task is unblocked. `dependenciesMet()` provides a synchronous snapshot check. `TaskRecord` carries `dependsOn` for introspection.
+
+**Cross-harness shared memory bus** — `SharedMemoryBus` is created once on the root harness and automatically propagated to every child via `forkChild`. Sub-agents can `publish(key, value, publisherId)` facts and `read` each other's output without going through the parent's conversation history. Subscribers receive notifications on every write.
+
+**Goal decomposer tool** — `decompose_goal(goal, context?, max_nodes?)` calls the configured model to break a high-level goal into a typed task DAG. Nodes are `sequential` or `parallel` and each carries an `agent_role` hint ready to paste into `spawn_agent`'s `system_prompt`. Returns full JSON DAG plus a human-readable summary.
+
+**Multi-path exploration tool** — `branch_explore(question, approach_a, approach_b, context?)` spawns two read-only critic sub-agents with divergent exploration angles, waits for both in parallel, then uses the model as a judge to pick the winner (`A`, `B`, or `both`) and synthesise a conclusion. Falls back gracefully if the judge call fails.
+
+**Execution contract verifier** — `verify_contract(mark_done?, goal_summary?)` reads `ExecutionState` from the harness and renders a structured report: mission status, per-milestone progress (✓/▶/✗/○), time-budget consumption with overage warnings, success criteria, drift score with severity label, high-severity commitments, and recent recovery events. Can atomically mark the active contract as `verified`.
+
+**Adaptive system prompt** — `buildProtocolDynamicSuffix` now accepts an optional `intentHint` and reads `AGENT_PROTOCOL_INTENT_HINT` from the environment. Heavy irrelevant sections are suppressed per intent class, saving 300–800 tokens on focused turns without dropping any guardrails:
+- `coding` → skips vault KB, markets, document engine
+- `execution` → skips markets, document engine
+- `introspection` → minimal set only (skips vault, markets, doc, vision)
+- `knowledge` / unset → full output (default, no change)
+
+**Plugin/extension system** — Set `AGENT_PLUGIN_DIR` to a directory of `.js`/`.mjs` files. Each must export `register(registry, emitter)`. Call `loadPlugins(registry, emitter)` at startup; it returns a per-file `{file, ok, error?}` report and emits errors for failed plugins. Plugins participate in the full tool system including lazy loading and tool families.
+
+---
+
 ## Core Runtime Guarantees (Most Important)
 
 1. **World-grounded operation**
@@ -84,11 +116,11 @@ npm run web
 2. **Strict tool dispatch pipeline**
   Every tool call goes through schema validation, argument guardrails, optional safety policy, lock acquisition, approval flow, then execution.
 3. **Long-horizon coherence state**
-  Runtime tracks mission/contracts/milestones, heartbeat and drift score, contract transitions, and recovery actions when rounds fail.
+  Runtime tracks mission/contracts/milestones, heartbeat and drift score, contract transitions, and recovery actions when rounds fail. Use `verify_contract` to inspect the active contract mid-task.
 4. **Research quality controls**
   Query diversity checks, duplicate-intent throttling, temporal anchoring for latest/news searches, and synthesis checklist nudges.
 5. **Memory + vault knowledge growth**
-  Retrieval prefers memory/vault before web (advisory by default), and research-style runs can auto-persist durable notes.
+  Retrieval prefers memory/vault before web. `recall_relevant` applies spaced-repetition decay so stale notes naturally rank lower. Research-style runs can auto-persist durable notes.
 6. **UI streaming hardening**
   Stream chunk normalization and buffered flush ordering reduce garbled glyphs and repaint artifacts in TUI/web.
 
@@ -169,6 +201,12 @@ Use `.env.example` for full options.
   - `AGENT_VAULT_PATH=C:\path\to\vault`
   - `AGENT_VAULT_AUTO_WRITE=research` (default behavior when unset)
   - `AGENT_VAULT_FIRST_STRICT=1` (optional strict blocking mode)
+- **Long-session / deep reasoning**
+  - `AGENT_COMPRESS_SEMANTIC=1` — causal narrative compression instead of one-liners
+  - `AGENT_REFLEXION_SEMANTIC=1` — structured lesson extraction on failure (root cause + fix pattern)
+  - `AGENT_PROTOCOL_INTENT_HINT=coding` — trim 300–800 tokens of irrelevant protocol sections
+- **Plugin extensions**
+  - `AGENT_PLUGIN_DIR=/path/to/plugins` — load custom `.js`/`.mjs` tool plugins at startup
 
 ## Documentation Index
 
