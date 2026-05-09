@@ -197,6 +197,10 @@ export const recallRelevantTool = defineTool({
           typeof rv === "object" && rv !== null && "updatedAt" in rv
             ? (rv as StoredNote).updatedAt
             : undefined;
+        const lastAccessedAt =
+          typeof rv === "object" && rv !== null && "lastAccessedAt" in rv
+            ? (rv as StoredNote).lastAccessedAt
+            : undefined;
         const colon = id.indexOf(":");
         const memoryType = colon > 0 ? id.slice(0, colon) : undefined;
         const accessCount =
@@ -211,6 +215,7 @@ export const recallRelevantTool = defineTool({
           id,
           text: `${id} ${value}`,
           updatedAt,
+          lastAccessedAt,
           memoryType,
           accessCount,
           confidence,
