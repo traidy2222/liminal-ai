@@ -38,7 +38,8 @@ When all tools in a round fail:
 - error summary is appended
 - recovery hints are injected
 - recovery action is logged/emitted
-- optional reflection persistence is attempted
+- structured reflexion is attempted: calls the configured model to extract `{lesson, root_cause, fix_pattern}` JSON and stores the result as a `reflection:` typed memory note for future sessions. Falls back to plain-text if the model call fails. Controlled by `AGENT_REFLEXION_SEMANTIC` (defaults on).
+- `bumpRuleHits()` is called with the error context to increment errors-prevented counters for any R-* rule IDs referenced in the failure.
 
 ## Finalization and Critic Pass
 

@@ -30,6 +30,8 @@ Use `.env.example` as canonical source. This document groups major flags by subs
 - `AGENT_TOOL_BODY_ELIDE`
 - `AGENT_TOOL_ELIDE_MIN_CHARS`
 - `AGENT_TOOL_ELIDE_KEEP_ROUNDS`
+- `AGENT_COMPRESS_SEMANTIC=1` — when context fills and old rounds are compressed, calls the configured model to produce a causal narrative digest instead of raw tool-name one-liners. Preserves reasoning chain across very long sessions.
+- `AGENT_PROTOCOL_INTENT_HINT` — session-wide protocol section filter. Values: `coding` | `knowledge` | `execution` | `introspection`. Suppresses irrelevant heavy sections (vault KB, markets, document engine, vision sidecar) to save 300–800 tokens per turn. Can also be set programmatically per-turn via `buildAdaptiveProtocolSuffix(toolNames, intent)`.
 
 ## Memory and Retrieval
 
@@ -39,7 +41,6 @@ Use `.env.example` as canonical source. This document groups major flags by subs
 - `AGENT_MEMORY_AUTOLINK`
 - `AGENT_MEMORY_AUTOLINK_MODEL`
 - `AGENT_QUERY_REWRITE`
-- `AGENT_FAST_MODEL`
 
 ## Vault
 
@@ -59,9 +60,14 @@ Use `.env.example` as canonical source. This document groups major flags by subs
 - `AGENT_CRITIC_EVIDENCE`
 - `AGENT_CRITIC_MIN_TOOLS`
 - `AGENT_FAILURE_LOG`
+- `AGENT_REFLEXION_SEMANTIC` — defaults on. When all tools in a round fail, calls the model to extract a structured `{lesson, root_cause, fix_pattern}` JSON and stores it as a `reflection:` typed memory note. Set to `0` to revert to plain-text reflection.
 - `AGENT_RATE_LIMIT_MAX_RETRIES`
 - `AGENT_TRANSIENT_5XX_MAX_RETRIES`
 - `AGENT_RETRY_MAX_DELAY_MS`
+
+## Extensions
+
+- `AGENT_PLUGIN_DIR` — absolute path to a directory of `.js` / `.mjs` plugin files. Each file must export `register(registry, emitter)`. Call `loadPlugins(registry, emitter)` at startup to load all plugins. Failed plugins emit an error event but do not prevent the harness from starting.
 
 ## Evaluation and Session Logging
 
@@ -91,4 +97,12 @@ Use `.env.example` as canonical source. This document groups major flags by subs
 - `AGENT_QUERY_REWRITE=1`
 - `AGENT_EMBED_MODEL=openai/text-embedding-3-small`
 - `AGENT_VAULT_AUTO_WRITE=research`
+
+### Long-session / deep reasoning
+- `AGENT_COMPRESS_SEMANTIC=1`
+- `AGENT_REFLEXION_SEMANTIC=1` (default on)
+- `AGENT_PROTOCOL_INTENT_HINT=coding` (adjust to task class)
+
+### Plugin extensions
+- `AGENT_PLUGIN_DIR=/path/to/plugins`
 
