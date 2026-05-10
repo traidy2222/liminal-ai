@@ -44,6 +44,8 @@ export class AgentBridge {
   private detachSessionLog: () => void = () => {};
   private pendingApprovals = new Map<string, (d: ApprovalDecision) => void>();
   private pendingAskUser: ((answer: string) => void) | null = null;
+  private harnessHeartbeatTimer: NodeJS.Timeout | null = null;
+  private turnStartedAt: number | null = null;
 
   constructor(private readonly sse: SSEManager, runtimePreferences: RuntimePreferences | null = null) {
     const provider = resolveProviderConfig(runtimePreferences?.provider);
@@ -75,12 +77,30 @@ export class AgentBridge {
     this.wireEvents();
   }
 
+  private startHeartbeat(): void {
+    if (this.harnessHeartbeatTimer) return;
+    if (!this.turnStartedAt) this.turnStartedAt = Date.now();
+    this.harnessHeartbeatTimer = setInterval(() => {
+      if (!this.harness.getIsRunning()) { this.stopHeartbeat(); return; }
+      this.sse.send("harness_running", { startedAt: this.turnStartedAt });
+    }, 5_000);
+  }
+
+  private stopHeartbeat(): void {
+    if (this.harnessHeartbeatTimer) { clearInterval(this.harnessHeartbeatTimer); this.harnessHeartbeatTimer = null; }
+    this.turnStartedAt = null;
+  }
+
+  /** Current busy state — exposed for /api/status. */
+  get isBusy(): boolean { return this.harness.getIsRunning(); }
+  get turnStartTime(): number | null { return this.turnStartedAt; }
+
   private wireEvents(): void {
     const { emitter } = this.harness;
 
-    emitter.on("text", (p) => this.sse.send("text", p));
-    emitter.on("provider_retry", (p) => this.sse.send("provider_retry", p));
-    emitter.on("tool_start", (p) => this.sse.send("tool_start", p));
+    emitter.on("text", (p) => { this.startHeartbeat(); this.sse.send("text", p); });
+    emitter.on("provider_retry", (p) => { this.startHeartbeat(); this.sse.send("provider_retry", p); });
+    emitter.on("tool_start", (p) => { this.startHeartbeat(); this.sse.send("tool_start", p); });
     emitter.on("tool_delta", (p) => this.sse.send("tool_delta", p));
     emitter.on("tool_result", (p) =>
       this.sse.send("tool_result", {
@@ -91,8 +111,8 @@ export class AgentBridge {
         output: p.result.ok ? p.result.output : p.result.error,
       })
     );
-    emitter.on("turn_end", (p) => this.sse.send("turn_end", p));
-    emitter.on("error", (p) => this.sse.send("error", { message: p.err.message }));
+    emitter.on("turn_end", (p) => { this.stopHeartbeat(); this.sse.send("turn_end", p); });
+    emitter.on("error", (p) => { this.stopHeartbeat(); this.sse.send("error", { message: p.err.message }); });
 
     emitter.on("subtask_spawned", (p) => this.sse.send("subtask_spawned", p));
     emitter.on("subtask_complete", (p) => this.sse.send("subtask_complete", p));

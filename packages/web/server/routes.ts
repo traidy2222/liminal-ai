@@ -42,6 +42,13 @@ export function createRouter(bridge: AgentBridge, sse: SSEManager): Router {
     req.socket.setKeepAlive(true, 15_000);
     req.socket.setTimeout(0);
     sse.add(req, res);
+    // If harness is mid-turn, immediately tell the new client so it shows
+    // "working..." instead of appearing idle after a reconnect.
+    if (bridge.isBusy) {
+      res.write(
+        `event: harness_running\ndata: ${JSON.stringify({ startedAt: bridge.turnStartTime })}\n\n`
+      );
+    }
   });
 
   router.post("/api/message", async (req, res) => {
@@ -118,7 +125,11 @@ export function createRouter(bridge: AgentBridge, sse: SSEManager): Router {
   });
 
   router.get("/api/status", (_req, res) => {
-    res.json({ clients: sse.clientCount });
+    res.json({
+      clients: sse.clientCount,
+      busy: bridge.isBusy,
+      startedAt: bridge.turnStartTime,
+    });
   });
 
   return router;

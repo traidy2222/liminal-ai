@@ -69,6 +69,7 @@ type Action =
   | { type: "init_config"; uiVerbosity: "normal" | "quiet" }
   | { type: "connected" }
   | { type: "disconnected" }
+  | { type: "harness_running"; payload: { startedAt: number } }
   | { type: "user_message"; text: string }
   | { type: "text"; payload: { delta: string; channel?: "user" | "trace" } }
   | { type: "provider_retry"; payload: { attempt: number; maxAttempts: number; message: string; backoffMs: number } }
@@ -108,6 +109,10 @@ function reducer(state: SSEState, action: Action): SSEState {
 
     case "disconnected":
       return { ...state, connected: false, error: state.error ?? "Connection lost. Reconnecting..." };
+
+    case "harness_running":
+      // Received while reconnecting — confirms work is still in progress.
+      return { ...state, busy: true };
 
     case "session_reset":
       return {
@@ -499,6 +504,8 @@ export function useSSE() {
       esRef.current = es;
 
       es.addEventListener("connected", () => {
+        // Clear any pending CONNECTING-state takeover timer — we made it.
+        if (reconnectTimer.current) { clearTimeout(reconnectTimer.current); reconnectTimer.current = null; }
         reconnectAttempt.current = 0;
         dispatch({ type: "connected" });
       });
@@ -594,6 +601,13 @@ export function useSSE() {
         dispatch({ type: "text", payload: { channel: "trace", delta: `\n[prefs] rejected ${p.summary} (${p.reason})\n` } });
       });
 
+      // harness_running — emitted every 5 s while agent is mid-turn.
+      // Lands in SSE history so reconnecting clients know work is ongoing.
+      es.addEventListener("harness_running", (e: MessageEvent) => {
+        trackId(e);
+        dispatch({ type: "harness_running", payload: JSON.parse(e.data) });
+      });
+
       // Ack-only events — no UI effect needed.
       ["ask_user_answered", "approval_decision", "tool_timing", "vault_activity",
         "runtime_heartbeat", "drift_detected", "execution_state", "contract_transition",
@@ -601,22 +615,36 @@ export function useSSE() {
         es.addEventListener(evt, trackId as EventListener);
       });
 
-      // onerror fires for both transient errors (CONNECTING) and fatal closes (CLOSED).
+      // onerror fires for transient errors (CONNECTING) and fatal closes (CLOSED).
       es.onerror = () => {
         if (cancelledRef.current) return;
 
-        // CONNECTING = browser is already retrying; CLOSED = browser gave up.
         if (es.readyState === EventSource.CONNECTING) {
-          // Browser will retry on its own; just reflect the disconnected state.
+          // Native EventSource will retry on its own schedule, but ERR_CONNECTION_RESET
+          // can stall it in CONNECTING indefinitely without ever reaching CLOSED.
+          // Schedule a 2s takeover: if the connection still isn't OPEN by then, we
+          // close the native ES and drive the reconnect ourselves with backoff.
           dispatch({ type: "disconnected" });
+          if (!reconnectTimer.current) {
+            reconnectTimer.current = setTimeout(() => {
+              reconnectTimer.current = null;
+              if (cancelledRef.current) return;
+              if (esRef.current?.readyState === EventSource.OPEN) return; // recovered on its own
+              esRef.current?.close();
+              esRef.current = null;
+              const delay = reconnectDelay(reconnectAttempt.current);
+              reconnectAttempt.current = Math.min(reconnectAttempt.current + 1, 6);
+              reconnectTimer.current = setTimeout(connect, delay);
+            }, 2_000);
+          }
           return;
         }
 
-        // CLOSED — browser gave up. Take over with our own backoff reconnect.
+        // CLOSED — browser gave up entirely. Take over immediately.
+        if (reconnectTimer.current) { clearTimeout(reconnectTimer.current); reconnectTimer.current = null; }
         es.close();
         esRef.current = null;
         dispatch({ type: "disconnected" });
-
         const delay = reconnectDelay(reconnectAttempt.current);
         reconnectAttempt.current = Math.min(reconnectAttempt.current + 1, 6);
         reconnectTimer.current = setTimeout(connect, delay);
@@ -625,8 +653,23 @@ export function useSSE() {
 
     connect();
 
+    // When the tab becomes visible after being hidden, browsers throttle/freeze
+    // timers — reconnect immediately if the connection is stale.
+    const handleVisibilityChange = () => {
+      if (document.visibilityState !== "visible" || cancelledRef.current) return;
+      if (!esRef.current || esRef.current.readyState !== EventSource.OPEN) {
+        if (reconnectTimer.current) { clearTimeout(reconnectTimer.current); reconnectTimer.current = null; }
+        esRef.current?.close();
+        esRef.current = null;
+        reconnectAttempt.current = 0; // reset backoff — user just came back
+        connect();
+      }
+    };
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+
     return () => {
       cancelledRef.current = true;
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
       if (flushTimer.current) clearTimeout(flushTimer.current);
       if (reconnectTimer.current) clearTimeout(reconnectTimer.current);
       esRef.current?.close();
