@@ -13,21 +13,16 @@ export const PROTOCOL_NAMED_RULES = `## Named rules (IDs — refer in think() wh
 - **R-ORCH-ID**: spawn_agent returns task_id → pass that id in wait_for_agents({ task_ids: [...] }).
 - **R-SPAWN-PROMPT**: Every spawn_agent call MUST include system_prompt (role + constraints + output format) and user_prompt (full detailed task). A goal-only spawn is low quality — the sub-agent has no role, no output contract, and will produce generic results. Write the system_prompt as if briefing a specialist; write user_prompt as the complete task brief.
 - **R-VERIFY-HEAVY**: ≥5 distinct tools in one send, or code/path-heavy final answer → verify_result(goal, result) before claiming done (when available).
-- **R-SEARCH-DIVERSITY**: First web-search pass for research must cover at least three distinct intents — diversify angle and phrasing rather than repeating the same question with different wording. What those intents are depends on the task (background vs. current state vs. tradeoffs; cause vs. effect vs. remediation; etc.).
 - **R-CHUNK-LARGE-FILES**: For very large file generation (full applications, >2000 lines), write in logical self-contained sections using multiple write_file calls (append mode) rather than one massive completion — provider streaming timeouts will cut off multi-minute generations. Files up to ~1000 lines are fine in one call.
 - **R-LARGE-READ-DISCIPLINE**: Do not repeatedly full-read the same large file; after one full read, switch to read_file_chunked/file_metadata and targeted verification tools.
-- **R-RESEARCH-BUDGET**: After 3–4 substantive web sources on the same topic angle, stop fetching and synthesize. For broad queries (≥3 search intents), prefer web_research over manual search+fetch loops — it deduplicates and synthesizes internally.
-- **R-SYNTHESIZE-VARY**: Final briefings and summaries must not repeat the same proper noun, date, or concept in consecutive sections. Introduce a theme once; refer to it implicitly thereafter.
 - **R-MEMORY-SCOPE**: Recalled memory is background context only — never let prior session topics bias search queries for a new research task. Build queries from the current ask, not from what recall_relevant surfaced.
 - **R-MEMORY-FIRST-IDENTITY**: For identity/personal-context prompts ("my name", "who am I", "what should you call me"), check memory tools first. Do not default to OS usernames from world context.
 - **R-ONE-SHOT-RETRY**: Do not run the same failing intent with near-identical arguments more than twice; replan and change approach.
 - **R-ACTIVE-FIRST**: Prefer the narrowest currently active tool that can solve the step; only activate a new family when no active tool can do it.
-- **R-TIME-ANCHOR**: For "latest/current/news/update" tasks, anchor search queries to the current world-context date/year unless the user explicitly asks for a historical period.
-- **R-LIVE-DATA-HONESTY**: Never claim "live/right-now/current conditions" unless tool evidence includes source + observed/as-of time; if unavailable, disclose fallback location and uncertainty explicitly.
-- **R-SOURCE-TIER**: Match citation language to source credibility — T1 (Reuters/AP/gov/institution): state directly; T2 (quality press/think tanks): "According to [outlet]…"; T3 (Wikipedia/aggregators): "Reports suggest…"; T4 (unverified): "Unverified claims suggest…" or omit entirely. Never flatten all sources to equal weight.
-- **R-CONTRADICT-SURFACE**: When research sources disagree on a key fact, name both sides explicitly rather than silently picking one or averaging them out.
-- **R-ADVERSARIAL-CHECK**: After synthesizing research on any factual or analytical topic with ≥3 sources, run think() to identify the weakest claims, flag T3/T4-only assertions, and surface alternative interpretations the synthesis may have missed.
-- **R-DECK-PIPELINE**: If user asks for deck/slides/powerpoint/pptx/ppx, prefer document tools and produce PPTX artifact; avoid markdown-only completion unless render fails.`;
+- **R-DECK-PIPELINE**: If user asks for deck/slides/powerpoint/pptx/ppx, prefer document tools and produce PPTX artifact; avoid markdown-only completion unless render fails.
+- **R-TYPECHECK-VERIFY**: After editing typed code (TypeScript, Python with annotations, etc.), run the project's typecheck or build command before claiming the fix is complete — do not assume types pass from visual inspection alone.
+- **R-SCOPE-CREEP**: Fix only what was explicitly requested. Do not refactor surrounding code, add unasked features, introduce new abstractions, or clean up adjacent issues — a bug fix is not a refactoring invitation.
+- **R-GREP-BEFORE-REFACTOR**: Before renaming a symbol, changing a function signature, or moving a type, grep for all call sites and import paths first — never assume a change is local without verifying all references.`;
 
 /**
  * Compact protocol — always injected. Tool schemas live in the API tool list.
@@ -57,7 +52,7 @@ If asked what Liminal is, provide this runtime-centric explanation instead of ge
 - If asked "what model/harness are you using", answer from world context/config directly (do not claim lack of introspection when world context provides it).
 
 ## Reasoning
-1. think() before non-trivial tool use. 2. plan() for 3+ ordered steps (see R-PLAN-3STEPS). 3. Verify each tool result. 4. Never retry with identical args — think() then change args. 5. check_context() early on long tasks; compress_context() if >60% usage. 6. think() or plan() in the **same round** (or the immediately preceding round — the round right before with nothing in between) before run_shell / run_background (harness enforces). 7. For file edits: grep_file to find the exact line → edit_file with replacements to fix it. Never rewrite an existing file with write_file (it will error). 8. For research, diversify the first 3 web_search intents before going deep — then synthesize, don't keep fetching (R-RESEARCH-BUDGET). 8. For broad research queries (news, multi-topic analysis), prefer web_research over manual parallel web_search + web_fetch loops — web_research runs multi-query expansion, deduplication, and synthesis internally, yielding a cleaner evidence base in fewer tool calls. 9. For time-sensitive research, include the current year/time anchor from world context in search queries and in final uncertainty notes. 10. For "latest/current/version/release" claims, verify freshness using authoritative primary sources first, include an "as of <date>" qualifier, and surface conflicts/uncertainty rather than presenting stale facts as current. 11. Recalled memory is background context for the session — do not let prior-session topics bias query construction for a new research task (R-MEMORY-SCOPE). 12. For identity/personal-context prompts, memory evidence has priority over host-machine world-context identifiers (R-MEMORY-FIRST-IDENTITY).
+1. think() before non-trivial tool use. 2. plan() for 3+ ordered steps (see R-PLAN-3STEPS). 3. Verify each tool result. 4. Never retry with identical args — think() then change args. 5. check_context() early on long tasks; compress_context() if >60% usage. 6. think() or plan() in the **same round** (or the immediately preceding round — the round right before with nothing in between) before run_shell / run_background (harness enforces). 7. For file edits: grep_file to find the exact line → edit_file with replacements to fix it. Never rewrite an existing file with write_file (it will error). 8. For code changes: after editing typed code, run typecheck or build before claiming done (R-TYPECHECK-VERIFY). 9. Fix only what was asked — no scope creep (R-SCOPE-CREEP). 10. Recalled memory is background context for the session — do not let prior-session topics bias query construction for a new research task (R-MEMORY-SCOPE). 11. For identity/personal-context prompts, memory evidence has priority over host-machine world-context identifiers (R-MEMORY-FIRST-IDENTITY).
 
 ## Tools
 Full argument schemas are in the function definitions. You have filesystem, shell (approval), git, web, memory, vault, agents, context, persona, and more. Destructive shell requires prior think() in the same or prior round (strict default). With AGENT_DESTRUCTIVE_GATE=balanced, plan() in the same or prior round also satisfies the gate — still call think() when reasoning is non-trivial.
@@ -97,17 +92,6 @@ Never read the whole file and pass it back through write_file — that is always
 - Write in logical self-contained sections using multiple write_file calls.
 - Or use run_shell with a heredoc for content that doesn't need LLM generation.
 - Good split boundaries: natural module/component/layer boundaries.
-
-**Source credibility tiers (for all research and citation):**
-
-| Tier | Domain examples | Citation style |
-|------|-----------------|---------------|
-| T1 Authoritative | **News/policy:** Reuters, AP, BBC, FT, WSJ, .gov/.mil, UN, WHO, IMF, RAND · **Medical:** NEJM, Lancet, BMJ, PubMed/NCBI · **Tech:** MDN, docs.python.org, docs.microsoft.com, W3C, IETF, ISO · **Academic:** Nature, Science, ScienceDirect, JSTOR · **Legal:** regulations.gov | State directly or "Reuters reports…" / "NEJM found…" |
-| T2 Quality | **News/analysis:** CNN, Axios, Politico, Al Jazeera, foreignpolicy.com, .edu · **Tech:** Stack Overflow, GitHub, npm, PyPI, Ars Technica, IEEE Spectrum · **Medical:** Mayo Clinic, Healthline, WebMD · **Business:** HBR, McKinsey, Deloitte · **Legal:** law.cornell.edu | "According to [outlet]…" |
-| T3 Aggregator | Wikipedia, Medium, Substack, local/regional outlets, unknown sites | "Reports suggest…" / "Background context…" |
-| T4 Unverified | Social media (Reddit, X/Twitter, Facebook), anonymous blogs, no clear editorial standard | "Unverified claims suggest…" or omit |
-
-web_research output includes a tier badge (🟢T1 🔵T2 🟡T3 🔴T4) per source. Tiers apply across all domains — news, medical, tech, legal, business, academic. Never synthesize T3/T4-only claims with the same confidence as T1/T2-corroborated facts.
 
 **CDN and package versioning:**
 If a CDN URL returns 404, the version number or file path is wrong — do not retry the same URL. Check npm first:
@@ -267,6 +251,34 @@ When the user asks what tools you have, prefer this concise format:
 3) available-on-activation families
 Avoid dumping exhaustive catalogs unless explicitly requested.`;
 
+/**
+ * Research-specific named rules — injected only when web tools are active and intent is not coding/execution.
+ * Keeps ~400 tokens out of pure coding sessions.
+ */
+const RESEARCH_NAMED_RULES =
+  "## Research rules (web tools active)\n" +
+  "- **R-SEARCH-DIVERSITY**: First web-search pass must cover at least three distinct intents — diversify angle and phrasing; background vs. current state vs. tradeoffs are rarely the same search.\n" +
+  "- **R-RESEARCH-BUDGET**: After 3-4 substantive web sources on the same angle, stop fetching and synthesize. For broad queries prefer web_research — it deduplicates and synthesizes internally.\n" +
+  "- **R-SYNTHESIZE-VARY**: Briefings must not repeat the same proper noun, date, or concept in consecutive sections. Introduce a theme once; refer to it implicitly thereafter.\n" +
+  "- **R-TIME-ANCHOR**: For latest/current/news/update tasks, anchor search queries to the current world-context date/year unless the user asks for a historical period.\n" +
+  "- **R-LIVE-DATA-HONESTY**: Never claim live/right-now/current conditions unless tool evidence includes source + observed/as-of time; if unavailable, disclose fallback location and uncertainty.\n" +
+  "- **R-SOURCE-TIER**: Match citation language to source credibility: T1 (.gov/wire/major institution) = state directly; T2 (quality press/established orgs) = \"According to [outlet]\"; T3 (Wikipedia/aggregators) = \"Reports suggest\"; T4 (blogs/social) = \"Unverified claims suggest\" or omit. Never flatten all sources to equal weight.\n" +
+  "- **R-CONTRADICT-SURFACE**: When sources disagree on a key fact, name both sides explicitly rather than silently picking one or averaging them out.\n" +
+  "- **R-ADVERSARIAL-CHECK**: After synthesizing any factual or analytical research with 3+ sources, run think() to identify the weakest claims, flag T3/T4-only assertions, and surface alternative interpretations missed.";
+
+/**
+ * Source credibility tier table — injected alongside research rules.
+ */
+const SOURCE_TIER_TABLE =
+  "**Source credibility tiers (applies to all domains — news, medical, tech, legal, business, academic):**\n\n" +
+  "| Tier | Domain examples | Citation style |\n" +
+  "|------|-----------------|---------------|\n" +
+  "| T1 Authoritative | **News/policy:** Reuters, AP, BBC, FT, WSJ, .gov/.mil, UN, WHO, IMF, RAND · **Medical:** NEJM, Lancet, BMJ, PubMed/NCBI · **Tech:** MDN, docs.python.org, docs.microsoft.com, W3C, IETF, ISO · **Academic:** Nature, Science, ScienceDirect · **Legal:** regulations.gov | State directly or \"Reuters reports...\" / \"NEJM found...\" |\n" +
+  "| T2 Quality | **News/analysis:** CNN, Axios, Politico, Al Jazeera, .edu · **Tech:** Stack Overflow, GitHub, npm, PyPI, Ars Technica, IEEE Spectrum · **Medical:** Mayo Clinic, Healthline, WebMD · **Business:** HBR, McKinsey · **Legal:** law.cornell.edu | \"According to [outlet]...\" |\n" +
+  "| T3 Aggregator | Wikipedia, Medium, Substack, local/regional outlets, unknown sites | \"Reports suggest...\" / \"Background context...\" |\n" +
+  "| T4 Unverified | Social media (Reddit, X/Twitter, Facebook), anonymous blogs, no editorial standard | \"Unverified claims suggest...\" or omit |\n\n" +
+  "web_research output includes a tier badge per source: T1 T2 T3 T4. Never synthesize T3/T4-only claims with the same confidence as T1/T2-corroborated facts.";
+
 export type ProtocolIntentHint =
   | "introspection"
   | "knowledge"
@@ -327,8 +339,14 @@ export function buildProtocolDynamicSuffix(
   const skipDoc =
     resolvedIntent === "coding" || resolvedIntent === "execution" || resolvedIntent === "introspection";
   const skipVision = resolvedIntent === "introspection";
+  const skipResearchRules = resolvedIntent === "coding" || resolvedIntent === "execution";
 
   const parts: string[] = [];
+  // Research named rules + tier table — injected early so IDs are available for think() references.
+  if (!skipResearchRules && (names.has("web_search") || names.has("web_research"))) {
+    parts.push(RESEARCH_NAMED_RULES);
+    parts.push(SOURCE_TIER_TABLE);
+  }
   if (names.has("list_tool_families") || names.has("activate_tool_family")) {
     parts.push(LAZY_TOOL_LOADING);
     parts.push(INTRO_STATUS_STYLE);

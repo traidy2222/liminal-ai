@@ -28,6 +28,9 @@ export const HARNESS_RULES: Record<string, string> = {
   "R-SOURCE-TIER": "Match citation language to source credibility: T1 (Reuters/AP/gov) = state directly or 'Reuters reports…'; T2 (quality press/think tanks) = 'According to [outlet]…'; T3 (Wikipedia/aggregators) = 'Reports suggest…' or 'Background context…'; T4 (blogs/unknown) = 'Unverified claims suggest…' or omit. Never flatten all sources to the same confidence level.",
   "R-CONTRADICT-SURFACE": "When research sources disagree on a key fact, surface the contradiction explicitly — name both sides — rather than averaging or silently picking one. Use 'Sources conflict: [A says X, B says Y]' framing.",
   "R-ADVERSARIAL-CHECK": "After synthesizing research with ≥3 sources on any factual or analytical topic: run think() with adversarial lens — identify the 2-3 weakest claims, flag what relies only on T3/T4 sources, and note plausible alternative interpretations the synthesis may have missed.",
+  "R-TYPECHECK-VERIFY": "After editing typed code (TypeScript, Python with annotations, etc.), run the project's typecheck or build command before claiming the fix is complete — do not assume types pass from visual inspection alone.",
+  "R-SCOPE-CREEP": "Fix only what was explicitly requested. Do not refactor surrounding code, add unasked features, introduce new abstractions, or clean up adjacent issues — a bug fix is not a refactoring invitation.",
+  "R-GREP-BEFORE-REFACTOR": "Before renaming a symbol, changing a function signature, or moving a type, grep for all call sites and import paths first — never assume a change is local without verifying all references.",
 };
 
 /**
@@ -79,4 +82,7 @@ export const HARNESS_RULE_RECALL_MESSAGE =
   `- **R-LIVE-DATA-HONESTY**: For live/current conditions claims, include source + observed/as-of time; if live data is unavailable, disclose fallback locality and uncertainty.\n` +
   `- **R-SOURCE-TIER**: Match citation language to source tier: T1 (wire/gov/institution) = state directly; T2 (quality press) = 'According to [outlet]'; T3 (Wikipedia/aggregator) = 'Reports suggest'; T4 (unverified) = 'Unverified claims suggest' or omit.\n` +
   `- **R-CONTRADICT-SURFACE**: When sources disagree, name both sides explicitly — never silently average conflicting facts.\n` +
-  `- **R-ADVERSARIAL-CHECK**: After synthesizing ≥3 sources on any factual or analytical topic, use think() to identify weak claims, T3/T4-only assertions, and missed alternative interpretations.\n`;
+  `- **R-ADVERSARIAL-CHECK**: After synthesizing ≥3 sources on any factual or analytical topic, use think() to identify weak claims, T3/T4-only assertions, and missed alternative interpretations.\n` +
+  `- **R-TYPECHECK-VERIFY**: After editing typed code, run typecheck/build before claiming done — do not assume types pass from visual inspection.\n` +
+  `- **R-SCOPE-CREEP**: Fix only what was explicitly requested — no surrounding refactors, no unasked features, no new abstractions.\n` +
+  `- **R-GREP-BEFORE-REFACTOR**: Before renaming a symbol or changing a signature, grep for all call sites first — never assume a change is local.\n`;
