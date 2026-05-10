@@ -69,12 +69,14 @@ export class AgentBridge {
       },
     });
 
-    registerAllTools(this.harness.registry, this.harness.emitter, this.harness);
     this.detachSessionLog = maybeAttachSessionEventLog(
       this.harness.emitter,
       this.harness.taskId
     );
     this.wireEvents();
+    // Async tool registration (loads dynamic tools from disk); fire-and-forget is safe
+    // because the harness queues messages and won't dispatch until tools are registered.
+    void registerAllTools(this.harness.registry, this.harness.emitter, this.harness);
   }
 
   private startHeartbeat(): void {

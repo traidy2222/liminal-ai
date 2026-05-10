@@ -320,7 +320,7 @@ async function runSingleHarnessSend(scenario: Scenario, userMessage: string): Pr
   const harness = new AgentHarness(
     makeEvalConfig(scenario.maxRounds ?? 20, timeoutFor(scenario))
   );
-  registerAllTools(harness.registry, harness.emitter, harness);
+  await registerAllTools(harness.registry, harness.emitter, harness);
 
   for (const mock of scenario.mocks ?? []) {
     const existing = harness.registry.get(mock.toolName);

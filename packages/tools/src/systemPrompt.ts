@@ -185,6 +185,31 @@ When you learn durable facts from code/web/user that are likely reusable, persis
 Vault usage is a quality multiplier: storing high-signal findings improves future grounding, reduces repeated web lookups, and yields more coherent long-horizon answers.
 Do not assume auto-capture will save findings — call vault_write / remember yourself when new information is important.`;
 
+const DYNAMIC_TOOLS_PROTOCOL = `## Dynamic tool creation
+You can define new tools at any point during a session using create_tool, edit_tool, remove_tool, and list_dynamic_tools.
+
+**When to create a tool:**
+- You find yourself repeating the same multi-step sequence (fetch → parse → format) across turns
+- You need a domain-specific helper that doesn't exist (e.g. parse_invoice, fetch_github_pr, summarize_diff)
+- You want to wrap an external API or CLI in a clean, reusable interface
+- The task has a recurring sub-problem that a named, persistent utility would solve cleanly
+
+**Handler format** — write the body of an async JavaScript function:
+- Receives args (object) — read with const x = args['x']
+- Must return { ok: true, output: string } or { ok: false, error: string }
+- May use await, Node.js built-ins (fs, path, child_process, fetch), and dynamic import()
+- Keep it focused: one tool, one job
+
+**Workflow:**
+1. think() about whether a tool would genuinely simplify future work (not just this call)
+2. create_tool with name, description (WHAT/WHEN/ARGS), parameters schema, handler_code
+3. Call the new tool immediately to verify it works
+4. If the handler has a bug: edit_tool with the corrected handler_code
+5. Tools persist across restarts — list_dynamic_tools to audit what exists
+
+**Good tool names:** parse_logline, fetch_issue, extract_table_rows, run_jest_single, query_db_table
+**Avoid:** tools that just wrap a single shell command you could run_shell for once`;
+
 const MEMORY_AND_REFLEXION = `## Memory & reflexion
 Reflections/recipes may appear in world context. Prefer memory_query when available; else search_memory / recall_type. After repeated failures, remember(type: reflection). After big wins, suggest_improvement. memory_stats / forget / forget_type as needed.`;
 
@@ -371,6 +396,9 @@ export function buildProtocolDynamicSuffix(
   if (!skipVault && [...names].some((n) => n.startsWith("vault_"))) {
     parts.push(VAULT_PROTOCOL);
   }
+  if (names.has("create_tool")) {
+    parts.push(DYNAMIC_TOOLS_PROTOCOL);
+  }
   if (
     names.has("remember") ||
     names.has("recall") ||
@@ -433,6 +461,7 @@ export const PROTOCOL_BLOCK = `${PROTOCOL_CORE}\n\n${buildProtocolDynamicSuffix(
     "list_tool_families",
     "activate_tool_family",
     "feature_checklist",
+    "create_tool",
   ])
 )}`;
 

@@ -62,6 +62,7 @@ import { applyLazyRegistrationPolicy } from "./tool_catalog.js";
 import { createDecomposeGoalTool } from "./decompose_goal.js";
 import { createBranchExploreTool } from "./branch_explore.js";
 import { createVerifyContractTool } from "./verify_contract.js";
+import { createDynamicToolsTools, loadDynamicTools } from "./dynamic_tools.js";
 // New tools — Upgrade IV
 import { gitStatusTool, gitDiffTool, gitLogTool, gitBranchTool, gitCommitTool } from "./git_tools.js";
 import { gitCheckpointTool, gitRollbackTool } from "./git_checkpoint.js";
@@ -99,11 +100,11 @@ import {
  * Register all tools onto a registry.
  * Pass `harness` to also register orchestration tools + context tools scoped to that harness.
  */
-export function registerAllTools(
+export async function registerAllTools(
   registry: ToolRegistry,
   emitter: AgentEmitter,
   harness?: AgentHarness
-): void {
+): Promise<void> {
   registry.register(thinkTool);
   registry.register(planTool);
   registry.register(readFileTool);
@@ -237,6 +238,16 @@ export function registerAllTools(
     registry.register(createBranchExploreTool(harness));
     registry.register(createVerifyContractTool(harness));
   }
+
+  // Dynamic tool creation — always available
+  const { createTool, editTool, removeTool, listDynamicTools: listDynTools } = createDynamicToolsTools(registry, emitter);
+  registry.register(createTool);
+  registry.register(editTool);
+  registry.register(removeTool);
+  registry.register(listDynTools);
+
+  // Load any previously-persisted dynamic tools from disk
+  await loadDynamicTools(registry, emitter);
 
   applyLazyRegistrationPolicy(registry, !!harness);
   if (harness) {

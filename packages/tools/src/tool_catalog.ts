@@ -78,6 +78,10 @@ export const TOOL_FAMILIES: Record<string, { description: string; tools: readonl
     description: "Harness improvement suggestions and insights.",
     tools: ["suggest_improvement", "view_insights"],
   },
+  dynamic_tools: {
+    description: "Create, edit, remove, and list model-defined tools registered at runtime.",
+    tools: ["create_tool", "edit_tool", "remove_tool", "list_dynamic_tools"],
+  },
   vault: {
     description: "Obsidian vault read/write/search.",
     tools: [
@@ -178,6 +182,11 @@ export const CORE_ALWAYS_TOOLS_BASE: readonly string[] = [
   "ask_user",
   "list_tool_families",
   "activate_tool_family",
+  // Dynamic tool creation — always exposed so the model can build tools any time
+  "create_tool",
+  "edit_tool",
+  "remove_tool",
+  "list_dynamic_tools",
   // Web tools are read-only and needed in nearly every general task — always on.
   "web_search",
   "web_fetch",

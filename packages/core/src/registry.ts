@@ -24,6 +24,15 @@ export class ToolRegistry {
     this.tools.set(tool.name, tool);
   }
 
+  /** Remove a tool from the registry; returns true if it existed. */
+  unregister(name: string): boolean {
+    const existed = this.tools.has(name);
+    this.tools.delete(name);
+    this.activeToolNames.delete(name);
+    this.toolFamilyByName.delete(name);
+    return existed;
+  }
+
   get(name: string): ToolDefinition | undefined {
     return this.tools.get(name);
   }

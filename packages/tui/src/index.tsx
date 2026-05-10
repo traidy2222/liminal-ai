@@ -73,7 +73,7 @@ const harness = new AgentHarness({
   },
 });
 
-registerAllTools(harness.registry, harness.emitter, harness);
+await registerAllTools(harness.registry, harness.emitter, harness);
 void maybeAttachSessionEventLog(harness.emitter, harness.taskId);
 
 render(<App harness={harness} />);
