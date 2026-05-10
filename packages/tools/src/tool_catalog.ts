@@ -14,6 +14,7 @@ export const TOOL_FAMILIES: Record<string, { description: string; tools: readonl
       "patch_file",
       "apply_diff",
       "search_replace_file",
+      "batch_replace",
       "move_file",
       "copy_file",
       "copy_tree",
@@ -106,8 +107,8 @@ export const TOOL_FAMILIES: Record<string, { description: string; tools: readonl
     ],
   },
   navigation: {
-    description: "Repository tree orientation.",
-    tools: ["repo_map", "workspace_snapshot", "file_metadata", "read_file_chunked", "read_file_with_imports"],
+    description: "Repository tree orientation and file search.",
+    tools: ["repo_map", "workspace_snapshot", "file_metadata", "read_file_chunked", "read_file_with_imports", "grep_file"],
   },
   harness_ui: {
     description: "Persona, images, structured extraction (requires harness).",
@@ -158,6 +159,7 @@ export const CORE_ALWAYS_TOOLS_BASE: readonly string[] = [
   "think",
   "plan",
   "read_file",
+  "grep_file",
   "list_dir",
   "recall_relevant",
   "search_memory",
