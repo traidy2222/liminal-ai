@@ -33,6 +33,7 @@ import { fileMetadataTool } from "./file_metadata.js";
 import { workspaceSnapshotTool } from "./workspace_snapshot.js";
 import { searchReplaceFileTool } from "./search_replace_file.js";
 import { batchReplaceTool } from "./batch_replace.js";
+import { grepFileTool } from "./grep_file.js";
 import { writeFileIfChangedTool } from "./write_file_if_changed.js";
 import { moveFileTool } from "./move_file.js";
 import { copyFileTool } from "./copy_file.js";
@@ -114,6 +115,7 @@ export function registerAllTools(
   registry.register(patchFileTool);
   registry.register(searchReplaceFileTool);
   registry.register(batchReplaceTool);
+  registry.register(grepFileTool);
   registry.register(moveFileTool);
   registry.register(copyFileTool);
   registry.register(copyTreeTool);

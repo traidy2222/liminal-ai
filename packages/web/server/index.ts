@@ -16,6 +16,11 @@ config({ path: join(__dirname, "../../../.env") });
 const repoRoot = join(__dirname, "../../../");
 const targetRoot = resolve(process.env["AGENT_WORKSPACE_ROOT"]?.trim() || repoRoot);
 process.env["AGENT_WORKSPACE_ROOT"] = targetRoot;
+// Default to balanced gate so plan() satisfies the destructive pre-flight (not just think()).
+// Can still be overridden by setting AGENT_DESTRUCTIVE_GATE=strict in .env.
+if (!process.env["AGENT_DESTRUCTIVE_GATE"]) {
+  process.env["AGENT_DESTRUCTIVE_GATE"] = "balanced";
+}
 try {
   process.chdir(targetRoot);
 } catch {

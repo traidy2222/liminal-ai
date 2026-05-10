@@ -287,8 +287,8 @@ export class ToolDispatcher {
       const passes = hasThink || (balanced && hasPlan);
       if (!passes) {
         const hint = balanced
-          ? `Call think() or plan() in the same round first (or alone in the prior round).`
-          : `Call think() in the same round first (or alone in the prior round). Set AGENT_DESTRUCTIVE_GATE=balanced to also allow plan().`;
+          ? `Call think() or plan() in the same round first (or alone in the immediately preceding round — not any earlier round).`
+          : `Call think() in the same round first (or alone in the immediately preceding round — not any earlier round). Set AGENT_DESTRUCTIVE_GATE=balanced to also allow plan().`;
         const result: ToolResult = {
           ok: false,
           error: `Destructive tool "${name}" blocked: ${hint}`,

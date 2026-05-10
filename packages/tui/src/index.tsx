@@ -41,6 +41,9 @@ function resolveWorldContext():
   return { sessionMode: sessionMode! };
 }
 
+if (!process.env["AGENT_DESTRUCTIVE_GATE"]) {
+  process.env["AGENT_DESTRUCTIVE_GATE"] = "balanced";
+}
 const runtimePreferences = await loadRuntimePreferences();
 let provider;
 try {
