@@ -200,6 +200,51 @@ type ToolCallEntry = Extract<MessageEntry, { kind: "tool_call" }>;
 type ToolResult = { output: string; ok: boolean };
 
 const PREVIEW_LINES = 4;
+const STREAM_TAIL_LINES = 5;
+
+// Tools where we can meaningfully show the streamed arg content as a live preview
+const STREAM_CONTENT_FIELD: Record<string, string> = {
+  write_file: "content",
+  write_file_if_changed: "content",
+  apply_diff: "diff",
+  patch_file: "new_content",
+  execute_code: "code",
+  run_shell: "command",
+  run_background: "command",
+};
+
+function extractStreamingTail(toolName: string, argsJson: string): { lines: string[]; linesAbove: number } | null {
+  const field = STREAM_CONTENT_FIELD[toolName];
+  if (!field || !argsJson) return null;
+
+  let content: string | null = null;
+
+  // Try full parse first (completed args)
+  try {
+    const parsed = JSON.parse(argsJson) as Record<string, unknown>;
+    if (typeof parsed[field] === "string") content = parsed[field] as string;
+  } catch {
+    // Partial JSON — extract the field value with a regex that handles streaming
+    // Matches "field": "...everything up to the current stream position"
+    const re = new RegExp(`"${field}"\\s*:\\s*"((?:[^"\\\\]|\\\\.)*)`);
+    const m = argsJson.match(re);
+    if (m && m[1]) {
+      // Unescape JSON string escape sequences present so far
+      content = m[1]
+        .replace(/\\n/g, "\n")
+        .replace(/\\r/g, "")
+        .replace(/\\t/g, "\t")
+        .replace(/\\"/g, '"')
+        .replace(/\\\\/g, "\\");
+    }
+  }
+
+  if (!content || !content.trim()) return null;
+
+  const allLines = content.split("\n");
+  const tail = allLines.slice(-STREAM_TAIL_LINES);
+  return { lines: tail, linesAbove: Math.max(0, allLines.length - STREAM_TAIL_LINES) };
+}
 
 function ToolCard({ entry, result }: { entry: ToolCallEntry; result?: ToolResult }) {
   const [expanded, setExpanded] = useState(false);
@@ -218,6 +263,11 @@ function ToolCard({ entry, result }: { entry: ToolCallEntry; result?: ToolResult
   const cat = CATEGORY_META[getToolCategory(entry.name)];
   const sm = STATUS_META[entry.status] ?? STATUS_META["done"]!;
   const arg = parsePrimaryArg(entry.argsJson);
+
+  // Live streaming tail — shown while model is still generating args
+  const streamTail = entry.status === "streaming"
+    ? extractStreamingTail(entry.name, entry.argsJson ?? "")
+    : null;
 
   // Split output into preview vs overflow
   const outputLines = result ? result.output.trimEnd().split("\n") : [];
@@ -280,10 +330,32 @@ function ToolCard({ entry, result }: { entry: ToolCallEntry; result?: ToolResult
         </div>
       </div>
 
-      {/* ── Running pulse ── */}
-      {isActive && !result && (
-        <div style={{ marginTop: 6, display: "flex", alignItems: "center", gap: 6 }}>
-          <span style={{ color: "#335", fontSize: 11, fontStyle: "italic" }}>running…</span>
+      {/* ── Streaming tail (live content preview while model generates args) ── */}
+      {streamTail && (
+        <div style={{ marginTop: 7 }}>
+          {streamTail.linesAbove > 0 && (
+            <div style={{ color: "#334", fontSize: 10, marginBottom: 3, fontFamily: "monospace" }}>
+              ⋯ {streamTail.linesAbove} line{streamTail.linesAbove !== 1 ? "s" : ""} above
+            </div>
+          )}
+          <pre
+            style={{
+              ...styles.toolOutputPre,
+              color: "#4a5a6a",
+              margin: 0,
+              borderColor: "#1a2535",
+              maxHeight: "none",
+            }}
+          >
+            {streamTail.lines.join("\n")}
+          </pre>
+        </div>
+      )}
+
+      {/* ── Running indicator (tool dispatched, no streamable content) ── */}
+      {isActive && !result && !streamTail && (
+        <div style={{ marginTop: 6 }}>
+          <span style={{ color: "#334", fontSize: 11, fontStyle: "italic" }}>running…</span>
         </div>
       )}
 
