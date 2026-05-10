@@ -982,10 +982,10 @@ export function App() {
     ? Math.round(state.contextSnapshot.usageFraction * 100)
     : 0;
 
-  // Filter: hide trace/provider_retry unless showTrace
+  // Filter: hide trace lines unless showTrace; provider_retry always visible
   const visibleMessages = state.messages.filter((entry) => {
     if (showTrace) return true;
-    return entry.kind !== "trace" && entry.kind !== "provider_retry";
+    return entry.kind !== "trace";
   });
 
   // Build callId → result map so ToolCard can show output inline
