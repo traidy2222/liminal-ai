@@ -97,9 +97,13 @@ export const webFetchTool = defineTool({
     required: ["url"],
     additionalProperties: false,
   },
-  handler: async (args) => {
+  handler: async (args, emit) => {
     const url = args["url"] as string;
     const maxChars = (args["max_chars"] as number | undefined) ?? 8000;
-    return runWebFetch(url, maxChars);
+    const hostname = (() => { try { return new URL(url).hostname; } catch { return url.slice(0, 50); } })();
+    emit?.(`\nfetching ${hostname}…\n`);
+    const result = await runWebFetch(url, maxChars);
+    if (result.ok) emit?.(`  ✓ ${result.output.length} chars\n`);
+    return result;
   },
 });

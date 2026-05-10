@@ -103,11 +103,13 @@ export const webSearchTool = defineTool({
     required: ["query"],
     additionalProperties: false,
   },
-  handler: async (args) => {
+  handler: async (args, emit) => {
     const max = (args["max_results"] as number | undefined) ?? 5;
     const inputQuery = args["query"] as string;
     const query = normalizeTemporalQuery(inputQuery);
+    emit?.(`\nsearching: ${query.slice(0, 80)}\n`);
     const r = await runHtmlDdgSearch(query, max);
+    if (r.ok) emit?.(`  ✓ ${r.hits.length} results\n`);
     if (!r.ok) return r;
     const currentYear = new Date().getFullYear();
     const anchored = query !== inputQuery;

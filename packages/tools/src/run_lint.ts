@@ -212,9 +212,10 @@ export const runLintTool = defineTool({
     required: ["cwd"],
     additionalProperties: false,
   },
-  handler: async (args) => {
+  handler: async (args, emit) => {
     const cwd = path.resolve(resolveWorkspaceRoot(), args["cwd"] as string);
     const mode = (((args["mode"] as string | undefined) ?? "tsc").toLowerCase() as LintMode);
+    emit?.(`\nrun_lint: ${mode} in ${cwd}\n`);
     const structured = ((args["format"] as string | undefined) ?? "text").toLowerCase() === "structured";
     const npx = process.platform === "win32" ? "npx.cmd" : "npx";
     try {

@@ -147,9 +147,11 @@ export const executeCodeTool = defineTool({
     required: ["language", "code"],
     additionalProperties: false,
   },
-  handler: async (args) => {
+  handler: async (args, emit) => {
     const language = args["language"] as "python" | "javascript";
     const code = String(args["code"] ?? "");
+    const preview = code.trim().split("\n")[0]?.slice(0, 60) ?? "";
+    emit?.(`\nexecute_code (${language}): ${preview}…\n`);
     const timeoutMs = Math.min(
       MAX_TIMEOUT_MS,
       Math.max(1, Number(args["timeout_ms"] ?? DEFAULT_TIMEOUT_MS))

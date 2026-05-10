@@ -181,8 +181,9 @@ export const weatherLookupTool = defineTool({
     required: ["location"],
     additionalProperties: false,
   },
-  handler: async (args) => {
+  handler: async (args, emit) => {
     const location = String(args["location"] ?? "").trim();
+    emit?.(`\nweather_lookup: geocoding "${location}"…\n`);
     const countryHint = (args["country_hint"] as string | undefined)?.trim();
     const units = ((args["units"] as "metric" | "imperial" | undefined) ?? "metric");
     const preferLive = (args["prefer_live"] as boolean | undefined) ?? true;
@@ -227,6 +228,8 @@ export const weatherLookupTool = defineTool({
       for (let i = 0; i < fallbackOrder.length; i++) {
         const c = fallbackOrder[i];
         if (!c) continue;
+        if (i > 0) emit?.(`  → fallback ${i}: ${c.name ?? c.admin1 ?? "unknown"}\n`);
+        else emit?.(`  → fetching ${c.name ?? location}\n`);
         try {
           const cur = await fetchCurrent(c, units);
           if (cur.current?.time || !preferLive) {

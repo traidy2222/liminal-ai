@@ -304,7 +304,7 @@ export const marketsQuoteTool = defineTool({
     required: ["symbols"],
     additionalProperties: false,
   },
-  handler: async (args) => {
+  handler: async (args, emit) => {
     try {
       const symbolsRaw = Array.isArray(args["symbols"]) ? (args["symbols"] as unknown[]) : [];
       const symbols = symbolsRaw.map((s) => String(s ?? "").trim()).filter(Boolean);
@@ -313,6 +313,7 @@ export const marketsQuoteTool = defineTool({
       const normalized = symbols.map((s) => normalizeOneSymbol(s, requestedAssetType));
       const timeoutMs = parseTimeoutMs();
       const retries = parseRetries();
+      emit?.(`\nmarkets_quote: querying ${symbols.join(", ")} via Yahoo Finance…\n`);
       const yahooMap = await fetchYahooQuotes(normalized, timeoutMs, retries).catch(
         () => new Map<string, Record<string, unknown>>()
       );

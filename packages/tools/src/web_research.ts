@@ -205,7 +205,7 @@ export const webResearchTool = defineTool({
     required: ["question"],
     additionalProperties: false,
   },
-  handler: async (args) => {
+  handler: async (args, emit) => {
     if (process.env["AGENT_WEB_RESEARCH"] !== "1") {
       return {
         ok: false,
@@ -216,13 +216,17 @@ export const webResearchTool = defineTool({
     const k = Math.min(6, Math.max(1, (args["k_sources"] as number | undefined) ?? 4));
     if (!question) return { ok: false, error: "question required" };
 
-    const sr = await runHtmlDdgSearch(question, k + 2); // fetch extra hits to compensate for failed fetches
+    emit?.(`\nweb_research: searching — ${question.slice(0, 80)}\n`);
+    const sr = await runHtmlDdgSearch(question, k + 2);
     if (!sr.ok) return sr;
+    emit?.(`  found ${sr.hits.length} hits — fetching up to ${k} sources\n`);
 
     const sources: ScoredSource[] = [];
     for (const h of sr.hits.slice(0, k + 2)) {
       if (sources.length >= k) break;
       const u = h.url.startsWith("//") ? `https:${h.url}` : h.url;
+      const hostname = (() => { try { return new URL(u).hostname; } catch { return u.slice(0, 40); } })();
+      emit?.(`  → fetching ${hostname} (${sources.length + 1}/${k})\n`);
       const fr = await runWebFetch(u, 4500);
       if (fr.ok) {
         const tier = scoreSourceDomain(u);
@@ -233,12 +237,16 @@ export const webResearchTool = defineTool({
           tier,
           tierLabel: SOURCE_TIER_LABELS[tier],
         });
+        emit?.(`    ✓ ${SOURCE_TIER_LABELS[tier]}: ${h.title.slice(0, 60)}\n`);
+      } else {
+        emit?.(`    ✗ failed — skipping\n`);
       }
     }
 
     // Sort: highest tier first so synthesis sees strongest sources early
     sources.sort((a, b) => a.tier - b.tier);
 
+    emit?.(`  synthesizing ${sources.length} sources…\n`);
     const synth = await synthesizeResearch(question, sources);
 
     // Parse synthesis for structured display

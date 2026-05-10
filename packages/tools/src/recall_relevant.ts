@@ -146,7 +146,7 @@ export const recallRelevantTool = defineTool({
     required: ["query"],
     additionalProperties: false,
   },
-  handler: async (args) => {
+  handler: async (args, emit) => {
     const k = Math.min(30, Math.max(1, (args["k"] as number | undefined) ?? 8));
     const scope = (args["scope"] as string | undefined) ?? "both";
     const hyde = typeof args["hyde"] === "string" ? args["hyde"].trim().slice(0, 2000) : "";
@@ -192,6 +192,9 @@ export const recallRelevantTool = defineTool({
 
     const lines: string[] = [];
     const bumpKeys: string[] = [];
+
+    const queryLabel = queries.length > 1 ? `${queries.length} queries` : (queries[0] ?? "").slice(0, 60);
+    emit?.(`\nrecall_relevant: ${queryLabel} (scope=${scope})\n`);
 
     if (scope === "notes" || scope === "both") {
       const plain = await loadNotes();
@@ -242,6 +245,7 @@ export const recallRelevantTool = defineTool({
 
       const semById = new Map<string, number>();
       if (embedModel && apiKey) {
+        emit?.(`  embedding lookup (${embedModel.split("/").pop()})…\n`);
         try {
           await upsertNoteEmbeddings({
             apiKey,

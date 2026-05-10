@@ -27,10 +27,11 @@ export const runTestsTool = defineTool({
     required: ["cwd"],
     additionalProperties: false,
   },
-  handler: async (args) => {
+  handler: async (args, emit) => {
     const cwd = path.resolve(resolveWorkspaceRoot(), args["cwd"] as string);
     const script = (args["script"] as string | undefined)?.trim() || "test";
     const npm = process.platform === "win32" ? "npm.cmd" : "npm";
+    emit?.(`\nrun_tests: npm run ${script} in ${cwd}\n`);
     try {
       const { stdout, stderr } = await execFileAsync(
         npm,

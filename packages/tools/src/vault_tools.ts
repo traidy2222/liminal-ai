@@ -70,12 +70,14 @@ export const vaultWriteTool = defineTool({
     required: ["title", "content", "type"],
     additionalProperties: false,
   },
-  handler: async (args) => {
+  handler: async (args, emit) => {
     try {
       let body = args["content"] as string;
       const title = args["title"] as string;
       const typ = args["type"] as NoteType;
+      emit?.(`\nvault_write: "${title}" (${typ})\n`);
       if (process.env["AGENT_VAULT_DEDUPE"] === "1") {
+        emit?.(`  checking for duplicates…\n`);
         const dupes = await findNearDuplicateNote(title, body, { limit: 3, threshold: 0.5 });
         if (dupes.length > 0) {
           const best = dupes[0]!;
@@ -111,6 +113,7 @@ export const vaultWriteTool = defineTool({
 
       const action = wasCreated ? "Created" : "Updated";
       const vault = getVaultDir();
+      emit?.(`  ✓ ${action.toLowerCase()}: ${slug}\n`);
       return {
         ok: true,
         output: `${action} vault note: "${title}" (${typ})\nSlug: ${slug}\nVault: ${vault}`,
@@ -197,8 +200,9 @@ export const vaultSearchTool = defineTool({
     required: ["query"],
     additionalProperties: false,
   },
-  handler: async (args) => {
+  handler: async (args, emit) => {
     const query = args["query"] as string;
+    emit?.(`\nvault_search: "${query}"\n`);
     const results = await searchVault(query, {
       type: args["type"] as NoteType | undefined,
       tag:  args["tag"]  as string | undefined,

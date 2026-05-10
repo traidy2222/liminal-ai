@@ -63,7 +63,15 @@ export type ToolResult =
   | { ok: true; output: string }
   | { ok: false; error: string };
 
-export type ToolHandler = (args: Record<string, unknown>) => Promise<ToolResult>;
+/**
+ * emit(text) streams a progress line to the UI while the tool is running.
+ * Call it for each meaningful milestone so the user can see the tool isn't stalled.
+ * Text is appended to the live conversation stream (same channel as run_shell output).
+ */
+export type ToolHandler = (
+  args: Record<string, unknown>,
+  emit?: (text: string) => void
+) => Promise<ToolResult>;
 
 // ─── Approval ─────────────────────────────────────────────────────────────────
 

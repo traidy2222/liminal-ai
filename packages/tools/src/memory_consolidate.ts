@@ -36,12 +36,14 @@ export const memoryConsolidateTool = defineTool({
     },
     additionalProperties: false,
   },
-  handler: async (args) => {
+  handler: async (args, emit) => {
     const dryRun = Boolean(args["dry_run"]);
     const pruneOrphans = Boolean(args["prune_orphan_embeddings"]);
 
+    emit?.(`\nmemory_consolidate: loading notes…\n`);
     const notes = await loadNotes();
     const keys = Object.keys(notes);
+    emit?.(`  ${keys.length} notes loaded — scanning for duplicates\n`);
 
     let pruneReport = "";
     if (pruneOrphans) {
@@ -81,6 +83,7 @@ export const memoryConsolidateTool = defineTool({
         output: "(no near-duplicate pairs found by token Jaccard ≥ 0.86)" + pruneReport,
       };
     }
+    emit?.(`  found ${pairs.length} candidate pair(s) — requesting merge plan\n`);
 
     const apiKey = process.env["OPENROUTER_API_KEY"];
     if (!apiKey) return { ok: false, error: "OPENROUTER_API_KEY required for merge planning" };
