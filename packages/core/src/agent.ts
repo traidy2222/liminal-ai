@@ -1930,6 +1930,13 @@ export class AgentHarness {
     // (spawn_agent, wait_for_agents, check_context, …) are included.
     childRegistry.copyLazyPolicyFromParent(this.registry);
 
+    // Force-activate any explicitly requested tools regardless of parent's active set.
+    // This lets the spawner provision web, vault, shell, etc. for sub-agents that need
+    // capabilities the parent hasn't activated in lazy mode.
+    if (childConfig.activateTools?.length) {
+      childRegistry.activate(childConfig.activateTools);
+    }
+
     const dyn =
       this.config.context.protocolDynamicBuilder?.(childHarness.registry.getActiveToolNames()) ??
       "";

@@ -77,9 +77,15 @@ export function createOrchestrationTools(harness: AgentHarness) {
       "           top 3 markets by volume, government subsidy programs active in 2024-2025, infrastructure\n" +
       "           deployment metrics. Focus on official and primary sources. Do not speculate.\"\n\n" +
       "goal — short label for orchestrator tracking only (shown in list_agents). Does NOT drive the sub-agent if user_prompt is set.\n\n" +
-      "── TOOL INHERITANCE ────────────────────────────────────────────────────────\n" +
-      "Sub-agents inherit ALL currently active tools by default. Only pass tools= to deliberately restrict\n" +
-      "(e.g. critic agents that must be read-only). Web/shell/document families active here are available inside the sub-agent.",
+      "── TOOL PROVISIONING ───────────────────────────────────────────────────────\n" +
+      "activate_tools: string[] — ADDITIVE. Force-activate specific tools in the child regardless of what is\n" +
+      "  currently active in the parent. Use this to give sub-agents the capabilities they need:\n" +
+      "    Web researcher:  activate_tools: [\"web_search\",\"web_fetch\",\"web_research\",\"think\"]\n" +
+      "    File writer:     activate_tools: [\"write_file\",\"edit_file\",\"read_file\",\"grep_file\"]\n" +
+      "    Full autonomy:   activate_tools: [\"web_search\",\"web_research\",\"write_file\",\"edit_file\",\"run_shell\",\"think\",\"remember\"]\n" +
+      "  Every registered tool name is valid. Does NOT restrict other active tools.\n\n" +
+      "tools: string[] — RESTRICTIVE allowlist. Limits child to ONLY these tools. Use for critic/read-only agents.\n" +
+      "  If omitted, child inherits all currently active tools plus anything in activate_tools.",
     requiresApproval: false,
     parameters: {
       type: "object",
@@ -96,10 +102,15 @@ export function createOrchestrationTools(harness: AgentHarness) {
           type: "string",
           description: "Full detailed task message sent as the sub-agent's first turn. Replace goal with a proper task description here. If omitted, goal is used instead.",
         },
+        activate_tools: {
+          type: "array",
+          items: { type: "string" },
+          description: "Additive tool activation — force these tools active in the child regardless of parent active set. Use to give sub-agents web, shell, vault, etc. access. Example: [\"web_search\",\"web_research\",\"think\",\"remember\"].",
+        },
         tools: {
           type: "array",
           items: { type: "string" },
-          description: "Optional allowlist — restricts sub-agent to only these tools. Omit to inherit all currently active tools.",
+          description: "Restrictive allowlist — limits child to ONLY these tools. Use for read-only or critic agents. Omit to inherit all active tools (plus activate_tools).",
         },
         context: {
           type: "string",
@@ -177,6 +188,7 @@ export function createOrchestrationTools(harness: AgentHarness) {
         const { taskId, promise } = harness.forkChild({
           goal: args["goal"] as string,
           toolNames: args["tools"] as string[] | undefined,
+          activateTools: args["activate_tools"] as string[] | undefined,
           additionalContext: mergedContext || undefined,
           maxRounds: args["max_rounds"] as number | undefined,
           timeoutMs: args["timeout_ms"] as number | undefined,

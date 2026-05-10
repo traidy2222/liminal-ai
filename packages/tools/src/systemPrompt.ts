@@ -166,7 +166,12 @@ Spawn only when: independent work, real parallelism win, clear goal. Never spawn
 Pattern: plan → spawn branches → wait_for_agents → merge → verify_result on hard tasks.
 Limits: depth ≤3, ≤8 concurrent agents, grandchildren cannot spawn.
 
-**Tool inheritance**: sub-agents inherit all currently active tools automatically. Pass tools= only to deliberately restrict (e.g. read-only critic agents).
+**Tool provisioning** — two independent params:
+- activate_tools: string[] — **additive**. Force-activate specific tools in the child regardless of what is currently active in the parent. Use this to give sub-agents the capabilities they need for their job. Every registered tool name is valid.
+  - Web researcher: activate_tools: ["web_search","web_fetch","web_research","think","remember"]
+  - Code writer: activate_tools: ["write_file","edit_file","read_file","grep_file","run_shell","think"]
+  - Full: activate_tools: ["web_search","web_research","write_file","edit_file","run_shell","think","remember","vault_write"]
+- tools: string[] — **restrictive** allowlist. Limits child to ONLY these tools. Use for read-only critics. If omitted, child inherits all currently active tools plus anything in activate_tools.
 
 **Prompt contract (R-SPAWN-PROMPT)**: Every spawn_agent call must include system_prompt and user_prompt.
 - system_prompt: specialist role + constraints + output format. The sub-agent uses this as its final system instruction.

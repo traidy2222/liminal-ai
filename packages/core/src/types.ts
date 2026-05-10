@@ -233,8 +233,20 @@ export interface ExecutionState {
 
 export interface ChildAgentConfig {
   goal: string;
-  /** Restrict to these tool names. undefined = all tools except depth-excluded orchestration. */
+  /**
+   * Restrict child to only these tool names (allowlist).
+   * undefined = inherit all registered tools from parent.
+   * Use when you want a deliberately limited agent (e.g. read-only critic).
+   */
   toolNames?: string[];
+  /**
+   * Force-activate these tool names in the child regardless of whether they are
+   * active in the parent. Additive — does not restrict other tools.
+   * Use to give a sub-agent capabilities the parent hasn't activated yet
+   * (e.g. web_search, web_research, vault_write for a research sub-agent).
+   * All named tools must be registered in the parent registry.
+   */
+  activateTools?: string[];
   /** Extra context prepended to inception messages. */
   additionalContext?: string;
   /** Max ReAct rounds for this child. Defaults to parent's maxToolRoundsPerTurn. */
