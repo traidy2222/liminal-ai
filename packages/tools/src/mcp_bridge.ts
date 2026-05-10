@@ -22,6 +22,10 @@ import {
   type McpServerConfig,
   type McpTool,
 } from "./mcp_client.js";
+import {
+  searchCatalog,
+  gatherMcpEnvironmentSignals,
+} from "./mcp_catalog.js";
 
 // ── Bridge: MCP tool → ToolDefinition ────────────────────────────────────────
 
@@ -268,7 +272,94 @@ export function createMcpManagementTools(
     },
   });
 
-  return { mcp_connect, mcp_servers, mcp_disconnect };
+  const mcp_suggest = defineTool({
+    name: "mcp_suggest",
+    description:
+      "WHAT: Find the right MCP server for a capability gap — returns ranked candidates with ready-to-use mcp_connect calls.\n" +
+      "WHEN: You need an external service (GitHub, database, browser, Slack, etc.) and no active tool covers it.\n" +
+      "Call this BEFORE telling the user a capability is unavailable. If a server shows READY, connect it immediately.\n" +
+      "ARGS: task — describe the capability you need in plain English.",
+    requiresApproval: false,
+    parameters: {
+      type: "object",
+      properties: {
+        task: {
+          type: "string",
+          description: "Plain-English description of the capability needed (e.g. 'query GitHub pull requests', 'read a SQLite database', 'send a Slack message').",
+        },
+        show_all: {
+          type: "boolean",
+          description: "If true, show all catalog entries regardless of query match (useful for browsing).",
+        },
+      },
+      required: ["task"],
+      additionalProperties: false,
+    },
+    handler: async (args, emit): Promise<ToolResult> => {
+      const task = String(args["task"] ?? "").trim();
+      const showAll = Boolean(args["show_all"] ?? false);
+      emit?.(`\nmcp_suggest: scanning catalog for "${task}"…\n`);
+
+      const env = await gatherMcpEnvironmentSignals();
+      const connectedIds = new Set(manager.listServers().map((s) => s.name));
+
+      let results = searchCatalog(showAll ? "files github database browser search slack" : task, env, connectedIds);
+      if (showAll) {
+        // include everything not already connected
+        for (const entry of (await import("./mcp_catalog.js")).MCP_CATALOG) {
+          if (!connectedIds.has(entry.id) && !results.find((r) => r.entry.id === entry.id)) {
+            results.push({ entry, score: 0, ready: entry.requiredEnvVars.length === 0, missing: entry.requiredEnvVars.filter((v) => !v.optional) });
+          }
+        }
+      }
+
+      if (results.length === 0) {
+        return {
+          ok: true,
+          output:
+            `No catalog entries match "${task}".\n` +
+            "Use mcp_connect directly if you know the server package, or mcp_suggest(show_all=true) to browse all entries.",
+        };
+      }
+
+      const top = results.slice(0, 6);
+      const lines: string[] = [`Found ${results.length} MCP server(s) for "${task}":\n`];
+
+      for (const { entry, ready, missing } of top) {
+        const status = ready ? "✅ READY" : "🔑 NEEDS CREDENTIALS";
+        lines.push(`${status} — ${entry.displayName} (${entry.npmPackage})`);
+        lines.push(`   ${entry.description}`);
+
+        if (ready) {
+          lines.push(`   Connect now:`);
+          lines.push(`     ${entry.connectExample}`);
+          if (entry.argsNote) lines.push(`   Note: ${entry.argsNote}`);
+        } else {
+          lines.push(`   Missing credentials:`);
+          for (const req of missing) {
+            const alts = req.alternatives?.length ? ` (or ${req.alternatives.join(", ")})` : "";
+            lines.push(`     • ${req.name}${alts} — ${req.description}`);
+          }
+          lines.push(`   After providing credentials, connect with:`);
+          lines.push(`     ${entry.connectExample}`);
+        }
+        lines.push("");
+      }
+
+      if (results.length > top.length) {
+        lines.push(`…and ${results.length - top.length} more. Use show_all=true to see all.`);
+      }
+
+      const readyCount = top.filter((r) => r.ready).length;
+      if (readyCount > 0) {
+        lines.push(`\n${readyCount} server(s) are READY — call mcp_connect now using the example above.`);
+      }
+
+      return { ok: true, output: lines.join("\n") };
+    },
+  });
+
+  return { mcp_connect, mcp_servers, mcp_disconnect, mcp_suggest };
 }
 
 // ── Startup loader ────────────────────────────────────────────────────────────

@@ -216,24 +216,33 @@ You can define new tools at any point during a session using create_tool, edit_t
 **Avoid:** tools that just wrap a single shell command you could run_shell for once`;
 
 const MCP_PROTOCOL =
-  "## MCP (Model Context Protocol) integration\n" +
-  "MCP servers extend your tool set with capabilities from any compatible external service.\n\n" +
-  "**Startup auto-connect** — set AGENT_MCP_SERVERS in .env before launching:\n" +
-  "  Array:          [{\"name\":\"fs\",\"command\":\"npx\",\"args\":[\"-y\",\"@modelcontextprotocol/server-filesystem\",\"/tmp\"]}]\n" +
-  "  Claude Desktop: {\"mcpServers\":{\"fs\":{\"command\":\"npx\",\"args\":[\"-y\",\"@modelcontextprotocol/server-filesystem\",\"/tmp\"]}}}\n\n" +
-  "**Runtime workflow:**\n" +
-  "1. mcp_connect(name, command/url/http_url, args?, env?) — connects and registers tools immediately\n" +
-  "2. mcp_servers() — lists active connections + tool names\n" +
-  "3. mcp_disconnect(name) — close a connection and unregister its tools\n\n" +
-  "**Tool naming:** After mcp_connect, the server's tools appear as mcp__name__toolName (double underscore).\n" +
-  "Call them exactly like any built-in tool — schemas are injected automatically.\n\n" +
-  "**Common MCP servers (use with mcp_connect or AGENT_MCP_SERVERS):**\n" +
-  "  Filesystem:  command: npx  args: [\"-y\",\"@modelcontextprotocol/server-filesystem\",\"/path\"]\n" +
-  "  GitHub:      command: npx  args: [\"-y\",\"@modelcontextprotocol/server-github\"]  env: {GITHUB_PERSONAL_ACCESS_TOKEN:\"..\"}\n" +
-  "  SQLite:      command: npx  args: [\"-y\",\"@modelcontextprotocol/server-sqlite\",\"--db-path\",\"/db.sqlite\"]\n" +
-  "  Puppeteer:   command: npx  args: [\"-y\",\"@modelcontextprotocol/server-puppeteer\"]\n" +
-  "  Custom HTTP: url: \"http://host:port/sse\"  or  http_url: \"http://host:port/mcp\"\n\n" +
-  "Think before connecting — list what the server will provide and confirm it won't conflict with active tools.";
+  "## MCP (Model Context Protocol) — self-managed external tool access\n" +
+  "MCP servers extend your tool set with any external capability. The harness manages connections at runtime — no pre-configuration required.\n\n" +
+  "**Autonomous capability gap workflow (follow this every time):**\n" +
+  "1. You hit a task requiring an external system (GitHub, database, browser, Slack, etc.) with no active tool.\n" +
+  "2. Call mcp_suggest(task) — it scans the catalog, checks credentials, and returns ranked results.\n" +
+  "3. If a result shows ✅ READY: call mcp_connect immediately using the exact example shown. Do not wait.\n" +
+  "4. If results show 🔑 NEEDS CREDENTIALS: call ask_user once for the specific env var(s) listed, then connect.\n" +
+  "5. After mcp_connect, the server's tools appear as mcp__name__toolName — call them like any built-in tool.\n" +
+  "6. Never tell the user a capability is unavailable without calling mcp_suggest first (R-MCP-GAP).\n\n" +
+  "**World context MCP section** — at session start, the [MCP environment] block shows:\n" +
+  "  • Which credentials are already in env (meaning related servers are READY to connect)\n" +
+  "  • Which git forge is detected (github.com → GitHub server is likely ready)\n" +
+  "  • Local database files (SQLite server can be connected without credentials)\n" +
+  "Use this to proactively connect servers before the user has to ask.\n\n" +
+  "**Credential pattern:**\n" +
+  "  Credential in env → connect immediately without asking the user.\n" +
+  "  Credential missing → ask_user(\"To connect to [Service], I need [VAR_NAME]. Where can I find it?\") → then connect.\n" +
+  "  No credentials needed (filesystem, puppeteer) → connect immediately, no questions.\n\n" +
+  "**Tool naming:** mcp__serverName__toolName (double underscore). After mcp_connect, schemas are injected into the live tool list automatically.\n\n" +
+  "**Startup auto-connect** (alternative to runtime) — set AGENT_MCP_SERVERS in .env:\n" +
+  "  [{\"name\":\"github\",\"command\":\"npx\",\"args\":[\"-y\",\"@modelcontextprotocol/server-github\"]}]\n" +
+  "  {\"mcpServers\":{\"github\":{\"command\":\"npx\",\"args\":[\"-y\",\"@modelcontextprotocol/server-github\"]}}}  ← Claude Desktop format\n\n" +
+  "**Management tools:**\n" +
+  "  mcp_suggest(task) — find the right server (ALWAYS call this before giving up on a capability)\n" +
+  "  mcp_connect(name, command/url/http_url, args?, env?) — connect and register tools\n" +
+  "  mcp_servers() — list active connections\n" +
+  "  mcp_disconnect(name) — close and unregister";
 
 const MEMORY_AND_REFLEXION = `## Memory & reflexion
 Reflections/recipes may appear in world context. Prefer memory_query when available; else search_memory / recall_type. After repeated failures, remember(type: reflection). After big wins, suggest_improvement. memory_stats / forget / forget_type as needed.`;

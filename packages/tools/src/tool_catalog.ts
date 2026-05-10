@@ -83,8 +83,8 @@ export const TOOL_FAMILIES: Record<string, { description: string; tools: readonl
     tools: ["create_tool", "edit_tool", "remove_tool", "list_dynamic_tools"],
   },
   mcp: {
-    description: "MCP (Model Context Protocol) server connections — connect to external tool servers and use their tools natively.",
-    tools: ["mcp_connect", "mcp_servers", "mcp_disconnect"],
+    description: "MCP (Model Context Protocol) — discover, connect, and manage external tool servers. mcp_suggest finds the right server; mcp_connect registers its tools natively.",
+    tools: ["mcp_suggest", "mcp_connect", "mcp_servers", "mcp_disconnect"],
   },
   vault: {
     description: "Obsidian vault read/write/search.",
@@ -191,7 +191,8 @@ export const CORE_ALWAYS_TOOLS_BASE: readonly string[] = [
   "edit_tool",
   "remove_tool",
   "list_dynamic_tools",
-  // MCP management — always exposed; bridged MCP tools appear dynamically after mcp_connect
+  // MCP — always exposed; mcp_suggest discovers servers, mcp_connect registers their tools
+  "mcp_suggest",
   "mcp_connect",
   "mcp_servers",
   "mcp_disconnect",

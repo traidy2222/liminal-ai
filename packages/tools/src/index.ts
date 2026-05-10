@@ -251,11 +251,12 @@ export async function registerAllTools(
   // Load any previously-persisted dynamic tools from disk
   await loadDynamicTools(registry, emitter);
 
-  // MCP management tools (mcp_connect, mcp_servers, mcp_disconnect)
-  const { mcp_connect, mcp_servers, mcp_disconnect } = createMcpManagementTools(mcpManager, registry, emitter);
+  // MCP management tools (mcp_connect, mcp_servers, mcp_disconnect, mcp_suggest)
+  const { mcp_connect, mcp_servers, mcp_disconnect, mcp_suggest } = createMcpManagementTools(mcpManager, registry, emitter);
   registry.register(mcp_connect);
   registry.register(mcp_servers);
   registry.register(mcp_disconnect);
+  registry.register(mcp_suggest);
 
   // Load MCP servers declared in AGENT_MCP_SERVERS env var
   await loadMcpServersFromEnv(registry, emitter);

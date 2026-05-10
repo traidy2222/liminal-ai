@@ -1002,11 +1002,73 @@ async function gatherLongHorizonHandoffLines(workspaceRoot: string): Promise<str
   return out;
 }
 
+// ─── 10. MCP environment signals ─────────────────────────────────────────────
+
+const MCP_CREDENTIAL_VARS: ReadonlyArray<[envVar: string, label: string]> = [
+  ["GITHUB_PERSONAL_ACCESS_TOKEN", "GITHUB_PERSONAL_ACCESS_TOKEN"],
+  ["GITHUB_TOKEN", "GITHUB_TOKEN"],
+  ["GITLAB_PERSONAL_ACCESS_TOKEN", "GITLAB_PERSONAL_ACCESS_TOKEN"],
+  ["GITLAB_TOKEN", "GITLAB_TOKEN"],
+  ["SLACK_BOT_TOKEN", "SLACK_BOT_TOKEN"],
+  ["NOTION_API_KEY", "NOTION_API_KEY"],
+  ["NOTION_TOKEN", "NOTION_TOKEN"],
+  ["LINEAR_API_KEY", "LINEAR_API_KEY"],
+  ["BRAVE_API_KEY", "BRAVE_API_KEY"],
+  ["POSTGRES_URL", "POSTGRES_URL"],
+  ["DATABASE_URL", "DATABASE_URL"],
+  ["GOOGLE_APPLICATION_CREDENTIALS", "GOOGLE_APPLICATION_CREDENTIALS"],
+];
+
+interface McpEnvSection {
+  lines: string[];
+}
+
+async function gatherMcpEnvironmentSection(workspaceRoot: string): Promise<McpEnvSection | null> {
+  const detectedVars: string[] = [];
+  for (const [varName] of MCP_CREDENTIAL_VARS) {
+    if (process.env[varName]) detectedVars.push(varName);
+  }
+
+  // git remote host from .git/config (fast file read, no shell)
+  let gitRemoteHost: string | null = null;
+  try {
+    const gitConfigRaw = await readFile(path.join(workspaceRoot, ".git", "config"), "utf-8");
+    const m = gitConfigRaw.match(/\[remote "origin"\][^[]*url\s*=\s*(.+)/);
+    if (m) {
+      const u = m[1]!.trim();
+      if (u.includes("github.com")) gitRemoteHost = "github.com";
+      else if (u.includes("gitlab.com")) gitRemoteHost = "gitlab.com";
+      else if (u.includes("bitbucket.org")) gitRemoteHost = "bitbucket.org";
+    }
+  } catch { /* no git or not reachable */ }
+
+  // local .db / .sqlite files in workspace root
+  let localDbFiles: string[] = [];
+  try {
+    const entries = await readdir(workspaceRoot);
+    localDbFiles = entries.filter((f) => /\.(db|sqlite|sqlite3)$/i.test(f));
+  } catch { /* ignore */ }
+
+  const parts: string[] = [];
+  if (gitRemoteHost) parts.push(`Git remote: ${gitRemoteHost}`);
+  if (detectedVars.length > 0) parts.push(`Credentials in env: ${detectedVars.join(", ")}`);
+  if (localDbFiles.length > 0) parts.push(`Local databases: ${localDbFiles.join(", ")}`);
+
+  if (parts.length === 0) return null;
+
+  return {
+    lines: [
+      ...parts,
+      `→ mcp_suggest("<capability>") to find and connect the right MCP server automatically.`,
+    ],
+  };
+}
+
 // ─── Main export ──────────────────────────────────────────────────────────────
 
 /**
  * Build the world context string to inject at session start.
- * Async — runs all 9 gatherers in parallel with a 1500ms hard ceiling.
+ * Async — runs all 10 gatherers in parallel with a 1500ms hard ceiling.
  * Returns null only if options.disabled === true.
  */
 export async function buildWorldContextMessage(options?: WorldContextOptions): Promise<string | null> {
@@ -1020,7 +1082,7 @@ export async function buildWorldContextMessage(options?: WorldContextOptions): P
   const TIMEOUT = 1500;
 
   // Parallel gather — all results degrade to null on timeout/error
-  const [resources, project, git, tools, ports, style, memory, vault, repoMapLines] = await Promise.all([
+  const [resources, project, git, tools, ports, style, memory, vault, repoMapLines, mcpEnv] = await Promise.all([
     withDeadline(gatherResources(workspaceRoot), TIMEOUT),
     withDeadline(gatherProject(workspaceRoot), TIMEOUT),
     withDeadline(gatherGit(workspaceRoot), TIMEOUT),
@@ -1030,6 +1092,7 @@ export async function buildWorldContextMessage(options?: WorldContextOptions): P
     withDeadline(gatherSessionMemory(workspaceRoot), TIMEOUT),
     withDeadline(gatherVaultSummary(), TIMEOUT),
     withDeadline(gatherRepoMapLines({ scope: "packages", root: workspaceRoot }), TIMEOUT),
+    withDeadline(gatherMcpEnvironmentSection(workspaceRoot), TIMEOUT),
   ]);
 
   // ── Core system ──────────────────────────────────────────────────────────────
@@ -1196,6 +1259,12 @@ export async function buildWorldContextMessage(options?: WorldContextOptions): P
       lines.push(sep("Recipe library"));
       lines.push(recipeLib);
     }
+  }
+
+  // ── MCP environment ───────────────────────────────────────────────────────────
+  if (mcpEnv) {
+    lines.push(sep("MCP environment"));
+    for (const ln of mcpEnv.lines) lines.push(ln);
   }
 
   // ── Vault (Obsidian brain) ────────────────────────────────────────────────────
