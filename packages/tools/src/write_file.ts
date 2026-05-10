@@ -1,13 +1,13 @@
-import { writeFile, mkdir, stat } from "node:fs/promises";
+import { writeFile, mkdir, stat, access } from "node:fs/promises";
 import { dirname } from "node:path";
 import { defineTool } from "./helpers.js";
 
 export const writeFileTool = defineTool({
   name: "write_file",
   description:
-    "WHAT: Write (or overwrite) a file with new content, creating parent directories as needed.\n" +
-    "WHEN: You have the complete final content ready to persist.\n" +
-    "NOT WHEN: Making a small edit to an existing file — read it first, merge the change, then write the merged result.\n" +
+    "WHAT: Create a NEW file with given content, creating parent directories as needed.\n" +
+    "WHEN: The file does not exist yet and you have the complete content ready.\n" +
+    "NOT WHEN: The file already exists — use edit_file instead (replacements, diff, or content+overwrite:true).\n" +
     "ARGS: path — destination file path; content — full text to write.",
   requiresApproval: true,
   dangerLevel: "cautious",
@@ -15,7 +15,7 @@ export const writeFileTool = defineTool({
   parameters: {
     type: "object",
     properties: {
-      path: { type: "string", description: "File path to write" },
+      path: { type: "string", description: "File path to create" },
       content: { type: "string", description: "Content to write" },
     },
     required: ["path", "content"],
@@ -24,6 +24,21 @@ export const writeFileTool = defineTool({
   handler: async (args) => {
     const path = args["path"] as string;
     const content = args["content"] as string;
+    // Guard: reject if file already exists — use edit_file for existing files
+    try {
+      await access(path);
+      return {
+        ok: false,
+        error:
+          `File already exists: ${path}\n` +
+          "Use edit_file to modify an existing file:\n" +
+          "  replacements: [{search, replace}]  — targeted string/regex swaps\n" +
+          "  diff: '<hunk>'                      — unified diff patch\n" +
+          "  content + overwrite:true            — full replacement (explicit)",
+      };
+    } catch {
+      // File doesn't exist — proceed with creation
+    }
     try {
       await mkdir(dirname(path), { recursive: true });
       await writeFile(path, content, "utf8");

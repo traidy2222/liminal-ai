@@ -7,19 +7,21 @@ import type { ToolRegistry } from "@liminal/core";
 /** Tool families: id -> description + member tool names. */
 export const TOOL_FAMILIES: Record<string, { description: string; tools: readonly string[] }> = {
   files_edit: {
-    description: "Write/patch/refactor files and directory trees.",
+    description: "Advanced file editing, filesystem ops, and rollback-safe multi-file refactors.",
     tools: [
-      "write_file",
+      // Legacy single-mode tools (still work; edit_file is preferred)
       "write_file_if_changed",
       "patch_file",
       "apply_diff",
       "search_replace_file",
       "batch_replace",
+      "edit_preview",
+      // Filesystem ops
       "move_file",
       "copy_file",
       "copy_tree",
       "mkdir_p",
-      "edit_preview",
+      // Rollback-safe orchestration
       "multi_file_apply",
       "refactor_plan_apply",
       "path_guard",
@@ -107,8 +109,8 @@ export const TOOL_FAMILIES: Record<string, { description: string; tools: readonl
     ],
   },
   navigation: {
-    description: "Repository tree orientation and file search.",
-    tools: ["repo_map", "workspace_snapshot", "file_metadata", "read_file_chunked", "read_file_with_imports", "grep_file"],
+    description: "Repository tree orientation and targeted file search.",
+    tools: ["repo_map", "workspace_snapshot", "file_metadata", "read_file_chunked", "read_file_with_imports"],
   },
   harness_ui: {
     description: "Persona, images, structured extraction (requires harness).",
@@ -158,9 +160,15 @@ export function summarizeFamilyActivity(registry: ToolRegistry): FamilyActivityS
 export const CORE_ALWAYS_TOOLS_BASE: readonly string[] = [
   "think",
   "plan",
+  // File read surface (2 tools)
   "read_file",
   "grep_file",
+  // File write surface (2 tools — write_file for new, edit_file for existing)
+  "write_file",
+  "edit_file",
+  // Navigation
   "list_dir",
+  // Memory / knowledge
   "recall_relevant",
   "search_memory",
   "memory_query",

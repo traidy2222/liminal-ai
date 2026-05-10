@@ -34,6 +34,7 @@ import { workspaceSnapshotTool } from "./workspace_snapshot.js";
 import { searchReplaceFileTool } from "./search_replace_file.js";
 import { batchReplaceTool } from "./batch_replace.js";
 import { grepFileTool } from "./grep_file.js";
+import { editFileTool } from "./edit_file.js";
 import { writeFileIfChangedTool } from "./write_file_if_changed.js";
 import { moveFileTool } from "./move_file.js";
 import { copyFileTool } from "./copy_file.js";
@@ -111,6 +112,7 @@ export function registerAllTools(
   registry.register(fileMetadataTool);
   registry.register(workspaceSnapshotTool);
   registry.register(writeFileTool);
+  registry.register(editFileTool);
   registry.register(writeFileIfChangedTool);
   registry.register(patchFileTool);
   registry.register(searchReplaceFileTool);
