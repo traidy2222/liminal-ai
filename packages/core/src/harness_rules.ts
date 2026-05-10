@@ -27,7 +27,7 @@ export const HARNESS_RULES: Record<string, string> = {
   "R-LIVE-DATA-HONESTY": "For live/current conditions claims, include source + observed/as-of time; if live data is unavailable, disclose fallback locality and uncertainty.",
   "R-SOURCE-TIER": "Match citation language to source credibility: T1 (Reuters/AP/gov) = state directly or 'Reuters reports…'; T2 (quality press/think tanks) = 'According to [outlet]…'; T3 (Wikipedia/aggregators) = 'Reports suggest…' or 'Background context…'; T4 (blogs/unknown) = 'Unverified claims suggest…' or omit. Never flatten all sources to the same confidence level.",
   "R-CONTRADICT-SURFACE": "When research sources disagree on a key fact, surface the contradiction explicitly — name both sides — rather than averaging or silently picking one. Use 'Sources conflict: [A says X, B says Y]' framing.",
-  "R-ADVERSARIAL-CHECK": "After synthesizing research with ≥3 sources on geopolitical, financial, or security topics: run think() with adversarial lens — identify the 2-3 weakest claims, flag what relies only on T3/T4 sources, and note plausible alternative interpretations the synthesis may have missed.",
+  "R-ADVERSARIAL-CHECK": "After synthesizing research with ≥3 sources on any factual or analytical topic: run think() with adversarial lens — identify the 2-3 weakest claims, flag what relies only on T3/T4 sources, and note plausible alternative interpretations the synthesis may have missed.",
 };
 
 /**
@@ -79,4 +79,4 @@ export const HARNESS_RULE_RECALL_MESSAGE =
   `- **R-LIVE-DATA-HONESTY**: For live/current conditions claims, include source + observed/as-of time; if live data is unavailable, disclose fallback locality and uncertainty.\n` +
   `- **R-SOURCE-TIER**: Match citation language to source tier: T1 (wire/gov/institution) = state directly; T2 (quality press) = 'According to [outlet]'; T3 (Wikipedia/aggregator) = 'Reports suggest'; T4 (unverified) = 'Unverified claims suggest' or omit.\n` +
   `- **R-CONTRADICT-SURFACE**: When sources disagree, name both sides explicitly — never silently average conflicting facts.\n` +
-  `- **R-ADVERSARIAL-CHECK**: After synthesizing ≥3 sources on geopolitical/financial/security topics, use think() to identify weak claims, T3/T4-only assertions, and missed alternative interpretations.\n`;
+  `- **R-ADVERSARIAL-CHECK**: After synthesizing ≥3 sources on any factual or analytical topic, use think() to identify weak claims, T3/T4-only assertions, and missed alternative interpretations.\n`;

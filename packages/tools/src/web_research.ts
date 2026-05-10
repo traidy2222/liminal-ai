@@ -23,29 +23,47 @@ export const SOURCE_TIER_LABELS: Record<SourceTier, string> = {
 };
 
 const TIER1_DOMAINS = new Set([
-  // Wire services
+  // Wire services / major financial press
   "reuters.com", "apnews.com", "afp.com", "bloomberg.com",
-  // Major financial / institutional press
   "ft.com", "wsj.com", "economist.com", "barrons.com",
-  // Top-tier newspapers
-  "nytimes.com", "theguardian.com", "washingtonpost.com", "bbc.com", "bbc.co.uk", "npr.org",
-  // Foreign affairs / security
-  "foreignaffairs.com", "foreignpolicy.com", "defensenews.com",
-  // Think tanks / research institutions
-  "rand.org", "brookings.edu", "cfr.org", "iiss.org", "sipri.org", "crisisgroup.org",
-  // Intergovernmental
-  "un.org", "imf.org", "worldbank.org", "nato.int", "who.int", "icrc.org", "iaea.org",
-  // Academic journals
-  "sciencedirect.com", "pubmed.ncbi.nlm.nih.gov", "jstor.org", "nature.com", "science.org",
+  // Established newspapers / broadcasters
+  "nytimes.com", "theguardian.com", "washingtonpost.com",
+  "bbc.com", "bbc.co.uk", "npr.org", "abc.net.au", "smh.com.au",
+  // Intergovernmental / standards bodies
+  "un.org", "imf.org", "worldbank.org", "nato.int", "who.int",
+  "icrc.org", "iaea.org", "oecd.org", "wto.org", "itu.int",
+  // Academic / science publishers
+  "nature.com", "science.org", "sciencedirect.com", "cell.com",
+  "pubmed.ncbi.nlm.nih.gov", "ncbi.nlm.nih.gov", "jstor.org",
+  "thelancet.com", "bmj.com", "nejm.org",
+  // Tech: official docs / standards
+  "developer.mozilla.org", "docs.python.org", "docs.microsoft.com",
+  "learn.microsoft.com", "developer.apple.com", "developer.android.com",
+  "tc39.es", "w3.org", "ietf.org", "iso.org",
+  // Policy / research institutions (domain-agnostic)
+  "rand.org", "brookings.edu", "cfr.org",
+  "pewresearch.org", "ourworldindata.org",
 ]);
 
 const TIER2_DOMAINS = new Set([
+  // Quality press / analysis
   "theatlantic.com", "politico.com", "axios.com", "time.com", "newsweek.com",
   "cnn.com", "nbcnews.com", "cbsnews.com", "abcnews.go.com",
-  "vox.com", "slate.com", "spectator.co.uk", "newstatesman.com",
   "aljazeera.com", "dw.com", "france24.com", "rferl.org",
-  "arstechnica.com", "wired.com", "techcrunch.com",
-  "statista.com", "ourworldindata.org",
+  "foreignaffairs.com", "foreignpolicy.com",
+  // Tech / science journalism
+  "arstechnica.com", "wired.com", "techcrunch.com", "thenextweb.com",
+  "spectrum.ieee.org", "newscientist.com", "scientificamerican.com",
+  // Business / finance
+  "hbr.org", "mckinsey.com", "deloitte.com",
+  // Health / medical journalism
+  "healthline.com", "webmd.com", "mayoclinic.org",
+  // Data / statistics
+  "statista.com", "census.gov",
+  // Legal / regulatory
+  "law.cornell.edu", "regulations.gov",
+  // Developer community (established)
+  "stackoverflow.com", "github.com", "npmjs.com", "pypi.org",
 ]);
 
 /** Score a URL's domain and return its credibility tier. */
