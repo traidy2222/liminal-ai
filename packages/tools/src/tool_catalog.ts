@@ -82,6 +82,10 @@ export const TOOL_FAMILIES: Record<string, { description: string; tools: readonl
     description: "Create, edit, remove, and list model-defined tools registered at runtime.",
     tools: ["create_tool", "edit_tool", "remove_tool", "list_dynamic_tools"],
   },
+  mcp: {
+    description: "MCP (Model Context Protocol) server connections — connect to external tool servers and use their tools natively.",
+    tools: ["mcp_connect", "mcp_servers", "mcp_disconnect"],
+  },
   vault: {
     description: "Obsidian vault read/write/search.",
     tools: [
@@ -187,6 +191,10 @@ export const CORE_ALWAYS_TOOLS_BASE: readonly string[] = [
   "edit_tool",
   "remove_tool",
   "list_dynamic_tools",
+  // MCP management — always exposed; bridged MCP tools appear dynamically after mcp_connect
+  "mcp_connect",
+  "mcp_servers",
+  "mcp_disconnect",
   // Web tools are read-only and needed in nearly every general task — always on.
   "web_search",
   "web_fetch",

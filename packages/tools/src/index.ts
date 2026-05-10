@@ -63,6 +63,8 @@ import { createDecomposeGoalTool } from "./decompose_goal.js";
 import { createBranchExploreTool } from "./branch_explore.js";
 import { createVerifyContractTool } from "./verify_contract.js";
 import { createDynamicToolsTools, loadDynamicTools } from "./dynamic_tools.js";
+import { createMcpManagementTools, loadMcpServersFromEnv } from "./mcp_bridge.js";
+import { mcpManager } from "./mcp_client.js";
 // New tools — Upgrade IV
 import { gitStatusTool, gitDiffTool, gitLogTool, gitBranchTool, gitCommitTool } from "./git_tools.js";
 import { gitCheckpointTool, gitRollbackTool } from "./git_checkpoint.js";
@@ -248,6 +250,15 @@ export async function registerAllTools(
 
   // Load any previously-persisted dynamic tools from disk
   await loadDynamicTools(registry, emitter);
+
+  // MCP management tools (mcp_connect, mcp_servers, mcp_disconnect)
+  const { mcp_connect, mcp_servers, mcp_disconnect } = createMcpManagementTools(mcpManager, registry, emitter);
+  registry.register(mcp_connect);
+  registry.register(mcp_servers);
+  registry.register(mcp_disconnect);
+
+  // Load MCP servers declared in AGENT_MCP_SERVERS env var
+  await loadMcpServersFromEnv(registry, emitter);
 
   applyLazyRegistrationPolicy(registry, !!harness);
   if (harness) {
