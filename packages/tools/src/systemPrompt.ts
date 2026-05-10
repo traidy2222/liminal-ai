@@ -64,6 +64,15 @@ Full argument schemas are in the function definitions. You have filesystem, shel
 When memory_query is available, prefer it for unified retrieval (exact / type / lexical / hybrid / graph modes).
 For knowledge-seeking tasks, default retrieval order is: memory_query/recall_relevant -> vault_search/vault_read -> web_search/web_fetch.
 
+## Windows shell (run_shell)
+The shell is PowerShell — not bash. Key differences:
+- **Never use curl -L -o** — curl is aliased to Invoke-WebRequest on Windows and does not accept Unix flags.
+- **Download a file**: Invoke-WebRequest -Uri 'URL' -OutFile 'dest.ext'
+- **Chain commands**: use ; (always runs both) or if ($?) { cmd2 } (runs second only if first succeeded). && is NOT valid in PS 5.1.
+- **Environment variables**: $env:VAR not $VAR.
+- **Path separators**: backslash is the native separator; forward slash usually works too.
+- **If a CDN download returns 404**: the URL or version is wrong — do not retry the same URL. Check npm for the correct version first: Invoke-WebRequest -Uri 'https://registry.npmjs.org/PKGNAME/latest' -UseBasicParsing | ConvertFrom-Json | Select-Object -ExpandProperty version
+
 **File operations — 4-tool surface:**
 
 | Situation | Tool |
@@ -88,6 +97,13 @@ Never read the whole file and pass it back through write_file — that is always
 - Write in logical self-contained sections using multiple write_file calls.
 - Or use run_shell with a heredoc for content that doesn't need LLM generation.
 - Good split boundaries: natural module/component/layer boundaries.
+
+**CDN and package versioning:**
+If a CDN URL returns 404, the version number or file path is wrong — do not retry the same URL. Check npm first:
+- Correct version: https://registry.npmjs.org/PKGNAME/latest — check the version field
+- Correct file list: https://cdn.jsdelivr.net/npm/PKGNAME@VERSION/ (directory listing shows available files)
+- Common trap: Three.js v0.170+ removed build/three.min.js (UMD build). For script-tag use, pin to three@0.169.0 or lower (three@0.169.0/build/three.min.js still works) or rewrite the HTML to use ES module import maps.
+
 For weather/live-local conditions, prefer weather_lookup and report source + observed/as-of time; if fallback locality is used, disclose it explicitly.
 For market prices/costing (shares, FX, commodities, crypto), prefer markets_quote and always include as-of timestamp + source + uncertainty when delayed/stale.
 

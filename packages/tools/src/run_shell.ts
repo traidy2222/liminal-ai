@@ -16,9 +16,12 @@ export function createRunShellTool(emitter: AgentEmitter) {
     description:
       "WHAT: Execute a shell command and return its stdout and stderr. Output streams live while running. Requires user approval.\n" +
       "WHEN: Installing packages, running build/test scripts, or any system task with no dedicated tool.\n" +
-      "NOT WHEN: A dedicated tool already covers the task (read_file, write_file, list_dir, web_fetch, web_search, git_*).\n" +
+      "NOT WHEN: A dedicated tool already covers the task (read_file, edit_file, list_dir, web_fetch, web_search, git_*).\n" +
       "NOT WHEN: Starting a server or long-running process — use run_background for those.\n" +
-      "ARGS: command — shell command string; cwd — optional working directory; timeout_ms — optional ms limit (default 60000).",
+      "WINDOWS NOTE: The shell is PowerShell. 'curl' is an alias for Invoke-WebRequest — NEVER use curl -L -o flags. " +
+      "To download a file: Invoke-WebRequest -Uri 'URL' -OutFile 'file.ext'. " +
+      "To run curl proper: use 'curl.exe' (available separately). Pipeline chains use ; not &&.\n" +
+      "ARGS: command — shell command string; cwd — optional working directory; timeout_ms — ms limit (default 60000).",
     requiresApproval: true,
     dangerLevel: "destructive",
     resourceLocks: (args) => {
@@ -32,7 +35,11 @@ export function createRunShellTool(emitter: AgentEmitter) {
         cwd: { type: "string", description: "Working directory (optional)" },
         timeout_ms: {
           type: "number",
-          description: "Timeout in milliseconds (default: 60000)",
+          description: "Timeout in milliseconds (default: 60000). Also accepted as 'timeout'.",
+        },
+        timeout: {
+          type: "number",
+          description: "Alias for timeout_ms.",
         },
       },
       required: ["command"],
@@ -41,7 +48,7 @@ export function createRunShellTool(emitter: AgentEmitter) {
     handler: async (args) => {
       const command = args["command"] as string;
       const cwd = args["cwd"] as string | undefined;
-      const timeout = (args["timeout_ms"] as number | undefined) ?? 60_000;
+      const timeout = (args["timeout_ms"] as number | undefined) ?? (args["timeout"] as number | undefined) ?? 60_000;
 
       return new Promise<import("@liminal/core").ToolResult>((resolve) => {
         const isWindows = process.platform === "win32";
