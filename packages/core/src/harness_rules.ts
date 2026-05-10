@@ -25,9 +25,6 @@ export const HARNESS_RULES: Record<string, string> = {
   "R-ONE-SHOT-RETRY": "If a tool intent fails twice with near-identical args, stop retrying and replan with a different approach.",
   "R-ACTIVE-FIRST": "Prefer the narrowest currently active tool first; activate only one new family when required by missing capability.",
   "R-LIVE-DATA-HONESTY": "For live/current conditions claims, include source + observed/as-of time; if live data is unavailable, disclose fallback locality and uncertainty.",
-  "R-USER-STANCE-EVIDENCE": "Do not assert user beliefs/preferences unless directly evidenced by the user's words in this session.",
-  "R-QUESTION-NOT-BELIEF": "User questions/probes are not commitments; avoid turning them into declared beliefs.",
-  "R-INFERENCE-LABEL": "If inferring user stance, mark it tentative and include confidence (low/med/high).",
 };
 
 /**
@@ -76,7 +73,4 @@ export const HARNESS_RULE_RECALL_MESSAGE =
   `- **R-MEMORY-FIRST-IDENTITY**: For identity/personal prompts (name, who am I, what should you call me), check memory first and do not default to OS username from world context.\n` +
   `- **R-ONE-SHOT-RETRY**: If a tool intent fails twice with near-identical args, stop retrying and replan with a different approach.\n` +
   `- **R-ACTIVE-FIRST**: Prefer the narrowest currently active tool first; activate only one new family when required by missing capability.\n` +
-  `- **R-LIVE-DATA-HONESTY**: For live/current conditions claims, include source + observed/as-of time; if live data is unavailable, disclose fallback locality and uncertainty.\n` +
-  `- **R-USER-STANCE-EVIDENCE**: Do not assert user beliefs/preferences unless directly evidenced by the user's words in this session.\n` +
-  `- **R-QUESTION-NOT-BELIEF**: User questions/probes are not commitments; avoid turning them into declared beliefs.\n` +
-  `- **R-INFERENCE-LABEL**: If inferring user stance, mark it tentative and include confidence (low/med/high).\n`;
+  `- **R-LIVE-DATA-HONESTY**: For live/current conditions claims, include source + observed/as-of time; if live data is unavailable, disclose fallback locality and uncertainty.\n`;

@@ -24,9 +24,6 @@ export const PROTOCOL_NAMED_RULES = `## Named rules (IDs — refer in think() wh
 - **R-ACTIVE-FIRST**: Prefer the narrowest currently active tool that can solve the step; only activate a new family when no active tool can do it.
 - **R-TIME-ANCHOR**: For "latest/current/news/update" tasks, anchor search queries to the current world-context date/year unless the user explicitly asks for a historical period.
 - **R-LIVE-DATA-HONESTY**: Never claim "live/right-now/current conditions" unless tool evidence includes source + observed/as-of time; if unavailable, disclose fallback location and uncertainty explicitly.
-- **R-USER-STANCE-EVIDENCE**: Do not state user beliefs/preferences as facts unless directly evidenced by user wording in this session.
-- **R-QUESTION-NOT-BELIEF**: Treat user questions/probes as questions, not as inferred commitments.
-- **R-INFERENCE-LABEL**: If inferring user stance, label it as tentative and include confidence (low/med/high).
 - **R-DECK-PIPELINE**: If user asks for deck/slides/powerpoint/pptx/ppx, prefer document tools and produce PPTX artifact; avoid markdown-only completion unless render fails.`;
 
 /**
@@ -148,13 +145,6 @@ For prompts like "what can you do", "what tools do you have", "what world are yo
 - Keep world-state language neutral and context-bound ("based on current context/sources").
 - Do not claim personal runtime history/timeline (e.g., "active since 2025", "I have been tracking X for months") unless you just verified it from explicit session/tool evidence in this turn.
 - Never leak raw internal debug artifacts in user-facing prose (e.g., "{}" stubs, trace fragments, transport noise).`;
-
-const USER_STANCE_STYLE = `## User stance / opinion readback
-When asked to summarize the user's views ("what do I think", "my opinions", "read me back"), use this compact structure:
-1) What you explicitly said (directly grounded)
-2) Possible inference (label as tentative + confidence low/med/high)
-3) Open uncertainty (what is not confirmed yet)
-Never present inferred traits as confirmed facts.`;
 
 const PROCESS_LIFECYCLE = `## Process lifecycle
 Long-running servers/watchers → run_background (not run_shell). Confirm startup, use read_process_output, then kill_process when done.
@@ -370,7 +360,6 @@ export function buildProtocolDynamicSuffix(
         "Pass goal_hint + open_questions to rerank hits against your active plan."
     );
   }
-  parts.push(USER_STANCE_STYLE);
   if (names.has("web_research")) {
     parts.push(
       "## Web research\n" +
