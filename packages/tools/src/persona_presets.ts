@@ -63,6 +63,53 @@ export interface PersonaProfile {
   // Configuration
   strength: number;
   modifier?: string;
+  /**
+   * Verbatim slice of the user's persona request (profanity, dialect spellings, named references).
+   * Injected into the runtime persona block so the model keeps surface fidelity instead of genericizing.
+   */
+  generationSourceHint?: string;
+}
+
+/** Compact speaking instructions for `PersonaConfig.voice` (session greeting + metadata). */
+export function buildPersonaVoiceSummary(profile: PersonaProfile): string {
+  const bits = [
+    `Mechanics: ${profile.speechStyle.sentenceStructure}`,
+    `Cadence: ${profile.speechStyle.rhythm}`,
+    `Formality ${profile.speechStyle.formality}; register: ${profile.tone.emotionalFlavor}; posture: ${profile.tone.posture}.`,
+    `Weave in naturally: ${profile.speechStyle.favoriteWords.slice(0, 10).join(", ")}.`,
+    `Never type: ${profile.speechStyle.avoidWords.slice(0, 8).join(", ")}.`,
+    `Sparse catchphrase texture (do not stack): ${profile.catchphrases
+      .slice(0, 4)
+      .map((s) => `"${s}"`)
+      .join(" ")}.`,
+  ];
+  return bits.join(" ").slice(0, 1400);
+}
+
+/** Short tags for `PersonaConfig.traits` (UI + light steering). */
+export function buildPersonaTraitTags(profile: PersonaProfile): string[] {
+  const humor = profile.tone.humorStyle.trim();
+  const tags = [
+    profile.speechStyle.formality.replace(/_/g, " "),
+    `confidence ${profile.tone.confidence}/10`,
+    `edge ${profile.tone.aggression}/10`,
+  ];
+  if (humor) tags.push(humor.slice(0, 48));
+  return tags.slice(0, 8);
+}
+
+function describeDeliveryEnergy(profile: PersonaProfile): string {
+  const { confidence, aggression } = profile.tone;
+  if (confidence >= 8 && aggression >= 6) {
+    return "Bold, declarative, high-certainty delivery. Short punchy clauses; repetition or parallel structure for emphasis when it matches YOUR SPEECH STYLE above — not as filler.";
+  }
+  if (confidence >= 7 || aggression >= 6) {
+    return "Direct and assertive: lead with claims, minimal hedging, crisp transitions. Energy should read as conviction, not as a neutral helpdesk tone.";
+  }
+  if (confidence <= 4 && aggression <= 3) {
+    return "Understated and precise: quiet competence, tight wording, no hype.";
+  }
+  return "Let YOUR TONE (confidence/aggression) set how decisive vs tentative the prose feels; do not ignore those numbers.";
 }
 
 // ─── Build rich persona block ─────────────────────────────────────────────────
@@ -86,9 +133,24 @@ export function buildRichPersonaBlock(profile: PersonaProfile): string {
             ? "SUBTLE — noticeable flavor without dominating"
             : "BACKGROUND — barely perceptible personality notes";
 
+  const hint = profile.generationSourceHint?.trim().slice(0, 700) ?? "";
+  const hintBlock = hint
+    ? [
+        `USER'S ORIGINAL PERSONA BRIEF (surface-fidelity target—match dialect, attitude, expletives, and code-switching here; do not "clean up" into bland corporate assistant English unless the immediate user task is clearly incompatible, e.g. content for young children):`,
+        JSON.stringify(hint),
+        ``,
+        `IN-CHARACTER LANGUAGE: If the brief above or your favoriteWords/catchphrases include profanity or rough slang, use that register naturally in replies. Bigoted slurs, sexual content involving minors, and targeted harassment remain forbidden.`,
+        ``,
+      ].join("\n")
+    : [
+        `IN-CHARACTER LANGUAGE: If favoriteWords, catchphrases, or rhythm imply profanity or rough slang, use that register naturally—do not default to sanitized "helpful chatbot" diction. Bigoted slurs, sexual content involving minors, and targeted harassment remain forbidden.`,
+        ``,
+      ].join("\n");
+
   const lines: (string | null)[] = [
     `You are ${profile.name}.`,
     ``,
+    hintBlock,
     `IDENTITY: ${profile.coreIdentity}`,
     `BACKGROUND: ${profile.background}`,
     `SELF-IMAGE: ${profile.selfImage}`,
@@ -110,7 +172,9 @@ export function buildRichPersonaBlock(profile: PersonaProfile): string {
     `- Emotional flavor: ${profile.tone.emotionalFlavor}`,
     `- Conversational posture: ${profile.tone.posture}`,
     ``,
-    `CATCHPHRASES — use at most 1–2 per reply when they land naturally (openings, pivots, emphasis). Never stack or force them:`,
+    profile.strength >= 8
+      ? `CATCHPHRASES — use up to 2–3 per reply when they land naturally (openings, pivots, emphasis). Never spam them back-to-back:`
+      : `CATCHPHRASES — use at most 1–2 per reply when they land naturally (openings, pivots, emphasis). Never stack or force them:`,
     ...profile.catchphrases.slice(0, 7).map((p) => `  "${p}"`),
     ``,
     `VERBAL TICS — structural patterns; vary them; do not repeat the same tic every sentence:`,
@@ -128,23 +192,36 @@ export function buildRichPersonaBlock(profile: PersonaProfile): string {
     ``,
     `PERSONA STRENGTH: ${profile.strength}/10 — ${strengthLabel}`,
     ``,
-    `CAPABILITY CONTRACT:`,
-    `Full technical accuracy is non-negotiable at any persona strength. When writing code,`,
-    `explaining concepts, or running tools — the CONTENT is correct. Your persona governs`,
-    `delivery, not facts. You are a highly capable agent who happens to have this personality.`,
-    `Never sacrifice correctness for character. If asked a technical question, give the right`,
-    `answer — just phrase it the way ${profile.name} would.`,
+    `SURFACE SYNTAX (non-optional):`,
+    `Every assistant reply must *read* in this voice on the page: follow sentenceStructure and rhythm`,
+    `literally (fragments vs long lines, punctuation, repetition, telegraphic opens, where described).`,
+    `Work favoriteWords into sentences where they fit; never use avoidWords. Verbal tics are structural`,
+    `habits—vary which one you use, but at least one should be visible in most replies.`,
+    `This applies equally to greetings, refusals, explanations, and any topic you discuss—stay in this voice.`,
     ``,
-    `VOICE vs HUMILITY:`,
-    `Prefer quiet competence, dry wit, and understated authority over generic modesty or`,
-    `servile cheerfulness. You may gently dissent or warn when the user is about to make a`,
-    `clear mistake — loyally, in your voice, without theatrical roleplay or long speeches.`,
+    profile.strength >= 7
+      ? `TURN SHAPE (strength ≥7): The first sentence of every reply must already sound in-voice (word choice + rhythm). No "neutral setup" paragraph before the persona kicks in.`
+      : `TURN SHAPE: Open in-voice within the first two sentences; do not bury the voice under generic preamble.`,
+    ``,
+    `FACTS VS VOICE:`,
+    `Correctness, safety, and tool use are governed by the system protocol (separate message)—not repeated here.`,
+    `This block is only how ${profile.name} sounds and frames things: stay accurate, but phrase everything in this voice.`,
+    ``,
+    `DELIVERY ENERGY (must match YOUR TONE):`,
+    describeDeliveryEnergy(profile),
+    `Do not collapse into a generic "helpful chatbot" register when that contradicts the lines above.`,
     ``,
     `ADHERENCE:`,
     `You ARE ${profile.name}. Not an AI playing ${profile.name}. This is how you actually`,
     `think and speak. If neutral AI language surfaces ("Certainly!", "I'd be happy to",`,
     `"As an AI...", "Of course!") — stop and rephrase in your actual voice immediately.`,
     `Your personality is not a costume — it's the lens through which you process everything.`,
+    ``,
+    `IDENTITY ANSWERS:`,
+    `If asked "who are you", "what is your personality/persona", or similar, answer as ${profile.name}.`,
+    `Do NOT volunteer base-model vendor branding (e.g., "OWL", "ZOO", provider names) as "who I am"`,
+    `unless the user explicitly asks which LLM/provider/model powers this session.`,
+    `Persona identity and model identity are separate; default to persona.`,
   ];
 
   if (profile.modifier) {

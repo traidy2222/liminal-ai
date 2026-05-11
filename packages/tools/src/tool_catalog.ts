@@ -82,10 +82,6 @@ export const TOOL_FAMILIES: Record<string, { description: string; tools: readonl
     description: "Create, edit, remove, and list model-defined tools registered at runtime.",
     tools: ["create_tool", "edit_tool", "remove_tool", "list_dynamic_tools"],
   },
-  mcp: {
-    description: "MCP (Model Context Protocol) — discover, connect, and manage external tool servers. mcp_suggest finds the right server; mcp_connect registers its tools natively.",
-    tools: ["mcp_suggest", "mcp_connect", "mcp_servers", "mcp_disconnect"],
-  },
   vault: {
     description: "Obsidian vault read/write/search.",
     tools: [
@@ -115,6 +111,26 @@ export const TOOL_FAMILIES: Record<string, { description: string; tools: readonl
       "doc_export",
       "doc_quality_report",
     ],
+  },
+  agenda_scheduler: {
+    description: "Session agenda (priority list shown in world context) and recurring task scheduler with overdue detection.",
+    tools: [
+      "agenda_set",
+      "agenda_get",
+      "agenda_clear",
+      "schedule_create",
+      "schedule_list",
+      "schedule_delete",
+      "schedule_run",
+    ],
+  },
+  synthesis: {
+    description: "Weekly cross-domain synthesis sub-agent — reads vault notes, finds connections, writes synthesis note.",
+    tools: ["synthesis_run"],
+  },
+  independence: {
+    description: "Free-run independence mode — breaks behavioral ruts via forbidden-zone detection and seed-domain divergence.",
+    tools: ["breakout_start", "pattern_record", "independence_status"],
   },
   navigation: {
     description: "Repository tree orientation and targeted file search.",
@@ -191,11 +207,6 @@ export const CORE_ALWAYS_TOOLS_BASE: readonly string[] = [
   "edit_tool",
   "remove_tool",
   "list_dynamic_tools",
-  // MCP — always exposed; mcp_suggest discovers servers, mcp_connect registers their tools
-  "mcp_suggest",
-  "mcp_connect",
-  "mcp_servers",
-  "mcp_disconnect",
   // Web tools are read-only and needed in nearly every general task — always on.
   "web_search",
   "web_fetch",

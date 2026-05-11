@@ -58,13 +58,21 @@ import { createRefreshWorldContextTool } from "./refresh_world_context.js";
 import { createSetPersonaTool } from "./set_persona.js";
 import { createToolDiscoveryTools } from "./tool_activation.js";
 import { applyLazyRegistrationPolicy } from "./tool_catalog.js";
+// New tools — Upgrade VI (harness quality)
+import { agendaSetTool, agendaGetTool, agendaClearTool } from "./session_agenda.js";
+import { breakoutStartTool, patternRecordTool, independenceStatusTool } from "./independence.js";
+import {
+  scheduleCreateTool,
+  scheduleListTool,
+  scheduleDeleteTool,
+  scheduleRunTool,
+} from "./task_scheduler.js";
+import { createSynthesisRunTool } from "./synthesis_run.js";
 // New tools — Upgrade V
 import { createDecomposeGoalTool } from "./decompose_goal.js";
 import { createBranchExploreTool } from "./branch_explore.js";
 import { createVerifyContractTool } from "./verify_contract.js";
 import { createDynamicToolsTools, loadDynamicTools } from "./dynamic_tools.js";
-import { createMcpManagementTools, loadMcpServersFromEnv } from "./mcp_bridge.js";
-import { mcpManager } from "./mcp_client.js";
 // New tools — Upgrade IV
 import { gitStatusTool, gitDiffTool, gitLogTool, gitBranchTool, gitCommitTool } from "./git_tools.js";
 import { gitCheckpointTool, gitRollbackTool } from "./git_checkpoint.js";
@@ -187,6 +195,18 @@ export async function registerAllTools(
   registry.register(vaultLinksTool);
   registry.register(vaultGraphTool);
   registry.register(vaultDeleteTool);
+  // Session agenda + recurring task scheduler
+  registry.register(agendaSetTool);
+  registry.register(agendaGetTool);
+  registry.register(agendaClearTool);
+  registry.register(scheduleCreateTool);
+  registry.register(scheduleListTool);
+  registry.register(scheduleDeleteTool);
+  registry.register(scheduleRunTool);
+  // Independence engine
+  registry.register(breakoutStartTool);
+  registry.register(patternRecordTool);
+  registry.register(independenceStatusTool);
   if (process.env["AGENT_DOC_ENGINE"] === "1") {
     registry.register(docPlanTool);
     registry.register(docResearchBriefTool);
@@ -239,6 +259,9 @@ export async function registerAllTools(
     registry.register(createDecomposeGoalTool(harness));
     registry.register(createBranchExploreTool(harness));
     registry.register(createVerifyContractTool(harness));
+
+    // Upgrade VI: cross-domain synthesis sub-agent
+    registry.register(createSynthesisRunTool(harness));
   }
 
   // Dynamic tool creation — always available
@@ -250,16 +273,6 @@ export async function registerAllTools(
 
   // Load any previously-persisted dynamic tools from disk
   await loadDynamicTools(registry, emitter);
-
-  // MCP management tools (mcp_connect, mcp_servers, mcp_disconnect, mcp_suggest)
-  const { mcp_connect, mcp_servers, mcp_disconnect, mcp_suggest } = createMcpManagementTools(mcpManager, registry, emitter);
-  registry.register(mcp_connect);
-  registry.register(mcp_servers);
-  registry.register(mcp_disconnect);
-  registry.register(mcp_suggest);
-
-  // Load MCP servers declared in AGENT_MCP_SERVERS env var
-  await loadMcpServersFromEnv(registry, emitter);
 
   applyLazyRegistrationPolicy(registry, !!harness);
   if (harness) {
@@ -282,5 +295,12 @@ export { applyLazyRegistrationPolicy, TOOL_FAMILIES } from "./tool_catalog.js";
 export { createOrchestrationTools } from "./orchestration.js";
 export { createContextTools } from "./context_tools.js";
 export { createSetPersonaTool } from "./set_persona.js";
+export {
+  parsePersonaInput,
+  isResetToDefaultRequest,
+  generatePersonaFromInput,
+  applyPersonaProfileToHarness,
+  clearPersistedPersonaArtifacts,
+} from "./persona_runtime.js";
 export { loadPlugins } from "./plugin_loader.js";
 export type { PluginModule, PluginLoadResult } from "./plugin_loader.js";

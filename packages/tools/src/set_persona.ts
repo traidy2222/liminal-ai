@@ -1,80 +1,13 @@
 import type { AgentHarness } from "@liminal/core";
 import { defineTool } from "./helpers.js";
-import { buildRichPersonaBlock, type PersonaProfile } from "./persona_presets.js";
-import { generatePersonaProfile } from "./persona_generator.js";
-import { atomicUpdate } from "./notes_store.js";
-
-// ─── Input parser ─────────────────────────────────────────────────────────────
-
-interface ParsedInput {
-  coreInput: string;
-  strength: number;
-  modifier?: string;
-}
-
-/**
- * Parse a set_persona input string for strength and modifier directives.
- *
- * Supported formats:
- *   "dry British valet"              → coreInput="dry British valet", strength=8
- *   "dry British valet 9"           → strength=9
- *   "dry British valet strength:7"  → strength=7
- *   "pirate narrator but calmer"    → modifier="calmer"
- *   "pirate 9 but more technical"   → strength=9, modifier="more technical"
- */
-function parsePersonaInput(input: string): ParsedInput {
-  let text = input.trim();
-  let strength = 8;
-  let modifier: string | undefined;
-
-  const butMatch = text.match(/\s+but\s+(.+)$/i);
-  if (butMatch) {
-    modifier = butMatch[1].trim();
-    text = text.slice(0, text.length - butMatch[0].length).trim();
-  }
-
-  const strengthExplicit = text.match(/\bstrength[:\s]+(\d{1,2})\b/i);
-  if (strengthExplicit) {
-    const n = parseInt(strengthExplicit[1], 10);
-    if (n >= 1 && n <= 10) strength = n;
-    text = text.replace(strengthExplicit[0], "").trim();
-  } else {
-    const trailingDigit = text.match(/\s+([1-9]|10)$/);
-    if (trailingDigit) {
-      strength = parseInt(trailingDigit[1], 10);
-      text = text.slice(0, text.length - trailingDigit[0].length).trim();
-    }
-  }
-
-  return { coreInput: text, strength, modifier };
-}
-
-function isResetToDefaultRequest(coreInput: string): boolean {
-  const k = coreInput.toLowerCase().trim();
-  return k === "default" || k === "liminal" || k === "reset" || k === "clear";
-}
-
-// ─── Memory persistence ───────────────────────────────────────────────────────
-
-const PERSONA_MEMORY_KEY = "persona:active_profile";
-const PERSONA_NAME_KEY = "persona:active_name";
-
-async function persistPersona(profile: PersonaProfile): Promise<void> {
-  await atomicUpdate((notes) => ({
-    ...notes,
-    [PERSONA_MEMORY_KEY]: JSON.stringify(profile),
-    [PERSONA_NAME_KEY]: profile.name,
-  }));
-}
-
-async function clearPersistedPersona(): Promise<void> {
-  await atomicUpdate((notes) => {
-    const next = { ...notes };
-    delete next[PERSONA_MEMORY_KEY];
-    delete next[PERSONA_NAME_KEY];
-    return next;
-  });
-}
+import type { RuntimePersonaProfile } from "@liminal/core";
+import {
+  applyPersonaProfileToHarness,
+  clearPersistedPersonaArtifacts,
+  generatePersonaFromInput,
+  isResetToDefaultRequest,
+  parsePersonaInput,
+} from "./persona_runtime.js";
 
 // ─── Tool factory ─────────────────────────────────────────────────────────────
 
@@ -121,8 +54,20 @@ export function createSetPersonaTool(harness: AgentHarness) {
 
       if (isResetToDefaultRequest(coreInput)) {
         harness.resetPersona();
+        await clearPersistedPersonaArtifacts().catch(() => undefined);
         try {
-          await clearPersistedPersona();
+          await harness.patchRuntimePreferences(
+            {
+              persona: {
+                // First-run bootstrap stays completed; only clear custom profile.
+                bootstrapCompleted: true,
+                sourcePrompt: "",
+                activeProfile: null,
+                updatedAt: Date.now(),
+              },
+            },
+            { persist: true }
+          );
         } catch {
           // non-fatal
         }
@@ -141,8 +86,7 @@ export function createSetPersonaTool(harness: AgentHarness) {
         };
       }
 
-      const { openRouterApiKey, model, baseURL } = harness.config;
-      if (!openRouterApiKey) {
+      if (!harness.config.openRouterApiKey) {
         return {
           ok: false,
           error:
@@ -151,21 +95,21 @@ export function createSetPersonaTool(harness: AgentHarness) {
         };
       }
 
-      const profile = await generatePersonaProfile(
-        coreInput,
-        strength,
-        modifier,
-        openRouterApiKey,
-        model,
-        baseURL
-      );
-
-      const block = buildRichPersonaBlock(profile);
-
-      harness.setPersona({ name: profile.name, description: profile.coreIdentity }, block);
+      const profile = await generatePersonaFromInput(harness, coreInput, strength, modifier);
+      await applyPersonaProfileToHarness(harness, profile);
 
       try {
-        await persistPersona(profile);
+        await harness.patchRuntimePreferences(
+          {
+            persona: {
+              bootstrapCompleted: true,
+              sourcePrompt: coreInput,
+              activeProfile: profile as RuntimePersonaProfile,
+              updatedAt: Date.now(),
+            },
+          },
+          { persist: true }
+        );
       } catch {
         // Non-fatal — persona is applied even if memory write fails
       }

@@ -80,9 +80,9 @@ export function createRunShellTool(emitter: AgentEmitter) {
         const emitDelta = (text: string) => {
           if (!headerEmitted) {
             headerEmitted = true;
-            emitter.emit("text", { delta: `\n\`${command}\`\n` });
+            emitter.emit("text", { delta: `\n\`${command}\`\n`, channel: "trace" });
           }
-          emitter.emit("text", { delta: text });
+          emitter.emit("text", { delta: text, channel: "trace" });
           chunks.push(text);
         };
 
