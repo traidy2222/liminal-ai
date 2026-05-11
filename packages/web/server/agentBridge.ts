@@ -2,12 +2,18 @@ import {
   AgentHarness,
   maybeAttachSessionEventLog,
   resolveProviderConfig,
+  resolveWorkspaceRoot,
   saveRuntimePreferences,
 } from "@liminal/core";
 import {
   registerAllTools,
   INCEPTION_MESSAGES,
   buildProtocolDynamicSuffix,
+  applyPersonaProfileToHarness,
+  clearPersistedPersonaArtifacts,
+  parsePersonaInput,
+  generatePersonaFromInput,
+  isResetToDefaultRequest,
 } from "@liminal/tools";
 import type { SSEManager } from "./sse.js";
 import type { ApprovalDecision } from "@liminal/core";
@@ -46,6 +52,15 @@ export class AgentBridge {
   private pendingAskUser: ((answer: string) => void) | null = null;
   private harnessHeartbeatTimer: NodeJS.Timeout | null = null;
   private turnStartedAt: number | null = null;
+  private awaitingPersonaBootstrapInput = false;
+  private bootstrapInFlight = false;
+  private emitBootstrapProgress(stage: string, message: string): void {
+    this.sse.send("persona_bootstrap_progress", {
+      stage,
+      message,
+      at: Date.now(),
+    });
+  }
 
   constructor(private readonly sse: SSEManager, runtimePreferences: RuntimePreferences | null = null) {
     const provider = resolveProviderConfig(runtimePreferences?.provider);
@@ -60,7 +75,8 @@ export class AgentBridge {
       // Set AGENT_LOCATION="City, Country" in .env to include physical location
       worldContext: resolveWorldContext(),
       runtimePreferences,
-      persistRuntimePreferences: async (prefs) => saveRuntimePreferences(prefs),
+      persistRuntimePreferences: async (prefs) =>
+        saveRuntimePreferences(prefs, resolveWorkspaceRoot()),
       context: {
         modelMaxTokens: 128_000,
         thresholdFraction: 0.8,
@@ -69,14 +85,39 @@ export class AgentBridge {
       },
     });
 
-    this.detachSessionLog = maybeAttachSessionEventLog(
-      this.harness.emitter,
-      this.harness.taskId
-    );
+    const harness = this.harness;
+    this.detachSessionLog = maybeAttachSessionEventLog(harness.emitter, harness.taskId);
     this.wireEvents();
-    // Async tool registration (loads dynamic tools from disk); fire-and-forget is safe
-    // because the harness queues messages and won't dispatch until tools are registered.
-    void registerAllTools(this.harness.registry, this.harness.emitter, this.harness);
+    void (async () => {
+      await registerAllTools(harness.registry, harness.emitter, harness);
+      await this.beginSession();
+    })();
+  }
+
+  private async beginSession(): Promise<void> {
+    const persisted = this.harness.getPersistedPersonaProfile();
+    if (persisted) {
+      await applyPersonaProfileToHarness(this.harness, persisted);
+    }
+    const forceBootstrap = process.env["AGENT_PERSONA_BOOTSTRAP_FORCE"] === "1";
+    this.awaitingPersonaBootstrapInput = false;
+    if (
+      process.env["AGENT_PERSONA_BOOTSTRAP"] !== "0" &&
+      (forceBootstrap || !this.harness.isPersonaBootstrapCompleted())
+    ) {
+      this.awaitingPersonaBootstrapInput = true;
+      // Web uses a dedicated client modal for bootstrap input; do not spend a model turn
+      // by asking in chat here.
+      return;
+    }
+    try {
+      await this.harness.sendSessionGreeting();
+    } catch (err) {
+      console.error(
+        "Session greeting failed:",
+        err instanceof Error ? err.message : String(err)
+      );
+    }
   }
 
   private startHeartbeat(): void {
@@ -96,6 +137,7 @@ export class AgentBridge {
   /** Current busy state — exposed for /api/status. */
   get isBusy(): boolean { return this.harness.getIsRunning(); }
   get turnStartTime(): number | null { return this.turnStartedAt; }
+  get isAwaitingPersonaBootstrap(): boolean { return this.awaitingPersonaBootstrapInput; }
 
   private wireEvents(): void {
     const { emitter } = this.harness;
@@ -172,5 +214,118 @@ export class AgentBridge {
   /** Clear transcript; next user message re-injects world context (root). */
   clearSession(): void {
     this.harness.clearConversation();
+    this.awaitingPersonaBootstrapInput = false;
+    this.bootstrapInFlight = false;
   }
+
+  /** Called after reset to run bootstrap/greeting sequence again. */
+  async initializeSessionAfterReset(): Promise<void> {
+    await this.beginSession();
+  }
+
+  async sendUserMessage(message: string, opts?: { freshContext?: boolean }): Promise<void> {
+    if (!this.awaitingPersonaBootstrapInput) {
+      await this.harness.send(message, opts);
+      return;
+    }
+    throw new Error("Persona bootstrap is pending. Submit via /api/persona/bootstrap.");
+  }
+
+  async submitPersonaBootstrap(input: string, options?: { skip?: boolean }): Promise<void> {
+    if (!this.awaitingPersonaBootstrapInput) {
+      throw new Error("Persona bootstrap is not pending (already completed or not enabled). Refresh the page.");
+    }
+    if (this.harness.getIsRunning()) {
+      throw new Error("Session is still initializing. Please retry persona bootstrap in a moment.");
+    }
+    if (this.bootstrapInFlight) {
+      throw new Error("Persona bootstrap is already in progress.");
+    }
+    this.bootstrapInFlight = true;
+    this.emitBootstrapProgress("starting", "Bootstrap started. Validating input...");
+    try {
+      const trimmed = input.trim();
+      const skipAllowed = process.env["AGENT_PERSONA_BOOTSTRAP_ALLOW_SKIP"] !== "0";
+      if (options?.skip || (skipAllowed && /^(skip|\/skip)$/i.test(trimmed))) {
+        this.emitBootstrapProgress("skip", "Skipping persona generation. Restoring default voice...");
+        this.awaitingPersonaBootstrapInput = false;
+        await clearPersistedPersonaArtifacts().catch(() => undefined);
+        // Persist first-run as dismissed so bootstrap modal does not return on next launch.
+        await this.harness.patchRuntimePreferences(
+          {
+            persona: {
+              bootstrapCompleted: true,
+              sourcePrompt: "",
+              activeProfile: null,
+              updatedAt: Date.now(),
+            },
+          },
+          { persist: true }
+        );
+        await this.harness.sendSessionGreeting();
+        this.emitBootstrapProgress("done", "Session ready.");
+        return;
+      }
+
+      const parsed = parsePersonaInput(trimmed);
+      if (!parsed.coreInput) {
+        throw new Error("Please describe the voice you want before continuing.");
+      }
+      this.emitBootstrapProgress("parsed", "Input parsed. Building persona profile...");
+
+      if (isResetToDefaultRequest(parsed.coreInput)) {
+        this.emitBootstrapProgress("reset", "Resetting to default persona...");
+        this.harness.resetPersona();
+        await clearPersistedPersonaArtifacts().catch(() => undefined);
+        await this.harness.patchRuntimePreferences(
+          {
+            persona: {
+              bootstrapCompleted: true,
+              sourcePrompt: "default",
+              activeProfile: null,
+              updatedAt: Date.now(),
+            },
+          },
+          { persist: true }
+        );
+        this.awaitingPersonaBootstrapInput = false;
+        await this.harness.sendSessionGreeting();
+        this.emitBootstrapProgress("done", "Session ready.");
+        return;
+      }
+
+      this.emitBootstrapProgress(
+        "generating",
+        "Generating persona, soul blueprint, and style lexicon with the model..."
+      );
+      const profile = await generatePersonaFromInput(
+        this.harness,
+        parsed.coreInput,
+        parsed.strength,
+        parsed.modifier,
+        (stage, message) => this.emitBootstrapProgress(stage, message)
+      );
+      this.emitBootstrapProgress("applying", "Applying persona context to the runtime...");
+      await applyPersonaProfileToHarness(this.harness, profile);
+      this.emitBootstrapProgress("persisting", "Persisting persona profile and bootstrap state...");
+      await this.harness.patchRuntimePreferences(
+        {
+          persona: {
+            bootstrapCompleted: true,
+            sourcePrompt: parsed.coreInput,
+            activeProfile: profile,
+            updatedAt: Date.now(),
+          },
+        },
+        { persist: true }
+      );
+      this.awaitingPersonaBootstrapInput = false;
+      this.emitBootstrapProgress("greeting", "Finalizing session greeting...");
+      await this.harness.sendSessionGreeting();
+      this.emitBootstrapProgress("done", "Bootstrap complete.");
+    } finally {
+      this.bootstrapInFlight = false;
+    }
+  }
+
 }

@@ -61,12 +61,21 @@ export interface SSEState {
   error: string | null;
   personaName: string;
   uiVerbosity: "normal" | "quiet";
+  personaBootstrapPending: boolean;
+  personaBootstrapAllowSkip: boolean;
+  personaBootstrapProgress: string | null;
+  personaBootstrapStage: string | null;
 }
 
 const ORCH_TOOLS = new Set(["spawn_agent", "wait_for_agents", "cancel_agent", "list_agents"]);
 
 type Action =
-  | { type: "init_config"; uiVerbosity: "normal" | "quiet" }
+  | {
+      type: "init_config";
+      uiVerbosity: "normal" | "quiet";
+      personaBootstrapPending?: boolean;
+      personaBootstrapAllowSkip?: boolean;
+    }
   | { type: "connected" }
   | { type: "disconnected" }
   | { type: "harness_running"; payload: { startedAt: number } }
@@ -91,6 +100,7 @@ type Action =
   | { type: "plan_step_done"; payload: { stepIndex: number } }
   | { type: "context_compressed"; payload: { beforeFraction: number; afterFraction: number; roundsCompressed: number } }
   | { type: "persona_changed"; payload: { name: string } }
+  | { type: "persona_bootstrap_progress"; payload: { stage: string; message: string; at: number } }
   | { type: "session_reset" };
 
 function stripTrailingProviderRetry(messages: MessageEntry[]): MessageEntry[] {
@@ -102,7 +112,19 @@ function stripTrailingProviderRetry(messages: MessageEntry[]): MessageEntry[] {
 function reducer(state: SSEState, action: Action): SSEState {
   switch (action.type) {
     case "init_config":
-      return { ...state, uiVerbosity: action.uiVerbosity };
+      return {
+        ...state,
+        uiVerbosity: action.uiVerbosity,
+        ...(typeof action.personaBootstrapPending === "boolean"
+          ? { personaBootstrapPending: action.personaBootstrapPending }
+          : {}),
+        ...(typeof action.personaBootstrapAllowSkip === "boolean"
+          ? { personaBootstrapAllowSkip: action.personaBootstrapAllowSkip }
+          : {}),
+        ...(action.personaBootstrapPending === false
+          ? { personaBootstrapProgress: null, personaBootstrapStage: null }
+          : {}),
+      };
 
     case "connected":
       return { ...state, connected: true, error: null };
@@ -123,6 +145,16 @@ function reducer(state: SSEState, action: Action): SSEState {
         contextSnapshot: null,
         pendingApproval: null,
         pendingAskUser: null,
+        personaBootstrapPending: state.personaBootstrapPending,
+        personaBootstrapProgress: null,
+        personaBootstrapStage: null,
+      };
+
+    case "persona_bootstrap_progress":
+      return {
+        ...state,
+        personaBootstrapProgress: action.payload.message,
+        personaBootstrapStage: action.payload.stage,
       };
 
     case "user_message":
@@ -446,6 +478,10 @@ export function useSSE() {
     error: null,
     personaName: "Liminal",
     uiVerbosity: "normal",
+    personaBootstrapPending: false,
+    personaBootstrapAllowSkip: true,
+    personaBootstrapProgress: null,
+    personaBootstrapStage: null,
   });
 
   // Text-batching refs — stable across renders, safe to use inside EventSource callbacks.
@@ -484,11 +520,26 @@ export function useSSE() {
     // Fetch config once — fire-and-forget, never blocks the SSE connection.
     fetch(`${SERVER}/api/config`)
       .then((r) => r.ok ? r.json() : null)
-      .then((cfg: { uiVerbosity?: string } | null) => {
-        if (!cancelledRef.current && cfg?.uiVerbosity === "quiet") {
-          dispatch({ type: "init_config", uiVerbosity: "quiet" });
+      .then(
+        (
+          cfg:
+            | {
+                uiVerbosity?: string;
+                personaBootstrapPending?: boolean;
+                personaBootstrapAllowSkip?: boolean;
+              }
+            | null
+        ) => {
+          if (!cancelledRef.current && cfg) {
+            dispatch({
+              type: "init_config",
+              uiVerbosity: cfg.uiVerbosity === "quiet" ? "quiet" : "normal",
+              personaBootstrapPending: cfg.personaBootstrapPending,
+              personaBootstrapAllowSkip: cfg.personaBootstrapAllowSkip,
+            });
+          }
         }
-      })
+      )
       .catch(() => { /* default normal */ });
 
     function connect() {
@@ -575,6 +626,10 @@ export function useSSE() {
       es.addEventListener("persona_changed", (e: MessageEvent) => {
         trackId(e); flushNow();
         dispatch({ type: "persona_changed", payload: JSON.parse(e.data) });
+      });
+      es.addEventListener("persona_bootstrap_progress", (e: MessageEvent) => {
+        trackId(e);
+        dispatch({ type: "persona_bootstrap_progress", payload: JSON.parse(e.data) });
       });
       es.addEventListener("error", (e: MessageEvent) => {
         trackId(e); flushNow();
@@ -742,11 +797,67 @@ export function useSSE() {
     const result = await fetchWithRetry(`${SERVER}/api/session/reset`, { method: "POST" }, 4);
     if (result.ok) {
       dispatch({ type: "session_reset" });
+      // Refresh config so bootstrap modal state is accurate after reset.
+      fetch(`${SERVER}/api/config`)
+        .then((r) => (r.ok ? r.json() : null))
+        .then(
+          (
+            cfg:
+              | {
+                  uiVerbosity?: string;
+                  personaBootstrapPending?: boolean;
+                  personaBootstrapAllowSkip?: boolean;
+                }
+              | null
+          ) => {
+            if (cfg) {
+              dispatch({
+                type: "init_config",
+                uiVerbosity: cfg.uiVerbosity === "quiet" ? "quiet" : "normal",
+                personaBootstrapPending: cfg.personaBootstrapPending,
+                personaBootstrapAllowSkip: cfg.personaBootstrapAllowSkip,
+              });
+            }
+          }
+        )
+        .catch(() => { /* ignore */ });
       return;
     }
     const msg = (result.body as { error?: string }).error ?? `Session reset failed (${result.status})`;
     dispatch({ type: "error", payload: { message: msg } });
   }, []);
 
-  return { state, sendMessage, sendApproval, sendAnswer, sendClearSession };
+  const sendPersonaBootstrap = useCallback(
+    async (input: string, options?: { skip?: boolean }): Promise<SendMessageResult> => {
+      const result = await fetchWithRetry(
+        `${SERVER}/api/persona/bootstrap`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ input, skip: Boolean(options?.skip) }),
+        },
+        6
+      );
+      if (!result.ok) {
+        const body = result.body as { error?: string; detail?: string };
+        const raw = body.error ?? `Bootstrap failed (${result.status})`;
+        const detail = typeof body.detail === "string" && body.detail !== raw ? ` (${body.detail})` : "";
+        const message =
+          result.status === 409
+            ? "Persona setup is still initializing. Please retry in a moment."
+            : `${raw}${detail}`;
+        dispatch({ type: "error", payload: { message } });
+        return { ok: false, error: message };
+      }
+      dispatch({
+        type: "init_config",
+        uiVerbosity: state.uiVerbosity,
+        personaBootstrapPending: false,
+      });
+      return { ok: true };
+    },
+    [state.uiVerbosity]
+  );
+
+  return { state, sendMessage, sendApproval, sendAnswer, sendClearSession, sendPersonaBootstrap };
 }

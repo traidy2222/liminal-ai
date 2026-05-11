@@ -10,7 +10,18 @@ export default defineConfig({
   server: {
     port: 3000,
     proxy: {
-      "/api": "http://localhost:3001",
+      "/api": {
+        target: "http://localhost:3001",
+        changeOrigin: false,
+        configure: (proxy) => {
+          // Disable socket timeout for SSE — the default http-proxy timeout
+          // resets long-lived /api/stream connections with ERR_CONNECTION_RESET.
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          (proxy as any).on("open", (proxySocket: any) => {
+            proxySocket.setTimeout(0);
+          });
+        },
+      },
     },
   },
 });

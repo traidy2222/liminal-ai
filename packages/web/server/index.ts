@@ -1,4 +1,5 @@
 import { config } from "dotenv";
+import { execSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { join, dirname, resolve } from "node:path";
 import { existsSync } from "node:fs";
@@ -32,14 +33,40 @@ app.use(cors());
 app.use(express.json({ limit: "20mb" }));
 
 const sse = new SSEManager();
-const runtimePreferences = await loadRuntimePreferences();
+const runtimePreferences = await loadRuntimePreferences(targetRoot);
 const bridge = new AgentBridge(sse, runtimePreferences);
 const router = createRouter(bridge, sse);
 app.use(router);
 
-// Serve built client if available (run: npm run build:client in packages/web first)
-const clientDist = join(__dirname, "../client/dist");
-if (existsSync(clientDist)) {
+const webPkgRoot = join(__dirname, "..");
+const clientDist = join(webPkgRoot, "client/dist");
+const clientIndexHtml = join(clientDist, "index.html");
+
+function tryBuildWebClient(): void {
+  if (process.env["AGENT_WEB_SKIP_CLIENT_BUILD"] === "1") return;
+  console.log("Web UI dist not found; running `vite build client/` …");
+  execSync("npx vite build client/", {
+    cwd: webPkgRoot,
+    stdio: "inherit",
+    env: process.env,
+    shell: process.platform === "win32" ? (process.env.ComSpec ?? "cmd.exe") : "/bin/sh",
+  });
+}
+
+if (!existsSync(clientIndexHtml)) {
+  try {
+    tryBuildWebClient();
+  } catch {
+    console.error(
+      "Could not build web client (is `vite` installed? try `npm install` in repo root).\n" +
+        "Build manually: npm run build:client --workspace=packages/web\n" +
+        "Dev with hot reload: npm run web:dev"
+    );
+    throw new Error("Liminal web: missing client/dist after build attempt");
+  }
+}
+
+if (existsSync(clientIndexHtml)) {
   app.use(express.static(clientDist));
 } else {
   app.get("/", (_req, res) => {
@@ -48,8 +75,11 @@ if (existsSync(clientDist)) {
       .type("text/plain")
       .send(
         "Liminal web API is running, but the web UI is not built here.\n" +
-          "Run `npm run web` from repo root for full dev UI (Vite on http://localhost:5173),\n" +
-          "or run `npm run build:client --workspace=packages/web` to serve static UI from this server."
+          "From repo root:\n" +
+          "  npm run web              — build client + serve API + static UI on PORT (default :3001)\n" +
+          "  npm run web:dev          — Express API on :3001 + Vite dev server on :5173 (hot reload)\n" +
+          "  npm run build:client --workspace=packages/web   — build only, then use npm run start in packages/web\n" +
+          "To run API without a UI build: set AGENT_WEB_SKIP_CLIENT_BUILD=1"
       );
   });
 }

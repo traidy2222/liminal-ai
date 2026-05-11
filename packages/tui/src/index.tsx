@@ -6,12 +6,14 @@ import {
   maybeAttachSessionEventLog,
   resolveProviderConfig,
   loadRuntimePreferences,
+  resolveWorkspaceRoot,
   saveRuntimePreferences,
 } from "@liminal/core";
 import {
   registerAllTools,
   INCEPTION_MESSAGES,
   buildProtocolDynamicSuffix,
+  applyPersonaProfileToHarness,
 } from "@liminal/tools";
 import { App } from "./App.js";
 
@@ -44,7 +46,7 @@ function resolveWorldContext():
 if (!process.env["AGENT_DESTRUCTIVE_GATE"]) {
   process.env["AGENT_DESTRUCTIVE_GATE"] = "balanced";
 }
-const runtimePreferences = await loadRuntimePreferences();
+const runtimePreferences = await loadRuntimePreferences(resolveWorkspaceRoot());
 let provider;
 try {
   provider = resolveProviderConfig(runtimePreferences?.provider);
@@ -64,7 +66,8 @@ const harness = new AgentHarness({
   // Set AGENT_LOCATION="City, Country" in .env to include physical location
   worldContext: resolveWorldContext(),
   runtimePreferences,
-  persistRuntimePreferences: async (prefs) => saveRuntimePreferences(prefs),
+  persistRuntimePreferences: async (prefs) =>
+    saveRuntimePreferences(prefs, resolveWorkspaceRoot()),
   context: {
     modelMaxTokens: 128_000,
     thresholdFraction: 0.8,
@@ -75,5 +78,19 @@ const harness = new AgentHarness({
 
 await registerAllTools(harness.registry, harness.emitter, harness);
 void maybeAttachSessionEventLog(harness.emitter, harness.taskId);
+
+try {
+  const persisted = harness.getPersistedPersonaProfile();
+  if (persisted) {
+    await applyPersonaProfileToHarness(harness, persisted);
+  }
+  if (process.env["AGENT_PERSONA_BOOTSTRAP"] !== "0" && !harness.isPersonaBootstrapCompleted()) {
+    await harness.sendPersonaBootstrapPrompt();
+  } else {
+    await harness.sendSessionGreeting();
+  }
+} catch (err) {
+  console.error("Session greeting failed:", err instanceof Error ? err.message : String(err));
+}
 
 render(<App harness={harness} />);

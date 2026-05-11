@@ -6,6 +6,13 @@ import {
   type ContextSnapshot,
   type ImageAttachment,
 } from "@liminal/core";
+import {
+  applyPersonaProfileToHarness,
+  clearPersistedPersonaArtifacts,
+  generatePersonaFromInput,
+  isResetToDefaultRequest,
+  parsePersonaInput,
+} from "@liminal/tools";
 
 function isAgentUiQuiet(): boolean {
   return process.env["AGENT_UI_VERBOSITY"]?.trim() === "quiet";
@@ -362,6 +369,10 @@ export function useAgent(harness: AgentHarness) {
   const queuedTextRef = useRef("");
   const queuedTraceRef = useRef("");
   const flushTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const bootstrapPendingRef = useRef(
+    process.env["AGENT_PERSONA_BOOTSTRAP"] !== "0" && !harness.isPersonaBootstrapCompleted()
+  );
+  const bootstrapInFlightRef = useRef(false);
 
   useEffect(() => {
     const { emitter } = harness;
@@ -570,7 +581,88 @@ export function useAgent(harness: AgentHarness) {
           ? `${text.trim() || "(no text)"}\n[attached images: ${attachments.length}]`
           : text;
       dispatch({ type: "user_message", text: userText });
-      void harness.send(buildMessageWithImageAttachments(text, attachments));
+      void (async () => {
+        try {
+          if (bootstrapPendingRef.current) {
+            if (bootstrapInFlightRef.current) {
+              throw new Error("Persona bootstrap is already in progress.");
+            }
+            bootstrapInFlightRef.current = true;
+            const trimmed = text.trim();
+            const skipAllowed = process.env["AGENT_PERSONA_BOOTSTRAP_ALLOW_SKIP"] !== "0";
+            if (skipAllowed && /^(skip|\/skip)$/i.test(trimmed)) {
+              bootstrapPendingRef.current = false;
+              await clearPersistedPersonaArtifacts().catch(() => undefined);
+              await harness.patchRuntimePreferences(
+                {
+                  persona: {
+                    bootstrapCompleted: true,
+                    sourcePrompt: "",
+                    activeProfile: null,
+                    updatedAt: Date.now(),
+                  },
+                },
+                { persist: true }
+              );
+              await harness.sendSessionGreeting();
+              return;
+            }
+            const parsed = parsePersonaInput(trimmed);
+            if (!parsed.coreInput) {
+              await harness.sendPersonaBootstrapPrompt();
+              return;
+            }
+            if (isResetToDefaultRequest(parsed.coreInput)) {
+              harness.resetPersona();
+              await clearPersistedPersonaArtifacts().catch(() => undefined);
+              await harness.patchRuntimePreferences(
+                {
+                  persona: {
+                    bootstrapCompleted: true,
+                    sourcePrompt: "default",
+                    activeProfile: null,
+                    updatedAt: Date.now(),
+                  },
+                },
+                { persist: true }
+              );
+              bootstrapPendingRef.current = false;
+              await harness.sendSessionGreeting();
+              return;
+            }
+            const profile = await generatePersonaFromInput(
+              harness,
+              parsed.coreInput,
+              parsed.strength,
+              parsed.modifier
+            );
+            await applyPersonaProfileToHarness(harness, profile);
+            await harness.patchRuntimePreferences(
+              {
+                persona: {
+                  bootstrapCompleted: true,
+                  sourcePrompt: parsed.coreInput,
+                  activeProfile: profile,
+                  updatedAt: Date.now(),
+                },
+              },
+              { persist: true }
+            );
+            bootstrapPendingRef.current = false;
+            await harness.sendSessionGreeting();
+            return;
+          }
+
+          await harness.send(buildMessageWithImageAttachments(text, attachments));
+        } catch (err) {
+          dispatch({
+            type: "error",
+            msg: err instanceof Error ? err.message : String(err),
+          });
+        } finally {
+          bootstrapInFlightRef.current = false;
+        }
+      })();
     },
     [harness]
   );
@@ -594,6 +686,26 @@ export function useAgent(harness: AgentHarness) {
     if (state.pendingApproval || state.pendingAskUser) return;
     harness.clearConversation();
     dispatch({ type: "session_reset" });
+    bootstrapPendingRef.current =
+      process.env["AGENT_PERSONA_BOOTSTRAP"] !== "0" && !harness.isPersonaBootstrapCompleted();
+    void (async () => {
+      try {
+        const persisted = harness.getPersistedPersonaProfile();
+        if (persisted) {
+          await applyPersonaProfileToHarness(harness, persisted);
+        }
+        if (bootstrapPendingRef.current) {
+          await harness.sendPersonaBootstrapPrompt();
+        } else {
+          await harness.sendSessionGreeting();
+        }
+      } catch (err) {
+        dispatch({
+          type: "error",
+          msg: err instanceof Error ? err.message : String(err),
+        });
+      }
+    })();
   }, [harness, state.pendingApproval, state.pendingAskUser]);
 
   const resolveAskUser = useCallback(

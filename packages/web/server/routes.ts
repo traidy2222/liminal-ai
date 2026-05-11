@@ -25,6 +25,9 @@ export function createRouter(bridge: AgentBridge, sse: SSEManager): Router {
     res.json({
       uiVerbosity: process.env["AGENT_UI_VERBOSITY"]?.trim() === "quiet" ? "quiet" : "normal",
       approvalTimeoutMs: bridge.harness.getApprovalTimeoutMs(),
+      personaBootstrapEnabled: process.env["AGENT_PERSONA_BOOTSTRAP"] !== "0",
+      personaBootstrapPending: bridge.isAwaitingPersonaBootstrap,
+      personaBootstrapAllowSkip: process.env["AGENT_PERSONA_BOOTSTRAP_ALLOW_SKIP"] !== "0",
     });
   });
 
@@ -35,6 +38,11 @@ export function createRouter(bridge: AgentBridge, sse: SSEManager): Router {
     }
     bridge.clearSession();
     res.json({ ok: true });
+    void bridge.initializeSessionAfterReset().catch((err) => {
+      sse.send("error", {
+        message: err instanceof Error ? err.message : "Session greeting failed after reset.",
+      });
+    });
   });
 
   router.get("/api/stream", (req, res) => {
@@ -52,6 +60,10 @@ export function createRouter(bridge: AgentBridge, sse: SSEManager): Router {
   });
 
   router.post("/api/message", async (req, res) => {
+    if (bridge.isAwaitingPersonaBootstrap) {
+      res.status(409).json({ error: "Persona bootstrap is pending. Submit via bootstrap modal." });
+      return;
+    }
     const { message, freshContext, attachments } = req.body as {
       message?: string;
       freshContext?: boolean;
@@ -95,10 +107,29 @@ export function createRouter(bridge: AgentBridge, sse: SSEManager): Router {
     // Fire-and-forget: respond immediately so the HTTP connection is never held open for a full turn.
     // Agent progress and errors surface exclusively via SSE events — no long-lived POST connection needed.
     res.json({ ok: true });
-    bridge.harness.send(normalizedMessage, { freshContext: Boolean(freshContext) }).catch((err) => {
+    bridge.sendUserMessage(normalizedMessage, { freshContext: Boolean(freshContext) }).catch((err) => {
       const message = err instanceof Error ? err.message : "Failed to process message.";
       sse.send("error", { message });
     });
+  });
+
+  router.post("/api/persona/bootstrap", async (req, res) => {
+    const { input, skip } = req.body as { input?: string; skip?: boolean };
+    try {
+      await bridge.submitPersonaBootstrap(String(input ?? ""), { skip: Boolean(skip) });
+      res.json({ ok: true });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Persona bootstrap failed.";
+      const isTimeout = /aborted|timeout|timed out/i.test(message);
+      const isConflict =
+        /already in progress|still initializing|already processing/i.test(message);
+      res.status(isConflict ? 409 : isTimeout ? 504 : 400).json({
+        error: isTimeout
+          ? "Persona generation timed out. Please retry (or reduce prompt complexity)."
+          : message,
+        detail: message,
+      });
+    }
   });
 
   router.post("/api/approve", (req, res) => {
