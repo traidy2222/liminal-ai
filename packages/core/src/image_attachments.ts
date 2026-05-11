@@ -123,6 +123,10 @@ export function buildMessageWithImageAttachments(message: string, attachments: I
     if (item.dataUrl) lines.push(`  data_url: ${item.dataUrl}`);
   });
   lines.push("```");
-  lines.push("If image understanding is needed, use vision_analyze with path when available (fallback: data_url).");
+  lines.push(
+    "VISUAL PERCEPTION: The primary chat model does not receive these pixels as built-in vision; the block above is text. " +
+      "To actually see the image, call vision_analyze with the same path or data_url from this block and a concrete prompt (e.g. describe layout, read text, identify objects). " +
+      "If vision_analyze is not in your tool list yet (lazy loading), call activate_tool_family({ family: \"vision\" }) first, then vision_analyze."
+  );
   return lines.join("\n");
 }

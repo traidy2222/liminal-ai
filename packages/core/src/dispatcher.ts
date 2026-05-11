@@ -151,7 +151,7 @@ export class ToolDispatcher {
     const guardMsg = guardToolArgs(name, args);
     if (guardMsg) return { ok: false, error: `[ARG GUARD] ${guardMsg}` };
     try {
-      const emit = (text: string) => this.emitter.emit("text", { delta: text });
+      const emit = (text: string) => this.emitter.emit("text", { delta: text, channel: "trace" });
       return await tool.handler(args, emit);
     } catch (err) {
       return { ok: false, error: err instanceof Error ? err.message : String(err) };
@@ -375,7 +375,7 @@ export class ToolDispatcher {
 
       const runHandler = async (): Promise<ToolResult> => {
         const t0 = Date.now();
-        const emit = (text: string) => this.emitter.emit("text", { delta: text });
+        const emit = (text: string) => this.emitter.emit("text", { delta: text, channel: "trace" });
         const result = await tool.handler(args, emit);
         this.emitter.emit("tool_timing", { callId, name, durationMs: Date.now() - t0 });
         return result;

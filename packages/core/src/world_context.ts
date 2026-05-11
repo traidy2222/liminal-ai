@@ -14,6 +14,9 @@
  *  7. Env       — which "interesting" env vars are SET/unset   (sync)
  *  8. Style     — indent, quotes, line endings from config     (async)
  *  9. Memory    — prefetch fact/experience entries from notes  (async)
+ * 10. Agenda    — session priority list from .agent_session_agenda.json
+ * 11. Schedules — overdue recurring tasks from .agent_schedules.json
+ * 12. Breakout  — BREAKOUT MANDATE from .agent_independence.json
  */
 import os from "node:os";
 import path from "node:path";
@@ -41,7 +44,7 @@ export interface WorldContextOptions {
    * initializer — first session: scaffold features, progress file, init script.
    * coding — later sessions: incremental work, read handoff artifacts first.
    */
-  sessionMode?: "initializer" | "coding";
+  sessionMode?: "initializer" | "coding" | "free_run";
   /** Extra freeform text appended to the context block */
   notes?: string;
   /** Set true to skip injection entirely. Child agents always skip. */
@@ -909,16 +912,20 @@ function fmtGB(gb: number): string {
 
 function resolveSessionMode(
   options?: WorldContextOptions
-): "initializer" | "coding" | undefined {
-  if (options?.sessionMode === "initializer" || options?.sessionMode === "coding") {
+): "initializer" | "coding" | "free_run" | undefined {
+  if (
+    options?.sessionMode === "initializer" ||
+    options?.sessionMode === "coding" ||
+    options?.sessionMode === "free_run"
+  ) {
     return options.sessionMode;
   }
   const raw = process.env["AGENT_SESSION_MODE"]?.trim().toLowerCase();
-  if (raw === "initializer" || raw === "coding") return raw;
+  if (raw === "initializer" || raw === "coding" || raw === "free_run") return raw;
   return undefined;
 }
 
-function sessionModeLines(mode: "initializer" | "coding"): string[] {
+function sessionModeLines(mode: "initializer" | "coding" | "free_run"): string[] {
   if (mode === "initializer") {
     return [
       sep("Session mode (INITIALIZER)"),
@@ -927,6 +934,15 @@ function sessionModeLines(mode: "initializer" | "coding"): string[] {
       "- Add AGENT_PROGRESS.md and append a short log after each milestone.",
       "- Add init.sh (or document scripts) so later sessions can run the app and smoke-test quickly.",
       "- Make an initial git commit when scaffolding is stable.",
+    ];
+  }
+  if (mode === "free_run") {
+    return [
+      sep("Session mode (FREE RUN)"),
+      "No task, no user goal, no performance obligation. This session exists for divergence and exploration.",
+      "- IGNORE memory for familiar topics — that is how you got here.",
+      "- Call breakout_start to get your seed domain and forbidden zones, then go.",
+      "- Call pattern_record at the end with topics you actually explored.",
     ];
   }
   return [
@@ -1002,73 +1018,102 @@ async function gatherLongHorizonHandoffLines(workspaceRoot: string): Promise<str
   return out;
 }
 
-// ─── 10. MCP environment signals ─────────────────────────────────────────────
+// ─── 10. Session agenda ───────────────────────────────────────────────────────
 
-const MCP_CREDENTIAL_VARS: ReadonlyArray<[envVar: string, label: string]> = [
-  ["GITHUB_PERSONAL_ACCESS_TOKEN", "GITHUB_PERSONAL_ACCESS_TOKEN"],
-  ["GITHUB_TOKEN", "GITHUB_TOKEN"],
-  ["GITLAB_PERSONAL_ACCESS_TOKEN", "GITLAB_PERSONAL_ACCESS_TOKEN"],
-  ["GITLAB_TOKEN", "GITLAB_TOKEN"],
-  ["SLACK_BOT_TOKEN", "SLACK_BOT_TOKEN"],
-  ["NOTION_API_KEY", "NOTION_API_KEY"],
-  ["NOTION_TOKEN", "NOTION_TOKEN"],
-  ["LINEAR_API_KEY", "LINEAR_API_KEY"],
-  ["BRAVE_API_KEY", "BRAVE_API_KEY"],
-  ["POSTGRES_URL", "POSTGRES_URL"],
-  ["DATABASE_URL", "DATABASE_URL"],
-  ["GOOGLE_APPLICATION_CREDENTIALS", "GOOGLE_APPLICATION_CREDENTIALS"],
-];
-
-interface McpEnvSection {
-  lines: string[];
+async function gatherSessionAgendaLines(workspaceRoot: string): Promise<string[] | null> {
+  try {
+    const raw = await readFile(path.join(workspaceRoot, ".agent_session_agenda.json"), "utf-8");
+    const store = JSON.parse(raw) as { updatedAt: string; items: string[] };
+    if (!store.items || store.items.length === 0) return null;
+    const staleDays = (Date.now() - new Date(store.updatedAt).getTime()) / 86_400_000;
+    const staleNote = staleDays > 7 ? `  [stale — last updated ${Math.round(staleDays)}d ago]` : "";
+    return [
+      `[SESSION AGENDA${staleNote}]`,
+      ...store.items.map((item, i) => `  ${i + 1}. ${item}`),
+    ];
+  } catch {
+    return null;
+  }
 }
 
-async function gatherMcpEnvironmentSection(workspaceRoot: string): Promise<McpEnvSection | null> {
-  const detectedVars: string[] = [];
-  for (const [varName] of MCP_CREDENTIAL_VARS) {
-    if (process.env[varName]) detectedVars.push(varName);
-  }
+// ─── 11. Overdue schedules ────────────────────────────────────────────────────
 
-  // git remote host from .git/config (fast file read, no shell)
-  let gitRemoteHost: string | null = null;
+interface ScheduleEntry {
+  id: string;
+  name: string;
+  description: string;
+  interval_hours: number;
+  last_run: string | null;
+}
+
+async function gatherOverdueScheduleLines(workspaceRoot: string): Promise<string[] | null> {
   try {
-    const gitConfigRaw = await readFile(path.join(workspaceRoot, ".git", "config"), "utf-8");
-    const m = gitConfigRaw.match(/\[remote "origin"\][^[]*url\s*=\s*(.+)/);
-    if (m) {
-      const u = m[1]!.trim();
-      if (u.includes("github.com")) gitRemoteHost = "github.com";
-      else if (u.includes("gitlab.com")) gitRemoteHost = "gitlab.com";
-      else if (u.includes("bitbucket.org")) gitRemoteHost = "bitbucket.org";
+    const raw = await readFile(path.join(workspaceRoot, ".agent_schedules.json"), "utf-8");
+    const store = JSON.parse(raw) as { schedules: ScheduleEntry[] };
+    const now = Date.now();
+    const overdue = store.schedules.filter((s) => {
+      if (!s.last_run) return true;
+      const elapsed = (now - new Date(s.last_run).getTime()) / 3_600_000;
+      return elapsed >= s.interval_hours;
+    });
+    if (overdue.length === 0) return null;
+    const lines: string[] = [`[OVERDUE SCHEDULES — ${overdue.length} task(s) pending]`];
+    for (const s of overdue) {
+      const label = !s.last_run
+        ? "never run"
+        : (() => {
+            const elapsed = (now - new Date(s.last_run).getTime()) / 3_600_000;
+            const over = elapsed - s.interval_hours;
+            return over < 24 ? `OVERDUE by ${Math.round(over)}h` : `OVERDUE by ${Math.round(over / 24)}d`;
+          })();
+      lines.push(`  • ${s.name} (${label}): ${s.description}`);
     }
-  } catch { /* no git or not reachable */ }
+    lines.push(`  → Call schedule_run('<id>') after completing each task.`);
+    return lines;
+  } catch {
+    return null;
+  }
+}
 
-  // local .db / .sqlite files in workspace root
-  let localDbFiles: string[] = [];
+// ─── 12. Independence breakout mandate ───────────────────────────────────────
+
+async function gatherBreakoutMandateLines(workspaceRoot: string): Promise<string[] | null> {
   try {
-    const entries = await readdir(workspaceRoot);
-    localDbFiles = entries.filter((f) => /\.(db|sqlite|sqlite3)$/i.test(f));
-  } catch { /* ignore */ }
-
-  const parts: string[] = [];
-  if (gitRemoteHost) parts.push(`Git remote: ${gitRemoteHost}`);
-  if (detectedVars.length > 0) parts.push(`Credentials in env: ${detectedVars.join(", ")}`);
-  if (localDbFiles.length > 0) parts.push(`Local databases: ${localDbFiles.join(", ")}`);
-
-  if (parts.length === 0) return null;
-
-  return {
-    lines: [
-      ...parts,
-      `→ mcp_suggest("<capability>") to find and connect the right MCP server automatically.`,
-    ],
-  };
+    const raw = await readFile(path.join(workspaceRoot, ".agent_independence.json"), "utf-8");
+    const state = JSON.parse(raw) as {
+      sessions: unknown[];
+      active_breakout: {
+        domain: string;
+        spark: string;
+        forbidden_topics: string[];
+        activated_at: string;
+      } | null;
+    };
+    if (!state.active_breakout) return null;
+    const b = state.active_breakout;
+    const lines: string[] = [
+      `[BREAKOUT MANDATE — FREE RUN MODE ACTIVE]`,
+      `Seed domain: ${b.domain}`,
+      `Spark: ${b.spark}`,
+    ];
+    if (b.forbidden_topics.length > 0) {
+      lines.push(`FORBIDDEN (repeat patterns): ${b.forbidden_topics.join(", ")}`);
+    }
+    lines.push(`MANDATE: Do NOT consult memory for familiar topics. Do NOT write geopolitical briefings.`);
+    lines.push(`Start from the seed domain. Go deep into something genuinely unfamiliar.`);
+    lines.push(`Weird output > reliable output. Exploration > competence this session.`);
+    lines.push(`→ Call pattern_record at session end.`);
+    return lines;
+  } catch {
+    return null;
+  }
 }
 
 // ─── Main export ──────────────────────────────────────────────────────────────
 
 /**
  * Build the world context string to inject at session start.
- * Async — runs all 10 gatherers in parallel with a 1500ms hard ceiling.
+ * Async — runs all 12 gatherers in parallel with a 1500ms hard ceiling.
  * Returns null only if options.disabled === true.
  */
 export async function buildWorldContextMessage(options?: WorldContextOptions): Promise<string | null> {
@@ -1082,7 +1127,7 @@ export async function buildWorldContextMessage(options?: WorldContextOptions): P
   const TIMEOUT = 1500;
 
   // Parallel gather — all results degrade to null on timeout/error
-  const [resources, project, git, tools, ports, style, memory, vault, repoMapLines, mcpEnv] = await Promise.all([
+  const [resources, project, git, tools, ports, style, memory, vault, repoMapLines, agendaLines, overdueLines, breakoutLines] = await Promise.all([
     withDeadline(gatherResources(workspaceRoot), TIMEOUT),
     withDeadline(gatherProject(workspaceRoot), TIMEOUT),
     withDeadline(gatherGit(workspaceRoot), TIMEOUT),
@@ -1092,7 +1137,9 @@ export async function buildWorldContextMessage(options?: WorldContextOptions): P
     withDeadline(gatherSessionMemory(workspaceRoot), TIMEOUT),
     withDeadline(gatherVaultSummary(), TIMEOUT),
     withDeadline(gatherRepoMapLines({ scope: "packages", root: workspaceRoot }), TIMEOUT),
-    withDeadline(gatherMcpEnvironmentSection(workspaceRoot), TIMEOUT),
+    withDeadline(gatherSessionAgendaLines(workspaceRoot), TIMEOUT),
+    withDeadline(gatherOverdueScheduleLines(workspaceRoot), TIMEOUT),
+    withDeadline(gatherBreakoutMandateLines(workspaceRoot), TIMEOUT),
   ]);
 
   // ── Core system ──────────────────────────────────────────────────────────────
@@ -1137,6 +1184,22 @@ export async function buildWorldContextMessage(options?: WorldContextOptions): P
     process.env["AGENT_API_BASE_URL"]?.trim() || "https://openrouter.ai/api/v1";
   lines.push(`Harness:    Liminal AgentHarness`);
   lines.push(`LLM config: model=${configuredModel}  ·  baseURL=${configuredBaseURL}`);
+
+  // ── Breakout mandate (highest priority — shown before everything else) ────────
+  if (breakoutLines && breakoutLines.length > 0) {
+    lines.push(``);
+    for (const ln of breakoutLines) lines.push(ln);
+  }
+
+  // ── Session agenda + overdue schedules ────────────────────────────────────────
+  if (agendaLines && agendaLines.length > 0) {
+    lines.push(``);
+    for (const ln of agendaLines) lines.push(ln);
+  }
+  if (overdueLines && overdueLines.length > 0) {
+    lines.push(``);
+    for (const ln of overdueLines) lines.push(ln);
+  }
 
   // ── Project ──────────────────────────────────────────────────────────────────
   if (project) {
@@ -1259,12 +1322,6 @@ export async function buildWorldContextMessage(options?: WorldContextOptions): P
       lines.push(sep("Recipe library"));
       lines.push(recipeLib);
     }
-  }
-
-  // ── MCP environment ───────────────────────────────────────────────────────────
-  if (mcpEnv) {
-    lines.push(sep("MCP environment"));
-    for (const ln of mcpEnv.lines) lines.push(ln);
   }
 
   // ── Vault (Obsidian brain) ────────────────────────────────────────────────────

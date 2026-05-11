@@ -9,6 +9,49 @@ export type ProviderKeySource =
   | "ANTHROPIC_API_KEY"
   | "XAI_API_KEY";
 
+export interface RuntimePersonaSpeechStyle {
+  sentenceStructure: string;
+  formality: "very_formal" | "formal" | "casual" | "very_casual" | "mixed";
+  favoriteWords: string[];
+  avoidWords: string[];
+  commonMetaphors: string[];
+  rhythm: string;
+}
+
+export interface RuntimePersonaTone {
+  confidence: number;
+  humorStyle: string;
+  aggression: number;
+  emotionalFlavor: string;
+  posture: string;
+}
+
+export interface RuntimePersonaProfile {
+  name: string;
+  coreIdentity: string;
+  background: string;
+  selfImage: string;
+  speechStyle: RuntimePersonaSpeechStyle;
+  tone: RuntimePersonaTone;
+  catchphrases: string[];
+  verbalTics: string[];
+  thinkingStyle: string;
+  decisionFramework: string;
+  neverDo: string[];
+  alwaysDo: string[];
+  strength: number;
+  modifier?: string;
+  /** Verbatim slice of user's persona request for surface fidelity (optional). */
+  generationSourceHint?: string;
+}
+
+export interface RuntimePersonaPreferences {
+  bootstrapCompleted?: boolean;
+  sourcePrompt?: string;
+  activeProfile?: RuntimePersonaProfile | null;
+  updatedAt?: number;
+}
+
 export interface RuntimePreferences {
   version: 1;
   provider?: {
@@ -26,6 +69,7 @@ export interface RuntimePreferences {
     transient5xxMaxRetries?: number;
     retryMaxDelayMs?: number;
   };
+  persona?: RuntimePersonaPreferences;
   updatedAt: number;
 }
 

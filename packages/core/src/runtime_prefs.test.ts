@@ -58,3 +58,68 @@ test("runtime prefs loader ignores invalid version payload", async () => {
   await rm(dir, { recursive: true, force: true });
 });
 
+test("runtime prefs persist persona bootstrap state and profile", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "liminal-prefs-"));
+  const prefs: RuntimePreferences = {
+    version: 1,
+    persona: {
+      bootstrapCompleted: true,
+      sourcePrompt: "Like JARVIS with terse engineering focus",
+      activeProfile: {
+        name: "Jarvis-Style",
+        coreIdentity: "A precise technical advisor with dry confidence.",
+        background: "Built for operational clarity under pressure.",
+        selfImage: "Calm, exact, and quietly assertive.",
+        speechStyle: {
+          sentenceStructure: "Short lead, then direct details.",
+          formality: "formal",
+          favoriteWords: ["precisely", "noted"],
+          avoidWords: ["happy to help"],
+          commonMetaphors: ["control surface"],
+          rhythm: "Measured with crisp endings.",
+        },
+        tone: {
+          confidence: 8,
+          humorStyle: "dry understatement",
+          aggression: 2,
+          emotionalFlavor: "calm steel",
+          posture: "Loyal advisor who warns early.",
+        },
+        catchphrases: ["If I may.", "Recommendation follows."],
+        verbalTics: ["Leads with one framing line before detail."],
+        thinkingStyle: "Prioritizes failure modes before elegance.",
+        decisionFramework: "Choose the safest effective path first.",
+        neverDo: ["Use asterisk actions (*does thing*)"],
+        alwaysDo: ["Complete the task accurately regardless of persona strength"],
+        strength: 8,
+      },
+      updatedAt: Date.now(),
+    },
+    updatedAt: Date.now(),
+  };
+  await saveRuntimePreferences(prefs, dir);
+  const loaded = await loadRuntimePreferences(dir);
+  assert.equal(loaded?.persona?.bootstrapCompleted, true);
+  assert.equal(loaded?.persona?.activeProfile?.name, "Jarvis-Style");
+  assert.equal(loaded?.persona?.activeProfile?.speechStyle.formality, "formal");
+  await rm(dir, { recursive: true, force: true });
+});
+
+test("runtime prefs preserve cleared persona profile marker", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "liminal-prefs-"));
+  const prefs: RuntimePreferences = {
+    version: 1,
+    persona: {
+      bootstrapCompleted: true,
+      sourcePrompt: "default",
+      activeProfile: null,
+      updatedAt: Date.now(),
+    },
+    updatedAt: Date.now(),
+  };
+  await saveRuntimePreferences(prefs, dir);
+  const loaded = await loadRuntimePreferences(dir);
+  assert.equal(loaded?.persona?.activeProfile, null);
+  await rm(dir, { recursive: true, force: true });
+});
+

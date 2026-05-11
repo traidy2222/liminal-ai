@@ -33,7 +33,7 @@ import { bumpRuleHits, getRuleHitCounts } from "./rule_stats.js";
 import { writeYieldSnapshot } from "./session_event_log.js";
 import { SharedMemoryBus } from "./shared_memory_bus.js";
 import { resolveProviderConfig } from "./provider_config.js";
-import type { RuntimePreferences } from "./runtime_prefs.js";
+import type { RuntimePreferences, RuntimePersonaProfile } from "./runtime_prefs.js";
 import {
   markEpistemicPlanStepDone,
   mergeExtractedSubgoals,
@@ -48,9 +48,8 @@ import {
 } from "./execution_state.js";
 import {
   inferTurnInference,
+  neutralTurnInferenceResult,
   resolveMemoryPolicy,
-  evaluateOverInferenceSemantics,
-  isIdentityRecallLikePrompt,
   type TurnInferenceResult,
 } from "./intent_inference.js";
 
@@ -204,13 +203,30 @@ function normalizeRuntimePreferencePatch(patch: Partial<RuntimePreferences>): Pa
     }
     if (Object.keys(r).length > 0) out.runtime = r;
   }
+  if (patch.persona) {
+    const p: NonNullable<RuntimePreferences["persona"]> = {};
+    if (typeof patch.persona.bootstrapCompleted === "boolean") {
+      p.bootstrapCompleted = patch.persona.bootstrapCompleted;
+    }
+    if (typeof patch.persona.sourcePrompt === "string") {
+      p.sourcePrompt = patch.persona.sourcePrompt.slice(0, 2000);
+    }
+    if ("activeProfile" in patch.persona) {
+      p.activeProfile = patch.persona.activeProfile ?? null;
+    }
+    if (patch.persona.updatedAt != null && Number.isFinite(patch.persona.updatedAt)) {
+      p.updatedAt = Math.max(0, Math.floor(patch.persona.updatedAt));
+    }
+    if (Object.keys(p).length > 0) out.persona = p;
+  }
   return out;
 }
 
 function hasRuntimePreferenceChange(patch: Partial<RuntimePreferences>): boolean {
   return Boolean(
     (patch.provider && Object.keys(patch.provider).length > 0) ||
-      (patch.runtime && Object.keys(patch.runtime).length > 0)
+      (patch.runtime && Object.keys(patch.runtime).length > 0) ||
+      (patch.persona && Object.keys(patch.persona).length > 0)
   );
 }
 
@@ -378,28 +394,15 @@ function looksPathOrCodeHeavy(assistantText: string): boolean {
   return false;
 }
 
-function isSimpleIntrospectionPrompt(userMessage: string): boolean {
-  const t = userMessage.toLowerCase();
-  return (
-    /\b(what model|which model|what harness|which harness|who are you|what are you running|what runtime)\b/.test(t) &&
-    t.length < 220
-  );
-}
-
-function hasUncertaintyMarkers(text: string): boolean {
-  return /\b(might|may|seems|appears|possibly|tentative|uncertain|likely|could be|inference)\b/i.test(text);
-}
-
-function hasOverconfidentUserStanceClaims(text: string): boolean {
+function hasModelIdentityLeak(text: string): boolean {
   const t = text.toLowerCase();
   return (
-    /\b(you believe|you prefer|you are clearly|you definitely|you want|you support)\b/.test(t) &&
-    !hasUncertaintyMarkers(t)
+    /\b(i am|i'm)\s+owl\b/.test(t) ||
+    /\bowl\b.*\b(zoo|developed)\b/.test(t) ||
+    /\bbuilt by\s+zoo\b/.test(t) ||
+    /\bzoo company\b/.test(t) ||
+    /\bdeveloped by\s+zoo\b/.test(t)
   );
-}
-
-function isOverInferenceGuardEnabled(): boolean {
-  return process.env["AGENT_OVERINFERENCE_GUARD"] !== "0";
 }
 
 function normPathForMatch(p: string): string {
@@ -489,6 +492,34 @@ function isFreshnessSensitivePrompt(text: string): boolean {
   );
 }
 
+/** Harness-injected user turn: model greets on new session (no tools). */
+function buildSessionGreetingUserPrompt(persona?: PersonaConfig): string {
+  const name = persona?.name?.trim() || "Assistant";
+  const voice = persona?.voice?.trim();
+  const traits = persona?.traits?.filter(Boolean).join(", ");
+  const voiceBit = voice ? ` Voice / surface syntax (follow on the page, not as a label): ${voice}` : "";
+  const traitsBit = traits ? ` Tags: ${traits}.` : "";
+  return (
+    `[SESSION START — harness] The user just opened a new chat session.${voiceBit}${traitsBit} ` +
+    `You are "${name}". Write the opening 2–4 short sentences **in full voice**: same sentence mechanics, rhythm, and lexical habits ` +
+    `as your system identity — including when describing the session or workspace. ` +
+    `Welcome them, signal that context is loaded, invite what to work on. ` +
+    `Do not call tools. Do not use markdown headings. ` +
+    `Skip long capability inventories unless they ask.`
+  );
+}
+
+/** Harness-injected user turn: model asks for first-run persona preferences. */
+function buildPersonaBootstrapUserPrompt(persona?: PersonaConfig): string {
+  const name = persona?.name?.trim() || "Assistant";
+  return (
+    `[SESSION START — persona bootstrap] First run personalization. Ask the user (in 4-6 short lines) ` +
+    `how they want ${name} to sound. Include concrete prompts: tone, cadence, confidence, humor, and inspirations ` +
+    `(historical/fictional archetypes are allowed). Tell them they can type one paragraph and you will build it. ` +
+    `Do not call tools. Keep it warm and concise. No markdown headings.`
+  );
+}
+
 function hasFreshnessClaims(text: string): boolean {
   const t = text.toLowerCase();
   return /\b(latest|current|as of|today|recent|version|release|updated)\b/.test(t);
@@ -503,11 +534,6 @@ function hasLiveNowClaims(text: string): boolean {
     /\b(it'?s|it is|things are)\s+currently\b/.test(t) ||
     /\bcurrently\s+(happening|unfolding|breaking|developing|raining|snowing|live)\b/.test(t)
   );
-}
-
-function isDeckIntentPrompt(text: string): boolean {
-  const t = text.toLowerCase();
-  return /\b(deck|powerpoint|pptx|ppx|slides|slide deck)\b/.test(t);
 }
 
 function isVisionCentricPrompt(text: string): boolean {
@@ -791,12 +817,12 @@ export class AgentHarness {
   private finalizeSynthesisNudgeThisSend = false;
   /** One-shot nudge for recency-sensitive prompts before turn_end(ok). */
   private finalizeRecencyNudgeThisSend = false;
-  /** One-shot nudge for over-inference on user-stance readback. */
-  private finalizeInferenceNudgeThisSend = false;
   /** One-shot guard for deck-intent requiring pptx render path. */
   private finalizeDeckPipelineNudgeThisSend = false;
   /** One-shot guard for vision-centric asks without sidecar usage. */
   private finalizeVisionNudgeThisSend = false;
+  /** One-shot guard to rewrite identity replies when persona is active. */
+  private finalizePersonaIdentityNudgeThisSend = false;
   /** Max extra finalize replan loops allowed after a draft answer exists. */
   private finalizeRetryBudgetThisSend = 1;
   /** web_search query history for first-pass diversity + dedupe checks. */
@@ -807,6 +833,14 @@ export class AgentHarness {
   private changedFilesThisTurn = new Set<string>();
   /** Related files observed from lint diagnostics in this send. */
   private lintRelatedFilesThisTurn = new Set<string>();
+  /** When true, this send() is the opening session greeting (no tools, lighter finalize). */
+  private sessionGreetingThisSend = false;
+  /** After a successful session greeting, skip duplicate greets until reset(). */
+  private sessionGreetingSentThisHarness = false;
+  /** When true, this send() asks first-run persona bootstrap questions. */
+  private personaBootstrapPromptThisSend = false;
+  /** After sending first-run bootstrap prompt once, avoid repeats until reset(). */
+  private personaBootstrapPromptSentThisHarness = false;
 
   /** Active persona. Set via setPersona(); defaults to config.persona or unnamed default. */
   private currentPersona?: PersonaConfig;
@@ -846,7 +880,9 @@ export class AgentHarness {
       used.has("memory_query") ||
       used.has("recall_relevant") ||
       used.has("vault_search") ||
-      used.has("vault_read")
+      used.has("vault_read") ||
+      // web_research already runs a web pipeline; follow-up web_search is refinement, not cold web.
+      used.has("web_research")
     );
   }
 
@@ -1049,7 +1085,7 @@ export class AgentHarness {
       return {
         ok: false,
         reason:
-          'Vault-first policy: call memory_query/recall_relevant or vault_search/vault_read before web_search for knowledge tasks.',
+          'Vault-first policy: call memory_query/recall_relevant, vault_search/vault_read, or web_research before web_search for knowledge tasks.',
         severity: "med",
       };
     }
@@ -1185,6 +1221,32 @@ export class AgentHarness {
     return this.currentPersona ?? this.config.persona;
   }
 
+  /** Returns the latest runtime preferences snapshot (if any). */
+  getRuntimePreferences(): RuntimePreferences | null {
+    return this.runtimePreferences ? JSON.parse(JSON.stringify(this.runtimePreferences)) : null;
+  }
+
+  /**
+   * Apply a runtime preference patch and optionally persist it.
+   * Used by harness-scoped tools and UI bootstrap flows.
+   */
+  async patchRuntimePreferences(
+    patch: Partial<RuntimePreferences>,
+    options?: { persist?: boolean }
+  ): Promise<{ persisted: boolean; path?: string }> {
+    const normalized = normalizeRuntimePreferencePatch(patch);
+    this.applyRuntimePreferencePatch(normalized);
+    const shouldPersist = options?.persist !== false;
+    if (!shouldPersist || !this.config.persistRuntimePreferences || !this.runtimePreferences) {
+      return { persisted: false };
+    }
+    const out = await this.config.persistRuntimePreferences(this.runtimePreferences);
+    return {
+      persisted: true,
+      ...(typeof out === "string" && out.length > 0 ? { path: out } : {}),
+    };
+  }
+
   private rebuildClient(): void {
     this.client = new OpenAI({
       apiKey: this.config.openRouterApiKey,
@@ -1318,6 +1380,10 @@ export class AgentHarness {
       runtime: {
         ...(this.runtimePreferences?.runtime ?? {}),
         ...(patch.runtime ?? {}),
+      },
+      persona: {
+        ...(this.runtimePreferences?.persona ?? {}),
+        ...(patch.persona ?? {}),
       },
       updatedAt: Date.now(),
     };
@@ -1586,17 +1652,42 @@ export class AgentHarness {
     });
   }
 
-  async send(userMessage: string, options?: { freshContext?: boolean }): Promise<void> {
+  async send(
+    userMessage: string,
+    options?: { freshContext?: boolean; sessionGreeting?: boolean; personaBootstrapPrompt?: boolean }
+  ): Promise<void> {
     if (this.running) throw new Error("Agent is already processing a message");
     if (options?.freshContext === true && this.agentDepth === 0) {
       this.reset();
     }
+    const sessionGreeting = Boolean(options?.sessionGreeting);
+    const personaBootstrapPrompt = Boolean(options?.personaBootstrapPrompt);
+    if (sessionGreeting && (this.sessionGreetingSentThisHarness || this.agentDepth !== 0)) {
+      return;
+    }
+    if (personaBootstrapPrompt && (this.personaBootstrapPromptSentThisHarness || this.agentDepth !== 0)) {
+      return;
+    }
+    this.sessionGreetingThisSend = sessionGreeting;
+    this.personaBootstrapPromptThisSend = personaBootstrapPrompt;
     this.running = true;
+
+    const telemetryUserLabel = sessionGreeting
+      ? "(session greeting)"
+      : personaBootstrapPrompt
+      ? "(persona bootstrap prompt)"
+      : userMessage;
+    const conversationUserContent = sessionGreeting
+      ? buildSessionGreetingUserPrompt(this.getCurrentPersona())
+      : personaBootstrapPrompt
+      ? buildPersonaBootstrapUserPrompt(this.getCurrentPersona())
+      : userMessage;
+    const openingTurn = sessionGreeting || personaBootstrapPrompt;
 
     // Reset per-turn tracking state
     this.toolErrorCounts = new Map();
     this.toolsUsedThisTurn = [];
-    this.lastUserMessage = userMessage;
+    this.lastUserMessage = telemetryUserLabel;
     this.contextAlertFired60 = false;
     this.contextAlertFired85 = false;
     this.lastParallelToolBatchSize = 0;
@@ -1625,7 +1716,7 @@ export class AgentHarness {
     this.finalizeCiteNudgeThisSend = false;
     this.finalizeSynthesisNudgeThisSend = false;
     this.finalizeRecencyNudgeThisSend = false;
-    this.finalizeInferenceNudgeThisSend = false;
+    this.finalizePersonaIdentityNudgeThisSend = false;
     this.finalizeRetryBudgetThisSend = Math.max(
       0,
       Math.min(2, parseInt(process.env["AGENT_FINALIZE_RETRY_BUDGET"] ?? "1", 10) || 1)
@@ -1637,25 +1728,34 @@ export class AgentHarness {
     this.changedFilesThisTurn = new Set();
     this.lintRelatedFilesThisTurn = new Set();
     this.turnInference = null;
-    await this.maybeHandleRuntimePreferenceIntent(userMessage);
+    await this.maybeHandleRuntimePreferenceIntent(telemetryUserLabel);
     try {
-      this.turnInference = await inferTurnInference(this.client, this.config.model, userMessage);
+      if (openingTurn) {
+        this.turnInference = {
+          intent: "introspection",
+          stancePrompt: false,
+          overInferenceRisk: false,
+          identityQuery: false,
+          personaIdentityPrompt: false,
+          runtimeIdentityPrompt: false,
+          deckIntent: false,
+          freshnessSensitive: false,
+          skipHarnessSecondaryPasses: true,
+          confidence: 1,
+          source: "default",
+          reason: "session_greeting",
+        };
+      } else {
+        this.turnInference = await inferTurnInference(this.client, this.config.model, userMessage);
+      }
     } catch {
-      this.turnInference = {
-        intent: "knowledge",
-        stancePrompt: false,
-        overInferenceRisk: false,
-        identityQuery: isIdentityRecallLikePrompt(userMessage),
-        deckIntent: false,
-        freshnessSensitive: false,
-        confidence: 0.5,
-        source: "fallback_regex",
-        reason: "inference_exception_fallback",
-      };
+      this.turnInference = neutralTurnInferenceResult("inference_exception_fallback", {
+        fallbackReason: "inferTurnInference threw",
+      });
     }
 
     if (this.config.workingStateEnabled !== false) {
-      this.context.initEpistemicState(userMessage);
+      this.context.initEpistemicState(telemetryUserLabel);
       const b0 = this.context.getContextBudgetAdvice();
       this.context.patchEpistemicState({
         goal: userMessage.slice(0, 2000),
@@ -1667,7 +1767,7 @@ export class AgentHarness {
         harnessNotes: buildToolAwarenessSnapshot(this.registry, this.toolsUsedThisTurn),
       });
     }
-    this.executionState = createDefaultExecutionState(userMessage);
+    this.executionState = createDefaultExecutionState(telemetryUserLabel);
     this.emitter.emit("execution_state", {
       missionId: this.executionState.mission?.id,
       activeContractId: this.executionState.activeContractId,
@@ -1676,7 +1776,7 @@ export class AgentHarness {
       contractCount: this.executionState.contracts.length,
     });
 
-    if (process.env["AGENT_QUERY_REWRITE"] === "1") {
+    if (process.env["AGENT_QUERY_REWRITE"] === "1" && !openingTurn) {
       try {
         this.recallRewriteThisSend = await rewriteQueryForRecall(
           userMessage,
@@ -1690,7 +1790,7 @@ export class AgentHarness {
 
     try {
       this.emitter.emit("send_start", {
-        userMessage,
+        userMessage: telemetryUserLabel,
         agentDepth: this.agentDepth,
       });
 
@@ -1700,7 +1800,7 @@ export class AgentHarness {
         this.worldContextInjected = true;
         const worldCtx = await buildWorldContextMessage({
           ...this.config.worldContext,
-          firstUserMessage: userMessage,
+          firstUserMessage: telemetryUserLabel,
         });
         if (worldCtx) {
           this.context.append({ role: "user", content: worldCtx });
@@ -1728,14 +1828,34 @@ export class AgentHarness {
         }
       }
 
-      this.context.append({ role: "user", content: userMessage });
-      this.context.append({
-        role: "user",
-        content:
-          "[SYSTEM NOTE] Capability awareness preface (non-forcing): use this to know all available families/tools, " +
-          "then choose the minimal family activation only when needed.\n" +
-          buildToolCapabilityManifest(this.registry),
-      });
+      this.context.append({ role: "user", content: conversationUserContent });
+
+      // Lazy mode: image attachments are text (data_url in ```attached_images```), not native
+      // multimodal input—expose vision_analyze/upload_image before the first model round.
+      if (
+        !openingTurn &&
+        this.registry.isLazyToolLoading() &&
+        /\`\`\`attached_images\b/.test(conversationUserContent)
+      ) {
+        const visionToolNames = (["vision_analyze", "upload_image"] as const).filter((n) =>
+          this.registry.has(n)
+        );
+        if (visionToolNames.length > 0) {
+          this.registry.activate(visionToolNames);
+          this.context.refreshProtocolDynamic(this.registry.getActiveToolNames());
+          this.refreshToolAwareness("vision_auto_activate_attachments");
+        }
+      }
+
+      if (!openingTurn) {
+        this.context.append({
+          role: "user",
+          content:
+            "[SYSTEM NOTE] Capability awareness preface (non-forcing): use this to know all available families/tools, " +
+            "then choose the minimal family activation only when needed.\n" +
+            buildToolCapabilityManifest(this.registry),
+        });
+      }
 
       // Send timeout is opt-in. By default we do not hard-abort long generations.
       // Set AGENT_SEND_TIMEOUT_MS to a positive value to enforce a wall-clock abort.
@@ -1804,6 +1924,12 @@ export class AgentHarness {
           }
         }
       }
+      if (sessionGreeting) {
+        this.sessionGreetingSentThisHarness = true;
+      }
+      if (personaBootstrapPrompt) {
+        this.personaBootstrapPromptSentThisHarness = true;
+      }
     } catch (err) {
       const msg = describeError(err);
       this.emitter.emit("error", {
@@ -1814,8 +1940,38 @@ export class AgentHarness {
       if (!this.turnEndEmittedThisSend) {
         this.emitTurnEnd("error");
       }
+      this.sessionGreetingThisSend = false;
+      this.personaBootstrapPromptThisSend = false;
       this.running = false;
     }
+  }
+
+  /**
+   * Opening turn: model greets the user (persona-aware, no tools).
+   * No-op when AGENT_SESSION_GREET=0, already sent for this harness, or depth > 0.
+   */
+  async sendSessionGreeting(): Promise<void> {
+    if (process.env["AGENT_SESSION_GREET"] === "0") return;
+    await this.send("", { sessionGreeting: true });
+  }
+
+  /** Returns true when runtime preferences show first-run persona bootstrap complete. */
+  isPersonaBootstrapCompleted(): boolean {
+    return this.runtimePreferences?.persona?.bootstrapCompleted === true;
+  }
+
+  getPersistedPersonaProfile(): RuntimePersonaProfile | undefined {
+    return this.runtimePreferences?.persona?.activeProfile ?? undefined;
+  }
+
+  /**
+   * Opening turn: model asks the user how they want the assistant to sound.
+   * No-op when disabled, already completed, already prompted, or depth > 0.
+   */
+  async sendPersonaBootstrapPrompt(): Promise<void> {
+    if (process.env["AGENT_PERSONA_BOOTSTRAP"] === "0") return;
+    if (this.isPersonaBootstrapCompleted()) return;
+    await this.send("", { personaBootstrapPrompt: true });
   }
 
   /** Returns the last assistant text message (used by parent to extract subtask result). */
@@ -2035,6 +2191,7 @@ export class AgentHarness {
   private async maybePersistEpisodeTurn(): Promise<void> {
     // Explicit opt-in only: avoid silent auto-capture into vault.
     if (process.env["AGENT_MEMORY_EPISODE"] !== "1") return;
+    if (this.sessionGreetingThisSend || this.personaBootstrapPromptThisSend) return;
     if (this.agentDepth > 0) return;
     if (!process.env["AGENT_VAULT_PATH"]?.trim()) return;
     if (!this.registry.has("vault_write")) return;
@@ -2271,7 +2428,9 @@ export class AgentHarness {
     if (
       round === 1 &&
       process.env["AGENT_RULE_RECALL"] !== "0" &&
-      !this.ruleRecallInjectedThisSend
+      !this.ruleRecallInjectedThisSend &&
+      !this.sessionGreetingThisSend &&
+      !this.personaBootstrapPromptThisSend
     ) {
       this.ruleRecallInjectedThisSend = true;
       // Adaptive injection: use rule stats to prioritize chronically violated rules.
@@ -2338,7 +2497,9 @@ export class AgentHarness {
 
     const recallEvery = parseInt(process.env["AGENT_RECALL_EVERY_N"] ?? "2", 10);
     const intent = this.turnInference?.intent ?? "knowledge";
-    const memoryPolicy = resolveMemoryPolicy(intent, { userMessage: this.lastUserMessage });
+    const memoryPolicy = resolveMemoryPolicy(intent, {
+      identityQuery: this.turnInference?.identityQuery === true,
+    });
     const inferenceThreshold = resolveIntentConfidenceThreshold();
     if (this.agentDepth === 0) {
       this.emitter.emit("memory_retrieval_policy", {
@@ -2362,6 +2523,8 @@ export class AgentHarness {
     if (
       shouldPrimeThisRound &&
       this.agentDepth === 0 &&
+      !this.sessionGreetingThisSend &&
+      !this.personaBootstrapPromptThisSend &&
       memoryPolicy.allowAutoRecall &&
       (this.registry.has("recall_relevant") || this.registry.has("memory_query"))
     ) {
@@ -2370,8 +2533,7 @@ export class AgentHarness {
         const rw = this.recallRewriteThisSend;
         const sub =
           rw?.subQueries?.filter((q) => q.trim().length >= 4) ?? [];
-        const identityLike =
-          this.turnInference?.identityQuery ?? isIdentityRecallLikePrompt(this.lastUserMessage);
+        const identityLike = this.turnInference?.identityQuery === true;
         // Identity queries get purpose-built BM25 seeds first — the raw question
         // ("do you know my name?") has zero lexical overlap with stored name facts.
         const queries =
@@ -2503,7 +2665,10 @@ export class AgentHarness {
     }
 
     const messages = await this.context.buildMessages();
-    const tools = this.registry.toOpenAIFormat();
+    const tools =
+      this.sessionGreetingThisSend || this.personaBootstrapPromptThisSend
+        ? []
+        : this.registry.toOpenAIFormat();
     const accumulator = new StreamAccumulator();
     // PASTE: speculative tool dispatch — start safe tool calls while stream is still running.
     const pasteEnabled = process.env["AGENT_PASTE"] === "1";
@@ -2640,9 +2805,15 @@ export class AgentHarness {
       toolCalls
     );
 
+    const skipStreamContinuationsForIntro =
+      toolCalls.length === 0 &&
+      Boolean(this.turnInference?.skipHarnessSecondaryPasses) &&
+      !Boolean(this.turnInference?.runtimeIdentityPrompt);
+
     // If stream ended without an explicit finish reason, treat as potentially incomplete
     // and request continuation before running finalization/verification logic.
     if (
+      !skipStreamContinuationsForIntro &&
       finishReason == null &&
       toolCalls.length === 0 &&
       accumulatedText.trim().length > 0 &&
@@ -2661,6 +2832,7 @@ export class AgentHarness {
     }
 
     if (
+      !skipStreamContinuationsForIntro &&
       finishReason === "length" &&
       toolCalls.length === 0 &&
       this.lengthResumeRemaining > 0
@@ -2678,6 +2850,7 @@ export class AgentHarness {
     }
 
     if (
+      !skipStreamContinuationsForIntro &&
       toolCalls.length === 0 &&
       this.pseudoToolMarkupRetryRemaining > 0 &&
       hasPseudoToolMarkup(accumulator.accumulatedText)
@@ -3028,8 +3201,9 @@ export class AgentHarness {
             role: "user",
             content:
               "[SYSTEM NOTE] Large file read was truncated/distilled. Do NOT call full read_file again on the same path. " +
-              "Switch to targeted access: read_file_chunked, read_file with offset/limit, or file_metadata for integrity checks; " +
-              "then run verification tools (run_lint/run_tests/browser_open include_console=true) as appropriate.",
+              "Switch to targeted access: read_file_chunked, read_file with offset/limit, or file_metadata for integrity checks. " +
+              "If this file was just created with write_file and already verified on disk, one targeted slice is enough—reply to the user (R-WRITE-ONE-VERIFY). " +
+              "For typed project code in a repo, run_lint/run_tests may still apply (R-TYPECHECK-VERIFY); skip ad-hoc shell parsers for static HTML/JS demos unless the user asked.",
           });
         }
       }
@@ -3201,10 +3375,21 @@ export class AgentHarness {
         this.agentDepth === 0 &&
         this.registry.has("verify_result") &&
         (distinctToolCount >= criticMinTools || looksPathOrCodeHeavy(assistantText));
+      const inf = this.turnInference;
       const skipCriticForSimpleIntrospection =
         distinctToolCount <= 1 &&
         this.toolsUsedThisTurn.filter((n) => n !== "think" && n !== "plan").length === 0 &&
-        isSimpleIntrospectionPrompt(this.lastUserMessage);
+        Boolean(
+          inf?.personaIdentityPrompt || inf?.skipHarnessSecondaryPasses || inf?.runtimeIdentityPrompt
+        );
+      const casualAssistantIdentity =
+        Boolean(inf?.personaIdentityPrompt || inf?.skipHarnessSecondaryPasses) &&
+        !Boolean(inf?.runtimeIdentityPrompt);
+      /** No extra finalize ReAct loops (critic/cite/synthesis/recency/over-inference…) for simple identity asks. */
+      const skipPostAssistantFinalizeExtensions =
+        !this.sessionGreetingThisSend &&
+        !this.personaBootstrapPromptThisSend &&
+        casualAssistantIdentity;
       const runHeuristicCritic =
         process.env["AGENT_CRITIC"] === "1" &&
         !this.criticConsumedThisSend &&
@@ -3213,7 +3398,13 @@ export class AgentHarness {
         this.registry.has("verify_result") &&
         shouldRunCriticPass(assistantText);
 
-      if ((runForcedCritic || runHeuristicCritic) && !skipCriticForSimpleIntrospection) {
+      if (
+        !this.sessionGreetingThisSend &&
+        !this.personaBootstrapPromptThisSend &&
+        (runForcedCritic || runHeuristicCritic) &&
+        !skipCriticForSimpleIntrospection &&
+        !skipPostAssistantFinalizeExtensions
+      ) {
         this.criticConsumedThisSend = true;
         try {
           const criticTool =
@@ -3248,10 +3439,43 @@ export class AgentHarness {
         }
       }
 
+      const activePersona = this.getCurrentPersona();
+      const personaIdentityNeedsRewrite =
+        !this.sessionGreetingThisSend &&
+        !this.personaBootstrapPromptThisSend &&
+        !!activePersona &&
+        hasModelIdentityLeak(assistantText) &&
+        !Boolean(this.turnInference?.runtimeIdentityPrompt) &&
+        (Boolean(this.turnInference?.personaIdentityPrompt) ||
+          Boolean(this.turnInference?.skipHarnessSecondaryPasses));
+      if (personaIdentityNeedsRewrite && !this.finalizePersonaIdentityNudgeThisSend) {
+        this.finalizePersonaIdentityNudgeThisSend = true;
+        const personaName = activePersona.name?.trim() || "the active persona";
+        this.context.appendMessage({
+          role: "user",
+          content:
+            `[PERSONA IDENTITY CHECK] Persona "${personaName}" is active. Replace your last reply with one short in-character answer only ` +
+            `(who you are in that voice, ≤6 sentences). ` +
+            `Do not mention model vendors, OWL/ZOO, "system notes", "inference checks", or prior drafts. ` +
+            `Do not claim model-family/vendor identity unless the user explicitly asked for model/runtime details.`,
+        });
+        await this.runReActLoop(round);
+        return;
+      }
+
+      if (this.sessionGreetingThisSend || this.personaBootstrapPromptThisSend) {
+        this.emitter.emit("recency_check", {
+          required: false,
+          passed: true,
+          reason: this.sessionGreetingThisSend ? "session_greeting" : "persona_bootstrap_prompt",
+          attemptedRecovery: false,
+        });
+      } else {
       const trimmedFinal = assistantText.trim();
       const doneish =
         /^(OK|DONE)\b/i.test(trimmedFinal) || /\b(done|ok)\b\s*[.!]?\s*$/i.test(trimmedFinal);
       if (
+        !skipPostAssistantFinalizeExtensions &&
         process.env["AGENT_FINALIZE_CITE"] !== "0" &&
         doneish &&
         this.filesReadThisTurn.length > 0 &&
@@ -3270,6 +3494,7 @@ export class AgentHarness {
       }
 
       const isResearchTask =
+        !skipPostAssistantFinalizeExtensions &&
         this.isLikelyKnowledgeTask() &&
         this.toolsUsedThisTurn.includes("web_search") &&
         !this.finalizeSynthesisNudgeThisSend;
@@ -3315,7 +3540,8 @@ export class AgentHarness {
       }
 
       if (
-        (this.turnInference?.deckIntent ?? isDeckIntentPrompt(this.lastUserMessage)) &&
+        !skipPostAssistantFinalizeExtensions &&
+        Boolean(this.turnInference?.deckIntent) &&
         !this.toolsUsedThisTurn.includes("doc_render_pptx") &&
         !this.finalizeDeckPipelineNudgeThisSend
       ) {
@@ -3332,6 +3558,7 @@ export class AgentHarness {
       }
 
       if (
+        !skipPostAssistantFinalizeExtensions &&
         isVisionCentricPrompt(this.lastUserMessage) &&
         !this.toolsUsedThisTurn.includes("vision_analyze") &&
         !this.finalizeVisionNudgeThisSend
@@ -3347,56 +3574,20 @@ export class AgentHarness {
         return;
       }
 
-      const stancePrompt =
-        isOverInferenceGuardEnabled() &&
+      const wouldHaveBeenOverInferenceStance =
+        !skipPostAssistantFinalizeExtensions &&
+        process.env["AGENT_OVERINFERENCE_GUARD"] !== "0" &&
         (this.turnInference?.stancePrompt || this.turnInference?.overInferenceRisk || false);
-      const heuristicRisk = stancePrompt && hasOverconfidentUserStanceClaims(assistantText);
-      let llmRisk = false;
-      let llmCheckConfidence: number | undefined;
-      let llmFixHint: string | undefined;
-      let llmCheckReason: string | undefined;
-      if (stancePrompt) {
-        const semantic = await evaluateOverInferenceSemantics(
-          this.client,
-          this.config.model,
-          this.lastUserMessage,
-          assistantText
-        );
-        llmRisk = !semantic.passed;
-        llmCheckConfidence = semantic.confidence;
-        llmFixHint = semantic.fixHint;
-        llmCheckReason = semantic.reason;
-      }
-      const overInferenceRisk = heuristicRisk || llmRisk;
       this.emitter.emit("over_inference_check", {
-        required: stancePrompt,
-        passed: !overInferenceRisk,
-        reason: !stancePrompt
-          ? "not_user_stance_prompt"
-          : overInferenceRisk && llmRisk
-          ? `semantic_over_inference:${llmCheckReason ?? "failed"}`
-          : overInferenceRisk
-          ? "heuristic_overconfident_user_stance_without_uncertainty"
-          : "user_stance_framed_with_uncertainty",
-        attemptedRecovery: overInferenceRisk,
-        source: stancePrompt ? (llmRisk ? "llm" : heuristicRisk ? "heuristic" : "llm") : "none",
-        confidence: llmCheckConfidence,
+        required: wouldHaveBeenOverInferenceStance,
+        passed: true,
+        reason: wouldHaveBeenOverInferenceStance
+          ? "finalize_over_inference_rewrite_removed"
+          : "not_user_stance_prompt",
+        attemptedRecovery: false,
+        source: "none",
         threshold: resolveIntentConfidenceThreshold(),
-        fixHint: llmFixHint,
       });
-      if (overInferenceRisk && !this.finalizeInferenceNudgeThisSend) {
-        this.finalizeInferenceNudgeThisSend = true;
-        this.context.appendMessage({
-          role: "user",
-          content:
-            "[OVER-INFERENCE CHECK] Rewrite using this structure: " +
-            "(1) What you explicitly said, (2) Possible inference (tentative + confidence low/med/high), " +
-            "(3) Open uncertainty. Do not treat user questions as confirmed beliefs. " +
-            (llmFixHint ? `Fix hint: ${llmFixHint}` : ""),
-        });
-        await this.runReActLoop(round);
-        return;
-      }
 
       const finalizeIntent = this.turnInference?.intent ?? "knowledge";
       const userFreshnessExplicit = isFreshnessSensitivePrompt(this.lastUserMessage);
@@ -3426,7 +3617,7 @@ export class AgentHarness {
             : "missing_as_of_or_recent_authoritative_evidence",
           attemptedRecovery: !recencyPassed,
         });
-        if (!recencyPassed && !this.finalizeRecencyNudgeThisSend) {
+        if (!recencyPassed && !this.finalizeRecencyNudgeThisSend && !skipPostAssistantFinalizeExtensions) {
           if (this.finalizeRetryBudgetThisSend > 0 && !substantiveDraftLikelyComplete) {
             this.finalizeRetryBudgetThisSend--;
             this.finalizeRecencyNudgeThisSend = true;
@@ -3449,6 +3640,7 @@ export class AgentHarness {
           reason: "not_freshness_sensitive",
           attemptedRecovery: false,
         });
+      }
       }
 
       await this.maybePersistEpisodeTurn();
@@ -3585,5 +3777,7 @@ export class AgentHarness {
     this.context.clear();
     this.roundCount = 0;
     this.worldContextInjected = false;
+    this.sessionGreetingSentThisHarness = false;
+    this.personaBootstrapPromptSentThisHarness = false;
   }
 }

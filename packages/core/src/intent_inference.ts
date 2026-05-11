@@ -18,12 +18,22 @@ export interface TurnInferenceResult {
   overInferenceRisk: boolean;
   /** User is asking about their name / who they are / what to call them. */
   identityQuery: boolean;
+  /** User asks for assistant persona/identity ("who are you", "your persona"). */
+  personaIdentityPrompt: boolean;
+  /** User explicitly asks model/runtime/provider details. */
+  runtimeIdentityPrompt: boolean;
   /** User wants a presentation, slide deck, or similar visual document. */
   deckIntent: boolean;
   /** User needs current, live, or recent information. */
   freshnessSensitive: boolean;
+  /**
+   * User mainly wants a short assistant self-intro, persona surface, or compact capability
+   * overview — skip harness [CONTINUE] / finalize extension chains unless they asked for
+   * substantive work.
+   */
+  skipHarnessSecondaryPasses: boolean;
   confidence: number;
-  source: "llm" | "fallback_regex";
+  source: "llm" | "default";
   reason: string;
   fallbackReason?: string;
 }
@@ -36,53 +46,26 @@ export interface OverInferenceSemanticResult {
   fixHint?: string;
 }
 
-function classifyTurnIntentFallback(text: string): TurnIntentClass {
-  const t = text.toLowerCase();
-  if (
-    /\b(can you|what can you do|who are you|what tools|what tool|manage yourself|manage the harness|self-manage|self manage|capabilit)/.test(
-      t
-    )
-  ) {
-    return "introspection";
-  }
-  if (
-    /\b(build|compile|typecheck|test|lint|npm run|fix bug|debug|refactor|implement|code|patch|edit|file)\b/.test(
-      t
-    )
-  ) {
-    return "coding";
-  }
-  if (/\b(run|execute|deploy|start|launch|restart|kill process|shell|terminal)\b/.test(t)) {
-    return "execution";
-  }
-  return "knowledge";
-}
-
-function isUserStancePromptFallback(text: string): boolean {
-  const t = text.toLowerCase();
-  if (isIdentityRecallPrompt(text)) return false;
-  return /\b(my opinions?|what do i think|what are my views|read me back|summari[sz]e me|my stance|about me)\b/.test(
-    t
-  );
-}
-
-function isIdentityRecallPrompt(text: string): boolean {
-  const t = text.toLowerCase();
-  return /\b(my real name|my name|what'?s my name|what is my name|do you know my name|who am i|what should you call me|call me|address me|my first name|my full name|have you stored my name|remember my name|know my name)\b/.test(
-    t
-  );
-}
-
-function isDeckIntentFallback(text: string): boolean {
-  return /\b(deck|powerpoint|pptx|ppx|slides|slide deck|presentation|keynote|slideshow|slide show)\b/i.test(text);
-}
-
-function isFreshnessSensitiveFallback(text: string): boolean {
-  return /\b(latest|current|today|recent|update|version|release|changelog|what'?s new|state of|newest|up.?to.?date|right now|live|happening now|at the moment|cutting.?edge)\b/i.test(text);
-}
-
-export function isIdentityRecallLikePrompt(text: string): boolean {
-  return isIdentityRecallPrompt(text);
+/** Deterministic defaults when inference is off, the LLM call fails, or send() catches. */
+export function neutralTurnInferenceResult(
+  reason: string,
+  extra?: Partial<Omit<TurnInferenceResult, "source" | "reason">> & { fallbackReason?: string }
+): TurnInferenceResult {
+  return {
+    intent: "knowledge",
+    stancePrompt: false,
+    overInferenceRisk: false,
+    identityQuery: false,
+    personaIdentityPrompt: false,
+    runtimeIdentityPrompt: false,
+    deckIntent: false,
+    freshnessSensitive: false,
+    skipHarnessSecondaryPasses: false,
+    confidence: 0.5,
+    ...(extra ?? {}),
+    source: "default",
+    reason,
+  };
 }
 
 function parseIntent(value: unknown): TurnIntentClass | null {
@@ -103,110 +86,104 @@ export function isIntentInferenceEnabled(): boolean {
   return process.env["AGENT_INTENT_INFERENCE"] !== "0";
 }
 
+function buildInferenceFromParsed(
+  parsed: Record<string, unknown>,
+  confidence: number,
+  source: "llm" | "default",
+  reason: string,
+  fallbackReason?: string
+): TurnInferenceResult {
+  const identityQuery = Boolean(parsed["identityQuery"]);
+  const intentRaw = parseIntent(parsed["intent"]);
+  const intent: TurnIntentClass = identityQuery ? "knowledge" : intentRaw ?? "knowledge";
+
+  return {
+    intent,
+    stancePrompt: identityQuery ? false : Boolean(parsed["stancePrompt"]),
+    overInferenceRisk: identityQuery ? false : Boolean(parsed["overInferenceRisk"]),
+    identityQuery,
+    personaIdentityPrompt: Boolean(parsed["personaIdentityPrompt"]),
+    runtimeIdentityPrompt: Boolean(parsed["runtimeIdentityPrompt"]),
+    deckIntent: Boolean(parsed["deckIntent"]),
+    freshnessSensitive: Boolean(parsed["freshnessSensitive"]),
+    skipHarnessSecondaryPasses: Boolean(parsed["skipHarnessSecondaryPasses"]),
+    confidence,
+    source,
+    reason,
+    fallbackReason,
+  };
+}
+
+const INFERENCE_SYSTEM_PROMPT =
+  "Classify the user message for harness policy. Return JSON only with exactly these keys: " +
+  "{intent:'introspection|knowledge|coding|execution',stancePrompt:boolean,overInferenceRisk:boolean," +
+  "identityQuery:boolean,personaIdentityPrompt:boolean,runtimeIdentityPrompt:boolean,deckIntent:boolean," +
+  "freshnessSensitive:boolean,skipHarnessSecondaryPasses:boolean,confidence:number,reason:string}. " +
+  "identityQuery=true when the user asks about THEIR name, what to call them, who they are, or whether you know/remember their name. " +
+  "personaIdentityPrompt=true when they ask for YOUR persona/identity (who you are in character, describe yourself, your personality) — " +
+  "including casual 'who are you' to the assistant when they want a persona answer, not a vendor stack dump. " +
+  "runtimeIdentityPrompt=true ONLY when they explicitly want base LLM/provider/model slug/API/stack facts " +
+  "(e.g. which model, which provider, OpenRouter slug). If ambiguous, set runtimeIdentityPrompt=false. " +
+  "skipHarnessSecondaryPasses=true when the message is mainly a short opener for assistant self-intro, persona surface, or compact " +
+  "capabilities overview (who you are / what you can do as an intro) without a substantive multi-step task; false when they want real work, " +
+  "research, code, edits, or long-form deliverables. " +
+  "deckIntent=true for presentations, slides, decks, slideshows. " +
+  "freshnessSensitive=true when they need current/live/recent/up-to-date information. " +
+  "overInferenceRisk=true when the request invites speculative user-belief attribution. " +
+  "confidence is 0–1 for your overall classification certainty.";
+
 export async function inferTurnInference(
   client: OpenAI,
   model: string,
   userMessage: string
 ): Promise<TurnInferenceResult> {
-  const fallbackIntent = classifyTurnIntentFallback(userMessage);
-  const fallbackStance = isUserStancePromptFallback(userMessage);
-  const fallbackIdentityQuery = isIdentityRecallPrompt(userMessage);
-  const fallbackDeckIntent = isDeckIntentFallback(userMessage);
-  const fallbackFreshnessSensitive = isFreshnessSensitiveFallback(userMessage);
-
   if (!isIntentInferenceEnabled()) {
-    return {
-      intent: fallbackIdentityQuery ? "knowledge" : fallbackIntent,
-      stancePrompt: fallbackIdentityQuery ? false : fallbackStance,
-      overInferenceRisk: false,
-      identityQuery: fallbackIdentityQuery,
-      deckIntent: fallbackDeckIntent,
-      freshnessSensitive: fallbackFreshnessSensitive,
-      confidence: 0.51,
-      source: "fallback_regex",
-      reason: fallbackIdentityQuery ? "identity_recall_fast_path" : "intent_inference_disabled",
+    return neutralTurnInferenceResult("intent_inference_disabled", {
       fallbackReason: "AGENT_INTENT_INFERENCE=0",
-    };
+      confidence: 0.51,
+    });
   }
 
   const jr = await completeChatJson(client, {
     model: getFastModelSlug(model),
     messages: [
-      {
-        role: "system",
-        content:
-          "Classify the user message for harness policy. " +
-          "Return JSON only: {intent:'introspection|knowledge|coding|execution',stancePrompt:boolean,overInferenceRisk:boolean," +
-          "identityQuery:boolean,deckIntent:boolean,freshnessSensitive:boolean,confidence:number,reason:string}. " +
-          "identityQuery=true when user asks about their name, what to call them, who they are, or whether you know/remember their name. " +
-          "deckIntent=true when user wants a presentation, slides, deck, slide show, or similar visual document. " +
-          "freshnessSensitive=true when user needs current, live, recent, or up-to-date information. " +
-          "overInferenceRisk=true when the request invites speculative user-belief attribution.",
-      },
+      { role: "system", content: INFERENCE_SYSTEM_PROMPT },
       { role: "user", content: userMessage.slice(0, 2000) },
     ],
-    maxTokens: 260,
+    maxTokens: 280,
     temperature: 0,
   });
+
   if (!jr.ok || typeof jr.parsed !== "object" || jr.parsed == null) {
-    return {
-      intent: fallbackIdentityQuery ? "knowledge" : fallbackIntent,
-      stancePrompt: fallbackIdentityQuery ? false : fallbackStance,
-      overInferenceRisk: false,
-      identityQuery: fallbackIdentityQuery,
-      deckIntent: fallbackDeckIntent,
-      freshnessSensitive: fallbackFreshnessSensitive,
-      confidence: 0.5,
-      source: "fallback_regex",
-      reason: fallbackIdentityQuery ? "identity_recall_fast_path" : "llm_inference_failed",
+    return neutralTurnInferenceResult("llm_inference_failed", {
       fallbackReason: jr.ok ? "invalid_json_shape" : jr.error,
-    };
+    });
   }
 
   const parsed = jr.parsed as Record<string, unknown>;
-  const intent = parseIntent(parsed["intent"]) ?? fallbackIntent;
   const confidenceRaw = Number(parsed["confidence"] ?? 0.5);
   const confidence = Number.isFinite(confidenceRaw) ? Math.max(0, Math.min(1, confidenceRaw)) : 0.5;
   const threshold = resolveIntentConfidenceThreshold();
 
-  // LLM-derived semantic flags — OR with regex fallback so neither path loses signal
-  const identityQuery = Boolean(parsed["identityQuery"]) || fallbackIdentityQuery;
-  const deckIntent = Boolean(parsed["deckIntent"]) || fallbackDeckIntent;
-  const freshnessSensitive = Boolean(parsed["freshnessSensitive"]) || fallbackFreshnessSensitive;
+  const reasonStr =
+    typeof parsed["reason"] === "string" ? parsed["reason"].slice(0, 200) : "classified_by_llm";
 
   if (confidence < threshold) {
+    const base = buildInferenceFromParsed(parsed, confidence, "llm", reasonStr);
     return {
-      intent: identityQuery ? "knowledge" : fallbackIntent,
-      stancePrompt: identityQuery ? false : fallbackStance,
-      overInferenceRisk: false,
-      identityQuery,
-      deckIntent,
-      freshnessSensitive,
-      confidence,
-      source: "fallback_regex",
-      reason: identityQuery ? "identity_recall_fast_path" : "llm_confidence_below_threshold",
+      ...base,
       fallbackReason: `confidence=${confidence.toFixed(2)} < threshold=${threshold.toFixed(2)}`,
     };
   }
 
-  return {
-    intent: identityQuery ? "knowledge" : intent,
-    stancePrompt: identityQuery ? false : Boolean(parsed["stancePrompt"]),
-    overInferenceRisk: identityQuery ? false : Boolean(parsed["overInferenceRisk"]),
-    identityQuery,
-    deckIntent,
-    freshnessSensitive,
-    confidence,
-    source: "llm",
-    reason: typeof parsed["reason"] === "string" ? parsed["reason"].slice(0, 200) : "classified_by_llm",
-  };
+  return buildInferenceFromParsed(parsed, confidence, "llm", reasonStr);
 }
 
 export function resolveMemoryPolicy(
   intent: TurnIntentClass,
-  opts?: { userMessage?: string }
+  opts?: { identityQuery?: boolean }
 ): MemoryPolicy {
-  if (opts?.userMessage && isIdentityRecallPrompt(opts.userMessage)) {
+  if (opts?.identityQuery === true) {
     return {
       allowAutoRecall: true,
       scope: "both",
@@ -309,4 +286,3 @@ export async function evaluateOverInferenceSemantics(
     fixHint: typeof parsed["fix_hint"] === "string" ? parsed["fix_hint"].slice(0, 220) : undefined,
   };
 }
-

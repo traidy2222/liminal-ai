@@ -18,6 +18,14 @@ export const HARNESS_RULES: Record<string, string> = {
   "R-SEARCH-DIVERSITY": "For the first research search pass, cover at least three distinct intents — diversify angle and phrasing rather than repeating the same question. What those intents are depends on the task.",
   "R-CHUNK-LARGE-FILES": "For very large files (full applications, >2000 lines), write in logical self-contained sections using multiple write_file calls (append mode) — provider streaming timeouts cut off multi-minute completions. Files up to ~1000 lines are fine in one call.",
   "R-LARGE-READ-DISCIPLINE": "Do not repeatedly full-read the same large file. After one full read, switch to read_file_chunked/file_metadata and targeted checks.",
+  "R-WRITE-ONE-VERIFY":
+    "After write_file succeeds with on-disk verification, at most one short read_file sanity check—then answer. No multi-pass full reads, grep fishing for closing tags on fresh writes, or ad-hoc shell syntax validators unless the user asked or a tool failed.",
+  "R-DEDUP-TOOLS":
+    "Within one send, do not repeat the same retrieval or read with identical or trivially narrower args (memory_query, recall_relevant, read_file on the same path, web_fetch on the same URL). Use the first result set; if it was empty or wrong, change the query meaningfully once, then synthesize.",
+  "R-CLOSED-ARTIFACT":
+    "For HTML/SVG/XML or other parseables: the first write_file must be a valid minimal document (balanced tags; no half-open script/style blocks). Prefer one complete file, or a tiny runnable skeleton plus apply_diff/patch_file hunks—never a truncated page that needs rescue rewrites.",
+  "R-READ-TOOL-ERRORS":
+    "When a tool fails with explicit remediation (e.g. edit_file needs overwrite:true; write_file refused because path exists), follow that instruction on the next call—do not cycle tools repeating the same failure mode.",
   "R-RESEARCH-BUDGET": "After gathering 3–4 substantive web sources, stop fetching and synthesize — do not keep fetching more sources on the same angle. Prefer web_research for broad queries instead of manual parallel search+fetch loops.",
   "R-SYNTHESIZE-VARY": "In final briefings and summaries, introduce each major theme once; do not repeat the same proper noun, date, or key concept in consecutive sections.",
   "R-MEMORY-SCOPE": "Recalled memory provides background context only. For research tasks on a new topic, do not let prior session topics bias search query construction — build queries from the current ask.",
@@ -31,7 +39,8 @@ export const HARNESS_RULES: Record<string, string> = {
   "R-TYPECHECK-VERIFY": "After editing typed code (TypeScript, Python with annotations, etc.), run the project's typecheck or build command before claiming the fix is complete — do not assume types pass from visual inspection alone.",
   "R-SCOPE-CREEP": "Fix only what was explicitly requested. Do not refactor surrounding code, add unasked features, introduce new abstractions, or clean up adjacent issues — a bug fix is not a refactoring invitation.",
   "R-GREP-BEFORE-REFACTOR": "Before renaming a symbol, changing a function signature, or moving a type, grep for all call sites and import paths first — never assume a change is local without verifying all references.",
-  "R-MCP-GAP": "Before telling the user a capability is unavailable (GitHub, database, browser, Slack, etc.), call mcp_suggest(task) to check the catalog. If a server shows READY, connect it immediately with mcp_connect. If credentials are missing, ask_user for the specific env var then connect. Never give up on a task without checking mcp_suggest first.",
+  "R-OUTPUT-TYPOGRAPHY":
+    "User-visible replies are final copy: no long runs of hyphens as separators or underlines; at most one standalone markdown --- hr if needed. Use em dash (—) sparingly; prefer commas/periods/colons. Fix broken markdown before sending.",
 };
 
 /**
@@ -74,6 +83,10 @@ export const HARNESS_RULE_RECALL_MESSAGE =
   `- **R-SEARCH-DIVERSITY**: For the first research search pass, cover at least three distinct intents — diversify angle and phrasing rather than repeating the same question. What those intents are depends on the task.\n` +
   `- **R-CHUNK-LARGE-FILES**: For very large files (full applications, >2000 lines), write in logical self-contained sections using multiple write_file calls (append mode) — provider streaming timeouts cut off multi-minute completions. Files up to ~1000 lines are fine in one call.\n` +
   `- **R-LARGE-READ-DISCIPLINE**: Do not repeatedly full-read the same large file. After one full read, switch to read_file_chunked/file_metadata and targeted checks.\n` +
+  `- **R-WRITE-ONE-VERIFY**: After write_file succeeds, one short read at most—then reply; no grep/shell reassurance spirals on demos.\n` +
+  `- **R-DEDUP-TOOLS**: Within one send, no duplicate memory_query/recall_relevant/read_file/web_fetch with the same intent/args—use first results or change the query once.\n` +
+  `- **R-CLOSED-ARTIFACT**: Parseable files (HTML/XML/SVG): first write must be complete minimal valid structure, or skeleton + apply_diff—not truncated half-documents.\n` +
+  `- **R-READ-TOOL-ERRORS**: On tool failure, read the error and apply the stated fix (overwrite:true, apply_diff, etc.)—no thrashing across tools.\n` +
   `- **R-RESEARCH-BUDGET**: After gathering 3–4 substantive web sources, stop fetching and synthesize — do not keep fetching more sources on the same angle. Prefer web_research for broad queries instead of manual parallel search+fetch loops.\n` +
   `- **R-SYNTHESIZE-VARY**: In final briefings and summaries, introduce each major theme once; do not repeat the same proper noun, date, or key concept in consecutive sections.\n` +
   `- **R-MEMORY-SCOPE**: Recalled memory provides background context only. For research tasks on a new topic, do not let prior session topics bias search query construction — build queries from the current ask.\n` +
@@ -87,4 +100,4 @@ export const HARNESS_RULE_RECALL_MESSAGE =
   `- **R-TYPECHECK-VERIFY**: After editing typed code, run typecheck/build before claiming done — do not assume types pass from visual inspection.\n` +
   `- **R-SCOPE-CREEP**: Fix only what was explicitly requested — no surrounding refactors, no unasked features, no new abstractions.\n` +
   `- **R-GREP-BEFORE-REFACTOR**: Before renaming a symbol or changing a signature, grep for all call sites first — never assume a change is local.\n` +
-  `- **R-MCP-GAP**: Before telling the user a capability is unavailable, call mcp_suggest(task) — if a server shows READY, connect it immediately; if credentials missing, ask_user for the specific var then connect.\n`;
+  `- **R-OUTPUT-TYPOGRAPHY**: Final user-visible text: no decorative hyphen lines; sparse em dashes; intentional markdown structure.\n`;

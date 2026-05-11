@@ -111,7 +111,12 @@ export {
   loadRuntimePreferences,
   saveRuntimePreferences,
 } from "./runtime_prefs.js";
-export type { RuntimePreferences, ProviderKeySource } from "./runtime_prefs.js";
+export type {
+  RuntimePreferences,
+  ProviderKeySource,
+  RuntimePersonaProfile,
+  RuntimePersonaPreferences,
+} from "./runtime_prefs.js";
 export {
   DEFAULT_IMAGE_ATTACHMENT_LIMITS,
   isSupportedImageMimeType,
