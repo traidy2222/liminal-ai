@@ -7,7 +7,8 @@
   "scripts": {
     "build": "npm run build --workspaces --if-present",
     "tui": "npm run start --workspace=packages/tui",
-    "web": "npm run dev --workspace=packages/web",
+    "web": "node scripts/run-web.mjs",
+    "web:dev": "npm run dev --workspace=packages/web",
     "typecheck": "npm run typecheck --workspaces --if-present",
     "test": "npm run test --workspace=@liminal/core"
   },
