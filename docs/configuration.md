@@ -4,6 +4,7 @@ Use `.env.example` as canonical source. This document groups major flags by subs
 
 ## Core
 
+- `AGENT_RULE_RECALL` — set to `0` to disable the harness-injected **named rule recall** system message at ReAct round 2 (see [Harness protocol](./harness-protocol.md)). Default is on; disabling saves tokens but removes the extra R-* nudge batch.
 - `AGENT_API_KEY`
 - `AGENT_API_BASE_URL`
 - `AGENT_MODEL`
@@ -32,6 +33,17 @@ Use `.env.example` as canonical source. This document groups major flags by subs
 - `AGENT_TOOL_ELIDE_KEEP_ROUNDS`
 - `AGENT_COMPRESS_SEMANTIC=1` — when context fills and old rounds are compressed, calls the configured model to produce a causal narrative digest instead of raw tool-name one-liners. Preserves reasoning chain across very long sessions.
 - `AGENT_PROTOCOL_INTENT_HINT` — session-wide protocol section filter. Values: `coding` | `knowledge` | `execution` | `introspection`. Suppresses irrelevant heavy sections (vault KB, markets, document engine, vision sidecar) to save 300–800 tokens per turn. Can also be set programmatically per-turn via `buildAdaptiveProtocolSuffix(toolNames, intent)`.
+
+## Web and fetch
+
+- `AGENT_WEB_FETCH_TIMEOUT_MS` — per-URL HTTP timeout (ms) for `web_fetch` and each page load inside `web_research`. Default `20000`; clamped between `3000` and `120000`.
+- `AGENT_WEB_READABILITY` — set to `1` to run fetched HTML through JSDOM + Mozilla Readability and return main-article plain text when extraction succeeds (length and quality heuristics apply). When off, `web_fetch` strips tags with regex only.
+
+### Web fetch and Readability (implementation detail)
+
+Readability runs for **article extraction**, not pixel layout. Before JSDOM parses the document, author `<style>`, `<link rel="stylesheet">`, and `<script>` blocks are stripped from a copy of the HTML so inline CSS does not go through `rrweb-cssom` (which errors on nested or modern CSS-in-JS). A silent `VirtualConsole` avoids noisy `jsdomError` logs for residual parse issues.
+
+For rendered pages, screenshots, or DOM after layout, use Playwright **`browser_open` / `browser_act`** (see tool family `browser`). See [Harness protocol](./harness-protocol.md#web-fetch-readability-and-jsdom) for the conceptual summary.
 
 ## Memory and Retrieval
 

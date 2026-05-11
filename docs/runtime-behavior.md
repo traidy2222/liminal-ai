@@ -78,6 +78,17 @@ Each round can emit heartbeat telemetry including:
 
 Heartbeats are used by UI traces and eval assertions for long-horizon health checks.
 
+## Harness protocol rule recall
+
+On **ReAct round 2** of each `send()`, unless `AGENT_RULE_RECALL=0`, the harness appends a system message listing named protocol rules (IDs such as `R-PLAN-3STEPS`, `R-DEDUP-TOOLS`, `R-CLOSED-ARTIFACT`, …) covering planning, citations, deduplicated retrieval, closed HTML artifacts, tool-error hygiene, research budgets, typography, and more. The text is defined in `packages/core/src/harness_rules.ts` and mirrors the spirit of the always-on protocol in `packages/tools/src/systemPrompt.ts`.
+
+Purpose:
+
+- reinforce habits that prevent broken half-files, duplicate `memory_query` loops, and ignored tool error messages
+- surface chronically violated rules when `.agent_rule_stats.json` is populated (adaptive builder)
+
+Full rule table and web_fetch Readability notes: **[Harness protocol](./harness-protocol.md)**.
+
 ## Conversational Self-Management
 
 The harness can interpret plain-language runtime directives (for example: "from now on use model X") with an internal JSON extraction pass.

@@ -96,6 +96,16 @@ This enables parallel-with-sequential patterns: spawn A and B in parallel, spawn
 
 All three are harness-scoped (close over the harness instance), listed in `ORCHESTRATION_TOOL_NAMES`, and re-created per child in `onChildCreated`.
 
+## Session quality tool families (lazy loading)
+
+When `AGENT_TOOL_LAZY=1`, additional families can be activated on demand. Recent additions include:
+
+- **`agenda_scheduler`** — `agenda_set` / `agenda_get` / `agenda_clear` for a priority agenda surfaced in world context; `schedule_create` / `schedule_list` / `schedule_delete` / `schedule_run` for recurring tasks and overdue detection.
+- **`synthesis`** — `synthesis_run` for a bounded cross-domain synthesis pass (vault-oriented notes).
+- **`independence`** — `breakout_start`, `pattern_record`, `independence_status` for rut-breaking and divergence hints in long sessions.
+
+These are registered from `packages/tools/src/index.ts` and catalogued in `packages/tools/src/tool_catalog.ts`. They do not change the core dispatcher contract; they add optional structure for long-horizon coherence.
+
 ## Context and Budget Management
 
 `ContextManager` tracks:
