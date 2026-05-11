@@ -179,6 +179,7 @@ export class AgentBridge {
     emitter.on("runtime_pref_changed", (p) => this.sse.send("runtime_pref_changed", p));
     emitter.on("runtime_pref_persisted", (p) => this.sse.send("runtime_pref_persisted", p));
     emitter.on("runtime_pref_rejected", (p) => this.sse.send("runtime_pref_rejected", p));
+    emitter.on("auto_dream", (p) => this.sse.send("auto_dream", p));
 
     emitter.on("tool_approval", (payload) => {
       this.pendingApprovals.set(payload.callId, payload.resolve);

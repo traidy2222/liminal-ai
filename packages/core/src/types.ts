@@ -160,7 +160,10 @@ export interface EpistemicState {
     confidence: "low" | "med" | "high";
     evidence?: string[];
   }[];
+  /** Paths successfully read via read_file (and similar) this send; unioned across rounds. */
   filesTouched: string[];
+  /** Paths successfully mutated by edit/write tools this send; unioned across rounds. */
+  filesModified: string[];
   lastVerified?: { what: string; how: string; at: number };
   openQuestions: string[];
   budget: { usagePct: number; recallK: number; spareRounds: number };
@@ -561,6 +564,30 @@ export interface AgentEventMap {
   runtime_pref_rejected: {
     summary: string;
     reason: string;
+  };
+  auto_dream: {
+    stage: "gate" | "started" | "progress" | "completed" | "failed";
+    runId: string;
+    gate?: {
+      name: string;
+      passed: boolean;
+      reason?: string;
+      value?: string | number | boolean;
+    };
+    progress?: {
+      step: string;
+      sessionsFound?: number;
+      snippetsLoaded?: number;
+      upserts?: number;
+      deletes?: number;
+    };
+    result?: {
+      summary?: string;
+      upserts: number;
+      deletes: number;
+      durationMs: number;
+    };
+    error?: string;
   };
   memory_retrieval_policy: {
     intent: "introspection" | "knowledge" | "coding" | "execution";

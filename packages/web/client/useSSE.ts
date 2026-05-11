@@ -43,6 +43,32 @@ interface ContextSnapshot {
   masked: boolean;
 }
 
+export interface AutoDreamState {
+  stage: "idle" | "gate" | "started" | "progress" | "completed" | "failed";
+  runId?: string;
+  gate?: {
+    name: string;
+    passed: boolean;
+    reason?: string;
+    value?: string | number | boolean;
+  };
+  progress?: {
+    step: string;
+    sessionsFound?: number;
+    snippetsLoaded?: number;
+    upserts?: number;
+    deletes?: number;
+  };
+  result?: {
+    summary?: string;
+    upserts: number;
+    deletes: number;
+    durationMs: number;
+  };
+  error?: string;
+  updatedAt: number;
+}
+
 export type PendingApprovalState = {
   callId: string;
   name: string;
@@ -54,6 +80,7 @@ export type PendingApprovalState = {
 export interface SSEState {
   messages: MessageEntry[];
   contextSnapshot: ContextSnapshot | null;
+  autoDream: AutoDreamState;
   pendingApproval: PendingApprovalState | null;
   pendingAskUser: { prompt: string } | null;
   connected: boolean;
@@ -100,6 +127,33 @@ type Action =
   | { type: "plan_step_done"; payload: { stepIndex: number } }
   | { type: "context_compressed"; payload: { beforeFraction: number; afterFraction: number; roundsCompressed: number } }
   | { type: "persona_changed"; payload: { name: string } }
+  | {
+      type: "auto_dream";
+      payload: {
+        stage: "gate" | "started" | "progress" | "completed" | "failed";
+        runId: string;
+        gate?: {
+          name: string;
+          passed: boolean;
+          reason?: string;
+          value?: string | number | boolean;
+        };
+        progress?: {
+          step: string;
+          sessionsFound?: number;
+          snippetsLoaded?: number;
+          upserts?: number;
+          deletes?: number;
+        };
+        result?: {
+          summary?: string;
+          upserts: number;
+          deletes: number;
+          durationMs: number;
+        };
+        error?: string;
+      };
+    }
   | { type: "persona_bootstrap_progress"; payload: { stage: string; message: string; at: number } }
   | { type: "session_reset" };
 
@@ -143,6 +197,7 @@ function reducer(state: SSEState, action: Action): SSEState {
         busy: false,
         error: null,
         contextSnapshot: null,
+        autoDream: { stage: "idle", updatedAt: Date.now() },
         pendingApproval: null,
         pendingAskUser: null,
         personaBootstrapPending: state.personaBootstrapPending,
@@ -411,6 +466,20 @@ function reducer(state: SSEState, action: Action): SSEState {
 
     case "persona_changed":
       return { ...state, personaName: action.payload.name };
+
+    case "auto_dream":
+      return {
+        ...state,
+        autoDream: {
+          stage: action.payload.stage,
+          runId: action.payload.runId,
+          gate: action.payload.gate,
+          progress: action.payload.progress,
+          result: action.payload.result,
+          error: action.payload.error,
+          updatedAt: Date.now(),
+        },
+      };
   }
 }
 
@@ -471,6 +540,7 @@ export function useSSE() {
   const [state, dispatch] = useReducer(reducer, {
     messages: [],
     contextSnapshot: null,
+    autoDream: { stage: "idle", updatedAt: Date.now() },
     pendingApproval: null,
     pendingAskUser: null,
     connected: false,
@@ -626,6 +696,10 @@ export function useSSE() {
       es.addEventListener("persona_changed", (e: MessageEvent) => {
         trackId(e); flushNow();
         dispatch({ type: "persona_changed", payload: JSON.parse(e.data) });
+      });
+      es.addEventListener("auto_dream", (e: MessageEvent) => {
+        trackId(e);
+        dispatch({ type: "auto_dream", payload: JSON.parse(e.data) });
       });
       es.addEventListener("persona_bootstrap_progress", (e: MessageEvent) => {
         trackId(e);

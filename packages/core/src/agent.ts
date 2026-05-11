@@ -35,6 +35,18 @@ import { SharedMemoryBus } from "./shared_memory_bus.js";
 import { resolveProviderConfig } from "./provider_config.js";
 import type { RuntimePreferences, RuntimePersonaProfile } from "./runtime_prefs.js";
 import {
+  buildAutoDreamPrompt,
+  listSessionsTouchedSince,
+  loadRecentSessionSnippets,
+  readLastConsolidatedAt,
+  resolveAutoDreamConfig,
+  rollbackConsolidationLock,
+  tryAcquireConsolidationLock,
+} from "./auto_dream.js";
+import { readFile as readFileFs } from "node:fs/promises";
+import path from "node:path";
+import { resolveWorkspaceRoot } from "./workspace_root.js";
+import {
   markEpistemicPlanStepDone,
   mergeExtractedSubgoals,
   subgoalsFromPlanSteps,
@@ -52,6 +64,7 @@ import {
   resolveMemoryPolicy,
   type TurnInferenceResult,
 } from "./intent_inference.js";
+import { EDIT_TOOL_NAMES, collectEditToolTargetPaths } from "./tool_changed_paths.js";
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -852,6 +865,7 @@ export class AgentHarness {
   private runtimePreferences: RuntimePreferences | null = null;
   private pendingRiskyPreferenceSummary: string | null = null;
   private turnInference: TurnInferenceResult | null = null;
+  private lastAutoDreamScanAt = 0;
 
   /**
    * Returns the ContextManager for use by context tools factory.
@@ -888,33 +902,10 @@ export class AgentHarness {
 
   private rememberChangedPathFromToolCall(toolName: string, argsJson: string, ok: boolean): void {
     if (!ok) return;
-    const editTools = new Set([
-      "write_file",
-      "patch_file",
-      "apply_diff",
-      "write_file_if_changed",
-      "search_replace_file",
-      "move_file",
-      "copy_file",
-      "copy_tree",
-      "multi_file_apply",
-      "refactor_plan_apply",
-    ]);
-    if (!editTools.has(toolName)) return;
+    if (!EDIT_TOOL_NAMES.has(toolName)) return;
     try {
       const args = JSON.parse(argsJson) as Record<string, unknown>;
-      const candidates: string[] = [];
-      for (const key of ["path", "to", "target", "target_path", "dest", "destination"]) {
-        const v = args[key];
-        if (typeof v === "string" && v.trim().length > 0) candidates.push(v.trim());
-      }
-      const arr = args["paths"];
-      if (Array.isArray(arr)) {
-        for (const it of arr) {
-          if (typeof it === "string" && it.trim().length > 0) candidates.push(it.trim());
-        }
-      }
-      for (const c of candidates) this.changedFilesThisTurn.add(c);
+      for (const c of collectEditToolTargetPaths(toolName, args)) this.changedFilesThisTurn.add(c);
     } catch {
       /* ignore malformed args json */
     }
@@ -2267,6 +2258,175 @@ export class AgentHarness {
     }
   }
 
+  /** AutoDream-style background memory consolidation over recent sessions (env-gated). */
+  private async maybeAutoDreamConsolidation(): Promise<void> {
+    const cfg = resolveAutoDreamConfig();
+    const runId = `dream-${Date.now()}`;
+    const emitGate = (
+      name: string,
+      passed: boolean,
+      reason?: string,
+      value?: string | number | boolean
+    ): void => {
+      this.emitter.emit("auto_dream", {
+        stage: "gate",
+        runId,
+        gate: { name, passed, ...(reason ? { reason } : {}), ...(value !== undefined ? { value } : {}) },
+      });
+    };
+    emitGate("enabled", cfg.enabled, cfg.enabled ? "auto_dream_enabled" : "disabled");
+    if (!cfg.enabled) return;
+    emitGate("agent_depth", this.agentDepth === 0, this.agentDepth === 0 ? "root_agent" : "child_agent", this.agentDepth);
+    if (this.agentDepth > 0) return;
+    const notBootstrap = !this.sessionGreetingThisSend && !this.personaBootstrapPromptThisSend;
+    emitGate("bootstrap_state", notBootstrap, notBootstrap ? "ready" : "session_bootstrap_active");
+    if (!notBootstrap) return;
+    const hasRemember = this.registry.has("remember");
+    emitGate("remember_tool", hasRemember, hasRemember ? "tool_available" : "remember_tool_missing");
+    if (!hasRemember) return;
+    const hasSessionSignals = this.toolsUsedThisTurn.length > 0 || this.roundCount > 0;
+    emitGate("session_signals", hasSessionSignals, hasSessionSignals ? "has_turn_activity" : "no_turn_activity");
+    if (!hasSessionSignals) return;
+
+    const lastAt = await readLastConsolidatedAt();
+    const hoursSince = (Date.now() - lastAt) / 3_600_000;
+    emitGate("min_hours", hoursSince >= cfg.minHours, hoursSince >= cfg.minHours ? "time_gate_passed" : "waiting_for_hours", Number(hoursSince.toFixed(2)));
+    if (hoursSince < cfg.minHours) return;
+
+    const sinceScan = Date.now() - this.lastAutoDreamScanAt;
+    emitGate("scan_interval", sinceScan >= cfg.scanIntervalMs, sinceScan >= cfg.scanIntervalMs ? "scan_due" : "scan_throttled_ms", sinceScan);
+    if (sinceScan < cfg.scanIntervalMs) return;
+    this.lastAutoDreamScanAt = Date.now();
+
+    const sessionIds = await listSessionsTouchedSince(lastAt, this.taskId);
+    emitGate("min_sessions", sessionIds.length >= cfg.minSessions, sessionIds.length >= cfg.minSessions ? "session_gate_passed" : "waiting_for_sessions", sessionIds.length);
+    if (sessionIds.length < cfg.minSessions) return;
+
+    const priorMtime = await tryAcquireConsolidationLock(cfg.lockStaleMs);
+    emitGate("lock", priorMtime !== null, priorMtime !== null ? "lock_acquired" : "lock_held_elsewhere");
+    if (priorMtime === null) return;
+    const dreamStartedAt = Date.now();
+    this.emitter.emit("auto_dream", {
+      stage: "started",
+      runId,
+      progress: { step: "started", sessionsFound: sessionIds.length },
+    });
+
+    try {
+      const snippets = await loadRecentSessionSnippets(
+        sessionIds,
+        cfg.maxSessionFiles,
+        cfg.maxCharsPerSession,
+        cfg.maxTotalChars
+      );
+      this.emitter.emit("auto_dream", {
+        stage: "progress",
+        runId,
+        progress: { step: "snippets_loaded", sessionsFound: sessionIds.length, snippetsLoaded: snippets.length },
+      });
+      const notesPath = path.join(resolveWorkspaceRoot(), ".agent_notes.json");
+      const notesSnapshot = await readFileFs(notesPath, "utf8")
+        .then((s) => s.slice(0, 30_000))
+        .catch(() => "(no notes yet)");
+      const prompt = buildAutoDreamPrompt({ notesSnapshot, sessions: snippets });
+
+      const fast = getFastModelSlug(this.config.model);
+      const jr = await completeChatJson(this.client, {
+        model: fast,
+        temperature: 0,
+        maxTokens: 1000,
+        messages: [
+          {
+            role: "system",
+            content:
+              "You produce strict JSON memory consolidation operations. No markdown fences, no prose outside JSON.",
+          },
+          { role: "user", content: prompt },
+        ],
+      });
+      if (!jr.ok || typeof jr.parsed !== "object" || jr.parsed === null) {
+        this.emitter.emit("auto_dream", {
+          stage: "failed",
+          runId,
+          error: "model_json_unavailable",
+        });
+        return;
+      }
+      this.emitter.emit("auto_dream", {
+        stage: "progress",
+        runId,
+        progress: { step: "model_parsed", sessionsFound: sessionIds.length, snippetsLoaded: snippets.length },
+      });
+      const parsed = jr.parsed as {
+        summary?: string;
+        upserts?: Array<{ type?: string; key?: string; value?: string }>;
+        deletes?: Array<{ key?: string; reason?: string }>;
+      };
+      const allowed = new Set(["fact", "experience", "entity", "belief", "reflection", "recipe"]);
+      let upsertsApplied = 0;
+      for (const u of parsed.upserts?.slice(0, 16) ?? []) {
+        if (!u || typeof u.key !== "string" || typeof u.value !== "string") continue;
+        const key = u.key.trim().slice(0, 80);
+        const value = u.value.trim().slice(0, 4000);
+        if (!key || value.length < 12) continue;
+        const typ = typeof u.type === "string" ? u.type.trim() : "";
+        if (typ && !allowed.has(typ)) continue;
+        await this.dispatcher.directCall("remember", {
+          key,
+          value,
+          ...(typ ? { type: typ } : {}),
+        });
+        upsertsApplied++;
+      }
+      this.emitter.emit("auto_dream", {
+        stage: "progress",
+        runId,
+        progress: { step: "upserts_applied", upserts: upsertsApplied },
+      });
+      const allowDelete = process.env["AGENT_AUTO_DREAM_ALLOW_DELETE"] === "1";
+      let deletesApplied = 0;
+      if (allowDelete && this.registry.has("forget")) {
+        for (const d of parsed.deletes?.slice(0, 8) ?? []) {
+          if (!d || typeof d.key !== "string") continue;
+          const key = d.key.trim().slice(0, 120);
+          if (!key) continue;
+          await this.dispatcher.directCall("forget", { key });
+          deletesApplied++;
+        }
+      }
+      this.emitter.emit("auto_dream", {
+        stage: "progress",
+        runId,
+        progress: { step: "deletes_applied", deletes: deletesApplied, upserts: upsertsApplied },
+      });
+      const summary = typeof parsed.summary === "string" ? parsed.summary.trim() : "";
+      if (summary) {
+        this.context.appendMessage({
+          role: "user",
+          content: `[AUTO_DREAM] Consolidation summary: ${summary.slice(0, 400)}`,
+        });
+      }
+      this.emitter.emit("auto_dream", {
+        stage: "completed",
+        runId,
+        result: {
+          ...(summary ? { summary: summary.slice(0, 400) } : {}),
+          upserts: upsertsApplied,
+          deletes: deletesApplied,
+          durationMs: Date.now() - dreamStartedAt,
+        },
+      });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      this.emitter.emit("auto_dream", {
+        stage: "failed",
+        runId,
+        error: msg.slice(0, 500),
+      });
+      await rollbackConsolidationLock(priorMtime);
+    }
+  }
+
   private async maybeAutoWriteVaultNotes(): Promise<void> {
     if (this.agentDepth > 0) return;
     const mode = resolveVaultAutoWriteMode();
@@ -2939,6 +3099,7 @@ export class AgentHarness {
       this.lastParallelToolBatchSize = toolCalls.length;
       let awarenessNeedsRefresh = false;
       let awarenessReason = "";
+      const changedPathsCountBeforeBatch = this.changedFilesThisTurn.size;
 
       for (let i = 0; i < toolCalls.length; i++) {
         const tc = toolCalls[i]!;
@@ -3024,6 +3185,9 @@ export class AgentHarness {
               "[SYSTEM NOTE] A requested tool is inactive. Reconcile tool state now: call list_tool_families, activate one best-fit family, then retry with updated args.",
           });
         }
+      }
+      if (this.changedFilesThisTurn.size > changedPathsCountBeforeBatch) {
+        this.dispatcher.invalidateCachesAfterFileWrites();
       }
       if (awarenessNeedsRefresh) this.refreshToolAwareness(awarenessReason);
 
@@ -3127,11 +3291,15 @@ export class AgentHarness {
           `RECENT TOOL LINES: ${this.recentToolOutcomeLines.join(" · ")}\n` +
           `SPAWN_AGENT CALLS THIS SEND: ${this.toolsUsedThisTurn.filter((n) => n === "spawn_agent").length}\n` +
           `${buildToolAwarenessSnapshot(this.registry, this.toolsUsedThisTurn)}`;
+        const modifiedSorted = [...this.changedFilesThisTurn].sort((a, b) =>
+          a.localeCompare(b, undefined, { sensitivity: "base" })
+        );
         this.context.patchEpistemicState({
           goal:
             this.lastUserMessage.slice(0, 500) +
             (this.lastUserMessage.length > 500 ? "…" : ""),
           filesTouched: [...this.filesReadThisTurn],
+          filesModified: modifiedSorted,
           openQuestions: openQs,
           budget: {
             usagePct: Math.round(budget.usageFraction * 100),
@@ -3646,6 +3814,7 @@ export class AgentHarness {
       await this.maybePersistEpisodeTurn();
       await this.maybeAutoWriteVaultNotes();
       await this.maybeAutoExtractMemories();
+      await this.maybeAutoDreamConsolidation();
       this.emitTurnEnd("ok");
     }
   }

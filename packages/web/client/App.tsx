@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect, useCallback, useMemo, memo } from "react";
-import { useSSE, type MessageEntry } from "./useSSE.js";
+import { useSSE, type MessageEntry, type AutoDreamState } from "./useSSE.js";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import rehypeRaw from "rehype-raw";
@@ -106,6 +106,23 @@ function formatSessionTime(sec: number): string {
   const s = sec % 60;
   if (m < 60) return `${m}m ${s < 10 ? "0" : ""}${s}s`;
   return `${Math.floor(m / 60)}h ${m % 60}m`;
+}
+
+function autoDreamCompactLabel(d: AutoDreamState): string {
+  if (d.stage === "started" || d.stage === "progress") {
+    const step = d.progress?.step ? ` · ${d.progress.step}` : "";
+    return `Dreaming…${step}`;
+  }
+  if (d.stage === "gate" && d.gate && !d.gate.passed) {
+    return `Dream waiting: ${d.gate.name}`;
+  }
+  if (d.stage === "completed") {
+    const upserts = d.result?.upserts ?? 0;
+    const deletes = d.result?.deletes ?? 0;
+    return `Dream done: +${upserts} / -${deletes}`;
+  }
+  if (d.stage === "failed") return "Dream failed";
+  return "Dream idle";
 }
 
 function parsePrimaryArg(argsJson: string): string {
@@ -341,11 +358,11 @@ function ContextArc({ pct, masked }: { pct: number; masked?: boolean }) {
 
 function SystemsPanel({
   orbState, pct, masked, connected, sessionSeconds,
-  toolCount, msgCount, subtasks, personaName,
+  toolCount, msgCount, subtasks, personaName, autoDream,
 }: {
   orbState: OrbState; pct: number; masked?: boolean; connected: boolean;
   sessionSeconds: number; toolCount: number; msgCount: number;
-  subtasks: SubtaskEntry[]; personaName: string;
+  subtasks: SubtaskEntry[]; personaName: string; autoDream: AutoDreamState;
 }) {
   const orbLabel: Record<OrbState, string> = {
     idle: "STANDBY", thinking: "PROCESSING", running: "EXECUTING",
@@ -465,6 +482,43 @@ function SystemsPanel({
           </div>
         </HudPanel>
       )}
+
+      <HudPanel title="AUTO-DREAM">
+        <div style={{ padding: "6px 10px 8px", display: "flex", flexDirection: "column", gap: 5 }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+            <span style={{ fontSize: 8, color: "rgba(0,212,255,0.35)", fontFamily: "monospace", letterSpacing: "0.1em" }}>
+              STATE
+            </span>
+            <span style={{ fontSize: 10, color: autoDream.stage === "failed" ? RED_ERR : autoDream.stage === "completed" ? GREEN : CYAN, fontFamily: "monospace", fontWeight: 700 }}>
+              {autoDream.stage.toUpperCase()}
+            </span>
+          </div>
+          {autoDream.gate && (
+            <div style={{ fontSize: 9, color: "rgba(0,212,255,0.6)", fontFamily: "monospace" }}>
+              gate: {autoDream.gate.name} · {autoDream.gate.passed ? "pass" : "wait"}
+              {autoDream.gate.reason ? ` · ${autoDream.gate.reason}` : ""}
+            </div>
+          )}
+          {autoDream.progress && (
+            <div style={{ fontSize: 9, color: "rgba(0,212,255,0.6)", fontFamily: "monospace" }}>
+              {autoDream.progress.step}
+              {typeof autoDream.progress.sessionsFound === "number" ? ` · sessions=${autoDream.progress.sessionsFound}` : ""}
+              {typeof autoDream.progress.upserts === "number" ? ` · upserts=${autoDream.progress.upserts}` : ""}
+              {typeof autoDream.progress.deletes === "number" ? ` · deletes=${autoDream.progress.deletes}` : ""}
+            </div>
+          )}
+          {autoDream.result && (
+            <div style={{ fontSize: 9, color: "rgba(0,255,136,0.6)", fontFamily: "monospace" }}>
+              done in {formatElapsed(autoDream.result.durationMs)} · +{autoDream.result.upserts} / -{autoDream.result.deletes}
+            </div>
+          )}
+          {autoDream.error && (
+            <div style={{ fontSize: 9, color: "rgba(255,34,68,0.75)", fontFamily: "monospace" }}>
+              {autoDream.error.slice(0, 120)}
+            </div>
+          )}
+        </div>
+      </HudPanel>
     </div>
   );
 }
@@ -1250,6 +1304,7 @@ export function App() {
   const toolCount    = allToolCalls.length;
   const msgCount     = state.messages.filter(m => m.kind === "user" || m.kind === "assistant").length;
   const subtasks     = state.messages.filter((m): m is SubtaskEntry => m.kind === "subtask");
+  const dreamLabel = autoDreamCompactLabel(state.autoDream);
 
   // ── Render ───────────────────────────────────────────────────────────────────
 
@@ -1271,6 +1326,14 @@ export function App() {
               {activeToolCall.status === "pending_approval" && (
                 <span style={{ color: MAGENTA, fontSize: 10, fontWeight: 700 }}>— approve?</span>
               )}
+            </div>
+          )}
+          {showPanels === false && state.autoDream.stage !== "idle" && (
+            <div style={styles.activityPill}>
+              <span style={{ color: state.autoDream.stage === "failed" ? RED_ERR : state.autoDream.stage === "completed" ? GREEN : CYAN }}>
+                ◈
+              </span>
+              <span style={{ color: "#889aaa", fontSize: 10, fontFamily: "monospace" }}>{dreamLabel}</span>
             </div>
           )}
         </div>
@@ -1316,6 +1379,7 @@ export function App() {
             msgCount={msgCount}
             subtasks={subtasks}
             personaName={state.personaName}
+            autoDream={state.autoDream}
           />
         )}
 
