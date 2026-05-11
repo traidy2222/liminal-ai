@@ -10,6 +10,7 @@ Human-oriented guides for configuring, operating, and extending the Liminal agen
 | [Architecture](./architecture.md) | Packages, ReAct loop, dispatcher, orchestration, context, rule stats |
 | [Harness protocol](./harness-protocol.md) | Named R-* rules, round-2 recall, coherence and web_fetch Readability behavior |
 | [Runtime behavior](./runtime-behavior.md) | World context, drift, reflexion, vault policy, self-management |
+| [Persona system](./persona-system.md) | `set_persona`, generation pipeline, workspace artifacts, bootstrap env flags |
 
 ## Tools and quality
 

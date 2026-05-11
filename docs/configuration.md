@@ -17,6 +17,22 @@ Use `.env.example` as canonical source. This document groups major flags by subs
 - `AGENT_TOOL_LAZY`
 - `AGENT_UI_VERBOSITY`
 
+## Persona and bootstrap
+
+First-run and mid-session voice are controlled by the harness plus TUI/web clients.
+
+- `AGENT_PERSONA_BOOTSTRAP` — set `0` to skip the model-injected first-run prompt asking how the assistant should sound (web/TUI + harness).
+- `AGENT_PERSONA_BOOTSTRAP_ALLOW_SKIP` — set `0` to require persona bootstrap input (disables `skip` / `/skip` where supported).
+- `AGENT_PERSONA_BOOTSTRAP_FORCE` — web server only: set `1` to force the bootstrap path for testing (`packages/web/server/agentBridge.ts`).
+
+**Generator tuning** (used by `persona_generator.ts` when `set_persona` runs a custom voice):
+
+- `AGENT_PERSONA_INFER_MODEL` — optional model slug for persona inference steps; falls back to the harness fast-model helper when unset.
+- `AGENT_PERSONA_GEN_TIMEOUT_MS` — per-request style timeout for persona HTTP calls (default `90000`, clamped up to `180000` ms).
+- `AGENT_PERSONA_GEN_RETRIES` — retry budget for those calls (default `2`, max `3`).
+
+Full pipeline, on-disk layout under `persona/active/`, and core APIs: **[Persona system](./persona-system.md)**.
+
 ## Safety and Approval
 
 - `AGENT_SAFETY_JUDGE`
