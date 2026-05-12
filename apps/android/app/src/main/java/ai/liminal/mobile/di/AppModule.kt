@@ -8,6 +8,7 @@ import androidx.datastore.preferences.core.PreferenceDataStoreFactory
 import androidx.room.Room
 import ai.liminal.mobile.data.network.HarnessApi
 import ai.liminal.mobile.data.storage.AppDatabase
+import ai.liminal.mobile.data.storage.ChatDao
 import com.jakewharton.retrofit2.converter.kotlinx.serialization.asConverterFactory
 import dagger.Module
 import dagger.Provides
@@ -70,6 +71,10 @@ object AppModule {
       "liminal_mobile.db"
     ).build()
   }
+
+  @Provides
+  @Singleton
+  fun provideChatDao(db: AppDatabase): ChatDao = db.chatDao()
 
   @Provides
   @Singleton

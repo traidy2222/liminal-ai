@@ -11,10 +11,11 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.doubleOrNull
-import kotlinx.serialization.json.jsonPrimitive
 import javax.inject.Inject
 
 data class TimelineEntry(
@@ -217,27 +218,31 @@ class ChatViewModel @Inject constructor(
   private fun extractString(raw: String, key: String): String {
     return runCatching {
       val obj = json.decodeFromString<JsonObject>(raw)
-      key.split(".").fold(obj as Any?) { acc, part ->
-        (acc as? JsonObject)?.get(part)
-      }?.let { el -> el.jsonPrimitive.content }
+      var el: JsonElement? = obj
+      for (part in key.split(".")) {
+        el = (el as? JsonObject)?.get(part) ?: return@runCatching ""
+      }
+      (el as? JsonPrimitive)?.content ?: ""
     }.getOrDefault("")
   }
 
   private fun extractBool(raw: String, key: String): Boolean {
     return runCatching {
-      val obj = json.decodeFromString<JsonObject>(raw)
-      key.split(".").fold(obj as Any?) { acc, part ->
-        (acc as? JsonObject)?.get(part)
-      }?.jsonPrimitive?.booleanOrNull ?: false
+      var el: JsonElement? = json.decodeFromString<JsonObject>(raw)
+      for (part in key.split(".")) {
+        el = (el as? JsonObject)?.get(part) ?: return@runCatching false
+      }
+      (el as? JsonPrimitive)?.booleanOrNull ?: false
     }.getOrDefault(false)
   }
 
   private fun extractDouble(raw: String, key: String): Double {
     return runCatching {
-      val obj = json.decodeFromString<JsonObject>(raw)
-      key.split(".").fold(obj as Any?) { acc, part ->
-        (acc as? JsonObject)?.get(part)
-      }?.jsonPrimitive?.doubleOrNull ?: 0.0
+      var el: JsonElement? = json.decodeFromString<JsonObject>(raw)
+      for (part in key.split(".")) {
+        el = (el as? JsonObject)?.get(part) ?: return@runCatching 0.0
+      }
+      (el as? JsonPrimitive)?.doubleOrNull ?: 0.0
     }.getOrDefault(0.0)
   }
 }

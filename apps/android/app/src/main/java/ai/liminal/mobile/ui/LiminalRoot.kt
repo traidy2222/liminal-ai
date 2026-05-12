@@ -1,3 +1,5 @@
+@file:OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
+
 package ai.liminal.mobile.ui
 
 import androidx.compose.foundation.layout.Arrangement
