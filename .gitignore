@@ -5,6 +5,16 @@ dist/
 .agent_sessions/
 *.js.map
 
+# Local agent / IDE artifacts
+.agent_artifacts/
+
+# Android — local Gradle, IDE, and build outputs (keep app/src + Gradle scripts)
+apps/android/.gradle/
+apps/android/.idea/
+apps/android/.kotlin/
+apps/android/**/build/
+apps/android/local.properties
+
 # Agent-generated test artifacts (written during live sessions)
 packages/tui/*.txt
 packages/tui/*.md
