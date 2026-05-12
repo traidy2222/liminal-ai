@@ -40,6 +40,7 @@ These are the rules emitted in the round-2 recall block (authoritative text live
 | **R-DEDUP-TOOLS** | No duplicate same-intent `memory_query` / `recall_relevant` / same-path `read_file` / same URL `web_fetch` in one send. |
 | **R-CLOSED-ARTIFACT** | HTML/XML/SVG: first write must be valid minimal document or skeleton + diff. |
 | **R-READ-TOOL-ERRORS** | On tool error, apply the stated fix next (`overwrite:true`, `apply_diff`, etc.). |
+| **R-SYNTAX-COLUMN** | `SyntaxError (path:line:column)`: anchor on that column; verify `:` vs `=`; no identical search/replace no-ops. |
 | **R-RESEARCH-BUDGET** | Stop after 3–4 substantive web sources on the same angle; synthesize. |
 | **R-SYNTHESIZE-VARY** | Briefings: each major theme once; avoid consecutive duplicate framing. |
 | **R-MEMORY-SCOPE** | Memory is background; new research queries come from the current ask. |
