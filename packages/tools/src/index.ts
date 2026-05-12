@@ -56,6 +56,7 @@ import { suggestImprovementTool, viewInsightsTool } from "./meta_tools.js";
 import { createContextTools } from "./context_tools.js";
 import { createRefreshWorldContextTool } from "./refresh_world_context.js";
 import { createSetPersonaTool } from "./set_persona.js";
+import { createSetRuntimeSettingsTool } from "./set_runtime_settings.js";
 import { createToolDiscoveryTools } from "./tool_activation.js";
 import { applyLazyRegistrationPolicy } from "./tool_catalog.js";
 // New tools — Upgrade VI (harness quality)
@@ -250,6 +251,7 @@ export async function registerAllTools(
 
     // Inline persona switching — closes over this specific harness instance
     registry.register(createSetPersonaTool(harness));
+    registry.register(createSetRuntimeSettingsTool(harness));
 
     // Harness-scoped multimodal + extraction tools
     registry.register(createUploadImageTool(harness));
@@ -295,6 +297,7 @@ export { applyLazyRegistrationPolicy, TOOL_FAMILIES } from "./tool_catalog.js";
 export { createOrchestrationTools } from "./orchestration.js";
 export { createContextTools } from "./context_tools.js";
 export { createSetPersonaTool } from "./set_persona.js";
+export { createSetRuntimeSettingsTool } from "./set_runtime_settings.js";
 export {
   parsePersonaInput,
   isResetToDefaultRequest,

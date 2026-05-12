@@ -1,5 +1,6 @@
 import { spawn } from "node:child_process";
 import type { ChildProcess } from "node:child_process";
+import { resolveShellRuntime } from "@liminal/core";
 import { defineTool } from "./helpers.js";
 
 // ─── Shared process registry ──────────────────────────────────────────────────
@@ -13,6 +14,7 @@ interface ProcessRecord {
   outputBuffer: string;
   exitCode: number | null;
   alive: boolean;
+  shell: string;
 }
 
 const registry = new Map<number, ProcessRecord>();
@@ -56,11 +58,13 @@ export const runBackgroundTool = defineTool({
     const startupWait = (args["startup_wait_ms"] as number | undefined) ?? 2000;
 
     try {
-      const child = spawn(command, {
-        shell: true,
+      const runtime = resolveShellRuntime();
+      const child = spawn(runtime.executable, [...runtime.args, command], {
+        shell: false,
         cwd,
         detached: false,
         stdio: ["ignore", "pipe", "pipe"],
+        windowsHide: true,
       });
 
       if (!child.pid) {
@@ -77,6 +81,7 @@ export const runBackgroundTool = defineTool({
         outputBuffer: "",
         exitCode: null,
         alive: true,
+        shell: runtime.displayName,
       };
 
       child.stdout?.on("data", (d: Buffer) => {
@@ -118,7 +123,7 @@ export const runBackgroundTool = defineTool({
       return {
         ok: true,
         output:
-          `PID: ${pid} | Status: ${status} | CWD: ${cwd ?? "inherited"}\n` +
+          `PID: ${pid} | Status: ${status} | Shell: ${record.shell} | CWD: ${cwd ?? "inherited"}\n` +
           `Initial output:\n${initial || "(none yet — may still be starting)"}`,
       };
     } catch (err) {
@@ -170,6 +175,20 @@ export const killProcessTool = defineTool({
       registry.delete(pid);
       return { ok: true, output: `Sent ${signal} to PID ${pid} (${record.command.slice(0, 60)})` };
     } catch (err) {
+      if (process.platform === "win32") {
+        try {
+          const killer = spawn("taskkill", ["/PID", String(pid), "/T", "/F"], {
+            shell: false,
+            stdio: "ignore",
+            windowsHide: true,
+          });
+          await new Promise<void>((resolve) => killer.on("close", () => resolve()));
+          registry.delete(pid);
+          return { ok: true, output: `Forced termination via taskkill for PID ${pid}` };
+        } catch {
+          // Fall through to original error.
+        }
+      }
       return { ok: false, error: `Failed to kill PID ${pid}: ${String(err)}` };
     }
   },

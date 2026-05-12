@@ -7,6 +7,7 @@
  */
 import { spawn } from "node:child_process";
 import type { AgentEmitter } from "@liminal/core";
+import { resolveShellRuntime } from "@liminal/core";
 import { defineTool } from "./helpers.js";
 
 /** Create the run_shell tool with live output streaming via the emitter. */
@@ -51,21 +52,8 @@ export function createRunShellTool(emitter: AgentEmitter) {
       const timeout = (args["timeout_ms"] as number | undefined) ?? (args["timeout"] as number | undefined) ?? 60_000;
 
       return new Promise<import("@liminal/core").ToolResult>((resolve) => {
-        const isWindows = process.platform === "win32";
-        const shellArgs = isWindows
-          ? [
-              "powershell.exe",
-              [
-                "-NoLogo",
-                "-NoProfile",
-                "-NonInteractive",
-                "-ExecutionPolicy",
-                "Bypass",
-                "-Command",
-                command,
-              ],
-            ]
-          : ["/bin/sh", ["-c", command]];
+        const runtime = resolveShellRuntime();
+        const shellArgs = [runtime.executable, [...runtime.args, command]];
 
         const child = spawn(shellArgs[0] as string, shellArgs[1] as string[], {
           cwd,

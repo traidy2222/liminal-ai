@@ -95,7 +95,8 @@ export function createSetPersonaTool(harness: AgentHarness) {
         };
       }
 
-      const profile = await generatePersonaFromInput(harness, coreInput, strength, modifier);
+      const bundle = await generatePersonaFromInput(harness, coreInput, strength, modifier);
+      const profile = bundle.profile;
       await applyPersonaProfileToHarness(harness, profile);
 
       try {
@@ -105,6 +106,7 @@ export function createSetPersonaTool(harness: AgentHarness) {
               bootstrapCompleted: true,
               sourcePrompt: coreInput,
               activeProfile: profile as RuntimePersonaProfile,
+              controls: bundle.defaultControls,
               updatedAt: Date.now(),
             },
           },

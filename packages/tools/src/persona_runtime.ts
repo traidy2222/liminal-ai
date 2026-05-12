@@ -1,11 +1,13 @@
 import type { AgentHarness } from "@liminal/core";
 import { resolveWorkspaceRoot } from "@liminal/core";
+import type { RuntimePersonaControls } from "@liminal/core";
 import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import {
-  generatePersonaProfile,
+  generatePersonaBundle,
   generatePersonaSoulArtifacts,
   type PersonaProgressFn,
+  type PersonaGenerationBundle,
   type PersonaSoulArtifacts,
 } from "./persona_generator.js";
 import {
@@ -73,7 +75,8 @@ function getPersonaArtifactsPaths() {
 async function persistPersonaArtifacts(
   sourcePrompt: string,
   profile: PersonaProfile,
-  artifacts: PersonaSoulArtifacts
+  artifacts: PersonaSoulArtifacts,
+  controls: RuntimePersonaControls
 ): Promise<void> {
   const paths = getPersonaArtifactsPaths();
   await mkdir(paths.dir, { recursive: true });
@@ -88,6 +91,7 @@ async function persistPersonaArtifacts(
         updatedAt: Date.now(),
         sourcePrompt,
         name: profile.name,
+        controls,
         files: {
           runtimeProfile: "runtime_profile.json",
           soul: "soul.md",
@@ -128,10 +132,10 @@ export async function generatePersonaFromInput(
   strength: number,
   modifier?: string,
   onProgress?: PersonaProgressFn
-): Promise<PersonaProfile> {
+): Promise<PersonaGenerationBundle> {
   const { openRouterApiKey, model, baseURL } = harness.config;
   onProgress?.("profile_start", "Starting persona profile generation...");
-  const profile = await generatePersonaProfile(
+  const bundle = await generatePersonaBundle(
     coreInput,
     strength,
     modifier,
@@ -140,6 +144,7 @@ export async function generatePersonaFromInput(
     baseURL,
     onProgress
   );
+  const profile = bundle.profile;
   onProgress?.("artifact_start", "Starting soul and lexicon generation...");
   const artifacts = await generatePersonaSoulArtifacts(
     profile,
@@ -150,9 +155,9 @@ export async function generatePersonaFromInput(
     onProgress
   );
   onProgress?.("artifact_persist", "Writing persona artifacts to workspace...");
-  await persistPersonaArtifacts(coreInput, profile, artifacts);
+  await persistPersonaArtifacts(coreInput, profile, artifacts, bundle.defaultControls);
   onProgress?.("artifact_ready", "Persona artifacts ready.");
-  return profile;
+  return bundle;
 }
 
 export async function applyPersonaProfileToHarness(

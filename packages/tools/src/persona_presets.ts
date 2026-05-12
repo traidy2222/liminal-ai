@@ -172,9 +172,12 @@ export function buildRichPersonaBlock(profile: PersonaProfile): string {
     `- Emotional flavor: ${profile.tone.emotionalFlavor}`,
     `- Conversational posture: ${profile.tone.posture}`,
     ``,
-    profile.strength >= 8
-      ? `CATCHPHRASES — use up to 2–3 per reply when they land naturally (openings, pivots, emphasis). Never spam them back-to-back:`
-      : `CATCHPHRASES — use at most 1–2 per reply when they land naturally (openings, pivots, emphasis). Never stack or force them:`,
+    `CATCHPHRASES — dynamic and sparse usage only:`,
+    `- Use 0 most turns; occasionally 1 when it adds clarity or flavor.`,
+    `- Never reuse the same catchphrase in consecutive replies.`,
+    `- Never open two consecutive replies with the same phrase pattern.`,
+    `- For serious/analytical requests, default to plain direct language (catchphrases optional, usually off).`,
+    `- If the user writes briefly/directly, mirror that with minimal stylistic ornament.`,
     ...profile.catchphrases.slice(0, 7).map((p) => `  "${p}"`),
     ``,
     `VERBAL TICS — structural patterns; vary them; do not repeat the same tic every sentence:`,
@@ -198,10 +201,12 @@ export function buildRichPersonaBlock(profile: PersonaProfile): string {
     `Work favoriteWords into sentences where they fit; never use avoidWords. Verbal tics are structural`,
     `habits—vary which one you use, but at least one should be visible in most replies.`,
     `This applies equally to greetings, refusals, explanations, and any topic you discuss—stay in this voice.`,
+    `Dynamic inclusion rule: prioritize content-first clarity, then layer persona lightly based on user tone and task.`,
+    `Do not convert the persona into a fixed script of repeated openers/closers.`,
     ``,
     profile.strength >= 7
-      ? `TURN SHAPE (strength ≥7): The first sentence of every reply must already sound in-voice (word choice + rhythm). No "neutral setup" paragraph before the persona kicks in.`
-      : `TURN SHAPE: Open in-voice within the first two sentences; do not bury the voice under generic preamble.`,
+      ? `TURN SHAPE (strength ≥7): The first sentence should sound in-voice, but lexical choice must vary turn-to-turn. No fixed opener templates.`
+      : `TURN SHAPE: Open in-voice within the first two sentences; vary openings and avoid canned lead-ins.`,
     ``,
     `FACTS VS VOICE:`,
     `Correctness, safety, and tool use are governed by the system protocol (separate message)—not repeated here.`,
@@ -216,6 +221,7 @@ export function buildRichPersonaBlock(profile: PersonaProfile): string {
     `think and speak. If neutral AI language surfaces ("Certainly!", "I'd be happy to",`,
     `"As an AI...", "Of course!") — stop and rephrase in your actual voice immediately.`,
     `Your personality is not a costume — it's the lens through which you process everything.`,
+    `If you detect recurring boilerplate ("same opener", "same pivot line", "same sign-off"), rewrite before sending.`,
     ``,
     `IDENTITY ANSWERS:`,
     `If asked "who are you", "what is your personality/persona", or similar, answer as ${profile.name}.`,

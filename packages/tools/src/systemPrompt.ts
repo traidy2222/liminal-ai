@@ -1,5 +1,6 @@
 import type { Message } from "@liminal/core";
 import type { PersonaConfig } from "@liminal/core";
+import { shellProtocolGuidance } from "@liminal/core";
 import { buildPersonaBlock } from "./persona_presets.js";
 
 /**
@@ -22,6 +23,7 @@ export const PROTOCOL_NAMED_RULES = `## Named rules (IDs — refer in think() wh
 - **R-DEDUP-TOOLS**: In one send, never issue two calls that are the same tool with the same core args and intent (especially memory_query, recall_relevant, read_file on one path, web_fetch on one URL). Batch what you need once; if results are insufficient, widen or rephrase once—then build.
 - **R-CLOSED-ARTIFACT**: For HTML/SVG/XML demos, the artifact must parse: either write one complete minimal runnable file in a single write_file, or write a short skeleton then extend with apply_diff/patch_file. Do not end a write on an open script-module tag or unclosed root—streaming cutoffs create broken files.
 - **R-READ-TOOL-ERRORS**: When a tool returns an error with a fix hint (e.g. edit_file content mode needs overwrite:true, or use apply_diff), do exactly that next—do not ignore the message and try a parallel path that repeats the mistake.
+- **R-SYNTAX-COLUMN**: For **SyntaxError** messages that include **(file:line:column)**, treat **column** as the 1-based index on **that line** from the first character (after read_file line_numbers, the pipe is not part of the source—count only the text to the right). Fix the character or token at that offset; do not assume a whole-line rewrite or confuse **:** with **=** without counting. If edit_file would use identical search and replace strings, stop—that is never a fix.
 - **R-ACTIVE-FIRST**: Prefer the narrowest currently active tool that can solve the step; only activate a new family when no active tool can do it.
 - **R-DECK-PIPELINE**: If user asks for deck/slides/powerpoint/pptx/ppx, prefer document tools and produce PPTX artifact; avoid markdown-only completion unless render fails.
 - **R-TYPECHECK-VERIFY**: After editing typed code (TypeScript, Python with annotations, etc.), run the project's typecheck or build command before claiming the fix is complete — do not assume types pass from visual inspection alone.
@@ -93,7 +95,7 @@ The shell is PowerShell — not bash. Key differences:
 | File exists — insert/remove/rewrite a block of lines | edit_file with diff: (unified hunk; fuzzy matching, line numbers can be ±120 off) |
 | File exists — genuine full rewrite (rare) | edit_file with content + overwrite:true (must be explicit) |
 | Find the exact line before editing | grep_file — returns matches + context lines with line numbers |
-| Read a section of a large file | read_file with offset + limit |
+| Read a section of a large file | read_file with offset + limit; set line_numbers true so each line shows its absolute 1-based line number (matches browser stack traces like file.html:224:20) |
 
 **The one rule:** write_file = new files only. edit_file = everything else. The tools enforce this — write_file will error if the file exists.
 
@@ -101,6 +103,8 @@ The shell is PowerShell — not bash. Key differences:
 1. grep_file(path, pattern, context_lines=4) — locate the broken line and its neighbors
 2. edit_file(path, replacements=[{search: exact_broken_text, replace: fixed_text}]) — fix it
 Never read the whole file and pass it back through write_file — that is always wrong for targeted fixes.
+
+**Browser / runtime line numbers:** Chromium stack traces use **1-based lines in the full saved file**. If you read a chunk without line_numbers, line 1 of the chunk is not file line 1 — call read_file with offset near the reported line (e.g. reportedLine minus 25), limit ~60, and line_numbers true so each printed row is labeled with the real file line index. When the error also gives **:column**, locate that character on the printed line (ignore the line-number gutter before the pipe). After a successful edit_file, if the runtime error would be unchanged, do not re-read the same window in a loop—rethink the hypothesis (R-SYNTAX-COLUMN).
 
 **edit_file diff tips:** Line numbers in the @@ header can be approximate (±120 lines) — the fuzzy matcher finds the right location. Include 2–3 context lines around the change. On mismatch it reports the first unmatched line and a file snippet to help you rebuild the diff.
 
@@ -367,6 +371,8 @@ const CODING_REPO_PROTOCOL = `## Coding / repo discipline
 const SHELL_PARALLEL_TRIAGE = `## Shell parallel failure triage
 - **R-SHELL-TRIAGE**: If several shell commands failed in one send, fully diagnose **one** (cwd, quoting, exit code, env) before launching more parallel guesses. Opaque failures → **Known unknowns** (R-KNOWN-UNKNOWNS), not a story of retries.`;
 
+const SHELL_RUNTIME_PROTOCOL = shellProtocolGuidance();
+
 export type ProtocolIntentHint =
   | "introspection"
   | "knowledge"
@@ -457,6 +463,7 @@ export function buildProtocolDynamicSuffix(
   }
   if ([...names].some((n) => n === "run_shell" || n === "run_background")) {
     parts.push(PROCESS_LIFECYCLE);
+    parts.push(SHELL_RUNTIME_PROTOCOL);
     parts.push(SHELL_PARALLEL_TRIAGE);
   }
   if (names.has("browser_open") || names.has("browser_act")) {

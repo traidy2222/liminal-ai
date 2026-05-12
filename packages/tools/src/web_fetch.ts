@@ -58,9 +58,12 @@ export async function extractReadableHtml(html: string, pageUrl: string): Promis
 
 export async function runWebFetch(
   urlIn: string,
-  maxChars: number
+  maxChars: number,
+  opts?: { includeAssets?: boolean; assetsMax?: number }
 ): Promise<{ ok: true; output: string } | { ok: false; error: string }> {
   const url = unwrapRedirectUrl(urlIn);
+  const includeAssets = opts?.includeAssets ?? false;
+  const assetsMax = Math.max(1, Math.min(100, opts?.assetsMax ?? 30));
   try {
     const retried = await fetchWithRetry(
       url,
@@ -76,6 +79,17 @@ export async function runWebFetch(
     }
 
     const ct = (retried.headers.get("content-type") ?? "").toLowerCase();
+    if (ct.startsWith("image/")) {
+      const size = retried.headers.get("content-length") ?? "unknown";
+      return {
+        ok: true,
+        output:
+          `Direct image URL: ${url}\n` +
+          `content-type: ${ct || "unknown"}\n` +
+          `content-length: ${size}\n` +
+          `Hint: pass this URL (or a downloaded local file) to vision_analyze for image understanding.`,
+      };
+    }
     if (ct.includes("application/pdf") || url.toLowerCase().endsWith(".pdf")) {
       try {
         const buf = Buffer.from(await retried.arrayBuffer());
@@ -98,18 +112,115 @@ export async function runWebFetch(
         .replace(/\s+/g, " ")
         .trim();
 
-    return { ok: true, output: body.slice(0, maxChars) };
+    if (!includeAssets) {
+      return { ok: true, output: body.slice(0, maxChars) };
+    }
+
+    const assets = extractPageAssets(text, url, assetsMax);
+    const sections: string[] = [body.slice(0, maxChars)];
+    if (assets.links.length > 0) {
+      sections.push(
+        "",
+        "## Discovered links",
+        ...assets.links.map((u, i) => `${i + 1}. ${u}`)
+      );
+    }
+    if (assets.images.length > 0) {
+      sections.push(
+        "",
+        "## Discovered image links",
+        ...assets.images.map((u, i) => `${i + 1}. ${u}`),
+        "",
+        "Hint: use vision_analyze on the most relevant image URL or local image file."
+      );
+    }
+
+    return { ok: true, output: sections.join("\n").slice(0, Math.max(maxChars, 12_000)) };
   } catch (err) {
     return { ok: false, error: String(err) };
   }
 }
 
+function toAbsoluteMaybe(raw: string, pageUrl: string): string | null {
+  const t = raw.trim();
+  if (!t) return null;
+  if (t.startsWith("javascript:") || t.startsWith("mailto:") || t.startsWith("tel:")) return null;
+  try {
+    return new URL(t, pageUrl).toString();
+  } catch {
+    return null;
+  }
+}
+
+function collectAttrUrls(html: string, attr: string, pageUrl: string): string[] {
+  const out: string[] = [];
+  const re = new RegExp(`${attr}\\s*=\\s*["']([^"']+)["']`, "gi");
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(html)) !== null) {
+    const abs = toAbsoluteMaybe(m[1] ?? "", pageUrl);
+    if (abs) out.push(abs);
+  }
+  return out;
+}
+
+function collectSrcsetUrls(html: string, pageUrl: string): string[] {
+  const out: string[] = [];
+  const re = /srcset\s*=\s*["']([^"']+)["']/gi;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(html)) !== null) {
+    const entries = (m[1] ?? "").split(",");
+    for (const e of entries) {
+      const first = e.trim().split(/\s+/)[0] ?? "";
+      const abs = toAbsoluteMaybe(first, pageUrl);
+      if (abs) out.push(abs);
+    }
+  }
+  return out;
+}
+
+function dedupeClamp(items: string[], max: number): string[] {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const it of items) {
+    if (seen.has(it)) continue;
+    seen.add(it);
+    out.push(it);
+    if (out.length >= max) break;
+  }
+  return out;
+}
+
+function looksLikeImageUrl(url: string): boolean {
+  return /\.(png|jpg|jpeg|gif|webp|bmp|svg|avif)(\?|#|$)/i.test(url);
+}
+
+function extractPageAssets(
+  html: string,
+  pageUrl: string,
+  maxItems: number
+): { links: string[]; images: string[] } {
+  const hrefs = collectAttrUrls(html, "href", pageUrl);
+  const srcs = collectAttrUrls(html, "src", pageUrl);
+  const dataSrcs = collectAttrUrls(html, "data-src", pageUrl);
+  const srcset = collectSrcsetUrls(html, pageUrl);
+  const all = [...hrefs, ...srcs, ...dataSrcs, ...srcset];
+  const images = dedupeClamp(
+    all.filter((u) => looksLikeImageUrl(u)),
+    maxItems
+  );
+  const links = dedupeClamp(
+    hrefs.filter((u) => u.startsWith("http://") || u.startsWith("https://")),
+    maxItems
+  );
+  return { links, images };
+}
+
 export const webFetchTool = defineTool({
   name: "web_fetch",
   description:
-    "WHAT: Fetch URL content as plain text. Strips HTML; with AGENT_WEB_READABILITY=1 uses Readability on a DOM with author style/script tags removed (JSDOM cannot parse many modern stylesheets; this is article text extraction, not visual layout). PDFs → text when pdf-parse available. Timeout: AGENT_WEB_FETCH_TIMEOUT_MS (default 20s).\n" +
+    "WHAT: Fetch URL content as plain text. Optional discovery of useful links and image URLs from the page for follow-up browsing/vision. Strips HTML; with AGENT_WEB_READABILITY=1 uses Readability on a DOM with author style/script tags removed (JSDOM cannot parse many modern stylesheets; this is article text extraction, not visual layout). PDFs → text when pdf-parse available. Direct image URLs return metadata + vision hint. Timeout: AGENT_WEB_FETCH_TIMEOUT_MS (default 20s).\n" +
     "WHEN: You already have the exact URL — use web_search first to find it.\n" +
-    "ARGS: url — full URL; max_chars — limit (default 8000).",
+    "ARGS: url — full URL; max_chars — body char limit (default 8000); include_assets — append discovered links/image links (default true); assets_max — cap per asset list (default 30, max 100).",
   requiresApproval: false,
   cacheable: true,
   cacheTtlMs: 60_000,
@@ -121,6 +232,14 @@ export const webFetchTool = defineTool({
         type: "number",
         description: "Maximum characters to return (default: 8000)",
       },
+      include_assets: {
+        type: "boolean",
+        description: "Append discovered links and image URLs from page HTML (default: true).",
+      },
+      assets_max: {
+        type: "number",
+        description: "Maximum discovered links/images per section (default: 30, max: 100).",
+      },
     },
     required: ["url"],
     additionalProperties: false,
@@ -128,9 +247,11 @@ export const webFetchTool = defineTool({
   handler: async (args, emit) => {
     const url = args["url"] as string;
     const maxChars = (args["max_chars"] as number | undefined) ?? 8000;
+    const includeAssets = (args["include_assets"] as boolean | undefined) ?? true;
+    const assetsMax = (args["assets_max"] as number | undefined) ?? 30;
     const hostname = (() => { try { return new URL(url).hostname; } catch { return url.slice(0, 50); } })();
     emit?.(`\nfetching ${hostname}…\n`);
-    const result = await runWebFetch(url, maxChars);
+    const result = await runWebFetch(url, maxChars, { includeAssets, assetsMax });
     if (result.ok) emit?.(`  ✓ ${result.output.length} chars\n`);
     return result;
   },

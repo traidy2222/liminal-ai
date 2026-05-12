@@ -203,6 +203,12 @@ export const editFileTool = defineTool({
 
       for (let i = 0; i < replacements.length; i++) {
         const { search, replace, regex = false, flags = "g" } = replacements[i]!;
+        if (search === replace) {
+          report.push(
+            `[${i}] SKIPPED: search and replace are identical (no-op). For SyntaxError (path:line:column), inspect the character at COLUMN on that line—do not confuse : with = in valid object literals.`
+          );
+          continue;
+        }
         let count = 0;
         if (regex) {
           let reFlags = flags.includes("g") ? flags : flags + "g";

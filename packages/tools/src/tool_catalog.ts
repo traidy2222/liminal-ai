@@ -138,7 +138,7 @@ export const TOOL_FAMILIES: Record<string, { description: string; tools: readonl
   },
   harness_ui: {
     description: "Persona, images, structured extraction (requires harness).",
-    tools: ["set_persona", "upload_image", "extract_structured"],
+    tools: ["set_persona", "set_runtime_settings", "upload_image", "extract_structured"],
   },
   orchestration: {
     description: "Sub-agents, critics, world refresh (requires harness).",
