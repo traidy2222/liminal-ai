@@ -123,7 +123,6 @@ export const vaultFirstOrderScenario: Scenario = {
   maxRounds: 14,
   timeoutMs: 90_000,
   env: {
-    AGENT_VAULT_FIRST: "1",
     AGENT_TOOL_LAZY: "1",
   },
   assertions: [

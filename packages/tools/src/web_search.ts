@@ -84,7 +84,7 @@ export const webSearchTool = defineTool({
   description:
     "WHAT: Search the web via DuckDuckGo and return ranked result titles, URLs, and snippets.\n" +
     "WHEN: You need URLs, recent information, documentation, or answers not available in memory/vault.\n" +
-    "BEFORE USING: Check memory/vault first (memory_query or recall_relevant, then vault_search/vault_read) when the question may already be known.\n" +
+    "OPTIONAL: If the question may already be answered locally, consider memory_query, recall_relevant, or vault_search before spending web quota — not required.\n" +
     "RESEARCH DISCIPLINE: For the first web-search batch, diversify query intents (origins/background, latest status, impact/metrics) and avoid lexical duplicates.\n" +
     "NOT WHEN: You already have the URL — call web_fetch directly instead.\n" +
     "ARGS: query — search query string; max_results — number of results to return (default: 5).",

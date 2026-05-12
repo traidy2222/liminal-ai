@@ -78,7 +78,6 @@ For rendered pages, screenshots, or DOM after layout, use Playwright **`browser_
 - `AGENT_VAULT_WRITE_BUDGET`
 - `AGENT_VAULT_REQUIRE_LINKS`
 - `AGENT_VAULT_OBSERVABILITY`
-- `AGENT_VAULT_FIRST_STRICT`
 - `AGENT_MEMORY_EPISODE`
 
 ## Critics and Reliability
@@ -105,7 +104,6 @@ For rendered pages, screenshots, or DOM after layout, use Playwright **`browser_
 
 ## Behavior Notes
 
-- strict vault-first blocking is opt-in (`AGENT_VAULT_FIRST_STRICT=1`)
 - default vault auto-write behavior is research-oriented unless explicitly disabled
 - latest/current web queries are time-anchored to current year by tool normalization
 - conversational self-management persists approved settings into `.agent_runtime_prefs.json`

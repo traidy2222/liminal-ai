@@ -71,7 +71,6 @@ export interface RuntimePreferences {
   runtime?: {
     uiVerbosity?: "normal" | "quiet";
     vaultAutoWriteMode?: "off" | "research" | "aggressive";
-    vaultFirstStrict?: boolean;
     approvalTimeoutMs?: number;
     destructiveGate?: "strict" | "balanced";
     rateLimitMaxRetries?: number;

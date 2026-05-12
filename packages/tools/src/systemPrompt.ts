@@ -324,9 +324,7 @@ When the user asks what tools you have, prefer this concise format:
 1) one-line preface
 2) currently active families
 3) available-on-activation families
-Avoid dumping exhaustive catalogs unless explicitly requested.
-
-**Vault-first / web order (runtime policy):** When strict vault-first may apply (e.g. AGENT_VAULT_FIRST_STRICT=1), prime with **memory_query**, **recall_relevant**, **vault_search** / **vault_read**, **or** **web_research** before the first cold **web_search** on knowledge tasks — avoids mid-run friction. Optional one-line think() preflight: "local + vault primed before web? y/n".`;
+Avoid dumping exhaustive catalogs unless explicitly requested.`;
 
 /**
  * Research-specific named rules — injected only when web tools are active and intent is not coding/execution.

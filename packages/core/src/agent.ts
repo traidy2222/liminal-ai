@@ -204,7 +204,6 @@ function normalizeRuntimePreferencePatch(patch: Partial<RuntimePreferences>): Pa
     const r: NonNullable<RuntimePreferences["runtime"]> = {};
     if (patch.runtime.uiVerbosity) r.uiVerbosity = patch.runtime.uiVerbosity;
     if (patch.runtime.vaultAutoWriteMode) r.vaultAutoWriteMode = patch.runtime.vaultAutoWriteMode;
-    if (typeof patch.runtime.vaultFirstStrict === "boolean") r.vaultFirstStrict = patch.runtime.vaultFirstStrict;
     if (patch.runtime.destructiveGate) r.destructiveGate = patch.runtime.destructiveGate;
     if (patch.runtime.approvalTimeoutMs != null && Number.isFinite(patch.runtime.approvalTimeoutMs)) {
       r.approvalTimeoutMs = clampInt(patch.runtime.approvalTimeoutMs, 10_000, 600_000);
@@ -630,11 +629,6 @@ function hasWeatherFreshEvidence(text: string): boolean {
   );
 }
 
-function isVaultFirstStrictEnabled(): boolean {
-  // Strict blocking is opt-in only.
-  return process.env["AGENT_VAULT_FIRST_STRICT"] === "1";
-}
-
 type VaultAutoWriteMode = "off" | "research" | "aggressive";
 
 function resolveVaultAutoWriteMode(): VaultAutoWriteMode {
@@ -940,18 +934,6 @@ export class AgentHarness {
     return this.turnInference?.intent === "knowledge";
   }
 
-  private hasVaultOrMemoryPrimingThisTurn(): boolean {
-    const used = new Set(this.toolsUsedThisTurn);
-    return (
-      used.has("memory_query") ||
-      used.has("recall_relevant") ||
-      used.has("vault_search") ||
-      used.has("vault_read") ||
-      // web_research already runs a web pipeline; follow-up web_search is refinement, not cold web.
-      used.has("web_research")
-    );
-  }
-
   private rememberChangedPathFromToolCall(toolName: string, argsJson: string, ok: boolean): void {
     if (!ok) return;
     if (!EDIT_TOOL_NAMES.has(toolName)) return;
@@ -1114,36 +1096,6 @@ export class AgentHarness {
     toolName: string,
     args: Record<string, unknown>
   ): { ok: true } | { ok: false; reason: string; severity: "low" | "med" | "high" } {
-    if (
-      isVaultFirstStrictEnabled() &&
-      toolName === "web_search" &&
-      this.isLikelyKnowledgeTask() &&
-      !this.hasVaultOrMemoryPrimingThisTurn()
-    ) {
-      this.emitter.emit("vault_activity", {
-        action: "search",
-        ok: false,
-        reason: "vault_first_blocked_web_search_without_memory_or_vault_priming",
-      });
-      return {
-        ok: false,
-        reason:
-          'Vault-first policy: call memory_query/recall_relevant, vault_search/vault_read, or web_research before web_search for knowledge tasks.',
-        severity: "med",
-      };
-    }
-    if (
-      toolName === "web_search" &&
-      this.isLikelyKnowledgeTask() &&
-      !this.hasVaultOrMemoryPrimingThisTurn()
-    ) {
-      // Advisory telemetry only: we no longer hard-block web search.
-      this.emitter.emit("vault_activity", {
-        action: "search",
-        ok: false,
-        reason: "vault_first_advisory_no_priming_before_web_search",
-      });
-    }
     if (toolName === "web_search") {
       const query = typeof args["query"] === "string" ? args["query"].trim() : "";
       if (query.length >= 8 && this.isLikelyKnowledgeTask()) {
@@ -1324,7 +1276,7 @@ export class AgentHarness {
           role: "system",
           content:
             "Extract runtime preference intent from user text. " +
-            "Return JSON object: {detected:boolean, summary:string, risky:boolean, changes:{provider?:{model?:string,baseURL?:string,keySource?:string},runtime?:{uiVerbosity?:'normal'|'quiet',vaultAutoWriteMode?:'off'|'research'|'aggressive',vaultFirstStrict?:boolean,approvalTimeoutMs?:number,destructiveGate?:'strict'|'balanced',rateLimitMaxRetries?:number,transient5xxMaxRetries?:number,retryMaxDelayMs?:number},persona?:{controls?:{humorPercent?:number,formality?:'very_formal'|'formal'|'casual'|'very_casual'|'mixed',confidence?:number,verbosity?:'compact'|'normal'|'detailed',personaStrength?:number}}}}. " +
+            "Return JSON object: {detected:boolean, summary:string, risky:boolean, changes:{provider?:{model?:string,baseURL?:string,keySource?:string},runtime?:{uiVerbosity?:'normal'|'quiet',vaultAutoWriteMode?:'off'|'research'|'aggressive',approvalTimeoutMs?:number,destructiveGate?:'strict'|'balanced',rateLimitMaxRetries?:number,transient5xxMaxRetries?:number,retryMaxDelayMs?:number},persona?:{controls?:{humorPercent?:number,formality?:'very_formal'|'formal'|'casual'|'very_casual'|'mixed',confidence?:number,verbosity?:'compact'|'normal'|'detailed',personaStrength?:number}}}}. " +
             "Only include fields explicitly requested or strongly implied. " +
             "Treat requests for faster/more autonomous behavior as potentially implying reduced confirmations/guardrails. " +
             "risky=true only when safety controls are reduced (for example: lower approval friction, looser destructive gate); persona style/control changes are not risky. " +
@@ -1473,9 +1425,6 @@ export class AgentHarness {
     }
     if (merged.runtime?.vaultAutoWriteMode) {
       process.env["AGENT_VAULT_AUTO_WRITE"] = merged.runtime.vaultAutoWriteMode;
-    }
-    if (typeof merged.runtime?.vaultFirstStrict === "boolean") {
-      process.env["AGENT_VAULT_FIRST_STRICT"] = merged.runtime.vaultFirstStrict ? "1" : "0";
     }
     if (merged.runtime?.approvalTimeoutMs != null) {
       process.env["AGENT_APPROVAL_TIMEOUT_MS"] = String(merged.runtime.approvalTimeoutMs);

@@ -199,7 +199,6 @@ export const lhVaultGrowthAndReuse: Scenario = {
   env: {
     AGENT_VAULT_AUTO_WRITE: "aggressive",
     AGENT_VAULT_DEDUPE: "1",
-    AGENT_VAULT_FIRST: "1",
   },
   userMessage:
     "Research and summarize how context compression and tool dedup work, then write durable wiki knowledge " +

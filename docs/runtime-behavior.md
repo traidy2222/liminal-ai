@@ -58,7 +58,6 @@ These steps improve output quality and reduce silent regressions.
 Current default behavior:
 
 - retrieval order guidance is advisory (memory -> vault -> web)
-- strict blocking before `web_search` is opt-in (`AGENT_VAULT_FIRST_STRICT=1`)
 - auto-write mode defaults to research-oriented persistence (unless disabled)
 
 ## Temporal Anchoring

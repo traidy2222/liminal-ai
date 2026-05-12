@@ -50,7 +50,7 @@ Recommended order for factual tasks:
 2. vault
 3. web
 
-Default policy is advisory. Strict pre-web blocking is opt-in via `AGENT_VAULT_FIRST_STRICT=1`.
+These steps are **suggestions** only. The harness does not block `web_search` based on prior memory or vault calls.
 
 ## Auto-Write Semantics
 
