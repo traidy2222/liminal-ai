@@ -13,3 +13,15 @@ test("mergeEpistemicState merges files and budget", () => {
   assert.equal(b.budget.usagePct, 44);
   assert.ok(renderEpistemicStateBlock(b).includes("batch ok"));
 });
+
+test("mergeEpistemicState unions filesModified and render shows both file sections", () => {
+  const a = emptyEpistemicState("fix bug");
+  const b = mergeEpistemicState(a, { filesModified: ["src/x.ts"] });
+  const c = mergeEpistemicState(b, { filesModified: ["src/y.ts", "src/x.ts"] });
+  assert.deepEqual(c.filesModified.sort(), ["src/x.ts", "src/y.ts"]);
+  const block = renderEpistemicStateBlock(c);
+  assert.ok(block.includes("## Files read (this send)"));
+  assert.ok(block.includes("## Files modified (this send)"));
+  assert.ok(block.includes("src/x.ts"));
+  assert.ok(block.includes("src/y.ts"));
+});

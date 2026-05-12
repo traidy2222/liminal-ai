@@ -139,6 +139,26 @@ export class ToolDispatcher {
   }
 
   /**
+   * After a successful workspace mutation, drop cached read/index results so the next
+   * tool call sees fresh disk state (read_file cache TTL would otherwise serve stale bodies).
+   */
+  invalidateCachesAfterFileWrites(): void {
+    const prefixes = [
+      "read_file:",
+      "read_file_chunked:",
+      "file_metadata:",
+      "list_dir:",
+      "symbol_index:",
+      "find_references:",
+      "ast_grep:",
+      "repo_map:",
+    ];
+    for (const key of [...this.resultCache.keys()]) {
+      if (prefixes.some((p) => key.startsWith(p))) this.resultCache.delete(key);
+    }
+  }
+
+  /**
    * Call a tool directly, bypassing approval/locking/events.
    * Used internally by the harness for housekeeping (reflexion, recipes).
    */

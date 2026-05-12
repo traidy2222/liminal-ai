@@ -113,6 +113,13 @@ test("runtime prefs preserve cleared persona profile marker", async () => {
       bootstrapCompleted: true,
       sourcePrompt: "default",
       activeProfile: null,
+      controls: {
+        humorPercent: 23,
+        formality: "formal",
+        confidence: 8,
+        verbosity: "compact",
+        personaStrength: 6,
+      },
       updatedAt: Date.now(),
     },
     updatedAt: Date.now(),
@@ -120,6 +127,8 @@ test("runtime prefs preserve cleared persona profile marker", async () => {
   await saveRuntimePreferences(prefs, dir);
   const loaded = await loadRuntimePreferences(dir);
   assert.equal(loaded?.persona?.activeProfile, null);
+  assert.equal(loaded?.persona?.controls?.humorPercent, 23);
+  assert.equal(loaded?.persona?.controls?.verbosity, "compact");
   await rm(dir, { recursive: true, force: true });
 });
 

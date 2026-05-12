@@ -52,6 +52,7 @@ export function emptyEpistemicState(goal: string): EpistemicState {
     subgoals: [],
     hypotheses: [],
     filesTouched: [],
+    filesModified: [],
     openQuestions: [],
     budget: { usagePct: 0, recallK: 8, spareRounds: 16 },
   };
@@ -69,6 +70,10 @@ export function mergeEpistemicState(
       patch.filesTouched !== undefined
         ? [...new Set([...base.filesTouched, ...patch.filesTouched])]
         : [...base.filesTouched],
+    filesModified:
+      patch.filesModified !== undefined
+        ? [...new Set([...base.filesModified, ...patch.filesModified])]
+        : [...base.filesModified],
     lastVerified: patch.lastVerified ?? base.lastVerified,
     openQuestions:
       patch.openQuestions !== undefined ? [...patch.openQuestions] : [...base.openQuestions],
@@ -101,9 +106,13 @@ export function renderEpistemicStateBlock(e: EpistemicState, maxChars = 3500): s
     }
   }
   lines.push("");
-  lines.push("## Files touched (this send)");
+  lines.push("## Files read (this send)");
   if (e.filesTouched.length === 0) lines.push("(none yet)");
   else lines.push(e.filesTouched.slice(-16).join(" | "));
+  lines.push("");
+  lines.push("## Files modified (this send)");
+  if (e.filesModified.length === 0) lines.push("(none yet)");
+  else lines.push(e.filesModified.slice(-16).join(" | "));
   lines.push("");
   lines.push("## Last verified");
   if (e.lastVerified) {

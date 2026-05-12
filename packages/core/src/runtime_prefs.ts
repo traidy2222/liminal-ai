@@ -45,10 +45,19 @@ export interface RuntimePersonaProfile {
   generationSourceHint?: string;
 }
 
+export interface RuntimePersonaControls {
+  humorPercent?: number;
+  formality?: RuntimePersonaSpeechStyle["formality"];
+  confidence?: number;
+  verbosity?: "compact" | "normal" | "detailed";
+  personaStrength?: number;
+}
+
 export interface RuntimePersonaPreferences {
   bootstrapCompleted?: boolean;
   sourcePrompt?: string;
   activeProfile?: RuntimePersonaProfile | null;
+  controls?: RuntimePersonaControls;
   updatedAt?: number;
 }
 

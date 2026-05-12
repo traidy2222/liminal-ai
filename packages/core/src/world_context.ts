@@ -29,6 +29,14 @@ import { resolveWorkspaceRoot } from "./workspace_root.js";
 import { formatFailureDigestForWorldContext } from "./failure_digest.js";
 import { formatGoldenEvalHints } from "./golden_eval.js";
 import { formatRecipeLibraryHints } from "./recipe_library.js";
+import {
+  gatherGitContext,
+  getPlatformIdentity,
+  getShellNote as getShellNoteFromPlatform,
+  resolveShellRuntime,
+  scanActiveDevPorts,
+} from "./platform_context.js";
+import { gatherExternalTerminalSnapshots } from "./terminal_snapshot.js";
 import { execFile as execFileCb } from "node:child_process";
 import { promisify } from "node:util";
 
@@ -186,28 +194,12 @@ async function tryReadFile(filePath: string): Promise<string | null> {
 // ─── 1. System context (synchronous) ─────────────────────────────────────────
 
 function getShell(): string {
-  if (process.platform === "win32") {
-    if (process.env["PSModulePath"]) {
-      const isCore = process.env["PSModulePath"]?.toLowerCase().includes("powershell\\7") ||
-                     process.env["PSModulePath"]?.toLowerCase().includes("powershell/7");
-      return isCore ? "PowerShell 7 (pwsh.exe)" : "Windows PowerShell (powershell.exe)";
-    }
-    return "cmd.exe";
-  }
-  const shellPath = process.env["SHELL"] ?? "/bin/sh";
-  return shellPath.split("/").at(-1) ?? shellPath;
+  return resolveShellRuntime().displayName;
 }
 
-function getOSLabel(): string {
-  const arch = process.arch;
-  if (process.platform === "win32") {
-    const release = os.release();
-    const build = parseInt(release.match(/^10\.0\.(\d+)/)?.[1] ?? "0", 10);
-    const win = build >= 22000 ? "Windows 11" : build >= 10000 ? "Windows 10" : "Windows";
-    return `${win} build ${build} (${arch})`;
-  }
-  if (process.platform === "darwin") return `macOS ${os.release()} (${arch})`;
-  return `Linux ${os.release()} (${arch})`;
+async function getOSLabel(): Promise<string> {
+  const platform = await getPlatformIdentity();
+  return platform.label;
 }
 
 function getUtcOffset(): string {
@@ -227,13 +219,7 @@ function getUsername(): string {
 }
 
 function getShellNote(shell: string): string {
-  if (process.platform === "win32") {
-    if (shell.toLowerCase().includes("powershell"))
-      return "Get-ChildItem (ls), Get-Content (cat), Remove-Item (rm), Copy-Item (cp). Paths: \\ or /.";
-    return "dir (not ls), type (not cat), del (not rm). Paths: \\.";
-  }
-  if (process.platform === "darwin") return `${shell}. BSD utils — use gsed for GNU sed. Paths: /.`;
-  return `${shell}. Paths: /.`;
+  return getShellNoteFromPlatform(resolveShellRuntime());
 }
 
 // ─── 2. System resources ──────────────────────────────────────────────────���──
@@ -335,65 +321,7 @@ async function gatherProject(workspaceRoot: string): Promise<ProjectInfo | null>
 // ─── 4. Git context ───────────────────────────────────────────────────────────
 
 async function gatherGit(workspaceRoot: string): Promise<GitInfo | null> {
-  const gitDir = await findUpward(".git", workspaceRoot);
-  if (!gitDir) return null;
-
-  const gitWorkTree = path.dirname(gitDir);
-
-  const headRaw = await tryReadFile(gitDir);
-  if (!headRaw) return null;
-
-  // .git is a directory — headRaw is a file we tried to read as text which will fail.
-  // We need to read .git/HEAD
-  const headContent = await tryReadFile(path.join(path.dirname(gitDir), ".git", "HEAD")) ??
-                      await tryReadFile(path.join(gitDir, "HEAD"));
-  if (!headContent) return null;
-
-  const branchMatch = headContent.trim().match(/^ref: refs\/heads\/(.+)$/);
-  const branch = branchMatch ? branchMatch[1]! : headContent.trim().slice(0, 12) + " (detached)";
-
-  // Read commit message
-  const commitMsg = (await tryReadFile(
-    path.join(path.dirname(gitDir), ".git", "COMMIT_EDITMSG")
-  ) ?? await tryReadFile(path.join(gitDir, "COMMIT_EDITMSG")) ?? "")
-    .split("\n")[0]?.trim() ?? "";
-
-  // Read commit hash from refs
-  const refFile = branchMatch
-    ? await tryReadFile(path.join(path.dirname(gitDir), ".git", `refs/heads/${branch}`)) ??
-      await tryReadFile(path.join(gitDir, `refs/heads/${branch}`))
-    : null;
-  const commitHash = refFile ? refFile.trim().slice(0, 7) : "unknown";
-
-  // Parse remote URL from .git/config
-  const gitConfig = await tryReadFile(path.join(path.dirname(gitDir), ".git", "config")) ??
-                    await tryReadFile(path.join(gitDir, "config")) ?? "";
-  const remoteMatch = gitConfig.match(/\[remote "origin"\][^[]*url\s*=\s*(.+)/);
-  const remoteUrl = remoteMatch ? remoteMatch[1]!.trim() : null;
-
-  // Check for stash
-  const stashExists = !!(await tryReadFile(
-    path.join(path.dirname(gitDir), ".git", "refs/stash")
-  ) ?? await tryReadFile(path.join(gitDir, "refs/stash")));
-
-  // Git status + commit age (shell calls — fast)
-  const [statusOut, ageOut] = await Promise.all([
-    exec("git", ["status", "--short", "--porcelain"], 800, gitWorkTree),
-    exec("git", ["log", "-1", "--format=%cr"], 800, gitWorkTree),
-  ]);
-
-  const isDirty = !!(statusOut && statusOut.trim().length > 0);
-  const commitAge = ageOut ?? "unknown";
-
-  return {
-    branch,
-    commitHash,
-    commitMessage: commitMsg.slice(0, 72),
-    commitAge,
-    remoteUrl,
-    isDirty,
-    stashCount: stashExists ? 1 : 0, // simplified — just "has stash or not"
-  };
+  return gatherGitContext(workspaceRoot);
 }
 
 // ─── 5. Installed tools probe ─────────────────────────────────────────────────
@@ -448,37 +376,7 @@ async function probeInstalledTools(): Promise<ToolVersions> {
 const DEV_PORTS = [3000, 3001, 3002, 4000, 4200, 5000, 5001, 5173, 5174, 8000, 8080, 8888, 9000, 9229];
 
 async function scanActivePorts(): Promise<PortInfo> {
-  try {
-    let output: string | null;
-    if (process.platform === "win32") {
-      output = await exec("netstat", ["-ano", "-p", "TCP"], 2000);
-    } else {
-      output = await exec("ss", ["-tlnp"], 1500) ?? await exec("netstat", ["-tlnp"], 1500);
-    }
-    if (!output) return { busy: [], free: DEV_PORTS };
-
-    const listening = new Set<number>();
-    if (process.platform === "win32") {
-      // "  TCP    0.0.0.0:3001    0.0.0.0:0    LISTENING    1234"
-      for (const match of output.matchAll(/TCP\s+\S+:(\d+)\s+\S+\s+LISTENING/gi)) {
-        listening.add(parseInt(match[1]!, 10));
-      }
-    } else {
-      // Both ss and netstat: lines with LISTEN contain ":<port> "
-      for (const line of output.split("\n")) {
-        if (!/LISTEN/i.test(line)) continue;
-        const m = line.match(/:(\d+)\s/);
-        if (m) listening.add(parseInt(m[1]!, 10));
-      }
-    }
-
-    return {
-      busy: DEV_PORTS.filter((p) => listening.has(p)),
-      free: DEV_PORTS.filter((p) => !listening.has(p)),
-    };
-  } catch {
-    return { busy: [], free: DEV_PORTS };
-  }
+  return scanActiveDevPorts(DEV_PORTS);
 }
 
 // ─── 7. Environment variable inventory (synchronous) ─────────────────────────
@@ -1150,7 +1048,7 @@ export async function buildWorldContextMessage(options?: WorldContextOptions): P
   const tz      = getTimezone();
   const offset  = getUtcOffset();
   const shell   = getShell();
-  const osLabel = getOSLabel();
+  const osLabel = await getOSLabel();
   const cwd     = workspaceRoot;
   const user    = getUsername();
   const home    = os.homedir();
@@ -1243,6 +1141,24 @@ export async function buildWorldContextMessage(options?: WorldContextOptions): P
     lines.push(sep("Active Ports"));
     if (ports.busy.length > 0) lines.push(`In use:  ${ports.busy.map((p) => `:${p}`).join("  ")}`);
     if (ports.free.length > 0) lines.push(`Free:    ${ports.free.map((p) => `:${p}`).join("  ")}`);
+  }
+
+  const terminalSnapshots = await withDeadline(gatherExternalTerminalSnapshots(), 800);
+  if (terminalSnapshots && terminalSnapshots.entries.length > 0) {
+    lines.push(sep("Terminal Context (opt-in)"));
+    lines.push(`Provenance: ${terminalSnapshots.source}`);
+    for (const entry of terminalSnapshots.entries) {
+      const status =
+        entry.lastExitCode === undefined || Number.isNaN(entry.lastExitCode)
+          ? "running/unknown"
+          : `last_exit=${entry.lastExitCode}`;
+      const cwdLine = entry.cwd ? `  ·  cwd=${entry.cwd}` : "";
+      lines.push(
+        `Terminal #${entry.id}${entry.pid ? ` (pid ${entry.pid})` : ""}  ·  ${status}${cwdLine}`
+      );
+      if (entry.lastCommand) lines.push(`  cmd: ${entry.lastCommand}`);
+      for (const ln of entry.outputPreview) lines.push(`  out: ${ln}`);
+    }
   }
 
   // ── Environment ───────────────────────────────────────────────────────────────

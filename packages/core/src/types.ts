@@ -2,6 +2,7 @@ import type { ChatCompletionMessageParam } from "openai/resources/chat/completio
 import type { TaskOrchestrator } from "./orchestrator.js";
 import type { WorldContextOptions } from "./world_context.js";
 import type { RuntimePreferences } from "./runtime_prefs.js";
+import type { RuntimePersonaControls } from "./runtime_prefs.js";
 
 export type Message = ChatCompletionMessageParam;
 
@@ -557,6 +558,7 @@ export interface AgentEventMap {
   runtime_pref_changed: {
     summary: string;
     persisted: boolean;
+    personaControls?: RuntimePersonaControls;
   };
   runtime_pref_persisted: {
     path: string;

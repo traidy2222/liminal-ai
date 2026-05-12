@@ -26,6 +26,8 @@ export const HARNESS_RULES: Record<string, string> = {
     "For HTML/SVG/XML or other parseables: the first write_file must be a valid minimal document (balanced tags; no half-open script/style blocks). Prefer one complete file, or a tiny runnable skeleton plus apply_diff/patch_file hunks—never a truncated page that needs rescue rewrites.",
   "R-READ-TOOL-ERRORS":
     "When a tool fails with explicit remediation (e.g. edit_file needs overwrite:true; write_file refused because path exists), follow that instruction on the next call—do not cycle tools repeating the same failure mode.",
+  "R-SYNTAX-COLUMN":
+    "For SyntaxError (path:line:column), anchor diagnosis on that column on that physical line—count characters from line start. Do not relabel valid key:value object properties as typos without verifying the exact character at COLUMN. Never emit edit_file replacements where search and replace strings are identical.",
   "R-RESEARCH-BUDGET": "After gathering 3–4 substantive web sources, stop fetching and synthesize — do not keep fetching more sources on the same angle. Prefer web_research for broad queries instead of manual parallel search+fetch loops.",
   "R-SYNTHESIZE-VARY": "In final briefings and summaries, introduce each major theme once; do not repeat the same proper noun, date, or key concept in consecutive sections.",
   "R-MEMORY-SCOPE": "Recalled memory provides background context only. For research tasks on a new topic, do not let prior session topics bias search query construction — build queries from the current ask.",
@@ -87,6 +89,7 @@ export const HARNESS_RULE_RECALL_MESSAGE =
   `- **R-DEDUP-TOOLS**: Within one send, no duplicate memory_query/recall_relevant/read_file/web_fetch with the same intent/args—use first results or change the query once.\n` +
   `- **R-CLOSED-ARTIFACT**: Parseable files (HTML/XML/SVG): first write must be complete minimal valid structure, or skeleton + apply_diff—not truncated half-documents.\n` +
   `- **R-READ-TOOL-ERRORS**: On tool failure, read the error and apply the stated fix (overwrite:true, apply_diff, etc.)—no thrashing across tools.\n` +
+  `- **R-SYNTAX-COLUMN**: SyntaxError (path:line:column) → fix at COLUMN on that line; verify characters; no identical search/replace no-ops.\n` +
   `- **R-RESEARCH-BUDGET**: After gathering 3–4 substantive web sources, stop fetching and synthesize — do not keep fetching more sources on the same angle. Prefer web_research for broad queries instead of manual parallel search+fetch loops.\n` +
   `- **R-SYNTHESIZE-VARY**: In final briefings and summaries, introduce each major theme once; do not repeat the same proper noun, date, or key concept in consecutive sections.\n` +
   `- **R-MEMORY-SCOPE**: Recalled memory provides background context only. For research tasks on a new topic, do not let prior session topics bias search query construction — build queries from the current ask.\n` +
