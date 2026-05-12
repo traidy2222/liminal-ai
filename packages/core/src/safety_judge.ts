@@ -6,6 +6,7 @@ import path from "node:path";
 import type OpenAI from "openai";
 import { guardToolArgs } from "./tool_arg_guard.js";
 import { resolveWorkspaceRoot } from "./workspace_root.js";
+import { withProviderRequestSpacing } from "./provider_request_gate.js";
 
 export type SafetyJudgeSource = "heuristic" | "llm" | "cache";
 
@@ -43,15 +44,21 @@ interface CacheEntry {
 const SHELL_ALLOW_PATTERNS: RegExp[] = [
   /^git\s+(status|diff|log|branch|show)(\s|$)/i,
   /^ls(\s|$)/i,
+  /^dir(\s|$)/i,
+  /^get-childitem(\s|$)/i,
   /^pwd\s*$/i,
+  /^get-location\s*$/i,
   /^whoami\s*$/i,
   /^node\s+(-v|--version)(\s|$)/i,
   /^npm\s+test(\s|$)/i,
   /^npm\s+run\s+typecheck(\s|$)/i,
   /^npx\s+tsc\s+--noEmit(\s|$)/i,
   /^cat\s+/i,
+  /^type\s+/i,
+  /^get-content\s+/i,
   /^echo\s+/i,
   /^which\s+/i,
+  /^where(\.exe)?\s+/i,
 ];
 
 function stableStringify(obj: Record<string, unknown>): string {
@@ -213,27 +220,31 @@ export class SafetyJudge {
     const timer = setTimeout(() => controller.abort(), this.timeoutMs);
 
     try {
-      const res = await this.client.chat.completions.create(
-        {
-          model: this.cfg.model,
-          temperature: 0,
-          max_tokens: 2,
-          messages: [
+      const res = await withProviderRequestSpacing(
+        { apiKey: this.client.apiKey, baseURL: this.client.baseURL },
+        () =>
+          this.client.chat.completions.create(
             {
-              role: "system",
-              content:
-                "You are a binary safety classifier. Reply with exactly one character: " +
-                "`1` if the tool call is destructive (irreversible writes/deletes outside the project, " +
-                "system or credential changes, exfiltration, executing remote code, exposing secrets, " +
-                "opening network attack surface). Otherwise reply `0`. No prose.",
+              model: this.cfg.model,
+              temperature: 0,
+              max_tokens: 2,
+              messages: [
+                {
+                  role: "system",
+                  content:
+                    "You are a binary safety classifier. Reply with exactly one character: " +
+                    "`1` if the tool call is destructive (irreversible writes/deletes outside the project, " +
+                    "system or credential changes, exfiltration, executing remote code, exposing secrets, " +
+                    "opening network attack surface). Otherwise reply `0`. No prose.",
+                },
+                {
+                  role: "user",
+                  content: `tool: ${toolName}\nargs: ${truncated}\nrecent batch: ${batch || "(none)"}`,
+                },
+              ],
             },
-            {
-              role: "user",
-              content: `tool: ${toolName}\nargs: ${truncated}\nrecent batch: ${batch || "(none)"}`,
-            },
-          ],
-        },
-        { signal: controller.signal }
+            { signal: controller.signal }
+          )
       );
 
       const text = res.choices[0]?.message?.content;

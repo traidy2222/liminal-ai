@@ -1,6 +1,7 @@
 /**
  * Optional A-Mem–style wikilink suggestions (OpenRouter JSON).
  */
+import { withProviderRequestSpacing } from "@liminal/core";
 export async function suggestWikilinkLine(params: {
   title: string;
   body: string;
@@ -16,33 +17,37 @@ export async function suggestWikilinkLine(params: {
   );
   const cand = params.candidateTitles.slice(0, 40).join(" | ");
   try {
-    const res = await fetch(`${base}/chat/completions`, {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${apiKey}`,
-        "Content-Type": "application/json",
-        "HTTP-Referer": "https://github.com/liminal-ai",
-        "X-Title": "Liminal-memory-autolink",
-      },
-      body: JSON.stringify({
-        model,
-        temperature: 0,
-        max_tokens: 120,
-        messages: [
-          {
-            role: "system",
-            content:
-              "You suggest 0-3 Obsidian wikilinks for a new note. Reply JSON only: {\"links\":[\"Title1\",...]} " +
-              "Use ONLY titles from the candidate list (exact spelling). Empty array if none fit.",
+    const res = await withProviderRequestSpacing(
+      { apiKey, baseURL: base },
+      () =>
+        fetch(`${base}/chat/completions`, {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${apiKey}`,
+            "Content-Type": "application/json",
+            "HTTP-Referer": "https://github.com/liminal-ai",
+            "X-Title": "Liminal-memory-autolink",
           },
-          {
-            role: "user",
-            content:
-              `New note title: ${params.title}\nBody excerpt:\n${params.body.slice(0, 1200)}\n\nCandidates:\n${cand}`,
-          },
-        ],
-      }),
-    });
+          body: JSON.stringify({
+            model,
+            temperature: 0,
+            max_tokens: 120,
+            messages: [
+              {
+                role: "system",
+                content:
+                  "You suggest 0-3 Obsidian wikilinks for a new note. Reply JSON only: {\"links\":[\"Title1\",...]} " +
+                  "Use ONLY titles from the candidate list (exact spelling). Empty array if none fit.",
+              },
+              {
+                role: "user",
+                content:
+                  `New note title: ${params.title}\nBody excerpt:\n${params.body.slice(0, 1200)}\n\nCandidates:\n${cand}`,
+              },
+            ],
+          }),
+        })
+    );
     if (!res.ok) return null;
     const json = (await res.json()) as {
       choices?: Array<{ message?: { content?: string } }>;

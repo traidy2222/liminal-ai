@@ -10,7 +10,7 @@
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc --noEmit",
-    "test": "tsx --test src/tool_arg_guard.test.ts src/safety_judge.test.ts src/memory_rank.test.ts src/memory_retrieval_eval.test.ts src/epistemic_state.test.ts src/runtime_prefs.test.ts"
+    "test": "tsx --test src/tool_arg_guard.test.ts src/safety_judge.test.ts src/memory_rank.test.ts src/memory_retrieval_eval.test.ts src/epistemic_state.test.ts src/tool_changed_paths.test.ts src/auto_dream.test.ts src/runtime_prefs.test.ts src/platform_context.test.ts src/terminal_snapshot.test.ts src/runtime_persona_controls.test.ts src/provider_request_gate.test.ts src/session_event_log.test.ts"
   },
   "dependencies": {
     "js-tiktoken": "^1.0.12",

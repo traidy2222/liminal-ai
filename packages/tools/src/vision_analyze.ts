@@ -1,6 +1,6 @@
 import { readFile } from "node:fs/promises";
 import { extname, resolve } from "node:path";
-import { resolveVisionProviderConfig } from "@liminal/core";
+import { resolveVisionProviderConfig, withProviderRequestSpacing } from "@liminal/core";
 import { defineTool } from "./helpers.js";
 
 const MIME_MAP: Record<string, string> = {
@@ -79,36 +79,40 @@ export const visionAnalyzeTool = defineTool({
       const controller = new AbortController();
       const tid = setTimeout(() => controller.abort(), timeoutMs);
       try {
-        const res = await fetch(`${provider.baseURL.replace(/\/$/, "")}/chat/completions`, {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            Authorization: `Bearer ${provider.apiKey}`,
-            "HTTP-Referer": "https://github.com/liminal-ai",
-            "X-Title": "Liminal-vision-sidecar",
-          },
-          body: JSON.stringify({
-            model: provider.model,
-            temperature: 0.1,
-            max_tokens: 900,
-            response_format: { type: "json_object" },
-            messages: [
-              {
-                role: "system",
-                content:
-                  "You are a vision extraction sidecar. Return strict JSON only with keys: caption, entities, text_ocr, layout, confidence, uncertainty_notes.",
+        const res = await withProviderRequestSpacing(
+          { apiKey: provider.apiKey, baseURL: provider.baseURL },
+          () =>
+            fetch(`${provider.baseURL.replace(/\/$/, "")}/chat/completions`, {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+                Authorization: `Bearer ${provider.apiKey}`,
+                "HTTP-Referer": "https://github.com/liminal-ai",
+                "X-Title": "Liminal-vision-sidecar",
               },
-              {
-                role: "user",
-                content: [
-                  { type: "text", text: `${prompt}\nReturn concise, grounded observations only.` },
-                  { type: "image_url", image_url: { url: dataUrl.dataUrl, detail } },
+              body: JSON.stringify({
+                model: provider.model,
+                temperature: 0.1,
+                max_tokens: 900,
+                response_format: { type: "json_object" },
+                messages: [
+                  {
+                    role: "system",
+                    content:
+                      "You are a vision extraction sidecar. Return strict JSON only with keys: caption, entities, text_ocr, layout, confidence, uncertainty_notes.",
+                  },
+                  {
+                    role: "user",
+                    content: [
+                      { type: "text", text: `${prompt}\nReturn concise, grounded observations only.` },
+                      { type: "image_url", image_url: { url: dataUrl.dataUrl, detail } },
+                    ],
+                  },
                 ],
-              },
-            ],
-          }),
-          signal: controller.signal,
-        });
+              }),
+              signal: controller.signal,
+            })
+        );
         clearTimeout(tid);
         if (!res.ok) {
           lastErr = `HTTP ${res.status}`;

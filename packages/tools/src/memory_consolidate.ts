@@ -3,9 +3,8 @@
  */
 import { defineTool } from "./helpers.js";
 import { loadNotes, atomicUpdate } from "./notes_store.js";
-import { tokenize } from "@liminal/core";
+import { cosineSimilarity, tokenize, withProviderRequestSpacing } from "@liminal/core";
 import { loadEmbedIndex, saveEmbedIndex, pruneOrphanEmbeddingKeys } from "./memory_index.js";
-import { cosineSimilarity } from "@liminal/core";
 
 function jaccard(a: Set<string>, b: Set<string>): number {
   let inter = 0;
@@ -99,36 +98,40 @@ export const memoryConsolidateTool = defineTool({
       .map((p) => `{"keep":"${p.a}","drop":"${p.b}","reason":"jaccard=${p.sim.toFixed(2)}"}`)
       .join("\n");
 
-    const res = await fetch(`${base}/chat/completions`, {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${apiKey}`,
-        "Content-Type": "application/json",
-        "HTTP-Referer": "https://github.com/liminal-ai",
-        "X-Title": "Liminal-memory-consolidate",
-      },
-      body: JSON.stringify({
-        model,
-        temperature: 0,
-        max_tokens: 500,
-        messages: [
-          {
-            role: "system",
-            content:
-              "You merge duplicate agent memory keys. Reply JSON only: {\"merges\":[{\"keep\":\"fullKey\",\"drop\":\"fullKey\",\"mergedValue\":\"text\"}]} " +
-              "Max 8 merges. Prefer keeping the more informative value. Same keep key only once.",
+    const res = await withProviderRequestSpacing(
+      { apiKey, baseURL: base },
+      () =>
+        fetch(`${base}/chat/completions`, {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${apiKey}`,
+            "Content-Type": "application/json",
+            "HTTP-Referer": "https://github.com/liminal-ai",
+            "X-Title": "Liminal-memory-consolidate",
           },
-          {
-            role: "user",
-            content: `Candidate duplicate pairs (high overlap):\n${pairDesc}\n\nFull values:\n` +
-              pairs
-                .slice(0, 6)
-                .map((p) => `${p.a}=${JSON.stringify(notes[p.a]).slice(0, 200)}…\n${p.b}=${JSON.stringify(notes[p.b]).slice(0, 200)}…`)
-                .join("\n"),
-          },
-        ],
-      }),
-    });
+          body: JSON.stringify({
+            model,
+            temperature: 0,
+            max_tokens: 500,
+            messages: [
+              {
+                role: "system",
+                content:
+                  "You merge duplicate agent memory keys. Reply JSON only: {\"merges\":[{\"keep\":\"fullKey\",\"drop\":\"fullKey\",\"mergedValue\":\"text\"}]} " +
+                  "Max 8 merges. Prefer keeping the more informative value. Same keep key only once.",
+              },
+              {
+                role: "user",
+                content: `Candidate duplicate pairs (high overlap):\n${pairDesc}\n\nFull values:\n` +
+                  pairs
+                    .slice(0, 6)
+                    .map((p) => `${p.a}=${JSON.stringify(notes[p.a]).slice(0, 200)}…\n${p.b}=${JSON.stringify(notes[p.b]).slice(0, 200)}…`)
+                    .join("\n"),
+              },
+            ],
+          }),
+        })
+    );
     if (!res.ok) return { ok: false, error: await res.text() };
     const json = (await res.json()) as { choices?: Array<{ message?: { content?: string } }> };
     const text = json.choices?.[0]?.message?.content ?? "{}";

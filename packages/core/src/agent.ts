@@ -33,7 +33,14 @@ import { bumpRuleHits, getRuleHitCounts } from "./rule_stats.js";
 import { writeYieldSnapshot } from "./session_event_log.js";
 import { SharedMemoryBus } from "./shared_memory_bus.js";
 import { resolveProviderConfig } from "./provider_config.js";
+import { withProviderRequestSpacing } from "./provider_request_gate.js";
 import type { RuntimePreferences, RuntimePersonaProfile } from "./runtime_prefs.js";
+import {
+  applyPersonaControlsToProfile,
+  buildRuntimePersonaBlock,
+  normalizePersonaControlsPatch,
+  personaConfigFromRuntimeProfile,
+} from "./runtime_persona_controls.js";
 import {
   buildAutoDreamPrompt,
   listSessionsTouchedSince,
@@ -227,6 +234,10 @@ function normalizeRuntimePreferencePatch(patch: Partial<RuntimePreferences>): Pa
     if ("activeProfile" in patch.persona) {
       p.activeProfile = patch.persona.activeProfile ?? null;
     }
+    const normalizedControls = normalizePersonaControlsPatch(patch.persona.controls);
+    if (normalizedControls) {
+      p.controls = normalizedControls;
+    }
     if (patch.persona.updatedAt != null && Number.isFinite(patch.persona.updatedAt)) {
       p.updatedAt = Math.max(0, Math.floor(patch.persona.updatedAt));
     }
@@ -360,20 +371,59 @@ function isProviderUnavailableError(err: unknown): boolean {
 
 function getRetryAfterMsFromError(err: unknown): number | null {
   const asAny = err as { headers?: Record<string, string | string[]>; message?: string } | null;
+  const candidates: number[] = [];
+
   const retryAfter = asAny?.headers?.["retry-after"];
   const raw = Array.isArray(retryAfter) ? retryAfter[0] : retryAfter;
   if (raw) {
     const secs = Number(raw);
-    if (Number.isFinite(secs)) return Math.max(0, Math.round(secs * 1000));
+    if (Number.isFinite(secs)) candidates.push(Math.max(0, Math.round(secs * 1000)));
     const ts = Date.parse(raw);
-    if (Number.isFinite(ts)) return Math.max(0, ts - Date.now());
+    if (Number.isFinite(ts)) candidates.push(Math.max(0, ts - Date.now()));
   }
+
   const msg = String(asAny?.message ?? describeError(err));
   const m = msg.match(/retry after\s+(\d+)\s*(ms|s|sec|seconds)?/i);
-  if (!m) return null;
-  const n = parseInt(m[1] ?? "0", 10);
-  const unit = (m[2] ?? "s").toLowerCase();
-  return unit.startsWith("ms") ? n : n * 1000;
+  if (m) {
+    const n = parseInt(m[1] ?? "0", 10);
+    const unit = (m[2] ?? "s").toLowerCase();
+    if (Number.isFinite(n) && n > 0) {
+      candidates.push(unit.startsWith("ms") ? n : n * 1000);
+    }
+  }
+
+  const jsonRetry = msg.match(/"retry_after"\s*:\s*"?(\d+)"?/i);
+  if (jsonRetry) {
+    const n = parseInt(jsonRetry[1] ?? "0", 10);
+    if (Number.isFinite(n) && n > 0) {
+      // Heuristic: small values are usually seconds (OpenRouter / providers).
+      candidates.push(n < 12_000 ? n * 1000 : n);
+    }
+  }
+
+  const upstream = suggestedWaitMsFromUpstreamThrottleMessage(msg);
+  if (upstream != null) candidates.push(upstream);
+
+  if (candidates.length === 0) return null;
+  return Math.max(...candidates.filter((x) => Number.isFinite(x) && x > 0));
+}
+
+/** When the body says upstream is throttling but Retry-After is missing, wait longer before retry. */
+function suggestedWaitMsFromUpstreamThrottleMessage(msg: string): number | null {
+  const t = msg.toLowerCase();
+  if (
+    !/temporarily rate-limited upstream|rate-limited upstream|upstream.*throttl|please retry shortly/.test(
+      t
+    )
+  ) {
+    return null;
+  }
+  const env = process.env["AGENT_UPSTREAM_429_SUGGESTED_WAIT_MS"]?.trim();
+  if (env) {
+    const n = parseInt(env, 10);
+    if (Number.isFinite(n) && n > 0) return Math.min(300_000, n);
+  }
+  return 8000;
 }
 
 function isRetryForeverEnabled(): boolean {
@@ -517,6 +567,7 @@ function buildSessionGreetingUserPrompt(persona?: PersonaConfig): string {
     `You are "${name}". Write the opening 2–4 short sentences **in full voice**: same sentence mechanics, rhythm, and lexical habits ` +
     `as your system identity — including when describing the session or workspace. ` +
     `Welcome them, signal that context is loaded, invite what to work on. ` +
+    `Avoid fixed catchphrase templates and avoid reusing any opener from the previous greeting. ` +
     `Do not call tools. Do not use markdown headings. ` +
     `Skip long capability inventories unless they ask.`
   );
@@ -866,6 +917,7 @@ export class AgentHarness {
   private pendingRiskyPreferenceSummary: string | null = null;
   private turnInference: TurnInferenceResult | null = null;
   private lastAutoDreamScanAt = 0;
+  private autoDreamBackgroundRunning = false;
 
   /**
    * Returns the ContextManager for use by context tools factory.
@@ -1259,7 +1311,7 @@ export class AgentHarness {
   private async maybeHandleRuntimePreferenceIntent(userMessage: string): Promise<void> {
     if (this.agentDepth > 0) return;
     if (
-      !/\b(from now on|going forward|default to|always use|prefer|switch|change|set|be more autonomous|lower confirmations?|fewer confirmations?|quieter|verbosity|retry|timeout|approval|vault|provider|model)\b/i.test(
+      !/\b(from now on|going forward|default to|always use|prefer|switch|change|set|be more autonomous|lower confirmations?|fewer confirmations?|quieter|verbosity|retry|timeout|approval|vault|provider|model|persona|humou?r|formal|confidence|tone|style)\b/i.test(
         userMessage
       )
     ) {
@@ -1272,10 +1324,10 @@ export class AgentHarness {
           role: "system",
           content:
             "Extract runtime preference intent from user text. " +
-            "Return JSON object: {detected:boolean, summary:string, risky:boolean, changes:{provider?:{model?:string,baseURL?:string,keySource?:string},runtime?:{uiVerbosity?:'normal'|'quiet',vaultAutoWriteMode?:'off'|'research'|'aggressive',vaultFirstStrict?:boolean,approvalTimeoutMs?:number,destructiveGate?:'strict'|'balanced',rateLimitMaxRetries?:number,transient5xxMaxRetries?:number,retryMaxDelayMs?:number}}}. " +
+            "Return JSON object: {detected:boolean, summary:string, risky:boolean, changes:{provider?:{model?:string,baseURL?:string,keySource?:string},runtime?:{uiVerbosity?:'normal'|'quiet',vaultAutoWriteMode?:'off'|'research'|'aggressive',vaultFirstStrict?:boolean,approvalTimeoutMs?:number,destructiveGate?:'strict'|'balanced',rateLimitMaxRetries?:number,transient5xxMaxRetries?:number,retryMaxDelayMs?:number},persona?:{controls?:{humorPercent?:number,formality?:'very_formal'|'formal'|'casual'|'very_casual'|'mixed',confidence?:number,verbosity?:'compact'|'normal'|'detailed',personaStrength?:number}}}}. " +
             "Only include fields explicitly requested or strongly implied. " +
             "Treat requests for faster/more autonomous behavior as potentially implying reduced confirmations/guardrails. " +
-            "risky=true when safety controls are reduced (for example: lower approval friction, looser destructive gate). " +
+            "risky=true only when safety controls are reduced (for example: lower approval friction, looser destructive gate); persona style/control changes are not risky. " +
             "summary must be short and concrete.",
         },
         { role: "user", content: userMessage.slice(0, 2000) },
@@ -1324,7 +1376,11 @@ export class AgentHarness {
     }
 
     this.applyRuntimePreferencePatch(normalizedChanges);
-    this.emitter.emit("runtime_pref_changed", { summary, persisted: false });
+    this.emitter.emit("runtime_pref_changed", {
+      summary,
+      persisted: false,
+      personaControls: this.runtimePreferences?.persona?.controls,
+    });
     this.emitter.emit("text", {
       delta: `\n[Runtime] Applied preference change: ${summary}\n`,
       channel: "trace",
@@ -1350,7 +1406,11 @@ export class AgentHarness {
         });
       }
     }
-    this.emitter.emit("runtime_pref_changed", { summary, persisted });
+    this.emitter.emit("runtime_pref_changed", {
+      summary,
+      persisted,
+      personaControls: this.runtimePreferences?.persona?.controls,
+    });
     this.emitter.emit("text", {
       delta:
         `\n[Runtime] Preference change status: ${summary} -> ` +
@@ -1375,6 +1435,10 @@ export class AgentHarness {
       persona: {
         ...(this.runtimePreferences?.persona ?? {}),
         ...(patch.persona ?? {}),
+        controls: {
+          ...(this.runtimePreferences?.persona?.controls ?? {}),
+          ...(patch.persona?.controls ?? {}),
+        },
       },
       updatedAt: Date.now(),
     };
@@ -1427,6 +1491,17 @@ export class AgentHarness {
     }
     if (merged.runtime?.retryMaxDelayMs != null) {
       process.env["AGENT_RETRY_MAX_DELAY_MS"] = String(merged.runtime.retryMaxDelayMs);
+    }
+    if (merged.persona?.activeProfile && merged.persona?.controls) {
+      const nextProfile = applyPersonaControlsToProfile(
+        merged.persona.activeProfile,
+        merged.persona.controls
+      );
+      merged.persona.activeProfile = nextProfile;
+      this.runtimePreferences = merged;
+      this.config.runtimePreferences = merged;
+      const block = buildRuntimePersonaBlock(nextProfile, merged.persona.controls);
+      this.setPersona(personaConfigFromRuntimeProfile(nextProfile), block);
     }
   }
 
@@ -2260,6 +2335,14 @@ export class AgentHarness {
 
   /** AutoDream-style background memory consolidation over recent sessions (env-gated). */
   private async maybeAutoDreamConsolidation(): Promise<void> {
+    // Opening-turn sends (greeting / persona-bootstrap prompt) clear these flags only in
+    // send()'s `finally` after runReActLoop returns. If we start auto-dream from the tail of
+    // runReActLoop, the microtask can run before `finally`, which used to emit a misleading
+    // auto_dream gate: bootstrap_state · session_bootstrap_active (telemetry only, but reads
+    // like the harness is stuck). Skip entirely while those sends are in flight.
+    if (this.sessionGreetingThisSend || this.personaBootstrapPromptThisSend) {
+      return;
+    }
     const cfg = resolveAutoDreamConfig();
     const runId = `dream-${Date.now()}`;
     const emitGate = (
@@ -2425,6 +2508,24 @@ export class AgentHarness {
       });
       await rollbackConsolidationLock(priorMtime);
     }
+  }
+
+  /** Run auto-dream off the critical response path. */
+  private triggerAutoDreamConsolidationBackground(): void {
+    if (this.autoDreamBackgroundRunning) return;
+    this.autoDreamBackgroundRunning = true;
+    void this.maybeAutoDreamConsolidation()
+      .catch((err) => {
+        const msg = err instanceof Error ? err.message : String(err);
+        this.emitter.emit("auto_dream", {
+          stage: "failed",
+          runId: `dream-bg-${Date.now()}`,
+          error: msg.slice(0, 500),
+        });
+      })
+      .finally(() => {
+        this.autoDreamBackgroundRunning = false;
+      });
   }
 
   private async maybeAutoWriteVaultNotes(): Promise<void> {
@@ -3814,8 +3915,10 @@ export class AgentHarness {
       await this.maybePersistEpisodeTurn();
       await this.maybeAutoWriteVaultNotes();
       await this.maybeAutoExtractMemories();
-      await this.maybeAutoDreamConsolidation();
       this.emitTurnEnd("ok");
+      if (!this.sessionGreetingThisSend && !this.personaBootstrapPromptThisSend) {
+        this.triggerAutoDreamConsolidationBackground();
+      }
     }
   }
 
@@ -3847,9 +3950,13 @@ export class AgentHarness {
 
       try {
         // Pass abort signal as RequestOptions (second arg) so hung streams can be cancelled (#3)
-        const stream = (await this.client.chat.completions.create(
-          params,
-          ...(this.abortSignal ? [{ signal: this.abortSignal }] : [])
+        const stream = (await withProviderRequestSpacing(
+          { apiKey: this.config.openRouterApiKey, baseURL: this.config.baseURL },
+          () =>
+            this.client.chat.completions.create(
+              params,
+              ...(this.abortSignal ? [{ signal: this.abortSignal }] : [])
+            )
         )) as Stream<OpenAI.Chat.Completions.ChatCompletionChunk>;
         this.consecutiveProviderFailures = 0;
         return stream;

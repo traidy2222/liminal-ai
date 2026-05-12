@@ -6,6 +6,7 @@
  * turning unstructured notes into typed entities, structuring log output.
  */
 import type { AgentHarness } from "@liminal/core";
+import { withProviderRequestSpacing } from "@liminal/core";
 import { defineTool } from "./helpers.js";
 
 export function createExtractStructuredTool(harness: AgentHarness) {
@@ -59,29 +60,33 @@ export function createExtractStructuredTool(harness: AgentHarness) {
       const timeoutId = setTimeout(() => controller.abort(), 15_000);
 
       try {
-        const response = await fetch(`${baseURL}/chat/completions`, {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            Authorization: `Bearer ${openRouterApiKey}`,
-            "HTTP-Referer": "https://github.com/liminal-ai",
-            "X-Title": "Liminal",
-          },
-          body: JSON.stringify({
-            model,
-            messages: [
-              {
-                role: "system",
-                content: "You are a precise JSON extractor. Output only valid JSON, nothing else.",
+        const response = await withProviderRequestSpacing(
+          { apiKey: openRouterApiKey, baseURL },
+          () =>
+            fetch(`${baseURL}/chat/completions`, {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+                Authorization: `Bearer ${openRouterApiKey}`,
+                "HTTP-Referer": "https://github.com/liminal-ai",
+                "X-Title": "Liminal",
               },
-              { role: "user", content: prompt },
-            ],
-            max_tokens: 1000,
-            temperature: 0,
-            stream: false,
-          }),
-          signal: controller.signal,
-        });
+              body: JSON.stringify({
+                model,
+                messages: [
+                  {
+                    role: "system",
+                    content: "You are a precise JSON extractor. Output only valid JSON, nothing else.",
+                  },
+                  { role: "user", content: prompt },
+                ],
+                max_tokens: 1000,
+                temperature: 0,
+                stream: false,
+              }),
+              signal: controller.signal,
+            })
+        );
 
         if (!response.ok) {
           return { ok: false, error: `Extraction API returned HTTP ${response.status}` };

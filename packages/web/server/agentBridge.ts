@@ -19,6 +19,17 @@ import type { SSEManager } from "./sse.js";
 import type { ApprovalDecision } from "@liminal/core";
 import type { RuntimePreferences } from "@liminal/core";
 
+/** Cap tool_result bodies for SSE so the web client reducer does not freeze on huge JSON. */
+const SSE_TOOL_RESULT_MAX_CHARS = 48_000;
+
+function capSseToolOutput(text: string): string {
+  if (text.length <= SSE_TOOL_RESULT_MAX_CHARS) return text;
+  return (
+    text.slice(0, SSE_TOOL_RESULT_MAX_CHARS) +
+    `\n\n[SSE: output truncated after ${SSE_TOOL_RESULT_MAX_CHARS} characters for UI performance]`
+  );
+}
+
 function resolveSafetyJudge():
   | { enabled: true; model?: string }
   | undefined {
@@ -152,7 +163,7 @@ export class AgentBridge {
         name: p.name,
         args: p.args,
         ok: p.result.ok,
-        output: p.result.ok ? p.result.output : p.result.error,
+        output: capSseToolOutput(p.result.ok ? p.result.output : p.result.error),
       })
     );
     emitter.on("turn_end", (p) => { this.stopHeartbeat(); this.sse.send("turn_end", p); });
@@ -299,13 +310,14 @@ export class AgentBridge {
         "generating",
         "Generating persona, soul blueprint, and style lexicon with the model..."
       );
-      const profile = await generatePersonaFromInput(
+      const bundle = await generatePersonaFromInput(
         this.harness,
         parsed.coreInput,
         parsed.strength,
         parsed.modifier,
         (stage, message) => this.emitBootstrapProgress(stage, message)
       );
+      const profile = bundle.profile;
       this.emitBootstrapProgress("applying", "Applying persona context to the runtime...");
       await applyPersonaProfileToHarness(this.harness, profile);
       this.emitBootstrapProgress("persisting", "Persisting persona profile and bootstrap state...");
@@ -315,6 +327,7 @@ export class AgentBridge {
             bootstrapCompleted: true,
             sourcePrompt: parsed.coreInput,
             activeProfile: profile,
+            controls: bundle.defaultControls,
             updatedAt: Date.now(),
           },
         },

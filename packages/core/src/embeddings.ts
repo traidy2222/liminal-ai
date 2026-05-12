@@ -1,6 +1,7 @@
 /**
  * OpenAI-compatible embedding fetch (OpenRouter, OpenAI, etc.).
  */
+import { withProviderRequestSpacing } from "./provider_request_gate.js";
 
 export function cosineSimilarity(a: number[], b: number[]): number {
   if (a.length !== b.length || a.length === 0) return 0;
@@ -30,30 +31,35 @@ export async function fetchEmbeddings(params: {
   signal?: AbortSignal;
 }): Promise<EmbedBatchResult> {
   const url = `${params.baseURL.replace(/\/$/, "")}/embeddings`;
-  const res = await fetch(url, {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${params.apiKey}`,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({
-      model: params.model,
-      input: params.inputs.length === 1 ? params.inputs[0] : params.inputs,
-    }),
-    signal: params.signal,
-  });
-  if (!res.ok) {
-    const t = await res.text();
-    throw new Error(`embeddings HTTP ${res.status}: ${t.slice(0, 400)}`);
-  }
-  const json = (await res.json()) as {
-    data?: Array<{ embedding: number[] }>;
-    model?: string;
-  };
-  const rows = json.data ?? [];
-  const vectors = rows.map((r) => r.embedding);
-  if (vectors.length !== params.inputs.length) {
-    throw new Error("embeddings response length mismatch");
-  }
-  return { vectors, model: json.model ?? params.model };
+  return withProviderRequestSpacing(
+    { apiKey: params.apiKey, baseURL: params.baseURL },
+    async () => {
+      const res = await fetch(url, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${params.apiKey}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          model: params.model,
+          input: params.inputs.length === 1 ? params.inputs[0] : params.inputs,
+        }),
+        signal: params.signal,
+      });
+      if (!res.ok) {
+        const t = await res.text();
+        throw new Error(`embeddings HTTP ${res.status}: ${t.slice(0, 400)}`);
+      }
+      const json = (await res.json()) as {
+        data?: Array<{ embedding: number[] }>;
+        model?: string;
+      };
+      const rows = json.data ?? [];
+      const vectors = rows.map((r) => r.embedding);
+      if (vectors.length !== params.inputs.length) {
+        throw new Error("embeddings response length mismatch");
+      }
+      return { vectors, model: json.model ?? params.model };
+    }
+  );
 }

@@ -9,7 +9,7 @@ import {
   setRunStage,
 } from "./doc_engine.js";
 import { isStyleDiverseEnough } from "./doc_style_memory.js";
-import { resolveProviderConfig } from "@liminal/core";
+import { resolveProviderConfig, withProviderRequestSpacing } from "@liminal/core";
 import type { DocumentIR } from "@liminal/core";
 
 function makeDocId(title: string): string {
@@ -31,35 +31,39 @@ async function synthesizeStyleFromIntent(
     const controller = new AbortController();
     const tid = setTimeout(() => controller.abort(), 10_000);
     try {
-      const res = await fetch(`${provider.baseURL.replace(/\/$/, "")}/chat/completions`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${provider.apiKey}`,
-          "HTTP-Referer": "https://github.com/liminal-ai",
-          "X-Title": "Liminal-doc-style",
-        },
-        body: JSON.stringify({
-          model: fastModel,
-          temperature: 0.4,
-          max_tokens: 320,
-          response_format: { type: "json_object" },
-          messages: [
-            {
-              role: "system",
-              content:
-                `You are a presentation design system. Given a style intent, return concrete hex colors and font choices as strict JSON.\n` +
-                `Allowed fonts: ${ALLOWED_FONTS.join(", ")}.\n` +
-                `Return ONLY valid JSON with keys: background (6-digit hex), foreground (6-digit hex), accent (6-digit hex), muted (6-digit hex), heading (font name from allowed list), body (font name from allowed list), description (one concise sentence like "Dark navy + gold accent for premium finance").`,
+      const res = await withProviderRequestSpacing(
+        { apiKey: provider.apiKey, baseURL: provider.baseURL },
+        () =>
+          fetch(`${provider.baseURL.replace(/\/$/, "")}/chat/completions`, {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              Authorization: `Bearer ${provider.apiKey}`,
+              "HTTP-Referer": "https://github.com/liminal-ai",
+              "X-Title": "Liminal-doc-style",
             },
-            {
-              role: "user",
-              content: `Style intent: "${intent}"\nPresentation title: "${title}", audience: "${audience}", tone: "${tone}"\nReturn colors that match the style intent with high contrast (foreground vs background ratio ≥4.5:1).`,
-            },
-          ],
-        }),
-        signal: controller.signal,
-      });
+            body: JSON.stringify({
+              model: fastModel,
+              temperature: 0.4,
+              max_tokens: 320,
+              response_format: { type: "json_object" },
+              messages: [
+                {
+                  role: "system",
+                  content:
+                    `You are a presentation design system. Given a style intent, return concrete hex colors and font choices as strict JSON.\n` +
+                    `Allowed fonts: ${ALLOWED_FONTS.join(", ")}.\n` +
+                    `Return ONLY valid JSON with keys: background (6-digit hex), foreground (6-digit hex), accent (6-digit hex), muted (6-digit hex), heading (font name from allowed list), body (font name from allowed list), description (one concise sentence like "Dark navy + gold accent for premium finance").`,
+                },
+                {
+                  role: "user",
+                  content: `Style intent: "${intent}"\nPresentation title: "${title}", audience: "${audience}", tone: "${tone}"\nReturn colors that match the style intent with high contrast (foreground vs background ratio ≥4.5:1).`,
+                },
+              ],
+            }),
+            signal: controller.signal,
+          })
+      );
       clearTimeout(tid);
       if (!res.ok) return {};
       const json = (await res.json()) as { choices?: Array<{ message?: { content?: string } }> };

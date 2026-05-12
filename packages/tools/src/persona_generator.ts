@@ -1,7 +1,18 @@
 import OpenAI from "openai";
-import { completeChatJson, getFastModelSlug } from "@liminal/core";
+import {
+  completeChatJson,
+  getFastModelSlug,
+  normalizePersonaControlsPatch,
+  withProviderRequestSpacing,
+  type RuntimePersonaControls,
+} from "@liminal/core";
 import type { PersonaProfile } from "./persona_presets.js";
 export type PersonaProgressFn = (stage: string, message: string) => void;
+
+export interface PersonaGenerationBundle {
+  profile: PersonaProfile;
+  defaultControls: RuntimePersonaControls;
+}
 
 /** LLM-inferred voice context (genre-agnostic); used to ground drafts and envelope-led fallbacks. */
 export interface PersonaVoiceEnvelope {
@@ -135,6 +146,121 @@ export async function generatePersonaProfile(
 
   profile = ensureProfileComplete(profile, input, strength, modifier, voiceEnvelope);
   return profile;
+}
+
+export function deriveDeterministicControls(
+  profile: PersonaProfile,
+  strength: number
+): RuntimePersonaControls {
+  const formality = profile.speechStyle.formality;
+  const confidence = Math.max(0, Math.min(10, Math.round(profile.tone.confidence)));
+  const personaStrength = Math.max(1, Math.min(10, Math.round(profile.strength || strength)));
+  let verbosity: RuntimePersonaControls["verbosity"] = "normal";
+  const rhythm = profile.speechStyle.rhythm.toLowerCase();
+  if (/short|dense|minimal|staccato|tight/.test(rhythm)) verbosity = "compact";
+  else if (/long|explan|detailed|expanded/.test(rhythm)) verbosity = "detailed";
+
+  let humorPercent = 40;
+  const hs = profile.tone.humorStyle.toLowerCase();
+  if (/off|none|plain/.test(hs)) humorPercent = 0;
+  else if (/very light|subtle/.test(hs)) humorPercent = 20;
+  else if (/dry|situational/.test(hs)) humorPercent = 35;
+  else if (/moderate/.test(hs)) humorPercent = 55;
+  else if (/high|very high|energetic/.test(hs)) humorPercent = 80;
+
+  return { humorPercent, formality, confidence, verbosity, personaStrength };
+}
+
+async function requestPersonaDefaultControls(args: {
+  profile: PersonaProfile;
+  input: string;
+  strength: number;
+  modifier?: string;
+  apiKey: string;
+  model: string;
+  baseURL: string;
+}): Promise<RuntimePersonaControls> {
+  const systemPrompt =
+    "You infer runtime persona controls from a completed persona profile. Return JSON only with numeric/enum values.";
+  const userPrompt = `Given this finalized persona profile, produce runtime controls that best match its natural written voice.
+
+Persona profile JSON:
+${JSON.stringify(args.profile, null, 2)}
+
+Original request: "${args.input.slice(0, 1200)}"
+Strength input: ${args.strength}/10
+Modifier: ${args.modifier ? `"${args.modifier}"` : "null"}
+
+Return JSON with exact keys:
+{
+  "humorPercent": 0-100,
+  "formality": "very_formal|formal|casual|very_casual|mixed",
+  "confidence": 0-10,
+  "verbosity": "compact|normal|detailed",
+  "personaStrength": 1-10
+}
+
+Rules:
+- Match the profile's actual cadence/diction (phonetic feel), not generic defaults.
+- humorPercent is frequency/intensity of humor in normal replies.
+- Keep values coherent with profile.tone and profile.speechStyle.
+- No prose, JSON only.`;
+
+  const raw = await callPersonaModel(
+    args.apiKey,
+    getFastModelSlug(args.model),
+    args.baseURL,
+    systemPrompt,
+    userPrompt,
+    300,
+    0.1
+  );
+  const normalized = normalizePersonaControlsPatch({
+    humorPercent: Number(raw["humorPercent"]),
+    formality: String(raw["formality"] ?? "") as RuntimePersonaControls["formality"],
+    confidence: Number(raw["confidence"]),
+    verbosity: String(raw["verbosity"] ?? "") as RuntimePersonaControls["verbosity"],
+    personaStrength: Number(raw["personaStrength"]),
+  });
+  if (!normalized) throw new Error("controls_normalization_failed");
+  return normalized;
+}
+
+export async function generatePersonaBundle(
+  input: string,
+  strength: number,
+  modifier: string | undefined,
+  apiKey: string,
+  model: string,
+  baseURL: string,
+  onProgress?: PersonaProgressFn
+): Promise<PersonaGenerationBundle> {
+  const profile = await generatePersonaProfile(
+    input,
+    strength,
+    modifier,
+    apiKey,
+    model,
+    baseURL,
+    onProgress
+  );
+  onProgress?.("controls_pass", "Generating runtime controls that match persona voice...");
+  let defaultControls: RuntimePersonaControls;
+  try {
+    defaultControls = await requestPersonaDefaultControls({
+      profile,
+      input,
+      strength,
+      modifier,
+      apiKey,
+      model,
+      baseURL,
+    });
+  } catch {
+    defaultControls = deriveDeterministicControls(profile, strength);
+  }
+  const normalized = normalizePersonaControlsPatch(defaultControls) ?? deriveDeterministicControls(profile, strength);
+  return { profile, defaultControls: normalized };
 }
 
 export async function generatePersonaSoulArtifacts(
@@ -1417,26 +1543,30 @@ async function callPersonaModel(
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
     try {
-      const response = await fetch(`${baseURL}/chat/completions`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${apiKey}`,
-          "HTTP-Referer": "https://github.com/liminal-ai",
-          "X-Title": "Liminal",
-        },
-        body: JSON.stringify({
-          model,
-          messages: [
-            { role: "system", content: systemPrompt },
-            { role: "user", content: userPrompt },
-          ],
-          max_tokens: maxTokens,
-          temperature,
-          stream: false,
-        }),
-        signal: controller.signal,
-      });
+      const response = await withProviderRequestSpacing(
+        { apiKey, baseURL },
+        () =>
+          fetch(`${baseURL}/chat/completions`, {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              Authorization: `Bearer ${apiKey}`,
+              "HTTP-Referer": "https://github.com/liminal-ai",
+              "X-Title": "Liminal",
+            },
+            body: JSON.stringify({
+              model,
+              messages: [
+                { role: "system", content: systemPrompt },
+                { role: "user", content: userPrompt },
+              ],
+              max_tokens: maxTokens,
+              temperature,
+              stream: false,
+            }),
+            signal: controller.signal,
+          })
+      );
       if (!response.ok) throw new Error(`LLM API returned HTTP ${response.status}`);
       const data = (await response.json()) as {
         choices?: Array<{ message?: { content?: string } }>;

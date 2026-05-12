@@ -72,6 +72,12 @@ export type {
 } from "./types.js";
 export { getFastModelSlug, completeChatJson } from "./router.js";
 export type { JsonCompletionResult } from "./router.js";
+export {
+  withProviderRequestSpacing,
+  providerSpacingKey,
+  resolveProviderMinIntervalMs,
+} from "./provider_request_gate.js";
+export type { ProviderCredentials } from "./provider_request_gate.js";
 export { rewriteQueryForRecall } from "./query_rewrite.js";
 export type { RewriteQueryResult } from "./query_rewrite.js";
 export {
@@ -100,7 +106,13 @@ export {
 } from "./output_distill.js";
 export type { DistilledOutput } from "./output_distill.js";
 export { appendFailureLog, failureLogPath } from "./failure_log.js";
-export { attachSessionEventLog, maybeAttachSessionEventLog, writeYieldSnapshot } from "./session_event_log.js";
+export {
+  attachSessionEventLog,
+  maybeAttachSessionEventLog,
+  writeYieldSnapshot,
+  resolveSessionTextLogMode,
+  sessionTraceLogEnabled,
+} from "./session_event_log.js";
 export type { YieldSnapshot } from "./session_event_log.js";
 export { appendGoldenEvalRecord } from "./golden_eval.js";
 export { resolveProviderConfig, resolveVisionProviderConfig } from "./provider_config.js";
@@ -114,9 +126,16 @@ export {
 export type {
   RuntimePreferences,
   ProviderKeySource,
+  RuntimePersonaControls,
   RuntimePersonaProfile,
   RuntimePersonaPreferences,
 } from "./runtime_prefs.js";
+export {
+  normalizePersonaControlsPatch,
+  applyPersonaControlsToProfile,
+  personaConfigFromRuntimeProfile,
+  buildRuntimePersonaBlock,
+} from "./runtime_persona_controls.js";
 export {
   DEFAULT_IMAGE_ATTACHMENT_LIMITS,
   isSupportedImageMimeType,
@@ -136,6 +155,22 @@ export type {
 } from "./input_semantics.js";
 export { SharedMemoryBus } from "./shared_memory_bus.js";
 export type { BusListener } from "./shared_memory_bus.js";
+export {
+  resolveShellRuntime,
+  getShellNote,
+  getPlatformIdentity,
+  gatherGitContext,
+  scanActiveDevPorts,
+  shellProtocolGuidance,
+} from "./platform_context.js";
+export type {
+  ShellRuntime,
+  PlatformIdentity,
+  GitContext,
+  PortContext,
+} from "./platform_context.js";
+export { gatherExternalTerminalSnapshots } from "./terminal_snapshot.js";
+export type { TerminalSnapshotSummary } from "./terminal_snapshot.js";
 export {
   bumpRuleHits,
   extractRuleIds,
