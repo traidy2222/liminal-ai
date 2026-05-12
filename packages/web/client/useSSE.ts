@@ -716,8 +716,31 @@ export function useSSE() {
       });
       es.addEventListener("runtime_pref_changed", (e: MessageEvent) => {
         trackId(e);
-        const p = JSON.parse(e.data) as { summary: string; persisted: boolean };
-        dispatch({ type: "text", payload: { channel: "trace", delta: `\n[prefs] changed persisted=${p.persisted ? "yes" : "no"} ${p.summary}\n` } });
+        const p = JSON.parse(e.data) as {
+          summary: string;
+          persisted: boolean;
+          personaControls?: {
+            humorPercent?: number;
+            formality?: string;
+            confidence?: number;
+            verbosity?: string;
+            personaStrength?: number;
+          };
+        };
+        const controls = p.personaControls
+          ? Object.entries(p.personaControls)
+              .filter(([, v]) => v !== undefined)
+              .map(([k, v]) => `${k}=${String(v)}`)
+              .join(", ")
+          : "";
+        const controlsSuffix = controls ? ` controls=[${controls}]` : "";
+        dispatch({
+          type: "text",
+          payload: {
+            channel: "trace",
+            delta: `\n[prefs] changed persisted=${p.persisted ? "yes" : "no"} ${p.summary}${controlsSuffix}\n`,
+          },
+        });
       });
       es.addEventListener("runtime_pref_persisted", (e: MessageEvent) => {
         trackId(e);

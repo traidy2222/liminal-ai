@@ -550,12 +550,23 @@ export function useAgent(harness: AgentHarness) {
         delta: `\n[prefs] detected risky=${p.risky ? "yes" : "no"} ${p.summary}\n`,
       })
     );
-    emitter.on("runtime_pref_changed", (p) =>
+    emitter.on("runtime_pref_changed", (raw) => {
+      const p = raw as {
+        summary: string;
+        persisted: boolean;
+        personaControls?: Record<string, unknown>;
+      };
+      const controls = p.personaControls
+        ? ` controls=[${Object.entries(p.personaControls)
+            .filter(([, v]) => v !== undefined)
+            .map(([k, v]) => `${k}=${String(v)}`)
+            .join(", ")}]`
+        : "";
       dispatch({
         type: "trace_delta",
-        delta: `\n[prefs] changed persisted=${p.persisted ? "yes" : "no"} ${p.summary}\n`,
-      })
-    );
+        delta: `\n[prefs] changed persisted=${p.persisted ? "yes" : "no"} ${p.summary}${controls}\n`,
+      });
+    });
     emitter.on("runtime_pref_persisted", (p) =>
       dispatch({
         type: "trace_delta",
@@ -630,12 +641,13 @@ export function useAgent(harness: AgentHarness) {
               await harness.sendSessionGreeting();
               return;
             }
-            const profile = await generatePersonaFromInput(
+            const bundle = await generatePersonaFromInput(
               harness,
               parsed.coreInput,
               parsed.strength,
               parsed.modifier
             );
+            const profile = bundle.profile;
             await applyPersonaProfileToHarness(harness, profile);
             await harness.patchRuntimePreferences(
               {
@@ -643,6 +655,7 @@ export function useAgent(harness: AgentHarness) {
                   bootstrapCompleted: true,
                   sourcePrompt: parsed.coreInput,
                   activeProfile: profile,
+                  controls: bundle.defaultControls,
                   updatedAt: Date.now(),
                 },
               },

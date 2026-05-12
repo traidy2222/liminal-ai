@@ -434,7 +434,7 @@ function SystemsPanel({
               }}>
                 {value}
               </span>
-            </div>
+        </div>
           ))}
         </div>
       </HudPanel>
@@ -469,7 +469,7 @@ function SystemsPanel({
                       maxWidth: 128,
                     }}>
                       {s.goal.length > 24 ? s.goal.slice(0, 23) + "…" : s.goal}
-                    </span>
+            </span>
                   </div>
                 </div>
               );
@@ -477,9 +477,9 @@ function SystemsPanel({
             {subtasks.length > 10 && (
               <div style={{ fontSize: 8, color: "rgba(0,212,255,0.25)", fontFamily: "monospace", paddingLeft: 14 }}>
                 +{subtasks.length - 10} more
-              </div>
-            )}
           </div>
+        )}
+      </div>
         </HudPanel>
       )}
 
@@ -497,20 +497,20 @@ function SystemsPanel({
             <div style={{ fontSize: 9, color: "rgba(0,212,255,0.6)", fontFamily: "monospace" }}>
               gate: {autoDream.gate.name} · {autoDream.gate.passed ? "pass" : "wait"}
               {autoDream.gate.reason ? ` · ${autoDream.gate.reason}` : ""}
-            </div>
-          )}
+          </div>
+        )}
           {autoDream.progress && (
             <div style={{ fontSize: 9, color: "rgba(0,212,255,0.6)", fontFamily: "monospace" }}>
               {autoDream.progress.step}
               {typeof autoDream.progress.sessionsFound === "number" ? ` · sessions=${autoDream.progress.sessionsFound}` : ""}
               {typeof autoDream.progress.upserts === "number" ? ` · upserts=${autoDream.progress.upserts}` : ""}
               {typeof autoDream.progress.deletes === "number" ? ` · deletes=${autoDream.progress.deletes}` : ""}
-            </div>
-          )}
+          </div>
+        )}
           {autoDream.result && (
             <div style={{ fontSize: 9, color: "rgba(0,255,136,0.6)", fontFamily: "monospace" }}>
               done in {formatElapsed(autoDream.result.durationMs)} · +{autoDream.result.upserts} / -{autoDream.result.deletes}
-            </div>
+      </div>
           )}
           {autoDream.error && (
             <div style={{ fontSize: 9, color: "rgba(255,34,68,0.75)", fontFamily: "monospace" }}>
@@ -563,14 +563,14 @@ const ActivityStream = memo(function ActivityStream({ toolCalls, toolResultMap }
             animation: "data-pulse 0.75s ease-in-out infinite",
           }} />
         )}
-      </div>
+            </div>
 
       {/* Rows */}
       <div style={{ flex: 1, overflowY: "auto", padding: "3px 0" }}>
         {recent.length === 0 && (
           <div style={{ padding: "28px 12px", textAlign: "center", color: "rgba(0,212,255,0.18)", fontSize: 10, fontFamily: "monospace" }}>
             awaiting activity…
-          </div>
+            </div>
         )}
         {recent.map((tc) => {
           const cat   = CATEGORY_META[getToolCategory(tc.name)];
@@ -701,7 +701,7 @@ function ToolCard({ entry, result }: { entry: ToolCallEntry; result?: ToolResult
               {arg}
             </span>
           )}
-        </div>
+            </div>
         <div style={{ display: "flex", alignItems: "center", gap: 7, flexShrink: 0 }}>
           {displayMs !== null && <span style={{ color: "#334455", fontSize: 10 }}>{formatElapsed(displayMs)}</span>}
           <span style={{
@@ -711,7 +711,7 @@ function ToolCard({ entry, result }: { entry: ToolCallEntry; result?: ToolResult
           }}>
             {sm.icon} {sm.label}
           </span>
-        </div>
+          </div>
       </div>
 
       {streamTail && (
@@ -730,7 +730,7 @@ function ToolCard({ entry, result }: { entry: ToolCallEntry; result?: ToolResult
       {isActive && !result && !streamTail && (
         <div style={{ marginTop: 5 }}>
           <span style={{ color: "#223344", fontSize: 10, fontStyle: "italic" }}>running…</span>
-        </div>
+            </div>
       )}
 
       {result && result.output.trim() && (
@@ -793,7 +793,7 @@ function ToolGroupCard({ group, toolResultMap }: { group: ToolCallGroup; toolRes
           <span style={{ color: "#ccddee", fontWeight: 700, fontSize: 12 }}>{group.name}</span>
           <span style={{ color: "#334455", fontSize: 10 }}>× {group.entries.length} parallel</span>
           {runningCount > 0 && <span style={{ color: CYAN, fontSize: 10 }}>{runningCount} running</span>}
-        </div>
+          </div>
         <div style={{ display: "flex", alignItems: "center", gap: 7 }}>
           <span style={{ color: statusColor, fontSize: 10, fontWeight: 700, background: `${statusColor}14`, border: `1px solid ${statusColor}38`, borderRadius: 3, padding: "1px 6px" }}>
             {statusIcon} {doneCount}/{group.entries.length} done{errorCount > 0 ? ` · ${errorCount} failed` : ""}
@@ -1308,7 +1308,7 @@ export function App() {
 
   // ── Render ───────────────────────────────────────────────────────────────────
 
-  return (
+      return (
     <div style={styles.root}>
       <style>{CSS_ANIMATIONS}</style>
 
@@ -1543,8 +1543,8 @@ export function App() {
               Describe how you want the assistant to sound. Example: tone, cadence, confidence, humor, and inspirations.
             </div>
             {bootstrapSubmitting && (
-              <div
-                style={{
+        <div
+          style={{
                   marginBottom: 10,
                   padding: "8px 10px",
                   border: "1px solid rgba(0,212,255,0.25)",
@@ -1634,8 +1634,8 @@ export function App() {
           </div>
         </div>
       )}
-    </div>
-  );
+        </div>
+      );
 }
 
 // ── Styles ────────────────────────────────────────────────────────────────────
