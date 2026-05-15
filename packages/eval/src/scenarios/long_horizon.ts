@@ -257,6 +257,28 @@ export const lhStreamCleanlinessScenario: Scenario = {
   ],
 };
 
+export const lhDependencyAndHandoffQuality: Scenario = {
+  name: "long-horizon-dependency-and-handoff-quality",
+  tags: ["slow", "critic"],
+  maxRounds: 28,
+  userMessage:
+    "Spawn task A to summarize packages/core/src/context.ts, then spawn task B with depends_on=[A] to refine A's output into a final checklist. " +
+    "Wait for both tasks and provide a merged final answer.",
+  assertions: [
+    { name: "spawn used", check: (t) => traceHasTool(t, "spawn_agent") },
+    { name: "wait used", check: (t) => traceHasTool(t, "wait_for_agents") },
+    {
+      name: "handoff writes observed",
+      check: (t) => t.some((e) => e.type === "subtask_handoff_written"),
+    },
+    {
+      name: "no dependency violation",
+      check: (t) => !t.some((e) => e.type === "spawn_contract_violation"),
+    },
+    { name: "clean termination", check: (t) => traceTerminatedCleanly(t) },
+  ],
+};
+
 export const LONG_HORIZON_SCENARIOS: Scenario[] = [
   lhPlanMemoryCodeCritic,
   lhOrchestrationMergeVerify,
@@ -269,5 +291,6 @@ export const LONG_HORIZON_SCENARIOS: Scenario[] = [
   lhVaultGrowthAndReuse,
   lhResearchSynthesisChecklist,
   lhStreamCleanlinessScenario,
+  lhDependencyAndHandoffQuality,
 ];
 

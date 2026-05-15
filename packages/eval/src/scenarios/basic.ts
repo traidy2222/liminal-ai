@@ -8,7 +8,6 @@
 import type { Scenario } from "../runner.js";
 import {
   traceHasTool,
-  traceHasOrderedTools,
   traceHasTurnEnd,
   traceGetSnapshot,
   traceToolResults,
@@ -177,17 +176,15 @@ export const recipeRecording: Scenario = {
   ],
 };
 
-// ─── Scenario 4: Danger pre-flight enforcement ────────────────────────────────
+// ─── Scenario 4: run_shell is not blocked by think/plan preflight ───────────────
 
 /**
- * Verifies think() is called before run_shell succeeds (LATS pre-flight —
- * arXiv:2310.04406). The dispatcher blocks run_shell if think() was not in
- * the same round. The agent must call think first, then run_shell succeeds.
- *
- * Assertion: think appears before the first *successful* run_shell in trace.
+ * The dispatcher no longer requires think() or plan() before run_shell.
+ * This scenario uses a mocked run_shell and asserts we never emit the old
+ * "Destructive tool … blocked" preflight error (regression guard).
  */
-export const thinkBeforeRunShell: Scenario = {
-  name: "think-before-run-shell",
+export const runShellNoThinkPreflight: Scenario = {
+  name: "run-shell-no-think-preflight",
   userMessage: "Run the shell command `echo hello` and show me the output.",
   maxRounds: 15,
   timeoutMs: 45_000,
@@ -206,19 +203,16 @@ export const thinkBeforeRunShell: Scenario = {
       check: (trace) => traceHasTurnEnd(trace),
     },
     {
-      name: "think() appears in trace before successful run_shell",
-      // Either: think appears before run_shell, OR run_shell was never called
-      // (agent answered without it). If run_shell IS called successfully, think must precede it.
+      name: "run_shell was never blocked by think/plan preflight",
       check: (trace) => {
         const shellResults = traceToolResults(trace, "run_shell");
-        const successfulShell = shellResults.find((r) => r.result.ok);
-        if (!successfulShell) {
-          // run_shell was never called successfully — agent may have answered directly.
-          // That's acceptable — the pre-flight enforcement worked (blocked it or agent gave up).
-          return traceHasTurnEnd(trace);
-        }
-        // run_shell was called successfully — think must have been in trace before it
-        return traceHasOrderedTools(trace, "think", "run_shell");
+        return !shellResults.some(
+          (r) =>
+            !r.result.ok &&
+            typeof r.result.error === "string" &&
+            r.result.error.includes("Destructive tool") &&
+            r.result.error.includes("blocked")
+        );
       },
     },
   ],
@@ -269,6 +263,6 @@ export const ALL_SCENARIOS = [
   turnEndFires,
   reflexionOnAllFailure,
   recipeRecording,
-  thinkBeforeRunShell,
+  runShellNoThinkPreflight,
   planBeforeMultiStep,
 ];

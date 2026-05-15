@@ -106,6 +106,30 @@ export const harnessDistillHandoff: Scenario = {
   ],
 };
 
+export const harnessSpawnContractTelemetry: Scenario = {
+  name: "harness-spawn-contract-telemetry",
+  userMessage:
+    "Spawn one sub-agent with only goal, no system_prompt/user_prompt/spawn_contract. " +
+    "Then wait_for_agents for that task id and reply OK.",
+  tags: ["smoke"],
+  assertions: [
+    { name: "spawn_agent invoked", check: (t) => traceHasTool(t, "spawn_agent") },
+    {
+      name: "contract synthesized event emitted",
+      check: (t) =>
+        t.some(
+          (e) =>
+            e.type === "spawn_contract_created" &&
+            (e.payload as { source?: string }).source === "synthesized"
+        ),
+    },
+    {
+      name: "handoff event emitted",
+      check: (t) => t.some((e) => e.type === "subtask_handoff_written"),
+    },
+  ],
+};
+
 export const HARNESS_CAPABILITY_SCENARIOS: Scenario[] = [
   harnessMemoryQueryModes,
   harnessAstGrepOrSkip,
@@ -114,4 +138,5 @@ export const HARNESS_CAPABILITY_SCENARIOS: Scenario[] = [
   harnessFindReferences,
   harnessPlanBeforeMultiStep,
   harnessDistillHandoff,
+  harnessSpawnContractTelemetry,
 ];
