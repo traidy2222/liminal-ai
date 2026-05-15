@@ -37,6 +37,7 @@ import {
   scanActiveDevPorts,
 } from "./platform_context.js";
 import { gatherExternalTerminalSnapshots } from "./terminal_snapshot.js";
+import { effectiveHarnessEnvRaw } from "./harness_effective_env.js";
 import { execFile as execFileCb } from "node:child_process";
 import { promisify } from "node:util";
 
@@ -131,6 +132,7 @@ interface SessionMemory {
   entities: Array<{ key: string; value: string }>;
   reflections: Array<{ value: string }>;
   recipes: Array<{ value: string }>;
+  hypotheses: Array<{ key: string; value: string }>;
   totalCount: number;
   countByType: Record<string, number>;
 }
@@ -588,6 +590,7 @@ async function gatherSessionMemory(workspaceRoot: string): Promise<SessionMemory
   const entities: SessionMemory["entities"] = [];
   const reflectionCandidates: Array<{ value: string; updatedAt?: string }> = [];
   const recipeCandidates: Array<{ value: string; updatedAt?: string }> = [];
+  const hypothesisCandidates: Array<{ key: string; value: string; updatedAt?: string }> = [];
   const countByType: Record<string, number> = {};
 
   for (const [fullKey, rawEntry] of Object.entries(rawNotes)) {
@@ -615,6 +618,8 @@ async function gatherSessionMemory(workspaceRoot: string): Promise<SessionMemory
     } else if (type === "recipe") {
       // Collect successful tool patterns for session start
       recipeCandidates.push({ value, updatedAt });
+    } else if (type === "hypothesis") {
+      hypothesisCandidates.push({ key, value, updatedAt });
     }
     // Skip harness:* — too verbose (improvement suggestions)
   }
@@ -643,10 +648,26 @@ async function gatherSessionMemory(workspaceRoot: string): Promise<SessionMemory
     value: r.value.slice(0, 120) + (r.value.length > 120 ? "…" : ""),
   }));
 
+  hypothesisCandidates.sort((a, b) => {
+    const aT = a.updatedAt ?? "";
+    const bT = b.updatedAt ?? "";
+    return bT.localeCompare(aT);
+  });
+  const hypotheses = hypothesisCandidates.slice(0, 4).map((h) => ({
+    key: h.key,
+    value: h.value.slice(0, 140) + (h.value.length > 140 ? "…" : ""),
+  }));
+
   const totalCount = Object.values(countByType).reduce((a, b) => a + b, 0);
-  const total = facts.length + experiences.length + entities.length + reflections.length + recipes.length;
+  const total =
+    facts.length +
+    experiences.length +
+    entities.length +
+    reflections.length +
+    recipes.length +
+    hypotheses.length;
   return total > 0 || totalCount > 0
-    ? { facts, experiences, entities, reflections, recipes, totalCount, countByType }
+    ? { facts, experiences, entities, reflections, recipes, hypotheses, totalCount, countByType }
     : null;
 }
 
@@ -696,7 +717,7 @@ async function gatherRelevantPrimedLines(
       const bmById = new Map<string, number>();
       for (const r of bmRanked) bmById.set(r.id, r.score / bmMax);
 
-      const embedModel = process.env["AGENT_EMBED_MODEL"]?.trim();
+      const embedModel = effectiveHarnessEnvRaw("AGENT_EMBED_MODEL")?.trim();
       const apiKey = process.env["OPENROUTER_API_KEY"]?.trim();
       const baseURL = (process.env["OPENROUTER_BASE_URL"] ?? "https://openrouter.ai/api/v1").replace(
         /\/$/,
@@ -818,7 +839,7 @@ function resolveSessionMode(
   ) {
     return options.sessionMode;
   }
-  const raw = process.env["AGENT_SESSION_MODE"]?.trim().toLowerCase();
+  const raw = effectiveHarnessEnvRaw("AGENT_SESSION_MODE")?.trim().toLowerCase();
   if (raw === "initializer" || raw === "coding" || raw === "free_run") return raw;
   return undefined;
 }
@@ -1075,13 +1096,34 @@ export async function buildWorldContextMessage(options?: WorldContextOptions): P
 
   lines.push(`Shell:      ${shell}  —  ${getShellNote(shell)}`);
   lines.push(`CWD:        ${cwd}`);
+  lines.push(
+    `Session anchor:  cwd=${cwd}  ·  shell=${shell}${git ? `  ·  git_branch=${git.branch}` : ""}`
+  );
   lines.push(`OS account: ${user} @ ${host}  →  ${home}  (system username — not necessarily the user's preferred name; check memory for actual name)`);
   lines.push(`Runtime:    Node.js ${process.version}`);
-  const configuredModel = process.env["AGENT_MODEL"]?.trim() || "openrouter/owl-alpha";
+  const configuredModel = effectiveHarnessEnvRaw("AGENT_MODEL")?.trim() || "openrouter/owl-alpha";
   const configuredBaseURL =
-    process.env["AGENT_API_BASE_URL"]?.trim() || "https://openrouter.ai/api/v1";
+    effectiveHarnessEnvRaw("AGENT_API_BASE_URL")?.trim() || "https://openrouter.ai/api/v1";
   lines.push(`Harness:    Liminal AgentHarness`);
   lines.push(`LLM config: model=${configuredModel}  ·  baseURL=${configuredBaseURL}`);
+  lines.push(
+    `Stack identity (do not conflate — prefer this over stale memory that merges layers):`
+  );
+  lines.push(
+    `  · Persona/voice = first system message in this session (e.g. Jarvis) — how you address the user.`
+  );
+  lines.push(
+    `  · Harness/runtime = Liminal AgentHarness — the local tool-using agent software you run inside.`
+  );
+  lines.push(
+    `  · Base LLM = model slug above — the inference engine; not the persona name and not the harness product name.`
+  );
+  lines.push(
+    `  · Who built the harness vs who trains/ships the base model are separate facts; do not say the model vendor "built" Liminal unless the user proved that.`
+  );
+  lines.push(
+    `  · Casual "who are you?" → answer as the active persona; cite model/harness stack only when the user asks for technical/runtime details.`
+  );
 
   // ── Breakout mandate (highest priority — shown before everything else) ────────
   if (breakoutLines && breakoutLines.length > 0) {
@@ -1191,24 +1233,41 @@ export async function buildWorldContextMessage(options?: WorldContextOptions): P
       .map(([t, n]) => `${n} ${t}`)
       .join(", ");
     lines.push(`Memory: ${memory.totalCount} stored (${breakdown})`);
-    // Facts and entities
-    for (const { key, value } of memory.facts)
+    // Facts and entities (capped so anchor lines stay above long memory dumps)
+    const maxFacts = 8;
+    const maxEntities = 8;
+    const maxExp = 6;
+    const maxRef = 4;
+    const maxRec = 4;
+    const maxHyp = 4;
+    for (const { key, value } of memory.facts.slice(0, maxFacts))
       lines.push(`[fact] ${key} → ${value}`);
-    for (const { key, value } of memory.entities)
+    if (memory.facts.length > maxFacts) lines.push(`  … +${memory.facts.length - maxFacts} more facts (use memory_query / recall)`);
+    for (const { key, value } of memory.entities.slice(0, maxEntities))
       lines.push(`[entity] ${key} → ${value}`);
-    for (const { key, value } of memory.experiences)
+    if (memory.entities.length > maxEntities) lines.push(`  … +${memory.entities.length - maxEntities} more entities`);
+    for (const { key, value } of memory.experiences.slice(0, maxExp))
       lines.push(`[exp:${key}] ${value}`);
+    if (memory.experiences.length > maxExp) lines.push(`  … +${memory.experiences.length - maxExp} more experiences`);
     // Past failure lessons (Reflexion protocol — surfaces what was previously skipped)
     if (memory.reflections.length > 0) {
       lines.push(`Past failure lessons (${memory.reflections.length}):`);
-      for (const { value } of memory.reflections)
+      for (const { value } of memory.reflections.slice(0, maxRef))
         lines.push(`  - ${value}`);
+      if (memory.reflections.length > maxRef) lines.push(`  … +${memory.reflections.length - maxRef} more`);
     }
     // Successful patterns
     if (memory.recipes.length > 0) {
       lines.push(`Successful patterns (${memory.recipes.length}):`);
-      for (const { value } of memory.recipes)
+      for (const { value } of memory.recipes.slice(0, maxRec))
         lines.push(`  - ${value}`);
+      if (memory.recipes.length > maxRec) lines.push(`  … +${memory.recipes.length - maxRec} more`);
+    }
+    if (memory.hypotheses.length > 0) {
+      lines.push(`Stored hypotheses (${memory.hypotheses.length}):`);
+      for (const { key, value } of memory.hypotheses.slice(0, maxHyp))
+        lines.push(`  - [hypothesis:${key}] ${value}`);
+      if (memory.hypotheses.length > maxHyp) lines.push(`  … +${memory.hypotheses.length - maxHyp} more`);
     }
   }
 

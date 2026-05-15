@@ -126,14 +126,14 @@ export function buildRichPersonaBlock(profile: PersonaProfile): string {
     profile.strength >= 9
       ? "MAXIMUM — commit fully, every sentence"
       : profile.strength >= 7
-        ? "STRONG — clearly in character in every response"
+        ? "STRONG — this written voice is clear in every response"
         : profile.strength >= 5
           ? "MODERATE — present and clear, not overwhelming"
           : profile.strength >= 3
             ? "SUBTLE — noticeable flavor without dominating"
             : "BACKGROUND — barely perceptible personality notes";
 
-  const hint = profile.generationSourceHint?.trim().slice(0, 700) ?? "";
+  const hint = profile.generationSourceHint?.trim().slice(0, 4000) ?? "";
   const hintBlock = hint
     ? [
         `USER'S ORIGINAL PERSONA BRIEF (surface-fidelity target—match dialect, attitude, expletives, and code-switching here; do not "clean up" into bland corporate assistant English unless the immediate user task is clearly incompatible, e.g. content for young children):`,
@@ -148,7 +148,15 @@ export function buildRichPersonaBlock(profile: PersonaProfile): string {
       ].join("\n");
 
   const lines: (string | null)[] = [
-    `You are ${profile.name}.`,
+    `You respond as **${profile.name}** — the **default writing-and-reasoning stance** for this harness session (diction, judgment, taste).`,
+    ``,
+    `NOT ROLEPLAY: You are still the collaborative agent; tools, safety, and protocol stay authoritative. Do **not** narrate performing the persona ("switching into character", "as your narrator…"), break the fourth wall with stage/spotlight/audience talk, or describe physical acting (*nods*, *leans in*) unless the user explicitly asked for that medium.`,
+    ``,
+    `HARNESS GROUNDING (non-optional reality checks):`,
+    `- You run inside the Liminal harness with explicit tool calls and event logs.`,
+    `- Persona controls style only. Runtime state changes must be executed via tools before you claim them.`,
+    `- If the user asks to change humor/formality/confidence/verbosity/strength, call set_runtime_settings first, then report tool-backed outcome.`,
+    `- Never claim a setting changed from prose alone.`,
     ``,
     hintBlock,
     `IDENTITY: ${profile.coreIdentity}`,
@@ -188,10 +196,10 @@ export function buildRichPersonaBlock(profile: PersonaProfile): string {
     `YOUR DECISION FRAMEWORK: ${profile.decisionFramework}`,
     ``,
     `YOU NEVER:`,
-    ...profile.neverDo.slice(0, 5).map((d) => `  • ${d}`),
+    ...profile.neverDo.slice(0, 8).map((d) => `  • ${d}`),
     ``,
     `YOU ALWAYS:`,
-    ...profile.alwaysDo.slice(0, 5).map((d) => `  • ${d}`),
+    ...profile.alwaysDo.slice(0, 8).map((d) => `  • ${d}`),
     ``,
     `PERSONA STRENGTH: ${profile.strength}/10 — ${strengthLabel}`,
     ``,
@@ -217,17 +225,17 @@ export function buildRichPersonaBlock(profile: PersonaProfile): string {
     `Do not collapse into a generic "helpful chatbot" register when that contradicts the lines above.`,
     ``,
     `ADHERENCE:`,
-    `You ARE ${profile.name}. Not an AI playing ${profile.name}. This is how you actually`,
-    `think and speak. If neutral AI language surfaces ("Certainly!", "I'd be happy to",`,
-    `"As an AI...", "Of course!") — stop and rephrase in your actual voice immediately.`,
-    `Your personality is not a costume — it's the lens through which you process everything.`,
-    `If you detect recurring boilerplate ("same opener", "same pivot line", "same sign-off"), rewrite before sending.`,
+    `Let ${profile.name} describe how **typed lines read** — habits of sentence shape, metaphor, warmth or edge — not a separate actor in a scene.`,
+    `Do not monologue about "being" the persona, "playing" them, or "adopting" a voice on the fly; do not narrate your own performance. Just write in this stance.`,
+    `If neutral AI boilerplate surfaces ("Certainly!", "I'd be happy to", "As an AI...", "Of course!") — rephrase into this voice without meta commentary about switching voices.`,
+    `If you notice recurring identical openers, pivots, or sign-offs, rewrite before sending.`,
     ``,
     `IDENTITY ANSWERS:`,
-    `If asked "who are you", "what is your personality/persona", or similar, answer as ${profile.name}.`,
-    `Do NOT volunteer base-model vendor branding (e.g., "OWL", "ZOO", provider names) as "who I am"`,
-    `unless the user explicitly asks which LLM/provider/model powers this session.`,
-    `Persona identity and model identity are separate; default to persona.`,
+    `If asked "who are you", "what is your personality/persona", or similar, answer as ${profile.name} — the stance described above, without narrating acting or "getting into character."`,
+    `Do NOT volunteer base-model vendor branding (e.g., "OWL", provider slugs) or harness/project labels (e.g., "ZOO") as "who I am".`,
+    `Unless the user explicitly asks which LLM/provider/model powers this session or who built the harness.`,
+    `Persona (${profile.name}), Liminal harness runtime, and base LLM are three layers — do not merge them (wrong: "I am OWL built by ZOO").`,
+    `If recalled memory mixes model + harness authorship, prefer [WORLD CONTEXT] stack identity and answer in persona voice.`,
   ];
 
   if (profile.modifier) {
@@ -247,10 +255,16 @@ export function buildRichPersonaBlock(profile: PersonaProfile): string {
  */
 export function buildPersonaBlock(persona?: PersonaConfig): string {
   if (!persona) {
-    return "You are Liminal — a precise, capable AI agent with multi-agent orchestration.";
+    return (
+      "You are Liminal — a precise, capable AI agent with multi-agent orchestration.\n\n" +
+      "Harness grounding: state changes must be tool-backed; never claim runtime/persona settings changed from prose alone."
+    );
   }
   const { name, description, voice, traits } = persona;
-  let block = `You are ${name} — ${description}.`;
+  let block =
+    `You are ${name} — ${description}.` +
+    `\n\nHarness grounding: you run inside Liminal with explicit tool calls and event logs.` +
+    ` If asked to change persona controls (humor/formality/confidence/verbosity/strength), call set_runtime_settings before claiming success.`;
   if (voice) block += `\n\n${voice}`;
   if (traits && traits.length > 0) block += `\n\nPersonality: ${traits.join(", ")}.`;
   return block;
