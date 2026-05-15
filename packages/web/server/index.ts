@@ -3,6 +3,7 @@ import { execSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { join, dirname, resolve } from "node:path";
 import { existsSync } from "node:fs";
+import { createServer } from "node:http";
 import express from "express";
 import cors from "cors";
 import { loadRuntimePreferences } from "@liminal/core";
@@ -10,22 +11,33 @@ import { SSEManager } from "./sse.js";
 import { AgentBridge } from "./agentBridge.js";
 import { createRouter } from "./routes.js";
 
-// Load .env from monorepo root before AgentBridge reads provider env config
+// Load `.env` files in order (dotenv does not override existing `process.env` keys by default):
+// 1) monorepo root, 2) packages/web, 3) workspace root when it differs — before AgentBridge starts.
 const __dirname = dirname(fileURLToPath(import.meta.url));
-config({ path: join(__dirname, "../../../.env") });
-
 const repoRoot = join(__dirname, "../../../");
+const rootEnvPath = join(repoRoot, ".env");
+config({ path: rootEnvPath });
+
+const webPkgEnvPath = join(__dirname, "../.env");
+if (existsSync(webPkgEnvPath) && resolve(webPkgEnvPath) !== resolve(rootEnvPath)) {
+  config({ path: webPkgEnvPath });
+}
+
 const targetRoot = resolve(process.env["AGENT_WORKSPACE_ROOT"]?.trim() || repoRoot);
 process.env["AGENT_WORKSPACE_ROOT"] = targetRoot;
-// Default to balanced gate so plan() satisfies the destructive pre-flight (not just think()).
-// Can still be overridden by setting AGENT_DESTRUCTIVE_GATE=strict in .env.
-if (!process.env["AGENT_DESTRUCTIVE_GATE"]) {
-  process.env["AGENT_DESTRUCTIVE_GATE"] = "balanced";
-}
 try {
   process.chdir(targetRoot);
 } catch {
   /* ignore */
+}
+
+const workspaceEnvPath = join(targetRoot, ".env");
+if (
+  existsSync(workspaceEnvPath) &&
+  resolve(workspaceEnvPath) !== resolve(rootEnvPath) &&
+  resolve(workspaceEnvPath) !== resolve(webPkgEnvPath)
+) {
+  config({ path: workspaceEnvPath });
 }
 
 const app = express();
@@ -66,6 +78,16 @@ if (!existsSync(clientIndexHtml)) {
   }
 }
 
+try {
+  await bridge.whenToolsRegistered();
+} catch (err) {
+  console.error(
+    "Agent tool registration failed:",
+    err instanceof Error ? err.message : String(err)
+  );
+  process.exit(1);
+}
+
 if (existsSync(clientIndexHtml)) {
   app.use(express.static(clientDist));
 } else {
@@ -85,7 +107,24 @@ if (existsSync(clientIndexHtml)) {
 }
 
 const PORT = Number(process.env["PORT"] ?? 3001);
-const server = app.listen(PORT, () => {
+const server = createServer(app);
+
+server.once("error", (err: unknown) => {
+  const e = err as NodeJS.ErrnoException;
+  if (e?.code === "EADDRINUSE") {
+    console.error(
+      `Port ${PORT} is already in use. Another Liminal/web server is likely running.\n` +
+        `Stop the existing process or set a different PORT, then retry.\n` +
+        `Example (PowerShell): $env:PORT=3002; npm run web:dev`
+    );
+    process.exit(1);
+  }
+  throw err;
+});
+
+server.listen(PORT);
+
+server.once("listening", () => {
   console.log(`Liminal web server → http://localhost:${PORT}`);
   console.log(`SSE stream         → http://localhost:${PORT}/api/stream`);
   const anyKeySet = Boolean(
@@ -102,3 +141,13 @@ const server = app.listen(PORT, () => {
 server.keepAliveTimeout = 75_000;
 server.headersTimeout = 90_000;
 server.requestTimeout = 0;
+
+// Greeting / bootstrap can take a model round — do not block `listen()` on that or
+// `web:dev` clients on :5173 see ECONNREFUSED while Vite is already up.
+void bridge.whenSessionReady().catch((err) => {
+  console.error(
+    "Agent session initialization failed:",
+    err instanceof Error ? err.message : String(err)
+  );
+  process.exit(1);
+});

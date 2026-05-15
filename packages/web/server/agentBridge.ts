@@ -4,6 +4,7 @@ import {
   resolveProviderConfig,
   resolveWorkspaceRoot,
   saveRuntimePreferences,
+  resolveHarnessEnvRaw,
 } from "@liminal/core";
 import {
   registerAllTools,
@@ -30,23 +31,27 @@ function capSseToolOutput(text: string): string {
   );
 }
 
-function resolveSafetyJudge():
+function resolveSafetyJudge(
+  prefs: RuntimePreferences | null
+):
   | { enabled: true; model?: string }
   | undefined {
-  if (process.env["AGENT_SAFETY_JUDGE"] !== "1") return undefined;
-  const model = process.env["AGENT_SAFETY_JUDGE_MODEL"]?.trim();
+  if (resolveHarnessEnvRaw("AGENT_SAFETY_JUDGE", prefs) !== "1") return undefined;
+  const model = resolveHarnessEnvRaw("AGENT_SAFETY_JUDGE_MODEL", prefs)?.trim();
   return {
     enabled: true,
     ...(model ? { model } : {}),
   };
 }
 
-function resolveWorldContext():
+function resolveWorldContext(
+  prefs: RuntimePreferences | null
+):
   | { location: string; sessionMode?: "initializer" | "coding" }
   | { sessionMode: "initializer" | "coding" }
   | undefined {
-  const loc = process.env["AGENT_LOCATION"]?.trim();
-  const modeRaw = process.env["AGENT_SESSION_MODE"]?.trim().toLowerCase();
+  const loc = resolveHarnessEnvRaw("AGENT_LOCATION", prefs)?.trim();
+  const modeRaw = resolveHarnessEnvRaw("AGENT_SESSION_MODE", prefs)?.trim().toLowerCase();
   const sessionMode =
     modeRaw === "initializer" || modeRaw === "coding" ? modeRaw : undefined;
   if (!loc && !sessionMode) return undefined;
@@ -57,6 +62,10 @@ function resolveWorldContext():
 
 export class AgentBridge {
   readonly harness: AgentHarness;
+  /** Resolves after `registerAllTools` completes. */
+  private readonly toolsRegistered: Promise<void>;
+  /** Resolves after `beginSession` (persisted persona, bootstrap gate, optional greeting). */
+  private readonly sessionReady: Promise<void>;
   /** No-op until maybeAttachSessionEventLog runs in constructor. */
   private detachSessionLog: () => void = () => {};
   private pendingApprovals = new Map<string, (d: ApprovalDecision) => void>();
@@ -65,6 +74,8 @@ export class AgentBridge {
   private turnStartedAt: number | null = null;
   private awaitingPersonaBootstrapInput = false;
   private bootstrapInFlight = false;
+  /** Wall-clock ms when the harness last emitted `turn_end` (for client status reconciliation). */
+  private lastTurnEndedAtMs: number | null = null;
   private emitBootstrapProgress(stage: string, message: string): void {
     this.sse.send("persona_bootstrap_progress", {
       stage,
@@ -80,11 +91,11 @@ export class AgentBridge {
       model: provider.model,
       baseURL: provider.baseURL,
       maxToolRoundsPerTurn: 128,
-      safetyJudge: resolveSafetyJudge(),
+      safetyJudge: resolveSafetyJudge(runtimePreferences),
       workingStateEnabled: true,
       // World context: auto-gather date/time/OS/shell; optionally include location
       // Set AGENT_LOCATION="City, Country" in .env to include physical location
-      worldContext: resolveWorldContext(),
+      worldContext: resolveWorldContext(runtimePreferences),
       runtimePreferences,
       persistRuntimePreferences: async (prefs) =>
         saveRuntimePreferences(prefs, resolveWorkspaceRoot()),
@@ -99,10 +110,18 @@ export class AgentBridge {
     const harness = this.harness;
     this.detachSessionLog = maybeAttachSessionEventLog(harness.emitter, harness.taskId);
     this.wireEvents();
-    void (async () => {
-      await registerAllTools(harness.registry, harness.emitter, harness);
-      await this.beginSession();
-    })();
+    this.toolsRegistered = registerAllTools(harness.registry, harness.emitter, harness);
+    this.sessionReady = this.toolsRegistered.then(() => this.beginSession());
+  }
+
+  /** Wait until the tool registry is populated (before binding HTTP in dev, avoid races on /api/message). */
+  whenToolsRegistered(): Promise<void> {
+    return this.toolsRegistered;
+  }
+
+  /** Wait until tools are registered and opening session (bootstrap vs greeting) has settled. */
+  whenSessionReady(): Promise<void> {
+    return this.sessionReady;
   }
 
   private async beginSession(): Promise<void> {
@@ -148,6 +167,9 @@ export class AgentBridge {
   /** Current busy state — exposed for /api/status. */
   get isBusy(): boolean { return this.harness.getIsRunning(); }
   get turnStartTime(): number | null { return this.turnStartedAt; }
+  get lastTurnEndedAt(): number | null {
+    return this.lastTurnEndedAtMs;
+  }
   get isAwaitingPersonaBootstrap(): boolean { return this.awaitingPersonaBootstrapInput; }
 
   private wireEvents(): void {
@@ -191,6 +213,10 @@ export class AgentBridge {
     emitter.on("runtime_pref_persisted", (p) => this.sse.send("runtime_pref_persisted", p));
     emitter.on("runtime_pref_rejected", (p) => this.sse.send("runtime_pref_rejected", p));
     emitter.on("auto_dream", (p) => this.sse.send("auto_dream", p));
+    emitter.on("heartbeat_scheduled", (p) => this.sse.send("heartbeat_scheduled", p));
+    emitter.on("heartbeat_started", (p) => this.sse.send("heartbeat_started", p));
+    emitter.on("heartbeat_completed", (p) => this.sse.send("heartbeat_completed", p));
+    emitter.on("heartbeat_skipped", (p) => this.sse.send("heartbeat_skipped", p));
 
     emitter.on("tool_approval", (payload) => {
       this.pendingApprovals.set(payload.callId, payload.resolve);
@@ -224,9 +250,11 @@ export class AgentBridge {
   }
 
   /** Clear transcript; next user message re-injects world context (root). */
-  clearSession(): void {
+  clearSession(options?: { preserveBootstrapState?: boolean }): void {
     this.harness.clearConversation();
-    this.awaitingPersonaBootstrapInput = false;
+    if (!options?.preserveBootstrapState) {
+      this.awaitingPersonaBootstrapInput = false;
+    }
     this.bootstrapInFlight = false;
   }
 
@@ -308,7 +336,7 @@ export class AgentBridge {
 
       this.emitBootstrapProgress(
         "generating",
-        "Generating persona, soul blueprint, and style lexicon with the model..."
+        "Generating persona, soul blueprint, and HUD theme with the model..."
       );
       const bundle = await generatePersonaFromInput(
         this.harness,

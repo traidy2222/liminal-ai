@@ -9,7 +9,14 @@ import {
   parseDataUrlImage,
   validateImageAttachments,
   type ImageAttachment,
+  buildHarnessSettingsApiFields,
+  HARNESS_SETTINGS_TABS,
+  HARNESS_MANAGED_ENV_KEY_SET,
+  harnessEnvResolutionMeta,
+  resolveHarnessEnvRaw,
+  resolvePersonalityHeartbeatConfig,
 } from "@liminal/core";
+import { loadPersonaUiThemeFromWorkspace } from "@liminal/tools";
 import { persistIncomingAttachments } from "./image_attachment_store.js";
 
 type IncomingAttachment = {
@@ -21,28 +28,144 @@ type IncomingAttachment = {
 export function createRouter(bridge: AgentBridge, sse: SSEManager): Router {
   const router = Router();
 
-  router.get("/api/config", (_req, res) => {
+  router.get("/api/config", async (_req, res) => {
+    try {
+      // `listen()` does not await this; avoid stale `personaBootstrapPending` and races with bootstrap.
+      await bridge.whenSessionReady();
+      const prefs = bridge.harness.getRuntimePreferences();
+      const uiRaw = resolveHarnessEnvRaw("AGENT_UI_VERBOSITY", prefs)?.trim();
+      let personaUiTheme: import("@liminal/core").PersonaUiThemeV1 | null = null;
+      try {
+        personaUiTheme = await loadPersonaUiThemeFromWorkspace();
+      } catch {
+        personaUiTheme = null;
+      }
+      const persona = bridge.harness.getCurrentPersona();
+      const personaDisplayLabel =
+        personaUiTheme?.displayLabel?.trim() ||
+        persona?.name?.trim() ||
+        "LIMINAL";
+      const ph = resolvePersonalityHeartbeatConfig(prefs);
+      res.json({
+        uiVerbosity: uiRaw === "quiet" ? "quiet" : "normal",
+        approvalTimeoutMs: bridge.harness.getApprovalTimeoutMs(),
+        personaBootstrapEnabled: resolveHarnessEnvRaw("AGENT_PERSONA_BOOTSTRAP", prefs) !== "0",
+        personaBootstrapPending: bridge.isAwaitingPersonaBootstrap,
+        personaBootstrapAllowSkip: resolveHarnessEnvRaw("AGENT_PERSONA_BOOTSTRAP_ALLOW_SKIP", prefs) !== "0",
+        personaUiTheme,
+        personaDisplayLabel,
+        personalityHeartbeatEnabled: ph.enabled,
+        personalityHeartbeatUiStrip: ph.uiStripDefault,
+      });
+    } catch (err) {
+      console.error("/api/config failed:", err instanceof Error ? err.stack ?? err.message : String(err));
+      res.status(200).json({
+        uiVerbosity: "normal",
+        approvalTimeoutMs: 120_000,
+        personaBootstrapEnabled: true,
+        personaBootstrapPending: false,
+        personaBootstrapAllowSkip: true,
+        personaUiTheme: null,
+        personaDisplayLabel: "LIMINAL",
+        personalityHeartbeatEnabled: false,
+        personalityHeartbeatUiStrip: false,
+        configDegraded: true,
+        configError: err instanceof Error ? err.message : String(err),
+      });
+    }
+  });
+
+  router.get("/api/settings", (_req, res) => {
+    const prefs = bridge.harness.getRuntimePreferences();
+    const fields = buildHarnessSettingsApiFields(prefs);
+    const cfg = bridge.harness.config;
+    const envModel = process.env["AGENT_MODEL"]?.trim();
+    const envBase = process.env["AGENT_API_BASE_URL"]?.trim();
+    const apiKeyConfigured = !!(cfg.openRouterApiKey && cfg.openRouterApiKey.trim().length > 0);
     res.json({
-      uiVerbosity: process.env["AGENT_UI_VERBOSITY"]?.trim() === "quiet" ? "quiet" : "normal",
-      approvalTimeoutMs: bridge.harness.getApprovalTimeoutMs(),
-      personaBootstrapEnabled: process.env["AGENT_PERSONA_BOOTSTRAP"] !== "0",
-      personaBootstrapPending: bridge.isAwaitingPersonaBootstrap,
-      personaBootstrapAllowSkip: process.env["AGENT_PERSONA_BOOTSTRAP_ALLOW_SKIP"] !== "0",
+      tabs: HARNESS_SETTINGS_TABS,
+      fields,
+      /** Matches the live OpenAI client: prefs + env + defaults (see `resolveProviderConfig`). */
+      provider: {
+        model: (cfg.model ?? "").slice(0, 200),
+        baseURL: (cfg.baseURL ?? "").slice(0, 500),
+        modelLockedByEnv: !!envModel,
+        baseURLLockedByEnv: !!envBase,
+        apiKeyConfigured,
+      },
+      hint:
+        "API keys are never shown here — only whether one loaded. Set `AGENT_API_KEY` or `OPENROUTER_API_KEY` (etc.) in `.env`. Model/base URL reflect the running harness (saved prefs, then env, then defaults).",
     });
   });
 
-  router.post("/api/session/reset", (_req, res) => {
+  router.put("/api/settings", async (req, res) => {
+    if (bridge.harness.getIsRunning()) {
+      res.status(409).json({ error: "Agent is busy; finish the current turn before saving settings." });
+      return;
+    }
+    const body = req.body as {
+      harness?: { env?: Record<string, string> };
+      provider?: { model?: string; baseURL?: string };
+    };
+    const prefs = bridge.harness.getRuntimePreferences();
+    const envIn = body.harness?.env;
+    const envPatch: Record<string, string> = {};
+    if (envIn && typeof envIn === "object") {
+      for (const [k, v] of Object.entries(envIn)) {
+        if (!HARNESS_MANAGED_ENV_KEY_SET.has(k)) continue;
+        if (harnessEnvResolutionMeta(k, prefs).lockedByEnv) continue;
+        if (typeof v !== "string") continue;
+        envPatch[k] = v.trim().slice(0, 8000);
+      }
+    }
+    const patch: Partial<import("@liminal/core").RuntimePreferences> = {};
+    if (Object.keys(envPatch).length > 0) {
+      patch.harness = { env: envPatch };
+    }
+    if (body.provider && typeof body.provider === "object") {
+      const modelLocked = !!(process.env["AGENT_MODEL"]?.trim());
+      const baseLocked = !!(process.env["AGENT_API_BASE_URL"]?.trim());
+      const pm =
+        typeof body.provider.model === "string" ? body.provider.model.trim().slice(0, 200) : "";
+      const pb =
+        typeof body.provider.baseURL === "string" ? body.provider.baseURL.trim().slice(0, 500) : "";
+      const prov: { model?: string; baseURL?: string } = {};
+      if (!modelLocked && pm.length > 0) prov.model = pm;
+      if (!baseLocked && pb.length > 0) prov.baseURL = pb;
+      if (Object.keys(prov).length > 0) patch.provider = prov;
+    }
+    if (!patch.harness && !patch.provider) {
+      res.status(400).json({ error: "No valid harness.env or provider fields in body." });
+      return;
+    }
+    try {
+      await bridge.harness.patchRuntimePreferences(patch, { persist: true });
+      res.json({ ok: true });
+    } catch (e) {
+      const message = e instanceof Error ? e.message : "Failed to save settings.";
+      res.status(400).json({ error: message });
+    }
+  });
+
+  router.post("/api/session/reset", (req, res) => {
     if (bridge.harness.getIsRunning()) {
       res.status(409).json({ error: "Agent is busy; wait for the current turn to finish." });
       return;
     }
-    bridge.clearSession();
-    res.json({ ok: true });
-    void bridge.initializeSessionAfterReset().catch((err) => {
-      sse.send("error", {
-        message: err instanceof Error ? err.message : "Session greeting failed after reset.",
+    const mode = String((req.body as { mode?: string } | undefined)?.mode ?? "soft").toLowerCase();
+    if (mode === "hard") {
+      bridge.clearSession({ preserveBootstrapState: false });
+      res.json({ ok: true, mode: "hard" });
+      void bridge.initializeSessionAfterReset().catch((err) => {
+        sse.send("error", {
+          message: err instanceof Error ? err.message : "Session greeting failed after reset.",
+        });
       });
-    });
+      return;
+    }
+    // Default: soft reset for active dev sessions — clear transcript only.
+    bridge.clearSession({ preserveBootstrapState: true });
+    res.json({ ok: true, mode: "soft" });
   });
 
   router.get("/api/stream", (req, res) => {
@@ -60,6 +183,7 @@ export function createRouter(bridge: AgentBridge, sse: SSEManager): Router {
   });
 
   router.post("/api/message", async (req, res) => {
+    await bridge.whenSessionReady();
     if (bridge.isAwaitingPersonaBootstrap) {
       res.status(409).json({ error: "Persona bootstrap is pending. Submit via bootstrap modal." });
       return;
@@ -116,6 +240,7 @@ export function createRouter(bridge: AgentBridge, sse: SSEManager): Router {
   router.post("/api/persona/bootstrap", async (req, res) => {
     const { input, skip } = req.body as { input?: string; skip?: boolean };
     try {
+      await bridge.whenSessionReady();
       await bridge.submitPersonaBootstrap(String(input ?? ""), { skip: Boolean(skip) });
       res.json({ ok: true });
     } catch (err) {
@@ -123,12 +248,19 @@ export function createRouter(bridge: AgentBridge, sse: SSEManager): Router {
       const isTimeout = /aborted|timeout|timed out/i.test(message);
       const isConflict =
         /already in progress|still initializing|already processing/i.test(message);
-      res.status(isConflict ? 409 : isTimeout ? 504 : 400).json({
+      const status = isConflict ? 409 : isTimeout ? 504 : 400;
+      const payload = {
         error: isTimeout
           ? "Persona generation timed out. Please retry (or reduce prompt complexity)."
           : message,
         detail: message,
-      });
+      };
+      try {
+        res.status(status).json(payload);
+      } catch (sendErr) {
+        console.error("persona/bootstrap: failed to send JSON error body:", sendErr);
+        if (!res.headersSent) res.status(500).end();
+      }
     }
   });
 
@@ -160,6 +292,7 @@ export function createRouter(bridge: AgentBridge, sse: SSEManager): Router {
       clients: sse.clientCount,
       busy: bridge.isBusy,
       startedAt: bridge.turnStartTime,
+      lastTurnEndedAt: bridge.lastTurnEndedAt,
     });
   });
 
