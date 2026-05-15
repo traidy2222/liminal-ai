@@ -15,20 +15,24 @@ import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import type { ToolRegistry, AgentEmitter, ToolResult } from "@liminal/core";
-import { resolveWorkspaceRoot } from "@liminal/core";
+import { resolveWorkspaceRoot, effectiveHarnessEnvRaw } from "@liminal/core";
 import { defineTool } from "./helpers.js";
 
 // ─── Shared helpers ───────────────────────────────────────────────────────────
 
 function getDynamicToolDir(): string {
   return (
-    process.env["AGENT_PLUGIN_DIR"]?.trim() ||
+    effectiveHarnessEnvRaw("AGENT_PLUGIN_DIR")?.trim() ||
     join(resolveWorkspaceRoot(), ".agent_dynamic_tools")
   );
 }
 
 function toolFilePath(dir: string, name: string): string {
   return join(dir, `${name}.mjs`);
+}
+
+function isValidDynamicToolName(name: string): boolean {
+  return /^[a-z][a-z0-9_]*$/.test(name);
 }
 
 function buildPluginSource(
@@ -93,6 +97,7 @@ export function createDynamicToolsTools(registry: ToolRegistry, emitter: AgentEm
       "handler_code (function body string), requires_approval (default false).",
     requiresApproval: true,
     dangerLevel: "destructive" as const,
+    resourceLocks: () => ["file:write:dynamic_tools"],
     parameters: {
       type: "object",
       properties: {
@@ -130,7 +135,7 @@ export function createDynamicToolsTools(registry: ToolRegistry, emitter: AgentEm
       const handlerCode = String(args["handler_code"] ?? "").trim();
       const requiresApproval = Boolean(args["requires_approval"] ?? false);
 
-      if (!name || !/^[a-z][a-z0-9_]*$/.test(name)) {
+      if (!name || !isValidDynamicToolName(name)) {
         return { ok: false, error: "name must be snake_case (lowercase letters, digits, underscores), starting with a letter." };
       }
       if (!handlerCode) return { ok: false, error: "handler_code is required." };
@@ -174,6 +179,7 @@ export function createDynamicToolsTools(registry: ToolRegistry, emitter: AgentEm
       "ARGS: name — the tool to update; then any subset of description/parameters/handler_code to replace.",
     requiresApproval: true,
     dangerLevel: "destructive" as const,
+    resourceLocks: () => ["file:write:dynamic_tools"],
     parameters: {
       type: "object",
       properties: {
@@ -188,6 +194,13 @@ export function createDynamicToolsTools(registry: ToolRegistry, emitter: AgentEm
     },
     handler: async (args): Promise<ToolResult> => {
       const name = String(args["name"] ?? "").trim();
+      if (!name || !isValidDynamicToolName(name)) {
+        return {
+          ok: false,
+          error:
+            "name must be snake_case (lowercase letters, digits, underscores), starting with a letter.",
+        };
+      }
       const dir = getDynamicToolDir();
       const filePath = toolFilePath(dir, name);
 
@@ -246,7 +259,9 @@ export function createDynamicToolsTools(registry: ToolRegistry, emitter: AgentEm
       "WHAT: Unregister a dynamic tool from the live registry and delete its plugin file.\n" +
       "WHEN: A self-created tool is no longer needed, needs to be replaced, or has a name conflict.\n" +
       "Only works on tools created via create_tool (files in the dynamic tool directory).",
-    requiresApproval: false,
+    requiresApproval: true,
+    dangerLevel: "destructive" as const,
+    resourceLocks: () => ["file:write:dynamic_tools"],
     parameters: {
       type: "object",
       properties: {
@@ -257,6 +272,13 @@ export function createDynamicToolsTools(registry: ToolRegistry, emitter: AgentEm
     },
     handler: async (args): Promise<ToolResult> => {
       const name = String(args["name"] ?? "").trim();
+      if (!name || !isValidDynamicToolName(name)) {
+        return {
+          ok: false,
+          error:
+            "name must be snake_case (lowercase letters, digits, underscores), starting with a letter.",
+        };
+      }
       const dir = getDynamicToolDir();
       const filePath = toolFilePath(dir, name);
 

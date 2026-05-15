@@ -1,4 +1,5 @@
 import type { ToolRegistry, AgentEmitter, AgentHarness } from "@liminal/core";
+import { resolveHarnessEnvRaw } from "@liminal/core";
 import { readFileTool } from "./read_file.js";
 import { writeFileTool } from "./write_file.js";
 import { listDirTool } from "./list_dir.js";
@@ -11,11 +12,11 @@ import { createAskUserTool } from "./ask_user.js";
 import { rememberTool, recallTool, recallByTypeTool, forgetTool, forgetTypeTool, memoryStatsTool } from "./remember_recall.js";
 import { thinkTool } from "./think.js";
 import { planTool } from "./plan.js";
+import { createHypothesizeTool } from "./hypothesize.js";
 import { searchMemoryTool } from "./search_memory.js";
 import { recallRelevantTool } from "./recall_relevant.js";
 import { memoryGraphTool } from "./memory_graph.js";
 import { readArtifactTool } from "./read_artifact.js";
-import { webResearchTool } from "./web_research.js";
 import { failureReviewTool } from "./failure_review.js";
 import { repoMapTool } from "./repo_map.js";
 import { memoryConsolidateTool } from "./memory_consolidate.js";
@@ -27,6 +28,9 @@ import { runLintTool } from "./run_lint.js";
 import { symbolIndexTool } from "./symbol_index.js";
 import { findReferencesTool } from "./find_references.js";
 import { executeCodeTool } from "./execute_code.js";
+import { httpRequestTool } from "./http_request.js";
+import { runCommandWithPtyTool } from "./run_command_with_pty.js";
+import { codebaseSymbolEditTool } from "./codebase_symbol_edit.js";
 import { readFileChunkedTool } from "./read_file_chunked.js";
 import { readFileWithImportsTool } from "./read_file_with_imports.js";
 import { fileMetadataTool } from "./file_metadata.js";
@@ -56,7 +60,9 @@ import { suggestImprovementTool, viewInsightsTool } from "./meta_tools.js";
 import { createContextTools } from "./context_tools.js";
 import { createRefreshWorldContextTool } from "./refresh_world_context.js";
 import { createSetPersonaTool } from "./set_persona.js";
+import { createAppendPersonaLivingTool } from "./append_persona_living.js";
 import { createSetRuntimeSettingsTool } from "./set_runtime_settings.js";
+import { createGetRuntimeSettingsTool } from "./get_runtime_settings.js";
 import { createToolDiscoveryTools } from "./tool_activation.js";
 import { applyLazyRegistrationPolicy } from "./tool_catalog.js";
 // New tools — Upgrade VI (harness quality)
@@ -148,7 +154,8 @@ export async function registerAllTools(
   registry.register(webFetchTool);
   registry.register(webSearchTool);
   registry.register(weatherLookupTool);
-  if (process.env["AGENT_MARKETS_ENABLE"] !== "0") {
+  const prefs = harness?.getRuntimePreferences() ?? null;
+  if (resolveHarnessEnvRaw("AGENT_MARKETS_ENABLE", prefs) !== "0") {
     registry.register(marketsQuoteTool);
   }
   registry.register(createAskUserTool(emitter));
@@ -172,7 +179,6 @@ export async function registerAllTools(
   registry.register(recallRelevantTool);
   registry.register(memoryGraphTool);
   registry.register(readArtifactTool);
-  registry.register(webResearchTool);
   registry.register(failureReviewTool);
   registry.register(memoryConsolidateTool);
   registry.register(memoryQueryTool);
@@ -183,6 +189,9 @@ export async function registerAllTools(
   registry.register(symbolIndexTool);
   registry.register(findReferencesTool);
   registry.register(executeCodeTool);
+  registry.register(httpRequestTool);
+  registry.register(runCommandWithPtyTool);
+  registry.register(codebaseSymbolEditTool);
   registry.register(browserOpenTool);
   registry.register(browserActTool);
   registry.register(suggestImprovementTool);
@@ -208,7 +217,7 @@ export async function registerAllTools(
   registry.register(breakoutStartTool);
   registry.register(patternRecordTool);
   registry.register(independenceStatusTool);
-  if (process.env["AGENT_DOC_ENGINE"] === "1") {
+  if (resolveHarnessEnvRaw("AGENT_DOC_ENGINE", prefs) === "1") {
     registry.register(docPlanTool);
     registry.register(docResearchBriefTool);
     registry.register(docCollectSourcesTool);
@@ -251,10 +260,13 @@ export async function registerAllTools(
 
     // Inline persona switching — closes over this specific harness instance
     registry.register(createSetPersonaTool(harness));
+    registry.register(createAppendPersonaLivingTool(harness));
+    registry.register(createGetRuntimeSettingsTool(harness));
     registry.register(createSetRuntimeSettingsTool(harness));
 
     // Harness-scoped multimodal + extraction tools
     registry.register(createUploadImageTool(harness));
+    registry.register(createHypothesizeTool(harness));
     registry.register(createExtractStructuredTool(harness));
 
     // Upgrade V: goal decomposer, branch explorer, contract verifier
@@ -276,7 +288,7 @@ export async function registerAllTools(
   // Load any previously-persisted dynamic tools from disk
   await loadDynamicTools(registry, emitter);
 
-  applyLazyRegistrationPolicy(registry, !!harness);
+  applyLazyRegistrationPolicy(registry, harness);
   if (harness) {
     harness.getContext().refreshProtocolDynamic(harness.registry.getActiveToolNames());
   }
@@ -297,6 +309,8 @@ export { applyLazyRegistrationPolicy, TOOL_FAMILIES } from "./tool_catalog.js";
 export { createOrchestrationTools } from "./orchestration.js";
 export { createContextTools } from "./context_tools.js";
 export { createSetPersonaTool } from "./set_persona.js";
+export { createAppendPersonaLivingTool } from "./append_persona_living.js";
+export { createGetRuntimeSettingsTool } from "./get_runtime_settings.js";
 export { createSetRuntimeSettingsTool } from "./set_runtime_settings.js";
 export {
   parsePersonaInput,
@@ -304,6 +318,13 @@ export {
   generatePersonaFromInput,
   applyPersonaProfileToHarness,
   clearPersistedPersonaArtifacts,
+  loadPersonaUiThemeFromWorkspace,
+  loadPersonaProfileFromWorkspace,
+  appendPersonaLivingSection,
+  buildPersonaSoulMarkdownFromSlices,
+  getPersonaArtifactsPaths,
+  PERSONA_LIVING_MAX_APPEND_CHARS,
+  PERSONA_LIVING_MAX_FILE_CHARS,
 } from "./persona_runtime.js";
 export { loadPlugins } from "./plugin_loader.js";
 export type { PluginModule, PluginLoadResult } from "./plugin_loader.js";

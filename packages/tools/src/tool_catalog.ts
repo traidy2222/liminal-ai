@@ -2,7 +2,8 @@
  * Tool families for lazy loading (AGENT_TOOL_LAZY=1).
  * Keep in sync with tools registered in packages/tools/src/index.ts.
  */
-import type { ToolRegistry } from "@liminal/core";
+import type { ToolRegistry, AgentHarness } from "@liminal/core";
+import { resolveHarnessEnvRaw } from "@liminal/core";
 
 /** Tool families: id -> description + member tool names. */
 export const TOOL_FAMILIES: Record<string, { description: string; tools: readonly string[] }> = {
@@ -29,7 +30,14 @@ export const TOOL_FAMILIES: Record<string, { description: string; tools: readonl
   },
   shell: {
     description: "Shell and background processes.",
-    tools: ["run_shell", "run_background", "kill_process", "list_processes", "read_process_output"],
+    tools: [
+      "run_shell",
+      "run_background",
+      "kill_process",
+      "list_processes",
+      "read_process_output",
+      "run_command_with_pty",
+    ],
   },
   git: {
     description: "Git inspection and commits.",
@@ -56,7 +64,7 @@ export const TOOL_FAMILIES: Record<string, { description: string; tools: readonl
   },
   web: {
     description: "HTTP fetch, search, research, failure review.",
-    tools: ["web_fetch", "web_search", "weather_lookup", "web_research", "failure_review"],
+    tools: ["web_fetch", "web_search", "weather_lookup", "failure_review", "http_request"],
   },
   markets: {
     description: "Free best-effort market pricing for equities/ETFs, FX, commodities, and crypto.",
@@ -64,7 +72,15 @@ export const TOOL_FAMILIES: Record<string, { description: string; tools: readonl
   },
   code_intel: {
     description: "AST search, tests, lint, symbol index, references.",
-    tools: ["ast_grep", "run_tests", "run_lint", "symbol_index", "find_references", "execute_code"],
+    tools: [
+      "ast_grep",
+      "run_tests",
+      "run_lint",
+      "symbol_index",
+      "find_references",
+      "execute_code",
+      "codebase_symbol_edit",
+    ],
   },
   browser: {
     description: "Headless browser (Playwright, env-gated).",
@@ -138,7 +154,15 @@ export const TOOL_FAMILIES: Record<string, { description: string; tools: readonl
   },
   harness_ui: {
     description: "Persona, images, structured extraction (requires harness).",
-    tools: ["set_persona", "set_runtime_settings", "upload_image", "extract_structured"],
+    tools: [
+      "set_persona",
+      "append_persona_living",
+      "get_runtime_settings",
+      "set_runtime_settings",
+      "upload_image",
+      "extract_structured",
+      "hypothesize",
+    ],
   },
   orchestration: {
     description: "Sub-agents, critics, world refresh (requires harness).",
@@ -184,6 +208,7 @@ export function summarizeFamilyActivity(registry: ToolRegistry): FamilyActivityS
 export const CORE_ALWAYS_TOOLS_BASE: readonly string[] = [
   "think",
   "plan",
+  "hypothesize",
   // File read surface (2 tools)
   "read_file",
   "grep_file",
@@ -210,7 +235,6 @@ export const CORE_ALWAYS_TOOLS_BASE: readonly string[] = [
   // Web tools are read-only and needed in nearly every general task — always on.
   "web_search",
   "web_fetch",
-  "web_research",
   "weather_lookup",
 ];
 
@@ -265,6 +289,9 @@ export function getCoreAlwaysToolNames(hasHarness: boolean): string[] {
     out.push(...CORE_HARNESS_TOOLS);
     // Keep orchestration + critics visible without an extra activation step (common root path).
     out.push(...TOOL_FAMILIES.orchestration.tools);
+    // Persona / runtime prefs / uploads / extraction — harness-scoped; keep visible so lazy mode
+    // does not require activate_tool_family("harness_ui") for humor, formality, etc.
+    out.push(...TOOL_FAMILIES.harness_ui.tools);
   }
   return [...new Set(out)];
 }
@@ -283,11 +310,12 @@ export function buildToolToFamilyMap(): Map<string, string> {
 /**
  * After all tools are registered: set family map and optional lazy active seed.
  */
-export function applyLazyRegistrationPolicy(registry: ToolRegistry, hasHarness: boolean): void {
+export function applyLazyRegistrationPolicy(registry: ToolRegistry, harness?: AgentHarness | null): void {
   registry.setToolFamilyLookup(buildToolToFamilyMap());
-  if (process.env["AGENT_TOOL_LAZY"] === "1") {
+  const prefs = harness?.getRuntimePreferences() ?? null;
+  if (resolveHarnessEnvRaw("AGENT_TOOL_LAZY", prefs) === "1") {
     registry.setLazyToolLoading(true);
-    const seed = getCoreAlwaysToolNames(hasHarness).filter((n) => registry.has(n));
+    const seed = getCoreAlwaysToolNames(!!harness).filter((n) => registry.has(n));
     registry.seedActiveTools(seed);
   } else {
     registry.setLazyToolLoading(false);

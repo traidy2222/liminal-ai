@@ -5,11 +5,70 @@ import { loadNotes } from "./notes_store.js";
 import { createDecomposeGoalTool } from "./decompose_goal.js";
 import { createBranchExploreTool } from "./branch_explore.js";
 import { createVerifyContractTool } from "./verify_contract.js";
+import { createRefreshWorldContextTool } from "./refresh_world_context.js";
+import { createSetPersonaTool } from "./set_persona.js";
+import { createAppendPersonaLivingTool } from "./append_persona_living.js";
+import { createGetRuntimeSettingsTool } from "./get_runtime_settings.js";
+import { createSetRuntimeSettingsTool } from "./set_runtime_settings.js";
+import { createUploadImageTool } from "./upload_image.js";
+import { createExtractStructuredTool } from "./extract_structured.js";
+import { createHypothesizeTool } from "./hypothesize.js";
+import type { SubagentSpawnContract } from "@liminal/core";
 
 // ─── Helper ───────────────────────────────────────────────────────────────────
 
 function sleep(ms: number) {
   return new Promise<void>((r) => setTimeout(r, ms));
+}
+
+type ContractSource = "provided" | "synthesized";
+
+function synthesizeSpawnContract(input: {
+  goal: string;
+  userPrompt?: string;
+  systemPrompt?: string;
+  tools?: string[];
+  activateTools?: string[];
+  timeoutMs?: number;
+  maxRounds?: number;
+}): { contract: SubagentSpawnContract; source: ContractSource; taskBrief: string } {
+  const objective =
+    input.userPrompt?.trim() || input.goal.trim() || "Complete the requested subtask precisely.";
+  const role = input.systemPrompt?.toLowerCase().includes("review")
+    ? "reviewer"
+    : input.systemPrompt?.toLowerCase().includes("research")
+      ? "researcher"
+      : input.systemPrompt?.toLowerCase().includes("summar")
+        ? "summarizer"
+        : "specialist_executor";
+  const deliverableFormat = input.systemPrompt?.trim()
+    ? "Follow system_prompt output contract exactly."
+    : "Concise markdown with findings, evidence, and explicit caveats.";
+  const allowed = [...new Set([...(input.tools ?? []), ...(input.activateTools ?? [])])];
+  return {
+    source: "synthesized",
+    taskBrief: objective.slice(0, 500),
+    contract: {
+      role,
+      objective,
+      deliverableFormat,
+      successCriteria: [
+        "Address the objective directly with no unnecessary scope expansion.",
+        "Include concrete evidence or repository references for major claims.",
+        "Return output formatted for parent-agent merge.",
+      ],
+      nonGoals: ["Do not change unrelated files or speculate beyond evidence."],
+      allowedTools: allowed.length > 0 ? allowed : undefined,
+      handoffRequirements: [
+        "Provide a final concise summary of what was completed.",
+        "List key evidence references used to reach conclusions.",
+      ],
+      budget: {
+        maxRounds: input.maxRounds,
+        timeoutMs: input.timeoutMs,
+      },
+    },
+  };
 }
 
 /**
@@ -62,7 +121,8 @@ export function createOrchestrationTools(harness: AgentHarness) {
     description:
       "WHAT: Spawn an independent sub-agent to work on a focused subtask. Returns immediately with a task_id.\n" +
       "WHEN: Subtask is fully independent, well-defined, and benefits from parallelism.\n" +
-      "NOT WHEN: Subtask needs results you haven't produced yet. NOT WHEN: Both you and the sub-agent write the same file. NOT WHEN: Task is trivial (1-2 tool calls) — just do it inline.\n\n" +
+      "NOT WHEN: Subtask needs results you haven't produced yet. NOT WHEN: Both you and the sub-agent write the same file. NOT WHEN: Task is trivial (1-2 tool calls) — just do it inline.\n" +
+      "GOOD OUTPUT: A sub-agent return value you can merge; you still own integrating every part of the user's ask (R-MULTI-PART-USER).\n\n" +
       "── PROMPT DESIGN (required for quality results) ───────────────────────────\n" +
       "Always write system_prompt AND user_prompt. A bare goal= produces a cold, generic sub-agent with no role, no output contract, and no format expectations.\n\n" +
       "system_prompt — sets the sub-agent's role, constraints, and output format. Write it as if briefing a specialist:\n" +
@@ -80,9 +140,9 @@ export function createOrchestrationTools(harness: AgentHarness) {
       "── TOOL PROVISIONING ───────────────────────────────────────────────────────\n" +
       "activate_tools: string[] — ADDITIVE. Force-activate specific tools in the child regardless of what is\n" +
       "  currently active in the parent. Use this to give sub-agents the capabilities they need:\n" +
-      "    Web researcher:  activate_tools: [\"web_search\",\"web_fetch\",\"web_research\",\"think\"]\n" +
+      "    Web researcher:  activate_tools: [\"web_search\",\"web_fetch\",\"think\"]\n" +
       "    File writer:     activate_tools: [\"write_file\",\"edit_file\",\"read_file\",\"grep_file\"]\n" +
-      "    Full autonomy:   activate_tools: [\"web_search\",\"web_research\",\"write_file\",\"edit_file\",\"run_shell\",\"think\",\"remember\"]\n" +
+      "    Full autonomy:   activate_tools: [\"web_search\",\"web_fetch\",\"write_file\",\"edit_file\",\"run_shell\",\"think\",\"remember\"]\n" +
       "  Every registered tool name is valid. Does NOT restrict other active tools.\n\n" +
       "tools: string[] — RESTRICTIVE allowlist. Limits child to ONLY these tools. Use for critic/read-only agents.\n" +
       "  If omitted, child inherits all currently active tools plus anything in activate_tools.",
@@ -102,10 +162,18 @@ export function createOrchestrationTools(harness: AgentHarness) {
           type: "string",
           description: "Full detailed task message sent as the sub-agent's first turn. Replace goal with a proper task description here. If omitted, goal is used instead.",
         },
+        task_brief: {
+          type: "string",
+          description: "Focused brief for child execution; used when user_prompt is omitted.",
+        },
+        inherit_persona: {
+          type: "boolean",
+          description: "If true, child inherits parent persona. Defaults to false for neutral specialist persona.",
+        },
         activate_tools: {
           type: "array",
           items: { type: "string" },
-          description: "Additive tool activation — force these tools active in the child regardless of parent active set. Use to give sub-agents web, shell, vault, etc. access. Example: [\"web_search\",\"web_research\",\"think\",\"remember\"].",
+          description: "Additive tool activation — force these tools active in the child regardless of parent active set. Use to give sub-agents web, shell, vault, etc. access. Example: [\"web_search\",\"web_fetch\",\"think\",\"remember\"].",
         },
         tools: {
           type: "array",
@@ -127,6 +195,10 @@ export function createOrchestrationTools(harness: AgentHarness) {
         contract: {
           type: "string",
           description: "Optional execution contract the sub-agent must follow (scope, success criteria, rollback plan).",
+        },
+        spawn_contract: {
+          type: "object",
+          description: "Structured spawn contract specifying role/objective/deliverable/success criteria and handoff requirements.",
         },
         depends_on: {
           type: "array",
@@ -172,9 +244,34 @@ export function createOrchestrationTools(harness: AgentHarness) {
 
         const systemPrompt = typeof args["system_prompt"] === "string" ? args["system_prompt"].trim() : undefined;
         const userPrompt = typeof args["user_prompt"] === "string" ? args["user_prompt"].trim() : undefined;
+        const taskBrief = typeof args["task_brief"] === "string" ? args["task_brief"].trim() : undefined;
         const dependsOn = Array.isArray(args["depends_on"])
           ? (args["depends_on"] as unknown[]).map((x) => String(x)).filter(Boolean)
           : undefined;
+        const providedSpawnContract = (args["spawn_contract"] as SubagentSpawnContract | undefined) ?? undefined;
+
+        let spawnContract: SubagentSpawnContract | undefined = providedSpawnContract;
+        let contractSource: ContractSource = "provided";
+        if (!spawnContract) {
+          const synthesized = synthesizeSpawnContract({
+            goal: String(args["goal"] ?? ""),
+            userPrompt,
+            systemPrompt,
+            tools: args["tools"] as string[] | undefined,
+            activateTools: args["activate_tools"] as string[] | undefined,
+            timeoutMs: args["timeout_ms"] as number | undefined,
+            maxRounds: args["max_rounds"] as number | undefined,
+          });
+          spawnContract = synthesized.contract;
+          contractSource = synthesized.source;
+        }
+
+        const effectiveTaskBrief = taskBrief || spawnContract.objective;
+
+        // Unsafe-only rejection: reject empty objective/brief/goal even after synthesis guard.
+        if (!spawnContract.objective.trim() && !effectiveTaskBrief.trim() && !String(args["goal"] ?? "").trim()) {
+          return { ok: false, error: "Unsafe spawn contract: objective/task brief/goal all empty." };
+        }
 
         // DAG pre-check: validate dependency IDs exist.
         if (dependsOn && dependsOn.length > 0) {
@@ -187,6 +284,10 @@ export function createOrchestrationTools(harness: AgentHarness) {
 
         const { taskId, promise } = harness.forkChild({
           goal: args["goal"] as string,
+          taskBrief: effectiveTaskBrief,
+          inheritPersona: args["inherit_persona"] === true,
+          spawnContract,
+          spawnContractSource: contractSource,
           toolNames: args["tools"] as string[] | undefined,
           activateTools: args["activate_tools"] as string[] | undefined,
           additionalContext: mergedContext || undefined,
@@ -197,30 +298,12 @@ export function createOrchestrationTools(harness: AgentHarness) {
           dependsOn,
         });
 
-        // If dependencies exist, wrap the child run to wait for them first.
-        if (dependsOn && dependsOn.length > 0) {
-          void (async () => {
-            try {
-              const depResult = await orchestrator.waitForDependencies(
-                taskId,
-                (args["timeout_ms"] as number | undefined) ?? 300_000
-              );
-              if (!depResult.ok) {
-                orchestrator.fail(taskId, `Dependencies failed: ${depResult.failedIds.join(", ")}`);
-              }
-              // The promise is already running; dependency resolution is advisory here —
-              // the child harness starts immediately but should check bus for dep outputs.
-            } catch (err) {
-              orchestrator.fail(taskId, err instanceof Error ? err.message : String(err));
-            }
-          })();
-        }
-
         void promise; // already handled by forkChild internal completion callbacks
         return {
           ok: true,
           output:
             `Sub-agent spawned: task_id="${taskId}"\n` +
+            `Contract source: ${contractSource}; role=${spawnContract.role}\n` +
             (dependsOn && dependsOn.length > 0
               ? `Depends on: [${dependsOn.join(", ")}] — will wait for completion before proceeding.\n`
               : "") +
@@ -664,6 +747,14 @@ export function createOrchestrationTools(harness: AgentHarness) {
     const { checkContextTool, compressContextTool } = createContextTools(child.getContext());
     child.registry.register(checkContextTool);
     child.registry.register(compressContextTool);
+    child.registry.register(createRefreshWorldContextTool(child));
+    child.registry.register(createSetPersonaTool(child));
+    child.registry.register(createAppendPersonaLivingTool(child));
+    child.registry.register(createGetRuntimeSettingsTool(child));
+    child.registry.register(createSetRuntimeSettingsTool(child));
+    child.registry.register(createUploadImageTool(child));
+    child.registry.register(createHypothesizeTool(child));
+    child.registry.register(createExtractStructuredTool(child));
     // Upgrade V: goal decomposer, branch explorer, contract verifier — each closes over child
     child.registry.register(createDecomposeGoalTool(child));
     child.registry.register(createBranchExploreTool(child));
