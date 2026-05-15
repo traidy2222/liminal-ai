@@ -5,6 +5,7 @@ import type { TaskOrchestrator } from "./orchestrator.js";
 import { guardToolArgs } from "./tool_arg_guard.js";
 import type { SafetyJudge } from "./safety_judge.js";
 import { stableArgsJsonKey } from "./json_stable.js";
+import { effectiveHarnessEnvRaw } from "./harness_effective_env.js";
 
 // ─── Schema validation (#5 — Tool Invocation Reliability arXiv:2601.16280) ────
 
@@ -13,6 +14,15 @@ import { stableArgsJsonKey } from "./json_stable.js";
  * Checks: type, enum, numeric range, string length, array items, nested objects.
  */
 function validateValue(key: string, val: unknown, schema: PropertySchema): string | null {
+  if (schema.anyOf && schema.anyOf.length > 0) {
+    let lastErr: string | null = null;
+    for (const branch of schema.anyOf) {
+      const e = validateValue(key, val, { ...branch, anyOf: undefined });
+      if (e === null) return null;
+      lastErr = e;
+    }
+    return lastErr ?? `Field "${key}": value did not match allowed variants`;
+  }
   // Type check
   if (schema.type) {
     const actual = Array.isArray(val) ? "array" : typeof val;
@@ -100,14 +110,6 @@ export class ToolDispatcher {
    */
   private readonly inflight = new Map<string, Promise<ToolResult>>();
 
-  /**
-   * True if think() was called in the most recently completed round.
-   * Allows the NEXT round's destructive tools to pass the pre-flight check —
-   * models naturally call think() alone, then act in the following round.
-   */
-  private lastBatchHadThink = false;
-  /** Same-round / carry-forward preflight for destructive tools when AGENT_DESTRUCTIVE_GATE=balanced. */
-  private lastBatchHadPlan = false;
   private vaultWritesThisTurn = 0;
   private failedIntentCounts = new Map<string, number>();
 
@@ -118,20 +120,12 @@ export class ToolDispatcher {
     private readonly taskId?: string,
     private readonly safetyJudge?: SafetyJudge,
     private readonly approvalTimeoutMs: number = 60_000,
+    private readonly autoApproveDestructive: boolean = false,
     private readonly preDispatchPolicy?: (
       toolName: string,
       args: Record<string, unknown>
     ) => { ok: true } | { ok: false; reason: string; severity: "low" | "med" | "high" }
   ) {}
-
-  /**
-   * Called by AgentHarness after each batch of tool calls completes.
-   * Tracks whether think() appeared so the next round's pre-flight can see it.
-   */
-  notifyBatchComplete(batchToolNames: string[]): void {
-    this.lastBatchHadThink = batchToolNames.includes("think");
-    this.lastBatchHadPlan = batchToolNames.includes("plan");
-  }
 
   resetTurnCounters(): void {
     this.vaultWritesThisTurn = 0;
@@ -266,7 +260,7 @@ export class ToolDispatcher {
     if (name === "vault_write") {
       const budget = Math.max(
         1,
-        Math.min(50, parseInt(process.env["AGENT_VAULT_WRITE_BUDGET"] ?? "8", 10) || 8)
+        Math.min(50, parseInt(effectiveHarnessEnvRaw("AGENT_VAULT_WRITE_BUDGET") ?? "8", 10) || 8)
       );
       if (this.vaultWritesThisTurn >= budget) {
         this.emitter.emit("vault_activity", {
@@ -297,28 +291,6 @@ export class ToolDispatcher {
       }
     }
 
-    // Pre-flight: destructive tools require think() in the same round OR the immediately
-    // preceding round. Models commonly call think() alone, then act in the next round.
-    if (tool.dangerLevel === "destructive") {
-      const balanced = process.env["AGENT_DESTRUCTIVE_GATE"] === "balanced";
-      const hasThink =
-        (batchToolNames?.includes("think") ?? false) || this.lastBatchHadThink;
-      const hasPlan =
-        (batchToolNames?.includes("plan") ?? false) || this.lastBatchHadPlan;
-      const passes = hasThink || (balanced && hasPlan);
-      if (!passes) {
-        const hint = balanced
-          ? `Call think() or plan() in the same round first (or alone in the immediately preceding round — not any earlier round).`
-          : `Call think() in the same round first (or alone in the immediately preceding round — not any earlier round). Set AGENT_DESTRUCTIVE_GATE=balanced to also allow plan().`;
-        const result: ToolResult = {
-          ok: false,
-          error: `Destructive tool "${name}" blocked: ${hint}`,
-        };
-        this.emitter.emit("tool_result", { callId, name, args, result });
-        return result;
-      }
-    }
-
     // Acquire resource locks if declared
     const resourceIds = tool.resourceLocks?.(args) ?? [];
     if (resourceIds.length > 0 && this.orchestrator) {
@@ -344,6 +316,14 @@ export class ToolDispatcher {
 
     try {
       if (requiresHumanApproval) {
+        if (this.autoApproveDestructive) {
+          // Session-only YOLO: bypass interactive approval while preserving audit visibility.
+          this.emitter.emit("approval_decision", {
+            callId,
+            name,
+            decision: "approve",
+          });
+        } else {
         let skipHumanApproval = false;
         if (this.safetyJudge) {
           const { verdict, source } = await this.safetyJudge.classify(
@@ -390,6 +370,7 @@ export class ToolDispatcher {
               return result;
             }
           }
+        }
         }
       }
 

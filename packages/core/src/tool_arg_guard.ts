@@ -2,6 +2,8 @@
  * Pre-execution argument guard (AgentProp-Bench–style propagation mitigation).
  * Runs after JSON schema validation; returns a human-readable block reason or null.
  */
+import { effectiveHarnessEnvRaw } from "./harness_effective_env.js";
+
 const DANGEROUS_SHELL =
   /\brm\s+(-\S+\s+)*\/($|[\s;|&])|rm\s+.*--no-preserve-root|:\(\)\{|\|\s*:\s*&|mkfs\.|dd\s+if=\/dev\/|curl\s+.*\|\s*sh|wget\s+.*\|\s*sh|>\s*\/dev\/sd/i;
 const DANGEROUS_EXECUTE_CODE =
@@ -115,7 +117,7 @@ export function guardToolArgs(
       return "vault_write content exceeds max length (120k).";
     }
     if (
-      process.env["AGENT_VAULT_REQUIRE_LINKS"] === "1" &&
+      effectiveHarnessEnvRaw("AGENT_VAULT_REQUIRE_LINKS") === "1" &&
       !content.includes("[[")
     ) {
       return "vault_write requires at least one [[Wikilink]] when AGENT_VAULT_REQUIRE_LINKS=1.";

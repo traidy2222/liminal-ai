@@ -18,6 +18,7 @@ import path from "node:path";
 import type { AgentEmitter } from "./events.js";
 import type { AgentEventMap } from "./types.js";
 import { resolveWorkspaceRoot } from "./workspace_root.js";
+import { effectiveHarnessEnvRaw } from "./harness_effective_env.js";
 
 const MAX_USER_CHARS = 12_000;
 const MAX_TOOL_OUT_CHARS = 8_000;
@@ -31,7 +32,7 @@ function truncate(s: string, max: number): string {
 }
 
 function resolveMaxRollupChars(): number {
-  const raw = process.env["AGENT_SESSION_JSONL_MAX_ROLLUP_CHARS"]?.trim();
+  const raw = effectiveHarnessEnvRaw("AGENT_SESSION_JSONL_MAX_ROLLUP_CHARS")?.trim();
   if (raw) {
     const n = parseInt(raw, 10);
     if (Number.isFinite(n) && n >= 4096) return Math.min(2_000_000, n);
@@ -41,14 +42,14 @@ function resolveMaxRollupChars(): number {
 
 /** How assistant stream text is written: rollup (default) | delta | both */
 export function resolveSessionTextLogMode(): "rollup" | "delta" | "both" {
-  const raw = process.env["AGENT_SESSION_JSONL_TEXT_LOG"]?.trim().toLowerCase();
+  const raw = effectiveHarnessEnvRaw("AGENT_SESSION_JSONL_TEXT_LOG")?.trim().toLowerCase();
   if (raw === "delta") return "delta";
   if (raw === "both") return "both";
   return "rollup";
 }
 
 export function sessionTraceLogEnabled(): boolean {
-  return process.env["AGENT_SESSION_JSONL_TRACE"] === "1";
+  return effectiveHarnessEnvRaw("AGENT_SESSION_JSONL_TRACE") === "1";
 }
 
 function sessionLogDir(): string {
@@ -291,6 +292,6 @@ export function maybeAttachSessionEventLog(
   emitter: AgentEmitter,
   sessionId: string
 ): () => void {
-  if (process.env["AGENT_SESSION_JSONL"] !== "1") return () => {};
+  if (effectiveHarnessEnvRaw("AGENT_SESSION_JSONL") !== "1") return () => {};
   return attachSessionEventLog(emitter, sessionId);
 }

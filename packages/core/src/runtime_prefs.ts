@@ -61,6 +61,11 @@ export interface RuntimePersonaPreferences {
   updatedAt?: number;
 }
 
+export interface RuntimeHarnessPreferences {
+  /** Sparse non-secret overrides for `AGENT_*` keys (see `HARNESS_MANAGED_ENV_KEYS`). */
+  env?: Record<string, string>;
+}
+
 export interface RuntimePreferences {
   version: 1;
   provider?: {
@@ -72,11 +77,13 @@ export interface RuntimePreferences {
     uiVerbosity?: "normal" | "quiet";
     vaultAutoWriteMode?: "off" | "research" | "aggressive";
     approvalTimeoutMs?: number;
+    /** @deprecated Stored for compatibility; no longer applied (think/plan preflight removed). */
     destructiveGate?: "strict" | "balanced";
     rateLimitMaxRetries?: number;
     transient5xxMaxRetries?: number;
     retryMaxDelayMs?: number;
   };
+  harness?: RuntimeHarnessPreferences;
   persona?: RuntimePersonaPreferences;
   updatedAt: number;
 }

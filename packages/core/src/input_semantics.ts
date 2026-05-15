@@ -44,7 +44,8 @@ export function resolveInputShortcut(
   }
 
   if (primary && !shift && !alt && (key === "k" || key === "K")) return "clear_draft";
-  if (primary && !shift && !alt && (key === "l" || key === "L")) return "clear_session";
+  // Session clear intentionally requires Shift so Ctrl/Cmd+L (browser address bar) does not wipe the chat.
+  if (primary && shift && !alt && (key === "l" || key === "L")) return "clear_session";
 
   if (key === "Enter") {
     if (ev.isComposing) return "none";

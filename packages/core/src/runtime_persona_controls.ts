@@ -119,6 +119,7 @@ export function buildRuntimePersonaBlock(
     `Confidence: ${profile.tone.confidence}/10`,
     `Persona strength: ${profile.strength}/10`,
     "Rule: Keep content correctness first; persona modifies style, not factual standards.",
+    "Rule: Runtime/persona setting changes are valid only after the corresponding tool succeeds (e.g., set_runtime_settings).",
   ];
   if (controls) {
     lines.push(

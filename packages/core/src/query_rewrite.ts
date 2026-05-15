@@ -3,6 +3,7 @@
  */
 import type OpenAI from "openai";
 import { completeChatJson, getFastModelSlug } from "./router.js";
+import { effectiveHarnessEnvRaw } from "./harness_effective_env.js";
 
 export interface RewriteQueryResult {
   subQueries: string[];
@@ -29,7 +30,7 @@ export async function rewriteQueryForRecall(
   defaultModel: string
 ): Promise<RewriteQueryResult> {
   const t = task.trim().slice(0, 4000);
-  if (process.env["AGENT_QUERY_REWRITE"] !== "1") {
+  if (effectiveHarnessEnvRaw("AGENT_QUERY_REWRITE") !== "1") {
     return { subQueries: [t.slice(0, 800)] };
   }
   const fast = getFastModelSlug(defaultModel);

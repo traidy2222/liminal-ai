@@ -2,8 +2,9 @@
  * Harness-injected rule recall (core-only; avoids core → @liminal/tools import cycle).
  * Injected once per send() when entering round 2, unless AGENT_RULE_RECALL=0.
  *
- * Adaptive injection: buildAdaptiveRuleMessage() selects the top-N most-violated rules
- * from live rule stats, so the model focuses on the rules it chronically ignores.
+ * Rule recall lists **rule IDs only**; canonical wording lives in the tools package
+ * system protocol (`## Named rules`). `buildHarnessRuleRecallMessage()` sorts IDs by
+ * violation counts from `.agent_rule_stats.json` when stats exist.
  */
 
 /** Individual rule entries keyed by ID for selective injection. */
@@ -31,7 +32,11 @@ export const HARNESS_RULES: Record<string, string> = {
   "R-RESEARCH-BUDGET": "After gathering 3–4 substantive web sources, stop fetching and synthesize — do not keep fetching more sources on the same angle. Prefer web_research for broad queries instead of manual parallel search+fetch loops.",
   "R-SYNTHESIZE-VARY": "In final briefings and summaries, introduce each major theme once; do not repeat the same proper noun, date, or key concept in consecutive sections.",
   "R-MEMORY-SCOPE": "Recalled memory provides background context only. For research tasks on a new topic, do not let prior session topics bias search query construction — build queries from the current ask.",
+  "R-EXPLORATORY-SYNTHESIS":
+    "For open-ended or hypothetical ideation, answer the literal prompt with novel options first. Do not default the arc to the user's stored business roadmap, cashflow, or quit-job plan unless they explicitly tied this turn to that work.",
   "R-MEMORY-FIRST-IDENTITY": "For identity/personal prompts (name, who am I, what should you call me), check memory first and do not default to OS username from world context.",
+  "R-RUNTIME-PERSONA-TOOLS":
+    "If the user asks to change humor %, formality, confidence, verbosity, or persona strength, call set_runtime_settings with persona_controls — do not claim new dial values from chat text alone. Full persona swap → set_persona.",
   "R-ONE-SHOT-RETRY": "If a tool intent fails twice with near-identical args, stop retrying and replan with a different approach.",
   "R-ACTIVE-FIRST": "Prefer the narrowest currently active tool first; activate only one new family when required by missing capability.",
   "R-LIVE-DATA-HONESTY": "For live/current conditions claims, include source + observed/as-of time; if live data is unavailable, disclose fallback locality and uncertainty.",
@@ -43,64 +48,38 @@ export const HARNESS_RULES: Record<string, string> = {
   "R-GREP-BEFORE-REFACTOR": "Before renaming a symbol, changing a function signature, or moving a type, grep for all call sites and import paths first — never assume a change is local without verifying all references.",
   "R-OUTPUT-TYPOGRAPHY":
     "User-visible replies are final copy: no long runs of hyphens as separators or underlines; at most one standalone markdown --- hr if needed. Use em dash (—) sparingly; prefer commas/periods/colons. Fix broken markdown before sending.",
+  "R-MULTI-PART-USER":
+    "If the user packs several distinct questions or requirements in one message, answer or explicitly defer each part in the final reply — do not silently skip a sub-question.",
 };
 
 /**
- * Build a targeted rule recall message using hit counts from rule_stats.
- * Injects all rules on first call (round 2), then only the top-N most-violated
- * rules on subsequent rounds so chronic violators get extra reinforcement.
+ * Compact harness rule recall: lists rule IDs only. Full definitions live in the
+ * tools package system protocol under `## Named rules` — avoids duplicating long
+ * paragraphs here (token savings, single source of truth).
  *
- * @param topN   Max rules to include (0 = all)
- * @param hitCounts  Map of ruleId → hitCount from rule_stats (higher = more violations)
+ * When `hitCounts` is non-empty, IDs are sorted by violation count (highest first).
  */
-export function buildAdaptiveRuleMessage(
-  topN: number,
-  hitCounts: Map<string, number>
-): string {
+export function buildHarnessRuleRecallMessage(hitCounts: Map<string, number>): string {
   const allIds = Object.keys(HARNESS_RULES);
-  let selected: string[];
-
-  if (topN <= 0 || hitCounts.size === 0) {
-    selected = allIds;
-  } else {
-    // Sort by violation count descending; zero-hit rules go last (still included up to topN)
-    selected = [...allIds].sort((a, b) => {
-      return (hitCounts.get(b) ?? 0) - (hitCounts.get(a) ?? 0);
-    }).slice(0, topN);
-  }
-
-  const lines = selected.map((id) => `- **${id}**: ${HARNESS_RULES[id]}`);
-  return `[REMEMBER — harness protocol rules (adaptive selection — most violated first)]\n${lines.join("\n")}\n`;
+  const ordered =
+    hitCounts.size > 0
+      ? [...allIds].sort((a, b) => (hitCounts.get(b) ?? 0) - (hitCounts.get(a) ?? 0))
+      : [...allIds];
+  const lines = ordered.map((id) => `- **${id}**`);
+  return (
+    `[REMEMBER — harness protocol rule IDs. Full text for each ID is under "## Named rules" in the fixed system message — use that section as the canonical definition.]\n` +
+    lines.join("\n") +
+    `\n`
+  );
 }
 
-export const HARNESS_RULE_RECALL_MESSAGE =
-  `[REMEMBER — named harness protocol rules]\n` +
-  `- **R-PLAN-3STEPS**: If the user lists ≥3 explicit ordered steps, call plan() before executing tools for those steps.\n` +
-  `- **R-SEQ-SETUP**: When the user numbers prerequisites (e.g. "1) remember … 2) remember … 3) memory_graph"), execute them in order — do not skip earlier steps.\n` +
-  `- **R-CITE-PATHS**: If you used repo_map, read_file, or list_dir, your final reply must cite at least one real path string that appeared in tool output (not invented).\n` +
-  `- **R-ORCH-ID**: After spawn_agent, capture the returned task_id and pass it in task_ids to wait_for_agents.\n` +
-  `- **R-SPAWN-PROMPT**: Every spawn_agent call must include system_prompt (role + constraints + output format) and user_prompt (full detailed task). A bare goal= only produces a cold, generic sub-agent with no output contract.\n` +
-  `- **R-CONTRACT-BOUNDS**: If a plan defines execution contract bounds (steps/time/tool budget), keep tool usage within those bounds or replan.\n` +
-  `- **R-COMMITMENT-CHECK**: Before destructive or risky actions, ensure they do not violate explicit commitments/invariants.\n` +
-  `- **R-SEARCH-DIVERSITY**: For the first research search pass, cover at least three distinct intents — diversify angle and phrasing rather than repeating the same question. What those intents are depends on the task.\n` +
-  `- **R-CHUNK-LARGE-FILES**: For very large files (full applications, >2000 lines), write in logical self-contained sections using multiple write_file calls (append mode) — provider streaming timeouts cut off multi-minute completions. Files up to ~1000 lines are fine in one call.\n` +
-  `- **R-LARGE-READ-DISCIPLINE**: Do not repeatedly full-read the same large file. After one full read, switch to read_file_chunked/file_metadata and targeted checks.\n` +
-  `- **R-WRITE-ONE-VERIFY**: After write_file succeeds, one short read at most—then reply; no grep/shell reassurance spirals on demos.\n` +
-  `- **R-DEDUP-TOOLS**: Within one send, no duplicate memory_query/recall_relevant/read_file/web_fetch with the same intent/args—use first results or change the query once.\n` +
-  `- **R-CLOSED-ARTIFACT**: Parseable files (HTML/XML/SVG): first write must be complete minimal valid structure, or skeleton + apply_diff—not truncated half-documents.\n` +
-  `- **R-READ-TOOL-ERRORS**: On tool failure, read the error and apply the stated fix (overwrite:true, apply_diff, etc.)—no thrashing across tools.\n` +
-  `- **R-SYNTAX-COLUMN**: SyntaxError (path:line:column) → fix at COLUMN on that line; verify characters; no identical search/replace no-ops.\n` +
-  `- **R-RESEARCH-BUDGET**: After gathering 3–4 substantive web sources, stop fetching and synthesize — do not keep fetching more sources on the same angle. Prefer web_research for broad queries instead of manual parallel search+fetch loops.\n` +
-  `- **R-SYNTHESIZE-VARY**: In final briefings and summaries, introduce each major theme once; do not repeat the same proper noun, date, or key concept in consecutive sections.\n` +
-  `- **R-MEMORY-SCOPE**: Recalled memory provides background context only. For research tasks on a new topic, do not let prior session topics bias search query construction — build queries from the current ask.\n` +
-  `- **R-MEMORY-FIRST-IDENTITY**: For identity/personal prompts (name, who am I, what should you call me), check memory first and do not default to OS username from world context.\n` +
-  `- **R-ONE-SHOT-RETRY**: If a tool intent fails twice with near-identical args, stop retrying and replan with a different approach.\n` +
-  `- **R-ACTIVE-FIRST**: Prefer the narrowest currently active tool first; activate only one new family when required by missing capability.\n` +
-  `- **R-LIVE-DATA-HONESTY**: For live/current conditions claims, include source + observed/as-of time; if live data is unavailable, disclose fallback locality and uncertainty.\n` +
-  `- **R-SOURCE-TIER**: Match citation language to source tier: T1 (wire/gov/institution) = state directly; T2 (quality press) = 'According to [outlet]'; T3 (Wikipedia/aggregator) = 'Reports suggest'; T4 (unverified) = 'Unverified claims suggest' or omit.\n` +
-  `- **R-CONTRADICT-SURFACE**: When sources disagree, name both sides explicitly — never silently average conflicting facts.\n` +
-  `- **R-ADVERSARIAL-CHECK**: After synthesizing ≥3 sources on any factual or analytical topic, use think() to identify weak claims, T3/T4-only assertions, and missed alternative interpretations.\n` +
-  `- **R-TYPECHECK-VERIFY**: After editing typed code, run typecheck/build before claiming done — do not assume types pass from visual inspection.\n` +
-  `- **R-SCOPE-CREEP**: Fix only what was explicitly requested — no surrounding refactors, no unasked features, no new abstractions.\n` +
-  `- **R-GREP-BEFORE-REFACTOR**: Before renaming a symbol or changing a signature, grep for all call sites first — never assume a change is local.\n` +
-  `- **R-OUTPUT-TYPOGRAPHY**: Final user-visible text: no decorative hyphen lines; sparse em dashes; intentional markdown structure.\n`;
+/**
+ * @param _topN Ignored (kept for signature compatibility); all IDs are always listed compactly.
+ * @deprecated Prefer `buildHarnessRuleRecallMessage`.
+ */
+export function buildAdaptiveRuleMessage(_topN: number, hitCounts: Map<string, number>): string {
+  return buildHarnessRuleRecallMessage(hitCounts);
+}
+
+/** @deprecated Prefer `buildHarnessRuleRecallMessage(new Map())`. */
+export const HARNESS_RULE_RECALL_MESSAGE = buildHarnessRuleRecallMessage(new Map());

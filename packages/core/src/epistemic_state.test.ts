@@ -1,6 +1,12 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { emptyEpistemicState, mergeEpistemicState, renderEpistemicStateBlock } from "./epistemic_state.js";
+import {
+  appendEpistemicHypothesis,
+  emptyEpistemicState,
+  mergeEpistemicState,
+  renderEpistemicStateBlock,
+} from "./epistemic_state.js";
+import type { EpistemicHypothesisRow } from "./epistemic_state.js";
 
 test("mergeEpistemicState merges files and budget", () => {
   const a = emptyEpistemicState("do thing");
@@ -24,4 +30,29 @@ test("mergeEpistemicState unions filesModified and render shows both file sectio
   assert.ok(block.includes("## Files modified (this send)"));
   assert.ok(block.includes("src/x.ts"));
   assert.ok(block.includes("src/y.ts"));
+});
+
+test("appendEpistemicHypothesis supersedes by id and render shows falsifiers", () => {
+  const base = emptyEpistemicState("goal");
+  const h1: EpistemicHypothesisRow = {
+    id: "hyp:aaa",
+    claim: "First theory",
+    confidence: "low",
+    falsifiers: ["if logs show X"],
+    status: "active",
+  };
+  const h2: EpistemicHypothesisRow = {
+    id: "hyp:bbb",
+    claim: "Revised theory",
+    confidence: "med",
+    status: "active",
+  };
+  let hy = appendEpistemicHypothesis(base.hypotheses, h1);
+  hy = appendEpistemicHypothesis(hy, h2, { supersede_id: "hyp:aaa" });
+  assert.equal(hy.length, 2);
+  assert.equal(hy[0]?.status, "superseded");
+  assert.equal(hy[0]?.superseded_by, "hyp:bbb");
+  const block = renderEpistemicStateBlock(mergeEpistemicState(base, { hypotheses: hy }));
+  assert.ok(block.includes("falsify-if"));
+  assert.ok(block.includes("hyp:bbb"));
 });

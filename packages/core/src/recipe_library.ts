@@ -6,6 +6,7 @@ import { join } from "node:path";
 import { createHash } from "node:crypto";
 import { rankDocumentsForQuery, type RankableDoc } from "./memory_rank.js";
 import { resolveWorkspaceRoot } from "./workspace_root.js";
+import { effectiveHarnessEnvRaw } from "./harness_effective_env.js";
 
 const STATS_PATH = () => join(resolveWorkspaceRoot(), ".agent_recipe_stats.json");
 
@@ -29,7 +30,7 @@ async function saveStats(s: StatsFile): Promise<void> {
 
 /** Bump success count when harness persists a recipe:* note. */
 export async function bumpRecipePattern(preview: string): Promise<void> {
-  if (process.env["AGENT_RECIPE_LIBRARY"] === "0") return;
+  if (effectiveHarnessEnvRaw("AGENT_RECIPE_LIBRARY") === "0") return;
   const key = preview.replace(/\s+/g, " ").trim().slice(0, 200);
   if (key.length < 12) return;
   const s = await loadStats();
@@ -44,7 +45,7 @@ export async function bumpRecipePattern(preview: string): Promise<void> {
 }
 
 export async function formatRecipeLibraryHints(seed: string): Promise<string | null> {
-  if (process.env["AGENT_RECIPE_LIBRARY"] === "0") return null;
+  if (effectiveHarnessEnvRaw("AGENT_RECIPE_LIBRARY") === "0") return null;
   const trimmed = seed.trim();
   if (trimmed.length < 6) return null;
   const s = await loadStats();

@@ -4,9 +4,10 @@
 import OpenAI from "openai";
 import type { ChatCompletionMessageParam } from "openai/resources/chat/completions.js";
 import { withProviderRequestSpacing } from "./provider_request_gate.js";
+import { effectiveHarnessEnvRaw } from "./harness_effective_env.js";
 
 export function getFastModelSlug(fallback: string): string {
-  const m = process.env["AGENT_FAST_MODEL"]?.trim();
+  const m = effectiveHarnessEnvRaw("AGENT_FAST_MODEL")?.trim();
   return m && m.length > 0 ? m : fallback;
 }
 
@@ -25,6 +26,8 @@ export async function completeChatJson(
     messages: ChatCompletionMessageParam[];
     maxTokens?: number;
     temperature?: number;
+    /** When aborted (timeout), the SDK rejects and {@link JsonCompletionResult} reports the error. */
+    signal?: AbortSignal;
   }
 ): Promise<JsonCompletionResult> {
   try {
@@ -37,6 +40,7 @@ export async function completeChatJson(
           max_tokens: opts.maxTokens ?? 800,
           temperature: opts.temperature ?? 0.2,
           response_format: { type: "json_object" },
+          ...(opts.signal ? { signal: opts.signal } : {}),
         })
     );
     const raw = res.choices[0]?.message?.content ?? "";

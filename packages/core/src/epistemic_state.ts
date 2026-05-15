@@ -58,6 +58,36 @@ export function emptyEpistemicState(goal: string): EpistemicState {
   };
 }
 
+export type EpistemicHypothesisRow = EpistemicState["hypotheses"][number];
+
+/**
+ * Append one hypothesis row, optionally marking an existing id as superseded.
+ * Caps list length (FIFO drop oldest) to keep working state bounded.
+ */
+export function appendEpistemicHypothesis(
+  current: EpistemicState["hypotheses"],
+  entry: EpistemicHypothesisRow,
+  opts?: { max?: number; supersede_id?: string }
+): EpistemicState["hypotheses"] {
+  const max = opts?.max ?? 12;
+  const sid = opts?.supersede_id?.trim();
+  let next = current.map((h) => ({ ...h }));
+  if (sid) {
+    next = next.map((h) =>
+      h.id === sid
+        ? {
+            ...h,
+            status: "superseded" as const,
+            superseded_by: entry.id,
+          }
+        : h
+    );
+  }
+  next.push(entry);
+  if (next.length > max) next = next.slice(-max);
+  return next;
+}
+
 export function mergeEpistemicState(
   base: EpistemicState,
   patch: Partial<EpistemicState>
@@ -101,8 +131,13 @@ export function renderEpistemicStateBlock(e: EpistemicState, maxChars = 3500): s
   if (e.hypotheses.length === 0) lines.push("(none)");
   else {
     for (const h of e.hypotheses.slice(0, 8)) {
-      const ev = h.evidence?.length ? ` evidence: ${h.evidence.slice(0, 2).join("; ")}` : "";
-      lines.push(`- (${h.confidence}) ${h.claim.slice(0, 200)}${ev}`);
+      const id = h.id ? `[${h.id}] ` : "";
+      const st = h.status && h.status !== "active" ? ` ${h.status}` : "";
+      const ev = h.evidence?.length ? ` · evidence: ${h.evidence.slice(0, 2).join("; ")}` : "";
+      const fal =
+        h.falsifiers?.length ? ` · falsify-if: ${h.falsifiers.slice(0, 2).join(" | ")}` : "";
+      const nt = h.next_test ? ` · next: ${h.next_test.slice(0, 120)}` : "";
+      lines.push(`- ${id}(${h.confidence})${st} ${h.claim.slice(0, 180)}${ev}${fal}${nt}`);
     }
   }
   lines.push("");

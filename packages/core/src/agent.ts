@@ -21,12 +21,13 @@ import { SafetyJudge } from "./safety_judge.js";
 import { StreamAccumulator } from "./streaming.js";
 import { TaskOrchestrator } from "./orchestrator.js";
 import { buildWorldContextMessage } from "./world_context.js";
+import { gatherRepoMapLines } from "./repo_map.js";
 import { rewriteQueryForRecall, type RewriteQueryResult } from "./query_rewrite.js";
 import { distillToolOutput, shouldDistillToolOutput } from "./output_distill.js";
 import { appendFailureLog } from "./failure_log.js";
 import { completeChatJson, getFastModelSlug } from "./router.js";
 import { stableArgsJsonKey } from "./json_stable.js";
-import { HARNESS_RULE_RECALL_MESSAGE, buildAdaptiveRuleMessage } from "./harness_rules.js";
+import { buildHarnessRuleRecallMessage } from "./harness_rules.js";
 import { bumpRecipePattern } from "./recipe_library.js";
 import { addCompressionGuideline, formatCompressionGuidelines } from "./compression_guidelines.js";
 import { bumpRuleHits, getRuleHitCounts } from "./rule_stats.js";
@@ -36,6 +37,12 @@ import { resolveProviderConfig } from "./provider_config.js";
 import { withProviderRequestSpacing } from "./provider_request_gate.js";
 import type { RuntimePreferences, RuntimePersonaProfile } from "./runtime_prefs.js";
 import {
+  runHarnessEffectiveEnvContext,
+  effectiveHarnessEnvRaw,
+  resolveHarnessEnvRaw,
+} from "./harness_effective_env.js";
+import { HARNESS_MANAGED_ENV_KEY_SET, HARNESS_SECRET_ENV_KEYS } from "./harness_env_inventory.js";
+import {
   applyPersonaControlsToProfile,
   buildRuntimePersonaBlock,
   normalizePersonaControlsPatch,
@@ -43,13 +50,20 @@ import {
 } from "./runtime_persona_controls.js";
 import {
   buildAutoDreamPrompt,
+  buildAutoDreamTranscriptMessage,
   listSessionsTouchedSince,
   loadRecentSessionSnippets,
   readLastConsolidatedAt,
   resolveAutoDreamConfig,
+  resolveAutoDreamInjectTranscript,
   rollbackConsolidationLock,
   tryAcquireConsolidationLock,
 } from "./auto_dream.js";
+import {
+  appendPersonalityHeartbeatLog,
+  executePersonalityHeartbeat,
+  resolvePersonalityHeartbeatConfig,
+} from "./personality_heartbeat.js";
 import { readFile as readFileFs } from "node:fs/promises";
 import path from "node:path";
 import { resolveWorkspaceRoot } from "./workspace_root.js";
@@ -66,9 +80,13 @@ import {
   updateDriftScore,
 } from "./execution_state.js";
 import {
+  heuristicExploratoryCreative,
+  heuristicPersonaOrHistoryPrompt,
+  shouldSkipHarnessSecondaryPassesForTurn,
   inferTurnInference,
   neutralTurnInferenceResult,
   resolveMemoryPolicy,
+  type IntentInferenceWorkspaceContext,
   type TurnInferenceResult,
 } from "./intent_inference.js";
 import { EDIT_TOOL_NAMES, collectEditToolTargetPaths } from "./tool_changed_paths.js";
@@ -77,6 +95,38 @@ import { EDIT_TOOL_NAMES, collectEditToolTargetPaths } from "./tool_changed_path
 
 function sleep(ms: number) {
   return new Promise<void>((r) => setTimeout(r, ms));
+}
+
+function buildNeutralChildPersonaMessage(): Message {
+  return {
+    role: "system",
+    content:
+      "You are a focused specialist sub-agent. Execute only the assigned subtask. " +
+      "Stay within scope, surface uncertainties, and return merge-ready outputs for your parent agent.",
+  };
+}
+
+function buildSpawnContractPrelude(contract: ChildAgentConfig["spawnContract"]): string {
+  if (!contract) return "";
+  const lines: string[] = [
+    "[SPAWN CONTRACT]",
+    `Role: ${contract.role}`,
+    `Objective: ${contract.objective}`,
+    `Deliverable Format: ${contract.deliverableFormat}`,
+  ];
+  if (contract.successCriteria.length > 0) {
+    lines.push("Success Criteria:");
+    for (const item of contract.successCriteria) lines.push(`- ${item}`);
+  }
+  if (contract.nonGoals?.length) {
+    lines.push("Non-goals:");
+    for (const item of contract.nonGoals) lines.push(`- ${item}`);
+  }
+  if (contract.handoffRequirements?.length) {
+    lines.push("Handoff Requirements:");
+    for (const item of contract.handoffRequirements) lines.push(`- ${item}`);
+  }
+  return lines.join("\n");
 }
 
 /**
@@ -123,7 +173,7 @@ function resolveApprovalTimeoutMs(config: AgentConfig): number {
   if (config.approvalTimeoutMs != null && Number.isFinite(config.approvalTimeoutMs)) {
     return Math.max(10_000, Math.min(600_000, config.approvalTimeoutMs));
   }
-  const raw = process.env["AGENT_APPROVAL_TIMEOUT_MS"]?.trim();
+  const raw = resolveHarnessEnvRaw("AGENT_APPROVAL_TIMEOUT_MS", config.runtimePreferences ?? null)?.trim();
   if (raw) {
     const n = parseInt(raw, 10);
     if (Number.isFinite(n)) return Math.max(10_000, Math.min(600_000, n));
@@ -131,8 +181,9 @@ function resolveApprovalTimeoutMs(config: AgentConfig): number {
   return 60_000;
 }
 
-function isUiQuiet(): boolean {
-  return process.env["AGENT_UI_VERBOSITY"] === "quiet";
+function resolveAutoApproveDestructive(config: AgentConfig): boolean {
+  if (config.autoApproveDestructive != null) return config.autoApproveDestructive === true;
+  return resolveHarnessEnvRaw("AGENT_YOLO", config.runtimePreferences ?? null) === "1";
 }
 
 function clampInt(n: number, min: number, max: number): number {
@@ -181,7 +232,7 @@ function normalizeFilePathForCompare(p: string): string {
 }
 
 function resolveIntentConfidenceThreshold(): number {
-  const raw = process.env["AGENT_INTENT_CONFIDENCE_MIN"]?.trim();
+  const raw = effectiveHarnessEnvRaw("AGENT_INTENT_CONFIDENCE_MIN")?.trim();
   const n = raw ? Number(raw) : 0.65;
   if (!Number.isFinite(n)) return 0.65;
   return Math.max(0.4, Math.min(0.95, n));
@@ -242,6 +293,17 @@ function normalizeRuntimePreferencePatch(patch: Partial<RuntimePreferences>): Pa
     }
     if (Object.keys(p).length > 0) out.persona = p;
   }
+  if (patch.harness?.env) {
+    const env: Record<string, string> = {};
+    for (const [k, v] of Object.entries(patch.harness.env)) {
+      if (!HARNESS_MANAGED_ENV_KEY_SET.has(k)) continue;
+      if (HARNESS_SECRET_ENV_KEYS.has(k)) continue;
+      if (typeof v !== "string") continue;
+      const t = v.trim().slice(0, 8000);
+      if (t.length > 0) env[k] = t;
+    }
+    if (Object.keys(env).length > 0) out.harness = { env };
+  }
   return out;
 }
 
@@ -249,7 +311,8 @@ function hasRuntimePreferenceChange(patch: Partial<RuntimePreferences>): boolean
   return Boolean(
     (patch.provider && Object.keys(patch.provider).length > 0) ||
       (patch.runtime && Object.keys(patch.runtime).length > 0) ||
-      (patch.persona && Object.keys(patch.persona).length > 0)
+      (patch.persona && Object.keys(patch.persona).length > 0) ||
+      (patch.harness?.env && Object.keys(patch.harness.env).length > 0)
   );
 }
 
@@ -417,7 +480,7 @@ function suggestedWaitMsFromUpstreamThrottleMessage(msg: string): number | null 
   ) {
     return null;
   }
-  const env = process.env["AGENT_UPSTREAM_429_SUGGESTED_WAIT_MS"]?.trim();
+  const env = effectiveHarnessEnvRaw("AGENT_UPSTREAM_429_SUGGESTED_WAIT_MS")?.trim();
   if (env) {
     const n = parseInt(env, 10);
     if (Number.isFinite(n) && n > 0) return Math.min(300_000, n);
@@ -426,7 +489,7 @@ function suggestedWaitMsFromUpstreamThrottleMessage(msg: string): number | null 
 }
 
 function isRetryForeverEnabled(): boolean {
-  return process.env["AGENT_RETRY_FOREVER"] === "1";
+  return effectiveHarnessEnvRaw("AGENT_RETRY_FOREVER") === "1";
 }
 
 /** Heuristic: assistant answer likely cites repo facts worth double-checking. */
@@ -454,17 +517,6 @@ function looksPathOrCodeHeavy(assistantText: string): boolean {
   if (/packages[/\\]|[/\\]src[/\\]|[A-Za-z0-9_.-]+[/\\][A-Za-z0-9_.-]+\.(ts|tsx|js|jsx|json|md)\b/i.test(assistantText)) return true;
   if (/`[^`]{3,}\.(ts|tsx|js|json)`/.test(assistantText)) return true;
   return false;
-}
-
-function hasModelIdentityLeak(text: string): boolean {
-  const t = text.toLowerCase();
-  return (
-    /\b(i am|i'm)\s+owl\b/.test(t) ||
-    /\bowl\b.*\b(zoo|developed)\b/.test(t) ||
-    /\bbuilt by\s+zoo\b/.test(t) ||
-    /\bzoo company\b/.test(t) ||
-    /\bdeveloped by\s+zoo\b/.test(t)
-  );
 }
 
 function normPathForMatch(p: string): string {
@@ -632,7 +684,7 @@ function hasWeatherFreshEvidence(text: string): boolean {
 type VaultAutoWriteMode = "off" | "research" | "aggressive";
 
 function resolveVaultAutoWriteMode(): VaultAutoWriteMode {
-  const raw = (process.env["AGENT_VAULT_AUTO_WRITE"] ?? "").trim().toLowerCase();
+  const raw = (effectiveHarnessEnvRaw("AGENT_VAULT_AUTO_WRITE") ?? "").trim().toLowerCase();
   if (raw === "0" || raw === "off" || raw === "false" || raw === "disabled") return "off";
   if (raw === "aggressive") return "aggressive";
   if (raw === "research") return "research";
@@ -779,6 +831,12 @@ const ORCHESTRATION_TOOL_NAMES = new Set([
   "compress_context",       // same
   "refresh_world_context",  // root-only; children skip world context entirely
   "set_persona",            // closes over parent harness — child inherits parent's persona
+  "append_persona_living",  // closes over harness; appends soul/living.md + reload persona block
+  "get_runtime_settings",   // closes over harness — reads effective runtime prefs
+  "set_runtime_settings",   // closes over harness — patch runtime prefs / persona controls
+  "upload_image",           // closes over harness
+  "hypothesize",
+  "extract_structured",     // closes over harness
   "decompose_goal",         // closes over harness (uses harness.config for LLM access)
   "branch_explore",         // closes over harness.forkChild + harness.orchestrator
   "verify_contract",        // closes over harness.getExecutionState()
@@ -879,8 +937,6 @@ export class AgentHarness {
   private finalizeDeckPipelineNudgeThisSend = false;
   /** One-shot guard for vision-centric asks without sidecar usage. */
   private finalizeVisionNudgeThisSend = false;
-  /** One-shot guard to rewrite identity replies when persona is active. */
-  private finalizePersonaIdentityNudgeThisSend = false;
   /** Max extra finalize replan loops allowed after a draft answer exists. */
   private finalizeRetryBudgetThisSend = 1;
   /** web_search query history for first-pass diversity + dedupe checks. */
@@ -908,10 +964,23 @@ export class AgentHarness {
   private executionState: ExecutionState | null = null;
   private vaultMetrics = { reads: 0, searches: 0, writes: 0, skippedWrites: 0 };
   private runtimePreferences: RuntimePreferences | null = null;
+
+  /** True when harness trace / provider retry lines should be hidden. */
+  private isUiQuiet(): boolean {
+    return resolveHarnessEnvRaw("AGENT_UI_VERBOSITY", this.runtimePreferences) === "quiet";
+  }
+
   private pendingRiskyPreferenceSummary: string | null = null;
   private turnInference: TurnInferenceResult | null = null;
   private lastAutoDreamScanAt = 0;
   private autoDreamBackgroundRunning = false;
+
+  /** Idle personality heartbeat (root only; AGENT_HEARTBEAT=1). */
+  private personalityHeartbeatIdleTimer: ReturnType<typeof setTimeout> | null = null;
+  private personalityHeartbeatRunning = false;
+  private lastPersonalityHeartbeatCompletedAt = 0;
+  private personalityHeartbeatNudgeTimestampsMs: number[] = [];
+  private lastTurnTerminationReason: TurnEndTerminationReason | null = null;
 
   /**
    * Returns the ContextManager for use by context tools factory.
@@ -946,7 +1015,7 @@ export class AgentHarness {
   }
 
   private resolveSelfHealMode(): LintMode {
-    const raw = (process.env["AGENT_SELF_HEAL_LINT_MODE"] ?? "tsc").toLowerCase();
+    const raw = (resolveHarnessEnvRaw("AGENT_SELF_HEAL_LINT_MODE", this.runtimePreferences) ?? "tsc").toLowerCase();
     if (raw === "eslint" || raw === "command") return raw;
     return "tsc";
   }
@@ -987,17 +1056,17 @@ export class AgentHarness {
   }
 
   private async runLintSelfHealIfNeeded(): Promise<void> {
-    if (process.env["AGENT_SELF_HEAL_LINT"] !== "1") return;
+    if (resolveHarnessEnvRaw("AGENT_SELF_HEAL_LINT", this.runtimePreferences) !== "1") return;
     if (this.agentDepth > 0) return;
     if (!this.registry.has("run_lint")) return;
     const changedFirstScope = this.resolveSelfHealChangedFirstScope();
     if (changedFirstScope.length === 0) return;
     const maxPasses = Math.max(
       1,
-      Math.min(8, parseInt(process.env["AGENT_SELF_HEAL_MAX_PASSES"] ?? "4", 10) || 4)
+      Math.min(8, parseInt(resolveHarnessEnvRaw("AGENT_SELF_HEAL_MAX_PASSES", this.runtimePreferences) ?? "4", 10) || 4)
     );
-    const stopOnNoProgress = process.env["AGENT_SELF_HEAL_STOP_ON_NO_PROGRESS"] !== "0";
-    const repoWide = process.env["AGENT_SELF_HEAL_REPO_WIDE"] === "1";
+    const stopOnNoProgress = resolveHarnessEnvRaw("AGENT_SELF_HEAL_STOP_ON_NO_PROGRESS", this.runtimePreferences) !== "0";
+    const repoWide = resolveHarnessEnvRaw("AGENT_SELF_HEAL_REPO_WIDE", this.runtimePreferences) === "1";
     const mode = this.resolveSelfHealMode();
     const cwd = ".";
     let scope = [...changedFirstScope];
@@ -1260,114 +1329,43 @@ export class AgentHarness {
     });
   }
 
-  private async maybeHandleRuntimePreferenceIntent(userMessage: string): Promise<void> {
+  private maybeInjectRuntimePreferenceRouting(userMessage: string): void {
     if (this.agentDepth > 0) return;
-    if (
-      !/\b(from now on|going forward|default to|always use|prefer|switch|change|set|be more autonomous|lower confirmations?|fewer confirmations?|quieter|verbosity|retry|timeout|approval|vault|provider|model|persona|humou?r|formal|confidence|tone|style)\b/i.test(
-        userMessage
-      )
-    ) {
-      return;
+    const inf = this.turnInference;
+    if (!inf?.runtimePreferenceIntent && !inf?.runtimeSettingsQuery) return;
+    if (inf.runtimeSettingsQuery) {
+      this.context.appendMessage({
+        role: "system",
+        content:
+          "[RUNTIME ROUTING] The user asked to check current runtime/persona settings. " +
+          "Call get_runtime_settings (fields: persona_controls for dial checks) before stating values.",
+      });
     }
-    const jr = await completeChatJson(this.client, {
-      model: getFastModelSlug(this.config.model),
-      messages: [
-        {
-          role: "system",
-          content:
-            "Extract runtime preference intent from user text. " +
-            "Return JSON object: {detected:boolean, summary:string, risky:boolean, changes:{provider?:{model?:string,baseURL?:string,keySource?:string},runtime?:{uiVerbosity?:'normal'|'quiet',vaultAutoWriteMode?:'off'|'research'|'aggressive',approvalTimeoutMs?:number,destructiveGate?:'strict'|'balanced',rateLimitMaxRetries?:number,transient5xxMaxRetries?:number,retryMaxDelayMs?:number},persona?:{controls?:{humorPercent?:number,formality?:'very_formal'|'formal'|'casual'|'very_casual'|'mixed',confidence?:number,verbosity?:'compact'|'normal'|'detailed',personaStrength?:number}}}}. " +
-            "Only include fields explicitly requested or strongly implied. " +
-            "Treat requests for faster/more autonomous behavior as potentially implying reduced confirmations/guardrails. " +
-            "risky=true only when safety controls are reduced (for example: lower approval friction, looser destructive gate); persona style/control changes are not risky. " +
-            "summary must be short and concrete.",
-        },
-        { role: "user", content: userMessage.slice(0, 2000) },
-      ],
-      maxTokens: 600,
-      temperature: 0.1,
-    });
-    if (!jr.ok || typeof jr.parsed !== "object" || jr.parsed == null) return;
-    const parsed = jr.parsed as {
-      detected?: boolean;
-      summary?: string;
-      risky?: boolean;
-      changes?: Partial<RuntimePreferences>;
-    };
-    if (!parsed.detected || !parsed.changes) return;
-    const normalizedChanges = normalizeRuntimePreferencePatch(parsed.changes);
-    if (!hasRuntimePreferenceChange(normalizedChanges)) return;
-    const summary = (parsed.summary ?? "runtime preference change").slice(0, 240);
-    const risky = Boolean(parsed.risky);
-    this.emitter.emit("runtime_pref_detected", { summary, risky });
-    this.emitter.emit("text", {
-      delta: `\n[Runtime] Detected preference intent: ${summary}${risky ? " (risky)" : ""}\n`,
-      channel: "trace",
-    });
+    if (!inf.runtimePreferenceIntent) return;
+    const lower = userMessage.toLowerCase();
+    const personaDialIntent =
+      /\b(humou?r|formality|confidence|verbosity|persona\s*strength|tone|style)\b/.test(lower);
+    const routing =
+      personaDialIntent
+        ? "[RUNTIME ROUTING] The user requested persona control changes. Apply via set_runtime_settings(persona_controls). Do not use remember for this."
+        : "[RUNTIME ROUTING] The user requested runtime preference changes. Apply via explicit runtime tools and report tool-backed outcomes only.";
+    this.context.appendMessage({ role: "system", content: routing });
+  }
 
-    if (risky) {
-      this.pendingRiskyPreferenceSummary = summary;
-      const answer = (
-        await this.askUserDirect(
-          `Risky runtime preference change detected: ${summary}. ` +
-            `Reply exactly "confirm" to apply and persist, or anything else to reject.`
-        )
-      )
-        .trim()
-        .toLowerCase();
-      if (answer !== "confirm") {
-        this.emitter.emit("runtime_pref_rejected", { summary, reason: "user_rejected_or_not_confirmed" });
-        this.emitter.emit("text", {
-          delta: `\n[Runtime] Preference change rejected: ${summary} (confirmation not provided)\n`,
-          channel: "trace",
-        });
-        this.pendingRiskyPreferenceSummary = null;
-        return;
-      }
-      this.pendingRiskyPreferenceSummary = null;
-    }
-
-    this.applyRuntimePreferencePatch(normalizedChanges);
-    this.emitter.emit("runtime_pref_changed", {
-      summary,
-      persisted: false,
-      personaControls: this.runtimePreferences?.persona?.controls,
-    });
-    this.emitter.emit("text", {
-      delta: `\n[Runtime] Applied preference change: ${summary}\n`,
-      channel: "trace",
-    });
-    let persisted = false;
-    if (this.config.persistRuntimePreferences) {
-      try {
-        const p = await this.config.persistRuntimePreferences(this.runtimePreferences!);
-        persisted = true;
-        if (typeof p === "string" && p.length > 0) {
-          this.emitter.emit("runtime_pref_persisted", { path: p });
-        }
-      } catch (err) {
-        this.emitter.emit("runtime_pref_rejected", {
-          summary,
-          reason: `persist_failed:${err instanceof Error ? err.message : String(err)}`,
-        });
-        this.emitter.emit("text", {
-          delta:
-            `\n[Runtime] Persist failed for preference change: ${summary} ` +
-            `(${err instanceof Error ? err.message : String(err)})\n`,
-          channel: "trace",
-        });
-      }
-    }
-    this.emitter.emit("runtime_pref_changed", {
-      summary,
-      persisted,
-      personaControls: this.runtimePreferences?.persona?.controls,
-    });
-    this.emitter.emit("text", {
-      delta:
-        `\n[Runtime] Preference change status: ${summary} -> ` +
-        `${persisted ? "persisted" : "applied (session only)"}\n`,
-      channel: "trace",
+  private maybeInjectRuntimeSettingsSnapshot(): void {
+    if (this.agentDepth > 0) return;
+    const controls = this.runtimePreferences?.persona?.controls;
+    if (!controls) return;
+    this.context.appendMessage({
+      role: "system",
+      content:
+        "[RUNTIME SETTINGS SNAPSHOT]\n" +
+        `humorPercent=${controls.humorPercent ?? "n/a"}, ` +
+        `formality=${controls.formality ?? "n/a"}, ` +
+        `confidence=${controls.confidence ?? "n/a"}, ` +
+        `verbosity=${controls.verbosity ?? "n/a"}, ` +
+        `personaStrength=${controls.personaStrength ?? "n/a"}\n` +
+        "If these conflict with persona catchphrases or style examples, treat this snapshot as source of truth.",
     });
   }
 
@@ -1390,6 +1388,12 @@ export class AgentHarness {
         controls: {
           ...(this.runtimePreferences?.persona?.controls ?? {}),
           ...(patch.persona?.controls ?? {}),
+        },
+      },
+      harness: {
+        env: {
+          ...(this.runtimePreferences?.harness?.env ?? {}),
+          ...(patch.harness?.env ?? {}),
         },
       },
       updatedAt: Date.now(),
@@ -1419,27 +1423,6 @@ export class AgentHarness {
           `baseURL=${this.config.baseURL}\n`,
         channel: "trace",
       });
-    }
-    if (merged.runtime?.uiVerbosity) {
-      process.env["AGENT_UI_VERBOSITY"] = merged.runtime.uiVerbosity;
-    }
-    if (merged.runtime?.vaultAutoWriteMode) {
-      process.env["AGENT_VAULT_AUTO_WRITE"] = merged.runtime.vaultAutoWriteMode;
-    }
-    if (merged.runtime?.approvalTimeoutMs != null) {
-      process.env["AGENT_APPROVAL_TIMEOUT_MS"] = String(merged.runtime.approvalTimeoutMs);
-    }
-    if (merged.runtime?.destructiveGate) {
-      process.env["AGENT_DESTRUCTIVE_GATE"] = merged.runtime.destructiveGate;
-    }
-    if (merged.runtime?.rateLimitMaxRetries != null) {
-      process.env["AGENT_RATE_LIMIT_MAX_RETRIES"] = String(merged.runtime.rateLimitMaxRetries);
-    }
-    if (merged.runtime?.transient5xxMaxRetries != null) {
-      process.env["AGENT_TRANSIENT_5XX_MAX_RETRIES"] = String(merged.runtime.transient5xxMaxRetries);
-    }
-    if (merged.runtime?.retryMaxDelayMs != null) {
-      process.env["AGENT_RETRY_MAX_DELAY_MS"] = String(merged.runtime.retryMaxDelayMs);
     }
     if (merged.persona?.activeProfile && merged.persona?.controls) {
       const nextProfile = applyPersonaControlsToProfile(
@@ -1473,7 +1456,7 @@ export class AgentHarness {
     return this.config.retryDelayMs ?? 1500;
   }
   private get retryMaxDelayMs() {
-    const raw = process.env["AGENT_RETRY_MAX_DELAY_MS"]?.trim();
+    const raw = resolveHarnessEnvRaw("AGENT_RETRY_MAX_DELAY_MS", this.runtimePreferences)?.trim();
     if (raw) {
       const n = parseInt(raw, 10);
       if (Number.isFinite(n)) return Math.max(1_000, Math.min(600_000, n));
@@ -1484,7 +1467,7 @@ export class AgentHarness {
   private get rateLimitMaxRetries() {
     const cfg = this.config.maxRateLimitRetries;
     if (typeof cfg === "number" && Number.isFinite(cfg)) return Math.max(0, cfg);
-    const raw = process.env["AGENT_RATE_LIMIT_MAX_RETRIES"]?.trim();
+    const raw = resolveHarnessEnvRaw("AGENT_RATE_LIMIT_MAX_RETRIES", this.runtimePreferences)?.trim();
     if (raw) {
       const n = parseInt(raw, 10);
       if (Number.isFinite(n)) return Math.max(0, n);
@@ -1495,7 +1478,7 @@ export class AgentHarness {
   private get transient5xxMaxRetries() {
     const cfg = this.config.maxTransient5xxRetries;
     if (typeof cfg === "number" && Number.isFinite(cfg)) return Math.max(0, cfg);
-    const raw = process.env["AGENT_TRANSIENT_5XX_MAX_RETRIES"]?.trim();
+    const raw = resolveHarnessEnvRaw("AGENT_TRANSIENT_5XX_MAX_RETRIES", this.runtimePreferences)?.trim();
     if (raw) {
       const n = parseInt(raw, 10);
       if (Number.isFinite(n)) return Math.max(0, n);
@@ -1519,7 +1502,7 @@ export class AgentHarness {
     return Math.max(250, raw + jitter);
   }
   private get retryWallTimeMs() {
-    const raw = process.env["AGENT_RETRY_WALL_TIME_MS"]?.trim();
+    const raw = resolveHarnessEnvRaw("AGENT_RETRY_WALL_TIME_MS", this.runtimePreferences)?.trim();
     if (raw) {
       const n = parseInt(raw, 10);
       if (Number.isFinite(n)) return Math.max(10_000, Math.min(900_000, n));
@@ -1527,7 +1510,7 @@ export class AgentHarness {
     return 120_000;
   }
   private get providerCircuitFailureThreshold() {
-    const raw = process.env["AGENT_PROVIDER_CIRCUIT_FAILURES"]?.trim();
+    const raw = resolveHarnessEnvRaw("AGENT_PROVIDER_CIRCUIT_FAILURES", this.runtimePreferences)?.trim();
     if (raw) {
       const n = parseInt(raw, 10);
       if (Number.isFinite(n)) return Math.max(2, Math.min(20, n));
@@ -1535,7 +1518,7 @@ export class AgentHarness {
     return 4;
   }
   private get providerCircuitCooldownMs() {
-    const raw = process.env["AGENT_PROVIDER_CIRCUIT_COOLDOWN_MS"]?.trim();
+    const raw = resolveHarnessEnvRaw("AGENT_PROVIDER_CIRCUIT_COOLDOWN_MS", this.runtimePreferences)?.trim();
     if (raw) {
       const n = parseInt(raw, 10);
       if (Number.isFinite(n)) return Math.max(5_000, Math.min(300_000, n));
@@ -1545,18 +1528,31 @@ export class AgentHarness {
 
   constructor(config: AgentConfig) {
     this.config = config;
+    this.runtimePreferences = config.runtimePreferences ?? null;
     this.config.vision = {
-      model: config.vision?.model ?? process.env["AGENT_VISION_MODEL"]?.trim(),
-      baseURL: config.vision?.baseURL ?? process.env["AGENT_VISION_BASE_URL"]?.trim(),
-      apiKey: config.vision?.apiKey ?? process.env["AGENT_VISION_API_KEY"]?.trim(),
+      model:
+        config.vision?.model ??
+        resolveHarnessEnvRaw("AGENT_VISION_MODEL", this.runtimePreferences)?.trim(),
+      baseURL:
+        config.vision?.baseURL ??
+        resolveHarnessEnvRaw("AGENT_VISION_BASE_URL", this.runtimePreferences)?.trim(),
+      apiKey:
+        config.vision?.apiKey ??
+        resolveHarnessEnvRaw("AGENT_VISION_API_KEY", this.runtimePreferences)?.trim(),
       timeoutMs:
         config.vision?.timeoutMs ??
-        (parseInt(process.env["AGENT_VISION_TIMEOUT_MS"] ?? "15000", 10) || 15_000),
+        (parseInt(
+          resolveHarnessEnvRaw("AGENT_VISION_TIMEOUT_MS", this.runtimePreferences) ?? "15000",
+          10
+        ) || 15_000),
       maxImageBytes:
         config.vision?.maxImageBytes ??
-        (parseInt(process.env["AGENT_VISION_MAX_IMAGE_BYTES"] ?? String(4 * 1024 * 1024), 10) || 4 * 1024 * 1024),
+        (parseInt(
+          resolveHarnessEnvRaw("AGENT_VISION_MAX_IMAGE_BYTES", this.runtimePreferences) ??
+            String(4 * 1024 * 1024),
+          10
+        ) || 4 * 1024 * 1024),
     };
-    this.runtimePreferences = config.runtimePreferences ?? null;
     if (this.runtimePreferences?.provider?.model) this.config.model = this.runtimePreferences.provider.model;
     if (this.runtimePreferences?.provider?.baseURL) this.config.baseURL = this.runtimePreferences.provider.baseURL;
     this.taskId = config.taskId ?? crypto.randomUUID();
@@ -1573,7 +1569,7 @@ export class AgentHarness {
     // Wire onCompressed callback so context compression fires a structured event (#7)
     // Wire semanticSummarizer when AGENT_COMPRESS_SEMANTIC=1 (uses fast model for causal narratives).
     const semanticSummarizer =
-      process.env["AGENT_COMPRESS_SEMANTIC"] === "1" && config.agentDepth === 0
+      resolveHarnessEnvRaw("AGENT_COMPRESS_SEMANTIC", this.runtimePreferences) === "1" && config.agentDepth === 0
         ? async (rawSummaries: string): Promise<string> => {
             const jr = await completeChatJson(this.client, {
               model: getFastModelSlug(config.model),
@@ -1585,6 +1581,7 @@ export class AgentHarness {
                   content:
                     "Summarize these tool-round one-liners as 2-3 concise causal sentences " +
                     "explaining WHAT was investigated, WHY, and WHAT was found. " +
+                    "Never drop explicit user numbers, paths, filenames, deadlines, or must-not constraints that appear in the one-liners. " +
                     'Return JSON: {"summary":"<causal narrative>"}. No bullet points.',
                 },
                 { role: "user", content: rawSummaries.slice(0, 3000) },
@@ -1652,6 +1649,7 @@ export class AgentHarness {
       this.taskId,
       safetyJudge,
       this.approvalTimeoutMs,
+      resolveAutoApproveDestructive(config),
       (toolName, args) => this.checkContractAndCommitments(toolName, args)
     );
 
@@ -1686,7 +1684,10 @@ export class AgentHarness {
     this.sessionGreetingThisSend = sessionGreeting;
     this.personaBootstrapPromptThisSend = personaBootstrapPrompt;
     this.running = true;
+    this.clearPersonalityHeartbeatSchedule();
+    this.lastTurnTerminationReason = null;
 
+    return await runHarnessEffectiveEnvContext(this.runtimePreferences, async () => {
     const telemetryUserLabel = sessionGreeting
       ? "(session greeting)"
       : personaBootstrapPrompt
@@ -1721,20 +1722,19 @@ export class AgentHarness {
     this.finalizeHintInjectedThisSend = false;
     this.ruleRecallInjectedThisSend = false;
     this.lengthResumeRemaining =
-      parseInt(process.env["AGENT_LENGTH_RESUME_MAX"] ?? "1", 10) > 0 ? 1 : 0;
+      parseInt(resolveHarnessEnvRaw("AGENT_LENGTH_RESUME_MAX", this.runtimePreferences) ?? "1", 10) > 0 ? 1 : 0;
     this.pseudoToolMarkupRetryRemaining = Math.max(
       0,
-      Math.min(3, parseInt(process.env["AGENT_PSEUDO_TOOL_RETRY_MAX"] ?? "2", 10) || 2)
+      Math.min(3, parseInt(resolveHarnessEnvRaw("AGENT_PSEUDO_TOOL_RETRY_MAX", this.runtimePreferences) ?? "2", 10) || 2)
     );
     this.pseudoMarkupSuppressCountThisSend = 0;
     this.pseudoMarkupSuppressionNotifiedThisSend = false;
     this.finalizeCiteNudgeThisSend = false;
     this.finalizeSynthesisNudgeThisSend = false;
     this.finalizeRecencyNudgeThisSend = false;
-    this.finalizePersonaIdentityNudgeThisSend = false;
     this.finalizeRetryBudgetThisSend = Math.max(
       0,
-      Math.min(2, parseInt(process.env["AGENT_FINALIZE_RETRY_BUDGET"] ?? "1", 10) || 1)
+      Math.min(2, parseInt(resolveHarnessEnvRaw("AGENT_FINALIZE_RETRY_BUDGET", this.runtimePreferences) ?? "1", 10) || 1)
     );
     this.dispatcher.resetTurnCounters();
     this.vaultMetrics = { reads: 0, searches: 0, writes: 0, skippedWrites: 0 };
@@ -1743,31 +1743,111 @@ export class AgentHarness {
     this.changedFilesThisTurn = new Set();
     this.lintRelatedFilesThisTurn = new Set();
     this.turnInference = null;
-    await this.maybeHandleRuntimePreferenceIntent(telemetryUserLabel);
     try {
       if (openingTurn) {
         this.turnInference = {
           intent: "introspection",
+          likelyEditPaths: [],
           stancePrompt: false,
           overInferenceRisk: false,
+          exploratoryCreative: false,
           identityQuery: false,
           personaIdentityPrompt: false,
           runtimeIdentityPrompt: false,
           deckIntent: false,
           freshnessSensitive: false,
+          runtimePreferenceIntent: false,
+          runtimeSettingsQuery: false,
           skipHarnessSecondaryPasses: true,
           confidence: 1,
           source: "default",
           reason: "session_greeting",
         };
       } else {
-        this.turnInference = await inferTurnInference(this.client, this.config.model, userMessage);
+        const prevEpistemic = this.context.getEpistemicState();
+        const intentWorkspace: IntentInferenceWorkspaceContext = {
+          epistemicFilesModified:
+            prevEpistemic?.filesModified && prevEpistemic.filesModified.length > 0
+              ? [...prevEpistemic.filesModified]
+              : undefined,
+          epistemicFilesTouched:
+            prevEpistemic?.filesTouched && prevEpistemic.filesTouched.length > 0
+              ? [...prevEpistemic.filesTouched]
+              : undefined,
+          lastAssistantSnippet: (() => {
+            const s = (this.context.getLastAssistantMessage() ?? "").trim();
+            return s.length > 0 ? s.slice(0, 1200) : undefined;
+          })(),
+        };
+        if (effectiveHarnessEnvRaw("AGENT_INTENT_REPO_CONTEXT") === "1") {
+          try {
+            intentWorkspace.repoMapLines = await gatherRepoMapLines();
+          } catch {
+            /* optional orientation */
+          }
+        }
+        this.turnInference = await inferTurnInference(
+          this.client,
+          this.config.model,
+          userMessage,
+          intentWorkspace
+        );
       }
     } catch {
       this.turnInference = neutralTurnInferenceResult("inference_exception_fallback", {
         fallbackReason: "inferTurnInference threw",
       });
     }
+    if (!openingTurn && this.turnInference) {
+      const ex =
+        this.turnInference.exploratoryCreative === true || heuristicExploratoryCreative(userMessage);
+      if (ex) {
+        this.turnInference = { ...this.turnInference, exploratoryCreative: true };
+      }
+      if (heuristicPersonaOrHistoryPrompt(userMessage)) {
+        this.turnInference = {
+          ...this.turnInference,
+          personaIdentityPrompt: true,
+          skipHarnessSecondaryPasses: true,
+          intent:
+            this.turnInference.intent === "coding" || this.turnInference.intent === "execution"
+              ? this.turnInference.intent
+              : "introspection",
+        };
+      }
+    }
+    if (!openingTurn) {
+      this.context.appendMessage({
+        role: "system",
+        content:
+          "[NO-REINTRO] This is an ongoing session. Do not emit session-initialization/greeting text " +
+          "(e.g., 'Session initialized', 'Context loaded', 'What are we working on?') unless the user explicitly asks for a re-introduction.",
+      });
+    }
+    if (!openingTurn && this.turnInference?.exploratoryCreative) {
+      this.context.appendMessage({
+        role: "system",
+        content:
+          "[EXPLORATORY TURN] The user message is treated as open-ended, hypothetical, or creative ideation. " +
+          "Answer the literal question with novel options, mechanisms, and tradeoffs (general knowledge + deliberate tool use only when it serves this ask). " +
+          "Do not let standing project artifacts (roadmaps, cashflow models, quit-job timelines, vault briefs) hijack the response arc unless they explicitly tied this turn to that work. " +
+          "At most one brief acknowledgment of relevant background — then pivot to fresh synthesis. Mid-turn memory auto-prime may be off or tightened; open stored plans only if the user asked or you state why they are necessary.",
+      });
+    }
+    if (
+      !openingTurn &&
+      this.turnInference?.likelyEditPaths &&
+      this.turnInference.likelyEditPaths.length > 0
+    ) {
+      this.context.appendMessage({
+        role: "system",
+        content:
+          "[INTENT EDIT HINTS] Classifier-suggested repo paths for this turn (prefer opening these first when relevant; ignore if the user contradicts):\n" +
+          this.turnInference.likelyEditPaths.map((p) => `- ${p}`).join("\n"),
+      });
+    }
+    this.maybeInjectRuntimeSettingsSnapshot();
+    this.maybeInjectRuntimePreferenceRouting(userMessage);
 
     if (this.config.workingStateEnabled !== false) {
       this.context.initEpistemicState(telemetryUserLabel);
@@ -1791,15 +1871,22 @@ export class AgentHarness {
       contractCount: this.executionState.contracts.length,
     });
 
-    if (process.env["AGENT_QUERY_REWRITE"] === "1" && !openingTurn) {
-      try {
-        this.recallRewriteThisSend = await rewriteQueryForRecall(
-          userMessage,
-          this.client,
-          this.config.model
-        );
-      } catch {
+    if (resolveHarnessEnvRaw("AGENT_QUERY_REWRITE", this.runtimePreferences) === "1" && !openingTurn) {
+      const skipRewriteForExploratory =
+        this.turnInference?.exploratoryCreative === true &&
+        resolveHarnessEnvRaw("AGENT_QUERY_REWRITE_EXPLORATORY", this.runtimePreferences) !== "1";
+      if (skipRewriteForExploratory) {
         this.recallRewriteThisSend = null;
+      } else {
+        try {
+          this.recallRewriteThisSend = await rewriteQueryForRecall(
+            userMessage,
+            this.client,
+            this.config.model
+          );
+        } catch {
+          this.recallRewriteThisSend = null;
+        }
       }
     }
 
@@ -1874,7 +1961,8 @@ export class AgentHarness {
 
       // Send timeout is opt-in. By default we do not hard-abort long generations.
       // Set AGENT_SEND_TIMEOUT_MS to a positive value to enforce a wall-clock abort.
-      const sendTimeoutRaw = parseInt(process.env["AGENT_SEND_TIMEOUT_MS"] ?? "0", 10) || 0;
+      const sendTimeoutRaw =
+        parseInt(resolveHarnessEnvRaw("AGENT_SEND_TIMEOUT_MS", this.runtimePreferences) ?? "0", 10) || 0;
       const sendTimeoutMs = sendTimeoutRaw > 0 ? Math.max(30_000, sendTimeoutRaw) : 0;
       if (sendTimeoutMs > 0) {
         let sendTimeoutId: ReturnType<typeof setTimeout> | undefined;
@@ -1899,46 +1987,9 @@ export class AgentHarness {
         await this.runReActLoop();
       }
 
-      // Episodic recipe recording (#7 AMA-Bench): persist successful patterns
-      // Awaited with error boundary (#2 VIGIL) — no silent swallowing
-      if (this.toolsUsedThisTurn.length >= 4 && this.registry.has("remember")) {
-        const recipeKey = `recipe:${hashString(userMessage).slice(0, 10)}`;
-        const recipeValue =
-          `GOAL: ${userMessage.slice(0, 60)}\n` +
-          `PATTERN: ${this.toolsUsedThisTurn.join(" → ")}\n` +
-          `ROUNDS: ${this.roundCount}`;
-        try {
-          await this.dispatcher.directCall("remember", { key: recipeKey, value: recipeValue, actor_id: this.taskId });
-          void bumpRecipePattern(recipeValue);
-        } catch (err) {
-          this.emitter.emit("text", {
-            delta: `\n[HARNESS] Recipe persist failed: ${err instanceof Error ? err.message : String(err)}\n`,
-            channel: "trace",
-          });
-        }
-
-        // Trajectory episodic memory: store a richer replay note for few-shot recall.
-        // Includes the final answer excerpt so future similar tasks can use it as context.
-        if (this.agentDepth === 0) {
-          const trajectoryKey = `trajectory:${hashString(userMessage).slice(0, 12)}`;
-          const finalAnswer = this.context.getLastAssistantMessage() ?? "";
-          const trajectoryValue =
-            `GOAL: ${userMessage.slice(0, 120)}\n` +
-            `TOOL_SEQUENCE: ${this.toolsUsedThisTurn.join(" → ")}\n` +
-            `ROUNDS: ${this.roundCount}\n` +
-            `OUTCOME: ${finalAnswer.slice(0, 400)}`;
-          try {
-            await this.dispatcher.directCall("remember", {
-              key: trajectoryKey,
-              value: trajectoryValue,
-              type: "trajectory",
-              actor_id: this.taskId,
-            });
-          } catch {
-            /* non-fatal */
-          }
-        }
-      }
+      // Episodic recipe/trajectory — off the critical path so `running` clears in `finally`
+      // immediately after `turn_end` (status/SSE stay aligned with user-visible completion).
+      void this.persistEpisodicRecipeAfterTurn(userMessage);
       if (sessionGreeting) {
         this.sessionGreetingSentThisHarness = true;
       }
@@ -1957,8 +2008,13 @@ export class AgentHarness {
       }
       this.sessionGreetingThisSend = false;
       this.personaBootstrapPromptThisSend = false;
+      const term = this.lastTurnTerminationReason;
       this.running = false;
+      if (term === "ok" && !openingTurn && this.agentDepth === 0) {
+        this.armPersonalityHeartbeatAfterIdle();
+      }
     }
+    });
   }
 
   /**
@@ -1966,7 +2022,7 @@ export class AgentHarness {
    * No-op when AGENT_SESSION_GREET=0, already sent for this harness, or depth > 0.
    */
   async sendSessionGreeting(): Promise<void> {
-    if (process.env["AGENT_SESSION_GREET"] === "0") return;
+    if (resolveHarnessEnvRaw("AGENT_SESSION_GREET", this.runtimePreferences) === "0") return;
     await this.send("", { sessionGreeting: true });
   }
 
@@ -1984,9 +2040,51 @@ export class AgentHarness {
    * No-op when disabled, already completed, already prompted, or depth > 0.
    */
   async sendPersonaBootstrapPrompt(): Promise<void> {
-    if (process.env["AGENT_PERSONA_BOOTSTRAP"] === "0") return;
+    if (resolveHarnessEnvRaw("AGENT_PERSONA_BOOTSTRAP", this.runtimePreferences) === "0") return;
     if (this.isPersonaBootstrapCompleted()) return;
     await this.send("", { personaBootstrapPrompt: true });
+  }
+
+  /** Post-turn recipe + trajectory writes (background; does not extend `running`). */
+  private async persistEpisodicRecipeAfterTurn(userMessage: string): Promise<void> {
+    if (this.toolsUsedThisTurn.length < 4 || !this.registry.has("remember")) return;
+    const recipeKey = `recipe:${hashString(userMessage).slice(0, 10)}`;
+    const recipeValue =
+      `GOAL: ${userMessage.slice(0, 60)}\n` +
+      `PATTERN: ${this.toolsUsedThisTurn.join(" → ")}\n` +
+      `ROUNDS: ${this.roundCount}`;
+    try {
+      await this.dispatcher.directCall("remember", {
+        key: recipeKey,
+        value: recipeValue,
+        actor_id: this.taskId,
+      });
+      void bumpRecipePattern(recipeValue);
+    } catch (err) {
+      this.emitter.emit("text", {
+        delta: `\n[HARNESS] Recipe persist failed: ${err instanceof Error ? err.message : String(err)}\n`,
+        channel: "trace",
+      });
+    }
+    if (this.agentDepth === 0) {
+      const trajectoryKey = `trajectory:${hashString(userMessage).slice(0, 12)}`;
+      const finalAnswer = this.context.getLastAssistantMessage() ?? "";
+      const trajectoryValue =
+        `GOAL: ${userMessage.slice(0, 120)}\n` +
+        `TOOL_SEQUENCE: ${this.toolsUsedThisTurn.join(" → ")}\n` +
+        `ROUNDS: ${this.roundCount}\n` +
+        `OUTCOME: ${finalAnswer.slice(0, 400)}`;
+      try {
+        await this.dispatcher.directCall("remember", {
+          key: trajectoryKey,
+          value: trajectoryValue,
+          type: "trajectory",
+          actor_id: this.taskId,
+        });
+      } catch {
+        /* non-fatal */
+      }
+    }
   }
 
   /** Returns the last assistant text message (used by parent to extract subtask result). */
@@ -2045,9 +2143,12 @@ export class AgentHarness {
     // It must run after all tools are registered so harness-scoped tools
     // (spawn_agent, check_context, etc.) are included in the seeded active set.
 
-    const personaMsg = this.context.getEffectiveInception()[0]!;
+    const inheritedPersonaMsg = this.context.getEffectiveInception()[0]!;
+    const personaMsg =
+      childConfig.inheritPersona === true ? inheritedPersonaMsg : buildNeutralChildPersonaMessage();
     const coreRaw = this.config.context.inceptionMessages[1];
     const coreStr = typeof coreRaw?.content === "string" ? coreRaw.content : "";
+    const contractPrelude = buildSpawnContractPrelude(childConfig.spawnContract);
     const subtaskTail: Message[] = childConfig.additionalContext
       ? [
           {
@@ -2056,6 +2157,9 @@ export class AgentHarness {
           },
         ]
       : [];
+    if (contractPrelude) {
+      subtaskTail.unshift({ role: "user" as const, content: contractPrelude });
+    }
     const childInceptionBase: Message[] = [
       personaMsg,
       { role: "system" as const, content: coreStr },
@@ -2142,7 +2246,23 @@ export class AgentHarness {
       parentTaskId: this.taskId,
       goal: childConfig.goal,
       depth: childDepth,
+      contractSource: childConfig.spawnContractSource ?? (childConfig.spawnContract ? "provided" : "synthesized"),
+      role: childConfig.spawnContract?.role,
     });
+    if (childConfig.spawnContract) {
+      this.emitter.emit("spawn_contract_created", {
+        taskId: childId,
+        source: childConfig.spawnContractSource ?? "provided",
+        role: childConfig.spawnContract.role,
+        objective: childConfig.spawnContract.objective,
+      });
+      this.emitter.emit("spawn_contract_applied", {
+        taskId: childId,
+        role: childConfig.spawnContract.role,
+        deliverableFormat: childConfig.spawnContract.deliverableFormat,
+        allowedTools: childConfig.spawnContract.allowedTools ?? [],
+      });
+    }
 
     // Forward child text output to parent as subtask_output events (live streaming)
     childHarness.emitter.on("text", ({ delta }) => {
@@ -2160,17 +2280,48 @@ export class AgentHarness {
           this.orchestrator.cancel(childId);
         }, timeoutMs);
 
-        childHarness
-          .send(childConfig.userPrompt?.trim() ?? childConfig.goal)
+        Promise.resolve()
+          .then(async () => {
+            if (childConfig.dependsOn && childConfig.dependsOn.length > 0) {
+              const dep = await this.orchestrator.waitForDependencies(childId, timeoutMs);
+              if (!dep.ok) {
+                const reason = `Dependencies failed: ${dep.failedIds.join(", ")}`;
+                this.emitter.emit("spawn_contract_violation", {
+                  taskId: childId,
+                  reason,
+                  severity: "high",
+                });
+                throw new Error(reason);
+              }
+            }
+            return childHarness.send(
+              childConfig.userPrompt?.trim() ?? childConfig.taskBrief?.trim() ?? childConfig.goal
+            );
+          })
           .then(() => {
             clearTimeout(timeoutId);
             const output = childHarness.getLastAssistantMessage();
+            const handoffKey = `spawn/${this.taskId}/${childId}/handoff`;
+            const handoff = {
+              type: "handoff" as const,
+              summary: output.slice(0, 500),
+              evidenceRefs: childConfig.spawnContract?.handoffRequirements ?? [],
+              payload: output.slice(0, 4000),
+              at: Date.now(),
+            };
+            this.sharedBus.publishEnvelope(handoffKey, handoff, childId);
+            this.emitter.emit("subtask_handoff_written", {
+              taskId: childId,
+              key: handoffKey,
+              bytes: JSON.stringify(handoff).length,
+            });
             this.orchestrator.complete(childId, output);
             this.emitter.emit("subtask_complete", {
               taskId: childId,
               ok: true,
               output,
               rounds: childHarness.roundCount,
+              handoffWritten: true,
             });
             resolve({
               taskId: childId,
@@ -2188,6 +2339,7 @@ export class AgentHarness {
               ok: false,
               output: errMsg,
               rounds: childHarness.roundCount,
+              handoffWritten: false,
             });
             resolve({
               taskId: childId,
@@ -2205,10 +2357,10 @@ export class AgentHarness {
   /** Episodic vault chunk (Obsidian) — one note per completed send when vault path is set. */
   private async maybePersistEpisodeTurn(): Promise<void> {
     // Explicit opt-in only: avoid silent auto-capture into vault.
-    if (process.env["AGENT_MEMORY_EPISODE"] !== "1") return;
+    if (resolveHarnessEnvRaw("AGENT_MEMORY_EPISODE", this.runtimePreferences) !== "1") return;
     if (this.sessionGreetingThisSend || this.personaBootstrapPromptThisSend) return;
     if (this.agentDepth > 0) return;
-    if (!process.env["AGENT_VAULT_PATH"]?.trim()) return;
+    if (!resolveHarnessEnvRaw("AGENT_VAULT_PATH", this.runtimePreferences)?.trim()) return;
     if (!this.registry.has("vault_write")) return;
     const title = `Episode ${new Date().toISOString().replace(/[:.]/g, "-")}`;
     const body =
@@ -2230,7 +2382,7 @@ export class AgentHarness {
 
   /** MemReader-style extraction into typed remember() entries (env-gated). */
   private async maybeAutoExtractMemories(): Promise<void> {
-    if (process.env["AGENT_MEMORY_AUTO_EXTRACT"] === "0") return;
+    if (resolveHarnessEnvRaw("AGENT_MEMORY_AUTO_EXTRACT", this.runtimePreferences) === "0") return;
     if (this.agentDepth > 0) return;
     if (!this.registry.has("remember")) return;
     if (this.toolsUsedThisTurn.length === 0) return;
@@ -2415,7 +2567,7 @@ export class AgentHarness {
         runId,
         progress: { step: "upserts_applied", upserts: upsertsApplied },
       });
-      const allowDelete = process.env["AGENT_AUTO_DREAM_ALLOW_DELETE"] === "1";
+      const allowDelete = resolveHarnessEnvRaw("AGENT_AUTO_DREAM_ALLOW_DELETE", this.runtimePreferences) === "1";
       let deletesApplied = 0;
       if (allowDelete && this.registry.has("forget")) {
         for (const d of parsed.deletes?.slice(0, 8) ?? []) {
@@ -2432,11 +2584,8 @@ export class AgentHarness {
         progress: { step: "deletes_applied", deletes: deletesApplied, upserts: upsertsApplied },
       });
       const summary = typeof parsed.summary === "string" ? parsed.summary.trim() : "";
-      if (summary) {
-        this.context.appendMessage({
-          role: "user",
-          content: `[AUTO_DREAM] Consolidation summary: ${summary.slice(0, 400)}`,
-        });
+      if (summary && resolveAutoDreamInjectTranscript(this.runtimePreferences)) {
+        this.context.appendMessage(buildAutoDreamTranscriptMessage(summary));
       }
       this.emitter.emit("auto_dream", {
         stage: "completed",
@@ -2456,6 +2605,147 @@ export class AgentHarness {
         error: msg.slice(0, 500),
       });
       await rollbackConsolidationLock(priorMtime);
+    }
+  }
+
+  private clearPersonalityHeartbeatSchedule(): void {
+    if (this.personalityHeartbeatIdleTimer != null) {
+      clearTimeout(this.personalityHeartbeatIdleTimer);
+      this.personalityHeartbeatIdleTimer = null;
+    }
+  }
+
+  /** Debounced idle timer after a successful root turn (see AGENT_HEARTBEAT). */
+  private armPersonalityHeartbeatAfterIdle(): void {
+    const cfg = resolvePersonalityHeartbeatConfig(this.runtimePreferences);
+    if (!cfg.enabled) return;
+    this.clearPersonalityHeartbeatSchedule();
+    this.emitter.emit("heartbeat_scheduled", {
+      taskId: this.taskId,
+      firesAtMs: Date.now() + cfg.idleMs,
+      idleMs: cfg.idleMs,
+    });
+    this.personalityHeartbeatIdleTimer = setTimeout(() => {
+      this.personalityHeartbeatIdleTimer = null;
+      void this.runPersonalityHeartbeatIfEligible();
+    }, cfg.idleMs);
+  }
+
+  private async runPersonalityHeartbeatIfEligible(): Promise<void> {
+    const cfg = resolvePersonalityHeartbeatConfig(this.runtimePreferences);
+    const skip = (reason: string, detail?: string) => {
+      this.emitter.emit("heartbeat_skipped", { taskId: this.taskId, reason, ...(detail ? { detail } : {}) });
+    };
+    if (!cfg.enabled) {
+      skip("disabled");
+      return;
+    }
+    if (this.agentDepth !== 0) {
+      skip("depth", String(this.agentDepth));
+      return;
+    }
+    if (this.running) {
+      skip("busy");
+      return;
+    }
+    if (this.personalityHeartbeatRunning) {
+      skip("single_flight");
+      return;
+    }
+    const sinceLast = Date.now() - this.lastPersonalityHeartbeatCompletedAt;
+    if (this.lastPersonalityHeartbeatCompletedAt > 0 && sinceLast < cfg.minIntervalMs) {
+      skip("rate_limited", `wait_ms=${cfg.minIntervalMs - sinceLast}`);
+      return;
+    }
+
+    this.personalityHeartbeatRunning = true;
+    const runId = `hb-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    this.emitter.emit("heartbeat_started", { taskId: this.taskId, runId });
+
+    const hourAgo = Date.now() - 3_600_000;
+    const nudgeWindow = this.personalityHeartbeatNudgeTimestampsMs.filter((t) => t > hourAgo);
+
+    try {
+      const persona = this.getCurrentPersona();
+      const personaLabel = persona?.name?.trim() || "Assistant";
+      const result = await executePersonalityHeartbeat({
+        prefs: this.runtimePreferences,
+        client: this.client,
+        mainModelSlug: this.config.model,
+        dispatcher: this.dispatcher,
+        taskId: this.taskId,
+        runId,
+        personaLabel,
+        lastUserMessage: this.lastUserMessage,
+        toolsUsedThisTurn: [...this.toolsUsedThisTurn],
+        registryHas: (name) => this.registry.has(name),
+        nudgeTimestampsHour: nudgeWindow,
+      });
+
+      this.lastPersonalityHeartbeatCompletedAt = Date.now();
+
+      if (result.error) {
+        await appendPersonalityHeartbeatLog({
+          ts: new Date().toISOString(),
+          taskId: this.taskId,
+          runId: result.runId,
+          trigger: "idle_tick",
+          summary: result.summary,
+          surfaceDecision: "none",
+          skippedReason: result.error,
+          durationMs: result.durationMs,
+        });
+        this.emitter.emit("heartbeat_skipped", {
+          taskId: this.taskId,
+          reason: "tick_failed",
+          detail: result.error.slice(0, 240),
+        });
+        return;
+      }
+
+      if (result.surfaceDecision !== "none" && result.nudgeText) {
+        const now = Date.now();
+        this.personalityHeartbeatNudgeTimestampsMs = [...nudgeWindow, now];
+      }
+      if (result.surfaceDecision === "trace" && result.nudgeText) {
+        this.emitter.emit("text", {
+          delta: `\n[Pulse] ${result.nudgeText}\n`,
+          channel: "trace",
+        });
+      }
+
+      await appendPersonalityHeartbeatLog({
+        ts: new Date().toISOString(),
+        taskId: this.taskId,
+        runId: result.runId,
+        trigger: "idle_tick",
+        summary: result.summary,
+        reflections: result.reflectionsPreview,
+        memoryWrites: result.memoryWrites,
+        surfaceDecision: result.surfaceDecision,
+        ...(result.nudgeText ? { nudgeText: result.nudgeText } : {}),
+        durationMs: result.durationMs,
+      });
+
+      this.emitter.emit("heartbeat_completed", {
+        taskId: this.taskId,
+        runId: result.runId,
+        summary: result.summary,
+        durationMs: result.durationMs,
+        reflectionsPreview: result.reflectionsPreview,
+        memoryWrites: result.memoryWrites,
+        surfaceDecision: result.surfaceDecision,
+        ...(result.nudgeText ? { nudgeText: result.nudgeText } : {}),
+      });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      this.emitter.emit("heartbeat_skipped", {
+        taskId: this.taskId,
+        reason: "exception",
+        detail: msg.slice(0, 300),
+      });
+    } finally {
+      this.personalityHeartbeatRunning = false;
     }
   }
 
@@ -2492,7 +2782,7 @@ export class AgentHarness {
     if (assistant.length < (mode === "aggressive" ? 120 : 80)) return;
     const budget = Math.max(
       1,
-      Math.min(20, parseInt(process.env["AGENT_VAULT_WRITE_BUDGET"] ?? "8", 10) || 8)
+      Math.min(20, parseInt(resolveHarnessEnvRaw("AGENT_VAULT_WRITE_BUDGET", this.runtimePreferences) ?? "8", 10) || 8)
     );
     const existingWrites = this.toolsUsedThisTurn.filter((t) => t === "vault_write").length;
     if (existingWrites >= budget) return;
@@ -2510,7 +2800,7 @@ export class AgentHarness {
       `## Runtime\n- Tools used: ${tools}\n- Rounds: ${this.roundCount}\n\n` +
       `## Next links\n- [[Tasks]]\n- [[Agent Runtime]]`;
 
-    const dedupeOn = process.env["AGENT_VAULT_DEDUPE"] !== "0";
+    const dedupeOn = resolveHarnessEnvRaw("AGENT_VAULT_DEDUPE", this.runtimePreferences) !== "0";
     if (dedupeOn && this.registry.has("vault_search")) {
       const search = await this.dispatcher.directCall("vault_search", {
         query: this.lastUserMessage.slice(0, 120),
@@ -2567,6 +2857,7 @@ export class AgentHarness {
   private emitTurnEnd(reason: TurnEndTerminationReason): void {
     if (this.turnEndEmittedThisSend) return;
     this.turnEndEmittedThisSend = true;
+    this.lastTurnTerminationReason = reason;
     const snapshot = this.context.snapshot();
     this.emitter.emit("turn_end", {
       contextSnapshot: snapshot,
@@ -2615,7 +2906,7 @@ export class AgentHarness {
 
     // Session yield point — crash-recovery snapshot every AGENT_YIELD_EVERY_N rounds.
     {
-      const yieldEvery = parseInt(process.env["AGENT_YIELD_EVERY_N"] ?? "0", 10);
+      const yieldEvery = parseInt(resolveHarnessEnvRaw("AGENT_YIELD_EVERY_N", this.runtimePreferences) ?? "0", 10);
       if (yieldEvery > 0 && this.agentDepth === 0 && this.roundCount % yieldEvery === 0) {
         const ctxSnap = this.context.snapshot();
         const es = this.context.getEpistemicState();
@@ -2637,28 +2928,24 @@ export class AgentHarness {
 
     if (
       round === 1 &&
-      process.env["AGENT_RULE_RECALL"] !== "0" &&
+      resolveHarnessEnvRaw("AGENT_RULE_RECALL", this.runtimePreferences) !== "0" &&
       !this.ruleRecallInjectedThisSend &&
       !this.sessionGreetingThisSend &&
       !this.personaBootstrapPromptThisSend
     ) {
       this.ruleRecallInjectedThisSend = true;
-      // Adaptive injection: use rule stats to prioritize chronically violated rules.
-      // Falls back to the full static message if stats are unavailable.
-      let ruleMsg = HARNESS_RULE_RECALL_MESSAGE;
+      let ruleMsg: string;
       try {
         const hitCounts = await getRuleHitCounts();
-        if (hitCounts.size > 0) {
-          ruleMsg = buildAdaptiveRuleMessage(0, hitCounts);
-        }
+        ruleMsg = buildHarnessRuleRecallMessage(hitCounts);
       } catch {
-        /* fall back to static message */
+        ruleMsg = buildHarnessRuleRecallMessage(new Map());
       }
       this.context.appendMessage({ role: "system", content: ruleMsg });
     }
 
     if (
-      process.env["AGENT_FINALIZE_HINT"] === "1" &&
+      resolveHarnessEnvRaw("AGENT_FINALIZE_HINT", this.runtimePreferences) === "1" &&
       !this.finalizeHintInjectedThisSend &&
       this.roundCount >= Math.max(1, Math.ceil(0.7 * this.config.maxToolRoundsPerTurn))
     ) {
@@ -2680,14 +2967,18 @@ export class AgentHarness {
     if (pctBefore >= 85 && !this.contextAlertFired85) {
       this.contextAlertFired85 = true;
       this.context.appendMessage({
-        role: "user",
-        content: `[CONTEXT BUDGET CRITICAL: ${pctBefore}% used — call compress_context() immediately or early context will be lost.]`,
+        role: "system",
+        content:
+          `[CONTEXT BUDGET — harness notice, not user speech]\n` +
+          `CONTEXT BUDGET CRITICAL: ${pctBefore}% used — call compress_context() immediately or early context will be lost.`,
       });
     } else if (pctBefore >= 60 && !this.contextAlertFired60) {
       this.contextAlertFired60 = true;
       this.context.appendMessage({
-        role: "user",
-        content: `[CONTEXT BUDGET: ${pctBefore}% used — consider calling compress_context() before continuing long tasks.]`,
+        role: "system",
+        content:
+          `[CONTEXT BUDGET — harness notice, not user speech]\n` +
+          `CONTEXT BUDGET: ${pctBefore}% used — consider calling compress_context() before continuing long tasks.`,
       });
     }
 
@@ -2705,15 +2996,19 @@ export class AgentHarness {
       this.proactiveCompressedThisSend = true;
     }
 
-    const recallEvery = parseInt(process.env["AGENT_RECALL_EVERY_N"] ?? "2", 10);
+    const recallEvery = parseInt(resolveHarnessEnvRaw("AGENT_RECALL_EVERY_N", this.runtimePreferences) ?? "2", 10);
     const intent = this.turnInference?.intent ?? "knowledge";
     const memoryPolicy = resolveMemoryPolicy(intent, {
       identityQuery: this.turnInference?.identityQuery === true,
+      exploratoryCreative: this.turnInference?.exploratoryCreative === true,
     });
     const inferenceThreshold = resolveIntentConfidenceThreshold();
     if (this.agentDepth === 0) {
       this.emitter.emit("memory_retrieval_policy", {
         intent,
+        likelyEditPaths: this.turnInference?.likelyEditPaths?.length
+          ? [...this.turnInference.likelyEditPaths]
+          : undefined,
         source: this.turnInference?.source ?? "turn_policy",
         confidence: this.turnInference?.confidence,
         threshold: inferenceThreshold,
@@ -2724,9 +3019,10 @@ export class AgentHarness {
         excludeTypes: memoryPolicy.excludeTypes ?? [],
         autoRecallAllowed: memoryPolicy.allowAutoRecall,
         fallbackReason: this.turnInference?.fallbackReason,
+        exploratoryCreative: Boolean(this.turnInference?.exploratoryCreative),
       });
     }
-    const round0PrimeEnabled = process.env["AGENT_MEMORY_PRIME_ROUND0"] !== "0";
+    const round0PrimeEnabled = resolveHarnessEnvRaw("AGENT_MEMORY_PRIME_ROUND0", this.runtimePreferences) !== "0";
     const shouldPrimeThisRound =
       recallEvery > 0 &&
       ((round > 0 && round % recallEvery === 0) || (round === 0 && round0PrimeEnabled));
@@ -2767,7 +3063,16 @@ export class AgentHarness {
                 queries,
                 k,
                 scope: memoryPolicy.scope,
-                goal_hint: this.lastUserMessage.slice(0, 500),
+                goal_hint: (() => {
+                  const base = this.lastUserMessage.slice(0, 500);
+                  const paths =
+                    intent === "coding" && this.turnInference?.likelyEditPaths?.length
+                      ? this.turnInference.likelyEditPaths.slice(0, 8).join(", ")
+                      : "";
+                  if (!paths) return base;
+                  const suffix = `\nLikely code paths: ${paths}`;
+                  return base.length + suffix.length > 900 ? base.slice(0, 900 - suffix.length) + suffix : base + suffix;
+                })(),
                 open_questions:
                   rw?.subQueries?.filter((q) => q.trim().length >= 4).slice(0, 8) ?? [],
                 ...(memoryPolicy.maxAgeDays != null ? { max_age_days: memoryPolicy.maxAgeDays } : {}),
@@ -2800,6 +3105,9 @@ export class AgentHarness {
           if (rw?.hyde?.trim()) payload["hyde"] = rw.hyde.trim().slice(0, 1500);
           this.emitter.emit("memory_retrieval_policy", {
             intent,
+            likelyEditPaths: this.turnInference?.likelyEditPaths?.length
+              ? [...this.turnInference.likelyEditPaths]
+              : undefined,
             source: useMq ? "memory_query" : "recall_relevant",
             confidence: this.turnInference?.confidence,
             threshold: inferenceThreshold,
@@ -2810,6 +3118,7 @@ export class AgentHarness {
             excludeTypes: memoryPolicy.excludeTypes ?? [],
             autoRecallAllowed: memoryPolicy.allowAutoRecall,
             fallbackReason: this.turnInference?.fallbackReason,
+            exploratoryCreative: Boolean(this.turnInference?.exploratoryCreative),
           });
           const r = await this.dispatcher.directCall(useMq ? "memory_query" : "recall_relevant", payload);
           if (
@@ -2871,6 +3180,7 @@ export class AgentHarness {
         excludeTypes: memoryPolicy.excludeTypes ?? [],
         autoRecallAllowed: false,
         fallbackReason: this.turnInference?.fallbackReason,
+        exploratoryCreative: Boolean(this.turnInference?.exploratoryCreative),
       });
     }
 
@@ -2881,16 +3191,19 @@ export class AgentHarness {
         : this.registry.toOpenAIFormat();
     const accumulator = new StreamAccumulator();
     // PASTE: speculative tool dispatch — start safe tool calls while stream is still running.
-    const pasteEnabled = process.env["AGENT_PASTE"] === "1";
+    const pasteEnabled = resolveHarnessEnvRaw("AGENT_PASTE", this.runtimePreferences) === "1";
     const speculativePromises = new Map<string, Promise<ToolResult>>();
 
     const chunkTimeoutMs = Math.max(
       10_000,
-      parseInt(process.env["AGENT_STREAM_CHUNK_TIMEOUT_MS"] ?? "60000", 10) || 60_000
+      parseInt(
+        resolveHarnessEnvRaw("AGENT_STREAM_CHUNK_TIMEOUT_MS", this.runtimePreferences) ?? "60000",
+        10
+      ) || 60_000
     );
     const maxStreamRetries = Math.max(
       0,
-      parseInt(process.env["AGENT_STREAM_MAX_RETRIES"] ?? "3", 10) || 3
+      parseInt(resolveHarnessEnvRaw("AGENT_STREAM_MAX_RETRIES", this.runtimePreferences) ?? "3", 10) || 3
     );
 
     let stream = await this.streamWithRetry(messages, tools);
@@ -2935,6 +3248,7 @@ export class AgentHarness {
                   const toolDef = this.registry.get(prevCall.name);
                   const isSafe =
                     toolDef &&
+                    this.registry.isActive(prevCall.name) &&
                     !toolDef.requiresApproval &&
                     (!toolDef.dangerLevel || toolDef.dangerLevel === "safe");
                   if (isSafe) {
@@ -2989,7 +3303,7 @@ export class AgentHarness {
           ? `stream stalled (${Math.round(chunkTimeoutMs / 1000)}s without data)`
           : "stream connection reset";
 
-        if (hadPartialContent && !isUiQuiet()) {
+        if (hadPartialContent && !this.isUiQuiet()) {
           this.emitter.emit("text", {
             delta: `\n\n[⟳ ${retryLabel} — restarting stream (attempt ${streamAttempt}/${maxStreamRetries})…]\n\n`,
             channel: "user",
@@ -3017,8 +3331,7 @@ export class AgentHarness {
 
     const skipStreamContinuationsForIntro =
       toolCalls.length === 0 &&
-      Boolean(this.turnInference?.skipHarnessSecondaryPasses) &&
-      !Boolean(this.turnInference?.runtimeIdentityPrompt);
+      shouldSkipHarnessSecondaryPassesForTurn(this.lastUserMessage, this.turnInference);
 
     // If stream ended without an explicit finish reason, treat as potentially incomplete
     // and request continuation before running finalization/verification logic.
@@ -3369,10 +3682,6 @@ export class AgentHarness {
         });
       }
 
-      // Tell dispatcher which tools ran this round so the NEXT round's
-      // pre-flight check can see if think() just fired (#10 danger pre-flight fix)
-      this.dispatcher.notifyBatchComplete(batchToolNames);
-
       for (let i = 0; i < toolCalls.length; i++) {
         const tc = toolCalls[i] as AccumulatedToolCall;
         const result = results[i]!;
@@ -3491,7 +3800,7 @@ export class AgentHarness {
             `Errors: ${errorSummary.slice(0, 200)}. ` +
             `Task: ${this.lastUserMessage.slice(0, 80)}`;
           // Semantic upgrade: ask fast model to extract a reusable lesson.
-          if (process.env["AGENT_REFLEXION_SEMANTIC"] !== "0") {
+          if (resolveHarnessEnvRaw("AGENT_REFLEXION_SEMANTIC", this.runtimePreferences) !== "0") {
             try {
               const jr = await completeChatJson(this.client, {
                 model: getFastModelSlug(this.config.model),
@@ -3585,31 +3894,33 @@ export class AgentHarness {
       if (typeof assistantMessage.content === "string") {
         assistantText = normalizeSearchDelta(assistantMessage.content);
       }
-      const criticMinTools = parseInt(process.env["AGENT_CRITIC_MIN_TOOLS"] ?? "4", 10);
+      const criticMinTools = parseInt(
+        resolveHarnessEnvRaw("AGENT_CRITIC_MIN_TOOLS", this.runtimePreferences) ?? "4",
+        10
+      );
       const distinctToolCount = new Set(this.toolsUsedThisTurn).size;
       const runForcedCritic =
-        process.env["AGENT_CRITIC_REQUIRE"] === "1" &&
+        resolveHarnessEnvRaw("AGENT_CRITIC_REQUIRE", this.runtimePreferences) === "1" &&
         !this.criticConsumedThisSend &&
         this.agentDepth === 0 &&
         this.registry.has("verify_result") &&
         (distinctToolCount >= criticMinTools || looksPathOrCodeHeavy(assistantText));
       const inf = this.turnInference;
+      const skipSecondaryPasses = shouldSkipHarnessSecondaryPassesForTurn(
+        this.lastUserMessage,
+        inf
+      );
       const skipCriticForSimpleIntrospection =
         distinctToolCount <= 1 &&
         this.toolsUsedThisTurn.filter((n) => n !== "think" && n !== "plan").length === 0 &&
-        Boolean(
-          inf?.personaIdentityPrompt || inf?.skipHarnessSecondaryPasses || inf?.runtimeIdentityPrompt
-        );
-      const casualAssistantIdentity =
-        Boolean(inf?.personaIdentityPrompt || inf?.skipHarnessSecondaryPasses) &&
-        !Boolean(inf?.runtimeIdentityPrompt);
-      /** No extra finalize ReAct loops (critic/cite/synthesis/recency/over-inference…) for simple identity asks. */
+        (skipSecondaryPasses || Boolean(inf?.runtimeIdentityPrompt));
+      /** No extra finalize ReAct loops (critic/cite/synthesis/recency…) for persona / session-history asks. */
       const skipPostAssistantFinalizeExtensions =
         !this.sessionGreetingThisSend &&
         !this.personaBootstrapPromptThisSend &&
-        casualAssistantIdentity;
+        skipSecondaryPasses;
       const runHeuristicCritic =
-        process.env["AGENT_CRITIC"] === "1" &&
+        resolveHarnessEnvRaw("AGENT_CRITIC", this.runtimePreferences) === "1" &&
         !this.criticConsumedThisSend &&
         this.roundCount >= 3 &&
         this.agentDepth === 0 &&
@@ -3626,13 +3937,13 @@ export class AgentHarness {
         this.criticConsumedThisSend = true;
         try {
           const criticTool =
-            process.env["AGENT_CRITIC_MODE"] === "debate" && this.registry.has("reflect_debate")
+            resolveHarnessEnvRaw("AGENT_CRITIC_MODE", this.runtimePreferences) === "debate" && this.registry.has("reflect_debate")
               ? "reflect_debate"
               : "verify_result";
           const vr = await this.dispatcher.directCall(criticTool, {
             goal: this.lastUserMessage.slice(0, 2000),
             result: assistantText.slice(0, 12_000),
-            ...(process.env["AGENT_CRITIC_EVIDENCE"] === "1"
+            ...(resolveHarnessEnvRaw("AGENT_CRITIC_EVIDENCE", this.runtimePreferences) === "1"
               ? { evidence_pack: this.getEvidencePackForCritic() }
               : {}),
           });
@@ -3657,30 +3968,6 @@ export class AgentHarness {
         }
       }
 
-      const activePersona = this.getCurrentPersona();
-      const personaIdentityNeedsRewrite =
-        !this.sessionGreetingThisSend &&
-        !this.personaBootstrapPromptThisSend &&
-        !!activePersona &&
-        hasModelIdentityLeak(assistantText) &&
-        !Boolean(this.turnInference?.runtimeIdentityPrompt) &&
-        (Boolean(this.turnInference?.personaIdentityPrompt) ||
-          Boolean(this.turnInference?.skipHarnessSecondaryPasses));
-      if (personaIdentityNeedsRewrite && !this.finalizePersonaIdentityNudgeThisSend) {
-        this.finalizePersonaIdentityNudgeThisSend = true;
-        const personaName = activePersona.name?.trim() || "the active persona";
-        this.context.appendMessage({
-          role: "user",
-          content:
-            `[PERSONA IDENTITY CHECK] Persona "${personaName}" is active. Replace your last reply with one short in-character answer only ` +
-            `(who you are in that voice, ≤6 sentences). ` +
-            `Do not mention model vendors, OWL/ZOO, "system notes", "inference checks", or prior drafts. ` +
-            `Do not claim model-family/vendor identity unless the user explicitly asked for model/runtime details.`,
-        });
-        await this.runReActLoop(round);
-        return;
-      }
-
       if (this.sessionGreetingThisSend || this.personaBootstrapPromptThisSend) {
         this.emitter.emit("recency_check", {
           required: false,
@@ -3694,7 +3981,7 @@ export class AgentHarness {
         /^(OK|DONE)\b/i.test(trimmedFinal) || /\b(done|ok)\b\s*[.!]?\s*$/i.test(trimmedFinal);
       if (
         !skipPostAssistantFinalizeExtensions &&
-        process.env["AGENT_FINALIZE_CITE"] !== "0" &&
+        resolveHarnessEnvRaw("AGENT_FINALIZE_CITE", this.runtimePreferences) !== "0" &&
         doneish &&
         this.filesReadThisTurn.length > 0 &&
         !assistantCitesPath(assistantText, this.filesReadThisTurn) &&
@@ -3794,7 +4081,7 @@ export class AgentHarness {
 
       const wouldHaveBeenOverInferenceStance =
         !skipPostAssistantFinalizeExtensions &&
-        process.env["AGENT_OVERINFERENCE_GUARD"] !== "0" &&
+        resolveHarnessEnvRaw("AGENT_OVERINFERENCE_GUARD", this.runtimePreferences) !== "0" &&
         (this.turnInference?.stancePrompt || this.turnInference?.overInferenceRisk || false);
       this.emitter.emit("over_inference_check", {
         required: wouldHaveBeenOverInferenceStance,
@@ -3878,7 +4165,9 @@ export class AgentHarness {
     let lastErr: unknown;
     const retryStartedAt = Date.now();
 
-    const allowToollessRetry = this.config.allowToollessStreamRetry !== false;
+    // Toolless retries can produce plausible text claims without executing required tools.
+    // Default to tools-on for all retries unless explicitly opted-in.
+    const allowToollessRetry = this.config.allowToollessStreamRetry === true;
     let attempt = 0;
     while (true) {
       if (Date.now() < this.providerCircuitOpenUntilMs) {
@@ -3940,9 +4229,18 @@ export class AgentHarness {
         );
         if (rateLimited || providerUnavailable) {
           this.consecutiveProviderFailures += 1;
-          const minCap = Math.max(1, parseInt(process.env["AGENT_MIN_CONCURRENT_AGENTS"] ?? "1", 10) || 1);
+          const minCap = Math.max(
+            1,
+            parseInt(resolveHarnessEnvRaw("AGENT_MIN_CONCURRENT_AGENTS", this.runtimePreferences) ?? "1", 10) || 1
+          );
           this.spawnConcurrencyCap = Math.max(minCap, Math.floor(this.spawnConcurrencyCap / 2));
-          const cooldown = Math.max(delay, parseInt(process.env["AGENT_CONCURRENCY_COOLDOWN_MS"] ?? "45000", 10) || 45_000);
+          const cooldown = Math.max(
+            delay,
+            parseInt(
+              resolveHarnessEnvRaw("AGENT_CONCURRENCY_COOLDOWN_MS", this.runtimePreferences) ?? "45000",
+              10
+            ) || 45_000
+          );
           this.providerDegradedUntilMs = Date.now() + cooldown;
           if (this.consecutiveProviderFailures >= this.providerCircuitFailureThreshold) {
             this.providerCircuitOpenUntilMs = Date.now() + this.providerCircuitCooldownMs;
@@ -3960,7 +4258,7 @@ export class AgentHarness {
           message: msg,
           backoffMs: delay,
         });
-        if (!isUiQuiet()) {
+        if (!this.isUiQuiet()) {
           this.emitter.emit("text", {
             delta:
               `\n⟳ ${msg} — retrying in ${Math.round(delay / 1000)}s ` +
@@ -3999,6 +4297,8 @@ export class AgentHarness {
    * World context will be re-injected on the next root send() (same as a fresh session).
    */
   reset(): void {
+    this.clearPersonalityHeartbeatSchedule();
+    this.personalityHeartbeatNudgeTimestampsMs = [];
     this.context.clear();
     this.roundCount = 0;
     this.worldContextInjected = false;

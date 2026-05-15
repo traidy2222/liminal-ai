@@ -4,6 +4,7 @@
  * budget; optional minimum interval caps request starts per credential pair.
  */
 import { createHash } from "node:crypto";
+import { effectiveHarnessEnvRaw } from "./harness_effective_env.js";
 
 export interface ProviderCredentials {
   apiKey: string;
@@ -27,7 +28,7 @@ export function providerSpacingKey(creds: ProviderCredentials): string {
 
 /** Minimum ms between the *start* of consecutive requests sharing the same key. 0 = disabled. */
 export function resolveProviderMinIntervalMs(): number {
-  const raw = process.env["AGENT_PROVIDER_MIN_INTERVAL_MS"]?.trim();
+  const raw = effectiveHarnessEnvRaw("AGENT_PROVIDER_MIN_INTERVAL_MS")?.trim();
   if (!raw) return 0;
   const n = parseInt(raw, 10);
   if (!Number.isFinite(n)) return 0;

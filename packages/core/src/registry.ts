@@ -1,6 +1,33 @@
 import type OpenAI from "openai";
 import type { ToolDefinition } from "./types.js";
 
+const TOOL_PRIORITY_ORDER = [
+  // Core runtime + control path first so model sees these early.
+  "think",
+  "plan",
+  "hypothesize",
+  "get_runtime_settings",
+  "set_runtime_settings",
+  "set_persona",
+  "check_context",
+  "compress_context",
+  "list_tool_families",
+  "activate_tool_family",
+] as const;
+
+const TOOL_PRIORITY_RANK = new Map<string, number>(
+  TOOL_PRIORITY_ORDER.map((name, idx) => [name, idx])
+);
+
+function compareToolNames(a: string, b: string): number {
+  const ra = TOOL_PRIORITY_RANK.get(a);
+  const rb = TOOL_PRIORITY_RANK.get(b);
+  if (ra != null && rb != null) return ra - rb;
+  if (ra != null) return -1;
+  if (rb != null) return 1;
+  return a.localeCompare(b);
+}
+
 export class ToolRegistry {
   private readonly tools = new Map<string, ToolDefinition>();
   /** When true, only tools in activeToolNames are sent to the model API. */
@@ -47,7 +74,7 @@ export class ToolRegistry {
 
   /** Tool names currently registered (stable order). */
   getToolNames(): string[] {
-    return [...this.tools.keys()].sort();
+    return [...this.tools.keys()].sort(compareToolNames);
   }
 
   /** When lazy loading is off, all registered tools are active. */
@@ -120,7 +147,7 @@ export class ToolRegistry {
   /** Names of tools currently exposed to the model (lazy) or all (non-lazy). */
   getActiveToolNames(): string[] {
     if (!this.lazyToolLoading) return this.getToolNames();
-    return [...this.activeToolNames].sort();
+    return [...this.activeToolNames].sort(compareToolNames);
   }
 
   /** Replace active set (lazy mode only). */
@@ -150,7 +177,7 @@ export class ToolRegistry {
     const defs = !this.lazyToolLoading
       ? this.getAll()
       : [...this.activeToolNames]
-          .sort()
+          .sort(compareToolNames)
           .map((n) => this.tools.get(n))
           .filter((t): t is ToolDefinition => t !== undefined);
     return defs.map((t) => ({

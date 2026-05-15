@@ -6,6 +6,14 @@
  * Pass a SharedMemoryBus instance through AgentConfig.sharedBus.
  */
 
+export interface SharedBusEnvelope {
+  type: "fact" | "summary" | "evidence" | "handoff" | "status";
+  summary: string;
+  evidenceRefs?: string[];
+  payload?: string;
+  at: number;
+}
+
 export type BusListener = (key: string, value: string, publisherId: string) => void;
 
 export class SharedMemoryBus {
@@ -21,6 +29,25 @@ export class SharedMemoryBus {
       } catch {
         /* subscriber errors are non-fatal */
       }
+    }
+  }
+
+  /** Publish a structured envelope to a namespaced key. */
+  publishEnvelope(key: string, envelope: SharedBusEnvelope, publisherId: string): void {
+    this.publish(key, JSON.stringify(envelope), publisherId);
+  }
+
+  /** Read and parse a structured envelope if present and valid. */
+  readEnvelope(key: string): SharedBusEnvelope | undefined {
+    const raw = this.read(key);
+    if (!raw) return undefined;
+    try {
+      const parsed = JSON.parse(raw) as SharedBusEnvelope;
+      if (!parsed || typeof parsed !== "object") return undefined;
+      if (!parsed.type || typeof parsed.summary !== "string") return undefined;
+      return parsed;
+    } catch {
+      return undefined;
     }
   }
 

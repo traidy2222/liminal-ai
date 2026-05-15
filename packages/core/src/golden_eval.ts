@@ -5,6 +5,7 @@ import { appendFile, mkdir, readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { rankDocumentsForQuery, type RankableDoc } from "./memory_rank.js";
 import { resolveWorkspaceRoot } from "./workspace_root.js";
+import { effectiveHarnessEnvRaw } from "./harness_effective_env.js";
 
 const GOLDEN_DIR = () => join(resolveWorkspaceRoot(), ".agent_eval_runs", "golden");
 const GOLDEN_FILE = () => join(GOLDEN_DIR(), "traces.jsonl");
@@ -18,7 +19,7 @@ export interface GoldenEvalRecord {
 }
 
 export async function appendGoldenEvalRecord(entry: Omit<GoldenEvalRecord, "at">): Promise<void> {
-  if (process.env["AGENT_GOLDEN_EVAL"] === "0") return;
+  if (effectiveHarnessEnvRaw("AGENT_GOLDEN_EVAL") === "0") return;
   try {
     await mkdir(GOLDEN_DIR(), { recursive: true });
     const row: GoldenEvalRecord = { ...entry, at: new Date().toISOString() };
@@ -29,7 +30,7 @@ export async function appendGoldenEvalRecord(entry: Omit<GoldenEvalRecord, "at">
 }
 
 export async function formatGoldenEvalHints(seed: string): Promise<string | null> {
-  if (process.env["AGENT_GOLDEN_EVAL"] === "0") return null;
+  if (effectiveHarnessEnvRaw("AGENT_GOLDEN_EVAL") === "0") return null;
   const trimmed = seed.trim();
   if (trimmed.length < 8) return null;
   let raw: string;

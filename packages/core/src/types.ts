@@ -22,6 +22,8 @@ export interface PropertySchema {
   properties?: Record<string, PropertySchema>;
   required?: string[];
   description?: string;
+  /** Union: value must satisfy exactly one branch (recursive). */
+  anyOf?: PropertySchema[];
 }
 
 export interface ToolParameterSchema {
@@ -44,8 +46,8 @@ export interface ToolDefinition {
    */
   resourceLocks?: (args: Record<string, unknown>) => string[];
   /**
-   * Danger level for pre-flight enforcement.
-   * "destructive" tools require a think() call in the same round before they execute.
+   * Danger level for tooling / UX (e.g. approval policy).
+   * "destructive" tools use the approval path when `requiresApproval` is set; there is no think/plan dispatch gate.
    * "cautious" tools are logged but not blocked.
    * "safe" (default) has no restrictions.
    */
@@ -156,10 +158,21 @@ export interface EpistemicState {
     status: "todo" | "doing" | "done" | "blocked";
     note?: string;
   }[];
+  /** Working hypotheses — updated by hypothesize() and rendered in [WORKING STATE]. */
   hypotheses: {
+    /** Stable id (e.g. hyp:abc12) for supersede / cross-refs */
+    id?: string;
     claim: string;
     confidence: "low" | "med" | "high";
     evidence?: string[];
+    /** Concrete observations that would refute or weaken the claim */
+    falsifiers?: string[];
+    /** Smallest next check to validate or invalidate */
+    next_test?: string;
+    rationale?: string;
+    status?: "active" | "superseded" | "confirmed" | "rejected";
+    superseded_by?: string;
+    at?: number;
   }[];
   /** Paths successfully read via read_file (and similar) this send; unioned across rounds. */
   filesTouched: string[];
@@ -245,6 +258,14 @@ export interface ExecutionState {
 
 export interface ChildAgentConfig {
   goal: string;
+  /** Optional focused brief distinct from orchestration label goal. */
+  taskBrief?: string;
+  /** Whether child should inherit parent persona block. Default false (neutral worker persona). */
+  inheritPersona?: boolean;
+  /** Structured spawn contract for focused specialist behavior. */
+  spawnContract?: SubagentSpawnContract;
+  /** Observability metadata for contract provenance. */
+  spawnContractSource?: "provided" | "synthesized";
   /**
    * Restrict child to only these tool names (allowlist).
    * undefined = inherit all registered tools from parent.
@@ -281,6 +302,21 @@ export interface ChildAgentConfig {
    * so the orchestrator can resolve them before starting execution.
    */
   dependsOn?: string[];
+}
+
+export interface SubagentSpawnContract {
+  role: string;
+  objective: string;
+  deliverableFormat: string;
+  successCriteria: string[];
+  nonGoals?: string[];
+  allowedTools?: string[];
+  handoffRequirements?: string[];
+  budget?: {
+    maxRounds?: number;
+    maxToolCalls?: number;
+    timeoutMs?: number;
+  };
 }
 
 export interface SubtaskResult {
@@ -475,12 +511,15 @@ export interface AgentEventMap {
     parentTaskId: string;
     goal: string;
     depth: number;
+    contractSource?: "provided" | "synthesized";
+    role?: string;
   };
   subtask_complete: {
     taskId: string;
     ok: boolean;
     output: string;
     rounds: number;
+    handoffWritten?: boolean;
   };
   /** Live output delta from a running sub-agent, forwarded to the parent's emitter. */
   subtask_output: {
@@ -591,6 +630,28 @@ export interface AgentEventMap {
     };
     error?: string;
   };
+  spawn_contract_created: {
+    taskId: string;
+    source: "provided" | "synthesized";
+    role: string;
+    objective: string;
+  };
+  spawn_contract_applied: {
+    taskId: string;
+    role: string;
+    deliverableFormat: string;
+    allowedTools: string[];
+  };
+  spawn_contract_violation: {
+    taskId: string;
+    reason: string;
+    severity: "low" | "med" | "high";
+  };
+  subtask_handoff_written: {
+    taskId: string;
+    key: string;
+    bytes: number;
+  };
   memory_retrieval_policy: {
     intent: "introspection" | "knowledge" | "coding" | "execution";
     source: string;
@@ -603,6 +664,8 @@ export interface AgentEventMap {
     excludeTypes: string[];
     autoRecallAllowed: boolean;
     fallbackReason?: string;
+    exploratoryCreative?: boolean;
+    likelyEditPaths?: string[];
   };
   over_inference_check: {
     required: boolean;
@@ -669,6 +732,31 @@ export interface AgentEventMap {
     passes: number;
     remainingDiagnostics: number;
     reason: string;
+  };
+  /** Idle personality heartbeat: armed after a successful turn (root only). */
+  heartbeat_scheduled: {
+    taskId: string;
+    firesAtMs: number;
+    idleMs: number;
+  };
+  heartbeat_started: {
+    taskId: string;
+    runId: string;
+  };
+  heartbeat_completed: {
+    taskId: string;
+    runId: string;
+    summary: string;
+    durationMs: number;
+    reflectionsPreview?: string[];
+    memoryWrites?: number;
+    surfaceDecision: "none" | "trace" | "assistant";
+    nudgeText?: string;
+  };
+  heartbeat_skipped: {
+    taskId: string;
+    reason: string;
+    detail?: string;
   };
 }
 
@@ -773,6 +861,11 @@ export interface AgentConfig {
    * Default / env: AGENT_APPROVAL_TIMEOUT_MS (10s–600s, default 60s).
    */
   approvalTimeoutMs?: number;
+  /**
+   * When true, destructive approval-gated tools are auto-approved for this harness session.
+   * Session-scoped only (intended for CLI/env launch flags like `--yolo`).
+   */
+  autoApproveDestructive?: boolean;
   /** Optional loaded runtime preferences used as session defaults/overrides. */
   runtimePreferences?: RuntimePreferences | null;
   /** Optional persistence hook invoked when runtime preferences are changed in-session. */
