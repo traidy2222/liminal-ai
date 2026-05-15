@@ -1,5 +1,7 @@
 import { useEffect, useReducer, useCallback, useRef } from "react";
+import type { PersonaUiThemeV1 } from "@liminal/core/persona-ui-theme";
 import type { ImageAttachment } from "./imageAttachments.js";
+import { readPersonaChromeFromSession, writePersonaChromeToSession } from "./personaChromeSessionCache.js";
 
 function sanitizeDeltaText(text: string): string {
   return text
@@ -25,6 +27,7 @@ export type MessageEntry =
   | { kind: "think"; content: string }
   | { kind: "plan"; steps: string[] }
   | { kind: "trace"; text: string }
+  | { kind: "pulse_nudge"; text: string; at: number }
   | {
       kind: "subtask";
       taskId: string;
@@ -67,7 +70,22 @@ export interface AutoDreamState {
   };
   error?: string;
   updatedAt: number;
-}
+};
+
+export type PersonalityPulseRow =
+  | {
+      id: string;
+      at: number;
+      phase: "completed";
+      runId: string;
+      summary: string;
+      durationMs: number;
+      reflectionsPreview?: string[];
+      memoryWrites?: number;
+      surfaceDecision: "none" | "trace" | "assistant";
+      nudgeText?: string;
+    }
+  | { id: string; at: number; phase: "skipped"; reason: string; detail?: string };
 
 export type PendingApprovalState = {
   callId: string;
@@ -92,6 +110,20 @@ export interface SSEState {
   personaBootstrapAllowSkip: boolean;
   personaBootstrapProgress: string | null;
   personaBootstrapStage: string | null;
+  /** Latest normalized persona HUD theme from server (null = defaults). */
+  personaUiTheme: PersonaUiThemeV1 | null;
+  /** Header / HUD brand line. */
+  personaDisplayLabel: string;
+  /** Provider retry events counted during the current send; snapshotted on turn_end. */
+  lastTurnProviderRetries: number;
+  recoveryPendingCount: number;
+  /** Latest context compression event (for footer / summary, not main noise). */
+  lastContextCompress: { beforePct: number; afterPct: number; rounds: number } | null;
+  /** Ambient personality heartbeat (AGENT_HEARTBEAT) — not a second chat transcript. */
+  personalityPulseRows: PersonalityPulseRow[];
+  personalityPulseActive: boolean;
+  heartbeatUiStrip: boolean;
+  heartbeatEnabled: boolean;
 }
 
 const ORCH_TOOLS = new Set(["spawn_agent", "wait_for_agents", "cancel_agent", "list_agents"]);
@@ -102,6 +134,10 @@ type Action =
       uiVerbosity: "normal" | "quiet";
       personaBootstrapPending?: boolean;
       personaBootstrapAllowSkip?: boolean;
+      personaUiTheme?: PersonaUiThemeV1 | null;
+      personaDisplayLabel?: string;
+      personalityHeartbeatUiStrip?: boolean;
+      personalityHeartbeatEnabled?: boolean;
     }
   | { type: "connected" }
   | { type: "disconnected" }
@@ -155,7 +191,28 @@ type Action =
       };
     }
   | { type: "persona_bootstrap_progress"; payload: { stage: string; message: string; at: number } }
-  | { type: "session_reset" };
+  | { type: "session_reset" }
+  | { type: "heartbeat_scheduled"; payload: { taskId: string; firesAtMs: number; idleMs: number } }
+  | { type: "heartbeat_started"; payload: { taskId: string; runId: string } }
+  | {
+      type: "heartbeat_completed";
+      payload: {
+        taskId: string;
+        runId: string;
+        summary: string;
+        durationMs: number;
+        reflectionsPreview?: string[];
+        memoryWrites?: number;
+        surfaceDecision: "none" | "trace" | "assistant";
+        nudgeText?: string;
+      };
+    }
+  | { type: "heartbeat_skipped"; payload: { taskId: string; reason: string; detail?: string } }
+  /**
+   * Reconcile UI `busy` with `/api/status` after SSE gaps.
+   * `addTraceNote` — only when we had to clear a stuck spinner without `turn_end`.
+   */
+  | { type: "sync_server_busy"; payload: { busy: boolean; addTraceNote?: boolean } };
 
 function stripTrailingProviderRetry(messages: MessageEntry[]): MessageEntry[] {
   const last = messages.at(-1);
@@ -178,16 +235,32 @@ function reducer(state: SSEState, action: Action): SSEState {
         ...(action.personaBootstrapPending === false
           ? { personaBootstrapProgress: null, personaBootstrapStage: null }
           : {}),
+        ...(action.personaUiTheme !== undefined ? { personaUiTheme: action.personaUiTheme } : {}),
+        ...(typeof action.personaDisplayLabel === "string"
+          ? { personaDisplayLabel: action.personaDisplayLabel }
+          : {}),
+        ...(typeof action.personalityHeartbeatUiStrip === "boolean"
+          ? { heartbeatUiStrip: action.personalityHeartbeatUiStrip }
+          : {}),
+        ...(typeof action.personalityHeartbeatEnabled === "boolean"
+          ? { heartbeatEnabled: action.personalityHeartbeatEnabled }
+          : {}),
       };
 
     case "connected":
       return { ...state, connected: true, error: null };
 
     case "disconnected":
-      return { ...state, connected: false, error: state.error ?? "Connection lost. Reconnecting..." };
+      return {
+        ...state,
+        connected: false,
+        error:
+          state.error && state.error !== "Agent error"
+            ? state.error
+            : "Connection lost. Reconnecting...",
+      };
 
     case "harness_running":
-      // Received while reconnecting — confirms work is still in progress.
       return { ...state, busy: true };
 
     case "session_reset":
@@ -203,6 +276,11 @@ function reducer(state: SSEState, action: Action): SSEState {
         personaBootstrapPending: state.personaBootstrapPending,
         personaBootstrapProgress: null,
         personaBootstrapStage: null,
+        lastTurnProviderRetries: 0,
+        recoveryPendingCount: 0,
+        lastContextCompress: null,
+        personalityPulseRows: [],
+        personalityPulseActive: false,
       };
 
     case "persona_bootstrap_progress":
@@ -217,6 +295,7 @@ function reducer(state: SSEState, action: Action): SSEState {
         ...state,
         busy: true,
         error: null,
+        personalityPulseActive: false,
         messages: [...state.messages, { kind: "user", text: action.text }],
       };
 
@@ -262,7 +341,10 @@ function reducer(state: SSEState, action: Action): SSEState {
     }
 
     case "provider_retry": {
-      if (state.uiVerbosity === "quiet") return state;
+      const nextRecovery = state.recoveryPendingCount + 1;
+      if (state.uiVerbosity === "quiet") {
+        return { ...state, recoveryPendingCount: nextRecovery };
+      }
       const { attempt, maxAttempts, message, backoffMs } = action.payload;
       const maxLabel = maxAttempts > 0 ? String(maxAttempts) : "∞";
       const line = `⟳ Provider retry ${attempt}/${maxLabel} in ${Math.round(backoffMs / 1000)}s: ${message.slice(0, 220)}`;
@@ -270,11 +352,13 @@ function reducer(state: SSEState, action: Action): SSEState {
       if (last?.kind === "provider_retry") {
         return {
           ...state,
+          recoveryPendingCount: nextRecovery,
           messages: [...state.messages.slice(0, -1), { kind: "provider_retry", text: line }],
         };
       }
       return {
         ...state,
+        recoveryPendingCount: nextRecovery,
         messages: [...state.messages, { kind: "provider_retry", text: line }],
       };
     }
@@ -377,20 +461,51 @@ function reducer(state: SSEState, action: Action): SSEState {
     case "ask_user_resolved":
       return { ...state, pendingAskUser: null };
 
-    case "turn_end":
+    case "turn_end": {
+      const msgs = stripTrailingProviderRetry(state.messages).map((m) =>
+        m.kind === "assistant" && m.streaming ? { ...m, streaming: false } : m
+      );
       return {
         ...state,
         busy: false,
         contextSnapshot: action.payload.contextSnapshot,
-        messages: stripTrailingProviderRetry(state.messages).map((m) =>
-          m.kind === "assistant" && m.streaming ? { ...m, streaming: false } : m
-        ),
+        messages: msgs,
+        lastTurnProviderRetries: state.recoveryPendingCount,
+        recoveryPendingCount: 0,
       };
+    }
+
+    case "sync_server_busy": {
+      if (action.payload.busy) {
+        return state.busy ? state : { ...state, busy: true };
+      }
+      if (!state.busy) return state;
+      const msgs = stripTrailingProviderRetry(state.messages).map((m) =>
+        m.kind === "assistant" && m.streaming ? { ...m, streaming: false } : m
+      );
+      const nextMessages = action.payload.addTraceNote
+        ? [
+            ...msgs,
+            {
+              kind: "trace" as const,
+              text: "[UI] Server finished; SSE turn_end was delayed or missed — UI unlocked. You can send again.\n",
+            },
+          ]
+        : msgs;
+      return {
+        ...state,
+        busy: false,
+        personalityPulseActive: false,
+        messages: nextMessages,
+        recoveryPendingCount: 0,
+      };
+    }
 
     case "error":
       return {
         ...state,
         busy: false,
+        personalityPulseActive: false,
         error: action.payload.message,
         messages: stripTrailingProviderRetry(state.messages),
       };
@@ -450,22 +565,76 @@ function reducer(state: SSEState, action: Action): SSEState {
       return { ...state, messages: msgs };
     }
 
-    case "context_compressed":
+    case "context_compressed": {
+      const snap = {
+        beforePct: Math.round(action.payload.beforeFraction * 100),
+        afterPct: Math.round(action.payload.afterFraction * 100),
+        rounds: action.payload.roundsCompressed,
+      };
       return {
         ...state,
+        lastContextCompress: snap,
         messages: [
           ...state.messages,
           {
             kind: "context_compressed",
-            beforePct: Math.round(action.payload.beforeFraction * 100),
-            afterPct: Math.round(action.payload.afterFraction * 100),
-            rounds: action.payload.roundsCompressed,
+            beforePct: snap.beforePct,
+            afterPct: snap.afterPct,
+            rounds: snap.rounds,
           },
         ],
       };
+    }
 
     case "persona_changed":
       return { ...state, personaName: action.payload.name };
+
+    case "heartbeat_scheduled":
+      return state;
+
+    case "heartbeat_started":
+      return { ...state, personalityPulseActive: true };
+
+    case "heartbeat_completed": {
+      const p = action.payload;
+      const msgs = [...state.messages];
+      if (p.surfaceDecision === "assistant" && p.nudgeText) {
+        msgs.push({ kind: "pulse_nudge", text: p.nudgeText, at: Date.now() });
+      }
+      const row: PersonalityPulseRow = {
+        id: p.runId,
+        at: Date.now(),
+        phase: "completed",
+        runId: p.runId,
+        summary: p.summary,
+        durationMs: p.durationMs,
+        reflectionsPreview: p.reflectionsPreview,
+        memoryWrites: p.memoryWrites,
+        surfaceDecision: p.surfaceDecision,
+        nudgeText: p.nudgeText,
+      };
+      return {
+        ...state,
+        personalityPulseActive: false,
+        personalityPulseRows: [...state.personalityPulseRows, row].slice(-24),
+        messages: msgs,
+      };
+    }
+
+    case "heartbeat_skipped": {
+      const row: PersonalityPulseRow = {
+        id: `sk-${Date.now()}`,
+        at: Date.now(),
+        phase: "skipped",
+        reason: action.payload.reason,
+        ...(action.payload.detail !== undefined ? { detail: action.payload.detail } : {}),
+      };
+      return {
+        ...state,
+        personalityPulseActive: false,
+        personalityPulseRows: [...state.personalityPulseRows, row].slice(-24),
+      };
+    }
 
     case "auto_dream":
       return {
@@ -483,7 +652,19 @@ function reducer(state: SSEState, action: Action): SSEState {
   }
 }
 
-const SERVER = "http://localhost:3001";
+/** Same origin as the page so Vite dev (`:5173`) can proxy `/api` → Express (`:3001`). */
+export const WEB_SERVER_BASE =
+  typeof window !== "undefined" ? "" : "http://localhost:3001";
+
+const SERVER = WEB_SERVER_BASE;
+
+/** Min time after Send before status poll may clear `busy` without `turn_end`. */
+const TURN_POST_SEND_GRACE_MS = 8_000;
+/** No harness SSE activity for this long + server idle → eligible to unlock. */
+const HARNESS_ACTIVITY_IDLE_MS = 22_000;
+/** Consecutive `/api/status` idle polls required before forced unlock. */
+const STATUS_IDLE_POLLS_REQUIRED = 3;
+const STATUS_POLL_INTERVAL_MS = 12_000;
 
 // ─── Retry helpers ────────────────────────────────────────────────────────────
 
@@ -506,22 +687,45 @@ async function fetchWithRetry(
   maxAttempts = 8
 ): Promise<{ ok: boolean; status: number; body: unknown }> {
   let lastErr = "";
+  let lastStatus = 0;
   for (let i = 0; i < maxAttempts; i++) {
     if (i > 0) await sleep(postDelay(i - 1));
     try {
       const r = await fetch(url, init);
       const body = await r.json().catch(() => ({}));
+      lastStatus = r.status;
       // 409 = agent busy; treat as success — first attempt got through
       if (r.status === 409) return { ok: true, status: 409, body };
       // 4xx client error — don't retry
       if (r.status >= 400 && r.status < 500) return { ok: false, status: r.status, body };
       if (r.ok) return { ok: true, status: r.status, body };
       lastErr = (body as { error?: string }).error ?? `HTTP ${r.status}`;
+      // 5xx — retry; cap attempts lower than network blips
+      if (r.status >= 500 && i >= Math.min(4, maxAttempts) - 1) {
+        return { ok: false, status: r.status, body: { error: lastErr } };
+      }
     } catch (e) {
       lastErr = e instanceof Error ? e.message : "Network error";
+      lastStatus = 0;
     }
   }
-  return { ok: false, status: 0, body: { error: lastErr } };
+  return { ok: false, status: lastStatus, body: { error: lastErr } };
+}
+
+interface HarnessStatusResponse {
+  busy?: boolean;
+  startedAt?: number | null;
+  lastTurnEndedAt?: number | null;
+}
+
+async function fetchHarnessStatus(): Promise<HarnessStatusResponse | null> {
+  try {
+    const r = await fetch(`${SERVER}/api/status`);
+    if (!r.ok) return null;
+    return (await r.json()) as HarnessStatusResponse;
+  } catch {
+    return null;
+  }
 }
 
 // ─── React hook ───────────────────────────────────────────────────────────────
@@ -536,8 +740,9 @@ export interface SendMessageResult {
   error?: string;
 }
 
-export function useSSE() {
-  const [state, dispatch] = useReducer(reducer, {
+function createInitialSSEState(): SSEState {
+  const chrome = readPersonaChromeFromSession();
+  return {
     messages: [],
     contextSnapshot: null,
     autoDream: { stage: "idle", updatedAt: Date.now() },
@@ -552,7 +757,20 @@ export function useSSE() {
     personaBootstrapAllowSkip: true,
     personaBootstrapProgress: null,
     personaBootstrapStage: null,
-  });
+    personaUiTheme: chrome?.personaUiTheme ?? null,
+    personaDisplayLabel: chrome?.personaDisplayLabel ?? "LIMINAL",
+    lastTurnProviderRetries: 0,
+    recoveryPendingCount: 0,
+    lastContextCompress: null,
+    personalityPulseRows: [],
+    personalityPulseActive: false,
+    heartbeatUiStrip: false,
+    heartbeatEnabled: false,
+  };
+}
+
+export function useSSE() {
+  const [state, dispatch] = useReducer(reducer, undefined, createInitialSSEState);
 
   // Text-batching refs — stable across renders, safe to use inside EventSource callbacks.
   const queuedText = useRef("");
@@ -564,6 +782,68 @@ export function useSSE() {
   const reconnectTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const esRef = useRef<EventSource | null>(null);
   const cancelledRef = useRef(false);
+  const fetchConfigRef = useRef<() => void>(() => {});
+  /** True from `user_message` until `turn_end` / `error` / forced status unlock. */
+  const expectTurnEndRef = useRef(false);
+  const turnSentAtMsRef = useRef(0);
+  const lastHarnessActivityMsRef = useRef(0);
+  const statusIdlePollStreakRef = useRef(0);
+  const lastSeenServerTurnEndedAtRef = useRef<number | null>(null);
+
+  const markHarnessActivity = useCallback(() => {
+    lastHarnessActivityMsRef.current = Date.now();
+    statusIdlePollStreakRef.current = 0;
+  }, []);
+
+  const reconcileBusyFromStatus = useCallback(
+    async (opts?: { forceIfServerBusy?: boolean }) => {
+      const st = await fetchHarnessStatus();
+      if (!st) return;
+      if (st.busy) {
+        statusIdlePollStreakRef.current = 0;
+        if (opts?.forceIfServerBusy || expectTurnEndRef.current) {
+          dispatch({ type: "sync_server_busy", payload: { busy: true } });
+        }
+        return;
+      }
+      const endedAt = st.lastTurnEndedAt ?? null;
+      if (
+        endedAt != null &&
+        endedAt > 0 &&
+        (lastSeenServerTurnEndedAtRef.current == null || endedAt > lastSeenServerTurnEndedAtRef.current)
+      ) {
+        lastSeenServerTurnEndedAtRef.current = endedAt;
+        if (expectTurnEndRef.current) {
+          expectTurnEndRef.current = false;
+          dispatch({
+            type: "sync_server_busy",
+            payload: { busy: false, addTraceNote: true },
+          });
+        }
+        return;
+      }
+      if (!expectTurnEndRef.current) return;
+      const now = Date.now();
+      if (now - turnSentAtMsRef.current < TURN_POST_SEND_GRACE_MS) return;
+      if (now - lastHarnessActivityMsRef.current < HARNESS_ACTIVITY_IDLE_MS) return;
+      statusIdlePollStreakRef.current += 1;
+      if (statusIdlePollStreakRef.current < STATUS_IDLE_POLLS_REQUIRED) return;
+      expectTurnEndRef.current = false;
+      statusIdlePollStreakRef.current = 0;
+      dispatch({
+        type: "sync_server_busy",
+        payload: { busy: false, addTraceNote: true },
+      });
+    },
+    []
+  );
+
+  useEffect(() => {
+    if (!state.busy) return;
+    void reconcileBusyFromStatus();
+    const id = setInterval(() => void reconcileBusyFromStatus(), STATUS_POLL_INTERVAL_MS);
+    return () => clearInterval(id);
+  }, [state.busy, reconcileBusyFromStatus]);
 
   useEffect(() => {
     cancelledRef.current = false;
@@ -587,30 +867,49 @@ export function useSSE() {
       flush();
     };
 
-    // Fetch config once — fire-and-forget, never blocks the SSE connection.
-    fetch(`${SERVER}/api/config`)
-      .then((r) => r.ok ? r.json() : null)
-      .then(
-        (
-          cfg:
-            | {
-                uiVerbosity?: string;
-                personaBootstrapPending?: boolean;
-                personaBootstrapAllowSkip?: boolean;
-              }
-            | null
-        ) => {
-          if (!cancelledRef.current && cfg) {
-            dispatch({
-              type: "init_config",
-              uiVerbosity: cfg.uiVerbosity === "quiet" ? "quiet" : "normal",
-              personaBootstrapPending: cfg.personaBootstrapPending,
-              personaBootstrapAllowSkip: cfg.personaBootstrapAllowSkip,
-            });
+    const fetchAndApplyConfig = () => {
+      fetch(`${SERVER}/api/config`)
+        .then((r) => (r.ok ? r.json() : null))
+        .then(
+          (
+            cfg: {
+              uiVerbosity?: string;
+              personaBootstrapPending?: boolean;
+              personaBootstrapAllowSkip?: boolean;
+              personaUiTheme?: PersonaUiThemeV1 | null;
+              personaDisplayLabel?: string;
+              personalityHeartbeatUiStrip?: boolean;
+              personalityHeartbeatEnabled?: boolean;
+            } | null
+          ) => {
+            if (!cancelledRef.current && cfg) {
+              const personaDisplayLabel =
+                typeof cfg.personaDisplayLabel === "string" && cfg.personaDisplayLabel.trim()
+                  ? cfg.personaDisplayLabel.trim()
+                  : "LIMINAL";
+              const personaUiTheme = cfg.personaUiTheme ?? null;
+              dispatch({
+                type: "init_config",
+                uiVerbosity: cfg.uiVerbosity === "quiet" ? "quiet" : "normal",
+                personaBootstrapPending: cfg.personaBootstrapPending,
+                personaBootstrapAllowSkip: cfg.personaBootstrapAllowSkip,
+                personaUiTheme,
+                personaDisplayLabel,
+                personalityHeartbeatUiStrip: cfg.personalityHeartbeatUiStrip,
+                personalityHeartbeatEnabled: cfg.personalityHeartbeatEnabled,
+              });
+              writePersonaChromeToSession(personaUiTheme, personaDisplayLabel);
+            }
           }
-        }
-      )
-      .catch(() => { /* default normal */ });
+        )
+        .catch(() => {
+          /* keep defaults */
+        });
+    };
+
+    fetchConfigRef.current = fetchAndApplyConfig;
+
+    fetchAndApplyConfig();
 
     function connect() {
       if (cancelledRef.current) return;
@@ -629,6 +928,8 @@ export function useSSE() {
         if (reconnectTimer.current) { clearTimeout(reconnectTimer.current); reconnectTimer.current = null; }
         reconnectAttempt.current = 0;
         dispatch({ type: "connected" });
+        void reconcileBusyFromStatus({ forceIfServerBusy: true });
+        fetchAndApplyConfig();
       });
 
       // Grab the event ID from every event so we can resume after reconnect.
@@ -639,6 +940,7 @@ export function useSSE() {
       es.addEventListener("text", (e: MessageEvent) => {
         trackId(e);
         const payload = JSON.parse(e.data) as { delta: string; channel?: "user" | "trace" };
+        if ((payload.channel ?? "user") !== "trace") markHarnessActivity();
         const cleaned = sanitizeDeltaText(payload.delta);
         if ((payload.channel ?? "user") === "trace") queuedTrace.current += cleaned;
         else queuedText.current += cleaned;
@@ -662,7 +964,9 @@ export function useSSE() {
         dispatch({ type: "tool_approval", payload: JSON.parse(e.data) });
       });
       es.addEventListener("tool_result", (e: MessageEvent) => {
-        trackId(e); flushNow();
+        trackId(e);
+        markHarnessActivity();
+        flushNow();
         dispatch({ type: "tool_result", payload: JSON.parse(e.data) });
       });
       es.addEventListener("ask_user", (e: MessageEvent) => {
@@ -670,7 +974,15 @@ export function useSSE() {
         dispatch({ type: "ask_user", payload: JSON.parse(e.data) });
       });
       es.addEventListener("turn_end", (e: MessageEvent) => {
-        trackId(e); flushNow();
+        trackId(e);
+        expectTurnEndRef.current = false;
+        statusIdlePollStreakRef.current = 0;
+        void fetchHarnessStatus().then((st) => {
+          if (st?.lastTurnEndedAt != null) {
+            lastSeenServerTurnEndedAtRef.current = st.lastTurnEndedAt;
+          }
+        });
+        flushNow();
         dispatch({ type: "turn_end", payload: JSON.parse(e.data) });
       });
       es.addEventListener("subtask_spawned", (e: MessageEvent) => {
@@ -696,18 +1008,46 @@ export function useSSE() {
       es.addEventListener("persona_changed", (e: MessageEvent) => {
         trackId(e); flushNow();
         dispatch({ type: "persona_changed", payload: JSON.parse(e.data) });
+        fetchConfigRef.current();
       });
       es.addEventListener("auto_dream", (e: MessageEvent) => {
         trackId(e);
         dispatch({ type: "auto_dream", payload: JSON.parse(e.data) });
       });
+      es.addEventListener("heartbeat_scheduled", (e: MessageEvent) => {
+        trackId(e);
+        dispatch({ type: "heartbeat_scheduled", payload: JSON.parse(e.data) });
+      });
+      es.addEventListener("heartbeat_started", (e: MessageEvent) => {
+        trackId(e);
+        dispatch({ type: "heartbeat_started", payload: JSON.parse(e.data) });
+      });
+      es.addEventListener("heartbeat_completed", (e: MessageEvent) => {
+        trackId(e);
+        dispatch({ type: "heartbeat_completed", payload: JSON.parse(e.data) });
+      });
+      es.addEventListener("heartbeat_skipped", (e: MessageEvent) => {
+        trackId(e);
+        dispatch({ type: "heartbeat_skipped", payload: JSON.parse(e.data) });
+      });
       es.addEventListener("persona_bootstrap_progress", (e: MessageEvent) => {
         trackId(e);
         dispatch({ type: "persona_bootstrap_progress", payload: JSON.parse(e.data) });
       });
-      es.addEventListener("error", (e: MessageEvent) => {
-        trackId(e); flushNow();
-        dispatch({ type: "error", payload: JSON.parse((e as MessageEvent).data ?? '{"message":"Agent error"}') });
+      es.addEventListener("error", (e: Event) => {
+        const me = e as MessageEvent;
+        // Server-sent `event: error` carries JSON in `data`. Native connection errors
+        // use the same listener name but have no `data` — do not treat as harness failure.
+        if (typeof me.data !== "string" || !me.data.trim()) return;
+        trackId(me);
+        flushNow();
+        expectTurnEndRef.current = false;
+        statusIdlePollStreakRef.current = 0;
+        try {
+          dispatch({ type: "error", payload: JSON.parse(me.data) });
+        } catch {
+          dispatch({ type: "error", payload: { message: me.data } });
+        }
       });
       es.addEventListener("runtime_pref_detected", (e: MessageEvent) => {
         trackId(e);
@@ -757,6 +1097,7 @@ export function useSSE() {
       // Lands in SSE history so reconnecting clients know work is ongoing.
       es.addEventListener("harness_running", (e: MessageEvent) => {
         trackId(e);
+        markHarnessActivity();
         dispatch({ type: "harness_running", payload: JSON.parse(e.data) });
       });
 
@@ -815,6 +1156,8 @@ export function useSSE() {
         esRef.current = null;
         reconnectAttempt.current = 0; // reset backoff — user just came back
         connect();
+      } else {
+        void reconcileBusyFromStatus();
       }
     };
     document.addEventListener("visibilitychange", handleVisibilityChange);
@@ -827,13 +1170,18 @@ export function useSSE() {
       esRef.current?.close();
       esRef.current = null;
     };
-  }, []); // stable — no deps needed, all state tracked via refs
+  }, [markHarnessActivity, reconcileBusyFromStatus]);
 
   const sendMessage = useCallback(async (payload: OutgoingChatMessage): Promise<SendMessageResult> => {
     const text = payload.text.trim();
     const attachmentCount = payload.attachments?.length ?? 0;
     const renderedUserMessage =
       attachmentCount > 0 ? `${text || "(no text)"}\n[attached images: ${attachmentCount}]` : text;
+    const now = Date.now();
+    turnSentAtMsRef.current = now;
+    lastHarnessActivityMsRef.current = now;
+    expectTurnEndRef.current = true;
+    statusIdlePollStreakRef.current = 0;
     dispatch({ type: "user_message", text: renderedUserMessage });
 
     const result = await fetchWithRetry(
@@ -847,6 +1195,7 @@ export function useSSE() {
     );
 
     if (!result.ok) {
+      expectTurnEndRef.current = false;
       const message = (result.body as { error?: string }).error ?? `Send failed (${result.status})`;
       dispatch({ type: "error", payload: { message } });
       return { ok: false, error: message };
@@ -891,33 +1240,20 @@ export function useSSE() {
   }, []);
 
   const sendClearSession = useCallback(async () => {
-    const result = await fetchWithRetry(`${SERVER}/api/session/reset`, { method: "POST" }, 4);
+    const result = await fetchWithRetry(
+      `${SERVER}/api/session/reset`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ mode: "soft" }),
+      },
+      4
+    );
     if (result.ok) {
+      expectTurnEndRef.current = false;
+      statusIdlePollStreakRef.current = 0;
       dispatch({ type: "session_reset" });
-      // Refresh config so bootstrap modal state is accurate after reset.
-      fetch(`${SERVER}/api/config`)
-        .then((r) => (r.ok ? r.json() : null))
-        .then(
-          (
-            cfg:
-              | {
-                  uiVerbosity?: string;
-                  personaBootstrapPending?: boolean;
-                  personaBootstrapAllowSkip?: boolean;
-                }
-              | null
-          ) => {
-            if (cfg) {
-              dispatch({
-                type: "init_config",
-                uiVerbosity: cfg.uiVerbosity === "quiet" ? "quiet" : "normal",
-                personaBootstrapPending: cfg.personaBootstrapPending,
-                personaBootstrapAllowSkip: cfg.personaBootstrapAllowSkip,
-              });
-            }
-          }
-        )
-        .catch(() => { /* ignore */ });
+      fetchConfigRef.current();
       return;
     }
     const msg = (result.body as { error?: string }).error ?? `Session reset failed (${result.status})`;
@@ -951,6 +1287,7 @@ export function useSSE() {
         uiVerbosity: state.uiVerbosity,
         personaBootstrapPending: false,
       });
+      fetchConfigRef.current();
       return { ok: true };
     },
     [state.uiVerbosity]
