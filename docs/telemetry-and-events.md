@@ -5,6 +5,7 @@ Liminal emits structured runtime events through the harness emitter. These power
 ## Core Event Categories
 
 - conversation: `text`, `error`, `turn_end`
+- idle personality pulse (optional, `AGENT_HEARTBEAT=1`): `heartbeat_scheduled`, `heartbeat_started`, `heartbeat_completed`, `heartbeat_skipped`
 - tool lifecycle: `tool_start`, `tool_delta`, `tool_approval`, `tool_result`, `tool_timing`
 - orchestration: `subtask_spawned`, `subtask_output`, `subtask_complete`
 - context/runtime: `context_compressed`, `persona_changed`

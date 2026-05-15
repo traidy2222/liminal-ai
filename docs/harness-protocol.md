@@ -7,9 +7,9 @@ This document describes how Liminal nudges the model toward reliable, coherent m
 | Layer | Where | When |
 |--------|--------|------|
 | **Protocol core** | `PROTOCOL_CORE` + `PROTOCOL_NAMED_RULES` in `systemPrompt.ts` | Every turn, in the system prompt |
-| **Harness rule recall** | `HARNESS_RULES` / `HARNESS_RULE_RECALL_MESSAGE` in `harness_rules.ts` | Injected as a **system** message once per `send()`, at **ReAct round 2**, unless disabled |
+| **Harness rule recall** | `HARNESS_RULES` keys + `buildHarnessRuleRecallMessage()` in `harness_rules.ts` | Injected as a **system** message once per `send()`, at **ReAct round 2**, unless disabled |
 
-The harness layer repeats compact R-* IDs so chronic mistakes get extra weight alongside the full prose protocol.
+The harness layer lists **compact R-* IDs only** (sorted by `.agent_rule_stats.json` violation counts when stats exist). Full prose for each ID lives in `PROTOCOL_NAMED_RULES` (`systemPrompt.ts`) so round-2 recall does not duplicate long paragraphs.
 
 ### Disabling or tuning recall
 
@@ -18,7 +18,7 @@ The harness layer repeats compact R-* IDs so chronic mistakes get extra weight a
 
 ### Adaptive selection (implementation note)
 
-`buildAdaptiveRuleMessage(topN, hitCounts)` can prioritize high–hit-count rules. The live harness currently loads hit counts when the stats file exists; operators tuning `topN` in `agent.ts` can shrink the injected block for token savings. When stats are empty or `topN <= 0`, the full rule set is injected.
+`buildHarnessRuleRecallMessage(hitCounts)` lists every rule ID in `HARNESS_RULES`. When `.agent_rule_stats.json` has entries, IDs are sorted with highest violation counts first; canonical definitions remain under `## Named rules` in the fixed system protocol. `buildAdaptiveRuleMessage` is a deprecated alias (the `topN` parameter is ignored).
 
 ## Harness-injected rules (`HARNESS_RULES`)
 
@@ -55,10 +55,11 @@ These are the rules emitted in the round-2 recall block (authoritative text live
 | **R-SCOPE-CREEP** | Fix only what was asked; no drive-by refactors. |
 | **R-GREP-BEFORE-REFACTOR** | Rename/signature change → grep call sites first. |
 | **R-OUTPUT-TYPOGRAPHY** | Final user text: no decorative hyphen runs; intentional markdown. |
+| **R-MULTI-PART-USER** | Several questions in one message → answer or defer each part explicitly. |
 
 ## Additional named rules (protocol only)
 
-The following appear in `PROTOCOL_NAMED_RULES` in `systemPrompt.ts` but are **not** duplicated in `HARNESS_RULES` (they still shape behavior every turn):
+The following appear in `PROTOCOL_NAMED_RULES` in `systemPrompt.ts` but have **no** `HARNESS_RULES` row (they still shape behavior every turn):
 
 - **R-VERIFY-HEAVY** — Many tools or path-heavy answers → `verify_result` when available.
 - **R-DECK-PIPELINE** — Slides/decks → document engine / PPTX path.
@@ -86,6 +87,10 @@ When **`AGENT_WEB_READABILITY=1`**, `web_fetch` uses JSDOM + Mozilla Readability
 - **VirtualConsole** — Residual `jsdomError` events are swallowed for this short-lived parse.
 
 See [Configuration](./configuration.md#web-fetch-and-readability) for environment variables.
+
+## Personality heartbeat (safety and spam avoidance)
+
+The optional idle heartbeat (`AGENT_HEARTBEAT=1`) is **not** a second agent or parallel chat transcript. It runs **only** on the root harness when no `send()` is active, uses a **bounded** fast-model JSON contract, and by default executes **`remember` only** for typed consolidation. **Shell, web, and file-mutation tools are never auto-invoked** from the heartbeat path: there is no bypass of the normal approval gates for destructive work. Overt user nudges require **`AGENT_HEARTBEAT_SURFACE`** plus confidence and **per-hour** limits; otherwise suggestions remain trace-only or JSONL telemetry. See [Configuration — Personality heartbeat](./configuration.md#personality-heartbeat-idle-ambient-cognition) for all `AGENT_HEARTBEAT_*` keys.
 
 ## Related documentation
 

@@ -55,7 +55,18 @@ Symptom: too much risk tolerance in tool decisions.
 Use:
 - `AGENT_SAFETY_JUDGE=1`
 - stricter `AGENT_APPROVAL_TIMEOUT_MS`
-- stricter destructive-gate policy
+
+## Missing Approval Prompts
+
+Symptom: destructive tools run without showing approval modal/prompt.
+
+Check:
+- whether session was launched with `--yolo`
+- whether `AGENT_YOLO=1` is set in the process environment
+
+Fix:
+- unset `AGENT_YOLO`
+- restart without `--yolo` (`npm run web`, `npm run web:dev`, `npm run tui`)
 
 ## Repeated Failure Loops
 

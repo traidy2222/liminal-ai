@@ -1,5 +1,6 @@
 import { spawnSync } from "node:child_process";
 
+/** Same detection as `run-web.mjs` so `web` and `web:dev` behave consistently. */
 const bootstrapFlag =
   process.argv.includes("--bootstrap") || process.env["npm_config_bootstrap"] === "true";
 const yoloFlag = process.argv.includes("--yolo") || process.env["npm_config_yolo"] === "true";
@@ -10,19 +11,10 @@ const env = {
   ...(yoloFlag ? { AGENT_YOLO: "1" } : {}),
 };
 
-const run = (args) => {
-  const result = spawnSync("npm", args, {
-    stdio: "inherit",
-    shell: process.platform === "win32",
-    env,
-  });
-  return result.status ?? 1;
-};
+const result = spawnSync("npm", ["run", "dev", "--workspace=packages/web"], {
+  stdio: "inherit",
+  shell: process.platform === "win32",
+  env,
+});
 
-const buildExit = run(["run", "build:client", "--workspace=packages/web"]);
-if (buildExit !== 0) {
-  process.exit(buildExit);
-}
-
-const startExit = run(["run", "start", "--workspace=packages/web"]);
-process.exit(startExit);
+process.exit(result.status ?? 1);

@@ -12,8 +12,12 @@ npm run build -w packages/tools        # tools only (requires core built first)
 
 # Run the interfaces
 npm run tui                            # terminal UI (ink/React)
+npm run tui -- --bootstrap             # same + AGENT_PERSONA_BOOTSTRAP_FORCE (re-show TUI persona overlay even if first-run already completed)
+npm run tui:bootstrap                  # alias for `npm run tui -- --bootstrap`
 npm run web                            # build web client + Express (API + static UI on PORT, default :3001)
+npm run web -- --bootstrap             # same + AGENT_PERSONA_BOOTSTRAP_FORCE (re-show web persona modal even if first-run already completed)
 npm run web:dev                        # Express :3001 + Vite dev :5173 with hot reload
+npm run web:dev -- --bootstrap         # web:dev + bootstrap force (or: npm run web:dev:bootstrap)
 
 # Run the eval suite
 npm run eval -w packages/eval                        # all scenarios
@@ -34,6 +38,9 @@ npm run build -w packages/core && npx tsc --noEmit -p packages/tools/tsconfig.js
 
 # Unit tests
 npm run test --workspace=@liminal/core    # tool arg guard, safety judge, memory rank, epistemic state, runtime prefs
+
+# CI: ensure typed harness defaults contain no obvious secrets
+npm run verify-harness-defaults-no-secrets
 ```
 
 Verification: `npm run typecheck`, `npm run test --workspace=@liminal/core`, and manual TUI/web runs.
@@ -41,6 +48,8 @@ Verification: `npm run typecheck`, `npm run test --workspace=@liminal/core`, and
 ## Environment variables
 
 `.env` at the monorepo root. All `AGENT_*` vars are optional unless marked required.
+
+**Where defaults live:** non-secret product defaults are typed in `packages/core/src/harness_default_constants.ts` (not generated from `.env`). Optional overrides without editing `.env` are persisted in `.agent_runtime_prefs.json` (including `harness.env` and `provider` / `runtime` slices) and can be changed from the web **Settings** modal (`GET`/`PUT /api/settings`). **Precedence** for each managed key: real `process.env` wins, then persisted prefs, then the typed defaults module. API keys stay in `.env` only. CI sanity check: `npm run verify-harness-defaults-no-secrets`.
 
 ### Provider (required)
 
@@ -89,7 +98,6 @@ Verification: `npm run typecheck`, `npm run test --workspace=@liminal/core`, and
 | Var                               | Default  | Purpose                                                                 |
 | --------------------------------- | -------- | ----------------------------------------------------------------------- |
 | `AGENT_SAFETY_JUDGE=1`            | off      | Heuristic + LLM pre-flight to skip human approval on safe tools         |
-| `AGENT_DESTRUCTIVE_GATE=balanced` | `strict` | Allow `plan()` to satisfy danger pre-flight (strict requires `think()`) |
 | `AGENT_APPROVAL_TIMEOUT_MS`       | `120000` | Auto-reject after timeout (clamped 10s–600s)                            |
 
 
@@ -149,7 +157,12 @@ Troubleshooting quick path for inactive tools:
 | `AGENT_MEMORY_EPISODE=0`      | on (if vault set) | Disable per-turn `vault_write` episode chunks                                      |
 | `AGENT_MEMORY_AUTOLINK=1`     | off               | Suggest wikilinks after `remember` / `vault_write`                                 |
 | `AGENT_MEMORY_GRAPH=1`        | off               | Link notes in a graph + enable `memory_graph` tool                                 |
-| `AGENT_VAULT_PATH`            | `~/.agent_vault`  | Obsidian vault folder (absolute path)                                              |
+| `AGENT_VAULT_PATH`            | —                 | Explicit Obsidian vault folder (absolute path); overrides auto-detect              |
+| `AGENT_OBSIDIAN_DISCOVER`     | on                | Set `0` to skip reading Obsidian’s `obsidian.json` when `AGENT_VAULT_PATH` is unset |
+| `AGENT_OBSIDIAN_REQUIRE_DOT_OBSIDIAN` | on        | When on, discovered path must contain a `.obsidian` directory                      |
+| `AGENT_OBSIDIAN_VAULT_NAME_SUBSTRING` | —         | If set, only vault paths containing this substring (case-insensitive) are candidates |
+
+**Vault resolution order** when `AGENT_VAULT_PATH` is unset: try Obsidian’s registered vault list (`obsidian.json`) only if discovery stays on; pick a single vault when there is exactly one entry, exactly one with `open: true`, or a unique latest `ts` among entries that have timestamps; otherwise fall back to `~/.agent_vault`. With several vaults and no clear signal, set `AGENT_VAULT_PATH` or `AGENT_OBSIDIAN_VAULT_NAME_SUBSTRING`.
 
 
 ### Web & research
@@ -158,6 +171,11 @@ Troubleshooting quick path for inactive tools:
 | Var                       | Default | Purpose                                                        |
 | ------------------------- | ------- | -------------------------------------------------------------- |
 | `AGENT_WEB_READABILITY=1` | off     | Article extraction (readability) in `web_fetch`                |
+| `AGENT_WEB_FETCH_USER_AGENT` | (Chrome 136 Win) | Override primary `web_fetch` UA; Client Hints only if UA is Chrome-shaped |
+| `AGENT_WEB_FETCH_ALT_USER_AGENT` | (Firefox 136) | Bot-wall retry profile (with Referer) |
+| `AGENT_WEB_FETCH_REFERER` | `https://www.google.com/` | Referer for cross-site `web_fetch` retries |
+| `AGENT_WEB_FETCH_SEC_CH_PLATFORM` | `"Windows"` | `sec-ch-ua-platform` when hints are sent |
+| `AGENT_WEB_FETCH_403_RETRY` | on | Set `0` to skip Firefox + Chrome-cross-site retries after bot-wall 401/403 |
 | `AGENT_WEB_RESEARCH=1`    | off     | Enable `web_research` tool (multi-query + dedup + readability) |
 
 
@@ -195,10 +213,13 @@ Troubleshooting quick path for inactive tools:
 | `AGENT_SESSION_GREET`         | on      | Set `0` to disable the model’s opening greeting on new web/TUI sessions and after session reset |
 | `AGENT_PERSONA_BOOTSTRAP` | on | Set `0` to skip first-run model prompt that asks how the assistant should sound |
 | `AGENT_PERSONA_BOOTSTRAP_ALLOW_SKIP` | on | Set `0` to require persona bootstrap input (disables `skip` / `/skip`) |
+| `AGENT_PERSONA_BOOTSTRAP_FORCE` | off | Web/TUI: set `1` or use `npm run web -- --bootstrap` / `npm run tui -- --bootstrap` to show the persona bootstrap UI even when `bootstrapCompleted` is already true; normal first launch does not need it (web server waits for session init before `listen`) |
 | `AGENT_WEB_SKIP_CLIENT_BUILD` | `0`     | Set `1` to skip auto `vite build` when `client/dist` is missing (API-only placeholder at `/`)   |
 | `AGENT_TUI_MEMORY_BULLETS`    | —       | Pipe-separated memory notes shown in TUI memory strip                                           |
 | `AGENT_LOCATION`              | —       | Physical location string injected into world context                                            |
 
+
+**Persona UI theme (no env):** After custom persona generation completes, `persona/active/ui_theme.json` stores a validated, presentation-only `PersonaUiThemeV1` (hex palette, short `displayLabel`, `motion` preset). Web exposes it on `GET /api/config` as `personaUiTheme` and `personaDisplayLabel`; the TUI reads the same file at startup (`PersonaChromeContext`). This JSON is not executable CSS or script — only whitelisted fields mapped by the clients. See `docs/persona-system.md` (UI theme section) and `packages/core/src/persona_ui_theme.ts`.
 
 ---
 
@@ -252,15 +273,17 @@ packages/tui    packages/web    packages/eval   — run directly via tsx, never 
 | `session_event_log.ts` | Session JSONL under `.agent_sessions/`. `attachSessionEventLog()`, `maybeAttachSessionEventLog()`. Rollup mode (`text_rollup` per turn), env: `AGENT_SESSION_JSONL_TEXT_LOG`, `AGENT_SESSION_JSONL_TRACE`, `AGENT_SESSION_JSONL_MAX_ROLLUP_CHARS`. |
 | `image_attachments.ts` | Image validation and normalization. Defaults: 5 files, 20 MB total, 4 MB each, JPEG/PNG/WebP/GIF. `validateImageAttachments()`, `buildMessageWithImageAttachments()`.                                                                                                                                                                            |
 | `input_semantics.ts`   | Keyboard shortcut + input context resolution. `resolveInputShortcut()`.                                                                                                                                                                                                                                                                          |
-| `vault_path.ts`        | Obsidian vault path resolution. `getAgentVaultRoot()`.                                                                                                                                                                                                                                                                                           |
+| `vault_path.ts`        | Obsidian vault path resolution. `getAgentVaultRoot()` — explicit `AGENT_VAULT_PATH`, optional Obsidian `obsidian.json` discovery, then `~/.agent_vault`.                                                                                                                                                                                          |
+| `obsidian_vault_discovery.ts` | Parse global `obsidian.json`, pick an unambiguous registered vault (`pickObsidianVaultFromParsedConfig`, `discoverObsidianVaultPathFromAppData`).                                                                                                                                                                                         |
 | `workspace_root.ts`    | Monorepo root detection via `import.meta.url` or `AGENT_WORKSPACE_ROOT`. `resolveWorkspaceRoot()`.                                                                                                                                                                                                                                               |
 | `provider_config.ts`   | OpenRouter / OpenAI / Anthropic / xAI API key resolution. `resolveProviderConfig()`, `resolveVisionProviderConfig()`.                                                                                                                                                                                                                            |
 | `runtime_prefs.ts`     | Persistent user preferences in `.agent_runtime_prefs.json`. `loadRuntimePreferences()`, `saveRuntimePreferences()`. Non-risky changes auto-applied; risky require confirmation.                                                                                                                                                                  |
+| `persona_ui_theme.ts`  | Versioned `PersonaUiThemeV1`, `validateAndNormalizePersonaUiTheme` (contrast vs dark base), `mapPersonaUiThemeToInk`, motion timing helpers for web/TUI.                                                                                                                                                                                          |
 | `json_stable.ts`       | Stable JSON key ordering for cache/lock keys. `stableArgsJsonKey()`.                                                                                                                                                                                                                                                                             |
 | `index.ts`             | Barrel export for all public APIs.                                                                                                                                                                                                                                                                                                               |
 
 
-**Test files** (in `packages/core/src/`): `epistemic_state.test.ts`, `memory_rank.test.ts`, `memory_retrieval_eval.test.ts`, `runtime_prefs.test.ts`, `safety_judge.test.ts`, `tool_arg_guard.test.ts`.
+**Test files** (in `packages/core/src/`): `epistemic_state.test.ts`, `memory_rank.test.ts`, `memory_retrieval_eval.test.ts`, `runtime_prefs.test.ts`, `safety_judge.test.ts`, `tool_arg_guard.test.ts`, `persona_ui_theme.test.ts`.
 
 ---
 
@@ -291,8 +314,8 @@ packages/tui    packages/web    packages/eval   — run directly via tsx, never 
 | `web_search.ts`      | `web_search`                                                              | Keyword search (free tier); cacheable.                                                                                              |
 | `web_research.ts`    | `web_research`                                                            | Orchestrated research: multi-query, dedup, readability. Gate: `AGENT_WEB_RESEARCH=1`.                                               |
 | `ask_user.ts`        | `ask_user`                                                                | Blocks until human response via approval flow.                                                                                      |
-| `think.ts`           | `think`                                                                   | Structured reasoning trace; satisfies danger pre-flight gate.                                                                       |
-| `plan.ts`            | `plan`                                                                    | Ordered step list with optional execute indices. Satisfies danger gate when `AGENT_DESTRUCTIVE_GATE=balanced`.                      |
+| `think.ts`           | `think`                                                                   | Structured reasoning trace.                                                                                                       |
+| `plan.ts`            | `plan`                                                                    | Ordered step list with optional execute indices.                                                                                  |
 | `weather_lookup.ts`  | `weather_lookup`                                                          | Weather by lat/lon or city (free tier).                                                                                             |
 | `markets_quote.ts`   | `markets_quote`                                                           | Best-effort near-real-time quotes for equities, ETFs, FX, commodities, crypto. Returns `as_of`, source, delay, confidence metadata. |
 
@@ -474,7 +497,7 @@ CLI: `npm run eval -w packages/eval`. Optional JSON sink: `AGENT_EVAL_JSON_SINK=
 
 **Harness-scoped tools.** `ORCHESTRATION_TOOL_NAMES` in `agent.ts` lists all tools excluded from the parent→child registry copy in `forkChild()`. Any new tool that closes over a `harness` or `ContextManager` reference must be added to this set and wired in `onChildCreated` inside `orchestration.ts`.
 
-**Danger pre-flight.** Tools with `dangerLevel: "destructive"` (`run_shell`, `run_background`) are blocked by `dispatcher.ts` if `think` is not present in the same round's `batchToolNames`. With `AGENT_DESTRUCTIVE_GATE=balanced`, `plan()` also satisfies the gate. Enforced at dispatch time, not in the system prompt.
+**Destructive tools.** Tools with `dangerLevel: "destructive"` (`run_shell`, `run_background`) use the normal approval path when `requiresApproval` is true. There is no harness requirement to call `think()` or `plan()` first.
 
 **Resource locks.** Tools declare `resourceLocks: (args) => string[]`. Lock IDs use prefixes: `file:read:`, `file:write:`, `shell:`. The `ResourceLockManager` always acquires in alphabetical order to prevent deadlock.
 

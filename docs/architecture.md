@@ -46,12 +46,11 @@ Liminal does not use a hard wall-clock kill for root `send()`; it relies on boun
 2. schema validation
 3. argument guardrails
 4. policy gates (pre-dispatch)
-5. destructive preflight
-6. resource lock acquisition
-7. approval/safety-judge path
-8. tool execution
-9. telemetry emission
-10. lock release
+5. resource lock acquisition
+6. approval/safety-judge path
+7. tool execution
+8. telemetry emission
+9. lock release
 
 This contract ensures identical safety semantics regardless of tool implementation details.
 

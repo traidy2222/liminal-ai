@@ -303,6 +303,11 @@ npm run test
 npm run tui
 npm run web
 npm run web:dev
+
+# session-only YOLO (auto-approve destructive tools; high risk)
+npm run tui -- --yolo
+npm run web -- --yolo
+npm run web:dev -- --yolo
 ```
 
 ### Workspace-specific
@@ -327,7 +332,6 @@ Use `.env.example` for the full set of options.
   - `AGENT_MODEL`
 - **Safety-first**
   - `AGENT_SAFETY_JUDGE=1`
-  - `AGENT_DESTRUCTIVE_GATE=balanced`
 - **Memory-heavy**
   - `AGENT_EMBED_MODEL=<embedding-model>`
   - `AGENT_MEMORY_AUTO_EXTRACT=1`
@@ -429,7 +433,8 @@ Liminal is production-oriented but should be adopted with explicit rollout contr
 ### Approval and safety controls
 
 - Enable `AGENT_SAFETY_JUDGE=1` for stricter automatic risk classification.
-- Keep destructive actions gated (`AGENT_DESTRUCTIVE_GATE` and approvals) in high-risk environments.
+- Use human approval for destructive tools when your workflow requires explicit confirmation.
+- `--yolo` / `AGENT_YOLO=1` enables session-only auto-approval for destructive approval-gated tools. Use only in trusted environments.
 
 ## Known Limits
 
