@@ -4,9 +4,9 @@
   "type": "module",
   "scripts": {
     "start": "node --import tsx/esm server/index.ts",
-    "dev": "concurrently \"npm run dev:server\" \"npm run dev:client\"",
+    "dev": "concurrently --kill-others-on-fail --names server,client \"npm run dev:server\" \"node scripts/wait-for-dev-api.mjs && npm run dev:client\"",
     "dev:server": "node --import tsx/esm --watch server/index.ts",
-    "dev:client": "vite client/ --port 5173",
+    "dev:client": "vite client/ --port 5173 --strictPort",
     "build:client": "vite build client/",
     "typecheck": "tsc --noEmit"
   },

@@ -1,12 +1,20 @@
 import React, { useState, useRef, useEffect, useCallback, useMemo, memo } from "react";
-import { useSSE, type MessageEntry, type AutoDreamState } from "./useSSE.js";
+import { useSSE, type MessageEntry, type AutoDreamState, type PersonalityPulseRow, WEB_SERVER_BASE } from "./useSSE.js";
+import { MEMORY_SYNC_LABEL, presentAutoDream } from "./autoDreamPresent.js";
+import { applyPersonaDocumentTheme } from "./applyPersonaDocumentTheme.js";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import rehypeRaw from "rehype-raw";
 import { toPng } from "html-to-image";
 import { Prism as SyntaxHighlighter } from "react-syntax-highlighter";
 import { vscDarkPlus } from "react-syntax-highlighter/dist/esm/styles/prism";
+import { SettingsModal } from "./settings/SettingsModal.js";
 import { resolveInputShortcut } from "./inputSemantics.js";
+import {
+  PERSONA_QUICK_PRESETS,
+  personaBootstrapStageHint,
+} from "@liminal/core/persona-bootstrap-ui";
+import type { HarnessSettingsApiField } from "@liminal/core";
 import {
   DEFAULT_IMAGE_ATTACHMENT_LIMITS,
   normalizeImageAttachmentName,
@@ -15,29 +23,25 @@ import {
   type ImageAttachment,
 } from "./imageAttachments.js";
 
-// ── JARVIS palette ────────────────────────────────────────────────────────────
+// ── HUD palette (CSS variables; defaults from applyPersonaDocumentTheme + fallbacks) ──
 
-const CYAN    = "#00d4ff";
-const AMBER   = "#ffb347";
-const MAGENTA = "#ff4488";
-const GREEN   = "#00ff88";
-const RED_ERR = "#ff2244";
-const BG      = "#020408";
+const CYAN = "var(--lim-accent, #00d4ff)";
+const AMBER = "var(--lim-warn, #ffb347)";
+const MAGENTA = "var(--lim-secondary, #ff4488)";
+const GREEN = "var(--lim-success, #00ff88)";
+const RED_ERR = "var(--lim-danger, #ff2244)";
+const BG = "var(--lim-bg, #020408)";
 
 // ── CSS animations (injected via <style> tag) ─────────────────────────────────
 
 const CSS_ANIMATIONS = `
 @keyframes blink      { 0%,100%{opacity:1} 50%{opacity:0} }
-@keyframes orb-idle   { 0%,100%{opacity:.38;box-shadow:0 0 8px rgba(0,212,255,.28)} 50%{opacity:.72;box-shadow:0 0 20px rgba(0,212,255,.6)} }
-@keyframes orb-think  { 0%,100%{box-shadow:0 0 8px rgba(255,179,71,.4)} 50%{box-shadow:0 0 24px rgba(255,179,71,.9),0 0 44px rgba(255,179,71,.3)} }
-@keyframes orb-spin   { to{transform:rotate(360deg)} }
-@keyframes orb-approv { 0%,100%{box-shadow:0 0 10px rgba(255,68,136,.5)} 50%{box-shadow:0 0 28px rgba(255,68,136,1),0 0 54px rgba(255,68,136,.4)} }
 @keyframes data-pulse { 0%,100%{opacity:.55} 50%{opacity:1} }
 @keyframes hud-in     { from{opacity:0;transform:translateY(4px)} to{opacity:1;transform:translateY(0)} }
-*{box-sizing:border-box;scrollbar-width:thin;scrollbar-color:rgba(0,212,255,.15) transparent}
+*{box-sizing:border-box;scrollbar-width:thin;scrollbar-color:rgba(var(--lim-accent-rgb),.15) transparent}
 ::-webkit-scrollbar{width:4px;height:4px}
 ::-webkit-scrollbar-track{background:transparent}
-::-webkit-scrollbar-thumb{background:rgba(0,212,255,.18);border-radius:2px}
+::-webkit-scrollbar-thumb{background:rgba(var(--lim-accent-rgb),.18);border-radius:2px}
 `;
 
 // ── Type aliases (defined early — used by new panel components) ───────────────
@@ -54,7 +58,7 @@ type ToolCategory =
 function getToolCategory(name: string): ToolCategory {
   if (/^(run_shell|run_background|kill_process|list_processes|read_process_output)$/.test(name)) return "shell";
   if (/^(read_file|write_file|list_dir|apply_diff|patch_file|edit_file|write_file_if_changed|search_replace_file|batch_replace|grep_file|move_file|copy_file|copy_tree|mkdir_p|edit_preview|multi_file_apply|refactor_plan_apply|path_guard|read_file_chunked|read_file_with_imports|file_metadata|workspace_snapshot)$/.test(name)) return "file";
-  if (/^(web_fetch|web_search|web_research|weather_lookup)$/.test(name)) return "web";
+  if (/^(web_fetch|web_search|weather_lookup)$/.test(name)) return "web";
   if (/^(remember|recall|recall_type|recall_relevant|search_memory|forget|forget_type|memory_stats|memory_consolidate|memory_query|memory_graph)$/.test(name)) return "memory";
   if (name.startsWith("vault_")) return "vault";
   if (/^(ast_grep|symbol_index|find_references|run_tests|run_lint|execute_code|repo_map)$/.test(name)) return "code";
@@ -106,23 +110,6 @@ function formatSessionTime(sec: number): string {
   const s = sec % 60;
   if (m < 60) return `${m}m ${s < 10 ? "0" : ""}${s}s`;
   return `${Math.floor(m / 60)}h ${m % 60}m`;
-}
-
-function autoDreamCompactLabel(d: AutoDreamState): string {
-  if (d.stage === "started" || d.stage === "progress") {
-    const step = d.progress?.step ? ` · ${d.progress.step}` : "";
-    return `Dreaming…${step}`;
-  }
-  if (d.stage === "gate" && d.gate && !d.gate.passed) {
-    return `Dream waiting: ${d.gate.name}`;
-  }
-  if (d.stage === "completed") {
-    const upserts = d.result?.upserts ?? 0;
-    const deletes = d.result?.deletes ?? 0;
-    return `Dream done: +${upserts} / -${deletes}`;
-  }
-  if (d.stage === "failed") return "Dream failed";
-  return "Dream idle";
 }
 
 function parsePrimaryArg(argsJson: string): string {
@@ -250,9 +237,9 @@ function HudPanel({ title, children, style }: { title?: string; children: React.
     <div style={{
       position: "relative",
       background: "rgba(1,6,16,0.96)",
-      border: "1px solid rgba(0,212,255,0.12)",
+      border: "1px solid rgba(var(--lim-accent-rgb),0.12)",
       borderRadius: 3,
-      boxShadow: "0 0 20px rgba(0,212,255,0.03), inset 0 0 30px rgba(0,0,0,0.4)",
+      boxShadow: "0 0 20px rgba(var(--lim-accent-rgb),0.03), inset 0 0 30px rgba(0,0,0,0.4)",
       animation: "hud-in 0.2s ease",
       ...style,
     }}>
@@ -263,11 +250,11 @@ function HudPanel({ title, children, style }: { title?: string; children: React.
       {title && (
         <div style={{
           padding: "4px 10px 3px",
-          borderBottom: "1px solid rgba(0,212,255,0.07)",
+          borderBottom: "1px solid rgba(var(--lim-accent-rgb),0.07)",
           fontSize: 8,
           fontWeight: 700,
           letterSpacing: "0.18em",
-          color: "rgba(0,212,255,0.4)",
+          color: "rgba(var(--lim-accent-rgb),0.4)",
           fontFamily: "monospace",
         }}>
           {title}
@@ -280,18 +267,18 @@ function HudPanel({ title, children, style }: { title?: string; children: React.
 
 // ── Status orb ────────────────────────────────────────────────────────────────
 
-type OrbState = "idle" | "thinking" | "running" | "approval" | "error" | "disconnected";
+type OrbState = "idle" | "thinking" | "running" | "approval" | "error" | "disconnected" | "pulse";
 
 function StatusOrb({ orbState }: { orbState: OrbState }) {
   if (orbState === "running") {
     return (
       <div style={{ position: "relative", width: 52, height: 52, flexShrink: 0 }}>
-        <div style={{ position: "absolute", inset: 0, borderRadius: "50%", border: "2px solid rgba(0,212,255,0.1)" }} />
+        <div style={{ position: "absolute", inset: 0, borderRadius: "50%", border: "2px solid rgba(var(--lim-accent-rgb),0.1)" }} />
         <div style={{
           position: "absolute", inset: 0, borderRadius: "50%",
           border: "2px solid transparent",
           borderTopColor: CYAN,
-          borderRightColor: "rgba(0,212,255,0.3)",
+          borderRightColor: "rgba(var(--lim-accent-rgb),0.3)",
           animation: "orb-spin 0.65s linear infinite",
         }} />
         <div style={{
@@ -299,19 +286,20 @@ function StatusOrb({ orbState }: { orbState: OrbState }) {
           transform: "translate(-50%,-50%)",
           width: 10, height: 10, borderRadius: "50%",
           background: CYAN,
-          boxShadow: `0 0 12px ${CYAN}, 0 0 24px rgba(0,212,255,.4)`,
+          boxShadow: `0 0 12px ${CYAN}, 0 0 24px rgba(var(--lim-accent-rgb),.4)`,
         }} />
       </div>
     );
   }
 
   const cfgs: Record<OrbState, { border: string; bg: string; dot: string; anim: string }> = {
-    idle:         { border: `2px solid rgba(0,212,255,.38)`,   bg: "transparent",           dot: CYAN,    anim: "orb-idle 3.5s ease-in-out infinite"   },
-    thinking:     { border: `2px solid ${AMBER}`,              bg: `rgba(255,179,71,.07)`,  dot: AMBER,   anim: "orb-think 1.8s ease-in-out infinite"  },
-    running:      { border: `2px solid ${CYAN}`,               bg: `rgba(0,212,255,.06)`,   dot: CYAN,    anim: "orb-spin 0.65s linear infinite"        },
-    approval:     { border: `2px solid ${MAGENTA}`,            bg: `rgba(255,68,136,.09)`,  dot: MAGENTA, anim: "orb-approv 0.7s ease-in-out infinite" },
-    error:        { border: `2px solid ${RED_ERR}`,            bg: `rgba(255,34,68,.09)`,   dot: RED_ERR, anim: "none"                                  },
+    idle:         { border: `2px solid rgba(var(--lim-accent-rgb),.38)`,   bg: "transparent",           dot: CYAN,    anim: "orb-idle 3.5s ease-in-out infinite"   },
+    thinking:     { border: `2px solid ${AMBER}`,              bg: `rgba(var(--lim-warn-rgb),.07)`,  dot: AMBER,   anim: "orb-think 1.8s ease-in-out infinite"  },
+    running:      { border: `2px solid ${CYAN}`,               bg: `rgba(var(--lim-accent-rgb),.06)`,   dot: CYAN,    anim: "orb-spin 0.65s linear infinite"        },
+    approval:     { border: `2px solid ${MAGENTA}`,            bg: `rgba(var(--lim-secondary-rgb),.09)`,  dot: MAGENTA, anim: "orb-approv 0.7s ease-in-out infinite" },
+    error:        { border: `2px solid ${RED_ERR}`,            bg: `rgba(var(--lim-danger-rgb),.09)`,   dot: RED_ERR, anim: "none"                                  },
     disconnected: { border: "2px solid rgba(80,80,90,.35)",    bg: "transparent",           dot: "#556",  anim: "none"                                  },
+    pulse:        { border: `2px solid rgba(var(--lim-secondary-rgb),.45)`, bg: `rgba(var(--lim-secondary-rgb),.07)`, dot: MAGENTA, anim: "data-pulse 1.1s ease-in-out infinite" },
   };
   const cfg = cfgs[orbState];
 
@@ -339,7 +327,7 @@ function ContextArc({ pct, masked }: { pct: number; masked?: boolean }) {
   const color = pct >= 80 ? RED_ERR : pct >= 60 ? AMBER : CYAN;
   return (
     <svg width="70" height="70" viewBox="0 0 70 70">
-      <circle cx="35" cy="35" r={r} fill="none" stroke="rgba(0,212,255,0.07)" strokeWidth="4" />
+      <circle cx="35" cy="35" r={r} fill="none" stroke="rgba(var(--lim-accent-rgb),0.07)" strokeWidth="4" />
       <circle
         cx="35" cy="35" r={r} fill="none"
         stroke={color} strokeWidth="4"
@@ -349,7 +337,7 @@ function ContextArc({ pct, masked }: { pct: number; masked?: boolean }) {
         style={{ filter: `drop-shadow(0 0 4px ${color}88)`, transition: "stroke-dasharray 0.5s ease" }}
       />
       <text x="35" y="31" textAnchor="middle" fill={color} fontSize="13" fontWeight="700" fontFamily="monospace">{pct}%</text>
-      <text x="35" y="44" textAnchor="middle" fill="rgba(0,212,255,0.32)" fontSize="7" fontFamily="monospace" letterSpacing="2">{masked ? "COMP" : "CTX"}</text>
+      <text x="35" y="44" textAnchor="middle" fill="rgba(var(--lim-accent-rgb),0.32)" fontSize="7" fontFamily="monospace" letterSpacing="2">{masked ? "COMP" : "CTX"}</text>
     </svg>
   );
 }
@@ -358,19 +346,31 @@ function ContextArc({ pct, masked }: { pct: number; masked?: boolean }) {
 
 function SystemsPanel({
   orbState, pct, masked, connected, sessionSeconds,
-  toolCount, msgCount, subtasks, personaName, autoDream,
+  toolCount, msgCount, subtasks, personaName, autoDream, uiVerbosity,
 }: {
   orbState: OrbState; pct: number; masked?: boolean; connected: boolean;
   sessionSeconds: number; toolCount: number; msgCount: number;
   subtasks: SubtaskEntry[]; personaName: string; autoDream: AutoDreamState;
+  uiVerbosity: "normal" | "quiet";
 }) {
+  const memorySync = useMemo(
+    () => presentAutoDream(autoDream, { verbosity: uiVerbosity }),
+    [autoDream, uiVerbosity]
+  );
+  const syncDotColor = (i: number): string => {
+    const idx = memorySync.progressStepIndex;
+    if (idx === undefined) return "rgba(var(--lim-accent-rgb),0.15)";
+    return i <= idx ? CYAN : "rgba(var(--lim-accent-rgb),0.12)";
+  };
   const orbLabel: Record<OrbState, string> = {
     idle: "STANDBY", thinking: "PROCESSING", running: "EXECUTING",
     approval: "AWAITING AUTH", error: "FAULT", disconnected: "OFFLINE",
+    pulse: "PULSE",
   };
   const orbColor: Record<OrbState, string> = {
     idle: CYAN, thinking: AMBER, running: CYAN,
     approval: MAGENTA, error: RED_ERR, disconnected: "#556",
+    pulse: MAGENTA,
   };
   const maxDepth = subtasks.length > 0 ? Math.max(...subtasks.map(s => s.depth)) : 0;
 
@@ -380,7 +380,7 @@ function SystemsPanel({
       display: "flex", flexDirection: "column", gap: 7,
       padding: "8px 8px 8px 9px",
       overflowY: "auto", flexShrink: 0,
-      borderRight: "1px solid rgba(0,212,255,0.055)",
+      borderRight: "1px solid rgba(var(--lim-accent-rgb),0.055)",
     }}>
 
       {/* Core status */}
@@ -395,7 +395,7 @@ function SystemsPanel({
             {orbLabel[orbState]}
           </div>
           {personaName !== "Liminal" && (
-            <div style={{ fontSize: 9, color: "rgba(255,68,136,0.6)", fontFamily: "monospace", letterSpacing: "0.08em" }}>
+            <div style={{ fontSize: 9, color: "rgba(var(--lim-secondary-rgb),0.6)", fontFamily: "monospace", letterSpacing: "0.08em" }}>
               [{personaName}]
             </div>
           )}
@@ -422,7 +422,7 @@ function SystemsPanel({
             ["SIGNAL",   connected ? "ONLINE" : "OFFLINE"],
           ] as [string, string][]).map(([label, value]) => (
             <div key={label} style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-              <span style={{ fontSize: 8, color: "rgba(0,212,255,0.35)", fontFamily: "monospace", letterSpacing: "0.1em" }}>
+              <span style={{ fontSize: 8, color: "rgba(var(--lim-accent-rgb),0.35)", fontFamily: "monospace", letterSpacing: "0.1em" }}>
                 {label}
               </span>
               <span style={{
@@ -430,7 +430,12 @@ function SystemsPanel({
                 color: label === "SIGNAL"
                   ? (connected ? GREEN : RED_ERR)
                   : CYAN,
-                textShadow: `0 0 6px ${label === "SIGNAL" ? (connected ? GREEN : RED_ERR) : CYAN}44`,
+                textShadow:
+                  label === "SIGNAL"
+                    ? connected
+                      ? "0 0 6px rgba(var(--lim-success-rgb),0.35)"
+                      : "0 0 6px rgba(var(--lim-danger-rgb),0.35)"
+                    : "0 0 6px rgba(var(--lim-accent-rgb),0.27)",
               }}>
                 {value}
               </span>
@@ -455,7 +460,7 @@ function SystemsPanel({
                        : "#445";
               return (
                 <div key={s.taskId} style={{ display: "flex", alignItems: "flex-start", gap: 3, paddingLeft: Math.max(4, s.depth * 12) }}>
-                  <span style={{ color: "rgba(0,212,255,0.18)", fontSize: 9, fontFamily: "monospace", marginTop: 1, flexShrink: 0 }}>└─</span>
+                  <span style={{ color: "rgba(var(--lim-accent-rgb),0.18)", fontSize: 9, fontFamily: "monospace", marginTop: 1, flexShrink: 0 }}>└─</span>
                   <div style={{ display: "flex", alignItems: "center", gap: 4, minWidth: 0 }}>
                     <div style={{
                       width: 5, height: 5, borderRadius: "50%", flexShrink: 0,
@@ -475,7 +480,7 @@ function SystemsPanel({
               );
             })}
             {subtasks.length > 10 && (
-              <div style={{ fontSize: 8, color: "rgba(0,212,255,0.25)", fontFamily: "monospace", paddingLeft: 14 }}>
+              <div style={{ fontSize: 8, color: "rgba(var(--lim-accent-rgb),0.25)", fontFamily: "monospace", paddingLeft: 14 }}>
                 +{subtasks.length - 10} more
           </div>
         )}
@@ -483,39 +488,89 @@ function SystemsPanel({
         </HudPanel>
       )}
 
-      <HudPanel title="AUTO-DREAM">
-        <div style={{ padding: "6px 10px 8px", display: "flex", flexDirection: "column", gap: 5 }}>
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-            <span style={{ fontSize: 8, color: "rgba(0,212,255,0.35)", fontFamily: "monospace", letterSpacing: "0.1em" }}>
-              STATE
-            </span>
-            <span style={{ fontSize: 10, color: autoDream.stage === "failed" ? RED_ERR : autoDream.stage === "completed" ? GREEN : CYAN, fontFamily: "monospace", fontWeight: 700 }}>
-              {autoDream.stage.toUpperCase()}
-            </span>
+      <HudPanel title={MEMORY_SYNC_LABEL}>
+        <div style={{ padding: "6px 10px 8px", display: "flex", flexDirection: "column", gap: 6 }}>
+          <div
+            style={{
+              fontSize: 11,
+              fontWeight: 600,
+              color:
+                memorySync.status === "failed"
+                  ? RED_ERR
+                  : memorySync.status === "done"
+                    ? GREEN
+                    : memorySync.status === "off"
+                      ? "#667788"
+                      : "#99aabb",
+              lineHeight: 1.35,
+            }}
+          >
+            {memorySync.title}
           </div>
-          {autoDream.gate && (
-            <div style={{ fontSize: 9, color: "rgba(0,212,255,0.6)", fontFamily: "monospace" }}>
-              gate: {autoDream.gate.name} · {autoDream.gate.passed ? "pass" : "wait"}
-              {autoDream.gate.reason ? ` · ${autoDream.gate.reason}` : ""}
-          </div>
-        )}
-          {autoDream.progress && (
-            <div style={{ fontSize: 9, color: "rgba(0,212,255,0.6)", fontFamily: "monospace" }}>
-              {autoDream.progress.step}
-              {typeof autoDream.progress.sessionsFound === "number" ? ` · sessions=${autoDream.progress.sessionsFound}` : ""}
-              {typeof autoDream.progress.upserts === "number" ? ` · upserts=${autoDream.progress.upserts}` : ""}
-              {typeof autoDream.progress.deletes === "number" ? ` · deletes=${autoDream.progress.deletes}` : ""}
-          </div>
-        )}
-          {autoDream.result && (
-            <div style={{ fontSize: 9, color: "rgba(0,255,136,0.6)", fontFamily: "monospace" }}>
-              done in {formatElapsed(autoDream.result.durationMs)} · +{autoDream.result.upserts} / -{autoDream.result.deletes}
-      </div>
-          )}
-          {autoDream.error && (
-            <div style={{ fontSize: 9, color: "rgba(255,34,68,0.75)", fontFamily: "monospace" }}>
-              {autoDream.error.slice(0, 120)}
+          {memorySync.subtitle && uiVerbosity !== "quiet" && (
+            <div style={{ fontSize: 9, color: "rgba(var(--lim-accent-rgb),0.45)", lineHeight: 1.4 }}>
+              {memorySync.subtitle}
             </div>
+          )}
+          {(memorySync.status === "running" || memorySync.progressIndeterminate) && memorySync.status !== "off" && (
+            <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>
+              {memorySync.progressStepIndex !== undefined ? (
+                <div style={{ display: "flex", gap: 4, alignItems: "center", paddingTop: 2 }}>
+                  {[0, 1, 2, 3, 4].map((i) => (
+                    <div
+                      key={i}
+                      style={{
+                        width: 6,
+                        height: 6,
+                        borderRadius: "50%",
+                        background: syncDotColor(i),
+                        boxShadow: i <= (memorySync.progressStepIndex ?? -1) ? "0 0 6px rgba(var(--lim-accent-rgb),0.45)" : "none",
+                      }}
+                    />
+                  ))}
+                </div>
+              ) : (
+                <div
+                  style={{
+                    height: 3,
+                    borderRadius: 2,
+                    background: "rgba(var(--lim-accent-rgb),0.2)",
+                    opacity: 0.85,
+                    animation: "data-pulse 1.2s ease-in-out infinite",
+                  }}
+                />
+              )}
+            </div>
+          )}
+          {memorySync.status === "done" && autoDream.result != null && (
+            <div style={{ fontSize: 9, color: "rgba(var(--lim-success-rgb),0.45)" }}>
+              Completed in {formatElapsed(autoDream.result.durationMs)}
+            </div>
+          )}
+          {uiVerbosity !== "quiet" && (
+            <details style={{ marginTop: 2 }}>
+              <summary style={{ fontSize: 9, color: "rgba(var(--lim-accent-rgb),0.35)", cursor: "pointer", userSelect: "none" }}>
+                Technical details
+              </summary>
+              <pre
+                style={{
+                  marginTop: 6,
+                  fontSize: 9,
+                  color: "#445566",
+                  background: "rgba(0,4,10,0.85)",
+                  border: "1px solid rgba(var(--lim-accent-rgb),0.06)",
+                  borderRadius: 3,
+                  padding: 8,
+                  whiteSpace: "pre-wrap",
+                  wordBreak: "break-word",
+                  maxHeight: 140,
+                  overflowY: "auto",
+                  fontFamily: "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace",
+                }}
+              >
+                {memorySync.technical}
+              </pre>
+            </details>
           )}
         </div>
       </HudPanel>
@@ -525,41 +580,50 @@ function SystemsPanel({
 
 // ── Activity stream (right column) ────────────────────────────────────────────
 
-const ActivityStream = memo(function ActivityStream({ toolCalls, toolResultMap }: {
+const ActivityStream = memo(function ActivityStream({
+  toolCalls,
+  toolResultMap,
+  pulseActive,
+  pulseRows,
+}: {
   toolCalls: ToolCallEntry[];
   toolResultMap: Map<string, { output: string; ok: boolean }>;
+  pulseActive: boolean;
+  pulseRows: PersonalityPulseRow[];
 }) {
-  const hasRunning = toolCalls.some(t => t.status === "running" || t.status === "streaming");
+  const hasRunning =
+    toolCalls.some((t) => t.status === "running" || t.status === "streaming") || pulseActive;
   const [, setTick] = useState(0);
   useEffect(() => {
     if (!hasRunning) return;
-    const id = window.setInterval(() => setTick(n => n + 1), 400);
+    const id = window.setInterval(() => setTick((n) => n + 1), 400);
     return () => window.clearInterval(id);
   }, [hasRunning]);
 
   const MAX_BAR_MS = 20000;
   const recent = [...toolCalls].reverse().slice(0, 40);
+  const pulseRecent = [...pulseRows].reverse().slice(0, 14);
 
   return (
     <div style={{
       width: 252,
       display: "flex", flexDirection: "column", flexShrink: 0,
-      borderLeft: "1px solid rgba(0,212,255,0.055)",
+      borderLeft: "1px solid rgba(var(--lim-accent-rgb),0.055)",
     }}>
       {/* Header */}
       <div style={{
         padding: "7px 10px 6px",
-        borderBottom: "1px solid rgba(0,212,255,0.07)",
+        borderBottom: "1px solid rgba(var(--lim-accent-rgb),0.07)",
         display: "flex", justifyContent: "space-between", alignItems: "center",
         flexShrink: 0,
       }}>
-        <span style={{ fontSize: 8, fontWeight: 700, letterSpacing: "0.18em", color: "rgba(0,212,255,0.38)", fontFamily: "monospace" }}>
+        <span style={{ fontSize: 8, fontWeight: 700, letterSpacing: "0.18em", color: "rgba(var(--lim-accent-rgb),0.38)", fontFamily: "monospace" }}>
           ACTIVITY STREAM
         </span>
         {hasRunning && (
           <div style={{
             width: 5, height: 5, borderRadius: "50%",
-            background: CYAN, boxShadow: `0 0 6px ${CYAN}`,
+            background: CYAN, boxShadow: "0 0 6px rgba(var(--lim-accent-rgb),0.55)",
             animation: "data-pulse 0.75s ease-in-out infinite",
           }} />
         )}
@@ -567,8 +631,88 @@ const ActivityStream = memo(function ActivityStream({ toolCalls, toolResultMap }
 
       {/* Rows */}
       <div style={{ flex: 1, overflowY: "auto", padding: "3px 0" }}>
-        {recent.length === 0 && (
-          <div style={{ padding: "28px 12px", textAlign: "center", color: "rgba(0,212,255,0.18)", fontSize: 10, fontFamily: "monospace" }}>
+        {pulseActive && (
+          <div style={{
+            padding: "4px 10px 6px",
+            borderBottom: "1px solid rgba(var(--lim-accent-rgb),0.05)",
+          }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 4 }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 5, minWidth: 0, flex: 1 }}>
+                <span style={{ color: MAGENTA, fontSize: 9, flexShrink: 0 }}>◇</span>
+                <span style={{
+                  fontSize: 9, fontFamily: "monospace", fontWeight: 600,
+                  color: "#aabbcc",
+                  overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
+                  maxWidth: 150,
+                }}>
+                  Pulse · idle tick
+                </span>
+              </div>
+              <span style={{ color: CYAN, fontSize: 9 }}>⟳</span>
+            </div>
+          </div>
+        )}
+        {pulseRecent.map((row, idx) => {
+          if (row.phase === "skipped") {
+            return (
+              <div
+                key={`${row.id}-${idx}`}
+                style={{
+                  padding: "4px 10px 5px",
+                  borderBottom: "1px solid rgba(var(--lim-accent-rgb),0.035)",
+                }}
+              >
+                <div style={{ display: "flex", alignItems: "center", gap: 5 }}>
+                  <span style={{ color: "#556677", fontSize: 9 }}>◇</span>
+                  <span style={{ fontSize: 8, fontFamily: "monospace", color: "#556677", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                    skipped · {row.reason}
+                  </span>
+                </div>
+                {row.detail && (
+                  <div style={{ fontSize: 8, color: "#445566", marginTop: 2, whiteSpace: "pre-wrap" }}>{row.detail.slice(0, 120)}</div>
+                )}
+              </div>
+            );
+          }
+          const elapsed = row.durationMs;
+          return (
+            <div
+              key={row.runId}
+              style={{
+                padding: "4px 10px 5px",
+                borderBottom: "1px solid rgba(var(--lim-accent-rgb),0.035)",
+              }}
+            >
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 4 }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 5, minWidth: 0, flex: 1 }}>
+                  <span style={{ color: MAGENTA, fontSize: 9, flexShrink: 0 }}>◇</span>
+                  <span style={{
+                    fontSize: 9, fontFamily: "monospace", fontWeight: 600,
+                    color: "#667788",
+                    overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
+                    maxWidth: 150,
+                  }}>
+                    {row.summary}
+                  </span>
+                </div>
+                <div style={{ display: "flex", alignItems: "center", gap: 3, flexShrink: 0 }}>
+                  <span style={{ color: GREEN, fontSize: 9 }}>✓</span>
+                  <span style={{ fontSize: 8, fontFamily: "monospace", color: "#334455" }}>
+                    {formatElapsed(elapsed)}
+                  </span>
+                </div>
+              </div>
+              {row.reflectionsPreview && row.reflectionsPreview.length > 0 && (
+                <div style={{ marginTop: 3, fontSize: 8, color: "#445566", lineHeight: 1.35 }}>
+                  {row.reflectionsPreview[0]!.slice(0, 140)}
+                  {row.reflectionsPreview[0]!.length > 140 ? "…" : ""}
+                </div>
+              )}
+            </div>
+          );
+        })}
+        {recent.length === 0 && pulseRecent.length === 0 && !pulseActive && (
+          <div style={{ padding: "28px 12px", textAlign: "center", color: "rgba(var(--lim-accent-rgb),0.18)", fontSize: 10, fontFamily: "monospace" }}>
             awaiting activity…
             </div>
         )}
@@ -585,7 +729,7 @@ const ActivityStream = memo(function ActivityStream({ toolCalls, toolResultMap }
           return (
             <div key={tc.callId} style={{
               padding: "4px 10px 5px",
-              borderBottom: "1px solid rgba(0,212,255,0.035)",
+              borderBottom: "1px solid rgba(var(--lim-accent-rgb),0.035)",
             }}>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 4 }}>
                 <div style={{ display: "flex", alignItems: "center", gap: 5, minWidth: 0, flex: 1 }}>
@@ -607,12 +751,12 @@ const ActivityStream = memo(function ActivityStream({ toolCalls, toolResultMap }
                 </div>
               </div>
               {/* Timing bar */}
-              <div style={{ marginTop: 3, height: 2, borderRadius: 1, background: "rgba(0,212,255,0.05)", overflow: "hidden" }}>
+              <div style={{ marginTop: 3, height: 2, borderRadius: 1, background: "rgba(var(--lim-accent-rgb),0.05)", overflow: "hidden" }}>
                 <div style={{
                   height: "100%",
                   width: `${barPct}%`,
                   background: result?.ok === false
-                    ? `linear-gradient(90deg,${RED_ERR}99,${RED_ERR}44)`
+                    ? "linear-gradient(90deg, rgba(var(--lim-danger-rgb),0.6), rgba(var(--lim-danger-rgb),0.25))"
                     : isActive
                     ? `linear-gradient(90deg,${cat.color}cc,${cat.color}44)`
                     : `linear-gradient(90deg,${cat.color}55,${cat.color}22)`,
@@ -668,7 +812,7 @@ function extractStreamingTail(toolName: string, argsJson: string): { lines: stri
 
 type ToolResult = { output: string; ok: boolean };
 
-function ToolCard({ entry, result }: { entry: ToolCallEntry; result?: ToolResult }) {
+function ToolCard({ entry, result, compact }: { entry: ToolCallEntry; result?: ToolResult; compact?: boolean }) {
   const [expanded, setExpanded] = useState(false);
 
   const isActive = entry.status === "streaming" || entry.status === "running" || entry.status === "pending_approval";
@@ -679,15 +823,17 @@ function ToolCard({ entry, result }: { entry: ToolCallEntry; result?: ToolResult
   const sm  = STATUS_META[entry.status] ?? STATUS_META["done"]!;
   const arg = parsePrimaryArg(entry.argsJson);
 
-  const streamTail = entry.status === "streaming"
-    ? extractStreamingTail(entry.name, entry.argsJson ?? "")
-    : null;
+  const streamTail =
+    entry.status === "streaming" && !compact
+      ? extractStreamingTail(entry.name, entry.argsJson ?? "")
+      : null;
 
   const rawOutput       = result ? result.output.trimEnd() : "";
   const { formatted: formattedOutput } = result ? tryFormatOutput(rawOutput) : { formatted: "" };
   const outputLines     = formattedOutput ? formattedOutput.split("\n") : [];
-  const previewText     = outputLines.slice(0, PREVIEW_LINES).map(l => l.length > 200 ? l.slice(0, 199) + "…" : l).join("\n");
-  const extraLines      = Math.max(0, outputLines.length - PREVIEW_LINES);
+  const previewCap      = compact ? 3 : PREVIEW_LINES;
+  const previewText     = outputLines.slice(0, previewCap).map(l => l.length > 200 ? l.slice(0, 199) + "…" : l).join("\n");
+  const extraLines      = Math.max(0, outputLines.length - previewCap);
   const fullText        = outputLines.map(l => l.length > 200 ? l.slice(0, 199) + "…" : l).join("\n");
 
   return (
@@ -735,7 +881,14 @@ function ToolCard({ entry, result }: { entry: ToolCallEntry; result?: ToolResult
 
       {result && result.output.trim() && (
         <div style={{ marginTop: 6 }}>
-          <pre style={{ ...styles.toolOutputPre, color: result.ok ? "#556677" : "#ff7766", maxHeight: "none", margin: 0 }}>
+          <pre
+            style={{
+              ...styles.toolOutputPre,
+              color: result.ok ? "#556677" : "#ff7766",
+              maxHeight: compact ? 120 : 260,
+              margin: 0,
+            }}
+          >
             {expanded ? fullText : previewText}
           </pre>
           {extraLines > 0 && (
@@ -753,7 +906,14 @@ function ToolCard({ entry, result }: { entry: ToolCallEntry; result?: ToolResult
 
 type ToolCallGroup = { kind: "tool_group"; name: string; entries: ToolCallEntry[] };
 
+type ToolSurface = "clean" | "verbose";
+
 const PARALLEL_WINDOW_MS = 2500;
+
+function parallelGroupMin(toolName: string): number {
+  if (toolName === "web_search" || toolName === "web_fetch") return 2;
+  return 3;
+}
 
 function groupToolCalls(messages: MessageEntry[]): (MessageEntry | ToolCallGroup)[] {
   const out: (MessageEntry | ToolCallGroup)[] = [];
@@ -769,13 +929,22 @@ function groupToolCalls(messages: MessageEntry[]): (MessageEntry | ToolCallGroup
       if (next.startedAt - m.startedAt > PARALLEL_WINDOW_MS) break;
       group.push(next); j++;
     }
-    if (group.length >= 3) { out.push({ kind: "tool_group", name: m.name, entries: group }); i = j; }
+    const min = parallelGroupMin(m.name);
+    if (group.length >= min) { out.push({ kind: "tool_group", name: m.name, entries: group }); i = j; }
     else { out.push(m); i++; }
   }
   return out;
 }
 
-function ToolGroupCard({ group, toolResultMap }: { group: ToolCallGroup; toolResultMap: Map<string, ToolResult> }) {
+function ToolGroupCard({
+  group,
+  toolResultMap,
+  surface,
+}: {
+  group: ToolCallGroup;
+  toolResultMap: Map<string, ToolResult>;
+  surface: ToolSurface;
+}) {
   const [open, setOpen] = useState(false);
   const cat          = CATEGORY_META[getToolCategory(group.name)];
   const doneCount    = group.entries.filter(e => e.status === "done").length;
@@ -804,7 +973,12 @@ function ToolGroupCard({ group, toolResultMap }: { group: ToolCallGroup; toolRes
       {open && (
         <div style={{ marginTop: 7, display: "flex", flexDirection: "column", gap: 5 }}>
           {group.entries.map(entry => (
-            <ToolCard key={entry.callId} entry={entry} result={toolResultMap.get(entry.callId)} />
+            <ToolCard
+              key={entry.callId}
+              entry={entry}
+              result={toolResultMap.get(entry.callId)}
+              compact={surface === "clean"}
+            />
           ))}
         </div>
       )}
@@ -814,7 +988,11 @@ function ToolGroupCard({ group, toolResultMap }: { group: ToolCallGroup; toolRes
 
 // ── Subtask card ──────────────────────────────────────────────────────────────
 
-function SubtaskView({ entry }: { entry: SubtaskEntry }) {
+function SubtaskView({ entry, surface }: { entry: SubtaskEntry; surface: ToolSurface }) {
+  const [showStream, setShowStream] = useState(surface === "verbose");
+  useEffect(() => {
+    setShowStream(surface === "verbose");
+  }, [surface]);
   const statusColor =
     entry.status === "running"  ? CYAN    :
     entry.status === "done"     ? GREEN   :
@@ -828,6 +1006,8 @@ function SubtaskView({ entry }: { entry: SubtaskEntry }) {
       ? entry.partialOutput.trimEnd().split("\n").filter(l => l.trim()).slice(-4)
       : [];
 
+  const showLines = surface === "verbose" || showStream;
+
   return (
     <div style={{ ...styles.subtaskCard, marginLeft: entry.depth * 20, borderLeftColor: statusColor }}>
       <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
@@ -838,7 +1018,7 @@ function SubtaskView({ entry }: { entry: SubtaskEntry }) {
           {entry.goal.length > 120 ? entry.goal.slice(0, 119) + "…" : entry.goal}
         </span>
       </div>
-      {outputLines.length > 0 && (
+      {outputLines.length > 0 && showLines && (
         <div style={{ marginTop: 4, paddingLeft: 20 }}>
           {outputLines.map((line, i) => (
             <div key={i} style={{ color: "#334455", fontSize: 10, fontFamily: "monospace", lineHeight: 1.4 }}>
@@ -847,13 +1027,91 @@ function SubtaskView({ entry }: { entry: SubtaskEntry }) {
           ))}
         </div>
       )}
+      {surface === "clean" && outputLines.length > 0 && !showStream && (
+        <button
+          type="button"
+          onClick={() => setShowStream(true)}
+          style={{
+            marginTop: 4,
+            marginLeft: 20,
+            background: "none",
+            border: "none",
+            color: "#445566",
+            fontSize: 10,
+            cursor: "pointer",
+            textDecoration: "underline",
+          }}
+        >
+          Show sub-agent stream
+        </button>
+      )}
+    </div>
+  );
+}
+
+function ThinkBlock({ entry, surface }: { entry: Extract<MessageEntry, { kind: "think" }>; surface: ToolSurface }) {
+  const [thinkOpen, setThinkOpen] = useState(surface === "verbose");
+  useEffect(() => {
+    setThinkOpen(surface === "verbose");
+  }, [surface]);
+  if (surface === "clean" && !thinkOpen) {
+    return (
+      <button
+        type="button"
+        onClick={() => setThinkOpen(true)}
+        style={{
+          display: "block",
+          width: "100%",
+          textAlign: "left" as const,
+          background: "rgba(0,4,12,0.55)",
+          border: "1px solid rgba(var(--lim-accent-rgb),0.08)",
+          borderRadius: 4,
+          color: "#556677",
+          fontSize: 11,
+          padding: "6px 10px",
+          cursor: "pointer",
+          fontFamily: "inherit",
+        }}
+      >
+        <span style={{ color: "#334455", fontWeight: 700 }}>◈ Reasoning</span>
+        <span style={{ color: "#445566", marginLeft: 8 }}>
+          ({entry.content.length.toLocaleString()} chars) — expand
+        </span>
+      </button>
+    );
+  }
+  return (
+    <div style={styles.thinkBubble}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 4 }}>
+        <div style={{ color: "#334455", fontSize: 9, fontWeight: 700, letterSpacing: "0.08em" }}>◈ REASONING</div>
+        {surface === "clean" && (
+          <button
+            type="button"
+            onClick={() => setThinkOpen(false)}
+            style={{ background: "none", border: "none", color: "#445566", fontSize: 10, cursor: "pointer" }}
+          >
+            Collapse
+          </button>
+        )}
+      </div>
+      <div style={{ color: "#556677", fontStyle: "italic", whiteSpace: "pre-wrap", lineHeight: 1.55, fontSize: 12 }}>
+        {entry.content.length > 1200 ? entry.content.slice(0, 1200) + "…" : entry.content}
+      </div>
     </div>
   );
 }
 
 // ── Message renderer ──────────────────────────────────────────────────────────
 
-function MessageView({ entry, toolResult }: { entry: MessageEntry; toolResult?: ToolResult }) {
+function MessageView({
+  entry,
+  toolResult,
+  surface,
+}: {
+  entry: MessageEntry;
+  toolResult?: ToolResult;
+  surface: ToolSurface;
+}) {
   switch (entry.kind) {
     case "user":
       return (
@@ -890,13 +1148,13 @@ function MessageView({ entry, toolResult }: { entry: MessageEntry; toolResult?: 
                 if (embed) return <VideoEmbedBlock embed={embed} />;
                 return (
                   <span style={{ display: "block", margin: "12px 0" }}>
-                    <img src={src} alt={alt ?? ""} title={title ?? ""} loading="lazy" style={{ maxWidth: "100%", borderRadius: 6, border: "1px solid rgba(0,212,255,0.1)", display: "block" }} />
+                    <img src={src} alt={alt ?? ""} title={title ?? ""} loading="lazy" style={{ maxWidth: "100%", borderRadius: 6, border: "1px solid rgba(var(--lim-accent-rgb),0.1)", display: "block" }} />
                     {alt && <span style={{ display: "block", textAlign: "center", color: "#334455", fontSize: 11, marginTop: 4, fontStyle: "italic" }}>{alt}</span>}
                   </span>
                 );
               },
               a({ href, children }) {
-                return <a href={href} target="_blank" rel="noopener noreferrer" style={{ color: CYAN, textDecoration: "none", borderBottom: "1px dotted rgba(0,212,255,0.3)" }}>{children}</a>;
+                return <a href={href} target="_blank" rel="noopener noreferrer" style={{ color: CYAN, textDecoration: "none", borderBottom: "1px dotted rgba(var(--lim-accent-rgb),0.3)" }}>{children}</a>;
               },
               h1({ children }) { return <h1 style={styles.mdH1}>{children}</h1>; },
               h2({ children }) { return <h2 style={styles.mdH2}>{children}</h2>; },
@@ -911,9 +1169,9 @@ function MessageView({ entry, toolResult }: { entry: MessageEntry; toolResult?: 
                 const raw  = String(children).replace(/\n$/, "");
                 if (lang) {
                   return (
-                    <div style={{ borderRadius: 6, overflow: "hidden", margin: "10px 0", border: "1px solid rgba(0,212,255,0.1)" }}>
-                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "4px 12px", background: "#030810", borderBottom: "1px solid rgba(0,212,255,0.08)" }}>
-                        <span style={{ color: "rgba(0,212,255,0.4)", fontSize: 10, fontFamily: "monospace", letterSpacing: "0.06em" }}>{lang}</span>
+                    <div style={{ borderRadius: 6, overflow: "hidden", margin: "10px 0", border: "1px solid rgba(var(--lim-accent-rgb),0.1)" }}>
+                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "4px 12px", background: "#030810", borderBottom: "1px solid rgba(var(--lim-accent-rgb),0.08)" }}>
+                        <span style={{ color: "rgba(var(--lim-accent-rgb),0.4)", fontSize: 10, fontFamily: "monospace", letterSpacing: "0.06em" }}>{lang}</span>
                       </div>
                       <SyntaxHighlighter language={lang} style={vscDarkPlus} customStyle={{ margin: 0, borderRadius: 0, fontSize: 13, background: "#020810" }} showLineNumbers={raw.split("\n").length > 6} lineNumberStyle={{ color: "#223344", minWidth: "2.5em" }} wrapLongLines>
                         {raw}
@@ -954,7 +1212,7 @@ function MessageView({ entry, toolResult }: { entry: MessageEntry; toolResult?: 
               th({ children }) { return <th style={styles.mdTableHead}>{children}</th>; },
               td({ children }) { return <td style={styles.mdTableCell}>{children}</td>; },
               hr() {
-                return <div style={{ margin: "18px 0", height: 1, background: `linear-gradient(90deg, transparent, rgba(0,212,255,0.15), ${GREEN}55, rgba(0,212,255,0.15), transparent)` }} />;
+                return <div style={{ margin: "18px 0", height: 1, background: "linear-gradient(90deg, transparent, rgba(var(--lim-accent-rgb),0.15), rgba(var(--lim-success-rgb),0.33), rgba(var(--lim-accent-rgb),0.15), transparent)" }} />;
               },
             }}
           >
@@ -972,6 +1230,24 @@ function MessageView({ entry, toolResult }: { entry: MessageEntry; toolResult?: 
         </div>
       );
 
+    case "pulse_nudge":
+      return (
+        <div
+          style={{
+            margin: "8px 0 4px",
+            padding: "9px 12px",
+            borderRadius: 6,
+            background: "rgba(28, 38, 52, 0.75)",
+            border: "1px solid rgba(var(--lim-accent-rgb),0.08)",
+          }}
+        >
+          <span style={{ fontSize: 9, fontFamily: "monospace", letterSpacing: "0.14em", color: "rgba(var(--lim-accent-rgb),0.35)" }}>
+            PULSE ·{" "}
+          </span>
+          <span style={{ fontSize: 12, color: "#aab8c8", whiteSpace: "pre-wrap" }}>{entry.text}</span>
+        </div>
+      );
+
     case "provider_retry":
       return (
         <div style={styles.traceLine}>
@@ -980,20 +1256,13 @@ function MessageView({ entry, toolResult }: { entry: MessageEntry; toolResult?: 
       );
 
     case "tool_call":
-      return <ToolCard entry={entry} result={toolResult} />;
+      return <ToolCard entry={entry} result={toolResult} compact={surface === "clean"} />;
 
     case "tool_result":
       return null;
 
     case "think":
-      return (
-        <div style={styles.thinkBubble}>
-          <div style={{ color: "#334455", fontSize: 9, fontWeight: 700, letterSpacing: "0.08em", marginBottom: 4 }}>◈ REASONING</div>
-          <div style={{ color: "#556677", fontStyle: "italic", whiteSpace: "pre-wrap", lineHeight: 1.55, fontSize: 12 }}>
-            {entry.content.length > 1200 ? entry.content.slice(0, 1200) + "…" : entry.content}
-          </div>
-        </div>
-      );
+      return <ThinkBlock entry={entry} surface={surface} />;
 
     case "plan": {
       const steps = Array.isArray(entry.steps) ? entry.steps : [];
@@ -1016,7 +1285,7 @@ function MessageView({ entry, toolResult }: { entry: MessageEntry; toolResult?: 
     }
 
     case "subtask":
-      return <SubtaskView entry={entry} />;
+      return <SubtaskView entry={entry} surface={surface} />;
 
     case "context_compressed":
       return (
@@ -1051,7 +1320,7 @@ export function App() {
   const [attachError,  setAttachError]  = useState<string | null>(null);
   const [isDragOver,   setIsDragOver]   = useState(false);
   const [askAnswer,    setAskAnswer]    = useState("");
-  const [showTrace,    setShowTrace]    = useState(false);
+  const [showRawHarness, setShowRawHarness] = useState(false);
   const [draftHistory, setDraftHistory] = useState<string[]>([]);
   const [historyIndex, setHistoryIndex] = useState(-1);
   const [historyDraft, setHistoryDraft] = useState("");
@@ -1060,12 +1329,38 @@ export function App() {
   const [sessionSeconds, setSessionSeconds] = useState(0);
   const [bootstrapInput, setBootstrapInput] = useState("");
   const [bootstrapSubmitting, setBootstrapSubmitting] = useState(false);
+  const bootstrapTextareaRef = useRef<HTMLTextAreaElement>(null);
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [settingsFields, setSettingsFields] = useState<HarnessSettingsApiField[]>([]);
+  const [settingsTabs, setSettingsTabs] = useState<{ id: string; title: string }[]>([]);
+  const [settingsHint, setSettingsHint] = useState("");
+  const [settingsProviderModel, setSettingsProviderModel] = useState("");
+  const [settingsProviderBase, setSettingsProviderBase] = useState("");
+  const [settingsProviderModelLocked, setSettingsProviderModelLocked] = useState(false);
+  const [settingsProviderBaseLocked, setSettingsProviderBaseLocked] = useState(false);
+  const [settingsProviderApiKeyConfigured, setSettingsProviderApiKeyConfigured] = useState(false);
+  const [settingsEnvDraft, setSettingsEnvDraft] = useState<Record<string, string>>({});
+  const [settingsLoading, setSettingsLoading] = useState(false);
+  const [settingsSaving, setSettingsSaving] = useState(false);
+  const [settingsError, setSettingsError] = useState<string | null>(null);
 
   const bottomRef    = useRef<HTMLDivElement>(null);
   const messagesRef  = useRef<HTMLDivElement>(null);
   const inputRef     = useRef<HTMLTextAreaElement>(null);
   const submittingRef = useRef(false);
   const sessionStartRef = useRef<number | null>(null);
+
+  useEffect(() => {
+    applyPersonaDocumentTheme(state.personaUiTheme);
+  }, [state.personaUiTheme]);
+
+  useEffect(() => {
+    if (!state.personaBootstrapPending || bootstrapSubmitting) return;
+    const id = window.requestAnimationFrame(() => {
+      bootstrapTextareaRef.current?.focus();
+    });
+    return () => window.cancelAnimationFrame(id);
+  }, [state.personaBootstrapPending, bootstrapSubmitting]);
 
   const maxHistory = 30;
   const showPanels = windowWidth >= 900;
@@ -1093,6 +1388,84 @@ export function App() {
     window.addEventListener("resize", handler);
     return () => window.removeEventListener("resize", handler);
   }, []);
+
+  const loadSettings = useCallback(async () => {
+    setSettingsLoading(true);
+    setSettingsError(null);
+    try {
+      const r = await fetch(`${WEB_SERVER_BASE}/api/settings`);
+      if (!r.ok) throw new Error(await r.text());
+      const j = (await r.json()) as {
+        fields: HarnessSettingsApiField[];
+        tabs?: { id: string; title: string }[];
+        provider?: {
+          model?: string;
+          baseURL?: string;
+          modelLockedByEnv?: boolean;
+          baseURLLockedByEnv?: boolean;
+          apiKeyConfigured?: boolean;
+        };
+        hint?: string;
+      };
+      setSettingsFields(j.fields ?? []);
+      setSettingsTabs(j.tabs ?? []);
+      setSettingsHint(j.hint ?? "");
+      setSettingsProviderModel(j.provider?.model ?? "");
+      setSettingsProviderBase(j.provider?.baseURL ?? "");
+      setSettingsProviderModelLocked(j.provider?.modelLockedByEnv ?? false);
+      setSettingsProviderBaseLocked(j.provider?.baseURLLockedByEnv ?? false);
+      setSettingsProviderApiKeyConfigured(j.provider?.apiKeyConfigured ?? false);
+      const draft: Record<string, string> = {};
+      for (const f of j.fields ?? []) draft[f.key] = f.value;
+      setSettingsEnvDraft(draft);
+    } catch (e) {
+      setSettingsError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setSettingsLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (settingsOpen) void loadSettings();
+  }, [settingsOpen, loadSettings]);
+
+  const saveSettings = useCallback(async () => {
+    setSettingsSaving(true);
+    setSettingsError(null);
+    try {
+      const env: Record<string, string> = {};
+      for (const f of settingsFields) {
+        if (f.lockedByEnv) continue;
+        const v = settingsEnvDraft[f.key];
+        if (v === undefined) continue;
+        env[f.key] = v;
+      }
+      const r = await fetch(`${WEB_SERVER_BASE}/api/settings`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          harness: { env: env },
+          provider: { model: settingsProviderModel, baseURL: settingsProviderBase },
+        }),
+      });
+      if (!r.ok) {
+        let msg = r.statusText;
+        try {
+          const j = (await r.json()) as { error?: string };
+          if (j.error) msg = j.error;
+        } catch {
+          const t = await r.text();
+          if (t) msg = t;
+        }
+        throw new Error(msg);
+      }
+      setSettingsOpen(false);
+    } catch (e) {
+      setSettingsError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setSettingsSaving(false);
+    }
+  }, [settingsFields, settingsEnvDraft, settingsProviderModel, settingsProviderBase]);
 
   const pushHistory = (value: string) => {
     const trimmed = value.trim();
@@ -1216,7 +1589,7 @@ export function App() {
       el.style.maxHeight = "none";
       el.style.flex      = "none";
       await new Promise<void>(r => requestAnimationFrame(() => requestAnimationFrame(() => r())));
-      const dataUrl = await toPng(el, { pixelRatio: 2, backgroundColor: BG, width, height: fullHeight });
+      const dataUrl = await toPng(el, { pixelRatio: 2, backgroundColor: "#020408", width, height: fullHeight });
       el.style.overflowY = savedOverflowY;
       el.style.height    = savedHeight;
       el.style.maxHeight = savedMaxHeight;
@@ -1272,7 +1645,35 @@ export function App() {
 
   const pct = state.contextSnapshot ? Math.round(state.contextSnapshot.usageFraction * 100) : 0;
 
-  const visibleMessages = state.messages.filter(entry => showTrace ? true : entry.kind !== "trace");
+  const surface: ToolSurface = showRawHarness ? "verbose" : "clean";
+
+  const visibleMessages = useMemo(() => {
+    return state.messages.filter((entry) => {
+      if (!showRawHarness && entry.kind === "trace") return false;
+      if (!showRawHarness && entry.kind === "provider_retry") return false;
+      if (!showRawHarness && entry.kind === "context_compressed") return false;
+      return true;
+    });
+  }, [state.messages, showRawHarness]);
+
+  const rawHarnessBlob = useMemo(() => {
+    const retries = state.messages
+      .filter((m): m is Extract<MessageEntry, { kind: "provider_retry" }> => m.kind === "provider_retry")
+      .map((m) => m.text);
+    const traces = state.messages
+      .filter((m): m is Extract<MessageEntry, { kind: "trace" }> => m.kind === "trace")
+      .map((m) => m.text);
+    const ctx =
+      state.lastContextCompress &&
+      `[context] compressed ${state.lastContextCompress.beforePct}% → ${state.lastContextCompress.afterPct}% · ${state.lastContextCompress.rounds} rounds`;
+    const bits = [...retries, ...(ctx ? [ctx] : []), ...traces];
+    return bits.join("\n\n");
+  }, [state.messages, state.lastContextCompress]);
+
+  const toolErrorCount = useMemo(
+    () => state.messages.filter((m) => m.kind === "tool_result" && !m.ok).length,
+    [state.messages]
+  );
 
   const toolResultMap = useMemo(() => {
     const m = new Map<string, ToolResult>();
@@ -1295,6 +1696,7 @@ export function App() {
     activeToolCall?.status === "pending_approval"       ? "approval"     :
     activeToolCall?.status === "running"                ? "running"      :
     state.busy                                          ? "thinking"     :
+    state.personalityPulseActive                        ? "pulse"        :
     "idle";
 
   const allToolCalls = useMemo(
@@ -1304,7 +1706,12 @@ export function App() {
   const toolCount    = allToolCalls.length;
   const msgCount     = state.messages.filter(m => m.kind === "user" || m.kind === "assistant").length;
   const subtasks     = state.messages.filter((m): m is SubtaskEntry => m.kind === "subtask");
-  const dreamLabel = autoDreamCompactLabel(state.autoDream);
+  const dreamLabel = presentAutoDream(state.autoDream, { verbosity: state.uiVerbosity }).pillHeadline;
+  const pulseChips = useMemo(() => {
+    return state.personalityPulseRows
+      .filter((r): r is Extract<PersonalityPulseRow, { phase: "completed" }> => r.phase === "completed")
+      .slice(-3);
+  }, [state.personalityPulseRows]);
 
   // ── Render ───────────────────────────────────────────────────────────────────
 
@@ -1315,7 +1722,7 @@ export function App() {
       {/* ── Thin header bar ──────────────────────────────────────────────────── */}
       <div style={styles.header}>
         <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-          <span style={{ color: CYAN, fontWeight: 800, fontSize: 12, letterSpacing: "0.28em", fontFamily: "monospace" }}>LIMINAL</span>
+          <span style={{ color: CYAN, fontWeight: 800, fontSize: 12, letterSpacing: "0.28em", fontFamily: "monospace" }}>{state.personaDisplayLabel}</span>
           {!state.connected && <span style={{ color: RED_ERR, fontSize: 9, fontFamily: "monospace", letterSpacing: "0.06em" }}>● OFFLINE</span>}
           {activeToolCall && showPanels === false && (
             <div style={styles.activityPill}>
@@ -1342,15 +1749,23 @@ export function App() {
           {/* Slim context bar — only when no left panel */}
           {!showPanels && state.contextSnapshot && (
             <div style={{ display: "flex", alignItems: "center", gap: 6, width: 120 }}>
-              <div style={{ flex: 1, height: 2, background: "rgba(0,212,255,0.08)", borderRadius: 1, overflow: "hidden" }}>
+              <div style={{ flex: 1, height: 2, background: "rgba(var(--lim-accent-rgb),0.08)", borderRadius: 1, overflow: "hidden" }}>
                 <div style={{ height: "100%", width: `${pct}%`, background: pct >= 80 ? RED_ERR : pct >= 60 ? AMBER : CYAN, borderRadius: 1, transition: "width 0.4s" }} />
               </div>
-              <span style={{ color: pct >= 80 ? RED_ERR : "rgba(0,212,255,0.35)", fontSize: 9, fontFamily: "monospace" }}>{pct}%</span>
+              <span style={{ color: pct >= 80 ? RED_ERR : "rgba(var(--lim-accent-rgb),0.35)", fontSize: 9, fontFamily: "monospace" }}>{pct}%</span>
             </div>
           )}
+          <button
+            type="button"
+            style={styles.headerBtn}
+            disabled={state.busy}
+            onClick={() => setSettingsOpen(true)}
+          >
+            SETTINGS
+          </button>
           <button type="button" style={styles.headerBtn} disabled={state.busy} onClick={() => void sendClearSession()}>NEW SESSION</button>
-          <button type="button" style={{ ...styles.headerBtn, color: showTrace ? CYAN : undefined, borderColor: showTrace ? "rgba(0,212,255,0.4)" : undefined }} onClick={() => setShowTrace(v => !v)} title={showTrace ? "Hide trace" : "Show trace"}>
-            TRACE {showTrace ? "●" : "○"}
+          <button type="button" style={{ ...styles.headerBtn, color: showRawHarness ? CYAN : undefined, borderColor: showRawHarness ? "rgba(var(--lim-accent-rgb),0.4)" : undefined }} onClick={() => setShowRawHarness(v => !v)} title={showRawHarness ? "Hide raw trace, retries, and compression lines from the transcript" : "Show raw harness lines in the transcript (noisy)"}>
+            RAW {showRawHarness ? "●" : "○"}
           </button>
           <button
             type="button"
@@ -1380,6 +1795,7 @@ export function App() {
             subtasks={subtasks}
             personaName={state.personaName}
             autoDream={state.autoDream}
+            uiVerbosity={state.uiVerbosity}
           />
         )}
 
@@ -1388,13 +1804,20 @@ export function App() {
           {/* Messages */}
           <div ref={messagesRef} style={styles.messages}>
             {visibleMessages.length === 0 && !state.busy && (
-              <div style={{ color: "rgba(0,212,255,0.12)", textAlign: "center", marginTop: 80, fontSize: 13, fontFamily: "monospace", letterSpacing: "0.1em" }}>
+              <div style={{ color: "rgba(var(--lim-accent-rgb),0.12)", textAlign: "center", marginTop: 80, fontSize: 13, fontFamily: "monospace", letterSpacing: "0.1em" }}>
                 AWAITING INPUT
               </div>
             )}
             {groupedMessages.map((entry, i) => {
               if ("kind" in entry && entry.kind === "tool_group") {
-                return <ToolGroupCard key={`grp-${i}`} group={entry} toolResultMap={toolResultMap} />;
+                return (
+                  <ToolGroupCard
+                    key={`grp-${i}-${entry.name}`}
+                    group={entry}
+                    toolResultMap={toolResultMap}
+                    surface={surface}
+                  />
+                );
               }
               const m = entry as MessageEntry;
               return (
@@ -1402,6 +1825,7 @@ export function App() {
                   key={i}
                   entry={m}
                   toolResult={m.kind === "tool_call" ? toolResultMap.get(m.callId) : undefined}
+                  surface={surface}
                 />
               );
             })}
@@ -1410,15 +1834,95 @@ export function App() {
                 ✗ {state.error}
               </div>
             )}
+            {!showRawHarness && rawHarnessBlob.trim().length > 0 && (
+              <details style={{ marginTop: 10, borderTop: "1px solid rgba(var(--lim-accent-rgb),0.08)", paddingTop: 8 }}>
+                <summary style={{ color: "#556677", fontSize: 11, cursor: "pointer", userSelect: "none" }}>
+                  Full harness trace ({rawHarnessBlob.length.toLocaleString()} chars) — optional
+                </summary>
+                <pre
+                  style={{
+                    marginTop: 8,
+                    maxHeight: 220,
+                    overflow: "auto",
+                    fontSize: 10,
+                    color: "#445566",
+                    background: "rgba(0,4,12,0.75)",
+                    border: "1px solid rgba(var(--lim-accent-rgb),0.06)",
+                    borderRadius: 4,
+                    padding: 10,
+                    whiteSpace: "pre-wrap",
+                    wordBreak: "break-word",
+                  }}
+                >
+                  {rawHarnessBlob}
+                </pre>
+              </details>
+            )}
             <div ref={bottomRef} />
           </div>
 
-          {/* Input area */}
+          <div style={styles.sessionFooterStrip}>
+            <span style={{ color: pct >= 80 ? RED_ERR : "rgba(var(--lim-accent-rgb),0.45)" }}>CTX {pct}%</span>
+            {state.lastTurnProviderRetries > 0 && (
+              <span style={{ color: AMBER }}>
+                {state.lastTurnProviderRetries} provider retr{state.lastTurnProviderRetries === 1 ? "y" : "ies"} (recovered)
+              </span>
+            )}
+            {toolErrorCount > 0 && (
+              <span style={{ color: RED_ERR }}>{toolErrorCount} tool error{toolErrorCount === 1 ? "" : "s"}</span>
+            )}
+            {state.lastContextCompress && (
+              <span style={{ color: "#556677" }}>
+                Compressed {state.lastContextCompress.beforePct}% → {state.lastContextCompress.afterPct}%
+              </span>
+            )}
+            <span style={{ color: "#334455", marginLeft: "auto" }}>
+              {surface === "clean" ? "Clean view — toggle RAW for full harness lines" : "Verbose view"}
+            </span>
+          </div>
+          {state.heartbeatEnabled && state.heartbeatUiStrip && (state.personalityPulseActive || pulseChips.length > 0) && (
+            <div
+              style={{
+                padding: "5px 12px 6px",
+                borderTop: "1px solid rgba(var(--lim-accent-rgb),0.05)",
+                background: "rgba(0,6,14,0.35)",
+                fontFamily: "monospace",
+                fontSize: 9,
+                color: "rgba(var(--lim-accent-rgb),0.35)",
+                letterSpacing: "0.06em",
+              }}
+            >
+              <span style={{ color: MAGENTA }}>PULSE</span>
+              {state.personalityPulseActive && <span style={{ marginLeft: 8, color: "#8899aa" }}>syncing…</span>}
+              {pulseChips.map((c) => (
+                <span
+                  key={c.runId}
+                  title={c.summary}
+                  style={{
+                    marginLeft: 8,
+                    padding: "1px 6px",
+                    borderRadius: 3,
+                    border: "1px solid rgba(var(--lim-accent-rgb),0.1)",
+                    color: "#778899",
+                    maxWidth: 160,
+                    display: "inline-block",
+                    overflow: "hidden",
+                    textOverflow: "ellipsis",
+                    whiteSpace: "nowrap",
+                    verticalAlign: "middle",
+                  }}
+                >
+                  {c.summary.slice(0, 48)}
+                  {c.summary.length > 48 ? "…" : ""}
+                </span>
+              ))}
+            </div>
+          )}
           <form
             style={{
               ...styles.inputArea,
-              borderTopColor: isDragOver ? CYAN : "rgba(0,212,255,0.07)",
-              outline: isDragOver ? `1px dashed rgba(0,212,255,0.4)` : "none",
+              borderTopColor: isDragOver ? CYAN : "rgba(var(--lim-accent-rgb),0.07)",
+              outline: isDragOver ? `1px dashed rgba(var(--lim-accent-rgb),0.4)` : "none",
             }}
             onSubmit={(e) => void handleSubmit(e)}
             onDragOver={handleDragOver}
@@ -1455,8 +1959,8 @@ export function App() {
               <button type="submit" style={{
                 ...styles.btn,
                 background: canSend ? "rgba(0,60,100,0.8)" : "rgba(0,6,14,0.6)",
-                borderColor: canSend ? "rgba(0,212,255,0.4)" : "rgba(0,212,255,0.08)",
-                color: canSend ? CYAN : "rgba(0,212,255,0.2)",
+                borderColor: canSend ? "rgba(var(--lim-accent-rgb),0.4)" : "rgba(var(--lim-accent-rgb),0.08)",
+                color: canSend ? CYAN : "rgba(var(--lim-accent-rgb),0.2)",
                 cursor: canSend ? "pointer" : "default",
                 fontFamily: "monospace",
                 letterSpacing: "0.1em",
@@ -1466,16 +1970,52 @@ export function App() {
               </button>
             </div>
             <div style={styles.shortcutHint}>
-              Enter send · Shift+Enter newline · Ctrl/Cmd+K clear · Ctrl/Cmd+L new session
+              Enter send · Shift+Enter newline · Ctrl/Cmd+K clear · Ctrl/Cmd+Shift+L new session
             </div>
           </form>
         </div>
 
         {/* RIGHT: Activity stream */}
         {showPanels && (
-          <ActivityStream toolCalls={allToolCalls} toolResultMap={toolResultMap} />
+          <ActivityStream
+            toolCalls={allToolCalls}
+            toolResultMap={toolResultMap}
+            pulseActive={state.personalityPulseActive}
+            pulseRows={state.personalityPulseRows}
+          />
         )}
       </div>
+
+      {/* ── Settings modal ─────────────────────────────────────────────────────── */}
+      <SettingsModal
+        open={settingsOpen}
+        onClose={() => {
+          setSettingsOpen(false);
+          setSettingsError(null);
+        }}
+        hint={settingsHint}
+        loading={settingsLoading}
+        error={settingsError}
+        saving={settingsSaving}
+        agentBusy={state.busy}
+        tabs={settingsTabs}
+        fields={settingsFields}
+        providerModel={settingsProviderModel}
+        providerBase={settingsProviderBase}
+        providerModelLocked={settingsProviderModelLocked}
+        providerBaseLocked={settingsProviderBaseLocked}
+        providerApiKeyConfigured={settingsProviderApiKeyConfigured}
+        onProviderModel={setSettingsProviderModel}
+        onProviderBase={setSettingsProviderBase}
+        envDraft={settingsEnvDraft}
+        onEnvChange={(key, v) =>
+          setSettingsEnvDraft((d) => ({
+            ...d,
+            [key]: v,
+          }))
+        }
+        onSave={() => void saveSettings()}
+      />
 
       {/* ── Approval modal ────────────────────────────────────────────────────── */}
       {state.pendingApproval && (
@@ -1516,13 +2056,13 @@ export function App() {
 
             <div style={{ display: "flex", gap: 10, marginTop: 16 }}>
               <button
-                style={{ ...styles.btn, background: "rgba(0,30,12,0.8)", borderColor: `rgba(0,255,136,0.3)`, color: GREEN, flex: 1, letterSpacing: "0.08em", fontSize: 11, fontFamily: "monospace" }}
+                style={{ ...styles.btn, background: "rgba(0,30,12,0.8)", borderColor: `rgba(var(--lim-success-rgb),0.3)`, color: GREEN, flex: 1, letterSpacing: "0.08em", fontSize: 11, fontFamily: "monospace" }}
                 onClick={() => sendApproval(state.pendingApproval!.callId, { decision: "approve" })}
               >
                 ✓ AUTHORIZE
               </button>
               <button
-                style={{ ...styles.btn, background: "rgba(30,4,8,0.8)", borderColor: `rgba(255,34,68,0.3)`, color: RED_ERR, flex: 1, letterSpacing: "0.08em", fontSize: 11, fontFamily: "monospace" }}
+                style={{ ...styles.btn, background: "rgba(30,4,8,0.8)", borderColor: `rgba(var(--lim-danger-rgb),0.3)`, color: RED_ERR, flex: 1, letterSpacing: "0.08em", fontSize: 11, fontFamily: "monospace" }}
                 onClick={() => sendApproval(state.pendingApproval!.callId, { decision: "reject", reason: "Rejected by user" })}
               >
                 ✗ DENY
@@ -1534,42 +2074,82 @@ export function App() {
 
       {/* ── Persona bootstrap modal ───────────────────────────────────────────── */}
       {state.personaBootstrapPending && (
-        <div style={styles.modal}>
+        <div
+          style={styles.modal}
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="persona-bootstrap-title"
+        >
           <div style={styles.modalBox}>
-            <div style={{ color: CYAN, fontWeight: 700, marginBottom: 10, fontSize: 11, letterSpacing: "0.12em", fontFamily: "monospace" }}>
-              ◆ PERSONALITY BOOTSTRAP
+            <div
+              id="persona-bootstrap-title"
+              style={{ color: CYAN, fontWeight: 700, marginBottom: 6, fontSize: 11, letterSpacing: "0.12em", fontFamily: "monospace" }}
+            >
+              ◆ WELCOME — PERSONALITY
             </div>
-            <div style={{ marginBottom: 12, color: "#aabbcc", lineHeight: 1.6, fontSize: 14 }}>
-              Describe how you want the assistant to sound. Example: tone, cadence, confidence, humor, and inspirations.
+            <div style={{ marginBottom: 10, color: "#c8d4e0", lineHeight: 1.65, fontSize: 14 }}>
+              Choose how the assistant should <strong style={{ color: "#e8f0ff" }}>sound</strong> (tone, pace, humor). Tools,
+              safety, and task behavior stay the same. You can change this anytime in Settings or with{" "}
+              <code style={{ fontSize: 12, color: CYAN }}>set_persona</code>.
+            </div>
+            <div style={{ marginBottom: 10, color: "#8899aa", fontSize: 12, lineHeight: 1.5 }}>
+              Try a quick start (tap to fill the box), then edit freely:
+            </div>
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginBottom: 12 }}>
+              {PERSONA_QUICK_PRESETS.map((preset) => (
+                <button
+                  key={preset}
+                  type="button"
+                  disabled={bootstrapSubmitting}
+                  onClick={() => setBootstrapInput(preset)}
+                  style={{
+                    ...styles.btn,
+                    fontSize: 11,
+                    padding: "6px 10px",
+                    letterSpacing: "0.04em",
+                    maxWidth: "100%",
+                    textAlign: "left",
+                    whiteSpace: "normal",
+                    lineHeight: 1.35,
+                  }}
+                >
+                  {preset.length > 52 ? `${preset.slice(0, 50)}…` : preset}
+                </button>
+              ))}
             </div>
             {bootstrapSubmitting && (
-        <div
-          style={{
+              <div
+                style={{
                   marginBottom: 10,
                   padding: "8px 10px",
-                  border: "1px solid rgba(0,212,255,0.25)",
-                  background: "rgba(0,212,255,0.06)",
+                  border: "1px solid rgba(var(--lim-accent-rgb),0.25)",
+                  background: "rgba(var(--lim-accent-rgb),0.06)",
                   color: CYAN,
                   fontSize: 12,
                   fontFamily: "monospace",
                   letterSpacing: "0.03em",
                 }}
               >
-                {state.personaBootstrapProgress ?? "Working..."}
-                {state.personaBootstrapStage ? ` [${state.personaBootstrapStage}]` : ""}
+                {state.personaBootstrapProgress ?? "Working…"}
+                {state.personaBootstrapStage
+                  ? ` · ${personaBootstrapStageHint(state.personaBootstrapStage)}`
+                  : ""}
               </div>
             )}
             <textarea
+              ref={bootstrapTextareaRef}
               style={{ ...styles.textarea, minHeight: 110, width: "100%" }}
               value={bootstrapInput}
               onChange={(e) => setBootstrapInput(e.target.value)}
-              placeholder="e.g. Calm, precise operations advisor with dry wit and concise answers..."
+              placeholder="e.g. Calm, precise operations advisor with dry wit and concise answers…"
               disabled={bootstrapSubmitting}
+              autoFocus
+              aria-label="Describe your preferred assistant voice"
             />
-            <div style={{ display: "flex", gap: 10, marginTop: 12 }}>
+            <div style={{ display: "flex", gap: 10, marginTop: 12, flexWrap: "wrap" }}>
               <button
                 type="button"
-                style={{ ...styles.btn, flex: 1 }}
+                style={{ ...styles.btn, flex: "1 1 140px" }}
                 disabled={bootstrapSubmitting || !bootstrapInput.trim()}
                 onClick={async () => {
                   setBootstrapSubmitting(true);
@@ -1578,12 +2158,12 @@ export function App() {
                   setBootstrapSubmitting(false);
                 }}
               >
-                APPLY PERSONA
+                SAVE VOICE · START
               </button>
               {state.personaBootstrapAllowSkip && (
                 <button
                   type="button"
-                  style={{ ...styles.btn, flex: 1 }}
+                  style={{ ...styles.btn, flex: "1 1 140px" }}
                   disabled={bootstrapSubmitting}
                   onClick={async () => {
                     setBootstrapSubmitting(true);
@@ -1591,11 +2171,18 @@ export function App() {
                     setBootstrapInput("");
                     setBootstrapSubmitting(false);
                   }}
+                  title="Keeps the default Liminal voice and marks this step complete. You can personalize later."
                 >
-                  SKIP
+                  USE DEFAULT VOICE
                 </button>
               )}
             </div>
+            {state.personaBootstrapAllowSkip && (
+              <div style={{ marginTop: 10, color: "#6a7a8a", fontSize: 11, lineHeight: 1.45 }}>
+                &quot;Use default voice&quot; skips generation, uses the built-in voice, and completes first-run setup.
+                No API calls for persona.
+              </div>
+            )}
           </div>
         </div>
       )}
@@ -1626,7 +2213,7 @@ export function App() {
               placeholder="Response…"
             />
             <button
-              style={{ ...styles.btn, background: "rgba(0,20,40,0.8)", borderColor: `rgba(0,212,255,0.3)`, color: CYAN, marginTop: 10, width: "100%", letterSpacing: "0.1em", fontSize: 11, fontFamily: "monospace" }}
+              style={{ ...styles.btn, background: "rgba(0,20,40,0.8)", borderColor: `rgba(var(--lim-accent-rgb),0.3)`, color: CYAN, marginTop: 10, width: "100%", letterSpacing: "0.1em", fontSize: 11, fontFamily: "monospace" }}
               onClick={() => { if (askAnswer.trim()) { sendAnswer(askAnswer.trim()); setAskAnswer(""); } }}
             >
               TRANSMIT
@@ -1650,8 +2237,8 @@ const styles = {
     fontFamily: "system-ui, -apple-system, sans-serif",
     backgroundImage: [
       "radial-gradient(ellipse at 50% 0%, rgba(0,40,80,0.35) 0%, rgba(2,4,8,0) 62%)",
-      "linear-gradient(rgba(0,212,255,0.022) 1px, transparent 1px)",
-      "linear-gradient(90deg, rgba(0,212,255,0.022) 1px, transparent 1px)",
+      "linear-gradient(rgba(var(--lim-accent-rgb),0.022) 1px, transparent 1px)",
+      "linear-gradient(90deg, rgba(var(--lim-accent-rgb),0.022) 1px, transparent 1px)",
     ].join(", "),
     backgroundSize: "auto, 44px 44px, 44px 44px",
   },
@@ -1660,7 +2247,7 @@ const styles = {
     justifyContent: "space-between",
     alignItems: "center",
     padding: "6px 14px",
-    borderBottom: "1px solid rgba(0,212,255,0.07)",
+    borderBottom: "1px solid rgba(var(--lim-accent-rgb),0.07)",
     background: "rgba(2,4,8,0.98)",
     flexShrink: 0,
     gap: 10,
@@ -1682,17 +2269,17 @@ const styles = {
     display: "flex",
     alignItems: "center",
     gap: 5,
-    background: "rgba(0,212,255,0.06)",
-    border: "1px solid rgba(0,212,255,0.15)",
+    background: "rgba(var(--lim-accent-rgb),0.06)",
+    border: "1px solid rgba(var(--lim-accent-rgb),0.15)",
     borderRadius: 20,
     padding: "2px 10px",
     fontSize: 10,
   },
   headerBtn: {
     background: "transparent",
-    border: "1px solid rgba(0,212,255,0.18)",
+    border: "1px solid rgba(var(--lim-accent-rgb),0.18)",
     borderRadius: 2,
-    color: "rgba(0,212,255,0.45)",
+    color: "rgba(var(--lim-accent-rgb),0.45)",
     padding: "3px 10px",
     fontSize: 9,
     cursor: "pointer",
@@ -1708,13 +2295,26 @@ const styles = {
     flexDirection: "column" as const,
     gap: 7,
   },
+  sessionFooterStrip: {
+    flexShrink: 0,
+    display: "flex",
+    flexWrap: "wrap" as const,
+    alignItems: "center",
+    gap: 12,
+    padding: "6px 18px 8px",
+    fontSize: 10,
+    fontFamily: "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace",
+    borderTop: "1px solid rgba(var(--lim-accent-rgb),0.06)",
+    color: "#556677",
+    background: "rgba(1,3,8,0.96)",
+  },
   userMsg: {
     padding: "8px 12px",
     background: "rgba(0,30,55,0.4)",
     borderRadius: 4,
     borderLeft: `2px solid ${CYAN}`,
     lineHeight: 1.5,
-    boxShadow: "inset 0 0 20px rgba(0,212,255,0.02)",
+    boxShadow: "inset 0 0 20px rgba(var(--lim-accent-rgb),0.02)",
   },
   assistantMsg: {
     padding: "5px 0",
@@ -1725,13 +2325,13 @@ const styles = {
   mdList:         { margin: "0 0 10px 22px", lineHeight: 1.72 },
   mdOrderedList:  { margin: "0 0 10px 22px", lineHeight: 1.72 },
   mdListItem:     { margin: "3px 0" },
-  mdH1: { fontSize: 22, margin: "18px 0 10px", color: "#7cf5a9", borderBottom: "1px solid rgba(0,255,136,0.15)", paddingBottom: 5, fontWeight: 700 },
+  mdH1: { fontSize: 22, margin: "18px 0 10px", color: "#7cf5a9", borderBottom: "1px solid rgba(var(--lim-success-rgb),0.15)", paddingBottom: 5, fontWeight: 700 },
   mdH2: { fontSize: 18, margin: "16px 0 8px", color: CYAN, fontWeight: 700 },
   mdH3: { fontSize: 15, margin: "12px 0 6px", color: "#cc88ff", fontWeight: 600 },
   mdH4: { fontSize: 13, margin: "10px 0 4px", color: AMBER, fontWeight: 600, textTransform: "uppercase" as const, letterSpacing: "0.07em" },
   mdInlineCode: {
     background: "rgba(0,10,22,0.8)",
-    border: "1px solid rgba(0,212,255,0.12)",
+    border: "1px solid rgba(var(--lim-accent-rgb),0.12)",
     borderRadius: 3,
     padding: "1px 5px",
     color: GREEN,
@@ -1740,26 +2340,26 @@ const styles = {
   },
   mdQuote: {
     margin: "12px 0", padding: "8px 14px",
-    borderLeft: "2px solid rgba(0,212,255,0.25)",
+    borderLeft: "2px solid rgba(var(--lim-accent-rgb),0.25)",
     color: "#667788", fontStyle: "italic" as const,
     background: "rgba(0,10,20,0.5)", borderRadius: "0 4px 4px 0",
   },
   mdTableWrap: { overflowX: "auto" as const, margin: "12px 0", borderRadius: 5, overflow: "hidden" as const },
   mdTable:     { width: "100%", borderCollapse: "collapse" as const, background: "rgba(0,6,14,0.8)" },
-  mdTableHead: { textAlign: "left" as const, border: "1px solid rgba(0,212,255,0.1)", padding: "7px 12px", background: "rgba(0,12,25,0.9)", color: "#889aaa", fontWeight: 700, fontSize: 11, letterSpacing: "0.05em" },
-  mdTableCell: { border: "1px solid rgba(0,212,255,0.07)", padding: "6px 12px", verticalAlign: "top" as const, color: "#778899" },
+  mdTableHead: { textAlign: "left" as const, border: "1px solid rgba(var(--lim-accent-rgb),0.1)", padding: "7px 12px", background: "rgba(0,12,25,0.9)", color: "#889aaa", fontWeight: 700, fontSize: 11, letterSpacing: "0.05em" },
+  mdTableCell: { border: "1px solid rgba(var(--lim-accent-rgb),0.07)", padding: "6px 12px", verticalAlign: "top" as const, color: "#778899" },
   toolCard: {
     borderRadius: 3,
     padding: "6px 10px",
     background: "rgba(0,6,16,0.8)",
-    border: "1px solid rgba(0,212,255,0.07)",
+    border: "1px solid rgba(var(--lim-accent-rgb),0.07)",
     fontFamily: "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace",
     fontSize: 11,
   },
   toolOutputPre: {
     margin: 0, padding: "5px 9px",
     background: "rgba(0,4,10,0.8)",
-    border: "1px solid rgba(0,212,255,0.06)",
+    border: "1px solid rgba(var(--lim-accent-rgb),0.06)",
     borderRadius: 3, fontSize: 10,
     fontFamily: "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace",
     whiteSpace: "pre-wrap" as const, wordBreak: "break-all" as const,
@@ -1768,15 +2368,15 @@ const styles = {
   thinkBubble: {
     padding: "7px 11px",
     background: "rgba(0,4,12,0.6)",
-    border: "1px solid rgba(0,212,255,0.06)",
-    borderLeft: "2px solid rgba(0,212,255,0.18)",
+    border: "1px solid rgba(var(--lim-accent-rgb),0.06)",
+    borderLeft: "2px solid rgba(var(--lim-accent-rgb),0.18)",
     borderRadius: 3, lineHeight: 1.5,
   },
   planCard: {
     padding: "9px 14px",
     background: "rgba(0,8,20,0.7)",
-    border: "1px solid rgba(0,212,255,0.1)",
-    borderLeft: "2px solid rgba(0,212,255,0.35)",
+    border: "1px solid rgba(var(--lim-accent-rgb),0.1)",
+    borderLeft: "2px solid rgba(var(--lim-accent-rgb),0.35)",
     borderRadius: 3,
   },
   subtaskCard: {
@@ -1792,12 +2392,12 @@ const styles = {
     color: "#334455",
     fontSize: 10,
     fontStyle: "italic" as const,
-    borderLeft: "2px solid rgba(0,212,255,0.15)",
+    borderLeft: "2px solid rgba(var(--lim-accent-rgb),0.15)",
     fontFamily: "monospace",
   },
   traceLine: {
     paddingLeft: 8,
-    borderLeft: "1px solid rgba(0,212,255,0.07)",
+    borderLeft: "1px solid rgba(var(--lim-accent-rgb),0.07)",
     lineHeight: 1.4,
     opacity: 0.65,
   },
@@ -1819,7 +2419,7 @@ const styles = {
   textarea: {
     flex: 1,
     background: "rgba(0,8,18,0.85)",
-    border: "1px solid rgba(0,212,255,0.14)",
+    border: "1px solid rgba(var(--lim-accent-rgb),0.14)",
     borderRadius: 3,
     color: "#aabbcc",
     padding: "8px 12px",
@@ -1834,12 +2434,12 @@ const styles = {
   },
   shortcutHint: {
     fontSize: 9,
-    color: "rgba(0,212,255,0.2)",
+    color: "rgba(var(--lim-accent-rgb),0.2)",
     letterSpacing: "0.03em",
     fontFamily: "monospace",
   },
   btn: {
-    border: "1px solid rgba(0,212,255,0.18)",
+    border: "1px solid rgba(var(--lim-accent-rgb),0.18)",
     borderRadius: 3,
     color: "#aabbcc",
     padding: "8px 16px",
@@ -1860,35 +2460,35 @@ const styles = {
   },
   modalBox: {
     background: "rgba(2,6,18,0.99)",
-    border: `1px solid rgba(0,212,255,0.2)`,
+    border: `1px solid rgba(var(--lim-accent-rgb),0.2)`,
     borderRadius: 4,
     padding: 22,
     width: 520,
     maxWidth: "90vw",
     maxHeight: "80vh",
     overflowY: "auto" as const,
-    boxShadow: "0 0 50px rgba(0,212,255,0.08), 0 0 100px rgba(0,0,0,0.6)",
+    boxShadow: "0 0 50px rgba(var(--lim-accent-rgb),0.08), 0 0 100px rgba(0,0,0,0.6)",
     position: "relative" as const,
   },
   argsTable: {
     background: "rgba(0,4,12,0.8)",
-    border: "1px solid rgba(0,212,255,0.1)",
+    border: "1px solid rgba(var(--lim-accent-rgb),0.1)",
     borderRadius: 3,
     overflow: "hidden" as const,
   },
   argsRow: {
     display: "flex",
-    borderBottom: "1px solid rgba(0,212,255,0.05)",
+    borderBottom: "1px solid rgba(var(--lim-accent-rgb),0.05)",
     fontSize: 11,
     fontFamily: "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace",
   },
   argsKey: {
-    color: "rgba(0,212,255,0.5)",
+    color: "rgba(var(--lim-accent-rgb),0.5)",
     padding: "5px 10px",
     background: "rgba(0,8,20,0.8)",
     flexShrink: 0,
     minWidth: 100,
-    borderRight: "1px solid rgba(0,212,255,0.08)",
+    borderRight: "1px solid rgba(var(--lim-accent-rgb),0.08)",
     fontWeight: 700,
   },
   argsVal: {
@@ -1901,7 +2501,7 @@ const styles = {
   answerInput: {
     width: "100%",
     background: "rgba(0,6,16,0.9)",
-    border: "1px solid rgba(0,212,255,0.18)",
+    border: "1px solid rgba(var(--lim-accent-rgb),0.18)",
     borderRadius: 3,
     color: "#aabbcc",
     padding: "8px 12px",
@@ -1921,13 +2521,13 @@ const styles = {
     alignItems: "center",
     gap: 6,
     background: "rgba(0,14,28,0.8)",
-    border: "1px solid rgba(0,212,255,0.15)",
+    border: "1px solid rgba(var(--lim-accent-rgb),0.15)",
     borderRadius: 3,
     padding: "3px 6px",
   },
   attachmentPreview: { width: 20, height: 20, objectFit: "cover" as const, borderRadius: 2 },
   attachmentLabel:  { fontSize: 10, color: "#667788", fontFamily: "monospace" },
   attachmentRemove: { border: "none", background: "transparent", color: RED_ERR, cursor: "pointer", fontSize: 14, lineHeight: 1, padding: 0 },
-  attachmentMeta:   { fontSize: 10, color: "rgba(0,212,255,0.25)", fontFamily: "monospace" },
+  attachmentMeta:   { fontSize: 10, color: "rgba(var(--lim-accent-rgb),0.25)", fontFamily: "monospace" },
   attachmentError:  { color: RED_ERR, fontSize: 11, fontFamily: "monospace" },
 };
