@@ -6,6 +6,18 @@ import {
 } from "./epistemic_state.js";
 import { estimateMessagesTokens } from "./token_estimate.js";
 import { stashToolBodyElide } from "./output_distill.js";
+import { effectiveHarnessEnvRaw } from "./harness_effective_env.js";
+
+/** Prepended to auto / forced compression digests so summaries keep user-critical facts. */
+const COMPRESSION_SUMMARY_RUBRIC =
+  "SUMMARY_RUBRIC: Preserve verbatim (1) every explicit user number, deadline, path, filename, and must-not/shall constraint, (2) tool-proven facts and repo paths the user depends on, (3) open sub-questions the user still expects answered. Paraphrase filler only; dropping a numbered user requirement is worse than a longer digest.";
+
+function buildCompressionPolicyBlock(policy: string): string {
+  const p = policy.trim();
+  const parts: string[] = [COMPRESSION_SUMMARY_RUBRIC];
+  if (p) parts.push(`COMPRESSION POLICY:\n${p}`);
+  return `\n${parts.join("\n\n")}\n`;
+}
 
 // ─── Round grouping for compression ──────────────────────────────────────────
 
@@ -48,7 +60,7 @@ function extractRounds(conv: Message[]): Round[] {
     if ("tool_calls" in m && Array.isArray(m.tool_calls)) {
       for (const tc of m.tool_calls as Array<{ function?: { name?: string } }>) {
         const name = tc.function?.name ?? "";
-        if (name === "think" || name === "plan") hasThinkOrPlan = true;
+        if (name === "think" || name === "plan" || name === "hypothesize") hasThinkOrPlan = true;
       }
     }
 
@@ -408,9 +420,7 @@ export class ContextManager {
       tool_round_summaries: toCompress.map((r) => r.summary.split("\n").filter(Boolean).slice(0, 16)),
     }).slice(0, 14_000);
     const policy = this.compressionPolicyPreamble();
-    const policyBlock = policy
-      ? `\nCOMPRESSION POLICY:\n${policy}\n`
-      : "";
+    const policyBlock = buildCompressionPolicyBlock(policy);
     const summaryMsg: Message = {
       role: "user",
       content:
@@ -490,14 +500,14 @@ export class ContextManager {
    * `[TOOL_BODY_ELIDED …]` + artifact pointer (AGENT_TOOL_BODY_ELIDE=1).
    */
   async elideStaleToolResults(): Promise<void> {
-    if (process.env["AGENT_TOOL_BODY_ELIDE"] !== "1") return;
+    if (effectiveHarnessEnvRaw("AGENT_TOOL_BODY_ELIDE") !== "1") return;
     const minChars = Math.max(
       2000,
-      parseInt(process.env["AGENT_TOOL_ELIDE_MIN_CHARS"] ?? "10000", 10) || 10_000
+      parseInt(effectiveHarnessEnvRaw("AGENT_TOOL_ELIDE_MIN_CHARS") ?? "10000", 10) || 10_000
     );
     const keepRounds = Math.max(
       1,
-      parseInt(process.env["AGENT_TOOL_ELIDE_KEEP_ROUNDS"] ?? "3", 10) || 3
+      parseInt(effectiveHarnessEnvRaw("AGENT_TOOL_ELIDE_KEEP_ROUNDS") ?? "3", 10) || 3
     );
     const rounds = extractRounds(this.conversation);
     const keepIdx = new Set<number>();
@@ -565,7 +575,7 @@ export class ContextManager {
       tool_round_summaries: toCompress.map((r) => r.summary.split("\n").filter(Boolean).slice(0, 16)),
     }).slice(0, 14_000);
     const policy = this.compressionPolicyPreamble();
-    const policyBlock = policy ? `\nCOMPRESSION POLICY:\n${policy}\n` : "";
+    const policyBlock = buildCompressionPolicyBlock(policy);
     const summaryMsg: Message = {
       role: "user",
       content:

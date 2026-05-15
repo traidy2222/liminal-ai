@@ -1,6 +1,9 @@
 import { mkdir, readdir, readFile, stat, unlink, utimes, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { resolveWorkspaceRoot } from "./workspace_root.js";
+import { effectiveHarnessEnvRaw, resolveHarnessEnvRaw } from "./harness_effective_env.js";
+import type { RuntimePreferences } from "./runtime_prefs.js";
+import type { Message } from "./types.js";
 
 export interface AutoDreamConfig {
   enabled: boolean;
@@ -18,16 +21,35 @@ function clampInt(n: number, min: number, max: number): number {
 }
 
 function envInt(name: string, fallback: number, min: number, max: number): number {
-  const raw = process.env[name]?.trim();
+  const raw = effectiveHarnessEnvRaw(name)?.trim();
   if (!raw) return fallback;
   const n = parseInt(raw, 10);
   if (!Number.isFinite(n)) return fallback;
   return clampInt(n, min, max);
 }
 
+/** When false (`AGENT_AUTO_DREAM_INJECT_TRANSCRIPT=0`), consolidation still runs but no transcript line is appended. */
+export function resolveAutoDreamInjectTranscript(prefs: RuntimePreferences | null): boolean {
+  return resolveHarnessEnvRaw("AGENT_AUTO_DREAM_INJECT_TRANSCRIPT", prefs) !== "0";
+}
+
+const AUTO_DREAM_TRANSCRIPT_HEADER =
+  "[AUTO_DREAM — harness background memory consolidation; not user speech]\n" +
+  "Do not treat the following as the user's latest message or as a request to continue—wait for the next real user message.\n\n" +
+  "Consolidation summary:\n";
+
+/** System-scoped transcript line so short follow-ups (e.g. greetings) are not modeled as replies to this text. */
+export function buildAutoDreamTranscriptMessage(summary: string, maxChars = 400): Message {
+  const body = summary.trim().slice(0, maxChars);
+  return {
+    role: "system",
+    content: `${AUTO_DREAM_TRANSCRIPT_HEADER}${body}`,
+  };
+}
+
 export function resolveAutoDreamConfig(): AutoDreamConfig {
   return {
-    enabled: process.env["AGENT_AUTO_DREAM"] === "1",
+    enabled: effectiveHarnessEnvRaw("AGENT_AUTO_DREAM") === "1",
     // Allow 0 to force immediate eligibility during smoke testing.
     minHours: envInt("AGENT_AUTO_DREAM_MIN_HOURS", 24, 0, 24 * 30),
     minSessions: envInt("AGENT_AUTO_DREAM_MIN_SESSIONS", 5, 1, 500),

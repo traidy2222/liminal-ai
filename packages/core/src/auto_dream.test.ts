@@ -2,7 +2,9 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import {
   buildAutoDreamPrompt,
+  buildAutoDreamTranscriptMessage,
   resolveAutoDreamConfig,
+  resolveAutoDreamInjectTranscript,
 } from "./auto_dream.js";
 
 test("resolveAutoDreamConfig defaults and clamps", () => {
@@ -30,3 +32,29 @@ test("buildAutoDreamPrompt includes notes and sessions", () => {
   assert.match(prompt, /deletes/);
 });
 
+test("buildAutoDreamTranscriptMessage is system-scoped with non-user framing", () => {
+  const m = buildAutoDreamTranscriptMessage("  hello world  ", 400);
+  assert.equal(m.role, "system");
+  assert.ok(typeof m.content === "string");
+  assert.match(m.content, /not user speech/);
+  assert.match(m.content, /wait for the next real user message/);
+  assert.match(m.content, /hello world/);
+});
+
+test("buildAutoDreamTranscriptMessage truncates summary", () => {
+  const long = "x".repeat(500);
+  const m = buildAutoDreamTranscriptMessage(long, 80);
+  assert.ok(typeof m.content === "string");
+  assert.equal(m.content.replace(/^[\s\S]*Consolidation summary:\n/, "").length, 80);
+});
+
+test("resolveAutoDreamInjectTranscript is false when env is 0", () => {
+  const prev = process.env["AGENT_AUTO_DREAM_INJECT_TRANSCRIPT"];
+  process.env["AGENT_AUTO_DREAM_INJECT_TRANSCRIPT"] = "0";
+  try {
+    assert.equal(resolveAutoDreamInjectTranscript(null), false);
+  } finally {
+    if (prev === undefined) delete process.env["AGENT_AUTO_DREAM_INJECT_TRANSCRIPT"];
+    else process.env["AGENT_AUTO_DREAM_INJECT_TRANSCRIPT"] = prev;
+  }
+});
