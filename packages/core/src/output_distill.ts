@@ -1,11 +1,12 @@
 /**
  * Tool-output distillation: large reads → structured summary + artifact pointer.
  */
-import { mkdir, writeFile, readFile } from "node:fs/promises";
+import { mkdir, writeFile, readFile, stat } from "node:fs/promises";
 import path from "node:path";
 import type OpenAI from "openai";
 import { completeChatJson, getFastModelSlug } from "./router.js";
 import { resolveWorkspaceRoot } from "./workspace_root.js";
+import { effectiveHarnessEnvRaw } from "./harness_effective_env.js";
 
 export interface DistilledOutput {
   source: { tool: string; arg: string; hash: string };
@@ -28,6 +29,11 @@ export function artifactPathForHash(hash: string): string {
   return path.join(resolveWorkspaceRoot(), ".agent_artifacts", `${hash}.txt`);
 }
 
+/** Refuse to load whole artifact files larger than this (read_artifact / distill pointers). */
+export const MAX_ARTIFACT_BYTES = 12_000_000;
+
+const MAX_ARTIFACT_LINES_PER_READ = 8_000;
+
 export async function writeArtifact(hash: string, fullText: string): Promise<string> {
   const dir = path.join(resolveWorkspaceRoot(), ".agent_artifacts");
   await mkdir(dir, { recursive: true });
@@ -47,23 +53,49 @@ export async function readArtifactText(
   hash: string,
   range?: { startLine: number; endLine: number }
 ): Promise<{ ok: true; text: string } | { ok: false; error: string }> {
+  const clean = hash.replace(/[^a-f0-9]/gi, "");
+  if (!clean) {
+    return { ok: false, error: "read_artifact: invalid hash" };
+  }
   try {
-    const p = artifactPathForHash(hash.replace(/[^a-f0-9]/gi, ""));
+    const p = artifactPathForHash(clean);
+    const st = await stat(p);
+    if (st.size > MAX_ARTIFACT_BYTES) {
+      return {
+        ok: false,
+        error:
+          `Artifact too large (${st.size} bytes, max ${MAX_ARTIFACT_BYTES}). ` +
+          "Use start_line/end_line for a slice or re-fetch with a smaller web_fetch max_chars.",
+      };
+    }
     const raw = await readFile(p, "utf8");
     if (!range) return { ok: true, text: raw };
+    const start = Math.max(1, range.startLine);
+    let end = range.endLine <= 0 ? start + MAX_ARTIFACT_LINES_PER_READ - 1 : range.endLine;
+    if (end - start + 1 > MAX_ARTIFACT_LINES_PER_READ) {
+      end = start + MAX_ARTIFACT_LINES_PER_READ - 1;
+    }
     const lines = raw.split("\n");
-    const slice = lines.slice(
-      Math.max(0, range.startLine - 1),
-      range.endLine <= 0 ? undefined : range.endLine
-    );
-    return { ok: true, text: slice.join("\n") };
+    const slice = lines.slice(start - 1, end);
+    const text = slice.join("\n");
+    const truncated = end < lines.length ? `\n[artifact truncated to lines ${start}-${end}]` : "";
+    return { ok: true, text: text + truncated };
   } catch (e) {
-    return { ok: false, error: e instanceof Error ? e.message : String(e) };
+    const msg = e instanceof Error ? e.message : String(e);
+    if (/enoent|not found/i.test(msg)) {
+      return {
+        ok: false,
+        error:
+          `Artifact not found for hash "${clean}". ` +
+          "Artifacts exist only when AGENT_DISTILL=1 or AGENT_TOOL_BODY_ELIDE=1 stored tool output — use the inline summary or call web_fetch again.",
+      };
+    }
+    return { ok: false, error: msg };
   }
 }
 
 export function shouldDistillToolOutput(toolName: string, output: string): boolean {
-  if (process.env["AGENT_DISTILL"] !== "1") return false;
+  if (effectiveHarnessEnvRaw("AGENT_DISTILL") !== "1") return false;
   if (!output || output.startsWith("ERROR:")) return false;
   if (toolName === "read_file" && output.length > 2000) return true;
   if (toolName === "web_fetch" && output.length > 1500) return true;

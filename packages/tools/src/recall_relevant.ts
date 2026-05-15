@@ -4,7 +4,7 @@
  */
 import { defineTool } from "./helpers.js";
 import { loadNotes, loadRawNotes, bumpNoteMetadata, type StoredNote } from "./notes_store.js";
-import { rankDocumentsForQuery, type RankableDoc, fetchEmbeddings } from "@liminal/core";
+import { rankDocumentsForQuery, type RankableDoc, fetchEmbeddings, effectiveHarnessEnvRaw } from "@liminal/core";
 import {
   loadEmbedIndex,
   upsertNoteEmbeddings,
@@ -87,7 +87,9 @@ export const recallRelevantTool = defineTool({
     "WHAT: Ranked retrieval across session notes + vault for natural-language (multi-query RRF when `queries` set).\n" +
     "Uses BM25 + recency + type; when AGENT_EMBED_MODEL is set, adds semantic similarity on notes.\n" +
     "WHEN: Starting work on a topic, or when search_memory / vault_search feel too literal.\n" +
-    "ARGS: query — single query (optional if queries set); queries — array of sub-queries; hyde — optional hypothetical passage for embedding only; k; scope.",
+    "NOT WHEN: You need structured joins or exact key lookup — use memory_query (exact/type/graph) instead.\n" +
+    "GOOD OUTPUT: A short ranked list of note/vault snippets tied to your query; fold only relevant lines into the user-facing answer.\n" +
+    "ARGS: query — single query (optional if queries set); queries — array of sub-queries; hyde — optional hypothetical passage for embedding only; k or max_results (same limit, default 8); scope.",
   requiresApproval: false,
   parameters: {
     type: "object",
@@ -147,7 +149,8 @@ export const recallRelevantTool = defineTool({
     additionalProperties: false,
   },
   handler: async (args, emit) => {
-    const k = Math.min(30, Math.max(1, (args["k"] as number | undefined) ?? 8));
+    const kRaw = (args["k"] as number | undefined) ?? (args["max_results"] as number | undefined);
+    const k = Math.min(30, Math.max(1, kRaw ?? 8));
     const scope = (args["scope"] as string | undefined) ?? "both";
     const hyde = typeof args["hyde"] === "string" ? args["hyde"].trim().slice(0, 2000) : "";
     const qArr = args["queries"] as string[] | undefined;
@@ -188,7 +191,7 @@ export const recallRelevantTool = defineTool({
       /\/$/,
       ""
     );
-    const embedModel = process.env["AGENT_EMBED_MODEL"]?.trim();
+    const embedModel = effectiveHarnessEnvRaw("AGENT_EMBED_MODEL")?.trim();
 
     const lines: string[] = [];
     const bumpKeys: string[] = [];
@@ -337,7 +340,7 @@ export const recallRelevantTool = defineTool({
 
       let top = dedupedFused.slice(0, k);
 
-      if (process.env["AGENT_MEMORY_GRAPH"] !== "0" && top.length > 0) {
+      if (effectiveHarnessEnvRaw("AGENT_MEMORY_GRAPH") !== "0" && top.length > 0) {
         const extra = new Map<string, { id: string; score: number; value: string }>();
         const floor = top.length > 0 ? top[top.length - 1]!.score * 0.35 : 0;
         for (const t of top.slice(0, Math.min(6, top.length))) {
