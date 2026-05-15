@@ -6,11 +6,14 @@
   ],
   "scripts": {
     "build": "npm run build --workspaces --if-present",
-    "tui": "npm run start --workspace=packages/tui",
+    "tui": "node scripts/run-tui.mjs",
+    "tui:bootstrap": "node scripts/run-tui.mjs --bootstrap",
     "web": "node scripts/run-web.mjs",
-    "web:dev": "npm run dev --workspace=packages/web",
+    "web:dev": "node scripts/run-web-dev.mjs",
+    "web:dev:bootstrap": "node scripts/run-web-dev.mjs --bootstrap",
     "typecheck": "npm run typecheck --workspaces --if-present",
-    "test": "npm run test --workspace=@liminal/core"
+    "test": "npm run test --workspace=@liminal/core",
+    "verify-harness-defaults-no-secrets": "node scripts/verify-harness-defaults-no-secrets.mjs"
   },
   "devDependencies": {
     "concurrently": "^9.2.1"
