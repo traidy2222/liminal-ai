@@ -36,7 +36,7 @@ At a high level, `AgentHarness.send()`:
 6. Applies drift/recovery logic and optional critic/finalization passes.
 7. Emits `turn_end` with runtime metrics.
 
-Liminal does not use a hard wall-clock kill for root `send()`; it relies on bounded rounds, error controls, and recovery logic.
+Root `send()` is bounded primarily by ReAct round limits, tool error controls, and recovery logic. **`AGENT_SEND_TIMEOUT_MS`** (default **600000** ms = 10 minutes in typed defaults) optionally aborts an in-flight turn when set to a positive value; set `0` to disable that wall clock.
 
 ## Tool Dispatcher Contract
 
@@ -147,4 +147,4 @@ The harness emits events for:
 - drift/recovery signals
 - vault activity
 
-See `docs/telemetry-and-events.md` for payload-level detail.
+See [Events](../reference/events.md) for payload-level detail.

@@ -9,7 +9,8 @@ Major scenario families include:
 - long-horizon behavior
 - memory retrieval quality
 - approval correctness
-- research-quality and streaming cleanliness checks
+- research-quality (`web_research_quality.ts` — tests multi-query **`web_search` + `web_fetch`** behavior, not a removed `web_research` tool)
+- streaming cleanliness checks
 
 ## Guarantees and Scenario Mapping
 

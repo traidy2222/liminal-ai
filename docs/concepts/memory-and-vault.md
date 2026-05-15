@@ -40,7 +40,19 @@ Vault tools manage Obsidian-compatible markdown with frontmatter and wikilinks:
 - `vault_write`
 - `vault_list`, `vault_links`, `vault_graph`, `vault_delete`
 
-Set `AGENT_VAULT_PATH` to your real vault path to avoid writing to fallback locations.
+### Vault path resolution
+
+Order when `AGENT_VAULT_PATH` is unset:
+
+1. **Explicit** `AGENT_VAULT_PATH` (normalized absolute path)
+2. **Obsidian auto-discovery** — read global `obsidian.json`, pick an unambiguous vault (single entry, sole `open: true`, or latest `ts`) when `AGENT_OBSIDIAN_DISCOVER` is on (default)
+3. Fallback **`~/.agent_vault`**
+
+Use `AGENT_OBSIDIAN_VAULT_NAME_SUBSTRING` when several vaults are registered. Set `AGENT_OBSIDIAN_DISCOVER=0` to skip Obsidian and use the fallback only. Set `AGENT_OBSIDIAN_REQUIRE_DOT_OBSIDIAN=0` to allow paths without a `.obsidian` folder.
+
+### Vault vs workspace files
+
+Rich briefs and wikilinked notes live in the **vault**, not under `AGENT_WORKSPACE_ROOT` tree paths like `situation-room/`. Use **`vault_search`** / **`vault_read`** / **`vault_write`** — not **`read_file`** on guessed workspace paths.
 
 ## Retrieval Order
 
@@ -61,6 +73,11 @@ These steps are **suggestions** only. The harness does not block `web_search` ba
 - `aggressive` (broader write behavior)
 
 Deduplication is default-on unless `AGENT_VAULT_DEDUPE=0`.
+
+- **Update in place:** reuse the **exact same** `vault_write` title — dedupe is skipped when that title already exists.
+- **New edition:** when content overlaps an older brief (e.g. Day 76 after Day 75), set **`ignore_dedupe: true`** on `vault_write`, or merge into the existing note instead of creating a parallel file.
+
+See [Vault briefs and updates](../guides/vault-briefs-and-updates.md).
 
 ## Growth vs Noise Tradeoff
 

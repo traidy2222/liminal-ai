@@ -149,4 +149,4 @@ Child harnesses: `set_persona` and **`append_persona_living`** are harness-scope
 
 ## Configuration summary
 
-See [Configuration](./configuration.md#persona-and-bootstrap) for a copy-paste env list.
+See [Configuration](../configuration.md#persona-and-bootstrap) for a copy-paste env list.

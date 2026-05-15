@@ -51,20 +51,10 @@ Human-oriented guides for running, configuring, and extending the Liminal agent 
 |----------|----------|
 | [Tool families](./reference/tools/index.md) | Lazy loading catalog |
 
-## Mobile
-
-| Document | Contents |
-|----------|----------|
-| [API contract](./mobile/api_contract.md) | Mobile backend notes |
-| [Play Store readiness](./mobile/play_store_readiness.md) | Android checklist |
-
 ## Contributors
 
-| Resource | Contents |
-|----------|----------|
-| `CLAUDE.md` (repo root) | Commands, package map, env tables for agents |
-| Root `README.md` | Operator overview + contributing |
+See repository root `README.md` and `CLAUDE.md`.
 
-**Browse locally (optional):** `npm run docs:dev` — VitePress site with sidebar search.
+**Browse locally:** `npm run docs:dev` — VitePress with sidebar search.
 
-**Maintenance:** After changing managed env keys or field meta, run `npm run docs:gen`. Run `npm run docs:check` before PRs that touch docs.
+**Maintenance:** `npm run docs:gen` · `npm run docs:check`

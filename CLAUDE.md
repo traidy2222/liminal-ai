@@ -176,7 +176,9 @@ Troubleshooting quick path for inactive tools:
 | `AGENT_WEB_FETCH_REFERER` | `https://www.google.com/` | Referer for cross-site `web_fetch` retries |
 | `AGENT_WEB_FETCH_SEC_CH_PLATFORM` | `"Windows"` | `sec-ch-ua-platform` when hints are sent |
 | `AGENT_WEB_FETCH_403_RETRY` | on | Set `0` to skip Firefox + Chrome-cross-site retries after bot-wall 401/403 |
-| `AGENT_WEB_RESEARCH=1`    | off     | Enable `web_research` tool (multi-query + dedup + readability) |
+| `AGENT_WEB_FETCH_TOTAL_WALL_MS` | `55000` | Hard wall clock (ms) per `web_fetch` call (all retries + parse) |
+
+Research on the public web uses **`web_search`** plus parallel **`web_fetch`** (no separate `web_research` tool). See [Research with web tools](docs/guides/research-with-web-tools.md).
 
 
 ### Markets
@@ -219,7 +221,7 @@ Troubleshooting quick path for inactive tools:
 | `AGENT_LOCATION`              | —       | Physical location string injected into world context                                            |
 
 
-**Persona UI theme (no env):** After custom persona generation completes, `persona/active/ui_theme.json` stores a validated, presentation-only `PersonaUiThemeV1` (hex palette, short `displayLabel`, `motion` preset). Web exposes it on `GET /api/config` as `personaUiTheme` and `personaDisplayLabel`; the TUI reads the same file at startup (`PersonaChromeContext`). This JSON is not executable CSS or script — only whitelisted fields mapped by the clients. See `docs/persona-system.md` (UI theme section) and `packages/core/src/persona_ui_theme.ts`.
+**Persona UI theme (no env):** After custom persona generation completes, `persona/active/ui_theme.json` stores a validated, presentation-only `PersonaUiThemeV1` (hex palette, short `displayLabel`, `motion` preset). Web exposes it on `GET /api/config` as `personaUiTheme` and `personaDisplayLabel`; the TUI reads the same file at startup (`PersonaChromeContext`). This JSON is not executable CSS or script — only whitelisted fields mapped by the clients. See `docs/concepts/persona-system.md` (UI theme section) and `packages/core/src/persona_ui_theme.ts`.
 
 ---
 
@@ -312,7 +314,6 @@ packages/tui    packages/web    packages/eval   — run directly via tsx, never 
 | `process_manager.ts` | `run_background`, `kill_process`, `list_processes`, `read_process_output` | Background process lifecycle.                                                                                                       |
 | `web_fetch.ts`       | `web_fetch`                                                               | HTTP GET with retry + readability extraction; cacheable.                                                                            |
 | `web_search.ts`      | `web_search`                                                              | Keyword search (free tier); cacheable.                                                                                              |
-| `web_research.ts`    | `web_research`                                                            | Orchestrated research: multi-query, dedup, readability. Gate: `AGENT_WEB_RESEARCH=1`.                                               |
 | `ask_user.ts`        | `ask_user`                                                                | Blocks until human response via approval flow.                                                                                      |
 | `think.ts`           | `think`                                                                   | Structured reasoning trace.                                                                                                       |
 | `plan.ts`            | `plan`                                                                    | Ordered step list with optional execute indices.                                                                                  |
@@ -480,7 +481,7 @@ CLI: `npm run eval -w packages/eval`. Optional JSON sink: `AGENT_EVAL_JSON_SINK=
 | `retrieval_precision.ts`  | Memory retrieval precision                  |
 | `context_rot.ts`          | Context compression robustness              |
 | `approval_correctness.ts` | Tool approval gate correctness              |
-| `web_research_quality.ts` | Multi-query web research, dedup             |
+| `web_research_quality.ts` | Multi-query research behavior (`web_search` + `web_fetch`; not a removed tool) |
 | `research_grade.ts`       | Fact-checked, sourced output                |
 | `harness_capability.ts`   | Orchestration, context, advanced features   |
 | `long_horizon.ts`         | Long-horizon task autonomy                  |

@@ -20,5 +20,11 @@ apps/android/local.properties
 packages/tui/*.txt
 packages/tui/*.md
 packages/tui/Python-API-Server/
+
+# VitePress build output
+docs/.vitepress/dist/
+docs/.vitepress/cache/
+docs/.vitepress/.temp/
+
 *.txt
 

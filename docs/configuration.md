@@ -1,10 +1,13 @@
 # Configuration Reference
 
-Use `.env.example` as canonical source. This document groups major flags by subsystem.
+> **Moved (narrative):** [Configuration basics](./start/configuration-basics.md) explains secrets vs Settings vs defaults.  
+> **Full key list:** [Environment reference](./reference/environment.md) (generated from code).
+
+This page groups major flags by subsystem for narrative browsing. **Precedence:** real `process.env` → `.agent_runtime_prefs.json` (`harness.env`) → [`harness_default_constants.ts`](../packages/core/src/harness_default_constants.ts). Put **secrets** in `.env` only; tune product flags via **Web Settings** (`GET`/`PUT /api/settings`) or prefs JSON.
 
 ## Core
 
-- `AGENT_RULE_RECALL` — set to `0` to disable the harness-injected **named rule recall** system message at ReAct round 2 (see [Harness protocol](./harness-protocol.md)). Default is on; disabling saves tokens but removes the extra R-* nudge batch.
+- `AGENT_RULE_RECALL` — set to `0` to disable the harness-injected **named rule recall** system message at ReAct round 2 (see [Harness protocol](./concepts/harness-protocol.md)). Default is on; disabling saves tokens but removes the extra R-* nudge batch.
 - `AGENT_API_KEY`
 - `AGENT_API_BASE_URL`
 - `AGENT_MODEL`
@@ -31,9 +34,9 @@ First-run and mid-session voice are controlled by the harness plus TUI/web clien
 - `AGENT_PERSONA_GEN_TIMEOUT_MS` — per-request style timeout for persona HTTP calls (default `90000`, clamped up to `180000` ms).
 - `AGENT_PERSONA_GEN_RETRIES` — retry budget for those calls (default `2`, max `3`).
 
-**Persona UI theme** — no extra env. After a successful custom generation, `persona/active/ui_theme.json` holds a validated `PersonaUiThemeV1` (palette, label, motion). Web clients read it via `GET /api/config` (`personaUiTheme`, `personaDisplayLabel`); the TUI loads the same path at startup. See **[Persona system](./persona-system.md#ui-theme-clients)**.
+**Persona UI theme** — no extra env. After a successful custom generation, `persona/active/ui_theme.json` holds a validated `PersonaUiThemeV1` (palette, label, motion). Web clients read it via `GET /api/config` (`personaUiTheme`, `personaDisplayLabel`); the TUI loads the same path at startup. See **[Persona system](./concepts/persona-system.md#ui-theme-clients)**.
 
-Full pipeline, on-disk layout under `persona/active/`, and core APIs: **[Persona system](./persona-system.md)**.
+Full pipeline, on-disk layout under `persona/active/`, and core APIs: **[Persona system](./concepts/persona-system.md)**.
 
 ## Safety and Approval
 
@@ -72,7 +75,7 @@ Full pipeline, on-disk layout under `persona/active/`, and core APIs: **[Persona
 
 Readability runs for **article extraction**, not pixel layout. Before JSDOM parses the document, author `<style>`, `<link rel="stylesheet">`, and `<script>` blocks are stripped from a copy of the HTML so inline CSS does not go through `rrweb-cssom` (which errors on nested or modern CSS-in-JS). A silent `VirtualConsole` avoids noisy `jsdomError` logs for residual parse issues. HTML text decoding uses the response `Content-Type` charset when valid (falls back to UTF-8).
 
-For rendered pages, screenshots, or DOM after layout, use Playwright **`browser_open` / `browser_act`** (see tool family `browser`). Document `GET`s use `Accept-Encoding: gzip, deflate, br` (not **zstd**) so fewer CDNs return zstd-compressed bodies that can surface as binary noise in plain-text extraction. See [Harness protocol](./harness-protocol.md#web-fetch-readability-and-jsdom) for the conceptual summary.
+For rendered pages, screenshots, or DOM after layout, use Playwright **`browser_open` / `browser_act`** (see tool family `browser`). Document `GET`s use `Accept-Encoding: gzip, deflate, br` (not **zstd**) so fewer CDNs return zstd-compressed bodies that can surface as binary noise in plain-text extraction. See [Harness protocol](./concepts/harness-protocol.md#web-fetch-readability-and-jsdom) for the conceptual summary.
 
 ## Memory and Retrieval
 
@@ -153,31 +156,5 @@ After a **successful** root `turn_end(ok)`, the harness may schedule an idle deb
 
 ## Recommended Baseline Profiles
 
-### Stable local dev
-- `AGENT_TOOL_LAZY=1`
-- `AGENT_UI_VERBOSITY=normal`
-
-### Safety-sensitive
-- `AGENT_SAFETY_JUDGE=1`
-- `AGENT_APPROVAL_TIMEOUT_MS=120000`
-
-### YOLO (high-risk, temporary)
-- `AGENT_YOLO=1`
-- Launch with CLI flags when possible so scope is explicit and session-bound:
-  - `npm run web -- --yolo`
-  - `npm run web:dev -- --yolo`
-  - `npm run tui -- --yolo`
-
-### Research-heavy
-- `AGENT_QUERY_REWRITE=1`
-- `AGENT_EMBED_MODEL=openai/text-embedding-3-small`
-- `AGENT_VAULT_AUTO_WRITE=research`
-
-### Long-session / deep reasoning
-- `AGENT_COMPRESS_SEMANTIC=1`
-- `AGENT_REFLEXION_SEMANTIC=1` (default on)
-- `AGENT_PROTOCOL_INTENT_HINT=coding` (adjust to task class)
-
-### Plugin extensions
-- `AGENT_PLUGIN_DIR=/path/to/plugins`
+Moved to [operations/profiles.md](./operations/profiles.md).
 

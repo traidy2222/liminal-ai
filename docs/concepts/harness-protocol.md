@@ -67,8 +67,9 @@ The following appear in `PROTOCOL_NAMED_RULES` in `systemPrompt.ts` but have **n
 - **R-KNOWN-UNKNOWNS** — After failures, state what was tried and what remains unknown.
 - **R-RELATED-MEMORY-HOOK** — Thematic tasks: one targeted memory pass from the current ask.
 - **R-SELF-CHECK-SCORE** (optional) — Meta score in `think()` only.
+- **R-HARNESS-VS-MODEL** — Persona vs Liminal harness vs base LLM; do not merge OWL/ZOO branding with persona name in identity answers.
 
-Refer to `systemPrompt.ts` for exact wording.
+Refer to `systemPrompt.ts` for exact wording. See [Identity stack](./identity-stack.md).
 
 ## Coherent multi-step development (operational summary)
 
@@ -82,19 +83,22 @@ Refer to `systemPrompt.ts` for exact wording.
 
 When **`AGENT_WEB_READABILITY=1`**, `web_fetch` uses JSDOM + Mozilla Readability for article-style extraction.
 
+- **Worker thread** — Parse runs in `web_fetch_readability_worker.ts` so pathological HTML cannot block the main event loop (which would stall `AGENT_WEB_FETCH_TOTAL_WALL_MS` timers and freeze the web UI).
 - **Not a layout engine** — JSDOM does not render modern CSS like a browser. For visual truth, use Playwright `browser_*` tools.
-- **Author CSS stripped before parse** — Inline `<style>`, `<link rel=stylesheet>`, and `<script>` are removed from a copy of the HTML before `new JSDOM(...)`, because `rrweb-cssom` fails on nested/modern CSS and spams `jsdomError`. Readability only needs DOM structure for main content.
-- **VirtualConsole** — Residual `jsdomError` events are swallowed for this short-lived parse.
+- **Author CSS stripped before parse** — Inline `<style>`, `<link rel=stylesheet>`, and `<script>` are removed before `new JSDOM(...)`.
+- **Hard wall** — Entire `web_fetch` call is capped by `AGENT_WEB_FETCH_TOTAL_WALL_MS` (default 55s).
 
-See [Configuration](./configuration.md#web-fetch-and-readability) for environment variables.
+See [Configuration](../configuration.md#web-fetch-and-readability) and [Research with web tools](../guides/research-with-web-tools.md).
 
 ## Personality heartbeat (safety and spam avoidance)
 
-The optional idle heartbeat (`AGENT_HEARTBEAT=1`) is **not** a second agent or parallel chat transcript. It runs **only** on the root harness when no `send()` is active, uses a **bounded** fast-model JSON contract, and by default executes **`remember` only** for typed consolidation. **Shell, web, and file-mutation tools are never auto-invoked** from the heartbeat path: there is no bypass of the normal approval gates for destructive work. Overt user nudges require **`AGENT_HEARTBEAT_SURFACE`** plus confidence and **per-hour** limits; otherwise suggestions remain trace-only or JSONL telemetry. See [Configuration — Personality heartbeat](./configuration.md#personality-heartbeat-idle-ambient-cognition) for all `AGENT_HEARTBEAT_*` keys.
+The optional idle heartbeat (`AGENT_HEARTBEAT=1`) is **not** a second agent or parallel chat transcript. It runs **only** on the root harness when no `send()` is active, uses a **bounded** fast-model JSON contract, and by default executes **`remember` only** for typed consolidation. **Shell, web, and file-mutation tools are never auto-invoked** from the heartbeat path: there is no bypass of the normal approval gates for destructive work. Overt user nudges require **`AGENT_HEARTBEAT_SURFACE`** plus confidence and **per-hour** limits; otherwise suggestions remain trace-only or JSONL telemetry. See [Configuration — Personality heartbeat](../configuration.md#personality-heartbeat-idle-ambient-cognition) for all `AGENT_HEARTBEAT_*` keys.
 
 ## Related documentation
 
-- [Configuration](./configuration.md) — all `AGENT_*` flags.
+- [Configuration](../configuration.md) — narrative `AGENT_*` groups.
+- [Environment reference](../reference/environment.md) — generated key table.
 - [Runtime behavior](./runtime-behavior.md) — world context, reflexion, finalization.
 - [Architecture](./architecture.md) — ReAct loop, dispatcher, rule stats.
-- [Research quality](./research-quality.md) — web and citation discipline.
+- [Research quality](../guides/research-quality.md) — citation discipline.
+- [Research with web tools](../guides/research-with-web-tools.md) — `web_search` + `web_fetch`.
