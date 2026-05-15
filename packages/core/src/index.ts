@@ -1,4 +1,33 @@
 export { resolveWorkspaceRoot } from "./workspace_root.js";
+export {
+  runHarnessEffectiveEnvContext,
+  resolveHarnessEnvRaw,
+  effectiveHarnessEnvRaw,
+  effectiveHarnessEnvString,
+  harnessEnvResolutionMeta,
+} from "./harness_effective_env.js";
+export type { HarnessEnvResolutionSource } from "./harness_effective_env.js";
+export { HARNESS_ENV_DEFAULTS } from "./harness_default_constants.js";
+export {
+  HARNESS_SECRET_ENV_KEYS,
+  HARNESS_MANAGED_ENV_KEYS,
+  HARNESS_MANAGED_ENV_KEY_SET,
+} from "./harness_env_inventory.js";
+export { HARNESS_SETTINGS_UI_SECTIONS } from "./harness_settings_sections.js";
+export {
+  HARNESS_SETTINGS_TABS,
+  HARNESS_SETTINGS_FIELD_META,
+  HARNESS_SETTINGS_SUBGROUP_LABELS,
+  harnessSettingsSubgroupLabel,
+} from "./harness_settings_field_meta.js";
+export type {
+  HarnessSettingsTabId,
+  HarnessSettingsFieldMeta,
+  HarnessSettingsValueKind,
+  ManagedHarnessEnvKey,
+} from "./harness_settings_field_meta.js";
+export { buildHarnessSettingsApiFields } from "./harness_settings_api.js";
+export type { HarnessSettingsApiField } from "./harness_settings_api.js";
 export { AgentHarness } from "./agent.js";
 export { AgentEmitter } from "./events.js";
 export { ContextManager } from "./context.js";
@@ -49,6 +78,7 @@ export type {
   AgentEventName,
   AgentConfig,
   ChildAgentConfig,
+  SubagentSpawnContract,
   SubtaskResult,
   WorldContextOptions,
   PersonaConfig,
@@ -73,6 +103,21 @@ export type {
 export { getFastModelSlug, completeChatJson } from "./router.js";
 export type { JsonCompletionResult } from "./router.js";
 export {
+  resolvePersonalityHeartbeatConfig,
+  parseHeartbeatTickJson,
+  decideUserNudgeSurface,
+  appendPersonalityHeartbeatLog,
+  personalityHeartbeatLogPath,
+  executePersonalityHeartbeat,
+} from "./personality_heartbeat.js";
+export type {
+  PersonalityHeartbeatConfig,
+  HeartbeatTickParsed,
+  HeartbeatSurfaceDecision,
+  HeartbeatLogRecord,
+  ExecutePersonalityHeartbeatResult,
+} from "./personality_heartbeat.js";
+export {
   withProviderRequestSpacing,
   providerSpacingKey,
   resolveProviderMinIntervalMs,
@@ -87,7 +132,9 @@ export {
   markEpistemicPlanStepDone,
   mergeExtractedSubgoals,
   subgoalsFromPlanSteps,
+  appendEpistemicHypothesis,
 } from "./epistemic_state.js";
+export type { EpistemicHypothesisRow } from "./epistemic_state.js";
 export {
   createDefaultExecutionState,
   advanceExecutionStateForPlan,
@@ -125,11 +172,24 @@ export {
 } from "./runtime_prefs.js";
 export type {
   RuntimePreferences,
+  RuntimeHarnessPreferences,
   ProviderKeySource,
   RuntimePersonaControls,
   RuntimePersonaProfile,
   RuntimePersonaPreferences,
 } from "./runtime_prefs.js";
+export {
+  DEFAULT_PERSONA_UI_THEME,
+  PERSONA_UI_THEME_VERSION,
+  validateAndNormalizePersonaUiTheme,
+  parseHexToRgb,
+  relativeLuminance,
+  contrastRatio,
+  mapPersonaUiThemeToInk,
+  motionPresetToStatusBarIntervalMs,
+  motionPresetToCssMultipliers,
+} from "./persona_ui_theme.js";
+export type { PersonaUiThemeV1, PersonaUiMotionPreset } from "./persona_ui_theme.js";
 export {
   normalizePersonaControlsPatch,
   applyPersonaControlsToProfile,
@@ -154,7 +214,7 @@ export type {
   InputShortcutContext,
 } from "./input_semantics.js";
 export { SharedMemoryBus } from "./shared_memory_bus.js";
-export type { BusListener } from "./shared_memory_bus.js";
+export type { BusListener, SharedBusEnvelope } from "./shared_memory_bus.js";
 export {
   resolveShellRuntime,
   getShellNote,
