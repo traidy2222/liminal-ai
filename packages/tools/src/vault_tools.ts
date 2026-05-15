@@ -12,6 +12,7 @@
  */
 
 import { defineTool } from "./helpers.js";
+import { effectiveHarnessEnvRaw } from "@liminal/core";
 import type { NoteType } from "./vault_store.js";
 import {
   writeVaultNote,
@@ -40,8 +41,9 @@ export const vaultWriteTool = defineTool({
     "reflection (failure lessons), recipe (successful patterns), task (work-in-progress\n" +
     "state), note (general research or observations), episode (auto session chunks).\n" +
     "Prefer vault_write() over remember() for richer, linked, or longer content.\n" +
+    "To **update** a note, reuse the exact same title (in-place overwrite). Notes live in the Obsidian vault — not workspace/situation-room paths; use vault_read/vault_search, not read_file.\n" +
     "ARGS: title — note title (lookup key); content — markdown body with [[Wikilinks]];\n" +
-    "type — note type; tags — optional string array.",
+    "type — note type; tags — optional string array; ignore_dedupe — allow a new note even when similar to an existing one (e.g. new dated edition).",
   requiresApproval: false,
   parameters: {
     type: "object",
@@ -76,7 +78,13 @@ export const vaultWriteTool = defineTool({
       const title = args["title"] as string;
       const typ = args["type"] as NoteType;
       emit?.(`\nvault_write: "${title}" (${typ})\n`);
-      if (process.env["AGENT_VAULT_DEDUPE"] === "1") {
+      const ignoreDedupe = args["ignore_dedupe"] === true;
+      const existing = await findNote(title);
+      if (
+        effectiveHarnessEnvRaw("AGENT_VAULT_DEDUPE") === "1" &&
+        !ignoreDedupe &&
+        !existing
+      ) {
         emit?.(`  checking for duplicates…\n`);
         const dupes = await findNearDuplicateNote(title, body, { limit: 3, threshold: 0.5 });
         if (dupes.length > 0) {
@@ -85,7 +93,7 @@ export const vaultWriteTool = defineTool({
             ok: false,
             error:
               `Near-duplicate vault note detected: [[${best.note.title}]] score=${best.score.toFixed(3)}. ` +
-              `Search/update existing note instead of creating a new duplicate.`,
+              `Reuse the same title to update in place, merge into [[${best.note.title}]], or set ignore_dedupe: true for a deliberate new edition.`,
           };
         }
       }
@@ -97,7 +105,7 @@ export const vaultWriteTool = defineTool({
         tags: args["tags"] as string[] | undefined,
       });
 
-      if (process.env["AGENT_MEMORY_AUTOLINK"] === "1" && !body.includes("[[")) {
+      if (effectiveHarnessEnvRaw("AGENT_MEMORY_AUTOLINK") === "1" && !body.includes("[[")) {
         const all = await listAllNotes({ limit: 80 });
         const candidateTitles = all.map((n) => n.title).filter((t) => t !== title);
         const extra = await suggestWikilinkLine({

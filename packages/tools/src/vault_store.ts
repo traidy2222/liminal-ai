@@ -1,9 +1,10 @@
 /**
  * Vault store — reads and writes Obsidian-compatible markdown notes.
  *
- * Vault root: set `AGENT_VAULT_PATH` in the monorepo root `.env` to your Obsidian
- * vault folder (absolute path, or `file:///C:/...` from Obsidian). If unset,
- * notes go to ~/.agent_vault.
+ * Vault root: `AGENT_VAULT_PATH` (env or runtime prefs) wins when set. Otherwise, when
+ * `AGENT_OBSIDIAN_DISCOVER` is not `0`, core tries Obsidian’s global `obsidian.json`
+ * and uses a vault only when the pick is unambiguous (see CLAUDE.md). Fallback:
+ * `~/.agent_vault`.
  *
  * Notes are stored as standard Obsidian markdown files with YAML frontmatter.
  * Folder layout mirrors note type:
@@ -304,7 +305,11 @@ export async function findNearDuplicateNote(
   body: string,
   opts?: { limit?: number; threshold?: number }
 ): Promise<Array<{ note: VaultNote; score: number }>> {
-  const notes = await listAllNotes({ limit: 500 });
+  const incomingSlug = titleToSlug(title);
+  const titleLower = title.trim().toLowerCase();
+  const notes = (await listAllNotes({ limit: 500 })).filter(
+    (n) => titleToSlug(n.title) !== incomingSlug && n.title.toLowerCase() !== titleLower
+  );
   if (notes.length === 0) return [];
   const query = `${title} ${body.slice(0, 800)}`.trim();
   const docs: RankableDoc[] = notes.map((note) => ({
