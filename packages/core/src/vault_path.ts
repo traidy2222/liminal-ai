@@ -5,6 +5,8 @@
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { effectiveHarnessEnvRaw } from "./harness_effective_env.js";
+import { discoverObsidianVaultPathFromAppData } from "./obsidian_vault_discovery.js";
 
 /** Strip surrounding quotes and trim (common in .env on Windows). */
 export function normalizeAgentVaultRawPath(raw: string): string {
@@ -31,16 +33,27 @@ export function normalizeAgentVaultRawPath(raw: string): string {
 
 /**
  * Returns the vault directory if `AGENT_VAULT_PATH` is set to a non-empty value
- * after normalization; otherwise undefined (caller may fall back to ~/.agent_vault).
+ * after normalization; otherwise undefined (see `getAgentVaultRoot()` for Obsidian
+ * auto-detect and `~/.agent_vault` fallback).
  */
 export function getExplicitAgentVaultPathFromEnv(): string | undefined {
-  const env = process.env["AGENT_VAULT_PATH"];
+  const env = effectiveHarnessEnvRaw("AGENT_VAULT_PATH");
   if (env === undefined) return undefined;
   const s = normalizeAgentVaultRawPath(env);
   return s.length > 0 ? s : undefined;
 }
 
-/** Absolute vault root: explicit `AGENT_VAULT_PATH` or `~/.agent_vault`. */
+/** Absolute vault root: explicit `AGENT_VAULT_PATH`, else Obsidian auto-detect, else `~/.agent_vault`. */
 export function getAgentVaultRoot(): string {
-  return getExplicitAgentVaultPathFromEnv() ?? join(homedir(), ".agent_vault");
+  const explicit = getExplicitAgentVaultPathFromEnv();
+  if (explicit) return explicit;
+  if (effectiveHarnessEnvRaw("AGENT_OBSIDIAN_DISCOVER") === "0") {
+    return join(homedir(), ".agent_vault");
+  }
+  const discovered = discoverObsidianVaultPathFromAppData({
+    requireDotObsidian: effectiveHarnessEnvRaw("AGENT_OBSIDIAN_REQUIRE_DOT_OBSIDIAN") !== "0",
+    nameSubstring: effectiveHarnessEnvRaw("AGENT_OBSIDIAN_VAULT_NAME_SUBSTRING")?.trim() || undefined,
+  });
+  if (discovered) return discovered;
+  return join(homedir(), ".agent_vault");
 }
