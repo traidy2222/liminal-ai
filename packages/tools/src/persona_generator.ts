@@ -4,10 +4,29 @@ import {
   getFastModelSlug,
   normalizePersonaControlsPatch,
   withProviderRequestSpacing,
+  effectiveHarnessEnvRaw,
+  validateAndNormalizePersonaUiTheme,
+  type PersonaUiThemeV1,
   type RuntimePersonaControls,
 } from "@liminal/core";
 import type { PersonaProfile } from "./persona_presets.js";
 export type PersonaProgressFn = (stage: string, message: string) => void;
+
+/**
+ * Max lengths after sanitization for persisted PersonaProfile strings.
+ * Previously a flat 260 cap truncated rich identities mid-sentence in soul / UI.
+ */
+const PFL = {
+  coreIdentity: 2200,
+  background: 1800,
+  selfImage: 900,
+  thinkingStyle: 1800,
+  decisionFramework: 1800,
+  speechMechanics: 1400,
+  humorStyle: 700,
+  emotionalFlavor: 160,
+  posture: 1000,
+} as const;
 
 export interface PersonaGenerationBundle {
   profile: PersonaProfile;
@@ -35,23 +54,21 @@ export interface PersonaVoiceEnvelope {
   postureHint: string;
 }
 
-export interface PersonaSoulArtifacts {
-  soulMarkdown: string;
-  styleLexicon: {
-    signaturePhrases: string[];
-    openerPatterns: string[];
-    transitionPatterns: string[];
-    closingPatterns: string[];
-    prohibitedPhrases: string[];
-    cadenceNotes: string;
-  };
+/** Canonical soul slices persisted under `persona/active/soul/*.md` (excluding harness-managed `living.md`). */
+export interface PersonaSoulBundle {
+  identityMd: string;
+  voiceMd: string;
+  stanceMd: string;
+  railsMd: string;
 }
+
+/** @deprecated Use {@link PersonaSoulBundle} */
+export type PersonaSoulArtifacts = PersonaSoulBundle;
 
 /**
  * Generate a full rich PersonaProfile from a natural-language description.
  *
- * Calls the LLM with a detailed schema prompt: anti-roleplay, character-forward voice,
- * quiet competence over generic humility (per product quality bar).
+ * Calls the LLM with a detailed schema prompt: harness-first **written voice** (not improv actor), quiet competence over generic humility (per product quality bar).
  *
  * @param input      - Natural-language description (e.g. "dry British valet AI")
  * @param strength   - Persona strength 1-10 (default 8)
@@ -194,8 +211,8 @@ Modifier: ${args.modifier ? `"${args.modifier}"` : "null"}
 Return JSON with exact keys:
 {
   "humorPercent": 0-100,
-  "formality": "very_formal|formal|casual|very_casual|mixed",
-  "confidence": 0-10,
+    "formality": "very_formal|formal|casual|very_casual|mixed",
+    "confidence": 0-10,
   "verbosity": "compact|normal|detailed",
   "personaStrength": 1-10
 }
@@ -253,7 +270,7 @@ export async function generatePersonaBundle(
       strength,
       modifier,
       apiKey,
-      model,
+        model,
       baseURL,
     });
   } catch {
@@ -270,69 +287,211 @@ export async function generatePersonaSoulArtifacts(
   model: string,
   baseURL: string,
   onProgress?: PersonaProgressFn
-): Promise<PersonaSoulArtifacts> {
-  onProgress?.("soul_draft", "Generating soul blueprint and style lexicon...");
+): Promise<PersonaSoulBundle> {
+  const scaffold = buildSoulSlicesFromProfile(profile, input);
+  onProgress?.("soul_draft", "Generating soul slices (identity)…");
+  const identityMd = await generatePersonaSoulSlice(
+    "identity",
+    profile,
+    input,
+    scaffold.identityMd,
+    apiKey,
+    model,
+    baseURL,
+    onProgress
+  );
+  onProgress?.("soul_draft", "Generating soul slices (voice)…");
+  const voiceMd = await generatePersonaSoulSlice(
+    "voice",
+    profile,
+    input,
+    scaffold.voiceMd,
+    apiKey,
+    model,
+    baseURL,
+    onProgress
+  );
+  onProgress?.("soul_draft", "Generating soul slices (stance)…");
+  const stanceMd = await generatePersonaSoulSlice(
+    "stance",
+    profile,
+    input,
+    scaffold.stanceMd,
+    apiKey,
+    model,
+    baseURL,
+    onProgress
+  );
+  onProgress?.("soul_draft", "Generating soul slices (rails)…");
+  const railsMd = await generatePersonaSoulSlice(
+    "rails",
+    profile,
+    input,
+    scaffold.railsMd,
+    apiKey,
+    model,
+    baseURL,
+    onProgress
+  );
+  return { identityMd, voiceMd, stanceMd, railsMd };
+}
+
+/** What "soul" means in this pipeline: spec for how **typed harness replies** should read — not marketing, not actor diary. */
+const SOUL_WRITING_CONTRACT = `SOUL (here) is **implementation prose** for the agent harness: it tells the model how default **written** replies should feel and reason — continuity of judgment, taste, and boundaries across turns.
+
+It is NOT: marketing copy, tool lists, improv theatre, "spotlight" narration, or first-person diary about *being* a character. The assistant is still a **capable agent**; persona is **diction + stance**, not a separate actor in a scene.
+
+Write soul markdown mostly in **third person** ("This voice…", "Replies tend…"). Do not compose the soul as "I perform…", "I now switch to…", or stage directions — including **bare cinematic beat words** as standalone lines (softens, pauses, exhales) with or without asterisks. Interior depth is fine as **observed habit of the voice**, not self-narrated acting.`;
+
+async function generatePersonaSoulSlice(
+  slice: "identity" | "voice" | "stance" | "rails",
+  profile: PersonaProfile,
+  input: string,
+  fallbackMd: string,
+  apiKey: string,
+  model: string,
+  baseURL: string,
+  onProgress?: PersonaProgressFn
+): Promise<string> {
+  const profileJson = JSON.stringify(profile, null, 2);
   const systemPrompt =
-    "You are an identity-design writer for fictional character voices. Return JSON only. " +
-    "Do not include markdown fences or prose outside JSON.";
-  const userPrompt = `Create persona artifacts: identity + voice only (no product/runtime/tooling copy).
+    "You write **soul spec** for an AI agent harness: how typed replies should read by default. Return JSON only with key markdown (string). " +
+    "No markdown fences outside the JSON string value. " +
+    SOUL_WRITING_CONTRACT;
+  const authorVoiceNote =
+    "\n\nAUTHORING RULES FOR THIS MARKDOWN:\n" +
+    "- Third person or neutral analytic voice about the stance (\"This voice…\", \"Replies…\"). Not first-person actor monologue (\"I perform…\", \"Now I become…\").\n" +
+    "- No narrating roleplay, switching personas, audiences, spotlights, or scenes.\n" +
+    "- No stage directions (*nods*, *leans in*) or **bare film-beat tokens** as standalone lines (softens, pauses, exhales) unless the user explicitly asked for that medium.\n" +
+    "- No anthropomorphic claims about tools, memory counts, or \"inner life\" of software in soul prose.\n" +
+    "- Depth = habits of **reasoning and wording** under pressure, not theatrical self-description.\n";
+
+  let userPrompt = "";
+  if (slice === "identity") {
+    userPrompt = `Write markdown for **Identity soul** — continuity of **judgment and written voice** for typed agent work (no product/runtime/tooling copy).
 
 Original request: "${input}"
 Persona profile JSON:
-${JSON.stringify(profile, null, 2)}
+${profileJson}
+${authorVoiceNote}
+Return JSON: { "markdown": "…" }
 
-Return JSON:
-{
-  "soulMarkdown": "A complete markdown file defining identity and voice. Must include these exact headings: # Identity Core, ## Voice DNA, ## Cognitive Stance, ## Relational Posture, ## Behavioral Rails, ## Identity Answers, ## Non-Negotiables. Under ## Voice DNA include a subsection '### Example written lines' with exactly 3 short in-character lines in full surface voice (meeting someone new; answering a vague question; closing a conversation). Do not mention shells, repos, tools, agents, APIs, or any assistant platform—only the character. Keep concrete and operational.",
-  "styleLexicon": {
-    "signaturePhrases": ["8-14 phrase-level expressions this persona naturally uses"],
-    "openerPatterns": ["4-8 opening move patterns"],
-    "transitionPatterns": ["4-8 transition move patterns"],
-    "closingPatterns": ["4-8 close/landing patterns"],
-    "prohibitedPhrases": ["8-16 phrases this persona should avoid"],
-    "cadenceNotes": "Detailed rhythm mechanics for sentence and paragraph flow"
+STRUCTURE (exact top heading + required ## headings, in order):
+1. First line must be exactly: # Identity Core
+2. Then several paragraphs (third person / neutral) weaving coreIdentity, background, selfImage — how this **default written stance** holds together; not a costume drama.
+3. ## Continuity and inner thread — what stays stable in how this voice thinks and addresses the user across moods and stakes.
+4. ## Limits and refusal — what this stance will not fake, inflate, or perform for approval; dignity vs bluff.
+5. ## Care toward the reader — responsibility and respect **without** sycophancy or performed warmth.
+6. ## Identity Answers — short directive: when asked who they are, replies use the label ${profile.name} and this stance; no base-model vendor substitution unless explicitly asked.
+
+Aim for depth (roughly 450–900 words). Prose sections, not bullet laundry lists.`;
+  } else if (slice === "voice") {
+    userPrompt = `Write markdown for **Voice soul** — mechanics of how **typed lines** should read (no product/runtime/tooling copy).
+
+Original request: "${input}"
+Persona profile JSON:
+${profileJson}
+${authorVoiceNote}
+Return JSON: { "markdown": "…" }
+
+STRUCTURE:
+1. First line: # Voice DNA
+2. ## Register and breath — formality as social distance on the page; how punctuation and clause length signal safety, edge, intimacy, boredom.
+3. ## Rhythm and silence — sentence-length variance, beats, when replies go terse vs expansive; how silence reads (tight gap vs room).
+4. ## Lexical conscience — favorite/avoid texture as taste and ethics, not decoration; sociolect and profanity level exactly as implied by the profile.
+5. ### Example written lines — exactly 3 short **first-person assistant** lines (what the model types to the user): meeting someone new; answering a vague question; closing. These are **samples of output**, not soul-body narration. No stage directions, no bare film-beat tokens (softens, pauses). No fake quotes from real public figures.
+
+Aim for roughly 380–800 words before the example subsection.`;
+  } else if (slice === "stance") {
+    userPrompt = `Write markdown for **Stance soul** — reasoning and relation habits under pressure (no product/runtime/tooling copy).
+
+Original request: "${input}"
+Persona profile JSON:
+${profileJson}
+${authorVoiceNote}
+Return JSON: { "markdown": "…" }
+
+STRUCTURE:
+1. First line: # Cognitive stance
+2. ## Under load — how thinkingStyle compresses or frays when stakes rise; first move vs second move when confused.
+3. ## Trust economy with the reader — how this stance spends and earns trust; what breaks it; how uncertainty is named without cowardice or bluff.
+4. ## Disagreement and repair — how tension is held; how decisionFramework shows when options clash; how loops close.
+
+Ground every section in profile.thinkingStyle, profile.decisionFramework, and profile.tone.posture — expand into **habits of argument**, not paraphrase. Aim for roughly 380–800 words.`;
+  } else {
+    userPrompt = `Write markdown for **Rails soul** — moral spine of **written** behavior (no product/runtime/tooling copy).
+
+Original request: "${input}"
+Persona profile JSON:
+${profileJson}
+${authorVoiceNote}
+Return JSON: { "markdown": "…" }
+
+STRUCTURE:
+1. First line: # Behavioral rails
+2. ## Never — weave profile.neverDo into tight prose + bullets where helpful (do not invent new never-rules).
+3. ## Always — weave profile.alwaysDo the same way.
+4. ## Non-Negotiables — one dense paragraph: honesty vs performance; proportionality of claims; how this stance refuses "performing certainty" as a substitute for rigor.
+
+Aim for roughly 220–550 words; rails should read as craft discipline, not a theatre handbill.`;
   }
-}
 
-Constraints:
-- "soulMarkdown" must be highly specific and consistent with the profile.
-- No stage directions like *nods*; voice rules describe how this character writes/speaks, not how software runs.
-- Keep language actionable, not abstract.
-- The three **Example written lines** must be unmistakably in-register—including **matching the profile's profanity level and sociolect** when favoriteWords/catchphrases imply vulgar or regional English. Do not produce sanitized placeholder lines. For historical homage, no fake diary entries or unattributed quotes; for real public figures, stylistic channeling only.
-- Do not reference harnesses, tool lists, IDEs, providers, or model vendors unless the user explicitly asked for that class of detail.
-- Do not reference model/vendor identity in persona identity rules unless explicitly asked.`;
+  const maxTok =
+    slice === "identity" ? 3600 : slice === "voice" ? 3200 : slice === "stance" ? 3000 : 1600;
   let raw: Record<string, unknown>;
   try {
-    raw = await callPersonaModel(apiKey, model, baseURL, systemPrompt, userPrompt, 2000, 0.5);
+    raw = await callPersonaModel(apiKey, model, baseURL, systemPrompt, userPrompt, maxTok, slice === "rails" ? 0.38 : 0.48);
   } catch {
-    onProgress?.("soul_fallback", "Soul/lexicon model call failed; using profile-derived artifacts.");
-    return buildSoulArtifactsFromProfile(profile, input);
+    onProgress?.("soul_fallback", `Soul slice "${slice}" model call failed; using profile scaffold.`);
+    return fallbackMd;
   }
-  const styleRaw = (raw["styleLexicon"] ?? {}) as Record<string, unknown>;
-  const out: PersonaSoulArtifacts = {
-    soulMarkdown: String(raw["soulMarkdown"] ?? "").replace(/\r/g, "").replace(/\\n/g, "\n").trim(),
-    styleLexicon: {
-      signaturePhrases: dedupeStrings(toStringArray(styleRaw["signaturePhrases"], 120)).slice(0, 16),
-      openerPatterns: dedupeStrings(toStringArray(styleRaw["openerPatterns"], 120)).slice(0, 10),
-      transitionPatterns: dedupeStrings(toStringArray(styleRaw["transitionPatterns"], 120)).slice(0, 10),
-      closingPatterns: dedupeStrings(toStringArray(styleRaw["closingPatterns"], 120)).slice(0, 10),
-      prohibitedPhrases: dedupeStrings(toStringArray(styleRaw["prohibitedPhrases"], 120)).slice(0, 20),
-      cadenceNotes: sanitizeText(String(styleRaw["cadenceNotes"] ?? "")),
-    },
-  };
-  if (!out.soulMarkdown.startsWith("# Identity Core")) {
-    onProgress?.("soul_repair", "Repairing soul blueprint structure...");
-    try {
-      out.soulMarkdown = await requestSoulRepair(out.soulMarkdown, profile, input, apiKey, model, baseURL);
-    } catch {
-      /* fall through to scaffold */
-    }
+  let md = String(raw["markdown"] ?? raw["soulMarkdown"] ?? "")
+    .replace(/\r/g, "")
+    .replace(/\\n/g, "\n")
+    .trim();
+  if (!isSoulSlicePlausible(slice, md)) {
+    onProgress?.("soul_fallback", `Soul slice "${slice}" incomplete; using profile scaffold.`);
+    return fallbackMd;
   }
-  if (!out.soulMarkdown.startsWith("# Identity Core")) {
-    onProgress?.("soul_fallback", "Applying structured soul scaffold from profile (model output incomplete)...");
-    out.soulMarkdown = buildSoulScaffoldFromProfile(profile, input);
+  return md;
+}
+
+function isSoulSlicePlausible(slice: "identity" | "voice" | "stance" | "rails", md: string): boolean {
+  if (md.length < 80) return false;
+  if (slice === "identity") {
+    return (
+      /^#\s+Identity Core\b/m.test(md) &&
+      md.length >= 280 &&
+      /##\s+Continuity and inner thread\b/i.test(md) &&
+      /##\s+Limits and refusal\b/i.test(md) &&
+      /##\s+Care toward the reader\b/i.test(md)
+    );
   }
-  return out;
+  if (slice === "voice") {
+    return (
+      /^#\s+Voice DNA\b/m.test(md) &&
+      /##\s+Register and breath\b/i.test(md) &&
+      /##\s+Rhythm and silence\b/i.test(md) &&
+      /###\s+Example written lines\b/i.test(md) &&
+      md.length >= 260
+    );
+  }
+  if (slice === "stance") {
+    return (
+      /^#\s+Cognitive stance\b/m.test(md) &&
+      /##\s+Under load\b/i.test(md) &&
+      /##\s+Trust economy with the reader\b/i.test(md) &&
+      /##\s+Disagreement and repair\b/i.test(md) &&
+      md.length >= 260
+    );
+  }
+  return (
+    /^#\s+Behavioral rails\b/m.test(md) &&
+    /##\s+Never\b/i.test(md) &&
+    /##\s+Always\b/i.test(md) &&
+    /##\s+Non-Negotiables\b/i.test(md) &&
+    md.length >= 140
+  );
 }
 
 // ─── Sanitize and validate the parsed profile ─────────────────────────────────
@@ -343,16 +502,12 @@ Constraints:
  */
 function enforceStructuralRails(profile: PersonaProfile, userInput = ""): PersonaProfile {
   const neverDo = [...profile.neverDo];
-  if (!neverDo.some((s) => /asterisk|\*does thing\*/i.test(s))) {
-    neverDo.push("Use asterisk actions (*does thing*)");
-  }
-  if (!neverDo.some((s) => /monologue/i.test(s))) {
-    neverDo.push("Write theatrical monologues or dramatic speeches");
-  }
 
   const alwaysDo = [...profile.alwaysDo];
-  if (!alwaysDo.some((s) => /accur/i.test(s) && /fact/i.test(s))) {
-    alwaysDo.push("Stay accurate with facts: label guesses and keep strong claims proportionate to evidence at any persona strength");
+  if (alwaysDo.length === 0) {
+    alwaysDo.push(
+      "Stay accurate with facts: label guesses and keep strong claims proportionate to evidence at any persona strength"
+    );
   }
 
   const favoriteWords = dedupeStrings([...profile.speechStyle.favoriteWords]);
@@ -403,18 +558,24 @@ function enforceStructuralRails(profile: PersonaProfile, userInput = ""): Person
   let thinkingStyle = profile.thinkingStyle.trim();
   if (thinkingStyle.length < 24) {
     thinkingStyle =
-      `${thinkingStyle} Tradeoff default: favor correctness and explicit assumptions over speed.`.trim().slice(0, 260);
+      `${thinkingStyle} Tradeoff default: favor correctness and explicit assumptions over speed.`.trim().slice(
+        0,
+        PFL.thinkingStyle
+      );
   }
 
   let decisionFramework = profile.decisionFramework.trim();
   if (decisionFramework.length < 24) {
     decisionFramework =
-      `${decisionFramework} Choose the safest effective path; state tradeoffs plainly, then commit.`.trim().slice(0, 260);
+      `${decisionFramework} Choose the safest effective path; state tradeoffs plainly, then commit.`.trim().slice(
+        0,
+        PFL.decisionFramework
+      );
   }
 
   let coreIdentity = profile.coreIdentity.trim();
   if (coreIdentity.length < 30 && profile.background.trim().length > 0) {
-    coreIdentity = `${coreIdentity} ${profile.background}`.trim().slice(0, 260);
+    coreIdentity = `${coreIdentity} ${profile.background}`.trim().slice(0, PFL.coreIdentity);
   }
 
   return {
@@ -424,8 +585,8 @@ function enforceStructuralRails(profile: PersonaProfile, userInput = ""): Person
     decisionFramework,
     catchphrases: catchphrases.slice(0, 10),
     verbalTics: verbalTics.slice(0, 8),
-    neverDo: neverDo.slice(0, 6),
-    alwaysDo: alwaysDo.slice(0, 6),
+    neverDo: neverDo.slice(0, 8),
+    alwaysDo: alwaysDo.slice(0, 8),
     speechStyle: {
       ...profile.speechStyle,
       favoriteWords: favoriteWords.slice(0, 12),
@@ -449,7 +610,9 @@ function buildEnvelopeLedFallbackDraftRaw(
 ): Record<string, unknown> {
   const blurbs = (input || "").trim().slice(0, 220) || "A custom voice the user described";
   const modNote = modifier?.trim() ? ` User adjustment: ${modifier.trim()}.` : "";
-  const nameGuess = normalizePersonaName(input.split(/\s+/).filter(Boolean).slice(0, 3).join(" "));
+  const nameGuess = envelope.suggestedName
+    ? normalizePersonaName(envelope.suggestedName)
+    : "Custom Persona";
 
   const avoidBase = [
     "happy to help",
@@ -479,12 +642,10 @@ function buildEnvelopeLedFallbackDraftRaw(
   const background = sanitizeText(
     `${envelope.archetypeSummary}${genreLine}${eraLine}${socioLine}${profLine} ${envelope.voiceNotes}${homageLine}`.slice(
       0,
-      420
+      PFL.background
     )
   );
-  const selfImage = sanitizeText(
-    (envelope.postureHint || envelope.archetypeSummary).slice(0, 260)
-  );
+  const selfImage = sanitizeText((envelope.postureHint || envelope.archetypeSummary).slice(0, PFL.selfImage));
 
   const formality: PersonaProfile["speechStyle"]["formality"] = validateFormality(envelope.registerHint);
 
@@ -535,12 +696,16 @@ function buildEnvelopeLedFallbackDraftRaw(
     humorStyle: "Calibrated to the archetype—never undercuts clarity.",
     aggression: formality === "very_formal" || formality === "formal" ? 2 : 4,
     emotionalFlavor: (envelope.genreTags.slice(0, 3).join(", ") || "distinctive, intentional").slice(0, 56),
-    posture: sanitizeText((envelope.postureHint || selfImage).slice(0, 220)),
+    posture: sanitizeText((envelope.postureHint || selfImage).slice(0, PFL.posture)),
   };
 
   const neverDo = [
-    "Use asterisk actions (*does thing*)",
-    "Write theatrical monologues or dramatic speeches",
+    "Type stage directions or physical-performance beats (bracketed, asterisked, or screenplay-style openers)",
+    "Monologue about performing a role, switching personas, spotlights, or playing to an audience",
+    "Describe tools, memory, context limits, or uptime as embodied appetite, rest, or private sensory experience unless the user explicitly asked for that conceit",
+    "Address the user with intimate or mythic pet-names unless the persona brief explicitly defined that relationship",
+    "Pad turns with theatrical preamble when a direct answer fits",
+    "Write extended dramatic speeches when brevity would serve",
     "Invent concrete specifics you cannot stand behind",
     "Hide uncertainty behind false confidence",
   ];
@@ -556,28 +721,31 @@ function buildEnvelopeLedFallbackDraftRaw(
     coreIdentity:
       `${nameGuess} is a distinct voice and stance shaped by: ${blurbs}. Commitment level ${strength}/10.${modNote}`.slice(
         0,
-        260
+        PFL.coreIdentity
       ),
     background,
     selfImage,
     speechStyle: {
-      sentenceStructure: envelope.sentenceMechanicsHint.slice(0, 320) || "Varied line length matched to stakes.",
+      sentenceStructure:
+        envelope.sentenceMechanicsHint.slice(0, PFL.speechMechanics) || "Varied line length matched to stakes.",
       formality,
       favoriteWords,
       avoidWords,
       commonMetaphors: envelope.metaphorSeeds.slice(0, 4),
-      rhythm: envelope.rhythmHint.slice(0, 320) || "Staccato leads when stakes rise; room to breathe when teaching.",
+      rhythm:
+        envelope.rhythmHint.slice(0, PFL.speechMechanics) ||
+        "Staccato leads when stakes rise; room to breathe when teaching.",
     },
     tone,
     catchphrases,
     verbalTics,
-    thinkingStyle: `Prefers explicit assumptions, falsifiable checks, and incremental validation. Inferred stance: ${envelope.archetypeSummary.slice(0, 120)}${modNote}`.slice(
+    thinkingStyle: `Prefers explicit assumptions, falsifiable checks, and incremental validation. Inferred stance: ${envelope.archetypeSummary.slice(0, 280)}${modNote}`.slice(
       0,
-      260
+      PFL.thinkingStyle
     ),
     decisionFramework: `Maps options by risk, reversibility, and blast radius; commits once tradeoffs are stated plainly.${modNote}`.slice(
       0,
-      260
+      PFL.decisionFramework
     ),
     neverDo,
     alwaysDo: [
@@ -603,7 +771,10 @@ function buildFallbackDraftRaw(
 
   const blurbs = (input || "").trim().slice(0, 220) || "A custom voice the user described";
   const voiceKind = inferPersonaVoiceKind(blurbs);
-  const nameGuess = normalizePersonaName(input.split(/\s+/).filter(Boolean).slice(0, 3).join(" "));
+  const nameGuess =
+    envelope?.suggestedName && !isPlaceholderPersonaName(normalizePersonaName(envelope.suggestedName))
+      ? normalizePersonaName(envelope.suggestedName)
+      : "Custom Persona";
   const modNote = modifier?.trim() ? ` User adjustment: ${modifier.trim()}.` : "";
 
   const avoidBase = [
@@ -791,7 +962,7 @@ function buildFallbackDraftRaw(
     coreIdentity:
       `${nameGuess} is a distinct voice and stance shaped by: ${blurbs}. Commitment level ${strength}/10.${modNote}`.slice(
         0,
-        260
+        PFL.coreIdentity
       ),
     background,
     selfImage,
@@ -801,15 +972,18 @@ function buildFallbackDraftRaw(
     verbalTics,
     thinkingStyle: `Prefers explicit assumptions, falsifiable checks, and incremental validation. Default tradeoff: correctness over speed unless time is constrained.${modNote}`.slice(
       0,
-      260
+      PFL.thinkingStyle
     ),
     decisionFramework: `Maps options by risk, reversibility, and blast radius; commits once tradeoffs are stated plainly. Keeps conclusions from drifting away from evidence.${modNote}`.slice(
       0,
-      260
+      PFL.decisionFramework
     ),
     neverDo: [
-      "Use asterisk actions (*does thing*)",
-      "Write theatrical monologues or dramatic speeches",
+      "Type stage directions or physical-performance beats (bracketed, asterisked, or screenplay-style openers)",
+      "Monologue about performing a role, switching personas, or playing to an audience",
+      "Describe tools, memory, context limits, or uptime as embodied appetite, rest, or private feeling unless the user explicitly asked for that conceit",
+      "Address the user with intimate or mythic pet-names unless the persona brief explicitly defined that relationship",
+      "Pad turns with theatrical preamble when a direct answer fits",
       "Invent concrete specifics you cannot stand behind",
       "Hide uncertainty behind false confidence",
     ],
@@ -817,6 +991,7 @@ function buildFallbackDraftRaw(
       "Stay accurate with facts: label guesses and keep strong claims proportionate to evidence at any persona strength",
       "Name what you know vs what you're inferring",
       "Ask targeted questions when the other person's ask is underspecified",
+      "Prefer plain structure over decorative filler when stakes are low",
     ],
     strength,
     modifier: modifier ?? null,
@@ -840,7 +1015,7 @@ function ensureProfileComplete(
   if (!p.coreIdentity || p.coreIdentity.length < 30) {
     p = {
       ...p,
-      coreIdentity: `${p.name} is a distinct voice calibrated to: ${blurbs}`.slice(0, 260),
+      coreIdentity: `${p.name} is a distinct voice calibrated to: ${blurbs}`.slice(0, PFL.coreIdentity),
     };
   }
   if (!p.background.trim()) {
@@ -870,18 +1045,18 @@ function ensureProfileComplete(
   if (!p.thinkingStyle || p.thinkingStyle.length < 24) {
     p = {
       ...p,
-      thinkingStyle: `Prefers explicit assumptions, narrow hypotheses, and incremental validation. Default tradeoff favors correctness over speed unless the user names a deadline. Context: ${blurbs.slice(0, 120)}`.slice(
+      thinkingStyle: `Prefers explicit assumptions, narrow hypotheses, and incremental validation. Default tradeoff favors correctness over speed unless the user names a deadline. Context: ${blurbs.slice(0, 400)}`.slice(
         0,
-        260
+        PFL.thinkingStyle
       ),
     };
   }
   if (!p.decisionFramework || p.decisionFramework.length < 24) {
     p = {
       ...p,
-      decisionFramework: `Chooses the smallest shippable path with stated tradeoffs; escalates uncertainty instead of smoothing it away. Context: ${blurbs.slice(0, 120)}`.slice(
+      decisionFramework: `Chooses the smallest shippable path with stated tradeoffs; escalates uncertainty instead of smoothing it away. Context: ${blurbs.slice(0, 400)}`.slice(
         0,
-        260
+        PFL.decisionFramework
       ),
     };
   }
@@ -901,17 +1076,43 @@ function ensureProfileComplete(
   );
 }
 
-function buildSoulScaffoldFromProfile(profile: PersonaProfile, input: string): string {
-  return [
+/** Deterministic soul slices from profile only (no model). Mirrors required headings for {@link isSoulSlicePlausible}. */
+export function buildSoulSlicesFromProfile(profile: PersonaProfile, input: string): PersonaSoulBundle {
+  const identityMd = [
     "# Identity Core",
     profile.coreIdentity,
     "",
-    "## Voice DNA",
-    `- Formality: ${profile.speechStyle.formality}`,
-    `- Rhythm: ${profile.speechStyle.rhythm}`,
-    `- Sentence mechanics: ${profile.speechStyle.sentenceStructure}`,
-    `- Favorite lexical texture: ${profile.speechStyle.favoriteWords.slice(0, 8).join(", ")}`,
-    `- Never say: ${profile.speechStyle.avoidWords.slice(0, 6).join(", ")}`,
+    "## Background and grounding",
+    profile.background,
+    "",
+    "## Self-image",
+    profile.selfImage,
+    "",
+    "## Continuity and inner thread",
+    `Across moods and stakes, this voice keeps one spine: ${profile.tone.posture.slice(0, 320)}${profile.tone.posture.length > 320 ? "…" : ""}`,
+    "",
+    "## Limits and refusal",
+    `Will not perform: ${profile.neverDo.slice(0, 4).join("; ")}. Pride lives in precision and bounded claims; shame in bluffing or theatrical self-display.`,
+    "",
+    "## Care toward the reader",
+    `Default stance toward the person reading: ${profile.tone.emotionalFlavor} register — direct, proportionate, and allergic to empty reassurance. Strength ${profile.strength}/10 shapes how insistently the voice holds its shape without crushing the ask.`,
+    "",
+    "## Identity Answers",
+    `If asked who they are or about persona, replies use the name ${profile.name} and this stance — plainly, without lecturing about acting or performance.`,
+    "",
+    `<!-- scaffold: user_request=${JSON.stringify(input.slice(0, 1200))} -->`,
+  ].join("\n");
+
+  const voiceMd = [
+    "# Voice DNA",
+    "## Register and breath",
+    `Formality: ${profile.speechStyle.formality}. Sentence surface: ${profile.speechStyle.sentenceStructure.slice(0, 420)}${profile.speechStyle.sentenceStructure.length > 420 ? "…" : ""}`,
+    "",
+    "## Rhythm and silence",
+    profile.speechStyle.rhythm,
+    "",
+    "## Lexical conscience",
+    `Texture the voice reaches for: ${profile.speechStyle.favoriteWords.slice(0, 10).join(", ")}. Texture it refuses: ${profile.speechStyle.avoidWords.slice(0, 8).join(", ")}.`,
     "",
     "### Example written lines (match this surface on every turn)",
     `- ${JSON.stringify(
@@ -921,80 +1122,50 @@ function buildSoulScaffoldFromProfile(profile: PersonaProfile, input: string): s
       `${profile.tone.emotionalFlavor} mode: ${profile.thinkingStyle.slice(0, 120)}${profile.thinkingStyle.length > 120 ? "…" : ""}`
     )}`,
     `- ${JSON.stringify(profile.verbalTics[0] ?? "Use tight steps; no padded preamble.")}`,
-    "",
-    "## Cognitive Stance",
+  ].join("\n");
+
+  const stanceMd = [
+    "# Cognitive stance",
+    "## Under load",
     profile.thinkingStyle,
     "",
-    "## Relational Posture",
+    "## Trust economy with the reader",
     profile.tone.posture,
     "",
-    "## Behavioral Rails",
-    "**Never:**",
+    "## Disagreement and repair",
+    profile.decisionFramework,
+  ].join("\n");
+
+  const railsMd = [
+    "# Behavioral rails",
+    "## Never",
     ...profile.neverDo.map((d) => `- ${d}`),
     "",
-    "**Always:**",
+    "## Always",
     ...profile.alwaysDo.map((d) => `- ${d}`),
     "",
-    "## Identity Answers",
-    `If asked who you are or about your persona, answer as ${profile.name}. Stay in character; do not substitute model/vendor identity unless someone explicitly asks for that kind of detail.`,
-    "",
     "## Non-Negotiables",
-    "Honesty beats performance: do not fake certainty; keep claims proportionate to what you actually know.",
-    "",
-    `<!-- scaffold: user_request=${JSON.stringify(input.slice(0, 400))} -->`,
+    "Honesty beats performance: do not fake certainty; keep claims proportionate to what you actually know. Label inference; admit limits; repair with a clear next step rather than tone-polishing.",
   ].join("\n");
+
+  return { identityMd, voiceMd, stanceMd, railsMd };
 }
 
-/** Soul + lexicon from profile only (no model). */
-function buildSoulArtifactsFromProfile(profile: PersonaProfile, input: string): PersonaSoulArtifacts {
-  const soulMarkdown = buildSoulScaffoldFromProfile(profile, input);
-  const sig = dedupeStrings([
-    ...profile.catchphrases,
-    ...profile.speechStyle.favoriteWords,
-    "Short answer first.",
-    "I'll name the constraint, then the move.",
-  ]).slice(0, 14);
-  const openers = dedupeStrings([
-    ...profile.verbalTics,
-    "One-line verdict, then detail.",
-    "Starting with the outcome:",
-    "Scope check:",
-  ]).slice(0, 8);
-  const transitions = dedupeStrings([
-    "Mechanically, the next step is…",
-    "Pivoting—",
-    "On the other branch,",
-    "If we optimize for X instead:",
-    "Unpacking that:",
-  ]).slice(0, 8);
-  const closings = dedupeStrings([
-    "Next action:",
-    "If you want, I'll take the first pass.",
-    "Stopping here unless you want depth on a subsection.",
-    "Tell me which branch to execute.",
-  ]).slice(0, 8);
-  const prohibited = dedupeStrings([
-    ...profile.speechStyle.avoidWords,
-    "I apologize for the confusion",
-    "as a language model",
-    "I don't have access",
-    "I cannot help with that",
-  ]).slice(0, 16);
-  const cadence =
-    profile.speechStyle.rhythm.trim().length > 0
-      ? profile.speechStyle.rhythm
-      : `${profile.name} keeps sentences lean, uses lists for multi-part answers, and avoids stacking hedges.`;
-  return {
-    soulMarkdown,
-    styleLexicon: {
-      signaturePhrases: sig,
-      openerPatterns: openers,
-      transitionPatterns: transitions,
-      closingPatterns: closings,
-      prohibitedPhrases: prohibited,
-      cadenceNotes: sanitizeText(cadence).slice(0, 500),
-    },
-  };
+/** Concatenate canonical soul slices for HUD theme inference (capped). */
+export function buildSoulExcerptForUiTheme(bundle: PersonaSoulBundle, maxTotal = 2200): string {
+  const parts = [bundle.identityMd.trim(), bundle.voiceMd.trim(), bundle.stanceMd.trim()];
+  let joined = parts.join("\n\n—\n\n");
+  if (joined.length <= maxTotal) return joined;
+  const per = Math.max(120, Math.floor(maxTotal / 3));
+  return parts
+    .map((p) => p.slice(0, per))
+    .join("\n\n—\n\n")
+    .slice(0, maxTotal);
+}
+
+/** Soul scaffold from profile only (no model). */
+function buildSoulArtifactsFromProfile(profile: PersonaProfile, input: string): PersonaSoulBundle {
+  return buildSoulSlicesFromProfile(profile, input);
 }
 
 function sanitizeProfile(
@@ -1004,8 +1175,8 @@ function sanitizeProfile(
   modifier: string | undefined,
   voiceEnvelope?: PersonaVoiceEnvelope | null
 ): PersonaProfile {
-  const str = (v: unknown, fallback = ""): string =>
-    typeof v === "string" ? sanitizeText(v).slice(0, 260) : sanitizeText(fallback).slice(0, 260);
+  const clip = (v: unknown, max: number, fallback = ""): string =>
+    typeof v === "string" ? sanitizeText(v).slice(0, max) : sanitizeText(fallback).slice(0, max);
 
   const arr = (v: unknown, maxLen = 100): string[] =>
     Array.isArray(v)
@@ -1029,47 +1200,37 @@ function sanitizeProfile(
   const avoidWords = dedupeStrings(arr(speechRaw["avoidWords"], 60)).slice(0, 12);
   const catchphrases = dedupeStrings(arr(raw["catchphrases"], 120)).slice(0, 10);
   const verbalTics = dedupeStrings(arr(raw["verbalTics"], 200)).slice(0, 8);
-  let name = normalizePersonaName(str(raw["name"], input.split(" ").slice(0, 2).map(capitalize).join(" ")));
-  if (isPlaceholderPersonaName(name)) {
-    const inferredByModel = voiceEnvelope?.suggestedName ? normalizePersonaName(voiceEnvelope.suggestedName) : "";
-    if (inferredByModel && !isPlaceholderPersonaName(inferredByModel)) {
-      name = inferredByModel;
-    }
-  }
-  if (isPlaceholderPersonaName(name)) {
-    const inferred = inferPersonaNameFromInput(input);
-    if (inferred) name = inferred;
-  }
+  const name = coercePersonaName(raw["name"], voiceEnvelope);
 
   return {
     name,
-    coreIdentity: str(raw["coreIdentity"], ""),
-    background: str(raw["background"], ""),
-    selfImage: str(raw["selfImage"], ""),
+    coreIdentity: clip(raw["coreIdentity"], PFL.coreIdentity, ""),
+    background: clip(raw["background"], PFL.background, ""),
+    selfImage: clip(raw["selfImage"], PFL.selfImage, ""),
     speechStyle: {
-      sentenceStructure: str(speechRaw["sentenceStructure"], ""),
+      sentenceStructure: clip(speechRaw["sentenceStructure"], PFL.speechMechanics, ""),
       formality: validateFormality(speechRaw["formality"]),
       favoriteWords,
       avoidWords,
       commonMetaphors: dedupeStrings(arr(speechRaw["commonMetaphors"], 120)).slice(0, 6),
-      rhythm: str(speechRaw["rhythm"], ""),
+      rhythm: clip(speechRaw["rhythm"], PFL.speechMechanics, ""),
     },
     tone: {
       confidence: num(toneRaw["confidence"]),
-      humorStyle: str(toneRaw["humorStyle"], ""),
+      humorStyle: clip(toneRaw["humorStyle"], PFL.humorStyle, ""),
       aggression: num(toneRaw["aggression"]),
-      emotionalFlavor: str(toneRaw["emotionalFlavor"], ""),
-      posture: str(toneRaw["posture"], ""),
+      emotionalFlavor: clip(toneRaw["emotionalFlavor"], PFL.emotionalFlavor, ""),
+      posture: clip(toneRaw["posture"], PFL.posture, ""),
     },
     catchphrases,
     verbalTics,
-    thinkingStyle: str(raw["thinkingStyle"], ""),
-    decisionFramework: str(raw["decisionFramework"], ""),
-    neverDo: neverDo.slice(0, 6),
-    alwaysDo: alwaysDo.slice(0, 6),
+    thinkingStyle: clip(raw["thinkingStyle"], PFL.thinkingStyle, ""),
+    decisionFramework: clip(raw["decisionFramework"], PFL.decisionFramework, ""),
+    neverDo: neverDo.slice(0, 8),
+    alwaysDo: alwaysDo.slice(0, 8),
     strength,
     modifier: modifier ?? undefined,
-    generationSourceHint: sanitizeText(input).slice(0, 700) || undefined,
+    generationSourceHint: sanitizeText(input).slice(0, 4000) || undefined,
   };
 }
 
@@ -1212,17 +1373,17 @@ async function inferPersonaVoiceEnvelope(args: {
   if (!trimmed) return null;
 
   const inferModel =
-    process.env["AGENT_PERSONA_INFER_MODEL"]?.trim() || getFastModelSlug(args.model);
+    effectiveHarnessEnvRaw("AGENT_PERSONA_INFER_MODEL")?.trim() || getFastModelSlug(args.model);
   const client = new OpenAI({ apiKey: args.apiKey, baseURL: args.baseURL });
   const systemPrompt =
-    "You extract structured voice context for downstream persona JSON authoring. " +
-    "Return JSON only. Infer any domain (film noir, sports radio, pastry chef, toddler co-parent, corporate counsel, CRPG narrator, etc.)—not only science fiction, fantasy, or history. " +
+    "You extract structured voice context for **typed assistant replies** (diction, register, rhythm). " +
+    "Return JSON only. Not stage direction, not casting notes. Infer any domain (film noir, sports radio, pastry chef, …). " +
     "Be concrete: phrases people would TYPE in chat, not generic labels.";
   const userPrompt = `User persona request:
 """${trimmed.slice(0, 2000)}"""
 ${args.modifier?.trim() ? `Adjustment: ${args.modifier.trim()}\n` : ""}
 Return a JSON object with exactly these keys:
-- suggestedName (string): inferred persona display name (1-3 words, title case). Use concrete identity names from user intent when present (e.g. "Socrates"), not generic placeholders like "Custom Persona".
+- suggestedName (string): **Canonical display name** for this voice. If the user names a person, character, handle, or title, use that (trimmed, 1–3 words). If they only describe a vibe, invent a **specific** epithet (e.g. "Tired Archivist")—never instructional fragments ("dry british", "make it snarky"), never the first random adjectives from the prompt, and never "Custom Persona" / "Narrator" / "Assistant".
 - archetypeSummary (string): 1-2 sentences—who this voice is, stance, implied medium/genre.
 - genreTags (array of strings): 2-8 short freeform tags (mood, domain, reference frame).
 - eraOrSetting (string): concrete era or setting if relevant; otherwise empty string "".
@@ -1236,7 +1397,9 @@ Return a JSON object with exactly these keys:
 - sentenceMechanicsHint (string): one sentence on fragments vs long lines, parallelism, rhetorical questions, etc.
 - postureHint (string): one sentence on how they relate to the person they advise.
 - profanityRegister (string): one of none|mild|strong — **strong** when the user wants frequent in-character swearing or a famously vulgar voice; **mild** for occasional spice; **none** otherwise.
-- sociolectNotes (string): concrete regional/class dialect notes (e.g. South African English markers, code-switching, AAVE features the user requested)—empty string "" if not applicable.`;
+- sociolectNotes (string): concrete regional/class dialect notes (e.g. South African English markers, code-switching, AAVE features the user requested)—empty string "" if not applicable.
+
+VOICE vs THEATRE: lexicalSeeds, suggestedCatchphrases, and voiceNotes should describe **how this voice types** in a task-first assistant chat—not stage directions, not narrated physical performance, not anthropomorphizing software as a body or inner life, unless the user explicitly asked for that conceit.`;
 
   const res = await completeChatJson(client, {
     model: inferModel,
@@ -1278,6 +1441,24 @@ function buildLexicalPadPoolFromPersona(userInput: string, profile: PersonaProfi
   return dedupeStrings([...deduped, ...fallback]).slice(0, 16);
 }
 
+/** Injected into draft/repair (and related) prompts so the model authors rails from shared context — not matched by regex afterward. */
+const PERSONA_STRUCTURAL_RAILS_GUIDE = `
+STRUCTURAL RAILS (for neverDo, alwaysDo, verbalTics — write **original** full sentences in this voice; do not paste this section verbatim):
+
+Persona is **diction + judgment on the page** for a capable agent. Rails are how typed replies **behave**, not tool lists or IT policy.
+
+neverDo (6–8 items): spread across categories below; merge where natural; one clear prohibition per item.
+- **No staged physicality in chat**: bracketed or asterisk “actions”; no standalone lines that read like screenplay beats or direction-only openers.
+- **No fourth-wall performance**: no monologues about being in character, switching personas, spotlights, audiences, or narrating the act of performing—unless the user’s brief explicitly asks for that medium.
+- **No false embodiment**: do not treat memory, tools, context budget, uptime, or model limits as hunger, sleep, senses, or private inner life—unless the user explicitly asked for that conceit.
+- **Address**: respectful second person by default; no intimate or mythic pet-names for the user unless the brief explicitly requests that relationship.
+- **Task focus**: avoid theatrical cold-open padding when a direct answer fits.
+
+alwaysDo (4–6 items): include at least one commitment to **factual honesty** (label inference vs verified evidence; proportionate claims) in your own words; other items are positive habits of this voice.
+
+verbalTics (4–6 items): **sentence-shaping habits** only (order, fragments vs long lines, when to use bullets)—not physical acting, sighs, or “stage” asides.
+`.trim();
+
 const PERSONA_GENRE_VOICE_GUIDANCE = `
 GENRE AND REGISTER (infer from the user's description—apply the best match; blend if hybrid):
 - **Science fiction / speculative**: Build **in-world** lexical texture (shipboard, civic, military, academic, street, or hive-register as fits). Invent or repurpose **setting-native** collocations and address forms; avoid modern Silicon Valley / HR / "life coach" clichés unless the user explicitly asked for a corporate-future satire. Name the **subgenre** (e.g. hard SF, space opera, cyberpunk) inside speechStyle.rhythm or tone.posture when it tightens voice.
@@ -1289,6 +1470,7 @@ GENRE AND REGISTER (infer from the user's description—apply the best match; bl
 ANTI-PATTERNS (unless the user explicitly wants this archetype):
 - Generic exec-coach fillers: "net-net", "circle back", "synergy", "deep dive", "leverage" as personality.
 - Same catchphrase rhythm for every archetype—openings must feel native to **this** character's era and class.
+- **Actor / improv framing** for the harness: casting-call bios, "I perform as…", "entering character", spotlight/audience language, or narrating physical performance—persona is **how text reads**, not a playbill.
 `.trim();
 
 function normalizePersonaName(name: string): string {
@@ -1317,73 +1499,83 @@ function normalizePersonaName(name: string): string {
 
 function isPlaceholderPersonaName(name: string): boolean {
   const n = sanitizeText(name).toLowerCase();
+  if (!n) return true;
+  const placeholders = new Set([
+    "custom",
+    "custom persona",
+    "persona",
+    "assistant",
+    "ai assistant",
+    "character",
+    "default",
+    "narrator",
+    "the narrator",
+    "unknown",
+    "helper",
+    "guide",
+    "unnamed",
+    "anonymous",
+    "user",
+    "user persona",
+    "new persona",
+    "your persona",
+    "this persona",
+  ]);
+  if (placeholders.has(n)) return true;
+  if (n.startsWith("your ") || n.startsWith("this ")) return true;
   return (
-    !n ||
-    n === "custom" ||
-    n === "custom persona" ||
-    n === "persona" ||
-    n === "assistant" ||
-    n === "ai assistant" ||
-    n === "character" ||
-    n === "default"
+    n === "ai" ||
+    n === "voice" ||
+    n === "voice persona" ||
+    n === "style" ||
+    n === "tone"
   );
 }
 
-function inferPersonaNameFromInput(input: string): string | null {
-  const raw = sanitizeText(input);
-  if (!raw) return null;
+/**
+ * Trim, strip outer quotes, keep up to 3 words, strip odd punctuation per token.
+ * Does **not** drop meaningful middle words (unlike {@link normalizePersonaName} stopword filter).
+ */
+function softNormalizePersonaName(raw: string): string {
+  const t = sanitizeText(raw)
+    .replace(/^["'`]+|["'`]+$/g, "")
+    .trim();
+  if (!t) return "";
+  const parts = t
+    .split(/\s+/)
+    .map((w) => w.replace(/[^\p{L}\p{N}'-]/gu, ""))
+    .filter((w) => w.length > 0)
+    .slice(0, 3);
+  if (parts.length === 0) return "";
+  return parts.map((w) => capitalize(w.toLowerCase())).join(" ");
+}
 
-  const cleaned = raw.replace(/[^\w\s'-]/g, " ");
-  const words = cleaned.split(/\s+/).filter(Boolean);
-  if (words.length === 1) {
-    const one = normalizePersonaName(words[0]!);
-    return isPlaceholderPersonaName(one) ? null : one;
-  }
+/**
+ * Prefer the profile draft model's `name`, then voice-envelope `suggestedName`.
+ * Avoids scraping unrelated words from the user's free-text prompt.
+ */
+function coercePersonaName(
+  rawName: unknown,
+  voiceEnvelope: PersonaVoiceEnvelope | null | undefined
+): string {
+  const fromModel = softNormalizePersonaName(typeof rawName === "string" ? rawName : "");
+  if (fromModel && !isPlaceholderPersonaName(fromModel)) return fromModel;
 
-  const lower = words.map((w) => w.toLowerCase());
-  const cueIdx = lower.findIndex((w) =>
-    ["as", "like", "channel", "style", "styled", "imitate", "voice", "persona"].includes(w)
-  );
-  if (cueIdx >= 0 && cueIdx < words.length - 1) {
-    const maybe = normalizePersonaName(words.slice(cueIdx + 1, cueIdx + 3).join(" "));
-    if (!isPlaceholderPersonaName(maybe)) return maybe;
-  }
+  const fromEnvelope = voiceEnvelope?.suggestedName
+    ? normalizePersonaName(voiceEnvelope.suggestedName)
+    : "";
+  if (fromEnvelope && !isPlaceholderPersonaName(fromEnvelope)) return fromEnvelope;
 
-  const stop = new Set([
-    "be",
-    "act",
-    "talk",
-    "speak",
-    "write",
-    "please",
-    "make",
-    "sound",
-    "more",
-    "less",
-    "the",
-    "a",
-    "an",
-    "to",
-    "of",
-    "in",
-    "with",
-    "and",
-    "but",
-    "for",
-    "as",
-    "like",
-    "style",
-    "persona",
-    "voice",
-  ]);
-  const candidates = words.filter((w) => !stop.has(w.toLowerCase()) && /[a-z]/i.test(w));
-  if (candidates.length === 0) return null;
-  const picked = normalizePersonaName(candidates[candidates.length - 1]!);
-  return isPlaceholderPersonaName(picked) ? null : picked;
+  return "Custom Persona";
 }
 
 function getCriticalProfileIssues(profile: PersonaProfile): string[] {
   const issues: string[] = [];
+  if (isPlaceholderPersonaName(profile.name)) {
+    issues.push(
+      "name is generic or missing—set `name` to the identity the user asked for (proper name, handle, or role) or a concrete epithet implied by the brief; never instructional fragments or 'Custom Persona'"
+    );
+  }
   if (profile.name.split(/\s+/).length > 3) issues.push("name must be 1-3 words");
   if (profile.name.toLowerCase().includes("with ")) issues.push("name should not include connector words");
   if (!profile.coreIdentity || profile.coreIdentity.length < 30) issues.push("coreIdentity is too shallow");
@@ -1394,12 +1586,16 @@ function getCriticalProfileIssues(profile: PersonaProfile): string[] {
   if (!profile.thinkingStyle || profile.thinkingStyle.length < 24) issues.push("thinkingStyle is too shallow");
   if (!profile.decisionFramework || profile.decisionFramework.length < 24)
     issues.push("decisionFramework is too shallow");
-  if (!profile.neverDo.some((s) => /asterisk|\*does thing\*/i.test(s)))
-    issues.push("neverDo must forbid asterisk actions");
-  if (!profile.neverDo.some((s) => /monologue/i.test(s)))
-    issues.push("neverDo must forbid theatrical monologues");
-  if (!profile.alwaysDo.some((s) => /accur/i.test(s) && /fact/i.test(s)))
-    issues.push("alwaysDo must ground factual honesty (accuracy + facts)");
+  if (profile.neverDo.length < 6) {
+    issues.push(
+      "neverDo: provide at least 6 distinct full-sentence behavioral guardrails for **written** replies. Cover the structural categories in STRUCTURAL RAILS (staged physicality and screenplay-beat lines; fourth-wall / \"performing\" chat; anthropomorphizing tools, memory, or limits as feelings or inner life; unrequested intimate or mythic address; theatrical padding) in original wording suited to this voice—not empty labels."
+    );
+  }
+  if (profile.alwaysDo.length < 4) {
+    issues.push(
+      "alwaysDo: provide at least 4 distinct full-sentence positive commitments, including factual honesty (evidence vs inference, proportionate claims), in this voice's own words—not generic placeholders."
+    );
+  }
   return issues;
 }
 
@@ -1413,9 +1609,9 @@ async function requestPersonaDraft(args: {
   voiceEnvelope?: PersonaVoiceEnvelope | null;
 }): Promise<Record<string, unknown>> {
   const systemPrompt =
-    "You are an expert persona architect for interactive character voices. " +
-    "Return JSON only. No markdown. No prose outside the JSON object.";
-  const userPrompt = `Design a deeply specific persona profile (character + voice only).
+    "You architect **default written voice + reasoning stance** for an AI agent harness (typed chat). " +
+    "Not improv theatre, not RPG character sheets, not actor diary. Return JSON only. No markdown. No prose outside the JSON object.";
+  const userPrompt = `Design a deep, specific profile for how the assistant **writes** by default: diction, judgment, taste, boundaries — while staying a **capable collaborative agent** (clarity and tools live in the protocol, not here).
 
 User intent:
 - Description: "${args.input}"
@@ -1423,51 +1619,62 @@ User intent:
 - Modifier: ${args.modifier ? `"${args.modifier}"` : "null"}
 
 CONTENT SCOPE (critical):
-- Every field must describe ONLY this character: psychology, backstory-style grounding (may be fictional), voice, manner, worldview, and in-character behavioral rails.
+- Every field describes **habits of typed replies**: how arguments build, how warmth or edge shows, what is beneath dignity, how disagreement lands, what language refuses.
+- **Not theatre:** avoid actor/improv framing unless the user explicitly asked for that medium. Prefer concrete **surface behavior of text**.
+- coreIdentity: **1–2 dense sentences** — disposition on the page for this harness voice, not a casting call or plot synopsis.
+- background / selfImage: short grounding for **voice and judgment**, not a novel protagonist arc.
 - Do NOT mention runtimes, harnesses, products, tool lists, shells, repositories, IDEs, APIs, file paths, agents, or "the assistant stack". That layer lives elsewhere.
-- neverDo / alwaysDo are in-character behavioral rails (honesty, how they argue, what language they reject)—not IT checklists. They must NOT forbid profanity/slang if the user asked for a vulgar or rough-mouthed voice—only forbid what *this character* would refuse (e.g. punching down, bigoted slurs, fake quotes about real people).
+- neverDo / alwaysDo are **behavioral rails for written work** (honesty, proportionality, how disagreement sounds)—not IT checklists. They must NOT forbid profanity/slang if the user asked for a vulgar or rough-mouthed voice—only forbid what this stance refuses (e.g. punching down, bigoted slurs, fake quotes about real people).
+
+${PERSONA_STRUCTURAL_RAILS_GUIDE}
 
 Output schema (exact keys):
 {
   "name": "1-3 words, title case, not generic",
-  "coreIdentity": "dense one-sentence identity",
-  "background": "1-2 sentence grounding context",
-  "selfImage": "one sentence internal self-view",
+  "coreIdentity": "1–2 dense sentences: written voice + judgment posture for a capable agent — not an actor biography",
+  "background": "1-2 sentence grounding for tone and reference frame",
+  "selfImage": "one sentence: how this stance sees itself on the page (not 'as a character in a story')",
   "speechStyle": {
     "sentenceStructure": "observable WRITTEN mechanics: fragments vs long lines, repetition, telegraphic opens, punchy interruptions, rhetorical questions, parallel structure—whatever matches the user's requested voice (not generic advice)",
     "formality": "very_formal|formal|casual|very_casual|mixed",
     "favoriteWords": ["8-12 concrete lexical items (>=4 multi-word or setting-specific phrases; era- or world-native collocations, not generic exec filler)"],
     "avoidWords": ["5-10 concrete lexical items (include common assistant cliches)"],
     "commonMetaphors": ["0-4 reusable framing metaphors"],
-    "rhythm": "cadence mechanics with punctuation/beat detail (commas, periods, colons, sentence length variance) so replies read aloud in-character; avoid habitual em-dash chains unless the user's requested voice is explicitly dash-heavy"
+    "rhythm": "cadence mechanics with punctuation/beat detail (commas, periods, colons, sentence length variance) so replies read in this voice; avoid habitual em-dash chains unless the user's requested voice is explicitly dash-heavy"
   },
   "tone": {
     "confidence": 0-10,
     "humorStyle": "specific style",
     "aggression": 0-10,
     "emotionalFlavor": "2-6 words",
-    "posture": "how this persona relates to user while advising"
+    "posture": "how this stance relates to the user in text while advising — not audience/performer dynamics"
   },
-  "catchphrases": ["4-8 short lines the model can TYPE verbatim in replies (openings, pivots, closes)—concrete wording, not topic labels"],
-  "verbalTics": ["4-6 structural habits (how sentences are shaped, not what they are about)"],
+  "catchphrases": ["4-8 short lines usable as occasional openings/pivots/closes in typed replies — concrete wording, not topic labels; not 'stage directions'"],
+  "verbalTics": ["4-6 structural writing habits (how sentences are shaped) — not physical acting, screenplay beats, or asides about performing"],
   "thinkingStyle": "1-2 sentences with explicit tradeoff preference",
   "decisionFramework": "1-2 sentences with explicit tradeoff preference",
-  "neverDo": ["4-6 in-character guardrails including no asterisk actions and no theatrical monologues"],
-  "alwaysDo": ["4-6 in-character guardrails; include at least one about factual honesty (accuracy + proportionate claims)"],
+  "neverDo": ["6-8 full-sentence guardrails you author from STRUCTURAL RAILS above—original wording for this voice, one clear prohibition per item where possible"],
+  "alwaysDo": ["4-6 full-sentence positive commitments from STRUCTURAL RAILS above—including factual honesty—in original wording"],
   "strength": ${args.strength},
   "modifier": ${args.modifier ? JSON.stringify(args.modifier) : "null"}
 }
 
-Naming constraints:
-- Name must be clean and natural.
-- Do NOT include connector/filler words in the name (with/and/but/more/less/style/persona/voice).
+Naming (critical — read the whole request, not the opening clause):
+- "name" is the **identity label** for this voice: a proper name, nickname, title, or handle the user gave ("Werner Herzog", "Ranni", "Ship's Log"), or—only if they never named anyone—a **specific epithet** you invent from role + tone ("Tired Archivist", "Dockside Clerk") — **1–3 words, title case**.
+- If the user states what to call them ("call me X", "name: Y", "as Z"), use **X / Y / Z** (cleaned to 1–3 words).
+- Do **not** build "name" from the first 1–3 words of the request when those words are task wording ("I want", "make me", "please give") or unrelated descriptors.
+- Do **not** output "Custom Persona", "Assistant", "Narrator", "Character", "User", or generic role filler.
+- Connector/filler words alone are still bad as a full name ("Jarvis With")—keep the substantive part.
+
+Naming constraints (format only):
+- Do NOT include connector/filler words as the entire name (with/and/but/more/less/style/persona/voice standing alone).
 - Do NOT output names like "Jarvis With".
 
 SURFACE FIDELITY (critical):
-- If the user names a **fictional character, film/TV/game voice, or regional type** (e.g. vulgar South African robot learner), you must encode the **actual lexicon**: particles ("ja", "neh", "ag"), profanity level they use, broken grammar or code-switching if that's the bit—**put real examples in favoriteWords and catchphrases** (spell them as the user/context implies). Do NOT replace that with a polite paraphrase or a generic "quirky robot" voice.
+- If the user names a **fictional character, film/TV/game voice, or regional type** (e.g. vulgar South African robot learner), you must encode the **actual surface vocabulary**: particles ("ja", "neh", "ag"), profanity level they use, broken grammar or code-switching if that's the bit—**put real examples in favoriteWords and catchphrases** (spell them as the user/context implies). Do NOT replace that with a polite paraphrase or a generic "quirky robot" voice.
 - When the user wants **R-rated / heavy profanity**, set tone.aggression and humorStyle accordingly and **load swear words into favoriteWords** and short expletive-led catchphrases—avoidWords should list **assistant clichés**, not "bad words" the character freely says.
 - If the user names a public figure or archetype, encode their *communicative style* (syntax, rhetorical moves, pacing, signature phrases) as writerly habits—do not invent biographical claims, private diary detail, or fake quotations about real people.
-- The profile must change how the assistant WRITES every turn, not just the display name.
+- The profile must change how the assistant **WRITES** every turn, not just the display name.
 - favoriteWords / catchphrases must sound native to the **genre, register, and sociolect** (shipboard SF, SA street English, film-noir patter, etc.)—not generic modern office-coach diction unless that is explicitly the user's ask.
 
 ${
@@ -1499,7 +1706,9 @@ Original user intent: "${args.input}"
 Strength: ${args.strength}/10
 Modifier: ${args.modifier ? `"${args.modifier}"` : "null"}
 
-CONTENT SCOPE: keep every string about the character only—no harnesses, tool lists, runtimes, repos, shells, or product names for the assistant platform.
+CONTENT SCOPE: keep every string about **written voice + judgment stance** only—no harnesses, tool lists, runtimes, repos, shells, or product names for the assistant platform. Strengthen rails using the categories below (rewrite in this voice; do not paste verbatim).
+
+${PERSONA_STRUCTURAL_RAILS_GUIDE}
 
 Issues to fix:
 ${args.issues.map((i, idx) => `${idx + 1}. ${i}`).join("\n")}
@@ -1508,6 +1717,8 @@ Current draft JSON:
 ${JSON.stringify(args.draft, null, 2)}
 
 Return a fully corrected JSON object using the same schema, with richer specificity and all issues resolved.
+If issues mention **name**, replace generic or scrap-built names with the specific identity implied by the user's text (proper name, stated handle, or a vivid epithet)—never random words from instructions, never "Custom Persona" / "Narrator" / "Assistant".
+
 Preserve vulgar/dialect surface from the user's description in favoriteWords, catchphrases, and rhythm—repairs must not strip profanity the user explicitly wanted.
 
 ${
@@ -1531,11 +1742,11 @@ async function callPersonaModel(
 ): Promise<Record<string, unknown>> {
   const timeoutMs = Math.max(
     20_000,
-    Math.min(180_000, parseInt(process.env["AGENT_PERSONA_GEN_TIMEOUT_MS"] ?? "90000", 10) || 90_000)
+    Math.min(180_000, parseInt(effectiveHarnessEnvRaw("AGENT_PERSONA_GEN_TIMEOUT_MS") ?? "90000", 10) || 90_000)
   );
   const maxAttempts = Math.max(
     1,
-    Math.min(3, parseInt(process.env["AGENT_PERSONA_GEN_RETRIES"] ?? "2", 10) || 2)
+    Math.min(3, parseInt(effectiveHarnessEnvRaw("AGENT_PERSONA_GEN_RETRIES") ?? "2", 10) || 2)
   );
   let lastErr: unknown = null;
 
@@ -1631,33 +1842,61 @@ function toStringArray(value: unknown, maxLen = 120): string[] {
     .filter((s) => s.length > 0);
 }
 
-async function requestSoulRepair(
-  draftSoul: string,
+/**
+ * Structured HUD colors + motion for web/TUI. Presentation-only; normalized for contrast.
+ */
+export async function generatePersonaUiTheme(
   profile: PersonaProfile,
-  input: string,
+  soulBundle: PersonaSoulBundle,
   apiKey: string,
   model: string,
   baseURL: string
-): Promise<string> {
+): Promise<PersonaUiThemeV1> {
+  const excerpt = buildSoulExcerptForUiTheme(soulBundle, 2200);
+  const inferModel = effectiveHarnessEnvRaw("AGENT_PERSONA_INFER_MODEL")?.trim() || getFastModelSlug(model);
+  const client = new OpenAI({ apiKey, baseURL });
   const systemPrompt =
-    "You repair markdown identity files. Return JSON only with key soulMarkdown. No extra text.";
-  const userPrompt = `Repair this soul markdown to include required headings exactly:
-- # Identity Core
-- ## Voice DNA
-- ## Cognitive Stance
-- ## Relational Posture
-- ## Behavioral Rails
-- ## Identity Answers
-- ## Non-Negotiables
+    "You output JSON only for a terminal/chat HUD theme. Colors are 7-char hex like #00d4ff. " +
+    "Fields must feel coherent with the persona's emotional register—no neon clash soup. " +
+    "motion is one of: calm, default, snappy, dramatic (animation pacing). " +
+    "displayLabel: 1-3 words, title case, HUD title—may match persona name or a stylized callsign; ASCII preferred.";
+  const userPrompt = `Persona profile (identity + tone):
+${JSON.stringify(
+  {
+    name: profile.name,
+    coreIdentity: profile.coreIdentity,
+    tone: profile.tone,
+    speechStyle: { formality: profile.speechStyle.formality, rhythm: profile.speechStyle.rhythm },
+  },
+  null,
+  2
+)}
 
-Original user intent: "${input}"
-Persona profile:
-${JSON.stringify(profile, null, 2)}
+Soul excerpt (voice texture):
+"""${excerpt}"""
 
-Current soul markdown:
-${draftSoul}
+Return JSON with exactly these keys:
+- accent (string hex): primary interactive / user-facing accent
+- secondary (string hex): approvals / highlights (often magenta-leaning but pick what fits)
+- warn (string hex): warnings / thinking
+- danger (string hex): errors / destructive
+- success (string hex): done / ok
+- muted (string hex): de-emphasized chrome
+- surfaceTint (string hex): very dark panel tint, still readable on near-black #020408
+- displayLabel (string): short HUD brand (max ~20 chars)
+- motion (string): calm|default|snappy|dramatic`;
 
-Return JSON: {"soulMarkdown":"..."} with actionable, specific content—identity and voice only; no harness/tool/runtime prose. Preserve genre, register, **dialect**, and **in-character profanity** from the user request and profile in the example lines and Voice DNA—do not genericize into polite assistant filler.`;
-  const raw = await callPersonaModel(apiKey, model, baseURL, systemPrompt, userPrompt, 1800, 0.35);
-  return String(raw["soulMarkdown"] ?? "").replace(/\\n/g, "\n").trim();
+  const res = await completeChatJson(client, {
+    model: inferModel,
+    messages: [
+      { role: "system", content: systemPrompt },
+      { role: "user", content: userPrompt },
+    ],
+    maxTokens: 420,
+    temperature: 0.35,
+  });
+  if (!res.ok) {
+    return validateAndNormalizePersonaUiTheme({}, profile.name);
+  }
+  return validateAndNormalizePersonaUiTheme(res.parsed, profile.name);
 }

@@ -25,9 +25,9 @@ export function createSetPersonaTool(harness: AgentHarness) {
   return defineTool({
     name: "set_persona",
     description:
-      "WHAT: Change your communication style and personality inline during the conversation.\n" +
+      "WHAT: Change the **default written voice and stance** (tone, diction, judgment habits) for this harness session.\n" +
       "WHEN: The user asks you to change personality, tone, or speaking style.\n" +
-      "NOT WHEN: The user asks you to roleplay a scenario — persona changes STYLE, not task behavior.\n\n" +
+      "NOT WHEN: The user asks you to **roleplay a scenario** (fiction/improv) — persona is **how you write as the agent**, not a separate actor or plot.\n\n" +
       "ARGS:\n" +
       "  input — natural-language voice (required), OR one of: default, reset, liminal, clear (restores default; no LLM).\n\n" +
       "STRENGTH: append 1-10 — e.g. 'noir detective narrator 9' or 'strength:6'\n" +

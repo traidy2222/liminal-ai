@@ -62,11 +62,14 @@ export function createSetRuntimeSettingsTool(harness: AgentHarness) {
         },
         { persist }
       );
+      const effectiveControls = harness.getRuntimePreferences()?.persona?.controls ?? {};
       const summary = controlsSummary(controls);
+      const effectiveSummary = controlsSummary(effectiveControls);
       return {
         ok: true,
         output:
           `Runtime settings updated: ${summary || "persona controls"}.\n` +
+          `Effective controls now: ${effectiveSummary || "(none)"}.\n` +
           `Persistence: ${out.persisted ? "persisted" : "session-only"}.`,
       };
     },
