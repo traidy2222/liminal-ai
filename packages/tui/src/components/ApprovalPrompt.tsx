@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { Box, Text, useInput } from "ink";
 import type { AgentEventMap } from "@liminal/core";
+import { usePersonaChrome } from "../personaChromeContext.js";
 
 interface Props {
   payload: AgentEventMap["tool_approval"];
@@ -35,6 +36,7 @@ function resourceLines(name: string, args: Record<string, unknown>): string[] {
 }
 
 export function ApprovalPrompt({ payload, onResolved }: Props) {
+  const jarvis = usePersonaChrome().colors;
   const [receivedAt] = useState(() => Date.now());
   const deadline = receivedAt + payload.approvalTimeoutMs;
   const [now, setNow] = useState(() => Date.now());
@@ -66,48 +68,48 @@ export function ApprovalPrompt({ payload, onResolved }: Props) {
   return (
     <Box
       borderStyle="double"
-      borderColor="magenta"
+      borderColor={jarvis.meta}
       flexDirection="column"
       padding={1}
       marginY={1}
     >
       <Box justifyContent="space-between">
-        <Text bold color="magenta">
+        <Text bold color={jarvis.meta}>
           SAFETY APPROVAL REQUIRED
         </Text>
-        <Text backgroundColor="magenta" color="black">
+        <Text backgroundColor={jarvis.meta} color="black">
           {" "}
           {tag}
           {" "}
         </Text>
       </Box>
       <Box marginY={1}>
-        <Text color="gray">
-          Agent requests <Text color="cyan">{payload.name}</Text> with the following context:
+        <Text color={jarvis.muted}>
+          Agent requests <Text color={jarvis.accent}>{payload.name}</Text> with the following context:
         </Text>
       </Box>
       {resources.map((line, i) => (
-        <Text key={i} dimColor color="white">
+        <Text key={i} dimColor color={jarvis.body}>
           {"  · "}
           {line}
         </Text>
       ))}
       <Box marginY={1}>
-        <Text color={leftSec <= 10 ? "yellow" : "gray"}>
+        <Text color={leftSec <= 10 ? jarvis.warn : jarvis.muted}>
           Auto-reject in {leftSec}s (cap {Math.round(payload.approvalTimeoutMs / 1000)}s)
         </Text>
       </Box>
       <Box flexDirection="column" marginTop={1}>
-        <Text color="green" bold>
+        <Text color={jarvis.assistant} bold>
           [A] Approve once
         </Text>
-        <Text color="green">
+        <Text color={jarvis.assistant}>
           [S] Approve (same as A — session-wide auto-approve not wired yet)
         </Text>
-        <Text color="red" bold>
+        <Text color={jarvis.danger} bold>
           [D] Deny
         </Text>
-        <Text dimColor color="gray">
+        <Text dimColor color={jarvis.muted}>
           [R] Reject (alias) · Enter approves
         </Text>
       </Box>

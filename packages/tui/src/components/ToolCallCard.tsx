@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from "react";
 import { Box, Text } from "ink";
+import { jarvis } from "../theme/jarvis.js";
 
 // ── Category detection ───────────────────────────────────────────────────────
 
@@ -10,7 +11,7 @@ type ToolCategory =
 export function getToolCategory(name: string): ToolCategory {
   if (/^(run_shell|run_background|kill_process|list_processes|read_process_output)$/.test(name)) return "shell";
   if (/^(read_file|write_file|list_dir|apply_diff|patch_file)$/.test(name)) return "file";
-  if (/^(web_fetch|web_search|web_research|weather_lookup)$/.test(name)) return "web";
+  if (/^(web_fetch|web_search|weather_lookup)$/.test(name)) return "web";
   if (/^(remember|recall|recall_type|recall_relevant|search_memory|forget|forget_type|memory_stats|memory_consolidate|memory_query|memory_graph)$/.test(name)) return "memory";
   if (name.startsWith("vault_")) return "vault";
   if (/^(ast_grep|symbol_index|find_references|run_tests|run_lint|execute_code|repo_map)$/.test(name)) return "code";
@@ -23,20 +24,22 @@ export function getToolCategory(name: string): ToolCategory {
   return "other";
 }
 
-const CATEGORY_META: Record<ToolCategory, { icon: string; color: string }> = {
-  shell:         { icon: "▶", color: "red" },
-  file:          { icon: "◇", color: "blue" },
-  web:           { icon: "◎", color: "magenta" },
-  memory:        { icon: "◈", color: "yellow" },
-  vault:         { icon: "⊚", color: "cyan" },
-  code:          { icon: "◆", color: "green" },
-  git:           { icon: "⌥", color: "yellow" },
-  markets:       { icon: "◉", color: "yellow" },
-  vision:        { icon: "◑", color: "magenta" },
-  docs:          { icon: "▣", color: "cyan" },
-  orchestration: { icon: "⟴", color: "magenta" },
-  context:       { icon: "⊙", color: "gray" },
-  other:         { icon: "⚙", color: "white" },
+type JarvisColor = (typeof jarvis)[keyof typeof jarvis];
+
+const CATEGORY_META: Record<ToolCategory, { icon: string; color: JarvisColor }> = {
+  shell:         { icon: "▶", color: jarvis.danger },
+  file:          { icon: "◇", color: jarvis.accent },
+  web:           { icon: "◎", color: jarvis.meta },
+  memory:        { icon: "◈", color: jarvis.warn },
+  vault:         { icon: "⊚", color: jarvis.accent },
+  code:          { icon: "◆", color: jarvis.assistant },
+  git:           { icon: "⌥", color: jarvis.warn },
+  markets:       { icon: "◉", color: jarvis.warn },
+  vision:        { icon: "◑", color: jarvis.meta },
+  docs:          { icon: "▣", color: jarvis.accent },
+  orchestration: { icon: "⟴", color: jarvis.meta },
+  context:       { icon: "⊙", color: jarvis.muted },
+  other:         { icon: "⚙", color: jarvis.body },
 };
 
 // ── Status meta ──────────────────────────────────────────────────────────────
@@ -51,12 +54,12 @@ const STATUS_ICON: Record<ToolStatus, string> = {
   error:            "✗",
 };
 
-export const STATUS_COLOR: Record<ToolStatus, string> = {
-  streaming:        "yellow",
-  pending_approval: "magenta",
-  running:          "cyan",
-  done:             "green",
-  error:            "red",
+export const STATUS_COLOR: Record<ToolStatus, JarvisColor> = {
+  streaming:        jarvis.warn,
+  pending_approval: jarvis.meta,
+  running:          jarvis.accent,
+  done:             jarvis.assistant,
+  error:            jarvis.danger,
 };
 
 const STATUS_LABEL: Record<ToolStatus, string> = {
@@ -140,14 +143,14 @@ export function ToolCallCard({ name, argsJson, status, startedAt, endedAt }: Pro
       <Box justifyContent="space-between">
         <Box gap={1}>
           <Text color={catColor}>{catIcon}</Text>
-          <Text bold color="white">{name}</Text>
+          <Text bold color={jarvis.body}>{name}</Text>
           {arg && (
-            <Text color="gray" dimColor>{arg}</Text>
+            <Text color={jarvis.muted} dimColor>{arg}</Text>
           )}
         </Box>
         <Box gap={1}>
           {elapsed !== null && (
-            <Text color="gray" dimColor>{formatElapsed(elapsed)}</Text>
+            <Text color={jarvis.muted} dimColor>{formatElapsed(elapsed)}</Text>
           )}
           <Text color={statusColor} bold>
             {STATUS_ICON[status]} {STATUS_LABEL[status]}

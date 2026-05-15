@@ -5,6 +5,7 @@ import {
   type AgentHarness,
   type ContextSnapshot,
   type ImageAttachment,
+  resolveHarnessEnvRaw,
 } from "@liminal/core";
 import {
   applyPersonaProfileToHarness,
@@ -13,6 +14,7 @@ import {
   isResetToDefaultRequest,
   parsePersonaInput,
 } from "@liminal/tools";
+import type { AutoDreamState } from "./autoDreamPresent.js";
 
 function isAgentUiQuiet(): boolean {
   return process.env["AGENT_UI_VERBOSITY"]?.trim() === "quiet";
@@ -47,6 +49,7 @@ export type MessageEntry =
   | { kind: "think"; content: string }
   | { kind: "plan"; steps: string[] }
   | { kind: "trace"; text: string }
+  | { kind: "pulse_nudge"; text: string }
   | {
       kind: "subtask";
       taskId: string;
@@ -66,6 +69,26 @@ export interface AgentState {
   error: string | null;
   busy: boolean;
   personaName: string;
+  autoDream: AutoDreamState;
+  personaBootstrapPending: boolean;
+  personaBootstrapAllowSkip: boolean;
+  personaBootstrapProgress: string | null;
+  personaBootstrapStage: string | null;
+  personaBootstrapSubmitting: boolean;
+  /** Ambient line for AGENT_HEARTBEAT (footer / status strip). */
+  personalityPulseLine: string | null;
+  personalityPulseActive: boolean;
+}
+
+export function computePersonaBootstrapPending(harness: AgentHarness): boolean {
+  const prefs = harness.getRuntimePreferences();
+  if (resolveHarnessEnvRaw("AGENT_PERSONA_BOOTSTRAP", prefs) === "0") return false;
+  if (process.env["AGENT_PERSONA_BOOTSTRAP_FORCE"] === "1") return true;
+  return !harness.isPersonaBootstrapCompleted();
+}
+
+function personaBootstrapAllowSkipFromHarness(harness: AgentHarness): boolean {
+  return resolveHarnessEnvRaw("AGENT_PERSONA_BOOTSTRAP_ALLOW_SKIP", harness.getRuntimePreferences()) !== "0";
 }
 
 type Action =
@@ -79,7 +102,10 @@ type Action =
       message: string;
       backoffMs: number;
     }
-  | { type: "session_reset" }
+  | {
+      type: "session_reset";
+      personaBootstrap?: { pending: boolean; allowSkip: boolean };
+    }
   | { type: "tool_start"; callId: string; name: string }
   | { type: "tool_delta"; callId: string; argsDelta: string }
   | { type: "tool_approval"; payload: AgentEventMap["tool_approval"] }
@@ -96,7 +122,34 @@ type Action =
   | { type: "subtask_complete"; taskId: string; ok: boolean }
   | { type: "subtask_output"; taskId: string; delta: string }
   | { type: "context_compressed"; beforePct: number; afterPct: number; rounds: number }
-  | { type: "persona_changed"; name: string };
+  | { type: "persona_changed"; name: string }
+  | { type: "auto_dream"; payload: AgentEventMap["auto_dream"] }
+  | { type: "heartbeat_started"; payload: AgentEventMap["heartbeat_started"] }
+  | { type: "heartbeat_completed"; payload: AgentEventMap["heartbeat_completed"] }
+  | { type: "heartbeat_skipped"; payload: AgentEventMap["heartbeat_skipped"] }
+  | { type: "persona_bootstrap_progress"; message: string | null; stage: string | null }
+  | { type: "persona_bootstrap_submitting"; value: boolean }
+  | { type: "persona_bootstrap_done" };
+
+function createInitialAgentState(harness: AgentHarness): AgentState {
+  return {
+    messages: [],
+    contextSnapshot: null,
+    pendingApproval: null,
+    pendingAskUser: null,
+    error: null,
+    busy: false,
+    personaName: "Liminal",
+    autoDream: { stage: "idle", updatedAt: Date.now() },
+    personaBootstrapPending: computePersonaBootstrapPending(harness),
+    personaBootstrapAllowSkip: personaBootstrapAllowSkipFromHarness(harness),
+    personaBootstrapProgress: null,
+    personaBootstrapStage: null,
+    personaBootstrapSubmitting: false,
+    personalityPulseLine: null,
+    personalityPulseActive: false,
+  };
+}
 
 function stripTrailingProviderRetry(messages: MessageEntry[]): MessageEntry[] {
   const last = messages.at(-1);
@@ -111,6 +164,7 @@ function reducer(state: AgentState, action: Action): AgentState {
         ...state,
         busy: true,
         error: null,
+        personalityPulseActive: false,
         messages: [...state.messages, { kind: "user", text: action.text }],
       };
 
@@ -164,7 +218,8 @@ function reducer(state: AgentState, action: Action): AgentState {
       return { ...state, messages: [...state.messages, { kind: "provider_retry", text: line }] };
     }
 
-    case "session_reset":
+    case "session_reset": {
+      const pb = action.personaBootstrap;
       return {
         ...state,
         messages: [],
@@ -173,7 +228,20 @@ function reducer(state: AgentState, action: Action): AgentState {
         contextSnapshot: null,
         pendingApproval: null,
         pendingAskUser: null,
+        autoDream: { stage: "idle", updatedAt: Date.now() },
+        personalityPulseLine: null,
+        personalityPulseActive: false,
+        ...(pb
+          ? {
+              personaBootstrapPending: pb.pending,
+              personaBootstrapAllowSkip: pb.allowSkip,
+              personaBootstrapProgress: null,
+              personaBootstrapStage: null,
+              personaBootstrapSubmitting: false,
+            }
+          : {}),
       };
+    }
 
     case "tool_start": {
       // Suppress generic card for think/plan — they render as special entries
@@ -351,28 +419,86 @@ function reducer(state: AgentState, action: Action): AgentState {
 
     case "persona_changed":
       return { ...state, personaName: action.name };
+
+    case "persona_bootstrap_progress":
+      return {
+        ...state,
+        personaBootstrapProgress: action.message,
+        personaBootstrapStage: action.stage,
+      };
+
+    case "persona_bootstrap_submitting":
+      return { ...state, personaBootstrapSubmitting: action.value };
+
+    case "persona_bootstrap_done":
+      return {
+        ...state,
+        personaBootstrapPending: false,
+        personaBootstrapProgress: null,
+        personaBootstrapStage: null,
+        personaBootstrapSubmitting: false,
+      };
+
+    case "auto_dream": {
+      const p = action.payload;
+      return {
+        ...state,
+        autoDream: {
+          stage: p.stage,
+          runId: p.runId,
+          gate: p.gate,
+          progress: p.progress,
+          result: p.result,
+          error: p.error,
+          updatedAt: Date.now(),
+        },
+      };
+    }
+
+    case "heartbeat_started":
+      return {
+        ...state,
+        personalityPulseActive: true,
+        personalityPulseLine: "Pulse · syncing…",
+      };
+
+    case "heartbeat_completed": {
+      const p = action.payload;
+      const msgs = [...state.messages];
+      if (p.surfaceDecision === "assistant" && p.nudgeText) {
+        msgs.push({ kind: "pulse_nudge", text: p.nudgeText });
+      }
+      return {
+        ...state,
+        personalityPulseActive: false,
+        personalityPulseLine: p.summary.slice(0, 120),
+        messages: msgs,
+      };
+    }
+
+    case "heartbeat_skipped":
+      return {
+        ...state,
+        personalityPulseActive: false,
+        personalityPulseLine: `Pulse · skipped (${action.payload.reason})`,
+      };
+
+    default:
+      return state;
   }
 }
 
-const initialState: AgentState = {
-  messages: [],
-  contextSnapshot: null,
-  pendingApproval: null,
-  pendingAskUser: null,
-  error: null,
-  busy: false,
-  personaName: "Liminal",
-};
-
 export function useAgent(harness: AgentHarness) {
-  const [state, dispatch] = useReducer(reducer, initialState);
+  const [state, dispatch] = useReducer(reducer, harness, createInitialAgentState);
   const queuedTextRef = useRef("");
   const queuedTraceRef = useRef("");
   const flushTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const bootstrapPendingRef = useRef(
-    process.env["AGENT_PERSONA_BOOTSTRAP"] !== "0" && !harness.isPersonaBootstrapCompleted()
-  );
+  const bootstrapPendingRef = useRef(computePersonaBootstrapPending(harness));
   const bootstrapInFlightRef = useRef(false);
+
+  useEffect(() => {
+    bootstrapPendingRef.current = state.personaBootstrapPending;
+  }, [state.personaBootstrapPending]);
 
   useEffect(() => {
     const { emitter } = harness;
@@ -497,6 +623,18 @@ export function useAgent(harness: AgentHarness) {
     emitter.on("persona_changed", ({ name }) =>
       dispatch({ type: "persona_changed", name })
     );
+    emitter.on("auto_dream", (payload) => {
+      dispatch({ type: "auto_dream", payload });
+    });
+    emitter.on("heartbeat_started", (payload) => {
+      dispatch({ type: "heartbeat_started", payload });
+    });
+    emitter.on("heartbeat_completed", (payload) => {
+      dispatch({ type: "heartbeat_completed", payload });
+    });
+    emitter.on("heartbeat_skipped", (payload) => {
+      dispatch({ type: "heartbeat_skipped", payload });
+    });
     emitter.on("execution_state", (p) =>
       dispatch({
         type: "trace_delta",
@@ -585,8 +723,134 @@ export function useAgent(harness: AgentHarness) {
     };
   }, [harness]);
 
+  const submitPersonaBootstrap = useCallback(
+    async (text: string, options?: { skip?: boolean }) => {
+      if (!bootstrapPendingRef.current) {
+        throw new Error("Persona bootstrap is not pending.");
+      }
+      if (bootstrapInFlightRef.current) {
+        throw new Error("Persona bootstrap is already in progress.");
+      }
+      bootstrapInFlightRef.current = true;
+      dispatch({ type: "persona_bootstrap_submitting", value: true });
+      dispatch({
+        type: "persona_bootstrap_progress",
+        message: "Starting…",
+        stage: "starting",
+      });
+      try {
+        if (options?.skip) {
+          dispatch({ type: "persona_bootstrap_progress", message: "Skipping…", stage: "skip" });
+          await clearPersistedPersonaArtifacts().catch(() => undefined);
+          await harness.patchRuntimePreferences(
+            {
+              persona: {
+                bootstrapCompleted: true,
+                sourcePrompt: "",
+                activeProfile: null,
+                updatedAt: Date.now(),
+              },
+            },
+            { persist: true }
+          );
+          await harness.sendSessionGreeting();
+          bootstrapPendingRef.current = false;
+          dispatch({ type: "persona_bootstrap_done" });
+          return;
+        }
+        const trimmed = text.trim();
+        const skipAllowed = personaBootstrapAllowSkipFromHarness(harness);
+        if (skipAllowed && /^(skip|\/skip)$/i.test(trimmed)) {
+          await clearPersistedPersonaArtifacts().catch(() => undefined);
+          await harness.patchRuntimePreferences(
+            {
+              persona: {
+                bootstrapCompleted: true,
+                sourcePrompt: "",
+                activeProfile: null,
+                updatedAt: Date.now(),
+              },
+            },
+            { persist: true }
+          );
+          await harness.sendSessionGreeting();
+          bootstrapPendingRef.current = false;
+          dispatch({ type: "persona_bootstrap_done" });
+          return;
+        }
+        const parsed = parsePersonaInput(trimmed);
+        if (!parsed.coreInput) {
+          throw new Error("Describe how you want the assistant to sound first.");
+        }
+        if (isResetToDefaultRequest(parsed.coreInput)) {
+          harness.resetPersona();
+          await clearPersistedPersonaArtifacts().catch(() => undefined);
+          await harness.patchRuntimePreferences(
+            {
+              persona: {
+                bootstrapCompleted: true,
+                sourcePrompt: "default",
+                activeProfile: null,
+                updatedAt: Date.now(),
+              },
+            },
+            { persist: true }
+          );
+          await harness.sendSessionGreeting();
+          bootstrapPendingRef.current = false;
+          dispatch({ type: "persona_bootstrap_done" });
+          return;
+        }
+        const onProgress = (stage: string, message: string) => {
+          dispatch({ type: "persona_bootstrap_progress", message, stage });
+        };
+        const bundle = await generatePersonaFromInput(
+          harness,
+          parsed.coreInput,
+          parsed.strength,
+          parsed.modifier,
+          onProgress
+        );
+        const profile = bundle.profile;
+        await applyPersonaProfileToHarness(harness, profile);
+        await harness.patchRuntimePreferences(
+          {
+            persona: {
+              bootstrapCompleted: true,
+              sourcePrompt: parsed.coreInput,
+              activeProfile: profile,
+              controls: bundle.defaultControls,
+              updatedAt: Date.now(),
+            },
+          },
+          { persist: true }
+        );
+        await harness.sendSessionGreeting();
+        bootstrapPendingRef.current = false;
+        dispatch({ type: "persona_bootstrap_done" });
+      } catch (err) {
+        dispatch({
+          type: "error",
+          msg: err instanceof Error ? err.message : String(err),
+        });
+      } finally {
+        bootstrapInFlightRef.current = false;
+        dispatch({ type: "persona_bootstrap_submitting", value: false });
+        dispatch({ type: "persona_bootstrap_progress", message: null, stage: null });
+      }
+    },
+    [harness]
+  );
+
   const sendMessage = useCallback(
     (text: string, attachments: ImageAttachment[] = []) => {
+      if (bootstrapPendingRef.current) {
+        dispatch({
+          type: "error",
+          msg: "Finish personality setup in the bootstrap panel first.",
+        });
+        return;
+      }
       const userText =
         attachments.length > 0
           ? `${text.trim() || "(no text)"}\n[attached images: ${attachments.length}]`
@@ -594,86 +858,12 @@ export function useAgent(harness: AgentHarness) {
       dispatch({ type: "user_message", text: userText });
       void (async () => {
         try {
-          if (bootstrapPendingRef.current) {
-            if (bootstrapInFlightRef.current) {
-              throw new Error("Persona bootstrap is already in progress.");
-            }
-            bootstrapInFlightRef.current = true;
-            const trimmed = text.trim();
-            const skipAllowed = process.env["AGENT_PERSONA_BOOTSTRAP_ALLOW_SKIP"] !== "0";
-            if (skipAllowed && /^(skip|\/skip)$/i.test(trimmed)) {
-              bootstrapPendingRef.current = false;
-              await clearPersistedPersonaArtifacts().catch(() => undefined);
-              await harness.patchRuntimePreferences(
-                {
-                  persona: {
-                    bootstrapCompleted: true,
-                    sourcePrompt: "",
-                    activeProfile: null,
-                    updatedAt: Date.now(),
-                  },
-                },
-                { persist: true }
-              );
-              await harness.sendSessionGreeting();
-              return;
-            }
-            const parsed = parsePersonaInput(trimmed);
-            if (!parsed.coreInput) {
-              await harness.sendPersonaBootstrapPrompt();
-              return;
-            }
-            if (isResetToDefaultRequest(parsed.coreInput)) {
-              harness.resetPersona();
-              await clearPersistedPersonaArtifacts().catch(() => undefined);
-              await harness.patchRuntimePreferences(
-                {
-                  persona: {
-                    bootstrapCompleted: true,
-                    sourcePrompt: "default",
-                    activeProfile: null,
-                    updatedAt: Date.now(),
-                  },
-                },
-                { persist: true }
-              );
-              bootstrapPendingRef.current = false;
-              await harness.sendSessionGreeting();
-              return;
-            }
-            const bundle = await generatePersonaFromInput(
-              harness,
-              parsed.coreInput,
-              parsed.strength,
-              parsed.modifier
-            );
-            const profile = bundle.profile;
-            await applyPersonaProfileToHarness(harness, profile);
-            await harness.patchRuntimePreferences(
-              {
-                persona: {
-                  bootstrapCompleted: true,
-                  sourcePrompt: parsed.coreInput,
-                  activeProfile: profile,
-                  controls: bundle.defaultControls,
-                  updatedAt: Date.now(),
-                },
-              },
-              { persist: true }
-            );
-            bootstrapPendingRef.current = false;
-            await harness.sendSessionGreeting();
-            return;
-          }
-
           await harness.send(buildMessageWithImageAttachments(text, attachments));
         } catch (err) {
           dispatch({
             type: "error",
             msg: err instanceof Error ? err.message : String(err),
           });
-        } finally {
-          bootstrapInFlightRef.current = false;
         }
       })();
     },
@@ -698,20 +888,18 @@ export function useAgent(harness: AgentHarness) {
     if (harness.getIsRunning()) return;
     if (state.pendingApproval || state.pendingAskUser) return;
     harness.clearConversation();
-    dispatch({ type: "session_reset" });
-    bootstrapPendingRef.current =
-      process.env["AGENT_PERSONA_BOOTSTRAP"] !== "0" && !harness.isPersonaBootstrapCompleted();
+    const pending = computePersonaBootstrapPending(harness);
+    const allowSkip = personaBootstrapAllowSkipFromHarness(harness);
+    dispatch({ type: "session_reset", personaBootstrap: { pending, allowSkip } });
+    bootstrapPendingRef.current = pending;
     void (async () => {
       try {
         const persisted = harness.getPersistedPersonaProfile();
         if (persisted) {
           await applyPersonaProfileToHarness(harness, persisted);
         }
-        if (bootstrapPendingRef.current) {
-          await harness.sendPersonaBootstrapPrompt();
-        } else {
-          await harness.sendSessionGreeting();
-        }
+        if (pending) return;
+        await harness.sendSessionGreeting();
       } catch (err) {
         dispatch({
           type: "error",
@@ -738,6 +926,7 @@ export function useAgent(harness: AgentHarness) {
   return {
     state,
     sendMessage,
+    submitPersonaBootstrap,
     resolveApproval,
     resolveAskUser,
     dismissApprovalUi,

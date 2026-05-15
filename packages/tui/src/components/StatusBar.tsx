@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from "react";
 import { Box, Text } from "ink";
 import type { ContextSnapshot } from "@liminal/core";
+import { usePersonaChrome } from "../personaChromeContext.js";
 
 const FRAMES = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"] as const;
 
@@ -10,19 +11,30 @@ interface Props {
   snapshot: ContextSnapshot | null;
   busy: boolean;
   width: number;
+  /** Short background memory sync line (omit when null). */
+  memorySync?: string | null;
 }
 
-export function StatusBar({ modelSlug, personaName, snapshot, busy, width }: Props) {
+export function StatusBar({
+  modelSlug,
+  personaName,
+  snapshot,
+  busy,
+  width,
+  memorySync,
+}: Props) {
+  const jarvis = usePersonaChrome().colors;
+  const statusBarIntervalMs = usePersonaChrome().statusBarIntervalMs;
   const [frame, setFrame] = useState(0);
 
   useEffect(() => {
     if (!busy) { setFrame(0); return; }
-    const id = setInterval(() => setFrame((f) => (f + 1) % FRAMES.length), 80);
+    const id = setInterval(() => setFrame((f) => (f + 1) % FRAMES.length), statusBarIntervalMs);
     return () => clearInterval(id);
-  }, [busy]);
+  }, [busy, statusBarIntervalMs]);
 
   const pct = snapshot ? Math.round(snapshot.usageFraction * 100) : null;
-  const ctxColor = pct == null ? "gray" : pct >= 80 ? "red" : pct >= 60 ? "yellow" : "green";
+  const ctxColor = pct == null ? jarvis.muted : pct >= 80 ? jarvis.danger : pct >= 60 ? jarvis.warn : jarvis.assistant;
 
   // Shorten slug: "openrouter/owl-alpha" → "owl-alpha"
   const rawModel = modelSlug.split("/").pop() ?? modelSlug;
@@ -30,16 +42,19 @@ export function StatusBar({ modelSlug, personaName, snapshot, busy, width }: Pro
 
   return (
     <Box width={width} paddingX={1} gap={0}>
-      <Text bold color="cyan">❯❯ </Text>
-      <Text color="white">{model}</Text>
-      {personaName !== "Liminal" && <Text color="magenta"> · {personaName}</Text>}
+      <Text bold color={jarvis.accent}>❯❯ </Text>
+      <Text color={jarvis.body}>{model}</Text>
+      {personaName !== "Liminal" && <Text color={jarvis.meta}> · {personaName}</Text>}
       {pct != null && <Text color={ctxColor}> · ctx {pct}%</Text>}
-      {snapshot?.masked === true && <Text color="yellow"> ⊙</Text>}
+      {snapshot?.masked === true && <Text color={jarvis.warn}> ⊙</Text>}
       {busy ? (
-        <Text color="yellow"> · {FRAMES[frame]!}</Text>
+        <Text color={jarvis.warn}> · {FRAMES[frame]!}</Text>
       ) : (
-        <Text color="green" dimColor> · ready</Text>
+        <Text color={jarvis.assistant} dimColor> · ready</Text>
       )}
+      {memorySync ? (
+        <Text dimColor color={jarvis.meta}> · {memorySync}</Text>
+      ) : null}
     </Box>
   );
 }

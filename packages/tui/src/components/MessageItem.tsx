@@ -3,11 +3,12 @@ import { Box, Text } from "ink";
 import type { MessageEntry } from "../useAgent.js";
 import { ToolCallCard } from "./ToolCallCard.js";
 import { SubtaskCard } from "./SubtaskCard.js";
+import { usePersonaChrome, type TuiJarvisColors } from "../personaChromeContext.js";
 
 const MAX_RESULT_LINES = 8;
 const MAX_RESULT_LINE_LEN = 180;
 
-function renderToolResult(output: string, ok: boolean, w: number): React.ReactElement {
+function renderToolResult(output: string, ok: boolean, w: number, j: TuiJarvisColors): React.ReactElement {
   const lines = output.split("\n");
   const shown = lines.slice(0, MAX_RESULT_LINES);
   const remaining = lines.length - MAX_RESULT_LINES;
@@ -21,7 +22,7 @@ function renderToolResult(output: string, ok: boolean, w: number): React.ReactEl
         return (
           <Box key={i}>
             <Text
-              color={ok ? "gray" : "red"}
+              color={ok ? j.muted : j.danger}
               dimColor={ok}
               wrap="truncate-end"
             >
@@ -33,7 +34,7 @@ function renderToolResult(output: string, ok: boolean, w: number): React.ReactEl
       })}
       {remaining > 0 && (
         <Box paddingLeft={2}>
-          <Text dimColor color="gray">
+          <Text dimColor color={j.muted}>
             … {remaining} more line{remaining !== 1 ? "s" : ""}
           </Text>
         </Box>
@@ -48,6 +49,7 @@ interface Props {
 }
 
 export function MessageItem({ entry, width }: Props) {
+  const jarvis = usePersonaChrome().colors;
   const w = Math.max(20, width);
 
   switch (entry.kind) {
@@ -55,9 +57,9 @@ export function MessageItem({ entry, width }: Props) {
     case "user":
       return (
         <Box flexDirection="row" marginTop={1} gap={1} width={w}>
-          <Text color="cyan" bold>▶</Text>
+          <Text color={jarvis.userMark} bold>▶</Text>
           <Box flexGrow={1}>
-            <Text color="white" wrap="wrap">
+            <Text color={jarvis.body} wrap="wrap">
               {entry.text.length > 2000 ? entry.text.slice(0, 2000) + "…" : entry.text}
             </Text>
           </Box>
@@ -69,10 +71,26 @@ export function MessageItem({ entry, width }: Props) {
       const text = entry.text.length > 8000 ? entry.text.slice(0, 8000) + "…" : entry.text;
       return (
         <Box width={w} marginBottom={0} paddingLeft={0}>
-          <Text color="green" wrap="wrap">
+          <Text color={jarvis.assistant} wrap="wrap">
             {text}
-            {entry.streaming && <Text color="green">▌</Text>}
+            {entry.streaming && <Text color={jarvis.assistant}>▌</Text>}
           </Text>
+        </Box>
+      );
+    }
+
+    case "pulse_nudge": {
+      const t = entry.text.length > 600 ? entry.text.slice(0, 600) + "…" : entry.text;
+      return (
+        <Box flexDirection="column" marginTop={1} paddingLeft={1} width={w} borderStyle="round" borderColor={jarvis.meta}>
+          <Text color={jarvis.meta} dimColor bold>
+            ◇ Pulse
+          </Text>
+          <Box paddingLeft={2}>
+            <Text color={jarvis.body} dimColor wrap="wrap">
+              {t}
+            </Text>
+          </Box>
         </Box>
       );
     }
@@ -83,7 +101,7 @@ export function MessageItem({ entry, width }: Props) {
       const t = entry.text.length > 240 ? entry.text.slice(0, 240) + "…" : entry.text;
       return (
         <Box paddingLeft={2} width={w}>
-          <Text dimColor color="gray" wrap="truncate-end">
+          <Text dimColor color={jarvis.muted} wrap="truncate-end">
             ∷ {t.replace(/\n/g, " ")}
           </Text>
         </Box>
@@ -95,7 +113,7 @@ export function MessageItem({ entry, width }: Props) {
       const t = entry.text.length > 240 ? entry.text.slice(0, 240) + "…" : entry.text;
       return (
         <Box paddingLeft={2} width={w}>
-          <Text color="yellow" dimColor wrap="truncate-end">
+          <Text color={jarvis.warn} dimColor wrap="truncate-end">
             {t}
           </Text>
         </Box>
@@ -119,15 +137,15 @@ export function MessageItem({ entry, width }: Props) {
     /* ── Tool result ────────────────────────────────────── */
     case "tool_result":
       if (!entry.output.trim()) return null;
-      return renderToolResult(entry.output, entry.ok, w);
+      return renderToolResult(entry.output, entry.ok, w, jarvis);
 
     /* ── Ask-user (historical) ──────────────────────────── */
     case "ask_user":
       return (
         <Box flexDirection="column" paddingLeft={2} width={w}>
-          <Text color="blue" bold>◆ Agent asked:</Text>
+          <Text color={jarvis.accent} bold>◆ Agent asked:</Text>
           <Box paddingLeft={2}>
-            <Text color="white" wrap="wrap">
+            <Text color={jarvis.body} wrap="wrap">
               {entry.prompt.length > 600 ? entry.prompt.slice(0, 600) + "…" : entry.prompt}
             </Text>
           </Box>
@@ -139,9 +157,9 @@ export function MessageItem({ entry, width }: Props) {
       const t = entry.content.length > 1200 ? entry.content.slice(0, 1200) + "…" : entry.content;
       return (
         <Box paddingLeft={2} flexDirection="column" width={w}>
-          <Text color="magenta" dimColor bold>◈ thinking</Text>
+          <Text color={jarvis.meta} dimColor bold>◈ thinking</Text>
           <Box paddingLeft={2}>
-            <Text color="magenta" dimColor wrap="wrap">{t}</Text>
+            <Text color={jarvis.meta} dimColor wrap="wrap">{t}</Text>
           </Box>
         </Box>
       );
@@ -152,14 +170,14 @@ export function MessageItem({ entry, width }: Props) {
       if (!entry.steps.length) return null;
       return (
         <Box flexDirection="column" paddingLeft={2} width={w}>
-          <Text color="cyan" bold>▸ Plan</Text>
+          <Text color={jarvis.accent} bold>▸ Plan</Text>
           {entry.steps.map((step, i) => {
             const done = step.startsWith("✓");
             const text = done ? step.slice(2) : step;
             return (
               <Box key={i} paddingLeft={2} gap={1}>
-                <Text color={done ? "green" : "gray"}>{done ? "✓" : "○"}</Text>
-                <Text color={done ? "green" : "gray"}>{`${i + 1}. ${text}`}</Text>
+                <Text color={done ? jarvis.assistant : jarvis.muted}>{done ? "✓" : "○"}</Text>
+                <Text color={done ? jarvis.assistant : jarvis.muted}>{`${i + 1}. ${text}`}</Text>
               </Box>
             );
           })}
@@ -184,7 +202,7 @@ export function MessageItem({ entry, width }: Props) {
     case "context_compressed":
       return (
         <Box paddingLeft={2} width={w}>
-          <Text color="yellow" dimColor>
+          <Text color={jarvis.warn} dimColor>
             {"⊙ Context compressed "}
             {entry.beforePct}{"% → "}
             {entry.afterPct}{"% ("}

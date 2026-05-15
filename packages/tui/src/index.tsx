@@ -1,5 +1,5 @@
 import "./tuiWorkspaceBootstrap.js";
-import React from "react";
+import React, { useEffect, useState } from "react";
 import { render } from "ink";
 import {
   AgentHarness,
@@ -8,14 +8,17 @@ import {
   loadRuntimePreferences,
   resolveWorkspaceRoot,
   saveRuntimePreferences,
+  resolveHarnessEnvRaw,
 } from "@liminal/core";
 import {
   registerAllTools,
   INCEPTION_MESSAGES,
   buildProtocolDynamicSuffix,
   applyPersonaProfileToHarness,
+  loadPersonaUiThemeFromWorkspace,
 } from "@liminal/tools";
 import { App } from "./App.js";
+import { PersonaChromeContext, buildChromeFromTheme } from "./personaChromeContext.js";
 
 /** Heuristic + LLM 0/1 gate to skip approval on safe calls. Env: AGENT_SAFETY_JUDGE=1 */
 function resolveSafetyJudge():
@@ -43,9 +46,6 @@ function resolveWorldContext():
   return { sessionMode: sessionMode! };
 }
 
-if (!process.env["AGENT_DESTRUCTIVE_GATE"]) {
-  process.env["AGENT_DESTRUCTIVE_GATE"] = "balanced";
-}
 const runtimePreferences = await loadRuntimePreferences(resolveWorkspaceRoot());
 let provider;
 try {
@@ -84,8 +84,14 @@ try {
   if (persisted) {
     await applyPersonaProfileToHarness(harness, persisted);
   }
-  if (process.env["AGENT_PERSONA_BOOTSTRAP"] !== "0" && !harness.isPersonaBootstrapCompleted()) {
-    await harness.sendPersonaBootstrapPrompt();
+  const prefs = harness.getRuntimePreferences();
+  const bootstrapOn =
+    resolveHarnessEnvRaw("AGENT_PERSONA_BOOTSTRAP", prefs) !== "0";
+  const forceBootstrap = process.env["AGENT_PERSONA_BOOTSTRAP_FORCE"] === "1";
+  const needBootstrapOverlay =
+    bootstrapOn && (forceBootstrap || !harness.isPersonaBootstrapCompleted());
+  if (needBootstrapOverlay) {
+    // Web parity: dedicated overlay in App; no in-chat model bootstrap turn here.
   } else {
     await harness.sendSessionGreeting();
   }
@@ -93,4 +99,18 @@ try {
   console.error("Session greeting failed:", err instanceof Error ? err.message : String(err));
 }
 
-render(<App harness={harness} />);
+function Root() {
+  const [chrome, setChrome] = useState(() => buildChromeFromTheme(null));
+  useEffect(() => {
+    void loadPersonaUiThemeFromWorkspace().then((t) => {
+      setChrome(buildChromeFromTheme(t));
+    });
+  }, []);
+  return (
+    <PersonaChromeContext.Provider value={chrome}>
+      <App harness={harness} />
+    </PersonaChromeContext.Provider>
+  );
+}
+
+render(<Root />);

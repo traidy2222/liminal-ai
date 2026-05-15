@@ -1,6 +1,7 @@
 import React, { useMemo } from "react";
 import { Box, Text } from "ink";
 import type { MessageEntry } from "../useAgent.js";
+import { usePersonaChrome } from "../personaChromeContext.js";
 
 interface Props {
   messages: MessageEntry[];
@@ -35,6 +36,7 @@ function thinkSnippets(messages: MessageEntry[], max: number): string[] {
  * Lightweight “session memory” strip: pinned env bullets + recent think one-liners.
  */
 export function MemoryStrip({ messages, personaName, maxBullets = 4 }: Props) {
+  const jarvis = usePersonaChrome().colors;
   const bullets = useMemo(() => {
     const pinned = parsePinnedFromEnv();
     const thinks = thinkSnippets(messages, 1);
@@ -53,20 +55,20 @@ export function MemoryStrip({ messages, personaName, maxBullets = 4 }: Props) {
     <Box
       flexDirection="column"
       borderStyle="round"
-      borderColor="magenta"
+      borderColor={jarvis.meta}
       paddingX={1}
       paddingY={1}
       marginBottom={1}
       height={boxHeight}
       overflowY="hidden"
     >
-      <Text bold color="magenta">
+      <Text bold color={jarvis.meta}>
         MEMORY / SESSION NOTES
       </Text>
       {bullets.map((line, i) => (
         <Box key={i} flexDirection="row">
-          <Text color="gray">• </Text>
-          <Text dimColor color="gray">
+          <Text color={jarvis.muted}>• </Text>
+          <Text dimColor color={jarvis.muted}>
             {line}
           </Text>
         </Box>

@@ -1,5 +1,6 @@
 import React from "react";
 import { Box, Text } from "ink";
+import { usePersonaChrome } from "../personaChromeContext.js";
 
 export type ShellPanel = "chat" | "tasks" | "agents" | "memory" | "settings";
 
@@ -23,6 +24,7 @@ const ROWS: Array<{ id: ShellPanel; icon: string; label: string }> = [
  * Decorative shell rail (visual parity with dashboard mock). Panel switching can be wired later.
  */
 export function Sidebar({ active, compact, height }: Props) {
+  const jarvis = usePersonaChrome().colors;
   return (
     <Box
       flexDirection="column"
@@ -30,12 +32,12 @@ export function Sidebar({ active, compact, height }: Props) {
       height={height}
       overflowY="hidden"
       borderStyle="single"
-      borderColor="cyan"
+      borderColor={jarvis.accent}
       paddingY={1}
       paddingX={compact ? 0 : 1}
       justifyContent="flex-start"
     >
-      <Text bold color="cyan" dimColor={active !== "chat"}>
+      <Text bold color={jarvis.accent} dimColor={active !== "chat"}>
         {compact ? "▣" : " liminal "}
       </Text>
       <Box marginY={1} />
@@ -43,7 +45,7 @@ export function Sidebar({ active, compact, height }: Props) {
         const on = active === row.id;
         return (
           <Box key={row.id} marginY={0}>
-            <Text color={on ? "cyan" : "gray"} bold={on} dimColor={!on}>
+            <Text color={on ? jarvis.accent : jarvis.muted} bold={on} dimColor={!on}>
               {compact ? row.icon : `${row.icon} ${row.label}`}
             </Text>
           </Box>

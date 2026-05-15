@@ -1,5 +1,6 @@
 import React, { useState } from "react";
 import { Box, Text, useInput } from "ink";
+import { usePersonaChrome } from "../personaChromeContext.js";
 
 interface Props {
   onSubmit: (text: string) => void;
@@ -11,6 +12,7 @@ interface Props {
 }
 
 export function InputBox({ onSubmit, disabled, onNewSession, promptLabel = "liminal" }: Props) {
+  const jarvis = usePersonaChrome().colors;
   const [input, setInput] = useState("");
 
   useInput(
@@ -35,17 +37,17 @@ export function InputBox({ onSubmit, disabled, onNewSession, promptLabel = "limi
   );
 
   return (
-    <Box borderStyle="single" borderColor={disabled ? "gray" : "cyan"} paddingX={1}>
-      <Text color="cyan" bold>
+    <Box borderStyle="single" borderColor={disabled ? jarvis.muted : jarvis.accent} paddingX={1}>
+      <Text color={jarvis.accent} bold>
         {promptLabel}
         {" > "}
       </Text>
-      <Text color={disabled ? "gray" : "white"}>
+      <Text color={disabled ? jarvis.muted : jarvis.body}>
         {disabled ? "(processing…)" : input || ""}
-        {!disabled && <Text color="cyan">█</Text>}
+        {!disabled && <Text color={jarvis.accent}>█</Text>}
       </Text>
       {onNewSession && !disabled && (
-        <Text dimColor color="gray">
+        <Text dimColor color={jarvis.muted}>
           {" "}
           ^N new session
         </Text>

@@ -1,5 +1,6 @@
 import React from "react";
 import { Box, Text } from "ink";
+import { usePersonaChrome, type TuiJarvisColors } from "../personaChromeContext.js";
 
 interface Props {
   taskId: string;
@@ -16,17 +17,17 @@ const STATUS_ICON: Record<string, string> = {
   cancelled: "⊘",
 };
 
-const STATUS_COLOR: Record<string, string> = {
-  running:   "cyan",
-  done:      "green",
-  error:     "red",
-  cancelled: "gray",
-};
-
 export function SubtaskCard({ taskId, goal, depth, status, partialOutput }: Props) {
+  const jarvis = usePersonaChrome().colors;
+  const statusColor: Record<string, TuiJarvisColors[keyof TuiJarvisColors]> = {
+    running:   jarvis.accent,
+    done:      jarvis.assistant,
+    error:     jarvis.danger,
+    cancelled: jarvis.muted,
+  };
   const indent = Math.max(0, depth) * 2;
   const icon = STATUS_ICON[status] ?? "?";
-  const color = STATUS_COLOR[status] ?? "white";
+  const color = statusColor[status] ?? jarvis.body;
 
   // Show last 4 non-empty lines of live output while running
   const outputLines =
@@ -42,10 +43,10 @@ export function SubtaskCard({ taskId, goal, depth, status, partialOutput }: Prop
     <Box paddingLeft={indent} marginY={0} flexDirection="column">
       {/* ── Header row ─────────────────────────────────────── */}
       <Box gap={1}>
-        <Text color="magenta" dimColor>{"⤷".repeat(Math.max(1, depth))}</Text>
+        <Text color={jarvis.meta} dimColor>{"⤷".repeat(Math.max(1, depth))}</Text>
         <Text color={color} bold>{icon}</Text>
-        <Text color="gray" dimColor>{taskId.slice(0, 8)}</Text>
-        <Text color="white">
+        <Text color={jarvis.muted} dimColor>{taskId.slice(0, 8)}</Text>
+        <Text color={jarvis.body}>
           {goal.length > 90 ? goal.slice(0, 89) + "…" : goal}
         </Text>
       </Box>
@@ -53,7 +54,7 @@ export function SubtaskCard({ taskId, goal, depth, status, partialOutput }: Prop
       {/* ── Live output lines ──────────────────────────────── */}
       {outputLines.map((line, i) => (
         <Box key={i} paddingLeft={indent + 4}>
-          <Text color="gray" dimColor wrap="truncate-end">
+          <Text color={jarvis.muted} dimColor wrap="truncate-end">
             {line}
           </Text>
         </Box>

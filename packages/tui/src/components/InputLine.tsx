@@ -1,6 +1,7 @@
 import React from "react";
 import { Box, Text } from "ink";
 import type { ImageAttachment } from "@liminal/core";
+import { usePersonaChrome } from "../personaChromeContext.js";
 
 interface Props {
   lines: string[];
@@ -23,6 +24,7 @@ export function InputLine({
   status,
   width,
 }: Props) {
+  const jarvis = usePersonaChrome().colors;
   const hints =
     scrollOffset > 0
       ? "Esc=bottom  ↑↓=scroll  /attach <path>  ^K=draft  ^L=session"
@@ -41,14 +43,14 @@ export function InputLine({
     <Box flexDirection="column" width={width}>
       {attachments.length > 0 && (
         <Box width={width} paddingX={1}>
-          <Text color="cyan">
+          <Text color={jarvis.accent}>
             attached: {attachments.map((a) => a.name).join(", ")}
           </Text>
         </Box>
       )}
       {status && (
         <Box width={width} paddingX={1}>
-          <Text color="yellow">{status}</Text>
+          <Text color={jarvis.warn}>{status}</Text>
         </Box>
       )}
       {displayLines.map((line, idx) => {
@@ -64,21 +66,21 @@ export function InputLine({
         }
         return (
           <Box key={sourceRow} width={width} paddingX={1} gap={0}>
-            <Text color={busy ? "gray" : "cyan"} bold>{sourceRow === 0 ? ">" : "·"} </Text>
+            <Text color={busy ? jarvis.muted : jarvis.accent} bold>{sourceRow === 0 ? ">" : "·"} </Text>
             {busy ? (
-              <Text color="gray">{sourceRow === 0 ? "processing…" : ""}</Text>
+              <Text color={jarvis.muted}>{sourceRow === 0 ? "processing…" : ""}</Text>
             ) : isCursorRow ? (
               <>
-                <Text color="white">{rowText.slice(0, cursorIndex)}</Text>
-                <Text color="cyan">█</Text>
-                <Text color="white">{rowText.slice(cursorIndex)}</Text>
+                <Text color={jarvis.body}>{rowText.slice(0, cursorIndex)}</Text>
+                <Text color={jarvis.accent}>█</Text>
+                <Text color={jarvis.body}>{rowText.slice(cursorIndex)}</Text>
               </>
             ) : (
-              <Text color="white">{rowText}</Text>
+              <Text color={jarvis.body}>{rowText}</Text>
             )}
             {sourceRow === 0 && hintText && (
               <Box flexGrow={1} justifyContent="flex-end">
-                <Text dimColor color="gray">{hintText}</Text>
+                <Text dimColor color={jarvis.muted}>{hintText}</Text>
               </Box>
             )}
           </Box>

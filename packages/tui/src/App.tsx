@@ -2,6 +2,7 @@ import React, { useState, useCallback, useEffect, useRef, useMemo } from "react"
 import { Box, Text, useInput, useStdout } from "ink";
 import type { AgentHarness } from "@liminal/core";
 import { DEFAULT_IMAGE_ATTACHMENT_LIMITS, validateImageAttachments, type ImageAttachment } from "@liminal/core";
+import { PERSONA_QUICK_PRESETS } from "@liminal/core/persona-bootstrap-ui";
 import { useAgent } from "./useAgent.js";
 import { resolveInputShortcut } from "./inputSemantics.js";
 import { StatusBar } from "./components/StatusBar.js";
@@ -9,7 +10,10 @@ import { MessageItem } from "./components/MessageItem.js";
 import { InputLine } from "./components/InputLine.js";
 import { ApprovalModal } from "./components/ApprovalModal.js";
 import { AskUserModal } from "./components/AskUserModal.js";
+import { PersonaBootstrapModal } from "./components/PersonaBootstrapModal.js";
 import { extractImagePathsFromText, imagePathToAttachment, parseAttachCommand } from "./imageAttachments.js";
+import { presentAutoDream } from "./autoDreamPresent.js";
+import { usePersonaChrome } from "./personaChromeContext.js";
 
 /** Message window size; keep moderate to reduce redraw churn. */
 const WINDOW_SIZE = 90;
@@ -41,9 +45,11 @@ function isPrintableInputChar(input: string): boolean {
 }
 
 export function App({ harness }: Props) {
+  const jarvis = usePersonaChrome().colors;
   const {
     state,
     sendMessage,
+    submitPersonaBootstrap,
     resolveApproval,
     resolveAskUser,
     clearSession,
@@ -51,6 +57,20 @@ export function App({ harness }: Props) {
 
   const { stdout } = useStdout();
   const cols = stdout?.columns ?? 100;
+
+  const memorySyncStatus = useMemo(() => {
+    const quiet = process.env["AGENT_UI_VERBOSITY"]?.trim() === "quiet";
+    const dreamIdle = state.autoDream.stage === "idle";
+    const pill = dreamIdle
+      ? ""
+      : presentAutoDream(state.autoDream, { verbosity: quiet ? "quiet" : "normal" }).pillHeadline;
+    const pulse = state.personalityPulseLine?.trim() ?? "";
+    if (dreamIdle && !pulse) return null;
+    const combined = [pill, pulse].filter(Boolean).join(" · ");
+    const reserve = 54;
+    const max = Math.max(12, cols - reserve);
+    return combined.length > max ? `${combined.slice(0, max - 1)}…` : combined;
+  }, [state.autoDream, state.personalityPulseLine, cols]);
   const rows = stdout?.rows ?? 30;
 
   /** Multiline text buffer user is typing in the chat input. */
@@ -69,6 +89,11 @@ export function App({ harness }: Props) {
    * 0 = show latest; N = scroll N messages back from the most recent.
    */
   const [scrollOffset, setScrollOffset] = useState(0);
+  const [bootstrapDraft, setBootstrapDraft] = useState("");
+
+  useEffect(() => {
+    if (!state.personaBootstrapPending) setBootstrapDraft("");
+  }, [state.personaBootstrapPending]);
 
   /* ── Auto-scroll to bottom when a turn completes ──────────────── */
   const prevBusy = useRef(state.busy);
@@ -80,16 +105,18 @@ export function App({ harness }: Props) {
   }, [state.busy]);
 
   /* ── Layout ───────────────────────────────────────────────────── */
+  const hasBootstrap = state.personaBootstrapPending;
   const hasApproval = !!state.pendingApproval;
   const hasAskUser = !!state.pendingAskUser;
 
   // Estimate lines consumed by the bottom area
-  const inputAreaH =
-    hasApproval
-      ? 5
-      : hasAskUser
+  const inputAreaH = hasApproval
+    ? 5
+    : hasAskUser
       ? 4
-      : Math.min(4, chatLines.length) + (pendingAttachments.length > 0 ? 1 : 0) + (inputStatus ? 1 : 0);
+      : hasBootstrap
+        ? 16
+        : Math.min(4, chatLines.length) + (pendingAttachments.length > 0 ? 1 : 0) + (inputStatus ? 1 : 0);
   // Fixed layout rows to avoid terminal jitter/flicker:
   // status(1) + top divider(1) + top indicator(1) + bottom indicator(1) + error row(1) + bottom divider(1) + input
   const transcriptH = Math.max(4, rows - (1 + 1 + 1 + 1 + 1 + 1 + inputAreaH));
@@ -131,6 +158,10 @@ export function App({ harness }: Props) {
 
   const handleSend = useCallback(async () => {
     if (state.busy) return;
+    if (state.personaBootstrapPending) {
+      setInputStatus("Finish personality setup in the panel below first.");
+      return;
+    }
     const attachPath = parseAttachCommand(currentDraft);
     if (attachPath !== null) {
       if (!attachPath) {
@@ -181,7 +212,7 @@ export function App({ harness }: Props) {
     setPendingAttachments([]);
     setInputStatus(null);
     setScrollOffset(0);
-  }, [currentDraft, pendingAttachments, pushHistory, sendMessage, setDraftText, state.busy]);
+  }, [currentDraft, pendingAttachments, pushHistory, sendMessage, setDraftText, state.busy, state.personaBootstrapPending]);
 
   const insertTextAtCursor = useCallback((text: string) => {
     const lines = [...chatLines];
@@ -278,6 +309,35 @@ export function App({ harness }: Props) {
         setScrollOffset((n) => Math.min(n + 1, Math.max(0, total - 1)));
       } else {
         setScrollOffset((n) => Math.max(0, n - 1));
+      }
+      return;
+    }
+
+    if (
+      state.personaBootstrapPending &&
+      !state.pendingApproval &&
+      !state.pendingAskUser
+    ) {
+      if (state.personaBootstrapSubmitting) return;
+      if (key.return) {
+        void submitPersonaBootstrap(bootstrapDraft).catch(() => undefined);
+        return;
+      }
+      if (state.personaBootstrapAllowSkip && (char === "d" || char === "D")) {
+        void submitPersonaBootstrap("", { skip: true }).catch(() => undefined);
+        return;
+      }
+      const presetIdx = char >= "1" && char <= "4" ? Number(char) - 1 : -1;
+      if (presetIdx >= 0 && presetIdx < PERSONA_QUICK_PRESETS.length) {
+        setBootstrapDraft(PERSONA_QUICK_PRESETS[presetIdx]!);
+        return;
+      }
+      if (key.backspace || key.delete) {
+        setBootstrapDraft((s) => s.slice(0, -1));
+        return;
+      }
+      if (isPrintableInputChar(char) && !key.ctrl && !key.meta) {
+        setBootstrapDraft((s) => s + char);
       }
       return;
     }
@@ -434,19 +494,20 @@ export function App({ harness }: Props) {
         modelSlug={harness.config.model ?? ""}
         personaName={state.personaName}
         snapshot={state.contextSnapshot}
-        busy={state.busy}
+        busy={state.busy || state.personalityPulseActive}
         width={cols}
+        memorySync={memorySyncStatus}
       />
-      <Text color="gray" dimColor>{divider}</Text>
+      <Text color={jarvis.muted} dimColor>{divider}</Text>
 
       {/* ── Scroll-up indicator (always reserve one row to prevent jump) ───────── */}
       <Box paddingX={1} height={1}>
         {olderCount > 0 ? (
-          <Text dimColor color="yellow">
+          <Text dimColor color={jarvis.warn}>
             {"↑ "}{olderCount} older message{olderCount !== 1 ? "s" : ""}{" — press ↑ / PgUp"}
           </Text>
         ) : (
-          <Text dimColor color="gray">{" "}</Text>
+          <Text dimColor color={jarvis.muted}>{" "}</Text>
         )}
       </Box>
 
@@ -460,7 +521,7 @@ export function App({ harness }: Props) {
         paddingX={1}
       >
         {visibleMessages.length === 0 && (
-          <Text dimColor color="gray">
+          <Text dimColor color={jarvis.muted}>
             {"  Type a message and press Enter to begin."}
           </Text>
         )}
@@ -472,26 +533,26 @@ export function App({ harness }: Props) {
       {/* ── Scroll-down indicator (always reserve one row to prevent jump) ─────── */}
       <Box paddingX={1} height={1}>
         {newerCount > 0 ? (
-          <Text dimColor color="yellow">
+          <Text dimColor color={jarvis.warn}>
             {"↓ "}{newerCount} newer message{newerCount !== 1 ? "s" : ""}{" — press ↓ / Esc"}
           </Text>
         ) : (
-          <Text dimColor color="gray">{" "}</Text>
+          <Text dimColor color={jarvis.muted}>{" "}</Text>
         )}
       </Box>
 
       {/* ── Error banner (always reserve one row to prevent jump) ──────────────── */}
       <Box paddingX={1} height={1}>
         {state.error ? (
-          <Text color="red" wrap="truncate-end">
+          <Text color={jarvis.danger} wrap="truncate-end">
             {"✗ "}{state.error.length > cols - 4 ? state.error.slice(0, cols - 5) + "…" : state.error}
           </Text>
         ) : (
-          <Text dimColor color="gray">{" "}</Text>
+          <Text dimColor color={jarvis.muted}>{" "}</Text>
         )}
       </Box>
 
-      <Text color="gray" dimColor>{divider}</Text>
+      <Text color={jarvis.muted} dimColor>{divider}</Text>
 
       {/* ── Bottom area: input / approval / ask-user ─────────────── */}
       {hasApproval && state.pendingApproval && (
@@ -500,7 +561,17 @@ export function App({ harness }: Props) {
       {!hasApproval && hasAskUser && state.pendingAskUser && (
         <AskUserModal payload={state.pendingAskUser} input={askInput} width={cols} />
       )}
-      {!hasApproval && !hasAskUser && (
+      {!hasApproval && !hasAskUser && hasBootstrap && (
+        <PersonaBootstrapModal
+          width={cols}
+          draft={bootstrapDraft}
+          submitting={state.personaBootstrapSubmitting}
+          progress={state.personaBootstrapProgress}
+          stage={state.personaBootstrapStage}
+          allowSkip={state.personaBootstrapAllowSkip}
+        />
+      )}
+      {!hasApproval && !hasAskUser && !hasBootstrap && (
         <InputLine
           lines={chatLines}
           cursorRow={cursorRow}

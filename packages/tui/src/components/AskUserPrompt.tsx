@@ -1,6 +1,7 @@
 import React, { useState } from "react";
 import { Box, Text, useInput } from "ink";
 import type { AgentEventMap } from "@liminal/core";
+import { usePersonaChrome } from "../personaChromeContext.js";
 
 interface Props {
   payload: AgentEventMap["ask_user"];
@@ -8,6 +9,7 @@ interface Props {
 }
 
 export function AskUserPrompt({ payload, onResolved }: Props) {
+  const jarvis = usePersonaChrome().colors;
   const [input, setInput] = useState("");
 
   useInput((char, key) => {
@@ -24,23 +26,23 @@ export function AskUserPrompt({ payload, onResolved }: Props) {
   return (
     <Box
       borderStyle="round"
-      borderColor="blue"
+      borderColor={jarvis.accent}
       flexDirection="column"
       padding={1}
       marginY={1}
     >
-      <Text bold color="blue">
+      <Text bold color={jarvis.accent}>
         Agent Question
       </Text>
-      <Text color="white">{payload.prompt}</Text>
+      <Text color={jarvis.body}>{payload.prompt}</Text>
       <Box gap={1} marginTop={1}>
-        <Text color="cyan">Your answer:</Text>
-        <Text color="white">
+        <Text color={jarvis.accent}>Your answer:</Text>
+        <Text color={jarvis.body}>
           {input}
-          <Text color="cyan">█</Text>
+          <Text color={jarvis.accent}>█</Text>
         </Text>
       </Box>
-      <Text color="gray" dimColor>
+      <Text color={jarvis.muted} dimColor>
         Press Enter to submit
       </Text>
     </Box>

@@ -1,5 +1,6 @@
 import React from "react";
 import { Box, Text } from "ink";
+import { usePersonaChrome } from "../personaChromeContext.js";
 
 interface Props {
   steps: string[] | null;
@@ -23,6 +24,7 @@ function isDoneStep(step: string): boolean {
  * Live task board derived from the latest `plan()` tool output (same data as PlanCard).
  */
 export function TasksPanel({ steps, busy, maxSteps = 7 }: Props) {
+  const jarvis = usePersonaChrome().colors;
   const omitted =
     steps && steps.length > maxSteps ? Math.max(0, steps.length - maxSteps) : 0;
   const slice = steps && steps.length > maxSteps ? steps.slice(-maxSteps) : steps;
@@ -32,23 +34,23 @@ export function TasksPanel({ steps, busy, maxSteps = 7 }: Props) {
     <Box
       flexDirection="column"
       borderStyle="round"
-      borderColor="blue"
+      borderColor={jarvis.accent}
       paddingX={1}
       paddingY={1}
       marginBottom={1}
       overflowY="hidden"
     >
-      <Text bold color="blueBright">
+      <Text bold color={jarvis.accent}>
         TASKS
       </Text>
       {!slice || slice.length === 0 ? (
-        <Text dimColor color="gray">
+        <Text dimColor color={jarvis.muted}>
           No structured plan yet — the agent will call plan() when it breaks work into steps.
         </Text>
       ) : (
         <>
           {omitted > 0 && (
-            <Text dimColor color="gray">
+            <Text dimColor color={jarvis.muted}>
               … {omitted} earlier step{omitted === 1 ? "" : "s"} not shown (terminal budget)
             </Text>
           )}
@@ -59,15 +61,15 @@ export function TasksPanel({ steps, busy, maxSteps = 7 }: Props) {
             const firstOpen = (steps ?? []).findIndex((s) => !isDoneStep(s));
             const running = busy && !done && i === firstOpen;
             const icon = done ? "✓" : running ? "▶" : "○";
-            const iconColor = done ? "green" : running ? "cyan" : "gray";
+            const iconColor = done ? jarvis.assistant : running ? jarvis.accent : jarvis.muted;
             const tag = done ? "DONE" : running ? "RUNNING" : "PENDING";
             return (
               <Box key={i} gap={1}>
                 <Text color={iconColor}>{icon}</Text>
-                <Text color="gray" dimColor>
+                <Text color={jarvis.muted} dimColor>
                   {`${i + 1}.`}
                 </Text>
-                <Text color={done ? "gray" : running ? "white" : "gray"} dimColor={!running && !done}>
+                <Text color={done ? jarvis.muted : running ? jarvis.body : jarvis.muted} dimColor={!running && !done}>
                   {label.slice(0, 72)}
                   {label.length > 72 ? "…" : ""}
                 </Text>
