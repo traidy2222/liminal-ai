@@ -4,7 +4,7 @@
 import { execFile, spawn } from "node:child_process";
 import { promisify } from "node:util";
 import path from "node:path";
-import { resolveWorkspaceRoot } from "@liminal/core";
+import { resolveWorkspaceRoot, effectiveHarnessEnvRaw } from "@liminal/core";
 import { defineTool } from "./helpers.js";
 
 const execFileAsync = promisify(execFile);
@@ -235,7 +235,7 @@ export const runLintTool = defineTool({
       if (mode === "command") {
         const cmd = (args["command"] as string | undefined)?.trim();
         if (!cmd) return { ok: false, error: 'mode="command" requires "command"' };
-        const allow = (process.env["AGENT_LINT_ALLOWED_COMMANDS"] ?? "")
+        const allow = (effectiveHarnessEnvRaw("AGENT_LINT_ALLOWED_COMMANDS") ?? "")
           .split(",")
           .map((s) => s.trim())
           .filter((s) => s.length > 0);

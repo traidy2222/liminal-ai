@@ -14,7 +14,7 @@ import { rankDocumentsForQuery, type RankableDoc } from "@liminal/core";
 import { recallRelevantTool } from "./recall_relevant.js";
 import { memoryGraphTool } from "./memory_graph.js";
 
-const MEMORY_TYPES = ["fact", "experience", "entity", "belief", "reflection", "recipe"] as const;
+const MEMORY_TYPES = ["fact", "experience", "entity", "belief", "reflection", "recipe", "hypothesis", "trajectory"] as const;
 
 type Mode = "exact" | "type" | "lexical" | "hybrid" | "graph";
 
@@ -75,6 +75,8 @@ export const memoryQueryTool = defineTool({
   description:
     "WHAT: Unified memory + vault retrieval.\n" +
     "WHEN: Any time you need notes — prefer this over calling recall + search_memory separately.\n" +
+    "NOT WHEN: You already have the exact note key and only need one value — use exact mode, not hybrid, to avoid noise.\n" +
+    "GOOD OUTPUT: Ranked lines you can merge into an answer; pass goal_hint + open_questions so irrelevant recalled topics do not drown the current ask.\n" +
     "MODES: exact (by key), type (all of a category), lexical (BM25 on notes), hybrid (notes+vault BM25/RRF/embed), graph (BFS links from seed).\n" +
     "ARGS: mode; query/key/seed per mode; goal_hint + open_questions rerank hits against your plan.",
   requiresApproval: false,
@@ -89,7 +91,13 @@ export const memoryQueryTool = defineTool({
       key: { type: "string", description: "exact: note key" },
       memory_type: {
         type: "string",
-        description: `type: one of ${MEMORY_TYPES.join(", ")}`,
+        enum: [...MEMORY_TYPES],
+        description: `type mode: memory category (lowercase).`,
+      },
+      max_results: {
+        type: "number",
+        description:
+          "Optional cap alias: hybrid uses as k when k omitted; lexical/graph use as limit when limit omitted (clamped per mode).",
       },
       query: { type: "string", description: "lexical / hybrid: search query" },
       queries: {
@@ -173,6 +181,12 @@ export const memoryQueryTool = defineTool({
       ? new Set((args["exclude_types"] as unknown[]).map((x) => String(x).trim().toLowerCase()).filter(Boolean))
       : new Set<string>();
 
+    const maxResultsRaw = args["max_results"];
+    const maxResults =
+      typeof maxResultsRaw === "number" && Number.isFinite(maxResultsRaw)
+        ? Math.max(1, Math.min(200, Math.round(maxResultsRaw)))
+        : undefined;
+
     const formatHit = (source: string, score: number, snippet: string) =>
       JSON.stringify({
         source,
@@ -182,7 +196,15 @@ export const memoryQueryTool = defineTool({
 
     try {
       if (mode === "graph") {
-        const r = await memoryGraphTool.handler(args);
+        const graphPayload: Record<string, unknown> = {
+          seed: args["seed"],
+          depth: args["depth"],
+          limit:
+            typeof args["limit"] === "number" && Number.isFinite(args["limit"])
+              ? args["limit"]
+              : maxResults,
+        };
+        const r = await memoryGraphTool.handler(graphPayload);
         if (!r.ok) return r;
         const lines = String(r.output).split("\n").filter(Boolean);
         const rr = rerankLines(lines, goalHint, openQs);
@@ -199,10 +221,16 @@ export const memoryQueryTool = defineTool({
         if (queries.length === 0) {
           return { ok: false, error: "hybrid mode requires query or queries" };
         }
+        const kHybrid =
+          typeof args["k"] === "number" && Number.isFinite(args["k"])
+            ? Math.max(1, Math.min(30, Math.round(args["k"])))
+            : maxResults != null
+              ? Math.max(1, Math.min(30, maxResults))
+              : 8;
         const payload: Record<string, unknown> = {
           query: queries[0]!,
           queries,
-          k: (args["k"] as number | undefined) ?? 8,
+          k: kHybrid,
           scope: (args["scope"] as string | undefined) ?? "both",
         };
         if (typeof args["hyde"] === "string" && args["hyde"].trim()) {
@@ -226,7 +254,8 @@ export const memoryQueryTool = defineTool({
         if (!r.ok) return r;
         const lines = String(r.output).split("\n").filter(Boolean);
         const rr = rerankLines(lines, goalHint, openQs);
-        const jsonl = rr.slice(0, 24).map((ln, i) => formatHit(`hybrid:${i}`, 1 - i * 0.01, ln));
+        const cap = Math.min(kHybrid, 48);
+        const jsonl = rr.slice(0, cap).map((ln, i) => formatHit(`hybrid:${i}`, 1 - i * 0.01, ln));
         return { ok: true, output: `mode=hybrid\n${jsonl.join("\n")}` };
       }
 
@@ -251,7 +280,7 @@ export const memoryQueryTool = defineTool({
       }
 
       if (mode === "type") {
-        const memType = args["memory_type"] as string;
+        const memType = String(args["memory_type"] ?? "").trim().toLowerCase();
         if (!memType || !(MEMORY_TYPES as readonly string[]).includes(memType)) {
           return { ok: false, error: `memory_type must be one of: ${MEMORY_TYPES.join(", ")}` };
         }
@@ -305,7 +334,15 @@ export const memoryQueryTool = defineTool({
       if (mode === "lexical") {
         const query = String(args["query"] ?? "").trim();
         const typeFilter = args["type_filter"] as string | undefined;
-        const limit = Math.min(200, Math.max(1, (args["limit"] as number | undefined) ?? 40));
+        const limit = Math.min(
+          200,
+          Math.max(
+            1,
+            typeof args["limit"] === "number" && Number.isFinite(args["limit"])
+              ? Math.round(args["limit"])
+              : maxResults ?? 40
+          )
+        );
         if (!query) return { ok: false, error: "lexical mode requires query" };
 
         const raw = await loadRawNotes();

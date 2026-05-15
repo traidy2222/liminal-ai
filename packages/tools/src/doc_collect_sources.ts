@@ -1,5 +1,6 @@
 import { defineTool } from "./helpers.js";
 import { loadIR, saveIR, setRunStage, sourceQualityForRef } from "./doc_engine.js";
+import { effectiveHarnessEnvRaw } from "@liminal/core";
 
 type SourceInput = { type?: string; ref?: string; note?: string };
 
@@ -33,7 +34,7 @@ export const docCollectSourcesTool = defineTool({
     const sources = (Array.isArray(args["sources"]) ? args["sources"] : []) as SourceInput[];
     if (!docId || sources.length === 0) return { ok: false, error: "doc_id and non-empty sources are required" };
     const doc = await loadIR(docId);
-    const sourceCap = Math.max(4, parseInt(process.env["AGENT_DOC_MAX_SOURCE_LOOKUPS"] ?? "24", 10) || 24);
+    const sourceCap = Math.max(4, parseInt(effectiveHarnessEnvRaw("AGENT_DOC_MAX_SOURCE_LOOKUPS") ?? "24", 10) || 24);
     doc.sourceMap = doc.sourceMap ?? [];
     for (let i = 0; i < sources.length; i++) {
       const src = sources[i];

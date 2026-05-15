@@ -1,6 +1,6 @@
 import { spawn } from "node:child_process";
 import type { ChildProcess } from "node:child_process";
-import { resolveShellRuntime } from "@liminal/core";
+import { resolveShellRuntime, effectiveHarnessEnvRaw } from "@liminal/core";
 import { defineTool } from "./helpers.js";
 
 // ─── Shared process registry ──────────────────────────────────────────────────
@@ -263,7 +263,7 @@ export const readProcessOutputTool = defineTool({
       : `exited (code ${record.exitCode})`;
 
     let healthLine = "";
-    if (process.env["AGENT_PROCESS_HEALTH"] === "1" && healthUrl) {
+    if (effectiveHarnessEnvRaw("AGENT_PROCESS_HEALTH") === "1" && healthUrl) {
       try {
         const ac = new AbortController();
         const t = setTimeout(() => ac.abort(), 3_000);

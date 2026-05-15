@@ -2,6 +2,7 @@ import { defineTool } from "./helpers.js";
 import { bundleDir, ensureRunState, loadIR, manifestPath, saveIR, scoreQuality, setRunStage } from "./doc_engine.js";
 import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
+import { effectiveHarnessEnvRaw } from "@liminal/core";
 
 export const docExportTool = defineTool({
   name: "doc_export",
@@ -23,7 +24,7 @@ export const docExportTool = defineTool({
     const doc = await loadIR(docId);
     const runState = ensureRunState(doc);
     const quality = scoreQuality(doc);
-    const min = Math.max(0, Math.min(100, parseInt(process.env["AGENT_DOC_QUALITY_MIN"] ?? "90", 10) || 90));
+    const min = Math.max(0, Math.min(100, parseInt(effectiveHarnessEnvRaw("AGENT_DOC_QUALITY_MIN") ?? "90", 10) || 90));
     const status = quality.score >= min ? "final" : "best_effort_with_warnings";
     const root = bundleDir(docId);
     await mkdir(root, { recursive: true });

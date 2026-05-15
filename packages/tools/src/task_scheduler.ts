@@ -81,7 +81,7 @@ function makeId(name: string): string {
 
 export const scheduleCreateTool: ToolDefinition = {
   name: "schedule_create",
-  requiresApproval: false,
+  requiresApproval: true,
   description:
     "Define a recurring harness task (e.g. weekly synthesis, daily briefing). " +
     "Overdue schedules are surfaced in every world context.",
@@ -153,7 +153,7 @@ export const scheduleListTool: ToolDefinition = {
 
 export const scheduleDeleteTool: ToolDefinition = {
   name: "schedule_delete",
-  requiresApproval: false,
+  requiresApproval: true,
   description: "Remove a recurring schedule by id.",
   parameters: {
     type: "object",
@@ -180,7 +180,7 @@ export const scheduleDeleteTool: ToolDefinition = {
 
 export const scheduleRunTool: ToolDefinition = {
   name: "schedule_run",
-  requiresApproval: false,
+  requiresApproval: true,
   description:
     "Mark a recurring schedule as completed now (resets its last_run clock). " +
     "Call this after actually performing the scheduled task.",

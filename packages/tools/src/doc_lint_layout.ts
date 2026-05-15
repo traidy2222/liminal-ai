@@ -1,5 +1,6 @@
 import { defineTool } from "./helpers.js";
 import { lintChunk, loadIR, saveIR, ensureRunState, setRunStage, getBulletText } from "./doc_engine.js";
+import { effectiveHarnessEnvRaw } from "@liminal/core";
 
 export const docLintLayoutTool = defineTool({
   name: "doc_lint_layout",
@@ -21,7 +22,7 @@ export const docLintLayoutTool = defineTool({
     if (!docId) return { ok: false, error: "doc_id is required" };
     const doc = await loadIR(docId);
     const runState = ensureRunState(doc);
-    const requireCitations = (process.env["AGENT_DOC_AUTONOMY"] ?? "0") === "1";
+    const requireCitations = (effectiveHarnessEnvRaw("AGENT_DOC_AUTONOMY") ?? "0") === "1";
     const targets = chunkId ? doc.chunks.filter((c) => c.id === chunkId) : doc.chunks;
     if (targets.length === 0) return { ok: false, error: "no matching chunks" };
     const results: Array<{ chunk_id: string; passed: boolean; issues: string[] }> = [];

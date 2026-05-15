@@ -19,6 +19,7 @@ export const planTool = defineTool({
     "Call with step_index to mark a step done as you complete each one.\n" +
     "WHEN: Task requires 3+ distinct tool calls. Re-call with step_index after each step.\n" +
     "NOT WHEN: Re-planning from scratch — use steps[] again to replace the plan.\n" +
+    "COVERAGE: When the user message has several requirements, mirror them as separate steps so none are dropped (R-MULTI-PART-USER).\n" +
     "ARGS: steps — ordered array of step descriptions (provide when creating a new plan); " +
     "step_index — 0-based index of the step just completed (provide to mark progress).",
   requiresApproval: false,

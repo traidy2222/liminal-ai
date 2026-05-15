@@ -1,6 +1,6 @@
 import { readFile } from "node:fs/promises";
 import { extname, resolve } from "node:path";
-import { resolveVisionProviderConfig, withProviderRequestSpacing } from "@liminal/core";
+import { resolveVisionProviderConfig, withProviderRequestSpacing, effectiveHarnessEnvRaw } from "@liminal/core";
 import { defineTool } from "./helpers.js";
 
 const MIME_MAP: Record<string, string> = {
@@ -66,10 +66,10 @@ export const visionAnalyzeTool = defineTool({
     if (!prompt) return { ok: false, error: "prompt is required" };
 
     const provider = resolveVisionProviderConfig();
-    const timeoutMs = Math.max(3000, parseInt(process.env["AGENT_VISION_TIMEOUT_MS"] ?? "15000", 10) || 15000);
-    const maxBytes = Math.max(128_000, parseInt(process.env["AGENT_VISION_MAX_IMAGE_BYTES"] ?? String(4 * 1024 * 1024), 10) || 4 * 1024 * 1024);
-    const retries = Math.max(0, parseInt(process.env["AGENT_VISION_RETRIES"] ?? "2", 10) || 2);
-    const retryBaseMs = Math.max(250, parseInt(process.env["AGENT_VISION_RETRY_BASE_MS"] ?? "800", 10) || 800);
+    const timeoutMs = Math.max(3000, parseInt(effectiveHarnessEnvRaw("AGENT_VISION_TIMEOUT_MS") ?? "15000", 10) || 15000);
+    const maxBytes = Math.max(128_000, parseInt(effectiveHarnessEnvRaw("AGENT_VISION_MAX_IMAGE_BYTES") ?? String(4 * 1024 * 1024), 10) || 4 * 1024 * 1024);
+    const retries = Math.max(0, parseInt(effectiveHarnessEnvRaw("AGENT_VISION_RETRIES") ?? "2", 10) || 2);
+    const retryBaseMs = Math.max(250, parseInt(effectiveHarnessEnvRaw("AGENT_VISION_RETRY_BASE_MS") ?? "800", 10) || 800);
 
     const dataUrl = await imageToDataUrl(imageInput, maxBytes);
     if (!dataUrl.ok) return dataUrl;

@@ -1,6 +1,6 @@
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import { resolveWorkspaceRoot, type DocumentIR, type DocChunk, type DocQualityReport, type DocStyleGenome, type BulletItem } from "@liminal/core";
+import { resolveWorkspaceRoot, type DocumentIR, type DocChunk, type DocQualityReport, type DocStyleGenome, type BulletItem, effectiveHarnessEnvRaw } from "@liminal/core";
 
 /** Extract display text from a BulletItem (plain string or emphasis object). */
 export function getBulletText(b: BulletItem): string {
@@ -135,7 +135,7 @@ export async function saveIR(doc: DocumentIR): Promise<void> {
 
 export function ensureRunState(doc: DocumentIR): NonNullable<DocumentIR["runState"]> {
   if (!doc.runState) {
-    const budget = Math.max(1, parseInt(process.env["AGENT_DOC_REPAIR_BUDGET"] ?? "4", 10) || 4);
+    const budget = Math.max(1, parseInt(effectiveHarnessEnvRaw("AGENT_DOC_REPAIR_BUDGET") ?? "4", 10) || 4);
     doc.runState = {
       stage: "planned",
       retries: 0,

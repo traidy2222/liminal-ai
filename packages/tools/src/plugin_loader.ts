@@ -16,6 +16,7 @@ import { existsSync, readdirSync } from "fs";
 import { join } from "path";
 import { pathToFileURL } from "url";
 import type { ToolRegistry, AgentEmitter } from "@liminal/core";
+import { effectiveHarnessEnvRaw } from "@liminal/core";
 
 export interface PluginModule {
   register?: (registry: ToolRegistry, emitter: AgentEmitter) => void | Promise<void>;
@@ -37,7 +38,7 @@ export async function loadPlugins(
   registry: ToolRegistry,
   emitter: AgentEmitter
 ): Promise<PluginLoadResult[]> {
-  const pluginDir = process.env["AGENT_PLUGIN_DIR"]?.trim();
+  const pluginDir = effectiveHarnessEnvRaw("AGENT_PLUGIN_DIR")?.trim();
   if (!pluginDir) return [];
 
   if (!existsSync(pluginDir)) {

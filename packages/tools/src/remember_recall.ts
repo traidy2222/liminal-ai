@@ -8,19 +8,31 @@ import {
   mergeNoteGraphFields,
   type StoredNote,
 } from "./notes_store.js";
-import { rankDocumentsForQuery } from "@liminal/core";
+import { rankDocumentsForQuery, effectiveHarnessEnvRaw } from "@liminal/core";
 import { suggestWikilinkLine } from "./memory_autolink.js";
 
-const MEMORY_TYPES = ["fact", "experience", "entity", "belief", "reflection", "recipe"] as const;
+const MEMORY_TYPES = ["fact", "experience", "entity", "belief", "reflection", "recipe", "hypothesis", "trajectory"] as const;
 type MemoryType = (typeof MEMORY_TYPES)[number];
+
+function looksLikePersonaDialSetting(rawKey: string, value: string): boolean {
+  const text = `${rawKey} ${value}`.toLowerCase();
+  const hasDial = /\b(humou?r|formality|confidence|verbosity|persona\s*strength|style\s*setting|tone\s*setting)\b/.test(
+    text
+  );
+  const hasSettingIntent = /\b(set|setting|adjust|updated?|persist|appl(?:y|ied)|from\s+\d+\s*%?\s+to\s+\d+\s*%?)\b/.test(
+    text
+  );
+  return hasDial && hasSettingIntent;
+}
 
 export const rememberTool = defineTool({
   name: "remember",
   description:
     "WHAT: Persist a key-value note that survives across turns and sessions.\n" +
     "WHEN: Important facts, user preferences, project-specific constants, or any info you'll need later.\n" +
-    "NOT WHEN: Ephemeral per-turn state, intermediate calculation results, or info already in context.\n" +
-    "ARGS: key — short identifier; value — the text to store; type — optional category: fact, experience, entity, belief, reflection, recipe; actor_id — optional agent task ID for multi-agent attribution.",
+    "NOT WHEN: Ephemeral per-turn state, intermediate calculation results, info already in context, or runtime/persona control dials.\n" +
+    "If the user asks to change humor/formality/confidence/verbosity/persona strength, use set_runtime_settings instead.\n" +
+    "ARGS: key — short identifier; value — the text to store; type — optional category: fact, experience, entity, belief, reflection, recipe, hypothesis, trajectory; actor_id — optional agent task ID for multi-agent attribution.",
   requiresApproval: false,
   parameters: {
     type: "object",
@@ -43,6 +55,14 @@ export const rememberTool = defineTool({
   handler: async (args) => {
     const rawKey = args["key"] as string;
     const value = args["value"] as string;
+    if (looksLikePersonaDialSetting(rawKey, value)) {
+      return {
+        ok: false,
+        error:
+          "Runtime persona control detected. Do not store this with remember(). " +
+          "Use set_runtime_settings with persona_controls so the setting is actually applied.",
+      };
+    }
     const memType = args["type"] as MemoryType | undefined;
     const actorId = args["actor_id"] as string | undefined;
     const storageKey = memType ? makeTypedKey(memType, rawKey) : rawKey;
@@ -52,7 +72,7 @@ export const rememberTool = defineTool({
     // Graph link inference runs by default (AGENT_MEMORY_GRAPH=0 to disable).
     // This makes related notes discoverable via neighbor expansion in recall_relevant
     // without requiring the full vault graph feature flag.
-    if (process.env["AGENT_MEMORY_GRAPH"] !== "0") {
+    if (effectiveHarnessEnvRaw("AGENT_MEMORY_GRAPH") !== "0") {
       const plain = await loadNotes();
       const otherKeys = Object.keys(plain).filter((x) => x !== storageKey);
       if (otherKeys.length > 0) {
@@ -66,7 +86,7 @@ export const rememberTool = defineTool({
       }
     }
 
-    if (process.env["AGENT_MEMORY_AUTOLINK"] === "1") {
+    if (effectiveHarnessEnvRaw("AGENT_MEMORY_AUTOLINK") === "1") {
       const all = await loadNotes();
       const candidateTitles = Object.keys(all)
         .filter((k) => k !== storageKey)

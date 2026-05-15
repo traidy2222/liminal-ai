@@ -1,5 +1,6 @@
 import { defineTool } from "./helpers.js";
 import { fetchWithRetry } from "./network_retry.js";
+import { effectiveHarnessEnvRaw } from "@liminal/core";
 
 type AssetType = "equity_etf" | "fx" | "commodity" | "crypto";
 
@@ -51,19 +52,19 @@ function parseAssetType(raw: unknown): AssetType | "auto" {
 }
 
 function parseMaxDelaySeconds(): number {
-  const raw = Number(process.env["AGENT_MARKETS_MAX_DELAY_MS"] ?? 900_000);
+  const raw = Number(effectiveHarnessEnvRaw("AGENT_MARKETS_MAX_DELAY_MS") ?? "2000");
   if (!Number.isFinite(raw)) return 900;
   return Math.max(30, Math.min(86_400, Math.floor(raw / 1000)));
 }
 
 function parseTimeoutMs(): number {
-  const n = Number(process.env["AGENT_MARKETS_TIMEOUT_MS"] ?? 12_000);
+  const n = Number(effectiveHarnessEnvRaw("AGENT_MARKETS_TIMEOUT_MS") ?? "8000");
   if (!Number.isFinite(n)) return 12_000;
   return Math.max(3_000, Math.min(60_000, Math.round(n)));
 }
 
 function parseRetries(): number {
-  const n = Number(process.env["AGENT_MARKETS_RETRIES"] ?? 3);
+  const n = Number(effectiveHarnessEnvRaw("AGENT_MARKETS_RETRIES") ?? "2");
   if (!Number.isFinite(n)) return 3;
   return Math.max(0, Math.min(8, Math.round(n)));
 }

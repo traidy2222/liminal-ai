@@ -1,5 +1,6 @@
 import { defineTool } from "./helpers.js";
 import { ensureRunState, loadIR, saveIR, scoreQuality, setRunStage } from "./doc_engine.js";
+import { effectiveHarnessEnvRaw } from "@liminal/core";
 
 export const docQualityReportTool = defineTool({
   name: "doc_quality_report",
@@ -18,7 +19,7 @@ export const docQualityReportTool = defineTool({
     const doc = await loadIR(docId);
     const runState = ensureRunState(doc);
     const report = scoreQuality(doc);
-    const min = Math.max(0, Math.min(100, parseInt(process.env["AGENT_DOC_QUALITY_MIN"] ?? "90", 10) || 90));
+    const min = Math.max(0, Math.min(100, parseInt(effectiveHarnessEnvRaw("AGENT_DOC_QUALITY_MIN") ?? "90", 10) || 90));
     const severe: string[] = [];
     if ((doc.claimSources?.length ?? 0) > 0 && (doc.claimSources ?? []).some((c) => c.sources.length === 0)) {
       severe.push("missing_claim_citations");

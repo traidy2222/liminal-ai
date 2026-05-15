@@ -44,7 +44,7 @@ async function writeAgenda(store: AgendaStore): Promise<void> {
 
 export const agendaSetTool: ToolDefinition = {
   name: "agenda_set",
-  requiresApproval: false,
+  requiresApproval: true,
   description:
     "Replace the session agenda (top-priority list shown in every world context). " +
     "Pass an ordered array of plain-text items — most important first.",
@@ -100,7 +100,7 @@ export const agendaGetTool: ToolDefinition = {
 
 export const agendaClearTool: ToolDefinition = {
   name: "agenda_clear",
-  requiresApproval: false,
+  requiresApproval: true,
   description: "Clear the session agenda.",
   parameters: {
     type: "object",

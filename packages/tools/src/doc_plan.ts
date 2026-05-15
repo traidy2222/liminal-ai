@@ -9,7 +9,7 @@ import {
   setRunStage,
 } from "./doc_engine.js";
 import { isStyleDiverseEnough } from "./doc_style_memory.js";
-import { resolveProviderConfig, withProviderRequestSpacing } from "@liminal/core";
+import { resolveProviderConfig, withProviderRequestSpacing, effectiveHarnessEnvRaw } from "@liminal/core";
 import type { DocumentIR } from "@liminal/core";
 
 function makeDocId(title: string): string {
@@ -27,7 +27,7 @@ async function synthesizeStyleFromIntent(
 ): Promise<{ palette?: { background: string; foreground: string; accent: string; muted: string }; heading?: string; body?: string; description?: string }> {
   try {
     const provider = resolveProviderConfig();
-    const fastModel = process.env["AGENT_FAST_MODEL"]?.trim() || provider.model;
+    const fastModel = effectiveHarnessEnvRaw("AGENT_FAST_MODEL")?.trim() || provider.model;
     const controller = new AbortController();
     const tid = setTimeout(() => controller.abort(), 10_000);
     try {

@@ -58,7 +58,7 @@ export const featureChecklistTool = defineTool({
     "WHEN: Multi-session projects — initializer creates items; coding marks passes after verification.\n" +
     "OPS: read — return JSON; set_passes — flip passes for one id; write — replace entire list (initializer).\n" +
     "Do not delete unrelated items; only add or set passes on verified features.",
-  requiresApproval: false,
+  requiresApproval: true,
   parameters: {
     type: "object",
     properties: {

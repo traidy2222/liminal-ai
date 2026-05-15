@@ -1,16 +1,16 @@
 /**
  * Optional A-Mem–style wikilink suggestions (OpenRouter JSON).
  */
-import { withProviderRequestSpacing } from "@liminal/core";
+import { withProviderRequestSpacing, effectiveHarnessEnvRaw } from "@liminal/core";
 export async function suggestWikilinkLine(params: {
   title: string;
   body: string;
   candidateTitles: string[];
 }): Promise<string | null> {
-  if (process.env["AGENT_MEMORY_AUTOLINK"] !== "1") return null;
+  if (effectiveHarnessEnvRaw("AGENT_MEMORY_AUTOLINK") !== "1") return null;
   const apiKey = process.env["OPENROUTER_API_KEY"];
   if (!apiKey) return null;
-  const model = process.env["AGENT_MEMORY_AUTOLINK_MODEL"]?.trim() || "openrouter/owl-alpha";
+  const model = effectiveHarnessEnvRaw("AGENT_MEMORY_AUTOLINK_MODEL")?.trim() || "openrouter/owl-alpha";
   const base = (process.env["OPENROUTER_BASE_URL"] ?? "https://openrouter.ai/api/v1").replace(
     /\/$/,
     ""

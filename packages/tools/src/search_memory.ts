@@ -8,7 +8,7 @@ export const searchMemoryTool = defineTool({
     "WHAT: Ranked search across stored note keys AND values (BM25-lite + recency + type).\n" +
     "WHEN: You need to find a note but don't know the exact key, or want to discover what was stored about a topic.\n" +
     "NOT WHEN: You already know the exact key — use recall instead.\n" +
-    "ARGS: query — text to match; type — optional filter: fact, experience, entity, belief, reflection, recipe; limit — max results (default 40).",
+    "ARGS: query — text to match; type — optional filter: fact, experience, entity, belief, reflection, recipe, hypothesis; limit — max results (default 40).",
   requiresApproval: false,
   parameters: {
     type: "object",
@@ -16,7 +16,7 @@ export const searchMemoryTool = defineTool({
       query: { type: "string", description: "Text to match in keys and values" },
       type: {
         type: "string",
-        description: "Optional: filter to only this memory type (fact, experience, entity, belief, reflection, recipe)",
+        description: "Optional: filter to only this memory type (fact, experience, entity, belief, reflection, recipe, hypothesis)",
       },
       limit: {
         type: "number",

@@ -2,6 +2,7 @@
  * Headless browser tools (Playwright) — gated by AGENT_BROWSER=1.
  */
 import { defineTool } from "./helpers.js";
+import { effectiveHarnessEnvRaw } from "@liminal/core";
 
 /** Playwright console + pageerror payloads (playwright may not be installed at typecheck time). */
 type PwConsoleMessage = {
@@ -113,7 +114,7 @@ export const browserOpenTool = defineTool({
     additionalProperties: false,
   },
   handler: async (args) => {
-    if (process.env["AGENT_BROWSER"] !== "1") {
+    if (effectiveHarnessEnvRaw("AGENT_BROWSER") !== "1") {
       return {
         ok: false,
         error: "Set AGENT_BROWSER=1 and install playwright (npm i playwright) to enable browser_open.",
@@ -166,7 +167,7 @@ export const browserActTool = defineTool({
     additionalProperties: false,
   },
   handler: async (args) => {
-    if (process.env["AGENT_BROWSER"] !== "1") {
+    if (effectiveHarnessEnvRaw("AGENT_BROWSER") !== "1") {
       return {
         ok: false,
         error: "Set AGENT_BROWSER=1 and install playwright to enable browser_act.",

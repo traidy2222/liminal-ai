@@ -3,7 +3,7 @@
  *
  * Uses spawn() so stdout/stderr stream in real time via text delta events,
  * rather than being fully buffered until completion.
- * Requires think() pre-flight and user approval (dangerLevel: "destructive").
+ * Requires user approval when configured (dangerLevel: "destructive").
  */
 import { spawn } from "node:child_process";
 import type { AgentEmitter } from "@liminal/core";

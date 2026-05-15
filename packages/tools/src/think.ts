@@ -6,6 +6,7 @@ export const thinkTool = defineTool({
     "WHAT: Externalize a reasoning step without taking any action or side effects.\n" +
     "WHEN: Before any non-trivial tool call, complex decision, or when you need to reason through ambiguity. Use freely — it costs nothing.\n" +
     "NOT WHEN: Trivial single-step actions where the path is already clear.\n" +
+    "GOOD COVERAGE: Briefly list distinct sub-parts of the user's ask you will address or explicitly defer (R-MULTI-PART-USER).\n" +
     "ARGS: content — the reasoning text to emit.",
   requiresApproval: false,
   parameters: {

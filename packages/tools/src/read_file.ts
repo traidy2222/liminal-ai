@@ -1,6 +1,7 @@
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { defineTool } from "./helpers.js";
+import { effectiveHarnessEnvRaw } from "@liminal/core";
 
 /** Resolve local import specifiers from TS/JS source (same-dir relative only). */
 function extractLocalImportPaths(mainPath: string, source: string): string[] {
@@ -24,7 +25,8 @@ export const readFileTool = defineTool({
   description:
     "WHAT: Read text contents of a file from disk, optionally a line range.\n" +
     "WHEN: You know the exact path and need to inspect or process the file's content.\n" +
-    "NOT WHEN: File existence is uncertain — use list_dir first to confirm the path.\n" +
+    "NOT WHEN: File existence is uncertain — use list_dir first to confirm the path. NOT WHEN: You only need existence/size — avoid loading huge bodies.\n" +
+    "GOOD OUTPUT: You can quote or reason about specific lines; cite the path in the user reply when the task is file-backed (R-CITE-PATHS).\n" +
     "ARGS: path — absolute or relative file path; offset — 1-based start line (default: 1); limit — max lines to return (default: all); encoding — optional (default: utf8).\n" +
     "line_numbers — when true, prefix each returned line with its 1-based absolute line number (matches browser stack traces like file.html:224:20). Use offset≈reported line with a small limit. For full-file reads, line_numbers is refused above 2000 lines unless limit is set.",
   requiresApproval: false,
@@ -85,7 +87,7 @@ export const readFileTool = defineTool({
       }
 
       // Speculative reads would append other files without line numbers — skip when aligning to browser line refs.
-      if (process.env["AGENT_SPECULATIVE_READS"] === "1" && !lineNumbers) {
+      if (effectiveHarnessEnvRaw("AGENT_SPECULATIVE_READS") === "1" && !lineNumbers) {
         const extra = extractLocalImportPaths(filePath, content);
         const chunks: string[] = [content];
         let n = 0;
