@@ -14,6 +14,10 @@ export interface RuleStatEntry {
   ruleId: string;
   hitCount: number;
   preventedErrorCount: number;
+  /** Sum of turn-outcome scores [0,1] for turns where this rule was injected. */
+  outcomeSum?: number;
+  /** Number of scored turns contributing to outcomeSum. */
+  outcomeCount?: number;
   lastHitAt: number;
 }
 
@@ -75,6 +79,41 @@ export async function bumpRuleHits(context: string, preventedError = false): Pro
   }
 }
 
+/**
+ * Record the turn-outcome score against each rule that was injected this turn.
+ * This is the real effectiveness signal: rules that ride with high-outcome turns
+ * are pulling weight; rules that ride with low-outcome turns are ceremonial.
+ * `outcome` is the [0,1] score from `scoreTurnOutcome`.
+ */
+export async function recordRuleOutcomes(ruleIds: string[], outcome: number): Promise<void> {
+  const ids = extractRuleIds(ruleIds.join(" "));
+  if (ids.length === 0) return;
+  const clamped = Math.max(0, Math.min(1, outcome));
+  try {
+    const stats = await loadRuleStats();
+    const now = Date.now();
+    for (const id of ids) {
+      const existing = stats.rules[id] ?? {
+        ruleId: id,
+        hitCount: 0,
+        preventedErrorCount: 0,
+        outcomeSum: 0,
+        outcomeCount: 0,
+        lastHitAt: now,
+      };
+      existing.hitCount += 1;
+      existing.outcomeSum = (existing.outcomeSum ?? 0) + clamped;
+      existing.outcomeCount = (existing.outcomeCount ?? 0) + 1;
+      existing.lastHitAt = now;
+      stats.rules[id] = existing;
+    }
+    stats.updatedAt = now;
+    await saveRuleStats(stats);
+  } catch {
+    /* non-fatal */
+  }
+}
+
 /** Return a map of ruleId → hitCount for adaptive rule injection. */
 export async function getRuleHitCounts(): Promise<Map<string, number>> {
   try {
@@ -101,11 +140,11 @@ export async function formatRuleStatsReport(topN = 10): Promise<string> {
       .slice(0, topN);
     if (entries.length === 0) return "(no rule stats yet)";
     const lines = entries.map((e) => {
-      const effectiveness =
-        e.hitCount > 0 ? ((e.preventedErrorCount / e.hitCount) * 100).toFixed(0) : "0";
-      return `  ${e.ruleId}: hits=${e.hitCount} errors_prevented=${e.preventedErrorCount} (${effectiveness}%) last=${new Date(e.lastHitAt).toISOString().slice(0, 10)}`;
+      const oc = e.outcomeCount ?? 0;
+      const avg = oc > 0 ? ((e.outcomeSum ?? 0) / oc).toFixed(2) : "n/a";
+      return `  ${e.ruleId}: turns=${e.hitCount} avg_outcome=${avg} (n=${oc}) last=${new Date(e.lastHitAt).toISOString().slice(0, 10)}`;
     });
-    return `Rule effectiveness (top ${topN}):\n${lines.join("\n")}`;
+    return `Rule effectiveness — avg turn-outcome [0–1] of turns where the rule was injected (top ${topN} by use):\n${lines.join("\n")}`;
   } catch {
     return "(rule stats unavailable)";
   }

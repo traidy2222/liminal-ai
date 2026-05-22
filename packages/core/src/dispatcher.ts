@@ -238,22 +238,21 @@ export class ToolDispatcher {
     }
 
     if (!this.registry.isActive(name)) {
+      // Auto-activate on miss. The model called a registered-but-inactive tool;
+      // it has already decided it needs this capability, so failing the round
+      // (the old behavior) just burned a turn and a telemetry event. Activate
+      // the tool's family transparently and fall through to normal dispatch —
+      // schema validation below still catches any guessed args.
       const fam = this.registry.getSuggestedFamilyForTool(name);
-      const famSummary = this.registry
-        .getActiveFamilySummary(8)
-        .map((f) => `${f.family}(${f.active}/${f.total})`)
-        .join(", ");
-      const hint = fam
-        ? `Call activate_tool_family with { "family": "${fam}" } (or list_tool_families).`
-        : `Call list_tool_families, then activate_tool_family.`;
-      return {
-        ok: false,
-        error:
-          `Tool "${name}" is not loaded for this session. ${hint}\n` +
-          `[TOOL_RECOVERY] lazy=${this.registry.isLazyToolLoading() ? "on" : "off"}; ` +
-          `suggested_family=${fam ?? "unknown"}; ` +
-          `active_families=${famSummary || "(none)"}`,
-      };
+      const newly = fam
+        ? this.registry.activateFamilies([fam])
+        : this.registry.activate([name]);
+      this.emitter.emit("text", {
+        delta:
+          `[TOOL_AUTO_ACTIVATE] "${name}" was inactive — activated ` +
+          `${fam ? `family "${fam}"` : "tool"} (${newly.length} tool(s) now visible).\n`,
+        channel: "trace",
+      });
     }
 
     let args: Record<string, unknown>;

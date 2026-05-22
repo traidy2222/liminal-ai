@@ -47,7 +47,7 @@ import {
 } from "./file_write_stream_sink.js";
 import { bumpRecipePattern } from "./recipe_library.js";
 import { addCompressionGuideline, formatCompressionGuidelines } from "./compression_guidelines.js";
-import { bumpRuleHits, getRuleHitCounts } from "./rule_stats.js";
+import { bumpRuleHits, getRuleHitCounts, extractRuleIds, recordRuleOutcomes } from "./rule_stats.js";
 import { writeYieldSnapshot } from "./session_event_log.js";
 import { SharedMemoryBus } from "./shared_memory_bus.js";
 import { resolveProviderConfig, buildProviderRouting } from "./provider_config.js";
@@ -939,6 +939,8 @@ export class AgentHarness {
   private finalizeHintInjectedThisSend = false;
   /** One-shot rule recall suffix (named protocol rules) at round 2. */
   private ruleRecallInjectedThisSend = false;
+  /** Rule IDs injected by the round-2 rule recall this send (for effectiveness scoring at turn end). */
+  private injectedRuleIdsThisSend: string[] = [];
   /** Extra stream continuation when model hits token limit (max 1 per send). */
   private lengthResumeRemaining = 0;
   private writeIntegrityNudgeThisSend = false;
@@ -1802,6 +1804,7 @@ export class AgentHarness {
     this.turnEndEmittedThisSend = false;
     this.finalizeHintInjectedThisSend = false;
     this.ruleRecallInjectedThisSend = false;
+    this.injectedRuleIdsThisSend = [];
     this.writeIntegrityNudgeThisSend = false;
     this.fileWriteStreamSink = new FileWriteStreamSink(
       resolveWriteStreamSinkEnabled(this.runtimePreferences),
@@ -2232,13 +2235,19 @@ export class AgentHarness {
       `GOAL: ${userMessage.slice(0, 60)}\n` +
       `PATTERN: ${this.toolsUsedThisTurn.join(" → ")}\n` +
       `ROUNDS: ${this.roundCount}`;
+    // Recipe dedupe key = the tool-call sequence (consecutive repeats collapsed),
+    // NOT the goal prose — so structurally-similar turns compound one entry
+    // instead of each landing at ×1.
+    const recipeSignature = this.toolsUsedThisTurn
+      .filter((t, i, arr) => t !== arr[i - 1])
+      .join(" → ");
     try {
       await this.dispatcher.directCall("remember", {
         key: recipeKey,
         value: recipeValue,
         actor_id: this.taskId,
       });
-      void bumpRecipePattern(recipeValue);
+      void bumpRecipePattern(recipeSignature, recipeValue);
     } catch (err) {
       this.emitter.emit("text", {
         delta: `\n[HARNESS] Recipe persist failed: ${err instanceof Error ? err.message : String(err)}\n`,
@@ -3169,6 +3178,7 @@ export class AgentHarness {
         ruleMsg = buildHarnessRuleRecallMessage(new Map());
       }
       this.context.appendMessage({ role: "system", content: ruleMsg });
+      this.injectedRuleIdsThisSend = extractRuleIds(ruleMsg);
     }
 
     if (
@@ -4616,16 +4626,21 @@ export class AgentHarness {
           intentClass: this.turnInference?.intent,
         }).catch(() => { /* non-fatal */ });
 
+        // Per-turn outcome score — feeds both effort learning and rule effectiveness.
+        const outcome = scoreTurnOutcome({
+          toolsUsed: this._toolOutcomesThisTurn,
+          roundCount: this.roundCount,
+          criticPassed: this.criticConsumedThisSend ? true : null,
+          contradictionCount: 0,
+          terminationReason: "ok",
+        });
+        // Rule effectiveness: attribute this turn's outcome to every rule injected.
+        if (this.injectedRuleIdsThisSend.length > 0) {
+          void recordRuleOutcomes(this.injectedRuleIdsThisSend, outcome).catch(() => { /* non-fatal */ });
+        }
         // Adaptive effort learning (AGENT_EFFORT_LEARN=1).
         const budget = this._turnReasoningBudget;
         if (budget) {
-          const outcome = scoreTurnOutcome({
-            toolsUsed: this._toolOutcomesThisTurn,
-            roundCount: this.roundCount,
-            criticPassed: this.criticConsumedThisSend ? true : null,
-            contradictionCount: 0,
-            terminationReason: "ok",
-          });
           void recordEffortOutcome(
             (this.turnInference?.intent ?? "knowledge") as ReasoningIntentClass,
             budget.reasoningEffort,
