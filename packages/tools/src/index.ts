@@ -27,6 +27,7 @@ import { runTestsTool } from "./run_tests.js";
 import { runLintTool } from "./run_lint.js";
 import { symbolIndexTool } from "./symbol_index.js";
 import { findReferencesTool } from "./find_references.js";
+import { renameSymbolTool } from "./rename_symbol.js";
 import { executeCodeTool } from "./execute_code.js";
 import { httpRequestTool } from "./http_request.js";
 import { runCommandWithPtyTool } from "./run_command_with_pty.js";
@@ -63,6 +64,7 @@ import {
   readProcessOutputTool,
 } from "./process_manager.js";
 import { suggestImprovementTool, viewInsightsTool } from "./meta_tools.js";
+import { selfTelemetryTool } from "./self_telemetry.js";
 import { createContextTools } from "./context_tools.js";
 import { createRecallCompressionTool } from "./recall_compression.js";
 import { createRefreshWorldContextTool } from "./refresh_world_context.js";
@@ -90,6 +92,7 @@ import { createDynamicToolsTools, loadDynamicTools } from "./dynamic_tools.js";
 // New tools — Upgrade IV
 import { gitStatusTool, gitDiffTool, gitLogTool, gitBranchTool, gitCommitTool } from "./git_tools.js";
 import { gitCheckpointTool, gitRollbackTool } from "./git_checkpoint.js";
+import { gitWorktreeTool } from "./git_worktree.js";
 import { taskCheckpointTool, resumeTaskTool } from "./task_persistence.js";
 import { featureChecklistTool } from "./feature_checklist.js";
 import { createExtractStructuredTool } from "./extract_structured.js";
@@ -171,6 +174,7 @@ export async function registerAllTools(
   registry.register(gitCommitTool);
   registry.register(gitCheckpointTool);
   registry.register(gitRollbackTool);
+  registry.register(gitWorktreeTool);
   registry.register(taskCheckpointTool);
   registry.register(resumeTaskTool);
   registry.register(featureChecklistTool);
@@ -192,6 +196,7 @@ export async function registerAllTools(
   registry.register(runLintTool);
   registry.register(symbolIndexTool);
   registry.register(findReferencesTool);
+  registry.register(renameSymbolTool);
   registry.register(executeCodeTool);
   registry.register(httpRequestTool);
   registry.register(runCommandWithPtyTool);
@@ -207,6 +212,7 @@ export async function registerAllTools(
   registry.register(captchaSolveTool);
   registry.register(suggestImprovementTool);
   registry.register(viewInsightsTool);
+  registry.register(selfTelemetryTool);
   registry.register(visionAnalyzeTool);
   // Obsidian brain
   registry.register(vaultWriteTool);

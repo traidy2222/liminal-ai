@@ -32,8 +32,8 @@ export const TOOL_FAMILIES: Record<string, { description: string; tools: readonl
     ],
   },
   git: {
-    description: "Git inspection and commits.",
-    tools: ["git_status", "git_diff", "git_log", "git_branch", "git_commit"],
+    description: "Git inspection, commits, and isolated worktrees.",
+    tools: ["git_status", "git_diff", "git_log", "git_branch", "git_commit", "git_worktree"],
   },
   tasks: {
     description: "Checkpoint and resume long tasks.",
@@ -64,13 +64,14 @@ export const TOOL_FAMILIES: Record<string, { description: string; tools: readonl
     tools: ["markets_quote"],
   },
   code_intel: {
-    description: "AST search, tests, lint, symbol index, references.",
+    description: "AST search, tests, lint, symbol index, references, semantic rename.",
     tools: [
       "ast_grep",
       "run_tests",
       "run_lint",
       "symbol_index",
       "find_references",
+      "rename_symbol",
       "execute_code",
     ],
   },
@@ -98,8 +99,8 @@ export const TOOL_FAMILIES: Record<string, { description: string; tools: readonl
     tools: ["vision_analyze", "upload_image"],
   },
   meta: {
-    description: "Harness improvement suggestions and insights.",
-    tools: ["suggest_improvement", "view_insights"],
+    description: "Harness improvement suggestions, insights, and self-telemetry.",
+    tools: ["suggest_improvement", "view_insights", "self_telemetry"],
   },
   dynamic_tools: {
     description: "Create, edit, remove, and list model-defined tools registered at runtime.",

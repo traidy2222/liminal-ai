@@ -9,6 +9,7 @@ dist/
 # Local agent / IDE artifacts
 .agent_artifacts/
 .agent_write_staging/
+.agent_worktrees/
 .claude/launch.json
 
 # Android — local Gradle, IDE, and build outputs (keep app/src + Gradle scripts)

@@ -202,6 +202,8 @@ export {
 } from "./output_distill.js";
 export type { DistilledOutput } from "./output_distill.js";
 export { appendFailureLog, failureLogPath } from "./failure_log.js";
+export { formatFailureDigestForWorldContext } from "./failure_digest.js";
+export { bumpRecipePattern, formatRecipeLibraryHints, formatTopRecipes } from "./recipe_library.js";
 export {
   attachSessionEventLog,
   maybeAttachSessionEventLog,
