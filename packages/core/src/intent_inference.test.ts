@@ -2,12 +2,11 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import {
   buildIntentInferenceUserContent,
-  heuristicExploratoryCreative,
-  heuristicPersonaOrHistoryPrompt,
   shouldSkipHarnessSecondaryPassesForTurn,
   parseLikelyEditPathsField,
   resolveMemoryPolicy,
   neutralTurnInferenceResult,
+  applyTurnInferenceHeuristics,
 } from "./intent_inference.js";
 
 test("parseLikelyEditPathsField caps and normalizes", () => {
@@ -37,40 +36,21 @@ test("buildIntentInferenceUserContent truncates when maxCharsOverride is small",
   assert.match(body, /intent_context_truncated/);
 });
 
-test("heuristicExploratoryCreative matches blue-sky phrasing", () => {
-  assert.equal(heuristicExploratoryCreative("If you could build one thing, what would it be?"), true);
-  assert.equal(
-    heuristicExploratoryCreative("What would make universal high income more likely in practice?"),
-    true
-  );
-  assert.equal(heuristicExploratoryCreative("Ignore my roadmap — give me fresh eyes on positioning."), true);
-});
-
-test("heuristicPersonaOrHistoryPrompt matches persona and session-history asks", () => {
-  assert.equal(
-    heuristicPersonaOrHistoryPrompt(
-      "tell me about yourself and what we have been doing who u have been"
-    ),
-    true
-  );
-  assert.equal(heuristicPersonaOrHistoryPrompt("fix packages/core/src/agent.ts"), false);
-});
-
-test("shouldSkipHarnessSecondaryPassesForTurn covers heuristic when LLM omits flags", () => {
+test("shouldSkipHarnessSecondaryPassesForTurn uses LLM flags only", () => {
   const inf = neutralTurnInferenceResult("test");
+  // neutral inference has no flags set — should not skip
+  assert.equal(shouldSkipHarnessSecondaryPassesForTurn("who are you", inf), false);
+  assert.equal(shouldSkipHarnessSecondaryPassesForTurn("run tests", inf), false);
+
+  // LLM-set flags are respected
   assert.equal(
-    shouldSkipHarnessSecondaryPassesForTurn("who are you and what have we been up to", inf),
+    shouldSkipHarnessSecondaryPassesForTurn("x", { ...inf, skipHarnessSecondaryPasses: true }),
     true
   );
-  assert.equal(shouldSkipHarnessSecondaryPassesForTurn("run tests", inf), false);
-});
-
-test("heuristicExploratoryCreative stays off for plan execution phrasing", () => {
   assert.equal(
-    heuristicExploratoryCreative("Open auckland-ai-business-roadmap.md and update the Q3 section."),
-    false
+    shouldSkipHarnessSecondaryPassesForTurn("x", { ...inf, personaIdentityPrompt: true }),
+    true
   );
-  assert.equal(heuristicExploratoryCreative("fix the bug"), false);
 });
 
 test("resolveMemoryPolicy disables auto recall on exploratory by default", () => {
@@ -87,6 +67,24 @@ test("resolveMemoryPolicy disables auto recall on exploratory by default", () =>
     if (prevEx === undefined) delete process.env["AGENT_MEMORY_EXPLORATORY_AUTO_RECALL"];
     else process.env["AGENT_MEMORY_EXPLORATORY_AUTO_RECALL"] = prevEx;
   }
+});
+
+test("applyTurnInferenceHeuristics upgrades Iran update to research tool-first", () => {
+  const base = neutralTurnInferenceResult("test", { intent: "knowledge", exploratoryCreative: true });
+  const refined = applyTurnInferenceHeuristics("update yourself on whats going on with iran", base);
+  assert.equal(refined.intent, "research");
+  assert.equal(refined.exploratoryCreative, false);
+  assert.equal(refined.toolFirstBias, true);
+  assert.equal(refined.thinkDepth, "brief");
+  assert.ok((refined.reasoningWordBudget ?? 999) <= 140);
+});
+
+test("applyTurnInferenceHeuristics upgrades build-for-yourself to coding tool-first", () => {
+  const base = neutralTurnInferenceResult("test", { intent: "knowledge", exploratoryCreative: true });
+  const refined = applyTurnInferenceHeuristics("build something for yourself", base);
+  assert.equal(refined.intent, "coding");
+  assert.equal(refined.exploratoryCreative, false);
+  assert.equal(refined.toolFirstBias, true);
 });
 
 test("resolveMemoryPolicy exploratory still applies when AGENT_MEMORY_DEBIAS=0", () => {

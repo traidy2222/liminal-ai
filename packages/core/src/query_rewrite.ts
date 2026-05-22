@@ -46,6 +46,7 @@ export async function rewriteQueryForRecall(
     ],
     maxTokens: 500,
     temperature: 0.15,
+    signal: AbortSignal.timeout(6000),
   });
   if (!r.ok || typeof r.parsed !== "object" || r.parsed === null) {
     return { subQueries: ruleBasedSubqueries(t) };

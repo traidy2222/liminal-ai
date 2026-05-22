@@ -1,8 +1,135 @@
 import OpenAI from "openai";
 import { completeChatJson, getFastModelSlug } from "./router.js";
 import { effectiveHarnessEnvRaw } from "./harness_effective_env.js";
+import {
+  applyFallbackReasoningFields,
+  fallbackReasoningBudget,
+  parseReasoningBudgetFromParsed,
+  type ReasoningEffort,
+  type ThinkDepth,
+} from "./reasoning_profile.js";
+import {
+  isBuildDeliverableUserMessage,
+  isImplementShipUserMessage,
+  isResearchFreshnessUserMessage,
+} from "./reasoning_surface.js";
 
-export type TurnIntentClass = "introspection" | "knowledge" | "coding" | "execution";
+export type TurnIntentClass = "introspection" | "knowledge" | "research" | "coding" | "execution" | "operational";
+
+/** Tool name filter presets for each routing tier. */
+const ROUTING_TOOL_FILTERS: Record<TurnIntentClass, ((name: string) => boolean) | null> = {
+  introspection: (n) =>
+    n === "recall_relevant" || n === "memory_query" || n === "search_memory" ||
+    n === "recall" || n === "recall_type" || n === "read_file" || n === "think" || n === "plan",
+  knowledge: (n) =>
+    !["run_shell", "run_background", "git_commit", "git_checkpoint",
+      "run_tests", "run_lint", "execute_code"].includes(n),
+  // research: same tool surface as knowledge — no destructive shell/git/code,
+  // but full web + memory + file read access for multi-source investigation.
+  research: (n) =>
+    !["run_shell", "run_background", "git_commit", "git_checkpoint",
+      "run_tests", "run_lint", "execute_code"].includes(n),
+  coding: null, // all tools
+  execution: null, // all tools
+  operational: (n) =>
+    n === "read_file" || n === "write_file" || n === "edit_file" || n === "list_dir" ||
+    n === "run_shell" || n === "grep_file" || n === "think" || n === "plan",
+};
+
+export interface RoutingProfile {
+  /** Model slug to use for this turn (may differ from main model). */
+  modelSlug: string;
+  /** Optional tool filter — null means all tools. */
+  toolFilter: ((name: string) => boolean) | null;
+  /** max_tokens override for this turn (0 = no override). */
+  maxTokens: number;
+  /** Whether routing was actually applied (false when disabled or confidence too low). */
+  applied: boolean;
+  intent: TurnIntentClass;
+  /** Where intent came from: "llm" | "heuristic" | "default" | "fallback" | etc. */
+  source: string;
+  /** Confidence score [0–1] from intent classification. */
+  confidence: number;
+  /** Whether a tool name filter is active (limits the tool surface for this turn). */
+  toolFilterActive: boolean;
+}
+
+function resolveIntentFastThreshold(): number {
+  const n = Number(effectiveHarnessEnvRaw("AGENT_INTENT_FAST_THRESHOLD") ?? "0.8");
+  return Number.isFinite(n) ? Math.max(0, Math.min(1, n)) : 0.8;
+}
+
+function resolveIntentOperationalModel(mainModel: string): string {
+  return effectiveHarnessEnvRaw("AGENT_INTENT_OPERATIONAL_MODEL")?.trim() ||
+    effectiveHarnessEnvRaw("AGENT_FAST_MODEL")?.trim() ||
+    mainModel;
+}
+
+/**
+ * Produce a routing profile for the given intent inference result.
+ * When AGENT_INTENT_ROUTING is not "1", returns a no-op profile.
+ */
+export function buildRoutingProfile(
+  inference: TurnInferenceResult | null,
+  mainModel: string
+): RoutingProfile {
+  const noOp: RoutingProfile = {
+    modelSlug: mainModel,
+    toolFilter: null,
+    maxTokens: 0,
+    applied: false,
+    intent: inference?.intent ?? "knowledge",
+    source: inference?.source ?? "default",
+    confidence: inference?.confidence ?? 0,
+    toolFilterActive: false,
+  };
+
+  if (effectiveHarnessEnvRaw("AGENT_INTENT_ROUTING") !== "1") return noOp;
+  if (!inference) return noOp;
+
+  const threshold = resolveIntentFastThreshold();
+  const confidence = inference.confidence ?? 0;
+  const intent = inference.intent;
+
+  // Only route away from main model if confidence is high enough
+  let modelSlug = mainModel;
+  let maxTokens = 0;
+
+  if (intent === "introspection") {
+    if (confidence >= threshold) {
+      modelSlug = effectiveHarnessEnvRaw("AGENT_FAST_MODEL")?.trim() || mainModel;
+      maxTokens = 2048;
+    }
+  } else if (intent === "operational") {
+    modelSlug = resolveIntentOperationalModel(mainModel);
+    maxTokens = 1024;
+  } else if (intent === "knowledge") {
+    maxTokens = 4096;
+  } else if (intent === "research") {
+    maxTokens = 8192;
+  } else if (intent === "coding") {
+    maxTokens = 8192;
+  } else if (intent === "execution") {
+    maxTokens = 6144;
+  }
+
+  // Only apply tool filters for high-confidence LLM classifications.
+  // Fallback/default inferences always see all tools — don't silently strip
+  // shell/git/code from messages the classifier wasn't confident about.
+  const applyToolFilter = inference.source === "llm" && confidence >= threshold;
+  const toolFilter = applyToolFilter ? (ROUTING_TOOL_FILTERS[intent] ?? null) : null;
+
+  return {
+    modelSlug,
+    toolFilter,
+    maxTokens,
+    applied: modelSlug !== mainModel || maxTokens > 0,
+    intent,
+    source: inference.source ?? "default",
+    confidence: inference.confidence ?? 0,
+    toolFilterActive: toolFilter !== null,
+  };
+}
 
 export interface MemoryPolicy {
   allowAutoRecall: boolean;
@@ -52,9 +179,17 @@ export interface TurnInferenceResult {
    */
   skipHarnessSecondaryPasses: boolean;
   confidence: number;
+  /** "llm" = classified by fast model, "default" = neutral fallback (inference off or timed out). */
   source: "llm" | "default";
   reason: string;
   fallbackReason?: string;
+  /** Adaptive reasoning budget (fast classifier); see reasoning_profile.ts */
+  reasoningEffort?: ReasoningEffort;
+  thinkDepth?: ThinkDepth;
+  toolFirstBias?: boolean;
+  reasoningWordBudget?: number;
+  essayRisk?: boolean;
+  reasoningBudgetSource?: "llm" | "fallback";
 }
 
 /** Optional workspace cues passed into {@link inferTurnInference} (bounded; never full file bodies). */
@@ -81,12 +216,15 @@ export function neutralTurnInferenceResult(
   reason: string,
   extra?: Partial<Omit<TurnInferenceResult, "source" | "reason">> & { fallbackReason?: string }
 ): TurnInferenceResult {
+  const intent = extra?.intent ?? "knowledge";
+  const exploratoryCreative = extra?.exploratoryCreative ?? false;
+  const fb = fallbackReasoningBudget(intent, exploratoryCreative);
   return {
-    intent: "knowledge",
+    intent,
     likelyEditPaths: [],
     stancePrompt: false,
     overInferenceRisk: false,
-    exploratoryCreative: false,
+    exploratoryCreative,
     identityQuery: false,
     personaIdentityPrompt: false,
     runtimeIdentityPrompt: false,
@@ -96,6 +234,12 @@ export function neutralTurnInferenceResult(
     runtimeSettingsQuery: false,
     skipHarnessSecondaryPasses: false,
     confidence: 0.5,
+    reasoningEffort: fb.reasoningEffort,
+    thinkDepth: fb.thinkDepth,
+    toolFirstBias: fb.toolFirstBias,
+    reasoningWordBudget: fb.reasoningWordBudget,
+    essayRisk: fb.essayRisk,
+    reasoningBudgetSource: "fallback",
     ...(extra ?? {}),
     source: "default",
     reason,
@@ -103,7 +247,10 @@ export function neutralTurnInferenceResult(
 }
 
 function parseIntent(value: unknown): TurnIntentClass | null {
-  if (value === "introspection" || value === "knowledge" || value === "coding" || value === "execution") {
+  if (
+    value === "introspection" || value === "knowledge" || value === "research" ||
+    value === "coding" || value === "execution" || value === "operational"
+  ) {
     return value;
   }
   return null;
@@ -174,6 +321,13 @@ export function buildIntentInferenceUserContent(
   return body;
 }
 
+function resolveIntentInferenceTimeoutMs(): number {
+  const raw = effectiveHarnessEnvRaw("AGENT_INTENT_INFERENCE_TIMEOUT_MS")?.trim();
+  const n = raw ? Number(raw) : 8000;
+  if (!Number.isFinite(n) || n <= 0) return 8000;
+  return Math.max(1000, Math.min(30000, n));
+}
+
 function resolveIntentConfidenceThreshold(): number {
   const raw = effectiveHarnessEnvRaw("AGENT_INTENT_CONFIDENCE_MIN")?.trim();
   const n = raw ? Number(raw) : 0.65;
@@ -197,6 +351,8 @@ function buildInferenceFromParsed(
   const intent: TurnIntentClass = identityQuery ? "knowledge" : intentRaw ?? "knowledge";
   const likelyEditPaths = identityQuery ? [] : parseLikelyEditPathsField(parsed["likelyEditPaths"]);
 
+  const budgetFields = parseReasoningBudgetFromParsed(parsed);
+
   return {
     intent,
     likelyEditPaths,
@@ -215,14 +371,26 @@ function buildInferenceFromParsed(
     source,
     reason,
     fallbackReason,
+    ...budgetFields,
   };
 }
 
 const INFERENCE_SYSTEM_PROMPT =
   "Classify the user message for harness policy. Return JSON only with exactly these keys: " +
-  "{intent:'introspection|knowledge|coding|execution',likelyEditPaths:string[],stancePrompt:boolean,overInferenceRisk:boolean," +
+  "{intent:'introspection|knowledge|research|coding|execution|operational',likelyEditPaths:string[],stancePrompt:boolean,overInferenceRisk:boolean," +
   "exploratoryCreative:boolean,identityQuery:boolean,personaIdentityPrompt:boolean,runtimeIdentityPrompt:boolean,deckIntent:boolean," +
-  "freshnessSensitive:boolean,runtimePreferenceIntent:boolean,runtimeSettingsQuery:boolean,skipHarnessSecondaryPasses:boolean,confidence:number,reason:string}. " +
+  "freshnessSensitive:boolean,runtimePreferenceIntent:boolean,runtimeSettingsQuery:boolean,skipHarnessSecondaryPasses:boolean," +
+  "reasoningEffort:'none'|'low'|'medium'|'high'|'xhigh',thinkDepth:'skip'|'brief'|'standard'|'deep',toolFirstBias:boolean," +
+  "reasoningWordBudget:number,essayRisk:boolean,confidence:number,reason:string}. " +
+  "REASONING BUDGET (defaults when uncertain: reasoningEffort=high; thinkDepth=standard for knowledge/research/coding/execution): " +
+  "reasoningEffort=none only for trivial one-liners (hi/thanks/yes/no). " +
+  "toolFirstBias=true when user wants implement/run/test/show results/ship code now — even for hard-sounding tasks. " +
+  "Lower reasoningWordBudget (80-200) when toolFirstBias=true; use brief thinkDepth. " +
+  "essayRisk=true when task invites long design essays before tools (novel algorithms + implement, zero-shot challenges). " +
+  "thinkDepth=deep only for open ideation without a clear ship-now clause. " +
+  "Examples: 'write hello.py and run' → coding, high, brief, toolFirst true, budget ~120. " +
+  "'zero-shot implement TSP algorithm in Python and test' → coding, high, brief, toolFirst true, budget ~180, essayRisk true. " +
+  "'explain quantum computing' → knowledge, high, standard, toolFirst false, budget ~350. " +
   "likelyEditPaths: up to 8 repo-relative file/dir paths the user will most likely need to read or edit for this turn, " +
   "inferred from USER_MESSAGE plus any RECENT_FILES_* / REPO_TREE / LAST_ASSISTANT sections; use [] when not a coding task or nothing fits. " +
   "exploratoryCreative=true when the user mainly wants open-ended ideation, hypotheticals, or creative futures " +
@@ -244,7 +412,13 @@ const INFERENCE_SYSTEM_PROMPT =
   "runtimeSettingsQuery=true when user asks to check/read current runtime settings or current persona controls " +
   "(e.g., 'what is my humor setting now?', 'check runtime settings'). " +
   "overInferenceRisk=true when the request invites speculative user-belief attribution. " +
-  "confidence is 0–1 for your overall classification certainty.";
+  "confidence is 0–1 for your overall classification certainty. " +
+  "intent classes: introspection=memory queries, capability checks, self-reflection; " +
+  "knowledge=background Q&A, explanations, factual recall without live web sources; " +
+  "research=live multi-source investigation using web_search/web_fetch — news, markets, current events, fact-checking; " +
+  "coding=code edits, repo work, debugging, refactoring, tests; " +
+  "execution=builds, deploys, CI/CD, process runs, tool-heavy pipelines; " +
+  "operational=scheduled briefs, structured analysis, file-system maintenance, no narrative output needed.";
 
 export async function inferTurnInference(
   client: OpenAI,
@@ -253,28 +427,37 @@ export async function inferTurnInference(
   workspace?: IntentInferenceWorkspaceContext
 ): Promise<TurnInferenceResult> {
   if (!isIntentInferenceEnabled()) {
-    return neutralTurnInferenceResult("intent_inference_disabled", {
-      fallbackReason: "AGENT_INTENT_INFERENCE=0",
-      confidence: 0.51,
-    });
+    return applyTurnInferenceHeuristics(
+      userMessage,
+      neutralTurnInferenceResult("intent_inference_disabled", {
+        fallbackReason: "AGENT_INTENT_INFERENCE=0",
+        confidence: 0.51,
+      })
+    );
   }
 
   const userContent = buildIntentInferenceUserContent(userMessage, workspace);
 
+  // Hard-cap the classification call. If the fast model stalls, fall back to
+  // the neutral result immediately rather than blocking the whole turn.
   const jr = await completeChatJson(client, {
     model: getFastModelSlug(model),
     messages: [
       { role: "system", content: INFERENCE_SYSTEM_PROMPT },
       { role: "user", content: userContent },
     ],
-    maxTokens: 340,
+    maxTokens: 420,
     temperature: 0,
+    signal: AbortSignal.timeout(resolveIntentInferenceTimeoutMs()),
   });
 
   if (!jr.ok || typeof jr.parsed !== "object" || jr.parsed == null) {
-    return neutralTurnInferenceResult("llm_inference_failed", {
-      fallbackReason: jr.ok ? "invalid_json_shape" : jr.error,
-    });
+    return applyTurnInferenceHeuristics(
+      userMessage,
+      neutralTurnInferenceResult("llm_inference_failed", {
+        fallbackReason: jr.ok ? "invalid_json_shape" : jr.error,
+      })
+    );
   }
 
   const parsed = jr.parsed as Record<string, unknown>;
@@ -287,81 +470,78 @@ export async function inferTurnInference(
 
   if (confidence < threshold) {
     const base = buildInferenceFromParsed(parsed, confidence, "llm", reasonStr);
+    const withFb = applyFallbackReasoningFields(
+      {
+        ...base,
+        fallbackReason: `confidence=${confidence.toFixed(2)} < threshold=${threshold.toFixed(2)}`,
+      },
+      false
+    );
+    return applyTurnInferenceHeuristics(userMessage, withFb);
+  }
+
+  const result = buildInferenceFromParsed(parsed, confidence, "llm", reasonStr);
+  return applyTurnInferenceHeuristics(userMessage, applyFallbackReasoningFields(result, true));
+}
+
+/**
+ * Regex safety net when the fast classifier misses research/build turns or marks them exploratory.
+ * Forces tool-first budgets so the model calls web_search / write_file instead of long native reasoning.
+ */
+export function applyTurnInferenceHeuristics(
+  userMessage: string,
+  inference: TurnInferenceResult
+): TurnInferenceResult {
+  const msg = userMessage.trim();
+  if (!msg) return inference;
+
+  const researchFresh =
+    inference.freshnessSensitive === true || isResearchFreshnessUserMessage(msg);
+  const buildDeliverable = isBuildDeliverableUserMessage(msg);
+  const implementShip = isImplementShipUserMessage(msg);
+
+  if (researchFresh && !implementShip && !buildDeliverable) {
+    const wordBudget = Math.min(inference.reasoningWordBudget ?? 350, 140);
     return {
-      ...base,
-      fallbackReason: `confidence=${confidence.toFixed(2)} < threshold=${threshold.toFixed(2)}`,
+      ...inference,
+      intent: "research",
+      exploratoryCreative: false,
+      freshnessSensitive: true,
+      toolFirstBias: true,
+      thinkDepth: "brief",
+      reasoningWordBudget: wordBudget,
+      essayRisk: false,
+      reason: `${inference.reason ?? ""} heuristic=research_freshness`.trim(),
     };
   }
 
-  return buildInferenceFromParsed(parsed, confidence, "llm", reasonStr);
+  if (buildDeliverable || (implementShip && inference.intent !== "operational")) {
+    const wordBudget = Math.min(inference.reasoningWordBudget ?? 350, 130);
+    return {
+      ...inference,
+      intent: implementShip ? "coding" : inference.intent === "execution" ? "execution" : "coding",
+      exploratoryCreative: false,
+      toolFirstBias: true,
+      thinkDepth: "brief",
+      reasoningWordBudget: wordBudget,
+      essayRisk: inference.essayRisk || implementShip,
+      reason: `${inference.reason ?? ""} heuristic=build_deliverable`.trim(),
+    };
+  }
+
+  return inference;
 }
 
-/**
- * Fast heuristic for exploratory / blue-sky prompts when the small-model classifier
- * is disabled, low-confidence, or misses the nuance. Kept conservative to avoid
- * firing on "build this feature in my roadmap.md".
- */
-export function heuristicExploratoryCreative(userMessage: string): boolean {
-  const t = userMessage.trim();
-  if (t.length < 14) return false;
-  const low = t.toLowerCase();
-  if (/\b(use|open|update|fix|implement|edit|refactor)\b.{0,120}\b(roadmap|cashflow|plan\.md|business plan)\b/.test(low)) {
-    return false;
-  }
-  if (
-    /\bignore (my )?(roadmap|plan|notes|memory|vault)\b/.test(low) ||
-    /\bblue[- ]sky\b/.test(low) ||
-    /\bfresh eyes\b/.test(low) ||
-    /\bwithout (using |consulting )(my )?(notes|memory|vault|roadmap)\b/.test(low)
-  ) {
-    return true;
-  }
-  if (/\bthought experiment\b/.test(low)) return true;
-  if (/\b(if you could|if i could)\b.{0,100}\b(build|make|create|invent)\b/.test(low)) return true;
-  if (/\bwhat (one )?thing would you (build|make|create)\b/.test(low)) return true;
-  if (/\b(build|make|create) one thing\b/.test(low)) return true;
-  if (/\bcreative mode\b|\bdivergent thinking\b|\b101 ideas\b/.test(low)) return true;
-  if (/\b(how )?to make\b.{0,72}\b(more likely|happen sooner|feasible|realistic)\b/.test(low)) return true;
-  if (/\bu(niversal)?\s*h(igh)?\s*i(ncome)?\b.{0,96}\b(more likely|accelerat|increase|feasible|realistic)\b/.test(low)) {
-    return true;
-  }
-  if (/\bwhat if\b.{0,80}\b(world|everyone|society|economy|policy)\b/.test(low)) return true;
-  return false;
-}
-
-/**
- * Persona / session-history questions (who you are, what we've been doing).
- * Used to skip [CONTINUE] stream resumes and post-answer finalize loops that glue a second reply.
- */
-export function heuristicPersonaOrHistoryPrompt(userMessage: string): boolean {
-  const t = userMessage.trim().toLowerCase();
-  if (t.length < 10) return false;
-  if (
-    /\b(about yourself|tell me about yourself|describe yourself|who you are|who u are|who are you|who r u|who've you been|who you have been|who u have been)\b/.test(
-      t
-    )
-  ) {
-    return true;
-  }
-  if (/\b(what we have been doing|what we've been doing|our history|who you('ve| have) been)\b/.test(t)) {
-    return true;
-  }
-  if (/\b(your persona|your identity|in character)\b/.test(t) && /\b(who|what|tell|describe|been)\b/.test(t)) {
-    return true;
-  }
-  return false;
-}
 
 /** Single gate for stream [CONTINUE] and finalize extension skips on conversational persona turns. */
 export function shouldSkipHarnessSecondaryPassesForTurn(
-  userMessage: string,
+  _userMessage: string,
   inference: TurnInferenceResult | null | undefined
 ): boolean {
   if (inference?.runtimeIdentityPrompt) return false;
   if (inference?.skipHarnessSecondaryPasses) return true;
   if (inference?.personaIdentityPrompt) return true;
   if (inference?.identityQuery) return true;
-  if (heuristicPersonaOrHistoryPrompt(userMessage)) return true;
   return false;
 }
 
@@ -424,7 +604,7 @@ export function resolveMemoryPolicy(
     if (!debiasOn) {
       return { allowAutoRecall: true, scope: "both" };
     }
-  if (intent === "knowledge") {
+  if (intent === "knowledge" || intent === "research") {
     return {
       allowAutoRecall: true,
       scope: "both",
