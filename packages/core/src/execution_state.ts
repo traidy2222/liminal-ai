@@ -5,6 +5,7 @@ import type {
   RecoveryRecord,
   ExecutionContract,
 } from "./types.js";
+import { CompensationLedger, type CompensationAction } from "./compensation_ledger.js";
 
 export function createDefaultExecutionState(goal: string): ExecutionState {
   const mission: MissionPlan = {
@@ -145,6 +146,17 @@ export function updateDriftScore(
     ...state,
     driftScore: Math.max(0, Math.min(1, state.driftScore + delta)),
   };
+}
+
+/** Per-plan compensation ledger singleton — shared across the harness lifetime. */
+const _globalLedger = new CompensationLedger();
+
+export function getCompensationLedger(): CompensationLedger {
+  return _globalLedger;
+}
+
+export function recordCompensation(planId: string, stepIndex: number, action: CompensationAction): void {
+  _globalLedger.record(planId, stepIndex, action);
 }
 
 export function renderExecutionStateBlock(state: ExecutionState): string {

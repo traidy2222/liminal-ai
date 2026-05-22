@@ -1,7 +1,9 @@
+import OpenAI from "openai";
 import type { AgentHarness, TaskOrchestrator, SubtaskResult } from "@liminal/core";
+import { completeChatJson, getFastModelSlug, resolveHarnessEnvRaw, detectContradictions } from "@liminal/core";
 import { defineTool } from "./helpers.js";
 import { createContextTools } from "./context_tools.js";
-import { loadNotes } from "./notes_store.js";
+import { loadRawNotes, getNoteValue } from "./notes_store.js";
 import { createDecomposeGoalTool } from "./decompose_goal.js";
 import { createBranchExploreTool } from "./branch_explore.js";
 import { createVerifyContractTool } from "./verify_contract.js";
@@ -99,6 +101,74 @@ async function waitForTask(
   // Timed out — cancel the task
   orchestrator.cancel(taskId);
   return { taskId, ok: false, output: `Timed out after ${timeoutMs}ms`, rounds: 0 };
+}
+
+// ─── Result fusion ───────────────────────────────────────────────────────────
+
+async function runResultFusion(
+  harness: AgentHarness,
+  results: SubtaskResult[]
+): Promise<string | null> {
+  try {
+    const resultSummaries = results
+      .map((r, i) => `Agent ${i + 1} (${r.taskId.slice(0, 8)}, ${r.ok ? "ok" : "failed"}):\n${r.output.slice(0, 1200)}`)
+      .join("\n\n---\n\n");
+
+    const prompt = (
+      `You are a synthesis engine. Given outputs from ${results.length} parallel sub-agents, produce a structured fusion report.\n\n` +
+      `AGENT OUTPUTS:\n${resultSummaries}\n\n` +
+      `Return ONLY a JSON object with these exact keys:\n` +
+      `{\n` +
+      `  "consensus_findings": ["string — facts all agents agreed on"],\n` +
+      `  "conflicts": ["string — where agents disagreed and why"],\n` +
+      `  "unique_contributions": ["agentN: unique insight from that agent"],\n` +
+      `  "confidence_map": {"finding": "high|med|low"},\n` +
+      `  "synthesis_summary": "2-3 sentence integrated conclusion",\n` +
+      `  "recommended_next_steps": ["string"]\n` +
+      `}`
+    );
+
+    const fastModel = getFastModelSlug(harness.config.model);
+    const client = new OpenAI({
+      apiKey: harness.config.openRouterApiKey,
+      baseURL: harness.config.baseURL,
+    });
+    const result = await completeChatJson(client, {
+      model: fastModel,
+      messages: [{ role: "user", content: prompt }],
+      maxTokens: 800,
+      isFastModel: true,
+    });
+
+    if (!result.ok || !result.parsed) return null;
+
+    const j = result.parsed as {
+      synthesis_summary?: string;
+      consensus_findings?: string[];
+      conflicts?: string[];
+      unique_contributions?: string[];
+      confidence_map?: Record<string, string>;
+      recommended_next_steps?: string[];
+    };
+
+    const lines: string[] = [];
+    if (j.synthesis_summary) lines.push(`Summary: ${j.synthesis_summary}`);
+    if (j.consensus_findings?.length) {
+      lines.push(`Consensus: ${j.consensus_findings.slice(0, 5).map((f) => `• ${f}`).join("\n  ")}`);
+    }
+    if (j.conflicts?.length) {
+      lines.push(`Conflicts: ${j.conflicts.slice(0, 3).map((c) => `• ${c}`).join("\n  ")}`);
+    }
+    if (j.unique_contributions?.length) {
+      lines.push(`Unique insights: ${j.unique_contributions.slice(0, 4).map((u) => `• ${u}`).join("\n  ")}`);
+    }
+    if (j.recommended_next_steps?.length) {
+      lines.push(`Next steps: ${j.recommended_next_steps.slice(0, 3).map((s) => `• ${s}`).join("\n  ")}`);
+    }
+    return lines.join("\n\n");
+  } catch {
+    return null; // fusion is best-effort, never blocks
+  }
 }
 
 // ─── Factory ──────────────────────────────────────────────────────────────────
@@ -211,20 +281,44 @@ export function createOrchestrationTools(harness: AgentHarness) {
     },
     handler: async (args) => {
       try {
-        // Inject parent's facts + entities into child context so it isn't cold-started
+        // Inject parent's facts + entities into child context so it isn't cold-started.
+        // Notes are sorted by recency (newest first) and deduplicated by normalized value.
         let memoryContext = args["context"] as string | undefined;
         try {
-          const notes = await loadNotes();
-          const facts = Object.entries(notes)
-            .filter(([k]) => k.startsWith("fact:"))
-            .slice(0, 6)
-            .map(([k, v]) => `  ${k.slice(5)}: ${v.slice(0, 80)}`)
-            .join("\n");
-          const entities = Object.entries(notes)
-            .filter(([k]) => k.startsWith("entity:"))
-            .slice(0, 4)
-            .map(([k, v]) => `  ${k.slice(7)}: ${v.slice(0, 80)}`)
-            .join("\n");
+          const rawNotes = await loadRawNotes();
+
+          function recencySort(entries: [string, typeof rawNotes[string]][]): [string, typeof rawNotes[string]][] {
+            return entries.slice().sort((a, b) => {
+              const aT = typeof a[1] === "object" && a[1] !== null ? (a[1].updatedAt ?? "") : "";
+              const bT = typeof b[1] === "object" && b[1] !== null ? (b[1].updatedAt ?? "") : "";
+              return bT.localeCompare(aT);
+            });
+          }
+
+          function dedupeByValue(entries: [string, string][]): [string, string][] {
+            const seen = new Set<string>();
+            return entries.filter(([, v]) => {
+              const norm = v.trim().toLowerCase().slice(0, 60);
+              if (seen.has(norm)) return false;
+              seen.add(norm);
+              return true;
+            });
+          }
+
+          const factEntries = dedupeByValue(
+            recencySort(Object.entries(rawNotes).filter(([k]) => k.startsWith("fact:")))
+              .slice(0, 10)
+              .map(([k, v]) => [k, getNoteValue(v)] as [string, string])
+          ).slice(0, 6);
+
+          const entityEntries = dedupeByValue(
+            recencySort(Object.entries(rawNotes).filter(([k]) => k.startsWith("entity:")))
+              .slice(0, 8)
+              .map(([k, v]) => [k, getNoteValue(v)] as [string, string])
+          ).slice(0, 4);
+
+          const facts = factEntries.map(([k, v]) => `  ${k.slice(5)}: ${v.slice(0, 80)}`).join("\n");
+          const entities = entityEntries.map(([k, v]) => `  ${k.slice(7)}: ${v.slice(0, 80)}`).join("\n");
           const memBlock = [
             facts ? `[PARENT MEMORY — Facts]\n${facts}` : "",
             entities ? `[PARENT MEMORY — Entities]\n${entities}` : "",
@@ -356,9 +450,66 @@ export function createOrchestrationTools(harness: AgentHarness) {
       });
 
       const allOk = results.every((r: SubtaskResult) => r.ok);
-      const body = sections.join("\n\n---\n\n");
-      if (allOk) return { ok: true as const, output: body };
-      return { ok: false as const, error: body };
+      const rawBody = sections.join("\n\n---\n\n");
+
+      // Cross-agent fact consensus: heuristic pairwise contradiction scan.
+      if (results.length >= 2) {
+        const conflictEvents: Array<{
+          agentA: string; agentB: string; claimA: string; claimB: string; confidence: number;
+        }> = [];
+        for (let a = 0; a < results.length - 1; a++) {
+          for (let b = a + 1; b < results.length; b++) {
+            const rA = results[a]!;
+            const rB = results[b]!;
+            if (!rA.ok || !rB.ok) continue;
+            const found = detectContradictions(
+              [{ key: rA.taskId, text: rA.output }],
+              [rB.output],
+              { confidenceThreshold: 0.5 }
+            );
+            for (const c of found) {
+              conflictEvents.push({
+                agentA: rA.taskId,
+                agentB: rB.taskId,
+                claimA: c.staleClaim,
+                claimB: c.freshFact,
+                confidence: c.confidence,
+              });
+            }
+          }
+        }
+        if (conflictEvents.length > 0) {
+          harness.getEmitter().emit("consensus_conflict", {
+            taskIds: results.map((r: SubtaskResult) => r.taskId),
+            conflicts: conflictEvents,
+          });
+          const conflictBlock =
+            `\n[CONSENSUS CONFLICTS DETECTED]\n` +
+            conflictEvents
+              .map(
+                (c) =>
+                  `• Agents ${c.agentA.slice(0, 8)} vs ${c.agentB.slice(0, 8)}: ` +
+                  `"${c.claimA}" conflicts with "${c.claimB}" (confidence: ${(c.confidence * 100).toFixed(0)}%)`
+              )
+              .join("\n") +
+            `\nReview these conflicts and reconcile before treating results as ground truth.`;
+          sections.push(conflictBlock);
+        }
+      }
+
+      // Multi-agent result fusion (AGENT_FUSION=1, ≥2 results)
+      const fusionEnabled = resolveHarnessEnvRaw("AGENT_FUSION", harness.getRuntimePreferences() ?? null) === "1";
+      if (fusionEnabled && results.length >= 2) {
+        const fusionReport = await runResultFusion(harness, results);
+        const body = fusionReport
+          ? `[FUSION REPORT]\n${fusionReport}\n\n[RAW AGENT OUTPUTS]\n${rawBody}`
+          : rawBody;
+        if (allOk) return { ok: true as const, output: body };
+        return { ok: false as const, error: body };
+      }
+
+      if (allOk) return { ok: true as const, output: rawBody };
+      return { ok: false as const, error: rawBody };
     },
   });
 

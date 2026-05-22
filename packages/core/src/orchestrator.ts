@@ -23,7 +23,7 @@ export class ResourceLockManager {
   async acquireAll(
     resourceIds: string[],
     taskId: string,
-    ttl = 30_000
+    ttl = 300_000
   ): Promise<boolean> {
     const sorted = [...new Set(resourceIds)].sort();
     const acquired: string[] = [];
@@ -97,6 +97,12 @@ export class ResourceLockManager {
     if (alive.length === 0) {
       this.locks.delete(resourceId);
     } else if (alive.length !== holders.length) {
+      // Log evicted tasks so the harness can surface lock_timeout events.
+      const evicted = holders.filter((e) => now - e.acquiredAt >= e.ttl);
+      for (const e of evicted) {
+        const heldMs = now - e.acquiredAt;
+        console.warn(`[ResourceLockManager] evicted stale lock ${resourceId} held by ${e.taskId} for ${heldMs}ms (ttl=${e.ttl}ms)`);
+      }
       this.locks.set(resourceId, alive);
     }
   }
