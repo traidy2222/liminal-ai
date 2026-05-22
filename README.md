@@ -63,6 +63,10 @@ Step-by-step setup, Settings vs `.env`, and profiles → **[docs/start/quickstar
 Liminal is a **harness you run**, not a hosted SaaS or a thin chat wrapper. Destructive
 tools can require approval; use `--yolo` only in trusted environments.
 
+![Liminal's first-run persona setup — describe how the assistant should sound, or pick a quick-start preset](assets/persona-bootstrap.png)
+
+<p align="center"><em>First-run persona bootstrap: describe a voice (or tap a preset) and Liminal generates a matching assistant — tone and a themed UI shell, with tools and safety unchanged.</em></p>
+
 ## Repository
 
 ```text
