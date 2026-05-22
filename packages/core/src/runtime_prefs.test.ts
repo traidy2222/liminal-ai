@@ -14,7 +14,10 @@ test("runtime prefs save/load roundtrip", async () => {
   const dir = await mkdtemp(join(tmpdir(), "liminal-prefs-"));
   const prefs: RuntimePreferences = {
     version: 1,
-    provider: { model: "openrouter/owl-alpha", baseURL: "https://openrouter.ai/api/v1" },
+    provider: {
+      model: "qwen/qwen3.5-9b",
+      baseURL: "http://localhost:1234/v1",
+    },
     runtime: { uiVerbosity: "quiet", rateLimitMaxRetries: 42 },
     updatedAt: Date.now(),
   };
@@ -22,7 +25,7 @@ test("runtime prefs save/load roundtrip", async () => {
   assert.equal(path, getRuntimePrefsPath(dir));
   const loaded = await loadRuntimePreferences(dir);
   assert.equal(loaded?.version, 1);
-  assert.equal(loaded?.provider?.model, "openrouter/owl-alpha");
+  assert.equal(loaded?.provider?.model, "qwen/qwen3.5-9b");
   assert.equal(loaded?.runtime?.uiVerbosity, "quiet");
   await rm(dir, { recursive: true, force: true });
 });

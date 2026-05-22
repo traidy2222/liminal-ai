@@ -27,7 +27,12 @@ function sectionIdForKey(key: string): keyof typeof SECTION_META {
     key === "AGENT_MEMORY_CONSOLIDATE_MODEL" ||
     key === "AGENT_PERSONA_INFER_MODEL" ||
     key === "AGENT_PERSONA_GEN_TIMEOUT_MS" ||
-    key === "AGENT_PERSONA_GEN_RETRIES"
+    key === "AGENT_PERSONA_GEN_RETRIES" ||
+    key === "AGENT_PERSONA_UI_THEME_LLM" ||
+    key === "AGENT_PERSONA_SOUL_MODE" ||
+    key === "AGENT_PERSONA_REPAIR_MAX" ||
+    key === "AGENT_PERSONA_GENERATION_STREAM" ||
+    key === "AGENT_PERSONA_PREVIEW_MAX_CHARS"
   ) {
     return "provider";
   }
@@ -62,6 +67,7 @@ function sectionIdForKey(key: string): keyof typeof SECTION_META {
   if (
     key.includes("WEB_") ||
     key === "AGENT_BROWSER" ||
+    key.startsWith("AGENT_BROWSER_") ||
     key === "AGENT_WEB_RESEARCH" ||
     key === "AGENT_WEB_READABILITY"
   ) {

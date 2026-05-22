@@ -13,6 +13,20 @@ export function runHarnessEffectiveEnvContext<T>(prefs: RuntimePreferences | nul
   return harnessEnvAsyncLocal.run({ prefs }, fn);
 }
 
+/** Settings → Provider slice (wins over harness.env for model/base URL when env does not lock). */
+function providerSliceEnv(prefs: RuntimePreferences | null, key: string): string | undefined {
+  if (!prefs?.provider) return undefined;
+  if (key === "AGENT_MODEL") {
+    const m = prefs.provider.model?.trim();
+    if (m) return m;
+  }
+  if (key === "AGENT_API_BASE_URL") {
+    const b = prefs.provider.baseURL?.trim();
+    if (b) return b;
+  }
+  return undefined;
+}
+
 function runtimeSliceEnv(prefs: RuntimePreferences | null, key: string): string | undefined {
   if (!prefs?.runtime) return undefined;
   const r = prefs.runtime;
@@ -43,6 +57,8 @@ export function resolveHarnessEnvRaw(key: string, prefs: RuntimePreferences | nu
   }
   const envFirst = process.env[key]?.trim();
   if (envFirst !== undefined && envFirst !== "") return envFirst;
+  const fromProvider = providerSliceEnv(prefs, key);
+  if (fromProvider !== undefined && fromProvider !== "") return fromProvider;
   const fromRuntime = runtimeSliceEnv(prefs, key);
   if (fromRuntime !== undefined && fromRuntime !== "") return fromRuntime;
   const fromHarness = prefs?.harness?.env?.[key]?.trim();
@@ -84,6 +100,10 @@ export function harnessEnvResolutionMeta(
   const lockedByEnv = !!(envRaw && envRaw.length > 0);
   if (envRaw !== undefined && envRaw !== "") {
     return { value: envRaw, lockedByEnv: true, source: "environment" };
+  }
+  const fromProvider = providerSliceEnv(prefs, key);
+  if (fromProvider !== undefined && fromProvider !== "") {
+    return { value: fromProvider, lockedByEnv: false, source: "runtime_preferences" };
   }
   const fromRuntime = runtimeSliceEnv(prefs, key);
   if (fromRuntime !== undefined && fromRuntime !== "") {

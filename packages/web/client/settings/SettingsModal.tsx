@@ -1,5 +1,10 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import type { HarnessSettingsApiField } from "@liminal/core";
+import {
+  PROVIDER_PRESETS,
+  PROVIDER_PRESET_CUSTOM_ID,
+  resolvePresetSelection,
+} from "./providerPresets.js";
 
 const CYAN = "var(--lim-accent, #00d4ff)";
 const AMBER = "var(--lim-warn, #ffb347)";
@@ -111,6 +116,8 @@ export interface SettingsModalProps {
   providerBaseLocked?: boolean;
   /** Whether the server has a provider API key loaded (secret is never sent). */
   providerApiKeyConfigured?: boolean;
+  /** Fill model, base URL, and fast-model harness env from a preset (no-op for Custom). */
+  onPresetApply: (presetId: string) => void;
   onProviderModel: (v: string) => void;
   onProviderBase: (v: string) => void;
   envDraft: Record<string, string>;
@@ -133,6 +140,7 @@ export function SettingsModal({
   providerModelLocked = false,
   providerBaseLocked = false,
   providerApiKeyConfigured = false,
+  onPresetApply,
   onProviderModel,
   onProviderBase,
   envDraft,
@@ -187,9 +195,18 @@ export function SettingsModal({
   const subgroups = useMemo(() => groupBySubgroup(activeRows), [activeRows]);
 
   const showProvider = !!filtered || activeTabId === "models_api";
-  const providerHintText = filtered
-    ? "Values reflect the running server harness. API keys are never displayed. ENV = read-only field."
-    : "Values reflect the running server harness. API keys are never displayed. ENV = read-only field.";
+  const providerPresetLocked = providerModelLocked || providerBaseLocked;
+  const resolvedPresetId = useMemo(
+    () => resolvePresetSelection(providerModel, providerBase),
+    [providerModel, providerBase]
+  );
+  const presetHint = useMemo(() => {
+    const p = PROVIDER_PRESETS.find((x) => x.id === resolvedPresetId);
+    return p?.hint ?? "";
+  }, [resolvedPresetId]);
+
+  const providerHintText =
+    "Values reflect the running server harness. API keys are never displayed. ENV = read-only field.";
 
   if (!open) return null;
 
@@ -307,6 +324,53 @@ export function SettingsModal({
                       Provider (live harness)
                     </div>
                     <div style={{ fontSize: 10, color: "#778899", marginBottom: 8 }}>{providerHintText}</div>
+                    <div style={{ display: "grid", gridTemplateColumns: "120px 1fr", gap: 8, alignItems: "center", marginBottom: 10 }}>
+                      <span style={{ fontSize: 11, color: "#aabbcc" }}>preset</span>
+                      <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                        <select
+                          disabled={saving || loading || providerPresetLocked}
+                          value={resolvedPresetId}
+                          onChange={(e) => {
+                            const id = e.target.value;
+                            if (id === PROVIDER_PRESET_CUSTOM_ID) return;
+                            onPresetApply(id);
+                          }}
+                          aria-label="Provider preset"
+                          style={{
+                            width: "100%",
+                            maxWidth: 520,
+                            fontSize: 12,
+                            padding: "8px 10px",
+                            borderRadius: 2,
+                            border: "1px solid rgba(var(--lim-accent-rgb),0.2)",
+                            background: "rgba(0,10,20,0.95)",
+                            color: "#dde8f0",
+                            fontFamily: "monospace",
+                          }}
+                        >
+                          {PROVIDER_PRESETS.map((p) => (
+                            <option key={p.id} value={p.id}>
+                              {p.label}
+                            </option>
+                          ))}
+                        </select>
+                        {providerPresetLocked ? (
+                          <span style={{ fontSize: 10, color: MAGENTA, fontFamily: "monospace" }}>
+                            Presets disabled — model or base URL is locked by process env (`.env`).
+                          </span>
+                        ) : (
+                          <span style={{ fontSize: 10, color: "#6a7a8a", lineHeight: 1.45 }}>
+                            Chooses model + base URL + <code style={{ color: "#99aab8" }}>AGENT_FAST_MODEL</code>. Still click{" "}
+                            <strong style={{ color: GREEN }}>SAVE TO RUNTIME PREFS</strong>. Local stacks: use any placeholder API key in{" "}
+                            <code style={{ color: "#99aab8" }}>.env</code> (e.g. <code style={{ color: "#99aab8" }}>lm-studio</code>,{" "}
+                            <code style={{ color: "#99aab8" }}>ollama</code>).
+                          </span>
+                        )}
+                        {presetHint ? (
+                          <span style={{ fontSize: 10, color: "#8899aa", lineHeight: 1.45 }}>{presetHint}</span>
+                        ) : null}
+                      </div>
+                    </div>
                     <div style={{ display: "grid", gridTemplateColumns: "120px 1fr", gap: 8, alignItems: "center", marginBottom: 6 }}>
                       <span style={{ fontSize: 11, color: "#aabbcc", display: "flex", alignItems: "center", gap: 6 }}>
                         model
