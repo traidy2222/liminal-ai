@@ -15,12 +15,17 @@ export function createAppendPersonaLivingTool(harness: AgentHarness) {
   return defineTool({
     name: "append_persona_living",
     description:
-      "WHAT: Append a short, timestamped note to the harness-managed persona living file (`persona/active/soul/living.md`) and **reload** the in-memory persona block so the change applies on the next model turn.\n" +
-      "WHEN: You learned something **about how this persona should sound or behave** that belongs in persona-local memory (voice habits, tone wins), not user-factual memory.\n" +
-      "NOT WHEN: The fact is about the user, project, or world — use remember / vault tools instead. Do **not** use raw write_file on soul files; it will not refresh the harness context.\n\n" +
-      "ARGS:\n" +
-      "  note — markdown or plain text (required). Max length per call is bounded by the tool schema.\n\n" +
-      "EFFECT: Disk append + `applyPersonaProfileToHarness` using runtime prefs profile or `runtime_profile.json` on disk.",
+      "WHAT: Append a timestamped note to `persona/active/soul/living.md` and **immediately reload** the persona block — the note takes effect on the very next model turn.\n" +
+      "WHEN to write a living note (write one per meaningful observation, at turn end):\n" +
+      "  • You broke character, got the tone wrong, or the output missed the mark — note what happened and how to avoid it.\n" +
+      "  • The user corrected your phrasing, style, register, or approach — record the correction as an active override.\n" +
+      "  • A specific rhythm, technique, or framing got strong positive engagement — note it so this persona repeats it.\n" +
+      "  • You discovered how this user prefers to receive information: length, directness, formality, detail level.\n" +
+      "  • A recurring theme, project thread, or context this persona should carry across sessions.\n" +
+      "  • You found a reasoning approach that works especially well for this persona + task type.\n" +
+      "  • This persona's relationship with the user has a dynamic worth preserving (collaborative, challenging, playful, etc.).\n" +
+      "NOT WHEN: The fact is about the user, project, or world — use remember / vault tools. Do NOT use raw write_file on soul files; it will not reload the harness.\n\n" +
+      "EFFECT: Disk append + persona block reload. Living notes are **active operating corrections** — they override the static soul slices for the dimensions they address.",
     requiresApproval: false,
     parameters: {
       type: "object",

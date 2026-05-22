@@ -3,7 +3,7 @@ import {
   DEFAULT_PERSONA_UI_THEME,
   mapPersonaUiThemeToInk,
   motionPresetToStatusBarIntervalMs,
-  type PersonaUiThemeV1,
+  type PersonaUiThemeV2,
 } from "@liminal/core";
 import { jarvis } from "./theme/jarvis.js";
 
@@ -14,7 +14,7 @@ export type TuiPersonaChrome = {
   statusBarIntervalMs: number;
 };
 
-function buildChromeFromTheme(theme: PersonaUiThemeV1 | null): TuiPersonaChrome {
+function buildChromeFromTheme(theme: PersonaUiThemeV2 | null): TuiPersonaChrome {
   const t = theme ?? DEFAULT_PERSONA_UI_THEME;
   const ink = mapPersonaUiThemeToInk(t);
   return {

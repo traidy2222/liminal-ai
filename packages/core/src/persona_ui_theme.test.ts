@@ -2,9 +2,13 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import {
   validateAndNormalizePersonaUiTheme,
+  migratePersonaUiTheme,
   parseHexToRgb,
   contrastRatio,
   DEFAULT_PERSONA_UI_THEME,
+  deriveCategoryTintsFromTheme,
+  derivePersonaSemanticTokens,
+  themeToCssVars,
 } from "./persona_ui_theme.js";
 
 test("parseHexToRgb accepts 6-digit hex", () => {
@@ -12,27 +16,67 @@ test("parseHexToRgb accepts 6-digit hex", () => {
   assert.deepEqual(parseHexToRgb("020408"), { r: 2, g: 4, b: 8 });
 });
 
-test("validateAndNormalizePersonaUiTheme fills defaults and boosts low contrast", () => {
+test("validateAndNormalizePersonaUiTheme fills v2 defaults and boosts low contrast", () => {
   const t = validateAndNormalizePersonaUiTheme(
     {
       accent: "#001122",
       secondary: "#110011",
       displayLabel: "x".repeat(40),
       motion: "snappy",
+      shell: "terminal",
     },
     "Ada"
   );
-  assert.equal(t.v, 1);
+  assert.equal(t.v, 2);
   assert.equal(t.displayLabel.length, 24);
-  const bg = parseHexToRgb("#020408")!;
-  const ar = parseHexToRgb(t.accent)!;
-  assert.ok(contrastRatio(ar, bg) >= 3.8);
+  assert.equal(t.shell, "terminal");
   assert.equal(t.motion, "snappy");
+  const bg = parseHexToRgb(t.surfaceTint)!;
+  const ar = parseHexToRgb(t.accent)!;
+  assert.ok(contrastRatio(ar, bg) >= 3.5);
 });
 
-test("invalid motion falls back to default", () => {
-  const t = validateAndNormalizePersonaUiTheme({ motion: "weird" }, "Pat");
-  assert.equal(t.motion, "default");
+test("migratePersonaUiTheme upgrades v1 to v2", () => {
+  const t = migratePersonaUiTheme({
+    v: 1,
+    accent: "#00d4ff",
+    secondary: "#ff4488",
+    warn: "#ffb347",
+    danger: "#ff2244",
+    success: "#00ff88",
+    muted: "#778899",
+    surfaceTint: "#0a1018",
+    displayLabel: "Test",
+    motion: "default",
+  });
+  assert.equal(t.v, 2);
+  assert.equal(t.shell, "hud");
+  assert.equal(t.typography, "mixed");
+});
+
+test("invalid shell falls back to hud", () => {
+  const t = validateAndNormalizePersonaUiTheme({ shell: "weird" }, "Pat");
+  assert.equal(t.shell, "hud");
+});
+
+test("deriveCategoryTintsFromTheme is stable per accent", () => {
+  const t = validateAndNormalizePersonaUiTheme({}, "X");
+  const a = deriveCategoryTintsFromTheme(t);
+  const b = deriveCategoryTintsFromTheme(t);
+  assert.equal(a.file, b.file);
+  assert.ok(parseHexToRgb(a.shell));
+});
+
+test("themeToCssVars includes semantic and motion keys", () => {
+  const vars = themeToCssVars(DEFAULT_PERSONA_UI_THEME);
+  assert.ok(vars["--lim-text"]);
+  assert.ok(vars["--lim-motion-orb-idle"]);
+  assert.ok(vars["--lim-cat-file"]);
+});
+
+test("derivePersonaSemanticTokens provides assistant color", () => {
+  const sem = derivePersonaSemanticTokens(DEFAULT_PERSONA_UI_THEME);
+  assert.ok(parseHexToRgb(sem.assistant));
 });
 
 test("DEFAULT theme parses", () => {

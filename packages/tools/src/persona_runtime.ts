@@ -1,16 +1,28 @@
 import type { AgentHarness } from "@liminal/core";
-import { resolveWorkspaceRoot, validateAndNormalizePersonaUiTheme, type PersonaUiThemeV1 } from "@liminal/core";
+import type { PersonaArtifactId } from "@liminal/core/persona-bootstrap-progress";
+import {
+  migratePersonaUiTheme,
+  resolveWorkspaceRoot,
+  type PersonaUiThemeV2,
+} from "@liminal/core";
 import type { RuntimePersonaControls } from "@liminal/core";
 import { mkdir, readFile, rm, stat, unlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import {
+  buildHarnessCapabilitySummary,
+  buildSoulSlicesFromProfile,
   generatePersonaBundle,
   generatePersonaSoulArtifacts,
   generatePersonaUiTheme,
-  type PersonaProgressFn,
   type PersonaGenerationBundle,
   type PersonaSoulBundle,
 } from "./persona_generator.js";
+import {
+  PersonaGenerationPreview,
+  personaGenerationStreamEnabled,
+  type PersonaProgressFn,
+} from "./persona_generation_preview.js";
+import { writePersonaArtifact, writePersonaArtifactStreaming, finalizePersonaManifest } from "./persona_artifact_io.js";
 import {
   buildPersonaTraitTags,
   buildPersonaVoiceSummary,
@@ -179,9 +191,9 @@ export function buildPersonaSoulMarkdownFromSlices(slices: PersonaSoulDiskSlices
   if (slices.living?.trim()) {
     parts.push(
       soulDelimiter("living"),
-      "## PERSONA LIVING NOTES (session-accumulated; non-canonical)",
+      "## PERSONA LIVING NOTES (active operating corrections — apply now)",
       "",
-      "_Supplemental voice lessons and persona-local habits — less authoritative than identity/voice slices above._",
+      "_These notes record what actually worked or failed in practice. Where a living note addresses the same dimension as a soul slice above, the living note takes precedence — it is a correction, not a suggestion._",
       "",
       slices.living.trim()
     );
@@ -196,45 +208,12 @@ async function persistPersonaArtifacts(
   bundle: PersonaSoulBundle,
   controls: RuntimePersonaControls
 ): Promise<void> {
-  const paths = getPersonaArtifactsPaths();
-  await mkdir(paths.soulDir, { recursive: true });
-  await removeStaleMonolithicSoulMd(paths);
-
-  let livingContent = (await readFile(paths.livingPath, "utf8").catch(() => "")).trim();
-  if (!livingContent) livingContent = DEFAULT_LIVING_HEADER;
-
-  await writeFile(paths.runtimeProfilePath, JSON.stringify(profile, null, 2), "utf8");
-  await writeFile(paths.identityPath, bundle.identityMd.trim() + "\n", "utf8");
-  await writeFile(paths.voicePath, bundle.voiceMd.trim() + "\n", "utf8");
-  await writeFile(paths.stancePath, bundle.stanceMd.trim() + "\n", "utf8");
-  await writeFile(paths.railsPath, bundle.railsMd.trim() + "\n", "utf8");
-  await writeFile(paths.livingPath, livingContent + "\n", "utf8");
-
-  await unlink(paths.legacyLexiconPath).catch(() => undefined);
-  await writeFile(
-    paths.manifestPath,
-    JSON.stringify(
-      {
-        version: 2,
-        updatedAt: Date.now(),
-        sourcePrompt,
-        name: profile.name,
-        controls,
-        files: {
-          runtimeProfile: "runtime_profile.json",
-          soulIdentity: "soul/identity.md",
-          soulVoice: "soul/voice.md",
-          soulStance: "soul/stance.md",
-          soulRails: "soul/rails.md",
-          soulLiving: "soul/living.md",
-          uiTheme: "ui_theme.json",
-        },
-      },
-      null,
-      2
-    ),
-    "utf8"
-  );
+  await writePersonaArtifact("runtime_profile", JSON.stringify(profile, null, 2));
+  await writePersonaArtifact("soul_identity", bundle.identityMd);
+  await writePersonaArtifact("soul_voice", bundle.voiceMd);
+  await writePersonaArtifact("soul_stance", bundle.stanceMd);
+  await writePersonaArtifact("soul_rails", bundle.railsMd);
+  await finalizePersonaManifest({ sourcePrompt, profile, controls });
 }
 
 export async function clearPersistedPersonaArtifacts(): Promise<void> {
@@ -250,7 +229,34 @@ export async function generatePersonaFromInput(
   onProgress?: PersonaProgressFn
 ): Promise<PersonaGenerationBundle> {
   const { openRouterApiKey, model, baseURL } = harness.config;
-  onProgress?.("profile_start", "Starting persona profile generation...");
+  const capabilitySummary = buildHarnessCapabilitySummary(
+    harness.registry.getAll().map((t) => t.name)
+  );
+  const harnessCapabilityHint = capabilitySummary || undefined;
+
+  const streamArtifacts = personaGenerationStreamEnabled() && Boolean(onProgress);
+  const preview = streamArtifacts
+    ? new PersonaGenerationPreview(
+        (stage, message, detail) => {
+          if (detail?.artifacts?.length) {
+            for (const a of detail.artifacts) {
+              if (a.status === "streaming" && a.content) {
+                void writePersonaArtifactStreaming(a.id, a.content).catch(() => undefined);
+              }
+            }
+          }
+          onProgress?.(stage, message, detail);
+        },
+        async (id, content) => {
+          await writePersonaArtifact(id, content);
+        }
+      )
+    : undefined;
+  const progress: PersonaProgressFn | undefined = preview
+    ? (stage, message) => preview.emit(stage, message)
+    : onProgress;
+
+  progress?.("profile_start", "Starting persona profile generation...");
   const bundle = await generatePersonaBundle(
     coreInput,
     strength,
@@ -258,38 +264,57 @@ export async function generatePersonaFromInput(
     openRouterApiKey,
     model,
     baseURL,
-    onProgress
+    progress,
+    preview,
+    harnessCapabilityHint
   );
   const profile = bundle.profile;
-  onProgress?.("artifact_start", "Generating soul blueprint…");
-  const soulBundle = await generatePersonaSoulArtifacts(
-    profile,
-    coreInput,
-    openRouterApiKey,
-    model,
-    baseURL,
-    onProgress
-  );
-  onProgress?.("artifact_persist", "Writing persona artifacts to workspace...");
+  const scaffold = buildSoulSlicesFromProfile(profile, coreInput);
+  progress?.("artifact_start", "Generating soul blueprint and HUD theme…");
+  const [soulBundle, uiTheme] = await Promise.all([
+    generatePersonaSoulArtifacts(
+      profile,
+      coreInput,
+      openRouterApiKey,
+      model,
+      baseURL,
+      progress,
+      { scaffold, preview, harnessCapabilityHint }
+    ),
+    generatePersonaUiTheme(profile, scaffold, openRouterApiKey, model, baseURL, preview),
+  ]).catch((err: unknown) => {
+    console.error("[persona] soul/theme generation failed:", err);
+    throw err;
+  });
+
+  if (streamArtifacts && preview) {
+    progress?.("artifact_manifest", "Writing manifest and living notes…");
+    await finalizePersonaManifest({
+      sourcePrompt: coreInput,
+      profile,
+      controls: bundle.defaultControls,
+    });
+    if (harnessCapabilityHint) {
+      await appendPersonaLivingSection(
+        `**Operating context at persona creation**\n\nCapability domains: ${harnessCapabilityHint}.`
+      ).catch(() => undefined);
+    }
+    progress?.("artifact_ready", "Persona artifacts ready.");
+    progress?.("ui_theme_ready", "HUD theme saved.");
+    return bundle;
+  }
+
+  progress?.("artifact_persist", "Writing persona artifacts to workspace...");
   await persistPersonaArtifacts(coreInput, profile, soulBundle, bundle.defaultControls);
-  onProgress?.("artifact_ready", "Persona artifacts ready.");
-  onProgress?.("ui_theme_start", "Designing HUD colors and motion…");
-  const uiTheme = await generatePersonaUiTheme(profile, soulBundle, openRouterApiKey, model, baseURL);
   const paths = getPersonaArtifactsPaths();
   await writeFile(paths.uiThemePath, JSON.stringify(uiTheme, null, 2), "utf8");
-  try {
-    const manRaw = await readFile(paths.manifestPath, "utf8");
-    const man = JSON.parse(manRaw) as Record<string, unknown>;
-    const files =
-      man["files"] && typeof man["files"] === "object"
-        ? (man["files"] as Record<string, string>)
-        : {};
-    man["files"] = { ...files, uiTheme: "ui_theme.json" };
-    await writeFile(paths.manifestPath, JSON.stringify(man, null, 2), "utf8");
-  } catch {
-    /* ignore manifest patch */
+  if (harnessCapabilityHint) {
+    await appendPersonaLivingSection(
+      `**Operating context at persona creation**\n\nCapability domains: ${harnessCapabilityHint}.`
+    ).catch(() => undefined);
   }
-  onProgress?.("ui_theme_ready", "HUD theme saved.");
+  progress?.("artifact_ready", "Persona artifacts ready.");
+  progress?.("ui_theme_ready", "HUD theme saved.");
   return bundle;
 }
 
@@ -309,12 +334,12 @@ export async function loadPersonaProfileFromWorkspace(): Promise<PersonaProfile 
 /**
  * Load normalized persona UI theme from `persona/active/ui_theme.json` if present.
  */
-export async function loadPersonaUiThemeFromWorkspace(): Promise<PersonaUiThemeV1 | null> {
+export async function loadPersonaUiThemeFromWorkspace(): Promise<PersonaUiThemeV2 | null> {
   try {
     const paths = getPersonaArtifactsPaths();
     const raw = await readFile(paths.uiThemePath, "utf8");
     const parsed = JSON.parse(raw) as unknown;
-    return validateAndNormalizePersonaUiTheme(parsed);
+    return migratePersonaUiTheme(parsed);
   } catch {
     return null;
   }

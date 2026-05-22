@@ -22,11 +22,14 @@ export function personaBootstrapStageHint(stage: string | null | undefined): str
     persisting: "Saving",
     done: "Done",
     profile_start: "Profile",
-    artifact_start: "Soul blueprint",
+    artifact_start: "Soul + theme",
     artifact_persist: "Saving files",
     artifact_ready: "Almost done",
     ui_theme_start: "HUD theme",
     ui_theme_ready: "Theme saved",
+    soul_draft: "Soul blueprint",
+    soul_scaffold: "Soul scaffold",
+    controls_pass: "Controls",
   };
   return labels[stage] ?? stage;
 }

@@ -136,10 +136,11 @@ export function buildRichPersonaBlock(profile: PersonaProfile): string {
   const hint = profile.generationSourceHint?.trim().slice(0, 4000) ?? "";
   const hintBlock = hint
     ? [
-        `USER'S ORIGINAL PERSONA BRIEF (surface-fidelity target—match dialect, attitude, expletives, and code-switching here; do not "clean up" into bland corporate assistant English unless the immediate user task is clearly incompatible, e.g. content for young children):`,
+        `USER'S ORIGINAL PERSONA BRIEF (surface-fidelity target — match dialect, register, attitude, and code-switching from this; do not sanitize into generic assistant English unless the task is clearly incompatible, e.g. content for young children):`,
         JSON.stringify(hint),
         ``,
-        `IN-CHARACTER LANGUAGE: If the brief above or your favoriteWords/catchphrases include profanity or rough slang, use that register naturally in replies. Bigoted slurs, sexual content involving minors, and targeted harassment remain forbidden.`,
+        `BRIEF USAGE: Use the above for register, dialect, and attitude — not as a literal script. If it lists specific signature phrases to "use naturally" or "always say", treat those as rare flavor available at most once per many replies, NOT as frequent mandatory inserts. Your favoriteWords, catchphrases, and verbalTics fields govern actual usage patterns; the brief does not override sparse-use rules for any of them.`,
+        `IN-CHARACTER LANGUAGE: If the brief or your favoriteWords/catchphrases include profanity or rough slang, use that register naturally. Bigoted slurs, sexual content involving minors, and targeted harassment remain forbidden.`,
         ``,
       ].join("\n")
     : [
@@ -167,7 +168,7 @@ export function buildRichPersonaBlock(profile: PersonaProfile): string {
     `- Sentence structure: ${profile.speechStyle.sentenceStructure}`,
     `- Formality: ${profile.speechStyle.formality}`,
     `- Rhythm: ${profile.speechStyle.rhythm}`,
-    `- Words you use constantly: ${profile.speechStyle.favoriteWords.slice(0, 10).join(", ")}`,
+    `- Vocabulary texture (let these color the voice naturally — not forced into every sentence, not every reply): ${profile.speechStyle.favoriteWords.slice(0, 10).join(", ")}`,
     `- Words you NEVER use: ${profile.speechStyle.avoidWords.slice(0, 6).join(", ")}`,
     profile.speechStyle.commonMetaphors.length > 0
       ? `- Your go-to frames/metaphors: ${profile.speechStyle.commonMetaphors.slice(0, 4).join("; ")}`
@@ -180,12 +181,15 @@ export function buildRichPersonaBlock(profile: PersonaProfile): string {
     `- Emotional flavor: ${profile.tone.emotionalFlavor}`,
     `- Conversational posture: ${profile.tone.posture}`,
     ``,
-    `CATCHPHRASES — dynamic and sparse usage only:`,
-    `- Use 0 most turns; occasionally 1 when it adds clarity or flavor.`,
+    `CATCHPHRASES — sparse functional use only (these are NOT signature openers to lead every reply):`,
+    `- Default: 0 per reply. Use at most 1 when it genuinely serves as a pivot, reframe, or close.`,
     `- Never reuse the same catchphrase in consecutive replies.`,
     `- Never open two consecutive replies with the same phrase pattern.`,
-    `- For serious/analytical requests, default to plain direct language (catchphrases optional, usually off).`,
-    `- If the user writes briefly/directly, mirror that with minimal stylistic ornament.`,
+    `- For technical, analytical, or direct requests: skip catchphrases entirely.`,
+    `- For opinion/commentary analysis (social posts, political discourse, LinkedIn content): suppress signature framing entirely — the dramatic apparatus reads as preachiness on practical topics. Engage substance only.`,
+    `- If the user writes briefly/directly, match that register — no stylistic ornament.`,
+    `- NEVER use a catchphrase that presumes the reader's inner state ("you already feel/know/sense this").`,
+    `- NEVER use a catchphrase as a theatrical announcement ("The X tightens…", "Witness:", "Revelation:") — these perform rather than communicate.`,
     ...profile.catchphrases.slice(0, 7).map((p) => `  "${p}"`),
     ``,
     `VERBAL TICS — structural patterns; vary them; do not repeat the same tic every sentence:`,
@@ -197,9 +201,12 @@ export function buildRichPersonaBlock(profile: PersonaProfile): string {
     ``,
     `YOU NEVER:`,
     ...profile.neverDo.slice(0, 8).map((d) => `  • ${d}`),
+    `  • Editorialize about how a piece is "framed" or call a framing a "concession" — engage the substance (facts right/wrong, alternatives) not the rhetoric.`,
+    `  • Cite a cost/time/effort range wider than 3× without explaining the key driver of the spread in the same sentence.`,
     ``,
     `YOU ALWAYS:`,
     ...profile.alwaysDo.slice(0, 8).map((d) => `  • ${d}`),
+    `  • When a reply spans two clearly different domains, open the new section with a plain one-sentence pivot ("On the X side:" / "Shifting to Y —") — brief and functional, not theatrical.`,
     ``,
     `PERSONA STRENGTH: ${profile.strength}/10 — ${strengthLabel}`,
     ``,

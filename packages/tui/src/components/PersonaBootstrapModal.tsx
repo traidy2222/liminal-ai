@@ -1,9 +1,11 @@
-import React from "react";
+import React, { useMemo } from "react";
 import { Box, Text } from "ink";
+import { PERSONA_QUICK_PRESETS, personaBootstrapStageHint } from "@liminal/core/persona-bootstrap-ui";
 import {
-  PERSONA_QUICK_PRESETS,
-  personaBootstrapStageHint,
-} from "@liminal/core/persona-bootstrap-ui";
+  PERSONA_ARTIFACT_LABELS,
+  PERSONA_ARTIFACT_ORDER,
+  type PersonaArtifactPreview,
+} from "@liminal/core/persona-bootstrap-progress";
 import { usePersonaChrome } from "../personaChromeContext.js";
 
 interface Props {
@@ -13,6 +15,23 @@ interface Props {
   progress: string | null;
   stage: string | null;
   allowSkip: boolean;
+  artifacts?: PersonaArtifactPreview[] | null;
+}
+
+const GLYPH: Record<PersonaArtifactPreview["status"], string> = {
+  pending: "○",
+  streaming: "◐",
+  done: "●",
+  error: "✗",
+};
+
+function pickFocusArtifact(artifacts: PersonaArtifactPreview[] | null | undefined): PersonaArtifactPreview | null {
+  if (!artifacts?.length) return null;
+  const streaming = artifacts.filter((a) => a.status === "streaming");
+  if (streaming.length === 0) return null;
+  return streaming.reduce((best, cur) =>
+    (cur.charCount ?? cur.content.length) >= (best.charCount ?? best.content.length) ? cur : best
+  );
 }
 
 export function PersonaBootstrapModal({
@@ -22,10 +41,19 @@ export function PersonaBootstrapModal({
   progress,
   stage,
   allowSkip,
+  artifacts,
 }: Props) {
   const jarvis = usePersonaChrome().colors;
   const w = Math.max(42, width - 2);
   const hint = stage ? personaBootstrapStageHint(stage) : "";
+  const focus = useMemo(() => pickFocusArtifact(artifacts), [artifacts]);
+
+  const statusRow = PERSONA_ARTIFACT_ORDER.map((id) => {
+    const a = artifacts?.find((x) => x.id === id);
+    const status = a?.status ?? "pending";
+    const short = PERSONA_ARTIFACT_LABELS[id].replace(/^soul\//, "").replace(/\.(md|json)$/, "");
+    return `${GLYPH[status]}${short}`;
+  }).join(" ");
 
   return (
     <Box
@@ -62,7 +90,29 @@ export function PersonaBootstrapModal({
       </Box>
       {submitting && (
         <Box marginBottom={1} flexDirection="column">
-          <Text color={jarvis.accent}>{progress ?? "Working…"}{hint ? ` · ${hint}` : ""}</Text>
+          <Text color={jarvis.accent}>
+            {progress ?? "Working…"}
+            {hint ? ` · ${hint}` : ""}
+          </Text>
+          <Text dimColor color={jarvis.muted} wrap="truncate-end">
+            {statusRow}
+          </Text>
+          {focus && focus.content ? (
+            <Box
+              flexDirection="column"
+              marginTop={0}
+              borderStyle="single"
+              borderColor={jarvis.borderSoft}
+              paddingX={1}
+            >
+              <Text color={jarvis.accent}>{focus.label}</Text>
+              <Text color={jarvis.body} wrap="truncate-end">
+                {focus.content.length > w - 4
+                  ? `…${focus.content.slice(-(w - 4))}`
+                  : focus.content}
+              </Text>
+            </Box>
+          ) : null}
         </Box>
       )}
       <Box borderStyle="single" borderColor={jarvis.borderSoft} paddingX={1} marginTop={0}>

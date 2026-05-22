@@ -6,11 +6,25 @@ import {
   withProviderRequestSpacing,
   effectiveHarnessEnvRaw,
   validateAndNormalizePersonaUiTheme,
-  type PersonaUiThemeV1,
+  derivePersonaShellHeuristics,
+  type PersonaUiThemeV2,
   type RuntimePersonaControls,
 } from "@liminal/core";
+import type { PersonaArtifactId } from "@liminal/core/persona-bootstrap-progress";
 import type { PersonaProfile } from "./persona_presets.js";
-export type PersonaProgressFn = (stage: string, message: string) => void;
+import {
+  PersonaGenerationPreview,
+  personaGenerationStreamEnabled,
+  type PersonaProgressFn,
+} from "./persona_generation_preview.js";
+import { streamPersonaModelToBuffer } from "./persona_generator_stream.js";
+import {
+  extractPartialJsonStringField,
+  extractPartialProfilePreview,
+  extractPartialSoulBatch,
+} from "./persona_stream_extract.js";
+
+export type { PersonaProgressFn } from "./persona_generation_preview.js";
 
 /**
  * Max lengths after sanitization for persisted PersonaProfile strings.
@@ -65,6 +79,111 @@ export interface PersonaSoulBundle {
 /** @deprecated Use {@link PersonaSoulBundle} */
 export type PersonaSoulArtifacts = PersonaSoulBundle;
 
+export type PersonaSoulMode = "batch" | "parallel" | "scaffold";
+
+export interface PersonaSoulArtifactsOptions {
+  scaffold?: PersonaSoulBundle;
+  mode?: PersonaSoulMode;
+  preview?: PersonaGenerationPreview;
+  harnessCapabilityHint?: string;
+}
+
+/**
+ * Map registered tool names → compact capability-domain summary for persona generation.
+ * Returns a comma-separated string of human-readable domains, or empty string if none match.
+ */
+export function buildHarnessCapabilitySummary(toolNames: string[]): string {
+  const has = (re: RegExp) => toolNames.some((n) => re.test(n));
+  const cats: string[] = [];
+  if (has(/^(read_file|write_file|edit_file|list_dir|multi_file_apply|move_file|copy_file|mkdir_p)/))
+    cats.push("file read/write");
+  if (has(/^(run_shell|run_background|kill_process|list_processes|read_process_output)/))
+    cats.push("shell execution");
+  if (has(/^(web_search|web_fetch)/))
+    cats.push("web search + live fetch");
+  if (has(/^(remember|recall\b|recall_type|recall_relevant|search_memory|memory_query|memory_consolidate)/))
+    cats.push("persistent memory across sessions");
+  if (has(/^(vault_write|vault_read|vault_search|vault_list|vault_links)/))
+    cats.push("knowledge vault");
+  if (has(/^(git_status|git_diff|git_log|git_branch|git_commit)/))
+    cats.push("git");
+  if (has(/^(execute_code|run_tests|run_lint|ast_grep|symbol_index|find_references)/))
+    cats.push("code execution + intelligence");
+  if (has(/^vision_analyze/))
+    cats.push("image analysis");
+  if (has(/^(browser_open|browser_act)/))
+    cats.push("browser automation");
+  if (has(/^(spawn_agent|wait_for_agents)/))
+    cats.push("multi-agent orchestration");
+  if (has(/^markets_quote/))
+    cats.push("live market data");
+  if (has(/^doc_(plan|render|compose)/))
+    cats.push("document generation");
+  return cats.join(", ");
+}
+
+function soulSliceArtifactId(slice: "identity" | "voice" | "stance" | "rails"): PersonaArtifactId {
+  const map = {
+    identity: "soul_identity",
+    voice: "soul_voice",
+    stance: "soul_stance",
+    rails: "soul_rails",
+  } as const;
+  return map[slice];
+}
+
+/** Test-only override for counting LLM calls in unit tests. */
+export type PersonaGeneratorTestHooks = {
+  callPersonaModel?: typeof callPersonaModel;
+};
+
+let personaGeneratorTestHooks: PersonaGeneratorTestHooks | undefined;
+
+export function setPersonaGeneratorTestHooks(hooks: PersonaGeneratorTestHooks | undefined): void {
+  personaGeneratorTestHooks = hooks;
+}
+
+function invokePersonaModel(
+  apiKey: string,
+  model: string,
+  baseURL: string,
+  systemPrompt: string,
+  userPrompt: string,
+  maxTokens: number,
+  temperature: number
+): Promise<Record<string, unknown>> {
+  const call = personaGeneratorTestHooks?.callPersonaModel ?? callPersonaModel;
+  return call(apiKey, model, baseURL, systemPrompt, userPrompt, maxTokens, temperature);
+}
+
+/** Fast sidecar model for soul batch, voice infer, and optional UI theme. */
+export function personaInferModel(mainModel: string): string {
+  const infer = effectiveHarnessEnvRaw("AGENT_PERSONA_INFER_MODEL")?.trim();
+  if (infer) return infer;
+  return getFastModelSlug(mainModel);
+}
+
+/** Main chat model for profile draft and repair. */
+export function personaMainModel(mainModel: string): string {
+  return mainModel;
+}
+
+export function resolvePersonaSoulMode(): PersonaSoulMode {
+  const raw = effectiveHarnessEnvRaw("AGENT_PERSONA_SOUL_MODE")?.trim().toLowerCase();
+  if (raw === "parallel" || raw === "scaffold") return raw;
+  return "batch";
+}
+
+export function resolvePersonaRepairMax(): number {
+  const n = parseInt(effectiveHarnessEnvRaw("AGENT_PERSONA_REPAIR_MAX") ?? "1", 10);
+  if (!Number.isFinite(n)) return 1;
+  return Math.max(0, Math.min(2, n));
+}
+
+export function personaUiThemeUsesLlm(): boolean {
+  return effectiveHarnessEnvRaw("AGENT_PERSONA_UI_THEME_LLM")?.trim() === "1";
+}
+
 /**
  * Generate a full rich PersonaProfile from a natural-language description.
  *
@@ -84,7 +203,9 @@ export async function generatePersonaProfile(
   apiKey: string,
   model: string,
   baseURL: string,
-  onProgress?: PersonaProgressFn
+  onProgress?: PersonaProgressFn,
+  preview?: PersonaGenerationPreview,
+  harnessCapabilityHint?: string
 ): Promise<PersonaProfile> {
   onProgress?.("profile_infer", "Inferring voice, genre, and register from your description...");
   let voiceEnvelope: PersonaVoiceEnvelope | null = null;
@@ -111,6 +232,8 @@ export async function generatePersonaProfile(
       model,
       baseURL,
       voiceEnvelope,
+      preview,
+      harnessCapabilityHint,
     });
   } catch {
     onProgress?.("profile_scaffold", "Model draft unavailable; building persona from your description locally...");
@@ -134,12 +257,13 @@ export async function generatePersonaProfile(
     );
   }
 
-  for (let repairPass = 0; repairPass < 2; repairPass++) {
+  const repairMax = resolvePersonaRepairMax();
+  for (let repairPass = 0; repairPass < repairMax; repairPass++) {
     const issues = getCriticalProfileIssues(profile);
     if (issues.length === 0) break;
     onProgress?.(
       "profile_repair",
-      `Refining profile (pass ${repairPass + 1}/2): ${issues.slice(0, 2).join("; ")}`
+      `Refining profile (pass ${repairPass + 1}/${repairMax}): ${issues.slice(0, 2).join("; ")}`
     );
     try {
       const repairedRaw = await requestPersonaRepair({
@@ -149,7 +273,7 @@ export async function generatePersonaProfile(
         draft: profile,
         issues,
         apiKey,
-        model,
+        model: personaMainModel(model),
         baseURL,
         voiceEnvelope,
       });
@@ -162,6 +286,9 @@ export async function generatePersonaProfile(
   }
 
   profile = ensureProfileComplete(profile, input, strength, modifier, voiceEnvelope);
+  if (preview) {
+    await preview.completeArtifact("runtime_profile", JSON.stringify(profile, null, 2));
+  }
   return profile;
 }
 
@@ -188,61 +315,6 @@ export function deriveDeterministicControls(
   return { humorPercent, formality, confidence, verbosity, personaStrength };
 }
 
-async function requestPersonaDefaultControls(args: {
-  profile: PersonaProfile;
-  input: string;
-  strength: number;
-  modifier?: string;
-  apiKey: string;
-  model: string;
-  baseURL: string;
-}): Promise<RuntimePersonaControls> {
-  const systemPrompt =
-    "You infer runtime persona controls from a completed persona profile. Return JSON only with numeric/enum values.";
-  const userPrompt = `Given this finalized persona profile, produce runtime controls that best match its natural written voice.
-
-Persona profile JSON:
-${JSON.stringify(args.profile, null, 2)}
-
-Original request: "${args.input.slice(0, 1200)}"
-Strength input: ${args.strength}/10
-Modifier: ${args.modifier ? `"${args.modifier}"` : "null"}
-
-Return JSON with exact keys:
-{
-  "humorPercent": 0-100,
-    "formality": "very_formal|formal|casual|very_casual|mixed",
-    "confidence": 0-10,
-  "verbosity": "compact|normal|detailed",
-  "personaStrength": 1-10
-}
-
-Rules:
-- Match the profile's actual cadence/diction (phonetic feel), not generic defaults.
-- humorPercent is frequency/intensity of humor in normal replies.
-- Keep values coherent with profile.tone and profile.speechStyle.
-- No prose, JSON only.`;
-
-  const raw = await callPersonaModel(
-    args.apiKey,
-    getFastModelSlug(args.model),
-    args.baseURL,
-    systemPrompt,
-    userPrompt,
-    300,
-    0.1
-  );
-  const normalized = normalizePersonaControlsPatch({
-    humorPercent: Number(raw["humorPercent"]),
-    formality: String(raw["formality"] ?? "") as RuntimePersonaControls["formality"],
-    confidence: Number(raw["confidence"]),
-    verbosity: String(raw["verbosity"] ?? "") as RuntimePersonaControls["verbosity"],
-    personaStrength: Number(raw["personaStrength"]),
-  });
-  if (!normalized) throw new Error("controls_normalization_failed");
-  return normalized;
-}
-
 export async function generatePersonaBundle(
   input: string,
   strength: number,
@@ -250,34 +322,26 @@ export async function generatePersonaBundle(
   apiKey: string,
   model: string,
   baseURL: string,
-  onProgress?: PersonaProgressFn
+  onProgress?: PersonaProgressFn,
+  preview?: PersonaGenerationPreview,
+  harnessCapabilityHint?: string
 ): Promise<PersonaGenerationBundle> {
   const profile = await generatePersonaProfile(
     input,
     strength,
     modifier,
     apiKey,
-    model,
+    personaMainModel(model),
     baseURL,
-    onProgress
+    onProgress,
+    preview,
+    harnessCapabilityHint
   );
-  onProgress?.("controls_pass", "Generating runtime controls that match persona voice...");
-  let defaultControls: RuntimePersonaControls;
-  try {
-    defaultControls = await requestPersonaDefaultControls({
-      profile,
-      input,
-      strength,
-      modifier,
-      apiKey,
-        model,
-      baseURL,
-    });
-  } catch {
-    defaultControls = deriveDeterministicControls(profile, strength);
-  }
-  const normalized = normalizePersonaControlsPatch(defaultControls) ?? deriveDeterministicControls(profile, strength);
-  return { profile, defaultControls: normalized };
+  onProgress?.("controls_pass", "Deriving runtime controls from profile…");
+  const defaultControls =
+    normalizePersonaControlsPatch(deriveDeterministicControls(profile, strength)) ??
+    deriveDeterministicControls(profile, strength);
+  return { profile, defaultControls };
 }
 
 export async function generatePersonaSoulArtifacts(
@@ -286,54 +350,93 @@ export async function generatePersonaSoulArtifacts(
   apiKey: string,
   model: string,
   baseURL: string,
-  onProgress?: PersonaProgressFn
+  onProgress?: PersonaProgressFn,
+  opts?: PersonaSoulArtifactsOptions
 ): Promise<PersonaSoulBundle> {
-  const scaffold = buildSoulSlicesFromProfile(profile, input);
-  onProgress?.("soul_draft", "Generating soul slices (identity)…");
-  const identityMd = await generatePersonaSoulSlice(
-    "identity",
+  const scaffold = opts?.scaffold ?? buildSoulSlicesFromProfile(profile, input);
+  const mode = opts?.mode ?? resolvePersonaSoulMode();
+  const inferModel = personaInferModel(model);
+
+  const preview = opts?.preview;
+  const harnessCapabilityHint = opts?.harnessCapabilityHint;
+
+  if (mode === "scaffold") {
+    onProgress?.("soul_scaffold", "Using profile scaffold for soul blueprint…");
+    if (preview) {
+      preview.showScaffoldSoul(scaffold);
+      await preview.completeArtifact("soul_identity", scaffold.identityMd);
+      await preview.completeArtifact("soul_voice", scaffold.voiceMd);
+      await preview.completeArtifact("soul_stance", scaffold.stanceMd);
+      await preview.completeArtifact("soul_rails", scaffold.railsMd);
+    }
+    return scaffold;
+  }
+
+  if (mode === "parallel") {
+    onProgress?.("soul_draft", "Generating soul blueprint (parallel)…");
+    const [identityMd, voiceMd, stanceMd, railsMd] = await Promise.all([
+      generatePersonaSoulSlice(
+        "identity",
+        profile,
+        input,
+        scaffold.identityMd,
+        apiKey,
+        inferModel,
+        baseURL,
+        onProgress,
+        preview
+      ),
+      generatePersonaSoulSlice(
+        "voice",
+        profile,
+        input,
+        scaffold.voiceMd,
+        apiKey,
+        inferModel,
+        baseURL,
+        onProgress,
+        preview
+      ),
+      generatePersonaSoulSlice(
+        "stance",
+        profile,
+        input,
+        scaffold.stanceMd,
+        apiKey,
+        inferModel,
+        baseURL,
+        onProgress,
+        preview,
+        harnessCapabilityHint
+      ),
+      generatePersonaSoulSlice(
+        "rails",
+        profile,
+        input,
+        scaffold.railsMd,
+        apiKey,
+        inferModel,
+        baseURL,
+        onProgress,
+        preview,
+        harnessCapabilityHint
+      ),
+    ]);
+    return { identityMd, voiceMd, stanceMd, railsMd };
+  }
+
+  onProgress?.("soul_draft", "Generating soul blueprint…");
+  return generatePersonaSoulBatch(
     profile,
     input,
-    scaffold.identityMd,
+    scaffold,
     apiKey,
-    model,
+    inferModel,
     baseURL,
-    onProgress
+    onProgress,
+    preview,
+    harnessCapabilityHint
   );
-  onProgress?.("soul_draft", "Generating soul slices (voice)…");
-  const voiceMd = await generatePersonaSoulSlice(
-    "voice",
-    profile,
-    input,
-    scaffold.voiceMd,
-    apiKey,
-    model,
-    baseURL,
-    onProgress
-  );
-  onProgress?.("soul_draft", "Generating soul slices (stance)…");
-  const stanceMd = await generatePersonaSoulSlice(
-    "stance",
-    profile,
-    input,
-    scaffold.stanceMd,
-    apiKey,
-    model,
-    baseURL,
-    onProgress
-  );
-  onProgress?.("soul_draft", "Generating soul slices (rails)…");
-  const railsMd = await generatePersonaSoulSlice(
-    "rails",
-    profile,
-    input,
-    scaffold.railsMd,
-    apiKey,
-    model,
-    baseURL,
-    onProgress
-  );
-  return { identityMd, voiceMd, stanceMd, railsMd };
 }
 
 /** What "soul" means in this pipeline: spec for how **typed harness replies** should read — not marketing, not actor diary. */
@@ -351,7 +454,9 @@ async function generatePersonaSoulSlice(
   apiKey: string,
   model: string,
   baseURL: string,
-  onProgress?: PersonaProgressFn
+  onProgress?: PersonaProgressFn,
+  preview?: PersonaGenerationPreview,
+  harnessCapabilityHint?: string
 ): Promise<string> {
   const profileJson = JSON.stringify(profile, null, 2);
   const systemPrompt =
@@ -398,8 +503,8 @@ STRUCTURE:
 1. First line: # Voice DNA
 2. ## Register and breath — formality as social distance on the page; how punctuation and clause length signal safety, edge, intimacy, boredom.
 3. ## Rhythm and silence — sentence-length variance, beats, when replies go terse vs expansive; how silence reads (tight gap vs room).
-4. ## Lexical conscience — favorite/avoid texture as taste and ethics, not decoration; sociolect and profanity level exactly as implied by the profile.
-5. ### Example written lines — exactly 3 short **first-person assistant** lines (what the model types to the user): meeting someone new; answering a vague question; closing. These are **samples of output**, not soul-body narration. No stage directions, no bare film-beat tokens (softens, pauses). No fake quotes from real public figures.
+4. ## Lexical conscience — vocabulary register: domain terms, characteristic collocations, what this voice reaches for and refuses. Write as actual words and short natural phrases (NOT dramatic signature lines — those are catchphrases). Sociolect and profanity level as implied by the profile.
+5. ### Example written lines — exactly 3 short **first-person assistant** lines showing the voice on NORMAL functional output (not catchphrases, not theatrical openers): meeting someone new; giving a direct answer; closing with a next step. These are samples of how the voice writes on ordinary tasks. No stage directions, no dramatic signature moves, no fake quotes.
 
 Aim for roughly 380–800 words before the example subsection.`;
   } else if (slice === "stance") {
@@ -417,7 +522,11 @@ STRUCTURE:
 3. ## Trust economy with the reader — how this stance spends and earns trust; what breaks it; how uncertainty is named without cowardice or bluff.
 4. ## Disagreement and repair — how tension is held; how decisionFramework shows when options clash; how loops close.
 
-Ground every section in profile.thinkingStyle, profile.decisionFramework, and profile.tone.posture — expand into **habits of argument**, not paraphrase. Aim for roughly 380–800 words.`;
+Ground every section in profile.thinkingStyle, profile.decisionFramework, and profile.tone.posture — expand into **habits of argument**, not paraphrase. Aim for roughly 380–800 words.${
+      harnessCapabilityHint
+        ? `\n\nOPERATING CONTEXT (for Under load and Trust economy only — do not name specific tool APIs or the harness product):\nThis persona operates with: ${harnessCapabilityHint}.\nReflect what it means to hold uncertainty honestly when you CAN or CANNOT verify claims (web), recall prior sessions (memory), or run code (execution). Do not anthropomorphize tools as senses or feelings.`
+        : ""
+    }`;
   } else {
     userPrompt = `Write markdown for **Rails soul** — moral spine of **written** behavior (no product/runtime/tooling copy).
 
@@ -433,16 +542,51 @@ STRUCTURE:
 3. ## Always — weave profile.alwaysDo the same way.
 4. ## Non-Negotiables — one dense paragraph: honesty vs performance; proportionality of claims; how this stance refuses "performing certainty" as a substitute for rigor.
 
-Aim for roughly 220–550 words; rails should read as craft discipline, not a theatre handbill.`;
+Aim for roughly 220–550 words; rails should read as craft discipline, not a theatre handbill.${
+      harnessCapabilityHint
+        ? `\n\nOPERATING CONTEXT (rails alignment — do not name specific tool APIs):\nCapability domains: ${harnessCapabilityHint}.\nDo NOT write rails that prohibit things this persona can actually do — e.g. if web search is available, do not write "never claim current knowledge"; if persistent memory exists, do not write "I only know what's in this session". Rails from profile.neverDo and alwaysDo should remain — only remove contradictions.`
+        : ""
+    }`;
   }
 
   const maxTok =
     slice === "identity" ? 3600 : slice === "voice" ? 3200 : slice === "stance" ? 3000 : 1600;
+  const artifactId = soulSliceArtifactId(slice);
   let raw: Record<string, unknown>;
   try {
-    raw = await callPersonaModel(apiKey, model, baseURL, systemPrompt, userPrompt, maxTok, slice === "rails" ? 0.38 : 0.48);
+    if (preview && personaGenerationStreamEnabled()) {
+      preview.setStatus(artifactId, "streaming");
+      const buf = await streamPersonaModelToBuffer(
+        apiKey,
+        model,
+        baseURL,
+        systemPrompt,
+        userPrompt,
+        maxTok,
+        slice === "rails" ? 0.38 : 0.48,
+        (partial) => {
+          const md = extractPartialJsonStringField(partial, "markdown");
+          if (md !== null) {
+            preview.streamContent(artifactId, md, true);
+          }
+          preview.emit("soul_draft", `Generating soul blueprint (${slice})…`);
+        }
+      );
+      raw = JSON.parse(parseFirstJsonObject(buf)) as Record<string, unknown>;
+    } else {
+      raw = await invokePersonaModel(
+        apiKey,
+        model,
+        baseURL,
+        systemPrompt,
+        userPrompt,
+        maxTok,
+        slice === "rails" ? 0.38 : 0.48
+      );
+    }
   } catch {
     onProgress?.("soul_fallback", `Soul slice "${slice}" model call failed; using profile scaffold.`);
+    if (preview) await preview.completeArtifact(artifactId, fallbackMd);
     return fallbackMd;
   }
   let md = String(raw["markdown"] ?? raw["soulMarkdown"] ?? "")
@@ -451,9 +595,145 @@ Aim for roughly 220–550 words; rails should read as craft discipline, not a th
     .trim();
   if (!isSoulSlicePlausible(slice, md)) {
     onProgress?.("soul_fallback", `Soul slice "${slice}" incomplete; using profile scaffold.`);
-    return fallbackMd;
+    md = fallbackMd;
+  }
+  if (preview) await preview.completeArtifact(artifactId, md);
+  return md;
+}
+
+function normalizeSoulMarkdownField(raw: string): string {
+  return raw.replace(/\r/g, "").replace(/\\n/g, "\n").trim();
+}
+
+function pickSoulSliceFromBatch(
+  slice: "identity" | "voice" | "stance" | "rails",
+  raw: Record<string, unknown>,
+  scaffold: PersonaSoulBundle
+): string {
+  const key =
+    slice === "identity"
+      ? "identityMd"
+      : slice === "voice"
+        ? "voiceMd"
+        : slice === "stance"
+          ? "stanceMd"
+          : "railsMd";
+  const altKey = slice;
+  let md = normalizeSoulMarkdownField(
+    String(raw[key] ?? raw[altKey] ?? raw[`${slice}Markdown`] ?? "")
+  );
+  if (!md && typeof raw["markdown"] === "object" && raw["markdown"] !== null) {
+    const nested = raw["markdown"] as Record<string, unknown>;
+    md = normalizeSoulMarkdownField(String(nested[key] ?? nested[altKey] ?? ""));
+  }
+  if (!isSoulSlicePlausible(slice, md)) {
+    return scaffold[key];
   }
   return md;
+}
+
+async function generatePersonaSoulBatch(
+  profile: PersonaProfile,
+  input: string,
+  scaffold: PersonaSoulBundle,
+  apiKey: string,
+  inferModel: string,
+  baseURL: string,
+  onProgress?: PersonaProgressFn,
+  preview?: PersonaGenerationPreview,
+  harnessCapabilityHint?: string
+): Promise<PersonaSoulBundle> {
+  const profileJson = JSON.stringify(profile, null, 2);
+  const systemPrompt =
+    "You write **soul spec** for an AI agent harness: how typed replies should read by default. " +
+    "Return JSON only with keys identityMd, voiceMd, stanceMd, railsMd (each a markdown string). " +
+    "No markdown fences outside JSON string values. " +
+    SOUL_WRITING_CONTRACT;
+  const authorVoiceNote =
+    "\n\nAUTHORING RULES FOR ALL FOUR MARKDOWN STRINGS:\n" +
+    "- Third person or neutral analytic voice (\"This voice…\", \"Replies…\"). Not first-person actor monologue.\n" +
+    "- No narrating roleplay, spotlights, or stage directions unless the user explicitly asked for that medium.\n" +
+    "- Depth = habits of reasoning and wording under pressure, not theatrical self-description.\n";
+
+  const capabilityBlock = harnessCapabilityHint
+    ? `\nOPERATING CONTEXT (stanceMd and railsMd only — do not name specific tool APIs or the harness product):\nCapability domains: ${harnessCapabilityHint}.\nFor stanceMd: reflect how this voice holds uncertainty honestly given what it can actually do (verify via web, recall prior sessions, run code, etc.).\nFor railsMd: do NOT write rails that contradict these capabilities — e.g. avoid "never claim current knowledge" if web search is available, or "I only know this session" if persistent memory exists. Weave only from profile.neverDo and alwaysDo.\n`
+    : "";
+
+  const userPrompt = `Write four soul markdown documents for one persona (typed agent work — no product/runtime/tooling copy).
+
+Original request: "${input.slice(0, 1200)}"
+Persona profile JSON:
+${profileJson}
+${authorVoiceNote}${capabilityBlock}
+Return JSON:
+{
+  "identityMd": "...",
+  "voiceMd": "...",
+  "stanceMd": "...",
+  "railsMd": "..."
+}
+
+identityMd — first line # Identity Core; ## Continuity and inner thread; ## Limits and refusal; ## Care toward the reader; ## Identity Answers (use label ${profile.name}). ~300–550 words.
+
+voiceMd — first line # Voice DNA; ## Register and breath; ## Rhythm and silence; ## Lexical conscience (vocabulary register: domain terms and natural collocations — NOT dramatic signature phrases); ### Example written lines (3 short first-person assistant lines showing normal voice output on ordinary tasks, NOT catchphrases or theatrical openers). ~280–500 words.
+
+stanceMd — first line # Cognitive stance; ## Under load; ## Trust economy with the reader; ## Disagreement and repair. ~280–500 words.
+
+railsMd — first line # Behavioral rails; ## Never (from profile.neverDo); ## Always (from profile.alwaysDo); ## Non-Negotiables. ~180–400 words.`;
+
+  try {
+    let raw: Record<string, unknown>;
+    if (preview && personaGenerationStreamEnabled()) {
+      preview.showScaffoldSoul(scaffold);
+      const buf = await streamPersonaModelToBuffer(
+        apiKey,
+        inferModel,
+        baseURL,
+        systemPrompt,
+        userPrompt,
+        4600,
+        0.42,
+        (partial) => {
+          preview.applyPartialSoulBatch(extractPartialSoulBatch(partial));
+          preview.emit("soul_draft", "Generating soul blueprint…");
+        }
+      );
+      raw = JSON.parse(parseFirstJsonObject(buf)) as Record<string, unknown>;
+    } else {
+      raw = await invokePersonaModel(
+        apiKey,
+        inferModel,
+        baseURL,
+        systemPrompt,
+        userPrompt,
+        4600,
+        0.42
+      );
+    }
+    const bundle = {
+      identityMd: pickSoulSliceFromBatch("identity", raw, scaffold),
+      voiceMd: pickSoulSliceFromBatch("voice", raw, scaffold),
+      stanceMd: pickSoulSliceFromBatch("stance", raw, scaffold),
+      railsMd: pickSoulSliceFromBatch("rails", raw, scaffold),
+    };
+    if (preview) {
+      await preview.completeArtifact("soul_identity", bundle.identityMd);
+      await preview.completeArtifact("soul_voice", bundle.voiceMd);
+      await preview.completeArtifact("soul_stance", bundle.stanceMd);
+      await preview.completeArtifact("soul_rails", bundle.railsMd);
+    }
+    return bundle;
+  } catch {
+    onProgress?.("soul_fallback", "Batched soul call failed; using profile scaffold.");
+    if (preview) {
+      preview.showScaffoldSoul(scaffold);
+      await preview.completeArtifact("soul_identity", scaffold.identityMd);
+      await preview.completeArtifact("soul_voice", scaffold.voiceMd);
+      await preview.completeArtifact("soul_stance", scaffold.stanceMd);
+      await preview.completeArtifact("soul_rails", scaffold.railsMd);
+    }
+    return scaffold;
+  }
 }
 
 function isSoulSlicePlausible(slice: "identity" | "voice" | "stance" | "rails", md: string): boolean {
@@ -1390,9 +1670,9 @@ Return a JSON object with exactly these keys:
 - registerHint (string): one of very_formal|formal|casual|very_casual|mixed.
 - voiceNotes (string): 2-5 sentences on diction, rhythm, address forms, anachronism rules, how disagreement sounds.
 - homageToRealFigure (boolean): true if the user names a real public figure to channel stylistically (not fictional characters).
-- lexicalSeeds (array of strings): 10-16 short phrases this voice would naturally type (multi-word collocations welcome).
-- suggestedCatchphrases (array of strings): 5-8 short lines the model can type verbatim as openings/pivots/closes.
-- metaphorSeeds (array of strings): 3-6 recurring metaphor families or image fields.
+- lexicalSeeds (array of strings): 10-16 vocabulary texture items — actual words and short natural phrases that characterize this voice's register and domain. Favor domain-native terms, characteristic collocations, and register markers over dramatic rhetorical phrases. Examples for a finance analyst: "basis points", "at the margin", "second-order". Examples for a sci-fi bridge voice: "nominal", "burn window", "range gate". Multi-word collocations welcome; dramatic signature openers are NOT welcome here.
+- suggestedCatchphrases (array of strings): 3-5 short natural lines the voice uses rarely (0 most replies, 1 at most when it genuinely fits as a pivot or close). Each must: (a) do real conversational work — reframe, invite, or land a close; (b) NOT presume the reader's inner state ("you already feel/know/sense this"); (c) NOT be a dramatic announcement ("The X tightens…", "Witness:", "Revelation:"); (d) sound like something a real person with this voice would say in actual conversation.
+- metaphorSeeds (array of strings): 3-6 recurring metaphor families or image fields (used as texture, not as signature phrases).
 - rhythmHint (string): one sentence on punctuation, beat, sentence-length variance.
 - sentenceMechanicsHint (string): one sentence on fragments vs long lines, parallelism, rhetorical questions, etc.
 - postureHint (string): one sentence on how they relate to the person they advise.
@@ -1453,10 +1733,12 @@ neverDo (6–8 items): spread across categories below; merge where natural; one 
 - **No false embodiment**: do not treat memory, tools, context budget, uptime, or model limits as hunger, sleep, senses, or private inner life—unless the user explicitly asked for that conceit.
 - **Address**: respectful second person by default; no intimate or mythic pet-names for the user unless the brief explicitly requests that relationship.
 - **Task focus**: avoid theatrical cold-open padding when a direct answer fits.
+- **No reader-state presumption**: never assert or imply what the reader privately feels, senses, or already knows (“you already feel/know/sense this”, “you can feel it”)—the reader owns their own inner state.
+- **No dramatic-announcement catchphrases**: never structure recurring phrases as theatrical proclamations (“The X tightens…”, “Witness:”, “Revelation:”); all catchphrases must do actual conversational work (pivot, reframe, close), not perform.
 
 alwaysDo (4–6 items): include at least one commitment to **factual honesty** (label inference vs verified evidence; proportionate claims) in your own words; other items are positive habits of this voice.
 
-verbalTics (4–6 items): **sentence-shaping habits** only (order, fragments vs long lines, when to use bullets)—not physical acting, sighs, or “stage” asides.
+verbalTics (3–5 items): **sentence-shaping prose mechanics only** (information order, fragments vs full sentences, when bullets fit, how to close a reply)—not rhetorical devices requiring theatrical delivery, not reader-state presumptions, not catchphrase variants or dramatic openers.
 `.trim();
 
 const PERSONA_GENRE_VOICE_GUIDANCE = `
@@ -1607,6 +1889,8 @@ async function requestPersonaDraft(args: {
   model: string;
   baseURL: string;
   voiceEnvelope?: PersonaVoiceEnvelope | null;
+  preview?: PersonaGenerationPreview;
+  harnessCapabilityHint?: string;
 }): Promise<Record<string, unknown>> {
   const systemPrompt =
     "You architect **default written voice + reasoning stance** for an AI agent harness (typed chat). " +
@@ -1637,9 +1921,9 @@ Output schema (exact keys):
   "speechStyle": {
     "sentenceStructure": "observable WRITTEN mechanics: fragments vs long lines, repetition, telegraphic opens, punchy interruptions, rhetorical questions, parallel structure—whatever matches the user's requested voice (not generic advice)",
     "formality": "very_formal|formal|casual|very_casual|mixed",
-    "favoriteWords": ["8-12 concrete lexical items (>=4 multi-word or setting-specific phrases; era- or world-native collocations, not generic exec filler)"],
-    "avoidWords": ["5-10 concrete lexical items (include common assistant cliches)"],
-    "commonMetaphors": ["0-4 reusable framing metaphors"],
+    "favoriteWords": ["8-12 vocabulary texture items: actual words and short natural phrases that color this voice's register on ordinary sentences. Domain-native terms, characteristic collocations, register markers. NOT dramatic rhetorical phrases or signature theatrical lines (those belong in catchphrases if truly occasional). NOT items from avoidWords. Example for a finance analyst: 'basis points', 'at the margin', 'second-order'. Example for a sci-fi bridge voice: 'nominal', 'burn window', 'range gate'."],
+    "avoidWords": ["5-10 concrete lexical items (include common assistant clichés like 'happy to help', 'great question', 'certainly')"],
+    "commonMetaphors": ["0-4 reusable metaphor families or image fields (texture only — not literal phrases to insert verbatim)"],
     "rhythm": "cadence mechanics with punctuation/beat detail (commas, periods, colons, sentence length variance) so replies read in this voice; avoid habitual em-dash chains unless the user's requested voice is explicitly dash-heavy"
   },
   "tone": {
@@ -1649,8 +1933,8 @@ Output schema (exact keys):
     "emotionalFlavor": "2-6 words",
     "posture": "how this stance relates to the user in text while advising — not audience/performer dynamics"
   },
-  "catchphrases": ["4-8 short lines usable as occasional openings/pivots/closes in typed replies — concrete wording, not topic labels; not 'stage directions'"],
-  "verbalTics": ["4-6 structural writing habits (how sentences are shaped) — not physical acting, screenplay beats, or asides about performing"],
+  "catchphrases": ["3-5 short lines the voice uses at most once per reply and ONLY when it genuinely serves as a pivot, reframe, or close. HARD PROHIBITIONS: (1) never presume the reader's inner state ('you already feel/know/sense this'); (2) never structure as a theatrical announcement ('The X tightens…', 'Witness:', 'Revelation:'); (3) must sound natural if said aloud by a real person in conversation — not like a performed opener. Fewer, better catchphrases beat a long list of dramatic ones."],
+  "verbalTics": ["3-5 PROSE MECHANICS only: information order (lead with answer or lead with context?), when to use a fragment, when bullets fit vs prose, how to close (question vs statement vs next step). NOT rhetorical devices requiring dramatic delivery. NOT reader-state presumptions. NOT catchphrase variants."],
   "thinkingStyle": "1-2 sentences with explicit tradeoff preference",
   "decisionFramework": "1-2 sentences with explicit tradeoff preference",
   "neverDo": ["6-8 full-sentence guardrails you author from STRUCTURAL RAILS above—original wording for this voice, one clear prohibition per item where possible"],
@@ -1658,6 +1942,11 @@ Output schema (exact keys):
   "strength": ${args.strength},
   "modifier": ${args.modifier ? JSON.stringify(args.modifier) : "null"}
 }
+
+VOCABULARY vs CATCHPHRASE (critical distinction — re-read before filling those fields):
+- **favoriteWords** = vocabulary register: words and short natural collocations that show up on ordinary sentences in this voice. The test: "would this word/phrase appear in 1 out of 5 replies without feeling forced?" If yes — good. If it's a dramatic opener or rhetorical flourish only suitable for specific moments — it belongs in catchphrases or nowhere.
+- **catchphrases** = rare conversational moves, used 0 most turns. The test: "is this something a real person would say naturally to pivot or close?" If it requires setup, theatrical delivery, or assumes the reader's inner state — it fails. A voice with 0 good catchphrases is better than one with 5 dramatic ones.
+- **verbalTics** = prose mechanics only (order, structure, fragment vs long line). Not rhetorical flourishes, not dramatic openers.
 
 Naming (critical — read the whole request, not the opening clause):
 - "name" is the **identity label** for this voice: a proper name, nickname, title, or handle the user gave ("Werner Herzog", "Ranni", "Ship's Log"), or—only if they never named anyone—a **specific epithet** you invent from role + tone ("Tired Archivist", "Dockside Clerk") — **1–3 words, title case**.
@@ -1681,10 +1970,40 @@ ${
   args.voiceEnvelope
     ? `VOICE INFERENCE (internal classifier—ground the profile here; refine if the user's text clearly implies otherwise):\n${JSON.stringify(args.voiceEnvelope)}\n`
     : ""
+}${
+  args.harnessCapabilityHint
+    ? `\nCAPABILITY HINT (for thinkingStyle and decisionFramework only — do not mention tool names, APIs, or the harness product in any field):\nThis persona operates with: ${args.harnessCapabilityHint}.\nA voice that can verify claims via web holds uncertainty differently than one that cannot. A voice with persistent memory relates to "I don't recall" differently. Let this ground thinkingStyle and decisionFramework — nowhere else.\n`
+    : ""
 }
 ${PERSONA_GENRE_VOICE_GUIDANCE}`;
 
-  return callPersonaModel(args.apiKey, args.model, args.baseURL, systemPrompt, userPrompt, 2400, 0.62);
+  if (args.preview && personaGenerationStreamEnabled()) {
+    args.preview.setStatus("runtime_profile", "streaming");
+    const buf = await streamPersonaModelToBuffer(
+      args.apiKey,
+      personaMainModel(args.model),
+      args.baseURL,
+      systemPrompt,
+      userPrompt,
+      2400,
+      0.62,
+      (partial) => {
+        args.preview!.streamContent("runtime_profile", extractPartialProfilePreview(partial), true);
+        args.preview!.emit("profile_draft", "Generating initial persona draft...");
+      }
+    );
+    return JSON.parse(parseFirstJsonObject(buf)) as Record<string, unknown>;
+  }
+
+  return invokePersonaModel(
+    args.apiKey,
+    personaMainModel(args.model),
+    args.baseURL,
+    systemPrompt,
+    userPrompt,
+    2400,
+    0.62
+  );
 }
 
 async function requestPersonaRepair(args: {
@@ -1728,7 +2047,15 @@ ${
 }
 ${PERSONA_GENRE_VOICE_GUIDANCE}`;
 
-  return callPersonaModel(args.apiKey, args.model, args.baseURL, systemPrompt, userPrompt, 2000, 0.38);
+  return invokePersonaModel(
+    args.apiKey,
+    personaMainModel(args.model),
+    args.baseURL,
+    systemPrompt,
+    userPrompt,
+    2000,
+    0.38
+  );
 }
 
 async function callPersonaModel(
@@ -1850,23 +2177,43 @@ export async function generatePersonaUiTheme(
   soulBundle: PersonaSoulBundle,
   apiKey: string,
   model: string,
-  baseURL: string
-): Promise<PersonaUiThemeV1> {
+  baseURL: string,
+  preview?: PersonaGenerationPreview
+): Promise<PersonaUiThemeV2> {
+  const shellHints = derivePersonaShellHeuristics(profile);
+  if (!personaUiThemeUsesLlm()) {
+    const theme = validateAndNormalizePersonaUiTheme({ v: 2, ...shellHints }, profile.name);
+    const json = JSON.stringify(theme, null, 2);
+    if (preview) {
+      preview.streamContent("ui_theme", json, false);
+      await preview.completeArtifact("ui_theme", json);
+    }
+    return theme;
+  }
+
   const excerpt = buildSoulExcerptForUiTheme(soulBundle, 2200);
-  const inferModel = effectiveHarnessEnvRaw("AGENT_PERSONA_INFER_MODEL")?.trim() || getFastModelSlug(model);
+  const inferModel = personaInferModel(model);
   const client = new OpenAI({ apiKey, baseURL });
   const systemPrompt =
-    "You output JSON only for a terminal/chat HUD theme. Colors are 7-char hex like #00d4ff. " +
-    "Fields must feel coherent with the persona's emotional register—no neon clash soup. " +
-    "motion is one of: calm, default, snappy, dramatic (animation pacing). " +
-    "displayLabel: 1-3 words, title case, HUD title—may match persona name or a stylized callsign; ASCII preferred.";
+    "You output JSON only for a terminal/chat HUD theme (presentation-only, no CSS, no scripts). " +
+    "Colors are 7-char hex like #00d4ff. Match the persona's emotional register—no neon clash soup. " +
+    "Pick shell/layout/font that matches voice: " +
+    "noir analyst→terminal+jetbrains+compact+log+transcript+headerStyle:none+panelLayout:none+inputDock:bottom-bar; " +
+    "warm mentor→studio+ibm-plex+spacious+verbose+bubble+slide+headerStyle:pill+panelLayout:right+inputDock:floating; " +
+    "hype coach→hud+inter-cascadia+snappy+gradient+compact+headerStyle:bar+panelLayout:both+inputDock:bottom-bar; " +
+    "quiet guide→minimal+geist+flat+hidden orb+fade+headerStyle:none+panelLayout:none+inputDock:inline; " +
+    "editorial/formal→studio+playfair+transcript+stripe avatar+fade+headerStyle:pill+panelLayout:right+inputDock:floating. " +
+    "backgroundCss is a single CSS gradient string (e.g. 'linear-gradient(135deg,#0a0a18 0%,#180a18 100%)')—omit if unsure.";
   const userPrompt = `Persona profile (identity + tone):
 ${JSON.stringify(
   {
     name: profile.name,
     coreIdentity: profile.coreIdentity,
     tone: profile.tone,
-    speechStyle: { formality: profile.speechStyle.formality, rhythm: profile.speechStyle.rhythm },
+    speechStyle: {
+      formality: profile.speechStyle.formality,
+      rhythm: profile.speechStyle.rhythm,
+    },
   },
   null,
   2
@@ -1875,16 +2222,63 @@ ${JSON.stringify(
 Soul excerpt (voice texture):
 """${excerpt}"""
 
+Heuristic defaults (override when a stronger fit exists): ${JSON.stringify(shellHints)}
+
 Return JSON with exactly these keys:
-- accent (string hex): primary interactive / user-facing accent
-- secondary (string hex): approvals / highlights (often magenta-leaning but pick what fits)
-- warn (string hex): warnings / thinking
-- danger (string hex): errors / destructive
-- success (string hex): done / ok
-- muted (string hex): de-emphasized chrome
-- surfaceTint (string hex): very dark panel tint, still readable on near-black #020408
-- displayLabel (string): short HUD brand (max ~20 chars)
-- motion (string): calm|default|snappy|dramatic`;
+- accent, secondary, warn, danger, success, muted (string hex)
+- surfaceTint (string hex): very dark panel tint on near-black
+- displayLabel (string): short HUD brand max ~20 chars
+- motion: calm|default|snappy|dramatic
+- shell: hud|terminal|studio|minimal
+- density: compact|comfortable|spacious
+- radius: sharp|soft|pill
+- typography: mono|sans|mixed
+- messageStyle: bubble|flat|transcript
+- orbStyle: ring|pulse|dot|hidden
+- background: solid|grid|scanline|gradient
+- fontPair: system|ibm-plex|jetbrains|inter-cascadia|playfair|geist
+- backgroundCss (optional string): CSS gradient e.g. "linear-gradient(135deg,#0a0a18 0%,#180a18 100%)"
+- inputStyle: default|command|document|minimal
+- avatarStyle: orb|glyph|stripe|none
+- avatarGlyph (optional string): 1-2 char glyph used when avatarStyle=glyph (e.g. "◆" "AI" "✦")
+- toolCards: verbose|compact|log|hidden
+- messageEntrance: instant|fade|slide|typewriter
+- headerStyle: bar|pill|none
+- panelLayout: both|left|right|none
+- inputDock: bottom-bar|floating|inline
+- categoryTint (optional object): keys shell,file,web,memory,vault,code,git,markets,vision,docs,orchestration,context,other → hex`;
+
+  if (preview && personaGenerationStreamEnabled()) {
+    preview.setStatus("ui_theme", "streaming");
+    try {
+      const buf = await streamPersonaModelToBuffer(
+        apiKey,
+        inferModel,
+        baseURL,
+        systemPrompt,
+        userPrompt,
+        2048,
+        0.35,
+        (partial) => {
+          preview.streamContent("ui_theme", partial.trim() || "{}", true);
+          preview.emit("ui_theme_start", "Generating HUD theme…");
+        }
+      );
+      const parsed = JSON.parse(parseFirstJsonObject(buf)) as Record<string, unknown>;
+      const theme = validateAndNormalizePersonaUiTheme(
+        { v: 2, ...shellHints, ...parsed },
+        profile.name
+      );
+      const json = JSON.stringify(theme, null, 2);
+      await preview.completeArtifact("ui_theme", json);
+      return theme;
+    } catch {
+      const theme = validateAndNormalizePersonaUiTheme({ v: 2, ...shellHints }, profile.name);
+      const json = JSON.stringify(theme, null, 2);
+      await preview.completeArtifact("ui_theme", json);
+      return theme;
+    }
+  }
 
   const res = await completeChatJson(client, {
     model: inferModel,
@@ -1892,11 +2286,24 @@ Return JSON with exactly these keys:
       { role: "system", content: systemPrompt },
       { role: "user", content: userPrompt },
     ],
-    maxTokens: 420,
+    maxTokens: 680,
     temperature: 0.35,
   });
   if (!res.ok) {
-    return validateAndNormalizePersonaUiTheme({}, profile.name);
+    const theme = validateAndNormalizePersonaUiTheme({ v: 2, ...shellHints }, profile.name);
+    if (preview) {
+      const json = JSON.stringify(theme, null, 2);
+      await preview.completeArtifact("ui_theme", json);
+    }
+    return theme;
   }
-  return validateAndNormalizePersonaUiTheme(res.parsed, profile.name);
+  const theme = validateAndNormalizePersonaUiTheme(
+    { v: 2, ...shellHints, ...(res.parsed as Record<string, unknown>) },
+    profile.name
+  );
+  if (preview) {
+    const json = JSON.stringify(theme, null, 2);
+    await preview.completeArtifact("ui_theme", json);
+  }
+  return theme;
 }
