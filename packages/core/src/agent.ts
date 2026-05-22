@@ -28,12 +28,29 @@ import { appendFailureLog } from "./failure_log.js";
 import { completeChatJson, getFastModelSlug } from "./router.js";
 import { stableArgsJsonKey } from "./json_stable.js";
 import { buildHarnessRuleRecallMessage } from "./harness_rules.js";
+import {
+  batchHasUndispatchableFileWrites,
+  isFileWriteToolName,
+  LENGTH_RESUME_FILE_WRITE_MESSAGE,
+  shouldDispatchToolBatch,
+  shouldEagerDispatchWhenArgsComplete,
+  tryParseToolArgs,
+} from "./file_write_resume.js";
+import {
+  discardFileWriteStreamManifest,
+  setFileWriteStreamManifest,
+} from "./file_write_stream_manifest.js";
+import {
+  FileWriteStreamSink,
+  resolveWriteStreamSinkEnabled,
+  resolveWriteStreamSinkMinChars,
+} from "./file_write_stream_sink.js";
 import { bumpRecipePattern } from "./recipe_library.js";
 import { addCompressionGuideline, formatCompressionGuidelines } from "./compression_guidelines.js";
 import { bumpRuleHits, getRuleHitCounts } from "./rule_stats.js";
 import { writeYieldSnapshot } from "./session_event_log.js";
 import { SharedMemoryBus } from "./shared_memory_bus.js";
-import { resolveProviderConfig } from "./provider_config.js";
+import { resolveProviderConfig, buildProviderRouting } from "./provider_config.js";
 import { withProviderRequestSpacing } from "./provider_request_gate.js";
 import type { RuntimePreferences, RuntimePersonaProfile } from "./runtime_prefs.js";
 import {
@@ -78,18 +95,44 @@ import {
   createDefaultExecutionState,
   markExecutionContractStatus,
   updateDriftScore,
+  getCompensationLedger,
+  recordCompensation,
 } from "./execution_state.js";
+import { inferCompensationAction, formatCompensationReport } from "./compensation_ledger.js";
 import {
-  heuristicExploratoryCreative,
-  heuristicPersonaOrHistoryPrompt,
   shouldSkipHarnessSecondaryPassesForTurn,
+  applyTurnInferenceHeuristics,
   inferTurnInference,
   neutralTurnInferenceResult,
   resolveMemoryPolicy,
+  buildRoutingProfile,
   type IntentInferenceWorkspaceContext,
   type TurnInferenceResult,
+  type RoutingProfile,
 } from "./intent_inference.js";
+import {
+  buildOpenRouterReasoningParam,
+  buildReasoningBudgetInjection,
+  formatReasoningBudgetTraceLine,
+  resolveReasoningBudget,
+  tightenReasoningBudgetForUserMessage,
+  type ReasoningBudget,
+  type ReasoningIntentClass,
+} from "./reasoning_profile.js";
+import {
+  applySurfaceToBudget,
+  buildReasoningSurfaceInjection,
+  isImplementShipUserMessage,
+  resolveReasoningSurface,
+  type ReasoningSurface,
+} from "./reasoning_surface.js";
+import { scoreTurnAgainstIndex, detectContradictions, type RankableDoc } from "./memory_rank.js";
 import { EDIT_TOOL_NAMES, collectEditToolTargetPaths } from "./tool_changed_paths.js";
+import { ToolDag } from "./tool_dag.js";
+import { SessionToolIndex } from "./session_tool_index.js";
+import { maybeWriteTrajectory } from "./trajectory_writer.js";
+import { scoreTurnOutcome, recordEffortOutcome, getBestEffortForIntent } from "./outcome_scorer.js";
+import { WorldContextRefresher } from "./world_context_delta.js";
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -599,13 +642,6 @@ function hasPseudoToolMarkup(text: string): boolean {
   );
 }
 
-function isFreshnessSensitivePrompt(text: string): boolean {
-  const t = text.toLowerCase();
-  return /\b(latest|current|today|recent|update|version|release|release notes|changelog|what's new|state of)\b/.test(
-    t
-  );
-}
-
 /** Harness-injected user turn: model greets on new session (no tools). */
 function buildSessionGreetingUserPrompt(persona?: PersonaConfig): string {
   const name = persona?.name?.trim() || "Assistant";
@@ -635,49 +671,10 @@ function buildPersonaBootstrapUserPrompt(persona?: PersonaConfig): string {
   );
 }
 
-function hasFreshnessClaims(text: string): boolean {
-  const t = text.toLowerCase();
-  return /\b(latest|current|as of|today|recent|version|release|updated)\b/.test(t);
-}
-
-function hasLiveNowClaims(text: string): boolean {
-  const t = text.toLowerCase();
-  // Avoid bare "currently" (common in capability/session copy) — require phrasing that
-  // usually signals live external state, not static tool counts.
-  return (
-    /\b(right now|live now|at the moment|current conditions|happening now)\b/.test(t) ||
-    /\b(it'?s|it is|things are)\s+currently\b/.test(t) ||
-    /\bcurrently\s+(happening|unfolding|breaking|developing|raining|snowing|live)\b/.test(t)
-  );
-}
-
 function isVisionCentricPrompt(text: string): boolean {
   const t = text.toLowerCase();
   return /\b(image|screenshot|photo|diagram|figure|ocr|read text from|what's in this picture|what is in this image|analyze this image)\b/.test(
     t
-  );
-}
-
-function hasAsOfQualifier(text: string): boolean {
-  return /\bas of\b|\bas-of\b|\bupdated\b|\blast updated\b/i.test(text);
-}
-
-function hasRecentYearEvidence(text: string): boolean {
-  const currentYear = new Date().getFullYear();
-  const years = [...text.matchAll(/\b(20\d{2})\b/g)].map((m) => parseInt(m[1]!, 10));
-  return years.some((y) => y >= currentYear - 1);
-}
-
-function hasAuthoritativeSourceHint(text: string): boolean {
-  const t = text.toLowerCase();
-  return /(github\.com\/.+\/releases|docs\.|official|release notes|changelog|blog\.)/.test(t);
-}
-
-function hasWeatherFreshEvidence(text: string): boolean {
-  const t = text.toLowerCase();
-  return (
-    (t.includes('"is_live": true') || t.includes("weather_lookup")) &&
-    (t.includes('"observed_at"') || t.includes("as of"))
   );
 }
 
@@ -742,7 +739,7 @@ const ERROR_TAXONOMY: Array<{
     pattern: /STREAM_CHUNK_TIMEOUT|stream.*stalled|stream.*interrupted/i,
     category: "STREAM_INTERRUPTED",
     hint: "The model's output stream stalled mid-completion — provider stopped sending chunks.",
-    template: "For very large file generation (full applications, thousands of lines), break into sections using multiple write_file calls or use run_shell with a heredoc. Files up to ~1000 lines are fine in a single call; beyond that, generation time can exceed provider streaming limits.",
+    template: "For very large file generation, call write_file with mode=create once, then mode=append for each follow-up section. Or use run_shell with a heredoc. Most files are fine in a single write_file call.",
   },
   {
     pattern: /timeout|timed out|deadline exceeded/i,
@@ -796,7 +793,8 @@ function buildRecoveryHint(errorSummary: string): string {
 function buildAdaptiveHint(toolName: string, failCount: number): string {
   const toolHints: Record<string, string> = {
     read_file: "Use list_dir first to confirm the exact path exists before retrying.",
-    write_file: "Confirm the parent directory exists with list_dir; use absolute paths. For very large files (full applications, >2000 lines), write in sections using multiple write_file calls or use run_shell with a heredoc — provider streaming timeouts can cut off completions that take many minutes to generate.",
+    write_file: "mode=create errors if the file exists — use mode=overwrite to replace it, or edit_file for a targeted change. For very large files, write once with mode=create then mode=append for follow-up sections.",
+    edit_file: "Targeted change to an existing file: replacements [{search, replace}] or a diff hunk. grep_file first to find the exact text.",
     run_shell: "Check cwd and command syntax. For long processes, use run_background instead.",
     run_background: "Ensure the command is valid and cwd exists. Check startup_wait_ms.",
     web_fetch: "Verify the URL is correct with web_search first. Check for auth/redirects.",
@@ -840,6 +838,10 @@ const ORCHESTRATION_TOOL_NAMES = new Set([
   "decompose_goal",         // closes over harness (uses harness.config for LLM access)
   "branch_explore",         // closes over harness.forkChild + harness.orchestrator
   "verify_contract",        // closes over harness.getExecutionState()
+  "synthesis_run",          // closes over harness (LLM calls via config)
+  "query_tool_outputs",     // closes over harness._sessionToolIndex
+  "dispatch_graph",         // closes over harness._toolDag
+  "branch_evaluate",        // closes over harness.forkChild + harness.orchestrator
 ]);
 
 // ADAPTIVE_HINTS removed — unified into buildAdaptiveHint() with ERROR_TAXONOMY (#9)
@@ -865,6 +867,16 @@ export class AgentHarness {
   private readonly approvalTimeoutMs: number;
   private running = false;
   private abortSignal?: AbortSignal;
+  /** Per-turn abort controller — created at send() start, cleared on turn end. */
+  private currentTurnController?: AbortController;
+  /** Per-turn trace ID for correlating all events within one send() call. */
+  private currentTurnTraceId?: string;
+  /**
+   * Active hypotheses carried forward from the previous send() so multi-turn
+   * investigative chains survive across conversation turns.
+   * Only hypotheses with status "active" (or no status) are persisted.
+   */
+  private persistedHypotheses: import("./types.js").EpistemicState["hypotheses"] = [];
 
   /** Incremented each ReAct round; accessible for subtask result reporting. */
   roundCount = 0;
@@ -874,6 +886,12 @@ export class AgentHarness {
    * Set by external code (orchestration tools) to register child-scoped tools.
    */
   onChildCreated?: (child: AgentHarness) => void;
+
+  /**
+   * Optional per-turn cleanup when {@link emitTurnEnd} runs (e.g. Playwright browser sessions).
+   * Set by `packages/tools` during `registerAllTools` — must not import tools from core.
+   */
+  onTurnEndCleanup?: (taskId: string) => void | Promise<void>;
 
   // ── Per-turn tracking (reset at start of each send()) ──────────────────────
   private toolErrorCounts = new Map<string, number>();
@@ -905,6 +923,8 @@ export class AgentHarness {
   private aconGuidelineAnalyzedThisSend = false;
   /** Cached query rewrite for mid-turn recall (AGENT_QUERY_REWRITE). */
   private recallRewriteThisSend: RewriteQueryResult | null = null;
+  /** Per-turn routing profile cache — built once per send(), reused across rounds. */
+  private _turnRoutingProfile: RoutingProfile | null = null;
   /** Evidence excerpts for evidence-bounded critic (AGENT_CRITIC_EVIDENCE). */
   private evidenceLog: Array<{
     toolCallId: string;
@@ -921,6 +941,8 @@ export class AgentHarness {
   private ruleRecallInjectedThisSend = false;
   /** Extra stream continuation when model hits token limit (max 1 per send). */
   private lengthResumeRemaining = 0;
+  private writeIntegrityNudgeThisSend = false;
+  private fileWriteStreamSink: FileWriteStreamSink | null = null;
   /** Retry budget when model emits pseudo tool markup instead of actual tool calls. */
   private pseudoToolMarkupRetryRemaining = 1;
   /** Count of suppressed pseudo-markup stream chunks this send (for compact trace). */
@@ -931,8 +953,6 @@ export class AgentHarness {
   private finalizeCiteNudgeThisSend = false;
   /** One-shot nudge for research synthesis completeness before turn_end(ok). */
   private finalizeSynthesisNudgeThisSend = false;
-  /** One-shot nudge for recency-sensitive prompts before turn_end(ok). */
-  private finalizeRecencyNudgeThisSend = false;
   /** One-shot guard for deck-intent requiring pptx render path. */
   private finalizeDeckPipelineNudgeThisSend = false;
   /** One-shot guard for vision-centric asks without sidecar usage. */
@@ -962,6 +982,14 @@ export class AgentHarness {
   readonly sharedBus: SharedMemoryBus;
   /** Long-horizon runtime state persisted by task_checkpoint and heartbeat events. */
   private executionState: ExecutionState | null = null;
+  /** Intra-round tool dependency DAG (populated by dispatch_graph, cleared after each dispatch). */
+  private readonly _toolDag = new ToolDag();
+  /** In-session BM25 index of tool outputs (cleared at turn end). */
+  private readonly _sessionToolIndex = new SessionToolIndex();
+  /** Per-turn tool outcome log for trajectory/effort recording. */
+  private _toolOutcomesThisTurn: Array<{ name: string; ok: boolean }> = [];
+  /** Volatile world context refresher — root agent only, null on child agents. */
+  private _worldRefresher: WorldContextRefresher | null = null;
   private vaultMetrics = { reads: 0, searches: 0, writes: 0, skippedWrites: 0 };
   private runtimePreferences: RuntimePreferences | null = null;
 
@@ -972,6 +1000,10 @@ export class AgentHarness {
 
   private pendingRiskyPreferenceSummary: string | null = null;
   private turnInference: TurnInferenceResult | null = null;
+  private _turnReasoningBudget: ReasoningBudget | null = null;
+  private _turnReasoningSurface: ReasoningSurface = "external";
+  private toolCallsDispatchedThisSend = 0;
+  private streamingToolNamesByCallId = new Map<string, string>();
   private lastAutoDreamScanAt = 0;
   private autoDreamBackgroundRunning = false;
 
@@ -992,6 +1024,45 @@ export class AgentHarness {
 
   getExecutionState(): ExecutionState | null {
     return this.executionState;
+  }
+
+  /**
+   * @internal — used by packages/tools for cross-agent event emission (e.g. consensus_conflict).
+   */
+  getEmitter(): AgentEmitter {
+    return this.emitter;
+  }
+
+  /** Returns the intra-round tool DAG (used by dispatch_graph tool). */
+  getToolDag(): ToolDag {
+    return this._toolDag;
+  }
+
+  /** Returns the in-session tool output index (used by query_tool_outputs tool). */
+  getSessionToolIndex(): SessionToolIndex {
+    return this._sessionToolIndex;
+  }
+
+  /**
+   * Wait for a set of child task IDs to complete, returning SubtaskResult for each.
+   * Used by branch_evaluate to collect parallel evaluator results.
+   */
+  async waitForChildren(taskIds: string[], timeoutMs: number): Promise<SubtaskResult[]> {
+    const deadline = Date.now() + timeoutMs;
+    return Promise.all(
+      taskIds.map(async (id): Promise<SubtaskResult> => {
+        while (Date.now() < deadline) {
+          const record = this.orchestrator.get(id);
+          if (!record) return { taskId: id, ok: false, output: `Unknown task ID: ${id}`, rounds: 0 };
+          if (record.status === "done") return { taskId: id, ok: true, output: record.result ?? "(no output)", rounds: 0 };
+          if (record.status === "error") return { taskId: id, ok: false, output: record.result ?? "(error)", rounds: 0 };
+          if (record.status === "cancelled") return { taskId: id, ok: false, output: "Task was cancelled", rounds: 0 };
+          await sleep(200);
+        }
+        this.orchestrator.cancel(id);
+        return { taskId: id, ok: false, output: `Timed out after ${timeoutMs}ms`, rounds: 0 };
+      })
+    );
   }
 
   private getActiveContract(): ExecutionContract | null {
@@ -1022,7 +1093,8 @@ export class AgentHarness {
 
   private resolveSelfHealChangedFirstScope(): string[] {
     const files = [...this.changedFilesThisTurn];
-    if (files.length === 0) return ["."];
+    // Only lint after real edit-tool targets this turn. Omitting "." avoids a
+    // full-repo `tsc` on read-only rounds (can hang minutes on wrong workspace roots).
     return files.slice(0, 40);
   }
 
@@ -1650,7 +1722,8 @@ export class AgentHarness {
       safetyJudge,
       this.approvalTimeoutMs,
       resolveAutoApproveDestructive(config),
-      (toolName, args) => this.checkContractAndCommitments(toolName, args)
+      (toolName, args) => this.checkContractAndCommitments(toolName, args),
+      config.dryRunApprovals === true,
     );
 
     // Register self in orchestrator
@@ -1683,6 +1756,9 @@ export class AgentHarness {
     }
     this.sessionGreetingThisSend = sessionGreeting;
     this.personaBootstrapPromptThisSend = personaBootstrapPrompt;
+    this.currentTurnController = new AbortController();
+    this.currentTurnTraceId = crypto.randomUUID();
+    this.dispatcher.setTurnTraceId(this.currentTurnTraceId);
     this.running = true;
     this.clearPersonalityHeartbeatSchedule();
     this.lastTurnTerminationReason = null;
@@ -1717,12 +1793,46 @@ export class AgentHarness {
     this.lastCompressionTimestampThisSend = 0;
     this.aconGuidelineAnalyzedThisSend = false;
     this.recallRewriteThisSend = null;
+    this._turnRoutingProfile = null;
+    this._turnReasoningBudget = null;
+    this._turnReasoningSurface = "external";
+    this.toolCallsDispatchedThisSend = 0;
+    this.streamingToolNamesByCallId.clear();
     this.evidenceLog = [];
     this.turnEndEmittedThisSend = false;
     this.finalizeHintInjectedThisSend = false;
     this.ruleRecallInjectedThisSend = false;
-    this.lengthResumeRemaining =
-      parseInt(resolveHarnessEnvRaw("AGENT_LENGTH_RESUME_MAX", this.runtimePreferences) ?? "1", 10) > 0 ? 1 : 0;
+    this.writeIntegrityNudgeThisSend = false;
+    this.fileWriteStreamSink = new FileWriteStreamSink(
+      resolveWriteStreamSinkEnabled(this.runtimePreferences),
+      resolveWriteStreamSinkMinChars(this.runtimePreferences)
+    );
+    this.dispatcher.setFileWriteHooks({
+      prepareArgs: async (callId, name, args) => {
+        const sink = this.fileWriteStreamSink;
+        if (!sink || !isFileWriteToolName(name)) return args;
+        await sink.finalize(callId);
+        const taken = sink.takeForDispatch(callId);
+        if (!taken) return args;
+        setFileWriteStreamManifest({
+          callId,
+          stagingPath: taken.stagingPath,
+          targetPath: taken.targetPath,
+          mode: taken.mode,
+          bytesWritten: taken.bytesWritten,
+        });
+        return { ...args, __harness_call_id: callId };
+      },
+      onRejected: (callId, name) => {
+        if (isFileWriteToolName(name)) {
+          this.fileWriteStreamSink?.discard(callId);
+          discardFileWriteStreamManifest(callId);
+        }
+      },
+    });
+    const lengthResumeRaw =
+      parseInt(resolveHarnessEnvRaw("AGENT_LENGTH_RESUME_MAX", this.runtimePreferences) ?? "3", 10) || 0;
+    this.lengthResumeRemaining = Math.max(0, Math.min(8, lengthResumeRaw));
     this.pseudoToolMarkupRetryRemaining = Math.max(
       0,
       Math.min(3, parseInt(resolveHarnessEnvRaw("AGENT_PSEUDO_TOOL_RETRY_MAX", this.runtimePreferences) ?? "2", 10) || 2)
@@ -1731,12 +1841,14 @@ export class AgentHarness {
     this.pseudoMarkupSuppressionNotifiedThisSend = false;
     this.finalizeCiteNudgeThisSend = false;
     this.finalizeSynthesisNudgeThisSend = false;
-    this.finalizeRecencyNudgeThisSend = false;
     this.finalizeRetryBudgetThisSend = Math.max(
       0,
       Math.min(2, parseInt(resolveHarnessEnvRaw("AGENT_FINALIZE_RETRY_BUDGET", this.runtimePreferences) ?? "1", 10) || 1)
     );
     this.dispatcher.resetTurnCounters();
+    this._toolDag.clear();
+    this._sessionToolIndex.clear();
+    this._toolOutcomesThisTurn = [];
     this.vaultMetrics = { reads: 0, searches: 0, writes: 0, skippedWrites: 0 };
     this.webSearchQueriesThisTurn = [];
     this.failedSearchIntentCounts = new Map();
@@ -1794,34 +1906,62 @@ export class AgentHarness {
         );
       }
     } catch {
-      this.turnInference = neutralTurnInferenceResult("inference_exception_fallback", {
-        fallbackReason: "inferTurnInference threw",
-      });
+      this.turnInference = applyTurnInferenceHeuristics(
+        userMessage,
+        neutralTurnInferenceResult("inference_exception_fallback", {
+          fallbackReason: "inferTurnInference threw",
+        })
+      );
     }
-    if (!openingTurn && this.turnInference) {
-      const ex =
-        this.turnInference.exploratoryCreative === true || heuristicExploratoryCreative(userMessage);
-      if (ex) {
-        this.turnInference = { ...this.turnInference, exploratoryCreative: true };
-      }
-      if (heuristicPersonaOrHistoryPrompt(userMessage)) {
-        this.turnInference = {
-          ...this.turnInference,
-          personaIdentityPrompt: true,
-          skipHarnessSecondaryPasses: true,
-          intent:
-            this.turnInference.intent === "coding" || this.turnInference.intent === "execution"
-              ? this.turnInference.intent
-              : "introspection",
-        };
-      }
-    }
+    // Wire the resolved intent into the context so refreshProtocolDynamic can
+    // suppress irrelevant protocol sections (saves 300–800 tokens per turn).
+    this.context.setProtocolIntentHint(this.turnInference?.intent ?? "any");
     if (!openingTurn) {
       this.context.appendMessage({
         role: "system",
         content:
           "[NO-REINTRO] This is an ongoing session. Do not emit session-initialization/greeting text " +
           "(e.g., 'Session initialized', 'Context loaded', 'What are we working on?') unless the user explicitly asks for a re-introduction.",
+      });
+    }
+    if (
+      !openingTurn &&
+      this.turnInference &&
+      isImplementShipUserMessage(userMessage) &&
+      (this.turnInference.intent === "knowledge" || this.turnInference.intent === "research")
+    ) {
+      this.turnInference = {
+        ...this.turnInference,
+        intent: "coding",
+        reason: `${this.turnInference.reason ?? ""} intent_override=coding_implement_trap`.trim(),
+      };
+    }
+    if (this.turnInference && !openingTurn) {
+      this.turnInference = applyTurnInferenceHeuristics(userMessage, this.turnInference);
+    }
+    this._turnRoutingProfile = buildRoutingProfile(this.turnInference ?? null, this.config.model);
+    if (!openingTurn) {
+      const routingModel = this._turnRoutingProfile.modelSlug;
+      const surfaceRes = resolveReasoningSurface(routingModel);
+      this._turnReasoningSurface = surfaceRes.surface;
+      // Adaptive reasoning effort: seed the fallback prior with the statistically
+      // best effort recorded for this intent class (AGENT_EFFORT_LEARN).
+      const learnedEffort = this.turnInference
+        ? await getBestEffortForIntent(this.turnInference.intent as ReasoningIntentClass)
+        : null;
+      let budget = tightenReasoningBudgetForUserMessage(
+        resolveReasoningBudget(this.turnInference, learnedEffort),
+        userMessage
+      );
+      budget = applySurfaceToBudget(budget, this._turnReasoningSurface);
+      this._turnReasoningBudget = budget;
+      this.context.appendMessage({
+        role: "system",
+        content: buildReasoningSurfaceInjection(surfaceRes, routingModel),
+      });
+      this.context.appendMessage({
+        role: "system",
+        content: buildReasoningBudgetInjection(this._turnReasoningBudget, this._turnReasoningSurface),
       });
     }
     if (!openingTurn && this.turnInference?.exploratoryCreative) {
@@ -1832,6 +1972,21 @@ export class AgentHarness {
           "Answer the literal question with novel options, mechanisms, and tradeoffs (general knowledge + deliberate tool use only when it serves this ask). " +
           "Do not let standing project artifacts (roadmaps, cashflow models, quit-job timelines, vault briefs) hijack the response arc unless they explicitly tied this turn to that work. " +
           "At most one brief acknowledgment of relevant background — then pivot to fresh synthesis. Mid-turn memory auto-prime may be off or tightened; open stored plans only if the user asked or you state why they are necessary.",
+      });
+    }
+    if (
+      !openingTurn &&
+      this.turnInference &&
+      (this.turnInference.intent === "research" ||
+        (this.turnInference.freshnessSensitive === true && this.turnInference.toolFirstBias === true))
+    ) {
+      this.context.appendMessage({
+        role: "system",
+        content:
+          "[RESEARCH TURN] The user needs current, sourced information — not a reasoning essay. " +
+          "After at most a few sentences of native reasoning, call web_search and web_fetch (and recall_relevant / vault_search when prior briefings may exist). " +
+          "Run multiple queries and fetches in parallel when useful. Do not describe tools you plan to call inside reasoning; execute them. " +
+          "Cite sources and dates in the final answer.",
       });
     }
     if (
@@ -1860,6 +2015,9 @@ export class AgentHarness {
           spareRounds: b0.suggestedMaxExtraRounds,
         },
         harnessNotes: buildToolAwarenessSnapshot(this.registry, this.toolsUsedThisTurn),
+        // Restore active hypotheses from the previous turn so multi-turn
+        // investigative chains are visible to the model from round 1.
+        hypotheses: this.persistedHypotheses.length > 0 ? this.persistedHypotheses : [],
       });
     }
     this.executionState = createDefaultExecutionState(telemetryUserLabel);
@@ -1894,15 +2052,23 @@ export class AgentHarness {
       this.emitter.emit("send_start", {
         userMessage: telemetryUserLabel,
         agentDepth: this.agentDepth,
+        traceId: this.currentTurnTraceId,
       });
 
       // Inject world context on the first turn of a root agent (#world-context).
       // Child agents (depth > 0) skip this — they inherit context from their parent.
       if (!this.worldContextInjected && this.agentDepth === 0) {
         this.worldContextInjected = true;
+        // Initialize volatile world context refresher at session start.
+        this._worldRefresher = new WorldContextRefresher(resolveWorkspaceRoot());
+        void this._worldRefresher.init().catch(() => { /* non-fatal */ });
         const worldCtx = await buildWorldContextMessage({
           ...this.config.worldContext,
           firstUserMessage: telemetryUserLabel,
+          activeLlm: {
+            model: this.config.model,
+            baseURL: this.config.baseURL ?? "",
+          },
         });
         if (worldCtx) {
           this.context.append({ role: "user", content: worldCtx });
@@ -1959,11 +2125,21 @@ export class AgentHarness {
         });
       }
 
-      // Send timeout is opt-in. By default we do not hard-abort long generations.
-      // Set AGENT_SEND_TIMEOUT_MS to a positive value to enforce a wall-clock abort.
+      // Wall-clock abort for one full send(): positive AGENT_SEND_TIMEOUT_MS (typed default),
+      // or set to "0" to disable.
       const sendTimeoutRaw =
         parseInt(resolveHarnessEnvRaw("AGENT_SEND_TIMEOUT_MS", this.runtimePreferences) ?? "0", 10) || 0;
       const sendTimeoutMs = sendTimeoutRaw > 0 ? Math.max(30_000, sendTimeoutRaw) : 0;
+      // Mid-session world context delta refresh (root agent only, AGENT_WORLD_REFRESH_EVERY).
+      if (this.agentDepth === 0 && this._worldRefresher) {
+        try {
+          const worldDelta = await this._worldRefresher.tick();
+          if (worldDelta) this.context.appendMessage(worldDelta);
+        } catch {
+          /* non-fatal */
+        }
+      }
+
       if (sendTimeoutMs > 0) {
         let sendTimeoutId: ReturnType<typeof setTimeout> | undefined;
         const sendTimeoutPromise = new Promise<never>((_, reject) => {
@@ -1972,7 +2148,7 @@ export class AgentHarness {
               reject(
                 new Error(
                   `Send timeout after ${Math.round(sendTimeoutMs / 1000)}s. ` +
-                    "For large file generation, prefer sectioned write_file calls or run_shell with a heredoc."
+                    "For large file generation, use write_file mode=create then mode=append, or run_shell with a heredoc."
                 )
               ),
             sendTimeoutMs
@@ -2008,6 +2184,9 @@ export class AgentHarness {
       }
       this.sessionGreetingThisSend = false;
       this.personaBootstrapPromptThisSend = false;
+      this.currentTurnController = undefined;
+      this.currentTurnTraceId = undefined;
+      this.dispatcher.setTurnTraceId(undefined);
       const term = this.lastTurnTerminationReason;
       this.running = false;
       if (term === "ok" && !openingTurn && this.agentDepth === 0) {
@@ -2194,6 +2373,7 @@ export class AgentHarness {
     // Only the root had this set from registerAllTools — without inheritance, grandchildren
     // would keep a stripped registry and never re-register.
     childHarness.onChildCreated = this.onChildCreated;
+    childHarness.onTurnEndCleanup = this.onTurnEndCleanup;
 
     // Notify external code (orchestration tools) to register child-scoped tools
     // (e.g. spawn_agent closing over childHarness for grandchild support)
@@ -2858,12 +3038,58 @@ export class AgentHarness {
     if (this.turnEndEmittedThisSend) return;
     this.turnEndEmittedThisSend = true;
     this.lastTurnTerminationReason = reason;
+    // Persist active hypotheses for the next send() so multi-turn investigative chains survive.
+    const es = this.context.getEpistemicState();
+    if (es?.hypotheses?.length) {
+      this.persistedHypotheses = es.hypotheses.filter(
+        (h) => !h.status || h.status === "active"
+      ).slice(0, 10);
+    } else {
+      this.persistedHypotheses = [];
+    }
     const snapshot = this.context.snapshot();
     this.emitter.emit("turn_end", {
       contextSnapshot: snapshot,
       durationMs: Date.now() - this.sendStartTime,
       harnessMetrics: this.buildHarnessMetrics(reason),
+      traceId: this.currentTurnTraceId,
     });
+    const cleanup = this.onTurnEndCleanup;
+    if (cleanup) {
+      void Promise.resolve(cleanup(this.taskId)).catch((err) => {
+        const msg = err instanceof Error ? err.message : String(err);
+        this.emitter.emit("text", {
+          delta: `\n[HARNESS] turn_end cleanup failed: ${msg}\n`,
+          channel: "trace",
+        });
+      });
+    }
+  }
+
+  /**
+   * Abort the current in-progress turn. No-op when idle.
+   * Triggers the stream abort path — the harness will emit turn_end with reason "error".
+   */
+  abortCurrentTurn(): void {
+    this.currentTurnController?.abort();
+  }
+
+  private mergeStreamAbortSignals(streamAbort?: AbortController): AbortSignal | undefined {
+    const parts: AbortSignal[] = [];
+    if (this.abortSignal) parts.push(this.abortSignal);
+    if (this.currentTurnController) parts.push(this.currentTurnController.signal);
+    if (streamAbort) parts.push(streamAbort.signal);
+    if (parts.length === 0) return undefined;
+    if (parts.length === 1) return parts[0];
+    const linked = new AbortController();
+    for (const sig of parts) {
+      if (sig.aborted) {
+        linked.abort();
+        return linked.signal;
+      }
+      sig.addEventListener("abort", () => linked.abort(), { once: true });
+    }
+    return linked.signal;
   }
 
   private async runReActLoop(round = 0): Promise<void> {
@@ -2881,6 +3107,7 @@ export class AgentHarness {
     }
 
     this.roundCount = round + 1;
+    this.dispatcher.advanceTurnRound();
     if (this.executionState) {
       this.emitter.emit("runtime_heartbeat", {
         round: this.roundCount,
@@ -3003,7 +3230,9 @@ export class AgentHarness {
       exploratoryCreative: this.turnInference?.exploratoryCreative === true,
     });
     const inferenceThreshold = resolveIntentConfidenceThreshold();
-    if (this.agentDepth === 0) {
+    // Emit routing policy once per turn (round 0 only) — the intent/policy is stable
+    // for the full turn; re-emitting on every round creates noisy UI repetition.
+    if (this.agentDepth === 0 && round === 0) {
       this.emitter.emit("memory_retrieval_policy", {
         intent,
         likelyEditPaths: this.turnInference?.likelyEditPaths?.length
@@ -3023,8 +3252,39 @@ export class AgentHarness {
       });
     }
     const round0PrimeEnabled = resolveHarnessEnvRaw("AGENT_MEMORY_PRIME_ROUND0", this.runtimePreferences) !== "0";
+    // ── Semantic dream gating ─────────────────────────────────────────────────
+    // Load notes index once per recall check for BM25 scoring.
+    // If score < threshold, skip the recall call (save tokens + latency).
+    const dreamThresholdRaw = resolveHarnessEnvRaw("AGENT_DREAM_THRESHOLD", this.runtimePreferences) ?? "0.15";
+    const dreamThreshold = Math.max(0, Math.min(1, Number(dreamThresholdRaw) || 0.15));
+    let dreamScorePassedGate = true;
+    if (dreamThreshold > 0 && this.agentDepth === 0 && memoryPolicy.allowAutoRecall && this.lastUserMessage.trim().length > 8) {
+      try {
+        const notesRaw = await readFileFs(
+          path.join(resolveWorkspaceRoot(), ".agent_notes.json"), "utf8"
+        ).catch(() => "{}");
+        const notesObj = JSON.parse(notesRaw) as Record<string, { value?: string; text?: string }>;
+        const docs: RankableDoc[] = Object.entries(notesObj).map(([id, n]) => ({
+          id,
+          text: (n.value ?? n.text ?? "").slice(0, 1000),
+        }));
+        if (docs.length > 0) {
+          const score = scoreTurnAgainstIndex(this.lastUserMessage.slice(0, 400), docs);
+          dreamScorePassedGate = score >= dreamThreshold;
+          if (!dreamScorePassedGate) {
+            this.emitter.emit("text", {
+              delta: `[dream-gate: score=${score.toFixed(3)} < threshold=${dreamThreshold} — skipping auto-recall]\n`,
+              channel: "trace",
+            });
+          }
+        }
+      } catch {
+        /* non-fatal — gate open on error */
+      }
+    }
     const shouldPrimeThisRound =
       recallEvery > 0 &&
+      dreamScorePassedGate &&
       ((round > 0 && round % recallEvery === 0) || (round === 0 && round0PrimeEnabled));
     if (
       shouldPrimeThisRound &&
@@ -3129,6 +3389,48 @@ export class AgentHarness {
               identityLike,
             })
           ) {
+            // ── Contradiction detection ───────────────────────────────────────
+            // Compare recalled notes against recent tool results in the last 3 turns.
+            const autoResolve = resolveHarnessEnvRaw("AGENT_DREAM_CONTRADICT_AUTO_RESOLVE", this.runtimePreferences) !== "0";
+            const contradictThreshold = Math.max(0, Math.min(1,
+              Number(resolveHarnessEnvRaw("AGENT_DREAM_CONTRADICT_CONFIDENCE", this.runtimePreferences) ?? "0.85") || 0.85
+            ));
+            if (autoResolve && contradictThreshold > 0) {
+              try {
+                // Collect recent tool output strings from context (last 3 rounds)
+                const recentOutputs: string[] = [];
+                const allMsgs = this.context.buildMessagesSync();
+                for (let mi = allMsgs.length - 1; mi >= 0 && recentOutputs.length < 6; mi--) {
+                  const m = allMsgs[mi];
+                  if (m && m.role === "tool" && typeof m.content === "string") {
+                    recentOutputs.push(m.content.slice(0, 800));
+                  }
+                }
+                // Parse recalled output into note-like objects
+                const recalledNotes = r.output
+                  .split("\n---\n")
+                  .map((s) => ({ text: s.trim() }))
+                  .filter((n) => n.text.length > 10);
+                const contradictions = detectContradictions(recalledNotes, recentOutputs, {
+                  confidenceThreshold: contradictThreshold,
+                });
+                for (const c of contradictions) {
+                  if (c.confidence >= contradictThreshold && c.noteKey) {
+                    try {
+                      await this.dispatcher.directCall("remember", {
+                        key: c.noteKey,
+                        value: c.freshFact,
+                        overwrite: true,
+                      });
+                      this.emitter.emit("text", {
+                        delta: `[MEMORY CONFLICT RESOLVED: key=${c.noteKey} stale="${c.staleClaim}" → updated from fresh evidence]\n`,
+                        channel: "trace",
+                      });
+                    } catch { /* non-fatal */ }
+                  }
+                }
+              } catch { /* non-fatal */ }
+            }
             this.context.appendMessage({
               role: "user",
               content: `[Relevant memory — mid-turn recall]\n${r.output.slice(0, 3500)}`,
@@ -3184,11 +3486,45 @@ export class AgentHarness {
       });
     }
 
-    const messages = await this.context.buildMessages();
+    let messages = await this.context.buildMessages();
+    // ── Adaptive intent routing ───────────────────────────────────────────────
+    // Cache the routing profile for the duration of this turn. Intent/model/maxTokens
+    // are stable across rounds — rebuilding every round is wasteful and causes
+    // repeated routing-line noise in the UI. Tool filter is included in the cache;
+    // if lazy tool loading adds new tools, they bypass the filter because coding/
+    // execution intents carry toolFilter=null and heuristic classifications never
+    // activate filters (applyToolFilter requires source==="llm" + high confidence).
+    if (!this._turnRoutingProfile) {
+      this._turnRoutingProfile = buildRoutingProfile(
+        this.turnInference ?? null,
+        this.config.model
+      );
+    }
+    const routingProfile: RoutingProfile = this._turnRoutingProfile;
+    // Emit the routing line only on round 0 — intent and model are fixed for the
+    // entire turn. Include source + confidence so the trace is actionable, not just
+    // a restatement of the model slug.
+    if (routingProfile.applied && round === 0 && !this.sessionGreetingThisSend && !this.personaBootstrapPromptThisSend) {
+      const srcNote =
+        routingProfile.source !== "default" && routingProfile.confidence > 0
+          ? ` src=${routingProfile.source}(${Math.round(routingProfile.confidence * 100)}%)`
+          : "";
+      const filterNote = routingProfile.toolFilterActive ? ` tools=filtered` : "";
+      this.emitter.emit("text", {
+        delta: `[routing: intent=${routingProfile.intent}${srcNote} model=${routingProfile.modelSlug} maxTokens=${routingProfile.maxTokens}${filterNote}]\n`,
+        channel: "trace",
+      });
+      if (this._turnReasoningBudget) {
+        this.emitter.emit("text", {
+          delta: formatReasoningBudgetTraceLine(this._turnReasoningBudget, this._turnReasoningSurface),
+          channel: "trace",
+        });
+      }
+    }
     const tools =
       this.sessionGreetingThisSend || this.personaBootstrapPromptThisSend
         ? []
-        : this.registry.toOpenAIFormat();
+        : this.registry.toOpenAIFormat(routingProfile.toolFilter ?? undefined);
     const accumulator = new StreamAccumulator();
     // PASTE: speculative tool dispatch — start safe tool calls while stream is still running.
     const pasteEnabled = resolveHarnessEnvRaw("AGENT_PASTE", this.runtimePreferences) === "1";
@@ -3206,7 +3542,16 @@ export class AgentHarness {
       parseInt(resolveHarnessEnvRaw("AGENT_STREAM_MAX_RETRIES", this.runtimePreferences) ?? "3", 10) || 3
     );
 
-    let stream = await this.streamWithRetry(messages, tools);
+    const routingModel = routingProfile.applied ? routingProfile.modelSlug : undefined;
+    let streamAbort = new AbortController();
+    let stream = await this.streamWithRetry(
+      messages,
+      tools,
+      routingModel,
+      this._turnReasoningBudget,
+      streamAbort,
+      this._turnReasoningSurface
+    );
     let finishReason: string | null = null;
     let streamAttempt = 0;
 
@@ -3234,35 +3579,32 @@ export class AgentHarness {
             }
           }
 
+          if (parsed.reasoningDelta && this._turnReasoningSurface === "native") {
+            this.emitter.emit("text", { delta: parsed.reasoningDelta, channel: "reasoning" });
+          }
+
           if (parsed.toolCallDelta) {
             const { index, id, name, argsDelta } = parsed.toolCallDelta;
-
+            if (id && name) {
+              this.streamingToolNamesByCallId.set(id, name);
+            }
+            const streamToolName =
+              name ?? (id ? this.streamingToolNamesByCallId.get(id) : undefined);
             if (parsed.isNewTool && id && name) {
-              this.emitter.emit("tool_start", { callId: id, name });
+              this.emitter.emit("tool_start", {
+                callId: id,
+                name,
+                traceId: this.currentTurnTraceId,
+                roundIndex: this.roundCount,
+              });
+              if (this.fileWriteStreamSink && isFileWriteToolName(name)) {
+                this.fileWriteStreamSink.open(id, name);
+              }
 
               // PASTE: when the model starts streaming a new tool call (index N),
               // tool call N-1's args are complete. Speculatively dispatch if safe.
               if (pasteEnabled && index > 0) {
-                const prevCall = accumulator.tryGetCompletedCall(index - 1);
-                if (prevCall && !speculativePromises.has(prevCall.id)) {
-                  const toolDef = this.registry.get(prevCall.name);
-                  const isSafe =
-                    toolDef &&
-                    this.registry.isActive(prevCall.name) &&
-                    !toolDef.requiresApproval &&
-                    (!toolDef.dangerLevel || toolDef.dangerLevel === "safe");
-                  if (isSafe) {
-                    speculativePromises.set(
-                      prevCall.id,
-                      this.dispatcher.dispatch(
-                        prevCall.id,
-                        prevCall.name,
-                        prevCall.argsJson,
-                        [] // batchToolNames will be re-derived after stream; empty is safe for pre-flight
-                      )
-                    );
-                  }
-                }
+                this.maybeStartEagerDispatch(accumulator, index - 1, speculativePromises, pasteEnabled);
               }
             }
 
@@ -3270,6 +3612,10 @@ export class AgentHarness {
               const tc = accumulator.accumulatedToolCalls[index];
               if (tc) {
                 this.emitter.emit("tool_delta", { callId: tc.id, argsDelta });
+                if (this.fileWriteStreamSink && isFileWriteToolName(tc.name)) {
+                  await this.fileWriteStreamSink.ingestDelta(tc.id, tc.name, argsDelta);
+                }
+                this.maybeStartEagerDispatch(accumulator, index, speculativePromises, pasteEnabled);
               }
             }
           }
@@ -3291,9 +3637,10 @@ export class AgentHarness {
         if (!canRetry) throw streamErr;
 
         streamAttempt++;
+        const interruptedText = accumulator.accumulatedText;
+        const interruptedToolCalls = [...accumulator.accumulatedToolCalls];
         const hadPartialContent =
-          accumulator.accumulatedText.length > 0 ||
-          accumulator.accumulatedToolCalls.length > 0;
+          interruptedText.length > 0 || interruptedToolCalls.length > 0;
 
         accumulator.reset();
         speculativePromises.clear(); // discard PASTE results from failed stream attempt
@@ -3310,6 +3657,16 @@ export class AgentHarness {
           });
         }
 
+        if (interruptedToolCalls.length > 0) {
+          await this.commitInterruptedStreamAttempt(
+            interruptedText,
+            interruptedToolCalls,
+            retryLabel,
+            speculativePromises
+          );
+          messages = await this.context.buildMessages();
+        }
+
         this.emitter.emit("provider_retry", {
           attempt: streamAttempt,
           maxAttempts: maxStreamRetries + 1,
@@ -3318,8 +3675,20 @@ export class AgentHarness {
         });
 
         await sleep(Math.min(2000 * streamAttempt, 10_000));
-        stream = await this.streamWithRetry(messages, tools);
+        streamAbort = new AbortController();
+        stream = await this.streamWithRetry(
+          messages,
+          tools,
+          routingModel,
+          this._turnReasoningBudget,
+          streamAbort,
+          this._turnReasoningSurface
+        );
       }
+    }
+
+    for (let i = 0; i < accumulator.accumulatedToolCalls.length; i++) {
+      this.maybeStartEagerDispatch(accumulator, i, speculativePromises, pasteEnabled);
     }
 
     const toolCalls = accumulator.accumulatedToolCalls;
@@ -3374,6 +3743,35 @@ export class AgentHarness {
 
     if (
       !skipStreamContinuationsForIntro &&
+      toolCalls.length > 0 &&
+      this.lengthResumeRemaining > 0 &&
+      batchHasUndispatchableFileWrites(toolCalls, finishReason)
+    ) {
+      this.lengthResumeRemaining--;
+      let resumeMsg = LENGTH_RESUME_FILE_WRITE_MESSAGE;
+      if (this.fileWriteStreamSink) {
+        for (const tc of toolCalls) {
+          if (!isFileWriteToolName(tc.name)) continue;
+          const salvaged = await this.fileWriteStreamSink.salvagePartialToTarget(tc.id);
+          if (salvaged) {
+            resumeMsg +=
+              ` Saved ${salvaged.bytes} bytes to ${salvaged.targetPath} before cutoff — continue with write_file mode=append.`;
+          } else {
+            resumeMsg += this.fileWriteStreamSink.buildLengthResumeHint(tc.id);
+          }
+        }
+      }
+      this.context.append(assistantMessage);
+      this.context.appendMessage({
+        role: "user",
+        content: resumeMsg,
+      });
+      await this.runReActLoop(round);
+      return;
+    }
+
+    if (
+      !skipStreamContinuationsForIntro &&
       toolCalls.length === 0 &&
       this.pseudoToolMarkupRetryRemaining > 0 &&
       hasPseudoToolMarkup(accumulator.accumulatedText)
@@ -3404,7 +3802,8 @@ export class AgentHarness {
 
     this.context.append(assistantMessage);
 
-    if (finishReason === "tool_calls" && toolCalls.length > 0) {
+    if (shouldDispatchToolBatch(toolCalls, finishReason)) {
+      this.toolCallsDispatchedThisSend += toolCalls.length;
       // Collect tool names for pre-flight dangerLevel checks
       const batchToolNames = toolCalls.map((tc) => tc.name);
 
@@ -3426,16 +3825,79 @@ export class AgentHarness {
       })();
 
       const results: ToolResult[] = new Array(toolCalls.length);
-      await Promise.all(
-        toolCalls.map(async (tc, i) => {
-          if (repIdx[i] !== i) return;
-          // PASTE: reuse speculatively-started promise if available (result likely already ready).
-          const speculative = speculativePromises.get(tc.id);
-          results[i] = speculative
-            ? await speculative
-            : await this.dispatcher.dispatch(tc.id, tc.name, tc.argsJson, batchToolNames);
-        })
-      );
+
+      // ── DAG-aware dispatch ───────────────────────────────────────────────────
+      // dispatch_graph tool calls register dependency edges into _toolDag BEFORE
+      // the regular calls are dispatched. Separate them so deps are populated first.
+      const dagCallIndices: number[] = [];
+      const regularCallIndices: number[] = [];
+      for (let _di = 0; _di < toolCalls.length; _di++) {
+        if (repIdx[_di] !== _di) continue;
+        if (toolCalls[_di]!.name === "dispatch_graph") dagCallIndices.push(_di);
+        else regularCallIndices.push(_di);
+      }
+
+      // Duplicate-call hints: identical tool+args already run earlier this turn.
+      const duplicateHints: string[] = [];
+      const dispatchAt = async (idx: number) => {
+        const tc = toolCalls[idx]!;
+        // PASTE: reuse speculatively-started promise if available.
+        const speculative = speculativePromises.get(tc.id);
+        const result = speculative
+          ? await speculative
+          : await this.dispatcher.dispatch(tc.id, tc.name, tc.argsJson, batchToolNames);
+        results[idx] = result;
+        // Index output for query_tool_outputs + flag identical cross-round re-calls.
+        const argsKey = tc.argsJson.slice(0, 200);
+        const prior = this._sessionToolIndex.findPriorCall(tc.name, argsKey, tc.id);
+        this._sessionToolIndex.add({
+          callId: tc.id,
+          toolName: tc.name,
+          argsKey,
+          output: result.ok ? String(result.output ?? "") : String(result.error ?? ""),
+          at: new Date().toISOString(),
+          ok: result.ok,
+        });
+        if (prior) {
+          duplicateHints.push(
+            `${tc.name} was already called with identical arguments earlier this turn (call ${prior.callId}).`
+          );
+        }
+        this._toolOutcomesThisTurn.push({ name: tc.name, ok: result.ok });
+      };
+
+      // 1. Run dispatch_graph calls first so the DAG is populated.
+      await Promise.all(dagCallIndices.map(dispatchAt));
+
+      // 2. Execute remaining calls in topological order if DAG has edges.
+      if (!this._toolDag.isEmpty() && regularCallIndices.length > 0) {
+        const idToIdx = new Map<string, number>(
+          regularCallIndices.map((i) => [toolCalls[i]!.id, i])
+        );
+        const callIds = regularCallIndices.map((i) => toolCalls[i]!.id);
+        const batches = this._toolDag.topologicalBatches(callIds);
+        for (const batchIds of batches) {
+          await Promise.all(batchIds.map((id) => dispatchAt(idToIdx.get(id)!)));
+        }
+      } else {
+        await Promise.all(regularCallIndices.map(dispatchAt));
+      }
+
+      // Clear DAG for next round.
+      this._toolDag.clear();
+
+      // Push a duplicate-work signal so the model reuses earlier results
+      // instead of re-running identical tool calls across rounds.
+      if (duplicateHints.length > 0) {
+        this.context.appendMessage({
+          role: "system",
+          content:
+            "[DUPLICATE TOOL CALLS] " +
+            duplicateHints.join(" ") +
+            " Reuse the earlier result via query_tool_outputs instead of re-running identical calls.",
+        });
+      }
+
       for (let i = 0; i < toolCalls.length; i++) {
         if (repIdx[i] === i) continue;
         const src = results[repIdx[i]!]!;
@@ -3452,6 +3914,8 @@ export class AgentHarness {
           name: tc.name,
           args: dupArgs,
           result: src,
+          traceId: this.currentTurnTraceId,
+          roundIndex: this.roundCount,
         });
       }
 
@@ -3468,6 +3932,32 @@ export class AgentHarness {
         const tc = toolCalls[i]!;
         const r = results[i]!;
         this.rememberChangedPathFromToolCall(tc.name, tc.argsJson, r.ok);
+        // ── Compensation ledger — record undo action on success ────────────────
+        if (r.ok && this.executionState) {
+          const planId = this.executionState.activeContractId ?? this.executionState.mission?.id;
+          if (planId) {
+            try {
+              const args = JSON.parse(tc.argsJson) as Record<string, unknown>;
+              const action = inferCompensationAction(tc.name, args);
+              if (action) recordCompensation(planId, this.roundCount, action);
+            } catch { /* non-fatal */ }
+          }
+        }
+        if (
+          r.ok &&
+          !this.writeIntegrityNudgeThisSend &&
+          isFileWriteToolName(tc.name) &&
+          resolveHarnessEnvRaw("AGENT_WRITE_INTEGRITY_NUDGE", this.runtimePreferences) !== "0" &&
+          r.output.includes("likely_truncated=true")
+        ) {
+          this.writeIntegrityNudgeThisSend = true;
+          this.context.appendMessage({
+            role: "user",
+            content:
+              "[SYSTEM NOTE] The last file write may be incomplete (likely_truncated). " +
+              "Continue with write_file mode=append before answering the user.",
+          });
+        }
         const line = `${tc.name}:${r.ok ? "ok" : "fail"}`;
         this.recentToolOutcomeLines.push(line.slice(0, 160));
         if (this.recentToolOutcomeLines.length > 3) this.recentToolOutcomeLines.shift();
@@ -3534,6 +4024,26 @@ export class AgentHarness {
             }
           } catch {
             /* ignore */
+          }
+        }
+        if (tc.name === "think" && r.ok) {
+          // Pre-activate any tool families declared in structured think() calls.
+          try {
+            const targs = JSON.parse(tc.argsJson) as { tool_families?: string[] };
+            const families = targs.tool_families;
+            if (Array.isArray(families) && families.length > 0 && this.registry.isLazyToolLoading()) {
+              const newly = this.registry.activateFamilies(families);
+              if (newly.length > 0) {
+                awarenessNeedsRefresh = true;
+                awarenessReason = "think_family_preseed";
+                this.emitter.emit("text", {
+                  channel: "trace",
+                  delta: `[think] pre-activated families: ${families.join(", ")} → ${newly.length} new tool(s)\n`,
+                });
+              }
+            }
+          } catch {
+            // malformed args — ignore, execution continues normally
           }
         }
         if (tc.name === "activate_tool_family" && r.ok) {
@@ -3889,6 +4399,10 @@ export class AgentHarness {
       await this.runLintSelfHealIfNeeded();
 
       await this.runReActLoop(round + 1);
+    } else if (toolCalls.length > 0) {
+      await this.finalizeUndispatchedToolCalls(toolCalls, speculativePromises, finishReason);
+      await this.runLintSelfHealIfNeeded();
+      await this.runReActLoop(round + 1);
     } else {
       let assistantText = "";
       if (typeof assistantMessage.content === "string") {
@@ -3914,7 +4428,7 @@ export class AgentHarness {
         distinctToolCount <= 1 &&
         this.toolsUsedThisTurn.filter((n) => n !== "think" && n !== "plan").length === 0 &&
         (skipSecondaryPasses || Boolean(inf?.runtimeIdentityPrompt));
-      /** No extra finalize ReAct loops (critic/cite/synthesis/recency…) for persona / session-history asks. */
+      /** No extra finalize ReAct loops (critic/cite/synthesis…) for persona / session-history asks. */
       const skipPostAssistantFinalizeExtensions =
         !this.sessionGreetingThisSend &&
         !this.personaBootstrapPromptThisSend &&
@@ -3968,14 +4482,7 @@ export class AgentHarness {
         }
       }
 
-      if (this.sessionGreetingThisSend || this.personaBootstrapPromptThisSend) {
-        this.emitter.emit("recency_check", {
-          required: false,
-          passed: true,
-          reason: this.sessionGreetingThisSend ? "session_greeting" : "persona_bootstrap_prompt",
-          attemptedRecovery: false,
-        });
-      } else {
+      if (!this.sessionGreetingThisSend && !this.personaBootstrapPromptThisSend) {
       const trimmedFinal = assistantText.trim();
       const doneish =
         /^(OK|DONE)\b/i.test(trimmedFinal) || /\b(done|ok)\b\s*[.!]?\s*$/i.test(trimmedFinal);
@@ -4093,64 +4600,40 @@ export class AgentHarness {
         source: "none",
         threshold: resolveIntentConfidenceThreshold(),
       });
-
-      const finalizeIntent = this.turnInference?.intent ?? "knowledge";
-      const userFreshnessExplicit = isFreshnessSensitivePrompt(this.lastUserMessage);
-      const inferredFreshness = Boolean(this.turnInference?.freshnessSensitive);
-      const liveNowClaimed = hasLiveNowClaims(assistantText);
-      // On introspection turns, only run recency when the user explicitly asked for
-      // fresh/live info or the draft uses strong live-now phrasing — avoids false
-      // positives when a small model marks capability questions as freshness-sensitive.
-      const recencyRequired =
-        userFreshnessExplicit ||
-        liveNowClaimed ||
-        (finalizeIntent !== "introspection" && inferredFreshness);
-      if (recencyRequired) {
-        const evidenceBlob = this.evidenceLog.map((e) => e.excerpt).join("\n");
-        const weatherFresh = hasWeatherFreshEvidence(`${assistantText}\n${evidenceBlob}`);
-        const recencyPassed =
-          (!hasFreshnessClaims(assistantText) || hasAsOfQualifier(assistantText)) &&
-          (hasRecentYearEvidence(`${assistantText}\n${evidenceBlob}`) || weatherFresh) &&
-          (hasAuthoritativeSourceHint(`${assistantText}\n${evidenceBlob}`) || weatherFresh);
-        this.emitter.emit("recency_check", {
-          required: true,
-          passed: recencyPassed,
-          reason: recencyPassed
-            ? "freshness_claims_grounded"
-            : liveNowClaimed
-            ? "live_now_claim_missing_fresh_weather_evidence"
-            : "missing_as_of_or_recent_authoritative_evidence",
-          attemptedRecovery: !recencyPassed,
-        });
-        if (!recencyPassed && !this.finalizeRecencyNudgeThisSend && !skipPostAssistantFinalizeExtensions) {
-          if (this.finalizeRetryBudgetThisSend > 0 && !substantiveDraftLikelyComplete) {
-            this.finalizeRetryBudgetThisSend--;
-            this.finalizeRecencyNudgeThisSend = true;
-            this.context.appendMessage({
-              role: "user",
-              content:
-                "[RECENCY CHECK] Your answer appears freshness-sensitive. Before finalizing: " +
-                "(1) verify latest/current/version claims against an authoritative source, " +
-                "(2) include an explicit 'as of <date>' qualifier, and " +
-                "(3) if sources conflict or latest cannot be verified, state uncertainty clearly.",
-            });
-            await this.runReActLoop(round);
-            return;
-          }
-        }
-      } else {
-        this.emitter.emit("recency_check", {
-          required: false,
-          passed: true,
-          reason: "not_freshness_sensitive",
-          attemptedRecovery: false,
-        });
-      }
       }
 
       await this.maybePersistEpisodeTurn();
       await this.maybeAutoWriteVaultNotes();
       await this.maybeAutoExtractMemories();
+
+      // Causal trajectory memory (AGENT_TRAJECTORY_WRITE=1, root agent only).
+      if (this.agentDepth === 0) {
+        void maybeWriteTrajectory({
+          trigger: this.lastUserMessage,
+          epistemicState: this.context.getEpistemicState(),
+          toolsUsed: this._toolOutcomesThisTurn,
+          roundCount: this.roundCount,
+          intentClass: this.turnInference?.intent,
+        }).catch(() => { /* non-fatal */ });
+
+        // Adaptive effort learning (AGENT_EFFORT_LEARN=1).
+        const budget = this._turnReasoningBudget;
+        if (budget) {
+          const outcome = scoreTurnOutcome({
+            toolsUsed: this._toolOutcomesThisTurn,
+            roundCount: this.roundCount,
+            criticPassed: this.criticConsumedThisSend ? true : null,
+            contradictionCount: 0,
+            terminationReason: "ok",
+          });
+          void recordEffortOutcome(
+            (this.turnInference?.intent ?? "knowledge") as ReasoningIntentClass,
+            budget.reasoningEffort,
+            outcome
+          ).catch(() => { /* non-fatal */ });
+        }
+      }
+
       this.emitTurnEnd("ok");
       if (!this.sessionGreetingThisSend && !this.personaBootstrapPromptThisSend) {
         this.triggerAutoDreamConsolidationBackground();
@@ -4160,7 +4643,11 @@ export class AgentHarness {
 
   private async streamWithRetry(
     messages: Message[],
-    tools: OpenAI.Chat.Completions.ChatCompletionTool[]
+    tools: OpenAI.Chat.Completions.ChatCompletionTool[],
+    modelOverride?: string,
+    reasoningBudget?: ReasoningBudget | null,
+    streamAbort?: AbortController,
+    reasoningSurface: ReasoningSurface = "native"
   ): Promise<Stream<OpenAI.Chat.Completions.ChatCompletionChunk>> {
     let lastErr: unknown;
     const retryStartedAt = Date.now();
@@ -4178,22 +4665,58 @@ export class AgentHarness {
         tools.length > 0 && (allowToollessRetry ? attempt < 2 : true);
       const useToolChoice = useTools && attempt === 0;
 
-      const params: OpenAI.Chat.Completions.ChatCompletionCreateParamsStreaming = {
-        model: this.config.model,
+      // Effective max_tokens: routing profile per-intent allocation takes precedence
+      // over the global AGENT_MAX_COMPLETION_TOKENS cap. This ensures that coding/
+      // execution turns (8192/6144) aren't silently capped at the 4000-token default.
+      const routingMaxTokens = this._turnRoutingProfile?.maxTokens ?? 0;
+      const maxCompletionRaw = parseInt(
+        resolveHarnessEnvRaw("AGENT_MAX_COMPLETION_TOKENS", this.runtimePreferences) ?? "0",
+        10
+      );
+      const defaultMaxTokens = Number.isFinite(maxCompletionRaw) && maxCompletionRaw > 0
+        ? maxCompletionRaw
+        : 0;
+      const effectiveMaxTokens = routingMaxTokens > 0 ? routingMaxTokens : defaultMaxTokens;
+      const maxCompletionTokens = effectiveMaxTokens > 0
+        ? Math.min(effectiveMaxTokens, 128_000)
+        : undefined;
+
+      // Provider pinning for OpenRouter cache affinity — without this, OpenRouter randomly
+      // load-balances across providers and each has its own KV cache, so the system prompt
+      // is re-ingested on every request. Pinning to a single provider keeps the cache warm.
+      const providerRouting = buildProviderRouting(modelOverride ?? this.config.model);
+
+      const reasoningParam =
+        reasoningBudget != null
+          ? buildOpenRouterReasoningParam(reasoningBudget, reasoningSurface)
+          : {};
+
+      const params: OpenAI.Chat.Completions.ChatCompletionCreateParamsStreaming & {
+        provider?: { order: string[]; allow_fallbacks: boolean };
+        user?: string;
+        reasoning?: { effort: string };
+      } = {
+        model: modelOverride ?? this.config.model,
         messages,
         stream: true,
+        ...(maxCompletionTokens !== undefined && { max_tokens: maxCompletionTokens }),
         ...(useTools && { tools }),
         ...(useToolChoice && { tool_choice: "auto" as const }),
+        // OpenRouter-specific: sticky provider routing + session affinity for cache hits
+        ...(providerRouting && { provider: providerRouting }),
+        ...reasoningParam,
+        user: this.taskId,
       };
 
       try {
         // Pass abort signal as RequestOptions (second arg) so hung streams can be cancelled (#3)
+        const mergedSignal = this.mergeStreamAbortSignals(streamAbort);
         const stream = (await withProviderRequestSpacing(
           { apiKey: this.config.openRouterApiKey, baseURL: this.config.baseURL },
           () =>
             this.client.chat.completions.create(
               params,
-              ...(this.abortSignal ? [{ signal: this.abortSignal }] : [])
+              ...(mergedSignal ? [{ signal: mergedSignal }] : [])
             )
         )) as Stream<OpenAI.Chat.Completions.ChatCompletionChunk>;
         this.consecutiveProviderFailures = 0;
@@ -4274,6 +4797,168 @@ export class AgentHarness {
     throw new Error(describeError(lastErr));
   }
 
+  /**
+   * Dispatch a tool as soon as streamed args form valid JSON (file writes by default).
+   * Freezes further arg deltas for that index so trailing stream junk cannot corrupt args.
+   */
+  private maybeStartEagerDispatch(
+    accumulator: StreamAccumulator,
+    index: number,
+    speculativePromises: Map<string, Promise<ToolResult>>,
+    pasteEnabled: boolean
+  ): void {
+    if (accumulator.isToolCallIndexFrozen(index)) return;
+    const completed = accumulator.tryGetCompletedCall(index);
+    if (!completed || speculativePromises.has(completed.id)) return;
+
+    const toolDef = this.registry.get(completed.name);
+    if (!toolDef || !this.registry.isActive(completed.name)) return;
+    if (!shouldEagerDispatchWhenArgsComplete(completed.name, toolDef, pasteEnabled)) return;
+
+    accumulator.freezeToolCallIndex(index);
+    speculativePromises.set(
+      completed.id,
+      this.dispatcher.dispatch(completed.id, completed.name, completed.argsJson, [])
+    );
+  }
+
+  /**
+   * Emit tool_result + context for tool calls that could not enter the normal dispatch batch.
+   */
+  private async finalizeUndispatchedToolCalls(
+    toolCalls: AccumulatedToolCall[],
+    speculativePromises: Map<string, Promise<ToolResult>>,
+    finishReason: string | null
+  ): Promise<void> {
+    const reason =
+      finishReason === "length"
+        ? "tool arguments were truncated (length limit) and could not be executed"
+        : "tool arguments were incomplete or invalid and could not be executed";
+
+    for (const tc of toolCalls) {
+      const pending = speculativePromises.get(tc.id);
+      let result: ToolResult;
+      if (pending) {
+        result = await pending;
+      } else if (tryParseToolArgs(tc.argsJson).ok) {
+        result = {
+          ok: false,
+          error: `Tool "${tc.name}" was not dispatched: ${reason}.`,
+        };
+      } else {
+        result = {
+          ok: false,
+          error: `Tool "${tc.name}": ${reason}.`,
+        };
+      }
+
+      let args: Record<string, unknown> = {};
+      try {
+        args = JSON.parse(tc.argsJson || "{}") as Record<string, unknown>;
+      } catch {
+        /* ignore */
+      }
+
+      if (!pending) {
+        this.emitter.emit("tool_result", {
+          callId: tc.id,
+          name: tc.name,
+          args,
+          result,
+          traceId: this.currentTurnTraceId,
+          roundIndex: this.roundCount,
+        });
+      }
+
+      const content = result.ok ? result.output : `ERROR: ${result.error}`;
+      this.context.append({
+        role: "tool",
+        tool_call_id: tc.id,
+        content,
+      });
+      this.toolsUsedThisTurn.push(tc.name);
+      this.rememberChangedPathFromToolCall(tc.name, tc.argsJson, result.ok);
+    }
+
+    this.context.appendMessage({
+      role: "user",
+      content:
+        `[SYSTEM NOTE] ${toolCalls.length} tool call(s) could not run: ${reason}. ` +
+        "For large files use write_file mode=create once, then mode=append. Continue from the errors above.",
+    });
+  }
+
+  /**
+   * When a provider stream stalls mid-tool-call, commit partial assistant + tool
+   * messages so the model does not blindly re-issue write_file on the same path.
+   */
+  private async commitInterruptedStreamAttempt(
+    interruptedText: string,
+    interruptedToolCalls: AccumulatedToolCall[],
+    retryLabel: string,
+    speculativePromises: Map<string, Promise<ToolResult>>
+  ): Promise<void> {
+    const toolCalls = interruptedToolCalls;
+    if (toolCalls.length === 0) return;
+
+    const assistantMessage = this.buildAssistantMessage(interruptedText, toolCalls);
+    this.context.append(assistantMessage);
+
+    const batchToolNames = toolCalls.map((tc) => tc.name);
+    let anyFileWriteOk = false;
+
+    for (const tc of toolCalls) {
+      const parsed = tryParseToolArgs(tc.argsJson);
+      let result: ToolResult;
+      if (parsed.ok) {
+        const speculative = speculativePromises.get(tc.id);
+        result = speculative
+          ? await speculative
+          : await this.dispatcher.dispatch(tc.id, tc.name, tc.argsJson, batchToolNames);
+      } else {
+        result = {
+          ok: false,
+          error:
+            `Stream interrupted (${retryLabel}): tool arguments were incomplete and were not executed.`,
+        };
+      }
+
+      if (result.ok && isFileWriteToolName(tc.name)) anyFileWriteOk = true;
+
+      let args: Record<string, unknown> = {};
+      try {
+        args = JSON.parse(tc.argsJson || "{}") as Record<string, unknown>;
+      } catch {
+        /* ignore */
+      }
+      this.emitter.emit("tool_result", {
+        callId: tc.id,
+        name: tc.name,
+        args,
+        result,
+        traceId: this.currentTurnTraceId,
+        roundIndex: this.roundCount,
+      });
+
+      const content = result.ok ? result.output : `ERROR: ${result.error}`;
+      this.context.append({
+        role: "tool",
+        tool_call_id: tc.id,
+        content,
+      });
+      this.toolsUsedThisTurn.push(tc.name);
+      this.rememberChangedPathFromToolCall(tc.name, tc.argsJson, result.ok);
+    }
+
+    const nudge = anyFileWriteOk
+      ? "If write_file succeeded above, continue with write_file mode=append on the same path for the next section."
+      : "Continue the task from the tool results above.";
+    this.context.appendMessage({
+      role: "user",
+      content: `[STREAM RETRY] Provider ${retryLabel}. ${nudge}`,
+    });
+  }
+
   private buildAssistantMessage(
     text: string,
     toolCalls: AccumulatedToolCall[]
@@ -4301,6 +4986,7 @@ export class AgentHarness {
     this.personalityHeartbeatNudgeTimestampsMs = [];
     this.context.clear();
     this.roundCount = 0;
+    this.persistedHypotheses = [];
     this.worldContextInjected = false;
     this.sessionGreetingSentThisHarness = false;
     this.personaBootstrapPromptSentThisHarness = false;

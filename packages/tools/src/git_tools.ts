@@ -5,11 +5,12 @@
  * git_branch / git_commit require approval (mutating). Destructive git via run_shell.
  * Destructive operations (push, reset --hard, rebase) intentionally omitted — use run_shell.
  */
-import { exec } from "node:child_process";
+import { exec, execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { defineTool } from "./helpers.js";
 
 const execAsync = promisify(exec);
+const execFileAsync = promisify(execFile);
 
 async function git(cmd: string, cwd?: string): Promise<{ stdout: string; stderr: string }> {
   return execAsync(`git ${cmd}`, { cwd, timeout: 15_000 });
@@ -143,7 +144,7 @@ export const gitBranchTool = defineTool({
     const name = args["name"] as string | undefined;
     try {
       if (name) {
-        const { stdout, stderr } = await git(`checkout -b "${name}"`, cwd);
+        const { stdout, stderr } = await execFileAsync("git", ["checkout", "-b", name], { cwd, timeout: 15_000 });
         return { ok: true, output: (stdout + stderr).trim() };
       } else {
         const { stdout } = await git("branch -a", cwd);
@@ -188,12 +189,9 @@ export const gitCommitTool = defineTool({
       return { ok: false, error: "No files specified. Provide at least one file path to stage." };
     }
     try {
-      // Stage files
-      const fileList = files.map((f) => `"${f}"`).join(" ");
-      await git(`add ${fileList}`, cwd);
-      // Commit
-      const safeMsg = message.replace(/"/g, '\\"');
-      const { stdout, stderr } = await git(`commit -m "${safeMsg}"`, cwd);
+      // Use execFile so file paths and message are passed as structured args, not shell-interpolated
+      await execFileAsync("git", ["add", "--", ...files], { cwd, timeout: 15_000 });
+      const { stdout, stderr } = await execFileAsync("git", ["commit", "-m", message], { cwd, timeout: 15_000 });
       return { ok: true, output: (stdout + "\n" + stderr).trim() };
     } catch (err) {
       return { ok: false, error: String(err) };

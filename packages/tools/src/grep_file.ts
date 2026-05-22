@@ -2,7 +2,7 @@
  * grep_file — search a single file for a pattern, return matches with N lines of
  * context. Equivalent to `grep -n -C N pattern file` but workspace-safe and with
  * structured output. Use this to locate the exact line of a bug/value before editing
- * with search_replace_file or apply_diff — avoids reading the whole file blind.
+ * with edit_file — avoids reading the whole file blind.
  */
 import { readFile } from "node:fs/promises";
 import { defineTool } from "./helpers.js";

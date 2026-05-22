@@ -26,7 +26,7 @@ export function createRunShellTool(emitter: AgentEmitter) {
     requiresApproval: true,
     dangerLevel: "destructive",
     resourceLocks: (args) => {
-      const cwd = (args["cwd"] as string | undefined) ?? "cwd";
+      const cwd = (args["cwd"] as string | undefined) ?? process.cwd();
       return [`shell:${cwd}`];
     },
     parameters: {

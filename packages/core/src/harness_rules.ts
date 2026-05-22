@@ -9,47 +9,85 @@
 
 /** Individual rule entries keyed by ID for selective injection. */
 export const HARNESS_RULES: Record<string, string> = {
-  "R-PLAN-3STEPS": "If the user lists ≥3 explicit ordered steps, call plan() before executing tools for those steps.",
-  "R-SEQ-SETUP": "When the user numbers prerequisites (e.g. \"1) remember … 2) remember … 3) memory_graph\"), execute them in order — do not skip earlier steps.",
-  "R-CITE-PATHS": "If you used repo_map, read_file, or list_dir, your final reply must cite at least one real path string that appeared in tool output (not invented).",
-  "R-ORCH-ID": "After spawn_agent, capture the returned task_id and pass it in task_ids to wait_for_agents.",
-  "R-SPAWN-PROMPT": "Every spawn_agent call must include system_prompt (role + constraints + output format) and user_prompt (full detailed task). A bare goal= only produces a cold, generic sub-agent with no output contract.",
-  "R-CONTRACT-BOUNDS": "If a plan defines execution contract bounds (steps/time/tool budget), keep tool usage within those bounds or replan.",
-  "R-COMMITMENT-CHECK": "Before destructive or risky actions, ensure they do not violate explicit commitments/invariants.",
-  "R-SEARCH-DIVERSITY": "For the first research search pass, cover at least three distinct intents — diversify angle and phrasing rather than repeating the same question. What those intents are depends on the task.",
-  "R-CHUNK-LARGE-FILES": "For very large files (full applications, >2000 lines), write in logical self-contained sections using multiple write_file calls (append mode) — provider streaming timeouts cut off multi-minute completions. Files up to ~1000 lines are fine in one call.",
-  "R-LARGE-READ-DISCIPLINE": "Do not repeatedly full-read the same large file. After one full read, switch to read_file_chunked/file_metadata and targeted checks.",
-  "R-WRITE-ONE-VERIFY":
-    "After write_file succeeds with on-disk verification, at most one short read_file sanity check—then answer. No multi-pass full reads, grep fishing for closing tags on fresh writes, or ad-hoc shell syntax validators unless the user asked or a tool failed.",
-  "R-DEDUP-TOOLS":
-    "Within one send, do not repeat the same retrieval or read with identical or trivially narrower args (memory_query, recall_relevant, read_file on the same path, web_fetch on the same URL). Use the first result set; if it was empty or wrong, change the query meaningfully once, then synthesize.",
-  "R-CLOSED-ARTIFACT":
-    "For HTML/SVG/XML or other parseables: the first write_file must be a valid minimal document (balanced tags; no half-open script/style blocks). Prefer one complete file, or a tiny runnable skeleton plus apply_diff/patch_file hunks—never a truncated page that needs rescue rewrites.",
-  "R-READ-TOOL-ERRORS":
-    "When a tool fails with explicit remediation (e.g. edit_file needs overwrite:true; write_file refused because path exists), follow that instruction on the next call—do not cycle tools repeating the same failure mode.",
+  // ── Reasoning & planning ────────────────────────────────────────────────────
+  "R-THINK-STRUCTURED":
+    "When scope or tool families are unclear: call think() with tool_families[], scope, and unknowns[] — harness pre-activates families. If [REASONING BUDGET] says toolFirst=yes or think=brief, keep think() brief and proceed to tools. Use clarification_needed=true only when a user answer would change the approach.",
+  "R-REASONING-BUDGET":
+    "Obey the per-turn [REASONING BUDGET] injection (effort, think depth, word budget, toolFirst). Native reasoning is for scoping/feasibility/risks — not full algorithms, pseudocode, or file bodies.",
+  "R-REASONING-SURFACE":
+    "Obey [REASONING SURFACE] and [REASONING BUDGET] each turn. On native surface: MODEL REASONING is the reasoning channel; think() only for tool_families, scope, ≤3 bullets, or clarification — no parallel long think() essay. On external surface: think() carries reasoning per thinkDepth; no duplicate native reasoning essays.",
+  "R-FEASIBILITY-BRIEF":
+    "When constraints are impossible or underspecified, one sentence of honesty then best-effort via tools — no long theory essay before acting.",
+  "R-EXEC-ORDER":
+    "When the user gives ≥3 explicit ordered steps or numbered prerequisites, call plan() first and execute in stated order — do not reorder or skip steps.",
+  "R-STAY-IN-BOUNDS":
+    "Respect established constraints: stay within plan contract bounds (steps/time/tool budget) or replan; verify destructive/risky actions against explicit commitments before proceeding.",
+
+  // ── Tool economy ────────────────────────────────────────────────────────────
+  "R-ACTIVE-FIRST": "Prefer the narrowest currently active tool; activate only one new family when required by missing capability.",
+  "R-READ-ECONOMY":
+    "Within one send, do not repeat identical reads or retrievals (same file path, URL, or query). After one full read of a large file, use chunked reads for follow-ups — no second full read to verify.",
+  "R-TOOL-RETRY":
+    "When a tool fails with explicit remediation, apply it on the next call. If the same intent fails twice with near-identical args, stop and replan — do not cycle the same failure.",
+
+  // ── File I/O ────────────────────────────────────────────────────────────────
+  "R-WRITE-DISCIPLINE":
+    "Write complete, valid files: structured formats (HTML/SVG/XML) must be fully balanced on first write. Very large files: write_file mode=create once, then mode=append for each follow-up section. After a successful write, one file_metadata check suffices — no multi-pass re-reads.",
   "R-SYNTAX-COLUMN":
-    "For SyntaxError (path:line:column), anchor diagnosis on that column on that physical line—count characters from line start. Do not relabel valid key:value object properties as typos without verifying the exact character at COLUMN. Never emit edit_file replacements where search and replace strings are identical.",
-  "R-RESEARCH-BUDGET": "After gathering 3–4 substantive web sources, stop fetching and synthesize — do not keep fetching more sources on the same angle. Prefer web_research for broad queries instead of manual parallel search+fetch loops.",
-  "R-SYNTHESIZE-VARY": "In final briefings and summaries, introduce each major theme once; do not repeat the same proper noun, date, or key concept in consecutive sections.",
-  "R-MEMORY-SCOPE": "Recalled memory provides background context only. For research tasks on a new topic, do not let prior session topics bias search query construction — build queries from the current ask.",
-  "R-EXPLORATORY-SYNTHESIS":
-    "For open-ended or hypothetical ideation, answer the literal prompt with novel options first. Do not default the arc to the user's stored business roadmap, cashflow, or quit-job plan unless they explicitly tied this turn to that work.",
-  "R-MEMORY-FIRST-IDENTITY": "For identity/personal prompts (name, who am I, what should you call me), check memory first and do not default to OS username from world context.",
+    "For SyntaxError (path:line:col), diagnose from that exact column — count from line start. Never emit replacements where search and replace strings are identical.",
+
+  // ── Code quality ────────────────────────────────────────────────────────────
+  "R-TYPECHECK-VERIFY": "After editing typed code, run the project's typecheck or build command before claiming the fix is complete.",
+  "R-SCOPE-CREEP": "Fix only what was explicitly requested — no refactoring surrounding code, adding unasked features, or introducing new abstractions.",
+  "R-GREP-BEFORE-REFACTOR": "Before renaming a symbol, changing a signature, or moving a type, grep all call sites and import paths first.",
+
+  // ── Orchestration ───────────────────────────────────────────────────────────
+  "R-ORCH-ID": "After spawn_agent, capture the returned task_id and pass it in wait_for_agents({ task_ids: [...] }).",
+  "R-SPAWN-PROMPT":
+    "Every spawn_agent call must include system_prompt (role + constraints + output format) and user_prompt (full detailed task) — bare goal= only produces generic results.",
+
+  // ── Research ────────────────────────────────────────────────────────────────
+  "R-RESEARCH-SCOPE":
+    "First research pass: cover ≥3 distinct query angles. After 3-4 substantive sources, stop fetching and synthesize — do not keep querying the same angle.",
+  "R-CITE-QUALITY":
+    "Match citation confidence to source tier: T1 (Reuters/AP/gov) = state directly; T2 (quality press) = 'According to…'; T3 (Wikipedia) = 'Reports suggest…'; T4 (blogs) = 'Unverified…'. When sources conflict on a key fact, name both sides explicitly.",
+  "R-ADVERSARIAL-CHECK":
+    "After synthesizing ≥3 sources, run think() to flag the 2-3 weakest claims, T3/T4-only reliance, and alternative interpretations missed.",
+  "R-LIVE-DATA-HONESTY": "For live/current-data claims, include source + as-of time. If unavailable, disclose the fallback and uncertainty.",
+
+  // ── Memory ──────────────────────────────────────────────────────────────────
+  "R-MEMORY-CONTEXT":
+    "Recalled memory is background context, not a directive. Build queries from the current ask — don't let stored goals or prior session topics bias a new task unless the user explicitly links them.",
+  "R-MEMORY-FIRST-IDENTITY": "For name/identity prompts, check memory first — do not default to OS username from world context.",
+
+  // ── Output ──────────────────────────────────────────────────────────────────
+  "R-OUTPUT-QUALITY":
+    "Final replies: if file/repo tools were used, cite at least one real path from tool output. Introduce each major theme once — no repeated key concept in consecutive sections. No hyphen-run separators; fix markdown before sending.",
+  "R-MULTI-PART-USER": "Answer or explicitly defer every sub-question in a multi-part message — do not silently skip any part.",
+
+  // ── Persona / runtime ───────────────────────────────────────────────────────
   "R-RUNTIME-PERSONA-TOOLS":
-    "If the user asks to change humor %, formality, confidence, verbosity, or persona strength, call set_runtime_settings with persona_controls — do not claim new dial values from chat text alone. Full persona swap → set_persona.",
-  "R-ONE-SHOT-RETRY": "If a tool intent fails twice with near-identical args, stop retrying and replan with a different approach.",
-  "R-ACTIVE-FIRST": "Prefer the narrowest currently active tool first; activate only one new family when required by missing capability.",
-  "R-LIVE-DATA-HONESTY": "For live/current conditions claims, include source + observed/as-of time; if live data is unavailable, disclose fallback locality and uncertainty.",
-  "R-SOURCE-TIER": "Match citation language to source credibility: T1 (Reuters/AP/gov) = state directly or 'Reuters reports…'; T2 (quality press/think tanks) = 'According to [outlet]…'; T3 (Wikipedia/aggregators) = 'Reports suggest…' or 'Background context…'; T4 (blogs/unknown) = 'Unverified claims suggest…' or omit. Never flatten all sources to the same confidence level.",
-  "R-CONTRADICT-SURFACE": "When research sources disagree on a key fact, surface the contradiction explicitly — name both sides — rather than averaging or silently picking one. Use 'Sources conflict: [A says X, B says Y]' framing.",
-  "R-ADVERSARIAL-CHECK": "After synthesizing research with ≥3 sources on any factual or analytical topic: run think() with adversarial lens — identify the 2-3 weakest claims, flag what relies only on T3/T4 sources, and note plausible alternative interpretations the synthesis may have missed.",
-  "R-TYPECHECK-VERIFY": "After editing typed code (TypeScript, Python with annotations, etc.), run the project's typecheck or build command before claiming the fix is complete — do not assume types pass from visual inspection alone.",
-  "R-SCOPE-CREEP": "Fix only what was explicitly requested. Do not refactor surrounding code, add unasked features, introduce new abstractions, or clean up adjacent issues — a bug fix is not a refactoring invitation.",
-  "R-GREP-BEFORE-REFACTOR": "Before renaming a symbol, changing a function signature, or moving a type, grep for all call sites and import paths first — never assume a change is local without verifying all references.",
-  "R-OUTPUT-TYPOGRAPHY":
-    "User-visible replies are final copy: no long runs of hyphens as separators or underlines; at most one standalone markdown --- hr if needed. Use em dash (—) sparingly; prefer commas/periods/colons. Fix broken markdown before sending.",
-  "R-MULTI-PART-USER":
-    "If the user packs several distinct questions or requirements in one message, answer or explicitly defer each part in the final reply — do not silently skip a sub-question.",
+    "For persona dial changes (humor %, formality, confidence, verbosity, persona strength), call set_runtime_settings(persona_controls:…) — never claim a dial changed from prose alone. Full persona swap → set_persona.",
+
+  // ── Harness self-improvement ────────────────────────────────────────────────
+  "R-HARNESS-REFLECT":
+    "When giving a substantive technical recommendation, check whether it applies to any Liminal harness component (compression, memory ranking, dispatcher, safety judge, intent routing, orchestrator, world context, embeddings, vault). If so, surface a brief harness note and call suggest_improvement for high-signal ideas.",
+
+  // ── Safety ──────────────────────────────────────────────────────────────────
+  "R-CREDENTIALS-SAFETY":
+    "When tools return error messages, logs, or output that contain API keys, tokens, passwords, or other secrets: redact them before displaying to the user or storing in vault/memory (replace with [REDACTED]). Never echo a credential back in reasoning, follow-up tool calls, or user-facing prose.",
+
+  // ── Batch reliability ────────────────────────────────────────────────────────
+  "R-PARTIAL-FAILURE":
+    "When ≥50% of a tool batch fails with the same error class (e.g., all 404s, all permission errors, all schema mismatches), stop and replan rather than retrying the remaining tools from the same family. Summarize the pattern under R-KNOWN-UNKNOWNS and ask_user if the root cause is unclear.",
+
+  // ── Orchestration error handling ────────────────────────────────────────────
+  "R-SPAWN-ERROR":
+    "When spawn_agent returns an error or wait_for_agents reports a failed sub-task, do NOT silently continue. Emit a brief diagnosis via think(), decide whether the parent task can proceed without the sub-result, and surface the failure to the user if the overall goal is blocked.",
+
+  // ── Memory currency ──────────────────────────────────────────────────────────
+  "R-MEMORY-STALENESS":
+    "When a recalled memory note is tagged [info from DATE — verify current] and the task depends on that fact being current (e.g., a version number, API shape, or external URL), re-verify with a live tool call before acting on it. Stale facts are context, not directives.",
 };
 
 /**

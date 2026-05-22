@@ -97,15 +97,53 @@ export function createExtractStructuredTool(harness: AgentHarness) {
         };
         const raw = data.choices?.[0]?.message?.content?.trim() ?? "";
 
-        // Strip markdown fences if present
-        const jsonMatch = raw.match(/\{[\s\S]*\}|\[[\s\S]*\]/);
-        if (!jsonMatch) {
-          return { ok: false, error: `No JSON found in extraction response. Raw: ${raw.slice(0, 200)}` };
+        // Strip markdown code fences if the model wrapped its response
+        const stripped = raw
+          .replace(/^```(?:json|JSON)?\s*\r?\n?/, "")
+          .replace(/\r?\n?```\s*$/, "")
+          .trim();
+
+        // Attempt 1: parse the whole stripped response (model followed instructions)
+        try {
+          JSON.parse(stripped);
+          return { ok: true, output: stripped };
+        } catch {
+          // fall through to structured extraction
         }
 
-        // Validate it's parseable
-        JSON.parse(jsonMatch[0]);
-        return { ok: true, output: jsonMatch[0] };
+        // Attempt 2: walk from the first { or [ and find the matching closer,
+        // respecting string escaping so we don't confuse delimiters inside strings.
+        const start = Math.min(
+          ...[stripped.indexOf("{"), stripped.indexOf("[")].filter((i) => i >= 0)
+        );
+        if (!Number.isFinite(start)) {
+          return { ok: false, error: `No JSON found in extraction response. Raw: ${raw.slice(0, 200)}` };
+        }
+        const opener = stripped[start]!;
+        const closer = opener === "{" ? "}" : "]";
+        let depth = 0;
+        let inStr = false;
+        let escaped = false;
+        let end = -1;
+        for (let i = start; i < stripped.length; i++) {
+          const c = stripped[i]!;
+          if (escaped) { escaped = false; continue; }
+          if (c === "\\" && inStr) { escaped = true; continue; }
+          if (c === '"') { inStr = !inStr; continue; }
+          if (inStr) continue;
+          if (c === opener) depth++;
+          else if (c === closer && --depth === 0) { end = i; break; }
+        }
+        if (end === -1) {
+          return { ok: false, error: `Unbalanced JSON structure in extraction response. Raw: ${raw.slice(0, 200)}` };
+        }
+        const candidate = stripped.slice(start, end + 1);
+        try {
+          JSON.parse(candidate);
+          return { ok: true, output: candidate };
+        } catch (e) {
+          return { ok: false, error: `Extracted content is not valid JSON: ${e instanceof Error ? e.message : String(e)}` };
+        }
       } catch (err) {
         if (err instanceof SyntaxError) {
           return { ok: false, error: `Extracted content is not valid JSON: ${err.message}` };

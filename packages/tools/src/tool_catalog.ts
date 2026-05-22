@@ -3,20 +3,13 @@
  * Keep in sync with tools registered in packages/tools/src/index.ts.
  */
 import type { ToolRegistry, AgentHarness } from "@liminal/core";
-import { resolveHarnessEnvRaw } from "@liminal/core";
+import { effectiveHarnessEnvRaw, resolveHarnessEnvRaw } from "@liminal/core";
 
 /** Tool families: id -> description + member tool names. */
 export const TOOL_FAMILIES: Record<string, { description: string; tools: readonly string[] }> = {
   files_edit: {
-    description: "Advanced file editing, filesystem ops, and rollback-safe multi-file refactors.",
+    description: "Filesystem operations and rollback-safe multi-file apply.",
     tools: [
-      // Legacy single-mode tools (still work; edit_file is preferred)
-      "write_file_if_changed",
-      "patch_file",
-      "apply_diff",
-      "search_replace_file",
-      "batch_replace",
-      "edit_preview",
       // Filesystem ops
       "move_file",
       "copy_file",
@@ -24,7 +17,6 @@ export const TOOL_FAMILIES: Record<string, { description: string; tools: readonl
       "mkdir_p",
       // Rollback-safe orchestration
       "multi_file_apply",
-      "refactor_plan_apply",
       "path_guard",
     ],
   },
@@ -56,6 +48,7 @@ export const TOOL_FAMILIES: Record<string, { description: string; tools: readonl
       "forget",
       "forget_type",
       "memory_stats",
+      "search_memory",
       "memory_consolidate",
       "memory_query",
       "memory_graph",
@@ -79,12 +72,26 @@ export const TOOL_FAMILIES: Record<string, { description: string; tools: readonl
       "symbol_index",
       "find_references",
       "execute_code",
-      "codebase_symbol_edit",
     ],
   },
   browser: {
-    description: "Headless browser (Playwright, env-gated).",
-    tools: ["browser_open", "browser_act"],
+    description:
+      "Headless Chromium via Playwright: session loop open → snapshot → act(refs) → close. browser_serve_file for local HTML over http://127.0.0.1. browser_wait_for waits for selector/text/URL/idle. browser_extract pulls structured data (tables, links, forms, meta). browser_cookies saves/loads auth sessions.",
+    tools: [
+      "browser_open",
+      "browser_navigate",
+      "browser_snapshot",
+      "browser_act",
+      "browser_close",
+      "browser_serve_file",
+      "browser_wait_for",
+      "browser_extract",
+      "browser_cookies",
+    ],
+  },
+  captcha: {
+    description: "Solve CAPTCHAs (reCAPTCHA v2/v3, hCaptcha, Turnstile, image) via 2captcha or CapSolver. Auto-detects from browser session and injects token.",
+    tools: ["captcha_solve"],
   },
   vision: {
     description: "Sidecar vision analysis (image understanding while Owl remains primary reasoning model).",
@@ -206,36 +213,26 @@ export function summarizeFamilyActivity(registry: ToolRegistry): FamilyActivityS
 
 /** Tools always exposed to the model when AGENT_TOOL_LAZY=1 (minimal surface). */
 export const CORE_ALWAYS_TOOLS_BASE: readonly string[] = [
+  // Reasoning
   "think",
+  "reason",
   "plan",
-  "hypothesize",
-  // File read surface (2 tools)
+  // File surface — read + write essentials only
   "read_file",
   "grep_file",
-  // File write surface (2 tools — write_file for new, edit_file for existing)
   "write_file",
   "edit_file",
-  // Navigation
   "list_dir",
-  // Memory / knowledge
+  // Memory — primary retrieval only; write via balanced profile seed
   "recall_relevant",
-  "search_memory",
-  "memory_query",
-  "vault_search",
-  "vault_read",
-  "vault_write",
+  // User interaction
   "ask_user",
+  // Lazy loading management — always needed to activate anything else
   "list_tool_families",
   "activate_tool_family",
-  // Dynamic tool creation — always exposed so the model can build tools any time
-  "create_tool",
-  "edit_tool",
-  "remove_tool",
-  "list_dynamic_tools",
-  // Web tools are read-only and needed in nearly every general task — always on.
+  // Web — read-only, needed in nearly every general task
   "web_search",
   "web_fetch",
-  "weather_lookup",
 ];
 
 /** Env-selected always-loaded profile used when AGENT_TOOL_LAZY=1. */
@@ -243,12 +240,11 @@ const ALWAYS_TOOLS_PROFILE_ENV = "AGENT_ALWAYS_TOOLS_PROFILE";
 const ALWAYS_TOOLS_PROFILES = ["balanced", "knowledge_first", "max_autonomy"] as const;
 type AlwaysToolsProfile = (typeof ALWAYS_TOOLS_PROFILES)[number];
 
+// Balanced profile seeds only `remember` — everything else is activation-only.
 const BALANCED_MEMORY_RELIABILITY_TOOLS = TOOL_FAMILIES.memory_advanced.tools.filter((t) =>
-  ["remember", "recall", "recall_type", "memory_stats"].includes(t)
+  ["remember"].includes(t)
 );
-const BALANCED_VAULT_RELIABILITY_TOOLS = TOOL_FAMILIES.vault.tools.filter((t) =>
-  ["vault_list", "vault_links"].includes(t)
-);
+const BALANCED_VAULT_RELIABILITY_TOOLS: readonly string[] = [];
 
 const KNOWLEDGE_FIRST_TOOLS = [...TOOL_FAMILIES.memory_advanced.tools, ...TOOL_FAMILIES.vault.tools];
 const MAX_AUTONOMY_TOOLS = [
@@ -283,15 +279,22 @@ function getProfileSeedTools(profile: AlwaysToolsProfile): readonly string[] {
 /** Context tools only exist after registerAllTools(..., harness). */
 export const CORE_HARNESS_TOOLS: readonly string[] = ["check_context", "compress_context"];
 
+function browserAlwaysActiveTools(): readonly string[] {
+  if (effectiveHarnessEnvRaw("AGENT_BROWSER_ALWAYS_ACTIVE") !== "1") return [];
+  return TOOL_FAMILIES.browser.tools;
+}
+
 export function getCoreAlwaysToolNames(hasHarness: boolean): string[] {
-  const out: string[] = [...CORE_ALWAYS_TOOLS_BASE, ...getProfileSeedTools(resolveAlwaysToolsProfile())];
+  const out: string[] = [
+    ...CORE_ALWAYS_TOOLS_BASE,
+    ...getProfileSeedTools(resolveAlwaysToolsProfile()),
+    ...browserAlwaysActiveTools(),
+  ];
   if (hasHarness) {
     out.push(...CORE_HARNESS_TOOLS);
-    // Keep orchestration + critics visible without an extra activation step (common root path).
-    out.push(...TOOL_FAMILIES.orchestration.tools);
-    // Persona / runtime prefs / uploads / extraction — harness-scoped; keep visible so lazy mode
-    // does not require activate_tool_family("harness_ui") for humor, formality, etc.
-    out.push(...TOOL_FAMILIES.harness_ui.tools);
+    // Orchestration and harness_ui are activation-only — they're only needed in specific
+    // sessions and their schemas cost ~1.5k tokens per call when always loaded.
+    // Activate via activate_tool_family("tasks") or activate_tool_family("harness_ui").
   }
   return [...new Set(out)];
 }

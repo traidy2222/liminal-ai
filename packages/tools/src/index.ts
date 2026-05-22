@@ -11,6 +11,7 @@ import { marketsQuoteTool } from "./markets_quote.js";
 import { createAskUserTool } from "./ask_user.js";
 import { rememberTool, recallTool, recallByTypeTool, forgetTool, forgetTypeTool, memoryStatsTool } from "./remember_recall.js";
 import { thinkTool } from "./think.js";
+import { reasonTool } from "./reason.js";
 import { planTool } from "./plan.js";
 import { createHypothesizeTool } from "./hypothesize.js";
 import { searchMemoryTool } from "./search_memory.js";
@@ -22,7 +23,6 @@ import { repoMapTool } from "./repo_map.js";
 import { memoryConsolidateTool } from "./memory_consolidate.js";
 import { memoryQueryTool } from "./memory_query.js";
 import { astGrepTool } from "./ast_grep.js";
-import { applyDiffTool } from "./apply_diff.js";
 import { runTestsTool } from "./run_tests.js";
 import { runLintTool } from "./run_lint.js";
 import { symbolIndexTool } from "./symbol_index.js";
@@ -30,25 +30,31 @@ import { findReferencesTool } from "./find_references.js";
 import { executeCodeTool } from "./execute_code.js";
 import { httpRequestTool } from "./http_request.js";
 import { runCommandWithPtyTool } from "./run_command_with_pty.js";
-import { codebaseSymbolEditTool } from "./codebase_symbol_edit.js";
 import { readFileChunkedTool } from "./read_file_chunked.js";
 import { readFileWithImportsTool } from "./read_file_with_imports.js";
 import { fileMetadataTool } from "./file_metadata.js";
 import { workspaceSnapshotTool } from "./workspace_snapshot.js";
-import { searchReplaceFileTool } from "./search_replace_file.js";
-import { batchReplaceTool } from "./batch_replace.js";
 import { grepFileTool } from "./grep_file.js";
 import { editFileTool } from "./edit_file.js";
-import { writeFileIfChangedTool } from "./write_file_if_changed.js";
 import { moveFileTool } from "./move_file.js";
 import { copyFileTool } from "./copy_file.js";
 import { copyTreeTool } from "./copy_tree.js";
 import { mkdirPTool } from "./mkdir_p.js";
-import { editPreviewTool } from "./edit_preview.js";
 import { multiFileApplyTool } from "./multi_file_apply.js";
-import { refactorPlanApplyTool } from "./refactor_plan_apply.js";
 import { pathGuardTool } from "./path_guard.js";
-import { browserOpenTool, browserActTool } from "./browser_tools.js";
+import {
+  browserOpenTool,
+  browserNavigateTool,
+  browserActTool,
+  browserSnapshotTool,
+  browserCloseTool,
+  browserServeFileTool,
+  browserWaitForTool,
+  browserExtractTool,
+  browserCookiesTool,
+  wireBrowserHarnessCleanup,
+} from "./browser_tools.js";
+import { captchaSolveTool } from "./captcha_solve.js";
 import { createOrchestrationTools } from "./orchestration.js";
 import {
   runBackgroundTool,
@@ -58,6 +64,7 @@ import {
 } from "./process_manager.js";
 import { suggestImprovementTool, viewInsightsTool } from "./meta_tools.js";
 import { createContextTools } from "./context_tools.js";
+import { createRecallCompressionTool } from "./recall_compression.js";
 import { createRefreshWorldContextTool } from "./refresh_world_context.js";
 import { createSetPersonaTool } from "./set_persona.js";
 import { createAppendPersonaLivingTool } from "./append_persona_living.js";
@@ -83,7 +90,6 @@ import { createDynamicToolsTools, loadDynamicTools } from "./dynamic_tools.js";
 // New tools — Upgrade IV
 import { gitStatusTool, gitDiffTool, gitLogTool, gitBranchTool, gitCommitTool } from "./git_tools.js";
 import { gitCheckpointTool, gitRollbackTool } from "./git_checkpoint.js";
-import { patchFileTool } from "./patch_file.js";
 import { taskCheckpointTool, resumeTaskTool } from "./task_persistence.js";
 import { featureChecklistTool } from "./feature_checklist.js";
 import { createExtractStructuredTool } from "./extract_structured.js";
@@ -102,6 +108,10 @@ import { docRenderDocxTool } from "./doc_render_docx.js";
 import { docRenderPdfTool } from "./doc_render_pdf.js";
 import { docExportTool } from "./doc_export.js";
 import { docQualityReportTool } from "./doc_quality_report.js";
+// New tools — Upgrade VII (harness power)
+import { createQueryToolOutputsTool } from "./query_tool_outputs.js";
+import { createDispatchGraphTool } from "./dispatch_graph.js";
+import { createBranchEvaluateTool } from "./branch_evaluate.js";
 // Obsidian brain — vault tools
 import {
   vaultWriteTool,
@@ -123,6 +133,7 @@ export async function registerAllTools(
   harness?: AgentHarness
 ): Promise<void> {
   registry.register(thinkTool);
+  registry.register(reasonTool);
   registry.register(planTool);
   registry.register(readFileTool);
   registry.register(readFileChunkedTool);
@@ -131,18 +142,12 @@ export async function registerAllTools(
   registry.register(workspaceSnapshotTool);
   registry.register(writeFileTool);
   registry.register(editFileTool);
-  registry.register(writeFileIfChangedTool);
-  registry.register(patchFileTool);
-  registry.register(searchReplaceFileTool);
-  registry.register(batchReplaceTool);
   registry.register(grepFileTool);
   registry.register(moveFileTool);
   registry.register(copyFileTool);
   registry.register(copyTreeTool);
   registry.register(mkdirPTool);
-  registry.register(editPreviewTool);
   registry.register(multiFileApplyTool);
-  registry.register(refactorPlanApplyTool);
   registry.register(pathGuardTool);
   registry.register(listDirTool);
   registry.register(repoMapTool);
@@ -183,7 +188,6 @@ export async function registerAllTools(
   registry.register(memoryConsolidateTool);
   registry.register(memoryQueryTool);
   registry.register(astGrepTool);
-  registry.register(applyDiffTool);
   registry.register(runTestsTool);
   registry.register(runLintTool);
   registry.register(symbolIndexTool);
@@ -191,9 +195,16 @@ export async function registerAllTools(
   registry.register(executeCodeTool);
   registry.register(httpRequestTool);
   registry.register(runCommandWithPtyTool);
-  registry.register(codebaseSymbolEditTool);
   registry.register(browserOpenTool);
+  registry.register(browserNavigateTool);
+  registry.register(browserSnapshotTool);
   registry.register(browserActTool);
+  registry.register(browserCloseTool);
+  registry.register(browserServeFileTool);
+  registry.register(browserWaitForTool);
+  registry.register(browserExtractTool);
+  registry.register(browserCookiesTool);
+  registry.register(captchaSolveTool);
   registry.register(suggestImprovementTool);
   registry.register(viewInsightsTool);
   registry.register(visionAnalyzeTool);
@@ -250,10 +261,11 @@ export async function registerAllTools(
     registry.register(orch.policyCriticTool);
     registry.register(orch.reflectDebateTool);
 
-    // Context budget tools (check_context, compress_context) — close over harness context
+    // Context budget tools (check_context, compress_context, recall_compression) — close over harness context
     const { checkContextTool, compressContextTool } = createContextTools(harness.getContext());
     registry.register(checkContextTool);
     registry.register(compressContextTool);
+    registry.register(createRecallCompressionTool(harness.getContext()));
 
     // World context refresh — root-only, excluded from child registries
     registry.register(createRefreshWorldContextTool(harness));
@@ -276,6 +288,13 @@ export async function registerAllTools(
 
     // Upgrade VI: cross-domain synthesis sub-agent
     registry.register(createSynthesisRunTool(harness));
+
+    // Upgrade VII: session tool index query, intra-round DAG scheduling, branch evaluation
+    registry.register(createQueryToolOutputsTool(harness));
+    registry.register(createDispatchGraphTool(harness));
+    registry.register(createBranchEvaluateTool(harness));
+
+    wireBrowserHarnessCleanup(harness);
   }
 
   // Dynamic tool creation — always available
@@ -308,6 +327,7 @@ export type { PersonaProfile, SpeechStyle, PersonaTone } from "./persona_presets
 export { applyLazyRegistrationPolicy, TOOL_FAMILIES } from "./tool_catalog.js";
 export { createOrchestrationTools } from "./orchestration.js";
 export { createContextTools } from "./context_tools.js";
+export { createRecallCompressionTool } from "./recall_compression.js";
 export { createSetPersonaTool } from "./set_persona.js";
 export { createAppendPersonaLivingTool } from "./append_persona_living.js";
 export { createGetRuntimeSettingsTool } from "./get_runtime_settings.js";

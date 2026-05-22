@@ -60,6 +60,12 @@ export interface ToolDefinition {
   cacheable?: boolean;
   /** TTL in ms for cached results. Default: 30_000 if cacheable is true. */
   cacheTtlMs?: number;
+  /**
+   * Hard cap on tool result length in approximate tokens (1 token ≈ 4 chars).
+   * When set, the dispatcher truncates over-long results and appends a notice.
+   * Use for tools that may emit arbitrarily large output (e.g. run_shell, run_tests).
+   */
+  maxOutputTokens?: number;
 }
 
 export type ToolResult =
@@ -91,8 +97,15 @@ export interface AccumulatedToolCall {
   argsJson: string;
 }
 
+/** Current streaming wire protocol version. Bump when StreamChunk shape changes in a breaking way. */
+export const STREAM_WIRE_VERSION = 1 as const;
+
 export interface StreamChunk {
+  /** Wire protocol version — always STREAM_WIRE_VERSION. Lets consumers detect shape changes. */
+  version?: typeof STREAM_WIRE_VERSION;
   textDelta?: string;
+  /** Provider-native reasoning tokens (OpenRouter / reasoning models). */
+  reasoningDelta?: string;
   toolCallDelta?: {
     index: number;
     id?: string;
@@ -133,7 +146,7 @@ export interface ContextConfig {
    * Appended to inception message[1] (protocol core) each send from registered tool names.
    * Keeps core prompt small; expanded rules only when matching tools exist (e.g. child agents).
    */
-  protocolDynamicBuilder?: (toolNames: string[]) => string;
+  protocolDynamicBuilder?: (toolNames: string[], intentHint?: string) => string;
   /**
    * Optional async callback that produces a 2-3 sentence causal narrative summary for a
    * batch of compressed tool rounds. Used by AGENT_COMPRESS_SEMANTIC=1 to replace
@@ -252,6 +265,13 @@ export interface ExecutionState {
     consecutiveFailures: number;
   };
   recoveryLog: RecoveryRecord[];
+  /**
+   * Active hypotheses persisted across send() calls so the model can track
+   * multi-turn investigative chains. Populated from EpistemicState at turn end;
+   * restored into the initial EpistemicState at the next turn start.
+   * Only hypotheses with status="active" (or undefined) are carried forward.
+   */
+  persistedHypotheses?: EpistemicState["hypotheses"];
 }
 
 // ─── Multi-agent orchestration ────────────────────────────────────────────────
@@ -466,9 +486,9 @@ export interface DocQualityReport {
 
 export interface AgentEventMap {
   /** Emitted at the start of each root/child send() with the user text (session logging). */
-  send_start: { userMessage: string; agentDepth: number };
-  /** Assistant-visible stream; `trace` is for harness noise (hidden when AGENT_UI_VERBOSITY=quiet). */
-  text: { delta: string; channel?: "user" | "trace" };
+  send_start: { userMessage: string; agentDepth: number; traceId?: string };
+  /** Assistant-visible stream; `trace` / `reasoning` are non-user channels (verbosity rules apply). */
+  text: { delta: string; channel?: "user" | "trace" | "reasoning" };
   /** Provider transient error; UI may fold instead of chat-stuffing (AGENT_UI_VERBOSITY=quiet). */
   provider_retry: {
     attempt: number;
@@ -476,7 +496,7 @@ export interface AgentEventMap {
     message: string;
     backoffMs: number;
   };
-  tool_start: { callId: string; name: string };
+  tool_start: { callId: string; name: string; traceId?: string; roundIndex?: number };
   tool_delta: { callId: string; argsDelta: string };
   tool_approval: {
     callId: string;
@@ -491,6 +511,8 @@ export interface AgentEventMap {
     name: string;
     args: Record<string, unknown>;
     result: ToolResult;
+    traceId?: string;
+    roundIndex?: number;
   };
   ask_user: {
     prompt: string;
@@ -504,6 +526,8 @@ export interface AgentEventMap {
     durationMs?: number;
     /** MAS / ReliabilityBench-style telemetry for this send() (cumulative where noted). */
     harnessMetrics?: TurnEndHarnessMetrics;
+    /** Per-turn trace ID — same value emitted in send_start for correlation. */
+    traceId?: string;
   };
   error: { err: Error };
   subtask_spawned: {
@@ -525,6 +549,16 @@ export interface AgentEventMap {
   subtask_output: {
     taskId: string;
     delta: string;
+  };
+  /**
+   * Emitted instead of tool_approval when dryRunApprovals is true.
+   * The tool is auto-approved; no human interaction occurs.
+   */
+  approval_simulated: {
+    callId: string;
+    name: string;
+    args: Record<string, unknown>;
+    traceId?: string;
   };
   /** Emitted after an approval gate is resolved (approve/edit/reject). (#7) */
   approval_decision: {
@@ -653,7 +687,7 @@ export interface AgentEventMap {
     bytes: number;
   };
   memory_retrieval_policy: {
-    intent: "introspection" | "knowledge" | "coding" | "execution";
+    intent: "introspection" | "knowledge" | "research" | "coding" | "execution" | "operational";
     source: string;
     confidence?: number;
     threshold?: number;
@@ -705,12 +739,6 @@ export interface AgentEventMap {
     format: "pptx" | "docx" | "pdf";
     path: string;
   };
-  recency_check: {
-    required: boolean;
-    passed: boolean;
-    reason: string;
-    attemptedRecovery: boolean;
-  };
   /** Research finalize checklist: advisory only — never mutates assistant text. */
   synthesis_check: {
     passed: boolean;
@@ -733,6 +761,26 @@ export interface AgentEventMap {
     remainingDiagnostics: number;
     reason: string;
   };
+  /** Circuit breaker opened after consecutive failures on the same tool. */
+  tool_circuit_open: { name: string; remainMs: number };
+  /**
+   * Emitted by wait_for_agents when contradictory facts are detected across
+   * sub-agent outputs. Parent should review and resolve before proceeding.
+   */
+  consensus_conflict: {
+    taskIds: string[];
+    conflicts: Array<{
+      agentA: string;
+      agentB: string;
+      claimA: string;
+      claimB: string;
+      confidence: number;
+    }>;
+  };
+  /** Streaming tool call index gap detected (provider sent non-contiguous indices). */
+  stream_index_gap: { expectedIndex: number; receivedIndex: number };
+  /** Approval request is still pending — emitted at 10s / 30s / 50s milestones. */
+  approval_waiting: { callId: string; name: string; elapsedMs: number; totalMs: number };
   /** Idle personality heartbeat: armed after a successful turn (root only). */
   heartbeat_scheduled: {
     taskId: string;
@@ -866,6 +914,12 @@ export interface AgentConfig {
    * Session-scoped only (intended for CLI/env launch flags like `--yolo`).
    */
   autoApproveDestructive?: boolean;
+  /**
+   * When true, all requiresApproval tools are auto-approved without blocking.
+   * An `approval_simulated` event is emitted instead of `tool_approval`.
+   * Intended for eval/test harnesses that need full ReAct runs without human input.
+   */
+  dryRunApprovals?: boolean;
   /** Optional loaded runtime preferences used as session defaults/overrides. */
   runtimePreferences?: RuntimePreferences | null;
   /** Optional persistence hook invoked when runtime preferences are changed in-session. */

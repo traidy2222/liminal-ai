@@ -1,5 +1,6 @@
 import { defineTool } from "./helpers.js";
 import { fetchWithRetry } from "./network_retry.js";
+import { buildWebFetchInit } from "./web_fetch_http.js";
 
 export interface DdgHit {
   url: string;
@@ -39,9 +40,7 @@ export async function runHtmlDdgSearch(
     const url = `https://html.duckduckgo.com/html/?q=${q}`;
     const res = await fetchWithRetry(
       url,
-      {
-        headers: { "User-Agent": "Mozilla/5.0 dreamthedream-agent/1.0" },
-      },
+      buildWebFetchInit("primary"),
       { timeoutMs: 15_000 }
     );
 

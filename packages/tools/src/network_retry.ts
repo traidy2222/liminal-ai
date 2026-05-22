@@ -1,7 +1,11 @@
 import { effectiveHarnessEnvRaw } from "@liminal/core";
 
-function sleep(ms: number) {
-  return new Promise<void>((resolve) => setTimeout(resolve, ms));
+function sleep(ms: number, abortSignal?: AbortSignal): Promise<void> {
+  if (abortSignal?.aborted) return Promise.resolve();
+  return new Promise<void>((resolve) => {
+    const t = setTimeout(resolve, ms);
+    abortSignal?.addEventListener("abort", () => { clearTimeout(t); resolve(); }, { once: true });
+  });
 }
 
 function parseRetryAfterMs(headerValue: string | null): number | null {
@@ -66,7 +70,7 @@ export async function fetchWithRetry(url: string, init: RequestInit, cfg: RetryH
         const exp = Math.min(10, attempt);
         const base = Math.min(maxDelayMs, Math.round(800 * Math.pow(2, exp)));
         const jitter = Math.round(Math.random() * base);
-        await sleep(Math.max(250, Math.min(maxDelayMs, retryAfter ?? base + jitter)));
+        await sleep(Math.max(250, Math.min(maxDelayMs, retryAfter ?? base + jitter)), cfg.externalSignal);
         if (cfg.externalSignal?.aborted) {
           throw new DOMException("The operation was aborted.", "AbortError");
         }
@@ -87,7 +91,7 @@ export async function fetchWithRetry(url: string, init: RequestInit, cfg: RetryH
       const exp = Math.min(10, attempt);
       const base = Math.min(maxDelayMs, Math.round(600 * Math.pow(2, exp)));
       const jitter = Math.round(Math.random() * base);
-      await sleep(Math.max(200, Math.min(maxDelayMs, base + jitter)));
+      await sleep(Math.max(200, Math.min(maxDelayMs, base + jitter)), cfg.externalSignal);
       if (cfg.externalSignal?.aborted) {
         throw new DOMException("The operation was aborted.", "AbortError");
       }

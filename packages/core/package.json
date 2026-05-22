@@ -6,19 +6,31 @@
   "types": "./dist/index.d.ts",
   "exports": {
     ".": "./dist/index.js",
+    "./defaults": {
+      "types": "./dist/harness_default_constants.d.ts",
+      "import": "./dist/harness_default_constants.js"
+    },
     "./persona-bootstrap-ui": {
       "types": "./dist/persona_bootstrap_ui_strings.d.ts",
       "import": "./dist/persona_bootstrap_ui_strings.js"
     },
+    "./persona-bootstrap-progress": {
+      "types": "./dist/persona_bootstrap_progress.d.ts",
+      "import": "./dist/persona_bootstrap_progress.js"
+    },
     "./persona-ui-theme": {
       "types": "./dist/persona_ui_theme.d.ts",
       "import": "./dist/persona_ui_theme.js"
+    },
+    "./streaming-write-preview": {
+      "types": "./dist/streaming_write_preview.d.ts",
+      "import": "./dist/streaming_write_preview.js"
     }
   },
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc --noEmit",
-    "test": "tsx --test src/tool_arg_guard.test.ts src/safety_judge.test.ts src/memory_rank.test.ts src/memory_retrieval_eval.test.ts src/epistemic_state.test.ts src/tool_changed_paths.test.ts src/auto_dream.test.ts src/runtime_prefs.test.ts src/platform_context.test.ts src/terminal_snapshot.test.ts src/runtime_persona_controls.test.ts src/provider_request_gate.test.ts src/session_event_log.test.ts src/intent_inference.test.ts src/obsidian_vault_discovery.test.ts src/persona_ui_theme.test.ts src/personality_heartbeat.test.ts src/harness_settings_field_meta.test.ts src/output_distill.test.ts"
+    "test": "tsx --test src/tool_arg_guard.test.ts src/safety_judge.test.ts src/memory_rank.test.ts src/memory_retrieval_eval.test.ts src/epistemic_state.test.ts src/tool_changed_paths.test.ts src/auto_dream.test.ts src/runtime_prefs.test.ts src/harness_effective_env.test.ts src/platform_context.test.ts src/terminal_snapshot.test.ts src/runtime_persona_controls.test.ts src/provider_request_gate.test.ts src/provider_config.test.ts src/session_event_log.test.ts src/intent_inference.test.ts src/obsidian_vault_discovery.test.ts src/persona_ui_theme.test.ts src/personality_heartbeat.test.ts src/harness_settings_field_meta.test.ts src/output_distill.test.ts src/file_write_resume.test.ts src/tool_arg_content_stream.test.ts src/file_write_stream_sink.test.ts src/streaming_write_preview.test.ts src/reasoning_stream.test.ts src/reasoning_profile.test.ts src/reasoning_surface.test.ts"
   },
   "dependencies": {
     "js-tiktoken": "^1.0.12",

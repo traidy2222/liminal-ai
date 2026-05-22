@@ -19,6 +19,8 @@ export function createToolDiscoveryTools(registry: ToolRegistry) {
     if (/(memory|recall|remember|vault|obsidian|notes)/.test(hint)) return "memory_advanced";
     if (/(powerpoint|pptx|ppx|slides|docx|pdf|document)/.test(hint)) return "document";
     if (/(code|symbol|reference|lint|execute code|ast)/.test(hint)) return "code_intel";
+    if (/(browser|playwright|chromium|frontend|ui test|web page|screenshot)/.test(hint))
+      return "browser";
     return null;
   }
 
@@ -111,11 +113,15 @@ export function createToolDiscoveryTools(registry: ToolRegistry) {
         return { ok: false, error: `Family "${family}" has no tools registered in this harness.` };
       }
       const newly = registry.activate(toActivate);
+      const browserHint =
+        family === "browser"
+          ? "\nBrowser loop: browser_open → browser_snapshot/browser_act(click_ref) → browser_close (or close_all:true)."
+          : "";
       return {
         ok: true,
         output:
           `Family "${family}" activated. Newly visible: ${newly.length ? newly.sort().join(", ") : "(already active)"}\n` +
-          `Total active tools: ${registry.getActiveToolNames().length}`,
+          `Total active tools: ${registry.getActiveToolNames().length}${browserHint}`,
       };
     },
   });

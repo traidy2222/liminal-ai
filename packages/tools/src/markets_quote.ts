@@ -2,6 +2,15 @@ import { defineTool } from "./helpers.js";
 import { fetchWithRetry } from "./network_retry.js";
 import { effectiveHarnessEnvRaw } from "@liminal/core";
 
+const DEFAULT_MARKETS_UA =
+  "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/136.0.0.0 Safari/537.36";
+
+function marketsUserAgent(): string {
+  return (
+    effectiveHarnessEnvRaw("AGENT_WEB_FETCH_USER_AGENT")?.trim() || DEFAULT_MARKETS_UA
+  );
+}
+
 type AssetType = "equity_etf" | "fx" | "commodity" | "crypto";
 
 interface NormalizedRequest {
@@ -134,7 +143,7 @@ async function fetchYahooQuotes(
   const out = new Map<string, Record<string, unknown>>();
   const symbols = requests.map((r) => r.providerSymbol).join(",");
   const url = `https://query1.finance.yahoo.com/v7/finance/quote?symbols=${encodeURIComponent(symbols)}`;
-  const res = await fetchWithRetry(url, { headers: { "User-Agent": "dreamthedream-agent/1.0" } }, { timeoutMs, maxRetries: retries });
+  const res = await fetchWithRetry(url, { headers: { "User-Agent": marketsUserAgent() } }, { timeoutMs, maxRetries: retries });
   if (!res.ok) throw new Error(`Yahoo quote HTTP ${res.status}`);
   const json = (await res.json()) as {
     quoteResponse?: { result?: Array<Record<string, unknown>> };
@@ -149,7 +158,7 @@ async function fetchYahooQuotes(
 async function fetchCoinbaseTicker(symbol: string, timeoutMs: number, retries: number): Promise<NormalizedQuote | null> {
   const pair = symbol.toUpperCase().replace("/", "-");
   const url = `https://api.exchange.coinbase.com/products/${encodeURIComponent(pair)}/ticker`;
-  const res = await fetchWithRetry(url, { headers: { "User-Agent": "dreamthedream-agent/1.0" } }, { timeoutMs, maxRetries: retries });
+  const res = await fetchWithRetry(url, { headers: { "User-Agent": marketsUserAgent() } }, { timeoutMs, maxRetries: retries });
   if (!res.ok) return null;
   const json = (await res.json()) as Record<string, unknown>;
   const price = Number(json["price"]);
@@ -206,7 +215,7 @@ async function fetchStooqFallback(
         : upper.replace("=X", "").toLowerCase()
       : req.canonicalSymbol.replace(/=X|=F/g, "").toLowerCase();
   const url = `https://stooq.com/q/l/?s=${encodeURIComponent(base)}&f=sd2t2ohlcvn&e=csv`;
-  const res = await fetchWithRetry(url, { headers: { "User-Agent": "dreamthedream-agent/1.0" } }, { timeoutMs, maxRetries: retries });
+  const res = await fetchWithRetry(url, { headers: { "User-Agent": marketsUserAgent() } }, { timeoutMs, maxRetries: retries });
   if (!res.ok) return null;
   const text = await res.text();
   const lines = text.trim().split(/\r?\n/);

@@ -98,6 +98,18 @@ function validateArgs(
 
 // ─── Dispatcher ───────────────────────────────────────────────────────────────
 
+export type FileWriteDispatchHooks = {
+  prepareArgs: (
+    callId: string,
+    name: string,
+    args: Record<string, unknown>
+  ) => Promise<Record<string, unknown>>;
+  onRejected: (callId: string, name: string) => void;
+};
+
+const CIRCUIT_FAIL_THRESHOLD = 3;
+const CIRCUIT_OPEN_TTL_MS = 30_000;
+
 export class ToolDispatcher {
   /**
    * Per-dispatcher result cache for cacheable tools (#6 — Tool Cache Agent).
@@ -110,8 +122,11 @@ export class ToolDispatcher {
    */
   private readonly inflight = new Map<string, Promise<ToolResult>>();
 
+  /** Circuit breaker: track consecutive failure streaks and open-circuit timestamps per tool. */
+  private readonly failStreaks = new Map<string, number>();
+  private readonly circuitOpenUntil = new Map<string, number>();
+
   private vaultWritesThisTurn = 0;
-  private failedIntentCounts = new Map<string, number>();
 
   constructor(
     private readonly registry: ToolRegistry,
@@ -124,12 +139,50 @@ export class ToolDispatcher {
     private readonly preDispatchPolicy?: (
       toolName: string,
       args: Record<string, unknown>
-    ) => { ok: true } | { ok: false; reason: string; severity: "low" | "med" | "high" }
+    ) => { ok: true } | { ok: false; reason: string; severity: "low" | "med" | "high" },
+    private readonly dryRunApprovals: boolean = false,
   ) {}
+
+  private fileWriteHooks?: FileWriteDispatchHooks;
+  /** Per-turn trace ID set by agent.ts at send() start for event correlation. */
+  private turnTraceId?: string;
+  /** Current ReAct round index (0-based) — set by agent.ts each round for causality tracking. */
+  private turnRoundIndex?: number;
+
+  setFileWriteHooks(hooks: FileWriteDispatchHooks | undefined): void {
+    this.fileWriteHooks = hooks;
+  }
+
+  /** Set per-turn trace ID and initial round index. Call at send() start; clear with undefined on finish. */
+  setTurnTraceId(id: string | undefined): void {
+    this.turnTraceId = id;
+    this.turnRoundIndex = id ? 0 : undefined;
+  }
+
+  /** Advance the round counter; call once per ReAct round from agent.ts. */
+  advanceTurnRound(): void {
+    if (this.turnRoundIndex !== undefined) this.turnRoundIndex += 1;
+  }
+
+  /** Emit tool_result with optional traceId + roundIndex for event correlation. */
+  private emitToolResult(
+    callId: string,
+    name: string,
+    args: Record<string, unknown>,
+    result: import("./types.js").ToolResult
+  ): void {
+    this.emitter.emit("tool_result", {
+      callId,
+      name,
+      args,
+      result,
+      ...(this.turnTraceId ? { traceId: this.turnTraceId } : {}),
+      ...(this.turnRoundIndex !== undefined ? { roundIndex: this.turnRoundIndex } : {}),
+    });
+  }
 
   resetTurnCounters(): void {
     this.vaultWritesThisTurn = 0;
-    this.failedIntentCounts.clear();
   }
 
   /**
@@ -213,6 +266,19 @@ export class ToolDispatcher {
       };
     }
 
+    // Circuit breaker: reject if this tool's circuit is open due to repeated failures.
+    const circuitOpenUntilTs = this.circuitOpenUntil.get(name) ?? 0;
+    if (Date.now() < circuitOpenUntilTs) {
+      const remainMs = circuitOpenUntilTs - Date.now();
+      const result: ToolResult = {
+        ok: false,
+        error: `Tool "${name}" circuit is open after ${CIRCUIT_FAIL_THRESHOLD} consecutive failures — cooling down for ${Math.ceil(remainMs / 1000)}s. Replan or try a different approach.`,
+      };
+      this.emitter.emit("tool_circuit_open", { name, remainMs });
+      this.emitToolResult(callId, name, args, result);
+      return result;
+    }
+
     // Schema validation before execution (#5 deep validation)
     const validationError = validateArgs(tool.parameters, args);
     if (validationError) {
@@ -220,14 +286,14 @@ export class ToolDispatcher {
         ok: false,
         error: `Invalid args for "${name}": ${validationError}`,
       };
-      this.emitter.emit("tool_result", { callId, name, args, result });
+      this.emitToolResult(callId, name, args, result);
       return result;
     }
 
     const guardMsg = guardToolArgs(name, args);
     if (guardMsg) {
       const result: ToolResult = { ok: false, error: `[ARG GUARD] ${guardMsg}` };
-      this.emitter.emit("tool_result", { callId, name, args, result });
+      this.emitToolResult(callId, name, args, result);
       return result;
     }
     if (this.preDispatchPolicy) {
@@ -242,20 +308,9 @@ export class ToolDispatcher {
           ok: false,
           error: `Blocked by runtime policy: ${decision.reason}`,
         };
-        this.emitter.emit("tool_result", { callId, name, args, result });
+        this.emitToolResult(callId, name, args, result);
         return result;
       }
-    }
-    const intentKey = `${name}:${stableArgsJsonKey(JSON.stringify(args))}`;
-    if ((this.failedIntentCounts.get(intentKey) ?? 0) >= 2) {
-      const result: ToolResult = {
-        ok: false,
-        error:
-          `Blocked repeated failing intent for "${name}". ` +
-          "Apply one-shot retry discipline: think() and change arguments before trying again.",
-      };
-      this.emitter.emit("tool_result", { callId, name, args, result });
-      return result;
     }
     if (name === "vault_write") {
       const budget = Math.max(
@@ -272,7 +327,7 @@ export class ToolDispatcher {
           ok: false,
           error: `vault_write budget exceeded for this send (${budget}). Consolidate notes before writing more.`,
         };
-        this.emitter.emit("tool_result", { callId, name, args, result });
+        this.emitToolResult(callId, name, args, result);
         return result;
       }
     }
@@ -286,7 +341,7 @@ export class ToolDispatcher {
     if (stableCacheKey) {
       const cached = this.resultCache.get(stableCacheKey);
       if (cached && Date.now() < cached.expiresAt) {
-        this.emitter.emit("tool_result", { callId, name, args, result: cached.result });
+        this.emitToolResult(callId, name, args, cached.result);
         return cached.result;
       }
     }
@@ -309,14 +364,22 @@ export class ToolDispatcher {
           ok: false,
           error: `Resource locked by another agent: ${holders}. Wait for the other agent to finish, or work on a different resource.`,
         };
-        this.emitter.emit("tool_result", { callId, name, args, result });
+        this.emitToolResult(callId, name, args, result);
         return result;
       }
     }
 
     try {
       if (requiresHumanApproval) {
-        if (this.autoApproveDestructive) {
+        if (this.dryRunApprovals) {
+          // Dry-run mode: auto-approve without blocking; emit approval_simulated for observability.
+          this.emitter.emit("approval_simulated", {
+            callId,
+            name,
+            args,
+            ...(this.turnTraceId ? { traceId: this.turnTraceId } : {}),
+          });
+        } else if (this.autoApproveDestructive) {
           // Session-only YOLO: bypass interactive approval while preserving audit visibility.
           this.emitter.emit("approval_decision", {
             callId,
@@ -345,11 +408,12 @@ export class ToolDispatcher {
             ...(decision.decision === "edit" && { editedArgs: decision.editedArgs }),
           });
           if (decision.decision === "reject") {
+            this.fileWriteHooks?.onRejected(callId, name);
             const result: ToolResult = {
               ok: false,
               error: `Tool "${name}" rejected by user: ${decision.reason}`,
             };
-            this.emitter.emit("tool_result", { callId, name, args, result });
+            this.emitToolResult(callId, name, args, result);
             return result;
           }
           if (decision.decision === "edit") {
@@ -360,17 +424,30 @@ export class ToolDispatcher {
                 ok: false,
                 error: `Edited args for "${name}" failed validation: ${reErr}`,
               };
-              this.emitter.emit("tool_result", { callId, name, args, result });
+              this.emitToolResult(callId, name, args, result);
               return result;
             }
             const reGuard = guardToolArgs(name, args);
             if (reGuard) {
               const result: ToolResult = { ok: false, error: `[ARG GUARD] ${reGuard}` };
-              this.emitter.emit("tool_result", { callId, name, args, result });
+              this.emitToolResult(callId, name, args, result);
               return result;
             }
           }
         }
+        }
+      }
+
+      if (this.fileWriteHooks) {
+        args = await this.fileWriteHooks.prepareArgs(callId, name, args);
+        const reErr = validateArgs(tool.parameters, args);
+        if (reErr) {
+          const result: ToolResult = {
+            ok: false,
+            error: `Invalid args for "${name}" after stream prepare: ${reErr}`,
+          };
+          this.emitToolResult(callId, name, args, result);
+          return result;
         }
       }
 
@@ -399,24 +476,50 @@ export class ToolDispatcher {
         result = await runHandler();
       }
 
+      // Enforce per-tool output size cap (maxOutputTokens * 4 chars ≈ token count)
+      if (result.ok && tool.maxOutputTokens) {
+        const charCap = tool.maxOutputTokens * 4;
+        if (result.output.length > charCap) {
+          result = {
+            ok: true,
+            output: result.output.slice(0, charCap) + `\n[OUTPUT TRUNCATED — exceeded ${tool.maxOutputTokens} token limit. Use a more targeted query or request a specific range.]`,
+          };
+        }
+      }
+
       // Store successful result in cache if cacheable (#6)
       if (tool.cacheable && result.ok && cacheKeyForRun) {
         const ttl = tool.cacheTtlMs ?? 30_000;
         this.resultCache.set(cacheKeyForRun, { result, expiresAt: Date.now() + ttl });
       }
 
-      this.emitter.emit("tool_result", { callId, name, args, result });
+      this.emitToolResult(callId, name, args, result);
       if (name === "vault_write" && result.ok) {
         this.vaultWritesThisTurn += 1;
       }
-      if (result.ok) this.failedIntentCounts.delete(intentKey);
-      else this.failedIntentCounts.set(intentKey, (this.failedIntentCounts.get(intentKey) ?? 0) + 1);
+      // Circuit breaker: reset streak on success, increment on failure.
+      if (result.ok) {
+        this.failStreaks.delete(name);
+        this.circuitOpenUntil.delete(name);
+      } else {
+        const streak = (this.failStreaks.get(name) ?? 0) + 1;
+        this.failStreaks.set(name, streak);
+        if (streak >= CIRCUIT_FAIL_THRESHOLD) {
+          this.circuitOpenUntil.set(name, Date.now() + CIRCUIT_OPEN_TTL_MS);
+          this.emitter.emit("tool_circuit_open", { name, remainMs: CIRCUIT_OPEN_TTL_MS });
+        }
+      }
       return result;
     } catch (err) {
       const error = err instanceof Error ? err.message : String(err);
       const result: ToolResult = { ok: false, error };
-      this.failedIntentCounts.set(intentKey, (this.failedIntentCounts.get(intentKey) ?? 0) + 1);
-      this.emitter.emit("tool_result", { callId, name, args, result });
+      this.emitToolResult(callId, name, args, result);
+      const streak = (this.failStreaks.get(name) ?? 0) + 1;
+      this.failStreaks.set(name, streak);
+      if (streak >= CIRCUIT_FAIL_THRESHOLD) {
+        this.circuitOpenUntil.set(name, Date.now() + CIRCUIT_OPEN_TTL_MS);
+        this.emitter.emit("tool_circuit_open", { name, remainMs: CIRCUIT_OPEN_TTL_MS });
+      }
       return result;
     } finally {
       // Always release locks, even on error or rejection
@@ -433,7 +536,23 @@ export class ToolDispatcher {
   ): Promise<ApprovalDecision> {
     const ttl = this.approvalTimeoutMs;
     return new Promise((resolve) => {
+      const milestoneTimers: ReturnType<typeof setTimeout>[] = [];
+
+      // Emit waiting milestones so UIs can show escalating urgency.
+      for (const ms of [10_000, 30_000, 50_000]) {
+        if (ms < ttl) {
+          milestoneTimers.push(
+            setTimeout(() => {
+              this.emitter.emit("approval_waiting", { callId, name, elapsedMs: ms, totalMs: ttl });
+            }, ms)
+          );
+        }
+      }
+
+      const clearMilestones = () => milestoneTimers.forEach(clearTimeout);
+
       const autoRejectTimer = setTimeout(() => {
+        clearMilestones();
         resolve({
           decision: "reject",
           reason: `Approval timed out after ${Math.round(ttl / 1000)} seconds (no response)`,
@@ -446,6 +565,7 @@ export class ToolDispatcher {
         approvalTimeoutMs: ttl,
         resolve: (d) => {
           clearTimeout(autoRejectTimer);
+          clearMilestones();
           resolve(d);
         },
       });

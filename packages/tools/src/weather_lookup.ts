@@ -107,7 +107,7 @@ function scoreCandidate(g: GeoResult, countryHint?: string): number {
 
 async function fetchJson<T>(url: string): Promise<T> {
   const res = await fetch(url, {
-    headers: { "User-Agent": "Mozilla/5.0 dreamthedream-agent/1.0" },
+    headers: { "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/136.0.0.0 Safari/537.36" },
     signal: AbortSignal.timeout(15_000),
   });
   if (!res.ok) throw new Error(`HTTP ${res.status} ${res.statusText}`);

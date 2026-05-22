@@ -7,7 +7,11 @@ export {
   harnessEnvResolutionMeta,
 } from "./harness_effective_env.js";
 export type { HarnessEnvResolutionSource } from "./harness_effective_env.js";
-export { HARNESS_ENV_DEFAULTS } from "./harness_default_constants.js";
+export {
+  DEFAULT_AGENT_API_BASE_URL,
+  DEFAULT_AGENT_MODEL_SLUG,
+  HARNESS_ENV_DEFAULTS,
+} from "./harness_default_constants.js";
 export {
   HARNESS_SECRET_ENV_KEYS,
   HARNESS_MANAGED_ENV_KEYS,
@@ -41,14 +45,50 @@ export { gatherRepoMapLines } from "./repo_map.js";
 export type { RepoMapOptions } from "./repo_map.js";
 export { guardToolArgs } from "./tool_arg_guard.js";
 export {
+  FILE_WRITE_TOOL_NAMES,
+  isFileWriteToolName,
+  isLikelyTruncatedFileContent,
+  batchHasUndispatchableFileWrites,
+  canEagerDispatchTool,
+  shouldDispatchToolBatch,
+  shouldEagerDispatchWhenArgsComplete,
+} from "./file_write_resume.js";
+export {
+  setFileWriteStreamManifest,
+  takeFileWriteStreamManifest,
+  discardFileWriteStreamManifest,
+} from "./file_write_stream_manifest.js";
+export type { FileWriteStreamManifest } from "./file_write_stream_manifest.js";
+export {
+  FileWriteStreamSink,
+  resolveWriteStreamSinkEnabled,
+  resolveWriteStreamSinkMinChars,
+} from "./file_write_stream_sink.js";
+export {
+  tryExtractJsonStringField,
+  decodePartialJsonStringField,
+  createContentStreamParseState,
+  ingestToolArgJsonDelta,
+  getDecodedContentFromRaw,
+} from "./tool_arg_content_stream.js";
+export type { ContentStreamParseState, PartialJsonStringField } from "./tool_arg_content_stream.js";
+export {
+  STREAMING_WRITE_TOOL_SPECS,
+  extractStreamingWritePreview,
+  isStreamingWriteTool,
+} from "./streaming_write_preview.js";
+export type { StreamingWritePreview, StreamingWriteToolSpec } from "./streaming_write_preview.js";
+export {
   tokenize,
   rankDocumentsForQuery,
   memoryTypeBoost,
   recencyBoost,
   trustBoost,
   spacedRepetitionDecay,
+  scoreTurnAgainstIndex,
+  detectContradictions,
 } from "./memory_rank.js";
-export type { RankableDoc } from "./memory_rank.js";
+export type { RankableDoc, Contradiction } from "./memory_rank.js";
 export { cosineSimilarity, fetchEmbeddings } from "./embeddings.js";
 export type { EmbedBatchResult } from "./embeddings.js";
 export { SafetyJudge } from "./safety_judge.js";
@@ -100,6 +140,7 @@ export type {
   BulletEmphasis,
   BulletItem,
 } from "./types.js";
+export { STREAM_WIRE_VERSION } from "./types.js";
 export { getFastModelSlug, completeChatJson } from "./router.js";
 export type { JsonCompletionResult } from "./router.js";
 export {
@@ -142,7 +183,15 @@ export {
   appendRecoveryRecord,
   updateDriftScore,
   renderExecutionStateBlock,
+  getCompensationLedger,
+  recordCompensation,
 } from "./execution_state.js";
+export {
+  CompensationLedger,
+  inferCompensationAction,
+  formatCompensationReport,
+} from "./compensation_ledger.js";
+export type { CompensationAction, LedgerEntry, CompensationResult } from "./compensation_ledger.js";
 export {
   distillToolOutput,
   shouldDistillToolOutput,
@@ -162,8 +211,8 @@ export {
 } from "./session_event_log.js";
 export type { YieldSnapshot } from "./session_event_log.js";
 export { appendGoldenEvalRecord } from "./golden_eval.js";
-export { resolveProviderConfig, resolveVisionProviderConfig } from "./provider_config.js";
-export type { ProviderConfig, ProviderConfigOverrides, VisionProviderConfig } from "./provider_config.js";
+export { resolveProviderConfig, resolveVisionProviderConfig, buildProviderRouting } from "./provider_config.js";
+export type { ProviderConfig, ProviderConfigOverrides, VisionProviderConfig, ProviderRouting } from "./provider_config.js";
 export {
   RUNTIME_PREFS_FILE,
   getRuntimePrefsPath,
@@ -180,16 +229,60 @@ export type {
 } from "./runtime_prefs.js";
 export {
   DEFAULT_PERSONA_UI_THEME,
-  PERSONA_UI_THEME_VERSION,
+  PERSONA_UI_THEME_V1,
+  PERSONA_UI_THEME_V2,
   validateAndNormalizePersonaUiTheme,
+  migratePersonaUiTheme,
+  derivePersonaSemanticTokens,
+  deriveCategoryTintsFromTheme,
+  derivePersonaShellHeuristics,
+  themeToCssVars,
+  shellDefaultShowSidePanels,
+  shellRootClassName,
   parseHexToRgb,
   relativeLuminance,
   contrastRatio,
   mapPersonaUiThemeToInk,
   motionPresetToStatusBarIntervalMs,
   motionPresetToCssMultipliers,
+  PERSONA_CATEGORY_KEYS,
 } from "./persona_ui_theme.js";
-export type { PersonaUiThemeV1, PersonaUiMotionPreset } from "./persona_ui_theme.js";
+export type {
+  PersonaUiThemeV1,
+  PersonaUiThemeV2,
+  PersonaUiTheme,
+  PersonaUiMotionPreset,
+  PersonaUiShell,
+  PersonaUiDensity,
+  PersonaUiRadius,
+  PersonaUiTypography,
+  PersonaUiMessageStyle,
+  PersonaUiOrbStyle,
+  PersonaUiBackground,
+  PersonaUiFontPair,
+  PersonaUiInputStyle,
+  PersonaUiAvatarStyle,
+  PersonaUiToolCards,
+  PersonaUiMessageEntrance,
+  PersonaUiHeaderStyle,
+  PersonaUiPanelLayout,
+  PersonaUiInputDock,
+  PersonaCategoryKey,
+  PersonaCategoryTint,
+  PersonaSemanticTokens,
+  PersonaCssVarMap,
+} from "./persona_ui_theme.js";
+export {
+  PERSONA_ARTIFACT_LABELS,
+  PERSONA_ARTIFACT_ORDER,
+} from "./persona_bootstrap_progress.js";
+export type {
+  PersonaArtifactId,
+  PersonaArtifactStatus,
+  PersonaArtifactPreview,
+  PersonaProgressDetail,
+  PersonaBootstrapProgressEvent,
+} from "./persona_bootstrap_progress.js";
 export {
   normalizePersonaControlsPatch,
   applyPersonaControlsToProfile,
@@ -213,6 +306,56 @@ export type {
   InputShortcutEvent,
   InputShortcutContext,
 } from "./input_semantics.js";
+export {
+  buildRoutingProfile,
+  neutralTurnInferenceResult,
+  isIntentInferenceEnabled,
+  applyTurnInferenceHeuristics,
+} from "./intent_inference.js";
+export type {
+  TurnIntentClass,
+  TurnInferenceResult,
+  RoutingProfile,
+  MemoryPolicy,
+} from "./intent_inference.js";
+export {
+  resolveReasoningBudget,
+  fallbackReasoningBudget,
+  buildOpenRouterReasoningParam,
+  buildReasoningBudgetInjection,
+  formatReasoningBudgetTraceLine,
+  resolveReasoningStallNudgeThresholdChars,
+  parseReasoningBudgetFromParsed,
+  parseReasoningEffort,
+  parseThinkDepth,
+  applyFallbackReasoningFields,
+  isReasoningBudgetClassifierEnabled,
+  tightenReasoningBudgetForUserMessage,
+  shouldAbortForDuplicateThinkAfterNative,
+  NATIVE_DUPLICATE_THINK_CHARS,
+} from "./reasoning_profile.js";
+export type {
+  ReasoningBudget,
+  ReasoningEffort,
+  ThinkDepth,
+  ReasoningBudgetInferenceSlice,
+  ReasoningIntentClass,
+} from "./reasoning_profile.js";
+export {
+  resolveReasoningSurface,
+  shouldSendOpenRouterReasoningParam,
+  effectiveThinkDepthForSurface,
+  applySurfaceToBudget,
+  buildReasoningSurfaceInjection,
+  isImplementShipUserMessage,
+  isResearchFreshnessUserMessage,
+  isBuildDeliverableUserMessage,
+} from "./reasoning_surface.js";
+export type {
+  ReasoningSurface,
+  ReasoningSurfaceResolution,
+  ReasoningSurfaceSource,
+} from "./reasoning_surface.js";
 export { SharedMemoryBus } from "./shared_memory_bus.js";
 export type { BusListener, SharedBusEnvelope } from "./shared_memory_bus.js";
 export {
@@ -238,3 +381,17 @@ export {
   ruleStatsPath,
 } from "./rule_stats.js";
 export type { RuleStatEntry, RuleStats } from "./rule_stats.js";
+export { ToolDag } from "./tool_dag.js";
+export type { DagSpec, DagEdge } from "./tool_dag.js";
+export { SessionToolIndex } from "./session_tool_index.js";
+export type { ToolOutputEntry, ToolOutputQueryResult } from "./session_tool_index.js";
+export { maybeWriteTrajectory } from "./trajectory_writer.js";
+export type { TrajectoryEntry, TrajectoryWriteInput } from "./trajectory_writer.js";
+export { scoreTurnOutcome, recordEffortOutcome, getBestEffortForIntent, formatEffortStatsReport } from "./outcome_scorer.js";
+export type { TurnOutcomeInput } from "./outcome_scorer.js";
+export { WorldContextRefresher, gatherVolatileSnapshot, diffVolatileSnapshots } from "./world_context_delta.js";
+export type { VolatileSnapshot } from "./world_context_delta.js";
+export { extractFacts, extractFactsRaw, publishToolFacts, readBusFacts } from "./fact_extractor.js";
+export type { ExtractedFact } from "./fact_extractor.js";
+export { mapContractToToolFamilies, TOOL_FAMILY_DESCRIPTORS } from "./contract_tool_mapper.js";
+export type { ContractFamilyMapping, ToolFamilyDescriptor } from "./contract_tool_mapper.js";

@@ -85,7 +85,10 @@ export const taskCheckpointTool = defineTool({
     // Read existing task to preserve createdAt
     const notes = await loadNotes();
     const taskKey = `task:${id}`;
-    const existing = notes[taskKey] ? (JSON.parse(notes[taskKey]) as Partial<TaskState>) : null;
+    let existing: Partial<TaskState> | null = null;
+    if (notes[taskKey]) {
+      try { existing = JSON.parse(notes[taskKey]) as Partial<TaskState>; } catch { /* ignore malformed */ }
+    }
 
     const task: TaskState = {
       id,

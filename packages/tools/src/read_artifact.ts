@@ -10,7 +10,8 @@ export const readArtifactTool = defineTool({
   name: "read_artifact",
   description:
     "WHAT: Read text saved under .agent_artifacts/<hash>.txt (from AGENT_DISTILL=1 or AGENT_TOOL_BODY_ELIDE=1).\n" +
-    "WHEN: You need full tool output after seeing a distill/elision hash in the trace — not for vault notes (use vault_read).\n" +
+    "WHEN: You need full archived tool output after distill — for web_fetch/run_shell bodies, not vault notes (use vault_read).\n" +
+    "NOT WHEN: The source was read_file — prefer read_file(path) with offset/limit; the file still exists on disk. Do not activate memory_advanced just for this.\n" +
     "Requires memory_advanced family when lazy tools are on. If the hash is missing, use inline web_fetch output instead.\n" +
     "ARGS: hash — hex hash from distill block; start_line, end_line — optional 1-based inclusive line slice (max 8000 lines per call).",
   requiresApproval: false,

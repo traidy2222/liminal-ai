@@ -16,15 +16,11 @@ const SCALAR_PATH_KEYS = [
 /** Tools that mutate workspace files on success (excludes plan-only helpers). */
 export const EDIT_TOOL_NAMES = new Set([
   "write_file",
-  "patch_file",
-  "apply_diff",
-  "write_file_if_changed",
-  "search_replace_file",
+  "edit_file",
   "move_file",
   "copy_file",
   "copy_tree",
   "multi_file_apply",
-  "edit_file",
 ]);
 
 function pushUnique(out: string[], s: string): void {

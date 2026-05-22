@@ -24,7 +24,7 @@ export const gitCheckpointTool = defineTool({
   name: "git_checkpoint",
   description:
     "WHAT: Create a git stash snapshot before a plan execution that modifies files.\n" +
-    "WHEN: Before running a multi-step plan (especially with write_file / patch_file / apply_diff).\n" +
+    "WHEN: Before running a multi-step plan (especially with write_file / edit_file).\n" +
     "NOT WHEN: Working in a non-git directory, or when changes are already stashed.\n" +
     "ARGS: label — short description of what the checkpoint protects; cwd — optional working directory.",
   requiresApproval: false,

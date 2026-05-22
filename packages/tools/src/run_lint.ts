@@ -189,7 +189,7 @@ export const runLintTool = defineTool({
     "ARGS: cwd required; mode = tsc | eslint | command; format = text | structured.",
   requiresApproval: true,
   dangerLevel: "cautious",
-  resourceLocks: (args) => [`shell:${(args["cwd"] as string | undefined) ?? "cwd"}`],
+  resourceLocks: (args) => [`shell:${(args["cwd"] as string | undefined) ?? process.cwd()}`],
   parameters: {
     type: "object",
     properties: {

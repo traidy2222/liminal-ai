@@ -17,12 +17,16 @@ export const runTestsTool = defineTool({
     "ARGS: cwd — required working directory; script — npm script name (default test).",
   requiresApproval: true,
   dangerLevel: "cautious",
-  resourceLocks: (args) => [`shell:${(args["cwd"] as string | undefined) ?? "cwd"}`],
+  resourceLocks: (args) => [`shell:${(args["cwd"] as string | undefined) ?? process.cwd()}`],
   parameters: {
     type: "object",
     properties: {
       cwd: { type: "string", description: "Working directory (required)" },
       script: { type: "string", description: "npm script name (default: test)" },
+      env: {
+        type: "object",
+        description: "Extra environment variables merged into the test process env (string values only)",
+      },
     },
     required: ["cwd"],
     additionalProperties: false,
@@ -30,13 +34,14 @@ export const runTestsTool = defineTool({
   handler: async (args, emit) => {
     const cwd = path.resolve(resolveWorkspaceRoot(), args["cwd"] as string);
     const script = (args["script"] as string | undefined)?.trim() || "test";
+    const extraEnv = (args["env"] as Record<string, string> | undefined) ?? {};
     const npm = process.platform === "win32" ? "npm.cmd" : "npm";
     emit?.(`\nrun_tests: npm run ${script} in ${cwd}\n`);
     try {
       const { stdout, stderr } = await execFileAsync(
         npm,
         ["run", script, "--if-present", "--"],
-        { cwd, maxBuffer: 6_000_000, timeout: 600_000 }
+        { cwd, maxBuffer: 6_000_000, timeout: 600_000, env: { ...process.env, ...extraEnv } }
       );
       return {
         ok: true,

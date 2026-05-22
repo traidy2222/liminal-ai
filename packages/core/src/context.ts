@@ -5,8 +5,9 @@ import {
   renderEpistemicStateBlock,
 } from "./epistemic_state.js";
 import { estimateMessagesTokens } from "./token_estimate.js";
-import { stashToolBodyElide } from "./output_distill.js";
+import { stashToolBodyElide, writeArtifact, artifactPathForHash } from "./output_distill.js";
 import { effectiveHarnessEnvRaw } from "./harness_effective_env.js";
+import { extractFactsRaw } from "./fact_extractor.js";
 
 /** Prepended to auto / forced compression digests so summaries keep user-critical facts. */
 const COMPRESSION_SUMMARY_RUBRIC =
@@ -27,6 +28,8 @@ interface Round {
   hasError: boolean;           // any tool result was an ERROR
   hasThinkOrPlan: boolean;     // assistant called think/plan (preserve)
   summary: string;             // one-liner summary for compression
+  /** Full tool result bodies — used to extract hard facts before summarization. */
+  toolResults: Array<{ name: string; body: string }>;
 }
 
 /**
@@ -85,6 +88,7 @@ function extractRounds(conv: Message[]): Round[] {
 
     // Build one-liner summary for this round
     const toolLines: string[] = [];
+    const toolResults: Array<{ name: string; body: string }> = [];
     if ("tool_calls" in m && Array.isArray(m.tool_calls)) {
       for (const tc of m.tool_calls as Array<{ id: string; function?: { name?: string; arguments?: string } }>) {
         const name = tc.function?.name ?? "?";
@@ -112,6 +116,7 @@ function extractRounds(conv: Message[]): Round[] {
         if (resultMsg && typeof resultMsg.content === "string") {
           resultPreview = resultMsg.content.slice(0, 60).replace(/\n/g, " ");
           if (resultMsg.content.length > 60) resultPreview += "…";
+          toolResults.push({ name, body: resultMsg.content });
         }
         toolLines.push(`  • ${name}(${argsPreview}) → ${resultPreview}`);
       }
@@ -123,10 +128,125 @@ function extractRounds(conv: Message[]): Round[] {
       hasError,
       hasThinkOrPlan,
       summary: toolLines.join("\n"),
+      toolResults,
     });
   }
 
   return rounds;
+}
+
+// ─── Tiered context preservation ─────────────────────────────────────────────
+
+function resolveCtxHotRounds(): number {
+  const n = parseInt(effectiveHarnessEnvRaw("AGENT_CTX_HOT_ROUNDS") ?? "6", 10);
+  return Number.isFinite(n) && n > 0 ? Math.max(2, Math.min(n, 32)) : 6;
+}
+
+function resolveCtxWarmRounds(): number {
+  const n = parseInt(effectiveHarnessEnvRaw("AGENT_CTX_WARM_ROUNDS") ?? "12", 10);
+  return Number.isFinite(n) && n > 0 ? Math.max(0, Math.min(n, 64)) : 12;
+}
+
+function isProvenanceEnabled(): boolean {
+  return effectiveHarnessEnvRaw("AGENT_CTX_PROVENANCE") !== "0";
+}
+
+/** Simple content hash for provenance IDs (djb2 → hex). */
+function provenanceHash(s: string): string {
+  let h = 5381;
+  for (let i = 0; i < Math.min(s.length, 80_000); i++) {
+    h = ((h << 5) + h) ^ s.charCodeAt(i);
+  }
+  return (h >>> 0).toString(16).padStart(8, "0");
+}
+
+interface Tier2Block {
+  provenanceId: string;
+  turnRange: [number, number];
+  label: string;
+  toolCallsSummary: string[];
+  keyFacts: string[];
+  summaryText: string;
+}
+
+function buildTier2Block(rounds: Round[], baseRoundIndex: number): Tier2Block {
+  const toolCallsSummary: string[] = [];
+  const structuredFacts: string[] = [];
+  const heuristicFacts: string[] = [];
+  const summaryParts: string[] = [];
+
+  for (const r of rounds) {
+    // Real facts (paths, URLs, ports, counts, key=values) pulled from full tool
+    // bodies — preserved verbatim so summarization does not erase hard knowledge.
+    for (const tr of r.toolResults) {
+      for (const f of extractFactsRaw(tr.name, tr.body)) {
+        structuredFacts.push(`${f.kind}: ${f.value}`.slice(0, 160));
+      }
+    }
+    const lines = r.summary.split("\n").filter(Boolean);
+    for (const line of lines.slice(0, 4)) {
+      toolCallsSummary.push(line.trim());
+      // Heuristic fallback: lines containing "→" with a result snippet.
+      if (line.includes("→") && line.length > 20) {
+        heuristicFacts.push(line.trim().slice(0, 120));
+      }
+    }
+    summaryParts.push(lines[0]?.trim() ?? "(round)");
+  }
+
+  const dedupedStructured = [...new Set(structuredFacts)];
+  const keyFacts =
+    dedupedStructured.length > 0
+      ? dedupedStructured.slice(0, 12)
+      : heuristicFacts.slice(0, 8);
+
+  const label = summaryParts.slice(0, 3).join("; ").slice(0, 200);
+  const content = toolCallsSummary.join("\n");
+  const provenanceId = provenanceHash(content + label + baseRoundIndex);
+
+  return {
+    provenanceId,
+    turnRange: [baseRoundIndex, baseRoundIndex + rounds.length - 1],
+    label,
+    toolCallsSummary: toolCallsSummary.slice(0, 24),
+    keyFacts,
+    summaryText: content,
+  };
+}
+
+function buildTier2SummaryMessage(block: Tier2Block): Message {
+  const structured = JSON.stringify({
+    __liminal_ctx_tier: 2,
+    provenance_id: block.provenanceId,
+    turn_range: block.turnRange,
+    label: block.label,
+    tool_calls_summary: block.toolCallsSummary,
+    key_facts: block.keyFacts,
+  });
+  return {
+    role: "user",
+    content:
+      `[CTX-TIER-2 turns=${block.turnRange[0]}–${block.turnRange[1]} provenance=${block.provenanceId}]\n` +
+      "```json\n" + structured + "\n```\n" +
+      `Digest: ${block.label}\n` +
+      `[Use read_artifact("${block.provenanceId}") to re-expand this block if needed]`,
+  };
+}
+
+function buildTier3SummaryMessage(rounds: Round[], baseRoundIndex: number): Message {
+  const label = rounds
+    .map((r) => r.summary.split("\n")[0]?.trim() ?? "(round)")
+    .slice(0, 5)
+    .join("; ")
+    .slice(0, 300);
+  const provenanceId = provenanceHash(label + baseRoundIndex + rounds.length);
+  return {
+    role: "user",
+    content:
+      `[CTX-TIER-3 turns=${baseRoundIndex}–${baseRoundIndex + rounds.length - 1} provenance=${provenanceId} — far history, collapsed]\n` +
+      `Episode: ${label}\n` +
+      `[Use recall/search_memory to retrieve details from this period]`,
+  };
 }
 
 // ─── Context Manager ──────────────────────────────────────────────────────────
@@ -143,6 +263,8 @@ export class ContextManager {
   private inceptionOverride?: Message[];
   /** Appended to inception protocol (message[1]) from `protocolDynamicBuilder`. */
   private protocolDynamicSuffix = "";
+  /** Current turn intent hint forwarded to protocolDynamicBuilder to suppress irrelevant sections. */
+  private currentIntentHint = "any";
   /** ZipAct-style bounded summary injected after inception (not stored in conversation). */
   private workingStateBlock = "";
   /** When set, rendered instead of raw workingStateBlock (structured epistemic snapshot). */
@@ -157,7 +279,12 @@ export class ContextManager {
   /** Recompute protocol suffix from current tool names (root + child registries). */
   refreshProtocolDynamic(toolNames: string[]): void {
     const builder = this.config.protocolDynamicBuilder;
-    this.protocolDynamicSuffix = builder ? builder(toolNames) : "";
+    this.protocolDynamicSuffix = builder ? builder(toolNames, this.currentIntentHint) : "";
+  }
+
+  /** Update the per-turn intent hint used to suppress irrelevant protocol sections. */
+  setProtocolIntentHint(hint: string): void {
+    this.currentIntentHint = hint;
   }
 
   /** Replace inception messages (used for child harness after scoped tools are registered). */
@@ -335,6 +462,21 @@ export class ContextManager {
     return this.computeSnapshot(this.buildMessagesSync());
   }
 
+  /**
+   * Return the text content of all CONTEXT COMPRESSED summary blocks
+   * currently in the conversation — for the recall_compression tool.
+   */
+  getCompressionSummaries(): string[] {
+    const out: string[] = [];
+    for (const m of this.conversation) {
+      if (m.role !== "user" || typeof m.content !== "string") continue;
+      if (m.content.startsWith("[CONTEXT COMPRESSED")) {
+        out.push(m.content);
+      }
+    }
+    return out;
+  }
+
   /** Returns the last assistant text message (for subtask result extraction). */
   getLastAssistantMessage(): string | null {
     for (let i = this.conversation.length - 1; i >= 0; i--) {
@@ -362,27 +504,25 @@ export class ContextManager {
   }
 
   /**
-   * ACON-lite compression: instead of blanking individual tool results,
-   * collapse old rounds into a structured summary block.
+   * ACON-lite compression with optional tiered preservation (AGENT_CTX_PROVENANCE).
    *
-   * Preserves: all user messages, error results, think/plan rounds,
-   * and the most recent keepRecentRounds complete rounds.
+   * Tier 1 (hot): last `AGENT_CTX_HOT_ROUNDS` rounds kept verbatim.
+   * Tier 2 (warm): next `AGENT_CTX_WARM_ROUNDS` rounds → structured JSON blocks with provenance IDs.
+   * Tier 3 (cold): remaining rounds → single-sentence episode labels.
    *
-   * (#1 Fix Fallback Masking — KEEP_RECENT_ROUNDS unified here)
-   * (#7 Structured Event Log — calls onCompressed callback)
+   * When tiered mode is off (AGENT_CTX_PROVENANCE=0), falls back to the original flat summary.
    */
   private async compressOldRounds(inception: Message[], conv: Message[]): Promise<Message[]> {
-    const keepRecent = this.config.keepRecentRounds ?? 6;
+    const hotRounds = resolveCtxHotRounds();
+    const keepRecent = this.config.keepRecentRounds ?? hotRounds;
     const rounds = extractRounds(conv);
 
     if (rounds.length <= keepRecent) {
-      // Fallback: if too few rounds to compress, do simple blanking
       return this.fallbackMaskObservations(inception, conv);
     }
 
     const snapBefore = this.computeSnapshot([...inception, ...conv]);
 
-    // Identify rounds eligible for compression (not recent, not error, not think/plan)
     const compressUpTo = rounds.length - keepRecent;
     const toCompress = rounds.slice(0, compressUpTo).filter(
       (r) => !r.hasError && !r.hasThinkOrPlan
@@ -392,18 +532,48 @@ export class ContextManager {
       return this.fallbackMaskObservations(inception, conv);
     }
 
-    // Build set of indices to remove
+    // Build set of indices to remove (same for both tiered and flat paths)
     const removeIdxs = new Set<number>();
     for (const round of toCompress) {
       removeIdxs.add(round.assistantIdx);
-      for (const idx of round.toolResultIdxs) {
-        removeIdxs.add(idx);
+      for (const idx of round.toolResultIdxs) removeIdxs.add(idx);
+    }
+    const firstRemovedIdx = Math.min(...removeIdxs);
+
+    // ── Tiered path ────────────────────────────────────────────────────────────
+    if (isProvenanceEnabled()) {
+      const warmCount = resolveCtxWarmRounds();
+      const summaryMessages: Message[] = [];
+
+      if (toCompress.length > warmCount) {
+        // Cold tier (oldest rounds beyond warm budget)
+        const coldRounds = toCompress.slice(0, toCompress.length - warmCount);
+        summaryMessages.push(buildTier3SummaryMessage(coldRounds, 0));
+
+        // Warm tier
+        const warmRounds = toCompress.slice(toCompress.length - warmCount);
+        if (warmRounds.length > 0) {
+          const warmMsg = this.buildWarmTierMessages(warmRounds, coldRounds.length);
+          summaryMessages.push(...warmMsg);
+          // Write provenance artifacts for warm blocks
+          await this.writeProvenanceArtifacts(warmRounds, coldRounds.length);
+        }
+      } else {
+        // All fit in warm tier
+        const warmMsg = this.buildWarmTierMessages(toCompress, 0);
+        summaryMessages.push(...warmMsg);
+        await this.writeProvenanceArtifacts(toCompress, 0);
       }
+
+      const newConv = this.rebuildConv(conv, removeIdxs, firstRemovedIdx, summaryMessages);
+      const result = [...inception, ...newConv];
+      const snapAfter = this.computeSnapshot(result);
+      this.config.onCompressed?.(snapBefore.usageFraction, snapAfter.usageFraction, toCompress.length);
+      return result;
     }
 
-    // Build summary message
+    // ── Flat legacy path ───────────────────────────────────────────────────────
     const summaryLines = toCompress.map((r) => r.summary).join("\n");
-    // Semantic compression: if a summarizer is wired, produce a causal narrative.
     let humanDigest = summaryLines;
     if (this.config.semanticSummarizer) {
       try {
@@ -433,32 +603,64 @@ export class ContextManager {
         `[End summary — use recall/search_memory/memory_query to access any stored details]`,
     };
 
-    // Reconstruct: insert summary before the first kept message, remove compressed messages
-    const firstRemovedIdx = Math.min(...removeIdxs);
-    const newConv: Message[] = [];
-    let summaryInserted = false;
+    const newConv = this.rebuildConv(conv, removeIdxs, firstRemovedIdx, [summaryMsg]);
+    const result = [...inception, ...newConv];
+    const snapAfter = this.computeSnapshot(result);
+    this.config.onCompressed?.(snapBefore.usageFraction, snapAfter.usageFraction, toCompress.length);
+    return result;
+  }
 
+  private buildWarmTierMessages(rounds: Round[], baseIdx: number): Message[] {
+    // Group into blocks of up to 4 rounds each
+    const blockSize = 4;
+    const messages: Message[] = [];
+    for (let i = 0; i < rounds.length; i += blockSize) {
+      const chunk = rounds.slice(i, i + blockSize);
+      const block = buildTier2Block(chunk, baseIdx + i);
+      messages.push(buildTier2SummaryMessage(block));
+    }
+    return messages;
+  }
+
+  private async writeProvenanceArtifacts(rounds: Round[], baseIdx: number): Promise<void> {
+    const blockSize = 4;
+    for (let i = 0; i < rounds.length; i += blockSize) {
+      const chunk = rounds.slice(i, i + blockSize);
+      const block = buildTier2Block(chunk, baseIdx + i);
+      const content = JSON.stringify({
+        provenance_id: block.provenanceId,
+        turn_range: block.turnRange,
+        label: block.label,
+        tool_calls_summary: block.toolCallsSummary,
+        key_facts: block.keyFacts,
+        full_summary: block.summaryText,
+      }, null, 2);
+      try {
+        await writeArtifact(block.provenanceId, content);
+      } catch {
+        /* non-fatal — provenance artifact is advisory */
+      }
+    }
+  }
+
+  private rebuildConv(
+    conv: Message[],
+    removeIdxs: Set<number>,
+    firstRemovedIdx: number,
+    summaryMessages: Message[]
+  ): Message[] {
+    const newConv: Message[] = [];
+    let inserted = false;
     for (let i = 0; i < conv.length; i++) {
       if (removeIdxs.has(i)) continue;
-      if (!summaryInserted && i >= firstRemovedIdx) {
-        newConv.push(summaryMsg);
-        summaryInserted = true;
+      if (!inserted && i >= firstRemovedIdx) {
+        newConv.push(...summaryMessages);
+        inserted = true;
       }
       newConv.push(conv[i]!);
     }
-    if (!summaryInserted) newConv.unshift(summaryMsg);
-
-    const result = [...inception, ...newConv];
-
-    // Notify caller of compression stats (#7)
-    const snapAfter = this.computeSnapshot(result);
-    this.config.onCompressed?.(
-      snapBefore.usageFraction,
-      snapAfter.usageFraction,
-      toCompress.length
-    );
-
-    return result;
+    if (!inserted) newConv.unshift(...summaryMessages);
+    return newConv;
   }
 
   /**

@@ -26,7 +26,11 @@ export function guardToolArgs(
     }
   }
 
-  if (toolName === "write_file" || toolName === "read_file") {
+  if (
+    toolName === "write_file" ||
+    toolName === "read_file" ||
+    toolName === "edit_file"
+  ) {
     const path = String(args["path"] ?? "");
     if (!path || path.trim() === "") {
       return "Path must be non-empty.";

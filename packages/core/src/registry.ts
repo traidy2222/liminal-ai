@@ -159,6 +159,19 @@ export class ToolRegistry {
     }
   }
 
+  /** Activate all tools belonging to the given family ids (lazy mode). */
+  activateFamilies(familyIds: readonly string[]): string[] {
+    if (!this.lazyToolLoading || familyIds.length === 0) return [];
+    const want = new Set(familyIds.map((f) => f.trim().toLowerCase()).filter(Boolean));
+    const toolNames: string[] = [];
+    for (const [tool, family] of this.toolFamilyByName) {
+      if (want.has(family.toLowerCase()) && this.tools.has(tool)) {
+        toolNames.push(tool);
+      }
+    }
+    return this.activate(toolNames);
+  }
+
   /** Add tools to active set; returns names that were newly activated. */
   activate(names: readonly string[]): string[] {
     if (!this.lazyToolLoading) return [];
@@ -173,14 +186,15 @@ export class ToolRegistry {
     return newly;
   }
 
-  toOpenAIFormat(): OpenAI.Chat.Completions.ChatCompletionTool[] {
+  toOpenAIFormat(filter?: (name: string) => boolean): OpenAI.Chat.Completions.ChatCompletionTool[] {
     const defs = !this.lazyToolLoading
       ? this.getAll()
       : [...this.activeToolNames]
           .sort(compareToolNames)
           .map((n) => this.tools.get(n))
           .filter((t): t is ToolDefinition => t !== undefined);
-    return defs.map((t) => ({
+    const filtered = filter ? defs.filter((t) => filter(t.name)) : defs;
+    return filtered.map((t) => ({
       type: "function" as const,
       function: {
         name: t.name,
