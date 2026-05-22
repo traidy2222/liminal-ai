@@ -1,6 +1,26 @@
 # Liminal
 
-Local-first agent runtime for tool-heavy software work — structured ReAct loop, strict tool dispatch, memory and vault integration, TUI and web UIs, and scenario-based evals. Built for reliability and debuggability, not demo polish.
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+![Node](https://img.shields.io/badge/Node-22%2B-339933?logo=node.js&logoColor=white)
+![TypeScript](https://img.shields.io/badge/TypeScript-5-3178C6?logo=typescript&logoColor=white)
+
+**A model-agnostic agent harness for tool-heavy software work.**
+
+Liminal is the orchestration layer around the model — a structured ReAct loop with strict
+tool dispatch, persistent memory, sub-agent orchestration, and matching terminal and web
+UIs. Point it at any OpenAI-compatible API (OpenRouter, a local LM Studio model, anything
+that speaks the protocol) and run it yourself. Built for reliability and observability,
+not demo polish.
+
+![Liminal's web UI mid-task — calling tools to write and type-check a file, then streaming the answer back](assets/web-ui.png)
+
+<p align="center"><em>The web UI mid-task: writing a file, type-checking it through the shell, and streaming the result back — with every tool call shown inline.</em></p>
+
+## Why Liminal
+
+- **Model-agnostic** — bring any OpenAI-compatible endpoint; no vendor lock-in, no hosted middleman.
+- **Reliability-engineered** — retries, context compression, approval gates, drift scoring, and resumable writes; the loop is built not to fall over mid-task.
+- **Yours to run and inspect** — a transparent process on your machine with a terminal *and* web UI, streaming every tool call and state change as it happens.
 
 **Requirements:** Node.js 22+, npm 10+, an OpenAI-compatible API (OpenRouter by default).
 
@@ -27,16 +47,21 @@ First-run persona overlay: `npm run tui -- --bootstrap` or `npm run web -- --boo
 
 Step-by-step setup, Settings vs `.env`, and profiles → **[docs/start/quickstart.md](docs/start/quickstart.md)** · **[docs/start/configuration-basics.md](docs/start/configuration-basics.md)**.
 
-## What you get
+## Capabilities
 
-| Area | Highlights |
-|------|------------|
-| **Harness** | ReAct loop, retries, context compression, approval gates, optional self-heal lint |
-| **Tools** | Files, shell, git, code intel, web (`web_search` + `web_fetch`), memory, Obsidian vault, orchestration |
-| **State** | Epistemic subgoals, execution contracts, streaming events (TUI + SSE web) |
-| **Quality** | `packages/eval` scenario packs; `npm run test` on core |
+| Area | What's in the box |
+|------|-------------------|
+| **Reliable loop** | ReAct loop with retries, context compression, approval gates for destructive tools, drift scoring, optional post-edit self-heal lint |
+| **Tools** | Files (incl. resumable streaming large-file writes), shell and processes, git, code intelligence (AST, symbols, tests, lint), web search + fetch, headless browser automation with CAPTCHA solving |
+| **Knowledge** | Typed memory with hybrid BM25 + vector recall; Obsidian vault read / write / graph |
+| **Autonomy** | Sub-agent orchestration, intra-round dispatch DAG, contract verification, per-turn reasoning-budget control |
+| **Documents** | Optional engine that renders PPTX / DOCX / PDF through an internal IR with layout linting and a quality gate |
+| **Personas** | Generate a custom assistant — voice, behavior, and a themed web shell — from a single prompt |
+| **State & streaming** | Epistemic subgoals, execution contracts, live token and tool streaming over the TUI and the SSE web client |
+| **Quality** | Scenario-based eval packs in `packages/eval`; unit tests on `core` |
 
-Liminal is a **runtime**, not a hosted SaaS or a thin chat wrapper. Destructive tools can require approval; use `--yolo` only in trusted environments.
+Liminal is a **harness you run**, not a hosted SaaS or a thin chat wrapper. Destructive
+tools can require approval; use `--yolo` only in trusted environments.
 
 ## Repository
 
@@ -59,7 +84,7 @@ Build order: **core → tools** before running tui/web/eval. Contributor command
 | `npm run typecheck` | Typecheck all workspaces |
 | `npm run test` | Core unit tests |
 | `npm run tui` / `npm run web` | Run interfaces |
-| `npm run web:dev` | API :3001 + Vite :5173 |
+| `npm run web:dev` | API :3001 + Vite :3000 |
 | `npm run eval -w packages/eval` | Scenario evals |
 | `npm run docs:dev` | Browse docs (VitePress) |
 
@@ -68,7 +93,7 @@ Workspace builds: `npm run build -w packages/core` then `packages/tools`. Eval f
 ## Configuration
 
 - **Secrets** — `AGENT_API_KEY` (and related) in `.env` only.
-- **Everything else** — typed defaults in code, overridable via web **Settings** or `.agent_runtime_prefs.json`.
+- **Everything else** — typed defaults in code, overridable via web **Settings** or `.agent_runtime_prefs.json` (local, gitignored).
 - **Full key list** — [docs/reference/environment.md](docs/reference/environment.md) (`npm run docs:gen` after inventory changes).
 
 Narrative flag groups: [docs/configuration.md](docs/configuration.md). Baseline bundles: [docs/operations/profiles.md](docs/operations/profiles.md).
@@ -97,4 +122,4 @@ Details: **`CLAUDE.md`** (agents) · **[docs/README.md](docs/README.md)** (opera
 
 ## License
 
-No top-level `LICENSE` file is present yet; add one before external distribution if needed.
+Liminal is released under the [MIT License](LICENSE).
