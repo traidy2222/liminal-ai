@@ -94,6 +94,17 @@ export async function readArtifactText(
   }
 }
 
+/** When distill archives a read_file body, reopen the same path — do not funnel models into read_artifact. */
+function tryExtractReadFilePathFromArgsJson(argsJson: string): string | null {
+  try {
+    const j = JSON.parse(argsJson) as { path?: unknown };
+    if (typeof j.path === "string" && j.path.trim().length > 0) return j.path.trim();
+  } catch {
+    /* ignore */
+  }
+  return null;
+}
+
 export function shouldDistillToolOutput(toolName: string, output: string): boolean {
   if (effectiveHarnessEnvRaw("AGENT_DISTILL") !== "1") return false;
   if (!output || output.startsWith("ERROR:")) return false;
@@ -155,16 +166,22 @@ export async function distillToolOutput(
     next_actions,
     full_text_pointer: pointer,
   };
-  const nextActionsJson = JSON.stringify({
-    read_artifact: { hash },
-  });
+  const rfPath = toolName === "read_file" ? tryExtractReadFilePathFromArgsJson(argsJson) : null;
+  const nextActionsJson =
+    rfPath !== null
+      ? JSON.stringify({ read_file: { path: rfPath, offset: 1, limit: 8000 }, read_artifact: { hash } })
+      : JSON.stringify({ read_artifact: { hash } });
+  const retrieveHint =
+    rfPath !== null
+      ? `To see more source: prefer read_file(${JSON.stringify(rfPath)}) with offset/limit — file is still on disk. read_artifact is optional (distill archive hash=${hash}).\n`
+      : `read_artifact({ "hash": "${hash}" }) to retrieve full text.\n`;
   const display =
     `[DISTILLED OUTPUT — full text archived at hash=${hash}]\n` +
     `claims:\n${claims.map((c) => `  - ${c}`).join("\n")}\n` +
     `paths_or_urls:\n${paths_or_urls.map((p) => `  - ${p}`).join("\n") || "  (none)"}\n` +
     `unknowns:\n${unknowns.map((u) => `  - ${u}`).join("\n") || "  (none)"}\n` +
     `next_actions:\n${next_actions.map((a) => `  - ${a}`).join("\n") || "  (none)"}\n` +
-    `read_artifact({ "hash": "${hash}" }) to retrieve full text.\n` +
+    retrieveHint +
     `NEXT_ACTIONS_JSON: ${nextActionsJson}`;
   return { display, distilled };
 }

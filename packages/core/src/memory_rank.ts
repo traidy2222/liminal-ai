@@ -193,3 +193,111 @@ function bm25ForQuery(
   if (queryTerms.length === 0) return 0;
   return bm25ForDoc(queryTerms, docTokens, df, N, avgdl);
 }
+
+// ─── Semantic dream gating ────────────────────────────────────────────────────
+
+/**
+ * Score a turn message against a set of notes using BM25.
+ * Returns a normalized [0, 1] score. Used to gate auto-recall:
+ * if score < AGENT_DREAM_THRESHOLD, skip the recall call.
+ */
+export function scoreTurnAgainstIndex(turn: string, docs: RankableDoc[]): number {
+  if (!turn.trim() || docs.length === 0) return 0;
+  const queryTerms = tokenize(turn);
+  if (queryTerms.length === 0) return 0;
+
+  const docTokenLists = docs.map((d) => tokenize(d.text));
+  const df = buildDf(docTokenLists);
+  const N = docs.length;
+  const totalLen = docTokenLists.reduce((a, t) => a + Math.max(t.length, 1), 0);
+  const avgdl = totalLen / N;
+
+  let maxScore = 0;
+  for (const docTokens of docTokenLists) {
+    const s = bm25ForDoc(queryTerms, docTokens, df, N, avgdl);
+    if (s > maxScore) maxScore = s;
+  }
+
+  // Normalize: BM25 scores are unbounded but typically < 20 in practice.
+  // Divide by a soft ceiling so the result lands in [0, 1].
+  return Math.min(1, maxScore / 12);
+}
+
+// ─── Contradiction detection ──────────────────────────────────────────────────
+
+export interface Contradiction {
+  noteKey?: string;
+  staleClaim: string;
+  freshFact: string;
+  confidence: number;
+}
+
+/** Extract number-like values from a string (port numbers, counts, booleans, etc.). */
+function extractScalarValues(s: string): string[] {
+  const nums = s.match(/\b\d{1,6}\b/g) ?? [];
+  const bools = s.match(/\b(true|false|yes|no|on|off|enabled|disabled)\b/gi) ?? [];
+  return [...nums, ...bools.map((b) => b.toLowerCase())];
+}
+
+/**
+ * Compare a stored note against recent tool output strings.
+ * Returns a contradiction if a shared entity appears with a different value.
+ */
+export function detectContradictions(
+  recalled: Array<{ key?: string; text: string }>,
+  toolOutputs: string[],
+  opts?: { confidenceThreshold?: number }
+): Contradiction[] {
+  if (recalled.length === 0 || toolOutputs.length === 0) return [];
+  const threshold = opts?.confidenceThreshold ?? 0;
+  const contradictions: Contradiction[] = [];
+
+  for (const note of recalled) {
+    const noteTokens = tokenize(note.text);
+    if (noteTokens.length === 0) continue;
+    const noteValues = extractScalarValues(note.text);
+    if (noteValues.length === 0) continue;
+
+    for (const output of toolOutputs) {
+      const outputValues = extractScalarValues(output);
+      if (outputValues.length === 0) continue;
+
+      // Check whether note and tool output share keywords (entity proximity)
+      const outputTokens = tokenize(output);
+      const sharedTokens = noteTokens.filter((t) => outputTokens.includes(t));
+      if (sharedTokens.length < 2) continue;
+
+      // Look for overlapping entity names but differing scalar values
+      for (const nVal of noteValues) {
+        if (outputValues.includes(nVal)) continue; // same value — no contradiction
+        // Find a conflicting value in the output that's near a shared entity token
+        for (const oVal of outputValues) {
+          if (nVal === oVal) continue;
+          // Ensure the differing values are of the same semantic type (both numbers or both bools)
+          const nIsNum = /^\d+$/.test(nVal);
+          const oIsNum = /^\d+$/.test(oVal);
+          if (nIsNum !== oIsNum) continue;
+
+          // Confidence: boosted by number of shared entity tokens
+          const confidence = Math.min(0.95, 0.5 + sharedTokens.length * 0.08);
+          if (confidence < threshold) continue;
+
+          // Produce a concise fresh fact from the tool output context around the value
+          const idx = output.indexOf(oVal);
+          const ctx = output.slice(Math.max(0, idx - 60), idx + oVal.length + 60).trim();
+
+          contradictions.push({
+            noteKey: note.key,
+            staleClaim: `${sharedTokens.slice(0, 3).join(" ")} = ${nVal}`,
+            freshFact: ctx.slice(0, 200),
+            confidence,
+          });
+          break; // one contradiction per note per output is enough
+        }
+        if (contradictions.some((c) => c.noteKey === note.key)) break;
+      }
+    }
+  }
+
+  return contradictions;
+}

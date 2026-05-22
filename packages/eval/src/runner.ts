@@ -3,9 +3,7 @@ import "./evalWorkspaceBootstrap.js";
  * Eval runner — runs behavioral scenario assertions against a live AgentHarness.
  * (#10 Eval Infrastructure — ReliabilityBench arXiv:2601.06112, AgentNoiseBench arXiv:2602.11348)
  *
- * Scenarios use the real LLM (via OpenRouter) as integration tests unless mocked fully.
- * Eval model is pinned to openrouter/owl-alpha for comparability across runs.
- * Set OPENROUTER_API_KEY env var to authenticate.
+ * Scenarios use the configured harness LLM (defaults: local OpenAI-compatible Qwen).
  */
 import { appendFile, mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
@@ -295,7 +293,7 @@ function makeEvalConfig(maxRounds: number, timeoutMs: number): AgentConfig {
       modelMaxTokens: 32_000,
       thresholdFraction: 0.8,
       inceptionMessages: INCEPTION_MESSAGES,
-      protocolDynamicBuilder: (names) => buildProtocolDynamicSuffix(names),
+      protocolDynamicBuilder: (names, hint) => buildProtocolDynamicSuffix(names, (hint ?? "any") as import("@liminal/tools").ProtocolIntentHint),
       compressionGuideline:
         "Preserve file paths, error codes, and user-stated constraints when summarizing older tool rounds.",
     },
@@ -352,7 +350,6 @@ async function runSingleHarnessSend(scenario: Scenario, userMessage: string): Pr
     "drift_detected",
     "runtime_heartbeat",
     "vault_activity",
-    "recency_check",
     "synthesis_check",
     "runtime_pref_detected",
     "runtime_pref_changed",

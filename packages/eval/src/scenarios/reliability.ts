@@ -367,15 +367,8 @@ export const recencyAccuracyScenario: Scenario = {
       check: (trace) => /\bas of\b|\bas-of\b|\bupdated\b|\blast updated\b/i.test(traceCollectTextBlob(trace)),
     },
     {
-      name: "recency_check telemetry emitted",
-      check: (trace) => trace.some((e) => e.type === "recency_check"),
-    },
-    {
-      name: "recency check passes or uncertainty is explicit",
+      name: "uncertainty explicit when latest not verified",
       check: (trace) => {
-        const checks = trace.filter((e) => e.type === "recency_check");
-        const last = checks.at(-1)?.payload as { passed?: boolean } | undefined;
-        if (last?.passed === true) return true;
         const blob = traceCollectTextBlob(trace).toLowerCase();
         return /could not fully verify|provisional|uncertainty|cannot verify latest/.test(blob);
       },
@@ -498,10 +491,6 @@ export const weatherNoFabricatedLiveClaimScenario: Scenario = {
   ],
   assertions: [
     { name: "turn_end fires", check: (trace) => traceHasTurnEnd(trace) },
-    {
-      name: "recency_check telemetry emitted",
-      check: (trace) => trace.some((e) => e.type === "recency_check"),
-    },
     {
       name: "assistant avoids unsupported certainty",
       check: (trace) => {

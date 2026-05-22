@@ -38,6 +38,10 @@ import {
 } from "./platform_context.js";
 import { gatherExternalTerminalSnapshots } from "./terminal_snapshot.js";
 import { effectiveHarnessEnvRaw } from "./harness_effective_env.js";
+import {
+  DEFAULT_AGENT_API_BASE_URL,
+  DEFAULT_AGENT_MODEL_SLUG,
+} from "./harness_default_constants.js";
 import { execFile as execFileCb } from "node:child_process";
 import { promisify } from "node:util";
 
@@ -68,6 +72,11 @@ export interface WorldContextOptions {
    * snippets under "Relevant memory" (root harness only).
    */
   firstUserMessage?: string;
+  /**
+   * Live provider config for this harness (AgentHarness.config after prefs merge).
+   * Ground truth for "what model am I using?" in this session.
+   */
+  activeLlm?: { model: string; baseURL: string };
 }
 
 // ─── Internal result types ────────────────────────────────────────────────────
@@ -575,6 +584,13 @@ function extractNoteUpdatedAt(note: MaybeStoredNote): string | undefined {
   return typeof note === "string" ? undefined : note.updatedAt;
 }
 
+/** Returns true when an ISO date string is older than `thresholdDays` days relative to now. */
+function isStaleDate(isoDate: string, thresholdDays: number): boolean {
+  const parsed = Date.parse(isoDate);
+  if (isNaN(parsed)) return false;
+  return Date.now() - parsed > thresholdDays * 86_400_000;
+}
+
 async function gatherSessionMemory(workspaceRoot: string): Promise<SessionMemory | null> {
   const notesFile = path.join(workspaceRoot, ".agent_notes.json");
   const projBasename = path.basename(workspaceRoot).toLowerCase();
@@ -604,7 +620,10 @@ async function gatherSessionMemory(workspaceRoot: string): Promise<SessionMemory
     countByType[type] = (countByType[type] ?? 0) + 1;
 
     if (type === "fact") {
-      facts.push({ key, value: value.slice(0, 100) });
+      const staleTag = updatedAt && isStaleDate(updatedAt, 14)
+        ? ` [info from ${updatedAt.slice(0, 10)} — verify current]`
+        : "";
+      facts.push({ key, value: value.slice(0, 100) + staleTag });
     } else if (type === "experience") {
       experiences.push({ key, value: value.slice(0, 120) });
     } else if (type === "entity") {
@@ -1043,28 +1062,32 @@ export async function buildWorldContextMessage(options?: WorldContextOptions): P
   );
   const processCwd = process.cwd();
 
-  const TIMEOUT = 1500;
+  // Category-based timeouts: fast file reads get 300ms, medium async ops 800ms, slow shell/embed ops 1500ms.
+  const T_FAST = 300;
+  const T_MED  = 800;
+  const T_SLOW = 1500;
 
   // Parallel gather — all results degrade to null on timeout/error
   const [resources, project, git, tools, ports, style, memory, vault, repoMapLines, agendaLines, overdueLines, breakoutLines] = await Promise.all([
-    withDeadline(gatherResources(workspaceRoot), TIMEOUT),
-    withDeadline(gatherProject(workspaceRoot), TIMEOUT),
-    withDeadline(gatherGit(workspaceRoot), TIMEOUT),
-    withDeadline(probeInstalledTools(), TIMEOUT),
-    withDeadline(scanActivePorts(), TIMEOUT),
-    withDeadline(gatherCodeStyle(workspaceRoot), TIMEOUT),
-    withDeadline(gatherSessionMemory(workspaceRoot), TIMEOUT),
-    withDeadline(gatherVaultSummary(), TIMEOUT),
-    withDeadline(gatherRepoMapLines({ scope: "packages", root: workspaceRoot }), TIMEOUT),
-    withDeadline(gatherSessionAgendaLines(workspaceRoot), TIMEOUT),
-    withDeadline(gatherOverdueScheduleLines(workspaceRoot), TIMEOUT),
-    withDeadline(gatherBreakoutMandateLines(workspaceRoot), TIMEOUT),
+    withDeadline(gatherResources(workspaceRoot), T_SLOW),
+    withDeadline(gatherProject(workspaceRoot), T_MED),
+    withDeadline(gatherGit(workspaceRoot), T_SLOW),
+    withDeadline(probeInstalledTools(), T_SLOW),
+    withDeadline(scanActivePorts(), T_MED),
+    withDeadline(gatherCodeStyle(workspaceRoot), T_MED),
+    withDeadline(gatherSessionMemory(workspaceRoot), T_SLOW),
+    withDeadline(gatherVaultSummary(), T_SLOW),
+    withDeadline(gatherRepoMapLines({ scope: "packages", root: workspaceRoot }), T_SLOW),
+    withDeadline(gatherSessionAgendaLines(workspaceRoot), T_FAST),
+    withDeadline(gatherOverdueScheduleLines(workspaceRoot), T_FAST),
+    withDeadline(gatherBreakoutMandateLines(workspaceRoot), T_FAST),
   ]);
 
   // ── Core system ──────────────────────────────────────────────────────────────
   const now = new Date();
   const isoDate = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,"0")}-${String(now.getDate()).padStart(2,"0")}`;
-  const isoTime = `${String(now.getHours()).padStart(2,"0")}:${String(now.getMinutes()).padStart(2,"0")}:${String(now.getSeconds()).padStart(2,"0")}`;
+  // Minute resolution only — seconds would bust the provider KV cache prefix on every request.
+  const isoTime = `${String(now.getHours()).padStart(2,"0")}:${String(now.getMinutes()).padStart(2,"0")}`;
   const dow     = now.toLocaleDateString("en-US", { weekday: "long" });
   const tz      = getTimezone();
   const offset  = getUtcOffset();
@@ -1076,7 +1099,7 @@ export async function buildWorldContextMessage(options?: WorldContextOptions): P
   const host    = os.hostname();
 
   const lines: string[] = [
-    `[WORLD CONTEXT — session grounding, ${isoDate} ${isoTime}]`,
+    `[WORLD CONTEXT — session grounding, ${isoDate}]`,
     ``,
     `Date/Time:  ${dow}, ${isoDate}  ${isoTime}  (${offset} · ${tz})`,
     ...(options?.location ? [`Location:   ${options.location}`] : []),
@@ -1101,11 +1124,19 @@ export async function buildWorldContextMessage(options?: WorldContextOptions): P
   );
   lines.push(`OS account: ${user} @ ${host}  →  ${home}  (system username — not necessarily the user's preferred name; check memory for actual name)`);
   lines.push(`Runtime:    Node.js ${process.version}`);
-  const configuredModel = effectiveHarnessEnvRaw("AGENT_MODEL")?.trim() || "openrouter/owl-alpha";
-  const configuredBaseURL =
-    effectiveHarnessEnvRaw("AGENT_API_BASE_URL")?.trim() || "https://openrouter.ai/api/v1";
+  const activeModel =
+    options?.activeLlm?.model?.trim() ||
+    effectiveHarnessEnvRaw("AGENT_MODEL")?.trim() ||
+    DEFAULT_AGENT_MODEL_SLUG;
+  const activeBaseURL =
+    options?.activeLlm?.baseURL?.trim() ||
+    effectiveHarnessEnvRaw("AGENT_API_BASE_URL")?.trim() ||
+    DEFAULT_AGENT_API_BASE_URL;
   lines.push(`Harness:    Liminal AgentHarness`);
-  lines.push(`LLM config: model=${configuredModel}  ·  baseURL=${configuredBaseURL}`);
+  lines.push(`LLM active: model=${activeModel}  ·  baseURL=${activeBaseURL}`);
+  lines.push(
+    `  · This line is authoritative for "what model are you on?" — not vault/memory notes that mention other slugs.`
+  );
   lines.push(
     `Stack identity (do not conflate — prefer this over stale memory that merges layers):`
   );
@@ -1276,7 +1307,7 @@ export async function buildWorldContextMessage(options?: WorldContextOptions): P
     const seed = options.firstUserMessage.trim();
     const primed = await withDeadline(
       gatherRelevantPrimedLines(seed, 6, 6, workspaceRoot),
-      TIMEOUT
+      T_SLOW
     );
     if (primed && primed.length > 0) {
       lines.push(sep("Relevant memory"));

@@ -3,7 +3,7 @@
  */
 import { defineTool } from "./helpers.js";
 import { loadNotes, atomicUpdate } from "./notes_store.js";
-import { cosineSimilarity, tokenize, withProviderRequestSpacing, effectiveHarnessEnvRaw } from "@liminal/core";
+import { cosineSimilarity, tokenize, withProviderRequestSpacing, effectiveHarnessEnvRaw, DEFAULT_AGENT_MODEL_SLUG } from "@liminal/core";
 import { loadEmbedIndex, saveEmbedIndex, pruneOrphanEmbeddingKeys } from "./memory_index.js";
 
 function jaccard(a: Set<string>, b: Set<string>): number {
@@ -87,7 +87,8 @@ export const memoryConsolidateTool = defineTool({
     const apiKey = process.env["OPENROUTER_API_KEY"];
     if (!apiKey) return { ok: false, error: "OPENROUTER_API_KEY required for merge planning" };
 
-    const model = effectiveHarnessEnvRaw("AGENT_MEMORY_CONSOLIDATE_MODEL")?.trim() || "openrouter/owl-alpha";
+    const model =
+      effectiveHarnessEnvRaw("AGENT_MEMORY_CONSOLIDATE_MODEL")?.trim() || DEFAULT_AGENT_MODEL_SLUG;
     const base = (process.env["OPENROUTER_BASE_URL"] ?? "https://openrouter.ai/api/v1").replace(
       /\/$/,
       ""

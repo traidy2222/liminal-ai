@@ -37,6 +37,24 @@ function rrfFuse(rankings: string[][], kConst = 60): Map<string, number> {
   return scores;
 }
 
+/**
+ * Parse AGENT_RECALL_WEIGHTS="sem:rrf:bm" and return the weighted sum.
+ * Falls back to default weights (0.45/0.35/0.20) if env var is absent or malformed.
+ */
+function recallWeights(sem: number, rrf: number, bm: number): number {
+  const raw = effectiveHarnessEnvRaw("AGENT_RECALL_WEIGHTS")?.trim();
+  if (raw) {
+    const parts = raw.split(":").map(Number);
+    if (parts.length === 3 && parts.every(isFinite) && parts.every((n) => n >= 0)) {
+      const total = parts[0]! + parts[1]! + parts[2]!;
+      if (total > 0) {
+        return (parts[0]! / total) * sem + (parts[1]! / total) * rrf + (parts[2]! / total) * bm;
+      }
+    }
+  }
+  return 0.45 * sem + 0.35 * rrf + 0.2 * bm;
+}
+
 function parseIsoMs(s?: string): number | null {
   if (!s) return null;
   const t = new Date(s).getTime();
@@ -320,7 +338,7 @@ export const recallRelevantTool = defineTool({
           confidence,
           accessCount,
         });
-        const hybrid = (0.45 * sem + 0.35 * rrf + 0.2 * bm) * tier;
+        const hybrid = recallWeights(sem, rrf, bm) * tier;
         if (hybrid < 0.008) continue;
         fused.push({ id, score: hybrid, value: val });
       }
@@ -342,13 +360,17 @@ export const recallRelevantTool = defineTool({
 
       if (effectiveHarnessEnvRaw("AGENT_MEMORY_GRAPH") !== "0" && top.length > 0) {
         const extra = new Map<string, { id: string; score: number; value: string }>();
+        // visited guards against re-adding items already in top and prevents
+        // redundant traversal when bidirectional links (A→B, B→A) exist.
+        const visited = new Set(top.map((t) => t.id));
         const floor = top.length > 0 ? top[top.length - 1]!.score * 0.35 : 0;
         for (const t of top.slice(0, Math.min(6, top.length))) {
           const rv = raw[t.id];
           if (!rv || typeof rv === "string") continue;
           const links = (rv as StoredNote).links ?? [];
           for (const lk of links) {
-            if (!plain[lk] || extra.has(lk)) continue;
+            if (visited.has(lk) || !plain[lk] || extra.has(lk)) continue;
+            visited.add(lk);
             extra.set(lk, {
               id: lk,
               score: floor,
