@@ -1,5 +1,10 @@
 import { useEffect, useReducer, useCallback, useRef } from "react";
-import type { PersonaUiThemeV1 } from "@liminal/core/persona-ui-theme";
+import type { PersonaUiThemeV2 } from "@liminal/core/persona-ui-theme";
+import type { PersonaArtifactPreview } from "@liminal/core/persona-bootstrap-progress";
+import {
+  extractStreamingWritePreview,
+  isStreamingWriteTool,
+} from "@liminal/core/streaming-write-preview";
 import type { ImageAttachment } from "./imageAttachments.js";
 import { readPersonaChromeFromSession, writePersonaChromeToSession } from "./personaChromeSessionCache.js";
 
@@ -8,6 +13,129 @@ function sanitizeDeltaText(text: string): string {
     .replace(/�/g, "")
     .replace(/\s*⚙\s*/g, " ")
     .replace(/\r/g, "");
+}
+
+function finalizeStreamingModelReasoning(messages: MessageEntry[]): MessageEntry[] {
+  return messages.map((m) =>
+    m.kind === "model_reasoning" && m.streaming ? { ...m, streaming: false } : m
+  );
+}
+
+function finalizeStreamingReasoningEntries(messages: MessageEntry[]): MessageEntry[] {
+  return messages.map((m) => {
+    if (m.kind === "think" && m.streaming) {
+      return {
+        ...m,
+        streaming: false,
+        content: m.content.trim() ? m.content : "(reasoning interrupted before completion)",
+      };
+    }
+    if (m.kind === "plan" && m.streaming) {
+      return { ...m, streaming: false };
+    }
+    if (m.kind === "model_reasoning" && m.streaming) {
+      return { ...m, streaming: false };
+    }
+    return m;
+  });
+}
+
+function updateStreamingThinkFromArgs(
+  messages: MessageEntry[],
+  callId: string,
+  argsJson: string
+): MessageEntry[] {
+  return messages.map((m) => {
+    if (m.kind !== "think" || m.callId !== callId || !m.streaming) return m;
+    const preview = extractStreamingWritePreview("think", argsJson);
+    return { ...m, argsJson, content: preview?.content ?? m.content };
+  });
+}
+
+function updateStreamingReasonFromArgs(
+  messages: MessageEntry[],
+  callId: string,
+  argsJson: string
+): MessageEntry[] {
+  return messages.map((m) => {
+    if (m.kind !== "reason" || m.callId !== callId || !m.streaming) return m;
+    const preview = extractStreamingWritePreview("reason", argsJson);
+    return { ...m, argsJson, inference: preview?.content ?? m.inference };
+  });
+}
+
+function promoteWriteToolCallIfArgsComplete(
+  entry: Extract<MessageEntry, { kind: "tool_call" }>,
+  argsJson: string
+): Extract<MessageEntry, { kind: "tool_call" }> {
+  if (entry.status !== "streaming" || !isStreamingWriteTool(entry.name)) {
+    return { ...entry, argsJson };
+  }
+  const preview = extractStreamingWritePreview(entry.name, argsJson);
+  if (preview && !preview.incomplete) {
+    return { ...entry, argsJson, status: "running" };
+  }
+  return { ...entry, argsJson };
+}
+
+function updateStreamingPlanFromArgs(
+  messages: MessageEntry[],
+  callId: string,
+  argsJson: string
+): MessageEntry[] {
+  return messages.map((m) => {
+    if (m.kind !== "plan" || m.callId !== callId || !m.streaming) return m;
+    const preview = extractStreamingWritePreview("plan", argsJson);
+    return {
+      ...m,
+      argsJson,
+      previewText: preview?.rawArgsTail ?? preview?.content ?? m.previewText ?? "",
+    };
+  });
+}
+
+/** Close tool cards that never received tool_result (stream timeout, error, forced idle). */
+function finalizeOrphanToolCalls(messages: MessageEntry[]): MessageEntry[] {
+  const withReasoning = finalizeStreamingReasoningEntries(messages);
+  const now = Date.now();
+  const orphans = withReasoning.filter(
+    (m): m is Extract<MessageEntry, { kind: "tool_call" }> =>
+      m.kind === "tool_call" &&
+      m.endedAt == null &&
+      (m.status === "streaming" || m.status === "running" || m.status === "pending_approval")
+  );
+  if (orphans.length === 0) return withReasoning;
+
+  const orphanIds = new Set(orphans.map((m) => m.callId));
+  const updated = withReasoning.map((m) =>
+    m.kind === "tool_call" && orphanIds.has(m.callId)
+      ? { ...m, status: "error" as const, endedAt: now }
+      : m
+  );
+  const results: MessageEntry[] = orphans.map((m) => ({
+    kind: "tool_result" as const,
+    callId: m.callId,
+    ok: false,
+    output:
+      m.status === "pending_approval"
+        ? "Turn ended before approval (harness stopped or connection lost)."
+        : m.status === "streaming"
+        ? "Turn ended while tool arguments were still streaming (provider stall or timeout)."
+        : "Turn ended before the tool finished executing.",
+  }));
+  return [...updated, ...results];
+}
+
+/** Prevents React from crashing if the server emits malformed SSE JSON. */
+function parseEventData(e: MessageEvent): unknown {
+  const raw = (e as MessageEvent<string>).data;
+  if (typeof raw !== "string" || !raw.trim()) return undefined;
+  try {
+    return JSON.parse(raw) as unknown;
+  } catch (err) {
+    console.warn("[useSSE] SSE JSON.parse failed:", err);
+    return undefined;
+  }
 }
 
 export type MessageEntry =
@@ -24,8 +152,37 @@ export type MessageEntry =
       endedAt?: number;
     }
   | { kind: "tool_result"; callId: string; output: string; ok: boolean }
-  | { kind: "think"; content: string }
-  | { kind: "plan"; steps: string[] }
+  | {
+      kind: "think";
+      callId?: string;
+      streaming?: boolean;
+      argsJson?: string;
+      content: string;
+      tool_families?: string[];
+      scope?: string;
+      unknowns?: string[];
+      clarification_needed?: boolean;
+      clarification_question?: string;
+      self_check?: number;
+    }
+  | {
+      kind: "reason";
+      callId?: string;
+      streaming?: boolean;
+      argsJson?: string;
+      inference: string;
+      confidence?: "low" | "medium" | "high";
+      next_action?: string;
+    }
+  | {
+      kind: "plan";
+      steps: string[];
+      callId?: string;
+      streaming?: boolean;
+      argsJson?: string;
+      previewText?: string;
+    }
+  | { kind: "model_reasoning"; text: string; streaming: boolean }
   | { kind: "trace"; text: string }
   | { kind: "pulse_nudge"; text: string; at: number }
   | {
@@ -95,13 +252,26 @@ export type PendingApprovalState = {
   receivedAt: number;
 };
 
+/** EventSource/stream layer (distinct from REST API reachability). */
+export type SseTransport = "open" | "reconnecting" | "offline";
+
+/** Lightweight `/api/status` probe (no SSE). */
+export type ApiReachable = "unknown" | "ok" | "down";
+
 export interface SSEState {
   messages: MessageEntry[];
   contextSnapshot: ContextSnapshot | null;
   autoDream: AutoDreamState;
   pendingApproval: PendingApprovalState | null;
   pendingAskUser: { prompt: string } | null;
+  /** True when the SSE handshake received `connected` and the socket is usable. */
   connected: boolean;
+  /** Stream quality: reconnecting/offline ≠ API down (see `apiReachable`). */
+  sseTransport: SseTransport;
+  sseTransportDetail: string;
+  /** Becomes true after the first SSE `connected` handshake (avoids BOOT→DEGRADED flash). */
+  sseHasOpenedOnce: boolean;
+  apiReachable: ApiReachable;
   busy: boolean;
   error: string | null;
   personaName: string;
@@ -110,8 +280,9 @@ export interface SSEState {
   personaBootstrapAllowSkip: boolean;
   personaBootstrapProgress: string | null;
   personaBootstrapStage: string | null;
+  personaBootstrapArtifacts: PersonaArtifactPreview[] | null;
   /** Latest normalized persona HUD theme from server (null = defaults). */
-  personaUiTheme: PersonaUiThemeV1 | null;
+  personaUiTheme: PersonaUiThemeV2 | null;
   /** Header / HUD brand line. */
   personaDisplayLabel: string;
   /** Provider retry events counted during the current send; snapshotted on turn_end. */
@@ -134,16 +305,28 @@ type Action =
       uiVerbosity: "normal" | "quiet";
       personaBootstrapPending?: boolean;
       personaBootstrapAllowSkip?: boolean;
-      personaUiTheme?: PersonaUiThemeV1 | null;
+      personaUiTheme?: PersonaUiThemeV2 | null;
       personaDisplayLabel?: string;
       personalityHeartbeatUiStrip?: boolean;
       personalityHeartbeatEnabled?: boolean;
     }
   | { type: "connected" }
-  | { type: "disconnected" }
+  /** Transport lost mid-session; preserves agent `error` unless API is unreachable. */
+  | {
+      type: "sse_reconnecting";
+      payload: {
+        detail: string;
+        attempt: number;
+        /** From `/api/status` — adjusts copy (“busy while SSE down”). */
+        serverBusy?: boolean;
+      };
+    }
+  /** Result probing `/api/status` after SSE interruption. */
+  | { type: "api_probe_result"; payload: { apiReachable: "ok" | "down"; detail?: string } }
   | { type: "harness_running"; payload: { startedAt: number } }
   | { type: "user_message"; text: string }
-  | { type: "text"; payload: { delta: string; channel?: "user" | "trace" } }
+  | { type: "remove_last_user_message" }
+  | { type: "text"; payload: { delta: string; channel?: "user" | "trace" | "reasoning" } }
   | { type: "provider_retry"; payload: { attempt: number; maxAttempts: number; message: string; backoffMs: number } }
   | { type: "tool_start"; payload: { callId: string; name: string } }
   | { type: "tool_delta"; payload: { callId: string; argsDelta: string } }
@@ -190,7 +373,15 @@ type Action =
         error?: string;
       };
     }
-  | { type: "persona_bootstrap_progress"; payload: { stage: string; message: string; at: number } }
+  | {
+      type: "persona_bootstrap_progress";
+      payload: {
+        stage: string;
+        message: string;
+        at: number;
+        artifacts?: PersonaArtifactPreview[];
+      };
+    }
   | { type: "session_reset" }
   | { type: "heartbeat_scheduled"; payload: { taskId: string; firesAtMs: number; idleMs: number } }
   | { type: "heartbeat_started"; payload: { taskId: string; runId: string } }
@@ -233,7 +424,11 @@ function reducer(state: SSEState, action: Action): SSEState {
           ? { personaBootstrapAllowSkip: action.personaBootstrapAllowSkip }
           : {}),
         ...(action.personaBootstrapPending === false
-          ? { personaBootstrapProgress: null, personaBootstrapStage: null }
+          ? {
+              personaBootstrapProgress: null,
+              personaBootstrapStage: null,
+              personaBootstrapArtifacts: null,
+            }
           : {}),
         ...(action.personaUiTheme !== undefined ? { personaUiTheme: action.personaUiTheme } : {}),
         ...(typeof action.personaDisplayLabel === "string"
@@ -248,17 +443,52 @@ function reducer(state: SSEState, action: Action): SSEState {
       };
 
     case "connected":
-      return { ...state, connected: true, error: null };
+      return {
+        ...state,
+        connected: true,
+        sseTransport: "open",
+        sseTransportDetail: "",
+        apiReachable: "ok",
+        sseHasOpenedOnce: true,
+        error: null,
+      };
 
-    case "disconnected":
+    case "sse_reconnecting": {
+      const { detail, attempt, serverBusy } = action.payload;
+      const busyFrag =
+        serverBusy === true ? " Harness busy — live events may pause until SSE recovers." : "";
+      const suffix = attempt > 0 ? ` (attempt ${attempt})` : "";
+      const fullDetail = `${detail}${suffix}${busyFrag}`.trim();
       return {
         ...state,
         connected: false,
-        error:
-          state.error && state.error !== "Agent error"
-            ? state.error
-            : "Connection lost. Reconnecting...",
+        sseTransport: "reconnecting",
+        sseTransportDetail: fullDetail,
       };
+    }
+
+    case "api_probe_result": {
+      const wasDown = state.apiReachable === "down";
+      if (action.payload.apiReachable === "down") {
+        const d =
+          typeof action.payload.detail === "string" && action.payload.detail.trim()
+            ? action.payload.detail.trim()
+            : "Cannot reach API (check :3001 / proxy / vite dev proxy).";
+        return {
+          ...state,
+          apiReachable: "down",
+          connected: false,
+          sseTransport: "offline",
+          sseTransportDetail: d,
+          error: d,
+        };
+      }
+      return {
+        ...state,
+        apiReachable: "ok",
+        ...(wasDown ? { error: null } : {}),
+      };
+    }
 
     case "harness_running":
       return { ...state, busy: true };
@@ -276,6 +506,7 @@ function reducer(state: SSEState, action: Action): SSEState {
         personaBootstrapPending: state.personaBootstrapPending,
         personaBootstrapProgress: null,
         personaBootstrapStage: null,
+        personaBootstrapArtifacts: null,
         lastTurnProviderRetries: 0,
         recoveryPendingCount: 0,
         lastContextCompress: null,
@@ -288,6 +519,7 @@ function reducer(state: SSEState, action: Action): SSEState {
         ...state,
         personaBootstrapProgress: action.payload.message,
         personaBootstrapStage: action.payload.stage,
+        personaBootstrapArtifacts: action.payload.artifacts ?? state.personaBootstrapArtifacts,
       };
 
     case "user_message":
@@ -299,10 +531,44 @@ function reducer(state: SSEState, action: Action): SSEState {
         messages: [...state.messages, { kind: "user", text: action.text }],
       };
 
+    case "remove_last_user_message": {
+      const msgs = [...state.messages];
+      for (let i = msgs.length - 1; i >= 0; i--) {
+        if (msgs[i]?.kind === "user") {
+          msgs.splice(i, 1);
+          break;
+        }
+      }
+      return { ...state, messages: msgs, busy: false };
+    }
+
     case "text": {
       const ch = action.payload.channel ?? "user";
       if (state.uiVerbosity === "quiet" && ch === "trace") {
         return state;
+      }
+      if (ch === "reasoning") {
+        let baseMessages = stripTrailingProviderRetry(state.messages);
+        if (/reasoning budget restart/i.test(action.payload.delta)) {
+          baseMessages = finalizeStreamingModelReasoning(baseMessages);
+        }
+        const last = baseMessages.at(-1);
+        if (last?.kind === "model_reasoning" && last.streaming) {
+          return {
+            ...state,
+            messages: [
+              ...baseMessages.slice(0, -1),
+              { ...last, text: last.text + action.payload.delta },
+            ],
+          };
+        }
+        return {
+          ...state,
+          messages: [
+            ...baseMessages,
+            { kind: "model_reasoning", text: action.payload.delta, streaming: true },
+          ],
+        };
       }
       if (ch === "trace") {
         const lastT = state.messages.at(-1);
@@ -320,7 +586,9 @@ function reducer(state: SSEState, action: Action): SSEState {
           messages: [...state.messages, { kind: "trace", text: action.payload.delta }],
         };
       }
-      const baseMessages = stripTrailingProviderRetry(state.messages);
+      let baseMessages = finalizeStreamingModelReasoning(
+        stripTrailingProviderRetry(state.messages)
+      );
       const last = baseMessages.at(-1);
       if (last?.kind === "assistant" && last.streaming) {
         return {
@@ -342,34 +610,84 @@ function reducer(state: SSEState, action: Action): SSEState {
 
     case "provider_retry": {
       const nextRecovery = state.recoveryPendingCount + 1;
+      const baseMessages = stripTrailingProviderRetry(state.messages);
       if (state.uiVerbosity === "quiet") {
-        return { ...state, recoveryPendingCount: nextRecovery };
+        return { ...state, recoveryPendingCount: nextRecovery, messages: baseMessages };
       }
       const { attempt, maxAttempts, message, backoffMs } = action.payload;
       const maxLabel = maxAttempts > 0 ? String(maxAttempts) : "∞";
       const line = `⟳ Provider retry ${attempt}/${maxLabel} in ${Math.round(backoffMs / 1000)}s: ${message.slice(0, 220)}`;
-      const last = state.messages.at(-1);
+      const last = baseMessages.at(-1);
       if (last?.kind === "provider_retry") {
         return {
           ...state,
           recoveryPendingCount: nextRecovery,
-          messages: [...state.messages.slice(0, -1), { kind: "provider_retry", text: line }],
+          messages: [...baseMessages.slice(0, -1), { kind: "provider_retry", text: line }],
         };
       }
       return {
         ...state,
         recoveryPendingCount: nextRecovery,
-        messages: [...state.messages, { kind: "provider_retry", text: line }],
+        messages: [...baseMessages, { kind: "provider_retry", text: line }],
       };
     }
 
     case "tool_start": {
-      const { name } = action.payload;
-      if (name === "think" || name === "plan" || ORCH_TOOLS.has(name)) return state;
+      const { callId, name } = action.payload;
+      const baseAfterReasoning = finalizeStreamingModelReasoning(
+        stripTrailingProviderRetry(state.messages)
+      );
+      if (name === "think") {
+        return {
+          ...state,
+          messages: [
+            ...baseAfterReasoning,
+            {
+              kind: "think",
+              callId,
+              streaming: true,
+              argsJson: "",
+              content: "",
+            },
+          ],
+        };
+      }
+      if (name === "plan") {
+        return {
+          ...state,
+          messages: [
+            ...baseAfterReasoning,
+            {
+              kind: "plan",
+              callId,
+              streaming: true,
+              argsJson: "",
+              steps: [],
+              previewText: "",
+            },
+          ],
+        };
+      }
+      if (name === "reason") {
+        return {
+          ...state,
+          messages: [
+            ...baseAfterReasoning,
+            {
+              kind: "reason",
+              callId,
+              streaming: true,
+              argsJson: "",
+              inference: "",
+            },
+          ],
+        };
+      }
+      if (ORCH_TOOLS.has(name)) return state;
       return {
         ...state,
         messages: [
-          ...stripTrailingProviderRetry(state.messages),
+          ...baseAfterReasoning,
           {
             kind: "tool_call",
             callId: action.payload.callId,
@@ -382,15 +700,49 @@ function reducer(state: SSEState, action: Action): SSEState {
       };
     }
 
-    case "tool_delta":
+    case "tool_delta": {
+      const { callId, argsDelta } = action.payload;
+      const thinkEntry = state.messages.find(
+        (m): m is Extract<MessageEntry, { kind: "think" }> =>
+          m.kind === "think" && m.streaming === true && m.callId === callId
+      );
+      if (thinkEntry) {
+        const argsJson = (thinkEntry.argsJson ?? "") + argsDelta;
+        return {
+          ...state,
+          messages: updateStreamingThinkFromArgs(state.messages, callId, argsJson),
+        };
+      }
+      const reasonEntry = state.messages.find(
+        (m): m is Extract<MessageEntry, { kind: "reason" }> =>
+          m.kind === "reason" && m.streaming === true && m.callId === callId
+      );
+      if (reasonEntry) {
+        const argsJson = (reasonEntry.argsJson ?? "") + argsDelta;
+        return {
+          ...state,
+          messages: updateStreamingReasonFromArgs(state.messages, callId, argsJson),
+        };
+      }
+      const planEntry = state.messages.find(
+        (m): m is Extract<MessageEntry, { kind: "plan" }> =>
+          m.kind === "plan" && m.streaming === true && m.callId === callId
+      );
+      if (planEntry) {
+        const argsJson = (planEntry.argsJson ?? "") + argsDelta;
+        return {
+          ...state,
+          messages: updateStreamingPlanFromArgs(state.messages, callId, argsJson),
+        };
+      }
       return {
         ...state,
-        messages: state.messages.map((m) =>
-          m.kind === "tool_call" && m.callId === action.payload.callId
-            ? { ...m, argsJson: m.argsJson + action.payload.argsDelta }
-            : m
-        ),
+        messages: state.messages.map((m) => {
+          if (m.kind !== "tool_call" || m.callId !== callId) return m;
+          return promoteWriteToolCallIfArgsComplete(m, m.argsJson + argsDelta);
+        }),
       };
+    }
 
     case "tool_approval":
       return {
@@ -424,10 +776,36 @@ function reducer(state: SSEState, action: Action): SSEState {
     case "tool_result": {
       const { callId, name, args, ok, output } = action.payload;
       if (name === "think" && ok) {
-        return {
-          ...state,
-          messages: [...state.messages, { kind: "think", content: args["content"] as string }],
+        const finalized = {
+          kind: "think" as const,
+          callId,
+          streaming: false as const,
+          content: (args["content"] as string) ?? "",
+          tool_families: args["tool_families"] as string[] | undefined,
+          scope: args["scope"] as string | undefined,
+          unknowns: args["unknowns"] as string[] | undefined,
+          clarification_needed: args["clarification_needed"] as boolean | undefined,
+          clarification_question: args["clarification_question"] as string | undefined,
+          self_check: args["self_check"] as number | undefined,
         };
+        const withoutStreaming = state.messages.filter(
+          (m) => !(m.kind === "think" && m.streaming && m.callId === callId)
+        );
+        return { ...state, messages: [...withoutStreaming, finalized] };
+      }
+      if (name === "reason" && ok) {
+        const finalized = {
+          kind: "reason" as const,
+          callId,
+          streaming: false as const,
+          inference: (args["inference"] as string) ?? "",
+          confidence: args["confidence"] as "low" | "medium" | "high" | undefined,
+          next_action: args["next_action"] as string | undefined,
+        };
+        const withoutStreaming = state.messages.filter(
+          (m) => !(m.kind === "reason" && m.streaming && m.callId === callId)
+        );
+        return { ...state, messages: [...withoutStreaming, finalized] };
       }
       if (name === "plan" && ok) {
         const steps = Array.isArray(args["steps"])
@@ -435,9 +813,12 @@ function reducer(state: SSEState, action: Action): SSEState {
           : typeof args["step_index"] === "number"
           ? [`Step ${args["step_index"] as number} marked complete`]
           : [];
+        const withoutStreaming = state.messages.filter(
+          (m) => !(m.kind === "plan" && m.streaming && m.callId === callId)
+        );
         return {
           ...state,
-          messages: [...state.messages, { kind: "plan", steps }],
+          messages: [...withoutStreaming, { kind: "plan", steps, streaming: false }],
         };
       }
       if (ORCH_TOOLS.has(name)) return state;
@@ -462,8 +843,12 @@ function reducer(state: SSEState, action: Action): SSEState {
       return { ...state, pendingAskUser: null };
 
     case "turn_end": {
-      const msgs = stripTrailingProviderRetry(state.messages).map((m) =>
-        m.kind === "assistant" && m.streaming ? { ...m, streaming: false } : m
+      const msgs = finalizeOrphanToolCalls(
+        finalizeStreamingReasoningEntries(
+          stripTrailingProviderRetry(state.messages).map((m) =>
+            m.kind === "assistant" && m.streaming ? { ...m, streaming: false } : m
+          )
+        )
       );
       return {
         ...state,
@@ -483,15 +868,17 @@ function reducer(state: SSEState, action: Action): SSEState {
       const msgs = stripTrailingProviderRetry(state.messages).map((m) =>
         m.kind === "assistant" && m.streaming ? { ...m, streaming: false } : m
       );
-      const nextMessages = action.payload.addTraceNote
-        ? [
-            ...msgs,
-            {
-              kind: "trace" as const,
-              text: "[UI] Server finished; SSE turn_end was delayed or missed — UI unlocked. You can send again.\n",
-            },
-          ]
-        : msgs;
+      const nextMessages = finalizeOrphanToolCalls(
+        action.payload.addTraceNote
+          ? [
+              ...msgs,
+              {
+                kind: "trace" as const,
+                text: "[UI] Unlocked — no SSE activity for a while while the server showed idle (heuristic fallback). Try refresh if the transcript looks incomplete.\n",
+              },
+            ]
+          : msgs
+      );
       return {
         ...state,
         busy: false,
@@ -507,7 +894,7 @@ function reducer(state: SSEState, action: Action): SSEState {
         busy: false,
         personalityPulseActive: false,
         error: action.payload.message,
-        messages: stripTrailingProviderRetry(state.messages),
+        messages: finalizeOrphanToolCalls(stripTrailingProviderRetry(state.messages)),
       };
 
     case "subtask_spawned":
@@ -665,6 +1052,14 @@ const HARNESS_ACTIVITY_IDLE_MS = 22_000;
 /** Consecutive `/api/status` idle polls required before forced unlock. */
 const STATUS_IDLE_POLLS_REQUIRED = 3;
 const STATUS_POLL_INTERVAL_MS = 12_000;
+/**
+ * Stall advisory when assistant tokens / tool SSE stall (distinct from periodic
+ * `harness_running`, which proves the SSE socket is alive but not model progress).
+ */
+const BUSY_STALL_NO_SEMANTIC_SSE_MS = 52_000;
+/** Subsequent stall reminders while still busy — long upstream reasoning can legitimately pause. */
+const BUSY_STALL_SEMANTIC_REPEAT_MS = 240_000;
+const SSE_RECONNECT_PROBE_MIN_INTERVAL_MS = 450;
 
 // ─── Retry helpers ────────────────────────────────────────────────────────────
 
@@ -694,8 +1089,14 @@ async function fetchWithRetry(
       const r = await fetch(url, init);
       const body = await r.json().catch(() => ({}));
       lastStatus = r.status;
-      // 409 = agent busy; treat as success — first attempt got through
-      if (r.status === 409) return { ok: true, status: 409, body };
+      // 409 = duplicate send while agent is already processing — first attempt got through
+      if (r.status === 409) {
+        const errMsg = String((body as { error?: string }).error ?? "");
+        if (/already processing/i.test(errMsg)) {
+          return { ok: true, status: 409, body };
+        }
+        return { ok: false, status: 409, body };
+      }
       // 4xx client error — don't retry
       if (r.status >= 400 && r.status < 500) return { ok: false, status: r.status, body };
       if (r.ok) return { ok: true, status: r.status, body };
@@ -728,6 +1129,68 @@ async function fetchHarnessStatus(): Promise<HarnessStatusResponse | null> {
   }
 }
 
+function isAgentBusyResetConflict(status: number, body: unknown): boolean {
+  if (status !== 409) return false;
+  const errMsg = String((body as { error?: string }).error ?? "");
+  return /agent is busy|wait for the current turn/i.test(errMsg);
+}
+
+async function postSessionReset(body: {
+  mode: string;
+  greet?: boolean;
+}): Promise<{ ok: boolean; status: number; body: unknown; busy?: boolean }> {
+  try {
+    const r = await fetch(`${SERVER}/api/session/reset`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    const parsed = await r.json().catch(() => ({}));
+    if (r.ok) return { ok: true, status: r.status, body: parsed };
+    if (isAgentBusyResetConflict(r.status, parsed)) {
+      return { ok: false, status: 409, body: parsed, busy: true };
+    }
+    return { ok: false, status: r.status, body: parsed };
+  } catch (e) {
+    return {
+      ok: false,
+      status: 0,
+      body: { error: e instanceof Error ? e.message : "Network error" },
+    };
+  }
+}
+
+/** Wait until harness idle, then soft/hard reset (avoids 409 on reload / Strict Mode / mid-turn refresh). */
+const SESSION_RESET_IDLE_MAX_WAIT_MS = 90_000;
+const SESSION_RESET_IDLE_POLL_MS = 400;
+
+async function sessionResetWhenIdle(
+  body: { mode: string; greet?: boolean },
+  isCancelled: () => boolean
+): Promise<{ ok: boolean; status: number; body: unknown }> {
+  const deadline = Date.now() + SESSION_RESET_IDLE_MAX_WAIT_MS;
+  while (Date.now() < deadline) {
+    if (isCancelled()) return { ok: false, status: 0, body: { error: "cancelled" } };
+    const st = await fetchHarnessStatus();
+    if (isCancelled()) return { ok: false, status: 0, body: { error: "cancelled" } };
+    if (!st?.busy) {
+      const result = await postSessionReset(body);
+      if (result.ok) return result;
+      if (result.busy) {
+        await sleep(SESSION_RESET_IDLE_POLL_MS);
+        continue;
+      }
+      return result;
+    }
+    await sleep(SESSION_RESET_IDLE_POLL_MS);
+  }
+  return {
+    ok: false,
+    status: 408,
+    body: { error: "Timed out waiting for the agent to finish the current turn." },
+  };
+}
+
 // ─── React hook ───────────────────────────────────────────────────────────────
 
 export interface OutgoingChatMessage {
@@ -749,6 +1212,10 @@ function createInitialSSEState(): SSEState {
     pendingApproval: null,
     pendingAskUser: null,
     connected: false,
+    sseTransport: "offline",
+    sseTransportDetail: "",
+    apiReachable: "unknown",
+    sseHasOpenedOnce: false,
     busy: false,
     error: null,
     personaName: "Liminal",
@@ -757,6 +1224,7 @@ function createInitialSSEState(): SSEState {
     personaBootstrapAllowSkip: true,
     personaBootstrapProgress: null,
     personaBootstrapStage: null,
+    personaBootstrapArtifacts: null,
     personaUiTheme: chrome?.personaUiTheme ?? null,
     personaDisplayLabel: chrome?.personaDisplayLabel ?? "LIMINAL",
     lastTurnProviderRetries: 0,
@@ -782,16 +1250,47 @@ export function useSSE() {
   const reconnectTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const esRef = useRef<EventSource | null>(null);
   const cancelledRef = useRef(false);
+  /** Bumps on each SSE effect run so stale auto-reset loops exit after unmount/remount. */
+  const autoResetRunIdRef = useRef(0);
+  /** Fresh page load: one soft reset + greet before first SSE connect (survives effect re-runs). */
+  const autoGreetDoneRef = useRef(false);
   const fetchConfigRef = useRef<() => void>(() => {});
   /** True from `user_message` until `turn_end` / `error` / forced status unlock. */
   const expectTurnEndRef = useRef(false);
   const turnSentAtMsRef = useRef(0);
+  /** Any harness-related SSE pulse (incl. `harness_running` keepalive every 5s). */
   const lastHarnessActivityMsRef = useRef(0);
+  /** Last streamed tokens, tools, or other user-visible harness work (NOT `harness_running` alone). */
+  const lastSemanticHarnessActivityMsRef = useRef(0);
   const statusIdlePollStreakRef = useRef(0);
   const lastSeenServerTurnEndedAtRef = useRef<number | null>(null);
+  const lastReconnectProbeAtRef = useRef(0);
+  const uiVerbosityRef = useRef(state.uiVerbosity);
+  /** Timestamp of last semantic-stall advisory trace (`0` until first advisory this busy span). */
+  const lastSemanticStallAdvisoryAtMsRef = useRef(0);
+  /** Mirrors live stream health for stall-copy (interval closures cannot read latest React state). */
+  const streamLooksHealthyRef = useRef(false);
 
-  const markHarnessActivity = useCallback(() => {
+  useEffect(() => {
+    uiVerbosityRef.current = state.uiVerbosity;
+  }, [state.uiVerbosity]);
+
+  useEffect(() => {
+    streamLooksHealthyRef.current =
+      state.sseTransport === "open" &&
+      state.connected &&
+      state.apiReachable !== "down";
+  }, [state.sseTransport, state.connected, state.apiReachable]);
+
+  /** Server still attached — resets status-poll idle streaks. Does not imply model output. */
+  const markHarnessConnectivityActivity = useCallback(() => {
     lastHarnessActivityMsRef.current = Date.now();
+    statusIdlePollStreakRef.current = 0;
+  }, []);
+
+  const markHarnessSemanticActivity = useCallback(() => {
+    lastHarnessActivityMsRef.current = Date.now();
+    lastSemanticHarnessActivityMsRef.current = Date.now();
     statusIdlePollStreakRef.current = 0;
   }, []);
 
@@ -817,7 +1316,7 @@ export function useSSE() {
           expectTurnEndRef.current = false;
           dispatch({
             type: "sync_server_busy",
-            payload: { busy: false, addTraceNote: true },
+            payload: { busy: false, addTraceNote: false },
           });
         }
         return;
@@ -825,7 +1324,7 @@ export function useSSE() {
       if (!expectTurnEndRef.current) return;
       const now = Date.now();
       if (now - turnSentAtMsRef.current < TURN_POST_SEND_GRACE_MS) return;
-      if (now - lastHarnessActivityMsRef.current < HARNESS_ACTIVITY_IDLE_MS) return;
+      if (now - lastSemanticHarnessActivityMsRef.current < HARNESS_ACTIVITY_IDLE_MS) return;
       statusIdlePollStreakRef.current += 1;
       if (statusIdlePollStreakRef.current < STATUS_IDLE_POLLS_REQUIRED) return;
       expectTurnEndRef.current = false;
@@ -844,6 +1343,49 @@ export function useSSE() {
     const id = setInterval(() => void reconcileBusyFromStatus(), STATUS_POLL_INTERVAL_MS);
     return () => clearInterval(id);
   }, [state.busy, reconcileBusyFromStatus]);
+
+  useEffect(() => {
+    if (!state.busy) {
+      lastSemanticStallAdvisoryAtMsRef.current = 0;
+      return;
+    }
+    // Capture when the UI entered busy state. For reconnect / server-initiated turns the
+    // semantic-activity ref may still be at epoch (0), which would make semanticIdleMs
+    // enormous and fire the advisory immediately. Use whichever is more recent: the busy
+    // transition time or the last real model output, so the 52s window starts fresh.
+    const busyBecameActiveAt = Date.now();
+    const tick = (): void => {
+      const baseline = Math.max(busyBecameActiveAt, lastSemanticHarnessActivityMsRef.current);
+      const semanticIdleMs = Date.now() - baseline;
+      if (semanticIdleMs < BUSY_STALL_NO_SEMANTIC_SSE_MS) return;
+      const now = Date.now();
+      const lastAdv = lastSemanticStallAdvisoryAtMsRef.current;
+      const isFirstAdvice = lastAdv === 0;
+      const elapsedSinceAdvice = lastAdv > 0 ? now - lastAdv : 0;
+      if (!isFirstAdvice && elapsedSinceAdvice < BUSY_STALL_SEMANTIC_REPEAT_MS) return;
+      lastSemanticStallAdvisoryAtMsRef.current = now;
+
+      const minutes = Math.max(1, Math.round(semanticIdleMs / 60_000));
+      const healthy = streamLooksHealthyRef.current;
+      const delta = isFirstAdvice
+        ? healthy
+          ? `\n[UI] Busy ≥${Math.round(BUSY_STALL_NO_SEMANTIC_SSE_MS / 1000)}s with no streamed assistant or tool SSE — periodic harness_running pings only mean the stream is alive, not model tokens. Turn on RAW if you rely on harness trace lines quiet mode hides. Hangs before the first streamed chunk often clear only after NEW SESSION or restarting Express.\n`
+          : `\n[UI] Busy ≥${Math.round(BUSY_STALL_NO_SEMANTIC_SSE_MS / 1000)}s with no assistant/tool SSE while SIGNAL degraded — reconnects or tab sleep are common; compare /api/status (busy) with /api/stream.\n`
+        : healthy
+          ? `\n[UI] Still no assistant/tool output after ~${minutes}m (SSE connected). Provider may stall before streaming; typed default AGENT_SEND_TIMEOUT_MS is often 1800s — check Express terminal for upstream errors.\n`
+          : `\n[UI] Still no assistant/tool SSE after ~${minutes}m (stream unhealthy).\n`;
+
+      dispatch({
+        type: "text",
+        payload: {
+          channel: "trace",
+          delta,
+        },
+      });
+    };
+    const id = window.setInterval(tick, 15_000);
+    return () => window.clearInterval(id);
+  }, [state.busy]);
 
   useEffect(() => {
     cancelledRef.current = false;
@@ -876,7 +1418,7 @@ export function useSSE() {
               uiVerbosity?: string;
               personaBootstrapPending?: boolean;
               personaBootstrapAllowSkip?: boolean;
-              personaUiTheme?: PersonaUiThemeV1 | null;
+              personaUiTheme?: PersonaUiThemeV2 | null;
               personaDisplayLabel?: string;
               personalityHeartbeatUiStrip?: boolean;
               personalityHeartbeatEnabled?: boolean;
@@ -909,7 +1451,83 @@ export function useSSE() {
 
     fetchConfigRef.current = fetchAndApplyConfig;
 
+    const probeBootstrapApi = (): void => {
+      void fetchHarnessStatus().then((st) => {
+        if (cancelledRef.current) return;
+        if (st) {
+          dispatch({ type: "api_probe_result", payload: { apiReachable: "ok" } });
+          return;
+        }
+        dispatch({
+          type: "api_probe_result",
+          payload: {
+            apiReachable: "down",
+            detail:
+              "Cannot reach `/api/status` — Express may be down or `web:dev` cannot proxy to `:3001` (ECONNRESET while restarting is common).",
+          },
+        });
+      });
+    };
+
+    /**
+     * When SSE flakes, correlate with REST so we avoid labelling transient stalls as OFFLINE.
+     */
+    function probeAfterStreamInterrupt(
+      reason: "CONNECTING" | "CLOSED",
+      opts: { throttle: boolean; reconnectOrdinal?: number },
+    ): void {
+      const now = Date.now();
+      if (
+        opts.throttle &&
+        now - lastReconnectProbeAtRef.current < SSE_RECONNECT_PROBE_MIN_INTERVAL_MS
+      ) {
+        return;
+      }
+      lastReconnectProbeAtRef.current = now;
+
+      void fetchHarnessStatus().then((st) => {
+        if (cancelledRef.current) return;
+        if (!st) {
+          dispatch({
+            type: "api_probe_result",
+            payload: {
+              apiReachable: "down",
+              detail:
+                "SSE interrupted — cannot reach `/api/status` (server stopped, blocked, or stale dev proxy).",
+            },
+          });
+          return;
+        }
+
+        dispatch({ type: "api_probe_result", payload: { apiReachable: "ok" } });
+
+        const ordinal = opts.reconnectOrdinal ?? reconnectAttempt.current;
+        const base =
+          reason === "CLOSED"
+            ? "SSE connection closed — scheduling reconnect"
+            : "SSE stuck in CONNECTING — native retry or 2s takeover will reopen";
+        dispatch({
+          type: "sse_reconnecting",
+          payload: {
+            detail: base,
+            attempt: Math.max(0, ordinal),
+            serverBusy: st.busy === true,
+          },
+        });
+
+        if (uiVerbosityRef.current !== "normal" || ordinal < 2) return;
+        dispatch({
+          type: "text",
+          payload: {
+            channel: "trace",
+            delta: `\n[UI/SSE] ${reason} reconnect · shown_attempt=${ordinal}${st.busy ? " · api_busy" : ""}\n`,
+          },
+        });
+      });
+    }
+
     fetchAndApplyConfig();
+    probeBootstrapApi();
 
     function connect() {
       if (cancelledRef.current) return;
@@ -939,39 +1557,72 @@ export function useSSE() {
 
       es.addEventListener("text", (e: MessageEvent) => {
         trackId(e);
-        const payload = JSON.parse(e.data) as { delta: string; channel?: "user" | "trace" };
-        if ((payload.channel ?? "user") !== "trace") markHarnessActivity();
+        const payload = parseEventData(e) as {
+          delta?: string;
+          channel?: "user" | "trace" | "reasoning";
+        } | undefined;
+        if (!payload || typeof payload.delta !== "string") return;
+        // Count trace + user deltas as harness activity so long reasoning-only streams
+        // and quiet periods between tools do not trip the status-poll idle unlock path.
+        markHarnessSemanticActivity();
         const cleaned = sanitizeDeltaText(payload.delta);
-        if ((payload.channel ?? "user") === "trace") queuedTrace.current += cleaned;
+        const ch = payload.channel ?? "user";
+        if (ch === "reasoning") {
+          flushNow();
+          dispatch({ type: "text", payload: { delta: cleaned, channel: "reasoning" } });
+          return;
+        }
+        if (ch === "trace") queuedTrace.current += cleaned;
         else queuedText.current += cleaned;
         queueFlush();
       });
 
       es.addEventListener("provider_retry", (e: MessageEvent) => {
         trackId(e);
-        dispatch({ type: "provider_retry", payload: JSON.parse(e.data) });
+        markHarnessSemanticActivity();
+        const p = parseEventData(e);
+        if (p == null) return;
+        dispatch({ type: "provider_retry", payload: p as never });
       });
       es.addEventListener("tool_start", (e: MessageEvent) => {
-        trackId(e); flushNow();
-        dispatch({ type: "tool_start", payload: JSON.parse(e.data) });
+        trackId(e);
+        markHarnessSemanticActivity();
+        flushNow();
+        const p = parseEventData(e);
+        if (p == null) return;
+        dispatch({ type: "tool_start", payload: p as never });
       });
       es.addEventListener("tool_delta", (e: MessageEvent) => {
-        trackId(e); flushNow();
-        dispatch({ type: "tool_delta", payload: JSON.parse(e.data) });
+        trackId(e);
+        markHarnessSemanticActivity();
+        flushNow();
+        const p = parseEventData(e);
+        if (p == null) return;
+        dispatch({ type: "tool_delta", payload: p as never });
       });
       es.addEventListener("tool_approval", (e: MessageEvent) => {
-        trackId(e); flushNow();
-        dispatch({ type: "tool_approval", payload: JSON.parse(e.data) });
+        trackId(e);
+        markHarnessSemanticActivity();
+        flushNow();
+        const p = parseEventData(e);
+        if (p == null) return;
+        dispatch({ type: "tool_approval", payload: p as never });
       });
       es.addEventListener("tool_result", (e: MessageEvent) => {
         trackId(e);
-        markHarnessActivity();
+        markHarnessSemanticActivity();
         flushNow();
-        dispatch({ type: "tool_result", payload: JSON.parse(e.data) });
+        const p = parseEventData(e);
+        if (p == null) return;
+        dispatch({ type: "tool_result", payload: p as never });
       });
       es.addEventListener("ask_user", (e: MessageEvent) => {
-        trackId(e); flushNow();
-        dispatch({ type: "ask_user", payload: JSON.parse(e.data) });
+        trackId(e);
+        markHarnessSemanticActivity();
+        flushNow();
+        const p = parseEventData(e);
+        if (p == null) return;
+        dispatch({ type: "ask_user", payload: p as never });
       });
       es.addEventListener("turn_end", (e: MessageEvent) => {
         trackId(e);
@@ -983,56 +1634,92 @@ export function useSSE() {
           }
         });
         flushNow();
-        dispatch({ type: "turn_end", payload: JSON.parse(e.data) });
+        const p = parseEventData(e);
+        if (p == null) return;
+        dispatch({ type: "turn_end", payload: p as never });
       });
       es.addEventListener("subtask_spawned", (e: MessageEvent) => {
-        trackId(e); flushNow();
-        dispatch({ type: "subtask_spawned", payload: JSON.parse(e.data) });
+        trackId(e);
+        markHarnessSemanticActivity();
+        flushNow();
+        const p = parseEventData(e);
+        if (p == null) return;
+        dispatch({ type: "subtask_spawned", payload: p as never });
       });
       es.addEventListener("subtask_complete", (e: MessageEvent) => {
-        trackId(e); flushNow();
-        dispatch({ type: "subtask_complete", payload: JSON.parse(e.data) });
+        trackId(e);
+        markHarnessSemanticActivity();
+        flushNow();
+        const p = parseEventData(e);
+        if (p == null) return;
+        dispatch({ type: "subtask_complete", payload: p as never });
       });
       es.addEventListener("subtask_output", (e: MessageEvent) => {
-        trackId(e); flushNow();
-        dispatch({ type: "subtask_output", payload: JSON.parse(e.data) });
+        trackId(e);
+        markHarnessSemanticActivity();
+        flushNow();
+        const p = parseEventData(e);
+        if (p == null) return;
+        dispatch({ type: "subtask_output", payload: p as never });
       });
       es.addEventListener("plan_step_done", (e: MessageEvent) => {
-        trackId(e); flushNow();
-        dispatch({ type: "plan_step_done", payload: JSON.parse(e.data) });
+        trackId(e);
+        markHarnessSemanticActivity();
+        flushNow();
+        const p = parseEventData(e);
+        if (p == null) return;
+        dispatch({ type: "plan_step_done", payload: p as never });
       });
       es.addEventListener("context_compressed", (e: MessageEvent) => {
-        trackId(e); flushNow();
-        dispatch({ type: "context_compressed", payload: JSON.parse(e.data) });
+        trackId(e);
+        markHarnessSemanticActivity();
+        flushNow();
+        const p = parseEventData(e);
+        if (p == null) return;
+        dispatch({ type: "context_compressed", payload: p as never });
       });
       es.addEventListener("persona_changed", (e: MessageEvent) => {
         trackId(e); flushNow();
-        dispatch({ type: "persona_changed", payload: JSON.parse(e.data) });
+        const p = parseEventData(e);
+        if (p == null) return;
+        dispatch({ type: "persona_changed", payload: p as never });
         fetchConfigRef.current();
       });
       es.addEventListener("auto_dream", (e: MessageEvent) => {
         trackId(e);
-        dispatch({ type: "auto_dream", payload: JSON.parse(e.data) });
+        const p = parseEventData(e);
+        if (p == null) return;
+        dispatch({ type: "auto_dream", payload: p as never });
       });
       es.addEventListener("heartbeat_scheduled", (e: MessageEvent) => {
         trackId(e);
-        dispatch({ type: "heartbeat_scheduled", payload: JSON.parse(e.data) });
+        const p = parseEventData(e);
+        if (p == null) return;
+        dispatch({ type: "heartbeat_scheduled", payload: p as never });
       });
       es.addEventListener("heartbeat_started", (e: MessageEvent) => {
         trackId(e);
-        dispatch({ type: "heartbeat_started", payload: JSON.parse(e.data) });
+        const p = parseEventData(e);
+        if (p == null) return;
+        dispatch({ type: "heartbeat_started", payload: p as never });
       });
       es.addEventListener("heartbeat_completed", (e: MessageEvent) => {
         trackId(e);
-        dispatch({ type: "heartbeat_completed", payload: JSON.parse(e.data) });
+        const p = parseEventData(e);
+        if (p == null) return;
+        dispatch({ type: "heartbeat_completed", payload: p as never });
       });
       es.addEventListener("heartbeat_skipped", (e: MessageEvent) => {
         trackId(e);
-        dispatch({ type: "heartbeat_skipped", payload: JSON.parse(e.data) });
+        const p = parseEventData(e);
+        if (p == null) return;
+        dispatch({ type: "heartbeat_skipped", payload: p as never });
       });
       es.addEventListener("persona_bootstrap_progress", (e: MessageEvent) => {
         trackId(e);
-        dispatch({ type: "persona_bootstrap_progress", payload: JSON.parse(e.data) });
+        const p = parseEventData(e);
+        if (p == null) return;
+        dispatch({ type: "persona_bootstrap_progress", payload: p as never });
       });
       es.addEventListener("error", (e: Event) => {
         const me = e as MessageEvent;
@@ -1051,14 +1738,15 @@ export function useSSE() {
       });
       es.addEventListener("runtime_pref_detected", (e: MessageEvent) => {
         trackId(e);
-        const p = JSON.parse(e.data) as { summary: string; risky: boolean };
+        const p = parseEventData(e) as { summary?: string; risky?: boolean } | undefined;
+        if (!p || typeof p.summary !== "string") return;
         dispatch({ type: "text", payload: { channel: "trace", delta: `\n[prefs] detected risky=${p.risky ? "yes" : "no"} ${p.summary}\n` } });
       });
       es.addEventListener("runtime_pref_changed", (e: MessageEvent) => {
         trackId(e);
-        const p = JSON.parse(e.data) as {
-          summary: string;
-          persisted: boolean;
+        const p = parseEventData(e) as {
+          summary?: string;
+          persisted?: boolean;
           personaControls?: {
             humorPercent?: number;
             formality?: string;
@@ -1066,7 +1754,8 @@ export function useSSE() {
             verbosity?: string;
             personaStrength?: number;
           };
-        };
+        } | undefined;
+        if (!p || typeof p.summary !== "string") return;
         const controls = p.personaControls
           ? Object.entries(p.personaControls)
               .filter(([, v]) => v !== undefined)
@@ -1084,12 +1773,14 @@ export function useSSE() {
       });
       es.addEventListener("runtime_pref_persisted", (e: MessageEvent) => {
         trackId(e);
-        const p = JSON.parse(e.data) as { path: string };
+        const p = parseEventData(e) as { path?: string } | undefined;
+        if (!p || typeof p.path !== "string") return;
         dispatch({ type: "text", payload: { channel: "trace", delta: `\n[prefs] persisted path=${p.path}\n` } });
       });
       es.addEventListener("runtime_pref_rejected", (e: MessageEvent) => {
         trackId(e);
-        const p = JSON.parse(e.data) as { summary: string; reason: string };
+        const p = parseEventData(e) as { summary?: string; reason?: string } | undefined;
+        if (!p || typeof p.summary !== "string" || typeof p.reason !== "string") return;
         dispatch({ type: "text", payload: { channel: "trace", delta: `\n[prefs] rejected ${p.summary} (${p.reason})\n` } });
       });
 
@@ -1097,8 +1788,10 @@ export function useSSE() {
       // Lands in SSE history so reconnecting clients know work is ongoing.
       es.addEventListener("harness_running", (e: MessageEvent) => {
         trackId(e);
-        markHarnessActivity();
-        dispatch({ type: "harness_running", payload: JSON.parse(e.data) });
+        markHarnessConnectivityActivity();
+        const p = parseEventData(e);
+        if (p == null) return;
+        dispatch({ type: "harness_running", payload: p as never });
       });
 
       // Ack-only events — no UI effect needed.
@@ -1117,7 +1810,7 @@ export function useSSE() {
           // can stall it in CONNECTING indefinitely without ever reaching CLOSED.
           // Schedule a 2s takeover: if the connection still isn't OPEN by then, we
           // close the native ES and drive the reconnect ourselves with backoff.
-          dispatch({ type: "disconnected" });
+          probeAfterStreamInterrupt("CONNECTING", { throttle: true });
           if (!reconnectTimer.current) {
             reconnectTimer.current = setTimeout(() => {
               reconnectTimer.current = null;
@@ -1135,16 +1828,30 @@ export function useSSE() {
 
         // CLOSED — browser gave up entirely. Take over immediately.
         if (reconnectTimer.current) { clearTimeout(reconnectTimer.current); reconnectTimer.current = null; }
+        const ordinal = reconnectAttempt.current + 1;
+        probeAfterStreamInterrupt("CLOSED", { throttle: false, reconnectOrdinal: ordinal });
         es.close();
         esRef.current = null;
-        dispatch({ type: "disconnected" });
         const delay = reconnectDelay(reconnectAttempt.current);
         reconnectAttempt.current = Math.min(reconnectAttempt.current + 1, 6);
         reconnectTimer.current = setTimeout(connect, delay);
       };
     }
 
-    connect();
+    void (async () => {
+      if (!autoGreetDoneRef.current) {
+        autoGreetDoneRef.current = true;
+        dispatch({ type: "session_reset" });
+        const runId = ++autoResetRunIdRef.current;
+        await sessionResetWhenIdle(
+          { mode: "soft", greet: true },
+          () => cancelledRef.current || autoResetRunIdRef.current !== runId
+        );
+      }
+      if (!cancelledRef.current) {
+        connect();
+      }
+    })();
 
     // When the tab becomes visible after being hidden, browsers throttle/freeze
     // timers — reconnect immediately if the connection is stale.
@@ -1170,7 +1877,7 @@ export function useSSE() {
       esRef.current?.close();
       esRef.current = null;
     };
-  }, [markHarnessActivity, reconcileBusyFromStatus]);
+  }, [markHarnessSemanticActivity, markHarnessConnectivityActivity, reconcileBusyFromStatus]);
 
   const sendMessage = useCallback(async (payload: OutgoingChatMessage): Promise<SendMessageResult> => {
     const text = payload.text.trim();
@@ -1180,6 +1887,8 @@ export function useSSE() {
     const now = Date.now();
     turnSentAtMsRef.current = now;
     lastHarnessActivityMsRef.current = now;
+    lastSemanticHarnessActivityMsRef.current = now;
+    lastSemanticStallAdvisoryAtMsRef.current = 0;
     expectTurnEndRef.current = true;
     statusIdlePollStreakRef.current = 0;
     dispatch({ type: "user_message", text: renderedUserMessage });
@@ -1198,6 +1907,7 @@ export function useSSE() {
       expectTurnEndRef.current = false;
       const message = (result.body as { error?: string }).error ?? `Send failed (${result.status})`;
       dispatch({ type: "error", payload: { message } });
+      dispatch({ type: "remove_last_user_message" });
       return { ok: false, error: message };
     }
     return { ok: true };
@@ -1240,15 +1950,7 @@ export function useSSE() {
   }, []);
 
   const sendClearSession = useCallback(async () => {
-    const result = await fetchWithRetry(
-      `${SERVER}/api/session/reset`,
-      {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ mode: "soft" }),
-      },
-      4
-    );
+    const result = await sessionResetWhenIdle({ mode: "soft" }, () => false);
     if (result.ok) {
       expectTurnEndRef.current = false;
       statusIdlePollStreakRef.current = 0;

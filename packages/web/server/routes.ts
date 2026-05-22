@@ -34,7 +34,7 @@ export function createRouter(bridge: AgentBridge, sse: SSEManager): Router {
       await bridge.whenSessionReady();
       const prefs = bridge.harness.getRuntimePreferences();
       const uiRaw = resolveHarnessEnvRaw("AGENT_UI_VERBOSITY", prefs)?.trim();
-      let personaUiTheme: import("@liminal/core").PersonaUiThemeV1 | null = null;
+      let personaUiTheme: import("@liminal/core").PersonaUiThemeV2 | null = null;
       try {
         personaUiTheme = await loadPersonaUiThemeFromWorkspace();
       } catch {
@@ -152,7 +152,8 @@ export function createRouter(bridge: AgentBridge, sse: SSEManager): Router {
       res.status(409).json({ error: "Agent is busy; wait for the current turn to finish." });
       return;
     }
-    const mode = String((req.body as { mode?: string } | undefined)?.mode ?? "soft").toLowerCase();
+    const body = req.body as { mode?: string; greet?: boolean } | undefined;
+    const mode = String(body?.mode ?? "soft").toLowerCase();
     if (mode === "hard") {
       bridge.clearSession({ preserveBootstrapState: false });
       res.json({ ok: true, mode: "hard" });
@@ -163,9 +164,27 @@ export function createRouter(bridge: AgentBridge, sse: SSEManager): Router {
       });
       return;
     }
-    // Default: soft reset for active dev sessions — clear transcript only.
+    // Default: soft reset — clear transcript only.
+    // greet=true (sent on fresh page load) triggers a session greeting after clearing.
+    const greet = body?.greet === true;
     bridge.clearSession({ preserveBootstrapState: true });
     res.json({ ok: true, mode: "soft" });
+    if (greet && !bridge.isAwaitingPersonaBootstrap) {
+      void bridge.harness.sendSessionGreeting().catch((err) => {
+        sse.send("error", {
+          message: err instanceof Error ? err.message : "Session greeting failed.",
+        });
+      });
+    }
+  });
+
+  router.post("/api/session/abort", (_req, res) => {
+    if (!bridge.harness.getIsRunning()) {
+      res.status(409).json({ error: "No turn in progress to abort." });
+      return;
+    }
+    bridge.harness.abortCurrentTurn();
+    res.json({ ok: true });
   });
 
   router.get("/api/stream", (req, res) => {
@@ -288,12 +307,17 @@ export function createRouter(bridge: AgentBridge, sse: SSEManager): Router {
   });
 
   router.get("/api/status", (_req, res) => {
-    res.json({
-      clients: sse.clientCount,
-      busy: bridge.isBusy,
-      startedAt: bridge.turnStartTime,
-      lastTurnEndedAt: bridge.lastTurnEndedAt,
-    });
+    try {
+      res.json({
+        clients: sse.clientCount,
+        busy: bridge.isBusy,
+        startedAt: bridge.turnStartTime,
+        lastTurnEndedAt: bridge.lastTurnEndedAt,
+      });
+    } catch (err) {
+      console.error("[status] failed:", err);
+      res.status(500).json({ error: "status unavailable" });
+    }
   });
 
   return router;

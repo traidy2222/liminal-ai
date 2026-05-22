@@ -69,12 +69,33 @@ export class SSEManager {
 
   send(eventName: string, data: unknown): void {
     const id = ++this.eventCounter;
-    this.history.push({ id, eventName, data });
+    let wireName = eventName;
+    let wireData: unknown = data;
+    try {
+      JSON.stringify(data);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      console.error(`[SSE] non-serializable payload for event "${eventName}":`, msg);
+      wireName = "error";
+      wireData = {
+        message: `Server could not encode SSE event "${eventName}" (${msg.slice(0, 400)}).`,
+      };
+    }
+    this.history.push({ id, eventName: wireName, data: wireData });
     if (this.history.length > this.historyLimit) {
       this.history.splice(0, this.history.length - this.historyLimit);
     }
 
-    const payload = this.serialize(id, eventName, data);
+    let payload: string;
+    try {
+      payload = this.serialize(id, wireName, wireData);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      console.error(`[SSE] serialize failed after coercion:`, msg);
+      payload = this.serialize(id, "error", {
+        message: `SSE serialize failed: ${msg.slice(0, 400)}`,
+      });
+    }
     const dead: string[] = [];
     for (const client of this.clients.values()) {
       try {
@@ -83,13 +104,20 @@ export class SSEManager {
         dead.push(client.id);
       }
     }
-    for (const id of dead) {
-      this.clients.delete(id);
+    for (const clientId of dead) {
+      this.clients.delete(clientId);
     }
   }
 
   private serialize(id: number, eventName: string, data: unknown): string {
-    return `id: ${id}\nevent: ${eventName}\ndata: ${JSON.stringify(data)}\n\n`;
+    try {
+      return `id: ${id}\nevent: ${eventName}\ndata: ${JSON.stringify(data)}\n\n`;
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      return `id: ${id}\nevent: error\ndata: ${JSON.stringify({
+        message: `SSE JSON.stringify failed: ${msg.slice(0, 400)}`,
+      })}\n\n`;
+    }
   }
 
   private ensureHeartbeat(): void {

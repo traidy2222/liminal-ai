@@ -1,7 +1,8 @@
 import React, { useState, useRef, useEffect, useCallback, useMemo, memo } from "react";
-import { useSSE, type MessageEntry, type AutoDreamState, type PersonalityPulseRow, WEB_SERVER_BASE } from "./useSSE.js";
+import { useSSE, type MessageEntry, type AutoDreamState, type PersonalityPulseRow, WEB_SERVER_BASE, type ApiReachable, type SseTransport } from "./useSSE.js";
 import { MEMORY_SYNC_LABEL, presentAutoDream } from "./autoDreamPresent.js";
 import { applyPersonaDocumentTheme } from "./applyPersonaDocumentTheme.js";
+import { useStickyAutoScroll } from "./useStickyAutoScroll.js";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import rehypeRaw from "rehype-raw";
@@ -9,6 +10,7 @@ import { toPng } from "html-to-image";
 import { Prism as SyntaxHighlighter } from "react-syntax-highlighter";
 import { vscDarkPlus } from "react-syntax-highlighter/dist/esm/styles/prism";
 import { SettingsModal } from "./settings/SettingsModal.js";
+import { PROVIDER_PRESETS, PROVIDER_PRESET_CUSTOM_ID } from "./settings/providerPresets.js";
 import { resolveInputShortcut } from "./inputSemantics.js";
 import {
   PERSONA_QUICK_PRESETS,
@@ -16,12 +18,38 @@ import {
 } from "@liminal/core/persona-bootstrap-ui";
 import type { HarnessSettingsApiField } from "@liminal/core";
 import {
+  extractStreamingWritePreview,
+  isStreamingWriteTool,
+} from "@liminal/core/streaming-write-preview";
+import { StreamingWritePreviewBox } from "./StreamingWritePreviewBox.js";
+import { PersonaGenerationWorkbench } from "./persona/PersonaGenerationWorkbench.js";
+import {
   DEFAULT_IMAGE_ATTACHMENT_LIMITS,
   normalizeImageAttachmentName,
   parseDataUrlImage,
   validateImageAttachments,
   type ImageAttachment,
 } from "./imageAttachments.js";
+import { migratePersonaUiTheme, type PersonaUiToolCards } from "@liminal/core/persona-ui-theme";
+import { resolveToolCardsMode } from "./resolveToolCardsMode.js";
+import { ShellRouter } from "./persona/ShellRouter.js";
+import { PersonaShellSwitcher } from "./persona/shells/ShellSwitcher.js";
+import type { ShellContract } from "./persona/ShellContract.js";
+import { categoryForTool, getToolCategory } from "./persona/categoryMeta.js";
+import {
+  resolveShell,
+  shouldShowSidePanels,
+  buildShellBodyStyle,
+  buildMessagesStyle,
+  buildUserMessageStyle,
+  buildAssistantMessageStyle,
+  orbHidden,
+  buildInputAreaStyle,
+  messageEntranceClass,
+  buildAvatarStripeStyle,
+  buildAvatarGlyphStyle,
+} from "./persona/shellLayout.js";
+import { LIM } from "./persona/personaVars.js";
 
 // ── HUD palette (CSS variables; defaults from applyPersonaDocumentTheme + fallbacks) ──
 
@@ -48,44 +76,6 @@ const CSS_ANIMATIONS = `
 
 type ToolCallEntry = Extract<MessageEntry, { kind: "tool_call" }>;
 type SubtaskEntry  = Extract<MessageEntry, { kind: "subtask" }>;
-
-// ── Tool category helpers ─────────────────────────────────────────────────────
-
-type ToolCategory =
-  | "shell" | "file" | "web" | "memory" | "vault" | "code"
-  | "git" | "markets" | "vision" | "docs" | "orchestration" | "context" | "other";
-
-function getToolCategory(name: string): ToolCategory {
-  if (/^(run_shell|run_background|kill_process|list_processes|read_process_output)$/.test(name)) return "shell";
-  if (/^(read_file|write_file|list_dir|apply_diff|patch_file|edit_file|write_file_if_changed|search_replace_file|batch_replace|grep_file|move_file|copy_file|copy_tree|mkdir_p|edit_preview|multi_file_apply|refactor_plan_apply|path_guard|read_file_chunked|read_file_with_imports|file_metadata|workspace_snapshot)$/.test(name)) return "file";
-  if (/^(web_fetch|web_search|weather_lookup)$/.test(name)) return "web";
-  if (/^(remember|recall|recall_type|recall_relevant|search_memory|forget|forget_type|memory_stats|memory_consolidate|memory_query|memory_graph)$/.test(name)) return "memory";
-  if (name.startsWith("vault_")) return "vault";
-  if (/^(ast_grep|symbol_index|find_references|run_tests|run_lint|execute_code|repo_map)$/.test(name)) return "code";
-  if (name.startsWith("git_")) return "git";
-  if (name.startsWith("markets_")) return "markets";
-  if (/^(vision_analyze|upload_image)$/.test(name)) return "vision";
-  if (name.startsWith("doc_")) return "docs";
-  if (/^(spawn_agent|wait_for_agents|cancel_agent|list_agents|verify_result|evidence_critic|path_critic|policy_critic|reflect_debate)$/.test(name)) return "orchestration";
-  if (/^(check_context|compress_context|refresh_world_context)$/.test(name)) return "context";
-  return "other";
-}
-
-const CATEGORY_META: Record<ToolCategory, { icon: string; color: string }> = {
-  shell:         { icon: "▶", color: "#ff5544" },
-  file:          { icon: "◇", color: "#44aaff" },
-  web:           { icon: "◎", color: "#bb66ff" },
-  memory:        { icon: "◈", color: AMBER },
-  vault:         { icon: "⊚", color: GREEN },
-  code:          { icon: "◆", color: "#55ee99" },
-  git:           { icon: "⌥", color: "#ff9944" },
-  markets:       { icon: "◉", color: "#ffee44" },
-  vision:        { icon: "◑", color: "#ff99cc" },
-  docs:          { icon: "▣", color: "#7788ff" },
-  orchestration: { icon: "⟴", color: MAGENTA },
-  context:       { icon: "⊙", color: CYAN },
-  other:         { icon: "⚙", color: "#778899" },
-};
 
 const STATUS_META: Record<string, { icon: string; label: string; color: string }> = {
   streaming:        { icon: "…", label: "forming",         color: AMBER   },
@@ -267,19 +257,29 @@ function HudPanel({ title, children, style }: { title?: string; children: React.
 
 // ── Status orb ────────────────────────────────────────────────────────────────
 
-type OrbState = "idle" | "thinking" | "running" | "approval" | "error" | "disconnected" | "pulse";
+type OrbState =
+  | "idle"
+  | "thinking"
+  | "running"
+  | "approval"
+  | "error"
+  | "disconnected"
+  | "degraded"
+  | "pulse";
 
-function StatusOrb({ orbState }: { orbState: OrbState }) {
+function StatusOrb({ orbState, hidden }: { orbState: OrbState; hidden?: boolean }) {
+  if (hidden) return null;
   if (orbState === "running") {
     return (
       <div style={{ position: "relative", width: 52, height: 52, flexShrink: 0 }}>
         <div style={{ position: "absolute", inset: 0, borderRadius: "50%", border: "2px solid rgba(var(--lim-accent-rgb),0.1)" }} />
-        <div style={{
+        <div
+          className="orb-spin-anim"
+          style={{
           position: "absolute", inset: 0, borderRadius: "50%",
           border: "2px solid transparent",
           borderTopColor: CYAN,
           borderRightColor: "rgba(var(--lim-accent-rgb),0.3)",
-          animation: "orb-spin 0.65s linear infinite",
         }} />
         <div style={{
           position: "absolute", top: "50%", left: "50%",
@@ -292,21 +292,24 @@ function StatusOrb({ orbState }: { orbState: OrbState }) {
     );
   }
 
-  const cfgs: Record<OrbState, { border: string; bg: string; dot: string; anim: string }> = {
-    idle:         { border: `2px solid rgba(var(--lim-accent-rgb),.38)`,   bg: "transparent",           dot: CYAN,    anim: "orb-idle 3.5s ease-in-out infinite"   },
-    thinking:     { border: `2px solid ${AMBER}`,              bg: `rgba(var(--lim-warn-rgb),.07)`,  dot: AMBER,   anim: "orb-think 1.8s ease-in-out infinite"  },
-    running:      { border: `2px solid ${CYAN}`,               bg: `rgba(var(--lim-accent-rgb),.06)`,   dot: CYAN,    anim: "orb-spin 0.65s linear infinite"        },
-    approval:     { border: `2px solid ${MAGENTA}`,            bg: `rgba(var(--lim-secondary-rgb),.09)`,  dot: MAGENTA, anim: "orb-approv 0.7s ease-in-out infinite" },
-    error:        { border: `2px solid ${RED_ERR}`,            bg: `rgba(var(--lim-danger-rgb),.09)`,   dot: RED_ERR, anim: "none"                                  },
-    disconnected: { border: "2px solid rgba(80,80,90,.35)",    bg: "transparent",           dot: "#556",  anim: "none"                                  },
-    pulse:        { border: `2px solid rgba(var(--lim-secondary-rgb),.45)`, bg: `rgba(var(--lim-secondary-rgb),.07)`, dot: MAGENTA, anim: "data-pulse 1.1s ease-in-out infinite" },
+  const cfgs: Record<OrbState, { border: string; bg: string; dot: string; animClass: string }> = {
+    idle:         { border: `2px solid rgba(var(--lim-accent-rgb),.38)`,   bg: "transparent",           dot: CYAN,    animClass: "orb-idle-anim"   },
+    thinking:     { border: `2px solid ${AMBER}`,              bg: `rgba(var(--lim-warn-rgb),.07)`,  dot: AMBER,   animClass: "orb-think-anim"  },
+    running:      { border: `2px solid ${CYAN}`,               bg: `rgba(var(--lim-accent-rgb),.06)`,   dot: CYAN,    animClass: "orb-spin-anim"        },
+    approval:     { border: `2px solid ${MAGENTA}`,            bg: `rgba(var(--lim-secondary-rgb),.09)`,  dot: MAGENTA, animClass: "orb-approv-anim" },
+    error:        { border: `2px solid ${RED_ERR}`,            bg: `rgba(var(--lim-danger-rgb),.09)`,   dot: RED_ERR, animClass: ""                                  },
+    disconnected: { border: "2px solid rgba(80,80,90,.35)",    bg: "transparent",           dot: LIM.muted,  animClass: ""                                  },
+    degraded:     { border: `2px dashed ${AMBER}`,             bg: `rgba(var(--lim-warn-rgb),.06)`,   dot: AMBER,   animClass: "" },
+    pulse:        { border: `2px solid rgba(var(--lim-secondary-rgb),.45)`, bg: `rgba(var(--lim-secondary-rgb),.07)`, dot: MAGENTA, animClass: "" },
   };
   const cfg = cfgs[orbState];
 
   return (
-    <div style={{
+    <div
+      className={cfg.animClass || undefined}
+      style={{
       width: 52, height: 52, borderRadius: "50%", flexShrink: 0,
-      background: cfg.bg, border: cfg.border, animation: cfg.anim,
+      background: cfg.bg, border: cfg.border,
       display: "flex", alignItems: "center", justifyContent: "center",
     }}>
       <div style={{
@@ -342,15 +345,55 @@ function ContextArc({ pct, masked }: { pct: number; masked?: boolean }) {
   );
 }
 
+function formatSignalHud(s: {
+  apiReachable: ApiReachable;
+  sseTransport: SseTransport;
+  streamConnected: boolean;
+  transportDetail: string;
+  sseHasOpenedOnce: boolean;
+}): { label: string; color: string; detail: string } {
+  const raw = s.transportDetail.trim();
+  const detail = raw.length > 96 ? `${raw.slice(0, 93)}…` : raw;
+  if (s.apiReachable === "down") {
+    return { label: "OFFLINE", color: RED_ERR, detail };
+  }
+  if (s.apiReachable === "unknown") {
+    return { label: "WAIT API", color: "#778899", detail: detail || "Probing `/api/status` + SSE…" };
+  }
+  if (s.streamConnected && s.sseTransport === "open") {
+    return { label: "ONLINE", color: GREEN, detail: "" };
+  }
+  // REST is up but the EventSource handshake has not fired yet — not the same as mid-session degraded.
+  if (!s.sseHasOpenedOnce) {
+    return { label: "CONNECTING", color: CYAN, detail: detail || "Opening SSE (`/api/stream`)…" };
+  }
+  return {
+    label: "DEGRADED",
+    color: AMBER,
+    detail: detail || "REST OK — SSE reconnecting (events may pause briefly).",
+  };
+}
+
 // ── Systems panel (left column) ───────────────────────────────────────────────
 
 function SystemsPanel({
-  orbState, pct, masked, connected, sessionSeconds,
+  orbHidden: hideOrbPanel,
+  orbState, pct, masked, signalLabel, signalColor, signalDetail, sessionSeconds,
   toolCount, msgCount, subtasks, personaName, autoDream, uiVerbosity,
 }: {
-  orbState: OrbState; pct: number; masked?: boolean; connected: boolean;
-  sessionSeconds: number; toolCount: number; msgCount: number;
-  subtasks: SubtaskEntry[]; personaName: string; autoDream: AutoDreamState;
+  orbHidden?: boolean;
+  orbState: OrbState;
+  pct: number;
+  masked?: boolean;
+  signalLabel: string;
+  signalColor: string;
+  signalDetail: string;
+  sessionSeconds: number;
+  toolCount: number;
+  msgCount: number;
+  subtasks: SubtaskEntry[];
+  personaName: string;
+  autoDream: AutoDreamState;
   uiVerbosity: "normal" | "quiet";
 }) {
   const memorySync = useMemo(
@@ -363,19 +406,31 @@ function SystemsPanel({
     return i <= idx ? CYAN : "rgba(var(--lim-accent-rgb),0.12)";
   };
   const orbLabel: Record<OrbState, string> = {
-    idle: "STANDBY", thinking: "PROCESSING", running: "EXECUTING",
-    approval: "AWAITING AUTH", error: "FAULT", disconnected: "OFFLINE",
+    idle: "STANDBY",
+    thinking: "PROCESSING",
+    running: "EXECUTING",
+    approval: "AWAITING AUTH",
+    error: "FAULT",
+    disconnected: "OFFLINE",
+    degraded: "DEGRADED",
     pulse: "PULSE",
   };
   const orbColor: Record<OrbState, string> = {
-    idle: CYAN, thinking: AMBER, running: CYAN,
-    approval: MAGENTA, error: RED_ERR, disconnected: "#556",
+    idle: CYAN,
+    thinking: AMBER,
+    running: CYAN,
+    approval: MAGENTA,
+    error: RED_ERR,
+    disconnected: "#556",
+    degraded: AMBER,
     pulse: MAGENTA,
   };
   const maxDepth = subtasks.length > 0 ? Math.max(...subtasks.map(s => s.depth)) : 0;
 
   return (
-    <div style={{
+    <div
+      data-persona-side-panel
+      style={{
       width: 218,
       display: "flex", flexDirection: "column", gap: 7,
       padding: "8px 8px 8px 9px",
@@ -386,7 +441,7 @@ function SystemsPanel({
       {/* Core status */}
       <HudPanel title="CORE STATUS">
         <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 7, padding: "12px 8px 10px" }}>
-          <StatusOrb orbState={orbState} />
+          <StatusOrb orbState={orbState} hidden={hideOrbPanel} />
           <div style={{
             fontSize: 9, fontWeight: 700, letterSpacing: "0.16em",
             color: orbColor[orbState], fontFamily: "monospace",
@@ -415,32 +470,65 @@ function SystemsPanel({
       <HudPanel title="SESSION METRICS">
         <div style={{ padding: "6px 10px 8px", display: "flex", flexDirection: "column", gap: 5 }}>
           {([
-            ["UPTIME",   formatSessionTime(sessionSeconds)],
-            ["TURNS",    String(msgCount)],
+            ["UPTIME", formatSessionTime(sessionSeconds)],
+            ["TURNS", String(msgCount)],
             ["TOOL OPS", String(toolCount)],
-            ["DEPTH",    String(maxDepth)],
-            ["SIGNAL",   connected ? "ONLINE" : "OFFLINE"],
+            ["DEPTH", String(maxDepth)],
           ] as [string, string][]).map(([label, value]) => (
             <div key={label} style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
               <span style={{ fontSize: 8, color: "rgba(var(--lim-accent-rgb),0.35)", fontFamily: "monospace", letterSpacing: "0.1em" }}>
                 {label}
               </span>
-              <span style={{
-                fontSize: 11, fontWeight: 700, fontFamily: "monospace",
-                color: label === "SIGNAL"
-                  ? (connected ? GREEN : RED_ERR)
-                  : CYAN,
-                textShadow:
-                  label === "SIGNAL"
-                    ? connected
-                      ? "0 0 6px rgba(var(--lim-success-rgb),0.35)"
-                      : "0 0 6px rgba(var(--lim-danger-rgb),0.35)"
-                    : "0 0 6px rgba(var(--lim-accent-rgb),0.27)",
-              }}>
+              <span
+                style={{
+                  fontSize: 11,
+                  fontWeight: 700,
+                  fontFamily: "monospace",
+                  color: CYAN,
+                  textShadow: "0 0 6px rgba(var(--lim-accent-rgb),0.27)",
+                }}
+              >
                 {value}
               </span>
-        </div>
+            </div>
           ))}
+          <div style={{ display: "flex", flexDirection: "column", gap: 4, alignItems: "stretch" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 8 }}>
+              <span style={{ fontSize: 8, color: "rgba(var(--lim-accent-rgb),0.35)", fontFamily: "monospace", letterSpacing: "0.1em" }}>
+                SIGNAL
+              </span>
+              <span
+                title={signalDetail || signalLabel}
+                style={{
+                  fontSize: 11,
+                  fontWeight: 700,
+                  fontFamily: "monospace",
+                  color: signalColor,
+                  textAlign: "right",
+                  lineHeight: 1.35,
+                  textShadow: `0 0 6px ${signalColor}55`,
+                  maxWidth: 140,
+                }}
+              >
+                {signalLabel}
+              </span>
+            </div>
+            {signalDetail.length > 0 && (
+              <div
+                style={{
+                  fontSize: 7,
+                  lineHeight: 1.4,
+                  color: "rgba(var(--lim-secondary-rgb),0.55)",
+                  fontFamily: "monospace",
+                  textAlign: "right",
+                  opacity: 0.92,
+                }}
+                title={signalDetail}
+              >
+                {signalDetail}
+              </div>
+            )}
+          </div>
         </div>
       </HudPanel>
 
@@ -717,7 +805,7 @@ const ActivityStream = memo(function ActivityStream({
             </div>
         )}
         {recent.map((tc) => {
-          const cat   = CATEGORY_META[getToolCategory(tc.name)];
+          const cat   = categoryForTool(tc.name);
           const sm    = STATUS_META[tc.status] ?? STATUS_META["done"]!;
           const result = toolResultMap.get(tc.callId);
           const isActive = tc.status === "running" || tc.status === "streaming";
@@ -772,66 +860,52 @@ const ActivityStream = memo(function ActivityStream({
   );
 });
 
-// ── Stream content preview ────────────────────────────────────────────────────
-
-const PREVIEW_LINES      = 10;
-const STREAM_TAIL_LINES  = 6;
-
-const STREAM_CONTENT_FIELD: Record<string, string> = {
-  write_file:           "content",
-  write_file_if_changed:"content",
-  apply_diff:           "diff",
-  patch_file:           "new_content",
-  execute_code:         "code",
-  run_shell:            "command",
-  run_background:       "command",
-};
-
-function extractStreamingTail(toolName: string, argsJson: string): { lines: string[]; linesAbove: number } | null {
-  const field = STREAM_CONTENT_FIELD[toolName];
-  if (!field || !argsJson) return null;
-  let content: string | null = null;
-  try {
-    const parsed = JSON.parse(argsJson) as Record<string, unknown>;
-    if (typeof parsed[field] === "string") content = parsed[field] as string;
-  } catch {
-    const re = new RegExp(`"${field}"\\s*:\\s*"((?:[^"\\\\]|\\\\.)*)`);
-    const m = argsJson.match(re);
-    if (m && m[1]) {
-      content = m[1]
-        .replace(/\\n/g, "\n").replace(/\\r/g, "").replace(/\\t/g, "\t")
-        .replace(/\\"/g, '"').replace(/\\\\/g, "\\");
-    }
-  }
-  if (!content || !content.trim()) return null;
-  const allLines = content.split("\n");
-  return { lines: allLines.slice(-STREAM_TAIL_LINES), linesAbove: Math.max(0, allLines.length - STREAM_TAIL_LINES) };
-}
-
 // ── Tool card ─────────────────────────────────────────────────────────────────
+
+const PREVIEW_LINES = 10;
 
 type ToolResult = { output: string; ok: boolean };
 
-function ToolCard({ entry, result, compact }: { entry: ToolCallEntry; result?: ToolResult; compact?: boolean }) {
+function ToolCard({ entry, result, toolCardsMode }: { entry: ToolCallEntry; result?: ToolResult; toolCardsMode?: PersonaUiToolCards }) {
   const [expanded, setExpanded] = useState(false);
 
   const isActive = entry.status === "streaming" || entry.status === "running" || entry.status === "pending_approval";
   const elapsedMs  = useElapsedMs(entry.startedAt, isActive);
   const displayMs  = isActive ? elapsedMs : entry.endedAt !== undefined ? entry.endedAt - entry.startedAt : null;
 
-  const cat = CATEGORY_META[getToolCategory(entry.name)];
+  const cat = categoryForTool(entry.name);
   const sm  = STATUS_META[entry.status] ?? STATUS_META["done"]!;
   const arg = parsePrimaryArg(entry.argsJson);
 
-  const streamTail =
-    entry.status === "streaming" && !compact
-      ? extractStreamingTail(entry.name, entry.argsJson ?? "")
-      : null;
+  const showWritePreview = isStreamingWriteTool(entry.name) && isActive;
+  const writePreview =
+    showWritePreview ? extractStreamingWritePreview(entry.name, entry.argsJson ?? "") : null;
 
+  const mode = toolCardsMode ?? "verbose";
+
+  if (mode === "hidden") return null;
+
+  if (mode === "log") {
+    return (
+      <div style={{ display: "flex", gap: 8, alignItems: "center", fontSize: 10, fontFamily: "monospace", padding: "2px 0", color: "#445566" }}>
+        <span style={{ color: cat.color }}>{cat.icon}</span>
+        <span style={{ color: sm.color }}>{sm.icon}</span>
+        <span style={{ color: "#778899" }}>{entry.name}</span>
+        {arg && (
+          <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: 220 }}>{arg}</span>
+        )}
+        {displayMs !== null && (
+          <span style={{ color: "#334455", marginLeft: "auto" }}>{formatElapsed(displayMs)}</span>
+        )}
+      </div>
+    );
+  }
+
+  const isCompact = mode === "compact";
   const rawOutput       = result ? result.output.trimEnd() : "";
   const { formatted: formattedOutput } = result ? tryFormatOutput(rawOutput) : { formatted: "" };
   const outputLines     = formattedOutput ? formattedOutput.split("\n") : [];
-  const previewCap      = compact ? 3 : PREVIEW_LINES;
+  const previewCap      = isCompact ? 3 : PREVIEW_LINES;
   const previewText     = outputLines.slice(0, previewCap).map(l => l.length > 200 ? l.slice(0, 199) + "…" : l).join("\n");
   const extraLines      = Math.max(0, outputLines.length - previewCap);
   const fullText        = outputLines.map(l => l.length > 200 ? l.slice(0, 199) + "…" : l).join("\n");
@@ -847,7 +921,7 @@ function ToolCard({ entry, result, compact }: { entry: ToolCallEntry; result?: T
               {arg}
             </span>
           )}
-            </div>
+        </div>
         <div style={{ display: "flex", alignItems: "center", gap: 7, flexShrink: 0 }}>
           {displayMs !== null && <span style={{ color: "#334455", fontSize: 10 }}>{formatElapsed(displayMs)}</span>}
           <span style={{
@@ -855,28 +929,40 @@ function ToolCard({ entry, result, compact }: { entry: ToolCallEntry; result?: T
             background: `${sm.color}14`, border: `1px solid ${sm.color}38`,
             borderRadius: 3, padding: "1px 6px", letterSpacing: "0.02em",
           }}>
-            {sm.icon} {sm.label}
+            {sm.icon}{" "}
+            {entry.status === "running" && writePreview && !writePreview.incomplete
+              ? "writing to disk…"
+              : entry.status === "streaming" && writePreview && writePreview.charCount > 0
+              ? `streaming ${writePreview.charCount.toLocaleString()} chars`
+              : entry.status === "streaming" && writePreview?.incomplete
+              ? "streaming args"
+              : sm.label}
           </span>
-          </div>
+        </div>
       </div>
 
-      {streamTail && (
-        <div style={{ marginTop: 7 }}>
-          {streamTail.linesAbove > 0 && (
-            <div style={{ color: "#223344", fontSize: 10, marginBottom: 3, fontFamily: "monospace" }}>
-              ⋯ {streamTail.linesAbove} line{streamTail.linesAbove !== 1 ? "s" : ""} above
-            </div>
-          )}
-          <pre style={{ ...styles.toolOutputPre, color: "#334455", margin: 0, borderColor: "#0d1825" }}>
-            {streamTail.lines.join("\n")}
-          </pre>
-        </div>
+      {showWritePreview && (
+        <StreamingWritePreviewBox
+          toolName={entry.name}
+          argsJson={entry.argsJson ?? ""}
+          isActive={isActive}
+          elapsedMs={elapsedMs}
+          compact={isCompact}
+        />
       )}
 
-      {isActive && !result && !streamTail && (
+      {isActive && !result && !showWritePreview && (
         <div style={{ marginTop: 5 }}>
-          <span style={{ color: "#223344", fontSize: 10, fontStyle: "italic" }}>running…</span>
-            </div>
+          <span style={{ color: "#223344", fontSize: 10, fontStyle: "italic" }}>
+            {entry.status === "running" && writePreview && !writePreview.incomplete
+              ? "writing to disk…"
+              : entry.status === "streaming"
+              ? "streaming arguments…"
+              : entry.status === "pending_approval"
+              ? "awaiting approval…"
+              : "executing…"}
+          </span>
+        </div>
       )}
 
       {result && result.output.trim() && (
@@ -885,7 +971,7 @@ function ToolCard({ entry, result, compact }: { entry: ToolCallEntry; result?: T
             style={{
               ...styles.toolOutputPre,
               color: result.ok ? "#556677" : "#ff7766",
-              maxHeight: compact ? 120 : 260,
+              maxHeight: isCompact ? 120 : 260,
               margin: 0,
             }}
           >
@@ -940,13 +1026,15 @@ function ToolGroupCard({
   group,
   toolResultMap,
   surface,
+  toolCardsMode,
 }: {
   group: ToolCallGroup;
   toolResultMap: Map<string, ToolResult>;
   surface: ToolSurface;
+  toolCardsMode?: PersonaUiToolCards;
 }) {
   const [open, setOpen] = useState(false);
-  const cat          = CATEGORY_META[getToolCategory(group.name)];
+  const cat          = categoryForTool(group.name);
   const doneCount    = group.entries.filter(e => e.status === "done").length;
   const errorCount   = group.entries.filter(e => e.status === "error").length;
   const runningCount = group.entries.filter(e => e.status === "running" || e.status === "streaming").length;
@@ -977,7 +1065,7 @@ function ToolGroupCard({
               key={entry.callId}
               entry={entry}
               result={toolResultMap.get(entry.callId)}
-              compact={surface === "clean"}
+              toolCardsMode={surface === "verbose" ? "verbose" : toolCardsMode}
             />
           ))}
         </div>
@@ -1049,12 +1137,88 @@ function SubtaskView({ entry, surface }: { entry: SubtaskEntry; surface: ToolSur
   );
 }
 
-function ThinkBlock({ entry, surface }: { entry: Extract<MessageEntry, { kind: "think" }>; surface: ToolSurface }) {
-  const [thinkOpen, setThinkOpen] = useState(surface === "verbose");
+function ModelReasoningBlock({
+  entry,
+  surface,
+}: {
+  entry: Extract<MessageEntry, { kind: "model_reasoning" }>;
+  surface: ToolSurface;
+}) {
+  const [open, setOpen] = useState(surface === "verbose");
   useEffect(() => {
-    setThinkOpen(surface === "verbose");
-  }, [surface]);
-  if (surface === "clean" && !thinkOpen) {
+    if (surface === "verbose") setOpen(true);
+    else if (!entry.streaming) setOpen(false);
+  }, [surface, entry.streaming]);
+  const label = entry.streaming
+    ? `Model reasoning · ${entry.text.length.toLocaleString()} chars · live`
+    : `Model reasoning · ${entry.text.length.toLocaleString()} chars`;
+  if (surface === "clean" && !open) {
+    return (
+      <button
+        type="button"
+        onClick={() => setOpen(true)}
+        style={{
+          display: "block",
+          width: "100%",
+          textAlign: "left" as const,
+          background: "rgba(0,4,12,0.55)",
+          border: "1px solid rgba(var(--lim-warn-rgb),0.12)",
+          borderRadius: 4,
+          color: "#556677",
+          fontSize: 11,
+          padding: "6px 10px",
+          cursor: "pointer",
+          fontFamily: "inherit",
+        }}
+      >
+        <span style={{ color: "#665533", fontWeight: 700 }}>◈ {label}</span>
+        <span style={{ color: "#445566", marginLeft: 8 }}>— expand</span>
+      </button>
+    );
+  }
+  const body =
+    entry.text.length > 2400 && !entry.streaming ? entry.text.slice(0, 2400) + "…" : entry.text;
+  return (
+    <div
+      style={{
+        ...styles.thinkBubble,
+        borderColor: "rgba(var(--lim-warn-rgb),0.2)",
+      }}
+    >
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 4 }}>
+        <div style={{ color: "#665533", fontSize: 9, fontWeight: 700, letterSpacing: "0.08em" }}>
+          ◈ MODEL REASONING{entry.streaming ? " · LIVE" : ""}
+        </div>
+        {surface === "clean" && (
+          <button
+            type="button"
+            onClick={() => setOpen(false)}
+            style={{ background: "none", border: "none", color: "#445566", fontSize: 10, cursor: "pointer" }}
+          >
+            Collapse
+          </button>
+        )}
+      </div>
+      <div style={{ color: "#6a5a44", fontStyle: "italic", whiteSpace: "pre-wrap", lineHeight: 1.55, fontSize: 12 }}>
+        {body}
+        {entry.streaming && (
+          <span style={{ color: "#aa8844", marginLeft: 4 }} aria-hidden>
+            ▍
+          </span>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function ThinkBlock({ entry, surface }: { entry: Extract<MessageEntry, { kind: "think" }>; surface: ToolSurface }) {
+  const [thinkOpen, setThinkOpen] = useState(surface === "verbose" || Boolean(entry.streaming));
+  useEffect(() => {
+    if (entry.streaming) setThinkOpen(true);
+    else setThinkOpen(surface === "verbose");
+  }, [surface, entry.streaming]);
+  const charLabel = entry.content.length.toLocaleString();
+  if (surface === "clean" && !thinkOpen && !entry.streaming) {
     return (
       <button
         type="button"
@@ -1075,15 +1239,24 @@ function ThinkBlock({ entry, surface }: { entry: Extract<MessageEntry, { kind: "
       >
         <span style={{ color: "#334455", fontWeight: 700 }}>◈ Reasoning</span>
         <span style={{ color: "#445566", marginLeft: 8 }}>
-          ({entry.content.length.toLocaleString()} chars) — expand
+          ({charLabel} chars) — expand
         </span>
       </button>
     );
   }
+  const hasStructured =
+    (entry.tool_families && entry.tool_families.length > 0) ||
+    entry.scope ||
+    (entry.unknowns && entry.unknowns.length > 0) ||
+    entry.clarification_needed ||
+    entry.self_check !== undefined;
+
   return (
     <div style={styles.thinkBubble}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 4 }}>
-        <div style={{ color: "#334455", fontSize: 9, fontWeight: 700, letterSpacing: "0.08em" }}>◈ REASONING</div>
+        <div style={{ color: "#334455", fontSize: 9, fontWeight: 700, letterSpacing: "0.08em" }}>
+          ◈ REASONING{entry.streaming ? " · LIVE" : ""}
+        </div>
         {surface === "clean" && (
           <button
             type="button"
@@ -1095,8 +1268,40 @@ function ThinkBlock({ entry, surface }: { entry: Extract<MessageEntry, { kind: "
         )}
       </div>
       <div style={{ color: "#556677", fontStyle: "italic", whiteSpace: "pre-wrap", lineHeight: 1.55, fontSize: 12 }}>
-        {entry.content.length > 1200 ? entry.content.slice(0, 1200) + "…" : entry.content}
+        {entry.streaming
+          ? entry.content.length > 4000
+            ? "…" + entry.content.slice(-4000)
+            : entry.content
+          : entry.content.length > 1200
+          ? entry.content.slice(0, 1200) + "…"
+          : entry.content}
+        {entry.streaming && (
+          <span style={{ color: "#6688aa", marginLeft: 4 }} aria-hidden>
+            ▍
+          </span>
+        )}
       </div>
+      {hasStructured && (
+        <div style={{ marginTop: 6, paddingTop: 6, borderTop: "1px solid rgba(var(--lim-accent-rgb),0.07)", display: "flex", flexWrap: "wrap", gap: "4px 12px", fontSize: 10 }}>
+          {entry.scope && (
+            <span style={{ color: "#445566" }}>scope: <span style={{ color: "#556677" }}>{entry.scope}</span></span>
+          )}
+          {entry.tool_families && entry.tool_families.length > 0 && (
+            <span style={{ color: "#445566" }}>families: <span style={{ color: "#556677" }}>{entry.tool_families.join(", ")}</span></span>
+          )}
+          {entry.unknowns && entry.unknowns.length > 0 && (
+            <span style={{ color: "#445566" }}>unknowns: <span style={{ color: "#556677" }}>{entry.unknowns.join(" · ")}</span></span>
+          )}
+          {entry.self_check !== undefined && (
+            <span style={{ color: entry.self_check >= 80 ? "#33aa66" : "#aa7733" }}>
+              self-check: {entry.self_check}/100
+            </span>
+          )}
+          {entry.clarification_needed && entry.clarification_question && (
+            <span style={{ color: "#ddaa44", fontWeight: 600, width: "100%" }}>❓ {entry.clarification_question}</span>
+          )}
+        </div>
+      )}
     </div>
   );
 }
@@ -1107,23 +1312,43 @@ function MessageView({
   entry,
   toolResult,
   surface,
+  personaTheme,
+  toolCardsMode,
 }: {
   entry: MessageEntry;
   toolResult?: ToolResult;
   surface: ToolSurface;
+  personaTheme: ReturnType<typeof migratePersonaUiTheme>;
+  toolCardsMode: PersonaUiToolCards;
 }) {
+  const entrance = messageEntranceClass(personaTheme.messageEntrance);
+  const entranceProp = entrance ? { className: entrance } : {};
+
   switch (entry.kind) {
     case "user":
       return (
-        <div style={styles.userMsg}>
+        <div {...entranceProp} style={{ ...styles.userMsg, ...buildUserMessageStyle(personaTheme) }}>
           <span style={{ color: CYAN, fontWeight: 700 }}>You </span>
           <span style={{ whiteSpace: "pre-wrap" }}>{entry.text}</span>
         </div>
       );
 
-    case "assistant":
+    case "assistant": {
+      const avatarStyle = personaTheme.avatarStyle;
+      const showGlyph = avatarStyle === "glyph";
+      const stripeExtra = avatarStyle === "stripe" ? buildAvatarStripeStyle() : {};
       return (
-        <div style={styles.assistantMsg}>
+        <div
+          {...entranceProp}
+          style={{
+            ...styles.assistantMsg,
+            ...buildAssistantMessageStyle(),
+            ...stripeExtra,
+            ...(showGlyph ? { display: "flex", alignItems: "flex-start" } : {}),
+          }}
+        >
+          {showGlyph && <span style={buildAvatarGlyphStyle(avatarStyle)}>{personaTheme.avatarGlyph ?? "❯"}</span>}
+          <div className="lim-md" style={showGlyph ? { flex: 1, minWidth: 0 } : undefined}>
           <ReactMarkdown
             remarkPlugins={[remarkGfm]}
             rehypePlugins={[rehypeRaw]}
@@ -1149,7 +1374,7 @@ function MessageView({
                 return (
                   <span style={{ display: "block", margin: "12px 0" }}>
                     <img src={src} alt={alt ?? ""} title={title ?? ""} loading="lazy" style={{ maxWidth: "100%", borderRadius: 6, border: "1px solid rgba(var(--lim-accent-rgb),0.1)", display: "block" }} />
-                    {alt && <span style={{ display: "block", textAlign: "center", color: "#334455", fontSize: 11, marginTop: 4, fontStyle: "italic" }}>{alt}</span>}
+                    {alt && <span style={{ display: "block", textAlign: "center", color: LIM.textDim, fontSize: 11, marginTop: 4, fontStyle: "italic" }}>{alt}</span>}
                   </span>
                 );
               },
@@ -1170,10 +1395,10 @@ function MessageView({
                 if (lang) {
                   return (
                     <div style={{ borderRadius: 6, overflow: "hidden", margin: "10px 0", border: "1px solid rgba(var(--lim-accent-rgb),0.1)" }}>
-                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "4px 12px", background: "#030810", borderBottom: "1px solid rgba(var(--lim-accent-rgb),0.08)" }}>
+                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "4px 12px", background: LIM.surface, borderBottom: "1px solid rgba(var(--lim-accent-rgb),0.08)" }}>
                         <span style={{ color: "rgba(var(--lim-accent-rgb),0.4)", fontSize: 10, fontFamily: "monospace", letterSpacing: "0.06em" }}>{lang}</span>
                       </div>
-                      <SyntaxHighlighter language={lang} style={vscDarkPlus} customStyle={{ margin: 0, borderRadius: 0, fontSize: 13, background: "#020810" }} showLineNumbers={raw.split("\n").length > 6} lineNumberStyle={{ color: "#223344", minWidth: "2.5em" }} wrapLongLines>
+                      <SyntaxHighlighter language={lang} style={vscDarkPlus} customStyle={{ margin: 0, borderRadius: 0, fontSize: 13, background: LIM.codeBg }} showLineNumbers={raw.split("\n").length > 6} lineNumberStyle={{ color: LIM.textDim, minWidth: "2.5em", opacity: 0.45 }} wrapLongLines>
                         {raw}
                       </SyntaxHighlighter>
                     </div>
@@ -1219,8 +1444,10 @@ function MessageView({
             {entry.text}
           </ReactMarkdown>
           {entry.streaming && <span style={{ color: CYAN, animation: "blink 1s step-end infinite" }}>█</span>}
+          </div>
         </div>
       );
+    }
 
     case "trace":
       return (
@@ -1256,16 +1483,31 @@ function MessageView({
       );
 
     case "tool_call":
-      return <ToolCard entry={entry} result={toolResult} compact={surface === "clean"} />;
+      return <ToolCard entry={entry} result={toolResult} toolCardsMode={toolCardsMode} />;
 
     case "tool_result":
       return null;
+
+    case "model_reasoning":
+      return <ModelReasoningBlock entry={entry} surface={surface} />;
 
     case "think":
       return <ThinkBlock entry={entry} surface={surface} />;
 
     case "plan": {
       const steps = Array.isArray(entry.steps) ? entry.steps : [];
+      if (steps.length === 0 && entry.streaming && entry.previewText) {
+        return (
+          <div style={styles.planCard}>
+            <div style={{ color: CYAN, fontWeight: 700, marginBottom: 8, fontSize: 12, letterSpacing: "0.06em" }}>
+              ▸ PLAN · LIVE
+            </div>
+            <pre style={{ margin: 0, fontSize: 11, color: "#667788", whiteSpace: "pre-wrap", fontFamily: "inherit" }}>
+              {entry.previewText.slice(-1200)}
+            </pre>
+          </div>
+        );
+      }
       if (steps.length === 0) return null;
       return (
         <div style={styles.planCard}>
@@ -1363,7 +1605,13 @@ export function App() {
   }, [state.personaBootstrapPending, bootstrapSubmitting]);
 
   const maxHistory = 30;
-  const showPanels = windowWidth >= 900;
+  const personaTheme = useMemo(
+    () => migratePersonaUiTheme(state.personaUiTheme),
+    [state.personaUiTheme]
+  );
+  const shell = resolveShell(state.personaUiTheme);
+  const showPanels = shouldShowSidePanels(shell, windowWidth);
+  const hideOrb = orbHidden(shell, personaTheme.orbStyle);
 
   // Track session start time from first message
   useEffect(() => {
@@ -1429,6 +1677,29 @@ export function App() {
     if (settingsOpen) void loadSettings();
   }, [settingsOpen, loadSettings]);
 
+  const applyProviderPreset = useCallback(
+    (presetId: string) => {
+      if (presetId === PROVIDER_PRESET_CUSTOM_ID) return;
+      if (settingsProviderModelLocked || settingsProviderBaseLocked) return;
+      const preset = PROVIDER_PRESETS.find((p) => p.id === presetId);
+      if (!preset?.baseURL) return;
+      setSettingsProviderModel(preset.model);
+      setSettingsProviderBase(preset.baseURL);
+      setSettingsEnvDraft((prev) => {
+        const next = { ...prev };
+        const merge: Record<string, string> = { ...(preset.harnessEnvPatch ?? {}) };
+        merge.AGENT_FAST_MODEL = preset.model;
+        for (const [k, v] of Object.entries(merge)) {
+          const f = settingsFields.find((sf) => sf.key === k);
+          if (f?.lockedByEnv) continue;
+          next[k] = v;
+        }
+        return next;
+      });
+    },
+    [settingsFields, settingsProviderModelLocked, settingsProviderBaseLocked]
+  );
+
   const saveSettings = useCallback(async () => {
     setSettingsSaving(true);
     setSettingsError(null);
@@ -1482,7 +1753,7 @@ export function App() {
     el.style.height = `${Math.max(40, Math.min(el.scrollHeight, 180))}px`;
   };
 
-  useEffect(() => { bottomRef.current?.scrollIntoView({ behavior: "smooth" }); }, [state.messages]);
+  useStickyAutoScroll(messagesRef, bottomRef, state.messages);
   useEffect(() => { syncTextareaHeight(); }, [input]);
 
   const tryAddAttachments = (next: ImageAttachment[]) => {
@@ -1569,6 +1840,7 @@ export function App() {
   useEffect(() => { if (state.busy) submittingRef.current = false; }, [state.busy]);
 
   const canSend =
+    state.apiReachable === "ok" &&
     !state.busy &&
     !state.personaBootstrapPending &&
     (input.trim().length > 0 || attachments.length > 0);
@@ -1646,6 +1918,7 @@ export function App() {
   const pct = state.contextSnapshot ? Math.round(state.contextSnapshot.usageFraction * 100) : 0;
 
   const surface: ToolSurface = showRawHarness ? "verbose" : "clean";
+  const toolCardsMode = resolveToolCardsMode(personaTheme.toolCards, surface);
 
   const visibleMessages = useMemo(() => {
     return state.messages.filter((entry) => {
@@ -1690,14 +1963,40 @@ export function App() {
       m.kind === "tool_call" && (m.status === "streaming" || m.status === "running" || m.status === "pending_approval")
   );
 
-  const orbState: OrbState =
-    !state.connected                                    ? "disconnected" :
-    state.pendingApproval                               ? "approval"     :
-    activeToolCall?.status === "pending_approval"       ? "approval"     :
-    activeToolCall?.status === "running"                ? "running"      :
-    state.busy                                          ? "thinking"     :
-    state.personalityPulseActive                        ? "pulse"        :
-    "idle";
+  const signalHud = useMemo(
+    () =>
+      formatSignalHud({
+        apiReachable: state.apiReachable,
+        sseTransport: state.sseTransport,
+        streamConnected: state.connected,
+        transportDetail: state.sseTransportDetail,
+        sseHasOpenedOnce: state.sseHasOpenedOnce,
+      }),
+    [
+      state.apiReachable,
+      state.sseTransport,
+      state.connected,
+      state.sseTransportDetail,
+      state.sseHasOpenedOnce,
+    ],
+  );
+
+  const orbState: OrbState = (() => {
+    if (state.apiReachable === "down") return "disconnected";
+    if (state.pendingApproval) return "approval";
+    if (activeToolCall?.status === "pending_approval") return "approval";
+    if (activeToolCall?.status === "running") return "running";
+    if (state.busy) return "thinking";
+    if (
+      state.apiReachable === "ok" &&
+      state.sseHasOpenedOnce &&
+      (!state.connected || state.sseTransport !== "open")
+    ) {
+      return "degraded";
+    }
+    if (state.personalityPulseActive) return "pulse";
+    return "idle";
+  })();
 
   const allToolCalls = useMemo(
     () => state.messages.filter((m): m is ToolCallEntry => m.kind === "tool_call"),
@@ -1715,276 +2014,63 @@ export function App() {
 
   // ── Render ───────────────────────────────────────────────────────────────────
 
-      return (
-    <div style={styles.root}>
+  const contract: ShellContract = {
+    personaTheme,
+    personaDisplayLabel: state.personaDisplayLabel,
+    personaName: state.personaName,
+    groupedMessages,
+    toolResultMap,
+    surface,
+    showRawHarness,
+    rawHarnessBlob,
+    error: state.error,
+    input,
+    attachments,
+    attachError,
+    isDragOver,
+    canSend,
+    totalAttachmentKb,
+    busy: state.busy,
+    onInputChange: (v) => { setInput(v); if (historyIndex !== -1) setHistoryIndex(-1); },
+    onSubmit: (e) => void handleSubmit(e),
+    onKeyDown: handleComposerKeyDown,
+    onPaste: handlePaste,
+    onDragOver: handleDragOver,
+    onDragLeave: handleDragLeave,
+    onDrop: handleDrop,
+    onRemoveAttachment: removeAttachmentAt,
+    orbState,
+    signalHud,
+    pct,
+    contextSnapshot: state.contextSnapshot,
+    sessionSeconds,
+    toolCount,
+    msgCount,
+    toolErrorCount,
+    subtasks,
+    allToolCalls,
+    autoDream: state.autoDream,
+    uiVerbosity: state.uiVerbosity,
+    pulseChips,
+    lastTurnProviderRetries: state.lastTurnProviderRetries,
+    lastContextCompress: state.lastContextCompress,
+    heartbeatEnabled: state.heartbeatEnabled,
+    heartbeatUiStrip: state.heartbeatUiStrip,
+    personalityPulseActive: state.personalityPulseActive,
+    personalityPulseRows: state.personalityPulseRows,
+    dreamLabel,
+    activeToolCall,
+    windowWidth,
+    showPanels,
+    onClearSession: sendClearSession,
+    onOpenSettings: () => setSettingsOpen(true),
+    onToggleRaw: () => setShowRawHarness(v => !v),
+  };
+
+  return (
+    <ShellRouter theme={state.personaUiTheme}>
       <style>{CSS_ANIMATIONS}</style>
-
-      {/* ── Thin header bar ──────────────────────────────────────────────────── */}
-      <div style={styles.header}>
-        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-          <span style={{ color: CYAN, fontWeight: 800, fontSize: 12, letterSpacing: "0.28em", fontFamily: "monospace" }}>{state.personaDisplayLabel}</span>
-          {!state.connected && <span style={{ color: RED_ERR, fontSize: 9, fontFamily: "monospace", letterSpacing: "0.06em" }}>● OFFLINE</span>}
-          {activeToolCall && showPanels === false && (
-            <div style={styles.activityPill}>
-              <span style={{ color: CATEGORY_META[getToolCategory(activeToolCall.name)].color }}>
-                {CATEGORY_META[getToolCategory(activeToolCall.name)].icon}
-              </span>
-              <span style={{ color: "#889aaa", fontSize: 10, fontFamily: "monospace" }}>{activeToolCall.name}</span>
-              {activeToolCall.status === "pending_approval" && (
-                <span style={{ color: MAGENTA, fontSize: 10, fontWeight: 700 }}>— approve?</span>
-              )}
-            </div>
-          )}
-          {showPanels === false && state.autoDream.stage !== "idle" && (
-            <div style={styles.activityPill}>
-              <span style={{ color: state.autoDream.stage === "failed" ? RED_ERR : state.autoDream.stage === "completed" ? GREEN : CYAN }}>
-                ◈
-              </span>
-              <span style={{ color: "#889aaa", fontSize: 10, fontFamily: "monospace" }}>{dreamLabel}</span>
-            </div>
-          )}
-        </div>
-
-        <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-          {/* Slim context bar — only when no left panel */}
-          {!showPanels && state.contextSnapshot && (
-            <div style={{ display: "flex", alignItems: "center", gap: 6, width: 120 }}>
-              <div style={{ flex: 1, height: 2, background: "rgba(var(--lim-accent-rgb),0.08)", borderRadius: 1, overflow: "hidden" }}>
-                <div style={{ height: "100%", width: `${pct}%`, background: pct >= 80 ? RED_ERR : pct >= 60 ? AMBER : CYAN, borderRadius: 1, transition: "width 0.4s" }} />
-              </div>
-              <span style={{ color: pct >= 80 ? RED_ERR : "rgba(var(--lim-accent-rgb),0.35)", fontSize: 9, fontFamily: "monospace" }}>{pct}%</span>
-            </div>
-          )}
-          <button
-            type="button"
-            style={styles.headerBtn}
-            disabled={state.busy}
-            onClick={() => setSettingsOpen(true)}
-          >
-            SETTINGS
-          </button>
-          <button type="button" style={styles.headerBtn} disabled={state.busy} onClick={() => void sendClearSession()}>NEW SESSION</button>
-          <button type="button" style={{ ...styles.headerBtn, color: showRawHarness ? CYAN : undefined, borderColor: showRawHarness ? "rgba(var(--lim-accent-rgb),0.4)" : undefined }} onClick={() => setShowRawHarness(v => !v)} title={showRawHarness ? "Hide raw trace, retries, and compression lines from the transcript" : "Show raw harness lines in the transcript (noisy)"}>
-            RAW {showRawHarness ? "●" : "○"}
-          </button>
-          <button
-            type="button"
-            style={{ ...styles.headerBtn, opacity: screenshotting ? 0.5 : 1 }}
-            disabled={screenshotting || visibleMessages.length === 0}
-            onClick={() => void handleScreenshot()}
-            title="Capture session"
-          >
-            {screenshotting ? "…" : "CAPTURE"}
-          </button>
-        </div>
-      </div>
-
-      {/* ── 3-column body ────────────────────────────────────────────────────── */}
-      <div style={styles.body}>
-
-        {/* LEFT: Systems panel */}
-        {showPanels && (
-          <SystemsPanel
-            orbState={orbState}
-            pct={pct}
-            masked={state.contextSnapshot?.masked}
-            connected={state.connected}
-            sessionSeconds={sessionSeconds}
-            toolCount={toolCount}
-            msgCount={msgCount}
-            subtasks={subtasks}
-            personaName={state.personaName}
-            autoDream={state.autoDream}
-            uiVerbosity={state.uiVerbosity}
-          />
-        )}
-
-        {/* CENTER: Comms */}
-        <div style={styles.center}>
-          {/* Messages */}
-          <div ref={messagesRef} style={styles.messages}>
-            {visibleMessages.length === 0 && !state.busy && (
-              <div style={{ color: "rgba(var(--lim-accent-rgb),0.12)", textAlign: "center", marginTop: 80, fontSize: 13, fontFamily: "monospace", letterSpacing: "0.1em" }}>
-                AWAITING INPUT
-              </div>
-            )}
-            {groupedMessages.map((entry, i) => {
-              if ("kind" in entry && entry.kind === "tool_group") {
-                return (
-                  <ToolGroupCard
-                    key={`grp-${i}-${entry.name}`}
-                    group={entry}
-                    toolResultMap={toolResultMap}
-                    surface={surface}
-                  />
-                );
-              }
-              const m = entry as MessageEntry;
-              return (
-                <MessageView
-                  key={i}
-                  entry={m}
-                  toolResult={m.kind === "tool_call" ? toolResultMap.get(m.callId) : undefined}
-                  surface={surface}
-                />
-              );
-            })}
-            {state.error && (
-              <div style={{ color: RED_ERR, padding: "8px 0", fontSize: 12, fontFamily: "monospace" }}>
-                ✗ {state.error}
-              </div>
-            )}
-            {!showRawHarness && rawHarnessBlob.trim().length > 0 && (
-              <details style={{ marginTop: 10, borderTop: "1px solid rgba(var(--lim-accent-rgb),0.08)", paddingTop: 8 }}>
-                <summary style={{ color: "#556677", fontSize: 11, cursor: "pointer", userSelect: "none" }}>
-                  Full harness trace ({rawHarnessBlob.length.toLocaleString()} chars) — optional
-                </summary>
-                <pre
-                  style={{
-                    marginTop: 8,
-                    maxHeight: 220,
-                    overflow: "auto",
-                    fontSize: 10,
-                    color: "#445566",
-                    background: "rgba(0,4,12,0.75)",
-                    border: "1px solid rgba(var(--lim-accent-rgb),0.06)",
-                    borderRadius: 4,
-                    padding: 10,
-                    whiteSpace: "pre-wrap",
-                    wordBreak: "break-word",
-                  }}
-                >
-                  {rawHarnessBlob}
-                </pre>
-              </details>
-            )}
-            <div ref={bottomRef} />
-          </div>
-
-          <div style={styles.sessionFooterStrip}>
-            <span style={{ color: pct >= 80 ? RED_ERR : "rgba(var(--lim-accent-rgb),0.45)" }}>CTX {pct}%</span>
-            {state.lastTurnProviderRetries > 0 && (
-              <span style={{ color: AMBER }}>
-                {state.lastTurnProviderRetries} provider retr{state.lastTurnProviderRetries === 1 ? "y" : "ies"} (recovered)
-              </span>
-            )}
-            {toolErrorCount > 0 && (
-              <span style={{ color: RED_ERR }}>{toolErrorCount} tool error{toolErrorCount === 1 ? "" : "s"}</span>
-            )}
-            {state.lastContextCompress && (
-              <span style={{ color: "#556677" }}>
-                Compressed {state.lastContextCompress.beforePct}% → {state.lastContextCompress.afterPct}%
-              </span>
-            )}
-            <span style={{ color: "#334455", marginLeft: "auto" }}>
-              {surface === "clean" ? "Clean view — toggle RAW for full harness lines" : "Verbose view"}
-            </span>
-          </div>
-          {state.heartbeatEnabled && state.heartbeatUiStrip && (state.personalityPulseActive || pulseChips.length > 0) && (
-            <div
-              style={{
-                padding: "5px 12px 6px",
-                borderTop: "1px solid rgba(var(--lim-accent-rgb),0.05)",
-                background: "rgba(0,6,14,0.35)",
-                fontFamily: "monospace",
-                fontSize: 9,
-                color: "rgba(var(--lim-accent-rgb),0.35)",
-                letterSpacing: "0.06em",
-              }}
-            >
-              <span style={{ color: MAGENTA }}>PULSE</span>
-              {state.personalityPulseActive && <span style={{ marginLeft: 8, color: "#8899aa" }}>syncing…</span>}
-              {pulseChips.map((c) => (
-                <span
-                  key={c.runId}
-                  title={c.summary}
-                  style={{
-                    marginLeft: 8,
-                    padding: "1px 6px",
-                    borderRadius: 3,
-                    border: "1px solid rgba(var(--lim-accent-rgb),0.1)",
-                    color: "#778899",
-                    maxWidth: 160,
-                    display: "inline-block",
-                    overflow: "hidden",
-                    textOverflow: "ellipsis",
-                    whiteSpace: "nowrap",
-                    verticalAlign: "middle",
-                  }}
-                >
-                  {c.summary.slice(0, 48)}
-                  {c.summary.length > 48 ? "…" : ""}
-                </span>
-              ))}
-            </div>
-          )}
-          <form
-            style={{
-              ...styles.inputArea,
-              borderTopColor: isDragOver ? CYAN : "rgba(var(--lim-accent-rgb),0.07)",
-              outline: isDragOver ? `1px dashed rgba(var(--lim-accent-rgb),0.4)` : "none",
-            }}
-            onSubmit={(e) => void handleSubmit(e)}
-            onDragOver={handleDragOver}
-            onDragLeave={handleDragLeave}
-            onDrop={(e) => void handleDrop(e)}
-          >
-            {attachments.length > 0 && (
-              <div style={styles.attachmentsRow}>
-                {attachments.map((attachment, idx) => (
-                  <div key={`${attachment.name}-${idx}`} style={styles.attachmentChip}>
-                    <img src={attachment.dataUrl} alt={attachment.name} style={styles.attachmentPreview} />
-                    <span style={styles.attachmentLabel}>{attachment.name} ({Math.round(attachment.sizeBytes / 1024)} KB)</span>
-                    <button type="button" style={styles.attachmentRemove} onClick={() => removeAttachmentAt(idx)} disabled={state.busy}>×</button>
-                  </div>
-                ))}
-                <span style={styles.attachmentMeta}>{attachments.length} image{attachments.length === 1 ? "" : "s"} ({totalAttachmentKb} KB)</span>
-              </div>
-            )}
-            {attachError && <div style={styles.attachmentError}>{attachError}</div>}
-            <div style={styles.composerRow}>
-              <textarea
-                id="chat-message-input"
-                name="message"
-                ref={inputRef}
-                rows={1}
-                style={styles.textarea}
-                value={input}
-                onChange={e => { setInput(e.target.value); if (historyIndex !== -1) setHistoryIndex(-1); }}
-                onKeyDown={e => void handleComposerKeyDown(e)}
-                onPaste={e => void handlePaste(e)}
-                placeholder={state.busy ? "processing…" : "transmit…"}
-                disabled={state.busy || !state.connected}
-              />
-              <button type="submit" style={{
-                ...styles.btn,
-                background: canSend ? "rgba(0,60,100,0.8)" : "rgba(0,6,14,0.6)",
-                borderColor: canSend ? "rgba(var(--lim-accent-rgb),0.4)" : "rgba(var(--lim-accent-rgb),0.08)",
-                color: canSend ? CYAN : "rgba(var(--lim-accent-rgb),0.2)",
-                cursor: canSend ? "pointer" : "default",
-                fontFamily: "monospace",
-                letterSpacing: "0.1em",
-                fontSize: 11,
-              }} disabled={!canSend}>
-                SEND
-              </button>
-            </div>
-            <div style={styles.shortcutHint}>
-              Enter send · Shift+Enter newline · Ctrl/Cmd+K clear · Ctrl/Cmd+Shift+L new session
-            </div>
-          </form>
-        </div>
-
-        {/* RIGHT: Activity stream */}
-        {showPanels && (
-          <ActivityStream
-            toolCalls={allToolCalls}
-            toolResultMap={toolResultMap}
-            pulseActive={state.personalityPulseActive}
-            pulseRows={state.personalityPulseRows}
-          />
-        )}
-      </div>
+      <PersonaShellSwitcher shell={shell} contract={contract} />
 
       {/* ── Settings modal ─────────────────────────────────────────────────────── */}
       <SettingsModal
@@ -2005,6 +2091,7 @@ export function App() {
         providerModelLocked={settingsProviderModelLocked}
         providerBaseLocked={settingsProviderBaseLocked}
         providerApiKeyConfigured={settingsProviderApiKeyConfigured}
+        onPresetApply={applyProviderPreset}
         onProviderModel={setSettingsProviderModel}
         onProviderBase={setSettingsProviderBase}
         envDraft={settingsEnvDraft}
@@ -2030,10 +2117,10 @@ export function App() {
               <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
                 <span style={{ color: MAGENTA, fontWeight: 700, fontSize: 12, letterSpacing: "0.1em", fontFamily: "monospace" }}>⚠ AUTHORIZATION REQUIRED</span>
                 <span style={{
-                  color: CATEGORY_META[getToolCategory(state.pendingApproval.name)].color,
+                  color: categoryForTool(state.pendingApproval.name).color,
                   fontWeight: 700, fontSize: 13, fontFamily: "monospace",
                 }}>
-                  {CATEGORY_META[getToolCategory(state.pendingApproval.name)].icon}{" "}
+                  {categoryForTool(state.pendingApproval.name).icon}{" "}
                   {state.pendingApproval.name}
                 </span>
               </div>
@@ -2080,7 +2167,12 @@ export function App() {
           aria-modal="true"
           aria-labelledby="persona-bootstrap-title"
         >
-          <div style={styles.modalBox}>
+          <div
+            style={{
+              ...styles.modalBox,
+              ...(bootstrapSubmitting ? { width: "min(960px, 92vw)" } : {}),
+            }}
+          >
             <div
               id="persona-bootstrap-title"
               style={{ color: CYAN, fontWeight: 700, marginBottom: 6, fontSize: 11, letterSpacing: "0.12em", fontFamily: "monospace" }}
@@ -2118,23 +2210,15 @@ export function App() {
               ))}
             </div>
             {bootstrapSubmitting && (
-              <div
-                style={{
-                  marginBottom: 10,
-                  padding: "8px 10px",
-                  border: "1px solid rgba(var(--lim-accent-rgb),0.25)",
-                  background: "rgba(var(--lim-accent-rgb),0.06)",
-                  color: CYAN,
-                  fontSize: 12,
-                  fontFamily: "monospace",
-                  letterSpacing: "0.03em",
-                }}
-              >
-                {state.personaBootstrapProgress ?? "Working…"}
-                {state.personaBootstrapStage
-                  ? ` · ${personaBootstrapStageHint(state.personaBootstrapStage)}`
-                  : ""}
-              </div>
+              <PersonaGenerationWorkbench
+                artifacts={state.personaBootstrapArtifacts}
+                progress={state.personaBootstrapProgress}
+                stageHint={
+                  state.personaBootstrapStage
+                    ? personaBootstrapStageHint(state.personaBootstrapStage)
+                    : undefined
+                }
+              />
             )}
             <textarea
               ref={bootstrapTextareaRef}
@@ -2221,8 +2305,8 @@ export function App() {
           </div>
         </div>
       )}
-        </div>
-      );
+    </ShellRouter>
+  );
 }
 
 // ── Styles ────────────────────────────────────────────────────────────────────
@@ -2310,27 +2394,27 @@ const styles = {
   },
   userMsg: {
     padding: "8px 12px",
-    background: "rgba(0,30,55,0.4)",
-    borderRadius: 4,
+    background: LIM.userBg,
+    borderRadius: "var(--lim-radius, 6px)",
     borderLeft: `2px solid ${CYAN}`,
     lineHeight: 1.5,
     boxShadow: "inset 0 0 20px rgba(var(--lim-accent-rgb),0.02)",
   },
   assistantMsg: {
     padding: "5px 0",
-    color: "#44dd88",
+    color: LIM.assistant,
     lineHeight: 1.65,
   },
   mdParagraph:    { margin: "0 0 10px", whiteSpace: "normal" as const, lineHeight: 1.72 },
   mdList:         { margin: "0 0 10px 22px", lineHeight: 1.72 },
   mdOrderedList:  { margin: "0 0 10px 22px", lineHeight: 1.72 },
   mdListItem:     { margin: "3px 0" },
-  mdH1: { fontSize: 22, margin: "18px 0 10px", color: "#7cf5a9", borderBottom: "1px solid rgba(var(--lim-success-rgb),0.15)", paddingBottom: 5, fontWeight: 700 },
-  mdH2: { fontSize: 18, margin: "16px 0 8px", color: CYAN, fontWeight: 700 },
-  mdH3: { fontSize: 15, margin: "12px 0 6px", color: "#cc88ff", fontWeight: 600 },
+  mdH1: { fontSize: 22, margin: "18px 0 10px", color: LIM.markdownH1, borderBottom: "1px solid rgba(var(--lim-success-rgb),0.15)", paddingBottom: 5, fontWeight: 700 },
+  mdH2: { fontSize: 18, margin: "16px 0 8px", color: LIM.markdownH2, fontWeight: 700 },
+  mdH3: { fontSize: 15, margin: "12px 0 6px", color: LIM.secondary, fontWeight: 600 },
   mdH4: { fontSize: 13, margin: "10px 0 4px", color: AMBER, fontWeight: 600, textTransform: "uppercase" as const, letterSpacing: "0.07em" },
   mdInlineCode: {
-    background: "rgba(0,10,22,0.8)",
+    background: LIM.surface1,
     border: "1px solid rgba(var(--lim-accent-rgb),0.12)",
     borderRadius: 3,
     padding: "1px 5px",
@@ -2341,13 +2425,13 @@ const styles = {
   mdQuote: {
     margin: "12px 0", padding: "8px 14px",
     borderLeft: "2px solid rgba(var(--lim-accent-rgb),0.25)",
-    color: "#667788", fontStyle: "italic" as const,
-    background: "rgba(0,10,20,0.5)", borderRadius: "0 4px 4px 0",
+    color: LIM.textDim, fontStyle: "italic" as const,
+    background: LIM.surface1, borderRadius: "0 4px 4px 0",
   },
   mdTableWrap: { overflowX: "auto" as const, margin: "12px 0", borderRadius: 5, overflow: "hidden" as const },
-  mdTable:     { width: "100%", borderCollapse: "collapse" as const, background: "rgba(0,6,14,0.8)" },
-  mdTableHead: { textAlign: "left" as const, border: "1px solid rgba(var(--lim-accent-rgb),0.1)", padding: "7px 12px", background: "rgba(0,12,25,0.9)", color: "#889aaa", fontWeight: 700, fontSize: 11, letterSpacing: "0.05em" },
-  mdTableCell: { border: "1px solid rgba(var(--lim-accent-rgb),0.07)", padding: "6px 12px", verticalAlign: "top" as const, color: "#778899" },
+  mdTable:     { width: "100%", borderCollapse: "collapse" as const, background: LIM.surface1 },
+  mdTableHead: { textAlign: "left" as const, border: "1px solid rgba(var(--lim-accent-rgb),0.1)", padding: "7px 12px", background: LIM.surface2, color: LIM.textMuted, fontWeight: 700, fontSize: 11, letterSpacing: "0.05em" },
+  mdTableCell: { border: "1px solid rgba(var(--lim-accent-rgb),0.07)", padding: "6px 12px", verticalAlign: "top" as const, color: LIM.textDim },
   toolCard: {
     borderRadius: 3,
     padding: "6px 10px",

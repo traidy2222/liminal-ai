@@ -6,7 +6,7 @@ import { existsSync } from "node:fs";
 import { createServer } from "node:http";
 import express from "express";
 import cors from "cors";
-import { loadRuntimePreferences } from "@liminal/core";
+import { effectiveHarnessEnvRaw, loadRuntimePreferences } from "@liminal/core";
 import { SSEManager } from "./sse.js";
 import { AgentBridge } from "./agentBridge.js";
 import { createRouter } from "./routes.js";
@@ -86,6 +86,24 @@ try {
     err instanceof Error ? err.message : String(err)
   );
   process.exit(1);
+}
+
+if (effectiveHarnessEnvRaw("AGENT_BROWSER") === "1") {
+  void (async () => {
+    try {
+      const pw = await import("playwright");
+      const exe = pw.chromium.executablePath();
+      if (!existsSync(exe)) {
+        console.warn(
+          "AGENT_BROWSER=1 but Chromium is not installed. Run: npm run browser:install"
+        );
+      }
+    } catch {
+      console.warn(
+        "AGENT_BROWSER=1 but playwright is unavailable. Install: npm run browser:install"
+      );
+    }
+  })();
 }
 
 if (existsSync(clientIndexHtml)) {
