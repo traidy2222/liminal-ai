@@ -1,12 +1,11 @@
 /**
- * edit_file — unified tool for all edits to EXISTING files.
+ * edit_file — unified tool for targeted changes to EXISTING files.
  *
- * Three modes, pick exactly one:
- *   replacements  — one or more find/replace pairs (like old batch_replace/search_replace_file)
- *   diff          — unified diff hunk with fuzzy context matching (like old apply_diff)
- *   content       — full file replacement; requires overwrite:true (escape hatch for genuine rewrites)
+ * Two modes, pick exactly one:
+ *   replacements  — one or more find/replace pairs (string or regex), applied in order
+ *   diff          — unified diff hunk with fuzzy context matching
  *
- * write_file is for NEW files only. edit_file is for everything else.
+ * Whole-file content (create / overwrite / append) belongs to write_file.
  */
 import { readFile, writeFile, access } from "node:fs/promises";
 import path from "node:path";
@@ -14,7 +13,7 @@ import { resolveWorkspaceRoot } from "@liminal/core";
 import { defineTool } from "./helpers.js";
 import { resolveWithinWorkspace } from "./file_path_guard.js";
 
-// ─── Fuzzy diff helpers (same algorithm as apply_diff.ts) ────────────────────
+// ─── Fuzzy diff helpers ──────────────────────────────────────────────────────
 
 const SEARCH_RADIUS = 120;
 
@@ -78,12 +77,11 @@ interface Replacement {
 export const editFileTool = defineTool({
   name: "edit_file",
   description:
-    "WHAT: Edit an EXISTING file. Three modes — pick exactly one:\n" +
+    "WHAT: Make a targeted change to an EXISTING file. Two modes — pick exactly one:\n" +
     "  replacements: [{search, replace, regex?, flags?}]  — find/replace one or many strings in one write.\n" +
     "  diff: '<unified diff hunk>'                        — patch via @@ hunk; fuzzy search finds context even if line numbers are slightly off.\n" +
-    "  content: '<full text>' + overwrite:true            — full replacement (escape hatch; requires explicit overwrite:true).\n" +
-    "WHEN: Any targeted change to a file that already exists.\n" +
-    "NOT WHEN: Creating a brand-new file — use write_file instead.\n" +
+    "WHEN: Changing part of a file that already exists.\n" +
+    "NOT WHEN: Creating a new file or replacing a whole file — use write_file (mode=create/overwrite/append).\n" +
     "WORKFLOW: grep_file first to find the exact line, then edit_file with replacements to fix it.",
   requiresApproval: true,
   dangerLevel: "cautious",
@@ -118,14 +116,6 @@ export const editFileTool = defineTool({
           "Context lines prefixed with space, removals with -, additions with +. " +
           "Line numbers can be approximate — fuzzy search finds the right location.",
       },
-      content: {
-        type: "string",
-        description: "Full replacement content. Requires overwrite:true — this rewrites the entire file.",
-      },
-      overwrite: {
-        type: "boolean",
-        description: "Must be true when using content mode to confirm intentional full replacement.",
-      },
       preview: {
         type: "boolean",
         description: "Dry run — report what would change without writing.",
@@ -155,36 +145,16 @@ export const editFileTool = defineTool({
 
     const hasReplacements = Array.isArray(args["replacements"]) && (args["replacements"] as Replacement[]).length > 0;
     const hasDiff = typeof args["diff"] === "string" && (args["diff"] as string).trim().length > 0;
-    const hasContent = typeof args["content"] === "string";
 
-    const modeCount = [hasReplacements, hasDiff, hasContent].filter(Boolean).length;
+    const modeCount = [hasReplacements, hasDiff].filter(Boolean).length;
     if (modeCount === 0) {
-      return { ok: false, error: "Provide exactly one of: replacements, diff, or content." };
+      return {
+        ok: false,
+        error: "Provide exactly one of: replacements or diff. For a whole-file write use write_file.",
+      };
     }
     if (modeCount > 1) {
-      return { ok: false, error: "Provide exactly one of: replacements, diff, or content — not multiple." };
-    }
-
-    // ── MODE: full content replacement ───────────────────────────────────────
-    if (hasContent) {
-      if (args["overwrite"] !== true) {
-        return {
-          ok: false,
-          error:
-            "Content mode replaces the entire file. Set overwrite:true to confirm.\n" +
-            "Tip: for targeted edits use replacements or diff instead — they are safer and faster.",
-        };
-      }
-      const newContent = args["content"] as string;
-      if (preview) {
-        return { ok: true, output: `PREVIEW — would write ${newContent.length} chars to ${filePath}` };
-      }
-      try {
-        await writeFile(filePath, newContent, "utf8");
-        return { ok: true, output: `Wrote ${newContent.length} chars to ${filePath} (full replacement)` };
-      } catch (e) {
-        return { ok: false, error: `Write failed: ${String(e)}` };
-      }
+      return { ok: false, error: "Provide exactly one of: replacements or diff — not both." };
     }
 
     // ── Read file for replacement/diff modes ─────────────────────────────────

@@ -1,5 +1,6 @@
 import type { AccumulatedToolCall, StreamChunk } from "./types.js";
 import type OpenAI from "openai";
+import { extractReasoningDeltaFromChunk } from "./reasoning_stream.js";
 
 function sanitizeStreamText(text: string): string {
   return text
@@ -13,13 +14,17 @@ export class StreamAccumulator {
   private text = "";
   private toolCallMap: Map<number, AccumulatedToolCall> = new Map();
   private seenToolStart: Set<number> = new Set();
+  /** Indices whose argsJson must not grow after eager dispatch. */
+  private frozenIndices = new Set<number>();
+  /** Highest tool call index seen so far — used to detect index gaps. */
+  private maxToolIndex = -1;
 
-  processChunk(chunk: OpenAI.Chat.Completions.ChatCompletionChunk): StreamChunk & { isNewTool?: boolean } {
+  processChunk(chunk: OpenAI.Chat.Completions.ChatCompletionChunk): StreamChunk & { isNewTool?: boolean; indexGap?: { expected: number; received: number } } {
     const choice = chunk.choices[0];
     if (!choice) return {};
 
     const delta = choice.delta;
-    const result: StreamChunk & { isNewTool?: boolean } = {
+    const result: StreamChunk & { isNewTool?: boolean; indexGap?: { expected: number; received: number } } = {
       finishReason: (choice.finish_reason as StreamChunk["finishReason"]) ?? null,
     };
 
@@ -29,9 +34,22 @@ export class StreamAccumulator {
       result.textDelta = cleaned;
     }
 
+    const reasoningRaw = extractReasoningDeltaFromChunk(delta);
+    if (reasoningRaw) {
+      const cleaned = sanitizeStreamText(reasoningRaw);
+      result.reasoningDelta = cleaned;
+    }
+
     if (delta.tool_calls) {
       for (const tc of delta.tool_calls) {
         const idx = tc.index;
+
+        // Detect non-contiguous index (provider skipped an index — possible misalignment).
+        if (!this.toolCallMap.has(idx) && idx > this.maxToolIndex + 1) {
+          result.indexGap = { expected: this.maxToolIndex + 1, received: idx };
+        }
+        if (idx > this.maxToolIndex) this.maxToolIndex = idx;
+
         let entry = this.toolCallMap.get(idx);
 
         if (!entry) {
@@ -42,8 +60,11 @@ export class StreamAccumulator {
         if (tc.id && !entry.id) entry.id = tc.id;
         if (tc.function?.name && !entry.name) entry.name = tc.function.name;
 
-        const argsDelta = tc.function?.arguments ?? "";
-        entry.argsJson += argsDelta;
+        const rawArgsDelta = tc.function?.arguments ?? "";
+        const frozen = this.frozenIndices.has(idx);
+        if (!frozen && rawArgsDelta) {
+          entry.argsJson += rawArgsDelta;
+        }
 
         const isNewTool = !this.seenToolStart.has(idx) && !!entry.name && !!entry.id;
         if (isNewTool) {
@@ -51,12 +72,18 @@ export class StreamAccumulator {
           result.isNewTool = true;
         }
 
-        result.toolCallDelta = {
-          index: idx,
-          id: entry.id,
-          name: entry.name,
-          argsDelta: argsDelta || undefined,
-        };
+        // Emit toolCallDelta on new-tool discovery (even with empty argsDelta) so
+        // callers can emit tool_start reliably — the first OpenAI-format streaming
+        // chunk carries name+id but arguments:"", which previously prevented
+        // tool_start from firing when isNewTool and toolCallDelta were in separate chunks.
+        if (!frozen && (isNewTool || rawArgsDelta)) {
+          result.toolCallDelta = {
+            index: idx,
+            id: entry.id,
+            name: entry.name,
+            argsDelta: rawArgsDelta,
+          };
+        }
       }
     }
 
@@ -87,9 +114,20 @@ export class StreamAccumulator {
     }
   }
 
+  /** Stop accepting further argument deltas for this tool index (after eager dispatch). */
+  freezeToolCallIndex(index: number): void {
+    this.frozenIndices.add(index);
+  }
+
+  isToolCallIndexFrozen(index: number): boolean {
+    return this.frozenIndices.has(index);
+  }
+
   reset(): void {
     this.text = "";
     this.toolCallMap.clear();
     this.seenToolStart.clear();
+    this.frozenIndices.clear();
+    this.maxToolIndex = -1;
   }
 }
