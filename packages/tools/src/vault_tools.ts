@@ -68,6 +68,12 @@ export const vaultWriteTool = defineTool({
         items: { type: "string" },
         description: "Optional tags for filtering and graph coloring in Obsidian",
       },
+      ignore_dedupe: {
+        type: "boolean",
+        description:
+          "Allow creating a new note even when it is similar to an existing one " +
+          "(e.g. a deliberate new dated edition). Default false.",
+      },
     },
     required: ["title", "content", "type"],
     additionalProperties: false,
