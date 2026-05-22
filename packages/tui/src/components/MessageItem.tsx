@@ -3,6 +3,8 @@ import { Box, Text } from "ink";
 import type { MessageEntry } from "../useAgent.js";
 import { ToolCallCard } from "./ToolCallCard.js";
 import { SubtaskCard } from "./SubtaskCard.js";
+import { ThinkCard } from "./ThinkCard.js";
+import { ReasonCard } from "./ReasonCard.js";
 import { usePersonaChrome, type TuiJarvisColors } from "../personaChromeContext.js";
 
 const MAX_RESULT_LINES = 8;
@@ -153,17 +155,44 @@ export function MessageItem({ entry, width }: Props) {
       );
 
     /* ── Think ──────────────────────────────────────────── */
-    case "think": {
-      const t = entry.content.length > 1200 ? entry.content.slice(0, 1200) + "…" : entry.content;
+    case "model_reasoning":
       return (
-        <Box paddingLeft={2} flexDirection="column" width={w}>
-          <Text color={jarvis.meta} dimColor bold>◈ thinking</Text>
-          <Box paddingLeft={2}>
-            <Text color={jarvis.meta} dimColor wrap="wrap">{t}</Text>
-          </Box>
+        <Box flexDirection="column" paddingLeft={2} width={w}>
+          <Text color={jarvis.warn} dimColor italic>
+            {"🧠 "}
+            {entry.streaming && entry.text.length > 400 ? "…" + entry.text.slice(-400) : entry.text}
+            {entry.streaming ? "▍" : ""}
+          </Text>
         </Box>
       );
-    }
+
+    case "think":
+      return (
+        <Box width={w}>
+          <ThinkCard
+            content={entry.content}
+            streaming={entry.streaming}
+            tool_families={entry.tool_families}
+            scope={entry.scope}
+            unknowns={entry.unknowns}
+            clarification_needed={entry.clarification_needed}
+            clarification_question={entry.clarification_question}
+            self_check={entry.self_check}
+          />
+        </Box>
+      );
+
+    case "reason":
+      return (
+        <Box width={w}>
+          <ReasonCard
+            inference={entry.inference}
+            streaming={entry.streaming}
+            confidence={entry.confidence}
+            next_action={entry.next_action}
+          />
+        </Box>
+      );
 
     /* ── Plan ───────────────────────────────────────────── */
     case "plan":

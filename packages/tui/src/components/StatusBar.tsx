@@ -36,7 +36,7 @@ export function StatusBar({
   const pct = snapshot ? Math.round(snapshot.usageFraction * 100) : null;
   const ctxColor = pct == null ? jarvis.muted : pct >= 80 ? jarvis.danger : pct >= 60 ? jarvis.warn : jarvis.assistant;
 
-  // Shorten slug: "openrouter/owl-alpha" → "owl-alpha"
+  // Shorten slug: "provider/name" → last segment (e.g. qwen/qwen3.5-9b → qwen3.5-9b)
   const rawModel = modelSlug.split("/").pop() ?? modelSlug;
   const model = rawModel.length > 30 ? rawModel.slice(0, 29) + "…" : rawModel;
 

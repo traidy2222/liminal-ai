@@ -70,9 +70,9 @@ const harness = new AgentHarness({
     saveRuntimePreferences(prefs, resolveWorkspaceRoot()),
   context: {
     modelMaxTokens: 128_000,
-    thresholdFraction: 0.8,
+    thresholdFraction: 0.6,
     inceptionMessages: INCEPTION_MESSAGES,
-    protocolDynamicBuilder: (names) => buildProtocolDynamicSuffix(names),
+    protocolDynamicBuilder: (names, hint) => buildProtocolDynamicSuffix(names, (hint ?? "any") as import("@liminal/tools").ProtocolIntentHint),
   },
 });
 

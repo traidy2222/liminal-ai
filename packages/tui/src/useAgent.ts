@@ -7,6 +7,11 @@ import {
   type ImageAttachment,
   resolveHarnessEnvRaw,
 } from "@liminal/core";
+import type { PersonaArtifactPreview } from "@liminal/core/persona-bootstrap-progress";
+import {
+  extractStreamingWritePreview,
+  isStreamingWriteTool,
+} from "@liminal/core/streaming-write-preview";
 import {
   applyPersonaProfileToHarness,
   clearPersistedPersonaArtifacts,
@@ -31,6 +36,26 @@ function sanitizeDeltaText(text: string): string {
     .replace(/\r/g, "");
 }
 
+function finalizeStreamingModelReasoning(messages: MessageEntry[]): MessageEntry[] {
+  return messages.map((m) =>
+    m.kind === "model_reasoning" && m.streaming ? { ...m, streaming: false } : m
+  );
+}
+
+function promoteWriteToolCallIfArgsComplete(
+  entry: Extract<MessageEntry, { kind: "tool_call" }>,
+  argsJson: string
+): Extract<MessageEntry, { kind: "tool_call" }> {
+  if (entry.status !== "streaming" || !isStreamingWriteTool(entry.name)) {
+    return { ...entry, argsJson };
+  }
+  const preview = extractStreamingWritePreview(entry.name, argsJson);
+  if (preview && !preview.incomplete) {
+    return { ...entry, argsJson, status: "running" };
+  }
+  return { ...entry, argsJson };
+}
+
 export type MessageEntry =
   | { kind: "user"; text: string }
   | { kind: "assistant"; text: string; streaming: boolean }
@@ -46,8 +71,30 @@ export type MessageEntry =
     }
   | { kind: "tool_result"; callId: string; output: string; ok: boolean }
   | { kind: "ask_user"; prompt: string }
-  | { kind: "think"; content: string }
-  | { kind: "plan"; steps: string[] }
+  | {
+      kind: "think";
+      callId?: string;
+      streaming?: boolean;
+      argsJson?: string;
+      content: string;
+      tool_families?: string[];
+      scope?: string;
+      unknowns?: string[];
+      clarification_needed?: boolean;
+      clarification_question?: string;
+      self_check?: number;
+    }
+  | {
+      kind: "reason";
+      callId?: string;
+      streaming?: boolean;
+      argsJson?: string;
+      inference: string;
+      confidence?: "low" | "medium" | "high";
+      next_action?: string;
+    }
+  | { kind: "plan"; steps: string[]; callId?: string; streaming?: boolean; argsJson?: string; previewText?: string }
+  | { kind: "model_reasoning"; text: string; streaming: boolean }
   | { kind: "trace"; text: string }
   | { kind: "pulse_nudge"; text: string }
   | {
@@ -74,6 +121,7 @@ export interface AgentState {
   personaBootstrapAllowSkip: boolean;
   personaBootstrapProgress: string | null;
   personaBootstrapStage: string | null;
+  personaBootstrapArtifacts: PersonaArtifactPreview[] | null;
   personaBootstrapSubmitting: boolean;
   /** Ambient line for AGENT_HEARTBEAT (footer / status strip). */
   personalityPulseLine: string | null;
@@ -95,6 +143,7 @@ type Action =
   | { type: "user_message"; text: string }
   | { type: "text_delta"; delta: string }
   | { type: "trace_delta"; delta: string }
+  | { type: "model_reasoning_delta"; delta: string }
   | {
       type: "provider_retry";
       attempt: number;
@@ -115,7 +164,24 @@ type Action =
   | { type: "ask_user_resolved" }
   | { type: "turn_end"; snapshot: ContextSnapshot }
   | { type: "error"; msg: string }
-  | { type: "think"; content: string }
+  | {
+      type: "think";
+      callId: string;
+      content: string;
+      tool_families?: string[];
+      scope?: string;
+      unknowns?: string[];
+      clarification_needed?: boolean;
+      clarification_question?: string;
+      self_check?: number;
+    }
+  | {
+      type: "reason";
+      callId: string;
+      inference: string;
+      confidence?: "low" | "medium" | "high";
+      next_action?: string;
+    }
   | { type: "plan"; steps: string[] }
   | { type: "plan_step_done"; stepIndex: number }
   | { type: "subtask_spawned"; taskId: string; parentTaskId: string; goal: string; depth: number }
@@ -127,7 +193,12 @@ type Action =
   | { type: "heartbeat_started"; payload: AgentEventMap["heartbeat_started"] }
   | { type: "heartbeat_completed"; payload: AgentEventMap["heartbeat_completed"] }
   | { type: "heartbeat_skipped"; payload: AgentEventMap["heartbeat_skipped"] }
-  | { type: "persona_bootstrap_progress"; message: string | null; stage: string | null }
+  | {
+      type: "persona_bootstrap_progress";
+      message: string | null;
+      stage: string | null;
+      artifacts?: PersonaArtifactPreview[] | null;
+    }
   | { type: "persona_bootstrap_submitting"; value: boolean }
   | { type: "persona_bootstrap_done" };
 
@@ -145,6 +216,7 @@ function createInitialAgentState(harness: AgentHarness): AgentState {
     personaBootstrapAllowSkip: personaBootstrapAllowSkipFromHarness(harness),
     personaBootstrapProgress: null,
     personaBootstrapStage: null,
+    personaBootstrapArtifacts: null,
     personaBootstrapSubmitting: false,
     personalityPulseLine: null,
     personalityPulseActive: false,
@@ -169,7 +241,9 @@ function reducer(state: AgentState, action: Action): AgentState {
       };
 
     case "text_delta": {
-      const baseMessages = stripTrailingProviderRetry(state.messages);
+      const baseMessages = finalizeStreamingModelReasoning(
+        stripTrailingProviderRetry(state.messages)
+      );
       const last = baseMessages.at(-1);
       if (last?.kind === "assistant" && last.streaming) {
         const updated = { ...last, text: last.text + action.delta };
@@ -199,6 +273,30 @@ function reducer(state: AgentState, action: Action): AgentState {
       return {
         ...state,
         messages: [...state.messages, { kind: "trace", text: action.delta }],
+      };
+    }
+
+    case "model_reasoning_delta": {
+      let baseMessages = stripTrailingProviderRetry(state.messages);
+      if (/reasoning budget restart/i.test(action.delta)) {
+        baseMessages = finalizeStreamingModelReasoning(baseMessages);
+      }
+      const last = baseMessages.at(-1);
+      if (last?.kind === "model_reasoning" && last.streaming) {
+        return {
+          ...state,
+          messages: [
+            ...baseMessages.slice(0, -1),
+            { ...last, text: last.text + action.delta },
+          ],
+        };
+      }
+      return {
+        ...state,
+        messages: [
+          ...baseMessages,
+          { kind: "model_reasoning", text: action.delta, streaming: true },
+        ],
       };
     }
 
@@ -244,8 +342,33 @@ function reducer(state: AgentState, action: Action): AgentState {
     }
 
     case "tool_start": {
-      // Suppress generic card for think/plan — they render as special entries
-      if (action.name === "think" || action.name === "plan") return state;
+      const baseAfterReasoning = finalizeStreamingModelReasoning(
+        stripTrailingProviderRetry(state.messages)
+      );
+      if (action.name === "think") {
+        return {
+          ...state,
+          messages: baseAfterReasoning.concat([
+            { kind: "think", callId: action.callId, streaming: true, argsJson: "", content: "" },
+          ]),
+        };
+      }
+      if (action.name === "reason") {
+        return {
+          ...state,
+          messages: baseAfterReasoning.concat([
+            { kind: "reason", callId: action.callId, streaming: true, argsJson: "", inference: "" },
+          ]),
+        };
+      }
+      if (action.name === "plan") {
+        return {
+          ...state,
+          messages: baseAfterReasoning.concat([
+            { kind: "plan", callId: action.callId, streaming: true, argsJson: "", steps: [], previewText: "" },
+          ]),
+        };
+      }
       // Suppress orchestration tools — they appear as subtask entries
       if (
         action.name === "spawn_agent" ||
@@ -253,9 +376,13 @@ function reducer(state: AgentState, action: Action): AgentState {
         action.name === "cancel_agent" ||
         action.name === "list_agents"
       ) return state;
+      const duplicate = baseAfterReasoning.some(
+        (m) => m.kind === "tool_call" && m.callId === action.callId
+      );
+      if (duplicate) return state;
       return {
         ...state,
-        messages: stripTrailingProviderRetry(state.messages).concat([
+        messages: baseAfterReasoning.concat([
           {
             kind: "tool_call",
             callId: action.callId,
@@ -269,11 +396,43 @@ function reducer(state: AgentState, action: Action): AgentState {
     }
 
     case "tool_delta": {
-      const messages = state.messages.map((m) =>
-        m.kind === "tool_call" && m.callId === action.callId
-          ? { ...m, argsJson: m.argsJson + action.argsDelta }
-          : m
+      const { callId, argsDelta } = action;
+      const think = state.messages.find(
+        (m): m is Extract<MessageEntry, { kind: "think" }> =>
+          m.kind === "think" && m.streaming === true && m.callId === callId
       );
+      if (think) {
+        const argsJson = (think.argsJson ?? "") + argsDelta;
+        const preview = extractStreamingWritePreview("think", argsJson);
+        return {
+          ...state,
+          messages: state.messages.map((m) =>
+            m.kind === "think" && m.callId === callId
+              ? { ...m, argsJson, content: preview?.content ?? m.content }
+              : m
+          ),
+        };
+      }
+      const reasonEntry = state.messages.find(
+        (m): m is Extract<MessageEntry, { kind: "reason" }> =>
+          m.kind === "reason" && m.streaming === true && m.callId === callId
+      );
+      if (reasonEntry) {
+        const argsJson = (reasonEntry.argsJson ?? "") + argsDelta;
+        const preview = extractStreamingWritePreview("reason", argsJson);
+        return {
+          ...state,
+          messages: state.messages.map((m) =>
+            m.kind === "reason" && m.callId === callId
+              ? { ...m, argsJson, inference: preview?.content ?? m.inference }
+              : m
+          ),
+        };
+      }
+      const messages = state.messages.map((m) => {
+        if (m.kind !== "tool_call" || m.callId !== callId) return m;
+        return promoteWriteToolCallIfArgsComplete(m, m.argsJson + argsDelta);
+      });
       return { ...state, messages };
     }
 
@@ -343,21 +502,62 @@ function reducer(state: AgentState, action: Action): AgentState {
       return { ...state, pendingAskUser: null };
 
     case "turn_end": {
-      const messages = stripTrailingProviderRetry(state.messages).map((m) =>
-        m.kind === "assistant" && m.streaming ? { ...m, streaming: false } : m
-      );
+      const messages = stripTrailingProviderRetry(state.messages).map((m) => {
+        if (m.kind === "assistant" && m.streaming) return { ...m, streaming: false };
+        if (m.kind === "model_reasoning" && m.streaming) return { ...m, streaming: false };
+        if (m.kind === "think" && m.streaming) {
+          return {
+            ...m,
+            streaming: false,
+            content: m.content.trim() ? m.content : "(reasoning interrupted)",
+          };
+        }
+        if (m.kind === "reason" && m.streaming) {
+          return { ...m, streaming: false };
+        }
+        return m;
+      });
       return { ...state, messages, contextSnapshot: action.snapshot, busy: false };
     }
 
     case "error":
       return { ...state, error: action.msg, busy: false, messages: stripTrailingProviderRetry(state.messages) };
 
-    case "think":
+    case "think": {
       if (isAgentUiQuiet()) return state;
-      return {
-        ...state,
-        messages: [...state.messages, { kind: "think", content: action.content }],
+      const finalized = {
+        kind: "think" as const,
+        callId: action.callId,
+        streaming: false as const,
+        content: action.content,
+        tool_families: action.tool_families,
+        scope: action.scope,
+        unknowns: action.unknowns,
+        clarification_needed: action.clarification_needed,
+        clarification_question: action.clarification_question,
+        self_check: action.self_check,
       };
+      const withoutStreaming = state.messages.filter(
+        (m) => !(m.kind === "think" && m.streaming && m.callId === action.callId)
+      );
+      return { ...state, messages: [...withoutStreaming, finalized] };
+    }
+
+    case "reason": {
+      if (isAgentUiQuiet()) return state;
+      const finalizedReason = {
+        kind: "reason" as const,
+        callId: action.callId,
+        streaming: false as const,
+        inference: action.inference,
+        confidence: action.confidence,
+        next_action: action.next_action,
+      };
+      const withoutStreamingReason = state.messages.filter(
+        (m) => !(m.kind === "reason" && m.streaming && m.callId === action.callId)
+      );
+      return { ...state, messages: [...withoutStreamingReason, finalizedReason] };
+    }
 
     case "plan":
       if (isAgentUiQuiet()) return state;
@@ -425,6 +625,8 @@ function reducer(state: AgentState, action: Action): AgentState {
         ...state,
         personaBootstrapProgress: action.message,
         personaBootstrapStage: action.stage,
+        personaBootstrapArtifacts:
+          action.artifacts !== undefined ? action.artifacts : state.personaBootstrapArtifacts,
       };
 
     case "persona_bootstrap_submitting":
@@ -436,6 +638,7 @@ function reducer(state: AgentState, action: Action): AgentState {
         personaBootstrapPending: false,
         personaBootstrapProgress: null,
         personaBootstrapStage: null,
+        personaBootstrapArtifacts: null,
         personaBootstrapSubmitting: false,
       };
 
@@ -531,6 +734,11 @@ export function useAgent(harness: AgentHarness) {
         queueFlush();
         return;
       }
+      if (ch === "reasoning") {
+        flushNow();
+        dispatch({ type: "model_reasoning_delta", delta: cleaned });
+        return;
+      }
       queuedTextRef.current += cleaned;
       queueFlush();
     });
@@ -558,7 +766,27 @@ export function useAgent(harness: AgentHarness) {
     emitter.on("tool_result", ({ callId, name, args, result }) => {
       flushNow();
       if (name === "think" && result.ok) {
-        dispatch({ type: "think", content: args["content"] as string });
+        dispatch({
+          type: "think",
+          callId,
+          content: args["content"] as string,
+          tool_families: args["tool_families"] as string[] | undefined,
+          scope: args["scope"] as string | undefined,
+          unknowns: args["unknowns"] as string[] | undefined,
+          clarification_needed: args["clarification_needed"] as boolean | undefined,
+          clarification_question: args["clarification_question"] as string | undefined,
+          self_check: args["self_check"] as number | undefined,
+        });
+        return;
+      }
+      if (name === "reason" && result.ok) {
+        dispatch({
+          type: "reason",
+          callId,
+          inference: args["inference"] as string,
+          confidence: args["confidence"] as "low" | "medium" | "high" | undefined,
+          next_action: args["next_action"] as string | undefined,
+        });
         return;
       }
       if (name === "plan" && result.ok) {
@@ -801,8 +1029,13 @@ export function useAgent(harness: AgentHarness) {
           dispatch({ type: "persona_bootstrap_done" });
           return;
         }
-        const onProgress = (stage: string, message: string) => {
-          dispatch({ type: "persona_bootstrap_progress", message, stage });
+        const onProgress = (stage: string, message: string, detail?: { artifacts?: PersonaArtifactPreview[] }) => {
+          dispatch({
+            type: "persona_bootstrap_progress",
+            message,
+            stage,
+            ...(detail?.artifacts ? { artifacts: detail.artifacts } : {}),
+          });
         };
         const bundle = await generatePersonaFromInput(
           harness,
@@ -836,7 +1069,12 @@ export function useAgent(harness: AgentHarness) {
       } finally {
         bootstrapInFlightRef.current = false;
         dispatch({ type: "persona_bootstrap_submitting", value: false });
-        dispatch({ type: "persona_bootstrap_progress", message: null, stage: null });
+        dispatch({
+          type: "persona_bootstrap_progress",
+          message: null,
+          stage: null,
+          artifacts: null,
+        });
       }
     },
     [harness]

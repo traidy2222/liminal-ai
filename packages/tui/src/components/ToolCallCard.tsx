@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from "react";
 import { Box, Text } from "ink";
+import { extractStreamingWritePreview, isStreamingWriteTool } from "@liminal/core";
 import { jarvis } from "../theme/jarvis.js";
 
 // ── Category detection ───────────────────────────────────────────────────────
@@ -10,7 +11,7 @@ type ToolCategory =
 
 export function getToolCategory(name: string): ToolCategory {
   if (/^(run_shell|run_background|kill_process|list_processes|read_process_output)$/.test(name)) return "shell";
-  if (/^(read_file|write_file|list_dir|apply_diff|patch_file)$/.test(name)) return "file";
+  if (/^(read_file|write_file|edit_file|list_dir|grep_file)$/.test(name)) return "file";
   if (/^(web_fetch|web_search|weather_lookup)$/.test(name)) return "web";
   if (/^(remember|recall|recall_type|recall_relevant|search_memory|forget|forget_type|memory_stats|memory_consolidate|memory_query|memory_graph)$/.test(name)) return "memory";
   if (name.startsWith("vault_")) return "vault";
@@ -131,6 +132,14 @@ export function ToolCallCard({ name, argsJson, status, startedAt, endedAt }: Pro
   const { icon: catIcon, color: catColor } = CATEGORY_META[category];
   const statusColor = STATUS_COLOR[status];
   const arg = parsePrimaryArg(argsJson);
+  const writePreview =
+    isActive && isStreamingWriteTool(name)
+      ? extractStreamingWritePreview(name, argsJson, { tailLines: 6, maxChars: 4000 })
+      : null;
+  const statusLabel =
+    status === "running" && writePreview && !writePreview.incomplete
+      ? "writing to disk"
+      : STATUS_LABEL[status];
 
   return (
     <Box
@@ -153,10 +162,30 @@ export function ToolCallCard({ name, argsJson, status, startedAt, endedAt }: Pro
             <Text color={jarvis.muted} dimColor>{formatElapsed(elapsed)}</Text>
           )}
           <Text color={statusColor} bold>
-            {STATUS_ICON[status]} {STATUS_LABEL[status]}
+            {STATUS_ICON[status]} {statusLabel}
           </Text>
         </Box>
       </Box>
+      {writePreview && (
+        <Box flexDirection="column" marginTop={0}>
+          <Text color={jarvis.muted} dimColor>
+            {writePreview.label ? `${writePreview.field ?? "payload"} → ${writePreview.label}` : writePreview.field ?? "payload"}
+            {writePreview.charCount > 0
+              ? ` · ${writePreview.charCount} chars`
+              : " · waiting…"}
+            {writePreview.incomplete ? " · live" : ""}
+          </Text>
+          {writePreview.content ? (
+            <Text color={jarvis.body} wrap="truncate">
+              {writePreview.content.split("\n").slice(-4).join("\n")}
+            </Text>
+          ) : writePreview.rawArgsTail ? (
+            <Text color={jarvis.muted} dimColor wrap="truncate">
+              {writePreview.rawArgsTail}
+            </Text>
+          ) : null}
+        </Box>
+      )}
     </Box>
   );
 }

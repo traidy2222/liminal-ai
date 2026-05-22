@@ -9,7 +9,7 @@ interface Props {
 }
 
 function contextTag(toolName: string): string {
-  if (toolName === "write_file" || toolName === "apply_diff") return "resource_lock.write";
+  if (toolName === "write_file" || toolName === "edit_file") return "resource_lock.write";
   if (toolName === "run_shell" || toolName === "run_background") return "shell.exec";
   if (toolName === "kill_process") return "process.control";
   return `approval.${toolName}`;

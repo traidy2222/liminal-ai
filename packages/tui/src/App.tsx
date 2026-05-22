@@ -477,6 +477,22 @@ export function App({ harness }: Props) {
       }
       return;
     }
+    // Multi-character input with embedded newlines = bracketed or rapid paste
+    if (!key.ctrl && !key.meta && char.length > 1 && /[\r\n]/.test(char)) {
+      const segments = char.split(/\r\n|\r|\n/);
+      for (let i = 0; i < segments.length; i++) {
+        const seg = segments[i] ?? "";
+        if (seg) {
+          // Filter out any remaining control chars within the segment
+          const clean = seg.replace(/[\x00-\x1f\x7f]/g, "");
+          if (clean) insertTextAtCursor(clean);
+        }
+        if (i < segments.length - 1) insertNewlineAtCursor();
+      }
+      if (historyIndex !== -1) setHistoryIndex(-1);
+      if (inputStatus) setInputStatus(null);
+      return;
+    }
     if (isPrintableInputChar(char) && !key.ctrl && !key.meta) {
       insertTextAtCursor(char);
       if (historyIndex !== -1) setHistoryIndex(-1);
@@ -569,6 +585,7 @@ export function App({ harness }: Props) {
           progress={state.personaBootstrapProgress}
           stage={state.personaBootstrapStage}
           allowSkip={state.personaBootstrapAllowSkip}
+          artifacts={state.personaBootstrapArtifacts}
         />
       )}
       {!hasApproval && !hasAskUser && !hasBootstrap && (
