@@ -2,11 +2,13 @@ node_modules/
 dist/
 .env
 .agent_notes.json
+.agent_runtime_prefs.json
 .agent_sessions/
 *.js.map
 
 # Local agent / IDE artifacts
 .agent_artifacts/
+.agent_write_staging/
 .claude/launch.json
 
 # Android — local Gradle, IDE, and build outputs (keep app/src + Gradle scripts)
