@@ -6,6 +6,24 @@
 - **`web_fetch` appearing stuck 5+ minutes** — hard wall `AGENT_WEB_FETCH_TOTAL_WALL_MS` (default 55s); readability in worker thread; rebuild `tools`.
 - **Web “stuck processing”** — client uses `lastTurnEndedAt` + consecutive idle polls ([UI streaming](../concepts/ui-streaming.md)).
 - **Persona bootstrap 500 on first load** — server gates API on session ready ([Persona bootstrap](../guides/persona-bootstrap.md)).
+- **Large file ends mid-function or mid-tag** — use `write_file` once, then `append_file` or `write_file_part`; see [Writing large files](../guides/writing-large-files.md). Check tool output for `likely_truncated=true`.
+
+## File ends abruptly (incomplete write)
+
+Symptom: Generated file stops mid-string, missing closing braces/tags, or far fewer lines than requested.
+
+**Cause:** Provider **output token limit** or stream timeout — the model's tool `content` argument was cut off before completion. `write_file` writes whatever it received; `integrity=ok` only means disk matches that partial string.
+
+**Fix:**
+
+1. Rebuild `core` + `tools`, restart the UI.
+2. Use the multi-part workflow: [Writing large files](../guides/writing-large-files.md).
+3. Raise `AGENT_MAX_COMPLETION_TOKENS` (e.g. `16384`) if the model route allows it.
+4. Ensure `AGENT_LENGTH_RESUME_MAX` is not `0` (default `3` auto-continues truncated generations).
+
+**Do not:** Call `write_file` again on the same path (create-only). Use `append_file` or `edit_file` / `apply_diff` to complete.
+
+With `AGENT_WRITE_STREAM_SINK=1` (default), partial bytes may already exist on disk after a cutoff — check the `[CONTINUE]` message for the saved path and byte count, then `append_file`.
 
 ## Build/Runtime Mismatch
 

@@ -58,7 +58,7 @@ Verification: `npm run typecheck`, `npm run test --workspace=@liminal/core`, and
 | -------------------- | ------------------------------ | ---------------------------------------- |
 | `AGENT_API_KEY`      | —                              | OpenRouter (or provider) API key         |
 | `AGENT_API_BASE_URL` | `https://openrouter.ai/api/v1` | Provider base URL                        |
-| `AGENT_MODEL`        | —                              | Model slug (e.g. `openrouter/owl-alpha`) |
+| `AGENT_MODEL`        | —                              | Model slug (e.g. `qwen/qwen3.5-9b` for local LM Studio) |
 
 
 ### Model routing
@@ -107,7 +107,7 @@ Verification: `npm run typecheck`, `npm run test --workspace=@liminal/core`, and
 | Var                                     | Default  | Purpose                                                               |
 | --------------------------------------- | -------- | --------------------------------------------------------------------- |
 | `AGENT_WORKSPACE_ROOT`                  | auto     | Monorepo root for world context, notes, artifacts, tool path defaults |
-| `AGENT_SEND_TIMEOUT_MS`                 | `600000` | Wall-clock cap for one full `send()` / ReAct run                      |
+| `AGENT_SEND_TIMEOUT_MS`                 | `1800000` | Wall-clock cap for one full `send()` / ReAct run                      |
 | `AGENT_SESSION_JSONL=1`                 | off      | Append-only event trace → `.agent_sessions/<taskId>.jsonl`            |
 | `AGENT_SESSION_JSONL_TEXT_LOG`        | `rollup` | `rollup` (one `text_rollup` per turn), `delta` (per-token lines), `both` |
 | `AGENT_SESSION_JSONL_TRACE`           | off      | Set `1` to log `channel: "trace"` harness lines to JSONL (noisy)       |
@@ -308,7 +308,9 @@ packages/tui    packages/web    packages/eval   — run directly via tsx, never 
 | File                 | Tools                                                                     | Notes                                                                                                                               |
 | -------------------- | ------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------- |
 | `read_file.ts`       | `read_file`                                                               | Range-aware read; cacheable.                                                                                                        |
-| `write_file.ts`      | `write_file`                                                              | Write-back verification; destructive.                                                                                               |
+| `write_file.ts`      | `write_file`                                                              | Whole-file write: `mode` create / overwrite / append. Write-back integrity verification.                                            |
+| `edit_file.ts`       | `edit_file`                                                               | Targeted change to an existing file: `replacements` or `diff` (fuzzy hunk).                                                          |
+| `grep_file.ts`       | `grep_file`                                                               | Line-located content search with context; cacheable.                                                                                |
 | `list_dir.ts`        | `list_dir`                                                                | Directory listing; cacheable.                                                                                                       |
 | `run_shell.ts`       | `run_shell`                                                               | Shell execution; `dangerLevel: "destructive"`.                                                                                      |
 | `process_manager.ts` | `run_background`, `kill_process`, `list_processes`, `read_process_output` | Background process lifecycle.                                                                                                       |
@@ -368,13 +370,9 @@ Wikilink extraction + graph visualization. Per-turn episode chunks: `AGENT_MEMOR
 | `git_tools.ts` | `git_status`, `git_diff`, `git_log`, `git_branch`, `git_commit` |
 
 
-#### Diff & patch tools
+#### File manipulation surface
 
-
-| File            | Tools                                                   |
-| --------------- | ------------------------------------------------------- |
-| `apply_diff.ts` | `apply_diff` — applies unified diff patches.            |
-| `patch_file.ts` | `patch_file` — line-by-line patching with verification. |
+File content is handled by exactly two tools: **`write_file`** (whole-file content — `mode` = `create` | `overwrite` | `append`) and **`edit_file`** (targeted change to an existing file — `replacements` array or a fuzzy `diff` hunk). The legacy single-mode tools (`apply_diff`, `patch_file`, `search_replace_file`, `write_file_if_changed`, `append_file`, `write_file_part`, `edit_preview`, `batch_replace`) were removed — `edit_file` and `write_file` cover every case.
 
 
 #### Document engine tools (gate: `AGENT_DOC_ENGINE=1`)
@@ -431,7 +429,7 @@ Full pipeline for PPTX, DOCX, and PDF generation via an internal IR (DocumentIR)
 
 `systemPrompt.ts` exports `PROTOCOL_CORE` + `buildProtocolDynamicSuffix(toolNames)` — the single authoritative system prompt shared by TUI, web, and eval. Child agents receive a smaller suffix scoped to their tool set.
 
-Self-healing lint runtime: when `AGENT_SELF_HEAL_LINT=1`, `AgentHarness` tracks successful edit tools (`write_file`, `patch_file`, `apply_diff`, and advanced file edit tools), runs `run_lint` in structured mode with changed-first scope, expands to related diagnostic files, prioritizes syntax/type errors first, and emits `lint_heal_pass` / `lint_heal_result` telemetry for observability.
+Self-healing lint runtime: when `AGENT_SELF_HEAL_LINT=1`, `AgentHarness` tracks successful edit tools (`write_file`, `edit_file`, `multi_file_apply`, and filesystem ops), runs `run_lint` in structured mode with changed-first scope, expands to related diagnostic files, prioritizes syntax/type errors first, and emits `lint_heal_pass` / `lint_heal_result` telemetry for observability.
 
 ---
 
@@ -510,7 +508,7 @@ CLI: `npm run eval -w packages/eval`. Optional JSON sink: `AGENT_EVAL_JSON_SINK=
 
 **Lazy tool loading.** When `AGENT_TOOL_LAZY=1`, only the baseline profile tools are registered at startup. `activate_tool_family` calls `registerAllTools` for the requested family into the live registry. Never call `registerAllTools` twice for the same family on the same registry instance — the catalog in `tool_catalog.ts` tracks activated families. `max_autonomy` baseline now includes `files_edit` tools to reduce false "missing write tool" loops in coding-heavy sessions.
 
-**Advanced file tools.** The `files_edit` family now includes fast write primitives (`write_file_if_changed`, `search_replace_file`, `move_file`, `copy_file`, `copy_tree`, `mkdir_p`) plus safer orchestration tools (`edit_preview`, `multi_file_apply`, `refactor_plan_apply`, `path_guard`). Prefer `edit_preview` before broad replacements and `multi_file_apply` / `refactor_plan_apply` for multi-file refactors that need rollback-aware execution.
+**File tools.** File content is two tools only — `write_file` (create/overwrite/append) and `edit_file` (replacements/diff) — both always loaded via `CORE_ALWAYS_TOOLS_BASE`. The `files_edit` family is activation-only and now holds just filesystem ops (`move_file`, `copy_file`, `copy_tree`, `mkdir_p`) plus `multi_file_apply` (atomic, rollback-aware multi-file apply) and `path_guard`.
 
 **Safety judge caching.** The safety judge uses an in-process LRU cache keyed on `(toolName, stableArgsJsonKey(args))`. Cache TTL is short (seconds). Do not rely on cached verdicts surviving a harness restart.
 

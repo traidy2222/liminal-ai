@@ -94,6 +94,18 @@ See [Configuration](../configuration.md#web-fetch-and-readability) and [Research
 
 The optional idle heartbeat (`AGENT_HEARTBEAT=1`) is **not** a second agent or parallel chat transcript. It runs **only** on the root harness when no `send()` is active, uses a **bounded** fast-model JSON contract, and by default executes **`remember` only** for typed consolidation. **Shell, web, and file-mutation tools are never auto-invoked** from the heartbeat path: there is no bypass of the normal approval gates for destructive work. Overt user nudges require **`AGENT_HEARTBEAT_SURFACE`** plus confidence and **per-hour** limits; otherwise suggestions remain trace-only or JSONL telemetry. See [Configuration — Personality heartbeat](../configuration.md#personality-heartbeat-idle-ambient-cognition) for all `AGENT_HEARTBEAT_*` keys.
 
+## Length resume and large file writes
+
+When a completion hits the provider **length** limit, or a file-write tool argument is **truncated** (invalid JSON or `likely_truncated` heuristics), the harness can auto-inject a `[CONTINUE]` user message instead of dispatching a partial `write_file`.
+
+| Variable | Default | Role |
+|----------|---------|------|
+| `AGENT_LENGTH_RESUME_MAX` | `3` | Max continue rounds per `send()` (0 disables) |
+| `AGENT_MAX_COMPLETION_TOKENS` | `0` | Main stream `max_tokens` (`0` = provider default) |
+| `AGENT_WRITE_INTEGRITY_NUDGE` | `1` | System note after writes reporting `likely_truncated=true` |
+
+Operator workflow for large new files: [Writing large files](../guides/writing-large-files.md).
+
 ## Related documentation
 
 - [Configuration](../configuration.md) — narrative `AGENT_*` groups.

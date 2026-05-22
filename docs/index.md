@@ -44,6 +44,7 @@ Human-oriented guides for running, configuring, and extending the Liminal agent 
 | [Persona bootstrap](./guides/persona-bootstrap.md) | First-run voice setup |
 | [Running eval](./guides/running-eval.md) | `npm run eval` |
 | [Research quality](./guides/research-quality.md) | Synthesis checklist |
+| [Writing large files](./guides/writing-large-files.md) | Multi-part `write_file` / `append_file` |
 
 ## Tools
 

@@ -85,22 +85,36 @@ Legacy `style_lexicon.json` files are still deleted on persona persist.
 ## Model pipeline (generation)
 
 1. **Profile pass** — User phrase + strength + modifier → JSON-moded completion → `PersonaProfile` (validated shape: identity, speech, tone, cognition, `neverDo` / `alwaysDo`, optional `generationSourceHint` for surface-fidelity to user wording).
-2. **Soul passes** — Profile + original user phrase → **four** focused completions → `PersonaSoulBundle` (`identity.md`, `voice.md`, `stance.md`, `rails.md` content). On failure per slice, deterministic scaffolds from `buildSoulSlicesFromProfile` fill that slice.
+2. **Soul pass** — Default **`AGENT_PERSONA_SOUL_MODE=batch`**: one fast-model JSON call returns all four markdown slices (`identityMd`, `voiceMd`, `stanceMd`, `railsMd`). Alternatives: `parallel` (four concurrent slice calls) or `scaffold` (no LLM — `buildSoulSlicesFromProfile` only). Soul HTTP uses **`personaInferModel()`** (`AGENT_PERSONA_INFER_MODEL` → `AGENT_FAST_MODEL` → main model). Per-slice scaffolds fill gaps when a slice fails validation.
 3. **Persist** — Write profile, all soul slices, preserve or seed `living.md`, and manifest (`version: 2`); delete legacy `style_lexicon.json` if present; **apply** to harness so the next model round sees the new block.
-4. **UI theme pass** — Excerpt built from canonical soul slices (`buildSoulExcerptForUiTheme`, capped) plus profile summary → small JSON-moded completion → `PersonaUiThemeV1`, then `validateAndNormalizePersonaUiTheme` clamps contrast vs the dark web base, caps strings, and fixes invalid motion. Result is written to `ui_theme.json` and reflected in the manifest. Bootstrap/default persona with no generation run has **no** `ui_theme.json` — clients keep built-in JARVIS-style defaults.
+4. **UI theme** — Runs **in parallel** with soul generation. Default: **`AGENT_PERSONA_UI_THEME_LLM=0`** — `derivePersonaShellHeuristics` + `validateAndNormalizePersonaUiTheme` only (no LLM). Set `AGENT_PERSONA_UI_THEME_LLM=1` for a small JSON theme completion using a profile + scaffold excerpt. Written to `ui_theme.json` (`v: 2`, manifest `uiThemeVersion: 2`). Legacy `v: 1` themes migrate on read.
 
-Progress stages for UIs include `ui_theme_start` / `ui_theme_ready` (see `persona_bootstrap_ui_strings` in core).
+**Typical LLM budget (balanced default):** voice infer + profile draft + up to **`AGENT_PERSONA_REPAIR_MAX`** repair (default `1`) + one batched soul call ≈ **3–4** round-trips (down from ~8–11 serial calls).
 
-Timeouts and retries for the generator HTTP calls are bounded by `AGENT_PERSONA_GEN_TIMEOUT_MS` (default 90s, capped at 180s) and `AGENT_PERSONA_GEN_RETRIES` (default 2, capped at 3). Optional **`AGENT_PERSONA_INFER_MODEL`** overrides the model slug used for inference steps (falls back to fast model helper when unset).
+Progress stages for UIs include `artifact_start` (soul + theme), `ui_theme_start` / `ui_theme_ready` (see `persona_bootstrap_ui_strings` in core).
+
+Timeouts and retries for persona HTTP calls: `AGENT_PERSONA_GEN_TIMEOUT_MS` (default 90s), `AGENT_PERSONA_GEN_RETRIES` (default 2). **`AGENT_PERSONA_INFER_MODEL`** overrides the fast sidecar slug for infer, soul batch, and optional theme LLM.
+
+| Env | Default | Effect |
+|-----|---------|--------|
+| `AGENT_PERSONA_SOUL_MODE` | `batch` | `batch` \| `parallel` \| `scaffold` |
+| `AGENT_PERSONA_UI_THEME_LLM` | `0` | `1` = LLM HUD theme; `0` = heuristics only |
+| `AGENT_PERSONA_GENERATION_STREAM` | `1` | `0` = disable live bootstrap workbench (stage/message only) |
+| `AGENT_PERSONA_PREVIEW_MAX_CHARS` | `16000` | Per-artifact SSE preview cap during bootstrap |
+
+### Live bootstrap workbench (web + TUI)
+
+When `AGENT_PERSONA_GENERATION_STREAM=1` (default), first-run bootstrap emits **six artifact panels** over SSE (`persona_bootstrap_progress` with an `artifacts` array): `runtime_profile.json`, four `soul/*.md` slices, and `ui_theme.json`. Content grows via **token streaming** from the provider (partial JSON extraction for batched soul; independent streams in `AGENT_PERSONA_SOUL_MODE=parallel`). Web shows a 2×3 grid workbench; TUI shows a compact status row plus a focus pane for the active stream. Files under `persona/active/` are written as each artifact completes (manifest + `living.md` last).
+| `AGENT_PERSONA_REPAIR_MAX` | `1` | Profile repair passes (0–2) |
 
 ## UI theme (clients)
 
 The theme artifact is **not** model context for the agent: it is a **trust-boundary-safe** contract consumed only by TUI and web chrome.
 
-- **Schema** — `PersonaUiThemeV1` in `packages/core/src/persona_ui_theme.ts`: whitelisted hex fields, bounded `displayLabel`, discrete `motion` enum. No raw CSS, HTML, or script — only values the runtime maps to CSS variables / Ink named colors and animation timing.
-- **Accessibility (web)** — Normalization boosts contrast of accent-like colors against a dark base (`#020408`-class) so suggested palettes stay readable.
-- **TUI** — `mapPersonaUiThemeToInk` maps hex suggestions to the nearest Ink **named** palette entries; core chrome avoids truecolor-only `Text` hex for portability (see `packages/tui/src/theme/jarvis.ts` tradeoff notes).
-- **Web** — `GET /api/config` includes `personaUiTheme` (normalized object or shapes from disk) and `personaDisplayLabel` (`theme.displayLabel` if set, else current persona `name`, else `"LIMINAL"`). The React client applies CSS variables and motion multipliers via `applyPersonaDocumentTheme`.
+- **Schema** — `PersonaUiThemeV2` in `packages/core/src/persona_ui_theme.ts`: whitelisted hex fields, bounded `displayLabel`, discrete `motion` enum, plus presentation enums: `shell` (`hud` | `terminal` | `studio` | `minimal`), `density`, `radius`, `typography`, `messageStyle`, `orbStyle`, `background`, and optional `categoryTint` map. No raw CSS, HTML, or script — only values the runtime maps to CSS variables / Ink named colors and animation timing. Semantic tokens (`--lim-text`, `--lim-panel`, markdown headings, tool category colors) are **derived** in core via `derivePersonaSemanticTokens` and `themeToCssVars`.
+- **Accessibility (web)** — Normalization boosts contrast of accent-like colors against a dark base (`surfaceTint` / `#020408`-class) so suggested palettes stay readable.
+- **TUI** — `mapPersonaUiThemeToInk` maps hex suggestions to the nearest Ink **named** palette entries; `shell` is available for future layout hints (compact terminal-style messaging when `shell === "terminal"`). Core chrome avoids truecolor-only `Text` hex for portability (see `packages/tui/src/theme/jarvis.ts` tradeoff notes).
+- **Web** — `GET /api/config` includes normalized `personaUiTheme` (v2, migrated from v1 on read) and `personaDisplayLabel`. `applyPersonaDocumentTheme` sets `:root` CSS variables, `data-persona-*` attributes, and orb motion keyframes. `ShellRouter` + `PersonaShellSwitcher` (`hud` / `terminal` / `studio` / `minimal`) apply shell-specific layout classes; shared components read `var(--lim-*)` via `personaVars.ts` and `categoryMeta.ts`.
 - **Disk vs prefs** — Theme is **not** embedded in `.agent_runtime_prefs.json` by default; it is read from `persona/active/ui_theme.json` when present so prefs stay small.
 
 ## Core API surface (for tool authors)

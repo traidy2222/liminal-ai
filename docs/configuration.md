@@ -30,11 +30,16 @@ First-run and mid-session voice are controlled by the harness plus TUI/web clien
 
 **Generator tuning** (used by `persona_generator.ts` when `set_persona` runs a custom voice):
 
-- `AGENT_PERSONA_INFER_MODEL` — optional model slug for persona inference steps; falls back to the harness fast-model helper when unset.
+- `AGENT_PERSONA_INFER_MODEL` — optional model slug for persona infer, batched soul, and optional theme LLM; falls back to `AGENT_FAST_MODEL` when unset.
 - `AGENT_PERSONA_GEN_TIMEOUT_MS` — per-request style timeout for persona HTTP calls (default `90000`, clamped up to `180000` ms).
 - `AGENT_PERSONA_GEN_RETRIES` — retry budget for those calls (default `2`, max `3`).
+- `AGENT_PERSONA_SOUL_MODE` — `batch` (default, one call for all soul slices), `parallel` (four concurrent slice calls), or `scaffold` (no soul LLM).
+- `AGENT_PERSONA_UI_THEME_LLM` — `0` (default): heuristic HUD theme only; `1`: add an LLM theme pass.
+- `AGENT_PERSONA_GENERATION_STREAM` — `1` (default): stream persona bootstrap artifacts to web/TUI workbench panels via SSE; set `0` to disable live previews.
+- `AGENT_PERSONA_PREVIEW_MAX_CHARS` — max characters per artifact panel in bootstrap SSE previews (default `16000`).
+- `AGENT_PERSONA_REPAIR_MAX` — max profile repair LLM passes after draft (default `1`, range 0–2).
 
-**Persona UI theme** — no extra env. After a successful custom generation, `persona/active/ui_theme.json` holds a validated `PersonaUiThemeV1` (palette, label, motion). Web clients read it via `GET /api/config` (`personaUiTheme`, `personaDisplayLabel`); the TUI loads the same path at startup. See **[Persona system](./concepts/persona-system.md#ui-theme-clients)**.
+**Persona UI theme** — after custom generation, `persona/active/ui_theme.json` holds validated `PersonaUiThemeV2`. Web/TUI read via `GET /api/config` or disk at startup. See **[Persona system](./concepts/persona-system.md#ui-theme-clients)**.
 
 Full pipeline, on-disk layout under `persona/active/`, and core APIs: **[Persona system](./concepts/persona-system.md)**.
 

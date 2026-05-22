@@ -31,12 +31,22 @@ function parseSecretKeys(src) {
   return keys;
 }
 
-function parseDefaults(src) {
+function parseExportedStringConsts(src) {
+  const map = {};
+  for (const m of src.matchAll(/^export const ([A-Z0-9_]+)\s*=\s*"([^"]*)"\s*;/gm)) {
+    map[m[1]] = m[2];
+  }
+  return map;
+}
+
+function parseDefaults(src, constMap) {
   const start = src.indexOf("HARNESS_ENV_DEFAULTS");
   const block = src.slice(start);
   const defaults = {};
-  for (const m of block.matchAll(/^\s+(AGENT_[A-Z0-9_]+):\s*"([^"]*)"/gm)) {
-    defaults[m[1]] = m[2];
+  for (const m of block.matchAll(/\s+(AGENT_[A-Z0-9_]+):\s*(?:"([^"]*)"|([A-Z][A-Z0-9_]*))/g)) {
+    const key = m[1];
+    if (m[2] !== undefined) defaults[key] = m[2];
+    else if (m[3] && constMap[m[3]]) defaults[key] = constMap[m[3]];
   }
   return defaults;
 }
@@ -63,7 +73,8 @@ const metaSrc = fs.readFileSync(metaPath, "utf8");
 
 const managed = parseManagedKeys(inv);
 const secrets = parseSecretKeys(inv);
-const defaults = parseDefaults(defaultsSrc);
+const defaultConstMap = parseExportedStringConsts(defaultsSrc);
+const defaults = parseDefaults(defaultsSrc, defaultConstMap);
 const fieldMeta = parseFieldMeta(metaSrc);
 
 if (managed.length < 100) {

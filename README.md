@@ -20,7 +20,7 @@ Minimal `.env`:
 ```bash
 AGENT_API_KEY=your_key_here
 AGENT_API_BASE_URL=https://openrouter.ai/api/v1
-AGENT_MODEL=openrouter/owl-alpha
+AGENT_MODEL=qwen/qwen3.5-9b
 ```
 
 First-run persona overlay: `npm run tui -- --bootstrap` or `npm run web -- --bootstrap`.

@@ -47,6 +47,7 @@ export default defineConfig({
           { text: "Settings modal", link: "/guides/tuning-via-settings" },
           { text: "Persona bootstrap", link: "/guides/persona-bootstrap" },
           { text: "Running eval", link: "/guides/running-eval" },
+          { text: "Writing large files", link: "/guides/writing-large-files" },
         ],
       },
       {

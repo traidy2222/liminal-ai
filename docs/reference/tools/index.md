@@ -8,7 +8,7 @@ Authoritative catalog: `packages/tools/src/tool_catalog.ts`. Registration: `pack
 
 | Family | Examples |
 |--------|----------|
-| `files_edit` | `read_file`, `write_file`, `patch_file`, `apply_diff`, … |
+| `files_edit` | `read_file`, `write_file`, `append_file`, `write_file_part`, `edit_file`, `patch_file`, … |
 | `shell` | `run_shell`, `run_background`, `run_command_with_pty`, … |
 | `git` | `git_status`, `git_diff`, `git_commit`, … |
 | `memory_advanced` | `recall_relevant`, `memory_query`, `read_artifact`, … |

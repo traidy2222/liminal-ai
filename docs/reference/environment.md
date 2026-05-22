@@ -17,7 +17,7 @@ Web **Settings** writes to (2). See [Configuration basics](../start/configuratio
 | Key | Default | Settings | Secret | Tab | Description |
 |-----|---------|----------|--------|-----|-------------|
 | `AGENT_ALWAYS_TOOLS_PROFILE` | `balanced` | yes | no | harness | Harness environment toggle for Always Tools Profile. See docs/configuration.md (harness). |
-| `AGENT_API_BASE_URL` | `—` | yes | no | models_api | Harness environment toggle for Api Base Url. See docs/configuration.md (models api). |
+| `AGENT_API_BASE_URL` | `http://localhost:1234/v1` | yes | no | models_api | Harness environment toggle for Api Base Url. See docs/configuration.md (models api). |
 | `AGENT_APPROVAL_TIMEOUT_MS` | `120000` | yes | yes | safety | Harness environment toggle for Approval Timeout Ms. See docs/configuration.md (safety). |
 | `AGENT_AUTO_DREAM` | `0` | yes | no | session_ui | Harness environment toggle for Auto Dream. See docs/configuration.md (session ui). |
 | `AGENT_AUTO_DREAM_ALLOW_DELETE` | `0` | yes | no | session_ui | Harness environment toggle for Auto Dream Allow Delete. See docs/configuration.md (session ui). |
@@ -49,7 +49,7 @@ Web **Settings** writes to (2). See [Configuration basics](../start/configuratio
 | `AGENT_EVAL_JSON_SINK` | `1` | yes | no | advanced | Harness environment toggle for Eval Json Sink. See docs/configuration.md (advanced). |
 | `AGENT_FAILURE_DIGEST` | `1` | yes | no | advanced | Harness environment toggle for Failure Digest. See docs/configuration.md (advanced). |
 | `AGENT_FAILURE_LOG` | `1` | yes | no | advanced | Harness environment toggle for Failure Log. See docs/configuration.md (advanced). |
-| `AGENT_FAST_MODEL` | `openrouter/owl-alpha` | yes | no | models_api | Harness environment toggle for Fast Model. See docs/configuration.md (models api). |
+| `AGENT_FAST_MODEL` | `qwen/qwen3.5-9b` | yes | no | models_api | Harness environment toggle for Fast Model. See docs/configuration.md (models api). |
 | `AGENT_FINALIZE_CITE` | `1` | yes | no | harness | Harness environment toggle for Finalize Cite. See docs/configuration.md (harness). |
 | `AGENT_FINALIZE_HINT` | `0` | yes | no | harness | Harness environment toggle for Finalize Hint. See docs/configuration.md (harness). |
 | `AGENT_FINALIZE_RETRY_BUDGET` | `1` | yes | no | harness | Harness environment toggle for Finalize Retry Budget. See docs/configuration.md (harness). |
@@ -67,17 +67,18 @@ Web **Settings** writes to (2). See [Configuration basics](../start/configuratio
 | `AGENT_INTENT_CONTEXT_MAX_CHARS` | `12000` | yes | no | harness | Harness environment toggle for Intent Context Max Chars. See docs/configuration.md (harness). |
 | `AGENT_INTENT_INFERENCE` | `1` | yes | no | harness | Harness environment toggle for Intent Inference. See docs/configuration.md (harness). |
 | `AGENT_INTENT_REPO_CONTEXT` | `0` | yes | no | harness | Harness environment toggle for Intent Repo Context. See docs/configuration.md (harness). |
-| `AGENT_LENGTH_RESUME_MAX` | `1` | yes | no | harness | Harness environment toggle for Length Resume Max. See docs/configuration.md (harness). |
+| `AGENT_LENGTH_RESUME_MAX` | `3` | yes | no | harness | Max auto-continue rounds when output hits length limit or file-write tool JSON is truncated (0–8, default 3). |
 | `AGENT_LINT_ALLOWED_COMMANDS` | `` | yes | no | advanced | Harness environment toggle for Lint Allowed Commands. See docs/configuration.md (advanced). |
 | `AGENT_LOCATION` | `—` | yes | no | session_ui | Harness environment toggle for Location. See docs/configuration.md (session ui). |
 | `AGENT_MARKETS_ENABLE` | `1` | yes | no | web_research | Harness environment toggle for Markets Enable. See docs/configuration.md (web research). |
 | `AGENT_MARKETS_MAX_DELAY_MS` | `2000` | yes | no | web_research | Harness environment toggle for Markets Max Delay Ms. See docs/configuration.md (web research). |
 | `AGENT_MARKETS_RETRIES` | `2` | yes | no | web_research | Harness environment toggle for Markets Retries. See docs/configuration.md (web research). |
 | `AGENT_MARKETS_TIMEOUT_MS` | `8000` | yes | no | web_research | Harness environment toggle for Markets Timeout Ms. See docs/configuration.md (web research). |
+| `AGENT_MAX_COMPLETION_TOKENS` | `0` | yes | no | harness | Main model max_tokens per completion (0 = provider default). Caps very long single completions. |
 | `AGENT_MEMORY_AUTOLINK` | `0` | yes | no | memory_vault | Harness environment toggle for Memory Autolink. See docs/configuration.md (memory vault). |
-| `AGENT_MEMORY_AUTOLINK_MODEL` | `openrouter/owl-alpha` | yes | no | models_api | Harness environment toggle for Memory Autolink Model. See docs/configuration.md (models api). |
+| `AGENT_MEMORY_AUTOLINK_MODEL` | `qwen/qwen3.5-9b` | yes | no | models_api | Harness environment toggle for Memory Autolink Model. See docs/configuration.md (models api). |
 | `AGENT_MEMORY_AUTO_EXTRACT` | `1` | yes | no | memory_vault | Harness environment toggle for Memory Auto Extract. See docs/configuration.md (memory vault). |
-| `AGENT_MEMORY_CONSOLIDATE_MODEL` | `openrouter/owl-alpha` | yes | no | models_api | Harness environment toggle for Memory Consolidate Model. See docs/configuration.md (models api). |
+| `AGENT_MEMORY_CONSOLIDATE_MODEL` | `qwen/qwen3.5-9b` | yes | no | models_api | Harness environment toggle for Memory Consolidate Model. See docs/configuration.md (models api). |
 | `AGENT_MEMORY_DEBIAS` | `1` | yes | no | memory_vault | Harness environment toggle for Memory Debias. See docs/configuration.md (memory vault). |
 | `AGENT_MEMORY_EPISODE` | `0` | yes | no | memory_vault | Harness environment toggle for Memory Episode. See docs/configuration.md (memory vault). |
 | `AGENT_MEMORY_EXPLORATORY_AUTO_RECALL` | `0` | yes | no | memory_vault | Harness environment toggle for Memory Exploratory Auto Recall. See docs/configuration.md (memory vault). |
@@ -87,7 +88,7 @@ Web **Settings** writes to (2). See [Configuration basics](../start/configuratio
 | `AGENT_MEMORY_MIN_CONFIDENCE_DEFAULT` | `0.35` | yes | no | memory_vault | Harness environment toggle for Memory Min Confidence Default. See docs/configuration.md (memory vault). |
 | `AGENT_MEMORY_PRIME_ROUND0` | `1` | yes | no | memory_vault | Harness environment toggle for Memory Prime Round0. See docs/configuration.md (memory vault). |
 | `AGENT_MIN_CONCURRENT_AGENTS` | `1` | yes | no | harness | Harness environment toggle for Min Concurrent Agents. See docs/configuration.md (harness). |
-| `AGENT_MODEL` | `—` | yes | no | models_api | Harness environment toggle for Model. See docs/configuration.md (models api). |
+| `AGENT_MODEL` | `qwen/qwen3.5-9b` | yes | no | models_api | Harness environment toggle for Model. See docs/configuration.md (models api). |
 | `AGENT_OBSIDIAN_DISCOVER` | `1` | yes | no | memory_vault | Harness environment toggle for Obsidian Discover. See docs/configuration.md (memory vault). |
 | `AGENT_OBSIDIAN_REQUIRE_DOT_OBSIDIAN` | `1` | yes | no | memory_vault | Harness environment toggle for Obsidian Require Dot Obsidian. See docs/configuration.md (memory vault). |
 | `AGENT_OBSIDIAN_VAULT_NAME_SUBSTRING` | `—` | yes | no | memory_vault | Harness environment toggle for Obsidian Vault Name Substring. See docs/configuration.md (memory vault). |
@@ -123,7 +124,7 @@ Web **Settings** writes to (2). See [Configuration basics](../start/configuratio
 | `AGENT_SELF_HEAL_MAX_PASSES` | `4` | yes | no | harness | Harness environment toggle for Self Heal Max Passes. See docs/configuration.md (harness). |
 | `AGENT_SELF_HEAL_REPO_WIDE` | `0` | yes | no | harness | Harness environment toggle for Self Heal Repo Wide. See docs/configuration.md (harness). |
 | `AGENT_SELF_HEAL_STOP_ON_NO_PROGRESS` | `1` | yes | no | harness | Harness environment toggle for Self Heal Stop On No Progress. See docs/configuration.md (harness). |
-| `AGENT_SEND_TIMEOUT_MS` | `600000` | yes | no | models_api | Harness environment toggle for Send Timeout Ms. See docs/configuration.md (models api). |
+| `AGENT_SEND_TIMEOUT_MS` | `1800000` | yes | no | models_api | Harness environment toggle for Send Timeout Ms. See docs/configuration.md (models api). |
 | `AGENT_SESSION_GREET` | `1` | yes | no | session_ui | Harness environment toggle for Session Greet. See docs/configuration.md (session ui). |
 | `AGENT_SESSION_JSONL` | `1` | yes | no | session_ui | Harness environment toggle for Session Jsonl. See docs/configuration.md (session ui). |
 | `AGENT_SESSION_JSONL_MAX_ROLLUP_CHARS` | `500000` | yes | no | session_ui | Harness environment toggle for Session Jsonl Max Rollup Chars. See docs/configuration.md (session ui). |
@@ -149,7 +150,7 @@ Web **Settings** writes to (2). See [Configuration basics](../start/configuratio
 | `AGENT_VISION_MAX_IMAGE_BYTES` | `4194304` | yes | yes | models_api | Harness environment toggle for Vision Max Image Bytes. See docs/configuration.md (models api). |
 | `AGENT_VISION_MODEL` | `nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free` | yes | yes | models_api | Harness environment toggle for Vision Model. See docs/configuration.md (models api). |
 | `AGENT_VISION_RETRIES` | `2` | yes | yes | models_api | Harness environment toggle for Vision Retries. See docs/configuration.md (models api). |
-| `AGENT_VISION_RETRY_BASE_MS` | `800` | yes | no | models_api | Harness environment toggle for Vision Retry Base Ms. See docs/configuration.md (models api). |
+| `AGENT_VISION_RETRY_BASE_MS` | `800` | yes | yes | models_api | Harness environment toggle for Vision Retry Base Ms. See docs/configuration.md (models api). |
 | `AGENT_VISION_TIMEOUT_MS` | `15000` | yes | yes | models_api | Harness environment toggle for Vision Timeout Ms. See docs/configuration.md (models api). |
 | `AGENT_WEB_FETCH_403_RETRY` | `1` | yes | no | web_research | Harness environment toggle for Web Fetch 403 Retry. See docs/configuration.md (web research). |
 | `AGENT_WEB_FETCH_ACCEPT_LANGUAGE` | `—` | yes | no | web_research | Harness environment toggle for Web Fetch Accept Language. See docs/configuration.md (web research). |
@@ -167,6 +168,10 @@ Web **Settings** writes to (2). See [Configuration basics](../start/configuratio
 | `AGENT_WEB_FETCH_USER_AGENT` | `—` | yes | no | web_research | Harness environment toggle for Web Fetch User Agent. See docs/configuration.md (web research). |
 | `AGENT_WEB_READABILITY` | `1` | yes | no | web_research | Harness environment toggle for Web Readability. See docs/configuration.md (web research). |
 | `AGENT_WEB_RESEARCH` | `1` | yes | no | web_research | Harness environment toggle for Web Research. See docs/configuration.md (web research). |
+| `AGENT_WRITE_INTEGRITY_NUDGE` | `1` | yes | no | harness | Inject a system note when file-write tools report likely_truncated. |
+| `AGENT_WRITE_PART_MAX_CHARS` | `512000` | yes | no | harness | Maximum characters per write_file_part chunk. |
+| `AGENT_WRITE_STREAM_SINK` | `0` | yes | no | harness | Stream file-write tool content to disk during model streaming (preserves partial bytes on cutoff). |
+| `AGENT_WRITE_STREAM_SINK_MIN_CHARS` | `8000` | yes | no | harness | Minimum estimated content size before opening the stream sink. |
 | `AGENT_YIELD_EVERY_N` | `0` | yes | no | session_ui | Harness environment toggle for Yield Every N. See docs/configuration.md (session ui). |
 | `AGENT_YOLO` | `0` | yes | no | safety | Harness environment toggle for Yolo. See docs/configuration.md (safety). |
 
@@ -187,6 +192,7 @@ Web **Settings** writes to (2). See [Configuration basics](../start/configuratio
 - `AGENT_VISION_MAX_IMAGE_BYTES`
 - `AGENT_VISION_MODEL`
 - `AGENT_VISION_RETRIES`
+- `AGENT_VISION_RETRY_BASE_MS`
 - `AGENT_VISION_TIMEOUT_MS`
 - `ANTHROPIC_API_KEY`
 - `OPENAI_API_KEY`

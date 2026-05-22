@@ -41,6 +41,7 @@ Human-oriented guides for running, configuring, and extending the Liminal agent 
 |----------|----------|
 | [Research with web tools](./guides/research-with-web-tools.md) | `web_search` + `web_fetch` |
 | [Vault briefs and updates](./guides/vault-briefs-and-updates.md) | `vault_write` without dedupe traps |
+| [Writing large files](./guides/writing-large-files.md) | `write_file` + `append_file` / `write_file_part` |
 | [Persona bootstrap](./guides/persona-bootstrap.md) | First-run voice setup |
 | [Running eval](./guides/running-eval.md) | `npm run eval` |
 | [Research quality](./guides/research-quality.md) | Synthesis checklist |

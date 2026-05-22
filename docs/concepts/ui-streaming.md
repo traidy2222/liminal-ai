@@ -19,6 +19,24 @@ Mitigation:
 
 Client: `packages/web/client/useSSE.ts`. Server: `packages/web/server/sse.ts`.
 
+### Transport vs API vs HUD “STANDBY”
+
+Treat these separately:
+
+| Layer | Signal | Typical meaning |
+|-------|--------|-----------------|
+| **REST `/api/status`** | `busy`, `lastTurnEndedAt`, `clients` | Express up; harness may be mid-turn even when SSE hiccups. |
+| **SSE `/api/stream`** | `connected`, `sseTransport`, `sseTransportDetail` | Live event delivery; reconnects briefly during API restarts or `web:dev` proxy `ECONNRESET`. |
+| **HUD orb “STANDBY”** | `idle`, not necessarily broken | Idle between turns — not diagnostics for crashes. |
+
+**Client behaviour (web):**
+
+- **CONNECTING** / **WAIT API** appears before the first successful SSE handshake (`sseHasOpenedOnce`); REST may already be reachable.
+- **DEGRADED** means **`/api/status` OK** while the EventSource layer is **`reconnecting` / `offline`**, including when the harness is **`busy`** (copy notes that events may pause).
+- **OFFLINE** means **`/api/status`** could not be reached — kill `:3001`, wrong proxy target, VPN, firewall, etc.
+- **Busy stall watchdog**: if `busy` and there are **no streamed assistant/tool events** (tokens, tool cards, subtask lines, etc.) for ~52s, a **`[UI]`** trace fires; it repeats about every 4 minutes while the stall continues. Periodic `harness_running` alone does not reset this timer — it only proves the SSE socket is warm. Use RAW for trace lines when `AGENT_UI_VERBOSITY=quiet`.
+- **`web:dev`** (Vite on `:5173` proxying to Express `:3001`) often logs **`http proxy error ... ECONNRESET`** when Express restarts; the UI probes `/api/status` on SSE interruption so SIGNAL does not jump straight to misleading OFFLINE when the API is still healthy.
+
 ### `turn_end` and “stuck processing”
 
 Symptom: trace shows `[UI] Server reports idle — cleared stuck "processing"` or the composer stays disabled after a long turn.
