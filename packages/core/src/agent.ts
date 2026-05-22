@@ -45,12 +45,13 @@ import {
   resolveWriteStreamSinkEnabled,
   resolveWriteStreamSinkMinChars,
 } from "./file_write_stream_sink.js";
-import { bumpRecipePattern } from "./recipe_library.js";
+import { recordRecipe } from "./recipe_library.js";
 import { addCompressionGuideline, formatCompressionGuidelines } from "./compression_guidelines.js";
 import { bumpRuleHits, getRuleHitCounts, extractRuleIds, recordRuleOutcomes } from "./rule_stats.js";
 import { writeYieldSnapshot } from "./session_event_log.js";
 import { SharedMemoryBus } from "./shared_memory_bus.js";
 import { resolveProviderConfig, buildProviderRouting } from "./provider_config.js";
+import { buildOpenRouterAttributionHeaders } from "./openrouter_attribution.js";
 import { withProviderRequestSpacing } from "./provider_request_gate.js";
 import type { RuntimePreferences, RuntimePersonaProfile } from "./runtime_prefs.js";
 import {
@@ -1390,10 +1391,7 @@ export class AgentHarness {
       apiKey: this.config.openRouterApiKey,
       baseURL: this.config.baseURL,
       maxRetries: 0,
-      defaultHeaders: {
-        "HTTP-Referer": "https://github.com/liminal-ai",
-        "X-Title": "Liminal",
-      },
+      defaultHeaders: buildOpenRouterAttributionHeaders(),
     });
   }
 
@@ -1689,10 +1687,7 @@ export class AgentHarness {
       apiKey: config.openRouterApiKey,
       baseURL: config.baseURL,
       maxRetries: 0,
-      defaultHeaders: {
-        "HTTP-Referer": "https://github.com/liminal-ai",
-        "X-Title": "Liminal",
-      },
+      defaultHeaders: buildOpenRouterAttributionHeaders(),
     });
     if (this.runtimePreferences?.provider?.keySource) {
       const provider = resolveProviderConfig({
@@ -2229,32 +2224,30 @@ export class AgentHarness {
 
   /** Post-turn recipe + trajectory writes (background; does not extend `running`). */
   private async persistEpisodicRecipeAfterTurn(userMessage: string): Promise<void> {
-    if (this.toolsUsedThisTurn.length < 4 || !this.registry.has("remember")) return;
-    const recipeKey = `recipe:${hashString(userMessage).slice(0, 10)}`;
-    const recipeValue =
-      `GOAL: ${userMessage.slice(0, 60)}\n` +
-      `PATTERN: ${this.toolsUsedThisTurn.join(" → ")}\n` +
-      `ROUNDS: ${this.roundCount}`;
-    // Recipe dedupe key = the tool-call sequence (consecutive repeats collapsed),
-    // NOT the goal prose — so structurally-similar turns compound one entry
-    // instead of each landing at ×1.
-    const recipeSignature = this.toolsUsedThisTurn
-      .filter((t, i, arr) => t !== arr[i - 1])
-      .join(" → ");
+    if (this.toolsUsedThisTurn.length < 4) return;
+    // Record the turn as a recipe — keyed by (intent class, phase shape),
+    // gated on a good outcome score, merged onto a matching entry if one exists.
+    const recipeOutcome = scoreTurnOutcome({
+      toolsUsed: this._toolOutcomesThisTurn,
+      roundCount: this.roundCount,
+      criticPassed: this.criticConsumedThisSend ? true : null,
+      contradictionCount: 0,
+      terminationReason: "ok",
+    });
     try {
-      await this.dispatcher.directCall("remember", {
-        key: recipeKey,
-        value: recipeValue,
-        actor_id: this.taskId,
+      await recordRecipe({
+        intentClass: this.turnInference?.intent ?? "general",
+        tools: [...this.toolsUsedThisTurn],
+        goal: userMessage,
+        outcome: recipeOutcome,
       });
-      void bumpRecipePattern(recipeSignature, recipeValue);
     } catch (err) {
       this.emitter.emit("text", {
         delta: `\n[HARNESS] Recipe persist failed: ${err instanceof Error ? err.message : String(err)}\n`,
         channel: "trace",
       });
     }
-    if (this.agentDepth === 0) {
+    if (this.agentDepth === 0 && this.registry.has("remember")) {
       const trajectoryKey = `trajectory:${hashString(userMessage).slice(0, 12)}`;
       const finalAnswer = this.context.getLastAssistantMessage() ?? "";
       const trajectoryValue =

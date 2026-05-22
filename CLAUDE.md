@@ -293,7 +293,7 @@ packages/tui    packages/web    packages/eval   — run directly via tsx, never 
 
 **Persona** — `persona_ui_theme.ts` (`PersonaUiThemeV1`/`V2`, validation, Ink/CSS mapping), `persona_bootstrap_progress.ts` (artifact progress events), `persona_bootstrap_ui_strings.ts`, `runtime_persona_controls.ts` (controls patch/apply), `personality_heartbeat.ts` (idle-time heartbeat).
 
-**Learning & telemetry** — `recipe_library.ts` (Voyager-style success recipes), `rule_stats.ts` (harness-rule hit stats), `outcome_scorer.ts` (per-turn outcome scoring + effort/intent stats), `trajectory_writer.ts` (causal trajectory logging), `failure_digest.ts`, `failure_log.ts` (`.agent_failures.jsonl`), `golden_eval.ts`, `session_event_log.ts` (`.agent_sessions/`).
+**Learning & telemetry** — `recipe_library.ts` (recipe library — successful-strategy patterns keyed by `(intent class, tool-phase shape)` so similar turns compound; `.agent_recipe_stats.json`), `rule_stats.ts` (harness-rule hit + outcome stats), `outcome_scorer.ts` (per-turn outcome scoring + effort/intent stats), `trajectory_writer.ts` (causal trajectory logging), `failure_digest.ts`, `failure_log.ts` (`.agent_failures.jsonl`), `golden_eval.ts`, `session_event_log.ts` (`.agent_sessions/`).
 
 **Utilities** — `runtime_prefs.ts` (`.agent_runtime_prefs.json`), `vault_path.ts` / `obsidian_vault_discovery.ts`, `workspace_root.ts`, `image_attachments.ts`, `input_semantics.ts`, `json_stable.ts`, `index.ts` (barrel export).
 
@@ -344,7 +344,7 @@ packages/tui    packages/web    packages/eval   — run directly via tsx, never 
 | `synthesis_run.ts` | `synthesis_run` (cross-domain synthesis sub-agent)                                                                                  |
 | `query_tool_outputs.ts` / `dispatch_graph.ts` / `branch_evaluate.ts` | session tool-output query, intra-round DAG scheduling, branch evaluation     |
 
-**Memory key convention**: `"{type}:{key}"` (e.g. `reflection:abc123`, `recipe:def456`). The harness auto-writes `reflection:` entries on all-tool-failure rounds and `recipe:` entries on successful turns with ≥4 tool calls.
+**Memory key convention**: `"{type}:{key}"` (e.g. `reflection:abc123`). The harness auto-writes `reflection:` entries on all-tool-failure rounds. Successful multi-tool turns (≥4 tools, outcome ≥ 0.6) are recorded in the recipe library (`recipe_library.ts` → `.agent_recipe_stats.json`), keyed by `(intent class, tool-phase shape)` — not as `recipe:` memory notes.
 
 **Tool families** (`tool_catalog.ts`): `files_edit`, `shell`, `git`, `tasks`, `memory_advanced`, `web`, `markets`, `code_intel`, `browser`, `captcha`, `vision`, `meta`, `dynamic_tools`, `vault`, `document`, `agenda_scheduler`, `synthesis`, `independence`, `navigation`, `harness_ui`, `orchestration`.
 
@@ -388,7 +388,7 @@ CLI: `npm run eval -w packages/eval`. JSON sink: `AGENT_EVAL_JSON_SINK` (on by d
 
 **Resource locks.** Tools declare `resourceLocks: (args) => string[]`. Lock IDs use prefixes `file:read:`, `file:write:`, `shell:`. `ResourceLockManager` always acquires in alphabetical order to prevent deadlock.
 
-**Memory key conventions.** Typed notes use `"{type}:{key}"` storage keys. The harness auto-writes `reflection:` entries on all-tool-failure rounds and `recipe:` entries on successful turns with ≥4 tool calls.
+**Memory key conventions.** Typed notes use `"{type}:{key}"` storage keys. The harness auto-writes `reflection:` entries on all-tool-failure rounds. Successful multi-tool turns are recorded in the recipe library (`.agent_recipe_stats.json`), keyed by `(intent class, tool-phase shape)` and gated on outcome score — not as `recipe:` notes.
 
 **No circular imports.** `core` has zero knowledge of `tools`. The `onChildCreated` hook on `AgentHarness` is how `tools/orchestration.ts` registers child-scoped tools without a circular dependency.
 

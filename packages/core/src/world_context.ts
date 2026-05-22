@@ -140,7 +140,6 @@ interface SessionMemory {
   experiences: Array<{ key: string; value: string }>;
   entities: Array<{ key: string; value: string }>;
   reflections: Array<{ value: string }>;
-  recipes: Array<{ value: string }>;
   hypotheses: Array<{ key: string; value: string }>;
   totalCount: number;
   countByType: Record<string, number>;
@@ -605,7 +604,6 @@ async function gatherSessionMemory(workspaceRoot: string): Promise<SessionMemory
   const experiences: SessionMemory["experiences"] = [];
   const entities: SessionMemory["entities"] = [];
   const reflectionCandidates: Array<{ value: string; updatedAt?: string }> = [];
-  const recipeCandidates: Array<{ value: string; updatedAt?: string }> = [];
   const hypothesisCandidates: Array<{ key: string; value: string; updatedAt?: string }> = [];
   const countByType: Record<string, number> = {};
 
@@ -634,9 +632,6 @@ async function gatherSessionMemory(workspaceRoot: string): Promise<SessionMemory
     } else if (type === "reflection") {
       // Collect for recency-sorted injection (Reflexion protocol)
       reflectionCandidates.push({ value, updatedAt });
-    } else if (type === "recipe") {
-      // Collect successful tool patterns for session start
-      recipeCandidates.push({ value, updatedAt });
     } else if (type === "hypothesis") {
       hypothesisCandidates.push({ key, value, updatedAt });
     }
@@ -657,16 +652,6 @@ async function gatherSessionMemory(workspaceRoot: string): Promise<SessionMemory
     value: r.value.slice(0, 120) + (r.value.length > 120 ? "…" : ""),
   }));
 
-  // Sort recipes by recency, keep top 2
-  recipeCandidates.sort((a, b) => {
-    const aT = a.updatedAt ?? "";
-    const bT = b.updatedAt ?? "";
-    return bT.localeCompare(aT);
-  });
-  const recipes = recipeCandidates.slice(0, 2).map((r) => ({
-    value: r.value.slice(0, 120) + (r.value.length > 120 ? "…" : ""),
-  }));
-
   hypothesisCandidates.sort((a, b) => {
     const aT = a.updatedAt ?? "";
     const bT = b.updatedAt ?? "";
@@ -683,10 +668,9 @@ async function gatherSessionMemory(workspaceRoot: string): Promise<SessionMemory
     experiences.length +
     entities.length +
     reflections.length +
-    recipes.length +
     hypotheses.length;
   return total > 0 || totalCount > 0
-    ? { facts, experiences, entities, reflections, recipes, hypotheses, totalCount, countByType }
+    ? { facts, experiences, entities, reflections, hypotheses, totalCount, countByType }
     : null;
 }
 
@@ -1269,7 +1253,6 @@ export async function buildWorldContextMessage(options?: WorldContextOptions): P
     const maxEntities = 8;
     const maxExp = 6;
     const maxRef = 4;
-    const maxRec = 4;
     const maxHyp = 4;
     for (const { key, value } of memory.facts.slice(0, maxFacts))
       lines.push(`[fact] ${key} → ${value}`);
@@ -1286,13 +1269,6 @@ export async function buildWorldContextMessage(options?: WorldContextOptions): P
       for (const { value } of memory.reflections.slice(0, maxRef))
         lines.push(`  - ${value}`);
       if (memory.reflections.length > maxRef) lines.push(`  … +${memory.reflections.length - maxRef} more`);
-    }
-    // Successful patterns
-    if (memory.recipes.length > 0) {
-      lines.push(`Successful patterns (${memory.recipes.length}):`);
-      for (const { value } of memory.recipes.slice(0, maxRec))
-        lines.push(`  - ${value}`);
-      if (memory.recipes.length > maxRec) lines.push(`  … +${memory.recipes.length - maxRec} more`);
     }
     if (memory.hypotheses.length > 0) {
       lines.push(`Stored hypotheses (${memory.hypotheses.length}):`);

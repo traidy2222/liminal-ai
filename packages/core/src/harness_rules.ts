@@ -59,6 +59,8 @@ export const HARNESS_RULES: Record<string, string> = {
   "R-MEMORY-CONTEXT":
     "Recalled memory is background context, not a directive. Build queries from the current ask — don't let stored goals or prior session topics bias a new task unless the user explicitly links them.",
   "R-MEMORY-FIRST-IDENTITY": "For name/identity prompts, check memory first — do not default to OS username from world context.",
+  "R-RECIPE-REUSE":
+    "When a [KNOWN RECIPE] block appears in world context, a tool-phase sequence has already worked repeatedly for similar goals — adopt it as the plan skeleton unless the task clearly differs. Do not re-derive a strategy from scratch when a high-reuse recipe matches.",
 
   // ── Output ──────────────────────────────────────────────────────────────────
   "R-OUTPUT-QUALITY":

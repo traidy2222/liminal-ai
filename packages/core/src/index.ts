@@ -203,7 +203,8 @@ export {
 export type { DistilledOutput } from "./output_distill.js";
 export { appendFailureLog, failureLogPath } from "./failure_log.js";
 export { formatFailureDigestForWorldContext } from "./failure_digest.js";
-export { bumpRecipePattern, formatRecipeLibraryHints, formatTopRecipes } from "./recipe_library.js";
+export { recordRecipe, formatRecipeLibraryHints, formatTopRecipes, phaseShapeForTools } from "./recipe_library.js";
+export type { RecipeEntry, RecipePhase, RecordRecipeInput } from "./recipe_library.js";
 export {
   attachSessionEventLog,
   maybeAttachSessionEventLog,
@@ -213,6 +214,12 @@ export {
 } from "./session_event_log.js";
 export type { YieldSnapshot } from "./session_event_log.js";
 export { appendGoldenEvalRecord } from "./golden_eval.js";
+export {
+  DEFAULT_OPENROUTER_HTTP_REFERER,
+  DEFAULT_OPENROUTER_X_TITLE,
+  buildOpenRouterAttributionHeaders,
+} from "./openrouter_attribution.js";
+export type { OpenRouterAttributionHeaders } from "./openrouter_attribution.js";
 export { resolveProviderConfig, resolveVisionProviderConfig, buildProviderRouting } from "./provider_config.js";
 export type { ProviderConfig, ProviderConfigOverrides, VisionProviderConfig, ProviderRouting } from "./provider_config.js";
 export {
