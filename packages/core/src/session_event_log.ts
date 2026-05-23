@@ -233,6 +233,12 @@ export function attachSessionEventLog(emitter: AgentEmitter, sessionId: string):
   const onTurnSummary = (p: AgentEventMap["turn_summary"]) => {
     write({ event: "turn_summary", turnIndex, summary: p });
   };
+  const onTaskWorldCreated = (p: AgentEventMap["task_world_created"]) => {
+    write({ event: "task_world_created", turnIndex, worldId: p.world.id, phase: p.world.phase });
+  };
+  const onTaskWorldUpdated = (p: AgentEventMap["task_world_updated"]) => {
+    write({ event: "task_world_updated", turnIndex, worldId: p.world.id, reason: p.reason, phase: p.world.phase });
+  };
 
   emitter.on("send_start", onSendStart);
   emitter.on("text", onText);
@@ -241,6 +247,8 @@ export function attachSessionEventLog(emitter: AgentEmitter, sessionId: string):
   emitter.on("tool_result", onToolResult);
   emitter.on("context_compressed", onContextCompressed);
   emitter.on("turn_summary", onTurnSummary);
+  emitter.on("task_world_created", onTaskWorldCreated);
+  emitter.on("task_world_updated", onTaskWorldUpdated);
   emitter.on("turn_end", onTurnEnd);
   emitter.on("error", onError);
   emitter.on("approval_decision", onApproval);
@@ -253,6 +261,8 @@ export function attachSessionEventLog(emitter: AgentEmitter, sessionId: string):
     emitter.off("tool_result", onToolResult);
     emitter.off("context_compressed", onContextCompressed);
     emitter.off("turn_summary", onTurnSummary);
+    emitter.off("task_world_created", onTaskWorldCreated);
+    emitter.off("task_world_updated", onTaskWorldUpdated);
     emitter.off("turn_end", onTurnEnd);
     emitter.off("error", onError);
     emitter.off("approval_decision", onApproval);

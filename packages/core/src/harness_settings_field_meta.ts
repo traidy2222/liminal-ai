@@ -818,6 +818,13 @@ const _META_RAW: Record<string, HarnessSettingsFieldMeta> = {
     description: "Harness environment toggle for Eval Json Sink. See docs/configuration.md (advanced).",
     valueKind: "boolean",
   },
+  "AGENT_TASK_WORLDS": {
+    tabId: "harness",
+    subgroupId: "harness_misc",
+    label: "Task Worlds",
+    description: "Enable event-sourced mission state for complex tasks.",
+    valueKind: "boolean",
+  },
   "AGENT_SESSION_MODE": {
     tabId: "session_ui",
     subgroupId: "session_recording",

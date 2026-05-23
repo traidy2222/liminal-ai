@@ -13,6 +13,8 @@ import type {
   ToolResult,
   ExecutionState,
   ExecutionContract,
+  TaskWorldSnapshot,
+  TaskWorldVerificationStatus,
 } from "./types.js";
 import { AgentEmitter } from "./events.js";
 import { ContextManager } from "./context.js";
@@ -53,6 +55,16 @@ import { writeYieldSnapshot } from "./session_event_log.js";
 import { SharedMemoryBus } from "./shared_memory_bus.js";
 import { resolveProviderConfig, buildProviderRouting } from "./provider_config.js";
 import { buildOpenRouterAttributionHeaders } from "./openrouter_attribution.js";
+import {
+  createTaskWorldSnapshot,
+  formatTaskWorldSummary,
+  inferSourceKindFromTool,
+  makeTaskWorldBlackboardEntry,
+  makeTaskWorldEvidence,
+  persistTaskWorldEvent,
+  loadTaskWorldSnapshot,
+  shouldAutoCreateTaskWorld,
+} from "./task_world.js";
 import { withProviderRequestSpacing } from "./provider_request_gate.js";
 import type { RuntimePreferences, RuntimePersonaProfile } from "./runtime_prefs.js";
 import {
@@ -988,6 +1000,8 @@ export class AgentHarness {
   readonly sharedBus: SharedMemoryBus;
   /** Long-horizon runtime state persisted by task_checkpoint and heartbeat events. */
   private executionState: ExecutionState | null = null;
+  /** Event-sourced mission state for complex tasks (root harness only by default). */
+  private activeTaskWorld: TaskWorldSnapshot | null = null;
   /** Intra-round tool dependency DAG (populated by dispatch_graph, cleared after each dispatch). */
   private readonly _toolDag = new ToolDag();
   /** In-session BM25 index of tool outputs (cleared at turn end). */
@@ -1032,6 +1046,94 @@ export class AgentHarness {
     return this.executionState;
   }
 
+  getActiveTaskWorld(): TaskWorldSnapshot | null {
+    return this.activeTaskWorld;
+  }
+
+  async resumeTaskWorld(worldId: string): Promise<TaskWorldSnapshot | null> {
+    const world = await loadTaskWorldSnapshot(worldId);
+    this.activeTaskWorld = world;
+    if (world) {
+      this.context.appendMessage({
+        role: "user",
+        content: `[TASK WORLD RESUMED]\n${formatTaskWorldSummary(world)}`,
+      });
+      this.emitter.emit("task_world_updated", { world, reason: "resume" });
+    }
+    return world;
+  }
+
+  async updateTaskWorld(input: {
+    kind: "fact" | "evidence" | "handoff" | "decision" | "blocker" | "status";
+    summary: string;
+    source?: string;
+    payload?: string;
+  }): Promise<TaskWorldSnapshot | null> {
+    if (!this.activeTaskWorld || resolveHarnessEnvRaw("AGENT_TASK_WORLDS", this.runtimePreferences) === "0") return null;
+    const entry = makeTaskWorldBlackboardEntry(input);
+    this.activeTaskWorld = await persistTaskWorldEvent(this.activeTaskWorld.id, this.activeTaskWorld, {
+      type: "blackboard_added",
+      at: entry.at,
+      entry,
+    });
+    this.emitter.emit("task_world_updated", { world: this.activeTaskWorld, reason: `blackboard:${input.kind}` });
+    return this.activeTaskWorld;
+  }
+
+  async addTaskWorldEvidence(input: {
+    claim: string;
+    sourceKind?: Parameters<typeof makeTaskWorldEvidence>[0]["sourceKind"];
+    sourceRef: string;
+    excerpt: string;
+    confidence?: Parameters<typeof makeTaskWorldEvidence>[0]["confidence"];
+    freshness?: Parameters<typeof makeTaskWorldEvidence>[0]["freshness"];
+    hash?: string;
+  }): Promise<TaskWorldSnapshot | null> {
+    if (!this.activeTaskWorld || resolveHarnessEnvRaw("AGENT_TASK_WORLDS", this.runtimePreferences) === "0") return null;
+    const evidence = makeTaskWorldEvidence({
+      claim: input.claim,
+      sourceKind: input.sourceKind ?? "tool",
+      sourceRef: input.sourceRef,
+      excerpt: input.excerpt,
+      confidence: input.confidence,
+      freshness: input.freshness,
+      hash: input.hash,
+    });
+    this.activeTaskWorld = await persistTaskWorldEvent(this.activeTaskWorld.id, this.activeTaskWorld, {
+      type: "evidence_added",
+      at: evidence.at,
+      entry: evidence,
+    });
+    this.emitter.emit("task_world_evidence_added", { worldId: this.activeTaskWorld.id, evidence });
+    return this.activeTaskWorld;
+  }
+
+  async updateTaskWorldVerification(input: {
+    status?: TaskWorldVerificationStatus;
+    criterionId?: string;
+    criterionStatus?: TaskWorldVerificationStatus;
+    evidenceIds?: string[];
+    waivedReason?: string;
+    residualRisks?: string[];
+  }): Promise<TaskWorldSnapshot | null> {
+    if (!this.activeTaskWorld || resolveHarnessEnvRaw("AGENT_TASK_WORLDS", this.runtimePreferences) === "0") return null;
+    this.activeTaskWorld = await persistTaskWorldEvent(this.activeTaskWorld.id, this.activeTaskWorld, {
+      type: "verification_updated",
+      at: Date.now(),
+      ...input,
+    });
+    this.emitter.emit("task_world_verification_updated", {
+      worldId: this.activeTaskWorld.id,
+      status: this.activeTaskWorld.verification.status,
+      criteria: this.activeTaskWorld.verification.successCriteria,
+      residualRisks: this.activeTaskWorld.verification.residualRisks,
+    });
+    if (this.activeTaskWorld.phase === "completed") {
+      this.emitter.emit("task_world_completed", { world: this.activeTaskWorld });
+    }
+    return this.activeTaskWorld;
+  }
+
   /**
    * @internal — used by packages/tools for cross-agent event emission (e.g. consensus_conflict).
    */
@@ -1074,6 +1176,63 @@ export class AgentHarness {
   private getActiveContract(): ExecutionContract | null {
     if (!this.executionState?.activeContractId) return null;
     return this.executionState.contracts.find((c) => c.id === this.executionState!.activeContractId) ?? null;
+  }
+
+  private taskWorldsEnabled(): boolean {
+    return resolveHarnessEnvRaw("AGENT_TASK_WORLDS", this.runtimePreferences) !== "0";
+  }
+
+  private async ensureTaskWorld(reason: string, successCriteria?: string[]): Promise<TaskWorldSnapshot | null> {
+    if (!this.taskWorldsEnabled() || this.agentDepth > 0 || this.sessionGreetingThisSend || this.personaBootstrapPromptThisSend) {
+      return null;
+    }
+    if (this.activeTaskWorld) return this.activeTaskWorld;
+    const now = Date.now();
+    let world = createTaskWorldSnapshot({
+      objective: this.lastUserMessage || "Active task",
+      successCriteria: successCriteria?.length ? successCriteria : [`Satisfy the user request: ${(this.lastUserMessage || "task").slice(0, 180)}`],
+      requiredChecks: this.turnInference?.intent === "coding" ? ["Run the most relevant typecheck, test, or build verification."] : [],
+      now,
+    });
+    world = await persistTaskWorldEvent(world.id, null, { type: "created", at: now, world });
+    this.activeTaskWorld = world;
+    this.emitter.emit("task_world_created", { world });
+    this.context.appendMessage({
+      role: "user",
+      content: `[TASK WORLD ACTIVE: ${reason}]\n${formatTaskWorldSummary(world)}`,
+    });
+    return world;
+  }
+
+  private async maybeAutoCreateTaskWorldForTurn(openingTurn: boolean): Promise<void> {
+    if (!shouldAutoCreateTaskWorld({
+      message: this.lastUserMessage,
+      intent: this.turnInference?.intent,
+      openingTurn,
+      agentDepth: this.agentDepth,
+    })) {
+      return;
+    }
+    await this.ensureTaskWorld("auto_complex_task");
+  }
+
+  private async syncTaskWorldArtifacts(reason: string): Promise<void> {
+    if (!this.activeTaskWorld || !this.taskWorldsEnabled()) return;
+    const epistemic = this.context.getEpistemicState();
+    const activeHypotheses =
+      epistemic?.hypotheses
+        ?.filter((h) => h.status === "active" || h.status === undefined)
+        .map((h) => h.claim)
+        .slice(0, 20) ?? [];
+    this.activeTaskWorld = await persistTaskWorldEvent(this.activeTaskWorld.id, this.activeTaskWorld, {
+      type: "artifacts_updated",
+      at: Date.now(),
+      filesTouched: this.filesReadThisTurn,
+      filesModified: [...this.changedFilesThisTurn],
+      artifacts: [...this.changedFilesThisTurn],
+      activeHypotheses,
+    });
+    this.emitter.emit("task_world_updated", { world: this.activeTaskWorld, reason });
   }
 
   private isLikelyKnowledgeTask(): boolean {
@@ -2043,6 +2202,7 @@ export class AgentHarness {
       milestoneCount: this.executionState.milestones.length,
       contractCount: this.executionState.contracts.length,
     });
+    await this.maybeAutoCreateTaskWorldForTurn(openingTurn);
 
     if (resolveHarnessEnvRaw("AGENT_QUERY_REWRITE", this.runtimePreferences) === "1" && !openingTurn) {
       const skipRewriteForExploratory =
@@ -2109,6 +2269,13 @@ export class AgentHarness {
         } catch {
           /* non-fatal */
         }
+      }
+
+      if (this.activeTaskWorld && !openingTurn) {
+        this.context.append({
+          role: "user",
+          content: formatTaskWorldSummary(this.activeTaskWorld),
+        });
       }
 
       this.context.append({ role: "user", content: conversationUserContent });
@@ -2512,6 +2679,12 @@ export class AgentHarness {
               at: Date.now(),
             };
             this.sharedBus.publishEnvelope(handoffKey, handoff, childId);
+            void this.updateTaskWorld({
+              kind: "handoff",
+              summary: `Sub-agent ${childId} completed: ${output.slice(0, 300)}`,
+              source: handoffKey,
+              payload: output.slice(0, 4000),
+            }).catch(() => undefined);
             this.emitter.emit("subtask_handoff_written", {
               taskId: childId,
               key: handoffKey,
@@ -4103,6 +4276,20 @@ export class AgentHarness {
               };
               if (args.steps && args.steps.length > 0) {
                 this.context.patchEpistemicState({ subgoals: subgoalsFromPlanSteps(args.steps) });
+                const world = await this.ensureTaskWorld("plan_tool", args.steps.map((s) => `Complete: ${s.slice(0, 200)}`));
+                if (world) {
+                  this.activeTaskWorld = await persistTaskWorldEvent(world.id, world, {
+                    type: "plan_updated",
+                    at: Date.now(),
+                    phase: "planning",
+                    successCriteria: args.steps.map((s) => `Complete: ${s.slice(0, 200)}`),
+                    requiredChecks:
+                      this.turnInference?.intent === "coding"
+                        ? ["Run targeted verification for changed code before final answer."]
+                        : [],
+                  });
+                  this.emitter.emit("task_world_updated", { world: this.activeTaskWorld, reason: "plan_updated" });
+                }
                 if (this.executionState) {
                   this.executionState = advanceExecutionStateForPlan(this.executionState, args.steps);
                   const cid = this.executionState.activeContractId;
@@ -4228,6 +4415,15 @@ export class AgentHarness {
             name: tc.name,
             hash: hashString(rawOut.slice(0, 12_000)),
             excerpt: rawOut.slice(0, 1200),
+          });
+          await this.addTaskWorldEvidence({
+            claim: `Output from ${tc.name} supports current task progress.`,
+            sourceKind: inferSourceKindFromTool(tc.name),
+            sourceRef: `${tc.name}:${tc.id}`,
+            excerpt: rawOut.slice(0, 1200),
+            confidence: "medium",
+            freshness: tc.name.includes("web") ? "current" : "unknown",
+            hash: hashString(rawOut.slice(0, 12_000)),
           });
         }
         let content = result.ok ? result.output : `ERROR: ${result.error}`;
@@ -4651,6 +4847,7 @@ export class AgentHarness {
         .slice(0, 3)
         .map(([n]) => n);
       const finalAnswer = this.context.getLastAssistantMessage() ?? "";
+      await this.syncTaskWorldArtifacts("turn_finalized");
       const summaryPayload: TurnSummary = {
         intentClass: this.turnInference?.intent ?? "general",
         outcomeScore: turnOutcome,
