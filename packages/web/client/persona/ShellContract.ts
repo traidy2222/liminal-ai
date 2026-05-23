@@ -6,6 +6,7 @@ import type {
   PersonalityPulseRow,
   ApiReachable,
   SseTransport,
+  TaskWorldPanelState,
 } from "../useSSE.js";
 import type { ImageAttachment } from "../imageAttachments.js";
 
@@ -77,6 +78,7 @@ export interface ShellContract {
   subtasks: SubtaskEntry[];
   allToolCalls: ToolCallEntry[];
   autoDream: AutoDreamState;
+  taskWorld: TaskWorldPanelState | null;
   uiVerbosity: "normal" | "quiet";
   pulseChips: CompletedPulseRow[];
   lastTurnProviderRetries: number;

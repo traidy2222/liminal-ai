@@ -252,6 +252,26 @@ export type PendingApprovalState = {
   receivedAt: number;
 };
 
+export interface TaskWorldPanelState {
+  id: string;
+  objective: string;
+  phase: string;
+  verification: {
+    status: string;
+    successCriteria: Array<{ id: string; text: string; status: string; evidenceIds?: string[]; waivedReason?: string }>;
+    requiredChecks: string[];
+    waivedChecks: string[];
+    residualRisks: string[];
+  };
+  evidence: Array<{ id: string; claim: string; sourceKind: string; sourceRef: string; confidence: string; freshness: string; excerpt: string; at: number }>;
+  blackboard: Array<{ id: string; kind: string; summary: string; source?: string; payload?: string; at: number }>;
+  openQuestions: string[];
+  artifacts: string[];
+  filesTouched: string[];
+  filesModified: string[];
+  updatedAt: number;
+}
+
 /** EventSource/stream layer (distinct from REST API reachability). */
 export type SseTransport = "open" | "reconnecting" | "offline";
 
@@ -295,6 +315,7 @@ export interface SSEState {
   personalityPulseActive: boolean;
   heartbeatUiStrip: boolean;
   heartbeatEnabled: boolean;
+  taskWorld: TaskWorldPanelState | null;
 }
 
 const ORCH_TOOLS = new Set(["spawn_agent", "wait_for_agents", "cancel_agent", "list_agents"]);
@@ -346,6 +367,19 @@ type Action =
   | { type: "plan_step_done"; payload: { stepIndex: number } }
   | { type: "context_compressed"; payload: { beforeFraction: number; afterFraction: number; roundsCompressed: number } }
   | { type: "persona_changed"; payload: { name: string } }
+  | { type: "task_world_created"; payload: { world: TaskWorldPanelState } }
+  | { type: "task_world_updated"; payload: { world: TaskWorldPanelState; reason: string } }
+  | { type: "task_world_evidence_added"; payload: { worldId: string; evidence: TaskWorldPanelState["evidence"][number] } }
+  | {
+      type: "task_world_verification_updated";
+      payload: {
+        worldId: string;
+        status: string;
+        criteria: TaskWorldPanelState["verification"]["successCriteria"];
+        residualRisks: string[];
+      };
+    }
+  | { type: "task_world_completed"; payload: { world: TaskWorldPanelState } }
   | {
       type: "auto_dream";
       payload: {
@@ -512,6 +546,7 @@ function reducer(state: SSEState, action: Action): SSEState {
         lastContextCompress: null,
         personalityPulseRows: [],
         personalityPulseActive: false,
+        taskWorld: null,
       };
 
     case "persona_bootstrap_progress":
@@ -976,6 +1011,43 @@ function reducer(state: SSEState, action: Action): SSEState {
     case "persona_changed":
       return { ...state, personaName: action.payload.name };
 
+    case "task_world_created":
+    case "task_world_updated":
+    case "task_world_completed":
+      return { ...state, taskWorld: action.payload.world };
+
+    case "task_world_evidence_added": {
+      if (!state.taskWorld || state.taskWorld.id !== action.payload.worldId) return state;
+      const exists = state.taskWorld.evidence.some((e) => e.id === action.payload.evidence.id);
+      return {
+        ...state,
+        taskWorld: {
+          ...state.taskWorld,
+          evidence: exists
+            ? state.taskWorld.evidence
+            : [...state.taskWorld.evidence, action.payload.evidence].slice(-200),
+          updatedAt: Date.now(),
+        },
+      };
+    }
+
+    case "task_world_verification_updated": {
+      if (!state.taskWorld || state.taskWorld.id !== action.payload.worldId) return state;
+      return {
+        ...state,
+        taskWorld: {
+          ...state.taskWorld,
+          verification: {
+            ...state.taskWorld.verification,
+            status: action.payload.status,
+            successCriteria: action.payload.criteria,
+            residualRisks: action.payload.residualRisks,
+          },
+          updatedAt: Date.now(),
+        },
+      };
+    }
+
     case "heartbeat_scheduled":
       return state;
 
@@ -1234,6 +1306,7 @@ function createInitialSSEState(): SSEState {
     personalityPulseActive: false,
     heartbeatUiStrip: false,
     heartbeatEnabled: false,
+    taskWorld: null,
   };
 }
 
@@ -1685,6 +1758,21 @@ export function useSSE() {
         dispatch({ type: "persona_changed", payload: p as never });
         fetchConfigRef.current();
       });
+      for (const evt of [
+        "task_world_created",
+        "task_world_updated",
+        "task_world_evidence_added",
+        "task_world_verification_updated",
+        "task_world_completed",
+      ] as const) {
+        es.addEventListener(evt, (e: MessageEvent) => {
+          trackId(e);
+          markHarnessSemanticActivity();
+          const p = parseEventData(e);
+          if (p == null) return;
+          dispatch({ type: evt, payload: p as never });
+        });
+      }
       es.addEventListener("auto_dream", (e: MessageEvent) => {
         trackId(e);
         const p = parseEventData(e);

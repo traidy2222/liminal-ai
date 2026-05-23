@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect, useCallback, useMemo, memo } from "react";
-import { useSSE, type MessageEntry, type AutoDreamState, type PersonalityPulseRow, WEB_SERVER_BASE, type ApiReachable, type SseTransport } from "./useSSE.js";
+import { useSSE, type MessageEntry, type AutoDreamState, type PersonalityPulseRow, WEB_SERVER_BASE, type ApiReachable, type SseTransport, type TaskWorldPanelState } from "./useSSE.js";
 import { MEMORY_SYNC_LABEL, presentAutoDream } from "./autoDreamPresent.js";
 import { applyPersonaDocumentTheme } from "./applyPersonaDocumentTheme.js";
 import { useStickyAutoScroll } from "./useStickyAutoScroll.js";
@@ -376,10 +376,72 @@ function formatSignalHud(s: {
 
 // ── Systems panel (left column) ───────────────────────────────────────────────
 
+function MissionPanel({ world }: { world: TaskWorldPanelState | null }) {
+  if (!world) return null;
+  const criteria = world.verification.successCriteria ?? [];
+  const done = criteria.filter((c) => c.status === "satisfied" || c.status === "waived").length;
+  const blockers = world.blackboard.filter((b) => b.kind === "blocker").slice(-3);
+  const handoffs = world.blackboard.filter((b) => b.kind === "handoff").slice(-3);
+  const latestEvidence = world.evidence.slice(-4).reverse();
+  return (
+    <HudPanel title="MISSION">
+      <div style={{ padding: "7px 9px 9px", display: "flex", flexDirection: "column", gap: 7 }}>
+        <div style={{ display: "flex", justifyContent: "space-between", gap: 8, alignItems: "center" }}>
+          <span style={{ fontSize: 8, color: "rgba(var(--lim-accent-rgb),0.35)", fontFamily: "monospace", letterSpacing: "0.1em" }}>
+            {world.phase.toUpperCase()}
+          </span>
+          <span style={{ fontSize: 9, color: CYAN, fontFamily: "monospace", fontWeight: 700 }}>
+            {criteria.length > 0 ? `${done}/${criteria.length}` : world.verification.status.toUpperCase()}
+          </span>
+        </div>
+        <div title={world.objective} style={{ fontSize: 10, lineHeight: 1.35, color: "rgba(var(--lim-text-rgb),0.86)", maxHeight: 42, overflow: "hidden" }}>
+          {world.objective}
+        </div>
+        {criteria.length > 0 && (
+          <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+            {criteria.slice(0, 4).map((c) => {
+              const ok = c.status === "satisfied" || c.status === "waived";
+              const color = ok ? GREEN : c.status === "missing" ? RED_ERR : AMBER;
+              return (
+                <div key={c.id} style={{ display: "flex", gap: 5, alignItems: "flex-start" }}>
+                  <span style={{ color, fontSize: 10, lineHeight: 1 }}>{ok ? "✓" : "•"}</span>
+                  <span style={{ fontSize: 8, color: "rgba(var(--lim-secondary-rgb),0.66)", lineHeight: 1.35 }}>
+                    {c.text.length > 56 ? `${c.text.slice(0, 55)}...` : c.text}
+                  </span>
+                </div>
+              );
+            })}
+          </div>
+        )}
+        {blockers.length > 0 && (
+          <div style={{ fontSize: 8, color: RED_ERR, lineHeight: 1.35 }}>
+            {blockers.map((b) => b.summary).join(" · ")}
+          </div>
+        )}
+        {latestEvidence.length > 0 && (
+          <div style={{ display: "flex", flexDirection: "column", gap: 3 }}>
+            <div style={{ fontSize: 8, color: "rgba(var(--lim-accent-rgb),0.34)", fontFamily: "monospace" }}>EVIDENCE</div>
+            {latestEvidence.map((e) => (
+              <div key={e.id} title={e.excerpt} style={{ fontSize: 8, color: "rgba(var(--lim-secondary-rgb),0.58)", lineHeight: 1.3 }}>
+                {e.sourceKind}:{e.sourceRef.slice(0, 26)} · {e.claim.slice(0, 52)}
+              </div>
+            ))}
+          </div>
+        )}
+        {handoffs.length > 0 && (
+          <div style={{ fontSize: 8, color: "rgba(var(--lim-accent-rgb),0.48)", lineHeight: 1.35 }}>
+            {handoffs.map((h) => h.summary.slice(0, 72)).join(" · ")}
+          </div>
+        )}
+      </div>
+    </HudPanel>
+  );
+}
+
 function SystemsPanel({
   orbHidden: hideOrbPanel,
   orbState, pct, masked, signalLabel, signalColor, signalDetail, sessionSeconds,
-  toolCount, msgCount, subtasks, personaName, autoDream, uiVerbosity,
+  toolCount, msgCount, subtasks, personaName, autoDream, uiVerbosity, taskWorld,
 }: {
   orbHidden?: boolean;
   orbState: OrbState;
@@ -395,6 +457,7 @@ function SystemsPanel({
   personaName: string;
   autoDream: AutoDreamState;
   uiVerbosity: "normal" | "quiet";
+  taskWorld: TaskWorldPanelState | null;
 }) {
   const memorySync = useMemo(
     () => presentAutoDream(autoDream, { verbosity: uiVerbosity }),
@@ -531,6 +594,8 @@ function SystemsPanel({
           </div>
         </div>
       </HudPanel>
+
+      <MissionPanel world={taskWorld} />
 
       {/* Agent network tree */}
       {subtasks.length > 0 && (
@@ -2050,6 +2115,7 @@ export function App() {
     subtasks,
     allToolCalls,
     autoDream: state.autoDream,
+    taskWorld: state.taskWorld,
     uiVerbosity: state.uiVerbosity,
     pulseChips,
     lastTurnProviderRetries: state.lastTurnProviderRetries,
