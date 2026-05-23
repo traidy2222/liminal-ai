@@ -5,6 +5,7 @@ import {
   DEFAULT_AGENT_MODEL_SLUG,
   withProviderRequestSpacing,
   effectiveHarnessEnvRaw,
+  buildOpenRouterAttributionHeaders,
 } from "@liminal/core";
 export async function suggestWikilinkLine(params: {
   title: string;
@@ -30,8 +31,7 @@ export async function suggestWikilinkLine(params: {
           headers: {
             Authorization: `Bearer ${apiKey}`,
             "Content-Type": "application/json",
-            "HTTP-Referer": "https://github.com/liminal-ai",
-            "X-Title": "Liminal-memory-autolink",
+            ...buildOpenRouterAttributionHeaders("memory-autolink"),
           },
           body: JSON.stringify({
             model,

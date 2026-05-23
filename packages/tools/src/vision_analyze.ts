@@ -1,6 +1,6 @@
 import { readFile } from "node:fs/promises";
 import { extname, resolve } from "node:path";
-import { resolveVisionProviderConfig, withProviderRequestSpacing, effectiveHarnessEnvRaw } from "@liminal/core";
+import { resolveVisionProviderConfig, withProviderRequestSpacing, effectiveHarnessEnvRaw, buildOpenRouterAttributionHeaders } from "@liminal/core";
 import { defineTool } from "./helpers.js";
 
 const MIME_MAP: Record<string, string> = {
@@ -171,8 +171,7 @@ export const visionAnalyzeTool = defineTool({
                 headers: {
                   "Content-Type": "application/json",
                   Authorization: `Bearer ${provider.apiKey}`,
-                  "HTTP-Referer": "https://github.com/liminal-ai",
-                  "X-Title": "Liminal-vision-sidecar",
+                  ...buildOpenRouterAttributionHeaders("vision-sidecar"),
                 },
                 body: JSON.stringify(
                   buildVisionRequestBody({

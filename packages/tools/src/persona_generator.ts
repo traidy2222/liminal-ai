@@ -7,6 +7,7 @@ import {
   effectiveHarnessEnvRaw,
   validateAndNormalizePersonaUiTheme,
   derivePersonaShellHeuristics,
+  buildOpenRouterAttributionHeaders,
   type PersonaUiThemeV2,
   type RuntimePersonaControls,
 } from "@liminal/core";
@@ -2089,8 +2090,7 @@ async function callPersonaModel(
             headers: {
               "Content-Type": "application/json",
               Authorization: `Bearer ${apiKey}`,
-              "HTTP-Referer": "https://github.com/liminal-ai",
-              "X-Title": "Liminal",
+              ...buildOpenRouterAttributionHeaders(),
             },
             body: JSON.stringify({
               model,

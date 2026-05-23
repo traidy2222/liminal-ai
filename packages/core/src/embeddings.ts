@@ -2,6 +2,7 @@
  * OpenAI-compatible embedding fetch (OpenRouter, OpenAI, etc.).
  */
 import { withProviderRequestSpacing } from "./provider_request_gate.js";
+import { buildOpenRouterAttributionHeaders } from "./openrouter_attribution.js";
 
 export function cosineSimilarity(a: number[], b: number[]): number {
   if (a.length !== b.length || a.length === 0) return 0;
@@ -39,6 +40,7 @@ export async function fetchEmbeddings(params: {
         headers: {
           Authorization: `Bearer ${params.apiKey}`,
           "Content-Type": "application/json",
+          ...buildOpenRouterAttributionHeaders("embeddings"),
         },
         body: JSON.stringify({
           model: params.model,

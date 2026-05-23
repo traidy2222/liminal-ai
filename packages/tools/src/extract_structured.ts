@@ -6,7 +6,7 @@
  * turning unstructured notes into typed entities, structuring log output.
  */
 import type { AgentHarness } from "@liminal/core";
-import { withProviderRequestSpacing } from "@liminal/core";
+import { withProviderRequestSpacing, effectiveHarnessEnvRaw, buildOpenRouterAttributionHeaders } from "@liminal/core";
 import { defineTool } from "./helpers.js";
 
 export function createExtractStructuredTool(harness: AgentHarness) {
@@ -68,8 +68,7 @@ export function createExtractStructuredTool(harness: AgentHarness) {
               headers: {
                 "Content-Type": "application/json",
                 Authorization: `Bearer ${openRouterApiKey}`,
-                "HTTP-Referer": "https://github.com/liminal-ai",
-                "X-Title": "Liminal",
+                ...buildOpenRouterAttributionHeaders(),
               },
               body: JSON.stringify({
                 model,

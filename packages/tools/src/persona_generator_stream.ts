@@ -1,4 +1,4 @@
-import { withProviderRequestSpacing, effectiveHarnessEnvRaw } from "@liminal/core";
+import { withProviderRequestSpacing, effectiveHarnessEnvRaw, buildOpenRouterAttributionHeaders } from "@liminal/core";
 
 function personaGenTimeoutMs(): number {
   return Math.max(
@@ -58,8 +58,7 @@ export async function* callPersonaModelStream(
             headers: {
               "Content-Type": "application/json",
               Authorization: `Bearer ${apiKey}`,
-              "HTTP-Referer": "https://github.com/liminal-ai",
-              "X-Title": "Liminal",
+              ...buildOpenRouterAttributionHeaders(),
             },
             body: JSON.stringify({
               model,

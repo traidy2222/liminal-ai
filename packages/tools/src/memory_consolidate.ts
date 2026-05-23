@@ -3,7 +3,7 @@
  */
 import { defineTool } from "./helpers.js";
 import { loadNotes, atomicUpdate } from "./notes_store.js";
-import { cosineSimilarity, tokenize, withProviderRequestSpacing, effectiveHarnessEnvRaw, DEFAULT_AGENT_MODEL_SLUG } from "@liminal/core";
+import { cosineSimilarity, tokenize, withProviderRequestSpacing, effectiveHarnessEnvRaw, DEFAULT_AGENT_MODEL_SLUG, buildOpenRouterAttributionHeaders } from "@liminal/core";
 import { loadEmbedIndex, saveEmbedIndex, pruneOrphanEmbeddingKeys } from "./memory_index.js";
 
 function jaccard(a: Set<string>, b: Set<string>): number {
@@ -107,8 +107,7 @@ export const memoryConsolidateTool = defineTool({
           headers: {
             Authorization: `Bearer ${apiKey}`,
             "Content-Type": "application/json",
-            "HTTP-Referer": "https://github.com/liminal-ai",
-            "X-Title": "Liminal-memory-consolidate",
+            ...buildOpenRouterAttributionHeaders("memory-consolidate"),
           },
           body: JSON.stringify({
             model,

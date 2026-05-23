@@ -9,7 +9,7 @@ import {
   setRunStage,
 } from "./doc_engine.js";
 import { isStyleDiverseEnough } from "./doc_style_memory.js";
-import { resolveProviderConfig, withProviderRequestSpacing, effectiveHarnessEnvRaw } from "@liminal/core";
+import { resolveProviderConfig, withProviderRequestSpacing, effectiveHarnessEnvRaw, buildOpenRouterAttributionHeaders } from "@liminal/core";
 import type { DocumentIR } from "@liminal/core";
 
 function makeDocId(title: string): string {
@@ -39,8 +39,7 @@ async function synthesizeStyleFromIntent(
             headers: {
               "Content-Type": "application/json",
               Authorization: `Bearer ${provider.apiKey}`,
-              "HTTP-Referer": "https://github.com/liminal-ai",
-              "X-Title": "Liminal-doc-style",
+              ...buildOpenRouterAttributionHeaders("doc-style"),
             },
             body: JSON.stringify({
               model: fastModel,
