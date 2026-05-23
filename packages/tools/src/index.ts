@@ -94,6 +94,7 @@ import { gitStatusTool, gitDiffTool, gitLogTool, gitBranchTool, gitCommitTool } 
 import { gitCheckpointTool, gitRollbackTool } from "./git_checkpoint.js";
 import { gitWorktreeTool } from "./git_worktree.js";
 import { taskCheckpointTool, resumeTaskTool } from "./task_persistence.js";
+import { createTaskWorldTools } from "./task_world_tools.js";
 import { featureChecklistTool } from "./feature_checklist.js";
 import { createExtractStructuredTool } from "./extract_structured.js";
 import { createUploadImageTool } from "./upload_image.js";
@@ -281,6 +282,13 @@ export async function registerAllTools(
     registry.register(createAppendPersonaLivingTool(harness));
     registry.register(createGetRuntimeSettingsTool(harness));
     registry.register(createSetRuntimeSettingsTool(harness));
+
+    const taskWorldTools = createTaskWorldTools(harness);
+    registry.register(taskWorldTools.taskWorldStatusTool);
+    registry.register(taskWorldTools.taskWorldUpdateTool);
+    registry.register(taskWorldTools.taskWorldEvidenceTool);
+    registry.register(taskWorldTools.taskWorldVerifyTool);
+    registry.register(taskWorldTools.taskWorldResumeTool);
 
     // Harness-scoped multimodal + extraction tools
     registry.register(createUploadImageTool(harness));
