@@ -56,6 +56,11 @@ export function createDecomposeGoalTool(harness: AgentHarness) {
           minimum: 2,
           maximum: 12,
         },
+        spawn_agents: {
+          type: "boolean",
+          description:
+            "When true, spawn a sub-agent per DAG node via spawn_agent with depends_on edges wired automatically.",
+        },
       },
       required: ["goal"],
       additionalProperties: false,
@@ -142,12 +147,37 @@ export function createDecomposeGoalTool(harness: AgentHarness) {
           .map((n) => `  [${n.id}] ${n.agent_role}`)
           .join("\n");
 
+      let spawnSection = "";
+      if (args["spawn_agents"] === true) {
+        const idToTaskId = new Map<string, string>();
+        const spawned: string[] = [];
+        for (const node of dag.nodes) {
+          const dependsOn = dag.edges
+            .filter((e) => e.to === node.id)
+            .map((e) => idToTaskId.get(e.from))
+            .filter((x): x is string => Boolean(x));
+          const { taskId } = harness.forkChild({
+            goal: node.description,
+            taskBrief: node.description,
+            systemPrompt: node.agent_role,
+            dependsOn: dependsOn.length > 0 ? dependsOn : undefined,
+            inheritPersona: false,
+          });
+          idToTaskId.set(node.id, taskId);
+          spawned.push(taskId);
+        }
+        spawnSection =
+          `\n\nSpawned ${spawned.length} sub-agent(s):\n` +
+          spawned.map((id, i) => `  ${dag.nodes[i]?.id ?? "?"} → ${id}`).join("\n") +
+          "\nCall wait_for_agents with these task_ids when ready.";
+      }
+
       return {
         ok: true,
         output:
           `Decomposed into ${dag.nodes.length} tasks.\n` +
           (summary ? `Strategy: ${summary}\n` : "") +
-          `\nTasks:\n${nodeLines}${edgeLines}${roleTip}\n\n` +
+          `\nTasks:\n${nodeLines}${edgeLines}${roleTip}${spawnSection}\n\n` +
           `Full DAG JSON:\n${JSON.stringify(dag, null, 2)}`,
       };
     },

@@ -72,6 +72,38 @@ export function resolveWebFetchMaxPreprocessChars(): number {
   return Math.max(50_000, Math.min(2_000_000, n));
 }
 
+/** Default max_chars when the model omits the argument (raised from 8000 for research use). */
+export function resolveWebFetchDefaultMaxChars(): number {
+  const raw = effectiveHarnessEnvRaw("AGENT_WEB_FETCH_DEFAULT_MAX_CHARS")?.trim();
+  if (!raw) return 32_000;
+  const n = parseInt(raw, 10);
+  if (!Number.isFinite(n)) return 32_000;
+  return Math.max(2000, Math.min(120_000, n));
+}
+
+/**
+ * Models often pass tiny max_chars (e.g. 6000) from habit — never honor values below the harness default.
+ * Larger explicit values (e.g. 50000) are kept.
+ */
+export function resolveEffectiveWebFetchMaxChars(requested?: number): number {
+  const floor = resolveWebFetchDefaultMaxChars();
+  if (requested == null || !Number.isFinite(requested)) return floor;
+  const n = Math.max(2000, Math.min(120_000, Math.floor(requested)));
+  return Math.max(floor, n);
+}
+
+/** MediaWiki plain-text extracts are returned whole up to this size (avoids pagination friction). */
+export const WEB_FETCH_WIKI_FULL_EXTRACT_MAX = 120_000;
+
+/** Max chars for discovered-links / image appendix (separate from article body budget). */
+export function resolveWebFetchAssetsMaxChars(): number {
+  const raw = effectiveHarnessEnvRaw("AGENT_WEB_FETCH_ASSETS_MAX_CHARS")?.trim();
+  if (!raw) return 4000;
+  const n = parseInt(raw, 10);
+  if (!Number.isFinite(n)) return 4000;
+  return Math.max(500, Math.min(20_000, n));
+}
+
 const PDF_MAX_BYTES = 6_000_000;
 const RESPONSE_BODY_WARN_BYTES = 25_000_000;
 /** Stop downloading HTML/text bodies after this many bytes (slow servers can otherwise stall `.text()` forever). */
@@ -376,6 +408,177 @@ export function unwrapRedirectUrl(url: string): string {
   return t;
 }
 
+/** Build MediaWiki extracts API URL for *.wikipedia.org /wiki/Title pages. */
+export function buildWikipediaExtractApiUrl(pageUrl: string): string | null {
+  try {
+    const u = new URL(pageUrl);
+    const host = u.hostname.toLowerCase();
+    const wikiMatch = /^([a-z]{2,})\.wikipedia\.org$/.exec(host);
+    if (!wikiMatch) return null;
+    const lang = wikiMatch[1]!;
+    let titlePart: string | null = null;
+    const wikiPath = u.pathname.match(/^\/wiki\/(.+)$/);
+    if (wikiPath?.[1]) titlePart = wikiPath[1];
+    const restSummary = u.pathname.match(/^\/api\/rest_v1\/page\/summary\/(.+)$/);
+    if (!titlePart && restSummary?.[1]) titlePart = restSummary[1];
+    if (!titlePart) return null;
+    const title = decodeURIComponent(titlePart.replace(/_/g, " "));
+    const params = new URLSearchParams({
+      action: "query",
+      format: "json",
+      prop: "extracts",
+      explaintext: "1",
+      exsectionformat: "plain",
+      redirects: "1",
+      titles: title,
+    });
+    return `https://${lang}.wikipedia.org/w/api.php?${params.toString()}`;
+  } catch {
+    return null;
+  }
+}
+
+function sliceBodyWithPagination(
+  body: string,
+  charOffset: number,
+  maxChars: number
+): { slice: string; footer: string } {
+  const offset = Math.max(0, charOffset);
+  const cap = Math.max(500, maxChars);
+  const total = body.length;
+  const slice = body.slice(offset, offset + cap);
+  let footer = "";
+  if (offset + slice.length < total) {
+    footer =
+      `\n[truncated: showing chars ${offset}–${offset + slice.length} of ${total}. ` +
+      `Re-fetch same url with char_offset=${offset + slice.length} to continue.]`;
+  } else if (offset > 0) {
+    footer = `\n[continued from char_offset ${offset}; ${total} chars total.]`;
+  }
+  return { slice, footer };
+}
+
+/** Skip CDN/static/API noise in discovered-link lists. */
+export function isJunkDiscoveredLink(url: string): boolean {
+  const lower = url.toLowerCase();
+  if (/\/w\/load\.php/i.test(lower)) return true;
+  if (/\/static\/(favicon|apple-touch)/i.test(lower)) return true;
+  if (/\/w\/(api|rest)\.php/i.test(lower)) return true;
+  if (/\.(css|js|ico|png|svg|woff2?)(\?|#|$)/i.test(lower)) return true;
+  if (lower.endsWith("upload.wikimedia.org/") || lower.endsWith("upload.wikimedia.org")) return true;
+  return false;
+}
+
+/** Prefer main/article content regions before naive tag-stripping. */
+export function extractMainContentFallback(html: string): string {
+  let chunk = html;
+  const mw = /<div[^>]+id=["']mw-content-text["'][^>]*>([\s\S]*?)<\/div>/i.exec(html);
+  if (mw?.[1] && mw[1].replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim().length > 20) {
+    chunk = mw[1];
+  } else {
+    for (const re of [/<main[^>]*>([\s\S]*?)<\/main>/i, /<article[^>]*>([\s\S]*?)<\/article>/i]) {
+      const m = re.exec(html);
+      if (m?.[1] && m[1].replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim().length > 200) {
+        chunk = m[1];
+        break;
+      }
+    }
+  }
+  return chunk
+    .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, "")
+    .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, "")
+    .replace(/<[^>]+>/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+export function isWikipediaRestSummaryUrl(pageUrl: string): boolean {
+  try {
+    const u = new URL(pageUrl);
+    if (!/^([a-z]{2,})\.wikipedia\.org$/i.test(u.hostname)) return false;
+    return /^\/api\/rest_v1\/page\/summary\//i.test(u.pathname);
+  } catch {
+    return false;
+  }
+}
+
+async function fetchWikipediaRestSummary(
+  pageUrl: string,
+  externalSignal: AbortSignal,
+  timeoutMs: number,
+  retries: number,
+  maxBackoff: number
+): Promise<string | null> {
+  if (!isWikipediaRestSummaryUrl(pageUrl)) return null;
+  const cfg = {
+    timeoutMs,
+    maxRetries: retries,
+    maxDelayMs: maxBackoff,
+    externalSignal,
+    tieTimeoutToFullDownload: true as const,
+  };
+  try {
+    const res = await fetchWithRetry(pageUrl, buildWebFetchInit("primary"), cfg);
+    if (!res.ok) return null;
+    const json = (await res.json()) as {
+      title?: string;
+      displaytitle?: string;
+      description?: string;
+      extract?: string;
+      content_urls?: { desktop?: { page?: string } };
+    };
+    const title = (json.displaytitle ?? json.title ?? "article").replace(/<[^>]+>/g, "").trim();
+    const lines = [`[Wikipedia REST summary — ${title}]`];
+    if (json.description?.trim()) lines.push(json.description.trim());
+    if (json.extract?.trim()) {
+      lines.push("", json.extract.trim());
+    }
+    const page = json.content_urls?.desktop?.page?.trim();
+    if (page) {
+      lines.push("", `Full article: ${page} (web_fetch that /wiki/ URL for the complete plain-text extract).`);
+    }
+    const out = lines.join("\n").trim();
+    return out.length > 40 ? out : null;
+  } catch {
+    return null;
+  }
+}
+
+async function fetchWikipediaPlainExtract(
+  pageUrl: string,
+  externalSignal: AbortSignal,
+  timeoutMs: number,
+  retries: number,
+  maxBackoff: number
+): Promise<string | null> {
+  const apiUrl = buildWikipediaExtractApiUrl(pageUrl);
+  if (!apiUrl) return null;
+  const cfg = {
+    timeoutMs,
+    maxRetries: retries,
+    maxDelayMs: maxBackoff,
+    externalSignal,
+    tieTimeoutToFullDownload: true as const,
+  };
+  try {
+    const res = await fetchWithRetry(apiUrl, buildWebFetchInit("primary"), cfg);
+    if (!res.ok) return null;
+    const json = (await res.json()) as {
+      query?: { pages?: Record<string, { extract?: string; missing?: string }> };
+    };
+    const pages = json.query?.pages;
+    if (!pages) return null;
+    for (const p of Object.values(pages)) {
+      if (p.missing) continue;
+      const text = p.extract?.trim();
+      if (text && text.length > 80) return text;
+    }
+  } catch {
+    return null;
+  }
+  return null;
+}
+
 /**
  * Remove author stylesheets/scripts before JSDOM parses HTML for Readability.
  * Readability uses DOM structure and metadata, not computed layout. JSDOM parses
@@ -523,7 +726,7 @@ async function obtainWebFetchResponse(
 async function runWebFetchInner(
   urlIn: string,
   maxChars: number,
-  opts: { includeAssets?: boolean; assetsMax?: number } | undefined,
+  opts: { includeAssets?: boolean; assetsMax?: number; charOffset?: number } | undefined,
   externalSignal: AbortSignal
 ): Promise<{ ok: true; output: string } | { ok: false; error: string }> {
   const url = unwrapRedirectUrl(urlIn);
@@ -532,9 +735,45 @@ async function runWebFetchInner(
 
   const includeAssets = opts?.includeAssets ?? false;
   const assetsMax = Math.max(1, Math.min(100, opts?.assetsMax ?? 30));
+  const charOffset = Math.max(0, opts?.charOffset ?? 0);
   const timeoutMs = resolveWebFetchTimeoutMs();
   const retries = resolveWebFetchRetries();
   const maxBackoff = resolveWebFetchMaxRetryDelayMs();
+
+  const wikiRestSummary = await fetchWikipediaRestSummary(
+    url,
+    externalSignal,
+    timeoutMs,
+    retries,
+    maxBackoff
+  );
+  if (wikiRestSummary) {
+    return { ok: true, output: wikiRestSummary };
+  }
+
+  const wikiExtract = await fetchWikipediaPlainExtract(
+    url,
+    externalSignal,
+    timeoutMs,
+    retries,
+    maxBackoff
+  );
+  if (wikiExtract) {
+    const header =
+      charOffset === 0
+        ? `[Wikipedia plain-text extract via MediaWiki API]\n`
+        : `[Wikipedia plain-text extract — continuation]\n`;
+    if (charOffset === 0 && wikiExtract.length <= WEB_FETCH_WIKI_FULL_EXTRACT_MAX) {
+      return { ok: true, output: (header + wikiExtract).trim() };
+    }
+    const wikiCap =
+      charOffset === 0
+        ? Math.max(maxChars, WEB_FETCH_WIKI_FULL_EXTRACT_MAX)
+        : maxChars;
+    const { slice, footer } = sliceBodyWithPagination(wikiExtract, charOffset, wikiCap);
+    return { ok: true, output: (header + slice + footer).trim() };
+  }
+
   const chunkIdleMs = resolveWebFetchBodyChunkIdleMs(timeoutMs);
 
   const retried = await obtainWebFetchResponse(url, externalSignal, timeoutMs, retries, maxBackoff);
@@ -623,21 +862,22 @@ async function runWebFetchInner(
   const readable = await extractReadableHtml(text, url, { signal: externalSignal });
   const body =
     readable ??
-    text
-      .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, "")
-      .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, "")
-      .replace(/<[^>]+>/g, " ")
-      .replace(/\s+/g, " ")
-      .trim();
+    extractMainContentFallback(text);
 
   const bodyOut = (body + truncatedNote).trim();
+  const { slice: bodySlice, footer: pageFooter } = sliceBodyWithPagination(
+    bodyOut,
+    charOffset,
+    maxChars
+  );
 
   if (!includeAssets) {
-    return { ok: true, output: bodyOut.slice(0, maxChars) };
+    return { ok: true, output: (bodySlice + pageFooter).trim() };
   }
 
   const assets = extractPageAssets(text, url, assetsMax);
-  const sections: string[] = [bodyOut.slice(0, maxChars)];
+  const assetsCap = resolveWebFetchAssetsMaxChars();
+  const sections: string[] = [bodySlice + pageFooter];
   if (assets.links.length > 0) {
     sections.push(
       "",
@@ -655,13 +895,24 @@ async function runWebFetchInner(
     );
   }
 
-  return { ok: true, output: sections.join("\n").slice(0, Math.max(maxChars, 12_000)) };
+  const combined = sections.join("\n");
+  const bodyBudget = bodySlice.length + pageFooter.length;
+  const assetsBudget = Math.max(500, assetsCap);
+  if (combined.length <= bodyBudget + assetsBudget) {
+    return { ok: true, output: combined };
+  }
+  return {
+    ok: true,
+    output:
+      combined.slice(0, bodyBudget + assetsBudget) +
+      `\n[asset list truncated — set include_assets=false for full body budget or lower assets_max]`,
+  };
 }
 
 export async function runWebFetch(
   urlIn: string,
   maxChars: number,
-  opts?: { includeAssets?: boolean; assetsMax?: number }
+  opts?: { includeAssets?: boolean; assetsMax?: number; charOffset?: number }
 ): Promise<{ ok: true; output: string } | { ok: false; error: string }> {
   const wallMs = resolveWebFetchTotalWallMs();
   const budget = new AbortController();
@@ -754,7 +1005,7 @@ function extractPageAssets(
     maxItems
   );
   const links = dedupeClamp(
-    hrefs.filter((u) => u.startsWith("http://") || u.startsWith("https://")),
+    hrefs.filter((u) => (u.startsWith("http://") || u.startsWith("https://")) && !isJunkDiscoveredLink(u)),
     maxItems
   );
   return { links, images };
@@ -769,7 +1020,8 @@ export const webFetchTool = defineTool({
     "WHEN: You already have the exact URL — use web_search first to find it.\n" +
     "NOT WHEN: The question is broad discovery across many sites — prefer web_search or an orchestrated multi-fetch flow instead of blind URL guesses.\n" +
     "GOOD OUTPUT: Clean article text or structured error you can cite; mention hostname and char limits when summarizing for the user.\n" +
-    "ARGS: url — full URL; max_chars — body char limit (default 8000); include_assets — append discovered links/image links (default true); assets_max — cap per asset list (default 30, max 100).",
+    "Wikipedia: /wiki/ URLs use the MediaWiki extracts API (full plain text up to 120k chars, no HTML nav). REST /api/rest_v1/page/summary/… returns a short lead extract as plain text. Very long articles (>120k): re-fetch /wiki/ URL with char_offset.\n" +
+    "ARGS: url — full URL; max_chars — optional; values below AGENT_WEB_FETCH_DEFAULT_MAX_CHARS (32000) are ignored — omit unless you need more than the default; char_offset — skip N chars for continuation; include_assets — append filtered links/images (default false); assets_max — cap per asset list (default 30, max 100).",
   requiresApproval: false,
   cacheable: true,
   cacheTtlMs: 60_000,
@@ -779,11 +1031,17 @@ export const webFetchTool = defineTool({
       url: { type: "string", description: "URL to fetch" },
       max_chars: {
         type: "number",
-        description: "Maximum characters to return (default: 8000)",
+        description:
+          "Optional body char limit. Omit to use AGENT_WEB_FETCH_DEFAULT_MAX_CHARS (32000). Values below the default are ignored.",
+      },
+      char_offset: {
+        type: "number",
+        description: "Skip this many characters into the extracted body (pagination for long pages)",
+        minimum: 0,
       },
       include_assets: {
         type: "boolean",
-        description: "Append discovered links and image URLs from page HTML (default: true).",
+        description: "Append filtered discovered links and image URLs (default: false — keeps full body budget).",
       },
       assets_max: {
         type: "number",
@@ -795,8 +1053,9 @@ export const webFetchTool = defineTool({
   },
   handler: async (args, emit) => {
     const url = args["url"] as string;
-    const maxChars = (args["max_chars"] as number | undefined) ?? 8000;
-    const includeAssets = (args["include_assets"] as boolean | undefined) ?? true;
+    const maxChars = resolveEffectiveWebFetchMaxChars(args["max_chars"] as number | undefined);
+    const charOffset = Math.max(0, (args["char_offset"] as number | undefined) ?? 0);
+    const includeAssets = (args["include_assets"] as boolean | undefined) ?? false;
     const assetsMax = (args["assets_max"] as number | undefined) ?? 30;
     const hostname = (() => {
       try {
@@ -806,7 +1065,7 @@ export const webFetchTool = defineTool({
       }
     })();
     emit?.(`\nfetching ${hostname}…\n`);
-    const result = await runWebFetch(url, maxChars, { includeAssets, assetsMax });
+    const result = await runWebFetch(url, maxChars, { includeAssets, assetsMax, charOffset });
     if (result.ok) emit?.(`  ✓ ${result.output.length} chars\n`);
     return result;
   },

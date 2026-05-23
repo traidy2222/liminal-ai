@@ -6,7 +6,7 @@ import rehypeRaw from "rehype-raw";
 import { toPng } from "html-to-image";
 import { Prism as SyntaxHighlighter } from "react-syntax-highlighter";
 import { vscDarkPlus } from "react-syntax-highlighter/dist/esm/styles/prism";
-import { migratePersonaUiTheme } from "@liminal/core/persona-ui-theme";
+import { migratePersonaUiTheme, resolvePersonaPanelSides } from "@liminal/core/persona-ui-theme";
 import { categoryForTool } from "../categoryMeta.js";
 import { useStickyAutoScroll } from "../../useStickyAutoScroll.js";
 import { ShellControls } from "./ShellControls.js";
@@ -19,6 +19,9 @@ import {
   buildAvatarGlyphStyle,
   buildMessagesStyle,
   buildShellBodyStyle,
+  buildHeaderChromeStyle,
+  buildHeaderLabelStyle,
+  buildInputDockStyle,
   orbHidden,
 } from "../shellLayout.js";
 import { LIM } from "../personaVars.js";
@@ -298,58 +301,10 @@ function ContextArc({ pct, masked }: { pct: number; masked?: boolean }) {
 
 type SubtaskEntry = Extract<MessageEntry, { kind: "subtask" }>;
 
-function MissionPanel({ world }: { world: ShellContract["taskWorld"] }) {
-  if (!world) return null;
-  const criteria = world.verification.successCriteria ?? [];
-  const done = criteria.filter((c) => c.status === "satisfied" || c.status === "waived").length;
-  const blockers = world.blackboard.filter((b) => b.kind === "blocker").slice(-3);
-  const latestEvidence = world.evidence.slice(-4).reverse();
-  return (
-    <HudPanel title="MISSION">
-      <div style={{ padding: "7px 9px 9px", display: "flex", flexDirection: "column", gap: 7 }}>
-        <div style={{ display: "flex", justifyContent: "space-between", gap: 8, alignItems: "center" }}>
-          <span style={{ fontSize: 8, color: "rgba(var(--lim-accent-rgb),0.35)", fontFamily: "monospace", letterSpacing: "0.1em" }}>
-            {world.phase.toUpperCase()}
-          </span>
-          <span style={{ fontSize: 9, color: CYAN, fontFamily: "monospace", fontWeight: 700 }}>
-            {criteria.length > 0 ? `${done}/${criteria.length}` : world.verification.status.toUpperCase()}
-          </span>
-        </div>
-        <div title={world.objective} style={{ fontSize: 10, lineHeight: 1.35, color: "rgba(var(--lim-text-rgb),0.86)", maxHeight: 42, overflow: "hidden" }}>
-          {world.objective}
-        </div>
-        {criteria.slice(0, 4).map((c) => {
-          const ok = c.status === "satisfied" || c.status === "waived";
-          const color = ok ? GREEN : c.status === "missing" ? RED_ERR : AMBER;
-          return (
-            <div key={c.id} style={{ display: "flex", gap: 5, alignItems: "flex-start" }}>
-              <span style={{ color, fontSize: 10, lineHeight: 1 }}>{ok ? "✓" : "•"}</span>
-              <span style={{ fontSize: 8, color: "rgba(var(--lim-secondary-rgb),0.66)", lineHeight: 1.35 }}>
-                {c.text.length > 56 ? `${c.text.slice(0, 55)}...` : c.text}
-              </span>
-            </div>
-          );
-        })}
-        {blockers.length > 0 && <div style={{ fontSize: 8, color: RED_ERR, lineHeight: 1.35 }}>{blockers.map((b) => b.summary).join(" · ")}</div>}
-        {latestEvidence.length > 0 && (
-          <div style={{ display: "flex", flexDirection: "column", gap: 3 }}>
-            <div style={{ fontSize: 8, color: "rgba(var(--lim-accent-rgb),0.34)", fontFamily: "monospace" }}>EVIDENCE</div>
-            {latestEvidence.map((e) => (
-              <div key={e.id} title={e.excerpt} style={{ fontSize: 8, color: "rgba(var(--lim-secondary-rgb),0.58)", lineHeight: 1.3 }}>
-                {e.sourceKind}:{e.sourceRef.slice(0, 26)} · {e.claim.slice(0, 52)}
-              </div>
-            ))}
-          </div>
-        )}
-      </div>
-    </HudPanel>
-  );
-}
-
 function SystemsPanel({
   orbHidden: hideOrbPanel,
   orbState, pct, masked, signalLabel, signalColor, signalDetail, sessionSeconds,
-  toolCount, msgCount, subtasks, personaName, autoDream, uiVerbosity, taskWorld,
+  toolCount, msgCount, subtasks, personaName, autoDream, uiVerbosity,
 }: {
   orbHidden?: boolean;
   orbState: OrbState;
@@ -365,7 +320,6 @@ function SystemsPanel({
   personaName: string;
   autoDream: ShellContract["autoDream"];
   uiVerbosity: "normal" | "quiet";
-  taskWorld: ShellContract["taskWorld"];
 }) {
   const memorySync = useMemo(
     () => presentAutoDream(autoDream, { verbosity: uiVerbosity }),
@@ -450,8 +404,6 @@ function SystemsPanel({
           </div>
         </div>
       </HudPanel>
-
-      <MissionPanel world={taskWorld} />
 
       {subtasks.length > 0 && (
         <HudPanel title="AGENT NETWORK">
@@ -1196,8 +1148,9 @@ export function HudShell({ contract }: { contract: ShellContract }) {
   const { showPanels, groupedMessages, toolResultMap, surface, showRawHarness, rawHarnessBlob,
     error, input, attachments, attachError, isDragOver, canSend, busy, totalAttachmentKb,
     onInputChange, onSubmit, onKeyDown, onPaste, onDragOver, onDragLeave, onDrop, onRemoveAttachment,
+    onAbortTurn,
     orbState, signalHud, pct, contextSnapshot, sessionSeconds, toolCount, msgCount, toolErrorCount,
-    subtasks, allToolCalls, autoDream, taskWorld, uiVerbosity, pulseChips, lastTurnProviderRetries,
+    subtasks, allToolCalls, autoDream, uiVerbosity, pulseChips, lastTurnProviderRetries,
     lastContextCompress, heartbeatEnabled, heartbeatUiStrip, personalityPulseActive,
     personalityPulseRows, dreamLabel, activeToolCall,
     personaDisplayLabel, personaName,
@@ -1205,28 +1158,33 @@ export function HudShell({ contract }: { contract: ShellContract }) {
 
   const visibleMessages = groupedMessages;
   const toolCardsMode = resolveToolCardsMode(personaTheme.toolCards, surface);
+  const panelSides = resolvePersonaPanelSides(personaTheme);
+  const showLeftPanel = showPanels && panelSides.left;
+  const showRightPanel = showPanels && panelSides.right;
+  const headerHidden = personaTheme.headerStyle === "none";
 
   return (
     <>
       <style>{CSS_ANIMATIONS}</style>
 
       {/* Header */}
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "6px 14px", borderBottom: "1px solid rgba(var(--lim-accent-rgb),0.07)", background: "rgba(2,4,8,0.98)", flexShrink: 0, gap: 10 }}>
+      {!headerHidden && (
+      <div style={buildHeaderChromeStyle(personaTheme)}>
         <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-          <span style={{ color: CYAN, fontWeight: 800, fontSize: 12, letterSpacing: "0.28em", fontFamily: "monospace" }}>{personaDisplayLabel}</span>
+          <span style={buildHeaderLabelStyle(personaTheme)}>{personaDisplayLabel}</span>
           {signalHud.label !== "ONLINE" && (
             <span title={signalHud.detail || signalHud.label} style={{ color: signalHud.color, fontSize: 9, fontFamily: "monospace", letterSpacing: "0.06em", opacity: signalHud.label === "WAIT API" ? 0.85 : 1 }}>
               ● {signalHud.label}
             </span>
           )}
-          {activeToolCall && !showPanels && (
+          {activeToolCall && !showRightPanel && (
             <div style={{ display: "flex", alignItems: "center", gap: 5, background: "rgba(var(--lim-accent-rgb),0.06)", border: "1px solid rgba(var(--lim-accent-rgb),0.15)", borderRadius: 20, padding: "2px 10px", fontSize: 10 }}>
               <span style={{ color: categoryForTool(activeToolCall.name).color }}>{categoryForTool(activeToolCall.name).icon}</span>
               <span style={{ color: "#889aaa", fontSize: 10, fontFamily: "monospace" }}>{activeToolCall.name}</span>
               {activeToolCall.status === "pending_approval" && <span style={{ color: MAGENTA, fontSize: 10, fontWeight: 700 }}>— approve?</span>}
             </div>
           )}
-          {!showPanels && autoDream.stage !== "idle" && (
+          {!showRightPanel && autoDream.stage !== "idle" && (
             <div style={{ display: "flex", alignItems: "center", gap: 5, background: "rgba(var(--lim-accent-rgb),0.06)", border: "1px solid rgba(var(--lim-accent-rgb),0.15)", borderRadius: 20, padding: "2px 10px", fontSize: 10 }}>
               <span style={{ color: autoDream.stage === "failed" ? RED_ERR : autoDream.stage === "completed" ? GREEN : CYAN }}>◈</span>
               <span style={{ color: "#889aaa", fontSize: 10, fontFamily: "monospace" }}>{dreamLabel}</span>
@@ -1234,7 +1192,7 @@ export function HudShell({ contract }: { contract: ShellContract }) {
           )}
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-          {!showPanels && contextSnapshot && (
+          {!showRightPanel && contextSnapshot && (
             <div style={{ display: "flex", alignItems: "center", gap: 6, width: 120 }}>
               <div style={{ flex: 1, height: 2, background: "rgba(var(--lim-accent-rgb),0.08)", borderRadius: 1, overflow: "hidden" }}>
                 <div style={{ height: "100%", width: `${pct}%`, background: pct >= 80 ? RED_ERR : pct >= 60 ? AMBER : CYAN, borderRadius: 1, transition: "width 0.4s" }} />
@@ -1248,10 +1206,11 @@ export function HudShell({ contract }: { contract: ShellContract }) {
           </button>
         </div>
       </div>
+      )}
 
       {/* 3-column body */}
       <div style={{ display: "flex", flex: 1, overflow: "hidden", minHeight: 0, ...buildShellBodyStyle(shell) }}>
-        {showPanels && (
+        {showLeftPanel && (
           <SystemsPanel
             orbHidden={hideOrb}
             orbState={orbState as OrbState}
@@ -1266,7 +1225,6 @@ export function HudShell({ contract }: { contract: ShellContract }) {
             subtasks={subtasks as SubtaskEntry[]}
             personaName={personaName}
             autoDream={autoDream}
-            taskWorld={taskWorld}
             uiVerbosity={uiVerbosity}
           />
         )}
@@ -1335,7 +1293,7 @@ export function HudShell({ contract }: { contract: ShellContract }) {
 
           {/* Input form */}
           <form
-            style={{ display: "flex", flexDirection: "column", gap: 7, padding: "10px 14px", background: "rgba(2,4,8,0.98)", borderTopWidth: 1, borderTopStyle: "solid", borderTopColor: isDragOver ? CYAN : "rgba(var(--lim-accent-rgb),0.07)", outline: isDragOver ? `1px dashed rgba(var(--lim-accent-rgb),0.4)` : "none", flexShrink: 0 }}
+            style={{ ...buildInputDockStyle(personaTheme), outline: isDragOver ? `1px dashed rgba(var(--lim-accent-rgb),0.4)` : "none", borderTopColor: isDragOver ? CYAN : undefined }}
             onSubmit={onSubmit}
             onDragOver={onDragOver}
             onDragLeave={onDragLeave}
@@ -1360,7 +1318,7 @@ export function HudShell({ contract }: { contract: ShellContract }) {
                 name="message"
                 ref={inputRef}
                 rows={1}
-                style={{ flex: 1, background: "rgba(0,8,18,0.85)", border: "1px solid rgba(var(--lim-accent-rgb),0.14)", borderRadius: 3, color: "#aabbcc", padding: "8px 12px", fontSize: 14, fontFamily: "inherit", outline: "none", resize: "none", minHeight: 40, maxHeight: 180, overflowY: "auto", lineHeight: 1.4, ...buildInputAreaStyle(personaTheme) }}
+                style={{ flex: 1, minHeight: 40, maxHeight: 180, overflowY: "auto", outline: "none", ...buildInputAreaStyle(personaTheme) }}
                 value={input}
                 onChange={e => { onInputChange(e.target.value); }}
                 onKeyDown={e => void onKeyDown(e)}
@@ -1368,13 +1326,16 @@ export function HudShell({ contract }: { contract: ShellContract }) {
                 placeholder={busy ? "processing…" : "transmit…"}
                 disabled={busy}
               />
-              <button type="submit" style={{ border: `1px solid ${canSend ? "rgba(var(--lim-accent-rgb),0.4)" : "rgba(var(--lim-accent-rgb),0.08)"}`, borderRadius: 3, color: canSend ? CYAN : "rgba(var(--lim-accent-rgb),0.2)", padding: "8px 16px", cursor: canSend ? "pointer" : "default", background: canSend ? "rgba(0,60,100,0.8)" : "rgba(0,6,14,0.6)", fontFamily: "monospace", letterSpacing: "0.1em", fontSize: 11 }} disabled={!canSend}>SEND</button>
+              <button type="submit" style={{ border: `1px solid ${canSend ? "rgba(var(--lim-accent-rgb),0.4)" : "rgba(var(--lim-accent-rgb),0.08)"}`, borderRadius: 3, color: canSend ? CYAN : "rgba(var(--lim-accent-rgb),0.2)", padding: "8px 16px", cursor: canSend ? "pointer" : "default", background: canSend ? "rgba(var(--lim-accent-rgb),0.12)" : LIM.surface1, fontFamily: "monospace", letterSpacing: "0.1em", fontSize: 11 }} disabled={!canSend}>SEND</button>
+              {busy && onAbortTurn && (
+                <button type="button" onClick={onAbortTurn} style={{ border: "1px solid rgba(255,80,80,0.35)", borderRadius: 3, color: "#ff8888", padding: "8px 12px", cursor: "pointer", background: "rgba(40,0,0,0.5)", fontFamily: "monospace", letterSpacing: "0.08em", fontSize: 10 }} title="Abort current turn">ABORT</button>
+              )}
             </div>
             <div style={{ fontSize: 9, color: "rgba(var(--lim-accent-rgb),0.2)", letterSpacing: "0.03em", fontFamily: "monospace" }}>Enter send · Shift+Enter newline · Ctrl/Cmd+K clear · Ctrl/Cmd+Shift+L new session</div>
           </form>
         </div>
 
-        {showPanels && (
+        {showRightPanel && (
           <ActivityStream
             toolCalls={allToolCalls as ToolCallEntry[]}
             toolResultMap={toolResultMap}

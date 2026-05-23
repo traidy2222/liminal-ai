@@ -274,107 +274,6 @@ export interface ExecutionState {
   persistedHypotheses?: EpistemicState["hypotheses"];
 }
 
-export type TaskWorldPhase =
-  | "created"
-  | "planning"
-  | "working"
-  | "verifying"
-  | "blocked"
-  | "completed";
-
-export type TaskWorldVerificationStatus =
-  | "not_started"
-  | "in_progress"
-  | "satisfied"
-  | "missing"
-  | "waived";
-
-export interface TaskWorldEvidenceEntry {
-  id: string;
-  claim: string;
-  sourceKind: "file" | "command" | "web" | "browser" | "tool" | "user" | "subagent";
-  sourceRef: string;
-  confidence: "low" | "medium" | "high";
-  freshness: "live" | "current" | "stale" | "unknown";
-  excerpt: string;
-  hash?: string;
-  at: number;
-}
-
-export interface TaskWorldBlackboardEntry {
-  id: string;
-  kind: "fact" | "evidence" | "handoff" | "decision" | "blocker" | "status";
-  summary: string;
-  source?: string;
-  payload?: string;
-  at: number;
-}
-
-export interface TaskWorldVerificationCriterion {
-  id: string;
-  text: string;
-  status: TaskWorldVerificationStatus;
-  evidenceIds: string[];
-  waivedReason?: string;
-  at: number;
-}
-
-export interface TaskWorldSnapshot {
-  version: 1;
-  id: string;
-  objective: string;
-  userConstraints: string[];
-  phase: TaskWorldPhase;
-  createdAt: number;
-  updatedAt: number;
-  openQuestions: string[];
-  artifacts: string[];
-  filesTouched: string[];
-  filesModified: string[];
-  activeHypotheses: string[];
-  verification: {
-    status: TaskWorldVerificationStatus;
-    successCriteria: TaskWorldVerificationCriterion[];
-    requiredChecks: string[];
-    waivedChecks: string[];
-    residualRisks: string[];
-  };
-  evidence: TaskWorldEvidenceEntry[];
-  blackboard: TaskWorldBlackboardEntry[];
-}
-
-export type TaskWorldEvent =
-  | { type: "created"; at: number; world: TaskWorldSnapshot }
-  | {
-      type: "plan_updated";
-      at: number;
-      phase?: TaskWorldPhase;
-      successCriteria?: string[];
-      requiredChecks?: string[];
-      openQuestions?: string[];
-    }
-  | { type: "evidence_added"; at: number; entry: TaskWorldEvidenceEntry }
-  | {
-      type: "verification_updated";
-      at: number;
-      status?: TaskWorldVerificationStatus;
-      criterionId?: string;
-      criterionStatus?: TaskWorldVerificationStatus;
-      evidenceIds?: string[];
-      waivedReason?: string;
-      residualRisks?: string[];
-    }
-  | { type: "blackboard_added"; at: number; entry: TaskWorldBlackboardEntry }
-  | {
-      type: "artifacts_updated";
-      at: number;
-      artifacts?: string[];
-      filesTouched?: string[];
-      filesModified?: string[];
-      activeHypotheses?: string[];
-    }
-  | { type: "completed"; at: number; residualRisks?: string[] };
-
 // ─── Multi-agent orchestration ────────────────────────────────────────────────
 
 export interface ChildAgentConfig {
@@ -456,7 +355,7 @@ export interface SubtaskResult {
 }
 
 /** Why this send() ended (present on reliable turn_end emissions). */
-export type TurnEndTerminationReason = "ok" | "round_cap" | "timeout" | "error";
+export type TurnEndTerminationReason = "ok" | "round_cap" | "timeout" | "error" | "contract_budget";
 
 /** Emitted on turn_end for orchestration / eval surfaces (arXiv:2512.08296, 2601.06112). */
 export interface TurnEndHarnessMetrics {
@@ -649,16 +548,6 @@ export interface AgentEventMap {
   ask_user_answered: { prompt: string; answer: string };
   /** Compact summary of a completed send() — emitted just before `turn_end`. */
   turn_summary: TurnSummary;
-  task_world_created: { world: TaskWorldSnapshot };
-  task_world_updated: { world: TaskWorldSnapshot; reason: string };
-  task_world_evidence_added: { worldId: string; evidence: TaskWorldEvidenceEntry };
-  task_world_verification_updated: {
-    worldId: string;
-    status: TaskWorldVerificationStatus;
-    criteria: TaskWorldVerificationCriterion[];
-    residualRisks: string[];
-  };
-  task_world_completed: { world: TaskWorldSnapshot };
   turn_end: {
     contextSnapshot: ContextSnapshot;
     /** Wall-clock time for the entire send() call in ms. */

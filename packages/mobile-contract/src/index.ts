@@ -1,3 +1,12 @@
+/**
+ * Mobile API + SSE contract v2 — typed payloads aligned with AgentEventMap bridge allowlist.
+ */
+import type {
+  TurnSummary,
+  TurnEndHarnessMetrics,
+  ContextSnapshot,
+} from "@liminal/core";
+
 export interface MobileApiConfigResponse {
   uiVerbosity: "normal" | "quiet";
   approvalTimeoutMs: number;
@@ -5,6 +14,11 @@ export interface MobileApiConfigResponse {
 
 export interface MobileApiStatusResponse {
   clients: number;
+  /** True while a send()/ReAct loop is in progress. */
+  busy: boolean;
+  startedAt?: number | null;
+  /** Server timestamp of last turn_end (ms since epoch). */
+  lastTurnEndedAt?: number | null;
 }
 
 export interface MobileIncomingAttachment {
@@ -46,8 +60,10 @@ export type MobileApiRoutes =
   | "/api/approve"
   | "/api/answer"
   | "/api/session/reset"
+  | "/api/session/abort"
   | "/api/status";
 
+/** SSE events bridged to mobile clients (subset of AgentEventMap). */
 export type MobileSseEventName =
   | "connected"
   | "text"
@@ -57,6 +73,7 @@ export type MobileSseEventName =
   | "tool_approval"
   | "tool_result"
   | "ask_user"
+  | "turn_summary"
   | "turn_end"
   | "error"
   | "subtask_spawned"
@@ -79,10 +96,39 @@ export type MobileSseEventName =
   | "approval_decision"
   | "tool_timing";
 
-export interface MobileSseEnvelope<T = unknown> {
-  id: number;
-  event: MobileSseEventName;
-  data: T;
+/** Per-event payload map for typed mobile consumers. */
+export interface MobileSsePayloadMap {
+  connected: { clientId?: string };
+  text: { delta: string; channel?: "user" | "trace" | "reasoning" };
+  provider_retry: { attempt: number; maxAttempts: number; message: string; backoffMs: number };
+  tool_start: { callId: string; name: string };
+  tool_delta: { callId: string; argsDelta: string };
+  tool_approval: { callId: string; name: string; args: Record<string, unknown>; approvalTimeoutMs: number };
+  tool_result: { callId: string; name: string; args: Record<string, unknown>; ok: boolean; output: string };
+  ask_user: { prompt: string };
+  turn_summary: TurnSummary;
+  turn_end: {
+    contextSnapshot: ContextSnapshot;
+    durationMs?: number;
+    harnessMetrics?: TurnEndHarnessMetrics;
+    traceId?: string;
+  };
+  error: { message: string };
+  tool_timing: { callId: string; name: string; durationMs: number };
+  execution_state: {
+    missionId?: string;
+    activeContractId?: string;
+    driftScore?: number;
+    milestoneCount?: number;
+    contractCount?: number;
+  };
+  [key: string]: unknown;
 }
 
-export const MOBILE_CONTRACT_VERSION = "2026-05-08.mobile.v1";
+export interface MobileSseEnvelope<E extends MobileSseEventName = MobileSseEventName> {
+  id: number;
+  event: E;
+  data: E extends keyof MobileSsePayloadMap ? MobileSsePayloadMap[E] : unknown;
+}
+
+export const MOBILE_CONTRACT_VERSION = "2026-05-23.mobile.v2";

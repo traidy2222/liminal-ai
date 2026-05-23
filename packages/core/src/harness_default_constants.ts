@@ -49,7 +49,7 @@ export const HARNESS_ENV_DEFAULTS: Readonly<Record<string, string>> = {
   AGENT_PERSONA_INFER_MODEL: "",
   AGENT_PERSONA_GEN_TIMEOUT_MS: "90000",
   AGENT_PERSONA_GEN_RETRIES: "2",
-  AGENT_PERSONA_UI_THEME_LLM: "0",
+  AGENT_PERSONA_UI_THEME_LLM: "1",
   AGENT_PERSONA_SOUL_MODE: "batch",
   AGENT_PERSONA_REPAIR_MAX: "1",
   AGENT_PERSONA_GENERATION_STREAM: "1",
@@ -58,11 +58,11 @@ export const HARNESS_ENV_DEFAULTS: Readonly<Record<string, string>> = {
   AGENT_SESSION_JSONL_TEXT_LOG: "rollup",
   AGENT_SESSION_JSONL_MAX_ROLLUP_CHARS: "500000",
   AGENT_SESSION_JSONL_TRACE: "0",
-  AGENT_TASK_WORLDS: "1",
   AGENT_TOOL_BODY_ELIDE: "1",
   AGENT_TOOL_ELIDE_MIN_CHARS: "10000",
   AGENT_TOOL_ELIDE_KEEP_ROUNDS: "3",
   AGENT_DISTILL: "1",
+  AGENT_DISTILL_WEB_FETCH: "0",
   // Sidecar model calls — OFF by default (each fires a full completion at main-model cost).
   // Enable individually in .env when the quality gain justifies the spend.
   AGENT_RECALL_EVERY_N: "0",        // was "3": mid-turn recall every N rounds
@@ -93,6 +93,8 @@ export const HARNESS_ENV_DEFAULTS: Readonly<Record<string, string>> = {
   AGENT_WEB_FETCH_TOTAL_WALL_MS: "55000",
   AGENT_WEB_FETCH_MAX_PREPROCESS_CHARS: "400000",
   AGENT_WEB_FETCH_READABILITY_MS: "12000",
+  AGENT_WEB_FETCH_DEFAULT_MAX_CHARS: "32000",
+  AGENT_WEB_FETCH_ASSETS_MAX_CHARS: "4000",
   AGENT_BROWSER: "1",
   AGENT_BROWSER_WALL_MS: "120000",
   AGENT_BROWSER_NAV_TIMEOUT_MS: "45000",

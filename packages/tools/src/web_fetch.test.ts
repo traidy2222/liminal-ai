@@ -13,6 +13,13 @@ import {
   refuseBinaryWebFetchUrl,
   resolveWebFetchReadabilityMaxInputChars,
   resolveWebFetchTotalWallMs,
+  resolveWebFetchDefaultMaxChars,
+  resolveEffectiveWebFetchMaxChars,
+  buildWikipediaExtractApiUrl,
+  isJunkDiscoveredLink,
+  isWikipediaRestSummaryUrl,
+  extractMainContentFallback,
+  WEB_FETCH_WIKI_FULL_EXTRACT_MAX,
   sniffCompressedPayloadHead,
 } from "./web_fetch.js";
 
@@ -142,4 +149,70 @@ test("peekLooksLikeBotWall detects common interstitial markers", () => {
     true
   );
   assert.equal(peekLooksLikeBotWall("<html><body>Article about cats</body></html>"), false);
+});
+
+test("buildWikipediaExtractApiUrl builds MediaWiki query for wiki titles", () => {
+  const api = buildWikipediaExtractApiUrl("https://en.wikipedia.org/wiki/Eiffel_Tower");
+  assert.ok(api?.includes("en.wikipedia.org/w/api.php"));
+  assert.ok(api?.includes("prop=extracts"));
+  assert.ok(api?.includes("Eiffel"));
+});
+
+test("resolveWebFetchDefaultMaxChars default is 32000", () => {
+  const prev = process.env["AGENT_WEB_FETCH_DEFAULT_MAX_CHARS"];
+  delete process.env["AGENT_WEB_FETCH_DEFAULT_MAX_CHARS"];
+  try {
+    assert.equal(resolveWebFetchDefaultMaxChars(), 32_000);
+  } finally {
+    if (prev === undefined) delete process.env["AGENT_WEB_FETCH_DEFAULT_MAX_CHARS"];
+    else process.env["AGENT_WEB_FETCH_DEFAULT_MAX_CHARS"] = prev;
+  }
+});
+
+test("resolveEffectiveWebFetchMaxChars ignores model caps below harness default", () => {
+  const prev = process.env["AGENT_WEB_FETCH_DEFAULT_MAX_CHARS"];
+  delete process.env["AGENT_WEB_FETCH_DEFAULT_MAX_CHARS"];
+  try {
+    assert.equal(resolveEffectiveWebFetchMaxChars(undefined), 32_000);
+    assert.equal(resolveEffectiveWebFetchMaxChars(6000), 32_000);
+    assert.equal(resolveEffectiveWebFetchMaxChars(50_000), 50_000);
+  } finally {
+    if (prev === undefined) delete process.env["AGENT_WEB_FETCH_DEFAULT_MAX_CHARS"];
+    else process.env["AGENT_WEB_FETCH_DEFAULT_MAX_CHARS"] = prev;
+  }
+});
+
+test("buildWikipediaExtractApiUrl accepts REST summary URLs", () => {
+  const api = buildWikipediaExtractApiUrl(
+    "https://en.wikipedia.org/api/rest_v1/page/summary/Eiffel_Tower"
+  );
+  assert.ok(api?.includes("prop=extracts"));
+  assert.ok(api?.includes("Eiffel"));
+});
+
+test("isWikipediaRestSummaryUrl detects REST summary paths", () => {
+  assert.equal(
+    isWikipediaRestSummaryUrl("https://en.wikipedia.org/api/rest_v1/page/summary/Eiffel_Tower"),
+    true
+  );
+  assert.equal(isWikipediaRestSummaryUrl("https://en.wikipedia.org/wiki/Eiffel_Tower"), false);
+});
+
+test("WEB_FETCH_WIKI_FULL_EXTRACT_MAX covers typical long Wikipedia articles", () => {
+  assert.ok(WEB_FETCH_WIKI_FULL_EXTRACT_MAX >= 44_690);
+});
+
+test("isJunkDiscoveredLink filters wikipedia static noise", () => {
+  assert.equal(isJunkDiscoveredLink("https://en.wikipedia.org/w/load.php?lang=en"), true);
+  assert.equal(isJunkDiscoveredLink("https://en.wikipedia.org/wiki/Paris"), false);
+});
+
+test("extractMainContentFallback prefers mw-content-text", () => {
+  const html =
+    '<div id="mw-content-text"><p>The Eiffel Tower is a lattice tower.</p></div>' +
+    '<div class="printfooter">footer</div>' +
+    "<nav>Jump to content Main menu</nav>";
+  const text = extractMainContentFallback(html);
+  assert.match(text, /lattice tower/);
+  assert.doesNotMatch(text, /Jump to content/);
 });

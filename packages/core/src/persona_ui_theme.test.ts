@@ -8,6 +8,9 @@ import {
   DEFAULT_PERSONA_UI_THEME,
   deriveCategoryTintsFromTheme,
   derivePersonaSemanticTokens,
+  deriveDeterministicPersonaPalette,
+  resolvePersonaPanelSides,
+  shouldShowPersonaSidePanels,
   themeToCssVars,
 } from "./persona_ui_theme.js";
 
@@ -81,4 +84,23 @@ test("derivePersonaSemanticTokens provides assistant color", () => {
 
 test("DEFAULT theme parses", () => {
   assert.ok(parseHexToRgb(DEFAULT_PERSONA_UI_THEME.accent));
+});
+
+test("deriveDeterministicPersonaPalette differs by seed", () => {
+  const a = deriveDeterministicPersonaPalette("Tars:tactical commander");
+  const b = deriveDeterministicPersonaPalette("Mira:warm mentor");
+  assert.notEqual(a.accent, b.accent);
+  assert.notEqual(a.surfaceTint, b.surfaceTint);
+});
+
+test("resolvePersonaPanelSides respects panelLayout", () => {
+  const t = validateAndNormalizePersonaUiTheme({ panelLayout: "right" }, "X");
+  assert.deepEqual(resolvePersonaPanelSides(t), { left: false, right: true });
+  const none = validateAndNormalizePersonaUiTheme({ panelLayout: "none" }, "X");
+  assert.deepEqual(resolvePersonaPanelSides(none), { left: false, right: false });
+});
+
+test("shouldShowPersonaSidePanels hides when panelLayout none", () => {
+  const t = validateAndNormalizePersonaUiTheme({ panelLayout: "none", shell: "hud" }, "X");
+  assert.equal(shouldShowPersonaSidePanels(t, 1200), false);
 });

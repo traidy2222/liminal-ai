@@ -1,6 +1,6 @@
 import OpenAI from "openai";
 import type { AgentHarness, TaskOrchestrator, SubtaskResult } from "@liminal/core";
-import { completeChatJson, getFastModelSlug, resolveHarnessEnvRaw, detectContradictions } from "@liminal/core";
+import { completeChatJson, getFastModelSlug, resolveHarnessEnvRaw, detectContradictions, mapContractToToolFamilies } from "@liminal/core";
 import { defineTool } from "./helpers.js";
 import { createContextTools } from "./context_tools.js";
 import { loadRawNotes, getNoteValue } from "./notes_store.js";
@@ -392,12 +392,15 @@ export function createOrchestrationTools(harness: AgentHarness) {
           dependsOn,
         });
 
+        const familyHint = mapContractToToolFamilies(spawnContract.objective, spawnContract.role);
+
         void promise; // already handled by forkChild internal completion callbacks
         return {
           ok: true,
           output:
             `Sub-agent spawned: task_id="${taskId}"\n` +
             `Contract source: ${contractSource}; role=${spawnContract.role}\n` +
+            `Pre-activated families: ${familyHint.families.join(", ")}\n` +
             (dependsOn && dependsOn.length > 0
               ? `Depends on: [${dependsOn.join(", ")}] — will wait for completion before proceeding.\n`
               : "") +

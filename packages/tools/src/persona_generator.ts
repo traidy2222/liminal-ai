@@ -7,6 +7,7 @@ import {
   effectiveHarnessEnvRaw,
   validateAndNormalizePersonaUiTheme,
   derivePersonaShellHeuristics,
+  deriveDeterministicPersonaPalette,
   buildOpenRouterAttributionHeaders,
   type PersonaUiThemeV2,
   type RuntimePersonaControls,
@@ -2181,8 +2182,13 @@ export async function generatePersonaUiTheme(
   preview?: PersonaGenerationPreview
 ): Promise<PersonaUiThemeV2> {
   const shellHints = derivePersonaShellHeuristics(profile);
+  const paletteSeed = `${profile.name}:${profile.coreIdentity ?? ""}:${profile.tone?.emotionalFlavor ?? ""}`;
+  const deterministicPalette = deriveDeterministicPersonaPalette(paletteSeed);
   if (!personaUiThemeUsesLlm()) {
-    const theme = validateAndNormalizePersonaUiTheme({ v: 2, ...shellHints }, profile.name);
+    const theme = validateAndNormalizePersonaUiTheme(
+      { v: 2, ...shellHints, ...deterministicPalette },
+      profile.name
+    );
     const json = JSON.stringify(theme, null, 2);
     if (preview) {
       preview.streamContent("ui_theme", json, false);
@@ -2266,14 +2272,19 @@ Return JSON with exactly these keys:
       );
       const parsed = JSON.parse(parseFirstJsonObject(buf)) as Record<string, unknown>;
       const theme = validateAndNormalizePersonaUiTheme(
-        { v: 2, ...shellHints, ...parsed },
+        { v: 2, ...shellHints, ...deterministicPalette, ...parsed },
         profile.name
       );
       const json = JSON.stringify(theme, null, 2);
       await preview.completeArtifact("ui_theme", json);
       return theme;
-    } catch {
-      const theme = validateAndNormalizePersonaUiTheme({ v: 2, ...shellHints }, profile.name);
+    } catch (err) {
+      console.warn("[persona] UI theme LLM failed, using deterministic palette:", err);
+      preview?.emit("ui_theme_fallback", "Theme model unavailable — using deterministic palette.");
+      const theme = validateAndNormalizePersonaUiTheme(
+        { v: 2, ...shellHints, ...deterministicPalette },
+        profile.name
+      );
       const json = JSON.stringify(theme, null, 2);
       await preview.completeArtifact("ui_theme", json);
       return theme;
@@ -2290,7 +2301,12 @@ Return JSON with exactly these keys:
     temperature: 0.35,
   });
   if (!res.ok) {
-    const theme = validateAndNormalizePersonaUiTheme({ v: 2, ...shellHints }, profile.name);
+    console.warn("[persona] UI theme LLM request failed:", res.error);
+    preview?.emit("ui_theme_fallback", "Theme model request failed — using deterministic palette.");
+    const theme = validateAndNormalizePersonaUiTheme(
+      { v: 2, ...shellHints, ...deterministicPalette },
+      profile.name
+    );
     if (preview) {
       const json = JSON.stringify(theme, null, 2);
       await preview.completeArtifact("ui_theme", json);
@@ -2298,7 +2314,7 @@ Return JSON with exactly these keys:
     return theme;
   }
   const theme = validateAndNormalizePersonaUiTheme(
-    { v: 2, ...shellHints, ...(res.parsed as Record<string, unknown>) },
+    { v: 2, ...shellHints, ...deterministicPalette, ...(res.parsed as Record<string, unknown>) },
     profile.name
   );
   if (preview) {

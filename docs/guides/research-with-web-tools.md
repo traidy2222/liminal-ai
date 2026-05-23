@@ -15,6 +15,8 @@ The eval scenario `web_research_quality` still tests this **behavior** — not a
 
 With `AGENT_WEB_READABILITY=1`, `web_fetch` runs Mozilla Readability in a **worker thread** so huge HTML cannot block the Node event loop. Caps: `AGENT_WEB_FETCH_READABILITY_MAX_INPUT_CHARS`, `AGENT_WEB_FETCH_READABILITY_MS`, preprocess truncation.
 
+**Defaults (research-friendly):** body limit `AGENT_WEB_FETCH_DEFAULT_MAX_CHARS` (32000); model-passed `max_chars` below that default is **ignored** (models often send 6000 by mistake). Wikipedia `/wiki/` URLs return the **full** MediaWiki plain-text extract up to 120k chars in one call. REST `/api/rest_v1/page/summary/…` URLs return a formatted short lead. `include_assets` defaults to **false**; `AGENT_DISTILL_WEB_FETCH=0` keeps full `web_fetch` text in the tool trace. For non-Wikipedia pages longer than the limit, re-fetch with `char_offset` from the footer hint.
+
 Full flag list: [Configuration — Web and fetch](../configuration.md#web-and-fetch).
 
 ## `read_artifact` vs inline output

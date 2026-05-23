@@ -1,6 +1,8 @@
 # Tool families (lazy loading)
 
-When `AGENT_TOOL_LAZY=1`, only a baseline subset is registered at startup. Activate more with `activate_tool_family` or `list_tool_families`.
+When `AGENT_TOOL_LAZY=1`, only a baseline subset is registered at startup. Activate more with `activate_tool_family`, `breakdown` (declares families for pre-activation), or `list_tool_families`.
+
+**Always-on reasoning (lazy mode):** `think`, `breakdown`, `reason`, `plan`.
 
 Authoritative catalog: `packages/tools/src/tool_catalog.ts`. Registration: `packages/tools/src/index.ts`.
 
@@ -10,7 +12,7 @@ Authoritative catalog: `packages/tools/src/tool_catalog.ts`. Registration: `pack
 |--------|----------|
 | `files_edit` | `read_file`, `write_file`, `append_file`, `write_file_part`, `edit_file`, `patch_file`, … |
 | `shell` | `run_shell`, `run_background`, `run_command_with_pty`, … |
-| `git` | `git_status`, `git_diff`, `git_commit`, … |
+| `git` | `git_status`, `git_diff`, `git_commit`, `git_checkpoint`, `git_rollback`, … |
 | `memory_advanced` | `recall_relevant`, `memory_query`, `read_artifact`, … |
 | `vault` | `vault_write`, `vault_read`, `vault_search`, … |
 | `web` | `web_search`, `web_fetch` (no `web_research`) |

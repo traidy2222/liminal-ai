@@ -32,8 +32,8 @@ export const TOOL_FAMILIES: Record<string, { description: string; tools: readonl
     ],
   },
   git: {
-    description: "Git inspection, commits, and isolated worktrees.",
-    tools: ["git_status", "git_diff", "git_log", "git_branch", "git_commit", "git_worktree"],
+    description: "Git inspection, commits, checkpoints, rollback, and isolated worktrees.",
+    tools: ["git_status", "git_diff", "git_log", "git_branch", "git_commit", "git_checkpoint", "git_rollback", "git_worktree"],
   },
   tasks: {
     description: "Checkpoint and resume long tasks.",
@@ -167,11 +167,6 @@ export const TOOL_FAMILIES: Record<string, { description: string; tools: readonl
       "append_persona_living",
       "get_runtime_settings",
       "set_runtime_settings",
-      "task_world_status",
-      "task_world_update",
-      "task_world_evidence",
-      "task_world_verify",
-      "task_world_resume",
       "upload_image",
       "extract_structured",
       "hypothesize",
@@ -221,6 +216,7 @@ export function summarizeFamilyActivity(registry: ToolRegistry): FamilyActivityS
 export const CORE_ALWAYS_TOOLS_BASE: readonly string[] = [
   // Reasoning
   "think",
+  "breakdown",
   "reason",
   "plan",
   // File surface — read + write essentials only

@@ -161,16 +161,25 @@ export function recordCompensation(planId: string, stepIndex: number, action: Co
 
 export function renderExecutionStateBlock(state: ExecutionState): string {
   const mission = state.mission
-    ? `${state.mission.title} (${state.mission.status})`
+    ? `${state.mission.title}: ${state.mission.objective.slice(0, 120)} (${state.mission.status})`
     : "(none)";
   const activeContract = state.contracts.find((c) => c.id === state.activeContractId);
+  const nextMilestone = state.milestones.find((m) => m.status === "todo" || m.status === "doing");
+  const openQuestions =
+    state.unresolvedQuestions.length > 0
+      ? state.unresolvedQuestions.slice(0, 2).join(" · ")
+      : "(none)";
   return [
     "## Runtime execution state",
     `mission: ${mission}`,
-    `milestones: ${state.milestones.length}`,
-    `contracts: ${state.contracts.length}`,
-    `active_contract: ${activeContract?.title ?? "(none)"}`,
+    `active_contract: ${activeContract?.objective?.slice(0, 120) ?? "(none)"}`,
+    activeContract
+      ? `budget: tools≤${activeContract.maxToolCalls} rounds≤${activeContract.maxSteps} min≤${activeContract.maxMinutes}`
+      : "",
+    `next_milestone: ${nextMilestone?.objective?.slice(0, 100) ?? "(none)"}`,
     `drift_score: ${state.driftScore.toFixed(2)}`,
-    `recovery_events: ${state.recoveryLog.length}`,
-  ].join("\n");
+    `open_questions: ${openQuestions}`,
+  ]
+    .filter(Boolean)
+    .join("\n");
 }

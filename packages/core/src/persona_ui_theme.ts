@@ -227,21 +227,83 @@ export function contrastRatio(
   return (a + 0.05) / (b + 0.05);
 }
 
+function rgbToHsl(r: number, g: number, b: number): { h: number; s: number; l: number } {
+  const rn = r / 255;
+  const gn = g / 255;
+  const bn = b / 255;
+  const max = Math.max(rn, gn, bn);
+  const min = Math.min(rn, gn, bn);
+  let h = 0;
+  let s = 0;
+  const l = (max + min) / 2;
+  if (max !== min) {
+    const d = max - min;
+    s = l > 0.5 ? d / (2 - max - min) : d / (max + min);
+    switch (max) {
+      case rn:
+        h = ((gn - bn) / d + (gn < bn ? 6 : 0)) / 6;
+        break;
+      case gn:
+        h = ((bn - rn) / d + 2) / 6;
+        break;
+      default:
+        h = ((rn - gn) / d + 4) / 6;
+        break;
+    }
+  }
+  return { h, s, l };
+}
+
+function hslToRgb(h: number, s: number, l: number): { r: number; g: number; b: number } {
+  if (s === 0) {
+    const v = Math.round(l * 255);
+    return { r: v, g: v, b: v };
+  }
+  const hue2rgb = (p: number, q: number, t: number) => {
+    let tt = t;
+    if (tt < 0) tt += 1;
+    if (tt > 1) tt -= 1;
+    if (tt < 1 / 6) return p + (q - p) * 6 * tt;
+    if (tt < 1 / 2) return q;
+    if (tt < 2 / 3) return p + (q - p) * (2 / 3 - tt) * 6;
+    return p;
+  };
+  const q = l < 0.5 ? l * (1 + s) : l + s - l * s;
+  const p = 2 * l - q;
+  return {
+    r: Math.round(hue2rgb(p, q, h + 1 / 3) * 255),
+    g: Math.round(hue2rgb(p, q, h) * 255),
+    b: Math.round(hue2rgb(p, q, h - 1 / 3) * 255),
+  };
+}
+
+/** Boost contrast while preserving hue (avoids every persona converging on washed-out cyan-white). */
 function boostContrastOnBg(
   fg: { r: number; g: number; b: number },
   bg: { r: number; g: number; b: number },
   minRatio: number
 ): { r: number; g: number; b: number } {
-  let cur = { ...fg };
-  for (let i = 0; i < 28; i++) {
+  let { h, s, l } = rgbToHsl(fg.r, fg.g, fg.b);
+  for (let i = 0; i < 36; i++) {
+    const cur = hslToRgb(h, s, l);
     if (contrastRatio(cur, bg) >= minRatio) return cur;
-    cur = {
-      r: cur.r + (255 - cur.r) * 0.12,
-      g: cur.g + (255 - cur.g) * 0.12,
-      b: cur.b + (255 - cur.b) * 0.12,
-    };
+    l = Math.min(0.94, l + 0.035);
+    s = Math.min(1, s + 0.025);
   }
-  return { r: 220, g: 230, b: 240 };
+  return hslToRgb(h, Math.min(1, s + 0.05), 0.9);
+}
+
+/** Darken while keeping surfaceTint hue (maroon vs teal backgrounds stay distinct). */
+function darkenPreservingHue(rgb: { r: number; g: number; b: number }, floor = 4): { r: number; g: number; b: number } {
+  const max = Math.max(rgb.r, rgb.g, rgb.b, 1);
+  const targetMax = Math.max(floor, Math.min(max, 56));
+  if (max <= targetMax) return rgb;
+  const scale = targetMax / max;
+  return {
+    r: Math.max(floor, rgb.r * scale),
+    g: Math.max(floor, rgb.g * scale),
+    b: Math.max(floor, rgb.b * scale),
+  };
 }
 
 function sanitizeHex(input: unknown, fallback: string): string {
@@ -317,11 +379,7 @@ function normalizeColorFields(o: Record<string, unknown>, fallbackName: string) 
   let surfaceTint = sanitizeHex(o["surfaceTint"], DEFAULT_PERSONA_UI_THEME.surfaceTint);
 
   const bgRgb = parseHexToRgb(surfaceTint) ?? DARK_BG_FALLBACK;
-  const bgForContrast = {
-    r: Math.max(2, Math.min(bgRgb.r, 24)),
-    g: Math.max(2, Math.min(bgRgb.g, 28)),
-    b: Math.max(2, Math.min(bgRgb.b, 32)),
-  };
+  const bgForContrast = darkenPreservingHue(bgRgb, 4);
 
   let accentRgb = boostContrastOnBg(parseHexToRgb(accent)!, bgForContrast, MIN_CONTRAST_NORMAL);
   let secondaryRgb = boostContrastOnBg(parseHexToRgb(secondary)!, bgForContrast, 3.8);
@@ -332,9 +390,9 @@ function normalizeColorFields(o: Record<string, unknown>, fallbackName: string) 
 
   const surfaceRgb = parseHexToRgb(surfaceTint)!;
   const surfaceBoosted = {
-    r: Math.min(40, surfaceRgb.r + 8),
-    g: Math.min(48, surfaceRgb.g + 10),
-    b: Math.min(56, surfaceRgb.b + 12),
+    r: Math.min(72, Math.max(6, surfaceRgb.r + 10)),
+    g: Math.min(80, Math.max(6, surfaceRgb.g + 12)),
+    b: Math.min(88, Math.max(6, surfaceRgb.b + 14)),
   };
 
   const labelRaw = typeof o["displayLabel"] === "string" ? o["displayLabel"] : "";
@@ -547,10 +605,11 @@ export interface PersonaSemanticTokens {
 /** Derived semantic colors for web CSS variables (not model context). */
 export function derivePersonaSemanticTokens(theme: PersonaUiThemeV2): PersonaSemanticTokens {
   const bgRgb = parseHexToRgb(theme.surfaceTint) ?? DARK_BG_FALLBACK;
+  const bgDark = darkenPreservingHue(bgRgb, 2);
   const bg = rgbToHex(
-    Math.max(2, bgRgb.r - 4),
-    Math.max(2, bgRgb.g - 4),
-    Math.max(2, bgRgb.b - 4)
+    Math.max(2, bgDark.r - 2),
+    Math.max(2, bgDark.g - 2),
+    Math.max(2, bgDark.b - 2)
   );
   const bgForContrast = parseHexToRgb(bg)!;
   const textRgb = boostContrastOnBg({ r: 200, g: 215, b: 230 }, bgForContrast, 4.2);
@@ -559,19 +618,19 @@ export function derivePersonaSemanticTokens(theme: PersonaUiThemeV2): PersonaSem
   const accentRgb = parseHexToRgb(theme.accent)!;
   const secondaryRgb = parseHexToRgb(theme.secondary)!;
   const panelRgb = {
-    r: Math.min(56, bgRgb.r + 14),
-    g: Math.min(64, bgRgb.g + 16),
-    b: Math.min(72, bgRgb.b + 18),
+    r: Math.min(96, bgRgb.r + 22),
+    g: Math.min(104, bgRgb.g + 24),
+    b: Math.min(112, bgRgb.b + 26),
   };
   const surf1Rgb = {
-    r: Math.max(2, bgRgb.r + 2),
-    g: Math.max(2, bgRgb.g + 2),
-    b: Math.max(2, bgRgb.b + 5),
+    r: Math.max(4, bgRgb.r + 6),
+    g: Math.max(4, bgRgb.g + 8),
+    b: Math.max(4, bgRgb.b + 10),
   };
   const surf2Rgb = {
-    r: Math.min(40, bgRgb.r + 10),
-    g: Math.min(48, bgRgb.g + 12),
-    b: Math.min(56, bgRgb.b + 16),
+    r: Math.min(72, bgRgb.r + 16),
+    g: Math.min(80, bgRgb.g + 18),
+    b: Math.min(88, bgRgb.b + 20),
   };
   const textDimRgb = boostContrastOnBg({ r: 96, g: 110, b: 128 }, bgForContrast, 2.8);
   return {
@@ -709,6 +768,25 @@ export function derivePersonaShellHeuristics(profile: {
   const flavor = (profile.tone?.emotionalFlavor ?? "").toLowerCase();
   const humor = (profile.tone?.humorStyle ?? "").toLowerCase();
 
+  const combined = `${formality} ${flavor} ${humor}`;
+  if (/tactical|military|commander|operative|noir|gritty|stark|cyberpunk|sci-fi|scifi|jarvis|hud/.test(combined)) {
+    return {
+      shell: "hud", density: "compact", typography: "mixed",
+      messageStyle: "flat", orbStyle: "ring", background: "grid",
+      fontPair: "inter-cascadia", inputStyle: "command", avatarStyle: "glyph",
+      toolCards: "compact", messageEntrance: "fade",
+      headerStyle: "bar", panelLayout: "both", inputDock: "bottom-bar",
+    };
+  }
+  if (/coach|hype|energetic|bold|charismatic|motivat/.test(combined)) {
+    return {
+      shell: "hud", density: "comfortable", typography: "sans",
+      messageStyle: "bubble", orbStyle: "pulse", background: "gradient",
+      fontPair: "inter-cascadia", inputStyle: "default", avatarStyle: "orb",
+      toolCards: "verbose", messageEntrance: "slide",
+      headerStyle: "bar", panelLayout: "both", inputDock: "bottom-bar",
+    };
+  }
   if (/formal|academic|analyst|precise|dry/.test(formality + flavor)) {
     return {
       shell: "terminal", density: "compact", typography: "mono",
@@ -751,6 +829,41 @@ export function derivePersonaShellHeuristics(profile: {
     fontPair: "system", inputStyle: "default", avatarStyle: "orb",
     toolCards: "verbose", messageEntrance: "instant",
     headerStyle: "bar", panelLayout: "both", inputDock: "bottom-bar",
+  };
+}
+
+function hashPersonaPaletteSeed(text: string): number {
+  let h = 2166136261;
+  const s = text.toLowerCase().trim();
+  for (let i = 0; i < s.length; i++) {
+    h ^= s.charCodeAt(i);
+    h = Math.imul(h, 16777619);
+  }
+  return h >>> 0 || 1;
+}
+
+/** Stable per-persona colors when LLM theme is off or fails — avoids identical cyan HUD for everyone. */
+export function deriveDeterministicPersonaPalette(seedText: string): Pick<
+  PersonaUiThemeV2,
+  "accent" | "secondary" | "warn" | "danger" | "success" | "muted" | "surfaceTint"
+> {
+  const h = hashPersonaPaletteSeed(seedText);
+  const hue = (h % 360) / 360;
+  const accent = hslToRgb(hue, 0.72, 0.62);
+  const secondary = hslToRgb((hue + 0.38) % 1, 0.65, 0.58);
+  const warn = hslToRgb((hue + 0.12) % 1, 0.75, 0.58);
+  const success = hslToRgb((hue + 0.55) % 1, 0.7, 0.52);
+  const danger = hslToRgb((hue + 0.02) % 1, 0.78, 0.48);
+  const muted = hslToRgb(hue, 0.15, 0.52);
+  const surface = hslToRgb(hue, 0.35, 0.08);
+  return {
+    accent: rgbToHex(accent.r, accent.g, accent.b),
+    secondary: rgbToHex(secondary.r, secondary.g, secondary.b),
+    warn: rgbToHex(warn.r, warn.g, warn.b),
+    danger: rgbToHex(danger.r, danger.g, danger.b),
+    success: rgbToHex(success.r, success.g, success.b),
+    muted: rgbToHex(muted.r, muted.g, muted.b),
+    surfaceTint: rgbToHex(surface.r, surface.g, surface.b),
   };
 }
 
@@ -818,6 +931,29 @@ export function motionPresetToCssMultipliers(motion: PersonaUiMotionPreset): {
 
 export function shellDefaultShowSidePanels(shell: PersonaUiShell): boolean {
   return shell === "hud" || shell === "studio";
+}
+
+/** Which side panels to render for the active theme (respects panelLayout). */
+export function resolvePersonaPanelSides(theme: PersonaUiThemeV2 | null | undefined): {
+  left: boolean;
+  right: boolean;
+} {
+  const t = theme ? validateAndNormalizePersonaUiTheme(theme) : DEFAULT_PERSONA_UI_THEME;
+  if (t.panelLayout === "none") return { left: false, right: false };
+  if (t.panelLayout === "left") return { left: true, right: false };
+  if (t.panelLayout === "right") return { left: false, right: true };
+  return { left: true, right: true };
+}
+
+/** Whether any side panel chrome should show at this viewport width. */
+export function shouldShowPersonaSidePanels(
+  theme: PersonaUiThemeV2 | null | undefined,
+  windowWidth: number
+): boolean {
+  const t = theme ? validateAndNormalizePersonaUiTheme(theme) : DEFAULT_PERSONA_UI_THEME;
+  if (t.panelLayout === "none") return false;
+  if (!shellDefaultShowSidePanels(t.shell)) return false;
+  return windowWidth >= 900;
 }
 
 export function shellRootClassName(shell: PersonaUiShell): string {

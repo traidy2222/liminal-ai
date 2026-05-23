@@ -10,11 +10,6 @@
  */
 import { defineTool } from "./helpers.js";
 import { loadNotes, atomicUpdate } from "./notes_store.js";
-import {
-  createTaskWorldSnapshot,
-  persistTaskWorldEvent,
-  resolveHarnessEnvRaw,
-} from "@liminal/core";
 
 interface TaskState {
   id: string;
@@ -108,21 +103,6 @@ export const taskCheckpointTool = defineTool({
     };
 
     await atomicUpdate((n) => ({ ...n, [taskKey]: JSON.stringify(task) }));
-    let taskWorldNote = "";
-    if (resolveHarnessEnvRaw("AGENT_TASK_WORLDS", null) !== "0") {
-      try {
-        const world = createTaskWorldSnapshot({
-          id,
-          objective: task.goal,
-          successCriteria: task.next_steps.map((s) => `Complete: ${s}`),
-          now: Date.now(),
-        });
-        await persistTaskWorldEvent(world.id, null, { type: "created", at: world.createdAt, world });
-        taskWorldNote = `\nTask World: .agent_task_worlds/${world.id}/snapshot.json`;
-      } catch {
-        /* task_checkpoint remains useful even if Task World persistence fails */
-      }
-    }
 
     const statusLabel = status === "completed" ? "✓ completed" : status === "abandoned" ? "✗ abandoned" : "⟳ in progress";
     return {
@@ -135,8 +115,7 @@ export const taskCheckpointTool = defineTool({
         (task.execution_state
           ? `Execution state: mission="${task.execution_state.mission ?? "n/a"}" contract="${task.execution_state.active_contract ?? "n/a"}" drift=${task.execution_state.drift_score ?? 0}\n`
           : "") +
-        `Key: ${taskKey}` +
-        taskWorldNote,
+        `Key: ${taskKey}`,
     };
   },
 });

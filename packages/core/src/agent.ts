@@ -13,8 +13,6 @@ import type {
   ToolResult,
   ExecutionState,
   ExecutionContract,
-  TaskWorldSnapshot,
-  TaskWorldVerificationStatus,
 } from "./types.js";
 import { AgentEmitter } from "./events.js";
 import { ContextManager } from "./context.js";
@@ -55,16 +53,6 @@ import { writeYieldSnapshot } from "./session_event_log.js";
 import { SharedMemoryBus } from "./shared_memory_bus.js";
 import { resolveProviderConfig, buildProviderRouting } from "./provider_config.js";
 import { buildOpenRouterAttributionHeaders } from "./openrouter_attribution.js";
-import {
-  createTaskWorldSnapshot,
-  formatTaskWorldSummary,
-  inferSourceKindFromTool,
-  makeTaskWorldBlackboardEntry,
-  makeTaskWorldEvidence,
-  persistTaskWorldEvent,
-  loadTaskWorldSnapshot,
-  shouldAutoCreateTaskWorld,
-} from "./task_world.js";
 import { withProviderRequestSpacing } from "./provider_request_gate.js";
 import type { RuntimePreferences, RuntimePersonaProfile } from "./runtime_prefs.js";
 import {
@@ -111,8 +99,14 @@ import {
   updateDriftScore,
   getCompensationLedger,
   recordCompensation,
+  renderExecutionStateBlock,
 } from "./execution_state.js";
-import { inferCompensationAction, formatCompensationReport } from "./compensation_ledger.js";
+import {
+  inferCompensationAction,
+  formatCompensationReport,
+  snapshotFileForCompensation,
+} from "./compensation_ledger.js";
+import { mapContractToToolFamilies } from "./contract_tool_mapper.js";
 import {
   shouldSkipHarnessSecondaryPassesForTurn,
   applyTurnInferenceHeuristics,
@@ -1000,8 +994,6 @@ export class AgentHarness {
   readonly sharedBus: SharedMemoryBus;
   /** Long-horizon runtime state persisted by task_checkpoint and heartbeat events. */
   private executionState: ExecutionState | null = null;
-  /** Event-sourced mission state for complex tasks (root harness only by default). */
-  private activeTaskWorld: TaskWorldSnapshot | null = null;
   /** Intra-round tool dependency DAG (populated by dispatch_graph, cleared after each dispatch). */
   private readonly _toolDag = new ToolDag();
   /** In-session BM25 index of tool outputs (cleared at turn end). */
@@ -1023,6 +1015,8 @@ export class AgentHarness {
   private _turnReasoningBudget: ReasoningBudget | null = null;
   private _turnReasoningSurface: ReasoningSurface = "external";
   private toolCallsDispatchedThisSend = 0;
+  /** When set, blocks side-effecting tools until ask_user resolves clarification. */
+  private breakdownClarificationGate: string | null = null;
   private streamingToolNamesByCallId = new Map<string, string>();
   private lastAutoDreamScanAt = 0;
   private autoDreamBackgroundRunning = false;
@@ -1044,94 +1038,6 @@ export class AgentHarness {
 
   getExecutionState(): ExecutionState | null {
     return this.executionState;
-  }
-
-  getActiveTaskWorld(): TaskWorldSnapshot | null {
-    return this.activeTaskWorld;
-  }
-
-  async resumeTaskWorld(worldId: string): Promise<TaskWorldSnapshot | null> {
-    const world = await loadTaskWorldSnapshot(worldId);
-    this.activeTaskWorld = world;
-    if (world) {
-      this.context.appendMessage({
-        role: "user",
-        content: `[TASK WORLD RESUMED]\n${formatTaskWorldSummary(world)}`,
-      });
-      this.emitter.emit("task_world_updated", { world, reason: "resume" });
-    }
-    return world;
-  }
-
-  async updateTaskWorld(input: {
-    kind: "fact" | "evidence" | "handoff" | "decision" | "blocker" | "status";
-    summary: string;
-    source?: string;
-    payload?: string;
-  }): Promise<TaskWorldSnapshot | null> {
-    if (!this.activeTaskWorld || resolveHarnessEnvRaw("AGENT_TASK_WORLDS", this.runtimePreferences) === "0") return null;
-    const entry = makeTaskWorldBlackboardEntry(input);
-    this.activeTaskWorld = await persistTaskWorldEvent(this.activeTaskWorld.id, this.activeTaskWorld, {
-      type: "blackboard_added",
-      at: entry.at,
-      entry,
-    });
-    this.emitter.emit("task_world_updated", { world: this.activeTaskWorld, reason: `blackboard:${input.kind}` });
-    return this.activeTaskWorld;
-  }
-
-  async addTaskWorldEvidence(input: {
-    claim: string;
-    sourceKind?: Parameters<typeof makeTaskWorldEvidence>[0]["sourceKind"];
-    sourceRef: string;
-    excerpt: string;
-    confidence?: Parameters<typeof makeTaskWorldEvidence>[0]["confidence"];
-    freshness?: Parameters<typeof makeTaskWorldEvidence>[0]["freshness"];
-    hash?: string;
-  }): Promise<TaskWorldSnapshot | null> {
-    if (!this.activeTaskWorld || resolveHarnessEnvRaw("AGENT_TASK_WORLDS", this.runtimePreferences) === "0") return null;
-    const evidence = makeTaskWorldEvidence({
-      claim: input.claim,
-      sourceKind: input.sourceKind ?? "tool",
-      sourceRef: input.sourceRef,
-      excerpt: input.excerpt,
-      confidence: input.confidence,
-      freshness: input.freshness,
-      hash: input.hash,
-    });
-    this.activeTaskWorld = await persistTaskWorldEvent(this.activeTaskWorld.id, this.activeTaskWorld, {
-      type: "evidence_added",
-      at: evidence.at,
-      entry: evidence,
-    });
-    this.emitter.emit("task_world_evidence_added", { worldId: this.activeTaskWorld.id, evidence });
-    return this.activeTaskWorld;
-  }
-
-  async updateTaskWorldVerification(input: {
-    status?: TaskWorldVerificationStatus;
-    criterionId?: string;
-    criterionStatus?: TaskWorldVerificationStatus;
-    evidenceIds?: string[];
-    waivedReason?: string;
-    residualRisks?: string[];
-  }): Promise<TaskWorldSnapshot | null> {
-    if (!this.activeTaskWorld || resolveHarnessEnvRaw("AGENT_TASK_WORLDS", this.runtimePreferences) === "0") return null;
-    this.activeTaskWorld = await persistTaskWorldEvent(this.activeTaskWorld.id, this.activeTaskWorld, {
-      type: "verification_updated",
-      at: Date.now(),
-      ...input,
-    });
-    this.emitter.emit("task_world_verification_updated", {
-      worldId: this.activeTaskWorld.id,
-      status: this.activeTaskWorld.verification.status,
-      criteria: this.activeTaskWorld.verification.successCriteria,
-      residualRisks: this.activeTaskWorld.verification.residualRisks,
-    });
-    if (this.activeTaskWorld.phase === "completed") {
-      this.emitter.emit("task_world_completed", { world: this.activeTaskWorld });
-    }
-    return this.activeTaskWorld;
   }
 
   /**
@@ -1178,61 +1084,47 @@ export class AgentHarness {
     return this.executionState.contracts.find((c) => c.id === this.executionState!.activeContractId) ?? null;
   }
 
-  private taskWorldsEnabled(): boolean {
-    return resolveHarnessEnvRaw("AGENT_TASK_WORLDS", this.runtimePreferences) !== "0";
-  }
-
-  private async ensureTaskWorld(reason: string, successCriteria?: string[]): Promise<TaskWorldSnapshot | null> {
-    if (!this.taskWorldsEnabled() || this.agentDepth > 0 || this.sessionGreetingThisSend || this.personaBootstrapPromptThisSend) {
-      return null;
-    }
-    if (this.activeTaskWorld) return this.activeTaskWorld;
-    const now = Date.now();
-    let world = createTaskWorldSnapshot({
-      objective: this.lastUserMessage || "Active task",
-      successCriteria: successCriteria?.length ? successCriteria : [`Satisfy the user request: ${(this.lastUserMessage || "task").slice(0, 180)}`],
-      requiredChecks: this.turnInference?.intent === "coding" ? ["Run the most relevant typecheck, test, or build verification."] : [],
-      now,
-    });
-    world = await persistTaskWorldEvent(world.id, null, { type: "created", at: now, world });
-    this.activeTaskWorld = world;
-    this.emitter.emit("task_world_created", { world });
-    this.context.appendMessage({
-      role: "user",
-      content: `[TASK WORLD ACTIVE: ${reason}]\n${formatTaskWorldSummary(world)}`,
-    });
-    return world;
-  }
-
-  private async maybeAutoCreateTaskWorldForTurn(openingTurn: boolean): Promise<void> {
-    if (!shouldAutoCreateTaskWorld({
-      message: this.lastUserMessage,
-      intent: this.turnInference?.intent,
-      openingTurn,
-      agentDepth: this.agentDepth,
-    })) {
+  private syncExecutionStateToContext(): void {
+    if (!this.executionState) {
+      this.context.setExecutionStateBlock("");
       return;
     }
-    await this.ensureTaskWorld("auto_complex_task");
+    this.context.setExecutionStateBlock(renderExecutionStateBlock(this.executionState));
   }
 
-  private async syncTaskWorldArtifacts(reason: string): Promise<void> {
-    if (!this.activeTaskWorld || !this.taskWorldsEnabled()) return;
-    const epistemic = this.context.getEpistemicState();
-    const activeHypotheses =
-      epistemic?.hypotheses
-        ?.filter((h) => h.status === "active" || h.status === undefined)
-        .map((h) => h.claim)
-        .slice(0, 20) ?? [];
-    this.activeTaskWorld = await persistTaskWorldEvent(this.activeTaskWorld.id, this.activeTaskWorld, {
-      type: "artifacts_updated",
-      at: Date.now(),
-      filesTouched: this.filesReadThisTurn,
-      filesModified: [...this.changedFilesThisTurn],
-      artifacts: [...this.changedFilesThisTurn],
-      activeHypotheses,
+  private checkContractBudgetExceeded(): string | null {
+    const contract = this.getActiveContract();
+    if (!contract) return null;
+    if (this.toolCallsDispatchedThisSend > contract.maxToolCalls) {
+      return `Tool call budget exceeded (${this.toolCallsDispatchedThisSend}/${contract.maxToolCalls}).`;
+    }
+    const elapsedMin = (Date.now() - this.sendStartTime) / 60_000;
+    if (elapsedMin > contract.maxMinutes) {
+      return `Wall-clock budget exceeded (${elapsedMin.toFixed(1)}/${contract.maxMinutes} min).`;
+    }
+    if (this.roundCount > contract.maxSteps) {
+      return `Round budget exceeded (${this.roundCount}/${contract.maxSteps}).`;
+    }
+    return null;
+  }
+
+  private async maybePlaybackCompensation(reason: string): Promise<void> {
+    if (resolveHarnessEnvRaw("AGENT_COMPENSATION_ENABLED", this.runtimePreferences) === "0") return;
+    const planId =
+      this.executionState?.activeContractId ?? this.executionState?.mission?.id;
+    if (!planId) return;
+    const ledger = getCompensationLedger();
+    if (ledger.entriesForPlan(planId).length === 0) return;
+    const results = await ledger.playback(planId);
+    ledger.clear(planId);
+    if (results.length === 0) return;
+    const report = formatCompensationReport(results);
+    this.context.appendMessage({ role: "system", content: report });
+    this.emitter.emit("recovery_action", {
+      strategy: "replan",
+      reason: `compensation_playback: ${reason}`,
+      notes: report.slice(0, 200),
     });
-    this.emitter.emit("task_world_updated", { world: this.activeTaskWorld, reason });
   }
 
   private isLikelyKnowledgeTask(): boolean {
@@ -1402,6 +1294,22 @@ export class AgentHarness {
     toolName: string,
     args: Record<string, unknown>
   ): { ok: true } | { ok: false; reason: string; severity: "low" | "med" | "high" } {
+    if (this.breakdownClarificationGate && EDIT_TOOL_NAMES.has(toolName)) {
+      return {
+        ok: false,
+        reason:
+          `Clarification required before mutating tools. Call ask_user first: ${this.breakdownClarificationGate}`,
+        severity: "high",
+      };
+    }
+    if (this.breakdownClarificationGate && (toolName === "run_shell" || toolName === "git_commit")) {
+      return {
+        ok: false,
+        reason:
+          `Clarification required before side-effecting tools. Call ask_user first: ${this.breakdownClarificationGate}`,
+        severity: "high",
+      };
+    }
     if (toolName === "web_search") {
       const query = typeof args["query"] === "string" ? args["query"].trim() : "";
       if (query.length >= 8 && this.isLikelyKnowledgeTask()) {
@@ -1970,6 +1878,7 @@ export class AgentHarness {
     this._turnReasoningBudget = null;
     this._turnReasoningSurface = "external";
     this.toolCallsDispatchedThisSend = 0;
+    this.breakdownClarificationGate = null;
     this.streamingToolNamesByCallId.clear();
     this.evidenceLog = [];
     this.turnEndEmittedThisSend = false;
@@ -2195,6 +2104,7 @@ export class AgentHarness {
       });
     }
     this.executionState = createDefaultExecutionState(telemetryUserLabel);
+    this.syncExecutionStateToContext();
     this.emitter.emit("execution_state", {
       missionId: this.executionState.mission?.id,
       activeContractId: this.executionState.activeContractId,
@@ -2202,8 +2112,6 @@ export class AgentHarness {
       milestoneCount: this.executionState.milestones.length,
       contractCount: this.executionState.contracts.length,
     });
-    await this.maybeAutoCreateTaskWorldForTurn(openingTurn);
-
     if (resolveHarnessEnvRaw("AGENT_QUERY_REWRITE", this.runtimePreferences) === "1" && !openingTurn) {
       const skipRewriteForExploratory =
         this.turnInference?.exploratoryCreative === true &&
@@ -2269,13 +2177,6 @@ export class AgentHarness {
         } catch {
           /* non-fatal */
         }
-      }
-
-      if (this.activeTaskWorld && !openingTurn) {
-        this.context.append({
-          role: "user",
-          content: formatTaskWorldSummary(this.activeTaskWorld),
-        });
       }
 
       this.context.append({ role: "user", content: conversationUserContent });
@@ -2574,6 +2475,14 @@ export class AgentHarness {
     // (spawn_agent, wait_for_agents, check_context, …) are included.
     childRegistry.copyLazyPolicyFromParent(this.registry);
 
+    if (childConfig.spawnContract && childRegistry.isLazyToolLoading()) {
+      const mapped = mapContractToToolFamilies(
+        childConfig.spawnContract.objective,
+        childConfig.spawnContract.role
+      );
+      childRegistry.activateFamilies(mapped.families);
+    }
+
     // Force-activate any explicitly requested tools regardless of parent's active set.
     // This lets the spawner provision web, vault, shell, etc. for sub-agents that need
     // capabilities the parent hasn't activated in lazy mode.
@@ -2679,12 +2588,6 @@ export class AgentHarness {
               at: Date.now(),
             };
             this.sharedBus.publishEnvelope(handoffKey, handoff, childId);
-            void this.updateTaskWorld({
-              kind: "handoff",
-              summary: `Sub-agent ${childId} completed: ${output.slice(0, 300)}`,
-              source: handoffKey,
-              payload: output.slice(0, 4000),
-            }).catch(() => undefined);
             this.emitter.emit("subtask_handoff_written", {
               taskId: childId,
               key: handoffKey,
@@ -3303,6 +3206,22 @@ export class AgentHarness {
 
     this.roundCount = round + 1;
     this.dispatcher.advanceTurnRound();
+    this.syncExecutionStateToContext();
+    const contractBudgetMsg = this.checkContractBudgetExceeded();
+    if (contractBudgetMsg) {
+      this.context.appendMessage({
+        role: "user",
+        content:
+          `[CONTRACT BUDGET] ${contractBudgetMsg} ` +
+          (this.registry.has("verify_contract")
+            ? "Call verify_contract to assess partial progress, then finalize your answer."
+            : "Stop calling tools and finalize your answer with what you have verified."),
+      });
+      if (!this.registry.has("verify_contract") || this.roundCount >= this.config.maxToolRoundsPerTurn - 1) {
+        this.emitTurnEnd("contract_budget");
+        return;
+      }
+    }
     if (this.executionState) {
       this.emitter.emit("runtime_heartbeat", {
         round: this.roundCount,
@@ -3313,6 +3232,9 @@ export class AgentHarness {
       if (this.roundCount > 1 && this.roundCount % 4 === 0) {
         const next = updateDriftScore(this.executionState, 0.06);
         const triggeredReplan = next.driftScore >= 0.55;
+        if (triggeredReplan) {
+          void this.maybePlaybackCompensation("drift replan threshold");
+        }
         this.executionState = triggeredReplan ? advanceExecutionStateForPlan(next, [
           "Reconfirm mission objective and constraints",
           "Regenerate milestone contracts from latest evidence",
@@ -4040,6 +3962,37 @@ export class AgentHarness {
       const duplicateHints: string[] = [];
       const dispatchAt = async (idx: number) => {
         const tc = toolCalls[idx]!;
+        if (
+          this.executionState &&
+          resolveHarnessEnvRaw("AGENT_COMPENSATION_ENABLED", this.runtimePreferences) !== "0" &&
+          (tc.name === "write_file" || tc.name === "edit_file")
+        ) {
+          try {
+            const snapArgs = JSON.parse(tc.argsJson) as Record<string, unknown>;
+            const filePath = String(snapArgs["path"] ?? "").trim();
+            const mode = snapArgs["mode"];
+            const needsSnapshot =
+              tc.name === "edit_file" ||
+              mode === "overwrite" ||
+              mode === "append";
+            if (filePath && needsSnapshot) {
+              const original = await snapshotFileForCompensation(filePath);
+              if (original !== null) {
+                const planId =
+                  this.executionState.activeContractId ?? this.executionState.mission?.id;
+                if (planId) {
+                  recordCompensation(planId, this.roundCount, {
+                    kind: "restore_file_content",
+                    path: filePath,
+                    originalContent: original,
+                  });
+                }
+              }
+            }
+          } catch {
+            /* non-fatal */
+          }
+        }
         // PASTE: reuse speculatively-started promise if available.
         const speculative = speculativePromises.get(tc.id);
         const result = speculative
@@ -4075,8 +4028,29 @@ export class AgentHarness {
         );
         const callIds = regularCallIndices.map((i) => toolCalls[i]!.id);
         const batches = this._toolDag.topologicalBatches(callIds);
+        const resultsByCallId = new Map<string, { ok: boolean; output: string; error?: string }>();
         for (const batchIds of batches) {
+          for (const id of batchIds) {
+            const idx = idToIdx.get(id)!;
+            const tc = toolCalls[idx]!;
+            try {
+              const argsObj = JSON.parse(tc.argsJson) as Record<string, unknown>;
+              const merged = this._toolDag.injectResolvedDeps(argsObj, id, resultsByCallId);
+              toolCalls[idx] = { ...tc, argsJson: JSON.stringify(merged) };
+            } catch {
+              /* keep original args */
+            }
+          }
           await Promise.all(batchIds.map((id) => dispatchAt(idToIdx.get(id)!)));
+          for (const id of batchIds) {
+            const idx = idToIdx.get(id)!;
+            const r = results[idx]!;
+            resultsByCallId.set(id, {
+              ok: r.ok,
+              output: r.ok ? String(r.output ?? "") : "",
+              error: r.ok ? undefined : r.error,
+            });
+          }
         }
       } else {
         await Promise.all(regularCallIndices.map(dispatchAt));
@@ -4245,6 +4219,54 @@ export class AgentHarness {
             // malformed args — ignore, execution continues normally
           }
         }
+        if (tc.name === "breakdown" && r.ok) {
+          try {
+            const bargs = JSON.parse(tc.argsJson) as {
+              tool_families?: string[];
+              clarification_needed?: boolean;
+              clarification_question?: string;
+              unknowns?: string[];
+            };
+            const families = bargs.tool_families;
+            if (Array.isArray(families) && families.length > 0 && this.registry.isLazyToolLoading()) {
+              const newly = this.registry.activateFamilies(families);
+              if (newly.length > 0) {
+                awarenessNeedsRefresh = true;
+                awarenessReason = "breakdown_family_preseed";
+                this.emitter.emit("text", {
+                  channel: "trace",
+                  delta: `[breakdown] pre-activated families: ${families.join(", ")} → ${newly.length} new tool(s)\n`,
+                });
+              }
+            }
+            if (bargs.clarification_needed && bargs.clarification_question?.trim()) {
+              this.breakdownClarificationGate = bargs.clarification_question.trim();
+              if (this.executionState) {
+                const unknowns = Array.isArray(bargs.unknowns) ? bargs.unknowns : [];
+                this.executionState = {
+                  ...this.executionState,
+                  unresolvedQuestions: [
+                    ...this.executionState.unresolvedQuestions,
+                    bargs.clarification_question.trim(),
+                    ...unknowns.slice(0, 3),
+                  ].slice(0, 8),
+                };
+                this.syncExecutionStateToContext();
+              }
+              this.context.appendMessage({
+                role: "user",
+                content:
+                  `[CLARIFICATION REQUIRED] ${bargs.clarification_question.trim()} ` +
+                  "Call ask_user with this question before any mutating or side-effecting tools.",
+              });
+            }
+          } catch {
+            /* ignore malformed breakdown args */
+          }
+        }
+        if (tc.name === "ask_user" && r.ok) {
+          this.breakdownClarificationGate = null;
+        }
         if (tc.name === "activate_tool_family" && r.ok) {
           awarenessNeedsRefresh = true;
           awarenessReason = "family_activation_success";
@@ -4276,22 +4298,9 @@ export class AgentHarness {
               };
               if (args.steps && args.steps.length > 0) {
                 this.context.patchEpistemicState({ subgoals: subgoalsFromPlanSteps(args.steps) });
-                const world = await this.ensureTaskWorld("plan_tool", args.steps.map((s) => `Complete: ${s.slice(0, 200)}`));
-                if (world) {
-                  this.activeTaskWorld = await persistTaskWorldEvent(world.id, world, {
-                    type: "plan_updated",
-                    at: Date.now(),
-                    phase: "planning",
-                    successCriteria: args.steps.map((s) => `Complete: ${s.slice(0, 200)}`),
-                    requiredChecks:
-                      this.turnInference?.intent === "coding"
-                        ? ["Run targeted verification for changed code before final answer."]
-                        : [],
-                  });
-                  this.emitter.emit("task_world_updated", { world: this.activeTaskWorld, reason: "plan_updated" });
-                }
                 if (this.executionState) {
                   this.executionState = advanceExecutionStateForPlan(this.executionState, args.steps);
+                  this.syncExecutionStateToContext();
                   const cid = this.executionState.activeContractId;
                   if (cid) {
                     this.emitter.emit("contract_transition", {
@@ -4416,15 +4425,6 @@ export class AgentHarness {
             hash: hashString(rawOut.slice(0, 12_000)),
             excerpt: rawOut.slice(0, 1200),
           });
-          await this.addTaskWorldEvidence({
-            claim: `Output from ${tc.name} supports current task progress.`,
-            sourceKind: inferSourceKindFromTool(tc.name),
-            sourceRef: `${tc.name}:${tc.id}`,
-            excerpt: rawOut.slice(0, 1200),
-            confidence: "medium",
-            freshness: tc.name.includes("web") ? "current" : "unknown",
-            hash: hashString(rawOut.slice(0, 12_000)),
-          });
         }
         let content = result.ok ? result.output : `ERROR: ${result.error}`;
         if (result.ok && shouldDistillToolOutput(tc.name, content)) {
@@ -4511,6 +4511,7 @@ export class AgentHarness {
         });
         if (this.executionState) {
           this.executionState = updateDriftScore(this.executionState, 0.15);
+          void this.maybePlaybackCompensation("all tools failed in round");
           this.executionState = appendRecoveryRecord(this.executionState, {
             at: Date.now(),
             reason: "all_tools_failed",
@@ -4847,7 +4848,6 @@ export class AgentHarness {
         .slice(0, 3)
         .map(([n]) => n);
       const finalAnswer = this.context.getLastAssistantMessage() ?? "";
-      await this.syncTaskWorldArtifacts("turn_finalized");
       const summaryPayload: TurnSummary = {
         intentClass: this.turnInference?.intent ?? "general",
         outcomeScore: turnOutcome,

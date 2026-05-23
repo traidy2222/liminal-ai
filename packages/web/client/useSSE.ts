@@ -194,7 +194,23 @@ export type MessageEntry =
       status: "running" | "done" | "error" | "cancelled";
       partialOutput: string;
     }
-  | { kind: "context_compressed"; beforePct: number; afterPct: number; rounds: number };
+  | { kind: "context_compressed"; beforePct: number; afterPct: number; rounds: number }
+  | {
+      kind: "turn_header";
+      intentClass: string;
+      outcomeScore: number;
+      toolCount: number;
+      durationMs: number;
+      keyTools: string[];
+      terminationReason: string;
+    }
+  | {
+      kind: "working_state";
+      goal?: string;
+      driftScore?: number;
+      subgoalsPreview?: string;
+      executionPreview?: string;
+    };
 
 interface ContextSnapshot {
   tokenCount: number;
@@ -252,26 +268,6 @@ export type PendingApprovalState = {
   receivedAt: number;
 };
 
-export interface TaskWorldPanelState {
-  id: string;
-  objective: string;
-  phase: string;
-  verification: {
-    status: string;
-    successCriteria: Array<{ id: string; text: string; status: string; evidenceIds?: string[]; waivedReason?: string }>;
-    requiredChecks: string[];
-    waivedChecks: string[];
-    residualRisks: string[];
-  };
-  evidence: Array<{ id: string; claim: string; sourceKind: string; sourceRef: string; confidence: string; freshness: string; excerpt: string; at: number }>;
-  blackboard: Array<{ id: string; kind: string; summary: string; source?: string; payload?: string; at: number }>;
-  openQuestions: string[];
-  artifacts: string[];
-  filesTouched: string[];
-  filesModified: string[];
-  updatedAt: number;
-}
-
 /** EventSource/stream layer (distinct from REST API reachability). */
 export type SseTransport = "open" | "reconnecting" | "offline";
 
@@ -315,7 +311,6 @@ export interface SSEState {
   personalityPulseActive: boolean;
   heartbeatUiStrip: boolean;
   heartbeatEnabled: boolean;
-  taskWorld: TaskWorldPanelState | null;
 }
 
 const ORCH_TOOLS = new Set(["spawn_agent", "wait_for_agents", "cancel_agent", "list_agents"]);
@@ -359,7 +354,19 @@ type Action =
   | { type: "ask_user"; payload: { prompt: string } }
   | { type: "approval_resolved" }
   | { type: "ask_user_resolved" }
-  | { type: "turn_end"; payload: { contextSnapshot: ContextSnapshot } }
+  | { type: "turn_end"; payload: { contextSnapshot: ContextSnapshot; harnessMetrics?: Record<string, unknown> } }
+  | {
+      type: "turn_summary";
+      payload: {
+        intentClass: string;
+        outcomeScore: number;
+        toolCount: number;
+        durationMs: number;
+        keyTools: string[];
+        terminationReason: string;
+      };
+    }
+  | { type: "tool_timing"; payload: { callId: string; durationMs: number } }
   | { type: "error"; payload: { message: string } }
   | { type: "subtask_spawned"; payload: { taskId: string; parentTaskId: string; goal: string; depth: number } }
   | { type: "subtask_complete"; payload: { taskId: string; ok: boolean } }
@@ -367,19 +374,6 @@ type Action =
   | { type: "plan_step_done"; payload: { stepIndex: number } }
   | { type: "context_compressed"; payload: { beforeFraction: number; afterFraction: number; roundsCompressed: number } }
   | { type: "persona_changed"; payload: { name: string } }
-  | { type: "task_world_created"; payload: { world: TaskWorldPanelState } }
-  | { type: "task_world_updated"; payload: { world: TaskWorldPanelState; reason: string } }
-  | { type: "task_world_evidence_added"; payload: { worldId: string; evidence: TaskWorldPanelState["evidence"][number] } }
-  | {
-      type: "task_world_verification_updated";
-      payload: {
-        worldId: string;
-        status: string;
-        criteria: TaskWorldPanelState["verification"]["successCriteria"];
-        residualRisks: string[];
-      };
-    }
-  | { type: "task_world_completed"; payload: { world: TaskWorldPanelState } }
   | {
       type: "auto_dream";
       payload: {
@@ -546,7 +540,6 @@ function reducer(state: SSEState, action: Action): SSEState {
         lastContextCompress: null,
         personalityPulseRows: [],
         personalityPulseActive: false,
-        taskWorld: null,
       };
 
     case "persona_bootstrap_progress":
@@ -885,15 +878,67 @@ function reducer(state: SSEState, action: Action): SSEState {
           )
         )
       );
+      const hm = action.payload.harnessMetrics as
+        | {
+            epistemicState?: { goal?: string; subgoals?: Array<{ id: string; status: string; note?: string }> };
+            executionState?: { driftScore?: number; mission?: { objective?: string } };
+            workingStatePreview?: string;
+            terminationReason?: string;
+          }
+        | undefined;
+      const extra: MessageEntry[] = [];
+      if (hm?.epistemicState || hm?.executionState) {
+        const subgoalsPreview = hm.epistemicState?.subgoals
+          ?.slice(0, 4)
+          .map((g) => `[${g.status}] ${g.id}${g.note ? `: ${g.note}` : ""}`)
+          .join(" · ");
+        extra.push({
+          kind: "working_state",
+          goal: hm.epistemicState?.goal,
+          driftScore: hm.executionState?.driftScore,
+          subgoalsPreview,
+          executionPreview: hm.workingStatePreview ?? hm.executionState?.mission?.objective?.slice(0, 160),
+        });
+      }
       return {
         ...state,
         busy: false,
         contextSnapshot: action.payload.contextSnapshot,
-        messages: msgs,
+        messages: [...msgs, ...extra],
         lastTurnProviderRetries: state.recoveryPendingCount,
         recoveryPendingCount: 0,
       };
     }
+
+    case "turn_summary":
+      return {
+        ...state,
+        messages: [
+          ...state.messages,
+          {
+            kind: "turn_header",
+            intentClass: action.payload.intentClass,
+            outcomeScore: action.payload.outcomeScore,
+            toolCount: action.payload.toolCount,
+            durationMs: action.payload.durationMs,
+            keyTools: action.payload.keyTools,
+            terminationReason: action.payload.terminationReason,
+          },
+        ],
+      };
+
+    case "tool_timing":
+      return {
+        ...state,
+        messages: state.messages.map((m) =>
+          m.kind === "tool_call" && m.callId === action.payload.callId
+            ? {
+                ...m,
+                endedAt: m.startedAt + action.payload.durationMs,
+              }
+            : m
+        ),
+      };
 
     case "sync_server_busy": {
       if (action.payload.busy) {
@@ -1010,43 +1055,6 @@ function reducer(state: SSEState, action: Action): SSEState {
 
     case "persona_changed":
       return { ...state, personaName: action.payload.name };
-
-    case "task_world_created":
-    case "task_world_updated":
-    case "task_world_completed":
-      return { ...state, taskWorld: action.payload.world };
-
-    case "task_world_evidence_added": {
-      if (!state.taskWorld || state.taskWorld.id !== action.payload.worldId) return state;
-      const exists = state.taskWorld.evidence.some((e) => e.id === action.payload.evidence.id);
-      return {
-        ...state,
-        taskWorld: {
-          ...state.taskWorld,
-          evidence: exists
-            ? state.taskWorld.evidence
-            : [...state.taskWorld.evidence, action.payload.evidence].slice(-200),
-          updatedAt: Date.now(),
-        },
-      };
-    }
-
-    case "task_world_verification_updated": {
-      if (!state.taskWorld || state.taskWorld.id !== action.payload.worldId) return state;
-      return {
-        ...state,
-        taskWorld: {
-          ...state.taskWorld,
-          verification: {
-            ...state.taskWorld.verification,
-            status: action.payload.status,
-            successCriteria: action.payload.criteria,
-            residualRisks: action.payload.residualRisks,
-          },
-          updatedAt: Date.now(),
-        },
-      };
-    }
 
     case "heartbeat_scheduled":
       return state;
@@ -1306,7 +1314,6 @@ function createInitialSSEState(): SSEState {
     personalityPulseActive: false,
     heartbeatUiStrip: false,
     heartbeatEnabled: false,
-    taskWorld: null,
   };
 }
 
@@ -1758,21 +1765,6 @@ export function useSSE() {
         dispatch({ type: "persona_changed", payload: p as never });
         fetchConfigRef.current();
       });
-      for (const evt of [
-        "task_world_created",
-        "task_world_updated",
-        "task_world_evidence_added",
-        "task_world_verification_updated",
-        "task_world_completed",
-      ] as const) {
-        es.addEventListener(evt, (e: MessageEvent) => {
-          trackId(e);
-          markHarnessSemanticActivity();
-          const p = parseEventData(e);
-          if (p == null) return;
-          dispatch({ type: evt, payload: p as never });
-        });
-      }
       es.addEventListener("auto_dream", (e: MessageEvent) => {
         trackId(e);
         const p = parseEventData(e);
@@ -1882,8 +1874,37 @@ export function useSSE() {
         dispatch({ type: "harness_running", payload: p as never });
       });
 
+      es.addEventListener("turn_summary", (e: MessageEvent) => {
+        trackId(e);
+        markHarnessSemanticActivity();
+        flushNow();
+        const p = parseEventData(e);
+        if (p == null || typeof p !== "object") return;
+        const o = p as Record<string, unknown>;
+        dispatch({
+          type: "turn_summary",
+          payload: {
+            intentClass: String(o.intentClass ?? "general"),
+            outcomeScore: Number(o.outcomeScore ?? 0),
+            toolCount: Number(o.toolCount ?? 0),
+            durationMs: Number(o.durationMs ?? 0),
+            keyTools: Array.isArray(o.keyTools) ? (o.keyTools as string[]) : [],
+            terminationReason: String(o.terminationReason ?? "ok"),
+          },
+        });
+      });
+
+      es.addEventListener("tool_timing", (e: MessageEvent) => {
+        trackId(e);
+        const p = parseEventData(e);
+        if (p == null || typeof p !== "object") return;
+        const o = p as Record<string, unknown>;
+        if (typeof o.callId !== "string" || typeof o.durationMs !== "number") return;
+        dispatch({ type: "tool_timing", payload: { callId: o.callId, durationMs: o.durationMs } });
+      });
+
       // Ack-only events — no UI effect needed.
-      ["ask_user_answered", "approval_decision", "tool_timing", "vault_activity",
+      ["ask_user_answered", "approval_decision", "vault_activity",
         "runtime_heartbeat", "drift_detected", "execution_state", "contract_transition",
         "contract_violation", "recovery_action"].forEach((evt) => {
         es.addEventListener(evt, trackId as EventListener);
@@ -2083,5 +2104,18 @@ export function useSSE() {
     [state.uiVerbosity]
   );
 
-  return { state, sendMessage, sendApproval, sendAnswer, sendClearSession, sendPersonaBootstrap };
+  return { state, sendMessage, sendApproval, sendAnswer, sendClearSession, sendPersonaBootstrap, sendAbortTurn };
+}
+
+export async function sendAbortTurn(): Promise<{ ok: boolean; error?: string }> {
+  try {
+    const r = await fetch(`${SERVER}/api/session/abort`, { method: "POST" });
+    if (!r.ok) {
+      const body = (await r.json().catch(() => ({}))) as { error?: string };
+      return { ok: false, error: body.error ?? `HTTP ${r.status}` };
+    }
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : "Network error" };
+  }
 }

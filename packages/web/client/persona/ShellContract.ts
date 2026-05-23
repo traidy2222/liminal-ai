@@ -6,7 +6,6 @@ import type {
   PersonalityPulseRow,
   ApiReachable,
   SseTransport,
-  TaskWorldPanelState,
 } from "../useSSE.js";
 import type { ImageAttachment } from "../imageAttachments.js";
 
@@ -78,7 +77,6 @@ export interface ShellContract {
   subtasks: SubtaskEntry[];
   allToolCalls: ToolCallEntry[];
   autoDream: AutoDreamState;
-  taskWorld: TaskWorldPanelState | null;
   uiVerbosity: "normal" | "quiet";
   pulseChips: CompletedPulseRow[];
   lastTurnProviderRetries: number;
@@ -113,4 +111,6 @@ export interface ShellContract {
   onClearSession(): Promise<void>;
   onOpenSettings(): void;
   onToggleRaw(): void;
+  /** Abort in-progress turn (POST /api/session/abort). */
+  onAbortTurn?: () => void;
 }

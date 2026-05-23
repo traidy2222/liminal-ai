@@ -2,6 +2,7 @@ import type { CSSProperties } from "react";
 import {
   migratePersonaUiTheme,
   shellDefaultShowSidePanels,
+  shouldShowPersonaSidePanels,
   type PersonaUiShell,
   type PersonaUiThemeV2,
   type PersonaUiAvatarStyle,
@@ -13,9 +14,91 @@ export function resolveShell(theme: PersonaUiThemeV2 | null): PersonaUiShell {
   return migratePersonaUiTheme(theme).shell;
 }
 
-export function shouldShowSidePanels(shell: PersonaUiShell, windowWidth: number): boolean {
+export function shouldShowSidePanels(
+  shellOrTheme: PersonaUiShell | PersonaUiThemeV2 | null,
+  windowWidth: number
+): boolean {
+  if (shellOrTheme && typeof shellOrTheme === "object" && "v" in shellOrTheme) {
+    return shouldShowPersonaSidePanels(shellOrTheme, windowWidth);
+  }
+  const shell = shellOrTheme as PersonaUiShell;
   if (!shellDefaultShowSidePanels(shell)) return false;
   return windowWidth >= 900;
+}
+
+export function buildHeaderChromeStyle(theme: PersonaUiThemeV2 | null): CSSProperties {
+  const t = migratePersonaUiTheme(theme);
+  const base: CSSProperties = {
+    display: "flex",
+    justifyContent: "space-between",
+    alignItems: "center",
+    flexShrink: 0,
+    gap: 10,
+    background: LIM.panel,
+    borderBottom: `1px solid ${LIM.border}`,
+  };
+  if (t.headerStyle === "none") {
+    return { ...base, padding: "4px 14px 2px", borderBottom: "none", background: "transparent" };
+  }
+  if (t.headerStyle === "pill") {
+    return { ...base, padding: "12px 16px 8px", borderBottom: "none", background: "transparent" };
+  }
+  return { ...base, padding: "6px 14px" };
+}
+
+export function buildHeaderLabelStyle(theme: PersonaUiThemeV2 | null): CSSProperties {
+  const t = migratePersonaUiTheme(theme);
+  const base: CSSProperties = {
+    color: LIM.accent,
+    fontWeight: 800,
+    fontSize: 12,
+    letterSpacing: "0.28em",
+    fontFamily: t.typography === "mono" ? LIM.fontMono : "monospace",
+  };
+  if (t.headerStyle === "pill") {
+    return {
+      ...base,
+      letterSpacing: "0.12em",
+      padding: "6px 14px",
+      borderRadius: 999,
+      background: LIM.surface1,
+      border: `1px solid ${LIM.border}`,
+      boxShadow: "0 8px 24px rgba(0,0,0,0.25)",
+    };
+  }
+  return base;
+}
+
+export function buildInputDockStyle(theme: PersonaUiThemeV2 | null): CSSProperties {
+  const t = migratePersonaUiTheme(theme);
+  const base: CSSProperties = {
+    display: "flex",
+    flexDirection: "column",
+    gap: 7,
+    flexShrink: 0,
+    background: LIM.panel,
+    borderTop: `1px solid ${LIM.border}`,
+  };
+  if (t.inputDock === "floating") {
+    return {
+      ...base,
+      margin: "0 14px 12px",
+      padding: "12px 14px",
+      borderRadius: 12,
+      border: `1px solid ${LIM.border}`,
+      boxShadow: "0 12px 32px rgba(0,0,0,0.35)",
+      background: LIM.surface1,
+    };
+  }
+  if (t.inputDock === "inline") {
+    return {
+      ...base,
+      padding: "8px 14px 10px",
+      background: "transparent",
+      borderTop: "none",
+    };
+  }
+  return { ...base, padding: "10px 14px" };
 }
 
 function backgroundLayers(shell: PersonaUiShell, background: PersonaUiThemeV2["background"]): string {
@@ -178,7 +261,16 @@ export function buildInputAreaStyle(theme: PersonaUiThemeV2 | null): CSSProperti
         fontSize: 14,
       };
     default:
-      return {};
+      return {
+        ...base,
+        background: LIM.surface1,
+        border: `1px solid rgba(var(--lim-accent-rgb),0.18)`,
+        borderRadius: t.radius === "pill" ? 14 : t.radius === "sharp" ? 2 : 6,
+        color: LIM.text,
+        padding: "8px 12px",
+        fontSize: 14,
+        lineHeight: 1.4,
+      };
   }
 }
 

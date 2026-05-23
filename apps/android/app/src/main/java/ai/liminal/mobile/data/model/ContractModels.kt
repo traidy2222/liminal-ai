@@ -11,7 +11,10 @@ data class ConfigResponse(
 
 @Serializable
 data class StatusResponse(
-  val clients: Int = 0
+  val clients: Int = 0,
+  val busy: Boolean = false,
+  val startedAt: Long? = null,
+  val lastTurnEndedAt: Long? = null
 )
 
 @Serializable

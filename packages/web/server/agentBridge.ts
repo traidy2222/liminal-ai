@@ -204,11 +204,6 @@ export class AgentBridge {
       })
     );
     emitter.on("turn_summary", (p) => this.sse.send("turn_summary", p));
-    emitter.on("task_world_created", (p) => this.sse.send("task_world_created", p));
-    emitter.on("task_world_updated", (p) => this.sse.send("task_world_updated", p));
-    emitter.on("task_world_evidence_added", (p) => this.sse.send("task_world_evidence_added", p));
-    emitter.on("task_world_verification_updated", (p) => this.sse.send("task_world_verification_updated", p));
-    emitter.on("task_world_completed", (p) => this.sse.send("task_world_completed", p));
     emitter.on("turn_end", (p) => {
       this.lastTurnEndedAtMs = Date.now();
       this.stopHeartbeat();

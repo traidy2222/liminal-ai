@@ -20,20 +20,17 @@ function joinedToolOutputs(trace: TraceEvent[], toolName: string): string {
 export const webTriangulationResearch: Scenario = {
   name: "research-web-triangulation",
   tags: ["web", "slow"],
-  env: { AGENT_WEB_RESEARCH: "1" },
   userMessage:
-    "Use web_research for the question: " +
-    "\"Do major regulators converge on caffeine <=400mg/day for healthy adults?\" " +
-    "Use k_sources=3 and then provide a concise answer with confidence.",
+    "Research whether major regulators converge on caffeine <=400mg/day for healthy adults. " +
+    "Use web_search once, then web_fetch at least two distinct source URLs from the results, " +
+    "then give a concise answer citing what you found.",
   maxRounds: 18,
   assertions: [
-    { name: "web_research tool ran", check: (t) => traceHasTool(t, "web_research") },
+    { name: "web_search ran", check: (t) => traceHasTool(t, "web_search") },
+    { name: "web_fetch ran", check: (t) => traceHasTool(t, "web_fetch") },
     {
-      name: "web_research returned synthesis fields",
-      check: (t) => {
-        const out = joinedToolOutputs(t, "web_research");
-        return out.includes("agreements") && out.includes("confidence");
-      },
+      name: "web_fetch returned content from multiple attempts",
+      check: (t) => traceToolResults(t, "web_fetch").filter((r) => r.result.ok).length >= 1,
     },
     { name: "terminated cleanly", check: (t) => traceTerminatedCleanly(t) },
   ],

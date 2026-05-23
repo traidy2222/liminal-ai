@@ -108,8 +108,12 @@ function tryExtractReadFilePathFromArgsJson(argsJson: string): string | null {
 export function shouldDistillToolOutput(toolName: string, output: string): boolean {
   if (effectiveHarnessEnvRaw("AGENT_DISTILL") !== "1") return false;
   if (!output || output.startsWith("ERROR:")) return false;
+  if (toolName === "web_fetch") {
+    if (effectiveHarnessEnvRaw("AGENT_DISTILL_WEB_FETCH") === "0") return false;
+    if (output.length > 1500) return true;
+    return false;
+  }
   if (toolName === "read_file" && output.length > 2000) return true;
-  if (toolName === "web_fetch" && output.length > 1500) return true;
   if (toolName === "run_shell" && output.split("\n").length > 100) return true;
   if (toolName === "recall_relevant" && output.length > 2500) return true;
   return false;

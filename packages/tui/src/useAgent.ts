@@ -106,7 +106,16 @@ export type MessageEntry =
       status: "running" | "done" | "error" | "cancelled";
       partialOutput: string;
     }
-  | { kind: "context_compressed"; beforePct: number; afterPct: number; rounds: number };
+  | { kind: "context_compressed"; beforePct: number; afterPct: number; rounds: number }
+  | {
+      kind: "turn_header";
+      intentClass: string;
+      outcomeScore: number;
+      toolCount: number;
+      durationMs: number;
+      keyTools: string[];
+      terminationReason: string;
+    };
 
 export interface AgentState {
   messages: MessageEntry[];
@@ -162,7 +171,12 @@ type Action =
   | { type: "tool_result"; callId: string; ok: boolean; output: string; name: string; args: Record<string, unknown> }
   | { type: "ask_user"; payload: AgentEventMap["ask_user"] }
   | { type: "ask_user_resolved" }
-  | { type: "turn_end"; snapshot: ContextSnapshot }
+  | { type: "turn_end"; snapshot: ContextSnapshot; harnessMetrics?: AgentEventMap["turn_end"]["harnessMetrics"] }
+  | {
+      type: "turn_summary";
+      payload: AgentEventMap["turn_summary"];
+    }
+  | { type: "tool_timing"; callId: string; durationMs: number }
   | { type: "error"; msg: string }
   | {
       type: "think";
@@ -520,6 +534,33 @@ function reducer(state: AgentState, action: Action): AgentState {
       return { ...state, messages, contextSnapshot: action.snapshot, busy: false };
     }
 
+    case "turn_summary":
+      return {
+        ...state,
+        messages: [
+          ...state.messages,
+          {
+            kind: "turn_header" as const,
+            intentClass: action.payload.intentClass,
+            outcomeScore: action.payload.outcomeScore,
+            toolCount: action.payload.toolCount,
+            durationMs: action.payload.durationMs,
+            keyTools: action.payload.keyTools,
+            terminationReason: action.payload.terminationReason,
+          },
+        ],
+      };
+
+    case "tool_timing":
+      return {
+        ...state,
+        messages: state.messages.map((m) =>
+          m.kind === "tool_call" && m.callId === action.callId
+            ? { ...m, endedAt: m.startedAt + action.durationMs }
+            : m
+        ),
+      };
+
     case "error":
       return { ...state, error: action.msg, busy: false, messages: stripTrailingProviderRetry(state.messages) };
 
@@ -823,6 +864,13 @@ export function useAgent(harness: AgentHarness) {
     emitter.on("turn_end", ({ contextSnapshot }) => {
       flushNow();
       dispatch({ type: "turn_end", snapshot: contextSnapshot });
+    });
+    emitter.on("turn_summary", (payload) => {
+      flushNow();
+      dispatch({ type: "turn_summary", payload });
+    });
+    emitter.on("tool_timing", ({ callId, durationMs }) => {
+      dispatch({ type: "tool_timing", callId, durationMs });
     });
     emitter.on("error", ({ err }) => {
       flushNow();

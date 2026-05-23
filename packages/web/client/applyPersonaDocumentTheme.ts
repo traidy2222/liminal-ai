@@ -49,6 +49,9 @@ export function applyPersonaDocumentTheme(theme: PersonaUiThemeV2 | null): void 
   root.dataset.personaAvatarStyle = t.avatarStyle;
   root.dataset.personaToolCards = t.toolCards;
   root.dataset.personaMessageEntrance = t.messageEntrance;
+  root.dataset.personaHeaderStyle = t.headerStyle;
+  root.dataset.personaPanelLayout = t.panelLayout;
+  root.dataset.personaInputDock = t.inputDock;
 
   // Google Fonts injection
   applyFontPairLink(FONT_PAIR_GOOGLE_URL[t.fontPair]);

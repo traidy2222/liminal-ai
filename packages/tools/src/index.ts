@@ -11,6 +11,7 @@ import { marketsQuoteTool } from "./markets_quote.js";
 import { createAskUserTool } from "./ask_user.js";
 import { rememberTool, recallTool, recallByTypeTool, forgetTool, forgetTypeTool, memoryStatsTool } from "./remember_recall.js";
 import { thinkTool } from "./think.js";
+import { breakdownTool } from "./breakdown.js";
 import { reasonTool } from "./reason.js";
 import { planTool } from "./plan.js";
 import { createHypothesizeTool } from "./hypothesize.js";
@@ -94,7 +95,6 @@ import { gitStatusTool, gitDiffTool, gitLogTool, gitBranchTool, gitCommitTool } 
 import { gitCheckpointTool, gitRollbackTool } from "./git_checkpoint.js";
 import { gitWorktreeTool } from "./git_worktree.js";
 import { taskCheckpointTool, resumeTaskTool } from "./task_persistence.js";
-import { createTaskWorldTools } from "./task_world_tools.js";
 import { featureChecklistTool } from "./feature_checklist.js";
 import { createExtractStructuredTool } from "./extract_structured.js";
 import { createUploadImageTool } from "./upload_image.js";
@@ -137,6 +137,7 @@ export async function registerAllTools(
   harness?: AgentHarness
 ): Promise<void> {
   registry.register(thinkTool);
+  registry.register(breakdownTool);
   registry.register(reasonTool);
   registry.register(planTool);
   registry.register(readFileTool);
@@ -282,13 +283,6 @@ export async function registerAllTools(
     registry.register(createAppendPersonaLivingTool(harness));
     registry.register(createGetRuntimeSettingsTool(harness));
     registry.register(createSetRuntimeSettingsTool(harness));
-
-    const taskWorldTools = createTaskWorldTools(harness);
-    registry.register(taskWorldTools.taskWorldStatusTool);
-    registry.register(taskWorldTools.taskWorldUpdateTool);
-    registry.register(taskWorldTools.taskWorldEvidenceTool);
-    registry.register(taskWorldTools.taskWorldVerifyTool);
-    registry.register(taskWorldTools.taskWorldResumeTool);
 
     // Harness-scoped multimodal + extraction tools
     registry.register(createUploadImageTool(harness));

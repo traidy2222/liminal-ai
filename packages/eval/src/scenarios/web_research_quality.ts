@@ -1,38 +1,25 @@
 import type { Scenario } from "../runner.js";
-import type { ToolResult } from "@liminal/core";
-import { traceHasTool, traceToolResults, traceHasTurnEnd } from "../runner.js";
+import { traceHasTool, traceToolResults, traceHasTurnEnd, traceTerminatedCleanly } from "../runner.js";
 
-export const webResearchStructuredMock: Scenario = {
-  name: "web-research-structured-mock",
+/** Real (no-mock) research chain using web_search + web_fetch. */
+export const webSearchFetchChain: Scenario = {
+  name: "web-search-fetch-chain",
+  tags: ["web", "slow"],
   userMessage:
-    "Call the tool web_research with question \"What is hydrogen?\" and k_sources 2. " +
-    "Then reply OK.",
-  maxRounds: 10,
-  timeoutMs: 60_000,
-  env: { AGENT_WEB_RESEARCH: "1" },
-  mocks: [
-    {
-      toolName: "web_research",
-      handler: async (): Promise<ToolResult> => ({
-        ok: true,
-        output:
-          "## web_research\n### Synthesis (JSON)\n" +
-          `{"agreements":["H is element 1"],"disagreements":[],"confidence":"high"}`,
-      }),
-    },
-  ],
+    "What is the chemical symbol for hydrogen? Use web_search once, then web_fetch one result URL, " +
+    "then answer in one sentence citing the source.",
+  maxRounds: 16,
+  timeoutMs: 120_000,
   assertions: [
-    { name: "web_research called", check: (t) => traceHasTool(t, "web_research") },
+    { name: "web_search called", check: (t) => traceHasTool(t, "web_search") },
+    { name: "web_fetch called", check: (t) => traceHasTool(t, "web_fetch") },
     {
-      name: "output has agreements json",
-      check: (t) => {
-        const xs = traceToolResults(t, "web_research");
-        const out = xs.map((x) => (x.result.ok ? x.result.output : "")).join("\n");
-        return out.includes("agreements") && out.includes("confidence");
-      },
+      name: "web_fetch succeeded at least once",
+      check: (t) => traceToolResults(t, "web_fetch").some((r) => r.result.ok),
     },
+    { name: "terminated cleanly", check: (t) => traceTerminatedCleanly(t) },
     { name: "turn_end", check: (t) => traceHasTurnEnd(t) },
   ],
 };
 
-export const WEB_RESEARCH_QUALITY_SCENARIOS = [webResearchStructuredMock];
+export const WEB_RESEARCH_QUALITY_SCENARIOS = [webSearchFetchChain];

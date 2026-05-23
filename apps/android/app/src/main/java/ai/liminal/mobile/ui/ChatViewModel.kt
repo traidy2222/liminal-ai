@@ -81,7 +81,15 @@ class ChatViewModel @Inject constructor(
               }
               "turn_end" -> {
                 val pct = ((extractDouble(event.data, "contextSnapshot.usageFraction")) * 100.0).toInt()
+                finalizeStreamingAssistant()
                 _ui.value = _ui.value.copy(busy = false, contextPct = pct.coerceIn(0, 100))
+              }
+              "turn_summary" -> {
+                if (_ui.value.showDiagnostics) {
+                  val intent = extractString(event.data, "intentClass")
+                  val tools = extractDouble(event.data, "toolCount").toInt()
+                  pushEntry(TimelineEntry(kind = "trace", text = "Turn: $intent · $tools tools"))
+                }
               }
               "error" -> _ui.value = _ui.value.copy(busy = false)
               else -> Unit
@@ -123,7 +131,8 @@ class ChatViewModel @Inject constructor(
       pushEntry(TimelineEntry(kind = "user", text = finalText))
       val result = repo.sendMessage(finalText)
       _ui.value = if (result.isSuccess) {
-        _ui.value.copy(busy = false, draft = "", pendingAttachmentNames = emptyList())
+        // Stay busy until SSE turn_end — HTTP 200 only means the turn was accepted.
+        _ui.value.copy(draft = "", pendingAttachmentNames = emptyList())
       } else {
         _ui.value.copy(busy = false, error = result.exceptionOrNull()?.message)
       }
@@ -187,6 +196,15 @@ class ChatViewModel @Inject constructor(
 
   fun toggleDiagnostics() {
     _ui.value = _ui.value.copy(showDiagnostics = !_ui.value.showDiagnostics)
+  }
+
+  private fun finalizeStreamingAssistant() {
+    val timeline = _ui.value.timeline.toMutableList()
+    val idx = timeline.indexOfLast { it.kind == "assistant" && it.status == "streaming" }
+    if (idx >= 0) {
+      timeline[idx] = timeline[idx].copy(status = "done")
+      _ui.value = _ui.value.copy(timeline = timeline)
+    }
   }
 
   private fun pushEntry(entry: TimelineEntry) {

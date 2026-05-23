@@ -49,6 +49,7 @@ import { LARGE_FILE_WRITE_SCENARIOS } from "./scenarios/large_file_write.js";
 import { BROWSER_LOCAL_SCENARIOS } from "./scenarios/browser_local.js";
 import { REASONING_BUDGET_SCENARIOS } from "./scenarios/reasoning_budget.js";
 import { HARNESS_RELIABILITY_SCENARIOS } from "./scenarios/harness_reliability.js";
+import { WORKFLOW_EVAL_SCENARIOS } from "./scenarios/workflow_evals.js";
 
 const ALL_SCENARIOS = [
   ...BASIC_SCENARIOS,
@@ -73,6 +74,7 @@ const ALL_SCENARIOS = [
   ...BROWSER_LOCAL_SCENARIOS,
   ...REASONING_BUDGET_SCENARIOS,
   ...HARNESS_RELIABILITY_SCENARIOS,
+  ...WORKFLOW_EVAL_SCENARIOS,
 ];
 const REAL_SCENARIOS = ALL_SCENARIOS.filter((s) => !s.mocks || s.mocks.length === 0);
 

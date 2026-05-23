@@ -269,6 +269,8 @@ export class ContextManager {
   private workingStateBlock = "";
   /** When set, rendered instead of raw workingStateBlock (structured epistemic snapshot). */
   private epistemicState: EpistemicState | null = null;
+  /** Bounded execution-state block injected alongside epistemic working state. */
+  private executionStateBlock = "";
   /** ACON-style runtime notes appended to compression policy in summary blocks. */
   private compressionNotes: string[] = [];
 
@@ -347,6 +349,15 @@ export class ContextManager {
   /** Clear epistemic snapshot (e.g. new session). */
   clearEpistemicState(): void {
     this.epistemicState = null;
+  }
+
+  /** Replace the injected [EXECUTION STATE] block (empty clears). */
+  setExecutionStateBlock(block: string): void {
+    this.executionStateBlock = block.trim().slice(0, 800);
+  }
+
+  getExecutionStateBlock(): string {
+    return this.executionStateBlock;
   }
 
   /** Append a line to compression policy (ACON-style guideline evolution via tools). */
@@ -432,6 +443,13 @@ export class ContextManager {
           `[WORKING STATE — bounded task snapshot; refreshed each tool round]\n${ws}`,
       });
     }
+    const es = this.executionStateBlock.trim();
+    if (es) {
+      working.push({
+        role: "system",
+        content: `[EXECUTION STATE — contract budgets and mission progress]\n${es}`,
+      });
+    }
     let messages = [...inception, ...working, ...this.conversation];
 
     const snap = this.computeSnapshot(messages);
@@ -453,6 +471,13 @@ export class ContextManager {
       working.push({
         role: "system",
         content: `[WORKING STATE — bounded task snapshot; refreshed each tool round]\n${ws}`,
+      });
+    }
+    const esBlock = this.executionStateBlock.trim();
+    if (esBlock) {
+      working.push({
+        role: "system",
+        content: `[EXECUTION STATE — contract budgets and mission progress]\n${esBlock}`,
       });
     }
     return [...inception, ...working, ...this.conversation];

@@ -97,6 +97,19 @@ export function MessageItem({ entry, width }: Props) {
       );
     }
 
+    case "turn_header": {
+      const sec = Math.round(entry.durationMs / 1000);
+      const tools = entry.keyTools.length > 0 ? entry.keyTools.join(", ") : "—";
+      const term = entry.terminationReason !== "ok" ? ` · ${entry.terminationReason}` : "";
+      return (
+        <Box paddingLeft={2} width={w}>
+          <Text dimColor color={jarvis.meta}>
+            {entry.intentClass} · {entry.outcomeScore.toFixed(2)} · {entry.toolCount} tools · {sec}s · {tools}{term}
+          </Text>
+        </Box>
+      );
+    }
+
     /* ── Trace (diagnostics only) ───────────────────────── */
     case "trace": {
       if (!entry.text.trim()) return null;

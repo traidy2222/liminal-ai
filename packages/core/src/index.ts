@@ -129,13 +129,6 @@ export type {
   AgentSafetyJudgeOptions,
   ExecutionState,
   ExecutionContract,
-  TaskWorldSnapshot,
-  TaskWorldEvent,
-  TaskWorldPhase,
-  TaskWorldVerificationStatus,
-  TaskWorldEvidenceEntry,
-  TaskWorldBlackboardEntry,
-  TaskWorldVerificationCriterion,
   MissionPlan,
   MilestonePlan,
   CommitmentRule,
@@ -228,24 +221,6 @@ export {
   buildOpenRouterAttributionHeaders,
 } from "./openrouter_attribution.js";
 export type { OpenRouterAttributionHeaders } from "./openrouter_attribution.js";
-export {
-  sanitizeTaskWorldId,
-  taskWorldsDir,
-  taskWorldDir,
-  taskWorldEventsPath,
-  taskWorldSnapshotPath,
-  makeTaskWorldId,
-  createTaskWorldSnapshot,
-  applyTaskWorldEvent,
-  persistTaskWorldEvent,
-  loadTaskWorldSnapshot,
-  reconstructTaskWorldFromEvents,
-  makeTaskWorldEvidence,
-  makeTaskWorldBlackboardEntry,
-  formatTaskWorldSummary,
-  shouldAutoCreateTaskWorld,
-  inferSourceKindFromTool,
-} from "./task_world.js";
 export { resolveProviderConfig, resolveVisionProviderConfig, buildProviderRouting } from "./provider_config.js";
 export type { ProviderConfig, ProviderConfigOverrides, VisionProviderConfig, ProviderRouting } from "./provider_config.js";
 export {
@@ -271,8 +246,11 @@ export {
   derivePersonaSemanticTokens,
   deriveCategoryTintsFromTheme,
   derivePersonaShellHeuristics,
+  deriveDeterministicPersonaPalette,
   themeToCssVars,
   shellDefaultShowSidePanels,
+  resolvePersonaPanelSides,
+  shouldShowPersonaSidePanels,
   shellRootClassName,
   parseHexToRgb,
   relativeLuminance,

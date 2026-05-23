@@ -113,4 +113,26 @@ export class ToolDag {
 
     return batches;
   }
+
+  /**
+   * Merge prerequisite tool outputs into dependent call args as __resolved_deps.
+   */
+  injectResolvedDeps(
+    args: Record<string, unknown>,
+    callId: string,
+    resultsByCallId: Map<string, { ok: boolean; output: string; error?: string }>
+  ): Record<string, unknown> {
+    const prereqs = this.getPrereqs(callId);
+    if (prereqs.length === 0) return args;
+    const resolved = prereqs.map((pid) => {
+      const r = resultsByCallId.get(pid);
+      return {
+        callId: pid,
+        ok: r?.ok ?? false,
+        output: r?.ok ? r.output.slice(0, 4000) : "",
+        error: r?.ok ? undefined : r?.error ?? "missing prerequisite result",
+      };
+    });
+    return { ...args, __resolved_deps: resolved };
+  }
 }

@@ -368,6 +368,13 @@ const _META_RAW: Record<string, HarnessSettingsFieldMeta> = {
     description: "Harness environment toggle for Distill. See docs/configuration.md (memory vault).",
     valueKind: "boolean",
   },
+  "AGENT_DISTILL_WEB_FETCH": {
+    tabId: "memory_vault",
+    subgroupId: "context_shaping",
+    label: "Distill Web Fetch",
+    description: "When 0, web_fetch full text is kept in the tool result (recommended for research). When 1, large fetches are LLM-summarized.",
+    valueKind: "boolean",
+  },
   "AGENT_RECALL_EVERY_N": {
     tabId: "memory_vault",
     subgroupId: "retrieval",
@@ -594,6 +601,20 @@ const _META_RAW: Record<string, HarnessSettingsFieldMeta> = {
     description: "Harness environment toggle for Web Fetch Readability Ms. See docs/configuration.md (web research).",
     valueKind: "number",
   },
+  "AGENT_WEB_FETCH_DEFAULT_MAX_CHARS": {
+    tabId: "web_research",
+    subgroupId: "http_client",
+    label: "Web Fetch Default Max Chars",
+    description: "Default max_chars for web_fetch when the model omits it (body budget).",
+    valueKind: "number",
+  },
+  "AGENT_WEB_FETCH_ASSETS_MAX_CHARS": {
+    tabId: "web_research",
+    subgroupId: "http_client",
+    label: "Web Fetch Assets Max Chars",
+    description: "Separate char budget for discovered links/images appendix when include_assets=true.",
+    valueKind: "number",
+  },
   "AGENT_WEB_FETCH_READABILITY_MAX_INPUT_CHARS": {
     tabId: "web_research",
     subgroupId: "http_client",
@@ -816,13 +837,6 @@ const _META_RAW: Record<string, HarnessSettingsFieldMeta> = {
     subgroupId: "telemetry",
     label: "Eval Json Sink",
     description: "Harness environment toggle for Eval Json Sink. See docs/configuration.md (advanced).",
-    valueKind: "boolean",
-  },
-  "AGENT_TASK_WORLDS": {
-    tabId: "harness",
-    subgroupId: "harness_misc",
-    label: "Task Worlds",
-    description: "Enable event-sourced mission state for complex tasks.",
     valueKind: "boolean",
   },
   "AGENT_SESSION_MODE": {
