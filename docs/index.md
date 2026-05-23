@@ -8,7 +8,8 @@ Human-oriented guides for running, configuring, and extending the Liminal agent 
 
 | Document | Contents |
 |----------|----------|
-| [Quickstart](./start/quickstart.md) | Install, build, `npm run tui` / `web` |
+| [Install](./start/install.md) | One-command install, `liminal` CLI, paths |
+| [Quickstart](./start/quickstart.md) | Manual install, build, `npm run tui` / `web` |
 | [Configuration basics](./start/configuration-basics.md) | `.env` vs Settings vs defaults |
 | [Troubleshooting](./operations/troubleshooting.md) | Common failures |
 

@@ -26,26 +26,47 @@ not demo polish.
 
 ## Quick start
 
+**One command (Linux / macOS / WSL):**
+
 ```bash
-npm install
-cp .env.example .env   # set AGENT_API_KEY, AGENT_MODEL
-npm run build
-npm run tui            # terminal UI
-# or
-npm run web            # http://localhost:3001 (PORT in .env)
+curl -fsSL https://raw.githubusercontent.com/traidy2222/liminal-ai/main/scripts/install.sh | bash
 ```
 
-Minimal `.env`:
+**Windows (PowerShell):**
+
+```powershell
+irm https://raw.githubusercontent.com/traidy2222/liminal-ai/main/scripts/install.ps1 | iex
+```
+
+Clones Liminal, runs setup, opens the web UI with persona bootstrap. See **[docs/start/install.md](docs/start/install.md)** for paths, CI, and troubleshooting.
+
+**Already have the repo:**
+
+```bash
+npm install
+npm run setup            # interactive wizard → .env + build
+npm run web -- --bootstrap
+# or
+node scripts/liminal.mjs web --bootstrap --open
+```
+
+Minimal `.env` (if not using the wizard):
 
 ```bash
 AGENT_API_KEY=your_key_here
 AGENT_API_BASE_URL=https://openrouter.ai/api/v1
-AGENT_MODEL=qwen/qwen3.5-9b
+AGENT_MODEL=deepseek/deepseek-chat
 ```
 
-First-run persona overlay: `npm run tui -- --bootstrap` or `npm run web -- --bootstrap`.
+| Command | Purpose |
+|---------|---------|
+| `liminal setup` / `npm run setup` | First-run wizard |
+| `liminal doctor` / `npm run doctor` | Verify install |
+| `liminal web --bootstrap --open` | Web UI + browser |
+| `liminal tui --bootstrap` | Terminal UI |
+| `liminal update` | Pull + rebuild |
 
-Step-by-step setup, Settings vs `.env`, and profiles → **[docs/start/quickstart.md](docs/start/quickstart.md)** · **[docs/start/configuration-basics.md](docs/start/configuration-basics.md)**.
+Step-by-step setup, Settings vs `.env`, and profiles → **[docs/start/quickstart.md](docs/start/quickstart.md)** · **[docs/start/install.md](docs/start/install.md)** · **[docs/start/configuration-basics.md](docs/start/configuration-basics.md)**.
 
 ## Capabilities
 
@@ -84,11 +105,13 @@ Build order: **core → tools** before running tui/web/eval. Contributor command
 
 | Command | Purpose |
 |---------|---------|
+| `npm run setup` | Interactive first-run wizard (`.env`, install, build) |
+| `npm run doctor` | Verify Node, builds, API key |
 | `npm run build` | Compile core + tools |
 | `npm run typecheck` | Typecheck all workspaces |
 | `npm run test` | Core unit tests |
 | `npm run tui` / `npm run web` | Run interfaces |
-| `npm run web:dev` | API :3001 + Vite :3000 |
+| `npm run web:dev` | API :3001 + Vite :5173 |
 | `npm run eval -w packages/eval` | Scenario evals |
 | `npm run docs:dev` | Browse docs (VitePress) |
 
@@ -108,6 +131,7 @@ Narrative flag groups: [docs/configuration.md](docs/configuration.md). Baseline 
 
 | If you need… | Start here |
 |--------------|------------|
+| One-command install | [install](docs/start/install.md) |
 | Install & first session | [quickstart](docs/start/quickstart.md) |
 | Stuck UI, vault, web_fetch | [troubleshooting](docs/operations/troubleshooting.md) |
 | Architecture & protocol | [architecture](docs/concepts/architecture.md) · [harness protocol](docs/concepts/harness-protocol.md) |

@@ -1,11 +1,16 @@
 {
   "name": "liminal",
   "private": true,
+  "bin": {
+    "liminal": "./scripts/liminal.mjs"
+  },
   "workspaces": [
     "packages/*"
   ],
   "scripts": {
     "build": "npm run build --workspaces --if-present",
+    "setup": "node scripts/liminal.mjs setup",
+    "doctor": "node scripts/liminal.mjs doctor",
     "tui": "node scripts/run-tui.mjs",
     "tui:bootstrap": "node scripts/run-tui.mjs --bootstrap",
     "web": "node scripts/run-web.mjs",

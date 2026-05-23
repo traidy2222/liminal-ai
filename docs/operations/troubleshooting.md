@@ -1,5 +1,17 @@
 # Troubleshooting
 
+## Run `liminal doctor` first
+
+From an install or cloned repo:
+
+```bash
+liminal doctor
+# or
+npm run doctor
+```
+
+Checks Node 22+, npm 10+, `.env` API key, `packages/core` and `packages/tools` builds, web client build (warn), and whether `PORT` (default 3001) is free. Fix hints are printed for each failure. Full install paths: [Install guide](../start/install.md).
+
 ## Recent fixes (operator-visible)
 
 - **`vault_write` blocked updating same title** — fixed: same-title updates skip dedupe; use `ignore_dedupe: true` for new editions ([Vault briefs](../guides/vault-briefs-and-updates.md)).
