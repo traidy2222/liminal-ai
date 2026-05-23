@@ -21,6 +21,10 @@ const STATS_PATH = (): string => join(resolveWorkspaceRoot(), ".agent_recipe_sta
 /** A turn must score at least this (scoreTurnOutcome, 0–1) to become a recipe. */
 const RECIPE_OUTCOME_FLOOR = 0.6;
 
+/** A recipe is "promoted" to a default plan when it has compounded enough times AND its avg outcome is high. */
+const PROMOTE_MIN_COUNT = 5;
+const PROMOTE_MIN_OUTCOME = 0.8;
+
 // ─── Phase taxonomy ───────────────────────────────────────────────────────────
 
 export type RecipePhase =
@@ -247,11 +251,16 @@ export async function formatRecipeLibraryHints(
     .slice(0, 2);
 
   if (scored.length === 0) return null;
-  const lines = [
-    "[KNOWN RECIPE] proven strategy for this kind of task — use as the plan skeleton unless the task clearly differs:",
-  ];
+  const isPromoted = (r: RecipeEntry, avg: number): boolean =>
+    r.count >= PROMOTE_MIN_COUNT && avg >= PROMOTE_MIN_OUTCOME;
+  const topPromoted = isPromoted(scored[0]!.r, scored[0]!.avg);
+  const header = topPromoted
+    ? "[DEFAULT PLAN] established play for this kind of task — follow it unless the task is structurally different:"
+    : "[KNOWN RECIPE] proven strategy for this kind of task — use as the plan skeleton unless the task clearly differs:";
+  const lines = [header];
   for (const { r, avg } of scored) {
-    lines.push(`  • ${r.phaseShape.join(" → ")}  (reused ×${r.count}, avg outcome ${avg.toFixed(2)})`);
+    const tag = isPromoted(r, avg) ? " [DEFAULT]" : "";
+    lines.push(`  • ${r.phaseShape.join(" → ")}  (reused ×${r.count}, avg outcome ${avg.toFixed(2)})${tag}`);
     lines.push(`    e.g. "${r.bestExample.goal}" → ${r.bestExample.toolSequence}`);
   }
   return lines.join("\n");

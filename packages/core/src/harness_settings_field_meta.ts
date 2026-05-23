@@ -1269,6 +1269,20 @@ const _META_RAW: Record<string, HarnessSettingsFieldMeta> = {
     description: "Harness environment toggle for Recipe Library. See docs/configuration.md (advanced).",
     valueKind: "boolean",
   },
+  "AGENT_RULE_DEMOTE_THRESHOLD": {
+    tabId: "advanced",
+    subgroupId: "telemetry",
+    label: "Rule Demote Threshold",
+    description: "Avg turn-outcome below which a harness rule is auto-demoted from the round-2 recall (0–1). Default 0.4.",
+    valueKind: "number",
+  },
+  "AGENT_RULE_DEMOTE_MIN_SAMPLES": {
+    tabId: "advanced",
+    subgroupId: "telemetry",
+    label: "Rule Demote Min Samples",
+    description: "Minimum outcomeCount required before a rule can be auto-demoted. Default 20.",
+    valueKind: "number",
+  },
   "AGENT_PLUGIN_DIR": {
     tabId: "advanced",
     subgroupId: "plugins",

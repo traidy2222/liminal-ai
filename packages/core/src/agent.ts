@@ -9,6 +9,7 @@ import type {
   PersonaConfig,
   TurnEndHarnessMetrics,
   TurnEndTerminationReason,
+  TurnSummary,
   ToolResult,
   ExecutionState,
   ExecutionContract,
@@ -47,7 +48,7 @@ import {
 } from "./file_write_stream_sink.js";
 import { recordRecipe } from "./recipe_library.js";
 import { addCompressionGuideline, formatCompressionGuidelines } from "./compression_guidelines.js";
-import { bumpRuleHits, getRuleHitCounts, extractRuleIds, recordRuleOutcomes } from "./rule_stats.js";
+import { bumpRuleHits, getRuleHitCounts, extractRuleIds, recordRuleOutcomes, getDemotedRuleIds } from "./rule_stats.js";
 import { writeYieldSnapshot } from "./session_event_log.js";
 import { SharedMemoryBus } from "./shared_memory_bus.js";
 import { resolveProviderConfig, buildProviderRouting } from "./provider_config.js";
@@ -84,7 +85,7 @@ import {
 } from "./personality_heartbeat.js";
 import { readFile as readFileFs } from "node:fs/promises";
 import path from "node:path";
-import { resolveWorkspaceRoot } from "./workspace_root.js";
+import { resolveWorkspaceRoot, runWithWorkspaceRoot } from "./workspace_root.js";
 import {
   markEpistemicPlanStepDone,
   mergeExtractedSubgoals,
@@ -852,6 +853,8 @@ export class AgentHarness {
   registry: ToolRegistry;           // non-readonly so forkChild can scope it
   readonly config: AgentConfig;     // exposed for child harness creation
   readonly taskId: string;
+  /** Per-harness workspace root. Wraps every send() in an AsyncLocalStorage scope. */
+  readonly workspaceRoot: string;
   readonly orchestrator: TaskOrchestrator;
   readonly agentDepth: number;
 
@@ -1600,6 +1603,9 @@ export class AgentHarness {
 
   constructor(config: AgentConfig) {
     this.config = config;
+    this.workspaceRoot = config.workspaceRoot
+      ? config.workspaceRoot
+      : resolveWorkspaceRoot();
     this.runtimePreferences = config.runtimePreferences ?? null;
     this.config.vision = {
       model:
@@ -1736,6 +1742,17 @@ export class AgentHarness {
   }
 
   async send(
+    userMessage: string,
+    options?: { freshContext?: boolean; sessionGreeting?: boolean; personaBootstrapPrompt?: boolean }
+  ): Promise<void> {
+    // Wrap the entire send in an AsyncLocalStorage scope so every file tool,
+    // background persist, and post-turn write resolves this harness's
+    // workspace root (instead of the process-global). Lets parallel sub-agents
+    // operate on isolated trees (e.g. git worktrees).
+    return runWithWorkspaceRoot(this.workspaceRoot, () => this._sendBody(userMessage, options));
+  }
+
+  private async _sendBody(
     userMessage: string,
     options?: { freshContext?: boolean; sessionGreeting?: boolean; personaBootstrapPrompt?: boolean }
   ): Promise<void> {
@@ -2352,6 +2369,9 @@ export class AgentHarness {
       ...this.config,
       taskId: childId,
       parentTaskId: this.taskId,
+      // Child inherits the parent's workspace root unless ChildAgentConfig overrides it
+      // (e.g. for a git_worktree-isolated sub-agent).
+      workspaceRoot: childConfig.workspaceRoot ?? this.workspaceRoot,
       orchestrator: this.orchestrator,
       agentDepth: childDepth,
       maxAgentDepth: this.maxAgentDepth,
@@ -3165,8 +3185,11 @@ export class AgentHarness {
       this.ruleRecallInjectedThisSend = true;
       let ruleMsg: string;
       try {
-        const hitCounts = await getRuleHitCounts();
-        ruleMsg = buildHarnessRuleRecallMessage(hitCounts);
+        const [hitCounts, demoted] = await Promise.all([
+          getRuleHitCounts(),
+          getDemotedRuleIds(),
+        ]);
+        ruleMsg = buildHarnessRuleRecallMessage(hitCounts, demoted);
       } catch {
         ruleMsg = buildHarnessRuleRecallMessage(new Map());
       }
@@ -4609,7 +4632,39 @@ export class AgentHarness {
       await this.maybeAutoWriteVaultNotes();
       await this.maybeAutoExtractMemories();
 
-      // Causal trajectory memory (AGENT_TRAJECTORY_WRITE=1, root agent only).
+      // Per-turn outcome score (used by summary + root-only learning paths).
+      const turnOutcome = scoreTurnOutcome({
+        toolsUsed: this._toolOutcomesThisTurn,
+        roundCount: this.roundCount,
+        criticPassed: this.criticConsumedThisSend ? true : null,
+        contradictionCount: 0,
+        terminationReason: "ok",
+      });
+
+      // Compact at-a-glance summary for UIs (emitted for every send before turn_end).
+      const toolFreq = new Map<string, number>();
+      for (const t of this.toolsUsedThisTurn) {
+        toolFreq.set(t, (toolFreq.get(t) ?? 0) + 1);
+      }
+      const keyTools = [...toolFreq.entries()]
+        .sort((a, b) => b[1] - a[1])
+        .slice(0, 3)
+        .map(([n]) => n);
+      const finalAnswer = this.context.getLastAssistantMessage() ?? "";
+      const summaryPayload: TurnSummary = {
+        intentClass: this.turnInference?.intent ?? "general",
+        outcomeScore: turnOutcome,
+        toolCount: this.toolsUsedThisTurn.length,
+        roundCount: this.roundCount,
+        durationMs: Date.now() - this.sendStartTime,
+        finalAnswerPreview: finalAnswer.replace(/\s+/g, " ").trim().slice(0, 120),
+        keyTools,
+        terminationReason: "ok",
+        ...(this.currentTurnTraceId ? { traceId: this.currentTurnTraceId } : {}),
+      };
+      this.emitter.emit("turn_summary", summaryPayload);
+
+      // Causal trajectory memory + outcome-based learning (root agent only).
       if (this.agentDepth === 0) {
         void maybeWriteTrajectory({
           trigger: this.lastUserMessage,
@@ -4619,17 +4674,9 @@ export class AgentHarness {
           intentClass: this.turnInference?.intent,
         }).catch(() => { /* non-fatal */ });
 
-        // Per-turn outcome score — feeds both effort learning and rule effectiveness.
-        const outcome = scoreTurnOutcome({
-          toolsUsed: this._toolOutcomesThisTurn,
-          roundCount: this.roundCount,
-          criticPassed: this.criticConsumedThisSend ? true : null,
-          contradictionCount: 0,
-          terminationReason: "ok",
-        });
         // Rule effectiveness: attribute this turn's outcome to every rule injected.
         if (this.injectedRuleIdsThisSend.length > 0) {
-          void recordRuleOutcomes(this.injectedRuleIdsThisSend, outcome).catch(() => { /* non-fatal */ });
+          void recordRuleOutcomes(this.injectedRuleIdsThisSend, turnOutcome).catch(() => { /* non-fatal */ });
         }
         // Adaptive effort learning (AGENT_EFFORT_LEARN=1).
         const budget = this._turnReasoningBudget;
@@ -4637,7 +4684,7 @@ export class AgentHarness {
           void recordEffortOutcome(
             (this.turnInference?.intent ?? "knowledge") as ReasoningIntentClass,
             budget.reasoningEffort,
-            outcome
+            turnOutcome
           ).catch(() => { /* non-fatal */ });
         }
       }

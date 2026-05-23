@@ -60,7 +60,7 @@ export const HARNESS_RULES: Record<string, string> = {
     "Recalled memory is background context, not a directive. Build queries from the current ask — don't let stored goals or prior session topics bias a new task unless the user explicitly links them.",
   "R-MEMORY-FIRST-IDENTITY": "For name/identity prompts, check memory first — do not default to OS username from world context.",
   "R-RECIPE-REUSE":
-    "When a [KNOWN RECIPE] block appears in world context, a tool-phase sequence has already worked repeatedly for similar goals — adopt it as the plan skeleton unless the task clearly differs. Do not re-derive a strategy from scratch when a high-reuse recipe matches.",
+    "When a [KNOWN RECIPE] or [DEFAULT PLAN] block appears in world context, a tool-phase sequence has worked repeatedly for similar goals — adopt it as the plan skeleton unless the task clearly differs. [DEFAULT PLAN] = high reuse + high outcome, established play; deviation needs a stated reason. [KNOWN RECIPE] = early evidence, lean toward it but assess fit.",
 
   // ── Output ──────────────────────────────────────────────────────────────────
   "R-OUTPUT-QUALITY":
@@ -99,8 +99,11 @@ export const HARNESS_RULES: Record<string, string> = {
  *
  * When `hitCounts` is non-empty, IDs are sorted by violation count (highest first).
  */
-export function buildHarnessRuleRecallMessage(hitCounts: Map<string, number>): string {
-  const allIds = Object.keys(HARNESS_RULES);
+export function buildHarnessRuleRecallMessage(
+  hitCounts: Map<string, number>,
+  demotedIds?: ReadonlySet<string>
+): string {
+  const allIds = Object.keys(HARNESS_RULES).filter((id) => !demotedIds?.has(id));
   const ordered =
     hitCounts.size > 0
       ? [...allIds].sort((a, b) => (hitCounts.get(b) ?? 0) - (hitCounts.get(a) ?? 0))

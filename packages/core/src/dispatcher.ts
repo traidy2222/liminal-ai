@@ -6,6 +6,7 @@ import { guardToolArgs } from "./tool_arg_guard.js";
 import type { SafetyJudge } from "./safety_judge.js";
 import { stableArgsJsonKey } from "./json_stable.js";
 import { effectiveHarnessEnvRaw } from "./harness_effective_env.js";
+import { resolveWorkspaceRoot } from "./workspace_root.js";
 
 // ─── Schema validation (#5 — Tool Invocation Reliability arXiv:2601.16280) ────
 
@@ -345,8 +346,12 @@ export class ToolDispatcher {
       }
     }
 
-    // Acquire resource locks if declared
-    const resourceIds = tool.resourceLocks?.(args) ?? [];
+    // Acquire resource locks if declared. Prefix each lock ID with the harness's
+    // workspace root so two sub-agents on different worktrees don't false-share
+    // a `file:write:src/foo.ts` lock just because the relative paths collide.
+    const rawResourceIds = tool.resourceLocks?.(args) ?? [];
+    const wsRoot = resolveWorkspaceRoot();
+    const resourceIds = rawResourceIds.map((id) => `ws:${wsRoot}::${id}`);
     if (resourceIds.length > 0 && this.orchestrator) {
       const acquired = await this.orchestrator.locks.acquireAll(
         resourceIds,

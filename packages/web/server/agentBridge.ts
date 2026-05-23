@@ -203,6 +203,7 @@ export class AgentBridge {
         output: capSseToolOutput(p.result.ok ? p.result.output : p.result.error),
       })
     );
+    emitter.on("turn_summary", (p) => this.sse.send("turn_summary", p));
     emitter.on("turn_end", (p) => {
       this.lastTurnEndedAtMs = Date.now();
       this.stopHeartbeat();

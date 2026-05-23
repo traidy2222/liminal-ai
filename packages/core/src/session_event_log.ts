@@ -230,12 +230,17 @@ export function attachSessionEventLog(emitter: AgentEmitter, sessionId: string):
     });
   };
 
+  const onTurnSummary = (p: AgentEventMap["turn_summary"]) => {
+    write({ event: "turn_summary", turnIndex, summary: p });
+  };
+
   emitter.on("send_start", onSendStart);
   emitter.on("text", onText);
   emitter.on("provider_retry", onProviderRetry);
   emitter.on("tool_start", onToolStart);
   emitter.on("tool_result", onToolResult);
   emitter.on("context_compressed", onContextCompressed);
+  emitter.on("turn_summary", onTurnSummary);
   emitter.on("turn_end", onTurnEnd);
   emitter.on("error", onError);
   emitter.on("approval_decision", onApproval);
@@ -247,6 +252,7 @@ export function attachSessionEventLog(emitter: AgentEmitter, sessionId: string):
     emitter.off("tool_start", onToolStart);
     emitter.off("tool_result", onToolResult);
     emitter.off("context_compressed", onContextCompressed);
+    emitter.off("turn_summary", onTurnSummary);
     emitter.off("turn_end", onTurnEnd);
     emitter.off("error", onError);
     emitter.off("approval_decision", onApproval);

@@ -280,6 +280,13 @@ export interface ChildAgentConfig {
   goal: string;
   /** Optional focused brief distinct from orchestration label goal. */
   taskBrief?: string;
+  /**
+   * Override the workspace root for this child. The child's send() runs inside
+   * an AsyncLocalStorage scope so all `resolveWorkspaceRoot()` calls — and
+   * thus file tools — operate on this path. Use with `git_worktree` to give a
+   * sub-agent an isolated checkout that doesn't contend on the parent's locks.
+   */
+  workspaceRoot?: string;
   /** Whether child should inherit parent persona block. Default false (neutral worker persona). */
   inheritPersona?: boolean;
   /** Structured spawn contract for focused specialist behavior. */
@@ -484,6 +491,25 @@ export interface DocQualityReport {
 
 // ─── Events ───────────────────────────────────────────────────────────────────
 
+/**
+ * Compact at-a-glance summary of a completed send() — emitted just before
+ * `turn_end` for UIs that want to render a one-line header per turn.
+ */
+export interface TurnSummary {
+  intentClass: string;
+  /** scoreTurnOutcome [0, 1]. */
+  outcomeScore: number;
+  toolCount: number;
+  roundCount: number;
+  durationMs: number;
+  /** First ~120 chars of the final assistant message. */
+  finalAnswerPreview: string;
+  /** Up to three most-used tool names this turn. */
+  keyTools: string[];
+  terminationReason: TurnEndTerminationReason;
+  traceId?: string;
+}
+
 export interface AgentEventMap {
   /** Emitted at the start of each root/child send() with the user text (session logging). */
   send_start: { userMessage: string; agentDepth: number; traceId?: string };
@@ -520,6 +546,8 @@ export interface AgentEventMap {
   };
   /** Emitted when the user answers an ask_user prompt. (#7 Structured Event Log) */
   ask_user_answered: { prompt: string; answer: string };
+  /** Compact summary of a completed send() — emitted just before `turn_end`. */
+  turn_summary: TurnSummary;
   turn_end: {
     contextSnapshot: ContextSnapshot;
     /** Wall-clock time for the entire send() call in ms. */
@@ -849,6 +877,12 @@ export interface AgentConfig {
   openRouterApiKey: string;
   model: string;
   baseURL: string;
+  /**
+   * Per-harness workspace root. When set, this harness's `send()` runs inside
+   * an AsyncLocalStorage scope so `resolveWorkspaceRoot()` (and every tool that
+   * uses it) returns this value. Defaults to the global root at construction.
+   */
+  workspaceRoot?: string;
   context: ContextConfig;
   maxToolRoundsPerTurn: number;
   /** Max retries on transient provider errors (default: 3) */

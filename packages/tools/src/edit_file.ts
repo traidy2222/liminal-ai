@@ -125,11 +125,13 @@ export const editFileTool = defineTool({
     additionalProperties: false,
   },
 
-  handler: async (args) => {
+  handler: async (args, emit) => {
     const safe = resolveWithinWorkspace(String(args["path"] ?? ""));
     if (!safe.ok || !safe.resolvedPath) return { ok: false, error: safe.error ?? "invalid path" };
     const filePath = safe.resolvedPath;
     const preview = Boolean(args["preview"]);
+    const ws = resolveWorkspaceRoot();
+    const displayPath = path.relative(ws, filePath) || path.basename(filePath);
 
     // ── Verify file exists ───────────────────────────────────────────────────
     try {
@@ -208,6 +210,17 @@ export const editFileTool = defineTool({
           ].join("\n"),
         };
       }
+      // Stream the diff preview BEFORE writing so the UI shows what's about
+      // to change ahead of the "written" confirmation.
+      const beforeLines = rawContent.split("\n").length;
+      const afterLines = current.split("\n").length;
+      const lineDelta = afterLines - beforeLines;
+      const sign = lineDelta >= 0 ? "+" : "";
+      emit?.(
+        `\n[diff preview] ${displayPath} (${replacements.length} replacement${replacements.length !== 1 ? "s" : ""}, ${sign}${lineDelta} lines)\n` +
+          report.map((r) => `  ${r}`).join("\n") +
+          "\n"
+      );
       try {
         await writeFile(filePath, current, "utf8");
       } catch (e) {
@@ -268,6 +281,21 @@ export const editFileTool = defineTool({
       const note = appliedAt !== parsed.oldStart ? ` (fuzzy: stated ${parsed.oldStart}, matched ${appliedAt})` : "";
       return { ok: true, output: `PREVIEW — would apply hunk at line ${appliedAt}${note}` };
     }
+
+    // Stream the hunk preview before writing.
+    const removedCount = parsed.oldLines.length;
+    const addedCount = parsed.newLines.length;
+    const fuzzyNote = appliedAt !== parsed.oldStart ? ` (fuzzy: stated ${parsed.oldStart} → matched ${appliedAt})` : "";
+    const previewLines: string[] = [];
+    for (const old of parsed.oldLines.slice(0, 4)) previewLines.push(`  - ${old.slice(0, 180)}`);
+    if (parsed.oldLines.length > 4) previewLines.push(`  - …+${parsed.oldLines.length - 4} more removed`);
+    for (const ne of parsed.newLines.slice(0, 4)) previewLines.push(`  + ${ne.slice(0, 180)}`);
+    if (parsed.newLines.length > 4) previewLines.push(`  + …+${parsed.newLines.length - 4} more added`);
+    emit?.(
+      `\n[diff preview] ${displayPath} hunk at line ${appliedAt}${fuzzyNote} (-${removedCount}/+${addedCount})\n` +
+        previewLines.join("\n") +
+        "\n"
+    );
 
     try {
       await writeFile(filePath, nextContent, "utf8");

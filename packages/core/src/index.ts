@@ -1,4 +1,4 @@
-export { resolveWorkspaceRoot } from "./workspace_root.js";
+export { resolveWorkspaceRoot, runWithWorkspaceRoot } from "./workspace_root.js";
 export {
   runHarnessEffectiveEnvContext,
   resolveHarnessEnvRaw,
@@ -124,6 +124,7 @@ export type {
   PersonaConfig,
   TurnEndHarnessMetrics,
   TurnEndTerminationReason,
+  TurnSummary,
   EpistemicState,
   AgentSafetyJudgeOptions,
   ExecutionState,

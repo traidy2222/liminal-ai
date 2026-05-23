@@ -215,4 +215,7 @@ export const HARNESS_ENV_DEFAULTS: Readonly<Record<string, string>> = {
   // Compensation ledger
   AGENT_COMPENSATION_ENABLED: "1",    // track and replay plan side-effect compensations
   AGENT_COMPENSATION_MAX_ACTIONS: "32", // max compensation entries per plan
+  // Closed-loop self-tuning — auto-demote rules with consistently low avg outcome
+  AGENT_RULE_DEMOTE_THRESHOLD: "0.4",   // rules below this avg_outcome get demoted
+  AGENT_RULE_DEMOTE_MIN_SAMPLES: "20",  // minimum sample size before demotion can fire
 };

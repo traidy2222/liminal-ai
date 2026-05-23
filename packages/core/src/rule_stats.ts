@@ -5,6 +5,7 @@
 import { readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { resolveWorkspaceRoot } from "./workspace_root.js";
+import { effectiveHarnessEnvRaw } from "./harness_effective_env.js";
 
 export function ruleStatsPath(): string {
   return join(resolveWorkspaceRoot(), ".agent_rule_stats.json");
@@ -114,6 +115,44 @@ export async function recordRuleOutcomes(ruleIds: string[], outcome: number): Pr
   }
 }
 
+// ─── Auto-demotion of low-effectiveness rules ────────────────────────────────
+
+const DEFAULT_DEMOTE_THRESHOLD = 0.4;
+const DEFAULT_DEMOTE_MIN_SAMPLES = 20;
+
+function resolveDemoteParams(): { threshold: number; minSamples: number } {
+  const tRaw = effectiveHarnessEnvRaw("AGENT_RULE_DEMOTE_THRESHOLD");
+  const nRaw = effectiveHarnessEnvRaw("AGENT_RULE_DEMOTE_MIN_SAMPLES");
+  const t = tRaw ? parseFloat(tRaw) : NaN;
+  const n = nRaw ? parseInt(nRaw, 10) : NaN;
+  return {
+    threshold: Number.isFinite(t) && t >= 0 && t <= 1 ? t : DEFAULT_DEMOTE_THRESHOLD,
+    minSamples: Number.isFinite(n) && n > 0 ? n : DEFAULT_DEMOTE_MIN_SAMPLES,
+  };
+}
+
+/**
+ * Rule IDs that should be excluded from the round-2 recall because their
+ * avg_outcome is consistently low over a meaningful sample. The rule remains
+ * in stats and self_telemetry — only the recall message hides it.
+ */
+export async function getDemotedRuleIds(): Promise<Set<string>> {
+  try {
+    const { threshold, minSamples } = resolveDemoteParams();
+    const stats = await loadRuleStats();
+    const out = new Set<string>();
+    for (const entry of Object.values(stats.rules)) {
+      const oc = entry.outcomeCount ?? 0;
+      if (oc < minSamples) continue;
+      const avg = (entry.outcomeSum ?? 0) / oc;
+      if (avg < threshold) out.add(entry.ruleId);
+    }
+    return out;
+  } catch {
+    return new Set<string>();
+  }
+}
+
 /** Return a map of ruleId → hitCount for adaptive rule injection. */
 export async function getRuleHitCounts(): Promise<Map<string, number>> {
   try {
@@ -135,6 +174,7 @@ export async function getRuleHitCounts(): Promise<Map<string, number>> {
 export async function formatRuleStatsReport(topN = 10): Promise<string> {
   try {
     const stats = await loadRuleStats();
+    const demoted = await getDemotedRuleIds();
     const entries = Object.values(stats.rules)
       .sort((a, b) => b.hitCount - a.hitCount)
       .slice(0, topN);
@@ -142,7 +182,8 @@ export async function formatRuleStatsReport(topN = 10): Promise<string> {
     const lines = entries.map((e) => {
       const oc = e.outcomeCount ?? 0;
       const avg = oc > 0 ? ((e.outcomeSum ?? 0) / oc).toFixed(2) : "n/a";
-      return `  ${e.ruleId}: turns=${e.hitCount} avg_outcome=${avg} (n=${oc}) last=${new Date(e.lastHitAt).toISOString().slice(0, 10)}`;
+      const tag = demoted.has(e.ruleId) ? " [auto-demoted: low avg, hidden from recall]" : "";
+      return `  ${e.ruleId}: turns=${e.hitCount} avg_outcome=${avg} (n=${oc}) last=${new Date(e.lastHitAt).toISOString().slice(0, 10)}${tag}`;
     });
     return `Rule effectiveness — avg turn-outcome [0–1] of turns where the rule was injected (top ${topN} by use):\n${lines.join("\n")}`;
   } catch {
