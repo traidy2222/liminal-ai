@@ -29,5 +29,8 @@ docs/.vitepress/dist/
 docs/.vitepress/cache/
 docs/.vitepress/.temp/
 
+# Marketing site — separate repo: github.com/traidy2222/vireondynamics-website
+website/
+
 *.txt
 
