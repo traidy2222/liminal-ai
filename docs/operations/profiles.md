@@ -29,7 +29,7 @@ See [Configuration basics](../start/configuration-basics.md) for precedence.
 - `AGENT_VAULT_AUTO_WRITE=research`
 - `AGENT_WEB_READABILITY=1`
 
-Workflow: [Research with web tools](../guides/research-with-web-tools.md).
+Workflow: [Harness protocol — Web research](../concepts/harness-protocol.md#web-research-no-web_research-tool).
 
 ## Long-session / deep reasoning
 

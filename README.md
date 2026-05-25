@@ -29,13 +29,13 @@ not demo polish.
 **One command (Linux / macOS / WSL):**
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/traidy2222/liminal-ai/main/scripts/install.sh | bash
+curl -fsSL https://vireondynamics.com/install/install.sh | bash
 ```
 
 **Windows (PowerShell):**
 
 ```powershell
-irm https://raw.githubusercontent.com/traidy2222/liminal-ai/main/scripts/install.ps1 | iex
+irm https://vireondynamics.com/install/install.ps1 | iex
 ```
 
 Clones Liminal, runs setup, opens the web UI with persona bootstrap. See **[Install guide](https://docs.vireondynamics.com/liminal/start/install)** for paths, CI, and troubleshooting.

@@ -1,65 +1,71 @@
 # Liminal documentation
 
-Human-oriented guides for running, configuring, and extending the Liminal agent harness.
+Run, configure, and extend the Liminal agent harness (alpha v0.0.10).
 
-**Published (alpha):** [docs.vireondynamics.com/liminal/](https://docs.vireondynamics.com/liminal/) — built from this folder via the [vireondynamics-website](https://github.com/traidy2222/vireondynamics-website) docs portal. **Changelog:** [reference/changelog](./reference/changelog.md).
+**Published:** [docs.vireondynamics.com/liminal/](https://docs.vireondynamics.com/liminal/)
 
-**Last doc pass:** aligned with typed harness defaults, web Settings API, removed `web_research` tool, vault dedupe fixes, and SSE busy-state behavior.
+## Recommended path
 
-## I want to run Liminal
+```text
+Install → Quickstart → Configuration basics
+    → Architecture + Harness protocol
+    → Persona + Vault guides (when you use those features)
+    → Environment reference (lookup) + Troubleshooting (when stuck)
+```
 
-| Document | Contents |
-|----------|----------|
-| [Install](./start/install.md) | One-command install, `liminal` CLI, paths |
-| [Quickstart](./start/quickstart.md) | Manual install, build, `npm run tui` / `web` |
-| [Configuration basics](./start/configuration-basics.md) | `.env` vs Settings vs defaults |
-| [Troubleshooting](./operations/troubleshooting.md) | Common failures |
+## 1. Get running
 
-## I want to configure it
+| Step | Document |
+|------|----------|
+| Install (hosted scripts) | [Install](./start/install.md) |
+| First session & smoke test | [Quickstart](./start/quickstart.md) |
+| `.env` vs Settings vs defaults | [Configuration basics](./start/configuration-basics.md) |
+| Something broke | [Troubleshooting](./operations/troubleshooting.md) |
 
-| Document | Contents |
-|----------|----------|
-| [Changelog](./reference/changelog.md) | Alpha release notes (v0.0.1–v0.0.10) |
-| [Environment reference](./reference/environment.md) | **Generated** full `AGENT_*` table (`npm run docs:gen`) |
-| [Configuration reference](./configuration.md) | Narrative flag groups by subsystem |
-| [Tuning via Settings](./guides/tuning-via-settings.md) | Web Settings modal |
-| [Baseline profiles](./operations/profiles.md) | Recommended flag bundles |
-| [Web API](./reference/web-api.md) | REST + SSE endpoints |
+**Install commands (hosted):**
 
-## I want to understand the system
+```bash
+curl -fsSL https://vireondynamics.com/install/install.sh | bash   # Linux / macOS / WSL
+```
+
+```powershell
+irm https://vireondynamics.com/install/install.ps1 | iex          # Windows
+```
+
+## 2. Understand the harness
 
 | Document | Contents |
 |----------|----------|
 | [Architecture](./concepts/architecture.md) | Packages, ReAct loop, dispatcher, locks |
-| [Harness protocol](./concepts/harness-protocol.md) | R-* rules, web_fetch readability |
+| [Harness protocol](./concepts/harness-protocol.md) | R-* rules, web_fetch, large writes |
 | [Runtime behavior](./concepts/runtime-behavior.md) | World context, drift, reflexion |
 | [Identity stack](./concepts/identity-stack.md) | Persona vs harness vs base LLM |
-| [Memory and vault](./concepts/memory-and-vault.md) | Notes, Obsidian, dedupe |
+| [UI streaming](./concepts/ui-streaming.md) | SSE, busy state, web HUD |
+
+## 3. Persona & vault (operator guides)
+
+| Document | Contents |
+|----------|----------|
 | [Persona system](./concepts/persona-system.md) | Bootstrap, soul slices, UI theme |
-| [UI streaming](./concepts/ui-streaming.md) | SSE, busy state, artifacts |
-| [Events](./reference/events.md) | Telemetry payloads |
-
-## Task guides
-
-| Document | Contents |
-|----------|----------|
-| [Research with web tools](./guides/research-with-web-tools.md) | `web_search` + `web_fetch` |
-| [Vault briefs and updates](./guides/vault-briefs-and-updates.md) | `vault_write` without dedupe traps |
 | [Persona bootstrap](./guides/persona-bootstrap.md) | First-run voice setup |
-| [Running eval](./guides/running-eval.md) | `npm run eval` |
-| [Research quality](./guides/research-quality.md) | Synthesis checklist |
-| [Writing large files](./guides/writing-large-files.md) | Multi-part `write_file` / `append_file` |
+| [Memory and vault](./concepts/memory-and-vault.md) | Notes, Obsidian, dedupe |
+| [Vault briefs](./guides/vault-briefs-and-updates.md) | `vault_write` without dedupe traps |
 
-## Tools
+## 4. Reference
 
 | Document | Contents |
 |----------|----------|
+| [Changelog](./reference/changelog.md) | Alpha release notes v0.0.1–v0.0.10 |
+| [Environment reference](./reference/environment.md) | Generated full `AGENT_*` table (`npm run docs:gen`) |
+| [Configuration (narrative)](./configuration.md) | Flag groups by subsystem |
 | [Tool families](./reference/tools/index.md) | Lazy loading catalog |
+| [Web API](./reference/web-api.md) | REST + SSE |
+| [Events](./reference/events.md) | Telemetry payloads |
+| [Baseline profiles](./operations/profiles.md) | Recommended flag bundles |
 
 ## Contributors
 
-See repository root `README.md` and `CLAUDE.md`.
-
-**Browse locally:** `npm run docs:dev` — VitePress with sidebar search.
-
-**Maintenance:** `npm run docs:gen` · `npm run docs:check`
+- Source: [github.com/traidy2222/liminal-ai](https://github.com/traidy2222/liminal-ai)
+- Agent-oriented map: root `CLAUDE.md` and `README.md`
+- Local preview: `npm run docs:dev` in the monorepo
+- After env key changes: `npm run docs:gen` · `npm run docs:check`

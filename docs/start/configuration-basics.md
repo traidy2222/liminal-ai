@@ -28,15 +28,19 @@ Never commit API keys. Run `npm run verify-harness-defaults-no-secrets` in CI to
 ## Web Settings workflow
 
 1. Open the web client → **Settings**.
-2. Fields are grouped by tab (session, memory, web, safety, …) from `harness_settings_field_meta.ts`.
+2. Fields are grouped by tab (session, memory, web, safety, models, …) from `harness_settings_field_meta.ts`.
 3. Keys **locked by env** (set in `.env`) show as read-only — change `.env` and restart.
 4. Save writes to `.agent_runtime_prefs.json`; restart TUI/web if a running process should reload prefs.
 
-Details: [Tuning via Settings](../guides/tuning-via-settings.md), [Web API](../reference/web-api.md).
+**What you can change in Settings:** distill, tool body elide, lazy tool families, web fetch timeouts and readability, memory/vault/recall options, session greet, persona bootstrap, heartbeat surface, fast model slug (when not env-locked).
+
+**What stays in `.env`:** API keys, `AGENT_MODEL` / `AGENT_API_BASE_URL` when set there, `AGENT_VAULT_PATH`, `AGENT_WORKSPACE_ROOT`, `PORT`.
+
+**Save behavior:** `PUT /api/settings` while the agent is **idle** (HTTP 409 if mid-turn). API details: [Web API](../reference/web-api.md).
 
 ## Narrative flag groups
 
-Subsystem-oriented prose (persona bootstrap, web_fetch walls, heartbeat) remains in the legacy [Configuration reference](../configuration.md) page until fully split. Prefer the generated [Environment reference](../reference/environment.md) for a complete key list.
+Subsystem-oriented prose (persona bootstrap, web_fetch walls, heartbeat) remains in the [Configuration reference](../configuration.md) page. Prefer the generated [Environment reference](../reference/environment.md) for the complete key list.
 
 ## Recommended profiles
 

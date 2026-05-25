@@ -54,7 +54,7 @@ Mitigations (client):
 Mitigations (operator):
 - Rebuild `core`/`tools` and restart web after harness changes
 - Avoid calling `read_artifact` when distill/elide are off — see [Troubleshooting](../operations/troubleshooting.md)
-- Cap parallel slow `web_fetch` — see [Research with web tools](../guides/research-with-web-tools.md)
+- Cap parallel slow `web_fetch` — see [Harness protocol — Web research](./harness-protocol.md#web-research-no-web_research-tool)
 
 ### Session bootstrap
 

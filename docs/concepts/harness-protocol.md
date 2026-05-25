@@ -39,7 +39,7 @@ These are the rules emitted in the round-2 recall block (authoritative text live
 | **R-WRITE-ONE-VERIFY** | After verified `write_file`, at most one short sanity read—then answer. |
 | **R-DEDUP-TOOLS** | No duplicate same-intent `memory_query` / `recall_relevant` / same-path `read_file` / same URL `web_fetch` in one send. |
 | **R-CLOSED-ARTIFACT** | HTML/XML/SVG: first write must be valid minimal document or skeleton + diff. |
-| **R-READ-TOOL-ERRORS** | On tool error, apply the stated fix next (`overwrite:true`, `apply_diff`, etc.). |
+| **R-READ-TOOL-ERRORS** | On tool error, apply the stated fix next (`mode: overwrite`, `edit_file` replacements/diff, etc.). |
 | **R-SYNTAX-COLUMN** | `SyntaxError (path:line:column)`: anchor on that column; verify `:` vs `=`; no identical search/replace no-ops. |
 | **R-RESEARCH-BUDGET** | Stop after 3–4 substantive web sources on the same angle; synthesize. |
 | **R-SYNTHESIZE-VARY** | Briefings: each major theme once; avoid consecutive duplicate framing. |
@@ -74,8 +74,8 @@ Refer to `systemPrompt.ts` for exact wording. See [Identity stack](./identity-st
 ## Coherent multi-step development (operational summary)
 
 1. **Plan before sprawling** — For large creative or multi-file builds, `plan()` locks milestones and “done” criteria even when the user did not number steps.
-2. **Closed artifacts** — Especially single-file HTML/JS demos: either one complete document write or a minimal skeleton plus `apply_diff` / `patch_file`. Half-open tags cause rescue spirals.
-3. **Read tool errors literally** — `edit_file` content replace on an existing file requires `overwrite:true` or use replacements/diff; repeating the wrong mode wastes rounds.
+2. **Closed artifacts** — Especially single-file HTML/JS demos: either one complete `write_file` or a minimal skeleton plus `edit_file` (replacements or diff hunks). Half-open tags cause rescue spirals.
+3. **Read tool errors literally** — `write_file` with `mode: create` refuses existing paths; use `mode: overwrite` or `edit_file` for changes; repeating the wrong mode wastes rounds.
 4. **Dedup retrieval** — One `memory_query` (or equivalent) with the right scope beats three identical calls.
 5. **Compress once, resume smart** — After `compress_context()`, re-read only what you need to continue; do not re-fetch the same memory corpus.
 
@@ -88,7 +88,18 @@ When **`AGENT_WEB_READABILITY=1`**, `web_fetch` uses JSDOM + Mozilla Readability
 - **Author CSS stripped before parse** — Inline `<style>`, `<link rel=stylesheet>`, and `<script>` are removed before `new JSDOM(...)`.
 - **Hard wall** — Entire `web_fetch` call is capped by `AGENT_WEB_FETCH_TOTAL_WALL_MS` (default 55s).
 
-See [Configuration](../configuration.md#web-fetch-and-readability) and [Research with web tools](../guides/research-with-web-tools.md).
+See [Configuration](../configuration.md#web-fetch-and-readability).
+
+## Web research (no `web_research` tool)
+
+Multi-source research uses **`web_search`** plus selective **`web_fetch`** calls (often parallel in one round). There is no separate `web_research` tool.
+
+1. Run 2–4 `web_search` queries with different angles (background, latest status, impact).
+2. Pick 3–4 high-signal URLs per angle; respect **R-RESEARCH-BUDGET** (synthesize after enough sources).
+3. `web_fetch` each URL — hard wall `AGENT_WEB_FETCH_TOTAL_WALL_MS` (default 55s per call).
+4. Synthesize with timeline, source tiers, uncertainty, and open questions.
+
+For bot walls use browser tools (`AGENT_BROWSER=1`, `npm run browser:install` once) or `AGENT_WEB_FETCH_403_RETRY` retries.
 
 ## Personality heartbeat (safety and spam avoidance)
 
@@ -104,7 +115,17 @@ When a completion hits the provider **length** limit, or a file-write tool argum
 | `AGENT_MAX_COMPLETION_TOKENS` | `0` | Main stream `max_tokens` (`0` = provider default) |
 | `AGENT_WRITE_INTEGRITY_NUDGE` | `1` | System note after writes reporting `likely_truncated=true` |
 
-Operator workflow for large new files: [Writing large files](../guides/writing-large-files.md).
+### Large file writes
+
+Use **`write_file`** with `mode: create` for the first chunk, then **`write_file`** with `mode: append` for follow-ups (or `edit_file` for targeted edits). Do not call `create` twice on the same path.
+
+| Variable | Default | Role |
+|----------|---------|------|
+| `AGENT_LENGTH_RESUME_MAX` | `3` | Auto-continue truncated tool JSON / completions |
+| `AGENT_WRITE_STREAM_SINK` | `1` | Stream large `content` to disk while args arrive |
+| `AGENT_WRITE_INTEGRITY_NUDGE` | `1` | Nudge when `likely_truncated=true` |
+
+Details: [Troubleshooting — incomplete writes](../operations/troubleshooting.md#file-ends-abruptly-incomplete-write).
 
 ## Related documentation
 
@@ -112,5 +133,3 @@ Operator workflow for large new files: [Writing large files](../guides/writing-l
 - [Environment reference](../reference/environment.md) — generated key table.
 - [Runtime behavior](./runtime-behavior.md) — world context, reflexion, finalization.
 - [Architecture](./architecture.md) — ReAct loop, dispatcher, rule stats.
-- [Research quality](../guides/research-quality.md) — citation discipline.
-- [Research with web tools](../guides/research-with-web-tools.md) — `web_search` + `web_fetch`.

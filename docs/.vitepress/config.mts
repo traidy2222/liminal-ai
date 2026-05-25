@@ -1,9 +1,10 @@
 import { defineConfig } from "vitepress";
 
+/** Local preview of docs/ (monorepo). Published site uses website/docs-portal. */
 export default defineConfig({
   title: "Liminal",
   description: "Local-first agent harness documentation",
-  srcDir: ".",
+  srcDir: "..",
   outDir: ".vitepress/dist",
   cleanUrls: true,
   ignoreDeadLinks: [
@@ -14,15 +15,15 @@ export default defineConfig({
   ],
   themeConfig: {
     nav: [
-      { text: "Home", link: "/" },
+      { text: "Install", link: "/start/install" },
       { text: "Quickstart", link: "/start/quickstart" },
-      { text: "Configuration", link: "/start/configuration-basics" },
       { text: "Troubleshooting", link: "/operations/troubleshooting" },
     ],
     sidebar: [
       {
-        text: "Start",
+        text: "Start here",
         items: [
+          { text: "Overview", link: "/" },
           { text: "Install", link: "/start/install" },
           { text: "Quickstart", link: "/start/quickstart" },
           { text: "Configuration basics", link: "/start/configuration-basics" },
@@ -43,21 +44,18 @@ export default defineConfig({
       {
         text: "Guides",
         items: [
-          { text: "Research (web)", link: "/guides/research-with-web-tools" },
-          { text: "Vault briefs", link: "/guides/vault-briefs-and-updates" },
-          { text: "Settings modal", link: "/guides/tuning-via-settings" },
           { text: "Persona bootstrap", link: "/guides/persona-bootstrap" },
-          { text: "Running eval", link: "/guides/running-eval" },
-          { text: "Writing large files", link: "/guides/writing-large-files" },
+          { text: "Vault briefs & updates", link: "/guides/vault-briefs-and-updates" },
         ],
       },
       {
         text: "Reference",
         items: [
+          { text: "Changelog", link: "/reference/changelog" },
           { text: "Environment (generated)", link: "/reference/environment" },
           { text: "Web API", link: "/reference/web-api" },
           { text: "Events", link: "/reference/events" },
-          { text: "Tool families", link: "/reference/tools/index" },
+          { text: "Tool families", link: "/reference/tools/" },
           { text: "Configuration (narrative)", link: "/configuration" },
         ],
       },

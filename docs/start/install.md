@@ -1,19 +1,21 @@
 # Install
 
-One-command install for new users, plus manual setup for contributors. Liminal is in **alpha** (v0.0.10) — install scripts are dev/onboarding helpers, not a GA public release yet.
+Official one-command installers are hosted by Vireon Dynamics. They clone [liminal-ai](https://github.com/traidy2222/liminal-ai), build the monorepo, run setup, and open the web UI with persona bootstrap.
+
+**Stage:** alpha (v0.0.10) — installers are onboarding helpers, not a GA release channel yet.
 
 ## One command (recommended)
 
 **Linux / macOS / WSL:**
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/traidy2222/liminal-ai/main/scripts/install.sh | bash
+curl -fsSL https://vireondynamics.com/install/install.sh | bash
 ```
 
 **Windows (PowerShell):**
 
 ```powershell
-irm https://raw.githubusercontent.com/traidy2222/liminal-ai/main/scripts/install.ps1 | iex
+irm https://vireondynamics.com/install/install.ps1 | iex
 ```
 
 The installer will:
@@ -23,6 +25,8 @@ The installer will:
 3. Walk you through **API key + provider** setup (writes `.env`)
 4. Run **`liminal doctor`** preflight checks
 5. Start the **web UI** with **persona bootstrap** and open your browser
+
+Scripts are also in the repo at `scripts/install.sh` and `scripts/install.ps1` if you prefer to inspect them before running.
 
 ### Install locations
 
@@ -39,6 +43,7 @@ Override with environment variables:
 | `LIMINAL_HOME` | Parent dir (`$LIMINAL_HOME/liminal-ai`) |
 | `LIMINAL_SKIP_LAUNCH=1` | Skip auto-start of web UI after install |
 | `AGENT_API_KEY` | Non-interactive setup (CI / scripted install) |
+| `LIMINAL_REPO_URL` | Alternate git remote (default: liminal-ai on GitHub) |
 
 ## `liminal` CLI
 
@@ -76,14 +81,14 @@ liminal setup --no-launch            # Do not start web after setup
 ```bash
 export AGENT_API_KEY=sk-...
 export AGENT_API_BASE_URL=https://openrouter.ai/api/v1   # optional
-export AGENT_MODEL=deepseek/deepseek-chat                 # optional
+export AGENT_MODEL=deepseek/deepseek-v4-pro               # optional
 liminal setup --non-interactive --skip-if-configured
 liminal doctor
 ```
 
 ## Manual install (contributors)
 
-If you already have the repo:
+If you develop from a git checkout:
 
 ```bash
 git clone https://github.com/traidy2222/liminal-ai.git
@@ -100,8 +105,6 @@ See [Quickstart](./quickstart.md) for smoke tests and next steps.
 ## Troubleshooting install
 
 Run **`liminal doctor`** first — it checks Node 22+, npm 10+, `.env` API key, `core`/`tools` builds, and port availability.
-
-Common fixes:
 
 | Symptom | Fix |
 |---------|-----|

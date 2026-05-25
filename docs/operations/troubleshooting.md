@@ -18,9 +18,9 @@ Checks Node 22+, npm 10+, `.env` API key, `packages/core` and `packages/tools` b
 - **`web_fetch` appearing stuck 5+ minutes** — hard wall `AGENT_WEB_FETCH_TOTAL_WALL_MS` (default 55s); readability in worker thread; rebuild `tools`.
 - **Web “stuck processing”** — client uses `lastTurnEndedAt` + consecutive idle polls ([UI streaming](../concepts/ui-streaming.md)).
 - **Persona bootstrap 500 on first load** — server gates API on session ready ([Persona bootstrap](../guides/persona-bootstrap.md)).
-- **Large file ends mid-function or mid-tag** — use `write_file` once, then `append_file` or `write_file_part`; see [Writing large files](../guides/writing-large-files.md). Check tool output for `likely_truncated=true`.
+- **Large file ends mid-function or mid-tag** — `write_file` `mode: create` then `mode: append`; see [below](#file-ends-abruptly-incomplete-write).
 
-## File ends abruptly (incomplete write)
+## File ends abruptly (incomplete write) {#file-ends-abruptly-incomplete-write}
 
 Symptom: Generated file stops mid-string, missing closing braces/tags, or far fewer lines than requested.
 
@@ -29,13 +29,15 @@ Symptom: Generated file stops mid-string, missing closing braces/tags, or far fe
 **Fix:**
 
 1. Rebuild `core` + `tools`, restart the UI.
-2. Use the multi-part workflow: [Writing large files](../guides/writing-large-files.md).
-3. Raise `AGENT_MAX_COMPLETION_TOKENS` (e.g. `16384`) if the model route allows it.
-4. Ensure `AGENT_LENGTH_RESUME_MAX` is not `0` (default `3` auto-continues truncated generations).
+2. **Multi-part workflow:** `write_file` with `mode: create` for the first section, then `write_file` with `mode: append` for each follow-up (or `edit_file` for small fixes). Verify with `file_metadata`.
+3. Raise `AGENT_MAX_COMPLETION_TOKENS` if your provider route allows a higher cap.
+4. Keep `AGENT_LENGTH_RESUME_MAX` at `3` (default) so truncated tool JSON auto-continues.
 
-**Do not:** Call `write_file` again on the same path (create-only). Use `append_file` or `edit_file` / `apply_diff` to complete.
+**Do not:** Call `write_file` with `mode: create` twice on the same path — the second call errors. Use `mode: append` or `edit_file`.
 
-With `AGENT_WRITE_STREAM_SINK=1` (default), partial bytes may already exist on disk after a cutoff — check the `[CONTINUE]` message for the saved path and byte count, then `append_file`.
+With `AGENT_WRITE_STREAM_SINK=1` (default), partial bytes may land on disk after a cutoff — read the `[CONTINUE]` message, then `write_file` `mode: append` to finish.
+
+See [Harness protocol — Large file writes](../concepts/harness-protocol.md#large-file-writes).
 
 ## Build/Runtime Mismatch
 
@@ -73,7 +75,7 @@ When enabled: 25s wall per call, 12MB max file. Activate `memory_advanced` when 
 - 403: bot-wall retries, fallback URL template, or `browser_*`
 - Avoid many parallel fetches to slow news sites in one turn
 
-[Research with web tools](../guides/research-with-web-tools.md)
+Protocol: [Harness protocol — Web research](../concepts/harness-protocol.md#web-research-no-web_research-tool)
 
 ## `recall_relevant` and `max_results`
 

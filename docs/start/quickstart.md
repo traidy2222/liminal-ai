@@ -13,22 +13,24 @@ Get Liminal running locally in a few minutes.
 **Linux / macOS / WSL:**
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/traidy2222/liminal-ai/main/scripts/install.sh | bash
+curl -fsSL https://vireondynamics.com/install/install.sh | bash
 ```
 
 **Windows (PowerShell):**
 
 ```powershell
-irm https://raw.githubusercontent.com/traidy2222/liminal-ai/main/scripts/install.ps1 | iex
+irm https://vireondynamics.com/install/install.ps1 | iex
 ```
 
-This clones Liminal, runs the setup wizard, verifies the install, and opens the web UI with persona bootstrap. Details: [Install guide](./install.md).
+This clones Liminal, runs the setup wizard, verifies the install, and opens the web UI with persona bootstrap. Paths, CI, and flags: [Install guide](./install.md).
 
 ## Manual install (contributors)
 
 ### 1. Install dependencies
 
 ```bash
+git clone https://github.com/traidy2222/liminal-ai.git
+cd liminal-ai
 npm install
 ```
 
@@ -96,6 +98,6 @@ First-run **persona bootstrap** may appear in web/TUI unless disabled (`AGENT_PE
 |------|------|
 | Install paths & CI | [Install](./install.md) |
 | Configure flags | [Configuration basics](./configuration-basics.md), [Environment reference](../reference/environment.md) |
-| Research / vault briefs | [Research with web tools](../guides/research-with-web-tools.md), [Vault briefs](../guides/vault-briefs-and-updates.md) |
+| Persona & vault workflows | [Persona bootstrap](../guides/persona-bootstrap.md), [Vault briefs](../guides/vault-briefs-and-updates.md) |
 | Architecture | [Architecture](../concepts/architecture.md) |
 | Problems | [Troubleshooting](../operations/troubleshooting.md) |
