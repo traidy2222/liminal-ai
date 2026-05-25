@@ -52,6 +52,7 @@ export default defineConfig({
         text: "Reference",
         items: [
           { text: "Changelog", link: "/reference/changelog" },
+          { text: "Roadmap", link: "/reference/roadmap" },
           { text: "Environment (generated)", link: "/reference/environment" },
           { text: "Web API", link: "/reference/web-api" },
           { text: "Events", link: "/reference/events" },

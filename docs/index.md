@@ -56,6 +56,7 @@ irm https://vireondynamics.com/install/install.ps1 | iex          # Windows
 | Document | Contents |
 |----------|----------|
 | [Changelog](./reference/changelog.md) | Alpha release notes v0.0.1–v0.0.10 |
+| [Roadmap](./reference/roadmap.md) | Alpha → beta → RC → v0.1.0 public preview |
 | [Environment reference](./reference/environment.md) | Generated full `AGENT_*` table (`npm run docs:gen`) |
 | [Configuration (narrative)](./configuration.md) | Flag groups by subsystem |
 | [Tool families](./reference/tools/index.md) | Lazy loading catalog |

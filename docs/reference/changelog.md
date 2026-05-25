@@ -83,6 +83,8 @@ Monorepo scaffold, AgentHarness, tools, TUI, web, eval, Liminal rebrand.
 
 ## Planned (not started)
 
+See the full [Roadmap](./roadmap.md) for what each milestone means.
+
 | Stage | Target | Status |
 |-------|--------|--------|
 | Beta | Stability + defaults freeze candidate | Not started |
