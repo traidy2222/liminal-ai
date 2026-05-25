@@ -19,6 +19,7 @@ Human-oriented guides for running, configuring, and extending the Liminal agent 
 
 | Document | Contents |
 |----------|----------|
+| [Changelog](./reference/changelog.md) | Alpha release notes (v0.0.1–v0.0.10) |
 | [Environment reference](./reference/environment.md) | **Generated** full `AGENT_*` table (`npm run docs:gen`) |
 | [Configuration reference](./configuration.md) | Narrative flag groups by subsystem |
 | [Tuning via Settings](./guides/tuning-via-settings.md) | Web Settings modal |

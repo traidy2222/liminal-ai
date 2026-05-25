@@ -2,7 +2,7 @@
 
 Human-oriented guides for running, configuring, and extending the Liminal agent harness.
 
-**Published (alpha):** [docs.vireondynamics.com/liminal/](https://docs.vireondynamics.com/liminal/) — built from this folder via the [vireondynamics-website](https://github.com/traidy2222/vireondynamics-website) docs portal. Marketing changelog: [vireondynamics.com/liminal/changelog](https://vireondynamics.com/liminal/changelog).
+**Published (alpha):** [docs.vireondynamics.com/liminal/](https://docs.vireondynamics.com/liminal/) — built from this folder via the [vireondynamics-website](https://github.com/traidy2222/vireondynamics-website) docs portal. **Changelog:** [reference/changelog](./reference/changelog.md).
 
 **Last doc pass:** aligned with typed harness defaults, web Settings API, removed `web_research` tool, vault dedupe fixes, and SSE busy-state behavior.
 
@@ -19,6 +19,7 @@ Human-oriented guides for running, configuring, and extending the Liminal agent 
 
 | Document | Contents |
 |----------|----------|
+| [Changelog](./reference/changelog.md) | Alpha release notes (v0.0.1–v0.0.10) |
 | [Environment reference](./reference/environment.md) | **Generated** full `AGENT_*` table (`npm run docs:gen`) |
 | [Configuration reference](./configuration.md) | Narrative flag groups by subsystem |
 | [Tuning via Settings](./guides/tuning-via-settings.md) | Web Settings modal |

@@ -138,7 +138,7 @@ Narrative flag groups: [docs/configuration.md](docs/configuration.md). Baseline 
 | Web research workflow | [research with web tools](https://docs.vireondynamics.com/liminal/guides/research-with-web-tools) |
 | Vault briefs / updates | [vault briefs](https://docs.vireondynamics.com/liminal/guides/vault-briefs-and-updates) |
 
-Edit locally: `npm run docs:dev` in this repo. Changelog and blog: [vireondynamics.com](https://vireondynamics.com).
+Edit locally: `npm run docs:dev` in this repo. Changelog: [docs portal](https://docs.vireondynamics.com/liminal/reference/changelog).
 
 ## Contributing
 
