@@ -8,7 +8,7 @@ Format: **v0.0.x** entries keyed to the last GitHub push in each slice (~130 com
 
 ## [v0.0.10] — 2026-05-23 — Current alpha
 
-Task Worlds, `liminal` dev CLI + install scripts, recipe library v2, closed-loop tuning.
+Task Worlds removed; execution state + compensation pass, `liminal` dev CLI, recipe library v2, web_fetch and persona theme polish.
 
 [Full notes](https://vireondynamics.com/liminal/changelog/v0-0-10)
 
