@@ -2,6 +2,8 @@
 
 Human-oriented guides for running, configuring, and extending the Liminal agent harness.
 
+**Published (alpha):** [docs.vireondynamics.com/liminal/](https://docs.vireondynamics.com/liminal/) — built from this folder via the [vireondynamics-website](https://github.com/traidy2222/vireondynamics-website) docs portal. Marketing changelog: [vireondynamics.com/liminal/changelog](https://vireondynamics.com/liminal/changelog).
+
 **Last doc pass:** aligned with typed harness defaults, web Settings API, removed `web_research` tool, vault dedupe fixes, and SSE busy-state behavior.
 
 ## I want to run Liminal

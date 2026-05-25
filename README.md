@@ -38,7 +38,7 @@ curl -fsSL https://raw.githubusercontent.com/traidy2222/liminal-ai/main/scripts/
 irm https://raw.githubusercontent.com/traidy2222/liminal-ai/main/scripts/install.ps1 | iex
 ```
 
-Clones Liminal, runs setup, opens the web UI with persona bootstrap. See **[docs/start/install.md](docs/start/install.md)** for paths, CI, and troubleshooting.
+Clones Liminal, runs setup, opens the web UI with persona bootstrap. See **[Install guide](https://docs.vireondynamics.com/liminal/start/install)** for paths, CI, and troubleshooting.
 
 **Already have the repo:**
 
@@ -66,7 +66,7 @@ AGENT_MODEL=deepseek/deepseek-chat
 | `liminal tui --bootstrap` | Terminal UI |
 | `liminal update` | Pull + rebuild |
 
-Step-by-step setup, Settings vs `.env`, and profiles → **[docs/start/quickstart.md](docs/start/quickstart.md)** · **[docs/start/install.md](docs/start/install.md)** · **[docs/start/configuration-basics.md](docs/start/configuration-basics.md)**.
+Step-by-step setup, Settings vs `.env`, and profiles → **[Quickstart](https://docs.vireondynamics.com/liminal/start/quickstart)** · **[Install](https://docs.vireondynamics.com/liminal/start/install)** · **[Configuration basics](https://docs.vireondynamics.com/liminal/start/configuration-basics)**.
 
 ## Capabilities
 
@@ -127,18 +127,18 @@ Narrative flag groups: [docs/configuration.md](docs/configuration.md). Baseline 
 
 ## Documentation
 
-**[docs/README.md](docs/README.md)** — hub by intent (run · configure · understand · contribute).
+**Published:** [docs.vireondynamics.com/liminal/](https://docs.vireondynamics.com/liminal/) (alpha — synced from this repo’s `docs/` folder).
 
 | If you need… | Start here |
 |--------------|------------|
-| One-command install | [install](docs/start/install.md) |
-| Install & first session | [quickstart](docs/start/quickstart.md) |
-| Stuck UI, vault, web_fetch | [troubleshooting](docs/operations/troubleshooting.md) |
-| Architecture & protocol | [architecture](docs/concepts/architecture.md) · [harness protocol](docs/concepts/harness-protocol.md) |
-| Web research workflow | [research with web tools](docs/guides/research-with-web-tools.md) |
-| Vault briefs / updates | [vault briefs](docs/guides/vault-briefs-and-updates.md) |
+| One-command install | [install](https://docs.vireondynamics.com/liminal/start/install) |
+| Install & first session | [quickstart](https://docs.vireondynamics.com/liminal/start/quickstart) |
+| Stuck UI, vault, web_fetch | [troubleshooting](https://docs.vireondynamics.com/liminal/operations/troubleshooting) |
+| Architecture & protocol | [architecture](https://docs.vireondynamics.com/liminal/concepts/architecture) · [harness protocol](https://docs.vireondynamics.com/liminal/concepts/harness-protocol) |
+| Web research workflow | [research with web tools](https://docs.vireondynamics.com/liminal/guides/research-with-web-tools) |
+| Vault briefs / updates | [vault briefs](https://docs.vireondynamics.com/liminal/guides/vault-briefs-and-updates) |
 
-Optional local site: `npm run docs:dev`.
+Edit locally: `npm run docs:dev` in this repo. Changelog and blog: [vireondynamics.com](https://vireondynamics.com).
 
 ## Contributing
 

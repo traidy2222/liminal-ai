@@ -1,6 +1,6 @@
 # Install
 
-One-command install for new users, plus manual setup for contributors.
+One-command install for new users, plus manual setup for contributors. Liminal is in **alpha** (v0.0.10) — install scripts are dev/onboarding helpers, not a GA public release yet.
 
 ## One command (recommended)
 
