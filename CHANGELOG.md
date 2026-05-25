@@ -2,9 +2,9 @@
 
 All notable changes to [Liminal AI](https://github.com/traidy2222/liminal-ai) are documented here and on [vireondynamics.com/liminal/changelog](https://vireondynamics.com/liminal/changelog).
 
-Format: pre-release milestones (alpha → beta → rc) then public **v0.1.0**. We group ~130 commits into a few releases instead of per-commit lists.
+Format: pre-release milestones (alpha → beta → rc) then public **v0.1.0**. Dates are the last push to `main` for each milestone on GitHub (~130 commits grouped, not per-commit).
 
-## [v0.1.0] — 2026-05-25 — Public preview
+## [v0.1.0] — 2026-05-23 — Public preview
 
 First public release. MIT license. `liminal` CLI + install scripts.
 
@@ -36,7 +36,7 @@ First public release. MIT license. `liminal` CLI + install scripts.
 
 [Full notes](https://vireondynamics.com/liminal/changelog/v0-1-0-beta)
 
-## [v0.1.0-alpha] — 2026-05-10 — First runnable harness
+## [v0.1.0-alpha] — 2026-05-12 — First runnable harness
 
 - Monorepo: core, tools, tui, web, eval
 - AgentHarness ReAct loop, lazy tool families
