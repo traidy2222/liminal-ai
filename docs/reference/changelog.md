@@ -2,15 +2,29 @@
 
 All notable changes to [Liminal AI](https://github.com/traidy2222/liminal-ai) on the `main` branch.
 
-**Current stage:** **alpha** (`v0.0.11` tip of `main`, 2026-05-24). The workspace package may read `0.1.0`, but **beta**, **RC**, and a **v0.1.0 public preview** have not been declared as product releases yet.
+**Current stage:** **alpha** (`v0.0.12` tip of `main`, 2026-05-26). The workspace package may read `0.1.0`, but **beta**, **RC**, and a **v0.1.0 public preview** have not been declared as product releases yet.
 
 Format: **v0.0.x** entries keyed to the last GitHub push in each slice. Dates are real push dates.
 
 ---
 
+## v0.0.12 — 2026-05-26 {#v0-0-12}
+
+**Current alpha.** Research ledger, LLM identity memory, and web chat chrome polish.
+
+**Shipped**
+
+- **Research ledger** — Per-`send()` tracking of `web_search` / `web_fetch` (queries, surfaced URLs, fetch outcomes, deduped URLs); compact context injection each round; new harness tool `research_state` (summary / pending / fetched / failures views)
+- **Identity memory** — Intent `identityQuery` / `identityProvision`; LLM-generated recall queries (not keyword lists); on-disk scan of `user:` / `identity:` / `pref:` notes injected before answer; auto-`remember` with `scope: global` when the user states their name (`user:name`); protocol reminder not to use OS username as display name
+- **Recall fix** — `recall_relevant` accepts `query` or `queries` (schema no longer requires `query` when only `scope` was passed)
+- **Web UI** — Chat switcher embedded in each persona shell header row (HUD, Studio, Terminal status line, Minimal) instead of a separate top strip; portaled dropdown + click-outside dismiss
+- **PASTE** (optional) — Predictive tool-call speculation from paste patterns (`AGENT_PASTE_*`, off by default)
+
+---
+
 ## v0.0.11 — 2026-05-24 {#v0-0-11}
 
-**Current alpha.** User-global storage, web multi-chat, audio transcription, and connector tools.
+User-global storage, web multi-chat, audio transcription, and connector tools.
 
 **Shipped**
 

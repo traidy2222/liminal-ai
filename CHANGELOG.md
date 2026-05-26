@@ -2,11 +2,17 @@
 
 All notable changes to [Liminal AI](https://github.com/traidy2222/liminal-ai) are documented here and on the docs portal: [docs.vireondynamics.com/liminal/reference/changelog](https://docs.vireondynamics.com/liminal/reference/changelog).
 
-**Current stage:** **alpha** (`v0.0.11` tip of `main`, 2026-05-24). The workspace package may read `0.1.0`, but **beta**, **RC**, and a **v0.1.0 public preview** have not been declared as product releases yet.
+**Current stage:** **alpha** (`v0.0.12` tip of `main`, 2026-05-26). The workspace package may read `0.1.0`, but **beta**, **RC**, and a **v0.1.0 public preview** have not been declared as product releases yet.
 
 Format: **v0.0.x** entries keyed to the last GitHub push in each slice. Dates are real push dates.
 
-## [v0.0.11] — 2026-05-24 — Current alpha
+## [v0.0.12] — 2026-05-26 — Current alpha
+
+Research ledger + `research_state`, LLM identity memory, inline web chat switcher, `recall_relevant` schema fix, optional PASTE speculation.
+
+[Full notes](https://docs.vireondynamics.com/liminal/reference/changelog#v0-0-12)
+
+## [v0.0.11] — 2026-05-24
 
 User-global `~/.liminal/` storage, web multi-chat, audio transcription, OpenAPI/MCP connectors, memory federation, prompt cache.
 

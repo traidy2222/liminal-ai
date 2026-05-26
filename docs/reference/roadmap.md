@@ -2,11 +2,11 @@
 
 Where Liminal is today and what comes next. **Dates are directional, not commitments** — alpha moves fast on `main`.
 
-**Current stage:** **alpha** (`v0.0.11`, May 2026). Beta, RC, and **v0.1.0 public preview** are [planned milestones](./changelog.md#planned-not-started), not shipped yet.
+**Current stage:** **alpha** (`v0.0.12`, May 2026). Beta, RC, and **v0.1.0 public preview** are [planned milestones](./changelog.md#planned-not-started), not shipped yet.
 
 ---
 
-## Now — Alpha (v0.0.11)
+## Now — Alpha (v0.0.12)
 
 What you can run today from [Install](../start/install.md):
 
@@ -17,7 +17,8 @@ What you can run today from [Install](../start/install.md):
 | Tools | 140+ tools — files, shell, git, web, browser, memory, vault, documents, orchestration, OpenAPI/MCP attach |
 | Persona | Bootstrap, soul slices, UI themes (web shells) |
 | Storage | User-global `~/.liminal/` + per-chat workspaces (`AGENT_STORAGE_LAYOUT`) |
-| Memory | Typed notes, hybrid recall, federation scoring, promote/neighbors, recipe library, optional auto-dream |
+| Memory | Typed notes, hybrid recall, federation scoring, promote/neighbors, recipe library, optional auto-dream; identity recall (`user:name`, LLM-primed) |
+| Research | Per-send research ledger + `research_state` tool (web search/fetch discipline) |
 | Audio | `transcribe_audio`, web mic upload, dictation env knobs |
 | Install | Hosted one-command scripts + `liminal` CLI (alpha onboarding) |
 | Docs | Self-contained portal at [docs.vireondynamics.com/liminal/](https://docs.vireondynamics.com/liminal/) |
