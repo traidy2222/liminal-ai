@@ -35,7 +35,7 @@ User-global storage, web multi-chat, audio transcription, and connector tools.
 - **MCP** — `mcp_attach` to wire MCP servers into the live registry
 - **Memory** — `memory_promote`, `memory_neighbors`, `consolidate_chat`; federated rank scoring; exploratory-turn debias (`AGENT_MEMORY_DEBIAS`, optional `AGENT_MEMORY_EXPLORATORY_AUTO_RECALL`)
 - **Harness** — `AGENT_PROMPT_CACHE` (provider cache breakpoints); intent inference heuristics + research finalize judge; vault index helper
-- **Docs** — [Roadmap](./roadmap.md) studio product pipeline (Teams, Mobile, Bench, SDK) with marketing links
+- **Docs** — [Roadmap](./roadmap.md) studio product pipeline (Teams, Bench, SDK) with marketing links
 - **Install** — script comments point at hosted `vireondynamics.com/install/` URLs
 
 ---

@@ -78,7 +78,6 @@ Ideas under investigation or early scaffolding — **not promised** for a specif
 | Theme | Notes |
 |-------|--------|
 | **Team & sync** | Shared persona profiles, team vault patterns — see [pricing](https://vireondynamics.com/liminal/pricing) waitlist |
-| **Mobile companion** | Android scaffold in repo; not a shipped client yet |
 | **Packaging** | Docker, systemd/launchd, npm global — explicitly **not** in current install v1 |
 | **Enterprise** | Air-gapped guidance, SSO help, custom tools — [contact](https://vireondynamics.com/about#contact) |
 
@@ -92,7 +91,6 @@ Liminal is the only product you can install today. Vireon Dynamics names the res
 |---------|--------|------------|
 | **Liminal AI** | Alpha · shipping | This repo — local-first harness + TUI/web |
 | **Liminal for Teams** | In development | Shared personas, team vault patterns, audit-friendly session logs |
-| **Liminal Mobile** | Early scaffold | Companion app for chat, approvals, and attachments against your harness |
 | **Vireon Bench** | Research | CI-grade harness regression testing from the eval suite |
 | **Harness SDK** | Research | Embed the loop in your own IDE, bot, or vertical agent |
 

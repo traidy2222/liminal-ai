@@ -44,4 +44,4 @@ Client: `packages/web/client/useSSE.ts`. Reconnect via `Last-Event-ID`; buffer w
 - Bridge: `packages/web/server/agentBridge.ts`
 - SSE: `packages/web/server/sse.ts`
 
-A native mobile client would use the same routes and SSE contract above; there is no separate mobile doc in this portal yet.
+The web UI is the supported client for chat, approvals, and SSE streaming on desktop and mobile browsers.

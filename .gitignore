@@ -12,13 +12,6 @@ dist/
 .agent_worktrees/
 .claude/launch.json
 
-# Android — local Gradle, IDE, and build outputs (keep app/src + Gradle scripts)
-apps/android/.gradle/
-apps/android/.idea/
-apps/android/.kotlin/
-apps/android/**/build/
-apps/android/local.properties
-
 # Agent-generated test artifacts (written during live sessions)
 .agent_rule_stats.json
 marketing-capture/
