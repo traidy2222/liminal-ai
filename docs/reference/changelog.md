@@ -47,7 +47,7 @@ Task Worlds landed earlier on May 23 then was **removed** the same day in favor 
 
 ## v0.0.9 — 2026-05-22 {#v0-0-9}
 
-Streaming writes, reasoning budget, Playwright browser + CAPTCHA, document engine, MIT license file, compensation ledger.
+Streaming writes, reasoning budget, Playwright browser + CAPTCHA, document engine, LICENSE (FSL-1.1-MIT), compensation ledger.
 
 ---
 

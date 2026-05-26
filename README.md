@@ -150,4 +150,11 @@ Details: **`CLAUDE.md`** (agents) · **[docs/README.md](docs/README.md)** (opera
 
 ## License
 
-Liminal is released under the [Functional Source License 1.1, MIT Future License](LICENSE) (FSL-1.1-MIT). You can use and modify the source for most purposes; competing commercial products or services are not permitted. Each version automatically becomes available under MIT two years after we publish it.
+Liminal is released under the [Functional Source License 1.1, MIT Future License](LICENSE) (FSL-1.1-MIT). See [docs/reference/license.md](docs/reference/license.md) for a plain-language summary.
+
+- **Permitted:** internal use (including commercial work inside your org), non-commercial education/research, professional services for licensees, and other non–Competing Use purposes.
+- **Not permitted:** commercial products or services that substitute for Liminal or offer substantially similar functionality.
+- **Future MIT:** each published version also becomes available under MIT on the second anniversary of the date we first publish that version.
+- **Redistribution:** include the LICENSE and preserve copyright notices when sharing copies or derivatives.
+
+FSL is fair-source, not an OSI-approved open source license. For enterprise or competing-use questions, contact Vireon Dynamics.
