@@ -1,0 +1,25 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Liminal — marketing capture</title>
+    <style>
+      * { box-sizing: border-box; margin: 0; padding: 0; }
+      body {
+        background: var(--lim-bg, #020408);
+        color: var(--lim-text, #c8d4e0);
+        font-family: var(--lim-font-body, system-ui, sans-serif);
+        font-size: 14px;
+        height: 100vh;
+        display: flex;
+        flex-direction: column;
+      }
+      #root { display: flex; flex-direction: column; height: 100vh; }
+    </style>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/marketing/main.tsx"></script>
+  </body>
+</html>

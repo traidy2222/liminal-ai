@@ -1989,7 +1989,10 @@ export function useSSE() {
     }
 
     void (async () => {
-      if (!autoGreetDoneRef.current) {
+      const captureMode =
+        typeof window !== "undefined" &&
+        new URLSearchParams(window.location.search).get("capture") === "1";
+      if (!autoGreetDoneRef.current && !captureMode) {
         autoGreetDoneRef.current = true;
         dispatch({ type: "session_reset" });
         const runId = ++autoResetRunIdRef.current;
@@ -1997,6 +2000,8 @@ export function useSSE() {
           { mode: "soft", greet: true },
           () => cancelledRef.current || autoResetRunIdRef.current !== runId
         );
+      } else if (captureMode) {
+        autoGreetDoneRef.current = true;
       }
       if (!cancelledRef.current) {
         connect();

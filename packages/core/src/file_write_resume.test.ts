@@ -18,6 +18,16 @@ test("isLikelyTruncatedFileContent detects unclosed string", () => {
   assert.equal(isLikelyTruncatedFileContent("const x = 1;\n"), false);
 });
 
+test("isLikelyTruncatedFileContent ignores apostrophes in comments", () => {
+  const debounceWithJsDoc = `/**
+ * debounced function's return value
+ */
+export function debounce<T>(fn: () => T): () => T | undefined {
+  return () => undefined;
+}`;
+  assert.equal(isLikelyTruncatedFileContent(debounceWithJsDoc), false);
+});
+
 test("batchHasUndispatchableFileWrites on truncated write_file args", () => {
   const calls = [
     {

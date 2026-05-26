@@ -1,5 +1,6 @@
 import { readFile } from "node:fs/promises";
 import crypto from "node:crypto";
+import { isLikelyTruncatedFileContent } from "@liminal/core";
 
 export const FILE_WRITE_INTEGRITY_HASH_MAX_BYTES = 2_000_000;
 
@@ -15,24 +16,8 @@ export function sha256Text(text: string): string {
   return crypto.createHash("sha256").update(text).digest("hex");
 }
 
-export function isLikelyTruncatedContent(content: string): boolean {
-  const t = content.trimEnd();
-  if (t.length === 0) return false;
-  const last = t[t.length - 1]!;
-  if (last === "\\") return true;
-  if (/[`"'([{<]$/.test(t)) return true;
-  if (t.endsWith("<!--")) return true;
-  let sq = 0;
-  let dq = 0;
-  let bt = 0;
-  for (let i = 0; i < t.length; i++) {
-    const c = t[i]!;
-    if (c === "'" && (i === 0 || t[i - 1] !== "\\")) sq ^= 1;
-    if (c === '"' && (i === 0 || t[i - 1] !== "\\")) dq ^= 1;
-    if (c === "`" && (i === 0 || t[i - 1] !== "\\")) bt ^= 1;
-  }
-  return sq === 1 || dq === 1 || bt === 1;
-}
+/** @see isLikelyTruncatedFileContent in @liminal/core */
+export const isLikelyTruncatedContent = isLikelyTruncatedFileContent;
 
 export async function verifyWrittenContent(
   resolvedPath: string,

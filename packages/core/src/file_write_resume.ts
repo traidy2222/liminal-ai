@@ -42,6 +42,18 @@ export function tryParseToolArgs(argsJson: string): { ok: true; args: Record<str
   }
 }
 
+function isAsciiWordChar(c: string): boolean {
+  return /[A-Za-z0-9_]/.test(c);
+}
+
+/** Possessive/contraction apostrophe inside a word — not a string delimiter. */
+function isApostropheInWord(text: string, index: number): boolean {
+  if (text[index] !== "'") return false;
+  const prev = index > 0 ? text[index - 1]! : "";
+  const next = index + 1 < text.length ? text[index + 1]! : "";
+  return isAsciiWordChar(prev) && isAsciiWordChar(next);
+}
+
 /** Heuristic: model may have stopped mid-string in tool arg content. */
 export function isLikelyTruncatedFileContent(content: string): boolean {
   const t = content.trimEnd();
@@ -50,16 +62,17 @@ export function isLikelyTruncatedFileContent(content: string): boolean {
   if (last === "\\") return true;
   if (/[`"'([{<]$/.test(t)) return true;
   if (t.endsWith("<!--")) return true;
-  let quotes = 0;
+  let sq = 0;
   let dbl = 0;
   let bt = 0;
   for (let i = 0; i < t.length; i++) {
     const c = t[i]!;
-    if (c === "'" && (i === 0 || t[i - 1] !== "\\")) quotes ^= 1;
-    if (c === '"' && (i === 0 || t[i - 1] !== "\\")) dbl ^= 1;
-    if (c === "`" && (i === 0 || t[i - 1] !== "\\")) bt ^= 1;
+    const escaped = i > 0 && t[i - 1] === "\\";
+    if (c === "'" && !escaped && !isApostropheInWord(t, i)) sq ^= 1;
+    if (c === '"' && !escaped) dbl ^= 1;
+    if (c === "`" && !escaped) bt ^= 1;
   }
-  return quotes === 1 || dbl === 1 || bt === 1;
+  return sq === 1 || dbl === 1 || bt === 1;
 }
 
 export function fileWriteToolNeedsLengthResume(tc: AccumulatedToolCall, finishReason: string | null): boolean {

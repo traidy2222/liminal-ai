@@ -1,5 +1,43 @@
-import { defineConfig } from "vite";
+import fs from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+import { defineConfig, type Plugin } from "vite";
 import react from "@vitejs/plugin-react";
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const MARKETING_RECORDINGS = path.resolve(__dirname, "../../../assets/marketing/recordings");
+
+/** Serve live capture JSON from assets/marketing/recordings for ?recording= replay. */
+function marketingRecordingsPlugin(): Plugin {
+  return {
+    name: "marketing-recordings",
+    configureServer(server) {
+      server.middlewares.use("/marketing-recordings", (req, res, next) => {
+        const url = (req.url ?? "/").split("?")[0] ?? "/";
+        const rel = decodeURIComponent(url.replace(/^\//, ""));
+        if (!rel || rel.includes("..")) {
+          res.statusCode = 400;
+          res.end("bad path");
+          return;
+        }
+        const filePath = path.join(MARKETING_RECORDINGS, rel);
+        if (!filePath.startsWith(MARKETING_RECORDINGS)) {
+          res.statusCode = 403;
+          res.end("forbidden");
+          return;
+        }
+        fs.readFile(filePath, (err, data) => {
+          if (err) {
+            next();
+            return;
+          }
+          res.setHeader("Content-Type", rel.endsWith(".json") ? "application/json" : "application/octet-stream");
+          res.end(data);
+        });
+      });
+    },
+  };
+}
 
 /** Must match Express `listen(PORT)` in `packages/web/server/index.ts` (default 3001). */
 const DEV_API_ORIGIN =
@@ -7,10 +45,16 @@ const DEV_API_ORIGIN =
   `http://127.0.0.1:${process.env["PORT"]?.trim() || "3001"}`;
 
 export default defineConfig({
-  plugins: [react()],
+  plugins: [react(), marketingRecordingsPlugin()],
   root: ".",
   build: {
     outDir: "dist",
+    rollupOptions: {
+      input: {
+        main: "index.html",
+        marketing: "marketing.html",
+      },
+    },
   },
   server: {
     port: 3000,

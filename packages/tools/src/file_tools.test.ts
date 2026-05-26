@@ -60,6 +60,23 @@ test("isLikelyTruncatedContent flags unclosed brace", () => {
   assert.equal(isLikelyTruncatedContent("function f() {"), true);
 });
 
+test("write_file accepts JSDoc with apostrophes and backticks", async () => {
+  const root = resolveWorkspaceRoot();
+  const rel = ".agent_artifacts/test-jsdoc-apostrophe.ts";
+  const abs = path.resolve(root, rel);
+  await rm(abs, { force: true });
+  const content = `/**
+ * Creates a debounced version of \`fn\` — the function's return value.
+ */
+export const ok = 1;
+`;
+  assert.equal(isLikelyTruncatedContent(content), false);
+  const r = await writeFileTool.handler({ path: rel, content });
+  assert.equal(r.ok, true);
+  assert.equal(await readFile(abs, "utf8"), content);
+  await rm(abs, { force: true });
+});
+
 test("write_file rejects likely truncated content", async () => {
   const root = resolveWorkspaceRoot();
   const rel = ".agent_artifacts/test-trunc-reject.txt";

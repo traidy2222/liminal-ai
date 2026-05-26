@@ -1,0 +1,41 @@
+{
+  "generatedAt": "2026-05-26T06:50:17.337Z",
+  "baseUrl": "http://localhost:5173",
+  "assets": [
+    {
+      "id": "semantic-rename",
+      "png": "assets/marketing/semantic-rename.png",
+      "gif": "assets/marketing/semantic-rename.gif"
+    },
+    {
+      "id": "fix-flaky-tests",
+      "png": "assets/marketing/fix-flaky-tests.png",
+      "gif": "assets/marketing/fix-flaky-tests.gif"
+    },
+    {
+      "id": "browser-staging",
+      "png": "assets/marketing/browser-staging.png",
+      "gif": "assets/marketing/browser-staging.gif"
+    },
+    {
+      "id": "document-deck",
+      "png": "assets/marketing/document-deck.png",
+      "gif": "assets/marketing/document-deck.gif"
+    },
+    {
+      "id": "parallel-review",
+      "png": "assets/marketing/parallel-review.png",
+      "gif": "assets/marketing/parallel-review.gif"
+    },
+    {
+      "id": "atomic-migration",
+      "png": "assets/marketing/atomic-migration.png",
+      "gif": "assets/marketing/atomic-migration.gif"
+    },
+    {
+      "id": "research-synthesis",
+      "png": "assets/marketing/research-synthesis.png",
+      "gif": "assets/marketing/research-synthesis.gif"
+    }
+  ]
+}
