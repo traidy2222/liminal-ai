@@ -84,3 +84,12 @@ Replace root heroes when live takes are better:
 
 - `assets/web-ui.png` ← e.g. `live-coding-debounce.png`
 - `assets/persona-bootstrap.png` ← still best from live bootstrap or a dedicated capture
+
+**Website gallery (live GIFs only):**
+
+```bash
+npm run marketing:capture:live   # repo root
+cd website && npm run sync-marketing-live
+```
+
+Publishes to [vireondynamics.com/liminal/in-action](https://vireondynamics.com/liminal/in-action) from `website/public/marketing/live/*.gif` (synced on `website` build).

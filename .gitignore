@@ -20,6 +20,9 @@ apps/android/**/build/
 apps/android/local.properties
 
 # Agent-generated test artifacts (written during live sessions)
+.agent_rule_stats.json
+marketing-capture/
+assets/marketing/live-capture.log
 packages/tui/*.txt
 packages/tui/*.md
 packages/tui/Python-API-Server/

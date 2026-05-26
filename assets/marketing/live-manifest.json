@@ -1,0 +1,66 @@
+{
+  "generatedAt": "2026-05-26T07:30:08.515Z",
+  "source": "live",
+  "apiBase": "http://localhost:3001",
+  "uiBase": "http://localhost:5173",
+  "results": [
+    {
+      "id": "live-coding-debounce",
+      "png": "assets/marketing/live-coding-debounce.png",
+      "gif": "assets/marketing/live-coding-debounce.gif",
+      "tools": [
+        "list_dir",
+        "activate_tool_family",
+        "read_file",
+        "write_file",
+        "run_shell"
+      ],
+      "durationMs": 97008,
+      "messageCount": 20,
+      "chatId": "chat_mpmb0hxb",
+      "source": "live"
+    },
+    {
+      "id": "live-repo-grep",
+      "png": "assets/marketing/live-repo-grep.png",
+      "gif": "assets/marketing/live-repo-grep.gif",
+      "tools": [
+        "grep_file",
+        "list_dir",
+        "read_file"
+      ],
+      "durationMs": 309595,
+      "messageCount": 58,
+      "chatId": "chat_mpmb32xh",
+      "source": "live"
+    },
+    {
+      "id": "live-web-research",
+      "png": "assets/marketing/live-web-research.png",
+      "gif": "assets/marketing/live-web-research.gif",
+      "tools": [
+        "web_search",
+        "web_fetch",
+        "read_file"
+      ],
+      "durationMs": 132200,
+      "messageCount": 26,
+      "chatId": "chat_mpmbab8g",
+      "source": "live"
+    },
+    {
+      "id": "live-git-status",
+      "png": "assets/marketing/live-git-status.png",
+      "gif": "assets/marketing/live-git-status.gif",
+      "tools": [
+        "activate_tool_family",
+        "git_status",
+        "git_diff"
+      ],
+      "durationMs": 48477,
+      "messageCount": 8,
+      "chatId": "chat_mpmbdnrs",
+      "source": "live"
+    }
+  ]
+}

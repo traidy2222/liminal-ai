@@ -1,0 +1,445 @@
+{
+  "prompt": "Use grep_file to find where `AgentHarness` is defined under `packages/core`, read the main file, and summarize the ReAct loop in 3 bullet points. Do not edit any files.",
+  "chatId": "chat_mpmb32xh",
+  "messages": [
+    {
+      "kind": "user",
+      "text": "Use grep_file to find where `AgentHarness` is defined under `packages/core`, read the main file, and summarize the ReAct loop in 3 bullet points. Do not edit any files."
+    },
+    {
+      "kind": "tool_call",
+      "callId": "call_1ee7da867fae4feab07c6947",
+      "name": "grep_file",
+      "argsJson": "{\"path\":\"packages/core/agent.ts\",\"pattern\":\"class AgentHarness\",\"context_lines\":3}",
+      "status": "error",
+      "startedAt": 1779779920768,
+      "endedAt": 1779779921968
+    },
+    {
+      "kind": "tool_result",
+      "callId": "call_1ee7da867fae4feab07c6947",
+      "ok": false,
+      "output": "Cannot read file: Error: ENOENT: no such file or directory, open 'C:\\Users\\traid\\dreamthedream\\packages\\core\\agent.ts'"
+    },
+    {
+      "kind": "tool_call",
+      "callId": "call_31cf2116d7234be6a7cdd773",
+      "name": "list_dir",
+      "argsJson": "{\"path\":\"C:\\\\Users\\\\traid\\\\dreamthedream\\\\packages\\\\core\"}",
+      "status": "done",
+      "startedAt": 1779779920948,
+      "endedAt": 1779779922148
+    },
+    {
+      "kind": "tool_result",
+      "callId": "call_31cf2116d7234be6a7cdd773",
+      "ok": true,
+      "output": "dist/\npackage.json\nsrc/\ntsconfig.json"
+    },
+    {
+      "kind": "tool_call",
+      "callId": "call_11820b660dfd46d598faf309",
+      "name": "list_dir",
+      "argsJson": "{\"path\":\"C:\\\\Users\\\\traid\\\\dreamthedream\\\\packages\\\\core\\\\src\"}",
+      "status": "done",
+      "startedAt": 1779779921128,
+      "endedAt": 1779779922328
+    },
+    {
+      "kind": "tool_result",
+      "callId": "call_11820b660dfd46d598faf309",
+      "ok": true,
+      "output": "agent.ts\nauto_dream.test.ts\nauto_dream.ts\nchat_context.ts\nchat_metadata.ts\ncompensation_ledger.test.ts\ncompensation_ledger.ts\ncompression_guidelines.ts\ncontext.ts\ncontract_tool_mapper.test.ts\ncontract_tool_mapper.ts\ndispatcher.ts\nembeddings.ts\nepistemic_state.test.ts\nepistemic_state.ts\nevents.ts\nexecution_state.test.ts\nexecution_state.ts\nfact_extractor.ts\nfailure_digest.ts\nfailure_log.ts\nfile_write_resume.test.ts\nfile_write_resume.ts\nfile_write_stream_manifest.ts\nfile_write_stream_sink.test.ts\nfile_write_stream_sink.ts\nglobal_storage.ts\ngolden_eval.ts\nharness_default_constants.ts\nharness_effective_env.test.ts\nharness_effective_env.ts\nharness_env_inventory.ts\nharness_rules.ts\nharness_settings_api.ts\nharness_settings_field_meta.test.ts\nharness_settings_field_meta.ts\nharness_settings_sections.ts\nimage_attachments.ts\nindex.ts\ninput_semantics.ts\nintent_inference.test.ts\nintent_inference.ts\njson_stable.ts\nmemory_rank.test.ts\nmemory_rank.ts\nmemory_rank_federation.test.ts\nmemory_retrieval_eval.test.ts\nobsidian_vault_discovery.test.ts\nobsidian_vault_discovery.ts\nopenrouter_attribution.test.ts\nopenrouter_attribution.ts\norchestrator.ts\noutcome_scorer.ts\noutput_distill.test.ts\noutput_distill.ts\npersonality_heartbeat.test.ts\npersonality_heartbeat.ts\npersona_bootstrap_progress.ts\npersona_bootstrap_ui_strings.ts\npersona_ui_theme.test.ts\npersona_ui_theme.ts\nplatform_context.test.ts\nplatform_context.ts\nprompt_cache.test.ts\nprompt_cache.ts\nprovider_config.test.ts\nprovider_config.ts\nprovider_request_gate.test.ts\nprovider_request_gate.ts\nquery_rewrite.ts\nreasoning_profile.test.ts\nreasoning_profile.ts\nreasoning_stream.test.ts\nreasoning_stream.ts\nreasoning_surface.test.ts\nreasoning_surface.ts\nrecipe_library.test.ts\nrecipe_library.ts\nregistry.ts\nrepo_map.ts\nresearch_finalize_judge.ts\nrouter.ts\nrule_stats.ts\nruntime_persona_controls.test.ts\nruntime_persona_controls.ts\nruntime_prefs.test.ts\nruntime_prefs.ts\nsafety_judge.test.ts\nsafety_judge.ts\nsession_event_log.test.ts\nsession_event_log.ts\nsession_tool_index.ts\nshared_memory_bus.ts\nstreaming.ts\nstreaming_write_preview.test.ts\nstreaming_write_preview.ts\nterminal_snapshot.test.ts\nterminal_snapshot.ts\ntoken_estimate.ts\ntool_arg_content_stream.test.ts\ntool_arg_content_stream.ts\ntool_arg_guard.test.ts\ntool_arg_guard.ts\ntool_changed_paths.test.ts\ntool_changed_paths.ts\ntool_dag.test.ts\ntool_dag.ts\ntrajectory_writer.ts\ntranscription.test.ts\ntranscription.ts\ntypes.ts\nvault_path.ts\nworkspace_root.ts\nworld_context.ts\nworld_context_delta.ts"
+    },
+    {
+      "kind": "tool_call",
+      "callId": "call_81d1714d47dd43ce98320da3",
+      "name": "grep_file",
+      "argsJson": "{\"path\":\"C:\\\\Users\\\\traid\\\\dreamthedream\\\\packages\\\\core\\\\src\\\\agent.ts\",\"pattern\":\"class AgentHarness\",\"context_lines\":5}",
+      "status": "done",
+      "startedAt": 1779779921308,
+      "endedAt": 1779779922508
+    },
+    {
+      "kind": "tool_result",
+      "callId": "call_81d1714d47dd43ce98320da3",
+      "ok": true,
+      "output": "1 match in C:\\Users\\traid\\dreamthedream\\packages\\core\\src\\agent.ts\n---\n  900    \"branch_evaluate\",        // closes over harness.forkChild + harness.orchestrator\r\n  901  ]);\r\n  902  \r\n  903  // ADAPTIVE_HINTS removed — unified into buildAdaptiveHint() with ERROR_TAXONOMY (#9)\r\n  904  \r\n  905> export class AgentHarness {\r\n  906    readonly emitter: AgentEmitter;\r\n  907    registry: ToolRegistry;           // non-readonly so forkChild can scope it\r\n  908    readonly config: AgentConfig;     // exposed for child harness creation\r\n  909    readonly taskId: string;\r\n  910    /** Per-harness workspace root. Wraps every send() in an AsyncLocalStorage scope. */"
+    },
+    {
+      "kind": "tool_call",
+      "callId": "call_f04af54bdf92479fa9505ba1",
+      "name": "grep_file",
+      "argsJson": "{\"context_lines\":5,\"path\":\"C:\\\\Users\\\\traid\\\\dreamthedream\\\\packages\\\\core\\\\src\\\\agent.ts\",\"pattern\":\"async send\\\\(\"}",
+      "status": "done",
+      "startedAt": 1779779921488,
+      "endedAt": 1779779922688
+    },
+    {
+      "kind": "tool_call",
+      "callId": "call_238af57c5cec4f29ac9896a1",
+      "name": "grep_file",
+      "argsJson": "{\"context_lines\":5,\"path\":\"C:\\\\Users\\\\traid\\\\dreamthedream\\\\packages\\\\core\\\\src\\\\agent.ts\",\"pattern\":\"ReAct|react|tool_call|while.*loop\"}",
+      "status": "done",
+      "startedAt": 1779779921568,
+      "endedAt": 1779779922768
+    },
+    {
+      "kind": "tool_result",
+      "callId": "call_f04af54bdf92479fa9505ba1",
+      "ok": true,
+      "output": "No matches for \"async send\\(\" in C:\\Users\\traid\\dreamthedream\\packages\\core\\src\\agent.ts (5444 lines total)"
+    },
+    {
+      "kind": "tool_result",
+      "callId": "call_238af57c5cec4f29ac9896a1",
+      "ok": true,
+      "output": "No matches for \"ReAct|react|tool_call|while.*loop\" in C:\\Users\\traid\\dreamthedream\\packages\\core\\src\\agent.ts (5444 lines total)"
+    },
+    {
+      "kind": "tool_call",
+      "callId": "call_3443f9492fc0485a85831104",
+      "name": "grep_file",
+      "argsJson": "{\"context_lines\":5,\"path\":\"C:\\\\Users\\\\traid\\\\dreamthedream\\\\packages\\\\core\\\\src\\\\agent.ts\",\"pattern\":\"send\\\\(\"}",
+      "status": "done",
+      "startedAt": 1779779921848,
+      "endedAt": 1779779923048
+    },
+    {
+      "kind": "tool_call",
+      "callId": "call_a947ec8d3e514387bd182ce2",
+      "name": "grep_file",
+      "argsJson": "{\"context_lines\":5,\"path\":\"C:\\\\Users\\\\traid\\\\dreamthedream\\\\packages\\\\core\\\\src\\\\agent.ts\",\"pattern\":\"loop|iteration|round\"}",
+      "status": "done",
+      "startedAt": 1779779921928,
+      "endedAt": 1779779923128
+    },
+    {
+      "kind": "tool_result",
+      "callId": "call_a947ec8d3e514387bd182ce2",
+      "ok": true,
+      "output": "No matches for \"loop|iteration|round\" in C:\\Users\\traid\\dreamthedream\\packages\\core\\src\\agent.ts (5444 lines total)"
+    },
+    {
+      "kind": "tool_result",
+      "callId": "call_3443f9492fc0485a85831104",
+      "ok": true,
+      "output": "No matches for \"send\\(\" in C:\\Users\\traid\\dreamthedream\\packages\\core\\src\\agent.ts (5444 lines total)"
+    },
+    {
+      "kind": "tool_call",
+      "callId": "call_63a64239167048a58a99c92d",
+      "name": "read_file",
+      "argsJson": "{\"path\":\"C:\\\\Users\\\\traid\\\\dreamthedream\\\\packages\\\\core\\\\src\\\\agent.ts\",\"offset\":905,\"limit\":150,\"line_numbers\":true}",
+      "status": "done",
+      "startedAt": 1779779922208,
+      "endedAt": 1779779923408
+    },
+    {
+      "kind": "tool_call",
+      "callId": "call_fd0fa8f6402041eaa8a3db9a",
+      "name": "grep_file",
+      "argsJson": "{\"path\":\"C:\\\\Users\\\\traid\\\\dreamthedream\\\\packages\\\\core\\\\src\\\\orchestrator.ts\",\"pattern\":\"async run|async execute|class Orchestrator\",\"context_lines\":3}",
+      "status": "done",
+      "startedAt": 1779779922288,
+      "endedAt": 1779779923488
+    },
+    {
+      "kind": "tool_result",
+      "callId": "call_63a64239167048a58a99c92d",
+      "ok": true,
+      "output": "905|export class AgentHarness {\r\n    906|  readonly emitter: AgentEmitter;\r\n    907|  registry: ToolRegistry;           // non-readonly so forkChild can scope it\r\n    908|  readonly config: AgentConfig;     // exposed for child harness creation\r\n    909|  readonly taskId: string;\r\n    910|  /** Per-harness workspace root. Wraps every send() in an AsyncLocalStorage scope. */\r\n    911|  readonly workspaceRoot: string;\r\n    912|  readonly orchestrator: TaskOrchestrator;\r\n    913|  readonly agentDepth: number;\r\n    914|\r\n    915|  private readonly context: ContextManager;\r\n    916|  private readonly dispatcher: ToolDispatcher;\r\n    917|  private client: OpenAI;\r\n    918|  private readonly maxAgentDepth: number;\r\n    919|  private readonly maxConcurrentAgents: number;\r\n    920|  private spawnConcurrencyCap: number;\r\n    921|  private providerDegradedUntilMs = 0;\r\n    922|  private providerCircuitOpenUntilMs = 0;\r\n    923|  private consecutiveProviderFailures = 0;\r\n    924|  /** Human approval TTL for destructive requiresApproval tools (dispatcher). */\r\n    925|  private readonly approvalTimeoutMs: number;\r\n    926|  private running = false;\r\n    927|  private abortSignal?: AbortSignal;\r\n    928|  /** Per-turn abort controller — created at send() start, cleared on turn end. */\r\n    929|  private currentTurnController?: AbortController;\r\n    930|  /** Per-turn trace ID for correlating all events within one send() call. */\r\n    931|  private currentTurnTraceId?: string;\r\n    932|  /**\r\n    933|   * Active hypotheses carried forward from the previous send() so multi-turn\r\n    934|   * investigative chains survive across conversation turns.\r\n    935|   * Only hypotheses with status \"active\" (or no status) are persisted.\r\n    936|   */\r\n    937|  private persistedHypotheses: import(\"./types.js\").EpistemicState[\"hypotheses\"] = [];\r\n    938|\r\n    939|  /** Incremented each ReAct round; accessible for subtask result reporting. */\r\n    940|  roundCount = 0;\r\n    941|\r\n    942|  /**\r\n    943|   * Called after forkChild creates a child harness, before running it.\r\n    944|   * Set by external code (orchestration tools) to register child-scoped tools.\r\n    945|   */\r\n    946|  onChildCreated?: (child: AgentHarness) => void;\r\n    947|\r\n    948|  /**\r\n    949|   * Optional per-turn cleanup when {@link emitTurnEnd} runs (e.g. Playwright browser sessions).\r\n    950|   * Set by `packages/tools` during `registerAllTools` — must not import tools from core.\r\n    951|   */\r\n    952|  onTurnEndCleanup?: (taskId: string) => void | Promise<void>;\r\n    953|\r\n    954|  // ── Per-turn tracking (reset at start of each send()) ──────────────────────\r\n    955|  private toolErrorCounts = new Map<string, number>();\r\n    956|  private toolsUsedThisTurn: string[] = [];\r\n    957|  private lastUserMessage = \"\";\r\n    958|  private contextAlertFired60 = false;\r\n    959|  private contextAlertFired85 = false;\r\n    960|  /** Wall-clock start time of the current send() call. */\r\n    961|  private sendStartTime = 0;\r\n    962|  /** Size of the most recent parallel tool batch (for turn_end metrics). */\r\n    963|  private lastParallelToolBatchSize = 0;\r\n    964|\r\n    965|  /** True once world context has been injected (only happens on the first send() of a root agent). */\r\n    966|  private worldContextInjected = false;\r\n    967|\r\n    968|  /** Paths successfully read_file'd this send (working state). */\r\n    969|  private filesReadThisTurn: string[] = [];\r\n    970|  /** Count repeated full read_file calls per path in this send. */\r\n    971|  private readFilePathCountsThisTurn = new Map<string, number>();\r\n    972|  /** One-shot nudge when large read_file output is truncated/distilled. */\r\n    973|  private largeReadPivotNudgeThisSend = false;\r\n    974|  /** Last few tool outcome one-liners for working state. */\r\n    975|  private recentToolOutcomeLines: string[] = [];\r\n    976|  /**\r\n    977|   * Track consecutive (tool_name, args_hash, ok) triples to detect call loops.\r\n    9"
+    },
+    {
+      "kind": "tool_result",
+      "callId": "call_fd0fa8f6402041eaa8a3db9a",
+      "ok": true,
+      "output": "No matches for \"async run|async execute|class Orchestrator\" in C:\\Users\\traid\\dreamthedream\\packages\\core\\src\\orchestrator.ts (221 lines total)"
+    },
+    {
+      "kind": "tool_call",
+      "callId": "call_f29e8d8312594b9fb339485d",
+      "name": "grep_file",
+      "argsJson": "{\"context_lines\":3,\"path\":\"C:\\\\Users\\\\traid\\\\dreamthedream\\\\packages\\\\core\\\\src\\\\agent.ts\",\"pattern\":\"async.*send\"}",
+      "status": "done",
+      "startedAt": 1779779922568,
+      "endedAt": 1779779923768
+    },
+    {
+      "kind": "tool_result",
+      "callId": "call_f29e8d8312594b9fb339485d",
+      "ok": true,
+      "output": "No matches for \"async.*send\" in C:\\Users\\traid\\dreamthedream\\packages\\core\\src\\agent.ts (5444 lines total)"
+    },
+    {
+      "kind": "tool_call",
+      "callId": "call_7dedbd0c378743629efcae12",
+      "name": "grep_file",
+      "argsJson": "{\"context_lines\":5,\"path\":\"C:\\\\Users\\\\traid\\\\dreamthedream\\\\packages\\\\core\\\\src\\\\agent.ts\",\"pattern\":\"send\\\\b\"}",
+      "status": "done",
+      "startedAt": 1779779922748,
+      "endedAt": 1779779923948
+    },
+    {
+      "kind": "tool_result",
+      "callId": "call_7dedbd0c378743629efcae12",
+      "ok": true,
+      "output": "No matches for \"send\\b\" in C:\\Users\\traid\\dreamthedream\\packages\\core\\src\\agent.ts (5444 lines total)"
+    },
+    {
+      "kind": "tool_call",
+      "callId": "call_7b1aba05ad1a4a73b353c173",
+      "name": "grep_file",
+      "argsJson": "{\"context_lines\":5,\"path\":\"C:\\\\Users\\\\traid\\\\dreamthedream\\\\packages\\\\core\\\\src\\\\agent.ts\",\"pattern\":\"send\",\"max_matches\":20}",
+      "status": "done",
+      "startedAt": 1779779922928,
+      "endedAt": 1779779924128
+    },
+    {
+      "kind": "tool_result",
+      "callId": "call_7b1aba05ad1a4a73b353c173",
+      "ok": true,
+      "output": "185 matches in C:\\Users\\traid\\dreamthedream\\packages\\core\\src\\agent.ts (showing first 20)\n---\n  792      template: \"Re-read the tool description carefully. Check exact types (string vs number vs array). Use think() to construct the correct args.\",\r\n  793    },\r\n  794    {\r\n  795      pattern: /STREAM_CHUNK_TIMEOUT|stream.*stalled|stream.*interrupted/i,\r\n  796      category: \"STREAM_INTERRUPTED\",\r\n  797>     hint: \"The model's output stream stalled mid-completion — provider stopped sending chunks.\",\r\n  798      template: \"For very large file generation, call write_file with mode=create once, then mode=append for each follow-up section. Or use run_shell with a heredoc. Most files are fine in a single write_file call.\",\r\n  799    },\r\n  800    {\r\n  801      pattern: /timeout|timed out|deadline exceeded/i,\r\n  802      category: \"TIMEOUT\",\r\n---\n  905  export class AgentHarness {\r\n  906    readonly emitter: AgentEmitter;\r\n  907    registry: ToolRegistry;           // non-readonly so forkChild can scope it\r\n  908    readonly config: AgentConfig;     // exposed for child harness creation\r\n  909    readonly taskId: string;\r\n  910>   /** Per-harness workspace root. Wraps every send() in an AsyncLocalStorage scope. */\r\n  911    readonly workspaceRoot: string;\r\n  912    readonly orchestrator: TaskOrchestrator;\r\n  913    readonly agentDepth: number;\r\n  914  \r\n  915    private readonly context: ContextManager;\r\n---\n  923    private consecutiveProviderFailures = 0;\r\n  924    /** Human approval TTL for destructive requiresApproval tools (dispatcher). */\r\n  925    private readonly approvalTimeoutMs: number;\r\n  926    private running = false;\r\n  927    private abortSignal?: AbortSignal;\r\n  928>   /** Per-turn abort controller — created at send() start, cleared on turn end. */\r\n  929    private currentTurnController?: AbortController;\r\n  930>   /** Per-turn trace ID for correlating all events within one send() call. */\r\n  931    private currentTurnTraceId?: string;\r\n  932    /**\r\n  933>    * Active hypotheses carried forward from the previous send() so multi-turn\r\n  934     * investigative chains survive across conversation turns.\r\n  935     * Only hypotheses with status \"active\" (or no status) are persisted.\r\n  936     */\r\n  937    private persistedHypotheses: import(\"./types.js\").EpistemicState[\"hypotheses\"] = [];\r\n  938  \r\n---\n  949     * Optional per-turn cleanup when {@link emitTurnEnd} runs (e.g. Playwright browser sessions).\r\n  950     * Set by `packages/tools` during `registerAllTools` — must not import tools from core.\r\n  951     */\r\n  952    onTurnEndCleanup?: (taskId: string) => void | Promise<void>;\r\n  953  \r\n  954>   // ── Per-turn tracking (reset at start of each send()) ──────────────────────\r\n  955    private toolErrorCounts = new Map<string, number>();\r\n  956    private toolsUsedThisTurn: string[] = [];\r\n  957    private lastUserMessage = \"\";\r\n  958    private contextAlertFired60 = false;\r\n  959    private contextAlertFired85 = false;\r\n  960>   /** Wall-clock start time of the current send() call. */\r\n  961>   private sendStartTime = 0;\r\n  962    /** Size of the most recent parallel tool batch (for turn_end metrics). */\r\n  963    private lastParallelToolBatchSize = 0;\r\n  964  \r\n  965>   /** True once world context has been injected (only happens on the first send() of a root agent). */\r\n  966    private worldContextInjected = false;\r\n  967  \r\n  968>   /** Paths successfully read_file'd this send (working state). */\r\n  969    private filesReadThisTurn: string[] = [];\r\n  970>   /** Count repeated full read_file calls per path in this send. */\r\n  971    private readFilePathCountsThisTurn = new Map<string, number>();\r\n  972    /** One-shot nudge when large read_file output is truncated/distilled. */\r\n  973>   private largeReadPivotNudgeThisSend = false;\r\n  974    /** Last few tool outcome one-liners for working state. */\r\n  975    private recentToolOutcomeLines: string[] = [];\r\n  976    /**\r\n  977     * Track consecutive (tool_name, "
+    },
+    {
+      "kind": "tool_call",
+      "callId": "call_6cd3ced94b144944ab27f649",
+      "name": "grep_file",
+      "argsJson": "{\"context_lines\":3,\"path\":\"C:\\\\Users\\\\traid\\\\dreamthedream\\\\packages\\\\core\\\\src\\\\agent.ts\",\"pattern\":\"runReActLoop\"}",
+      "status": "done",
+      "startedAt": 1779779923108,
+      "endedAt": 1779779924308
+    },
+    {
+      "kind": "tool_result",
+      "callId": "call_6cd3ced94b144944ab27f649",
+      "ok": true,
+      "output": "16 matches in C:\\Users\\traid\\dreamthedream\\packages\\core\\src\\agent.ts\n---\n 2324            );\r\n 2325          });\r\n 2326          try {\r\n 2327>           await Promise.race([this.runReActLoop(), sendTimeoutPromise]);\r\n 2328          } finally {\r\n 2329            clearTimeout(sendTimeoutId);\r\n 2330          }\r\n 2331        } else {\r\n 2332>         await this.runReActLoop();\r\n 2333        }\r\n 2334  \r\n 2335        // Episodic recipe/trajectory — off the critical path so `running` clears in `finally`\r\n---\n 2801    /** AutoDream-style background memory consolidation over recent sessions (env-gated). */\r\n 2802    private async maybeAutoDreamConsolidation(): Promise<void> {\r\n 2803      // Opening-turn sends (greeting / persona-bootstrap prompt) clear these flags only in\r\n 2804>     // send()'s `finally` after runReActLoop returns. If we start auto-dream from the tail of\r\n 2805>     // runReActLoop, the microtask can run before `finally`, which used to emit a misleading\r\n 2806      // auto_dream gate: bootstrap_state · session_bootstrap_active (telemetry only, but reads\r\n 2807      // like the harness is stuck). Skip entirely while those sends are in flight.\r\n 2808      if (this.sessionGreetingThisSend || this.personaBootstrapPromptThisSend) {\r\n---\n 3278      return linked.signal;\r\n 3279    }\r\n 3280  \r\n 3281>   private async runReActLoop(round = 0): Promise<void> {\r\n 3282      // Check abort signal (set when orchestrator cancels this task)\r\n 3283      if (this.abortSignal?.aborted) return;\r\n 3284  \r\n---\n 3951            \"[CONTINUE] The previous assistant message appears incomplete (no finish reason). \" +\r\n 3952            \"Continue exactly where you left off and finish before verification/finalization.\",\r\n 3953        });\r\n 3954>       await this.runReActLoop(round);\r\n 3955        return;\r\n 3956      }\r\n 3957  \r\n---\n 3969            \"[CONTINUE] The previous assistant message was cut off (length limit). \" +\r\n 3970            \"Continue exactly where you left off and finish.\",\r\n 3971        });\r\n 3972>       await this.runReActLoop(round);\r\n 3973        return;\r\n 3974      }\r\n 3975  \r\n---\n 3998          role: \"user\",\r\n 3999          content: resumeMsg,\r\n 4000        });\r\n 4001>       await this.runReActLoop(round);\r\n 4002        return;\r\n 4003      }\r\n 4004  \r\n---\n 4020            \"\\n[HARNESS] Recovered from pseudo tool markup after retry/rate-limit path; requesting proper tool calls.\\n\",\r\n 4021          channel: \"trace\",\r\n 4022        });\r\n 4023>       await this.runReActLoop(round + 1);\r\n 4024        return;\r\n 4025      }\r\n 4026      if (this.pseudoMarkupSuppressCountThisSend > 0) {\r\n---\n 4804  \r\n 4805        await this.runLintSelfHealIfNeeded();\r\n 4806  \r\n 4807>       await this.runReActLoop(round + 1);\r\n 4808      } else if (toolCalls.length > 0) {\r\n 4809        await this.finalizeUndispatchedToolCalls(toolCalls, speculativePromises, finishReason);\r\n 4810        await this.runLintSelfHealIfNeeded();\r\n 4811>       await this.runReActLoop(round + 1);\r\n 4812      } else {\r\n 4813        let assistantText = \"\";\r\n 4814        if (typeof assistantMessage.content === \"string\") {\r\n---\n 4880                role: \"user\",\r\n 4881                content: `[CRITIC NOTES]\\n${vr.output.slice(0, 4000)}`,\r\n 4882              });\r\n 4883>             await this.runReActLoop(round);\r\n 4884              return;\r\n 4885            }\r\n 4886          } catch {\r\n---\n 4907              \"[FINALIZE NOTE] Your reply looks finished, but cite at least one real path string \" +\r\n 4908              \"that appeared in read_file / repo_map / list_dir output (exact substring) before ending.\",\r\n 4909          });\r\n 4910>         await this.runReActLoop(round);\r\n 4911          return;\r\n 4912        }\r\n 4913  \r\n---\n 4947                  \"(3) explicit uncertainty/fragility note for fast-moving facts, and (4) unresolved items. \" +\r\n 4948                  `Judge says: ${verdict.reason}`,\r\n 4949              });\r\n 4950>             await this.runReActLoop(round);\r\n 4951          "
+    },
+    {
+      "kind": "tool_call",
+      "callId": "call_b4ca7cd139ef4c2a99bc5688",
+      "name": "read_file",
+      "argsJson": "{\"line_numbers\":true,\"limit\":200,\"offset\":3281,\"path\":\"C:\\\\Users\\\\traid\\\\dreamthedream\\\\packages\\\\core\\\\src\\\\agent.ts\"}",
+      "status": "done",
+      "startedAt": 1779779923288,
+      "endedAt": 1779779924488
+    },
+    {
+      "kind": "tool_result",
+      "callId": "call_b4ca7cd139ef4c2a99bc5688",
+      "ok": true,
+      "output": "3281|  private async runReActLoop(round = 0): Promise<void> {\r\n   3282|    // Check abort signal (set when orchestrator cancels this task)\r\n   3283|    if (this.abortSignal?.aborted) return;\r\n   3284|\r\n   3285|    if (round >= this.config.maxToolRoundsPerTurn) {\r\n   3286|      this.emitTurnEnd(\"round_cap\");\r\n   3287|      this.emitter.emit(\"error\", {\r\n   3288|        err: new Error(\r\n   3289|          `Max tool rounds (${this.config.maxToolRoundsPerTurn}) exceeded`\r\n   3290|        ),\r\n   3291|      });\r\n   3292|      return;\r\n   3293|    }\r\n   3294|\r\n   3295|    this.roundCount = round + 1;\r\n   3296|    this.dispatcher.advanceTurnRound();\r\n   3297|    this.syncExecutionStateToContext();\r\n   3298|    const contractBudgetMsg = this.checkContractBudgetExceeded();\r\n   3299|    if (contractBudgetMsg) {\r\n   3300|      this.context.appendMessage({\r\n   3301|        role: \"user\",\r\n   3302|        content:\r\n   3303|          `[CONTRACT BUDGET] ${contractBudgetMsg} ` +\r\n   3304|          (this.registry.has(\"verify_contract\")\r\n   3305|            ? \"Call verify_contract to assess partial progress, then finalize your answer.\"\r\n   3306|            : \"Stop calling tools and finalize your answer with what you have verified.\"),\r\n   3307|      });\r\n   3308|      if (!this.registry.has(\"verify_contract\") || this.roundCount >= this.config.maxToolRoundsPerTurn - 1) {\r\n   3309|        this.emitTurnEnd(\"contract_budget\");\r\n   3310|        return;\r\n   3311|      }\r\n   3312|    }\r\n   3313|    if (this.executionState) {\r\n   3314|      this.emitter.emit(\"runtime_heartbeat\", {\r\n   3315|        round: this.roundCount,\r\n   3316|        uptimeMs: Date.now() - this.sendStartTime,\r\n   3317|        activeContractId: this.executionState.activeContractId,\r\n   3318|        driftScore: this.executionState.driftScore,\r\n   3319|      });\r\n   3320|      if (this.roundCount > 1 && this.roundCount % 4 === 0) {\r\n   3321|        const next = updateDriftScore(this.executionState, 0.06);\r\n   3322|        const triggeredReplan = next.driftScore >= 0.55;\r\n   3323|        if (triggeredReplan) {\r\n   3324|          void this.maybePlaybackCompensation(\"drift replan threshold\");\r\n   3325|        }\r\n   3326|        this.executionState = triggeredReplan ? advanceExecutionStateForPlan(next, [\r\n   3327|          \"Reconfirm mission objective and constraints\",\r\n   3328|          \"Regenerate milestone contracts from latest evidence\",\r\n   3329|          \"Continue execution under refreshed contracts\",\r\n   3330|        ]) : next;\r\n   3331|        this.emitter.emit(\"drift_detected\", {\r\n   3332|          score: this.executionState.driftScore,\r\n   3333|          reason: \"periodic anti-drift cadence\",\r\n   3334|          triggeredReplan,\r\n   3335|        });\r\n   3336|      }\r\n   3337|    }\r\n   3338|\r\n   3339|    // Session yield point — crash-recovery snapshot every AGENT_YIELD_EVERY_N rounds.\r\n   3340|    {\r\n   3341|      const yieldEvery = parseInt(resolveHarnessEnvRaw(\"AGENT_YIELD_EVERY_N\", this.runtimePreferences) ?? \"0\", 10);\r\n   3342|      if (yieldEvery > 0 && this.agentDepth === 0 && this.roundCount % yieldEvery === 0) {\r\n   3343|        const ctxSnap = this.context.snapshot();\r\n   3344|        const es = this.context.getEpistemicState();\r\n   3345|        const epSummary = es\r\n   3346|          ? es.subgoals.map((g) => `[${g.status}] ${g.id}${g.note ? \": \" + g.note : \"\"}`).join(\"; \")\r\n   3347|          : undefined;\r\n   3348|        void writeYieldSnapshot({\r\n   3349|          taskId: this.taskId,\r\n   3350|          round: this.roundCount,\r\n   3351|          goal: this.lastUserMessage.slice(0, 2000),\r\n   3352|          toolsUsed: [...this.toolsUsedThisTurn],\r\n   3353|          usageFraction: ctxSnap.usageFraction,\r\n   3354|          tokenCount: ctxSnap.tokenCount,\r\n   3355|          epistemicSummary: epSummary,\r\n   3356|          savedAt: new Date().toISOString(),\r\n   3357|        });\r\n   3358|      }\r\n   3359|    }\r\n   3360|\r\n   3361|    if (\r\n   3362|      round === 1 &&\r\n   3363|    "
+    },
+    {
+      "kind": "tool_call",
+      "callId": "call_cefcf6eca4be41d684b2284b",
+      "name": "read_file",
+      "argsJson": "{\"line_numbers\":true,\"offset\":3281,\"limit\":100,\"path\":\"C:\\\\Users\\\\traid\\\\dreamthedream\\\\packages\\\\core\\\\src\\\\agent.ts\"}",
+      "status": "done",
+      "startedAt": 1779779923468,
+      "endedAt": 1779779924668
+    },
+    {
+      "kind": "tool_result",
+      "callId": "call_cefcf6eca4be41d684b2284b",
+      "ok": true,
+      "output": "3281|  private async runReActLoop(round = 0): Promise<void> {\r\n   3282|    // Check abort signal (set when orchestrator cancels this task)\r\n   3283|    if (this.abortSignal?.aborted) return;\r\n   3284|\r\n   3285|    if (round >= this.config.maxToolRoundsPerTurn) {\r\n   3286|      this.emitTurnEnd(\"round_cap\");\r\n   3287|      this.emitter.emit(\"error\", {\r\n   3288|        err: new Error(\r\n   3289|          `Max tool rounds (${this.config.maxToolRoundsPerTurn}) exceeded`\r\n   3290|        ),\r\n   3291|      });\r\n   3292|      return;\r\n   3293|    }\r\n   3294|\r\n   3295|    this.roundCount = round + 1;\r\n   3296|    this.dispatcher.advanceTurnRound();\r\n   3297|    this.syncExecutionStateToContext();\r\n   3298|    const contractBudgetMsg = this.checkContractBudgetExceeded();\r\n   3299|    if (contractBudgetMsg) {\r\n   3300|      this.context.appendMessage({\r\n   3301|        role: \"user\",\r\n   3302|        content:\r\n   3303|          `[CONTRACT BUDGET] ${contractBudgetMsg} ` +\r\n   3304|          (this.registry.has(\"verify_contract\")\r\n   3305|            ? \"Call verify_contract to assess partial progress, then finalize your answer.\"\r\n   3306|            : \"Stop calling tools and finalize your answer with what you have verified.\"),\r\n   3307|      });\r\n   3308|      if (!this.registry.has(\"verify_contract\") || this.roundCount >= this.config.maxToolRoundsPerTurn - 1) {\r\n   3309|        this.emitTurnEnd(\"contract_budget\");\r\n   3310|        return;\r\n   3311|      }\r\n   3312|    }\r\n   3313|    if (this.executionState) {\r\n   3314|      this.emitter.emit(\"runtime_heartbeat\", {\r\n   3315|        round: this.roundCount,\r\n   3316|        uptimeMs: Date.now() - this.sendStartTime,\r\n   3317|        activeContractId: this.executionState.activeContractId,\r\n   3318|        driftScore: this.executionState.driftScore,\r\n   3319|      });\r\n   3320|      if (this.roundCount > 1 && this.roundCount % 4 === 0) {\r\n   3321|        const next = updateDriftScore(this.executionState, 0.06);\r\n   3322|        const triggeredReplan = next.driftScore >= 0.55;\r\n   3323|        if (triggeredReplan) {\r\n   3324|          void this.maybePlaybackCompensation(\"drift replan threshold\");\r\n   3325|        }\r\n   3326|        this.executionState = triggeredReplan ? advanceExecutionStateForPlan(next, [\r\n   3327|          \"Reconfirm mission objective and constraints\",\r\n   3328|          \"Regenerate milestone contracts from latest evidence\",\r\n   3329|          \"Continue execution under refreshed contracts\",\r\n   3330|        ]) : next;\r\n   3331|        this.emitter.emit(\"drift_detected\", {\r\n   3332|          score: this.executionState.driftScore,\r\n   3333|          reason: \"periodic anti-drift cadence\",\r\n   3334|          triggeredReplan,\r\n   3335|        });\r\n   3336|      }\r\n   3337|    }\r\n   3338|\r\n   3339|    // Session yield point — crash-recovery snapshot every AGENT_YIELD_EVERY_N rounds.\r\n   3340|    {\r\n   3341|      const yieldEvery = parseInt(resolveHarnessEnvRaw(\"AGENT_YIELD_EVERY_N\", this.runtimePreferences) ?? \"0\", 10);\r\n   3342|      if (yieldEvery > 0 && this.agentDepth === 0 && this.roundCount % yieldEvery === 0) {\r\n   3343|        const ctxSnap = this.context.snapshot();\r\n   3344|        const es = this.context.getEpistemicState();\r\n   3345|        const epSummary = es\r\n   3346|          ? es.subgoals.map((g) => `[${g.status}] ${g.id}${g.note ? \": \" + g.note : \"\"}`).join(\"; \")\r\n   3347|          : undefined;\r\n   3348|        void writeYieldSnapshot({\r\n   3349|          taskId: this.taskId,\r\n   3350|          round: this.roundCount,\r\n   3351|          goal: this.lastUserMessage.slice(0, 2000),\r\n   3352|          toolsUsed: [...this.toolsUsedThisTurn],\r\n   3353|          usageFraction: ctxSnap.usageFraction,\r\n   3354|          tokenCount: ctxSnap.tokenCount,\r\n   3355|          epistemicSummary: epSummary,\r\n   3356|          savedAt: new Date().toISOString(),\r\n   3357|        });\r\n   3358|      }\r\n   3359|    }\r\n   3360|\r\n   3361|    if (\r\n   3362|      round === 1 &&\r\n   3363|    "
+    },
+    {
+      "kind": "tool_call",
+      "callId": "call_b902bf9874674f06985bee55",
+      "name": "read_file",
+      "argsJson": "{\"line_numbers\":true,\"offset\":3381,\"limit\":120,\"path\":\"C:\\\\Users\\\\traid\\\\dreamthedream\\\\packages\\\\core\\\\src\\\\agent.ts\"}",
+      "status": "done",
+      "startedAt": 1779779923648,
+      "endedAt": 1779779924848
+    },
+    {
+      "kind": "tool_result",
+      "callId": "call_b902bf9874674f06985bee55",
+      "ok": true,
+      "output": "3381|    }\r\n   3382|\r\n   3383|    if (\r\n   3384|      resolveHarnessEnvRaw(\"AGENT_FINALIZE_HINT\", this.runtimePreferences) === \"1\" &&\r\n   3385|      !this.finalizeHintInjectedThisSend &&\r\n   3386|      this.roundCount >= Math.max(1, Math.ceil(0.7 * this.config.maxToolRoundsPerTurn))\r\n   3387|    ) {\r\n   3388|      this.finalizeHintInjectedThisSend = true;\r\n   3389|      this.context.appendMessage({\r\n   3390|        role: \"user\",\r\n   3391|        content:\r\n   3392|          \"[SYSTEM NOTE] You are past ~70% of the tool-round budget for this turn. \" +\r\n   3393|          \"Stop calling tools unless strictly necessary and produce your final answer soon.\",\r\n   3394|      });\r\n   3395|    }\r\n   3396|\r\n   3397|    this.context.refreshProtocolDynamic(this.registry.getActiveToolNames());\r\n   3398|    this.refreshToolAwareness(\"protocol_dynamic_refresh\");\r\n   3399|\r\n   3400|    // Context pressure alerts (#9): fire once per threshold per turn\r\n   3401|    const snapBefore = this.context.snapshot();\r\n   3402|    const pctBefore = Math.round(snapBefore.usageFraction * 100);\r\n   3403|    if (pctBefore >= 85 && !this.contextAlertFired85) {\r\n   3404|      this.contextAlertFired85 = true;\r\n   3405|      this.context.appendMessage({\r\n   3406|        role: \"system\",\r\n   3407|        content:\r\n   3408|          `[CONTEXT BUDGET — harness notice, not user speech]\\n` +\r\n   3409|          `CONTEXT BUDGET CRITICAL: ${pctBefore}% used — call compress_context() immediately or early context will be lost.`,\r\n   3410|      });\r\n   3411|    } else if (pctBefore >= 60 && !this.contextAlertFired60) {\r\n   3412|      this.contextAlertFired60 = true;\r\n   3413|      this.context.appendMessage({\r\n   3414|        role: \"system\",\r\n   3415|        content:\r\n   3416|          `[CONTEXT BUDGET — harness notice, not user speech]\\n` +\r\n   3417|          `CONTEXT BUDGET: ${pctBefore}% used — consider calling compress_context() before continuing long tasks.`,\r\n   3418|      });\r\n   3419|    }\r\n   3420|\r\n   3421|    if (\r\n   3422|      !this.proactiveCompressedThisSend &&\r\n   3423|      pctBefore >= 65 &&\r\n   3424|      this.roundCount >= 2\r\n   3425|    ) {\r\n   3426|      const anchor = `Proactive compress at ~${pctBefore}% — recent tools: ${[\r\n   3427|        ...new Set(this.toolsUsedThisTurn),\r\n   3428|      ]\r\n   3429|        .slice(-10)\r\n   3430|        .join(\", \")}`;\r\n   3431|      this.context.forceCompress(anchor);\r\n   3432|      this.proactiveCompressedThisSend = true;\r\n   3433|    }\r\n   3434|\r\n   3435|    const recallEvery = parseInt(resolveHarnessEnvRaw(\"AGENT_RECALL_EVERY_N\", this.runtimePreferences) ?? \"2\", 10);\r\n   3436|    const intent = this.turnInference?.intent ?? \"knowledge\";\r\n   3437|    const memoryPolicy = resolveMemoryPolicy(intent, {\r\n   3438|      identityQuery: this.turnInference?.identityQuery === true,\r\n   3439|      exploratoryCreative: this.turnInference?.exploratoryCreative === true,\r\n   3440|    });\r\n   3441|    const inferenceThreshold = resolveIntentConfidenceThreshold();\r\n   3442|    // Emit routing policy once per turn (round 0 only) — the intent/policy is stable\r\n   3443|    // for the full turn; re-emitting on every round creates noisy UI repetition.\r\n   3444|    if (this.agentDepth === 0 && round === 0) {\r\n   3445|      this.emitter.emit(\"memory_retrieval_policy\", {\r\n   3446|        intent,\r\n   3447|        likelyEditPaths: this.turnInference?.likelyEditPaths?.length\r\n   3448|          ? [...this.turnInference.likelyEditPaths]\r\n   3449|          : undefined,\r\n   3450|        source: this.turnInference?.source ?? \"turn_policy\",\r\n   3451|        confidence: this.turnInference?.confidence,\r\n   3452|        threshold: inferenceThreshold,\r\n   3453|        scope: memoryPolicy.scope,\r\n   3454|        maxAgeDays: memoryPolicy.maxAgeDays,\r\n   3455|        minConfidence: memoryPolicy.minConfidence,\r\n   3456|        minQueryOverlap: memoryPolicy.minQueryOverlap,\r\n   3457|        excludeTypes: memoryPolicy.excludeTypes ?? [],\r\n   3458|        autoR"
+    },
+    {
+      "kind": "tool_call",
+      "callId": "call_9b9d946b6c7d448ebbf6e578",
+      "name": "grep_file",
+      "argsJson": "{\"context_lines\":2,\"path\":\"C:\\\\Users\\\\traid\\\\dreamthedream\\\\packages\\\\core\\\\src\\\\agent.ts\",\"pattern\":\"this\\\\.context\\\\.callLLM|this\\\\.callLLM|streamChat|createChatCompletion|chat\\\\.completions\"}",
+      "status": "done",
+      "startedAt": 1779779923828,
+      "endedAt": 1779779925028
+    },
+    {
+      "kind": "tool_result",
+      "callId": "call_9b9d946b6c7d448ebbf6e578",
+      "ok": true,
+      "output": "No matches for \"this\\.context\\.callLLM|this\\.callLLM|streamChat|createChatCompletion|chat\\.completions\" in C:\\Users\\traid\\dreamthedream\\packages\\core\\src\\agent.ts (5444 lines total)"
+    },
+    {
+      "kind": "tool_call",
+      "callId": "call_15ef2f61da4647779d17d860",
+      "name": "grep_file",
+      "argsJson": "{\"context_lines\":3,\"path\":\"C:\\\\Users\\\\traid\\\\dreamthedream\\\\packages\\\\core\\\\src\\\\agent.ts\",\"pattern\":\"completion|llmCall|callModel|executeTurn\"}",
+      "status": "done",
+      "startedAt": 1779779924008,
+      "endedAt": 1779779925208
+    },
+    {
+      "kind": "tool_result",
+      "callId": "call_15ef2f61da4647779d17d860",
+      "ok": true,
+      "output": "No matches for \"completion|llmCall|callModel|executeTurn\" in C:\\Users\\traid\\dreamthedream\\packages\\core\\src\\agent.ts (5444 lines total)"
+    },
+    {
+      "kind": "tool_call",
+      "callId": "call_863d3516a46b439794518ce9",
+      "name": "grep_file",
+      "argsJson": "{\"context_lines\":3,\"path\":\"C:\\\\Users\\\\traid\\\\dreamthedream\\\\packages\\\\core\\\\src\\\\agent.ts\",\"pattern\":\"this\\\\.client\"}",
+      "status": "done",
+      "startedAt": 1779779924188,
+      "endedAt": 1779779925388
+    },
+    {
+      "kind": "tool_result",
+      "callId": "call_863d3516a46b439794518ce9",
+      "ok": true,
+      "output": "No matches for \"this\\.client\" in C:\\Users\\traid\\dreamthedream\\packages\\core\\src\\agent.ts (5444 lines total)"
+    },
+    {
+      "kind": "tool_call",
+      "callId": "call_5da3838b384e42a9be4da23c",
+      "name": "grep_file",
+      "argsJson": "{\"context_lines\":5,\"path\":\"C:\\\\Users\\\\traid\\\\dreamthedream\\\\packages\\\\core\\\\src\\\\agent.ts\",\"pattern\":\"this.client\"}",
+      "status": "done",
+      "startedAt": 1779779924368,
+      "endedAt": 1779779925568
+    },
+    {
+      "kind": "tool_result",
+      "callId": "call_5da3838b384e42a9be4da23c",
+      "ok": true,
+      "output": "14 matches in C:\\Users\\traid\\dreamthedream\\packages\\core\\src\\agent.ts\n---\n 1513        ...(typeof out === \"string\" && out.length > 0 ? { path: out } : {}),\r\n 1514      };\r\n 1515    }\r\n 1516  \r\n 1517    private rebuildClient(): void {\r\n 1518>     this.client = new OpenAI({\r\n 1519        apiKey: this.config.openRouterApiKey,\r\n 1520        baseURL: this.config.baseURL,\r\n 1521        maxRetries: 0,\r\n 1522        defaultHeaders: buildOpenRouterAttributionHeaders(),\r\n 1523      });\r\n---\n 1772      // Wire onCompressed callback so context compression fires a structured event (#7)\r\n 1773      // Wire semanticSummarizer when AGENT_COMPRESS_SEMANTIC=1 (uses fast model for causal narratives).\r\n 1774      const semanticSummarizer =\r\n 1775        resolveHarnessEnvRaw(\"AGENT_COMPRESS_SEMANTIC\", this.runtimePreferences) === \"1\" && config.agentDepth === 0\r\n 1776          ? async (rawSummaries: string): Promise<string> => {\r\n 1777>             const jr = await completeChatJson(this.client, {\r\n 1778                model: getFastModelSlug(config.model),\r\n 1779                temperature: 0.1,\r\n 1780                maxTokens: 300,\r\n 1781                messages: [\r\n 1782                  {\r\n---\n 1812  \r\n 1813      // Root creates orchestrator; children receive the same instance\r\n 1814      this.orchestrator =\r\n 1815        config.orchestrator ?? new TaskOrchestrator();\r\n 1816  \r\n 1817>     this.client = new OpenAI({\r\n 1818        apiKey: config.openRouterApiKey,\r\n 1819        baseURL: config.baseURL,\r\n 1820        maxRetries: 0,\r\n 1821        defaultHeaders: buildOpenRouterAttributionHeaders(),\r\n 1822      });\r\n---\n 1832        this.rebuildClient();\r\n 1833      }\r\n 1834  \r\n 1835      const safetyJudge =\r\n 1836        config.safetyJudge?.enabled === true\r\n 1837>         ? new SafetyJudge(this.client, {\r\n 1838              model: config.safetyJudge.model ?? config.model,\r\n 1839              timeoutMs: config.safetyJudge.timeoutMs,\r\n 1840              cacheTtlMs: config.safetyJudge.cacheTtlMs,\r\n 1841              failOpen: config.safetyJudge.failOpen,\r\n 1842            })\r\n---\n 2050            } catch {\r\n 2051              /* optional orientation */\r\n 2052            }\r\n 2053          }\r\n 2054          this.turnInference = await inferTurnInference(\r\n 2055>           this.client,\r\n 2056            this.config.model,\r\n 2057            userMessage,\r\n 2058            intentWorkspace\r\n 2059          );\r\n 2060        }\r\n---\n 2206          this.recallRewriteThisSend = null;\r\n 2207        } else {\r\n 2208          try {\r\n 2209            this.recallRewriteThisSend = await rewriteQueryForRecall(\r\n 2210              userMessage,\r\n 2211>             this.client,\r\n 2212              this.config.model\r\n 2213            );\r\n 2214          } catch {\r\n 2215            this.recallRewriteThisSend = null;\r\n 2216          }\r\n---\n 2756        `Tools used this send:\\n${this.toolsUsedThisTurn.join(\", \")}\\n\\n` +\r\n 2757        `Last assistant:\\n${(this.context.getLastAssistantMessage() ?? \"\").slice(0, 3000)}`;\r\n 2758  \r\n 2759      try {\r\n 2760        const fast = getFastModelSlug(this.config.model);\r\n 2761>       const jr = await completeChatJson(this.client, {\r\n 2762          model: fast,\r\n 2763          temperature: 0,\r\n 2764          maxTokens: 500,\r\n 2765          messages: [\r\n 2766            {\r\n---\n 2879          .then((s) => s.slice(0, 30_000))\r\n 2880          .catch(() => \"(no notes yet)\");\r\n 2881        const prompt = buildAutoDreamPrompt({ notesSnapshot, sessions: snippets });\r\n 2882  \r\n 2883        const fast = getFastModelSlug(this.config.model);\r\n 2884>       const jr = await completeChatJson(this.client, {\r\n 2885          model: fast,\r\n 2886          temperature: 0,\r\n 2887          maxTokens: 1000,\r\n 2888          messages: [\r\n 2889            {\r\n---\n 3034      try {\r\n 3035        const persona = this.getCurrentPersona();\r\n 3036        const personaLabel = persona?.name?.trim() || \"Assistant\";\r\n 3037        const result = await executePersonalityHeartbeat({\r\n 3"
+    },
+    {
+      "kind": "tool_call",
+      "callId": "call_fc122134812649f3b57d30b3",
+      "name": "read_file",
+      "argsJson": "{\"line_numbers\":true,\"limit\":120,\"offset\":3501,\"path\":\"C:\\\\Users\\\\traid\\\\dreamthedream\\\\packages\\\\core\\\\src\\\\agent.ts\"}",
+      "status": "done",
+      "startedAt": 1779779924548,
+      "endedAt": 1779779925748
+    },
+    {
+      "kind": "tool_result",
+      "callId": "call_fc122134812649f3b57d30b3",
+      "ok": true,
+      "output": "3501|      shouldPrimeThisRound &&\r\n   3502|      this.agentDepth === 0 &&\r\n   3503|      !this.sessionGreetingThisSend &&\r\n   3504|      !this.personaBootstrapPromptThisSend &&\r\n   3505|      memoryPolicy.allowAutoRecall &&\r\n   3506|      (this.registry.has(\"recall_relevant\") || this.registry.has(\"memory_query\"))\r\n   3507|    ) {\r\n   3508|      try {\r\n   3509|        const seed = this.lastUserMessage.trim().slice(0, 400);\r\n   3510|        const rw = this.recallRewriteThisSend;\r\n   3511|        const sub =\r\n   3512|          rw?.subQueries?.filter((q) => q.trim().length >= 4) ?? [];\r\n   3513|        const identityLike = this.turnInference?.identityQuery === true;\r\n   3514|        // Identity queries get purpose-built BM25 seeds first — the raw question\r\n   3515|        // (\"do you know my name?\") has zero lexical overlap with stored name facts.\r\n   3516|        const queries =\r\n   3517|          sub.length > 0\r\n   3518|            ? sub\r\n   3519|            : identityLike\r\n   3520|            ? [\"user name\", \"what should i call user\", \"identity\", \"preferred name\"]\r\n   3521|            : seed.length >= 8\r\n   3522|            ? [seed]\r\n   3523|            : [];\r\n   3524|        if (queries.length > 0) {\r\n   3525|          const k = Math.min(\r\n   3526|            8,\r\n   3527|            Math.max(3, this.context.getContextBudgetAdvice().recommendedRecallK)\r\n   3528|          );\r\n   3529|          const useMq = this.registry.has(\"memory_query\");\r\n   3530|          const payload: Record<string, unknown> = useMq\r\n   3531|            ? {\r\n   3532|                mode: \"hybrid\",\r\n   3533|                query: queries[0]!.slice(0, 800),\r\n   3534|                queries,\r\n   3535|                k,\r\n   3536|                scope: memoryPolicy.scope,\r\n   3537|                goal_hint: (() => {\r\n   3538|                  const base = this.lastUserMessage.slice(0, 500);\r\n   3539|                  const paths =\r\n   3540|                    intent === \"coding\" && this.turnInference?.likelyEditPaths?.length\r\n   3541|                      ? this.turnInference.likelyEditPaths.slice(0, 8).join(\", \")\r\n   3542|                      : \"\";\r\n   3543|                  if (!paths) return base;\r\n   3544|                  const suffix = `\\nLikely code paths: ${paths}`;\r\n   3545|                  return base.length + suffix.length > 900 ? base.slice(0, 900 - suffix.length) + suffix : base + suffix;\r\n   3546|                })(),\r\n   3547|                open_questions:\r\n   3548|                  rw?.subQueries?.filter((q) => q.trim().length >= 4).slice(0, 8) ?? [],\r\n   3549|                ...(memoryPolicy.maxAgeDays != null ? { max_age_days: memoryPolicy.maxAgeDays } : {}),\r\n   3550|                ...(memoryPolicy.minConfidence != null\r\n   3551|                  ? { min_confidence: memoryPolicy.minConfidence }\r\n   3552|                  : {}),\r\n   3553|                ...(memoryPolicy.minQueryOverlap != null\r\n   3554|                  ? { min_query_overlap: memoryPolicy.minQueryOverlap }\r\n   3555|                  : {}),\r\n   3556|                ...(memoryPolicy.excludeTypes?.length\r\n   3557|                  ? { exclude_types: memoryPolicy.excludeTypes }\r\n   3558|                  : {}),\r\n   3559|              }\r\n   3560|            : {\r\n   3561|                query: queries[0]!.slice(0, 800),\r\n   3562|                queries,\r\n   3563|                k,\r\n   3564|                scope: memoryPolicy.scope,\r\n   3565|                ...(memoryPolicy.maxAgeDays != null ? { max_age_days: memoryPolicy.maxAgeDays } : {}),\r\n   3566|                ...(memoryPolicy.minConfidence != null\r\n   3567|                  ? { min_confidence: memoryPolicy.minConfidence }\r\n   3568|                  : {}),\r\n   3569|                ...(memoryPolicy.minQueryOverlap != null\r\n   3570|                  ? { min_query_overlap: memoryPolicy.minQueryOverlap }\r\n   3571|                  : {}),\r\n   3572|                ...(memoryPolicy.excludeTypes?.length\r\n   3573|                "
+    },
+    {
+      "kind": "tool_call",
+      "callId": "call_b8ce3e7ed2db4529aa7e8f3b",
+      "name": "read_file",
+      "argsJson": "{\"line_numbers\":true,\"offset\":5100,\"limit\":180,\"path\":\"C:\\\\Users\\\\traid\\\\dreamthedream\\\\packages\\\\core\\\\src\\\\agent.ts\"}",
+      "status": "done",
+      "startedAt": 1779779924728,
+      "endedAt": 1779779925928
+    },
+    {
+      "kind": "tool_result",
+      "callId": "call_b8ce3e7ed2db4529aa7e8f3b",
+      "ok": true,
+      "output": "5100|      if (Date.now() < this.providerCircuitOpenUntilMs) {\r\n   5101|        const sec = Math.ceil((this.providerCircuitOpenUntilMs - Date.now()) / 1000);\r\n   5102|        throw new Error(`Provider circuit open due to repeated upstream failures. Retry in ~${sec}s.`);\r\n   5103|      }\r\n   5104|      const useTools =\r\n   5105|        tools.length > 0 && (allowToollessRetry ? attempt < 2 : true);\r\n   5106|      const useToolChoice = useTools && attempt === 0;\r\n   5107|\r\n   5108|      // Effective max_tokens: routing profile per-intent allocation takes precedence\r\n   5109|      // over the global AGENT_MAX_COMPLETION_TOKENS cap. This ensures that coding/\r\n   5110|      // execution turns (8192/6144) aren't silently capped at the 4000-token default.\r\n   5111|      const routingMaxTokens = this._turnRoutingProfile?.maxTokens ?? 0;\r\n   5112|      const maxCompletionRaw = parseInt(\r\n   5113|        resolveHarnessEnvRaw(\"AGENT_MAX_COMPLETION_TOKENS\", this.runtimePreferences) ?? \"0\",\r\n   5114|        10\r\n   5115|      );\r\n   5116|      const defaultMaxTokens = Number.isFinite(maxCompletionRaw) && maxCompletionRaw > 0\r\n   5117|        ? maxCompletionRaw\r\n   5118|        : 0;\r\n   5119|      const effectiveMaxTokens = routingMaxTokens > 0 ? routingMaxTokens : defaultMaxTokens;\r\n   5120|      const maxCompletionTokens = effectiveMaxTokens > 0\r\n   5121|        ? Math.min(effectiveMaxTokens, 128_000)\r\n   5122|        : undefined;\r\n   5123|\r\n   5124|      // Provider pinning for OpenRouter cache affinity — without this, OpenRouter randomly\r\n   5125|      // load-balances across providers and each has its own KV cache, so the system prompt\r\n   5126|      // is re-ingested on every request. Pinning to a single provider keeps the cache warm.\r\n   5127|      const providerRouting = buildProviderRouting(modelOverride ?? this.config.model);\r\n   5128|\r\n   5129|      const reasoningParam =\r\n   5130|        reasoningBudget != null\r\n   5131|          ? buildOpenRouterReasoningParam(reasoningBudget, reasoningSurface)\r\n   5132|          : {};\r\n   5133|\r\n   5134|      // Prompt cache breakpoint: tag the trailing static system message with\r\n   5135|      // `cache_control: { type: \"ephemeral\" }` so cache-supporting providers\r\n   5136|      // (DeepInfra, GMICloud, NovitaAI, …) serve the prefix at ~1/10× cost on\r\n   5137|      // every round after the first. No-op when AGENT_PROMPT_CACHE=0.\r\n   5138|      const cachedMessages = applyPromptCacheBreakpoints(messages);\r\n   5139|\r\n   5140|      const params: OpenAI.Chat.Completions.ChatCompletionCreateParamsStreaming & {\r\n   5141|        provider?: { order: string[]; allow_fallbacks: boolean };\r\n   5142|        user?: string;\r\n   5143|        reasoning?: { effort: string };\r\n   5144|        stream_options?: { include_usage: boolean };\r\n   5145|      } = {\r\n   5146|        model: modelOverride ?? this.config.model,\r\n   5147|        messages: cachedMessages,\r\n   5148|        stream: true,\r\n   5149|        // Request usage on the terminal chunk so we can log cache hit rate.\r\n   5150|        stream_options: { include_usage: true },\r\n   5151|        ...(maxCompletionTokens !== undefined && { max_tokens: maxCompletionTokens }),\r\n   5152|        ...(useTools && { tools }),\r\n   5153|        ...(useToolChoice && { tool_choice: \"auto\" as const }),\r\n   5154|        // OpenRouter-specific: sticky provider routing + session affinity for cache hits\r\n   5155|        ...(providerRouting && { provider: providerRouting }),\r\n   5156|        ...reasoningParam,\r\n   5157|        user: this.taskId,\r\n   5158|      };\r\n   5159|\r\n   5160|      try {\r\n   5161|        // Pass abort signal as RequestOptions (second arg) so hung streams can be cancelled (#3)\r\n   5162|        const mergedSignal = this.mergeStreamAbortSignals(streamAbort);\r\n   5163|        const stream = (await withProviderRequestSpacing(\r\n   5164|          { apiKey: this.config.openRouterApiKey, baseURL: this.config.baseURL },\r\n   5165|          () =>\r\n   5166|            t"
+    },
+    {
+      "kind": "tool_call",
+      "callId": "call_fdd4f2f4bf554bfe8d85bdd4",
+      "name": "read_file",
+      "argsJson": "{\"line_numbers\":true,\"offset\":4350,\"limit\":160,\"path\":\"C:\\\\Users\\\\traid\\\\dreamthedream\\\\packages\\\\core\\\\src\\\\agent.ts\"}",
+      "status": "done",
+      "startedAt": 1779779924908,
+      "endedAt": 1779779926108
+    },
+    {
+      "kind": "tool_result",
+      "callId": "call_fdd4f2f4bf554bfe8d85bdd4",
+      "ok": true,
+      "output": "4350|            ok: r.ok,\r\n   4351|            reason: r.ok ? undefined : r.error,\r\n   4352|          });\r\n   4353|        } else if (tc.name === \"vault_search\") {\r\n   4354|          if (r.ok) this.vaultMetrics.searches += 1;\r\n   4355|          this.emitter.emit(\"vault_activity\", {\r\n   4356|            action: \"search\",\r\n   4357|            ok: r.ok,\r\n   4358|            reason: r.ok ? undefined : r.error,\r\n   4359|          });\r\n   4360|        } else if (tc.name === \"vault_write\") {\r\n   4361|          if (r.ok) this.vaultMetrics.writes += 1;\r\n   4362|          else this.vaultMetrics.skippedWrites += 1;\r\n   4363|          this.emitter.emit(\"vault_activity\", {\r\n   4364|            action: r.ok ? \"write\" : \"skip_write\",\r\n   4365|            ok: r.ok,\r\n   4366|            reason: r.ok ? undefined : r.error,\r\n   4367|          });\r\n   4368|        } else if (tc.name === \"web_search\") {\r\n   4369|          try {\r\n   4370|            const a = JSON.parse(tc.argsJson) as { query?: string };\r\n   4371|            if (typeof a.query === \"string\" && a.query.trim().length >= 4) {\r\n   4372|              const q = a.query.trim();\r\n   4373|              if (!this.webSearchQueriesThisTurn.some((x) => normalizeIntentText(x) === normalizeIntentText(q))) {\r\n   4374|                this.webSearchQueriesThisTurn.push(q);\r\n   4375|              }\r\n   4376|              if (!r.ok) {\r\n   4377|                const key = normalizeIntentText(q);\r\n   4378|                this.failedSearchIntentCounts.set(key, (this.failedSearchIntentCounts.get(key) ?? 0) + 1);\r\n   4379|              }\r\n   4380|            }\r\n   4381|          } catch {\r\n   4382|            /* ignore */\r\n   4383|          }\r\n   4384|        }\r\n   4385|        if (tc.name === \"think\" && r.ok) {\r\n   4386|          // Pre-activate any tool families declared in structured think() calls.\r\n   4387|          try {\r\n   4388|            const targs = JSON.parse(tc.argsJson) as { tool_families?: string[] };\r\n   4389|            const families = targs.tool_families;\r\n   4390|            if (Array.isArray(families) && families.length > 0 && this.registry.isLazyToolLoading()) {\r\n   4391|              const newly = this.registry.activateFamilies(families);\r\n   4392|              if (newly.length > 0) {\r\n   4393|                awarenessNeedsRefresh = true;\r\n   4394|                awarenessReason = \"think_family_preseed\";\r\n   4395|                this.emitter.emit(\"text\", {\r\n   4396|                  channel: \"trace\",\r\n   4397|                  delta: `[think] pre-activated families: ${families.join(\", \")} → ${newly.length} new tool(s)\\n`,\r\n   4398|                });\r\n   4399|              }\r\n   4400|            }\r\n   4401|          } catch {\r\n   4402|            // malformed args — ignore, execution continues normally\r\n   4403|          }\r\n   4404|        }\r\n   4405|        if (tc.name === \"breakdown\" && r.ok) {\r\n   4406|          try {\r\n   4407|            const bargs = JSON.parse(tc.argsJson) as {\r\n   4408|              tool_families?: string[];\r\n   4409|              clarification_needed?: boolean;\r\n   4410|              clarification_question?: string;\r\n   4411|              unknowns?: string[];\r\n   4412|            };\r\n   4413|            const families = bargs.tool_families;\r\n   4414|            if (Array.isArray(families) && families.length > 0 && this.registry.isLazyToolLoading()) {\r\n   4415|              const newly = this.registry.activateFamilies(families);\r\n   4416|              if (newly.length > 0) {\r\n   4417|                awarenessNeedsRefresh = true;\r\n   4418|                awarenessReason = \"breakdown_family_preseed\";\r\n   4419|                this.emitter.emit(\"text\", {\r\n   4420|                  channel: \"trace\",\r\n   4421|                  delta: `[breakdown] pre-activated families: ${families.join(\", \")} → ${newly.length} new tool(s)\\n`,\r\n   4422|                });\r\n   4423|              }\r\n   4424|            }\r\n   4425|            if (bargs.clarification_needed && bargs.cla"
+    },
+    {
+      "kind": "tool_call",
+      "callId": "call_9a296237fb1f480ab0d463ae",
+      "name": "read_file",
+      "argsJson": "{\"line_numbers\":true,\"limit\":150,\"offset\":4250,\"path\":\"C:\\\\Users\\\\traid\\\\dreamthedream\\\\packages\\\\core\\\\src\\\\agent.ts\"}",
+      "status": "done",
+      "startedAt": 1779779925088,
+      "endedAt": 1779779926288
+    },
+    {
+      "kind": "tool_result",
+      "callId": "call_9a296237fb1f480ab0d463ae",
+      "ok": true,
+      "output": "4250|          this.writeIntegrityNudgeThisSend = true;\r\n   4251|          this.context.appendMessage({\r\n   4252|            role: \"user\",\r\n   4253|            content:\r\n   4254|              \"[SYSTEM NOTE] The last file write may be incomplete (likely_truncated). \" +\r\n   4255|              \"Continue with write_file mode=append before answering the user.\",\r\n   4256|          });\r\n   4257|        }\r\n   4258|        const line = `${tc.name}:${r.ok ? \"ok\" : \"fail\"}`;\r\n   4259|        this.recentToolOutcomeLines.push(line.slice(0, 160));\r\n   4260|        if (this.recentToolOutcomeLines.length > 3) this.recentToolOutcomeLines.shift();\r\n   4261|\r\n   4262|        // ── Loop detection ──────────────────────────────────────────────────\r\n   4263|        // When the same (tool_name, normalized_args) call fails 3+ times in a\r\n   4264|        // row, the model has clearly mis-mapped the situation onto the wrong\r\n   4265|        // tool (classic: calling read_file on a directory path repeatedly when\r\n   4266|        // list_dir is what's needed). Ban the shape for the rest of this send\r\n   4267|        // and inject a corrective system message naming the wrong tool.\r\n   4268|        const argsHash = hashString(tc.argsJson || \"\");\r\n   4269|        const shapeKey = `${tc.name}::${argsHash}`;\r\n   4270|        if (!r.ok) {\r\n   4271|          if (\r\n   4272|            this.toolCallStreak &&\r\n   4273|            this.toolCallStreak.name === tc.name &&\r\n   4274|            this.toolCallStreak.argsHash === argsHash\r\n   4275|          ) {\r\n   4276|            this.toolCallStreak.failures += 1;\r\n   4277|          } else {\r\n   4278|            this.toolCallStreak = { name: tc.name, argsHash, failures: 1 };\r\n   4279|          }\r\n   4280|          if (this.toolCallStreak.failures >= 3 && !this.bannedToolCallShapesThisSend.has(shapeKey)) {\r\n   4281|            this.bannedToolCallShapesThisSend.add(shapeKey);\r\n   4282|            const argsPreview = tc.argsJson.slice(0, 200);\r\n   4283|            const errSnippet = r.error ? r.error.slice(0, 240) : \"(no error)\";\r\n   4284|            // Try to infer a suggested alternative based on the error pattern.\r\n   4285|            const suggestion = inferLoopBreakSuggestion(tc.name, errSnippet);\r\n   4286|            this.context.appendMessage({\r\n   4287|              role: \"user\",\r\n   4288|              content:\r\n   4289|                `[LOOP DETECTED] You called \\`${tc.name}\\` with the same args ${this.toolCallStreak.failures} times in a row and each call failed with: ${errSnippet}\\n\\n` +\r\n   4290|                `Args (preview): ${argsPreview}\\n\\n` +\r\n   4291|                (suggestion\r\n   4292|                  ? `Try a different tool. Specifically: ${suggestion}\\n\\n`\r\n   4293|                  : \"Stop calling this exact tool+args combination. Pick a different tool or change the arguments meaningfully.\\n\\n\") +\r\n   4294|                `This (tool, args) shape is now blocked for the rest of this turn — further identical calls will be rejected without dispatch.`,\r\n   4295|            });\r\n   4296|            this.loopBreakNudgeFiredThisSend = true;\r\n   4297|            this.emitter.emit(\"recovery_action\", {\r\n   4298|              strategy: \"replan\",\r\n   4299|              reason: `loop_break:${tc.name} ${this.toolCallStreak.failures}x — ${errSnippet.slice(0, 120)}`,\r\n   4300|            });\r\n   4301|          }\r\n   4302|        } else {\r\n   4303|          // Any successful call resets the streak — model is making progress.\r\n   4304|          this.toolCallStreak = null;\r\n   4305|        }\r\n   4306|        if (r.ok && tc.name === \"read_file\") {\r\n   4307|          try {\r\n   4308|            const a = JSON.parse(tc.argsJson) as { path?: string; offset?: number; limit?: number };\r\n   4309|            if (a.path) {\r\n   4310|              this.filesReadThisTurn.push(a.path);\r\n   4311|              if (this.filesReadThisTurn.length > 24) this.filesReadThisTurn.shift();\r\n   4312|              const key = a.path.replace(/\\"
+    },
+    {
+      "kind": "tool_call",
+      "callId": "call_9733d84be816479a84821ee5",
+      "name": "read_file",
+      "argsJson": "{\"limit\":200,\"line_numbers\":true,\"offset\":3800,\"path\":\"C:\\\\Users\\\\traid\\\\dreamthedream\\\\packages\\\\core\\\\src\\\\agent.ts\"}",
+      "status": "done",
+      "startedAt": 1779779925268,
+      "endedAt": 1779779926468
+    },
+    {
+      "kind": "tool_result",
+      "callId": "call_9733d84be816479a84821ee5",
+      "ok": true,
+      "output": "3800|              this.streamingToolNamesByCallId.set(id, name);\r\n   3801|            }\r\n   3802|            const streamToolName =\r\n   3803|              name ?? (id ? this.streamingToolNamesByCallId.get(id) : undefined);\r\n   3804|            if (parsed.isNewTool && id && name) {\r\n   3805|              this.emitter.emit(\"tool_start\", {\r\n   3806|                callId: id,\r\n   3807|                name,\r\n   3808|                traceId: this.currentTurnTraceId,\r\n   3809|                roundIndex: this.roundCount,\r\n   3810|              });\r\n   3811|              if (this.fileWriteStreamSink && isFileWriteToolName(name)) {\r\n   3812|                this.fileWriteStreamSink.open(id, name);\r\n   3813|              }\r\n   3814|\r\n   3815|              // PASTE: when the model starts streaming a new tool call (index N),\r\n   3816|              // tool call N-1's args are complete. Speculatively dispatch if safe.\r\n   3817|              if (pasteEnabled && index > 0) {\r\n   3818|                this.maybeStartEagerDispatch(accumulator, index - 1, speculativePromises, pasteEnabled);\r\n   3819|              }\r\n   3820|            }\r\n   3821|\r\n   3822|            if (argsDelta) {\r\n   3823|              const tc = accumulator.accumulatedToolCalls[index];\r\n   3824|              if (tc) {\r\n   3825|                this.emitter.emit(\"tool_delta\", { callId: tc.id, argsDelta });\r\n   3826|                if (this.fileWriteStreamSink && isFileWriteToolName(tc.name)) {\r\n   3827|                  await this.fileWriteStreamSink.ingestDelta(tc.id, tc.name, argsDelta);\r\n   3828|                }\r\n   3829|                this.maybeStartEagerDispatch(accumulator, index, speculativePromises, pasteEnabled);\r\n   3830|              }\r\n   3831|            }\r\n   3832|          }\r\n   3833|\r\n   3834|          if (parsed.finishReason) {\r\n   3835|            finishReason = parsed.finishReason;\r\n   3836|          }\r\n   3837|        }\r\n   3838|        // Surface prompt-cache hit rate so we can verify caching is firing.\r\n   3839|        // Quiet under AGENT_UI_VERBOSITY=quiet; trace channel either way.\r\n   3840|        try {\r\n   3841|          const usage = accumulator.usage as\r\n   3842|            | { prompt_tokens?: number }\r\n   3843|            | null\r\n   3844|            | undefined;\r\n   3845|          if (usage && typeof usage === \"object\") {\r\n   3846|            const cached = extractCachedTokens(usage);\r\n   3847|            const prompt = (usage.prompt_tokens ?? 0) as number;\r\n   3848|            if (prompt > 0) {\r\n   3849|              const pct = prompt > 0 ? Math.round((cached / prompt) * 100) : 0;\r\n   3850|              this.emitter.emit(\"text\", {\r\n   3851|                delta: `[HARNESS] prompt_cache: cached=${cached}/${prompt} (${pct}%)\\n`,\r\n   3852|                channel: \"trace\",\r\n   3853|              });\r\n   3854|            }\r\n   3855|          }\r\n   3856|        } catch {\r\n   3857|          /* non-fatal */\r\n   3858|        }\r\n   3859|        break streamLoop; // stream completed successfully\r\n   3860|      } catch (streamErr) {\r\n   3861|        // Never retry if the task was externally cancelled\r\n   3862|        if (this.abortSignal?.aborted) return;\r\n   3863|\r\n   3864|        const streamErrMsg = describeError(streamErr);\r\n   3865|        const isChunkTimeout = streamErrMsg.includes(\"STREAM_CHUNK_TIMEOUT\");\r\n   3866|        const canRetry =\r\n   3867|          streamAttempt < maxStreamRetries && (isChunkTimeout || isRetryable(streamErr));\r\n   3868|\r\n   3869|        if (!canRetry) throw streamErr;\r\n   3870|\r\n   3871|        streamAttempt++;\r\n   3872|        const interruptedText = accumulator.accumulatedText;\r\n   3873|        const interruptedToolCalls = [...accumulator.accumulatedToolCalls];\r\n   3874|        const hadPartialContent =\r\n   3875|          interruptedText.length > 0 || interruptedToolCalls.length > 0;\r\n   3876|\r\n   3877|        accumulator.reset();\r\n   3878|        speculativePromises.clear(); // discard PASTE results from failed stream"
+    },
+    {
+      "kind": "tool_call",
+      "callId": "call_ed967c55b51e44dda29d4074",
+      "name": "read_file",
+      "argsJson": "{\"limit\":120,\"line_numbers\":true,\"offset\":4100,\"path\":\"C:\\\\Users\\\\traid\\\\dreamthedream\\\\packages\\\\core\\\\src\\\\agent.ts\"}",
+      "status": "done",
+      "startedAt": 1779779925448,
+      "endedAt": 1779779926648
+    },
+    {
+      "kind": "tool_result",
+      "callId": "call_ed967c55b51e44dda29d4074",
+      "ok": true,
+      "output": "4100|                }\r\n   4101|              }\r\n   4102|            }\r\n   4103|          } catch {\r\n   4104|            /* non-fatal */\r\n   4105|          }\r\n   4106|        }\r\n   4107|        // Loop-break: short-circuit any (tool, args) shape that has already\r\n   4108|        // been banned this send because it failed 3+ times in a row. Returning\r\n   4109|        // a synthetic failure here keeps the loop-detector message in context\r\n   4110|        // without burning another round on the same broken call.\r\n   4111|        const bannedShapeKey = `${tc.name}::${hashString(tc.argsJson || \"\")}`;\r\n   4112|        let result: import(\"./types.js\").ToolResult;\r\n   4113|        if (this.bannedToolCallShapesThisSend.has(bannedShapeKey)) {\r\n   4114|          result = {\r\n   4115|            ok: false,\r\n   4116|            error: `[loop_break] This (${tc.name}, args) combination was blocked after 3 consecutive failures earlier this turn. Try a different tool or change the arguments meaningfully.`,\r\n   4117|          };\r\n   4118|        } else {\r\n   4119|          // PASTE: reuse speculatively-started promise if available.\r\n   4120|          const speculative = speculativePromises.get(tc.id);\r\n   4121|          result = speculative\r\n   4122|            ? await speculative\r\n   4123|            : await this.dispatcher.dispatch(tc.id, tc.name, tc.argsJson, batchToolNames);\r\n   4124|        }\r\n   4125|        results[idx] = result;\r\n   4126|        // Index output for query_tool_outputs + flag identical cross-round re-calls.\r\n   4127|        const argsKey = tc.argsJson.slice(0, 200);\r\n   4128|        const prior = this._sessionToolIndex.findPriorCall(tc.name, argsKey, tc.id);\r\n   4129|        this._sessionToolIndex.add({\r\n   4130|          callId: tc.id,\r\n   4131|          toolName: tc.name,\r\n   4132|          argsKey,\r\n   4133|          output: result.ok ? String(result.output ?? \"\") : String(result.error ?? \"\"),\r\n   4134|          at: new Date().toISOString(),\r\n   4135|          ok: result.ok,\r\n   4136|        });\r\n   4137|        if (prior) {\r\n   4138|          duplicateHints.push(\r\n   4139|            `${tc.name} was already called with identical arguments earlier this turn (call ${prior.callId}).`\r\n   4140|          );\r\n   4141|        }\r\n   4142|        this._toolOutcomesThisTurn.push({ name: tc.name, ok: result.ok });\r\n   4143|      };\r\n   4144|\r\n   4145|      // 1. Run dispatch_graph calls first so the DAG is populated.\r\n   4146|      await Promise.all(dagCallIndices.map(dispatchAt));\r\n   4147|\r\n   4148|      // 2. Execute remaining calls in topological order if DAG has edges.\r\n   4149|      if (!this._toolDag.isEmpty() && regularCallIndices.length > 0) {\r\n   4150|        const idToIdx = new Map<string, number>(\r\n   4151|          regularCallIndices.map((i) => [toolCalls[i]!.id, i])\r\n   4152|        );\r\n   4153|        const callIds = regularCallIndices.map((i) => toolCalls[i]!.id);\r\n   4154|        const batches = this._toolDag.topologicalBatches(callIds);\r\n   4155|        const resultsByCallId = new Map<string, { ok: boolean; output: string; error?: string }>();\r\n   4156|        for (const batchIds of batches) {\r\n   4157|          for (const id of batchIds) {\r\n   4158|            const idx = idToIdx.get(id)!;\r\n   4159|            const tc = toolCalls[idx]!;\r\n   4160|            try {\r\n   4161|              const argsObj = JSON.parse(tc.argsJson) as Record<string, unknown>;\r\n   4162|              const merged = this._toolDag.injectResolvedDeps(argsObj, id, resultsByCallId);\r\n   4163|              toolCalls[idx] = { ...tc, argsJson: JSON.stringify(merged) };\r\n   4164|            } catch {\r\n   4165|              /* keep original args */\r\n   4166|            }\r\n   4167|          }\r\n   4168|          await Promise.all(batchIds.map((id) => dispatchAt(idToIdx.get(id)!)));\r\n   4169|          for (const id of batchIds) {\r\n   4170|            const idx = idToIdx.get(id)!;\r\n   4171|            const r = results[idx]!;\r\n   4172|            re"
+    },
+    {
+      "kind": "tool_call",
+      "callId": "call_8509a92df9014615bd287d7b",
+      "name": "read_file",
+      "argsJson": "{\"limit\":80,\"line_numbers\":true,\"offset\":3690,\"path\":\"C:\\\\Users\\\\traid\\\\dreamthedream\\\\packages\\\\core\\\\src\\\\agent.ts\"}",
+      "status": "done",
+      "startedAt": 1779779925628,
+      "endedAt": 1779779926828
+    },
+    {
+      "kind": "tool_result",
+      "callId": "call_8509a92df9014615bd287d7b",
+      "ok": true,
+      "output": "3690|        maxAgeDays: memoryPolicy.maxAgeDays,\r\n   3691|        minConfidence: memoryPolicy.minConfidence,\r\n   3692|        minQueryOverlap: memoryPolicy.minQueryOverlap,\r\n   3693|        excludeTypes: memoryPolicy.excludeTypes ?? [],\r\n   3694|        autoRecallAllowed: false,\r\n   3695|        fallbackReason: this.turnInference?.fallbackReason,\r\n   3696|        exploratoryCreative: Boolean(this.turnInference?.exploratoryCreative),\r\n   3697|      });\r\n   3698|    }\r\n   3699|\r\n   3700|    let messages = await this.context.buildMessages();\r\n   3701|    // ── Adaptive intent routing ───────────────────────────────────────────────\r\n   3702|    // Cache the routing profile for the duration of this turn. Intent/model/maxTokens\r\n   3703|    // are stable across rounds — rebuilding every round is wasteful and causes\r\n   3704|    // repeated routing-line noise in the UI. Tool filter is included in the cache;\r\n   3705|    // if lazy tool loading adds new tools, they bypass the filter because coding/\r\n   3706|    // execution intents carry toolFilter=null and heuristic classifications never\r\n   3707|    // activate filters (applyToolFilter requires source===\"llm\" + high confidence).\r\n   3708|    if (!this._turnRoutingProfile) {\r\n   3709|      this._turnRoutingProfile = buildRoutingProfile(\r\n   3710|        this.turnInference ?? null,\r\n   3711|        this.config.model\r\n   3712|      );\r\n   3713|    }\r\n   3714|    const routingProfile: RoutingProfile = this._turnRoutingProfile;\r\n   3715|    // Emit the routing line only on round 0 — intent and model are fixed for the\r\n   3716|    // entire turn. Include source + confidence so the trace is actionable, not just\r\n   3717|    // a restatement of the model slug.\r\n   3718|    if (routingProfile.applied && round === 0 && !this.sessionGreetingThisSend && !this.personaBootstrapPromptThisSend) {\r\n   3719|      const srcNote =\r\n   3720|        routingProfile.source !== \"default\" && routingProfile.confidence > 0\r\n   3721|          ? ` src=${routingProfile.source}(${Math.round(routingProfile.confidence * 100)}%)`\r\n   3722|          : \"\";\r\n   3723|      const filterNote = routingProfile.toolFilterActive ? ` tools=filtered` : \"\";\r\n   3724|      this.emitter.emit(\"text\", {\r\n   3725|        delta: `[routing: intent=${routingProfile.intent}${srcNote} model=${routingProfile.modelSlug} maxTokens=${routingProfile.maxTokens}${filterNote}]\\n`,\r\n   3726|        channel: \"trace\",\r\n   3727|      });\r\n   3728|      if (this._turnReasoningBudget) {\r\n   3729|        this.emitter.emit(\"text\", {\r\n   3730|          delta: formatReasoningBudgetTraceLine(this._turnReasoningBudget, this._turnReasoningSurface),\r\n   3731|          channel: \"trace\",\r\n   3732|        });\r\n   3733|      }\r\n   3734|    }\r\n   3735|    const tools =\r\n   3736|      this.sessionGreetingThisSend || this.personaBootstrapPromptThisSend\r\n   3737|        ? []\r\n   3738|        : this.registry.toOpenAIFormat(routingProfile.toolFilter ?? undefined);\r\n   3739|    const accumulator = new StreamAccumulator();\r\n   3740|    // PASTE: speculative tool dispatch — start safe tool calls while stream is still running.\r\n   3741|    const pasteEnabled = resolveHarnessEnvRaw(\"AGENT_PASTE\", this.runtimePreferences) === \"1\";\r\n   3742|    const speculativePromises = new Map<string, Promise<ToolResult>>();\r\n   3743|\r\n   3744|    const chunkTimeoutMs = Math.max(\r\n   3745|      10_000,\r\n   3746|      parseInt(\r\n   3747|        resolveHarnessEnvRaw(\"AGENT_STREAM_CHUNK_TIMEOUT_MS\", this.runtimePreferences) ?? \"60000\",\r\n   3748|        10\r\n   3749|      ) || 60_000\r\n   3750|    );\r\n   3751|    const maxStreamRetries = Math.max(\r\n   3752|      0,\r\n   3753|      parseInt(resolveHarnessEnvRaw(\"AGENT_STREAM_MAX_RETRIES\", this.runtimePreferences) ?? \"3\", 10) || 3\r\n   3754|    );\r\n   3755|\r\n   3756|    const routingModel = routingProfile.applied ? routingProfile.modelSlug : undefined;\r\n   3757|    let streamAbort = new AbortController();\r\n   3758|    let stream = await this.streamWi"
+    },
+    {
+      "kind": "assistant",
+      "text": "Here's the summary, drawn directly from `packages/core/src/agent.ts` — the `runReActLoop()` method (line 3281) and its orchestration across the full `AgentHarness` class.\n\n---\n\n## The ReAct Loop — `runReActLoop()` at `agent.ts:3281`\n\n**1. Pre-flight guards, then streaming LLM call with adaptive routing and provider resilience.**\n\nEach round begins with abort-signal checks, round-cap enforcement (`maxToolRoundsPerTurn`), contract-budget exhaustion, and periodic anti-drift scoring (every 4 rounds, drift ≥ 0.55 triggers replan). Yield snapshots are written for crash recovery. Context-pressure alerts fire at 60% / 85% utilization with proactive compression at 65%+. Memory is primed via auto-recall (with a semantic dream gate — BM25 scoring against the notes index, skipping recall if the score is below threshold, plus contradiction detection against recent tool output). The harness then builds messages and makes a streaming LLM call (`this.client.chat.completions.create` at line 5166) through a retry wrapper with provider circuit-breaking, prompt-cache breakpoints, and PASTE-enabled speculative dispatch (safe tool calls like file writes launch before the stream finishes).\n\n**2. Tool dispatch with DAG topological ordering, safety gating, dedup, and loop detection.**\n\nTool calls accumulated from the stream are de-duplicated (identical `(name, args)` pairs), checked against a per-send banlist for 3×-failure loop breaks, and dispatched. `dispatch_graph` calls run first to populate the DAG, then remaining calls are executed in topological batches so dependencies resolve before dependents. Per-call results flow through output distillation (fast-model summarization for large tool outputs), read-file anti-loop nudges (at 2× and 4× re-reads of the same file), `think()`/`breakdown()` family pre-activation, and vault/web-search activity tracking. Duplicate cross-round calls are signaled so the model reuses `query_tool_outputs` instead of re-running identical work.\n\n**3. Recursive re-entry or finalization with critic gates.**\n\nIf tool calls were dispatched (or if length-resume / no-finish-reason continuations are needed), the loop recurses: `await this.runReActLoop(round + 1)`. When the model produces text-only output, the harness runs finalization checks — a verify-result critic, synthesis-completeness checks for research turns, deck-pipeline enforcement (pptx path, not markdown-only), vision-completion guards for image-centric asks, and a `turn_end` emit with recipe recording / episodic trajectory logging. Pseudo-tool-markup recovery (stalled JSON in text instead of real tool calls) gets one retry with a correction message.",
+      "streaming": false
+    }
+  ],
+  "meta": {
+    "turnIndex": 1,
+    "tools": [
+      "grep_file",
+      "list_dir",
+      "read_file"
+    ],
+    "durationMs": 309595
+  },
+  "capturedAt": "2026-05-26T07:26:13.624Z"
+}
