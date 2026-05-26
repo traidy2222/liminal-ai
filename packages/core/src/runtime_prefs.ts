@@ -1,6 +1,12 @@
-import { readFile, writeFile } from "node:fs/promises";
-import { join } from "node:path";
+import { readFile, writeFile, mkdir } from "node:fs/promises";
+import path, { join } from "node:path";
 import { resolveWorkspaceRoot } from "./workspace_root.js";
+import {
+  ensureGlobalStorageRoot,
+  pickReadPath,
+  pickWritePath,
+  runtimePrefsPaths,
+} from "./global_storage.js";
 
 export type ProviderKeySource =
   | "AGENT_API_KEY"
@@ -90,6 +96,12 @@ export interface RuntimePreferences {
 
 export const RUNTIME_PREFS_FILE = ".agent_runtime_prefs.json";
 
+/**
+ * Synchronous legacy path resolver — kept for callers that need a stable path
+ * string without async lookup (currently none in the harness). New code should
+ * prefer `runtimePrefsPaths()` from global_storage which returns both the new
+ * `~/.liminal/runtime_prefs.json` and the legacy fallback.
+ */
 export function getRuntimePrefsPath(workspaceRoot?: string): string {
   const root = workspaceRoot ? workspaceRoot : resolveWorkspaceRoot();
   return join(root, RUNTIME_PREFS_FILE);
@@ -98,9 +110,11 @@ export function getRuntimePrefsPath(workspaceRoot?: string): string {
 export async function loadRuntimePreferences(
   workspaceRoot?: string
 ): Promise<RuntimePreferences | null> {
-  const path = getRuntimePrefsPath(workspaceRoot);
+  // Phase 1 storage split: prefer ~/.liminal/runtime_prefs.json; fall back to
+  // the legacy workspace-local .agent_runtime_prefs.json when global is unset.
+  const filePath = await pickReadPath(runtimePrefsPaths(workspaceRoot));
   try {
-    const raw = await readFile(path, "utf8");
+    const raw = await readFile(filePath, "utf8");
     const parsed = JSON.parse(raw) as RuntimePreferences;
     if (parsed && parsed.version === 1) return parsed;
     return null;
@@ -113,8 +127,10 @@ export async function saveRuntimePreferences(
   prefs: RuntimePreferences,
   workspaceRoot?: string
 ): Promise<string> {
-  const path = getRuntimePrefsPath(workspaceRoot);
-  await writeFile(path, JSON.stringify(prefs, null, 2), "utf8");
-  return path;
+  await ensureGlobalStorageRoot();
+  const filePath = await pickWritePath(runtimePrefsPaths(workspaceRoot));
+  await mkdir(path.dirname(filePath), { recursive: true });
+  await writeFile(filePath, JSON.stringify(prefs, null, 2), "utf8");
+  return filePath;
 }
 

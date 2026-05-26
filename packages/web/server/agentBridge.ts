@@ -3,8 +3,10 @@ import {
   maybeAttachSessionEventLog,
   resolveProviderConfig,
   resolveWorkspaceRoot,
+  runWithWorkspaceRoot,
   saveRuntimePreferences,
   resolveHarnessEnvRaw,
+  touchChatMetadata,
   type PersonaBootstrapProgressEvent,
 } from "@liminal/core";
 import {
@@ -61,7 +63,21 @@ function resolveWorldContext(
   return { sessionMode: sessionMode! };
 }
 
+/** Per-bridge configuration. Each chat = one AgentBridge with its own workspace + harness. */
+export interface AgentBridgeOptions {
+  /** Chat / harness taskId. Stable across bridge restarts for the same chat. */
+  chatId: string;
+  /**
+   * Absolute workspace root the harness operates in. All workspace-rooted reads/writes
+   * (file tools, git, repo_map, world_context) happen inside `runWithWorkspaceRoot(this)`
+   * scopes so concurrent chats with different workspaces stay isolated.
+   */
+  workspaceRoot: string;
+}
+
 export class AgentBridge {
+  readonly chatId: string;
+  readonly workspaceRoot: string;
   readonly harness: AgentHarness;
   /** Resolves after `registerAllTools` completes. */
   private readonly toolsRegistered: Promise<void>;
@@ -77,6 +93,15 @@ export class AgentBridge {
   private bootstrapInFlight = false;
   /** Wall-clock ms when the harness last emitted `turn_end` (for client status reconciliation). */
   private lastTurnEndedAtMs: number | null = null;
+  /**
+   * When suspended, SSE forwarding is silent — used while another chat is the
+   * active one in the ChatManager so background harnesses don't bleed events
+   * into the UI of an unrelated chat.
+   */
+  private sseSuspended = true;
+  /** Detach functions for all emitter subscriptions, so dispose() can fully unwire. */
+  private emitterDetachers: Array<() => void> = [];
+
   private emitBootstrapProgress(
     stageOrEvent: string | PersonaBootstrapProgressEvent,
     message?: string
@@ -85,36 +110,58 @@ export class AgentBridge {
       typeof stageOrEvent === "string"
         ? { stage: stageOrEvent, message: message ?? "", at: Date.now() }
         : stageOrEvent;
-    this.sse.send("persona_bootstrap_progress", payload);
+    this.maybeSend("persona_bootstrap_progress", payload);
   }
 
-  constructor(private readonly sse: SSEManager, runtimePreferences: RuntimePreferences | null = null) {
+  constructor(
+    private readonly sse: SSEManager,
+    options: AgentBridgeOptions,
+    runtimePreferences: RuntimePreferences | null = null
+  ) {
+    this.chatId = options.chatId;
+    this.workspaceRoot = options.workspaceRoot;
     const provider = resolveProviderConfig(runtimePreferences?.provider);
-    this.harness = new AgentHarness({
-      openRouterApiKey: provider.apiKey,
-      model: provider.model,
-      baseURL: provider.baseURL,
-      maxToolRoundsPerTurn: 128,
-      safetyJudge: resolveSafetyJudge(runtimePreferences),
-      workingStateEnabled: true,
-      // World context: auto-gather date/time/OS/shell; optionally include location
-      // Set AGENT_LOCATION="City, Country" in .env to include physical location
-      worldContext: resolveWorldContext(runtimePreferences),
-      runtimePreferences,
-      persistRuntimePreferences: async (prefs) =>
-        saveRuntimePreferences(prefs, resolveWorkspaceRoot()),
-      context: {
-        modelMaxTokens: 128_000,
-        thresholdFraction: 0.6,
-        inceptionMessages: INCEPTION_MESSAGES,
-        protocolDynamicBuilder: (names, hint) => buildProtocolDynamicSuffix(names, (hint ?? "any") as import("@liminal/tools").ProtocolIntentHint),
-      },
-    });
+    // All harness construction work happens inside the chat's workspace scope
+    // so world-context gather, persona discovery, etc. resolve relative to this
+    // chat's bound folder rather than the server's cwd.
+    this.harness = runWithWorkspaceRoot(this.workspaceRoot, () =>
+      new AgentHarness({
+        openRouterApiKey: provider.apiKey,
+        model: provider.model,
+        baseURL: provider.baseURL,
+        // Use the chatId as the harness taskId so session.jsonl, write_staging,
+        // and meta.json all share a directory under ~/.liminal/chats/<chatId>/.
+        taskId: this.chatId,
+        // Per-harness workspace root — AgentHarness wraps its own send() in an
+        // AsyncLocalStorage scope so file/git/repo_map tools resolve relative
+        // to this chat's folder even when multiple chats coexist in process.
+        workspaceRoot: this.workspaceRoot,
+        maxToolRoundsPerTurn: 128,
+        safetyJudge: resolveSafetyJudge(runtimePreferences),
+        workingStateEnabled: true,
+        worldContext: resolveWorldContext(runtimePreferences),
+        runtimePreferences,
+        persistRuntimePreferences: async (prefs) =>
+          // Runtime prefs are user-global (Phase 1) — passing the chat's
+          // workspaceRoot still works because the global path resolver wins
+          // when the storage split is active.
+          saveRuntimePreferences(prefs, this.workspaceRoot),
+        context: {
+          modelMaxTokens: 128_000,
+          thresholdFraction: 0.6,
+          inceptionMessages: INCEPTION_MESSAGES,
+          protocolDynamicBuilder: (names, hint) =>
+            buildProtocolDynamicSuffix(names, (hint ?? "any") as import("@liminal/tools").ProtocolIntentHint),
+        },
+      })
+    );
 
     const harness = this.harness;
     this.detachSessionLog = maybeAttachSessionEventLog(harness.emitter, harness.taskId);
     this.wireEvents();
-    this.toolsRegistered = registerAllTools(harness.registry, harness.emitter, harness);
+    this.toolsRegistered = runWithWorkspaceRoot(this.workspaceRoot, () =>
+      registerAllTools(harness.registry, harness.emitter, harness)
+    );
     this.sessionReady = this.toolsRegistered.then(() => this.beginSession());
   }
 
@@ -129,35 +176,65 @@ export class AgentBridge {
   }
 
   /**
+   * Activate this bridge as the live SSE source. Called by ChatManager when the
+   * user switches to this chat. Also touches chat metadata so the list-sort
+   * reflects most-recent-active first.
+   */
+  async resumeSSE(): Promise<void> {
+    this.sseSuspended = false;
+    await touchChatMetadata(this.chatId).catch(() => undefined);
+    // If the harness is mid-turn at activation, surface a fresh heartbeat so
+    // the client UI immediately sees the busy state.
+    if (this.harness.getIsRunning()) {
+      this.sse.send("harness_running", {
+        startedAt: this.turnStartedAt ?? Date.now(),
+      });
+    }
+  }
+
+  /** Silence SSE forwarding (used while another chat is the active one). */
+  suspendSSE(): void {
+    this.sseSuspended = true;
+  }
+
+  /** Gated send — short-circuits when this bridge is not the active SSE source. */
+  private maybeSend(event: string, payload: unknown): void {
+    if (this.sseSuspended) return;
+    this.sse.send(event, payload);
+  }
+
+  /**
    * Apply persisted persona and bootstrap gate. Web defers the opening greet to the
    * client (`POST /api/session/reset` with `greet: true` on fresh page load) so reload
    * does not double-greet with server boot.
    */
   private async beginSession(options?: { greet?: boolean }): Promise<void> {
-    const persisted = this.harness.getPersistedPersonaProfile();
-    if (persisted) {
-      await applyPersonaProfileToHarness(this.harness, persisted);
-    }
-    const forceBootstrap = process.env["AGENT_PERSONA_BOOTSTRAP_FORCE"] === "1";
-    this.awaitingPersonaBootstrapInput = false;
-    if (
-      process.env["AGENT_PERSONA_BOOTSTRAP"] !== "0" &&
-      (forceBootstrap || !this.harness.isPersonaBootstrapCompleted())
-    ) {
-      this.awaitingPersonaBootstrapInput = true;
-      // Web uses a dedicated client modal for bootstrap input; do not spend a model turn
-      // by asking in chat here.
-      return;
-    }
-    if (options?.greet !== true) return;
-    try {
-      await this.harness.sendSessionGreeting();
-    } catch (err) {
-      console.error(
-        "Session greeting failed:",
-        err instanceof Error ? err.message : String(err)
-      );
-    }
+    return runWithWorkspaceRoot(this.workspaceRoot, async () => {
+      const persisted = this.harness.getPersistedPersonaProfile();
+      if (persisted) {
+        await applyPersonaProfileToHarness(this.harness, persisted);
+      }
+      const forceBootstrap = process.env["AGENT_PERSONA_BOOTSTRAP_FORCE"] === "1";
+      this.awaitingPersonaBootstrapInput = false;
+      if (
+        process.env["AGENT_PERSONA_BOOTSTRAP"] !== "0" &&
+        (forceBootstrap || !this.harness.isPersonaBootstrapCompleted())
+      ) {
+        this.awaitingPersonaBootstrapInput = true;
+        // Web uses a dedicated client modal for bootstrap input; do not spend a model turn
+        // by asking in chat here.
+        return;
+      }
+      if (options?.greet !== true) return;
+      try {
+        await this.harness.sendSessionGreeting();
+      } catch (err) {
+        console.error(
+          "Session greeting failed:",
+          err instanceof Error ? err.message : String(err)
+        );
+      }
+    });
   }
 
   private startHeartbeat(): void {
@@ -168,7 +245,7 @@ export class AgentBridge {
         this.stopHeartbeat();
         return;
       }
-      this.sse.send("harness_running", { startedAt: this.turnStartedAt });
+      this.maybeSend("harness_running", { startedAt: this.turnStartedAt });
     };
     tick();
     this.harnessHeartbeatTimer = setInterval(tick, 5_000);
@@ -186,16 +263,26 @@ export class AgentBridge {
     return this.lastTurnEndedAtMs;
   }
   get isAwaitingPersonaBootstrap(): boolean { return this.awaitingPersonaBootstrapInput; }
+  get isActive(): boolean { return !this.sseSuspended; }
 
   private wireEvents(): void {
     const { emitter } = this.harness;
 
-    emitter.on("text", (p) => { this.startHeartbeat(); this.sse.send("text", p); });
-    emitter.on("provider_retry", (p) => { this.startHeartbeat(); this.sse.send("provider_retry", p); });
-    emitter.on("tool_start", (p) => { this.startHeartbeat(); this.sse.send("tool_start", p); });
-    emitter.on("tool_delta", (p) => this.sse.send("tool_delta", p));
-    emitter.on("tool_result", (p) =>
-      this.sse.send("tool_result", {
+    // Track every subscription so dispose() can fully detach.
+    const on = <K extends Parameters<typeof emitter.on>[0]>(
+      event: K,
+      handler: Parameters<typeof emitter.on<K>>[1]
+    ): void => {
+      emitter.on(event, handler);
+      this.emitterDetachers.push(() => emitter.off(event, handler));
+    };
+
+    on("text", (p) => { this.startHeartbeat(); this.maybeSend("text", p); });
+    on("provider_retry", (p) => { this.startHeartbeat(); this.maybeSend("provider_retry", p); });
+    on("tool_start", (p) => { this.startHeartbeat(); this.maybeSend("tool_start", p); });
+    on("tool_delta", (p) => this.maybeSend("tool_delta", p));
+    on("tool_result", (p) =>
+      this.maybeSend("tool_result", {
         callId: p.callId,
         name: p.name,
         args: p.args,
@@ -203,44 +290,43 @@ export class AgentBridge {
         output: capSseToolOutput(p.result.ok ? p.result.output : p.result.error),
       })
     );
-    emitter.on("turn_summary", (p) => this.sse.send("turn_summary", p));
-    emitter.on("turn_end", (p) => {
+    on("turn_summary", (p) => this.maybeSend("turn_summary", p));
+    on("turn_end", (p) => {
       this.lastTurnEndedAtMs = Date.now();
       this.stopHeartbeat();
-      this.sse.send("turn_end", p);
+      this.maybeSend("turn_end", p);
     });
-    emitter.on("error", (p) => { this.stopHeartbeat(); this.sse.send("error", { message: p.err.message }); });
+    on("error", (p) => { this.stopHeartbeat(); this.maybeSend("error", { message: p.err.message }); });
 
-    emitter.on("subtask_spawned", (p) => this.sse.send("subtask_spawned", p));
-    emitter.on("subtask_complete", (p) => this.sse.send("subtask_complete", p));
-    emitter.on("subtask_output", (p) => this.sse.send("subtask_output", p));
+    on("subtask_spawned", (p) => this.maybeSend("subtask_spawned", p));
+    on("subtask_complete", (p) => this.maybeSend("subtask_complete", p));
+    on("subtask_output", (p) => this.maybeSend("subtask_output", p));
 
-    // New structured telemetry events (#7 — AgentTrace arXiv:2602.10133)
-    emitter.on("ask_user_answered", (p) => this.sse.send("ask_user_answered", p));
-    emitter.on("approval_decision", (p) => this.sse.send("approval_decision", p));
-    emitter.on("context_compressed", (p) => this.sse.send("context_compressed", p));
-    emitter.on("tool_timing", (p) => this.sse.send("tool_timing", p));
-    emitter.on("persona_changed", (p) => this.sse.send("persona_changed", p));
-    emitter.on("execution_state", (p) => this.sse.send("execution_state", p));
-    emitter.on("contract_transition", (p) => this.sse.send("contract_transition", p));
-    emitter.on("contract_violation", (p) => this.sse.send("contract_violation", p));
-    emitter.on("recovery_action", (p) => this.sse.send("recovery_action", p));
-    emitter.on("drift_detected", (p) => this.sse.send("drift_detected", p));
-    emitter.on("runtime_heartbeat", (p) => this.sse.send("runtime_heartbeat", p));
-    emitter.on("vault_activity", (p) => this.sse.send("vault_activity", p));
-    emitter.on("runtime_pref_detected", (p) => this.sse.send("runtime_pref_detected", p));
-    emitter.on("runtime_pref_changed", (p) => this.sse.send("runtime_pref_changed", p));
-    emitter.on("runtime_pref_persisted", (p) => this.sse.send("runtime_pref_persisted", p));
-    emitter.on("runtime_pref_rejected", (p) => this.sse.send("runtime_pref_rejected", p));
-    emitter.on("auto_dream", (p) => this.sse.send("auto_dream", p));
-    emitter.on("heartbeat_scheduled", (p) => this.sse.send("heartbeat_scheduled", p));
-    emitter.on("heartbeat_started", (p) => this.sse.send("heartbeat_started", p));
-    emitter.on("heartbeat_completed", (p) => this.sse.send("heartbeat_completed", p));
-    emitter.on("heartbeat_skipped", (p) => this.sse.send("heartbeat_skipped", p));
+    on("ask_user_answered", (p) => this.maybeSend("ask_user_answered", p));
+    on("approval_decision", (p) => this.maybeSend("approval_decision", p));
+    on("context_compressed", (p) => this.maybeSend("context_compressed", p));
+    on("tool_timing", (p) => this.maybeSend("tool_timing", p));
+    on("persona_changed", (p) => this.maybeSend("persona_changed", p));
+    on("execution_state", (p) => this.maybeSend("execution_state", p));
+    on("contract_transition", (p) => this.maybeSend("contract_transition", p));
+    on("contract_violation", (p) => this.maybeSend("contract_violation", p));
+    on("recovery_action", (p) => this.maybeSend("recovery_action", p));
+    on("drift_detected", (p) => this.maybeSend("drift_detected", p));
+    on("runtime_heartbeat", (p) => this.maybeSend("runtime_heartbeat", p));
+    on("vault_activity", (p) => this.maybeSend("vault_activity", p));
+    on("runtime_pref_detected", (p) => this.maybeSend("runtime_pref_detected", p));
+    on("runtime_pref_changed", (p) => this.maybeSend("runtime_pref_changed", p));
+    on("runtime_pref_persisted", (p) => this.maybeSend("runtime_pref_persisted", p));
+    on("runtime_pref_rejected", (p) => this.maybeSend("runtime_pref_rejected", p));
+    on("auto_dream", (p) => this.maybeSend("auto_dream", p));
+    on("heartbeat_scheduled", (p) => this.maybeSend("heartbeat_scheduled", p));
+    on("heartbeat_started", (p) => this.maybeSend("heartbeat_started", p));
+    on("heartbeat_completed", (p) => this.maybeSend("heartbeat_completed", p));
+    on("heartbeat_skipped", (p) => this.maybeSend("heartbeat_skipped", p));
 
-    emitter.on("tool_approval", (payload) => {
+    on("tool_approval", (payload) => {
       this.pendingApprovals.set(payload.callId, payload.resolve);
-      this.sse.send("tool_approval", {
+      this.maybeSend("tool_approval", {
         callId: payload.callId,
         name: payload.name,
         args: payload.args,
@@ -248,9 +334,9 @@ export class AgentBridge {
       });
     });
 
-    emitter.on("ask_user", (payload) => {
+    on("ask_user", (payload) => {
       this.pendingAskUser = payload.resolve;
-      this.sse.send("ask_user", { prompt: payload.prompt });
+      this.maybeSend("ask_user", { prompt: payload.prompt });
     });
   }
 
@@ -284,13 +370,16 @@ export class AgentBridge {
   }
 
   async sendUserMessage(message: string, opts?: { freshContext?: boolean }): Promise<void> {
-    if (!this.awaitingPersonaBootstrapInput) {
+    if (this.awaitingPersonaBootstrapInput) {
+      throw new Error("Persona bootstrap is pending. Submit via /api/persona/bootstrap.");
+    }
+    // Pin the workspace for the whole send so file tools, repo_map, world_context,
+    // etc. resolve relative to this chat's bound folder rather than the server's cwd.
+    await runWithWorkspaceRoot(this.workspaceRoot, async () => {
       const run = this.harness.send(message, opts);
       this.startHeartbeat();
       await run;
-      return;
-    }
-    throw new Error("Persona bootstrap is pending. Submit via /api/persona/bootstrap.");
+    });
   }
 
   async submitPersonaBootstrap(input: string, options?: { skip?: boolean }): Promise<void> {
@@ -306,102 +395,140 @@ export class AgentBridge {
     this.bootstrapInFlight = true;
     this.emitBootstrapProgress("starting", "Bootstrap started. Validating input...");
     try {
-      const trimmed = input.trim();
-      const skipAllowed = process.env["AGENT_PERSONA_BOOTSTRAP_ALLOW_SKIP"] !== "0";
-      if (options?.skip || (skipAllowed && /^(skip|\/skip)$/i.test(trimmed))) {
-        this.emitBootstrapProgress("skip", "Skipping persona generation. Restoring default voice...");
+      await runWithWorkspaceRoot(this.workspaceRoot, async () => {
+        const trimmed = input.trim();
+        const skipAllowed = process.env["AGENT_PERSONA_BOOTSTRAP_ALLOW_SKIP"] !== "0";
+        if (options?.skip || (skipAllowed && /^(skip|\/skip)$/i.test(trimmed))) {
+          this.emitBootstrapProgress("skip", "Skipping persona generation. Restoring default voice...");
+          this.awaitingPersonaBootstrapInput = false;
+          await clearPersistedPersonaArtifacts().catch(() => undefined);
+          await this.harness.patchRuntimePreferences(
+            {
+              persona: {
+                bootstrapCompleted: true,
+                sourcePrompt: "",
+                activeProfile: null,
+                updatedAt: Date.now(),
+              },
+            },
+            { persist: true }
+          );
+          await this.harness.sendSessionGreeting();
+          this.emitBootstrapProgress("done", "Session ready.");
+          return;
+        }
+
+        const parsed = parsePersonaInput(trimmed);
+        if (!parsed.coreInput) {
+          throw new Error("Please describe the voice you want before continuing.");
+        }
+        this.emitBootstrapProgress("parsed", "Input parsed. Building persona profile...");
+
+        if (isResetToDefaultRequest(parsed.coreInput)) {
+          this.emitBootstrapProgress("reset", "Resetting to default persona...");
+          this.harness.resetPersona();
+          await clearPersistedPersonaArtifacts().catch(() => undefined);
+          await this.harness.patchRuntimePreferences(
+            {
+              persona: {
+                bootstrapCompleted: true,
+                sourcePrompt: "default",
+                activeProfile: null,
+                updatedAt: Date.now(),
+              },
+            },
+            { persist: true }
+          );
+          this.awaitingPersonaBootstrapInput = false;
+          await this.harness.sendSessionGreeting();
+          this.emitBootstrapProgress("done", "Session ready.");
+          return;
+        }
+
+        this.emitBootstrapProgress(
+          "generating",
+          "Generating persona profile and soul blueprint…"
+        );
+        const bundle = await generatePersonaFromInput(
+          this.harness,
+          parsed.coreInput,
+          parsed.strength,
+          parsed.modifier,
+          (stage, message, detail) =>
+            this.emitBootstrapProgress({
+              stage,
+              message,
+              at: Date.now(),
+              artifacts: detail?.artifacts,
+            })
+        );
+        const profile = bundle.profile;
+        this.emitBootstrapProgress("applying", "Applying persona context to the runtime...");
+        try {
+          await applyPersonaProfileToHarness(this.harness, profile);
+          this.emitBootstrapProgress("persisting", "Persisting persona profile and bootstrap state...");
+          await this.harness.patchRuntimePreferences(
+            {
+              persona: {
+                bootstrapCompleted: true,
+                sourcePrompt: parsed.coreInput,
+                activeProfile: profile,
+                controls: bundle.defaultControls,
+                updatedAt: Date.now(),
+              },
+            },
+            { persist: true }
+          );
+        } catch (applyErr) {
+          this.harness.resetPersona();
+          throw applyErr;
+        }
         this.awaitingPersonaBootstrapInput = false;
-        await clearPersistedPersonaArtifacts().catch(() => undefined);
-        // Persist first-run as dismissed so bootstrap modal does not return on next launch.
-        await this.harness.patchRuntimePreferences(
-          {
-            persona: {
-              bootstrapCompleted: true,
-              sourcePrompt: "",
-              activeProfile: null,
-              updatedAt: Date.now(),
-            },
-          },
-          { persist: true }
-        );
+        this.emitBootstrapProgress("greeting", "Finalizing session greeting...");
         await this.harness.sendSessionGreeting();
-        this.emitBootstrapProgress("done", "Session ready.");
-        return;
-      }
-
-      const parsed = parsePersonaInput(trimmed);
-      if (!parsed.coreInput) {
-        throw new Error("Please describe the voice you want before continuing.");
-      }
-      this.emitBootstrapProgress("parsed", "Input parsed. Building persona profile...");
-
-      if (isResetToDefaultRequest(parsed.coreInput)) {
-        this.emitBootstrapProgress("reset", "Resetting to default persona...");
-        this.harness.resetPersona();
-        await clearPersistedPersonaArtifacts().catch(() => undefined);
-        await this.harness.patchRuntimePreferences(
-          {
-            persona: {
-              bootstrapCompleted: true,
-              sourcePrompt: "default",
-              activeProfile: null,
-              updatedAt: Date.now(),
-            },
-          },
-          { persist: true }
-        );
-        this.awaitingPersonaBootstrapInput = false;
-        await this.harness.sendSessionGreeting();
-        this.emitBootstrapProgress("done", "Session ready.");
-        return;
-      }
-
-      this.emitBootstrapProgress(
-        "generating",
-        "Generating persona profile and soul blueprint…"
-      );
-      const bundle = await generatePersonaFromInput(
-        this.harness,
-        parsed.coreInput,
-        parsed.strength,
-        parsed.modifier,
-        (stage, message, detail) =>
-          this.emitBootstrapProgress({
-            stage,
-            message,
-            at: Date.now(),
-            artifacts: detail?.artifacts,
-          })
-      );
-      const profile = bundle.profile;
-      this.emitBootstrapProgress("applying", "Applying persona context to the runtime...");
-      try {
-        await applyPersonaProfileToHarness(this.harness, profile);
-        this.emitBootstrapProgress("persisting", "Persisting persona profile and bootstrap state...");
-        await this.harness.patchRuntimePreferences(
-          {
-            persona: {
-              bootstrapCompleted: true,
-              sourcePrompt: parsed.coreInput,
-              activeProfile: profile,
-              controls: bundle.defaultControls,
-              updatedAt: Date.now(),
-            },
-          },
-          { persist: true }
-        );
-      } catch (applyErr) {
-        // Rollback: reset persona to default so the harness is not left in a partial state.
-        this.harness.resetPersona();
-        throw applyErr;
-      }
-      this.awaitingPersonaBootstrapInput = false;
-      this.emitBootstrapProgress("greeting", "Finalizing session greeting...");
-      await this.harness.sendSessionGreeting();
-      this.emitBootstrapProgress("done", "Bootstrap complete.");
+        this.emitBootstrapProgress("done", "Bootstrap complete.");
+      });
     } finally {
       this.bootstrapInFlight = false;
     }
   }
 
+  /**
+   * Full teardown for permanent disposal (chat deleted). Detaches emitter
+   * subscriptions, session log writer, and clears any in-flight approval
+   * promises so the harness can be garbage-collected.
+   */
+  dispose(): void {
+    try {
+      this.stopHeartbeat();
+      this.detachSessionLog();
+      for (const off of this.emitterDetachers) {
+        try {
+          off();
+        } catch {
+          /* ignore */
+        }
+      }
+      this.emitterDetachers = [];
+      // Reject any pending approvals so the harness send() unwinds cleanly.
+      for (const [, resolve] of this.pendingApprovals) {
+        try {
+          resolve({ decision: "reject", reason: "chat_disposed" });
+        } catch {
+          /* ignore */
+        }
+      }
+      this.pendingApprovals.clear();
+      if (this.pendingAskUser) {
+        try {
+          this.pendingAskUser("");
+        } catch {
+          /* ignore */
+        }
+        this.pendingAskUser = null;
+      }
+    } catch (err) {
+      console.error("[bridge.dispose]", err);
+    }
+  }
 }

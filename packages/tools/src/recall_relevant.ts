@@ -4,13 +4,25 @@
  */
 import { defineTool } from "./helpers.js";
 import { loadNotes, loadRawNotes, bumpNoteMetadata, type StoredNote } from "./notes_store.js";
-import { rankDocumentsForQuery, type RankableDoc, fetchEmbeddings, effectiveHarnessEnvRaw } from "@liminal/core";
+import {
+  rankDocumentsForQuery,
+  type RankableDoc,
+  fetchEmbeddings,
+  effectiveHarnessEnvRaw,
+  workspaceFingerprint,
+  resolveCurrentChatId,
+} from "@liminal/core";
 import {
   loadEmbedIndex,
   upsertNoteEmbeddings,
   embedQueryAgainstIndex,
 } from "./memory_index.js";
-import { searchVault, getBacklinks, extractWikilinks, findNote } from "./vault_store.js";
+import { searchVault, getBacklinks, extractWikilinks, findNote, listAllNotes, titleToSlug } from "./vault_store.js";
+import {
+  loadVaultEmbedIndex,
+  upsertVaultEmbeddings,
+  embedQueryAgainstVaultIndex,
+} from "./vault_index.js";
 
 function normBm25Scores(scores: number[]): number[] {
   const m = Math.max(...scores, 1e-9);
@@ -162,6 +174,16 @@ export const recallRelevantTool = defineTool({
         type: "string",
         description: "Optional filter: only return notes written by this agent task ID.",
       },
+      workspace_scope: {
+        type: "string",
+        enum: ["current", "all", "global_only"],
+        description:
+          "Workspace + federation filter. 'current' = only notes tagged with this workspace's fingerprint (strict scope). " +
+          "'all' (default) = search across every workspace's notes; notes from the current workspace still get a small " +
+          "ranking boost so same-project memory surfaces first while cross-project still appears when relevant. " +
+          "'global_only' = only notes with scope='global' (durable identity facts) — use for privacy-sensitive turns " +
+          "where sibling-chat workspace facts should not surface.",
+      },
     },
     required: ["query"],
     additionalProperties: false,
@@ -217,50 +239,66 @@ export const recallRelevantTool = defineTool({
     const queryLabel = queries.length > 1 ? `${queries.length} queries` : (queries[0] ?? "").slice(0, 60);
     emit?.(`\nrecall_relevant: ${queryLabel} (scope=${scope})\n`);
 
+    // Pull current chat + workspace context once. Both come from
+    // AsyncLocalStorage scopes set by AgentHarness.send() — undefined when
+    // recall is invoked outside an active harness (CLI, eval), in which case
+    // the ranker degrades to "all notes, no federation discount."
+    const currentChatId = resolveCurrentChatId();
+    const currentFp = workspaceFingerprint();
+    const siblingDiscountRaw = Number(effectiveHarnessEnvRaw("AGENT_RECALL_SIBLING_DISCOUNT") ?? "0.85");
+    const siblingDiscount = Number.isFinite(siblingDiscountRaw)
+      ? Math.max(0.1, Math.min(1, siblingDiscountRaw))
+      : 0.85;
+    const wsScopeArg = args["workspace_scope"] as string | undefined;
+    const workspaceScope: "current" | "all" | "global_only" =
+      wsScopeArg === "current" ? "current" : wsScopeArg === "global_only" ? "global_only" : "all";
+
     if (scope === "notes" || scope === "both") {
       const plain = await loadNotes();
       const raw = await loadRawNotes();
       const docs: RankableDoc[] = Object.entries(plain).map(([id, value]) => {
         const rv = raw[id];
-        const updatedAt =
-          typeof rv === "object" && rv !== null && "updatedAt" in rv
-            ? (rv as StoredNote).updatedAt
-            : undefined;
-        const lastAccessedAt =
-          typeof rv === "object" && rv !== null && "lastAccessedAt" in rv
-            ? (rv as StoredNote).lastAccessedAt
-            : undefined;
+        const rich = typeof rv === "object" && rv !== null ? (rv as StoredNote) : null;
         const colon = id.indexOf(":");
         const memoryType = colon > 0 ? id.slice(0, colon) : undefined;
-        const accessCount =
-          typeof rv === "object" && rv !== null && "accessCount" in rv
-            ? (rv as StoredNote).accessCount
-            : undefined;
-        const confidence =
-          typeof rv === "object" && rv !== null && "confidence" in rv
-            ? (rv as StoredNote).confidence
-            : undefined;
         return {
           id,
           text: `${id} ${value}`,
-          updatedAt,
-          lastAccessedAt,
+          updatedAt: rich?.updatedAt,
+          lastAccessedAt: rich?.lastAccessedAt,
           memoryType,
-          accessCount,
-          confidence,
+          accessCount: rich?.accessCount,
+          confidence: rich?.confidence,
+          workspaceFingerprint: rich?.workspaceFingerprint,
+          chatId: rich?.chatId,
+          scope: rich?.scope,
         };
       });
 
       const perQueryRankings: string[][] = [];
       for (const q of queries) {
-        const bmRanked = rankDocumentsForQuery(q, docs, { limit: k * 4 });
+        const bmRanked = rankDocumentsForQuery(q, docs, {
+          limit: k * 4,
+          currentWorkspaceFingerprint: currentFp,
+          requireWorkspaceMatch: workspaceScope === "current",
+          currentChatId,
+          siblingDiscount,
+          globalOnly: workspaceScope === "global_only",
+        });
         perQueryRankings.push(bmRanked.map((x) => x.id));
       }
       const rrfById = normMap(rrfFuse(perQueryRankings));
 
       const bmById = new Map<string, number>();
       const anchor = queries[0] ?? "";
-      const bmRanked0 = rankDocumentsForQuery(anchor, docs, { limit: k * 4 });
+      const bmRanked0 = rankDocumentsForQuery(anchor, docs, {
+        limit: k * 4,
+        currentWorkspaceFingerprint: currentFp,
+        requireWorkspaceMatch: workspaceScope === "current",
+        currentChatId,
+        siblingDiscount,
+        globalOnly: workspaceScope === "global_only",
+      });
       const bmNorms0 = normBm25Scores(bmRanked0.map((x) => x.score));
       bmRanked0.forEach((r, i) => bmById.set(r.id, bmNorms0[i] ?? 0));
 
@@ -292,7 +330,7 @@ export const recallRelevantTool = defineTool({
       }
 
       const semN = normMap(semById);
-      const fused: Array<{ id: string; score: number; value: string }> = [];
+      const fused: Array<{ id: string; score: number; value: string; provenance: string }> = [];
       const allIds = new Set<string>([...rrfById.keys(), ...semN.keys(), ...bmById.keys()]);
       for (const id of allIds) {
         const rv = raw[id];
@@ -303,6 +341,20 @@ export const recallRelevantTool = defineTool({
             ? (rv as StoredNote).actorId : undefined;
           if (noteActorId !== actorIdFilter) continue;
         }
+        // Federation Phase 2 — the BM25 leg already enforces chat-scope and
+        // workspace-scope filters via the ranker. The semantic leg builds its
+        // own candidate set from the embedding index without that filter, so
+        // re-enforce here so semantic-only hits don't bypass the federation
+        // rules.
+        const noteScope =
+          typeof rv === "object" && rv !== null ? (rv as StoredNote).scope : undefined;
+        const noteChatId =
+          typeof rv === "object" && rv !== null ? (rv as StoredNote).chatId : undefined;
+        const noteWsFp =
+          typeof rv === "object" && rv !== null ? (rv as StoredNote).workspaceFingerprint : undefined;
+        if (noteScope === "chat" && noteChatId !== currentChatId) continue;
+        if (workspaceScope === "global_only" && noteScope !== "global") continue;
+        if (workspaceScope === "current" && currentFp && noteWsFp && noteWsFp !== currentFp) continue;
         const confidence =
           typeof rv === "object" && rv !== null && "confidence" in rv
             ? Number((rv as StoredNote).confidence ?? 0.5)
@@ -338,9 +390,26 @@ export const recallRelevantTool = defineTool({
           confidence,
           accessCount,
         });
+        // Build a one-shot provenance label for this candidate so the model
+        // (and the audit UI) can see where the fact came from. Format priority:
+        //   "own chat" > "sibling chat" > "global" > "" (no metadata to show)
+        let provenance = "";
+        if (currentChatId && noteChatId) {
+          if (noteChatId === currentChatId) {
+            provenance = "own chat";
+          } else if (noteWsFp && currentFp && noteWsFp === currentFp) {
+            provenance = `sibling chat ${noteChatId.slice(0, 8)}`;
+          } else if (noteScope === "global") {
+            provenance = "global";
+          } else {
+            provenance = `chat ${noteChatId.slice(0, 8)}`;
+          }
+        } else if (noteScope === "global") {
+          provenance = "global";
+        }
         const hybrid = recallWeights(sem, rrf, bm) * tier;
         if (hybrid < 0.008) continue;
-        fused.push({ id, score: hybrid, value: val });
+        fused.push({ id, score: hybrid, value: val, provenance });
       }
       fused.sort((a, b) => b.score - a.score);
 
@@ -359,7 +428,7 @@ export const recallRelevantTool = defineTool({
       let top = dedupedFused.slice(0, k);
 
       if (effectiveHarnessEnvRaw("AGENT_MEMORY_GRAPH") !== "0" && top.length > 0) {
-        const extra = new Map<string, { id: string; score: number; value: string }>();
+        const extra = new Map<string, { id: string; score: number; value: string; provenance: string }>();
         // visited guards against re-adding items already in top and prevents
         // redundant traversal when bidirectional links (A→B, B→A) exist.
         const visited = new Set(top.map((t) => t.id));
@@ -375,6 +444,7 @@ export const recallRelevantTool = defineTool({
               id: lk,
               score: floor,
               value: plain[lk] ?? "",
+              provenance: "graph neighbor",
             });
           }
         }
@@ -389,8 +459,9 @@ export const recallRelevantTool = defineTool({
       } else {
         lines.push("## Notes");
         for (const t of top.slice(0, k + 4)) {
+          const prov = t.provenance ? ` (${t.provenance})` : "";
           lines.push(
-            `- [${t.id}] score=${t.score.toFixed(3)} — ${t.value.slice(0, 200)}${t.value.length > 200 ? "…" : ""}`
+            `- [${t.id}] score=${t.score.toFixed(3)}${prov} — ${t.value.slice(0, 200)}${t.value.length > 200 ? "…" : ""}`
           );
           bumpKeys.push(t.id);
         }
@@ -429,6 +500,71 @@ export const recallRelevantTool = defineTool({
           }
         });
       }
+      // Federation Phase 2 — fold semantic similarity into the vault leg when
+      // an embedding model is configured. The semantic index is keyed by slug
+      // (titleToSlug), parallel to memory_index for notes. Falls back to pure
+      // BM25 + recency when embeddings are unavailable.
+      if (embedModel && apiKey) {
+        try {
+          // Ensure every vault note is in the index (idempotent — only re-embeds
+          // notes whose body content hash changed).
+          const allVault = await listAllNotes({ limit: 500 });
+          await upsertVaultEmbeddings({
+            apiKey,
+            baseURL,
+            model: embedModel,
+            notes: allVault.map((n) => ({
+              slug: n.slug,
+              title: n.title,
+              type: n.type,
+              body: n.body,
+            })),
+          });
+          const idx = await loadVaultEmbedIndex();
+          const embedText = (hyde || queries.join(" | ")).slice(0, 8000);
+          const { vectors } = await fetchEmbeddings({
+            apiKey,
+            baseURL,
+            model: embedModel,
+            inputs: [embedText],
+          });
+          const qv = vectors[0]!;
+          const semHits = embedQueryAgainstVaultIndex(qv, idx, k * 4);
+          // Build a slug→title map so the merge keys stay consistent with the
+          // BM25 byTitle map (titles are the user-facing identifier).
+          const titleBySlug = new Map<string, string>();
+          for (const n of allVault) titleBySlug.set(n.slug, n.title);
+          // Normalize semantic scores and fuse: keep BM25-derived score on top
+          // and additively bump with normalized semantic score so paraphrase
+          // matches surface even when the keyword search missed them.
+          const maxSem = Math.max(...semHits.map((h) => h.score), 1e-9);
+          for (const sh of semHits) {
+            const title = titleBySlug.get(sh.slug) ?? sh.title;
+            const note = (await findNote(title)) ?? null;
+            if (!note) continue;
+            if (maxAgeDays != null) {
+              const updatedMs = new Date(note.updated).getTime();
+              if (Number.isFinite(updatedMs) && (Date.now() - updatedMs) / 86_400_000 > maxAgeDays) continue;
+            }
+            const semBoost = (sh.score / maxSem) * 0.4; // 0–0.4 additive
+            const existing = byTitle.get(title);
+            if (existing) {
+              existing.score = existing.score + semBoost;
+            } else {
+              byTitle.set(title, {
+                note,
+                snippet: note.body.replace(/\s+/g, " ").slice(0, 180),
+                score: semBoost,
+              });
+            }
+          }
+        } catch {
+          /* embeddings optional — silent fallback to BM25-only */
+        }
+      }
+      // Suppress unused-var warning for titleToSlug import (kept for future
+      // use in slug ↔ title round-trips).
+      void titleToSlug;
       let vhits = [...byTitle.values()].sort((a, b) => b.score - a.score);
       if (args["expand_vault_neighbors"] === true && vhits.length > 0) {
         const seeds = vhits.slice(0, 3).map((h) => h.note.title);

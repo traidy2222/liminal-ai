@@ -311,6 +311,10 @@ export interface SSEState {
   personalityPulseActive: boolean;
   heartbeatUiStrip: boolean;
   heartbeatEnabled: boolean;
+  /** Dictation auto-send default (from AGENT_DICTATION_AUTO_SEND). */
+  dictationAutoSendDefault: boolean;
+  /** Whether to play a brief tone when auto-send fires. */
+  dictationAudioCue: boolean;
 }
 
 const ORCH_TOOLS = new Set(["spawn_agent", "wait_for_agents", "cancel_agent", "list_agents"]);
@@ -325,6 +329,8 @@ type Action =
       personaDisplayLabel?: string;
       personalityHeartbeatUiStrip?: boolean;
       personalityHeartbeatEnabled?: boolean;
+      dictationAutoSendDefault?: boolean;
+      dictationAudioCue?: boolean;
     }
   | { type: "connected" }
   /** Transport lost mid-session; preserves agent `error` unless API is unreachable. */
@@ -467,6 +473,12 @@ function reducer(state: SSEState, action: Action): SSEState {
           : {}),
         ...(typeof action.personalityHeartbeatEnabled === "boolean"
           ? { heartbeatEnabled: action.personalityHeartbeatEnabled }
+          : {}),
+        ...(typeof action.dictationAutoSendDefault === "boolean"
+          ? { dictationAutoSendDefault: action.dictationAutoSendDefault }
+          : {}),
+        ...(typeof action.dictationAudioCue === "boolean"
+          ? { dictationAudioCue: action.dictationAudioCue }
           : {}),
       };
 
@@ -1314,6 +1326,8 @@ function createInitialSSEState(): SSEState {
     personalityPulseActive: false,
     heartbeatUiStrip: false,
     heartbeatEnabled: false,
+    dictationAutoSendDefault: false,
+    dictationAudioCue: false,
   };
 }
 
@@ -1502,6 +1516,8 @@ export function useSSE() {
               personaDisplayLabel?: string;
               personalityHeartbeatUiStrip?: boolean;
               personalityHeartbeatEnabled?: boolean;
+              dictationAutoSendDefault?: boolean;
+              dictationAudioCue?: boolean;
             } | null
           ) => {
             if (!cancelledRef.current && cfg) {
@@ -1519,6 +1535,8 @@ export function useSSE() {
                 personaDisplayLabel,
                 personalityHeartbeatUiStrip: cfg.personalityHeartbeatUiStrip,
                 personalityHeartbeatEnabled: cfg.personalityHeartbeatEnabled,
+                dictationAutoSendDefault: cfg.dictationAutoSendDefault,
+                dictationAudioCue: cfg.dictationAudioCue,
               });
               writePersonaChromeToSession(personaUiTheme, personaDisplayLabel);
             }
@@ -1628,6 +1646,29 @@ export function useSSE() {
         dispatch({ type: "connected" });
         void reconcileBusyFromStatus({ forceIfServerBusy: true });
         fetchAndApplyConfig();
+      });
+
+      // Phase 2 per-chat workspaces: when the server switches the active chat,
+      // wipe the local transcript so the UI doesn't bleed one chat's messages
+      // into another's, then bubble a window event so useChats() refreshes.
+      es.addEventListener("chat_switched", (e: MessageEvent) => {
+        trackId(e);
+        const payload = parseEventData(e) as
+          | { chatId?: string; title?: string; workspaceRoot?: string; workspaceFingerprint?: string; workspaceMode?: string; at?: number }
+          | undefined;
+        if (!payload) return;
+        // Reset transcript locally (server keeps each chat's own conversation
+        // context in memory; this is purely a UI clear).
+        dispatch({ type: "session_reset" });
+        // Refresh /api/config so the persona theme, display label, and
+        // approvalTimeoutMs reflect the new chat's bridge.
+        fetchAndApplyConfig();
+        // Notify the chat hook + any other listeners.
+        try {
+          window.dispatchEvent(new CustomEvent("liminal:chat_switched", { detail: payload }));
+        } catch {
+          /* ignore */
+        }
       });
 
       // Grab the event ID from every event so we can resume after reconnect.

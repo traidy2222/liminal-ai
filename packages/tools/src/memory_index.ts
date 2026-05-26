@@ -1,13 +1,25 @@
 /**
- * On-disk embedding index for `.agent_notes.json` keys (Phase 1 hybrid recall).
+ * On-disk embedding index for note keys (Phase 1 hybrid recall, federated in Phase 2).
+ *
+ * Phase 1 stored this under `<workspaceRoot>/.agent_memory.index.json` — a silent
+ * bug after the per-chat scratch-workspace split, because every new chat
+ * started with an empty index. Phase 2 moves the canonical location to
+ * `~/.liminal/memory.index.json` so the embedding cache survives chat hops
+ * and a single user has one cross-chat semantic substrate. The legacy
+ * workspace-local file is read once at first access and migrated forward.
  */
 import { createHash } from "node:crypto";
 import { readFile, writeFile } from "node:fs/promises";
-import { join } from "node:path";
-import { fetchEmbeddings, cosineSimilarity, resolveWorkspaceRoot } from "@liminal/core";
+import { fetchEmbeddings, cosineSimilarity, memoryIndexPaths, pickReadPath, pickWritePath } from "@liminal/core";
 
-export function memoryEmbedIndexPath(): string {
-  return join(resolveWorkspaceRoot(), ".agent_memory.index.json");
+/** Read path — prefers `~/.liminal/memory.index.json`, falls back to legacy. */
+export async function memoryEmbedIndexReadPath(): Promise<string> {
+  return pickReadPath(memoryIndexPaths());
+}
+
+/** Write path — always returns the global path; lazy-migrates legacy on first write. */
+export async function memoryEmbedIndexWritePath(): Promise<string> {
+  return pickWritePath(memoryIndexPaths());
 }
 
 export interface NoteEmbedRow {
@@ -28,7 +40,7 @@ export function hashNoteValue(value: string): string {
 
 export async function loadEmbedIndex(): Promise<MemoryEmbedIndex> {
   try {
-    const raw = await readFile(memoryEmbedIndexPath(), "utf8");
+    const raw = await readFile(await memoryEmbedIndexReadPath(), "utf8");
     const j = JSON.parse(raw) as MemoryEmbedIndex;
     if (j.version !== 1 || !j.entries) return { version: 1, model: "", entries: {} };
     return j;
@@ -38,7 +50,7 @@ export async function loadEmbedIndex(): Promise<MemoryEmbedIndex> {
 }
 
 export async function saveEmbedIndex(idx: MemoryEmbedIndex): Promise<void> {
-  await writeFile(memoryEmbedIndexPath(), JSON.stringify(idx, null, 2), "utf8");
+  await writeFile(await memoryEmbedIndexWritePath(), JSON.stringify(idx, null, 2), "utf8");
 }
 
 /** Upsert embeddings for keys whose value hash changed. */

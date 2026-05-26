@@ -12,7 +12,11 @@ export type ReasoningIntentClass =
   | "research"
   | "coding"
   | "execution"
-  | "operational";
+  | "conversational"
+  | "creative";
+
+/** Orthogonal axis predicted alongside intent. Drives fast-model routing regardless of intent. */
+export type TurnComplexity = "trivial" | "normal" | "complex";
 
 /** Budget fields carried on {@link TurnInferenceResult}. */
 export interface ReasoningBudgetInferenceSlice {
@@ -126,13 +130,24 @@ export function fallbackReasoningBudget(
         essayRisk: false,
         source: "fallback",
       };
-    case "operational":
+    case "conversational":
+      // chitchat / persona / continuation — almost no reasoning, no tools, fast turnaround
       return {
-        reasoningEffort: "medium",
+        reasoningEffort: "low",
         thinkDepth: "skip",
-        toolFirstBias: true,
-        reasoningWordBudget: 80,
+        toolFirstBias: false,
+        reasoningWordBudget: 60,
         essayRisk: true,
+        source: "fallback",
+      };
+    case "creative":
+      // generative writing / ideation — deep think, no tool-first bias, large word budget
+      return {
+        reasoningEffort: defaultEffort,
+        thinkDepth: "deep",
+        toolFirstBias: false,
+        reasoningWordBudget: 500,
+        essayRisk: false,
         source: "fallback",
       };
     default:
@@ -194,25 +209,55 @@ export function resolveReasoningBudget(
   return budget;
 }
 
-/** Regex safety net when classifier misses implement / essay-trap prompts. */
+/**
+ * Tighten the reasoning budget for implement/research/essay-trap prompts.
+ *
+ * When `llmSignals` is provided (the typed booleans the fast-model classifier
+ * already returns), trust those — they handle paraphrases the regex can't (e.g.
+ * "spin up a Tetris clone", "what's the latest on the OpenAI breakup", "shock
+ * me with a novel scheduler"). When the classifier was off / failed / low
+ * confidence, fall back to the keyword regex so the harness still degrades
+ * gracefully without an LLM round-trip available.
+ *
+ * Kept as a separate signal-consumer (not folded into applyTurnInferenceHeuristics)
+ * because this runs at a different layer — after the reasoning budget has been
+ * assembled — and protects the budget specifically, while the heuristic protects
+ * the intent class.
+ */
 export function tightenReasoningBudgetForUserMessage(
   budget: ReasoningBudget,
-  userMessage: string
+  userMessage: string,
+  llmSignals?: LlmTurnSignals
 ): ReasoningBudget {
-  const t = userMessage.toLowerCase();
-  const wantsShip =
-    /\b(implement|write\b.*\b(python|code)|runnable|run it|test it|zero-?shot|from scratch|make it runnable|show the results)\b/.test(
-      t
-    );
-  const wantsResearch =
-    /\b(what'?s going on|update (me )?on|latest|current(ly)?|up[- ]?to[- ]?date|breaking|headlines?|situation|developments?)\b/.test(
-      t
-    ) || /\b(iran|ukraine|israel|gaza|middle east|ceasefire)\b/.test(t);
-  const wantsBuild =
-    /\b(build|create|make|implement|write|code|ship)\b/.test(t) &&
-    /\b(for yourself|for me|something|a file|an? (html|app|page|tool|script)|now)\b/.test(t);
-  const essayTrap =
-    /\b(algorithm|solve|design|traveling salesman|tsp|np-?hard|zero-?shot)\b/.test(t) && wantsShip;
+  let wantsShip: boolean;
+  let wantsBuild: boolean;
+  let wantsResearch: boolean;
+  let essayTrap: boolean;
+
+  if (llmSignals) {
+    wantsShip = llmSignals.implementShip;
+    wantsBuild = llmSignals.buildDeliverable;
+    wantsResearch = llmSignals.freshnessSensitive;
+    // The classifier's `essayRisk` is the holistic "model will ramble before
+    // tools" signal — covers the old algorithm/TSP/zero-shot regex trap plus
+    // any analogous case the keyword list missed.
+    essayTrap = llmSignals.essayRisk && wantsShip;
+  } else {
+    const t = userMessage.toLowerCase();
+    wantsShip =
+      /\b(implement|write\b.*\b(python|code)|runnable|run it|test it|zero-?shot|from scratch|make it runnable|show the results)\b/.test(
+        t
+      );
+    wantsResearch =
+      /\b(what'?s going on|update (me )?on|latest|current(ly)?|up[- ]?to[- ]?date|breaking|headlines?|situation|developments?)\b/.test(
+        t
+      ) || /\b(iran|ukraine|israel|gaza|middle east|ceasefire)\b/.test(t);
+    wantsBuild =
+      /\b(build|create|make|implement|write|code|ship)\b/.test(t) &&
+      /\b(for yourself|for me|something|a file|an? (html|app|page|tool|script)|now)\b/.test(t);
+    essayTrap =
+      /\b(algorithm|solve|design|traveling salesman|tsp|np-?hard|zero-?shot)\b/.test(t) && wantsShip;
+  }
 
   if (!wantsShip && !essayTrap && !wantsResearch && !wantsBuild) return budget;
 
@@ -233,6 +278,18 @@ export function tightenReasoningBudgetForUserMessage(
     essayRisk: budget.essayRisk || essayTrap || wantsShip,
     source: budget.source,
   };
+}
+
+/**
+ * Subset of TurnInferenceResult signals used by the budget tightener. Passed
+ * structurally (not by importing the full TurnInferenceResult type) so this
+ * module stays free of a circular import with intent_inference.ts.
+ */
+export interface LlmTurnSignals {
+  implementShip: boolean;
+  buildDeliverable: boolean;
+  freshnessSensitive: boolean;
+  essayRisk: boolean;
 }
 
 export function buildOpenRouterReasoningParam(

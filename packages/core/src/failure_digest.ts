@@ -2,15 +2,14 @@
  * Session-start digest of recent harness failures (.agent_failures.jsonl).
  */
 import { readFile } from "node:fs/promises";
-import { join } from "node:path";
-import { failureLogPath } from "./failure_log.js";
+import { failureLogReadPath } from "./failure_log.js";
 import { effectiveHarnessEnvRaw } from "./harness_effective_env.js";
 
 const MS_7D = 7 * 86400 * 1000;
 
 export async function formatFailureDigestForWorldContext(): Promise<string | null> {
   if (effectiveHarnessEnvRaw("AGENT_FAILURE_DIGEST") === "0") return null;
-  const p = failureLogPath();
+  const p = await failureLogReadPath();
   let raw: string;
   try {
     raw = await readFile(p, "utf8");

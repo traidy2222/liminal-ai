@@ -42,7 +42,12 @@ test("rollup mode: one text_rollup, no per-delta user text lines", async () => {
   const prevRoot = process.env.AGENT_WORKSPACE_ROOT;
   const prevMode = process.env.AGENT_SESSION_JSONL_TEXT_LOG;
   const prevTrace = process.env.AGENT_SESSION_JSONL_TRACE;
+  // Phase 1 storage split: session logs land under ~/.liminal/chats/<id>/session.jsonl.
+  // Redirect AGENT_GLOBAL_STORAGE_ROOT into the test tmpdir so the assertion paths
+  // are isolated. AGENT_WORKSPACE_ROOT is still set for code paths that read it,
+  // though the session log no longer lives under it.
   process.env.AGENT_WORKSPACE_ROOT = dir;
+  process.env.AGENT_GLOBAL_STORAGE_ROOT = dir;
   delete process.env.AGENT_SESSION_JSONL_TEXT_LOG;
   delete process.env.AGENT_SESSION_JSONL_TRACE;
 
@@ -60,7 +65,7 @@ test("rollup mode: one text_rollup, no per-delta user text lines", async () => {
   em.emit("turn_end", { contextSnapshot: snap, durationMs: 1 });
   await sleep(80);
 
-  const raw = await readFile(path.join(dir, ".agent_sessions", "test-sid.jsonl"), "utf8");
+  const raw = await readFile(path.join(dir, "chats", "test-sid", "session.jsonl"), "utf8");
   const lines = raw
     .trim()
     .split("\n")
@@ -88,7 +93,12 @@ test("delta mode: per-delta text lines", async () => {
   const dir = await mkdtemp(path.join(tmpdir(), "sess-log-delta-"));
   const prevRoot = process.env.AGENT_WORKSPACE_ROOT;
   const prevMode = process.env.AGENT_SESSION_JSONL_TEXT_LOG;
+  // Phase 1 storage split: session logs land under ~/.liminal/chats/<id>/session.jsonl.
+  // Redirect AGENT_GLOBAL_STORAGE_ROOT into the test tmpdir so the assertion paths
+  // are isolated. AGENT_WORKSPACE_ROOT is still set for code paths that read it,
+  // though the session log no longer lives under it.
   process.env.AGENT_WORKSPACE_ROOT = dir;
+  process.env.AGENT_GLOBAL_STORAGE_ROOT = dir;
   process.env.AGENT_SESSION_JSONL_TEXT_LOG = "delta";
 
   const em = new AgentEmitter();
@@ -105,7 +115,7 @@ test("delta mode: per-delta text lines", async () => {
   em.emit("turn_end", { contextSnapshot: snap });
   await sleep(80);
 
-  const raw = await readFile(path.join(dir, ".agent_sessions", "sid2.jsonl"), "utf8");
+  const raw = await readFile(path.join(dir, "chats", "sid2", "session.jsonl"), "utf8");
   const lines = raw
     .trim()
     .split("\n")
@@ -125,7 +135,12 @@ test("trace lines omitted unless AGENT_SESSION_JSONL_TRACE=1", async () => {
   const dir = await mkdtemp(path.join(tmpdir(), "sess-log-tr-"));
   const prevRoot = process.env.AGENT_WORKSPACE_ROOT;
   const prevTrace = process.env.AGENT_SESSION_JSONL_TRACE;
+  // Phase 1 storage split: session logs land under ~/.liminal/chats/<id>/session.jsonl.
+  // Redirect AGENT_GLOBAL_STORAGE_ROOT into the test tmpdir so the assertion paths
+  // are isolated. AGENT_WORKSPACE_ROOT is still set for code paths that read it,
+  // though the session log no longer lives under it.
   process.env.AGENT_WORKSPACE_ROOT = dir;
+  process.env.AGENT_GLOBAL_STORAGE_ROOT = dir;
   delete process.env.AGENT_SESSION_JSONL_TRACE;
 
   const em = new AgentEmitter();
@@ -141,7 +156,7 @@ test("trace lines omitted unless AGENT_SESSION_JSONL_TRACE=1", async () => {
   em.emit("turn_end", { contextSnapshot: snap });
   await sleep(80);
 
-  let raw = await readFile(path.join(dir, ".agent_sessions", "sid3.jsonl"), "utf8");
+  let raw = await readFile(path.join(dir, "chats", "sid3", "session.jsonl"), "utf8");
   detach();
   let lines = raw
     .trim()
@@ -154,6 +169,7 @@ test("trace lines omitted unless AGENT_SESSION_JSONL_TRACE=1", async () => {
 
   const dir2 = await mkdtemp(path.join(tmpdir(), "sess-log-tr2-"));
   process.env.AGENT_WORKSPACE_ROOT = dir2;
+  process.env.AGENT_GLOBAL_STORAGE_ROOT = dir2;
   process.env.AGENT_SESSION_JSONL_TRACE = "1";
   const em2 = new AgentEmitter();
   const detach2 = attachSessionEventLog(em2, "sid4");
@@ -161,7 +177,7 @@ test("trace lines omitted unless AGENT_SESSION_JSONL_TRACE=1", async () => {
   em2.emit("text", { delta: "t", channel: "trace" });
   em2.emit("turn_end", { contextSnapshot: snap });
   await sleep(80);
-  raw = await readFile(path.join(dir2, ".agent_sessions", "sid4.jsonl"), "utf8");
+  raw = await readFile(path.join(dir2, "chats", "sid4", "session.jsonl"), "utf8");
   detach2();
   lines = raw
     .trim()

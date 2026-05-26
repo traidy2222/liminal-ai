@@ -715,7 +715,7 @@ export interface AgentEventMap {
     bytes: number;
   };
   memory_retrieval_policy: {
-    intent: "introspection" | "knowledge" | "research" | "coding" | "execution" | "operational";
+    intent: "introspection" | "knowledge" | "research" | "coding" | "execution" | "conversational" | "creative";
     source: string;
     confidence?: number;
     threshold?: number;

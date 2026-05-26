@@ -130,8 +130,16 @@ export function isBuildDeliverableUserMessage(userMessage: string): boolean {
   if (/\b(explain|describe|what would|imagine|hypothetical|if you could|thought experiment)\b/.test(t)) {
     return false;
   }
-  return (
-    /\b(build|create|make|implement|write|code|ship)\b/.test(t) &&
-    /\b(for yourself|for me|something|a file|an? (html|app|page|tool|script|site)|now|from scratch)\b/.test(t)
-  );
+  // Two-part match: an imperative build verb + a deliverable indicator.
+  // The deliverable list intentionally covers informal phrasings ("build me a X",
+  // "make us a Y") and common artifact nouns (os, game, dashboard, demo, clone,
+  // site, plugin, etc.) so creative-subject requests like "build me a browser OS"
+  // still trip the build-deliverable safety net instead of slipping into the
+  // creative-intent path (which has thinkDepth=deep and stalls on big writes).
+  const verb = /\b(build|create|make|implement|write|code|ship|design|generate|whip up|spin up|throw together|prototype|scaffold|bootstrap)\b/;
+  const target =
+    /\b(for (yourself|me|us)|me|us)\s+(an?|some|the)\b/.test(t) ||
+    /\b(for yourself|for me|for us|something|a file|now|from scratch|right now)\b/.test(t) ||
+    /\ban?\s+(html|app|page|tool|script|site|website|game|os|dashboard|demo|clone|widget|plugin|extension|deck|presentation|slideshow|ui|interface|prototype|playground|editor|tracker|generator|simulator|toy|sandbox|landing|portfolio|cli|server|api|bot|notebook|component)\b/.test(t);
+  return verb.test(t) && target;
 }

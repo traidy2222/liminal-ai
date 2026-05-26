@@ -6,9 +6,9 @@ import { existsSync } from "node:fs";
 import { createServer } from "node:http";
 import express from "express";
 import cors from "cors";
-import { effectiveHarnessEnvRaw, loadRuntimePreferences } from "@liminal/core";
+import { effectiveHarnessEnvRaw } from "@liminal/core";
 import { SSEManager } from "./sse.js";
-import { AgentBridge } from "./agentBridge.js";
+import { ChatManager } from "./chatManager.js";
 import { createRouter } from "./routes.js";
 
 // Load `.env` files in order (dotenv does not override existing `process.env` keys by default):
@@ -45,9 +45,17 @@ app.use(cors());
 app.use(express.json({ limit: "20mb" }));
 
 const sse = new SSEManager();
-const runtimePreferences = await loadRuntimePreferences(targetRoot);
-const bridge = new AgentBridge(sse, runtimePreferences);
-const router = createRouter(bridge, sse);
+// Multi-chat manager owns every AgentBridge in process. boot() loads chats
+// from ~/.liminal/chats/, picks the most-recently-updated as active (or
+// creates a default scratch chat), and lazy-constructs subsequent bridges
+// on activate. Runtime prefs are loaded inside boot() from the user-global
+// path (Phase 1 storage split).
+const chatManager = new ChatManager(sse);
+const bootedChat = await chatManager.boot();
+console.log(
+  `Liminal chat manager → active chat ${bootedChat.activeChatId} (${bootedChat.activeMeta.workspaceMode} @ ${bootedChat.activeMeta.workspaceRoot})`
+);
+const router = createRouter(chatManager, sse);
 app.use(router);
 
 const webPkgRoot = join(__dirname, "..");
@@ -79,7 +87,7 @@ if (!existsSync(clientIndexHtml)) {
 }
 
 try {
-  await bridge.whenToolsRegistered();
+  await chatManager.getActive().whenToolsRegistered();
 } catch (err) {
   console.error(
     "Agent tool registration failed:",
@@ -162,10 +170,23 @@ server.requestTimeout = 0;
 
 // Greeting / bootstrap can take a model round — do not block `listen()` on that or
 // `web:dev` clients on :5173 see ECONNREFUSED while Vite is already up.
-void bridge.whenSessionReady().catch((err) => {
+void chatManager.getActive().whenSessionReady().catch((err) => {
   console.error(
     "Agent session initialization failed:",
     err instanceof Error ? err.message : String(err)
   );
   process.exit(1);
 });
+
+// Clean shutdown — dispose every resident bridge on SIGTERM/SIGINT so file
+// descriptors (session log streams, write_staging stream sinks) close cleanly.
+for (const sig of ["SIGTERM", "SIGINT"] as const) {
+  process.once(sig, () => {
+    try {
+      chatManager.shutdown();
+    } finally {
+      server.close(() => process.exit(0));
+      setTimeout(() => process.exit(0), 2000).unref();
+    }
+  });
+}

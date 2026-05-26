@@ -10,7 +10,7 @@
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc --noEmit",
-    "test": "tsx --test src/web_fetch.test.ts src/persona_runtime.test.ts src/persona_generator.test.ts src/persona_stream_extract.test.ts src/file_tools.test.ts src/browser_tools.test.ts",
+    "test": "tsx --test src/web_fetch.test.ts src/persona_runtime.test.ts src/persona_generator.test.ts src/persona_stream_extract.test.ts src/file_tools.test.ts src/browser_tools.test.ts src/api_connect.test.ts src/notes_store_scope.test.ts",
     "browser:install": "playwright install chromium"
   },
   "dependencies": {

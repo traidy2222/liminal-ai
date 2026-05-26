@@ -90,6 +90,11 @@ import { createDecomposeGoalTool } from "./decompose_goal.js";
 import { createBranchExploreTool } from "./branch_explore.js";
 import { createVerifyContractTool } from "./verify_contract.js";
 import { createDynamicToolsTools, loadDynamicTools } from "./dynamic_tools.js";
+import { createApiConnectionTools, restoreOpenApiConnections } from "./api_connect.js";
+import { createMcpAttachTools, restoreMcpConnections } from "./mcp_attach.js";
+import { memoryPromoteTool } from "./memory_promote.js";
+import { memoryNeighborsTool } from "./memory_neighbors.js";
+import { consolidateChatTool } from "./consolidate_chat.js";
 // New tools — Upgrade IV
 import { gitStatusTool, gitDiffTool, gitLogTool, gitBranchTool, gitCommitTool } from "./git_tools.js";
 import { gitCheckpointTool, gitRollbackTool } from "./git_checkpoint.js";
@@ -99,6 +104,7 @@ import { featureChecklistTool } from "./feature_checklist.js";
 import { createExtractStructuredTool } from "./extract_structured.js";
 import { createUploadImageTool } from "./upload_image.js";
 import { visionAnalyzeTool } from "./vision_analyze.js";
+import { createTranscribeAudioTool } from "./transcribe_audio.js";
 import { docPlanTool } from "./doc_plan.js";
 import { docResearchBriefTool } from "./doc_research_brief.js";
 import { docCollectSourcesTool } from "./doc_collect_sources.js";
@@ -188,6 +194,10 @@ export async function registerAllTools(
   registry.register(memoryStatsTool);
   registry.register(searchMemoryTool);
   registry.register(recallRelevantTool);
+  // Federation Phase 2 — cross-chat memory tools.
+  registry.register(memoryPromoteTool);
+  registry.register(memoryNeighborsTool);
+  registry.register(consolidateChatTool);
   registry.register(memoryGraphTool);
   registry.register(readArtifactTool);
   registry.register(failureReviewTool);
@@ -288,6 +298,11 @@ export async function registerAllTools(
     registry.register(createUploadImageTool(harness));
     registry.register(createHypothesizeTool(harness));
     registry.register(createExtractStructuredTool(harness));
+    // Audio transcription — chat-scoped so attachment_id resolves under the
+    // active chat's per-chat audio dir.
+    if (resolveHarnessEnvRaw("AGENT_TRANSCRIBE_ENABLED", prefs) !== "0") {
+      registry.register(createTranscribeAudioTool(harness));
+    }
 
     // Upgrade V: goal decomposer, branch explorer, contract verifier
     registry.register(createDecomposeGoalTool(harness));
@@ -314,6 +329,20 @@ export async function registerAllTools(
 
   // Load any previously-persisted dynamic tools from disk
   await loadDynamicTools(registry, emitter);
+
+  // External API + MCP connections — meta tools are always available; the
+  // operation tools they generate are spec/server-defined and survive restarts.
+  const { apiConnectTool, apiDisconnectTool, apiListTool } = createApiConnectionTools(registry, emitter);
+  registry.register(apiConnectTool);
+  registry.register(apiDisconnectTool);
+  registry.register(apiListTool);
+  const { mcpAttachTool, mcpDetachTool } = createMcpAttachTools(registry, emitter);
+  registry.register(mcpAttachTool);
+  registry.register(mcpDetachTool);
+  // Re-register previously-attached connections so their generated tools are
+  // live on the next ReAct turn. Best-effort — failures are logged via emitter.
+  await restoreOpenApiConnections(registry, emitter);
+  await restoreMcpConnections(registry, emitter);
 
   applyLazyRegistrationPolicy(registry, harness);
   if (harness) {
@@ -356,3 +385,12 @@ export {
 } from "./persona_runtime.js";
 export { loadPlugins } from "./plugin_loader.js";
 export type { PluginModule, PluginLoadResult } from "./plugin_loader.js";
+// Audio attachment helpers — re-exported for the web layer so it can persist
+// uploads and pass attachment_id into the transcribe_audio tool.
+export {
+  saveAudioAttachment,
+  findAudioAttachment,
+  readAudioAttachment,
+  SUPPORTED_AUDIO_MIME_TYPES,
+} from "./audio_attachments.js";
+export type { AudioAttachmentInput, AudioAttachmentRecord } from "./audio_attachments.js";

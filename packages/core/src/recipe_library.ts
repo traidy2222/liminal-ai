@@ -13,10 +13,13 @@
 import { readFile, writeFile, mkdir } from "node:fs/promises";
 import { join } from "node:path";
 import { rankDocumentsForQuery, type RankableDoc } from "./memory_rank.js";
-import { resolveWorkspaceRoot } from "./workspace_root.js";
+import {
+  ensureGlobalStorageRoot,
+  pickReadPath,
+  pickWritePath,
+  recipeStatsPaths,
+} from "./global_storage.js";
 import { effectiveHarnessEnvRaw } from "./harness_effective_env.js";
-
-const STATS_PATH = (): string => join(resolveWorkspaceRoot(), ".agent_recipe_stats.json");
 
 /** A turn must score at least this (scoreTurnOutcome, 0–1) to become a recipe. */
 const RECIPE_OUTCOME_FLOOR = 0.6;
@@ -135,7 +138,8 @@ interface StatsFile {
 
 async function loadFile(): Promise<StatsFile> {
   try {
-    const raw = await readFile(STATS_PATH(), "utf8");
+    const p = await pickReadPath(recipeStatsPaths());
+    const raw = await readFile(p, "utf8");
     const j = JSON.parse(raw) as unknown;
     return j && typeof j === "object" ? (j as StatsFile) : {};
   } catch {
@@ -144,8 +148,10 @@ async function loadFile(): Promise<StatsFile> {
 }
 
 async function saveFile(file: StatsFile): Promise<void> {
-  await mkdir(resolveWorkspaceRoot(), { recursive: true });
-  await writeFile(STATS_PATH(), JSON.stringify(file, null, 2), "utf8");
+  await ensureGlobalStorageRoot();
+  const p = await pickWritePath(recipeStatsPaths());
+  await mkdir(join(p, ".."), { recursive: true });
+  await writeFile(p, JSON.stringify(file, null, 2), "utf8");
 }
 
 export interface RecordRecipeInput {

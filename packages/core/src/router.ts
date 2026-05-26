@@ -6,6 +6,8 @@ import type { ChatCompletionMessageParam } from "openai/resources/chat/completio
 import { withProviderRequestSpacing } from "./provider_request_gate.js";
 import { effectiveHarnessEnvRaw } from "./harness_effective_env.js";
 import { buildProviderRouting } from "./provider_config.js";
+import { applyPromptCacheBreakpoints } from "./prompt_cache.js";
+import type { Message } from "./types.js";
 
 export function getFastModelSlug(fallback: string): string {
   const m = effectiveHarnessEnvRaw("AGENT_FAST_MODEL")?.trim();
@@ -44,6 +46,12 @@ export async function completeChatJson(
 
   const attemptWithModel = async (model: string, isFast: boolean): Promise<JsonCompletionResult> => {
     const providerRouting = buildProviderRouting(model, isFast);
+    // Same prompt-cache breakpoint logic as the main model — fast sidecar calls
+    // (intent / distill / critic / safety judge) also see the same big static
+    // prefix when they reuse the conversation messages.
+    const cachedMessages = applyPromptCacheBreakpoints(
+      opts.messages as unknown as Message[]
+    ) as unknown as typeof opts.messages;
     try {
       const res = await withProviderRequestSpacing(
         { apiKey: client.apiKey, baseURL: client.baseURL },
@@ -51,7 +59,7 @@ export async function completeChatJson(
           createFn(
             {
               model,
-              messages: opts.messages,
+              messages: cachedMessages,
               max_tokens: opts.maxTokens ?? 800,
               temperature: opts.temperature ?? 0.2,
               response_format: { type: "json_object" },

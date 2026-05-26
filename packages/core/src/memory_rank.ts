@@ -136,6 +136,66 @@ export interface RankableDoc {
   memoryType?: string;
   accessCount?: number;
   confidence?: number;
+  /**
+   * Workspace fingerprint the note was written in (set by notes_store).
+   * Format: `git:<host>/<owner>/<repo>` for git checkouts, else `path:<abs>`.
+   * Enables the workspace-affinity boost below.
+   */
+  workspaceFingerprint?: string;
+  /** Chat / harness taskId that wrote the note (federation Phase 2). */
+  chatId?: string;
+  /** Visibility scope across chats; "chat" notes get a hard filter to their writer. */
+  scope?: "chat" | "workspace" | "global";
+}
+
+/**
+ * Small additive boost applied when a candidate note shares a workspace
+ * fingerprint with the current workspace. Cross-workspace notes still surface
+ * (especially when BM25 is very strong) — they just sit slightly behind their
+ * same-workspace siblings, which is the right ordering when you're working
+ * in a specific project but might still want to see related learnings from
+ * adjacent ones.
+ */
+export function workspaceAffinityBoost(
+  noteWs: string | undefined,
+  currentWs: string | undefined
+): number {
+  if (!noteWs || !currentWs) return 0;
+  return noteWs === currentWs ? 0.18 : 0;
+}
+
+/**
+ * Federation Phase 2 — multiplicative penalty applied when a note comes from a
+ * sibling chat in the same workspace. Sibling notes stay visible (the agent
+ * may legitimately want continuity across chats), but rank behind the current
+ * chat's own writes so the active conversation's train of thought wins ties.
+ *
+ * Cross-workspace global facts are not penalized — they're durable identity
+ * facts the user expects to surface everywhere. Chat-scope notes from other
+ * chats are filtered out earlier (hard scope filter).
+ *
+ * The default 0.85 is env-tunable via `AGENT_RECALL_SIBLING_DISCOUNT`.
+ */
+export function chatScopeMultiplier(opts: {
+  noteScope: RankableDoc["scope"];
+  noteChatId: string | undefined;
+  noteWorkspaceFp: string | undefined;
+  currentChatId: string | undefined;
+  currentWorkspaceFp: string | undefined;
+  siblingDiscount: number;
+}): number {
+  if (!opts.currentChatId) return 1; // recall without chat context (eval, CLI) — no penalty
+  if (opts.noteChatId === undefined) return 1; // legacy notes (no chatId) — treat as global, no penalty
+  if (opts.noteChatId === opts.currentChatId) return 1; // own chat — no penalty
+  // Different chat. Only penalize when both notes share the current workspace
+  // AND the note's scope is "workspace" (or unset → legacy global). "global"
+  // scope notes stay unpenalized: they were explicitly marked durable.
+  const sameWs =
+    opts.currentWorkspaceFp && opts.noteWorkspaceFp && opts.currentWorkspaceFp === opts.noteWorkspaceFp;
+  if (sameWs && opts.noteScope !== "global") {
+    return Math.max(0.1, Math.min(1, opts.siblingDiscount));
+  }
+  return 1;
 }
 
 /**
@@ -144,22 +204,74 @@ export interface RankableDoc {
 export function rankDocumentsForQuery(
   query: string,
   docs: RankableDoc[],
-  opts?: { limit?: number }
+  opts?: {
+    limit?: number;
+    /**
+     * Workspace fingerprint of the caller (current workspace). When provided,
+     * notes with a matching fingerprint get a small additive boost so memory
+     * from "this project" surfaces ahead of cross-project candidates without
+     * suppressing them entirely.
+     */
+    currentWorkspaceFingerprint?: string;
+    /**
+     * When true, drop any candidate whose workspaceFingerprint doesn't match
+     * `currentWorkspaceFingerprint`. Used by the `recall_in_workspace` tool
+     * for strict-scope recall.
+     */
+    requireWorkspaceMatch?: boolean;
+    /**
+     * Federation Phase 2 — chatId of the caller. Used to (a) enforce the hard
+     * scope filter for `scope: "chat"` notes (only their own chat sees them)
+     * and (b) apply the sibling-chat discount to same-workspace notes from
+     * different chats.
+     */
+    currentChatId?: string;
+    /**
+     * Multiplicative penalty for sibling-chat notes (default 0.85). Lower
+     * favors the current chat more; higher makes siblings co-equal.
+     */
+    siblingDiscount?: number;
+    /**
+     * When true, drop any candidate whose scope is "global" — used when the
+     * caller wants to ignore cross-chat federation entirely (privacy-sensitive
+     * turns). When false (default), all scopes are visible after their
+     * respective penalties.
+     */
+    globalOnly?: boolean;
+  }
 ): Array<{ id: string; score: number; doc: RankableDoc }> {
   const queryTerms = tokenize(query);
   const limit = opts?.limit ?? 50;
   if (queryTerms.length === 0 || docs.length === 0) return [];
 
-  const docTokenLists = docs.map((d) => tokenize(d.text));
+  let effectiveDocs = docs;
+  if (opts?.requireWorkspaceMatch && opts.currentWorkspaceFingerprint) {
+    effectiveDocs = effectiveDocs.filter((d) => d.workspaceFingerprint === opts.currentWorkspaceFingerprint);
+  }
+  // Hard scope filter — chat-scope notes only visible to their own writer.
+  if (opts?.currentChatId !== undefined) {
+    effectiveDocs = effectiveDocs.filter(
+      (d) => d.scope !== "chat" || d.chatId === opts.currentChatId
+    );
+  } else {
+    // No chat context — be conservative and hide chat-scope notes entirely.
+    effectiveDocs = effectiveDocs.filter((d) => d.scope !== "chat");
+  }
+  if (opts?.globalOnly) {
+    effectiveDocs = effectiveDocs.filter((d) => d.scope === "global");
+  }
+  if (effectiveDocs.length === 0) return [];
+
+  const docTokenLists = effectiveDocs.map((d) => tokenize(d.text));
   const df = buildDf(docTokenLists);
-  const N = docs.length;
+  const N = effectiveDocs.length;
   const totalLen = docTokenLists.reduce((a, t) => a + Math.max(t.length, 1), 0);
   const avgdl = totalLen / N;
 
   const now = Date.now();
   const qLower = query.toLowerCase();
 
-  const scored = docs.map((doc, i) => {
+  const scored = effectiveDocs.map((doc, i) => {
     const bm = bm25ForQuery(queryTerms, docTokenLists[i]!, df, N, avgdl);
     const sub =
       doc.text.toLowerCase().includes(qLower) && qLower.length >= 2 ? 0.25 : 0;
@@ -174,8 +286,17 @@ export function rankDocumentsForQuery(
       sub +
       memoryTypeBoost(doc.memoryType) +
       recencyBoost(doc.updatedAt, now) +
-      trustBoost(doc.accessCount, doc.confidence);
-    const score = rawScore * decay;
+      trustBoost(doc.accessCount, doc.confidence) +
+      workspaceAffinityBoost(doc.workspaceFingerprint, opts?.currentWorkspaceFingerprint);
+    const chatMul = chatScopeMultiplier({
+      noteScope: doc.scope,
+      noteChatId: doc.chatId,
+      noteWorkspaceFp: doc.workspaceFingerprint,
+      currentChatId: opts?.currentChatId,
+      currentWorkspaceFp: opts?.currentWorkspaceFingerprint,
+      siblingDiscount: opts?.siblingDiscount ?? 0.85,
+    });
+    const score = rawScore * decay * chatMul;
     return { id: doc.id, score, doc };
   });
 

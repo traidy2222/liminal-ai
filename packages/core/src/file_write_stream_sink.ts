@@ -36,13 +36,23 @@ export function resolveWriteStreamSinkMinChars(prefs: RuntimePreferences | null)
   return Number.isFinite(n) && n > 0 ? n : 8000;
 }
 
-function inflightDir(): string {
+function inflightDir(chatId: string | null): string {
+  // Per-chat layout: stage under ~/.liminal/chats/<chatId>/write_staging/inflight
+  // so a chat bound to an external folder doesn't pollute that folder, and so
+  // scratch chats keep their staging alongside their workspace.
+  if (chatId) {
+    // Lazy require to avoid widening this module's import graph.
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const gs = require("./global_storage.js") as typeof import("./global_storage.js");
+    return gs.ensurePerChatDirSync(chatId, "write_staging", "inflight");
+  }
+  // Legacy: workspace-local staging when no chatId is known.
   return path.join(resolveWorkspaceRoot(), ".agent_write_staging", "inflight");
 }
 
-function stagingPathFor(callId: string): string {
+function stagingPathFor(callId: string, chatId: string | null): string {
   const safe = callId.replace(/[^a-zA-Z0-9_-]/g, "_").slice(0, 80);
-  return path.join(inflightDir(), `${safe}.tmp`);
+  return path.join(inflightDir(chatId), `${safe}.tmp`);
 }
 
 function resolveTargetPath(p: string): string {
@@ -55,7 +65,9 @@ export class FileWriteStreamSink {
 
   constructor(
     private readonly enabled: boolean,
-    private readonly minChars: number
+    private readonly minChars: number,
+    /** Chat / harness taskId — used to scope the staging dir per-chat. */
+    private readonly chatId: string | null = null
   ) {}
 
   open(callId: string, toolName: string): void {
@@ -65,7 +77,7 @@ export class FileWriteStreamSink {
         callId,
         toolName,
         parse: createContentStreamParseState(),
-        stagingPath: stagingPathFor(callId),
+        stagingPath: stagingPathFor(callId, this.chatId),
         targetPath: null,
         // Staging is always a fresh file; the real create/overwrite/append mode
         // is applied by the write_file handler from its parsed `mode` arg.
@@ -120,7 +132,7 @@ export class FileWriteStreamSink {
 
   private async ensureStream(entry: SinkEntry): Promise<void> {
     if (entry.stream) return;
-    await mkdir(inflightDir(), { recursive: true });
+    await mkdir(inflightDir(this.chatId), { recursive: true });
     entry.stream = createWriteStream(entry.stagingPath, { encoding: "utf8", flags: "w" });
   }
 

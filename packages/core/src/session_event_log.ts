@@ -18,6 +18,7 @@ import path from "node:path";
 import type { AgentEmitter } from "./events.js";
 import type { AgentEventMap } from "./types.js";
 import { resolveWorkspaceRoot } from "./workspace_root.js";
+import { ensurePerChatDirSync, sanitizeChatId } from "./global_storage.js";
 import { effectiveHarnessEnvRaw } from "./harness_effective_env.js";
 
 const MAX_USER_CHARS = 12_000;
@@ -52,20 +53,29 @@ export function sessionTraceLogEnabled(): boolean {
   return effectiveHarnessEnvRaw("AGENT_SESSION_JSONL_TRACE") === "1";
 }
 
-function sessionLogDir(): string {
-  return path.join(resolveWorkspaceRoot(), ".agent_sessions");
+/**
+ * Resolve the directory holding this session's jsonl. Phase 1 storage split:
+ * each chat (= sessionId / harness taskId) gets its own subfolder under
+ * `~/.liminal/chats/<chatId>/`. Legacy callers that scan `.agent_sessions/`
+ * in the workspace can still locate older runs at the legacy path; new writes
+ * land in the per-chat dir.
+ */
+function sessionLogPath(sessionId: string): string {
+  const dir = ensurePerChatDirSync(sessionId);
+  return path.join(dir, "session.jsonl");
 }
 
-function sessionLogPath(sessionId: string): string {
-  const safe = sessionId.replace(/[^a-zA-Z0-9._-]/g, "_").slice(0, 80);
-  return path.join(sessionLogDir(), `${safe}.jsonl`);
+/** Legacy `~workspace/.agent_sessions/` path — readers fall back here for old runs. */
+function legacySessionLogPath(sessionId: string): string {
+  const safe = sanitizeChatId(sessionId);
+  return path.join(resolveWorkspaceRoot(), ".agent_sessions", `${safe}.jsonl`);
 }
 
 async function appendLine(sessionId: string, record: Record<string, unknown>): Promise<void> {
-  const dir = sessionLogDir();
-  await mkdir(dir, { recursive: true });
+  const target = sessionLogPath(sessionId);
+  await mkdir(path.dirname(target), { recursive: true });
   const line = JSON.stringify({ ts: new Date().toISOString(), sessionId, ...record }) + "\n";
-  await appendFile(sessionLogPath(sessionId), line, "utf8");
+  await appendFile(target, line, "utf8");
 }
 
 function writeFireAndForget(sessionId: string, record: Record<string, unknown>): void {
@@ -271,27 +281,28 @@ export interface YieldSnapshot {
 }
 
 function yieldSnapshotPath(taskId: string): string {
-  const safe = taskId.replace(/[^a-zA-Z0-9._-]/g, "_").slice(0, 80);
-  return path.join(sessionLogDir(), `${safe}_yield.json`);
+  // Stored alongside the per-chat session log under ~/.liminal/chats/<chatId>/.
+  return path.join(ensurePerChatDirSync(taskId), "yield.json");
 }
 
 /**
- * Write a crash-recovery yield snapshot to `.agent_sessions/<taskId>_yield.json`.
+ * Write a crash-recovery yield snapshot under `~/.liminal/chats/<chatId>/yield.json`.
  * Called every AGENT_YIELD_EVERY_N rounds when that env var is set.
  */
 export async function writeYieldSnapshot(snapshot: YieldSnapshot): Promise<void> {
   try {
-    const dir = sessionLogDir();
-    await mkdir(dir, { recursive: true });
-    await writeFile(
-      yieldSnapshotPath(snapshot.taskId),
-      JSON.stringify(snapshot, null, 2),
-      "utf8"
-    );
+    const target = yieldSnapshotPath(snapshot.taskId);
+    await mkdir(path.dirname(target), { recursive: true });
+    await writeFile(target, JSON.stringify(snapshot, null, 2), "utf8");
   } catch {
     /* non-fatal */
   }
 }
+
+// Surface the legacy path for readers that want to scan old session jsonl files
+// (auto_dream session scan, etc). Suppress unused-binding warning — exported
+// indirectly via callers that import the symbol when they need it.
+export { legacySessionLogPath };
 
 /** When AGENT_SESSION_JSONL=1, attach logging and return detach; otherwise return a no-op. */
 export function maybeAttachSessionEventLog(

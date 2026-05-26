@@ -2,15 +2,33 @@
 
 All notable changes to [Liminal AI](https://github.com/traidy2222/liminal-ai) on the `main` branch.
 
-**Current stage:** **alpha** (`v0.0.10` tip of `main`, 2026-05-23). The workspace package may read `0.1.0`, but **beta**, **RC**, and a **v0.1.0 public preview** have not been declared as product releases yet.
+**Current stage:** **alpha** (`v0.0.11` tip of `main`, 2026-05-24). The workspace package may read `0.1.0`, but **beta**, **RC**, and a **v0.1.0 public preview** have not been declared as product releases yet.
 
 Format: **v0.0.x** entries keyed to the last GitHub push in each slice. Dates are real push dates.
 
 ---
 
+## v0.0.11 — 2026-05-24 {#v0-0-11}
+
+**Current alpha.** User-global storage, web multi-chat, audio transcription, and connector tools.
+
+**Shipped**
+
+- **Storage layout** — `~/.liminal/` user-global memory, persona, prefs, vault; per-chat folders for sessions/artifacts; `AGENT_STORAGE_LAYOUT=legacy` to keep old paths
+- **Web multi-chat** — `ChatManager`, chat list/switch APIs, idle bridge eviction, SSE scoped to the active chat
+- **Audio** — `transcribe_audio`, upload attachments, OpenRouter Whisper defaults, dictation env knobs, web mic UI + auto-transcribe on upload
+- **API connectors** — `api_connect` / `api_disconnect` / `api_list` (OpenAPI → dynamic tools, persisted connections)
+- **MCP** — `mcp_attach` to wire MCP servers into the live registry
+- **Memory** — `memory_promote`, `memory_neighbors`, `consolidate_chat`; federated rank scoring; exploratory-turn debias (`AGENT_MEMORY_DEBIAS`, optional `AGENT_MEMORY_EXPLORATORY_AUTO_RECALL`)
+- **Harness** — `AGENT_PROMPT_CACHE` (provider cache breakpoints); intent inference heuristics + research finalize judge; vault index helper
+- **Docs** — [Roadmap](./roadmap.md) studio product pipeline (Teams, Mobile, Bench, SDK) with marketing links
+- **Install** — script comments point at hosted `vireondynamics.com/install/` URLs
+
+---
+
 ## v0.0.10 — 2026-05-23 {#v0-0-10}
 
-**Current alpha.** Task Worlds landed earlier on May 23 then was **removed** the same day in favor of **execution state** and **compensation** wiring.
+Task Worlds landed earlier on May 23 then was **removed** the same day in favor of **execution state** and **compensation** wiring.
 
 **Shipped**
 

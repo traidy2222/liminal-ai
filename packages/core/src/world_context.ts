@@ -26,6 +26,7 @@ import { rankDocumentsForQuery, type RankableDoc } from "./memory_rank.js";
 import { cosineSimilarity, fetchEmbeddings } from "./embeddings.js";
 import { gatherRepoMapLines } from "./repo_map.js";
 import { resolveWorkspaceRoot } from "./workspace_root.js";
+import { notesPaths, pickReadPath } from "./global_storage.js";
 import { formatFailureDigestForWorldContext } from "./failure_digest.js";
 import { formatGoldenEvalHints } from "./golden_eval.js";
 import { formatRecipeLibraryHints } from "./recipe_library.js";
@@ -591,7 +592,10 @@ function isStaleDate(isoDate: string, thresholdDays: number): boolean {
 }
 
 async function gatherSessionMemory(workspaceRoot: string): Promise<SessionMemory | null> {
-  const notesFile = path.join(workspaceRoot, ".agent_notes.json");
+  // Phase 1 storage split: prefer ~/.liminal/notes.json over the legacy
+  // workspace-local .agent_notes.json. pickReadPath returns the legacy path
+  // when the global file doesn't exist yet.
+  const notesFile = await pickReadPath(notesPaths(workspaceRoot));
   const projBasename = path.basename(workspaceRoot).toLowerCase();
   const raw = await tryReadFile(notesFile);
   if (!raw) return null;
@@ -685,7 +689,9 @@ async function gatherRelevantPrimedLines(
   if (trimmed.length < 2) return [];
 
   const lines: string[] = [];
-  const notesFile = path.join(workspaceRoot, ".agent_notes.json");
+  const notesFile = await pickReadPath(notesPaths(workspaceRoot));
+  // Embedding index stays workspace-local for now — Phase 2 moves it alongside
+  // notes (will require an index format bump to track workspace tags per key).
   const memoryEmbedIndexPath = path.join(workspaceRoot, ".agent_memory.index.json");
 
   const rawNotes = await tryReadFile(notesFile);
@@ -895,7 +901,7 @@ async function gatherLongHorizonHandoffLines(workspaceRoot: string): Promise<str
     out.push(tail);
   }
 
-  const notesPath = path.join(workspaceRoot, ".agent_notes.json");
+  const notesPath = await pickReadPath(notesPaths(workspaceRoot));
   const notesRaw = await tryReadFile(notesPath);
   if (notesRaw) {
     try {

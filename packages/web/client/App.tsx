@@ -10,6 +10,8 @@ import { toPng } from "html-to-image";
 import { Prism as SyntaxHighlighter } from "react-syntax-highlighter";
 import { vscDarkPlus } from "react-syntax-highlighter/dist/esm/styles/prism";
 import { SettingsModal } from "./settings/SettingsModal.js";
+import { ChatSwitcher } from "./chat/ChatSwitcher.js";
+import { DictationButton } from "./audio/DictationButton.js";
 import { PROVIDER_PRESETS, PROVIDER_PRESET_CUSTOM_ID } from "./settings/providerPresets.js";
 import { resolveInputShortcut } from "./inputSemantics.js";
 import {
@@ -1617,6 +1619,21 @@ export function App() {
   const submittingRef = useRef(false);
   const sessionStartRef = useRef<number | null>(null);
 
+  // Dictation span tracking — when the mic starts we snapshot where the
+  // dictation text begins in the input box. Web Speech finals append AFTER the
+  // committed span; the interim hypothesis lives in a preview span that gets
+  // replaced on every partial result; Whisper's refinement replaces the entire
+  // (committed + preview) span on stop.
+  const dictationSpanStartRef = useRef(0);
+  const dictationCommittedLenRef = useRef(0);
+  const dictationPreviewLenRef = useRef(0);
+  // Mirrored as state only so the input area can render a subtle "live"
+  // affordance if a shell wants to use it; not currently wired to UI.
+  const [, setDictationPreview] = useState<string>("");
+  // Inline notice surfaced under the mic button when auto-send is refused
+  // (agent busy, empty transcript, attachment validation, etc).
+  const [autoSendNotice, setAutoSendNotice] = useState<string | null>(null);
+
   useEffect(() => {
     applyPersonaDocumentTheme(state.personaUiTheme);
   }, [state.personaUiTheme]);
@@ -1791,15 +1808,78 @@ export function App() {
     const incoming = Array.from(files);
     if (incoming.length === 0) return;
     const prepared: ImageAttachment[] = [];
+    const audioFiles: File[] = [];
     for (const file of incoming) {
-      if (!file.type.startsWith("image/")) continue;
-      const dataUrl = await fileToDataUrl(file);
-      const parsed = parseDataUrlImage(dataUrl);
-      if (!parsed.ok) { setAttachError(parsed.error); return; }
-      prepared.push({ name: normalizeImageAttachmentName(file.name, `image-${Date.now()}.png`), mimeType: parsed.mimeType, dataUrl, sizeBytes: parsed.sizeBytes, source });
+      if (file.type.startsWith("image/")) {
+        const dataUrl = await fileToDataUrl(file);
+        const parsed = parseDataUrlImage(dataUrl);
+        if (!parsed.ok) { setAttachError(parsed.error); return; }
+        prepared.push({ name: normalizeImageAttachmentName(file.name, `image-${Date.now()}.png`), mimeType: parsed.mimeType, dataUrl, sizeBytes: parsed.sizeBytes, source });
+      } else if (file.type.startsWith("audio/") || file.type.startsWith("video/")) {
+        // Audio (or audio-bearing video like mp4 podcasts) → transcribe and
+        // append the transcript to the input draft. Original file is persisted
+        // server-side so the agent can re-transcribe with different settings
+        // later via the transcribe_audio tool.
+        audioFiles.push(file);
+      }
     }
-    if (prepared.length === 0) { setAttachError("No supported images found."); return; }
-    void tryAddAttachments([...attachments, ...prepared]);
+    if (audioFiles.length > 0) {
+      for (const file of audioFiles) {
+        void transcribeAndAppend(file);
+      }
+    }
+    if (prepared.length === 0 && audioFiles.length === 0) {
+      setAttachError("No supported files found (images, audio, or video).");
+      return;
+    }
+    if (prepared.length > 0) {
+      void tryAddAttachments([...attachments, ...prepared]);
+    }
+  };
+
+  /**
+   * Upload an audio file to /api/audio/upload, run /api/transcribe, then append
+   * the transcript to the current input draft. Wraps the result in a small
+   * pointer line so the user (and the model later, via session log) can tell
+   * the text came from a transcription, not raw user typing.
+   */
+  const transcribeAndAppend = async (file: File) => {
+    try {
+      const dataUrl = await fileToDataUrl(file);
+      const uploadResp = await fetch(`${WEB_SERVER_BASE}/api/audio/upload`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ dataUrl, filename: file.name, mimeType: file.type || "audio/webm" }),
+      });
+      if (!uploadResp.ok) {
+        const j = (await uploadResp.json().catch(() => ({}))) as { error?: string };
+        setAttachError(j.error ?? `Audio upload failed (${uploadResp.status})`);
+        return;
+      }
+      const upload = (await uploadResp.json()) as { attachmentId: string };
+      const tResp = await fetch(`${WEB_SERVER_BASE}/api/transcribe`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ attachmentId: upload.attachmentId }),
+      });
+      if (!tResp.ok) {
+        const j = (await tResp.json().catch(() => ({}))) as { error?: string };
+        setAttachError(j.error ?? `Transcription failed (${tResp.status})`);
+        return;
+      }
+      const t = (await tResp.json()) as {
+        text: string;
+        durationSec?: number;
+        costUsd?: number;
+        model?: string;
+      };
+      const header = `[Audio: ${file.name}${t.durationSec ? `, ${Math.round(t.durationSec)}s` : ""}]`;
+      const block = `${header}\n${t.text.trim()}`;
+      setInput((prev) => (prev ? `${prev}\n\n${block}` : block));
+      if (historyIndex !== -1) setHistoryIndex(-1);
+    } catch (err) {
+      setAttachError(err instanceof Error ? err.message : String(err));
+    }
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -2097,6 +2177,167 @@ export function App() {
     <ShellRouter theme={state.personaUiTheme}>
       <style>{CSS_ANIMATIONS}</style>
       <PersonaShellSwitcher shell={shell} contract={contract} />
+
+      {/* ── Chat switcher (Phase 2 per-chat workspaces) ──────────────────────── */}
+      {/* Fixed overlay top-left: persists across persona shells without picking
+          apart each shell's chrome. Click → dropdown of chats; new-chat modal
+          opens from there. Memory continuity hint lives inside the dropdown. */}
+      <div
+        style={{
+          position: "fixed",
+          top: 8,
+          left: 8,
+          zIndex: 800,
+          pointerEvents: "auto",
+        }}
+      >
+        <ChatSwitcher />
+      </div>
+
+      {/* ── Live dictation overlay ──────────────────────────────────────────── */}
+      {/* Fixed bottom-right. Three callback streams from the mic button keep
+          the input in sync:
+            - onStart: snapshot the input length so we know where dictation's
+              span begins (Whisper refinement replaces from there to the end)
+            - onAppendFinal: Web Speech committed a final phrase → append
+            - onInterimText: Web Speech's live hypothesis → show as preview
+            - onRefinedFull: Whisper finished → replace the entire dictation
+              span with the high-accuracy text */}
+      <div
+        style={{
+          position: "fixed",
+          bottom: 12,
+          right: 14,
+          zIndex: 800,
+          pointerEvents: "auto",
+        }}
+      >
+        <DictationButton
+          autoSendDefault={state.dictationAutoSendDefault}
+          audioCue={state.dictationAudioCue}
+          onStart={() => {
+            // Snapshot where the dictation span begins so we can replace it
+            // wholesale when Whisper's refinement arrives. Anything the user
+            // typed BEFORE clicking the mic stays untouched.
+            dictationSpanStartRef.current = inputRef.current?.value.length ?? input.length;
+            dictationCommittedLenRef.current = 0;
+            dictationPreviewLenRef.current = 0;
+            setDictationPreview("");
+            setAutoSendNotice(null);
+          }}
+          onAppendFinal={(text) => {
+            if (!text.trim()) return;
+            setInput((prev) => {
+              const base = prev.slice(0, dictationSpanStartRef.current + dictationCommittedLenRef.current);
+              const after = prev.slice(dictationSpanStartRef.current + dictationCommittedLenRef.current + dictationPreviewLenRef.current);
+              const sep = base && !/\s$/.test(base) ? " " : "";
+              const insertion = sep + text.trim();
+              dictationCommittedLenRef.current += insertion.length;
+              dictationPreviewLenRef.current = 0;
+              return base + insertion + after;
+            });
+            setDictationPreview("");
+            if (historyIndex !== -1) setHistoryIndex(-1);
+          }}
+          onInterimText={(text) => {
+            // Render the interim hypothesis inline in the input box (greyed
+            // out feeling) by replacing the previous preview span.
+            setInput((prev) => {
+              const baseEnd = dictationSpanStartRef.current + dictationCommittedLenRef.current;
+              const base = prev.slice(0, baseEnd);
+              const after = prev.slice(baseEnd + dictationPreviewLenRef.current);
+              const sep = base && !/\s$/.test(base) ? " " : "";
+              const insertion = sep + text.trim();
+              dictationPreviewLenRef.current = insertion.length;
+              return base + insertion + after;
+            });
+            setDictationPreview(text);
+          }}
+          onAutoSend={(committedText) => {
+            // Auto-send: VAD detected end-of-utterance + Web Speech committed
+            // text. Trigger the same submit path the form uses.
+            const trimmed = committedText.trim();
+            if (!trimmed) {
+              setAutoSendNotice("Empty transcript — nothing to send.");
+              return;
+            }
+            if (state.busy || submittingRef.current) {
+              // Refuse rather than queue — user-visible chip explains why.
+              setAutoSendNotice("Agent busy with prior turn — message kept in input. Press Enter when ready.");
+              return;
+            }
+            // Build the input value as if the user pressed Enter: everything
+            // before the dictation span + the committed text. We send via the
+            // same path as manual submit so attachments, history, etc. all work.
+            const preDictation = (inputRef.current?.value ?? input).slice(0, dictationSpanStartRef.current);
+            const sep = preDictation && !/\s$/.test(preDictation) ? " " : "";
+            const fullMessage = (preDictation + sep + trimmed).trim();
+            // Match the manual submit guard.
+            if (!fullMessage && attachments.length === 0) return;
+            const validation = validateImageAttachments(attachments, DEFAULT_IMAGE_ATTACHMENT_LIMITS);
+            if (!validation.ok) {
+              setAttachError(validation.error);
+              setAutoSendNotice("Couldn't auto-send: attachment validation failed.");
+              return;
+            }
+            submittingRef.current = true;
+            const textToSend = fullMessage;
+            const attachmentsToSend = [...attachments];
+            setInput("");
+            setAttachments([]);
+            setAttachError(null);
+            // Reset dictation span trackers — the next recording starts fresh.
+            dictationSpanStartRef.current = 0;
+            dictationCommittedLenRef.current = 0;
+            dictationPreviewLenRef.current = 0;
+            void sendMessage({ text: textToSend, attachments: attachmentsToSend }).then((r) => {
+              if (!r.ok) submittingRef.current = false;
+              else pushHistory(textToSend);
+            });
+            setAutoSendNotice(null);
+          }}
+          onRefinedFull={(refinedText, _cost, wasAutoSent) => {
+            // If we already auto-sent, the agent has the Web Speech version —
+            // don't re-send. Whisper refinement is silent (could be wired to
+            // update the displayed message bubble in a later polish pass).
+            if (wasAutoSent) return;
+            // Manual mode: Whisper refinement REPLACES the dictation span in
+            // the input box with the more accurate version.
+            setInput((prev) => {
+              const base = prev.slice(0, dictationSpanStartRef.current);
+              const totalSpanLen = dictationCommittedLenRef.current + dictationPreviewLenRef.current;
+              const after = prev.slice(dictationSpanStartRef.current + totalSpanLen);
+              const sep = base && !/\s$/.test(base) ? " " : "";
+              const insertion = sep + refinedText.trim();
+              dictationCommittedLenRef.current = insertion.length;
+              dictationPreviewLenRef.current = 0;
+              return base + insertion + after;
+            });
+            setDictationPreview("");
+            queueMicrotask(() => inputRef.current?.focus());
+          }}
+        />
+        {autoSendNotice && (
+          <div
+            style={{
+              marginTop: 6,
+              maxWidth: 260,
+              padding: "5px 8px",
+              background: "rgba(255,200,0,0.12)",
+              color: "#ffc800",
+              border: "1px solid rgba(255,200,0,0.4)",
+              borderRadius: 3,
+              fontSize: 10,
+              fontFamily: "monospace",
+              lineHeight: 1.4,
+            }}
+            onClick={() => setAutoSendNotice(null)}
+            title="Click to dismiss"
+          >
+            {autoSendNotice}
+          </div>
+        )}
+      </div>
 
       {/* ── Settings modal ─────────────────────────────────────────────────────── */}
       <SettingsModal

@@ -113,7 +113,14 @@ export function shouldDistillToolOutput(toolName: string, output: string): boole
     if (output.length > 1500) return true;
     return false;
   }
-  if (toolName === "read_file" && output.length > 2000) return true;
+  if (toolName === "read_file") {
+    // read_file is the model's PRIMARY substrate for coding tasks. Distilling
+    // source files (replacing code with bullet-point "claims") forces the model
+    // to re-read constantly because it never saw the actual code. Default OFF;
+    // only distill if explicitly opted in AND output is genuinely huge (25k+).
+    if (effectiveHarnessEnvRaw("AGENT_DISTILL_READ_FILE") !== "1") return false;
+    return output.length > 25_000;
+  }
   if (toolName === "run_shell" && output.split("\n").length > 100) return true;
   if (toolName === "recall_relevant" && output.length > 2500) return true;
   return false;

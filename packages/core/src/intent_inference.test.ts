@@ -7,6 +7,9 @@ import {
   resolveMemoryPolicy,
   neutralTurnInferenceResult,
   applyTurnInferenceHeuristics,
+  fallbackComplexityForUserMessage,
+  buildRoutingProfile,
+  type TurnInferenceResult,
 } from "./intent_inference.js";
 
 test("parseLikelyEditPathsField caps and normalizes", () => {
@@ -87,6 +90,53 @@ test("applyTurnInferenceHeuristics upgrades build-for-yourself to coding tool-fi
   assert.equal(refined.toolFirstBias, true);
 });
 
+test("applyTurnInferenceHeuristics trusts LLM buildDeliverable over regex on novel paraphrases", () => {
+  // Phrase the old regex wouldn't catch ("whip up", "Socratic dashboard"), but the
+  // fast-model classifier handles via paraphrase understanding.
+  const llmInference: TurnInferenceResult = {
+    ...neutralTurnInferenceResult("test", { intent: "creative" }),
+    source: "llm",
+    confidence: 0.9,
+    buildDeliverable: true,
+    implementShip: false,
+  };
+  const refined = applyTurnInferenceHeuristics(
+    "whip up a little Socratic dashboard for me whenever you get a chance",
+    llmInference
+  );
+  assert.equal(refined.intent, "coding", "should override creative→coding from LLM signal");
+  assert.equal(refined.toolFirstBias, true);
+  assert.equal(refined.essayRisk, true);
+  assert.equal(refined.thinkDepth, "brief");
+});
+
+test("applyTurnInferenceHeuristics ignores regex when LLM source says buildDeliverable=false", () => {
+  // Even though the message contains "build me a tool", the LLM classifier knows
+  // this is actually a research question about an existing tool. Trust it.
+  const llmInference: TurnInferenceResult = {
+    ...neutralTurnInferenceResult("test", { intent: "research" }),
+    source: "llm",
+    confidence: 0.9,
+    buildDeliverable: false,
+    implementShip: false,
+    freshnessSensitive: true,
+  };
+  const refined = applyTurnInferenceHeuristics(
+    "build me a comparison of which tool is best for X — what's the current consensus",
+    llmInference
+  );
+  // Should NOT flip to coding — research wins because LLM said buildDeliverable=false.
+  assert.equal(refined.intent, "research");
+});
+
+test("applyTurnInferenceHeuristics falls back to regex when source=default (classifier off/failed)", () => {
+  const base = neutralTurnInferenceResult("test", { intent: "knowledge" });
+  // source defaults to "default", so regex path fires.
+  const refined = applyTurnInferenceHeuristics("build me a html page from scratch", base);
+  assert.equal(refined.intent, "coding");
+  assert.equal(refined.toolFirstBias, true);
+});
+
 test("resolveMemoryPolicy exploratory still applies when AGENT_MEMORY_DEBIAS=0", () => {
   const prev = process.env["AGENT_MEMORY_DEBIAS"];
   const prevEx = process.env["AGENT_MEMORY_EXPLORATORY_AUTO_RECALL"];
@@ -100,5 +150,142 @@ test("resolveMemoryPolicy exploratory still applies when AGENT_MEMORY_DEBIAS=0",
     else process.env["AGENT_MEMORY_DEBIAS"] = prev;
     if (prevEx === undefined) delete process.env["AGENT_MEMORY_EXPLORATORY_AUTO_RECALL"];
     else process.env["AGENT_MEMORY_EXPLORATORY_AUTO_RECALL"] = prevEx;
+  }
+});
+
+// ─── Conversational + creative intents ───────────────────────────────────────
+
+test("resolveMemoryPolicy disables auto-recall for conversational", () => {
+  const p = resolveMemoryPolicy("conversational");
+  assert.equal(p.allowAutoRecall, false);
+  assert.equal(p.scope, "notes");
+});
+
+test("resolveMemoryPolicy carves out identity queries even when intent is conversational", () => {
+  const p = resolveMemoryPolicy("conversational", { identityQuery: true });
+  assert.equal(p.allowAutoRecall, true);
+  assert.equal(p.scope, "both");
+});
+
+test("resolveMemoryPolicy excludes facts/recipes/trajectories on creative", () => {
+  const p = resolveMemoryPolicy("creative");
+  assert.equal(p.allowAutoRecall, false);
+  assert.deepEqual(p.excludeTypes?.sort(), ["fact", "recipe", "trajectory"]);
+});
+
+test("shouldSkipHarnessSecondaryPassesForTurn skips for conversational intent", () => {
+  const inf = neutralTurnInferenceResult("test", { intent: "conversational" });
+  assert.equal(shouldSkipHarnessSecondaryPassesForTurn("hi", inf), true);
+});
+
+test("fallbackComplexityForUserMessage classifies short messages as trivial", () => {
+  assert.equal(fallbackComplexityForUserMessage("hi"), "trivial");
+  assert.equal(fallbackComplexityForUserMessage("thanks!"), "trivial");
+  assert.equal(fallbackComplexityForUserMessage(""), "trivial");
+});
+
+test("fallbackComplexityForUserMessage classifies a paragraph as normal", () => {
+  const msg = "Please add a new tool family for browser automation and wire it into the registry with a sane default.";
+  assert.equal(fallbackComplexityForUserMessage(msg), "normal");
+});
+
+test("fallbackComplexityForUserMessage flags long bullet lists as complex", () => {
+  const msg = [
+    "Refactor the harness with the following:",
+    "- split agent.ts",
+    "- extract the dispatcher",
+    "- move the lock manager out",
+    "- migrate the SSE bridge",
+    "- update all the tests",
+    "- add new docs",
+    "- ship the migration script",
+  ].join("\n");
+  assert.equal(fallbackComplexityForUserMessage(msg), "complex");
+});
+
+// ─── Routing profile ─────────────────────────────────────────────────────────
+
+test("buildRoutingProfile returns no-op when AGENT_INTENT_ROUTING is off", () => {
+  // AGENT_INTENT_ROUTING defaults to "1" in HARNESS_ENV_DEFAULTS, so deleting
+  // the env var falls back to on. Explicitly set "0" to test the disabled path.
+  const prev = process.env["AGENT_INTENT_ROUTING"];
+  process.env["AGENT_INTENT_ROUTING"] = "0";
+  try {
+    const inf = neutralTurnInferenceResult("test", { intent: "conversational" });
+    const profile = buildRoutingProfile(inf, "main/model");
+    assert.equal(profile.applied, false);
+    assert.equal(profile.modelSlug, "main/model");
+  } finally {
+    if (prev === undefined) delete process.env["AGENT_INTENT_ROUTING"];
+    else process.env["AGENT_INTENT_ROUTING"] = prev;
+  }
+});
+
+test("buildRoutingProfile routes conversational to the fast model unconditionally", () => {
+  const prev = process.env["AGENT_INTENT_ROUTING"];
+  const prevFast = process.env["AGENT_FAST_MODEL"];
+  process.env["AGENT_INTENT_ROUTING"] = "1";
+  process.env["AGENT_FAST_MODEL"] = "fast/slug";
+  try {
+    const inf = neutralTurnInferenceResult("test", { intent: "conversational" });
+    // intentionally low confidence — conversational should still route fast
+    inf.confidence = 0.3;
+    inf.source = "llm";
+    const profile = buildRoutingProfile(inf, "main/model");
+    assert.equal(profile.modelSlug, "fast/slug");
+    assert.equal(profile.toolFilterActive, true);
+    assert.equal(profile.routingReason, "conversational_always_fast");
+  } finally {
+    if (prev === undefined) delete process.env["AGENT_INTENT_ROUTING"];
+    else process.env["AGENT_INTENT_ROUTING"] = prev;
+    if (prevFast === undefined) delete process.env["AGENT_FAST_MODEL"];
+    else process.env["AGENT_FAST_MODEL"] = prevFast;
+  }
+});
+
+test("buildRoutingProfile routes trivial-complexity coding to fast when complexity routing enabled", () => {
+  const prev = process.env["AGENT_INTENT_ROUTING"];
+  const prevFast = process.env["AGENT_FAST_MODEL"];
+  const prevComp = process.env["AGENT_COMPLEXITY_ROUTING"];
+  process.env["AGENT_INTENT_ROUTING"] = "1";
+  process.env["AGENT_FAST_MODEL"] = "fast/slug";
+  process.env["AGENT_COMPLEXITY_ROUTING"] = "1";
+  try {
+    const inf = neutralTurnInferenceResult("test", { intent: "coding", complexity: "trivial" });
+    inf.confidence = 0.95;
+    inf.source = "llm";
+    const profile = buildRoutingProfile(inf, "main/model");
+    assert.equal(profile.modelSlug, "fast/slug");
+    assert.match(profile.routingReason, /complexity_trivial_coding/);
+  } finally {
+    if (prev === undefined) delete process.env["AGENT_INTENT_ROUTING"];
+    else process.env["AGENT_INTENT_ROUTING"] = prev;
+    if (prevFast === undefined) delete process.env["AGENT_FAST_MODEL"];
+    else process.env["AGENT_FAST_MODEL"] = prevFast;
+    if (prevComp === undefined) delete process.env["AGENT_COMPLEXITY_ROUTING"];
+    else process.env["AGENT_COMPLEXITY_ROUTING"] = prevComp;
+  }
+});
+
+test("buildRoutingProfile does NOT route trivial creative to fast (generation quality matters)", () => {
+  const prev = process.env["AGENT_INTENT_ROUTING"];
+  const prevFast = process.env["AGENT_FAST_MODEL"];
+  const prevComp = process.env["AGENT_COMPLEXITY_ROUTING"];
+  process.env["AGENT_INTENT_ROUTING"] = "1";
+  process.env["AGENT_FAST_MODEL"] = "fast/slug";
+  process.env["AGENT_COMPLEXITY_ROUTING"] = "1";
+  try {
+    const inf = neutralTurnInferenceResult("test", { intent: "creative", complexity: "trivial" });
+    inf.confidence = 0.95;
+    inf.source = "llm";
+    const profile = buildRoutingProfile(inf, "main/model");
+    assert.equal(profile.modelSlug, "main/model");
+  } finally {
+    if (prev === undefined) delete process.env["AGENT_INTENT_ROUTING"];
+    else process.env["AGENT_INTENT_ROUTING"] = prev;
+    if (prevFast === undefined) delete process.env["AGENT_FAST_MODEL"];
+    else process.env["AGENT_FAST_MODEL"] = prevFast;
+    if (prevComp === undefined) delete process.env["AGENT_COMPLEXITY_ROUTING"];
+    else process.env["AGENT_COMPLEXITY_ROUTING"] = prevComp;
   }
 });

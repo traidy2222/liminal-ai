@@ -1,4 +1,51 @@
 export { resolveWorkspaceRoot, runWithWorkspaceRoot } from "./workspace_root.js";
+export { resolveCurrentChatId, runWithChatId } from "./chat_context.js";
+export {
+  resolveGlobalStorageRoot,
+  ensureGlobalStorageRoot,
+  ensureGlobalStorageRootSync,
+  globalPath,
+  globalChatsRoot,
+  perChatPath,
+  ensurePerChatDir,
+  ensurePerChatDirSync,
+  sanitizeChatId,
+  notesPaths,
+  failureLogPaths,
+  recipeStatsPaths,
+  runtimePrefsPaths,
+  personaActivePaths,
+  memoryIndexPaths,
+  vaultIndexPaths,
+  pickReadPath,
+  pickWritePath,
+  workspaceFingerprint,
+} from "./global_storage.js";
+export type { TieredPaths } from "./global_storage.js";
+export {
+  TRANSCRIPTION_MODEL_RATES,
+  DEFAULT_TRANSCRIBE_MODEL,
+  estimateTranscriptionCostUsd,
+  resolveTranscriptionConfig,
+  transcribeAudio,
+} from "./transcription.js";
+export type {
+  TranscriptionConfig,
+  TranscriptionInput,
+  TranscriptionResult,
+  TranscriptionSegment,
+  TranscriptionModelRate,
+} from "./transcription.js";
+export {
+  readChatMetadata,
+  writeChatMetadata,
+  touchChatMetadata,
+  createChatMetadata,
+  listChats,
+  listOrphanChatIds,
+  scratchWorkspaceRoot,
+} from "./chat_metadata.js";
+export type { ChatMetadata, ChatWorkspaceMode } from "./chat_metadata.js";
 export {
   runHarnessEffectiveEnvContext,
   resolveHarnessEnvRaw,
@@ -109,6 +156,7 @@ export type {
   ToolResult,
   ToolHandler,
   ToolParameterSchema,
+  PropertySchema,
   ApprovalDecision,
   AccumulatedToolCall,
   StreamChunk,
@@ -143,6 +191,7 @@ export type {
 } from "./types.js";
 export { STREAM_WIRE_VERSION } from "./types.js";
 export { getFastModelSlug, completeChatJson } from "./router.js";
+export { buildAutoDreamPrompt } from "./auto_dream.js";
 export type { JsonCompletionResult } from "./router.js";
 export {
   resolvePersonalityHeartbeatConfig,

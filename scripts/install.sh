@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Liminal one-command installer (Linux / macOS / WSL)
-# Usage: curl -fsSL https://raw.githubusercontent.com/traidy2222/liminal-ai/main/scripts/install.sh | bash
+# Usage: curl -fsSL https://vireondynamics.com/install/install.sh | bash
 set -euo pipefail
 
 REPO_URL="${LIMINAL_REPO_URL:-https://github.com/traidy2222/liminal-ai.git}"

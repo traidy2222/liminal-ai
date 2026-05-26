@@ -11,6 +11,7 @@ export const LIM = {
   text: "var(--lim-text, #c8d4e0)",
   textMuted: "var(--lim-text-muted, #778899)",
   panel: "var(--lim-panel, #0e141c)",
+  border: "var(--lim-border, rgba(0,212,255,0.18))",
   assistant: "var(--lim-assistant, #00ff88)",
   userBg: "var(--lim-user-bg, rgba(0,30,55,0.4))",
   codeBg: "var(--lim-code-bg, #030810)",

@@ -2,9 +2,10 @@ import type { AgentHarness } from "@liminal/core";
 import type { PersonaArtifactId } from "@liminal/core/persona-bootstrap-progress";
 import {
   migratePersonaUiTheme,
-  resolveWorkspaceRoot,
+  personaActivePaths,
   type PersonaUiThemeV2,
 } from "@liminal/core";
+import { existsSync } from "node:fs";
 import type { RuntimePersonaControls } from "@liminal/core";
 import { mkdir, readFile, rm, stat, unlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
@@ -42,7 +43,6 @@ export const PERSONA_LIVING_MAX_APPEND_CHARS = 3500;
 /** Max total size of `soul/living.md`; older head content is dropped when exceeded. */
 export const PERSONA_LIVING_MAX_FILE_CHARS = 24_000;
 
-const PERSONA_ACTIVE_DIR = ["persona", "active"] as const;
 const SOUL_SUBDIR = "soul";
 
 const DEFAULT_LIVING_HEADER = [
@@ -69,8 +69,29 @@ export interface PersonaArtifactsPaths {
 }
 
 export function getPersonaArtifactsPaths(): PersonaArtifactsPaths {
-  const root = resolveWorkspaceRoot();
-  const dir = join(root, ...PERSONA_ACTIVE_DIR);
+  // Phase 1 storage split: persona lives under ~/.liminal/persona/active/ so
+  // a single persona follows the user across all workspaces and chats.
+  //
+  // Fallback rule (defensive — earlier bugs let an empty global dir win over a
+  // populated legacy one):
+  //   - If AGENT_STORAGE_LAYOUT=legacy, always use legacy.
+  //   - Else prefer global when it has a runtime_profile.json (i.e. real persona
+  //     content lives there).
+  //   - Else if legacy exists and looks populated, use legacy. First persona
+  //     write under this resolver creates the global dir; once it has a runtime
+  //     profile, subsequent reads stay on global.
+  //   - Else use global (greenfield install with no persona yet).
+  const paths = personaActivePaths();
+  let dir: string;
+  if (paths.legacyOnly) {
+    dir = paths.legacy;
+  } else if (existsSync(join(paths.global, "runtime_profile.json"))) {
+    dir = paths.global;
+  } else if (existsSync(join(paths.legacy, "runtime_profile.json"))) {
+    dir = paths.legacy;
+  } else {
+    dir = paths.global;
+  }
   const soulDir = join(dir, SOUL_SUBDIR);
   return {
     dir,

@@ -8,13 +8,18 @@ import type { PersonaProfile } from "./persona_presets.js";
 import { createAppendPersonaLivingTool } from "./append_persona_living.js";
 
 let prevWorkspace: string | undefined;
+let prevGlobalRoot: string | undefined;
 
 beforeEach(() => {
   prevWorkspace = process.env.AGENT_WORKSPACE_ROOT;
+  prevGlobalRoot = process.env.AGENT_GLOBAL_STORAGE_ROOT;
 });
 
 afterEach(async () => {
-  process.env.AGENT_WORKSPACE_ROOT = prevWorkspace;
+  if (prevWorkspace === undefined) delete process.env.AGENT_WORKSPACE_ROOT;
+  else process.env.AGENT_WORKSPACE_ROOT = prevWorkspace;
+  if (prevGlobalRoot === undefined) delete process.env.AGENT_GLOBAL_STORAGE_ROOT;
+  else process.env.AGENT_GLOBAL_STORAGE_ROOT = prevGlobalRoot;
 });
 
 const minimalProfile: PersonaProfile = {
@@ -52,7 +57,11 @@ const minimalProfile: PersonaProfile = {
 
 test("loadPersonaArtifactsContext removes stale monolithic soul.md", async () => {
   const root = await mkdtemp(join(tmpdir(), "lim-persona-"));
+  // Phase 1 storage split: persona now lives under ~/.liminal/persona/active/.
+  // Tests MUST isolate AGENT_GLOBAL_STORAGE_ROOT to the test tmpdir or they will
+  // clobber the real user's persona profile in their home dir.
   process.env.AGENT_WORKSPACE_ROOT = root;
+  process.env.AGENT_GLOBAL_STORAGE_ROOT = root;
   const { getPersonaArtifactsPaths, loadPersonaArtifactsContext } = await import("./persona_runtime.js");
   const paths = getPersonaArtifactsPaths();
   await mkdir(paths.dir, { recursive: true });
@@ -83,7 +92,11 @@ test("buildPersonaSoulMarkdownFromSlices orders living after canonical slices", 
 
 test("appendPersonaLivingSection rejects oversized notes", async () => {
   const root = await mkdtemp(join(tmpdir(), "lim-persona-"));
+  // Phase 1 storage split: persona now lives under ~/.liminal/persona/active/.
+  // Tests MUST isolate AGENT_GLOBAL_STORAGE_ROOT to the test tmpdir or they will
+  // clobber the real user's persona profile in their home dir.
   process.env.AGENT_WORKSPACE_ROOT = root;
+  process.env.AGENT_GLOBAL_STORAGE_ROOT = root;
   const mod = await import("./persona_runtime.js");
   const paths = mod.getPersonaArtifactsPaths();
   await mkdir(paths.soulDir, { recursive: true });
@@ -96,7 +109,11 @@ test("appendPersonaLivingSection rejects oversized notes", async () => {
 
 test("appendPersonaLivingSection eventually trims head when over file cap", async () => {
   const root = await mkdtemp(join(tmpdir(), "lim-persona-"));
+  // Phase 1 storage split: persona now lives under ~/.liminal/persona/active/.
+  // Tests MUST isolate AGENT_GLOBAL_STORAGE_ROOT to the test tmpdir or they will
+  // clobber the real user's persona profile in their home dir.
   process.env.AGENT_WORKSPACE_ROOT = root;
+  process.env.AGENT_GLOBAL_STORAGE_ROOT = root;
   const mod = await import("./persona_runtime.js");
   const paths = mod.getPersonaArtifactsPaths();
   await mkdir(paths.soulDir, { recursive: true });
@@ -118,7 +135,11 @@ test("appendPersonaLivingSection eventually trims head when over file cap", asyn
 
 test("applyPersonaProfileToHarness includes living slice in persona block", async () => {
   const root = await mkdtemp(join(tmpdir(), "lim-persona-"));
+  // Phase 1 storage split: persona now lives under ~/.liminal/persona/active/.
+  // Tests MUST isolate AGENT_GLOBAL_STORAGE_ROOT to the test tmpdir or they will
+  // clobber the real user's persona profile in their home dir.
   process.env.AGENT_WORKSPACE_ROOT = root;
+  process.env.AGENT_GLOBAL_STORAGE_ROOT = root;
   const rt = await import("./persona_runtime.js");
   const paths = rt.getPersonaArtifactsPaths();
   await mkdir(paths.soulDir, { recursive: true });
@@ -137,7 +158,11 @@ test("applyPersonaProfileToHarness includes living slice in persona block", asyn
 
 test("append_persona_living tool reloads harness via setPersona", async () => {
   const root = await mkdtemp(join(tmpdir(), "lim-persona-"));
+  // Phase 1 storage split: persona now lives under ~/.liminal/persona/active/.
+  // Tests MUST isolate AGENT_GLOBAL_STORAGE_ROOT to the test tmpdir or they will
+  // clobber the real user's persona profile in their home dir.
   process.env.AGENT_WORKSPACE_ROOT = root;
+  process.env.AGENT_GLOBAL_STORAGE_ROOT = root;
   const rt = await import("./persona_runtime.js");
   const paths = rt.getPersonaArtifactsPaths();
   await mkdir(paths.soulDir, { recursive: true });

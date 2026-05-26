@@ -62,12 +62,23 @@ export function resolveAutoDreamConfig(): AutoDreamConfig {
   };
 }
 
-function sessionLogDir(): string {
+/** Legacy `.agent_sessions/` under the workspace root — retained for reading old runs. */
+function legacySessionLogDir(): string {
   return path.join(resolveWorkspaceRoot(), ".agent_sessions");
 }
 
+/** Per-chat dirs live under `~/.liminal/chats/`. */
+function perChatSessionsRoot(): string {
+  // Lazy import to keep the existing import graph stable.
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const gs = require("./global_storage.js") as typeof import("./global_storage.js");
+  return gs.globalChatsRoot();
+}
+
 function lockPath(): string {
-  return path.join(sessionLogDir(), ".consolidate-lock");
+  // Lock lives under the per-chat root so it's user-global and survives a
+  // workspace switch. Keep one lock for the whole consolidator (single process).
+  return path.join(perChatSessionsRoot(), ".consolidate-lock");
 }
 
 function isPidAlive(pid: number): boolean {
@@ -108,7 +119,7 @@ export async function tryAcquireConsolidationLock(
     if (holderPid && holderPid !== process.pid && isPidAlive(holderPid)) return null;
   }
 
-  await mkdir(sessionLogDir(), { recursive: true });
+  await mkdir(perChatSessionsRoot(), { recursive: true });
   await writeFile(p, String(process.pid), "utf8");
   const verify = await readFile(p, "utf8").catch(() => "");
   if (parseInt(verify.trim(), 10) !== process.pid) return null;
@@ -134,25 +145,48 @@ export async function listSessionsTouchedSince(
   sinceMs: number,
   currentSessionId?: string
 ): Promise<string[]> {
-  let files: string[] = [];
-  try {
-    files = await readdir(sessionLogDir());
-  } catch {
-    return [];
-  }
   const out: string[] = [];
-  for (const f of files) {
-    if (!f.endsWith(".jsonl")) continue;
-    if (f.endsWith("_yield.jsonl")) continue;
-    const sessionId = f.slice(0, -".jsonl".length);
-    if (currentSessionId && sessionId === currentSessionId) continue;
-    try {
-      const s = await stat(path.join(sessionLogDir(), f));
-      if (s.mtimeMs > sinceMs) out.push(sessionId);
-    } catch {
-      // ignore races
+
+  // Scan the new per-chat layout first: each chat is a subdir under
+  // ~/.liminal/chats/ holding session.jsonl.
+  try {
+    const root = perChatSessionsRoot();
+    const entries = await readdir(root);
+    for (const chatId of entries) {
+      if (chatId.startsWith(".")) continue;
+      if (currentSessionId && chatId === currentSessionId) continue;
+      const sessionFile = path.join(root, chatId, "session.jsonl");
+      try {
+        const s = await stat(sessionFile);
+        if (s.isFile() && s.mtimeMs > sinceMs) out.push(chatId);
+      } catch {
+        // chat dir exists but no session.jsonl yet — skip
+      }
     }
+  } catch {
+    // chats root doesn't exist yet — fine
   }
+
+  // Also scan the legacy workspace-local layout for older sessions.
+  try {
+    const files = await readdir(legacySessionLogDir());
+    for (const f of files) {
+      if (!f.endsWith(".jsonl")) continue;
+      if (f.endsWith("_yield.jsonl")) continue;
+      const sessionId = f.slice(0, -".jsonl".length);
+      if (currentSessionId && sessionId === currentSessionId) continue;
+      if (out.includes(sessionId)) continue; // already accounted for via new layout
+      try {
+        const s = await stat(path.join(legacySessionLogDir(), f));
+        if (s.mtimeMs > sinceMs) out.push(sessionId);
+      } catch {
+        // ignore races
+      }
+    }
+  } catch {
+    // no legacy dir
+  }
+
   return out.sort();
 }
 
@@ -166,9 +200,23 @@ export async function loadRecentSessionSnippets(
   const out: Array<{ sessionId: string; snippet: string }> = [];
   let used = 0;
   for (const id of picked) {
-    const p = path.join(sessionLogDir(), `${id}.jsonl`);
+    // Try the new per-chat layout first; fall back to the legacy
+    // .agent_sessions/<id>.jsonl path so historic runs still load.
+    const candidates = [
+      path.join(perChatSessionsRoot(), id, "session.jsonl"),
+      path.join(legacySessionLogDir(), `${id}.jsonl`),
+    ];
+    let raw: string | null = null;
+    for (const p of candidates) {
+      try {
+        raw = await readFile(p, "utf8");
+        break;
+      } catch {
+        /* try next candidate */
+      }
+    }
+    if (raw == null) continue;
     try {
-      const raw = await readFile(p, "utf8");
       const tail = raw.slice(-maxCharsPerSession).trim();
       const remain = Math.max(0, maxTotalChars - used);
       if (remain <= 0) break;

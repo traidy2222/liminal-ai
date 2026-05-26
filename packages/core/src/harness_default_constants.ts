@@ -38,6 +38,25 @@ export const HARNESS_ENV_DEFAULTS: Readonly<Record<string, string>> = {
   AGENT_VISION_MAX_IMAGE_BYTES: "4194304",
   AGENT_VISION_RETRIES: "2",
   AGENT_VISION_RETRY_BASE_MS: "800",
+  /** Audio transcription — defaults to cheapest viable model (Whisper Large V3 Turbo @ $0.04/hour). */
+  AGENT_TRANSCRIBE_ENABLED: "1",
+  AGENT_TRANSCRIBE_MODEL: "openai/whisper-large-v3-turbo",
+  AGENT_TRANSCRIBE_BASE_URL: "https://openrouter.ai/api/v1",
+  AGENT_TRANSCRIBE_MAX_BYTES: "26214400", // 25 MB, matches Whisper-1 historical cap
+  AGENT_TRANSCRIBE_TIMEOUT_MS: "120000",
+  AGENT_TRANSCRIBE_AUTO_ON_UPLOAD: "1",
+  AGENT_TRANSCRIBE_TIMESTAMPS: "segment",
+  /** Browser dictation auto-send — off by default (opt-in via mic ⚡ toggle or settings). */
+  AGENT_DICTATION_AUTO_SEND: "0",
+  AGENT_DICTATION_AUDIO_CUE: "0",
+  /** ms — minimum recording length before auto-send is considered (filters coughs). */
+  AGENT_DICTATION_MIN_RECORDING_MS: "1500",
+  /** ms — pause threshold for short utterances (< 5s recorded). Snappy. */
+  AGENT_DICTATION_SILENCE_MS_SHORT: "1500",
+  /** ms — pause threshold for longer recordings. More room for mid-thought pauses. */
+  AGENT_DICTATION_SILENCE_MS_LONG: "2500",
+  /** ms — hard cap on continuous recording (safety). */
+  AGENT_DICTATION_MAX_RECORDING_MS: "60000",
   AGENT_API_BASE_URL: DEFAULT_AGENT_API_BASE_URL,
   AGENT_MODEL: DEFAULT_AGENT_MODEL_SLUG,
   AGENT_FAST_MODEL: DEFAULT_AGENT_FAST_MODEL_SLUG,
@@ -59,7 +78,11 @@ export const HARNESS_ENV_DEFAULTS: Readonly<Record<string, string>> = {
   AGENT_SESSION_JSONL_MAX_ROLLUP_CHARS: "500000",
   AGENT_SESSION_JSONL_TRACE: "0",
   AGENT_TOOL_BODY_ELIDE: "1",
-  AGENT_TOOL_ELIDE_MIN_CHARS: "10000",
+  AGENT_TOOL_ELIDE_MIN_CHARS: "12000",    // for coding workflows: keep file/grep results readable. Lower (e.g. 5000) only for chat-style tasks where verbatim tool output matters less.
+  // read_file distillation — OFF by default. Distilling source files replaces
+  // code with bullet-point JSON summaries, which forces the model to re-read
+  // constantly. Enable only for workflows that primarily summarize huge files.
+  AGENT_DISTILL_READ_FILE: "0",
   AGENT_TOOL_ELIDE_KEEP_ROUNDS: "3",
   AGENT_DISTILL: "1",
   AGENT_DISTILL_WEB_FETCH: "0",
@@ -125,11 +148,11 @@ export const HARNESS_ENV_DEFAULTS: Readonly<Record<string, string>> = {
   AGENT_EVAL_JSON_SINK: "1",
   AGENT_RULE_RECALL: "1",
   AGENT_COMPRESS_SEMANTIC: "0",
-  AGENT_LENGTH_RESUME_MAX: "3",
-  AGENT_MAX_COMPLETION_TOKENS: "4000",
+  AGENT_LENGTH_RESUME_MAX: "8",
+  AGENT_MAX_COMPLETION_TOKENS: "16000",
   AGENT_WRITE_INTEGRITY_NUDGE: "1",
   AGENT_WRITE_PART_MAX_CHARS: "512000",
-  AGENT_WRITE_STREAM_SINK: "0",
+  AGENT_WRITE_STREAM_SINK: "1",
   AGENT_WRITE_STREAM_SINK_MIN_CHARS: "8000",
   AGENT_PSEUDO_TOOL_RETRY_MAX: "2",
   AGENT_FINALIZE_RETRY_BUDGET: "0",
@@ -170,11 +193,20 @@ export const HARNESS_ENV_DEFAULTS: Readonly<Record<string, string>> = {
   AGENT_MARKETS_MAX_DELAY_MS: "2000",
   AGENT_WEB_FETCH_403_RETRY: "1",
   AGENT_PROVIDER_MIN_INTERVAL_MS: "0",
-  // Provider pinning — OpenRouter sticky cache affinity
-  AGENT_PROVIDER_ROUTE_AUTO: "1",          // auto-derive provider order from model slug prefix
-  AGENT_PROVIDER_ORDER: "",                // comma-separated override for main model: "AtlasCloud,NovitaAI,GMICloud"
-  AGENT_PROVIDER_ORDER_FAST: "",           // comma-separated override for fast/sidecar model: "AtlasCloud,NovitaAI,SiliconFlow"
-  AGENT_PROVIDER_ALLOW_FALLBACKS: "1",     // allow fallback if preferred provider unavailable
+  // Provider pinning — OpenRouter sticky cache affinity.
+  // DeepInfra wins on input price ($1.30/M Pro, $0.10/M Flash), cache-read price
+  // ($0.10/M Pro = 13× discount, $0.02/M Flash = 5× discount), and latency for
+  // both DeepSeek tiers. Single-provider pinning is REQUIRED for prompt caching
+  // to accumulate hits — each provider keeps its own KV cache, so any drift
+  // ($0.07 → $0.01 input cost on cached rounds) gets undone.
+  AGENT_PROVIDER_ROUTE_AUTO: "1",          // auto-derive provider order from model slug prefix (used only when AGENT_PROVIDER_ORDER is empty)
+  AGENT_PROVIDER_ORDER: "DeepInfra",       // sticky pin for main model — cache-friendly + cheapest input on DeepSeek V4 Pro
+  AGENT_PROVIDER_ORDER_FAST: "DeepInfra",  // sticky pin for fast sidecar — cache-friendly + cheapest input on DeepSeek V4 Flash
+  AGENT_PROVIDER_ALLOW_FALLBACKS: "0",     // DO NOT allow OpenRouter to drift providers — drift kills cache hits and silently increases cost
+  // Prompt caching — adds cache_control breakpoint on the trailing static system
+  // message. On DeepInfra/GMICloud/NovitaAI this discounts cached prefix tokens
+  // ~10× on rounds 2+ of a ReAct turn. Disable only for A/B baseline measurement.
+  AGENT_PROMPT_CACHE: "1",
   AGENT_GOLDEN_EVAL: "1",
   AGENT_FAILURE_DIGEST: "1",
   AGENT_RECIPE_LIBRARY: "1",
@@ -197,7 +229,7 @@ export const HARNESS_ENV_DEFAULTS: Readonly<Record<string, string>> = {
   // Phase 1 — Adaptive Intelligence
   // Adaptive context routing by turn intent
   AGENT_INTENT_ROUTING: "1",           // on: routes knowledge/introspection turns to fast model
-  AGENT_INTENT_FAST_THRESHOLD: "0.8",  // min confidence to route to fast model
+  AGENT_INTENT_FAST_THRESHOLD: "0.6",  // min confidence to route to fast model (lowered from 0.8 — Pro is ~13× more expensive than Flash; bias toward Flash on knowledge/introspection turns)
   AGENT_INTENT_OPERATIONAL_MODEL: "",  // empty = use AGENT_FAST_MODEL
   // Adaptive reasoning budget (merged into intent inference fast call)
   AGENT_REASONING_BUDGET: "1",           // on: use classifier reasoningEffort/thinkDepth fields

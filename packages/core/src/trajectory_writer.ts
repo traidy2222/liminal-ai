@@ -17,7 +17,9 @@
 import { writeFile, readFile, mkdir } from "node:fs/promises";
 import { join } from "node:path";
 import { createHash } from "node:crypto";
-import { resolveWorkspaceRoot } from "./workspace_root.js";
+// resolveWorkspaceRoot no longer used here — notes path now resolves via
+// global_storage.js (lazy-imported inside loadNotes/saveNotes to avoid a
+// circular import).
 import { effectiveHarnessEnvRaw } from "./harness_effective_env.js";
 import type { EpistemicState } from "./types.js";
 
@@ -39,7 +41,6 @@ export interface TrajectoryEntry {
 
 type NotesStore = Record<string, { value: string; updatedAt: string; createdAt: string }>;
 
-const NOTES_FILE = () => join(resolveWorkspaceRoot(), ".agent_notes.json");
 const MAX_TRAJECTORIES = 200;
 
 function isEnabled(): boolean {
@@ -48,7 +49,9 @@ function isEnabled(): boolean {
 
 async function loadNotes(): Promise<NotesStore> {
   try {
-    const raw = await readFile(NOTES_FILE(), "utf8");
+    const { notesPaths, pickReadPath } = await import("./global_storage.js");
+    const p = await pickReadPath(notesPaths());
+    const raw = await readFile(p, "utf8");
     return JSON.parse(raw) as NotesStore;
   } catch {
     return {};
@@ -56,8 +59,16 @@ async function loadNotes(): Promise<NotesStore> {
 }
 
 async function saveNotes(notes: NotesStore): Promise<void> {
-  await mkdir(resolveWorkspaceRoot(), { recursive: true });
-  await writeFile(NOTES_FILE(), JSON.stringify(notes, null, 2), "utf8");
+  const { notesPaths, pickWritePath, ensureGlobalStorageRoot } = await import(
+    "./global_storage.js"
+  );
+  await ensureGlobalStorageRoot();
+  const p = await pickWritePath(notesPaths());
+  // Ensure parent exists for safety (the legacy fallback path may not exist if
+  // the workspace dir is new).
+  const dir = join(p, "..");
+  await mkdir(dir, { recursive: true });
+  await writeFile(p, JSON.stringify(notes, null, 2), "utf8");
 }
 
 function buildCausalSummary(
@@ -186,6 +197,30 @@ export async function maybeWriteTrajectory(input: TrajectoryWriteInput): Promise
       createdAt: now,
     };
     await saveNotes(notes);
+    // Tag the freshly-written trajectory with the current chat id so cross-chat
+    // recall can attribute it. Lazy-imported to avoid a circular dep with
+    // notes_store (which transitively imports types from this package).
+    try {
+      const { resolveCurrentChatId } = await import("./chat_context.js");
+      const chatId = resolveCurrentChatId();
+      if (chatId) {
+        const { notesPaths, pickWritePath } = await import("./global_storage.js");
+        const p = await pickWritePath(notesPaths());
+        const raw = await readFile(p, "utf8").catch(() => "{}");
+        const parsed = JSON.parse(raw) as Record<string, { value?: string; chatId?: string; scope?: string }>;
+        const target = parsed[key];
+        if (target && typeof target === "object") {
+          target.chatId = chatId;
+          // Trajectories are always workspace-scoped by default — they're per-project
+          // execution history, not durable user identity facts. Sibling chats in the
+          // same project may legitimately want to see them; unrelated workspaces won't.
+          target.scope = target.scope ?? "workspace";
+          await writeFile(p, JSON.stringify(parsed, null, 2), "utf8");
+        }
+      }
+    } catch {
+      /* tagging is best-effort — write already succeeded */
+    }
     return true;
   } catch {
     return false;

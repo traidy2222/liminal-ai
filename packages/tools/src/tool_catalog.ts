@@ -40,7 +40,9 @@ export const TOOL_FAMILIES: Record<string, { description: string; tools: readonl
     tools: ["task_checkpoint", "resume_task", "feature_checklist"],
   },
   memory_advanced: {
-    description: "Typed memory CRUD, consolidation, graph, artifacts.",
+    description:
+      "Typed memory CRUD, consolidation, graph, artifacts, plus cross-chat federation (Phase 2): " +
+      "scope-aware writes, sibling-chat aware retrieval, semantic neighbor search, and on-demand consolidation.",
     tools: [
       "remember",
       "recall",
@@ -53,6 +55,9 @@ export const TOOL_FAMILIES: Record<string, { description: string; tools: readonl
       "memory_query",
       "memory_graph",
       "read_artifact",
+      "memory_promote",
+      "memory_neighbors",
+      "consolidate_chat",
     ],
   },
   web: {
@@ -98,6 +103,12 @@ export const TOOL_FAMILIES: Record<string, { description: string; tools: readonl
     description: "Sidecar vision analysis (image understanding while Owl remains primary reasoning model).",
     tools: ["vision_analyze", "upload_image"],
   },
+  audio: {
+    description:
+      "Speech-to-text transcription for voice notes, meetings, podcasts, lectures. " +
+      "Cheapest configured ASR model by default (Whisper Large V3 Turbo @ $0.04/hour).",
+    tools: ["transcribe_audio"],
+  },
   meta: {
     description: "Harness improvement suggestions, insights, and self-telemetry.",
     tools: ["suggest_improvement", "view_insights", "self_telemetry"],
@@ -105,6 +116,13 @@ export const TOOL_FAMILIES: Record<string, { description: string; tools: readonl
   dynamic_tools: {
     description: "Create, edit, remove, and list model-defined tools registered at runtime.",
     tools: ["create_tool", "edit_tool", "remove_tool", "list_dynamic_tools"],
+  },
+  external_api: {
+    description:
+      "Connect external services by spec: OpenAPI/Swagger via api_connect, MCP servers via mcp_attach. " +
+      "Each connection auto-registers one tool per remote operation (e.g. api_linear_issues_create). " +
+      "Connections persist across restarts under ~/.liminal/api_connections/.",
+    tools: ["api_connect", "api_disconnect", "api_list", "mcp_attach", "mcp_detach"],
   },
   vault: {
     description: "Obsidian vault read/write/search.",

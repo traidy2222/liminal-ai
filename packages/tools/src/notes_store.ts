@@ -1,10 +1,32 @@
 import { readFile, writeFile } from "node:fs/promises";
-import { join } from "node:path";
-import { resolveWorkspaceRoot } from "@liminal/core";
+import { notesPaths, pickReadPath, pickWritePath, workspaceFingerprint } from "@liminal/core";
 
-/** Absolute path to `.agent_notes.json` (uses `AGENT_WORKSPACE_ROOT` / monorepo root). */
+/**
+ * Read path for the notes file. Prefers `~/.liminal/notes.json` (the new
+ * user-global location); falls back to the legacy `.agent_notes.json` under
+ * the workspace root when the global file doesn't exist. Async because the
+ * fallback requires a stat call.
+ */
+export async function notesReadPath(): Promise<string> {
+  return pickReadPath(notesPaths());
+}
+
+/**
+ * Write path for the notes file. Always returns the global path when the
+ * storage split is active; performs a one-shot lazy migration of the legacy
+ * file on the first write so users don't lose their accumulated memory.
+ */
+export async function notesWritePath(): Promise<string> {
+  return pickWritePath(notesPaths());
+}
+
+/**
+ * @deprecated Use {@link notesReadPath} / {@link notesWritePath}. Kept only for
+ * callers that need a synchronous path reference (world_context's path probes,
+ * eval scenarios). Returns the legacy workspace-local path verbatim.
+ */
 export function notesPath(): string {
-  return join(resolveWorkspaceRoot(), ".agent_notes.json");
+  return notesPaths().legacy;
 }
 
 /** Build a typed key: "{type}:{key}" for structured memory (#3). */
@@ -37,6 +59,48 @@ export interface StoredNote {
   trigger?: string;
   /** Agent task ID that wrote this note (actor-aware memory attribution). */
   actorId?: string;
+  // ─── Workspace-aware memory tagging (Phase 1 of per-chat workspaces) ───
+  /**
+   * Absolute path of the workspace this note was written in. Set automatically
+   * by atomicUpdate when missing. Lets recall filter by workspace and lets the
+   * ranker apply a current-workspace affinity boost when scoring candidates.
+   */
+  workspaceRoot?: string;
+  /**
+   * Stable signature of the workspace: `git:<host>/<owner>/<repo>` when the
+   * workspace is a git checkout, else `path:<absolute>`. Two clones of the
+   * same repo at different paths share a fingerprint so memory from one
+   * surfaces when working in the other.
+   */
+  workspaceFingerprint?: string;
+  /** Chat / harness taskId that owned the note write (provenance). */
+  chatId?: string;
+  /**
+   * Visibility scope across chats (federation Phase 2).
+   *   - "chat":      only the writing chatId sees this note (hard filter at the ranker).
+   *   - "workspace": every chat sharing the same workspaceFingerprint sees it.
+   *   - "global":    every chat on the machine sees it (durable identity facts).
+   * Legacy notes without a scope field are treated as "global" so the old
+   * "every chat sees everything" behavior is preserved until promotion runs.
+   */
+  scope?: "chat" | "workspace" | "global";
+}
+
+/**
+ * Heuristic auto-classifier for the default `scope` of a new note.
+ * Identity-shaped keys (user:*, identity:*, pref:*) hop straight to "global"
+ * because they're durable facts about the user, not the project. Everything
+ * else defaults to "workspace" when a fingerprint resolves so per-project
+ * facts stay scoped to that project; without a fingerprint we fall back to
+ * "global" (there's no meaningful smaller scope to apply).
+ */
+export function defaultScopeForKey(
+  key: string,
+  hasWorkspaceFingerprint: boolean
+): NonNullable<StoredNote["scope"]> {
+  const prefix = key.includes(":") ? key.slice(0, key.indexOf(":")).toLowerCase() : "";
+  if (prefix === "user" || prefix === "identity" || prefix === "pref") return "global";
+  return hasWorkspaceFingerprint ? "workspace" : "global";
 }
 
 /** On-disk notes file — may contain plain strings (legacy) or StoredNote objects. */
@@ -53,7 +117,7 @@ export function getNoteValue(note: StoredNote | string): string {
  */
 export async function loadNotes(): Promise<Record<string, string>> {
   try {
-    const raw = await readFile(notesPath(), "utf8");
+    const raw = await readFile(await notesReadPath(), "utf8");
     const parsed = JSON.parse(raw) as RawNotesStore;
     const result: Record<string, string> = {};
     for (const [k, v] of Object.entries(parsed)) {
@@ -71,7 +135,7 @@ export async function loadNotes(): Promise<Record<string, string>> {
  */
 export async function loadRawNotes(): Promise<RawNotesStore> {
   try {
-    const raw = await readFile(notesPath(), "utf8");
+    const raw = await readFile(await notesReadPath(), "utf8");
     return JSON.parse(raw) as RawNotesStore;
   } catch {
     return {};
@@ -79,7 +143,7 @@ export async function loadRawNotes(): Promise<RawNotesStore> {
 }
 
 export async function saveNotes(notes: Record<string, string>): Promise<void> {
-  await writeFile(notesPath(), JSON.stringify(notes, null, 2), "utf8");
+  await writeFile(await notesWritePath(), JSON.stringify(notes, null, 2), "utf8");
 }
 
 // ─── Serialized write queue (#4 — H-MEM arXiv:2507.22925) ────────────────────
@@ -105,7 +169,8 @@ let writeQueue: Promise<void> = Promise.resolve();
  */
 export async function atomicUpdate(
   updater: (notes: Record<string, string>) => Record<string, string>,
-  actorId?: string
+  actorId?: string,
+  opts?: { scope?: StoredNote["scope"] }
 ): Promise<void> {
   const thisOp = writeQueue.then(async () => {
     const raw = await loadRawNotes();
@@ -116,15 +181,34 @@ export async function atomicUpdate(
     }
     const updated = updater(plain);
     const now = new Date().toISOString();
+    // Per-write workspace tagging: every newly-written note gets the current
+    // workspace path + git-aware fingerprint stamped so cross-workspace recall
+    // can filter / rank by provenance.
+    const wsRoot = (await import("@liminal/core")).resolveWorkspaceRoot();
+    const wsFingerprint = workspaceFingerprint(wsRoot);
     // Re-wrap with timestamps
     const rich: RawNotesStore = {};
     for (const [k, v] of Object.entries(updated)) {
       const prev = raw[k];
+      // Pick the effective scope for this write. Caller-supplied scope wins;
+      // otherwise we re-use whatever the previous version had; otherwise the
+      // auto-classifier picks one based on key prefix + fingerprint resolvability.
+      const hasFp = wsFingerprint !== "" && !wsFingerprint.startsWith("path:");
+      const explicitScope = opts?.scope;
+      const inheritScope =
+        prev !== undefined && typeof prev === "object" ? (prev as StoredNote).scope : undefined;
+      const effectiveScope: NonNullable<StoredNote["scope"]> =
+        explicitScope ?? inheritScope ?? defaultScopeForKey(k, hasFp);
       if (prev !== undefined && typeof prev === "object" && prev.value === v) {
-        // Unchanged StoredNote — preserve as-is (no timestamp churn)
-        rich[k] = prev;
+        // Unchanged StoredNote — preserve as-is (no timestamp churn) but
+        // backfill workspace tags if they're missing (lazy upgrade).
+        const p = prev as StoredNote;
+        rich[k] = p.workspaceRoot
+          ? { ...p, ...(p.scope ? {} : { scope: effectiveScope }) }
+          : { ...p, workspaceRoot: wsRoot, workspaceFingerprint: wsFingerprint, scope: effectiveScope };
       } else if (prev !== undefined && typeof prev === "object") {
-        // Value changed — update updatedAt, preserve original createdAt + trust + graph fields
+        // Value changed — update updatedAt, preserve original createdAt + trust + graph fields.
+        // Workspace tags refresh to the current writer (most recent owner wins).
         const p = prev as StoredNote;
         rich[k] = {
           ...p,
@@ -133,21 +217,29 @@ export async function atomicUpdate(
           updatedAt: now,
           accessCount: p.accessCount ?? 0,
           confidence: p.confidence ?? 0.5,
+          workspaceRoot: wsRoot,
+          workspaceFingerprint: wsFingerprint,
+          scope: effectiveScope,
+          ...(actorId ? { chatId: actorId } : p.chatId ? { chatId: p.chatId } : {}),
           ...(p.lastAccessedAt ? { lastAccessedAt: p.lastAccessedAt } : {}),
         };
       } else {
         // New key or migrating from legacy plain string — create fresh timestamps
+        // and full workspace provenance.
         rich[k] = {
           value: v,
           createdAt: now,
           updatedAt: now,
           accessCount: 0,
           confidence: 0.5,
-          ...(actorId ? { actorId } : {}),
+          workspaceRoot: wsRoot,
+          workspaceFingerprint: wsFingerprint,
+          scope: effectiveScope,
+          ...(actorId ? { actorId, chatId: actorId } : {}),
         };
       }
     }
-    await writeFile(notesPath(), JSON.stringify(rich, null, 2), "utf8");
+    await writeFile(await notesWritePath(), JSON.stringify(rich, null, 2), "utf8");
   });
   // Reset queue to resolved on error so one bad write doesn't block all future ones
   writeQueue = thisOp.catch(() => {});
@@ -179,10 +271,31 @@ export async function bumpNoteMetadata(keys: string[]): Promise<void> {
       };
       changed = true;
     }
-    if (changed) await writeFile(notesPath(), JSON.stringify(rich, null, 2), "utf8");
+    if (changed) await writeFile(await notesWritePath(), JSON.stringify(rich, null, 2), "utf8");
   });
   writeQueue = thisOp.catch(() => {});
   await thisOp;
+}
+
+/** Update a single note's scope in place (serialized with writeQueue). */
+export async function setNoteScope(
+  key: string,
+  scope: NonNullable<StoredNote["scope"]>
+): Promise<boolean> {
+  let changed = false;
+  const thisOp = writeQueue.then(async () => {
+    const raw = await loadRawNotes();
+    const prev = raw[key];
+    if (!prev || typeof prev === "string") return;
+    const sn = prev as StoredNote;
+    if (sn.scope === scope) return;
+    raw[key] = { ...sn, scope, updatedAt: new Date().toISOString() };
+    await writeFile(await notesWritePath(), JSON.stringify(raw, null, 2), "utf8");
+    changed = true;
+  });
+  writeQueue = thisOp.catch(() => {});
+  await thisOp;
+  return changed;
 }
 
 /** Merge graph metadata onto an existing rich note (serialized with writeQueue). */
@@ -196,7 +309,7 @@ export async function mergeNoteGraphFields(
     if (!prev || typeof prev === "string") return;
     const sn = prev as StoredNote;
     raw[key] = { ...sn, ...meta, updatedAt: new Date().toISOString() };
-    await writeFile(notesPath(), JSON.stringify(raw, null, 2), "utf8");
+    await writeFile(await notesWritePath(), JSON.stringify(raw, null, 2), "utf8");
   });
   writeQueue = thisOp.catch(() => {});
   await thisOp;

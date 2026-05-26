@@ -48,6 +48,15 @@ export const rememberTool = defineTool({
         type: "string",
         description: "Optional agent task ID for multi-agent attribution (who wrote this note).",
       },
+      scope: {
+        type: "string",
+        enum: ["chat", "workspace", "global"],
+        description:
+          "Visibility across chats. 'chat' = only this conversation sees it. " +
+          "'workspace' = every chat in the same project sees it. " +
+          "'global' = every chat on the machine sees it. " +
+          "Omit to let the harness auto-classify: user:*/identity:*/pref:* → global, others → workspace when in a recognizable project, else global.",
+      },
     },
     required: ["key", "value"],
     additionalProperties: false,
@@ -65,9 +74,14 @@ export const rememberTool = defineTool({
     }
     const memType = args["type"] as MemoryType | undefined;
     const actorId = args["actor_id"] as string | undefined;
+    const scopeArg = args["scope"] as "chat" | "workspace" | "global" | undefined;
     const storageKey = memType ? makeTypedKey(memType, rawKey) : rawKey;
     // Use atomic write queue (#4) to prevent concurrent sub-agent data loss
-    await atomicUpdate((notes) => ({ ...notes, [storageKey]: value }), actorId);
+    await atomicUpdate(
+      (notes) => ({ ...notes, [storageKey]: value }),
+      actorId,
+      scopeArg ? { scope: scopeArg } : undefined
+    );
 
     // Graph link inference runs by default (AGENT_MEMORY_GRAPH=0 to disable).
     // This makes related notes discoverable via neighbor expansion in recall_relevant
@@ -104,7 +118,10 @@ export const rememberTool = defineTool({
       }
     }
 
-    return { ok: true, output: `Remembered "${storageKey}"` };
+    return {
+      ok: true,
+      output: `Remembered "${storageKey}"${scopeArg ? ` (scope=${scopeArg})` : ""}`,
+    };
   },
 });
 

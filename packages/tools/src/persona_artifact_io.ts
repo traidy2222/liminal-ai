@@ -1,11 +1,11 @@
 import type { PersonaArtifactId } from "@liminal/core/persona-bootstrap-progress";
-import { resolveWorkspaceRoot } from "@liminal/core";
+import { personaActivePaths } from "@liminal/core";
 import type { RuntimePersonaControls } from "@liminal/core";
+import { existsSync } from "node:fs";
 import { mkdir, readFile, unlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { PersonaProfile } from "./persona_presets.js";
 
-const PERSONA_ACTIVE_DIR = ["persona", "active"] as const;
 const SOUL_SUBDIR = "soul";
 
 const DEFAULT_LIVING_HEADER = [
@@ -18,9 +18,31 @@ const DEFAULT_LIVING_HEADER = [
 const DEBOUNCE_MS = 2000;
 const lastStreamWriteAt = new Map<PersonaArtifactId, number>();
 
+/**
+ * Resolve the persona-active directory.
+ *
+ * Phase 1 storage split: persona lives at `~/.liminal/persona/active/` so it
+ * survives switching workspaces. Fallback rule keys on a real artifact file
+ * (`runtime_profile.json`) rather than directory existence — an empty global
+ * dir (e.g. created by tests or by `mkdir -p`) must NOT win over a populated
+ * legacy dir. Resolution order:
+ *   1. `AGENT_STORAGE_LAYOUT=legacy`           → legacy
+ *   2. global has runtime_profile.json         → global
+ *   3. legacy has runtime_profile.json         → legacy
+ *   4. neither has content (greenfield)        → global
+ */
 function artifactPaths() {
-  const root = resolveWorkspaceRoot();
-  const dir = join(root, ...PERSONA_ACTIVE_DIR);
+  const paths = personaActivePaths();
+  let dir: string;
+  if (paths.legacyOnly) {
+    dir = paths.legacy;
+  } else if (existsSync(join(paths.global, "runtime_profile.json"))) {
+    dir = paths.global;
+  } else if (existsSync(join(paths.legacy, "runtime_profile.json"))) {
+    dir = paths.legacy;
+  } else {
+    dir = paths.global;
+  }
   const soulDir = join(dir, SOUL_SUBDIR);
   return {
     dir,

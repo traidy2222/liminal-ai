@@ -1,7 +1,7 @@
 import { Router } from "express";
-import type { AgentBridge } from "./agentBridge.js";
+import type { ChatManager } from "./chatManager.js";
 import type { SSEManager } from "./sse.js";
-import type { ApprovalDecision } from "@liminal/core";
+import type { ApprovalDecision, ChatWorkspaceMode } from "@liminal/core";
 import {
   DEFAULT_IMAGE_ATTACHMENT_LIMITS,
   buildMessageWithImageAttachments,
@@ -15,9 +15,17 @@ import {
   harnessEnvResolutionMeta,
   resolveHarnessEnvRaw,
   resolvePersonalityHeartbeatConfig,
+  listChats,
+  listOrphanChatIds,
+  readChatMetadata,
+  workspaceFingerprint,
+  resolveTranscriptionConfig,
+  transcribeAudio,
 } from "@liminal/core";
+import { saveAudioAttachment, findAudioAttachment, readAudioAttachment, SUPPORTED_AUDIO_MIME_TYPES } from "@liminal/tools";
 import { loadPersonaUiThemeFromWorkspace } from "@liminal/tools";
 import { persistIncomingAttachments } from "./image_attachment_store.js";
+import path from "node:path";
 
 type IncomingAttachment = {
   name?: string;
@@ -25,12 +33,21 @@ type IncomingAttachment = {
   source?: "clipboard" | "drop" | "path" | "command";
 };
 
-export function createRouter(bridge: AgentBridge, sse: SSEManager): Router {
+/**
+ * Build the HTTP router. Every endpoint that operates on a chat resolves the
+ * active bridge through `chatManager.getActive()` so a single client can hop
+ * between chats by calling `POST /api/chats/:id/activate` — subsequent
+ * `/api/message`, `/api/approve`, etc. land in the newly-active chat.
+ */
+export function createRouter(chatManager: ChatManager, sse: SSEManager): Router {
   const router = Router();
+
+  /** Convenience wrapper — every chat-scoped route calls this. */
+  const active = () => chatManager.getActive();
 
   router.get("/api/config", async (_req, res) => {
     try {
-      // `listen()` does not await this; avoid stale `personaBootstrapPending` and races with bootstrap.
+      const bridge = active();
       await bridge.whenSessionReady();
       const prefs = bridge.harness.getRuntimePreferences();
       const uiRaw = resolveHarnessEnvRaw("AGENT_UI_VERBOSITY", prefs)?.trim();
@@ -46,6 +63,9 @@ export function createRouter(bridge: AgentBridge, sse: SSEManager): Router {
         persona?.name?.trim() ||
         "LIMINAL";
       const ph = resolvePersonalityHeartbeatConfig(prefs);
+      // Surface the active chat so the client can populate its header chip on
+      // first paint without a separate roundtrip.
+      const activeMeta = await readChatMetadata(bridge.chatId);
       res.json({
         uiVerbosity: uiRaw === "quiet" ? "quiet" : "normal",
         approvalTimeoutMs: bridge.harness.getApprovalTimeoutMs(),
@@ -56,6 +76,22 @@ export function createRouter(bridge: AgentBridge, sse: SSEManager): Router {
         personaDisplayLabel,
         personalityHeartbeatEnabled: ph.enabled,
         personalityHeartbeatUiStrip: ph.uiStripDefault,
+        // Dictation client config — feeds the mic button's auto-send defaults
+        // and audio cue toggle. Values are tri-state in env: "1"=on, "0"=off,
+        // absent=default off (surprise-action principle).
+        dictationAutoSendDefault: resolveHarnessEnvRaw("AGENT_DICTATION_AUTO_SEND", prefs) === "1",
+        dictationAudioCue: resolveHarnessEnvRaw("AGENT_DICTATION_AUDIO_CUE", prefs) === "1",
+        // New in Phase 2: which chat is the SSE stream currently bound to.
+        activeChat: activeMeta
+          ? {
+              chatId: activeMeta.chatId,
+              title: activeMeta.title,
+              workspaceMode: activeMeta.workspaceMode,
+              workspaceRoot: activeMeta.workspaceRoot,
+              workspaceBasename: path.basename(activeMeta.workspaceRoot),
+              workspaceFingerprint: activeMeta.workspaceFingerprint,
+            }
+          : null,
       });
     } catch (err) {
       console.error("/api/config failed:", err instanceof Error ? err.stack ?? err.message : String(err));
@@ -76,6 +112,7 @@ export function createRouter(bridge: AgentBridge, sse: SSEManager): Router {
   });
 
   router.get("/api/settings", (_req, res) => {
+    const bridge = active();
     const prefs = bridge.harness.getRuntimePreferences();
     const fields = buildHarnessSettingsApiFields(prefs);
     const cfg = bridge.harness.config;
@@ -85,7 +122,6 @@ export function createRouter(bridge: AgentBridge, sse: SSEManager): Router {
     res.json({
       tabs: HARNESS_SETTINGS_TABS,
       fields,
-      /** Matches the live OpenAI client: prefs + env + defaults (see `resolveProviderConfig`). */
       provider: {
         model: (cfg.model ?? "").slice(0, 200),
         baseURL: (cfg.baseURL ?? "").slice(0, 500),
@@ -99,6 +135,7 @@ export function createRouter(bridge: AgentBridge, sse: SSEManager): Router {
   });
 
   router.put("/api/settings", async (req, res) => {
+    const bridge = active();
     if (bridge.harness.getIsRunning()) {
       res.status(409).json({ error: "Agent is busy; finish the current turn before saving settings." });
       return;
@@ -140,6 +177,9 @@ export function createRouter(bridge: AgentBridge, sse: SSEManager): Router {
     }
     try {
       await bridge.harness.patchRuntimePreferences(patch, { persist: true });
+      // Surface updated prefs to the chat manager so newly-constructed bridges
+      // (after idle eviction or new chat creation) pick them up.
+      await chatManager.reloadRuntimePrefs();
       res.json({ ok: true });
     } catch (e) {
       const message = e instanceof Error ? e.message : "Failed to save settings.";
@@ -148,6 +188,7 @@ export function createRouter(bridge: AgentBridge, sse: SSEManager): Router {
   });
 
   router.post("/api/session/reset", (req, res) => {
+    const bridge = active();
     if (bridge.harness.getIsRunning()) {
       res.status(409).json({ error: "Agent is busy; wait for the current turn to finish." });
       return;
@@ -164,8 +205,6 @@ export function createRouter(bridge: AgentBridge, sse: SSEManager): Router {
       });
       return;
     }
-    // Default: soft reset — clear transcript only.
-    // greet=true (sent on fresh page load) triggers a session greeting after clearing.
     const greet = body?.greet === true;
     bridge.clearSession({ preserveBootstrapState: true });
     res.json({ ok: true, mode: "soft" });
@@ -179,6 +218,7 @@ export function createRouter(bridge: AgentBridge, sse: SSEManager): Router {
   });
 
   router.post("/api/session/abort", (_req, res) => {
+    const bridge = active();
     if (!bridge.harness.getIsRunning()) {
       res.status(409).json({ error: "No turn in progress to abort." });
       return;
@@ -188,20 +228,43 @@ export function createRouter(bridge: AgentBridge, sse: SSEManager): Router {
   });
 
   router.get("/api/stream", (req, res) => {
-    // Keep SSE sockets alive across longer idle windows.
     req.socket.setKeepAlive(true, 15_000);
     req.socket.setTimeout(0);
     sse.add(req, res);
-    // If harness is mid-turn, immediately tell the new client so it shows
-    // "working..." instead of appearing idle after a reconnect.
-    if (bridge.isBusy) {
-      res.write(
-        `event: harness_running\ndata: ${JSON.stringify({ startedAt: bridge.turnStartTime })}\n\n`
-      );
+    let bridge: import("./agentBridge.js").AgentBridge | null = null;
+    try {
+      bridge = chatManager.getActive();
+    } catch {
+      /* no active chat yet — fine */
+    }
+    if (bridge) {
+      // Immediately announce the active chat so newly-connected clients can
+      // sync their header chip + chat list selection state without a separate
+      // /api/workspace/current roundtrip.
+      void readChatMetadata(bridge.chatId).then((meta) => {
+        if (meta) {
+          res.write(
+            `event: chat_switched\ndata: ${JSON.stringify({
+              chatId: meta.chatId,
+              title: meta.title,
+              workspaceRoot: meta.workspaceRoot,
+              workspaceFingerprint: meta.workspaceFingerprint,
+              workspaceMode: meta.workspaceMode,
+              at: Date.now(),
+            })}\n\n`
+          );
+        }
+      });
+      if (bridge.isBusy) {
+        res.write(
+          `event: harness_running\ndata: ${JSON.stringify({ startedAt: bridge.turnStartTime })}\n\n`
+        );
+      }
     }
   });
 
   router.post("/api/message", async (req, res) => {
+    const bridge = active();
     await bridge.whenSessionReady();
     if (bridge.isAwaitingPersonaBootstrap) {
       res.status(409).json({ error: "Persona bootstrap is pending. Submit via bootstrap modal." });
@@ -247,8 +310,6 @@ export function createRouter(bridge: AgentBridge, sse: SSEManager): Router {
     }
     const persisted = await persistIncomingAttachments(normalizedAttachments);
     const normalizedMessage = buildMessageWithImageAttachments(msg, persisted);
-    // Fire-and-forget: respond immediately so the HTTP connection is never held open for a full turn.
-    // Agent progress and errors surface exclusively via SSE events — no long-lived POST connection needed.
     res.json({ ok: true });
     bridge.sendUserMessage(normalizedMessage, { freshContext: Boolean(freshContext) }).catch((err) => {
       const message = err instanceof Error ? err.message : "Failed to process message.";
@@ -257,6 +318,7 @@ export function createRouter(bridge: AgentBridge, sse: SSEManager): Router {
   });
 
   router.post("/api/persona/bootstrap", async (req, res) => {
+    const bridge = active();
     const { input, skip } = req.body as { input?: string; skip?: boolean };
     try {
       await bridge.whenSessionReady();
@@ -284,6 +346,7 @@ export function createRouter(bridge: AgentBridge, sse: SSEManager): Router {
   });
 
   router.post("/api/approve", (req, res) => {
+    const bridge = active();
     const { callId, decision } = req.body as {
       callId?: string;
       decision?: ApprovalDecision;
@@ -297,6 +360,7 @@ export function createRouter(bridge: AgentBridge, sse: SSEManager): Router {
   });
 
   router.post("/api/answer", (req, res) => {
+    const bridge = active();
     const { answer } = req.body as { answer?: string };
     if (answer === undefined) {
       res.status(400).json({ error: "answer required" });
@@ -308,15 +372,270 @@ export function createRouter(bridge: AgentBridge, sse: SSEManager): Router {
 
   router.get("/api/status", (_req, res) => {
     try {
+      const bridge = active();
       res.json({
         clients: sse.clientCount,
         busy: bridge.isBusy,
         startedAt: bridge.turnStartTime,
         lastTurnEndedAt: bridge.lastTurnEndedAt,
+        activeChatId: bridge.chatId,
+        residentChatIds: chatManager.getResidentBridgeIds(),
       });
     } catch (err) {
       console.error("[status] failed:", err);
       res.status(500).json({ error: "status unavailable" });
+    }
+  });
+
+  // ─── Per-chat workspaces ──────────────────────────────────────────────────
+
+  router.get("/api/workspace/current", async (_req, res) => {
+    try {
+      const bridge = active();
+      const meta = await readChatMetadata(bridge.chatId);
+      res.json({
+        chatId: bridge.chatId,
+        workspaceRoot: bridge.workspaceRoot,
+        workspaceFingerprint: workspaceFingerprint(bridge.workspaceRoot),
+        basename: path.basename(bridge.workspaceRoot),
+        meta,
+      });
+    } catch (err) {
+      res.status(500).json({ error: (err as Error).message });
+    }
+  });
+
+  router.get("/api/chats", async (_req, res) => {
+    try {
+      const [chats, orphanIds] = await Promise.all([listChats(), listOrphanChatIds()]);
+      res.json({
+        chats,
+        orphanIds,
+        activeChatId: chatManager.activeId || null,
+        residentChatIds: chatManager.getResidentBridgeIds(),
+      });
+    } catch (err) {
+      res.status(500).json({ error: (err as Error).message });
+    }
+  });
+
+  router.get("/api/chats/:id", async (req, res) => {
+    try {
+      const meta = await readChatMetadata(req.params.id);
+      if (!meta) {
+        res.status(404).json({ error: "chat not found" });
+        return;
+      }
+      res.json({ meta });
+    } catch (err) {
+      res.status(500).json({ error: (err as Error).message });
+    }
+  });
+
+  router.post("/api/chats", async (req, res) => {
+    try {
+      const { title, workspaceMode, workspaceRoot, activate: shouldActivate } = req.body as {
+        title?: string;
+        workspaceMode?: ChatWorkspaceMode;
+        workspaceRoot?: string;
+        activate?: boolean;
+      };
+      const mode: ChatWorkspaceMode =
+        workspaceMode === "folder" || workspaceMode === "reuse" ? workspaceMode : "scratch";
+      // Validate folder existence here (manager assumes valid input).
+      if (mode === "folder") {
+        if (!workspaceRoot) {
+          res.status(400).json({ error: "workspaceRoot required for folder mode" });
+          return;
+        }
+        const { stat } = await import("node:fs/promises");
+        try {
+          const s = await stat(path.resolve(workspaceRoot));
+          if (!s.isDirectory()) throw new Error("not a directory");
+        } catch {
+          res.status(400).json({
+            error: `workspaceRoot does not exist or is not a directory: ${path.resolve(workspaceRoot)}`,
+          });
+          return;
+        }
+      }
+      const meta = await chatManager.create({ title, workspaceMode: mode, workspaceRoot });
+      if (shouldActivate !== false) {
+        await chatManager.activate(meta.chatId);
+      }
+      res.json({ meta, activated: shouldActivate !== false });
+    } catch (err) {
+      res.status(500).json({ error: (err as Error).message });
+    }
+  });
+
+  router.post("/api/chats/:id/activate", async (req, res) => {
+    try {
+      const meta = await chatManager.activate(req.params.id);
+      res.json({ meta });
+    } catch (err) {
+      const message = (err as Error).message;
+      const status = /not found/.test(message) ? 404 : 500;
+      res.status(status).json({ error: message });
+    }
+  });
+
+  router.delete("/api/chats/:id", async (req, res) => {
+    try {
+      const result = await chatManager.delete(req.params.id);
+      res.json({ ok: true, newActiveId: result.newActiveId });
+    } catch (err) {
+      res.status(500).json({ error: (err as Error).message });
+    }
+  });
+
+  // ─── Audio transcription ──────────────────────────────────────────────────
+  //
+  // Two endpoints, mirroring the image attachment pattern (base64 data URL
+  // body to avoid pulling in multer):
+  //   POST /api/audio/upload    → persist audio under per-chat dir, return id
+  //   POST /api/transcribe      → run ASR on a previously-uploaded id
+  //
+  // Both resolve the chat via chatManager.getActive() so multi-chat works:
+  // each chat has its own audio dir under ~/.liminal/chats/<id>/audio/.
+
+  router.post("/api/audio/upload", async (req, res) => {
+    try {
+      const bridge = active();
+      const body = req.body as {
+        dataUrl?: string;
+        filename?: string;
+        mimeType?: string;
+      };
+      const dataUrl = String(body.dataUrl ?? "").trim();
+      if (!dataUrl.startsWith("data:")) {
+        res.status(400).json({ error: "dataUrl required (data:<mime>;base64,<payload>)" });
+        return;
+      }
+      // MediaRecorder produces mime types like `audio/webm;codecs=opus`, which
+      // adds a parameter segment before `;base64,`. The previous regex
+      // /^data:([^;]+);base64,(.+)$/ failed on these because [^;]+ stopped at
+      // the FIRST semicolon. The new pattern grabs everything between `data:`
+      // and the LAST `;base64,` so codec/charset parameters survive intact.
+      const base64Idx = dataUrl.indexOf(";base64,");
+      if (base64Idx < 5) {
+        res.status(400).json({ error: "Invalid data URL format (expected ;base64, segment)" });
+        return;
+      }
+      const fullMimeHeader = dataUrl.slice(5, base64Idx); // strip "data:" prefix
+      const payload = dataUrl.slice(base64Idx + ";base64,".length);
+      if (!fullMimeHeader || !payload) {
+        res.status(400).json({ error: "Invalid data URL format" });
+        return;
+      }
+      // Extract just the media type (drop ;codecs=…, ;charset=…) for our
+      // allow-list check. Keep the full header for content-type if we ever
+      // need it downstream.
+      const mimeFromUrl = (fullMimeHeader.split(";")[0] ?? "").trim().toLowerCase();
+      const mimeType = (body.mimeType || mimeFromUrl).toLowerCase();
+      if (!SUPPORTED_AUDIO_MIME_TYPES.has(mimeType)) {
+        res.status(400).json({
+          error: `Unsupported audio MIME: ${mimeType}. Supported: ${[...SUPPORTED_AUDIO_MIME_TYPES].join(", ")}`,
+        });
+        return;
+      }
+      const bytes = Buffer.from(payload, "base64");
+      const config = resolveTranscriptionConfig(bridge.harness.getRuntimePreferences());
+      if (bytes.byteLength > config.maxBytes) {
+        res.status(413).json({
+          error: `Audio file ${bytes.byteLength} bytes exceeds AGENT_TRANSCRIBE_MAX_BYTES (${config.maxBytes}).`,
+        });
+        return;
+      }
+      const filename =
+        (typeof body.filename === "string" && body.filename.trim()) || `audio-${Date.now()}.webm`;
+      const rec = await saveAudioAttachment(bridge.chatId, {
+        bytes,
+        filename,
+        mimeType,
+      });
+      res.json({
+        ok: true,
+        attachmentId: rec.id,
+        filename: rec.filename,
+        mimeType: rec.mimeType,
+        sizeBytes: rec.sizeBytes,
+        chatId: bridge.chatId,
+      });
+    } catch (err) {
+      res.status(500).json({ error: (err as Error).message });
+    }
+  });
+
+  router.post("/api/transcribe", async (req, res) => {
+    try {
+      const bridge = active();
+      const body = req.body as {
+        attachmentId?: string;
+        language?: string;
+        prompt?: string;
+        timestamps?: "none" | "segment" | "word";
+        model?: string;
+      };
+      const id = String(body.attachmentId ?? "").trim();
+      if (!id) {
+        res.status(400).json({ error: "attachmentId required (upload first via /api/audio/upload)" });
+        return;
+      }
+      const found = await findAudioAttachment(bridge.chatId, id);
+      if (!found) {
+        res.status(404).json({ error: `Audio attachment ${id} not found for this chat.` });
+        return;
+      }
+      const { record, bytes } = await readAudioAttachment(bridge.chatId, id);
+      const config = resolveTranscriptionConfig(bridge.harness.getRuntimePreferences());
+      if (!config.enabled) {
+        res.status(503).json({ error: "Transcription disabled (AGENT_TRANSCRIBE_ENABLED=0)." });
+        return;
+      }
+      if (!config.apiKey) {
+        res.status(503).json({
+          error: "No transcription API key. Set AGENT_TRANSCRIBE_API_KEY, AGENT_API_KEY, or OPENROUTER_API_KEY.",
+        });
+        return;
+      }
+      const result = await transcribeAudio(
+        {
+          audio: bytes,
+          filename: record.filename,
+          language: body.language?.trim() || undefined,
+          prompt: body.prompt?.slice(0, 1500),
+          timestamps:
+            body.timestamps === "none" || body.timestamps === "word" || body.timestamps === "segment"
+              ? body.timestamps
+              : undefined,
+          model: body.model?.trim() || undefined,
+        },
+        config
+      );
+      // Surface to SSE so the client UI's cost chip stays in sync even if the
+      // browser tab that triggered the call already moved on.
+      sse.send("transcription", {
+        chatId: bridge.chatId,
+        attachmentId: id,
+        durationSec: result.durationSec,
+        costUsd: result.costUsd,
+        model: result.model,
+        language: result.language,
+        at: Date.now(),
+      });
+      res.json({
+        ok: true,
+        attachmentId: id,
+        text: result.text,
+        language: result.language,
+        durationSec: result.durationSec,
+        costUsd: result.costUsd,
+        model: result.model,
+        provider: result.provider,
+      });
+    } catch (err) {
+      res.status(500).json({ error: (err as Error).message });
     }
   });
 

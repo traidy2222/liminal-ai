@@ -16,7 +16,7 @@
 
 import { readFile, writeFile, mkdir } from "node:fs/promises";
 import { join } from "node:path";
-import { resolveWorkspaceRoot } from "./workspace_root.js";
+// resolveWorkspaceRoot no longer used — stats file resolved via global_storage.
 import { effectiveHarnessEnvRaw } from "./harness_effective_env.js";
 import type { ReasoningEffort, ReasoningIntentClass } from "./reasoning_profile.js";
 
@@ -78,11 +78,11 @@ interface EffortStatsFile {
   cells: Record<string, EffortCell>; // key: `${intent}:${effort}`
 }
 
-const STATS_PATH = () => join(resolveWorkspaceRoot(), ".agent_recipe_stats.json");
-
 async function loadStatsFile(): Promise<{ entries: Record<string, unknown>; effort_stats?: EffortStatsFile }> {
   try {
-    const raw = await readFile(STATS_PATH(), "utf8");
+    const { recipeStatsPaths, pickReadPath } = await import("./global_storage.js");
+    const p = await pickReadPath(recipeStatsPaths());
+    const raw = await readFile(p, "utf8");
     return JSON.parse(raw) as { entries: Record<string, unknown>; effort_stats?: EffortStatsFile };
   } catch {
     return { entries: {} };
@@ -90,8 +90,13 @@ async function loadStatsFile(): Promise<{ entries: Record<string, unknown>; effo
 }
 
 async function saveStatsFile(data: { entries: Record<string, unknown>; effort_stats?: EffortStatsFile }): Promise<void> {
-  await mkdir(resolveWorkspaceRoot(), { recursive: true });
-  await writeFile(STATS_PATH(), JSON.stringify(data, null, 2), "utf8");
+  const { recipeStatsPaths, pickWritePath, ensureGlobalStorageRoot } = await import(
+    "./global_storage.js"
+  );
+  await ensureGlobalStorageRoot();
+  const p = await pickWritePath(recipeStatsPaths());
+  await mkdir(join(p, ".."), { recursive: true });
+  await writeFile(p, JSON.stringify(data, null, 2), "utf8");
 }
 
 function isEnabled(): boolean {

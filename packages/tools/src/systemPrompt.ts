@@ -365,7 +365,8 @@ export type ProtocolIntentHint =
   | "research"
   | "coding"
   | "execution"
-  | "operational"
+  | "conversational"
+  | "creative"
   | "any";
 
 /**
@@ -373,11 +374,13 @@ export type ProtocolIntentHint =
  *
  * When `intentHint` is provided, heavy sections irrelevant to the intent are suppressed:
  *   - coding: skip MARKETS_PROTOCOL, VAULT_PROTOCOL (heavy knowledge KB sections)
- *   - execution: skip MARKETS_PROTOCOL, DOCUMENT_ENGINE
+ *   - execution: analytical/intelligence runs — keeps epistemic + source-tier rules, strips
+ *       MARKETS_PROTOCOL, DOCUMENT_ENGINE, and narrative/rhetorical OUTPUT guidance (Bounded
+ *       voice, Scan priority, Forward close, Rich rendering). Used for builds, deploys,
+ *       scheduled briefs, market scans, and tool-heavy analysis chains.
  *   - introspection: skip MARKETS_PROTOCOL, DOCUMENT_ENGINE, VAULT_PROTOCOL, VISION_SIDECAR
- *   - operational: analytical/intelligence runs — keeps epistemic + source-tier rules, strips
- *       narrative/rhetorical OUTPUT guidance (Bounded voice, Scan priority, Forward close, Rich
- *       rendering). Use for scheduled briefs, market scans, and tool-heavy analysis chains.
+ *   - conversational: strip almost everything — chitchat/persona turns don't need protocols
+ *   - creative: skip research/markets/doc heaviness — generation is the deliverable
  *   - knowledge / any: include everything (default behaviour)
  *
  * This trims 300–800 tokens on focused tasks without losing any critical guardrails.
@@ -400,6 +403,7 @@ export function buildProtocolDynamicSuffix(
   if (names.size === 0) return "";
 
   // Resolve intent: explicit arg wins; then env var; then "any" (full output).
+  // Legacy `operational` env value maps to `execution` (its behavioral successor).
   const resolvedIntent: ProtocolIntentHint =
     intentHint !== "any"
       ? intentHint
@@ -411,24 +415,52 @@ export function buildProtocolDynamicSuffix(
             env === "research" ||
             env === "execution" ||
             env === "introspection" ||
-            env === "operational"
+            env === "conversational" ||
+            env === "creative"
           ) {
             return env;
           }
+          if (env === "operational") return "execution";
           return "any";
         })();
 
   // Intent-based suppression: drop heavy irrelevant sections to save 300–800 tokens.
   const skipMarkets =
-    resolvedIntent === "coding" || resolvedIntent === "execution" || resolvedIntent === "introspection";
+    resolvedIntent === "coding" ||
+    resolvedIntent === "execution" ||
+    resolvedIntent === "introspection" ||
+    resolvedIntent === "conversational" ||
+    resolvedIntent === "creative";
   const skipVault =
-    resolvedIntent === "coding" || resolvedIntent === "introspection";
+    resolvedIntent === "coding" ||
+    resolvedIntent === "introspection" ||
+    resolvedIntent === "conversational" ||
+    resolvedIntent === "creative";
   const skipDoc =
-    resolvedIntent === "coding" || resolvedIntent === "execution" || resolvedIntent === "introspection";
-  const skipVision = resolvedIntent === "introspection";
-  const skipResearchRules = resolvedIntent === "coding" || resolvedIntent === "execution";
-  // Operational mode: keep epistemic/source rules; strip narrative/rhetorical output guidance.
-  const operationalMode = resolvedIntent === "operational";
+    resolvedIntent === "coding" ||
+    resolvedIntent === "execution" ||
+    resolvedIntent === "introspection" ||
+    resolvedIntent === "conversational";
+  const skipVision = resolvedIntent === "introspection" || resolvedIntent === "conversational";
+  const skipResearchRules =
+    resolvedIntent === "coding" ||
+    resolvedIntent === "execution" ||
+    resolvedIntent === "conversational" ||
+    resolvedIntent === "creative";
+  // Execution mode = the old operational mode: keep epistemic/source rules; strip
+  // narrative/rhetorical output guidance for builds/deploys/scheduled briefs.
+  const operationalMode = resolvedIntent === "execution";
+  // Conversational: skip almost every protocol — chitchat/persona/identity replies
+  // don't need shell guidance, memory rules, browser confirmation, etc.
+  const conversationalMode = resolvedIntent === "conversational";
+
+  // Conversational mode short-circuits: chitchat / persona / identity / continuation
+  // turns get the bare-minimum protocol surface. No shell guidance, no memory rules,
+  // no research protocols — these turns shouldn't be calling tools anyway, and
+  // the bulky protocol text just bloats the prompt for a one-paragraph reply.
+  if (conversationalMode) {
+    return "";
+  }
 
   const parts: string[] = [];
   // Research named rules + tier table — injected early so IDs are available for think() references.

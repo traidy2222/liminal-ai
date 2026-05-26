@@ -1,0 +1,321 @@
+/**
+ * Audio transcription provider abstraction.
+ *
+ * One code path for every OpenAI-compatible `/audio/transcriptions` endpoint:
+ * OpenAI, OpenRouter (which proxies Whisper, Voxtral, Qwen-ASR, Chirp under
+ * one API), and any self-hosted endpoint that speaks the same protocol. Models
+ * differ only in slug + cost — the wire protocol is identical.
+ *
+ * Cheapest-first model registry — defaults to `openai/whisper-large-v3-turbo`
+ * at $0.04/hour (3× cheaper than Whisper-1, 5× cheaper than Whisper Large V3).
+ * Per-model rates live next to the registry so cost can be computed locally
+ * from the duration the API returns, without a second call.
+ */
+import { resolveHarnessEnvRaw } from "./harness_effective_env.js";
+import type { RuntimePreferences } from "./runtime_prefs.js";
+
+// ─── Model registry ──────────────────────────────────────────────────────────
+
+/**
+ * Rate is normalized to USD per second so the cost calculator can multiply
+ * durationSec directly. Source: provider price pages as of 2026-05.
+ */
+export interface TranscriptionModelRate {
+  /** Per-second USD rate. */
+  perSecondUsd: number;
+  /** Human label for telemetry/UI. */
+  label: string;
+  /** Notes on language/accuracy trade-offs. */
+  notes?: string;
+}
+
+export const TRANSCRIPTION_MODEL_RATES: Readonly<Record<string, TranscriptionModelRate>> = {
+  // Tier 1 — default. Cheapest by a wide margin and fast enough to feel real-time.
+  "openai/whisper-large-v3-turbo": {
+    perSecondUsd: 0.04 / 3600,
+    label: "Whisper Large V3 Turbo",
+    notes: "Default. 99 languages, 12% WER, real-time speed factor up to 216×.",
+  },
+  // Tier 2 — accuracy upgrade when WER matters more than cost (10.3% vs 12%).
+  "openai/whisper-large-v3": {
+    perSecondUsd: 0.111 / 3600,
+    label: "Whisper Large V3",
+    notes: "Higher accuracy and word-level timestamps. ~3× the cost of Turbo.",
+  },
+  // Tier 3 — Chinese dialects, lyrics-over-music, vocabulary biasing.
+  "qwen/qwen3-asr-flash": {
+    perSecondUsd: 0.000035,
+    label: "Qwen3 ASR Flash",
+    notes:
+      "11 languages incl. Cantonese/Sichuanese/Wu/Minnan. Auto language detection, " +
+      "noise-robust, accepts arbitrary context text to bias recognition.",
+  },
+  // Tier 4 — alternative European-language ASR.
+  "mistralai/voxtral-mini-transcribe": {
+    perSecondUsd: 0.003 / 60,
+    label: "Mistral Voxtral Mini Transcribe",
+    notes: "Mistral's Voxtral family. Per-minute pricing; competitive on French/Italian/Spanish.",
+  },
+  // Legacy — still cheaper than most chat models but 9× Turbo's price.
+  "openai/whisper-1": {
+    perSecondUsd: 0.006 / 60,
+    label: "Whisper 1 (legacy)",
+    notes: "Older API model. Use Whisper Large V3 Turbo unless you need this exact slug.",
+  },
+};
+
+/** Default model when `AGENT_TRANSCRIBE_MODEL` is unset. Cheapest in the registry. */
+export const DEFAULT_TRANSCRIBE_MODEL = "openai/whisper-large-v3-turbo";
+
+/**
+ * Estimate USD cost for a transcription run. Returns 0 when the model isn't in
+ * the registry — better to undercount than to fabricate a rate.
+ */
+export function estimateTranscriptionCostUsd(model: string, durationSec: number): number {
+  const rate = TRANSCRIPTION_MODEL_RATES[model];
+  if (!rate || !Number.isFinite(durationSec) || durationSec <= 0) return 0;
+  return durationSec * rate.perSecondUsd;
+}
+
+// ─── Config resolution ───────────────────────────────────────────────────────
+
+/** All defaults match the cheapest viable production setup out of the box. */
+export interface TranscriptionConfig {
+  enabled: boolean;
+  model: string;
+  baseURL: string;
+  apiKey: string;
+  maxBytes: number;
+  timeoutMs: number;
+  autoOnUpload: boolean;
+  timestamps: "none" | "segment" | "word";
+}
+
+const DEFAULT_BASE_URL = "https://openrouter.ai/api/v1";
+const DEFAULT_MAX_BYTES = 26_214_400; // 25 MB (matches Whisper-1 historical cap)
+const DEFAULT_TIMEOUT_MS = 120_000;
+
+export function resolveTranscriptionConfig(
+  prefs: RuntimePreferences | null
+): TranscriptionConfig {
+  const enabled = resolveHarnessEnvRaw("AGENT_TRANSCRIBE_ENABLED", prefs) !== "0";
+  const model =
+    resolveHarnessEnvRaw("AGENT_TRANSCRIBE_MODEL", prefs)?.trim() || DEFAULT_TRANSCRIBE_MODEL;
+  const baseURL =
+    resolveHarnessEnvRaw("AGENT_TRANSCRIBE_BASE_URL", prefs)?.trim() ||
+    resolveHarnessEnvRaw("AGENT_API_BASE_URL", prefs)?.trim() ||
+    DEFAULT_BASE_URL;
+  // API key precedence: transcribe-specific override → primary AGENT_API_KEY →
+  // raw OPENROUTER_API_KEY env. Never persisted to runtime prefs.
+  const apiKey =
+    (process.env["AGENT_TRANSCRIBE_API_KEY"]?.trim() ||
+      process.env["AGENT_API_KEY"]?.trim() ||
+      process.env["OPENROUTER_API_KEY"]?.trim()) ??
+    "";
+  const maxBytesRaw =
+    resolveHarnessEnvRaw("AGENT_TRANSCRIBE_MAX_BYTES", prefs)?.trim() ?? "";
+  const maxBytesParsed = parseInt(maxBytesRaw, 10);
+  const maxBytes =
+    Number.isFinite(maxBytesParsed) && maxBytesParsed > 0 ? maxBytesParsed : DEFAULT_MAX_BYTES;
+  const timeoutRaw =
+    resolveHarnessEnvRaw("AGENT_TRANSCRIBE_TIMEOUT_MS", prefs)?.trim() ?? "";
+  const timeoutParsed = parseInt(timeoutRaw, 10);
+  const timeoutMs =
+    Number.isFinite(timeoutParsed) && timeoutParsed > 0 ? timeoutParsed : DEFAULT_TIMEOUT_MS;
+  const autoOnUpload =
+    resolveHarnessEnvRaw("AGENT_TRANSCRIBE_AUTO_ON_UPLOAD", prefs) !== "0";
+  const timestampsRaw =
+    resolveHarnessEnvRaw("AGENT_TRANSCRIBE_TIMESTAMPS", prefs)?.trim().toLowerCase() ?? "segment";
+  const timestamps: TranscriptionConfig["timestamps"] =
+    timestampsRaw === "none" || timestampsRaw === "word" ? timestampsRaw : "segment";
+  return { enabled, model, baseURL, apiKey, maxBytes, timeoutMs, autoOnUpload, timestamps };
+}
+
+// ─── Transcription call ──────────────────────────────────────────────────────
+
+export interface TranscriptionSegment {
+  start: number;
+  end: number;
+  text: string;
+}
+
+export interface TranscriptionResult {
+  text: string;
+  language?: string;
+  durationSec?: number;
+  segments?: TranscriptionSegment[];
+  /** Estimated USD cost from durationSec × per-model rate. */
+  costUsd: number;
+  model: string;
+  /** Provider host extracted from baseURL — for telemetry. */
+  provider: string;
+}
+
+export interface TranscriptionInput {
+  /** Raw audio bytes. */
+  audio: Buffer | Uint8Array;
+  /** Filename including extension — used for content-type detection by the API. */
+  filename: string;
+  /** Override the configured model. */
+  model?: string;
+  /** Optional ISO-639 language hint (skip for auto-detect). */
+  language?: string;
+  /** Optional vocabulary biasing — short text of names/jargon to expect. */
+  prompt?: string;
+  /** Timestamp granularity. */
+  timestamps?: "none" | "segment" | "word";
+  signal?: AbortSignal;
+}
+
+/**
+ * Call the OpenAI-compatible `/audio/transcriptions` endpoint with multipart
+ * form data. Returns parsed transcript + computed cost.
+ *
+ * The endpoint shape is consistent across providers — only model slug + key
+ * change. Whisper / Voxtral / Qwen / Chirp all accept the same request format
+ * when proxied through OpenRouter (the most common configuration here).
+ */
+export async function transcribeAudio(
+  input: TranscriptionInput,
+  config: TranscriptionConfig
+): Promise<TranscriptionResult> {
+  if (!config.enabled) {
+    throw new Error("Transcription is disabled (AGENT_TRANSCRIBE_ENABLED=0).");
+  }
+  if (!config.apiKey) {
+    throw new Error(
+      "No transcription API key. Set AGENT_TRANSCRIBE_API_KEY, AGENT_API_KEY, or OPENROUTER_API_KEY."
+    );
+  }
+  if (input.audio.byteLength > config.maxBytes) {
+    throw new Error(
+      `Audio file exceeds AGENT_TRANSCRIBE_MAX_BYTES (${config.maxBytes} bytes). Split it first.`
+    );
+  }
+  const model = (input.model ?? config.model).trim() || DEFAULT_TRANSCRIBE_MODEL;
+  const timestamps = input.timestamps ?? config.timestamps;
+
+  const url = `${config.baseURL.replace(/\/$/, "")}/audio/transcriptions`;
+  const form = new FormData();
+  // Convert the buffer to a Blob — works in Node 18+ undici without extra deps.
+  const blob = new Blob([toArrayBuffer(input.audio)], {
+    type: inferContentType(input.filename),
+  });
+  form.append("file", blob, input.filename);
+  form.append("model", model);
+  form.append("response_format", "verbose_json");
+  if (input.language) form.append("language", input.language);
+  if (input.prompt) form.append("prompt", input.prompt);
+  if (timestamps === "word") {
+    form.append("timestamp_granularities[]", "word");
+  } else if (timestamps === "segment") {
+    form.append("timestamp_granularities[]", "segment");
+  }
+
+  const headers: Record<string, string> = {
+    Authorization: `Bearer ${config.apiKey}`,
+  };
+  // OpenRouter recommends these headers for attribution / rate-limit fairness.
+  if (config.baseURL.includes("openrouter")) {
+    headers["HTTP-Referer"] = "https://github.com/yourorg/liminal";
+    headers["X-Title"] = "Liminal Harness";
+  }
+
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), config.timeoutMs);
+  const signal = chainSignals(controller.signal, input.signal);
+
+  let resp: Response;
+  try {
+    resp = await fetch(url, {
+      method: "POST",
+      headers,
+      body: form,
+      signal,
+    });
+  } finally {
+    clearTimeout(timer);
+  }
+
+  if (!resp.ok) {
+    const errText = await resp.text().catch(() => "");
+    throw new Error(
+      `Transcription HTTP ${resp.status}: ${errText.slice(0, 400) || resp.statusText}`
+    );
+  }
+  const json = (await resp.json()) as {
+    text?: string;
+    language?: string;
+    duration?: number;
+    segments?: Array<{ start: number; end: number; text: string }>;
+  };
+  const text = String(json.text ?? "").trim();
+  const language = typeof json.language === "string" ? json.language : undefined;
+  const durationSec =
+    typeof json.duration === "number" && Number.isFinite(json.duration) ? json.duration : undefined;
+  const segments = Array.isArray(json.segments)
+    ? json.segments
+        .filter((s) => typeof s.text === "string")
+        .map((s) => ({ start: Number(s.start) || 0, end: Number(s.end) || 0, text: String(s.text) }))
+    : undefined;
+  const costUsd = durationSec ? estimateTranscriptionCostUsd(model, durationSec) : 0;
+  return {
+    text,
+    language,
+    durationSec,
+    segments,
+    costUsd,
+    model,
+    provider: providerFromBaseUrl(config.baseURL),
+  };
+}
+
+// ─── Helpers ─────────────────────────────────────────────────────────────────
+
+/**
+ * Convert a Buffer/Uint8Array to a tight ArrayBuffer slice. We can't pass the
+ * Uint8Array directly into `new Blob([])` under strict TS because some Node
+ * variants type the underlying buffer as SharedArrayBuffer | ArrayBuffer.
+ * Copying into a fresh ArrayBuffer is the cheapest universally-safe path.
+ */
+function toArrayBuffer(buf: Buffer | Uint8Array): ArrayBuffer {
+  const view = buf instanceof Uint8Array ? buf : new Uint8Array(buf);
+  const out = new ArrayBuffer(view.byteLength);
+  new Uint8Array(out).set(view);
+  return out;
+}
+
+function inferContentType(filename: string): string {
+  const lower = filename.toLowerCase();
+  if (lower.endsWith(".mp3")) return "audio/mpeg";
+  if (lower.endsWith(".wav")) return "audio/wav";
+  if (lower.endsWith(".m4a") || lower.endsWith(".mp4")) return "audio/mp4";
+  if (lower.endsWith(".webm")) return "audio/webm";
+  if (lower.endsWith(".ogg") || lower.endsWith(".oga")) return "audio/ogg";
+  if (lower.endsWith(".flac")) return "audio/flac";
+  if (lower.endsWith(".aac")) return "audio/aac";
+  return "application/octet-stream";
+}
+
+function providerFromBaseUrl(url: string): string {
+  try {
+    return new URL(url).host;
+  } catch {
+    return url;
+  }
+}
+
+function chainSignals(...signals: Array<AbortSignal | undefined>): AbortSignal {
+  const sigs = signals.filter((s): s is AbortSignal => s != null);
+  if (sigs.length === 0) return new AbortController().signal;
+  if (sigs.length === 1) return sigs[0]!;
+  const c = new AbortController();
+  for (const s of sigs) {
+    if (s.aborted) {
+      c.abort();
+      break;
+    }
+    s.addEventListener("abort", () => c.abort(), { once: true });
+  }
+  return c.signal;
+}

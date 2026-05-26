@@ -18,8 +18,20 @@ export class StreamAccumulator {
   private frozenIndices = new Set<number>();
   /** Highest tool call index seen so far — used to detect index gaps. */
   private maxToolIndex = -1;
+  /** Provider usage payload from the terminal chunk (OpenRouter forwards it
+   *  on the last chunk when `usage: { include: true }` is requested or by
+   *  default for some providers). Contains `prompt_tokens_details.cached_tokens`
+   *  when prompt caching fires. */
+  private _usage: unknown = null;
 
   processChunk(chunk: OpenAI.Chat.Completions.ChatCompletionChunk): StreamChunk & { isNewTool?: boolean; indexGap?: { expected: number; received: number } } {
+    // Some providers attach `usage` on the terminal chunk (choices may be empty).
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const chunkUsage = (chunk as any).usage;
+    if (chunkUsage && typeof chunkUsage === "object") {
+      this._usage = chunkUsage;
+    }
+
     const choice = chunk.choices[0];
     if (!choice) return {};
 
@@ -123,11 +135,18 @@ export class StreamAccumulator {
     return this.frozenIndices.has(index);
   }
 
+  /** Provider usage payload (token counts, including `cached_tokens` when
+   *  prompt caching fires). Null until the terminal chunk arrives. */
+  get usage(): unknown {
+    return this._usage;
+  }
+
   reset(): void {
     this.text = "";
     this.toolCallMap.clear();
     this.seenToolStart.clear();
     this.frozenIndices.clear();
     this.maxToolIndex = -1;
+    this._usage = null;
   }
 }

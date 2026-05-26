@@ -52,6 +52,7 @@ import { bumpRuleHits, getRuleHitCounts, extractRuleIds, recordRuleOutcomes, get
 import { writeYieldSnapshot } from "./session_event_log.js";
 import { SharedMemoryBus } from "./shared_memory_bus.js";
 import { resolveProviderConfig, buildProviderRouting } from "./provider_config.js";
+import { applyPromptCacheBreakpoints, extractCachedTokens } from "./prompt_cache.js";
 import { buildOpenRouterAttributionHeaders } from "./openrouter_attribution.js";
 import { withProviderRequestSpacing } from "./provider_request_gate.js";
 import type { RuntimePreferences, RuntimePersonaProfile } from "./runtime_prefs.js";
@@ -86,6 +87,7 @@ import {
 import { readFile as readFileFs } from "node:fs/promises";
 import path from "node:path";
 import { resolveWorkspaceRoot, runWithWorkspaceRoot } from "./workspace_root.js";
+import { runWithChatId } from "./chat_context.js";
 import {
   markEpistemicPlanStepDone,
   mergeExtractedSubgoals,
@@ -134,6 +136,13 @@ import {
   resolveReasoningSurface,
   type ReasoningSurface,
 } from "./reasoning_surface.js";
+// isImplementShipUserMessage is still imported as a fallback for the
+// implementShip override below when the classifier wasn't available.
+import {
+  judgeResearchFinalize,
+  judgeResearchFinalizeWithRegex,
+  type ResearchFinalizeVerdict,
+} from "./research_finalize_judge.js";
 import { scoreTurnAgainstIndex, detectContradictions, type RankableDoc } from "./memory_rank.js";
 import { EDIT_TOOL_NAMES, collectEditToolTargetPaths } from "./tool_changed_paths.js";
 import { ToolDag } from "./tool_dag.js";
@@ -679,6 +688,45 @@ function buildPersonaBootstrapUserPrompt(persona?: PersonaConfig): string {
   );
 }
 
+/**
+ * Map a failing tool-name + error-snippet pair to a concrete suggested
+ * alternative tool. Heuristic — used inside the loop-break nudge to point the
+ * model at the obvious right tool when it's stuck on the wrong one.
+ */
+function inferLoopBreakSuggestion(toolName: string, errSnippet: string): string | null {
+  const err = errSnippet.toLowerCase();
+  if (toolName === "read_file") {
+    if (err.includes("eisdir") || err.includes("is a directory") || err.includes("directory")) {
+      return "the path is a directory — use `list_dir` (to see entries) or `repo_map` (for a structural overview) instead of `read_file`.";
+    }
+    if (err.includes("enoent") || err.includes("no such file")) {
+      return "the file does not exist — use `list_dir` on the parent directory to see what's actually there, or `grep_file` to search for the name.";
+    }
+  }
+  if (toolName === "list_dir") {
+    if (err.includes("enotdir") || err.includes("not a directory")) {
+      return "the path is a file, not a directory — use `read_file` instead.";
+    }
+  }
+  if (toolName === "write_file") {
+    if (err.includes("eisdir") || err.includes("is a directory")) {
+      return "the path is a directory — pick an actual file name to write to.";
+    }
+    if (err.includes("eacces") || err.includes("permission denied")) {
+      return "permission denied — check the path is inside the chat's workspace, not outside it.";
+    }
+  }
+  if (toolName === "edit_file") {
+    if (err.includes("not found") || err.includes("no match")) {
+      return "the old text wasn't found — re-read the file with `read_file` to see its current exact content, then redo the edit with the verbatim string.";
+    }
+  }
+  if (toolName === "web_fetch" && (err.includes("403") || err.includes("401"))) {
+    return "the site is blocking the request — try a different URL, search for the topic via `web_search`, or skip this source.";
+  }
+  return null;
+}
+
 function isVisionCentricPrompt(text: string): boolean {
   const t = text.toLowerCase();
   return /\b(image|screenshot|photo|diagram|figure|ocr|read text from|what's in this picture|what is in this image|analyze this image)\b/.test(
@@ -925,6 +973,16 @@ export class AgentHarness {
   private largeReadPivotNudgeThisSend = false;
   /** Last few tool outcome one-liners for working state. */
   private recentToolOutcomeLines: string[] = [];
+  /**
+   * Track consecutive (tool_name, args_hash, ok) triples to detect call loops.
+   * When the same failing call repeats N times the harness injects a strong
+   * corrective system message and adds the (name, hash) to a per-send banlist
+   * so subsequent identical calls are short-circuited with a clear "try
+   * something else" error instead of dispatching again.
+   */
+  private toolCallStreak: { name: string; argsHash: string; failures: number } | null = null;
+  private bannedToolCallShapesThisSend = new Set<string>();
+  private loopBreakNudgeFiredThisSend = false;
   private proactiveCompressedThisSend = false;
   private criticConsumedThisSend = false;
   /** Timestamp of the last compression event in this send (for ACON failure analysis). */
@@ -1815,8 +1873,12 @@ export class AgentHarness {
     // Wrap the entire send in an AsyncLocalStorage scope so every file tool,
     // background persist, and post-turn write resolves this harness's
     // workspace root (instead of the process-global). Lets parallel sub-agents
-    // operate on isolated trees (e.g. git worktrees).
-    return runWithWorkspaceRoot(this.workspaceRoot, () => this._sendBody(userMessage, options));
+    // operate on isolated trees (e.g. git worktrees). We also bind the chat id
+    // so memory recall + writes can attribute provenance without each tool
+    // factory needing a harness reference (federation Phase 2).
+    return runWithWorkspaceRoot(this.workspaceRoot, () =>
+      runWithChatId(this.taskId, () => this._sendBody(userMessage, options))
+    );
   }
 
   private async _sendBody(
@@ -1869,6 +1931,9 @@ export class AgentHarness {
     this.readFilePathCountsThisTurn = new Map();
     this.largeReadPivotNudgeThisSend = false;
     this.recentToolOutcomeLines = [];
+    this.toolCallStreak = null;
+    this.bannedToolCallShapesThisSend.clear();
+    this.loopBreakNudgeFiredThisSend = false;
     this.proactiveCompressedThisSend = false;
     this.criticConsumedThisSend = false;
     this.lastCompressionTimestampThisSend = 0;
@@ -1888,7 +1953,8 @@ export class AgentHarness {
     this.writeIntegrityNudgeThisSend = false;
     this.fileWriteStreamSink = new FileWriteStreamSink(
       resolveWriteStreamSinkEnabled(this.runtimePreferences),
-      resolveWriteStreamSinkMinChars(this.runtimePreferences)
+      resolveWriteStreamSinkMinChars(this.runtimePreferences),
+      this.taskId
     );
     this.dispatcher.setFileWriteHooks({
       prepareArgs: async (callId, name, args) => {
@@ -1942,6 +2008,7 @@ export class AgentHarness {
       if (openingTurn) {
         this.turnInference = {
           intent: "introspection",
+          complexity: "trivial",
           likelyEditPaths: [],
           stancePrompt: false,
           overInferenceRisk: false,
@@ -1951,6 +2018,9 @@ export class AgentHarness {
           runtimeIdentityPrompt: false,
           deckIntent: false,
           freshnessSensitive: false,
+          visionIntent: false,
+          buildDeliverable: false,
+          implementShip: false,
           runtimePreferenceIntent: false,
           runtimeSettingsQuery: false,
           skipHarnessSecondaryPasses: true,
@@ -2010,7 +2080,9 @@ export class AgentHarness {
     if (
       !openingTurn &&
       this.turnInference &&
-      isImplementShipUserMessage(userMessage) &&
+      (this.turnInference.source === "llm"
+        ? this.turnInference.implementShip === true
+        : isImplementShipUserMessage(userMessage)) &&
       (this.turnInference.intent === "knowledge" || this.turnInference.intent === "research")
     ) {
       this.turnInference = {
@@ -2032,9 +2104,23 @@ export class AgentHarness {
       const learnedEffort = this.turnInference
         ? await getBestEffortForIntent(this.turnInference.intent as ReasoningIntentClass)
         : null;
+      // When the classifier ran and was confident, hand its typed signals to the
+      // budget tightener instead of letting it re-derive them via regex — this
+      // catches paraphrases ("spin up a clone", "what's the latest on X") that
+      // keyword matching misses.
+      const llmSignals =
+        this.turnInference?.source === "llm"
+          ? {
+              implementShip: this.turnInference.implementShip === true,
+              buildDeliverable: this.turnInference.buildDeliverable === true,
+              freshnessSensitive: this.turnInference.freshnessSensitive === true,
+              essayRisk: this.turnInference.essayRisk === true,
+            }
+          : undefined;
       let budget = tightenReasoningBudgetForUserMessage(
         resolveReasoningBudget(this.turnInference, learnedEffort),
-        userMessage
+        userMessage,
+        llmSignals
       );
       budget = applySurfaceToBudget(budget, this._turnReasoningSurface);
       this._turnReasoningBudget = budget;
@@ -2786,8 +2872,10 @@ export class AgentHarness {
         runId,
         progress: { step: "snippets_loaded", sessionsFound: sessionIds.length, snippetsLoaded: snippets.length },
       });
-      const notesPath = path.join(resolveWorkspaceRoot(), ".agent_notes.json");
-      const notesSnapshot = await readFileFs(notesPath, "utf8")
+      const notesPathResolved = await (
+        await import("./global_storage.js")
+      ).pickReadPath((await import("./global_storage.js")).notesPaths());
+      const notesSnapshot = await readFileFs(notesPathResolved, "utf8")
         .then((s) => s.slice(0, 30_000))
         .catch(() => "(no notes yet)");
       const prompt = buildAutoDreamPrompt({ notesSnapshot, sessions: snippets });
@@ -3381,9 +3469,11 @@ export class AgentHarness {
     let dreamScorePassedGate = true;
     if (dreamThreshold > 0 && this.agentDepth === 0 && memoryPolicy.allowAutoRecall && this.lastUserMessage.trim().length > 8) {
       try {
-        const notesRaw = await readFileFs(
-          path.join(resolveWorkspaceRoot(), ".agent_notes.json"), "utf8"
-        ).catch(() => "{}");
+        const { notesPaths: _notesPaths, pickReadPath: _pickReadPath } = await import(
+          "./global_storage.js"
+        );
+        const notesPathResolved = await _pickReadPath(_notesPaths());
+        const notesRaw = await readFileFs(notesPathResolved, "utf8").catch(() => "{}");
         const notesObj = JSON.parse(notesRaw) as Record<string, { value?: string; text?: string }>;
         const docs: RankableDoc[] = Object.entries(notesObj).map(([id, n]) => ({
           id,
@@ -3745,6 +3835,27 @@ export class AgentHarness {
             finishReason = parsed.finishReason;
           }
         }
+        // Surface prompt-cache hit rate so we can verify caching is firing.
+        // Quiet under AGENT_UI_VERBOSITY=quiet; trace channel either way.
+        try {
+          const usage = accumulator.usage as
+            | { prompt_tokens?: number }
+            | null
+            | undefined;
+          if (usage && typeof usage === "object") {
+            const cached = extractCachedTokens(usage);
+            const prompt = (usage.prompt_tokens ?? 0) as number;
+            if (prompt > 0) {
+              const pct = prompt > 0 ? Math.round((cached / prompt) * 100) : 0;
+              this.emitter.emit("text", {
+                delta: `[HARNESS] prompt_cache: cached=${cached}/${prompt} (${pct}%)\n`,
+                channel: "trace",
+              });
+            }
+          }
+        } catch {
+          /* non-fatal */
+        }
         break streamLoop; // stream completed successfully
       } catch (streamErr) {
         // Never retry if the task was externally cancelled
@@ -3993,11 +4104,24 @@ export class AgentHarness {
             /* non-fatal */
           }
         }
-        // PASTE: reuse speculatively-started promise if available.
-        const speculative = speculativePromises.get(tc.id);
-        const result = speculative
-          ? await speculative
-          : await this.dispatcher.dispatch(tc.id, tc.name, tc.argsJson, batchToolNames);
+        // Loop-break: short-circuit any (tool, args) shape that has already
+        // been banned this send because it failed 3+ times in a row. Returning
+        // a synthetic failure here keeps the loop-detector message in context
+        // without burning another round on the same broken call.
+        const bannedShapeKey = `${tc.name}::${hashString(tc.argsJson || "")}`;
+        let result: import("./types.js").ToolResult;
+        if (this.bannedToolCallShapesThisSend.has(bannedShapeKey)) {
+          result = {
+            ok: false,
+            error: `[loop_break] This (${tc.name}, args) combination was blocked after 3 consecutive failures earlier this turn. Try a different tool or change the arguments meaningfully.`,
+          };
+        } else {
+          // PASTE: reuse speculatively-started promise if available.
+          const speculative = speculativePromises.get(tc.id);
+          result = speculative
+            ? await speculative
+            : await this.dispatcher.dispatch(tc.id, tc.name, tc.argsJson, batchToolNames);
+        }
         results[idx] = result;
         // Index output for query_tool_outputs + flag identical cross-round re-calls.
         const argsKey = tc.argsJson.slice(0, 200);
@@ -4134,13 +4258,61 @@ export class AgentHarness {
         const line = `${tc.name}:${r.ok ? "ok" : "fail"}`;
         this.recentToolOutcomeLines.push(line.slice(0, 160));
         if (this.recentToolOutcomeLines.length > 3) this.recentToolOutcomeLines.shift();
+
+        // ── Loop detection ──────────────────────────────────────────────────
+        // When the same (tool_name, normalized_args) call fails 3+ times in a
+        // row, the model has clearly mis-mapped the situation onto the wrong
+        // tool (classic: calling read_file on a directory path repeatedly when
+        // list_dir is what's needed). Ban the shape for the rest of this send
+        // and inject a corrective system message naming the wrong tool.
+        const argsHash = hashString(tc.argsJson || "");
+        const shapeKey = `${tc.name}::${argsHash}`;
+        if (!r.ok) {
+          if (
+            this.toolCallStreak &&
+            this.toolCallStreak.name === tc.name &&
+            this.toolCallStreak.argsHash === argsHash
+          ) {
+            this.toolCallStreak.failures += 1;
+          } else {
+            this.toolCallStreak = { name: tc.name, argsHash, failures: 1 };
+          }
+          if (this.toolCallStreak.failures >= 3 && !this.bannedToolCallShapesThisSend.has(shapeKey)) {
+            this.bannedToolCallShapesThisSend.add(shapeKey);
+            const argsPreview = tc.argsJson.slice(0, 200);
+            const errSnippet = r.error ? r.error.slice(0, 240) : "(no error)";
+            // Try to infer a suggested alternative based on the error pattern.
+            const suggestion = inferLoopBreakSuggestion(tc.name, errSnippet);
+            this.context.appendMessage({
+              role: "user",
+              content:
+                `[LOOP DETECTED] You called \`${tc.name}\` with the same args ${this.toolCallStreak.failures} times in a row and each call failed with: ${errSnippet}\n\n` +
+                `Args (preview): ${argsPreview}\n\n` +
+                (suggestion
+                  ? `Try a different tool. Specifically: ${suggestion}\n\n`
+                  : "Stop calling this exact tool+args combination. Pick a different tool or change the arguments meaningfully.\n\n") +
+                `This (tool, args) shape is now blocked for the rest of this turn — further identical calls will be rejected without dispatch.`,
+            });
+            this.loopBreakNudgeFiredThisSend = true;
+            this.emitter.emit("recovery_action", {
+              strategy: "replan",
+              reason: `loop_break:${tc.name} ${this.toolCallStreak.failures}x — ${errSnippet.slice(0, 120)}`,
+            });
+          }
+        } else {
+          // Any successful call resets the streak — model is making progress.
+          this.toolCallStreak = null;
+        }
         if (r.ok && tc.name === "read_file") {
           try {
-            const a = JSON.parse(tc.argsJson) as { path?: string };
+            const a = JSON.parse(tc.argsJson) as { path?: string; offset?: number; limit?: number };
             if (a.path) {
               this.filesReadThisTurn.push(a.path);
               if (this.filesReadThisTurn.length > 24) this.filesReadThisTurn.shift();
               const key = a.path.replace(/\\/g, "/").toLowerCase();
+              // Count by path regardless of offset/limit — re-reads with different
+              // slices on the same file are the most common stall pattern when
+              // distillation is on or context has rolled over.
               const nextCount = (this.readFilePathCountsThisTurn.get(key) ?? 0) + 1;
               this.readFilePathCountsThisTurn.set(key, nextCount);
               if (nextCount === 2) {
@@ -4153,6 +4325,17 @@ export class AgentHarness {
                     "Use targeted checks instead: read_file_chunked for large files, file_metadata/workspace_snapshot for integrity, " +
                     "run_lint/run_tests for static verification, and browser_open/browser_act(include_console=true) for browser runtime errors " +
                     (browserRelevant ? "on this frontend file." : "when reviewing web behavior."),
+                });
+              } else if (nextCount === 4) {
+                // Hard stop: the model is in a re-read loop. Surface the prior
+                // round indices so it can scroll back instead of looping.
+                this.context.appendMessage({
+                  role: "user",
+                  content:
+                    `[SYSTEM NOTE] read_file on "${a.path}" has now been called ${nextCount}× this turn. ` +
+                    `The content from earlier reads is still in your conversation history above — scroll back rather than re-reading. ` +
+                    `If you cannot see it, call compress_context() once to consolidate and continue with what you remember; ` +
+                    `do not call read_file on this path again this turn.`,
                 });
               }
             }
@@ -4740,19 +4923,19 @@ export class AgentHarness {
           (assistantText.match(/\b(source|sources|as of|uncertain|open|timeline|update)\b/gi) ?? []).length >= 3) ||
         (hasWebFetchEvidence && distinctToolCount >= 6);
       if (isResearchTask) {
-        const hasTimeline = /\b(chronology|timeline|sequence|on\s+\w+\s+\d{1,2}|recently|earlier)\b/i.test(
-          assistantText
-        );
-        const sourceMentions =
-          (assistantText.match(/https?:\/\/|reuters|bbc|ap|al jazeera|wikipedia|france24|guardian|nyt/gi) ?? [])
-            .length;
-        const hasUncertainty = /\b(uncertain|unverified|fragile|confidence|may change|developing)\b/i.test(
-          assistantText
-        );
-        const hasOpenItems = /\b(open question|unknown|unresolved|to confirm|not yet clear)\b/i.test(
-          assistantText
-        );
-        if (!hasTimeline || sourceMentions < 2 || !hasUncertainty || !hasOpenItems) {
+        // Fast-model judge replaces a stack of brittle regexes that only matched
+        // a curated outlet list and missed paraphrased timelines / uncertainty.
+        // Falls back to the same regex behavior on transport/parse failure so
+        // the harness stays usable when the fast model is unreachable.
+        let verdict: ResearchFinalizeVerdict;
+        try {
+          verdict = await judgeResearchFinalize(this.client, this.config.model, assistantText);
+        } catch {
+          // Judge transport/parse failure → regex. The downstream synthesis_check
+          // emit below tags verdict.source so the fallback is visible in telemetry.
+          verdict = judgeResearchFinalizeWithRegex(assistantText);
+        }
+        if (!verdict.ready) {
           if (this.finalizeRetryBudgetThisSend > 0 && !substantiveDraftLikelyComplete) {
             this.finalizeRetryBudgetThisSend--;
             this.finalizeSynthesisNudgeThisSend = true;
@@ -4761,14 +4944,15 @@ export class AgentHarness {
               content:
                 "[SYNTHESIS CHECKLIST] Before finalizing research output, include: " +
                 "(1) a short timeline/sequence, (2) multi-source grounding (>=2 sources), " +
-                "(3) explicit uncertainty/fragility note for fast-moving facts, and (4) unresolved items.",
+                "(3) explicit uncertainty/fragility note for fast-moving facts, and (4) unresolved items. " +
+                `Judge says: ${verdict.reason}`,
             });
             await this.runReActLoop(round);
             return;
           }
           this.emitter.emit("synthesis_check", {
             passed: false,
-            reason: "checklist_incomplete_substantive_draft",
+            reason: `checklist_incomplete_substantive_draft (${verdict.source}: ${verdict.reason})`,
             substantiveDraftComplete: substantiveDraftLikelyComplete,
           });
         }
@@ -4792,9 +4976,13 @@ export class AgentHarness {
         return;
       }
 
+      const visionWanted =
+        this.turnInference?.source === "llm"
+          ? this.turnInference.visionIntent === true
+          : isVisionCentricPrompt(this.lastUserMessage);
       if (
         !skipPostAssistantFinalizeExtensions &&
-        isVisionCentricPrompt(this.lastUserMessage) &&
+        visionWanted &&
         !this.toolsUsedThisTurn.includes("vision_analyze") &&
         !this.finalizeVisionNudgeThisSend
       ) {
@@ -4943,14 +5131,23 @@ export class AgentHarness {
           ? buildOpenRouterReasoningParam(reasoningBudget, reasoningSurface)
           : {};
 
+      // Prompt cache breakpoint: tag the trailing static system message with
+      // `cache_control: { type: "ephemeral" }` so cache-supporting providers
+      // (DeepInfra, GMICloud, NovitaAI, …) serve the prefix at ~1/10× cost on
+      // every round after the first. No-op when AGENT_PROMPT_CACHE=0.
+      const cachedMessages = applyPromptCacheBreakpoints(messages);
+
       const params: OpenAI.Chat.Completions.ChatCompletionCreateParamsStreaming & {
         provider?: { order: string[]; allow_fallbacks: boolean };
         user?: string;
         reasoning?: { effort: string };
+        stream_options?: { include_usage: boolean };
       } = {
         model: modelOverride ?? this.config.model,
-        messages,
+        messages: cachedMessages,
         stream: true,
+        // Request usage on the terminal chunk so we can log cache hit rate.
+        stream_options: { include_usage: true },
         ...(maxCompletionTokens !== undefined && { max_tokens: maxCompletionTokens }),
         ...(useTools && { tools }),
         ...(useToolChoice && { tool_choice: "auto" as const }),
