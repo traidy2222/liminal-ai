@@ -248,6 +248,8 @@ export interface TurnInferenceResult {
   exploratoryCreative: boolean;
   /** User is asking about their name / who they are / what to call them. */
   identityQuery: boolean;
+  /** User is stating their name or what to call them (store to memory). */
+  identityProvision: boolean;
   /** User asks for assistant persona/identity ("who are you", "your persona"). */
   personaIdentityPrompt: boolean;
   /** User explicitly asks model/runtime/provider details. */
@@ -341,6 +343,7 @@ export function neutralTurnInferenceResult(
     overInferenceRisk: false,
     exploratoryCreative,
     identityQuery: false,
+    identityProvision: false,
     personaIdentityPrompt: false,
     runtimeIdentityPrompt: false,
     deckIntent: false,
@@ -477,6 +480,7 @@ function buildInferenceFromParsed(
   fallbackReason?: string
 ): TurnInferenceResult {
   const identityQuery = Boolean(parsed["identityQuery"]);
+  const identityProvision = Boolean(parsed["identityProvision"]);
   const personaIdentityPrompt = Boolean(parsed["personaIdentityPrompt"]);
   const runtimeIdentityPrompt = Boolean(parsed["runtimeIdentityPrompt"]);
   const intentRaw = parseIntent(parsed["intent"]);
@@ -507,6 +511,7 @@ function buildInferenceFromParsed(
         ? false
         : Boolean(parsed["exploratoryCreative"]),
     identityQuery,
+    identityProvision,
     personaIdentityPrompt,
     runtimeIdentityPrompt,
     deckIntent: Boolean(parsed["deckIntent"]),
@@ -537,7 +542,7 @@ const INFERENCE_SYSTEM_PROMPT =
   "{intent:'introspection|knowledge|research|coding|execution|conversational|creative'," +
   "complexity:'trivial|normal|complex'," +
   "likelyEditPaths:string[],stancePrompt:boolean,overInferenceRisk:boolean," +
-  "exploratoryCreative:boolean,identityQuery:boolean,personaIdentityPrompt:boolean,runtimeIdentityPrompt:boolean,deckIntent:boolean," +
+  "exploratoryCreative:boolean,identityQuery:boolean,identityProvision:boolean,personaIdentityPrompt:boolean,runtimeIdentityPrompt:boolean,deckIntent:boolean," +
   "freshnessSensitive:boolean,visionIntent:boolean,buildDeliverable:boolean,implementShip:boolean," +
   "runtimePreferenceIntent:boolean,runtimeSettingsQuery:boolean,skipHarnessSecondaryPasses:boolean," +
   "reasoningEffort:'none'|'low'|'medium'|'high'|'xhigh',thinkDepth:'skip'|'brief'|'standard'|'deep',toolFirstBias:boolean," +
@@ -578,6 +583,7 @@ const INFERENCE_SYSTEM_PROMPT =
   "exploratoryCreative=true when the user mainly wants open-ended ideation/hypotheticals tied to their own work or roadmap " +
   "('what would make X more likely', 'imagine…', 'ignore my roadmap for a moment'). For pure generative writing prefer intent=creative instead. " +
   "identityQuery=true when the user asks about THEIR name, what to call them, who they are, or whether you know/remember their name (set intent=conversational). " +
+  "identityProvision=true when they STATE their name or how to address them (e.g. 'I'm Alex', 'call me Sam', 'my name is …') — not when merely asking. " +
   "personaIdentityPrompt=true when they ask for YOUR persona/identity (who you are in character, describe yourself) (set intent=conversational). " +
   "runtimeIdentityPrompt=true ONLY when they explicitly want base LLM/provider/model slug/API/stack facts " +
   "(e.g. which model, which provider, OpenRouter slug) (set intent=conversational). If ambiguous, set runtimeIdentityPrompt=false. " +

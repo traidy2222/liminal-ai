@@ -214,7 +214,14 @@ export {
   resolveProviderMinIntervalMs,
 } from "./provider_request_gate.js";
 export type { ProviderCredentials } from "./provider_request_gate.js";
-export { rewriteQueryForRecall } from "./query_rewrite.js";
+export { rewriteQueryForRecall, rewriteQueryForIdentityRecall } from "./query_rewrite.js";
+export {
+  IDENTITY_MEMORY_KEYS,
+  loadIdentityNotesFromDisk,
+  formatIdentityRecallBlock,
+  extractPreferredNameFromMessage,
+} from "./user_identity_memory.js";
+export type { IdentityNameExtraction } from "./user_identity_memory.js";
 export type { RewriteQueryResult } from "./query_rewrite.js";
 export {
   emptyEpistemicState,
@@ -447,6 +454,18 @@ export { ToolDag } from "./tool_dag.js";
 export type { DagSpec, DagEdge } from "./tool_dag.js";
 export { SessionToolIndex } from "./session_tool_index.js";
 export type { ToolOutputEntry, ToolOutputQueryResult } from "./session_tool_index.js";
+export {
+  ResearchLedger,
+  canonicalUrl,
+  unwrapSearchRedirect,
+  extractUrls,
+} from "./research_ledger.js";
+export type {
+  UrlStatus,
+  UrlRecord,
+  QueryRecord,
+  LedgerSummary,
+} from "./research_ledger.js";
 export {
   minePatternsFromSessions,
   isSpeculatable,

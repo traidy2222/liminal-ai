@@ -10,7 +10,6 @@ import { toPng } from "html-to-image";
 import { Prism as SyntaxHighlighter } from "react-syntax-highlighter";
 import { vscDarkPlus } from "react-syntax-highlighter/dist/esm/styles/prism";
 import { SettingsModal } from "./settings/SettingsModal.js";
-import { ChatSwitcher } from "./chat/ChatSwitcher.js";
 import { DictationButton } from "./audio/DictationButton.js";
 import { PROVIDER_PRESETS, PROVIDER_PRESET_CUSTOM_ID } from "./settings/providerPresets.js";
 import { resolveInputShortcut } from "./inputSemantics.js";
@@ -2177,22 +2176,6 @@ export function App() {
     <ShellRouter theme={state.personaUiTheme}>
       <style>{CSS_ANIMATIONS}</style>
       <PersonaShellSwitcher shell={shell} contract={contract} />
-
-      {/* ── Chat switcher (Phase 2 per-chat workspaces) ──────────────────────── */}
-      {/* Fixed overlay top-left: persists across persona shells without picking
-          apart each shell's chrome. Click → dropdown of chats; new-chat modal
-          opens from there. Memory continuity hint lives inside the dropdown. */}
-      <div
-        style={{
-          position: "fixed",
-          top: 8,
-          left: 8,
-          zIndex: 800,
-          pointerEvents: "auto",
-        }}
-      >
-        <ChatSwitcher />
-      </div>
 
       {/* ── Live dictation overlay ──────────────────────────────────────────── */}
       {/* Fixed bottom-right. Three callback streams from the mic button keep

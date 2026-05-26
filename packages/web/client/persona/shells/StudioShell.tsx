@@ -9,6 +9,7 @@ import { migratePersonaUiTheme } from "@liminal/core/persona-ui-theme";
 import { resolveToolCardsMode } from "../../resolveToolCardsMode.js";
 import { useStickyAutoScroll } from "../../useStickyAutoScroll.js";
 import { ShellControls } from "./ShellControls.js";
+import { ShellChatSwitcher } from "../../chat/ShellChatSwitcher.js";
 import { categoryForTool } from "../categoryMeta.js";
 import {
   buildMessagesStyle,
@@ -155,17 +156,39 @@ export function StudioShell({ contract }: { contract: ShellContract }) {
     <>
       <style>{CSS}</style>
 
-      {/* Floating top pill */}
-      <div style={{ flexShrink: 0, display: "flex", justifyContent: "center", padding: "14px 0 0", pointerEvents: "none", position: "relative" }}>
-        <div style={{ display: "inline-flex", alignItems: "center", gap: 8, padding: "6px 18px", borderRadius: 24, background: "rgba(10,16,28,0.88)", border: "1px solid rgba(var(--lim-accent-rgb),0.15)", backdropFilter: "blur(8px)", pointerEvents: "auto" }}>
-          <div style={{ width: 7, height: 7, borderRadius: "50%", background: signalHud.color, boxShadow: `0 0 6px ${signalHud.color}` }} />
-          <span style={{ color: "var(--lim-text, #c8d4e0)", fontSize: 12, fontWeight: 600, letterSpacing: "0.04em" }}>{personaDisplayLabel}</span>
+      {/* Top chrome: chat (left) · persona pill (center) · controls (right) */}
+      <div
+        style={{
+          flexShrink: 0,
+          display: "grid",
+          gridTemplateColumns: "minmax(0, 1fr) auto minmax(0, 1fr)",
+          alignItems: "center",
+          gap: 10,
+          padding: "8px 12px 0",
+        }}
+      >
+        <div style={{ justifySelf: "start", minWidth: 0, overflow: "hidden" }}>
+          <ShellChatSwitcher />
+        </div>
+        <div
+          style={{
+            display: "inline-flex",
+            alignItems: "center",
+            gap: 8,
+            padding: "5px 14px",
+            borderRadius: 24,
+            background: "rgba(10,16,28,0.88)",
+            border: "1px solid rgba(var(--lim-accent-rgb),0.15)",
+            backdropFilter: "blur(8px)",
+          }}
+        >
+          <div style={{ width: 6, height: 6, borderRadius: "50%", background: signalHud.color, boxShadow: `0 0 5px ${signalHud.color}` }} />
+          <span style={{ color: "var(--lim-text, #c8d4e0)", fontSize: 11, fontWeight: 600, letterSpacing: "0.04em" }}>{personaDisplayLabel}</span>
           {signalHud.label !== "ONLINE" && (
-            <span style={{ color: signalHud.color, fontSize: 10, fontFamily: "monospace", opacity: 0.8 }}>{signalHud.label}</span>
+            <span style={{ color: signalHud.color, fontSize: 9, fontFamily: "monospace", opacity: 0.8 }}>{signalHud.label}</span>
           )}
         </div>
-        {/* Required controls — keep settings reachable in every persona style */}
-        <div style={{ position: "absolute", right: 16, top: 12, pointerEvents: "auto" }}>
+        <div style={{ justifySelf: "end" }}>
           <ShellControls contract={contract} tone="soft" />
         </div>
       </div>

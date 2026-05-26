@@ -66,6 +66,10 @@ export const HARNESS_RULES: Record<string, string> = {
   "R-OUTPUT-QUALITY":
     "Final replies: if file/repo tools were used, cite at least one real path from tool output. Introduce each major theme once — no repeated key concept in consecutive sections. No hyphen-run separators; fix markdown before sending.",
   "R-MULTI-PART-USER": "Answer or explicitly defer every sub-question in a multi-part message — do not silently skip any part.",
+  "R-TURN-FRESHNESS":
+    "New analytical asks: open with What's new for this ask (2–4 bullets); prior memory/vault/chat is background only — ≤2 sentences cross-reference unless user asked for comparison/changelog.",
+  "R-TERM-SCOPE":
+    "When the answer hinges on a contested term: Working definition (one sentence); Alternate framing (one sentence) if a common alternative would change the conclusion.",
 
   // ── Persona / runtime ───────────────────────────────────────────────────────
   "R-RUNTIME-PERSONA-TOOLS":

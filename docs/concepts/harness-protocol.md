@@ -63,7 +63,10 @@ The following appear in `PROTOCOL_NAMED_RULES` in `systemPrompt.ts` but have **n
 
 - **R-VERIFY-HEAVY** — Many tools or path-heavy answers → `verify_result` when available.
 - **R-DECK-PIPELINE** — Slides/decks → document engine / PPTX path.
-- **R-EXECUTIVE-READ** — Long sends: compact executive lead in the user reply.
+- **R-EXECUTIVE-READ** — Long sends: compact executive lead in the user reply; cut restated sections when not exhaustive/deep dive.
+- **R-TURN-FRESHNESS** — New analytical asks: **What's new for this ask**; prior briefs/memory are background, not the outline.
+- **R-TERM-SCOPE** — Contested terms: **Working definition** + optional **Alternate framing**.
+- **R-NUMERIC-CITE** — Numbers as **reported** / **derived** / **judgment** (drivers, ranges, scenario weights).
 - **R-KNOWN-UNKNOWNS** — After failures, state what was tried and what remains unknown.
 - **R-RELATED-MEMORY-HOOK** — Thematic tasks: one targeted memory pass from the current ask.
 - **R-SELF-CHECK-SCORE** (optional) — Meta score in `think()` only.

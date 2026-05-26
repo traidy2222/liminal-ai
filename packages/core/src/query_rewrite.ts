@@ -65,3 +65,53 @@ export async function rewriteQueryForRecall(
     typeof hydeRaw === "string" && hydeRaw.trim() ? hydeRaw.trim().slice(0, 800) : undefined;
   return { subQueries: subQueries.length ? subQueries : ruleBasedSubqueries(t), hyde };
 }
+
+/**
+ * Identity recall queries — always LLM-generated (not keyword lists).
+ * Runs even when AGENT_QUERY_REWRITE=0.
+ */
+export async function rewriteQueryForIdentityRecall(
+  userMessage: string,
+  client: OpenAI,
+  defaultModel: string
+): Promise<RewriteQueryResult> {
+  const msg = userMessage.trim().slice(0, 1200);
+  if (!msg) return { subQueries: ["user preferred name how to address user"] };
+
+  const r = await completeChatJson(client, {
+    model: getFastModelSlug(defaultModel),
+    messages: [
+      {
+        role: "system",
+        content:
+          "The user is asking about their name or identity. Generate 2–4 short memory search queries " +
+          "that would find stored facts about what to call them (not OS usernames).\n" +
+          'Return JSON: {"subQueries": string[], "hyde"?: string}\n' +
+          "hyde: optional one-sentence hypothetical note that states their name if it were stored.",
+      },
+      { role: "user", content: msg },
+    ],
+    maxTokens: 280,
+    temperature: 0.1,
+    signal: AbortSignal.timeout(8000),
+  });
+
+  if (!r.ok || typeof r.parsed !== "object" || r.parsed === null) {
+    return { subQueries: [msg.slice(0, 400)] };
+  }
+  const obj = r.parsed as Record<string, unknown>;
+  const pq = obj["subQueries"];
+  const hydeRaw = obj["hyde"];
+  const subQueries = Array.isArray(pq)
+    ? pq
+        .map((x) => String(x).trim())
+        .filter((s) => s.length >= 3)
+        .slice(0, 5)
+    : [];
+  const hyde =
+    typeof hydeRaw === "string" && hydeRaw.trim() ? hydeRaw.trim().slice(0, 600) : undefined;
+  return {
+    subQueries: subQueries.length > 0 ? subQueries : [msg.slice(0, 400)],
+    hyde,
+  };
+}

@@ -121,6 +121,7 @@ import { docExportTool } from "./doc_export.js";
 import { docQualityReportTool } from "./doc_quality_report.js";
 // New tools — Upgrade VII (harness power)
 import { createQueryToolOutputsTool } from "./query_tool_outputs.js";
+import { createResearchStateTool } from "./research_state.js";
 import { createDispatchGraphTool } from "./dispatch_graph.js";
 import { createBranchEvaluateTool } from "./branch_evaluate.js";
 // Obsidian brain — vault tools
@@ -316,6 +317,7 @@ export async function registerAllTools(
 
     // Upgrade VII: session tool index query, intra-round DAG scheduling, branch evaluation
     registry.register(createQueryToolOutputsTool(harness));
+    registry.register(createResearchStateTool(harness.getResearchLedger()));
     registry.register(createDispatchGraphTool(harness));
     registry.register(createBranchEvaluateTool(harness));
 

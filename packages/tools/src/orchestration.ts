@@ -15,6 +15,7 @@ import { createSetRuntimeSettingsTool } from "./set_runtime_settings.js";
 import { createUploadImageTool } from "./upload_image.js";
 import { createExtractStructuredTool } from "./extract_structured.js";
 import { createHypothesizeTool } from "./hypothesize.js";
+import { createResearchStateTool } from "./research_state.js";
 import type { SubagentSpawnContract } from "@liminal/core";
 
 // ─── Helper ───────────────────────────────────────────────────────────────────
@@ -909,6 +910,7 @@ export function createOrchestrationTools(harness: AgentHarness) {
     child.registry.register(createUploadImageTool(child));
     child.registry.register(createHypothesizeTool(child));
     child.registry.register(createExtractStructuredTool(child));
+    child.registry.register(createResearchStateTool(child.getResearchLedger()));
     // Upgrade V: goal decomposer, branch explorer, contract verifier — each closes over child
     child.registry.register(createDecomposeGoalTool(child));
     child.registry.register(createBranchExploreTool(child));

@@ -23,7 +23,11 @@ import { StreamAccumulator } from "./streaming.js";
 import { TaskOrchestrator } from "./orchestrator.js";
 import { buildWorldContextMessage } from "./world_context.js";
 import { gatherRepoMapLines } from "./repo_map.js";
-import { rewriteQueryForRecall, type RewriteQueryResult } from "./query_rewrite.js";
+import {
+  rewriteQueryForRecall,
+  rewriteQueryForIdentityRecall,
+  type RewriteQueryResult,
+} from "./query_rewrite.js";
 import { distillToolOutput, shouldDistillToolOutput } from "./output_distill.js";
 import { appendFailureLog } from "./failure_log.js";
 import { completeChatJson, getFastModelSlug } from "./router.js";
@@ -147,6 +151,13 @@ import { scoreTurnAgainstIndex, detectContradictions, type RankableDoc } from ".
 import { EDIT_TOOL_NAMES, collectEditToolTargetPaths } from "./tool_changed_paths.js";
 import { ToolDag } from "./tool_dag.js";
 import { SessionToolIndex } from "./session_tool_index.js";
+import { ResearchLedger } from "./research_ledger.js";
+import {
+  extractPreferredNameFromMessage,
+  formatIdentityRecallBlock,
+  loadIdentityNotesFromDisk,
+  shouldPrimeMemoryThisRound,
+} from "./user_identity_memory.js";
 import { PasteScheduler } from "./paste_scheduler.js";
 import { predictNextTools } from "./paste_pattern_store.js";
 import { inferSpeculationArgs } from "./paste_args_inference.js";
@@ -899,6 +910,7 @@ const ORCHESTRATION_TOOL_NAMES = new Set([
   "verify_contract",        // closes over harness.getExecutionState()
   "synthesis_run",          // closes over harness (LLM calls via config)
   "query_tool_outputs",     // closes over harness._sessionToolIndex
+  "research_state",         // closes over harness._researchLedger
   "dispatch_graph",         // closes over harness._toolDag
   "branch_evaluate",        // closes over harness.forkChild + harness.orchestrator
 ]);
@@ -1036,6 +1048,10 @@ export class AgentHarness {
   private webSearchQueriesThisTurn: string[] = [];
   /** Near-duplicate failed search intents for one-shot retry discipline. */
   private failedSearchIntentCounts = new Map<string, number>();
+  /** Per-send research workspace state — populated by web_search / web_fetch results. */
+  private readonly _researchLedger = new ResearchLedger();
+  /** Last ledger version injected as a [RESEARCH STATE] block this send. */
+  private _lastResearchLedgerInjectedVersion = 0;
   /** Successful edit/write targets in this send, used for lint self-heal scoping. */
   private changedFilesThisTurn = new Set<string>();
   /** Related files observed from lint diagnostics in this send. */
@@ -1122,6 +1138,11 @@ export class AgentHarness {
   /** Returns the in-session tool output index (used by query_tool_outputs tool). */
   getSessionToolIndex(): SessionToolIndex {
     return this._sessionToolIndex;
+  }
+
+  /** Per-send research workspace (search queries, URL inventory, fetch outcomes). */
+  getResearchLedger(): ResearchLedger {
+    return this._researchLedger;
   }
 
   /**
@@ -1390,20 +1411,10 @@ export class AgentHarness {
             severity: "med",
           };
         }
-        if (this.webSearchQueriesThisTurn.length < 3) {
-          for (const prior of this.webSearchQueriesThisTurn) {
-            const overlap = lexicalJaccard(prior, query);
-            if (overlap >= 0.72) {
-              return {
-                ok: false,
-                reason:
-                  `First-pass web_search queries must be diverse (overlap=${overlap.toFixed(2)}). ` +
-                  "Use a different intent bucket: origins/background, latest status, impact/metrics.",
-                severity: "low",
-              };
-            }
-          }
-        }
+        // No diversity / budget refusal here — the ResearchLedger surfaces
+        // duplication and inventory directly into the model's context via the
+        // [RESEARCH STATE] block + research_state tool, so the model can see
+        // overlap and self-regulate. Trust the model; don't block its breadth.
       }
     }
     const state = this.executionState;
@@ -2013,6 +2024,8 @@ export class AgentHarness {
     this.vaultMetrics = { reads: 0, searches: 0, writes: 0, skippedWrites: 0 };
     this.webSearchQueriesThisTurn = [];
     this.failedSearchIntentCounts = new Map();
+    this._researchLedger.clear();
+    this._lastResearchLedgerInjectedVersion = 0;
     this.changedFilesThisTurn = new Set();
     this.lintRelatedFilesThisTurn = new Set();
     this.turnInference = null;
@@ -2026,6 +2039,7 @@ export class AgentHarness {
           overInferenceRisk: false,
           exploratoryCreative: false,
           identityQuery: false,
+          identityProvision: false,
           personaIdentityPrompt: false,
           runtimeIdentityPrompt: false,
           deckIntent: false,
@@ -2210,23 +2224,92 @@ export class AgentHarness {
       milestoneCount: this.executionState.milestones.length,
       contractCount: this.executionState.contracts.length,
     });
-    if (resolveHarnessEnvRaw("AGENT_QUERY_REWRITE", this.runtimePreferences) === "1" && !openingTurn) {
-      const skipRewriteForExploratory =
-        this.turnInference?.exploratoryCreative === true &&
-        resolveHarnessEnvRaw("AGENT_QUERY_REWRITE_EXPLORATORY", this.runtimePreferences) !== "1";
-      if (skipRewriteForExploratory) {
-        this.recallRewriteThisSend = null;
-      } else {
+    if (!openingTurn) {
+      const identityQ = this.turnInference?.identityQuery === true;
+      const rewriteOn = resolveHarnessEnvRaw("AGENT_QUERY_REWRITE", this.runtimePreferences) === "1";
+      if (identityQ) {
         try {
-          this.recallRewriteThisSend = await rewriteQueryForRecall(
+          this.recallRewriteThisSend = await rewriteQueryForIdentityRecall(
             userMessage,
             this.client,
             this.config.model
           );
         } catch {
+          this.recallRewriteThisSend = { subQueries: [userMessage.trim().slice(0, 400)] };
+        }
+      } else if (rewriteOn) {
+        const skipRewriteForExploratory =
+          this.turnInference?.exploratoryCreative === true &&
+          resolveHarnessEnvRaw("AGENT_QUERY_REWRITE_EXPLORATORY", this.runtimePreferences) !== "1";
+        if (skipRewriteForExploratory) {
           this.recallRewriteThisSend = null;
+        } else {
+          try {
+            this.recallRewriteThisSend = await rewriteQueryForRecall(
+              userMessage,
+              this.client,
+              this.config.model
+            );
+          } catch {
+            this.recallRewriteThisSend = null;
+          }
         }
       }
+    }
+
+    if (
+      !openingTurn &&
+      this.agentDepth === 0 &&
+      this.turnInference?.identityProvision === true &&
+      this.registry.has("remember")
+    ) {
+      try {
+        const extracted = await extractPreferredNameFromMessage(
+          userMessage,
+          this.client,
+          this.config.model
+        );
+        if (extracted) {
+          await this.dispatcher.directCall("remember", {
+            key: extracted.storageKey,
+            value: extracted.preferredName,
+            scope: "global",
+            confidence: 0.95,
+          });
+          this.context.appendMessage({
+            role: "system",
+            content:
+              `[Identity stored] ${extracted.storageKey} → "${extracted.preferredName}" (global scope). ` +
+              "Use this name in replies; do not substitute the OS username.",
+          });
+        }
+      } catch {
+        /* optional */
+      }
+    }
+
+    if (!openingTurn && this.agentDepth === 0 && this.turnInference?.identityQuery === true) {
+      try {
+        const identityNotes = await loadIdentityNotesFromDisk();
+        if (identityNotes.length > 0) {
+          this.context.appendMessage({
+            role: "user",
+            content:
+              "[Stored identity facts — authoritative for this turn; do not treat OS account name as the user's name]\n" +
+              formatIdentityRecallBlock(identityNotes),
+          });
+        }
+      } catch {
+        /* optional */
+      }
+      this.context.appendMessage({
+        role: "system",
+        content:
+          "[IDENTITY TURN] The user asked about their name. Answer from stored identity notes above and harness recall — " +
+          "never guess from the OS account line in world context. If nothing is stored, ask once what to call them and " +
+          "call remember({ key: 'user:name', value: '<name>', scope: 'global' }). " +
+          "recall_relevant always requires query= (or queries=); never call it with only scope=.",
+      });
     }
 
     try {
@@ -3392,6 +3475,22 @@ export class AgentHarness {
       this.injectedRuleIdsThisSend = extractRuleIds(ruleMsg);
     }
 
+    // ResearchLedger: when the ledger has changed since the last injection,
+    // append a compact [RESEARCH STATE] block so the model knows what it has
+    // already searched, what URLs are pending, and what fetches succeeded or
+    // failed. Empty / version-stable ledgers add zero overhead.
+    const ledgerVersion = this._researchLedger.getVersion();
+    if (
+      !this._researchLedger.isEmpty() &&
+      ledgerVersion !== this._lastResearchLedgerInjectedVersion
+    ) {
+      const block = this._researchLedger.formatContextBlock();
+      if (block) {
+        this.context.appendMessage({ role: "system", content: block });
+        this._lastResearchLedgerInjectedVersion = ledgerVersion;
+      }
+    }
+
     if (
       resolveHarnessEnvRaw("AGENT_FINALIZE_HINT", this.runtimePreferences) === "1" &&
       !this.finalizeHintInjectedThisSend &&
@@ -3505,10 +3604,15 @@ export class AgentHarness {
         /* non-fatal — gate open on error */
       }
     }
-    const shouldPrimeThisRound =
-      recallEvery > 0 &&
-      dreamScorePassedGate &&
-      ((round > 0 && round % recallEvery === 0) || (round === 0 && round0PrimeEnabled));
+    const identityLike = this.turnInference?.identityQuery === true;
+    // Name questions rarely lexically match stored notes — don't block harness recall.
+    if (identityLike) dreamScorePassedGate = true;
+    const shouldPrimeThisRound = shouldPrimeMemoryThisRound({
+      recallEvery,
+      round,
+      round0PrimeEnabled,
+      dreamScorePassedGate,
+    });
     if (
       shouldPrimeThisRound &&
       this.agentDepth === 0 &&
@@ -3525,14 +3629,25 @@ export class AgentHarness {
         const identityLike = this.turnInference?.identityQuery === true;
         // Identity queries get purpose-built BM25 seeds first — the raw question
         // ("do you know my name?") has zero lexical overlap with stored name facts.
-        const queries =
-          sub.length > 0
-            ? sub
-            : identityLike
-            ? ["user name", "what should i call user", "identity", "preferred name"]
-            : seed.length >= 8
-            ? [seed]
-            : [];
+        let queries: string[] = [];
+        let identityHyde: string | undefined;
+        if (identityLike) {
+          try {
+            const ir = await rewriteQueryForIdentityRecall(
+              this.lastUserMessage,
+              this.client,
+              this.config.model
+            );
+            queries = ir.subQueries.filter((q) => q.trim().length >= 3);
+            identityHyde = ir.hyde?.trim();
+          } catch {
+            queries = seed.length >= 4 ? [seed] : [this.lastUserMessage.trim().slice(0, 400)];
+          }
+        } else if (sub.length > 0) {
+          queries = sub;
+        } else if (seed.length >= 8) {
+          queries = [seed];
+        }
         if (queries.length > 0) {
           const k = Math.min(
             8,
@@ -3585,7 +3700,9 @@ export class AgentHarness {
                   ? { exclude_types: memoryPolicy.excludeTypes }
                   : {}),
               };
-          if (rw?.hyde?.trim()) payload["hyde"] = rw.hyde.trim().slice(0, 1500);
+          if (identityHyde) payload["hyde"] = identityHyde.slice(0, 1500);
+          else if (rw?.hyde?.trim()) payload["hyde"] = rw.hyde.trim().slice(0, 1500);
+          if (identityLike) payload["workspace_scope"] = "all";
           this.emitter.emit("memory_retrieval_policy", {
             intent,
             likelyEditPaths: this.turnInference?.likelyEditPaths?.length
@@ -3661,30 +3778,12 @@ export class AgentHarness {
           }
         }
 
-        // For identity-like queries (name/who am I), BM25 IDF collapses for "user"
-        // because it appears in hundreds of note keys. Bypass BM25 with direct exact
-        // key lookups for known name-bearing keys.
-        if (identityLike && this.registry.has("memory_query")) {
-          const nameKeys = [
-            "entity:user_name",
-            "entity:user_full_name",
-            "entity:preferred_name",
-            "fact:user_name",
-            "fact:preferred_name",
-          ];
-          const nameHits: string[] = [];
-          for (const nameKey of nameKeys) {
-            try {
-              const nr = await this.dispatcher.directCall("memory_query", { mode: "exact", key: nameKey });
-              if (nr.ok && typeof nr.output === "string" && nr.output.trim().length > 10) {
-                nameHits.push(nr.output.trim());
-              }
-            } catch { /* optional */ }
-          }
-          if (nameHits.length > 0) {
+        if (identityLike) {
+          const diskNotes = await loadIdentityNotesFromDisk();
+          if (diskNotes.length > 0) {
             this.context.appendMessage({
               role: "user",
-              content: `[Identity recall — stored name]\n${nameHits.join("\n")}`,
+              content: `[Identity recall — on-disk user:/identity:/pref: notes]\n${formatIdentityRecallBlock(diskNotes)}`,
             });
           }
         }
@@ -4404,6 +4503,27 @@ export class AgentHarness {
                 const key = normalizeIntentText(q);
                 this.failedSearchIntentCounts.set(key, (this.failedSearchIntentCounts.get(key) ?? 0) + 1);
               }
+              // ResearchLedger: parse URLs out of the result body and record
+              // them as pending. Multidomain — purely behavioral.
+              this._researchLedger.recordSearch(
+                q,
+                r.ok ? String(r.output ?? "") : "",
+                r.ok
+              );
+            }
+          } catch {
+            /* ignore */
+          }
+        } else if (tc.name === "web_fetch") {
+          try {
+            const a = JSON.parse(tc.argsJson) as { url?: string };
+            if (typeof a.url === "string" && a.url.trim().length >= 4) {
+              this._researchLedger.recordFetch(
+                a.url.trim(),
+                r.ok,
+                r.ok ? String(r.output ?? "") : undefined,
+                r.ok ? undefined : String(r.error ?? "")
+              );
             }
           } catch {
             /* ignore */

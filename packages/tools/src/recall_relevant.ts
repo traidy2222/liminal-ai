@@ -119,7 +119,7 @@ export const recallRelevantTool = defineTool({
     "WHEN: Starting work on a topic, or when search_memory / vault_search feel too literal.\n" +
     "NOT WHEN: You need structured joins or exact key lookup — use memory_query (exact/type/graph) instead.\n" +
     "GOOD OUTPUT: A short ranked list of note/vault snippets tied to your query; fold only relevant lines into the user-facing answer.\n" +
-    "ARGS: query — single query (optional if queries set); queries — array of sub-queries; hyde — optional hypothetical passage for embedding only; k or max_results (same limit, default 8); scope.",
+    "ARGS: query OR queries (at least one required) — never pass scope alone; queries — array of sub-queries; hyde — optional hypothetical passage for embedding only; k or max_results (same limit, default 8); scope.",
   requiresApproval: false,
   parameters: {
     type: "object",
@@ -185,7 +185,7 @@ export const recallRelevantTool = defineTool({
           "where sibling-chat workspace facts should not surface.",
       },
     },
-    required: ["query"],
+    required: [],
     additionalProperties: false,
   },
   handler: async (args, emit) => {

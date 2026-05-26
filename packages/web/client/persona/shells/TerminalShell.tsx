@@ -10,6 +10,7 @@ import { categoryForTool } from "../categoryMeta.js";
 import type { MessageEntry } from "../../useSSE.js";
 import { useStickyAutoScroll } from "../../useStickyAutoScroll.js";
 import { ShellControls } from "./ShellControls.js";
+import { ShellChatSwitcher } from "../../chat/ShellChatSwitcher.js";
 import { LIM } from "../personaVars.js";
 
 // ── Palette ───────────────────────────────────────────────────────────────────
@@ -314,8 +315,10 @@ export function TerminalShell({ contract }: { contract: ShellContract }) {
         </form>
 
         {/* Status line at bottom */}
-        <div style={{ flexShrink: 0, padding: "3px 12px 5px", background: "rgba(0,1,4,0.99)", borderTop: "1px solid rgba(var(--lim-accent-rgb),0.05)", display: "flex", alignItems: "center", gap: 12, fontSize: 9, fontFamily: "var(--lim-font-mono, Consolas, monospace)", letterSpacing: "0.08em", color: "rgba(var(--lim-accent-rgb),0.35)" }}>
-          <span style={{ color: CYAN }}>[{personaDisplayLabel}]</span>
+        <div style={{ flexShrink: 0, padding: "3px 12px 5px", background: "rgba(0,1,4,0.99)", borderTop: "1px solid rgba(var(--lim-accent-rgb),0.05)", display: "flex", alignItems: "center", gap: 10, fontSize: 9, fontFamily: "var(--lim-font-mono, Consolas, monospace)", letterSpacing: "0.08em", color: "rgba(var(--lim-accent-rgb),0.35)", minWidth: 0 }}>
+          <ShellChatSwitcher />
+          <span style={{ color: "rgba(var(--lim-accent-rgb),0.15)", flexShrink: 0 }}>|</span>
+          <span style={{ color: CYAN, flexShrink: 0 }}>[{personaDisplayLabel}]</span>
           <span style={{ color: "rgba(var(--lim-accent-rgb),0.2)" }}>›</span>
           <span style={{ color: signalHud.color }}>{signalHud.label}</span>
           <span style={{ color: "rgba(var(--lim-accent-rgb),0.2)" }}>·</span>

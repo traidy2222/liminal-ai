@@ -4,6 +4,7 @@ import { migratePersonaUiTheme } from "@liminal/core/persona-ui-theme";
 import type { MessageEntry } from "../../useSSE.js";
 import { useStickyAutoScroll } from "../../useStickyAutoScroll.js";
 import { ShellControls } from "./ShellControls.js";
+import { ShellChatSwitcher } from "../../chat/ShellChatSwitcher.js";
 
 // ── Palette ───────────────────────────────────────────────────────────────────
 
@@ -60,8 +61,20 @@ export function MinimalShell({ contract }: { contract: ShellContract }) {
       {/* Outer flex column — max 680px centered */}
       <div style={{ display: "flex", flexDirection: "column", flex: 1, overflow: "hidden", minHeight: 0, maxWidth: 680, margin: "0 auto", width: "100%" }}>
 
-        {/* Required controls — keep settings reachable in every persona style */}
-        <div style={{ flexShrink: 0, display: "flex", justifyContent: "flex-end", padding: "14px 24px 0" }}>
+        <div
+          style={{
+            flexShrink: 0,
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "space-between",
+            gap: 10,
+            padding: "12px 24px 0",
+            minWidth: 0,
+          }}
+        >
+          <div style={{ minWidth: 0, flex: 1, overflow: "hidden" }}>
+            <ShellChatSwitcher />
+          </div>
           <ShellControls contract={contract} tone="soft" />
         </div>
 

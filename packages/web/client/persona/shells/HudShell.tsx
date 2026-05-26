@@ -10,6 +10,7 @@ import { migratePersonaUiTheme, resolvePersonaPanelSides } from "@liminal/core/p
 import { categoryForTool } from "../categoryMeta.js";
 import { useStickyAutoScroll } from "../../useStickyAutoScroll.js";
 import { ShellControls } from "./ShellControls.js";
+import { ShellChatSwitcher } from "../../chat/ShellChatSwitcher.js";
 import {
   buildInputAreaStyle,
   buildUserMessageStyle,
@@ -1167,11 +1168,16 @@ export function HudShell({ contract }: { contract: ShellContract }) {
     <>
       <style>{CSS_ANIMATIONS}</style>
 
-      {/* Header */}
+      {/* Header (chat switcher shares this row — no separate strip above) */}
       {!headerHidden && (
       <div style={buildHeaderChromeStyle(personaTheme)}>
-        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-          <span style={buildHeaderLabelStyle(personaTheme)}>{personaDisplayLabel}</span>
+        <div style={{ display: "flex", alignItems: "center", gap: 10, minWidth: 0, flex: 1, overflow: "hidden" }}>
+          <ShellChatSwitcher />
+          <span
+            aria-hidden
+            style={{ width: 1, height: 12, flexShrink: 0, background: "rgba(var(--lim-accent-rgb, 0, 212, 255), 0.12)" }}
+          />
+          <span style={{ ...buildHeaderLabelStyle(personaTheme), flexShrink: 0 }}>{personaDisplayLabel}</span>
           {signalHud.label !== "ONLINE" && (
             <span title={signalHud.detail || signalHud.label} style={{ color: signalHud.color, fontSize: 9, fontFamily: "monospace", letterSpacing: "0.06em", opacity: signalHud.label === "WAIT API" ? 0.85 : 1 }}>
               ● {signalHud.label}
@@ -1206,6 +1212,20 @@ export function HudShell({ contract }: { contract: ShellContract }) {
           </button>
         </div>
       </div>
+      )}
+
+      {headerHidden && (
+        <div
+          style={{
+            flexShrink: 0,
+            display: "flex",
+            alignItems: "center",
+            padding: "4px 14px",
+            borderBottom: "1px solid rgba(var(--lim-accent-rgb, 0, 212, 255), 0.08)",
+          }}
+        >
+          <ShellChatSwitcher />
+        </div>
       )}
 
       {/* 3-column body */}
