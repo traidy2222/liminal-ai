@@ -66,6 +66,7 @@ import {
 } from "./process_manager.js";
 import { suggestImprovementTool, viewInsightsTool } from "./meta_tools.js";
 import { selfTelemetryTool } from "./self_telemetry.js";
+import { pasteTrainTool } from "./paste_train.js";
 import { createContextTools } from "./context_tools.js";
 import { createRecallCompressionTool } from "./recall_compression.js";
 import { createRefreshWorldContextTool } from "./refresh_world_context.js";
@@ -225,6 +226,7 @@ export async function registerAllTools(
   registry.register(suggestImprovementTool);
   registry.register(viewInsightsTool);
   registry.register(selfTelemetryTool);
+  registry.register(pasteTrainTool);
   registry.register(visionAnalyzeTool);
   // Obsidian brain
   registry.register(vaultWriteTool);

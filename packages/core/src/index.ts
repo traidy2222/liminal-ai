@@ -447,6 +447,31 @@ export { ToolDag } from "./tool_dag.js";
 export type { DagSpec, DagEdge } from "./tool_dag.js";
 export { SessionToolIndex } from "./session_tool_index.js";
 export type { ToolOutputEntry, ToolOutputQueryResult } from "./session_tool_index.js";
+export {
+  minePatternsFromSessions,
+  isSpeculatable,
+  defaultSessionRoots,
+  DEFAULT_CONTEXT_WINDOW,
+  DEFAULT_MIN_SUPPORT,
+} from "./paste_pattern_miner.js";
+export type { PatternRecord, MineOptions } from "./paste_pattern_miner.js";
+export {
+  loadPatternStore,
+  savePatternStore,
+  buildContextKey,
+  queryPatterns,
+  predictNextTools,
+  getCachedPatternStore,
+  refreshPatternStoreCache,
+  patternStorePath,
+} from "./paste_pattern_store.js";
+export type { PatternQueryResult } from "./paste_pattern_store.js";
+export { PasteScheduler } from "./paste_scheduler.js";
+export type {
+  SpeculationCandidate,
+  InFlightSpeculation,
+  SchedulerOptions,
+} from "./paste_scheduler.js";
 export { maybeWriteTrajectory } from "./trajectory_writer.js";
 export type { TrajectoryEntry, TrajectoryWriteInput } from "./trajectory_writer.js";
 export { scoreTurnOutcome, recordEffortOutcome, getBestEffortForIntent, formatEffortStatsReport } from "./outcome_scorer.js";

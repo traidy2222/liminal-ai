@@ -147,6 +147,9 @@ import { scoreTurnAgainstIndex, detectContradictions, type RankableDoc } from ".
 import { EDIT_TOOL_NAMES, collectEditToolTargetPaths } from "./tool_changed_paths.js";
 import { ToolDag } from "./tool_dag.js";
 import { SessionToolIndex } from "./session_tool_index.js";
+import { PasteScheduler } from "./paste_scheduler.js";
+import { predictNextTools } from "./paste_pattern_store.js";
+import { inferSpeculationArgs } from "./paste_args_inference.js";
 import { maybeWriteTrajectory } from "./trajectory_writer.js";
 import { scoreTurnOutcome, recordEffortOutcome, getBestEffortForIntent } from "./outcome_scorer.js";
 import { WorldContextRefresher } from "./world_context_delta.js";
@@ -1056,6 +1059,12 @@ export class AgentHarness {
   private readonly _toolDag = new ToolDag();
   /** In-session BM25 index of tool outputs (cleared at turn end). */
   private readonly _sessionToolIndex = new SessionToolIndex();
+  /** PASTE predictive-speculation scheduler — lazy-init on first use under AGENT_PASTE_PREDICTIVE=1. */
+  private _pasteScheduler: PasteScheduler | null = null;
+  /** Tool names successfully dispatched this send, in order — feeds the PASTE context window. */
+  private _pasteRecentTools: string[] = [];
+  /** Tools already speculated this send (toolName::argsKey) — avoid duplicate dispatches. */
+  private _pasteSpeculatedKeys = new Set<string>();
   /** Per-turn tool outcome log for trajectory/effort recording. */
   private _toolOutcomesThisTurn: Array<{ name: string; ok: boolean }> = [];
   /** Volatile world context refresher — root agent only, null on child agents. */
@@ -1997,6 +2006,9 @@ export class AgentHarness {
     this.dispatcher.resetTurnCounters();
     this._toolDag.clear();
     this._sessionToolIndex.clear();
+    if (this._pasteScheduler) this._pasteScheduler.reset();
+    this._pasteRecentTools = [];
+    this._pasteSpeculatedKeys.clear();
     this._toolOutcomesThisTurn = [];
     this.vaultMetrics = { reads: 0, searches: 0, writes: 0, skippedWrites: 0 };
     this.webSearchQueriesThisTurn = [];
@@ -4118,9 +4130,15 @@ export class AgentHarness {
         } else {
           // PASTE: reuse speculatively-started promise if available.
           const speculative = speculativePromises.get(tc.id);
-          result = speculative
-            ? await speculative
-            : await this.dispatcher.dispatch(tc.id, tc.name, tc.argsJson, batchToolNames);
+          if (speculative) {
+            result = await speculative;
+          } else {
+            // PASTE predictive: try to promote a pre-dispatched in-flight speculation.
+            const promoted = this.tryPromotePasteSpeculation(tc.name, tc.argsJson);
+            result = promoted
+              ? await promoted
+              : await this.dispatcher.dispatch(tc.id, tc.name, tc.argsJson, batchToolNames);
+          }
         }
         results[idx] = result;
         // Index output for query_tool_outputs + flag identical cross-round re-calls.
@@ -4220,6 +4238,15 @@ export class AgentHarness {
       for (const tc of toolCalls) {
         this.toolsUsedThisTurn.push(tc.name);
       }
+      // PASTE: feed successful tool names into the pattern context window.
+      for (let i = 0; i < toolCalls.length; i++) {
+        if (results[i]?.ok) this._pasteRecentTools.push(toolCalls[i]!.name);
+      }
+      if (this._pasteRecentTools.length > 16) {
+        this._pasteRecentTools = this._pasteRecentTools.slice(-16);
+      }
+      // Fire-and-forget — speculation runs concurrently with the next stream.
+      void this.maybePredictiveSpeculate();
       this.lastParallelToolBatchSize = toolCalls.length;
       let awarenessNeedsRefresh = false;
       let awarenessReason = "";
@@ -5269,6 +5296,101 @@ export class AgentHarness {
       completed.id,
       this.dispatcher.dispatch(completed.id, completed.name, completed.argsJson, [])
     );
+  }
+
+  // ── PASTE predictive speculation ─────────────────────────────────────────────
+
+  /**
+   * Returns the lazily-instantiated PASTE scheduler when AGENT_PASTE_PREDICTIVE=1.
+   * Returns null when the feature is disabled so all integration becomes a no-op.
+   */
+  private getPasteScheduler(): PasteScheduler | null {
+    if (resolveHarnessEnvRaw("AGENT_PASTE_PREDICTIVE", this.runtimePreferences) !== "1") {
+      return null;
+    }
+    if (!this._pasteScheduler) {
+      const budgetMs = parseInt(
+        resolveHarnessEnvRaw("AGENT_PASTE_BUDGET_MS", this.runtimePreferences) ?? "2000",
+        10
+      ) || 2000;
+      const minProbRaw = resolveHarnessEnvRaw("AGENT_PASTE_MIN_PROB", this.runtimePreferences);
+      const minProb = minProbRaw ? parseFloat(minProbRaw) : 0.5;
+      const maxConcurrent = parseInt(
+        resolveHarnessEnvRaw("AGENT_PASTE_MAX_CONCURRENT", this.runtimePreferences) ?? "2",
+        10
+      ) || 2;
+      this._pasteScheduler = new PasteScheduler({ budgetMs, minProbability: minProb, maxConcurrent });
+    }
+    return this._pasteScheduler;
+  }
+
+  /**
+   * Called after a tool batch settles. Queries the pattern store for likely
+   * next tools, infers args from session tool index when possible, and starts
+   * speculative dispatches that may be promoted by the model's next call.
+   */
+  private async maybePredictiveSpeculate(): Promise<void> {
+    const scheduler = this.getPasteScheduler();
+    if (!scheduler) return;
+    if (this._pasteRecentTools.length === 0) return;
+    const window = Math.max(
+      1,
+      parseInt(resolveHarnessEnvRaw("AGENT_PASTE_CONTEXT_WINDOW", this.runtimePreferences) ?? "2", 10) || 2
+    );
+    let predictions;
+    try {
+      predictions = await predictNextTools(this._pasteRecentTools, {
+        window,
+        topK: 3,
+        minProbability: 0,
+      });
+    } catch {
+      return;
+    }
+    if (predictions.length === 0) return;
+    for (const p of predictions) {
+      if (!scheduler.hasBudget()) break;
+      const toolDef = this.registry.get(p.nextTool);
+      if (!toolDef || !this.registry.isActive(p.nextTool)) continue;
+      const candidate = {
+        toolName: p.nextTool,
+        args: {} as Record<string, unknown>,
+        probability: p.probability,
+        estimatedLatencyMs: 0,
+      };
+      if (!scheduler.isEligible(candidate, toolDef)) continue;
+      const inferred = inferSpeculationArgs(p.nextTool, this._sessionToolIndex);
+      if (!inferred) continue;
+      candidate.args = inferred.args;
+      const argsJson = JSON.stringify(inferred.args);
+      const argsKey = stableArgsJsonKey(argsJson);
+      const dedupe = `${p.nextTool}::${argsKey}`;
+      if (this._pasteSpeculatedKeys.has(dedupe)) continue;
+      this._pasteSpeculatedKeys.add(dedupe);
+      const callId = `paste_spec_${Date.now()}_${Math.floor(Math.random() * 1e6)}`;
+      scheduler.start(candidate, argsKey, () =>
+        this.dispatcher.dispatch(callId, p.nextTool, argsJson, [])
+      );
+      this.emitter.emit("text", {
+        delta: `[PASTE] speculating ${p.nextTool}(${inferred.source}) p=${p.probability.toFixed(2)}\n`,
+        channel: "trace",
+      });
+    }
+  }
+
+  /**
+   * Try to promote an in-flight predictive speculation matching this tool call.
+   * Returns the promoted result promise on hit, or null when no match — caller
+   * must then dispatch normally.
+   */
+  private tryPromotePasteSpeculation(
+    toolName: string,
+    argsJson: string
+  ): Promise<ToolResult> | null {
+    const scheduler = this._pasteScheduler;
+    if (!scheduler) return null;
+    const argsKey = stableArgsJsonKey(argsJson);
+    return scheduler.promote(toolName, argsKey);
   }
 
   /**

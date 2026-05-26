@@ -72,7 +72,7 @@ These steps are **suggestions** only. The harness does not block `web_search` ba
 - `research` (default behavior when unset): persist durable research-style learnings
 - `aggressive` (broader write behavior)
 
-Deduplication is default-on unless `AGENT_VAULT_DEDUPE=0`.
+Deduplication is off by default; set `AGENT_VAULT_DEDUPE=1` to skip writes when body hash matches an existing note.
 
 - **Update in place:** reuse the **exact same** `vault_write` title — dedupe is skipped when that title already exists.
 - **New edition:** when content overlaps an older brief (e.g. Day 76 after Day 75), set **`ignore_dedupe: true`** on `vault_write`, or merge into the existing note instead of creating a parallel file.

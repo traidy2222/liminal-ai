@@ -127,6 +127,11 @@ Web **Settings** writes to (2). See [Configuration basics](../start/configuratio
 | `AGENT_OVERINFERENCE_GUARD` | `1` | yes | no | harness | Harness environment toggle for Overinference Guard. See docs/configuration.md (harness). |
 | `AGENT_OVERINFERENCE_LLM_CHECK` | `0` | yes | no | harness | Harness environment toggle for Overinference Llm Check. See docs/configuration.md (harness). |
 | `AGENT_PASTE` | `0` | yes | no | session_ui | Harness environment toggle for Paste. See docs/configuration.md (session ui). |
+| `AGENT_PASTE_BUDGET_MS` | `2000` | yes | no | session_ui | Aggregate in-flight wall-clock cap for predictive speculations. |
+| `AGENT_PASTE_CONTEXT_WINDOW` | `2` | yes | no | session_ui | Number of trailing tool calls used as the pattern lookup key. |
+| `AGENT_PASTE_MAX_CONCURRENT` | `2` | yes | no | session_ui | Hard cap on concurrent in-flight predictive speculations. |
+| `AGENT_PASTE_MIN_PROB` | `0.5` | yes | no | session_ui | Minimum mined-pattern probability before a speculation is dispatched (0–1). |
+| `AGENT_PASTE_PREDICTIVE` | `0` | yes | no | session_ui | Enable predictive speculative dispatch of the next tool call based on mined session patterns. |
 | `AGENT_PERSONA_BOOTSTRAP` | `1` | yes | no | session_ui | Harness environment toggle for Persona Bootstrap. See docs/configuration.md (session ui). |
 | `AGENT_PERSONA_BOOTSTRAP_ALLOW_SKIP` | `1` | yes | no | session_ui | Harness environment toggle for Persona Bootstrap Allow Skip. See docs/configuration.md (session ui). |
 | `AGENT_PERSONA_GENERATION_STREAM` | `1` | yes | no | harness | Stream persona bootstrap artifacts to the UI (0 = off). |
@@ -199,7 +204,7 @@ Web **Settings** writes to (2). See [Configuration basics](../start/configuratio
 | `AGENT_UI_VERBOSITY` | `normal` | yes | yes | session_ui | Harness environment toggle for Ui Verbosity. See docs/configuration.md (session ui). |
 | `AGENT_UPSTREAM_429_SUGGESTED_WAIT_MS` | `—` | yes | no | models_api | Harness environment toggle for Upstream 429 Suggested Wait Ms. See docs/configuration.md (models api). |
 | `AGENT_VAULT_AUTO_WRITE` | `off` | yes | yes | memory_vault | Harness environment toggle for Vault Auto Write. See docs/configuration.md (memory vault). |
-| `AGENT_VAULT_DEDUPE` | `1` | yes | no | memory_vault | Harness environment toggle for Vault Dedupe. See docs/configuration.md (memory vault). |
+| `AGENT_VAULT_DEDUPE` | `0` | yes | no | memory_vault | Harness environment toggle for Vault Dedupe. See docs/configuration.md (memory vault). |
 | `AGENT_VAULT_PATH` | `—` | yes | no | memory_vault | Harness environment toggle for Vault Path. See docs/configuration.md (memory vault). |
 | `AGENT_VAULT_REQUIRE_LINKS` | `0` | yes | no | memory_vault | Harness environment toggle for Vault Require Links. See docs/configuration.md (memory vault). |
 | `AGENT_VAULT_WRITE_BUDGET` | `8` | yes | no | memory_vault | Harness environment toggle for Vault Write Budget. See docs/configuration.md (memory vault). |
