@@ -1,6 +1,6 @@
 # Liminal
 
-[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+[![License: FSL-1.1-MIT](https://img.shields.io/badge/License-FSL--1.1--MIT-blue.svg)](LICENSE)
 ![Node](https://img.shields.io/badge/Node-22%2B-339933?logo=node.js&logoColor=white)
 ![TypeScript](https://img.shields.io/badge/TypeScript-5-3178C6?logo=typescript&logoColor=white)
 
@@ -150,4 +150,4 @@ Details: **`CLAUDE.md`** (agents) · **[docs/README.md](docs/README.md)** (opera
 
 ## License
 
-Liminal is released under the [MIT License](LICENSE).
+Liminal is released under the [Functional Source License 1.1, MIT Future License](LICENSE) (FSL-1.1-MIT). You can use and modify the source for most purposes; competing commercial products or services are not permitted. Each version automatically becomes available under MIT two years after we publish it.

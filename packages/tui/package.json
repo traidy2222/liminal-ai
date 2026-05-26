@@ -1,6 +1,7 @@
 {
   "name": "@liminal/tui",
   "version": "0.1.0",
+  "license": "FSL-1.1-MIT",
   "type": "module",
   "scripts": {
     "start": "node --import tsx/esm src/index.tsx",

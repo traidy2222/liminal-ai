@@ -1,5 +1,6 @@
 {
   "name": "liminal",
+  "license": "FSL-1.1-MIT",
   "private": true,
   "bin": {
     "liminal": "./scripts/liminal.mjs"

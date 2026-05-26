@@ -66,7 +66,7 @@ See [Changelog](./changelog.md) for version-by-version notes.
 | Upgrade story | `liminal update` + documented migration from alpha installs |
 | Eval bar | Scenario packs green on the release branch |
 
-Still **local-first** and **MIT** — v0.1.0 is a stability/packaging milestone, not a hosted SaaS product.
+Still **local-first** and **FSL-1.1-MIT** (fair source; converts to MIT after two years per release) — v0.1.0 is a stability/packaging milestone, not a hosted SaaS product.
 
 ---
 

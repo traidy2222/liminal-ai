@@ -1,6 +1,7 @@
 {
   "name": "@liminal/eval",
   "version": "0.1.0",
+  "license": "FSL-1.1-MIT",
   "type": "module",
   "scripts": {
     "eval": "node --import tsx/esm src/index.ts",
