@@ -125,6 +125,8 @@ Web **Settings** writes to (2). See [Configuration basics](../start/configuratio
 | `AGENT_OBSIDIAN_DISCOVER` | `1` | yes | no | memory_vault | Harness environment toggle for Obsidian Discover. See docs/configuration.md (memory vault). |
 | `AGENT_OBSIDIAN_REQUIRE_DOT_OBSIDIAN` | `1` | yes | no | memory_vault | Harness environment toggle for Obsidian Require Dot Obsidian. See docs/configuration.md (memory vault). |
 | `AGENT_OBSIDIAN_VAULT_NAME_SUBSTRING` | `` | yes | no | memory_vault | Harness environment toggle for Obsidian Vault Name Substring. See docs/configuration.md (memory vault). |
+| `AGENT_OPENROUTER_SESSIONS` | `1` | yes | no | harness | When on (default), chat completions to OpenRouter include session_id (and aligned user) so generations group in the Open |
+| `AGENT_OPENROUTER_SESSION_ID` | `` | yes | no | harness | Optional fixed OpenRouter session_id for all requests (max 256 chars). Leave empty to use each chat's harness taskId. |
 | `AGENT_OVERINFERENCE_GUARD` | `1` | yes | no | harness | Harness environment toggle for Overinference Guard. See docs/configuration.md (harness). |
 | `AGENT_OVERINFERENCE_LLM_CHECK` | `0` | yes | no | harness | Harness environment toggle for Overinference Llm Check. See docs/configuration.md (harness). |
 | `AGENT_PASTE` | `0` | yes | no | session_ui | Harness environment toggle for Paste. See docs/configuration.md (session ui). |

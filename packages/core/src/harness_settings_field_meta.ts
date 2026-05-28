@@ -1348,6 +1348,22 @@ const _META_RAW: Record<string, HarnessSettingsFieldMeta> = {
     description: "Harness environment toggle for Provider Allow Fallbacks. See docs/configuration.md (harness).",
     valueKind: "string",
   },
+  "AGENT_OPENROUTER_SESSIONS": {
+    tabId: "harness",
+    subgroupId: "harness_misc",
+    label: "OpenRouter Sessions",
+    description:
+      "When on (default), chat completions to OpenRouter include session_id (and aligned user) so generations group in the OpenRouter Sessions dashboard. Uses harness taskId per chat; set AGENT_OPENROUTER_SESSION_ID to pin a fixed id.",
+    valueKind: "boolean",
+  },
+  "AGENT_OPENROUTER_SESSION_ID": {
+    tabId: "harness",
+    subgroupId: "harness_misc",
+    label: "OpenRouter Session ID Override",
+    description:
+      "Optional fixed OpenRouter session_id for all requests (max 256 chars). Leave empty to use each chat's harness taskId.",
+    valueKind: "string",
+  },
   "AGENT_PROMPT_CACHE": {
     tabId: "harness",
     subgroupId: "harness_misc",

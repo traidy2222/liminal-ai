@@ -59,6 +59,7 @@ import { SharedMemoryBus } from "./shared_memory_bus.js";
 import { resolveProviderConfig, buildProviderRouting } from "./provider_config.js";
 import { applyPromptCacheBreakpoints, extractCachedTokens } from "./prompt_cache.js";
 import { buildOpenRouterAttributionHeaders } from "./openrouter_attribution.js";
+import { buildOpenRouterSessionExtras } from "./openrouter_session.js";
 import { withProviderRequestSpacing } from "./provider_request_gate.js";
 import type { RuntimePreferences, RuntimePersonaProfile } from "./runtime_prefs.js";
 import {
@@ -5021,6 +5022,7 @@ export class AgentHarness {
 
       const params: OpenAI.Chat.Completions.ChatCompletionCreateParamsStreaming & {
         provider?: { order: string[]; allow_fallbacks: boolean };
+        session_id?: string;
         user?: string;
         reasoning?: { effort: string };
         stream_options?: { include_usage: boolean };
@@ -5033,10 +5035,10 @@ export class AgentHarness {
         ...(maxCompletionTokens !== undefined && { max_tokens: maxCompletionTokens }),
         ...(useTools && { tools }),
         ...(useToolChoice && { tool_choice: "auto" as const }),
-        // OpenRouter-specific: sticky provider routing + session affinity for cache hits
+        // OpenRouter-specific: sticky provider routing + session tracking (Generations → Sessions)
         ...(providerRouting && { provider: providerRouting }),
         ...reasoningParam,
-        user: this.taskId,
+        ...buildOpenRouterSessionExtras(this.config.baseURL, this.taskId),
       };
 
       try {

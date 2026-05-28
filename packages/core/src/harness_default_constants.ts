@@ -215,6 +215,10 @@ export const HARNESS_ENV_DEFAULTS: Readonly<Record<string, string>> = {
   AGENT_PROVIDER_ORDER: "DeepInfra",       // sticky pin for main model — cache-friendly + cheapest input on DeepSeek V4 Pro
   AGENT_PROVIDER_ORDER_FAST: "DeepInfra",  // sticky pin for fast sidecar — cache-friendly + cheapest input on DeepSeek V4 Flash
   AGENT_PROVIDER_ALLOW_FALLBACKS: "0",     // DO NOT allow OpenRouter to drift providers — drift kills cache hits and silently increases cost
+  /** Pass OpenRouter `session_id` (and aligned `user`) on chat completions for dashboard session grouping. */
+  AGENT_OPENROUTER_SESSIONS: "1",
+  /** Optional fixed session id override (else harness taskId / active chat id). Max 256 chars. */
+  AGENT_OPENROUTER_SESSION_ID: "",
   // Prompt caching — adds cache_control breakpoint on the trailing static system
   // message. On DeepInfra/GMICloud/NovitaAI this discounts cached prefix tokens
   // ~10× on rounds 2+ of a ReAct turn. Disable only for A/B baseline measurement.

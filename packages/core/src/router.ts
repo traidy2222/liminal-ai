@@ -7,6 +7,7 @@ import { withProviderRequestSpacing } from "./provider_request_gate.js";
 import { effectiveHarnessEnvRaw } from "./harness_effective_env.js";
 import { buildProviderRouting } from "./provider_config.js";
 import { applyPromptCacheBreakpoints } from "./prompt_cache.js";
+import { buildOpenRouterSessionExtras } from "./openrouter_session.js";
 import type { Message } from "./types.js";
 
 export function getFastModelSlug(fallback: string): string {
@@ -33,7 +34,9 @@ export async function completeChatJson(
     temperature?: number;
     /** When aborted (timeout), the SDK rejects and {@link JsonCompletionResult} reports the error. */
     signal?: AbortSignal;
-    /** Stable ID for OpenRouter session affinity (task/session ID). */
+    /** Stable ID for OpenRouter session grouping (defaults to active chat / userId). */
+    sessionId?: string;
+    /** @deprecated Prefer sessionId — still honored when sessionId is unset. */
     userId?: string;
     /** Set true for fast/sidecar model calls — uses AGENT_PROVIDER_ORDER_FAST if set. */
     isFastModel?: boolean;
@@ -64,7 +67,10 @@ export async function completeChatJson(
               temperature: opts.temperature ?? 0.2,
               response_format: { type: "json_object" },
               ...(providerRouting && { provider: providerRouting }),
-              ...(opts.userId ? { user: opts.userId } : {}),
+              ...buildOpenRouterSessionExtras(
+                client.baseURL,
+                opts.sessionId ?? opts.userId
+              ),
             },
             opts.signal ? { signal: opts.signal } : undefined
           )

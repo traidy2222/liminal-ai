@@ -7,6 +7,7 @@ import type OpenAI from "openai";
 import { guardToolArgs } from "./tool_arg_guard.js";
 import { resolveWorkspaceRoot } from "./workspace_root.js";
 import { withProviderRequestSpacing } from "./provider_request_gate.js";
+import { buildOpenRouterSessionExtras } from "./openrouter_session.js";
 
 export type SafetyJudgeSource = "heuristic" | "llm" | "cache";
 
@@ -242,6 +243,7 @@ export class SafetyJudge {
                   content: `tool: ${toolName}\nargs: ${truncated}\nrecent batch: ${batch || "(none)"}`,
                 },
               ],
+              ...buildOpenRouterSessionExtras(this.client.baseURL),
             },
             { signal: controller.signal }
           )
