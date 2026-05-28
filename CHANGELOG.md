@@ -2,13 +2,21 @@
 
 All notable changes to [Liminal AI](https://github.com/traidy2222/liminal-ai) are documented here and on the docs portal: [docs.vireondynamics.com/liminal/reference/changelog](https://docs.vireondynamics.com/liminal/reference/changelog).
 
-**Current stage:** **alpha** (`v0.0.12` tip of `main`, 2026-05-26). The workspace package may read `0.1.0`, but **beta**, **RC**, and a **v0.1.0 public preview** have not been declared as product releases yet.
+**Current stage:** **alpha** (`v0.0.13` tip of `main`, 2026-05-28). **Beta**, **RC**, and **v0.1.0 public preview** have not been declared as product releases yet.
 
 Format: **v0.0.x** entries keyed to the last GitHub push in each slice. Dates are real push dates.
 
-## [v0.0.12] — 2026-05-26 — Current alpha
+Marketing (richer notes): [vireondynamics.com/liminal/changelog](https://vireondynamics.com/liminal/changelog)
 
-Research ledger + `research_state`, LLM identity memory, inline web chat switcher, `recall_relevant` schema fix, optional PASTE speculation.
+## [v0.0.13] — 2026-05-28 — Current alpha
+
+OpenRouter provider presets in Settings, full harness env catalog in UI, simpler turn end, Android scaffold removed.
+
+[Full notes](https://docs.vireondynamics.com/liminal/reference/changelog#v0-0-13)
+
+## [v0.0.12] — 2026-05-26
+
+Research ledger + `research_state`, identity memory, FSL-1.1-MIT relicense, inline web chat switcher, `recall_relevant` fix, optional PASTE, write_file integrity fix.
 
 [Full notes](https://docs.vireondynamics.com/liminal/reference/changelog#v0-0-12)
 
@@ -26,7 +34,7 @@ Task Worlds removed; execution state + compensation pass, `liminal` dev CLI, rec
 
 ## [v0.0.9] — 2026-05-22
 
-Streaming writes, reasoning budget, Playwright browser + CAPTCHA, document engine, MIT license file, compensation ledger.
+Streaming writes, reasoning budget, Playwright browser + CAPTCHA, document engine, MIT license file (later FSL), compensation ledger.
 
 [Full notes](https://docs.vireondynamics.com/liminal/reference/changelog#v0-0-9)
 
@@ -88,4 +96,4 @@ Monorepo scaffold, AgentHarness, tools, TUI, web, eval, Liminal rebrand.
 
 ---
 
-[v0.0.10]: https://github.com/traidy2222/liminal-ai/commits/main
+[v0.0.13]: https://github.com/traidy2222/liminal-ai/commits/main

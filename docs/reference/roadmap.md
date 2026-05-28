@@ -2,11 +2,11 @@
 
 Where Liminal is today and what comes next. **Dates are directional, not commitments** — alpha moves fast on `main`.
 
-**Current stage:** **alpha** (`v0.0.12`, May 2026). Beta, RC, and **v0.1.0 public preview** are [planned milestones](./changelog.md#planned-not-started), not shipped yet.
+**Current stage:** **alpha** (`v0.0.13`, May 2026). Beta, RC, and **v0.1.0 public preview** are [planned milestones](./changelog.md#planned-not-started), not shipped yet.
 
 ---
 
-## Now — Alpha (v0.0.12)
+## Now — Alpha (v0.0.13)
 
 What you can run today from [Install](../start/install.md):
 
@@ -21,6 +21,7 @@ What you can run today from [Install](../start/install.md):
 | Research | Per-send research ledger + `research_state` tool (web search/fetch discipline) |
 | Audio | `transcribe_audio`, web mic upload, dictation env knobs |
 | Install | Hosted one-command scripts + `liminal` CLI (alpha onboarding) |
+| Settings | Full `AGENT_*` catalog in web UI + OpenRouter **model presets** (one-click packs) |
 | Docs | Self-contained portal at [docs.vireondynamics.com/liminal/](https://docs.vireondynamics.com/liminal/) |
 
 See [Changelog](./changelog.md) for version-by-version notes.

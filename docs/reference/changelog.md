@@ -2,23 +2,40 @@
 
 All notable changes to [Liminal AI](https://github.com/traidy2222/liminal-ai) on the `main` branch.
 
-**Current stage:** **alpha** (`v0.0.12` tip of `main`, 2026-05-26). The workspace package may read `0.1.0`, but **beta**, **RC**, and a **v0.1.0 public preview** have not been declared as product releases yet.
+**Current stage:** **alpha** (`v0.0.13` tip of `main`, 2026-05-28). The workspace package may read `0.1.0`, but **beta**, **RC**, and a **v0.1.0 public preview** have not been declared as product releases yet.
 
 Format: **v0.0.x** entries keyed to the last GitHub push in each slice. Dates are real push dates.
+
+Marketing release notes (richer layout): [vireondynamics.com/liminal/changelog](https://vireondynamics.com/liminal/changelog)
+
+---
+
+## v0.0.13 — 2026-05-28 {#v0-0-13}
+
+**Current alpha.** Provider presets, Settings catalog completeness, simpler turn end.
+
+**Shipped**
+
+- **Provider model presets** — One-click OpenRouter packs in web Settings (main + fast slots, provider order pins); DeepSeek, Claude 4.7, GPT 5.5, Gemini 3.5, Qwen 3.6, MiMo, Llama 4, Kimi, GLM, and cross-vendor mixes; slugs verified against OpenRouter `GET /models`
+- **Settings completeness** — Full harness env catalog in the web Settings modal with field metadata (aligned with `HARNESS_ENV_DEFAULTS`)
+- **Turn end** — Simpler end-of-turn pipeline on `send()` (less redundant work)
+- **Repo** — Removed experimental Android app scaffold and `mobile-contract` package
 
 ---
 
 ## v0.0.12 — 2026-05-26 {#v0-0-12}
 
-**Current alpha.** Research ledger, LLM identity memory, and web chat chrome polish.
+Research ledger, identity memory, FSL relicense, web chat chrome polish.
 
 **Shipped**
 
-- **Research ledger** — Per-`send()` tracking of `web_search` / `web_fetch` (queries, surfaced URLs, fetch outcomes, deduped URLs); compact context injection each round; new harness tool `research_state` (summary / pending / fetched / failures views)
-- **Identity memory** — Intent `identityQuery` / `identityProvision`; LLM-generated recall queries (not keyword lists); on-disk scan of `user:` / `identity:` / `pref:` notes injected before answer; auto-`remember` with `scope: global` when the user states their name (`user:name`); protocol reminder not to use OS username as display name
-- **Recall fix** — `recall_relevant` accepts `query` or `queries` (schema no longer requires `query` when only `scope` was passed)
-- **Web UI** — Chat switcher embedded in each persona shell header row (HUD, Studio, Terminal status line, Minimal) instead of a separate top strip; portaled dropdown + click-outside dismiss
-- **PASTE** (optional) — Predictive tool-call speculation from paste patterns (`AGENT_PASTE_*`, off by default)
+- **Research ledger** — Per-`send()` tracking of `web_search` / `web_fetch` (queries, surfaced URLs, fetch outcomes, deduped URLs); compact context injection each round; harness tool `research_state` (summary / pending / fetched / failures views)
+- **Identity memory** — Intent `identityQuery` / `identityProvision`; LLM-generated recall queries; on-disk scan of `user:` / `identity:` / `pref:` notes; auto-`remember` with `scope: global` for `user:name`; protocol reminder not to use OS username as display name
+- **Recall fix** — `recall_relevant` accepts `query` or `queries`
+- **Web UI** — Chat switcher embedded in each persona shell header row; portaled dropdown + click-outside dismiss
+- **PASTE** (optional) — Predictive tool-call speculation (`AGENT_PASTE_*`, off by default)
+- **License** — **FSL-1.1-MIT** (MIT Future) across the harness; compliance documentation expanded; fair-source framing on marketing/install
+- **Reliability** — `write_file` integrity check fix for apostrophes inside comments
 
 ---
 
@@ -28,15 +45,14 @@ User-global storage, web multi-chat, audio transcription, and connector tools.
 
 **Shipped**
 
-- **Storage layout** — `~/.liminal/` user-global memory, persona, prefs, vault; per-chat folders for sessions/artifacts; `AGENT_STORAGE_LAYOUT=legacy` to keep old paths
+- **Storage layout** — `~/.liminal/` user-global memory, persona, prefs, vault; per-chat folders for sessions/artifacts; `AGENT_STORAGE_LAYOUT=legacy`
 - **Web multi-chat** — `ChatManager`, chat list/switch APIs, idle bridge eviction, SSE scoped to the active chat
-- **Audio** — `transcribe_audio`, upload attachments, OpenRouter Whisper defaults, dictation env knobs, web mic UI + auto-transcribe on upload
+- **Audio** — `transcribe_audio`, upload attachments, OpenRouter Whisper defaults, dictation env knobs, web mic UI
 - **API connectors** — `api_connect` / `api_disconnect` / `api_list` (OpenAPI → dynamic tools, persisted connections)
 - **MCP** — `mcp_attach` to wire MCP servers into the live registry
 - **Memory** — `memory_promote`, `memory_neighbors`, `consolidate_chat`; federated rank scoring; exploratory-turn debias (`AGENT_MEMORY_DEBIAS`, optional `AGENT_MEMORY_EXPLORATORY_AUTO_RECALL`)
 - **Harness** — `AGENT_PROMPT_CACHE` (provider cache breakpoints); intent inference heuristics + research finalize judge; vault index helper
-- **Docs** — [Roadmap](./roadmap.md) studio product pipeline (Teams, Bench, SDK) with marketing links
-- **Install** — script comments point at hosted `vireondynamics.com/install/` URLs
+- **Docs** — [Roadmap](./roadmap.md) studio product pipeline; install script comments point at hosted `vireondynamics.com/install/` URLs
 
 ---
 
@@ -61,7 +77,17 @@ Task Worlds landed earlier on May 23 then was **removed** the same day in favor 
 
 ## v0.0.9 — 2026-05-22 {#v0-0-9}
 
-Streaming writes, reasoning budget, Playwright browser + CAPTCHA, document engine, LICENSE (FSL-1.1-MIT), compensation ledger.
+Streaming writes, reasoning budget, Playwright browser + CAPTCHA, document engine, license file (later FSL), compensation ledger.
+
+**Shipped**
+
+- **Streaming large-file writes** — `.agent_write_staging/`, manifest resume after truncation; write integrity nudges; legacy patch tools removed
+- **Compensation ledger** for partial plan rollback; session tool-output index; outcome scoring; optional self-heal lint
+- **Intent classification** and **reasoning budget** (effort + think-depth per turn); external `think()` + `reason()` surface; two-tier main/fast models; effort learning
+- **Playwright browser** family + stealth; **CAPTCHA** solving (2captcha / CapSolver)
+- **Document engine** — compose → lint → repair → PPTX / DOCX / PDF export with quality gate
+- `self_telemetry`, `rename_symbol`, `git_worktree`; recipe library redesign; Settings catalog + provider presets in web UI
+- MIT `LICENSE` file at this milestone (superseded by FSL-1.1-MIT in v0.0.12)
 
 ---
 
@@ -69,11 +95,26 @@ Streaming writes, reasoning budget, Playwright browser + CAPTCHA, document engin
 
 Harness defaults + web Settings, Obsidian vault discovery, persona bootstrap/themes, orchestration expansion.
 
+**Shipped**
+
+- **`HARNESS_ENV_DEFAULTS`** typed module (~190 keys); web **Settings** modal with field metadata and provider presets
+- **Obsidian vault auto-discovery** from `obsidian.json`; web_fetch wall-clock budget + readability worker
+- Removed **`web_research`** tool → `web_search` + parallel `web_fetch`
+- Persona generator, bootstrap modal (TUI + web), **PersonaUiTheme** + web shell router, personality heartbeat (off by default)
+- Expanded harness lifecycle hooks; orchestration catalog growth; VitePress docs restructure
+
 ---
 
 ## v0.0.7 — 2026-05-12 {#v0-0-7}
 
 World context, session JSONL, platform context, agenda/scheduler, auto-dream telemetry.
+
+**Shipped**
+
+- **World context** gatherers + **harness rule recall** at round 2; **runtime prefs** (`.agent_runtime_prefs.json`); **platform context** (OS, shell, git, ports, terminal snapshots)
+- **Agenda / scheduler / synthesis / independence** tool family; web_fetch readability improvements
+- **Session JSONL** — rollup / delta / trace modes under `.agent_sessions/`; provider pacing gate; auto-dream scanner telemetry in web UI
+- TUI/web session metrics; **runtime settings** tools; experimental Android chat scaffold (later removed)
 
 ---
 
@@ -81,11 +122,24 @@ World context, session JSONL, platform context, agenda/scheduler, auto-dream tel
 
 Unified file edits, research credibility tiers, dynamic tools, MCP client.
 
+**Shipped**
+
+- **`write_file` + `edit_file`** canonical surface; **`grep_file`** always-on
+- **Source credibility tiers** and contradiction surfacing in research rules
+- **Dynamic tools** persisted to disk; **MCP client**; progress events for long-running tools
+- SSE reconnect hardening; provider retry lines visible in UI
+
 ---
 
 ## v0.0.5 — 2026-05-09 {#v0-0-5}
 
 Upgrade V — shared memory bus, tool DAG, semantic compression, goal/branch tools.
+
+**Shipped**
+
+- **Shared memory bus**; spaced-repetition decay in `memory_rank`
+- **TaskOrchestrator DAG** with `depends_on`; **semantic compression** for context
+- `decompose_goal`, `branch_explore`, `verify_contract`; plugin loader; adaptive protocol suffix
 
 ---
 
@@ -93,11 +147,24 @@ Upgrade V — shared memory bus, tool DAG, semantic compression, goal/branch too
 
 Vision sidecar, markets quotes, self-heal lint, document engine scaffold.
 
+**Shipped**
+
+- **Vision sidecar** (`vision_analyze`); **markets_quote** multi-source
+- **Self-heal lint** loop (off by default); **document engine** scaffolding (`doc_*` family begins)
+- Streaming resilience; long-horizon autonomy hooks; expanded file operations
+
 ---
 
 ## v0.0.3 — 2026-05-05 {#v0-0-3}
 
 Lazy tool families, hybrid recall, safety judge, workspace-root grounding.
+
+**Shipped**
+
+- **Tool argument guard**; vault path resolution; **workspace-root grounding**
+- **Safety judge** optional pre-flight; **hybrid recall** (BM25 + embeddings)
+- **Lazy tool loading** — `list_tool_families` / `activate_tool_family`
+- README + architecture diagram fixes
 
 ---
 
@@ -105,11 +172,23 @@ Lazy tool families, hybrid recall, safety judge, workspace-root grounding.
 
 Dynamic persona generation, child harness wiring.
 
+**Shipped**
+
+- LLM-generated personas with strength dial and modifiers
+- **`onChildCreated`** child harness tool registration; resource lock caps on persona tooling
+
 ---
 
 ## v0.0.1 — 2026-05-03 {#v0-0-1}
 
 Monorepo scaffold, AgentHarness, tools, TUI, web, eval, Liminal rebrand.
+
+**Shipped**
+
+- Workspaces: `packages/core`, `tools`, `tui`, `web`, `eval`
+- **AgentHarness** ReAct loop, approvals, context manager
+- Initial tools: files, shell, git, memory, web, `think` / `plan` / `reason`
+- Ink TUI + Express/React web with SSE; first eval scenarios
 
 ---
 
