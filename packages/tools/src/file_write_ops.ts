@@ -103,12 +103,22 @@ export async function promoteStagingFile(
     try {
       await access(targetPath);
       throw new Error(`File already exists: ${targetPath}`);
-    } catch {
-      /* ok */
+    } catch (err: unknown) {
+      const code = (err as NodeJS.ErrnoException | undefined)?.code;
+      if (code !== "ENOENT") throw err;
     }
     await writeFile(targetPath, staged, "utf8");
   } else if (mode === "append") {
-    await commitContent(targetPath, staged, "append");
+    let payload = staged;
+    try {
+      const prev = await readFile(targetPath, "utf8");
+      if (prev.length > 0 && !prev.endsWith("\n") && !payload.startsWith("\n")) {
+        payload = "\n" + payload;
+      }
+    } catch {
+      /* target missing — append creates it */
+    }
+    await commitContent(targetPath, payload, "append");
   } else {
     await commitContent(targetPath, staged, "overwrite");
   }

@@ -1,6 +1,8 @@
 /**
  * OpenRouter model packs — one-click switch for main + fast + sidecar model slots.
  * Consumed by web Settings and setup scripts (browser imports via package export).
+ *
+ * Slugs verified against GET https://openrouter.ai/api/v1/models (May 2026).
  */
 import {
   DEFAULT_AGENT_API_BASE_URL,
@@ -10,10 +12,35 @@ import {
 
 /** OpenRouter slugs (see https://openrouter.ai/models). */
 export const OPENROUTER_MODEL_SLUG = {
+  // DeepSeek / Xiaomi (product defaults)
   DEEPSEEK_V4_PRO: "deepseek/deepseek-v4-pro",
   DEEPSEEK_V4_FLASH: "deepseek/deepseek-v4-flash",
   MIMO_V25_PRO: "xiaomi/mimo-v2.5-pro",
   MIMO_V25: "xiaomi/mimo-v2.5",
+  // Anthropic
+  CLAUDE_OPUS_47: "anthropic/claude-opus-4.7",
+  CLAUDE_OPUS_47_FAST: "anthropic/claude-opus-4.7-fast",
+  CLAUDE_SONNET_46: "anthropic/claude-sonnet-4.6",
+  CLAUDE_HAIKU_45: "anthropic/claude-haiku-4.5",
+  // Google
+  GEMINI_35_FLASH: "google/gemini-3.5-flash",
+  GEMINI_31_FLASH_LITE: "google/gemini-3.1-flash-lite",
+  // OpenAI
+  GPT_55: "openai/gpt-5.5",
+  GPT_54_MINI: "openai/gpt-5.4-mini",
+  // Meta
+  LLAMA4_MAVERICK: "meta-llama/llama-4-maverick",
+  LLAMA4_SCOUT: "meta-llama/llama-4-scout",
+  // Qwen
+  QWEN36_PLUS: "qwen/qwen3.6-plus",
+  QWEN36_FLASH: "qwen/qwen3.6-flash",
+  QWEN3_CODER_PLUS: "qwen/qwen3-coder-plus",
+  QWEN3_CODER_FLASH: "qwen/qwen3-coder-flash",
+  // Moonshot / Z.ai
+  KIMI_K26: "moonshotai/kimi-k2.6",
+  KIMI_K25: "moonshotai/kimi-k2.5",
+  GLM_47: "z-ai/glm-4.7",
+  GLM_47_FLASH: "z-ai/glm-4.7-flash",
 } as const;
 
 export interface ProviderModelPreset {
@@ -57,48 +84,183 @@ export function buildHarnessModelPackEnvPatch(opts: {
   return patch;
 }
 
-const DEEPSEEK_V4_PATCH = buildHarnessModelPackEnvPatch({
-  main: OPENROUTER_MODEL_SLUG.DEEPSEEK_V4_PRO,
-  fast: OPENROUTER_MODEL_SLUG.DEEPSEEK_V4_FLASH,
-  baseURL: DEFAULT_AGENT_API_BASE_URL,
-  providerOrder: "DeepInfra",
-  providerOrderFast: "DeepInfra",
-  providerRouteAuto: "0",
-  allowFallbacks: "0",
-});
+/** DeepInfra pin — best prompt-cache affinity for DeepSeek V4 on OpenRouter. */
+function deepseekV4PinPatch(): Record<string, string> {
+  return buildHarnessModelPackEnvPatch({
+    main: OPENROUTER_MODEL_SLUG.DEEPSEEK_V4_PRO,
+    fast: OPENROUTER_MODEL_SLUG.DEEPSEEK_V4_FLASH,
+    baseURL: DEFAULT_AGENT_API_BASE_URL,
+    providerOrder: "DeepInfra",
+    providerOrderFast: "DeepInfra",
+    providerRouteAuto: "0",
+    allowFallbacks: "0",
+  });
+}
 
-const MIMO_V25_PATCH = buildHarnessModelPackEnvPatch({
-  main: OPENROUTER_MODEL_SLUG.MIMO_V25_PRO,
-  fast: OPENROUTER_MODEL_SLUG.MIMO_V25,
-  baseURL: DEFAULT_AGENT_API_BASE_URL,
-  providerOrder: "",
-  providerOrderFast: "",
-  providerRouteAuto: "1",
-  allowFallbacks: "1",
-});
+/** Same-vendor or cross-vendor pack with OpenRouter auto routing + fallbacks. */
+function openRouterAutoRoutePatch(main: string, fast: string): Record<string, string> {
+  return buildHarnessModelPackEnvPatch({
+    main,
+    fast,
+    baseURL: DEFAULT_AGENT_API_BASE_URL,
+    providerOrder: "",
+    providerOrderFast: "",
+    providerRouteAuto: "1",
+    allowFallbacks: "1",
+  });
+}
+
+function preset(
+  id: string,
+  label: string,
+  hint: string,
+  main: string,
+  harnessEnvPatch: Record<string, string>
+): ProviderModelPreset {
+  return {
+    id,
+    label,
+    hint,
+    baseURL: DEFAULT_AGENT_API_BASE_URL,
+    model: main,
+    harnessEnvPatch,
+  };
+}
 
 /** Cloud model packs for OpenRouter (Settings → preset dropdown). */
 export const PROVIDER_MODEL_PRESETS: readonly ProviderModelPreset[] = [
-  {
-    id: "deepseek-v4",
-    label: "DeepSeek V4 — Pro + Flash",
-    hint:
-      "Main: deepseek-v4-pro (agent loop). Fast: deepseek-v4-flash (intent, reflexion, memory sidecars). " +
-      "Pinned to DeepInfra for prompt-cache affinity. Requires OpenRouter key in `.env`.",
-    baseURL: DEFAULT_AGENT_API_BASE_URL,
-    model: OPENROUTER_MODEL_SLUG.DEEPSEEK_V4_PRO,
-    harnessEnvPatch: DEEPSEEK_V4_PATCH,
-  },
-  {
-    id: "mimo-v2.5",
-    label: "Xiaomi MiMo V2.5 — Pro + standard",
-    hint:
-      "Main: mimo-v2.5-pro (1M context, agentic). Fast: mimo-v2.5 (~half inference cost). " +
-      "Provider routing auto (no DeepInfra pin). Requires OpenRouter key in `.env`.",
-    baseURL: DEFAULT_AGENT_API_BASE_URL,
-    model: OPENROUTER_MODEL_SLUG.MIMO_V25_PRO,
-    harnessEnvPatch: MIMO_V25_PATCH,
-  },
+  // —— Same developer (main + fast tier) ——
+  preset(
+    "deepseek-v4",
+    "DeepSeek V4 — Pro + Flash",
+    "Latest DeepSeek pair on OpenRouter (Apr 2026). Main: v4-pro (~$0.44/M in). Fast: v4-flash (~$0.10/M in). " +
+      "Pinned to DeepInfra for prompt-cache affinity.",
+    OPENROUTER_MODEL_SLUG.DEEPSEEK_V4_PRO,
+    deepseekV4PinPatch()
+  ),
+  preset(
+    "mimo-v2.5",
+    "Xiaomi MiMo V2.5 — Pro + standard",
+    "Latest MiMo line. Main: mimo-v2.5-pro (1M ctx). Fast: mimo-v2.5 (~3× cheaper). OpenRouter auto-routes providers.",
+    OPENROUTER_MODEL_SLUG.MIMO_V25_PRO,
+    openRouterAutoRoutePatch(OPENROUTER_MODEL_SLUG.MIMO_V25_PRO, OPENROUTER_MODEL_SLUG.MIMO_V25)
+  ),
+  preset(
+    "google-gemini-3.5",
+    "Google Gemini 3.5 — Flash + 3.1 Flash Lite",
+    "Latest stable Google slugs (May 2026). Main: gemini-3.5-flash (1M). Fast: gemini-3.1-flash-lite (~6× cheaper). " +
+      "Replaces deprecated Gemini 2.5 / 3.1-preview packs.",
+    OPENROUTER_MODEL_SLUG.GEMINI_35_FLASH,
+    openRouterAutoRoutePatch(OPENROUTER_MODEL_SLUG.GEMINI_35_FLASH, OPENROUTER_MODEL_SLUG.GEMINI_31_FLASH_LITE)
+  ),
+  preset(
+    "anthropic-claude-opus-4.7",
+    "Anthropic Claude Opus 4.7 + Opus Fast",
+    "Frontier Anthropic line (Apr 2026). Main: claude-opus-4.7 (1M). Fast: claude-opus-4.7-fast. " +
+      "No Sonnet 4.7 on OpenRouter yet — use Sonnet 4.6 pack for balanced cost.",
+    OPENROUTER_MODEL_SLUG.CLAUDE_OPUS_47,
+    openRouterAutoRoutePatch(OPENROUTER_MODEL_SLUG.CLAUDE_OPUS_47, OPENROUTER_MODEL_SLUG.CLAUDE_OPUS_47_FAST)
+  ),
+  preset(
+    "anthropic-claude-sonnet-4.6",
+    "Anthropic Claude Sonnet 4.6 + Haiku 4.5",
+    "Best Sonnet-tier pair on OpenRouter. Main: claude-sonnet-4.6 (1M, ~$3/$15 per M). Fast: claude-haiku-4.5.",
+    OPENROUTER_MODEL_SLUG.CLAUDE_SONNET_46,
+    openRouterAutoRoutePatch(OPENROUTER_MODEL_SLUG.CLAUDE_SONNET_46, OPENROUTER_MODEL_SLUG.CLAUDE_HAIKU_45)
+  ),
+  preset(
+    "openai-gpt-5.5",
+    "OpenAI GPT-5.5 + GPT-5.4 mini",
+    "Latest OpenAI chat pair (May 2026). Main: gpt-5.5 (1M+). Fast: gpt-5.4-mini (no gpt-5.5-mini slug).",
+    OPENROUTER_MODEL_SLUG.GPT_55,
+    openRouterAutoRoutePatch(OPENROUTER_MODEL_SLUG.GPT_55, OPENROUTER_MODEL_SLUG.GPT_54_MINI)
+  ),
+  preset(
+    "meta-llama-4",
+    "Meta Llama 4 — Maverick + Scout",
+    "Latest Llama 4 open-weight pair. Main: llama-4-maverick (1M). Fast: llama-4-scout (10M ctx, very cheap).",
+    OPENROUTER_MODEL_SLUG.LLAMA4_MAVERICK,
+    openRouterAutoRoutePatch(OPENROUTER_MODEL_SLUG.LLAMA4_MAVERICK, OPENROUTER_MODEL_SLUG.LLAMA4_SCOUT)
+  ),
+  preset(
+    "qwen-3.6",
+    "Qwen 3.6 — Plus + Flash",
+    "Latest Qwen agent pair (May 2026). Main: qwen3.6-plus (1M). Fast: qwen3.6-flash. Replaces Qwen 3.5 Plus pack.",
+    OPENROUTER_MODEL_SLUG.QWEN36_PLUS,
+    openRouterAutoRoutePatch(OPENROUTER_MODEL_SLUG.QWEN36_PLUS, OPENROUTER_MODEL_SLUG.QWEN36_FLASH)
+  ),
+  preset(
+    "qwen-coder",
+    "Qwen — Coder Plus + Coder Flash",
+    "Latest Qwen coding pair. Main: qwen3-coder-plus (1M). Fast: qwen3-coder-flash. Replaces qwen3-coder + 3.5-9b.",
+    OPENROUTER_MODEL_SLUG.QWEN3_CODER_PLUS,
+    openRouterAutoRoutePatch(OPENROUTER_MODEL_SLUG.QWEN3_CODER_PLUS, OPENROUTER_MODEL_SLUG.QWEN3_CODER_FLASH)
+  ),
+  preset(
+    "kimi-k2",
+    "Moonshot Kimi — K2.6 + K2.5",
+    "Latest Kimi pair. Main: kimi-k2.6. Fast: kimi-k2.5. Strong CN/EN agentic work.",
+    OPENROUTER_MODEL_SLUG.KIMI_K26,
+    openRouterAutoRoutePatch(OPENROUTER_MODEL_SLUG.KIMI_K26, OPENROUTER_MODEL_SLUG.KIMI_K25)
+  ),
+  preset(
+    "zai-glm-4.7",
+    "Z.ai GLM — 4.7 + 4.7 Flash",
+    "Latest GLM pair. Main: glm-4.7. Fast: glm-4.7-flash.",
+    OPENROUTER_MODEL_SLUG.GLM_47,
+    openRouterAutoRoutePatch(OPENROUTER_MODEL_SLUG.GLM_47, OPENROUTER_MODEL_SLUG.GLM_47_FLASH)
+  ),
+  // —— Cross-developer (mixed main + fast) ——
+  preset(
+    "mix-claude-opus-4.7-deepseek-flash",
+    "Mix — Claude Opus 4.7 + DeepSeek Flash",
+    "Frontier Anthropic main + cheapest DeepSeek sidecars for intent/memory/safety JSON.",
+    OPENROUTER_MODEL_SLUG.CLAUDE_OPUS_47,
+    openRouterAutoRoutePatch(OPENROUTER_MODEL_SLUG.CLAUDE_OPUS_47, OPENROUTER_MODEL_SLUG.DEEPSEEK_V4_FLASH)
+  ),
+  preset(
+    "mix-claude-sonnet-4.6-deepseek-flash",
+    "Mix — Claude Sonnet 4.6 + DeepSeek Flash",
+    "Balanced Anthropic main (Sonnet 4.6) + DeepSeek Flash sidecars — best quality/$ for long harness runs.",
+    OPENROUTER_MODEL_SLUG.CLAUDE_SONNET_46,
+    openRouterAutoRoutePatch(OPENROUTER_MODEL_SLUG.CLAUDE_SONNET_46, OPENROUTER_MODEL_SLUG.DEEPSEEK_V4_FLASH)
+  ),
+  preset(
+    "mix-gemini-3.5-deepseek-flash",
+    "Mix — Gemini 3.5 Flash + DeepSeek Flash",
+    "Latest Google main (1M multimodal) + DeepSeek Flash sidecars. Good for web/research at moderate cost.",
+    OPENROUTER_MODEL_SLUG.GEMINI_35_FLASH,
+    openRouterAutoRoutePatch(OPENROUTER_MODEL_SLUG.GEMINI_35_FLASH, OPENROUTER_MODEL_SLUG.DEEPSEEK_V4_FLASH)
+  ),
+  preset(
+    "mix-deepseek-haiku",
+    "Mix — DeepSeek V4 Pro + Claude Haiku 4.5",
+    "Cheap capable main (DeepInfra pin) + latest Anthropic Haiku for crisp JSON sidecars.",
+    OPENROUTER_MODEL_SLUG.DEEPSEEK_V4_PRO,
+    buildHarnessModelPackEnvPatch({
+      main: OPENROUTER_MODEL_SLUG.DEEPSEEK_V4_PRO,
+      fast: OPENROUTER_MODEL_SLUG.CLAUDE_HAIKU_45,
+      baseURL: DEFAULT_AGENT_API_BASE_URL,
+      providerOrder: "DeepInfra",
+      providerOrderFast: "",
+      providerRouteAuto: "0",
+      allowFallbacks: "0",
+    })
+  ),
+  preset(
+    "mix-gpt55-gemini-flash-lite",
+    "Mix — GPT-5.5 + Gemini 3.1 Flash Lite",
+    "OpenAI main (tool-heavy) + latest cheap Google fast tier (gemini-3.1-flash-lite).",
+    OPENROUTER_MODEL_SLUG.GPT_55,
+    openRouterAutoRoutePatch(OPENROUTER_MODEL_SLUG.GPT_55, OPENROUTER_MODEL_SLUG.GEMINI_31_FLASH_LITE)
+  ),
+  preset(
+    "mix-qwen-coder-deepseek-flash",
+    "Mix — Qwen3 Coder Plus + DeepSeek Flash",
+    "Latest code-specialist main + ultra-cheap DeepSeek sidecars.",
+    OPENROUTER_MODEL_SLUG.QWEN3_CODER_PLUS,
+    openRouterAutoRoutePatch(OPENROUTER_MODEL_SLUG.QWEN3_CODER_PLUS, OPENROUTER_MODEL_SLUG.DEEPSEEK_V4_FLASH)
+  ),
 ] as const;
 
 export function findProviderModelPreset(id: string): ProviderModelPreset | undefined {

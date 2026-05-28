@@ -8,10 +8,11 @@ import {
   createContentStreamParseState,
   getDecodedContentFromRaw,
   ingestToolArgJsonDelta,
+  tryExtractJsonStringField,
   type ContentStreamParseState,
 } from "./tool_arg_content_stream.js";
 
-export type FileWriteSinkMode = "create" | "append";
+export type FileWriteSinkMode = "create" | "append" | "overwrite";
 
 type SinkEntry = {
   callId: string;
@@ -22,8 +23,11 @@ type SinkEntry = {
   mode: FileWriteSinkMode;
   stream: ReturnType<typeof createWriteStream> | null;
   bytesWritten: number;
+  /** Decoded UTF-16 length already flushed to staging. */
+  contentFlushedLen: number;
   closed: boolean;
   sinkActive: boolean;
+  writeFailed: boolean;
 };
 
 export function resolveWriteStreamSinkEnabled(prefs: RuntimePreferences | null): boolean {
@@ -37,16 +41,11 @@ export function resolveWriteStreamSinkMinChars(prefs: RuntimePreferences | null)
 }
 
 function inflightDir(chatId: string | null): string {
-  // Per-chat layout: stage under ~/.liminal/chats/<chatId>/write_staging/inflight
-  // so a chat bound to an external folder doesn't pollute that folder, and so
-  // scratch chats keep their staging alongside their workspace.
   if (chatId) {
-    // Lazy require to avoid widening this module's import graph.
     // eslint-disable-next-line @typescript-eslint/no-require-imports
     const gs = require("./global_storage.js") as typeof import("./global_storage.js");
     return gs.ensurePerChatDirSync(chatId, "write_staging", "inflight");
   }
-  // Legacy: workspace-local staging when no chatId is known.
   return path.join(resolveWorkspaceRoot(), ".agent_write_staging", "inflight");
 }
 
@@ -60,13 +59,18 @@ function resolveTargetPath(p: string): string {
   return path.resolve(resolveWorkspaceRoot(), p);
 }
 
+function parseSinkMode(raw: string | null): FileWriteSinkMode {
+  if (raw === "append") return "append";
+  if (raw === "overwrite") return "overwrite";
+  return "create";
+}
+
 export class FileWriteStreamSink {
   private readonly entries = new Map<string, SinkEntry>();
 
   constructor(
     private readonly enabled: boolean,
     private readonly minChars: number,
-    /** Chat / harness taskId — used to scope the staging dir per-chat. */
     private readonly chatId: string | null = null
   ) {}
 
@@ -79,13 +83,13 @@ export class FileWriteStreamSink {
         parse: createContentStreamParseState(),
         stagingPath: stagingPathFor(callId, this.chatId),
         targetPath: null,
-        // Staging is always a fresh file; the real create/overwrite/append mode
-        // is applied by the write_file handler from its parsed `mode` arg.
         mode: "create",
         stream: null,
         bytesWritten: 0,
+        contentFlushedLen: 0,
         closed: false,
         sinkActive: false,
+        writeFailed: false,
       });
     }
   }
@@ -94,39 +98,46 @@ export class FileWriteStreamSink {
     if (!this.enabled || !delta) return;
     this.open(callId, toolName);
     const entry = this.entries.get(callId);
-    if (!entry || entry.closed) return;
+    if (!entry || entry.closed || entry.writeFailed) return;
 
-    const { path: parsedPath, newContent } = ingestToolArgJsonDelta(entry.parse, delta);
+    ingestToolArgJsonDelta(entry.parse, delta);
+
+    const parsedPath = entry.parse.path ?? tryExtractJsonStringField(entry.parse.raw, "path");
     if (parsedPath && !entry.targetPath) {
       entry.targetPath = resolveTargetPath(parsedPath);
+      if (!entry.parse.path) entry.parse.path = parsedPath;
     }
 
-    if (!entry.sinkActive) {
-      if (entry.parse.contentEmittedLen < this.minChars) return;
+    const modeRaw = tryExtractJsonStringField(entry.parse.raw, "mode");
+    if (modeRaw) entry.mode = parseSinkMode(modeRaw);
+
+    if (!entry.sinkActive && entry.parse.contentEmittedLen >= this.minChars) {
       entry.sinkActive = true;
-      const backlog = getDecodedContentFromRaw(entry.parse);
-      if (backlog && entry.targetPath) {
-        await this.writeChunk(entry, backlog);
-      }
-      return;
     }
 
-    if (newContent && entry.targetPath) {
-      await this.writeChunk(entry, newContent);
+    if (entry.sinkActive && entry.targetPath) {
+      await this.flushDecodedTail(entry);
     }
   }
 
+  private async flushDecodedTail(entry: SinkEntry): Promise<void> {
+    const decoded = getDecodedContentFromRaw(entry.parse);
+    if (decoded.length <= entry.contentFlushedLen) return;
+    const slice = decoded.slice(entry.contentFlushedLen);
+    entry.contentFlushedLen = decoded.length;
+    await this.writeChunk(entry, slice);
+  }
+
   private async writeChunk(entry: SinkEntry, chunk: string): Promise<void> {
-    try {
-      await this.ensureStream(entry);
-      if (!entry.stream || entry.closed) return;
-      const ok = entry.stream.write(chunk, "utf8");
-      entry.bytesWritten += Buffer.byteLength(chunk, "utf8");
-      if (!ok) {
-        await new Promise<void>((resolve) => entry.stream!.once("drain", resolve));
-      }
-    } catch {
-      /* best-effort staging */
+    await this.ensureStream(entry);
+    if (!entry.stream || entry.closed) return;
+    const ok = entry.stream.write(chunk, "utf8");
+    entry.bytesWritten += Buffer.byteLength(chunk, "utf8");
+    if (!ok) {
+      await new Promise<void>((resolve, reject) => {
+        entry.stream!.once("drain", resolve);
+        entry.stream!.once("error", reject);
+      });
     }
   }
 
@@ -134,6 +145,9 @@ export class FileWriteStreamSink {
     if (entry.stream) return;
     await mkdir(inflightDir(this.chatId), { recursive: true });
     entry.stream = createWriteStream(entry.stagingPath, { encoding: "utf8", flags: "w" });
+    entry.stream.on("error", () => {
+      entry.writeFailed = true;
+    });
   }
 
   async finalize(callId: string): Promise<void> {
@@ -143,7 +157,7 @@ export class FileWriteStreamSink {
     if (entry.stream) {
       await new Promise<void>((resolve, reject) => {
         entry.stream!.end(() => resolve());
-        entry.stream!.on("error", reject);
+        entry.stream!.once("error", reject);
       });
     }
   }
@@ -166,7 +180,13 @@ export class FileWriteStreamSink {
     bytesWritten: number;
   } | null {
     const entry = this.entries.get(callId);
-    if (!entry || !entry.sinkActive || !entry.targetPath || entry.bytesWritten === 0) {
+    if (
+      !entry ||
+      entry.writeFailed ||
+      !entry.sinkActive ||
+      !entry.targetPath ||
+      entry.bytesWritten === 0
+    ) {
       return null;
     }
     this.entries.delete(callId);
@@ -189,21 +209,37 @@ export class FileWriteStreamSink {
     }
   }
 
+  /** True while a file-write tool call is still streaming args into staging. */
+  hasActiveIngest(): boolean {
+    for (const entry of this.entries.values()) {
+      if (entry.closed || entry.writeFailed) continue;
+      if (entry.sinkActive || entry.parse.contentEmittedLen > 0) return true;
+    }
+    return false;
+  }
+
   buildLengthResumeHint(callId: string): string {
     const entry = this.entries.get(callId);
     if (!entry?.targetPath || entry.bytesWritten === 0) return "";
     return ` Partial bytes (${entry.bytesWritten}) staged at ${entry.stagingPath} for ${entry.targetPath} — continue with write_file mode=append.`;
   }
 
-  /** Copy staged bytes to target so partial progress survives a truncated stream. */
   async salvagePartialToTarget(callId: string): Promise<{ targetPath: string; bytes: number } | null> {
     const entry = this.entries.get(callId);
-    if (!entry?.targetPath || entry.bytesWritten === 0) return null;
+    if (!entry?.targetPath || entry.bytesWritten === 0 || entry.writeFailed) return null;
     await this.finalize(callId);
     try {
       await mkdir(path.dirname(entry.targetPath), { recursive: true });
       if (entry.mode === "append") {
-        const staged = await readFile(entry.stagingPath, "utf8");
+        let staged = await readFile(entry.stagingPath, "utf8");
+        try {
+          const prev = await readFile(entry.targetPath, "utf8");
+          if (prev.length > 0 && !prev.endsWith("\n") && !staged.startsWith("\n")) {
+            staged = "\n" + staged;
+          }
+        } catch {
+          /* new file */
+        }
         await appendFile(entry.targetPath, staged, "utf8");
       } else {
         await copyFile(entry.stagingPath, entry.targetPath);

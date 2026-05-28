@@ -35,6 +35,7 @@ import { stableArgsJsonKey } from "./json_stable.js";
 import { buildHarnessRuleRecallMessage } from "./harness_rules.js";
 import {
   batchHasUndispatchableFileWrites,
+  fileWriteSafeToDispatch,
   isFileWriteToolName,
   LENGTH_RESUME_FILE_WRITE_MESSAGE,
   shouldDispatchToolBatch,
@@ -205,11 +206,13 @@ function buildSpawnContractPrelude(contract: ChildAgentConfig["spawnContract"]):
  */
 async function* withChunkTimeout<T>(
   stream: AsyncIterable<T>,
-  timeoutMs: number
+  timeoutMs: number | (() => number)
 ): AsyncGenerator<T> {
   const iter = stream[Symbol.asyncIterator]();
+  const resolveTimeout = () => (typeof timeoutMs === "function" ? timeoutMs() : timeoutMs);
   try {
     while (true) {
+      const waitMs = resolveTimeout();
       let timerId: ReturnType<typeof setTimeout> | undefined;
       const chunkPromise = iter.next();
       const timeoutPromise = new Promise<never>((_, reject) => {
@@ -217,11 +220,11 @@ async function* withChunkTimeout<T>(
           () =>
             reject(
               new Error(
-                `STREAM_CHUNK_TIMEOUT: No data received for ${Math.round(timeoutMs / 1000)}s — ` +
+                `STREAM_CHUNK_TIMEOUT: No data received for ${Math.round(waitMs / 1000)}s — ` +
                   "provider may be stalled. For very large files (thousands of lines), consider writing in sections to reduce per-completion size."
               )
             ),
-          timeoutMs
+          waitMs
         );
       });
       let result: IteratorResult<T, unknown>;
@@ -993,6 +996,8 @@ export class AgentHarness {
   private lengthResumeRemaining = 0;
   private writeIntegrityNudgeThisSend = false;
   private fileWriteStreamSink: FileWriteStreamSink | null = null;
+  /** Serialize write_file / edit_file on the same path within one send(). */
+  private readonly fileWritePathTail = new Map<string, Promise<void>>();
   /** Retry budget when model emits pseudo tool markup instead of actual tool calls. */
   private pseudoToolMarkupRetryRemaining = 1;
   /** Count of suppressed pseudo-markup stream chunks this send (for compact trace). */
@@ -1925,6 +1930,7 @@ export class AgentHarness {
     this.ruleRecallInjectedThisSend = false;
     this.injectedRuleIdsThisSend = [];
     this.writeIntegrityNudgeThisSend = false;
+    this.fileWritePathTail.clear();
     this.fileWriteStreamSink = new FileWriteStreamSink(
       resolveWriteStreamSinkEnabled(this.runtimePreferences),
       resolveWriteStreamSinkMinChars(this.runtimePreferences),
@@ -3813,7 +3819,13 @@ export class AgentHarness {
 
     streamLoop: while (true) {
       try {
-        for await (const chunk of withChunkTimeout(stream, chunkTimeoutMs)) {
+        const streamChunkTimeoutMs = () => {
+          if (this.fileWriteStreamSink?.hasActiveIngest()) {
+            return Math.max(chunkTimeoutMs * 4, 180_000);
+          }
+          return chunkTimeoutMs;
+        };
+        for await (const chunk of withChunkTimeout(stream, streamChunkTimeoutMs)) {
           // Check abort between chunks
           if (this.abortSignal?.aborted) return;
 
@@ -3935,6 +3947,10 @@ export class AgentHarness {
         }
 
         if (interruptedToolCalls.length > 0) {
+          for (const tc of interruptedToolCalls) {
+            if (!isFileWriteToolName(tc.name)) continue;
+            speculativePromises.delete(tc.id);
+          }
           await this.commitInterruptedStreamAttempt(
             interruptedText,
             interruptedToolCalls,
@@ -3986,6 +4002,11 @@ export class AgentHarness {
       batchHasUndispatchableFileWrites(toolCalls, finishReason)
     ) {
       this.lengthResumeRemaining--;
+      for (const tc of toolCalls) {
+        if (!isFileWriteToolName(tc.name)) continue;
+        speculativePromises.delete(tc.id);
+        discardFileWriteStreamManifest(tc.id);
+      }
       let resumeMsg = LENGTH_RESUME_FILE_WRITE_MESSAGE;
       if (this.fileWriteStreamSink) {
         for (const tc of toolCalls) {
@@ -3997,6 +4018,7 @@ export class AgentHarness {
           } else {
             resumeMsg += this.fileWriteStreamSink.buildLengthResumeHint(tc.id);
           }
+          this.fileWriteStreamSink.discard(tc.id);
         }
       }
       this.context.append(assistantMessage);
@@ -4122,16 +4144,20 @@ export class AgentHarness {
             error: `[loop_break] This (${tc.name}, args) combination was blocked after 3 consecutive failures earlier this turn. Try a different tool or change the arguments meaningfully.`,
           };
         } else {
-          // PASTE: reuse speculatively-started promise if available.
-          const speculative = speculativePromises.get(tc.id);
-          if (speculative) {
-            result = await speculative;
-          } else {
-            // PASTE predictive: try to promote a pre-dispatched in-flight speculation.
+          const runDispatch = async () => {
+            const speculative = speculativePromises.get(tc.id);
+            if (speculative) return speculative;
             const promoted = this.tryPromotePasteSpeculation(tc.name, tc.argsJson);
-            result = promoted
-              ? await promoted
-              : await this.dispatcher.dispatch(tc.id, tc.name, tc.argsJson, batchToolNames);
+            if (promoted) return promoted;
+            return this.dispatcher.dispatch(tc.id, tc.name, tc.argsJson, batchToolNames);
+          };
+          if (tc.name === "write_file" || tc.name === "edit_file") {
+            const pathKey = this.fileWritePathKeyFromArgs(tc.argsJson);
+            result = pathKey
+              ? await this.runSerializedOnFileWritePath(pathKey, runDispatch)
+              : await runDispatch();
+          } else {
+            result = await runDispatch();
           }
         }
         results[idx] = result;
@@ -5292,6 +5318,35 @@ export class AgentHarness {
    * When a provider stream stalls mid-tool-call, commit partial assistant + tool
    * messages so the model does not blindly re-issue write_file on the same path.
    */
+  private fileWritePathKeyFromArgs(argsJson: string): string | null {
+    const parsed = tryParseToolArgs(argsJson);
+    if (!parsed.ok) return null;
+    const p = String(parsed.args["path"] ?? "").trim();
+    return p || null;
+  }
+
+  private async runSerializedOnFileWritePath<T>(
+    pathKey: string,
+    fn: () => Promise<T>
+  ): Promise<T> {
+    const prev = this.fileWritePathTail.get(pathKey) ?? Promise.resolve();
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const tail = prev.then(() => gate);
+    this.fileWritePathTail.set(pathKey, tail);
+    await prev;
+    try {
+      return await fn();
+    } finally {
+      release();
+      if (this.fileWritePathTail.get(pathKey) === tail) {
+        this.fileWritePathTail.delete(pathKey);
+      }
+    }
+  }
+
   private async commitInterruptedStreamAttempt(
     interruptedText: string,
     interruptedToolCalls: AccumulatedToolCall[],
@@ -5310,12 +5365,43 @@ export class AgentHarness {
     for (const tc of toolCalls) {
       const parsed = tryParseToolArgs(tc.argsJson);
       let result: ToolResult;
-      if (parsed.ok) {
+      if (isFileWriteToolName(tc.name) && !fileWriteSafeToDispatch(tc, "length")) {
+        let extra = "";
+        if (this.fileWriteStreamSink) {
+          const salvaged = await this.fileWriteStreamSink.salvagePartialToTarget(tc.id);
+          if (salvaged) {
+            extra =
+              ` Partial progress (${salvaged.bytes} bytes) saved to ${salvaged.targetPath} — continue with write_file mode=append after the stream restarts.`;
+          } else {
+            extra = this.fileWriteStreamSink.buildLengthResumeHint(tc.id);
+          }
+          this.fileWriteStreamSink.discard(tc.id);
+        }
+        discardFileWriteStreamManifest(tc.id);
+        result = {
+          ok: false,
+          error:
+            `Stream interrupted (${retryLabel}): write_file was not committed (incomplete or truncated args).${extra}`,
+        };
+      } else if (parsed.ok) {
         const speculative = speculativePromises.get(tc.id);
-        result = speculative
-          ? await speculative
-          : await this.dispatcher.dispatch(tc.id, tc.name, tc.argsJson, batchToolNames);
+        const runDispatch = async () =>
+          speculative
+            ? speculative
+            : this.dispatcher.dispatch(tc.id, tc.name, tc.argsJson, batchToolNames);
+        if (tc.name === "write_file" || tc.name === "edit_file") {
+          const pathKey = this.fileWritePathKeyFromArgs(tc.argsJson);
+          result = pathKey
+            ? await this.runSerializedOnFileWritePath(pathKey, runDispatch)
+            : await runDispatch();
+        } else {
+          result = await runDispatch();
+        }
       } else {
+        if (isFileWriteToolName(tc.name)) {
+          this.fileWriteStreamSink?.discard(tc.id);
+          discardFileWriteStreamManifest(tc.id);
+        }
         result = {
           ok: false,
           error:

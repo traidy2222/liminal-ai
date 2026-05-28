@@ -106,6 +106,26 @@ test("write_file mode=create then mode=append builds full file", async () => {
   await rm(abs, { force: true });
 });
 
+test("promoteStagingFile mode=create refuses existing file", async () => {
+  const root = resolveWorkspaceRoot();
+  const rel = ".agent_artifacts/test-stream-create-guard.txt";
+  const abs = path.resolve(root, rel);
+  const staging = path.resolve(root, ".agent_artifacts/test-stream-create-guard.staging");
+  await rm(abs, { force: true });
+  await rm(staging, { force: true });
+  const { writeFile: wf } = await import("node:fs/promises");
+  await wf(abs, "existing", "utf8");
+  await wf(staging, "staged body", "utf8");
+  const { promoteStagingFile } = await import("./file_write_ops.js");
+  await assert.rejects(
+    () => promoteStagingFile(staging, abs, "create"),
+    /already exists/
+  );
+  assert.equal(await readFile(abs, "utf8"), "existing");
+  await rm(abs, { force: true });
+  await rm(staging, { force: true });
+});
+
 test("write_file mode=append creates the file when missing", async () => {
   const root = resolveWorkspaceRoot();
   const rel = ".agent_artifacts/test-append-create.txt";

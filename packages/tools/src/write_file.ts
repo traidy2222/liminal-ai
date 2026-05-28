@@ -8,6 +8,7 @@ import {
   rejectIfLikelyTruncated,
   type FileWriteMode,
 } from "./file_write_ops.js";
+import { validateHtmlAppendChunk } from "./html_write_coherence.js";
 import { takeFileWriteStreamManifest } from "@liminal/core";
 
 function resolveMode(raw: unknown): FileWriteMode {
@@ -62,6 +63,16 @@ export const writeFileTool = defineTool({
 
     if (streamManifest) {
       try {
+        if (mode === "append") {
+          try {
+            const prev = await readFile(streamManifest.targetPath, "utf8");
+            const staged = await readFile(streamManifest.stagingPath, "utf8");
+            const htmlErr = validateHtmlAppendChunk(prev, staged, streamManifest.targetPath);
+            if (htmlErr) return { ok: false, error: htmlErr };
+          } catch {
+            /* target or staging missing — promote will surface */
+          }
+        }
         const content = await promoteStagingFile(
           streamManifest.stagingPath,
           streamManifest.targetPath,
@@ -101,6 +112,8 @@ export const writeFileTool = defineTool({
         if (prev.length > 0 && !prev.endsWith("\n") && !content.startsWith("\n")) {
           payload = "\n" + content;
         }
+        const htmlErr = validateHtmlAppendChunk(prev, payload, prep.resolvedPath);
+        if (htmlErr) return { ok: false, error: htmlErr };
       } catch {
         /* file does not exist yet — append creates it, no separator needed */
       }

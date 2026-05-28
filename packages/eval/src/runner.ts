@@ -300,7 +300,7 @@ function makeEvalConfig(maxRounds: number, timeoutMs: number): AgentConfig {
   };
 }
 
-async function runSingleHarnessSend(scenario: Scenario, userMessage: string): Promise<{
+export async function runSingleHarnessSend(scenario: Scenario, userMessage: string): Promise<{
   trace: TraceEvent[];
   runError?: string;
   durationMs: number;

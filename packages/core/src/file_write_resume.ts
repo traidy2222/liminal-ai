@@ -26,7 +26,9 @@ export function shouldEagerDispatchWhenArgsComplete(
   pasteEnabled: boolean
 ): boolean {
   if (!canEagerDispatchTool(tool)) return false;
-  if (isFileWriteToolName(toolName)) return true;
+  // write_file dispatches only in the end-of-stream batch so length-resume and
+  // truncation checks run before anything hits disk (no eager mid-stream commit).
+  if (isFileWriteToolName(toolName)) return false;
   return pasteEnabled && (tool.dangerLevel === "safe" || !tool.dangerLevel);
 }
 
@@ -75,6 +77,16 @@ export function isLikelyTruncatedFileContent(content: string): boolean {
   return sq === 1 || dbl === 1 || bt === 1;
 }
 
+/** True when a write_file call must not commit to disk yet (truncated / length / bad JSON). */
+export function fileWriteSafeToDispatch(
+  tc: AccumulatedToolCall,
+  finishReason: string | null
+): boolean {
+  if (!isFileWriteToolName(tc.name)) return true;
+  if (!tryParseToolArgs(tc.argsJson).ok) return false;
+  return !fileWriteToolNeedsLengthResume(tc, finishReason);
+}
+
 export function fileWriteToolNeedsLengthResume(tc: AccumulatedToolCall, finishReason: string | null): boolean {
   if (!isFileWriteToolName(tc.name)) return false;
   const parsed = tryParseToolArgs(tc.argsJson);
@@ -85,6 +97,8 @@ export function fileWriteToolNeedsLengthResume(tc: AccumulatedToolCall, finishRe
   if (typeof content === "string" && isLikelyTruncatedFileContent(content)) {
     return true;
   }
+  // Valid JSON with complete-looking content may still finish with reason=length when
+  // the provider exhausted tokens on the closing brace — allow dispatch in that case.
   return false;
 }
 

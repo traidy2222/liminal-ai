@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import {
   batchHasUndispatchableFileWrites,
   canEagerDispatchTool,
+  fileWriteSafeToDispatch,
   isLikelyTruncatedFileContent,
   shouldDispatchToolBatch,
   shouldEagerDispatchWhenArgsComplete,
@@ -90,9 +91,31 @@ test("canEagerDispatchTool allows cautious write_file, blocks destructive approv
   );
 });
 
-test("shouldEagerDispatchWhenArgsComplete enables write_file without PASTE", () => {
+test("shouldEagerDispatchWhenArgsComplete does not eager-dispatch write_file", () => {
   const cautious = { requiresApproval: true, dangerLevel: "cautious" as const };
-  assert.equal(shouldEagerDispatchWhenArgsComplete("write_file", cautious, false), true);
+  assert.equal(shouldEagerDispatchWhenArgsComplete("write_file", cautious, false), false);
   assert.equal(shouldEagerDispatchWhenArgsComplete("read_file", cautious, false), false);
   assert.equal(shouldEagerDispatchWhenArgsComplete("read_file", { dangerLevel: "safe" }, true), true);
+});
+
+test("fileWriteSafeToDispatch allows length finish when JSON and content are complete", () => {
+  const tc = {
+    id: "1",
+    name: "write_file",
+    argsJson: JSON.stringify({ path: "ok.ts", content: "export const x = 1;\n" }),
+  };
+  assert.equal(fileWriteSafeToDispatch(tc, "length"), true);
+  assert.equal(fileWriteSafeToDispatch(tc, "tool_calls"), true);
+});
+
+test("batchHasUndispatchableFileWrites passes complete write_file on length finish", () => {
+  const calls = [
+    {
+      id: "1",
+      name: "write_file",
+      argsJson: JSON.stringify({ path: "ok.ts", content: "export const x = 1;\n" }),
+    },
+  ];
+  assert.equal(batchHasUndispatchableFileWrites(calls, "length"), false);
+  assert.equal(shouldDispatchToolBatch(calls, "length"), true);
 });

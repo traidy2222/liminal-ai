@@ -5,6 +5,24 @@ import path from "node:path";
 import { resolveWorkspaceRoot } from "./workspace_root.js";
 import { FileWriteStreamSink } from "./file_write_stream_sink.js";
 
+test("salvagePartialToTarget copies staged bytes before discard removes entry", async () => {
+  const sink = new FileWriteStreamSink(true, 5);
+  const callId = "test-salvage-1";
+  const rel = ".agent_artifacts/sink-salvage-test.txt";
+  const abs = path.resolve(resolveWorkspaceRoot(), rel);
+  await rm(abs, { force: true });
+  const delta = JSON.stringify({ path: rel, content: "hello-world-staged" });
+  await sink.ingestDelta(callId, "write_file", delta);
+  const salvaged = await sink.salvagePartialToTarget(callId);
+  assert.ok(salvaged);
+  assert.equal(salvaged!.targetPath, abs);
+  assert.ok(salvaged!.bytes >= 10);
+  const onDisk = await readFile(abs, "utf8");
+  assert.ok(onDisk.includes("hello-world"));
+  sink.discard(callId);
+  await rm(abs, { force: true });
+});
+
 test("FileWriteStreamSink writes staged content for large payload", async () => {
   const sink = new FileWriteStreamSink(true, 10);
   const callId = "test-sink-1";

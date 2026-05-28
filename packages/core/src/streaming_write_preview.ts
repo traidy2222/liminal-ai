@@ -18,6 +18,7 @@ export const STREAMING_WRITE_TOOL_SPECS: Readonly<Record<string, StreamingWriteT
   think: { contentFields: ["content"], labelFields: [] },
   reason: { contentFields: ["inference"], labelFields: [] },
   plan: { contentFields: [], labelFields: [], rawArgsFallback: true },
+  breakdown: { contentFields: ["goal"], labelFields: [], rawArgsFallback: true },
   write_file: { contentFields: ["content"], labelFields: ["path"] },
   edit_file: { contentFields: ["diff"], labelFields: ["path"] },
   vault_write: { contentFields: ["content"], labelFields: ["title"] },
