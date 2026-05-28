@@ -11,6 +11,8 @@ interface LockEntry {
   mode: LockMode;
   acquiredAt: number;
   ttl: number;
+  /** Same task may dispatch parallel tools that share a lock (e.g. batch run_shell). */
+  refcount: number;
 }
 
 export class ResourceLockManager {
@@ -48,9 +50,15 @@ export class ResourceLockManager {
     while (Date.now() < deadline) {
       this.evictExpired(resourceId);
       const holders = this.locks.get(resourceId) ?? [];
+      const own = holders.find((h) => h.taskId === taskId);
+      if (own) {
+        own.refcount += 1;
+        own.acquiredAt = Date.now();
+        return true;
+      }
       if (holders.length === 0) {
         this.locks.set(resourceId, [
-          { taskId, mode: "write", acquiredAt: Date.now(), ttl },
+          { taskId, mode: "write", acquiredAt: Date.now(), ttl, refcount: 1 },
         ]);
         return true;
       }
@@ -63,7 +71,17 @@ export class ResourceLockManager {
     for (const id of resourceIds) {
       const holders = this.locks.get(id);
       if (!holders) continue;
-      const remaining = holders.filter((e) => e.taskId !== taskId);
+      const remaining: LockEntry[] = [];
+      for (const e of holders) {
+        if (e.taskId !== taskId) {
+          remaining.push(e);
+          continue;
+        }
+        const next = e.refcount - 1;
+        if (next > 0) {
+          remaining.push({ ...e, refcount: next });
+        }
+      }
       if (remaining.length === 0) {
         this.locks.delete(id);
       } else {

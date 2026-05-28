@@ -51,8 +51,14 @@ export function buildHarnessSettingsApiFields(prefs: RuntimePreferences | null):
     const meta = HARNESS_SETTINGS_FIELD_META[key];
     const res = harnessEnvResolutionMeta(key, prefs);
     const pdRaw = HARNESS_ENV_DEFAULTS[key];
-    const productDefault = pdRaw !== undefined && pdRaw !== "" ? pdRaw : null;
-    const val = res.value ?? "";
+    const hasProductDefault = pdRaw !== undefined;
+    const productDefault = hasProductDefault ? pdRaw! : null;
+    const val =
+      res.value !== undefined && res.value !== ""
+        ? res.value
+        : hasProductDefault
+          ? pdRaw!
+          : "";
     rows.push({
       key,
       value: val,

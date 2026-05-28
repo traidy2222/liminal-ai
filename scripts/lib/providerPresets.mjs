@@ -3,17 +3,26 @@
 /** @type {ProviderPreset[]} */
 export const PROVIDER_PRESETS = [
   {
-    id: "openrouter",
-    label: "OpenRouter + deepseek/deepseek-chat (recommended)",
+    id: "deepseek-v4",
+    label: "OpenRouter — DeepSeek V4 Pro + Flash (recommended)",
     baseURL: "https://openrouter.ai/api/v1",
-    model: "deepseek/deepseek-chat",
+    model: "deepseek/deepseek-v4-pro",
     apiKey: "",
     needsKey: true,
-    hint: "Get a key at https://openrouter.ai/keys",
+    hint: "Main: deepseek-v4-pro. Fast sidecar: deepseek-v4-flash. Key: https://openrouter.ai/keys",
+  },
+  {
+    id: "mimo-v2.5",
+    label: "OpenRouter — Xiaomi MiMo V2.5 Pro + MiMo V2.5",
+    baseURL: "https://openrouter.ai/api/v1",
+    model: "xiaomi/mimo-v2.5-pro",
+    apiKey: "",
+    needsKey: true,
+    hint: "Main: mimo-v2.5-pro. Fast sidecar: mimo-v2.5. Key: https://openrouter.ai/keys",
   },
   {
     id: "deepseek",
-    label: "DeepSeek direct + deepseek-chat",
+    label: "DeepSeek API direct + deepseek-chat",
     baseURL: "https://api.deepseek.com/v1",
     model: "deepseek-chat",
     apiKey: "",

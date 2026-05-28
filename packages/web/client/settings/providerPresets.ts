@@ -1,5 +1,12 @@
-/** Browser-safe: do not import `@liminal/core` entry (pulls Node `async_hooks`). */
-import { DEFAULT_AGENT_API_BASE_URL, DEFAULT_AGENT_MODEL_SLUG } from "@liminal/core/defaults";
+/** Browser-safe: import model packs from core subpath (no Node async_hooks). */
+import {
+  DEFAULT_AGENT_API_BASE_URL,
+  DEFAULT_AGENT_MODEL_SLUG,
+} from "@liminal/core/defaults";
+import {
+  PROVIDER_MODEL_PRESETS,
+  resolveProviderModelPresetId,
+} from "@liminal/core/provider-presets";
 
 export const PROVIDER_PRESET_CUSTOM_ID = "custom";
 
@@ -21,21 +28,24 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
     baseURL: "",
     model: "",
   },
-  {
-    id: "openrouter",
-    label: "OpenRouter (cloud)",
-    hint: "https://openrouter.ai — set a real key in `.env` (`AGENT_API_KEY` or `OPENROUTER_API_KEY`).",
-    baseURL: "https://openrouter.ai/api/v1",
-    model: "deepseek/deepseek-v4-pro",
-    harnessEnvPatch: { AGENT_FAST_MODEL: "deepseek/deepseek-v4-pro" },
-  },
+  ...PROVIDER_MODEL_PRESETS.map((p) => ({
+    id: p.id,
+    label: p.label,
+    hint: p.hint,
+    baseURL: p.baseURL,
+    model: p.model,
+    harnessEnvPatch: p.harnessEnvPatch,
+  })),
   {
     id: "lmstudio",
     label: "LM Studio (local :1234)",
     hint: "Local OpenAI-compatible server — match the Model ID shown in LM Studio.",
-    baseURL: DEFAULT_AGENT_API_BASE_URL,
+    baseURL: "http://localhost:1234/v1",
     model: DEFAULT_AGENT_MODEL_SLUG,
-    harnessEnvPatch: { AGENT_FAST_MODEL: DEFAULT_AGENT_MODEL_SLUG },
+    harnessEnvPatch: {
+      AGENT_API_BASE_URL: "http://localhost:1234/v1",
+      AGENT_FAST_MODEL: DEFAULT_AGENT_MODEL_SLUG,
+    },
   },
   {
     id: "ollama",
@@ -52,6 +62,8 @@ export function normalizeProviderBase(url: string): string {
 }
 
 export function resolvePresetSelection(model: string, baseURL: string): string {
+  const cloud = resolveProviderModelPresetId(model, baseURL);
+  if (cloud) return cloud;
   const m = model.trim();
   const b = normalizeProviderBase(baseURL);
   for (const p of PROVIDER_PRESETS) {

@@ -57,8 +57,17 @@ export type { HarnessEnvResolutionSource } from "./harness_effective_env.js";
 export {
   DEFAULT_AGENT_API_BASE_URL,
   DEFAULT_AGENT_MODEL_SLUG,
+  DEFAULT_AGENT_FAST_MODEL_SLUG,
   HARNESS_ENV_DEFAULTS,
 } from "./harness_default_constants.js";
+export {
+  OPENROUTER_MODEL_SLUG,
+  PROVIDER_MODEL_PRESETS,
+  buildHarnessModelPackEnvPatch,
+  findProviderModelPreset,
+  resolveProviderModelPresetId,
+} from "./provider_model_presets.js";
+export type { ProviderModelPreset } from "./provider_model_presets.js";
 export {
   HARNESS_SECRET_ENV_KEYS,
   HARNESS_MANAGED_ENV_KEYS,

@@ -187,7 +187,7 @@ export function createRouter(chatManager: ChatManager, sse: SSEManager): Router 
     }
   });
 
-  router.post("/api/session/reset", (req, res) => {
+  router.post("/api/session/reset", async (req, res) => {
     const bridge = active();
     if (bridge.harness.getIsRunning()) {
       res.status(409).json({ error: "Agent is busy; wait for the current turn to finish." });
@@ -207,14 +207,18 @@ export function createRouter(chatManager: ChatManager, sse: SSEManager): Router 
     }
     const greet = body?.greet === true;
     bridge.clearSession({ preserveBootstrapState: true });
-    res.json({ ok: true, mode: "soft" });
+    let greeted = false;
     if (greet && !bridge.isAwaitingPersonaBootstrap) {
-      void bridge.harness.sendSessionGreeting().catch((err) => {
+      try {
+        await bridge.harness.sendSessionGreeting({ force: true });
+        greeted = true;
+      } catch (err) {
         sse.send("error", {
           message: err instanceof Error ? err.message : "Session greeting failed.",
         });
-      });
+      }
     }
+    res.json({ ok: true, mode: "soft", greeted });
   });
 
   router.post("/api/session/abort", (_req, res) => {
@@ -238,23 +242,9 @@ export function createRouter(chatManager: ChatManager, sse: SSEManager): Router 
       /* no active chat yet — fine */
     }
     if (bridge) {
-      // Immediately announce the active chat so newly-connected clients can
-      // sync their header chip + chat list selection state without a separate
-      // /api/workspace/current roundtrip.
-      void readChatMetadata(bridge.chatId).then((meta) => {
-        if (meta) {
-          res.write(
-            `event: chat_switched\ndata: ${JSON.stringify({
-              chatId: meta.chatId,
-              title: meta.title,
-              workspaceRoot: meta.workspaceRoot,
-              workspaceFingerprint: meta.workspaceFingerprint,
-              workspaceMode: meta.workspaceMode,
-              at: Date.now(),
-            })}\n\n`
-          );
-        }
-      });
+      // Do NOT emit `chat_switched` here — that event clears the client transcript.
+      // Chat switches are announced only from ChatManager.activate(). New stream
+      // clients load active chat via GET /api/config and /api/chats.
       if (bridge.isBusy) {
         res.write(
           `event: harness_running\ndata: ${JSON.stringify({ startedAt: bridge.turnStartTime })}\n\n`

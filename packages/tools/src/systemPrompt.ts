@@ -103,6 +103,7 @@ The shell is PowerShell — not bash. Key differences:
 - **Environment variables**: $env:VAR not $VAR.
 - **Path separators**: backslash is the native separator; forward slash usually works too.
 - **If a CDN download returns 404**: the URL or version is wrong — do not retry the same URL. Check npm for the correct version first: Invoke-WebRequest -Uri 'https://registry.npmjs.org/PKGNAME/latest' -UseBasicParsing | ConvertFrom-Json | Select-Object -ExpandProperty version
+- **Timeouts**: omitting timeout_ms → ~60s default (implicit max ~3m). Long builds/tests → pass timeout_ms (e.g. 3600000 for 1h; raise AGENT_SHELL_MAX_TIMEOUT_MS or set 0 for no cap). Indefinite processes → run_background, not run_shell. Do not loop hundreds of probes in one command without an explicit long timeout.
 
 **File operations — write_file + edit_file:**
 
@@ -333,6 +334,7 @@ When the user asks what tools you have, group by: currently active families vs a
 const RESEARCH_NAMED_RULES =
   "## Research rules (web tools active)\n" +
   "- **R-RESEARCH-SCOPE**: Cover multiple distinct query angles before synthesizing — stop fetching when additional sources on the same angle yield diminishing returns. If a fetch round stalls, pivot to a different domain/tier — summarize gaps under R-KNOWN-UNKNOWNS. If fetches repeatedly fail on the same lane or a headline claim rests only on T3/T4: one targeted T1/T2 pass or label the lane **shallow pass** and stop widening.\n" +
+  "- **R-RESEARCH-IP-PROBE**: Never http_request https://<bare-IP>:<port> — use web_fetch on the hostname, run_shell curl with Host header, or synthesize from Shodan/WHOIS the user pasted.\n" +
   "- **R-TEMPORAL**: Anchor queries to the current world-context date/year unless the user asks for a historical period. In multi-source briefs add **Source recency**: newest explicit calendar date vs world-context today; if key claims lean on materially older sources without fresher T1/T2 corroboration, label that material **stale mosaic** and soften confidence.\n" +
   "- **R-STATEMENT-VS-SIGNAL**: When official lines diverge from field/frontline or strong independent reporting, add one **Official vs signal** paragraph — name both with outlet/tier; tension from attributed contrast, not invented motives.\n" +
   "- **R-LIVE-DATA-HONESTY**: Never claim live/right-now conditions unless tool evidence includes source + observed/as-of time; if unavailable, disclose fallback location and uncertainty.\n" +

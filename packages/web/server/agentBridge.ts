@@ -227,7 +227,7 @@ export class AgentBridge {
       }
       if (options?.greet !== true) return;
       try {
-        await this.harness.sendSessionGreeting();
+        await this.harness.sendSessionGreeting({ force: true });
       } catch (err) {
         console.error(
           "Session greeting failed:",
@@ -413,7 +413,7 @@ export class AgentBridge {
             },
             { persist: true }
           );
-          await this.harness.sendSessionGreeting();
+          await this.harness.sendSessionGreeting({ force: true });
           this.emitBootstrapProgress("done", "Session ready.");
           return;
         }
@@ -440,7 +440,7 @@ export class AgentBridge {
             { persist: true }
           );
           this.awaitingPersonaBootstrapInput = false;
-          await this.harness.sendSessionGreeting();
+          await this.harness.sendSessionGreeting({ force: true });
           this.emitBootstrapProgress("done", "Session ready.");
           return;
         }
@@ -485,7 +485,7 @@ export class AgentBridge {
         }
         this.awaitingPersonaBootstrapInput = false;
         this.emitBootstrapProgress("greeting", "Finalizing session greeting...");
-        await this.harness.sendSessionGreeting();
+        await this.harness.sendSessionGreeting({ force: true });
         this.emitBootstrapProgress("done", "Bootstrap complete.");
       });
     } finally {

@@ -360,7 +360,9 @@ export function SettingsModal({
                           </span>
                         ) : (
                           <span style={{ fontSize: 10, color: "#6a7a8a", lineHeight: 1.45 }}>
-                            Chooses model + base URL + <code style={{ color: "#99aab8" }}>AGENT_FAST_MODEL</code>. Still click{" "}
+                            Chooses main model, base URL, fast model, and sidecar slots (
+                            <code style={{ color: "#99aab8" }}>AGENT_FAST_MODEL</code>, safety judge, memory autolink/consolidate,
+                            provider routing). Still click{" "}
                             <strong style={{ color: GREEN }}>SAVE TO RUNTIME PREFS</strong>. Local stacks: use any placeholder API key in{" "}
                             <code style={{ color: "#99aab8" }}>.env</code> (e.g. <code style={{ color: "#99aab8" }}>lm-studio</code>,{" "}
                             <code style={{ color: "#99aab8" }}>ollama</code>).
@@ -599,6 +601,7 @@ function SettingsFieldRow({
         type="number"
         disabled={disabled}
         value={rawValue}
+        placeholder={rawValue ? undefined : f.productDefault ?? undefined}
         onChange={(e) => onChange(e.target.value)}
         min={f.numericBounds?.min}
         max={f.numericBounds?.max}
@@ -623,6 +626,7 @@ function SettingsFieldRow({
       <textarea
         disabled={disabled}
         value={rawValue}
+        placeholder={rawValue ? undefined : f.productDefault ?? undefined}
         onChange={(e) => onChange(e.target.value)}
         rows={3}
         style={{
@@ -644,6 +648,7 @@ function SettingsFieldRow({
         type="text"
         disabled={disabled}
         value={rawValue}
+        placeholder={rawValue ? undefined : f.productDefault ?? undefined}
         onChange={(e) => onChange(e.target.value)}
         style={{
           width: "100%",
@@ -683,7 +688,7 @@ function SettingsFieldRow({
       <div style={{ fontSize: 10, color: "#6a7a8a", marginTop: 8, lineHeight: 1.5, fontFamily: "monospace" }}>
         <div>
           Effective: <span style={{ color: "#aabccc" }}>{f.effectiveDisplay}</span>
-          {f.resolutionSource === "unset" && !rawValue ? (
+          {f.resolutionSource === "unset" && rawValue === "" ? (
             <span style={{ color: AMBER }}> — empty</span>
           ) : null}
         </div>
@@ -691,9 +696,11 @@ function SettingsFieldRow({
         <div>
           Product default:{" "}
           {f.productDefault != null ? (
-            <span style={{ color: "#aabccc" }}>{f.productDefault}</span>
+            <span style={{ color: "#aabccc" }}>
+              {f.productDefault === "" ? "(empty — inherit / auto)" : f.productDefault}
+            </span>
           ) : (
-            <span style={{ color: AMBER }}>none (unset until you set it)</span>
+            <span style={{ color: AMBER }}>none</span>
           )}
         </div>
       </div>

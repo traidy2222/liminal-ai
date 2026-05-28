@@ -142,11 +142,6 @@ import {
 } from "./reasoning_surface.js";
 // isImplementShipUserMessage is still imported as a fallback for the
 // implementShip override below when the classifier wasn't available.
-import {
-  judgeResearchFinalize,
-  judgeResearchFinalizeWithRegex,
-  type ResearchFinalizeVerdict,
-} from "./research_finalize_judge.js";
 import { scoreTurnAgainstIndex, detectContradictions, type RankableDoc } from "./memory_rank.js";
 import { EDIT_TOOL_NAMES, collectEditToolTargetPaths } from "./tool_changed_paths.js";
 import { ToolDag } from "./tool_dag.js";
@@ -577,37 +572,6 @@ function isEvidenceToolName(name: string): boolean {
   );
 }
 
-function shouldRunCriticPass(assistantText: string): boolean {
-  if (assistantText.length < 80) return false;
-  if (assistantText.includes("```")) return true;
-  if (/packages[/\\]|[/\\]src[/\\]|\.\/[a-z]/i.test(assistantText)) return true;
-  return false;
-}
-
-/** True when final text likely depends on repo paths / code (AGENT_CRITIC_REQUIRE path trigger). */
-function looksPathOrCodeHeavy(assistantText: string): boolean {
-  if (assistantText.length < 40) return false;
-  // Require file/path-like context to avoid false positives like "Node.js".
-  if (/packages[/\\]|[/\\]src[/\\]|[A-Za-z0-9_.-]+[/\\][A-Za-z0-9_.-]+\.(ts|tsx|js|jsx|json|md)\b/i.test(assistantText)) return true;
-  if (/`[^`]{3,}\.(ts|tsx|js|json)`/.test(assistantText)) return true;
-  return false;
-}
-
-function normPathForMatch(p: string): string {
-  return p.replace(/\\/g, "/").toLowerCase();
-}
-
-function assistantCitesPath(assistantText: string, paths: string[]): boolean {
-  const t = normPathForMatch(assistantText);
-  for (const p of paths) {
-    const n = normPathForMatch(p);
-    if (n.length >= 4 && t.includes(n)) return true;
-    const base = n.split("/").pop();
-    if (base && base.length >= 4 && t.includes(base)) return true;
-  }
-  return false;
-}
-
 /** Simple djb2 hash → short hex string for recipe/reflexion key generation. */
 function hashString(s: string): string {
   let h = 5381;
@@ -741,13 +705,6 @@ function inferLoopBreakSuggestion(toolName: string, errSnippet: string): string 
   return null;
 }
 
-function isVisionCentricPrompt(text: string): boolean {
-  const t = text.toLowerCase();
-  return /\b(image|screenshot|photo|diagram|figure|ocr|read text from|what's in this picture|what is in this image|analyze this image)\b/.test(
-    t
-  );
-}
-
 type VaultAutoWriteMode = "off" | "research" | "aggressive";
 
 function resolveVaultAutoWriteMode(): VaultAutoWriteMode {
@@ -830,6 +787,13 @@ const ERROR_TAXONOMY: Array<{
     template: "Verify the command is installed. Use run_shell('which <cmd>') or run_shell('where <cmd>') to check.",
   },
   {
+    pattern: /bare_ip_without_host|HTTP request failed|fetch failed/i,
+    category: "HTTP_PROBE_FAIL",
+    hint: "Direct HTTP to bare IP:port or TLS mismatch often fails from Node fetch.",
+    template:
+      "Use web_fetch on the hostname (not https://IP:port), browser_open for bot walls, or run_shell: curl.exe -k -H \"Host: <hostname>\" https://<ip>:<port>/. Synthesize from evidence already in chat (Shodan/WHOIS/user paste).",
+  },
+  {
     pattern: /econnrefused|econnreset|getaddrinfo|network|dns lookup/i,
     category: "NETWORK_FAILURE",
     hint: "Network connectivity or DNS resolution failed.",
@@ -865,10 +829,13 @@ function buildAdaptiveHint(toolName: string, failCount: number): string {
     read_file: "Use list_dir first to confirm the exact path exists before retrying.",
     write_file: "mode=create errors if the file exists — use mode=overwrite to replace it, or edit_file for a targeted change. For very large files, write once with mode=create then mode=append for follow-up sections.",
     edit_file: "Targeted change to an existing file: replacements [{search, replace}] or a diff hunk. grep_file first to find the exact text.",
-    run_shell: "Check cwd and command syntax. For long processes, use run_background instead.",
     run_background: "Ensure the command is valid and cwd exists. Check startup_wait_ms.",
     web_fetch: "Verify the URL is correct with web_search first. Check for auth/redirects.",
-    web_search: "Rephrase the query or use a more specific search term.",
+    http_request:
+      "Do not probe https://<IP>:<port>. Use web_fetch on hostnames or run_shell curl with Host header.",
+    web_search: "Rephrase the query or use a more specific search term. Empty results are not a hard failure.",
+    run_shell:
+      "Non-zero exit with long output may still be useful (nslookup/curl -v). Read stderr before retrying.",
     recall: "Key may differ — use search_memory to find it by content.",
     spawn_agent: "Check depth limits and concurrent count with list_agents first.",
     write_file_hint: "Read the file first to see current content, then write the full merged result.",
@@ -1018,8 +985,6 @@ export class AgentHarness {
 
   /** At most one turn_end per send() — round cap / timeout / error paths share this. */
   private turnEndEmittedThisSend = false;
-  /** AGENT_FINALIZE_HINT: inject the budget nudge at most once per send(). */
-  private finalizeHintInjectedThisSend = false;
   /** One-shot rule recall suffix (named protocol rules) at round 2. */
   private ruleRecallInjectedThisSend = false;
   /** Rule IDs injected by the round-2 rule recall this send (for effectiveness scoring at turn end). */
@@ -1034,16 +999,6 @@ export class AgentHarness {
   private pseudoMarkupSuppressCountThisSend = 0;
   /** Emit suppression trace at most once per send to avoid spam. */
   private pseudoMarkupSuppressionNotifiedThisSend = false;
-  /** One-shot nudge to cite a read path before turn_end(ok). */
-  private finalizeCiteNudgeThisSend = false;
-  /** One-shot nudge for research synthesis completeness before turn_end(ok). */
-  private finalizeSynthesisNudgeThisSend = false;
-  /** One-shot guard for deck-intent requiring pptx render path. */
-  private finalizeDeckPipelineNudgeThisSend = false;
-  /** One-shot guard for vision-centric asks without sidecar usage. */
-  private finalizeVisionNudgeThisSend = false;
-  /** Max extra finalize replan loops allowed after a draft answer exists. */
-  private finalizeRetryBudgetThisSend = 1;
   /** web_search query history for first-pass diversity + dedupe checks. */
   private webSearchQueriesThisTurn: string[] = [];
   /** Near-duplicate failed search intents for one-shot retry discipline. */
@@ -1967,7 +1922,6 @@ export class AgentHarness {
     this.streamingToolNamesByCallId.clear();
     this.evidenceLog = [];
     this.turnEndEmittedThisSend = false;
-    this.finalizeHintInjectedThisSend = false;
     this.ruleRecallInjectedThisSend = false;
     this.injectedRuleIdsThisSend = [];
     this.writeIntegrityNudgeThisSend = false;
@@ -2008,12 +1962,6 @@ export class AgentHarness {
     );
     this.pseudoMarkupSuppressCountThisSend = 0;
     this.pseudoMarkupSuppressionNotifiedThisSend = false;
-    this.finalizeCiteNudgeThisSend = false;
-    this.finalizeSynthesisNudgeThisSend = false;
-    this.finalizeRetryBudgetThisSend = Math.max(
-      0,
-      Math.min(2, parseInt(resolveHarnessEnvRaw("AGENT_FINALIZE_RETRY_BUDGET", this.runtimePreferences) ?? "1", 10) || 1)
-    );
     this.dispatcher.resetTurnCounters();
     this._toolDag.clear();
     this._sessionToolIndex.clear();
@@ -3491,20 +3439,6 @@ export class AgentHarness {
       }
     }
 
-    if (
-      resolveHarnessEnvRaw("AGENT_FINALIZE_HINT", this.runtimePreferences) === "1" &&
-      !this.finalizeHintInjectedThisSend &&
-      this.roundCount >= Math.max(1, Math.ceil(0.7 * this.config.maxToolRoundsPerTurn))
-    ) {
-      this.finalizeHintInjectedThisSend = true;
-      this.context.appendMessage({
-        role: "user",
-        content:
-          "[SYSTEM NOTE] You are past ~70% of the tool-round budget for this turn. " +
-          "Stop calling tools unless strictly necessary and produce your final answer soon.",
-      });
-    }
-
     this.context.refreshProtocolDynamic(this.registry.getActiveToolNames());
     this.refreshToolAwareness("protocol_dynamic_refresh");
 
@@ -4045,45 +3979,6 @@ export class AgentHarness {
       toolCalls.length === 0 &&
       shouldSkipHarnessSecondaryPassesForTurn(this.lastUserMessage, this.turnInference);
 
-    // If stream ended without an explicit finish reason, treat as potentially incomplete
-    // and request continuation before running finalization/verification logic.
-    if (
-      !skipStreamContinuationsForIntro &&
-      finishReason == null &&
-      toolCalls.length === 0 &&
-      accumulatedText.trim().length > 0 &&
-      this.lengthResumeRemaining > 0
-    ) {
-      this.lengthResumeRemaining--;
-      this.context.append(assistantMessage);
-      this.context.appendMessage({
-        role: "user",
-        content:
-          "[CONTINUE] The previous assistant message appears incomplete (no finish reason). " +
-          "Continue exactly where you left off and finish before verification/finalization.",
-      });
-      await this.runReActLoop(round);
-      return;
-    }
-
-    if (
-      !skipStreamContinuationsForIntro &&
-      finishReason === "length" &&
-      toolCalls.length === 0 &&
-      this.lengthResumeRemaining > 0
-    ) {
-      this.lengthResumeRemaining--;
-      this.context.append(assistantMessage);
-      this.context.appendMessage({
-        role: "user",
-        content:
-          "[CONTINUE] The previous assistant message was cut off (length limit). " +
-          "Continue exactly where you left off and finish.",
-      });
-      await this.runReActLoop(round);
-      return;
-    }
-
     if (
       !skipStreamContinuationsForIntro &&
       toolCalls.length > 0 &&
@@ -4514,16 +4409,31 @@ export class AgentHarness {
           } catch {
             /* ignore */
           }
-        } else if (tc.name === "web_fetch") {
+        } else if (tc.name === "web_fetch" || tc.name === "http_request") {
           try {
             const a = JSON.parse(tc.argsJson) as { url?: string };
             if (typeof a.url === "string" && a.url.trim().length >= 4) {
-              this._researchLedger.recordFetch(
-                a.url.trim(),
-                r.ok,
-                r.ok ? String(r.output ?? "") : undefined,
-                r.ok ? undefined : String(r.error ?? "")
-              );
+              const url = a.url.trim();
+              let fetchOk = r.ok;
+              let fetchBody = r.ok ? String(r.output ?? "") : undefined;
+              let fetchErr = r.ok ? undefined : String(r.error ?? "");
+              if (tc.name === "http_request" && r.ok && fetchBody) {
+                try {
+                  const parsed = JSON.parse(fetchBody) as {
+                    ok?: boolean;
+                    skipped?: boolean;
+                    error?: string;
+                    guidance?: string;
+                  };
+                  if (parsed.skipped || parsed.ok === false) {
+                    fetchOk = false;
+                    fetchErr = parsed.error ?? parsed.guidance ?? "http_request failed or skipped";
+                  }
+                } catch {
+                  /* plain text body */
+                }
+              }
+              this._researchLedger.recordFetch(url, fetchOk, fetchOk ? fetchBody : undefined, fetchErr);
             }
           } catch {
             /* ignore */
@@ -4957,209 +4867,8 @@ export class AgentHarness {
       await this.runLintSelfHealIfNeeded();
       await this.runReActLoop(round + 1);
     } else {
-      let assistantText = "";
-      if (typeof assistantMessage.content === "string") {
-        assistantText = normalizeSearchDelta(assistantMessage.content);
-      }
-      const criticMinTools = parseInt(
-        resolveHarnessEnvRaw("AGENT_CRITIC_MIN_TOOLS", this.runtimePreferences) ?? "4",
-        10
-      );
-      const distinctToolCount = new Set(this.toolsUsedThisTurn).size;
-      const runForcedCritic =
-        resolveHarnessEnvRaw("AGENT_CRITIC_REQUIRE", this.runtimePreferences) === "1" &&
-        !this.criticConsumedThisSend &&
-        this.agentDepth === 0 &&
-        this.registry.has("verify_result") &&
-        (distinctToolCount >= criticMinTools || looksPathOrCodeHeavy(assistantText));
-      const inf = this.turnInference;
-      const skipSecondaryPasses = shouldSkipHarnessSecondaryPassesForTurn(
-        this.lastUserMessage,
-        inf
-      );
-      const skipCriticForSimpleIntrospection =
-        distinctToolCount <= 1 &&
-        this.toolsUsedThisTurn.filter((n) => n !== "think" && n !== "plan").length === 0 &&
-        (skipSecondaryPasses || Boolean(inf?.runtimeIdentityPrompt));
-      /** No extra finalize ReAct loops (critic/cite/synthesis…) for persona / session-history asks. */
-      const skipPostAssistantFinalizeExtensions =
-        !this.sessionGreetingThisSend &&
-        !this.personaBootstrapPromptThisSend &&
-        skipSecondaryPasses;
-      const runHeuristicCritic =
-        resolveHarnessEnvRaw("AGENT_CRITIC", this.runtimePreferences) === "1" &&
-        !this.criticConsumedThisSend &&
-        this.roundCount >= 3 &&
-        this.agentDepth === 0 &&
-        this.registry.has("verify_result") &&
-        shouldRunCriticPass(assistantText);
-
-      if (
-        !this.sessionGreetingThisSend &&
-        !this.personaBootstrapPromptThisSend &&
-        (runForcedCritic || runHeuristicCritic) &&
-        !skipCriticForSimpleIntrospection &&
-        !skipPostAssistantFinalizeExtensions
-      ) {
-        this.criticConsumedThisSend = true;
-        try {
-          const criticTool =
-            resolveHarnessEnvRaw("AGENT_CRITIC_MODE", this.runtimePreferences) === "debate" && this.registry.has("reflect_debate")
-              ? "reflect_debate"
-              : "verify_result";
-          const vr = await this.dispatcher.directCall(criticTool, {
-            goal: this.lastUserMessage.slice(0, 2000),
-            result: assistantText.slice(0, 12_000),
-            ...(resolveHarnessEnvRaw("AGENT_CRITIC_EVIDENCE", this.runtimePreferences) === "1"
-              ? { evidence_pack: this.getEvidencePackForCritic() }
-              : {}),
-          });
-          if (
-            vr.ok &&
-            typeof vr.output === "string" &&
-            (/ISSUES\s+FOUND|✗\s*ISSUES/i.test(vr.output) || /✗/.test(vr.output))
-          ) {
-            void appendFailureLog({
-              category: "critic_issues",
-              preview: vr.output.slice(0, 800),
-            });
-            this.context.appendMessage({
-              role: "user",
-              content: `[CRITIC NOTES]\n${vr.output.slice(0, 4000)}`,
-            });
-            await this.runReActLoop(round);
-            return;
-          }
-        } catch {
-          /* optional */
-        }
-      }
-
-      if (!this.sessionGreetingThisSend && !this.personaBootstrapPromptThisSend) {
-      const trimmedFinal = assistantText.trim();
-      const doneish =
-        /^(OK|DONE)\b/i.test(trimmedFinal) || /\b(done|ok)\b\s*[.!]?\s*$/i.test(trimmedFinal);
-      if (
-        !skipPostAssistantFinalizeExtensions &&
-        resolveHarnessEnvRaw("AGENT_FINALIZE_CITE", this.runtimePreferences) !== "0" &&
-        doneish &&
-        this.filesReadThisTurn.length > 0 &&
-        !assistantCitesPath(assistantText, this.filesReadThisTurn) &&
-        !this.finalizeCiteNudgeThisSend
-      ) {
-        this.finalizeCiteNudgeThisSend = true;
-        this.context.appendMessage({
-          role: "user",
-          content:
-            "[FINALIZE NOTE] Your reply looks finished, but cite at least one real path string " +
-            "that appeared in read_file / repo_map / list_dir output (exact substring) before ending.",
-        });
-        await this.runReActLoop(round);
-        return;
-      }
-
-      const isResearchTask =
-        !skipPostAssistantFinalizeExtensions &&
-        this.isLikelyKnowledgeTask() &&
-        this.toolsUsedThisTurn.includes("web_search") &&
-        !this.finalizeSynthesisNudgeThisSend;
-      const hasWebFetchEvidence = this.toolsUsedThisTurn.includes("web_fetch");
-      const substantiveDraftLikelyComplete =
-        assistantText.length >= 1800 ||
-        ((assistantText.match(/\n[-*]\s/g) ?? []).length >= 6 &&
-          (assistantText.match(/\b(source|sources|as of|uncertain|open|timeline|update)\b/gi) ?? []).length >= 3) ||
-        (hasWebFetchEvidence && distinctToolCount >= 6);
-      if (isResearchTask) {
-        // Fast-model judge replaces a stack of brittle regexes that only matched
-        // a curated outlet list and missed paraphrased timelines / uncertainty.
-        // Falls back to the same regex behavior on transport/parse failure so
-        // the harness stays usable when the fast model is unreachable.
-        let verdict: ResearchFinalizeVerdict;
-        try {
-          verdict = await judgeResearchFinalize(this.client, this.config.model, assistantText);
-        } catch {
-          // Judge transport/parse failure → regex. The downstream synthesis_check
-          // emit below tags verdict.source so the fallback is visible in telemetry.
-          verdict = judgeResearchFinalizeWithRegex(assistantText);
-        }
-        if (!verdict.ready) {
-          if (this.finalizeRetryBudgetThisSend > 0 && !substantiveDraftLikelyComplete) {
-            this.finalizeRetryBudgetThisSend--;
-            this.finalizeSynthesisNudgeThisSend = true;
-            this.context.appendMessage({
-              role: "user",
-              content:
-                "[SYNTHESIS CHECKLIST] Before finalizing research output, include: " +
-                "(1) a short timeline/sequence, (2) multi-source grounding (>=2 sources), " +
-                "(3) explicit uncertainty/fragility note for fast-moving facts, and (4) unresolved items. " +
-                `Judge says: ${verdict.reason}`,
-            });
-            await this.runReActLoop(round);
-            return;
-          }
-          this.emitter.emit("synthesis_check", {
-            passed: false,
-            reason: `checklist_incomplete_substantive_draft (${verdict.source}: ${verdict.reason})`,
-            substantiveDraftComplete: substantiveDraftLikelyComplete,
-          });
-        }
-      }
-
-      if (
-        !skipPostAssistantFinalizeExtensions &&
-        Boolean(this.turnInference?.deckIntent) &&
-        !this.toolsUsedThisTurn.includes("doc_render_pptx") &&
-        !this.finalizeDeckPipelineNudgeThisSend
-      ) {
-        this.finalizeDeckPipelineNudgeThisSend = true;
-        this.context.appendMessage({
-          role: "user",
-          content:
-            "[PPTX COMPLETION GUARD] User requested a deck/PPTX. Before finalizing, run the document pipeline and produce artifacts: " +
-            "doc_plan -> doc_compose_chunk -> doc_lint_layout/doc_repair_chunk -> doc_render_pptx -> doc_export -> doc_quality_report. " +
-            "Do not finalize with markdown-only output unless pptx rendering fails; if it fails, return diagnostics and retry guidance.",
-        });
-        await this.runReActLoop(round);
-        return;
-      }
-
-      const visionWanted =
-        this.turnInference?.source === "llm"
-          ? this.turnInference.visionIntent === true
-          : isVisionCentricPrompt(this.lastUserMessage);
-      if (
-        !skipPostAssistantFinalizeExtensions &&
-        visionWanted &&
-        !this.toolsUsedThisTurn.includes("vision_analyze") &&
-        !this.finalizeVisionNudgeThisSend
-      ) {
-        this.finalizeVisionNudgeThisSend = true;
-        this.context.appendMessage({
-          role: "user",
-          content:
-            "[VISION COMPLETION GUARD] This looks image-centric. Before finalizing, use vision_analyze (and activate/load vision family if needed). " +
-            "If vision call fails, continue with explicit lower-confidence uncertainty notes instead of pretending image evidence was seen.",
-        });
-        await this.runReActLoop(round);
-        return;
-      }
-
-      const wouldHaveBeenOverInferenceStance =
-        !skipPostAssistantFinalizeExtensions &&
-        resolveHarnessEnvRaw("AGENT_OVERINFERENCE_GUARD", this.runtimePreferences) !== "0" &&
-        (this.turnInference?.stancePrompt || this.turnInference?.overInferenceRisk || false);
-      this.emitter.emit("over_inference_check", {
-        required: wouldHaveBeenOverInferenceStance,
-        passed: true,
-        reason: wouldHaveBeenOverInferenceStance
-          ? "finalize_over_inference_rewrite_removed"
-          : "not_user_stance_prompt",
-        attemptedRecovery: false,
-        source: "none",
-        threshold: resolveIntentConfidenceThreshold(),
-      });
-      }
-
+      // Text-only completion: end the turn when the model stops (no post-assistant
+      // critic, synthesis judge, cite guard, or stream [CONTINUE] loops).
       await this.maybePersistEpisodeTurn();
       await this.maybeAutoWriteVaultNotes();
       await this.maybeAutoExtractMemories();

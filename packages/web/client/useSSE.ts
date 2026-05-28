@@ -8,6 +8,65 @@ import {
 import type { ImageAttachment } from "./imageAttachments.js";
 import { readPersonaChromeFromSession, writePersonaChromeToSession } from "./personaChromeSessionCache.js";
 
+/** Set only after a successful auto-greet reset (survives remount within the tab). */
+const SS_AUTO_GREET_DONE = "liminal:auto_greet_done_v1";
+const SS_SSE_LAST_EVENT_ID = "liminal:sse_last_event_id_v1";
+/** Legacy key from an earlier fix attempt — clear so it cannot block greet. */
+const SS_TAB_SESSION_INIT_LEGACY = "liminal:tab_session_init_v1";
+
+function readStoredLastEventId(): string | undefined {
+  try {
+    const v = sessionStorage.getItem(SS_SSE_LAST_EVENT_ID);
+    return v && /^\d+$/.test(v) ? v : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function writeStoredLastEventId(id: string): void {
+  try {
+    sessionStorage.setItem(SS_SSE_LAST_EVENT_ID, id);
+  } catch {
+    /* private mode / quota */
+  }
+}
+
+function clearStoredLastEventId(): void {
+  try {
+    sessionStorage.removeItem(SS_SSE_LAST_EVENT_ID);
+  } catch {
+    /* ignore */
+  }
+}
+
+function isAutoGreetDone(): boolean {
+  try {
+    sessionStorage.removeItem(SS_TAB_SESSION_INIT_LEGACY);
+    return sessionStorage.getItem(SS_AUTO_GREET_DONE) === "1";
+  } catch {
+    return false;
+  }
+}
+
+function markAutoGreetDone(): void {
+  try {
+    sessionStorage.setItem(SS_AUTO_GREET_DONE, "1");
+  } catch {
+    /* ignore */
+  }
+}
+
+function clearAutoGreetDone(): void {
+  try {
+    sessionStorage.removeItem(SS_AUTO_GREET_DONE);
+  } catch {
+    /* ignore */
+  }
+}
+
+/** Prevents duplicate auto-greet under React Strict Mode (in-memory only; resets on full reload). */
+let autoGreetAttemptedThisPageLoad = false;
+
 function sanitizeDeltaText(text: string): string {
   return text
     .replace(/�/g, "")
@@ -1221,6 +1280,21 @@ async function fetchHarnessStatus(): Promise<HarnessStatusResponse | null> {
   }
 }
 
+/** Wait until Express is up (web:dev often starts Vite before :3001 is listening). */
+async function waitForApiReady(
+  isCancelled: () => boolean,
+  maxMs = 90_000
+): Promise<boolean> {
+  const deadline = Date.now() + maxMs;
+  while (Date.now() < deadline) {
+    if (isCancelled()) return false;
+    const st = await fetchHarnessStatus();
+    if (st) return true;
+    await sleep(350);
+  }
+  return false;
+}
+
 function isAgentBusyResetConflict(status: number, body: unknown): boolean {
   if (status !== 409) return false;
   const errMsg = String((body as { error?: string }).error ?? "");
@@ -1343,11 +1417,10 @@ export function useSSE() {
   const reconnectAttempt = useRef(0);
   const reconnectTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const esRef = useRef<EventSource | null>(null);
+  const sseConnectedWaitersRef = useRef<Array<() => void>>([]);
   const cancelledRef = useRef(false);
   /** Bumps on each SSE effect run so stale auto-reset loops exit after unmount/remount. */
   const autoResetRunIdRef = useRef(0);
-  /** Fresh page load: one soft reset + greet before first SSE connect (survives effect re-runs). */
-  const autoGreetDoneRef = useRef(false);
   const fetchConfigRef = useRef<() => void>(() => {});
   /** True from `user_message` until `turn_end` / `error` / forced status unlock. */
   const expectTurnEndRef = useRef(false);
@@ -1364,6 +1437,10 @@ export function useSSE() {
   const lastSemanticStallAdvisoryAtMsRef = useRef(0);
   /** Mirrors live stream health for stall-copy (interval closures cannot read latest React state). */
   const streamLooksHealthyRef = useRef(false);
+  /** Last chat id we cleared the transcript for — ignore duplicate `chat_switched`. */
+  const streamBoundChatIdRef = useRef<string | null>(null);
+  const connectStreamRef = useRef<(opts?: { replayHistory?: boolean }) => void>(() => {});
+  const waitForSseOpenRef = useRef<(timeoutMs?: number) => Promise<boolean>>(async () => false);
 
   useEffect(() => {
     uiVerbosityRef.current = state.uiVerbosity;
@@ -1518,9 +1595,14 @@ export function useSSE() {
               personalityHeartbeatEnabled?: boolean;
               dictationAutoSendDefault?: boolean;
               dictationAudioCue?: boolean;
+              activeChat?: { chatId?: string } | null;
             } | null
           ) => {
             if (!cancelledRef.current && cfg) {
+              const activeId = cfg.activeChat?.chatId?.trim();
+              if (activeId && streamBoundChatIdRef.current === null) {
+                streamBoundChatIdRef.current = activeId;
+              }
               const personaDisplayLabel =
                 typeof cfg.personaDisplayLabel === "string" && cfg.personaDisplayLabel.trim()
                   ? cfg.personaDisplayLabel.trim()
@@ -1627,25 +1709,63 @@ export function useSSE() {
     fetchAndApplyConfig();
     probeBootstrapApi();
 
-    function connect() {
+    function persistEventId(id: string | undefined): void {
+      if (!id) return;
+      lastEventId.current = id;
+      writeStoredLastEventId(id);
+    }
+
+    function buildStreamUrl(opts?: { replayHistory?: boolean }): string {
+      if (opts?.replayHistory) {
+        return `${SERVER}/api/stream?replayHistory=1`;
+      }
+      const eid = lastEventId.current ?? readStoredLastEventId();
+      if (eid) {
+        return `${SERVER}/api/stream?lastEventId=${encodeURIComponent(eid)}`;
+      }
+      return `${SERVER}/api/stream`;
+    }
+
+    function waitForSseOpen(timeoutMs = 20_000): Promise<boolean> {
+      if (esRef.current?.readyState === EventSource.OPEN) return Promise.resolve(true);
+      return new Promise((resolve) => {
+        const timer = setTimeout(() => resolve(false), timeoutMs);
+        sseConnectedWaitersRef.current.push(() => {
+          clearTimeout(timer);
+          resolve(esRef.current?.readyState === EventSource.OPEN);
+        });
+      });
+    }
+
+    function connect(opts?: { replayHistory?: boolean }) {
       if (cancelledRef.current) return;
 
-      // Build URL — pass lastEventId as query param so server can replay missed events.
-      const eid = lastEventId.current;
-      const url = eid
-        ? `${SERVER}/api/stream?lastEventId=${encodeURIComponent(eid)}`
-        : `${SERVER}/api/stream`;
-
+      const url = buildStreamUrl(opts);
       const es = new EventSource(url);
       esRef.current = es;
 
-      es.addEventListener("connected", () => {
+      es.addEventListener("connected", (e: MessageEvent) => {
         // Clear any pending CONNECTING-state takeover timer — we made it.
         if (reconnectTimer.current) { clearTimeout(reconnectTimer.current); reconnectTimer.current = null; }
         reconnectAttempt.current = 0;
+        const payload = parseEventData(e) as { cursor?: number } | undefined;
+        const cursor =
+          typeof payload?.cursor === "number" && Number.isFinite(payload.cursor)
+            ? payload.cursor
+            : 0;
+        const stored = lastEventId.current ?? readStoredLastEventId();
+        if (stored) {
+          const storedNum = Number.parseInt(stored, 10);
+          if (Number.isFinite(storedNum) && storedNum > cursor) {
+            clearStoredLastEventId();
+            lastEventId.current = undefined;
+          }
+        }
         dispatch({ type: "connected" });
         void reconcileBusyFromStatus({ forceIfServerBusy: true });
         fetchAndApplyConfig();
+        const waiters = sseConnectedWaitersRef.current.splice(0);
+        for (const wake of waiters) wake();
       });
 
       // Phase 2 per-chat workspaces: when the server switches the active chat,
@@ -1657,11 +1777,18 @@ export function useSSE() {
           | { chatId?: string; title?: string; workspaceRoot?: string; workspaceFingerprint?: string; workspaceMode?: string; at?: number }
           | undefined;
         if (!payload) return;
-        // Reset transcript locally (server keeps each chat's own conversation
-        // context in memory; this is purely a UI clear).
+        const chatId = String(payload.chatId ?? "");
+        if (streamBoundChatIdRef.current === chatId) {
+          fetchAndApplyConfig();
+          try {
+            window.dispatchEvent(new CustomEvent("liminal:chat_switched", { detail: payload }));
+          } catch {
+            /* ignore */
+          }
+          return;
+        }
+        streamBoundChatIdRef.current = chatId;
         dispatch({ type: "session_reset" });
-        // Refresh /api/config so the persona theme, display label, and
-        // approvalTimeoutMs reflect the new chat's bridge.
         fetchAndApplyConfig();
         // Notify the chat hook + any other listeners.
         try {
@@ -1673,7 +1800,7 @@ export function useSSE() {
 
       // Grab the event ID from every event so we can resume after reconnect.
       const trackId = (e: MessageEvent) => {
-        if (e.lastEventId) lastEventId.current = e.lastEventId;
+        persistEventId(e.lastEventId || undefined);
       };
 
       es.addEventListener("text", (e: MessageEvent) => {
@@ -1693,9 +1820,15 @@ export function useSSE() {
           dispatch({ type: "text", payload: { delta: cleaned, channel: "reasoning" } });
           return;
         }
-        if (ch === "trace") queuedTrace.current += cleaned;
-        else queuedText.current += cleaned;
-        queueFlush();
+        if (ch === "trace") {
+          queuedTrace.current += cleaned;
+          queueFlush();
+          return;
+        }
+        // Assistant/user tokens must paint as they arrive — batching collapses live streams
+        // and replays into one visible chunk after the 40ms timer fires.
+        flushNow();
+        dispatch({ type: "text", payload: { delta: cleaned, channel: ch } });
       });
 
       es.addEventListener("provider_retry", (e: MessageEvent) => {
@@ -1988,45 +2121,104 @@ export function useSSE() {
       };
     }
 
+    connectStreamRef.current = connect;
+    waitForSseOpenRef.current = waitForSseOpen;
+
     void (async () => {
       const captureMode =
         typeof window !== "undefined" &&
         new URLSearchParams(window.location.search).get("capture") === "1";
-      if (!autoGreetDoneRef.current && !captureMode) {
-        autoGreetDoneRef.current = true;
+
+      if (!captureMode) {
+        const apiReady = await waitForApiReady(() => cancelledRef.current);
+        if (cancelledRef.current) return;
+        if (!apiReady) {
+          dispatch({
+            type: "error",
+            payload: {
+              message:
+                "Cannot reach the Liminal API yet. If you use web:dev, wait for Express on :3001 or reload after the server finishes restarting.",
+            },
+          });
+          return;
+        }
+      }
+
+      const needsAutoGreet =
+        !captureMode && !isAutoGreetDone() && !autoGreetAttemptedThisPageLoad;
+
+      if (needsAutoGreet) {
+        autoGreetAttemptedThisPageLoad = true;
         dispatch({ type: "session_reset" });
+        connect();
         const runId = ++autoResetRunIdRef.current;
-        await sessionResetWhenIdle(
+        const streamReady = await waitForSseOpen();
+        if (cancelledRef.current || autoResetRunIdRef.current !== runId) return;
+        if (!streamReady) {
+          autoGreetAttemptedThisPageLoad = false;
+          dispatch({
+            type: "error",
+            payload: { message: "Could not open event stream before session greeting." },
+          });
+          return;
+        }
+        const resetResult = await sessionResetWhenIdle(
           { mode: "soft", greet: true },
           () => cancelledRef.current || autoResetRunIdRef.current !== runId
         );
-      } else if (captureMode) {
-        autoGreetDoneRef.current = true;
+        const greeted =
+          resetResult.ok &&
+          (resetResult.body as { greeted?: boolean }).greeted === true;
+        if (greeted) markAutoGreetDone();
+        else if (!resetResult.ok) autoGreetAttemptedThisPageLoad = false;
+        return;
       }
+
+      // Auto-greet already ran this tab (remount / bfcache / return): replay SSE, no server reset.
+      const storedEid = readStoredLastEventId();
+      if (storedEid) lastEventId.current = storedEid;
       if (!cancelledRef.current) {
-        connect();
+        connect({ replayHistory: !captureMode });
       }
     })();
 
     // When the tab becomes visible after being hidden, browsers throttle/freeze
     // timers — reconnect immediately if the connection is stale.
-    const handleVisibilityChange = () => {
-      if (document.visibilityState !== "visible" || cancelledRef.current) return;
+    const resumeStreamAfterInterrupt = () => {
+      if (cancelledRef.current) return;
       if (!esRef.current || esRef.current.readyState !== EventSource.OPEN) {
-        if (reconnectTimer.current) { clearTimeout(reconnectTimer.current); reconnectTimer.current = null; }
+        if (reconnectTimer.current) {
+          clearTimeout(reconnectTimer.current);
+          reconnectTimer.current = null;
+        }
         esRef.current?.close();
         esRef.current = null;
-        reconnectAttempt.current = 0; // reset backoff — user just came back
+        reconnectAttempt.current = 0;
         connect();
       } else {
-        void reconcileBusyFromStatus();
+        void reconcileBusyFromStatus({ forceIfServerBusy: true });
       }
     };
+
+    const handleVisibilityChange = () => {
+      if (document.visibilityState !== "visible" || cancelledRef.current) return;
+      resumeStreamAfterInterrupt();
+    };
+
+    const handlePageShow = (ev: PageTransitionEvent) => {
+      if (cancelledRef.current) return;
+      if (ev.persisted) {
+        resumeStreamAfterInterrupt();
+      }
+    };
+
     document.addEventListener("visibilitychange", handleVisibilityChange);
+    window.addEventListener("pageshow", handlePageShow);
 
     return () => {
       cancelledRef.current = true;
       document.removeEventListener("visibilitychange", handleVisibilityChange);
+      window.removeEventListener("pageshow", handlePageShow);
       if (flushTimer.current) clearTimeout(flushTimer.current);
       if (reconnectTimer.current) clearTimeout(reconnectTimer.current);
       esRef.current?.close();
@@ -2047,6 +2239,11 @@ export function useSSE() {
     expectTurnEndRef.current = true;
     statusIdlePollStreakRef.current = 0;
     dispatch({ type: "user_message", text: renderedUserMessage });
+
+    if (!esRef.current || esRef.current.readyState !== EventSource.OPEN) {
+      connectStreamRef.current();
+      await waitForSseOpenRef.current(12_000);
+    }
 
     const result = await fetchWithRetry(
       `${SERVER}/api/message`,
@@ -2109,6 +2306,10 @@ export function useSSE() {
     if (result.ok) {
       expectTurnEndRef.current = false;
       statusIdlePollStreakRef.current = 0;
+      clearStoredLastEventId();
+      clearAutoGreetDone();
+      streamBoundChatIdRef.current = null;
+      lastEventId.current = undefined;
       dispatch({ type: "session_reset" });
       fetchConfigRef.current();
       return;

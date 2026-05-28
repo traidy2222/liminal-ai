@@ -77,14 +77,14 @@ export const HARNESS_ENV_DEFAULTS: Readonly<Record<string, string>> = {
   AGENT_SESSION_JSONL_TEXT_LOG: "rollup",
   AGENT_SESSION_JSONL_MAX_ROLLUP_CHARS: "500000",
   AGENT_SESSION_JSONL_TRACE: "0",
-  AGENT_TOOL_BODY_ELIDE: "1",
+  AGENT_TOOL_BODY_ELIDE: "0",
   AGENT_TOOL_ELIDE_MIN_CHARS: "12000",    // for coding workflows: keep file/grep results readable. Lower (e.g. 5000) only for chat-style tasks where verbatim tool output matters less.
   // read_file distillation — OFF by default. Distilling source files replaces
   // code with bullet-point JSON summaries, which forces the model to re-read
   // constantly. Enable only for workflows that primarily summarize huge files.
   AGENT_DISTILL_READ_FILE: "0",
   AGENT_TOOL_ELIDE_KEEP_ROUNDS: "3",
-  AGENT_DISTILL: "1",
+  AGENT_DISTILL: "0",
   AGENT_DISTILL_WEB_FETCH: "0",
   // Sidecar model calls — OFF by default (each fires a full completion at main-model cost).
   // Enable individually in .env when the quality gain justifies the spend.
@@ -95,8 +95,8 @@ export const HARNESS_ENV_DEFAULTS: Readonly<Record<string, string>> = {
   AGENT_MEMORY_AUTO_EXTRACT: "0",   // was "1": end-of-turn extraction call
   AGENT_MEMORY_GRAPH: "1",
   AGENT_MEMORY_AUTOLINK: "0",
-  AGENT_MEMORY_AUTOLINK_MODEL: DEFAULT_AGENT_FAST_MODEL_SLUG,
-  AGENT_MEMORY_CONSOLIDATE_MODEL: DEFAULT_AGENT_FAST_MODEL_SLUG,
+  AGENT_MEMORY_AUTOLINK_MODEL: "deepseek/deepseek-v4-pro",
+  AGENT_MEMORY_CONSOLIDATE_MODEL: "deepseek/deepseek-v4-pro",
   AGENT_MEMORY_EPISODE: "0",
   AGENT_MEMORY_PRIME_ROUND0: "1",
   AGENT_TRAJECTORY_WRITE: "1",       // write causal trajectory: memory entries at turn end (zero LLM cost)
@@ -140,6 +140,12 @@ export const HARNESS_ENV_DEFAULTS: Readonly<Record<string, string>> = {
   AGENT_DOC_MAX_SOURCE_LOOKUPS: "24",
   AGENT_DOC_STYLE_DIVERSITY_MIN: "0.12",
   AGENT_SEND_TIMEOUT_MS: "1800000",
+  /** Default run_shell wall clock when the model omits timeout_ms. */
+  AGENT_SHELL_TIMEOUT_MS: "60000",
+  /** Max run_shell when the model passes explicit timeout_ms (0 = no cap). */
+  AGENT_SHELL_MAX_TIMEOUT_MS: "3600000",
+  /** Max when timeout_ms is omitted — stops accidental multi-minute one-liners. */
+  AGENT_SHELL_IMPLICIT_MAX_MS: "180000",
   AGENT_STREAM_CHUNK_TIMEOUT_MS: "60000",
   AGENT_STREAM_MAX_RETRIES: "3",
   AGENT_FAILURE_LOG: "1",
@@ -157,7 +163,8 @@ export const HARNESS_ENV_DEFAULTS: Readonly<Record<string, string>> = {
   AGENT_PSEUDO_TOOL_RETRY_MAX: "2",
   AGENT_FINALIZE_RETRY_BUDGET: "0",
   AGENT_FINALIZE_HINT: "0",
-  AGENT_FINALIZE_CITE: "1",
+  AGENT_FINALIZE_CITE: "0",
+  AGENT_FINALIZE_JUDGE: "0",
   AGENT_CRITIC_MIN_TOOLS: "4",
   AGENT_CRITIC_REQUIRE: "0",
   AGENT_CRITIC_MODE: "single",
@@ -216,9 +223,9 @@ export const HARNESS_ENV_DEFAULTS: Readonly<Record<string, string>> = {
   AGENT_FAILURE_DIGEST: "1",
   AGENT_RECIPE_LIBRARY: "1",
   AGENT_YOLO: "0",
-  AGENT_AUTO_DREAM_MIN_HOURS: "24",
-  AGENT_AUTO_DREAM_MIN_SESSIONS: "5",
-  AGENT_AUTO_DREAM_SCAN_INTERVAL_MS: "600000",
+  AGENT_AUTO_DREAM_MIN_HOURS: "5",
+  AGENT_AUTO_DREAM_MIN_SESSIONS: "10",
+  AGENT_AUTO_DREAM_SCAN_INTERVAL_MS: "30000",
   AGENT_AUTO_DREAM_MAX_SESSION_FILES: "8",
   AGENT_AUTO_DREAM_MAX_CHARS_PER_SESSION: "10000",
   AGENT_AUTO_DREAM_MAX_TOTAL_CHARS: "40000",
@@ -255,6 +262,34 @@ export const HARNESS_ENV_DEFAULTS: Readonly<Record<string, string>> = {
   // Compensation ledger
   AGENT_COMPENSATION_ENABLED: "1",    // track and replay plan side-effect compensations
   AGENT_COMPENSATION_MAX_ACTIONS: "32", // max compensation entries per plan
+  // Optional / inherit-when-empty (Settings UI shows product default instead of blank)
+  AGENT_VAULT_PATH: "",
+  AGENT_OBSIDIAN_VAULT_NAME_SUBSTRING: "",
+  AGENT_WEB_FETCH_READABILITY_MAX_INPUT_CHARS: "72000",
+  AGENT_WEB_FETCH_ACCEPT_LANGUAGE: "",
+  AGENT_WEB_FETCH_SEC_CH_PLATFORM: "",
+  AGENT_WEB_FETCH_USER_AGENT:
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/136.0.0.0 Safari/537.36",
+  AGENT_WEB_FETCH_ALT_USER_AGENT:
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:136.0) Gecko/20100101 Firefox/136.0",
+  AGENT_WEB_FETCH_REFERER: "",
+  AGENT_WEB_FETCH_FALLBACK_URL_TEMPLATE: "",
+  AGENT_BROWSER_FILE_ROOT: "",
+  AGENT_BROWSER_ALLOW_FILE_ANY: "0",
+  AGENT_BROWSER_HEADED: "0",
+  AGENT_BROWSER_AUTO_VISION: "0",
+  AGENT_SESSION_MODE: "",
+  AGENT_LOCATION: "",
+  AGENT_UPSTREAM_429_SUGGESTED_WAIT_MS: "",
+  AGENT_HEARTBEAT: "0",
+  AGENT_HEARTBEAT_IDLE_MS: "45000",
+  AGENT_HEARTBEAT_MAX_TOKENS: "512",
+  AGENT_HEARTBEAT_MAX_USER_NUDGES_PER_HOUR: "2",
+  AGENT_HEARTBEAT_MIN_INTERVAL_MS: "120000",
+  AGENT_HEARTBEAT_SURFACE: "trace",
+  AGENT_HEARTBEAT_TIMEOUT_MS: "20000",
+  AGENT_HEARTBEAT_UI_STRIP: "0",
+  AGENT_HEARTBEAT_USER_NUDGE_CONFIDENCE_MIN: "0.86",
   // Closed-loop self-tuning — auto-demote rules with consistently low avg outcome
   AGENT_RULE_DEMOTE_THRESHOLD: "0.4",   // rules below this avg_outcome get demoted
   AGENT_RULE_DEMOTE_MIN_SAMPLES: "20",  // minimum sample size before demotion can fire

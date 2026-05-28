@@ -51,17 +51,22 @@ export class SSEManager {
       req.header("last-event-id") ?? (req.query["lastEventId"] as string | undefined);
     const lastEventId = lastEventIdRaw ? Number.parseInt(lastEventIdRaw, 10) : NaN;
     const hasLastEventId = Number.isFinite(lastEventId);
+    const replayHistory = req.query["replayHistory"] === "1";
 
     // Send initial connected event with server-side cursor.
     const connectedCursor = this.eventCounter;
     res.write(`event: connected\ndata: ${JSON.stringify({ id, cursor: connectedCursor })}\n\n`);
 
-    // Replay missed events on reconnect if browser provided Last-Event-ID.
-    if (hasLastEventId) {
-      for (const evt of this.history) {
-        if (evt.id <= (lastEventId as number)) continue;
-        res.write(this.serialize(evt.id, evt.eventName, evt.data));
-      }
+    // Replay buffered events: full history (page remount) or tail after Last-Event-ID.
+    if (replayHistory && this.history.length > 0) {
+      this.replayHistoryToClient(res, this.history);
+    } else if (hasLastEventId) {
+      // Stale cursor after Express restart — replay entire buffer instead of nothing.
+      const staleCursor = (lastEventId as number) > connectedCursor;
+      const tail = this.history.filter(
+        (evt) => staleCursor || evt.id > (lastEventId as number)
+      );
+      this.replayHistoryToClient(res, tail);
     }
 
     return id;
@@ -107,6 +112,24 @@ export class SSEManager {
     for (const clientId of dead) {
       this.clients.delete(clientId);
     }
+  }
+
+  /** Write replayed events in chunks so the client can paint incrementally (not one burst). */
+  private replayHistoryToClient(res: Response, events: SSEEvent[]): void {
+    const CHUNK = 48;
+    let i = 0;
+    const writeChunk = (): void => {
+      if (res.writableEnded || res.destroyed) return;
+      const end = Math.min(i + CHUNK, events.length);
+      for (; i < end; i++) {
+        const evt = events[i]!;
+        res.write(this.serialize(evt.id, evt.eventName, evt.data));
+      }
+      if (i < events.length) {
+        setImmediate(writeChunk);
+      }
+    };
+    writeChunk();
   }
 
   private serialize(id: number, eventName: string, data: unknown): string {

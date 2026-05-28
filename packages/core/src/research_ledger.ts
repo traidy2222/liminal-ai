@@ -366,6 +366,13 @@ export class ResearchLedger {
         lines.push(`  • ${u.url.slice(0, 100)}${u.fetchError ? ` — ${u.fetchError.slice(0, 60)}` : ""}`);
       }
     }
+    const attempts = s.fetchedOk + s.fetchedFail;
+    if (s.fetchedFail >= 3 && attempts >= 4 && s.fetchedFail / attempts >= 0.5) {
+      lines.push(
+        "⚠ high fetch failure rate — stop parallel spray. Prefer web_fetch on hostnames (not https://<IP>:port via http_request), " +
+          "browser_* for bot walls, run_shell curl with Host header, or synthesize from evidence the user already pasted."
+      );
+    }
     lines.push(
       "use research_state for full inventory, query_tool_outputs to retrieve prior search bodies, " +
         "or fetch a pending URL directly with web_fetch."

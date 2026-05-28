@@ -64,7 +64,7 @@ export async function runHtmlDdgSearch(
     }
 
     if (links.length === 0) {
-      return { ok: false, error: "No results found" };
+      return { ok: true, hits: [] };
     }
 
     const hits: DdgHit[] = links.map((l, i) => ({
@@ -111,6 +111,13 @@ export const webSearchTool = defineTool({
     const r = await runHtmlDdgSearch(query, max);
     if (r.ok) emit?.(`  ✓ ${r.hits.length} results\n`);
     if (!r.ok) return r;
+    if (r.hits.length === 0) {
+      return {
+        ok: true,
+        output:
+          `No results found for "${query}". Try shorter keywords, alternate spellings, or web_fetch if you already have a URL.`,
+      };
+    }
     const currentYear = new Date().getFullYear();
     const anchored = query !== inputQuery;
     const recencyHint = anchored

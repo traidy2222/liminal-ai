@@ -1728,8 +1728,13 @@ export function App() {
       setSettingsProviderBase(preset.baseURL);
       setSettingsEnvDraft((prev) => {
         const next = { ...prev };
-        const merge: Record<string, string> = { ...(preset.harnessEnvPatch ?? {}) };
-        merge.AGENT_FAST_MODEL = preset.model;
+        const merge: Record<string, string> = {
+          AGENT_MODEL: preset.model,
+          ...(preset.harnessEnvPatch ?? {}),
+        };
+        if (preset.baseURL) {
+          merge.AGENT_API_BASE_URL = preset.baseURL;
+        }
         for (const [k, v] of Object.entries(merge)) {
           const f = settingsFields.find((sf) => sf.key === k);
           if (f?.lockedByEnv) continue;

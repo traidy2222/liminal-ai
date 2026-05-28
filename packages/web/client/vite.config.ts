@@ -63,6 +63,18 @@ export default defineConfig({
         target: DEV_API_ORIGIN,
         changeOrigin: false,
         configure: (proxy) => {
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          (proxy as any).on("proxyRes", (proxyRes: { headers?: Record<string, string> }, req: { url?: string }) => {
+            const url = req.url ?? "";
+            if (!url.includes("/api/stream")) return;
+            const ct = proxyRes.headers?.["content-type"] ?? "";
+            if (!ct.includes("text/event-stream")) return;
+            proxyRes.headers = {
+              ...proxyRes.headers,
+              "cache-control": "no-cache, no-transform",
+              "x-accel-buffering": "no",
+            };
+          });
           // Idle long-lived SSE sockets: avoid default timeouts / early RST where possible.
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
           (proxy as any).on("open", (proxySocket: any) => {

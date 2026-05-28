@@ -49,6 +49,8 @@ export const HARNESS_RULES: Record<string, string> = {
   // ── Research ────────────────────────────────────────────────────────────────
   "R-RESEARCH-SCOPE":
     "First research pass: cover ≥3 distinct query angles. After 3-4 substantive sources, stop fetching and synthesize — do not keep querying the same angle.",
+  "R-RESEARCH-IP-PROBE":
+    "Do not http_request https://<bare-IP>:<port> — TLS/SNI usually fails. Use web_fetch on the hostname, run_shell curl.exe with Host header, or answer from Shodan/WHOIS the user already provided.",
   "R-CITE-QUALITY":
     "Match citation confidence to source tier: T1 (Reuters/AP/gov) = state directly; T2 (quality press) = 'According to…'; T3 (Wikipedia) = 'Reports suggest…'; T4 (blogs) = 'Unverified…'. When sources conflict on a key fact, name both sides explicitly.",
   "R-ADVERSARIAL-CHECK":
@@ -74,6 +76,10 @@ export const HARNESS_RULES: Record<string, string> = {
   // ── Persona / runtime ───────────────────────────────────────────────────────
   "R-RUNTIME-PERSONA-TOOLS":
     "For persona dial changes (humor %, formality, confidence, verbosity, persona strength), call set_runtime_settings(persona_controls:…) — never claim a dial changed from prose alone. Full persona swap → set_persona.",
+
+  // ── Shell bounds ────────────────────────────────────────────────────────────
+  "R-SHELL-BOUNDS":
+    "Omitting timeout_ms → short default (~60s, implicit max ~3m). Long builds/tests → pass explicit timeout_ms (hours OK if approved). Indefinite daemons/watchers → run_background + read_process_output, not run_shell. Never put hundreds of probes in one shell loop without an explicit long timeout.",
 
   // ── Harness self-improvement ────────────────────────────────────────────────
   "R-HARNESS-REFLECT":

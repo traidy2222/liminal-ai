@@ -487,7 +487,7 @@ const _META_RAW: Record<string, HarnessSettingsFieldMeta> = {
     subgroupId: "retrieval",
     label: "Speculative Reads",
     description: "Harness environment toggle for Speculative Reads. See docs/configuration.md (memory vault).",
-    valueKind: "string",
+    valueKind: "boolean",
   },
   "AGENT_QUERY_REWRITE": {
     tabId: "memory_vault",
@@ -825,7 +825,7 @@ const _META_RAW: Record<string, HarnessSettingsFieldMeta> = {
     subgroupId: "harness_misc",
     label: "Browser Always Active",
     description: "Harness environment toggle for Browser Always Active. See docs/configuration.md (harness).",
-    valueKind: "string",
+    valueKind: "boolean",
   },
   "AGENT_BROWSER_HEADED": {
     tabId: "harness",
@@ -993,7 +993,7 @@ const _META_RAW: Record<string, HarnessSettingsFieldMeta> = {
     subgroupId: "harness_misc",
     label: "Write Integrity Nudge",
     description: "Harness environment toggle for Write Integrity Nudge. See docs/configuration.md (harness).",
-    valueKind: "string",
+    valueKind: "boolean",
   },
   "AGENT_WRITE_PART_MAX_CHARS": {
     tabId: "harness",
@@ -1007,7 +1007,7 @@ const _META_RAW: Record<string, HarnessSettingsFieldMeta> = {
     subgroupId: "harness_misc",
     label: "Write Stream Sink",
     description: "Harness environment toggle for Write Stream Sink. See docs/configuration.md (harness).",
-    valueKind: "string",
+    valueKind: "boolean",
   },
   "AGENT_WRITE_STREAM_SINK_MIN_CHARS": {
     tabId: "harness",
@@ -1042,6 +1042,14 @@ const _META_RAW: Record<string, HarnessSettingsFieldMeta> = {
     subgroupId: "finalize",
     label: "Finalize Cite",
     description: "Harness environment toggle for Finalize Cite. See docs/configuration.md (harness).",
+    valueKind: "boolean",
+  },
+  "AGENT_FINALIZE_JUDGE": {
+    tabId: "harness",
+    subgroupId: "finalize",
+    label: "Finalize Judge",
+    description:
+      "When on, a fast-model research completeness judge could run before turn end (off by default; post-assistant re-reply loops are disabled in the harness).",
     valueKind: "boolean",
   },
   "AGENT_CRITIC_MIN_TOOLS": {
@@ -1134,7 +1142,7 @@ const _META_RAW: Record<string, HarnessSettingsFieldMeta> = {
     subgroupId: "auto_dream",
     label: "Auto Dream Inject Transcript",
     description: "Harness environment toggle for Auto Dream Inject Transcript. See docs/configuration.md (session ui).",
-    valueKind: "string",
+    valueKind: "boolean",
   },
   "AGENT_AUTO_DREAM_ALLOW_DELETE": {
     tabId: "session_ui",
@@ -1317,7 +1325,7 @@ const _META_RAW: Record<string, HarnessSettingsFieldMeta> = {
     subgroupId: "harness_misc",
     label: "Provider Route Auto",
     description: "Harness environment toggle for Provider Route Auto. See docs/configuration.md (harness).",
-    valueKind: "string",
+    valueKind: "boolean",
   },
   "AGENT_PROVIDER_ORDER": {
     tabId: "harness",
@@ -1549,7 +1557,7 @@ const _META_RAW: Record<string, HarnessSettingsFieldMeta> = {
     subgroupId: "intent",
     label: "Intent Routing",
     description: "Harness environment toggle for Intent Routing. See docs/configuration.md (harness).",
-    valueKind: "string",
+    valueKind: "boolean",
   },
   "AGENT_INTENT_FAST_THRESHOLD": {
     tabId: "harness",
@@ -1626,7 +1634,7 @@ const _META_RAW: Record<string, HarnessSettingsFieldMeta> = {
     subgroupId: "harness_misc",
     label: "Ctx Provenance",
     description: "Harness environment toggle for Ctx Provenance. See docs/configuration.md (harness).",
-    valueKind: "string",
+    valueKind: "boolean",
   },
   "AGENT_DREAM_THRESHOLD": {
     tabId: "harness",
@@ -1647,14 +1655,14 @@ const _META_RAW: Record<string, HarnessSettingsFieldMeta> = {
     subgroupId: "harness_misc",
     label: "Dream Contradict Auto Resolve",
     description: "Harness environment toggle for Dream Contradict Auto Resolve. See docs/configuration.md (harness).",
-    valueKind: "string",
+    valueKind: "boolean",
   },
   "AGENT_COMPENSATION_ENABLED": {
     tabId: "harness",
     subgroupId: "harness_misc",
     label: "Compensation Enabled",
     description: "Harness environment toggle for Compensation Enabled. See docs/configuration.md (harness).",
-    valueKind: "string",
+    valueKind: "boolean",
   },
   "AGENT_COMPENSATION_MAX_ACTIONS": {
     tabId: "harness",
