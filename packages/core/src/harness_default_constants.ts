@@ -284,6 +284,7 @@ export const HARNESS_ENV_DEFAULTS: Readonly<Record<string, string>> = {
   AGENT_MEMORY_ARCHIVE: "1",          // forget/curate soft-delete into notes.archive.json before removing
   AGENT_MEMORY_ARCHIVE_MAX: "2000",   // archive ring-buffer cap (oldest trimmed past this)
   AGENT_MEMORY_CURATOR_MODEL: "",     // optional model slug for curate_memory (default: fast model)
+  AGENT_CURATOR_TIMEOUT_MS: "90000",  // wall-clock budget for the curate_memory model call (clamped 5s–300s)
   AGENT_CURATOR_PROTECT_ACCESS_COUNT: "3",   // never prune notes accessed >= this many times
   AGENT_CURATOR_PROTECT_MIN_AGE_HOURS: "24", // never prune notes younger than this (by createdAt)
   AGENT_MEMORY_MAX_NOTES: "0",        // reserved: future budget-triggered auto-curation (0 = off)

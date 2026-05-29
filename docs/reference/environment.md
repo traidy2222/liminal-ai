@@ -58,6 +58,7 @@ Web **Settings** writes to (2). See [Configuration basics](../start/configuratio
 | `AGENT_CTX_WARM_ROUNDS` | `8` | yes | no | harness | Harness environment toggle for Ctx Warm Rounds. See docs/configuration.md (harness). |
 | `AGENT_CURATOR_PROTECT_ACCESS_COUNT` | `3` | yes | no | harness | Memory curator never prunes notes accessed at least this many times. |
 | `AGENT_CURATOR_PROTECT_MIN_AGE_HOURS` | `24` | yes | no | harness | Memory curator never prunes notes younger than this many hours. |
+| `AGENT_CURATOR_TIMEOUT_MS` | `90000` | yes | no | harness | Wall-clock budget for the curate_memory model call (clamped 5s–300s). Raise for large note stores. |
 | `AGENT_DICTATION_AUDIO_CUE` | `0` | yes | no | models_api | Play a brief 880Hz tone when auto-send fires so you know the message went out. |
 | `AGENT_DICTATION_AUTO_SEND` | `0` | yes | no | models_api | When 1, the mic button defaults to auto-send mode: recording stops + message is sent automatically once you pause talkin |
 | `AGENT_DICTATION_MAX_RECORDING_MS` | `60000` | yes | no | models_api | Hard cap on a single continuous recording (default 60000ms = 60s). |

@@ -89,8 +89,17 @@ export const curateMemoryTool = defineTool({
     const client = new OpenAI({ apiKey: provider.apiKey, baseURL: provider.baseURL });
     const model = effectiveHarnessEnvRaw("AGENT_MEMORY_CURATOR_MODEL")?.trim() || getFastModelSlug(provider.model);
 
-    const timeoutRaw = parseInt(effectiveHarnessEnvRaw("AGENT_CONSOLIDATE_TIMEOUT_MS")?.trim() ?? "", 10);
-    const timeoutMs = Number.isFinite(timeoutRaw) ? Math.max(5_000, Math.min(120_000, timeoutRaw)) : 30_000;
+    // Curation prompts can be large on a multi-day store, so the model call gets
+    // a generous, separate budget (NOT the 30s consolidate timeout). The OpenAI
+    // SDK surfaces an AbortSignal.timeout as an "aborted" error, so translate
+    // those into an actionable timeout message rather than a confusing abort.
+    const timeoutRaw = parseInt(effectiveHarnessEnvRaw("AGENT_CURATOR_TIMEOUT_MS")?.trim() ?? "", 10);
+    const timeoutMs = Number.isFinite(timeoutRaw) ? Math.max(5_000, Math.min(300_000, timeoutRaw)) : 90_000;
+    const looksLikeTimeout = (msg: string): boolean => /abort|timed?\s*out|timeout|ETIMEDOUT/i.test(msg);
+    const timeoutHint =
+      ` — the curation model call exceeded ${Math.round(timeoutMs / 1000)}s. ` +
+      `Raise AGENT_CURATOR_TIMEOUT_MS, lower max_notes_considered (reviewed ${slice.length} of ${all.length} notes), ` +
+      `or point AGENT_MEMORY_CURATOR_MODEL at a faster model.`;
 
     let plan;
     try {
@@ -103,10 +112,11 @@ export const curateMemoryTool = defineTool({
         fallbackModel: provider.model,
         signal: AbortSignal.timeout(timeoutMs),
       });
-      if (!jr.ok) return { ok: false, error: jr.error };
+      if (!jr.ok) return { ok: false, error: looksLikeTimeout(jr.error) ? `curation timed out${timeoutHint}` : jr.error };
       plan = parseCuratorPlan(jr.parsed);
     } catch (e) {
-      return { ok: false, error: `curation call failed: ${e instanceof Error ? e.message : String(e)}` };
+      const msg = e instanceof Error ? e.message : String(e);
+      return { ok: false, error: looksLikeTimeout(msg) ? `curation timed out${timeoutHint}` : `curation call failed: ${msg}` };
     }
     if (!plan) return { ok: false, error: "model returned an unparseable curation plan" };
 

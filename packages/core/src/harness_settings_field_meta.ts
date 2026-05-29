@@ -1722,6 +1722,13 @@ const _META_RAW: Record<string, HarnessSettingsFieldMeta> = {
     description: "Optional model slug for the curate_memory tool. Empty = use the fast model.",
     valueKind: "string",
   },
+  "AGENT_CURATOR_TIMEOUT_MS": {
+    tabId: "harness",
+    subgroupId: "harness_misc",
+    label: "Curator Timeout Ms",
+    description: "Wall-clock budget for the curate_memory model call (clamped 5s–300s). Raise for large note stores.",
+    valueKind: "number",
+  },
   "AGENT_CURATOR_PROTECT_ACCESS_COUNT": {
     tabId: "harness",
     subgroupId: "harness_misc",
