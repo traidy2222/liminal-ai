@@ -12,18 +12,30 @@ import type { Message } from "./types.js";
 // explicitly to lock the behavior under test.
 
 const ORIGINAL = process.env.AGENT_PROMPT_CACHE;
+const ORIGINAL_ROLLING = process.env.AGENT_PROMPT_CACHE_ROLLING;
 
 function setEnabled(enabled: boolean) {
   process.env.AGENT_PROMPT_CACHE = enabled ? "1" : "0";
 }
 
+function setRolling(enabled: boolean) {
+  process.env.AGENT_PROMPT_CACHE_ROLLING = enabled ? "1" : "0";
+}
+
 function restore() {
   if (ORIGINAL === undefined) delete process.env.AGENT_PROMPT_CACHE;
   else process.env.AGENT_PROMPT_CACHE = ORIGINAL;
+  if (ORIGINAL_ROLLING === undefined) delete process.env.AGENT_PROMPT_CACHE_ROLLING;
+  else process.env.AGENT_PROMPT_CACHE_ROLLING = ORIGINAL_ROLLING;
 }
 
+// The prefix-only tests below pin the rolling breakpoint OFF so they assert the
+// static-prefix behavior in isolation. Rolling behavior is covered separately.
 describe("applyPromptCacheBreakpoints", () => {
-  beforeEach(() => setEnabled(true));
+  beforeEach(() => {
+    setEnabled(true);
+    setRolling(false);
+  });
   afterEach(() => restore());
 
   it("wraps the trailing static system message with cache_control", () => {
@@ -108,6 +120,81 @@ describe("applyPromptCacheBreakpoints", () => {
     const messages: Message[] = [{ role: "system", content: "" }];
     const out = applyPromptCacheBreakpoints(messages);
     assert.equal(typeof (out[0] as Message).content, "string");
+  });
+});
+
+describe("applyPromptCacheBreakpoints — rolling history breakpoint", () => {
+  beforeEach(() => {
+    setEnabled(true);
+    setRolling(true);
+  });
+  afterEach(() => restore());
+
+  const isWrapped = (m: Message | undefined): boolean =>
+    !!m && Array.isArray((m as unknown as { content: unknown }).content);
+
+  it("adds a second breakpoint on the last conversation message", () => {
+    const messages: Message[] = [
+      { role: "system", content: "core" },
+      { role: "user", content: "hi" },
+      { role: "assistant", content: "hello" },
+      { role: "user", content: "follow up" },
+    ];
+
+    const out = applyPromptCacheBreakpoints(messages);
+
+    // Prefix breakpoint (index 0) + rolling breakpoint (index 3, last message).
+    assert.ok(isWrapped(out[0]), "static prefix wrapped");
+    assert.equal(typeof (out[1] as Message).content, "string", "middle untouched");
+    assert.equal(typeof (out[2] as Message).content, "string", "middle untouched");
+    assert.ok(isWrapped(out[3]), "last conversation message wrapped");
+  });
+
+  it("places the rolling breakpoint before the volatile working/exec-state tail", () => {
+    const messages: Message[] = [
+      { role: "system", content: "core" },
+      { role: "user", content: "task" },
+      { role: "tool", tool_call_id: "call_1", content: "tool result body" },
+      { role: "system", content: "[WORKING STATE — bounded task snapshot]\n..." },
+      { role: "system", content: "[EXECUTION STATE — contract budgets]\n..." },
+    ];
+
+    const out = applyPromptCacheBreakpoints(messages);
+
+    assert.ok(isWrapped(out[0]), "static prefix wrapped");
+    // Rolling breakpoint lands on the last stable msg (the tool result), NOT
+    // the volatile WORKING/EXECUTION-STATE blocks that change every round.
+    assert.ok(isWrapped(out[2]), "last stable (tool) message wrapped");
+    assert.equal(typeof (out[3] as Message).content, "string", "WORKING STATE left as string");
+    assert.equal(typeof (out[4] as Message).content, "string", "EXECUTION STATE left as string");
+  });
+
+  it("does not add a second breakpoint when only the static prefix exists", () => {
+    const messages: Message[] = [
+      { role: "system", content: "persona" },
+      { role: "system", content: "core" },
+    ];
+
+    const out = applyPromptCacheBreakpoints(messages);
+
+    // Only the trailing static system message (index 1) is wrapped; there is no
+    // distinct conversation message to carry a second breakpoint.
+    assert.equal(typeof (out[0] as Message).content, "string");
+    assert.ok(isWrapped(out[1]), "static prefix wrapped");
+  });
+
+  it("can be disabled independently via AGENT_PROMPT_CACHE_ROLLING=0", () => {
+    setRolling(false);
+    const messages: Message[] = [
+      { role: "system", content: "core" },
+      { role: "user", content: "hi" },
+      { role: "user", content: "follow up" },
+    ];
+
+    const out = applyPromptCacheBreakpoints(messages);
+
+    assert.ok(isWrapped(out[0]), "static prefix still wrapped");
+    assert.equal(typeof (out[2] as Message).content, "string", "no rolling breakpoint");
   });
 });
 

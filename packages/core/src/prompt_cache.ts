@@ -13,6 +13,12 @@
  * cache_control }]` only on the *last* contiguous system message — the inception
  * block — so dynamic per-turn system notes (rule recalls, world context deltas)
  * appended later don't accidentally invalidate the cache.
+ *
+ * A second, optional *rolling* breakpoint (AGENT_PROMPT_CACHE_ROLLING, default
+ * on) is placed on the last stable conversation message so the cache extends
+ * across the growing tool-result history — not just the ~14k static prefix —
+ * which is the dominant token cost in long ReAct turns. Up to 2 breakpoints,
+ * well under the 4-breakpoint provider limit.
  */
 
 import type { Message } from "./types.js";
@@ -24,6 +30,37 @@ export function isPromptCacheEnabled(): boolean {
   // Default on; only "0" / "false" disables.
   if (raw === undefined || raw === "") return true;
   return raw !== "0" && raw.toLowerCase() !== "false";
+}
+
+/**
+ * Returns true when the rolling second breakpoint (over conversation history)
+ * should be added in addition to the static-prefix breakpoint. Default on.
+ */
+function isRollingCacheEnabled(): boolean {
+  const raw = effectiveHarnessEnvRaw("AGENT_PROMPT_CACHE_ROLLING")?.trim();
+  if (raw === undefined || raw === "") return true;
+  return raw !== "0" && raw.toLowerCase() !== "false";
+}
+
+/**
+ * Wrap a string-content message's body in a single text part carrying an
+ * ephemeral cache_control breakpoint. Returns null when the message can't be
+ * wrapped (non-string or empty content — e.g. multimodal parts arrays).
+ */
+function wrapWithCacheControl(m: Message): Message | null {
+  if (typeof m.content !== "string" || m.content.length === 0) return null;
+  return {
+    ...m,
+    content: [
+      {
+        type: "text",
+        text: m.content,
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        cache_control: { type: "ephemeral" },
+      } as unknown as { type: "text"; text: string },
+    ],
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  } as any;
 }
 
 /**
@@ -66,27 +103,44 @@ export function applyPromptCacheBreakpoints(messages: Message[]): Message[] {
   const target = messages[lastStaticIdx];
   if (!target) return messages;
 
-  // Already a parts array (e.g. multimodal user msg) — skip, don't double-wrap.
-  if (typeof target.content !== "string") return messages;
-  if (target.content.length === 0) return messages;
-
-  const wrapped: Message = {
-    ...target,
-    // OpenRouter / OpenAI-compatible message shape: content as parts array.
-    // `cache_control` is an extra field the SDK forwards verbatim.
-    content: [
-      {
-        type: "text",
-        text: target.content,
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        cache_control: { type: "ephemeral" },
-      } as unknown as { type: "text"; text: string },
-    ],
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  } as any;
+  // Breakpoint #1 — static prefix (persona + protocol + named rules + suffix).
+  const wrappedPrefix = wrapWithCacheControl(target);
+  if (!wrappedPrefix) return messages; // multimodal/empty prefix — skip entirely.
 
   const out = messages.slice();
-  out[lastStaticIdx] = wrapped;
+  out[lastStaticIdx] = wrappedPrefix;
+
+  // Breakpoint #2 — rolling, over the conversation history. Place it on the last
+  // *stable* message: walk back over the trailing run of volatile working /
+  // execution-state system blocks (which are recomputed every round and live at
+  // the tail when AGENT_CTX_VOLATILE_TAIL is on), then tag the message before
+  // them. That message is byte-identical next round (history only appends), so
+  // round N+1 reads the whole [prefix … round-N tail] span from cache instead of
+  // re-billing the accumulated tool-result history cold.
+  if (isRollingCacheEnabled()) {
+    let rollingIdx = messages.length - 1;
+    while (rollingIdx > lastStaticIdx) {
+      const m = messages[rollingIdx];
+      if (
+        m &&
+        m.role === "system" &&
+        typeof m.content === "string" &&
+        /^\[(WORKING STATE|EXECUTION STATE)/.test(m.content)
+      ) {
+        rollingIdx -= 1;
+        continue;
+      }
+      break;
+    }
+    // Only add a distinct second breakpoint when there's real history past the
+    // static prefix and the target is wrappable (plain string content).
+    if (rollingIdx > lastStaticIdx) {
+      const rollingTarget = messages[rollingIdx];
+      const wrappedRolling = rollingTarget ? wrapWithCacheControl(rollingTarget) : null;
+      if (wrappedRolling) out[rollingIdx] = wrappedRolling;
+    }
+  }
+
   return out;
 }
 

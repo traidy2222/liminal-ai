@@ -151,6 +151,17 @@ function isProvenanceEnabled(): boolean {
   return effectiveHarnessEnvRaw("AGENT_CTX_PROVENANCE") !== "0";
 }
 
+/**
+ * When on (default), volatile working/execution-state system blocks are placed
+ * AFTER the conversation history instead of between inception and history. This
+ * keeps the `[inception, ...stable history]` prefix byte-identical from one
+ * round to the next so prompt-cache breakpoints can extend across the growing
+ * tool-result history. Set AGENT_CTX_VOLATILE_TAIL=0 for the legacy ordering.
+ */
+function isVolatileTailEnabled(): boolean {
+  return effectiveHarnessEnvRaw("AGENT_CTX_VOLATILE_TAIL") !== "0";
+}
+
 /** Simple content hash for provenance IDs (djb2 → hex). */
 function provenanceHash(s: string): string {
   let h = 5381;
@@ -430,14 +441,19 @@ export class ContextManager {
     this.conversation.push(message);
   }
 
-  async buildMessages(): Promise<Message[]> {
-    const inception = this.getEffectiveInception();
-    const working: Message[] = [];
+  /**
+   * Build the volatile per-round system blocks (working-state snapshot +
+   * execution-state contract budgets). Recomputed every round, so these must be
+   * positioned to avoid poisoning the prompt-cache prefix — see
+   * `isVolatileTailEnabled` and `buildMessages`.
+   */
+  private buildVolatileBlocks(): Message[] {
+    const blocks: Message[] = [];
     const ws = this.epistemicState
       ? renderEpistemicStateBlock(this.epistemicState)
       : this.workingStateBlock.trim();
     if (ws) {
-      working.push({
+      blocks.push({
         role: "system",
         content:
           `[WORKING STATE — bounded task snapshot; refreshed each tool round]\n${ws}`,
@@ -445,42 +461,46 @@ export class ContextManager {
     }
     const es = this.executionStateBlock.trim();
     if (es) {
-      working.push({
+      blocks.push({
         role: "system",
         content: `[EXECUTION STATE — contract budgets and mission progress]\n${es}`,
       });
     }
-    let messages = [...inception, ...working, ...this.conversation];
+    return blocks;
+  }
 
+  async buildMessages(): Promise<Message[]> {
+    const inception = this.getEffectiveInception();
+    const working = this.buildVolatileBlocks();
+
+    if (isVolatileTailEnabled()) {
+      // Volatile blocks go AFTER the conversation so [inception, ...history]
+      // stays byte-identical round-to-round (prompt-cache friendly).
+      let core = [...inception, ...this.conversation];
+      const snap = this.computeSnapshot([...core, ...working]);
+      if (snap.usageFraction >= this.config.thresholdFraction) {
+        core = await this.compressOldRounds(inception, this.conversation);
+      }
+      return [...core, ...working];
+    }
+
+    // Legacy ordering: volatile blocks between inception and conversation.
+    let messages = [...inception, ...working, ...this.conversation];
     const snap = this.computeSnapshot(messages);
     if (snap.usageFraction >= this.config.thresholdFraction) {
       messages = await this.compressOldRounds(inception, this.conversation);
     }
-
     return messages;
   }
 
   /** Synchronous message build (no semantic compression) — used for token counting only. */
   buildMessagesSync(): Message[] {
     const inception = this.getEffectiveInception();
-    const working: Message[] = [];
-    const ws = this.epistemicState
-      ? renderEpistemicStateBlock(this.epistemicState)
-      : this.workingStateBlock.trim();
-    if (ws) {
-      working.push({
-        role: "system",
-        content: `[WORKING STATE — bounded task snapshot; refreshed each tool round]\n${ws}`,
-      });
-    }
-    const esBlock = this.executionStateBlock.trim();
-    if (esBlock) {
-      working.push({
-        role: "system",
-        content: `[EXECUTION STATE — contract budgets and mission progress]\n${esBlock}`,
-      });
-    }
-    return [...inception, ...working, ...this.conversation];
+    const working = this.buildVolatileBlocks();
+    // Ordering is irrelevant for token counting; mirror buildMessages for clarity.
+    return isVolatileTailEnabled()
+      ? [...inception, ...this.conversation, ...working]
+      : [...inception, ...working, ...this.conversation];
   }
 
   snapshot(): ContextSnapshot {
