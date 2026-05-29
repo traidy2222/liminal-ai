@@ -59,6 +59,14 @@ export interface CuratorSafetyOpts {
   protectAccessCount: number;
   /** Notes younger than this (hours, by createdAt) are never pruned/dropped. */
   protectMinAgeHours: number;
+  /**
+   * When true, ALSO veto every `scope: "global"` note. Off by default: `global`
+   * is the auto-classifier's fallback scope (legacy notes, scratch-workspace
+   * writes, anything without a workspace fingerprint), so it is not a reliable
+   * "durable" signal. Identity protection comes from the key prefix instead.
+   * Enable for a maximally conservative store where global is curated by hand.
+   */
+  protectGlobal: boolean;
   /** Override "now" for deterministic tests. */
   nowMs?: number;
 }
@@ -75,6 +83,8 @@ export function resolveCuratorSafetyOpts(): CuratorSafetyOpts {
   return {
     protectAccessCount: Number.isFinite(accRaw) ? Math.max(0, accRaw) : 3,
     protectMinAgeHours: Number.isFinite(ageRaw) ? Math.max(0, ageRaw) : 24,
+    // Opt-in only: global is the default scope, not a durability signal.
+    protectGlobal: effectiveHarnessEnvRaw("AGENT_CURATOR_PROTECT_GLOBAL")?.trim() === "1",
   };
 }
 
@@ -92,8 +102,10 @@ function keyPrefix(key: string): string {
  */
 export function protectionRuleFor(note: CuratorNote | undefined, opts: CuratorSafetyOpts): string | null {
   if (!note) return null; // unknown key — nothing to protect (handled as no-op by caller)
-  if (note.scope === "global") return "scope=global";
+  // Identity protection is by key prefix (reliable), NOT by scope=global (which
+  // is merely the default fallback). The global veto is opt-in via protectGlobal.
   if (PROTECTED_PREFIXES.includes(keyPrefix(note.key))) return `protected-prefix:${keyPrefix(note.key)}`;
+  if (opts.protectGlobal && note.scope === "global") return "scope=global";
   if ((note.accessCount ?? 0) >= opts.protectAccessCount) return `accessCount>=${opts.protectAccessCount}`;
   const created = note.createdAt ? new Date(note.createdAt).getTime() : NaN;
   if (Number.isFinite(created)) {

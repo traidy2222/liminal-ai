@@ -12,7 +12,7 @@ import {
 } from "./memory_curator.js";
 
 const NOW = Date.parse("2026-05-30T00:00:00Z");
-const OPTS: CuratorSafetyOpts = { protectAccessCount: 3, protectMinAgeHours: 24, nowMs: NOW };
+const OPTS: CuratorSafetyOpts = { protectAccessCount: 3, protectMinAgeHours: 24, protectGlobal: false, nowMs: NOW };
 
 function note(key: string, over: Partial<CuratorNote> = {}): CuratorNote {
   return {
@@ -45,7 +45,10 @@ test("parseCuratorPlan rejects junk and coerces shape", () => {
 
 test("protectionRuleFor vetoes durable / protected notes", () => {
   assert.equal(protectionRuleFor(note("fact:plain"), OPTS), null);
-  assert.equal(protectionRuleFor(note("g", { scope: "global" }), OPTS), "scope=global");
+  // scope=global is NOT vetoed by default (it's the fallback scope, not durable).
+  assert.equal(protectionRuleFor(note("g", { scope: "global" }), OPTS), null);
+  // ...but identity-shaped keys are protected regardless of scope.
+  assert.match(protectionRuleFor(note("identity:name", { scope: "global" }), OPTS)!, /protected-prefix/);
   assert.match(protectionRuleFor(note("identity:name"), OPTS)!, /protected-prefix/);
   assert.match(protectionRuleFor(note("user:tz"), OPTS)!, /protected-prefix/);
   assert.match(protectionRuleFor(note("pref:theme"), OPTS)!, /protected-prefix/);
@@ -54,6 +57,13 @@ test("protectionRuleFor vetoes durable / protected notes", () => {
     protectionRuleFor(note("fact:fresh", { createdAt: "2026-05-29T23:00:00Z" }), OPTS)!,
     /age</
   );
+});
+
+test("global veto is opt-in via protectGlobal", () => {
+  const strict: CuratorSafetyOpts = { ...OPTS, protectGlobal: true };
+  assert.equal(protectionRuleFor(note("fact:plain", { scope: "global" }), strict), "scope=global");
+  // Non-global notes are unaffected by the toggle.
+  assert.equal(protectionRuleFor(note("fact:plain", { scope: "workspace" }), strict), null);
 });
 
 test("applyCuratorSafetyRails filters prune and strips merge-drops", () => {

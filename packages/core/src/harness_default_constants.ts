@@ -286,6 +286,7 @@ export const HARNESS_ENV_DEFAULTS: Readonly<Record<string, string>> = {
   AGENT_MEMORY_CURATOR_MODEL: "",     // optional model slug for curate_memory (default: fast model)
   AGENT_CURATOR_TIMEOUT_MS: "90000",  // wall-clock budget for the curate_memory model call (clamped 5s–300s)
   AGENT_CURATOR_MAX_TOKENS: "6000",   // output budget for the curate_memory plan JSON (clamped 1k–16k)
+  AGENT_CURATOR_PROTECT_GLOBAL: "0",  // when 1, also veto every scope:global note (off — global is the default scope, not a durability signal)
   AGENT_CURATOR_PROTECT_ACCESS_COUNT: "3",   // never prune notes accessed >= this many times
   AGENT_CURATOR_PROTECT_MIN_AGE_HOURS: "24", // never prune notes younger than this (by createdAt)
   AGENT_MEMORY_MAX_NOTES: "0",        // reserved: future budget-triggered auto-curation (0 = off)

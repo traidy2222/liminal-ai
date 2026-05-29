@@ -1736,6 +1736,13 @@ const _META_RAW: Record<string, HarnessSettingsFieldMeta> = {
     description: "Output token budget for the curate_memory plan JSON (clamped 1k–16k). Prevents the plan being truncated mid-JSON.",
     valueKind: "number",
   },
+  "AGENT_CURATOR_PROTECT_GLOBAL": {
+    tabId: "harness",
+    subgroupId: "harness_misc",
+    label: "Curator Protect Global",
+    description: "When on, the memory curator also refuses to touch any global-scope note. Off by default — global is the fallback scope, not a durability signal; identity facts are protected by key prefix instead.",
+    valueKind: "boolean",
+  },
   "AGENT_CURATOR_PROTECT_ACCESS_COUNT": {
     tabId: "harness",
     subgroupId: "harness_misc",
