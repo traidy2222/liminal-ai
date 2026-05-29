@@ -199,7 +199,7 @@ export type {
   BulletItem,
 } from "./types.js";
 export { STREAM_WIRE_VERSION } from "./types.js";
-export { getFastModelSlug, completeChatJson } from "./router.js";
+export { getFastModelSlug, completeChatJson, clearJsonResponseCache } from "./router.js";
 export { buildAutoDreamPrompt } from "./auto_dream.js";
 export type { JsonCompletionResult } from "./router.js";
 export {

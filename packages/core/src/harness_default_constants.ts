@@ -92,6 +92,12 @@ export const HARNESS_ENV_DEFAULTS: Readonly<Record<string, string>> = {
   AGENT_SPECULATIVE_READS: "0",     // was "1": extra read_file calls on imports
   AGENT_QUERY_REWRITE: "0",         // was "1": multi-query expansion before recall
   AGENT_QUERY_REWRITE_EXPLORATORY: "0",
+  AGENT_RECALL_RERANK: "0",         // fast-model cross-encoder rerank over fused recall candidates (sidecar call)
+  AGENT_RECALL_RERANK_WEIGHT: "1.0", // blend weight: finalScore = hybrid * (1 + weight * relevance)
+  // LLM JSON response cache — in-process LRU for fast-model JSON sidecar calls
+  // (intent/distill/rewrite/critic/rerank). Pure optimization; ON by default.
+  AGENT_LLM_JSON_CACHE: "1",
+  AGENT_LLM_JSON_CACHE_TTL_MS: "300000",
   AGENT_MEMORY_AUTO_EXTRACT: "0",   // was "1": end-of-turn extraction call
   AGENT_MEMORY_GRAPH: "1",
   AGENT_MEMORY_AUTOLINK: "0",

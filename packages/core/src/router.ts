@@ -19,6 +19,78 @@ export type JsonCompletionResult =
   | { ok: true; parsed: unknown; raw: string }
   | { ok: false; error: string; raw: string };
 
+// ─── In-process JSON response cache ─────────────────────────────────────────────
+// Fast-model JSON sidecar calls (intent classify, distill, query rewrite, critic,
+// recall rerank) are pure functions of their inputs. Identical inputs recur often
+// (retries, re-classifying the same user message, repeated distills). Cache the
+// successful parse in a small TTL'd LRU so we skip the round-trip. Only `ok:true`
+// results are cached — failures must always retry. Disable with AGENT_LLM_JSON_CACHE=0.
+
+interface JsonCacheEntry {
+  raw: string;
+  expires: number;
+}
+
+const jsonResponseCache = new Map<string, JsonCacheEntry>();
+
+function jsonCacheConfig(): { enabled: boolean; ttlMs: number; max: number } {
+  const enabled = effectiveHarnessEnvRaw("AGENT_LLM_JSON_CACHE") !== "0";
+  const ttlRaw = Number(effectiveHarnessEnvRaw("AGENT_LLM_JSON_CACHE_TTL_MS") ?? "300000");
+  const ttlMs = Number.isFinite(ttlRaw) && ttlRaw > 0 ? ttlRaw : 300_000;
+  const maxRaw = Number(effectiveHarnessEnvRaw("AGENT_LLM_JSON_CACHE_MAX") ?? "256");
+  const max = Number.isFinite(maxRaw) && maxRaw > 0 ? Math.floor(maxRaw) : 256;
+  return { enabled, ttlMs, max };
+}
+
+/** FNV-1a 32-bit — compact, dependency-free digest for the cache key. */
+function fnv1a(s: string): string {
+  let h = 0x811c9dc5;
+  for (let i = 0; i < s.length; i++) {
+    h ^= s.charCodeAt(i);
+    h = Math.imul(h, 0x01000193);
+  }
+  return (h >>> 0).toString(16);
+}
+
+function jsonCacheKey(model: string, messages: unknown, temperature: number, maxTokens: number): string {
+  const body = JSON.stringify(messages);
+  // Length guards against the astronomically-unlikely FNV collision between two
+  // different prompts that hash equal; model+temp+tokens pin the semantic request.
+  return `${model}|${temperature}|${maxTokens}|${body.length}|${fnv1a(body)}`;
+}
+
+function readJsonCache(key: string): JsonCompletionResult | null {
+  const hit = jsonResponseCache.get(key);
+  if (!hit) return null;
+  if (hit.expires <= Date.now()) {
+    jsonResponseCache.delete(key);
+    return null;
+  }
+  // Touch for LRU recency.
+  jsonResponseCache.delete(key);
+  jsonResponseCache.set(key, hit);
+  try {
+    return { ok: true, parsed: JSON.parse(hit.raw), raw: hit.raw };
+  } catch {
+    jsonResponseCache.delete(key);
+    return null;
+  }
+}
+
+function writeJsonCache(key: string, raw: string, ttlMs: number, max: number): void {
+  jsonResponseCache.set(key, { raw, expires: Date.now() + ttlMs });
+  while (jsonResponseCache.size > max) {
+    const oldest = jsonResponseCache.keys().next().value;
+    if (oldest === undefined) break;
+    jsonResponseCache.delete(oldest);
+  }
+}
+
+/** Test/maintenance hook — clears the in-process JSON response cache. */
+export function clearJsonResponseCache(): void {
+  jsonResponseCache.clear();
+}
+
 /**
  * Non-streaming chat completion expecting JSON in the message body.
  * Uses `json_object` format (widely supported on OpenRouter).
@@ -42,8 +114,24 @@ export async function completeChatJson(
     isFastModel?: boolean;
     /** Main model slug to fall back to if the fast model returns 429/503. */
     fallbackModel?: string;
+    /** Opt out of the in-process JSON response cache for this call (default: cached). */
+    cache?: boolean;
   }
 ): Promise<JsonCompletionResult> {
+  const cacheCfg = jsonCacheConfig();
+  const useCache = cacheCfg.enabled && opts.cache !== false;
+  const cacheKey = useCache
+    ? jsonCacheKey(
+        opts.model,
+        opts.messages,
+        opts.temperature ?? 0.2,
+        opts.maxTokens ?? 800
+      )
+    : null;
+  if (cacheKey) {
+    const cached = readJsonCache(cacheKey);
+    if (cached) return cached;
+  }
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const createFn = client.chat.completions.create.bind(client.chat.completions) as (p: any, o?: any) => Promise<OpenAI.Chat.Completions.ChatCompletion>;
 
@@ -88,13 +176,20 @@ export async function completeChatJson(
     }
   };
 
+  const cacheOk = (r: JsonCompletionResult): JsonCompletionResult => {
+    if (cacheKey && r.ok && r.raw.trim()) {
+      writeJsonCache(cacheKey, r.raw, cacheCfg.ttlMs, cacheCfg.max);
+    }
+    return r;
+  };
+
   const primary = await attemptWithModel(opts.model, opts.isFastModel ?? true);
-  if (primary.ok || !opts.fallbackModel || opts.fallbackModel === opts.model) return primary;
+  if (primary.ok || !opts.fallbackModel || opts.fallbackModel === opts.model) return cacheOk(primary);
 
   // Retry with fallback model on quota or transient server errors.
   const isRetryableError = /429|503|quota|rate.?limit|too many/i.test(primary.error);
   if (!isRetryableError) return primary;
 
   console.warn(`[router] fast model "${opts.model}" failed (${primary.error.slice(0, 80)}); retrying with fallback "${opts.fallbackModel}"`);
-  return attemptWithModel(opts.fallbackModel, false);
+  return cacheOk(await attemptWithModel(opts.fallbackModel, false));
 }

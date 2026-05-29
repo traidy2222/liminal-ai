@@ -23,6 +23,7 @@ import {
   upsertVaultEmbeddings,
   embedQueryAgainstVaultIndex,
 } from "./vault_index.js";
+import { rerankEnabled, rerankWeight, rerankCandidates } from "./recall_rerank.js";
 
 function normBm25Scores(scores: number[]): number[] {
   const m = Math.max(...scores, 1e-9);
@@ -423,6 +424,33 @@ export const recallRelevantTool = defineTool({
         });
         if (!isDuplicate) dedupedFused.push(candidate);
         if (dedupedFused.length >= k * 3) break; // early exit after enough candidates
+      }
+
+      // Second-stage rerank: judge true query→candidate relevance with one
+      // fast-model call over the shortlist, then blend into the hybrid score.
+      // Off by default (AGENT_RECALL_RERANK); degrades to first-stage order on
+      // any failure. Runs before the k-slice so a low-fusion-but-high-relevance
+      // note can still be promoted into the top-k.
+      if (rerankEnabled() && dedupedFused.length > 1) {
+        emit?.(`  rerank (fast model)…\n`);
+        try {
+          const window = dedupedFused.slice(0, 25);
+          const scores = await rerankCandidates(
+            queries.join(" "),
+            window.map((c) => ({ id: c.id, text: c.value })),
+            { maxCandidates: 25 }
+          );
+          if (scores) {
+            const w = rerankWeight();
+            for (const c of window) {
+              const rel = scores.get(c.id);
+              if (rel != null) c.score = c.score * (1 + w * rel);
+            }
+            dedupedFused.sort((a, b) => b.score - a.score);
+          }
+        } catch {
+          /* rerank optional — keep first-stage order */
+        }
       }
 
       let top = dedupedFused.slice(0, k);

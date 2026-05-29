@@ -5,6 +5,7 @@
   "type": "module",
   "scripts": {
     "eval": "node --import tsx/esm src/index.ts",
+    "ab:rerank": "node --env-file=../../.env --import tsx/esm src/ab/rerank_ab.ts",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
