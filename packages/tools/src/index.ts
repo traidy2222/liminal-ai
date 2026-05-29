@@ -42,6 +42,8 @@ import { moveFileTool } from "./move_file.js";
 import { copyFileTool } from "./copy_file.js";
 import { copyTreeTool } from "./copy_tree.js";
 import { mkdirPTool } from "./mkdir_p.js";
+import { deleteFileTool } from "./delete_file.js";
+import { findFilesTool } from "./find_files.js";
 import { multiFileApplyTool } from "./multi_file_apply.js";
 import { pathGuardTool } from "./path_guard.js";
 import {
@@ -96,6 +98,8 @@ import { createMcpAttachTools, restoreMcpConnections } from "./mcp_attach.js";
 import { memoryPromoteTool } from "./memory_promote.js";
 import { memoryNeighborsTool } from "./memory_neighbors.js";
 import { consolidateChatTool } from "./consolidate_chat.js";
+import { curateMemoryTool } from "./curate_memory.js";
+import { restoreMemoryTool } from "./restore_memory.js";
 // New tools — Upgrade IV
 import { gitStatusTool, gitDiffTool, gitLogTool, gitBranchTool, gitCommitTool } from "./git_tools.js";
 import { gitCheckpointTool, gitRollbackTool } from "./git_checkpoint.js";
@@ -160,6 +164,8 @@ export async function registerAllTools(
   registry.register(copyFileTool);
   registry.register(copyTreeTool);
   registry.register(mkdirPTool);
+  registry.register(deleteFileTool);
+  registry.register(findFilesTool);
   registry.register(multiFileApplyTool);
   registry.register(pathGuardTool);
   registry.register(listDirTool);
@@ -200,6 +206,8 @@ export async function registerAllTools(
   registry.register(memoryPromoteTool);
   registry.register(memoryNeighborsTool);
   registry.register(consolidateChatTool);
+  registry.register(curateMemoryTool);
+  registry.register(restoreMemoryTool);
   registry.register(memoryGraphTool);
   registry.register(readArtifactTool);
   registry.register(failureReviewTool);

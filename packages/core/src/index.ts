@@ -11,6 +11,7 @@ export {
   ensurePerChatDirSync,
   sanitizeChatId,
   notesPaths,
+  notesArchivePaths,
   failureLogPaths,
   recipeStatsPaths,
   runtimePrefsPaths,
@@ -201,6 +202,23 @@ export type {
 export { STREAM_WIRE_VERSION } from "./types.js";
 export { getFastModelSlug, completeChatJson, clearJsonResponseCache } from "./router.js";
 export { buildAutoDreamPrompt } from "./auto_dream.js";
+export {
+  buildCuratorPrompt,
+  parseCuratorPlan,
+  applyCuratorSafetyRails,
+  selectReviewSlice,
+  resolveCuratorSafetyOpts,
+  protectionRuleFor,
+} from "./memory_curator.js";
+export type {
+  CuratorNote,
+  CuratorPlan,
+  CuratorPrune,
+  CuratorMerge,
+  CuratorAdjust,
+  CuratorSafetyOpts,
+  VetoedItem,
+} from "./memory_curator.js";
 export type { JsonCompletionResult } from "./router.js";
 export {
   resolvePersonalityHeartbeatConfig,

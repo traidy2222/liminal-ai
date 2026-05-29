@@ -298,6 +298,25 @@ export async function setNoteScope(
   return changed;
 }
 
+/** Set a single note's confidence (0–1) in place (serialized with writeQueue). Returns true if changed. */
+export async function setNoteConfidence(key: string, confidence: number): Promise<boolean> {
+  const clamped = Math.max(0, Math.min(1, confidence));
+  let changed = false;
+  const thisOp = writeQueue.then(async () => {
+    const raw = await loadRawNotes();
+    const prev = raw[key];
+    if (!prev || typeof prev === "string") return;
+    const sn = prev as StoredNote;
+    if (sn.confidence === clamped) return;
+    raw[key] = { ...sn, confidence: clamped, updatedAt: new Date().toISOString() };
+    await writeFile(await notesWritePath(), JSON.stringify(raw, null, 2), "utf8");
+    changed = true;
+  });
+  writeQueue = thisOp.catch(() => {});
+  await thisOp;
+  return changed;
+}
+
 /** Merge graph metadata onto an existing rich note (serialized with writeQueue). */
 export async function mergeNoteGraphFields(
   key: string,

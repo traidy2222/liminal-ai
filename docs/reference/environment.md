@@ -54,7 +54,10 @@ Web **Settings** writes to (2). See [Configuration basics](../start/configuratio
 | `AGENT_CRITIC_REQUIRE` | `0` | yes | no | harness | Harness environment toggle for Critic Require. See docs/configuration.md (harness). |
 | `AGENT_CTX_HOT_ROUNDS` | `4` | yes | no | harness | Harness environment toggle for Ctx Hot Rounds. See docs/configuration.md (harness). |
 | `AGENT_CTX_PROVENANCE` | `1` | yes | no | harness | Harness environment toggle for Ctx Provenance. See docs/configuration.md (harness). |
+| `AGENT_CTX_VOLATILE_TAIL` | `1` | yes | no | harness | Place volatile working/execution-state system blocks AFTER the conversation history instead of between the static prefix |
 | `AGENT_CTX_WARM_ROUNDS` | `8` | yes | no | harness | Harness environment toggle for Ctx Warm Rounds. See docs/configuration.md (harness). |
+| `AGENT_CURATOR_PROTECT_ACCESS_COUNT` | `3` | yes | no | harness | Memory curator never prunes notes accessed at least this many times. |
+| `AGENT_CURATOR_PROTECT_MIN_AGE_HOURS` | `24` | yes | no | harness | Memory curator never prunes notes younger than this many hours. |
 | `AGENT_DICTATION_AUDIO_CUE` | `0` | yes | no | models_api | Play a brief 880Hz tone when auto-send fires so you know the message went out. |
 | `AGENT_DICTATION_AUTO_SEND` | `0` | yes | no | models_api | When 1, the mic button defaults to auto-send mode: recording stops + message is sent automatically once you pause talkin |
 | `AGENT_DICTATION_MAX_RECORDING_MS` | `60000` | yes | no | models_api | Hard cap on a single continuous recording (default 60000ms = 60s). |
@@ -102,22 +105,28 @@ Web **Settings** writes to (2). See [Configuration basics](../start/configuratio
 | `AGENT_INTENT_ROUTING` | `1` | yes | no | harness | Harness environment toggle for Intent Routing. See docs/configuration.md (harness). |
 | `AGENT_LENGTH_RESUME_MAX` | `8` | yes | no | harness | Harness environment toggle for Length Resume Max. See docs/configuration.md (harness). |
 | `AGENT_LINT_ALLOWED_COMMANDS` | `` | yes | no | advanced | Harness environment toggle for Lint Allowed Commands. See docs/configuration.md (advanced). |
+| `AGENT_LLM_JSON_CACHE` | `1` | yes | no | harness | In-process LRU cache for fast-model JSON sidecar calls (intent/distill/rewrite/critic/rerank). On by default. See docs/c |
+| `AGENT_LLM_JSON_CACHE_TTL_MS` | `300000` | yes | no | harness | Time-to-live for entries in the LLM JSON response cache, in milliseconds. See docs/configuration.md (harness). |
 | `AGENT_LOCATION` | `` | yes | no | session_ui | Harness environment toggle for Location. See docs/configuration.md (session ui). |
 | `AGENT_MARKETS_ENABLE` | `1` | yes | no | web_research | Harness environment toggle for Markets Enable. See docs/configuration.md (web research). |
 | `AGENT_MARKETS_MAX_DELAY_MS` | `2000` | yes | no | web_research | Harness environment toggle for Markets Max Delay Ms. See docs/configuration.md (web research). |
 | `AGENT_MARKETS_RETRIES` | `2` | yes | no | web_research | Harness environment toggle for Markets Retries. See docs/configuration.md (web research). |
 | `AGENT_MARKETS_TIMEOUT_MS` | `8000` | yes | no | web_research | Harness environment toggle for Markets Timeout Ms. See docs/configuration.md (web research). |
 | `AGENT_MAX_COMPLETION_TOKENS` | `16000` | yes | no | harness | Harness environment toggle for Max Completion Tokens. See docs/configuration.md (harness). |
+| `AGENT_MEMORY_ARCHIVE` | `1` | yes | no | harness | Soft-delete forgotten/curated notes into notes.archive.json before removing them (reversible). |
+| `AGENT_MEMORY_ARCHIVE_MAX` | `2000` | yes | no | harness | Cap on archived notes retained in notes.archive.json (oldest trimmed past this). |
 | `AGENT_MEMORY_AUTOLINK` | `0` | yes | no | memory_vault | Harness environment toggle for Memory Autolink. See docs/configuration.md (memory vault). |
 | `AGENT_MEMORY_AUTOLINK_MODEL` | `deepseek/deepseek-v4-pro` | yes | no | models_api | Harness environment toggle for Memory Autolink Model. See docs/configuration.md (models api). |
 | `AGENT_MEMORY_AUTO_EXTRACT` | `0` | yes | no | memory_vault | Harness environment toggle for Memory Auto Extract. See docs/configuration.md (memory vault). |
 | `AGENT_MEMORY_CONSOLIDATE_MODEL` | `deepseek/deepseek-v4-pro` | yes | no | models_api | Harness environment toggle for Memory Consolidate Model. See docs/configuration.md (models api). |
+| `AGENT_MEMORY_CURATOR_MODEL` | `` | yes | no | harness | Optional model slug for the curate_memory tool. Empty = use the fast model. |
 | `AGENT_MEMORY_DEBIAS` | `1` | yes | no | memory_vault | Harness environment toggle for Memory Debias. See docs/configuration.md (memory vault). |
 | `AGENT_MEMORY_EPISODE` | `0` | yes | no | memory_vault | Harness environment toggle for Memory Episode. See docs/configuration.md (memory vault). |
 | `AGENT_MEMORY_EXPLORATORY_AUTO_RECALL` | `0` | yes | no | memory_vault | Harness environment toggle for Memory Exploratory Auto Recall. See docs/configuration.md (memory vault). |
 | `AGENT_MEMORY_GRAPH` | `1` | yes | no | memory_vault | Harness environment toggle for Memory Graph. See docs/configuration.md (memory vault). |
 | `AGENT_MEMORY_INTROSPECTION_STRICT` | `0` | yes | no | memory_vault | Harness environment toggle for Memory Introspection Strict. See docs/configuration.md (memory vault). |
 | `AGENT_MEMORY_MAX_AGE_DAYS_DEFAULT` | `540` | yes | no | memory_vault | Harness environment toggle for Memory Max Age Days Default. See docs/configuration.md (memory vault). |
+| `AGENT_MEMORY_MAX_NOTES` | `0` | yes | no | harness | Reserved for future budget-triggered auto-curation (0 = off). |
 | `AGENT_MEMORY_MIN_CONFIDENCE_DEFAULT` | `0.35` | yes | no | memory_vault | Harness environment toggle for Memory Min Confidence Default. See docs/configuration.md (memory vault). |
 | `AGENT_MEMORY_PRIME_ROUND0` | `1` | yes | no | memory_vault | Harness environment toggle for Memory Prime Round0. See docs/configuration.md (memory vault). |
 | `AGENT_MIN_CONCURRENT_AGENTS` | `1` | yes | no | harness | Harness environment toggle for Min Concurrent Agents. See docs/configuration.md (harness). |
@@ -148,6 +157,7 @@ Web **Settings** writes to (2). See [Configuration basics](../start/configuratio
 | `AGENT_PLUGIN_DIR` | `` | yes | no | advanced | Harness environment toggle for Plugin Dir. See docs/configuration.md (advanced). |
 | `AGENT_PROCESS_HEALTH` | `0` | yes | no | advanced | Harness environment toggle for Process Health. See docs/configuration.md (advanced). |
 | `AGENT_PROMPT_CACHE` | `1` | yes | no | harness | Add OpenRouter cache_control breakpoints to the static system prefix. On cache-supporting providers (DeepInfra, GMICloud |
+| `AGENT_PROMPT_CACHE_ROLLING` | `1` | yes | no | harness | Add a second, rolling cache_control breakpoint on the last stable conversation message so the prompt cache extends acros |
 | `AGENT_PROTOCOL_INTENT_HINT` | `any` | yes | no | advanced | Harness environment toggle for Protocol Intent Hint. See docs/configuration.md (advanced). |
 | `AGENT_PROVIDER_ALLOW_FALLBACKS` | `0` | yes | no | harness | Harness environment toggle for Provider Allow Fallbacks. See docs/configuration.md (harness). |
 | `AGENT_PROVIDER_CIRCUIT_COOLDOWN_MS` | `60000` | yes | yes | harness | Harness environment toggle for Provider Circuit Cooldown Ms. See docs/configuration.md (harness). |
@@ -167,6 +177,8 @@ Web **Settings** writes to (2). See [Configuration basics](../start/configuratio
 | `AGENT_REASONING_NUDGE_CHARS` | `2500` | yes | no | harness | Harness environment toggle for Reasoning Nudge Chars. See docs/configuration.md (harness). |
 | `AGENT_REASONING_SURFACE` | `external` | yes | no | harness | Harness environment toggle for Reasoning Surface. See docs/configuration.md (harness). |
 | `AGENT_RECALL_EVERY_N` | `0` | yes | no | memory_vault | Harness environment toggle for Recall Every N. See docs/configuration.md (memory vault). |
+| `AGENT_RECALL_RERANK` | `0` | yes | no | memory_vault | Second-stage fast-model rerank over fused recall candidates (sidecar call; off by default). See docs/configuration.md (m |
+| `AGENT_RECALL_RERANK_WEIGHT` | `1.0` | yes | no | memory_vault | Blend weight for the recall reranker: finalScore = hybrid * (1 + weight * relevance). See docs/configuration.md (memory  |
 | `AGENT_RECIPE_LIBRARY` | `1` | yes | no | advanced | Harness environment toggle for Recipe Library. See docs/configuration.md (advanced). |
 | `AGENT_REFLEXION_SEMANTIC` | `1` | yes | no | harness | Harness environment toggle for Reflexion Semantic. See docs/configuration.md (harness). |
 | `AGENT_RETRY_FOREVER` | `0` | yes | no | models_api | Harness environment toggle for Retry Forever. See docs/configuration.md (models api). |

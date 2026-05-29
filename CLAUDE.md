@@ -196,6 +196,21 @@ Troubleshooting inactive tools: (1) `list_tool_families` (pass `task_hint`), (2)
 | `AGENT_AUTO_DREAM_ALLOW_DELETE`  | off      | Allow the dream pass to prune stale/contradicted notes             |
 | `AGENT_DREAM_THRESHOLD`          | `0.15`   | Min BM25 score to trigger auto-recall                              |
 
+The `auto_dream` delete path (when `AGENT_AUTO_DREAM_ALLOW_DELETE=1`) routes its deletes through the same curator safety-rails + soft-delete archive as `curate_memory` below.
+
+### Memory curator (LLM prune + reversible soft-delete)
+
+| Var                                  | Default | Purpose                                                                          |
+| ------------------------------------ | ------- | -------------------------------------------------------------------------------- |
+| `AGENT_MEMORY_ARCHIVE`               | on      | `forget`/`curate_memory` soft-delete to `notes.archive.json` before removing     |
+| `AGENT_MEMORY_ARCHIVE_MAX`           | `2000`  | Archive ring-buffer cap (oldest rows trimmed past this)                          |
+| `AGENT_MEMORY_CURATOR_MODEL`         | (fast)  | Optional model slug for `curate_memory` (empty = fast model)                     |
+| `AGENT_CURATOR_PROTECT_ACCESS_COUNT` | `3`     | Never prune notes accessed ≥ this many times                                     |
+| `AGENT_CURATOR_PROTECT_MIN_AGE_HOURS`| `24`    | Never prune notes younger than this (by `createdAt`)                             |
+| `AGENT_MEMORY_MAX_NOTES`             | `0`     | Reserved: future budget-triggered auto-curation (`0` = off)                      |
+
+`curate_memory({dry_run})` defaults to **dry-run** — it returns the LLM plan plus what the deterministic guardrail vetoed before anything is written. Pure planning/veto logic is in `core/memory_curator.ts`.
+
 ### Web & research
 
 | Var                            | Default                   | Purpose                                                        |
@@ -309,9 +324,9 @@ packages/tui    packages/web    packages/eval   — run directly via tsx, never 
 
 **Reasoning & planning** — `think`, `reason`, `plan`, `hypothesize`, `breakdown`.
 
-**File read & navigation** — `read_file`, `read_file_chunked`, `read_file_with_imports`, `file_metadata`, `workspace_snapshot`, `grep_file`, `list_dir`, `repo_map`, `ast_grep`, `symbol_index`, `find_references`, `rename_symbol` (semantic TS/JS project-wide rename via the TS language service).
+**File read & navigation** — `read_file`, `read_file_chunked`, `read_file_with_imports`, `file_metadata`, `workspace_snapshot`, `grep_file` (content search), `find_files` (path/name glob, e.g. `**/*.test.ts`), `list_dir`, `repo_map`, `ast_grep`, `symbol_index`, `find_references`, `rename_symbol` (semantic TS/JS project-wide rename via the TS language service).
 
-**File write** — `write_file` (whole-file: create/overwrite/append) and `edit_file` (targeted: `replacements` or fuzzy `diff`) are always loaded. The `files_edit` family (activation-only) adds `move_file`, `copy_file`, `copy_tree`, `mkdir_p`, `multi_file_apply` (atomic, rollback-aware), `path_guard`. Streaming/integrity support: `file_write_ops.ts`, `file_write_integrity.ts`.
+**File write** — `write_file` (whole-file: create/overwrite/append) and `edit_file` (targeted: `replacements` or fuzzy `diff`) are always loaded. The `files_edit` family (activation-only) adds `move_file`, `copy_file`, `copy_tree`, `mkdir_p`, `delete_file` (file or recursive dir; destructive, approval-gated), `multi_file_apply` (atomic, rollback-aware), `path_guard`. Streaming/integrity support: `file_write_ops.ts`, `file_write_integrity.ts`.
 
 **Shell & process** — `run_shell` (`dangerLevel: "destructive"`), `run_background`, `kill_process`, `list_processes`, `read_process_output`, `run_command_with_pty`, `execute_code`, `run_tests`, `run_lint`.
 
@@ -321,7 +336,7 @@ packages/tui    packages/web    packages/eval   — run directly via tsx, never 
 
 **Git** — `git_status`, `git_diff`, `git_log`, `git_branch`, `git_commit`, `git_checkpoint`, `git_rollback`, `git_worktree` (add/list/remove linked worktrees under `.agent_worktrees/`).
 
-**Memory** (backed by `.agent_notes.json`) — `remember`, `recall`, `recall_type`, `forget`, `forget_type`, `memory_stats`, `search_memory`, `recall_relevant` (hybrid BM25 + embedding), `memory_query` (unified modes), `memory_graph`, `memory_consolidate`, `read_artifact`, `failure_review`.
+**Memory** (backed by `.agent_notes.json`) — `remember`, `recall`, `recall_type`, `forget`, `forget_type`, `memory_stats`, `search_memory`, `recall_relevant` (hybrid BM25 + embedding), `memory_query` (unified modes), `memory_graph`, `memory_consolidate`, `curate_memory` (LLM prune/merge/re-confidence with a deterministic safety-rail veto), `restore_memory` (recover from the soft-delete archive), `read_artifact`, `failure_review`. **Soft-delete:** `forget` and `curate_memory` archive the full `StoredNote` to `notes.archive.json` before removing (gated by `AGENT_MEMORY_ARCHIVE`, default on); `restore_memory` recovers it. The curator's veto + slice scoring live as pure functions in `core/memory_curator.ts` (shared with the `auto_dream` delete path); never prunes `scope:"global"`, `user:`/`identity:`/`pref:` keys, high-access, or too-young notes.
 
 **Vault** (Obsidian brain) — `vault_write`, `vault_read`, `vault_search`, `vault_list`, `vault_links`, `vault_graph`, `vault_delete`.
 
@@ -352,7 +367,7 @@ packages/tui    packages/web    packages/eval   — run directly via tsx, never 
 
 **Cross-chat memory federation (Phase 2)** — every note carries a `scope` field with three values: `chat` (only the writing chatId sees it — hard ranker filter), `workspace` (every chat in the same `workspaceFingerprint` sees it; **default** for new writes), `global` (every chat sees it — durable identity facts). Auto-classifier in `defaultScopeForKey`: `user:*`/`identity:*`/`pref:*` → `global`, else `workspace` when a fingerprint resolves, else `global`. Same-workspace sibling-chat notes apply a multiplicative discount (default 0.85, env `AGENT_RECALL_SIBLING_DISCOUNT`) so the current chat's own writes win ties. `recall_relevant` surfaces provenance per line (`(own chat)`, `(sibling chat <id>)`, `(global)`) and exposes `workspace_scope: "current" | "all" | "global_only"`. The embedding index lives at user-global `~/.liminal/memory.index.json` (Phase 1 had a silent regression where it lived in scratch workspace roots). The vault gets a parallel semantic index at `~/.liminal/vault.index.json` via `vault_index.ts` so consolidated knowledge is paraphrase-findable. Three new tools: `memory_promote({key, to})` flips scope; `memory_neighbors({anchor_key|text, k})` returns k semantically-nearest notes via cosine; `consolidate_chat({chat_id?})` runs the auto-dream consolidator on demand against one chat's session.jsonl. Chat-id propagation rides AsyncLocalStorage in `chat_context.ts`, bound by `AgentHarness.send()`.
 
-**Tool families** (`tool_catalog.ts`): `files_edit`, `shell`, `git`, `tasks`, `memory_advanced`, `web`, `markets`, `code_intel`, `browser`, `captcha`, `vision`, `audio`, `meta`, `dynamic_tools`, `external_api`, `vault`, `document`, `agenda_scheduler`, `synthesis`, `independence`, `navigation`, `harness_ui`, `orchestration`.
+**Tool families** (`tool_catalog.ts`): `files_edit`, `shell`, `git`, `tasks`, `memory_advanced`, `web`, `markets`, `code_intel`, `browser`, `captcha`, `vision`, `audio`, `meta`, `reasoning_advanced` (harness-scoped: `decompose_goal`, `verify_contract`, `dispatch_graph`, `query_tool_outputs`, `research_state`), `dynamic_tools`, `external_api`, `vault`, `document`, `agenda_scheduler`, `synthesis`, `independence`, `navigation`, `harness_ui`, `orchestration` (now also `reflect_debate`, `branch_explore`, `branch_evaluate`). Every registered tool must belong to a family or the always-set — enforced by `tool_catalog.test.ts`.
 
 **External API + MCP connections** (`api_connect.ts` / `mcp_attach.ts`). The meta tools `api_connect`, `api_disconnect`, `api_list`, `mcp_attach`, `mcp_detach` are always available. `api_connect` ingests an OpenAPI 3.x JSON spec and registers one tool per operation as `api_<conn>_<opSlug>` (GETs default to no-approval; writes always require approval). `mcp_attach` runs the MCP `initialize` → `tools/list` handshake against a Streamable-HTTP MCP server and registers each remote tool as `mcp_<conn>_<remoteName>`. Connection records persist as JSON under `~/.liminal/api_connections/<name>.json` and are re-registered on every `registerAllTools` call. Auth is stored by reference (env var name) — secrets are never persisted, resolved fresh on each request.
 

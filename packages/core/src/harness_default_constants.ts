@@ -229,6 +229,12 @@ export const HARNESS_ENV_DEFAULTS: Readonly<Record<string, string>> = {
   // message. On DeepInfra/GMICloud/NovitaAI this discounts cached prefix tokens
   // ~10× on rounds 2+ of a ReAct turn. Disable only for A/B baseline measurement.
   AGENT_PROMPT_CACHE: "1",
+  // Second, rolling cache_control breakpoint on the last stable conversation
+  // message (after the volatile working/execution-state tail). Lets the prompt
+  // cache extend across the growing tool-result history, not just the static
+  // prefix — the dominant token cost in long ReAct turns. Most effective with
+  // AGENT_CTX_VOLATILE_TAIL on. Set 0 to keep prefix-only caching.
+  AGENT_PROMPT_CACHE_ROLLING: "1",
   AGENT_GOLDEN_EVAL: "1",
   AGENT_FAILURE_DIGEST: "1",
   AGENT_RECIPE_LIBRARY: "1",
@@ -265,10 +271,22 @@ export const HARNESS_ENV_DEFAULTS: Readonly<Record<string, string>> = {
   AGENT_CTX_HOT_ROUNDS: "4",          // verbatim rounds kept
   AGENT_CTX_WARM_ROUNDS: "8",         // rounds kept as tier-2 provenance blocks
   AGENT_CTX_PROVENANCE: "1",          // write provenance artifacts for warm/cold blocks
+  // Place volatile working/execution-state system blocks AFTER the conversation
+  // history (vs. between inception and history). Keeps the [inception, ...stable
+  // history] prefix byte-identical round-to-round so prompt caching can extend
+  // across it. Set 0 to restore the legacy (volatile-in-the-middle) ordering.
+  AGENT_CTX_VOLATILE_TAIL: "1",
   // Semantic dream gating
   AGENT_DREAM_THRESHOLD: "0.15",      // min BM25 score to trigger auto-recall
   AGENT_DREAM_CONTRADICT_CONFIDENCE: "0.85", // confidence required for auto-resolution
   AGENT_DREAM_CONTRADICT_AUTO_RESOLVE: "1",  // auto-update stale notes on contradiction
+  // Memory curator (LLM-driven note pruning + reversible soft-delete archive)
+  AGENT_MEMORY_ARCHIVE: "1",          // forget/curate soft-delete into notes.archive.json before removing
+  AGENT_MEMORY_ARCHIVE_MAX: "2000",   // archive ring-buffer cap (oldest trimmed past this)
+  AGENT_MEMORY_CURATOR_MODEL: "",     // optional model slug for curate_memory (default: fast model)
+  AGENT_CURATOR_PROTECT_ACCESS_COUNT: "3",   // never prune notes accessed >= this many times
+  AGENT_CURATOR_PROTECT_MIN_AGE_HOURS: "24", // never prune notes younger than this (by createdAt)
+  AGENT_MEMORY_MAX_NOTES: "0",        // reserved: future budget-triggered auto-curation (0 = off)
   // Compensation ledger
   AGENT_COMPENSATION_ENABLED: "1",    // track and replay plan side-effect compensations
   AGENT_COMPENSATION_MAX_ACTIONS: "32", // max compensation entries per plan

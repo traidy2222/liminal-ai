@@ -140,6 +140,16 @@ export function notesPaths(workspaceRoot?: string): TieredPaths {
   };
 }
 
+/** Tiered paths for the soft-delete memory archive (`notes.archive.json`). Lives beside notes.json. */
+export function notesArchivePaths(workspaceRoot?: string): TieredPaths {
+  const wsRoot = workspaceRoot ?? resolveWorkspaceRoot();
+  return {
+    global: globalPath("notes.archive.json"),
+    legacy: path.join(wsRoot, ".agent_notes.archive.json"),
+    legacyOnly: isLegacyLayout(),
+  };
+}
+
 /** Tiered paths for the failure log (`failures.jsonl`). */
 export function failureLogPaths(workspaceRoot?: string): TieredPaths {
   const wsRoot = workspaceRoot ?? resolveWorkspaceRoot();

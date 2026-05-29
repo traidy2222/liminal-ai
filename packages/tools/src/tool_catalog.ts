@@ -15,6 +15,7 @@ export const TOOL_FAMILIES: Record<string, { description: string; tools: readonl
       "copy_file",
       "copy_tree",
       "mkdir_p",
+      "delete_file",
       // Rollback-safe orchestration
       "multi_file_apply",
       "path_guard",
@@ -58,6 +59,9 @@ export const TOOL_FAMILIES: Record<string, { description: string; tools: readonl
       "memory_promote",
       "memory_neighbors",
       "consolidate_chat",
+      "curate_memory",
+      "restore_memory",
+      "recall_compression",
     ],
   },
   web: {
@@ -110,8 +114,21 @@ export const TOOL_FAMILIES: Record<string, { description: string; tools: readonl
     tools: ["transcribe_audio"],
   },
   meta: {
-    description: "Harness improvement suggestions, insights, and self-telemetry.",
-    tools: ["suggest_improvement", "view_insights", "self_telemetry"],
+    description: "Harness improvement suggestions, insights, self-telemetry, and pattern-store maintenance.",
+    tools: ["suggest_improvement", "view_insights", "self_telemetry", "paste_train"],
+  },
+  reasoning_advanced: {
+    description:
+      "Advanced planning and execution control: decompose a goal into subgoals, verify progress against execution contracts, " +
+      "schedule an intra-round tool dependency DAG, query prior tool outputs, and inspect the research ledger. " +
+      "Harness-scoped — only present when running under a full harness.",
+    tools: [
+      "decompose_goal",
+      "verify_contract",
+      "dispatch_graph",
+      "query_tool_outputs",
+      "research_state",
+    ],
   },
   dynamic_tools: {
     description: "Create, edit, remove, and list model-defined tools registered at runtime.",
@@ -176,16 +193,15 @@ export const TOOL_FAMILIES: Record<string, { description: string; tools: readonl
   },
   navigation: {
     description: "Repository tree orientation and targeted file search.",
-    tools: ["repo_map", "workspace_snapshot", "file_metadata", "read_file_chunked", "read_file_with_imports"],
+    tools: ["repo_map", "workspace_snapshot", "file_metadata", "find_files", "read_file_chunked", "read_file_with_imports"],
   },
   harness_ui: {
-    description: "Persona, images, structured extraction (requires harness).",
+    description: "Persona, runtime settings, structured extraction (requires harness). Image upload lives in the vision family.",
     tools: [
       "set_persona",
       "append_persona_living",
       "get_runtime_settings",
       "set_runtime_settings",
-      "upload_image",
       "extract_structured",
       "hypothesize",
     ],
@@ -201,6 +217,9 @@ export const TOOL_FAMILIES: Record<string, { description: string; tools: readonl
       "evidence_critic",
       "path_critic",
       "policy_critic",
+      "reflect_debate",
+      "branch_explore",
+      "branch_evaluate",
       "refresh_world_context",
     ],
   },

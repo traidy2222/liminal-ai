@@ -2986,11 +2986,39 @@ export class AgentHarness {
       const allowDelete = resolveHarnessEnvRaw("AGENT_AUTO_DREAM_ALLOW_DELETE", this.runtimePreferences) === "1";
       let deletesApplied = 0;
       if (allowDelete && this.registry.has("forget")) {
-        for (const d of parsed.deletes?.slice(0, 8) ?? []) {
-          if (!d || typeof d.key !== "string") continue;
-          const key = d.key.trim().slice(0, 120);
-          if (!key) continue;
-          await this.dispatcher.directCall("forget", { key });
+        const requested = (parsed.deletes ?? [])
+          .filter((d): d is { key: string; reason?: string } => !!d && typeof d.key === "string" && d.key.trim().length > 0)
+          .slice(0, 8)
+          .map((d) => ({ key: d.key.trim().slice(0, 120), reason: String(d.reason ?? "auto-dream").slice(0, 240) }));
+        // Run the same deterministic guardrail the curate_memory tool uses, so
+        // background deletes can never remove durable identity/high-access facts.
+        // forget() itself soft-deletes to the archive (reversible).
+        const { applyCuratorSafetyRails, resolveCuratorSafetyOpts } = await import("./memory_curator.js");
+        const byKey = new Map<string, import("./memory_curator.js").CuratorNote>();
+        try {
+          const parsedNotes = JSON.parse(await readFileFs(notesPathResolved, "utf8")) as Record<string, unknown>;
+          for (const [k, v] of Object.entries(parsedNotes)) {
+            if (v && typeof v === "object") {
+              const sn = v as Record<string, unknown>;
+              byKey.set(k, {
+                key: k,
+                value: String(sn["value"] ?? ""),
+                createdAt: sn["createdAt"] as string | undefined,
+                accessCount: sn["accessCount"] as number | undefined,
+                scope: sn["scope"] as "chat" | "workspace" | "global" | undefined,
+              });
+            }
+          }
+        } catch {
+          /* notes unreadable — guardrail still vetoes by key prefix */
+        }
+        const { plan: vetted } = applyCuratorSafetyRails(
+          { summary: "", prune: requested, merge: [], adjust: [] },
+          byKey,
+          resolveCuratorSafetyOpts()
+        );
+        for (const p of vetted.prune) {
+          await this.dispatcher.directCall("forget", { key: p.key });
           deletesApplied++;
         }
       }
@@ -3347,6 +3375,13 @@ export class AgentHarness {
     this.syncExecutionStateToContext();
     const contractBudgetMsg = this.checkContractBudgetExceeded();
     if (contractBudgetMsg) {
+      // Ensure the tool we're about to recommend is actually exposed to the
+      // model. Under lazy loading verify_contract lives in the (activation-only)
+      // reasoning_advanced family, so activate it before nudging — otherwise the
+      // model is told to call a tool it cannot see.
+      if (this.registry.has("verify_contract") && !this.registry.isActive("verify_contract")) {
+        this.registry.activate(["verify_contract"]);
+      }
       this.context.appendMessage({
         role: "user",
         content:
@@ -4225,12 +4260,20 @@ export class AgentHarness {
       // Push a duplicate-work signal so the model reuses earlier results
       // instead of re-running identical tool calls across rounds.
       if (duplicateHints.length > 0) {
+        // Expose query_tool_outputs (activation-only reasoning_advanced family)
+        // before recommending it, so the model can act on the hint.
+        const hasQueryOutputs = this.registry.has("query_tool_outputs");
+        if (hasQueryOutputs && !this.registry.isActive("query_tool_outputs")) {
+          this.registry.activate(["query_tool_outputs"]);
+        }
         this.context.appendMessage({
           role: "system",
           content:
             "[DUPLICATE TOOL CALLS] " +
             duplicateHints.join(" ") +
-            " Reuse the earlier result via query_tool_outputs instead of re-running identical calls.",
+            (hasQueryOutputs
+              ? " Reuse the earlier result via query_tool_outputs instead of re-running identical calls."
+              : " Reuse the earlier result instead of re-running identical calls."),
         });
       }
 

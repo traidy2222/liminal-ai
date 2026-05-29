@@ -10,6 +10,7 @@ import {
 } from "./notes_store.js";
 import { rankDocumentsForQuery, effectiveHarnessEnvRaw } from "@liminal/core";
 import { suggestWikilinkLine } from "./memory_autolink.js";
+import { archiveNotes } from "./notes_archive.js";
 
 const MEMORY_TYPES = ["fact", "experience", "entity", "belief", "reflection", "recipe", "hypothesis", "trajectory"] as const;
 type MemoryType = (typeof MEMORY_TYPES)[number];
@@ -213,6 +214,13 @@ export const forgetTool = defineTool({
   },
   handler: async (args) => {
     const targetKey = args["key"] as string;
+    // Soft-delete: archive the full StoredNote before removing so the delete is
+    // reversible via restore_memory (no-op when AGENT_MEMORY_ARCHIVE=0).
+    const raw = await loadRawNotes();
+    const existing = raw[targetKey];
+    if (existing && typeof existing === "object") {
+      await archiveNotes([{ key: targetKey, note: existing, reason: "forget" }]);
+    }
     let found = false;
     await atomicUpdate((notes) => {
       if (!(targetKey in notes)) return notes;
@@ -222,7 +230,7 @@ export const forgetTool = defineTool({
       return updated;
     });
     return found
-      ? { ok: true, output: `Deleted memory: "${targetKey}"` }
+      ? { ok: true, output: `Deleted memory: "${targetKey}"${existing && typeof existing === "object" ? " (archived — restore_memory can recover it)" : ""}` }
       : { ok: false, error: `No memory found for key "${targetKey}". Use search_memory to find the correct key.` };
   },
 });
