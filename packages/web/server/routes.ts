@@ -209,14 +209,12 @@ export function createRouter(chatManager: ChatManager, sse: SSEManager): Router 
     bridge.clearSession({ preserveBootstrapState: true });
     let greeted = false;
     if (greet && !bridge.isAwaitingPersonaBootstrap) {
-      try {
-        await bridge.harness.sendSessionGreeting({ force: true });
-        greeted = true;
-      } catch (err) {
-        sse.send("error", {
-          message: err instanceof Error ? err.message : "Session greeting failed.",
-        });
-      }
+      // Non-blocking: start the greeting turn and return immediately. The heartbeat
+      // fires harness_running synchronously so the client shows busy state at once;
+      // greeting content streams over SSE. Awaiting here would hang the reset call
+      // for the entire turn.
+      bridge.beginGreeting();
+      greeted = true;
     }
     res.json({ ok: true, mode: "soft", greeted });
   });

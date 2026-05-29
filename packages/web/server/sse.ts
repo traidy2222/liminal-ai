@@ -110,7 +110,32 @@ export class SSEManager {
       }
     }
     for (const clientId of dead) {
-      this.clients.delete(clientId);
+      this.dropClient(clientId);
+    }
+  }
+
+  /**
+   * Remove a client and explicitly close its socket. A bare `clients.delete`
+   * leaves a half-open connection alive from the browser's perspective: its
+   * `EventSource` stays OPEN, never fires `onerror`, never reconnects, and the
+   * "ONLINE" badge stays green while no events are delivered. Ending the response
+   * sends a FIN so the browser detects the drop and runs its reconnect logic.
+   * Safe to call repeatedly (guarded on `writableEnded`); the `res.on("close")`
+   * handler may also fire and re-delete, which is a no-op.
+   */
+  private dropClient(id: string): void {
+    const client = this.clients.get(id);
+    this.clients.delete(id);
+    if (client) {
+      try {
+        if (!client.res.writableEnded) client.res.end();
+      } catch {
+        /* socket already torn down */
+      }
+    }
+    if (this.clients.size === 0 && this.heartbeatTimer) {
+      clearInterval(this.heartbeatTimer);
+      this.heartbeatTimer = null;
     }
   }
 
@@ -157,7 +182,7 @@ export class SSEManager {
         }
       }
       for (const id of dead) {
-        this.clients.delete(id);
+        this.dropClient(id);
       }
     }, 8_000);
   }

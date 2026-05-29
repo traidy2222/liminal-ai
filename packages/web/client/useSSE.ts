@@ -2144,6 +2144,13 @@ export function useSSE() {
         }
       }
 
+      // User preference: greet on every page load (including reload), not just the
+      // first load per tab. Reset the persisted per-tab "already greeted" marker so
+      // the gate below opens each load. The in-memory `autoGreetAttemptedThisPageLoad`
+      // still de-dupes the React Strict Mode double-mount within a single page load.
+      // NOTE: each greet runs a soft reset, so a reload starts a fresh conversation.
+      if (!captureMode) clearAutoGreetDone();
+
       const needsAutoGreet =
         !captureMode && !isAutoGreetDone() && !autoGreetAttemptedThisPageLoad;
 

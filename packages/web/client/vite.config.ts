@@ -46,13 +46,16 @@ const DEV_API_ORIGIN =
 
 export default defineConfig({
   plugins: [react(), marketingRecordingsPlugin()],
-  root: ".",
+  // Anchor root + entry inputs to this config's directory so the build resolves
+  // correctly regardless of cwd (e.g. `vite build client/` from packages/web,
+  // where a relative `root: "."` would otherwise point at packages/web).
+  root: __dirname,
   build: {
     outDir: "dist",
     rollupOptions: {
       input: {
-        main: "index.html",
-        marketing: "marketing.html",
+        main: path.resolve(__dirname, "index.html"),
+        marketing: path.resolve(__dirname, "marketing.html"),
       },
     },
   },

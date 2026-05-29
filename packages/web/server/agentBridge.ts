@@ -227,13 +227,32 @@ export class AgentBridge {
       }
       if (options?.greet !== true) return;
       try {
-        await this.harness.sendSessionGreeting({ force: true });
+        // Surface busy state immediately — `running` is set synchronously inside
+        // send(), so starting the heartbeat now emits harness_running before the
+        // first model token (mirrors sendUserMessage). Without this the greeting
+        // turn runs with no "PROCESSING" indicator until the first text event.
+        const run = this.harness.sendSessionGreeting();
+        this.startHeartbeat();
+        await run;
       } catch (err) {
         console.error(
           "Session greeting failed:",
           err instanceof Error ? err.message : String(err)
         );
       }
+    });
+  }
+
+  /** Kick off the opening greeting non-blocking, surfacing busy state immediately. */
+  beginGreeting(): void {
+    void runWithWorkspaceRoot(this.workspaceRoot, async () => {
+      const run = this.harness.sendSessionGreeting();
+      this.startHeartbeat();
+      await run;
+    }).catch((err) => {
+      this.maybeSend("error", {
+        message: err instanceof Error ? err.message : "Session greeting failed.",
+      });
     });
   }
 
@@ -413,7 +432,7 @@ export class AgentBridge {
             },
             { persist: true }
           );
-          await this.harness.sendSessionGreeting({ force: true });
+          await this.harness.sendSessionGreeting();
           this.emitBootstrapProgress("done", "Session ready.");
           return;
         }
@@ -440,7 +459,7 @@ export class AgentBridge {
             { persist: true }
           );
           this.awaitingPersonaBootstrapInput = false;
-          await this.harness.sendSessionGreeting({ force: true });
+          await this.harness.sendSessionGreeting();
           this.emitBootstrapProgress("done", "Session ready.");
           return;
         }
@@ -485,7 +504,7 @@ export class AgentBridge {
         }
         this.awaitingPersonaBootstrapInput = false;
         this.emitBootstrapProgress("greeting", "Finalizing session greeting...");
-        await this.harness.sendSessionGreeting({ force: true });
+        await this.harness.sendSessionGreeting();
         this.emitBootstrapProgress("done", "Bootstrap complete.");
       });
     } finally {
