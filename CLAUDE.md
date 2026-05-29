@@ -206,6 +206,7 @@ The `auto_dream` delete path (when `AGENT_AUTO_DREAM_ALLOW_DELETE=1`) routes its
 | `AGENT_MEMORY_ARCHIVE_MAX`           | `2000`  | Archive ring-buffer cap (oldest rows trimmed past this)                          |
 | `AGENT_MEMORY_CURATOR_MODEL`         | (fast)  | Optional model slug for `curate_memory` (empty = fast model)                     |
 | `AGENT_CURATOR_TIMEOUT_MS`           | `90000` | Wall-clock budget for the `curate_memory` model call (clamped 5s–300s)           |
+| `AGENT_CURATOR_MAX_TOKENS`           | `6000`  | Output budget for the curation plan JSON (clamped 1k–16k); guards against truncation |
 | `AGENT_CURATOR_PROTECT_ACCESS_COUNT` | `3`     | Never prune notes accessed ≥ this many times                                     |
 | `AGENT_CURATOR_PROTECT_MIN_AGE_HOURS`| `24`    | Never prune notes younger than this (by `createdAt`)                             |
 | `AGENT_MEMORY_MAX_NOTES`             | `0`     | Reserved: future budget-triggered auto-curation (`0` = off)                      |

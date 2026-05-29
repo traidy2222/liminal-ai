@@ -211,7 +211,9 @@ export function buildCuratorPrompt(notes: CuratorNote[], nowMs?: number): string
     "- MERGE near-duplicates: keep the richer/more-recent key, fold the rest into mergedValue, list the others under drop.\n" +
     "- ADJUST confidence down for facts that look shaky or unverified; up for ones repeatedly useful.\n" +
     "- NEVER prune durable identity/preference facts (keys like user:*, identity:*, pref:*) or high-access notes — the harness vetoes these anyway, so don't waste operations on them.\n" +
-    "- Use exact keys verbatim from the list. Be conservative: when unsure, keep.\n\n" +
+    "- Use exact keys verbatim from the list. Be conservative: when unsure, keep.\n" +
+    "- Keep `reason` under ~120 chars and each `mergedValue` under ~240 chars — terse, not prose.\n" +
+    "- Return AT MOST 30 prune, 12 merge, and 30 adjust operations in this response. Pick the highest-value ones; the user can re-run for more. A bounded plan must always be complete, valid JSON.\n\n" +
     "Notes:\n" +
     rows
   );

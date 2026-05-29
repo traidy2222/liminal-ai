@@ -96,27 +96,42 @@ export const curateMemoryTool = defineTool({
     const timeoutRaw = parseInt(effectiveHarnessEnvRaw("AGENT_CURATOR_TIMEOUT_MS")?.trim() ?? "", 10);
     const timeoutMs = Number.isFinite(timeoutRaw) ? Math.max(5_000, Math.min(300_000, timeoutRaw)) : 90_000;
     const looksLikeTimeout = (msg: string): boolean => /abort|timed?\s*out|timeout|ETIMEDOUT/i.test(msg);
+    // A truncated plan (model hit its output budget mid-JSON) surfaces as a
+    // JSON.parse failure in completeChatJson, NOT corrupt notes — don't let the
+    // caller hunt for a bad note. The prompt caps op counts, but guard anyway.
+    const looksTruncated = (msg: string): boolean =>
+      /Unterminated string|Unexpected end of JSON|Unexpected end of (?:input|data)|in JSON at position/i.test(msg);
     const timeoutHint =
       ` — the curation model call exceeded ${Math.round(timeoutMs / 1000)}s. ` +
       `Raise AGENT_CURATOR_TIMEOUT_MS, lower max_notes_considered (reviewed ${slice.length} of ${all.length} notes), ` +
       `or point AGENT_MEMORY_CURATOR_MODEL at a faster model.`;
+    const truncatedHint =
+      ` — the model's plan was truncated before it was valid JSON (not a corrupt note). ` +
+      `Lower max_notes_considered (reviewed ${slice.length} of ${all.length} notes) and re-run; the curator handles the store in slices.`;
+    const classify = (msg: string): string =>
+      looksLikeTimeout(msg) ? `curation timed out${timeoutHint}` : looksTruncated(msg) ? `curation plan truncated${truncatedHint}` : msg;
+
+    // Curation plans can be sizable; give the JSON response generous headroom so
+    // it isn't cut off mid-string (the op caps in the prompt keep this bounded).
+    const maxTokensRaw = parseInt(effectiveHarnessEnvRaw("AGENT_CURATOR_MAX_TOKENS")?.trim() ?? "", 10);
+    const maxTokens = Number.isFinite(maxTokensRaw) ? Math.max(1000, Math.min(16000, maxTokensRaw)) : 6000;
 
     let plan;
     try {
       const jr = await completeChatJson(client, {
         model,
         messages: [{ role: "user", content: buildCuratorPrompt(slice) }],
-        maxTokens: 1500,
+        maxTokens,
         temperature: 0.1,
         isFastModel: true,
         fallbackModel: provider.model,
         signal: AbortSignal.timeout(timeoutMs),
       });
-      if (!jr.ok) return { ok: false, error: looksLikeTimeout(jr.error) ? `curation timed out${timeoutHint}` : jr.error };
+      if (!jr.ok) return { ok: false, error: classify(jr.error) };
       plan = parseCuratorPlan(jr.parsed);
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
-      return { ok: false, error: looksLikeTimeout(msg) ? `curation timed out${timeoutHint}` : `curation call failed: ${msg}` };
+      return { ok: false, error: looksLikeTimeout(msg) || looksTruncated(msg) ? classify(msg) : `curation call failed: ${msg}` };
     }
     if (!plan) return { ok: false, error: "model returned an unparseable curation plan" };
 

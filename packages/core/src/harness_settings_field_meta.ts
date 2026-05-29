@@ -1729,6 +1729,13 @@ const _META_RAW: Record<string, HarnessSettingsFieldMeta> = {
     description: "Wall-clock budget for the curate_memory model call (clamped 5s–300s). Raise for large note stores.",
     valueKind: "number",
   },
+  "AGENT_CURATOR_MAX_TOKENS": {
+    tabId: "harness",
+    subgroupId: "harness_misc",
+    label: "Curator Max Tokens",
+    description: "Output token budget for the curate_memory plan JSON (clamped 1k–16k). Prevents the plan being truncated mid-JSON.",
+    valueKind: "number",
+  },
   "AGENT_CURATOR_PROTECT_ACCESS_COUNT": {
     tabId: "harness",
     subgroupId: "harness_misc",

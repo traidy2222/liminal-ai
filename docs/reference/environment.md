@@ -56,6 +56,7 @@ Web **Settings** writes to (2). See [Configuration basics](../start/configuratio
 | `AGENT_CTX_PROVENANCE` | `1` | yes | no | harness | Harness environment toggle for Ctx Provenance. See docs/configuration.md (harness). |
 | `AGENT_CTX_VOLATILE_TAIL` | `1` | yes | no | harness | Place volatile working/execution-state system blocks AFTER the conversation history instead of between the static prefix |
 | `AGENT_CTX_WARM_ROUNDS` | `8` | yes | no | harness | Harness environment toggle for Ctx Warm Rounds. See docs/configuration.md (harness). |
+| `AGENT_CURATOR_MAX_TOKENS` | `6000` | yes | no | harness | Output token budget for the curate_memory plan JSON (clamped 1k–16k). Prevents the plan being truncated mid-JSON. |
 | `AGENT_CURATOR_PROTECT_ACCESS_COUNT` | `3` | yes | no | harness | Memory curator never prunes notes accessed at least this many times. |
 | `AGENT_CURATOR_PROTECT_MIN_AGE_HOURS` | `24` | yes | no | harness | Memory curator never prunes notes younger than this many hours. |
 | `AGENT_CURATOR_TIMEOUT_MS` | `90000` | yes | no | harness | Wall-clock budget for the curate_memory model call (clamped 5s–300s). Raise for large note stores. |
