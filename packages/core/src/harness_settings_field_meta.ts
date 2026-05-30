@@ -256,13 +256,89 @@ const _META_RAW: Record<string, HarnessSettingsFieldMeta> = {
     description: "Timestamp granularity in the response: none, segment (default), or word.",
     valueKind: "string",
   },
-  "AGENT_DICTATION_AUTO_SEND": {
+  "AGENT_TTS_ENABLED": {
     tabId: "models_api",
     subgroupId: "audio",
-    label: "Dictation Auto-Send",
+    label: "Text-to-Speech Enabled",
     description:
-      "When 1, the mic button defaults to auto-send mode: recording stops + message is sent automatically once you pause talking. Off by default — you can still flip per-session via the ⚡ button next to the mic.",
+      "Master switch for Jarvis-style spoken updates (speak tool + web audio queue). Written chat stays the full deliverable.",
     valueKind: "boolean",
+  },
+  "AGENT_TTS_MODEL": {
+    tabId: "models_api",
+    subgroupId: "audio",
+    label: "TTS Model",
+    description:
+      "TTS model slug for /audio/speech. Default hexgrad/kokoro-82m (~$0.62/M characters on OpenRouter).",
+    valueKind: "string",
+  },
+  "AGENT_TTS_VOICE": {
+    tabId: "models_api",
+    subgroupId: "audio",
+    label: "TTS Voice",
+    description:
+      "Voice preset — must match TTS model: Kokoro (af_sky, af_bella, am_adam, …) or OpenAI (alloy, nova, shimmer, …). Mismatched pairs are auto-corrected at synthesis.",
+    valueKind: "string",
+  },
+  "AGENT_TTS_BASE_URL": {
+    tabId: "models_api",
+    subgroupId: "audio",
+    label: "TTS Base URL",
+    description: "OpenAI-compatible base URL for /audio/speech. Defaults to OpenRouter.",
+    valueKind: "string",
+  },
+  "AGENT_TTS_TIMEOUT_MS": {
+    tabId: "models_api",
+    subgroupId: "audio",
+    label: "TTS Timeout Ms",
+    description: "Per-call wall-clock timeout for speech synthesis.",
+    valueKind: "number",
+  },
+  "AGENT_TTS_MAX_CHARS_PER_CALL": {
+    tabId: "models_api",
+    subgroupId: "audio",
+    label: "TTS Max Chars Per Call",
+    description:
+      "Max characters per speak() after sanitization (default 4096 — matches OpenRouter TTS input context; values above 4096 are clamped).",
+    valueKind: "number",
+  },
+  "AGENT_TTS_MAX_OUTPUT_TOKENS": {
+    tabId: "models_api",
+    subgroupId: "audio",
+    label: "TTS Max Output Tokens",
+    description:
+      "Optional passthrough max_tokens per segment (some providers). Long lines are split via AGENT_TTS_CHUNK_CHARS instead.",
+    valueKind: "number",
+  },
+  "AGENT_TTS_CHUNK_CHARS": {
+    tabId: "models_api",
+    subgroupId: "audio",
+    label: "TTS Chunk Chars",
+    description:
+      "Max characters per upstream /audio/speech request (default 400). Longer speak() text is split into sequential clips. OpenRouter recommends segmenting long input.",
+    valueKind: "number",
+  },
+  "AGENT_TTS_MAX_CALLS_PER_TURN": {
+    tabId: "models_api",
+    subgroupId: "audio",
+    label: "TTS Max Calls Per Turn",
+    description: "Hard cap on speak() calls per user message (default 8).",
+    valueKind: "number",
+  },
+  "AGENT_TTS_MIN_INTERVAL_MS": {
+    tabId: "models_api",
+    subgroupId: "audio",
+    label: "TTS Min Interval Ms",
+    description: "Minimum spacing between spoken clips to avoid machine-gun audio (default 800ms).",
+    valueKind: "number",
+  },
+  "AGENT_TTS_RESPONSE_FORMAT": {
+    tabId: "models_api",
+    subgroupId: "audio",
+    label: "TTS Response Format",
+    description:
+      "Audio format for /audio/speech. OpenRouter accepts mp3 or pcm only (wav/opus/flac are coerced to mp3). Use Kokoro voices (af_sky, af_bella) — not OpenAI names like alloy.",
+    valueKind: "string",
   },
   "AGENT_DICTATION_AUDIO_CUE": {
     tabId: "models_api",
@@ -1637,6 +1713,15 @@ const _META_RAW: Record<string, HarnessSettingsFieldMeta> = {
     label: "Reasoning Default Effort",
     description: "Harness environment toggle for Reasoning Default Effort. See docs/configuration.md (harness).",
     valueKind: "string",
+  },
+  "AGENT_EFFORT": {
+    tabId: "harness",
+    subgroupId: "harness_misc",
+    label: "Output Effort",
+    description:
+      "Deliverable-thoroughness dial: injected each turn beside the reasoning budget, scales completion max_tokens (0.75×–1.5×). Separate from reasoning depth and from AGENT_EFFORT_LEARN (which tunes reasoning effort only).",
+    valueKind: "enum",
+    enumValues: ["low", "medium", "high", "xhigh"] as const,
   },
   "AGENT_REASONING_NUDGE_CHARS": {
     tabId: "harness",

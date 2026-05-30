@@ -46,8 +46,18 @@ export const HARNESS_ENV_DEFAULTS: Readonly<Record<string, string>> = {
   AGENT_TRANSCRIBE_TIMEOUT_MS: "120000",
   AGENT_TRANSCRIBE_AUTO_ON_UPLOAD: "1",
   AGENT_TRANSCRIBE_TIMESTAMPS: "segment",
-  /** Browser dictation auto-send — off by default (opt-in via mic ⚡ toggle or settings). */
-  AGENT_DICTATION_AUTO_SEND: "0",
+  /** Text-to-speech — off by default; web-only playback in v1. */
+  AGENT_TTS_ENABLED: "0",
+  AGENT_TTS_MODEL: "hexgrad/kokoro-82m",
+  AGENT_TTS_VOICE: "af_sky",
+  AGENT_TTS_BASE_URL: "https://openrouter.ai/api/v1",
+  AGENT_TTS_TIMEOUT_MS: "45000",
+  AGENT_TTS_MAX_CHARS_PER_CALL: "4096",
+  AGENT_TTS_MAX_OUTPUT_TOKENS: "4096",
+  AGENT_TTS_CHUNK_CHARS: "400",
+  AGENT_TTS_MAX_CALLS_PER_TURN: "8",
+  AGENT_TTS_MIN_INTERVAL_MS: "800",
+  AGENT_TTS_RESPONSE_FORMAT: "mp3",
   AGENT_DICTATION_AUDIO_CUE: "0",
   /** ms — minimum recording length before auto-send is considered (filters coughs). */
   AGENT_DICTATION_MIN_RECORDING_MS: "1500",
@@ -265,6 +275,9 @@ export const HARNESS_ENV_DEFAULTS: Readonly<Record<string, string>> = {
   AGENT_EFFORT_LEARN: "1",               // record per-intent effort outcomes and reuse the best as fallback prior
   AGENT_REASONING_NUDGE_CHARS: "2500",   // legacy; stream stall enforcement removed
   AGENT_REASONING_SURFACE: "external",   // native | external | auto — always external: model uses think()+reason() tools
+  // Output-effort dial — SEPARATE axis from reasoning above. Governs how thorough
+  // the DELIVERABLE is (completeness, edge cases, polish) via a system-prompt block.
+  AGENT_EFFORT: "medium",                // low | medium | high | xhigh — deliverable thoroughness
   AGENT_REASONING_NATIVE_SLUGS: "",      // unused by default; set to re-enable native stream for specific slugs
   AGENT_REASONING_EXTERNAL_SLUGS: "",    // comma substrings → force external (think-primary)
   // Tiered context preservation

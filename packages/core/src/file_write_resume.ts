@@ -29,6 +29,8 @@ export function shouldEagerDispatchWhenArgsComplete(
   // write_file dispatches only in the end-of-stream batch so length-resume and
   // truncation checks run before anything hits disk (no eager mid-stream commit).
   if (isFileWriteToolName(toolName)) return false;
+  // speak: `{}` is valid JSON before the "text" field streams in — wait for full args.
+  if (toolName === "speak") return false;
   return pasteEnabled && (tool.dangerLevel === "safe" || !tool.dangerLevel);
 }
 

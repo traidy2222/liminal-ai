@@ -38,6 +38,33 @@ export type {
   TranscriptionModelRate,
 } from "./transcription.js";
 export {
+  TTS_MODEL_RATES,
+  DEFAULT_TTS_MODEL,
+  DEFAULT_TTS_VOICE,
+  TTS_MODEL_INPUT_MAX_CHARS,
+  TTS_MODEL_OUTPUT_MAX_TOKENS,
+  DEFAULT_TTS_CHUNK_CHARS,
+  ttsMaxOutputTokensForInput,
+  splitTextForTtsChunks,
+  synthesizeSpeechMulti,
+  estimateTtsCostUsd,
+  resolveSpeechSynthesisConfig,
+  sanitizeTextForTts,
+  synthesizeSpeech,
+} from "./speech_synthesis.js";
+export type {
+  SpeechSynthesisConfig,
+  SynthesizeSpeechInput,
+  SynthesizeSpeechResult,
+  TtsModelRate,
+} from "./speech_synthesis.js";
+export { TtsTurnBudget } from "./tts_budget.js";
+export type { TtsBudgetConsumeResult } from "./tts_budget.js";
+export {
+  LIVE_DICTATION_TURN_INJECTION,
+  LIVE_DICTATION_SPEAK_NUDGE,
+} from "./live_dictation.js";
+export {
   readChatMetadata,
   writeChatMetadata,
   touchChatMetadata,
@@ -202,6 +229,16 @@ export type {
 export { STREAM_WIRE_VERSION } from "./types.js";
 export { getFastModelSlug, completeChatJson, clearJsonResponseCache } from "./router.js";
 export { buildAutoDreamPrompt } from "./auto_dream.js";
+export {
+  resolveEffortLevel,
+  parseEffortLevel,
+  buildEffortDirective,
+  buildEffortTurnInjection,
+  scaleMaxCompletionTokensForEffort,
+  formatOutputEffortTraceLine,
+  DEFAULT_EFFORT_LEVEL,
+} from "./output_effort.js";
+export type { EffortLevel } from "./output_effort.js";
 export {
   buildCuratorPrompt,
   parseCuratorPlan,

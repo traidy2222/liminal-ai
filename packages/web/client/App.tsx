@@ -2,15 +2,8 @@ import React, { useState, useRef, useEffect, useCallback, useMemo, memo } from "
 import { useSSE, sendAbortTurn, type MessageEntry, type AutoDreamState, type PersonalityPulseRow, WEB_SERVER_BASE, type ApiReachable, type SseTransport } from "./useSSE.js";
 import { MEMORY_SYNC_LABEL, presentAutoDream } from "./autoDreamPresent.js";
 import { applyPersonaDocumentTheme } from "./applyPersonaDocumentTheme.js";
-import { useStickyAutoScroll } from "./useStickyAutoScroll.js";
-import ReactMarkdown from "react-markdown";
-import remarkGfm from "remark-gfm";
-import rehypeRaw from "rehype-raw";
-import { toPng } from "html-to-image";
-import { Prism as SyntaxHighlighter } from "react-syntax-highlighter";
-import { vscDarkPlus } from "react-syntax-highlighter/dist/esm/styles/prism";
+import { AssistantMessageContent, renderFencedCodeBlock } from "./liminalMarkdown.js";
 import { SettingsModal } from "./settings/SettingsModal.js";
-import { DictationButton } from "./audio/DictationButton.js";
 import { PROVIDER_PRESETS, PROVIDER_PRESET_CUSTOM_ID } from "./settings/providerPresets.js";
 import { resolveInputShortcut } from "./inputSemantics.js";
 import {
@@ -33,6 +26,8 @@ import {
 } from "./imageAttachments.js";
 import { migratePersonaUiTheme, type PersonaUiToolCards } from "@liminal/core/persona-ui-theme";
 import { resolveToolCardsMode } from "./resolveToolCardsMode.js";
+import { useSpeechOutput } from "./audio/useSpeechOutput.js";
+import type { SpeechSsePayload } from "./useSSE.js";
 import { ShellRouter } from "./persona/ShellRouter.js";
 import { PersonaShellSwitcher } from "./persona/shells/ShellSwitcher.js";
 import type { ShellContract } from "./persona/ShellContract.js";
@@ -1350,9 +1345,9 @@ function MessageView({
         >
           {showGlyph && <span style={buildAvatarGlyphStyle(avatarStyle)}>{personaTheme.avatarGlyph ?? "❯"}</span>}
           <div className="lim-md" style={showGlyph ? { flex: 1, minWidth: 0 } : undefined}>
-          <ReactMarkdown
-            remarkPlugins={[remarkGfm]}
-            rehypePlugins={[rehypeRaw]}
+          <AssistantMessageContent
+            text={entry.text}
+            streaming={entry.streaming}
             components={{
               p({ node, children }) {
                 const kids = node?.children ?? [];
@@ -1391,21 +1386,11 @@ function MessageView({
               li({ children }) { return <li style={styles.mdListItem}>{children}</li>; },
               pre({ children }) { return <div style={{ margin: "10px 0" }}>{children}</div>; },
               code({ className, children }) {
-                const lang = /language-(\w+)/.exec(className ?? "")?.[1];
-                const raw  = String(children).replace(/\n$/, "");
-                if (lang) {
-                  return (
-                    <div style={{ borderRadius: 6, overflow: "hidden", margin: "10px 0", border: "1px solid rgba(var(--lim-accent-rgb),0.1)" }}>
-                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "4px 12px", background: LIM.surface, borderBottom: "1px solid rgba(var(--lim-accent-rgb),0.08)" }}>
-                        <span style={{ color: "rgba(var(--lim-accent-rgb),0.4)", fontSize: 10, fontFamily: "monospace", letterSpacing: "0.06em" }}>{lang}</span>
-                      </div>
-                      <SyntaxHighlighter language={lang} style={vscDarkPlus} customStyle={{ margin: 0, borderRadius: 0, fontSize: 13, background: LIM.codeBg }} showLineNumbers={raw.split("\n").length > 6} lineNumberStyle={{ color: LIM.textDim, minWidth: "2.5em", opacity: 0.45 }} wrapLongLines>
-                        {raw}
-                      </SyntaxHighlighter>
-                    </div>
-                  );
-                }
-                return <code style={styles.mdInlineCode}>{children}</code>;
+                return renderFencedCodeBlock(className, children, {
+                  streaming: entry.streaming,
+                  codeBg: LIM.codeBg,
+                  inlineCodeStyle: styles.mdInlineCode,
+                });
               },
               blockquote({ node, children }) {
                 const firstPara = (node?.children ?? []).find(c => (c as { type?: string }).type === "element" && (c as { tagName?: string }).tagName === "p");
@@ -1441,9 +1426,7 @@ function MessageView({
                 return <div style={{ margin: "18px 0", height: 1, background: "linear-gradient(90deg, transparent, rgba(var(--lim-accent-rgb),0.15), rgba(var(--lim-success-rgb),0.33), rgba(var(--lim-accent-rgb),0.15), transparent)" }} />;
               },
             }}
-          >
-            {entry.text}
-          </ReactMarkdown>
+          />
           {entry.streaming && <span style={{ color: CYAN, animation: "blink 1s step-end infinite" }}>█</span>}
           </div>
         </div>
@@ -1582,7 +1565,25 @@ async function fileToDataUrl(file: File): Promise<string> {
 // ── Main App ──────────────────────────────────────────────────────────────────
 
 export function App() {
-  const { state, sendMessage, sendApproval, sendAnswer, sendClearSession, sendPersonaBootstrap } = useSSE();
+  const [dictationCaptureActive, setDictationCaptureActive] = useState(false);
+  const [dictationSessionActive, setDictationSessionActive] = useState(false);
+  const onSpeechRef = useRef<((payload: SpeechSsePayload) => void) | undefined>(undefined);
+  const dictationSessionRef = useRef(false);
+  const speechOutputRef = useRef<ReturnType<typeof useSpeechOutput> | null>(null);
+  const { state, sendMessage, sendApproval, sendAnswer, sendClearSession, sendPersonaBootstrap } = useSSE({
+    onSpeechRef,
+  });
+  dictationSessionRef.current = dictationSessionActive;
+  const speechOutput = useSpeechOutput({
+    ttsConfigured: state.ttsEnabled && dictationSessionActive,
+    pauseWhenCapture: dictationCaptureActive,
+  });
+  const shouldBlockDictationCapture = speechOutput.shouldBlockMicCapture;
+  speechOutputRef.current = speechOutput;
+  onSpeechRef.current = (payload) => {
+    if (!dictationSessionRef.current) return;
+    speechOutputRef.current?.enqueue(payload);
+  };
   const [input,        setInput]        = useState("");
   const [attachments,  setAttachments]  = useState<ImageAttachment[]>([]);
   const [attachError,  setAttachError]  = useState<string | null>(null);
@@ -1592,7 +1593,8 @@ export function App() {
   const [draftHistory, setDraftHistory] = useState<string[]>([]);
   const [historyIndex, setHistoryIndex] = useState(-1);
   const [historyDraft, setHistoryDraft] = useState("");
-  const [screenshotting, setScreenshotting] = useState(false);
+  /** Mic session armed → server [VOICE / DICTATION MODE] (speak() required when TTS on). */
+  const liveDictationForSend = dictationSessionActive;
   const [windowWidth,  setWindowWidth]  = useState(window.innerWidth);
   const [sessionSeconds, setSessionSeconds] = useState(0);
   const [bootstrapInput, setBootstrapInput] = useState("");
@@ -1612,26 +1614,8 @@ export function App() {
   const [settingsSaving, setSettingsSaving] = useState(false);
   const [settingsError, setSettingsError] = useState<string | null>(null);
 
-  const bottomRef    = useRef<HTMLDivElement>(null);
-  const messagesRef  = useRef<HTMLDivElement>(null);
-  const inputRef     = useRef<HTMLTextAreaElement>(null);
   const submittingRef = useRef(false);
   const sessionStartRef = useRef<number | null>(null);
-
-  // Dictation span tracking — when the mic starts we snapshot where the
-  // dictation text begins in the input box. Web Speech finals append AFTER the
-  // committed span; the interim hypothesis lives in a preview span that gets
-  // replaced on every partial result; Whisper's refinement replaces the entire
-  // (committed + preview) span on stop.
-  const dictationSpanStartRef = useRef(0);
-  const dictationCommittedLenRef = useRef(0);
-  const dictationPreviewLenRef = useRef(0);
-  // Mirrored as state only so the input area can render a subtle "live"
-  // affordance if a shell wants to use it; not currently wired to UI.
-  const [, setDictationPreview] = useState<string>("");
-  // Inline notice surfaced under the mic button when auto-send is refused
-  // (agent busy, empty transcript, attachment validation, etc).
-  const [autoSendNotice, setAutoSendNotice] = useState<string | null>(null);
 
   useEffect(() => {
     applyPersonaDocumentTheme(state.personaUiTheme);
@@ -1792,16 +1776,6 @@ export function App() {
     setHistoryDraft("");
   };
 
-  const syncTextareaHeight = () => {
-    const el = inputRef.current;
-    if (!el) return;
-    el.style.height = "0px";
-    el.style.height = `${Math.max(40, Math.min(el.scrollHeight, 180))}px`;
-  };
-
-  useStickyAutoScroll(messagesRef, bottomRef, state.messages);
-  useEffect(() => { syncTextareaHeight(); }, [input]);
-
   const tryAddAttachments = (next: ImageAttachment[]) => {
     const validation = validateImageAttachments(next, DEFAULT_IMAGE_ATTACHMENT_LIMITS);
     if (!validation.ok) { setAttachError(validation.error); return false; }
@@ -1896,7 +1870,13 @@ export function App() {
     const textToSend = input;
     const attachmentsToSend = [...attachments];
     setInput(""); setAttachments([]); setAttachError(null);
-    const result = await sendMessage({ text: textToSend, attachments: attachmentsToSend });
+    void speechOutput.unlockAudio();
+    speechOutput.flush();
+    const result = await sendMessage({
+      text: textToSend,
+      attachments: attachmentsToSend,
+      liveDictation: liveDictationForSend,
+    });
     if (!result.ok) { submittingRef.current = false; return; }
     pushHistory(textToSend);
   };
@@ -1954,38 +1934,37 @@ export function App() {
     !state.personaBootstrapPending &&
     (input.trim().length > 0 || attachments.length > 0);
 
-  const handleScreenshot = useCallback(async () => {
-    const el = messagesRef.current;
-    if (!el || screenshotting) return;
-    setScreenshotting(true);
-    try {
-      const fullHeight = el.scrollHeight;
-      const width = el.offsetWidth;
-      const savedOverflowY = el.style.overflowY;
-      const savedHeight    = el.style.height;
-      const savedMaxHeight = el.style.maxHeight;
-      const savedFlex      = el.style.flex;
-      el.style.overflowY = "visible";
-      el.style.height    = `${fullHeight}px`;
-      el.style.maxHeight = "none";
-      el.style.flex      = "none";
-      await new Promise<void>(r => requestAnimationFrame(() => requestAnimationFrame(() => r())));
-      const dataUrl = await toPng(el, { pixelRatio: 2, backgroundColor: "#020408", width, height: fullHeight });
-      el.style.overflowY = savedOverflowY;
-      el.style.height    = savedHeight;
-      el.style.maxHeight = savedMaxHeight;
-      el.style.flex      = savedFlex;
-      const ts   = new Date().toISOString().replace(/[:.]/g, "-").slice(0, -1);
-      const link = document.createElement("a");
-      link.download = `liminal-${ts}.png`;
-      link.href = dataUrl;
-      link.click();
-    } catch (err) {
-      console.error("Screenshot failed:", err);
-    } finally {
-      setScreenshotting(false);
-    }
-  }, [screenshotting]);
+  const handleDictationAutoSend = useCallback(
+    (fullMessage: string): void | string => {
+      const trimmed = fullMessage.trim();
+      if (!trimmed) return "Empty transcript — nothing to send.";
+      if (state.busy || submittingRef.current) {
+        return "Agent busy — message kept in input. Press Enter when ready.";
+      }
+      const validation = validateImageAttachments(attachments, DEFAULT_IMAGE_ATTACHMENT_LIMITS);
+      if (!validation.ok) {
+        setAttachError(validation.error);
+        return "Couldn't auto-send: attachment validation failed.";
+      }
+      submittingRef.current = true;
+      const textToSend = trimmed;
+      const attachmentsToSend = [...attachments];
+      setInput("");
+      setAttachments([]);
+      setAttachError(null);
+      void speechOutput.unlockAudio();
+      speechOutput.flush();
+      void sendMessage({
+        text: textToSend,
+        attachments: attachmentsToSend,
+        liveDictation: true,
+      }).then((r) => {
+        if (!r.ok) submittingRef.current = false;
+        else pushHistory(textToSend);
+      });
+    },
+    [attachments, sendMessage, speechOutput, state.busy]
+  );
 
   const handleComposerKeyDown = async (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     const target = e.currentTarget;
@@ -2003,7 +1982,13 @@ export function App() {
       const textToSend = input;
       const attachmentsToSend = [...attachments];
       setInput(""); setAttachments([]); setAttachError(null);
-      const result = await sendMessage({ text: textToSend, attachments: attachmentsToSend });
+      void speechOutput.unlockAudio();
+      speechOutput.flush();
+      const result = await sendMessage({
+        text: textToSend,
+        attachments: attachmentsToSend,
+        liveDictation: liveDictationForSend,
+      });
       if (!result.ok) { submittingRef.current = false; return; }
       pushHistory(textToSend);
       return;
@@ -2013,7 +1998,10 @@ export function App() {
       const end   = target.selectionEnd;
       const next  = `${input.slice(0, start)}\n${input.slice(end)}`;
       setInput(next);
-      queueMicrotask(() => inputRef.current?.setSelectionRange(start + 1, start + 1));
+      queueMicrotask(() => {
+        const el = document.getElementById("chat-message-input") as HTMLTextAreaElement | null;
+        el?.setSelectionRange(start + 1, start + 1);
+      });
       return;
     }
     if (action === "history_prev")  { applyHistory("prev"); return; }
@@ -2175,157 +2163,26 @@ export function App() {
     onOpenSettings: () => setSettingsOpen(true),
     onToggleRaw: () => setShowRawHarness(v => !v),
     onAbortTurn: state.busy ? () => void sendAbortTurn() : undefined,
+    dictationAudioCue: state.dictationAudioCue,
+    ttsEnabled: state.ttsEnabled,
+    ttsLastSpoken: speechOutput.lastSpoken,
+    ttsPlayError: speechOutput.playError,
+    onDictationSessionActive: setDictationSessionActive,
+    onDictationCaptureActive: setDictationCaptureActive,
+    shouldBlockDictationCapture,
+    onUnlockSpeechAudio: () => {
+      void speechOutput.unlockAudio();
+    },
+    onDictationAutoSend: handleDictationAutoSend,
+    onDictationHistoryReset: () => {
+      if (historyIndex !== -1) setHistoryIndex(-1);
+    },
   };
 
   return (
     <ShellRouter theme={state.personaUiTheme}>
       <style>{CSS_ANIMATIONS}</style>
       <PersonaShellSwitcher shell={shell} contract={contract} />
-
-      {/* ── Live dictation overlay ──────────────────────────────────────────── */}
-      {/* Fixed bottom-right. Three callback streams from the mic button keep
-          the input in sync:
-            - onStart: snapshot the input length so we know where dictation's
-              span begins (Whisper refinement replaces from there to the end)
-            - onAppendFinal: Web Speech committed a final phrase → append
-            - onInterimText: Web Speech's live hypothesis → show as preview
-            - onRefinedFull: Whisper finished → replace the entire dictation
-              span with the high-accuracy text */}
-      <div
-        style={{
-          position: "fixed",
-          bottom: 12,
-          right: 14,
-          zIndex: 800,
-          pointerEvents: "auto",
-        }}
-      >
-        <DictationButton
-          autoSendDefault={state.dictationAutoSendDefault}
-          audioCue={state.dictationAudioCue}
-          onStart={() => {
-            // Snapshot where the dictation span begins so we can replace it
-            // wholesale when Whisper's refinement arrives. Anything the user
-            // typed BEFORE clicking the mic stays untouched.
-            dictationSpanStartRef.current = inputRef.current?.value.length ?? input.length;
-            dictationCommittedLenRef.current = 0;
-            dictationPreviewLenRef.current = 0;
-            setDictationPreview("");
-            setAutoSendNotice(null);
-          }}
-          onAppendFinal={(text) => {
-            if (!text.trim()) return;
-            setInput((prev) => {
-              const base = prev.slice(0, dictationSpanStartRef.current + dictationCommittedLenRef.current);
-              const after = prev.slice(dictationSpanStartRef.current + dictationCommittedLenRef.current + dictationPreviewLenRef.current);
-              const sep = base && !/\s$/.test(base) ? " " : "";
-              const insertion = sep + text.trim();
-              dictationCommittedLenRef.current += insertion.length;
-              dictationPreviewLenRef.current = 0;
-              return base + insertion + after;
-            });
-            setDictationPreview("");
-            if (historyIndex !== -1) setHistoryIndex(-1);
-          }}
-          onInterimText={(text) => {
-            // Render the interim hypothesis inline in the input box (greyed
-            // out feeling) by replacing the previous preview span.
-            setInput((prev) => {
-              const baseEnd = dictationSpanStartRef.current + dictationCommittedLenRef.current;
-              const base = prev.slice(0, baseEnd);
-              const after = prev.slice(baseEnd + dictationPreviewLenRef.current);
-              const sep = base && !/\s$/.test(base) ? " " : "";
-              const insertion = sep + text.trim();
-              dictationPreviewLenRef.current = insertion.length;
-              return base + insertion + after;
-            });
-            setDictationPreview(text);
-          }}
-          onAutoSend={(committedText) => {
-            // Auto-send: VAD detected end-of-utterance + Web Speech committed
-            // text. Trigger the same submit path the form uses.
-            const trimmed = committedText.trim();
-            if (!trimmed) {
-              setAutoSendNotice("Empty transcript — nothing to send.");
-              return;
-            }
-            if (state.busy || submittingRef.current) {
-              // Refuse rather than queue — user-visible chip explains why.
-              setAutoSendNotice("Agent busy with prior turn — message kept in input. Press Enter when ready.");
-              return;
-            }
-            // Build the input value as if the user pressed Enter: everything
-            // before the dictation span + the committed text. We send via the
-            // same path as manual submit so attachments, history, etc. all work.
-            const preDictation = (inputRef.current?.value ?? input).slice(0, dictationSpanStartRef.current);
-            const sep = preDictation && !/\s$/.test(preDictation) ? " " : "";
-            const fullMessage = (preDictation + sep + trimmed).trim();
-            // Match the manual submit guard.
-            if (!fullMessage && attachments.length === 0) return;
-            const validation = validateImageAttachments(attachments, DEFAULT_IMAGE_ATTACHMENT_LIMITS);
-            if (!validation.ok) {
-              setAttachError(validation.error);
-              setAutoSendNotice("Couldn't auto-send: attachment validation failed.");
-              return;
-            }
-            submittingRef.current = true;
-            const textToSend = fullMessage;
-            const attachmentsToSend = [...attachments];
-            setInput("");
-            setAttachments([]);
-            setAttachError(null);
-            // Reset dictation span trackers — the next recording starts fresh.
-            dictationSpanStartRef.current = 0;
-            dictationCommittedLenRef.current = 0;
-            dictationPreviewLenRef.current = 0;
-            void sendMessage({ text: textToSend, attachments: attachmentsToSend }).then((r) => {
-              if (!r.ok) submittingRef.current = false;
-              else pushHistory(textToSend);
-            });
-            setAutoSendNotice(null);
-          }}
-          onRefinedFull={(refinedText, _cost, wasAutoSent) => {
-            // If we already auto-sent, the agent has the Web Speech version —
-            // don't re-send. Whisper refinement is silent (could be wired to
-            // update the displayed message bubble in a later polish pass).
-            if (wasAutoSent) return;
-            // Manual mode: Whisper refinement REPLACES the dictation span in
-            // the input box with the more accurate version.
-            setInput((prev) => {
-              const base = prev.slice(0, dictationSpanStartRef.current);
-              const totalSpanLen = dictationCommittedLenRef.current + dictationPreviewLenRef.current;
-              const after = prev.slice(dictationSpanStartRef.current + totalSpanLen);
-              const sep = base && !/\s$/.test(base) ? " " : "";
-              const insertion = sep + refinedText.trim();
-              dictationCommittedLenRef.current = insertion.length;
-              dictationPreviewLenRef.current = 0;
-              return base + insertion + after;
-            });
-            setDictationPreview("");
-            queueMicrotask(() => inputRef.current?.focus());
-          }}
-        />
-        {autoSendNotice && (
-          <div
-            style={{
-              marginTop: 6,
-              maxWidth: 260,
-              padding: "5px 8px",
-              background: "rgba(255,200,0,0.12)",
-              color: "#ffc800",
-              border: "1px solid rgba(255,200,0,0.4)",
-              borderRadius: 3,
-              fontSize: 10,
-              fontFamily: "monospace",
-              lineHeight: 1.4,
-            }}
-            onClick={() => setAutoSendNotice(null)}
-            title="Click to dismiss"
-          >
-            {autoSendNotice}
-          </div>
-        )}
-      </div>
 
       {/* ── Settings modal ─────────────────────────────────────────────────────── */}
       <SettingsModal

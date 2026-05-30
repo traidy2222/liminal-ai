@@ -17,6 +17,7 @@ import { createExtractStructuredTool } from "./extract_structured.js";
 import { createHypothesizeTool } from "./hypothesize.js";
 import { createResearchStateTool } from "./research_state.js";
 import type { SubagentSpawnContract } from "@liminal/core";
+import { createSpeakTool } from "./speak.js";
 
 // ─── Helper ───────────────────────────────────────────────────────────────────
 
@@ -915,6 +916,9 @@ export function createOrchestrationTools(harness: AgentHarness) {
     child.registry.register(createDecomposeGoalTool(child));
     child.registry.register(createBranchExploreTool(child));
     child.registry.register(createVerifyContractTool(child));
+    if (resolveHarnessEnvRaw("AGENT_TTS_ENABLED", child.getRuntimePreferences()) === "1") {
+      child.registry.register(createSpeakTool(child));
+    }
   };
 
   return {

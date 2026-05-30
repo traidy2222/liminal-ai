@@ -2,7 +2,7 @@
  * Tool families for lazy loading (AGENT_TOOL_LAZY=1).
  * Keep in sync with tools registered in packages/tools/src/index.ts.
  */
-import type { ToolRegistry, AgentHarness } from "@liminal/core";
+import type { AgentHarness, RuntimePreferences, ToolRegistry } from "@liminal/core";
 import { effectiveHarnessEnvRaw, resolveHarnessEnvRaw } from "@liminal/core";
 
 /** Tool families: id -> description + member tool names. */
@@ -111,7 +111,7 @@ export const TOOL_FAMILIES: Record<string, { description: string; tools: readonl
     description:
       "Speech-to-text transcription for voice notes, meetings, podcasts, lectures. " +
       "Cheapest configured ASR model by default (Whisper Large V3 Turbo @ $0.04/hour).",
-    tools: ["transcribe_audio"],
+    tools: ["transcribe_audio", "speak"],
   },
   meta: {
     description: "Harness improvement suggestions, insights, self-telemetry, and pattern-store maintenance.",
@@ -323,7 +323,10 @@ function browserAlwaysActiveTools(): readonly string[] {
   return TOOL_FAMILIES.browser.tools;
 }
 
-export function getCoreAlwaysToolNames(hasHarness: boolean): string[] {
+export function getCoreAlwaysToolNames(
+  hasHarness: boolean,
+  prefs?: RuntimePreferences | null
+): string[] {
   const out: string[] = [
     ...CORE_ALWAYS_TOOLS_BASE,
     ...getProfileSeedTools(resolveAlwaysToolsProfile()),
@@ -335,6 +338,8 @@ export function getCoreAlwaysToolNames(hasHarness: boolean): string[] {
     // sessions and their schemas cost ~1.5k tokens per call when always loaded.
     // Activate via activate_tool_family("tasks") or activate_tool_family("harness_ui").
   }
+  // speak() is voice-mode only (mic session). AgentHarness.syncVoiceModeTools() activates
+  // it per send when liveDictation is set — not part of the static lazy always-set.
   return [...new Set(out)];
 }
 
@@ -357,7 +362,7 @@ export function applyLazyRegistrationPolicy(registry: ToolRegistry, harness?: Ag
   const prefs = harness?.getRuntimePreferences() ?? null;
   if (resolveHarnessEnvRaw("AGENT_TOOL_LAZY", prefs) === "1") {
     registry.setLazyToolLoading(true);
-    const seed = getCoreAlwaysToolNames(!!harness).filter((n) => registry.has(n));
+    const seed = getCoreAlwaysToolNames(!!harness, prefs).filter((n) => registry.has(n));
     registry.seedActiveTools(seed);
   } else {
     registry.setLazyToolLoading(false);

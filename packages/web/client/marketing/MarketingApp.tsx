@@ -180,6 +180,8 @@ export function MarketingApp() {
     onClearSession: async () => {},
     onOpenSettings: () => {},
     onToggleRaw: () => {},
+    dictationAudioCue: false,
+    onDictationAutoSend: () => "Dictation disabled in marketing preview",
   };
 
   const dataAttrs =

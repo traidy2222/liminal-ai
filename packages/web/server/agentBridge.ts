@@ -299,6 +299,7 @@ export class AgentBridge {
     on("text", (p) => { this.startHeartbeat(); this.maybeSend("text", p); });
     on("provider_retry", (p) => { this.startHeartbeat(); this.maybeSend("provider_retry", p); });
     on("tool_start", (p) => { this.startHeartbeat(); this.maybeSend("tool_start", p); });
+    on("speech", (p) => this.maybeSend("speech", p));
     on("tool_delta", (p) => this.maybeSend("tool_delta", p));
     on("tool_result", (p) =>
       this.maybeSend("tool_result", {
@@ -388,14 +389,20 @@ export class AgentBridge {
     await this.beginSession({ greet: true });
   }
 
-  async sendUserMessage(message: string, opts?: { freshContext?: boolean }): Promise<void> {
+  async sendUserMessage(
+    message: string,
+    opts?: { freshContext?: boolean; liveDictation?: boolean }
+  ): Promise<void> {
     if (this.awaitingPersonaBootstrapInput) {
       throw new Error("Persona bootstrap is pending. Submit via /api/persona/bootstrap.");
     }
     // Pin the workspace for the whole send so file tools, repo_map, world_context,
     // etc. resolve relative to this chat's bound folder rather than the server's cwd.
     await runWithWorkspaceRoot(this.workspaceRoot, async () => {
-      const run = this.harness.send(message, opts);
+      const run = this.harness.send(message, {
+        freshContext: opts?.freshContext,
+        liveDictation: opts?.liveDictation,
+      });
       this.startHeartbeat();
       await run;
     });

@@ -523,6 +523,14 @@ export interface AgentEventMap {
     backoffMs: number;
   };
   tool_start: { callId: string; name: string; traceId?: string; roundIndex?: number };
+  /** Spoken-channel clip ready for web playback (not shown in chat transcript). */
+  speech: {
+    clipId: string;
+    text: string;
+    audioUrl: string;
+    durationSec?: number;
+    costUsd?: number;
+  };
   tool_delta: { callId: string; argsDelta: string };
   tool_approval: {
     callId: string;

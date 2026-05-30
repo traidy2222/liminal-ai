@@ -111,5 +111,40 @@ export function applyPersonaDocumentTheme(theme: PersonaUiThemeV2 | null): void 
 .lim-md hr     { background: linear-gradient(90deg, transparent, rgba(var(--lim-accent-rgb),.15), rgba(var(--lim-success-rgb),.33), rgba(var(--lim-accent-rgb),.15), transparent); }
 .lim-md img    { border-color: rgba(var(--lim-accent-rgb),.1); border-radius: var(--lim-radius); }
 .lim-md figcaption, .lim-md .img-caption { color: var(--lim-text-dim); }
+/* Agent HTML embeds (raw HTML or html-language fenced blocks, rendered live) */
+.lim-html-embed { line-height: 1.6; }
+.lim-html-embed img { max-width: 100%; height: auto; border-radius: var(--lim-radius); }
+.lim-html-embed table { border-collapse: collapse; width: 100%; margin: 8px 0; }
+.lim-html-embed th, .lim-html-embed td { border: 1px solid rgba(var(--lim-accent-rgb),.12); padding: 6px 10px; vertical-align: top; }
+.lim-html-embed a { color: var(--lim-markdown-link); }
+/* Composer */
+.lim-composer-field { flex: 1; min-width: 0; }
+.lim-composer-field textarea {
+  box-sizing: border-box;
+  display: block;
+  width: 100%;
+  min-height: 2.75rem;
+  max-height: 13.75rem;
+  color: var(--lim-text, #c8d4e0);
+  caret-color: var(--lim-accent, #00d4ff);
+  overflow-y: hidden;
+  resize: none;
+}
+.lim-composer-field textarea::placeholder {
+  color: rgba(var(--lim-accent-rgb), 0.32);
+  opacity: 1;
+}
+.lim-composer-field textarea:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+.lim-composer-field textarea:focus { outline: none; }
+.lim-composer-field:focus-within {
+  box-shadow: 0 0 0 1px rgba(var(--lim-accent-rgb),0.22);
+  border-radius: var(--lim-radius, 6px);
+}
+.lim-composer-input-row:focus-within .lim-composer-field {
+  box-shadow: 0 0 0 1px rgba(var(--lim-accent-rgb),0.22);
+}
 `;
 }

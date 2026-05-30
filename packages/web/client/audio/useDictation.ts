@@ -1,44 +1,32 @@
 /**
- * Live browser dictation with optional auto-send.
+ * Live browser dictation — pause detection sends to the agent by default.
  *
  * THREE PARALLEL SUBSYSTEMS while recording:
  *
  *   1. **Web Speech API** (Chrome / Edge / Safari) — streams interim + final
- *      transcripts as the user speaks. Zero cost, near-zero latency. This is
- *      what makes dictation feel "live".
+ *      transcripts as the user speaks. Zero cost, near-zero latency.
  *
  *   2. **MediaRecorder + Whisper** — captures the full clip in the background.
- *      On stop, uploads to /api/transcribe for a high-accuracy refinement that
- *      replaces the Web Speech draft.
+ *      On stop, uploads to /api/transcribe for a high-accuracy refinement.
  *
- *   3. **VAD** (Web Audio API RMS analyzer) — detects silence with 50ms
- *      resolution. Drives the optional auto-send state machine.
+ *   3. **VAD** (Web Audio API RMS analyzer) — detects end-of-speech and triggers
+ *      send when you pause (50ms resolution).
  *
- * AUTO-SEND STATE MACHINE (opt-in via `autoSend.enabled`):
+ * ENDPOINT STATE MACHINE (always on while recording):
  *
- *     listening                  (calibrating noise floor)
- *        ↓ first speech frame
- *     speaking                   (VAD says user is actively talking)
- *        ↓ silence > silenceMsToPause
- *     pausing                    (brief pause — could be mid-sentence)
- *        ↓ silence > adaptiveSilenceMs   AND   recordingMs > minRecordingMs
- *     ready_to_send              (countdown chip fires; user can cancel)
- *        ↓ no new speech during countdown
- *     firing                     (call onAutoSend; stop recording)
+ *     listening → speaking → (silence) → countdown chip → onAutoSend + stop
  *
- * Cancel paths (return to `speaking`):
- *   - New speech frame arrives during pausing/ready_to_send → reset timer
- *   - User presses Escape while recording → cancel pending send, stay recording
- *   - User clicks Cancel → discard everything
+ * Cancel paths:
+ *   - Resume talking during countdown → reset timer
+ *   - Escape once → cancel pending send, keep recording
+ *   - Escape twice / ✕ → discard recording
+ *   - Click ⏹ while recording → send now (force) if there is transcript audio
  *
- * EDGE CASES HANDLED:
- *   - Tab/window backgrounded: pause auto-send (visibilitychange)
- *   - Mic stream ends (OS interrupt, permission revoked): stop cleanly
- *   - Web Speech fails (NotAllowedError, network): continue with MediaRecorder
- *   - Recording shorter than minRecordingMs: don't auto-send (filter coughs)
- *   - Recording exceeds maxRecordingMs: hard-stop and send what we have
- *   - Audio cue requested: 100ms 880Hz tone via Web Audio (no asset needed)
- *   - Whisper refinement arrives AFTER auto-send: silent update via callback
+ * EDGE CASES:
+ *   - Tab hidden: pause countdown only (recording continues)
+ *   - No Web Speech (Firefox): send after Whisper on silence or forced stop
+ *   - Recording < minRecordingMs: ignore brief noise
+ *   - maxRecordingMs: hard-stop and send when possible
  */
 import { useCallback, useEffect, useRef, useState } from "react";
 import { WEB_SERVER_BASE } from "../useSSE.js";
@@ -47,6 +35,8 @@ import { createVad, type VadHandle } from "./vad.js";
 export type DictationStatus =
   | "idle"
   | "permission-pending"
+  /** Mic session on — stream + VAD armed; records only when speech is detected. */
+  | "listening"
   | "recording"
   | "uploading"
   | "transcribing"
@@ -60,9 +50,9 @@ export interface DictationCost {
   language?: string;
 }
 
-export interface AutoSendOptions {
-  enabled: boolean;
-  /** Min recording length before auto-send is even considered. Default 1500ms. */
+/** Pause-detection tuning (silence thresholds, caps, optional send tone). */
+export interface DictationEndpointOptions {
+  /** Min recording length before pause-send is considered. Default 1500ms. */
   minRecordingMs?: number;
   /** Pause threshold (ms) for short utterances (< 5000ms recorded). Default 1500ms. */
   silenceMsShort?: number;
@@ -72,21 +62,17 @@ export interface AutoSendOptions {
   maxRecordingMs?: number;
   /**
    * When true and Web Speech is available, require at least one `isFinal`
-   * result before auto-send fires (means we have committed text to send).
-   * Default true.
+   * before pause-send (committed text). Default true.
    */
   requireWebSpeechFinal?: boolean;
-  /**
-   * When true, play a brief 880Hz tone on auto-send so the user knows the
-   * message went out. Default false.
-   */
+  /** Play a brief 880Hz tone when the message is sent. Default false. */
   audioCue?: boolean;
-  /**
-   * Reject auto-send if the transcript would be < N words. Filters out
-   * "send" / "go" / single-cough scenarios. Default 2.
-   */
+  /** Min words when Web Speech is active (filters coughs). Default 2. */
   minWordCount?: number;
 }
+
+/** @deprecated Use DictationEndpointOptions */
+export type AutoSendOptions = DictationEndpointOptions & { enabled?: boolean };
 
 export interface DictationState {
   status: DictationStatus;
@@ -98,9 +84,9 @@ export interface DictationState {
   supported: boolean;
   liveTranscriptionSupported: boolean;
   liveText: string;
-  /** Whether auto-send mode is active for the current session. */
-  autoSendActive: boolean;
-  /** ms remaining until auto-send fires (when in pause countdown). */
+  /** Mic session armed (listening or actively recording an utterance). */
+  sessionActive: boolean;
+  /** ms remaining until pause-send fires (countdown chip). */
   autoSendCountdownMs: number | null;
   /**
    * True during the first ~WARMUP_MS after recording starts. The stop button
@@ -127,20 +113,28 @@ export interface UseDictationOptions {
    */
   onWhisperRefinement?: (text: string, cost: DictationCost, wasAutoSent: boolean) => void;
   /**
-   * Auto-send fired. Receives the current committed Web Speech text the
-   * consumer should send. After this fires, recording stops and Whisper
-   * refinement runs in the background; refinement arrives via
-   * onWhisperRefinement with wasAutoSent=true.
+   * Pause or manual stop fired — consumer sends this text to the agent.
+   * Recording stops; Whisper refinement may follow via onWhisperRefinement.
    */
   onAutoSend?: (committedText: string) => void;
+  /** Pause-detection tuning; always active while recording. */
+  endpoint?: DictationEndpointOptions;
+  /** @deprecated Use `endpoint` */
+  autoSend?: DictationEndpointOptions & { enabled?: boolean };
   /**
    * Callback for the live pause countdown — fires every ~100ms with ms
    * remaining until auto-send. Used by the button UI to render a chip.
    */
   onCountdown?: (msRemaining: number | null) => void;
+  /** Fired when VAD detects speech and a new utterance starts (each turn). */
+  onUtteranceStart?: () => void;
+  /**
+   * When true, VAD must not start a new utterance (agent TTS playing — avoids
+   * speaker bleed arming the mic and cutting playback).
+   */
+  shouldBlockSpeechCapture?: () => boolean;
   language?: string;
   prompt?: string;
-  autoSend?: AutoSendOptions;
 }
 
 /** Web Speech API surface (typed inline — lib.dom doesn't ship globals). */
@@ -175,7 +169,7 @@ function getSpeechRecognitionCtor(): (new () => SpeechRecognitionLike) | null {
   return w.SpeechRecognition ?? w.webkitSpeechRecognition ?? null;
 }
 
-const DEFAULT_AUTO_SEND: Required<Omit<AutoSendOptions, "enabled">> = {
+const DEFAULT_ENDPOINT: Required<DictationEndpointOptions> = {
   minRecordingMs: 1500,
   silenceMsShort: 1500,
   silenceMsLong: 2500,
@@ -184,6 +178,33 @@ const DEFAULT_AUTO_SEND: Required<Omit<AutoSendOptions, "enabled">> = {
   audioCue: false,
   minWordCount: 2,
 };
+
+/** Spread only defined keys — explicit `undefined` must not erase defaults. */
+function pickDefinedEndpoint(
+  partial: DictationEndpointOptions | undefined
+): Partial<DictationEndpointOptions> {
+  if (!partial) return {};
+  const out: Partial<DictationEndpointOptions> = {};
+  if (partial.minRecordingMs !== undefined) out.minRecordingMs = partial.minRecordingMs;
+  if (partial.silenceMsShort !== undefined) out.silenceMsShort = partial.silenceMsShort;
+  if (partial.silenceMsLong !== undefined) out.silenceMsLong = partial.silenceMsLong;
+  if (partial.maxRecordingMs !== undefined) out.maxRecordingMs = partial.maxRecordingMs;
+  if (partial.requireWebSpeechFinal !== undefined) {
+    out.requireWebSpeechFinal = partial.requireWebSpeechFinal;
+  }
+  if (partial.audioCue !== undefined) out.audioCue = partial.audioCue;
+  if (partial.minWordCount !== undefined) out.minWordCount = partial.minWordCount;
+  return out;
+}
+
+function mergeEndpointOptions(opts: UseDictationOptions): Required<DictationEndpointOptions> {
+  const { enabled: _legacyOff, ...legacy } = opts.autoSend ?? {};
+  return {
+    ...DEFAULT_ENDPOINT,
+    ...pickDefinedEndpoint(legacy),
+    ...pickDefinedEndpoint(opts.endpoint),
+  };
+}
 
 /**
  * Disable the stop button for this many ms after recording starts. Absorbs
@@ -195,10 +216,12 @@ const RECORDING_WARMUP_MS = 600;
 
 export function useDictation(opts: UseDictationOptions): {
   state: DictationState;
+  /** Open mic session (listen for speech; stays on until endSession). */
   start: () => Promise<void>;
+  /** Turn mic session off. */
+  endSession: () => void;
   stop: () => Promise<void>;
   cancel: () => void;
-  /** Cancel any pending auto-send while keeping recording active. */
   cancelPendingAutoSend: () => void;
 } {
   const speechCtor = getSpeechRecognitionCtor();
@@ -215,7 +238,7 @@ export function useDictation(opts: UseDictationOptions): {
       !!navigator.mediaDevices?.getUserMedia,
     liveTranscriptionSupported: speechCtor != null,
     liveText: "",
-    autoSendActive: !!opts.autoSend?.enabled,
+    sessionActive: false,
     autoSendCountdownMs: null,
     warmingUp: false,
   });
@@ -226,12 +249,19 @@ export function useDictation(opts: UseDictationOptions): {
   const streamRef = useRef<MediaStream | null>(null);
   const startedAtRef = useRef<number>(0);
   const tickerRef = useRef<number | null>(null);
-  const cancelledRef = useRef(false);
   const speechRef = useRef<SpeechRecognitionLike | null>(null);
   const vadRef = useRef<VadHandle | null>(null);
   const committedTextRef = useRef("");
+  /** Latest Web Speech interim — often ahead of `isFinal` when VAD fires. */
+  const interimTextRef = useRef("");
   const hasWebSpeechFinalRef = useRef(false);
   const autoSentRef = useRef(false);
+  const whisperPendingSendRef = useRef(false);
+  const sessionActiveRef = useRef(false);
+  const utteranceActiveRef = useRef(false);
+  const utteranceCancelledRef = useRef(false);
+  const beginningUtteranceRef = useRef(false);
+  const mimeTypeRef = useRef("");
   const optsRef = useRef(opts);
   const maxRecordingTimerRef = useRef<number | null>(null);
   const visibilityHandlerRef = useRef<(() => void) | null>(null);
@@ -247,10 +277,6 @@ export function useDictation(opts: UseDictationOptions): {
   useEffect(() => {
     optsRef.current = opts;
   }, [opts]);
-
-  useEffect(() => {
-    setState((s) => ({ ...s, autoSendActive: !!opts.autoSend?.enabled }));
-  }, [opts.autoSend?.enabled]);
 
   // ── Cleanup helpers ─────────────────────────────────────────────────────
   const cleanupStream = useCallback(() => {
@@ -316,56 +342,42 @@ export function useDictation(opts: UseDictationOptions): {
     };
   }, [cleanupStream, stopSpeech, stopVad, detachVisibilityHandler]);
 
-  // ── Auto-send mechanism ─────────────────────────────────────────────────
-  /**
-   * Compute the silence threshold for the current recording length. Short
-   * utterances (< 5s) use the snappy threshold; longer recordings get more
-   * room for natural mid-thought pauses.
-   */
-  function currentSilenceThreshold(): number {
-    const a = { ...DEFAULT_AUTO_SEND, ...(optsRef.current.autoSend ?? {}) };
-    const recordedMs = Date.now() - startedAtRef.current;
-    return recordedMs < 5000 ? a.silenceMsShort : a.silenceMsLong;
+  function resetUtteranceDraftRefs(): void {
+    committedTextRef.current = "";
+    interimTextRef.current = "";
+    hasWebSpeechFinalRef.current = false;
+    autoSentRef.current = false;
+    whisperPendingSendRef.current = false;
   }
 
-  function maybeFireAutoSend(): void {
-    if (autoSentRef.current) return;
-    const a = { ...DEFAULT_AUTO_SEND, ...(optsRef.current.autoSend ?? {}) };
-    if (!a) return;
-    if (!optsRef.current.autoSend?.enabled) return;
-
-    const recordingMs = Date.now() - startedAtRef.current;
-    if (recordingMs < a.minRecordingMs) return; // too short — filter coughs
-
-    // If Web Speech is supported and we require finals, only fire when we
-    // have at least one committed segment. (When Web Speech isn't supported,
-    // auto-send waits for Whisper after stop, see uploadAndRefine path.)
-    if (a.requireWebSpeechFinal && speechCtor && !hasWebSpeechFinalRef.current) return;
-
-    const text = committedTextRef.current.trim();
-    if (a.requireWebSpeechFinal && speechCtor) {
-      // Word-count filter prevents accidental "send"/"go" auto-sends.
-      const words = text.split(/\s+/).filter(Boolean);
-      if (words.length < a.minWordCount) return;
+  function returnToListening(): void {
+    utteranceActiveRef.current = false;
+    resetUtteranceDraftRefs();
+    if (maxRecordingTimerRef.current != null) {
+      window.clearTimeout(maxRecordingTimerRef.current);
+      maxRecordingTimerRef.current = null;
     }
-
-    autoSentRef.current = true;
-    setState((s) => ({ ...s, autoSendCountdownMs: null }));
-    optsRef.current.onCountdown?.(null);
-
-    // Optional audio cue — a brief 880Hz tone via Web Audio (no asset needed).
-    if (a.audioCue) {
-      playSendCue();
+    if (tickerRef.current != null) {
+      window.clearInterval(tickerRef.current);
+      tickerRef.current = null;
     }
+    warmupUntilRef.current = 0;
+    recorderRef.current = null;
+    chunksRef.current = [];
+    if (sessionActiveRef.current) {
+      setState((s) => ({
+        ...s,
+        status: "listening",
+        elapsedMs: 0,
+        liveText: "",
+        sessionActive: true,
+        autoSendCountdownMs: null,
+        warmingUp: false,
+      }));
+    }
+  }
 
-    // Hand the committed text to the consumer; they decide whether to send
-    // (typically yes, unless agent is busy in which case they refuse + we
-    // keep listening).
-    optsRef.current.onAutoSend?.(text);
-
-    // Stop the recorder; Whisper refinement will run in background and arrive
-    // via onWhisperRefinement(wasAutoSent=true).
-    console.debug("[dictation] stop() ← maybeFireAutoSend at +" + (Date.now() - startedAtRef.current) + "ms");
+  function stopRecorderForEndpoint(): void {
     const r = recorderRef.current;
     if (r && r.state !== "inactive") {
       try {
@@ -377,11 +389,83 @@ export function useDictation(opts: UseDictationOptions): {
     stopSpeech();
   }
 
-  function handleSilenceTick(msSinceSpeech: number): void {
-    if (autoSentRef.current) return;
-    if (!optsRef.current.autoSend?.enabled) return;
+  /** Committed finals + trailing interim (what the user sees in the composer). */
+  function draftTranscript(): string {
+    const committed = committedTextRef.current.trim();
+    const interim = interimTextRef.current.trim();
+    if (!interim) return committed;
+    if (!committed) return interim;
+    return committed + (/\s$/.test(committed) ? "" : " ") + interim;
+  }
 
-    const a = { ...DEFAULT_AUTO_SEND, ...(optsRef.current.autoSend ?? {}) };
+  // ── Pause detection → send ──────────────────────────────────────────────
+  function currentSilenceThreshold(): number {
+    const a = mergeEndpointOptions(optsRef.current);
+    const recordedMs = Date.now() - startedAtRef.current;
+    return recordedMs < 5000 ? a.silenceMsShort : a.silenceMsLong;
+  }
+
+  /**
+   * End the take and send to the agent when pause thresholds are met, or when
+   * `force` (mic stop click). Returns true if recording was ended for send.
+   */
+  function tryEndpointSend(opts?: { force?: boolean; silenceDeadline?: boolean }): boolean {
+    if (autoSentRef.current) return true;
+    const a = mergeEndpointOptions(optsRef.current);
+    const force = opts?.force ?? false;
+    const silenceDeadline = opts?.silenceDeadline ?? false;
+    const recordingMs = Date.now() - startedAtRef.current;
+
+    if (!force && recordingMs < a.minRecordingMs) return false;
+
+    const text = draftTranscript();
+    const hasFinal = hasWebSpeechFinalRef.current;
+    const hasDraft = text.length > 0;
+
+    if (!force) {
+      if (a.requireWebSpeechFinal && speechCtor && !hasFinal && !hasDraft) {
+        if (recordingMs >= a.minRecordingMs) {
+          whisperPendingSendRef.current = true;
+          autoSentRef.current = true;
+          setState((s) => ({ ...s, autoSendCountdownMs: null }));
+          optsRef.current.onCountdown?.(null);
+          if (a.audioCue) playSendCue();
+          stopRecorderForEndpoint();
+          return true;
+        }
+        return false;
+      }
+      if (a.requireWebSpeechFinal && speechCtor && hasDraft) {
+        const words = text.split(/\s+/).filter(Boolean);
+        if (words.length < a.minWordCount && !silenceDeadline) return false;
+      }
+      if (!hasDraft) return false;
+    } else if (!hasDraft) {
+      if (speechCtor && !hasFinal && recordingMs >= a.minRecordingMs) {
+        whisperPendingSendRef.current = true;
+        autoSentRef.current = true;
+        setState((s) => ({ ...s, autoSendCountdownMs: null }));
+        optsRef.current.onCountdown?.(null);
+        stopRecorderForEndpoint();
+        return true;
+      }
+      return false;
+    }
+
+    autoSentRef.current = true;
+    setState((s) => ({ ...s, autoSendCountdownMs: null }));
+    optsRef.current.onCountdown?.(null);
+    if (a.audioCue) playSendCue();
+    optsRef.current.onAutoSend?.(text);
+    console.debug("[dictation] endpoint send at +" + recordingMs + "ms");
+    stopRecorderForEndpoint();
+    return true;
+  }
+
+  function handleSilenceTick(msSinceSpeech: number): void {
+    if (!utteranceActiveRef.current || autoSentRef.current) return;
+
+    const a = mergeEndpointOptions(optsRef.current);
     const threshold = currentSilenceThreshold();
     const recordingMs = Date.now() - startedAtRef.current;
 
@@ -401,16 +485,21 @@ export function useDictation(opts: UseDictationOptions): {
       );
       optsRef.current.onCountdown?.(remaining);
     } else {
-      maybeFireAutoSend();
+      setState((s) => ({ ...s, autoSendCountdownMs: null }));
+      optsRef.current.onCountdown?.(null);
+      if (!tryEndpointSend({ silenceDeadline: true })) {
+        if (!tryEndpointSend({ force: true })) {
+          console.debug("[dictation] pause deadline: no sendable draft yet");
+        }
+      }
     }
   }
 
-  function handleSpeechStart(): void {
-    // Reset countdown — user resumed talking.
-    if (state.autoSendCountdownMs != null) {
-      setState((s) => ({ ...s, autoSendCountdownMs: null }));
-      optsRef.current.onCountdown?.(null);
-    }
+  function handleSpeechResume(): void {
+    setState((s) =>
+      s.autoSendCountdownMs != null ? { ...s, autoSendCountdownMs: null } : s
+    );
+    optsRef.current.onCountdown?.(null);
   }
 
   // ── Web Speech wiring ───────────────────────────────────────────────────
@@ -434,6 +523,7 @@ export function useDictation(opts: UseDictationOptions): {
         if (newFinals) {
           const trimmed = newFinals.trim();
           if (trimmed) {
+            interimTextRef.current = "";
             const sep = committedTextRef.current && !/\s$/.test(committedTextRef.current) ? " " : "";
             committedTextRef.current = committedTextRef.current + sep + trimmed;
             hasWebSpeechFinalRef.current = true;
@@ -442,6 +532,7 @@ export function useDictation(opts: UseDictationOptions): {
           }
         }
         if (interim) {
+          interimTextRef.current = interim.trim();
           setState((s) => ({ ...s, liveText: committedTextRef.current + " " + interim }));
           optsRef.current.onInterim?.(interim);
         }
@@ -454,7 +545,11 @@ export function useDictation(opts: UseDictationOptions): {
       rec.onend = () => {
         // Browser will auto-end after extended silence even with continuous=true.
         // Restart if we're still recording AND haven't auto-sent.
-        if (recorderRef.current?.state === "recording" && !autoSentRef.current) {
+        if (
+          utteranceActiveRef.current &&
+          recorderRef.current?.state === "recording" &&
+          !autoSentRef.current
+        ) {
           try {
             rec.start();
           } catch {
@@ -469,19 +564,215 @@ export function useDictation(opts: UseDictationOptions): {
     }
   }
 
-  // ── Recording lifecycle ─────────────────────────────────────────────────
+  function wireRecorderOnStop(recorder: MediaRecorder, mimeType: string): void {
+    recorder.onstop = () => {
+      const elapsed = Date.now() - startedAtRef.current;
+      console.warn("[dictation] recorder ONSTOP fired", {
+        elapsedMs: elapsed,
+        utteranceCancelled: utteranceCancelledRef.current,
+        wasAutoSent: autoSentRef.current,
+        sessionActive: sessionActiveRef.current,
+      });
+      stopSpeech();
+      if (utteranceCancelledRef.current) {
+        utteranceCancelledRef.current = false;
+        returnToListening();
+        return;
+      }
+      const finalMime = recorder.mimeType || mimeType || "audio/webm";
+      const blob = new Blob(chunksRef.current, { type: finalMime });
+      const wasSent = autoSentRef.current;
+      if (sessionActiveRef.current) {
+        returnToListening();
+        void uploadAndRefine(blob, finalMime, optsRef.current, wasSent).then(
+          (cost) => {
+            if (!cost) return;
+            setState((s) => ({
+              ...s,
+              lastCost: cost,
+              sessionCostUsd: s.sessionCostUsd + (cost.costUsd || 0),
+              sessionDurationSec: s.sessionDurationSec + (cost.durationSec || 0),
+            }));
+          },
+          (err) => {
+            if (!sessionActiveRef.current) return;
+            setState((s) => ({
+              ...s,
+              error: err instanceof Error ? err.message : String(err),
+            }));
+          }
+        );
+        return;
+      }
+      cleanupStream();
+      void uploadAndRefine(blob, finalMime, optsRef.current, wasSent).then(
+        (cost) => {
+          setState((s) => ({
+            ...s,
+            status: "done",
+            elapsedMs: 0,
+            liveText: "",
+            sessionActive: false,
+            autoSendCountdownMs: null,
+            lastCost: cost,
+            sessionCostUsd: cost ? s.sessionCostUsd + (cost.costUsd || 0) : s.sessionCostUsd,
+            sessionDurationSec: cost ? s.sessionDurationSec + (cost.durationSec || 0) : s.sessionDurationSec,
+            error: null,
+          }));
+        },
+        (err) => {
+          setState((s) => ({
+            ...s,
+            status: state.liveTranscriptionSupported ? "done" : "error",
+            elapsedMs: 0,
+            liveText: "",
+            sessionActive: false,
+            autoSendCountdownMs: null,
+            error: err instanceof Error ? err.message : String(err),
+          }));
+        }
+      );
+    };
+  }
+
+  const beginUtterance = useCallback(async () => {
+    if (!sessionActiveRef.current || utteranceActiveRef.current || !streamRef.current) return;
+    if (beginningUtteranceRef.current) return;
+    beginningUtteranceRef.current = true;
+    try {
+      resetUtteranceDraftRefs();
+      utteranceCancelledRef.current = false;
+      const stream = streamRef.current;
+      const candidates = [
+        "audio/webm;codecs=opus",
+        "audio/webm",
+        "audio/mp4",
+        "audio/ogg;codecs=opus",
+      ];
+      const mimeType =
+        mimeTypeRef.current ||
+        candidates.find((c) => window.MediaRecorder.isTypeSupported?.(c)) ||
+        "";
+      mimeTypeRef.current = mimeType;
+      const recorder = mimeType
+        ? new MediaRecorder(stream, { mimeType })
+        : new MediaRecorder(stream);
+      recorderRef.current = recorder;
+      chunksRef.current = [];
+      recorder.ondataavailable = (e) => {
+        if (e.data && e.data.size > 0) chunksRef.current.push(e.data);
+      };
+      recorder.onerror = (ev) => {
+        const errEvent = ev as Event & { error?: { name?: string; message?: string } };
+        const msg = errEvent.error?.message ?? errEvent.error?.name ?? "MediaRecorder error";
+        setState((s) => ({ ...s, status: "error", error: `Recording error: ${msg}` }));
+        endSessionRef.current();
+      };
+      wireRecorderOnStop(recorder, mimeType);
+      try {
+        recorder.start(1000);
+      } catch (err) {
+        setState((s) => ({
+          ...s,
+          status: "error",
+          error: `Recording could not start: ${err instanceof Error ? err.message : String(err)}`,
+        }));
+        return;
+      }
+      utteranceActiveRef.current = true;
+      startedAtRef.current = Date.now();
+      warmupUntilRef.current = startedAtRef.current + RECORDING_WARMUP_MS;
+      warmupTimerRef.current = window.setTimeout(() => {
+        setState((s) => ({ ...s, warmingUp: false }));
+        warmupTimerRef.current = null;
+      }, RECORDING_WARMUP_MS);
+      tickerRef.current = window.setInterval(() => {
+        setState((s) => ({ ...s, elapsedMs: Date.now() - startedAtRef.current }));
+      }, 200);
+      const endpointOpts = mergeEndpointOptions(optsRef.current);
+      const maxMs = Math.max(5_000, endpointOpts.maxRecordingMs);
+      maxRecordingTimerRef.current = window.setTimeout(() => {
+        if (recorderRef.current?.state === "recording") {
+          if (!tryEndpointSend({ force: true })) {
+            try {
+              recorderRef.current.stop();
+            } catch {
+              /* ignore */
+            }
+          }
+        }
+      }, maxMs);
+      setState((s) => ({
+        ...s,
+        status: "recording",
+        elapsedMs: 0,
+        error: null,
+        sessionActive: true,
+        warmingUp: true,
+        autoSendCountdownMs: null,
+      }));
+      optsRef.current.onUtteranceStart?.();
+      startSpeechRecognition(optsRef.current.language);
+    } finally {
+      beginningUtteranceRef.current = false;
+    }
+  }, []);
+
+  const endSessionRef = useRef<() => void>(() => {});
+
+  const endSession = useCallback(() => {
+    sessionActiveRef.current = false;
+    utteranceActiveRef.current = false;
+    utteranceCancelledRef.current = false;
+    const r = recorderRef.current;
+    if (r && r.state !== "inactive") {
+      utteranceCancelledRef.current = true;
+      try {
+        r.stop();
+      } catch {
+        /* ignore */
+      }
+    }
+    cleanupStream();
+    stopSpeech();
+    stopVad();
+    detachVisibilityHandler();
+    setState((s) => ({
+      ...s,
+      status: "idle",
+      elapsedMs: 0,
+      error: null,
+      liveText: "",
+      sessionActive: false,
+      autoSendCountdownMs: null,
+      warmingUp: false,
+    }));
+  }, [cleanupStream, stopSpeech, stopVad, detachVisibilityHandler]);
+
+  endSessionRef.current = endSession;
+
+  // ── Mic session (stays on until endSession) ─────────────────────────────
   const start = useCallback(async () => {
     if (!state.supported) {
       setState((s) => ({ ...s, status: "error", error: "Microphone not supported in this browser." }));
       return;
     }
-    if (state.status === "recording" || state.status === "uploading" || state.status === "transcribing") {
+    if (
+      state.status === "recording" ||
+      state.status === "listening" ||
+      state.status === "permission-pending"
+    ) {
       return;
     }
-    setState((s) => ({ ...s, status: "permission-pending", error: null, liveText: "", autoSendCountdownMs: null }));
-    committedTextRef.current = "";
-    hasWebSpeechFinalRef.current = false;
-    autoSentRef.current = false;
+    setState((s) => ({
+      ...s,
+      status: "permission-pending",
+      error: null,
+      liveText: "",
+      autoSendCountdownMs: null,
+    }));
+    resetUtteranceDraftRefs();
+    sessionActiveRef.current = true;
 
     let stream: MediaStream;
     try {
@@ -493,10 +784,12 @@ export function useDictation(opts: UseDictationOptions): {
         },
       });
     } catch (err) {
+      sessionActiveRef.current = false;
       const msg = err instanceof Error ? err.message : String(err);
       setState((s) => ({
         ...s,
         status: "error",
+        sessionActive: false,
         error: /permission|denied|notallowed/i.test(msg)
           ? "Microphone permission denied. Enable it in your browser's site settings."
           : `Could not access microphone: ${msg}`,
@@ -530,25 +823,18 @@ export function useDictation(opts: UseDictationOptions): {
           recorderState: recorderRef.current?.state,
           recordingMs: startedAtRef.current ? Date.now() - startedAtRef.current : null,
         });
-        if (recorderRef.current?.state === "recording") {
-          try {
-            recorderRef.current.stop();
-          } catch {
-            /* ignore */
-          }
-        }
+        endSessionRef.current();
       });
       track.addEventListener("mute", () => {
         console.warn("[dictation] track muted:", track.id, "— this often precedes an ended event");
       });
     }
 
-    // Tab background → cancel pending auto-send to avoid surprise sends when
-    // the user isn't looking. Recording continues (the user could be doing a
-    // hands-free workflow); only the auto-send heuristic pauses.
     const onVisibility = (): void => {
-      if (document.hidden && state.autoSendCountdownMs != null) {
-        setState((s) => ({ ...s, autoSendCountdownMs: null }));
+      if (document.hidden) {
+        setState((s) =>
+          s.autoSendCountdownMs != null ? { ...s, autoSendCountdownMs: null } : s
+        );
         optsRef.current.onCountdown?.(null);
       }
     };
@@ -561,201 +847,74 @@ export function useDictation(opts: UseDictationOptions): {
       "audio/mp4",
       "audio/ogg;codecs=opus",
     ];
-    const mimeType = candidates.find((c) => window.MediaRecorder.isTypeSupported?.(c)) ?? "";
-    const recorder = mimeType ? new MediaRecorder(stream, { mimeType }) : new MediaRecorder(stream);
-    recorderRef.current = recorder;
-    chunksRef.current = [];
-    cancelledRef.current = false;
+    mimeTypeRef.current = candidates.find((c) => window.MediaRecorder.isTypeSupported?.(c)) ?? "";
 
-    recorder.ondataavailable = (e) => {
-      if (e.data && e.data.size > 0) {
-        chunksRef.current.push(e.data);
-        console.debug(
-          `[dictation] dataavailable: ${e.data.size}B (chunk #${chunksRef.current.length}, +${Date.now() - startedAtRef.current}ms)`
-        );
-      }
-    };
-
-    recorder.onpause = () => {
-      console.warn("[dictation] recorder PAUSED unexpectedly at +" + (Date.now() - startedAtRef.current) + "ms");
-    };
-    recorder.onresume = () => {
-      console.debug("[dictation] recorder resumed at +" + (Date.now() - startedAtRef.current) + "ms");
-    };
-
-    // Surface MediaRecorder errors instead of swallowing them. The recorder
-    // can fire `error` events asynchronously for codec issues, OS audio
-    // glitches, or quota problems — without this handler, the recorder
-    // silently transitions to "inactive" and the UI looks like dictation
-    // turned itself off for no reason.
-    recorder.onerror = (ev) => {
-      const errEvent = ev as Event & { error?: { name?: string; message?: string } };
-      const errInfo = errEvent.error;
-      const msg = errInfo?.message ?? errInfo?.name ?? "MediaRecorder error";
-      console.warn("[dictation] MediaRecorder error:", errInfo ?? ev);
-      setState((s) => ({ ...s, status: "error", error: `Recording error: ${msg}` }));
-      cleanupStream();
-      stopSpeech();
-      stopVad();
-      detachVisibilityHandler();
-    };
-
-    recorder.onstop = () => {
-      const elapsed = Date.now() - startedAtRef.current;
-      const chunkBytes = chunksRef.current.reduce(
-        (n, c) => n + (c instanceof Blob ? c.size : (c as ArrayBuffer).byteLength ?? 0),
-        0
-      );
-      console.warn("[dictation] recorder ONSTOP fired", {
-        elapsedMs: elapsed,
-        wasCancelled: cancelledRef.current,
-        wasAutoSent: autoSentRef.current,
-        chunks: chunksRef.current.length,
-        totalBytes: chunkBytes,
-        // Stack trace shows WHO called stop — invaluable for diagnosing
-        // surprise stops. Look for cancel() / maybeFireAutoSend() / max
-        // recording timeout / track.ended in the trace.
-        trace: new Error("onstop trace").stack?.split("\n").slice(1, 8).join("\n"),
-      });
-      stopVad();
-      stopSpeech();
-      detachVisibilityHandler();
-      if (cancelledRef.current) {
-        cleanupStream();
-        setState((s) => ({ ...s, status: "idle", elapsedMs: 0, liveText: "", autoSendCountdownMs: null }));
-        return;
-      }
-      const finalMime = recorder.mimeType || mimeType || "audio/webm";
-      const blob = new Blob(chunksRef.current, { type: finalMime });
-      cleanupStream();
-      void uploadAndRefine(blob, finalMime, optsRef.current, autoSentRef.current).then(
-        (cost) => {
-          setState((s) => ({
-            ...s,
-            status: "done",
-            elapsedMs: 0,
-            liveText: "",
-            autoSendCountdownMs: null,
-            lastCost: cost,
-            sessionCostUsd: cost ? s.sessionCostUsd + (cost.costUsd || 0) : s.sessionCostUsd,
-            sessionDurationSec: cost ? s.sessionDurationSec + (cost.durationSec || 0) : s.sessionDurationSec,
-            error: null,
-          }));
-        },
-        (err) => {
-          setState((s) => ({
-            ...s,
-            status: state.liveTranscriptionSupported ? "done" : "error",
-            elapsedMs: 0,
-            liveText: "",
-            autoSendCountdownMs: null,
-            error: err instanceof Error ? err.message : String(err),
-          }));
+    vadRef.current = createVad({
+      stream,
+      onSpeechStart: () => {
+        if (optsRef.current.shouldBlockSpeechCapture?.()) {
+          return;
         }
-      );
-    };
-
-    // MediaRecorder.start() can throw synchronously in some browsers when the
-    // requested mime/codec isn't actually supported despite isTypeSupported's
-    // earlier promise. Catch that path explicitly — otherwise the recorder
-    // silently enters "inactive" state and the UI looks frozen.
-    try {
-      recorder.start(1000);
-    } catch (err) {
-      console.warn("[dictation] recorder.start() threw:", err);
-      setState((s) => ({
-        ...s,
-        status: "error",
-        error: `Recording could not start: ${err instanceof Error ? err.message : String(err)}`,
-      }));
-      cleanupStream();
-      detachVisibilityHandler();
-      return;
-    }
-    startedAtRef.current = Date.now();
-    // Warmup window — absorb accidental double-clicks from touch devices /
-    // fast-click users so the second click doesn't immediately stop recording.
-    warmupUntilRef.current = startedAtRef.current + RECORDING_WARMUP_MS;
-    warmupTimerRef.current = window.setTimeout(() => {
-      setState((s) => ({ ...s, warmingUp: false }));
-      warmupTimerRef.current = null;
-    }, RECORDING_WARMUP_MS);
-    tickerRef.current = window.setInterval(() => {
-      setState((s) => ({ ...s, elapsedMs: Date.now() - startedAtRef.current }));
-    }, 200);
-
-    // Hard cap on continuous recording so a stuck mic doesn't run forever.
-    const a = { ...DEFAULT_AUTO_SEND, ...(opts.autoSend ?? {}) };
-    maxRecordingTimerRef.current = window.setTimeout(() => {
-      if (recorderRef.current?.state === "recording") {
-        console.warn("[dictation] stop() ← maxRecordingMs timeout (" + a.maxRecordingMs + "ms)");
-        try {
-          recorderRef.current.stop();
-        } catch {
-          /* ignore */
+        if (sessionActiveRef.current && !utteranceActiveRef.current) {
+          void beginUtterance();
+          return;
         }
-      }
-    }, a.maxRecordingMs);
+        handleSpeechResume();
+      },
+      onSpeechEnd: () => {
+        /* handled via onSilenceTick */
+      },
+      onSilenceTick: handleSilenceTick,
+      onError: () => {
+        /* VAD failure isn't fatal */
+      },
+    });
 
-    setState((s) => ({ ...s, status: "recording", elapsedMs: 0, error: null, warmingUp: true }));
-
-    // Web Speech in parallel for live transcript display.
-    startSpeechRecognition(opts.language);
-
-    // VAD in parallel for auto-send pause detection (only when needed).
-    if (opts.autoSend?.enabled) {
-      vadRef.current = createVad({
-        stream,
-        onSpeechStart: handleSpeechStart,
-        onSpeechEnd: () => {
-          /* handled via onSilenceTick */
-        },
-        onSilenceTick: handleSilenceTick,
-        onError: () => {
-          /* VAD failure isn't fatal — auto-send just won't trigger */
-        },
-      });
-    }
-  }, [state.supported, state.status, state.liveTranscriptionSupported, state.autoSendCountdownMs, cleanupStream, stopSpeech, stopVad, detachVisibilityHandler, opts.language, opts.autoSend?.enabled]);
+    setState((s) => ({
+      ...s,
+      status: "listening",
+      elapsedMs: 0,
+      error: null,
+      sessionActive: true,
+      warmingUp: false,
+      autoSendCountdownMs: null,
+    }));
+  }, [state.supported, state.status, beginUtterance, cleanupStream, stopSpeech, stopVad, detachVisibilityHandler]);
 
   const stop = useCallback(async () => {
     const r = recorderRef.current;
-    if (!r) return;
-    if (r.state === "inactive") return;
-    // Warmup guard — refuse stop() within the first RECORDING_WARMUP_MS so
-    // a double-click on the mic button can't immediately end the take.
-    // Cancel() (the ✕ button) deliberately skips this check so users can
-    // always bail out instantly.
+    if (!r || r.state === "inactive") return;
     if (Date.now() < warmupUntilRef.current) {
       console.debug(
         `[dictation] ignoring stop() during warmup (${Math.round(warmupUntilRef.current - Date.now())}ms remaining)`
       );
       return;
     }
+    if (tryEndpointSend({ force: true })) return;
     setState((s) => ({ ...s, status: "uploading", autoSendCountdownMs: null }));
-    stopVad();
     stopSpeech();
     r.stop();
-  }, [stopSpeech, stopVad]);
+  }, []);
 
   const cancel = useCallback(() => {
-    const r = recorderRef.current;
-    cancelledRef.current = true;
-    autoSentRef.current = false;
-    if (r && r.state !== "inactive") r.stop();
-    cleanupStream();
-    stopSpeech();
-    stopVad();
-    detachVisibilityHandler();
-    setState((s) => ({
-      ...s,
-      status: "idle",
-      elapsedMs: 0,
-      error: null,
-      liveText: "",
-      autoSendCountdownMs: null,
-    }));
-  }, [cleanupStream, stopSpeech, stopVad, detachVisibilityHandler]);
+    if (utteranceActiveRef.current) {
+      utteranceCancelledRef.current = true;
+      autoSentRef.current = false;
+      whisperPendingSendRef.current = false;
+      const r = recorderRef.current;
+      if (r && r.state !== "inactive") {
+        try {
+          r.stop();
+        } catch {
+          /* ignore */
+        }
+      } else {
+        returnToListening();
+      }
+      return;
+    }
+    endSession();
+  }, [endSession]);
 
   const cancelPendingAutoSend = useCallback(() => {
     if (state.autoSendCountdownMs != null) {
@@ -773,20 +932,22 @@ export function useDictation(opts: UseDictationOptions): {
     wasAutoSent: boolean
   ): Promise<DictationCost | null> {
     if (blob.size < 500) return null; // too short for Whisper
-    setState((s) => ({ ...s, status: "uploading" }));
+    const keepListening = sessionActiveRef.current;
+    if (!keepListening) setState((s) => ({ ...s, status: "uploading" }));
     const dataUrl = await blobToDataUrl(blob);
     const filename = `dictation-${Date.now()}.${extForMime(mimeType)}`;
+    const baseMime = mimeType.split(";")[0]?.trim().toLowerCase() || "audio/webm";
     const uploadResp = await fetch(`${WEB_SERVER_BASE}/api/audio/upload`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ dataUrl, filename, mimeType }),
+      body: JSON.stringify({ dataUrl, filename, mimeType: baseMime }),
     });
     if (!uploadResp.ok) {
       const j = (await uploadResp.json().catch(() => ({}))) as { error?: string };
       throw new Error(j.error ?? `Upload failed: HTTP ${uploadResp.status}`);
     }
     const uploadBody = (await uploadResp.json()) as { attachmentId: string };
-    setState((s) => ({ ...s, status: "transcribing" }));
+    if (!sessionActiveRef.current) setState((s) => ({ ...s, status: "transcribing" }));
     const tResp = await fetch(`${WEB_SERVER_BASE}/api/transcribe`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -814,13 +975,20 @@ export function useDictation(opts: UseDictationOptions): {
       model: tBody.model,
       language: tBody.language,
     };
-    if (tBody.text.trim()) {
-      o.onWhisperRefinement?.(tBody.text.trim(), cost, wasAutoSent);
+    const refined = tBody.text.trim();
+    if (refined) {
+      if (whisperPendingSendRef.current) {
+        whisperPendingSendRef.current = false;
+        o.onAutoSend?.(refined);
+        o.onWhisperRefinement?.(refined, cost, true);
+      } else {
+        o.onWhisperRefinement?.(refined, cost, wasAutoSent);
+      }
     }
     return cost;
   }
 
-  return { state, start, stop, cancel, cancelPendingAutoSend };
+  return { state, start, endSession, stop, cancel, cancelPendingAutoSend };
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────

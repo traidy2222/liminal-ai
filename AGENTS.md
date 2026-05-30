@@ -108,10 +108,18 @@ Two-tier model: main model runs the full loop; fast model runs background JSON t
 | `AGENT_REASONING_BUDGET`       | on         | Infer per-turn reasoning effort / think-depth from the intent classifier |
 | `AGENT_REASONING_DEFAULT_EFFORT` | `high`   | Fallback effort when the classifier is off / low-confidence          |
 | `AGENT_REASONING_SURFACE`      | `external` | `native` \| `external` \| `auto` — external = model uses `think()` + `reason()` |
-| `AGENT_EFFORT_LEARN`           | on         | Record per-intent effort outcomes; reuse the best as a prior         |
+| `AGENT_EFFORT_LEARN`           | on         | Record per-intent **reasoning** effort outcomes (not `AGENT_EFFORT`); reuse the best as a prior |
 | `AGENT_INTENT_INFERENCE`       | on         | LLM-tier turn-intent classification (no regex fallback)              |
 | `AGENT_INTENT_ROUTING`         | on         | Route knowledge/introspection turns to the fast model                |
 | `AGENT_INTENT_FAST_THRESHOLD`  | `0.8`      | Min confidence to route to the fast model                            |
+
+### Output effort (separate axis from reasoning)
+
+| Var            | Default  | Purpose                                                                                  |
+| -------------- | -------- | ---------------------------------------------------------------------------------------- |
+| `AGENT_EFFORT` | `medium` | `low` \| `medium` \| `high` \| `xhigh` — deliverable thoroughness; per-turn system injection + completion token scale |
+
+See `CLAUDE.md` for full behavior (`buildEffortTurnInjection`, conflict overrides at high/xhigh).
 
 ### Safety
 

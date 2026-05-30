@@ -62,7 +62,6 @@ Web **Settings** writes to (2). See [Configuration basics](../start/configuratio
 | `AGENT_CURATOR_PROTECT_MIN_AGE_HOURS` | `24` | yes | no | harness | Memory curator never prunes notes younger than this many hours. |
 | `AGENT_CURATOR_TIMEOUT_MS` | `90000` | yes | no | harness | Wall-clock budget for the curate_memory model call (clamped 5s–300s). Raise for large note stores. |
 | `AGENT_DICTATION_AUDIO_CUE` | `0` | yes | no | models_api | Play a brief 880Hz tone when auto-send fires so you know the message went out. |
-| `AGENT_DICTATION_AUTO_SEND` | `0` | yes | no | models_api | When 1, the mic button defaults to auto-send mode: recording stops + message is sent automatically once you pause talkin |
 | `AGENT_DICTATION_MAX_RECORDING_MS` | `60000` | yes | no | models_api | Hard cap on a single continuous recording (default 60000ms = 60s). |
 | `AGENT_DICTATION_MIN_RECORDING_MS` | `1500` | yes | no | models_api | Minimum recording length before auto-send is considered (default 1500ms — filters out coughs). |
 | `AGENT_DICTATION_SILENCE_MS_LONG` | `2500` | yes | no | models_api | Pause threshold for longer recordings. Default 2500ms — more room for mid-thought pauses. |
@@ -80,6 +79,7 @@ Web **Settings** writes to (2). See [Configuration basics](../start/configuratio
 | `AGENT_DREAM_CONTRADICT_AUTO_RESOLVE` | `1` | yes | no | harness | Harness environment toggle for Dream Contradict Auto Resolve. See docs/configuration.md (harness). |
 | `AGENT_DREAM_CONTRADICT_CONFIDENCE` | `0.85` | yes | no | harness | Harness environment toggle for Dream Contradict Confidence. See docs/configuration.md (harness). |
 | `AGENT_DREAM_THRESHOLD` | `0.15` | yes | no | harness | Harness environment toggle for Dream Threshold. See docs/configuration.md (harness). |
+| `AGENT_EFFORT` | `medium` | yes | no | harness | Deliverable-thoroughness dial: injected each turn beside the reasoning budget, scales completion max_tokens (0.75×–1.5×) |
 | `AGENT_EMBED_MODEL` | `qwen/qwen3-embedding-8b` | yes | no | models_api | Harness environment toggle for Embed Model. See docs/configuration.md (models api). |
 | `AGENT_EVAL_JSON_SINK` | `1` | yes | no | advanced | Harness environment toggle for Eval Json Sink. See docs/configuration.md (advanced). |
 | `AGENT_FAILURE_DIGEST` | `1` | yes | no | advanced | Harness environment toggle for Failure Digest. See docs/configuration.md (advanced). |
@@ -219,6 +219,17 @@ Web **Settings** writes to (2). See [Configuration basics](../start/configuratio
 | `AGENT_TRANSCRIBE_TIMEOUT_MS` | `120000` | yes | no | models_api | Per-call wall-clock timeout for the transcription request. |
 | `AGENT_TRANSCRIBE_TIMESTAMPS` | `segment` | yes | no | models_api | Timestamp granularity in the response: none, segment (default), or word. |
 | `AGENT_TRANSIENT_5XX_MAX_RETRIES` | `8` | yes | yes | models_api | Harness environment toggle for Transient 5xx Max Retries. See docs/configuration.md (models api). |
+| `AGENT_TTS_BASE_URL` | `https://openrouter.ai/api/v1` | yes | no | models_api | OpenAI-compatible base URL for /audio/speech. Defaults to OpenRouter. |
+| `AGENT_TTS_CHUNK_CHARS` | `400` | yes | no | models_api | Max characters per upstream /audio/speech request (default 400). Longer speak() text is split into sequential clips. Ope |
+| `AGENT_TTS_ENABLED` | `0` | yes | no | models_api | Master switch for Jarvis-style spoken updates (speak tool + web audio queue). Written chat stays the full deliverable. |
+| `AGENT_TTS_MAX_CALLS_PER_TURN` | `8` | yes | no | models_api | Hard cap on speak() calls per user message (default 8). |
+| `AGENT_TTS_MAX_CHARS_PER_CALL` | `4096` | yes | no | models_api | Max characters per speak() after sanitization (default 4096 — matches OpenRouter TTS input context; values above 4096 ar |
+| `AGENT_TTS_MAX_OUTPUT_TOKENS` | `4096` | yes | no | models_api | Optional passthrough max_tokens per segment (some providers). Long lines are split via AGENT_TTS_CHUNK_CHARS instead. |
+| `AGENT_TTS_MIN_INTERVAL_MS` | `800` | yes | no | models_api | Minimum spacing between spoken clips to avoid machine-gun audio (default 800ms). |
+| `AGENT_TTS_MODEL` | `hexgrad/kokoro-82m` | yes | no | models_api | TTS model slug for /audio/speech. Default hexgrad/kokoro-82m (~$0.62/M characters on OpenRouter). |
+| `AGENT_TTS_RESPONSE_FORMAT` | `mp3` | yes | no | models_api | Audio format for /audio/speech. OpenRouter accepts mp3 or pcm only (wav/opus/flac are coerced to mp3). Use Kokoro voices |
+| `AGENT_TTS_TIMEOUT_MS` | `45000` | yes | no | models_api | Per-call wall-clock timeout for speech synthesis. |
+| `AGENT_TTS_VOICE` | `af_sky` | yes | no | models_api | Voice preset — must match TTS model: Kokoro (af_sky, af_bella, am_adam, …) or OpenAI (alloy, nova, shimmer, …). Mismatch |
 | `AGENT_UI_VERBOSITY` | `normal` | yes | yes | session_ui | Harness environment toggle for Ui Verbosity. See docs/configuration.md (session ui). |
 | `AGENT_UPSTREAM_429_SUGGESTED_WAIT_MS` | `` | yes | no | models_api | Harness environment toggle for Upstream 429 Suggested Wait Ms. See docs/configuration.md (models api). |
 | `AGENT_VAULT_AUTO_WRITE` | `off` | yes | yes | memory_vault | Harness environment toggle for Vault Auto Write. See docs/configuration.md (memory vault). |
@@ -227,7 +238,7 @@ Web **Settings** writes to (2). See [Configuration basics](../start/configuratio
 | `AGENT_VAULT_REQUIRE_LINKS` | `0` | yes | no | memory_vault | Harness environment toggle for Vault Require Links. See docs/configuration.md (memory vault). |
 | `AGENT_VAULT_WRITE_BUDGET` | `8` | yes | no | memory_vault | Harness environment toggle for Vault Write Budget. See docs/configuration.md (memory vault). |
 | `AGENT_VISION_BASE_URL` | `https://openrouter.ai/api/v1` | yes | yes | models_api | Harness environment toggle for Vision Base Url. See docs/configuration.md (models api). |
-| `AGENT_VISION_MAX_IMAGE_BYTES` | `4194304` | yes | no | models_api | Harness environment toggle for Vision Max Image Bytes. See docs/configuration.md (models api). |
+| `AGENT_VISION_MAX_IMAGE_BYTES` | `4194304` | yes | yes | models_api | Harness environment toggle for Vision Max Image Bytes. See docs/configuration.md (models api). |
 | `AGENT_VISION_MODEL` | `nvidia/nemotron-nano-12b-v2-vl:free` | yes | yes | models_api | Harness environment toggle for Vision Model. See docs/configuration.md (models api). |
 | `AGENT_VISION_RETRIES` | `2` | yes | no | models_api | Harness environment toggle for Vision Retries. See docs/configuration.md (models api). |
 | `AGENT_VISION_RETRY_BASE_MS` | `800` | yes | no | models_api | Harness environment toggle for Vision Retry Base Ms. See docs/configuration.md (models api). |
@@ -273,6 +284,7 @@ Web **Settings** writes to (2). See [Configuration basics](../start/configuratio
 - `AGENT_VAULT_AUTO_WRITE`
 - `AGENT_VISION_API_KEY`
 - `AGENT_VISION_BASE_URL`
+- `AGENT_VISION_MAX_IMAGE_BYTES`
 - `AGENT_VISION_MODEL`
 - `AGENT_VISION_TIMEOUT_MS`
 - `ANTHROPIC_API_KEY`

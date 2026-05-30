@@ -1,40 +1,26 @@
-import React, { useCallback, useEffect, useState } from "react";
+import React, { useCallback, useEffect } from "react";
 import { useDictation, type DictationCost } from "./useDictation.js";
 
 /**
- * Mic button with live dictation, Whisper refinement, and optional auto-send.
+ * Mic button — continuous listening session with VAD-triggered utterances.
  *
- * Three button modes (icon shifts to show what's active):
- *   🎤   — idle, manual mode (click to dictate, click again to stop+send manually)
- *   🎤⚡  — idle, auto-send mode (records until you stop talking, then sends)
- *   ⏹   — recording, manual mode
- *   ⏹⚡  — recording, auto-send mode (countdown chip appears on pause)
- *
- * Auto-send toggle is per-session — click ⚡ next to the mic to flip it on/off
- * for the next recording. Default off (surprise-action principle).
- *
- * Keyboard:
- *   - Escape (while recording): cancel pending auto-send, stay recording
- *   - Escape (twice while recording): discard everything
- *
- * Three callback streams the consumer (App.tsx) wires:
- *   onAppendFinal(text)              — Web Speech committed a final → append to input
- *   onInterimText(text)              — Web Speech interim → show as preview
- *   onRefinedFull(text, cost, sent)  — Whisper finished → replace span (or update sent msg)
- *   onAutoSend(text)                 — auto-send fired → consumer triggers submit
- *   onStart()                        — recording started → snapshot input cursor
+ * Click 🎤 once to arm the mic (stays on). Speak → records → pause sends.
+ * Click 🎤 again to turn the session off. While recording, ⏹ sends immediately.
  */
 export interface DictationButtonProps {
   onAppendFinal: (text: string) => void;
   onInterimText: (text: string) => void;
   onRefinedFull: (text: string, cost: DictationCost, wasAutoSent: boolean) => void;
   onAutoSend: (text: string) => void;
+  /** Fired at the start of each spoken utterance (for cursor / span snapshot). */
   onStart?: () => void;
-  /** Persistent default for auto-send (from env / settings). User can override per-session. */
-  autoSendDefault?: boolean;
-  /** Audio cue plays a short tone when auto-send fires. Default off. */
+  /** Fired when the continuous listening session arms or disarms. */
+  onSessionActiveChange?: (active: boolean) => void;
+  /** Fired when uploading/transcribing dictation — pause agent TTS (not while merely recording). */
+  onCaptureActiveChange?: (active: boolean) => void;
+  /** Suppress VAD utterance starts while agent TTS is playing (speaker bleed guard). */
+  shouldBlockSpeechCapture?: () => boolean;
   audioCue?: boolean;
-  /** Tuning knobs — usually left to the in-hook defaults. */
   minRecordingMs?: number;
   silenceMsShort?: number;
   silenceMsLong?: number;
@@ -43,6 +29,7 @@ export interface DictationButtonProps {
   prompt?: string;
   hideCostChip?: boolean;
   className?: string;
+  placement?: "floating" | "composer";
 }
 
 export const DictationButton: React.FC<DictationButtonProps> = ({
@@ -51,7 +38,9 @@ export const DictationButton: React.FC<DictationButtonProps> = ({
   onRefinedFull,
   onAutoSend,
   onStart,
-  autoSendDefault = false,
+  onSessionActiveChange,
+  onCaptureActiveChange,
+  shouldBlockSpeechCapture,
   audioCue = false,
   minRecordingMs,
   silenceMsShort,
@@ -61,56 +50,44 @@ export const DictationButton: React.FC<DictationButtonProps> = ({
   prompt,
   hideCostChip,
   className,
+  placement = "floating",
 }) => {
-  // Per-session toggle, seeded from autoSendDefault on first mount only.
-  //
-  // We DELIBERATELY don't sync the prop into local state on every change.
-  // The default flows in from `/api/config` which can re-fetch at any time
-  // (SSE reconnect, chat_switched, settings update). If we re-synced on
-  // every prop change, the user's manual ⚡ toggle would flip back whenever
-  // the server re-emitted the config — destroying their session-level choice.
-  //
-  // Once mounted, the local toggle is the source of truth. To change it,
-  // user clicks ⚡; to change the persisted default, edit Settings or env.
-  const [autoSendEnabled, setAutoSendEnabled] = useState(autoSendDefault);
-  // Re-sync only when the prop transitions from undefined → defined on the
-  // very first config arrival (component mounts before /api/config returns,
-  // initial autoSendDefault is false; first non-false update is the real one).
-  const initialDefaultAppliedRef = React.useRef(false);
-  useEffect(() => {
-    if (initialDefaultAppliedRef.current) return;
-    initialDefaultAppliedRef.current = true;
-    setAutoSendEnabled(autoSendDefault);
-  }, [autoSendDefault]);
-
-  const { state, start, stop, cancel, cancelPendingAutoSend } = useDictation({
+  const { state, start, endSession, stop, cancel, cancelPendingAutoSend } = useDictation({
     onFinal: (text) => onAppendFinal(text),
     onInterim: (text) => onInterimText(text),
     onWhisperRefinement: (text, cost, sent) => onRefinedFull(text, cost, sent),
     onAutoSend,
+    onUtteranceStart: onStart,
+    shouldBlockSpeechCapture,
     language,
     prompt,
-    autoSend: autoSendEnabled
-      ? {
-          enabled: true,
-          audioCue,
-          minRecordingMs,
-          silenceMsShort,
-          silenceMsLong,
-          maxRecordingMs,
-        }
-      : { enabled: false },
+    endpoint: {
+      ...(audioCue ? { audioCue: true } : {}),
+      ...(minRecordingMs !== undefined ? { minRecordingMs } : {}),
+      ...(silenceMsShort !== undefined ? { silenceMsShort } : {}),
+      ...(silenceMsLong !== undefined ? { silenceMsLong } : {}),
+      ...(maxRecordingMs !== undefined ? { maxRecordingMs } : {}),
+    },
   });
 
   const isRecording = state.status === "recording";
+  const isListening = state.status === "listening";
+  const sessionActive = state.sessionActive;
 
-  // Escape key: cancel pending auto-send first; if pressed again, cancel
-  // recording entirely. Provides a clear two-step abort.
   useEffect(() => {
-    if (!isRecording) return;
+    onSessionActiveChange?.(sessionActive);
+  }, [sessionActive, onSessionActiveChange]);
+
+  useEffect(() => {
+    const capture = state.status === "uploading" || state.status === "transcribing";
+    onCaptureActiveChange?.(capture);
+  }, [state.status, onCaptureActiveChange]);
+
+  useEffect(() => {
+    if (!sessionActive) return;
     const onKey = (e: KeyboardEvent): void => {
       if (e.key !== "Escape") return;
-      if (state.autoSendCountdownMs != null) {
+      if (isRecording && state.autoSendCountdownMs != null) {
         e.preventDefault();
         cancelPendingAutoSend();
       } else {
@@ -120,13 +97,10 @@ export const DictationButton: React.FC<DictationButtonProps> = ({
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [isRecording, state.autoSendCountdownMs, cancel, cancelPendingAutoSend]);
+  }, [sessionActive, isRecording, state.autoSendCountdownMs, cancel, cancelPendingAutoSend]);
 
   const onClickMic = useCallback(() => {
     if (isRecording) {
-      // The hook itself guards stop() during the warmup window, but skipping
-      // here too avoids a misleading status flash and keeps the UX intent
-      // ("click was ignored because we just started") explicit.
       if (state.warmingUp) {
         console.debug("[dictation] mic click ignored during warmup");
         return;
@@ -134,11 +108,14 @@ export const DictationButton: React.FC<DictationButtonProps> = ({
       void stop();
       return;
     }
+    if (isListening) {
+      endSession();
+      return;
+    }
     if (state.status === "idle" || state.status === "done" || state.status === "error") {
-      onStart?.();
       void start();
     }
-  }, [isRecording, state.warmingUp, state.status, start, stop, onStart]);
+  }, [isRecording, isListening, state.warmingUp, state.status, start, stop, endSession]);
 
   if (!state.supported) {
     return (
@@ -151,32 +128,28 @@ export const DictationButton: React.FC<DictationButtonProps> = ({
     );
   }
 
-  // ── Visual state ────────────────────────────────────────────────────────
   let icon = "🎤";
-  let title = state.liveTranscriptionSupported
-    ? "Click to dictate (live transcription enabled)"
-    : "Click to dictate (transcribes on stop — your browser lacks live speech recognition)";
+  let title = "Click to turn on voice input (stays on until you click again)";
   let color = "rgba(217,226,236,0.6)";
   let bg = "transparent";
   if (state.status === "permission-pending") {
     icon = "⏳";
     title = "Waiting for microphone permission…";
+  } else if (isListening) {
+    icon = "🎤";
+    title = "Listening — speak when ready. Click mic to turn off.";
+    color = "#66ff99";
+    bg = "rgba(102,255,153,0.12)";
   } else if (isRecording) {
     icon = "⏹";
-    title = autoSendEnabled
-      ? "Recording — will auto-send when you stop talking. Esc to cancel countdown."
-      : state.liveTranscriptionSupported
-        ? "Recording — words appear in input as you speak. Click to stop + refine with Whisper."
-        : "Recording — click to stop and transcribe.";
+    title = state.liveTranscriptionSupported
+      ? "Speaking — pause to send, or click to send now. Click mic (when idle) to turn off session."
+      : "Speaking — pause to send. Click ⏹ to finish.";
     color = "#ff4488";
     bg = "rgba(255,68,136,0.12)";
-  } else if (state.status === "uploading") {
-    icon = "↑";
-    title = "Uploading for Whisper refinement…";
-    color = "var(--lim-accent, #00d4ff)";
-  } else if (state.status === "transcribing") {
+  } else if (state.status === "uploading" || state.status === "transcribing") {
     icon = "⟳";
-    title = "Whisper refining transcript…";
+    title = "Refining last clip in background — still listening.";
     color = "var(--lim-accent, #00d4ff)";
   } else if (state.status === "error") {
     icon = "⚠";
@@ -187,68 +160,53 @@ export const DictationButton: React.FC<DictationButtonProps> = ({
   const countdownSecs =
     state.autoSendCountdownMs != null ? (state.autoSendCountdownMs / 1000).toFixed(1) : null;
 
+  const inComposer = placement === "composer";
+
   return (
     <div
       className={className}
-      style={{ display: "inline-flex", flexDirection: "column", alignItems: "flex-end", gap: 3 }}
+      style={{
+        display: "inline-flex",
+        flexDirection: inComposer ? "row" : "column",
+        alignItems: inComposer ? "center" : "flex-end",
+        gap: inComposer ? 6 : 3,
+        position: "relative",
+        flexShrink: 0,
+      }}
     >
-      {/* Auto-send countdown chip — only when a pause has actually been detected. */}
       {countdownSecs && (
         <div
           style={{
-            padding: "3px 8px",
+            position: inComposer ? "absolute" : undefined,
+            bottom: inComposer ? "calc(100% + 6px)" : undefined,
+            left: inComposer ? 0 : undefined,
+            right: inComposer ? 0 : undefined,
+            padding: "4px 10px",
             background: "rgba(255,68,136,0.18)",
             color: "#ff4488",
             border: "1px solid rgba(255,68,136,0.5)",
-            borderRadius: 3,
+            borderRadius: inComposer ? 6 : 3,
             fontSize: 10,
             fontFamily: "monospace",
             fontWeight: 600,
-            whiteSpace: "nowrap",
+            whiteSpace: inComposer ? "normal" : "nowrap",
             animation: "data-pulse 0.5s ease-in-out infinite",
+            zIndex: 2,
           }}
         >
-          ⚡ auto-sending in {countdownSecs}s · keep talking or Esc to cancel
+          Sending in {countdownSecs}s · keep talking or Esc to cancel
         </div>
       )}
 
       <div style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>
-        {/* ⚡ toggle — visible only when idle so user can enable for next take. */}
-        {!isRecording && state.status !== "uploading" && state.status !== "transcribing" && (
-          <button
-            type="button"
-            onClick={() => setAutoSendEnabled((v) => !v)}
-            title={
-              autoSendEnabled
-                ? "Auto-send is ON. Recording will auto-stop and send when you pause. Click to switch back to manual."
-                : "Auto-send is OFF. Click to enable: recording will auto-stop and send when you pause talking."
-            }
-            aria-label={autoSendEnabled ? "Disable auto-send" : "Enable auto-send"}
-            style={{
-              width: 22,
-              height: 28,
-              background: autoSendEnabled ? "rgba(255,200,0,0.18)" : "transparent",
-              color: autoSendEnabled ? "#ffc800" : "rgba(217,226,236,0.45)",
-              border: autoSendEnabled
-                ? "1px solid rgba(255,200,0,0.55)"
-                : "1px solid rgba(var(--lim-accent-rgb, 0,212,255),0.18)",
-              borderRadius: 3,
-              cursor: "pointer",
-              fontSize: 11,
-              fontWeight: 700,
-              display: "inline-flex",
-              alignItems: "center",
-              justifyContent: "center",
-            }}
-          >
-            ⚡
-          </button>
-        )}
-
         <button
           type="button"
           onClick={onClickMic}
-          disabled={state.status === "permission-pending" || state.status === "uploading" || state.status === "transcribing"}
+          disabled={
+            state.status === "permission-pending" ||
+            state.status === "uploading" ||
+            state.status === "transcribing"
+          }
           title={title}
           aria-label={title}
           style={{
@@ -256,12 +214,17 @@ export const DictationButton: React.FC<DictationButtonProps> = ({
             height: 28,
             background: bg,
             color,
-            border: isRecording
-              ? "1px solid #ff4488"
-              : "1px solid rgba(var(--lim-accent-rgb, 0,212,255),0.22)",
+            border:
+              isRecording
+                ? "1px solid #ff4488"
+                : isListening
+                  ? "1px solid #66ff99"
+                  : "1px solid rgba(var(--lim-accent-rgb, 0,212,255),0.22)",
             borderRadius: 4,
             cursor:
-              state.status === "permission-pending" || state.status === "uploading" || state.status === "transcribing"
+              state.status === "permission-pending" ||
+              state.status === "uploading" ||
+              state.status === "transcribing"
                 ? "default"
                 : "pointer",
             fontSize: 14,
@@ -272,25 +235,7 @@ export const DictationButton: React.FC<DictationButtonProps> = ({
           }}
         >
           {icon}
-          {autoSendEnabled && !isRecording && state.status !== "permission-pending" && (
-            <span
-              style={{
-                position: "absolute",
-                bottom: -2,
-                right: -2,
-                fontSize: 8,
-                color: "#ffc800",
-                background: "var(--lim-bg, #0c1117)",
-                borderRadius: 8,
-                padding: "0 2px",
-                lineHeight: 1,
-                fontWeight: 700,
-              }}
-            >
-              ⚡
-            </span>
-          )}
-          {isRecording && (
+          {(isListening || isRecording) && (
             <span
               style={{
                 position: "absolute",
@@ -299,8 +244,8 @@ export const DictationButton: React.FC<DictationButtonProps> = ({
                 width: 8,
                 height: 8,
                 borderRadius: "50%",
-                background: "#ff4488",
-                boxShadow: "0 0 8px #ff4488",
+                background: isRecording ? "#ff4488" : "#66ff99",
+                boxShadow: isRecording ? "0 0 8px #ff4488" : "0 0 8px #66ff99",
                 animation: "data-pulse 0.75s ease-in-out infinite",
               }}
             />
@@ -311,11 +256,11 @@ export const DictationButton: React.FC<DictationButtonProps> = ({
             {formatMs(state.elapsedMs)}
           </span>
         )}
-        {isRecording && (
+        {sessionActive && (
           <button
             type="button"
             onClick={cancel}
-            title="Discard recording (Esc Esc)"
+            title={isRecording ? "Discard this phrase (Esc)" : "Turn off voice input (Esc)"}
             style={{
               padding: "2px 6px",
               fontSize: 10,
@@ -330,7 +275,7 @@ export const DictationButton: React.FC<DictationButtonProps> = ({
           </button>
         )}
       </div>
-      {!hideCostChip && state.lastCost && state.status === "done" && (
+      {!hideCostChip && state.lastCost && state.status === "done" && !sessionActive && (
         <span
           style={{
             fontSize: 9,

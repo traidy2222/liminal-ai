@@ -1,8 +1,10 @@
 import type React from "react";
+import type { RefObject } from "react";
 import type { ShellContract } from "../ShellContract.js";
+import { useSessionScreenshot } from "../../useSessionScreenshot.js";
 
 /**
- * Mandatory shell control cluster — Settings, New session, Raw toggle.
+ * Mandatory shell control cluster — Settings, New session, Raw toggle, Screenshot.
  *
  * Every persona shell MUST render this component. It is the single source of
  * truth for the controls a user needs regardless of which generated persona
@@ -16,18 +18,23 @@ import type { ShellContract } from "../ShellContract.js";
  *   - Settings    — always enabled (must stay reachable even mid-turn).
  *   - New session — disabled while busy (avoids resetting an in-flight turn).
  *   - Raw toggle  — always enabled (view-only toggle).
+ *   - Screenshot  — disabled while capturing or when the transcript is empty.
  */
 export function ShellControls({
   contract,
+  messagesRef,
   tone = "mono",
   style,
 }: {
   contract: ShellContract;
+  /** Scrollable messages container to capture (each shell's `messagesRef`). */
+  messagesRef: RefObject<HTMLDivElement | null>;
   /** "mono" = uppercase monospace (terminal/hud); "soft" = rounded sentence-case (studio/minimal). */
   tone?: "mono" | "soft";
   style?: React.CSSProperties;
 }) {
-  const { busy, showRawHarness, onOpenSettings, onClearSession, onToggleRaw } = contract;
+  const { busy, showRawHarness, msgCount, onOpenSettings, onClearSession, onToggleRaw } = contract;
+  const { screenshotting, captureSession } = useSessionScreenshot(messagesRef);
   const mono = tone === "mono";
 
   const base: React.CSSProperties = {
@@ -49,6 +56,7 @@ export function ShellControls({
   };
 
   const label = (text: string) => (mono ? text.toUpperCase() : text);
+  const captureDisabled = screenshotting || msgCount === 0;
 
   return (
     <div style={{ display: "flex", alignItems: "center", gap: 6, ...style }}>
@@ -84,6 +92,19 @@ export function ShellControls({
         title={showRawHarness ? "Hide raw harness trace" : "Show raw harness trace"}
       >
         {label("Raw")} {showRawHarness ? "●" : "○"}
+      </button>
+      <button
+        type="button"
+        style={{
+          ...base,
+          opacity: captureDisabled ? 0.45 : 1,
+          cursor: captureDisabled ? "default" : "pointer",
+        }}
+        disabled={captureDisabled}
+        onClick={() => void captureSession()}
+        title="Download a PNG of the conversation"
+      >
+        {screenshotting ? "…" : label(mono ? "Capture" : "Screenshot")}
       </button>
     </div>
   );

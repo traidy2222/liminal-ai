@@ -21,8 +21,20 @@ import {
   workspaceFingerprint,
   resolveTranscriptionConfig,
   transcribeAudio,
+  resolveSpeechSynthesisConfig,
+  synthesizeSpeechMulti,
+  sanitizeTextForTts,
 } from "@liminal/core";
-import { saveAudioAttachment, findAudioAttachment, readAudioAttachment, SUPPORTED_AUDIO_MIME_TYPES } from "@liminal/tools";
+import {
+  saveAudioAttachment,
+  findAudioAttachment,
+  readAudioAttachment,
+  normalizeAudioMimeType,
+  SUPPORTED_AUDIO_MIME_TYPES,
+  saveTtsClip,
+  readTtsClip,
+  ttsClipAudioUrl,
+} from "@liminal/tools";
 import { loadPersonaUiThemeFromWorkspace } from "@liminal/tools";
 import { persistIncomingAttachments } from "./image_attachment_store.js";
 import path from "node:path";
@@ -76,11 +88,9 @@ export function createRouter(chatManager: ChatManager, sse: SSEManager): Router 
         personaDisplayLabel,
         personalityHeartbeatEnabled: ph.enabled,
         personalityHeartbeatUiStrip: ph.uiStripDefault,
-        // Dictation client config — feeds the mic button's auto-send defaults
-        // and audio cue toggle. Values are tri-state in env: "1"=on, "0"=off,
-        // absent=default off (surprise-action principle).
-        dictationAutoSendDefault: resolveHarnessEnvRaw("AGENT_DICTATION_AUTO_SEND", prefs) === "1",
         dictationAudioCue: resolveHarnessEnvRaw("AGENT_DICTATION_AUDIO_CUE", prefs) === "1",
+        ttsEnabled: resolveHarnessEnvRaw("AGENT_TTS_ENABLED", prefs) === "1",
+        ttsVoice: resolveHarnessEnvRaw("AGENT_TTS_VOICE", prefs)?.trim() || "af_sky",
         // New in Phase 2: which chat is the SSE stream currently bound to.
         activeChat: activeMeta
           ? {
@@ -258,10 +268,11 @@ export function createRouter(chatManager: ChatManager, sse: SSEManager): Router 
       res.status(409).json({ error: "Persona bootstrap is pending. Submit via bootstrap modal." });
       return;
     }
-    const { message, freshContext, attachments } = req.body as {
+    const { message, freshContext, attachments, liveDictation } = req.body as {
       message?: string;
       freshContext?: boolean;
       attachments?: IncomingAttachment[];
+      liveDictation?: boolean;
     };
     const msg = String(message ?? "").trim();
     const normalizedAttachments: Array<ImageAttachment & { dataUrl: string }> = [];
@@ -299,7 +310,12 @@ export function createRouter(chatManager: ChatManager, sse: SSEManager): Router 
     const persisted = await persistIncomingAttachments(normalizedAttachments);
     const normalizedMessage = buildMessageWithImageAttachments(msg, persisted);
     res.json({ ok: true });
-    bridge.sendUserMessage(normalizedMessage, { freshContext: Boolean(freshContext) }).catch((err) => {
+    bridge
+      .sendUserMessage(normalizedMessage, {
+        freshContext: Boolean(freshContext),
+        liveDictation: Boolean(liveDictation),
+      })
+      .catch((err) => {
       const message = err instanceof Error ? err.message : "Failed to process message.";
       sse.send("error", { message });
     });
@@ -519,11 +535,11 @@ export function createRouter(chatManager: ChatManager, sse: SSEManager): Router 
       // Extract just the media type (drop ;codecs=…, ;charset=…) for our
       // allow-list check. Keep the full header for content-type if we ever
       // need it downstream.
-      const mimeFromUrl = (fullMimeHeader.split(";")[0] ?? "").trim().toLowerCase();
-      const mimeType = (body.mimeType || mimeFromUrl).toLowerCase();
-      if (!SUPPORTED_AUDIO_MIME_TYPES.has(mimeType)) {
+      const mimeFromUrl = normalizeAudioMimeType(fullMimeHeader);
+      const mimeType = normalizeAudioMimeType(body.mimeType || mimeFromUrl);
+      if (!mimeType || !SUPPORTED_AUDIO_MIME_TYPES.has(mimeType)) {
         res.status(400).json({
-          error: `Unsupported audio MIME: ${mimeType}. Supported: ${[...SUPPORTED_AUDIO_MIME_TYPES].join(", ")}`,
+          error: `Unsupported audio MIME: ${body.mimeType || fullMimeHeader}. Supported: ${[...SUPPORTED_AUDIO_MIME_TYPES].join(", ")}`,
         });
         return;
       }
@@ -622,6 +638,69 @@ export function createRouter(chatManager: ChatManager, sse: SSEManager): Router 
         model: result.model,
         provider: result.provider,
       });
+    } catch (err) {
+      res.status(500).json({ error: (err as Error).message });
+    }
+  });
+
+  router.post("/api/tts", async (req, res) => {
+    try {
+      const bridge = active();
+      const body = req.body as { text?: string; voice?: string };
+      const raw = String(body.text ?? "").trim();
+      if (!raw) {
+        res.status(400).json({ error: "text required" });
+        return;
+      }
+      const prefs = bridge.harness.getRuntimePreferences();
+      const config = resolveSpeechSynthesisConfig(prefs);
+      if (!config.enabled) {
+        res.status(400).json({ error: "TTS is disabled (AGENT_TTS_ENABLED=0)." });
+        return;
+      }
+      const sanitized = sanitizeTextForTts(raw, config.maxCharsPerCall);
+      if (!sanitized) {
+        res.status(400).json({ error: "Nothing to speak after sanitization." });
+        return;
+      }
+      const multi = await synthesizeSpeechMulti(
+        { text: sanitized, voice: body.voice?.trim() || undefined },
+        config
+      );
+      const clips = [];
+      for (const seg of multi.segments) {
+        const saved = await saveTtsClip(bridge.chatId, seg.audio, seg.mimeType, seg.spokenText);
+        clips.push({
+          clipId: saved.clipId,
+          audioUrl: ttsClipAudioUrl(saved.clipId),
+          text: seg.spokenText,
+          cacheHit: saved.cacheHit,
+        });
+      }
+      res.json({
+        ok: true,
+        segments: clips.length,
+        clips,
+        charCount: multi.charCount,
+        costUsd: multi.costUsd,
+      });
+    } catch (err) {
+      res.status(500).json({ error: (err as Error).message });
+    }
+  });
+
+  router.get("/api/tts/clip/:clipId", async (req, res) => {
+    try {
+      const bridge = active();
+      const clipId = String(req.params.clipId ?? "");
+      const clip = await readTtsClip(bridge.chatId, clipId);
+      if (!clip) {
+        res.status(404).json({ error: "clip not found" });
+        return;
+      }
+      res.setHeader("Content-Type", clip.mimeType);
+      res.setHeader("Cache-Control", "private, max-age=86400");
+      res.send(clip.bytes);
     } catch (err) {
       res.status(500).json({ error: (err as Error).message });
     }

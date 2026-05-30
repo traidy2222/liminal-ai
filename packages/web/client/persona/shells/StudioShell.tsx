@@ -1,21 +1,14 @@
-import React, { useState, useRef, useEffect, useCallback, useMemo } from "react";
+import React, { useState, useRef, useMemo } from "react";
 import type { ShellContract, ToolCallEntry, ToolCallGroup, ToolResult, ToolSurface } from "../ShellContract.js";
-import ReactMarkdown from "react-markdown";
-import remarkGfm from "remark-gfm";
-import rehypeRaw from "rehype-raw";
-import { Prism as SyntaxHighlighter } from "react-syntax-highlighter";
-import { vscDarkPlus } from "react-syntax-highlighter/dist/esm/styles/prism";
+import { AssistantMessageContent, renderFencedCodeBlock } from "../../liminalMarkdown.js";
 import { migratePersonaUiTheme } from "@liminal/core/persona-ui-theme";
 import { resolveToolCardsMode } from "../../resolveToolCardsMode.js";
 import { useStickyAutoScroll } from "../../useStickyAutoScroll.js";
 import { ShellControls } from "./ShellControls.js";
+import { ShellComposer } from "./ShellComposer.js";
 import { ShellChatSwitcher } from "../../chat/ShellChatSwitcher.js";
 import { categoryForTool } from "../categoryMeta.js";
-import {
-  buildMessagesStyle,
-  buildInputAreaStyle,
-  messageEntranceClass,
-} from "../shellLayout.js";
+import { buildMessagesStyle, messageEntranceClass } from "../shellLayout.js";
 import { LIM } from "../personaVars.js";
 import type { MessageEntry } from "../../useSSE.js";
 
@@ -120,7 +113,6 @@ function ToolDrawer({
 export function StudioShell({ contract }: { contract: ShellContract }) {
   const messagesRef = useRef<HTMLDivElement>(null);
   const bottomRef   = useRef<HTMLDivElement>(null);
-  const inputRef    = useRef<HTMLTextAreaElement>(null);
   const [drawerOpen, setDrawerOpen] = useState(false);
 
   const personaTheme = useMemo(() => migratePersonaUiTheme(contract.personaTheme), [contract.personaTheme]);
@@ -128,21 +120,9 @@ export function StudioShell({ contract }: { contract: ShellContract }) {
 
   useStickyAutoScroll(messagesRef, bottomRef, contract.groupedMessages);
 
-  // Textarea auto-height
-  const syncTextareaHeight = useCallback(() => {
-    const el = inputRef.current;
-    if (!el) return;
-    el.style.height = "0px";
-    el.style.height = `${Math.max(40, Math.min(el.scrollHeight, 200))}px`;
-  }, []);
-
-  useEffect(() => { syncTextareaHeight(); }, [contract.input, syncTextareaHeight]);
-
   const {
     groupedMessages, toolResultMap, surface, showRawHarness, rawHarnessBlob, error,
-    input, attachments, attachError, isDragOver, canSend, busy, totalAttachmentKb,
-    onInputChange, onSubmit, onKeyDown, onPaste, onDragOver, onDragLeave, onDrop, onRemoveAttachment,
-    signalHud, pct, contextSnapshot, allToolCalls, personaDisplayLabel, personaName, showPanels,
+    busy, allToolCalls, personaDisplayLabel, personaName, showPanels, signalHud,
   } = contract;
 
   const activeCount = allToolCalls.filter(t => t.status === "running" || t.status === "streaming" || t.status === "pending_approval").length;
@@ -189,7 +169,7 @@ export function StudioShell({ contract }: { contract: ShellContract }) {
           )}
         </div>
         <div style={{ justifySelf: "end" }}>
-          <ShellControls contract={contract} tone="soft" />
+          <ShellControls contract={contract} tone="soft" messagesRef={messagesRef} />
         </div>
       </div>
 
@@ -249,9 +229,9 @@ export function StudioShell({ contract }: { contract: ShellContract }) {
                           <span style={{ color: CYAN, fontSize: 10 }}>❯</span>
                         </div>
                         <div className="lim-md" style={{ flex: 1, minWidth: 0, color: "var(--lim-assistant, #00ff88)", lineHeight: 1.7, fontSize: 14 }}>
-                          <ReactMarkdown
-                            remarkPlugins={[remarkGfm]}
-                            rehypePlugins={[rehypeRaw]}
+                          <AssistantMessageContent
+                            text={m.text}
+                            streaming={m.streaming}
                             components={{
                               p({ children }) { return <p style={{ margin: "0 0 10px", lineHeight: 1.72 }}>{children}</p>; },
                               a({ href, children }) { return <a href={href} target="_blank" rel="noopener noreferrer" style={{ color: CYAN, textDecoration: "none", borderBottom: "1px dotted rgba(var(--lim-accent-rgb),0.3)" }}>{children}</a>; },
@@ -263,21 +243,19 @@ export function StudioShell({ contract }: { contract: ShellContract }) {
                               li({ children }) { return <li style={{ margin: "3px 0" }}>{children}</li>; },
                               pre({ children }) { return <div style={{ margin: "10px 0" }}>{children}</div>; },
                               code({ className, children }) {
-                                const lang = /language-(\w+)/.exec(className ?? "")?.[1];
-                                const raw  = String(children).replace(/\n$/, "");
-                                if (lang) {
-                                  return (
-                                    <div style={{ borderRadius: 10, overflow: "hidden", margin: "10px 0", border: "1px solid rgba(var(--lim-accent-rgb),0.1)" }}>
-                                      <div style={{ padding: "4px 12px", background: LIM.surface, borderBottom: "1px solid rgba(var(--lim-accent-rgb),0.08)" }}>
-                                        <span style={{ color: "rgba(var(--lim-accent-rgb),0.4)", fontSize: 10, fontFamily: "monospace" }}>{lang}</span>
-                                      </div>
-                                      <SyntaxHighlighter language={lang} style={vscDarkPlus} customStyle={{ margin: 0, borderRadius: 0, fontSize: 13, background: LIM.codeBg }} showLineNumbers={raw.split("\n").length > 6} lineNumberStyle={{ color: LIM.textDim, minWidth: "2.5em", opacity: 0.45 }} wrapLongLines>
-                                        {raw}
-                                      </SyntaxHighlighter>
-                                    </div>
-                                  );
-                                }
-                                return <code style={{ background: LIM.surface1, border: "1px solid rgba(var(--lim-accent-rgb),0.12)", borderRadius: 4, padding: "1px 5px", color: GREEN, fontFamily: "monospace", fontSize: "0.9em" }}>{children}</code>;
+                                return renderFencedCodeBlock(className, children, {
+                                  streaming: m.streaming,
+                                  codeBg: LIM.codeBg,
+                                  inlineCodeStyle: {
+                                    background: LIM.surface1,
+                                    border: "1px solid rgba(var(--lim-accent-rgb),0.12)",
+                                    borderRadius: 4,
+                                    padding: "1px 5px",
+                                    color: GREEN,
+                                    fontFamily: "monospace",
+                                    fontSize: "0.9em",
+                                  },
+                                });
                               },
                               blockquote({ children }) {
                                 return <blockquote style={{ margin: "12px 0", padding: "8px 14px", borderLeft: "2px solid rgba(var(--lim-accent-rgb),0.25)", color: LIM.textDim, fontStyle: "italic", background: LIM.surface1, borderRadius: "0 8px 8px 0" }}>{children}</blockquote>;
@@ -287,9 +265,7 @@ export function StudioShell({ contract }: { contract: ShellContract }) {
                               td({ children }) { return <td style={{ border: "1px solid rgba(var(--lim-accent-rgb),0.07)", padding: "6px 12px", verticalAlign: "top", color: LIM.textDim }}>{children}</td>; },
                               hr() { return <div style={{ margin: "16px 0", height: 1, background: "linear-gradient(90deg, transparent, rgba(var(--lim-accent-rgb),0.15), rgba(var(--lim-success-rgb),0.2), rgba(var(--lim-accent-rgb),0.15), transparent)" }} />; },
                             }}
-                          >
-                            {m.text}
-                          </ReactMarkdown>
+                          />
                           {m.streaming && <span style={{ color: CYAN, animation: "blink 1s step-end infinite" }}>█</span>}
                         </div>
                       </div>
@@ -398,46 +374,7 @@ export function StudioShell({ contract }: { contract: ShellContract }) {
             </div>
           </div>
 
-          {/* Floating input card */}
-          <div style={{ flexShrink: 0, padding: "0 24px 20px", maxWidth: 720, width: "100%", margin: "0 auto", boxSizing: "border-box" }}>
-            <form
-              style={{ background: "rgba(10,16,28,0.92)", borderRadius: 16, boxShadow: "0 4px 32px rgba(0,0,0,0.35), 0 0 0 1px rgba(var(--lim-accent-rgb),0.1)", padding: "12px 16px", display: "flex", flexDirection: "column", gap: 8, outline: isDragOver ? `2px dashed rgba(var(--lim-accent-rgb),0.4)` : "none" }}
-              onSubmit={onSubmit}
-              onDragOver={onDragOver}
-              onDragLeave={onDragLeave}
-              onDrop={onDrop}
-            >
-              {attachments.length > 0 && (
-                <div style={{ display: "flex", flexWrap: "wrap", gap: 8, alignItems: "center" }}>
-                  {attachments.map((attachment, idx) => (
-                    <div key={`${attachment.name}-${idx}`} style={{ display: "flex", alignItems: "center", gap: 5, background: "rgba(var(--lim-accent-rgb),0.06)", borderRadius: 8, padding: "3px 8px" }}>
-                      <img src={attachment.dataUrl} alt={attachment.name} style={{ width: 22, height: 22, objectFit: "cover", borderRadius: 4 }} />
-                      <span style={{ fontSize: 10, color: "#667788" }}>{attachment.name}</span>
-                      <button type="button" style={{ background: "none", border: "none", color: "#445566", cursor: "pointer", fontSize: 13, padding: "0 2px", lineHeight: 1 }} onClick={() => onRemoveAttachment(idx)} disabled={busy}>×</button>
-                    </div>
-                  ))}
-                </div>
-              )}
-              {attachError && <div style={{ color: RED_ERR, fontSize: 11 }}>{attachError}</div>}
-              <textarea
-                ref={inputRef}
-                rows={1}
-                style={{ background: "transparent", border: "none", outline: "none", color: "var(--lim-text, #c8d4e0)", fontFamily: LIM.fontBody, fontSize: 14, resize: "none", minHeight: 40, maxHeight: 200, overflowY: "auto", lineHeight: 1.5, padding: 0, width: "100%", ...buildInputAreaStyle(personaTheme) }}
-                value={input}
-                onChange={e => onInputChange(e.target.value)}
-                onKeyDown={e => void onKeyDown(e)}
-                onPaste={e => void onPaste(e)}
-                placeholder={busy ? "processing…" : "Message…"}
-                disabled={busy}
-              />
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 2 }}>
-                <span style={{ fontSize: 9, color: "rgba(var(--lim-accent-rgb),0.25)", fontFamily: "monospace" }}>Enter to send · Shift+Enter for newline</span>
-                {contextSnapshot && (
-                  <span style={{ fontSize: 9, color: "rgba(var(--lim-accent-rgb),0.3)", fontFamily: "monospace" }}>ctx {contract.pct}%</span>
-                )}
-              </div>
-            </form>
-          </div>
+          <ShellComposer contract={contract} personaTheme={personaTheme} variant="studio" />
         </div>
 
         {/* Tool activity drawer (right side) */}

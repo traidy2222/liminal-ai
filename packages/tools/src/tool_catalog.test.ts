@@ -81,6 +81,33 @@ test("every registered tool is reachable via the always-set or a family", async 
   );
 });
 
+test("speak is registered when TTS is enabled but not in static always-set", async () => {
+  const prevTts = process.env["AGENT_TTS_ENABLED"];
+  const prevLazy = process.env["AGENT_TOOL_LAZY"];
+  process.env["AGENT_TTS_ENABLED"] = "1";
+  process.env["AGENT_TOOL_LAZY"] = "1";
+  try {
+    const harness = buildHarness();
+    await registerAllTools(harness.registry, harness.emitter, harness);
+    assert.ok(harness.registry.has("speak"), "speak should be registered");
+    assert.equal(
+      harness.registry.isActive("speak"),
+      false,
+      "speak is voice-mode only — activated per send when mic is on"
+    );
+    assert.equal(
+      getCoreAlwaysToolNames(true).includes("speak"),
+      false,
+      "speak should not be in the static lazy always-set"
+    );
+  } finally {
+    if (prevTts === undefined) delete process.env["AGENT_TTS_ENABLED"];
+    else process.env["AGENT_TTS_ENABLED"] = prevTts;
+    if (prevLazy === undefined) delete process.env["AGENT_TOOL_LAZY"];
+    else process.env["AGENT_TOOL_LAZY"] = prevLazy;
+  }
+});
+
 test("new file tools are registered and reachable", async () => {
   const harness = buildHarness();
   await registerAllTools(harness.registry, harness.emitter, harness);

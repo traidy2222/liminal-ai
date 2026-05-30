@@ -95,7 +95,7 @@ export interface ShellContract {
    * Required controls contract.
    *
    * Every persona shell MUST render the shared <ShellControls> component
-   * (persona/shells/ShellControls.tsx), which wires all three handlers below.
+   * (persona/shells/ShellControls.tsx), which wires the handlers below.
    * <ShellControls> is the single source of truth — do not hand-roll these
    * buttons per shell. A shell that omits it strands the user with no way to
    * reach Settings or reset the session, which is the bug class this contract
@@ -105,12 +105,35 @@ export interface ShellContract {
    *   onClearSession  — reset to a fresh session.
    *   onToggleRaw     — toggle raw harness trace visibility.
    *
-   * Shell-specific extras (e.g. HudShell's CAPTURE/screenshot) are optional and
-   * rendered alongside <ShellControls>, never as a replacement for it.
+   * Screenshot (session PNG) lives in <ShellControls> — pass each shell's
+   * `messagesRef` so capture works in every persona style.
+   *
+   * Message input lives in <ShellComposer> (persona/shells/ShellComposer.tsx) —
+   * textarea, dictation mic, attachments, send/abort. Do not hand-roll per shell.
    */
   onClearSession(): Promise<void>;
   onOpenSettings(): void;
   onToggleRaw(): void;
   /** Abort in-progress turn (POST /api/session/abort). */
   onAbortTurn?: () => void;
+
+  // ── Dictation (wired by ShellComposer) ───────────────────────────────────────
+  dictationAudioCue: boolean;
+  /** Mic session armed (continuous listening) — server voice/dictation mode for sends. */
+  onDictationSessionActive?: (active: boolean) => void;
+  /** Mic is recording / uploading / transcribing — pause agent TTS during capture only. */
+  onDictationCaptureActive?: (active: boolean) => void;
+  /** Block mic VAD while agent TTS is playing (avoids cutting off playback). */
+  shouldBlockDictationCapture?: () => boolean;
+  /** Unlock browser autoplay (mic arm / send). */
+  onUnlockSpeechAudio?: () => void;
+  /** Pause-to-send or manual stop — return an error string for the composer banner. */
+  onDictationAutoSend: (fullMessage: string) => void | string;
+  onDictationHistoryReset?: () => void;
+  /** Jarvis-style spoken channel enabled (AGENT_TTS_ENABLED). */
+  ttsEnabled?: boolean;
+  /** Last line spoken on the audio channel (accessibility). */
+  ttsLastSpoken?: string | null;
+  /** Browser blocked playback or fetch failed. */
+  ttsPlayError?: string | null;
 }

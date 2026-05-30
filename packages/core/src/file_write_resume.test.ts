@@ -91,11 +91,13 @@ test("canEagerDispatchTool allows cautious write_file, blocks destructive approv
   );
 });
 
-test("shouldEagerDispatchWhenArgsComplete does not eager-dispatch write_file", () => {
+test("shouldEagerDispatchWhenArgsComplete does not eager-dispatch write_file or speak", () => {
   const cautious = { requiresApproval: true, dangerLevel: "cautious" as const };
+  const safe = { dangerLevel: "safe" as const };
   assert.equal(shouldEagerDispatchWhenArgsComplete("write_file", cautious, false), false);
+  assert.equal(shouldEagerDispatchWhenArgsComplete("speak", safe, true), false);
   assert.equal(shouldEagerDispatchWhenArgsComplete("read_file", cautious, false), false);
-  assert.equal(shouldEagerDispatchWhenArgsComplete("read_file", { dangerLevel: "safe" }, true), true);
+  assert.equal(shouldEagerDispatchWhenArgsComplete("read_file", safe, true), true);
 });
 
 test("fileWriteSafeToDispatch allows length finish when JSON and content are complete", () => {

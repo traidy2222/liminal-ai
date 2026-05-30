@@ -142,6 +142,18 @@ import {
   resolveReasoningSurface,
   type ReasoningSurface,
 } from "./reasoning_surface.js";
+import {
+  buildEffortTurnInjection,
+  formatOutputEffortTraceLine,
+  scaleMaxCompletionTokensForEffort,
+} from "./output_effort.js";
+import { TtsTurnBudget } from "./tts_budget.js";
+import {
+  LIVE_DICTATION_AFTER_TOOLS_NUDGE,
+  LIVE_DICTATION_SPEAK_NUDGE,
+  LIVE_DICTATION_TURN_INJECTION,
+} from "./live_dictation.js";
+import { resolveSpeechSynthesisConfig } from "./speech_synthesis.js";
 // isImplementShipUserMessage is still imported as a fallback for the
 // implementShip override below when the classifier wasn't available.
 import { scoreTurnAgainstIndex, detectContradictions, type RankableDoc } from "./memory_rank.js";
@@ -884,6 +896,7 @@ const ORCHESTRATION_TOOL_NAMES = new Set([
   "research_state",         // closes over harness._researchLedger
   "dispatch_graph",         // closes over harness._toolDag
   "branch_evaluate",        // closes over harness.forkChild + harness.orchestrator
+  "speak",                  // harness-scoped TTS + speech SSE
 ]);
 
 // ADAPTIVE_HINTS removed — unified into buildAdaptiveHint() with ERROR_TAXONOMY (#9)
@@ -1025,6 +1038,13 @@ export class AgentHarness {
   private personaBootstrapPromptThisSend = false;
   /** After sending first-run bootstrap prompt once, avoid repeats until reset(). */
   private personaBootstrapPromptSentThisHarness = false;
+  /** When true, mic session armed — voice conversation (speak() + short written). */
+  private liveDictationThisSend = false;
+  private voicePostToolsNudgeFired = false;
+  /** Per-send TTS budget for speak() and harness fallback dedupe. */
+  readonly ttsTurnBudget = new TtsTurnBudget();
+  /** Wired from tools/speak.ts — synthesize when the model omits speak() in voice mode. */
+  voiceTtsFallback?: (text: string) => Promise<void>;
 
   /** Active persona. Set via setPersona(); defaults to config.persona or unnamed default. */
   private currentPersona?: PersonaConfig;
@@ -1849,7 +1869,12 @@ export class AgentHarness {
 
   async send(
     userMessage: string,
-    options?: { freshContext?: boolean; sessionGreeting?: boolean; personaBootstrapPrompt?: boolean }
+    options?: {
+      freshContext?: boolean;
+      sessionGreeting?: boolean;
+      personaBootstrapPrompt?: boolean;
+      liveDictation?: boolean;
+    }
   ): Promise<void> {
     // Wrap the entire send in an AsyncLocalStorage scope so every file tool,
     // background persist, and post-turn write resolves this harness's
@@ -1864,7 +1889,12 @@ export class AgentHarness {
 
   private async _sendBody(
     userMessage: string,
-    options?: { freshContext?: boolean; sessionGreeting?: boolean; personaBootstrapPrompt?: boolean }
+    options?: {
+      freshContext?: boolean;
+      sessionGreeting?: boolean;
+      personaBootstrapPrompt?: boolean;
+      liveDictation?: boolean;
+    }
   ): Promise<void> {
     if (this.running) throw new Error("Agent is already processing a message");
     if (options?.freshContext === true && this.agentDepth === 0) {
@@ -1880,6 +1910,9 @@ export class AgentHarness {
     }
     this.sessionGreetingThisSend = sessionGreeting;
     this.personaBootstrapPromptThisSend = personaBootstrapPrompt;
+    this.liveDictationThisSend = Boolean(options?.liveDictation);
+    this.voicePostToolsNudgeFired = false;
+    this.ttsTurnBudget.reset();
     this.currentTurnController = new AbortController();
     this.currentTurnTraceId = crypto.randomUUID();
     this.dispatcher.setTurnTraceId(this.currentTurnTraceId);
@@ -1928,6 +1961,7 @@ export class AgentHarness {
     this.streamingToolNamesByCallId.clear();
     this.evidenceLog = [];
     this.turnEndEmittedThisSend = false;
+    this.voicePostToolsNudgeFired = false;
     this.ruleRecallInjectedThisSend = false;
     this.injectedRuleIdsThisSend = [];
     this.writeIntegrityNudgeThisSend = false;
@@ -2112,6 +2146,20 @@ export class AgentHarness {
       this.context.appendMessage({
         role: "system",
         content: buildReasoningBudgetInjection(this._turnReasoningBudget, this._turnReasoningSurface),
+      });
+      this.context.appendMessage({
+        role: "system",
+        content: buildEffortTurnInjection(),
+      });
+    }
+    if (
+      !openingTurn &&
+      this.liveDictationThisSend &&
+      resolveSpeechSynthesisConfig(this.runtimePreferences).enabled
+    ) {
+      this.context.appendMessage({
+        role: "system",
+        content: LIVE_DICTATION_TURN_INJECTION,
       });
     }
     if (!openingTurn && this.turnInference?.exploratoryCreative) {
@@ -2359,6 +2407,8 @@ export class AgentHarness {
         }
       }
 
+      this.syncVoiceModeTools();
+
       if (sendTimeoutMs > 0) {
         let sendTimeoutId: ReturnType<typeof setTimeout> | undefined;
         const sendTimeoutPromise = new Promise<never>((_, reject) => {
@@ -2403,6 +2453,7 @@ export class AgentHarness {
       }
       this.sessionGreetingThisSend = false;
       this.personaBootstrapPromptThisSend = false;
+      this.liveDictationThisSend = false;
       this.currentTurnController = undefined;
       this.currentTurnTraceId = undefined;
       this.dispatcher.setTurnTraceId(undefined);
@@ -2562,9 +2613,13 @@ export class AgentHarness {
     if (contractPrelude) {
       subtaskTail.unshift({ role: "user" as const, content: contractPrelude });
     }
+    const protocolWithEffort =
+      coreStr.trim().length > 0
+        ? `${coreStr}\n\n${buildEffortTurnInjection()}`
+        : buildEffortTurnInjection();
     const childInceptionBase: Message[] = [
       personaMsg,
-      { role: "system" as const, content: coreStr },
+      { role: "system" as const, content: protocolWithEffort },
       ...subtaskTail,
     ];
 
@@ -3297,6 +3352,11 @@ export class AgentHarness {
     };
   }
 
+  /** True when this send() is a mic-armed voice conversation (speak tool + TTS). */
+  isLiveDictationTurn(): boolean {
+    return this.liveDictationThisSend;
+  }
+
   /** Emit a single turn_end per send() with telemetry (idempotent). */
   private emitTurnEnd(reason: TurnEndTerminationReason): void {
     if (this.turnEndEmittedThisSend) return;
@@ -3312,21 +3372,35 @@ export class AgentHarness {
       this.persistedHypotheses = [];
     }
     const snapshot = this.context.snapshot();
-    this.emitter.emit("turn_end", {
+    const payload = {
       contextSnapshot: snapshot,
       durationMs: Date.now() - this.sendStartTime,
       harnessMetrics: this.buildHarnessMetrics(reason),
       traceId: this.currentTurnTraceId,
-    });
-    const cleanup = this.onTurnEndCleanup;
-    if (cleanup) {
-      void Promise.resolve(cleanup(this.taskId)).catch((err) => {
-        const msg = err instanceof Error ? err.message : String(err);
-        this.emitter.emit("text", {
-          delta: `\n[HARNESS] turn_end cleanup failed: ${msg}\n`,
-          channel: "trace",
+    };
+    const finish = () => {
+      this.emitter.emit("turn_end", payload);
+      const cleanup = this.onTurnEndCleanup;
+      if (cleanup) {
+        void Promise.resolve(cleanup(this.taskId)).catch((err) => {
+          const msg = err instanceof Error ? err.message : String(err);
+          this.emitter.emit("text", {
+            delta: `\n[HARNESS] turn_end cleanup failed: ${msg}\n`,
+            channel: "trace",
+          });
         });
-      });
+      }
+    };
+    const shouldAutoSpeak =
+      (reason === "ok" || reason === "round_cap") &&
+      this.liveDictationThisSend &&
+      !this.toolsUsedThisTurn.includes("speak") &&
+      !this.sessionGreetingThisSend &&
+      !this.personaBootstrapPromptThisSend;
+    if (shouldAutoSpeak && this.voiceTtsFallback) {
+      void this.voiceTtsFallback(this.context.getLastAssistantMessage() ?? "").finally(finish);
+    } else {
+      finish();
     }
   }
 
@@ -3354,6 +3428,26 @@ export class AgentHarness {
       sig.addEventListener("abort", () => linked.abort(), { once: true });
     }
     return linked.signal;
+  }
+
+  /**
+   * Mic on + TTS enabled → expose speak(); mic off → hide speak from the active tool list.
+   */
+  private syncVoiceModeTools(): void {
+    const ttsOn = resolveSpeechSynthesisConfig(this.runtimePreferences).enabled;
+    const voiceOn = this.liveDictationThisSend && ttsOn;
+    if (!this.registry.has("speak")) return;
+    if (this.registry.isLazyToolLoading()) {
+      if (voiceOn) {
+        if (!this.registry.isActive("speak")) {
+          this.registry.activate(["speak"]);
+        }
+      } else if (this.registry.isActive("speak")) {
+        const active = this.registry.getActiveToolNames().filter((n) => n !== "speak");
+        this.registry.seedActiveTools(active);
+      }
+    }
+    this.context.refreshProtocolDynamic(this.registry.getActiveToolNames());
   }
 
   private async runReActLoop(round = 0): Promise<void> {
@@ -3463,6 +3557,33 @@ export class AgentHarness {
       }
       this.context.appendMessage({ role: "system", content: ruleMsg });
       this.injectedRuleIdsThisSend = extractRuleIds(ruleMsg);
+    }
+
+    if (
+      round === 0 &&
+      this.liveDictationThisSend &&
+      resolveSpeechSynthesisConfig(this.runtimePreferences).enabled &&
+      !this.toolsUsedThisTurn.includes("speak")
+    ) {
+      this.context.appendMessage({
+        role: "system",
+        content: LIVE_DICTATION_SPEAK_NUDGE,
+      });
+    }
+
+    if (
+      round >= 1 &&
+      this.liveDictationThisSend &&
+      resolveSpeechSynthesisConfig(this.runtimePreferences).enabled &&
+      this.toolsUsedThisTurn.length > 0 &&
+      !this.toolsUsedThisTurn.includes("speak") &&
+      !this.voicePostToolsNudgeFired
+    ) {
+      this.voicePostToolsNudgeFired = true;
+      this.context.appendMessage({
+        role: "system",
+        content: LIVE_DICTATION_AFTER_TOOLS_NUDGE,
+      });
     }
 
     // ResearchLedger: when the ledger has changed since the last injection,
@@ -3818,6 +3939,10 @@ export class AgentHarness {
           channel: "trace",
         });
       }
+      this.emitter.emit("text", {
+        delta: formatOutputEffortTraceLine(),
+        channel: "trace",
+      });
     }
     const tools =
       this.sessionGreetingThisSend || this.personaBootstrapPromptThisSend
@@ -5044,7 +5169,7 @@ export class AgentHarness {
         : 0;
       const effectiveMaxTokens = routingMaxTokens > 0 ? routingMaxTokens : defaultMaxTokens;
       const maxCompletionTokens = effectiveMaxTokens > 0
-        ? Math.min(effectiveMaxTokens, 128_000)
+        ? Math.min(scaleMaxCompletionTokensForEffort(effectiveMaxTokens), 128_000)
         : undefined;
 
       // Provider pinning for OpenRouter cache affinity — without this, OpenRouter randomly

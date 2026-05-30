@@ -21,6 +21,16 @@ import { perChatPath } from "@liminal/core";
  * APIs accept. Includes video/mp4 because podcast/screencast uploads often
  * arrive as mp4 with the audio track being what the user actually wants.
  */
+/** Strip `;codecs=opus` and similar — MediaRecorder uses parameterized MIME types. */
+export function normalizeAudioMimeType(mime: string): string {
+  const base = String(mime ?? "")
+    .trim()
+    .toLowerCase()
+    .split(";")[0]
+    ?.trim();
+  return base ?? "";
+}
+
 export const SUPPORTED_AUDIO_MIME_TYPES: ReadonlySet<string> = new Set([
   "audio/mpeg",
   "audio/mp3",
@@ -91,14 +101,15 @@ export async function saveAudioAttachment(
   chatId: string,
   input: AudioAttachmentInput
 ): Promise<AudioAttachmentRecord> {
-  if (!SUPPORTED_AUDIO_MIME_TYPES.has(input.mimeType.toLowerCase())) {
+  const normalizedMime = normalizeAudioMimeType(input.mimeType);
+  if (!normalizedMime || !SUPPORTED_AUDIO_MIME_TYPES.has(normalizedMime)) {
     throw new Error(
       `Unsupported audio MIME type: ${input.mimeType}. Supported: ${[...SUPPORTED_AUDIO_MIME_TYPES].join(", ")}`
     );
   }
   const bytes = input.bytes instanceof Uint8Array ? input.bytes : new Uint8Array(input.bytes);
   const hash = createHash("sha256").update(bytes).digest("hex").slice(0, 16);
-  const ext = extForMime(input.mimeType);
+  const ext = extForMime(normalizedMime);
   const dir = await audioDirFor(chatId);
   const targetPath = path.join(dir, `${hash}.${ext}`);
   if (!existsSync(targetPath)) {
@@ -109,7 +120,7 @@ export async function saveAudioAttachment(
     id: hash,
     path: targetPath,
     filename: input.filename,
-    mimeType: input.mimeType,
+    mimeType: normalizedMime,
     sizeBytes: s.size,
     createdAt: new Date(s.ctimeMs).toISOString(),
   };

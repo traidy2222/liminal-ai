@@ -1,4 +1,4 @@
-import { useEffect, useReducer, useCallback, useRef } from "react";
+import { useEffect, useReducer, useCallback, useRef, type MutableRefObject } from "react";
 import type { PersonaUiThemeV2 } from "@liminal/core/persona-ui-theme";
 import type { PersonaArtifactPreview } from "@liminal/core/persona-bootstrap-progress";
 import {
@@ -370,10 +370,10 @@ export interface SSEState {
   personalityPulseActive: boolean;
   heartbeatUiStrip: boolean;
   heartbeatEnabled: boolean;
-  /** Dictation auto-send default (from AGENT_DICTATION_AUTO_SEND). */
-  dictationAutoSendDefault: boolean;
-  /** Whether to play a brief tone when auto-send fires. */
+  /** Play a brief tone when dictation sends (AGENT_DICTATION_AUDIO_CUE). */
   dictationAudioCue: boolean;
+  /** Jarvis-style spoken channel (AGENT_TTS_ENABLED). */
+  ttsEnabled: boolean;
 }
 
 const ORCH_TOOLS = new Set(["spawn_agent", "wait_for_agents", "cancel_agent", "list_agents"]);
@@ -388,8 +388,8 @@ type Action =
       personaDisplayLabel?: string;
       personalityHeartbeatUiStrip?: boolean;
       personalityHeartbeatEnabled?: boolean;
-      dictationAutoSendDefault?: boolean;
       dictationAudioCue?: boolean;
+      ttsEnabled?: boolean;
     }
   | { type: "connected" }
   /** Transport lost mid-session; preserves agent `error` unless API is unreachable. */
@@ -533,12 +533,10 @@ function reducer(state: SSEState, action: Action): SSEState {
         ...(typeof action.personalityHeartbeatEnabled === "boolean"
           ? { heartbeatEnabled: action.personalityHeartbeatEnabled }
           : {}),
-        ...(typeof action.dictationAutoSendDefault === "boolean"
-          ? { dictationAutoSendDefault: action.dictationAutoSendDefault }
-          : {}),
         ...(typeof action.dictationAudioCue === "boolean"
           ? { dictationAudioCue: action.dictationAudioCue }
           : {}),
+        ...(typeof action.ttsEnabled === "boolean" ? { ttsEnabled: action.ttsEnabled } : {}),
       };
 
     case "connected":
@@ -1362,6 +1360,8 @@ async function sessionResetWhenIdle(
 export interface OutgoingChatMessage {
   text: string;
   attachments?: ImageAttachment[];
+  /** True when the message was sent from live dictation (mic auto-send). */
+  liveDictation?: boolean;
 }
 
 export interface SendMessageResult {
@@ -1400,12 +1400,20 @@ function createInitialSSEState(): SSEState {
     personalityPulseActive: false,
     heartbeatUiStrip: false,
     heartbeatEnabled: false,
-    dictationAutoSendDefault: false,
     dictationAudioCue: false,
+    ttsEnabled: false,
   };
 }
 
-export function useSSE() {
+export type SpeechSsePayload = {
+  clipId: string;
+  text: string;
+  audioUrl: string;
+};
+
+export function useSSE(options?: {
+  onSpeechRef?: MutableRefObject<((payload: SpeechSsePayload) => void) | undefined>;
+}) {
   const [state, dispatch] = useReducer(reducer, undefined, createInitialSSEState);
 
   // Text-batching refs — stable across renders, safe to use inside EventSource callbacks.
@@ -1593,8 +1601,8 @@ export function useSSE() {
               personaDisplayLabel?: string;
               personalityHeartbeatUiStrip?: boolean;
               personalityHeartbeatEnabled?: boolean;
-              dictationAutoSendDefault?: boolean;
               dictationAudioCue?: boolean;
+              ttsEnabled?: boolean;
               activeChat?: { chatId?: string } | null;
             } | null
           ) => {
@@ -1617,8 +1625,8 @@ export function useSSE() {
                 personaDisplayLabel,
                 personalityHeartbeatUiStrip: cfg.personalityHeartbeatUiStrip,
                 personalityHeartbeatEnabled: cfg.personalityHeartbeatEnabled,
-                dictationAutoSendDefault: cfg.dictationAutoSendDefault,
                 dictationAudioCue: cfg.dictationAudioCue,
+                ttsEnabled: cfg.ttsEnabled === true,
               });
               writePersonaChromeToSession(personaUiTheme, personaDisplayLabel);
             }
@@ -1838,6 +1846,16 @@ export function useSSE() {
         if (p == null) return;
         dispatch({ type: "provider_retry", payload: p as never });
       });
+      es.addEventListener("speech", (e: MessageEvent) => {
+        markHarnessSemanticActivity();
+        try {
+          const p = JSON.parse(e.data) as SpeechSsePayload;
+          if (p?.clipId && p?.audioUrl) options?.onSpeechRef?.current?.(p);
+        } catch {
+          /* ignore malformed */
+        }
+      });
+
       es.addEventListener("tool_start", (e: MessageEvent) => {
         trackId(e);
         markHarnessSemanticActivity();
@@ -2257,7 +2275,11 @@ export function useSSE() {
       {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ message: text, attachments: payload.attachments ?? [] }),
+        body: JSON.stringify({
+          message: text,
+          attachments: payload.attachments ?? [],
+          liveDictation: Boolean(payload.liveDictation),
+        }),
       },
       8
     );

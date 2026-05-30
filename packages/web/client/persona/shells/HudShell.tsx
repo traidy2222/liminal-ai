@@ -1,18 +1,13 @@
 import React, { useState, useRef, useEffect, useCallback, useMemo, memo } from "react";
 import type { ShellContract, ToolCallEntry, ToolCallGroup, ToolResult, ToolSurface } from "../ShellContract.js";
-import ReactMarkdown from "react-markdown";
-import remarkGfm from "remark-gfm";
-import rehypeRaw from "rehype-raw";
-import { toPng } from "html-to-image";
-import { Prism as SyntaxHighlighter } from "react-syntax-highlighter";
-import { vscDarkPlus } from "react-syntax-highlighter/dist/esm/styles/prism";
+import { AssistantMessageContent, renderFencedCodeBlock } from "../../liminalMarkdown.js";
 import { migratePersonaUiTheme, resolvePersonaPanelSides } from "@liminal/core/persona-ui-theme";
 import { categoryForTool } from "../categoryMeta.js";
 import { useStickyAutoScroll } from "../../useStickyAutoScroll.js";
 import { ShellControls } from "./ShellControls.js";
+import { ShellComposer } from "./ShellComposer.js";
 import { ShellChatSwitcher } from "../../chat/ShellChatSwitcher.js";
 import {
-  buildInputAreaStyle,
   buildUserMessageStyle,
   buildAssistantMessageStyle,
   messageEntranceClass,
@@ -22,7 +17,6 @@ import {
   buildShellBodyStyle,
   buildHeaderChromeStyle,
   buildHeaderLabelStyle,
-  buildInputDockStyle,
   orbHidden,
 } from "../shellLayout.js";
 import { LIM } from "../personaVars.js";
@@ -909,9 +903,9 @@ function MessageView({
         <div {...entranceProp} style={{ padding: "5px 0", color: LIM.assistant, lineHeight: 1.65, ...buildAssistantMessageStyle(), ...stripeExtra, ...(showGlyph ? { display: "flex", alignItems: "flex-start" } : {}) }}>
           {showGlyph && <span style={buildAvatarGlyphStyle(avatarStyle)}>{personaTheme.avatarGlyph ?? "❯"}</span>}
           <div className="lim-md" style={showGlyph ? { flex: 1, minWidth: 0 } : undefined}>
-            <ReactMarkdown
-              remarkPlugins={[remarkGfm]}
-              rehypePlugins={[rehypeRaw]}
+            <AssistantMessageContent
+              text={entry.text}
+              streaming={entry.streaming}
               components={{
                 p({ node, children }) {
                   const kids = node?.children ?? [];
@@ -950,21 +944,19 @@ function MessageView({
                 li({ children }) { return <li style={{ margin: "3px 0" }}>{children}</li>; },
                 pre({ children }) { return <div style={{ margin: "10px 0" }}>{children}</div>; },
                 code({ className, children }) {
-                  const lang = /language-(\w+)/.exec(className ?? "")?.[1];
-                  const raw  = String(children).replace(/\n$/, "");
-                  if (lang) {
-                    return (
-                      <div style={{ borderRadius: 6, overflow: "hidden", margin: "10px 0", border: "1px solid rgba(var(--lim-accent-rgb),0.1)" }}>
-                        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "4px 12px", background: LIM.surface, borderBottom: "1px solid rgba(var(--lim-accent-rgb),0.08)" }}>
-                          <span style={{ color: "rgba(var(--lim-accent-rgb),0.4)", fontSize: 10, fontFamily: "monospace", letterSpacing: "0.06em" }}>{lang}</span>
-                        </div>
-                        <SyntaxHighlighter language={lang} style={vscDarkPlus} customStyle={{ margin: 0, borderRadius: 0, fontSize: 13, background: LIM.codeBg }} showLineNumbers={raw.split("\n").length > 6} lineNumberStyle={{ color: LIM.textDim, minWidth: "2.5em", opacity: 0.45 }} wrapLongLines>
-                          {raw}
-                        </SyntaxHighlighter>
-                      </div>
-                    );
-                  }
-                  return <code style={{ background: LIM.surface1, border: "1px solid rgba(var(--lim-accent-rgb),0.12)", borderRadius: 3, padding: "1px 5px", color: GREEN, fontFamily: "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace", fontSize: "0.9em" }}>{children}</code>;
+                  return renderFencedCodeBlock(className, children, {
+                    streaming: entry.streaming,
+                    codeBg: LIM.codeBg,
+                    inlineCodeStyle: {
+                      background: LIM.surface1,
+                      border: "1px solid rgba(var(--lim-accent-rgb),0.12)",
+                      borderRadius: 3,
+                      padding: "1px 5px",
+                      color: GREEN,
+                      fontFamily: "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace",
+                      fontSize: "0.9em",
+                    },
+                  });
                 },
                 blockquote({ node, children }) {
                   const firstPara = (node?.children ?? []).find(c => (c as { type?: string }).type === "element" && (c as { tagName?: string }).tagName === "p");
@@ -996,9 +988,7 @@ function MessageView({
                 td({ children }) { return <td style={{ border: "1px solid rgba(var(--lim-accent-rgb),0.07)", padding: "6px 12px", verticalAlign: "top", color: LIM.textDim }}>{children}</td>; },
                 hr() { return <div style={{ margin: "18px 0", height: 1, background: "linear-gradient(90deg, transparent, rgba(var(--lim-accent-rgb),0.15), rgba(var(--lim-success-rgb),0.33), rgba(var(--lim-accent-rgb),0.15), transparent)" }} />; },
               }}
-            >
-              {entry.text}
-            </ReactMarkdown>
+            />
             {entry.streaming && <span style={{ color: CYAN, animation: "blink 1s step-end infinite" }}>█</span>}
           </div>
         </div>
@@ -1093,62 +1083,14 @@ function MessageView({
 export function HudShell({ contract }: { contract: ShellContract }) {
   const messagesRef  = useRef<HTMLDivElement>(null);
   const bottomRef    = useRef<HTMLDivElement>(null);
-  const inputRef     = useRef<HTMLTextAreaElement>(null);
-  const [screenshotting, setScreenshotting] = useState(false);
-
   const personaTheme = useMemo(() => migratePersonaUiTheme(contract.personaTheme), [contract.personaTheme]);
   const hideOrb = orbHidden(personaTheme.shell, personaTheme.orbStyle);
   const shell = personaTheme.shell;
 
   useStickyAutoScroll(messagesRef, bottomRef, contract.groupedMessages);
 
-  // Textarea auto-height
-  const syncTextareaHeight = useCallback(() => {
-    const el = inputRef.current;
-    if (!el) return;
-    el.style.height = "0px";
-    el.style.height = `${Math.max(40, Math.min(el.scrollHeight, 180))}px`;
-  }, []);
-
-  useEffect(() => { syncTextareaHeight(); }, [contract.input, syncTextareaHeight]);
-
-  // Screenshot
-  const handleScreenshot = useCallback(async () => {
-    const el = messagesRef.current;
-    if (!el || screenshotting) return;
-    setScreenshotting(true);
-    try {
-      const fullHeight = el.scrollHeight;
-      const width = el.offsetWidth;
-      const savedOverflowY = el.style.overflowY;
-      const savedHeight    = el.style.height;
-      const savedMaxHeight = el.style.maxHeight;
-      const savedFlex      = el.style.flex;
-      el.style.overflowY = "visible";
-      el.style.height    = `${fullHeight}px`;
-      el.style.maxHeight = "none";
-      el.style.flex      = "none";
-      await new Promise<void>(r => requestAnimationFrame(() => requestAnimationFrame(() => r())));
-      const dataUrl = await toPng(el, { pixelRatio: 2, backgroundColor: "#020408", width, height: fullHeight });
-      el.style.overflowY = savedOverflowY;
-      el.style.height    = savedHeight;
-      el.style.maxHeight = savedMaxHeight;
-      el.style.flex      = savedFlex;
-      const ts   = new Date().toISOString().replace(/[:.]/g, "-").slice(0, -1);
-      const link = document.createElement("a");
-      link.download = `liminal-${ts}.png`;
-      link.href = dataUrl;
-      link.click();
-    } catch (err) {
-      console.error("Screenshot failed:", err);
-    } finally {
-      setScreenshotting(false);
-    }
-  }, [screenshotting]);
-
   const { showPanels, groupedMessages, toolResultMap, surface, showRawHarness, rawHarnessBlob,
-    error, input, attachments, attachError, isDragOver, canSend, busy, totalAttachmentKb,
-    onInputChange, onSubmit, onKeyDown, onPaste, onDragOver, onDragLeave, onDrop, onRemoveAttachment,
+    error, busy,
     onAbortTurn,
     orbState, signalHud, pct, contextSnapshot, sessionSeconds, toolCount, msgCount, toolErrorCount,
     subtasks, allToolCalls, autoDream, uiVerbosity, pulseChips, lastTurnProviderRetries,
@@ -1206,10 +1148,7 @@ export function HudShell({ contract }: { contract: ShellContract }) {
               <span style={{ color: pct >= 80 ? RED_ERR : "rgba(var(--lim-accent-rgb),0.35)", fontSize: 9, fontFamily: "monospace" }}>{pct}%</span>
             </div>
           )}
-          <ShellControls contract={contract} tone="mono" />
-          <button type="button" style={{ background: "transparent", border: "1px solid rgba(var(--lim-accent-rgb),0.18)", borderRadius: 2, color: "rgba(var(--lim-accent-rgb),0.45)", padding: "3px 10px", fontSize: 9, cursor: "pointer", fontFamily: "monospace", letterSpacing: "0.1em", opacity: screenshotting ? 0.5 : 1 }} disabled={screenshotting || visibleMessages.length === 0} onClick={() => void handleScreenshot()} title="Capture session">
-            {screenshotting ? "…" : "CAPTURE"}
-          </button>
+          <ShellControls contract={contract} tone="mono" messagesRef={messagesRef} />
         </div>
       </div>
       )}
@@ -1220,11 +1159,15 @@ export function HudShell({ contract }: { contract: ShellContract }) {
             flexShrink: 0,
             display: "flex",
             alignItems: "center",
+            gap: 8,
             padding: "4px 14px",
             borderBottom: "1px solid rgba(var(--lim-accent-rgb, 0, 212, 255), 0.08)",
           }}
         >
           <ShellChatSwitcher />
+          <div style={{ marginLeft: "auto" }}>
+            <ShellControls contract={contract} tone="mono" messagesRef={messagesRef} />
+          </div>
         </div>
       )}
 
@@ -1311,48 +1254,7 @@ export function HudShell({ contract }: { contract: ShellContract }) {
             </div>
           )}
 
-          {/* Input form */}
-          <form
-            style={{ ...buildInputDockStyle(personaTheme), outline: isDragOver ? `1px dashed rgba(var(--lim-accent-rgb),0.4)` : "none", borderTopColor: isDragOver ? CYAN : undefined }}
-            onSubmit={onSubmit}
-            onDragOver={onDragOver}
-            onDragLeave={onDragLeave}
-            onDrop={onDrop}
-          >
-            {attachments.length > 0 && (
-              <div style={{ display: "flex", flexWrap: "wrap", gap: 8, alignItems: "center" }}>
-                {attachments.map((attachment, idx) => (
-                  <div key={`${attachment.name}-${idx}`} style={{ display: "flex", alignItems: "center", gap: 5, background: "rgba(0,8,18,0.85)", border: "1px solid rgba(var(--lim-accent-rgb),0.14)", borderRadius: 3, padding: "3px 7px" }}>
-                    <img src={attachment.dataUrl} alt={attachment.name} style={{ width: 24, height: 24, objectFit: "cover", borderRadius: 2 }} />
-                    <span style={{ fontSize: 10, color: "#667788", fontFamily: "monospace" }}>{attachment.name} ({Math.round(attachment.sizeBytes / 1024)} KB)</span>
-                    <button type="button" style={{ background: "none", border: "none", color: "#445566", cursor: "pointer", fontSize: 13, padding: "0 2px", lineHeight: 1 }} onClick={() => onRemoveAttachment(idx)} disabled={busy}>×</button>
-                  </div>
-                ))}
-                <span style={{ fontSize: 10, color: "#445566", fontFamily: "monospace" }}>{attachments.length} image{attachments.length === 1 ? "" : "s"} ({totalAttachmentKb} KB)</span>
-              </div>
-            )}
-            {attachError && <div style={{ color: RED_ERR, fontSize: 11, fontFamily: "monospace" }}>{attachError}</div>}
-            <div style={{ display: "flex", gap: 7, alignItems: "flex-end" }}>
-              <textarea
-                id="chat-message-input"
-                name="message"
-                ref={inputRef}
-                rows={1}
-                style={{ flex: 1, minHeight: 40, maxHeight: 180, overflowY: "auto", outline: "none", ...buildInputAreaStyle(personaTheme) }}
-                value={input}
-                onChange={e => { onInputChange(e.target.value); }}
-                onKeyDown={e => void onKeyDown(e)}
-                onPaste={e => void onPaste(e)}
-                placeholder={busy ? "processing…" : "transmit…"}
-                disabled={busy}
-              />
-              <button type="submit" style={{ border: `1px solid ${canSend ? "rgba(var(--lim-accent-rgb),0.4)" : "rgba(var(--lim-accent-rgb),0.08)"}`, borderRadius: 3, color: canSend ? CYAN : "rgba(var(--lim-accent-rgb),0.2)", padding: "8px 16px", cursor: canSend ? "pointer" : "default", background: canSend ? "rgba(var(--lim-accent-rgb),0.12)" : LIM.surface1, fontFamily: "monospace", letterSpacing: "0.1em", fontSize: 11 }} disabled={!canSend}>SEND</button>
-              {busy && onAbortTurn && (
-                <button type="button" onClick={onAbortTurn} style={{ border: "1px solid rgba(255,80,80,0.35)", borderRadius: 3, color: "#ff8888", padding: "8px 12px", cursor: "pointer", background: "rgba(40,0,0,0.5)", fontFamily: "monospace", letterSpacing: "0.08em", fontSize: 10 }} title="Abort current turn">ABORT</button>
-              )}
-            </div>
-            <div style={{ fontSize: 9, color: "rgba(var(--lim-accent-rgb),0.2)", letterSpacing: "0.03em", fontFamily: "monospace" }}>Enter send · Shift+Enter newline · Ctrl/Cmd+K clear · Ctrl/Cmd+Shift+L new session</div>
-          </form>
+          <ShellComposer contract={contract} personaTheme={personaTheme} variant="hud" />
         </div>
 
         {showRightPanel && (

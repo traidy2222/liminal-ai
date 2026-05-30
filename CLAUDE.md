@@ -112,10 +112,18 @@ Two-tier model: main model runs the full loop; fast model runs background JSON t
 | `AGENT_REASONING_BUDGET`       | on         | Infer per-turn reasoning effort / think-depth from the intent classifier |
 | `AGENT_REASONING_DEFAULT_EFFORT` | `high`   | Fallback effort when the classifier is off / low-confidence          |
 | `AGENT_REASONING_SURFACE`      | `external` | `native` \| `external` \| `auto` — external = model uses `think()` + `reason()` |
-| `AGENT_EFFORT_LEARN`           | on         | Record per-intent effort outcomes; reuse the best as a prior         |
+| `AGENT_EFFORT_LEARN`           | on         | Record per-intent **reasoning** effort outcomes (not `AGENT_EFFORT`); reuse the best as a prior |
 | `AGENT_INTENT_INFERENCE`       | on         | LLM-tier turn-intent classification (no regex fallback)              |
 | `AGENT_INTENT_ROUTING`         | on         | Route knowledge/introspection turns to the fast model                |
 | `AGENT_INTENT_FAST_THRESHOLD`  | `0.8`      | Min confidence to route to the fast model                            |
+
+### Output effort (separate axis from reasoning)
+
+| Var            | Default  | Purpose                                                                                  |
+| -------------- | -------- | ---------------------------------------------------------------------------------------- |
+| `AGENT_EFFORT` | `medium` | `low` \| `medium` \| `high` \| `xhigh` — deliverable thoroughness, as a system-prompt directive |
+
+`AGENT_EFFORT` is **not** reasoning. Reasoning (the `AGENT_REASONING_*` keys above) is internal deliberation depth; **effort** is how thorough the produced *deliverable* is — completeness, edge-case coverage, polish. It is a fixed user setting (`core/output_effort.ts` → `resolveEffortLevel` / `buildEffortTurnInjection`) injected **each turn** as a system message beside `[REASONING BUDGET]` (Settings changes apply on the next message). Conversational turns still get the effort block in the protocol suffix; child agents get it in inception. Completion `max_tokens` is scaled by level (0.75× low … 1.5× xhigh) after routing/env caps. Named rule **R-EFFORT** ties model behavior to it; high/xhigh turn overrides suspend default R-EXECUTIVE-READ brevity unless the user asked for short. `AGENT_EFFORT_LEARN` adjusts **reasoning** effort only, not this dial. Higher output effort = more substance/coverage, not more `think()`/`reason()` usage.
 
 ### Safety
 

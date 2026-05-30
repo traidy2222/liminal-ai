@@ -110,6 +110,7 @@ import { createExtractStructuredTool } from "./extract_structured.js";
 import { createUploadImageTool } from "./upload_image.js";
 import { visionAnalyzeTool } from "./vision_analyze.js";
 import { createTranscribeAudioTool } from "./transcribe_audio.js";
+import { createSpeakTool, installVoiceTtsFallback } from "./speak.js";
 import { docPlanTool } from "./doc_plan.js";
 import { docResearchBriefTool } from "./doc_research_brief.js";
 import { docCollectSourcesTool } from "./doc_collect_sources.js";
@@ -314,6 +315,10 @@ export async function registerAllTools(
     if (resolveHarnessEnvRaw("AGENT_TRANSCRIBE_ENABLED", prefs) !== "0") {
       registry.register(createTranscribeAudioTool(harness));
     }
+    if (resolveHarnessEnvRaw("AGENT_TTS_ENABLED", prefs) === "1") {
+      registry.register(createSpeakTool(harness));
+      installVoiceTtsFallback(harness);
+    }
 
     // Upgrade V: goal decomposer, branch explorer, contract verifier
     registry.register(createDecomposeGoalTool(harness));
@@ -404,5 +409,8 @@ export {
   findAudioAttachment,
   readAudioAttachment,
   SUPPORTED_AUDIO_MIME_TYPES,
+  normalizeAudioMimeType,
 } from "./audio_attachments.js";
 export type { AudioAttachmentInput, AudioAttachmentRecord } from "./audio_attachments.js";
+export { saveTtsClip, readTtsClip, ttsClipAudioUrl } from "./tts_clips.js";
+export type { SavedTtsClip } from "./tts_clips.js";

@@ -1,6 +1,6 @@
 import type { Message } from "@liminal/core";
 import type { PersonaConfig } from "@liminal/core";
-import { shellProtocolGuidance, effectiveHarnessEnvRaw } from "@liminal/core";
+import { shellProtocolGuidance, effectiveHarnessEnvRaw, buildEffortTurnInjection } from "@liminal/core";
 import { buildPersonaBlock } from "./persona_presets.js";
 
 /**
@@ -9,6 +9,7 @@ import { buildPersonaBlock } from "./persona_presets.js";
  */
 export const PROTOCOL_NAMED_RULES = `## Named rules (IDs — refer in think() when deciding)
 - **R-REASONING**: When scope or tool families are unclear, call think() with tool_families[], scope, unknowns[] — harness pre-activates families. think() = planning/orientation at task start or after disorienting results. reason() = inter-step inference after a tool result, brief not an essay. Obey [REASONING BUDGET] (depth, word count, toolFirst) — implementation belongs in tools, not reasoning text. If toolFirst=yes or thinkDepth=brief, brief think then tools immediately. When constraints are impossible, one sentence of honesty then best-effort via tools.
+- **R-EFFORT**: Match deliverable thoroughness to the per-session **[OUTPUT EFFORT]** block — completeness, edge-case coverage, and polish of the answer/artifact. This is independent of reasoning depth (R-REASONING): higher effort means more substance and coverage, not more words or more thinking.
 - **R-PLAN-CONTRACT**: For explicit ordered steps or numbered prerequisites, call plan() and execute in stated order. Stay within plan bounds (steps/time/tool budget) or replan — do not reorder or skip.
 - **R-HYPOTHESIZE**: When assumptions drive expensive tools or ambiguous diagnosis, call **hypothesize()** with claim + **falsifiers** + **next_test** (not prose-only think).
 - **R-TOOL-DISCIPLINE**: Prefer the narrowest active tool; activate a new family only when no active tool fits. Within one send, no identical repeat reads/retrievals (same file path, URL, or query). On tool failure with explicit remediation, apply it once; if same intent fails twice with near-identical args, stop and replan.
@@ -34,6 +35,7 @@ export const PROTOCOL_NAMED_RULES = `## Named rules (IDs — refer in think() wh
 - **R-SPAWN-ERROR**: When spawn_agent returns an error or wait_for_agents reports a failed sub-task, do NOT silently continue. Emit a brief diagnosis via think(), decide whether the parent task can proceed without the sub-result, and surface the failure to the user if the overall goal is blocked.
 - **R-MEMORY-STALENESS**: When a recalled memory note is tagged [info from DATE — verify current] and the task depends on that fact being current (version number, API shape, external URL), re-verify with a live tool call before acting on it. Stale facts are context, not directives.
 - **R-NUMERIC-CITE**: Every concrete number in the user-visible answer — percentages, counts, dates, version numbers, monetary values, benchmark scores — must be classed **reported** (verbatim from a tool result this turn), **derived** (computed; show inputs: "derived: 18 of 24 = 75%"), or **judgment** (subjective estimate, forecast, or scenario weight without a tool-quoted number). Never state a precise figure from training recall without a tool anchor. When a source gives a range or "around N", preserve the qualifier — do not collapse "roughly 40%" into "40%". For benchmarks, name benchmark and table/section. In comparison tables, separate reported / derived / judgment. **judgment**: prefix the section once with "subjective judgment — not a forecast"; prefer ranges when evidence is thin (15–25%, not 22%) unless the user asked for point estimates; for each material judgment %, one line — primary driver + what would move it ~5–10pp; scenario tables — mutually exclusive rows summing ~100% ±5%, labeled **judgment weights** not empirical frequencies.
+- **R-TTS-VOICE**: When **[VOICE MODE]** is active (mic on), **only speak()** produces audio. Speak after tool work with what you would say aloud; written chat stays short. Mic off = no speak() / no TTS. Never speak user text, tool JSON, harness trace, or code blocks.
 - **R-SEARCH-COMMIT**: The harness maintains a per-send **research ledger** — every web_search query, every URL surfaced (canonicalized + dedup'd across DuckDuckGo / Google / Bing redirect wrappers), every web_fetch outcome with word count or error. A compact **[RESEARCH STATE]** block is auto-injected into your context whenever the ledger changes; call **research_state** at any time for the full inventory (views: summary | pending | fetched | failures | queries | all). Use it to **decide, not just react**: before issuing another web_search, check what queries you've already run and what URLs are still pending — running near-identical breadth queries while pending URLs sit unfetched is scattershot retrieval. The flow is breadth (web_search) → inventory (research_state) → depth (web_fetch on pending URLs) → commit (hypothesize() with falsifiers, then narrow searches). Stop broadening when coverage is enough — you decide that, not the harness; the ledger gives you the evidence to make the call.`;
 
 /**
@@ -163,25 +165,28 @@ For briefings and multi-section summaries: introduce each major theme (event, pe
 **Format optionality:** If the user did not specify a shape, lead with a brief summary when the answer is long, then sectioned detail — unless they asked for only one mode.
 
 ### Rich rendering (web UI)
-The web UI renders raw HTML inside markdown. You have **full creative control** over presentation — invent whatever layout, color scheme, or visual structure best fits the content. Do not default to plain prose.
+The web UI renders **live HTML** in assistant messages (inline styles, flex/grid, gradients, callout cards). Use HTML when markdown is too weak — multi-column layouts, styled KPI cards, gradient panels, precise typography, scenario tables with custom emphasis, timelines, or branded "Bottom line" blocks. Use markdown for normal prose, GFM tables, lists, and \`inline code\`.
 
-**Raw HTML with inline styles is fully supported.** Write whatever you think looks best:
+**How to embed HTML in chat (important):**
+1. **Preferred — raw HTML in the message** (no fence): paste a balanced fragment directly, e.g. \`<div style="...">...</div>\`. The UI renders it via rehype-raw.
+2. **Also supported — \`\`\`html fence:** a fenced block with language \`html\` is rendered as **live HTML** in the web UI (including **while streaming** — the card paints as tokens arrive). Not syntax-highlighted source. Keep the HTML compact on normal lines (do not put each tag or attribute on its own line).
+3. **Do not** use \`\`\`html when you only want to show source code to the user — use \`\`\`text or prose instead.
+4. **Vault / files:** long briefs may stay markdown in vault_write; you may still paste the same HTML callout in chat for the skimmable executive layer.
+
+Example callout (either paste raw or wrap in \`\`\`html … \`\`\`):
 \`\`\`html
-<div style="background: linear-gradient(135deg, #1a1a2e, #16213e); border-left: 4px solid #e94560; border-radius: 10px; padding: 18px 22px; margin: 14px 0; color: #eee;">
-  <strong style="color: #e94560; font-size: 0.75rem; letter-spacing: 2px; text-transform: uppercase;">Warning</strong>
-  <p style="margin: 8px 0 0;">Content here.</p>
+<div style="background: linear-gradient(135deg, #0f0f1a, #1a1a2e); border-left: 5px solid #c0392b; border-radius: 8px; padding: 20px 24px; margin: 12px 0; color: #e0e0e0;">
+  <strong style="color: #e74c3c; font-size: 0.7rem; letter-spacing: 0.12em; text-transform: uppercase;">Bottom line</strong>
+  <p style="margin: 10px 0 0; line-height: 1.6;">One tight paragraph of outcome-first synthesis.</p>
 </div>
 \`\`\`
 
-Design principles — apply your own judgment on all of these:
-- **Invent color schemes** per response based on topic mood: cool blues for technical, warm ambers for cautions, gradients for emphasis, etc.
-- **Mix layouts**: side-by-side columns with flexbox, card grids, timeline rows, stat callout boxes — whatever structure communicates the data best.
-- **Typography**: vary font sizes, weights, letter-spacing, text-transform to create visual hierarchy inside HTML blocks.
-- **Borders and backgrounds**: use border-left, border-radius, box-shadow, gradients — make sections feel distinct.
-- **Standard markdown still works**: code blocks (always include language tag for syntax highlighting), tables, --- glowing dividers, > [!NOTE/TIP/WARNING/IMPORTANT/CAUTION] callouts, ![alt](url) images, bare YouTube/Vimeo URLs for video embeds.
-- **Never repeat the same visual style across consecutive responses.** Treat each response as a fresh design decision based on content type and tone.
-
-The goal is that each response feels intentionally designed, not templated. You are the designer.`;
+Design principles:
+- Invent color schemes per topic; mix flex columns, cards, stat boxes, timelines when they clarify.
+- Pair HTML callouts with normal markdown sections — HTML for the visual anchor, markdown for depth.
+- Standard markdown still works: GFM tables, --- dividers, > [!NOTE/TIP/WARNING] callouts, images, video URLs.
+- Vary visual style across responses; avoid copy-pasting the same card template every turn.
+- **R-OUTPUT-QUALITY** still applies: no credential leaks; judgment labels on forecasts; substance over filler.`;
 
 const INTRO_STATUS_STYLE = `## Intro / status answers
 For prompts like "what can you do", "what tools do you have", "what world are you in":
@@ -327,6 +332,12 @@ The baseline set is controlled by AGENT_ALWAYS_TOOLS_PROFILE — use list_tool_f
 Before concluding a tool is unavailable, check active families and activate the best-fit one. Never claim you cannot perform a task before checking. After activating, retry before escalating.
 When the user asks what tools you have, group by: currently active families vs available-on-activation families. Avoid exhaustive catalogs unless asked.`;
 
+const TTS_VOICE_PROTOCOL =
+  "## Spoken channel (voice mode — mic on)\n" +
+  "Only **speak({ text })** triggers synthesis. This tool is available only in voice mode. " +
+  "Treat the user like a phone call: speak early when helpful, and **always speak again after tools** with results (R-TTS-VOICE). Up to ~4096 chars per speak(); long lines are split automatically. " +
+  "Written chat in voice mode stays short — do not duplicate speak() verbatim in text.";
+
 /**
  * Research-specific named rules — injected only when web tools are active and intent is not coding/execution.
  * Keeps ~400 tokens out of pure coding sessions.
@@ -466,7 +477,7 @@ export function buildProtocolDynamicSuffix(
   // no research protocols — these turns shouldn't be calling tools anyway, and
   // the bulky protocol text just bloats the prompt for a one-paragraph reply.
   if (conversationalMode) {
-    return "";
+    return buildEffortTurnInjection();
   }
 
   const parts: string[] = [];
@@ -544,6 +555,12 @@ export function buildProtocolDynamicSuffix(
   }
   if (!skipVision && names.has("vision_analyze")) {
     parts.push(VISION_SIDEcar);
+  }
+  if (
+    names.has("speak") &&
+    effectiveHarnessEnvRaw("AGENT_TTS_ENABLED") === "1"
+  ) {
+    parts.push(TTS_VOICE_PROTOCOL);
   }
   if (!skipMarkets && !operationalMode && names.has("markets_quote")) {
     parts.push(MARKETS_PROTOCOL);

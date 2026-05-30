@@ -1,9 +1,12 @@
-import React, { useRef, useEffect, useCallback, useMemo } from "react";
+import React, { useRef, useMemo } from "react";
 import type { ShellContract } from "../ShellContract.js";
 import { migratePersonaUiTheme } from "@liminal/core/persona-ui-theme";
 import type { MessageEntry } from "../../useSSE.js";
+import { AssistantMessageContent, renderFencedCodeBlock } from "../../liminalMarkdown.js";
+import { LIM } from "../personaVars.js";
 import { useStickyAutoScroll } from "../../useStickyAutoScroll.js";
 import { ShellControls } from "./ShellControls.js";
+import { ShellComposer } from "./ShellComposer.js";
 import { ShellChatSwitcher } from "../../chat/ShellChatSwitcher.js";
 
 // ── Palette ───────────────────────────────────────────────────────────────────
@@ -29,26 +32,13 @@ const CSS = `
 export function MinimalShell({ contract }: { contract: ShellContract }) {
   const messagesRef = useRef<HTMLDivElement>(null);
   const bottomRef   = useRef<HTMLDivElement>(null);
-  const inputRef    = useRef<HTMLTextAreaElement>(null);
 
   const personaTheme = useMemo(() => migratePersonaUiTheme(contract.personaTheme), [contract.personaTheme]);
 
   useStickyAutoScroll(messagesRef, bottomRef, contract.groupedMessages);
 
-  // Textarea auto-height
-  const syncTextareaHeight = useCallback(() => {
-    const el = inputRef.current;
-    if (!el) return;
-    el.style.height = "0px";
-    el.style.height = `${Math.max(36, Math.min(el.scrollHeight, 200))}px`;
-  }, []);
-
-  useEffect(() => { syncTextareaHeight(); }, [contract.input, syncTextareaHeight]);
-
   const {
-    groupedMessages, surface, showRawHarness, error,
-    input, attachments, attachError, isDragOver, canSend, busy,
-    onInputChange, onSubmit, onKeyDown, onPaste, onDragOver, onDragLeave, onDrop, onRemoveAttachment,
+    groupedMessages, surface, showRawHarness, error, busy,
     signalHud,
   } = contract;
 
@@ -75,7 +65,7 @@ export function MinimalShell({ contract }: { contract: ShellContract }) {
           <div style={{ minWidth: 0, flex: 1, overflow: "hidden" }}>
             <ShellChatSwitcher />
           </div>
-          <ShellControls contract={contract} tone="soft" />
+          <ShellControls contract={contract} tone="soft" messagesRef={messagesRef} />
         </div>
 
         {/* Messages area */}
@@ -126,9 +116,23 @@ export function MinimalShell({ contract }: { contract: ShellContract }) {
                 )}
 
                 {m.kind === "assistant" && (
-                  <div style={{ marginBottom: 12 }}>
-                    <div style={{ color: "var(--lim-text, #c8d4e0)", lineHeight: 1.75, fontSize: 14, whiteSpace: "pre-wrap" }}>
-                      {m.text}
+                  <div style={{ marginBottom: 12 }} className="lim-md">
+                    <div style={{ color: "var(--lim-text, #c8d4e0)", lineHeight: 1.75, fontSize: 14 }}>
+                      <AssistantMessageContent
+                        text={m.text}
+                        streaming={m.streaming}
+                        components={{
+                          code({ className, children }) {
+                            return renderFencedCodeBlock(className, children, {
+                              streaming: m.streaming,
+                              codeBg: LIM.codeBg,
+                            });
+                          },
+                          pre({ children }) {
+                            return <div style={{ margin: "8px 0" }}>{children}</div>;
+                          },
+                        }}
+                      />
                       {m.streaming && <span style={{ color: CYAN, animation: "blink 1s step-end infinite" }}>█</span>}
                     </div>
                   </div>
@@ -197,40 +201,7 @@ export function MinimalShell({ contract }: { contract: ShellContract }) {
           <div ref={bottomRef} />
         </div>
 
-        {/* Input area — borderless, full width */}
-        <form
-          style={{ flexShrink: 0, padding: "0 24px 24px", display: "flex", flexDirection: "column", gap: 6 }}
-          onSubmit={onSubmit}
-          onDragOver={onDragOver}
-          onDragLeave={onDragLeave}
-          onDrop={onDrop}
-        >
-          {attachments.length > 0 && (
-            <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 4 }}>
-              {attachments.map((attachment, idx) => (
-                <div key={`${attachment.name}-${idx}`} style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 10, color: "#445566" }}>
-                  <img src={attachment.dataUrl} alt={attachment.name} style={{ width: 18, height: 18, objectFit: "cover", borderRadius: 3 }} />
-                  <span>{attachment.name}</span>
-                  <button type="button" style={{ background: "none", border: "none", color: "#334455", cursor: "pointer", fontSize: 12, padding: "0 2px" }} onClick={() => onRemoveAttachment(idx)} disabled={busy}>×</button>
-                </div>
-              ))}
-            </div>
-          )}
-          {attachError && <div style={{ color: RED_ERR, fontSize: 11 }}>{attachError}</div>}
-          <div style={{ borderBottom: "1px solid rgba(var(--lim-accent-rgb),0.12)" }}>
-            <textarea
-              ref={inputRef}
-              rows={1}
-              style={{ width: "100%", background: "transparent", border: "none", outline: "none", color: "var(--lim-text, #c8d4e0)", fontFamily: "var(--lim-font-body, system-ui, sans-serif)", fontSize: 14, resize: "none", minHeight: 36, maxHeight: 200, overflowY: "auto", lineHeight: 1.6, padding: "6px 0" }}
-              value={input}
-              onChange={e => onInputChange(e.target.value)}
-              onKeyDown={e => void onKeyDown(e)}
-              onPaste={e => void onPaste(e)}
-              placeholder={busy ? "…" : "…"}
-              disabled={busy}
-            />
-          </div>
-        </form>
+        <ShellComposer contract={contract} personaTheme={personaTheme} variant="minimal" />
 
         {/* Disconnected/error status — single line at very bottom */}
         {isDisconnected && (

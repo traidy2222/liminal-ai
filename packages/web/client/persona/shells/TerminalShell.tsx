@@ -1,15 +1,13 @@
-import React, { useRef, useEffect, useCallback, useMemo } from "react";
-import ReactMarkdown from "react-markdown";
-import remarkGfm from "remark-gfm";
-import rehypeRaw from "rehype-raw";
-import { Prism as SyntaxHighlighter } from "react-syntax-highlighter";
-import { vscDarkPlus } from "react-syntax-highlighter/dist/esm/styles/prism";
+import React, { useRef, useMemo } from "react";
+import { AssistantMessageContent, renderFencedCodeBlock } from "../../liminalMarkdown.js";
+import { extractFencedCodeText } from "../../liminalMarkdownUtils.js";
 import type { ShellContract, ToolCallEntry, ToolCallGroup, ToolResult } from "../ShellContract.js";
 import { migratePersonaUiTheme } from "@liminal/core/persona-ui-theme";
 import { categoryForTool } from "../categoryMeta.js";
 import type { MessageEntry } from "../../useSSE.js";
 import { useStickyAutoScroll } from "../../useStickyAutoScroll.js";
 import { ShellControls } from "./ShellControls.js";
+import { ShellComposer } from "./ShellComposer.js";
 import { ShellChatSwitcher } from "../../chat/ShellChatSwitcher.js";
 import { LIM } from "../personaVars.js";
 
@@ -62,26 +60,14 @@ function parsePrimaryArg(argsJson: string): string {
 export function TerminalShell({ contract }: { contract: ShellContract }) {
   const messagesRef = useRef<HTMLDivElement>(null);
   const bottomRef   = useRef<HTMLDivElement>(null);
-  const inputRef    = useRef<HTMLTextAreaElement>(null);
 
   const personaTheme = useMemo(() => migratePersonaUiTheme(contract.personaTheme), [contract.personaTheme]);
 
   useStickyAutoScroll(messagesRef, bottomRef, contract.groupedMessages);
 
-  // Textarea auto-height
-  const syncTextareaHeight = useCallback(() => {
-    const el = inputRef.current;
-    if (!el) return;
-    el.style.height = "0px";
-    el.style.height = `${Math.max(32, Math.min(el.scrollHeight, 160))}px`;
-  }, []);
-
-  useEffect(() => { syncTextareaHeight(); }, [contract.input, syncTextareaHeight]);
-
   const {
     groupedMessages, toolResultMap, surface, showRawHarness, error,
-    input, attachments, attachError, isDragOver, canSend, busy,
-    onInputChange, onSubmit, onKeyDown, onPaste, onDragOver, onDragLeave, onDrop,
+    attachError, busy,
     signalHud, pct, personaDisplayLabel,
   } = contract;
 
@@ -135,9 +121,9 @@ export function TerminalShell({ contract }: { contract: ShellContract }) {
               case "assistant":
                 return (
                   <div key={i} className="lim-md" style={{ color: "var(--lim-assistant, #00ff88)", lineHeight: 1.65, marginBottom: 4, paddingLeft: 18 }}>
-                    <ReactMarkdown
-                      remarkPlugins={[remarkGfm]}
-                      rehypePlugins={[rehypeRaw]}
+                    <AssistantMessageContent
+                      text={m.text}
+                      streaming={m.streaming}
                       components={{
                         p({ children }) { return <p style={{ margin: "0 0 6px", whiteSpace: "pre-wrap", lineHeight: 1.65 }}>{children}</p>; },
                         a({ href, children }) { return <a href={href} target="_blank" rel="noopener noreferrer" style={{ color: CYAN, textDecoration: "none" }}>{children}</a>; },
@@ -150,18 +136,12 @@ export function TerminalShell({ contract }: { contract: ShellContract }) {
                         pre({ children }) { return <div style={{ margin: "6px 0" }}>{children}</div>; },
                         code({ className, children }) {
                           const lang = /language-(\w+)/.exec(className ?? "")?.[1];
-                          const raw = String(children).replace(/\n$/, "");
+                          const raw = extractFencedCodeText(children);
                           if (lang) {
-                            return (
-                              <div style={{ borderRadius: 4, overflow: "hidden", margin: "6px 0", border: "1px solid rgba(var(--lim-accent-rgb),0.2)" }}>
-                                <div style={{ padding: "2px 10px", background: LIM.surface, borderBottom: "1px solid rgba(var(--lim-accent-rgb),0.1)" }}>
-                                  <span style={{ color: "rgba(var(--lim-accent-rgb),0.5)", fontSize: 9, fontFamily: "monospace", letterSpacing: "0.06em" }}>{lang}</span>
-                                </div>
-                                <SyntaxHighlighter language={lang} style={vscDarkPlus} customStyle={{ margin: 0, borderRadius: 0, fontSize: 12, background: LIM.codeBg }} showLineNumbers={raw.split("\n").length > 8} lineNumberStyle={{ color: LIM.textDim, minWidth: "2em", opacity: 0.4 }} wrapLongLines>
-                                  {raw}
-                                </SyntaxHighlighter>
-                              </div>
-                            );
+                            return renderFencedCodeBlock(className, children, {
+                              streaming: m.streaming,
+                              codeBg: LIM.codeBg,
+                            });
                           }
                           if (raw.includes("\n")) {
                             return (
@@ -182,9 +162,7 @@ export function TerminalShell({ contract }: { contract: ShellContract }) {
                           return <span style={{ display: "block", margin: "6px 0" }}><img src={src} alt={alt ?? ""} loading="lazy" style={{ maxWidth: "100%", borderRadius: 3, border: "1px solid rgba(var(--lim-accent-rgb),0.1)" }} /></span>;
                         },
                       }}
-                    >
-                      {m.text}
-                    </ReactMarkdown>
+                    />
                     {m.streaming && <span style={{ color: CYAN, animation: "blink 1s step-end infinite" }}>_</span>}
                   </div>
                 );
@@ -292,27 +270,7 @@ export function TerminalShell({ contract }: { contract: ShellContract }) {
           <div ref={bottomRef} />
         </div>
 
-        {/* Input bar */}
-        <form
-          style={{ flexShrink: 0, display: "flex", alignItems: "flex-end", gap: 0, background: "rgba(0,2,6,0.97)", borderTop: `1px solid rgba(var(--lim-accent-rgb),0.1)`, padding: "8px 12px", outline: isDragOver ? `1px dashed ${CYAN}` : "none" }}
-          onSubmit={onSubmit}
-          onDragOver={onDragOver}
-          onDragLeave={onDragLeave}
-          onDrop={onDrop}
-        >
-          <span style={{ color: CYAN, fontWeight: 700, marginRight: 10, flexShrink: 0, lineHeight: "32px", fontSize: 14, userSelect: "none" }}>&gt;</span>
-          <textarea
-            ref={inputRef}
-            rows={1}
-            style={{ flex: 1, background: "transparent", border: "none", outline: "none", color: "var(--lim-text, #c8d4e0)", fontFamily: "var(--lim-font-mono, Consolas, monospace)", fontSize: 13, resize: "none", minHeight: 32, maxHeight: 160, overflowY: "auto", lineHeight: 1.45, padding: 0, letterSpacing: "0.02em" }}
-            value={input}
-            onChange={e => onInputChange(e.target.value)}
-            onKeyDown={e => void onKeyDown(e)}
-            onPaste={e => void onPaste(e)}
-            placeholder={busy ? "processing…" : "transmit_"}
-            disabled={busy}
-          />
-        </form>
+        <ShellComposer contract={contract} personaTheme={personaTheme} variant="terminal" />
 
         {/* Status line at bottom */}
         <div style={{ flexShrink: 0, padding: "3px 12px 5px", background: "rgba(0,1,4,0.99)", borderTop: "1px solid rgba(var(--lim-accent-rgb),0.05)", display: "flex", alignItems: "center", gap: 10, fontSize: 9, fontFamily: "var(--lim-font-mono, Consolas, monospace)", letterSpacing: "0.08em", color: "rgba(var(--lim-accent-rgb),0.35)", minWidth: 0 }}>
@@ -330,7 +288,7 @@ export function TerminalShell({ contract }: { contract: ShellContract }) {
             </>
           )}
           {/* Required controls — keep settings reachable in every persona style */}
-          <ShellControls contract={contract} tone="mono" style={{ marginLeft: "auto" }} />
+          <ShellControls contract={contract} tone="mono" messagesRef={messagesRef} style={{ marginLeft: "auto" }} />
         </div>
       </div>
     </>
