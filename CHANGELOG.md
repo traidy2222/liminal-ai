@@ -2,13 +2,19 @@
 
 All notable changes to [Liminal AI](https://github.com/traidy2222/liminal-ai) are documented here and on the docs portal: [docs.vireondynamics.com/liminal/reference/changelog](https://docs.vireondynamics.com/liminal/reference/changelog).
 
-**Current stage:** **alpha** (`v0.0.13` tip of `main`, 2026-05-28). **Beta**, **RC**, and **v0.1.0 public preview** have not been declared as product releases yet.
+**Current stage:** **alpha** (`v0.0.14` tip of `main`, 2026-05-30). **Beta**, **RC**, and **v0.1.0 public preview** have not been declared as product releases yet.
 
 Format: **v0.0.x** entries keyed to the last GitHub push in each slice. Dates are real push dates.
 
 Marketing (richer notes): [vireondynamics.com/liminal/changelog](https://vireondynamics.com/liminal/changelog)
 
-## [v0.0.13] — 2026-05-28 — Current alpha
+## [v0.0.14] — 2026-05-30 — Current alpha
+
+LLM memory curator with reversible soft-delete, output-effort dial, voice I/O (TTS + dictation), second-stage recall reranker, rolling prompt-cache breakpoint, `find_files`/`delete_file`, chat markdown renderer.
+
+[Full notes](https://docs.vireondynamics.com/liminal/reference/changelog#v0-0-14)
+
+## [v0.0.13] — 2026-05-28
 
 OpenRouter provider presets in Settings, full harness env catalog in UI, simpler turn end, Android scaffold removed.
 

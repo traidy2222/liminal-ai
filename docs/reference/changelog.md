@@ -2,7 +2,7 @@
 
 All notable changes to [Liminal AI](https://github.com/traidy2222/liminal-ai) on the `main` branch.
 
-**Current stage:** **alpha** (`v0.0.13` tip of `main`, 2026-05-28). The workspace package may read `0.1.0`, but **beta**, **RC**, and a **v0.1.0 public preview** have not been declared as product releases yet.
+**Current stage:** **alpha** (`v0.0.14` tip of `main`, 2026-05-30). The workspace package may read `0.1.0`, but **beta**, **RC**, and a **v0.1.0 public preview** have not been declared as product releases yet.
 
 Format: **v0.0.x** entries keyed to the last GitHub push in each slice. Dates are real push dates.
 
@@ -10,9 +10,27 @@ Marketing release notes (richer layout): [vireondynamics.com/liminal/changelog](
 
 ---
 
+## v0.0.14 — 2026-05-30 {#v0-0-14}
+
+**Current alpha.** LLM memory curator, output-effort dial, voice I/O, retrieval reranker, deeper prompt caching.
+
+**Shipped**
+
+- **Memory curator** — `curate_memory` (dry-run by default) sends a metadata-annotated slice of the note store to the model, which returns prune / merge / re-confidence ops; a deterministic safety-rail veto then protects `user:`/`identity:`/`pref:` keys, high-access, and too-young notes. Deletion is **reversible**: `forget` and the curator soft-delete the full note to `notes.archive.json` (`AGENT_MEMORY_ARCHIVE`) before removing; `restore_memory` recovers it. Tunables: `AGENT_CURATOR_TIMEOUT_MS`, `AGENT_CURATOR_MAX_TOKENS`, `AGENT_CURATOR_PROTECT_GLOBAL` (off — `global` is the default scope, not a durability signal)
+- **Output effort** — `AGENT_EFFORT` (`low` | `medium` | `high` | `xhigh`) — a deliverable-thoroughness dial injected as a system-prompt directive (rule **R-EFFORT**), exposed as a Settings dropdown. A separate axis from reasoning: it scales completion budget and output completeness/coverage, not internal `think()`/`reason()` depth
+- **Voice I/O** — Text-to-speech (`speak`, Kokoro / OpenAI voices, per-turn budget + near-duplicate suppression) and live microphone **dictation** in the web UI; voice-mode tool gating
+- **Retrieval** — Second-stage recall reranker over first-stage BM25 + embedding hits; fast-model JSON response cache to cut repeat sidecar calls
+- **Prompt cache** — Rolling `cache_control` breakpoint over conversation history (`AGENT_PROMPT_CACHE_ROLLING`) plus volatile-tail context ordering (`AGENT_CTX_VOLATILE_TAIL`), so the cache extends across accumulated tool-result history, not just the static prefix
+- **File tools** — `find_files` (path/name glob) and `delete_file` (approval-gated); a catalog reachability test guards against tools unreachable under lazy loading
+- **Chat UX** — Markdown renderer for assistant output, session screenshot export, persona shell refactor (Hud / Minimal / Studio / Terminal / Composer)
+- **Web** — Greeting fires on reload without blocking, SSE reconnect robustness; OpenRouter `session_id` on chat completions for request grouping
+- **Reliability** — More reliable long `write_file` paths and HTML chunk guards
+
+---
+
 ## v0.0.13 — 2026-05-28 {#v0-0-13}
 
-**Current alpha.** Provider presets, Settings catalog completeness, simpler turn end.
+**Provider presets, Settings catalog completeness, simpler turn end.**
 
 **Shipped**
 
