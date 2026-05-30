@@ -1,6 +1,6 @@
 # Liminal documentation
 
-Run, configure, and extend the Liminal agent harness (alpha v0.0.13).
+Run, configure, and extend the Liminal agent harness (alpha v0.0.14).
 
 **Published:** [docs.vireondynamics.com/liminal/](https://docs.vireondynamics.com/liminal/)
 
