@@ -130,7 +130,7 @@ export interface ResolvedEntitlements {
  * so only an env-provided key can verify (CE still works fully without any key).
  */
 export const VIREON_LICENSE_PUBLIC_KEY_PEM = `-----BEGIN PUBLIC KEY-----
-MCowBQYDK2VwAyEADfOvnr0djYyrbKT4AD8gy/I9JlnWMMVgSxBhnP95VtM=
+MCowBQYDK2VwAyEAht86izvwozOwLOuqtFAv4xU7oWi9l38NhfRd2lT+ylg=
 -----END PUBLIC KEY-----
 `;
 
