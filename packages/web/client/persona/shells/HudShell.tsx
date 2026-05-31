@@ -21,6 +21,7 @@ import {
 } from "../shellLayout.js";
 import { LIM } from "../personaVars.js";
 import { StreamingWritePreviewBox } from "../../StreamingWritePreviewBox.js";
+import { SubtaskInlineCard } from "../../SubtaskInspectorModal.js";
 import {
   extractStreamingWritePreview,
   isStreamingWriteTool,
@@ -299,7 +300,7 @@ type SubtaskEntry = Extract<MessageEntry, { kind: "subtask" }>;
 function SystemsPanel({
   orbHidden: hideOrbPanel,
   orbState, pct, masked, signalLabel, signalColor, signalDetail, sessionSeconds,
-  toolCount, msgCount, subtasks, personaName, autoDream, uiVerbosity,
+  toolCount, msgCount, subtasks, personaName, autoDream, uiVerbosity, onInspectSubtask,
 }: {
   orbHidden?: boolean;
   orbState: OrbState;
@@ -315,6 +316,7 @@ function SystemsPanel({
   personaName: string;
   autoDream: ShellContract["autoDream"];
   uiVerbosity: "normal" | "quiet";
+  onInspectSubtask?: (taskId: string) => void;
 }) {
   const memorySync = useMemo(
     () => presentAutoDream(autoDream, { verbosity: uiVerbosity }),
@@ -410,7 +412,24 @@ function SystemsPanel({
             {subtasks.slice(0, 10).map((s) => {
               const sc = s.status === "running" ? CYAN : s.status === "done" ? GREEN : s.status === "error" ? RED_ERR : "#445";
               return (
-                <div key={s.taskId} style={{ display: "flex", alignItems: "flex-start", gap: 3, paddingLeft: Math.max(4, s.depth * 12) }}>
+                <button
+                  key={s.taskId}
+                  type="button"
+                  onClick={() => onInspectSubtask?.(s.taskId)}
+                  style={{
+                    display: "flex",
+                    alignItems: "flex-start",
+                    gap: 3,
+                    paddingLeft: Math.max(4, s.depth * 12),
+                    background: "none",
+                    border: "none",
+                    cursor: onInspectSubtask ? "pointer" : "default",
+                    textAlign: "left",
+                    padding: "2px 0 2px " + Math.max(4, s.depth * 12),
+                    width: "100%",
+                  }}
+                  title={onInspectSubtask ? "Inspect sub-agent" : undefined}
+                >
                   <span style={{ color: "rgba(var(--lim-accent-rgb),0.18)", fontSize: 9, fontFamily: "monospace", marginTop: 1, flexShrink: 0 }}>└─</span>
                   <div style={{ display: "flex", alignItems: "center", gap: 4, minWidth: 0 }}>
                     <div style={{ width: 5, height: 5, borderRadius: "50%", flexShrink: 0, background: sc, boxShadow: s.status === "running" ? `0 0 6px ${sc}` : "none", animation: s.status === "running" ? "data-pulse 1.1s ease-in-out infinite" : "none" }} />
@@ -418,7 +437,7 @@ function SystemsPanel({
                       {s.goal.length > 24 ? s.goal.slice(0, 23) + "…" : s.goal}
                     </span>
                   </div>
-                </div>
+                </button>
               );
             })}
             {subtasks.length > 10 && (
@@ -726,46 +745,6 @@ function ToolGroupCard({ group, toolResultMap, surface, toolCardsMode }: { group
   );
 }
 
-// ── SubtaskView ───────────────────────────────────────────────────────────────
-
-function SubtaskView({ entry, surface }: { entry: SubtaskEntry; surface: ToolSurface }) {
-  const [showStream, setShowStream] = useState(surface === "verbose");
-  useEffect(() => { setShowStream(surface === "verbose"); }, [surface]);
-  const statusColor = entry.status === "running" ? CYAN : entry.status === "done" ? GREEN : entry.status === "error" ? RED_ERR : "#556677";
-  const statusIcon  = entry.status === "running" ? "⟳" : entry.status === "done" ? "✓" : entry.status === "error" ? "✗" : "⊘";
-  const outputLines = entry.status === "running" && entry.partialOutput
-    ? entry.partialOutput.trimEnd().split("\n").filter(l => l.trim()).slice(-4)
-    : [];
-  const showLines = surface === "verbose" || showStream;
-
-  return (
-    <div style={{ padding: "5px 11px", background: "rgba(0,5,14,0.7)", borderRadius: 3, fontSize: 12, fontFamily: "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace", borderLeft: `2px solid ${statusColor}`, color: "#889aaa", marginLeft: entry.depth * 20 }}>
-      <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-        <span style={{ color: MAGENTA }}>{"⤷".repeat(Math.max(1, entry.depth))}</span>
-        <span style={{ color: statusColor, fontWeight: 700 }}>{statusIcon}</span>
-        <span style={{ color: "#334455", fontSize: 10, fontFamily: "monospace" }}>{entry.taskId.slice(0, 8)}</span>
-        <span style={{ color: "#99aabb" }}>{entry.goal.length > 120 ? entry.goal.slice(0, 119) + "…" : entry.goal}</span>
-      </div>
-      {outputLines.length > 0 && showLines && (
-        <div style={{ marginTop: 4, paddingLeft: 20 }}>
-          {outputLines.map((line, i) => (
-            <div key={i} style={{ color: "#334455", fontSize: 10, fontFamily: "monospace", lineHeight: 1.4 }}>
-              {line.length > 160 ? line.slice(0, 159) + "…" : line}
-            </div>
-          ))}
-        </div>
-      )}
-      {surface === "clean" && outputLines.length > 0 && !showStream && (
-        <button type="button" onClick={() => setShowStream(true)} style={{ marginTop: 4, marginLeft: 20, background: "none", border: "none", color: "#445566", fontSize: 10, cursor: "pointer", textDecoration: "underline" }}>
-          Show sub-agent stream
-        </button>
-      )}
-    </div>
-  );
-}
-
-// ── ModelReasoningBlock ───────────────────────────────────────────────────────
-
 function ModelReasoningBlock({ entry, surface }: { entry: Extract<MessageEntry, { kind: "model_reasoning" }>; surface: ToolSurface }) {
   const [open, setOpen] = useState(surface === "verbose");
   useEffect(() => {
@@ -876,12 +855,14 @@ function MessageView({
   surface,
   personaTheme,
   toolCardsMode,
+  onInspectSubtask,
 }: {
   entry: MessageEntry;
   toolResult?: ToolResult;
   surface: ToolSurface;
   personaTheme: ReturnType<typeof migratePersonaUiTheme>;
   toolCardsMode: PersonaUiToolCards;
+  onInspectSubtask?: (taskId: string) => void;
 }) {
   const entrance = messageEntranceClass(personaTheme.messageEntrance);
   const entranceProp = entrance ? { className: entrance } : {};
@@ -1062,7 +1043,7 @@ function MessageView({
     }
 
     case "subtask":
-      return <SubtaskView entry={entry} surface={surface} />;
+      return <SubtaskInlineCard entry={entry} onInspect={onInspectSubtask} />;
 
     case "context_compressed":
       return (
@@ -1096,7 +1077,7 @@ export function HudShell({ contract }: { contract: ShellContract }) {
     subtasks, allToolCalls, autoDream, uiVerbosity, pulseChips, lastTurnProviderRetries,
     lastContextCompress, heartbeatEnabled, heartbeatUiStrip, personalityPulseActive,
     personalityPulseRows, dreamLabel, activeToolCall,
-    personaDisplayLabel, personaName,
+    personaDisplayLabel, personaName, onInspectSubtask,
   } = contract;
 
   const visibleMessages = groupedMessages;
@@ -1189,6 +1170,7 @@ export function HudShell({ contract }: { contract: ShellContract }) {
             personaName={personaName}
             autoDream={autoDream}
             uiVerbosity={uiVerbosity}
+            onInspectSubtask={onInspectSubtask}
           />
         )}
 
@@ -1219,6 +1201,7 @@ export function HudShell({ contract }: { contract: ShellContract }) {
                   surface={surface}
                   personaTheme={personaTheme}
                   toolCardsMode={toolCardsMode}
+                  onInspectSubtask={onInspectSubtask}
                 />
               );
             })}

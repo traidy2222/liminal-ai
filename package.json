@@ -28,7 +28,9 @@
     "browser:install": "npm exec --workspace=@liminal/tools -- playwright install chromium",
     "marketing:capture": "node scripts/capture-marketing.mjs",
     "marketing:capture:advanced": "node scripts/capture-marketing.mjs --advanced",
-    "marketing:capture:live": "node scripts/capture-marketing-live.mjs"
+    "marketing:capture:live": "node scripts/capture-marketing-live.mjs",
+    "control-plane": "npm run start -w @liminal/control-plane",
+    "control-plane:dev": "npm run dev -w @liminal/control-plane"
   },
   "devDependencies": {
     "concurrently": "^9.2.1",

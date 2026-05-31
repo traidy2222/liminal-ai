@@ -307,8 +307,21 @@ export interface ChildAgentConfig {
    * All named tools must be registered in the parent registry.
    */
   activateTools?: string[];
+  /**
+   * Force-activate these tool FAMILIES in the child (e.g. "code_intel", "shell",
+   * "browser", "web"). More reliable than `activateTools` for provisioning a
+   * sub-agent, since the spawner (or workflow planner) names families by intent
+   * rather than guessing individual tool names. Applied on top of the BM25
+   * family inference, so it can only add capabilities. Unknown families are
+   * ignored.
+   */
+  activateFamilies?: string[];
   /** Extra context prepended to inception messages. */
   additionalContext?: string;
+  /** Shared-bus keys to inject before the child runs (from share_agent_context). */
+  contextKeys?: string[];
+  /** Inject all shared-bus entries whose keys start with this prefix (e.g. "ctx/"). */
+  contextBusPrefix?: string;
   /** Max ReAct rounds for this child. Defaults to parent's maxToolRoundsPerTurn. */
   maxRounds?: number;
   /** Timeout in ms before the child is auto-cancelled. Default: 300_000 (5 min). */
@@ -573,6 +586,21 @@ export interface AgentEventMap {
     depth: number;
     contractSource?: "provided" | "synthesized";
     role?: string;
+    /** Tools visible to the child after spawn-time family inference + activate_tools. */
+    activeToolCount?: number;
+    activeFamilies?: string[];
+    /** Families chosen by BM25 inference from spawn prompt text. */
+    inferredFamilies?: string[];
+  };
+  /** Fast-model tool provisioning completed immediately before the child send(). */
+  spawn_tools_inferred: {
+    taskId: string;
+    parentTaskId: string;
+    families: string[];
+    activateTools: string[];
+    activeToolCount: number;
+    rationale: string;
+    source: "llm" | "skipped" | "failed";
   };
   subtask_complete: {
     taskId: string;
@@ -585,6 +613,24 @@ export interface AgentEventMap {
   subtask_output: {
     taskId: string;
     delta: string;
+  };
+  /** Harness trace lines from a sub-agent (spawn tools, auto-activate, etc.). */
+  subtask_trace: {
+    taskId: string;
+    delta: string;
+  };
+  subtask_tool_start: {
+    taskId: string;
+    callId: string;
+    name: string;
+  };
+  subtask_tool_result: {
+    taskId: string;
+    callId: string;
+    name: string;
+    args: Record<string, unknown>;
+    ok: boolean;
+    output: string;
   };
   /**
    * Emitted instead of tool_approval when dryRunApprovals is true.

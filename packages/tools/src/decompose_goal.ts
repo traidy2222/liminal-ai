@@ -159,6 +159,7 @@ export function createDecomposeGoalTool(harness: AgentHarness) {
           const { taskId } = harness.forkChild({
             goal: node.description,
             taskBrief: node.description,
+            userPrompt: node.description,
             systemPrompt: node.agent_role,
             dependsOn: dependsOn.length > 0 ? dependsOn : undefined,
             inheritPersona: false,

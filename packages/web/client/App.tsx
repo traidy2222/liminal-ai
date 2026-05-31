@@ -31,6 +31,7 @@ import type { SpeechSsePayload } from "./useSSE.js";
 import { ShellRouter } from "./persona/ShellRouter.js";
 import { PersonaShellSwitcher } from "./persona/shells/ShellSwitcher.js";
 import type { ShellContract } from "./persona/ShellContract.js";
+import { SubtaskInspectorModal, SubtaskInlineCard } from "./SubtaskInspectorModal.js";
 import { categoryForTool, getToolCategory } from "./persona/categoryMeta.js";
 import {
   resolveShell,
@@ -1072,65 +1073,14 @@ function ToolGroupCard({
 
 // ── Subtask card ──────────────────────────────────────────────────────────────
 
-function SubtaskView({ entry, surface }: { entry: SubtaskEntry; surface: ToolSurface }) {
-  const [showStream, setShowStream] = useState(surface === "verbose");
-  useEffect(() => {
-    setShowStream(surface === "verbose");
-  }, [surface]);
-  const statusColor =
-    entry.status === "running"  ? CYAN    :
-    entry.status === "done"     ? GREEN   :
-    entry.status === "error"    ? RED_ERR : "#556677";
-  const statusIcon  =
-    entry.status === "running"  ? "⟳" :
-    entry.status === "done"     ? "✓" :
-    entry.status === "error"    ? "✗" : "⊘";
-  const outputLines =
-    entry.status === "running" && entry.partialOutput
-      ? entry.partialOutput.trimEnd().split("\n").filter(l => l.trim()).slice(-4)
-      : [];
-
-  const showLines = surface === "verbose" || showStream;
-
-  return (
-    <div style={{ ...styles.subtaskCard, marginLeft: entry.depth * 20, borderLeftColor: statusColor }}>
-      <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-        <span style={{ color: MAGENTA }}>{"⤷".repeat(Math.max(1, entry.depth))}</span>
-        <span style={{ color: statusColor, fontWeight: 700 }}>{statusIcon}</span>
-        <span style={{ color: "#334455", fontSize: 10, fontFamily: "monospace" }}>{entry.taskId.slice(0, 8)}</span>
-        <span style={{ color: "#99aabb" }}>
-          {entry.goal.length > 120 ? entry.goal.slice(0, 119) + "…" : entry.goal}
-        </span>
-      </div>
-      {outputLines.length > 0 && showLines && (
-        <div style={{ marginTop: 4, paddingLeft: 20 }}>
-          {outputLines.map((line, i) => (
-            <div key={i} style={{ color: "#334455", fontSize: 10, fontFamily: "monospace", lineHeight: 1.4 }}>
-              {line.length > 160 ? line.slice(0, 159) + "…" : line}
-            </div>
-          ))}
-        </div>
-      )}
-      {surface === "clean" && outputLines.length > 0 && !showStream && (
-        <button
-          type="button"
-          onClick={() => setShowStream(true)}
-          style={{
-            marginTop: 4,
-            marginLeft: 20,
-            background: "none",
-            border: "none",
-            color: "#445566",
-            fontSize: 10,
-            cursor: "pointer",
-            textDecoration: "underline",
-          }}
-        >
-          Show sub-agent stream
-        </button>
-      )}
-    </div>
-  );
+function SubtaskView({
+  entry,
+  onInspect,
+}: {
+  entry: SubtaskEntry;
+  onInspect?: (taskId: string) => void;
+}) {
+  return <SubtaskInlineCard entry={entry} onInspect={onInspect} />;
 }
 
 function ModelReasoningBlock({
@@ -1310,12 +1260,14 @@ function MessageView({
   surface,
   personaTheme,
   toolCardsMode,
+  onInspectSubtask,
 }: {
   entry: MessageEntry;
   toolResult?: ToolResult;
   surface: ToolSurface;
   personaTheme: ReturnType<typeof migratePersonaUiTheme>;
   toolCardsMode: PersonaUiToolCards;
+  onInspectSubtask?: (taskId: string) => void;
 }) {
   const entrance = messageEntranceClass(personaTheme.messageEntrance);
   const entranceProp = entrance ? { className: entrance } : {};
@@ -1536,7 +1488,7 @@ function MessageView({
     }
 
     case "subtask":
-      return <SubtaskView entry={entry} surface={surface} />;
+      return <SubtaskView entry={entry} onInspect={onInspectSubtask} />;
 
     case "context_compressed":
       return (
@@ -1601,6 +1553,7 @@ export function App() {
   const [bootstrapSubmitting, setBootstrapSubmitting] = useState(false);
   const bootstrapTextareaRef = useRef<HTMLTextAreaElement>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [selectedSubtaskId, setSelectedSubtaskId] = useState<string | null>(null);
   const [settingsFields, setSettingsFields] = useState<HarnessSettingsApiField[]>([]);
   const [settingsTabs, setSettingsTabs] = useState<{ id: string; title: string }[]>([]);
   const [settingsHint, setSettingsHint] = useState("");
@@ -2102,6 +2055,9 @@ export function App() {
   const toolCount    = allToolCalls.length;
   const msgCount     = state.messages.filter(m => m.kind === "user" || m.kind === "assistant").length;
   const subtasks     = state.messages.filter((m): m is SubtaskEntry => m.kind === "subtask");
+  const selectedSubtask = selectedSubtaskId
+    ? subtasks.find((s) => s.taskId === selectedSubtaskId) ?? null
+    : null;
   const dreamLabel = presentAutoDream(state.autoDream, { verbosity: state.uiVerbosity }).pillHeadline;
   const pulseChips = useMemo(() => {
     return state.personalityPulseRows
@@ -2177,12 +2133,17 @@ export function App() {
     onDictationHistoryReset: () => {
       if (historyIndex !== -1) setHistoryIndex(-1);
     },
+    onInspectSubtask: (taskId) => setSelectedSubtaskId(taskId),
   };
 
   return (
     <ShellRouter theme={state.personaUiTheme}>
       <style>{CSS_ANIMATIONS}</style>
       <PersonaShellSwitcher shell={shell} contract={contract} />
+
+      {selectedSubtask && (
+        <SubtaskInspectorModal entry={selectedSubtask} onClose={() => setSelectedSubtaskId(null)} />
+      )}
 
       {/* ── Settings modal ─────────────────────────────────────────────────────── */}
       <SettingsModal

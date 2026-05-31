@@ -27,8 +27,8 @@ export const TOOL_FAMILY_DESCRIPTORS: ToolFamilyDescriptor[] = [
   },
   {
     family: "shell",
-    description: "Run shell commands, background processes, process management, terminal execution",
-    keywords: ["shell", "command", "run", "execute", "terminal", "process", "bash", "script", "install", "build", "npm", "pip"],
+    description: "Run shell commands, background processes, process management, terminal execution, serve/build/test runs",
+    keywords: ["shell", "command", "run", "execute", "terminal", "process", "bash", "script", "install", "build", "npm", "pip", "serve", "start", "dev", "compile", "bundle", "deploy", "launch"],
   },
   {
     family: "git",
@@ -47,8 +47,8 @@ export const TOOL_FAMILY_DESCRIPTORS: ToolFamilyDescriptor[] = [
   },
   {
     family: "code_intel",
-    description: "AST grep, symbol index, find references, run tests, run lint, execute code",
-    keywords: ["symbol", "ast", "reference", "test", "lint", "typecheck", "type error", "analysis", "refactor", "grep"],
+    description: "AST grep, symbol index, find references, run tests, run lint, execute code, verify/validate",
+    keywords: ["symbol", "ast", "reference", "test", "tests", "lint", "typecheck", "type error", "analysis", "refactor", "grep", "verify", "validate", "imports", "unused", "audit"],
   },
   {
     family: "tasks",
@@ -62,8 +62,13 @@ export const TOOL_FAMILY_DESCRIPTORS: ToolFamilyDescriptor[] = [
   },
   {
     family: "browser",
-    description: "Headless browser automation, Playwright, web UI interaction",
-    keywords: ["browser", "playwright", "automate", "click", "form", "navigate", "playwright", "e2e", "ui test"],
+    description: "Headless browser automation, Playwright, web UI interaction, serve a file, screenshot a page",
+    keywords: ["browser", "playwright", "automate", "click", "form", "navigate", "e2e", "ui test", "serve", "screenshot", "render", "preview", "open the page", "interact"],
+  },
+  {
+    family: "navigation",
+    description: "Repository tree orientation, find files by glob, file metadata, chunked reads, resolve imports",
+    keywords: ["map", "tree", "structure", "find files", "glob", "locate", "metadata", "overview", "explore", "enumerate", "inventory", "every file", "all files"],
   },
   {
     family: "markets",
@@ -110,6 +115,36 @@ export interface ContractFamilyMapping {
   families: string[];
   scores: Record<string, number>;
   source: "contract" | "default";
+}
+
+/** Inputs available on every forkChild spawn — used to infer tool families without a spawnContract. */
+export interface SpawnFamilyInferenceInput {
+  goal: string;
+  taskBrief?: string;
+  userPrompt?: string;
+  systemPrompt?: string;
+  spawnContract?: { objective: string; role: string };
+}
+
+/**
+ * Derive tool families to pre-activate for a sub-agent from whatever prompt text
+ * the spawner provided (contract, user_prompt, task brief, or goal label).
+ */
+export function inferSpawnToolFamiliesFromChildConfig(
+  cfg: SpawnFamilyInferenceInput,
+  opts?: { maxFamilies?: number; threshold?: number }
+): ContractFamilyMapping {
+  const objective =
+    cfg.spawnContract?.objective.trim() ||
+    cfg.userPrompt?.trim() ||
+    cfg.taskBrief?.trim() ||
+    cfg.goal.trim() ||
+    "";
+  const role =
+    cfg.spawnContract?.role.trim() ||
+    cfg.systemPrompt?.trim().slice(0, 500) ||
+    "";
+  return mapContractToToolFamilies(objective, role, opts);
 }
 
 /**

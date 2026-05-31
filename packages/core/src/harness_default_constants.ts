@@ -303,6 +303,16 @@ export const HARNESS_ENV_DEFAULTS: Readonly<Record<string, string>> = {
   AGENT_CURATOR_PROTECT_ACCESS_COUNT: "3",   // never prune notes accessed >= this many times
   AGENT_CURATOR_PROTECT_MIN_AGE_HOURS: "24", // never prune notes younger than this (by createdAt)
   AGENT_MEMORY_MAX_NOTES: "0",        // reserved: future budget-triggered auto-curation (0 = off)
+  // Dynamic workflows (ultracode-equivalent) — multi-phase sub-agent fan-out
+  // with results kept out of the parent context.
+  AGENT_WORKFLOWS: "1",               // master switch for plan_workflow/run_workflow tools
+  AGENT_WORKFLOW_MAX_CONCURRENT: "4",  // max concurrent sub-agents per phase wave
+  AGENT_WORKFLOW_MAX_AGENTS: "64",     // total sub-agent cap per workflow run
+  AGENT_WORKFLOW_TIMEOUT_MS: "1800000",// wall-clock cap for one workflow run
+  AGENT_WORKFLOW_MODEL: "",            // optional planner/summarizer model (empty = fast model)
+  AGENT_SPAWN_TOOL_INFER: "1",         // fast-model tool pick for sub-agents before first send
+  AGENT_SPAWN_TOOL_INFER_MODEL: "",    // optional infer model (empty = AGENT_FAST_MODEL)
+  AGENT_SPAWN_TOOL_INFER_TIMEOUT_MS: "8000",
   // Compensation ledger
   AGENT_COMPENSATION_ENABLED: "1",    // track and replay plan side-effect compensations
   AGENT_COMPENSATION_MAX_ACTIONS: "32", // max compensation entries per plan

@@ -1,6 +1,6 @@
 import OpenAI from "openai";
 import type { AgentHarness, TaskOrchestrator, SubtaskResult } from "@liminal/core";
-import { completeChatJson, getFastModelSlug, resolveHarnessEnvRaw, detectContradictions, mapContractToToolFamilies } from "@liminal/core";
+import { completeChatJson, getFastModelSlug, resolveHarnessEnvRaw, detectContradictions } from "@liminal/core";
 import { defineTool } from "./helpers.js";
 import { createContextTools } from "./context_tools.js";
 import { loadRawNotes, getNoteValue } from "./notes_store.js";
@@ -18,6 +18,7 @@ import { createHypothesizeTool } from "./hypothesize.js";
 import { createResearchStateTool } from "./research_state.js";
 import type { SubagentSpawnContract } from "@liminal/core";
 import { createSpeakTool } from "./speak.js";
+import { createAgentContextTools } from "./agent_context_tools.js";
 
 // ─── Helper ───────────────────────────────────────────────────────────────────
 
@@ -247,6 +248,23 @@ export function createOrchestrationTools(harness: AgentHarness) {
           items: { type: "string" },
           description: "Additive tool activation — force these tools active in the child regardless of parent active set. Use to give sub-agents web, shell, vault, etc. access. Example: [\"web_search\",\"web_fetch\",\"think\",\"remember\"].",
         },
+        activate_families: {
+          type: "array",
+          items: { type: "string" },
+          description:
+            "Additive family activation — reliable way to provision capabilities (e.g. [\"code_intel\",\"shell\",\"web\",\"browser\"]). " +
+            "Prefer this over guessing individual tool names under lazy loading.",
+        },
+        context_keys: {
+          type: "array",
+          items: { type: "string" },
+          description:
+            "Shared-bus keys to inject into the sub-agent (from share_agent_context). Example: [\"ctx/abc123/pricing\"].",
+        },
+        context_bus_prefix: {
+          type: "string",
+          description: "Inject all shared-bus entries whose keys start with this prefix (e.g. \"ctx/\").",
+        },
         tools: {
           type: "array",
           items: { type: "string" },
@@ -344,6 +362,14 @@ export function createOrchestrationTools(harness: AgentHarness) {
         const dependsOn = Array.isArray(args["depends_on"])
           ? (args["depends_on"] as unknown[]).map((x) => String(x)).filter(Boolean)
           : undefined;
+        const activateFamilies = Array.isArray(args["activate_families"])
+          ? (args["activate_families"] as unknown[]).map((x) => String(x).trim().toLowerCase()).filter(Boolean)
+          : undefined;
+        const contextKeys = Array.isArray(args["context_keys"])
+          ? (args["context_keys"] as unknown[]).map((x) => String(x).trim()).filter(Boolean)
+          : undefined;
+        const contextBusPrefix =
+          typeof args["context_bus_prefix"] === "string" ? args["context_bus_prefix"].trim() : undefined;
         const providedSpawnContract = (args["spawn_contract"] as SubagentSpawnContract | undefined) ?? undefined;
 
         let spawnContract: SubagentSpawnContract | undefined = providedSpawnContract;
@@ -386,7 +412,10 @@ export function createOrchestrationTools(harness: AgentHarness) {
           spawnContractSource: contractSource,
           toolNames: args["tools"] as string[] | undefined,
           activateTools: args["activate_tools"] as string[] | undefined,
+          activateFamilies,
           additionalContext: mergedContext || undefined,
+          contextKeys,
+          contextBusPrefix,
           maxRounds: args["max_rounds"] as number | undefined,
           timeoutMs: args["timeout_ms"] as number | undefined,
           systemPrompt,
@@ -394,15 +423,13 @@ export function createOrchestrationTools(harness: AgentHarness) {
           dependsOn,
         });
 
-        const familyHint = mapContractToToolFamilies(spawnContract.objective, spawnContract.role);
-
         void promise; // already handled by forkChild internal completion callbacks
         return {
           ok: true,
           output:
             `Sub-agent spawned: task_id="${taskId}"\n` +
             `Contract source: ${contractSource}; role=${spawnContract.role}\n` +
-            `Pre-activated families: ${familyHint.families.join(", ")}\n` +
+            `(Tool families inferred at spawn — see subtask_spawned telemetry. Use activate_families for explicit provisioning.)\n` +
             (dependsOn && dependsOn.length > 0
               ? `Depends on: [${dependsOn.join(", ")}] — will wait for completion before proceeding.\n`
               : "") +
@@ -899,6 +926,9 @@ export function createOrchestrationTools(harness: AgentHarness) {
     child.registry.register(childTools.pathCriticTool);
     child.registry.register(childTools.policyCriticTool);
     child.registry.register(childTools.reflectDebateTool);
+    const childCtxTools = createAgentContextTools(child);
+    child.registry.register(childCtxTools.shareAgentContextTool);
+    child.registry.register(childCtxTools.readAgentContextTool);
     // Context tools — close over child's own ContextManager
     const { checkContextTool, compressContextTool } = createContextTools(child.getContext());
     child.registry.register(checkContextTool);

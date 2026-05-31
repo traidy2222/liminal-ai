@@ -8,6 +8,7 @@ import { useStickyAutoScroll } from "../../useStickyAutoScroll.js";
 import { ShellControls } from "./ShellControls.js";
 import { ShellComposer } from "./ShellComposer.js";
 import { ShellChatSwitcher } from "../../chat/ShellChatSwitcher.js";
+import { SubtaskInlineCard } from "../../SubtaskInspectorModal.js";
 
 // ── Palette ───────────────────────────────────────────────────────────────────
 
@@ -39,7 +40,7 @@ export function MinimalShell({ contract }: { contract: ShellContract }) {
 
   const {
     groupedMessages, surface, showRawHarness, error, busy,
-    signalHud,
+    signalHud, onInspectSubtask,
   } = contract;
 
   const isDisconnected = signalHud.label === "OFFLINE" || signalHud.label === "DEGRADED";
@@ -171,9 +172,7 @@ export function MinimalShell({ contract }: { contract: ShellContract }) {
                 })()}
 
                 {m.kind === "subtask" && (
-                  <div style={{ fontSize: 12, color: "#445566", paddingLeft: m.depth * 12 }}>
-                    {m.status === "done" ? "✓" : m.status === "error" ? "✗" : "→"} {m.goal.length > 70 ? m.goal.slice(0, 69) + "…" : m.goal}
-                  </div>
+                  <SubtaskInlineCard entry={m} onInspect={onInspectSubtask} />
                 )}
 
                 {m.kind === "pulse_nudge" && (

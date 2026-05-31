@@ -12,6 +12,15 @@ export const PROVIDER_PRESETS = [
     hint: "Latest DeepSeek. Main: v4-pro. Fast: v4-flash. DeepInfra pin.",
   },
   {
+    id: "openrouter-owl-stealth",
+    label: "OpenRouter Stealth — Owl Alpha (Hermes)",
+    baseURL: "https://openrouter.ai/api/v1",
+    model: "openrouter/owl-alpha",
+    apiKey: "",
+    needsKey: true,
+    hint: "Stealth owl-alpha — must use Stealth provider (not DeepInfra).",
+  },
+  {
     id: "mimo-v2.5",
     label: "OpenRouter — Xiaomi MiMo V2.5 Pro + MiMo V2.5",
     baseURL: "https://openrouter.ai/api/v1",

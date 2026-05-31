@@ -321,6 +321,9 @@ export class AgentBridge {
     on("subtask_spawned", (p) => this.maybeSend("subtask_spawned", p));
     on("subtask_complete", (p) => this.maybeSend("subtask_complete", p));
     on("subtask_output", (p) => this.maybeSend("subtask_output", p));
+    on("subtask_trace", (p) => this.maybeSend("subtask_trace", p));
+    on("subtask_tool_start", (p) => this.maybeSend("subtask_tool_start", p));
+    on("subtask_tool_result", (p) => this.maybeSend("subtask_tool_result", p));
 
     on("ask_user_answered", (p) => this.maybeSend("ask_user_answered", p));
     on("approval_decision", (p) => this.maybeSend("approval_decision", p));

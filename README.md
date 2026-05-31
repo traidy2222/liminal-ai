@@ -92,12 +92,18 @@ tools can require approval; use `--yolo` only in trusted environments.
 
 ```text
 packages/
-  core/   Harness engine (build → dist/)
-  tools/  Tool implementations (depends on core)
-  tui/    Ink terminal UI
-  web/    Express + React + SSE
-  eval/   Evaluation scenarios
+  core/        Harness engine (build → dist/)
+  tools/       Tool implementations (depends on core)
+  tui/         Ink terminal UI
+  web/         Express + React + SSE
+  eval/        Evaluation scenarios
+  enterprise/     Proprietary Enterprise Edition (EE) — separate commercial license
+  control-plane/  Stripe + Supabase billing + license issuance (deploy with website)
 ```
+
+> `packages/core`, `tools`, `tui`, and `web` are the **Community Edition (CE)**, licensed
+> FSL-1.1-MIT. `packages/enterprise` is the **Enterprise Edition (EE)**, proprietary and
+> separately licensed — see [License](#license).
 
 Build order: **core → tools** before running tui/web/eval. Contributor commands and invariants → **`CLAUDE.md`**.
 
@@ -150,11 +156,22 @@ Details: **`CLAUDE.md`** (agents) · **[docs/README.md](docs/README.md)** (opera
 
 ## License
 
-Liminal is released under the [Functional Source License 1.1, MIT Future License](LICENSE) (FSL-1.1-MIT). See [docs/reference/license.md](docs/reference/license.md) for a plain-language summary.
+Liminal is **open-core**:
+
+- **Community Edition (CE)** — `packages/core`, `tools`, `tui`, `web` — is released under the
+  [Functional Source License 1.1, MIT Future License](LICENSE) (FSL-1.1-MIT). CE is fully
+  functional on its own. See [docs/reference/license.md](docs/reference/license.md) for a
+  plain-language summary.
+- **Enterprise Edition (EE)** — `packages/enterprise` — is **proprietary**, licensed under
+  [`packages/enterprise/LICENSE-EE`](packages/enterprise/LICENSE-EE). It is **not** open
+  source and is **never** subject to the FSL MIT-future conversion. EE features only activate
+  with a valid license entitlement (`packages/core/src/entitlements.ts`).
+
+Community Edition (FSL) in brief:
 
 - **Permitted:** internal use (including commercial work inside your org), non-commercial education/research, professional services for licensees, and other non–Competing Use purposes.
 - **Not permitted:** commercial products or services that substitute for Liminal or offer substantially similar functionality.
-- **Future MIT:** each published version also becomes available under MIT on the second anniversary of the date we first publish that version.
+- **Future MIT:** each published CE version also becomes available under MIT on the second anniversary of the date we first publish that version.
 - **Redistribution:** include the LICENSE and preserve copyright notices when sharing copies or derivatives.
 
-FSL is fair-source, not an OSI-approved open source license. For enterprise or competing-use questions, contact Vireon Dynamics.
+FSL is fair-source, not an OSI-approved open source license. For enterprise, OEM/embed, or competing-use licensing, contact Vireon Dynamics.

@@ -117,6 +117,9 @@ export interface ShellContract {
   /** Abort in-progress turn (POST /api/session/abort). */
   onAbortTurn?: () => void;
 
+  /** Open the sub-agent inspector for a spawned task id. */
+  onInspectSubtask?(taskId: string): void;
+
   // ── Dictation (wired by ShellComposer) ───────────────────────────────────────
   dictationAudioCue: boolean;
   /** Mic session armed (continuous listening) — server voice/dictation mode for sends. */

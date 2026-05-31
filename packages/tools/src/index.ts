@@ -60,6 +60,7 @@ import {
 } from "./browser_tools.js";
 import { captchaSolveTool } from "./captcha_solve.js";
 import { createOrchestrationTools } from "./orchestration.js";
+import { createAgentContextTools } from "./agent_context_tools.js";
 import {
   runBackgroundTool,
   killProcessTool,
@@ -88,6 +89,7 @@ import {
   scheduleRunTool,
 } from "./task_scheduler.js";
 import { createSynthesisRunTool } from "./synthesis_run.js";
+import { createWorkflowTools } from "./workflow_tools.js";
 // New tools — Upgrade V
 import { createDecomposeGoalTool } from "./decompose_goal.js";
 import { createBranchExploreTool } from "./branch_explore.js";
@@ -291,6 +293,10 @@ export async function registerAllTools(
     registry.register(orch.policyCriticTool);
     registry.register(orch.reflectDebateTool);
 
+    const ctxTools = createAgentContextTools(harness);
+    registry.register(ctxTools.shareAgentContextTool);
+    registry.register(ctxTools.readAgentContextTool);
+
     // Context budget tools (check_context, compress_context, recall_compression) — close over harness context
     const { checkContextTool, compressContextTool } = createContextTools(harness.getContext());
     registry.register(checkContextTool);
@@ -327,6 +333,17 @@ export async function registerAllTools(
 
     // Upgrade VI: cross-domain synthesis sub-agent
     registry.register(createSynthesisRunTool(harness));
+
+    // Dynamic workflows (ultracode-equivalent) — root-only; fan out sub-agents
+    // per phase with results stored out of context. Excluded from child
+    // registries via ORCHESTRATION_TOOL_NAMES (children don't nest workflows).
+    if (resolveHarnessEnvRaw("AGENT_WORKFLOWS", prefs) !== "0") {
+      const wf = createWorkflowTools(harness);
+      registry.register(wf.planWorkflowTool);
+      registry.register(wf.runWorkflowTool);
+      registry.register(wf.workflowStatusTool);
+      registry.register(wf.queryWorkflowTool);
+    }
 
     // Upgrade VII: session tool index query, intra-round DAG scheduling, branch evaluation
     registry.register(createQueryToolOutputsTool(harness));

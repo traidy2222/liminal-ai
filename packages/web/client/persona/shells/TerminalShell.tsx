@@ -10,6 +10,7 @@ import { ShellControls } from "./ShellControls.js";
 import { ShellComposer } from "./ShellComposer.js";
 import { ShellChatSwitcher } from "../../chat/ShellChatSwitcher.js";
 import { LIM } from "../personaVars.js";
+import { SubtaskInlineCard } from "../../SubtaskInspectorModal.js";
 
 // ── Palette ───────────────────────────────────────────────────────────────────
 
@@ -68,7 +69,7 @@ export function TerminalShell({ contract }: { contract: ShellContract }) {
   const {
     groupedMessages, toolResultMap, surface, showRawHarness, error,
     attachError, busy,
-    signalHud, pct, personaDisplayLabel,
+    signalHud, pct, personaDisplayLabel, onInspectSubtask,
   } = contract;
 
   return (
@@ -233,13 +234,7 @@ export function TerminalShell({ contract }: { contract: ShellContract }) {
 
               case "subtask":
                 return (
-                  <div key={i} style={{ color: "#334455", fontSize: 11, paddingLeft: 18 + m.depth * 16 }}>
-                    <span style={{ color: MAGENTA }}>{"⤷".repeat(Math.max(1, m.depth))}</span>
-                    <span style={{ color: m.status === "done" ? GREEN : m.status === "error" ? RED_ERR : CYAN, marginLeft: 6 }}>
-                      {m.status === "done" ? "✓" : m.status === "error" ? "✗" : "⟳"}
-                    </span>
-                    <span style={{ color: "#445566", marginLeft: 6 }}>{m.goal.length > 80 ? m.goal.slice(0, 79) + "…" : m.goal}</span>
-                  </div>
+                  <SubtaskInlineCard key={i} entry={m} onInspect={onInspectSubtask} />
                 );
 
               case "trace":

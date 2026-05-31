@@ -1,10 +1,32 @@
 # License
 
-Liminal is licensed under the **Functional Source License, Version 1.1, MIT Future License** ([FSL-1.1-MIT](https://fsl.software/)).
+Liminal is **open-core**: a fair-source Community Edition plus a proprietary Enterprise Edition.
 
-The full text is in the repository root [`LICENSE`](https://github.com/traidy2222/liminal-ai/blob/main/LICENSE).
+The **Community Edition (CE)** is licensed under the **Functional Source License, Version 1.1, MIT Future License** ([FSL-1.1-MIT](https://fsl.software/)). The full text is in the repository root [`LICENSE`](https://github.com/traidy2222/liminal-ai/blob/main/LICENSE).
 
 > **Not legal advice.** This page summarizes the LICENSE in plain language. If anything here conflicts with the LICENSE file, the LICENSE file controls.
+
+## Editions: Community vs Enterprise (open-core)
+
+| Edition | Packages | License | Future MIT? |
+| ------- | -------- | ------- | ----------- |
+| **Community (CE)** | `packages/core`, `packages/tools`, `packages/tui`, `packages/web` | FSL-1.1-MIT (fair-source) | Yes — each version after 2 years |
+| **Enterprise (EE)** | `packages/enterprise` | Commercial ([`LICENSE-EE`](https://github.com/traidy2222/liminal-ai/blob/main/packages/enterprise/LICENSE-EE)) | **Never** |
+
+The Community Edition is fully functional on its own. Enterprise Edition adds paid,
+**entitlement-gated** features (cloud memory sync, team shared memory, audit log, RBAC,
+SSO, self-host). EE code is proprietary, is **not** open/fair-source, and never converts to
+MIT. EE features activate only when a valid license **entitlement** is present — verified
+offline by `packages/core/src/entitlements.ts`, which signs/verifies Ed25519 license tokens
+and falls back to the free Community tier whenever no valid license is found.
+
+**Tiers:** Community (free) · Pro · Team · Enterprise. See
+[vireondynamics.com](https://vireondynamics.com) for current pricing.
+
+**Billing backend:** `packages/control-plane` — Stripe + Supabase + `/api/license/*`
+endpoints that mint the same Ed25519 tokens the harness verifies in
+`entitlements.ts`. Deploy separately from the marketing `website/` repo; see
+[`packages/control-plane/README.md`](../../packages/control-plane/README.md).
 
 ## What FSL is (and is not)
 

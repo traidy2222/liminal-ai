@@ -114,7 +114,16 @@ import {
   formatCompensationReport,
   snapshotFileForCompensation,
 } from "./compensation_ledger.js";
-import { mapContractToToolFamilies } from "./contract_tool_mapper.js";
+import { inferSpawnToolFamiliesFromChildConfig } from "./contract_tool_mapper.js";
+import {
+  applySpawnToolInference,
+  inferSpawnToolsWithFastModel,
+} from "./spawn_tool_inference.js";
+import { wireSubtaskEventForwarding } from "./subtask_telemetry.js";
+import {
+  buildSpawnContextInjection,
+  finalizeChildSpawnTools,
+} from "./spawn_provisioning.js";
 import {
   shouldSkipHarnessSecondaryPassesForTurn,
   applyTurnInferenceHeuristics,
@@ -147,6 +156,7 @@ import {
   formatOutputEffortTraceLine,
   scaleMaxCompletionTokensForEffort,
 } from "./output_effort.js";
+import { detectWorkflowSignal } from "./workflow_spec.js";
 import { TtsTurnBudget } from "./tts_budget.js";
 import {
   LIVE_DICTATION_AFTER_TOOLS_NUDGE,
@@ -897,6 +907,12 @@ const ORCHESTRATION_TOOL_NAMES = new Set([
   "dispatch_graph",         // closes over harness._toolDag
   "branch_evaluate",        // closes over harness.forkChild + harness.orchestrator
   "speak",                  // harness-scoped TTS + speech SSE
+  "plan_workflow",          // root-only dynamic workflows — not nested by children
+  "run_workflow",           // closes over harness.forkChild + provider config
+  "workflow_status",        // closes over the in-process run registry
+  "query_workflow",         // closes over the run's out-of-context store
+  "share_agent_context",    // closes over harness.sharedBus
+  "read_agent_context",     // closes over harness.sharedBus + orchestrator
 ]);
 
 // ADAPTIVE_HINTS removed — unified into buildAdaptiveHint() with ERROR_TAXONOMY (#9)
@@ -2039,6 +2055,7 @@ export class AgentHarness {
           runtimePreferenceIntent: false,
           runtimeSettingsQuery: false,
           skipHarnessSecondaryPasses: true,
+          workflowSuitable: false,
           confidence: 1,
           source: "default",
           reason: "session_greeting",
@@ -2151,6 +2168,40 @@ export class AgentHarness {
         role: "system",
         content: buildEffortTurnInjection(),
       });
+      // Workflow opportunity detection (ultracode-style): recognize tasks where
+      // a dynamic workflow is the right tool. The fast-model intent classifier's
+      // `workflowSuitable` field is authoritative when it ran (handles paraphrases
+      // the regex can't); the `detectWorkflowSignal` heuristic is the fallback
+      // when the classifier is off / low-confidence. On a match, ACTIVATE the
+      // workflow family (lazy loading otherwise hides the tools, so the model
+      // can't call them and falls back to spawn_agent) and nudge.
+      if (this.agentDepth === 0 && this.registry.has("run_workflow")) {
+        const trustLlm = this.turnInference?.source === "llm";
+        const regexSignal = trustLlm ? null : detectWorkflowSignal(userMessage);
+        const wfMatch = trustLlm
+          ? this.turnInference!.workflowSuitable === true
+          : regexSignal?.match === true;
+        if (wfMatch) {
+          const reason = trustLlm
+            ? "a task that fans out into many independent sub-tasks"
+            : regexSignal?.reason || "a parallelizable task";
+          const toActivate = ["plan_workflow", "run_workflow", "workflow_status", "query_workflow"].filter(
+            (n) => this.registry.has(n) && !this.registry.isActive(n)
+          );
+          if (toActivate.length > 0) {
+            this.registry.activate(toActivate);
+            this.context.refreshProtocolDynamic(this.registry.getActiveToolNames());
+          }
+          this.context.appendMessage({
+            role: "system",
+            content:
+              `[WORKFLOW OPPORTUNITY] This turn looks like ${reason} — exactly where a dynamic workflow is powerful: ` +
+              "many INDEPENDENT sub-agents fan out in parallel and their intermediate results stay OUT of your context (only a distilled per-phase summary returns), so you can coordinate far more work without context blow-up. " +
+              "The workflow tools are now active. Prefer plan_workflow (draft the phases) → run_workflow (execute; approval-gated) over orchestrating spawn_agent calls yourself; use query_workflow to pull any per-agent detail afterward. " +
+              "If on reflection this is actually a small, single-step task, ignore this and proceed directly.",
+          });
+        }
+      }
     }
     if (
       !openingTurn &&
@@ -2656,33 +2707,44 @@ export class AgentHarness {
     childHarness.onChildCreated = this.onChildCreated;
     childHarness.onTurnEndCleanup = this.onTurnEndCleanup;
 
-    // Notify external code (orchestration tools) to register child-scoped tools
-    // (e.g. spawn_agent closing over childHarness for grandchild support)
-    if (depthAllowsOrchestration) {
-      this.onChildCreated?.(childHarness);
-    }
+    // Register harness-scoped tools (orchestration, context, collaboration).
+    // Always run — even at max depth leaf agents need share/read + check_context.
+    this.onChildCreated?.(childHarness);
 
     // Seed child active set AFTER onChildCreated so harness-scoped tools
     // (spawn_agent, wait_for_agents, check_context, …) are included.
     childRegistry.copyLazyPolicyFromParent(this.registry);
 
-    if (childConfig.spawnContract && childRegistry.isLazyToolLoading()) {
-      const mapped = mapContractToToolFamilies(
-        childConfig.spawnContract.objective,
-        childConfig.spawnContract.role
-      );
-      childRegistry.activateFamilies(mapped.families);
+    // Infer required tool families from spawn text (goal / user_prompt / contract).
+    // Runs for every spawn path — workflows, decompose_goal, spawn_agent — not only
+    // when a structured spawnContract was supplied.
+    let inferredFamilyMapping: ReturnType<typeof inferSpawnToolFamiliesFromChildConfig> | undefined;
+    if (childRegistry.isLazyToolLoading()) {
+      inferredFamilyMapping = inferSpawnToolFamiliesFromChildConfig({
+        goal: childConfig.goal,
+        taskBrief: childConfig.taskBrief,
+        userPrompt: childConfig.userPrompt,
+        systemPrompt: childConfig.systemPrompt,
+        spawnContract: childConfig.spawnContract,
+      });
+      childRegistry.activateFamilies(inferredFamilyMapping.families);
     }
 
     // Force-activate any explicitly requested tools regardless of parent's active set.
-    // This lets the spawner provision web, vault, shell, etc. for sub-agents that need
-    // capabilities the parent hasn't activated in lazy mode.
-    if (childConfig.activateTools?.length) {
-      childRegistry.activate(childConfig.activateTools);
-    }
+    // finalizeChildSpawnTools also applies contract allowlists, discovery tools,
+    // collaboration tools, and orchestration family when depth allows.
+    const provision = finalizeChildSpawnTools(childRegistry, childConfig, {
+      canOrchestrate: depthAllowsOrchestration,
+    });
+
+    const spawnActiveToolCount = provision.activeCount;
+    const spawnActiveFamilies = childRegistry
+      .getActiveFamilySummary(12)
+      .filter((f) => f.active > 0)
+      .map((f) => f.family);
 
     const dyn =
-      this.config.context.protocolDynamicBuilder?.(childHarness.registry.getActiveToolNames()) ??
+      this.config.context.protocolDynamicBuilder?.(childRegistry.getActiveToolNames()) ??
       "";
     const customSystemMsg: Message[] = childConfig.systemPrompt?.trim()
       ? [{ role: "system" as const, content: childConfig.systemPrompt.trim() }]
@@ -2696,6 +2758,7 @@ export class AgentHarness {
       ...subtaskTail,
       ...customSystemMsg,
     ]);
+    childHarness.getContext().refreshProtocolDynamic(childRegistry.getActiveToolNames());
 
     // ── Register in orchestrator ────────────────────────────────────────────
     this.orchestrator.register({
@@ -2717,6 +2780,9 @@ export class AgentHarness {
       depth: childDepth,
       contractSource: childConfig.spawnContractSource ?? (childConfig.spawnContract ? "provided" : "synthesized"),
       role: childConfig.spawnContract?.role,
+      activeToolCount: spawnActiveToolCount,
+      activeFamilies: spawnActiveFamilies,
+      inferredFamilies: inferredFamilyMapping?.families,
     });
     if (childConfig.spawnContract) {
       this.emitter.emit("spawn_contract_created", {
@@ -2733,10 +2799,8 @@ export class AgentHarness {
       });
     }
 
-    // Forward child text output to parent as subtask_output events (live streaming)
-    childHarness.emitter.on("text", ({ delta }) => {
-      this.emitter.emit("subtask_output", { taskId: childId, delta });
-    });
+    // Forward child activity to parent for sub-agent inspector UIs.
+    wireSubtaskEventForwarding(this.emitter, childHarness.emitter, childId);
 
     // ── Run child asynchronously ────────────────────────────────────────────
     const timeoutMs = childConfig.timeoutMs ?? 300_000;
@@ -2763,6 +2827,49 @@ export class AgentHarness {
                 throw new Error(reason);
               }
             }
+            if (childRegistry.isLazyToolLoading()) {
+              const llmInfer = await inferSpawnToolsWithFastModel(
+                this.client,
+                this.config.model,
+                childConfig,
+                { parentActiveTools: this.registry.getActiveToolNames() }
+              );
+              if (llmInfer.source === "llm") {
+                const applied = applySpawnToolInference(childRegistry, llmInfer, childConfig);
+                childHarness.getContext().refreshProtocolDynamic(childRegistry.getActiveToolNames());
+                this.emitter.emit("text", {
+                  channel: "trace",
+                  delta:
+                    `[SPAWN TOOLS] task=${childId.slice(0, 8)} ` +
+                    `families=${applied.familiesActivated.join(",") || "(none)"} ` +
+                    `tools+${applied.toolsActivated.length} ` +
+                    `active=${childRegistry.getActiveToolNames().length} — ${llmInfer.rationale}\n`,
+                });
+                this.emitter.emit("spawn_tools_inferred", {
+                  taskId: childId,
+                  parentTaskId: this.taskId,
+                  families: applied.familiesActivated,
+                  activateTools: applied.toolsActivated,
+                  activeToolCount: childRegistry.getActiveToolNames().length,
+                  rationale: llmInfer.rationale,
+                  source: llmInfer.source,
+                });
+              }
+            }
+
+            const injected = buildSpawnContextInjection(
+              this.orchestrator,
+              this.sharedBus,
+              this.taskId,
+              childConfig
+            );
+            if (injected.trim()) {
+              childHarness.getContext().appendMessage({
+                role: "user",
+                content: injected,
+              });
+            }
+
             return childHarness.send(
               childConfig.userPrompt?.trim() ?? childConfig.taskBrief?.trim() ?? childConfig.goal
             );

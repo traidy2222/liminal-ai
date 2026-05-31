@@ -252,6 +252,9 @@ export type MessageEntry =
       depth: number;
       status: "running" | "done" | "error" | "cancelled";
       partialOutput: string;
+      finalOutput?: string;
+      toolCalls?: SubtaskToolCallEntry[];
+      traceLog?: string;
     }
   | { kind: "context_compressed"; beforePct: number; afterPct: number; rounds: number }
   | {
@@ -270,6 +273,18 @@ export type MessageEntry =
       subgoalsPreview?: string;
       executionPreview?: string;
     };
+
+export type SubtaskToolCallEntry = {
+  callId: string;
+  name: string;
+  status: "running" | "done" | "error";
+  args?: Record<string, unknown>;
+  output?: string;
+  ok?: boolean;
+  startedAt: number;
+};
+
+export type SubtaskEntry = Extract<MessageEntry, { kind: "subtask" }>;
 
 interface ContextSnapshot {
   tokenCount: number;
@@ -378,6 +393,14 @@ export interface SSEState {
 
 const ORCH_TOOLS = new Set(["spawn_agent", "wait_for_agents", "cancel_agent", "list_agents"]);
 
+function mapSubtask(
+  messages: MessageEntry[],
+  taskId: string,
+  fn: (entry: Extract<MessageEntry, { kind: "subtask" }>) => Extract<MessageEntry, { kind: "subtask" }>
+): MessageEntry[] {
+  return messages.map((m) => (m.kind === "subtask" && m.taskId === taskId ? fn(m) : m));
+}
+
 type Action =
   | {
       type: "init_config";
@@ -434,8 +457,21 @@ type Action =
   | { type: "tool_timing"; payload: { callId: string; durationMs: number } }
   | { type: "error"; payload: { message: string } }
   | { type: "subtask_spawned"; payload: { taskId: string; parentTaskId: string; goal: string; depth: number } }
-  | { type: "subtask_complete"; payload: { taskId: string; ok: boolean } }
+  | { type: "subtask_complete"; payload: { taskId: string; ok: boolean; output?: string; rounds?: number } }
   | { type: "subtask_output"; payload: { taskId: string; delta: string } }
+  | { type: "subtask_trace"; payload: { taskId: string; delta: string } }
+  | { type: "subtask_tool_start"; payload: { taskId: string; callId: string; name: string } }
+  | {
+      type: "subtask_tool_result";
+      payload: {
+        taskId: string;
+        callId: string;
+        name: string;
+        args: Record<string, unknown>;
+        ok: boolean;
+        output: string;
+      };
+    }
   | { type: "plan_step_done"; payload: { stepIndex: number } }
   | { type: "context_compressed"; payload: { beforeFraction: number; afterFraction: number; roundsCompressed: number } }
   | { type: "persona_changed"; payload: { name: string } }
@@ -1059,6 +1095,8 @@ function reducer(state: SSEState, action: Action): SSEState {
             depth: action.payload.depth,
             status: "running",
             partialOutput: "",
+            toolCalls: [],
+            traceLog: "",
           },
         ],
       };
@@ -1066,24 +1104,100 @@ function reducer(state: SSEState, action: Action): SSEState {
     case "subtask_output":
       return {
         ...state,
-        messages: state.messages.map((m) =>
-          m.kind === "subtask" && m.taskId === action.payload.taskId
-            ? { ...m, partialOutput: m.partialOutput + action.payload.delta }
-            : m
-        ),
+        messages: mapSubtask(state.messages, action.payload.taskId, (m) => ({
+          ...m,
+          partialOutput: m.partialOutput + action.payload.delta,
+        })),
+      };
+
+    case "subtask_trace":
+      return {
+        ...state,
+        messages: mapSubtask(state.messages, action.payload.taskId, (m) => ({
+          ...m,
+          traceLog: (m.traceLog ?? "") + action.payload.delta,
+        })),
+      };
+
+    case "subtask_tool_start":
+      return {
+        ...state,
+        messages: mapSubtask(state.messages, action.payload.taskId, (m) => {
+          const toolCalls = m.toolCalls ?? [];
+          if (toolCalls.some((t) => t.callId === action.payload.callId)) return m;
+          return {
+            ...m,
+            toolCalls: [
+              ...toolCalls,
+              {
+                callId: action.payload.callId,
+                name: action.payload.name,
+                status: "running" as const,
+                startedAt: Date.now(),
+              },
+            ],
+          };
+        }),
+      };
+
+    case "subtask_tool_result":
+      return {
+        ...state,
+        messages: mapSubtask(state.messages, action.payload.taskId, (m) => {
+          const toolCalls = m.toolCalls ?? [];
+          const exists = toolCalls.some((t) => t.callId === action.payload.callId);
+          const updated = exists
+            ? toolCalls.map((t) =>
+                t.callId === action.payload.callId
+                  ? {
+                      ...t,
+                      name: action.payload.name,
+                      status: action.payload.ok ? ("done" as const) : ("error" as const),
+                      args: action.payload.args,
+                      ok: action.payload.ok,
+                      output: action.payload.output,
+                    }
+                  : t
+              )
+            : [
+                ...toolCalls,
+                {
+                  callId: action.payload.callId,
+                  name: action.payload.name,
+                  status: action.payload.ok ? ("done" as const) : ("error" as const),
+                  args: action.payload.args,
+                  ok: action.payload.ok,
+                  output: action.payload.output,
+                  startedAt: Date.now(),
+                },
+              ];
+          return { ...m, toolCalls: updated };
+        }),
       };
 
     case "subtask_complete":
       return {
         ...state,
-        messages: state.messages.map((m) =>
-          m.kind === "subtask" && m.taskId === action.payload.taskId
-            ? {
-                ...m,
-                status: action.payload.ok ? ("done" as const) : ("error" as const),
-              }
-            : m
-        ),
+        messages: mapSubtask(state.messages, action.payload.taskId, (m) => {
+          const out = action.payload.output?.trim() ?? "";
+          const toolCalls = (m.toolCalls ?? []).map((t) =>
+            t.status === "running"
+              ? {
+                  ...t,
+                  status: action.payload.ok ? ("done" as const) : ("error" as const),
+                  ok: action.payload.ok,
+                  output: t.output ?? (action.payload.ok ? "(completed)" : out.slice(0, 500)),
+                }
+              : t
+          );
+          return {
+            ...m,
+            status: action.payload.ok ? ("done" as const) : ("error" as const),
+            finalOutput: out || m.finalOutput,
+            partialOutput: m.partialOutput || out,
+            toolCalls,
+          };
+        }),
       };
 
     case "plan_step_done": {
@@ -1933,6 +2047,30 @@ export function useSSE(options?: {
         const p = parseEventData(e);
         if (p == null) return;
         dispatch({ type: "subtask_output", payload: p as never });
+      });
+      es.addEventListener("subtask_trace", (e: MessageEvent) => {
+        trackId(e);
+        markHarnessSemanticActivity();
+        flushNow();
+        const p = parseEventData(e);
+        if (p == null) return;
+        dispatch({ type: "subtask_trace", payload: p as never });
+      });
+      es.addEventListener("subtask_tool_start", (e: MessageEvent) => {
+        trackId(e);
+        markHarnessSemanticActivity();
+        flushNow();
+        const p = parseEventData(e);
+        if (p == null) return;
+        dispatch({ type: "subtask_tool_start", payload: p as never });
+      });
+      es.addEventListener("subtask_tool_result", (e: MessageEvent) => {
+        trackId(e);
+        markHarnessSemanticActivity();
+        flushNow();
+        const p = parseEventData(e);
+        if (p == null) return;
+        dispatch({ type: "subtask_tool_result", payload: p as never });
       });
       es.addEventListener("plan_step_done", (e: MessageEvent) => {
         trackId(e);

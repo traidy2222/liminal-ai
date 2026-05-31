@@ -41,6 +41,8 @@ export const OPENROUTER_MODEL_SLUG = {
   KIMI_K25: "moonshotai/kimi-k2.5",
   GLM_47: "z-ai/glm-4.7",
   GLM_47_FLASH: "z-ai/glm-4.7-flash",
+  // OpenRouter Stealth (Hermes / owl line)
+  OWL_ALPHA: "openrouter/owl-alpha",
 } as const;
 
 export interface ProviderModelPreset {
@@ -97,6 +99,19 @@ function deepseekV4PinPatch(): Record<string, string> {
   });
 }
 
+/** Stealth provider pin — required for openrouter/owl-alpha (404 if pinned to DeepInfra/DeepSeek). */
+function owlStealthPinPatch(): Record<string, string> {
+  return buildHarnessModelPackEnvPatch({
+    main: OPENROUTER_MODEL_SLUG.OWL_ALPHA,
+    fast: OPENROUTER_MODEL_SLUG.OWL_ALPHA,
+    baseURL: DEFAULT_AGENT_API_BASE_URL,
+    providerOrder: "Stealth",
+    providerOrderFast: "Stealth",
+    providerRouteAuto: "0",
+    allowFallbacks: "0",
+  });
+}
+
 /** Same-vendor or cross-vendor pack with OpenRouter auto routing + fallbacks. */
 function openRouterAutoRoutePatch(main: string, fast: string): Record<string, string> {
   return buildHarnessModelPackEnvPatch({
@@ -137,6 +152,30 @@ export const PROVIDER_MODEL_PRESETS: readonly ProviderModelPreset[] = [
       "Pinned to DeepInfra for prompt-cache affinity.",
     OPENROUTER_MODEL_SLUG.DEEPSEEK_V4_PRO,
     deepseekV4PinPatch()
+  ),
+  preset(
+    "openrouter-owl-stealth",
+    "OpenRouter Stealth — Owl Alpha",
+    "OpenRouter's Stealth owl-alpha (Hermes / agentic line). Main + fast both use owl-alpha. " +
+      "Must pin to Stealth provider — DeepInfra/DeepSeek pins return HTTP 404 for this slug.",
+    OPENROUTER_MODEL_SLUG.OWL_ALPHA,
+    owlStealthPinPatch()
+  ),
+  preset(
+    "mix-owl-stealth-deepseek-flash",
+    "Mix — Owl Alpha (Stealth) + DeepSeek Flash",
+    "Stealth owl-alpha main ReAct loop + DeepSeek v4-flash sidecars (intent, memory JSON). " +
+      "Main pinned to Stealth; fast tier uses OpenRouter auto-route.",
+    OPENROUTER_MODEL_SLUG.OWL_ALPHA,
+    buildHarnessModelPackEnvPatch({
+      main: OPENROUTER_MODEL_SLUG.OWL_ALPHA,
+      fast: OPENROUTER_MODEL_SLUG.DEEPSEEK_V4_FLASH,
+      baseURL: DEFAULT_AGENT_API_BASE_URL,
+      providerOrder: "Stealth",
+      providerOrderFast: "DeepInfra",
+      providerRouteAuto: "0",
+      allowFallbacks: "0",
+    })
   ),
   preset(
     "mimo-v2.5",

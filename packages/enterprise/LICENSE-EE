@@ -1,0 +1,85 @@
+Liminal Enterprise Edition — Commercial License Agreement
+Version 1.0
+
+Copyright 2026 Vireon Dynamics. All rights reserved.
+
+IMPORTANT — READ CAREFULLY. This is a summary skeleton of a commercial license,
+not legal advice. Have counsel review and finalize before relying on it.
+
+This software ("Enterprise Software") is the proprietary Enterprise Edition of
+Liminal. UNLIKE the Liminal Community Edition — which is offered under the
+Functional Source License (FSL-1.1-MIT) — this Enterprise Software is NOT
+open source, NOT fair-source, and is NOT subject to any future MIT or other
+permissive re-license. No FSL "MIT Future License" conversion applies to this
+Enterprise Software, ever.
+
+1. DEFINITIONS
+   "Vireon" means Vireon Dynamics. "You" means the entity that has procured a
+   valid, current commercial subscription or license to the Enterprise Software
+   from Vireon ("Subscription"). "Entitlement" means a license token issued by
+   Vireon that authorizes use of specific Enterprise features.
+
+2. LICENSE GRANT
+   Subject to Your compliance with this Agreement and an active Subscription,
+   Vireon grants You a non-exclusive, non-transferable, non-sublicensable,
+   revocable license to use the Enterprise Software solely for Your internal
+   business operations, limited to the features, seats, and term authorized by
+   Your Entitlement.
+
+3. RESTRICTIONS
+   You may NOT, except to the extent this restriction is unenforceable under
+   applicable law:
+   (a) copy, distribute, sublicense, sell, rent, lease, or make the Enterprise
+       Software available to any third party;
+   (b) host or offer the Enterprise Software, or any service substantially
+       based on it, to third parties (including as SaaS);
+   (c) reverse engineer, decompile, or disassemble the Enterprise Software;
+   (d) remove or alter any proprietary notices;
+   (e) circumvent, disable, or tamper with the Entitlement / license
+       verification mechanism, or use the Enterprise Software without a valid
+       Entitlement; or
+   (f) use the Enterprise Software to build a competing product or service.
+
+4. OWNERSHIP
+   The Enterprise Software is licensed, not sold. Vireon retains all right,
+   title, and interest, including all intellectual property rights, in and to
+   the Enterprise Software. No rights are granted except as expressly stated.
+
+5. COMMUNITY EDITION IS SEPARATE
+   The Liminal Community Edition is licensed separately under FSL-1.1-MIT (see
+   the repository root LICENSE). Nothing in this Agreement grants rights in the
+   Enterprise Software under those Community terms, and nothing in the Community
+   license grants rights in the Enterprise Software.
+
+6. TERM AND TERMINATION
+   This Agreement is effective until terminated. It terminates automatically if
+   You breach it or if Your Subscription lapses. On termination You must stop
+   using and delete all copies of the Enterprise Software. Sections 3, 4, 7, 8,
+   and 9 survive termination.
+
+7. CONFIDENTIALITY
+   The Enterprise Software and its non-public source are Vireon's confidential
+   information. You will protect them with at least reasonable care and not
+   disclose them except as permitted herein.
+
+8. DISCLAIMER OF WARRANTY
+   THE ENTERPRISE SOFTWARE IS PROVIDED "AS IS" WITHOUT WARRANTY OF ANY KIND,
+   EXPRESS OR IMPLIED, INCLUDING WARRANTIES OF MERCHANTABILITY, FITNESS FOR A
+   PARTICULAR PURPOSE, AND NON-INFRINGEMENT, EXCEPT AS REQUIRED BY LAW OR STATED
+   IN A SIGNED ORDER FORM.
+
+9. LIMITATION OF LIABILITY
+   TO THE MAXIMUM EXTENT PERMITTED BY LAW, VIREON WILL NOT BE LIABLE FOR ANY
+   INDIRECT, INCIDENTAL, SPECIAL, CONSEQUENTIAL, OR PUNITIVE DAMAGES, OR FOR
+   LOST PROFITS OR REVENUES. VIREON'S TOTAL LIABILITY UNDER THIS AGREEMENT WILL
+   NOT EXCEED THE FEES YOU PAID FOR THE ENTERPRISE SOFTWARE IN THE TWELVE (12)
+   MONTHS PRECEDING THE CLAIM.
+
+10. GENERAL
+   This Agreement is governed by the laws of the jurisdiction designated by
+   Vireon in the applicable order form. If any provision is unenforceable, the
+   rest remains in effect. This Agreement, together with any order form, is the
+   entire agreement regarding the Enterprise Software.
+
+For commercial licensing, enterprise terms, or an alternative license, contact
+Vireon Dynamics: https://vireondynamics.com

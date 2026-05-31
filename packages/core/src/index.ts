@@ -240,6 +240,41 @@ export {
 } from "./output_effort.js";
 export type { EffortLevel } from "./output_effort.js";
 export {
+  parseWorkflowSpec,
+  topoSortPhases,
+  buildPlanWorkflowPrompt,
+  detectWorkflowSignal,
+  defaultFamiliesForKind,
+  inferWorkflowTaskFamilies,
+  workflowNeedsWebTools,
+  WORKFLOW_WEB_ACTIVATE_TOOLS,
+  WORKFLOW_KNOWN_FAMILIES,
+  WORKFLOW_MAX_PHASES,
+  WORKFLOW_MAX_TASKS_PER_PHASE,
+  WORKFLOW_MAX_TOTAL_TASKS,
+} from "./workflow_spec.js";
+export type {
+  WorkflowSpec,
+  WorkflowPhaseSpec,
+  WorkflowTaskSpec,
+  WorkflowVerifySpec,
+  WorkflowPhaseKind,
+  WorkflowVerifyGate,
+  WorkflowSignal,
+  ParseWorkflowResult,
+} from "./workflow_spec.js";
+export { WorkflowStore, workflowRunDir } from "./workflow_store.js";
+export type { WorkflowAgentResult, WorkflowQueryHit } from "./workflow_store.js";
+export { WorkflowRuntime } from "./workflow_runtime.js";
+export type {
+  WorkflowReport,
+  PhaseSummary,
+  WorkflowSpawn,
+  WorkflowRuntimeDeps,
+  WorkflowSummarizeInput,
+  WorkflowVerifyInput,
+} from "./workflow_runtime.js";
+export {
   buildCuratorPrompt,
   parseCuratorPlan,
   applyCuratorSafetyRails,
@@ -349,7 +384,7 @@ export {
   resolveOpenRouterSessionId,
 } from "./openrouter_session.js";
 export type { OpenRouterSessionRequestExtras } from "./openrouter_session.js";
-export { resolveProviderConfig, resolveVisionProviderConfig, buildProviderRouting } from "./provider_config.js";
+export { resolveProviderConfig, resolveVisionProviderConfig, buildProviderRouting, isOpenRouterStealthModel, OPENROUTER_STEALTH_MODEL_SLUGS } from "./provider_config.js";
 export type { ProviderConfig, ProviderConfigOverrides, VisionProviderConfig, ProviderRouting } from "./provider_config.js";
 export {
   RUNTIME_PREFS_FILE,
@@ -571,5 +606,58 @@ export { WorldContextRefresher, gatherVolatileSnapshot, diffVolatileSnapshots } 
 export type { VolatileSnapshot } from "./world_context_delta.js";
 export { extractFacts, extractFactsRaw, publishToolFacts, readBusFacts } from "./fact_extractor.js";
 export type { ExtractedFact } from "./fact_extractor.js";
-export { mapContractToToolFamilies, TOOL_FAMILY_DESCRIPTORS } from "./contract_tool_mapper.js";
-export type { ContractFamilyMapping, ToolFamilyDescriptor } from "./contract_tool_mapper.js";
+export {
+  inferSpawnToolFamiliesFromChildConfig,
+  mapContractToToolFamilies,
+  TOOL_FAMILY_DESCRIPTORS,
+} from "./contract_tool_mapper.js";
+export type { ContractFamilyMapping, SpawnFamilyInferenceInput } from "./contract_tool_mapper.js";
+export type { ToolFamilyDescriptor } from "./contract_tool_mapper.js";
+export {
+  applySpawnToolInference,
+  buildSpawnToolInferencePrompt,
+  inferSpawnToolsWithFastModel,
+  parseSpawnToolInferencePayload,
+} from "./spawn_tool_inference.js";
+export type { SpawnToolInferenceResult } from "./spawn_tool_inference.js";
+export {
+  SPAWN_DISCOVERY_TOOL_NAMES,
+  SPAWN_COLLABORATION_TOOL_NAMES,
+  ensureSpawnDiscoveryTools,
+  ensureSpawnCollaborationTools,
+  activateSpawnContractAllowlist,
+  buildUpstreamDependencyContext,
+  buildSharedBusContext,
+  buildSpawnContextInjection,
+  finalizeChildSpawnTools,
+  ensureChildBaselineTools,
+  SPAWN_BASELINE_TOOL_NAMES,
+} from "./spawn_provisioning.js";
+export {
+  ENTITLEMENTS,
+  COMMUNITY_ENTITLEMENTS,
+  LICENSE_TIERS,
+  VIREON_LICENSE_PUBLIC_KEY_PEM,
+  ENTITLEMENT_GATED_FAMILIES,
+  entitlementsForTier,
+  parseLicenseToken,
+  verifyLicenseToken,
+  signLicenseToken,
+  resolveEntitlements,
+  loadResolvedEntitlements,
+  hasEntitlement,
+  gateFamiliesByEntitlements,
+  isFamilyEntitled,
+  readCachedLicenseToken,
+  writeCachedLicenseToken,
+  licenseCachePath,
+} from "./entitlements.js";
+export type {
+  LicenseTier,
+  EntitlementKey,
+  LicensePayload,
+  EntitlementStatus,
+  ResolvedEntitlements,
+  VerifyResult,
+  ResolveEntitlementsOptions,
+} from "./entitlements.js";

@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { resolveVisionProviderConfig } from "./provider_config.js";
+import { resolveVisionProviderConfig, buildProviderRouting, isOpenRouterStealthModel } from "./provider_config.js";
 
 test("resolveVisionProviderConfig uses product vision defaults, not chat model", () => {
   const prev = {
@@ -24,6 +24,47 @@ test("resolveVisionProviderConfig uses product vision defaults, not chat model",
     assert.equal(cfg.baseURL, "https://openrouter.ai/api/v1");
     assert.match(cfg.model, /nemotron-nano-12b-v2-vl:free|vision|vl/i);
     assert.notEqual(cfg.model, "qwen/qwen3.5-9b");
+  } finally {
+    for (const [k, v] of Object.entries(prev)) {
+      if (v === undefined) delete process.env[k];
+      else process.env[k] = v;
+    }
+  }
+});
+
+test("buildProviderRouting pins openrouter/owl-alpha to Stealth despite DeepInfra env", () => {
+  const prev = {
+    AGENT_PROVIDER_ORDER: process.env["AGENT_PROVIDER_ORDER"],
+    AGENT_PROVIDER_ROUTE_AUTO: process.env["AGENT_PROVIDER_ROUTE_AUTO"],
+    AGENT_PROVIDER_ALLOW_FALLBACKS: process.env["AGENT_PROVIDER_ALLOW_FALLBACKS"],
+  };
+  try {
+    process.env["AGENT_PROVIDER_ORDER"] = "DeepInfra";
+    process.env["AGENT_PROVIDER_ROUTE_AUTO"] = "1";
+    process.env["AGENT_PROVIDER_ALLOW_FALLBACKS"] = "0";
+    const routing = buildProviderRouting("openrouter/owl-alpha");
+    assert.ok(routing);
+    assert.deepEqual(routing!.order, ["Stealth"]);
+    assert.equal(isOpenRouterStealthModel("openrouter/owl-alpha"), true);
+  } finally {
+    for (const [k, v] of Object.entries(prev)) {
+      if (v === undefined) delete process.env[k];
+      else process.env[k] = v;
+    }
+  }
+});
+
+test("buildProviderRouting honors explicit order when route auto is off", () => {
+  const prev = {
+    AGENT_PROVIDER_ORDER: process.env["AGENT_PROVIDER_ORDER"],
+    AGENT_PROVIDER_ROUTE_AUTO: process.env["AGENT_PROVIDER_ROUTE_AUTO"],
+  };
+  try {
+    process.env["AGENT_PROVIDER_ORDER"] = "DeepInfra";
+    process.env["AGENT_PROVIDER_ROUTE_AUTO"] = "0";
+    const routing = buildProviderRouting("deepseek/deepseek-v4-pro");
+    assert.ok(routing);
+    assert.deepEqual(routing!.order, ["DeepInfra"]);
   } finally {
     for (const [k, v] of Object.entries(prev)) {
       if (v === undefined) delete process.env[k];

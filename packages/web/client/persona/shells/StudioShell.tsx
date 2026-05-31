@@ -11,6 +11,7 @@ import { categoryForTool } from "../categoryMeta.js";
 import { buildMessagesStyle, messageEntranceClass } from "../shellLayout.js";
 import { LIM } from "../personaVars.js";
 import type { MessageEntry } from "../../useSSE.js";
+import { SubtaskInlineCard } from "../../SubtaskInspectorModal.js";
 
 // ── Palette ───────────────────────────────────────────────────────────────────
 
@@ -122,7 +123,7 @@ export function StudioShell({ contract }: { contract: ShellContract }) {
 
   const {
     groupedMessages, toolResultMap, surface, showRawHarness, rawHarnessBlob, error,
-    busy, allToolCalls, personaDisplayLabel, personaName, showPanels, signalHud,
+    busy, allToolCalls, personaDisplayLabel, personaName, showPanels, signalHud, onInspectSubtask,
   } = contract;
 
   const activeCount = allToolCalls.filter(t => t.status === "running" || t.status === "streaming" || t.status === "pending_approval").length;
@@ -331,13 +332,7 @@ export function StudioShell({ contract }: { contract: ShellContract }) {
 
                   case "subtask":
                     return (
-                      <div key={i} style={{ paddingLeft: 12 + m.depth * 16, fontSize: 12, color: "#556677" }}>
-                        <span style={{ color: MAGENTA }}>{"⤷".repeat(Math.max(1, m.depth))}</span>
-                        <span style={{ color: m.status === "done" ? GREEN : m.status === "error" ? RED_ERR : CYAN, marginLeft: 6 }}>
-                          {m.status === "done" ? "✓" : m.status === "error" ? "✗" : "⟳"}
-                        </span>
-                        <span style={{ color: "#667788", marginLeft: 6 }}>{m.goal.length > 80 ? m.goal.slice(0, 79) + "…" : m.goal}</span>
-                      </div>
+                      <SubtaskInlineCard key={i} entry={m} onInspect={onInspectSubtask} />
                     );
 
                   case "trace":

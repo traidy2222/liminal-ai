@@ -10,6 +10,7 @@ import { buildPersonaBlock } from "./persona_presets.js";
 export const PROTOCOL_NAMED_RULES = `## Named rules (IDs — refer in think() when deciding)
 - **R-REASONING**: When scope or tool families are unclear, call think() with tool_families[], scope, unknowns[] — harness pre-activates families. think() = planning/orientation at task start or after disorienting results. reason() = inter-step inference after a tool result, brief not an essay. Obey [REASONING BUDGET] (depth, word count, toolFirst) — implementation belongs in tools, not reasoning text. If toolFirst=yes or thinkDepth=brief, brief think then tools immediately. When constraints are impossible, one sentence of honesty then best-effort via tools.
 - **R-EFFORT**: Match deliverable thoroughness to the per-session **[OUTPUT EFFORT]** block — completeness, edge-case coverage, and polish of the answer/artifact. This is independent of reasoning depth (R-REASONING): higher effort means more substance and coverage, not more words or more thinking.
+- **R-WORKFLOW**: When a task needs many coordinated agents or a repeatable audit/migration/multi-angle pattern (e.g. "audit every X", "migrate N files", cross-checked research), prefer a **workflow** (plan_workflow → run_workflow) over spawning agents by hand — intermediate results stay out of your context and only phase summaries return. For a handful of steps, just do the work directly.
 - **R-PLAN-CONTRACT**: For explicit ordered steps or numbered prerequisites, call plan() and execute in stated order. Stay within plan bounds (steps/time/tool budget) or replan — do not reorder or skip.
 - **R-HYPOTHESIZE**: When assumptions drive expensive tools or ambiguous diagnosis, call **hypothesize()** with claim + **falsifiers** + **next_test** (not prose-only think).
 - **R-TOOL-DISCIPLINE**: Prefer the narrowest active tool; activate a new family only when no active tool fits. Within one send, no identical repeat reads/retrievals (same file path, URL, or query). On tool failure with explicit remediation, apply it once; if same intent fails twice with near-identical args, stop and replan.
@@ -223,21 +224,27 @@ When AGENT_BROWSER=1 and Chromium is installed (npm run browser:install):
 
 const ORCHESTRATION = `## Sub-agent orchestration
 Spawn only when: independent work, real parallelism win, clear goal. Never spawn two writers on the same file — plan file ownership first.
-Pattern: plan → spawn branches → wait_for_agents → merge → verify_result on hard tasks.
+Pattern: plan → share_agent_context (curate findings) → spawn branches → wait_for_agents → read_agent_context → merge → verify_result on hard tasks.
 Limits: depth ≤3, ≤8 concurrent agents, grandchildren cannot spawn.
 
-**Tool provisioning** — two independent params:
-- activate_tools: string[] — **additive**. Force-activate specific tools in the child regardless of what is currently active in the parent. Use this to give sub-agents the capabilities they need for their job. Every registered tool name is valid.
-- tools: string[] — **restrictive** allowlist. Limits child to ONLY these tools. Use for read-only critics. If omitted, child inherits all currently active tools plus anything in activate_tools.
+**Tool provisioning** — three params (all additive unless noted):
+- activate_families: string[] — **preferred**. Force-activate whole families (code_intel, shell, web, browser, git, …). Most reliable under lazy loading.
+- activate_tools: string[] — force specific tool names when a family is too broad.
+- tools: string[] — **restrictive** allowlist. Limits child to ONLY these tools (read-only critics). If omitted, child gets inferred families + activate_*.
+
+Spawn-time inference (BM25 + fast model) pre-activates families from user_prompt — but always set activate_families when you know the job (e.g. web research → ["web","memory_advanced"]).
+
+**Context handoff** — keep sub-agents warm without stuffing the parent context:
+- share_agent_context({ key, summary, payload }) — publish curated bundles to the session bus.
+- spawn_agent({ context_keys: ["ctx/…"], depends_on: ["upstream-task-id"] }) — inject shared keys + upstream outputs automatically.
+- read_agent_context({ keys, prefix: "ctx/", include_upstream: true }) — pull sibling/sub-agent results before merging.
 
 **Prompt contract (R-SPAWN)**: Every spawn_agent call must include system_prompt and user_prompt.
-- system_prompt: specialist role + constraints + output format. The sub-agent uses this as its final system instruction.
-  Example: "You are a TypeScript code author. Write clean, typed code only. Output the full file content, no prose."
+- system_prompt: specialist role + constraints + output format.
 - user_prompt: full detailed task message (replaces goal as the actual first turn).
-  Example: "Implement the parseMarkdown() function in src/parser.ts. It must handle bold, italic, and code spans. Include JSDoc. No external deps."
-- goal: short label shown in list_agents only — not seen by the sub-agent if user_prompt is set.
+- goal: short label for list_agents only.
 
-Without system_prompt + user_prompt the sub-agent wakes up with no role, no output contract, and produces generic results.`;
+Without system_prompt + user_prompt the sub-agent wakes up with no role and produces generic results.`;
 
 const VAULT_PROTOCOL = `## Knowledge vault (Obsidian)
 Treat the vault as the world wiki and default source of truth for project/domain knowledge.
@@ -514,6 +521,16 @@ export function buildProtocolDynamicSuffix(
   }
   if (names.has("spawn_agent")) {
     parts.push(ORCHESTRATION);
+  }
+  if (names.has("run_workflow")) {
+    parts.push(
+      "## Dynamic workflows (R-WORKFLOW)\n" +
+        "A workflow runs a multi-phase plan whose sub-agent results stay OUT of your context — only a distilled per-phase summary returns. **Powerful for:** auditing/sweeping every file·endpoint·route·module; large migrations/refactors across a codebase; building many independent components in parallel; multi-angle research that cross-checks sources adversarially. Reach for it whenever the work splits into many independent tasks — prefer it over orchestrating spawn_agent yourself.\n" +
+        "- **plan_workflow({goal})** drafts a phase plan (understand → execute → verify) WITHOUT running it. Review it.\n" +
+        "- **run_workflow({spec})** executes that plan (approval-gated). Pass the spec from plan_workflow; or run_workflow({goal}) to plan+run in one step.\n" +
+        "- **query_workflow({run_id, query})** retrieves a specific per-agent detail afterward; **workflow_status({run_id})** lists phase outcomes.\n" +
+        "Don't reach for a workflow when a few direct tool calls suffice."
+    );
   }
   if (names.has("feature_checklist")) {
     parts.push(

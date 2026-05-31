@@ -261,6 +261,11 @@ Web **Settings** writes to (2). See [Configuration basics](../start/configuratio
 | `AGENT_WEB_FETCH_USER_AGENT` | `Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/136.0.0.0 Safari/537.36` | yes | no | web_research | Harness environment toggle for Web Fetch User Agent. See docs/configuration.md (web research). |
 | `AGENT_WEB_READABILITY` | `1` | yes | no | web_research | Harness environment toggle for Web Readability. See docs/configuration.md (web research). |
 | `AGENT_WEB_RESEARCH` | `1` | yes | no | web_research | Harness environment toggle for Web Research. See docs/configuration.md (web research). |
+| `AGENT_WORKFLOWS` | `1` | yes | no | harness | Master switch for dynamic workflows (plan_workflow / run_workflow) — multi-phase sub-agent fan-out with results kept out |
+| `AGENT_WORKFLOW_MAX_AGENTS` | `64` | yes | no | harness | Total sub-agent cap per workflow run (clamped 1–500). |
+| `AGENT_WORKFLOW_MAX_CONCURRENT` | `4` | yes | no | harness | Max concurrent sub-agents per workflow phase wave (clamped 1–16). |
+| `AGENT_WORKFLOW_MODEL` | `` | yes | no | harness | Optional model slug for the workflow planner/summarizer. Empty = fast model. |
+| `AGENT_WORKFLOW_TIMEOUT_MS` | `1800000` | yes | no | harness | Wall-clock cap for a single workflow run. |
 | `AGENT_WRITE_INTEGRITY_NUDGE` | `1` | yes | no | harness | Harness environment toggle for Write Integrity Nudge. See docs/configuration.md (harness). |
 | `AGENT_WRITE_PART_MAX_CHARS` | `512000` | yes | no | harness | Harness environment toggle for Write Part Max Chars. See docs/configuration.md (harness). |
 | `AGENT_WRITE_STREAM_SINK` | `1` | yes | no | harness | Harness environment toggle for Write Stream Sink. See docs/configuration.md (harness). |

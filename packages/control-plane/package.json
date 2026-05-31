@@ -1,0 +1,33 @@
+{
+  "name": "@liminal/control-plane",
+  "version": "0.1.0",
+  "description": "Vireon control plane — Stripe billing, Supabase entitlements, Ed25519 license issuance",
+  "license": "FSL-1.1-MIT",
+  "private": true,
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc --noEmit",
+    "start": "node --import tsx/esm src/server.ts",
+    "dev": "node --import tsx/esm --watch src/server.ts",
+    "test": "tsx --test src/**/*.test.ts",
+    "keys:generate": "node scripts/generate-license-keys.mjs"
+  },
+  "dependencies": {
+    "@liminal/core": "*",
+    "@supabase/supabase-js": "^2.49.0",
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.0",
+    "express": "^4.21.0",
+    "stripe": "^17.7.0"
+  },
+  "devDependencies": {
+    "@types/cors": "^2.8.17",
+    "@types/express": "^4.17.21",
+    "@types/node": "^22.0.0",
+    "tsx": "^4.19.0",
+    "typescript": "^5.6.0"
+  }
+}

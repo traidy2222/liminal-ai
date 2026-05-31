@@ -289,6 +289,15 @@ export interface TurnInferenceResult {
   /** User asks to read/check current runtime or persona control values. */
   runtimeSettingsQuery: boolean;
   /**
+   * Task is a strong fit for a DYNAMIC WORKFLOW: it splits into many INDEPENDENT
+   * sub-tasks that can run in parallel — codebase-wide audits/sweeps, large
+   * migrations/refactors, building many components in parallel, or multi-angle
+   * research that cross-checks sources. The harness auto-activates the workflow
+   * tools and nudges toward plan_workflow → run_workflow when this is true.
+   * (Replaces the regex heuristic when the classifier is trusted.)
+   */
+  workflowSuitable: boolean;
+  /**
    * User mainly wants a short assistant self-intro, persona surface, or compact capability
    * overview — skip harness [CONTINUE] / finalize extension chains unless they asked for
    * substantive work.
@@ -354,6 +363,7 @@ export function neutralTurnInferenceResult(
     runtimePreferenceIntent: false,
     runtimeSettingsQuery: false,
     skipHarnessSecondaryPasses: false,
+    workflowSuitable: false,
     confidence: 0.5,
     reasoningEffort: fb.reasoningEffort,
     thinkDepth: fb.thinkDepth,
@@ -529,6 +539,7 @@ function buildInferenceFromParsed(
     runtimePreferenceIntent: Boolean(parsed["runtimePreferenceIntent"]),
     runtimeSettingsQuery: Boolean(parsed["runtimeSettingsQuery"]),
     skipHarnessSecondaryPasses: Boolean(parsed["skipHarnessSecondaryPasses"]),
+    workflowSuitable: intent === "conversational" ? false : Boolean(parsed["workflowSuitable"]),
     confidence,
     source,
     reason,
@@ -544,7 +555,7 @@ const INFERENCE_SYSTEM_PROMPT =
   "likelyEditPaths:string[],stancePrompt:boolean,overInferenceRisk:boolean," +
   "exploratoryCreative:boolean,identityQuery:boolean,identityProvision:boolean,personaIdentityPrompt:boolean,runtimeIdentityPrompt:boolean,deckIntent:boolean," +
   "freshnessSensitive:boolean,visionIntent:boolean,buildDeliverable:boolean,implementShip:boolean," +
-  "runtimePreferenceIntent:boolean,runtimeSettingsQuery:boolean,skipHarnessSecondaryPasses:boolean," +
+  "runtimePreferenceIntent:boolean,runtimeSettingsQuery:boolean,skipHarnessSecondaryPasses:boolean,workflowSuitable:boolean," +
   "reasoningEffort:'none'|'low'|'medium'|'high'|'xhigh',thinkDepth:'skip'|'brief'|'standard'|'deep',toolFirstBias:boolean," +
   "reasoningWordBudget:number,essayRisk:boolean,confidence:number,reason:string}. " +
   "INTENT CLASSES (mutually exclusive): " +
@@ -601,6 +612,8 @@ const INFERENCE_SYSTEM_PROMPT =
   "runtimePreferenceIntent=true when the user asks to change runtime behavior/settings/preferences (humor, formality, persona dials). " +
   "runtimeSettingsQuery=true when user asks to check/read current runtime settings or current persona controls. " +
   "overInferenceRisk=true when the request invites speculative user-belief attribution. " +
+  "workflowSuitable=true ONLY when the task naturally splits into MANY INDEPENDENT sub-tasks that could run in parallel — e.g. auditing/sweeping every file·endpoint·route·module across a codebase, a large migration/refactor spanning many files, building several independent components in parallel, or multi-angle research that cross-checks several sources against each other. " +
+  "These benefit from a dynamic workflow (fan-out sub-agents, results kept out of context). Set FALSE for ordinary single-goal coding, a single-file build, one-shot Q&A, or anything a handful of sequential tool calls handles — bigness alone is not enough; it must be PARALLELIZABLE into independent pieces. " +
   "confidence is 0–1 for your overall classification certainty.";
 
 export async function inferTurnInference(

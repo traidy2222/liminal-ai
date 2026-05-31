@@ -207,7 +207,7 @@ export const TOOL_FAMILIES: Record<string, { description: string; tools: readonl
     ],
   },
   orchestration: {
-    description: "Sub-agents, critics, world refresh (requires harness).",
+    description: "Sub-agents, critics, shared context, world refresh (requires harness).",
     tools: [
       "spawn_agent",
       "wait_for_agents",
@@ -220,8 +220,15 @@ export const TOOL_FAMILIES: Record<string, { description: string; tools: readonl
       "reflect_debate",
       "branch_explore",
       "branch_evaluate",
+      "share_agent_context",
+      "read_agent_context",
       "refresh_world_context",
     ],
+  },
+  workflow: {
+    description:
+      "Dynamic workflows: plan and run a multi-phase plan that fans out sub-agents, keeping intermediate results out of context. Harness-scoped, root-only.",
+    tools: ["plan_workflow", "run_workflow", "workflow_status", "query_workflow"],
   },
 };
 
@@ -294,6 +301,10 @@ const MAX_AUTONOMY_TOOLS = [
   ...TOOL_FAMILIES.files_edit.tools,
   ...TOOL_FAMILIES.document.tools,
   ...TOOL_FAMILIES.vision.tools,
+  // Workflow entry points are visible without activation in max_autonomy so the
+  // model can reach for dynamic workflows on big parallel jobs. Filtered against
+  // the live registry, so harmless when AGENT_WORKFLOWS is off.
+  ...TOOL_FAMILIES.workflow.tools,
 ];
 
 function resolveAlwaysToolsProfile(): AlwaysToolsProfile {
@@ -316,7 +327,12 @@ function getProfileSeedTools(profile: AlwaysToolsProfile): readonly string[] {
 }
 
 /** Context tools only exist after registerAllTools(..., harness). */
-export const CORE_HARNESS_TOOLS: readonly string[] = ["check_context", "compress_context"];
+export const CORE_HARNESS_TOOLS: readonly string[] = [
+  "check_context",
+  "compress_context",
+  "share_agent_context",
+  "read_agent_context",
+];
 
 function browserAlwaysActiveTools(): readonly string[] {
   if (effectiveHarnessEnvRaw("AGENT_BROWSER_ALWAYS_ACTIVE") !== "1") return [];

@@ -28,6 +28,14 @@ const SLUG_PREFIX_TO_PROVIDER: Record<string, string> = {
   xai: "xAI",
 };
 
+/** OpenRouter slugs that only accept the Stealth provider (not DeepInfra / vendor pins). */
+export const OPENROUTER_STEALTH_MODEL_SLUGS: readonly string[] = ["openrouter/owl-alpha"];
+
+export function isOpenRouterStealthModel(modelSlug: string): boolean {
+  const s = modelSlug.trim().toLowerCase();
+  return OPENROUTER_STEALTH_MODEL_SLUGS.some((m) => m.toLowerCase() === s);
+}
+
 function deriveProviderFromModelSlug(slug: string): string | null {
   const prefix = slug.split("/")[0]?.toLowerCase() ?? "";
   return SLUG_PREFIX_TO_PROVIDER[prefix] ?? null;
@@ -46,11 +54,13 @@ export function buildProviderRouting(
   modelSlug: string,
   isFastModel = false
 ): ProviderRouting | null {
-  const auto = effectiveHarnessEnvRaw("AGENT_PROVIDER_ROUTE_AUTO")?.trim();
-  if (auto === "0") return null;
-
   const allowFallbacks =
     effectiveHarnessEnvRaw("AGENT_PROVIDER_ALLOW_FALLBACKS")?.trim() !== "0";
+
+  // Stealth-only models — global DeepInfra/DeepSeek pins cause HTTP 404 on OpenRouter.
+  if (isOpenRouterStealthModel(modelSlug)) {
+    return { order: ["Stealth"], allow_fallbacks: allowFallbacks };
+  }
 
   // Fast model has its own provider order (sidecar calls: intent, distill, critic, rewrite)
   if (isFastModel) {
@@ -73,6 +83,9 @@ export function buildProviderRouting(
       .filter(Boolean);
     if (order.length > 0) return { order, allow_fallbacks: allowFallbacks };
   }
+
+  const auto = effectiveHarnessEnvRaw("AGENT_PROVIDER_ROUTE_AUTO")?.trim();
+  if (auto === "0") return null;
 
   const derived = deriveProviderFromModelSlug(modelSlug);
   if (!derived) return null;

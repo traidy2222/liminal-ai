@@ -1,0 +1,23 @@
+{
+  "name": "@liminal/enterprise",
+  "version": "0.1.0",
+  "description": "Liminal Enterprise Edition (EE) — proprietary, entitlement-gated commercial features. NOT covered by the FSL Community license.",
+  "license": "SEE LICENSE IN LICENSE-EE",
+  "private": true,
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc --noEmit",
+    "test": "tsx --test src/enterprise_registration.test.ts"
+  },
+  "dependencies": {
+    "@liminal/core": "*"
+  },
+  "devDependencies": {
+    "typescript": "^5.6.0",
+    "@types/node": "^22.0.0",
+    "tsx": "^4.19.0"
+  }
+}

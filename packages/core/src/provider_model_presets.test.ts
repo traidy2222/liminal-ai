@@ -66,6 +66,16 @@ test("resolveProviderModelPresetId matches OpenRouter base + main slug", () => {
 
 
 
+test("owl stealth preset pins Stealth provider and owl-alpha slug", () => {
+  const owl = PROVIDER_MODEL_PRESETS.find((p) => p.id === "openrouter-owl-stealth")!;
+  assert.equal(owl.model, OPENROUTER_MODEL_SLUG.OWL_ALPHA);
+  assert.equal(owl.harnessEnvPatch.AGENT_MODEL, OPENROUTER_MODEL_SLUG.OWL_ALPHA);
+  assert.equal(owl.harnessEnvPatch.AGENT_PROVIDER_ORDER, "Stealth");
+  assert.equal(owl.harnessEnvPatch.AGENT_PROVIDER_ORDER_FAST, "Stealth");
+});
+
+
+
 test("latest vendor packs use current OpenRouter slugs", () => {
 
   const google = PROVIDER_MODEL_PRESETS.find((p) => p.id === "google-gemini-3.5")!;
