@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 const WEB_SERVER_BASE = "";
 
@@ -19,12 +19,17 @@ type Props = {
 
 export function InferenceUsageBanner({ vireonConnected, managedRoute }: Props) {
   const [status, setStatus] = useState<InferenceStatus | null>(null);
+  const hadVireon = useRef(vireonConnected);
 
   const load = useCallback(async () => {
     if (!vireonConnected) {
-      setStatus(null);
+      if (hadVireon.current) {
+        hadVireon.current = false;
+        setStatus(null);
+      }
       return;
     }
+    hadVireon.current = true;
     try {
       const r = await fetch(`${WEB_SERVER_BASE}/api/vireon/inference-status`);
       if (!r.ok) return;

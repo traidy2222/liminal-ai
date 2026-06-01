@@ -1811,7 +1811,7 @@ export function App() {
     } finally {
       setVireonBusy(false);
     }
-  }, []);
+  }, [loadSettings]);
 
   const handleVireonSignOut = useCallback(async () => {
     setVireonBusy(true);
