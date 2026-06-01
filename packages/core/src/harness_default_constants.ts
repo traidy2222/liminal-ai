@@ -68,6 +68,16 @@ export const HARNESS_ENV_DEFAULTS: Readonly<Record<string, string>> = {
   /** ms — hard cap on continuous recording (safety). */
   AGENT_DICTATION_MAX_RECORDING_MS: "60000",
   AGENT_API_BASE_URL: DEFAULT_AGENT_API_BASE_URL,
+  /** byok | managed | auto — auto uses managed when entitled; with PREFER_MANAGED, also when a local API key exists. */
+  AGENT_INFERENCE_MODE: "auto",
+  /** When 1, auto mode uses Vireon managed inference for entitled Pro+ even if AGENT_API_KEY is set. */
+  AGENT_INFERENCE_PREFER_MANAGED: "1",
+  AGENT_INFERENCE_BASE_URL: "https://api.vireondynamics.com/v1/inference",
+  AGENT_INFERENCE_SESSION_URL: "https://www.vireondynamics.com/api/inference/session",
+  AGENT_INFERENCE_SESSION_TOKEN: "",
+  /** Marketing site origin for `liminal login` / connect flow (override for staging). */
+  AGENT_VIREON_SITE_URL: "https://www.vireondynamics.com",
+  AGENT_LICENSE_PREFER_ENV: "0",
   AGENT_MODEL: DEFAULT_AGENT_MODEL_SLUG,
   AGENT_FAST_MODEL: DEFAULT_AGENT_FAST_MODEL_SLUG,
   AGENT_SAFETY_JUDGE_MODEL: DEFAULT_AGENT_FAST_MODEL_SLUG,

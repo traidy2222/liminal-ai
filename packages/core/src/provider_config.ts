@@ -104,7 +104,8 @@ export interface ProviderConfig {
     | "OPENROUTER_API_KEY"
     | "OPENAI_API_KEY"
     | "ANTHROPIC_API_KEY"
-    | "XAI_API_KEY";
+    | "XAI_API_KEY"
+    | "VIREON_MANAGED";
 }
 
 export interface ProviderConfigOverrides {

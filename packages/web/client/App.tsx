@@ -4,6 +4,7 @@ import { MEMORY_SYNC_LABEL, presentAutoDream } from "./autoDreamPresent.js";
 import { applyPersonaDocumentTheme } from "./applyPersonaDocumentTheme.js";
 import { AssistantMessageContent, renderFencedCodeBlock } from "./liminalMarkdown.js";
 import { SettingsModal } from "./settings/SettingsModal.js";
+import { InferenceUsageBanner } from "./InferenceUsageBanner.js";
 import { PROVIDER_PRESETS, PROVIDER_PRESET_CUSTOM_ID } from "./settings/providerPresets.js";
 import { resolveInputShortcut } from "./inputSemantics.js";
 import {
@@ -1566,6 +1567,11 @@ export function App() {
   const [settingsLoading, setSettingsLoading] = useState(false);
   const [settingsSaving, setSettingsSaving] = useState(false);
   const [settingsError, setSettingsError] = useState<string | null>(null);
+  const [vireonConnected, setVireonConnected] = useState(false);
+  const [vireonEmail, setVireonEmail] = useState<string | null>(null);
+  const [vireonTier, setVireonTier] = useState<string | null>(null);
+  const [vireonBusy, setVireonBusy] = useState(false);
+  const [settingsManagedRoute, setSettingsManagedRoute] = useState(false);
 
   const submittingRef = useRef(false);
   const sessionStartRef = useRef<number | null>(null);
@@ -1619,8 +1625,21 @@ export function App() {
     setSettingsLoading(true);
     setSettingsError(null);
     try {
-      const r = await fetch(`${WEB_SERVER_BASE}/api/settings`);
+      const [r, vr] = await Promise.all([
+        fetch(`${WEB_SERVER_BASE}/api/settings`),
+        fetch(`${WEB_SERVER_BASE}/api/vireon/account`),
+      ]);
       if (!r.ok) throw new Error(await r.text());
+      if (vr.ok) {
+        const vj = (await vr.json()) as {
+          connected?: boolean;
+          account?: { email?: string } | null;
+          tier?: string;
+        };
+        setVireonConnected(Boolean(vj.connected));
+        setVireonEmail(vj.account?.email ?? null);
+        setVireonTier(vj.tier ?? null);
+      }
       const j = (await r.json()) as {
         fields: HarnessSettingsApiField[];
         tabs?: { id: string; title: string }[];
@@ -1630,6 +1649,8 @@ export function App() {
           modelLockedByEnv?: boolean;
           baseURLLockedByEnv?: boolean;
           apiKeyConfigured?: boolean;
+          managedRoute?: boolean;
+          inferenceMode?: string;
         };
         hint?: string;
       };
@@ -1641,6 +1662,9 @@ export function App() {
       setSettingsProviderModelLocked(j.provider?.modelLockedByEnv ?? false);
       setSettingsProviderBaseLocked(j.provider?.baseURLLockedByEnv ?? false);
       setSettingsProviderApiKeyConfigured(j.provider?.apiKeyConfigured ?? false);
+      setSettingsManagedRoute(
+        Boolean(j.provider?.managedRoute) || j.provider?.inferenceMode === "managed"
+      );
       const draft: Record<string, string> = {};
       for (const f of j.fields ?? []) draft[f.key] = f.value;
       setSettingsEnvDraft(draft);
@@ -1654,6 +1678,33 @@ export function App() {
   useEffect(() => {
     if (settingsOpen) void loadSettings();
   }, [settingsOpen, loadSettings]);
+
+  useEffect(() => {
+    void (async () => {
+      try {
+        const vr = await fetch(`${WEB_SERVER_BASE}/api/vireon/account`);
+        if (vr.ok) {
+          const vj = (await vr.json()) as {
+            connected?: boolean;
+            account?: { email?: string };
+            tier?: string;
+          };
+          setVireonConnected(Boolean(vj.connected));
+          setVireonEmail(vj.account?.email ?? null);
+          setVireonTier(vj.tier ?? null);
+        }
+        const sr = await fetch(`${WEB_SERVER_BASE}/api/settings`);
+        if (sr.ok) {
+          const sj = (await sr.json()) as { provider?: { managedRoute?: boolean; inferenceMode?: string } };
+          setSettingsManagedRoute(
+            Boolean(sj.provider?.managedRoute) || sj.provider?.inferenceMode === "managed"
+          );
+        }
+      } catch {
+        /* optional */
+      }
+    })();
+  }, []);
 
   const applyProviderPreset = useCallback(
     (presetId: string) => {
@@ -1694,12 +1745,19 @@ export function App() {
         if (v === undefined) continue;
         env[f.key] = v;
       }
+      const mode = env["AGENT_INFERENCE_MODE"]?.trim().toLowerCase();
+      const inferenceMode =
+        mode === "byok" || mode === "managed" || mode === "auto" ? mode : undefined;
       const r = await fetch(`${WEB_SERVER_BASE}/api/settings`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          harness: { env: env },
-          provider: { model: settingsProviderModel, baseURL: settingsProviderBase },
+          harness: { env },
+          provider: {
+            model: settingsProviderModel,
+            baseURL: settingsProviderBase,
+            ...(inferenceMode ? { inferenceMode } : {}),
+          },
         }),
       });
       if (!r.ok) {
@@ -1720,6 +1778,54 @@ export function App() {
       setSettingsSaving(false);
     }
   }, [settingsFields, settingsEnvDraft, settingsProviderModel, settingsProviderBase]);
+
+  const handleVireonSignIn = useCallback(async () => {
+    setVireonBusy(true);
+    setSettingsError(null);
+    try {
+      const r = await fetch(`${WEB_SERVER_BASE}/api/vireon/connect/begin`);
+      const j = (await r.json()) as { connectUrl?: string; error?: string };
+      if (!r.ok || !j.connectUrl) throw new Error(j.error ?? "Could not start sign-in");
+      const popup = window.open(j.connectUrl, "_blank", "noopener,noreferrer");
+      setSettingsError("Complete sign-in in the browser tab…");
+      const poll = window.setInterval(async () => {
+        try {
+          const ar = await fetch(`${WEB_SERVER_BASE}/api/vireon/account`);
+          if (!ar.ok) return;
+          const aj = (await ar.json()) as { connected?: boolean; account?: { email?: string } };
+          if (!aj.connected) return;
+          setVireonConnected(true);
+          setVireonEmail(aj.account?.email ?? null);
+          await fetch(`${WEB_SERVER_BASE}/api/vireon/reconnect`, { method: "POST" });
+          void loadSettings();
+          setSettingsError(null);
+          window.clearInterval(poll);
+          popup?.close();
+        } catch {
+          /* keep polling */
+        }
+      }, 2000);
+      window.setTimeout(() => window.clearInterval(poll), 5 * 60_000);
+    } catch (e) {
+      setSettingsError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setVireonBusy(false);
+    }
+  }, []);
+
+  const handleVireonSignOut = useCallback(async () => {
+    setVireonBusy(true);
+    try {
+      await fetch(`${WEB_SERVER_BASE}/api/vireon/logout`, { method: "POST" });
+      setVireonConnected(false);
+      setVireonEmail(null);
+      setVireonTier(null);
+    } catch (e) {
+      setSettingsError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setVireonBusy(false);
+    }
+  }, []);
 
   const pushHistory = (value: string) => {
     const trimmed = value.trim();
@@ -2139,6 +2245,10 @@ export function App() {
   return (
     <ShellRouter theme={state.personaUiTheme}>
       <style>{CSS_ANIMATIONS}</style>
+      <InferenceUsageBanner
+        vireonConnected={vireonConnected}
+        managedRoute={settingsManagedRoute}
+      />
       <PersonaShellSwitcher shell={shell} contract={contract} />
 
       {selectedSubtask && (
@@ -2175,6 +2285,12 @@ export function App() {
           }))
         }
         onSave={() => void saveSettings()}
+        vireonConnected={vireonConnected}
+        vireonEmail={vireonEmail}
+        vireonTier={vireonTier}
+        vireonBusy={vireonBusy}
+        onVireonSignIn={() => void handleVireonSignIn()}
+        onVireonSignOut={() => void handleVireonSignOut()}
       />
 
       {/* ── Approval modal ────────────────────────────────────────────────────── */}

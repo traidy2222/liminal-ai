@@ -1,7 +1,8 @@
 import {
   AgentHarness,
   maybeAttachSessionEventLog,
-  resolveProviderConfig,
+  resolveProviderConfigWithInference,
+  type ProviderConfig,
   resolveWorkspaceRoot,
   runWithWorkspaceRoot,
   saveRuntimePreferences,
@@ -116,11 +117,18 @@ export class AgentBridge {
   constructor(
     private readonly sse: SSEManager,
     options: AgentBridgeOptions,
-    runtimePreferences: RuntimePreferences | null = null
+    runtimePreferences: RuntimePreferences | null = null,
+    providerConfig?: ProviderConfig
   ) {
     this.chatId = options.chatId;
     this.workspaceRoot = options.workspaceRoot;
-    const provider = resolveProviderConfig(runtimePreferences?.provider);
+    const provider =
+      providerConfig ??
+      (() => {
+        throw new Error(
+          "AgentBridge requires a pre-resolved provider; call resolveProviderConfigWithInference before construction."
+        );
+      })();
     // All harness construction work happens inside the chat's workspace scope
     // so world-context gather, persona discovery, etc. resolve relative to this
     // chat's bound folder rather than the server's cwd.
@@ -520,6 +528,15 @@ export class AgentBridge {
     } finally {
       this.bootstrapInFlight = false;
     }
+  }
+
+  /** Re-resolve API provider after Vireon sign-in (managed inference / license). */
+  async reapplyProvider(runtimePreferences: RuntimePreferences | null): Promise<void> {
+    if (this.harness.getIsRunning()) {
+      throw new Error("Agent is busy; finish the current turn before reconnecting.");
+    }
+    await this.harness.refreshProviderConfig();
+    void runtimePreferences;
   }
 
   /**

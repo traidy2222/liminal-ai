@@ -4,7 +4,10 @@ import { render } from "ink";
 import {
   AgentHarness,
   maybeAttachSessionEventLog,
-  resolveProviderConfig,
+  resolveProviderConfigWithInference,
+  resolveInferenceMode,
+  hasLocalProviderApiKey,
+  resolveLicenseTokenForHarness,
   loadRuntimePreferences,
   resolveWorkspaceRoot,
   saveRuntimePreferences,
@@ -47,9 +50,26 @@ function resolveWorldContext():
 }
 
 const runtimePreferences = await loadRuntimePreferences(resolveWorkspaceRoot());
+const inferenceMode = resolveInferenceMode(runtimePreferences);
+if (
+  (inferenceMode === "managed" || inferenceMode === "auto") &&
+  !hasLocalProviderApiKey()
+) {
+  const license = await resolveLicenseTokenForHarness();
+  if (!license) {
+    console.error(
+      "No Vireon account on this machine. Run: liminal login\n" +
+        "Or set AGENT_API_KEY in .env for bring-your-own-key mode (AGENT_INFERENCE_MODE=byok)."
+    );
+    process.exit(1);
+  }
+}
 let provider;
 try {
-  provider = resolveProviderConfig(runtimePreferences?.provider);
+  provider = await resolveProviderConfigWithInference(
+    runtimePreferences?.provider,
+    runtimePreferences
+  );
 } catch (err) {
   console.error(`Error: ${err instanceof Error ? err.message : String(err)}`);
   process.exit(1);

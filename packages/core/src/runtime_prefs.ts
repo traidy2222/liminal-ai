@@ -72,12 +72,16 @@ export interface RuntimeHarnessPreferences {
   env?: Record<string, string>;
 }
 
+export type InferenceModePreference = "byok" | "managed" | "auto";
+
 export interface RuntimePreferences {
   version: 1;
   provider?: {
     model?: string;
     baseURL?: string;
     keySource?: ProviderKeySource;
+    /** BYOK vs Vireon-managed inference routing (see AGENT_INFERENCE_MODE). */
+    inferenceMode?: InferenceModePreference;
   };
   runtime?: {
     uiVerbosity?: "normal" | "quiet";

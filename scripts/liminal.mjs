@@ -13,6 +13,8 @@ Usage:
   liminal web [options]       Start web UI (production build)
   liminal tui [options]       Start terminal UI
   liminal update              git pull + npm install + build
+  liminal login               Sign in to Vireon (browser); saves license to ~/.liminal/
+  liminal logout              Remove local Vireon account + license cache
   liminal path                Print install directory
 
 Setup options:
@@ -53,6 +55,26 @@ async function main(argv) {
       return runTui(rest);
     case "update":
       return runUpdate();
+    case "login": {
+      const { spawn } = await import("node:child_process");
+      const script = new URL("./lib/vireon-login.mjs", import.meta.url).pathname;
+      return new Promise((resolve) => {
+        const child = spawn(process.execPath, [script], { stdio: "inherit", cwd: process.cwd() });
+        child.on("exit", (code) => resolve(code ?? 1));
+      });
+    }
+    case "logout": {
+      const coreDist = new URL("../packages/core/dist/vireon_account.js", import.meta.url).pathname;
+      try {
+        const { clearVireonAccount } = await import(coreDist);
+        await clearVireonAccount();
+        console.log("Removed ~/.liminal/account.json and license cache.");
+        return 0;
+      } catch {
+        console.error("Build core first: npm run build -w packages/core");
+        return 1;
+      }
+    }
     case "path": {
       console.log(resolveRepoRoot());
       console.log(`default install: ${getDefaultInstallDir()}`);

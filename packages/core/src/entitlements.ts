@@ -314,22 +314,23 @@ export async function writeCachedLicenseToken(token: string): Promise<void> {
 export async function loadResolvedEntitlements(
   opts?: ResolveEntitlementsOptions
 ): Promise<ResolvedEntitlements> {
-  const envToken = (opts?.token ?? process.env[LICENSE_KEY_ENV] ?? "").trim();
-  if (envToken) {
-    const resolved = resolveEntitlements({ ...opts, token: envToken });
-    // Cache any cryptographically-valid token (active or grace) for offline use.
-    if (resolved.license) {
-      try {
-        await writeCachedLicenseToken(envToken);
-      } catch {
-        /* cache write best-effort */
-      }
-    }
-    return resolved;
+  if (opts?.token?.trim()) {
+    return resolveEntitlements({ ...opts, token: opts.token.trim() });
   }
   const cached = await readCachedLicenseToken();
-  if (cached) return resolveEntitlements({ ...opts, token: cached });
-  return communityResult("no license");
+  const envToken = (process.env[LICENSE_KEY_ENV] ?? "").trim();
+  const preferEnv = process.env["AGENT_LICENSE_PREFER_ENV"] === "1";
+  const token = preferEnv ? envToken || cached : cached || envToken;
+  if (!token) return communityResult("no license");
+  const resolved = resolveEntitlements({ ...opts, token });
+  if (resolved.license && token === envToken && envToken && !preferEnv && !cached) {
+    try {
+      await writeCachedLicenseToken(envToken);
+    } catch {
+      /* best-effort */
+    }
+  }
+  return resolved;
 }
 
 // ── Tool-family gating hook ─────────────────────────────────────────────────

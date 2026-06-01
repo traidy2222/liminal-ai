@@ -123,6 +123,12 @@ export interface SettingsModalProps {
   envDraft: Record<string, string>;
   onEnvChange: (key: string, v: string) => void;
   onSave: () => void;
+  vireonConnected?: boolean;
+  vireonEmail?: string | null;
+  vireonTier?: string | null;
+  onVireonSignIn?: () => void;
+  onVireonSignOut?: () => void;
+  vireonBusy?: boolean;
 }
 
 export function SettingsModal({
@@ -146,6 +152,12 @@ export function SettingsModal({
   envDraft,
   onEnvChange,
   onSave,
+  vireonConnected = false,
+  vireonEmail = null,
+  vireonTier = null,
+  onVireonSignIn,
+  onVireonSignOut,
+  vireonBusy = false,
 }: SettingsModalProps) {
   const [activeTabId, setActiveTabId] = useState<string>("models_api");
   const [search, setSearch] = useState("");
@@ -323,6 +335,49 @@ export function SettingsModal({
                     <div style={{ color: AMBER, fontWeight: 700, marginBottom: 8, fontSize: 11, letterSpacing: "0.08em" }}>
                       Provider (live harness)
                     </div>
+                    <div
+                      style={{
+                        marginBottom: 12,
+                        padding: 10,
+                        borderRadius: 2,
+                        border: "1px solid rgba(var(--lim-accent-rgb),0.15)",
+                        background: "rgba(0,12,24,0.6)",
+                      }}
+                    >
+                      <div style={{ fontSize: 11, color: "#aabbcc", marginBottom: 6 }}>Vireon account</div>
+                      {vireonConnected ? (
+                        <div style={{ fontSize: 12, fontFamily: "monospace", color: GREEN, marginBottom: 8 }}>
+                          Signed in{vireonEmail ? ` as ${vireonEmail}` : ""}
+                          {vireonTier ? ` (${vireonTier})` : ""} — license in ~/.liminal/
+                        </div>
+                      ) : (
+                        <div style={{ fontSize: 11, color: AMBER, marginBottom: 8, lineHeight: 1.45 }}>
+                          Not connected. Sign in for Pro license + managed inference (no AGENT_LICENSE_KEY in .env).
+                        </div>
+                      )}
+                      <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                        {onVireonSignIn ? (
+                          <button
+                            type="button"
+                            style={{ ...btn, padding: "6px 10px", fontSize: 10 }}
+                            disabled={saving || loading || vireonBusy}
+                            onClick={onVireonSignIn}
+                          >
+                            {vireonBusy ? "Opening browser…" : "Sign in to Vireon"}
+                          </button>
+                        ) : null}
+                        {vireonConnected && onVireonSignOut ? (
+                          <button
+                            type="button"
+                            style={{ ...btn, padding: "6px 10px", fontSize: 10, color: MAGENTA }}
+                            disabled={saving || loading || vireonBusy}
+                            onClick={onVireonSignOut}
+                          >
+                            Sign out locally
+                          </button>
+                        ) : null}
+                      </div>
+                    </div>
                     <div style={{ fontSize: 10, color: "#778899", marginBottom: 8 }}>{providerHintText}</div>
                     <div style={{ display: "grid", gridTemplateColumns: "120px 1fr", gap: 8, alignItems: "center", marginBottom: 10 }}>
                       <span style={{ fontSize: 11, color: "#aabbcc" }}>preset</span>
@@ -437,6 +492,32 @@ export function SettingsModal({
                           ? "Loaded (value never shown in UI)"
                           : "Not configured — set AGENT_API_KEY or OPENROUTER_API_KEY in .env"}
                       </div>
+                    </div>
+                    <div style={{ display: "grid", gridTemplateColumns: "120px 1fr", gap: 8, alignItems: "center", marginTop: 8 }}>
+                      <span style={{ fontSize: 11, color: "#aabbcc" }}>inference</span>
+                      <select
+                        disabled={saving || loading}
+                        value={envDraft["AGENT_INFERENCE_MODE"] ?? "auto"}
+                        onChange={(e) => onEnvChange("AGENT_INFERENCE_MODE", e.target.value)}
+                        aria-label="Inference mode"
+                        style={{
+                          width: "100%",
+                          maxWidth: 520,
+                          fontSize: 12,
+                          padding: "8px 10px",
+                          borderRadius: 2,
+                          border: "1px solid rgba(var(--lim-accent-rgb),0.2)",
+                          background: "rgba(0,10,20,0.95)",
+                          color: "#dde8f0",
+                          fontFamily: "monospace",
+                        }}
+                      >
+                        <option value="auto">
+                          auto — Pro uses Vireon included credits (even if .env has a key)
+                        </option>
+                        <option value="byok">byok — always your API key</option>
+                        <option value="managed">managed — always Vireon proxy (Pro license)</option>
+                      </select>
                     </div>
                   </div>
                 ) : null}

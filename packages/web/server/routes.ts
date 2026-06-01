@@ -1,4 +1,5 @@
 import { Router } from "express";
+import { randomBytes } from "node:crypto";
 import type { ChatManager } from "./chatManager.js";
 import type { SSEManager } from "./sse.js";
 import type { ApprovalDecision, ChatWorkspaceMode } from "@liminal/core";
@@ -24,6 +25,13 @@ import {
   resolveSpeechSynthesisConfig,
   synthesizeSpeechMulti,
   sanitizeTextForTts,
+  applyVireonLicenseToken,
+  readVireonAccount,
+  loadHarnessEntitlements,
+  defaultVireonSiteOrigin,
+  clearVireonAccount,
+  fetchInferenceUsageStatus,
+  resolveInferenceMode,
 } from "@liminal/core";
 import {
   saveAudioAttachment,
@@ -51,6 +59,16 @@ type IncomingAttachment = {
  * between chats by calling `POST /api/chats/:id/activate` — subsequent
  * `/api/message`, `/api/approve`, etc. land in the newly-active chat.
  */
+/** Short-lived state nonces for /connect/harness → local callback. */
+const pendingHarnessConnect = new Map<string, number>();
+
+function prunePendingHarnessConnect(): void {
+  const now = Date.now();
+  for (const [k, exp] of pendingHarnessConnect) {
+    if (exp < now) pendingHarnessConnect.delete(k);
+  }
+}
+
 export function createRouter(chatManager: ChatManager, sse: SSEManager): Router {
   const router = Router();
 
@@ -129,6 +147,7 @@ export function createRouter(chatManager: ChatManager, sse: SSEManager): Router 
     const envModel = process.env["AGENT_MODEL"]?.trim();
     const envBase = process.env["AGENT_API_BASE_URL"]?.trim();
     const apiKeyConfigured = !!(cfg.openRouterApiKey && cfg.openRouterApiKey.trim().length > 0);
+    const managedRoute = (cfg.baseURL ?? "").includes("/inference");
     res.json({
       tabs: HARNESS_SETTINGS_TABS,
       fields,
@@ -138,10 +157,146 @@ export function createRouter(chatManager: ChatManager, sse: SSEManager): Router 
         modelLockedByEnv: !!envModel,
         baseURLLockedByEnv: !!envBase,
         apiKeyConfigured,
+        managedRoute,
+        inferenceMode: resolveInferenceMode(prefs),
       },
       hint:
-        "API keys are never shown here — only whether one loaded. Set `AGENT_API_KEY` or `OPENROUTER_API_KEY` (etc.) in `.env`. Model/base URL reflect the running harness (saved prefs, then env, then defaults).",
+        "API keys are never shown here — only whether one loaded. Sign in to Vireon (Settings) for Pro license + managed inference, or set BYOK keys in `.env`.",
     });
+  });
+
+  router.get("/api/vireon/inference-status", async (_req, res) => {
+    try {
+      const status = await fetchInferenceUsageStatus();
+      res.json(
+        status ?? {
+          configured: false,
+          entitled: false,
+          reason: "Not signed in to Vireon",
+          remainingUsd: null,
+          capUsd: null,
+          usedUsd: null,
+          periodEnd: null,
+        }
+      );
+    } catch (e) {
+      res.status(400).json({
+        error: e instanceof Error ? e.message : "Inference status failed",
+      });
+    }
+  });
+
+  router.get("/api/vireon/account", async (_req, res) => {
+    const account = await readVireonAccount();
+    const ent = await loadHarnessEntitlements();
+    res.json({
+      connected: Boolean(account),
+      account,
+      tier: ent.tier,
+      licensed: Boolean(ent.license),
+      entitlements: ent.entitlements,
+    });
+  });
+
+  router.get("/api/vireon/connect/begin", (req, res) => {
+    prunePendingHarnessConnect();
+    const state = randomBytes(16).toString("hex");
+    pendingHarnessConnect.set(state, Date.now() + 5 * 60_000);
+    const host = req.get("host") ?? "127.0.0.1:3001";
+    const redirectUri = `http://${host}/api/vireon/auth/callback`;
+    const site = defaultVireonSiteOrigin();
+    const connectUrl = `${site}/connect/harness?redirect_uri=${encodeURIComponent(redirectUri)}&state=${encodeURIComponent(state)}`;
+    res.json({ connectUrl, state });
+  });
+
+  const handleVireonAuthCallback = async (
+    req: import("express").Request,
+    res: import("express").Response,
+    asHtml: boolean
+  ) => {
+    prunePendingHarnessConnect();
+    const token =
+      typeof req.body?.token === "string"
+        ? req.body.token.trim()
+        : typeof req.query?.token === "string"
+          ? req.query.token.trim()
+          : "";
+    const state =
+      typeof req.body?.state === "string"
+        ? req.body.state.trim()
+        : typeof req.query?.state === "string"
+          ? req.query.state.trim()
+          : "";
+    const exp = state ? pendingHarnessConnect.get(state) : undefined;
+    if (!state || !exp || exp < Date.now()) {
+      if (asHtml) {
+        res.status(403).type("html").send("<p>Invalid or expired connect session.</p>");
+        return;
+      }
+      res.status(403).json({ error: "Invalid or expired connect session" });
+      return;
+    }
+    pendingHarnessConnect.delete(state);
+    try {
+      const email =
+        (typeof req.query?.email === "string" ? req.query.email : null) ||
+        (typeof req.body?.email === "string" ? req.body.email : null) ||
+        "vireon@user";
+      const resolved = await applyVireonLicenseToken(token, {
+        email,
+        source: "browser",
+        licenseSub: typeof req.body?.licenseSub === "string" ? req.body.licenseSub : undefined,
+      });
+      await chatManager.reloadRuntimePrefs();
+      try {
+        await chatManager.reapplyActiveBridgeProvider();
+      } catch (e) {
+        console.warn("[vireon] bridge provider refresh:", e instanceof Error ? e.message : e);
+      }
+      if (asHtml) {
+        res.type("html").send(
+          "<!DOCTYPE html><html><body style='font-family:system-ui;padding:2rem'>" +
+            "<h1>Connected to Vireon</h1><p>You can close this tab and return to Liminal.</p></body></html>"
+        );
+        return;
+      }
+      res.json({ ok: true, tier: resolved.tier, email });
+    } catch (e) {
+      const message = e instanceof Error ? e.message : "Connect failed";
+      if (asHtml) {
+        res.status(400).type("html").send(`<p>${message}</p>`);
+        return;
+      }
+      res.status(400).json({ error: message });
+    }
+  };
+
+  router.post("/api/vireon/auth/callback", (req, res) => {
+    void handleVireonAuthCallback(req, res, false);
+  });
+
+  router.get("/api/vireon/auth/callback", (req, res) => {
+    void handleVireonAuthCallback(req, res, true);
+  });
+
+  router.post("/api/vireon/logout", async (_req, res) => {
+    await clearVireonAccount();
+    await chatManager.reloadRuntimePrefs();
+    res.json({ ok: true });
+  });
+
+  router.post("/api/vireon/reconnect", async (_req, res) => {
+    const bridge = active();
+    if (bridge.harness.getIsRunning()) {
+      res.status(409).json({ error: "Agent is busy." });
+      return;
+    }
+    try {
+      await chatManager.reapplyActiveBridgeProvider();
+      res.json({ ok: true });
+    } catch (e) {
+      res.status(400).json({ error: e instanceof Error ? e.message : "Reconnect failed" });
+    }
   });
 
   router.put("/api/settings", async (req, res) => {
@@ -152,7 +307,7 @@ export function createRouter(chatManager: ChatManager, sse: SSEManager): Router 
     }
     const body = req.body as {
       harness?: { env?: Record<string, string> };
-      provider?: { model?: string; baseURL?: string };
+      provider?: { model?: string; baseURL?: string; inferenceMode?: string };
     };
     const prefs = bridge.harness.getRuntimePreferences();
     const envIn = body.harness?.env;
@@ -176,10 +331,18 @@ export function createRouter(chatManager: ChatManager, sse: SSEManager): Router 
         typeof body.provider.model === "string" ? body.provider.model.trim().slice(0, 200) : "";
       const pb =
         typeof body.provider.baseURL === "string" ? body.provider.baseURL.trim().slice(0, 500) : "";
-      const prov: { model?: string; baseURL?: string } = {};
+      const prov: { model?: string; baseURL?: string; inferenceMode?: "byok" | "managed" | "auto" } =
+        {};
       if (!modelLocked && pm.length > 0) prov.model = pm;
       if (!baseLocked && pb.length > 0) prov.baseURL = pb;
-      if (Object.keys(prov).length > 0) patch.provider = prov;
+      const modeRaw =
+        typeof body.provider.inferenceMode === "string"
+          ? body.provider.inferenceMode.trim().toLowerCase()
+          : "";
+      if (modeRaw === "byok" || modeRaw === "managed" || modeRaw === "auto") {
+        prov.inferenceMode = modeRaw;
+      }
+      if (Object.keys(prov).length > 0) patch.provider = { ...prefs?.provider, ...prov };
     }
     if (!patch.harness && !patch.provider) {
       res.status(400).json({ error: "No valid harness.env or provider fields in body." });

@@ -33,6 +33,7 @@ import {
   ensurePerChatDir,
   globalChatsRoot,
   loadRuntimePreferences,
+  resolveProviderConfigWithInference,
   type ChatMetadata,
   type ChatWorkspaceMode,
   type RuntimePreferences,
@@ -178,10 +179,15 @@ export class ChatManager {
       // Ensure the per-chat directory exists so session.jsonl and meta.json can
       // land there without the harness having to mkdir on its first emit.
       await ensurePerChatDir(chatId);
+      const provider = await resolveProviderConfigWithInference(
+        this.cachedRuntimePrefs?.provider,
+        this.cachedRuntimePrefs
+      );
       const bridge = new AgentBridge(
         this.sse,
         { chatId, workspaceRoot: meta.workspaceRoot },
-        this.cachedRuntimePrefs
+        this.cachedRuntimePrefs,
+        provider
       );
       slot = { bridge, lastTouchedAt: Date.now() };
       this.bridges.set(chatId, slot);
@@ -285,6 +291,15 @@ export class ChatManager {
    */
   async reloadRuntimePrefs(): Promise<void> {
     this.cachedRuntimePrefs = await loadRuntimePreferences().catch(() => null);
+  }
+
+  /** Refresh active bridge provider after Vireon sign-in (license now on disk). */
+  async reapplyActiveBridgeProvider(): Promise<void> {
+    const chatId = this.activeChatId;
+    if (!chatId) return;
+    const slot = this.bridges.get(chatId);
+    if (!slot) return;
+    await slot.bridge.reapplyProvider(this.cachedRuntimePrefs);
   }
 
   /**

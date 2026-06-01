@@ -387,6 +387,20 @@ export type { OpenRouterSessionRequestExtras } from "./openrouter_session.js";
 export { resolveProviderConfig, resolveVisionProviderConfig, buildProviderRouting, isOpenRouterStealthModel, OPENROUTER_STEALTH_MODEL_SLUGS } from "./provider_config.js";
 export type { ProviderConfig, ProviderConfigOverrides, VisionProviderConfig, ProviderRouting } from "./provider_config.js";
 export {
+  resolveInferenceMode,
+  resolveProviderConfigWithInference,
+  fetchInferenceSession,
+  fetchInferenceUsageStatus,
+  hasLocalProviderApiKey,
+  inferencePreferManaged,
+  describeProviderError,
+  formatInferenceBudgetExceededMessage,
+  inferenceAccountUrl,
+  proManagedInferencePrefsPatch,
+} from "./inference_provider.js";
+export { applyProManagedInferenceDefaults } from "./vireon_account.js";
+export type { InferenceMode, InferenceSessionResult, InferenceUsageStatus } from "./inference_provider.js";
+export {
   RUNTIME_PREFS_FILE,
   getRuntimePrefsPath,
   loadRuntimePreferences,
@@ -396,6 +410,7 @@ export type {
   RuntimePreferences,
   RuntimeHarnessPreferences,
   ProviderKeySource,
+  InferenceModePreference,
   RuntimePersonaControls,
   RuntimePersonaProfile,
   RuntimePersonaPreferences,
@@ -652,6 +667,24 @@ export {
   writeCachedLicenseToken,
   licenseCachePath,
 } from "./entitlements.js";
+export {
+  readVireonAccount,
+  writeVireonAccount,
+  applyVireonLicenseToken,
+  clearVireonAccount,
+  resolveLicenseTokenForHarness,
+  loadHarnessEntitlements,
+  defaultVireonSiteOrigin,
+  vireonAccountPath,
+} from "./vireon_account.js";
+export type { VireonAccountRecord } from "./vireon_account.js";
+export { runVireonConnectFlow } from "./vireon_connect.js";
+export type { VireonConnectResult, RunVireonConnectOptions } from "./vireon_connect.js";
+export {
+  ensureManagedInferenceSession,
+  clearManagedInferenceSessionCache,
+  isManagedInferenceBaseUrl,
+} from "./inference_session.js";
 export type {
   LicenseTier,
   EntitlementKey,

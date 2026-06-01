@@ -396,6 +396,58 @@ const _META_RAW: Record<string, HarnessSettingsFieldMeta> = {
     description: "Harness environment toggle for Api Base Url. See docs/configuration.md (models api).",
     valueKind: "string",
   },
+  "AGENT_INFERENCE_MODE": {
+    tabId: "models_api",
+    subgroupId: "routing",
+    label: "Inference mode",
+    description:
+      "byok = always your API key; managed = Vireon proxy (Pro); auto = managed when entitled (see AGENT_INFERENCE_PREFER_MANAGED).",
+    valueKind: "string",
+  },
+  "AGENT_INFERENCE_PREFER_MANAGED": {
+    tabId: "models_api",
+    subgroupId: "routing",
+    label: "Prefer managed inference",
+    description:
+      "When 1, auto mode routes entitled Pro+ through Vireon included credits even if AGENT_API_KEY is set in .env.",
+    valueKind: "boolean",
+  },
+  "AGENT_INFERENCE_BASE_URL": {
+    tabId: "models_api",
+    subgroupId: "routing",
+    label: "Managed inference base URL",
+    description: "OpenAI-compatible root for Vireon managed inference (chat/completions).",
+    valueKind: "string",
+  },
+  "AGENT_INFERENCE_SESSION_URL": {
+    tabId: "models_api",
+    subgroupId: "routing",
+    label: "Inference session URL",
+    description: "Control-plane endpoint that mints short-lived inference session tokens.",
+    valueKind: "string",
+  },
+  "AGENT_INFERENCE_SESSION_TOKEN": {
+    tabId: "models_api",
+    subgroupId: "routing",
+    label: "Inference session token (headless)",
+    description:
+      "Optional pinned session JWT for CI/headless; normally fetched automatically via license.",
+    valueKind: "string",
+  },
+  "AGENT_VIREON_SITE_URL": {
+    tabId: "models_api",
+    subgroupId: "routing",
+    label: "Vireon site URL",
+    description: "Origin for browser sign-in (liminal login / connect harness).",
+    valueKind: "string",
+  },
+  "AGENT_LICENSE_PREFER_ENV": {
+    tabId: "models_api",
+    subgroupId: "routing",
+    label: "Prefer license from env",
+    description: "Set to 1 so AGENT_LICENSE_KEY in .env overrides ~/.liminal/license.json (CI).",
+    valueKind: "string",
+  },
   "AGENT_EMBED_MODEL": {
     tabId: "models_api",
     subgroupId: "routing",

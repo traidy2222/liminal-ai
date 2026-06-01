@@ -57,6 +57,11 @@ import { bumpRuleHits, getRuleHitCounts, extractRuleIds, recordRuleOutcomes, get
 import { writeYieldSnapshot } from "./session_event_log.js";
 import { SharedMemoryBus } from "./shared_memory_bus.js";
 import { resolveProviderConfig, buildProviderRouting } from "./provider_config.js";
+import {
+  describeProviderError,
+  resolveProviderConfigWithInference,
+} from "./inference_provider.js";
+import { ensureManagedInferenceSession, isManagedInferenceBaseUrl } from "./inference_session.js";
 import { applyPromptCacheBreakpoints, extractCachedTokens } from "./prompt_cache.js";
 import { buildOpenRouterAttributionHeaders } from "./openrouter_attribution.js";
 import { buildOpenRouterSessionExtras } from "./openrouter_session.js";
@@ -484,14 +489,7 @@ function buildToolCapabilityManifest(registry: ToolRegistry): string {
  * OpenRouter can throw.
  */
 function describeError(err: unknown): string {
-  if (err instanceof OpenAI.APIError) {
-    const body =
-      typeof err.error === "object" && err.error !== null
-        ? JSON.stringify(err.error)
-        : String(err.error ?? err.message);
-    return `HTTP ${err.status} from ${err.name}: ${body}`;
-  }
-  return err instanceof Error ? err.message : String(err);
+  return describeProviderError(err);
 }
 
 /** Returns true for errors worth retrying. */
@@ -1519,7 +1517,7 @@ export class AgentHarness {
     options?: { persist?: boolean }
   ): Promise<{ persisted: boolean; path?: string }> {
     const normalized = normalizeRuntimePreferencePatch(patch);
-    this.applyRuntimePreferencePatch(normalized);
+    await this.applyRuntimePreferencePatch(normalized);
     const shouldPersist = options?.persist !== false;
     if (!shouldPersist || !this.config.persistRuntimePreferences || !this.runtimePreferences) {
       return { persisted: false };
@@ -1538,6 +1536,33 @@ export class AgentHarness {
       maxRetries: 0,
       defaultHeaders: buildOpenRouterAttributionHeaders(),
     });
+  }
+
+  /**
+   * Re-resolve provider (BYOK vs managed inference) after Vireon sign-in or settings change.
+   */
+  async refreshProviderConfig(): Promise<void> {
+    if (this.running) {
+      throw new Error("Cannot refresh provider while a turn is in progress.");
+    }
+    const provider = await resolveProviderConfigWithInference(
+      {
+        baseURL: this.config.baseURL,
+        model: this.config.model,
+      },
+      this.runtimePreferences
+    );
+    this.config.openRouterApiKey = provider.apiKey;
+    this.config.baseURL = provider.baseURL;
+    this.config.model = provider.model;
+    this.rebuildClient();
+    if (this.agentDepth === 0) {
+      this.emitter.emit("text", {
+        delta:
+          `\n[Runtime] Provider refreshed: ${provider.keySource}, model=${this.config.model}\n`,
+        channel: "trace",
+      });
+    }
   }
 
   private askUserDirect(prompt: string): Promise<string> {
@@ -1586,7 +1611,7 @@ export class AgentHarness {
     });
   }
 
-  private applyRuntimePreferencePatch(patch: Partial<RuntimePreferences>): void {
+  private async applyRuntimePreferencePatch(patch: Partial<RuntimePreferences>): Promise<void> {
     const merged: RuntimePreferences = {
       ...(this.runtimePreferences ?? { updatedAt: Date.now() }),
       ...patch,
@@ -1624,12 +1649,20 @@ export class AgentHarness {
     if (merged.provider?.baseURL) {
       this.config.baseURL = merged.provider.baseURL;
     }
-    if (merged.provider?.keySource || merged.provider?.baseURL || merged.provider?.model) {
-      const provider = resolveProviderConfig({
-        keySource: merged.provider?.keySource,
-        baseURL: this.config.baseURL,
-        model: this.config.model,
-      });
+    if (
+      merged.provider?.keySource ||
+      merged.provider?.baseURL ||
+      merged.provider?.model ||
+      merged.provider?.inferenceMode
+    ) {
+      const provider = await resolveProviderConfigWithInference(
+        {
+          keySource: merged.provider?.keySource,
+          baseURL: this.config.baseURL,
+          model: this.config.model,
+        },
+        merged
+      );
       this.config.openRouterApiKey = provider.apiKey;
       this.config.baseURL = provider.baseURL;
       this.config.model = provider.model;
@@ -1637,7 +1670,7 @@ export class AgentHarness {
       this.emitter.emit("text", {
         delta:
           `\n[Runtime] Effective provider updated: model=${this.config.model}, ` +
-          `baseURL=${this.config.baseURL}\n`,
+          `baseURL=${this.config.baseURL}, key=${provider.keySource}\n`,
         channel: "trace",
       });
     }
@@ -1935,6 +1968,29 @@ export class AgentHarness {
     this.running = true;
     this.clearPersonalityHeartbeatSchedule();
     this.lastTurnTerminationReason = null;
+
+    if (this.agentDepth === 0 && isManagedInferenceBaseUrl(this.config.baseURL)) {
+      try {
+        const session = await ensureManagedInferenceSession(
+          this.runtimePreferences,
+          this.config.baseURL
+        );
+        if (session && session.apiKey !== this.config.openRouterApiKey) {
+          this.config.openRouterApiKey = session.apiKey;
+          this.config.baseURL = session.baseURL;
+          this.rebuildClient();
+        }
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        this.running = false;
+        this.emitter.emit("error", {
+          err: new Error(
+            `Managed inference session failed: ${msg}. Run \`liminal login\` or use Settings → Sign in to Vireon.`
+          ),
+        });
+        return;
+      }
+    }
 
     return await runHarnessEffectiveEnvContext(this.runtimePreferences, async () => {
     const telemetryUserLabel = sessionGreeting

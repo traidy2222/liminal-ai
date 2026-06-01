@@ -99,6 +99,10 @@ Web **Settings** writes to (2). See [Configuration basics](../start/configuratio
 | `AGENT_HEARTBEAT_TIMEOUT_MS` | `20000` | yes | no | session_ui | Harness environment toggle for Heartbeat Timeout Ms. See docs/configuration.md (session ui). |
 | `AGENT_HEARTBEAT_UI_STRIP` | `0` | yes | no | session_ui | Harness environment toggle for Heartbeat Ui Strip. See docs/configuration.md (session ui). |
 | `AGENT_HEARTBEAT_USER_NUDGE_CONFIDENCE_MIN` | `0.86` | yes | no | session_ui | Harness environment toggle for Heartbeat User Nudge Confidence Min. See docs/configuration.md (session ui). |
+| `AGENT_INFERENCE_BASE_URL` | `https://api.vireondynamics.com/v1/inference` | yes | no | models_api | OpenAI-compatible root for Vireon managed inference (chat/completions). |
+| `AGENT_INFERENCE_MODE` | `auto` | yes | no | models_api | byok = always use your API key; managed = Vireon proxy (Pro); auto = managed when entitled and no local key. |
+| `AGENT_INFERENCE_SESSION_TOKEN` | `` | yes | no | models_api | Optional pinned session JWT for CI/headless; normally fetched automatically via license. |
+| `AGENT_INFERENCE_SESSION_URL` | `https://www.vireondynamics.com/api/inference/session` | yes | no | models_api | Control-plane endpoint that mints short-lived inference session tokens. |
 | `AGENT_INTENT_CONFIDENCE_MIN` | `0.65` | yes | no | harness | Harness environment toggle for Intent Confidence Min. See docs/configuration.md (harness). |
 | `AGENT_INTENT_CONTEXT_MAX_CHARS` | `12000` | yes | no | harness | Harness environment toggle for Intent Context Max Chars. See docs/configuration.md (harness). |
 | `AGENT_INTENT_FAST_THRESHOLD` | `0.6` | yes | no | harness | Harness environment toggle for Intent Fast Threshold. See docs/configuration.md (harness). |
@@ -107,6 +111,7 @@ Web **Settings** writes to (2). See [Configuration basics](../start/configuratio
 | `AGENT_INTENT_REPO_CONTEXT` | `0` | yes | no | harness | Harness environment toggle for Intent Repo Context. See docs/configuration.md (harness). |
 | `AGENT_INTENT_ROUTING` | `1` | yes | no | harness | Harness environment toggle for Intent Routing. See docs/configuration.md (harness). |
 | `AGENT_LENGTH_RESUME_MAX` | `8` | yes | no | harness | Harness environment toggle for Length Resume Max. See docs/configuration.md (harness). |
+| `AGENT_LICENSE_PREFER_ENV` | `0` | yes | no | models_api | Set to 1 so AGENT_LICENSE_KEY in .env overrides ~/.liminal/license.json (CI). |
 | `AGENT_LINT_ALLOWED_COMMANDS` | `` | yes | no | advanced | Harness environment toggle for Lint Allowed Commands. See docs/configuration.md (advanced). |
 | `AGENT_LLM_JSON_CACHE` | `1` | yes | no | harness | In-process LRU cache for fast-model JSON sidecar calls (intent/distill/rewrite/critic/rerank). On by default. See docs/c |
 | `AGENT_LLM_JSON_CACHE_TTL_MS` | `300000` | yes | no | harness | Time-to-live for entries in the LLM JSON response cache, in milliseconds. See docs/configuration.md (harness). |
@@ -204,6 +209,9 @@ Web **Settings** writes to (2). See [Configuration basics](../start/configuratio
 | `AGENT_SESSION_JSONL_TEXT_LOG` | `rollup` | yes | no | session_ui | Harness environment toggle for Session Jsonl Text Log. See docs/configuration.md (session ui). |
 | `AGENT_SESSION_JSONL_TRACE` | `0` | yes | no | session_ui | Harness environment toggle for Session Jsonl Trace. See docs/configuration.md (session ui). |
 | `AGENT_SESSION_MODE` | `` | yes | no | session_ui | Harness environment toggle for Session Mode. See docs/configuration.md (session ui). |
+| `AGENT_SPAWN_TOOL_INFER` | `1` | yes | no | harness | Fast-model picks tool families for each sub-agent from spawn context before its first turn (lazy loading). |
+| `AGENT_SPAWN_TOOL_INFER_MODEL` | `` | yes | no | harness | Optional model slug for sub-agent tool provisioning. Empty = AGENT_FAST_MODEL. |
+| `AGENT_SPAWN_TOOL_INFER_TIMEOUT_MS` | `8000` | yes | no | harness | Wall-clock cap for the spawn-time tool inference call (default 8000). |
 | `AGENT_SPECULATIVE_READS` | `0` | yes | no | memory_vault | Harness environment toggle for Speculative Reads. See docs/configuration.md (memory vault). |
 | `AGENT_STREAM_CHUNK_TIMEOUT_MS` | `60000` | yes | no | harness | Harness environment toggle for Stream Chunk Timeout Ms. See docs/configuration.md (harness). |
 | `AGENT_STREAM_MAX_RETRIES` | `3` | yes | no | harness | Harness environment toggle for Stream Max Retries. See docs/configuration.md (harness). |
@@ -237,6 +245,7 @@ Web **Settings** writes to (2). See [Configuration basics](../start/configuratio
 | `AGENT_VAULT_PATH` | `` | yes | no | memory_vault | Harness environment toggle for Vault Path. See docs/configuration.md (memory vault). |
 | `AGENT_VAULT_REQUIRE_LINKS` | `0` | yes | no | memory_vault | Harness environment toggle for Vault Require Links. See docs/configuration.md (memory vault). |
 | `AGENT_VAULT_WRITE_BUDGET` | `8` | yes | no | memory_vault | Harness environment toggle for Vault Write Budget. See docs/configuration.md (memory vault). |
+| `AGENT_VIREON_SITE_URL` | `https://www.vireondynamics.com` | yes | no | models_api | Origin for browser sign-in (liminal login / connect harness). |
 | `AGENT_VISION_BASE_URL` | `https://openrouter.ai/api/v1` | yes | yes | models_api | Harness environment toggle for Vision Base Url. See docs/configuration.md (models api). |
 | `AGENT_VISION_MAX_IMAGE_BYTES` | `4194304` | yes | yes | models_api | Harness environment toggle for Vision Max Image Bytes. See docs/configuration.md (models api). |
 | `AGENT_VISION_MODEL` | `nvidia/nemotron-nano-12b-v2-vl:free` | yes | yes | models_api | Harness environment toggle for Vision Model. See docs/configuration.md (models api). |

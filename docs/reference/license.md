@@ -23,6 +23,12 @@ and falls back to the free Community tier whenever no valid license is found.
 **Tiers:** Community (free) · Pro · Team · Enterprise. See
 [vireondynamics.com](https://vireondynamics.com) for current pricing.
 
+**Managed inference (Pro+):** entitlement `pro.managed_inference` lets the harness use
+Vireon’s metered OpenAI-compatible proxy instead of a local `AGENT_API_KEY` when
+`AGENT_INFERENCE_MODE` is `managed` or `auto` (default). BYOK is unchanged — Community and
+Pro users can always supply their own OpenRouter key. See harness env keys
+`AGENT_INFERENCE_*` and the website operator doc `MANAGED_INFERENCE.md`.
+
 **Billing backend:** `packages/control-plane` — Stripe + Supabase + `/api/license/*`
 endpoints that mint the same Ed25519 tokens the harness verifies in
 `entitlements.ts`. Deploy separately from the marketing `website/` repo; see
