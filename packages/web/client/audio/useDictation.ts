@@ -30,6 +30,7 @@
  */
 import { useCallback, useEffect, useRef, useState } from "react";
 import { WEB_SERVER_BASE } from "../useSSE.js";
+import { webApiFetch } from "../webApiAuth.js";
 import { createVad, type VadHandle } from "./vad.js";
 
 export type DictationStatus =
@@ -937,7 +938,7 @@ export function useDictation(opts: UseDictationOptions): {
     const dataUrl = await blobToDataUrl(blob);
     const filename = `dictation-${Date.now()}.${extForMime(mimeType)}`;
     const baseMime = mimeType.split(";")[0]?.trim().toLowerCase() || "audio/webm";
-    const uploadResp = await fetch(`${WEB_SERVER_BASE}/api/audio/upload`, {
+    const uploadResp = await webApiFetch(`${WEB_SERVER_BASE}/api/audio/upload`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ dataUrl, filename, mimeType: baseMime }),
@@ -948,7 +949,7 @@ export function useDictation(opts: UseDictationOptions): {
     }
     const uploadBody = (await uploadResp.json()) as { attachmentId: string };
     if (!sessionActiveRef.current) setState((s) => ({ ...s, status: "transcribing" }));
-    const tResp = await fetch(`${WEB_SERVER_BASE}/api/transcribe`, {
+    const tResp = await webApiFetch(`${WEB_SERVER_BASE}/api/transcribe`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({

@@ -1,13 +1,14 @@
 /**
- * Per-chat TTS clip cache — deduped by content hash of spoken text.
+ * Per-chat TTS clip cache — clip ids are random; content hash maps to existing clips.
  */
-import { createHash } from "node:crypto";
+import { createHash, randomBytes } from "node:crypto";
 import { existsSync } from "node:fs";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { perChatPath } from "@liminal/core";
 
 const TTS_SUBDIR = "tts";
+const TTS_CACHE_INDEX = "cache.json";
 /** Bump when clip hashing or synthesis semantics change (invalidates stale truncated cache). */
 const TTS_CLIP_CACHE_VERSION = 2;
 
@@ -20,10 +21,41 @@ function extForMime(mimeType: string): string {
   return "bin";
 }
 
+function contentHashFor(spokenText: string): string {
+  return createHash("sha256")
+    .update(`v${TTS_CLIP_CACHE_VERSION}:${spokenText.trim().toLowerCase()}`)
+    .digest("hex")
+    .slice(0, 16);
+}
+
+interface TtsCacheIndex {
+  version: 2;
+  byContentHash: Record<string, { clipId: string; ext: string }>;
+}
+
 async function ttsDirFor(chatId: string): Promise<string> {
   const dir = perChatPath(chatId, TTS_SUBDIR);
   if (!existsSync(dir)) await mkdir(dir, { recursive: true });
   return dir;
+}
+
+async function readCacheIndex(chatId: string): Promise<TtsCacheIndex> {
+  const indexPath = path.join(await ttsDirFor(chatId), TTS_CACHE_INDEX);
+  try {
+    const raw = await readFile(indexPath, "utf8");
+    const parsed = JSON.parse(raw) as TtsCacheIndex;
+    if (parsed?.version === 2 && parsed.byContentHash && typeof parsed.byContentHash === "object") {
+      return parsed;
+    }
+  } catch {
+    /* fresh index */
+  }
+  return { version: 2, byContentHash: {} };
+}
+
+async function writeCacheIndex(chatId: string, index: TtsCacheIndex): Promise<void> {
+  const indexPath = path.join(await ttsDirFor(chatId), TTS_CACHE_INDEX);
+  await writeFile(indexPath, JSON.stringify(index, null, 2), "utf8");
 }
 
 export interface SavedTtsClip {
@@ -36,7 +68,7 @@ export interface SavedTtsClip {
 
 /**
  * Persist synthesized audio under the chat's tts dir. Reuses clip when the same
- * normalized text was already synthesized (hash id).
+ * normalized text was already synthesized (content-hash index → random clip id).
  */
 export async function saveTtsClip(
   chatId: string,
@@ -44,25 +76,31 @@ export async function saveTtsClip(
   mimeType: string,
   spokenText: string
 ): Promise<SavedTtsClip> {
-  const hash = createHash("sha256")
-    .update(`v${TTS_CLIP_CACHE_VERSION}:${spokenText.trim().toLowerCase()}`)
-    .digest("hex")
-    .slice(0, 16);
-  const clipId = hash;
-  const dir = await ttsDirFor(chatId);
+  const hash = contentHashFor(spokenText);
   const ext = extForMime(mimeType);
-  const filePath = path.join(dir, `${clipId}.${ext}`);
-  if (existsSync(filePath)) {
-    const existing = await readFile(filePath);
-    return {
-      clipId,
-      path: filePath,
-      mimeType,
-      sizeBytes: existing.length,
-      cacheHit: true,
-    };
+  const dir = await ttsDirFor(chatId);
+  const index = await readCacheIndex(chatId);
+  const cached = index.byContentHash[hash];
+  if (cached) {
+    const filePath = path.join(dir, `${cached.clipId}.${cached.ext}`);
+    if (existsSync(filePath)) {
+      const existing = await readFile(filePath);
+      return {
+        clipId: cached.clipId,
+        path: filePath,
+        mimeType,
+        sizeBytes: existing.length,
+        cacheHit: true,
+      };
+    }
+    delete index.byContentHash[hash];
   }
+
+  const clipId = randomBytes(16).toString("hex");
+  const filePath = path.join(dir, `${clipId}.${ext}`);
   await writeFile(filePath, audio);
+  index.byContentHash[hash] = { clipId, ext };
+  await writeCacheIndex(chatId, index);
   return {
     clipId,
     path: filePath,

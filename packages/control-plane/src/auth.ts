@@ -25,13 +25,18 @@ export function createAuthMiddleware(config: ControlPlaneConfig) {
       return;
     }
     const jwt = header.slice("Bearer ".length).trim();
-    const { data, error } = await authClient.auth.getUser(jwt);
-    if (error || !data.user) {
-      res.status(401).json({ error: "invalid session" });
-      return;
+    try {
+      const { data, error } = await authClient.auth.getUser(jwt);
+      if (error || !data.user) {
+        res.status(401).json({ error: "invalid session" });
+        return;
+      }
+      req.userId = data.user.id;
+      req.userEmail = data.user.email ?? null;
+      next();
+    } catch (err) {
+      console.error("[control-plane] auth getUser failed", err);
+      res.status(500).json({ error: "Internal server error" });
     }
-    req.userId = data.user.id;
-    req.userEmail = data.user.email ?? null;
-    next();
   };
 }

@@ -14,7 +14,19 @@ function main() {
   const deps: RouteDeps = { config, db, stripe };
 
   const app = express();
-  app.use(cors({ origin: true, credentials: true }));
+  app.set("trust proxy", 1);
+  app.use(
+    cors({
+      origin(origin, callback) {
+        if (!origin || config.corsOrigins.includes(origin)) {
+          callback(null, true);
+          return;
+        }
+        callback(null, false);
+      },
+      credentials: true,
+    })
+  );
 
   app.post(
     "/api/stripe/webhook",

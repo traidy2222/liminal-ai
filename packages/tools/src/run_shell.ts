@@ -9,6 +9,7 @@ import { spawn } from "node:child_process";
 import type { AgentEmitter } from "@liminal/core";
 import { effectiveHarnessEnvRaw, resolveShellRuntime } from "@liminal/core";
 import { defineTool } from "./helpers.js";
+import { resolveWithinWorkspace } from "./file_path_guard.js";
 
 function parseEnvMs(key: string, fallback: number): number {
   const raw = effectiveHarnessEnvRaw(key)?.trim();
@@ -97,7 +98,15 @@ export function createRunShellTool(emitter: AgentEmitter) {
     },
     handler: async (args) => {
       const command = args["command"] as string;
-      const cwd = args["cwd"] as string | undefined;
+      const cwdArg = args["cwd"] as string | undefined;
+      let cwd: string | undefined;
+      if (cwdArg) {
+        const guard = resolveWithinWorkspace(cwdArg);
+        if (!guard.ok) {
+          return { ok: false, error: guard.error ?? "cwd must stay inside the workspace root." };
+        }
+        cwd = guard.resolvedPath;
+      }
       const requested =
         (args["timeout_ms"] as number | undefined) ?? (args["timeout"] as number | undefined);
       const { timeoutMs: timeout, cappedNote } = resolveShellTimeoutMs(requested);

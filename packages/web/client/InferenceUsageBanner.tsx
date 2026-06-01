@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
+import { webApiFetch } from "./webApiAuth.js";
+
 const WEB_SERVER_BASE = "";
 
 type InferenceStatus = {
@@ -31,7 +33,7 @@ export function InferenceUsageBanner({ vireonConnected, managedRoute }: Props) {
     }
     hadVireon.current = true;
     try {
-      const r = await fetch(`${WEB_SERVER_BASE}/api/vireon/inference-status`);
+      const r = await webApiFetch(`${WEB_SERVER_BASE}/api/vireon/inference-status`);
       if (!r.ok) return;
       setStatus((await r.json()) as InferenceStatus);
     } catch {

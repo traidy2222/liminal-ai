@@ -2,15 +2,18 @@ import { Router, type Request, type Response } from "express";
 import type Stripe from "stripe";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { ControlPlaneConfig, PaidTier } from "./config.js";
-import { stripePriceIdForTier } from "./config.js";
+import { isAllowedPortalReturnUrl, stripePriceIdForTier } from "./config.js";
 import { licenseVerifyResponse } from "./license_service.js";
 import { createAuthMiddleware, type AuthedRequest } from "./auth.js";
 import {
   ensureProfile,
   getActiveLicenseForUser,
+  isStripeEventProcessed,
   recordStripeEvent,
 } from "./supabase_admin.js";
 import { handleCheckoutCompleted, handleSubscriptionEvent } from "./stripe_handlers.js";
+import { createRateLimiter } from "./rate_limit.js";
+import { logServerError, newCorrelationId, sendInternalError } from "./http_errors.js";
 
 const PAID_TIERS = ["pro", "team", "enterprise"] as const;
 
@@ -24,6 +27,8 @@ export interface RouteDeps {
   stripe: Stripe;
 }
 
+const licenseVerifyRateLimit = createRateLimiter({ windowMs: 60_000, max: 30 });
+
 export function createRoutes(deps: RouteDeps): Router {
   const { config, db, stripe } = deps;
   const router = Router();
@@ -34,7 +39,7 @@ export function createRoutes(deps: RouteDeps): Router {
   });
 
   /** Offline-verifiable license check (no auth — harness + dashboard copy-paste). */
-  router.post("/api/license/verify", (req, res) => {
+  router.post("/api/license/verify", licenseVerifyRateLimit, (req, res) => {
     const token = typeof req.body?.token === "string" ? req.body.token.trim() : "";
     if (!token) {
       res.status(400).json({ error: "token required" });
@@ -62,7 +67,9 @@ export function createRoutes(deps: RouteDeps): Router {
         entitlements: summary.entitlements,
       });
     } catch (err) {
-      res.status(500).json({ error: (err as Error).message });
+      const correlationId = newCorrelationId();
+      logServerError("GET /api/license/me", err, correlationId);
+      sendInternalError(res, correlationId);
     }
   });
 
@@ -112,7 +119,9 @@ export function createRoutes(deps: RouteDeps): Router {
 
       res.json({ url: session.url, sessionId: session.id });
     } catch (err) {
-      res.status(500).json({ error: (err as Error).message });
+      const correlationId = newCorrelationId();
+      logServerError("POST /api/billing/checkout", err, correlationId);
+      sendInternalError(res, correlationId);
     }
   });
 
@@ -132,13 +141,19 @@ export function createRoutes(deps: RouteDeps): Router {
         typeof req.body?.returnUrl === "string" && req.body.returnUrl.trim()
           ? req.body.returnUrl.trim()
           : config.checkoutCancelUrl;
+      if (!isAllowedPortalReturnUrl(returnUrl, config)) {
+        res.status(400).json({ error: "returnUrl not allowed" });
+        return;
+      }
       const portal = await stripe.billingPortal.sessions.create({
         customer: profile.stripe_customer_id,
         return_url: returnUrl,
       });
       res.json({ url: portal.url });
     } catch (err) {
-      res.status(500).json({ error: (err as Error).message });
+      const correlationId = newCorrelationId();
+      logServerError("POST /api/billing/portal", err, correlationId);
+      sendInternalError(res, correlationId);
     }
   });
 
@@ -168,8 +183,7 @@ export function createStripeWebhookHandler(deps: RouteDeps) {
     }
 
     try {
-      const idempotency = await recordStripeEvent(db, event.id, event.type);
-      if (idempotency === "duplicate") {
+      if (await isStripeEventProcessed(db, event.id)) {
         res.json({ received: true, duplicate: true });
         return;
       }
@@ -214,10 +228,12 @@ export function createStripeWebhookHandler(deps: RouteDeps) {
           break;
       }
 
+      await recordStripeEvent(db, event.id, event.type);
       res.json({ received: true });
     } catch (err) {
-      console.error("[stripe] webhook handler error", err);
-      res.status(500).json({ error: (err as Error).message });
+      const correlationId = newCorrelationId();
+      logServerError("POST /api/stripe/webhook", err, correlationId);
+      sendInternalError(res, correlationId);
     }
   };
 }

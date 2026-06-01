@@ -10,24 +10,40 @@ interface SSEEvent {
   id: number;
   eventName: string;
   data: unknown;
+  chatId: string;
 }
 
 export class SSEManager {
   private clients = new Map<string, SSEClient>();
   private idCounter = 0;
   private eventCounter = 0;
-  private readonly history: SSEEvent[] = [];
+  /** Per-chat event ring buffers — prevents cross-chat secret leakage on replay. */
+  private readonly histories = new Map<string, SSEEvent[]>();
   private readonly historyLimit = 2000;
   private heartbeatTimer: NodeJS.Timeout | null = null;
+  private activeChatId = "";
 
-  add(req: Request, res: Response): string {
+  setActiveChatId(chatId: string): void {
+    this.activeChatId = chatId;
+  }
+
+  clearHistory(chatId?: string): void {
+    if (chatId) {
+      this.histories.delete(chatId);
+      return;
+    }
+    if (this.activeChatId) {
+      this.histories.delete(this.activeChatId);
+    }
+  }
+
+  add(req: Request, res: Response, chatId: string): string {
     const id = String(++this.idCounter);
 
     res.setHeader("Content-Type", "text/event-stream");
     res.setHeader("Cache-Control", "no-cache");
     res.setHeader("Connection", "keep-alive");
     res.setHeader("X-Accel-Buffering", "no");
-    res.setHeader("Access-Control-Allow-Origin", "*");
     res.flushHeaders();
     res.write(`retry: 1000\n\n`);
 
@@ -45,34 +61,35 @@ export class SSEManager {
       this.clients.delete(id);
     });
 
-    // Accept Last-Event-ID from header (native EventSource on reconnect) or query param
-    // (manual reconnect where we can't set headers).
     const lastEventIdRaw =
       req.header("last-event-id") ?? (req.query["lastEventId"] as string | undefined);
     const lastEventId = lastEventIdRaw ? Number.parseInt(lastEventIdRaw, 10) : NaN;
     const hasLastEventId = Number.isFinite(lastEventId);
     const replayHistory = req.query["replayHistory"] === "1";
 
-    // Send initial connected event with server-side cursor.
     const connectedCursor = this.eventCounter;
-    res.write(`event: connected\ndata: ${JSON.stringify({ id, cursor: connectedCursor })}\n\n`);
+    res.write(`event: connected\ndata: ${JSON.stringify({ id, cursor: connectedCursor, chatId })}\n\n`);
 
-    // Replay buffered events: full history (page remount) or tail after Last-Event-ID.
-    if (replayHistory && this.history.length > 0) {
-      this.replayHistoryToClient(res, this.history);
+    const history = this.histories.get(chatId) ?? [];
+
+    if (replayHistory && history.length > 0) {
+      this.replayHistoryToClient(res, history);
     } else if (hasLastEventId) {
-      // Stale cursor after Express restart — replay entire buffer instead of nothing.
       const staleCursor = (lastEventId as number) > connectedCursor;
-      const tail = this.history.filter(
-        (evt) => staleCursor || evt.id > (lastEventId as number)
-      );
+      const tail = history.filter((evt) => staleCursor || evt.id > (lastEventId as number));
       this.replayHistoryToClient(res, tail);
     }
 
     return id;
   }
 
-  send(eventName: string, data: unknown): void {
+  send(eventName: string, data: unknown, chatId?: string): void {
+    const cid = chatId ?? this.activeChatId;
+    if (!cid) {
+      console.warn(`[SSE] send("${eventName}") skipped — no active chatId`);
+      return;
+    }
+
     const id = ++this.eventCounter;
     let wireName = eventName;
     let wireData: unknown = data;
@@ -86,9 +103,15 @@ export class SSEManager {
         message: `Server could not encode SSE event "${eventName}" (${msg.slice(0, 400)}).`,
       };
     }
-    this.history.push({ id, eventName: wireName, data: wireData });
-    if (this.history.length > this.historyLimit) {
-      this.history.splice(0, this.history.length - this.historyLimit);
+
+    let history = this.histories.get(cid);
+    if (!history) {
+      history = [];
+      this.histories.set(cid, history);
+    }
+    history.push({ id, eventName: wireName, data: wireData, chatId: cid });
+    if (history.length > this.historyLimit) {
+      history.splice(0, history.length - this.historyLimit);
     }
 
     let payload: string;
@@ -114,15 +137,6 @@ export class SSEManager {
     }
   }
 
-  /**
-   * Remove a client and explicitly close its socket. A bare `clients.delete`
-   * leaves a half-open connection alive from the browser's perspective: its
-   * `EventSource` stays OPEN, never fires `onerror`, never reconnects, and the
-   * "ONLINE" badge stays green while no events are delivered. Ending the response
-   * sends a FIN so the browser detects the drop and runs its reconnect logic.
-   * Safe to call repeatedly (guarded on `writableEnded`); the `res.on("close")`
-   * handler may also fire and re-delete, which is a no-op.
-   */
   private dropClient(id: string): void {
     const client = this.clients.get(id);
     this.clients.delete(id);
@@ -139,7 +153,6 @@ export class SSEManager {
     }
   }
 
-  /** Write replayed events in chunks so the client can paint incrementally (not one burst). */
   private replayHistoryToClient(res: Response, events: SSEEvent[]): void {
     const CHUNK = 48;
     let i = 0;
@@ -175,7 +188,6 @@ export class SSEManager {
       const dead: string[] = [];
       for (const client of this.clients.values()) {
         try {
-          // SSE comment heartbeat keeps intermediaries from closing idle streams.
           client.res.write(`: heartbeat ${Date.now()}\n\n`);
         } catch {
           dead.push(client.id);

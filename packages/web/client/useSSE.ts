@@ -7,6 +7,11 @@ import {
 } from "@liminal/core/streaming-write-preview";
 import type { ImageAttachment } from "./imageAttachments.js";
 import { readPersonaChromeFromSession, writePersonaChromeToSession } from "./personaChromeSessionCache.js";
+import {
+  setWebAuthToken,
+  webApiAuthHeaders,
+  webApiStreamUrl,
+} from "./webApiAuth.js";
 
 /** Set only after a successful auto-greet reset (survives remount within the tab). */
 const SS_AUTO_GREET_DONE = "liminal:auto_greet_done_v1";
@@ -340,6 +345,7 @@ export type PendingApprovalState = {
   args: Record<string, unknown>;
   approvalTimeoutMs: number;
   receivedAt: number;
+  approvalNonce: string;
 };
 
 /** EventSource/stream layer (distinct from REST API reachability). */
@@ -436,7 +442,13 @@ type Action =
   | { type: "tool_delta"; payload: { callId: string; argsDelta: string } }
   | {
       type: "tool_approval";
-      payload: { callId: string; name: string; args: Record<string, unknown>; approvalTimeoutMs: number };
+      payload: {
+        callId: string;
+        name: string;
+        args: Record<string, unknown>;
+        approvalTimeoutMs: number;
+        approvalNonce: string;
+      };
     }
   | { type: "tool_result"; payload: { callId: string; name: string; args: Record<string, unknown>; ok: boolean; output: string } }
   | { type: "ask_user"; payload: { prompt: string } }
@@ -886,6 +898,7 @@ function reducer(state: SSEState, action: Action): SSEState {
           args: action.payload.args,
           approvalTimeoutMs: action.payload.approvalTimeoutMs ?? 60_000,
           receivedAt: Date.now(),
+          approvalNonce: action.payload.approvalNonce,
         },
         messages: state.messages.map((m) =>
           m.kind === "tool_call" && m.callId === action.payload.callId
@@ -1346,10 +1359,15 @@ async function fetchWithRetry(
 ): Promise<{ ok: boolean; status: number; body: unknown }> {
   let lastErr = "";
   let lastStatus = 0;
+  const authHeaders = webApiAuthHeaders();
   for (let i = 0; i < maxAttempts; i++) {
     if (i > 0) await sleep(postDelay(i - 1));
     try {
-      const r = await fetch(url, init);
+      const headers = new Headers(init.headers);
+      for (const [k, v] of Object.entries(authHeaders)) {
+        headers.set(k, v);
+      }
+      const r = await fetch(url, { ...init, headers });
       const body = await r.json().catch(() => ({}));
       lastStatus = r.status;
       // 409 = duplicate send while agent is already processing — first attempt got through
@@ -1382,9 +1400,24 @@ interface HarnessStatusResponse {
   lastTurnEndedAt?: number | null;
 }
 
+async function bootstrapWebAuth(): Promise<boolean> {
+  try {
+    const r = await fetch(`${SERVER}/api/config`);
+    if (!r.ok) return false;
+    const cfg = (await r.json()) as { webAuthToken?: string };
+    if (typeof cfg.webAuthToken === "string" && cfg.webAuthToken.trim()) {
+      setWebAuthToken(cfg.webAuthToken.trim());
+    }
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 async function fetchHarnessStatus(): Promise<HarnessStatusResponse | null> {
   try {
-    const r = await fetch(`${SERVER}/api/status`);
+    const headers = new Headers(webApiAuthHeaders());
+    const r = await fetch(`${SERVER}/api/status`, { headers });
     if (!r.ok) return null;
     return (await r.json()) as HarnessStatusResponse;
   } catch {
@@ -1400,7 +1433,7 @@ async function waitForApiReady(
   const deadline = Date.now() + maxMs;
   while (Date.now() < deadline) {
     if (isCancelled()) return false;
-    const st = await fetchHarnessStatus();
+    const st = await bootstrapWebAuth();
     if (st) return true;
     await sleep(350);
   }
@@ -1703,11 +1736,13 @@ export function useSSE(options?: {
     };
 
     const fetchAndApplyConfig = () => {
-      fetch(`${SERVER}/api/config`)
+      const headers = new Headers(webApiAuthHeaders());
+      fetch(`${SERVER}/api/config`, { headers })
         .then((r) => (r.ok ? r.json() : null))
         .then(
           (
             cfg: {
+              webAuthToken?: string;
               uiVerbosity?: string;
               personaBootstrapPending?: boolean;
               personaBootstrapAllowSkip?: boolean;
@@ -1721,6 +1756,9 @@ export function useSSE(options?: {
             } | null
           ) => {
             if (!cancelledRef.current && cfg) {
+              if (typeof cfg.webAuthToken === "string" && cfg.webAuthToken.trim()) {
+                setWebAuthToken(cfg.webAuthToken.trim());
+              }
               const activeId = cfg.activeChat?.chatId?.trim();
               if (activeId && streamBoundChatIdRef.current === null) {
                 streamBoundChatIdRef.current = activeId;
@@ -1839,13 +1877,15 @@ export function useSSE(options?: {
 
     function buildStreamUrl(opts?: { replayHistory?: boolean }): string {
       if (opts?.replayHistory) {
-        return `${SERVER}/api/stream?replayHistory=1`;
+        return webApiStreamUrl(`${SERVER}/api/stream?replayHistory=1`);
       }
       const eid = lastEventId.current ?? readStoredLastEventId();
       if (eid) {
-        return `${SERVER}/api/stream?lastEventId=${encodeURIComponent(eid)}`;
+        return webApiStreamUrl(
+          `${SERVER}/api/stream?lastEventId=${encodeURIComponent(eid)}`
+        );
       }
-      return `${SERVER}/api/stream`;
+      return webApiStreamUrl(`${SERVER}/api/stream`);
     }
 
     function waitForSseOpen(timeoutMs = 20_000): Promise<boolean> {
@@ -2432,23 +2472,27 @@ export function useSSE(options?: {
     return { ok: true };
   }, []);
 
-  const sendApproval = useCallback(async (callId: string, decision: unknown) => {
-    const result = await fetchWithRetry(
-      `${SERVER}/api/approve`,
-      {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ callId, decision }),
-      },
-      6
-    );
-    if (result.ok) {
-      dispatch({ type: "approval_resolved" });
-    } else {
-      const message = (result.body as { error?: string }).error ?? `Approval failed (${result.status})`;
-      dispatch({ type: "error", payload: { message } });
-    }
-  }, []);
+  const sendApproval = useCallback(
+    async (callId: string, decision: unknown, approvalNonce: string) => {
+      const result = await fetchWithRetry(
+        `${SERVER}/api/approve`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ callId, decision, approvalNonce }),
+        },
+        6
+      );
+      if (result.ok) {
+        dispatch({ type: "approval_resolved" });
+      } else {
+        const message =
+          (result.body as { error?: string }).error ?? `Approval failed (${result.status})`;
+        dispatch({ type: "error", payload: { message } });
+      }
+    },
+    []
+  );
 
   const sendAnswer = useCallback(async (answer: string) => {
     const result = await fetchWithRetry(

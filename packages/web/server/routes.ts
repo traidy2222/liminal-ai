@@ -45,7 +45,18 @@ import {
 } from "@liminal/tools";
 import { loadPersonaUiThemeFromWorkspace } from "@liminal/tools";
 import { persistIncomingAttachments } from "./image_attachment_store.js";
+import type { LocalWebAuth } from "./local_auth.js";
 import path from "node:path";
+
+const WEB_PORT = Number(process.env["PORT"] ?? 3001);
+
+/** Strip path segments and dangerous chars; cap length for safe storage/display. */
+function sanitizeAudioFilename(raw: string): string {
+  const base = path.basename(String(raw ?? "").trim());
+  const cleaned = base.replace(/[^a-zA-Z0-9._-]+/g, "_").replace(/^\.+/, "");
+  const trimmed = cleaned.slice(0, 120);
+  return trimmed || `audio-${Date.now()}.webm`;
+}
 
 type IncomingAttachment = {
   name?: string;
@@ -60,16 +71,46 @@ type IncomingAttachment = {
  * `/api/message`, `/api/approve`, etc. land in the newly-active chat.
  */
 /** Short-lived state nonces for /connect/harness → local callback. */
-const pendingHarnessConnect = new Map<string, number>();
+const pendingHarnessConnect = new Map<
+  string,
+  { exp: number; redirectUri: string }
+>();
 
 function prunePendingHarnessConnect(): void {
   const now = Date.now();
-  for (const [k, exp] of pendingHarnessConnect) {
-    if (exp < now) pendingHarnessConnect.delete(k);
+  for (const [k, v] of pendingHarnessConnect) {
+    if (v.exp < now) pendingHarnessConnect.delete(k);
   }
 }
 
-export function createRouter(chatManager: ChatManager, sse: SSEManager): Router {
+function escapeHtml(text: string): string {
+  return text
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
+}
+
+function isAllowedVireonRedirectUri(uri: string): boolean {
+  try {
+    const u = new URL(uri);
+    if (u.protocol !== "http:") return false;
+    const host = u.hostname.toLowerCase();
+    return host === "127.0.0.1" || host === "localhost" || host === "[::1]";
+  } catch {
+    return false;
+  }
+}
+
+function vireonCallbackRedirectUri(port: number): string {
+  return `http://127.0.0.1:${port}/api/vireon/auth/callback`;
+}
+
+export function createRouter(
+  chatManager: ChatManager,
+  sse: SSEManager,
+  localAuth: LocalWebAuth
+): Router {
   const router = Router();
 
   /** Convenience wrapper — every chat-scoped route calls this. */
@@ -97,6 +138,7 @@ export function createRouter(chatManager: ChatManager, sse: SSEManager): Router 
       // first paint without a separate roundtrip.
       const activeMeta = await readChatMetadata(bridge.chatId);
       res.json({
+        webAuthToken: localAuth.token,
         uiVerbosity: uiRaw === "quiet" ? "quiet" : "normal",
         approvalTimeoutMs: bridge.harness.getApprovalTimeoutMs(),
         personaBootstrapEnabled: resolveHarnessEnvRaw("AGENT_PERSONA_BOOTSTRAP", prefs) !== "0",
@@ -124,6 +166,7 @@ export function createRouter(chatManager: ChatManager, sse: SSEManager): Router 
     } catch (err) {
       console.error("/api/config failed:", err instanceof Error ? err.stack ?? err.message : String(err));
       res.status(200).json({
+        webAuthToken: localAuth.token,
         uiVerbosity: "normal",
         approvalTimeoutMs: 120_000,
         personaBootstrapEnabled: true,
@@ -194,16 +237,15 @@ export function createRouter(chatManager: ChatManager, sse: SSEManager): Router 
       account,
       tier: ent.tier,
       licensed: Boolean(ent.license),
-      entitlements: ent.entitlements,
+      entitlements: [...ent.entitlements],
     });
   });
 
   router.get("/api/vireon/connect/begin", (req, res) => {
     prunePendingHarnessConnect();
     const state = randomBytes(16).toString("hex");
-    pendingHarnessConnect.set(state, Date.now() + 5 * 60_000);
-    const host = req.get("host") ?? "127.0.0.1:3001";
-    const redirectUri = `http://${host}/api/vireon/auth/callback`;
+    const redirectUri = vireonCallbackRedirectUri(WEB_PORT);
+    pendingHarnessConnect.set(state, { exp: Date.now() + 5 * 60_000, redirectUri });
     const site = defaultVireonSiteOrigin();
     const connectUrl = `${site}/connect/harness?redirect_uri=${encodeURIComponent(redirectUri)}&state=${encodeURIComponent(state)}`;
     res.json({ connectUrl, state });
@@ -211,72 +253,53 @@ export function createRouter(chatManager: ChatManager, sse: SSEManager): Router 
 
   const handleVireonAuthCallback = async (
     req: import("express").Request,
-    res: import("express").Response,
-    asHtml: boolean
+    res: import("express").Response
   ) => {
     prunePendingHarnessConnect();
     const token =
-      typeof req.body?.token === "string"
-        ? req.body.token.trim()
-        : typeof req.query?.token === "string"
-          ? req.query.token.trim()
-          : "";
+      typeof req.body?.token === "string" ? req.body.token.trim() : "";
     const state =
-      typeof req.body?.state === "string"
-        ? req.body.state.trim()
-        : typeof req.query?.state === "string"
-          ? req.query.state.trim()
-          : "";
-    const exp = state ? pendingHarnessConnect.get(state) : undefined;
-    if (!state || !exp || exp < Date.now()) {
-      if (asHtml) {
-        res.status(403).type("html").send("<p>Invalid or expired connect session.</p>");
-        return;
-      }
+      typeof req.body?.state === "string" ? req.body.state.trim() : "";
+    const pending = state ? pendingHarnessConnect.get(state) : undefined;
+    if (!state || !pending || pending.exp < Date.now()) {
       res.status(403).json({ error: "Invalid or expired connect session" });
       return;
     }
-    pendingHarnessConnect.delete(state);
+    const requestUri = `${req.protocol}://${req.get("host") ?? "127.0.0.1"}${req.originalUrl.split("?")[0]}`;
+    if (
+      !isAllowedVireonRedirectUri(requestUri) &&
+      requestUri !== pending.redirectUri
+    ) {
+      res.status(403).json({ error: "Invalid callback redirect URI" });
+      return;
+    }
+    if (!token) {
+      res.status(400).json({ error: "token required in POST body" });
+      return;
+    }
     try {
-      const email =
-        (typeof req.query?.email === "string" ? req.query.email : null) ||
-        (typeof req.body?.email === "string" ? req.body.email : null) ||
-        "vireon@user";
       const resolved = await applyVireonLicenseToken(token, {
-        email,
+        email: "vireon@user",
         source: "browser",
-        licenseSub: typeof req.body?.licenseSub === "string" ? req.body.licenseSub : undefined,
+        licenseSub:
+          typeof req.body?.licenseSub === "string" ? req.body.licenseSub : undefined,
       });
+      pendingHarnessConnect.delete(state);
       await chatManager.reloadRuntimePrefs();
       try {
         await chatManager.reapplyActiveBridgeProvider();
       } catch (e) {
         console.warn("[vireon] bridge provider refresh:", e instanceof Error ? e.message : e);
       }
-      if (asHtml) {
-        res.type("html").send(
-          "<!DOCTYPE html><html><body style='font-family:system-ui;padding:2rem'>" +
-            "<h1>Connected to Vireon</h1><p>You can close this tab and return to Liminal.</p></body></html>"
-        );
-        return;
-      }
-      res.json({ ok: true, tier: resolved.tier, email });
+      res.json({ ok: true, tier: resolved.tier, email: "vireon@user" });
     } catch (e) {
       const message = e instanceof Error ? e.message : "Connect failed";
-      if (asHtml) {
-        res.status(400).type("html").send(`<p>${message}</p>`);
-        return;
-      }
       res.status(400).json({ error: message });
     }
   };
 
   router.post("/api/vireon/auth/callback", (req, res) => {
-    void handleVireonAuthCallback(req, res, false);
-  });
-
-  router.get("/api/vireon/auth/callback", (req, res) => {
-    void handleVireonAuthCallback(req, res, true);
+    void handleVireonAuthCallback(req, res);
   });
 
   router.post("/api/vireon/logout", async (_req, res) => {
@@ -370,16 +393,22 @@ export function createRouter(chatManager: ChatManager, sse: SSEManager): Router 
     const mode = String(body?.mode ?? "soft").toLowerCase();
     if (mode === "hard") {
       bridge.clearSession({ preserveBootstrapState: false });
+      sse.clearHistory(bridge.chatId);
       res.json({ ok: true, mode: "hard" });
       void bridge.initializeSessionAfterReset().catch((err) => {
-        sse.send("error", {
-          message: err instanceof Error ? err.message : "Session greeting failed after reset.",
-        });
+        sse.send(
+          "error",
+          {
+            message: err instanceof Error ? err.message : "Session greeting failed after reset.",
+          },
+          bridge.chatId
+        );
       });
       return;
     }
     const greet = body?.greet === true;
     bridge.clearSession({ preserveBootstrapState: true });
+    sse.clearHistory(bridge.chatId);
     let greeted = false;
     if (greet && !bridge.isAwaitingPersonaBootstrap) {
       // Non-blocking: start the greeting turn and return immediately. The heartbeat
@@ -405,7 +434,14 @@ export function createRouter(chatManager: ChatManager, sse: SSEManager): Router 
   router.get("/api/stream", (req, res) => {
     req.socket.setKeepAlive(true, 15_000);
     req.socket.setTimeout(0);
-    sse.add(req, res);
+    let chatId = "";
+    try {
+      chatId = chatManager.activeId;
+    } catch {
+      res.status(503).json({ error: "No active chat" });
+      return;
+    }
+    sse.add(req, res, chatId);
     let bridge: import("./agentBridge.js").AgentBridge | null = null;
     try {
       bridge = chatManager.getActive();
@@ -480,7 +516,7 @@ export function createRouter(chatManager: ChatManager, sse: SSEManager): Router 
       })
       .catch((err) => {
       const message = err instanceof Error ? err.message : "Failed to process message.";
-      sse.send("error", { message });
+      sse.send("error", { message }, bridge.chatId);
     });
   });
 
@@ -514,15 +550,20 @@ export function createRouter(chatManager: ChatManager, sse: SSEManager): Router 
 
   router.post("/api/approve", (req, res) => {
     const bridge = active();
-    const { callId, decision } = req.body as {
+    const { callId, decision, approvalNonce } = req.body as {
       callId?: string;
       decision?: ApprovalDecision;
+      approvalNonce?: string;
     };
     if (!callId || !decision) {
       res.status(400).json({ error: "callId and decision required" });
       return;
     }
-    const resolved = bridge.resolveApproval(callId, decision);
+    if (!approvalNonce || typeof approvalNonce !== "string") {
+      res.status(400).json({ error: "approvalNonce required" });
+      return;
+    }
+    const resolved = bridge.resolveApproval(callId, decision, approvalNonce);
     res.json({ ok: resolved });
   });
 
@@ -699,10 +740,14 @@ export function createRouter(chatManager: ChatManager, sse: SSEManager): Router 
       // allow-list check. Keep the full header for content-type if we ever
       // need it downstream.
       const mimeFromUrl = normalizeAudioMimeType(fullMimeHeader);
-      const mimeType = normalizeAudioMimeType(body.mimeType || mimeFromUrl);
+      const bodyMime =
+        typeof body.mimeType === "string" ? normalizeAudioMimeType(body.mimeType) : "";
+      // Trust the data URL MIME only; ignore a mismatched client-supplied mimeType.
+      const mimeType =
+        bodyMime && bodyMime === mimeFromUrl ? bodyMime : mimeFromUrl;
       if (!mimeType || !SUPPORTED_AUDIO_MIME_TYPES.has(mimeType)) {
         res.status(400).json({
-          error: `Unsupported audio MIME: ${body.mimeType || fullMimeHeader}. Supported: ${[...SUPPORTED_AUDIO_MIME_TYPES].join(", ")}`,
+          error: `Unsupported audio MIME: ${fullMimeHeader}. Supported: ${[...SUPPORTED_AUDIO_MIME_TYPES].join(", ")}`,
         });
         return;
       }
@@ -714,8 +759,9 @@ export function createRouter(chatManager: ChatManager, sse: SSEManager): Router 
         });
         return;
       }
-      const filename =
-        (typeof body.filename === "string" && body.filename.trim()) || `audio-${Date.now()}.webm`;
+      const filename = sanitizeAudioFilename(
+        (typeof body.filename === "string" && body.filename.trim()) || `audio-${Date.now()}.webm`
+      );
       const rec = await saveAudioAttachment(bridge.chatId, {
         bytes,
         filename,
@@ -782,15 +828,19 @@ export function createRouter(chatManager: ChatManager, sse: SSEManager): Router 
       );
       // Surface to SSE so the client UI's cost chip stays in sync even if the
       // browser tab that triggered the call already moved on.
-      sse.send("transcription", {
-        chatId: bridge.chatId,
-        attachmentId: id,
-        durationSec: result.durationSec,
-        costUsd: result.costUsd,
-        model: result.model,
-        language: result.language,
-        at: Date.now(),
-      });
+      sse.send(
+        "transcription",
+        {
+          chatId: bridge.chatId,
+          attachmentId: id,
+          durationSec: result.durationSec,
+          costUsd: result.costUsd,
+          model: result.model,
+          language: result.language,
+          at: Date.now(),
+        },
+        bridge.chatId
+      );
       res.json({
         ok: true,
         attachmentId: id,

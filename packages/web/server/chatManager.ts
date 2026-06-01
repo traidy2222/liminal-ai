@@ -201,6 +201,8 @@ export class ChatManager {
     }
 
     this.activeChatId = chatId;
+    this.sse.setActiveChatId(chatId);
+
     await slot.bridge.resumeSSE();
 
     if (opts?.announce !== false) {
@@ -211,7 +213,7 @@ export class ChatManager {
         workspaceFingerprint: meta.workspaceFingerprint,
         workspaceMode: meta.workspaceMode,
         at: Date.now(),
-      });
+      }, chatId);
     }
 
     return meta;

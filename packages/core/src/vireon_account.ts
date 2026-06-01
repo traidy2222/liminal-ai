@@ -2,7 +2,7 @@
  * Local Vireon account binding — license + profile persisted under ~/.liminal/
  * (not .env). Use {@link runVireonConnectFlow} or the web Settings "Sign in" flow.
  */
-import { readFile, writeFile, mkdir } from "node:fs/promises";
+import { readFile, writeFile, mkdir, chmod } from "node:fs/promises";
 import path from "node:path";
 import { ensureGlobalStorageRoot, globalPath } from "./global_storage.js";
 import {
@@ -21,6 +21,7 @@ import {
 } from "./runtime_prefs.js";
 
 const ACCOUNT_FILE = "account.json";
+const SECURE_FILE_MODE = 0o600;
 
 export interface VireonAccountRecord {
   version: 1;
@@ -61,7 +62,8 @@ export async function writeVireonAccount(
   };
   const p = vireonAccountPath();
   await mkdir(path.dirname(p), { recursive: true });
-  await writeFile(p, JSON.stringify(rec, null, 2), "utf8");
+  await writeFile(p, JSON.stringify(rec, null, 2), { encoding: "utf8", mode: SECURE_FILE_MODE });
+  await chmod(p, SECURE_FILE_MODE);
   return rec;
 }
 

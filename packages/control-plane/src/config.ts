@@ -32,6 +32,7 @@ export interface ControlPlaneConfig {
   stripePriceEnterprise: string;
   checkoutSuccessUrl: string;
   checkoutCancelUrl: string;
+  corsOrigins: string[];
 }
 
 function req(name: string): string {
@@ -44,8 +45,64 @@ function opt(name: string, fallback = ""): string {
   return process.env[name]?.trim() ?? fallback;
 }
 
+/** Origin from a checkout redirect URL (strips Stripe template placeholders). */
+export function originFromCheckoutUrl(url: string): string | null {
+  try {
+    const normalized = url.replace(/\{[A-Z0-9_]+\}/g, "placeholder");
+    return new URL(normalized).origin;
+  } catch {
+    return null;
+  }
+}
+
+function parseCorsOrigins(checkoutSuccessUrl: string, checkoutCancelUrl: string): string[] {
+  const envList = process.env.CONTROL_PLANE_CORS_ORIGINS?.trim();
+  if (envList) {
+    return [...new Set(envList.split(",").map((s) => s.trim()).filter(Boolean))];
+  }
+  const origins = new Set<string>();
+  for (const url of [checkoutSuccessUrl, checkoutCancelUrl]) {
+    const origin = originFromCheckoutUrl(url);
+    if (origin) origins.add(origin);
+  }
+  return [...origins];
+}
+
+/** Stripe Customer Portal return_url — same origin as checkout redirects, allowed path prefix. */
+export function isAllowedPortalReturnUrl(returnUrl: string, config: ControlPlaneConfig): boolean {
+  let parsed: URL;
+  try {
+    parsed = new URL(returnUrl);
+  } catch {
+    return false;
+  }
+  for (const template of [config.checkoutSuccessUrl, config.checkoutCancelUrl]) {
+    try {
+      const base = new URL(template.replace(/\{[A-Z0-9_]+\}/g, "placeholder"));
+      if (parsed.origin !== base.origin) continue;
+      const basePath = base.pathname.replace(/\/$/, "") || "/";
+      const path = parsed.pathname.replace(/\/$/, "") || "/";
+      if (path === basePath || path.startsWith(`${basePath}/`)) return true;
+    } catch {
+      continue;
+    }
+  }
+  return false;
+}
+
 export function loadConfig(): ControlPlaneConfig {
   const licenseTermDays = Number(opt("CONTROL_PLANE_LICENSE_TERM_DAYS", "30"));
+  const checkoutSuccessUrl = opt(
+    "STRIPE_CHECKOUT_SUCCESS_URL",
+    "http://localhost:3000/dashboard?session_id={CHECKOUT_SESSION_ID}"
+  );
+  const checkoutCancelUrl = opt("STRIPE_CHECKOUT_CANCEL_URL", "http://localhost:3000/pricing");
+  const supabaseAnonKey = opt("SUPABASE_ANON_KEY");
+
+  if (process.env.NODE_ENV === "production" && !supabaseAnonKey) {
+    throw new Error("SUPABASE_ANON_KEY is required when NODE_ENV=production");
+  }
+
   return {
     port: Number(opt("CONTROL_PLANE_PORT", opt("PORT", "3002"))),
     licensePrivateKeyPem: req("CONTROL_PLANE_LICENSE_PRIVATE_KEY_PEM"),
@@ -53,17 +110,15 @@ export function loadConfig(): ControlPlaneConfig {
     licenseTermDays: Number.isFinite(licenseTermDays) && licenseTermDays > 0 ? licenseTermDays : 30,
     supabaseUrl: req("SUPABASE_URL"),
     supabaseServiceRoleKey: req("SUPABASE_SERVICE_ROLE_KEY"),
-    supabaseAnonKey: opt("SUPABASE_ANON_KEY"),
+    supabaseAnonKey,
     stripeSecretKey: req("STRIPE_SECRET_KEY"),
     stripeWebhookSecret: req("STRIPE_WEBHOOK_SECRET"),
     stripePricePro: opt("STRIPE_PRICE_PRO"),
     stripePriceTeam: opt("STRIPE_PRICE_TEAM"),
     stripePriceEnterprise: opt("STRIPE_PRICE_ENTERPRISE"),
-    checkoutSuccessUrl: opt(
-      "STRIPE_CHECKOUT_SUCCESS_URL",
-      "http://localhost:3000/dashboard?session_id={CHECKOUT_SESSION_ID}"
-    ),
-    checkoutCancelUrl: opt("STRIPE_CHECKOUT_CANCEL_URL", "http://localhost:3000/pricing"),
+    checkoutSuccessUrl,
+    checkoutCancelUrl,
+    corsOrigins: parseCorsOrigins(checkoutSuccessUrl, checkoutCancelUrl),
   };
 }
 

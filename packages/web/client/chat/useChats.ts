@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { WEB_SERVER_BASE } from "../useSSE.js";
+import { webApiFetch } from "../webApiAuth.js";
 
 /** Mirrors core's ChatMetadata. Kept loose so the client doesn't transitively import core types. */
 export interface ChatMetaDTO {
@@ -49,7 +50,7 @@ export function useChats(): {
   const refresh = useCallback(async () => {
     setState((s) => ({ ...s, loading: true, error: null }));
     try {
-      const res = await fetch(`${WEB_SERVER_BASE}/api/chats`);
+      const res = await webApiFetch(`${WEB_SERVER_BASE}/api/chats`);
       if (!res.ok) throw new Error(`/api/chats → ${res.status}`);
       const body = (await res.json()) as {
         chats: ChatMetaDTO[];
@@ -97,7 +98,7 @@ export function useChats(): {
       workspaceMode: "scratch" | "folder" | "reuse";
       workspaceRoot?: string;
     }) => {
-      const res = await fetch(`${WEB_SERVER_BASE}/api/chats`, {
+      const res = await webApiFetch(`${WEB_SERVER_BASE}/api/chats`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ ...input, activate: true }),
@@ -115,7 +116,7 @@ export function useChats(): {
 
   const activate = useCallback(
     async (chatId: string) => {
-      const res = await fetch(`${WEB_SERVER_BASE}/api/chats/${encodeURIComponent(chatId)}/activate`, {
+      const res = await webApiFetch(`${WEB_SERVER_BASE}/api/chats/${encodeURIComponent(chatId)}/activate`, {
         method: "POST",
       });
       if (!res.ok) {
@@ -129,7 +130,7 @@ export function useChats(): {
 
   const remove = useCallback(
     async (chatId: string) => {
-      const res = await fetch(`${WEB_SERVER_BASE}/api/chats/${encodeURIComponent(chatId)}`, {
+      const res = await webApiFetch(`${WEB_SERVER_BASE}/api/chats/${encodeURIComponent(chatId)}`, {
         method: "DELETE",
       });
       if (!res.ok) {

@@ -147,27 +147,72 @@ export async function persistLicense(
   if (error) throw new Error(`licenses upsert: ${error.message}`);
 }
 
+export async function isStripeEventProcessed(
+  db: SupabaseClient,
+  stripeEventId: string
+): Promise<boolean> {
+  const { data, error } = await db
+    .from("stripe_webhook_events")
+    .select("stripe_event_id")
+    .eq("stripe_event_id", stripeEventId)
+    .maybeSingle();
+  if (error) throw new Error(`stripe_webhook_events select: ${error.message}`);
+  return !!data;
+}
+
 export async function recordStripeEvent(
   db: SupabaseClient,
   stripeEventId: string,
   eventType: string
-): Promise<"new" | "duplicate"> {
+): Promise<void> {
   const { error } = await db.from("stripe_webhook_events").insert({
     stripe_event_id: stripeEventId,
     event_type: eventType,
   });
-  if (!error) return "new";
-  if (error.code === "23505") return "duplicate";
-  throw new Error(`stripe_webhook_events insert: ${error.message}`);
+  if (error && error.code !== "23505") {
+    throw new Error(`stripe_webhook_events insert: ${error.message}`);
+  }
+}
+
+async function profileExists(db: SupabaseClient, userId: string): Promise<boolean> {
+  const { data, error } = await db.from("profiles").select("id").eq("id", userId).maybeSingle();
+  if (error) throw new Error(`profiles lookup: ${error.message}`);
+  return !!data?.id;
+}
+
+function metadataUserId(metadata: Record<string, string> | null | undefined): string | null {
+  return metadata?.supabase_user_id?.trim() || metadata?.user_id?.trim() || null;
 }
 
 export async function resolveUserIdFromMetadata(
   db: SupabaseClient,
   metadata: Record<string, string> | null | undefined,
-  stripeCustomerId?: string
+  stripeCustomerId?: string,
+  clientReferenceId?: string | null
 ): Promise<string | null> {
-  const fromMeta = metadata?.supabase_user_id?.trim() || metadata?.user_id?.trim();
-  if (fromMeta) return fromMeta;
-  if (stripeCustomerId) return findUserIdByStripeCustomer(db, stripeCustomerId);
+  const metaId = metadataUserId(metadata);
+  const refId = clientReferenceId?.trim() || null;
+
+  if (stripeCustomerId) {
+    const fromCustomer = await findUserIdByStripeCustomer(db, stripeCustomerId);
+    if (fromCustomer) {
+      if (metaId && metaId !== fromCustomer) {
+        console.warn(
+          "[stripe] metadata user_id does not match stripe customer profile; using customer lookup",
+          { metaId, fromCustomer }
+        );
+      }
+      return fromCustomer;
+    }
+  }
+
+  if (refId && (await profileExists(db, refId))) {
+    return refId;
+  }
+
+  if (metaId && (await profileExists(db, metaId))) {
+    return metaId;
+  }
+
   return null;
 }

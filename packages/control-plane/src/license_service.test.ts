@@ -32,6 +32,7 @@ const baseConfig: ControlPlaneConfig = {
   stripePriceEnterprise: "price_ent",
   checkoutSuccessUrl: "http://localhost/success",
   checkoutCancelUrl: "http://localhost/cancel",
+  corsOrigins: ["http://localhost"],
 };
 
 describe("license_service", () => {

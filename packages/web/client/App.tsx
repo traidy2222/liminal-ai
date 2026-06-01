@@ -1,5 +1,6 @@
 import React, { useState, useRef, useEffect, useCallback, useMemo, memo } from "react";
 import { useSSE, sendAbortTurn, type MessageEntry, type AutoDreamState, type PersonalityPulseRow, WEB_SERVER_BASE, type ApiReachable, type SseTransport } from "./useSSE.js";
+import { webApiFetch } from "./webApiAuth.js";
 import { MEMORY_SYNC_LABEL, presentAutoDream } from "./autoDreamPresent.js";
 import { applyPersonaDocumentTheme } from "./applyPersonaDocumentTheme.js";
 import { AssistantMessageContent, renderFencedCodeBlock } from "./liminalMarkdown.js";
@@ -1626,8 +1627,8 @@ export function App() {
     setSettingsError(null);
     try {
       const [r, vr] = await Promise.all([
-        fetch(`${WEB_SERVER_BASE}/api/settings`),
-        fetch(`${WEB_SERVER_BASE}/api/vireon/account`),
+        webApiFetch(`${WEB_SERVER_BASE}/api/settings`),
+        webApiFetch(`${WEB_SERVER_BASE}/api/vireon/account`),
       ]);
       if (!r.ok) throw new Error(await r.text());
       if (vr.ok) {
@@ -1682,7 +1683,7 @@ export function App() {
   useEffect(() => {
     void (async () => {
       try {
-        const vr = await fetch(`${WEB_SERVER_BASE}/api/vireon/account`);
+        const vr = await webApiFetch(`${WEB_SERVER_BASE}/api/vireon/account`);
         if (vr.ok) {
           const vj = (await vr.json()) as {
             connected?: boolean;
@@ -1693,7 +1694,7 @@ export function App() {
           setVireonEmail(vj.account?.email ?? null);
           setVireonTier(vj.tier ?? null);
         }
-        const sr = await fetch(`${WEB_SERVER_BASE}/api/settings`);
+        const sr = await webApiFetch(`${WEB_SERVER_BASE}/api/settings`);
         if (sr.ok) {
           const sj = (await sr.json()) as { provider?: { managedRoute?: boolean; inferenceMode?: string } };
           setSettingsManagedRoute(
@@ -1748,7 +1749,7 @@ export function App() {
       const mode = env["AGENT_INFERENCE_MODE"]?.trim().toLowerCase();
       const inferenceMode =
         mode === "byok" || mode === "managed" || mode === "auto" ? mode : undefined;
-      const r = await fetch(`${WEB_SERVER_BASE}/api/settings`, {
+      const r = await webApiFetch(`${WEB_SERVER_BASE}/api/settings`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -1783,20 +1784,20 @@ export function App() {
     setVireonBusy(true);
     setSettingsError(null);
     try {
-      const r = await fetch(`${WEB_SERVER_BASE}/api/vireon/connect/begin`);
+      const r = await webApiFetch(`${WEB_SERVER_BASE}/api/vireon/connect/begin`);
       const j = (await r.json()) as { connectUrl?: string; error?: string };
       if (!r.ok || !j.connectUrl) throw new Error(j.error ?? "Could not start sign-in");
       const popup = window.open(j.connectUrl, "_blank", "noopener,noreferrer");
       setSettingsError("Complete sign-in in the browser tab…");
       const poll = window.setInterval(async () => {
         try {
-          const ar = await fetch(`${WEB_SERVER_BASE}/api/vireon/account`);
+          const ar = await webApiFetch(`${WEB_SERVER_BASE}/api/vireon/account`);
           if (!ar.ok) return;
           const aj = (await ar.json()) as { connected?: boolean; account?: { email?: string } };
           if (!aj.connected) return;
           setVireonConnected(true);
           setVireonEmail(aj.account?.email ?? null);
-          await fetch(`${WEB_SERVER_BASE}/api/vireon/reconnect`, { method: "POST" });
+          await webApiFetch(`${WEB_SERVER_BASE}/api/vireon/reconnect`, { method: "POST" });
           void loadSettings();
           setSettingsError(null);
           window.clearInterval(poll);
@@ -1816,7 +1817,7 @@ export function App() {
   const handleVireonSignOut = useCallback(async () => {
     setVireonBusy(true);
     try {
-      await fetch(`${WEB_SERVER_BASE}/api/vireon/logout`, { method: "POST" });
+      await webApiFetch(`${WEB_SERVER_BASE}/api/vireon/logout`, { method: "POST" });
       setVireonConnected(false);
       setVireonEmail(null);
       setVireonTier(null);
@@ -1883,7 +1884,7 @@ export function App() {
   const transcribeAndAppend = async (file: File) => {
     try {
       const dataUrl = await fileToDataUrl(file);
-      const uploadResp = await fetch(`${WEB_SERVER_BASE}/api/audio/upload`, {
+      const uploadResp = await webApiFetch(`${WEB_SERVER_BASE}/api/audio/upload`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ dataUrl, filename: file.name, mimeType: file.type || "audio/webm" }),
@@ -1894,7 +1895,7 @@ export function App() {
         return;
       }
       const upload = (await uploadResp.json()) as { attachmentId: string };
-      const tResp = await fetch(`${WEB_SERVER_BASE}/api/transcribe`, {
+      const tResp = await webApiFetch(`${WEB_SERVER_BASE}/api/transcribe`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ attachmentId: upload.attachmentId }),
@@ -2333,13 +2334,21 @@ export function App() {
             <div style={{ display: "flex", gap: 10, marginTop: 16 }}>
               <button
                 style={{ ...styles.btn, background: "rgba(0,30,12,0.8)", borderColor: `rgba(var(--lim-success-rgb),0.3)`, color: GREEN, flex: 1, letterSpacing: "0.08em", fontSize: 11, fontFamily: "monospace" }}
-                onClick={() => sendApproval(state.pendingApproval!.callId, { decision: "approve" })}
+                onClick={() =>
+                  sendApproval(state.pendingApproval!.callId, { decision: "approve" }, state.pendingApproval!.approvalNonce)
+                }
               >
                 ✓ AUTHORIZE
               </button>
               <button
                 style={{ ...styles.btn, background: "rgba(30,4,8,0.8)", borderColor: `rgba(var(--lim-danger-rgb),0.3)`, color: RED_ERR, flex: 1, letterSpacing: "0.08em", fontSize: 11, fontFamily: "monospace" }}
-                onClick={() => sendApproval(state.pendingApproval!.callId, { decision: "reject", reason: "Rejected by user" })}
+                onClick={() =>
+                  sendApproval(
+                    state.pendingApproval!.callId,
+                    { decision: "reject", reason: "Rejected by user" },
+                    state.pendingApproval!.approvalNonce
+                  )
+                }
               >
                 ✗ DENY
               </button>

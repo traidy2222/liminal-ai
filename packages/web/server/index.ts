@@ -10,6 +10,11 @@ import { effectiveHarnessEnvRaw } from "@liminal/core";
 import { SSEManager } from "./sse.js";
 import { ChatManager } from "./chatManager.js";
 import { createRouter } from "./routes.js";
+import {
+  allowedWebCorsOrigins,
+  createLocalWebAuth,
+  resolveWebBindHost,
+} from "./local_auth.js";
 
 // Load `.env` files in order (dotenv does not override existing `process.env` keys by default):
 // 1) monorepo root, 2) packages/web, 3) workspace root when it differs — before AgentBridge starts.
@@ -40,8 +45,23 @@ if (
   config({ path: workspaceEnvPath });
 }
 
+const PORT = Number(process.env["PORT"] ?? 3001);
+const localAuth = await createLocalWebAuth();
+const corsOrigins = allowedWebCorsOrigins(PORT);
+
 const app = express();
-app.use(cors());
+app.use(
+  cors({
+    origin(origin, callback) {
+      if (!origin || corsOrigins.includes(origin)) {
+        callback(null, true);
+        return;
+      }
+      callback(null, false);
+    },
+    credentials: true,
+  })
+);
 app.use(express.json({ limit: "20mb" }));
 
 const sse = new SSEManager();
@@ -55,7 +75,15 @@ const bootedChat = await chatManager.boot();
 console.log(
   `Liminal chat manager → active chat ${bootedChat.activeChatId} (${bootedChat.activeMeta.workspaceMode} @ ${bootedChat.activeMeta.workspaceRoot})`
 );
-const router = createRouter(chatManager, sse);
+app.use((req, res, next) => {
+  if (!req.path.startsWith("/api")) {
+    next();
+    return;
+  }
+  localAuth.requireAuth(req, res, next);
+});
+
+const router = createRouter(chatManager, sse, localAuth);
 app.use(router);
 
 const webPkgRoot = join(__dirname, "..");
@@ -132,7 +160,7 @@ if (existsSync(clientIndexHtml)) {
   });
 }
 
-const PORT = Number(process.env["PORT"] ?? 3001);
+const bindHost = resolveWebBindHost();
 const server = createServer(app);
 
 server.once("error", (err: unknown) => {
@@ -148,11 +176,17 @@ server.once("error", (err: unknown) => {
   throw err;
 });
 
-server.listen(PORT);
+server.listen(PORT, bindHost);
 
 server.once("listening", () => {
-  console.log(`Liminal web server → http://localhost:${PORT}`);
-  console.log(`SSE stream         → http://localhost:${PORT}/api/stream`);
+  console.log(`Liminal web server → http://${bindHost}:${PORT}`);
+  console.log(`SSE stream         → http://${bindHost}:${PORT}/api/stream`);
+  if (bindHost !== "127.0.0.1" && bindHost !== "::1" && bindHost !== "localhost") {
+    console.warn(
+      `[security] Web server bound to ${bindHost} — exposes unauthenticated agent control if AGENT_WEB_TOKEN is not set. Prefer 127.0.0.1.`
+    );
+  }
+  console.log(`Web auth token     → ${process.env["AGENT_WEB_TOKEN"] ? "AGENT_WEB_TOKEN (env)" : "~/.liminal/web_token"}`);
   const anyKeySet = Boolean(
     process.env["AGENT_API_KEY"] ||
       process.env["OPENROUTER_API_KEY"] ||

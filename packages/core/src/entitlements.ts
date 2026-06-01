@@ -18,7 +18,7 @@
  * package and are gated here by entitlement key.
  */
 import { createPublicKey, createPrivateKey, sign as cryptoSign, verify as cryptoVerify } from "node:crypto";
-import { readFile, writeFile, mkdir } from "node:fs/promises";
+import { readFile, writeFile, mkdir, chmod } from "node:fs/promises";
 import path from "node:path";
 import { globalPath, ensureGlobalStorageRoot } from "./global_storage.js";
 
@@ -277,6 +277,7 @@ export function resolveEntitlements(opts?: ResolveEntitlementsOptions): Resolved
 // ── Disk cache (offline grace) ──────────────────────────────────────────────
 
 const LICENSE_CACHE_FILE = "license.json";
+const SECURE_FILE_MODE = 0o600;
 
 interface LicenseCacheRecord {
   version: 1;
@@ -303,7 +304,8 @@ export async function writeCachedLicenseToken(token: string): Promise<void> {
   const p = licenseCachePath();
   await mkdir(path.dirname(p), { recursive: true });
   const rec: LicenseCacheRecord = { version: 1, token, cachedAt: Date.now() };
-  await writeFile(p, JSON.stringify(rec, null, 2), "utf8");
+  await writeFile(p, JSON.stringify(rec, null, 2), { encoding: "utf8", mode: SECURE_FILE_MODE });
+  await chmod(p, SECURE_FILE_MODE);
 }
 
 /**

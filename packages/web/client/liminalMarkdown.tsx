@@ -9,6 +9,10 @@ import ReactMarkdown from "react-markdown";
 import type { Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
 import rehypeRaw from "rehype-raw";
+import rehypeSanitize from "rehype-sanitize";
+import { unified } from "unified";
+import rehypeParse from "rehype-parse";
+import rehypeStringify from "rehype-stringify";
 import { Prism as SyntaxHighlighter } from "react-syntax-highlighter";
 import { vscDarkPlus } from "react-syntax-highlighter/dist/esm/styles/prism";
 import { LIM } from "./persona/personaVars.js";
@@ -27,7 +31,20 @@ export {
 } from "./liminalMarkdownUtils.js";
 
 export const LIMINAL_MARKDOWN_REMARK_PLUGINS = [remarkGfm];
-export const LIMINAL_MARKDOWN_REHYPE_PLUGINS = [rehypeRaw];
+export const LIMINAL_MARKDOWN_REHYPE_PLUGINS = [rehypeRaw, rehypeSanitize];
+
+const embedSanitizer = unified()
+  .use(rehypeParse, { fragment: true })
+  .use(rehypeSanitize)
+  .use(rehypeStringify);
+
+function sanitizeEmbedHtml(html: string): string {
+  try {
+    return String(embedSanitizer.processSync(html));
+  } catch {
+    return "";
+  }
+}
 
 /**
  * Assistant bubble: during streaming, open ```html fences are rendered outside
@@ -67,7 +84,8 @@ export function AssistantMessageContent({
  * partial markup on each token — same visual shell as the finished embed (no badge).
  */
 export function HtmlEmbedBlock({ html, streaming = false }: { html: string; streaming?: boolean }) {
-  const displayHtml = streaming ? balanceHtmlForStreamingPreview(html) : html;
+  const rawHtml = streaming ? balanceHtmlForStreamingPreview(html) : html;
+  const displayHtml = sanitizeEmbedHtml(rawHtml);
   if (!displayHtml.trim()) return null;
 
   return (

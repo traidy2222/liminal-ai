@@ -114,7 +114,8 @@ export async function handleCheckoutCompleted(
   const userId = await resolveUserIdFromMetadata(
     db,
     session.metadata as Record<string, string>,
-    typeof session.customer === "string" ? session.customer : session.customer?.id
+    typeof session.customer === "string" ? session.customer : session.customer?.id,
+    session.client_reference_id
   );
   if (!userId) {
     console.warn("[stripe] checkout.session.completed without user", session.id);

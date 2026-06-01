@@ -112,9 +112,10 @@ export const executeCodeTool = defineTool({
     "WHAT: Execute short Python or JavaScript snippets and return structured stdout/stderr JSON.\n" +
     "WHEN: Numeric calculations, simulation snippets, quick data transforms.\n" +
     "NOT WHEN: You need package installs, process orchestration, or broader shell access (use run_shell/run_background).\n" +
+    "Requires user approval.\n" +
     "ARGS: language (python|javascript), code, optional timeout_ms, optional cwd (workspace-relative).",
-  requiresApproval: false,
-  dangerLevel: "cautious",
+  requiresApproval: true,
+  dangerLevel: "destructive",
   resourceLocks: (args) => {
     const cwd = (args["cwd"] as string | undefined) ?? ".";
     return [`shell:${cwd}`];

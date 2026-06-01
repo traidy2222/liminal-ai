@@ -1,3 +1,4 @@
+import { randomBytes } from "node:crypto";
 import {
   AgentHarness,
   maybeAttachSessionEventLog,
@@ -86,7 +87,10 @@ export class AgentBridge {
   private readonly sessionReady: Promise<void>;
   /** No-op until maybeAttachSessionEventLog runs in constructor. */
   private detachSessionLog: () => void = () => {};
-  private pendingApprovals = new Map<string, (d: ApprovalDecision) => void>();
+  private pendingApprovals = new Map<
+    string,
+    { resolve: (d: ApprovalDecision) => void; nonce: string }
+  >();
   private pendingAskUser: ((answer: string) => void) | null = null;
   private harnessHeartbeatTimer: NodeJS.Timeout | null = null;
   private turnStartedAt: number | null = null;
@@ -194,9 +198,13 @@ export class AgentBridge {
     // If the harness is mid-turn at activation, surface a fresh heartbeat so
     // the client UI immediately sees the busy state.
     if (this.harness.getIsRunning()) {
-      this.sse.send("harness_running", {
-        startedAt: this.turnStartedAt ?? Date.now(),
-      });
+      this.sse.send(
+        "harness_running",
+        {
+          startedAt: this.turnStartedAt ?? Date.now(),
+        },
+        this.chatId
+      );
     }
   }
 
@@ -208,7 +216,7 @@ export class AgentBridge {
   /** Gated send — short-circuits when this bridge is not the active SSE source. */
   private maybeSend(event: string, payload: unknown): void {
     if (this.sseSuspended) return;
-    this.sse.send(event, payload);
+    this.sse.send(event, payload, this.chatId);
   }
 
   /**
@@ -356,12 +364,14 @@ export class AgentBridge {
     on("heartbeat_skipped", (p) => this.maybeSend("heartbeat_skipped", p));
 
     on("tool_approval", (payload) => {
-      this.pendingApprovals.set(payload.callId, payload.resolve);
+      const nonce = randomBytes(16).toString("hex");
+      this.pendingApprovals.set(payload.callId, { resolve: payload.resolve, nonce });
       this.maybeSend("tool_approval", {
         callId: payload.callId,
         name: payload.name,
         args: payload.args,
         approvalTimeoutMs: payload.approvalTimeoutMs,
+        approvalNonce: nonce,
       });
     });
 
@@ -371,10 +381,10 @@ export class AgentBridge {
     });
   }
 
-  resolveApproval(callId: string, decision: ApprovalDecision): boolean {
-    const resolve = this.pendingApprovals.get(callId);
-    if (!resolve) return false;
-    resolve(decision);
+  resolveApproval(callId: string, decision: ApprovalDecision, approvalNonce: string): boolean {
+    const pending = this.pendingApprovals.get(callId);
+    if (!pending || pending.nonce !== approvalNonce) return false;
+    pending.resolve(decision);
     this.pendingApprovals.delete(callId);
     return true;
   }
@@ -557,9 +567,9 @@ export class AgentBridge {
       }
       this.emitterDetachers = [];
       // Reject any pending approvals so the harness send() unwinds cleanly.
-      for (const [, resolve] of this.pendingApprovals) {
+      for (const [, pending] of this.pendingApprovals) {
         try {
-          resolve({ decision: "reject", reason: "chat_disposed" });
+          pending.resolve({ decision: "reject", reason: "chat_disposed" });
         } catch {
           /* ignore */
         }
