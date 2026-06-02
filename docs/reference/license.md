@@ -11,7 +11,7 @@ The **Community Edition (CE)** is licensed under the **Functional Source License
 | Edition | Packages | License | Future MIT? |
 | ------- | -------- | ------- | ----------- |
 | **Community (CE)** | `packages/core`, `packages/tools`, `packages/tui`, `packages/web` | FSL-1.1-MIT (fair-source) | Yes — each version after 2 years |
-| **Enterprise (EE)** | `packages/enterprise` | Commercial ([`LICENSE-EE`](https://github.com/traidy2222/liminal-ai/blob/main/packages/enterprise/LICENSE-EE)) | **Never** |
+| **Enterprise (EE)** | Installed to `~/.liminal/enterprise/` (proprietary; not in public git) | Commercial ([`LICENSE-EE`](../../packages/enterprise/LICENSE-EE) when present locally) | **Never** |
 
 The Community Edition is fully functional on its own. Enterprise Edition adds paid,
 **entitlement-gated** features (cloud memory sync, team shared memory, audit log, RBAC,
@@ -33,6 +33,9 @@ Pro users can always supply their own OpenRouter key. See harness env keys
 endpoints that mint the same Ed25519 tokens the harness verifies in
 `entitlements.ts`. Deploy separately from the marketing `website/` repo; see
 [`packages/control-plane/README.md`](../../packages/control-plane/README.md).
+
+**Enterprise package:** proprietary code is **not** in the public repository. See
+[`enterprise-edition.md`](./enterprise-edition.md) for install paths and the open-core boundary.
 
 ## What FSL is (and is not)
 

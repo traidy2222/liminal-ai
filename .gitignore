@@ -28,5 +28,15 @@ docs/.vitepress/.temp/
 # Marketing site — separate repo: github.com/traidy2222/vireondynamics-website
 website/
 
+# Proprietary Enterprise Edition — implementations stay out of public CE repo.
+# Loader/install logic lives in packages/core (enterprise_loader.ts).
+packages/enterprise/*
+!packages/enterprise/README.install.md
+enterprise-bundle.tar.gz
+.enterprise-bundle/
+
+# User-global EE install (also outside repo)
+# ~/.liminal/enterprise/ — created by liminal login
+
 *.txt
 

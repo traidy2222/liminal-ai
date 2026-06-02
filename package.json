@@ -26,6 +26,7 @@
     "docs:build": "vitepress build docs",
     "docs:preview": "vitepress preview docs",
     "browser:install": "npm exec --workspace=@liminal/tools -- playwright install chromium",
+    "enterprise:pack": "node scripts/pack-enterprise-bundle.mjs",
     "marketing:capture": "node scripts/capture-marketing.mjs",
     "marketing:capture:advanced": "node scripts/capture-marketing.mjs --advanced",
     "marketing:capture:live": "node scripts/capture-marketing-live.mjs",

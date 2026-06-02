@@ -97,6 +97,15 @@ const harness = new AgentHarness({
 });
 
 await registerAllTools(harness.registry, harness.emitter, harness);
+const { wireEnterpriseWithInstall } = await import("@liminal/core");
+const ee = await wireEnterpriseWithInstall({
+  registry: harness.registry,
+  emitter: harness.emitter,
+  harness,
+});
+if (!ee.wired && ee.reason) {
+  console.warn("[enterprise] feature wiring skipped:", ee.reason);
+}
 void maybeAttachSessionEventLog(harness.emitter, harness.taskId);
 
 try {

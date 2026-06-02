@@ -681,6 +681,27 @@ export type { VireonAccountRecord } from "./vireon_account.js";
 export { runVireonConnectFlow } from "./vireon_connect.js";
 export type { VireonConnectResult, RunVireonConnectOptions } from "./vireon_connect.js";
 export {
+  loadEnterpriseModule,
+  wireEnterpriseEdition,
+  linkEnterpriseHostDependencies,
+  resolveEnterpriseRoots,
+  enterpriseInstallDir,
+  enterpriseManifestPath,
+  entrypointForRoot,
+} from "./enterprise_loader.js";
+export type {
+  EnterpriseModule,
+  EnterpriseLoadResult,
+  EnterpriseWireResult,
+  WireEnterpriseEditionResult,
+} from "./enterprise_loader.js";
+export {
+  ensureEnterpriseEditionInstalled,
+  wireEnterpriseWithInstall,
+  tierRequiresEnterprisePackage,
+} from "./enterprise_install.js";
+export type { EnterpriseInstallResult, EnterpriseManifest } from "./enterprise_install.js";
+export {
   ensureManagedInferenceSession,
   clearManagedInferenceSessionCache,
   isManagedInferenceBaseUrl,

@@ -431,3 +431,4 @@ export {
 export type { AudioAttachmentInput, AudioAttachmentRecord } from "./audio_attachments.js";
 export { saveTtsClip, readTtsClip, ttsClipAudioUrl } from "./tts_clips.js";
 export type { SavedTtsClip } from "./tts_clips.js";
+export { defineTool } from "./helpers.js";

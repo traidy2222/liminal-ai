@@ -5,6 +5,7 @@
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { randomBytes } from "node:crypto";
 import { applyVireonLicenseToken, defaultVireonSiteOrigin } from "./vireon_account.js";
+import { ensureEnterpriseEditionInstalled, tierRequiresEnterprisePackage } from "./enterprise_install.js";
 
 const CONNECT_PATH = "/connect/harness";
 const CALLBACK_PATH = "/callback";
@@ -117,6 +118,10 @@ export function runVireonConnectFlow(
           source: "browser",
           licenseSub: body.licenseSub,
         });
+
+        if (tierRequiresEnterprisePackage(resolved.tier)) {
+          void ensureEnterpriseEditionInstalled({ token }).catch(() => undefined);
+        }
 
         res.writeHead(200, {
           "Content-Type": "application/json",

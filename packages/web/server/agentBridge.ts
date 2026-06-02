@@ -171,9 +171,18 @@ export class AgentBridge {
     const harness = this.harness;
     this.detachSessionLog = maybeAttachSessionEventLog(harness.emitter, harness.taskId);
     this.wireEvents();
-    this.toolsRegistered = runWithWorkspaceRoot(this.workspaceRoot, () =>
-      registerAllTools(harness.registry, harness.emitter, harness)
-    );
+    this.toolsRegistered = runWithWorkspaceRoot(this.workspaceRoot, async () => {
+      registerAllTools(harness.registry, harness.emitter, harness);
+      const { wireEnterpriseWithInstall } = await import("@liminal/core");
+      const ee = await wireEnterpriseWithInstall({
+        registry: harness.registry,
+        emitter: harness.emitter,
+        harness,
+      });
+      if (!ee.wired && ee.reason) {
+        console.warn("[enterprise] feature wiring skipped:", ee.reason);
+      }
+    });
     this.sessionReady = this.toolsRegistered.then(() => this.beginSession());
   }
 

@@ -1,4 +1,5 @@
 import type { ToolRegistry } from "@liminal/core";
+import { isFamilyEntitled, loadHarnessEntitlements, ENTITLEMENT_GATED_FAMILIES } from "@liminal/core";
 import { defineTool } from "./helpers.js";
 import { TOOL_FAMILIES, summarizeFamilyActivity } from "./tool_catalog.js";
 
@@ -107,6 +108,15 @@ export function createToolDiscoveryTools(registry: ToolRegistry) {
       if (!def) {
         const ids = Object.keys(TOOL_FAMILIES).sort().join(", ");
         return { ok: false, error: `Unknown family "${family}". Known: ${ids}` };
+      }
+      if (ENTITLEMENT_GATED_FAMILIES[family]) {
+        const entitlements = await loadHarnessEntitlements();
+        if (!isFamilyEntitled(family, entitlements)) {
+          return {
+            ok: false,
+            error: `Family "${family}" requires a paid Vireon license (Pro+). Connect with liminal login.`,
+          };
+        }
       }
       const toActivate = def.tools.filter((t) => registry.has(t));
       if (toActivate.length === 0) {
