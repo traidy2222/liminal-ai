@@ -28,6 +28,7 @@ export {
   DEFAULT_TRANSCRIBE_MODEL,
   estimateTranscriptionCostUsd,
   resolveTranscriptionConfig,
+  resolveTranscriptionConfigAsync,
   transcribeAudio,
 } from "./transcription.js";
 export type {
@@ -49,6 +50,7 @@ export {
   synthesizeSpeechMulti,
   estimateTtsCostUsd,
   resolveSpeechSynthesisConfig,
+  resolveSpeechSynthesisConfigAsync,
   sanitizeTextForTts,
   synthesizeSpeech,
 } from "./speech_synthesis.js";
@@ -379,16 +381,28 @@ export type { OpenRouterAttributionHeaders } from "./openrouter_attribution.js";
 export {
   buildOpenRouterSessionExtras,
   isOpenRouterApiBaseUrl,
+  supportsOpenRouterRequestExtras,
   normalizeOpenRouterSessionId,
   openRouterSessionsEnabled,
   resolveOpenRouterSessionId,
 } from "./openrouter_session.js";
 export type { OpenRouterSessionRequestExtras } from "./openrouter_session.js";
-export { resolveProviderConfig, resolveVisionProviderConfig, buildProviderRouting, isOpenRouterStealthModel, OPENROUTER_STEALTH_MODEL_SLUGS } from "./provider_config.js";
-export type { ProviderConfig, ProviderConfigOverrides, VisionProviderConfig, ProviderRouting } from "./provider_config.js";
+export { resolveProviderConfig, resolveVisionProviderConfig, resolveVisionProviderConfigAsync, buildProviderRouting, resolveProviderRouting, buildOpenRouterChatRequestExtras, resolveProviderStrategy, sessionEpochBumpOn429Enabled, isOpenRouterStealthModel, OPENROUTER_STEALTH_MODEL_SLUGS } from "./provider_config.js";
+export type { ProviderConfig, ProviderConfigOverrides, VisionProviderConfig, ProviderRouting, ProviderRoutingContext, ProviderStrategy, ProviderSortAxis, OpenRouterChatRequestExtras } from "./provider_config.js";
+export { ProviderRouteState } from "./provider_route_state.js";
+export type { ProviderRouteSnapshot } from "./provider_route_state.js";
+export { parseOpenRouterProviderSlug } from "./openrouter_errors.js";
+export {
+  parseVireonUpstreamRetryCount,
+  vireonProxyAlreadyRetriedUpstream,
+  managedUpstreamBusyMessage,
+} from "./vireon_proxy.js";
 export {
   resolveInferenceMode,
   resolveProviderConfigWithInference,
+  resolveManagedOpenRouterCredentials,
+  shouldRouteOpenRouterViaManaged,
+  managedInferenceBaseUrl,
   fetchInferenceSession,
   fetchInferenceUsageStatus,
   hasLocalProviderApiKey,
@@ -399,7 +413,7 @@ export {
   proManagedInferencePrefsPatch,
 } from "./inference_provider.js";
 export { applyProManagedInferenceDefaults } from "./vireon_account.js";
-export type { InferenceMode, InferenceSessionResult, InferenceUsageStatus } from "./inference_provider.js";
+export type { InferenceMode, InferenceSessionResult, InferenceUsageStatus, OpenRouterRoute, ManagedOpenRouterCredentials } from "./inference_provider.js";
 export {
   RUNTIME_PREFS_FILE,
   getRuntimePrefsPath,

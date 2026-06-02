@@ -4,6 +4,8 @@ import {
   hasLocalProviderApiKey,
   inferencePreferManaged,
   resolveInferenceMode,
+  resolveManagedOpenRouterCredentials,
+  shouldRouteOpenRouterViaManaged,
 } from "./inference_provider.js";
 import { HARNESS_ENV_DEFAULTS } from "./harness_default_constants.js";
 
@@ -44,5 +46,33 @@ describe("inference_provider", () => {
     assert.equal(hasLocalProviderApiKey(), true);
     if (saved.AGENT_API_KEY === undefined) delete process.env.AGENT_API_KEY;
     else process.env.AGENT_API_KEY = saved.AGENT_API_KEY;
+  });
+
+  it("shouldRouteOpenRouterViaManaged is false in byok mode", async () => {
+    const route = await shouldRouteOpenRouterViaManaged({
+      version: 1,
+      provider: { inferenceMode: "byok" },
+      updatedAt: 0,
+    });
+    assert.equal(route, false);
+  });
+
+  it("resolveManagedOpenRouterCredentials returns byok route with env key", async () => {
+    saved.AGENT_API_KEY = process.env.AGENT_API_KEY;
+    saved.AGENT_INFERENCE_MODE = process.env.AGENT_INFERENCE_MODE;
+    process.env.AGENT_API_KEY = "sk-test-byok";
+    process.env.AGENT_INFERENCE_MODE = "byok";
+    const creds = await resolveManagedOpenRouterCredentials({
+      version: 1,
+      provider: { inferenceMode: "byok" },
+      updatedAt: 0,
+    });
+    assert.equal(creds.route, "byok");
+    assert.equal(creds.apiKey, "sk-test-byok");
+    assert.ok(creds.baseURL.includes("openrouter") || creds.baseURL.includes("api"));
+    if (saved.AGENT_API_KEY === undefined) delete process.env.AGENT_API_KEY;
+    else process.env.AGENT_API_KEY = saved.AGENT_API_KEY;
+    if (saved.AGENT_INFERENCE_MODE === undefined) delete process.env.AGENT_INFERENCE_MODE;
+    else process.env.AGENT_INFERENCE_MODE = saved.AGENT_INFERENCE_MODE;
   });
 });

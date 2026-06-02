@@ -19,8 +19,16 @@ import {
   type ProviderConfig,
   type ProviderConfigOverrides,
 } from "./provider_config.js";
+import { ensureManagedInferenceSession } from "./inference_session.js";
 
 export type InferenceMode = "byok" | "managed" | "auto";
+export type OpenRouterRoute = "managed" | "byok";
+
+export type ManagedOpenRouterCredentials = {
+  route: OpenRouterRoute;
+  apiKey: string;
+  baseURL: string;
+};
 
 const DEFAULT_INFERENCE_BASE_URL =
   HARNESS_ENV_DEFAULTS["AGENT_INFERENCE_BASE_URL"]?.trim() ||
@@ -130,10 +138,14 @@ export function hasLocalProviderApiKey(): boolean {
   return keys.some((k) => Boolean(process.env[k]?.trim()));
 }
 
-function inferenceBaseUrl(): string {
+export function managedInferenceBaseUrl(): string {
   return (
     effectiveHarnessEnvRaw("AGENT_INFERENCE_BASE_URL")?.trim() || DEFAULT_INFERENCE_BASE_URL
   ).replace(/\/$/, "");
+}
+
+function inferenceBaseUrl(): string {
+  return managedInferenceBaseUrl();
 }
 
 function inferenceSessionUrl(): string {
@@ -189,6 +201,55 @@ export async function fetchInferenceSession(
   };
 }
 
+/** True when OpenRouter sidecar calls should route through the Vireon inference proxy. */
+export async function shouldRouteOpenRouterViaManaged(
+  prefs?: RuntimePreferences | null
+): Promise<boolean> {
+  const mode = resolveInferenceMode(prefs);
+  if (mode === "byok") return false;
+  const entitlements = await loadResolvedEntitlements();
+  const entitled = hasEntitlement(entitlements, ENTITLEMENTS.PRO_MANAGED_INFERENCE);
+  if (!entitled) return false;
+  if (mode === "managed") return true;
+  return !hasLocalProviderApiKey() || inferencePreferManaged(prefs);
+}
+
+/**
+ * Single gate for managed vs BYOK OpenRouter routing (chat sidecars, embeddings, vision, audio).
+ * When `route === "managed"`, returns session JWT + inference proxy base URL.
+ */
+export async function resolveManagedOpenRouterCredentials(
+  prefs?: RuntimePreferences | null,
+  opts?: { refreshSession?: boolean }
+): Promise<ManagedOpenRouterCredentials> {
+  const managed = await shouldRouteOpenRouterViaManaged(prefs);
+  if (managed) {
+    if (opts?.refreshSession) {
+      const session = await fetchInferenceSession(prefs);
+      return {
+        route: "managed",
+        apiKey: session.token,
+        baseURL: session.baseURL.replace(/\/$/, ""),
+      };
+    }
+    const session = await ensureManagedInferenceSession(prefs, inferenceBaseUrl());
+    if (!session) {
+      throw new Error("Managed inference session unavailable — sign in to Vireon first.");
+    }
+    return {
+      route: "managed",
+      apiKey: session.apiKey,
+      baseURL: session.baseURL.replace(/\/$/, ""),
+    };
+  }
+  const byok = resolveProviderConfig();
+  return {
+    route: "byok",
+    apiKey: byok.apiKey,
+    baseURL: byok.baseURL.replace(/\/$/, ""),
+  };
+}
+
 /**
  * Resolve chat provider config, optionally routing through Vireon managed inference.
  */
@@ -201,36 +262,21 @@ export async function resolveProviderConfigWithInference(
     return resolveProviderConfig(overrides);
   }
 
-  const entitlements = await loadResolvedEntitlements();
-  const entitled = hasEntitlement(entitlements, ENTITLEMENTS.PRO_MANAGED_INFERENCE);
-
-  if (mode === "managed") {
-    if (!entitled) {
-      throw new Error(
-        "AGENT_INFERENCE_MODE=managed requires pro.managed_inference on an active Pro (or higher) license."
-      );
-    }
-    const session = await fetchInferenceSession(prefs);
-    const model =
-      (overrides?.model ?? prefs?.provider?.model ?? process.env["AGENT_MODEL"]?.trim()) ||
-      DEFAULT_AGENT_MODEL_SLUG;
-    return {
-      apiKey: session.token,
-      baseURL: session.baseURL,
-      model,
-      keySource: "VIREON_MANAGED",
-    };
+  const managed = await shouldRouteOpenRouterViaManaged(prefs);
+  if (mode === "managed" && !managed) {
+    throw new Error(
+      "AGENT_INFERENCE_MODE=managed requires pro.managed_inference on an active Pro (or higher) license."
+    );
   }
 
-  // auto — managed when entitled and (no local key, or prefer-managed for Pro routing)
-  if (entitled && (!hasLocalProviderApiKey() || inferencePreferManaged(prefs))) {
-    const session = await fetchInferenceSession(prefs);
+  if (managed) {
+    const creds = await resolveManagedOpenRouterCredentials(prefs);
     const model =
       (overrides?.model ?? prefs?.provider?.model ?? process.env["AGENT_MODEL"]?.trim()) ||
       DEFAULT_AGENT_MODEL_SLUG;
     return {
-      apiKey: session.token,
-      baseURL: session.baseURL,
+      apiKey: creds.apiKey,
+      baseURL: creds.baseURL,
       model,
       keySource: "VIREON_MANAGED",
     };

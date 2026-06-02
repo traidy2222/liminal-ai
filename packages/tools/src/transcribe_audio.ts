@@ -15,7 +15,7 @@
  */
 import type { AgentHarness } from "@liminal/core";
 import {
-  resolveTranscriptionConfig,
+  resolveTranscriptionConfigAsync,
   transcribeAudio,
 } from "@liminal/core";
 import { readFile } from "node:fs/promises";
@@ -95,7 +95,7 @@ export function createTranscribeAudioTool(harness: AgentHarness) {
         return { ok: false, error: "Provide exactly one of attachment_id / path / url, not multiple." };
       }
 
-      const config = resolveTranscriptionConfig(harness.getRuntimePreferences());
+      const config = await resolveTranscriptionConfigAsync(harness.getRuntimePreferences());
       if (!config.enabled) {
         return { ok: false, error: "Transcription disabled via AGENT_TRANSCRIBE_ENABLED=0." };
       }

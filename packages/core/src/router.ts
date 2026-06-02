@@ -5,9 +5,16 @@ import OpenAI from "openai";
 import type { ChatCompletionMessageParam } from "openai/resources/chat/completions.js";
 import { withProviderRequestSpacing } from "./provider_request_gate.js";
 import { effectiveHarnessEnvRaw } from "./harness_effective_env.js";
-import { buildProviderRouting } from "./provider_config.js";
+import {
+  buildOpenRouterChatRequestExtras,
+  resolveProviderStrategy,
+  sessionEpochBumpOn429Enabled,
+} from "./provider_config.js";
 import { applyPromptCacheBreakpoints } from "./prompt_cache.js";
-import { buildOpenRouterSessionExtras } from "./openrouter_session.js";
+import { parseOpenRouterProviderSlug } from "./openrouter_errors.js";
+import { isManagedInferenceBaseUrl } from "./inference_session.js";
+import { vireonProxyAlreadyRetriedUpstream } from "./vireon_proxy.js";
+import type { ProviderRouteState } from "./provider_route_state.js";
 import type { Message } from "./types.js";
 
 export function getFastModelSlug(fallback: string): string {
@@ -91,6 +98,10 @@ export function clearJsonResponseCache(): void {
   jsonResponseCache.clear();
 }
 
+function isRateLimitErrorMessage(msg: string): boolean {
+  return /429|503|quota|rate.?limit|too many/i.test(msg);
+}
+
 /**
  * Non-streaming chat completion expecting JSON in the message body.
  * Uses `json_object` format (widely supported on OpenRouter).
@@ -116,6 +127,8 @@ export async function completeChatJson(
     fallbackModel?: string;
     /** Opt out of the in-process JSON response cache for this call (default: cached). */
     cache?: boolean;
+    /** Per-harness route state for adaptive 429 rotation (optional). */
+    routeState?: ProviderRouteState;
   }
 ): Promise<JsonCompletionResult> {
   const cacheCfg = jsonCacheConfig();
@@ -135,8 +148,19 @@ export async function completeChatJson(
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const createFn = client.chat.completions.create.bind(client.chat.completions) as (p: any, o?: any) => Promise<OpenAI.Chat.Completions.ChatCompletion>;
 
-  const attemptWithModel = async (model: string, isFast: boolean): Promise<JsonCompletionResult> => {
-    const providerRouting = buildProviderRouting(model, isFast);
+  const attemptWithModel = async (
+    model: string,
+    isFast: boolean,
+    retryAttempt = 0
+  ): Promise<JsonCompletionResult> => {
+    const orExtras = buildOpenRouterChatRequestExtras({
+      baseURL: client.baseURL,
+      modelSlug: model,
+      isFastModel: isFast,
+      routeState: opts.routeState,
+      sessionId: opts.sessionId ?? opts.userId,
+      retryAttempt,
+    });
     // Same prompt-cache breakpoint logic as the main model — fast sidecar calls
     // (intent / distill / critic / safety judge) also see the same big static
     // prefix when they reuse the conversation messages.
@@ -154,11 +178,7 @@ export async function completeChatJson(
               max_tokens: opts.maxTokens ?? 800,
               temperature: opts.temperature ?? 0.2,
               response_format: { type: "json_object" },
-              ...(providerRouting && { provider: providerRouting }),
-              ...buildOpenRouterSessionExtras(
-                client.baseURL,
-                opts.sessionId ?? opts.userId
-              ),
+              ...orExtras,
             },
             opts.signal ? { signal: opts.signal } : undefined
           )
@@ -168,9 +188,27 @@ export async function completeChatJson(
       const parsed = JSON.parse(raw) as unknown;
       return { ok: true, parsed, raw };
     } catch (e) {
+      const error = e instanceof Error ? e.message : String(e);
+      if (
+        retryAttempt === 0 &&
+        isRateLimitErrorMessage(error) &&
+        opts.routeState &&
+        !(isManagedInferenceBaseUrl(client.baseURL) && vireonProxyAlreadyRetriedUpstream(e))
+      ) {
+        const slug = parseOpenRouterProviderSlug(e);
+        const strategy = resolveProviderStrategy();
+        const bumpEpoch =
+          sessionEpochBumpOn429Enabled() && strategy === "adaptive";
+        if (slug) {
+          opts.routeState.markProviderRateLimited(slug, { bumpEpoch });
+        } else if (bumpEpoch) {
+          opts.routeState.markProviderRateLimited("", { bumpEpoch: true });
+        }
+        return attemptWithModel(model, isFast, retryAttempt + 1);
+      }
       return {
         ok: false,
-        error: e instanceof Error ? e.message : String(e),
+        error,
         raw: "",
       };
     }
@@ -187,7 +225,7 @@ export async function completeChatJson(
   if (primary.ok || !opts.fallbackModel || opts.fallbackModel === opts.model) return cacheOk(primary);
 
   // Retry with fallback model on quota or transient server errors.
-  const isRetryableError = /429|503|quota|rate.?limit|too many/i.test(primary.error);
+  const isRetryableError = isRateLimitErrorMessage(primary.error);
   if (!isRetryableError) return primary;
 
   console.warn(`[router] fast model "${opts.model}" failed (${primary.error.slice(0, 80)}); retrying with fallback "${opts.fallbackModel}"`);

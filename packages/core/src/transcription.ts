@@ -13,6 +13,7 @@
  */
 import { resolveHarnessEnvRaw } from "./harness_effective_env.js";
 import type { RuntimePreferences } from "./runtime_prefs.js";
+import { resolveManagedOpenRouterCredentials } from "./inference_provider.js";
 
 // ─── Model registry ──────────────────────────────────────────────────────────
 
@@ -129,6 +130,21 @@ export function resolveTranscriptionConfig(
   const timestamps: TranscriptionConfig["timestamps"] =
     timestampsRaw === "none" || timestampsRaw === "word" ? timestampsRaw : "segment";
   return { enabled, model, baseURL, apiKey, maxBytes, timeoutMs, autoOnUpload, timestamps };
+}
+
+/** Transcription config with managed-inference routing when entitled (unless AGENT_TRANSCRIBE_API_KEY is set). */
+export async function resolveTranscriptionConfigAsync(
+  prefs: RuntimePreferences | null
+): Promise<TranscriptionConfig> {
+  const base = resolveTranscriptionConfig(prefs);
+  if (process.env["AGENT_TRANSCRIBE_API_KEY"]?.trim()) {
+    return base;
+  }
+  const creds = await resolveManagedOpenRouterCredentials(prefs);
+  if (creds.route === "managed") {
+    return { ...base, apiKey: creds.apiKey, baseURL: creds.baseURL };
+  }
+  return base;
 }
 
 // ─── Transcription call ──────────────────────────────────────────────────────

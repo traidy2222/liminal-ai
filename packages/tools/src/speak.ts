@@ -4,10 +4,10 @@
  * Does not add text to the chat transcript; emits a `speech` harness event
  * with a cached audio clip URL.
  */
-import type { AgentHarness } from "@liminal/core";
+import type { AgentHarness, SpeechSynthesisConfig } from "@liminal/core";
 import {
   resolveCurrentChatId,
-  resolveSpeechSynthesisConfig,
+  resolveSpeechSynthesisConfigAsync,
   synthesizeSpeechMulti,
 } from "@liminal/core";
 import { defineTool } from "./helpers.js";
@@ -17,7 +17,7 @@ import { saveTtsClip, ttsClipAudioUrl } from "./tts_clips.js";
 export async function emitSpokenClips(
   harness: AgentHarness,
   rawText: string,
-  cfg: ReturnType<typeof resolveSpeechSynthesisConfig>
+  cfg: SpeechSynthesisConfig
 ): Promise<{ ok: true; segments: number; charCount: number; costUsd: number } | { ok: false; reason: string }> {
   const gate = harness.ttsTurnBudget.tryConsume(rawText, cfg);
   if (!gate.ok) {
@@ -48,7 +48,7 @@ export function installVoiceTtsFallback(harness: AgentHarness): void {
     const trimmed = text.trim();
     if (trimmed.length < 12) return;
     if (/^```|^#\s|^\[HARNESS\]/m.test(trimmed)) return;
-    const cfg = resolveSpeechSynthesisConfig(harness.getRuntimePreferences());
+    const cfg = await resolveSpeechSynthesisConfigAsync(harness.getRuntimePreferences());
     if (!cfg.enabled || !harness.isLiveDictationTurn()) return;
     await emitSpokenClips(harness, trimmed, cfg);
   };
@@ -77,7 +77,7 @@ export function createSpeakTool(harness: AgentHarness) {
         return { ok: false, error: "text is required" };
       }
       const prefs = harness.getRuntimePreferences();
-      const cfg = resolveSpeechSynthesisConfig(prefs);
+      const cfg = await resolveSpeechSynthesisConfigAsync(prefs);
       if (!cfg.enabled) {
         return { ok: false, error: "TTS is disabled (AGENT_TTS_ENABLED=0)." };
       }

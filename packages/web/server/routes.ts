@@ -20,9 +20,9 @@ import {
   listOrphanChatIds,
   readChatMetadata,
   workspaceFingerprint,
-  resolveTranscriptionConfig,
+  resolveTranscriptionConfigAsync,
   transcribeAudio,
-  resolveSpeechSynthesisConfig,
+  resolveSpeechSynthesisConfigAsync,
   synthesizeSpeechMulti,
   sanitizeTextForTts,
   applyVireonLicenseToken,
@@ -251,18 +251,108 @@ export function createRouter(
     res.json({ connectUrl, state });
   });
 
+  const vireonCallbackHtml = (title: string, bodyHtml: string) =>
+    `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>${escapeHtml(title)}</title>
+  <style>
+    body { font-family: system-ui, sans-serif; max-width: 32rem; margin: 3rem auto; padding: 0 1rem; color: #e8e8e8; background: #0a0a0a; }
+    h1 { font-size: 1.25rem; margin-bottom: 0.75rem; }
+    p { color: #aaa; line-height: 1.5; margin: 0 0 0.75rem; }
+    a { color: #7dd3fc; }
+  </style>
+</head>
+<body>
+  <h1>${escapeHtml(title)}</h1>
+  <p>${bodyHtml}</p>
+</body>
+</html>`;
+
+  const vireonCallbackSuccessRedirect = (email: string, tier: string) =>
+    `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta http-equiv="refresh" content="0;url=/?vireon=connected" />
+  <title>Connected — returning to Liminal</title>
+  <style>
+    body { font-family: system-ui, sans-serif; max-width: 32rem; margin: 3rem auto; padding: 0 1rem; color: #e8e8e8; background: #0a0a0a; }
+    p { color: #aaa; line-height: 1.5; }
+    a { color: #7dd3fc; }
+  </style>
+</head>
+<body>
+  <p>Connected as <strong>${escapeHtml(email)}</strong> (${escapeHtml(tier)}). Returning to Liminal chat…</p>
+  <p><a href="/?vireon=connected">Continue to chat</a> if you are not redirected.</p>
+  <script>
+  (function () {
+    var target = "/?vireon=connected";
+    try {
+      if (window.opener && !window.opener.closed) {
+        window.opener.location.replace(target);
+        window.close();
+        return;
+      }
+    } catch (e) {}
+    window.location.replace(target);
+  })();
+  </script>
+</body>
+</html>`;
+
+  const readVireonCallbackParams = (req: import("express").Request) => {
+    if (req.method === "GET") {
+      const q = req.query;
+      return {
+        token: typeof q["token"] === "string" ? q["token"].trim() : "",
+        state: typeof q["state"] === "string" ? q["state"].trim() : "",
+        licenseSub: typeof q["licenseSub"] === "string" ? q["licenseSub"].trim() : undefined,
+        email: typeof q["email"] === "string" ? q["email"].trim() : undefined,
+      };
+    }
+    return {
+      token: typeof req.body?.token === "string" ? req.body.token.trim() : "",
+      state: typeof req.body?.state === "string" ? req.body.state.trim() : "",
+      licenseSub:
+        typeof req.body?.licenseSub === "string" ? req.body.licenseSub.trim() : undefined,
+      email: typeof req.body?.email === "string" ? req.body.email.trim() : undefined,
+    };
+  };
+
+  const respondVireonCallbackError = (
+    req: import("express").Request,
+    res: import("express").Response,
+    status: number,
+    message: string
+  ) => {
+    if (req.method === "GET") {
+      res
+        .status(status)
+        .type("html")
+        .send(
+          vireonCallbackHtml(
+            "Could not connect Liminal",
+            `${escapeHtml(message)} <a href="/">Return to Liminal chat</a>`
+          )
+        );
+      return;
+    }
+    res.status(status).json({ error: message });
+  };
+
   const handleVireonAuthCallback = async (
     req: import("express").Request,
     res: import("express").Response
   ) => {
     prunePendingHarnessConnect();
-    const token =
-      typeof req.body?.token === "string" ? req.body.token.trim() : "";
-    const state =
-      typeof req.body?.state === "string" ? req.body.state.trim() : "";
+    const { token, state, licenseSub, email } = readVireonCallbackParams(req);
     const pending = state ? pendingHarnessConnect.get(state) : undefined;
     if (!state || !pending || pending.exp < Date.now()) {
-      res.status(403).json({ error: "Invalid or expired connect session" });
+      respondVireonCallbackError(req, res, 403, "Invalid or expired connect session");
       return;
     }
     const requestUri = `${req.protocol}://${req.get("host") ?? "127.0.0.1"}${req.originalUrl.split("?")[0]}`;
@@ -270,19 +360,24 @@ export function createRouter(
       !isAllowedVireonRedirectUri(requestUri) &&
       requestUri !== pending.redirectUri
     ) {
-      res.status(403).json({ error: "Invalid callback redirect URI" });
+      respondVireonCallbackError(req, res, 403, "Invalid callback redirect URI");
       return;
     }
     if (!token) {
-      res.status(400).json({ error: "token required in POST body" });
+      respondVireonCallbackError(
+        req,
+        res,
+        400,
+        req.method === "GET" ? "token required in query string" : "token required in POST body"
+      );
       return;
     }
+    const resolvedEmail = email?.trim() || "vireon@user";
     try {
       const resolved = await applyVireonLicenseToken(token, {
-        email: "vireon@user",
+        email: resolvedEmail,
         source: "browser",
-        licenseSub:
-          typeof req.body?.licenseSub === "string" ? req.body.licenseSub : undefined,
+        licenseSub,
       });
       pendingHarnessConnect.delete(state);
       await chatManager.reloadRuntimePrefs();
@@ -291,12 +386,23 @@ export function createRouter(
       } catch (e) {
         console.warn("[vireon] bridge provider refresh:", e instanceof Error ? e.message : e);
       }
-      res.json({ ok: true, tier: resolved.tier, email: "vireon@user" });
+      if (req.method === "GET") {
+        res
+          .status(200)
+          .type("html")
+          .send(vireonCallbackSuccessRedirect(resolvedEmail, resolved.tier));
+        return;
+      }
+      res.json({ ok: true, tier: resolved.tier, email: resolvedEmail });
     } catch (e) {
       const message = e instanceof Error ? e.message : "Connect failed";
-      res.status(400).json({ error: message });
+      respondVireonCallbackError(req, res, 400, message);
     }
   };
+
+  router.get("/api/vireon/auth/callback", (req, res) => {
+    void handleVireonAuthCallback(req, res);
+  });
 
   router.post("/api/vireon/auth/callback", (req, res) => {
     void handleVireonAuthCallback(req, res);
@@ -752,7 +858,7 @@ export function createRouter(
         return;
       }
       const bytes = Buffer.from(payload, "base64");
-      const config = resolveTranscriptionConfig(bridge.harness.getRuntimePreferences());
+      const config = await resolveTranscriptionConfigAsync(bridge.harness.getRuntimePreferences());
       if (bytes.byteLength > config.maxBytes) {
         res.status(413).json({
           error: `Audio file ${bytes.byteLength} bytes exceeds AGENT_TRANSCRIBE_MAX_BYTES (${config.maxBytes}).`,
@@ -801,7 +907,7 @@ export function createRouter(
         return;
       }
       const { record, bytes } = await readAudioAttachment(bridge.chatId, id);
-      const config = resolveTranscriptionConfig(bridge.harness.getRuntimePreferences());
+      const config = await resolveTranscriptionConfigAsync(bridge.harness.getRuntimePreferences());
       if (!config.enabled) {
         res.status(503).json({ error: "Transcription disabled (AGENT_TRANSCRIBE_ENABLED=0)." });
         return;
@@ -866,7 +972,7 @@ export function createRouter(
         return;
       }
       const prefs = bridge.harness.getRuntimePreferences();
-      const config = resolveSpeechSynthesisConfig(prefs);
+      const config = await resolveSpeechSynthesisConfigAsync(prefs);
       if (!config.enabled) {
         res.status(400).json({ error: "TTS is disabled (AGENT_TTS_ENABLED=0)." });
         return;

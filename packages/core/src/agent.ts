@@ -56,15 +56,25 @@ import { addCompressionGuideline, formatCompressionGuidelines } from "./compress
 import { bumpRuleHits, getRuleHitCounts, extractRuleIds, recordRuleOutcomes, getDemotedRuleIds } from "./rule_stats.js";
 import { writeYieldSnapshot } from "./session_event_log.js";
 import { SharedMemoryBus } from "./shared_memory_bus.js";
-import { resolveProviderConfig, buildProviderRouting } from "./provider_config.js";
+import {
+  resolveProviderConfig,
+  buildOpenRouterChatRequestExtras,
+  resolveProviderStrategy,
+  sessionEpochBumpOn429Enabled,
+} from "./provider_config.js";
+import { parseOpenRouterProviderSlug } from "./openrouter_errors.js";
+import { ProviderRouteState } from "./provider_route_state.js";
 import {
   describeProviderError,
   resolveProviderConfigWithInference,
 } from "./inference_provider.js";
 import { ensureManagedInferenceSession, isManagedInferenceBaseUrl } from "./inference_session.js";
+import {
+  managedUpstreamBusyMessage,
+  vireonProxyAlreadyRetriedUpstream,
+} from "./vireon_proxy.js";
 import { applyPromptCacheBreakpoints, extractCachedTokens } from "./prompt_cache.js";
 import { buildOpenRouterAttributionHeaders } from "./openrouter_attribution.js";
-import { buildOpenRouterSessionExtras } from "./openrouter_session.js";
 import { withProviderRequestSpacing } from "./provider_request_gate.js";
 import type { RuntimePreferences, RuntimePersonaProfile } from "./runtime_prefs.js";
 import {
@@ -933,6 +943,7 @@ export class AgentHarness {
   private spawnConcurrencyCap: number;
   private providerDegradedUntilMs = 0;
   private providerCircuitOpenUntilMs = 0;
+  private readonly providerRouteState = new ProviderRouteState();
   private consecutiveProviderFailures = 0;
   /** Human approval TTL for destructive requiresApproval tools (dispatcher). */
   private readonly approvalTimeoutMs: number;
@@ -1826,6 +1837,8 @@ export class AgentHarness {
         ? async (rawSummaries: string): Promise<string> => {
             const jr = await completeChatJson(this.client, {
               model: getFastModelSlug(config.model),
+              isFastModel: true,
+              routeState: this.providerRouteState,
               temperature: 0.1,
               maxTokens: 300,
               messages: [
@@ -3028,6 +3041,8 @@ export class AgentHarness {
       const fast = getFastModelSlug(this.config.model);
       const jr = await completeChatJson(this.client, {
         model: fast,
+        isFastModel: true,
+        routeState: this.providerRouteState,
         temperature: 0,
         maxTokens: 500,
         messages: [
@@ -3151,6 +3166,8 @@ export class AgentHarness {
       const fast = getFastModelSlug(this.config.model);
       const jr = await completeChatJson(this.client, {
         model: fast,
+        isFastModel: true,
+        routeState: this.providerRouteState,
         temperature: 0,
         maxTokens: 1000,
         messages: [
@@ -4228,8 +4245,12 @@ export class AgentHarness {
             const prompt = (usage.prompt_tokens ?? 0) as number;
             if (prompt > 0) {
               const pct = prompt > 0 ? Math.round((cached / prompt) * 100) : 0;
+              const snap = this.providerRouteState.snapshot();
+              const strategy = resolveProviderStrategy();
               this.emitter.emit("text", {
-                delta: `[HARNESS] prompt_cache: cached=${cached}/${prompt} (${pct}%)\n`,
+                delta:
+                  `[HARNESS] prompt_cache: cached=${cached}/${prompt} (${pct}%) ` +
+                  `strategy=${strategy} epoch=${snap.epoch}\n`,
                 channel: "trace",
               });
             }
@@ -5135,6 +5156,8 @@ export class AgentHarness {
             try {
               const jr = await completeChatJson(this.client, {
                 model: getFastModelSlug(this.config.model),
+                isFastModel: true,
+                routeState: this.providerRouteState,
                 temperature: 0,
                 maxTokens: 220,
                 messages: [
@@ -5188,6 +5211,8 @@ export class AgentHarness {
             try {
               const jr = await completeChatJson(this.client, {
                 model: getFastModelSlug(this.config.model),
+                isFastModel: true,
+                routeState: this.providerRouteState,
                 temperature: 0,
                 maxTokens: 180,
                 messages: [
@@ -5335,10 +5360,15 @@ export class AgentHarness {
         ? Math.min(scaleMaxCompletionTokensForEffort(effectiveMaxTokens), 128_000)
         : undefined;
 
-      // Provider pinning for OpenRouter cache affinity — without this, OpenRouter randomly
-      // load-balances across providers and each has its own KV cache, so the system prompt
-      // is re-ingested on every request. Pinning to a single provider keeps the cache warm.
-      const providerRouting = buildProviderRouting(modelOverride ?? this.config.model);
+      // OpenRouter provider routing: adaptive price sort + session_id stickiness for cache affinity.
+      const modelSlug = modelOverride ?? this.config.model;
+      const orExtras = buildOpenRouterChatRequestExtras({
+        baseURL: this.config.baseURL,
+        modelSlug,
+        routeState: this.providerRouteState,
+        sessionId: this.taskId,
+        retryAttempt: attempt,
+      });
 
       const reasoningParam =
         reasoningBudget != null
@@ -5352,13 +5382,13 @@ export class AgentHarness {
       const cachedMessages = applyPromptCacheBreakpoints(messages);
 
       const params: OpenAI.Chat.Completions.ChatCompletionCreateParamsStreaming & {
-        provider?: { order: string[]; allow_fallbacks: boolean };
+        provider?: import("./provider_config.js").ProviderRouting;
         session_id?: string;
         user?: string;
         reasoning?: { effort: string };
         stream_options?: { include_usage: boolean };
       } = {
-        model: modelOverride ?? this.config.model,
+        model: modelSlug,
         messages: cachedMessages,
         stream: true,
         // Request usage on the terminal chunk so we can log cache hit rate.
@@ -5366,10 +5396,8 @@ export class AgentHarness {
         ...(maxCompletionTokens !== undefined && { max_tokens: maxCompletionTokens }),
         ...(useTools && { tools }),
         ...(useToolChoice && { tool_choice: "auto" as const }),
-        // OpenRouter-specific: sticky provider routing + session tracking (Generations → Sessions)
-        ...(providerRouting && { provider: providerRouting }),
+        ...orExtras,
         ...reasoningParam,
-        ...buildOpenRouterSessionExtras(this.config.baseURL, this.taskId),
       };
 
       try {
@@ -5391,6 +5419,11 @@ export class AgentHarness {
 
         const rateLimited = isRateLimitError(err);
         const providerUnavailable = isProviderUnavailableError(err);
+        const managedProxyRetried =
+          isManagedInferenceBaseUrl(this.config.baseURL) && vireonProxyAlreadyRetriedUpstream(err);
+        if (managedProxyRetried && (rateLimited || providerUnavailable)) {
+          throw new Error(managedUpstreamBusyMessage());
+        }
         const retryForever = isRetryForeverEnabled();
         const maxRetriesForError = rateLimited
           ? this.rateLimitMaxRetries
@@ -5416,6 +5449,17 @@ export class AgentHarness {
         );
         if (rateLimited || providerUnavailable) {
           this.consecutiveProviderFailures += 1;
+          if (rateLimited) {
+            const slug = parseOpenRouterProviderSlug(err);
+            const strategy = resolveProviderStrategy();
+            const bumpEpoch =
+              sessionEpochBumpOn429Enabled() && strategy === "adaptive";
+            if (slug) {
+              this.providerRouteState.markProviderRateLimited(slug, { bumpEpoch });
+            } else if (bumpEpoch) {
+              this.providerRouteState.markProviderRateLimited("", { bumpEpoch: true });
+            }
+          }
           const minCap = Math.max(
             1,
             parseInt(resolveHarnessEnvRaw("AGENT_MIN_CONCURRENT_AGENTS", this.runtimePreferences) ?? "1", 10) || 1

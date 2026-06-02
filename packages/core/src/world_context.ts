@@ -24,6 +24,7 @@ import { readFile, access, readdir } from "node:fs/promises";
 import { getAgentVaultRoot, getExplicitAgentVaultPathFromEnv } from "./vault_path.js";
 import { rankDocumentsForQuery, type RankableDoc } from "./memory_rank.js";
 import { cosineSimilarity, fetchEmbeddings } from "./embeddings.js";
+import { resolveManagedOpenRouterCredentials } from "./inference_provider.js";
 import { gatherRepoMapLines } from "./repo_map.js";
 import { resolveWorkspaceRoot } from "./workspace_root.js";
 import { notesPaths, pickReadPath } from "./global_storage.js";
@@ -727,11 +728,20 @@ async function gatherRelevantPrimedLines(
       for (const r of bmRanked) bmById.set(r.id, r.score / bmMax);
 
       const embedModel = effectiveHarnessEnvRaw("AGENT_EMBED_MODEL")?.trim();
-      const apiKey = process.env["OPENROUTER_API_KEY"]?.trim();
-      const baseURL = (process.env["OPENROUTER_BASE_URL"] ?? "https://openrouter.ai/api/v1").replace(
+      let apiKey = process.env["OPENROUTER_API_KEY"]?.trim() ?? "";
+      let baseURL = (process.env["OPENROUTER_BASE_URL"] ?? "https://openrouter.ai/api/v1").replace(
         /\/$/,
         ""
       );
+      if (embedModel) {
+        try {
+          const creds = await resolveManagedOpenRouterCredentials(null);
+          apiKey = creds.apiKey;
+          baseURL = creds.baseURL;
+        } catch {
+          /* keep env fallback */
+        }
+      }
 
       let orderedNoteIds: string[] = bmRanked.slice(0, maxNotes).map((r) => r.id);
 

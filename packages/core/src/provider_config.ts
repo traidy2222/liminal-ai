@@ -4,14 +4,42 @@ import {
   HARNESS_ENV_DEFAULTS,
 } from "./harness_default_constants.js";
 import { effectiveHarnessEnvRaw } from "./harness_effective_env.js";
+import { resolveManagedOpenRouterCredentials } from "./inference_provider.js";
+import {
+  buildOpenRouterSessionExtras,
+  supportsOpenRouterRequestExtras,
+} from "./openrouter_session.js";
+import type { ProviderRouteState } from "./provider_route_state.js";
+import type { RuntimePreferences } from "./runtime_prefs.js";
 
-// ─── Provider routing (OpenRouter sticky cache) ───────────────────────────────
+// ─── Provider routing (OpenRouter sticky cache + dynamic price sort) ─────────
 
+export type ProviderSortAxis = "price" | "throughput" | "latency";
+
+export type ProviderStrategy =
+  | "adaptive"
+  | "price"
+  | "cache_first"
+  | "openrouter_default"
+  | "throughput"
+  | "latency";
+
+/** OpenRouter `provider` preferences object on chat completion requests. */
 export interface ProviderRouting {
-  /** Preferred provider order (e.g. ["DeepSeek"]). OpenRouter tries them in order. */
-  order: string[];
-  /** Fall back to other providers if preferred are unavailable. Default true. */
-  allow_fallbacks: boolean;
+  order?: string[];
+  allow_fallbacks?: boolean;
+  sort?: ProviderSortAxis | { by: ProviderSortAxis; partition?: "model" | "none" };
+  ignore?: string[];
+  only?: string[];
+  max_price?: { prompt?: number; completion?: number };
+  require_parameters?: boolean;
+}
+
+export interface ProviderRoutingContext {
+  modelSlug: string;
+  isFastModel?: boolean;
+  routeState?: ProviderRouteState;
+  retryAttempt?: number;
 }
 
 /** Map model slug prefix → OpenRouter provider display name. */
@@ -41,46 +69,91 @@ function deriveProviderFromModelSlug(slug: string): string | null {
   return SLUG_PREFIX_TO_PROVIDER[prefix] ?? null;
 }
 
-/**
- * Builds the `provider` routing object for OpenRouter requests.
- * Pinning to a single provider is the primary mechanism for cache affinity —
- * each provider maintains its own KV cache, so random load-balancing breaks it.
- *
- * @param modelSlug - The model slug being called (used for auto-derive).
- * @param isFastModel - When true, checks `AGENT_PROVIDER_ORDER_FAST` before the main key.
- * Returns null when auto-routing is disabled or provider cannot be inferred.
- */
-export function buildProviderRouting(
-  modelSlug: string,
-  isFastModel = false
-): ProviderRouting | null {
+function parseCsvList(raw: string | undefined | null): string[] {
+  if (!raw?.trim()) return [];
+  return raw
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean);
+}
+
+export function resolveProviderStrategy(): ProviderStrategy {
+  const raw =
+    effectiveHarnessEnvRaw("AGENT_PROVIDER_STRATEGY")?.trim().toLowerCase() ??
+    HARNESS_ENV_DEFAULTS["AGENT_PROVIDER_STRATEGY"]?.trim().toLowerCase() ??
+    "price";
+  switch (raw) {
+    case "price":
+    case "cache_first":
+    case "openrouter_default":
+    case "throughput":
+    case "latency":
+      return raw;
+    case "adaptive":
+      return "adaptive";
+    default:
+      return "price";
+  }
+}
+
+function resolveSortAxis(strategy: ProviderStrategy): ProviderSortAxis {
+  const override = effectiveHarnessEnvRaw("AGENT_PROVIDER_SORT")?.trim().toLowerCase();
+  if (override === "throughput" || override === "latency" || override === "price") {
+    return override;
+  }
+  if (strategy === "throughput") return "throughput";
+  if (strategy === "latency") return "latency";
+  return "price";
+}
+
+function resolveAllowlist(isFastModel: boolean): string[] {
+  if (isFastModel) {
+    const fast = parseCsvList(effectiveHarnessEnvRaw("AGENT_PROVIDER_ORDER_FAST"));
+    if (fast.length > 0) return fast;
+  }
+  return parseCsvList(effectiveHarnessEnvRaw("AGENT_PROVIDER_ORDER"));
+}
+
+function resolveStaticIgnores(): string[] {
+  return parseCsvList(effectiveHarnessEnvRaw("AGENT_PROVIDER_IGNORE"));
+}
+
+function resolveMaxPrice(): ProviderRouting["max_price"] | undefined {
+  const promptRaw = effectiveHarnessEnvRaw("AGENT_PROVIDER_MAX_PRICE_PROMPT")?.trim();
+  const completionRaw = effectiveHarnessEnvRaw("AGENT_PROVIDER_MAX_PRICE_COMPLETION")?.trim();
+  const prompt = promptRaw ? Number(promptRaw) : NaN;
+  const completion = completionRaw ? Number(completionRaw) : NaN;
+  const out: ProviderRouting["max_price"] = {};
+  if (Number.isFinite(prompt) && prompt > 0) out.prompt = prompt;
+  if (Number.isFinite(completion) && completion > 0) out.completion = completion;
+  return Object.keys(out).length > 0 ? out : undefined;
+}
+
+function mergeIgnores(routeState?: ProviderRouteState): string[] | undefined {
+  const merged = new Set<string>([...resolveStaticIgnores(), ...(routeState?.snapshot().ignore ?? [])]);
+  if (merged.size === 0) return undefined;
+  return [...merged];
+}
+
+function buildCacheFirstRouting(modelSlug: string, isFastModel: boolean): ProviderRouting | null {
   const allowFallbacks =
     effectiveHarnessEnvRaw("AGENT_PROVIDER_ALLOW_FALLBACKS")?.trim() !== "0";
 
-  // Stealth-only models — global DeepInfra/DeepSeek pins cause HTTP 404 on OpenRouter.
   if (isOpenRouterStealthModel(modelSlug)) {
     return { order: ["Stealth"], allow_fallbacks: allowFallbacks };
   }
 
-  // Fast model has its own provider order (sidecar calls: intent, distill, critic, rewrite)
   if (isFastModel) {
     const fastExplicit = effectiveHarnessEnvRaw("AGENT_PROVIDER_ORDER_FAST")?.trim();
     if (fastExplicit && fastExplicit.length > 0) {
-      const order = fastExplicit
-        .split(",")
-        .map((s) => s.trim())
-        .filter(Boolean);
+      const order = parseCsvList(fastExplicit);
       if (order.length > 0) return { order, allow_fallbacks: allowFallbacks };
     }
   }
 
-  // Explicit comma-separated order for main model (also used as fast fallback if FAST unset)
   const explicit = effectiveHarnessEnvRaw("AGENT_PROVIDER_ORDER")?.trim();
   if (explicit && explicit.length > 0) {
-    const order = explicit
-      .split(",")
-      .map((s) => s.trim())
-      .filter(Boolean);
+    const order = parseCsvList(explicit);
     if (order.length > 0) return { order, allow_fallbacks: allowFallbacks };
   }
 
@@ -90,6 +163,104 @@ export function buildProviderRouting(
   const derived = deriveProviderFromModelSlug(modelSlug);
   if (!derived) return null;
   return { order: [derived], allow_fallbacks: allowFallbacks };
+}
+
+function buildDynamicRouting(
+  modelSlug: string,
+  isFastModel: boolean,
+  strategy: ProviderStrategy,
+  routeState?: ProviderRouteState
+): ProviderRouting | null {
+  if (isOpenRouterStealthModel(modelSlug)) {
+    return { order: ["Stealth"], allow_fallbacks: true };
+  }
+
+  const sort = resolveSortAxis(strategy);
+  const only = resolveAllowlist(isFastModel);
+  const ignore = mergeIgnores(routeState);
+  const max_price = resolveMaxPrice();
+
+  const routing: ProviderRouting = {
+    sort,
+    allow_fallbacks: true,
+  };
+  if (only.length > 0) routing.only = only;
+  if (ignore && ignore.length > 0) routing.ignore = ignore;
+  if (max_price) routing.max_price = max_price;
+  return routing;
+}
+
+/**
+ * Resolve OpenRouter `provider` preferences for a chat completion.
+ * Returns null for `openrouter_default` or non-OpenRouter bases (caller should omit field).
+ */
+export function resolveProviderRouting(ctx: ProviderRoutingContext): ProviderRouting | null {
+  const strategy = resolveProviderStrategy();
+  if (strategy === "openrouter_default") return null;
+  if (strategy === "cache_first") {
+    return buildCacheFirstRouting(ctx.modelSlug, ctx.isFastModel ?? false);
+  }
+  return buildDynamicRouting(
+    ctx.modelSlug,
+    ctx.isFastModel ?? false,
+    strategy,
+    ctx.routeState
+  );
+}
+
+/**
+ * @deprecated Prefer {@link resolveProviderRouting} — kept for existing call sites.
+ */
+export function buildProviderRouting(modelSlug: string, isFastModel = false): ProviderRouting | null {
+  return resolveProviderRouting({ modelSlug, isFastModel });
+}
+
+export type OpenRouterChatRequestExtras = {
+  provider?: ProviderRouting;
+  session_id?: string;
+  user?: string;
+};
+
+/**
+ * Merge provider routing + session stickiness (with optional epoch suffix) for OpenRouter chat calls.
+ */
+export function buildOpenRouterChatRequestExtras(opts: {
+  baseURL: string;
+  modelSlug: string;
+  isFastModel?: boolean;
+  routeState?: ProviderRouteState;
+  sessionId?: string | null;
+  retryAttempt?: number;
+}): OpenRouterChatRequestExtras {
+  if (!supportsOpenRouterRequestExtras(opts.baseURL)) return {};
+
+  const provider = resolveProviderRouting({
+    modelSlug: opts.modelSlug,
+    isFastModel: opts.isFastModel,
+    routeState: opts.routeState,
+    retryAttempt: opts.retryAttempt,
+  });
+
+  const sessionExtras = buildOpenRouterSessionExtras(opts.baseURL, opts.sessionId);
+  if (sessionExtras.session_id && opts.routeState) {
+    const id = opts.routeState.resolveSessionId(sessionExtras.session_id);
+    return {
+      ...(provider ? { provider } : {}),
+      session_id: id,
+      user: id,
+    };
+  }
+
+  return {
+    ...(provider ? { provider } : {}),
+    ...sessionExtras,
+  };
+}
+
+export function sessionEpochBumpOn429Enabled(): boolean {
+  const raw = effectiveHarnessEnvRaw("AGENT_PROVIDER_SESSION_EPOCH_ON_429")?.trim();
+  if (raw === "0" || raw === "false") return false;
+  return true;
 }
 
 const DEFAULT_BASE_URL = DEFAULT_AGENT_API_BASE_URL;
@@ -165,4 +336,23 @@ export function resolveVisionProviderConfig(): VisionProviderConfig {
     baseURL: effectiveHarnessEnvRaw("AGENT_VISION_BASE_URL")?.trim() || defaultBase,
     model: effectiveHarnessEnvRaw("AGENT_VISION_MODEL")?.trim() || defaultModel,
   };
+}
+
+/** Vision config with managed-inference routing when entitled (unless AGENT_VISION_API_KEY is set). */
+export async function resolveVisionProviderConfigAsync(
+  prefs?: RuntimePreferences | null
+): Promise<VisionProviderConfig> {
+  const sync = resolveVisionProviderConfig();
+  if (effectiveHarnessEnvRaw("AGENT_VISION_API_KEY")?.trim()) {
+    return sync;
+  }
+  const creds = await resolveManagedOpenRouterCredentials(prefs);
+  if (creds.route === "managed") {
+    return {
+      apiKey: creds.apiKey,
+      baseURL: creds.baseURL,
+      model: sync.model,
+    };
+  }
+  return sync;
 }

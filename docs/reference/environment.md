@@ -100,7 +100,8 @@ Web **Settings** writes to (2). See [Configuration basics](../start/configuratio
 | `AGENT_HEARTBEAT_UI_STRIP` | `0` | yes | no | session_ui | Harness environment toggle for Heartbeat Ui Strip. See docs/configuration.md (session ui). |
 | `AGENT_HEARTBEAT_USER_NUDGE_CONFIDENCE_MIN` | `0.86` | yes | no | session_ui | Harness environment toggle for Heartbeat User Nudge Confidence Min. See docs/configuration.md (session ui). |
 | `AGENT_INFERENCE_BASE_URL` | `https://api.vireondynamics.com/v1/inference` | yes | no | models_api | OpenAI-compatible root for Vireon managed inference (chat/completions). |
-| `AGENT_INFERENCE_MODE` | `auto` | yes | no | models_api | byok = always use your API key; managed = Vireon proxy (Pro); auto = managed when entitled and no local key. |
+| `AGENT_INFERENCE_MODE` | `auto` | yes | no | models_api | byok = always your API key; managed = Vireon proxy (Pro); auto = managed when entitled (see AGENT_INFERENCE_PREFER_MANAG |
+| `AGENT_INFERENCE_PREFER_MANAGED` | `1` | yes | no | models_api | When 1, auto mode routes entitled Pro+ through Vireon included credits even if AGENT_API_KEY is set in .env. |
 | `AGENT_INFERENCE_SESSION_TOKEN` | `` | yes | no | models_api | Optional pinned session JWT for CI/headless; normally fetched automatically via license. |
 | `AGENT_INFERENCE_SESSION_URL` | `https://www.vireondynamics.com/api/inference/session` | yes | no | models_api | Control-plane endpoint that mints short-lived inference session tokens. |
 | `AGENT_INTENT_CONFIDENCE_MIN` | `0.65` | yes | no | harness | Harness environment toggle for Intent Confidence Min. See docs/configuration.md (harness). |
@@ -167,13 +168,19 @@ Web **Settings** writes to (2). See [Configuration basics](../start/configuratio
 | `AGENT_PROMPT_CACHE` | `1` | yes | no | harness | Add OpenRouter cache_control breakpoints to the static system prefix. On cache-supporting providers (DeepInfra, GMICloud |
 | `AGENT_PROMPT_CACHE_ROLLING` | `1` | yes | no | harness | Add a second, rolling cache_control breakpoint on the last stable conversation message so the prompt cache extends acros |
 | `AGENT_PROTOCOL_INTENT_HINT` | `any` | yes | no | advanced | Harness environment toggle for Protocol Intent Hint. See docs/configuration.md (advanced). |
-| `AGENT_PROVIDER_ALLOW_FALLBACKS` | `0` | yes | no | harness | Harness environment toggle for Provider Allow Fallbacks. See docs/configuration.md (harness). |
+| `AGENT_PROVIDER_ALLOW_FALLBACKS` | `1` | yes | no | harness | cache_first only — allow backup resellers when pin is unavailable. Adaptive always enables fallbacks. |
 | `AGENT_PROVIDER_CIRCUIT_COOLDOWN_MS` | `60000` | yes | yes | harness | Harness environment toggle for Provider Circuit Cooldown Ms. See docs/configuration.md (harness). |
 | `AGENT_PROVIDER_CIRCUIT_FAILURES` | `3` | yes | yes | advanced | Harness environment toggle for Provider Circuit Failures. See docs/configuration.md (advanced). |
+| `AGENT_PROVIDER_IGNORE` | `` | yes | no | harness | Static comma-separated OpenRouter provider denylist merged with dynamic 429 ignores. |
+| `AGENT_PROVIDER_MAX_PRICE_COMPLETION` | `` | yes | no | harness | OpenRouter max_price.completion cap. Empty = no cap. |
+| `AGENT_PROVIDER_MAX_PRICE_PROMPT` | `` | yes | no | harness | OpenRouter max_price.prompt cap. Empty = no cap. |
 | `AGENT_PROVIDER_MIN_INTERVAL_MS` | `0` | yes | no | models_api | Harness environment toggle for Provider Min Interval Ms. See docs/configuration.md (models api). |
-| `AGENT_PROVIDER_ORDER` | `DeepInfra` | yes | no | harness | Harness environment toggle for Provider Order. See docs/configuration.md (harness). |
-| `AGENT_PROVIDER_ORDER_FAST` | `DeepInfra` | yes | no | harness | Harness environment toggle for Provider Order Fast. See docs/configuration.md (harness). |
-| `AGENT_PROVIDER_ROUTE_AUTO` | `1` | yes | no | harness | Harness environment toggle for Provider Route Auto. See docs/configuration.md (harness). |
+| `AGENT_PROVIDER_ORDER` | `` | yes | no | harness | cache_first: comma-separated pin order. adaptive/price: optional OpenRouter only allowlist (empty = full marketplace). |
+| `AGENT_PROVIDER_ORDER_FAST` | `` | yes | no | harness | Fast-model tier variant of AGENT_PROVIDER_ORDER. |
+| `AGENT_PROVIDER_ROUTE_AUTO` | `1` | yes | no | harness | When cache_first and AGENT_PROVIDER_ORDER is empty, derive provider from model slug prefix. |
+| `AGENT_PROVIDER_SESSION_EPOCH_ON_429` | `1` | yes | no | harness | When on (default), adaptive mode bumps session_id epoch after upstream 429 to re-bind sticky routing. |
+| `AGENT_PROVIDER_SORT` | `price` | yes | no | harness | Override sort axis for adaptive/price strategies (price, throughput, latency). |
+| `AGENT_PROVIDER_STRATEGY` | `price` | yes | no | harness | OpenRouter routing mode. adaptive (default): sort=price + session stickiness + 429 rotation. cache_first: explicit AGENT |
 | `AGENT_PSEUDO_TOOL_RETRY_MAX` | `2` | yes | no | harness | Harness environment toggle for Pseudo Tool Retry Max. See docs/configuration.md (harness). |
 | `AGENT_QUERY_REWRITE` | `0` | yes | no | memory_vault | Harness environment toggle for Query Rewrite. See docs/configuration.md (memory vault). |
 | `AGENT_QUERY_REWRITE_EXPLORATORY` | `0` | yes | no | memory_vault | Harness environment toggle for Query Rewrite Exploratory. See docs/configuration.md (memory vault). |

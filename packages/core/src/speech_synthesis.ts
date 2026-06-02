@@ -6,6 +6,7 @@
  */
 import { resolveHarnessEnvRaw } from "./harness_effective_env.js";
 import type { RuntimePreferences } from "./runtime_prefs.js";
+import { resolveManagedOpenRouterCredentials } from "./inference_provider.js";
 
 // ─── Model registry ──────────────────────────────────────────────────────────
 
@@ -290,6 +291,21 @@ export function resolveSpeechSynthesisConfig(
     maxOutputTokens,
     chunkChars,
   };
+}
+
+/** TTS config with managed-inference routing when entitled (unless AGENT_TTS_API_KEY is set). */
+export async function resolveSpeechSynthesisConfigAsync(
+  prefs: RuntimePreferences | null
+): Promise<SpeechSynthesisConfig> {
+  const base = resolveSpeechSynthesisConfig(prefs);
+  if (process.env["AGENT_TTS_API_KEY"]?.trim()) {
+    return base;
+  }
+  const creds = await resolveManagedOpenRouterCredentials(prefs);
+  if (creds.route === "managed") {
+    return { ...base, apiKey: creds.apiKey, baseURL: creds.baseURL };
+  }
+  return base;
 }
 
 // ─── Text sanitization ───────────────────────────────────────────────────────

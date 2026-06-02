@@ -13,7 +13,7 @@
  * degrade gracefully: the caller keeps the first-stage ordering.
  */
 import OpenAI from "openai";
-import { completeChatJson, getFastModelSlug, effectiveHarnessEnvRaw } from "@liminal/core";
+import { completeChatJson, getFastModelSlug, effectiveHarnessEnvRaw, resolveManagedOpenRouterCredentials } from "@liminal/core";
 
 export interface RerankCandidate {
   id: string;
@@ -74,12 +74,18 @@ export async function rerankCandidates(
   opts?: { maxCandidates?: number; timeoutMs?: number }
 ): Promise<Map<string, number> | null> {
   if (candidates.length === 0) return null;
-  const apiKey = process.env["OPENROUTER_API_KEY"] ?? "";
-  if (!apiKey) return null;
-  const baseURL = (process.env["OPENROUTER_BASE_URL"] ?? "https://openrouter.ai/api/v1").replace(
+  let apiKey = process.env["OPENROUTER_API_KEY"] ?? "";
+  let baseURL = (process.env["OPENROUTER_BASE_URL"] ?? "https://openrouter.ai/api/v1").replace(
     /\/$/,
     ""
   );
+  try {
+    const creds = await resolveManagedOpenRouterCredentials(null);
+    apiKey = creds.apiKey;
+    baseURL = creds.baseURL;
+  } catch {
+    if (!apiKey) return null;
+  }
   const max = Math.max(1, Math.min(40, opts?.maxCandidates ?? 25));
   const shortlist = candidates.slice(0, max);
 

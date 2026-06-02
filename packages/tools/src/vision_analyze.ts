@@ -1,6 +1,6 @@
 import { readFile } from "node:fs/promises";
 import { extname, resolve } from "node:path";
-import { resolveVisionProviderConfig, withProviderRequestSpacing, effectiveHarnessEnvRaw, buildOpenRouterAttributionHeaders } from "@liminal/core";
+import { resolveVisionProviderConfigAsync, withProviderRequestSpacing, effectiveHarnessEnvRaw, buildOpenRouterAttributionHeaders, buildOpenRouterChatRequestExtras } from "@liminal/core";
 import { defineTool } from "./helpers.js";
 
 const MIME_MAP: Record<string, string> = {
@@ -122,9 +122,9 @@ export const visionAnalyzeTool = defineTool({
       };
     }
 
-    let provider: ReturnType<typeof resolveVisionProviderConfig>;
+    let provider: Awaited<ReturnType<typeof resolveVisionProviderConfigAsync>>;
     try {
-      provider = resolveVisionProviderConfig();
+      provider = await resolveVisionProviderConfigAsync(null);
     } catch (err) {
       return {
         ok: false,
@@ -174,13 +174,20 @@ export const visionAnalyzeTool = defineTool({
                   ...buildOpenRouterAttributionHeaders("vision-sidecar"),
                 },
                 body: JSON.stringify(
-                  buildVisionRequestBody({
-                    model: provider.model,
-                    prompt,
-                    dataUrl: dataUrl.dataUrl,
-                    detail,
-                    jsonMode,
-                  })
+                  {
+                    ...buildVisionRequestBody({
+                      model: provider.model,
+                      prompt,
+                      dataUrl: dataUrl.dataUrl,
+                      detail,
+                      jsonMode,
+                    }),
+                    ...buildOpenRouterChatRequestExtras({
+                      baseURL: provider.baseURL,
+                      modelSlug: provider.model,
+                      isFastModel: true,
+                    }),
+                  }
                 ),
                 signal: controller.signal,
               })

@@ -231,16 +231,18 @@ export const HARNESS_ENV_DEFAULTS: Readonly<Record<string, string>> = {
   AGENT_MARKETS_MAX_DELAY_MS: "2000",
   AGENT_WEB_FETCH_403_RETRY: "1",
   AGENT_PROVIDER_MIN_INTERVAL_MS: "0",
-  // Provider pinning — OpenRouter sticky cache affinity.
-  // DeepInfra wins on input price ($1.30/M Pro, $0.10/M Flash), cache-read price
-  // ($0.10/M Pro = 13× discount, $0.02/M Flash = 5× discount), and latency for
-  // both DeepSeek tiers. Single-provider pinning is REQUIRED for prompt caching
-  // to accumulate hits — each provider keeps its own KV cache, so any drift
-  // ($0.07 → $0.01 input cost on cached rounds) gets undone.
-  AGENT_PROVIDER_ROUTE_AUTO: "1",          // auto-derive provider order from model slug prefix (used only when AGENT_PROVIDER_ORDER is empty)
-  AGENT_PROVIDER_ORDER: "DeepInfra",       // sticky pin for main model — cache-friendly + cheapest input on DeepSeek V4 Pro
-  AGENT_PROVIDER_ORDER_FAST: "DeepInfra",  // sticky pin for fast sidecar — cache-friendly + cheapest input on DeepSeek V4 Flash
-  AGENT_PROVIDER_ALLOW_FALLBACKS: "0",     // DO NOT allow OpenRouter to drift providers — drift kills cache hits and silently increases cost
+  // Provider routing — adaptive price sort + session_id stickiness (OpenRouter-native cache affinity).
+  // Use AGENT_PROVIDER_STRATEGY=cache_first + AGENT_PROVIDER_ORDER=DeepInfra to restore explicit pin.
+  AGENT_PROVIDER_STRATEGY: "price",          // live benchmark winner for cost+cache (see scripts/benchmark-provider-strategies.mjs)
+  AGENT_PROVIDER_SORT: "price",            // override sort axis when strategy is adaptive or price
+  AGENT_PROVIDER_ROUTE_AUTO: "1",          // auto-derive provider order from model slug (cache_first only, when ORDER empty)
+  AGENT_PROVIDER_ORDER: "",                // cache_first: pin order; adaptive/price: optional allowlist (OpenRouter `only`)
+  AGENT_PROVIDER_ORDER_FAST: "",           // fast-tier variant of AGENT_PROVIDER_ORDER
+  AGENT_PROVIDER_ALLOW_FALLBACKS: "1",     // cache_first: allow backup resellers; adaptive always enables fallbacks
+  AGENT_PROVIDER_IGNORE: "",               // static comma-separated denylist merged with dynamic 429 ignores
+  AGENT_PROVIDER_MAX_PRICE_PROMPT: "",     // OpenRouter max_price.prompt cap (empty = no cap)
+  AGENT_PROVIDER_MAX_PRICE_COMPLETION: "", // OpenRouter max_price.completion cap (empty = no cap)
+  AGENT_PROVIDER_SESSION_EPOCH_ON_429: "1", // bump session_id epoch on 429 in adaptive mode to re-bind sticky routing
   /** Pass OpenRouter `session_id` (and aligned `user`) on chat completions for dashboard session grouping. */
   AGENT_OPENROUTER_SESSIONS: "1",
   /** Optional fixed session id override (else harness taskId / active chat id). Max 256 chars. */

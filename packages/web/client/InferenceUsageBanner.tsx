@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import { webApiFetch } from "./webApiAuth.js";
+import type { InferenceWalletSnapshot } from "./useSSE.js";
 
 const WEB_SERVER_BASE = "";
 
@@ -17,9 +18,18 @@ type InferenceStatus = {
 type Props = {
   vireonConnected: boolean;
   managedRoute: boolean;
+  /** Real-time wallet snapshot from SSE (preferred over poll when present). */
+  liveWallet?: InferenceWalletSnapshot | null;
+  /** Poll more often while the harness is busy (embeddings/vision mid-turn). */
+  busy?: boolean;
 };
 
-export function InferenceUsageBanner({ vireonConnected, managedRoute }: Props) {
+export function InferenceUsageBanner({
+  vireonConnected,
+  managedRoute,
+  liveWallet,
+  busy = false,
+}: Props) {
   const [status, setStatus] = useState<InferenceStatus | null>(null);
   const hadVireon = useRef(vireonConnected);
 
@@ -44,14 +54,28 @@ export function InferenceUsageBanner({ vireonConnected, managedRoute }: Props) {
   useEffect(() => {
     void load();
     if (!vireonConnected) return;
-    const id = window.setInterval(() => void load(), 60_000);
+    const intervalMs = busy && managedRoute ? 30_000 : 60_000;
+    const id = window.setInterval(() => void load(), intervalMs);
     return () => window.clearInterval(id);
-  }, [vireonConnected, load]);
+  }, [vireonConnected, load, busy, managedRoute]);
 
-  if (!vireonConnected || !status?.entitled) return null;
+  const merged: InferenceStatus | null =
+    liveWallet != null
+      ? {
+          ...(status ?? {}),
+          entitled: status?.entitled ?? true,
+          remainingUsd: liveWallet.remainingUsd ?? status?.remainingUsd ?? null,
+          capUsd: liveWallet.capUsd ?? status?.capUsd ?? null,
+          usedUsd: liveWallet.usedUsd ?? status?.usedUsd ?? null,
+          periodEnd: liveWallet.periodEnd ?? status?.periodEnd ?? null,
+        }
+      : status;
 
-  const remaining = status.remainingUsd;
-  const cap = status.capUsd;
+  if (!vireonConnected || !merged?.entitled) return null;
+
+  const remaining = merged.remainingUsd;
+  const cap = merged.capUsd;
+  const used = merged.usedUsd;
   const low =
     remaining != null && cap != null && cap > 0 && remaining / cap <= 0.2;
   const exhausted = remaining != null && remaining <= 0.01;
@@ -98,7 +122,19 @@ export function InferenceUsageBanner({ vireonConnected, managedRoute }: Props) {
     >
       {managedRoute ? (
         <>
-          Managed inference: <strong>${remaining.toFixed(2)}</strong> remaining
+          Managed inference:
+          {used != null ? (
+            <>
+              {" "}
+              <strong>${used.toFixed(2)}</strong> used · <strong>${remaining.toFixed(2)}</strong>{" "}
+              remaining
+            </>
+          ) : (
+            <>
+              {" "}
+              <strong>${remaining.toFixed(2)}</strong> remaining
+            </>
+          )}
           {cap != null ? ` of $${cap.toFixed(2)}` : ""} this period.
         </>
       ) : (

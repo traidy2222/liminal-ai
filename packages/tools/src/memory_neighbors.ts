@@ -23,6 +23,7 @@ import {
   effectiveHarnessEnvRaw,
   fetchEmbeddings,
   resolveCurrentChatId,
+  resolveManagedOpenRouterCredentials,
 } from "@liminal/core";
 import { loadEmbedIndex } from "./memory_index.js";
 import { loadRawNotes, getNoteValue, type StoredNote } from "./notes_store.js";
@@ -78,11 +79,20 @@ export const memoryNeighborsTool = defineTool({
       }
       queryVec = row.v;
     } else {
-      const apiKey = process.env["OPENROUTER_API_KEY"] ?? "";
-      const baseURL = (process.env["OPENROUTER_BASE_URL"] ?? "https://openrouter.ai/api/v1").replace(/\/$/, "");
+      let apiKey = process.env["OPENROUTER_API_KEY"] ?? "";
+      let baseURL = (process.env["OPENROUTER_BASE_URL"] ?? "https://openrouter.ai/api/v1").replace(/\/$/, "");
       const model = effectiveHarnessEnvRaw("AGENT_EMBED_MODEL")?.trim();
+      if (model) {
+        try {
+          const creds = await resolveManagedOpenRouterCredentials(null);
+          apiKey = creds.apiKey;
+          baseURL = creds.baseURL;
+        } catch {
+          /* keep env fallback */
+        }
+      }
       if (!apiKey || !model) {
-        return { ok: false, error: "AGENT_EMBED_MODEL + OPENROUTER_API_KEY required for text mode" };
+        return { ok: false, error: "AGENT_EMBED_MODEL + API key required for text mode (managed inference or OPENROUTER_API_KEY)" };
       }
       try {
         const { vectors } = await fetchEmbeddings({ apiKey, baseURL, model, inputs: [text.slice(0, 8000)] });

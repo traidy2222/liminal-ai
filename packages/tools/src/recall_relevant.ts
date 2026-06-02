@@ -11,6 +11,7 @@ import {
   effectiveHarnessEnvRaw,
   workspaceFingerprint,
   resolveCurrentChatId,
+  resolveManagedOpenRouterCredentials,
 } from "@liminal/core";
 import {
   loadEmbedIndex,
@@ -227,12 +228,21 @@ export const recallRelevantTool = defineTool({
     }
     if (queries.length === 0) return { ok: false, error: "query or queries required" };
 
-    const apiKey = process.env["OPENROUTER_API_KEY"] ?? "";
-    const baseURL = (process.env["OPENROUTER_BASE_URL"] ?? "https://openrouter.ai/api/v1").replace(
+    const embedModel = effectiveHarnessEnvRaw("AGENT_EMBED_MODEL")?.trim();
+    let apiKey = process.env["OPENROUTER_API_KEY"] ?? "";
+    let baseURL = (process.env["OPENROUTER_BASE_URL"] ?? "https://openrouter.ai/api/v1").replace(
       /\/$/,
       ""
     );
-    const embedModel = effectiveHarnessEnvRaw("AGENT_EMBED_MODEL")?.trim();
+    if (embedModel) {
+      try {
+        const creds = await resolveManagedOpenRouterCredentials(null);
+        apiKey = creds.apiKey;
+        baseURL = creds.baseURL;
+      } catch {
+        /* keep env fallback */
+      }
+    }
 
     const lines: string[] = [];
     const bumpKeys: string[] = [];

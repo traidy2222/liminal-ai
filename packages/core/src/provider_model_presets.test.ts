@@ -66,10 +66,28 @@ test("resolveProviderModelPresetId matches OpenRouter base + main slug", () => {
 
 
 
+test("deepseek price preset uses price strategy (benchmark default)", () => {
+  const deepseek = PROVIDER_MODEL_PRESETS.find((p) => p.id === "deepseek-v4")!;
+  assert.equal(deepseek.harnessEnvPatch.AGENT_PROVIDER_STRATEGY, "price");
+  assert.equal(deepseek.harnessEnvPatch.AGENT_PROVIDER_ORDER, "");
+});
+
+test("deepseek adaptive preset available for 429-heavy workloads", () => {
+  const adaptive = PROVIDER_MODEL_PRESETS.find((p) => p.id === "deepseek-v4-adaptive")!;
+  assert.equal(adaptive.harnessEnvPatch.AGENT_PROVIDER_STRATEGY, "adaptive");
+});
+
+test("deepseek deepinfra pin preset uses cache_first", () => {
+  const pin = PROVIDER_MODEL_PRESETS.find((p) => p.id === "deepseek-v4-deepinfra-pin")!;
+  assert.equal(pin.harnessEnvPatch.AGENT_PROVIDER_STRATEGY, "cache_first");
+  assert.equal(pin.harnessEnvPatch.AGENT_PROVIDER_ORDER, "DeepInfra");
+});
+
 test("owl stealth preset pins Stealth provider and owl-alpha slug", () => {
   const owl = PROVIDER_MODEL_PRESETS.find((p) => p.id === "openrouter-owl-stealth")!;
   assert.equal(owl.model, OPENROUTER_MODEL_SLUG.OWL_ALPHA);
   assert.equal(owl.harnessEnvPatch.AGENT_MODEL, OPENROUTER_MODEL_SLUG.OWL_ALPHA);
+  assert.equal(owl.harnessEnvPatch.AGENT_PROVIDER_STRATEGY, "cache_first");
   assert.equal(owl.harnessEnvPatch.AGENT_PROVIDER_ORDER, "Stealth");
   assert.equal(owl.harnessEnvPatch.AGENT_PROVIDER_ORDER_FAST, "Stealth");
 });

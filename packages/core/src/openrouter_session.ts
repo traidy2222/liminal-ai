@@ -6,6 +6,7 @@
 import { DEFAULT_AGENT_API_BASE_URL } from "./harness_default_constants.js";
 import { effectiveHarnessEnvRaw } from "./harness_effective_env.js";
 import { resolveCurrentChatId } from "./chat_context.js";
+import { isManagedInferenceBaseUrl } from "./inference_session.js";
 
 const OPENROUTER_SESSION_ID_MAX_LEN = 256;
 
@@ -19,6 +20,13 @@ export function isOpenRouterApiBaseUrl(baseURL: string | undefined | null): bool
   } catch {
     return /openrouter\.ai/i.test(raw);
   }
+}
+
+/** OpenRouter-compatible routing/session extras (direct OR Vireon managed proxy). */
+export function supportsOpenRouterRequestExtras(baseURL: string | undefined | null): boolean {
+  const raw = (baseURL ?? "").trim();
+  if (!raw) return false;
+  return isOpenRouterApiBaseUrl(raw) || isManagedInferenceBaseUrl(raw);
 }
 
 /** Product default: on for OpenRouter bases unless AGENT_OPENROUTER_SESSIONS=0. */
@@ -79,7 +87,7 @@ export function buildOpenRouterSessionExtras(
   baseURL: string | undefined | null,
   sessionId?: string | null
 ): OpenRouterSessionRequestExtras {
-  if (!isOpenRouterApiBaseUrl(baseURL) || !openRouterSessionsEnabled()) {
+  if (!supportsOpenRouterRequestExtras(baseURL) || !openRouterSessionsEnabled()) {
     return {};
   }
   const id = resolveOpenRouterSessionId(sessionId);

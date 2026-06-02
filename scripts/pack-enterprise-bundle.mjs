@@ -41,10 +41,7 @@ if (tar.status !== 0) {
 }
 
 manifest.sha256 = createHash("sha256").update(readFileSync(archive)).digest("hex");
-writeFileSync(path.join(outDir, "manifest.json"), JSON.stringify(manifest, null, 2));
 writeFileSync(sidecar, JSON.stringify(manifest, null, 2));
-
-spawnSync("tar", ["-czf", archive, "-C", outDir, "."], { stdio: "inherit" });
 
 console.log(`\nWrote ${archive}`);
 console.log(`Wrote ${sidecar}`);

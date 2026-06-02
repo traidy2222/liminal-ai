@@ -56,7 +56,10 @@ export async function createLocalWebAuth(): Promise<LocalWebAuth> {
 
   const isExempt = (req: Request): boolean => {
     const path = req.path;
-    if (req.method === "POST" && path === "/api/vireon/auth/callback") {
+    if (
+      (req.method === "POST" || req.method === "GET") &&
+      path === "/api/vireon/auth/callback"
+    ) {
       return true;
     }
     if (req.method === "GET" && path === "/api/config") {

@@ -1572,6 +1572,7 @@ export function App() {
   const [vireonEmail, setVireonEmail] = useState<string | null>(null);
   const [vireonTier, setVireonTier] = useState<string | null>(null);
   const [vireonBusy, setVireonBusy] = useState(false);
+  const [vireonConnectNotice, setVireonConnectNotice] = useState<string | null>(null);
   const [settingsManagedRoute, setSettingsManagedRoute] = useState(false);
 
   const submittingRef = useRef(false);
@@ -1706,6 +1707,49 @@ export function App() {
       }
     })();
   }, []);
+
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    if (params.get("vireon") !== "connected") return;
+
+    window.history.replaceState({}, "", window.location.pathname);
+
+    void (async () => {
+      try {
+        await webApiFetch(`${WEB_SERVER_BASE}/api/vireon/reconnect`, { method: "POST" });
+        const vr = await webApiFetch(`${WEB_SERVER_BASE}/api/vireon/account`);
+        if (vr.ok) {
+          const vj = (await vr.json()) as {
+            connected?: boolean;
+            account?: { email?: string };
+            tier?: string;
+          };
+          setVireonConnected(Boolean(vj.connected));
+          setVireonEmail(vj.account?.email ?? null);
+          setVireonTier(vj.tier ?? null);
+          if (vj.connected) {
+            const label = vj.account?.email ?? "your account";
+            setVireonConnectNotice(`Connected to Vireon as ${label} (${vj.tier ?? "pro"})`);
+          }
+        }
+        const sr = await webApiFetch(`${WEB_SERVER_BASE}/api/settings`);
+        if (sr.ok) {
+          const sj = (await sr.json()) as { provider?: { managedRoute?: boolean; inferenceMode?: string } };
+          setSettingsManagedRoute(
+            Boolean(sj.provider?.managedRoute) || sj.provider?.inferenceMode === "managed"
+          );
+        }
+      } catch {
+        /* optional */
+      }
+    })();
+  }, []);
+
+  useEffect(() => {
+    if (!vireonConnectNotice) return;
+    const id = window.setTimeout(() => setVireonConnectNotice(null), 8000);
+    return () => window.clearTimeout(id);
+  }, [vireonConnectNotice]);
 
   const applyProviderPreset = useCallback(
     (presetId: string) => {
@@ -2246,9 +2290,32 @@ export function App() {
   return (
     <ShellRouter theme={state.personaUiTheme}>
       <style>{CSS_ANIMATIONS}</style>
+      {vireonConnectNotice ? (
+        <div
+          role="status"
+          style={{
+            position: "fixed",
+            top: 12,
+            left: "50%",
+            transform: "translateX(-50%)",
+            zIndex: 10000,
+            padding: "10px 16px",
+            borderRadius: 8,
+            background: "rgba(20, 83, 45, 0.95)",
+            border: "1px solid rgba(74, 222, 128, 0.35)",
+            color: "#ecfdf5",
+            fontSize: 13,
+            boxShadow: "0 4px 24px rgba(0,0,0,0.35)",
+          }}
+        >
+          {vireonConnectNotice}
+        </div>
+      ) : null}
       <InferenceUsageBanner
         vireonConnected={vireonConnected}
         managedRoute={settingsManagedRoute}
+        liveWallet={state.inferenceWallet}
+        busy={state.busy}
       />
       <PersonaShellSwitcher shell={shell} contract={contract} />
 

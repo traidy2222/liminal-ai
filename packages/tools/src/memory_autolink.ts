@@ -6,6 +6,7 @@ import {
   withProviderRequestSpacing,
   effectiveHarnessEnvRaw,
   buildOpenRouterAttributionHeaders,
+  resolveManagedOpenRouterCredentials,
 } from "@liminal/core";
 export async function suggestWikilinkLine(params: {
   title: string;
@@ -13,14 +14,20 @@ export async function suggestWikilinkLine(params: {
   candidateTitles: string[];
 }): Promise<string | null> {
   if (effectiveHarnessEnvRaw("AGENT_MEMORY_AUTOLINK") !== "1") return null;
-  const apiKey = process.env["OPENROUTER_API_KEY"];
-  if (!apiKey) return null;
-  const model =
-    effectiveHarnessEnvRaw("AGENT_MEMORY_AUTOLINK_MODEL")?.trim() || DEFAULT_AGENT_MODEL_SLUG;
-  const base = (process.env["OPENROUTER_BASE_URL"] ?? "https://openrouter.ai/api/v1").replace(
+  let apiKey = process.env["OPENROUTER_API_KEY"]?.trim() ?? "";
+  let base = (process.env["OPENROUTER_BASE_URL"] ?? "https://openrouter.ai/api/v1").replace(
     /\/$/,
     ""
   );
+  try {
+    const creds = await resolveManagedOpenRouterCredentials(null);
+    apiKey = creds.apiKey;
+    base = creds.baseURL;
+  } catch {
+    if (!apiKey) return null;
+  }
+  const model =
+    effectiveHarnessEnvRaw("AGENT_MEMORY_AUTOLINK_MODEL")?.trim() || DEFAULT_AGENT_MODEL_SLUG;
   const cand = params.candidateTitles.slice(0, 40).join(" | ");
   try {
     const res = await withProviderRequestSpacing(

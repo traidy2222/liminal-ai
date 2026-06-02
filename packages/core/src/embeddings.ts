@@ -23,7 +23,9 @@ export interface EmbedBatchResult {
   model: string;
 }
 
-/** POST /v1/embeddings — returns one vector per input string (same order). */
+/** POST /v1/embeddings — returns one vector per input string (same order).
+ * OpenRouter embeddings do not accept the chat `provider` object; routing is model-level only.
+ */
 export async function fetchEmbeddings(params: {
   apiKey: string;
   baseURL: string;

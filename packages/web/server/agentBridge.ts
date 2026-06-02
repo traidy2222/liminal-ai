@@ -3,6 +3,8 @@ import {
   AgentHarness,
   maybeAttachSessionEventLog,
   resolveProviderConfigWithInference,
+  fetchInferenceUsageStatus,
+  shouldRouteOpenRouterViaManaged,
   type ProviderConfig,
   resolveWorkspaceRoot,
   runWithWorkspaceRoot,
@@ -228,6 +230,26 @@ export class AgentBridge {
     this.sse.send(event, payload, this.chatId);
   }
 
+  /** Push fresh wallet totals to the web client after a managed-inference turn. */
+  private async emitInferenceWalletIfManaged(): Promise<void> {
+    try {
+      const prefs = this.harness.getRuntimePreferences();
+      const managed = await shouldRouteOpenRouterViaManaged(prefs);
+      if (!managed) return;
+      const status = await fetchInferenceUsageStatus(prefs);
+      if (!status?.entitled) return;
+      this.maybeSend("inference_wallet", {
+        remainingUsd: status.remainingUsd,
+        capUsd: status.capUsd,
+        usedUsd: status.usedUsd,
+        periodEnd: status.periodEnd,
+        at: Date.now(),
+      });
+    } catch {
+      /* optional telemetry */
+    }
+  }
+
   /**
    * Apply persisted persona and bootstrap gate. Web defers the opening greet to the
    * client (`POST /api/session/reset` with `greet: true` on fresh page load) so reload
@@ -340,6 +362,7 @@ export class AgentBridge {
       this.lastTurnEndedAtMs = Date.now();
       this.stopHeartbeat();
       this.maybeSend("turn_end", p);
+      void this.emitInferenceWalletIfManaged();
     });
     on("error", (p) => { this.stopHeartbeat(); this.maybeSend("error", { message: p.err.message }); });
 

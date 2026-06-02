@@ -395,7 +395,17 @@ export interface SSEState {
   dictationAudioCue: boolean;
   /** Jarvis-style spoken channel (AGENT_TTS_ENABLED). */
   ttsEnabled: boolean;
+  /** Live managed-inference wallet snapshot from SSE `inference_wallet` events. */
+  inferenceWallet: InferenceWalletSnapshot | null;
 }
+
+export type InferenceWalletSnapshot = {
+  remainingUsd: number | null;
+  capUsd: number | null;
+  usedUsd: number | null;
+  periodEnd?: string | null;
+  at?: number;
+};
 
 const ORCH_TOOLS = new Set(["spawn_agent", "wait_for_agents", "cancel_agent", "list_agents"]);
 
@@ -455,6 +465,10 @@ type Action =
   | { type: "approval_resolved" }
   | { type: "ask_user_resolved" }
   | { type: "turn_end"; payload: { contextSnapshot: ContextSnapshot; harnessMetrics?: Record<string, unknown> } }
+  | {
+      type: "inference_wallet";
+      payload: InferenceWalletSnapshot;
+    }
   | {
       type: "turn_summary";
       payload: {
@@ -1028,6 +1042,9 @@ function reducer(state: SSEState, action: Action): SSEState {
       };
     }
 
+    case "inference_wallet":
+      return { ...state, inferenceWallet: action.payload };
+
     case "turn_summary":
       return {
         ...state,
@@ -1549,6 +1566,7 @@ function createInitialSSEState(): SSEState {
     heartbeatEnabled: false,
     dictationAudioCue: false,
     ttsEnabled: false,
+    inferenceWallet: null,
   };
 }
 
@@ -2063,6 +2081,12 @@ export function useSSE(options?: {
         const p = parseEventData(e);
         if (p == null) return;
         dispatch({ type: "turn_end", payload: p as never });
+      });
+      es.addEventListener("inference_wallet", (e: MessageEvent) => {
+        trackId(e);
+        const p = parseEventData(e);
+        if (p == null) return;
+        dispatch({ type: "inference_wallet", payload: p as InferenceWalletSnapshot });
       });
       es.addEventListener("subtask_spawned", (e: MessageEvent) => {
         trackId(e);

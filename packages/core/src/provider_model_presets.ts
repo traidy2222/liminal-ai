@@ -64,6 +64,7 @@ export function buildHarnessModelPackEnvPatch(opts: {
   main: string;
   fast: string;
   baseURL?: string;
+  providerStrategy?: string;
   providerOrder?: string;
   providerOrderFast?: string;
   providerRouteAuto?: string;
@@ -79,6 +80,7 @@ export function buildHarnessModelPackEnvPatch(opts: {
     AGENT_MEMORY_CONSOLIDATE_MODEL: fast,
   };
   if (opts.baseURL !== undefined) patch.AGENT_API_BASE_URL = opts.baseURL;
+  if (opts.providerStrategy !== undefined) patch.AGENT_PROVIDER_STRATEGY = opts.providerStrategy;
   if (opts.providerOrder !== undefined) patch.AGENT_PROVIDER_ORDER = opts.providerOrder;
   if (opts.providerOrderFast !== undefined) patch.AGENT_PROVIDER_ORDER_FAST = opts.providerOrderFast;
   if (opts.providerRouteAuto !== undefined) patch.AGENT_PROVIDER_ROUTE_AUTO = opts.providerRouteAuto;
@@ -86,12 +88,41 @@ export function buildHarnessModelPackEnvPatch(opts: {
   return patch;
 }
 
-/** DeepInfra pin — best prompt-cache affinity for DeepSeek V4 on OpenRouter. */
+/** Price-sorted OpenRouter routing — live benchmark best bang-for-buck on DeepSeek V4 Pro. */
+function deepseekV4PricePatch(): Record<string, string> {
+  return buildHarnessModelPackEnvPatch({
+    main: OPENROUTER_MODEL_SLUG.DEEPSEEK_V4_PRO,
+    fast: OPENROUTER_MODEL_SLUG.DEEPSEEK_V4_FLASH,
+    baseURL: DEFAULT_AGENT_API_BASE_URL,
+    providerStrategy: "price",
+    providerOrder: "",
+    providerOrderFast: "",
+    providerRouteAuto: "1",
+    allowFallbacks: "1",
+  });
+}
+
+/** Adaptive routing — price sort + session epoch bump on upstream 429. */
+function deepseekV4AdaptivePatch(): Record<string, string> {
+  return buildHarnessModelPackEnvPatch({
+    main: OPENROUTER_MODEL_SLUG.DEEPSEEK_V4_PRO,
+    fast: OPENROUTER_MODEL_SLUG.DEEPSEEK_V4_FLASH,
+    baseURL: DEFAULT_AGENT_API_BASE_URL,
+    providerStrategy: "adaptive",
+    providerOrder: "",
+    providerOrderFast: "",
+    providerRouteAuto: "1",
+    allowFallbacks: "1",
+  });
+}
+
+/** DeepInfra pin — explicit cache-first routing for DeepSeek V4 on OpenRouter. */
 function deepseekV4PinPatch(): Record<string, string> {
   return buildHarnessModelPackEnvPatch({
     main: OPENROUTER_MODEL_SLUG.DEEPSEEK_V4_PRO,
     fast: OPENROUTER_MODEL_SLUG.DEEPSEEK_V4_FLASH,
     baseURL: DEFAULT_AGENT_API_BASE_URL,
+    providerStrategy: "cache_first",
     providerOrder: "DeepInfra",
     providerOrderFast: "DeepInfra",
     providerRouteAuto: "0",
@@ -105,6 +136,7 @@ function owlStealthPinPatch(): Record<string, string> {
     main: OPENROUTER_MODEL_SLUG.OWL_ALPHA,
     fast: OPENROUTER_MODEL_SLUG.OWL_ALPHA,
     baseURL: DEFAULT_AGENT_API_BASE_URL,
+    providerStrategy: "cache_first",
     providerOrder: "Stealth",
     providerOrderFast: "Stealth",
     providerRouteAuto: "0",
@@ -118,6 +150,7 @@ function openRouterAutoRoutePatch(main: string, fast: string): Record<string, st
     main,
     fast,
     baseURL: DEFAULT_AGENT_API_BASE_URL,
+    providerStrategy: "price",
     providerOrder: "",
     providerOrderFast: "",
     providerRouteAuto: "1",
@@ -147,9 +180,24 @@ export const PROVIDER_MODEL_PRESETS: readonly ProviderModelPreset[] = [
   // —— Same developer (main + fast tier) ——
   preset(
     "deepseek-v4",
-    "DeepSeek V4 — Pro + Flash",
+    "DeepSeek V4 — Pro + Flash (Price)",
     "Latest DeepSeek pair on OpenRouter (Apr 2026). Main: v4-pro (~$0.44/M in). Fast: v4-flash (~$0.10/M in). " +
-      "Pinned to DeepInfra for prompt-cache affinity.",
+      "Price routing: OpenRouter sort=price + session stickiness (benchmark default for cost + cache).",
+    OPENROUTER_MODEL_SLUG.DEEPSEEK_V4_PRO,
+    deepseekV4PricePatch()
+  ),
+  preset(
+    "deepseek-v4-adaptive",
+    "DeepSeek V4 — Pro + Flash (Adaptive)",
+    "Same DeepSeek V4 pair with adaptive routing (price sort + session epoch bump on upstream 429).",
+    OPENROUTER_MODEL_SLUG.DEEPSEEK_V4_PRO,
+    deepseekV4AdaptivePatch()
+  ),
+  preset(
+    "deepseek-v4-deepinfra-pin",
+    "DeepSeek V4 — Pro + Flash (DeepInfra pin)",
+    "Same DeepSeek V4 pair with explicit DeepInfra cache-first pin (legacy behavior). " +
+      "Use when you want a fixed reseller instead of live price routing.",
     OPENROUTER_MODEL_SLUG.DEEPSEEK_V4_PRO,
     deepseekV4PinPatch()
   ),
@@ -171,6 +219,7 @@ export const PROVIDER_MODEL_PRESETS: readonly ProviderModelPreset[] = [
       main: OPENROUTER_MODEL_SLUG.OWL_ALPHA,
       fast: OPENROUTER_MODEL_SLUG.DEEPSEEK_V4_FLASH,
       baseURL: DEFAULT_AGENT_API_BASE_URL,
+      providerStrategy: "cache_first",
       providerOrder: "Stealth",
       providerOrderFast: "DeepInfra",
       providerRouteAuto: "0",
