@@ -1,0 +1,44 @@
+# Voice (TTS &amp; dictation)
+
+The web UI can **speak its replies** (text-to-speech) and **listen** (dictation/transcription),
+so you can drive the agent hands-free. Both are sidecar model calls you control via env.
+
+## Dictation (speech → text)
+
+Record in the browser and send the clip for transcription:
+
+- `POST /api/audio/upload` persists the clip under the active chat and returns an
+  `attachmentId` (audio is sent as a base64 data URL — `audio/webm`, etc.).
+- `POST /api/transcribe` runs ASR on that id and returns the text, duration, language, and
+  cost.
+
+In the agent loop, `transcribe_audio` (the `audio` family) does the same server-side.
+
+| Variable | Purpose |
+| -------- | ------- |
+| `AGENT_TRANSCRIBE_ENABLED` | Master switch for transcription |
+| `AGENT_TRANSCRIBE_API_KEY` | ASR key (falls back to `AGENT_API_KEY` / `OPENROUTER_API_KEY`) |
+| `AGENT_TRANSCRIBE_MAX_BYTES` | Per-clip size limit |
+| `AGENT_DICTATION_AUDIO_CUE` | Play a start/stop cue in the UI |
+
+## Text-to-speech (text → speech)
+
+- `POST /api/tts` synthesizes speech (segmented for long text) and returns clip ids + cost.
+- `GET /api/tts/clip/:clipId` streams a clip's audio bytes.
+
+Text is sanitized and capped per call, with duplicate-clip suppression and a per-turn speech
+budget so the agent doesn't read back everything. The `speak` tool exposes TTS in the loop.
+
+| Variable | Default | Purpose |
+| -------- | ------- | ------- |
+| `AGENT_TTS_ENABLED` | off | Master switch for TTS |
+| `AGENT_TTS_VOICE` | `af_sky` | Default voice |
+
+## Managed inference
+
+On Pro, voice sidecars can route through Vireon-managed inference along with chat — no
+separate key needed. See [Managed inference](./managed-inference.md).
+
+## API reference
+
+Endpoints are documented in [Web API → Audio](../reference/web-api.md#audio-transcription-tts).

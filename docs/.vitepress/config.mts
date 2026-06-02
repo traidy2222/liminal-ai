@@ -44,8 +44,28 @@ export default defineConfig({
       {
         text: "Guides",
         items: [
+          { text: "Memory & recall", link: "/guides/memory-and-recall" },
+          { text: "Web research", link: "/guides/web-research" },
+          { text: "Browser automation", link: "/guides/browser-automation" },
+          { text: "Document engine", link: "/guides/document-engine" },
+          { text: "Voice (TTS & dictation)", link: "/guides/voice" },
+          { text: "Sub-agents & orchestration", link: "/guides/sub-agents-and-orchestration" },
+          { text: "Dynamic workflows", link: "/guides/dynamic-workflows" },
+          { text: "Reasoning & effort", link: "/guides/reasoning-and-effort" },
+          { text: "Tuning via Settings", link: "/guides/tuning-via-settings" },
+          { text: "Running the eval suite", link: "/guides/running-eval" },
           { text: "Persona bootstrap", link: "/guides/persona-bootstrap" },
           { text: "Vault briefs & updates", link: "/guides/vault-briefs-and-updates" },
+        ],
+      },
+      {
+        text: "Pro & Enterprise",
+        items: [
+          { text: "Pro & Enterprise features", link: "/reference/pro-and-enterprise" },
+          { text: "Accounts & licensing", link: "/guides/accounts-and-licensing" },
+          { text: "Managed inference", link: "/guides/managed-inference" },
+          { text: "Enterprise Edition", link: "/reference/enterprise-edition" },
+          { text: "License", link: "/reference/license" },
         ],
       },
       {
