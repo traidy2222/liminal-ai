@@ -11,6 +11,8 @@ export default defineConfig({
     /^\.\.\//,
     /^\.\.\/\.\.\//,
     /^\.\.\/\.\.\/\.\.\//,
+    /^\.\/\.\.\/\.\.\//,
+    /\/packages\/(enterprise|control-plane)\//,
     /\/\.env\.example$/,
   ],
   themeConfig: {
