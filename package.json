@@ -18,7 +18,7 @@
     "packages/*"
   ],
   "scripts": {
-    "build": "npm run build -w @liminal/core && npm run build -w @liminal/tools && npm run build -w @liminal/enterprise && npm run build -w @liminal/control-plane",
+    "build": "npm run build -w @liminal/core && npm run build -w @liminal/tools && npm run build -w @liminal/enterprise",
     "setup": "node scripts/liminal.mjs setup",
     "doctor": "node scripts/liminal.mjs doctor",
     "tui": "node scripts/run-tui.mjs",
@@ -29,6 +29,8 @@
     "typecheck": "npm run typecheck --workspaces --if-present",
     "test": "npm run test --workspace=@liminal/core",
     "verify-harness-defaults-no-secrets": "node scripts/verify-harness-defaults-no-secrets.mjs",
+    "verify:repo-secrets": "node scripts/verify-repo-secrets.mjs",
+    "keys:generate": "node scripts/generate-license-keys.mjs",
     "docs:gen": "node scripts/gen-docs-env.mjs",
     "changelog:gen": "node scripts/gen-changelog.mjs",
     "changelog:import": "node scripts/changelog-import-from-docs.mjs",
@@ -46,9 +48,7 @@
     "marketing:capture:live": "node scripts/capture-marketing-live.mjs",
     "marketing:video": "npm run studio -w @liminal/marketing-video",
     "marketing:video:render": "npm run render -w @liminal/marketing-video --",
-    "marketing:video:render:all": "npm run render:all -w @liminal/marketing-video",
-    "control-plane": "npm run start -w @liminal/control-plane",
-    "control-plane:dev": "npm run dev -w @liminal/control-plane"
+    "marketing:video:render:all": "npm run render:all -w @liminal/marketing-video"
   },
   "devDependencies": {
     "concurrently": "^9.2.1",

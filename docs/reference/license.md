@@ -32,10 +32,8 @@ Pro users can always supply their own OpenRouter key. See the
 [Managed inference guide](../guides/managed-inference.md) and
 [Pro &amp; Enterprise reference](./pro-and-enterprise.md).
 
-**Billing backend:** `packages/control-plane` — Stripe + Supabase + `/api/license/*`
-endpoints that mint the same Ed25519 tokens the harness verifies in
-`entitlements.ts`. Deploy separately from the marketing site repo (`C:\Users\traid\vireondynamics-website`); see
-[`packages/control-plane/README.md`](../../packages/control-plane/README.md).
+**Billing backend:** private **vireondynamics-website** deployment (embedded Stripe + Supabase + `/api/license/*`).
+The public repo only documents the stub at [`packages/control-plane/README.md`](../../packages/control-plane/README.md) — no billing source in `liminal-ai`.
 
 **Enterprise package:** proprietary code is **not** in the public repository. See
 [`enterprise-edition.md`](./enterprise-edition.md) for install paths and the open-core boundary.

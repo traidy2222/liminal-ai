@@ -167,9 +167,7 @@ holds the private signing key.
 
 ## Control-plane API (operator reference)
 
-The control plane (`packages/control-plane`, default `:3002`) is the billing/entitlement
-backend. Deploy it separately from the marketing site; see
-[`packages/control-plane/README.md`](https://github.com/traidy2222/liminal-ai).
+Production billing runs **inside the private marketing site** (`vireondynamics-website` on Vercel) as Next.js API routes — not as a published Express package in `liminal-ai`. See `docs/BILLING.md` and `docs/SECURITY.md` in that repo. The public tree only has [`packages/control-plane/README.md`](../../packages/control-plane/README.md) (pointer).
 
 | Method | Path | Auth | Purpose |
 | ------ | ---- | ---- | ------- |

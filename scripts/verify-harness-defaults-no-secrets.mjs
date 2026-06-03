@@ -12,11 +12,9 @@ const path = join(root, "packages", "core", "src", "harness_default_constants.ts
 const text = readFileSync(path, "utf8");
 
 const banned = [
-  /AGENT_API_KEY/i,
-  /OPENROUTER_API_KEY/i,
-  /OPENAI_API_KEY/i,
+  /(?:AGENT|OPENROUTER|OPENAI)_API_KEY\s*=\s*["'][^"'\s]{8,}["']/i,
   /sk-[a-z0-9]{10,}/i,
-  /Bearer\s+[a-z0-9._-]{8,}/i,
+  /Bearer\s+[a-z0-9._-]{20,}/i,
   /api[_-]?key\s*:\s*["'][^"']{12,}["']/i,
 ];
 

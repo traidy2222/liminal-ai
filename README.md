@@ -281,7 +281,7 @@ packages/
   web/            Express + React + SSE
   eval/           Evaluation scenarios
   enterprise/     Enterprise Edition (EE) — proprietary
-  control-plane/  Billing + license issuance (pairs with vireondynamics-website)
+  control-plane/  Stub — billing runs in private vireondynamics-website (see SECURITY.md)
 ```
 
 > **Community Edition (CE):** `core`, `tools`, `tui`, `web` — [FSL-1.1-MIT](LICENSE).  

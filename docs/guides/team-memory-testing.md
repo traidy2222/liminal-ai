@@ -6,10 +6,10 @@
 
 | Area | Tests | Location |
 |------|-------|----------|
-| Org RBAC roles | role order, viewer vs member gates | `packages/control-plane/src/org_auth.test.ts` |
-| Team API policy | license org mismatch, chat upload rejected, workspace PUT OK | `packages/control-plane/src/team_api.test.ts` |
-| Invites | seat limit 409, expired 410 | `packages/control-plane/src/team_api.test.ts` |
-| Sync policy helpers | chat scope, license org match | `packages/control-plane/src/team_memory_helpers.test.ts` |
+| Org RBAC roles | role order, viewer vs member gates | `vireondynamics-website` → `src/lib/team/org_auth` (private repo) |
+| Team API policy | license org mismatch, chat upload rejected, workspace PUT OK | `npm run e2e:team-licensed` on website |
+| Invites | seat limit 409, expired 410 | `src/lib/team/org_invites.test.ts` (website) |
+| Sync policy helpers | chat scope, license org match | website team memory helpers |
 | Entitlements | `team.shared_memory` on Team tier | `packages/control-plane/src/entitlements.test.ts` (core) |
 | Notes facade | org/user stamping | `packages/core/src/notes_facade.test.ts` |
 | Recall ranker | sibling + remote fixture | `packages/core/src/memory_rank_federation.test.ts` |
@@ -18,7 +18,7 @@
 Run:
 
 ```bash
-npm run test -w @liminal/control-plane
+npm run e2e:team-licensed   # in vireondynamics-website (private)
 npm run test -w @liminal/core
 ```
 
