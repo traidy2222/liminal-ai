@@ -10,7 +10,10 @@ dist/
 .agent_artifacts/
 .agent_write_staging/
 .agent_worktrees/
+.agent_benchmarks/
+.cursor/
 .claude/launch.json
+.claude/worktrees/
 
 # Agent-generated test artifacts (written during live sessions)
 .agent_rule_stats.json
@@ -34,6 +37,7 @@ website/
 packages/enterprise/*
 !packages/enterprise/README.install.md
 enterprise-bundle.tar.gz
+enterprise-bundle.manifest.json
 .enterprise-bundle/
 
 # User-global EE install (also outside repo)
