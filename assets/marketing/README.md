@@ -85,11 +85,20 @@ Replace root heroes when live takes are better:
 - `assets/web-ui.png` ← e.g. `live-coding-debounce.png`
 - `assets/persona-bootstrap.png` ← still best from live bootstrap or a dedicated capture
 
+**Remotion marketing reels** (programmatic 1080p MP4s):
+
+```bash
+npm run marketing:video              # Remotion Studio preview
+npm run marketing:video:render:all   # export all chapters → assets/marketing/videos/
+```
+
+See `packages/marketing-video/README.md`.
+
 **Website gallery (live GIFs only):**
 
 ```bash
-npm run marketing:capture:live   # repo root
-cd website && npm run sync-marketing-live
+npm run marketing:capture:live   # repo root (liminal-ai)
+cd C:\Users\traid\vireondynamics-website && npm run sync-marketing-live
 ```
 
-Publishes to [vireondynamics.com/liminal/in-action](https://vireondynamics.com/liminal/in-action) from `website/public/marketing/live/*.gif` (synced on `website` build).
+Publishes to [vireondynamics.com/liminal/in-action](https://vireondynamics.com/liminal/in-action) from `vireondynamics-website/public/marketing/live/*.gif` (synced on site build).

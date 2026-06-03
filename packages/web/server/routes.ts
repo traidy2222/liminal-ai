@@ -149,6 +149,7 @@ export function createRouter(
         personalityHeartbeatEnabled: ph.enabled,
         personalityHeartbeatUiStrip: ph.uiStripDefault,
         dictationAudioCue: resolveHarnessEnvRaw("AGENT_DICTATION_AUDIO_CUE", prefs) === "1",
+        dictationWebSpeech: resolveHarnessEnvRaw("AGENT_DICTATION_WEB_SPEECH", prefs) !== "0",
         ttsEnabled: resolveHarnessEnvRaw("AGENT_TTS_ENABLED", prefs) === "1",
         ttsVoice: resolveHarnessEnvRaw("AGENT_TTS_VOICE", prefs)?.trim() || "af_sky",
         // New in Phase 2: which chat is the SSE stream currently bound to.

@@ -34,7 +34,7 @@ Pro users can always supply their own OpenRouter key. See the
 
 **Billing backend:** `packages/control-plane` — Stripe + Supabase + `/api/license/*`
 endpoints that mint the same Ed25519 tokens the harness verifies in
-`entitlements.ts`. Deploy separately from the marketing `website/` repo; see
+`entitlements.ts`. Deploy separately from the marketing site repo (`C:\Users\traid\vireondynamics-website`); see
 [`packages/control-plane/README.md`](../../packages/control-plane/README.md).
 
 **Enterprise package:** proprietary code is **not** in the public repository. See

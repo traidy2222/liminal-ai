@@ -161,8 +161,23 @@ interface SpeechRecognitionResultLike {
   length: number;
 }
 
+/**
+ * Whether dictation may use the browser's built-in Web Speech API for the live
+ * transcript. When false (`AGENT_DICTATION_WEB_SPEECH=0`), dictation records
+ * audio and transcribes it server-side via `AGENT_TRANSCRIBE_MODEL` instead —
+ * so speech never goes to the browser vendor's cloud (e.g. Chrome → Google).
+ * Set from `/api/config` via {@link setDictationWebSpeechEnabled}.
+ */
+let webSpeechEnabled = true;
+
+/** Toggle the browser Web Speech path on/off (driven by `AGENT_DICTATION_WEB_SPEECH`). */
+export function setDictationWebSpeechEnabled(on: boolean): void {
+  webSpeechEnabled = on;
+}
+
 function getSpeechRecognitionCtor(): (new () => SpeechRecognitionLike) | null {
   if (typeof window === "undefined") return null;
+  if (!webSpeechEnabled) return null;
   const w = window as unknown as {
     SpeechRecognition?: new () => SpeechRecognitionLike;
     webkitSpeechRecognition?: new () => SpeechRecognitionLike;

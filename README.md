@@ -138,7 +138,7 @@ packages/
   web/            Express + React + SSE
   eval/           Evaluation scenarios
   enterprise/     Enterprise Edition (EE) — proprietary
-  control-plane/  Billing + license issuance (deploy with website)
+  control-plane/  Billing + license issuance (deploy with vireondynamics-website)
 ```
 
 > **Community Edition (CE):** `core`, `tools`, `tui`, `web` — [FSL-1.1-MIT](LICENSE).  

@@ -13,14 +13,13 @@ test("default transcription model is the cheapest in the registry", () => {
     (acc, [slug, rate]) => (rate.perSecondUsd < acc[1] ? [slug, rate.perSecondUsd] : acc),
     ["", Infinity]
   );
-  // Cheapest is Qwen at $0.000035/sec, but we default to whisper-large-v3-turbo
-  // because it's universally available via OpenRouter and battle-tested. The
-  // assertion documents the trade-off: default is "best cheap default", not
-  // strictly the lowest rate.
+  // We default to nvidia/parakeet-tdt-0.6b-v3: cheap ($0.0015/min), accurate
+  // (6.34% avg WER), English + EU. Whisper Turbo remains the broad-multilingual
+  // fallback. The assertion documents the chosen default, not the lowest rate.
   assert.equal(
     DEFAULT_TRANSCRIBE_MODEL,
-    "openai/whisper-large-v3-turbo",
-    "default should be Whisper Large V3 Turbo — cheapest battle-tested OpenAI model"
+    "nvidia/parakeet-tdt-0.6b-v3",
+    "default should be NVIDIA Parakeet TDT 0.6B v3"
   );
   assert.ok(cheapest[1] > 0, "expected a finite cheapest rate");
 });
@@ -55,7 +54,7 @@ test("resolveTranscriptionConfig falls back to defaults when env is unset", () =
   try {
     const cfg = resolveTranscriptionConfig(null);
     assert.equal(cfg.enabled, true);
-    assert.equal(cfg.model, "openai/whisper-large-v3-turbo");
+    assert.equal(cfg.model, "nvidia/parakeet-tdt-0.6b-v3");
     assert.equal(cfg.timestamps, "segment");
     assert.ok(cfg.maxBytes > 0);
     assert.ok(cfg.timeoutMs > 0);

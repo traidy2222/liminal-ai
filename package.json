@@ -33,6 +33,9 @@
     "marketing:capture": "node scripts/capture-marketing.mjs",
     "marketing:capture:advanced": "node scripts/capture-marketing.mjs --advanced",
     "marketing:capture:live": "node scripts/capture-marketing-live.mjs",
+    "marketing:video": "npm run studio -w @liminal/marketing-video",
+    "marketing:video:render": "npm run render -w @liminal/marketing-video --",
+    "marketing:video:render:all": "npm run render:all -w @liminal/marketing-video",
     "control-plane": "npm run start -w @liminal/control-plane",
     "control-plane:dev": "npm run dev -w @liminal/control-plane"
   },

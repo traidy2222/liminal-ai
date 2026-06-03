@@ -218,7 +218,7 @@ const _META_RAW: Record<string, HarnessSettingsFieldMeta> = {
     subgroupId: "audio",
     label: "Transcription Model",
     description:
-      "ASR model slug. Defaults to openai/whisper-large-v3-turbo ($0.04/hour). Cheapest options: qwen/qwen3-asr-flash, openai/whisper-large-v3.",
+      "ASR model slug. Defaults to nvidia/parakeet-tdt-0.6b-v3 ($0.0015/min, English + EU). For 99-language coverage use openai/whisper-large-v3-turbo; for Chinese dialects use qwen/qwen3-asr-flash.",
     valueKind: "string",
   },
   "AGENT_TRANSCRIBE_BASE_URL": {
@@ -345,6 +345,14 @@ const _META_RAW: Record<string, HarnessSettingsFieldMeta> = {
     subgroupId: "audio",
     label: "Auto-Send Audio Cue",
     description: "Play a brief 880Hz tone when auto-send fires so you know the message went out.",
+    valueKind: "boolean",
+  },
+  "AGENT_DICTATION_WEB_SPEECH": {
+    tabId: "models_api",
+    subgroupId: "audio",
+    label: "Browser Web Speech",
+    description:
+      "Off (default): dictation transcribes server-side via the Transcription Model (no audio sent to the browser vendor's cloud, e.g. Chrome→Google). On: use the browser's built-in recognizer for a live preview while you speak.",
     valueKind: "boolean",
   },
   "AGENT_DICTATION_MIN_RECORDING_MS": {

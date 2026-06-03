@@ -275,6 +275,8 @@ packages/tui    packages/web    packages/eval   — run directly via tsx, never 
 
 `core` and `tools` emit `dist/` via `tsc`. `tui`, `web`, and `eval` use `node --import tsx/esm` at runtime so they never need a build step themselves.
 
+**Marketing site (not in this repo):** Vireon Dynamics site + Liminal changelog/pages live in `C:\Users\traid\vireondynamics-website` ([vireondynamics-website](https://github.com/traidy2222/vireondynamics-website)). Do not add a `website/` folder here — it is gitignored and was removed from the working tree.
+
 ---
 
 ### `packages/core` — the harness engine (71 source files + 28 tests)

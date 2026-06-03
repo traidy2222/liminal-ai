@@ -6,6 +6,7 @@ import {
   isStreamingWriteTool,
 } from "@liminal/core/streaming-write-preview";
 import type { ImageAttachment } from "./imageAttachments.js";
+import { setDictationWebSpeechEnabled } from "./audio/useDictation.js";
 import { readPersonaChromeFromSession, writePersonaChromeToSession } from "./personaChromeSessionCache.js";
 import {
   setWebAuthToken,
@@ -1769,11 +1770,15 @@ export function useSSE(options?: {
               personalityHeartbeatUiStrip?: boolean;
               personalityHeartbeatEnabled?: boolean;
               dictationAudioCue?: boolean;
+              dictationWebSpeech?: boolean;
               ttsEnabled?: boolean;
               activeChat?: { chatId?: string } | null;
             } | null
           ) => {
             if (!cancelledRef.current && cfg) {
+              // Apply the browser-Web-Speech toggle (AGENT_DICTATION_WEB_SPEECH).
+              // Undefined (degraded config) keeps the browser recognizer on.
+              setDictationWebSpeechEnabled(cfg.dictationWebSpeech !== false);
               if (typeof cfg.webAuthToken === "string" && cfg.webAuthToken.trim()) {
                 setWebAuthToken(cfg.webAuthToken.trim());
               }

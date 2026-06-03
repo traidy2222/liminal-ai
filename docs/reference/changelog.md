@@ -2,7 +2,7 @@
 
 All notable changes to [Liminal AI](https://github.com/traidy2222/liminal-ai) on the `main` branch.
 
-**Current stage:** **alpha** (`v0.0.14` tip of `main`, 2026-05-30). The workspace package may read `0.1.0`, but **beta**, **RC**, and a **v0.1.0 public preview** have not been declared as product releases yet.
+**Current stage:** **alpha** (`v0.0.16` tip of `main`, 2026-06-02). The workspace package may read `0.1.0`, but **beta**, **RC**, and a **v0.1.0 public preview** have not been declared as product releases yet.
 
 Format: **v0.0.x** entries keyed to the last GitHub push in each slice. Dates are real push dates.
 
@@ -10,9 +10,40 @@ Marketing release notes (richer layout): [vireondynamics.com/liminal/changelog](
 
 ---
 
+## v0.0.16 — 2026-06-02 {#v0-0-16}
+
+**Current alpha.** Managed inference for Pro, Vireon sign-in, dynamic OpenRouter routing, EE auto-install, security hardening.
+
+**Shipped**
+
+- **Managed inference (Pro)** — Chat, embeddings, vision, and audio sidecars can route through Vireon's metered OpenAI-compatible proxy (`AGENT_INFERENCE_MODE`: `auto` | `managed` | `byok`; default `auto`). Pro sign-in prefers managed routing with included monthly credits and a clear top-up path when budget is exhausted. Community Edition stays bring-your-own-key with no account
+- **Vireon sign-in** — `liminal login` (loopback browser flow) or **Settings → Sign in** stores the license under `~/.liminal/`; no `.env` API-key paste for Pro managed mode
+- **Dynamic OpenRouter routing** — Price-sorted provider selection (`AGENT_PROVIDER_STRATEGY`), sticky `session_id` for KV-cache affinity (`AGENT_OPENROUTER_SESSIONS`), and session-epoch rotation on upstream 429s (`adaptive` strategy) so rate limits do not stall long runs
+- **Enterprise Edition auto-install** — Pro+ login downloads the proprietary EE bundle to `~/.liminal/enterprise/` (checksum-verified); implementations stay out of the public CE repo while gating cloud/team entitlements
+- **Security hardening** — Control-plane rate limiting and auth hygiene, web API token gate bound to loopback, tighter guards on `run_shell` and `execute_code`
+- **Inference UX** — Web inference usage/credits banner; steadier sign-in polling for managed sessions
+- **Docs** — [Managed inference](../guides/managed-inference.md), [Accounts & licensing](../guides/accounts-and-licensing.md), [Pro & Enterprise](../reference/pro-and-enterprise.md)
+
+---
+
+## v0.0.15 — 2026-05-31 {#v0-0-15}
+
+Open-core licensing, Vireon control plane, Enterprise Edition package, dynamic workflows.
+
+**Shipped**
+
+- **Open-core entitlements** — Offline-verifiable license tokens (Ed25519; harness holds public key only). Verified licenses cache to `~/.liminal/license.json` with bounded offline grace. Community Edition needs **no license** — full harness on your machine
+- **License tiers** — `community` · `pro` · `team` · `enterprise` (each inherits below). Tiers gate cloud/sync/governance features by entitlement key, not core agent capability
+- **Vireon control plane** — `@liminal/control-plane`: Stripe subscriptions + webhooks, Supabase entitlements, signed license issuance (deploy beside [vireondynamics-website](https://github.com/traidy2222/vireondynamics-website))
+- **Enterprise Edition package** — Proprietary Pro/Team/Enterprise implementations in a separate package; CE repo stays fully functional without EE installed
+- **Dynamic workflows** — `plan_workflow` → `run_workflow` execute a declarative multi-phase spec: bounded concurrency waves per phase, per-agent results in an out-of-context store (`.agent_workflows/`), distilled phase summaries back to parent context only. Root-only, approval-gated (`AGENT_WORKFLOWS`). Intent classifier can auto-activate the `workflow` tool family under lazy loading
+- **Docs** — [Dynamic workflows](../guides/dynamic-workflows.md), [Pro & Enterprise](../reference/pro-and-enterprise.md), [Enterprise Edition](../reference/enterprise-edition.md)
+
+---
+
 ## v0.0.14 — 2026-05-30 {#v0-0-14}
 
-**Current alpha.** LLM memory curator, output-effort dial, voice I/O, retrieval reranker, deeper prompt caching.
+LLM memory curator, output-effort dial, voice I/O, retrieval reranker, deeper prompt caching.
 
 **Shipped**
 

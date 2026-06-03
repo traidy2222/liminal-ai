@@ -78,8 +78,8 @@ export function createTranscribeAudioTool(harness: AgentHarness) {
         model: {
           type: "string",
           description:
-            "Override the configured AGENT_TRANSCRIBE_MODEL. Cheapest options: " +
-            "openai/whisper-large-v3-turbo, qwen/qwen3-asr-flash, openai/whisper-large-v3.",
+            "Override the configured AGENT_TRANSCRIBE_MODEL (default nvidia/parakeet-tdt-0.6b-v3). " +
+            "Alternatives: openai/whisper-large-v3-turbo (99 languages), qwen/qwen3-asr-flash (Chinese dialects).",
         },
       },
       additionalProperties: false,

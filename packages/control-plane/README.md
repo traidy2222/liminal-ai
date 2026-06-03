@@ -2,7 +2,7 @@
 
 Vireon **control plane** — Stripe subscriptions, Supabase entitlements, and Ed25519 license issuance for Liminal EE.
 
-The marketing site lives in a separate repo (`website/`, gitignored here). This package is the billing backend you deploy beside it (or mount into that repo).
+The marketing site lives in a separate repo at `C:\Users\traid\vireondynamics-website` ([vireondynamics-website](https://github.com/traidy2222/vireondynamics-website)). This package is the billing backend you deploy beside it.
 
 ## Architecture
 

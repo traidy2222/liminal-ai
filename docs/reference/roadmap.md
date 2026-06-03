@@ -2,11 +2,11 @@
 
 Where Liminal is today and what comes next. **Dates are directional, not commitments** — alpha moves fast on `main`.
 
-**Current stage:** **alpha** (`v0.0.14`, May 2026). Beta, RC, and **v0.1.0 public preview** are [planned milestones](./changelog.md#planned-not-started), not shipped yet.
+**Current stage:** **alpha** (`v0.0.16`, June 2026). Beta, RC, and **v0.1.0 public preview** are [planned milestones](./changelog.md#planned-not-started), not shipped yet.
 
 ---
 
-## Now — Alpha (v0.0.14)
+## Now — Alpha (v0.0.16)
 
 What you can run today from [Install](../start/install.md):
 
@@ -15,11 +15,15 @@ What you can run today from [Install](../start/install.md):
 | ReAct harness | Retries, circuit breaker, compression, approvals, optional self-heal lint |
 | Interfaces | Terminal UI (Ink) + Web UI (Express + React + SSE, multi-chat) |
 | Tools | 140+ tools — files, shell, git, web, browser, memory, vault, documents, orchestration, OpenAPI/MCP attach |
+| Inference | **BYOK** (any OpenAI-compatible provider) or **Pro managed** via Vireon proxy — `liminal login`, `AGENT_INFERENCE_MODE` |
+| Provider routing | Price-sorted OpenRouter resellers, sticky sessions, 429-aware rotation (`AGENT_PROVIDER_STRATEGY`) |
+| Licensing | Open-core CE (FSL-1.1-MIT, no account) + offline Ed25519 tiers; EE auto-install on Pro login |
+| Workflows | `plan_workflow` / `run_workflow` — multi-phase parallel sub-agents, out-of-context store |
 | Persona | Bootstrap, soul slices, UI themes (web shells) |
 | Storage | User-global `~/.liminal/` + per-chat workspaces (`AGENT_STORAGE_LAYOUT`) |
-| Memory | Typed notes, hybrid recall, federation scoring, promote/neighbors, recipe library, optional auto-dream; identity recall (`user:name`, LLM-primed) |
+| Memory | Typed notes, hybrid recall, curator + soft-delete archive, federation, recipe library, optional auto-dream |
 | Research | Per-send research ledger + `research_state` tool (web search/fetch discipline) |
-| Audio | `transcribe_audio`, web mic upload, dictation env knobs |
+| Audio / voice | `transcribe_audio`, TTS (`speak`), web dictation, voice-mode tool gating |
 | Install | Hosted one-command scripts + `liminal` CLI (alpha onboarding) |
 | Settings | Full `AGENT_*` catalog in web UI + OpenRouter **model presets** (one-click packs) |
 | Docs | Self-contained portal at [docs.vireondynamics.com/liminal/](https://docs.vireondynamics.com/liminal/) |

@@ -25,7 +25,8 @@ docs/.vitepress/dist/
 docs/.vitepress/cache/
 docs/.vitepress/.temp/
 
-# Marketing site — separate repo: github.com/traidy2222/vireondynamics-website
+# Marketing site — NOT in this monorepo (local clone: C:\Users\traid\vireondynamics-website)
+# https://github.com/traidy2222/vireondynamics-website
 website/
 
 # Proprietary Enterprise Edition — implementations stay out of public CE repo.

@@ -23,6 +23,6 @@ Start at **[index.md](./index.md)** for the full learning path.
 | Regenerate env table | `npm run docs:gen` |
 | Validate links | `npm run docs:check` |
 | Local VitePress | `npm run docs:dev` |
-| Publish portal | `website` repo → `npm run docs-portal:build` |
+| Publish portal | `C:\Users\traid\vireondynamics-website` → `npm run docs-portal:build` |
 
-Edit harness docs here (`docs/`). Edit the multi-product hub in `website/docs-portal/index.md`.
+Edit harness docs here (`docs/`). Edit the multi-product hub in `vireondynamics-website/docs-portal/index.md` (separate repo — not `website/` inside this tree).

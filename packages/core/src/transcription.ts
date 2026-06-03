@@ -6,10 +6,10 @@
  * one API), and any self-hosted endpoint that speaks the same protocol. Models
  * differ only in slug + cost — the wire protocol is identical.
  *
- * Cheapest-first model registry — defaults to `openai/whisper-large-v3-turbo`
- * at $0.04/hour (3× cheaper than Whisper-1, 5× cheaper than Whisper Large V3).
- * Per-model rates live next to the registry so cost can be computed locally
- * from the duration the API returns, without a second call.
+ * Model registry — defaults to `nvidia/parakeet-tdt-0.6b-v3` at $0.0015/minute
+ * (English + EU languages). Falls back to `openai/whisper-large-v3-turbo` for
+ * broad 99-language coverage. Per-model rates live next to the registry so cost
+ * can be computed locally from the duration the API returns, without a second call.
  */
 import { resolveHarnessEnvRaw } from "./harness_effective_env.js";
 import type { RuntimePreferences } from "./runtime_prefs.js";
@@ -31,11 +31,20 @@ export interface TranscriptionModelRate {
 }
 
 export const TRANSCRIPTION_MODEL_RATES: Readonly<Record<string, TranscriptionModelRate>> = {
-  // Tier 1 — default. Cheapest by a wide margin and fast enough to feel real-time.
+  // Tier 1 — default. NVIDIA Parakeet: cheapest accurate option, English + EU.
+  "nvidia/parakeet-tdt-0.6b-v3": {
+    perSecondUsd: 0.0015 / 60,
+    label: "NVIDIA Parakeet TDT 0.6B v3",
+    notes:
+      "Default. English + all official EU languages with auto language detection, " +
+      "6.34% avg WER (HF Open ASR Leaderboard). Per-minute pricing; punctuation + segment timestamps. " +
+      "For non-EU languages (Mandarin, Hindi, Arabic, …) use whisper-large-v3-turbo instead.",
+  },
+  // Broad multilingual fallback — 99 languages when you need coverage Parakeet lacks.
   "openai/whisper-large-v3-turbo": {
     perSecondUsd: 0.04 / 3600,
     label: "Whisper Large V3 Turbo",
-    notes: "Default. 99 languages, 12% WER, real-time speed factor up to 216×.",
+    notes: "99 languages, 12% WER, real-time speed factor up to 216×.",
   },
   // Tier 2 — accuracy upgrade when WER matters more than cost (10.3% vs 12%).
   "openai/whisper-large-v3": {
@@ -65,8 +74,8 @@ export const TRANSCRIPTION_MODEL_RATES: Readonly<Record<string, TranscriptionMod
   },
 };
 
-/** Default model when `AGENT_TRANSCRIBE_MODEL` is unset. Cheapest in the registry. */
-export const DEFAULT_TRANSCRIBE_MODEL = "openai/whisper-large-v3-turbo";
+/** Default model when `AGENT_TRANSCRIBE_MODEL` is unset. */
+export const DEFAULT_TRANSCRIBE_MODEL = "nvidia/parakeet-tdt-0.6b-v3";
 
 /**
  * Estimate USD cost for a transcription run. Returns 0 when the model isn't in

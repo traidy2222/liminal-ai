@@ -66,6 +66,7 @@ Web **Settings** writes to (2). See [Configuration basics](../start/configuratio
 | `AGENT_DICTATION_MIN_RECORDING_MS` | `1500` | yes | no | models_api | Minimum recording length before auto-send is considered (default 1500ms — filters out coughs). |
 | `AGENT_DICTATION_SILENCE_MS_LONG` | `2500` | yes | no | models_api | Pause threshold for longer recordings. Default 2500ms — more room for mid-thought pauses. |
 | `AGENT_DICTATION_SILENCE_MS_SHORT` | `1500` | yes | no | models_api | Pause threshold for short utterances (< 5s recorded). Default 1500ms — snappy. |
+| `AGENT_DICTATION_WEB_SPEECH` | `0` | yes | no |  |  |
 | `AGENT_DISTILL` | `0` | yes | no | memory_vault | Harness environment toggle for Distill. See docs/configuration.md (memory vault). |
 | `AGENT_DISTILL_READ_FILE` | `0` | yes | no | memory_vault | When 0 (default), read_file output is always kept verbatim — critical for coding tasks where source code is the model's  |
 | `AGENT_DISTILL_WEB_FETCH` | `0` | yes | no | memory_vault | When 0, web_fetch full text is kept in the tool result (recommended for research). When 1, large fetches are LLM-summari |
@@ -230,7 +231,7 @@ Web **Settings** writes to (2). See [Configuration basics](../start/configuratio
 | `AGENT_TRANSCRIBE_BASE_URL` | `https://openrouter.ai/api/v1` | yes | no | models_api | OpenAI-compatible base URL for /audio/transcriptions. Defaults to OpenRouter. |
 | `AGENT_TRANSCRIBE_ENABLED` | `1` | yes | no | models_api | Master switch for audio transcription (the transcribe_audio tool, mic button, audio drag-drop). |
 | `AGENT_TRANSCRIBE_MAX_BYTES` | `26214400` | yes | no | models_api | Per-call upload cap. Default 25 MB. |
-| `AGENT_TRANSCRIBE_MODEL` | `openai/whisper-large-v3-turbo` | yes | no | models_api | ASR model slug. Defaults to openai/whisper-large-v3-turbo ($0.04/hour). Cheapest options: qwen/qwen3-asr-flash, openai/w |
+| `AGENT_TRANSCRIBE_MODEL` | `nvidia/parakeet-tdt-0.6b-v3` | yes | no | models_api | ASR model slug. Defaults to nvidia/parakeet-tdt-0.6b-v3 ($0.0015/min, English + EU). For 99-language coverage use openai |
 | `AGENT_TRANSCRIBE_TIMEOUT_MS` | `120000` | yes | no | models_api | Per-call wall-clock timeout for the transcription request. |
 | `AGENT_TRANSCRIBE_TIMESTAMPS` | `segment` | yes | no | models_api | Timestamp granularity in the response: none, segment (default), or word. |
 | `AGENT_TRANSIENT_5XX_MAX_RETRIES` | `8` | yes | yes | models_api | Harness environment toggle for Transient 5xx Max Retries. See docs/configuration.md (models api). |

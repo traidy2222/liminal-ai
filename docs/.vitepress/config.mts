@@ -1,6 +1,6 @@
 import { defineConfig } from "vitepress";
 
-/** Local preview of docs/ (monorepo). Published site uses website/docs-portal. */
+/** Local preview of docs/ (monorepo). Published site uses vireondynamics-website/docs-portal. */
 export default defineConfig({
   title: "Liminal",
   description: "Local-first agent harness documentation",

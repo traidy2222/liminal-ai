@@ -2,13 +2,25 @@
 
 All notable changes to [Liminal AI](https://github.com/traidy2222/liminal-ai) are documented here and on the docs portal: [docs.vireondynamics.com/liminal/reference/changelog](https://docs.vireondynamics.com/liminal/reference/changelog).
 
-**Current stage:** **alpha** (`v0.0.14` tip of `main`, 2026-05-30). **Beta**, **RC**, and **v0.1.0 public preview** have not been declared as product releases yet.
+**Current stage:** **alpha** (`v0.0.16` tip of `main`, 2026-06-02). **Beta**, **RC**, and **v0.1.0 public preview** have not been declared as product releases yet.
 
 Format: **v0.0.x** entries keyed to the last GitHub push in each slice. Dates are real push dates.
 
 Marketing (richer notes): [vireondynamics.com/liminal/changelog](https://vireondynamics.com/liminal/changelog)
 
-## [v0.0.14] — 2026-05-30 — Current alpha
+## [v0.0.16] — 2026-06-02 — Current alpha
+
+Optional Pro managed inference through Vireon's metered proxy (`AGENT_INFERENCE_MODE`), browser/CLI sign-in (`liminal login`), price-sorted OpenRouter routing with sticky sessions and 429-aware rotation, Enterprise Edition auto-install on login, inference credits banner in web UI, and a security-hardening pass.
+
+[Full notes](https://docs.vireondynamics.com/liminal/reference/changelog#v0-0-16)
+
+## [v0.0.15] — 2026-05-31
+
+Open-core foundation: offline Ed25519 license tiers (`community`→`enterprise`), the CE/EE split, `@liminal/control-plane` (Stripe + Supabase), and dynamic multi-agent workflows (`plan_workflow`/`run_workflow`, `AGENT_WORKFLOWS`).
+
+[Full notes](https://docs.vireondynamics.com/liminal/reference/changelog#v0-0-15)
+
+## [v0.0.14] — 2026-05-30
 
 LLM memory curator with reversible soft-delete, output-effort dial, voice I/O (TTS + dictation), second-stage recall reranker, rolling prompt-cache breakpoint, `find_files`/`delete_file`, chat markdown renderer.
 
