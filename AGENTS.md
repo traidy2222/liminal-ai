@@ -288,6 +288,8 @@ packages/tui    packages/web    packages/eval   — run directly via tsx, never 
 
 `core` and `tools` emit `dist/` via `tsc`. `tui`, `web`, and `eval` use `node --import tsx/esm` at runtime so they never need a build step themselves.
 
+**Changelog (single source):** edit `changelog/releases.json`, then `npm run changelog:gen` (updates `docs/reference/changelog.md` + root `CHANGELOG.md`). Marketing MDX still lives in vireondynamics-website (`content/changelog/`, `liminal-release.json`, `npm run version:sync`).
+
 **Marketing site (not in this repo):** Vireon Dynamics site + Liminal changelog/pages live in `C:\Users\traid\vireondynamics-website` ([vireondynamics-website](https://github.com/traidy2222/vireondynamics-website)). Do not add a `website/` folder here — it is gitignored and was removed from the working tree.
 
 ---
