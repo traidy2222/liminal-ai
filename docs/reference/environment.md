@@ -66,7 +66,7 @@ Web **Settings** writes to (2). See [Configuration basics](../start/configuratio
 | `AGENT_DICTATION_MIN_RECORDING_MS` | `1500` | yes | no | models_api | Minimum recording length before auto-send is considered (default 1500ms — filters out coughs). |
 | `AGENT_DICTATION_SILENCE_MS_LONG` | `2500` | yes | no | models_api | Pause threshold for longer recordings. Default 2500ms — more room for mid-thought pauses. |
 | `AGENT_DICTATION_SILENCE_MS_SHORT` | `1500` | yes | no | models_api | Pause threshold for short utterances (< 5s recorded). Default 1500ms — snappy. |
-| `AGENT_DICTATION_WEB_SPEECH` | `0` | yes | no |  |  |
+| `AGENT_DICTATION_WEB_SPEECH` | `0` | yes | no | models_api | Off (default): dictation transcribes server-side via the Transcription Model (no audio sent to the browser vendor's clou |
 | `AGENT_DISTILL` | `0` | yes | no | memory_vault | Harness environment toggle for Distill. See docs/configuration.md (memory vault). |
 | `AGENT_DISTILL_READ_FILE` | `0` | yes | no | memory_vault | When 0 (default), read_file output is always kept verbatim — critical for coding tasks where source code is the model's  |
 | `AGENT_DISTILL_WEB_FETCH` | `0` | yes | no | memory_vault | When 0, web_fetch full text is kept in the tool result (recommended for research). When 1, large fetches are LLM-summari |

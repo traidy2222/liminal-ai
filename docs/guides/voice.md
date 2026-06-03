@@ -14,12 +14,26 @@ Record in the browser and send the clip for transcription:
 
 In the agent loop, `transcribe_audio` (the `audio` family) does the same server-side.
 
-| Variable | Purpose |
-| -------- | ------- |
-| `AGENT_TRANSCRIBE_ENABLED` | Master switch for transcription |
-| `AGENT_TRANSCRIBE_API_KEY` | ASR key (falls back to `AGENT_API_KEY` / `OPENROUTER_API_KEY`) |
-| `AGENT_TRANSCRIBE_MAX_BYTES` | Per-clip size limit |
-| `AGENT_DICTATION_AUDIO_CUE` | Play a start/stop cue in the UI |
+### Where dictation gets transcribed (server model vs browser)
+
+By default (`AGENT_DICTATION_WEB_SPEECH=0`) dictation records audio and transcribes it
+**server-side** with your `AGENT_TRANSCRIBE_MODEL` — so speech never leaves for the browser
+vendor's cloud (Chrome's recognizer sends audio to Google). Set `AGENT_DICTATION_WEB_SPEECH=1`
+to use the browser's built-in Web Speech API for an instant live preview while you talk
+(Chrome/Edge); the recorded audio is still sent to the server model for the final transcript.
+
+The default ASR model is **`nvidia/parakeet-tdt-0.6b-v3`** ($0.0015/min, English + EU). For
+99-language coverage set `AGENT_TRANSCRIBE_MODEL=openai/whisper-large-v3-turbo`; for Chinese
+dialects, `qwen/qwen3-asr-flash`.
+
+| Variable | Default | Purpose |
+| -------- | ------- | ------- |
+| `AGENT_TRANSCRIBE_ENABLED` | `1` | Master switch for transcription |
+| `AGENT_TRANSCRIBE_MODEL` | `nvidia/parakeet-tdt-0.6b-v3` | ASR model slug |
+| `AGENT_TRANSCRIBE_API_KEY` | — | ASR key (falls back to `AGENT_API_KEY` / `OPENROUTER_API_KEY`) |
+| `AGENT_TRANSCRIBE_MAX_BYTES` | `26214400` | Per-clip size limit (25 MB) |
+| `AGENT_DICTATION_WEB_SPEECH` | `0` | `1` = browser live preview; `0` = server model only |
+| `AGENT_DICTATION_AUDIO_CUE` | `0` | Play a start/stop cue in the UI |
 
 ## Text-to-speech (text → speech)
 

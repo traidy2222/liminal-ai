@@ -10,7 +10,7 @@ Marketing (richer notes): [vireondynamics.com/liminal/changelog](https://vireond
 
 ## [v0.0.16] — 2026-06-02 — Current alpha
 
-Optional Pro managed inference through Vireon's metered proxy (`AGENT_INFERENCE_MODE`), browser/CLI sign-in (`liminal login`), price-sorted OpenRouter routing with sticky sessions and 429-aware rotation, Enterprise Edition auto-install on login, inference credits banner in web UI, and a security-hardening pass.
+Optional Pro managed inference through Vireon's metered proxy (`AGENT_INFERENCE_MODE`), browser/CLI sign-in (`liminal login`), price-sorted OpenRouter routing with sticky sessions and 429-aware rotation, Enterprise Edition auto-install on login, inference credits banner in web UI, Parakeet ASR default with server-side dictation (`AGENT_DICTATION_WEB_SPEECH=0`), and a security-hardening pass.
 
 [Full notes](https://docs.vireondynamics.com/liminal/reference/changelog#v0-0-16)
 

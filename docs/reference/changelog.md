@@ -6,7 +6,13 @@ All notable changes to [Liminal AI](https://github.com/traidy2222/liminal-ai) on
 
 Format: **v0.0.x** entries keyed to the last GitHub push in each slice. Dates are real push dates.
 
-Marketing release notes (richer layout): [vireondynamics.com/liminal/changelog](https://vireondynamics.com/liminal/changelog)
+| Surface | Where |
+| -------- | ----- |
+| **Technical changelog (this page)** | Full `Shipped` bullets, env keys, doc links — canonical for harness operators |
+| **Marketing changelog** | [vireondynamics.com/liminal/changelog](https://www.vireondynamics.com/liminal/changelog) — narrative layout, featured latest release |
+| **Short index** | [CHANGELOG.md](https://github.com/traidy2222/liminal-ai/blob/main/CHANGELOG.md) in the repo root |
+
+Repo pushes drive both; after editing this file, run `npm run docs-portal:sync` in [vireondynamics-website](https://github.com/traidy2222/vireondynamics-website) before deploying [docs.vireondynamics.com](https://docs.vireondynamics.com/liminal/reference/changelog).
 
 ---
 
@@ -22,7 +28,8 @@ Marketing release notes (richer layout): [vireondynamics.com/liminal/changelog](
 - **Enterprise Edition auto-install** — Pro+ login downloads the proprietary EE bundle to `~/.liminal/enterprise/` (checksum-verified); implementations stay out of the public CE repo while gating cloud/team entitlements
 - **Security hardening** — Control-plane rate limiting and auth hygiene, web API token gate bound to loopback, tighter guards on `run_shell` and `execute_code`
 - **Inference UX** — Web inference usage/credits banner; steadier sign-in polling for managed sessions
-- **Docs** — [Managed inference](../guides/managed-inference.md), [Accounts & licensing](../guides/accounts-and-licensing.md), [Pro & Enterprise](../reference/pro-and-enterprise.md)
+- **Dictation & ASR defaults** — Default `AGENT_TRANSCRIBE_MODEL` is `nvidia/parakeet-tdt-0.6b-v3` (English + EU); `AGENT_DICTATION_WEB_SPEECH=0` keeps browser Web Speech off so dictation transcribes **server-side** only (no Chrome→Google path). Web `/api/config` exposes the toggle
+- **Docs** — [Managed inference](../guides/managed-inference.md), [Accounts & licensing](../guides/accounts-and-licensing.md), [Pro & Enterprise](../reference/pro-and-enterprise.md), [Voice I/O](../guides/voice.md)
 
 ---
 
@@ -49,7 +56,7 @@ LLM memory curator, output-effort dial, voice I/O, retrieval reranker, deeper pr
 
 - **Memory curator** — `curate_memory` (dry-run by default) sends a metadata-annotated slice of the note store to the model, which returns prune / merge / re-confidence ops; a deterministic safety-rail veto then protects `user:`/`identity:`/`pref:` keys, high-access, and too-young notes. Deletion is **reversible**: `forget` and the curator soft-delete the full note to `notes.archive.json` (`AGENT_MEMORY_ARCHIVE`) before removing; `restore_memory` recovers it. Tunables: `AGENT_CURATOR_TIMEOUT_MS`, `AGENT_CURATOR_MAX_TOKENS`, `AGENT_CURATOR_PROTECT_GLOBAL` (off — `global` is the default scope, not a durability signal)
 - **Output effort** — `AGENT_EFFORT` (`low` | `medium` | `high` | `xhigh`) — a deliverable-thoroughness dial injected as a system-prompt directive (rule **R-EFFORT**), exposed as a Settings dropdown. A separate axis from reasoning: it scales completion budget and output completeness/coverage, not internal `think()`/`reason()` depth
-- **Voice I/O** — Text-to-speech (`speak`, Kokoro / OpenAI voices, per-turn budget + near-duplicate suppression) and live microphone **dictation** in the web UI; voice-mode tool gating
+- **Voice I/O** — Text-to-speech (`speak`, Kokoro / OpenAI voices, per-turn budget + near-duplicate suppression) and live microphone **dictation** in the web UI; voice-mode tool gating. See [Voice I/O](../guides/voice.md)
 - **Retrieval** — Second-stage recall reranker over first-stage BM25 + embedding hits; fast-model JSON response cache to cut repeat sidecar calls
 - **Prompt cache** — Rolling `cache_control` breakpoint over conversation history (`AGENT_PROMPT_CACHE_ROLLING`) plus volatile-tail context ordering (`AGENT_CTX_VOLATILE_TAIL`), so the cache extends across accumulated tool-result history, not just the static prefix
 - **File tools** — `find_files` (path/name glob) and `delete_file` (approval-gated); a catalog reachability test guards against tools unreachable under lazy loading
