@@ -5,7 +5,7 @@ import { createHash, randomBytes } from "node:crypto";
 import { existsSync } from "node:fs";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
-import { perChatPath } from "@liminal/core";
+import { normalizeTtsBytesForBrowserPlayback, perChatPath } from "@liminal/core";
 
 const TTS_SUBDIR = "tts";
 const TTS_CACHE_INDEX = "cache.json";
@@ -18,6 +18,7 @@ function extForMime(mimeType: string): string {
   if (m.includes("wav")) return "wav";
   if (m.includes("opus")) return "opus";
   if (m.includes("flac")) return "flac";
+  if (m.includes("pcm")) return "wav";
   return "bin";
 }
 
@@ -77,7 +78,6 @@ export async function saveTtsClip(
   spokenText: string
 ): Promise<SavedTtsClip> {
   const hash = contentHashFor(spokenText);
-  const ext = extForMime(mimeType);
   const dir = await ttsDirFor(chatId);
   const index = await readCacheIndex(chatId);
   const cached = index.byContentHash[hash];
@@ -85,11 +85,22 @@ export async function saveTtsClip(
     const filePath = path.join(dir, `${cached.clipId}.${cached.ext}`);
     if (existsSync(filePath)) {
       const existing = await readFile(filePath);
+      const storedMime =
+        cached.ext === "mp3"
+          ? "audio/mpeg"
+          : cached.ext === "wav"
+            ? "audio/wav"
+            : cached.ext === "opus"
+              ? "audio/opus"
+              : cached.ext === "flac"
+                ? "audio/flac"
+                : "audio/pcm";
+      const normalized = normalizeTtsBytesForBrowserPlayback(existing, storedMime);
       return {
         clipId: cached.clipId,
         path: filePath,
-        mimeType,
-        sizeBytes: existing.length,
+        mimeType: normalized.mimeType,
+        sizeBytes: normalized.bytes.byteLength,
         cacheHit: true,
       };
     }
@@ -97,15 +108,17 @@ export async function saveTtsClip(
   }
 
   const clipId = randomBytes(16).toString("hex");
-  const filePath = path.join(dir, `${clipId}.${ext}`);
-  await writeFile(filePath, audio);
-  index.byContentHash[hash] = { clipId, ext };
+  const normalized = normalizeTtsBytesForBrowserPlayback(audio, mimeType);
+  const storeExt = extForMime(normalized.mimeType);
+  const filePath = path.join(dir, `${clipId}.${storeExt}`);
+  await writeFile(filePath, normalized.bytes);
+  index.byContentHash[hash] = { clipId, ext: storeExt };
   await writeCacheIndex(chatId, index);
   return {
     clipId,
     path: filePath,
-    mimeType,
-    sizeBytes: audio.byteLength,
+    mimeType: normalized.mimeType,
+    sizeBytes: normalized.bytes.byteLength,
     cacheHit: false,
   };
 }
@@ -120,8 +133,8 @@ export async function readTtsClip(
   for (const ext of ["mp3", "wav", "opus", "flac", "bin"]) {
     const filePath = path.join(dir, `${safe}.${ext}`);
     if (!existsSync(filePath)) continue;
-    const bytes = await readFile(filePath);
-    const mimeType =
+    const raw = await readFile(filePath);
+    const storedMime =
       ext === "mp3"
         ? "audio/mpeg"
         : ext === "wav"
@@ -130,8 +143,9 @@ export async function readTtsClip(
             ? "audio/opus"
             : ext === "flac"
               ? "audio/flac"
-              : "application/octet-stream";
-    return { bytes, mimeType };
+              : "audio/pcm";
+    const normalized = normalizeTtsBytesForBrowserPlayback(raw, storedMime);
+    return { bytes: Buffer.from(normalized.bytes), mimeType: normalized.mimeType };
   }
   return null;
 }

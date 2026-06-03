@@ -36,6 +36,21 @@ function isBenignPlaybackError(err: unknown): boolean {
   return err.name === "AbortError";
 }
 
+async function fetchAudioBlob(url: string): Promise<Blob> {
+  const resp = await fetch(url, { credentials: "same-origin" });
+  if (!resp.ok) {
+    const detail = (await resp.text().catch(() => "")).slice(0, 160);
+    throw new Error(
+      detail ? `TTS clip HTTP ${resp.status}: ${detail}` : `TTS clip HTTP ${resp.status}`
+    );
+  }
+  const blob = await resp.blob();
+  if (blob.size === 0) {
+    throw new Error("TTS clip is empty.");
+  }
+  return blob;
+}
+
 export function useSpeechOutput(opts: UseSpeechOutputOptions) {
   const queueRef = useRef<SpeechQueueItem[]>([]);
   const playingRef = useRef(false);
@@ -117,13 +132,21 @@ export function useSpeechOutput(opts: UseSpeechOutputOptions) {
     const gen = playGenRef.current;
     const audio = new Audio();
     activeAudioRef.current = audio;
-    audio.src = url;
     setLastSpoken(next.text);
+    let objectUrl: string | null = null;
+
+    const releaseObjectUrl = () => {
+      if (objectUrl) {
+        URL.revokeObjectURL(objectUrl);
+        objectUrl = null;
+      }
+    };
 
     const onDone = () => {
       if (gen !== playGenRef.current) return;
       audio.removeEventListener("ended", onDone);
       audio.removeEventListener("error", onDone);
+      releaseObjectUrl();
       if (activeAudioRef.current === audio) activeAudioRef.current = null;
       playNext();
     };
@@ -131,21 +154,38 @@ export function useSpeechOutput(opts: UseSpeechOutputOptions) {
     audio.addEventListener("ended", onDone);
     audio.addEventListener("error", onDone);
 
-    void audio.play().catch((err: unknown) => {
+    const failPlayback = (err: unknown) => {
       if (gen !== playGenRef.current) return;
       if (isBenignPlaybackError(err)) return;
       const name = err instanceof Error ? err.name : "";
       const msg =
         name === "NotAllowedError"
           ? "Browser blocked audio — click Send or the mic once, then try again."
-          : `Playback failed (${name || "error"}).`;
+          : name === "NotSupportedError"
+            ? "Audio format not supported — set AGENT_TTS_RESPONSE_FORMAT=mp3 and retry."
+            : err instanceof Error && err.message
+              ? err.message.slice(0, 200)
+              : `Playback failed (${name || "error"}).`;
       setPlayError(msg);
       playingRef.current = false;
       setIsSpeaking(false);
+      releaseObjectUrl();
       if (activeAudioRef.current === audio) activeAudioRef.current = null;
       queueRef.current.unshift(next);
       setQueueLength(queueRef.current.length);
-    });
+    };
+
+    void (async () => {
+      try {
+        const blob = await fetchAudioBlob(url);
+        if (gen !== playGenRef.current) return;
+        objectUrl = URL.createObjectURL(blob);
+        audio.src = objectUrl;
+        await audio.play();
+      } catch (err) {
+        failPlayback(err);
+      }
+    })();
   }, []);
 
   const enqueue = useCallback(

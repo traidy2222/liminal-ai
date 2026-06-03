@@ -6,6 +6,7 @@ import { readEnvFile, resolvePort } from "../envWriter.mjs";
 import { log } from "../log.mjs";
 import { envPath, resolveRepoRoot } from "../paths.mjs";
 import { scheduleBrowserOpen } from "../openBrowser.mjs";
+import { resolveAutoUpdatePolicy, runRepoSync } from "../update.mjs";
 
 const SCRIPTS_DIR = path.dirname(path.dirname(path.dirname(fileURLToPath(import.meta.url))));
 
@@ -20,6 +21,13 @@ export async function runWeb(argv) {
   const yolo = argv.includes("--yolo");
 
   const repoRoot = resolveRepoRoot();
+  const updatePolicy = resolveAutoUpdatePolicy(argv);
+  if (updatePolicy) {
+    const syncCode = runRepoSync(repoRoot, updatePolicy);
+    if (syncCode !== 0) {
+      return syncCode;
+    }
+  }
   const env = readEnvFile(envPath(repoRoot));
   const port = resolvePort(env);
 
@@ -65,6 +73,13 @@ export function runTui(argv) {
   const yolo = argv.includes("--yolo");
 
   const repoRoot = resolveRepoRoot();
+  const updatePolicy = resolveAutoUpdatePolicy(argv);
+  if (updatePolicy) {
+    const syncCode = runRepoSync(repoRoot, updatePolicy);
+    if (syncCode !== 0) {
+      return syncCode;
+    }
+  }
   const scriptPath = path.join(SCRIPTS_DIR, "run-tui.mjs");
   if (!fs.existsSync(scriptPath)) {
     log("error", `Missing ${scriptPath}`);
@@ -98,30 +113,5 @@ export function runTui(argv) {
  */
 export function runUpdate() {
   const repoRoot = resolveRepoRoot();
-  log("info", `Updating ${repoRoot}…`);
-
-  const pull = spawnSync("git", ["pull", "--ff-only"], {
-    cwd: repoRoot,
-    stdio: "inherit",
-    shell: process.platform === "win32",
-  });
-  if (pull.status !== 0) {
-    return pull.status ?? 1;
-  }
-
-  const install = spawnSync("npm", ["install"], {
-    cwd: repoRoot,
-    stdio: "inherit",
-    shell: process.platform === "win32",
-  });
-  if (install.status !== 0) {
-    return install.status ?? 1;
-  }
-
-  const build = spawnSync("npm", ["run", "build"], {
-    cwd: repoRoot,
-    stdio: "inherit",
-    shell: process.platform === "win32",
-  });
-  return build.status ?? 1;
+  return runRepoSync(repoRoot, { pull: true, install: true, build: true });
 }

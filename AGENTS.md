@@ -14,9 +14,14 @@ npm run build -w packages/tools        # tools only (requires core built first)
 npm run tui                            # terminal UI (ink/React)
 npm run tui -- --bootstrap             # same + AGENT_PERSONA_BOOTSTRAP_FORCE (re-show TUI persona overlay)
 npm run tui:bootstrap                  # alias for `npm run tui -- --bootstrap`
-npm run web                            # build web client + Express (API + static UI on PORT, default :3001)
+liminal web                            # customer path: auto sync (pull/install/build) + production UI (:3001)
+liminal web --open                     # same + open browser
+liminal web --no-update                # skip auto sync (fast local iteration after you built)
+liminal tui                            # auto sync + terminal UI
+liminal update                         # explicit sync only (also runs before web/tui by default)
+npm run web                            # same production stack as liminal web (no auto sync)
 npm run web -- --bootstrap             # same + AGENT_PERSONA_BOOTSTRAP_FORCE (re-show web persona modal)
-npm run web:dev                        # Express :3001 + Vite dev :3000 with hot reload
+npm run web:dev                        # dev only: Vite HMR on :5173 (not what end users run)
 npm run web:dev -- --bootstrap         # web:dev + bootstrap force (or: npm run web:dev:bootstrap)
 
 # Run the eval suite

@@ -10,9 +10,9 @@ const USAGE = `Liminal — one-command setup and launcher
 Usage:
   liminal setup [options]     Interactive first-run wizard (writes .env, install, build)
   liminal doctor              Verify Node, build artifacts, API key, port
-  liminal web [options]       Start web UI (production build)
+  liminal web [options]       Start web UI (production — same as customers)
   liminal tui [options]       Start terminal UI
-  liminal update              git pull + npm install + build
+  liminal update              git pull + npm install + build (also runs before web/tui)
   liminal login               Sign in to Vireon (browser); saves license to ~/.liminal/
   liminal logout              Remove local Vireon account + license cache
   liminal path                Print install directory
@@ -29,8 +29,17 @@ Setup options:
 Web / TUI options:
   --bootstrap                 Force persona bootstrap modal
   --open                      Open browser when web server is ready
-  --dev                       Web dev mode (Vite HMR + API)
+  --dev                       Web dev mode (Vite HMR — not the customer path)
   --yolo                      Disable approval gates (trusted env only)
+  --no-update                 Skip auto sync (pull/install/build) before launch
+  --no-pull                   Sync without git pull (still install + build)
+  --no-install                Sync without npm install
+  --no-build                  Sync without npm run build
+
+Before web/tui, liminal runs: git pull --ff-only (if tree clean) → npm install → npm run build.
+Commit and push your changes, then rerun so pull picks up the latest remote (or skip pull with --no-pull when iterating locally).
+
+Env: LIMINAL_SKIP_UPDATE=1 or LIMINAL_AUTO_UPDATE=0 disables auto sync.
 `;
 
 /** @param {string[]} argv */

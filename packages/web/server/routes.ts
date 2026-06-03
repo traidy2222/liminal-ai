@@ -25,6 +25,7 @@ import {
   resolveSpeechSynthesisConfigAsync,
   synthesizeSpeechMulti,
   sanitizeTextForTts,
+  coerceTtsConfigForBrowserPlayback,
   applyVireonLicenseToken,
   readVireonAccount,
   loadHarnessEntitlements,
@@ -985,7 +986,7 @@ export function createRouter(
       }
       const multi = await synthesizeSpeechMulti(
         { text: sanitized, voice: body.voice?.trim() || undefined },
-        config
+        coerceTtsConfigForBrowserPlayback(config)
       );
       const clips = [];
       for (const seg of multi.segments) {

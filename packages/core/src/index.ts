@@ -53,6 +53,10 @@ export {
   resolveSpeechSynthesisConfigAsync,
   sanitizeTextForTts,
   synthesizeSpeech,
+  coerceTtsConfigForBrowserPlayback,
+  wrapPcm16LeMonoAsWav,
+  normalizeTtsBytesForBrowserPlayback,
+  TTS_PCM_SAMPLE_RATE,
 } from "./speech_synthesis.js";
 export type {
   SpeechSynthesisConfig,

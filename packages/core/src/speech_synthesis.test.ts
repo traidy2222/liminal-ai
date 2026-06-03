@@ -13,6 +13,9 @@ import {
   ttsMaxOutputTokensForInput,
   splitTextForTtsChunks,
   wireTtsResponseFormat,
+  coerceTtsConfigForBrowserPlayback,
+  wrapPcm16LeMonoAsWav,
+  normalizeTtsBytesForBrowserPlayback,
 } from "./speech_synthesis.js";
 import { TtsTurnBudget } from "./tts_budget.js";
 
@@ -136,6 +139,28 @@ test("resolveSpeechSynthesisConfig honors AGENT_TTS_ENABLED=1", () => {
     if (prev === undefined) delete process.env["AGENT_TTS_ENABLED"];
     else process.env["AGENT_TTS_ENABLED"] = prev;
   }
+});
+
+test("coerceTtsConfigForBrowserPlayback forces mp3", () => {
+  const cfg = resolveSpeechSynthesisConfig(null);
+  const pcmCfg = { ...cfg, responseFormat: "pcm" as const };
+  assert.equal(coerceTtsConfigForBrowserPlayback(pcmCfg).responseFormat, "mp3");
+  assert.equal(coerceTtsConfigForBrowserPlayback({ ...cfg, responseFormat: "mp3" }).responseFormat, "mp3");
+});
+
+test("wrapPcm16LeMonoAsWav produces a RIFF WAVE header", () => {
+  const pcm = new Uint8Array([0, 0, 0xff, 0x7f]);
+  const wav = wrapPcm16LeMonoAsWav(pcm);
+  assert.equal(String.fromCharCode(...wav.slice(0, 4)), "RIFF");
+  assert.equal(String.fromCharCode(...wav.slice(8, 12)), "WAVE");
+  assert.equal(wav.length, 44 + pcm.length);
+});
+
+test("normalizeTtsBytesForBrowserPlayback wraps pcm mime", () => {
+  const pcm = new Uint8Array(128);
+  const out = normalizeTtsBytesForBrowserPlayback(pcm, "audio/pcm");
+  assert.equal(out.mimeType, "audio/wav");
+  assert.ok(out.bytes.length > pcm.length);
 });
 
 test("wireTtsResponseFormat maps wav to mp3 on OpenRouter", () => {

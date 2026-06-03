@@ -6,6 +6,7 @@
  */
 import type { AgentHarness, SpeechSynthesisConfig } from "@liminal/core";
 import {
+  coerceTtsConfigForBrowserPlayback,
   resolveCurrentChatId,
   resolveSpeechSynthesisConfigAsync,
   synthesizeSpeechMulti,
@@ -24,7 +25,10 @@ export async function emitSpokenClips(
     return { ok: false, reason: gate.reason ?? "TTS budget rejected this line." };
   }
   const chatId = resolveCurrentChatId() ?? harness.taskId;
-  const multi = await synthesizeSpeechMulti({ text: gate.sanitizedText! }, cfg);
+  const multi = await synthesizeSpeechMulti(
+    { text: gate.sanitizedText! },
+    coerceTtsConfigForBrowserPlayback(cfg)
+  );
   for (const seg of multi.segments) {
     const saved = await saveTtsClip(chatId, seg.audio, seg.mimeType, seg.spokenText);
     harness.emitter.emit("speech", {

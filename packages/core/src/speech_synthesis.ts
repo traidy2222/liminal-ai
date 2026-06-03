@@ -487,6 +487,81 @@ function mimeForWireFormat(format: "mp3" | "pcm"): string {
   return format === "pcm" ? "audio/pcm" : "audio/mpeg";
 }
 
+/** OpenAI-compatible PCM from `/audio/speech` (24 kHz, mono, 16-bit LE). */
+export const TTS_PCM_SAMPLE_RATE = 24_000;
+
+/**
+ * HTML `<audio>` cannot play raw `audio/pcm`. Web TTS should synthesize mp3, but
+ * coerce config when callers still request pcm/wav/opus/flac.
+ */
+export function coerceTtsConfigForBrowserPlayback(
+  config: SpeechSynthesisConfig
+): SpeechSynthesisConfig {
+  if (config.responseFormat === "mp3") return config;
+  return { ...config, responseFormat: "mp3" };
+}
+
+/** Wrap raw PCM16 LE mono in a WAV container for browser playback. */
+export function wrapPcm16LeMonoAsWav(
+  pcm: Uint8Array,
+  sampleRate = TTS_PCM_SAMPLE_RATE
+): Uint8Array {
+  const channels = 1;
+  const bitsPerSample = 16;
+  const blockAlign = (channels * bitsPerSample) / 8;
+  const byteRate = sampleRate * blockAlign;
+  const dataSize = pcm.byteLength;
+  const out = new Uint8Array(44 + dataSize);
+  const view = new DataView(out.buffer);
+  const writeAscii = (offset: number, text: string) => {
+    for (let i = 0; i < text.length; i++) {
+      view.setUint8(offset + i, text.charCodeAt(i));
+    }
+  };
+  writeAscii(0, "RIFF");
+  view.setUint32(4, 36 + dataSize, true);
+  writeAscii(8, "WAVE");
+  writeAscii(12, "fmt ");
+  view.setUint32(16, 16, true);
+  view.setUint16(20, 1, true);
+  view.setUint16(22, channels, true);
+  view.setUint32(24, sampleRate, true);
+  view.setUint32(28, byteRate, true);
+  view.setUint16(32, blockAlign, true);
+  view.setUint16(34, bitsPerSample, true);
+  writeAscii(36, "data");
+  view.setUint32(40, dataSize, true);
+  out.set(pcm, 44);
+  return out;
+}
+
+/** Normalize stored/served TTS bytes so `<audio>` and MediaSource can decode them. */
+export function normalizeTtsBytesForBrowserPlayback(
+  audio: Uint8Array,
+  mimeType: string
+): { bytes: Uint8Array; mimeType: string } {
+  const m = mimeType.toLowerCase();
+  if (m.includes("mpeg") || m.includes("mp3")) {
+    return { bytes: audio, mimeType: "audio/mpeg" };
+  }
+  if (m.includes("wav")) {
+    return { bytes: audio, mimeType: "audio/wav" };
+  }
+  if (m.includes("opus")) {
+    return { bytes: audio, mimeType: "audio/opus" };
+  }
+  if (m.includes("flac")) {
+    return { bytes: audio, mimeType: "audio/flac" };
+  }
+  if (m.includes("pcm") || m === "application/octet-stream") {
+    return {
+      bytes: wrapPcm16LeMonoAsWav(audio),
+      mimeType: "audio/wav",
+    };
+  }
+  return { bytes: audio, mimeType: mimeType || "audio/mpeg" };
+}
+
 function providerFromBaseUrl(baseURL: string): string {
   try {
     return new URL(baseURL).hostname;
