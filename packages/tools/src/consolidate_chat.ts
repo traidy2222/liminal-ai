@@ -18,37 +18,15 @@
  * Failure modes: missing session log, fast-model unreachable, JSON parse
  * failure — all surface as ok:false; no partial writes.
  */
-import path from "node:path";
-import { readFile } from "node:fs/promises";
 import { defineTool } from "./helpers.js";
 import {
-  buildAutoDreamPrompt,
-  completeChatJson,
-  effectiveHarnessEnvRaw,
-  getFastModelSlug,
-  globalChatsRoot,
+  consolidateChatSession,
   resolveCurrentChatId,
   resolveProviderConfig,
   sanitizeChatId,
 } from "@liminal/core";
 import OpenAI from "openai";
 import { atomicUpdate, loadNotes, makeTypedKey } from "./notes_store.js";
-
-interface ConsolidateUpsert {
-  type?: string;
-  key?: string;
-  value?: string;
-}
-
-interface ConsolidateParsed {
-  summary?: string;
-  upserts?: ConsolidateUpsert[];
-  deletes?: Array<{ key?: string; reason?: string }>;
-}
-
-function sessionPath(chatId: string): string {
-  return path.join(globalChatsRoot(), sanitizeChatId(chatId), "session.jsonl");
-}
 
 export const consolidateChatTool = defineTool({
   name: "consolidate_chat",
@@ -74,52 +52,26 @@ export const consolidateChatTool = defineTool({
     if (!chatId) return { ok: false, error: "no chat id (pass chat_id or run inside an active harness send)" };
     const maxChars = Math.min(60000, Math.max(1000, (args["max_chars"] as number | undefined) ?? 12000));
 
-    let snippet = "";
-    try {
-      const raw = await readFile(sessionPath(chatId), "utf8");
-      snippet = raw.slice(-maxChars).trim();
-    } catch {
-      return { ok: false, error: `no session log at ${sessionPath(chatId)}` };
-    }
-    if (!snippet) return { ok: false, error: "session log is empty — nothing to consolidate" };
-
-    const notesSnapshot = JSON.stringify(await loadNotes()).slice(0, 8000);
-    const prompt = buildAutoDreamPrompt({
-      notesSnapshot,
-      sessions: [{ sessionId: chatId, snippet }],
-    });
-
     const provider = resolveProviderConfig();
     if (!provider.apiKey) return { ok: false, error: "provider API key missing" };
     const client = new OpenAI({ apiKey: provider.apiKey, baseURL: provider.baseURL });
-    const mainModel = provider.model;
-    const fast = getFastModelSlug(mainModel);
-
-    const consolidateTimeoutMsRaw = effectiveHarnessEnvRaw("AGENT_CONSOLIDATE_TIMEOUT_MS");
-    const timeoutMs = consolidateTimeoutMsRaw ? Math.max(5_000, Math.min(120_000, parseInt(consolidateTimeoutMsRaw, 10))) : 30_000;
-
-    let parsed: ConsolidateParsed;
-    try {
-      const jr = await completeChatJson(client, {
-        model: fast,
-        messages: [{ role: "user", content: prompt }],
-        maxTokens: 1200,
-        temperature: 0.2,
-        signal: AbortSignal.timeout(timeoutMs),
-      });
-      if (!jr.ok || !jr.parsed || typeof jr.parsed !== "object") {
-        return { ok: false, error: jr.ok ? "judge returned non-object JSON" : jr.error };
-      }
-      parsed = jr.parsed as ConsolidateParsed;
-    } catch (e) {
-      return { ok: false, error: `consolidation call failed: ${e instanceof Error ? e.message : String(e)}` };
+    const notesSnapshot = JSON.stringify(await loadNotes()).slice(0, 8000);
+    const result = await consolidateChatSession({
+      chatId,
+      notesSnapshot,
+      client,
+      mainModel: provider.model,
+      maxChars,
+    });
+    if (!result.ok) {
+      return { ok: false, error: result.error ?? "consolidation failed" };
     }
 
-    const upserts = (parsed.upserts ?? []).filter((u) => u && typeof u.key === "string" && typeof u.value === "string");
+    const upserts = (result.upserts ?? []).filter((u) => u && typeof u.key === "string" && typeof u.value === "string");
     if (upserts.length === 0) {
       return {
         ok: true,
-        output: `Consolidated chat ${chatId.slice(0, 8)} — no new durable insights.\nSummary: ${parsed.summary?.slice(0, 400) ?? "(none)"}`,
+        output: `Consolidated chat ${chatId.slice(0, 8)} — no new durable insights.\nSummary: ${result.summary?.slice(0, 400) ?? "(none)"}`,
       };
     }
 
@@ -136,7 +88,7 @@ export const consolidateChatTool = defineTool({
       ok: true,
       output:
         `Consolidated chat ${chatId.slice(0, 8)} — wrote ${upserts.length} note(s).\n` +
-        `Summary: ${(parsed.summary ?? "").slice(0, 400)}\n` +
+        `Summary: ${(result.summary ?? "").slice(0, 400)}\n` +
         writtenLines.join("\n"),
     };
   },

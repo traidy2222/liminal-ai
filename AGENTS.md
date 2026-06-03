@@ -2,6 +2,14 @@
 
 This file provides guidance to Codex (Codex.ai/code) when working with code in this repository.
 
+## Harness pillars (product defaults)
+
+Three coordinated behaviors ship by default (see `docs/operations/profiles.md` for presets):
+
+1. **Smarter harness** — `AGENT_TOOL_BODY_ELIDE`, `AGENT_DISTILL`, `AGENT_REASONING_DEFAULT_EFFORT=medium`, `AGENT_COMPLEXITY_ROUTING`; intent-scoped tool-family pre-seed, selective rule recall (~8–12 IDs), session-cached tool manifest, knowledge→fast routing when confident.
+2. **Unique self** — federation-aware session priming (`memory_priming.ts`), per-turn recipe hints, identity block in world context, idle `AGENT_CONSOLIDATE_ON_IDLE`, `AGENT_VAULT_AUTO_WRITE=research`.
+3. **Long-run autonomy** — `AGENT_CHILD_TIMEOUT_MS`, yield/task resume injection, optional `AGENT_MISSION_AUTONOMY` (with `AGENT_YOLO`), workflow phase cursors on disk, `AGENT_AUTO_APPROVE_TOOLS` allowlist.
+
 ## Commands
 
 ```bash

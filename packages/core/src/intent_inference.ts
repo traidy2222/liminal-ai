@@ -157,6 +157,14 @@ export function buildRoutingProfile(
     }
   } else if (intent === "knowledge") {
     maxTokens = 4096;
+    if (
+      confidence >= threshold &&
+      inference.likelyEditPaths.length === 0 &&
+      !inference.freshnessSensitive
+    ) {
+      modelSlug = resolveFastModelSlug(mainModel);
+      routingReason = "knowledge_high_confidence_fast";
+    }
   } else if (intent === "research") {
     // Multi-source synthesis; final answers can be long-form briefings.
     maxTokens = 16000;

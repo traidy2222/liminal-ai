@@ -21,6 +21,7 @@ import {
   type WorkflowVerifyGate,
 } from "./workflow_spec.js";
 import type { WorkflowStore, WorkflowAgentResult } from "./workflow_store.js";
+import { writeWorkflowCursor } from "./workflow_store.js";
 
 export interface PhaseSummary {
   phaseId: string;
@@ -223,6 +224,13 @@ export class WorkflowRuntime {
         break;
       }
       if (!phaseOk) runOk = false;
+
+      await writeWorkflowCursor({
+        runId: this.runId,
+        phaseIndex: phaseSummaries.length,
+        completedPhaseIds: phaseSummaries.map((p) => p.phaseId),
+        updatedAt: new Date().toISOString(),
+      });
     }
 
     const finalReport = this.buildFinalReport(spec, phaseSummaries, runOk, truncated, spawned);

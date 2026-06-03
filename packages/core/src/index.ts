@@ -371,9 +371,32 @@ export {
   attachSessionEventLog,
   maybeAttachSessionEventLog,
   writeYieldSnapshot,
+  readYieldSnapshot,
   resolveSessionTextLogMode,
   sessionTraceLogEnabled,
 } from "./session_event_log.js";
+export {
+  consolidateChatSession,
+  loadSessionSnippet,
+  resolveConsolidateOnIdleConfig,
+} from "./consolidate_session.js";
+export type { ConsolidateSessionResult, ConsolidateUpsert } from "./consolidate_session.js";
+export {
+  evaluateMissionContinue,
+  buildResumeMissionBlock,
+  loadLatestInProgressTask,
+  resolveMissionAutonomyConfig,
+} from "./mission_controller.js";
+export type { InProgressTask, MissionContinueDecision } from "./mission_controller.js";
+export { rankNotesForPriming } from "./memory_priming.js";
+export type { MemoryPrimingOptions } from "./memory_priming.js";
+export { inferIntentToolFamilies } from "./intent_tool_families.js";
+export { buildHarnessRuleRecallMessageForIntent } from "./harness_rules.js";
+export {
+  readWorkflowCursor,
+  writeWorkflowCursor,
+} from "./workflow_store.js";
+export type { WorkflowRunCursor } from "./workflow_store.js";
 export type { YieldSnapshot } from "./session_event_log.js";
 export { appendGoldenEvalRecord } from "./golden_eval.js";
 export {

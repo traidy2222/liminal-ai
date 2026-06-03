@@ -23,7 +23,7 @@ export const DEFAULT_AGENT_FAST_MODEL_SLUG = "deepseek/deepseek-v4-flash";
 
 export const HARNESS_ENV_DEFAULTS: Readonly<Record<string, string>> = {
   AGENT_UI_VERBOSITY: "normal",
-  AGENT_VAULT_AUTO_WRITE: "off",
+  AGENT_VAULT_AUTO_WRITE: "research",
   AGENT_APPROVAL_TIMEOUT_MS: "120000",
   AGENT_RATE_LIMIT_MAX_RETRIES: "8",
   AGENT_TRANSIENT_5XX_MAX_RETRIES: "8",
@@ -99,14 +99,14 @@ export const HARNESS_ENV_DEFAULTS: Readonly<Record<string, string>> = {
   AGENT_SESSION_JSONL_TEXT_LOG: "rollup",
   AGENT_SESSION_JSONL_MAX_ROLLUP_CHARS: "500000",
   AGENT_SESSION_JSONL_TRACE: "0",
-  AGENT_TOOL_BODY_ELIDE: "0",
+  AGENT_TOOL_BODY_ELIDE: "1",
   AGENT_TOOL_ELIDE_MIN_CHARS: "12000",    // for coding workflows: keep file/grep results readable. Lower (e.g. 5000) only for chat-style tasks where verbatim tool output matters less.
   // read_file distillation — OFF by default. Distilling source files replaces
   // code with bullet-point JSON summaries, which forces the model to re-read
   // constantly. Enable only for workflows that primarily summarize huge files.
   AGENT_DISTILL_READ_FILE: "0",
   AGENT_TOOL_ELIDE_KEEP_ROUNDS: "3",
-  AGENT_DISTILL: "0",
+  AGENT_DISTILL: "1",
   AGENT_DISTILL_WEB_FETCH: "0",
   // Sidecar model calls — OFF by default (each fires a full completion at main-model cost).
   // Enable individually in .env when the quality gain justifies the spend.
@@ -285,7 +285,8 @@ export const HARNESS_ENV_DEFAULTS: Readonly<Record<string, string>> = {
   AGENT_INTENT_OPERATIONAL_MODEL: "",  // empty = use AGENT_FAST_MODEL
   // Adaptive reasoning budget (merged into intent inference fast call)
   AGENT_REASONING_BUDGET: "1",           // on: use classifier reasoningEffort/thinkDepth fields
-  AGENT_REASONING_DEFAULT_EFFORT: "high", // fallback when classifier off or low confidence
+  AGENT_REASONING_DEFAULT_EFFORT: "medium", // fallback when classifier off or low confidence
+  AGENT_COMPLEXITY_ROUTING: "1", // trivial non-creative turns → fast model (see intent_inference.ts)
   AGENT_EFFORT_LEARN: "1",               // record per-intent effort outcomes and reuse the best as fallback prior
   AGENT_REASONING_NUDGE_CHARS: "2500",   // legacy; stream stall enforcement removed
   AGENT_REASONING_SURFACE: "external",   // native | external | auto — always external: model uses think()+reason() tools
@@ -361,4 +362,15 @@ export const HARNESS_ENV_DEFAULTS: Readonly<Record<string, string>> = {
   // Closed-loop self-tuning — auto-demote rules with consistently low avg outcome
   AGENT_RULE_DEMOTE_THRESHOLD: "0.4",   // rules below this avg_outcome get demoted
   AGENT_RULE_DEMOTE_MIN_SAMPLES: "20",  // minimum sample size before demotion can fire
+  // End-of-chat consolidation (fast model; separate from nightly AGENT_AUTO_DREAM)
+  AGENT_CONSOLIDATE_ON_IDLE: "1",
+  AGENT_CONSOLIDATE_MIN_MESSAGES: "8",
+  AGENT_CONSOLIDATE_TIMEOUT_MS: "30000",
+  // Sub-agent timeout — align with long sends / workflows
+  AGENT_CHILD_TIMEOUT_MS: "1800000",
+  // Mission continuation loop (requires AGENT_YOLO=1 when enabled)
+  AGENT_MISSION_AUTONOMY: "0",
+  AGENT_MISSION_MAX_ITERATIONS: "20",
+  // Comma-separated tools that skip destructive approval when safety judge is off
+  AGENT_AUTO_APPROVE_TOOLS: "run_lint,run_tests,git_status",
 };

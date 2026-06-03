@@ -11,6 +11,8 @@ import {
   saveRuntimePreferences,
   resolveHarnessEnvRaw,
   touchChatMetadata,
+  loadSessionSnippet,
+  resolveConsolidateOnIdleConfig,
   type PersonaBootstrapProgressEvent,
 } from "@liminal/core";
 import {
@@ -106,6 +108,7 @@ export class AgentBridge {
    * into the UI of an unrelated chat.
    */
   private sseSuspended = true;
+  private readonly bridgeRuntimePreferences: RuntimePreferences | null;
   /** Detach functions for all emitter subscriptions, so dispose() can fully unwire. */
   private emitterDetachers: Array<() => void> = [];
 
@@ -128,6 +131,7 @@ export class AgentBridge {
   ) {
     this.chatId = options.chatId;
     this.workspaceRoot = options.workspaceRoot;
+    this.bridgeRuntimePreferences = runtimePreferences;
     const provider =
       providerConfig ??
       (() => {
@@ -171,6 +175,10 @@ export class AgentBridge {
     );
 
     const harness = this.harness;
+    harness.onMissionContinue = (continuation) => {
+      if (harness.getIsRunning()) return;
+      void this.sendUserMessage(continuation);
+    };
     this.detachSessionLog = maybeAttachSessionEventLog(harness.emitter, harness.taskId);
     this.wireEvents();
     this.toolsRegistered = runWithWorkspaceRoot(this.workspaceRoot, async () => {
@@ -430,11 +438,35 @@ export class AgentBridge {
 
   /** Clear transcript; next user message re-injects world context (root). */
   clearSession(options?: { preserveBootstrapState?: boolean }): void {
+    void this.maybeConsolidateOnIdle();
     this.harness.clearConversation();
     if (!options?.preserveBootstrapState) {
       this.awaitingPersonaBootstrapInput = false;
     }
     this.bootstrapInFlight = false;
+  }
+
+  private async maybeConsolidateOnIdle(): Promise<void> {
+    const cfg = resolveConsolidateOnIdleConfig(this.bridgeRuntimePreferences);
+    if (!cfg.enabled) return;
+    const snippet = await loadSessionSnippet(this.chatId, 8000);
+    if (!snippet) return;
+    const eventLines = snippet.split("\n").filter((l) => l.includes('"event"')).length;
+    if (eventLines < cfg.minMessages) return;
+    try {
+      await this.whenToolsRegistered();
+      const result = await runWithWorkspaceRoot(this.workspaceRoot, () =>
+        this.harness.runConsolidateChat(12_000)
+      );
+      if (!result.ok || !result.output) return;
+      this.maybeSend("auto_dream", {
+        stage: "idle_consolidate",
+        runId: `idle-${this.chatId.slice(0, 8)}`,
+        summary: result.output.slice(0, 400),
+      });
+    } catch {
+      /* non-fatal */
+    }
   }
 
   /** Called after reset to run bootstrap/greeting sequence again. */

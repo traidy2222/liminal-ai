@@ -23,14 +23,14 @@ import path from "node:path";
 import { readFile, access, readdir } from "node:fs/promises";
 import { getAgentVaultRoot, getExplicitAgentVaultPathFromEnv } from "./vault_path.js";
 import { rankDocumentsForQuery, type RankableDoc } from "./memory_rank.js";
-import { cosineSimilarity, fetchEmbeddings } from "./embeddings.js";
-import { resolveManagedOpenRouterCredentials } from "./inference_provider.js";
 import { gatherRepoMapLines } from "./repo_map.js";
 import { resolveWorkspaceRoot } from "./workspace_root.js";
 import { notesPaths, pickReadPath } from "./global_storage.js";
 import { formatFailureDigestForWorldContext } from "./failure_digest.js";
 import { formatGoldenEvalHints } from "./golden_eval.js";
 import { formatRecipeLibraryHints } from "./recipe_library.js";
+import { rankNotesForPriming } from "./memory_priming.js";
+import { loadIdentityNotesFromDisk } from "./user_identity_memory.js";
 import {
   gatherGitContext,
   getPlatformIdentity,
@@ -74,6 +74,8 @@ export interface WorldContextOptions {
    * snippets under "Relevant memory" (root harness only).
    */
   firstUserMessage?: string;
+  /** Active chat / harness taskId — enables federation-aware memory priming. */
+  chatId?: string;
   /**
    * Live provider config for this harness (AgentHarness.config after prefs merge).
    * Ground truth for "what model am I using?" in this session.
@@ -679,123 +681,23 @@ async function gatherSessionMemory(workspaceRoot: string): Promise<SessionMemory
     : null;
 }
 
-/** BM25-ranked lines for session priming from notes + vault (no embeddings). */
+/** Federation-aware note priming + vault BM25 snippets. */
 async function gatherRelevantPrimedLines(
   seed: string,
   maxNotes: number,
   maxVault: number,
-  workspaceRoot: string
+  workspaceRoot: string,
+  chatId?: string
 ): Promise<string[]> {
   const trimmed = seed.trim();
   if (trimmed.length < 2) return [];
 
-  const lines: string[] = [];
-  const notesFile = await pickReadPath(notesPaths(workspaceRoot));
-  // Embedding index stays workspace-local for now — Phase 2 moves it alongside
-  // notes (will require an index format bump to track workspace tags per key).
-  const memoryEmbedIndexPath = path.join(workspaceRoot, ".agent_memory.index.json");
-
-  const rawNotes = await tryReadFile(notesFile);
-  if (rawNotes) {
-    try {
-      const parsed = JSON.parse(rawNotes) as Record<string, MaybeStoredNote>;
-      const docs: RankableDoc[] = [];
-      for (const [fullKey, rawEntry] of Object.entries(parsed)) {
-        const value = extractNoteValue(rawEntry);
-        const updatedAt = extractNoteUpdatedAt(rawEntry);
-        const colonIdx = fullKey.indexOf(":");
-        const memType = colonIdx > 0 ? fullKey.slice(0, colonIdx) : undefined;
-        const accessCount =
-          typeof rawEntry === "object" && rawEntry !== null && "accessCount" in rawEntry
-            ? (rawEntry as { accessCount?: number }).accessCount
-            : undefined;
-        const confidence =
-          typeof rawEntry === "object" && rawEntry !== null && "confidence" in rawEntry
-            ? (rawEntry as { confidence?: number }).confidence
-            : undefined;
-        docs.push({
-          id: fullKey,
-          text: `${fullKey} ${value}`,
-          updatedAt,
-          memoryType: memType,
-          accessCount,
-          confidence,
-        });
-      }
-      const bmRanked = rankDocumentsForQuery(trimmed, docs, { limit: Math.max(maxNotes * 4, 48) });
-      const bmMax = Math.max(...bmRanked.map((r) => r.score), 1e-9);
-      const bmById = new Map<string, number>();
-      for (const r of bmRanked) bmById.set(r.id, r.score / bmMax);
-
-      const embedModel = effectiveHarnessEnvRaw("AGENT_EMBED_MODEL")?.trim();
-      let apiKey = process.env["OPENROUTER_API_KEY"]?.trim() ?? "";
-      let baseURL = (process.env["OPENROUTER_BASE_URL"] ?? "https://openrouter.ai/api/v1").replace(
-        /\/$/,
-        ""
-      );
-      if (embedModel) {
-        try {
-          const creds = await resolveManagedOpenRouterCredentials(null);
-          apiKey = creds.apiKey;
-          baseURL = creds.baseURL;
-        } catch {
-          /* keep env fallback */
-        }
-      }
-
-      let orderedNoteIds: string[] = bmRanked.slice(0, maxNotes).map((r) => r.id);
-
-      if (embedModel && apiKey) {
-        try {
-          const rawIdx = await tryReadFile(memoryEmbedIndexPath);
-          if (rawIdx) {
-            const idx = JSON.parse(rawIdx) as { entries?: Record<string, { v?: number[] }> };
-            const { vectors } = await fetchEmbeddings({
-              apiKey,
-              baseURL,
-              model: embedModel,
-              inputs: [trimmed.slice(0, 8000)],
-            });
-            const qv = vectors[0];
-            if (qv?.length) {
-              const semById = new Map<string, number>();
-              let semMax = 1e-9;
-              for (const [key, row] of Object.entries(idx.entries ?? {})) {
-                const v = row?.v;
-                if (!v?.length || v.length !== qv.length) continue;
-                const s = cosineSimilarity(qv, v);
-                semById.set(key, s);
-                if (s > semMax) semMax = s;
-              }
-              const allIds = new Set<string>([...bmById.keys(), ...semById.keys()]);
-              const fused: Array<{ id: string; score: number }> = [];
-              for (const id of allIds) {
-                const bm = bmById.get(id) ?? 0;
-                const sem = (semById.get(id) ?? 0) / semMax;
-                const hybrid = 0.55 * sem + 0.35 * bm + 0.1 * Math.max(sem, bm);
-                if (hybrid < 0.02) continue;
-                fused.push({ id, score: hybrid });
-              }
-              fused.sort((a, b) => b.score - a.score);
-              if (fused.length > 0) {
-                orderedNoteIds = fused.slice(0, maxNotes).map((x) => x.id);
-              }
-            }
-          }
-        } catch {
-          /* embeddings optional — keep BM25 order */
-        }
-      }
-
-      for (const id of orderedNoteIds) {
-        const rawEntry = parsed[id];
-        const v = extractNoteValue(rawEntry ?? "");
-        lines.push(`[${id}] ${v.slice(0, 160)}${v.length > 160 ? "…" : ""}`);
-      }
-    } catch {
-      /* malformed JSON */
-    }
-  }
+  const lines = await rankNotesForPriming({
+    query: trimmed,
+    limit: maxNotes,
+    workspaceRoot,
+    currentChatId: chatId,
+  });
 
   const vaultDir = getAgentVaultRoot();
   const vaultDocs: RankableDoc[] = [];
@@ -835,6 +737,32 @@ async function gatherRelevantPrimedLines(
     }
   }
 
+  return lines;
+}
+
+/** Global identity notes + optional dream timestamp for session self. */
+async function gatherIdentityContextLines(maxChars = 1200): Promise<string[]> {
+  const lines: string[] = [];
+  const identity = await loadIdentityNotesFromDisk();
+  let used = 0;
+  for (const n of identity.slice(0, 12)) {
+    const ln = `- [${n.key}] ${n.value}`;
+    if (used + ln.length > maxChars) break;
+    lines.push(ln);
+    used += ln.length;
+  }
+  try {
+    const notesFile = await pickReadPath(notesPaths(resolveWorkspaceRoot()));
+    const raw = await readFile(notesFile, "utf8");
+    const parsed = JSON.parse(raw) as Record<string, MaybeStoredNote>;
+    const dream = parsed["meta:last_dream"];
+    const dreamVal = dream ? extractNoteValue(dream) : "";
+    if (dreamVal.trim()) {
+      lines.push(`Last dream consolidation: ${dreamVal.trim().slice(0, 200)}`);
+    }
+  } catch {
+    /* optional */
+  }
   return lines;
 }
 
@@ -1294,11 +1222,17 @@ export async function buildWorldContextMessage(options?: WorldContextOptions): P
     }
   }
 
+  const identityLines = await withDeadline(gatherIdentityContextLines(), 400);
+  if (identityLines && identityLines.length > 0) {
+    lines.push(sep("Identity & preferences"));
+    for (const ln of identityLines) lines.push(ln);
+  }
+
   // ── Relevant memory (BM25 seed from first user message) ─────────────────────
   if (options?.firstUserMessage?.trim()) {
     const seed = options.firstUserMessage.trim();
     const primed = await withDeadline(
-      gatherRelevantPrimedLines(seed, 6, 6, workspaceRoot),
+      gatherRelevantPrimedLines(seed, 6, 6, workspaceRoot, options.chatId),
       T_SLOW
     );
     if (primed && primed.length > 0) {

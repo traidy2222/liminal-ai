@@ -1061,6 +1061,13 @@ const _META_RAW: Record<string, HarnessSettingsFieldMeta> = {
     description: "Harness environment toggle for Send Timeout Ms. See docs/configuration.md (models api).",
     valueKind: "number",
   },
+  "AGENT_CHILD_TIMEOUT_MS": {
+    tabId: "models_api",
+    subgroupId: "streaming",
+    label: "Child Agent Timeout Ms",
+    description: "Wall-clock cap per forkChild sub-agent (default 30m). Align with send/workflow timeouts for long jobs.",
+    valueKind: "number",
+  },
   "AGENT_STREAM_CHUNK_TIMEOUT_MS": {
     tabId: "harness",
     subgroupId: "harness_misc",
@@ -1130,6 +1137,27 @@ const _META_RAW: Record<string, HarnessSettingsFieldMeta> = {
     label: "Yolo",
     description: "Harness environment toggle for Yolo. See docs/configuration.md (safety).",
     valueKind: "boolean",
+  },
+  "AGENT_MISSION_AUTONOMY": {
+    tabId: "safety",
+    subgroupId: "safety",
+    label: "Mission Autonomy",
+    description: "Chain harness sends while task:* notes stay in_progress (requires AGENT_YOLO=1).",
+    valueKind: "boolean",
+  },
+  "AGENT_MISSION_MAX_ITERATIONS": {
+    tabId: "safety",
+    subgroupId: "safety",
+    label: "Mission Max Iterations",
+    description: "Max chained mission sends per session.",
+    valueKind: "number",
+  },
+  "AGENT_AUTO_APPROVE_TOOLS": {
+    tabId: "safety",
+    subgroupId: "safety",
+    label: "Auto Approve Tools",
+    description: "Comma-separated tool names that skip interactive approval (middle ground before YOLO).",
+    valueKind: "string",
   },
   "AGENT_COMPRESS_SEMANTIC": {
     tabId: "session_ui",
@@ -1300,6 +1328,27 @@ const _META_RAW: Record<string, HarnessSettingsFieldMeta> = {
     label: "Auto Dream",
     description: "Harness environment toggle for Auto Dream. See docs/configuration.md (session ui).",
     valueKind: "boolean",
+  },
+  "AGENT_CONSOLIDATE_ON_IDLE": {
+    tabId: "session_ui",
+    subgroupId: "auto_dream",
+    label: "Consolidate On Idle",
+    description: "Run a fast-model consolidation pass when a chat session is reset (min messages gate applies).",
+    valueKind: "boolean",
+  },
+  "AGENT_CONSOLIDATE_MIN_MESSAGES": {
+    tabId: "session_ui",
+    subgroupId: "auto_dream",
+    label: "Consolidate Min Messages",
+    description: "Minimum session log events before idle consolidation runs.",
+    valueKind: "number",
+  },
+  "AGENT_CONSOLIDATE_TIMEOUT_MS": {
+    tabId: "session_ui",
+    subgroupId: "auto_dream",
+    label: "Consolidate Timeout Ms",
+    description: "Wall-clock cap for the idle consolidation fast-model call.",
+    valueKind: "number",
   },
   "AGENT_AUTO_DREAM_INJECT_TRANSCRIPT": {
     tabId: "session_ui",
@@ -1791,6 +1840,13 @@ const _META_RAW: Record<string, HarnessSettingsFieldMeta> = {
     subgroupId: "intent",
     label: "Intent Routing",
     description: "Harness environment toggle for Intent Routing. See docs/configuration.md (harness).",
+    valueKind: "boolean",
+  },
+  "AGENT_COMPLEXITY_ROUTING": {
+    tabId: "harness",
+    subgroupId: "intent",
+    label: "Complexity Routing",
+    description: "Route trivial non-creative turns to the fast model when the LLM classifier is confident.",
     valueKind: "boolean",
   },
   "AGENT_INTENT_FAST_THRESHOLD": {

@@ -32,7 +32,11 @@ import { distillToolOutput, shouldDistillToolOutput } from "./output_distill.js"
 import { appendFailureLog } from "./failure_log.js";
 import { completeChatJson, getFastModelSlug } from "./router.js";
 import { stableArgsJsonKey } from "./json_stable.js";
-import { buildHarnessRuleRecallMessage } from "./harness_rules.js";
+import {
+  buildHarnessRuleRecallMessage,
+  buildHarnessRuleRecallMessageForIntent,
+} from "./harness_rules.js";
+import { inferIntentToolFamilies } from "./intent_tool_families.js";
 import {
   batchHasUndispatchableFileWrites,
   fileWriteSafeToDispatch,
@@ -51,10 +55,15 @@ import {
   resolveWriteStreamSinkEnabled,
   resolveWriteStreamSinkMinChars,
 } from "./file_write_stream_sink.js";
-import { recordRecipe } from "./recipe_library.js";
+import { formatRecipeLibraryHints, recordRecipe } from "./recipe_library.js";
 import { addCompressionGuideline, formatCompressionGuidelines } from "./compression_guidelines.js";
 import { bumpRuleHits, getRuleHitCounts, extractRuleIds, recordRuleOutcomes, getDemotedRuleIds } from "./rule_stats.js";
-import { writeYieldSnapshot } from "./session_event_log.js";
+import { readYieldSnapshot, writeYieldSnapshot } from "./session_event_log.js";
+import {
+  buildResumeMissionBlock,
+  evaluateMissionContinue,
+  loadLatestInProgressTask,
+} from "./mission_controller.js";
 import { SharedMemoryBus } from "./shared_memory_bus.js";
 import {
   resolveProviderConfig,
@@ -448,6 +457,10 @@ function buildToolAwarenessSnapshot(registry: ToolRegistry, recentTools: string[
   );
 }
 
+function activeToolNamesHash(registry: ToolRegistry): string {
+  return registry.getActiveToolNames().slice().sort().join("\0");
+}
+
 function buildToolCapabilityManifest(registry: ToolRegistry): string {
   const allTools = registry.getToolNames();
   const activeSet = new Set(registry.getActiveToolNames());
@@ -741,6 +754,15 @@ function inferLoopBreakSuggestion(toolName: string, errSnippet: string): string 
 
 type VaultAutoWriteMode = "off" | "research" | "aggressive";
 
+function resolveChildTimeoutMs(prefs: RuntimePreferences | null): number {
+  const raw = resolveHarnessEnvRaw("AGENT_CHILD_TIMEOUT_MS", prefs)?.trim();
+  if (raw) {
+    const n = parseInt(raw, 10);
+    if (Number.isFinite(n) && n > 0) return Math.max(5_000, Math.min(7_200_000, n));
+  }
+  return 1_800_000;
+}
+
 function resolveVaultAutoWriteMode(): VaultAutoWriteMode {
   const raw = (effectiveHarnessEnvRaw("AGENT_VAULT_AUTO_WRITE") ?? "").trim().toLowerCase();
   if (raw === "0" || raw === "off" || raw === "false" || raw === "disabled") return "off";
@@ -988,6 +1010,15 @@ export class AgentHarness {
 
   /** True once world context has been injected (only happens on the first send() of a root agent). */
   private worldContextInjected = false;
+  /** Cached tool capability manifest — invalidated when active tool set changes. */
+  private toolManifestCache: { hash: string; text: string } | null = null;
+  private resumeMissionInjectedThisSend = false;
+  private missionChainedSendsThisSession = 0;
+  /**
+   * Root harness: schedule an internal continuation send after mission turn_end.
+   * Wired by web/TUI bridge — must not fire while the user is typing.
+   */
+  onMissionContinue?: (continuationUserMessage: string) => void;
 
   /** Paths successfully read_file'd this send (working state). */
   private filesReadThisTurn: string[] = [];
@@ -1464,12 +1495,33 @@ export class AgentHarness {
     return this.running;
   }
 
+  /** On-demand session consolidation via the consolidate_chat tool (if registered). */
+  async runConsolidateChat(maxChars?: number): Promise<{ ok: boolean; output?: string; error?: string }> {
+    if (!this.registry.has("consolidate_chat")) {
+      return { ok: false, error: "consolidate_chat tool not registered" };
+    }
+    const r = await this.dispatcher.directCall("consolidate_chat", {
+      chat_id: this.taskId,
+      ...(maxChars !== undefined ? { max_chars: maxChars } : {}),
+    });
+    return r.ok ? { ok: true, output: r.output } : { ok: false, error: r.error };
+  }
+
   private refreshToolAwareness(reason?: string): void {
     if (this.config.workingStateEnabled === false || !this.context.getEpistemicState()) return;
     const suffix = reason ? `\nAWARENESS_REFRESH_REASON: ${reason}` : "";
     this.context.patchEpistemicState({
       harnessNotes: buildToolAwarenessSnapshot(this.registry, this.toolsUsedThisTurn) + suffix,
     });
+  }
+
+  /** Session-scoped manifest — rebuild only when the active tool set changes. */
+  private getToolCapabilityManifest(): string {
+    const hash = activeToolNamesHash(this.registry);
+    if (this.toolManifestCache?.hash === hash) return this.toolManifestCache.text;
+    const text = buildToolCapabilityManifest(this.registry);
+    this.toolManifestCache = { hash, text };
+    return text;
   }
 
   /**
@@ -2103,6 +2155,7 @@ export class AgentHarness {
     this.changedFilesThisTurn = new Set();
     this.lintRelatedFilesThisTurn = new Set();
     this.turnInference = null;
+    this.resumeMissionInjectedThisSend = false;
     try {
       if (openingTurn) {
         this.turnInference = {
@@ -2195,6 +2248,21 @@ export class AgentHarness {
     if (this.turnInference && !openingTurn) {
       this.turnInference = applyTurnInferenceHeuristics(userMessage, this.turnInference);
     }
+    if (!openingTurn && this.agentDepth === 0 && !this.resumeMissionInjectedThisSend) {
+      try {
+        const task = await loadLatestInProgressTask();
+        if (task) {
+          const yieldSnap = await readYieldSnapshot(this.taskId);
+          this.context.appendMessage({
+            role: "system",
+            content: buildResumeMissionBlock(task, yieldSnap),
+          });
+          this.resumeMissionInjectedThisSend = true;
+        }
+      } catch {
+        /* non-fatal */
+      }
+    }
     this._turnRoutingProfile = buildRoutingProfile(this.turnInference ?? null, this.config.model);
     if (!openingTurn) {
       const routingModel = this._turnRoutingProfile.modelSlug;
@@ -2269,6 +2337,48 @@ export class AgentHarness {
               "The workflow tools are now active. Prefer plan_workflow (draft the phases) → run_workflow (execute; approval-gated) over orchestrating spawn_agent calls yourself; use query_workflow to pull any per-agent detail afterward. " +
               "If on reflection this is actually a small, single-step task, ignore this and proceed directly.",
           });
+        }
+      }
+      // Intent-scoped family pre-seed (coding/research/etc.) — same pattern as workflow activation.
+      if (
+        !openingTurn &&
+        this.registry.isLazyToolLoading() &&
+        this.turnInference?.intent
+      ) {
+        const intentFamilies = inferIntentToolFamilies(
+          this.turnInference.intent,
+          userMessage,
+          {
+            registryHas: (fam) =>
+              this.registry.getToolNames().some(
+                (t) => this.registry.getSuggestedFamilyForTool(t) === fam
+              ),
+          }
+        );
+        if (intentFamilies.length > 0) {
+          const newly = this.registry.activateFamilies(intentFamilies);
+          if (newly.length > 0) {
+            this.context.refreshProtocolDynamic(this.registry.getActiveToolNames());
+            this.refreshToolAwareness("intent_family_preseed");
+          }
+        }
+      }
+      // Per-turn recipe hint (complements world-context recipe block on first send).
+      if (
+        !openingTurn &&
+        resolveHarnessEnvRaw("AGENT_RECIPE_LIBRARY", this.runtimePreferences) !== "0" &&
+        this.turnInference?.intent
+      ) {
+        try {
+          const recipeHint = await formatRecipeLibraryHints(
+            userMessage,
+            this.turnInference.intent
+          );
+          if (recipeHint) {
+            this.context.appendMessage({ role: "system", content: recipeHint });
+          }
+        } catch {
+          /* non-fatal */
         }
       }
     }
@@ -2452,6 +2562,7 @@ export class AgentHarness {
         const worldCtx = await buildWorldContextMessage({
           ...this.config.worldContext,
           firstUserMessage: telemetryUserLabel,
+          chatId: this.taskId,
           activeLlm: {
             model: this.config.model,
             baseURL: this.config.baseURL ?? "",
@@ -2508,7 +2619,7 @@ export class AgentHarness {
           content:
             "[SYSTEM NOTE] Capability awareness preface (non-forcing): use this to know all available families/tools, " +
             "then choose the minimal family activation only when needed.\n" +
-            buildToolCapabilityManifest(this.registry),
+            this.getToolCapabilityManifest(),
         });
       }
 
@@ -2872,7 +2983,7 @@ export class AgentHarness {
     wireSubtaskEventForwarding(this.emitter, childHarness.emitter, childId);
 
     // ── Run child asynchronously ────────────────────────────────────────────
-    const timeoutMs = childConfig.timeoutMs ?? 300_000;
+    const timeoutMs = childConfig.timeoutMs ?? resolveChildTimeoutMs(this.runtimePreferences);
     let timeoutId: ReturnType<typeof setTimeout> | undefined;
 
     const promise: Promise<SubtaskResult> = new Promise<SubtaskResult>(
@@ -3537,6 +3648,25 @@ export class AgentHarness {
     return this.liveDictationThisSend;
   }
 
+  private async maybeScheduleMissionContinue(reason: TurnEndTerminationReason): Promise<void> {
+    const yolo = resolveHarnessEnvRaw("AGENT_YOLO", this.runtimePreferences) === "1";
+    const decision = await evaluateMissionContinue({
+      taskId: this.taskId,
+      prefs: this.runtimePreferences,
+      yolo,
+      chainedSendsThisMission: this.missionChainedSendsThisSession,
+      userAborted: this.abortSignal?.aborted === true,
+      terminationReason: reason,
+    });
+    if (!decision.continue || !decision.userMessage) return;
+    this.missionChainedSendsThisSession += 1;
+    this.emitter.emit("text", {
+      channel: "trace",
+      delta: `\n[mission_continue] scheduling chained send (${this.missionChainedSendsThisSession})\n`,
+    });
+    this.onMissionContinue?.(decision.userMessage);
+  }
+
   /** Emit a single turn_end per send() with telemetry (idempotent). */
   private emitTurnEnd(reason: TurnEndTerminationReason): void {
     if (this.turnEndEmittedThisSend) return;
@@ -3569,6 +3699,9 @@ export class AgentHarness {
             channel: "trace",
           });
         });
+      }
+      if (this.agentDepth === 0 && reason === "ok" && this.onMissionContinue) {
+        void this.maybeScheduleMissionContinue(reason).catch(() => { /* non-fatal */ });
       }
     };
     const shouldAutoSpeak =
@@ -3731,9 +3864,13 @@ export class AgentHarness {
           getRuleHitCounts(),
           getDemotedRuleIds(),
         ]);
-        ruleMsg = buildHarnessRuleRecallMessage(hitCounts, demoted);
+        const intent = this.turnInference?.intent ?? "knowledge";
+        ruleMsg = buildHarnessRuleRecallMessageForIntent(intent, hitCounts, demoted);
       } catch {
-        ruleMsg = buildHarnessRuleRecallMessage(new Map());
+        ruleMsg = buildHarnessRuleRecallMessageForIntent(
+          this.turnInference?.intent ?? "knowledge",
+          new Map()
+        );
       }
       this.context.appendMessage({ role: "system", content: ruleMsg });
       this.injectedRuleIdsThisSend = extractRuleIds(ruleMsg);

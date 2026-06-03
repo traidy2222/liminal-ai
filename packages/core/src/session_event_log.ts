@@ -13,7 +13,7 @@
  *
  * Yield snapshots: AGENT_YIELD_EVERY_N=<n> writes _yield.json every N rounds for crash recovery.
  */
-import { mkdir, appendFile, writeFile } from "node:fs/promises";
+import { mkdir, appendFile, writeFile, readFile } from "node:fs/promises";
 import path from "node:path";
 import type { AgentEmitter } from "./events.js";
 import type { AgentEventMap } from "./types.js";
@@ -296,6 +296,16 @@ export async function writeYieldSnapshot(snapshot: YieldSnapshot): Promise<void>
     await writeFile(target, JSON.stringify(snapshot, null, 2), "utf8");
   } catch {
     /* non-fatal */
+  }
+}
+
+/** Read the latest yield snapshot for crash/mission resume (null if missing). */
+export async function readYieldSnapshot(taskId: string): Promise<YieldSnapshot | null> {
+  try {
+    const raw = await readFile(yieldSnapshotPath(taskId), "utf8");
+    return JSON.parse(raw) as YieldSnapshot;
+  } catch {
+    return null;
   }
 }
 

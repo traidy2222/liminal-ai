@@ -102,6 +102,76 @@ export const HARNESS_RULES: Record<string, string> = {
     "When a recalled memory note is tagged [info from DATE — verify current] and the task depends on that fact being current (e.g., a version number, API shape, or external URL), re-verify with a live tool call before acting on it. Stale facts are context, not directives.",
 };
 
+import type { TurnIntentClass } from "./intent_inference.js";
+
+const INTENT_RULE_IDS: Record<TurnIntentClass, string[]> = {
+  conversational: ["R-OUTPUT-QUALITY", "R-MULTI-PART-USER", "R-MEMORY-CONTEXT"],
+  introspection: ["R-OUTPUT-QUALITY", "R-MEMORY-CONTEXT", "R-TURN-FRESHNESS"],
+  knowledge: ["R-MEMORY-CONTEXT", "R-TURN-FRESHNESS", "R-OUTPUT-QUALITY", "R-MEMORY-FIRST-IDENTITY"],
+  research: [
+    "R-RESEARCH-SCOPE",
+    "R-CITE-QUALITY",
+    "R-LIVE-DATA-HONESTY",
+    "R-TURN-FRESHNESS",
+    "R-ADVERSARIAL-CHECK",
+  ],
+  coding: [
+    "R-READ-ECONOMY",
+    "R-GREP-BEFORE-REFACTOR",
+    "R-TYPECHECK-VERIFY",
+    "R-WRITE-DISCIPLINE",
+    "R-TOOL-RETRY",
+    "R-SCOPE-CREEP",
+  ],
+  execution: [
+    "R-EXEC-ORDER",
+    "R-STAY-IN-BOUNDS",
+    "R-TYPECHECK-VERIFY",
+    "R-TOOL-RETRY",
+    "R-SHELL-BOUNDS",
+  ],
+  creative: ["R-OUTPUT-QUALITY", "R-TURN-FRESHNESS", "R-WRITE-DISCIPLINE", "R-TERM-SCOPE"],
+};
+
+const TOP_VIOLATION_APPEND = 3;
+
+function formatRuleRecallBody(orderedIds: string[]): string {
+  const lines = orderedIds.map((id) => `- **${id}**`);
+  return (
+    `[REMEMBER — harness protocol rule IDs. Full text for each ID is under "## Named rules" in the fixed system message — use that section as the canonical definition.]\n` +
+    lines.join("\n") +
+    `\n`
+  );
+}
+
+/**
+ * Intent-scoped rule recall (~8–12 IDs) plus top violation hits from stats.
+ */
+export function buildHarnessRuleRecallMessageForIntent(
+  intent: TurnIntentClass,
+  hitCounts: Map<string, number>,
+  demotedIds?: ReadonlySet<string>
+): string {
+  const base = (INTENT_RULE_IDS[intent] ?? INTENT_RULE_IDS.knowledge).filter(
+    (id) => HARNESS_RULES[id] && !demotedIds?.has(id)
+  );
+  const seen = new Set(base);
+  const byHits =
+    hitCounts.size > 0
+      ? [...hitCounts.entries()]
+          .filter(([id]) => HARNESS_RULES[id] && !demotedIds?.has(id))
+          .sort((a, b) => b[1] - a[1])
+      : [];
+  for (const [id] of byHits) {
+    if (seen.size >= base.length + TOP_VIOLATION_APPEND) break;
+    if (!seen.has(id)) {
+      seen.add(id);
+      base.push(id);
+    }
+  }
+  return formatRuleRecallBody(base);
+}
+
 /**
  * Compact harness rule recall: lists rule IDs only. Full definitions live in the
  * tools package system protocol under `## Named rules` — avoids duplicating long
@@ -118,12 +188,7 @@ export function buildHarnessRuleRecallMessage(
     hitCounts.size > 0
       ? [...allIds].sort((a, b) => (hitCounts.get(b) ?? 0) - (hitCounts.get(a) ?? 0))
       : [...allIds];
-  const lines = ordered.map((id) => `- **${id}**`);
-  return (
-    `[REMEMBER — harness protocol rule IDs. Full text for each ID is under "## Named rules" in the fixed system message — use that section as the canonical definition.]\n` +
-    lines.join("\n") +
-    `\n`
-  );
+  return formatRuleRecallBody(ordered);
 }
 
 /**

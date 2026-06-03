@@ -8,6 +8,17 @@ import { stableArgsJsonKey } from "./json_stable.js";
 import { effectiveHarnessEnvRaw } from "./harness_effective_env.js";
 import { resolveWorkspaceRoot } from "./workspace_root.js";
 
+function autoApproveToolSet(): Set<string> {
+  const raw = effectiveHarnessEnvRaw("AGENT_AUTO_APPROVE_TOOLS")?.trim();
+  if (!raw) return new Set();
+  return new Set(
+    raw
+      .split(",")
+      .map((s) => s.trim())
+      .filter(Boolean)
+  );
+}
+
 // ─── Schema validation (#5 — Tool Invocation Reliability arXiv:2601.16280) ────
 
 /**
@@ -374,7 +385,18 @@ export class ToolDispatcher {
     }
 
     try {
-      if (requiresHumanApproval) {
+      if (
+        tool.requiresApproval &&
+        autoApproveToolSet().has(name) &&
+        !this.dryRunApprovals &&
+        !this.autoApproveDestructive
+      ) {
+        this.emitter.emit("approval_decision", {
+          callId,
+          name,
+          decision: "approve",
+        });
+      } else if (requiresHumanApproval) {
         if (this.dryRunApprovals) {
           // Dry-run mode: auto-approve without blocking; emit approval_simulated for observability.
           this.emitter.emit("approval_simulated", {

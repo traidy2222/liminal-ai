@@ -136,17 +136,17 @@ export interface TrajectoryWriteInput {
 /**
  * Write a trajectory: memory entry for this send if conditions are met:
  * - AGENT_TRAJECTORY_WRITE=1
- * - ≥3 tools succeeded
- * - At least one hypothesis was active OR ≥2 files were modified
+ * - ≥2 tools succeeded (or ≥1 file modified)
+ * - At least one hypothesis was active OR ≥1 file was modified
  */
 export async function maybeWriteTrajectory(input: TrajectoryWriteInput): Promise<boolean> {
   if (!isEnabled()) return false;
 
   const successCount = input.toolsUsed.filter((t) => t.ok).length;
-  if (successCount < 3) return false;
-
   const hasHypotheses = (input.epistemicState?.hypotheses?.length ?? 0) > 0;
-  const hasModifiedFiles = (input.epistemicState?.filesModified?.length ?? 0) >= 2;
+  const modifiedCount = input.epistemicState?.filesModified?.length ?? 0;
+  const hasModifiedFiles = modifiedCount >= 1;
+  if (successCount < 2 && !hasModifiedFiles) return false;
   if (!hasHypotheses && !hasModifiedFiles) return false;
 
   const now = new Date().toISOString();

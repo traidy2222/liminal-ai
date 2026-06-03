@@ -19,6 +19,7 @@ Web **Settings** writes to (2). See [Configuration basics](../start/configuratio
 | `AGENT_ALWAYS_TOOLS_PROFILE` | `balanced` | yes | no | harness | Harness environment toggle for Always Tools Profile. See docs/configuration.md (harness). |
 | `AGENT_API_BASE_URL` | `https://openrouter.ai/api/v1` | yes | no | models_api | Harness environment toggle for Api Base Url. See docs/configuration.md (models api). |
 | `AGENT_APPROVAL_TIMEOUT_MS` | `120000` | yes | yes | safety | Harness environment toggle for Approval Timeout Ms. See docs/configuration.md (safety). |
+| `AGENT_AUTO_APPROVE_TOOLS` | `run_lint,run_tests,git_status` | yes | no | safety | Comma-separated tool names that skip interactive approval (middle ground before YOLO). |
 | `AGENT_AUTO_DREAM` | `0` | yes | no | session_ui | Harness environment toggle for Auto Dream. See docs/configuration.md (session ui). |
 | `AGENT_AUTO_DREAM_ALLOW_DELETE` | `0` | yes | no | session_ui | Harness environment toggle for Auto Dream Allow Delete. See docs/configuration.md (session ui). |
 | `AGENT_AUTO_DREAM_INJECT_TRANSCRIPT` | `1` | yes | no | session_ui | Harness environment toggle for Auto Dream Inject Transcript. See docs/configuration.md (session ui). |
@@ -43,10 +44,15 @@ Web **Settings** writes to (2). See [Configuration basics](../start/configuratio
 | `AGENT_CAPTCHA_POLL_MS` | `3000` | yes | no | harness | Harness environment toggle for Captcha Poll Ms. See docs/configuration.md (harness). |
 | `AGENT_CAPTCHA_SERVICE` | `2captcha` | yes | no | harness | Harness environment toggle for Captcha Service. See docs/configuration.md (harness). |
 | `AGENT_CAPTCHA_TIMEOUT_MS` | `120000` | yes | no | harness | Harness environment toggle for Captcha Timeout Ms. See docs/configuration.md (harness). |
+| `AGENT_CHILD_TIMEOUT_MS` | `1800000` | yes | no | models_api | Wall-clock cap per forkChild sub-agent (default 30m). Align with send/workflow timeouts for long jobs. |
 | `AGENT_COMPENSATION_ENABLED` | `1` | yes | no | harness | Harness environment toggle for Compensation Enabled. See docs/configuration.md (harness). |
 | `AGENT_COMPENSATION_MAX_ACTIONS` | `32` | yes | no | harness | Harness environment toggle for Compensation Max Actions. See docs/configuration.md (harness). |
+| `AGENT_COMPLEXITY_ROUTING` | `1` | yes | no | harness | Route trivial non-creative turns to the fast model when the LLM classifier is confident. |
 | `AGENT_COMPRESS_SEMANTIC` | `0` | yes | no | session_ui | Harness environment toggle for Compress Semantic. See docs/configuration.md (session ui). |
 | `AGENT_CONCURRENCY_COOLDOWN_MS` | `60000` | yes | no | harness | Harness environment toggle for Concurrency Cooldown Ms. See docs/configuration.md (harness). |
+| `AGENT_CONSOLIDATE_MIN_MESSAGES` | `8` | yes | no | session_ui | Minimum session log events before idle consolidation runs. |
+| `AGENT_CONSOLIDATE_ON_IDLE` | `1` | yes | no | session_ui | Run a fast-model consolidation pass when a chat session is reset (min messages gate applies). |
+| `AGENT_CONSOLIDATE_TIMEOUT_MS` | `30000` | yes | no | session_ui | Wall-clock cap for the idle consolidation fast-model call. |
 | `AGENT_CRITIC` | `0` | yes | no | harness | Harness environment toggle for Critic. See docs/configuration.md (harness). |
 | `AGENT_CRITIC_EVIDENCE` | `1` | yes | no | harness | Harness environment toggle for Critic Evidence. See docs/configuration.md (harness). |
 | `AGENT_CRITIC_MIN_TOOLS` | `4` | yes | no | harness | Harness environment toggle for Critic Min Tools. See docs/configuration.md (harness). |
@@ -67,7 +73,7 @@ Web **Settings** writes to (2). See [Configuration basics](../start/configuratio
 | `AGENT_DICTATION_SILENCE_MS_LONG` | `2500` | yes | no | models_api | Pause threshold for longer recordings. Default 2500ms — more room for mid-thought pauses. |
 | `AGENT_DICTATION_SILENCE_MS_SHORT` | `1500` | yes | no | models_api | Pause threshold for short utterances (< 5s recorded). Default 1500ms — snappy. |
 | `AGENT_DICTATION_WEB_SPEECH` | `0` | yes | no | models_api | Off (default): dictation transcribes server-side via the Transcription Model (no audio sent to the browser vendor's clou |
-| `AGENT_DISTILL` | `0` | yes | no | memory_vault | Harness environment toggle for Distill. See docs/configuration.md (memory vault). |
+| `AGENT_DISTILL` | `1` | yes | no | memory_vault | Harness environment toggle for Distill. See docs/configuration.md (memory vault). |
 | `AGENT_DISTILL_READ_FILE` | `0` | yes | no | memory_vault | When 0 (default), read_file output is always kept verbatim — critical for coding tasks where source code is the model's  |
 | `AGENT_DISTILL_WEB_FETCH` | `0` | yes | no | memory_vault | When 0, web_fetch full text is kept in the tool result (recommended for research). When 1, large fetches are LLM-summari |
 | `AGENT_DOC_AUTONOMY` | `1` | yes | no | documents | Harness environment toggle for Doc Autonomy. See docs/configuration.md (documents). |
@@ -140,6 +146,8 @@ Web **Settings** writes to (2). See [Configuration basics](../start/configuratio
 | `AGENT_MEMORY_MIN_CONFIDENCE_DEFAULT` | `0.35` | yes | no | memory_vault | Harness environment toggle for Memory Min Confidence Default. See docs/configuration.md (memory vault). |
 | `AGENT_MEMORY_PRIME_ROUND0` | `1` | yes | no | memory_vault | Harness environment toggle for Memory Prime Round0. See docs/configuration.md (memory vault). |
 | `AGENT_MIN_CONCURRENT_AGENTS` | `1` | yes | no | harness | Harness environment toggle for Min Concurrent Agents. See docs/configuration.md (harness). |
+| `AGENT_MISSION_AUTONOMY` | `0` | yes | no | safety | Chain harness sends while task:* notes stay in_progress (requires AGENT_YOLO=1). |
+| `AGENT_MISSION_MAX_ITERATIONS` | `20` | yes | no | safety | Max chained mission sends per session. |
 | `AGENT_MODEL` | `deepseek/deepseek-v4-pro` | yes | no | models_api | Harness environment toggle for Model. See docs/configuration.md (models api). |
 | `AGENT_OBSIDIAN_DISCOVER` | `1` | yes | no | memory_vault | Harness environment toggle for Obsidian Discover. See docs/configuration.md (memory vault). |
 | `AGENT_OBSIDIAN_REQUIRE_DOT_OBSIDIAN` | `1` | yes | no | memory_vault | Harness environment toggle for Obsidian Require Dot Obsidian. See docs/configuration.md (memory vault). |
@@ -187,7 +195,7 @@ Web **Settings** writes to (2). See [Configuration basics](../start/configuratio
 | `AGENT_QUERY_REWRITE_EXPLORATORY` | `0` | yes | no | memory_vault | Harness environment toggle for Query Rewrite Exploratory. See docs/configuration.md (memory vault). |
 | `AGENT_RATE_LIMIT_MAX_RETRIES` | `8` | yes | yes | models_api | Harness environment toggle for Rate Limit Max Retries. See docs/configuration.md (models api). |
 | `AGENT_REASONING_BUDGET` | `1` | yes | no | harness | Harness environment toggle for Reasoning Budget. See docs/configuration.md (harness). |
-| `AGENT_REASONING_DEFAULT_EFFORT` | `high` | yes | no | harness | Harness environment toggle for Reasoning Default Effort. See docs/configuration.md (harness). |
+| `AGENT_REASONING_DEFAULT_EFFORT` | `medium` | yes | no | harness | Harness environment toggle for Reasoning Default Effort. See docs/configuration.md (harness). |
 | `AGENT_REASONING_EXTERNAL_SLUGS` | `` | yes | no | harness | Harness environment toggle for Reasoning External Slugs. See docs/configuration.md (harness). |
 | `AGENT_REASONING_NATIVE_SLUGS` | `` | yes | no | harness | Harness environment toggle for Reasoning Native Slugs. See docs/configuration.md (harness). |
 | `AGENT_REASONING_NUDGE_CHARS` | `2500` | yes | no | harness | Harness environment toggle for Reasoning Nudge Chars. See docs/configuration.md (harness). |
@@ -223,7 +231,7 @@ Web **Settings** writes to (2). See [Configuration basics](../start/configuratio
 | `AGENT_SPECULATIVE_READS` | `0` | yes | no | memory_vault | Harness environment toggle for Speculative Reads. See docs/configuration.md (memory vault). |
 | `AGENT_STREAM_CHUNK_TIMEOUT_MS` | `60000` | yes | no | harness | Harness environment toggle for Stream Chunk Timeout Ms. See docs/configuration.md (harness). |
 | `AGENT_STREAM_MAX_RETRIES` | `3` | yes | no | harness | Harness environment toggle for Stream Max Retries. See docs/configuration.md (harness). |
-| `AGENT_TOOL_BODY_ELIDE` | `0` | yes | no | memory_vault | Harness environment toggle for Tool Body Elide. See docs/configuration.md (memory vault). |
+| `AGENT_TOOL_BODY_ELIDE` | `1` | yes | no | memory_vault | Harness environment toggle for Tool Body Elide. See docs/configuration.md (memory vault). |
 | `AGENT_TOOL_ELIDE_KEEP_ROUNDS` | `3` | yes | no | memory_vault | Harness environment toggle for Tool Elide Keep Rounds. See docs/configuration.md (memory vault). |
 | `AGENT_TOOL_ELIDE_MIN_CHARS` | `12000` | yes | no | memory_vault | Harness environment toggle for Tool Elide Min Chars. See docs/configuration.md (memory vault). |
 | `AGENT_TOOL_LAZY` | `1` | yes | no | harness | Harness environment toggle for Tool Lazy. See docs/configuration.md (harness). |
@@ -248,7 +256,7 @@ Web **Settings** writes to (2). See [Configuration basics](../start/configuratio
 | `AGENT_TTS_VOICE` | `af_sky` | yes | no | models_api | Voice preset — must match TTS model: Kokoro (af_sky, af_bella, am_adam, …) or OpenAI (alloy, nova, shimmer, …). Mismatch |
 | `AGENT_UI_VERBOSITY` | `normal` | yes | yes | session_ui | Harness environment toggle for Ui Verbosity. See docs/configuration.md (session ui). |
 | `AGENT_UPSTREAM_429_SUGGESTED_WAIT_MS` | `` | yes | no | models_api | Harness environment toggle for Upstream 429 Suggested Wait Ms. See docs/configuration.md (models api). |
-| `AGENT_VAULT_AUTO_WRITE` | `off` | yes | yes | memory_vault | Harness environment toggle for Vault Auto Write. See docs/configuration.md (memory vault). |
+| `AGENT_VAULT_AUTO_WRITE` | `research` | yes | yes | memory_vault | Harness environment toggle for Vault Auto Write. See docs/configuration.md (memory vault). |
 | `AGENT_VAULT_DEDUPE` | `0` | yes | no | memory_vault | Harness environment toggle for Vault Dedupe. See docs/configuration.md (memory vault). |
 | `AGENT_VAULT_PATH` | `` | yes | no | memory_vault | Harness environment toggle for Vault Path. See docs/configuration.md (memory vault). |
 | `AGENT_VAULT_REQUIRE_LINKS` | `0` | yes | no | memory_vault | Harness environment toggle for Vault Require Links. See docs/configuration.md (memory vault). |

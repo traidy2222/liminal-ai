@@ -267,6 +267,27 @@ test("buildRoutingProfile routes trivial-complexity coding to fast when complexi
   }
 });
 
+test("buildRoutingProfile routes high-confidence knowledge to fast when no edit paths", () => {
+  const prev = process.env["AGENT_INTENT_ROUTING"];
+  process.env["AGENT_INTENT_ROUTING"] = "1";
+  try {
+    const inf: TurnInferenceResult = {
+      ...neutralTurnInferenceResult("test"),
+      intent: "knowledge",
+      confidence: 0.95,
+      source: "llm",
+      likelyEditPaths: [],
+      freshnessSensitive: false,
+    };
+    const profile = buildRoutingProfile(inf, "deepseek/deepseek-v4-pro");
+    assert.notEqual(profile.modelSlug, "deepseek/deepseek-v4-pro");
+    assert.equal(profile.routingReason, "knowledge_high_confidence_fast");
+  } finally {
+    if (prev === undefined) delete process.env["AGENT_INTENT_ROUTING"];
+    else process.env["AGENT_INTENT_ROUTING"] = prev;
+  }
+});
+
 test("buildRoutingProfile does NOT route trivial creative to fast (generation quality matters)", () => {
   const prev = process.env["AGENT_INTENT_ROUTING"];
   const prevFast = process.env["AGENT_FAST_MODEL"];

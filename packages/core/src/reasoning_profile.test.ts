@@ -10,9 +10,9 @@ import {
   tightenReasoningBudgetForUserMessage,
 } from "./reasoning_profile.js";
 
-test("fallbackReasoningBudget defaults coding to high brief toolFirst", () => {
+test("fallbackReasoningBudget defaults coding to configured effort brief toolFirst", () => {
   const b = fallbackReasoningBudget("coding", false);
-  assert.equal(b.reasoningEffort, "high");
+  assert.equal(b.reasoningEffort, "medium");
   assert.equal(b.thinkDepth, "brief");
   assert.equal(b.toolFirstBias, true);
   assert.ok(b.reasoningWordBudget <= 200);
@@ -35,7 +35,7 @@ test("resolveReasoningBudget uses LLM fields when complete", () => {
 test("buildOpenRouterReasoningParam maps effort on native surface", () => {
   assert.deepEqual(
     buildOpenRouterReasoningParam(fallbackReasoningBudget("knowledge", false), "native"),
-    { reasoning: { effort: "high" } }
+    { reasoning: { effort: "medium" } }
   );
 });
 

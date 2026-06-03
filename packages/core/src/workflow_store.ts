@@ -13,7 +13,7 @@
  *
  * BM25 ranking is modeled on SessionToolIndex (session_tool_index.ts).
  */
-import { mkdir, writeFile } from "node:fs/promises";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { resolveWorkspaceRoot } from "./workspace_root.js";
 import { rankDocumentsForQuery, type RankableDoc } from "./memory_rank.js";
@@ -135,5 +135,35 @@ export class WorkflowStore {
     } catch {
       /* best effort */
     }
+  }
+}
+
+export interface WorkflowRunCursor {
+  runId: string;
+  phaseIndex: number;
+  completedPhaseIds: string[];
+  updatedAt: string;
+}
+
+export async function readWorkflowCursor(runId: string): Promise<WorkflowRunCursor | null> {
+  try {
+    const raw = await readFile(path.join(workflowRunDir(runId), "cursor.json"), "utf8");
+    return JSON.parse(raw) as WorkflowRunCursor;
+  } catch {
+    return null;
+  }
+}
+
+export async function writeWorkflowCursor(cursor: WorkflowRunCursor): Promise<void> {
+  try {
+    const dir = workflowRunDir(cursor.runId);
+    await mkdir(dir, { recursive: true });
+    await writeFile(
+      path.join(dir, "cursor.json"),
+      JSON.stringify({ ...cursor, updatedAt: new Date().toISOString() }, null, 2),
+      "utf8"
+    );
+  } catch {
+    /* best effort */
   }
 }
