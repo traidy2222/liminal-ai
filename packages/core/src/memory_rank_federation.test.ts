@@ -167,3 +167,32 @@ describe("federation: rankDocumentsForQuery hard scope filter", () => {
     assert.ok(ranked[0]!.score > ranked[1]!.score, "own-chat note must outrank sibling");
   });
 });
+
+describe("federation: merged remote org notes", () => {
+  it("ranks a teammate workspace note alongside local notes", () => {
+    const docs: RankableDoc[] = [
+      {
+        id: "local:api-port",
+        text: "API listens on port 3001",
+        scope: "workspace",
+        chatId: "chat_a",
+        workspaceFingerprint: "git:proj",
+      },
+      {
+        id: "remote:api-port",
+        text: "API listens on port 3001 shared by team",
+        scope: "workspace",
+        chatId: "chat_b",
+        workspaceFingerprint: "git:proj",
+        userId: "user-teammate",
+      },
+    ];
+    const ranked = rankDocumentsForQuery("which port does API use", docs, {
+      currentChatId: "chat_a",
+      currentWorkspaceFingerprint: "git:proj",
+      siblingDiscount: 0.85,
+    });
+    assert.equal(ranked.length, 2);
+    assert.ok(ranked.some((r) => r.id === "remote:api-port"));
+  });
+});

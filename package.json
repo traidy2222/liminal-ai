@@ -21,6 +21,8 @@
     "test": "npm run test --workspace=@liminal/core",
     "verify-harness-defaults-no-secrets": "node scripts/verify-harness-defaults-no-secrets.mjs",
     "docs:gen": "node scripts/gen-docs-env.mjs",
+    "changelog:gen": "node scripts/gen-changelog.mjs",
+    "changelog:import": "node scripts/changelog-import-from-docs.mjs",
     "benchmark:provider-strategies": "node scripts/benchmark-provider-strategies.mjs",
     "docs:check": "node scripts/docs-check.mjs",
     "docs:dev": "vitepress dev docs",

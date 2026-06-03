@@ -1572,6 +1572,8 @@ export function App() {
   const [vireonEmail, setVireonEmail] = useState<string | null>(null);
   const [vireonTier, setVireonTier] = useState<string | null>(null);
   const [vireonBusy, setVireonBusy] = useState(false);
+  const [teamMemoryStatus, setTeamMemoryStatus] = useState<"active" | "offline" | "not_entitled">("not_entitled");
+  const [orgId, setOrgId] = useState<string | null>(null);
   const [vireonConnectNotice, setVireonConnectNotice] = useState<string | null>(null);
   const [settingsManagedRoute, setSettingsManagedRoute] = useState(false);
 
@@ -1637,10 +1639,14 @@ export function App() {
           connected?: boolean;
           account?: { email?: string } | null;
           tier?: string;
+          orgId?: string | null;
+          teamMemory?: { status?: "active" | "offline" | "not_entitled" };
         };
         setVireonConnected(Boolean(vj.connected));
         setVireonEmail(vj.account?.email ?? null);
         setVireonTier(vj.tier ?? null);
+        setOrgId(vj.orgId ?? null);
+        setTeamMemoryStatus(vj.teamMemory?.status ?? "not_entitled");
       }
       const j = (await r.json()) as {
         fields: HarnessSettingsApiField[];
@@ -2359,6 +2365,8 @@ export function App() {
         vireonBusy={vireonBusy}
         onVireonSignIn={() => void handleVireonSignIn()}
         onVireonSignOut={() => void handleVireonSignOut()}
+        teamMemoryStatus={teamMemoryStatus}
+        orgId={orgId}
       />
 
       {/* ── Approval modal ────────────────────────────────────────────────────── */}

@@ -14,6 +14,12 @@ import {
 import { handleCheckoutCompleted, handleSubscriptionEvent } from "./stripe_handlers.js";
 import { createRateLimiter } from "./rate_limit.js";
 import { logServerError, newCorrelationId, sendInternalError } from "./http_errors.js";
+import { createProRoutes } from "./pro_routes.js";
+import { createTeamRoutes } from "./team_routes.js";
+import { createTeamBusRoutes } from "./team_bus_routes.js";
+import { randomUUID } from "node:crypto";
+import { ensureOrganization, addOrgMember } from "./org_auth.js";
+import { createTeamOrgRoutes } from "./team_org_routes.js";
 
 const PAID_TIERS = ["pro", "team", "enterprise"] as const;
 
@@ -104,6 +110,13 @@ export function createRoutes(deps: RouteDeps): Router {
           .eq("id", req.userId!);
       }
 
+      let orgId: string | undefined;
+      if (tierRaw === "team") {
+        orgId = randomUUID();
+        await ensureOrganization(db, orgId, `Team ${req.userEmail ?? req.userId!.slice(0, 8)}`);
+        await addOrgMember(db, orgId, req.userId!, "owner");
+      }
+
       const session = await stripe.checkout.sessions.create({
         mode: "subscription",
         customer: customerId,
@@ -112,9 +125,17 @@ export function createRoutes(deps: RouteDeps): Router {
         cancel_url: config.checkoutCancelUrl,
         client_reference_id: req.userId!,
         subscription_data: {
-          metadata: { supabase_user_id: req.userId!, tier: tierRaw },
+          metadata: {
+            supabase_user_id: req.userId!,
+            tier: tierRaw,
+            ...(orgId ? { org_id: orgId } : {}),
+          },
         },
-        metadata: { supabase_user_id: req.userId!, tier: tierRaw },
+        metadata: {
+          supabase_user_id: req.userId!,
+          tier: tierRaw,
+          ...(orgId ? { org_id: orgId } : {}),
+        },
       });
 
       res.json({ url: session.url, sessionId: session.id });
@@ -156,6 +177,11 @@ export function createRoutes(deps: RouteDeps): Router {
       sendInternalError(res, correlationId);
     }
   });
+
+  router.use(createTeamOrgRoutes({ db, requireAuth }));
+  router.use(createProRoutes({ config, db }));
+  router.use(createTeamRoutes({ config, db }));
+  router.use(createTeamBusRoutes({ config, db }));
 
   return router;
 }

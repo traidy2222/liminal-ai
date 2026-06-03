@@ -129,6 +129,8 @@ export interface SettingsModalProps {
   onVireonSignIn?: () => void;
   onVireonSignOut?: () => void;
   vireonBusy?: boolean;
+  teamMemoryStatus?: "active" | "offline" | "not_entitled";
+  orgId?: string | null;
 }
 
 export function SettingsModal({
@@ -158,6 +160,8 @@ export function SettingsModal({
   onVireonSignIn,
   onVireonSignOut,
   vireonBusy = false,
+  teamMemoryStatus = "not_entitled",
+  orgId = null,
 }: SettingsModalProps) {
   const [activeTabId, setActiveTabId] = useState<string>("models_api");
   const [search, setSearch] = useState("");
@@ -378,6 +382,35 @@ export function SettingsModal({
                         ) : null}
                       </div>
                     </div>
+                    {(teamMemoryStatus !== "not_entitled" || orgId) && (
+                      <div
+                        style={{
+                          marginBottom: 12,
+                          padding: 10,
+                          borderRadius: 2,
+                          border: "1px solid rgba(var(--lim-accent-rgb),0.15)",
+                          background: "rgba(0,12,24,0.6)",
+                        }}
+                      >
+                        <div style={{ fontSize: 11, color: "#aabbcc", marginBottom: 6 }}>Team shared memory</div>
+                        <div style={{ fontSize: 12, fontFamily: "monospace", color: teamMemoryStatus === "active" ? GREEN : AMBER }}>
+                          {teamMemoryStatus === "active"
+                            ? "Active — org notes sync each turn (EE + AGENT_TEAM_MEMORY_SYNC)"
+                            : teamMemoryStatus === "offline"
+                              ? "Offline — entitled but org not bound or sync disabled"
+                              : "Not entitled — Team tier required"}
+                        </div>
+                        {orgId ? (
+                          <div style={{ fontSize: 10, color: "#778899", marginTop: 6 }}>
+                            Org: <span style={{ fontFamily: "monospace" }}>{orgId}</span>
+                          </div>
+                        ) : (
+                          <div style={{ fontSize: 10, color: AMBER, marginTop: 6 }}>
+                            No org on license — complete Team checkout or re-login.
+                          </div>
+                        )}
+                      </div>
+                    )}
                     <div style={{ fontSize: 10, color: "#778899", marginBottom: 8 }}>{providerHintText}</div>
                     <div style={{ display: "grid", gridTemplateColumns: "120px 1fr", gap: 8, alignItems: "center", marginBottom: 10 }}>
                       <span style={{ fontSize: 11, color: "#aabbcc" }}>preset</span>

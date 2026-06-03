@@ -317,12 +317,18 @@ export const recallRelevantTool = defineTool({
       if (embedModel && apiKey) {
         emit?.(`  embedding lookup (${embedModel.split("/").pop()})…\n`);
         try {
-          await upsertNoteEmbeddings({
-            apiKey,
-            baseURL,
-            model: embedModel,
-            notes: plain,
-          });
+          const { resolveOrgContext, effectiveHarnessEnvRaw } = await import("@liminal/core");
+          const orgCtx = resolveOrgContext();
+          const teamBulkEmbed =
+            !orgCtx.orgId || effectiveHarnessEnvRaw("AGENT_TEAM_EMBED_ON_RECALL") === "1";
+          if (teamBulkEmbed) {
+            await upsertNoteEmbeddings({
+              apiKey,
+              baseURL,
+              model: embedModel,
+              notes: plain,
+            });
+          }
           const idx = await loadEmbedIndex();
           const embedText = (hyde || queries.join(" | ")).slice(0, 8000);
           const { vectors } = await fetchEmbeddings({

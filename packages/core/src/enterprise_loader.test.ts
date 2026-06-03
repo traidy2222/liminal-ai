@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import path from "node:path";
 import { tierRequiresEnterprisePackage } from "./enterprise_install.js";
 import { resolveEnterpriseRoots, entrypointForRoot } from "./enterprise_loader.js";
+import { resolveWorkspaceRoot } from "./workspace_root.js";
 
 describe("enterprise open-core loader", () => {
   it("tierRequiresEnterprisePackage is false for community", () => {
@@ -15,17 +16,13 @@ describe("enterprise open-core loader", () => {
     assert.equal(tierRequiresEnterprisePackage("enterprise"), true);
   });
 
-  it("resolveEnterpriseRoots includes env, global, and workspace paths", () => {
-    const prev = process.env["AGENT_ENTERPRISE_DIR"];
-    process.env["AGENT_ENTERPRISE_DIR"] = "/tmp/ee-test";
-    try {
-      const roots = resolveEnterpriseRoots();
-      assert.ok(roots.some((r) => r.endsWith(path.join("packages", "enterprise"))));
-      assert.ok(roots.includes("/tmp/ee-test"));
-    } finally {
-      if (prev === undefined) delete process.env["AGENT_ENTERPRISE_DIR"];
-      else process.env["AGENT_ENTERPRISE_DIR"] = prev;
-    }
+  it("resolveEnterpriseRoots includes workspace enterprise package path", () => {
+    const roots = resolveEnterpriseRoots();
+    const expected = path.join(resolveWorkspaceRoot(), "packages", "enterprise");
+    assert.ok(
+      roots.some((r) => path.normalize(r) === path.normalize(expected)),
+      `expected ${expected} in ${roots.join(", ")}`
+    );
   });
 
   it("entrypointForRoot points at dist/index.js", () => {

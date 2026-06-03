@@ -181,7 +181,11 @@ backend. Deploy it separately from the marketing site; see
 | `GET` | `/api/inference/session` | Bearer license | Mint a short-lived inference session JWT |
 | `GET` | `/api/inference/status` | Bearer license | Wallet / entitlement / remaining credits |
 | `GET` | `/api/enterprise/bundle` | Bearer license | Download the EE bundle (`.tar.gz`) |
-| `*` | `/api/pro/cloud_sync/*`, `/api/pro/session_history` | Bearer license | Pro cloud features |
+| `GET`/`PUT` | `/api/pro/cloud_sync/notes`, `/api/pro/cloud_sync/vault` | Bearer license + `pro.cloud_sync` | User notes/vault sync |
+| `POST` | `/api/pro/session_history` | Bearer license + `pro.session_history` | Session chunk upload |
+| `GET`/`PUT` | `/api/team/memory/notes` | Bearer license + `team.shared_memory` | Org workspace notes |
+| `GET` | `/api/team/memory/status` | Bearer license + `team.shared_memory` | Org sync status |
+| `POST`/`GET` | `/api/team/bus/publish`, `/api/team/bus/subscribe` | Bearer license + `team.shared_memory` | Live bus (optional) |
 
 ## Self-hosted control plane (Enterprise)
 

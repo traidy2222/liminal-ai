@@ -28,6 +28,8 @@ export interface VireonAccountRecord {
   email: string;
   tier: string;
   licenseSub?: string;
+  /** Supabase auth user id when known (team RBAC / attribution). */
+  supabaseUserId?: string;
   connectedAt: number;
   /** Last successful connect method */
   source: "browser" | "paste" | "env";
@@ -141,6 +143,21 @@ export async function loadHarnessEntitlements(): Promise<ResolvedEntitlements> {
   const token = await resolveLicenseTokenForHarness();
   if (!token) return loadResolvedEntitlements({ token: "" });
   return loadResolvedEntitlements({ token });
+}
+
+/** Org / user ids for team memory and note attribution. */
+export async function resolveOrgContextForHarness(): Promise<{
+  orgId?: string;
+  userId?: string;
+  licenseSub?: string;
+}> {
+  const ent = await loadHarnessEntitlements();
+  const account = await readVireonAccount();
+  return {
+    orgId: ent.license?.org?.trim() || undefined,
+    licenseSub: ent.license?.sub ?? account?.licenseSub,
+    userId: account?.supabaseUserId,
+  };
 }
 
 export function defaultVireonSiteOrigin(): string {

@@ -34,7 +34,7 @@ function main() {
     createStripeWebhookHandler(deps)
   );
 
-  app.use(express.json({ limit: "64kb" }));
+  app.use(express.json({ limit: "8mb" }));
   app.use(createRoutes(deps));
 
   app.listen(config.port, () => {

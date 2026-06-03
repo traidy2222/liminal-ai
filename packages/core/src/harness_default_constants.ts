@@ -318,6 +318,11 @@ export const HARNESS_ENV_DEFAULTS: Readonly<Record<string, string>> = {
   AGENT_CURATOR_PROTECT_ACCESS_COUNT: "3",   // never prune notes accessed >= this many times
   AGENT_CURATOR_PROTECT_MIN_AGE_HOURS: "24", // never prune notes younger than this (by createdAt)
   AGENT_MEMORY_MAX_NOTES: "0",        // reserved: future budget-triggered auto-curation (0 = off)
+  // Team shared memory (EE + control plane; requires team.shared_memory entitlement)
+  AGENT_TEAM_MEMORY_SYNC: "1",        // pull/push org notes each turn when entitled
+  AGENT_TEAM_EMBED_ON_RECALL: "0",    // when 0, skip bulk note embedding on recall for org users
+  AGENT_TEAM_BUS: "0",                // live team bus (SSE); async sync is default
+  AGENT_CONTROL_PLANE_URL: "",        // optional direct CP base (dev); else AGENT_VIREON_SITE_URL proxy
   // Dynamic workflows (ultracode-equivalent) — multi-phase sub-agent fan-out
   // with results kept out of the parent context.
   AGENT_WORKFLOWS: "1",               // master switch for plan_workflow/run_workflow tools

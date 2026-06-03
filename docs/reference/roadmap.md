@@ -2,11 +2,11 @@
 
 Where Liminal is today and what comes next. **Dates are directional, not commitments** — alpha moves fast on `main`.
 
-**Current stage:** **alpha** (`v0.0.16`, June 2026). Beta, RC, and **v0.1.0 public preview** are [planned milestones](./changelog.md#planned-not-started), not shipped yet.
+**Current stage:** **alpha** (`v0.0.17`, June 2026). Beta, RC, and **v0.1.0 public preview** are [planned milestones](./changelog.md#planned-not-started), not shipped yet.
 
 ---
 
-## Now — Alpha (v0.0.16)
+## Now — Alpha (v0.0.17)
 
 What you can run today from [Install](../start/install.md):
 
@@ -95,7 +95,7 @@ Liminal is the only product you can install today. Vireon Dynamics names the res
 | Product | Status | What it is |
 |---------|--------|------------|
 | **Liminal AI** | Alpha · shipping | This repo — local-first harness + TUI/web |
-| **Liminal for Teams** | In development | Shared personas, team vault patterns, audit-friendly session logs |
+| **Liminal for Teams** | Alpha (v0.0.17) | Org-scoped shared memory sync; fleet/audit/policy governance still planned |
 | **Vireon Bench** | Research | CI-grade harness regression testing from the eval suite |
 | **Harness SDK** | Research | Embed the loop in your own IDE, bot, or vertical agent |
 

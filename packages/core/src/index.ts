@@ -1,5 +1,23 @@
 export { resolveWorkspaceRoot, runWithWorkspaceRoot } from "./workspace_root.js";
 export { resolveCurrentChatId, runWithChatId } from "./chat_context.js";
+export { resolveOrgContext, runWithOrgContext } from "./org_context.js";
+export type { OrgContext } from "./org_context.js";
+export {
+  getNotesFacade,
+  setNotesFacade,
+  setNotesFacadeFactory,
+  getNoteValue,
+  defaultScopeForKey,
+  LocalNotesFacade,
+} from "./notes_facade.js";
+export type {
+  CloudSyncNotesPutBody,
+  CloudSyncNotesGetResponse,
+  TeamMemoryNotesPutBody,
+  TeamMemoryNotesGetResponse,
+} from "./cloud_sync_types.js";
+export type { NotesFacade, StoredNote, RawNotesStore, NoteScope } from "./notes_facade.js";
+export { resolveOrgContextForHarness } from "./vireon_account.js";
 export {
   resolveGlobalStorageRoot,
   ensureGlobalStorageRoot,
@@ -732,6 +750,7 @@ export {
 } from "./enterprise_loader.js";
 export type {
   EnterpriseModule,
+  EnterpriseWireInput,
   EnterpriseLoadResult,
   EnterpriseWireResult,
   WireEnterpriseEditionResult,

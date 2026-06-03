@@ -22,6 +22,18 @@ matching **entitlement** is present. The entitlement **verifier** lives in CE
 (`packages/core/src/entitlements.ts`) on purpose — see
 [security model](#security-model) below.
 
+## Team memory hooks (CE contract)
+
+`AgentHarness` exposes optional callbacks wired by EE when `team.shared_memory` or
+`pro.cloud_sync` is active:
+
+- `onTurnStartMemorySync` — pull cloud/org note deltas before ReAct round 0
+- `onTurnEndMemorySync` — push dirty notes after `turn_end`
+- `onRecallMerge` — optional remote candidate injection before auto-recall
+
+EE may also register `createNotesFacade(ctx)` via `wireEnterpriseHarness` to wrap the local
+`NotesFacade` ([`packages/core/src/notes_facade.ts`](../../packages/core/src/notes_facade.ts)).
+
 ## How it loads
 
 1. **Community Edition** (`core`, `tools`, `web`, `tui`) is fully functional without EE.

@@ -118,6 +118,8 @@ import { readFile as readFileFs } from "node:fs/promises";
 import path from "node:path";
 import { resolveWorkspaceRoot, runWithWorkspaceRoot } from "./workspace_root.js";
 import { runWithChatId } from "./chat_context.js";
+import { runWithOrgContext } from "./org_context.js";
+import { resolveOrgContextForHarness } from "./vireon_account.js";
 import {
   markEpistemicPlanStepDone,
   mergeExtractedSubgoals,
@@ -996,6 +998,16 @@ export class AgentHarness {
    * Set by `packages/tools` during `registerAllTools` — must not import tools from core.
    */
   onTurnEndCleanup?: (taskId: string) => void | Promise<void>;
+
+  /** EE: pull org / cloud notes before ReAct round 0 (team.shared_memory / pro.cloud_sync). */
+  onTurnStartMemorySync?: (taskId: string) => void | Promise<void>;
+  /** EE: push dirty notes after turn_end (chained with onTurnEndCleanup). */
+  onTurnEndMemorySync?: (taskId: string) => void | Promise<void>;
+  /** EE: merge remote note candidates before auto-recall ranking (optional). */
+  onRecallMerge?: (input: {
+    query: string;
+    workspaceFingerprint?: string;
+  }) => void | Promise<void>;
 
   // ── Per-turn tracking (reset at start of each send()) ──────────────────────
   private toolErrorCounts = new Map<string, number>();
@@ -1996,8 +2008,11 @@ export class AgentHarness {
     // operate on isolated trees (e.g. git worktrees). We also bind the chat id
     // so memory recall + writes can attribute provenance without each tool
     // factory needing a harness reference (federation Phase 2).
+    const orgCtx = await resolveOrgContextForHarness();
     return runWithWorkspaceRoot(this.workspaceRoot, () =>
-      runWithChatId(this.taskId, () => this._sendBody(userMessage, options))
+      runWithChatId(this.taskId, () =>
+        runWithOrgContext(orgCtx, () => this._sendBody(userMessage, options))
+      )
     );
   }
 
@@ -2639,6 +2654,14 @@ export class AgentHarness {
       }
 
       this.syncVoiceModeTools();
+
+      if (this.onTurnStartMemorySync) {
+        try {
+          await Promise.resolve(this.onTurnStartMemorySync(this.taskId));
+        } catch {
+          /* non-fatal */
+        }
+      }
 
       if (sendTimeoutMs > 0) {
         let sendTimeoutId: ReturnType<typeof setTimeout> | undefined;
@@ -3690,16 +3713,30 @@ export class AgentHarness {
     };
     const finish = () => {
       this.emitter.emit("turn_end", payload);
-      const cleanup = this.onTurnEndCleanup;
-      if (cleanup) {
-        void Promise.resolve(cleanup(this.taskId)).catch((err) => {
-          const msg = err instanceof Error ? err.message : String(err);
-          this.emitter.emit("text", {
-            delta: `\n[HARNESS] turn_end cleanup failed: ${msg}\n`,
-            channel: "trace",
-          });
+      const runCleanup = async () => {
+        if (this.onTurnEndMemorySync) {
+          try {
+            await Promise.resolve(this.onTurnEndMemorySync(this.taskId));
+          } catch (err) {
+            const msg = err instanceof Error ? err.message : String(err);
+            this.emitter.emit("text", {
+              delta: `\n[HARNESS] turn_end memory sync failed: ${msg}\n`,
+              channel: "trace",
+            });
+          }
+        }
+        const cleanup = this.onTurnEndCleanup;
+        if (cleanup) {
+          await Promise.resolve(cleanup(this.taskId));
+        }
+      };
+      void runCleanup().catch((err) => {
+        const msg = err instanceof Error ? err.message : String(err);
+        this.emitter.emit("text", {
+          delta: `\n[HARNESS] turn_end cleanup failed: ${msg}\n`,
+          channel: "trace",
         });
-      }
+      });
       if (this.agentDepth === 0 && reason === "ok" && this.onMissionContinue) {
         void this.maybeScheduleMissionContinue(reason).catch(() => { /* non-fatal */ });
       }
@@ -4134,6 +4171,19 @@ export class AgentHarness {
             fallbackReason: this.turnInference?.fallbackReason,
             exploratoryCreative: Boolean(this.turnInference?.exploratoryCreative),
           });
+          if (this.onRecallMerge) {
+            try {
+              const { workspaceFingerprint: wsFp } = await import("./global_storage.js");
+              await Promise.resolve(
+                this.onRecallMerge({
+                  query: queries[0]!.slice(0, 800),
+                  workspaceFingerprint: wsFp(),
+                })
+              );
+            } catch {
+              /* non-fatal */
+            }
+          }
           const r = await this.dispatcher.directCall(useMq ? "memory_query" : "recall_relevant", payload);
           if (
             r.ok &&

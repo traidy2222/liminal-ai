@@ -234,12 +234,25 @@ export function createRouter(
   router.get("/api/vireon/account", async (_req, res) => {
     const account = await readVireonAccount();
     const ent = await loadHarnessEntitlements();
+    const orgId = ent.license?.org?.trim() || null;
+    const teamMemoryEntitled = ent.entitlements.includes("team.shared_memory");
+    const teamMemorySyncOn = process.env["AGENT_TEAM_MEMORY_SYNC"] !== "0";
+    let teamMemoryStatus: "active" | "offline" | "not_entitled" = "not_entitled";
+    if (teamMemoryEntitled) {
+      teamMemoryStatus = orgId && teamMemorySyncOn ? "active" : "offline";
+    }
     res.json({
       connected: Boolean(account),
       account,
       tier: ent.tier,
       licensed: Boolean(ent.license),
       entitlements: [...ent.entitlements],
+      orgId,
+      teamMemory: {
+        status: teamMemoryStatus,
+        orgBound: Boolean(orgId),
+        syncEnabled: teamMemorySyncOn,
+      },
     });
   });
 

@@ -2,23 +2,39 @@
 
 All notable changes to [Liminal AI](https://github.com/traidy2222/liminal-ai) on the `main` branch.
 
-**Current stage:** **alpha** (`v0.0.16` tip of `main`, 2026-06-02). The workspace package may read `0.1.0`, but **beta**, **RC**, and a **v0.1.0 public preview** have not been declared as product releases yet.
+**Current stage:** **alpha** (`v0.0.17` tip of `main`, 2026-06-02). The workspace package may read `0.1.0`, but **beta**, **RC**, and a **v0.1.0 public preview** have not been declared as product releases yet.
 
 Format: **v0.0.x** entries keyed to the last GitHub push in each slice. Dates are real push dates.
 
 | Surface | Where |
 | -------- | ----- |
-| **Technical changelog (this page)** | Full `Shipped` bullets, env keys, doc links — canonical for harness operators |
-| **Marketing changelog** | [vireondynamics.com/liminal/changelog](https://www.vireondynamics.com/liminal/changelog) — narrative layout, featured latest release |
-| **Short index** | [CHANGELOG.md](https://github.com/traidy2222/liminal-ai/blob/main/CHANGELOG.md) in the repo root |
+| **Source of truth** | [`changelog/releases.json`](../../changelog/releases.json) — run `npm run changelog:gen` |
+| **Technical changelog (this page)** | Generated from JSON — full `Shipped` bullets |
+| **Marketing changelog** | [vireondynamics.com/liminal/changelog](https://www.vireondynamics.com/liminal/changelog) |
+| **Short index** | [CHANGELOG.md](https://github.com/traidy2222/liminal-ai/blob/main/CHANGELOG.md) |
 
-Repo pushes drive both; after editing this file, run `npm run docs-portal:sync` in [vireondynamics-website](https://github.com/traidy2222/vireondynamics-website) before deploying [docs.vireondynamics.com](https://docs.vireondynamics.com/liminal/reference/changelog).
+After editing JSON: `npm run changelog:gen`, commit, push, then in [vireondynamics-website](https://github.com/traidy2222/vireondynamics-website): `npm run docs-portal:sync` and `npm run docs-portal:deploy`.
+
+---
+
+## v0.0.17 — 2026-06-02 {#v0-0-17}
+
+**Current alpha.** Team shared memory, Pro cloud sync APIs, NotesFacade in CE, and org-scoped control-plane storage.
+
+**Shipped**
+
+- **Team shared memory** — `team.shared_memory` entitlement drives org-scoped note replication keyed by `org_id` + `workspace_fingerprint`. Workspace and global notes sync across teammates; chat-scoped notes stay local-only (API + ranker enforced). Enterprise Edition pulls before round 0 and pushes after `turn_end` when `AGENT_TEAM_MEMORY_SYNC=1`
+- **Control plane** — `GET/PUT /api/team/memory/notes`, status, optional SSE bus (`/api/team/bus/*`), Pro user notes/vault sync (`/api/pro/cloud_sync/*`), session history upload, org tables + Team checkout creates org owner, invite flow with seat limits
+- **CE contracts** — `NotesFacade`, `StoredNote` org fields (`userId`, `orgId`, `revision`), `runWithOrgContext`, harness hooks `onTurnStartMemorySync` / `onTurnEndMemorySync` / `onRecallMerge`, `AGENT_TEAM_EMBED_ON_RECALL` to avoid full-store embedding on recall
+- **Web Settings** — Team memory status + org id on `/api/vireon/account` and in the Settings modal
+- **Dev** — `AGENT_CONTROL_PLANE_URL` for local EE sync against `:3002`; changelog now generated from `changelog/releases.json` (`npm run changelog:gen`)
+- **Docs** — [Team memory](../guides/team-memory.md), [Pro & Enterprise](../reference/pro-and-enterprise.md), [Enterprise Edition](../reference/enterprise-edition.md)
 
 ---
 
 ## v0.0.16 — 2026-06-02 {#v0-0-16}
 
-**Current alpha.** Managed inference for Pro, Vireon sign-in, dynamic OpenRouter routing, EE auto-install, security hardening.
+Managed inference for Pro, Vireon sign-in, dynamic OpenRouter routing, EE auto-install, security hardening.
 
 **Shipped**
 
@@ -68,8 +84,6 @@ LLM memory curator, output-effort dial, voice I/O, retrieval reranker, deeper pr
 
 ## v0.0.13 — 2026-05-28 {#v0-0-13}
 
-**Provider presets, Settings catalog completeness, simpler turn end.**
-
 **Shipped**
 
 - **Provider model presets** — One-click OpenRouter packs in web Settings (main + fast slots, provider order pins); DeepSeek, Claude 4.7, GPT 5.5, Gemini 3.5, Qwen 3.6, MiMo, Llama 4, Kimi, GLM, and cross-vendor mixes; slugs verified against OpenRouter `GET /models`
@@ -108,13 +122,13 @@ User-global storage, web multi-chat, audio transcription, and connector tools.
 - **MCP** — `mcp_attach` to wire MCP servers into the live registry
 - **Memory** — `memory_promote`, `memory_neighbors`, `consolidate_chat`; federated rank scoring; exploratory-turn debias (`AGENT_MEMORY_DEBIAS`, optional `AGENT_MEMORY_EXPLORATORY_AUTO_RECALL`)
 - **Harness** — `AGENT_PROMPT_CACHE` (provider cache breakpoints); intent inference heuristics + research finalize judge; vault index helper
-- **Docs** — [Roadmap](./roadmap.md) studio product pipeline; install script comments point at hosted `vireondynamics.com/install/` URLs
+- **Docs** — [Roadmap](./roadmap.md)
 
 ---
 
 ## v0.0.10 — 2026-05-23 {#v0-0-10}
 
-Task Worlds landed earlier on May 23 then was **removed** the same day in favor of **execution state** and **compensation** wiring.
+Task Worlds landed earlier on May 23 then was removed the same day in favor of execution state and compensation wiring.
 
 **Shipped**
 
@@ -126,8 +140,6 @@ Task Worlds landed earlier on May 23 then was **removed** the same day in favor 
 - Web fetch — Wikipedia extracts, pagination, distill bypass, model `max_chars` floor
 - Persona UI themes — distinct palettes, HudShell theme wiring
 - Per-harness workspace root, streaming edit previews in web
-
-**Removed:** Task Worlds (`task_world_*` tools, web HUD mission panel) in commit `199d043`. Mission-style state today is **execution state** + **epistemic state**, not Task Worlds.
 
 ---
 

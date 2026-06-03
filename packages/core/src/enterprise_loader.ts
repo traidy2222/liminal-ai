@@ -18,6 +18,8 @@ import type { ToolRegistry } from "./registry.js";
 import { resolveWorkspaceRoot } from "./workspace_root.js";
 import { globalPath } from "./global_storage.js";
 import type { ResolvedEntitlements } from "./entitlements.js";
+import type { NotesFacade } from "./notes_facade.js";
+import type { OrgContext } from "./org_context.js";
 import { effectiveHarnessEnvRaw } from "./harness_effective_env.js";
 
 const ENTERPRISE_DIR_NAME = "enterprise";
@@ -28,14 +30,18 @@ export type EnterpriseWireResult = {
   skipped: Array<{ id: string; reason: string }>;
 };
 
+export type EnterpriseWireInput = {
+  registry: ToolRegistry;
+  emitter: AgentEmitter;
+  harness: AgentHarness;
+  entitlements?: ResolvedEntitlements;
+  autoActivate?: boolean;
+};
+
 export type EnterpriseModule = {
-  wireEnterpriseHarness: (input: {
-    registry: ToolRegistry;
-    emitter: AgentEmitter;
-    harness: AgentHarness;
-    entitlements?: ResolvedEntitlements;
-    autoActivate?: boolean;
-  }) => Promise<EnterpriseWireResult>;
+  wireEnterpriseHarness: (input: EnterpriseWireInput) => Promise<EnterpriseWireResult>;
+  /** Optional: wrap local notes with cloud / team sync. */
+  createNotesFacade?: (ctx: OrgContext) => NotesFacade;
 };
 
 export type EnterpriseLoadResult =
@@ -174,6 +180,11 @@ export async function wireEnterpriseEdition(input: {
   }
   try {
     const result = await loaded.module.wireEnterpriseHarness(input);
+    if (loaded.module.createNotesFacade) {
+      const { setNotesFacadeFactory } = await import("./notes_facade.js");
+      const createFacade = loaded.module.createNotesFacade;
+      setNotesFacadeFactory((ctx) => createFacade(ctx));
+    }
     return { wired: true, ...result, source: loaded.source };
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);

@@ -1,13 +1,13 @@
 /**
  * Unified memory priming — same federation-aware ranking as recall_relevant.
  */
-import { readFile } from "node:fs/promises";
 import {
   rankDocumentsForQuery,
   chatScopeMultiplier,
   type RankableDoc,
 } from "./memory_rank.js";
-import { notesPaths, pickReadPath, workspaceFingerprint } from "./global_storage.js";
+import { workspaceFingerprint } from "./global_storage.js";
+import { getNotesFacade, getNoteValue } from "./notes_facade.js";
 import { resolveWorkspaceRoot } from "./workspace_root.js";
 import { effectiveHarnessEnvRaw } from "./harness_effective_env.js";
 
@@ -25,7 +25,7 @@ type RawNote =
     };
 
 function noteValue(raw: RawNote): string {
-  return typeof raw === "string" ? raw : String(raw?.value ?? "");
+  return typeof raw === "string" ? getNoteValue(raw) : String(raw?.value ?? "");
 }
 
 function noteField<T>(raw: RawNote, key: keyof Exclude<RawNote, string>): T | undefined {
@@ -69,17 +69,10 @@ export async function rankNotesForPriming(opts: MemoryPrimingOptions): Promise<s
   const limit = Math.max(1, Math.min(24, opts.limit ?? 6));
   const globalOnly = opts.workspaceScope === "global_only";
 
-  let raw: string;
-  try {
-    const notesFile = await pickReadPath(notesPaths(wsRoot));
-    raw = await readFile(notesFile, "utf8");
-  } catch {
-    return [];
-  }
-
   let parsed: Record<string, RawNote>;
   try {
-    parsed = JSON.parse(raw) as Record<string, RawNote>;
+    const store = await getNotesFacade().readAll();
+    parsed = store as Record<string, RawNote>;
   } catch {
     return [];
   }
