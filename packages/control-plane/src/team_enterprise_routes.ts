@@ -8,6 +8,15 @@ import {
   type LicenseAuthedRequest,
 } from "./license_auth.js";
 import { OrgAuthError, requireOrgRole } from "./org_auth.js";
+import {
+  listOrgMembersWithProfiles,
+  listPendingInvites,
+  OrgMemberError,
+  queryAuditEvents,
+  removeMember,
+  revokeInvite,
+  updateMemberRole,
+} from "./org_members.js";
 import { assertLicenseOrgMatch, TeamMemoryPolicyError } from "./team_memory_helpers.js";
 
 export function createTeamEnterpriseRoutes(deps: {
@@ -21,6 +30,33 @@ export function createTeamEnterpriseRoutes(deps: {
   const requireFleet = createLicenseBearerMiddleware(config, ENTITLEMENTS.TEAM_FLEET_CONFIG);
   const requirePolicy = createLicenseBearerMiddleware(config, ENTITLEMENTS.TEAM_POLICY_GOVERNANCE);
   const requireRbac = createLicenseBearerMiddleware(config, ENTITLEMENTS.TEAM_RBAC);
+
+  router.get("/api/team/audit/events", requireAudit, async (req: LicenseAuthedRequest, res: Response) => {
+    try {
+      if (!(await attachLicenseUserId(db, req)) || !req.licenseUserId) {
+        res.status(403).json({ error: "license user not found" });
+        return;
+      }
+      const orgId =
+        (typeof req.query.org_id === "string" ? req.query.org_id : "") ||
+        req.licenseResolved?.license?.org?.trim() ||
+        "";
+      if (!orgId) {
+        res.status(400).json({ error: "org_id required" });
+        return;
+      }
+      assertLicenseOrgMatch(req, orgId);
+      const limit = Number(req.query.limit ?? 50);
+      const result = await queryAuditEvents(db, orgId, req.licenseUserId, limit);
+      res.json({ ok: true, orgId, ...result, nextCursor: null });
+    } catch (err) {
+      if (err instanceof OrgAuthError) {
+        res.status(403).json({ error: "forbidden" });
+        return;
+      }
+      res.status(500).json({ error: err instanceof Error ? err.message : String(err) });
+    }
+  });
 
   router.post("/api/team/audit/events", requireAudit, async (req: LicenseAuthedRequest, res: Response) => {
     try {
@@ -255,12 +291,112 @@ export function createTeamEnterpriseRoutes(deps: {
       }
       assertLicenseOrgMatch(req, orgId);
       await requireOrgRole(db, orgId, req.licenseUserId, "viewer");
-      const { data, error } = await db
-        .from("org_members")
-        .select("user_id, role, created_at, accepted_at")
-        .eq("org_id", orgId);
-      if (error) throw new Error(error.message);
-      res.json({ ok: true, orgId, members: data ?? [] });
+      const members = await listOrgMembersWithProfiles(db, orgId);
+      res.json({ ok: true, orgId, members });
+    } catch (err) {
+      if (err instanceof OrgAuthError) {
+        res.status(403).json({ error: "forbidden" });
+        return;
+      }
+      res.status(500).json({ error: err instanceof Error ? err.message : String(err) });
+    }
+  });
+
+  router.patch("/api/team/org/members", requireRbac, async (req: LicenseAuthedRequest, res: Response) => {
+    try {
+      if (!(await attachLicenseUserId(db, req)) || !req.licenseUserId) {
+        res.status(403).json({ error: "license user not found" });
+        return;
+      }
+      const body = req.body as { orgId?: string; userId?: string; role?: string };
+      const orgId = body.orgId?.trim() || req.licenseResolved?.license?.org?.trim() || "";
+      if (!orgId || !body.userId || !body.role) {
+        res.status(400).json({ error: "orgId, userId, role required" });
+        return;
+      }
+      assertLicenseOrgMatch(req, orgId);
+      await updateMemberRole(db, orgId, req.licenseUserId, body.userId, body.role as "admin" | "member" | "viewer");
+      res.json({ ok: true });
+    } catch (err) {
+      if (err instanceof OrgMemberError || err instanceof OrgAuthError) {
+        res.status(403).json({ error: err instanceof Error ? err.message : "forbidden" });
+        return;
+      }
+      res.status(500).json({ error: err instanceof Error ? err.message : String(err) });
+    }
+  });
+
+  router.delete("/api/team/org/members", requireRbac, async (req: LicenseAuthedRequest, res: Response) => {
+    try {
+      if (!(await attachLicenseUserId(db, req)) || !req.licenseUserId) {
+        res.status(403).json({ error: "license user not found" });
+        return;
+      }
+      const orgId =
+        (typeof req.query.org_id === "string" ? req.query.org_id : "") ||
+        req.licenseResolved?.license?.org?.trim() ||
+        "";
+      const userId = typeof req.query.userId === "string" ? req.query.userId : "";
+      if (!orgId || !userId) {
+        res.status(400).json({ error: "org_id and userId required" });
+        return;
+      }
+      assertLicenseOrgMatch(req, orgId);
+      await removeMember(db, orgId, req.licenseUserId, userId);
+      res.json({ ok: true });
+    } catch (err) {
+      if (err instanceof OrgMemberError || err instanceof OrgAuthError) {
+        res.status(403).json({ error: err instanceof Error ? err.message : "forbidden" });
+        return;
+      }
+      res.status(500).json({ error: err instanceof Error ? err.message : String(err) });
+    }
+  });
+
+  router.get("/api/team/invites", requireRbac, async (req: LicenseAuthedRequest, res: Response) => {
+    try {
+      if (!(await attachLicenseUserId(db, req)) || !req.licenseUserId) {
+        res.status(403).json({ error: "license user not found" });
+        return;
+      }
+      const orgId =
+        (typeof req.query.org_id === "string" ? req.query.org_id : "") ||
+        req.licenseResolved?.license?.org?.trim() ||
+        "";
+      if (!orgId) {
+        res.status(400).json({ error: "org_id required" });
+        return;
+      }
+      assertLicenseOrgMatch(req, orgId);
+      const invites = await listPendingInvites(db, orgId, req.licenseUserId);
+      res.json({ ok: true, orgId, invites });
+    } catch (err) {
+      if (err instanceof OrgAuthError) {
+        res.status(403).json({ error: "forbidden" });
+        return;
+      }
+      res.status(500).json({ error: err instanceof Error ? err.message : String(err) });
+    }
+  });
+
+  router.delete("/api/team/invites", requireRbac, async (req: LicenseAuthedRequest, res: Response) => {
+    try {
+      if (!(await attachLicenseUserId(db, req)) || !req.licenseUserId) {
+        res.status(403).json({ error: "license user not found" });
+        return;
+      }
+      const orgId =
+        (typeof req.query.org_id === "string" ? req.query.org_id : "") ||
+        req.licenseResolved?.license?.org?.trim() ||
+        "";
+      const token = typeof req.query.token === "string" ? req.query.token : "";
+      if (!orgId || !token) {
+        res.status(400).json({ error: "org_id and token required" });
+        return;
+      }
+      assertLicenseOrgMatch(req, orgId);
+      await revokeInvite(db, orgId, req.licenseUserId, token);
+      res.json({ ok: true });
     } catch (err) {
       if (err instanceof OrgAuthError) {
         res.status(403).json({ error: "forbidden" });
