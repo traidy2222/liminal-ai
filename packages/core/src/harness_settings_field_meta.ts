@@ -2067,6 +2067,14 @@ const _META_RAW: Record<string, HarnessSettingsFieldMeta> = {
     description: "Harness environment toggle for Team Bus. See docs/configuration.md (harness).",
     valueKind: "string",
   },
+  "AGENT_TEAM_AUDIT_LOG": {
+    tabId: "harness",
+    subgroupId: "harness_misc",
+    label: "Team Audit Log",
+    description:
+      "When on (Team+), ship turn_end harness metrics to the control-plane audit API (POST /api/team/audit/events).",
+    valueKind: "string",
+  },
   "AGENT_CONTROL_PLANE_URL": {
     tabId: "harness",
     subgroupId: "harness_misc",

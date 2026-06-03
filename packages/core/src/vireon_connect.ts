@@ -120,7 +120,11 @@ export function runVireonConnectFlow(
         });
 
         if (tierRequiresEnterprisePackage(resolved.tier)) {
-          void ensureEnterpriseEditionInstalled({ token }).catch(() => undefined);
+          try {
+            await ensureEnterpriseEditionInstalled({ token, force: false });
+          } catch {
+            /* login still succeeds; harness will retry install on wire */
+          }
         }
 
         res.writeHead(200, {

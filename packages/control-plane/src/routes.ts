@@ -17,8 +17,11 @@ import { logServerError, newCorrelationId, sendInternalError } from "./http_erro
 import { createProRoutes } from "./pro_routes.js";
 import { createTeamRoutes } from "./team_routes.js";
 import { createTeamBusRoutes } from "./team_bus_routes.js";
-import { randomUUID } from "node:crypto";
-import { ensureOrganization, addOrgMember } from "./org_auth.js";
+import {
+  assertOrgReadyForCheckout,
+  OrgServiceError,
+  tierRequiresOrg,
+} from "./org_service.js";
 import { createTeamOrgRoutes } from "./team_org_routes.js";
 import { createTeamEnterpriseRoutes } from "./team_enterprise_routes.js";
 
@@ -111,17 +114,28 @@ export function createRoutes(deps: RouteDeps): Router {
           .eq("id", req.userId!);
       }
 
+      const orgIdRaw = typeof req.body?.orgId === "string" ? req.body.orgId.trim() : "";
+      const quantity = Math.min(
+        50,
+        Math.max(1, Number(req.body?.quantity) || 1)
+      );
       let orgId: string | undefined;
-      if (tierRaw === "team") {
-        orgId = randomUUID();
-        await ensureOrganization(db, orgId, `Team ${req.userEmail ?? req.userId!.slice(0, 8)}`);
-        await addOrgMember(db, orgId, req.userId!, "owner");
+      if (tierRequiresOrg(tierRaw)) {
+        if (!orgIdRaw) {
+          res.status(400).json({
+            error: "orgId is required for Team and Enterprise checkout",
+            setupPath: "/account/organization/setup",
+          });
+          return;
+        }
+        await assertOrgReadyForCheckout(db, req.userId!, orgIdRaw, tierRaw);
+        orgId = orgIdRaw;
       }
 
       const session = await stripe.checkout.sessions.create({
         mode: "subscription",
         customer: customerId,
-        line_items: [{ price: priceId, quantity: 1 }],
+        line_items: [{ price: priceId, quantity }],
         success_url: config.checkoutSuccessUrl,
         cancel_url: config.checkoutCancelUrl,
         client_reference_id: req.userId!,
@@ -141,6 +155,10 @@ export function createRoutes(deps: RouteDeps): Router {
 
       res.json({ url: session.url, sessionId: session.id });
     } catch (err) {
+      if (err instanceof OrgServiceError) {
+        res.status(err.code === "forbidden" ? 403 : 400).json({ error: err.message, code: err.code });
+        return;
+      }
       const correlationId = newCorrelationId();
       logServerError("POST /api/billing/checkout", err, correlationId);
       sendInternalError(res, correlationId);

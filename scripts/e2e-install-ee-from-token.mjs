@@ -8,8 +8,9 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const token = process.argv[2]?.trim();
+const expectTier = process.argv[3]?.trim() || "pro";
 if (!token) {
-  console.error("Usage: node scripts/e2e-install-ee-from-token.mjs <license-token>");
+  console.error("Usage: node scripts/e2e-install-ee-from-token.mjs <license-token> [pro|team|enterprise]");
   process.exit(1);
 }
 
@@ -39,4 +40,29 @@ if (!loaded.ok) {
   process.exit(1);
 }
 
-console.log(`installed=${install.path ?? loaded.source} version=${install.version ?? "?"}`);
+const entPath = path.join(__dirname, "../packages/core/dist/entitlements.js");
+let entMod;
+try {
+  entMod = await import(pathToFileURL(entPath).href);
+} catch {
+  console.error("Build core first: npm run build -w packages/core");
+  process.exit(1);
+}
+
+const resolved = entMod.resolveEntitlements({ token });
+if (resolved.tier !== expectTier) {
+  console.error(`tier mismatch: expected ${expectTier}, got ${resolved.tier}`);
+  process.exit(1);
+}
+if (expectTier === "team" && !entMod.hasEntitlement(resolved, entMod.ENTITLEMENTS.TEAM_SHARED_MEMORY)) {
+  console.error("team license missing team.shared_memory entitlement");
+  process.exit(1);
+}
+if (expectTier === "pro" && !entMod.hasEntitlement(resolved, entMod.ENTITLEMENTS.PRO_CLOUD_SYNC)) {
+  console.error("pro license missing pro.cloud_sync entitlement");
+  process.exit(1);
+}
+
+console.log(
+  `installed=${install.path ?? loaded.source} version=${install.version ?? "?"} tier=${resolved.tier}`
+);

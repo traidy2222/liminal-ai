@@ -15,6 +15,7 @@ import {
   upsertSubscription,
   resolveUserIdFromMetadata,
 } from "./supabase_admin.js";
+import { provisionTeamOrgAfterPayment, tierRequiresOrg } from "./org_service.js";
 
 function tierFromSubscription(
   sub: Stripe.Subscription,
@@ -41,13 +42,21 @@ export async function issueLicenseForSubscription(
   await ensureProfile(db, userId);
   const fallbackExp = Math.floor(Date.now() / 1000) + config.licenseTermDays * 86_400;
   const expSec = epochSecFromDate(periodEnd(sub), fallbackExp);
+  const orgId = (sub.metadata?.org_id as string | undefined)?.trim() || undefined;
+  if (tierRequiresOrg(tier)) {
+    if (!orgId) {
+      throw new Error(`Team/Enterprise license requires org_id on subscription ${sub.id}`);
+    }
+    await provisionTeamOrgAfterPayment(db, userId, orgId);
+  }
+
   const payload = buildLicensePayload(
     {
       userId,
       tier,
       expSec,
       seats: sub.items.data[0]?.quantity ?? 1,
-      orgId: (sub.metadata?.org_id as string | undefined) ?? undefined,
+      orgId,
     },
     config
   );
