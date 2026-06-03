@@ -2,7 +2,7 @@ import { Router, type Response } from "express";
 import { randomBytes } from "node:crypto";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { AuthedRequest } from "./auth.js";
-import { OrgAuthError, addOrgMember, requireOrgRole } from "./org_auth.js";
+import { OrgAuthError, addOrgMember, requireOrgRole, type OrgRole } from "./org_auth.js";
 
 export function createTeamOrgRoutes(deps: {
   db: SupabaseClient;
@@ -61,6 +61,11 @@ export function createTeamOrgRoutes(deps: {
         res.status(404).json({ error: "invite not found or already used" });
         return;
       }
+      const expiresMs = Date.parse(String(invite.expires_at ?? ""));
+      if (Number.isFinite(expiresMs) && expiresMs < Date.now()) {
+        res.status(410).json({ error: "invite expired" });
+        return;
+      }
       const userEmail = (req.userEmail ?? "").trim().toLowerCase();
       if (userEmail && invite.email !== userEmail) {
         res.status(403).json({ error: "invite email mismatch" });
@@ -82,7 +87,7 @@ export function createTeamOrgRoutes(deps: {
         res.status(409).json({ error: "org seat limit reached" });
         return;
       }
-      await addOrgMember(db, orgId, req.userId!, invite.role as "member");
+      await addOrgMember(db, orgId, req.userId!, invite.role as OrgRole);
       await db.from("org_invites").update({ accepted_by: req.userId! }).eq("token", token);
       res.json({ ok: true, orgId });
     } catch (err) {

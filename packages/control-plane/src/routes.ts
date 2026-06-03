@@ -20,6 +20,7 @@ import { createTeamBusRoutes } from "./team_bus_routes.js";
 import { randomUUID } from "node:crypto";
 import { ensureOrganization, addOrgMember } from "./org_auth.js";
 import { createTeamOrgRoutes } from "./team_org_routes.js";
+import { createTeamEnterpriseRoutes } from "./team_enterprise_routes.js";
 
 const PAID_TIERS = ["pro", "team", "enterprise"] as const;
 
@@ -182,6 +183,7 @@ export function createRoutes(deps: RouteDeps): Router {
   router.use(createProRoutes({ config, db }));
   router.use(createTeamRoutes({ config, db }));
   router.use(createTeamBusRoutes({ config, db }));
+  router.use(createTeamEnterpriseRoutes({ config, db }));
 
   return router;
 }

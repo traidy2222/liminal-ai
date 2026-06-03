@@ -322,6 +322,7 @@ export const HARNESS_ENV_DEFAULTS: Readonly<Record<string, string>> = {
   AGENT_TEAM_MEMORY_SYNC: "1",        // pull/push org notes each turn when entitled
   AGENT_TEAM_EMBED_ON_RECALL: "0",    // when 0, skip bulk note embedding on recall for org users
   AGENT_TEAM_BUS: "0",                // live team bus (SSE); async sync is default
+  AGENT_TEAM_AUDIT_LOG: "1",          // ship turn_end events to control-plane audit log (Team+)
   AGENT_CONTROL_PLANE_URL: "",        // optional direct CP base (dev); else AGENT_VIREON_SITE_URL proxy
   // Dynamic workflows (ultracode-equivalent) — multi-phase sub-agent fan-out
   // with results kept out of the parent context.

@@ -33,5 +33,6 @@ The ranker also hides other chats' `chat` notes locally.
 If the control plane is unreachable, the harness keeps using local notes. Sync resumes on the
 next successful pull when connectivity returns.
 
-See also [Pro & Enterprise features](../reference/pro-and-enterprise.md) and
-[Accounts & licensing](./accounts-and-licensing.md).
+See also [Pro & Enterprise features](../reference/pro-and-enterprise.md),
+[Accounts & licensing](./accounts-and-licensing.md), and
+[Test coverage & readiness](./team-memory-testing.md).
