@@ -1,41 +1,60 @@
-# Liminal AI — local agent harness for coding, research, and automation
+# Liminal AI — local coding agent you own
 
-[![License: FSL-1.1-MIT](https://img.shields.io/badge/License-FSL--1.1--MIT-blue.svg)](LICENSE)
-![Node](https://img.shields.io/badge/Node-22%2B-339933?logo=node.js&logoColor=white)
-![TypeScript](https://img.shields.io/badge/TypeScript-5-3178C6?logo=typescript&logoColor=white)
+<p align="center">
+  <a href="https://www.vireondynamics.com/liminal"><img src="https://img.shields.io/badge/Product-Liminal_AI-7c3aed?style=for-the-badge" alt="Liminal AI"></a>
+  <a href="https://github.com/traidy2222/liminal-ai/stargazers"><img src="https://img.shields.io/github/stars/traidy2222/liminal-ai?style=for-the-badge&logo=github&label=Star" alt="GitHub stars"></a>
+  <a href="https://www.vireondynamics.com/liminal/get-started"><img src="https://img.shields.io/badge/Install-90_seconds-22c55e?style=for-the-badge" alt="Install"></a>
+</p>
 
-**Liminal** is a **model-agnostic AI agent harness** for serious software work: a structured ReAct loop with tool dispatch, persistent memory, sub-agents, and matching **terminal + web** UIs. Use any **OpenAI-compatible** API (OpenRouter, local LM Studio, DeepSeek, etc.) — no vendor lock-in, no opaque hosted middleman.
+<p align="center">
+  <strong>Fair-source ReAct harness</strong> · <strong>140+ tools</strong> · <strong>Terminal + web UI</strong> · <strong>Any OpenAI-compatible model</strong>
+</p>
 
-**Built by [Vireon Dynamics](https://www.vireondynamics.com)** · **[Install](https://www.vireondynamics.com/liminal/get-started)** · **[Pricing](https://www.vireondynamics.com/liminal/pricing)** · **[Docs](https://docs.vireondynamics.com/liminal/)** · **[Compare tools](https://www.vireondynamics.com/liminal/compare)**
+<p align="center">
+  <a href="https://www.vireondynamics.com/liminal/get-started"><b>Install</b></a>
+  ·
+  <a href="https://www.vireondynamics.com/liminal">Website</a>
+  ·
+  <a href="https://www.vireondynamics.com/liminal/compare">Compare</a>
+  ·
+  <a href="https://docs.vireondynamics.com/liminal/">Docs</a>
+  ·
+  <a href="https://www.vireondynamics.com/liminal/changelog">Changelog</a>
+  ·
+  <a href="https://www.vireondynamics.com/blog">Blog</a>
+</p>
 
-> **Community Edition is free** under [FSL-1.1-MIT](LICENSE) — full harness on your machine. Optional **Pro / Team** add cloud memory sync and team features via [Vireon](https://www.vireondynamics.com/liminal/pricing).
+<p align="center">
+  Built by <a href="https://www.vireondynamics.com"><b>Vireon Dynamics</b></a> — AI infrastructure studio (Australia). Community Edition is <b>free on your machine</b>; optional <a href="https://www.vireondynamics.com/liminal/pricing">Pro / Team</a> adds cloud sync, org admin, and shared memory.
+</p>
 
-![Liminal web UI mid-task — tool calls for write, shell, and streaming reply](assets/web-ui.png)
+![Liminal web UI — streaming reply with inline tool calls for write, shell, and file edits](assets/web-ui.png)
 
-<p align="center"><em>Web UI mid-task: file writes, shell/type-check, and streamed answers — every tool call visible inline.</em></p>
+<p align="center"><em>Every tool call, approval, and harness trace is visible — not buried in a chat sidebar.</em></p>
 
-## What you get
+---
 
-| | |
-|---|---|
-| **For** | Developers who want a **local, inspectable coding agent** — not a black-box chat tab |
-| **Runs on** | Your machine (Linux, macOS, WSL, Windows) with **your** API keys |
-| **Unlike** | Thin chat wrappers — Liminal is an **orchestration harness** with approvals, memory, evals, and document export |
-| **License** | CE: [FSL-1.1-MIT](LICENSE) (fair-source; MIT on each version after 2 years). EE: commercial ([pricing](https://www.vireondynamics.com/liminal/pricing)) |
+## Table of contents
 
-**Keywords people use:** open-source AI coding agent, local AI agent, OpenRouter agent, autonomous dev agent, ReAct harness, Obsidian vault agent, self-hosted coding assistant.
+- [Install in 90 seconds](#install-in-90-seconds)
+- [Why Liminal](#why-liminal)
+- [See it work](#see-it-work)
+- [What's new](#whats-new)
+- [Pick your path](#pick-your-path)
+- [Capabilities](#capabilities)
+- [Liminal vs other tools](#liminal-vs-other-tools)
+- [Learn on the web](#learn-on-the-web-vireon-dynamics)
+- [Clone & run from source](#clone--run-from-source)
+- [Documentation](#documentation)
+- [Repository layout](#repository-layout)
+- [Contributing](#contributing)
+- [License](#license--commercial-use)
 
-## Why Liminal
+---
 
-- **Model-agnostic** — any OpenAI-compatible endpoint; swap models without rewriting workflows.
-- **Reliability-engineered** — retries, context compression, approval gates, drift scoring, resumable large-file writes; built to finish multi-step tasks.
-- **Transparent** — terminal **and** web UI; stream every tool call, approval, and harness trace.
-- **Knowledge that persists** — typed memory + hybrid BM25/vector recall; optional **Obsidian vault** integration.
-- **Fair-source CE** — run the full Community Edition free; Pro/Team are optional hosted add-ons from Vireon.
+## Install in 90 seconds
 
-**Requirements:** Node.js 22+, npm 10+, an OpenAI-compatible API key (OpenRouter works out of the box).
-
-## Quick start (one command)
+No Vireon account required — only an API key to your provider (OpenRouter works out of the box).
 
 **Linux / macOS / WSL:**
 
@@ -49,19 +68,26 @@ curl -fsSL https://www.vireondynamics.com/install/install.sh | bash
 irm https://www.vireondynamics.com/install/install.ps1 | iex
 ```
 
-This clones the repo, runs setup, and can open the web UI with persona bootstrap. Full paths, CI, and troubleshooting → **[Install guide](https://www.vireondynamics.com/liminal/get-started)** · **[Docs: install](https://docs.vireondynamics.com/liminal/start/install)**.
+Then open the web UI with persona bootstrap, or use the terminal UI:
 
-**Already cloned this repository:**
+```bash
+liminal web --bootstrap --open
+# or
+liminal tui --bootstrap
+```
+
+**Full install guide (troubleshooting, CI, paths):** [vireondynamics.com/liminal/get-started](https://www.vireondynamics.com/liminal/get-started) · [Docs: install](https://docs.vireondynamics.com/liminal/start/install)
+
+<details>
+<summary><b>Already cloned this repo?</b></summary>
 
 ```bash
 npm install
-npm run setup            # interactive wizard → .env + build
-npm run web -- --bootstrap
-# or
-node scripts/liminal.mjs web -- --bootstrap --open
+npm run setup            # wizard → .env + build
+liminal web --bootstrap --open
 ```
 
-Minimal `.env` (if you skip the wizard):
+Minimal `.env`:
 
 ```bash
 AGENT_API_KEY=your_key_here
@@ -71,62 +97,179 @@ AGENT_MODEL=deepseek/deepseek-chat
 
 | Command | Purpose |
 |---------|---------|
-| `liminal setup` / `npm run setup` | First-run wizard |
-| `liminal doctor` / `npm run doctor` | Verify install |
-| `liminal web --bootstrap --open` | Web UI + browser |
-| `liminal tui --bootstrap` | Terminal UI |
+| `liminal setup` | First-run wizard |
+| `liminal doctor` | Verify Node, build, API key |
 | `liminal update` | Pull + rebuild |
 
-First session walkthrough → **[Quickstart](https://docs.vireondynamics.com/liminal/start/quickstart)** · **[Configuration basics](https://docs.vireondynamics.com/liminal/start/configuration-basics)**.
+</details>
 
-## Official site (Vireon Dynamics)
+**Requirements:** Node.js 22+, npm 10+.
 
-Use the marketing site for **install UX, pricing, comparisons, and release notes** (SEO-friendly guides that complement this repo):
+If Liminal saves you time, **[star the repo](https://github.com/traidy2222/liminal-ai)** — it helps other developers find a local alternative to hosted copilots.
 
-| Page | URL |
-|------|-----|
-| **Liminal home** | [vireondynamics.com/liminal](https://www.vireondynamics.com/liminal) |
-| **Get started** | [vireondynamics.com/liminal/get-started](https://www.vireondynamics.com/liminal/get-started) |
-| **Pricing (Community / Pro / Team)** | [vireondynamics.com/liminal/pricing](https://www.vireondynamics.com/liminal/pricing) |
-| **Compare vs other tools** | [vireondynamics.com/liminal/compare](https://www.vireondynamics.com/liminal/compare) |
-| **Guides & use cases** | [Resources hub](https://www.vireondynamics.com/liminal/resources) |
-| **Changelog (product)** | [vireondynamics.com/liminal/changelog](https://www.vireondynamics.com/liminal/changelog) |
-| **Blog** | [vireondynamics.com/blog](https://www.vireondynamics.com/blog) |
+---
 
-### How Liminal compares (2026)
+## Why Liminal
 
-Honest side-by-side pages — local agent vs IDE copilots and chat tools:
+| | Hosted copilot / chat tab | Liminal |
+|---|---------------------------|---------|
+| **Runs where** | Vendor cloud | **Your machine** — keys, repo, logs stay local |
+| **Model** | Often locked | **Any** OpenAI-compatible API (OpenRouter, Anthropic, local LM Studio, …) |
+| **Loop** | Opaque | **ReAct harness** — retries, compression, approvals, evals, sub-agents |
+| **Memory** | Session-only | **Typed notes** + hybrid BM25/vector recall; optional **Obsidian vault** |
+| **License** | Terms of service | CE: **[FSL-1.1-MIT](LICENSE)** (fair-source; MIT on each version after 2 years) |
 
-| Alternative | Comparison |
-|-------------|------------|
-| Cursor | [Liminal vs Cursor](https://www.vireondynamics.com/liminal/compare/cursor) |
-| Claude Code | [Liminal vs Claude Code](https://www.vireondynamics.com/liminal/compare/claude-code) |
-| GitHub Copilot | [Liminal vs GitHub Copilot](https://www.vireondynamics.com/liminal/compare/github-copilot) |
-| Windsurf | [Liminal vs Windsurf](https://www.vireondynamics.com/liminal/compare/windsurf) |
-| Cline | [Liminal vs Cline](https://www.vireondynamics.com/liminal/compare/cline) |
-| Aider | [Liminal vs Aider](https://www.vireondynamics.com/liminal/compare/aider) |
-| Continue | [Liminal vs Continue](https://www.vireondynamics.com/liminal/compare/continue-dev) |
-| OpenHands | [Liminal vs OpenHands](https://www.vireondynamics.com/liminal/compare/openhands) |
+**Who it's for:** developers who want a **local, inspectable coding agent** for real repo work — refactors, tests, research, migrations, and document export — without renting a black-box session.
 
-**All comparisons:** [liminal/compare](https://www.vireondynamics.com/liminal/compare)
+**Keywords:** open-source AI coding agent, local AI agent, OpenRouter agent, Cursor alternative, Claude Code alternative, ReAct harness, Obsidian agent, self-hosted coding assistant.
+
+---
+
+## See it work
+
+Captured from real harness runs (Community Edition, web UI).
+
+| | |
+|:---:|:---:|
+| **Semantic rename** across a TS project | **Web research** — search + parallel fetch |
+| ![Semantic rename](assets/marketing/semantic-rename.gif) | ![Web research](assets/marketing/live-web-research.gif) |
+| **Sub-agents** for parallel work | **Approval gate** before destructive tools |
+| ![Sub-agents](assets/marketing/subagents.gif) | ![Approval gate](assets/marketing/approval-gate.png) |
+| **Memory recall** (BM25 + vectors) | **Persona bootstrap** — voice + themed shell |
+| ![Memory recall](assets/marketing/memory-recall.gif) | ![Persona bootstrap](assets/persona-bootstrap.png) |
+
+More demos and install walkthrough: **[Liminal home](https://www.vireondynamics.com/liminal)** · **[Features](https://www.vireondynamics.com/liminal/features)**
+
+---
+
+## What's new
+
+**Latest:** [Liminal 0.0.17 — team shared memory & cloud sync](https://www.vireondynamics.com/liminal/changelog/v0-0-17) (2026-06-02)
+
+- **Team shared memory** — workspace/global notes sync across org members on the same repo fingerprint ([Team pricing](https://www.vireondynamics.com/liminal/pricing))
+- **Org admin** — members, invites (email via Resend), audit log, fleet/policy ([Team admin docs](https://docs.vireondynamics.com/liminal/) on site)
+- **Pro cloud sync** APIs on the control plane; CE ships hooks, EE performs sync when signed in
+
+**Product changelog (readable releases):** [vireondynamics.com/liminal/changelog](https://www.vireondynamics.com/liminal/changelog) · **Technical:** [docs reference changelog](https://docs.vireondynamics.com/liminal/reference/changelog)
+
+---
+
+## Pick your path
+
+| Goal | Start here |
+|------|------------|
+| **Try it now** | [One-command install](https://www.vireondynamics.com/liminal/get-started) |
+| **Coming from Cursor** | [Liminal vs Cursor](https://www.vireondynamics.com/liminal/compare/cursor) · [Blog: Cursor alternative 2026](https://www.vireondynamics.com/blog/cursor-alternative-2026) |
+| **Coming from Claude Code** | [Liminal vs Claude Code](https://www.vireondynamics.com/liminal/compare/claude-code) |
+| **Windows + local models** | [Local AI coding agent on Windows](https://www.vireondynamics.com/blog/local-ai-coding-agent-windows) |
+| **OpenRouter setup** | [OpenRouter + Liminal](https://www.vireondynamics.com/blog/openrouter-liminal-setup) |
+| **Obsidian brain** | [Memory + Obsidian](https://www.vireondynamics.com/blog/liminal-memory-obsidian) |
+| **Team / org** | [Pricing](https://www.vireondynamics.com/liminal/pricing) → checkout → [account / organization](https://www.vireondynamics.com/account/organization) |
+| **Architecture deep dive** | [Agent harness architecture](https://www.vireondynamics.com/blog/agent-harness-architecture) |
+
+---
 
 ## Capabilities
 
 | Area | What's in the box |
 |------|-------------------|
-| **Reliable loop** | ReAct with retries, context compression, approval gates, drift scoring, optional post-edit self-heal lint |
-| **Tools** | Files (resumable streaming writes), shell/processes, git, code intelligence (AST, symbols, tests, lint), web search + fetch, headless browser + CAPTCHA |
-| **Knowledge** | Typed memory with hybrid BM25 + vector recall; Obsidian vault read/write/graph |
-| **Autonomy** | Sub-agents, intra-round tool DAG, dynamic workflows, contract verification, reasoning-budget control |
+| **Reliable loop** | ReAct with retries, context compression, approval gates, drift scoring, resumable large-file writes, optional post-edit self-heal lint |
+| **Tools** | Files (streaming writes), shell/processes, git, code intelligence (AST, symbols, semantic rename), web search + fetch, headless browser + CAPTCHA |
+| **Knowledge** | Typed memory + hybrid BM25/vector recall; Obsidian vault read/write/graph; recipe library for successful multi-tool turns |
+| **Autonomy** | Sub-agents, intra-round tool DAG, **dynamic workflows**, contract verification, reasoning-budget control |
 | **Documents** | Optional PPTX / DOCX / PDF engine with layout lint and quality gate |
-| **Personas** | Custom assistant voice + themed web shell from one prompt |
+| **Personas** | Custom assistant voice + themed web shell from one bootstrap prompt |
 | **Quality** | Eval packs in `packages/eval`; extensive `core` unit tests |
 
 Liminal is a **harness you run**, not a hosted SaaS. Destructive tools can require approval; use `--yolo` only in trusted environments.
 
-![First-run persona bootstrap — voice, presets, themed UI shell](assets/persona-bootstrap.png)
+---
 
-<p align="center"><em>Persona bootstrap: describe how the assistant should sound; Liminal generates tone and UI chrome — tools and safety unchanged.</em></p>
+## Liminal vs other tools
+
+Honest comparison pages (updated for 2026):
+
+| Tool | Page |
+|------|------|
+| Cursor | [compare/cursor](https://www.vireondynamics.com/liminal/compare/cursor) |
+| Claude Code | [compare/claude-code](https://www.vireondynamics.com/liminal/compare/claude-code) |
+| GitHub Copilot | [compare/github-copilot](https://www.vireondynamics.com/liminal/compare/github-copilot) |
+| Windsurf | [compare/windsurf](https://www.vireondynamics.com/liminal/compare/windsurf) |
+| Cline | [compare/cline](https://www.vireondynamics.com/liminal/compare/cline) |
+| Aider | [compare/aider](https://www.vireondynamics.com/liminal/compare/aider) |
+| Continue | [compare/continue-dev](https://www.vireondynamics.com/liminal/compare/continue-dev) |
+| OpenHands | [compare/openhands](https://www.vireondynamics.com/liminal/compare/openhands) |
+
+**All comparisons:** [vireondynamics.com/liminal/compare](https://www.vireondynamics.com/liminal/compare) · **Guides hub:** [liminal/resources](https://www.vireondynamics.com/liminal/resources)
+
+---
+
+## Learn on the web (Vireon Dynamics)
+
+The marketing site is the best entry for **SEO guides, pricing, comparisons, and release notes** — this README stays technical; the site stays approachable.
+
+| Page | URL |
+|------|-----|
+| **Liminal home** | [vireondynamics.com/liminal](https://www.vireondynamics.com/liminal) |
+| **Get started** | [vireondynamics.com/liminal/get-started](https://www.vireondynamics.com/liminal/get-started) |
+| **Pricing** (Community / Pro / Team) | [vireondynamics.com/liminal/pricing](https://www.vireondynamics.com/liminal/pricing) |
+| **Compare hub** | [vireondynamics.com/liminal/compare](https://www.vireondynamics.com/liminal/compare) |
+| **Resources** (guides + use cases) | [vireondynamics.com/liminal/resources](https://www.vireondynamics.com/liminal/resources) |
+| **Changelog** | [vireondynamics.com/liminal/changelog](https://www.vireondynamics.com/liminal/changelog) |
+| **Blog** (install, alternatives, harness design) | [vireondynamics.com/blog](https://www.vireondynamics.com/blog) |
+| **Studio / contact** | [vireondynamics.com/about](https://www.vireondynamics.com/about) |
+
+**Recommended reads**
+
+- [Introducing Liminal AI](https://www.vireondynamics.com/blog/introducing-liminal) — why a harness, not a hosted agent
+- [Run an AI coding agent without an API key](https://www.vireondynamics.com/blog/run-ai-coding-agent-without-api-key) — local endpoint path
+- [Fair-source FSL for AI tools](https://www.vireondynamics.com/blog/fair-source-fsl-ai-tools) — license philosophy
+- [Self-hosted coding agent](https://www.vireondynamics.com/blog/self-hosted-coding-agent) — ops-minded overview
+
+**Product updates:** subscribe on the [homepage](https://www.vireondynamics.com/) or [blog RSS](https://www.vireondynamics.com/blog/rss.xml).
+
+---
+
+## Clone & run from source
+
+```bash
+git clone https://github.com/traidy2222/liminal-ai.git
+cd liminal-ai
+npm install && npm run setup
+```
+
+| Command | Purpose |
+|---------|---------|
+| `npm run build` | Compile core + tools |
+| `npm run typecheck` | Typecheck all workspaces |
+| `npm run test` | Core unit tests |
+| `npm run tui` / `npm run web` | Run interfaces |
+| `npm run web:dev` | API :3001 + Vite hot reload |
+| `npm run eval -w packages/eval` | Scenario evals (`--only memory`, etc.) |
+
+First session: [Docs quickstart](https://docs.vireondynamics.com/liminal/start/quickstart).
+
+---
+
+## Documentation
+
+**Published docs:** [docs.vireondynamics.com/liminal/](https://docs.vireondynamics.com/liminal/)
+
+| If you need… | Start here |
+|--------------|------------|
+| Install | [start/install](https://docs.vireondynamics.com/liminal/start/install) |
+| First session | [start/quickstart](https://docs.vireondynamics.com/liminal/start/quickstart) |
+| Troubleshooting | [operations/troubleshooting](https://docs.vireondynamics.com/liminal/operations/troubleshooting) |
+| Architecture | [concepts/architecture](https://docs.vireondynamics.com/liminal/concepts/architecture) |
+| Web research | [guides/research-with-web-tools](https://docs.vireondynamics.com/liminal/guides/research-with-web-tools) |
+| Obsidian / vault | [guides/vault-briefs-and-updates](https://docs.vireondynamics.com/liminal/guides/vault-briefs-and-updates) |
+| All `AGENT_*` env keys | [reference/environment](https://docs.vireondynamics.com/liminal/reference/environment) |
+
+Edit docs locally: `npm run docs:dev`. Regenerate env inventory: `npm run docs:gen`.
+
+**Configuration:** secrets in `.env` only; product defaults via web **Settings** or `.agent_runtime_prefs.json`. Narrative: [docs/configuration.md](docs/configuration.md).
+
+---
 
 ## Repository layout
 
@@ -138,72 +281,43 @@ packages/
   web/            Express + React + SSE
   eval/           Evaluation scenarios
   enterprise/     Enterprise Edition (EE) — proprietary
-  control-plane/  Billing + license issuance (deploy with vireondynamics-website)
+  control-plane/  Billing + license issuance (pairs with vireondynamics-website)
 ```
 
 > **Community Edition (CE):** `core`, `tools`, `tui`, `web` — [FSL-1.1-MIT](LICENSE).  
-> **Enterprise Edition (EE):** `enterprise` — proprietary; see [License](#license) and [pricing](https://www.vireondynamics.com/liminal/pricing).
+> **Enterprise Edition (EE):** `packages/enterprise` — proprietary; [pricing](https://www.vireondynamics.com/liminal/pricing).
 
-Build order: **core → tools** before tui/web/eval. Contributor invariants → **`CLAUDE.md`**.
+Build order: **core → tools** before tui/web/eval. Contributor invariants: **`CLAUDE.md`** · **`AGENTS.md`**.
 
-## Commands (contributors)
-
-| Command | Purpose |
-|---------|---------|
-| `npm run setup` | Interactive wizard (`.env`, install, build) |
-| `npm run doctor` | Verify Node, builds, API key |
-| `npm run build` | Compile core + tools |
-| `npm run typecheck` | Typecheck all workspaces |
-| `npm run test` | Core unit tests |
-| `npm run tui` / `npm run web` | Run interfaces |
-| `npm run web:dev` | API :3001 + Vite dev |
-| `npm run eval -w packages/eval` | Scenario evals |
-| `npm run docs:dev` | Local VitePress docs |
-
-Eval filters: `npm run eval -w packages/eval -- --only memory`.
-
-## Configuration
-
-- **Secrets** — `AGENT_API_KEY` in `.env` only (never commit).
-- **Product defaults** — typed harness constants + web **Settings** or `.agent_runtime_prefs.json`.
-- **Full key list** — [environment reference](docs/reference/environment.md) (`npm run docs:gen` after inventory changes).
-
-Narrative overview: [docs/configuration.md](docs/configuration.md) · Profiles: [docs/operations/profiles.md](docs/operations/profiles.md).
-
-## Documentation
-
-**Published (always current for operators):** [docs.vireondynamics.com/liminal/](https://docs.vireondynamics.com/liminal/)
-
-| If you need… | Start here |
-|--------------|------------|
-| One-command install | [install](https://docs.vireondynamics.com/liminal/start/install) · [Marketing install](https://www.vireondynamics.com/liminal/get-started) |
-| First session | [quickstart](https://docs.vireondynamics.com/liminal/start/quickstart) |
-| Troubleshooting | [troubleshooting](https://docs.vireondynamics.com/liminal/operations/troubleshooting) |
-| Architecture | [architecture](https://docs.vireondynamics.com/liminal/concepts/architecture) · [harness protocol](https://docs.vireondynamics.com/liminal/concepts/harness-protocol) |
-| Web research | [research with web tools](https://docs.vireondynamics.com/liminal/guides/research-with-web-tools) |
-| Obsidian / vault | [vault briefs](https://docs.vireondynamics.com/liminal/guides/vault-briefs-and-updates) |
-
-Edit docs locally: `npm run docs:dev`. Product changelog on the site: [liminal/changelog](https://www.vireondynamics.com/liminal/changelog).
+---
 
 ## Contributing
 
-- Keep **`core`** free of **`tools`** imports; rebuild core after harness changes.
-- Run `npm run typecheck` and `npm run test` before PRs.
-- Docs: `npm run docs:gen` when changing managed `AGENT_*` keys; `npm run docs:check` when editing `docs/`.
+1. Keep **`core`** free of **`tools`** imports; rebuild core after harness changes.
+2. Run `npm run typecheck` and `npm run test` before PRs.
+3. Docs: `npm run docs:gen` when changing managed `AGENT_*` keys; `npm run docs:check` when editing `docs/`.
 
-Details: **`CLAUDE.md`** · **[docs/README.md](docs/README.md)**
+---
 
 ## License & commercial use
 
 Liminal is **open-core**:
 
 - **Community Edition (CE)** — `packages/core`, `tools`, `tui`, `web` — [Functional Source License 1.1, MIT Future License](LICENSE) (FSL-1.1-MIT). CE is fully functional standalone. Summary: [docs/reference/license.md](docs/reference/license.md).
-- **Enterprise Edition (EE)** — `packages/enterprise` — proprietary ([LICENSE-EE](packages/enterprise/LICENSE-EE)); requires a valid license entitlement (`packages/core/src/entitlements.ts`). **Pro / Team subscriptions:** [vireondynamics.com/liminal/pricing](https://www.vireondynamics.com/liminal/pricing) · **License key:** [account](https://www.vireondynamics.com/account/license).
+- **Enterprise Edition (EE)** — `packages/enterprise` — [LICENSE-EE](packages/enterprise/LICENSE-EE); requires entitlement. **Subscriptions:** [pricing](https://www.vireondynamics.com/liminal/pricing) · **License key:** [account](https://www.vireondynamics.com/account/license).
 
-FSL in brief:
+FSL in brief: internal commercial use and non-competing products are permitted; you may not ship a substantially similar competing product. Each CE version becomes **MIT** on the second anniversary of its first publication.
 
-- **Permitted:** internal commercial use, education/research, professional services for licensees, and other non–Competing Use purposes.
-- **Not permitted:** products or services that substitute for Liminal or offer substantially similar functionality.
-- **Future MIT:** each CE version also becomes MIT on the second anniversary of its first publication.
+Enterprise, OEM, or competing-use licensing → **[Vireon Dynamics](https://www.vireondynamics.com)** · [contact](https://www.vireondynamics.com/about).
 
-FSL is fair-source, not OSI “open source.” For enterprise, OEM/embed, or competing-use licensing → **[Vireon Dynamics](https://www.vireondynamics.com)** · [contact](https://www.vireondynamics.com/about).
+---
+
+<p align="center">
+  <a href="https://www.vireondynamics.com/liminal/get-started"><b>Install Liminal</b></a>
+  ·
+  <a href="https://github.com/traidy2222/liminal-ai/stargazers"><b>Star on GitHub</b></a>
+  ·
+  <a href="https://www.vireondynamics.com/liminal/compare"><b>Compare tools</b></a>
+</p>
+
+<!-- Suggested GitHub repository topics: ai-agent, coding-agent, autonomous-agent, react-agent, openrouter, local-llm, obsidian, fair-source, typescript, self-hosted, cursor-alternative, claude-code-alternative, developer-tools -->

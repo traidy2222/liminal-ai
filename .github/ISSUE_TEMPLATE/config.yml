@@ -1,0 +1,11 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Install & get started
+    url: https://www.vireondynamics.com/liminal/get-started
+    about: One-command install, wizard, and troubleshooting on the Vireon Dynamics site
+  - name: Documentation
+    url: https://docs.vireondynamics.com/liminal/
+    about: Operator guides, architecture, and environment reference
+  - name: Compare Liminal vs other tools
+    url: https://www.vireondynamics.com/liminal/compare
+    about: Side-by-side pages for Cursor, Claude Code, Cline, and more
