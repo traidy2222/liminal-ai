@@ -11,6 +11,10 @@ import {
   needsGoogleSidecar,
   formatGoogleScopeDiagnostics,
   missingGoogleScopes,
+  GOOGLE_OFFICIAL_MCP_API_IDS,
+  googleCloudMcpApiLibraryUrl,
+  googleProjectIdFromClientId,
+  type GoogleServiceId,
   type GoogleServicePreset,
 } from "@liminal/core";
 import { defineTool } from "./helpers.js";
@@ -300,6 +304,16 @@ export function createConnectorTools(registry: ToolRegistry, _emitter: AgentEmit
             `- ${c.name}: ${c.tools.length} tools, services=[${(c.services ?? []).join(",")}], readOnly=${!!c.readOnly}`
           );
         }
+      }
+      lines.push("");
+      lines.push("### Official MCP APIs (separate from Gmail/Drive API)");
+      lines.push(
+        "Enable these in Cloud Console for MCP tools (403 often means MCP API disabled while classic API works):"
+      );
+      const projectId = googleProjectIdFromClientId();
+      for (const [svc, apiId] of Object.entries(GOOGLE_OFFICIAL_MCP_API_IDS)) {
+        const url = googleCloudMcpApiLibraryUrl(svc as GoogleServiceId, projectId);
+        lines.push(`- ${apiId}${url ? ` → ${url}` : ""}`);
       }
 
       return { ok: true, output: lines.join("\n") };

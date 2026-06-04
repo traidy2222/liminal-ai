@@ -37,6 +37,32 @@ const OFFICIAL_BASE: Record<string, string> = {
   people: "https://people.googleapis.com/mcp/v1",
 };
 
+/**
+ * Separate from classic APIs (gmail.googleapis.com, drive.googleapis.com).
+ * Liminal's official MCP tools call *mcp* endpoints — each needs its own enable in Cloud Console.
+ */
+export const GOOGLE_OFFICIAL_MCP_API_IDS: Partial<Record<GoogleServiceId, string>> = {
+  drive: "drivemcp.googleapis.com",
+  gmail: "gmailmcp.googleapis.com",
+  calendar: "calendarmcp.googleapis.com",
+  chat: "chatmcp.googleapis.com",
+};
+
+export function googleCloudMcpApiLibraryUrl(serviceId: GoogleServiceId, projectId?: string): string | null {
+  const apiId = GOOGLE_OFFICIAL_MCP_API_IDS[serviceId];
+  if (!apiId) return null;
+  const q = projectId?.trim() ? `?project=${encodeURIComponent(projectId.trim())}` : "";
+  return `https://console.cloud.google.com/apis/library/${apiId}${q}`;
+}
+
+/** Numeric project id from OAuth client id (`123456789-xxx.apps.googleusercontent.com`). */
+export function googleProjectIdFromClientId(clientId?: string): string | undefined {
+  const id = clientId?.trim() || process.env.GOOGLE_OAUTH_CLIENT_ID?.trim();
+  if (!id) return undefined;
+  const m = /^(\d+)-/.exec(id);
+  return m?.[1];
+}
+
 /** Sidecar-backed services share one MCP connection (google_ext). */
 const SIDECAR_SERVICES: GoogleServiceId[] = [
   "docs",

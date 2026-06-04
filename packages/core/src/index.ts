@@ -792,6 +792,9 @@ export {
   scopesForGoogleServices,
   needsGoogleSidecar,
   sidecarServiceIds,
+  GOOGLE_OFFICIAL_MCP_API_IDS,
+  googleCloudMcpApiLibraryUrl,
+  googleProjectIdFromClientId,
 } from "./connector_catalog.js";
 export {
   missingGoogleScopes,

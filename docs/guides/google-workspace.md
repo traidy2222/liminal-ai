@@ -13,13 +13,18 @@ One-time **Google Cloud** setup, then one CLI command. After that, tokens and MC
 
 In [Google Cloud Console](https://console.cloud.google.com/) for your OAuth project:
 
-1. **APIs & Services → Library** — enable each API you use:
-   - Gmail API
-   - Google Drive API
-   - Google Calendar API
-   - Google People API
-   - Google Chat API
-   - Google Docs API, Sheets API, Slides API, Forms API, Tasks API (for sidecar)
+1. **APIs & Services → Library** — enable **both** the classic API and the **MCP** API for each official service:
+
+   | You want | Classic API (REST) | **Also enable (MCP tools)** |
+   |----------|-------------------|------------------------------|
+   | Gmail | Gmail API | **Gmail MCP API** (`gmailmcp.googleapis.com`) |
+   | Drive | Google Drive API | **Drive MCP API** (`drivemcp.googleapis.com`) |
+   | Calendar | Google Calendar API | **Calendar MCP API** (`calendarmcp.googleapis.com`) |
+   | Chat | Google Chat API | **Chat MCP API** (`chatmcp.googleapis.com`) |
+
+   Enabling only “Gmail API” fixes direct REST calls but **not** `mcp_google_gmail_*` tools — those hit `gmailmcp.googleapis.com` and return 403 until **Gmail MCP API** is on.
+
+   Sidecar (Docs/Sheets/…): Google Docs API, Sheets API, Slides API, Forms API, Tasks API, People API.
 2. **OAuth consent screen** — add test users if app is in *Testing* mode.
 3. **Credentials → OAuth 2.0 Client** (Web or Desktop).
 3. Add authorized redirect URIs (Web application client):
@@ -106,7 +111,8 @@ Connections persist under `~/.liminal/api_connections/`. OAuth tokens are encryp
 
 ## Troubleshooting
 
-- **Gmail tools return HTTP 403**: (1) Enable **Gmail API** in Cloud Console. (2) Confirm token has gmail scopes — `list_connectors` shows `gmail=yes`. If `gmail=NO`, revoke at [Google Account permissions](https://myaccount.google.com/permissions) and run `liminal connect google --attach` again. (3) Gmail uses official MCP, not the Docs sidecar — `sidecar: running: false` is normal for Gmail-only.
+- **Gmail MCP tools return HTTP 403 but OAuth looks fine**: Enable **Gmail MCP API** (not just Gmail API). Direct `gmail.googleapis.com` can return 200 while `gmailmcp.googleapis.com` still 403. Use `list_connectors` for enable links (project `102482009638` from your client id). Wait 1–2 minutes after enabling, then retry — no re-OAuth needed.
+- **Gmail tools / missing scopes**: Confirm `list_connectors` shows `gmail=yes`; if not, revoke at [Google Account permissions](https://myaccount.google.com/permissions) and run `liminal connect google --attach` again.
 - **OAuth error / no refresh token**: Revoke app access in [Google Account permissions](https://myaccount.google.com/permissions) and reconnect with `prompt=consent`.
 - **Sidecar not ready** (Docs/Sheets): Run `uvx workspace-mcp --help` manually; ensure port 8010 is free.
 - **Tools invisible under lazy loading**: Call `list_connectors` or `activate_tool_family("connectors")`; restored Google connections auto-activate by default.

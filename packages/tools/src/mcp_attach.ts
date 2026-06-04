@@ -3,6 +3,11 @@
  * as local harness tools.
  */
 import type { AgentEmitter, ToolDefinition, ToolRegistry, ToolResult, PropertySchema } from "@liminal/core";
+import {
+  type GoogleServiceId,
+  googleCloudMcpApiLibraryUrl,
+  googleProjectIdFromClientId,
+} from "@liminal/core";
 import { defineTool } from "./helpers.js";
 import {
   type AuthScheme,
@@ -140,6 +145,39 @@ function ensureToolParameterShape(schema: Record<string, unknown>): {
   return { properties: props, required };
 }
 
+const MCP_HOST_TO_SERVICE: Array<{ host: string; service: GoogleServiceId }> = [
+  { host: "gmailmcp.googleapis.com", service: "gmail" },
+  { host: "drivemcp.googleapis.com", service: "drive" },
+  { host: "calendarmcp.googleapis.com", service: "calendar" },
+  { host: "chatmcp.googleapis.com", service: "chat" },
+];
+
+function enrichGoogleMcpToolError(serverUrl: string, message: string): string {
+  if (!/MCP API has not been used|is disabled/i.test(message)) return message;
+  let host = "";
+  try {
+    host = new URL(serverUrl).hostname;
+  } catch {
+    return message;
+  }
+  const match = MCP_HOST_TO_SERVICE.find((e) => host === e.host);
+  if (!match) return message;
+  const projectId = googleProjectIdFromClientId();
+  const enableUrl = googleCloudMcpApiLibraryUrl(match.service, projectId);
+  const classic =
+    match.service === "gmail"
+      ? "Gmail API (gmail.googleapis.com)"
+      : match.service === "drive"
+        ? "Google Drive API"
+        : `${match.service} API`;
+  return (
+    `${message}\n\n` +
+    `Note: ${classic} can work while ${host} is still disabled — they are separate products in Google Cloud.\n` +
+    (enableUrl ? `Enable **${host}** here: ${enableUrl}\n` : "") +
+    `Then wait 1–2 minutes and retry (no need to re-OAuth).`
+  );
+}
+
 function buildMcpToolHandler(record: McpConnectionRecord, tool: McpToolRecord): ToolDefinition["handler"] {
   return async (args): Promise<ToolResult> => {
     let reply: JsonRpcResponse<McpToolCallResult> | null;
@@ -156,7 +194,8 @@ function buildMcpToolHandler(record: McpConnectionRecord, tool: McpToolRecord): 
         true
       );
     } catch (e) {
-      return { ok: false, error: `transport error: ${e instanceof Error ? e.message : String(e)}` };
+      const raw = e instanceof Error ? e.message : String(e);
+      return { ok: false, error: enrichGoogleMcpToolError(record.serverUrl, `transport error: ${raw}`) };
     }
     if (!reply) return { ok: false, error: "no response" };
     if (reply.error) return { ok: false, error: `MCP error ${reply.error.code}: ${reply.error.message}` };
@@ -165,7 +204,9 @@ function buildMcpToolHandler(record: McpConnectionRecord, tool: McpToolRecord): 
       .map((c) => (typeof c.text === "string" ? c.text : ""))
       .filter(Boolean);
     const text = parts.join("\n").trim() || "[empty MCP response]";
-    if (result.isError) return { ok: false, error: text };
+    if (result.isError) {
+      return { ok: false, error: enrichGoogleMcpToolError(record.serverUrl, text) };
+    }
     return { ok: true, output: text };
   };
 }
