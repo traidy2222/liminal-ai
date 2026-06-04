@@ -71,7 +71,13 @@ async function postToken(body: URLSearchParams): Promise<TokenResponse> {
   });
   const json = (await res.json()) as TokenResponse;
   if (!res.ok || json.error) {
-    throw new Error(json.error_description ?? json.error ?? `token HTTP ${res.status}`);
+    const desc = json.error_description ?? json.error ?? `token HTTP ${res.status}`;
+    if (json.error === "invalid_client" || /client secret is invalid/i.test(desc)) {
+      throw new Error(
+        `${desc} — check GOOGLE_OAUTH_CLIENT_SECRET in dreamthedream/.env matches Google Cloud → Credentials → your OAuth client (reset secret there if unsure).`
+      );
+    }
+    throw new Error(desc);
   }
   return json;
 }
