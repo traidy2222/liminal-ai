@@ -96,9 +96,12 @@ While **Gmail MCP** (`gmailmcp.googleapis.com`) waits on [Workspace Developer Pr
 | `gmail_api_search_threads` | Search (`from:`, `is:unread`, etc.) |
 | `gmail_api_get_thread` | Thread + message IDs |
 | `gmail_api_get_message` | Full message body |
-| `gmail_api_create_draft` | Create draft (approval-gated; needs `gmail.compose`) |
+| `gmail_api_create_draft` | Create draft — plain or styled HTML, inline images, attachments (approval-gated; needs `gmail.compose`) |
+| `gmail_api_send_message` | Send immediately — same compose surface as draft (approval-gated; `gmail.compose` permits send) |
 
 Requires **Gmail API** enabled in Cloud Console and a completed `liminal connect google`. Set `AGENT_GOOGLE_GMAIL_REST=0` to disable.
+
+**Rich email.** Both compose tools take a plain `body` and an optional `body_html`. The model authors email-safe HTML freely (inline CSS + table layout) for occasions — birthday cards, invitations, announcements — and embeds artwork via `inline_images` (`<img src="cid:ID">`). It defaults to plain text and only escalates to HTML on an occasion signal or an explicit "make it nice" request, per the **Email composition** protocol in the system prompt.
 
 **Choosing REST vs MCP — `AGENT_GOOGLE_GMAIL_TRANSPORT`** (Settings → Harness → *Gmail Transport*). The Gmail MCP endpoint (`gmailmcp.googleapis.com`) is an invite-only preview; for most projects it returns `403 "The caller does not have permission"`. So the default is **`rest`**, which uses the classic `gmail_api_*` tools and does **not** attach the preview MCP (so the model never reaches for the broken `mcp_google_gmail_*` tools). Only switch to `mcp` (preview only) or `auto` (preview MCP + REST fallback) once you are enrolled in the Workspace MCP preview **and** have enabled `gmailmcp.googleapis.com`. In `rest` mode the same `gmail.readonly` / `gmail.compose` OAuth scopes are still requested, so REST works with your existing token.
 

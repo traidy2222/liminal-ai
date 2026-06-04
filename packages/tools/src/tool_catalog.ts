@@ -147,6 +147,7 @@ export const TOOL_FAMILIES: Record<string, { description: string; tools: readonl
       "gmail_api_get_thread",
       "gmail_api_get_message",
       "gmail_api_create_draft",
+      "gmail_api_send_message",
     ],
   },
   external_api: {

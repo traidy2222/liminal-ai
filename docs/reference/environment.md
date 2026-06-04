@@ -274,7 +274,7 @@ Web **Settings** writes to (2). See [Configuration basics](../start/configuratio
 | `AGENT_VAULT_REQUIRE_LINKS` | `0` | yes | no | memory_vault | Harness environment toggle for Vault Require Links. See docs/configuration.md (memory vault). |
 | `AGENT_VAULT_WRITE_BUDGET` | `8` | yes | no | memory_vault | Harness environment toggle for Vault Write Budget. See docs/configuration.md (memory vault). |
 | `AGENT_VIREON_SITE_URL` | `https://www.vireondynamics.com` | yes | no | harness | Harness environment toggle for Vireon Site Url. See docs/configuration.md (harness). |
-| `AGENT_VISION_BASE_URL` | `https://openrouter.ai/api/v1` | yes | yes | models_api | Harness environment toggle for Vision Base Url. See docs/configuration.md (models api). |
+| `AGENT_VISION_BASE_URL` | `https://openrouter.ai/api/v1` | yes | no | models_api | Harness environment toggle for Vision Base Url. See docs/configuration.md (models api). |
 | `AGENT_VISION_MAX_IMAGE_BYTES` | `4194304` | yes | no | models_api | Harness environment toggle for Vision Max Image Bytes. See docs/configuration.md (models api). |
 | `AGENT_VISION_MODEL` | `nvidia/nemotron-nano-12b-v2-vl:free` | yes | yes | models_api | Harness environment toggle for Vision Model. See docs/configuration.md (models api). |
 | `AGENT_VISION_RETRIES` | `2` | yes | no | models_api | Harness environment toggle for Vision Retries. See docs/configuration.md (models api). |
@@ -326,7 +326,6 @@ Web **Settings** writes to (2). See [Configuration basics](../start/configuratio
 - `AGENT_UI_VERBOSITY`
 - `AGENT_VAULT_AUTO_WRITE`
 - `AGENT_VISION_API_KEY`
-- `AGENT_VISION_BASE_URL`
 - `AGENT_VISION_MODEL`
 - `ANTHROPIC_API_KEY`
 - `OPENAI_API_KEY`

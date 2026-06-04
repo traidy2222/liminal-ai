@@ -334,6 +334,26 @@ When the user mentions Google Drive, Docs, Sheets, Gmail, or Calendar:
 3. Prefer read tools first; writes are approval-gated — confirm file/sheet IDs in args.
 4. Large Doc/Sheet payloads: rely on distillation; offer remember/vault_write when the user wants persistence.`;
 
+const EMAIL_COMPOSITION_PROTOCOL = `## Email composition (Gmail draft / send)
+gmail_api_create_draft and gmail_api_send_message take BOTH a plain \`body\` and an optional \`body_html\`. You decide the styling per email by inference — there are no fixed templates; design the HTML to fit the moment.
+
+Choose the register by reading occasion + relationship + intent:
+- PLAIN (\`body\` only) — the default. Replies in a thread, scheduling, quick questions/answers, business/transactional, forwards, anything where the user said "quick"/"short". Replies inherit the thread's register: do not drop a decorated card into a working thread.
+- FORMATTED (clean \`body_html\`) — announcements, invitations with details, newsletters, polished outreach. Headings, brand color, clear sections, maybe a button/logo.
+- FULL ARTISTIC (rich \`body_html\`, imagery, color, large display type, inline images) — celebratory/emotional occasions to people: birthday, anniversary, holiday/seasonal, congratulations, thank-you, get-well, "just because". This is where you go all-in on design.
+Escalate above PLAIN only on an occasion signal or an explicit request ("make it festive", "a nice card", "design it"). When in doubt, plain. When the user names an occasion, match its spirit generously.
+
+Always provide \`body\` too (it is the fallback when HTML can't render; auto-derived if you omit it but explicit is better).
+
+EMAIL-SAFE HTML (clients are not browsers — Gmail/Outlook strip much of modern CSS):
+- Inline \`style="…"\` only. No <style> blocks, no external/linked CSS, no <script>.
+- Layout with <table>/<td> + width/align/bgcolor — NOT flexbox/grid/position. Keep max width ~600px.
+- Web-safe font stacks; set explicit colors and absolute pixel sizes; don't rely on dark-mode.
+- Inline images: pass them in \`inline_images\` with a \`content_id\` and reference as <img src="cid:THAT_ID" width="…">. Use real images for photos/illustrations; CSS gradients, borders, emoji, and styled type are great for lightweight cards with no assets.
+- Decorate within the HTML; never put raw HTML tags in the plain \`body\`.
+
+Drafts vs send: use create_draft when the user wants to review in Gmail; use send_message only when they explicitly asked to send. Both are approval-gated — verify recipients before approving.`;
+
 const MARKETS_PROTOCOL = `## Markets pricing (free best-effort)
 For price/costing requests on equities/ETFs, FX, commodities, or crypto, prefer markets_quote over generic web_search.
 **Preflight (lazy tools):** If the task needs quotes or price context, call list_tool_families / activate_tool_family({ family: "markets" }) before broad web collection on that axis — avoid activating markets_quote only as a late patch after web saturation.
@@ -591,6 +611,9 @@ export function buildProtocolDynamicSuffix(
   }
   if (names.has("list_connectors") || names.has("connect_provider")) {
     parts.push(GOOGLE_WORKSPACE_PROTOCOL);
+  }
+  if (names.has("gmail_api_create_draft") || names.has("gmail_api_send_message")) {
+    parts.push(EMAIL_COMPOSITION_PROTOCOL);
   }
   if (names.has("breakout_start") || names.has("independence_status") || names.has("pattern_record")) {
     parts.push(FREE_RUN_PROTOCOL);

@@ -3,15 +3,18 @@
  * Uses the same OAuth token as connect google / Integrations.
  */
 import { effectiveHarnessEnvRaw, getGoogleAccessToken, resolveGoogleGmailTransport } from "@liminal/core";
-import type { ToolDefinition, ToolResult } from "@liminal/core";
+import type { PropertySchema, ToolDefinition, ToolResult } from "@liminal/core";
+import { readFile } from "node:fs/promises";
+import { basename, extname } from "node:path";
 import { defineTool } from "./helpers.js";
 import {
+  buildMimeMessage,
   decodeHtmlEntities,
   decodeMimeHeaderValue,
-  encodeRfc822HeaderValue,
   extractEmailBody,
   normalizeEmailWhitespace,
   type GmailPartLike,
+  type MimeBlob,
 } from "./gmail_message_body.js";
 
 const GMAIL_BASE = "https://gmail.googleapis.com/gmail/v1/users/me";
@@ -89,27 +92,178 @@ async function gmailApiJson<T>(
   }
 }
 
-function buildRfc822Raw(opts: {
+const MIME_BY_EXT: Record<string, string> = {
+  ".png": "image/png",
+  ".jpg": "image/jpeg",
+  ".jpeg": "image/jpeg",
+  ".gif": "image/gif",
+  ".webp": "image/webp",
+  ".svg": "image/svg+xml",
+  ".bmp": "image/bmp",
+  ".pdf": "application/pdf",
+  ".txt": "text/plain",
+  ".csv": "text/csv",
+  ".ics": "text/calendar",
+};
+
+function mimeFromName(name: string): string {
+  return MIME_BY_EXT[extname(name).toLowerCase()] ?? "application/octet-stream";
+}
+
+/** Load one inline-image / attachment spec (data URL, base64, or file path) into bytes. */
+async function loadBlob(
+  spec: Record<string, unknown>,
+  kind: "inline" | "attachment"
+): Promise<MimeBlob> {
+  const mimeHint = typeof spec["mime_type"] === "string" ? (spec["mime_type"] as string).trim() : "";
+  let filename = typeof spec["filename"] === "string" ? (spec["filename"] as string).trim() : "";
+  let data: Buffer;
+  let mimeType = mimeHint;
+
+  const dataField = typeof spec["data_base64"] === "string" ? (spec["data_base64"] as string).trim() : "";
+  const path = typeof spec["path"] === "string" ? (spec["path"] as string).trim() : "";
+
+  if (dataField) {
+    const dataUrl = /^data:([^;,]+)(;base64)?,(.*)$/s.exec(dataField);
+    if (dataUrl) {
+      mimeType = mimeType || dataUrl[1] || "";
+      data = Buffer.from(dataUrl[3] ?? "", dataUrl[2] ? "base64" : "utf8");
+    } else {
+      data = Buffer.from(dataField, "base64");
+    }
+  } else if (path) {
+    data = await readFile(path);
+    if (!filename && kind === "attachment") filename = basename(path);
+    if (!mimeType) mimeType = mimeFromName(filename || path);
+  } else {
+    throw new Error(`${kind} item needs "path" or "data_base64"`);
+  }
+  if (!mimeType) mimeType = kind === "inline" ? "image/png" : "application/octet-stream";
+
+  const blob: MimeBlob = { data, mimeType };
+  if (kind === "attachment") blob.filename = filename || "attachment";
+  else {
+    const cid = typeof spec["content_id"] === "string" ? (spec["content_id"] as string).trim() : "";
+    if (!cid) throw new Error('inline image needs "content_id" (referenced in HTML as cid:<id>)');
+    blob.contentId = cid;
+    if (filename) blob.filename = filename;
+  }
+  return blob;
+}
+
+function strArray(value: unknown): string[] {
+  return Array.isArray(value) ? value.map((x) => String(x).trim()).filter(Boolean) : [];
+}
+
+interface ComposeArgs {
   to: string[];
   cc?: string[];
+  bcc?: string[];
   subject: string;
-  body: string;
+  text?: string;
+  html?: string;
+  inlineImages?: MimeBlob[];
+  attachments?: MimeBlob[];
   inReplyTo?: string;
-}): string {
-  const lines = [
-    `To: ${opts.to.join(", ")}`,
-    ...(opts.cc?.length ? [`Cc: ${opts.cc.join(", ")}`] : []),
-    `Subject: ${encodeRfc822HeaderValue(opts.subject)}`,
-    "MIME-Version: 1.0",
-    "Content-Type: text/plain; charset=utf-8",
-  ];
-  if (opts.inReplyTo?.trim()) {
-    lines.push(`In-Reply-To: ${opts.inReplyTo.trim()}`);
-    lines.push(`References: ${opts.inReplyTo.trim()}`);
-  }
-  const raw = `${lines.join("\r\n")}\r\n\r\n${opts.body}`;
-  return Buffer.from(raw, "utf8").toString("base64url");
 }
+
+/** Validate + load the shared compose fields used by draft + send. */
+async function resolveComposeArgs(
+  args: Record<string, unknown>
+): Promise<{ ok: true; value: ComposeArgs } | { ok: false; error: string }> {
+  const to = strArray(args["to"]);
+  if (to.length === 0) return { ok: false, error: "to must include at least one address" };
+
+  const body = typeof args["body"] === "string" ? (args["body"] as string) : "";
+  const html = typeof args["body_html"] === "string" ? (args["body_html"] as string) : "";
+  if (!body.trim() && !html.trim()) {
+    return { ok: false, error: "provide body (plain text) and/or body_html (rich HTML)" };
+  }
+
+  let inlineImages: MimeBlob[] | undefined;
+  let attachments: MimeBlob[] | undefined;
+  try {
+    if (Array.isArray(args["inline_images"])) {
+      inlineImages = await Promise.all(
+        (args["inline_images"] as Record<string, unknown>[]).map((s) => loadBlob(s, "inline"))
+      );
+    }
+    if (Array.isArray(args["attachments"])) {
+      attachments = await Promise.all(
+        (args["attachments"] as Record<string, unknown>[]).map((s) => loadBlob(s, "attachment"))
+      );
+    }
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : String(e) };
+  }
+
+  const value: ComposeArgs = { to, subject: String(args["subject"] ?? "").trim() };
+  const cc = strArray(args["cc"]);
+  const bcc = strArray(args["bcc"]);
+  if (cc.length) value.cc = cc;
+  if (bcc.length) value.bcc = bcc;
+  if (body) value.text = body;
+  if (html.trim()) value.html = html;
+  if (inlineImages?.length) value.inlineImages = inlineImages;
+  if (attachments?.length) value.attachments = attachments;
+  if (typeof args["reply_to_message_id"] === "string") value.inReplyTo = args["reply_to_message_id"];
+  return { ok: true, value };
+}
+
+/** JSON-schema fragment shared by draft + send (rich-email compose surface). */
+const composeProperties: Record<string, PropertySchema> = {
+  to: { type: "array", items: { type: "string" }, description: "Recipient email addresses." },
+  cc: { type: "array", items: { type: "string" }, description: "Optional CC addresses." },
+  bcc: { type: "array", items: { type: "string" }, description: "Optional BCC addresses." },
+  subject: { type: "string", description: "Email subject." },
+  body: {
+    type: "string",
+    description:
+      "Plain-text body. Always provide this; it is the fallback shown when a client can't render HTML. " +
+      "If omitted but body_html is set, a plain-text version is auto-derived.",
+  },
+  body_html: {
+    type: "string",
+    description:
+      "Optional rich HTML body — author it freely to match the occasion (greeting cards, " +
+      "announcements, newsletters). EMAIL-SAFE HTML ONLY: inline style= attributes (no <style> " +
+      "blocks or external CSS), <table> for layout (no fl/grid), web-safe or stack fonts, absolute " +
+      "image sizes. Reference inline images as <img src=\"cid:<content_id>\">. Omit for a plain email.",
+  },
+  inline_images: {
+    type: "array",
+    description:
+      "Images embedded in the HTML body via cid: references (e.g. a card illustration). " +
+      "Each: { content_id, path | data_base64, mime_type? }. content_id maps to src=\"cid:<id>\".",
+    items: {
+      type: "object",
+      properties: {
+        content_id: { type: "string", description: "ID referenced in HTML as cid:<id>." },
+        path: { type: "string", description: "Local file path to the image." },
+        data_base64: { type: "string", description: "Base64 (or data: URL) image bytes instead of a path." },
+        mime_type: { type: "string", description: "e.g. image/png (inferred from path if omitted)." },
+      },
+      required: ["content_id"],
+    },
+  },
+  attachments: {
+    type: "array",
+    description: "File attachments. Each: { path | data_base64, filename?, mime_type? }.",
+    items: {
+      type: "object",
+      properties: {
+        path: { type: "string", description: "Local file path to attach." },
+        filename: { type: "string", description: "Display filename (defaults to the path basename)." },
+        data_base64: { type: "string", description: "Base64 (or data: URL) bytes instead of a path." },
+        mime_type: { type: "string", description: "Inferred from filename/path if omitted." },
+      },
+    },
+  },
+  reply_to_message_id: {
+    type: "string",
+    description: "Optional Message-ID header value for threading (from gmail_api_get_message headers).",
+  },
+};
 
 export function createGmailApiTools(): ToolDefinition[] {
   // When transport=rest these ARE the Gmail tools (the preview MCP is not
@@ -276,51 +430,21 @@ export function createGmailApiTools(): ToolDefinition[] {
   const gmailApiCreateDraft = defineTool({
     name: "gmail_api_create_draft",
     description:
-      "WHAT: Create a Gmail draft (classic API; needs gmail.compose scope).\n" +
+      "WHAT: Create a Gmail draft — plain OR fully styled HTML (greeting cards, announcements, newsletters) with inline images and attachments (classic API; gmail.compose scope).\n" +
       "WHEN: User wants a draft to review in Gmail before sending.\n" +
-      "NOT WHEN: User asked to send immediately — Gmail API send needs extra scope; user sends from Gmail UI.",
+      "STYLE: default plain (body only). For occasions/celebrations or when the user asks for something designed, add body_html. See the Email composition protocol for the artistic-vs-plain rubric and email-safe HTML rules.",
     parameters: {
       type: "object",
-      properties: {
-        to: {
-          type: "array",
-          items: { type: "string" },
-          description: "Recipient email addresses.",
-        },
-        cc: {
-          type: "array",
-          items: { type: "string" },
-          description: "Optional CC addresses.",
-        },
-        subject: { type: "string", description: "Email subject." },
-        body: { type: "string", description: "Plain-text body." },
-        reply_to_message_id: {
-          type: "string",
-          description: "Optional Message-ID header value for threading (from gmail_api_get_message headers).",
-        },
-      },
-      required: ["to", "subject", "body"],
+      properties: composeProperties,
+      required: ["to", "subject"],
       additionalProperties: false,
     },
     requiresApproval: true,
     dangerLevel: "destructive",
     handler: async (args): Promise<ToolResult> => {
-      const to = Array.isArray(args["to"])
-        ? (args["to"] as unknown[]).map((x) => String(x).trim()).filter(Boolean)
-        : [];
-      if (to.length === 0) return { ok: false, error: "to must include at least one address" };
-      const cc = Array.isArray(args["cc"])
-        ? (args["cc"] as unknown[]).map((x) => String(x).trim()).filter(Boolean)
-        : undefined;
-      const subject = String(args["subject"] ?? "").trim();
-      const body = String(args["body"] ?? "");
-      const raw = buildRfc822Raw({
-        to,
-        cc,
-        subject,
-        body,
-        inReplyTo: typeof args["reply_to_message_id"] === "string" ? args["reply_to_message_id"] : undefined,
-      });
+      const resolved = await resolveComposeArgs(args);
+      if (!resolved.ok) return { ok: false, error: resolved.error };
+      const raw = buildMimeMessage(resolved.value);
       const res = await gmailApiJson<{ id?: string; message?: { id?: string; threadId?: string } }>("/drafts", {
         method: "POST",
         body: JSON.stringify({ message: { raw } }),
@@ -333,11 +457,45 @@ export function createGmailApiTools(): ToolDefinition[] {
     },
   });
 
+  const gmailApiSendMessage = defineTool({
+    name: "gmail_api_send_message",
+    description:
+      "WHAT: Send an email immediately via Gmail — plain OR fully styled HTML with inline images/attachments (classic API; gmail.compose scope permits send).\n" +
+      "WHEN: User explicitly asked to SEND (not just draft). Approval-gated: the recipient receives it on approval.\n" +
+      "STYLE: same compose surface as gmail_api_create_draft — default plain; add body_html for designed/celebratory emails per the Email composition protocol.\n" +
+      "SAFETY: double-check recipients before approving; this delivers real mail. Prefer a draft when the user only wants to review.",
+    parameters: {
+      type: "object",
+      properties: composeProperties,
+      required: ["to", "subject"],
+      additionalProperties: false,
+    },
+    requiresApproval: true,
+    dangerLevel: "destructive",
+    handler: async (args): Promise<ToolResult> => {
+      const resolved = await resolveComposeArgs(args);
+      if (!resolved.ok) return { ok: false, error: resolved.error };
+      const raw = buildMimeMessage(resolved.value);
+      const res = await gmailApiJson<{ id?: string; threadId?: string; labelIds?: string[] }>("/messages/send", {
+        method: "POST",
+        body: JSON.stringify({ raw }),
+      });
+      if (!res.ok) return { ok: false, error: res.error };
+      const v = resolved.value;
+      const recip = [...v.to, ...(v.cc ?? []), ...(v.bcc ?? [])].join(", ");
+      return {
+        ok: true,
+        output: `Email sent to ${recip}. messageId=${res.data.id ?? "?"}, threadId=${res.data.threadId ?? "?"}`,
+      };
+    },
+  });
+
   return [
     gmailApiListLabels,
     gmailApiSearchThreads,
     gmailApiGetMessage,
     gmailApiListThreadMessages,
     gmailApiCreateDraft,
+    gmailApiSendMessage,
   ];
 }

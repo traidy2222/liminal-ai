@@ -61,6 +61,12 @@ class ProtocolClient {
         return;
       case 'sidecar_ready':
         _completeReady();
+        // Non-empty cases do not fall through in Dart 3, so the shared
+        // `onGlobalFrame` dispatch below is unreachable from here — call it
+        // explicitly or the UI never sets `sidecarReady` and hangs on the
+        // "Starting…" spinner forever.
+        onGlobalFrame?.call(frame);
+        return;
       case 'chat_list':
       case 'settings':
       case 'vireon_account':

@@ -168,3 +168,119 @@ export function encodeRfc822HeaderValue(value: string): string {
   const b64 = Buffer.from(value, "utf8").toString("base64");
   return `=?UTF-8?B?${b64}?=`;
 }
+
+// ---------------------------------------------------------------------------
+// MIME composition (rich HTML email: multipart/alternative + related + mixed).
+//
+// Gmail/Outlook ignore <style> blocks, flexbox, grid, and external CSS, so the
+// model authors email-safe HTML (inline styles, table layout) freely — this
+// builder only supplies the MIME envelope: a plain-text fallback alongside the
+// HTML, inline images referenced as `cid:<id>`, and file attachments.
+// ---------------------------------------------------------------------------
+
+/** One binary part: an inline image (set `contentId`) or attachment (set `filename`). */
+export interface MimeBlob {
+  data: Buffer;
+  mimeType: string;
+  /** Display filename for attachments (encoded if non-ASCII). */
+  filename?: string;
+  /** Content-ID for inline images — reference in HTML as `cid:<contentId>`. */
+  contentId?: string;
+}
+
+export interface BuildMimeOptions {
+  to: string[];
+  cc?: string[];
+  bcc?: string[];
+  subject: string;
+  /** Rich HTML body. When present, a multipart/alternative is emitted. */
+  html?: string;
+  /** Plain-text body / fallback. Auto-derived from `html` when omitted. */
+  text?: string;
+  inlineImages?: MimeBlob[];
+  attachments?: MimeBlob[];
+  /** Message-ID this is a reply to (sets In-Reply-To + References for threading). */
+  inReplyTo?: string;
+}
+
+function mimeBoundary(tag: string): string {
+  let r = "";
+  for (let i = 0; i < 24; i++) r += Math.floor(Math.random() * 36).toString(36);
+  return `=_liminal_${tag}_${r}`;
+}
+
+/** RFC 2045: base64 wrapped at 76 chars with CRLF. */
+function wrapBase64(b64: string): string {
+  return b64.match(/.{1,76}/g)?.join("\r\n") ?? b64;
+}
+
+/** A MIME node = its own Content-Type header block + body. */
+function textNode(mime: string, content: string): string {
+  const b64 = wrapBase64(Buffer.from(content, "utf8").toString("base64"));
+  return (
+    `Content-Type: ${mime}; charset="utf-8"\r\n` +
+    `Content-Transfer-Encoding: base64\r\n\r\n${b64}`
+  );
+}
+
+function binaryNode(blob: MimeBlob, disposition: "inline" | "attachment"): string {
+  const name = blob.filename ? encodeRfc822HeaderValue(blob.filename) : undefined;
+  const head = [
+    `Content-Type: ${blob.mimeType}${name ? `; name="${name}"` : ""}`,
+    "Content-Transfer-Encoding: base64",
+  ];
+  if (blob.contentId) head.push(`Content-ID: <${blob.contentId}>`, `X-Attachment-Id: ${blob.contentId}`);
+  head.push(`Content-Disposition: ${disposition}${name ? `; filename="${name}"` : ""}`);
+  return `${head.join("\r\n")}\r\n\r\n${wrapBase64(blob.data.toString("base64"))}`;
+}
+
+function multipartNode(subtype: string, children: string[]): string {
+  const b = mimeBoundary(subtype);
+  const inner = children.map((c) => `--${b}\r\n${c}\r\n`).join("") + `--${b}--`;
+  return `Content-Type: multipart/${subtype}; boundary="${b}"\r\n\r\n${inner}`;
+}
+
+/**
+ * Build a base64url-encoded RFC 822 message for Gmail `drafts`/`messages` raw.
+ * Picks the minimal nesting: text-only, alternative (text+html),
+ * related (alternative + inline images), and/or mixed (… + attachments).
+ */
+export function buildMimeMessage(opts: BuildMimeOptions): string {
+  const headers = [`To: ${opts.to.join(", ")}`];
+  if (opts.cc?.length) headers.push(`Cc: ${opts.cc.join(", ")}`);
+  if (opts.bcc?.length) headers.push(`Bcc: ${opts.bcc.join(", ")}`);
+  headers.push(`Subject: ${encodeRfc822HeaderValue(opts.subject)}`, "MIME-Version: 1.0");
+  if (opts.inReplyTo?.trim()) {
+    headers.push(`In-Reply-To: ${opts.inReplyTo.trim()}`, `References: ${opts.inReplyTo.trim()}`);
+  }
+
+  const html = opts.html?.trim() ? opts.html : undefined;
+  const text = opts.text != null && opts.text !== ""
+    ? opts.text
+    : html
+      ? htmlToPlainText(html)
+      : "";
+  const inline = (opts.inlineImages ?? []).filter((b) => b.data.length > 0);
+  const attach = (opts.attachments ?? []).filter((b) => b.data.length > 0);
+
+  let node: string;
+  if (html) {
+    node = multipartNode("alternative", [
+      textNode("text/plain", text || " "),
+      textNode("text/html", html),
+    ]);
+    if (inline.length) {
+      node = multipartNode("related", [node, ...inline.map((b) => binaryNode(b, "inline"))]);
+    }
+  } else {
+    node = textNode("text/plain", text || " ");
+  }
+  if (attach.length) {
+    node = multipartNode("mixed", [node, ...attach.map((b) => binaryNode(b, "attachment"))]);
+  }
+
+  // `node` already begins with its own Content-Type header, so it joins the
+  // top-level header block directly (the entity's Content-Type lives there).
+  const raw = `${headers.join("\r\n")}\r\n${node}`;
+  return Buffer.from(raw, "utf8").toString("base64url");
+}
