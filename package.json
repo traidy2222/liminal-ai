@@ -23,6 +23,7 @@
     "sidecar": "npm run build:sidecar && npm run start -w @liminal/sidecar",
     "sidecar:dev": "npm run start -w @liminal/sidecar",
     "desktop:build:windows": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/build-desktop-windows.ps1",
+    "desktop:package:windows": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/package-desktop-windows.ps1",
     "desktop:test:windows": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/test-desktop-windows.ps1",
     "setup": "node scripts/liminal.mjs setup",
     "doctor": "node scripts/liminal.mjs doctor",

@@ -1,9 +1,9 @@
-# Stage liminald metadata beside the Windows Release exe.
-# The sidecar runs from the monorepo (packages/sidecar/dist) so Node resolves
-# workspace deps from the repo root node_modules.
+# Stage a portable liminald runtime beside the Windows Release folder.
+# Output: Release/liminald/repo/ (sidecar + production node_modules) + bundle.json (paths relative to .exe).
 param(
   [Parameter(Mandatory = $true)][string]$ReleaseDir,
-  [Parameter(Mandatory = $true)][string]$RepoRoot
+  [Parameter(Mandatory = $true)][string]$RepoRoot,
+  [switch]$CopyNodeModulesFromRepo
 )
 
 $ErrorActionPreference = "Stop"
@@ -15,15 +15,86 @@ if (-not (Test-Path $sidecarEntry)) {
   throw "Missing $sidecarEntry. Run: npm run build:sidecar"
 }
 
-$LiminaldMeta = Join-Path $ReleaseDir "liminald"
-New-Item -ItemType Directory -Force $LiminaldMeta | Out-Null
+$BundleRoot = Join-Path $ReleaseDir "liminald"
+$BundleRepo = Join-Path $BundleRoot "repo"
+$Packages = @("core", "protocol", "tools", "sidecar")
 
-$manifest = @{
-  repoRoot      = $RepoRoot
-  sidecarScript = $sidecarEntry
-  builtAt       = (Get-Date).ToUniversalTime().ToString("o")
+if (Test-Path $BundleRepo) {
+  Remove-Item -Recurse -Force $BundleRepo
 }
-$manifest | ConvertTo-Json | Set-Content (Join-Path $LiminaldMeta "bundle.json") -Encoding utf8
+New-Item -ItemType Directory -Force -Path $BundleRepo, (Join-Path $BundleRepo "packages") | Out-Null
 
-Write-Host "==> liminald manifest -> $sidecarEntry"
-Write-Host "    (requires repo node_modules; run npm install at repo root if needed)"
+Write-Host "==> Staging portable liminald repo -> $BundleRepo"
+
+$runtimePkg = Join-Path $PSScriptRoot "desktop-runtime.package.json"
+Copy-Item $runtimePkg (Join-Path $BundleRepo "package.json") -Force
+
+foreach ($name in $Packages) {
+  $srcPkg = Join-Path $RepoRoot "packages\$name"
+  $destPkg = Join-Path $BundleRepo "packages\$name"
+  if (-not (Test-Path (Join-Path $srcPkg "dist\index.js"))) {
+    throw "Missing packages/$name/dist - run: npm run build:sidecar"
+  }
+  New-Item -ItemType Directory -Force $destPkg | Out-Null
+  Copy-Item (Join-Path $srcPkg "package.json") $destPkg -Force
+  Copy-Item (Join-Path $srcPkg "dist") $destPkg -Recurse -Force
+}
+
+$license = Join-Path $RepoRoot "LICENSE"
+if (Test-Path $license) {
+  Copy-Item $license (Join-Path $BundleRepo "LICENSE") -Force
+}
+
+$envExample = Join-Path $RepoRoot ".env.example"
+if (Test-Path $envExample) {
+  Copy-Item $envExample (Join-Path $BundleRepo ".env.example") -Force
+}
+
+$readme = @"
+Liminal Desktop — bundled harness runtime (do not edit unless you know what you are doing).
+
+First run:
+  1. Install Node.js 20+ (https://nodejs.org/) and ensure ``node`` is on PATH.
+  2. Copy ``.env.example`` to ``.env`` in this folder and set ``AGENT_API_KEY``.
+  3. Run ``liminal_desktop.exe`` from the parent Release folder (not this directory).
+
+Pro users can sign in inside the app instead of using a local API key.
+"@
+Set-Content -Path (Join-Path $BundleRepo "README.txt") -Value $readme -Encoding utf8
+
+$srcModules = Join-Path $RepoRoot "node_modules"
+if ($CopyNodeModulesFromRepo -and (Test-Path $srcModules)) {
+  Write-Host "==> Copying node_modules from monorepo (fast path)..."
+  $destModules = Join-Path $BundleRepo "node_modules"
+  New-Item -ItemType Directory -Force $destModules | Out-Null
+  & robocopy $srcModules $destModules /E /NFL /NDL /NJH /NJS /nc /ns /np | Out-Null
+  if ($LASTEXITCODE -ge 8) {
+    throw "robocopy node_modules failed with exit $LASTEXITCODE"
+  }
+} else {
+  Write-Host "==> npm install --omit=dev (portable runtime, may take a few minutes)..."
+  Push-Location $BundleRepo
+  npm install --omit=dev --no-audit --no-fund
+  if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+  Pop-Location
+}
+
+if (-not (Test-Path (Join-Path $BundleRepo "packages\sidecar\dist\index.js"))) {
+  throw "Bundle incomplete: sidecar dist missing after install"
+}
+
+$scriptRel = "liminald\repo\packages\sidecar\dist\index.js"
+$rootRel = "liminald\repo"
+$manifest = @{
+  layout        = "portable-v1"
+  repoRoot      = $rootRel
+  sidecarScript = $scriptRel
+  builtAt       = (Get-Date).ToUniversalTime().ToString("o")
+  liminalVersion = (Get-Content (Join-Path $RepoRoot "changelog\releases.json") -Raw | ConvertFrom-Json).currentVersion
+}
+New-Item -ItemType Directory -Force $BundleRoot | Out-Null
+$manifest | ConvertTo-Json | Set-Content (Join-Path $BundleRoot "bundle.json") -Encoding utf8
+
+Write-Host "==> bundle.json (paths relative to Release/)"
+Write-Host "    repoRoot:      $rootRel"
+Write-Host "    sidecarScript: $scriptRel"

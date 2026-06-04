@@ -6,7 +6,8 @@
 #   .\scripts\build-desktop-windows.ps1 -FlutterRoot "C:\src\flutter"
 
 param(
-  [string]$FlutterRoot = $(if ($env:FLUTTER_ROOT) { $env:FLUTTER_ROOT } else { "$env:LOCALAPPDATA\flutter-sdk" })
+  [string]$FlutterRoot = $(if ($env:FLUTTER_ROOT) { $env:FLUTTER_ROOT } else { "$env:LOCALAPPDATA\flutter-sdk" }),
+  [switch]$CopyNodeModulesFromRepo
 )
 
 $ErrorActionPreference = "Stop"
@@ -58,8 +59,13 @@ Pop-Location
 $OutDir = Join-Path $AppDir "build\windows\x64\runner\Release"
 $Exe = Join-Path $OutDir "liminal_desktop.exe"
 
-Write-Host "==> Bundling liminald into Release folder..."
-& (Join-Path $RepoRoot "scripts\bundle-liminald-for-desktop.ps1") -ReleaseDir $OutDir -RepoRoot $RepoRoot
+Write-Host "==> Bundling portable liminald into Release folder..."
+$bundleArgs = @{
+  ReleaseDir = $OutDir
+  RepoRoot   = $RepoRoot
+}
+if ($CopyNodeModulesFromRepo) { $bundleArgs["CopyNodeModulesFromRepo"] = $true }
+& (Join-Path $RepoRoot "scripts\bundle-liminald-for-desktop.ps1") @bundleArgs
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
 Write-Host ""

@@ -51,17 +51,25 @@ String? executableDirectory() {
   }
 }
 
+/// Resolve a path from bundle.json (absolute, or relative to the Release / .exe folder).
+String? _resolveBundledPath(String exeDir, String? raw) {
+  if (raw == null || raw.trim().isEmpty) return null;
+  final trimmed = raw.trim();
+  if (p.isAbsolute(trimmed)) return p.normalize(trimmed);
+  return p.normalize(p.join(exeDir, trimmed));
+}
+
 /// Read `liminald/bundle.json` written by `scripts/bundle-liminald-for-desktop.ps1`.
 SidecarLocations? readBundledLocations(String exeDir) {
   final manifest = File(p.join(exeDir, 'liminald', 'bundle.json'));
   if (!manifest.existsSync()) return null;
   try {
     final json = jsonDecode(manifest.readAsStringSync()) as Map<String, dynamic>;
-    final script = json['sidecarScript'] as String?;
-    final root = json['repoRoot'] as String?;
+    final script = _resolveBundledPath(exeDir, json['sidecarScript'] as String?);
+    final root = _resolveBundledPath(exeDir, json['repoRoot'] as String?);
     if (script == null || root == null) return null;
     if (!File(script).existsSync()) return null;
-    return SidecarLocations(scriptPath: p.normalize(script), repoRoot: p.normalize(root));
+    return SidecarLocations(scriptPath: script, repoRoot: root);
   } catch (_) {
     return null;
   }

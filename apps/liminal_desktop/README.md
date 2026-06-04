@@ -32,6 +32,28 @@ Run **`liminal_desktop.exe` from the `Release` folder** (not a copy of the exe a
 
 `apps/liminal_desktop/build/windows/x64/runner/Release/liminal_desktop.exe`
 
+The Release folder includes **`liminald/repo/`** (portable sidecar + production `node_modules`) and **`liminald/bundle.json`** (paths relative to the exe).
+
+## GitHub Release (Windows zip)
+
+From the monorepo root:
+
+```bash
+npm run desktop:package:windows
+# → dist/liminal-desktop-windows-x64-v<version>.zip + .sha256
+```
+
+Publish to GitHub (creates tag `v<version>-desktop` and uploads the zip):
+
+```bash
+git tag v0.0.18-desktop
+git push origin v0.0.18-desktop
+```
+
+Or run **Actions → Release Desktop (Windows) → Run workflow** on `main`.
+
+**End users:** download the zip from [GitHub Releases](https://github.com/traidy2222/liminal-ai/releases), unzip, install Node 20+, copy `liminald/repo/.env.example` → `.env`, run `liminal_desktop.exe`.
+
 ## Development
 
 From the **monorepo root**, build the sidecar once (required before the desktop app can start):

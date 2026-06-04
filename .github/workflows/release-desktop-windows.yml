@@ -1,0 +1,105 @@
+# Build Liminal Desktop for Windows and attach to a GitHub Release.
+# Trigger: push tag v*-desktop (e.g. v0.0.18-desktop) or manual workflow_dispatch.
+name: Release Desktop (Windows)
+
+on:
+  push:
+    tags:
+      - "v*-desktop"
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Release version (e.g. 0.0.18)"
+        required: true
+        default: "0.0.18"
+
+permissions:
+  contents: write
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Resolve version and release tag
+        id: meta
+        shell: pwsh
+        run: |
+          $tag = "${{ github.ref_name }}"
+          if ($tag -match '^v(.+)-desktop$') {
+            $ver = $Matches[1]
+          } else {
+            $ver = "${{ inputs.version }}".Trim()
+            if (-not $ver) { throw "version required" }
+            $tag = "v$ver-desktop"
+          }
+          "version=$ver" >> $env:GITHUB_OUTPUT
+          "tag=$tag" >> $env:GITHUB_OUTPUT
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+
+      - name: Enable symlink support (Flutter plugins)
+        run: |
+          reg add "HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\AppModelUnlock" /t REG_DWORD /v AllowDevelopmentWithoutDevLicense /d 1 /f
+
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build and package desktop zip
+        shell: pwsh
+        run: |
+          ./scripts/package-desktop-windows.ps1 `
+            -Version "${{ steps.meta.outputs.version }}" `
+            -CopyNodeModulesFromRepo
+
+      - name: Locate artifacts
+        id: artifacts
+        shell: pwsh
+        run: |
+          $ver = "${{ steps.meta.outputs.version }}"
+          $zip = Get-ChildItem -Path dist -Filter "liminal-desktop-windows-x64-v$ver.zip" | Select-Object -First 1
+          if (-not $zip) { throw "Zip not found in dist/" }
+          "zip=$($zip.FullName)" >> $env:GITHUB_OUTPUT
+          "zip_name=$($zip.Name)" >> $env:GITHUB_OUTPUT
+
+      - name: Write release notes
+        shell: pwsh
+        run: |
+          $ver = "${{ steps.meta.outputs.version }}"
+          $zipName = "${{ steps.artifacts.outputs.zip_name }}"
+          @"
+          ## Liminal Desktop $ver (Windows x64 alpha)
+
+          **Requirements:** Windows 10/11 x64, [Node.js 20+](https://nodejs.org/) on PATH.
+
+          **Setup:**
+          1. Download and unzip ``$zipName``.
+          2. Copy ``liminald\repo\.env.example`` to ``liminald\repo\.env`` and set ``AGENT_API_KEY`` (or sign in with Vireon in the app).
+          3. Run ``liminal_desktop.exe`` from the extracted folder — keep the ``liminald\`` folder next to the exe.
+
+          Attach the ``.sha256`` file to verify the download.
+
+          License: [FSL-1.1-MIT](https://github.com/${{ github.repository }}/blob/main/LICENSE)
+          "@ | Set-Content -Path "$env:RUNNER_TEMP\release-notes.md" -Encoding utf8
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.meta.outputs.tag }}
+          name: Liminal Desktop ${{ steps.meta.outputs.version }} (Windows)
+          body_path: ${{ runner.temp }}/release-notes.md
+          files: |
+            dist/liminal-desktop-windows-x64-v${{ steps.meta.outputs.version }}.zip
+            dist/liminal-desktop-windows-x64-v${{ steps.meta.outputs.version }}.zip.sha256
+          draft: false
+          prerelease: true
+          generate_release_notes: false

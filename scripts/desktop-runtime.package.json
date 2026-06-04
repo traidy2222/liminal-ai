@@ -1,0 +1,11 @@
+{
+  "name": "liminal-desktop-runtime",
+  "private": true,
+  "license": "FSL-1.1-MIT",
+  "workspaces": [
+    "packages/core",
+    "packages/protocol",
+    "packages/tools",
+    "packages/sidecar"
+  ]
+}
