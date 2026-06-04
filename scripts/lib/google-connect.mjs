@@ -2,11 +2,6 @@
 /**
  * liminal connect google — OAuth + optional MCP attach
  */
-import path from "node:path";
-import { fileURLToPath } from "node:url";
-
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-
 function parseArgs(argv) {
   let services;
   let readOnly = false;
@@ -24,13 +19,16 @@ function parseArgs(argv) {
 
 async function main() {
   const { services, readOnly, attach } = parseArgs(process.argv.slice(2));
-  const coreDist = path.join(__dirname, "../../packages/core/dist/google_connect.js").replace(/\\/g, "/");
+  const coreUrl = new URL("../../packages/core/dist/google_connect.js", import.meta.url).href;
   let mod;
   try {
-    mod = await import(coreDist);
-  } catch {
-    console.error("Build core first: npm run build -w packages/core");
-    process.exit(1);
+    mod = await import(coreUrl);
+  } catch (err) {
+    if (err?.code === "ERR_MODULE_NOT_FOUND") {
+      console.error("Build core first: npm run build -w packages/core");
+      process.exit(1);
+    }
+    throw err;
   }
   const { runGoogleConnectFlow } = mod;
   const result = await runGoogleConnectFlow({

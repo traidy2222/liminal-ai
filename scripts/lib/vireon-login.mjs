@@ -2,19 +2,17 @@
 /**
  * liminal login — browser sign-in; stores license in ~/.liminal/
  */
-import path from "node:path";
-import { fileURLToPath } from "node:url";
-
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-
 async function main() {
-  const coreDist = path.join(__dirname, "../../packages/core/dist/vireon_connect.js").replace(/\\/g, "/");
+  const coreUrl = new URL("../../packages/core/dist/vireon_connect.js", import.meta.url).href;
   let mod;
   try {
-    mod = await import(coreDist);
-  } catch {
-    console.error("Build core first: npm run build -w packages/core");
-    process.exit(1);
+    mod = await import(coreUrl);
+  } catch (err) {
+    if (err?.code === "ERR_MODULE_NOT_FOUND") {
+      console.error("Build core first: npm run build -w packages/core");
+      process.exit(1);
+    }
+    throw err;
   }
   const { runVireonConnectFlow } = mod;
   const result = await runVireonConnectFlow({
@@ -23,9 +21,9 @@ async function main() {
   console.log(`\nSigned in as ${result.email} (${result.tier})`);
   console.log("License saved to ~/.liminal/license.json");
 
-  const installDist = path.join(__dirname, "../../packages/core/dist/enterprise_install.js").replace(/\\/g, "/");
+  const installUrl = new URL("../../packages/core/dist/enterprise_install.js", import.meta.url).href;
   try {
-    const { tierRequiresEnterprisePackage, ensureEnterpriseEditionInstalled } = await import(installDist);
+    const { tierRequiresEnterprisePackage, ensureEnterpriseEditionInstalled } = await import(installUrl);
     if (tierRequiresEnterprisePackage(result.tier)) {
       console.log("Installing Enterprise Edition features…");
       const install = await ensureEnterpriseEditionInstalled();

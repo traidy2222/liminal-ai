@@ -76,9 +76,9 @@ async function main(argv) {
       });
     }
     case "logout": {
-      const coreDist = fileURLToPath(new URL("../packages/core/dist/vireon_account.js", import.meta.url));
+      const coreUrl = new URL("../packages/core/dist/vireon_account.js", import.meta.url).href;
       try {
-        const { clearVireonAccount } = await import(coreDist);
+        const { clearVireonAccount } = await import(coreUrl);
         await clearVireonAccount();
         console.log("Removed ~/.liminal/account.json and license cache.");
         return 0;

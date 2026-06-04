@@ -1,13 +1,8 @@
 #!/usr/bin/env node
 /** liminal disconnect google — revoke OAuth and remove MCP connections (via agent tools on next web session). */
-import path from "node:path";
-import { fileURLToPath } from "node:url";
-
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-
 async function main() {
-  const coreDist = path.join(__dirname, "../../packages/core/dist/oauth_broker.js").replace(/\\/g, "/");
-  const { listGoogleOAuthAccounts, revokeGoogleAccount } = await import(coreDist);
+  const coreUrl = new URL("../../packages/core/dist/oauth_broker.js", import.meta.url).href;
+  const { listGoogleOAuthAccounts, revokeGoogleAccount } = await import(coreUrl);
   const accounts = await listGoogleOAuthAccounts();
   if (accounts.length === 0) {
     console.log("No Google OAuth accounts on disk.");
