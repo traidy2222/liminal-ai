@@ -9,7 +9,10 @@ Liminal connects to Google Workspace through a **hybrid MCP architecture**:
 
 1. Create a [Google Cloud project](https://console.cloud.google.com/) and enable the APIs you need.
 2. Create an **OAuth 2.0 Client** (Desktop app or Web application).
-3. Add authorized redirect URI: `http://127.0.0.1:3001/oauth/google/callback` (web) and/or `http://127.0.0.1:<port>/oauth/google/callback` (CLI loopback).
+3. Add authorized redirect URIs (Web application client):
+   - Web UI: `http://127.0.0.1:3001/oauth/google/callback`
+   - CLI: `http://127.0.0.1:38475/oauth/google/callback` (default; override with `GOOGLE_OAUTH_LOOPBACK_PORT` or `liminal connect google --port N`)
+   - Or create a **Desktop** OAuth client — Google allows dynamic loopback ports for CLI.
 4. Add to `.env`:
 
 ```env

@@ -5,6 +5,8 @@ import { log } from "./lib/log.mjs";
 import { getDefaultInstallDir, resolveRepoRoot } from "./lib/paths.mjs";
 import { runSetup } from "./lib/setup.mjs";
 import { runTui, runUpdate, runWeb } from "./lib/commands/web.mjs";
+import { loadEnvForCli } from "./lib/load-env.mjs";
+import { runConnectGoogleCli } from "./lib/google-connect.mjs";
 
 const USAGE = `Liminal — one-command setup and launcher
 
@@ -16,7 +18,7 @@ Usage:
   liminal update              git pull + npm install + build (also runs before web/tui)
   liminal login               Sign in to Vireon (browser); saves license to ~/.liminal/
   liminal logout              Remove local Vireon account + license cache
-  liminal connect google      Google Workspace OAuth (set GOOGLE_OAUTH_* in .env)
+  liminal connect google      Google Workspace OAuth (GOOGLE_OAUTH_* in .env; redirect port 38475)
   liminal disconnect google   Revoke Google OAuth tokens
   liminal path                Print install directory
 
@@ -90,12 +92,8 @@ async function main(argv) {
     case "connect": {
       const sub = rest[0];
       if (sub === "google") {
-        const { spawn } = await import("node:child_process");
-        const script = fileURLToPath(new URL("./lib/google-connect.mjs", import.meta.url));
-        return new Promise((resolve) => {
-          const child = spawn(process.execPath, [script, ...rest.slice(1)], { stdio: "inherit", cwd: process.cwd() });
-          child.on("exit", (code) => resolve(code ?? 1));
-        });
+        loadEnvForCli();
+        return runConnectGoogleCli(rest.slice(1));
       }
       log("error", `Unknown connect target: ${sub ?? "(none)"}. Try: liminal connect google`);
       return 1;

@@ -15,6 +15,18 @@ import { openExternalUrl } from "./open_external_url.js";
 
 const FLOW_TIMEOUT_MS = 5 * 60_000;
 
+/** Default CLI loopback port — register this exact redirect URI in Google Cloud (Web client). */
+export const GOOGLE_OAUTH_LOOPBACK_PORT_DEFAULT = 38475;
+
+export function resolveGoogleOAuthLoopbackPort(explicit?: number): number {
+  if (explicit != null && Number.isFinite(explicit) && explicit > 0 && explicit < 65536) {
+    return Math.floor(explicit);
+  }
+  const fromEnv = Number(process.env.GOOGLE_OAUTH_LOOPBACK_PORT?.trim());
+  if (Number.isFinite(fromEnv) && fromEnv > 0 && fromEnv < 65536) return Math.floor(fromEnv);
+  return GOOGLE_OAUTH_LOOPBACK_PORT_DEFAULT;
+}
+
 export type GoogleConnectResult = {
   accountId: string;
   email?: string;
@@ -141,10 +153,19 @@ export function runGoogleConnectFlow(
 
     const timer = setTimeout(() => {
       server.close();
-      reject(new Error("Google OAuth timed out"));
+      reject(new Error("Google OAuth timed out after 5 minutes — run liminal connect google again"));
     }, timeoutMs);
 
-    server.listen(options.port ?? 0, "127.0.0.1", () => {
+    const listenPort = options.redirectUri?.trim()
+      ? 0
+      : resolveGoogleOAuthLoopbackPort(options.port);
+
+    server.on("error", (err) => {
+      clearTimeout(timer);
+      reject(err instanceof Error ? err : new Error(String(err)));
+    });
+
+    server.listen(listenPort, "127.0.0.1", () => {
       const addr = server.address();
       if (!addr || typeof addr === "string") {
         clearTimeout(timer);
@@ -169,7 +190,13 @@ export function runGoogleConnectFlow(
         reject(e instanceof Error ? e : new Error(String(e)));
         return;
       }
-      log(`Opening Google sign-in…\nIf the browser does not open:\n${authUrl}`);
+      log(
+        `Opening Google sign-in…\n` +
+          `Waiting for callback at:\n  ${redirectUri}\n` +
+          `(Add that URI under Google Cloud → Credentials → your OAuth client → Authorized redirect URIs.)\n` +
+          `Complete consent in the browser. Leave this terminal open until you see "Google connected".\n` +
+          `If the browser does not open, paste this URL:\n${authUrl}`
+      );
       if (options.openBrowser !== false) openExternalUrl(authUrl);
     });
 
