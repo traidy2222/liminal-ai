@@ -2,7 +2,7 @@
 
 All notable changes to [Liminal AI](https://github.com/traidy2222/liminal-ai) on the `main` branch.
 
-**Current stage:** **alpha** (`v0.0.18` tip of `main`, 2026-06-04). The workspace package may read `0.1.0`, but **beta**, **RC**, and a **v0.1.0 public preview** have not been declared as product releases yet.
+**Current stage:** **alpha** (`v0.0.19` tip of `main`, 2026-06-05). The workspace package may read `0.1.0`, but **beta**, **RC**, and a **v0.1.0 public preview** have not been declared as product releases yet.
 
 Format: **v0.0.x** entries keyed to the last GitHub push in each slice. Dates are real push dates.
 
@@ -17,9 +17,23 @@ After editing JSON: `npm run changelog:gen`, commit, push, then in [vireondynami
 
 ---
 
+## v0.0.19 — 2026-06-05 {#v0-0-19}
+
+**Current alpha.** Desktop for macOS and Linux, GitHub Release downloads, install-page links.
+
+**Shipped**
+
+- **Liminal Desktop (all platforms)** — Release builds for **Windows x64**, **macOS arm64**, and **Linux x64**; `npm run desktop:build|package:macos|linux` plus existing Windows scripts; portable `liminald/repo` with **relative** paths in `bundle.json`
+- **GitHub Releases** — Tag `v*-desktop` runs unified CI (Windows + macOS + Linux), uploads zip/tar.gz artifacts and SHA256 checksums
+- **Install page** — [vireondynamics.com/liminal/get-started#desktop-app](https://www.vireondynamics.com/liminal/get-started#desktop-app) links direct downloads; product hero CTA points at the desktop app
+- **CI fixes** — `tsc` builds without proprietary `@liminal/enterprise` on public clones; desktop bundle treats robocopy exit codes 0–7 as success
+- **Docs** — [Rich message rendering](../concepts/rich-message-rendering.md), [Install (docs)](../start/install.md)
+
+---
+
 ## v0.0.18 — 2026-06-04 {#v0-0-18}
 
-**Current alpha.** Liminal Desktop (Windows), provider-routing recovery, reasoning-stall breaker, Gmail API tools.
+Liminal Desktop (Windows), provider-routing recovery, reasoning-stall breaker, Gmail API tools.
 
 **Shipped**
 

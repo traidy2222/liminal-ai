@@ -1,7 +1,29 @@
 {
   "stage": "alpha",
-  "currentVersion": "0.0.18",
+  "currentVersion": "0.0.19",
   "releases": [
+    {
+      "version": "0.0.19",
+      "date": "2026-06-05",
+      "tagline": "Desktop for macOS and Linux, GitHub Release downloads, install-page links.",
+      "summary": "Ships pre-built Liminal Desktop for Windows, macOS (Apple Silicon), and Linux via GitHub Releases; portable liminald bundle; marketing install page with per-OS download cards.",
+      "bullets": [
+        "**Liminal Desktop (all platforms)** — Release builds for **Windows x64**, **macOS arm64**, and **Linux x64**; `npm run desktop:build|package:macos|linux` plus existing Windows scripts; portable `liminald/repo` with **relative** paths in `bundle.json`",
+        "**GitHub Releases** — Tag `v*-desktop` runs unified CI (Windows + macOS + Linux), uploads zip/tar.gz artifacts and SHA256 checksums",
+        "**Install page** — [vireondynamics.com/liminal/get-started#desktop-app](https://www.vireondynamics.com/liminal/get-started#desktop-app) links direct downloads; product hero CTA points at the desktop app",
+        "**CI fixes** — `tsc` builds without proprietary `@liminal/enterprise` on public clones; desktop bundle treats robocopy exit codes 0–7 as success"
+      ],
+      "docs": [
+        {
+          "label": "Rich message rendering",
+          "href": "../concepts/rich-message-rendering.md"
+        },
+        {
+          "label": "Install (docs)",
+          "href": "../start/install.md"
+        }
+      ]
+    },
     {
       "version": "0.0.18",
       "date": "2026-06-04",

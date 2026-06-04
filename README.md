@@ -144,7 +144,7 @@ More demos and install walkthrough: **[Liminal home](https://www.vireondynamics.
 
 ## What's new
 
-**Latest:** [Liminal 0.0.18 — Desktop, routing recovery, reasoning-stall breaker](https://www.vireondynamics.com/liminal/changelog/v0-0-18) (2026-06-04)
+**Latest:** [Liminal 0.0.19 — Desktop downloads for Windows, Mac & Linux](https://www.vireondynamics.com/liminal/changelog/v0-0-19) (2026-06-05)
 
 - **Team shared memory** — workspace/global notes sync across org members on the same repo fingerprint ([Team pricing](https://www.vireondynamics.com/liminal/pricing))
 - **Org admin** — members, invites (email via Resend), audit log, fleet/policy ([Team admin docs](https://docs.vireondynamics.com/liminal/) on site)

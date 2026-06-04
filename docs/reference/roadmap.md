@@ -2,18 +2,18 @@
 
 Where Liminal is today and what comes next. **Dates are directional, not commitments** — alpha moves fast on `main`.
 
-**Current stage:** **alpha** (`v0.0.18`, June 2026). Beta, RC, and **v0.1.0 public preview** are [planned milestones](./changelog.md#planned-not-started), not shipped yet.
+**Current stage:** **alpha** (`v0.0.19`, June 2026). Beta, RC, and **v0.1.0 public preview** are [planned milestones](./changelog.md#planned-not-started), not shipped yet.
 
 ---
 
-## Now — Alpha (v0.0.18)
+## Now — Alpha (v0.0.19)
 
 What you can run today from [Install](../start/install.md):
 
 | Area | Status |
 |------|--------|
 | ReAct harness | Retries, circuit breaker, compression, approvals, optional self-heal lint |
-| Interfaces | Terminal UI (Ink) + Web UI (Express + React + SSE, multi-chat) + **Desktop** (Windows alpha, Flutter + sidecar) |
+| Interfaces | Terminal UI (Ink) + Web UI (Express + React + SSE, multi-chat) + **Desktop** (Windows / macOS / Linux alpha, Flutter + sidecar) |
 | Tools | 140+ tools — files, shell, git, web, browser, memory, vault, documents, orchestration, OpenAPI/MCP attach |
 | Inference | **BYOK** (any OpenAI-compatible provider) or **Pro managed** via Vireon proxy — `liminal login`, `AGENT_INFERENCE_MODE` |
 | Provider routing | Price-sorted OpenRouter resellers, sticky sessions, 429-aware rotation (`AGENT_PROVIDER_STRATEGY`) |
