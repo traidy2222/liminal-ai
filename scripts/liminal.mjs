@@ -15,6 +15,8 @@ Usage:
   liminal update              git pull + npm install + build (also runs before web/tui)
   liminal login               Sign in to Vireon (browser); saves license to ~/.liminal/
   liminal logout              Remove local Vireon account + license cache
+  liminal connect google      Google Workspace OAuth (set GOOGLE_OAUTH_* in .env)
+  liminal disconnect google   Revoke Google OAuth tokens
   liminal path                Print install directory
 
 Setup options:
@@ -83,6 +85,32 @@ async function main(argv) {
         console.error("Build core first: npm run build -w packages/core");
         return 1;
       }
+    }
+    case "connect": {
+      const sub = rest[0];
+      if (sub === "google") {
+        const { spawn } = await import("node:child_process");
+        const script = new URL("./lib/google-connect.mjs", import.meta.url).pathname;
+        return new Promise((resolve) => {
+          const child = spawn(process.execPath, [script, ...rest.slice(1)], { stdio: "inherit", cwd: process.cwd() });
+          child.on("exit", (code) => resolve(code ?? 1));
+        });
+      }
+      log("error", `Unknown connect target: ${sub ?? "(none)"}. Try: liminal connect google`);
+      return 1;
+    }
+    case "disconnect": {
+      const sub = rest[0];
+      if (sub === "google") {
+        const { spawn } = await import("node:child_process");
+        const script = new URL("./lib/google-disconnect.mjs", import.meta.url).pathname;
+        return new Promise((resolve) => {
+          const child = spawn(process.execPath, [script], { stdio: "inherit", cwd: process.cwd() });
+          child.on("exit", (code) => resolve(code ?? 1));
+        });
+      }
+      log("error", `Unknown disconnect target: ${sub ?? "(none)"}. Try: liminal disconnect google`);
+      return 1;
     }
     case "path": {
       console.log(resolveRepoRoot());

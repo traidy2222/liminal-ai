@@ -18,6 +18,7 @@ export function createToolDiscoveryTools(registry: ToolRegistry) {
     if (/(price|stock|fx|crypto|commodity|market)/.test(hint)) return "markets";
     if (/(vision|image|screenshot|ocr|diagram)/.test(hint)) return "vision";
     if (/(memory|recall|remember|vault|obsidian|notes)/.test(hint)) return "memory_advanced";
+    if (/(google|gmail|sheet|spreadsheet|drive|calendar|workspace|docs)/.test(hint)) return "connectors";
     if (/(powerpoint|pptx|ppx|slides|docx|pdf|document)/.test(hint)) return "document";
     if (/(code|symbol|reference|lint|execute code|ast)/.test(hint)) return "code_intel";
     if (/(browser|playwright|chromium|frontend|ui test|web page|screenshot)/.test(hint))

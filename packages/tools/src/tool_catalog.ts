@@ -134,6 +134,12 @@ export const TOOL_FAMILIES: Record<string, { description: string; tools: readonl
     description: "Create, edit, remove, and list model-defined tools registered at runtime.",
     tools: ["create_tool", "edit_tool", "remove_tool", "list_dynamic_tools"],
   },
+  connectors: {
+    description:
+      "Curated provider integrations: Google Workspace (Drive, Gmail, Calendar, Docs, Sheets, …) via connect_provider. " +
+      "Requires OAuth (Settings → Integrations or `liminal connect google`).",
+    tools: ["connect_provider", "disconnect_provider", "list_connectors"],
+  },
   external_api: {
     description:
       "Connect external services by spec: OpenAPI/Swagger via api_connect, MCP servers via mcp_attach. " +

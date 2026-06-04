@@ -1663,7 +1663,7 @@ export function App() {
         hint?: string;
       };
       setSettingsFields(j.fields ?? []);
-      setSettingsTabs(j.tabs ?? []);
+      setSettingsTabs([{ id: "integrations", title: "Integrations" }, ...(j.tabs ?? [])]);
       setSettingsHint(j.hint ?? "");
       setSettingsProviderModel(j.provider?.model ?? "");
       setSettingsProviderBase(j.provider?.baseURL ?? "");

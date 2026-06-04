@@ -62,6 +62,9 @@ export async function createLocalWebAuth(): Promise<LocalWebAuth> {
     ) {
       return true;
     }
+    if (req.method === "GET" && path === "/oauth/google/callback") {
+      return isLoopbackAddress(req.socket.remoteAddress);
+    }
     if (req.method === "GET" && path === "/api/config") {
       return isLoopbackAddress(req.socket.remoteAddress);
     }

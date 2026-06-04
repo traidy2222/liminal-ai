@@ -37,6 +37,9 @@ export function inferIntentToolFamilies(
     for (const f of mapped.families) {
       if (has(f)) out.add(f);
     }
+    if (/google|gmail|sheet|spreadsheet|gdoc|drive|calendar|workspace/i.test(trimmed)) {
+      if (has("connectors")) out.add("connectors");
+    }
   }
 
   return [...out];

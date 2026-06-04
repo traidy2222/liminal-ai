@@ -51,6 +51,7 @@ import { REASONING_BUDGET_SCENARIOS } from "./scenarios/reasoning_budget.js";
 import { HARNESS_RELIABILITY_SCENARIOS } from "./scenarios/harness_reliability.js";
 import { WORKFLOW_EVAL_SCENARIOS } from "./scenarios/workflow_evals.js";
 import { MONOLITHIC_HTML_GAME_SCENARIOS } from "./scenarios/monolithic_html_game.js";
+import { GOOGLE_CONNECTORS_SCENARIOS } from "./scenarios/google_connectors.js";
 
 const ALL_SCENARIOS = [
   ...BASIC_SCENARIOS,
@@ -77,6 +78,7 @@ const ALL_SCENARIOS = [
   ...HARNESS_RELIABILITY_SCENARIOS,
   ...WORKFLOW_EVAL_SCENARIOS,
   ...MONOLITHIC_HTML_GAME_SCENARIOS,
+  ...GOOGLE_CONNECTORS_SCENARIOS,
 ];
 const REAL_SCENARIOS = ALL_SCENARIOS.filter((s) => !s.mocks || s.mocks.length === 0);
 

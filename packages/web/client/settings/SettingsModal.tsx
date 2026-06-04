@@ -5,6 +5,7 @@ import {
   PROVIDER_PRESET_CUSTOM_ID,
   resolvePresetSelection,
 } from "./providerPresets.js";
+import { IntegrationsPanel } from "./IntegrationsPanel.js";
 
 const CYAN = "var(--lim-accent, #00d4ff)";
 const AMBER = "var(--lim-warn, #ffb347)";
@@ -211,6 +212,7 @@ export function SettingsModal({
   const subgroups = useMemo(() => groupBySubgroup(activeRows), [activeRows]);
 
   const showProvider = !!filtered || activeTabId === "models_api";
+  const showIntegrations = activeTabId === "integrations" && !filtered;
   const providerPresetLocked = providerModelLocked || providerBaseLocked;
   const resolvedPresetId = useMemo(
     () => resolvePresetSelection(providerModel, providerBase),
@@ -555,7 +557,10 @@ export function SettingsModal({
                   </div>
                 ) : null}
 
-                {subgroups.map(([subId, subLabel, subFields]) => (
+                {showIntegrations ? <IntegrationsPanel agentBusy={agentBusy} /> : null}
+
+                {!showIntegrations
+                  ? subgroups.map(([subId, subLabel, subFields]) => (
                   <details
                     key={`${activeTabId}-${subId}-${searchQ || "all"}`}
                     open
@@ -587,7 +592,8 @@ export function SettingsModal({
                       ))}
                     </div>
                   </details>
-                ))}
+                ))
+                  : null}
               </div>
             </div>
           </div>

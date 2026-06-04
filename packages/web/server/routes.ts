@@ -33,6 +33,12 @@ import {
   clearVireonAccount,
   fetchInferenceUsageStatus,
   resolveInferenceMode,
+  listGoogleOAuthAccounts,
+  exchangeGoogleCode,
+  buildGoogleAuthUrlForWeb,
+  ALL_GOOGLE_SERVICE_IDS,
+  scopesForGoogleServices,
+  resolveGoogleServices,
 } from "@liminal/core";
 import {
   saveAudioAttachment,
@@ -43,6 +49,15 @@ import {
   saveTtsClip,
   readTtsClip,
   ttsClipAudioUrl,
+  getGoogleSidecarStatus,
+  connectGoogleWorkspaceFromServer,
+  disconnectGoogleWorkspaceFromServer,
+  listIntegrationConnections,
+  attachCustomMcpFromServer,
+  detachCustomMcpFromServer,
+  connectOpenApiFromServer,
+  disconnectOpenApiFromServer,
+  parseAuthBody,
 } from "@liminal/tools";
 import { loadPersonaUiThemeFromWorkspace } from "@liminal/tools";
 import { persistIncomingAttachments } from "./image_attachment_store.js";
@@ -76,6 +91,22 @@ const pendingHarnessConnect = new Map<
   string,
   { exp: number; redirectUri: string }
 >();
+
+const pendingGoogleConnect = new Map<
+  string,
+  { exp: number; redirectUri: string; services?: string[]; mode: "read_write" | "read_only" }
+>();
+
+function prunePendingGoogleConnect(): void {
+  const now = Date.now();
+  for (const [k, v] of pendingGoogleConnect) {
+    if (v.exp < now) pendingGoogleConnect.delete(k);
+  }
+}
+
+function googleCallbackRedirectUri(port: number): string {
+  return `http://127.0.0.1:${port}/oauth/google/callback`;
+}
 
 function prunePendingHarnessConnect(): void {
   const now = Date.now();
@@ -235,7 +266,7 @@ export function createRouter(
     const account = await readVireonAccount();
     const ent = await loadHarnessEntitlements();
     const orgId = ent.license?.org?.trim() || null;
-    const teamMemoryEntitled = ent.entitlements.includes("team.shared_memory");
+    const teamMemoryEntitled = ent.entitlements.has("team.shared_memory");
     const teamMemorySyncOn = process.env["AGENT_TEAM_MEMORY_SYNC"] !== "0";
     let teamMemoryStatus: "active" | "offline" | "not_entitled" = "not_entitled";
     if (teamMemoryEntitled) {
@@ -441,6 +472,209 @@ export function createRouter(
     } catch (e) {
       res.status(400).json({ error: e instanceof Error ? e.message : "Reconnect failed" });
     }
+  });
+
+  router.get("/api/integrations", async (_req, res) => {
+    try {
+      const accounts = await listGoogleOAuthAccounts();
+      const sidecar = await getGoogleSidecarStatus();
+      const connections = await listIntegrationConnections();
+      res.json({
+        google: {
+          accounts,
+          sidecar,
+          services: ALL_GOOGLE_SERVICE_IDS,
+        },
+        connections,
+      });
+    } catch (e) {
+      res.status(500).json({ error: e instanceof Error ? e.message : String(e) });
+    }
+  });
+
+  router.get("/api/integrations/google/begin", (req, res) => {
+    prunePendingGoogleConnect();
+    const state = randomBytes(16).toString("hex");
+    const redirectUri = googleCallbackRedirectUri(WEB_PORT);
+    const servicesRaw = req.query["services"];
+    const services =
+      typeof servicesRaw === "string"
+        ? servicesRaw.split(",").map((s) => s.trim()).filter(Boolean)
+        : undefined;
+    const mode = req.query["mode"] === "read_only" ? "read_only" : "read_write";
+    pendingGoogleConnect.set(state, { exp: Date.now() + 5 * 60_000, redirectUri, services, mode });
+    try {
+      const authUrl = buildGoogleAuthUrlForWeb({ redirectUri, state, services, mode });
+      res.json({ authUrl, state });
+    } catch (e) {
+      res.status(400).json({ error: e instanceof Error ? e.message : String(e) });
+    }
+  });
+
+  router.get("/oauth/google/callback", async (req, res) => {
+    prunePendingGoogleConnect();
+    const state = String(req.query["state"] ?? "");
+    const pending = pendingGoogleConnect.get(state);
+    const code = String(req.query["code"] ?? "");
+    const err = req.query["error"];
+
+    if (err) {
+      res.status(400).send(vireonCallbackHtml("Google sign-in failed", escapeHtml(String(err))));
+      return;
+    }
+    if (!pending || !code) {
+      res.status(400).send(vireonCallbackHtml("Invalid request", "Missing or expired OAuth state."));
+      return;
+    }
+    pendingGoogleConnect.delete(state);
+
+    try {
+      const presets = resolveGoogleServices(pending.services);
+      const scopes = scopesForGoogleServices(
+        presets.length > 0 ? presets : resolveGoogleServices(undefined),
+        pending.mode
+      );
+      const bundle = await exchangeGoogleCode({ code, redirectUri: pending.redirectUri, scopes });
+      res.send(
+        vireonCallbackSuccessRedirect(bundle.email ?? bundle.accountId, "google_workspace").replace(
+          "vireon=connected",
+          "google=connected"
+        )
+      );
+    } catch (e) {
+      res.status(500).send(
+        vireonCallbackHtml("Token exchange failed", escapeHtml(e instanceof Error ? e.message : String(e)))
+      );
+    }
+  });
+
+  router.post("/api/integrations/google/connect", async (req, res) => {
+    const bridge = active();
+    if (bridge.harness.getIsRunning()) {
+      res.status(409).json({ error: "Agent is busy; finish the current turn first." });
+      return;
+    }
+    const body = req.body as { services?: string[]; mode?: "read_write" | "read_only" };
+    const result = await connectGoogleWorkspaceFromServer(bridge.harness.registry, {
+      services: body.services,
+      mode: body.mode ?? "read_write",
+    });
+    if (!result.ok) {
+      res.status(400).json({ error: result.error });
+      return;
+    }
+    bridge.harness.getContext().refreshProtocolDynamic(bridge.harness.registry.getActiveToolNames());
+    res.json({ ok: true, output: result.output });
+  });
+
+  router.delete("/api/integrations/google", async (req, res) => {
+    const bridge = active();
+    const revoke = req.query["revoke"] === "1" || req.query["revoke"] === "true";
+    const result = await disconnectGoogleWorkspaceFromServer(bridge.harness.registry, revoke);
+    if (!result.ok) {
+      res.status(400).json({ error: result.error });
+      return;
+    }
+    bridge.harness.getContext().refreshProtocolDynamic(bridge.harness.registry.getActiveToolNames());
+    res.json({ ok: true, output: result.output });
+  });
+
+  router.post("/api/integrations/mcp", async (req, res) => {
+    const bridge = active();
+    if (bridge.harness.getIsRunning()) {
+      res.status(409).json({ error: "Agent is busy; finish the current turn first." });
+      return;
+    }
+    const body = req.body as {
+      name?: string;
+      url?: string;
+      read_only?: boolean;
+      auth?: unknown;
+    };
+    const name = String(body.name ?? "").trim();
+    const url = String(body.url ?? "").trim();
+    if (!name || !url) {
+      res.status(400).json({ error: "name and url are required" });
+      return;
+    }
+    const result = await attachCustomMcpFromServer(bridge.harness.registry, {
+      name,
+      url,
+      readOnly: body.read_only === true,
+      auth: parseAuthBody(body.auth),
+    });
+    if (!result.ok) {
+      res.status(400).json({ error: result.error });
+      return;
+    }
+    bridge.harness.getContext().refreshProtocolDynamic(bridge.harness.registry.getActiveToolNames());
+    res.json({ ok: true, output: result.output, toolCount: result.toolNames?.length ?? 0 });
+  });
+
+  router.delete("/api/integrations/mcp/:name", async (req, res) => {
+    const bridge = active();
+    if (bridge.harness.getIsRunning()) {
+      res.status(409).json({ error: "Agent is busy; finish the current turn first." });
+      return;
+    }
+    const name = String(req.params["name"] ?? "").trim();
+    const result = await detachCustomMcpFromServer(bridge.harness.registry, name);
+    if (!result.ok) {
+      res.status(400).json({ error: result.error });
+      return;
+    }
+    bridge.harness.getContext().refreshProtocolDynamic(bridge.harness.registry.getActiveToolNames());
+    res.json({ ok: true, output: result.output });
+  });
+
+  router.post("/api/integrations/openapi", async (req, res) => {
+    const bridge = active();
+    if (bridge.harness.getIsRunning()) {
+      res.status(409).json({ error: "Agent is busy; finish the current turn first." });
+      return;
+    }
+    const body = req.body as {
+      name?: string;
+      specUrl?: string;
+      baseUrl?: string;
+      autoApproveReads?: boolean;
+      auth?: unknown;
+    };
+    const name = String(body.name ?? "").trim();
+    const specUrl = String(body.specUrl ?? "").trim();
+    if (!name || !specUrl) {
+      res.status(400).json({ error: "name and specUrl are required" });
+      return;
+    }
+    const result = await connectOpenApiFromServer(bridge.harness.registry, {
+      name,
+      specUrl,
+      baseUrl: typeof body.baseUrl === "string" ? body.baseUrl.trim() : undefined,
+      auth: parseAuthBody(body.auth),
+      autoApproveReads: body.autoApproveReads !== false,
+    });
+    if (!result.ok) {
+      res.status(400).json({ error: result.error });
+      return;
+    }
+    bridge.harness.getContext().refreshProtocolDynamic(bridge.harness.registry.getActiveToolNames());
+    res.json({ ok: true, output: result.output, toolCount: result.toolNames?.length ?? 0 });
+  });
+
+  router.delete("/api/integrations/openapi/:name", async (req, res) => {
+    const bridge = active();
+    if (bridge.harness.getIsRunning()) {
+      res.status(409).json({ error: "Agent is busy; finish the current turn first." });
+      return;
+    }
+    const name = String(req.params["name"] ?? "").trim();
+    const result = await disconnectOpenApiFromServer(bridge.harness.registry, name);
+    if (!result.ok) {
+      res.status(400).json({ error: result.error });
+      return;
+    }
+    bridge.harness.getContext().refreshProtocolDynamic(bridge.harness.registry.getActiveToolNames());
+    res.json({ ok: true, output: result.output });
   });
 
   router.put("/api/settings", async (req, res) => {

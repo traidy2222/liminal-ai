@@ -1,33 +1,24 @@
 /**
  * MCP (Model Context Protocol) attach — register a remote MCP server's tools
  * as local harness tools.
- *
- * Transport: Streamable HTTP only (POST JSON-RPC, optional SSE response). This
- * is the modern MCP transport and avoids spawning subprocesses. stdio servers
- * can still be reached by fronting them with an HTTP shim; we keep the wire
- * surface tight so the connection record stays JSON-serializable.
- *
- * Handshake (per MCP spec):
- *   1. POST `{"jsonrpc":"2.0","id":1,"method":"initialize", params:{protocolVersion,capabilities,clientInfo}}`
- *   2. POST `{"jsonrpc":"2.0","method":"notifications/initialized"}` (no response)
- *   3. POST `{"jsonrpc":"2.0","id":2,"method":"tools/list"}` → tools enumeration
- *
- * At call time each generated tool POSTs `tools/call` with `{name, arguments}`
- * and surfaces the `content[].text` join as the tool output.
  */
 import type { AgentEmitter, ToolDefinition, ToolRegistry, ToolResult, PropertySchema } from "@liminal/core";
 import { defineTool } from "./helpers.js";
 import {
   type AuthScheme,
   type McpConnectionRecord,
+  type McpToolFilter,
   type McpToolRecord,
   deleteConnection,
+  googleOAuthAuthScheme,
   listConnections,
   readConnection,
-  resolveAuthHeader,
+  resolveAuthHeaderAsync,
   sanitizeConnectionName,
   writeConnection,
 } from "./api_connections_store.js";
+import { filterMcpToolRecords, isMcpReadTool, isMcpWriteTool } from "./mcp_tool_classify.js";
+import { registerConnectorToolFamilies } from "./connector_family_map.js";
 
 const MCP_PROTOCOL_VERSION = "2025-06-18";
 const MCP_CLIENT_INFO = { name: "liminal-harness", version: "0.1.0" };
@@ -53,7 +44,7 @@ async function postJsonRpc<T>(
   const headers: Record<string, string> = {
     "Content-Type": "application/json",
     Accept: "application/json, text/event-stream",
-    ...resolveAuthHeader(auth),
+    ...(await resolveAuthHeaderAsync(auth)),
   };
   const res = await fetch(serverUrl, {
     method: "POST",
@@ -66,7 +57,6 @@ async function postJsonRpc<T>(
   }
   const ct = res.headers.get("content-type") ?? "";
   if (ct.includes("text/event-stream")) {
-    // Drain SSE → return the first `data:` line that contains a JSON-RPC response.
     const text = await res.text();
     for (const line of text.split(/\r?\n/)) {
       if (!line.startsWith("data:")) continue;
@@ -76,7 +66,7 @@ async function postJsonRpc<T>(
         const parsed = JSON.parse(payload) as JsonRpcResponse<T>;
         if (parsed && parsed.jsonrpc === "2.0") return parsed;
       } catch {
-        /* continue scanning lines */
+        /* continue */
       }
     }
     throw new Error("SSE response contained no JSON-RPC payload");
@@ -97,8 +87,7 @@ interface McpToolCallResult {
   isError?: boolean;
 }
 
-async function mcpHandshakeAndListTools(serverUrl: string, auth: AuthScheme): Promise<McpToolRecord[]> {
-  // 1. initialize
+export async function mcpHandshakeAndListTools(serverUrl: string, auth: AuthScheme): Promise<McpToolRecord[]> {
   await postJsonRpc<{ protocolVersion?: string }>(
     serverUrl,
     {
@@ -114,7 +103,6 @@ async function mcpHandshakeAndListTools(serverUrl: string, auth: AuthScheme): Pr
     auth,
     true
   );
-  // 2. notifications/initialized — fire-and-forget per spec.
   try {
     await postJsonRpc(
       serverUrl,
@@ -123,9 +111,8 @@ async function mcpHandshakeAndListTools(serverUrl: string, auth: AuthScheme): Pr
       false
     );
   } catch {
-    /* not every server requires this; tolerate failure */
+    /* tolerate */
   }
-  // 3. tools/list
   const reply = await postJsonRpc<McpToolsListResult>(
     serverUrl,
     { jsonrpc: "2.0", id: nextJsonRpcId(), method: "tools/list" },
@@ -185,6 +172,8 @@ function buildMcpToolHandler(record: McpConnectionRecord, tool: McpToolRecord): 
 
 function buildMcpTool(record: McpConnectionRecord, tool: McpToolRecord): ToolDefinition {
   const { properties, required } = ensureToolParameterShape(tool.inputSchema);
+  const isWrite = isMcpWriteTool(tool.remoteName, tool.description);
+  const isRead = isMcpReadTool(tool.remoteName, tool.description);
   return defineTool({
     name: tool.toolName,
     description: `[mcp:${record.name}] ${tool.description || tool.remoteName}`,
@@ -193,22 +182,30 @@ function buildMcpTool(record: McpConnectionRecord, tool: McpToolRecord): ToolDef
       properties,
       required: required.length > 0 ? required : undefined,
     },
-    // MCP tools span the full safety spectrum; default to approval-required so a
-    // server marketed as "read-only" can't surprise the user with a write call.
-    requiresApproval: true,
-    dangerLevel: "cautious",
+    requiresApproval: isWrite,
+    dangerLevel: isWrite ? "destructive" : "safe",
+    cacheable: isRead && !isWrite,
+    cacheTtlMs: isRead ? 30_000 : undefined,
     handler: buildMcpToolHandler(record, tool),
   });
 }
 
-export function registerMcpConnection(registry: ToolRegistry, record: McpConnectionRecord): number {
-  let count = 0;
+export function assignMcpToolNames(tools: McpToolRecord[], connName: string): void {
+  for (const t of tools) {
+    const slug = t.remoteName.replace(/[^a-zA-Z0-9_]/g, "_").toLowerCase();
+    t.toolName = `mcp_${connName}_${slug}`.slice(0, 64);
+  }
+}
+
+export function registerMcpConnection(registry: ToolRegistry, record: McpConnectionRecord): string[] {
+  const registered: string[] = [];
   for (const t of record.tools) {
     if (registry.has(t.toolName)) registry.unregister(t.toolName);
     registry.register(buildMcpTool(record, t));
-    count++;
+    registered.push(t.toolName);
   }
-  return count;
+  registerConnectorToolFamilies(registry, record.name, registered);
+  return registered;
 }
 
 export function unregisterMcpConnection(registry: ToolRegistry, record: McpConnectionRecord): number {
@@ -221,33 +218,109 @@ export function unregisterMcpConnection(registry: ToolRegistry, record: McpConne
 
 function parseAuthArg(auth: unknown): AuthScheme {
   if (!auth || typeof auth !== "object") return { kind: "none" };
-  const a = auth as { kind?: string; envVar?: string; headerName?: string };
+  const a = auth as {
+    kind?: string;
+    envVar?: string;
+    headerName?: string;
+    provider?: string;
+    accountId?: string;
+    scopes?: string[];
+  };
+  if (a.kind === "oauth2" && a.provider === "google") {
+    return {
+      kind: "oauth2",
+      provider: "google",
+      accountId: a.accountId,
+      scopes: Array.isArray(a.scopes) ? a.scopes : [],
+    };
+  }
   if (a.kind === "bearer" && a.envVar) return { kind: "bearer", envVar: a.envVar };
-  if (a.kind === "header" && a.envVar && a.headerName) return { kind: "header", headerName: a.headerName, envVar: a.envVar };
+  if (a.kind === "header" && a.envVar && a.headerName) {
+    return { kind: "header", headerName: a.headerName, envVar: a.envVar };
+  }
   if (a.kind === "basic" && a.envVar) return { kind: "basic", envVar: a.envVar };
   return { kind: "none" };
+}
+
+export interface AttachMcpOptions {
+  name: string;
+  url: string;
+  auth?: AuthScheme;
+  readOnly?: boolean;
+  autoActivate?: boolean;
+  toolFilter?: McpToolFilter;
+  providerId?: string;
+  parentProvider?: string;
+  services?: string[];
+  oauthAccountId?: string;
+  sidecarManaged?: boolean;
+}
+
+export async function attachMcpConnection(
+  registry: ToolRegistry,
+  opts: AttachMcpOptions
+): Promise<{ record: McpConnectionRecord; registered: string[] }> {
+  const name = sanitizeConnectionName(opts.name);
+  if (!name) throw new Error("connection name normalized to empty");
+
+  const existing = await readConnection(name);
+  if (existing && existing.kind === "mcp") {
+    unregisterMcpConnection(registry, existing);
+  }
+
+  const auth = opts.auth ?? { kind: "none" };
+  let tools = await mcpHandshakeAndListTools(opts.url, auth);
+  tools = filterMcpToolRecords(tools, {
+    readOnly: opts.readOnly,
+    toolFilter: opts.toolFilter,
+  });
+  if (tools.length === 0) throw new Error("no tools after filter");
+
+  assignMcpToolNames(tools, name);
+
+  const record: McpConnectionRecord = {
+    kind: "mcp",
+    name,
+    serverUrl: opts.url,
+    transport: "http",
+    auth,
+    tools,
+    attachedAt: Date.now(),
+    readOnly: opts.readOnly,
+    autoActivate: opts.autoActivate ?? true,
+    toolFilter: opts.toolFilter,
+    providerId: opts.providerId,
+    parentProvider: opts.parentProvider,
+    services: opts.services,
+    oauthAccountId: opts.oauthAccountId,
+    sidecarManaged: opts.sidecarManaged,
+  };
+
+  await writeConnection(record);
+  const registered = registerMcpConnection(registry, record);
+
+  if (registry.isLazyToolLoading() && record.autoActivate !== false) {
+    registry.activate(registered);
+  }
+
+  return { record, registered };
 }
 
 export function createMcpAttachTools(registry: ToolRegistry, _emitter: AgentEmitter) {
   const mcpAttachTool = defineTool({
     name: "mcp_attach",
     description:
-      "WHAT: Connect to a remote MCP (Model Context Protocol) server and register every tool it exposes.\n" +
-      "WHEN: You want to plug the agent into an MCP-speaking service (file-system bridges, GitHub, Slack, custom internal MCP servers).\n" +
-      "HOW: Provide a connection `name` and the server's HTTP endpoint `url`. Handshake (`initialize` → `tools/list`) " +
-      "runs immediately; generated tools land as `mcp_<name>_<remoteName>`. Survives restarts.",
+      "WHAT: Connect to a remote MCP server and register every tool it exposes.\n" +
+      "WHEN: Plug into MCP-speaking services (GitHub, Slack, Google via connect_provider, custom servers).\n" +
+      "HOW: Provide `name` and `url`. Generated tools: `mcp_<name>_*`. Persists across restarts.",
     parameters: {
       type: "object",
       properties: {
-        name: { type: "string", description: "Short id, e.g. 'gh'. Becomes the tool prefix `mcp_<name>_*`." },
-        url: {
-          type: "string",
-          description: "Streamable HTTP endpoint of the MCP server (commonly ending in `/mcp` or `/sse`).",
-        },
-        auth: {
-          type: "object",
-          description: "Optional auth scheme, same shape as api_connect (bearer/header/basic/none).",
-        },
+        name: { type: "string", description: "Short id, e.g. 'gh'." },
+        url: { type: "string", description: "Streamable HTTP MCP endpoint." },
+        auth: { type: "object", description: "Auth scheme (bearer/header/oauth2/none)." },
+        read_only: { type: "boolean", description: "Skip write tools." },
+        auto_activate: { type: "boolean", description: "Expose tools immediately under lazy loading (default true)." },
       },
       required: ["name", "url"],
       additionalProperties: false,
@@ -257,59 +330,36 @@ export function createMcpAttachTools(registry: ToolRegistry, _emitter: AgentEmit
       const rawName = String(args["name"] ?? "").trim();
       const url = String(args["url"] ?? "").trim();
       if (!rawName || !url) return { ok: false, error: "name and url are required" };
-      const name = sanitizeConnectionName(rawName);
-      if (!name) return { ok: false, error: "name normalized to empty — use lowercase letters, digits, underscore" };
 
-      const existing = await readConnection(name);
-      if (existing && existing.kind === "mcp") {
-        unregisterMcpConnection(registry, existing);
-      }
-
-      const auth = parseAuthArg(args["auth"]);
-      let tools: McpToolRecord[];
       try {
-        tools = await mcpHandshakeAndListTools(url, auth);
+        const { record, registered } = await attachMcpConnection(registry, {
+          name: rawName,
+          url,
+          auth: parseAuthArg(args["auth"]),
+          readOnly: args["read_only"] === true,
+          autoActivate: args["auto_activate"] !== false,
+        });
+        const sample = record.tools.slice(0, 8).map((t) => `  ${t.toolName}  → ${t.remoteName}`).join("\n");
+        const more = record.tools.length > 8 ? `\n  …and ${record.tools.length - 8} more` : "";
+        return {
+          ok: true,
+          output:
+            `Attached MCP '${record.name}'. URL: ${url}\n` +
+            `Registered ${registered.length} tools:\n${sample}${more}\n` +
+            `Auth: ${record.auth.kind}.\nPersisted to ~/.liminal/api_connections/${record.name}.json.`,
+        };
       } catch (e) {
-        return { ok: false, error: `handshake failed: ${e instanceof Error ? e.message : String(e)}` };
+        return { ok: false, error: e instanceof Error ? e.message : String(e) };
       }
-      // Assign final tool names AFTER we know the connection name (so persistence is stable).
-      for (const t of tools) {
-        const slug = t.remoteName.replace(/[^a-zA-Z0-9_]/g, "_").toLowerCase();
-        t.toolName = `mcp_${name}_${slug}`.slice(0, 64);
-      }
-
-      const record: McpConnectionRecord = {
-        kind: "mcp",
-        name,
-        serverUrl: url,
-        transport: "http",
-        auth,
-        tools,
-        attachedAt: Date.now(),
-      };
-      await writeConnection(record);
-      const registered = registerMcpConnection(registry, record);
-
-      const sample = tools.slice(0, 8).map((t) => `  ${t.toolName}  → ${t.remoteName}`).join("\n");
-      const more = tools.length > 8 ? `\n  …and ${tools.length - 8} more` : "";
-      return {
-        ok: true,
-        output:
-          `Attached MCP '${name}'. URL: ${url}\n` +
-          `Registered ${registered} tools:\n${sample}${more}\n` +
-          `Auth: ${auth.kind}.\nPersisted to ~/.liminal/api_connections/${name}.json.`,
-      };
     },
   });
 
   const mcpDetachTool = defineTool({
     name: "mcp_detach",
-    description:
-      "WHAT: Unregister every tool from a named MCP connection and delete its persisted record.\n" +
-      "WHEN: A server is decommissioned or you want to refresh tool definitions via a fresh attach.",
+    description: "Unregister every tool from a named MCP connection and delete its persisted record.",
     parameters: {
       type: "object",
-      properties: { name: { type: "string", description: "MCP connection name." } },
+      properties: { name: { type: "string" } },
       required: ["name"],
       additionalProperties: false,
     },
@@ -329,20 +379,30 @@ export function createMcpAttachTools(registry: ToolRegistry, _emitter: AgentEmit
   return { mcpAttachTool, mcpDetachTool };
 }
 
-/** Restore every persisted MCP connection — uses cached tool list, does NOT re-handshake. */
-export function restoreMcpConnectionsFromRecords(records: McpConnectionRecord[], registry: ToolRegistry): number {
-  let total = 0;
+export function restoreMcpConnectionsFromRecords(
+  records: McpConnectionRecord[],
+  registry: ToolRegistry
+): { toolCount: number; activated: string[] } {
+  let toolCount = 0;
+  const activated: string[] = [];
   for (const c of records) {
-    total += registerMcpConnection(registry, c);
+    const names = registerMcpConnection(registry, c);
+    toolCount += names.length;
+    if (registry.isLazyToolLoading() && c.autoActivate !== false) {
+      activated.push(...registry.activate(names));
+    }
   }
-  return total;
+  return { toolCount, activated };
 }
 
-export async function restoreMcpConnections(registry: ToolRegistry, emitter: AgentEmitter): Promise<number> {
+export async function restoreMcpConnections(
+  registry: ToolRegistry,
+  emitter: AgentEmitter
+): Promise<number> {
   const all = await listConnections();
   const mcp = all.filter((c): c is McpConnectionRecord => c.kind === "mcp");
   try {
-    return restoreMcpConnectionsFromRecords(mcp, registry);
+    return restoreMcpConnectionsFromRecords(mcp, registry).toolCount;
   } catch (e) {
     emitter.emit("error", {
       err: new Error(`Failed to restore MCP connections: ${e instanceof Error ? e.message : String(e)}`),
@@ -350,3 +410,5 @@ export async function restoreMcpConnections(registry: ToolRegistry, emitter: Age
     return 0;
   }
 }
+
+export { googleOAuthAuthScheme };

@@ -1661,6 +1661,41 @@ const _META_RAW: Record<string, HarnessSettingsFieldMeta> = {
     description: "Harness environment toggle for Plugin Dir. See docs/configuration.md (advanced).",
     valueKind: "string",
   },
+  "AGENT_GOOGLE_OAUTH_CLIENT_ID": {
+    tabId: "harness",
+    subgroupId: "harness_misc",
+    label: "Google Oauth Client Id",
+    description: "Harness environment toggle for Google Oauth Client Id. See docs/configuration.md (harness).",
+    valueKind: "string",
+  },
+  "AGENT_GOOGLE_SIDECAR_ENABLE": {
+    tabId: "harness",
+    subgroupId: "harness_misc",
+    label: "Google Sidecar Enable",
+    description: "Harness environment toggle for Google Sidecar Enable. See docs/configuration.md (harness).",
+    valueKind: "string",
+  },
+  "AGENT_GOOGLE_SIDECAR_CMD": {
+    tabId: "harness",
+    subgroupId: "harness_misc",
+    label: "Google Sidecar Cmd",
+    description: "Harness environment toggle for Google Sidecar Cmd. See docs/configuration.md (harness).",
+    valueKind: "string",
+  },
+  "AGENT_GOOGLE_SIDECAR_PORT": {
+    tabId: "harness",
+    subgroupId: "harness_misc",
+    label: "Google Sidecar Port",
+    description: "Harness environment toggle for Google Sidecar Port. See docs/configuration.md (harness).",
+    valueKind: "string",
+  },
+  "AGENT_GOOGLE_CONNECT_ON_BOOT": {
+    tabId: "harness",
+    subgroupId: "harness_misc",
+    label: "Google Connect On Boot",
+    description: "Harness environment toggle for Google Connect On Boot. See docs/configuration.md (harness).",
+    valueKind: "string",
+  },
   "AGENT_PROCESS_HEALTH": {
     tabId: "advanced",
     subgroupId: "plugins",
@@ -2071,8 +2106,7 @@ const _META_RAW: Record<string, HarnessSettingsFieldMeta> = {
     tabId: "harness",
     subgroupId: "harness_misc",
     label: "Team Audit Log",
-    description:
-      "When on (Team+), ship turn_end harness metrics to the control-plane audit API (POST /api/team/audit/events).",
+    description: "Harness environment toggle for Team Audit Log. See docs/configuration.md (harness).",
     valueKind: "string",
   },
   "AGENT_CONTROL_PLANE_URL": {

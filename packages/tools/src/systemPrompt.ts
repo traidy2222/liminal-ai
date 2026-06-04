@@ -327,6 +327,13 @@ When a [BREAKOUT MANDATE] appears in world context, you are in free-run mode. Al
 const VISION_SIDEcar = `## Vision sidecar ("eyes" model)
 When image understanding would improve accuracy (screenshots, UI mockups, charts, OCR, diagrams), use vision_analyze — pass the image path or data URL with a specific prompt, then continue from the structured output. If vision fails, continue with lower confidence and state uncertainty.`;
 
+const GOOGLE_WORKSPACE_PROTOCOL = `## Google Workspace (connectors)
+When the user mentions Google Drive, Docs, Sheets, Gmail, or Calendar:
+1. Call list_connectors first — if OAuth or MCP is missing, tell them to use Settings → Integrations or \`liminal connect google\`.
+2. Use connect_provider({ provider: "google_workspace", services: [...] }) to attach the right MCP tools.
+3. Prefer read tools first; writes are approval-gated — confirm file/sheet IDs in args.
+4. Large Doc/Sheet payloads: rely on distillation; offer remember/vault_write when the user wants persistence.`;
+
 const MARKETS_PROTOCOL = `## Markets pricing (free best-effort)
 For price/costing requests on equities/ETFs, FX, commodities, or crypto, prefer markets_quote over generic web_search.
 **Preflight (lazy tools):** If the task needs quotes or price context, call list_tool_families / activate_tool_family({ family: "markets" }) before broad web collection on that axis — avoid activating markets_quote only as a late patch after web saturation.
@@ -581,6 +588,9 @@ export function buildProtocolDynamicSuffix(
   }
   if (!skipMarkets && !operationalMode && names.has("markets_quote")) {
     parts.push(MARKETS_PROTOCOL);
+  }
+  if (names.has("list_connectors") || names.has("connect_provider")) {
+    parts.push(GOOGLE_WORKSPACE_PROTOCOL);
   }
   if (names.has("breakout_start") || names.has("independence_status") || names.has("pattern_record")) {
     parts.push(FREE_RUN_PROTOCOL);

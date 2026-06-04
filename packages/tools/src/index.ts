@@ -97,6 +97,7 @@ import { createVerifyContractTool } from "./verify_contract.js";
 import { createDynamicToolsTools, loadDynamicTools } from "./dynamic_tools.js";
 import { createApiConnectionTools, restoreOpenApiConnections } from "./api_connect.js";
 import { createMcpAttachTools, restoreMcpConnections } from "./mcp_attach.js";
+import { createConnectorTools } from "./connect_provider.js";
 import { memoryPromoteTool } from "./memory_promote.js";
 import { memoryNeighborsTool } from "./memory_neighbors.js";
 import { consolidateChatTool } from "./consolidate_chat.js";
@@ -373,12 +374,17 @@ export async function registerAllTools(
   const { mcpAttachTool, mcpDetachTool } = createMcpAttachTools(registry, emitter);
   registry.register(mcpAttachTool);
   registry.register(mcpDetachTool);
+  const connectorTools = createConnectorTools(registry, emitter);
+  registry.register(connectorTools.connectProviderTool);
+  registry.register(connectorTools.disconnectProviderTool);
+  registry.register(connectorTools.listConnectorsTool);
   // Re-register previously-attached connections so their generated tools are
   // live on the next ReAct turn. Best-effort — failures are logged via emitter.
+  applyLazyRegistrationPolicy(registry, harness);
+
+  // Restore persisted connections after lazy seed so autoActivate tools stay visible.
   await restoreOpenApiConnections(registry, emitter);
   await restoreMcpConnections(registry, emitter);
-
-  applyLazyRegistrationPolicy(registry, harness);
   if (harness) {
     harness.getContext().refreshProtocolDynamic(harness.registry.getActiveToolNames());
   }
@@ -432,3 +438,17 @@ export type { AudioAttachmentInput, AudioAttachmentRecord } from "./audio_attach
 export { saveTtsClip, readTtsClip, ttsClipAudioUrl } from "./tts_clips.js";
 export type { SavedTtsClip } from "./tts_clips.js";
 export { defineTool } from "./helpers.js";
+export {
+  connectGoogleWorkspaceFromServer,
+  disconnectGoogleWorkspaceFromServer,
+} from "./connect_provider.js";
+export { getGoogleSidecarStatus, stopGoogleSidecar } from "./google_sidecar.js";
+export {
+  listIntegrationConnections,
+  attachCustomMcpFromServer,
+  detachCustomMcpFromServer,
+  connectOpenApiFromServer,
+  disconnectOpenApiFromServer,
+  parseAuthBody,
+} from "./integrations_server.js";
+export type { IntegrationConnectionSummary } from "./integrations_server.js";

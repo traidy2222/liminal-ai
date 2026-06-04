@@ -766,6 +766,36 @@ export {
   clearManagedInferenceSessionCache,
   isManagedInferenceBaseUrl,
 } from "./inference_session.js";
+export {
+  readOAuthBundle,
+  writeOAuthBundle,
+  listOAuthAccounts,
+  deleteOAuthBundle,
+  sanitizeOAuthAccountId,
+} from "./oauth_store.js";
+export type { OAuthTokenBundle } from "./oauth_store.js";
+export {
+  googleOAuthClientConfig,
+  buildGoogleAuthUrl,
+  exchangeGoogleCode,
+  refreshGoogleAccessToken,
+  getGoogleAccessToken,
+  revokeGoogleAccount,
+  listGoogleOAuthAccounts,
+} from "./oauth_broker.js";
+export {
+  GOOGLE_WORKSPACE_SERVICES,
+  ALL_GOOGLE_SERVICE_IDS,
+  GOOGLE_OAUTH_SCOPES_FULL,
+  getGoogleServicePreset,
+  resolveGoogleServices,
+  scopesForGoogleServices,
+  needsGoogleSidecar,
+  sidecarServiceIds,
+} from "./connector_catalog.js";
+export type { GoogleServiceId, GoogleServicePreset, ConnectorBackend } from "./connector_catalog.js";
+export { runGoogleConnectFlow, buildGoogleAuthUrlForWeb } from "./google_connect.js";
+export type { GoogleConnectResult, RunGoogleConnectFlowOptions } from "./google_connect.js";
 export type {
   LicenseTier,
   EntitlementKey,

@@ -1,30 +1,13 @@
 /**
  * Persisted registry of external API + MCP connections.
- *
- * Each connection lives as its own JSON record under
- * `~/.liminal/api_connections/<name>.json` so connections survive harness
- * restarts and can be re-attached automatically on boot. The store is
- * intentionally tiny and dependency-free — connections are the bridge between
- * static, hand-written tools and tools that the agent's environment can expand
- * at runtime by pointing at an OpenAPI spec or MCP server.
- *
- * Two record shapes:
- *   - openapi: stores the spec URL + parsed operation list so re-attach is
- *     cheap (no second fetch unless the user asks).
- *   - mcp: stores the server URL + transport so re-attach replays the
- *     `tools/list` JSON-RPC handshake.
- *
- * Auth is stored as a *reference* (env var name or runtime-pref path), never
- * the literal secret. The actual header value is resolved fresh at call time.
  */
 import { mkdir, readFile, readdir, unlink, writeFile } from "node:fs/promises";
 import { existsSync, mkdirSync } from "node:fs";
 import path from "node:path";
-import { globalPath } from "@liminal/core";
+import { globalPath, getGoogleAccessToken } from "@liminal/core";
 
 const CONNECTIONS_DIR_SEG = "api_connections";
 
-/** Absolute path to the connections directory. Created lazily on first write. */
 export function connectionsDir(): string {
   return globalPath(CONNECTIONS_DIR_SEG);
 }
@@ -41,7 +24,6 @@ async function ensureDir(): Promise<string> {
   return dir;
 }
 
-/** Conservative sanitizer — connection names become part of tool names. */
 export function sanitizeConnectionName(name: string): string {
   const s = name.trim().toLowerCase().replace(/[^a-z0-9_]/g, "_").replace(/_+/g, "_");
   return s.replace(/^_+|_+$/g, "").slice(0, 40);
@@ -51,12 +33,16 @@ export type AuthScheme =
   | { kind: "none" }
   | { kind: "bearer"; envVar: string }
   | { kind: "header"; headerName: string; envVar: string }
-  | { kind: "basic"; envVar: string };
+  | { kind: "basic"; envVar: string }
+  | { kind: "oauth2"; provider: "google"; accountId?: string; scopes: string[] };
+
+export interface McpToolFilter {
+  include?: string[];
+  exclude?: string[];
+}
 
 export interface OpenApiOperationRecord {
-  /** Generated tool name: `api_<conn>_<opSlug>`. */
   toolName: string;
-  /** Original operationId (or synthesized method+path). */
   operationId: string;
   method: string;
   pathTemplate: string;
@@ -80,7 +66,6 @@ export interface OpenApiConnectionRecord {
   specUrl: string;
   baseUrl: string;
   auth: AuthScheme;
-  /** When true, GET operations skip the approval gate. POST/PUT/DELETE always require approval. */
   autoApproveReads: boolean;
   operations: OpenApiOperationRecord[];
   attachedAt: number;
@@ -97,11 +82,18 @@ export interface McpConnectionRecord {
   kind: "mcp";
   name: string;
   serverUrl: string;
-  /** Currently only "http" (Streamable HTTP / JSON-RPC over POST) is supported. */
   transport: "http";
   auth: AuthScheme;
   tools: McpToolRecord[];
   attachedAt: number;
+  providerId?: string;
+  parentProvider?: string;
+  services?: string[];
+  readOnly?: boolean;
+  autoActivate?: boolean;
+  toolFilter?: McpToolFilter;
+  oauthAccountId?: string;
+  sidecarManaged?: boolean;
 }
 
 export type ConnectionRecord = OpenApiConnectionRecord | McpConnectionRecord;
@@ -154,13 +146,37 @@ export async function listConnections(): Promise<ConnectionRecord[]> {
   return out;
 }
 
-/** Resolve an auth scheme to a concrete header to send on each request. */
+/** Sync auth resolution (env-var schemes only). */
 export function resolveAuthHeader(auth: AuthScheme): Record<string, string> {
   if (auth.kind === "none") return {};
+  if (auth.kind === "oauth2") return {};
   const value = process.env[auth.envVar]?.trim();
   if (!value) return {};
   if (auth.kind === "bearer") return { Authorization: `Bearer ${value}` };
   if (auth.kind === "basic") return { Authorization: `Basic ${value}` };
   if (auth.kind === "header") return { [auth.headerName]: value };
   return {};
+}
+
+/** Async auth — resolves OAuth2 access tokens with refresh. */
+export async function resolveAuthHeaderAsync(auth: AuthScheme): Promise<Record<string, string>> {
+  if (auth.kind === "oauth2" && auth.provider === "google") {
+    const token = await getGoogleAccessToken(auth.accountId);
+    if (!token) return {};
+    return { Authorization: `Bearer ${token}` };
+  }
+  return resolveAuthHeader(auth);
+}
+
+export function googleOAuthAuthScheme(accountId?: string, scopes: string[] = []): AuthScheme {
+  return { kind: "oauth2", provider: "google", accountId, scopes };
+}
+
+export function listConnectionsByParent(parentProvider: string): Promise<McpConnectionRecord[]> {
+  return listConnections().then((all) =>
+    all.filter(
+      (c): c is McpConnectionRecord =>
+        c.kind === "mcp" && c.parentProvider === parentProvider
+    )
+  );
 }
