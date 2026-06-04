@@ -142,10 +142,12 @@ export async function loadEnterpriseModule(): Promise<EnterpriseLoadResult> {
     return { ok: false, reason: lastError };
   }
 
+  // Non-literal specifier so `tsc` does not require the proprietary workspace package on public CI.
+  const enterprisePkg = "@liminal/enterprise";
   try {
-    const mod = (await import("@liminal/enterprise")) as EnterpriseModule;
+    const mod = (await import(enterprisePkg)) as EnterpriseModule;
     if (typeof mod.wireEnterpriseHarness === "function") {
-      return { ok: true, module: mod, source: "@liminal/enterprise" };
+      return { ok: true, module: mod, source: enterprisePkg };
     }
   } catch {
     /* optional workspace package not installed */
