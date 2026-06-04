@@ -21,38 +21,35 @@ flutter pub get
 
 `flutter create` adds `windows/`, `macos/`, `linux/` runners. It is safe to re-run; it will not overwrite `lib/`.
 
-## Windows `.exe` (local)
+## Release builds (local)
 
-```bash
-npm run desktop:build:windows   # sidecar + flutter + bundle.json
-npm run desktop:test:windows    # optional smoke launch
-```
+| OS | Build | Package for GitHub |
+|----|--------|-------------------|
+| **Windows** | `npm run desktop:build:windows` | `npm run desktop:package:windows` |
+| **macOS** | `npm run desktop:build:macos` | `npm run desktop:package:macos` |
+| **Linux** | `npm run desktop:build:linux` | `npm run desktop:package:linux` |
 
-Run **`liminal_desktop.exe` from the `Release` folder** (not a copy of the exe alone). Output:
+Optional smoke test (Windows): `npm run desktop:test:windows`.
 
-`apps/liminal_desktop/build/windows/x64/runner/Release/liminal_desktop.exe`
+**Windows** — run `liminal_desktop.exe` from `build/windows/x64/runner/Release/` (not the exe alone).
 
-The Release folder includes **`liminald/repo/`** (portable sidecar + production `node_modules`) and **`liminald/bundle.json`** (paths relative to the exe).
+**macOS** — `build/macos/Build/Products/Release/liminal_desktop.app` (`liminald/` is inside `Contents/MacOS/`).
 
-## GitHub Release (Windows zip)
+**Linux** — run `./liminal_desktop` from `build/linux/x64/release/bundle/` (keep `liminald/` beside the binary).
 
-From the monorepo root:
+Each build includes **`liminald/repo/`** (portable sidecar + `node_modules`) and **`liminald/bundle.json`** (paths relative to the app binary).
 
-```bash
-npm run desktop:package:windows
-# → dist/liminal-desktop-windows-x64-v<version>.zip + .sha256
-```
+## GitHub Release (all platforms)
 
-Publish to GitHub (creates tag `v<version>-desktop` and uploads the zip):
+From the monorepo root, tag `v<version>-desktop` (e.g. `v0.0.18-desktop`) and push — **Actions → Release Desktop** builds Windows, macOS (arm64), and Linux x64 and uploads:
 
-```bash
-git tag v0.0.18-desktop
-git push origin v0.0.18-desktop
-```
+- `liminal-desktop-windows-x64-v<version>.zip`
+- `liminal-desktop-macos-arm64-v<version>.zip`
+- `liminal-desktop-linux-x64-v<version>.tar.gz`
 
-Or run **Actions → Release Desktop (Windows) → Run workflow** on `main`.
+Each artifact has a `.sha256` sidecar. Or run the workflow manually on `main`.
 
-**End users:** download the zip from [GitHub Releases](https://github.com/traidy2222/liminal-ai/releases), unzip, install Node 20+, copy `liminald/repo/.env.example` → `.env`, run `liminal_desktop.exe`.
+**End users:** [GitHub Releases](https://github.com/traidy2222/liminal-ai/releases) → pick your OS, install Node 20+, copy `liminald/repo/.env.example` → `.env`, launch the app.
 
 ## Development
 

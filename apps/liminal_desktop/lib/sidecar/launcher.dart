@@ -59,7 +59,7 @@ String? _resolveBundledPath(String exeDir, String? raw) {
   return p.normalize(p.join(exeDir, trimmed));
 }
 
-/// Read `liminald/bundle.json` written by `scripts/bundle-liminald-for-desktop.ps1`.
+/// Read `liminald/bundle.json` written by the desktop bundle scripts.
 SidecarLocations? readBundledLocations(String exeDir) {
   final manifest = File(p.join(exeDir, 'liminald', 'bundle.json'));
   if (!manifest.existsSync()) return null;
@@ -186,7 +186,7 @@ Future<SidecarProcess> launchSidecar({
     throw StateError(
       'Could not find liminald.\n'
       '• Run from repo: npm run build:sidecar\n'
-      '• Rebuild the desktop app: npm run desktop:build:windows\n'
+      '• Rebuild the desktop app (npm run desktop:build:windows|macos|linux)\n'
       '• Or set LIMINALD_SCRIPT / LIMINAL_REPO_ROOT\n'
       'Exe directory: $exeDir',
     );

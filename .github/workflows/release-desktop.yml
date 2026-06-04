@@ -1,0 +1,199 @@
+# Build Liminal Desktop for Windows, macOS, and Linux; publish one GitHub Release per tag.
+# Trigger: push tag v*-desktop (e.g. v0.0.18-desktop) or workflow_dispatch.
+name: Release Desktop
+
+on:
+  push:
+    tags:
+      - "v*-desktop"
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Release version (e.g. 0.0.18)"
+        required: true
+        default: "0.0.18"
+
+permissions:
+  contents: write
+
+jobs:
+  meta:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.meta.outputs.version }}
+      tag: ${{ steps.meta.outputs.tag }}
+    steps:
+      - name: Resolve version and release tag
+        id: meta
+        shell: bash
+        run: |
+          tag="${GITHUB_REF_NAME}"
+          if [[ "$tag" =~ ^v(.+)-desktop$ ]]; then
+            ver="${BASH_REMATCH[1]}"
+          else
+            ver="${{ inputs.version }}"
+            ver="${ver// /}"
+            if [[ -z "$ver" ]]; then
+              echo "version required" >&2
+              exit 1
+            fi
+            tag="v${ver}-desktop"
+          fi
+          echo "version=$ver" >> "$GITHUB_OUTPUT"
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+
+  windows:
+    needs: meta
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+
+      - name: Enable symlink support (Flutter plugins)
+        run: |
+          reg add "HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\AppModelUnlock" /t REG_DWORD /v AllowDevelopmentWithoutDevLicense /d 1 /f
+
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build and package (Windows)
+        shell: pwsh
+        run: |
+          ./scripts/package-desktop-windows.ps1 `
+            -Version "${{ needs.meta.outputs.version }}" `
+            -CopyNodeModulesFromRepo
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: desktop-windows
+          path: |
+            dist/liminal-desktop-windows-x64-v${{ needs.meta.outputs.version }}.zip
+            dist/liminal-desktop-windows-x64-v${{ needs.meta.outputs.version }}.zip.sha256
+
+  macos:
+    needs: meta
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build and package (macOS)
+        env:
+          COPY_NODE_MODULES_FROM_REPO: "1"
+        run: |
+          chmod +x scripts/*.sh
+          ./scripts/package-desktop.sh macos --version "${{ needs.meta.outputs.version }}" --copy-node-modules
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: desktop-macos
+          path: |
+            dist/liminal-desktop-macos-arm64-v${{ needs.meta.outputs.version }}.zip
+            dist/liminal-desktop-macos-arm64-v${{ needs.meta.outputs.version }}.zip.sha256
+
+  linux:
+    needs: meta
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+
+      - name: Linux build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang cmake ninja-build pkg-config libgtk-3-dev libblkid-dev liblzma-dev
+
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build and package (Linux)
+        env:
+          COPY_NODE_MODULES_FROM_REPO: "1"
+        run: |
+          chmod +x scripts/*.sh
+          ./scripts/package-desktop.sh linux --version "${{ needs.meta.outputs.version }}" --copy-node-modules
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: desktop-linux
+          path: |
+            dist/liminal-desktop-linux-x64-v${{ needs.meta.outputs.version }}.tar.gz
+            dist/liminal-desktop-linux-x64-v${{ needs.meta.outputs.version }}.tar.gz.sha256
+
+  release:
+    needs: [meta, windows, macos, linux]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: Write release notes
+        run: |
+          ver="${{ needs.meta.outputs.version }}"
+          cat > "$RUNNER_TEMP/release-notes.md" <<EOF
+          ## Liminal Desktop $ver (alpha)
+
+          **Requirements (all platforms):** [Node.js 20+](https://nodejs.org/) on PATH.
+
+          | Platform | Download | Run |
+          |----------|----------|-----|
+          | **Windows x64** | \`liminal-desktop-windows-x64-v$ver.zip\` | Unzip; run \`liminal_desktop.exe\` (keep \`liminald\\\` next to the exe) |
+          | **macOS arm64** | \`liminal-desktop-macos-arm64-v$ver.zip\` | Unzip \`liminal_desktop.app\`; right-click → Open if Gatekeeper blocks |
+          | **Linux x64** | \`liminal-desktop-linux-x64-v$ver.tar.gz\` | Extract; run \`./liminal_desktop\` from the bundle folder |
+
+          **API key:** copy \`liminald/repo/.env.example\` → \`.env\` and set \`AGENT_API_KEY\`, or sign in with Vireon in the app.
+
+          Verify downloads with the matching \`.sha256\` files.
+
+          License: [FSL-1.1-MIT](https://github.com/${{ github.repository }}/blob/main/LICENSE)
+          EOF
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ needs.meta.outputs.tag }}
+          name: Liminal Desktop ${{ needs.meta.outputs.version }}
+          body_path: ${{ runner.temp }}/release-notes.md
+          files: |
+            dist/liminal-desktop-windows-x64-v${{ needs.meta.outputs.version }}.zip
+            dist/liminal-desktop-windows-x64-v${{ needs.meta.outputs.version }}.zip.sha256
+            dist/liminal-desktop-macos-arm64-v${{ needs.meta.outputs.version }}.zip
+            dist/liminal-desktop-macos-arm64-v${{ needs.meta.outputs.version }}.zip.sha256
+            dist/liminal-desktop-linux-x64-v${{ needs.meta.outputs.version }}.tar.gz
+            dist/liminal-desktop-linux-x64-v${{ needs.meta.outputs.version }}.tar.gz.sha256
+          draft: false
+          prerelease: true
+          generate_release_notes: false
