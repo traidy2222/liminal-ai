@@ -9,8 +9,10 @@ import type { ImageAttachment } from "./imageAttachments.js";
 import { setDictationWebSpeechEnabled } from "./audio/useDictation.js";
 import { readPersonaChromeFromSession, writePersonaChromeToSession } from "./personaChromeSessionCache.js";
 import {
+  ensureWebAuthReady,
   setWebAuthToken,
   webApiAuthHeaders,
+  webApiFetch,
   webApiStreamUrl,
 } from "./webApiAuth.js";
 
@@ -72,6 +74,9 @@ function clearAutoGreetDone(): void {
 
 /** Prevents duplicate auto-greet under React Strict Mode (in-memory only; resets on full reload). */
 let autoGreetAttemptedThisPageLoad = false;
+
+/** From GET /api/config — only auto-greet when AGENT_SESSION_GREET=1. */
+let sessionGreetEnabled = false;
 
 function sanitizeDeltaText(text: string): string {
   return text
@@ -1377,6 +1382,7 @@ async function fetchWithRetry(
 ): Promise<{ ok: boolean; status: number; body: unknown }> {
   let lastErr = "";
   let lastStatus = 0;
+  await ensureWebAuthReady();
   const authHeaders = webApiAuthHeaders();
   for (let i = 0; i < maxAttempts; i++) {
     if (i > 0) await sleep(postDelay(i - 1));
@@ -1419,21 +1425,12 @@ interface HarnessStatusResponse {
 }
 
 async function bootstrapWebAuth(): Promise<boolean> {
-  try {
-    const r = await fetch(`${SERVER}/api/config`);
-    if (!r.ok) return false;
-    const cfg = (await r.json()) as { webAuthToken?: string };
-    if (typeof cfg.webAuthToken === "string" && cfg.webAuthToken.trim()) {
-      setWebAuthToken(cfg.webAuthToken.trim());
-    }
-    return true;
-  } catch {
-    return false;
-  }
+  return ensureWebAuthReady();
 }
 
 async function fetchHarnessStatus(): Promise<HarnessStatusResponse | null> {
   try {
+    if (!(await ensureWebAuthReady())) return null;
     const headers = new Headers(webApiAuthHeaders());
     const r = await fetch(`${SERVER}/api/status`, { headers });
     if (!r.ok) return null;
@@ -1469,7 +1466,7 @@ async function postSessionReset(body: {
   greet?: boolean;
 }): Promise<{ ok: boolean; status: number; body: unknown; busy?: boolean }> {
   try {
-    const r = await fetch(`${SERVER}/api/session/reset`, {
+    const r = await webApiFetch(`${SERVER}/api/session/reset`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body),
@@ -1772,10 +1769,12 @@ export function useSSE(options?: {
               dictationAudioCue?: boolean;
               dictationWebSpeech?: boolean;
               ttsEnabled?: boolean;
+              sessionGreetEnabled?: boolean;
               activeChat?: { chatId?: string } | null;
             } | null
           ) => {
             if (!cancelledRef.current && cfg) {
+              sessionGreetEnabled = cfg.sessionGreetEnabled === true;
               // Apply the browser-Web-Speech toggle (AGENT_DICTATION_WEB_SPEECH).
               // Undefined (degraded config) keeps the browser recognizer on.
               setDictationWebSpeechEnabled(cfg.dictationWebSpeech !== false);
@@ -1925,9 +1924,12 @@ export function useSSE(options?: {
     function connect(opts?: { replayHistory?: boolean }) {
       if (cancelledRef.current) return;
 
-      const url = buildStreamUrl(opts);
-      const es = new EventSource(url);
-      esRef.current = es;
+      void ensureWebAuthReady().then((ready) => {
+        if (cancelledRef.current || !ready) return;
+
+        const url = buildStreamUrl(opts);
+        const es = new EventSource(url);
+        esRef.current = es;
 
       es.addEventListener("connected", (e: MessageEvent) => {
         // Clear any pending CONNECTING-state takeover timer — we made it.
@@ -2344,6 +2346,7 @@ export function useSSE(options?: {
         reconnectAttempt.current = Math.min(reconnectAttempt.current + 1, 6);
         reconnectTimer.current = setTimeout(connect, delay);
       };
+      });
     }
 
     connectStreamRef.current = connect;
@@ -2369,15 +2372,14 @@ export function useSSE(options?: {
         }
       }
 
-      // User preference: greet on every page load (including reload), not just the
-      // first load per tab. Reset the persisted per-tab "already greeted" marker so
-      // the gate below opens each load. The in-memory `autoGreetAttemptedThisPageLoad`
-      // still de-dupes the React Strict Mode double-mount within a single page load.
-      // NOTE: each greet runs a soft reset, so a reload starts a fresh conversation.
-      if (!captureMode) clearAutoGreetDone();
-
+      // Optional session greet (AGENT_SESSION_GREET=1): once per tab via sessionStorage.
+      // Do not clear the marker on every reload — that forced a full LLM greet before
+      // the user could chat and added 15–30s to first reply.
       const needsAutoGreet =
-        !captureMode && !isAutoGreetDone() && !autoGreetAttemptedThisPageLoad;
+        !captureMode &&
+        sessionGreetEnabled &&
+        !isAutoGreetDone() &&
+        !autoGreetAttemptedThisPageLoad;
 
       if (needsAutoGreet) {
         autoGreetAttemptedThisPageLoad = true;

@@ -65,7 +65,9 @@ When managed routing is active it covers the **main chat model and the sidecars*
 - Chat completions (the ReAct loop)
 - Embeddings for hybrid recall (`AGENT_EMBED_MODEL`)
 - Vision (`vision_analyze`), unless you set a dedicated `AGENT_VISION_API_KEY`
-- Voice sidecars (TTS / transcription)
+- Voice sidecars (TTS / transcription) — any OpenRouter TTS/ASR slug you set in Settings
+  (`AGENT_TTS_MODEL`, `AGENT_TRANSCRIBE_MODEL`); the control-plane chat model allowlist does
+  not apply to `audio/speech` or `audio/transcriptions`.
 
 Under the hood the harness exchanges your license for a short-lived session JWT at
 `AGENT_INFERENCE_SESSION_URL`, then calls the OpenAI-compatible proxy at

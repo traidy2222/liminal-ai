@@ -3,6 +3,7 @@ import { execSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { join, dirname, resolve } from "node:path";
 import { existsSync } from "node:fs";
+import { readFile } from "node:fs/promises";
 import { createServer } from "node:http";
 import express from "express";
 import cors from "cors";
@@ -15,6 +16,7 @@ import {
   createLocalWebAuth,
   resolveWebBindHost,
 } from "./local_auth.js";
+import { injectWebAuthIntoHtml } from "./serve_client_html.js";
 
 // Load `.env` files in order (dotenv does not override existing `process.env` keys by default):
 // 1) monorepo root, 2) packages/web, 3) workspace root when it differs — before AgentBridge starts.
@@ -143,7 +145,15 @@ if (effectiveHarnessEnvRaw("AGENT_BROWSER") === "1") {
 }
 
 if (existsSync(clientIndexHtml)) {
-  app.use(express.static(clientDist));
+  app.get(["/", "/index.html"], async (_req, res, next) => {
+    try {
+      const raw = await readFile(clientIndexHtml, "utf8");
+      res.type("html").send(injectWebAuthIntoHtml(raw, localAuth.token));
+    } catch (err) {
+      next(err);
+    }
+  });
+  app.use(express.static(clientDist, { index: false }));
 } else {
   app.get("/", (_req, res) => {
     res

@@ -7,10 +7,21 @@ import {
   resolveMemoryPolicy,
   neutralTurnInferenceResult,
   applyTurnInferenceHeuristics,
+  tryHeuristicTurnInference,
   fallbackComplexityForUserMessage,
   buildRoutingProfile,
   type TurnInferenceResult,
 } from "./intent_inference.js";
+
+test("tryHeuristicTurnInference matches short greetings only", () => {
+  const hi = tryHeuristicTurnInference("hi!");
+  assert.ok(hi);
+  assert.equal(hi?.intent, "conversational");
+  assert.equal(hi?.complexity, "trivial");
+  assert.equal(tryHeuristicTurnInference("good evening")?.intent, "conversational");
+  assert.equal(tryHeuristicTurnInference("fix the greeting in README"), null);
+  assert.equal(tryHeuristicTurnInference("a".repeat(200)), null);
+});
 
 test("parseLikelyEditPathsField caps and normalizes", () => {
   assert.deepEqual(parseLikelyEditPathsField(["a/b.ts", "x\\y.ts", 3, "a/b.ts"], 3), ["a/b.ts", "x/y.ts"]);

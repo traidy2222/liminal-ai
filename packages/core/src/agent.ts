@@ -2171,6 +2171,22 @@ export class AgentHarness {
     this.lintRelatedFilesThisTurn = new Set();
     this.turnInference = null;
     this.resumeMissionInjectedThisSend = false;
+    let worldCtxForTurn: string | null | undefined;
+    let worldCtxPromise: Promise<string | null> | null = null;
+    if (!this.worldContextInjected && this.agentDepth === 0) {
+      this.worldContextInjected = true;
+      this._worldRefresher = new WorldContextRefresher(resolveWorkspaceRoot());
+      void this._worldRefresher.init().catch(() => { /* non-fatal */ });
+      worldCtxPromise = buildWorldContextMessage({
+        ...this.config.worldContext,
+        firstUserMessage: telemetryUserLabel,
+        chatId: this.taskId,
+        activeLlm: {
+          model: this.config.model,
+          baseURL: this.config.baseURL ?? "",
+        },
+      }).catch(() => null);
+    }
     try {
       if (openingTurn) {
         this.turnInference = {
@@ -2220,12 +2236,20 @@ export class AgentHarness {
             /* optional orientation */
           }
         }
-        this.turnInference = await inferTurnInference(
+        const intentP = inferTurnInference(
           this.client,
           this.config.model,
           userMessage,
           intentWorkspace
         );
+        if (worldCtxPromise) {
+          const [inference, worldCtx] = await Promise.all([intentP, worldCtxPromise]);
+          this.turnInference = inference;
+          worldCtxForTurn = worldCtx;
+          worldCtxPromise = null;
+        } else {
+          this.turnInference = await intentP;
+        }
       }
     } catch {
       this.turnInference = applyTurnInferenceHeuristics(
@@ -2569,20 +2593,12 @@ export class AgentHarness {
 
       // Inject world context on the first turn of a root agent (#world-context).
       // Child agents (depth > 0) skip this — they inherit context from their parent.
-      if (!this.worldContextInjected && this.agentDepth === 0) {
-        this.worldContextInjected = true;
-        // Initialize volatile world context refresher at session start.
-        this._worldRefresher = new WorldContextRefresher(resolveWorkspaceRoot());
-        void this._worldRefresher.init().catch(() => { /* non-fatal */ });
-        const worldCtx = await buildWorldContextMessage({
-          ...this.config.worldContext,
-          firstUserMessage: telemetryUserLabel,
-          chatId: this.taskId,
-          activeLlm: {
-            model: this.config.model,
-            baseURL: this.config.baseURL ?? "",
-          },
-        });
+      if (worldCtxForTurn === undefined && worldCtxPromise) {
+        worldCtxForTurn = await worldCtxPromise;
+        worldCtxPromise = null;
+      }
+      if (worldCtxForTurn) {
+        const worldCtx = worldCtxForTurn;
         if (worldCtx) {
           this.context.append({ role: "user", content: worldCtx });
           // Brief acknowledgement so the model registers it as processed context,

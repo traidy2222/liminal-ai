@@ -8,7 +8,9 @@ The local server is **token-gated** (`packages/web/server/local_auth.ts`). Every
 present the web token via `Authorization: Bearer <token>`, an `x-liminal-token` header, or an
 `authToken` query param. The token is generated on first run and stored at `~/.liminal/web_token`
 (`0600`), or set explicitly with `AGENT_WEB_TOKEN`. The client reads it from
-`GET /api/config`, which is **exempt only from loopback** (`127.0.0.1`). The Vireon auth
+`GET /api/config`, which is **exempt only for local requests** (loopback IP or `localhost` /
+`127.0.0.1` Host). Production UI also receives the token in a `<meta name="liminal-web-auth">`
+tag when Express serves `index.html`. The Vireon auth callback
 callback (`/api/vireon/auth/callback`) is also exempt so the browser sign-in redirect can land.
 
 Bind host defaults to `127.0.0.1` (`AGENT_WEB_BIND_HOST`); extra CORS origins via

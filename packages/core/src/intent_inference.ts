@@ -624,6 +624,51 @@ const INFERENCE_SYSTEM_PROMPT =
   "These benefit from a dynamic workflow (fan-out sub-agents, results kept out of context). Set FALSE for ordinary single-goal coding, a single-file build, one-shot Q&A, or anything a handful of sequential tool calls handles — bigness alone is not enough; it must be PARALLELIZABLE into independent pieces. " +
   "confidence is 0–1 for your overall classification certainty.";
 
+const HEURISTIC_GREETING_RE =
+  /^(hi|hello|hey|yo|sup|howdy|greetings?|good\s+(morning|afternoon|evening|night)|evening|morning|afternoon)\b/i;
+const HEURISTIC_THANKS_RE = /^(thanks|thank you|thx|ty|cheers)\b/i;
+const HEURISTIC_CHITCHAT_RE = /^(how\s+are\s+you|what'?s\s+up|how\s+goes\s+it)\b/i;
+
+/**
+ * Skip the fast-model classifier for obvious short greetings/chitchat — saves several
+ * seconds on the first user message while the main model is still cold.
+ */
+export function tryHeuristicTurnInference(userMessage: string): TurnInferenceResult | null {
+  const msg = userMessage.trim();
+  if (!msg || msg.length > 160) return null;
+  const words = msg.split(/\s+/).filter(Boolean);
+  if (words.length > 14) return null;
+  const lower = msg.toLowerCase();
+  const looksConversational =
+    HEURISTIC_GREETING_RE.test(lower) ||
+    HEURISTIC_THANKS_RE.test(lower) ||
+    HEURISTIC_CHITCHAT_RE.test(lower);
+  if (!looksConversational) return null;
+  if (
+    /\b(fix|implement|build|write|debug|refactor|create|add|remove|delete|search|grep|file|code)\b/i.test(
+      lower
+    )
+  ) {
+    return null;
+  }
+  const fb = fallbackReasoningBudget("conversational", false);
+  return applyTurnInferenceHeuristics(
+    userMessage,
+    neutralTurnInferenceResult("heuristic_conversational", {
+      intent: "conversational",
+      complexity: "trivial",
+      confidence: 0.9,
+      skipHarnessSecondaryPasses: true,
+      reasoningEffort: fb.reasoningEffort,
+      thinkDepth: fb.thinkDepth,
+      toolFirstBias: fb.toolFirstBias,
+      reasoningWordBudget: fb.reasoningWordBudget,
+      essayRisk: fb.essayRisk,
+      reasoningBudgetSource: "fallback",
+    })
+  );
+}
+
 export async function inferTurnInference(
   client: OpenAI,
   model: string,
@@ -639,6 +684,9 @@ export async function inferTurnInference(
       })
     );
   }
+
+  const heuristic = tryHeuristicTurnInference(userMessage);
+  if (heuristic) return heuristic;
 
   const userContent = buildIntentInferenceUserContent(userMessage, workspace);
 

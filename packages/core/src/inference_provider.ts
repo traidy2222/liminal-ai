@@ -91,13 +91,19 @@ export function formatInferenceBudgetExceededMessage(detail?: string): string {
 }
 
 function parseInferenceBudgetExceeded(err: unknown): string | null {
-  if (!(err instanceof OpenAI.APIError) || err.status !== 402) return null;
+  if (!(err instanceof OpenAI.APIError)) return null;
+  if (err.status !== 402 && err.status !== 403) return null;
   const raw =
     typeof err.error === "object" && err.error !== null
       ? JSON.stringify(err.error)
       : String(err.error ?? err.message);
-  if (!/inference_budget_exceeded|credit limit reached/i.test(raw)) {
-    return formatInferenceBudgetExceededMessage();
+  if (
+    !/inference_budget_exceeded|credit limit reached|key limit exceeded|limit exceeded \(monthly/i.test(
+      raw
+    )
+  ) {
+    if (err.status === 402) return formatInferenceBudgetExceededMessage();
+    return null;
   }
   try {
     const parsed = JSON.parse(raw) as { error?: string; message?: string };

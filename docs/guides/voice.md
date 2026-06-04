@@ -50,8 +50,10 @@ budget so the agent doesn't read back everything. The `speak` tool exposes TTS i
 
 ## Managed inference
 
-On Pro, voice sidecars can route through Vireon-managed inference along with chat — no
-separate key needed. See [Managed inference](./managed-inference.md).
+On Pro, voice sidecars can route through Vireon-managed inference along with chat — any
+OpenRouter TTS model slug you choose in Settings (e.g. `openai/gpt-4o-mini-tts-2025-12-15` or
+`hexgrad/kokoro-82m`) is forwarded on `audio/speech`; the chat model allowlist does not block
+TTS. No separate key needed. See [Managed inference](./managed-inference.md).
 
 ## API reference
 

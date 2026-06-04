@@ -167,12 +167,11 @@ export function useSpeechOutput(opts: UseSpeechOutputOptions) {
               ? err.message.slice(0, 200)
               : `Playback failed (${name || "error"}).`;
       setPlayError(msg);
-      playingRef.current = false;
-      setIsSpeaking(false);
       releaseObjectUrl();
       if (activeAudioRef.current === audio) activeAudioRef.current = null;
-      queueRef.current.unshift(next);
-      setQueueLength(queueRef.current.length);
+      // Drop the failed clip and continue — re-queuing blocks dictation VAD while
+      // shouldBlockMicCapture() treats queue length > 0 as "agent still speaking".
+      playNext();
     };
 
     void (async () => {

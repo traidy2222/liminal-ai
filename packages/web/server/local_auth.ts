@@ -11,6 +11,13 @@ function isLoopbackAddress(ip: string | undefined): boolean {
   return n === "127.0.0.1" || n === "::1" || n === "localhost";
 }
 
+/** True when the request targets this machine's local harness UI (loopback IP or localhost Host). */
+export function isLocalHarnessRequest(req: Request): boolean {
+  if (isLoopbackAddress(req.socket.remoteAddress)) return true;
+  const host = (req.headers.host ?? "").split(":")[0]?.trim().toLowerCase();
+  return host === "localhost" || host === "127.0.0.1" || host === "[::1]";
+}
+
 function readTokenFromRequest(req: Request): string | null {
   const header =
     req.header("authorization")?.startsWith("Bearer ")
@@ -66,7 +73,7 @@ export async function createLocalWebAuth(): Promise<LocalWebAuth> {
       return isLoopbackAddress(req.socket.remoteAddress);
     }
     if (req.method === "GET" && path === "/api/config") {
-      return isLoopbackAddress(req.socket.remoteAddress);
+      return isLocalHarnessRequest(req);
     }
     return false;
   };

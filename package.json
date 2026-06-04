@@ -52,6 +52,7 @@
   },
   "devDependencies": {
     "concurrently": "^9.2.1",
+    "discord.js": "^14.26.4",
     "vitepress": "^1.6.3"
   }
 }

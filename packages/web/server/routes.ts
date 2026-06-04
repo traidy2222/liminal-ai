@@ -151,7 +151,11 @@ export function createRouter(
   router.get("/api/config", async (_req, res) => {
     try {
       const bridge = active();
-      await bridge.whenSessionReady();
+      // Do not block the web shell on tool registration + beginSession (10–30s cold start).
+      // SSE `connected` and a follow-up config fetch refresh persona/bootstrap fields.
+      void bridge.whenSessionReady().catch((err) => {
+        console.warn("[config] session ready deferred:", err instanceof Error ? err.message : err);
+      });
       const prefs = bridge.harness.getRuntimePreferences();
       const uiRaw = resolveHarnessEnvRaw("AGENT_UI_VERBOSITY", prefs)?.trim();
       let personaUiTheme: import("@liminal/core").PersonaUiThemeV2 | null = null;
@@ -184,6 +188,7 @@ export function createRouter(
         dictationWebSpeech: resolveHarnessEnvRaw("AGENT_DICTATION_WEB_SPEECH", prefs) !== "0",
         ttsEnabled: resolveHarnessEnvRaw("AGENT_TTS_ENABLED", prefs) === "1",
         ttsVoice: resolveHarnessEnvRaw("AGENT_TTS_VOICE", prefs)?.trim() || "af_sky",
+        sessionGreetEnabled: resolveHarnessEnvRaw("AGENT_SESSION_GREET", prefs) === "1",
         // New in Phase 2: which chat is the SSE stream currently bound to.
         activeChat: activeMeta
           ? {
@@ -209,6 +214,7 @@ export function createRouter(
         personaDisplayLabel: "LIMINAL",
         personalityHeartbeatEnabled: false,
         personalityHeartbeatUiStrip: false,
+        sessionGreetEnabled: false,
         configDegraded: true,
         configError: err instanceof Error ? err.message : String(err),
       });
