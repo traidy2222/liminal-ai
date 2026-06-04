@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { fileURLToPath } from "node:url";
 import { runDoctor } from "./lib/doctor.mjs";
 import { log } from "./lib/log.mjs";
 import { getDefaultInstallDir, resolveRepoRoot } from "./lib/paths.mjs";
@@ -68,14 +69,14 @@ async function main(argv) {
       return runUpdate();
     case "login": {
       const { spawn } = await import("node:child_process");
-      const script = new URL("./lib/vireon-login.mjs", import.meta.url).pathname;
+      const script = fileURLToPath(new URL("./lib/vireon-login.mjs", import.meta.url));
       return new Promise((resolve) => {
         const child = spawn(process.execPath, [script], { stdio: "inherit", cwd: process.cwd() });
         child.on("exit", (code) => resolve(code ?? 1));
       });
     }
     case "logout": {
-      const coreDist = new URL("../packages/core/dist/vireon_account.js", import.meta.url).pathname;
+      const coreDist = fileURLToPath(new URL("../packages/core/dist/vireon_account.js", import.meta.url));
       try {
         const { clearVireonAccount } = await import(coreDist);
         await clearVireonAccount();
@@ -90,7 +91,7 @@ async function main(argv) {
       const sub = rest[0];
       if (sub === "google") {
         const { spawn } = await import("node:child_process");
-        const script = new URL("./lib/google-connect.mjs", import.meta.url).pathname;
+        const script = fileURLToPath(new URL("./lib/google-connect.mjs", import.meta.url));
         return new Promise((resolve) => {
           const child = spawn(process.execPath, [script, ...rest.slice(1)], { stdio: "inherit", cwd: process.cwd() });
           child.on("exit", (code) => resolve(code ?? 1));
@@ -103,7 +104,7 @@ async function main(argv) {
       const sub = rest[0];
       if (sub === "google") {
         const { spawn } = await import("node:child_process");
-        const script = new URL("./lib/google-disconnect.mjs", import.meta.url).pathname;
+        const script = fileURLToPath(new URL("./lib/google-disconnect.mjs", import.meta.url));
         return new Promise((resolve) => {
           const child = spawn(process.execPath, [script], { stdio: "inherit", cwd: process.cwd() });
           child.on("exit", (code) => resolve(code ?? 1));
