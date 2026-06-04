@@ -65,7 +65,12 @@ export function runGoogleConnectFlow(
 ): Promise<GoogleConnectResult> {
   if (!googleOAuthClientConfig()) {
     return Promise.reject(
-      new Error("Set GOOGLE_OAUTH_CLIENT_ID and GOOGLE_OAUTH_CLIENT_SECRET in .env (see docs/guides/google-workspace.md)")
+      new Error(
+        "Google Workspace OAuth is not configured. Add GOOGLE_OAUTH_CLIENT_ID and GOOGLE_OAUTH_CLIENT_SECRET to " +
+          "dreamthedream/.env (see docs/guides/google-workspace.md). " +
+          "Note: Google sign-in on vireondynamics.com is Supabase login-only — it does not provide Drive/Gmail API credentials; " +
+          "use a Google Cloud OAuth client with Workspace scopes and redirect http://127.0.0.1:<port>/oauth/google/callback."
+      )
     );
   }
 

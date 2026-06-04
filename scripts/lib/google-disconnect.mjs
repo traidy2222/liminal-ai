@@ -1,5 +1,9 @@
 #!/usr/bin/env node
 /** liminal disconnect google — revoke OAuth and remove MCP connections (via agent tools on next web session). */
+import { loadEnvForCli } from "./load-env.mjs";
+
+loadEnvForCli();
+
 async function main() {
   const coreUrl = new URL("../../packages/core/dist/oauth_broker.js", import.meta.url).href;
   const { listGoogleOAuthAccounts, revokeGoogleAccount } = await import(coreUrl);

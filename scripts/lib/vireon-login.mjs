@@ -2,6 +2,10 @@
 /**
  * liminal login — browser sign-in; stores license in ~/.liminal/
  */
+import { loadEnvForCli } from "./load-env.mjs";
+
+loadEnvForCli();
+
 async function main() {
   const coreUrl = new URL("../../packages/core/dist/vireon_connect.js", import.meta.url).href;
   let mod;

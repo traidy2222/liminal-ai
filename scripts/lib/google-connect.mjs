@@ -2,6 +2,10 @@
 /**
  * liminal connect google — OAuth + optional MCP attach
  */
+import { loadEnvForCli } from "./load-env.mjs";
+
+loadEnvForCli();
+
 function parseArgs(argv) {
   let services;
   let readOnly = false;

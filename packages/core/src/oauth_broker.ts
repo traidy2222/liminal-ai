@@ -22,7 +22,9 @@ export function googleOAuthClientConfig(): { clientId: string; clientSecret: str
   const clientId =
     process.env.GOOGLE_OAUTH_CLIENT_ID?.trim() ||
     process.env.AGENT_GOOGLE_OAUTH_CLIENT_ID?.trim();
-  const clientSecret = process.env.GOOGLE_OAUTH_CLIENT_SECRET?.trim();
+  const clientSecret =
+    process.env.GOOGLE_OAUTH_CLIENT_SECRET?.trim() ||
+    process.env.AGENT_GOOGLE_OAUTH_CLIENT_SECRET?.trim();
   if (!clientId || !clientSecret) return null;
   return { clientId, clientSecret };
 }
