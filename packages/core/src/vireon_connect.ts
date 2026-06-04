@@ -6,6 +6,7 @@ import { createServer, type IncomingMessage, type ServerResponse } from "node:ht
 import { randomBytes } from "node:crypto";
 import { applyVireonLicenseToken, defaultVireonSiteOrigin } from "./vireon_account.js";
 import { ensureEnterpriseEditionInstalled, tierRequiresEnterprisePackage } from "./enterprise_install.js";
+import { openExternalUrl } from "./open_external_url.js";
 
 const CONNECT_PATH = "/connect/harness";
 const CALLBACK_PATH = "/callback";
@@ -30,21 +31,6 @@ function isAllowedRedirectUri(uri: string): boolean {
 
 function siteOrigin(override?: string): string {
   return (override?.trim() || defaultVireonSiteOrigin()).replace(/\/$/, "");
-}
-
-function openBrowser(url: string): void {
-  const start =
-    process.platform === "darwin"
-      ? ["open", url]
-      : process.platform === "win32"
-        ? ["cmd", "/c", "start", "", url]
-        : ["xdg-open", url];
-  import("node:child_process").then(({ spawn }) => {
-    const child = spawn(start[0]!, start.slice(1), { detached: true, stdio: "ignore" });
-    child.unref();
-  }).catch(() => {
-    console.log(`Open this URL in your browser:\n${url}`);
-  });
 }
 
 async function readJsonBody(req: IncomingMessage): Promise<unknown> {
@@ -169,7 +155,7 @@ export function runVireonConnectFlow(
       log(connectUrl.toString());
 
       if (options.openBrowser !== false) {
-        openBrowser(connectUrl.toString());
+        openExternalUrl(connectUrl.toString());
       }
     });
 

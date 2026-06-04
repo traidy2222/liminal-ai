@@ -11,6 +11,7 @@ import {
 } from "./oauth_broker.js";
 import { GOOGLE_OAUTH_SCOPES_FULL, scopesForGoogleServices, resolveGoogleServices } from "./connector_catalog.js";
 import type { OAuthTokenBundle } from "./oauth_store.js";
+import { openExternalUrl } from "./open_external_url.js";
 
 const FLOW_TIMEOUT_MS = 5 * 60_000;
 
@@ -29,21 +30,6 @@ function isAllowedRedirectUri(uri: string): boolean {
   } catch {
     return false;
   }
-}
-
-function openBrowser(url: string): void {
-  const start =
-    process.platform === "darwin"
-      ? ["open", url]
-      : process.platform === "win32"
-        ? ["cmd", "/c", "start", "", url]
-        : ["xdg-open", url];
-  import("node:child_process").then(({ spawn }) => {
-    const child = spawn(start[0]!, start.slice(1), { detached: true, stdio: "ignore" });
-    child.unref();
-  }).catch(() => {
-    console.log(`Open this URL in your browser:\n${url}`);
-  });
 }
 
 export interface RunGoogleConnectFlowOptions {
@@ -184,7 +170,7 @@ export function runGoogleConnectFlow(
         return;
       }
       log(`Opening Google sign-in…\nIf the browser does not open:\n${authUrl}`);
-      if (options.openBrowser !== false) openBrowser(authUrl);
+      if (options.openBrowser !== false) openExternalUrl(authUrl);
     });
 
     server.on("close", () => clearTimeout(timer));
