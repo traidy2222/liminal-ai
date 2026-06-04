@@ -1,6 +1,6 @@
 # Team memory — test coverage & readiness
 
-**Not production-GA.** v0.0.17 ships the contracts and control-plane APIs; validate on staging before billing Team customers on sync.
+**Not production-GA.** Team memory shipped in v0.0.17; validate on staging before billing Team customers on sync.
 
 ## Automated (CI)
 
