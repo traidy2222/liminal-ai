@@ -1,8 +1,6 @@
 /**
  * Connector presets — Google Workspace hybrid MCP routing (official + sidecar).
  */
-import { effectiveHarnessEnvRaw } from "./harness_effective_env.js";
-
 export type GoogleServiceId =
   | "drive"
   | "gmail"
@@ -266,31 +264,6 @@ export function sidecarServiceIds(presets: GoogleServicePreset[]): GoogleService
 }
 
 export const GOOGLE_OAUTH_SCOPES_FULL = scopesForGoogleServices(GOOGLE_WORKSPACE_SERVICES, "read_write");
-
-/**
- * How Gmail is reached:
- * - `rest`  — classic gmail.googleapis.com REST tools (`gmail_api_*`). Works with a
- *             normal OAuth token; needs NO Workspace MCP preview enrollment. Default.
- * - `mcp`   — only the preview `mcp_google_gmail_*` tools (requires preview enrollment
- *             AND the `gmailmcp.googleapis.com` *MCP* API enabled in Cloud Console).
- * - `auto`  — attach the preview MCP and keep REST tools available as a fallback.
- *
- * Gmail's official MCP endpoint (`gmailmcp.googleapis.com`) is an invite-only preview;
- * for most projects it returns 403 "The caller does not have permission", so `rest`
- * is the safe default and only preview-enrolled users should switch to `auto`/`mcp`.
- */
-export type GoogleGmailTransport = "auto" | "rest" | "mcp";
-
-export function resolveGoogleGmailTransport(): GoogleGmailTransport {
-  const raw = effectiveHarnessEnvRaw("AGENT_GOOGLE_GMAIL_TRANSPORT")?.trim().toLowerCase();
-  if (raw === "mcp" || raw === "auto") return raw;
-  return "rest";
-}
-
-/** True when the preview Gmail MCP must NOT be attached (transport=rest). */
-export function gmailMcpSuppressed(): boolean {
-  return resolveGoogleGmailTransport() === "rest";
-}
 
 /** Identify a persisted/curated connection as the official Gmail MCP. */
 export function isGmailOfficialMcpConnection(opts: {

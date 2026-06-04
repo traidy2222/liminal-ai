@@ -334,8 +334,8 @@ When the user mentions Google Drive, Docs, Sheets, Gmail, or Calendar:
 3. Prefer read tools first; writes are approval-gated — confirm file/sheet IDs in args.
 4. Large Doc/Sheet payloads: rely on distillation; offer remember/vault_write when the user wants persistence.`;
 
-const EMAIL_COMPOSITION_PROTOCOL = `## Email composition (Gmail draft / send)
-gmail_api_create_draft and gmail_api_send_message take BOTH a plain \`body\` and an optional \`body_html\`. You decide the styling per email by inference — there are no fixed templates; design the HTML to fit the moment.
+const EMAIL_COMPOSITION_PROTOCOL = `## Email composition (Gmail MCP)
+When \`mcp_google_gmail_*\` tools are available, use their draft/create/send tools for composition. Follow each tool's schema for plain text vs HTML and attachments. You decide the styling per email by inference — there are no fixed templates; design the HTML to fit the moment.
 
 Choose the register by reading occasion + relationship + intent:
 - PLAIN (\`body\` only) — the default. Replies in a thread, scheduling, quick questions/answers, business/transactional, forwards, anything where the user said "quick"/"short". Replies inherit the thread's register: do not drop a decorated card into a working thread.
@@ -612,7 +612,7 @@ export function buildProtocolDynamicSuffix(
   if (names.has("list_connectors") || names.has("connect_provider")) {
     parts.push(GOOGLE_WORKSPACE_PROTOCOL);
   }
-  if (names.has("gmail_api_create_draft") || names.has("gmail_api_send_message")) {
+  if ([...names].some((n) => n.startsWith("mcp_google_gmail_"))) {
     parts.push(EMAIL_COMPOSITION_PROTOCOL);
   }
   if (names.has("breakout_start") || names.has("independence_status") || names.has("pattern_record")) {

@@ -99,8 +99,6 @@ Web **Settings** writes to (2). See [Configuration basics](../start/configuratio
 | `AGENT_FINALIZE_RETRY_BUDGET` | `0` | yes | no | harness | Harness environment toggle for Finalize Retry Budget. See docs/configuration.md (harness). |
 | `AGENT_GOLDEN_EVAL` | `1` | yes | no | advanced | Harness environment toggle for Golden Eval. See docs/configuration.md (advanced). |
 | `AGENT_GOOGLE_CONNECT_ON_BOOT` | `0` | yes | no | harness | Harness environment toggle for Google Connect On Boot. See docs/configuration.md (harness). |
-| `AGENT_GOOGLE_GMAIL_REST` | `1` | yes | no | harness | Register the classic-REST gmail_api_* tools (list labels, search threads, read message, create draft). Leave on so Gmail |
-| `AGENT_GOOGLE_GMAIL_TRANSPORT` | `rest` | yes | no | harness | How Gmail is reached. 'rest' = classic gmail.googleapis.com tools (gmail_api_*), no Workspace MCP preview needed (defaul |
 | `AGENT_GOOGLE_OAUTH_CLIENT_ID` | `` | yes | no | harness | Harness environment toggle for Google Oauth Client Id. See docs/configuration.md (harness). |
 | `AGENT_GOOGLE_SIDECAR_CMD` | `uvx workspace-mcp` | yes | no | harness | Harness environment toggle for Google Sidecar Cmd. See docs/configuration.md (harness). |
 | `AGENT_GOOGLE_SIDECAR_ENABLE` | `1` | yes | no | harness | Harness environment toggle for Google Sidecar Enable. See docs/configuration.md (harness). |

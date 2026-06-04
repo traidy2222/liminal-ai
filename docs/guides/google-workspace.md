@@ -22,17 +22,17 @@ In [Google Cloud Console](https://console.cloud.google.com/) for your OAuth proj
    | Calendar | Google Calendar API | **Calendar MCP API** (`calendarmcp.googleapis.com`) |
    | Chat | Google Chat API | **Chat MCP API** (`chatmcp.googleapis.com`) |
 
-   Enabling only “Gmail API” fixes direct REST calls but **not** `mcp_google_gmail_*` tools — those hit `gmailmcp.googleapis.com` and return 403 until **Gmail MCP API** is on.
+   Gmail uses **`mcp_google_gmail_*`** tools against `gmailmcp.googleapis.com`. Enable **Gmail MCP API** in addition to Gmail API.
 
    Sidecar (Docs/Sheets/…): Google Docs API, Sheets API, Slides API, Forms API, Tasks API, People API.
 2. **OAuth consent screen** — add test users if app is in *Testing* mode. Under **Data access**, manually add Google's **MCP** scopes (not only the classic REST scopes). Minimum for Gmail MCP: `gmail.readonly` + `gmail.compose` ([Google doc](https://developers.google.com/workspace/gmail/api/guides/configure-mcp-server)).
-3. **Workspace Developer Preview (required for MCP)** — Gmail/Drive/Calendar **MCP** APIs are preview-only. Enroll project `102482009638` at [Google Workspace Developer Preview Program](https://developers.google.com/workspace/preview) (Workspace account + Cloud project). Until Google confirms enrollment, `tools/call` on `gmailmcp.googleapis.com` often returns *The caller does not have permission* even when classic Gmail API returns 200 and OAuth includes `gmail.compose`.
-3. **Credentials → OAuth 2.0 Client** (Web or Desktop).
-3. Add authorized redirect URIs (Web application client):
+3. **Workspace Developer Preview (required for MCP)** — Gmail/Drive/Calendar **MCP** APIs are preview-only. Enroll your Cloud project at [Google Workspace Developer Preview Program](https://developers.google.com/workspace/preview) (Workspace account + Cloud project). Until Google confirms enrollment, `tools/call` on `gmailmcp.googleapis.com` often returns *The caller does not have permission* even when classic Gmail API returns 200 and OAuth includes `gmail.compose`.
+4. **Credentials → OAuth 2.0 Client** (Web or Desktop).
+5. Add authorized redirect URIs (Web application client):
    - Web UI: `http://127.0.0.1:3001/oauth/google/callback`
    - CLI: `http://127.0.0.1:38475/oauth/google/callback` (default; override with `GOOGLE_OAUTH_LOOPBACK_PORT` or `liminal connect google --port N`)
    - Or create a **Desktop** OAuth client — Google allows dynamic loopback ports for CLI.
-4. Add to `.env`:
+6. Add to `.env`:
 
 ```env
 GOOGLE_OAUTH_CLIENT_ID=your-client-id.apps.googleusercontent.com
@@ -41,7 +41,7 @@ GOOGLE_OAUTH_CLIENT_SECRET=your-secret
 # AGENT_OAUTH_ENCRYPTION_KEY=random-32-byte-secret
 ```
 
-5. Install [uv](https://docs.astral.sh/uv/) for the Docs/Sheets sidecar (`uvx workspace-mcp`).
+7. Install [uv](https://docs.astral.sh/uv/) for the Docs/Sheets sidecar (`uvx workspace-mcp`).
 
 ### 2. Liminal `.env`
 
@@ -86,31 +86,23 @@ list_connectors
 connect_provider({ provider: "google_workspace", services: ["drive", "sheets"], mode: "read_write" })
 ```
 
-## Gmail without MCP preview (REST bridge)
+## Gmail (official MCP)
 
-While **Gmail MCP** (`gmailmcp.googleapis.com`) waits on [Workspace Developer Preview](https://developers.google.com/workspace/preview), Liminal exposes **classic Gmail API** tools (same OAuth token, `gmail.googleapis.com`):
+After `liminal connect google --attach` with `gmail` in services, the harness registers **`mcp_google_gmail_*`** tools from Google's remote MCP (`gmailmcp.googleapis.com`). Tool names and parameters come from the server — use `list_connectors` and the tool schemas in-session.
 
-| Tool | Purpose |
-|------|---------|
-| `gmail_api_list_labels` | List labels |
-| `gmail_api_search_threads` | Search (`from:`, `is:unread`, etc.) |
-| `gmail_api_get_thread` | Thread + message IDs |
-| `gmail_api_get_message` | Full message body |
-| `gmail_api_create_draft` | Create draft — plain or styled HTML, inline images, attachments (approval-gated; needs `gmail.compose`) |
-| `gmail_api_send_message` | Send immediately — same compose surface as draft (approval-gated; `gmail.compose` permits send) |
+Requires:
 
-Requires **Gmail API** enabled in Cloud Console and a completed `liminal connect google`. Set `AGENT_GOOGLE_GMAIL_REST=0` to disable.
+- **Gmail MCP API** enabled in Cloud Console
+- [Workspace Developer Preview](https://developers.google.com/workspace/preview) enrollment for your project
+- OAuth scopes `gmail.readonly` and `gmail.compose` (re-connect if `list_connectors` shows `gmail_mcp=no`)
 
-**Rich email.** Both compose tools take a plain `body` and an optional `body_html`. The model authors email-safe HTML freely (inline CSS + table layout) for occasions — birthday cards, invitations, announcements — and embeds artwork via `inline_images` (`<img src="cid:ID">`). It defaults to plain text and only escalates to HTML on an occasion signal or an explicit "make it nice" request, per the **Email composition** protocol in the system prompt.
-
-**Choosing REST vs MCP — `AGENT_GOOGLE_GMAIL_TRANSPORT`** (Settings → Harness → *Gmail Transport*). The Gmail MCP endpoint (`gmailmcp.googleapis.com`) is an invite-only preview; for most projects it returns `403 "The caller does not have permission"`. So the default is **`rest`**, which uses the classic `gmail_api_*` tools and does **not** attach the preview MCP (so the model never reaches for the broken `mcp_google_gmail_*` tools). Only switch to `mcp` (preview only) or `auto` (preview MCP + REST fallback) once you are enrolled in the Workspace MCP preview **and** have enabled `gmailmcp.googleapis.com`. In `rest` mode the same `gmail.readonly` / `gmail.compose` OAuth scopes are still requested, so REST works with your existing token.
+**Rich email.** When draft/send MCP tools expose HTML or attachment fields, the harness **Email composition** protocol (in the system prompt when Gmail MCP tools are active) guides plain vs styled HTML for occasions — inline images via tool-specific attachment args when supported.
 
 ## Architecture
 
 | Service | Backend |
 |---------|---------|
 | Drive, Gmail, Calendar, Chat, People | Official remote MCP |
-| Gmail (fallback) | Classic REST (`gmail_api_*`) when MCP preview blocked |
 | Docs, Sheets, Slides, Forms, Tasks, … | Local `workspace-mcp` sidecar on port 8010 |
 
 Connections persist under `~/.liminal/api_connections/`. OAuth tokens are encrypted under `~/.liminal/oauth/google/`.
@@ -123,8 +115,6 @@ Connections persist under `~/.liminal/api_connections/`. OAuth tokens are encryp
 | `AGENT_GOOGLE_SIDECAR_CMD` | `uvx workspace-mcp` | Sidecar launch command |
 | `AGENT_GOOGLE_SIDECAR_PORT` | `8010` | Local MCP port |
 | `AGENT_GOOGLE_CONNECT_ON_BOOT` | `0` | Auto-restore connections on harness start |
-| `AGENT_GOOGLE_GMAIL_REST` | `1` | Register `gmail_api_*` classic REST tools (works without MCP preview) |
-| `AGENT_GOOGLE_GMAIL_TRANSPORT` | `rest` | `rest` = classic REST only (no preview needed); `mcp` = preview `mcp_google_gmail_*` only; `auto` = preview MCP + REST fallback |
 
 ## Safety
 
@@ -134,10 +124,11 @@ Connections persist under `~/.liminal/api_connections/`. OAuth tokens are encryp
 
 ## Troubleshooting
 
-- **Gmail MCP: "caller does not have permission" and you're NOT in the preview**: This is expected — `gmailmcp.googleapis.com` is invite-only. Set `AGENT_GOOGLE_GMAIL_TRANSPORT=rest` (Settings → Harness → Gmail Transport) and use the `gmail_api_*` tools, which work with a normal OAuth token. (This is the default; you only see the MCP error if it was set to `mcp`/`auto`.)
-- **Gmail MCP: "caller does not have permission"** (preview-enrolled, API enabled): Your token likely lacks **`gmail.compose`** (Liminal used `gmail.modify` before — wrong for MCP). Revoke the app at [Google Account permissions](https://myaccount.google.com/permissions), then `liminal connect google --attach`. `list_connectors` should show `gmail_mcp=yes`.
+- **Gmail MCP: "caller does not have permission"**: Enroll the project in [Workspace Developer Preview](https://developers.google.com/workspace/preview) and enable **Gmail MCP API** (`gmailmcp.googleapis.com`). Revoke the app at [Google Account permissions](https://myaccount.google.com/permissions), then `liminal connect google --attach`. `list_connectors` should show `gmail_mcp=yes`.
 - **Gmail MCP tools return HTTP 403 "API disabled"**: Enable **Gmail MCP API** (`gmailmcp.googleapis.com`), not only Gmail API. Wait 1–2 minutes, then retry.
-- **Gmail tools / missing scopes**: Confirm `list_connectors` shows `gmail=yes`; if not, revoke at [Google Account permissions](https://myaccount.google.com/permissions) and run `liminal connect google --attach` again.
+- **Gmail tools / missing scopes**: Confirm `list_connectors` shows `gmail_mcp=yes`; if not, revoke at [Google Account permissions](https://myaccount.google.com/permissions) and run `liminal connect google --attach` again.
 - **OAuth error / no refresh token**: Revoke app access in [Google Account permissions](https://myaccount.google.com/permissions) and reconnect with `prompt=consent`.
 - **Sidecar not ready** (Docs/Sheets): Run `uvx workspace-mcp --help` manually; ensure port 8010 is free.
 - **Tools invisible under lazy loading**: Call `list_connectors` or `activate_tool_family("connectors")`; restored Google connections auto-activate by default.
+
+Probe both APIs: `node scripts/lib/google-mcp-probe.mjs` (after `npm run build -w @liminal/core`).

@@ -277,8 +277,6 @@ export const HARNESS_ENV_DEFAULTS: Readonly<Record<string, string>> = {
   AGENT_GOOGLE_SIDECAR_CMD: "uvx workspace-mcp",
   AGENT_GOOGLE_SIDECAR_PORT: "8010",
   AGENT_GOOGLE_CONNECT_ON_BOOT: "0",
-  AGENT_GOOGLE_GMAIL_REST: "1",
-  AGENT_GOOGLE_GMAIL_TRANSPORT: "rest",
   AGENT_PROCESS_HEALTH: "0",
   AGENT_LINT_ALLOWED_COMMANDS: "",
   // CAPTCHA solving (2captcha / CapSolver) — key stays in .env only
