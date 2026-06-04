@@ -105,11 +105,16 @@ class ConfigErrorScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final host = AppScope.watch(context);
+    final initErr = host.sidecarInitError?.trim();
     return LiminalOnboardingPage(
-      title: 'Could not load configuration',
-      subtitle: host.setupError ?? 'Check that liminald is running and try again.',
+      title: initErr != null && initErr.isNotEmpty
+          ? 'Harness failed to start'
+          : 'Could not load configuration',
+      subtitle: initErr ??
+          host.setupError ??
+          'Check that liminald is running and try again.',
       child: FilledButton(
-        onPressed: host.refreshConfig,
+        onPressed: initErr != null && initErr.isNotEmpty ? host.boot : host.refreshConfig,
         child: const Text('Retry'),
       ),
     );

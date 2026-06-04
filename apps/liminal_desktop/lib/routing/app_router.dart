@@ -27,6 +27,9 @@ GoRouter createAppRouter(AppController controller) {
         return loc == AppRoutes.boot ? null : AppRoutes.boot;
       }
 
+      if (host.sidecarInitError != null && host.sidecarInitError!.isNotEmpty) {
+        return loc == AppRoutes.configError ? null : AppRoutes.configError;
+      }
       if (!host.sidecarReady ||
           (host.configLoading && host.config == null)) {
         return loc == AppRoutes.starting ? null : AppRoutes.starting;

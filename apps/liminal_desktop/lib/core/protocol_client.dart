@@ -7,7 +7,7 @@ import '../transport/ws_transport.dart';
 class ProtocolClient {
   WsTransport? _transport;
   StreamSubscription<ServerFrame>? _subscription;
-  Completer<void>? _helloCompleter;
+  Completer<void>? _readyCompleter;
 
   void Function(ServerFrame frame)? onGlobalFrame;
   void Function(String chatId, String event, Map<String, dynamic> data)?
@@ -20,37 +20,47 @@ class ProtocolClient {
 
   Future<void> connect({required int port, required String token}) async {
     await disconnect();
-    _helloCompleter = Completer<void>();
+    _readyCompleter = Completer<void>();
     _transport = WsTransport(port: port, token: token);
     _subscription = _transport!.frames.listen(_dispatchFrame);
     await _transport!.connect();
   }
 
-  Future<void> waitForHello({Duration timeout = const Duration(seconds: 90)}) {
-    final completer = _helloCompleter;
+  /// Waits until the sidecar finishes harness registration (`sidecar_ready`).
+  /// Do not treat the initial `hello` with `starting: true` as ready.
+  Future<void> waitForSidecarReady({
+    Duration timeout = const Duration(seconds: 120),
+  }) {
+    final completer = _readyCompleter;
     if (completer == null) {
       return Future.error(StateError('ProtocolClient.connect was not called'));
     }
     return completer.future.timeout(
       timeout,
       onTimeout: () => throw TimeoutException(
-        'Sidecar did not send hello within ${timeout.inSeconds}s '
+        'Sidecar did not finish starting within ${timeout.inSeconds}s '
         '(tool registration may still be running).',
       ),
     );
   }
+
+  @Deprecated('Use waitForSidecarReady')
+  Future<void> waitForHello({Duration timeout = const Duration(seconds: 120)}) =>
+      waitForSidecarReady(timeout: timeout);
 
   void _dispatchFrame(ServerFrame frame) {
     switch (frame.event) {
       case 'hello':
         protocolVersion = (frame.data['protocolVersion'] as num?)?.toInt() ?? 1;
         sidecarVersion = frame.data['sidecarVersion'] as String? ?? '';
-        if (_helloCompleter != null && !_helloCompleter!.isCompleted) {
-          _helloCompleter!.complete();
+        final starting = frame.data['starting'] as bool? ?? false;
+        if (!starting) {
+          _completeReady();
         }
         onGlobalFrame?.call(frame);
         return;
       case 'sidecar_ready':
+        _completeReady();
       case 'chat_list':
       case 'settings':
       case 'vireon_account':
@@ -76,11 +86,18 @@ class ProtocolClient {
     return transport.sendCommand(command, data, timeout: timeout);
   }
 
+  void _completeReady() {
+    final completer = _readyCompleter;
+    if (completer != null && !completer.isCompleted) {
+      completer.complete();
+    }
+  }
+
   Future<void> disconnect() async {
     await _subscription?.cancel();
     _subscription = null;
     await _transport?.dispose();
     _transport = null;
-    _helloCompleter = null;
+    _readyCompleter = null;
   }
 }

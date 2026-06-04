@@ -43,6 +43,7 @@ class AppController extends ChangeNotifier {
   AppConfig? config;
   bool configLoading = false;
   bool sidecarReady = false;
+  String? sidecarInitError;
   String? setupError;
   bool setupSaving = false;
   HarnessSettingsSnapshot? harnessSettings;
@@ -85,6 +86,7 @@ class AppController extends ChangeNotifier {
     bootError = null;
     configLoading = true;
     sidecarReady = false;
+    sidecarInitError = null;
     notifyListeners();
 
     try {
@@ -95,7 +97,7 @@ class AppController extends ChangeNotifier {
       _sidecarToken = proc.token;
       await _protocol.connect(port: proc.port, token: proc.token);
       _syncAssetResolver();
-      await _protocol.waitForHello();
+      await _protocol.waitForSidecarReady();
 
       phase = ConnectionPhase.connected;
       if (config == null) {
@@ -347,6 +349,7 @@ class AppController extends ChangeNotifier {
         return;
       case 'sidecar_ready':
         _applyHelloPayload(frame.data);
+        sidecarInitError = frame.data['initError'] as String?;
         sidecarReady = true;
         notifyListeners();
         return;

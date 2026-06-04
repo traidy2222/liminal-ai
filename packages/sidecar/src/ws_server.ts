@@ -157,12 +157,30 @@ export class WsServer {
       })
     );
 
-    const bridge = await this.registry.getOrCreateActive().catch(() => undefined);
+    const INIT_TIMEOUT_MS = 120_000;
+    let initError: string | undefined;
+    let bridge: Awaited<ReturnType<typeof this.registry.getOrCreateActive>> | undefined;
+    try {
+      bridge = await Promise.race([
+        this.registry.getOrCreateActive(),
+        new Promise<never>((_, reject) =>
+          setTimeout(
+            () => reject(new Error(`Harness init timed out after ${INIT_TIMEOUT_MS / 1000}s`)),
+            INIT_TIMEOUT_MS
+          )
+        ),
+      ]);
+    } catch (err) {
+      initError = err instanceof Error ? err.message : String(err);
+      bridge = undefined;
+    }
+
     let appConfig: Awaited<ReturnType<typeof buildDesktopConfig>> | undefined;
     if (bridge) {
       try {
         appConfig = await buildDesktopConfig(bridge, this.repoRoot);
-      } catch {
+      } catch (err) {
+        initError = initError ?? (err instanceof Error ? err.message : String(err));
         appConfig = undefined;
       }
     }
@@ -173,6 +191,7 @@ export class WsServer {
         activeChatId: this.registry.activeId ?? "",
         chats: this.registry.list(),
         ...(appConfig ? { appConfig: wireAppConfig(appConfig) } : {}),
+        ...(initError ? { initError } : {}),
       })
     );
   }
