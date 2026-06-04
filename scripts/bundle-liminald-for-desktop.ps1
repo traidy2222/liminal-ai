@@ -68,9 +68,12 @@ if ($CopyNodeModulesFromRepo -and (Test-Path $srcModules)) {
   $destModules = Join-Path $BundleRepo "node_modules"
   New-Item -ItemType Directory -Force $destModules | Out-Null
   & robocopy $srcModules $destModules /E /NFL /NDL /NJH /NJS /nc /ns /np | Out-Null
-  if ($LASTEXITCODE -ge 8) {
-    throw "robocopy node_modules failed with exit $LASTEXITCODE"
+  $robocopyExit = $LASTEXITCODE
+  if ($robocopyExit -ge 8) {
+    throw "robocopy node_modules failed with exit $robocopyExit"
   }
+  # Robocopy uses 0-7 for success; do not propagate to callers (npm/CI treat non-zero as failure).
+  $global:LASTEXITCODE = 0
 } else {
   Write-Host "==> npm install --omit=dev (portable runtime, may take a few minutes)..."
   Push-Location $BundleRepo
@@ -98,3 +101,4 @@ $manifest | ConvertTo-Json | Set-Content (Join-Path $BundleRoot "bundle.json") -
 Write-Host "==> bundle.json (paths relative to Release/)"
 Write-Host "    repoRoot:      $rootRel"
 Write-Host "    sidecarScript: $scriptRel"
+exit 0
