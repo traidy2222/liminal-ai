@@ -793,6 +793,12 @@ export {
   needsGoogleSidecar,
   sidecarServiceIds,
 } from "./connector_catalog.js";
+export {
+  missingGoogleScopes,
+  requiredScopesForPresets,
+  formatGoogleScopeDiagnostics,
+  missingDefaultWorkspaceScopes,
+} from "./google_oauth_scopes.js";
 export type { GoogleServiceId, GoogleServicePreset, ConnectorBackend } from "./connector_catalog.js";
 export { runGoogleConnectFlow, buildGoogleAuthUrlForWeb } from "./google_connect.js";
 export type { GoogleConnectResult, RunGoogleConnectFlowOptions } from "./google_connect.js";

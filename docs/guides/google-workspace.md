@@ -5,10 +5,23 @@ Liminal connects to Google Workspace through a **hybrid MCP architecture**:
 - **Official Google MCP** (preview): Drive, Gmail, Calendar, Chat, People
 - **Community sidecar** (`workspace-mcp` via `uvx`): Docs, Sheets, Slides, Forms, Tasks, Contacts, Apps Script, Custom Search
 
-## Prerequisites
+## Connect once (recommended)
 
-1. Create a [Google Cloud project](https://console.cloud.google.com/) and enable the APIs you need.
-2. Create an **OAuth 2.0 Client** (Desktop app or Web application).
+One-time **Google Cloud** setup, then one CLI command. After that, tokens and MCP connections persist under `~/.liminal/`.
+
+### 1. Google Cloud (one time)
+
+In [Google Cloud Console](https://console.cloud.google.com/) for your OAuth project:
+
+1. **APIs & Services → Library** — enable each API you use:
+   - Gmail API
+   - Google Drive API
+   - Google Calendar API
+   - Google People API
+   - Google Chat API
+   - Google Docs API, Sheets API, Slides API, Forms API, Tasks API (for sidecar)
+2. **OAuth consent screen** — add test users if app is in *Testing* mode.
+3. **Credentials → OAuth 2.0 Client** (Web or Desktop).
 3. Add authorized redirect URIs (Web application client):
    - Web UI: `http://127.0.0.1:3001/oauth/google/callback`
    - CLI: `http://127.0.0.1:38475/oauth/google/callback` (default; override with `GOOGLE_OAUTH_LOOPBACK_PORT` or `liminal connect google --port N`)
@@ -24,23 +37,39 @@ GOOGLE_OAUTH_CLIENT_SECRET=your-secret
 
 5. Install [uv](https://docs.astral.sh/uv/) for the Docs/Sheets sidecar (`uvx workspace-mcp`).
 
+### 2. Liminal `.env`
+
+```env
+GOOGLE_OAUTH_CLIENT_ID=....apps.googleusercontent.com
+GOOGLE_OAUTH_CLIENT_SECRET=...
+AGENT_GOOGLE_CONNECT_ON_BOOT=1
+```
+
+### 3. OAuth + attach (one command)
+
+```bash
+npm run build -w packages/core && npm run build -w packages/tools
+liminal connect google --attach
+```
+
+This stores the refresh token, registers Drive/Gmail/Calendar/… MCP tools, and starts the Docs/Sheets sidecar when needed.
+
+On later **web/tui** starts, `AGENT_GOOGLE_CONNECT_ON_BOOT=1` re-attaches MCP connections and restarts the sidecar automatically.
+
+### Web UI (two clicks instead of CLI)
+
+**Settings → Integrations**:
+
+1. **Connect Google (OAuth)** — approve **all** requested permissions (Gmail, Drive, …).
+2. **Attach MCP tools** — required; OAuth alone does not register tools.
+
 ## Connect
-
-### Web
-
-**Settings → Integrations** — three sections:
-
-1. **Providers — Google Workspace** — OAuth, service picker, attach/detach
-2. **Custom MCP** — attach any Streamable HTTP MCP server (`mcp_<name>_*` tools)
-3. **OpenAPI** — import a JSON spec (`api_<name>_*` tools)
-
-Secrets are referenced by env var name only; set tokens in `.env`.
 
 ### CLI
 
 ```bash
-liminal connect google
-liminal connect google --services drive,sheets,gmail --read-only
+liminal connect google --attach
+liminal connect google --services drive,gmail --read-only --attach
 liminal disconnect google
 ```
 
@@ -77,6 +106,7 @@ Connections persist under `~/.liminal/api_connections/`. OAuth tokens are encryp
 
 ## Troubleshooting
 
+- **Gmail tools return HTTP 403**: (1) Enable **Gmail API** in Cloud Console. (2) Confirm token has gmail scopes — `list_connectors` shows `gmail=yes`. If `gmail=NO`, revoke at [Google Account permissions](https://myaccount.google.com/permissions) and run `liminal connect google --attach` again. (3) Gmail uses official MCP, not the Docs sidecar — `sidecar: running: false` is normal for Gmail-only.
 - **OAuth error / no refresh token**: Revoke app access in [Google Account permissions](https://myaccount.google.com/permissions) and reconnect with `prompt=consent`.
-- **Sidecar not ready**: Run `uvx workspace-mcp --help` manually; ensure port 8010 is free.
+- **Sidecar not ready** (Docs/Sheets): Run `uvx workspace-mcp --help` manually; ensure port 8010 is free.
 - **Tools invisible under lazy loading**: Call `list_connectors` or `activate_tool_family("connectors")`; restored Google connections auto-activate by default.

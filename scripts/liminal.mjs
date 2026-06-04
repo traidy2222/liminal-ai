@@ -18,7 +18,7 @@ Usage:
   liminal update              git pull + npm install + build (also runs before web/tui)
   liminal login               Sign in to Vireon (browser); saves license to ~/.liminal/
   liminal logout              Remove local Vireon account + license cache
-  liminal connect google      Google Workspace OAuth (GOOGLE_OAUTH_* in .env; redirect port 38475)
+  liminal connect google      Google OAuth (+ use --attach for MCP tools in one step)
   liminal disconnect google   Revoke Google OAuth tokens
   liminal path                Print install directory
 

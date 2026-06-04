@@ -9,6 +9,8 @@ import {
   resolveGoogleServices,
   scopesForGoogleServices,
   needsGoogleSidecar,
+  formatGoogleScopeDiagnostics,
+  missingGoogleScopes,
   type GoogleServicePreset,
 } from "@liminal/core";
 import { defineTool } from "./helpers.js";
@@ -104,7 +106,7 @@ export function createConnectorTools(registry: ToolRegistry, _emitter: AgentEmit
         let authUrlHint = "";
         try {
           authUrlHint =
-            "\n\nConnect first: run `liminal connect google` or open Settings → Integrations → Connect Google.\n" +
+            "\n\nConnect first: run `liminal connect google --attach` or open Settings → Integrations → Connect Google, then Attach MCP tools.\n" +
             `(OAuth scopes needed: ${scopes.slice(0, 4).join(", ")}${scopes.length > 4 ? "…" : ""})`;
         } catch {
           authUrlHint = "\n\nSet GOOGLE_OAUTH_CLIENT_ID and GOOGLE_OAUTH_CLIENT_SECRET in .env, then connect via Settings or CLI.";
@@ -112,6 +114,19 @@ export function createConnectorTools(registry: ToolRegistry, _emitter: AgentEmit
         return {
           ok: false,
           error: `Google OAuth not configured or no token on disk.${authUrlHint}`,
+        };
+      }
+
+      const accounts = await listGoogleOAuthAccounts();
+      const match = accounts.find((a) => a.accountId === oauth.accountId);
+      const granted = match?.scopes ?? [];
+      const missing = missingGoogleScopes(granted, presets);
+      if (missing.length > 0) {
+        return {
+          ok: false,
+          error:
+            formatGoogleScopeDiagnostics(granted, presets) +
+            "\n\nAlso enable each Google API in Cloud Console (APIs & Services → Library): Gmail API, Google Drive API, Calendar API, etc.",
         };
       }
 
@@ -250,7 +265,16 @@ export function createConnectorTools(registry: ToolRegistry, _emitter: AgentEmit
       } else {
         for (const a of googleAccounts) {
           const exp = new Date(a.expiresAt).toISOString();
-          lines.push(`- ${a.email ?? a.accountId} (expires ~${exp}, ${a.scopes.length} scopes)`);
+          const hasGmail = a.scopes.some((s) => s.includes("gmail"));
+          const hasDrive = a.scopes.some((s) => s.includes("drive"));
+          lines.push(
+            `- ${a.email ?? a.accountId} (expires ~${exp}, ${a.scopes.length} scopes, gmail=${hasGmail ? "yes" : "NO"}, drive=${hasDrive ? "yes" : "NO"})`
+          );
+          const gmailOnly = resolveGoogleServices(["gmail"]);
+          const miss = missingGoogleScopes(a.scopes, gmailOnly);
+          if (miss.length > 0) {
+            lines.push(`  - missing for gmail: ${miss.join(", ")}`);
+          }
         }
       }
       lines.push("");

@@ -45,6 +45,7 @@ export function buildGoogleAuthUrl(opts: {
     state: opts.state,
     access_type: opts.accessType ?? "offline",
     prompt: "consent",
+    include_granted_scopes: "true",
   });
   return `${GOOGLE_AUTH_URL}?${params.toString()}`;
 }

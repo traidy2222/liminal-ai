@@ -5,6 +5,7 @@
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { loadEnvForCli } from "./load-env.mjs";
+import { attachGoogleWorkspaceMcp } from "./google-attach.mjs";
 
 function parseArgs(argv) {
   let services;
@@ -46,13 +47,16 @@ export async function runConnectGoogleCli(argv) {
     onStatus: (m) => console.log(m),
   });
   console.log(`\nGoogle connected as ${result.email ?? result.accountId}`);
-  console.log(`Scopes: ${result.scopes.length}`);
+  console.log(`Scopes granted: ${result.scopes.length}`);
 
   if (attach) {
-    console.log(
-      "\nTo attach MCP tools, ask the agent to run connect_provider or use web Settings → Integrations → Attach MCP tools."
-    );
+    console.log("\nAttaching Google Workspace MCP tools…");
+    return attachGoogleWorkspaceMcp({ services, mode: readOnly ? "read_only" : "read_write" });
   }
+
+  console.log(
+    "\nNext: run `liminal connect google --attach` or in web Settings → Integrations click **Attach MCP tools**."
+  );
   return 0;
 }
 

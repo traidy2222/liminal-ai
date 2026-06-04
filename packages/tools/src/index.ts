@@ -385,6 +385,12 @@ export async function registerAllTools(
   // Restore persisted connections after lazy seed so autoActivate tools stay visible.
   await restoreOpenApiConnections(registry, emitter);
   await restoreMcpConnections(registry, emitter);
+  try {
+    const { bootstrapGoogleWorkspace } = await import("./google_workspace_boot.js");
+    await bootstrapGoogleWorkspace(registry);
+  } catch {
+    /* best effort */
+  }
   if (harness) {
     harness.getContext().refreshProtocolDynamic(harness.registry.getActiveToolNames());
   }
