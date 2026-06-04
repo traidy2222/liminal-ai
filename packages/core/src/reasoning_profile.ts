@@ -352,6 +352,43 @@ export function buildReasoningBudgetInjection(
   );
 }
 
+/** Running counters for the reasoning-stall breaker (see AgentHarness). */
+export interface ReasoningStallState {
+  /** Consecutive rounds whose dispatched batch was ONLY reasoning tools. */
+  consecutiveReasoningOnlyRounds: number;
+  /** Accumulated reasoning-tool arg chars across the current spiral. */
+  reasoningOnlyChars: number;
+}
+
+/**
+ * `"none"` — keep going. `"nudge"` — inject a hard "act now" message. `"suppress"`
+ * — also drop reasoning tools from the next round so the model cannot keep
+ * spiraling. Pure decision so it can be unit-tested without an AgentHarness.
+ */
+export type ReasoningStallAction = "none" | "nudge" | "suppress";
+
+/**
+ * Decide whether a reason()-only spiral has crossed the budget-aware threshold.
+ *
+ * Trips on EITHER too many consecutive reasoning-only rounds (tighter on
+ * tool-first turns) OR too many accumulated reasoning chars (via
+ * {@link resolveReasoningStallNudgeThresholdChars}). Once tripped, escalates from
+ * `nudge` to `suppress` based on whether a nudge already fired.
+ */
+export function evaluateReasoningStall(
+  state: ReasoningStallState,
+  budget: ReasoningBudget | null,
+  alreadyNudged: boolean
+): ReasoningStallAction {
+  const charCap = budget ? resolveReasoningStallNudgeThresholdChars(budget) : 2500;
+  const roundCap = budget?.toolFirstBias ? 2 : 3;
+  const tripped =
+    state.consecutiveReasoningOnlyRounds >= roundCap ||
+    state.reasoningOnlyChars >= charCap;
+  if (!tripped) return "none";
+  return alreadyNudged ? "suppress" : "nudge";
+}
+
 export function resolveReasoningStallNudgeThresholdChars(budget: ReasoningBudget): number {
   const floorRaw = effectiveHarnessEnvRaw("AGENT_REASONING_NUDGE_CHARS")?.trim();
   const floor = floorRaw ? Number(floorRaw) : 2500;

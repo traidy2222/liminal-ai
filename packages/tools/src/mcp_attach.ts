@@ -7,6 +7,8 @@ import {
   type GoogleServiceId,
   googleCloudMcpApiLibraryUrl,
   googleProjectIdFromClientId,
+  gmailMcpSuppressed,
+  isGmailOfficialMcpConnection,
 } from "@liminal/core";
 import { defineTool } from "./helpers.js";
 import {
@@ -441,7 +443,21 @@ export async function restoreMcpConnections(
   emitter: AgentEmitter
 ): Promise<number> {
   const all = await listConnections();
-  const mcp = all.filter((c): c is McpConnectionRecord => c.kind === "mcp");
+  let mcp = all.filter((c): c is McpConnectionRecord => c.kind === "mcp");
+  // Gmail transport=rest: do not re-register a previously-attached preview Gmail
+  // MCP — its tools 403 without preview enrollment. The classic-REST gmail_api_*
+  // tools cover Gmail instead. (connect_provider already skips attaching it.)
+  if (gmailMcpSuppressed()) {
+    mcp = mcp.filter(
+      (c) =>
+        !isGmailOfficialMcpConnection({
+          name: c.name,
+          providerId: c.providerId,
+          parentProvider: c.parentProvider,
+          services: c.services,
+        })
+    );
+  }
   try {
     return restoreMcpConnectionsFromRecords(mcp, registry).toolCount;
   } catch (e) {

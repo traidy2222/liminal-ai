@@ -1,0 +1,21 @@
+.dart_tool/
+.packages
+build/
+.flutter-plugins
+.flutter-plugins-dependencies
+.pub-cache/
+.pub/
+**/doc/api/
+**/ios/Flutter/.last_build_id
+.melos_tool/
+
+# Platform runners (generated via `flutter create .`)
+android/
+ios/
+linux/
+macos/
+windows/
+web/
+
+# Keep lib/ and pubspec — runners are local-only until `flutter create`.
+.idea/

@@ -19,3 +19,13 @@ test("ProviderRouteState accumulates ignores and bumps epoch", () => {
   state.reset();
   assert.deepEqual(state.snapshot(), { ignore: [], epoch: 0 });
 });
+
+test("ProviderRouteState caps dynamic ignores and can clear", () => {
+  const state = new ProviderRouteState();
+  for (let i = 0; i < 8; i++) state.markProviderRateLimited(`P${i}`);
+  assert.equal(state.snapshot().ignore.length, 6);
+  assert.equal(state.snapshot().ignore[0], "P2");
+
+  state.clearProviderIgnores();
+  assert.deepEqual(state.snapshot().ignore, []);
+});

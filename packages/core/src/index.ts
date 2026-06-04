@@ -575,6 +575,7 @@ export {
   buildReasoningBudgetInjection,
   formatReasoningBudgetTraceLine,
   resolveReasoningStallNudgeThresholdChars,
+  evaluateReasoningStall,
   parseReasoningBudgetFromParsed,
   parseReasoningEffort,
   parseThinkDepth,
@@ -590,6 +591,8 @@ export type {
   ThinkDepth,
   ReasoningBudgetInferenceSlice,
   ReasoningIntentClass,
+  ReasoningStallState,
+  ReasoningStallAction,
 } from "./reasoning_profile.js";
 export {
   resolveReasoningSurface,
@@ -795,6 +798,9 @@ export {
   GOOGLE_OFFICIAL_MCP_API_IDS,
   googleCloudMcpApiLibraryUrl,
   googleProjectIdFromClientId,
+  resolveGoogleGmailTransport,
+  gmailMcpSuppressed,
+  isGmailOfficialMcpConnection,
 } from "./connector_catalog.js";
 export {
   missingGoogleScopes,
@@ -802,7 +808,7 @@ export {
   formatGoogleScopeDiagnostics,
   missingDefaultWorkspaceScopes,
 } from "./google_oauth_scopes.js";
-export type { GoogleServiceId, GoogleServicePreset, ConnectorBackend } from "./connector_catalog.js";
+export type { GoogleServiceId, GoogleServicePreset, ConnectorBackend, GoogleGmailTransport } from "./connector_catalog.js";
 export { runGoogleConnectFlow, buildGoogleAuthUrlForWeb } from "./google_connect.js";
 export type { GoogleConnectResult, RunGoogleConnectFlowOptions } from "./google_connect.js";
 export type {

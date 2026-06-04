@@ -1,0 +1,30 @@
+{
+  "name": "@liminal/sidecar",
+  "version": "0.1.0",
+  "license": "FSL-1.1-MIT",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "bin": {
+    "liminald": "./dist/index.js"
+  },
+  "scripts": {
+    "build": "node -e \"require('node:fs').rmSync('dist',{recursive:true,force:true})\" && tsc -p tsconfig.json",
+    "typecheck": "tsc --noEmit",
+    "start": "node --import tsx/esm src/index.ts",
+    "test": "tsx --test src/event_mapper.test.ts src/handshake.test.ts src/ws_server.test.ts"
+  },
+  "dependencies": {
+    "@liminal/core": "*",
+    "@liminal/tools": "*",
+    "@liminal/protocol": "*",
+    "dotenv": "^16.4.0",
+    "ws": "^8.18.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "@types/ws": "^8.5.12",
+    "tsx": "^4.19.0",
+    "typescript": "^5.6.0"
+  }
+}

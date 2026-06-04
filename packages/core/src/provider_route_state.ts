@@ -3,6 +3,8 @@
  * epoch for sticky routing rotation after upstream 429s.
  */
 
+import { MAX_DYNAMIC_PROVIDER_IGNORES } from "./openrouter_errors.js";
+
 export interface ProviderRouteSnapshot {
   ignore: string[];
   epoch: number;
@@ -16,8 +18,20 @@ export class ProviderRouteState {
   /** Record a provider that returned 429 / upstream throttle. */
   markProviderRateLimited(slug: string, opts?: { bumpEpoch?: boolean }): void {
     const s = slug.trim();
-    if (s) this.ignores.add(s);
+    if (s) {
+      if (this.ignores.has(s)) this.ignores.delete(s);
+      this.ignores.add(s);
+      while (this.ignores.size > MAX_DYNAMIC_PROVIDER_IGNORES) {
+        const oldest = this.ignores.values().next().value;
+        if (oldest) this.ignores.delete(oldest);
+      }
+    }
     if (opts?.bumpEpoch) this.sessionEpoch += 1;
+  }
+
+  /** Clear dynamic ignores after OpenRouter reports no providers left (404). */
+  clearProviderIgnores(): void {
+    this.ignores.clear();
   }
 
   /** Session id suffix when epoch > 0 breaks sticky binding after rotation. */

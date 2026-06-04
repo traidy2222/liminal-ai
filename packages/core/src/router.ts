@@ -11,7 +11,10 @@ import {
   sessionEpochBumpOn429Enabled,
 } from "./provider_config.js";
 import { applyPromptCacheBreakpoints } from "./prompt_cache.js";
-import { parseOpenRouterProviderSlug } from "./openrouter_errors.js";
+import {
+  isExhaustedProviderRoutingError,
+  parseOpenRouterProviderSlug,
+} from "./openrouter_errors.js";
 import { isManagedInferenceBaseUrl } from "./inference_session.js";
 import { vireonProxyAlreadyRetriedUpstream } from "./vireon_proxy.js";
 import type { ProviderRouteState } from "./provider_route_state.js";
@@ -189,20 +192,26 @@ export async function completeChatJson(
       return { ok: true, parsed, raw };
     } catch (e) {
       const error = e instanceof Error ? e.message : String(e);
+      const exhaustedRouting = isExhaustedProviderRoutingError(e);
+      if (exhaustedRouting && opts.routeState) {
+        opts.routeState.clearProviderIgnores();
+      }
       if (
         retryAttempt === 0 &&
-        isRateLimitErrorMessage(error) &&
+        (isRateLimitErrorMessage(error) || exhaustedRouting) &&
         opts.routeState &&
         !(isManagedInferenceBaseUrl(client.baseURL) && vireonProxyAlreadyRetriedUpstream(e))
       ) {
-        const slug = parseOpenRouterProviderSlug(e);
-        const strategy = resolveProviderStrategy();
-        const bumpEpoch =
-          sessionEpochBumpOn429Enabled() && strategy === "adaptive";
-        if (slug) {
-          opts.routeState.markProviderRateLimited(slug, { bumpEpoch });
-        } else if (bumpEpoch) {
-          opts.routeState.markProviderRateLimited("", { bumpEpoch: true });
+        if (!exhaustedRouting) {
+          const slug = parseOpenRouterProviderSlug(e);
+          const strategy = resolveProviderStrategy();
+          const bumpEpoch =
+            sessionEpochBumpOn429Enabled() && strategy === "adaptive";
+          if (slug) {
+            opts.routeState.markProviderRateLimited(slug, { bumpEpoch });
+          } else if (bumpEpoch) {
+            opts.routeState.markProviderRateLimited("", { bumpEpoch: true });
+          }
         }
         return attemptWithModel(model, isFast, retryAttempt + 1);
       }

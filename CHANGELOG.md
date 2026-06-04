@@ -2,7 +2,7 @@
 
 All notable changes to [Liminal AI](https://github.com/traidy2222/liminal-ai) are documented here and on the docs portal: [docs.vireondynamics.com/liminal/reference/changelog](https://docs.vireondynamics.com/liminal/reference/changelog).
 
-**Current stage:** **alpha** (`v0.0.17` tip of `main`, 2026-06-02). **Beta**, **RC**, and **v0.1.0 public preview** have not been declared as product releases yet.
+**Current stage:** **alpha** (`v0.0.18` tip of `main`, 2026-06-04). **Beta**, **RC**, and **v0.1.0 public preview** have not been declared as product releases yet.
 
 **Single source:** edit [`changelog/releases.json`](changelog/releases.json), then run `npm run changelog:gen`.
 
@@ -10,7 +10,13 @@ Format: **v0.0.x** entries keyed to the last GitHub push in each slice. Dates ar
 
 Marketing (richer notes): [vireondynamics.com/liminal/changelog](https://www.vireondynamics.com/liminal/changelog)
 
-## [v0.0.17] — 2026-06-02 — Current alpha
+## [v0.0.18] — 2026-06-04 — Current alpha
+
+Windows desktop app with sidecar protocol, rich assistant markdown/HTML, OpenRouter ignore-list recovery on long runs, and native Gmail read tools.
+
+[Full notes](https://docs.vireondynamics.com/liminal/reference/changelog#v0-0-18)
+
+## [v0.0.17] — 2026-06-02
 
 Team-tier org memory sync (workspace/global notes), Pro `/api/pro/cloud_sync/*`, harness NotesFacade + turn hooks, org RBAC and invites on the control plane.
 

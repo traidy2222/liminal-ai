@@ -14,6 +14,7 @@ import {
   GOOGLE_OFFICIAL_MCP_API_IDS,
   googleCloudMcpApiLibraryUrl,
   googleProjectIdFromClientId,
+  resolveGoogleGmailTransport,
   type GoogleServiceId,
   type GoogleServicePreset,
 } from "@liminal/core";
@@ -137,12 +138,22 @@ export function createConnectorTools(registry: ToolRegistry, _emitter: AgentEmit
       const scopes = scopesForGoogleServices(presets, mode);
       const auth = googleOAuthAuthScheme(oauth.accountId, scopes);
       const readOnly = mode === "read_only";
-      const byConn = uniqueConnectionNames(presets);
+
+      // Gmail transport: in `rest` mode do NOT attach the preview Gmail MCP
+      // (gmailmcp.googleapis.com is invite-only and 403s for most projects).
+      // The always-registered classic-REST gmail_api_* tools cover Gmail instead.
+      // OAuth scopes above still include gmail.* so the REST tools work.
+      const gmailTransport = resolveGoogleGmailTransport();
+      const gmailRequested = presets.some((p) => p.id === "gmail");
+      const skipGmailMcp = gmailTransport === "rest" && gmailRequested;
+      const attachPresets = skipGmailMcp ? presets.filter((p) => p.id !== "gmail") : presets;
+
+      const byConn = uniqueConnectionNames(attachPresets);
       const attached: string[] = [];
       let totalTools = 0;
 
       try {
-        if (needsGoogleSidecar(presets)) {
+        if (needsGoogleSidecar(attachPresets)) {
           const accessToken = await getGoogleAccessToken(oauth.accountId);
           const sidecar = await ensureGoogleSidecarRunning(accessToken ?? undefined);
           if (!sidecar.ok) {
@@ -152,7 +163,7 @@ export function createConnectorTools(registry: ToolRegistry, _emitter: AgentEmit
                 `https://docs.astral.sh/uv/) and ensure workspace-mcp is available via uvx.`,
             };
           }
-          const sidecarServices = presets.filter((p) => p.backend === "google_sidecar").map((p) => p.id);
+          const sidecarServices = attachPresets.filter((p) => p.backend === "google_sidecar").map((p) => p.id);
           const { registered } = await attachMcpConnection(registry, {
             name: "google_ext",
             url: sidecar.url,
@@ -191,13 +202,17 @@ export function createConnectorTools(registry: ToolRegistry, _emitter: AgentEmit
         return { ok: false, error: e instanceof Error ? e.message : String(e) };
       }
 
+      const gmailNote = skipGmailMcp
+        ? `\nGmail: using classic REST tools (gmail_api_*) — preview MCP skipped (AGENT_GOOGLE_GMAIL_TRANSPORT=rest).`
+        : "";
       return {
         ok: true,
         output:
           `Connected google_workspace as ${oauth.email ?? oauth.accountId} (${mode}).\n` +
-          `Connections: ${attached.join(", ")}\n` +
+          `Connections: ${attached.length ? attached.join(", ") : "(none — using REST/sidecar only)"}\n` +
           `Active MCP tools: ${totalTools}\n` +
-          `Services: ${presets.map((p) => p.id).join(", ")}`,
+          `Services: ${presets.map((p) => p.id).join(", ")}` +
+          gmailNote,
       };
     },
   });
@@ -262,6 +277,17 @@ export function createConnectorTools(registry: ToolRegistry, _emitter: AgentEmit
     handler: async (): Promise<ToolResult> => {
       const lines: string[] = ["## Connectors", ""];
 
+      const gmailTransport = resolveGoogleGmailTransport();
+      lines.push(
+        `Gmail transport: ${gmailTransport}` +
+          (gmailTransport === "rest"
+            ? " — using classic REST tools (gmail_api_*); preview MCP not attached. Switch in Settings → Harness → Gmail Transport."
+            : gmailTransport === "mcp"
+              ? " — preview mcp_google_gmail_* only (needs preview enrollment + gmailmcp.googleapis.com enabled)."
+              : " — preview MCP attached with REST (gmail_api_*) as fallback.")
+      );
+      lines.push("");
+
       const googleAccounts = await listGoogleOAuthAccounts();
       lines.push("### Google OAuth");
       if (googleAccounts.length === 0) {
@@ -269,10 +295,11 @@ export function createConnectorTools(registry: ToolRegistry, _emitter: AgentEmit
       } else {
         for (const a of googleAccounts) {
           const exp = new Date(a.expiresAt).toISOString();
-          const hasGmail = a.scopes.some((s) => s.includes("gmail"));
-          const hasDrive = a.scopes.some((s) => s.includes("drive"));
+          const hasGmailRead = a.scopes.includes("https://www.googleapis.com/auth/gmail.readonly");
+          const hasGmailCompose = a.scopes.includes("https://www.googleapis.com/auth/gmail.compose");
+          const hasDriveMcp = a.scopes.includes("https://www.googleapis.com/auth/drive.file");
           lines.push(
-            `- ${a.email ?? a.accountId} (expires ~${exp}, ${a.scopes.length} scopes, gmail=${hasGmail ? "yes" : "NO"}, drive=${hasDrive ? "yes" : "NO"})`
+            `- ${a.email ?? a.accountId} (expires ~${exp}, ${a.scopes.length} scopes, gmail_mcp=${hasGmailRead && hasGmailCompose ? "yes" : "NO — re-run liminal connect google --attach"}, drive_mcp=${hasDriveMcp ? "yes" : "partial"})`
           );
           const gmailOnly = resolveGoogleServices(["gmail"]);
           const miss = missingGoogleScopes(a.scopes, gmailOnly);

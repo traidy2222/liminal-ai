@@ -18,7 +18,12 @@
     "packages/*"
   ],
   "scripts": {
-    "build": "npm run build -w @liminal/core && npm run build -w @liminal/tools && npm run build -w @liminal/enterprise",
+    "build": "npm run build -w @liminal/core && npm run build -w @liminal/protocol && npm run build -w @liminal/tools && npm run build -w @liminal/sidecar && npm run build -w @liminal/enterprise",
+    "build:sidecar": "npm run build -w @liminal/core && npm run build -w @liminal/protocol && npm run build -w @liminal/tools && npm run build -w @liminal/sidecar",
+    "sidecar": "npm run build:sidecar && npm run start -w @liminal/sidecar",
+    "sidecar:dev": "npm run start -w @liminal/sidecar",
+    "desktop:build:windows": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/build-desktop-windows.ps1",
+    "desktop:test:windows": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/test-desktop-windows.ps1",
     "setup": "node scripts/liminal.mjs setup",
     "doctor": "node scripts/liminal.mjs doctor",
     "tui": "node scripts/run-tui.mjs",

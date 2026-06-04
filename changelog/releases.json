@@ -1,7 +1,35 @@
 {
   "stage": "alpha",
-  "currentVersion": "0.0.17",
+  "currentVersion": "0.0.18",
   "releases": [
+    {
+      "version": "0.0.18",
+      "date": "2026-06-04",
+      "tagline": "Liminal Desktop (Windows), provider-routing recovery, reasoning-stall breaker, Gmail API tools.",
+      "summary": "Windows desktop app with sidecar protocol, rich assistant markdown/HTML, OpenRouter ignore-list recovery on long runs, and native Gmail read tools.",
+      "bullets": [
+        "**Provider routing recovery** — Dynamic `provider.ignore` list is capped and cleared when OpenRouter returns “all providers ignored” (404), so long ReAct runs do not stall mid-task after repeated upstream 429s",
+        "**Reasoning-stall breaker** — Consecutive reasoning-only rounds (`think`/`reason`/`plan`/…) trigger a hard nudge, then temporarily drop reasoning tools so the model must call an action tool or finish",
+        "**Liminal Desktop (Windows alpha)** — Flutter app (`apps/liminal_desktop`) talks to bundled `liminald` over `@liminal/protocol` WebSocket: multi-chat, Vireon sign-in, harness settings, compact tool cards, image attachments, GFM markdown + HTML embeds",
+        "**Sidecar** — `@liminal/sidecar` serves session bridge, `/media` for workspace images, and `send_message` attachments; `npm run desktop:build:windows` bundles Release + liminald",
+        "**Gmail** — Native `google_gmail_*` tools (read/search) with proper body decoding; Google MCP probe documents separate Gmail API enablement",
+        "**Rich message rendering** — Spec in `docs/concepts/rich-message-rendering.md`; desktop parity with web for alerts, code highlight, video embeds, streaming HTML fences"
+      ],
+      "docs": [
+        {
+          "label": "Rich message rendering",
+          "href": "../concepts/rich-message-rendering.md"
+        },
+        {
+          "label": "Managed inference",
+          "href": "../guides/managed-inference.md"
+        },
+        {
+          "label": "Google Workspace",
+          "href": "../guides/google-workspace.md"
+        }
+      ]
+    },
     {
       "version": "0.0.17",
       "date": "2026-06-02",

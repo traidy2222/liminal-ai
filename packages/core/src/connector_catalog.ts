@@ -1,6 +1,7 @@
 /**
  * Connector presets — Google Workspace hybrid MCP routing (official + sidecar).
  */
+import { effectiveHarnessEnvRaw } from "./harness_effective_env.js";
 
 export type GoogleServiceId =
   | "drive"
@@ -83,8 +84,8 @@ export const GOOGLE_WORKSPACE_SERVICES: GoogleServicePreset[] = [
     mcpUrl: OFFICIAL_BASE.drive,
     connectionName: "google_drive",
     scopes: [
-      "https://www.googleapis.com/auth/drive",
       "https://www.googleapis.com/auth/drive.readonly",
+      "https://www.googleapis.com/auth/drive.file",
     ],
   },
   {
@@ -94,8 +95,8 @@ export const GOOGLE_WORKSPACE_SERVICES: GoogleServicePreset[] = [
     mcpUrl: OFFICIAL_BASE.gmail,
     connectionName: "google_gmail",
     scopes: [
-      "https://www.googleapis.com/auth/gmail.modify",
       "https://www.googleapis.com/auth/gmail.readonly",
+      "https://www.googleapis.com/auth/gmail.compose",
     ],
   },
   {
@@ -105,8 +106,9 @@ export const GOOGLE_WORKSPACE_SERVICES: GoogleServicePreset[] = [
     mcpUrl: OFFICIAL_BASE.calendar,
     connectionName: "google_calendar",
     scopes: [
-      "https://www.googleapis.com/auth/calendar",
-      "https://www.googleapis.com/auth/calendar.readonly",
+      "https://www.googleapis.com/auth/calendar.calendarlist.readonly",
+      "https://www.googleapis.com/auth/calendar.events.freebusy",
+      "https://www.googleapis.com/auth/calendar.events.readonly",
     ],
   },
   {
@@ -115,7 +117,13 @@ export const GOOGLE_WORKSPACE_SERVICES: GoogleServicePreset[] = [
     backend: "google_official_mcp",
     mcpUrl: OFFICIAL_BASE.chat,
     connectionName: "google_chat",
-    scopes: ["https://www.googleapis.com/auth/chat.messages"],
+    scopes: [
+      "https://www.googleapis.com/auth/chat.spaces.readonly",
+      "https://www.googleapis.com/auth/chat.memberships.readonly",
+      "https://www.googleapis.com/auth/chat.messages.readonly",
+      "https://www.googleapis.com/auth/chat.messages.create",
+      "https://www.googleapis.com/auth/chat.users.readstate.readonly",
+    ],
   },
   {
     id: "people",
@@ -124,7 +132,7 @@ export const GOOGLE_WORKSPACE_SERVICES: GoogleServicePreset[] = [
     mcpUrl: OFFICIAL_BASE.people,
     connectionName: "google_people",
     scopes: [
-      "https://www.googleapis.com/auth/contacts",
+      "https://www.googleapis.com/auth/directory.readonly",
       "https://www.googleapis.com/auth/contacts.readonly",
     ],
   },
@@ -258,3 +266,43 @@ export function sidecarServiceIds(presets: GoogleServicePreset[]): GoogleService
 }
 
 export const GOOGLE_OAUTH_SCOPES_FULL = scopesForGoogleServices(GOOGLE_WORKSPACE_SERVICES, "read_write");
+
+/**
+ * How Gmail is reached:
+ * - `rest`  — classic gmail.googleapis.com REST tools (`gmail_api_*`). Works with a
+ *             normal OAuth token; needs NO Workspace MCP preview enrollment. Default.
+ * - `mcp`   — only the preview `mcp_google_gmail_*` tools (requires preview enrollment
+ *             AND the `gmailmcp.googleapis.com` *MCP* API enabled in Cloud Console).
+ * - `auto`  — attach the preview MCP and keep REST tools available as a fallback.
+ *
+ * Gmail's official MCP endpoint (`gmailmcp.googleapis.com`) is an invite-only preview;
+ * for most projects it returns 403 "The caller does not have permission", so `rest`
+ * is the safe default and only preview-enrolled users should switch to `auto`/`mcp`.
+ */
+export type GoogleGmailTransport = "auto" | "rest" | "mcp";
+
+export function resolveGoogleGmailTransport(): GoogleGmailTransport {
+  const raw = effectiveHarnessEnvRaw("AGENT_GOOGLE_GMAIL_TRANSPORT")?.trim().toLowerCase();
+  if (raw === "mcp" || raw === "auto") return raw;
+  return "rest";
+}
+
+/** True when the preview Gmail MCP must NOT be attached (transport=rest). */
+export function gmailMcpSuppressed(): boolean {
+  return resolveGoogleGmailTransport() === "rest";
+}
+
+/** Identify a persisted/curated connection as the official Gmail MCP. */
+export function isGmailOfficialMcpConnection(opts: {
+  name?: string;
+  providerId?: string;
+  parentProvider?: string;
+  services?: string[];
+}): boolean {
+  if (opts.parentProvider && opts.parentProvider !== "google_workspace") return false;
+  return (
+    opts.name === "google_gmail" ||
+    opts.providerId === "gmail" ||
+    (opts.services ?? []).includes("gmail")
+  );
+}

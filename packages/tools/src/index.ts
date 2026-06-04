@@ -98,6 +98,7 @@ import { createDynamicToolsTools, loadDynamicTools } from "./dynamic_tools.js";
 import { createApiConnectionTools, restoreOpenApiConnections } from "./api_connect.js";
 import { createMcpAttachTools, restoreMcpConnections } from "./mcp_attach.js";
 import { createConnectorTools } from "./connect_provider.js";
+import { createGmailApiTools } from "./google_gmail_api.js";
 import { memoryPromoteTool } from "./memory_promote.js";
 import { memoryNeighborsTool } from "./memory_neighbors.js";
 import { consolidateChatTool } from "./consolidate_chat.js";
@@ -378,6 +379,7 @@ export async function registerAllTools(
   registry.register(connectorTools.connectProviderTool);
   registry.register(connectorTools.disconnectProviderTool);
   registry.register(connectorTools.listConnectorsTool);
+  for (const t of createGmailApiTools()) registry.register(t);
   // Re-register previously-attached connections so their generated tools are
   // live on the next ReAct turn. Best-effort — failures are logged via emitter.
   applyLazyRegistrationPolicy(registry, harness);

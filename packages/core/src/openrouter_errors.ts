@@ -2,14 +2,32 @@
  * Parse OpenRouter / upstream error bodies for provider identification.
  */
 
-function describeError(err: unknown): string {
+/** Max dynamic 429 ignores per harness session — prevents "all providers ignored" 404s. */
+export const MAX_DYNAMIC_PROVIDER_IGNORES = 6;
+
+export function errorMessage(err: unknown): string {
   if (err instanceof Error) return err.message;
   return String(err);
 }
 
+/** OpenRouter returns 404 when `provider.ignore` (and retries) exhaust every reseller. */
+export function isExhaustedProviderRoutingMessage(message: string): boolean {
+  const m = message.toLowerCase();
+  return (
+    /all\s+providers\s+(have\s+been\s+)?ignored/.test(m) ||
+    /providers?\s+have\s+been\s+ignored/.test(m) ||
+    /no\s+allowed\s+providers\s+are\s+available/.test(m) ||
+    /no\s+providers\s+available\s+for/.test(m)
+  );
+}
+
+export function isExhaustedProviderRoutingError(err: unknown): boolean {
+  return isExhaustedProviderRoutingMessage(errorMessage(err));
+}
+
 /** Normalize OpenRouter provider slug from error metadata (case preserved). */
 export function parseOpenRouterProviderSlug(err: unknown): string | null {
-  const msg = describeError(err);
+  const msg = errorMessage(err);
 
   const jsonName = msg.match(/provider_name["']?\s*[:=]\s*["']([^"']+)["']/i);
   if (jsonName?.[1]?.trim()) return jsonName[1].trim();

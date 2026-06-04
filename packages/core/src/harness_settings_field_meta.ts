@@ -1696,6 +1696,23 @@ const _META_RAW: Record<string, HarnessSettingsFieldMeta> = {
     description: "Harness environment toggle for Google Connect On Boot. See docs/configuration.md (harness).",
     valueKind: "string",
   },
+  "AGENT_GOOGLE_GMAIL_TRANSPORT": {
+    tabId: "harness",
+    subgroupId: "harness_misc",
+    label: "Gmail Transport",
+    description:
+      "How Gmail is reached. 'rest' = classic gmail.googleapis.com tools (gmail_api_*), no Workspace MCP preview needed (default, recommended unless enrolled in the preview). 'mcp' = preview mcp_google_gmail_* only (needs preview enrollment + gmailmcp.googleapis.com enabled). 'auto' = attach preview MCP with REST as fallback.",
+    valueKind: "enum",
+    enumValues: ["rest", "auto", "mcp"] as const,
+  },
+  "AGENT_GOOGLE_GMAIL_REST": {
+    tabId: "harness",
+    subgroupId: "harness_misc",
+    label: "Gmail REST Tools",
+    description:
+      "Register the classic-REST gmail_api_* tools (list labels, search threads, read message, create draft). Leave on so Gmail works without the MCP preview.",
+    valueKind: "boolean",
+  },
   "AGENT_PROCESS_HEALTH": {
     tabId: "advanced",
     subgroupId: "plugins",

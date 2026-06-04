@@ -6,6 +6,7 @@ import {
   buildReasoningBudgetInjection,
   buildOpenRouterReasoningParam,
   resolveReasoningStallNudgeThresholdChars,
+  evaluateReasoningStall,
   parseReasoningBudgetFromParsed,
   tightenReasoningBudgetForUserMessage,
 } from "./reasoning_profile.js";
@@ -76,6 +77,92 @@ test("fallbackReasoningBudget research is tool-first brief", () => {
   assert.equal(b.toolFirstBias, true);
   assert.equal(b.thinkDepth, "brief");
   assert.ok(b.reasoningWordBudget <= 200);
+});
+
+test("evaluateReasoningStall: below threshold returns none", () => {
+  const budget = fallbackReasoningBudget("coding", false); // toolFirstBias → roundCap 2
+  assert.equal(
+    evaluateReasoningStall(
+      { consecutiveReasoningOnlyRounds: 1, reasoningOnlyChars: 50 },
+      budget,
+      false
+    ),
+    "none"
+  );
+});
+
+test("evaluateReasoningStall: tool-first trips at 2 rounds then escalates to suppress", () => {
+  const budget = fallbackReasoningBudget("coding", false); // toolFirstBias → roundCap 2
+  // First trip → nudge (no prior nudge).
+  assert.equal(
+    evaluateReasoningStall(
+      { consecutiveReasoningOnlyRounds: 2, reasoningOnlyChars: 10 },
+      budget,
+      false
+    ),
+    "nudge"
+  );
+  // Still spiraling after a nudge fired → suppress.
+  assert.equal(
+    evaluateReasoningStall(
+      { consecutiveReasoningOnlyRounds: 3, reasoningOnlyChars: 10 },
+      budget,
+      true
+    ),
+    "suppress"
+  );
+});
+
+test("evaluateReasoningStall: open-ended turn gets more round slack (cap 3)", () => {
+  const budget = fallbackReasoningBudget("creative", false); // toolFirstBias false → roundCap 3
+  assert.equal(
+    evaluateReasoningStall(
+      { consecutiveReasoningOnlyRounds: 2, reasoningOnlyChars: 10 },
+      budget,
+      false
+    ),
+    "none"
+  );
+  assert.equal(
+    evaluateReasoningStall(
+      { consecutiveReasoningOnlyRounds: 3, reasoningOnlyChars: 10 },
+      budget,
+      false
+    ),
+    "nudge"
+  );
+});
+
+test("evaluateReasoningStall: char budget trips independently of round count", () => {
+  const budget = fallbackReasoningBudget("creative", false);
+  const charCap = resolveReasoningStallNudgeThresholdChars(budget);
+  assert.equal(
+    evaluateReasoningStall(
+      { consecutiveReasoningOnlyRounds: 1, reasoningOnlyChars: charCap + 1 },
+      budget,
+      false
+    ),
+    "nudge"
+  );
+});
+
+test("evaluateReasoningStall: null budget falls back to 2500 char cap / round cap 3", () => {
+  assert.equal(
+    evaluateReasoningStall(
+      { consecutiveReasoningOnlyRounds: 2, reasoningOnlyChars: 100 },
+      null,
+      false
+    ),
+    "none"
+  );
+  assert.equal(
+    evaluateReasoningStall(
+      { consecutiveReasoningOnlyRounds: 1, reasoningOnlyChars: 2500 },
+      null,
+      false
+    ),
+    "nudge"
+  );
 });
 
 test("tightenReasoningBudgetForUserMessage clamps Iran research", () => {

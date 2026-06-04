@@ -2,7 +2,7 @@
 
 All notable changes to [Liminal AI](https://github.com/traidy2222/liminal-ai) on the `main` branch.
 
-**Current stage:** **alpha** (`v0.0.17` tip of `main`, 2026-06-02). The workspace package may read `0.1.0`, but **beta**, **RC**, and a **v0.1.0 public preview** have not been declared as product releases yet.
+**Current stage:** **alpha** (`v0.0.18` tip of `main`, 2026-06-04). The workspace package may read `0.1.0`, but **beta**, **RC**, and a **v0.1.0 public preview** have not been declared as product releases yet.
 
 Format: **v0.0.x** entries keyed to the last GitHub push in each slice. Dates are real push dates.
 
@@ -17,9 +17,25 @@ After editing JSON: `npm run changelog:gen`, commit, push, then in [vireondynami
 
 ---
 
+## v0.0.18 — 2026-06-04 {#v0-0-18}
+
+**Current alpha.** Liminal Desktop (Windows), provider-routing recovery, reasoning-stall breaker, Gmail API tools.
+
+**Shipped**
+
+- **Provider routing recovery** — Dynamic `provider.ignore` list is capped and cleared when OpenRouter returns “all providers ignored” (404), so long ReAct runs do not stall mid-task after repeated upstream 429s
+- **Reasoning-stall breaker** — Consecutive reasoning-only rounds (`think`/`reason`/`plan`/…) trigger a hard nudge, then temporarily drop reasoning tools so the model must call an action tool or finish
+- **Liminal Desktop (Windows alpha)** — Flutter app (`apps/liminal_desktop`) talks to bundled `liminald` over `@liminal/protocol` WebSocket: multi-chat, Vireon sign-in, harness settings, compact tool cards, image attachments, GFM markdown + HTML embeds
+- **Sidecar** — `@liminal/sidecar` serves session bridge, `/media` for workspace images, and `send_message` attachments; `npm run desktop:build:windows` bundles Release + liminald
+- **Gmail** — Native `google_gmail_*` tools (read/search) with proper body decoding; Google MCP probe documents separate Gmail API enablement
+- **Rich message rendering** — Spec in `docs/concepts/rich-message-rendering.md`; desktop parity with web for alerts, code highlight, video embeds, streaming HTML fences
+- **Docs** — [Rich message rendering](../concepts/rich-message-rendering.md), [Managed inference](../guides/managed-inference.md), [Google Workspace](../guides/google-workspace.md)
+
+---
+
 ## v0.0.17 — 2026-06-02 {#v0-0-17}
 
-**Current alpha.** Team shared memory, Pro cloud sync APIs, NotesFacade in CE, and org-scoped control-plane storage.
+Team shared memory, Pro cloud sync APIs, NotesFacade in CE, and org-scoped control-plane storage.
 
 **Shipped**
 

@@ -1,0 +1,48 @@
+name: liminal_desktop
+description: "Liminal — the native desktop app for the Liminal agent harness."
+publish_to: "none"
+version: 0.1.0
+
+environment:
+  sdk: ">=3.4.0 <4.0.0"
+  flutter: ">=3.22.0"
+
+dependencies:
+  flutter:
+    sdk: flutter
+  web_socket_channel: ^3.0.0
+  path: ^1.9.0
+  provider: ^6.1.2
+  go_router: ^14.6.2
+  flutter_markdown: ^0.7.4+1
+  markdown: ^7.3.1
+  flutter_widget_from_html: ^0.15.2
+  fwfh_url_launcher: ^0.9.1
+  webview_flutter: ^4.10.0
+  webview_flutter_wkwebview: ^3.16.0
+  flutter_highlight: ^0.7.0
+  highlight: ^0.7.0
+  url_launcher: ^6.3.1
+  html: ^0.15.5
+  file_picker: ^8.1.6
+  mime: ^2.0.0
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^4.0.0
+
+flutter:
+  uses-material-design: true
+  assets:
+    - assets/fonts/
+  fonts:
+    - family: Inter
+      fonts:
+        - asset: assets/fonts/Inter-Regular.ttf
+    - family: JetBrains Mono
+      fonts:
+        - asset: assets/fonts/JetBrainsMono-Regular.ttf
+    - family: IBM Plex Mono
+      fonts:
+        - asset: assets/fonts/IBMPlexMono-Regular.ttf

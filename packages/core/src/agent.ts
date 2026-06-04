@@ -71,7 +71,10 @@ import {
   resolveProviderStrategy,
   sessionEpochBumpOn429Enabled,
 } from "./provider_config.js";
-import { parseOpenRouterProviderSlug } from "./openrouter_errors.js";
+import {
+  isExhaustedProviderRoutingError,
+  parseOpenRouterProviderSlug,
+} from "./openrouter_errors.js";
 import { ProviderRouteState } from "./provider_route_state.js";
 import {
   describeProviderError,
@@ -164,6 +167,7 @@ import {
 import {
   buildOpenRouterReasoningParam,
   buildReasoningBudgetInjection,
+  evaluateReasoningStall,
   formatReasoningBudgetTraceLine,
   resolveReasoningBudget,
   tightenReasoningBudgetForUserMessage,
@@ -530,7 +534,10 @@ function isRetryable(err: unknown): boolean {
     err.message.toLowerCase().includes("provider")
   )
     return true;
+  if (err instanceof OpenAI.APIError && err.status === 404 && isExhaustedProviderRoutingError(err))
+    return true;
   const msg = describeError(err).toLowerCase();
+  if (isExhaustedProviderRoutingError(err)) return true;
   if (/\b429\b|rate.?limit|too many requests|temporarily rate-limited|rate_limit_exceeded/.test(msg)) return true;
   if (/econnreset|socket hang up|etimedout|network|fetch failed|und_err_socket/.test(msg)) return true;
   return false;
@@ -949,6 +956,21 @@ const ORCHESTRATION_TOOL_NAMES = new Set([
 
 // ADAPTIVE_HINTS removed — unified into buildAdaptiveHint() with ERROR_TAXONOMY (#9)
 
+/**
+ * Pure-reasoning tools that produce no external side effect and no new evidence.
+ * A round whose dispatched batch contains ONLY these is "reasoning-only" — the
+ * model deliberated but did not act. Repeated reasoning-only rounds are the
+ * classic reason()-spiral stall (narrating "I'll call X next" without ever
+ * emitting X); see the reasoning-stall breaker in runReActLoop.
+ */
+const REASONING_TOOL_NAMES = new Set<string>([
+  "think",
+  "reason",
+  "plan",
+  "hypothesize",
+  "breakdown",
+]);
+
 export class AgentHarness {
   readonly emitter: AgentEmitter;
   registry: ToolRegistry;           // non-readonly so forkChild can scope it
@@ -1050,6 +1072,21 @@ export class AgentHarness {
   private toolCallStreak: { name: string; argsHash: string; failures: number } | null = null;
   private bannedToolCallShapesThisSend = new Set<string>();
   private loopBreakNudgeFiredThisSend = false;
+  /**
+   * Reasoning-stall breaker. The failure-gated {@link toolCallStreak} detector
+   * above cannot catch a reason()-only spiral because reasoning tools always
+   * succeed (and any success resets the streak). These track consecutive rounds
+   * whose dispatched batch was ONLY reasoning tools, plus the accumulated
+   * reasoning-arg chars across that spiral. When either crosses the budget-aware
+   * threshold (resolveReasoningStallNudgeThresholdChars / toolFirstBias) the
+   * harness escalates: first a hard "act now" nudge, then it suppresses the
+   * reasoning tools from the next round's tool list so the model must call a
+   * real tool or finalize. All reset the moment any action tool runs.
+   */
+  private consecutiveReasoningOnlyRounds = 0;
+  private reasoningOnlyCharsThisSpiral = 0;
+  private reasoningStallNudgeLevel = 0;
+  private suppressReasoningToolsThisSend = false;
   private proactiveCompressedThisSend = false;
   private criticConsumedThisSend = false;
   /** Timestamp of the last compression event in this send (for ACON failure analysis). */
@@ -2100,6 +2137,10 @@ export class AgentHarness {
     this.toolCallStreak = null;
     this.bannedToolCallShapesThisSend.clear();
     this.loopBreakNudgeFiredThisSend = false;
+    this.consecutiveReasoningOnlyRounds = 0;
+    this.reasoningOnlyCharsThisSpiral = 0;
+    this.reasoningStallNudgeLevel = 0;
+    this.suppressReasoningToolsThisSend = false;
     this.proactiveCompressedThisSend = false;
     this.criticConsumedThisSend = false;
     this.lastCompressionTimestampThisSend = 0;
@@ -4327,10 +4368,16 @@ export class AgentHarness {
         channel: "trace",
       });
     }
-    const tools =
+    let tools =
       this.sessionGreetingThisSend || this.personaBootstrapPromptThisSend
         ? []
         : this.registry.toOpenAIFormat(routingProfile.toolFilter ?? undefined);
+    // Reasoning-stall breaker: once a reason()-only spiral has been escalated,
+    // drop the reasoning tools from the tool list so the model must call a real
+    // tool or finalize. Cleared the moment any action tool runs (see below).
+    if (this.suppressReasoningToolsThisSend && tools.length > 0) {
+      tools = tools.filter((t) => !REASONING_TOOL_NAMES.has(t.function?.name ?? ""));
+    }
     const accumulator = new StreamAccumulator();
     // PASTE: speculative tool dispatch — start safe tool calls while stream is still running.
     const pasteEnabled = resolveHarnessEnvRaw("AGENT_PASTE", this.runtimePreferences) === "1";
@@ -5445,6 +5492,8 @@ export class AgentHarness {
         }
       }
 
+      this.updateReasoningStallState(toolCalls);
+
       await this.runLintSelfHealIfNeeded();
 
       await this.runReActLoop(round + 1);
@@ -5520,6 +5569,78 @@ export class AgentHarness {
       if (!this.sessionGreetingThisSend && !this.personaBootstrapPromptThisSend) {
         this.triggerAutoDreamConsolidationBackground();
       }
+    }
+  }
+
+  /**
+   * Reasoning-stall breaker. Invoked after each dispatched tool batch.
+   *
+   * The failure-gated {@link toolCallStreak} detector cannot catch a reason()-only
+   * spiral: reasoning tools always succeed, and any success resets that streak.
+   * Here we track consecutive rounds whose batch was ONLY reasoning tools, plus
+   * accumulated reasoning-arg chars. When either crosses the budget-aware
+   * threshold the harness escalates — first a hard "act now" nudge, then it
+   * suppresses the reasoning tools from subsequent rounds so the model must call
+   * a concrete tool or finalize. Any round that runs an action tool resets all
+   * of this and restores the reasoning tools.
+   */
+  private updateReasoningStallState(toolCalls: AccumulatedToolCall[]): void {
+    const reasoningOnly =
+      toolCalls.length > 0 &&
+      toolCalls.every((tc) => REASONING_TOOL_NAMES.has(tc.name));
+
+    if (!reasoningOnly) {
+      this.consecutiveReasoningOnlyRounds = 0;
+      this.reasoningOnlyCharsThisSpiral = 0;
+      this.reasoningStallNudgeLevel = 0;
+      this.suppressReasoningToolsThisSend = false;
+      return;
+    }
+
+    this.consecutiveReasoningOnlyRounds += 1;
+    for (const tc of toolCalls) {
+      this.reasoningOnlyCharsThisSpiral += (tc.argsJson ?? "").length;
+    }
+
+    const action = evaluateReasoningStall(
+      {
+        consecutiveReasoningOnlyRounds: this.consecutiveReasoningOnlyRounds,
+        reasoningOnlyChars: this.reasoningOnlyCharsThisSpiral,
+      },
+      this._turnReasoningBudget,
+      this.reasoningStallNudgeLevel > 0
+    );
+    if (action === "none") return;
+
+    this.reasoningStallNudgeLevel += 1;
+    const rounds = this.consecutiveReasoningOnlyRounds;
+
+    if (action === "nudge") {
+      this.context.appendMessage({
+        role: "user",
+        content:
+          `[REASONING STALL] You have used only reasoning tools (think/reason/plan) for ${rounds} consecutive rounds without acting. ` +
+          "Stop reasoning now. Either (a) emit the actual tool call you keep saying you will make, or (b) give your final answer with what you already know. " +
+          "Do not narrate another planned tool call — execute it.",
+      });
+      this.emitter.emit("recovery_action", {
+        strategy: "replan",
+        reason: `reasoning_stall:${rounds} reasoning-only rounds`,
+      });
+    } else {
+      // Still spiraling after the first nudge — remove the escape hatch so the
+      // next round cannot be reasoning-only.
+      this.suppressReasoningToolsThisSend = true;
+      this.context.appendMessage({
+        role: "user",
+        content:
+          `[REASONING STALL — HARD] ${rounds} reasoning-only rounds. The reasoning tools (think/reason/plan/hypothesize/breakdown) are now disabled for this turn. ` +
+          "You MUST either call a concrete action tool or write your final answer in plain text this round.",
+      });
+      this.emitter.emit("recovery_action", {
+        strategy: "escalate",
+        reason: `reasoning_stall_hard:${rounds} reasoning-only rounds — reasoning tools suppressed`,
+      });
     }
   }
 
@@ -5620,6 +5741,11 @@ export class AgentHarness {
         lastErr = err;
         const msg = describeError(err);
 
+        const exhaustedRouting = isExhaustedProviderRoutingError(err);
+        if (exhaustedRouting) {
+          this.providerRouteState.clearProviderIgnores();
+        }
+
         const rateLimited = isRateLimitError(err);
         const providerUnavailable = isProviderUnavailableError(err);
         const managedProxyRetried =
@@ -5650,9 +5776,9 @@ export class AgentHarness {
           rateLimited ? "rate_limited" : providerUnavailable ? "provider_unavailable" : "normal",
           getRetryAfterMsFromError(err)
         );
-        if (rateLimited || providerUnavailable) {
+        if (rateLimited || providerUnavailable || exhaustedRouting) {
           this.consecutiveProviderFailures += 1;
-          if (rateLimited) {
+          if (rateLimited && !exhaustedRouting) {
             const slug = parseOpenRouterProviderSlug(err);
             const strategy = resolveProviderStrategy();
             const bumpEpoch =

@@ -98,6 +98,13 @@ Web **Settings** writes to (2). See [Configuration basics](../start/configuratio
 | `AGENT_FINALIZE_JUDGE` | `0` | yes | no | harness | Harness environment toggle for Finalize Judge. See docs/configuration.md (harness). |
 | `AGENT_FINALIZE_RETRY_BUDGET` | `0` | yes | no | harness | Harness environment toggle for Finalize Retry Budget. See docs/configuration.md (harness). |
 | `AGENT_GOLDEN_EVAL` | `1` | yes | no | advanced | Harness environment toggle for Golden Eval. See docs/configuration.md (advanced). |
+| `AGENT_GOOGLE_CONNECT_ON_BOOT` | `0` | yes | no | harness | Harness environment toggle for Google Connect On Boot. See docs/configuration.md (harness). |
+| `AGENT_GOOGLE_GMAIL_REST` | `1` | yes | no | harness | Register the classic-REST gmail_api_* tools (list labels, search threads, read message, create draft). Leave on so Gmail |
+| `AGENT_GOOGLE_GMAIL_TRANSPORT` | `rest` | yes | no | harness | How Gmail is reached. 'rest' = classic gmail.googleapis.com tools (gmail_api_*), no Workspace MCP preview needed (defaul |
+| `AGENT_GOOGLE_OAUTH_CLIENT_ID` | `` | yes | no | harness | Harness environment toggle for Google Oauth Client Id. See docs/configuration.md (harness). |
+| `AGENT_GOOGLE_SIDECAR_CMD` | `uvx workspace-mcp` | yes | no | harness | Harness environment toggle for Google Sidecar Cmd. See docs/configuration.md (harness). |
+| `AGENT_GOOGLE_SIDECAR_ENABLE` | `1` | yes | no | harness | Harness environment toggle for Google Sidecar Enable. See docs/configuration.md (harness). |
+| `AGENT_GOOGLE_SIDECAR_PORT` | `8010` | yes | no | harness | Harness environment toggle for Google Sidecar Port. See docs/configuration.md (harness). |
 | `AGENT_HEARTBEAT` | `0` | yes | no | session_ui | Harness environment toggle for Heartbeat. See docs/configuration.md (session ui). |
 | `AGENT_HEARTBEAT_IDLE_MS` | `45000` | yes | no | session_ui | Harness environment toggle for Heartbeat Idle Ms. See docs/configuration.md (session ui). |
 | `AGENT_HEARTBEAT_MAX_TOKENS` | `512` | yes | no | session_ui | Harness environment toggle for Heartbeat Max Tokens. See docs/configuration.md (session ui). |
@@ -232,6 +239,7 @@ Web **Settings** writes to (2). See [Configuration basics](../start/configuratio
 | `AGENT_SPECULATIVE_READS` | `0` | yes | no | memory_vault | Harness environment toggle for Speculative Reads. See docs/configuration.md (memory vault). |
 | `AGENT_STREAM_CHUNK_TIMEOUT_MS` | `60000` | yes | no | harness | Harness environment toggle for Stream Chunk Timeout Ms. See docs/configuration.md (harness). |
 | `AGENT_STREAM_MAX_RETRIES` | `3` | yes | no | harness | Harness environment toggle for Stream Max Retries. See docs/configuration.md (harness). |
+| `AGENT_TEAM_AUDIT_LOG` | `1` | yes | no | harness | Harness environment toggle for Team Audit Log. See docs/configuration.md (harness). |
 | `AGENT_TEAM_BUS` | `0` | yes | no | harness | Harness environment toggle for Team Bus. See docs/configuration.md (harness). |
 | `AGENT_TEAM_EMBED_ON_RECALL` | `0` | yes | no | memory_vault | Harness environment toggle for Team Embed On Recall. See docs/configuration.md (memory vault). |
 | `AGENT_TEAM_MEMORY_SYNC` | `1` | yes | no | memory_vault | Harness environment toggle for Team Memory Sync. See docs/configuration.md (memory vault). |
@@ -267,11 +275,11 @@ Web **Settings** writes to (2). See [Configuration basics](../start/configuratio
 | `AGENT_VAULT_WRITE_BUDGET` | `8` | yes | no | memory_vault | Harness environment toggle for Vault Write Budget. See docs/configuration.md (memory vault). |
 | `AGENT_VIREON_SITE_URL` | `https://www.vireondynamics.com` | yes | no | harness | Harness environment toggle for Vireon Site Url. See docs/configuration.md (harness). |
 | `AGENT_VISION_BASE_URL` | `https://openrouter.ai/api/v1` | yes | yes | models_api | Harness environment toggle for Vision Base Url. See docs/configuration.md (models api). |
-| `AGENT_VISION_MAX_IMAGE_BYTES` | `4194304` | yes | yes | models_api | Harness environment toggle for Vision Max Image Bytes. See docs/configuration.md (models api). |
+| `AGENT_VISION_MAX_IMAGE_BYTES` | `4194304` | yes | no | models_api | Harness environment toggle for Vision Max Image Bytes. See docs/configuration.md (models api). |
 | `AGENT_VISION_MODEL` | `nvidia/nemotron-nano-12b-v2-vl:free` | yes | yes | models_api | Harness environment toggle for Vision Model. See docs/configuration.md (models api). |
 | `AGENT_VISION_RETRIES` | `2` | yes | no | models_api | Harness environment toggle for Vision Retries. See docs/configuration.md (models api). |
 | `AGENT_VISION_RETRY_BASE_MS` | `800` | yes | no | models_api | Harness environment toggle for Vision Retry Base Ms. See docs/configuration.md (models api). |
-| `AGENT_VISION_TIMEOUT_MS` | `45000` | yes | yes | models_api | Harness environment toggle for Vision Timeout Ms. See docs/configuration.md (models api). |
+| `AGENT_VISION_TIMEOUT_MS` | `45000` | yes | no | models_api | Harness environment toggle for Vision Timeout Ms. See docs/configuration.md (models api). |
 | `AGENT_WEB_FETCH_403_RETRY` | `1` | yes | no | web_research | Harness environment toggle for Web Fetch 403 Retry. See docs/configuration.md (web research). |
 | `AGENT_WEB_FETCH_ACCEPT_LANGUAGE` | `` | yes | no | web_research | Harness environment toggle for Web Fetch Accept Language. See docs/configuration.md (web research). |
 | `AGENT_WEB_FETCH_ALT_USER_AGENT` | `Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:136.0) Gecko/20100101 Firefox/136.0` | yes | no | web_research | Harness environment toggle for Web Fetch Alt User Agent. See docs/configuration.md (web research). |
@@ -307,6 +315,7 @@ Web **Settings** writes to (2). See [Configuration basics](../start/configuratio
 - `AGENT_API_KEY`
 - `AGENT_APPROVAL_TIMEOUT_MS`
 - `AGENT_CAPTCHA_KEY`
+- `AGENT_OAUTH_ENCRYPTION_KEY`
 - `AGENT_PROVIDER_CIRCUIT_COOLDOWN_MS`
 - `AGENT_PROVIDER_CIRCUIT_FAILURES`
 - `AGENT_RATE_LIMIT_MAX_RETRIES`
@@ -318,9 +327,7 @@ Web **Settings** writes to (2). See [Configuration basics](../start/configuratio
 - `AGENT_VAULT_AUTO_WRITE`
 - `AGENT_VISION_API_KEY`
 - `AGENT_VISION_BASE_URL`
-- `AGENT_VISION_MAX_IMAGE_BYTES`
 - `AGENT_VISION_MODEL`
-- `AGENT_VISION_TIMEOUT_MS`
 - `ANTHROPIC_API_KEY`
 - `OPENAI_API_KEY`
 - `OPENROUTER_API_KEY`
