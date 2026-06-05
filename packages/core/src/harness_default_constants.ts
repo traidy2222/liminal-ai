@@ -174,7 +174,7 @@ export const HARNESS_ENV_DEFAULTS: Readonly<Record<string, string>> = {
   AGENT_SHELL_MAX_TIMEOUT_MS: "3600000",
   /** Max when timeout_ms is omitted — stops accidental multi-minute one-liners. */
   AGENT_SHELL_IMPLICIT_MAX_MS: "180000",
-  AGENT_STREAM_CHUNK_TIMEOUT_MS: "60000",
+  AGENT_STREAM_CHUNK_TIMEOUT_MS: "120000",
   AGENT_STREAM_MAX_RETRIES: "3",
   AGENT_FAILURE_LOG: "1",
   AGENT_CRITIC: "0",
@@ -277,6 +277,7 @@ export const HARNESS_ENV_DEFAULTS: Readonly<Record<string, string>> = {
   AGENT_GOOGLE_SIDECAR_CMD: "uvx workspace-mcp",
   AGENT_GOOGLE_SIDECAR_PORT: "8010",
   AGENT_GOOGLE_CONNECT_ON_BOOT: "0",
+  AGENT_GOOGLE_GMAIL_SEND: "1",
   AGENT_PROCESS_HEALTH: "0",
   AGENT_LINT_ALLOWED_COMMANDS: "",
   // CAPTCHA solving (2captcha / CapSolver) — key stays in .env only

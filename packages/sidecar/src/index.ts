@@ -1,9 +1,8 @@
 #!/usr/bin/env node
-import { config } from "dotenv";
-import { existsSync } from "node:fs";
-import { dirname, join, resolve } from "node:path";
+import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
+  loadHarnessEnvFiles,
   loadRuntimePreferences,
   resolveProviderConfigWithInference,
   resolveWorkspaceRoot,
@@ -19,17 +18,14 @@ import { clearHandshake, handshakePath, mintToken, writeHandshake } from "./hand
  * port + token to `~/.liminal/sidecar.json` for the UI to discover.
  */
 
-// Load .env from the monorepo root then the workspace root (dotenv never overrides existing keys).
+// Load secrets before OAuth decrypt / provider resolution (desktop bundle often has no .env until copied).
 const __dirname = dirname(fileURLToPath(import.meta.url));
 /** Monorepo / desktop bundle root — set by the Flutter app when not using a standard packages/sidecar/dist layout. */
 const repoRoot =
   process.env["LIMINAL_REPO_ROOT"]?.trim() || join(__dirname, "../../../");
-const rootEnv = join(repoRoot, ".env");
-if (existsSync(rootEnv)) config({ path: rootEnv });
+loadHarnessEnvFiles({ repoRoot, cwd: process.cwd() });
 
 const workspaceRoot = resolveWorkspaceRoot();
-const wsEnv = join(workspaceRoot, ".env");
-if (existsSync(wsEnv) && resolve(wsEnv) !== resolve(rootEnv)) config({ path: wsEnv });
 
 async function main(): Promise<void> {
   const runtimePreferences = await loadRuntimePreferences(workspaceRoot);

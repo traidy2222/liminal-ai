@@ -78,7 +78,10 @@ The UI spawns `liminald` automatically. It resolves the sidecar via:
 2. Walking up from the `.exe` to the monorepo (`packages/sidecar/dist/index.js`)
 3. `LIMINAL_REPO_ROOT` / `LIMINALD_SCRIPT` env overrides
 
-You need **Node.js on PATH** and a root **`.env`** with `AGENT_API_KEY`.
+You need **Node.js on PATH** and secrets the sidecar can read:
+
+- **Dev build:** `npm run desktop:build:*` copies the monorepo `.env` into `liminald/repo/.env` when present.
+- **Otherwise:** copy your project `.env` to `liminald/repo/.env` next to the app, or create `~/.liminal/.env` with the same `AGENT_API_KEY` (and `AGENT_OAUTH_ENCRYPTION_KEY` if used) as when you ran `liminal connect google --attach`.
 
 ### Attach to an existing sidecar
 

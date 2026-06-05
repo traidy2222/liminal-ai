@@ -50,6 +50,14 @@ if (Test-Path $envExample) {
   Copy-Item $envExample (Join-Path $BundleRepo ".env.example") -Force
 }
 
+$envSrc = Join-Path $RepoRoot ".env"
+if (Test-Path $envSrc) {
+  Copy-Item $envSrc (Join-Path $BundleRepo ".env") -Force
+  Write-Host "==> Copied .env into bundle (OAuth decrypt + API key for desktop)"
+} else {
+  Write-Host "==> No .env in repo root - desktop OAuth needs liminald/repo/.env or ~/.liminal/.env"
+}
+
 $readme = @"
 Liminal Desktop — bundled harness runtime (do not edit unless you know what you are doing).
 

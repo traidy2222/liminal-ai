@@ -98,6 +98,7 @@ import { createDynamicToolsTools, loadDynamicTools } from "./dynamic_tools.js";
 import { createApiConnectionTools, restoreOpenApiConnections } from "./api_connect.js";
 import { createMcpAttachTools, restoreMcpConnections } from "./mcp_attach.js";
 import { createConnectorTools } from "./connect_provider.js";
+import { createGmailSendTools, gmailSendRestEnabled } from "./google_gmail_send.js";
 import { memoryPromoteTool } from "./memory_promote.js";
 import { memoryNeighborsTool } from "./memory_neighbors.js";
 import { consolidateChatTool } from "./consolidate_chat.js";
@@ -378,6 +379,9 @@ export async function registerAllTools(
   registry.register(connectorTools.connectProviderTool);
   registry.register(connectorTools.disconnectProviderTool);
   registry.register(connectorTools.listConnectorsTool);
+  if (gmailSendRestEnabled()) {
+    for (const t of createGmailSendTools()) registry.register(t);
+  }
   // Re-register previously-attached connections so their generated tools are
   // live on the next ReAct turn. Best-effort — failures are logged via emitter.
   applyLazyRegistrationPolicy(registry, harness);

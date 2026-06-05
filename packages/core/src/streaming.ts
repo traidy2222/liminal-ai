@@ -126,6 +126,22 @@ export class StreamAccumulator {
     }
   }
 
+  /**
+   * True when a not-yet-frozen tool call has accumulated a large argument
+   * payload — i.e. the model is mid-way through streaming one big single tool
+   * argument (a long email/HTML body, a large file write, etc.). These phases
+   * have legitimately long inter-chunk gaps on some providers, so callers raise
+   * the per-chunk idle timeout while one is in flight. Independent of the
+   * file-write stream sink (which only covers write_file/edit_file).
+   */
+  hasLargePendingToolArg(thresholdChars = 8000): boolean {
+    for (const [idx, tc] of this.toolCallMap.entries()) {
+      if (this.frozenIndices.has(idx)) continue;
+      if ((tc.argsJson?.length ?? 0) >= thresholdChars) return true;
+    }
+    return false;
+  }
+
   /** Stop accepting further argument deltas for this tool index (after eager dispatch). */
   freezeToolCallIndex(index: number): void {
     this.frozenIndices.add(index);

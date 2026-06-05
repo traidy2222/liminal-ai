@@ -36,7 +36,6 @@ export function loadEnvForCli() {
   const extra = process.env.LIMINAL_EXTRA_ENV?.trim();
   if (extra) add(extra);
 
-  // Optional sibling checkout (common on this machine: dreamthedream + vireondynamics-website)
   add(path.join(repoRoot, "..", "vireondynamics-website", ".env"));
   add(path.join(os.homedir(), "vireondynamics-website", ".env"));
   add(path.join(os.homedir(), ".liminal", ".env"));

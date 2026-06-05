@@ -1053,7 +1053,8 @@ const _META_RAW: Record<string, HarnessSettingsFieldMeta> = {
     tabId: "harness",
     subgroupId: "harness_misc",
     label: "Stream Chunk Timeout Ms",
-    description: "Harness environment toggle for Stream Chunk Timeout Ms. See docs/configuration.md (harness).",
+    description:
+      "Max idle time (ms) between SSE chunks before the harness aborts and retries the stream. Default 120000; auto-raised for high/xhigh reasoning and while a large tool argument (long email/HTML body, big file write) is streaming.",
     valueKind: "number",
   },
   "AGENT_STREAM_MAX_RETRIES": {
@@ -1695,6 +1696,14 @@ const _META_RAW: Record<string, HarnessSettingsFieldMeta> = {
     label: "Google Connect On Boot",
     description: "Harness environment toggle for Google Connect On Boot. See docs/configuration.md (harness).",
     valueKind: "string",
+  },
+  "AGENT_GOOGLE_GMAIL_SEND": {
+    tabId: "harness",
+    subgroupId: "harness_misc",
+    label: "Gmail REST Send",
+    description:
+      "Register gmail_send_message (classic users.messages.send). Official Gmail MCP has create_draft only; keep this on for immediate send. Uses the same OAuth token as MCP.",
+    valueKind: "boolean",
   },
   "AGENT_PROCESS_HEALTH": {
     tabId: "advanced",

@@ -786,6 +786,8 @@ export {
   revokeGoogleAccount,
   listGoogleOAuthAccounts,
 } from "./oauth_broker.js";
+export { loadHarnessEnvFiles } from "./load_harness_env.js";
+export { countOAuthAccountFiles, oauthDecryptHint } from "./oauth_diagnostics.js";
 export {
   GOOGLE_WORKSPACE_SERVICES,
   ALL_GOOGLE_SERVICE_IDS,

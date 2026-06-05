@@ -99,6 +99,7 @@ Web **Settings** writes to (2). See [Configuration basics](../start/configuratio
 | `AGENT_FINALIZE_RETRY_BUDGET` | `0` | yes | no | harness | Harness environment toggle for Finalize Retry Budget. See docs/configuration.md (harness). |
 | `AGENT_GOLDEN_EVAL` | `1` | yes | no | advanced | Harness environment toggle for Golden Eval. See docs/configuration.md (advanced). |
 | `AGENT_GOOGLE_CONNECT_ON_BOOT` | `0` | yes | no | harness | Harness environment toggle for Google Connect On Boot. See docs/configuration.md (harness). |
+| `AGENT_GOOGLE_GMAIL_SEND` | `1` | yes | no | harness | Register gmail_send_message (classic users.messages.send). Official Gmail MCP has create_draft only; keep this on for im |
 | `AGENT_GOOGLE_OAUTH_CLIENT_ID` | `` | yes | no | harness | Harness environment toggle for Google Oauth Client Id. See docs/configuration.md (harness). |
 | `AGENT_GOOGLE_SIDECAR_CMD` | `uvx workspace-mcp` | yes | no | harness | Harness environment toggle for Google Sidecar Cmd. See docs/configuration.md (harness). |
 | `AGENT_GOOGLE_SIDECAR_ENABLE` | `1` | yes | no | harness | Harness environment toggle for Google Sidecar Enable. See docs/configuration.md (harness). |
@@ -235,7 +236,7 @@ Web **Settings** writes to (2). See [Configuration basics](../start/configuratio
 | `AGENT_SPAWN_TOOL_INFER_MODEL` | `` | yes | no | harness | Harness environment toggle for Spawn Tool Infer Model. See docs/configuration.md (harness). |
 | `AGENT_SPAWN_TOOL_INFER_TIMEOUT_MS` | `8000` | yes | no | harness | Harness environment toggle for Spawn Tool Infer Timeout Ms. See docs/configuration.md (harness). |
 | `AGENT_SPECULATIVE_READS` | `0` | yes | no | memory_vault | Harness environment toggle for Speculative Reads. See docs/configuration.md (memory vault). |
-| `AGENT_STREAM_CHUNK_TIMEOUT_MS` | `60000` | yes | no | harness | Harness environment toggle for Stream Chunk Timeout Ms. See docs/configuration.md (harness). |
+| `AGENT_STREAM_CHUNK_TIMEOUT_MS` | `120000` | yes | no | harness | Max idle time (ms) between SSE chunks before the harness aborts and retries the stream. Default 120000; auto-raised for  |
 | `AGENT_STREAM_MAX_RETRIES` | `3` | yes | no | harness | Harness environment toggle for Stream Max Retries. See docs/configuration.md (harness). |
 | `AGENT_TEAM_AUDIT_LOG` | `1` | yes | no | harness | Harness environment toggle for Team Audit Log. See docs/configuration.md (harness). |
 | `AGENT_TEAM_BUS` | `0` | yes | no | harness | Harness environment toggle for Team Bus. See docs/configuration.md (harness). |
@@ -272,7 +273,7 @@ Web **Settings** writes to (2). See [Configuration basics](../start/configuratio
 | `AGENT_VAULT_REQUIRE_LINKS` | `0` | yes | no | memory_vault | Harness environment toggle for Vault Require Links. See docs/configuration.md (memory vault). |
 | `AGENT_VAULT_WRITE_BUDGET` | `8` | yes | no | memory_vault | Harness environment toggle for Vault Write Budget. See docs/configuration.md (memory vault). |
 | `AGENT_VIREON_SITE_URL` | `https://www.vireondynamics.com` | yes | no | harness | Harness environment toggle for Vireon Site Url. See docs/configuration.md (harness). |
-| `AGENT_VISION_BASE_URL` | `https://openrouter.ai/api/v1` | yes | no | models_api | Harness environment toggle for Vision Base Url. See docs/configuration.md (models api). |
+| `AGENT_VISION_BASE_URL` | `https://openrouter.ai/api/v1` | yes | yes | models_api | Harness environment toggle for Vision Base Url. See docs/configuration.md (models api). |
 | `AGENT_VISION_MAX_IMAGE_BYTES` | `4194304` | yes | no | models_api | Harness environment toggle for Vision Max Image Bytes. See docs/configuration.md (models api). |
 | `AGENT_VISION_MODEL` | `nvidia/nemotron-nano-12b-v2-vl:free` | yes | yes | models_api | Harness environment toggle for Vision Model. See docs/configuration.md (models api). |
 | `AGENT_VISION_RETRIES` | `2` | yes | no | models_api | Harness environment toggle for Vision Retries. See docs/configuration.md (models api). |
@@ -324,6 +325,7 @@ Web **Settings** writes to (2). See [Configuration basics](../start/configuratio
 - `AGENT_UI_VERBOSITY`
 - `AGENT_VAULT_AUTO_WRITE`
 - `AGENT_VISION_API_KEY`
+- `AGENT_VISION_BASE_URL`
 - `AGENT_VISION_MODEL`
 - `ANTHROPIC_API_KEY`
 - `OPENAI_API_KEY`

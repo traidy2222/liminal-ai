@@ -11,6 +11,8 @@ import {
   needsGoogleSidecar,
   formatGoogleScopeDiagnostics,
   missingGoogleScopes,
+  countOAuthAccountFiles,
+  oauthDecryptHint,
   GOOGLE_OFFICIAL_MCP_API_IDS,
   googleCloudMcpApiLibraryUrl,
   googleProjectIdFromClientId,
@@ -26,6 +28,7 @@ import {
   type McpConnectionRecord,
 } from "./api_connections_store.js";
 import { attachMcpConnection, unregisterMcpConnection } from "./mcp_attach.js";
+import { gmailSendRestEnabled } from "./google_gmail_send.js";
 import { ensureGoogleSidecarRunning, releaseGoogleSidecar, stopGoogleSidecar, getGoogleSidecarStatus } from "./google_sidecar.js";
 
 const PARENT_PROVIDER = "google_workspace";
@@ -262,11 +265,23 @@ export function createConnectorTools(registry: ToolRegistry, _emitter: AgentEmit
     cacheTtlMs: 10_000,
     handler: async (): Promise<ToolResult> => {
       const lines: string[] = ["## Connectors", ""];
+      lines.push(
+        `Gmail: hybrid — mcp_google_gmail_* (read/search/draft/labels) + gmail_send_message REST send: ${
+          gmailSendRestEnabled() ? "on" : "off (set AGENT_GOOGLE_GMAIL_SEND=1)"
+        }`
+      );
+      lines.push("");
 
       const googleAccounts = await listGoogleOAuthAccounts();
       lines.push("### Google OAuth");
       if (googleAccounts.length === 0) {
-        lines.push("- (not connected — use Settings → Integrations or `liminal connect google`)");
+        const onDisk = await countOAuthAccountFiles("google");
+        if (onDisk > 0) {
+          lines.push(`- (tokens on disk but unreadable in this process — ${onDisk} file(s))`);
+          lines.push(`  ${oauthDecryptHint("google")}`);
+        } else {
+          lines.push("- (not connected — run `liminal connect google --attach` from a shell with your project .env)");
+        }
       } else {
         for (const a of googleAccounts) {
           const exp = new Date(a.expiresAt).toISOString();
@@ -305,6 +320,14 @@ export function createConnectorTools(registry: ToolRegistry, _emitter: AgentEmit
           lines.push(
             `- ${c.name}: ${c.tools.length} tools, services=[${(c.services ?? []).join(",")}], readOnly=${!!c.readOnly}`
           );
+          if (c.name === "google_gmail" && c.readOnly) {
+            lines.push(
+              "  - readOnly hides MCP draft/label writes; immediate send still uses gmail_send_message (REST) when OAuth is readable."
+            );
+            lines.push(
+              "  - For MCP drafts too: connect_provider({ provider: \"google_workspace\", services: [\"gmail\"], mode: \"read_write\" })."
+            );
+          }
         }
       }
       lines.push("");

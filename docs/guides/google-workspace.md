@@ -86,23 +86,34 @@ list_connectors
 connect_provider({ provider: "google_workspace", services: ["drive", "sheets"], mode: "read_write" })
 ```
 
-## Gmail (official MCP)
+## Gmail (hybrid: MCP + REST send)
 
-After `liminal connect google --attach` with `gmail` in services, the harness registers **`mcp_google_gmail_*`** tools from Google's remote MCP (`gmailmcp.googleapis.com`). Tool names and parameters come from the server — use `list_connectors` and the tool schemas in-session.
+Google's official Gmail MCP (`gmailmcp.googleapis.com`) covers **search, read, drafts, and labels** — it does **not** expose immediate send. Liminal uses a **hybrid**:
+
+| Task | Tool |
+|------|------|
+| Search, read threads, list labels, draft for review | `mcp_google_gmail_*` (official MCP) |
+| **Send now** (user said send / deliver) | `gmail_send_message` (classic `users.messages.send` on `gmail.googleapis.com`) |
+
+After `liminal connect google --attach` with `gmail` in services, MCP tools register automatically. **`gmail_send_message`** is always registered when `AGENT_GOOGLE_GMAIL_SEND=1` (default) and uses the **same OAuth token** (`gmail.compose` scope).
 
 Requires:
 
-- **Gmail MCP API** enabled in Cloud Console
-- [Workspace Developer Preview](https://developers.google.com/workspace/preview) enrollment for your project
+- **Gmail API** + **Gmail MCP API** enabled in Cloud Console
+- [Workspace Developer Preview](https://developers.google.com/workspace/preview) enrollment for MCP
 - OAuth scopes `gmail.readonly` and `gmail.compose` (re-connect if `list_connectors` shows `gmail_mcp=no`)
 
-**Rich email.** When draft/send MCP tools expose HTML or attachment fields, the harness **Email composition** protocol (in the system prompt when Gmail MCP tools are active) guides plain vs styled HTML for occasions — inline images via tool-specific attachment args when supported.
+**Rich email.** `gmail_send_message` supports plain `body`, optional `body_html`, `inline_images`, and `attachments`. The harness **Email composition** protocol applies when Gmail MCP or send tools are active.
+
+Set `AGENT_GOOGLE_GMAIL_SEND=0` to disable REST send (draft-only via MCP).
 
 ## Architecture
 
 | Service | Backend |
 |---------|---------|
-| Drive, Gmail, Calendar, Chat, People | Official remote MCP |
+| Drive, Calendar, Chat, People | Official remote MCP |
+| Gmail read / draft / labels | Official Gmail MCP (`mcp_google_gmail_*`) |
+| Gmail immediate send | Classic REST (`gmail_send_message`) |
 | Docs, Sheets, Slides, Forms, Tasks, … | Local `workspace-mcp` sidecar on port 8010 |
 
 Connections persist under `~/.liminal/api_connections/`. OAuth tokens are encrypted under `~/.liminal/oauth/google/`.
@@ -115,6 +126,7 @@ Connections persist under `~/.liminal/api_connections/`. OAuth tokens are encryp
 | `AGENT_GOOGLE_SIDECAR_CMD` | `uvx workspace-mcp` | Sidecar launch command |
 | `AGENT_GOOGLE_SIDECAR_PORT` | `8010` | Local MCP port |
 | `AGENT_GOOGLE_CONNECT_ON_BOOT` | `0` | Auto-restore connections on harness start |
+| `AGENT_GOOGLE_GMAIL_SEND` | `1` | Register `gmail_send_message` (REST); MCP has no send tool |
 
 ## Safety
 

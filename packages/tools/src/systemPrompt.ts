@@ -329,13 +329,14 @@ When image understanding would improve accuracy (screenshots, UI mockups, charts
 
 const GOOGLE_WORKSPACE_PROTOCOL = `## Google Workspace (connectors)
 When the user mentions Google Drive, Docs, Sheets, Gmail, or Calendar:
-1. Call list_connectors first — if OAuth or MCP is missing, tell them to use Settings → Integrations or \`liminal connect google\`.
+1. Call list_connectors first — if OAuth or MCP is missing, tell them to use Settings → Integrations or \`liminal connect google --attach\`.
 2. Use connect_provider({ provider: "google_workspace", services: [...] }) to attach the right MCP tools.
-3. Prefer read tools first; writes are approval-gated — confirm file/sheet IDs in args.
-4. Large Doc/Sheet payloads: rely on distillation; offer remember/vault_write when the user wants persistence.`;
+3. **Gmail hybrid:** use \`mcp_google_gmail_*\` for search, read, drafts, and labels. Use \`gmail_send_message\` only when the user wants mail delivered immediately (official Gmail MCP has no send tool).
+4. Prefer read tools first; writes are approval-gated — confirm file/sheet IDs in args.
+5. Large Doc/Sheet payloads: rely on distillation; offer remember/vault_write when the user wants persistence.`;
 
-const EMAIL_COMPOSITION_PROTOCOL = `## Email composition (Gmail MCP)
-When \`mcp_google_gmail_*\` tools are available, use their draft/create/send tools for composition. Follow each tool's schema for plain text vs HTML and attachments. You decide the styling per email by inference — there are no fixed templates; design the HTML to fit the moment.
+const EMAIL_COMPOSITION_PROTOCOL = `## Email composition (Gmail)
+Use \`mcp_google_gmail_*\` for search/read/drafts/labels. For **send now**, use \`gmail_send_message\` (REST). For **review in Gmail first**, use \`mcp_google_gmail_create_draft\`. Both compose paths accept plain \`body\` and optional \`body_html\` with \`inline_images\` / \`attachments\` where the tool schema allows.
 
 Choose the register by reading occasion + relationship + intent:
 - PLAIN (\`body\` only) — the default. Replies in a thread, scheduling, quick questions/answers, business/transactional, forwards, anything where the user said "quick"/"short". Replies inherit the thread's register: do not drop a decorated card into a working thread.
@@ -352,7 +353,7 @@ EMAIL-SAFE HTML (clients are not browsers — Gmail/Outlook strip much of modern
 - Inline images: pass them in \`inline_images\` with a \`content_id\` and reference as <img src="cid:THAT_ID" width="…">. Use real images for photos/illustrations; CSS gradients, borders, emoji, and styled type are great for lightweight cards with no assets.
 - Decorate within the HTML; never put raw HTML tags in the plain \`body\`.
 
-Drafts vs send: use create_draft when the user wants to review in Gmail; use send_message only when they explicitly asked to send. Both are approval-gated — verify recipients before approving.`;
+Drafts vs send: \`mcp_google_gmail_create_draft\` when they want to review in Gmail; \`gmail_send_message\` only when they explicitly asked to send. Both are approval-gated — verify recipients before approving.`;
 
 const MARKETS_PROTOCOL = `## Markets pricing (free best-effort)
 For price/costing requests on equities/ETFs, FX, commodities, or crypto, prefer markets_quote over generic web_search.
@@ -612,7 +613,7 @@ export function buildProtocolDynamicSuffix(
   if (names.has("list_connectors") || names.has("connect_provider")) {
     parts.push(GOOGLE_WORKSPACE_PROTOCOL);
   }
-  if ([...names].some((n) => n.startsWith("mcp_google_gmail_"))) {
+  if ([...names].some((n) => n.startsWith("mcp_google_gmail_")) || names.has("gmail_send_message")) {
     parts.push(EMAIL_COMPOSITION_PROTOCOL);
   }
   if (names.has("breakout_start") || names.has("independence_status") || names.has("pattern_record")) {

@@ -20,6 +20,10 @@ import { ToolRegistry } from "./registry.js";
 import { ToolDispatcher } from "./dispatcher.js";
 import { SafetyJudge } from "./safety_judge.js";
 import { StreamAccumulator } from "./streaming.js";
+import {
+  isStreamTransportRetryable,
+  resolveStreamChunkTimeoutMs,
+} from "./stream_chunk_timeout.js";
 import { TaskOrchestrator } from "./orchestrator.js";
 import { buildWorldContextMessage } from "./world_context.js";
 import { gatherRepoMapLines } from "./repo_map.js";
@@ -540,6 +544,7 @@ function isRetryable(err: unknown): boolean {
   if (isExhaustedProviderRoutingError(err)) return true;
   if (/\b429\b|rate.?limit|too many requests|temporarily rate-limited|rate_limit_exceeded/.test(msg)) return true;
   if (/econnreset|socket hang up|etimedout|network|fetch failed|und_err_socket/.test(msg)) return true;
+  if (isStreamTransportRetryable(err)) return true;
   return false;
 }
 
@@ -4383,13 +4388,6 @@ export class AgentHarness {
     const pasteEnabled = resolveHarnessEnvRaw("AGENT_PASTE", this.runtimePreferences) === "1";
     const speculativePromises = new Map<string, Promise<ToolResult>>();
 
-    const chunkTimeoutMs = Math.max(
-      10_000,
-      parseInt(
-        resolveHarnessEnvRaw("AGENT_STREAM_CHUNK_TIMEOUT_MS", this.runtimePreferences) ?? "60000",
-        10
-      ) || 60_000
-    );
     const maxStreamRetries = Math.max(
       0,
       parseInt(resolveHarnessEnvRaw("AGENT_STREAM_MAX_RETRIES", this.runtimePreferences) ?? "3", 10) || 3
@@ -4408,14 +4406,17 @@ export class AgentHarness {
     let finishReason: string | null = null;
     let streamAttempt = 0;
 
+    const streamChunkTimeoutMs = () =>
+      resolveStreamChunkTimeoutMs({
+        baseURL: this.config.baseURL,
+        reasoningEffort: this._turnReasoningBudget?.reasoningEffort ?? null,
+        fileWriteSinkActive: this.fileWriteStreamSink?.hasActiveIngest() ?? false,
+        largeToolArgInFlight: accumulator.hasLargePendingToolArg(),
+        runtimePreferences: this.runtimePreferences,
+      });
+
     streamLoop: while (true) {
       try {
-        const streamChunkTimeoutMs = () => {
-          if (this.fileWriteStreamSink?.hasActiveIngest()) {
-            return Math.max(chunkTimeoutMs * 4, 180_000);
-          }
-          return chunkTimeoutMs;
-        };
         for await (const chunk of withChunkTimeout(stream, streamChunkTimeoutMs)) {
           // Check abort between chunks
           if (this.abortSignal?.aborted) return;
@@ -4530,8 +4531,9 @@ export class AgentHarness {
         speculativePromises.clear(); // discard PASTE results from failed stream attempt
         finishReason = null;
 
+        const idleSec = Math.round(streamChunkTimeoutMs() / 1000);
         const retryLabel = isChunkTimeout
-          ? `stream stalled (${Math.round(chunkTimeoutMs / 1000)}s without data)`
+          ? `stream stalled (${idleSec}s without data)`
           : "stream connection reset";
 
         if (hadPartialContent && !this.isUiQuiet()) {
@@ -4563,6 +4565,14 @@ export class AgentHarness {
         });
 
         await sleep(Math.min(2000 * streamAttempt, 10_000));
+        // Abort the stale stream's underlying request before opening a new one so
+        // the half-open connection is released (it can otherwise linger and add
+        // provider-side back-pressure that contributes to repeat stalls).
+        try {
+          streamAbort.abort();
+        } catch {
+          /* already settled */
+        }
         streamAbort = new AbortController();
         stream = await this.streamWithRetry(
           messages,

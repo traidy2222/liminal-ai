@@ -41,6 +41,12 @@ done
 
 [[ -f "$REPO_ROOT/LICENSE" ]] && cp "$REPO_ROOT/LICENSE" "$BUNDLE_REPO/LICENSE"
 [[ -f "$REPO_ROOT/.env.example" ]] && cp "$REPO_ROOT/.env.example" "$BUNDLE_REPO/.env.example"
+if [[ -f "$REPO_ROOT/.env" ]]; then
+  cp "$REPO_ROOT/.env" "$BUNDLE_REPO/.env"
+  echo "==> Copied .env into bundle (OAuth decrypt + API key for desktop)"
+else
+  echo "==> No $REPO_ROOT/.env — desktop OAuth needs liminald/repo/.env or ~/.liminal/.env"
+fi
 
 cat >"$BUNDLE_REPO/README.txt" <<'EOF'
 Liminal Desktop — bundled harness runtime (do not edit unless you know what you are doing).

@@ -138,7 +138,7 @@ export const TOOL_FAMILIES: Record<string, { description: string; tools: readonl
     description:
       "Curated provider integrations: Google Workspace (Drive, Gmail, Calendar, Docs, Sheets, …) via connect_provider. " +
       "Requires OAuth (Settings → Integrations or `liminal connect google`).",
-    tools: ["connect_provider", "disconnect_provider", "list_connectors"],
+    tools: ["connect_provider", "disconnect_provider", "list_connectors", "gmail_send_message"],
   },
   external_api: {
     description:
