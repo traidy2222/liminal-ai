@@ -1,7 +1,30 @@
 {
   "stage": "alpha",
-  "currentVersion": "0.0.19",
+  "currentVersion": "0.0.20",
   "releases": [
+    {
+      "version": "0.0.20",
+      "date": "2026-06-06",
+      "tagline": "Vault knowledge graph, desktop provider presets, managed-inference BYOK fallback.",
+      "summary": "Entity dossier tools (vault_ingest_entities, vault_recall, vault_lint), R-VAULT-ENTITIES protocol guidance, desktop Settings provider presets, and automatic OpenRouter BYOK fallback when managed credits are exhausted.",
+      "bullets": [
+        "**Vault knowledge graph** — `vault_ingest_entities` decomposes research into per-entity dossiers (Identity / Current / History / Relationships); `vault_ingest` auto-wikilinks; `vault_recall` GraphRAG neighborhood retrieval; `vault_lint` orphan repair; `AGENT_VAULT_ENTITY_EXTRACT` on by default for research auto-write",
+        "**R-VAULT-ENTITIES** — Protocol cookbook for one canonical name per dossier, parallel `vault_write` batching, event+cast workflows; kind tags (`person`, `org`, …) on ingested entities",
+        "**Managed inference fallback** — On HTTP 402 (credits exhausted), switch to OpenRouter BYOK on free `openrouter/owl-alpha` (`AGENT_MANAGED_FREE_FALLBACK`); preempt when wallet is already empty; honor explicit OpenRouter `baseURL` for BYOK presets",
+        "**Desktop provider** — Settings provider-preset dropdown (Owl Alpha Stealth single-model, DeepSeek, etc.); `save_provider` allows model/baseURL-only saves; API key hydration from bundled `liminald/repo/.env` (`provider_api_key`)",
+        "**Web Settings** — Provider presets sourced from `@liminal/core`; inference usage banner hints when managed credits are exhausted"
+      ],
+      "docs": [
+        {
+          "label": "Memory and vault",
+          "href": "../concepts/memory-and-vault.md"
+        },
+        {
+          "label": "Managed inference",
+          "href": "../guides/managed-inference.md"
+        }
+      ]
+    },
     {
       "version": "0.0.19",
       "date": "2026-06-05",

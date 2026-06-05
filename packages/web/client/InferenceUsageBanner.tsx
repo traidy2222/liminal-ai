@@ -150,7 +150,12 @@ export function InferenceUsageBanner({
       )}
       {exhausted && managedRoute && (
         <span style={{ display: "block", marginTop: 4, opacity: 0.9 }}>
-          Or switch Settings → inference → <strong>byok</strong> to use your own API key.
+          With <code style={{ fontSize: 11 }}>AGENT_API_KEY</code> set, the harness auto-falls back to free{" "}
+          <strong>owl-alpha</strong> on OpenRouter. Or switch Settings → inference → <strong>byok</strong>, or{" "}
+          <a href={accountUrl} target="_blank" rel="noreferrer" style={{ color: "#7ec8ff" }}>
+            add credits
+          </a>
+          .
         </span>
       )}
     </div>

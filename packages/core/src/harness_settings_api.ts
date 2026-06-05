@@ -32,7 +32,7 @@ export interface HarnessSettingsApiField {
 const TAB_ORDER: HarnessSettingsTabId[] = HARNESS_SETTINGS_TABS.map((t) => t.id);
 
 function effectiveDisplayFor(valueKind: HarnessSettingsValueKind, raw: string): string {
-  const t = raw.trim();
+  const t = (raw ?? "").trim();
   if (valueKind === "boolean") {
     if (t === "1" || t.toLowerCase() === "on" || t.toLowerCase() === "yes") return "On";
     if (t === "0" || t.toLowerCase() === "off" || t.toLowerCase() === "no") return "Off";
@@ -54,8 +54,8 @@ export function buildHarnessSettingsApiFields(prefs: RuntimePreferences | null):
     const hasProductDefault = pdRaw !== undefined;
     const productDefault = hasProductDefault ? pdRaw! : null;
     const val =
-      res.value !== undefined && res.value !== ""
-        ? res.value
+      res.value != null && res.value !== ""
+        ? String(res.value)
         : hasProductDefault
           ? pdRaw!
           : "";

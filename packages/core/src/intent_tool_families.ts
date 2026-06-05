@@ -7,7 +7,12 @@ import { mapContractToToolFamilies } from "./contract_tool_mapper.js";
 const INTENT_BASE_FAMILIES: Partial<Record<TurnIntentClass, string[]>> = {
   coding: ["shell", "git", "code_intel"],
   execution: ["shell", "git", "code_intel"],
-  research: ["web"],
+  // Knowledge & research turns are where the interlinked vault brain pays off —
+  // pre-seed it so the model can read/search/write+link notes without an
+  // activate_tool_family round-trip (the #1 reason the vault sat unused).
+  knowledge: ["vault", "memory_advanced"],
+  research: ["web", "vault", "memory_advanced"],
+  introspection: ["vault", "memory_advanced"],
   creative: ["document"],
 };
 

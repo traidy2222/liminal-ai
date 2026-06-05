@@ -143,6 +143,10 @@ import {
   vaultGraphTool,
   vaultDeleteTool,
 } from "./vault_tools.js";
+import { vaultIngestTool } from "./vault_ingest.js";
+import { vaultIngestEntitiesTool } from "./vault_ingest_entities.js";
+import { vaultRecallTool } from "./vault_recall.js";
+import { vaultLintTool } from "./vault_lint.js";
 
 /**
  * Register all tools onto a registry.
@@ -250,6 +254,10 @@ export async function registerAllTools(
   registry.register(vaultLinksTool);
   registry.register(vaultGraphTool);
   registry.register(vaultDeleteTool);
+  registry.register(vaultIngestTool);
+  registry.register(vaultIngestEntitiesTool);
+  registry.register(vaultRecallTool);
+  registry.register(vaultLintTool);
   // Session agenda + recurring task scheduler
   registry.register(agendaSetTool);
   registry.register(agendaGetTool);

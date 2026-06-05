@@ -76,6 +76,34 @@ class _SettingsScreenState extends State<SettingsScreen>
     super.dispose();
   }
 
+  Future<void> _applyProviderPreset(String presetId) async {
+    if (presetId == 'custom') return;
+    setState(() {
+      _saving = true;
+      _error = null;
+    });
+    final ok = await AppScope.of(context).applyProviderPreset(presetId);
+    if (!mounted) return;
+    final snap = AppScope.of(context).harnessSettings;
+    final cfg = AppScope.of(context).config;
+    if (ok) {
+      if (cfg != null) {
+        _model.text = cfg.providerModel;
+        _baseUrl.text = cfg.providerBaseUrl;
+      } else if (snap != null) {
+        _model.text = snap.provider.model;
+        _baseUrl.text = snap.provider.baseURL;
+      }
+      _syncFieldControllers();
+    }
+    setState(() {
+      _saving = false;
+      if (!ok) {
+        _error = AppScope.of(context).setupError ?? 'Failed to apply provider preset';
+      }
+    });
+  }
+
   Future<void> _saveProvider() async {
     setState(() {
       _saving = true;
@@ -185,8 +213,11 @@ class _SettingsScreenState extends State<SettingsScreen>
                           model: _model,
                           baseUrl: _baseUrl,
                           cfg: cfg,
+                          provider: snap?.provider,
+                          presets: snap?.providerPresets ?? const [],
                           saving: _saving,
                           onSave: _saveProvider,
+                          onPresetApply: _applyProviderPreset,
                         ),
                       ),
                     ),
@@ -387,19 +418,39 @@ class _ProviderForm extends StatelessWidget {
     required this.model,
     required this.baseUrl,
     required this.cfg,
+    required this.presets,
     required this.saving,
     required this.onSave,
+    required this.onPresetApply,
+    this.provider,
   });
 
   final TextEditingController apiKey;
   final TextEditingController model;
   final TextEditingController baseUrl;
   final AppConfig? cfg;
+  final HarnessSettingsProvider? provider;
+  final List<ProviderPreset> presets;
   final bool saving;
   final VoidCallback onSave;
+  final Future<void> Function(String presetId) onPresetApply;
 
   @override
   Widget build(BuildContext context) {
+    final lim = LiminalTheme.of(context);
+    final theme = Theme.of(context);
+    final presetLocked = provider?.presetLockedByEnv ?? false;
+    final resolvedPresetId = presets.isEmpty
+        ? 'custom'
+        : ProviderPreset.resolveSelection(presets, model.text, baseUrl.text);
+    String? presetHint;
+    for (final p in presets) {
+      if (p.id == resolvedPresetId) {
+        presetHint = p.hint;
+        break;
+      }
+    }
+
     return LayoutBuilder(
       builder: (context, constraints) {
         final twoCol = constraints.maxWidth >= LiminalBreakpoints.medium;
@@ -437,6 +488,77 @@ class _ProviderForm extends StatelessWidget {
               hint: 'Leave blank to keep current',
               obscure: true,
             ),
+            if (presets.isNotEmpty) ...[
+              Text(
+                'Preset',
+                style: theme.textTheme.titleSmall,
+              ),
+              const SizedBox(height: LiminalSpacing.xs),
+              DropdownButtonFormField<String>(
+                value: presets.any((p) => p.id == resolvedPresetId)
+                    ? resolvedPresetId
+                    : 'custom',
+                decoration: InputDecoration(
+                  isDense: true,
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(4),
+                    borderSide: BorderSide(color: lim.border),
+                  ),
+                  enabledBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(4),
+                    borderSide: BorderSide(color: lim.border),
+                  ),
+                ),
+                dropdownColor: lim.panel,
+                style: theme.textTheme.bodyMedium?.copyWith(color: lim.text),
+                items: [
+                  for (final p in presets)
+                    DropdownMenuItem(
+                      value: p.id,
+                      child: Text(p.label, overflow: TextOverflow.ellipsis),
+                    ),
+                ],
+                onChanged: (presetLocked || saving)
+                    ? null
+                    : (id) {
+                        if (id == null || id == 'custom') return;
+                        onPresetApply(id);
+                      },
+              ),
+              if (presetLocked)
+                Padding(
+                  padding: const EdgeInsets.only(top: LiminalSpacing.xs),
+                  child: Text(
+                    'Presets disabled — model or base URL is locked by process env (.env).',
+                    style: theme.textTheme.bodySmall?.copyWith(color: lim.warn),
+                  ),
+                )
+              else
+                Padding(
+                  padding: const EdgeInsets.only(top: LiminalSpacing.xs),
+                  child: Text(
+                    'Sets main model, base URL, fast model, and provider routing. '
+                    'Saved to runtime prefs immediately.',
+                    style: theme.textTheme.bodySmall?.copyWith(color: lim.textMuted),
+                  ),
+                ),
+              if (presetHint != null && presetHint.isNotEmpty)
+                Padding(
+                  padding: const EdgeInsets.only(
+                    top: LiminalSpacing.xs,
+                    bottom: LiminalSpacing.md,
+                  ),
+                  child: Text(
+                    presetHint,
+                    style: theme.textTheme.bodySmall?.copyWith(
+                      color: lim.textMuted,
+                      height: 1.45,
+                    ),
+                  ),
+                )
+              else
+                const SizedBox(height: LiminalSpacing.md),
+            ],
             if (twoCol)
               Row(
                 crossAxisAlignment: CrossAxisAlignment.start,

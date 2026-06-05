@@ -157,6 +157,10 @@ export const TOOL_FAMILIES: Record<string, { description: string; tools: readonl
       "vault_links",
       "vault_graph",
       "vault_delete",
+      "vault_ingest",
+      "vault_ingest_entities",
+      "vault_recall",
+      "vault_lint",
     ],
   },
   document: {

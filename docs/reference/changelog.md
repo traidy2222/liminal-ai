@@ -2,7 +2,7 @@
 
 All notable changes to [Liminal AI](https://github.com/traidy2222/liminal-ai) on the `main` branch.
 
-**Current stage:** **alpha** (`v0.0.19` tip of `main`, 2026-06-05). The workspace package may read `0.1.0`, but **beta**, **RC**, and a **v0.1.0 public preview** have not been declared as product releases yet.
+**Current stage:** **alpha** (`v0.0.20` tip of `main`, 2026-06-06). The workspace package may read `0.1.0`, but **beta**, **RC**, and a **v0.1.0 public preview** have not been declared as product releases yet.
 
 Format: **v0.0.x** entries keyed to the last GitHub push in each slice. Dates are real push dates.
 
@@ -17,9 +17,24 @@ After editing JSON: `npm run changelog:gen`, commit, push, then in [vireondynami
 
 ---
 
+## v0.0.20 — 2026-06-06 {#v0-0-20}
+
+**Current alpha.** Vault knowledge graph, desktop provider presets, managed-inference BYOK fallback.
+
+**Shipped**
+
+- **Vault knowledge graph** — `vault_ingest_entities` decomposes research into per-entity dossiers (Identity / Current / History / Relationships); `vault_ingest` auto-wikilinks; `vault_recall` GraphRAG neighborhood retrieval; `vault_lint` orphan repair; `AGENT_VAULT_ENTITY_EXTRACT` on by default for research auto-write
+- **R-VAULT-ENTITIES** — Protocol cookbook for one canonical name per dossier, parallel `vault_write` batching, event+cast workflows; kind tags (`person`, `org`, …) on ingested entities
+- **Managed inference fallback** — On HTTP 402 (credits exhausted), switch to OpenRouter BYOK on free `openrouter/owl-alpha` (`AGENT_MANAGED_FREE_FALLBACK`); preempt when wallet is already empty; honor explicit OpenRouter `baseURL` for BYOK presets
+- **Desktop provider** — Settings provider-preset dropdown (Owl Alpha Stealth single-model, DeepSeek, etc.); `save_provider` allows model/baseURL-only saves; API key hydration from bundled `liminald/repo/.env` (`provider_api_key`)
+- **Web Settings** — Provider presets sourced from `@liminal/core`; inference usage banner hints when managed credits are exhausted
+- **Docs** — [Memory and vault](../concepts/memory-and-vault.md), [Managed inference](../guides/managed-inference.md)
+
+---
+
 ## v0.0.19 — 2026-06-05 {#v0-0-19}
 
-**Current alpha.** Desktop for macOS and Linux, GitHub Release downloads, install-page links.
+Desktop for macOS and Linux, GitHub Release downloads, install-page links.
 
 **Shipped**
 

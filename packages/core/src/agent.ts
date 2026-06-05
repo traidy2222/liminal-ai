@@ -82,9 +82,24 @@ import {
 import { ProviderRouteState } from "./provider_route_state.js";
 import {
   describeProviderError,
+  fetchInferenceUsageStatus,
+  hasLocalProviderApiKey,
+  inferenceAccountUrl,
+  isInferenceBudgetExceededError,
+  isManagedInferenceAuthError,
   resolveProviderConfigWithInference,
 } from "./inference_provider.js";
-import { ensureManagedInferenceSession, isManagedInferenceBaseUrl } from "./inference_session.js";
+import { ensureLocalProviderApiKeyInProcess } from "./provider_api_key.js";
+import {
+  buildManagedFreeFallbackHarnessEnv,
+  managedFreeFallbackEnabled,
+  resolveManagedFreeFallbackMainModel,
+} from "./managed_free_fallback.js";
+import {
+  clearManagedInferenceSessionCache,
+  ensureManagedInferenceSession,
+  isManagedInferenceBaseUrl,
+} from "./inference_session.js";
 import {
   managedUpstreamBusyMessage,
   vireonProxyAlreadyRetriedUpstream,
@@ -622,6 +637,18 @@ function isRetryForeverEnabled(): boolean {
   return effectiveHarnessEnvRaw("AGENT_RETRY_FOREVER") === "1";
 }
 
+/** Bounded local retries before surfacing the managed-inference busy message. */
+function resolveManagedBusyMaxRetries(prefs: RuntimePreferences | null | undefined): number {
+  const raw = resolveHarnessEnvRaw("AGENT_MANAGED_BUSY_MAX_RETRIES", prefs ?? null) ?? "4";
+  const n = parseInt(raw, 10);
+  return Number.isFinite(n) ? Math.max(0, Math.min(12, n)) : 4;
+}
+
+/** Whether to fall back to a local BYOK key when managed inference stays busy. */
+function managedByokFallbackEnabled(prefs: RuntimePreferences | null | undefined): boolean {
+  return resolveHarnessEnvRaw("AGENT_MANAGED_BYOK_FALLBACK", prefs ?? null) === "1";
+}
+
 /** Heuristic: assistant answer likely cites repo facts worth double-checking. */
 function isEvidenceToolName(name: string): boolean {
   return (
@@ -996,6 +1023,9 @@ export class AgentHarness {
   private providerCircuitOpenUntilMs = 0;
   private readonly providerRouteState = new ProviderRouteState();
   private consecutiveProviderFailures = 0;
+  /** Set once we have swapped from managed inference to a local BYOK key after a
+   *  sustained busy signal — prevents repeated re-resolution within the session. */
+  private managedByokFallbackActive = false;
   /** Human approval TTL for destructive requiresApproval tools (dispatcher). */
   private readonly approvalTimeoutMs: number;
   private running = false;
@@ -1647,12 +1677,118 @@ export class AgentHarness {
   }
 
   private rebuildClient(): void {
+    const hydrated = ensureLocalProviderApiKeyInProcess();
+    if (!this.config.openRouterApiKey?.trim() && hydrated) {
+      this.config.openRouterApiKey = hydrated;
+    }
+    const apiKey = this.config.openRouterApiKey?.trim();
+    if (!apiKey && !isManagedInferenceBaseUrl(this.config.baseURL ?? "")) {
+      throw new Error(
+        "Provider API key missing — set AGENT_API_KEY in .env or save your key in Settings."
+      );
+    }
     this.client = new OpenAI({
-      apiKey: this.config.openRouterApiKey,
+      apiKey: apiKey ?? "",
       baseURL: this.config.baseURL,
       maxRetries: 0,
       defaultHeaders: buildOpenRouterAttributionHeaders(),
     });
+  }
+
+  /** Switch to free BYOK before the first completion when the wallet is already empty. */
+  private async maybePreemptManagedCreditExhaustion(): Promise<void> {
+    if (this.managedByokFallbackActive) return;
+    if (!isManagedInferenceBaseUrl(this.config.baseURL)) return;
+    if (!managedFreeFallbackEnabled(this.runtimePreferences)) return;
+    if (!hasLocalProviderApiKey()) return;
+    try {
+      const status = await fetchInferenceUsageStatus(this.runtimePreferences);
+      if (status?.remainingUsd != null && status.remainingUsd <= 0) {
+        await this.tryActivateManagedOpenRouterFallback("budget_exceeded");
+      }
+    } catch {
+      /* non-fatal — 402 handler still applies mid-turn */
+    }
+  }
+
+  /**
+   * Leave the Vireon managed-inference proxy for direct OpenRouter BYOK.
+   * - `budget_exceeded`: optional free model pack (owl-alpha default).
+   * - `upstream_busy`: same model on BYOK when AGENT_MANAGED_BYOK_FALLBACK=1.
+   * Sticky for the rest of the session.
+   */
+  private async tryActivateManagedOpenRouterFallback(
+    reason: "budget_exceeded" | "upstream_busy"
+  ): Promise<boolean> {
+    if (this.managedByokFallbackActive) return true;
+    if (!isManagedInferenceBaseUrl(this.config.baseURL)) return false;
+
+    const useFreePack =
+      reason === "budget_exceeded" && managedFreeFallbackEnabled(this.runtimePreferences);
+    if (reason === "budget_exceeded") {
+      if (!useFreePack && !managedByokFallbackEnabled(this.runtimePreferences)) return false;
+    } else if (!managedByokFallbackEnabled(this.runtimePreferences)) {
+      return false;
+    }
+
+    if (!hasLocalProviderApiKey()) {
+      if (!this.isUiQuiet() && reason === "budget_exceeded") {
+        const model = resolveManagedFreeFallbackMainModel(this.runtimePreferences);
+        this.emitter.emit("text", {
+          delta:
+            `\n⚠ Managed inference credits exhausted. Add credits: ${inferenceAccountUrl()} ` +
+            `— or set AGENT_API_KEY in .env to continue on free model \`${model}\` via OpenRouter BYOK.\n`,
+          channel: "user",
+        });
+      }
+      return false;
+    }
+
+    try {
+      const modelOverride = useFreePack
+        ? resolveManagedFreeFallbackMainModel(this.runtimePreferences)
+        : this.config.model;
+      const byok = resolveProviderConfig({ model: modelOverride });
+      if (!byok.apiKey?.trim()) return false;
+
+      clearManagedInferenceSessionCache();
+      const envPatch = useFreePack
+        ? buildManagedFreeFallbackHarnessEnv(this.runtimePreferences)
+        : {};
+      await this.patchRuntimePreferences(
+        {
+          harness: {
+            env: {
+              ...envPatch,
+              AGENT_INFERENCE_MODE: "byok",
+              AGENT_INFERENCE_PREFER_MANAGED: "0",
+            },
+          },
+          provider: {
+            inferenceMode: "byok",
+            model: byok.model,
+            baseURL: byok.baseURL,
+          },
+        },
+        { persist: true }
+      );
+
+      this.config.openRouterApiKey = byok.apiKey;
+      this.config.baseURL = byok.baseURL;
+      this.config.model = byok.model || this.config.model;
+      this.rebuildClient();
+      this.managedByokFallbackActive = true;
+      if (!this.isUiQuiet()) {
+        const delta =
+          reason === "budget_exceeded" && useFreePack
+            ? `\n⚠ Managed inference credits exhausted — switching to free model \`${this.config.model}\` on your OpenRouter key for this session.\n`
+            : "\n⚠ Managed inference is busy — switching to your local provider key (BYOK) for this session.\n";
+        this.emitter.emit("text", { delta, channel: "user" });
+      }
+      return true;
+    } catch {
+      return false;
+    }
   }
 
   /**
@@ -1661,6 +1797,17 @@ export class AgentHarness {
   async refreshProviderConfig(): Promise<void> {
     if (this.running) {
       throw new Error("Cannot refresh provider while a turn is in progress.");
+    }
+    if (this.managedByokFallbackActive) {
+      const byok = resolveProviderConfig({
+        baseURL: this.config.baseURL,
+        model: this.config.model,
+      });
+      this.config.openRouterApiKey = byok.apiKey;
+      this.config.baseURL = byok.baseURL;
+      this.config.model = byok.model;
+      this.rebuildClient();
+      return;
     }
     const provider = await resolveProviderConfigWithInference(
       {
@@ -1772,22 +1919,36 @@ export class AgentHarness {
       merged.provider?.model ||
       merged.provider?.inferenceMode
     ) {
-      const provider = await resolveProviderConfigWithInference(
-        {
-          keySource: merged.provider?.keySource,
+      let keySource: string;
+      if (this.managedByokFallbackActive && merged.provider?.inferenceMode !== "managed") {
+        if (merged.provider?.model) this.config.model = merged.provider.model;
+        if (merged.provider?.baseURL) this.config.baseURL = merged.provider.baseURL;
+        const byok = resolveProviderConfig({
           baseURL: this.config.baseURL,
           model: this.config.model,
-        },
-        merged
-      );
-      this.config.openRouterApiKey = provider.apiKey;
-      this.config.baseURL = provider.baseURL;
-      this.config.model = provider.model;
-      this.rebuildClient();
+        });
+        this.config.openRouterApiKey = byok.apiKey;
+        keySource = byok.keySource;
+        this.rebuildClient();
+      } else {
+        const provider = await resolveProviderConfigWithInference(
+          {
+            keySource: merged.provider?.keySource,
+            baseURL: this.config.baseURL,
+            model: this.config.model,
+          },
+          merged
+        );
+        this.config.openRouterApiKey = provider.apiKey;
+        this.config.baseURL = provider.baseURL;
+        this.config.model = provider.model;
+        keySource = provider.keySource;
+        this.rebuildClient();
+      }
       this.emitter.emit("text", {
         delta:
           `\n[Runtime] Effective provider updated: model=${this.config.model}, ` +
-          `baseURL=${this.config.baseURL}, key=${provider.keySource}\n`,
+          `baseURL=${this.config.baseURL}, key=${keySource}\n`,
         channel: "trace",
       });
     }
@@ -1983,6 +2144,10 @@ export class AgentHarness {
     this.orchestrator =
       config.orchestrator ?? new TaskOrchestrator();
 
+    const hydratedKey = ensureLocalProviderApiKeyInProcess();
+    if (!config.openRouterApiKey?.trim() && hydratedKey) {
+      config.openRouterApiKey = hydratedKey;
+    }
     this.client = new OpenAI({
       apiKey: config.openRouterApiKey,
       baseURL: config.baseURL,
@@ -2068,6 +2233,7 @@ export class AgentHarness {
     }
   ): Promise<void> {
     if (this.running) throw new Error("Agent is already processing a message");
+    await this.maybePreemptManagedCreditExhaustion();
     if (options?.freshContext === true && this.agentDepth === 0) {
       this.reset();
     }
@@ -3646,7 +3812,8 @@ export class AgentHarness {
     if (this.agentDepth > 0) return;
     const mode = resolveVaultAutoWriteMode();
     if (mode === "off") return;
-    if (!this.registry.has("vault_write")) return;
+    const canIngest = this.registry.has("vault_ingest");
+    if (!canIngest && !this.registry.has("vault_write")) return;
     const hasResearchSignals =
       this.isLikelyKnowledgeTask() ||
       this.toolsUsedThisTurn.includes("web_search") ||
@@ -3669,11 +3836,13 @@ export class AgentHarness {
       .map((e) => `- ${e.name}: ${e.excerpt.replace(/\n/g, " ").slice(0, 180)}`)
       .join("\n");
     const tools = [...new Set(this.toolsUsedThisTurn)].slice(0, 12).join(", ");
+    // No stub links here — vault_ingest weaves in real [[Wikilinks]] to the
+    // nearest existing notes, so auto-notes become connected graph nodes rather
+    // than orphans pointing at placeholder pages.
     const body =
       `## Summary\n${assistant.slice(0, 1400)}\n\n` +
       `## Evidence\n${evidence || "- (no explicit evidence excerpts captured)"}\n\n` +
-      `## Runtime\n- Tools used: ${tools}\n- Rounds: ${this.roundCount}\n\n` +
-      `## Next links\n- [[Tasks]]\n- [[Agent Runtime]]`;
+      `## Runtime\n- Tools used: ${tools}\n- Rounds: ${this.roundCount}`;
 
     const dedupeOn = resolveHarnessEnvRaw("AGENT_VAULT_DEDUPE", this.runtimePreferences) !== "0";
     if (dedupeOn && this.registry.has("vault_search")) {
@@ -3691,12 +3860,38 @@ export class AgentHarness {
       }
     }
 
-    const wr = await this.dispatcher.directCall("vault_write", {
-      title,
-      content: body,
-      type: "note",
-      tags: ["auto-wiki", "knowledge", "harness"],
-    });
+    // Prefer entity decomposition: turn the answer into a graph of per-entity
+    // notes (people/orgs/places/events) that merge into existing dossiers,
+    // rather than one dated blob. Falls back to a single linked note when
+    // extraction is disabled, unavailable, or finds nothing.
+    const entityExtract =
+      resolveHarnessEnvRaw("AGENT_VAULT_ENTITY_EXTRACT", this.runtimePreferences) !== "0" &&
+      this.registry.has("vault_ingest_entities") &&
+      assistant.length >= 200;
+
+    let wr: ToolResult | null = null;
+    if (entityExtract) {
+      wr = await this.dispatcher.directCall("vault_ingest_entities", {
+        content: `${assistant}\n\n${evidence}`,
+        source: this.lastUserMessage.slice(0, 100) || `Research ${dateKey}`,
+        max_entities: 16,
+      });
+    }
+    if (!wr || !wr.ok) {
+      wr = canIngest
+        ? await this.dispatcher.directCall("vault_ingest", {
+            title,
+            content: body,
+            type: "note",
+            tags: ["auto-wiki", "knowledge", "harness"],
+          })
+        : await this.dispatcher.directCall("vault_write", {
+            title,
+            content: body,
+            type: "note",
+            tags: ["auto-wiki", "knowledge", "harness"],
+          });
+    }
     if (wr.ok) {
       this.vaultMetrics.writes += 1;
       this.emitter.emit("vault_activity", {
@@ -5669,6 +5864,7 @@ export class AgentHarness {
     // Default to tools-on for all retries unless explicitly opted-in.
     const allowToollessRetry = this.config.allowToollessStreamRetry === true;
     let attempt = 0;
+    let managedBusyRetries = 0;
     while (true) {
       if (Date.now() < this.providerCircuitOpenUntilMs) {
         const sec = Math.ceil((this.providerCircuitOpenUntilMs - Date.now()) / 1000);
@@ -5761,7 +5957,86 @@ export class AgentHarness {
         const managedProxyRetried =
           isManagedInferenceBaseUrl(this.config.baseURL) && vireonProxyAlreadyRetriedUpstream(err);
         if (managedProxyRetried && (rateLimited || providerUnavailable)) {
+          // The managed proxy already retried upstream and is still busy. Rather
+          // than failing the turn immediately (the old behavior — the cause of
+          // "providers are busy" spam), ride out transient OpenRouter congestion
+          // with a few backed-off local retries, then optionally fall back to a
+          // local BYOK key, and only then surface the busy message.
+          const wallExceeded = Date.now() - retryStartedAt >= this.retryWallTimeMs;
+          const maxManagedBusy = resolveManagedBusyMaxRetries(this.runtimePreferences);
+          if (managedBusyRetries < maxManagedBusy && !wallExceeded) {
+            managedBusyRetries += 1;
+            this.consecutiveProviderFailures += 1;
+            const busyDelay = this.computeRetryDelayMs(
+              managedBusyRetries,
+              "provider_unavailable",
+              getRetryAfterMsFromError(err)
+            );
+            this.emitter.emit("provider_retry", {
+              attempt: managedBusyRetries,
+              maxAttempts: maxManagedBusy + 1,
+              message: "managed inference busy",
+              backoffMs: busyDelay,
+            });
+            if (!this.isUiQuiet()) {
+              this.emitter.emit("text", {
+                delta:
+                  `\n⟳ Managed inference busy — retrying in ${Math.round(busyDelay / 1000)}s ` +
+                  `(${managedBusyRetries}/${maxManagedBusy})…\n`,
+              });
+            }
+            await sleep(busyDelay);
+            continue;
+          }
+          // Retries exhausted (or wall-time hit): try a one-time BYOK fallback.
+          if (await this.tryActivateManagedOpenRouterFallback("upstream_busy")) {
+            managedBusyRetries = 0;
+            attempt = 0;
+            this.consecutiveProviderFailures = 0;
+            continue;
+          }
           throw new Error(managedUpstreamBusyMessage());
+        }
+        if (
+          isInferenceBudgetExceededError(err) &&
+          isManagedInferenceBaseUrl(this.config.baseURL)
+        ) {
+          if (await this.tryActivateManagedOpenRouterFallback("budget_exceeded")) {
+            managedBusyRetries = 0;
+            attempt = 0;
+            this.consecutiveProviderFailures = 0;
+            continue;
+          }
+          throw new Error(msg);
+        }
+        if (
+          isManagedInferenceAuthError(err) &&
+          isManagedInferenceBaseUrl(this.config.baseURL)
+        ) {
+          clearManagedInferenceSessionCache();
+          try {
+            const session = await ensureManagedInferenceSession(
+              this.runtimePreferences,
+              this.config.baseURL
+            );
+            if (session?.apiKey?.trim()) {
+              this.config.openRouterApiKey = session.apiKey;
+              this.config.baseURL = session.baseURL;
+              this.rebuildClient();
+              attempt = 0;
+              this.consecutiveProviderFailures = 0;
+              continue;
+            }
+          } catch {
+            /* fall through to BYOK fallback */
+          }
+          if (await this.tryActivateManagedOpenRouterFallback("budget_exceeded")) {
+            managedBusyRetries = 0;
+            attempt = 0;
+            this.consecutiveProviderFailures = 0;
+            continue;
+          }
+          throw new Error(msg);
         }
         const retryForever = isRetryForeverEnabled();
         const maxRetriesForError = rateLimited

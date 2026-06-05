@@ -37,13 +37,13 @@ export const vaultWriteTool = defineTool({
     "WHAT: Write a rich Obsidian-compatible markdown note to the knowledge vault.\n" +
     "WHEN: Storing anything longer than 2 sentences, structured knowledge, or info that\n" +
     "connects to other concepts. Use [[Wikilinks]] in the body to link related notes.\n" +
-    "TYPES: fact (persistent constants/preferences), entity (project/file/person summaries),\n" +
-    "reflection (failure lessons), recipe (successful patterns), task (work-in-progress\n" +
-    "state), note (general research or observations), episode (auto session chunks).\n" +
-    "Prefer vault_write() over remember() for richer, linked, or longer content.\n" +
-    "To **update** a note, reuse the exact same title (in-place overwrite). Notes live in the Obsidian vault — not workspace/situation-room paths; use vault_read/vault_search, not read_file.\n" +
-    "ARGS: title — note title (lookup key); content — markdown body with [[Wikilinks]];\n" +
-    "type — note type; tags — optional string array; ignore_dedupe — allow a new note even when similar to an existing one (e.g. new dated edition).",
+    "TYPES: entity = one dossier per canonical name (## Identity / ## Current / ## History / ## Relationships);\n" +
+    "note = hubs/briefs; fact, reflection, recipe, task, episode as labeled.\n" +
+    "ENTITY TEMPLATE: title=\"OpenAI\" type=entity content with ## Identity (one subject), ## Current (dated bullets),\n" +
+    "## Relationships ([[wikilinks]] — many allowed). Batch multiple entities = parallel vault_write calls (one title each).\n" +
+    "For auto-split from research text use vault_ingest_entities instead.\n" +
+    "Update in place: reuse exact title. Vault paths only — not workspace read_file.\n" +
+    "ARGS: title, content, type; optional tags, summary (index catalog only), ignore_dedupe.",
   requiresApproval: false,
   parameters: {
     type: "object",
@@ -73,6 +73,10 @@ export const vaultWriteTool = defineTool({
         description:
           "Allow creating a new note even when it is similar to an existing one " +
           "(e.g. a deliberate new dated edition). Default false.",
+      },
+      summary: {
+        type: "string",
+        description: "Optional one-line catalog summary for index.md (not injected into note body)",
       },
     },
     required: ["title", "content", "type"],

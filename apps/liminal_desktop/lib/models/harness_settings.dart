@@ -4,12 +4,14 @@ class HarnessSettingsSnapshot {
     required this.tabs,
     required this.fields,
     required this.provider,
+    required this.providerPresets,
     this.hint,
   });
 
   final List<HarnessSettingsTab> tabs;
   final List<HarnessSettingsField> fields;
   final HarnessSettingsProvider provider;
+  final List<ProviderPreset> providerPresets;
   final String? hint;
 
   factory HarnessSettingsSnapshot.fromJson(Map<String, dynamic> json) {
@@ -23,7 +25,59 @@ class HarnessSettingsSnapshot {
       provider: HarnessSettingsProvider.fromJson(
         Map<String, dynamic>.from(json['provider'] as Map? ?? {}),
       ),
+      providerPresets: (json['providerPresets'] as List<dynamic>? ?? [])
+          .map((e) => ProviderPreset.fromJson(Map<String, dynamic>.from(e as Map)))
+          .toList(),
       hint: json['hint'] as String?,
+    );
+  }
+}
+
+class ProviderPreset {
+  ProviderPreset({
+    required this.id,
+    required this.label,
+    required this.hint,
+    required this.baseURL,
+    required this.model,
+    this.harnessEnvPatch,
+  });
+
+  final String id;
+  final String label;
+  final String hint;
+  final String baseURL;
+  final String model;
+  final Map<String, String>? harnessEnvPatch;
+
+  static String resolveSelection(
+    List<ProviderPreset> presets,
+    String model,
+    String baseUrl,
+  ) {
+    final m = model.trim();
+    final b = baseUrl.trim().replaceAll(RegExp(r'/+$'), '');
+    for (final p in presets) {
+      if (p.id == 'custom' || p.baseURL.isEmpty) continue;
+      final pb = p.baseURL.trim().replaceAll(RegExp(r'/+$'), '');
+      if (pb == b && p.model == m) return p.id;
+    }
+    return 'custom';
+  }
+
+  factory ProviderPreset.fromJson(Map<String, dynamic> json) {
+    final patchRaw = json['harnessEnvPatch'];
+    Map<String, String>? patch;
+    if (patchRaw is Map) {
+      patch = patchRaw.map((k, v) => MapEntry(k.toString(), v.toString()));
+    }
+    return ProviderPreset(
+      id: json['id'] as String? ?? '',
+      label: json['label'] as String? ?? '',
+      hint: json['hint'] as String? ?? '',
+      baseURL: json['baseURL'] as String? ?? '',
+      model: json['model'] as String? ?? '',
+      harnessEnvPatch: patch,
     );
   }
 }
@@ -94,6 +148,7 @@ class HarnessSettingsProvider {
     required this.modelLockedByEnv,
     required this.baseURLLockedByEnv,
     this.inferenceMode,
+    this.resolvedPresetId = 'custom',
   });
 
   final String model;
@@ -102,6 +157,9 @@ class HarnessSettingsProvider {
   final bool modelLockedByEnv;
   final bool baseURLLockedByEnv;
   final String? inferenceMode;
+  final String resolvedPresetId;
+
+  bool get presetLockedByEnv => modelLockedByEnv || baseURLLockedByEnv;
 
   factory HarnessSettingsProvider.fromJson(Map<String, dynamic> json) {
     return HarnessSettingsProvider(
@@ -111,6 +169,7 @@ class HarnessSettingsProvider {
       modelLockedByEnv: json['modelLockedByEnv'] as bool? ?? false,
       baseURLLockedByEnv: json['baseURLLockedByEnv'] as bool? ?? false,
       inferenceMode: json['inferenceMode'] as String?,
+      resolvedPresetId: json['resolvedPresetId'] as String? ?? 'custom',
     );
   }
 }

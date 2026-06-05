@@ -2,6 +2,7 @@
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
+  ensureLocalProviderApiKeyInProcess,
   loadHarnessEnvFiles,
   loadRuntimePreferences,
   resolveProviderConfigWithInference,
@@ -24,6 +25,7 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 const repoRoot =
   process.env["LIMINAL_REPO_ROOT"]?.trim() || join(__dirname, "../../../");
 loadHarnessEnvFiles({ repoRoot, cwd: process.cwd() });
+ensureLocalProviderApiKeyInProcess();
 
 const workspaceRoot = resolveWorkspaceRoot();
 

@@ -19,7 +19,11 @@ import {
   type ProviderConfig,
   type ProviderConfigOverrides,
 } from "./provider_config.js";
-import { ensureManagedInferenceSession } from "./inference_session.js";
+import {
+  ensureManagedInferenceSession,
+  isManagedInferenceBaseUrl,
+} from "./inference_session.js";
+import { ensureLocalProviderApiKeyInProcess } from "./provider_api_key.js";
 
 export type InferenceMode = "byok" | "managed" | "auto";
 export type OpenRouterRoute = "managed" | "byok";
@@ -90,6 +94,23 @@ export function formatInferenceBudgetExceededMessage(detail?: string): string {
   return `${base} ${inferenceTopUpHint()}`;
 }
 
+export function isInferenceBudgetExceededError(err: unknown): boolean {
+  return parseInferenceBudgetExceeded(err) !== null;
+}
+
+/** Managed proxy / session errors that should trigger BYOK free-model fallback. */
+export function isManagedInferenceAuthError(err: unknown): boolean {
+  if (!(err instanceof OpenAI.APIError) || err.status !== 401) return false;
+  const raw =
+    typeof err.error === "object" && err.error !== null
+      ? JSON.stringify(err.error)
+      : String(err.error ?? err.message);
+  const msg = raw.toLowerCase();
+  return /missing auth|auth header|unauthorized|no authorization|invalid token|invalid.*session/i.test(
+    msg
+  );
+}
+
 function parseInferenceBudgetExceeded(err: unknown): string | null {
   if (!(err instanceof OpenAI.APIError)) return null;
   if (err.status !== 402 && err.status !== 403) return null;
@@ -134,14 +155,7 @@ export function describeProviderError(err: unknown): string {
 }
 
 export function hasLocalProviderApiKey(): boolean {
-  const keys = [
-    "AGENT_API_KEY",
-    "OPENROUTER_API_KEY",
-    "OPENAI_API_KEY",
-    "ANTHROPIC_API_KEY",
-    "XAI_API_KEY",
-  ] as const;
-  return keys.some((k) => Boolean(process.env[k]?.trim()));
+  return Boolean(ensureLocalProviderApiKeyInProcess());
 }
 
 export function managedInferenceBaseUrl(): string {
@@ -213,6 +227,8 @@ export async function shouldRouteOpenRouterViaManaged(
 ): Promise<boolean> {
   const mode = resolveInferenceMode(prefs);
   if (mode === "byok") return false;
+  const pinnedBase = prefs?.provider?.baseURL?.trim();
+  if (pinnedBase && !isManagedInferenceBaseUrl(pinnedBase)) return false;
   const entitlements = await loadResolvedEntitlements();
   const entitled = hasEntitlement(entitlements, ENTITLEMENTS.PRO_MANAGED_INFERENCE);
   if (!entitled) return false;
@@ -266,6 +282,12 @@ export async function resolveProviderConfigWithInference(
   const mode = resolveInferenceMode(prefs);
   if (mode === "byok") {
     return resolveProviderConfig(overrides);
+  }
+
+  const requestedBase =
+    overrides?.baseURL?.trim() || prefs?.provider?.baseURL?.trim();
+  if (requestedBase && !isManagedInferenceBaseUrl(requestedBase)) {
+    return resolveProviderConfig({ ...overrides, baseURL: requestedBase });
   }
 
   const managed = await shouldRouteOpenRouterViaManaged(prefs);

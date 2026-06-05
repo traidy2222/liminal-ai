@@ -322,7 +322,7 @@ export class WsServer {
 
         case "get_settings": {
           const bridge = this.registry.getActiveBridge() ?? (await this.registry.getOrCreateActive());
-          const snapshot = buildSettingsSnapshot(bridge.harness.getRuntimePreferences());
+          const snapshot = buildSettingsSnapshot(bridge.harness.getRuntimePreferences(), bridge);
           this.sendTo(ws, serverFrame("settings", { values: snapshot }));
           this.ack(ws, id, true, undefined, snapshot);
           return;
@@ -332,7 +332,10 @@ export class WsServer {
           const d = data as { patch: Record<string, unknown> };
           await patchHarnessSettings(this.registry, d.patch ?? {});
           const bridge = this.registry.getActiveBridge();
-          const snapshot = buildSettingsSnapshot(bridge?.harness.getRuntimePreferences() ?? null);
+          const snapshot = buildSettingsSnapshot(
+            bridge?.harness.getRuntimePreferences() ?? null,
+            bridge
+          );
           this.broadcast(serverFrame("settings", { values: snapshot }));
           this.broadcastChatList();
           this.ack(ws, id, true);
@@ -340,7 +343,7 @@ export class WsServer {
         }
 
         case "save_provider": {
-          const d = data as { apiKey: string; model?: string; baseURL?: string };
+          const d = data as { apiKey?: string; model?: string; baseURL?: string };
           await saveProviderCredentials(this.registry, this.repoRoot, d);
           const bridge = await this.registry.getOrCreateActive();
           const config = await buildDesktopConfig(bridge, this.repoRoot);

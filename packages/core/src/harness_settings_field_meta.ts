@@ -136,6 +136,46 @@ const _META_RAW: Record<string, HarnessSettingsFieldMeta> = {
     description: "Harness environment toggle for Transient 5xx Max Retries. See docs/configuration.md (models api).",
     valueKind: "number",
   },
+  "AGENT_MANAGED_BUSY_MAX_RETRIES": {
+    tabId: "models_api",
+    subgroupId: "resilience",
+    label: "Managed Inference Busy Retries",
+    description:
+      "Bounded local retries (with backoff) when managed inference reports its upstream is busy, before surfacing a 'providers are busy' error. Rides out transient OpenRouter congestion.",
+    valueKind: "number",
+  },
+  "AGENT_MANAGED_BYOK_FALLBACK": {
+    tabId: "models_api",
+    subgroupId: "resilience",
+    label: "Managed → BYOK Fallback",
+    description:
+      "When managed inference stays busy, fall back to your local provider API key for the rest of the session. Off by default — BYOK spends your own key.",
+    valueKind: "boolean",
+  },
+  "AGENT_MANAGED_FREE_FALLBACK": {
+    tabId: "models_api",
+    subgroupId: "resilience",
+    label: "Managed → Free Model Fallback",
+    description:
+      "When managed inference credits are exhausted (HTTP 402), switch to your OpenRouter API key on a free model (see Free Fallback Model). On by default.",
+    valueKind: "boolean",
+  },
+  "AGENT_MANAGED_FREE_FALLBACK_MODEL": {
+    tabId: "models_api",
+    subgroupId: "resilience",
+    label: "Free Fallback Model",
+    description:
+      "OpenRouter slug used when managed credits are exhausted and free fallback is on (default openrouter/owl-alpha — Stealth, no separate fast tier).",
+    valueKind: "string",
+  },
+  "AGENT_MANAGED_FREE_FALLBACK_FAST": {
+    tabId: "models_api",
+    subgroupId: "resilience",
+    label: "Free Fallback Fast Model",
+    description:
+      "Sidecar/fast model for free fallback; empty = same as Free Fallback Model.",
+    valueKind: "string",
+  },
   "AGENT_RETRY_MAX_DELAY_MS": {
     tabId: "models_api",
     subgroupId: "resilience",
@@ -1280,6 +1320,14 @@ const _META_RAW: Record<string, HarnessSettingsFieldMeta> = {
     subgroupId: "vault_limits",
     label: "Vault Require Links",
     description: "Harness environment toggle for Vault Require Links. See docs/configuration.md (memory vault).",
+    valueKind: "boolean",
+  },
+  "AGENT_VAULT_ENTITY_EXTRACT": {
+    tabId: "memory_vault",
+    subgroupId: "vault_limits",
+    label: "Vault Entity Extraction",
+    description:
+      "Decompose vault writes into per-entity notes (people, orgs/businesses, places, events) that merge into existing dossiers and cross-link — instead of one big note. Costs one fast-model call per qualifying research turn.",
     valueKind: "boolean",
   },
   "AGENT_AUTO_DREAM": {

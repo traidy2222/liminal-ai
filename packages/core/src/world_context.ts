@@ -701,6 +701,7 @@ async function gatherRelevantPrimedLines(
 
   const vaultDir = getAgentVaultRoot();
   const vaultDocs: RankableDoc[] = [];
+  const vaultSnippet = new Map<string, string>();
   for (const folder of VAULT_TYPE_FOLDERS) {
     const dir = path.join(vaultDir, folder);
     let files: string[];
@@ -725,6 +726,15 @@ async function gatherRelevantPrimedLines(
           updatedAt: fm.updated,
           memoryType: typ,
         });
+        // First non-heading line as a one-line teaser so priming shows substance,
+        // not a bare title the model can't open without activating the family.
+        const teaser = body
+          .replace(/^#+\s+.*$/gm, "")
+          .replace(/\[\[|\]\]/g, "")
+          .replace(/\s+/g, " ")
+          .trim()
+          .slice(0, 140);
+        vaultSnippet.set(title, teaser);
       } catch {
         /* skip */
       }
@@ -733,7 +743,8 @@ async function gatherRelevantPrimedLines(
   if (vaultDocs.length > 0) {
     const vr = rankDocumentsForQuery(trimmed, vaultDocs, { limit: maxVault });
     for (const r of vr) {
-      lines.push(`Vault: [[${r.id}]]`);
+      const snip = vaultSnippet.get(r.id);
+      lines.push(snip ? `Vault: [[${r.id}]] — ${snip}` : `Vault: [[${r.id}]]`);
     }
   }
 

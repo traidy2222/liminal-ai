@@ -203,9 +203,10 @@ export const PROVIDER_MODEL_PRESETS: readonly ProviderModelPreset[] = [
   ),
   preset(
     "openrouter-owl-stealth",
-    "OpenRouter Stealth — Owl Alpha",
-    "OpenRouter's Stealth owl-alpha (Hermes / agentic line). Main + fast both use owl-alpha. " +
-      "Must pin to Stealth provider — DeepInfra/DeepSeek pins return HTTP 404 for this slug.",
+    "Owl Alpha — Stealth (single model)",
+    "Free Stealth owl-alpha for the main ReAct loop and all sidecars — no separate fast tier. " +
+      "Must pin to Stealth provider (DeepInfra/DeepSeek pins return HTTP 404 for this slug). " +
+      "Note: prompts and completions may be logged by the provider and used to improve the model.",
     OPENROUTER_MODEL_SLUG.OWL_ALPHA,
     owlStealthPinPatch()
   ),
@@ -358,11 +359,81 @@ export function findProviderModelPreset(id: string): ProviderModelPreset | undef
 /** Match saved provider + main model to a preset id (for Settings dropdown). */
 export function resolveProviderModelPresetId(model: string, baseURL: string): string | null {
   const m = model.trim();
-  const b = baseURL.trim().replace(/\/+$/, "");
+  const b = normalizeProviderBaseUrl(baseURL);
   for (const p of PROVIDER_MODEL_PRESETS) {
-    if (p.model === m && p.baseURL.replace(/\/+$/, "") === b) return p.id;
+    if (p.model === m && normalizeProviderBaseUrl(p.baseURL) === b) return p.id;
   }
   return null;
+}
+
+export const PROVIDER_PRESET_CUSTOM_ID = "custom";
+
+/** Wire shape for Settings UIs (web + desktop). */
+export interface ProviderPresetWire {
+  id: string;
+  label: string;
+  hint: string;
+  baseURL: string;
+  model: string;
+  harnessEnvPatch?: Record<string, string>;
+}
+
+export function normalizeProviderBaseUrl(url: string): string {
+  return url.trim().replace(/\/+$/, "");
+}
+
+/** Full preset list for Settings provider dropdown (cloud packs + local stacks). */
+export function listProviderPresetsForSettings(): readonly ProviderPresetWire[] {
+  return [
+    {
+      id: PROVIDER_PRESET_CUSTOM_ID,
+      label: "Custom…",
+      hint: "No automatic fill — edit model and base URL below.",
+      baseURL: "",
+      model: "",
+    },
+    ...PROVIDER_MODEL_PRESETS.map((p) => ({
+      id: p.id,
+      label: p.label,
+      hint: p.hint,
+      baseURL: p.baseURL,
+      model: p.model,
+      harnessEnvPatch: p.harnessEnvPatch,
+    })),
+    {
+      id: "lmstudio",
+      label: "LM Studio (local :1234)",
+      hint: "Local OpenAI-compatible server — match the Model ID shown in LM Studio.",
+      baseURL: "http://localhost:1234/v1",
+      model: DEFAULT_AGENT_MODEL_SLUG,
+      harnessEnvPatch: {
+        AGENT_API_BASE_URL: "http://localhost:1234/v1",
+        AGENT_FAST_MODEL: DEFAULT_AGENT_MODEL_SLUG,
+      },
+    },
+    {
+      id: "ollama",
+      label: "Ollama (local :11434)",
+      hint: "`ollama serve` — typical slug `qwen3.5:9b` (pull via `ollama pull qwen3.5:9b`).",
+      baseURL: "http://localhost:11434/v1",
+      model: "qwen3.5:9b",
+      harnessEnvPatch: { AGENT_FAST_MODEL: "qwen3.5:9b" },
+    },
+  ];
+}
+
+/** Resolve current model + base URL to a preset id (includes local stacks). */
+export function resolveProviderPresetId(model: string, baseURL: string): string {
+  const cloud = resolveProviderModelPresetId(model, baseURL);
+  if (cloud) return cloud;
+  const m = model.trim();
+  const b = normalizeProviderBaseUrl(baseURL);
+  for (const p of listProviderPresetsForSettings()) {
+    if (p.id === PROVIDER_PRESET_CUSTOM_ID) continue;
+    if (!p.baseURL) continue;
+    if (normalizeProviderBaseUrl(p.baseURL) === b && p.model === m) return p.id;
+  }
+  return PROVIDER_PRESET_CUSTOM_ID;
 }
 
 /** Defaults when no preset is selected — mirrors product defaults. */

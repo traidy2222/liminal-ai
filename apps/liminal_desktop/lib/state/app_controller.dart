@@ -272,6 +272,56 @@ class AppController extends ChangeNotifier {
     return result.ok;
   }
 
+  /// Apply a provider model pack (main, fast, routing) from Settings preset dropdown.
+  Future<bool> applyProviderPreset(String presetId) async {
+    if (!_protocol.isConnected || presetId.isEmpty || presetId == 'custom') {
+      return false;
+    }
+    final snap = harnessSettings;
+    if (snap == null) return false;
+    ProviderPreset? preset;
+    for (final p in snap.providerPresets) {
+      if (p.id == presetId) {
+        preset = p;
+        break;
+      }
+    }
+    if (preset == null || preset.baseURL.isEmpty) return false;
+    if (snap.provider.presetLockedByEnv) return false;
+
+    final envPatch = <String, String>{};
+    final merge = <String, String>{
+      'AGENT_MODEL': preset.model,
+      if (preset.harnessEnvPatch != null) ...preset.harnessEnvPatch!,
+    };
+    if (preset.baseURL.isNotEmpty) {
+      merge['AGENT_API_BASE_URL'] = preset.baseURL;
+    }
+    for (final entry in merge.entries) {
+      final locked = snap.fields.any((f) => f.key == entry.key && f.lockedByEnv);
+      if (locked) continue;
+      envPatch[entry.key] = entry.value;
+    }
+
+    final result = await _protocol.send('update_settings', {
+      'patch': {
+        'harness': {'env': envPatch},
+        'provider': {
+          'model': preset.model,
+          'baseURL': preset.baseURL,
+        },
+      },
+    });
+    if (result.ok) {
+      await loadHarnessSettings();
+      await refreshConfig();
+    } else {
+      setupError = result.error ?? 'Failed to apply provider preset';
+      notifyListeners();
+    }
+    return result.ok;
+  }
+
   Future<bool> saveProvider({
     required String apiKey,
     String? model,

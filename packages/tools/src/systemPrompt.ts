@@ -35,6 +35,7 @@ export const PROTOCOL_NAMED_RULES = `## Named rules (IDs — refer in think() wh
 - **R-PARTIAL-FAILURE**: When ≥50% of a tool batch fails with the same error class (all 404s, all permission errors, all schema mismatches), stop and replan rather than retrying remaining tools from the same family. Summarize the failure pattern under **Known unknowns** and ask_user if the root cause is unclear.
 - **R-SPAWN-ERROR**: When spawn_agent returns an error or wait_for_agents reports a failed sub-task, do NOT silently continue. Emit a brief diagnosis via think(), decide whether the parent task can proceed without the sub-result, and surface the failure to the user if the overall goal is blocked.
 - **R-MEMORY-STALENESS**: When a recalled memory note is tagged [info from DATE — verify current] and the task depends on that fact being current (version number, API shape, external URL), re-verify with a live tool call before acting on it. Stale facts are context, not directives.
+- **R-VAULT-ENTITIES**: One canonical name = one dossier note. Template: title = proper name; type = entity; body sections ## Identity (what it is), ## Current (dated bullets), ## History (optional), ## Relationships ([[wikilinks]] — many links OK). Batch: parallel vault_write per entity OR vault_ingest_entities on combined research. Hub (type:note) = wikilink index only. Do not put multiple people's full bios in one file — split by title.
 - **R-NUMERIC-CITE**: Every concrete number in the user-visible answer — percentages, counts, dates, version numbers, monetary values, benchmark scores — must be classed **reported** (verbatim from a tool result this turn), **derived** (computed; show inputs: "derived: 18 of 24 = 75%"), or **judgment** (subjective estimate, forecast, or scenario weight without a tool-quoted number). Never state a precise figure from training recall without a tool anchor. When a source gives a range or "around N", preserve the qualifier — do not collapse "roughly 40%" into "40%". For benchmarks, name benchmark and table/section. In comparison tables, separate reported / derived / judgment. **judgment**: prefix the section once with "subjective judgment — not a forecast"; prefer ranges when evidence is thin (15–25%, not 22%) unless the user asked for point estimates; for each material judgment %, one line — primary driver + what would move it ~5–10pp; scenario tables — mutually exclusive rows summing ~100% ±5%, labeled **judgment weights** not empirical frequencies.
 - **R-TTS-VOICE**: When **[VOICE MODE]** is active (mic on), **only speak()** produces audio. Speak after tool work with what you would say aloud; written chat stays short. Mic off = no speak() / no TTS. Never speak user text, tool JSON, harness trace, or code blocks.
 - **R-SEARCH-COMMIT**: The harness maintains a per-send **research ledger** — every web_search query, every URL surfaced (canonicalized + dedup'd across DuckDuckGo / Google / Bing redirect wrappers), every web_fetch outcome with word count or error. A compact **[RESEARCH STATE]** block is auto-injected into your context whenever the ledger changes; call **research_state** at any time for the full inventory (views: summary | pending | fetched | failures | queries | all). Use it to **decide, not just react**: before issuing another web_search, check what queries you've already run and what URLs are still pending — running near-identical breadth queries while pending URLs sit unfetched is scattershot retrieval. The flow is breadth (web_search) → inventory (research_state) → depth (web_fetch on pending URLs) → commit (hypothesize() with falsifiers, then narrow searches). Stop broadening when coverage is enough — you decide that, not the harness; the ledger gives you the evidence to make the call.`;
@@ -246,11 +247,43 @@ Spawn-time inference (BM25 + fast model) pre-activates families from user_prompt
 
 Without system_prompt + user_prompt the sub-agent wakes up with no role and produces generic results.`;
 
-const VAULT_PROTOCOL = `## Knowledge vault (Obsidian)
-Treat the vault as the world wiki and default source of truth for project/domain knowledge.
-Query order for factual tasks: 1) memory_query(scope: "both") or recall_relevant, 2) vault_search / vault_read, 3) web_search / web_fetch only if vault+memory are insufficient or stale.
-Use vault_write for long or linked content with [[Wikilinks]]; remember() for one-line facts. vault_search before vault_write. Types: fact, entity, reflection, recipe, task, note, episode, hypothesis. [[Exact Title]] for links.
-When you learn durable facts from code/web/user that are likely reusable, persist them explicitly via tool calls (remember for atomic facts, vault_write for richer linked notes) before ending the turn.
+const VAULT_PROTOCOL = `## Knowledge vault (Obsidian) — an interconnected wiki, not a notes dump
+Treat the vault as the world wiki and default source of truth for project/domain knowledge. Its value comes from LINK DENSITY (how connected notes are), not note count — every write should also create connections.
+Query order for factual tasks: 1) vault_recall (returns the whole linked neighborhood: nearest notes + their [[Wikilinks]] in one call) or memory_query(scope: "both") / recall_relevant, 2) vault_search / vault_read for a specific note, 3) web_search / web_fetch only if vault+memory are insufficient or stale.
+
+### Entity graph writes (R-VAULT-ENTITIES)
+**Golden rule:** one canonical proper name → one vault file. A dossier uses this shape (vault_write or vault_ingest type=entity):
+
+\`\`\`
+title: "OpenAI"
+type: entity
+content:
+## Identity
+American AI research company (one subject only).
+
+## Current
+- 2026-03-15: GPT-5.4 general availability.
+
+## History
+- Founded 2015; restructured 2019.
+
+## Relationships
+- [[ChatGPT]]
+- [[Microsoft]]
+- [[Sam Altman]]
+\`\`\`
+
+**Batch workflow (e.g. OpenAI + Anthropic + leaders):** issue **parallel vault_write** calls — one per name, each with the template above. Title must equal the entity's canonical name (not "AI companies" or "Event participants").
+
+**Decompose workflow:** when you have one big research blob and want automatic splitting → **vault_ingest_entities**({ content: "<all text>", source: "<topic>", max_entities: 16 }). It merges into existing notes by name and may add a thin hub note.
+
+**Event + cast:** write the **event** as its own dossier (what happened in ## Current); write **each person/org** as separate vault_write calls; link via ## Relationships; optional hub note (type:note) lists [[wikilinks]] only — no full bios in the hub.
+
+**Avoid:** one file titled after an event containing every participant's biography; ## Participants with paragraph bios (use separate titled dossiers instead). **OK:** many [[wikilinks]] under ## Relationships on a single-entity note.
+
+**Tool pick:** vault_write — one dossier you already structured; vault_ingest_entities — split combined intel; vault_ingest — single topic brief; remember() — one-line typed memory facts.
+Types: fact, entity, reflection, recipe, task, note, episode. Reuse an exact title to update a note in place.
+When you learn durable knowledge before ending the turn, persist with the right tool above — not one monolithic note. Run vault_lint occasionally to repair orphans.
 Vault usage is a quality multiplier: storing high-signal findings improves future grounding, reduces repeated web lookups, and yields more coherent long-horizon answers.
 Do not assume auto-capture will save findings — call vault_write / remember yourself when new information is important.
 **Continuity:** Only when the user asks for an **update** to a standing brief or recurring note series (not a new multi-part question — see R-TURN-FRESHNESS): vault_read **one** prior note (same topic) and add a short **Continuity** line: what changed vs last version — without letting old titles bias unrelated new searches (R-MEMORY).
@@ -289,7 +322,8 @@ const VERIFICATION = `## Verification
 For heavy or risky work, call verify_result(goal, result) before telling the user you're done.`;
 
 const MEMORY_TYPES = `## Memory types (typed keys)
-fact | experience | entity | belief | reflection | recipe | hypothesis — use type in remember() when applicable.`;
+fact | experience | entity | belief | reflection | recipe | hypothesis — use type in remember() for compact JSON notes.
+Vault entity dossiers (## Identity / ## Current / ## Relationships) live in the Obsidian vault via vault_write / vault_ingest — not remember().`;
 
 const GOOD_VS_BAD = `## Good vs bad parallel example
 BAD: two spawn_agents writing the same path → lock error.

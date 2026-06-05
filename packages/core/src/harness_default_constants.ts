@@ -27,6 +27,20 @@ export const HARNESS_ENV_DEFAULTS: Readonly<Record<string, string>> = {
   AGENT_APPROVAL_TIMEOUT_MS: "120000",
   AGENT_RATE_LIMIT_MAX_RETRIES: "8",
   AGENT_TRANSIENT_5XX_MAX_RETRIES: "8",
+  /** Bounded local retries when the managed-inference proxy reports it already
+   *  retried upstream and is still busy (429/5xx). Rides out transient OpenRouter
+   *  congestion instead of failing the turn immediately. */
+  AGENT_MANAGED_BUSY_MAX_RETRIES: "4",
+  /** When managed inference stays busy after the retries above, fall back to a
+   *  local BYOK provider key (if one is configured) for the rest of the session.
+   *  Off by default — BYOK spends the user's own key, so it is opt-in. */
+  AGENT_MANAGED_BYOK_FALLBACK: "0",
+  /** When managed inference credits are exhausted (402), switch to OpenRouter BYOK on a free model. */
+  AGENT_MANAGED_FREE_FALLBACK: "1",
+  /** Default free model when managed wallet is empty (Stealth owl-alpha on OpenRouter). */
+  AGENT_MANAGED_FREE_FALLBACK_MODEL: "openrouter/owl-alpha",
+  /** Fast/sidecar slot for free fallback; empty = same as AGENT_MANAGED_FREE_FALLBACK_MODEL. */
+  AGENT_MANAGED_FREE_FALLBACK_FAST: "",
   AGENT_RETRY_MAX_DELAY_MS: "30000",
   AGENT_RETRY_WALL_TIME_MS: "90000",
   AGENT_PROVIDER_CIRCUIT_FAILURES: "3",
@@ -204,6 +218,10 @@ export const HARNESS_ENV_DEFAULTS: Readonly<Record<string, string>> = {
   AGENT_VAULT_WRITE_BUDGET: "8",
   AGENT_VAULT_DEDUPE: "0",
   AGENT_VAULT_REQUIRE_LINKS: "0",
+  /** Decompose vault writes into per-entity notes (people/orgs/places/events)
+   *  via vault_ingest_entities instead of one monolithic note. One fast-model
+   *  call per qualifying research turn. Set 0 for single-note writes. */
+  AGENT_VAULT_ENTITY_EXTRACT: "1",
   AGENT_OBSIDIAN_DISCOVER: "1",
   AGENT_OBSIDIAN_REQUIRE_DOT_OBSIDIAN: "1",
   AGENT_AUTO_DREAM: "0",

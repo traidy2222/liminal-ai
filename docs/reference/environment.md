@@ -131,6 +131,11 @@ Web **Settings** writes to (2). See [Configuration basics](../start/configuratio
 | `AGENT_LLM_JSON_CACHE` | `1` | yes | no | harness | Harness environment toggle for Llm Json Cache. See docs/configuration.md (harness). |
 | `AGENT_LLM_JSON_CACHE_TTL_MS` | `300000` | yes | no | harness | Harness environment toggle for Llm Json Cache Ttl Ms. See docs/configuration.md (harness). |
 | `AGENT_LOCATION` | `` | yes | no | session_ui | Harness environment toggle for Location. See docs/configuration.md (session ui). |
+| `AGENT_MANAGED_BUSY_MAX_RETRIES` | `4` | yes | yes | models_api | Bounded local retries (with backoff) when managed inference reports its upstream is busy, before surfacing a 'providers  |
+| `AGENT_MANAGED_BYOK_FALLBACK` | `0` | yes | yes | models_api | When managed inference stays busy, fall back to your local provider API key for the rest of the session. Off by default  |
+| `AGENT_MANAGED_FREE_FALLBACK` | `1` | yes | yes | models_api | When managed inference credits are exhausted (HTTP 402), switch to your OpenRouter API key on a free model (see Free Fal |
+| `AGENT_MANAGED_FREE_FALLBACK_FAST` | `` | yes | yes | models_api | Sidecar/fast model for free fallback; empty = same as Free Fallback Model. |
+| `AGENT_MANAGED_FREE_FALLBACK_MODEL` | `openrouter/owl-alpha` | yes | yes | models_api | OpenRouter slug used when managed credits are exhausted and free fallback is on (default openrouter/owl-alpha — Stealth, |
 | `AGENT_MARKETS_ENABLE` | `1` | yes | no | web_research | Harness environment toggle for Markets Enable. See docs/configuration.md (web research). |
 | `AGENT_MARKETS_MAX_DELAY_MS` | `2000` | yes | no | web_research | Harness environment toggle for Markets Max Delay Ms. See docs/configuration.md (web research). |
 | `AGENT_MARKETS_RETRIES` | `2` | yes | no | web_research | Harness environment toggle for Markets Retries. See docs/configuration.md (web research). |
@@ -185,8 +190,8 @@ Web **Settings** writes to (2). See [Configuration basics](../start/configuratio
 | `AGENT_PROMPT_CACHE_ROLLING` | `1` | yes | no | harness | Harness environment toggle for Prompt Cache Rolling. See docs/configuration.md (harness). |
 | `AGENT_PROTOCOL_INTENT_HINT` | `any` | yes | no | advanced | Harness environment toggle for Protocol Intent Hint. See docs/configuration.md (advanced). |
 | `AGENT_PROVIDER_ALLOW_FALLBACKS` | `1` | yes | no | harness | Harness environment toggle for Provider Allow Fallbacks. See docs/configuration.md (harness). |
-| `AGENT_PROVIDER_CIRCUIT_COOLDOWN_MS` | `60000` | yes | yes | harness | Harness environment toggle for Provider Circuit Cooldown Ms. See docs/configuration.md (harness). |
-| `AGENT_PROVIDER_CIRCUIT_FAILURES` | `3` | yes | yes | advanced | Harness environment toggle for Provider Circuit Failures. See docs/configuration.md (advanced). |
+| `AGENT_PROVIDER_CIRCUIT_COOLDOWN_MS` | `60000` | yes | no | harness | Harness environment toggle for Provider Circuit Cooldown Ms. See docs/configuration.md (harness). |
+| `AGENT_PROVIDER_CIRCUIT_FAILURES` | `3` | yes | no | advanced | Harness environment toggle for Provider Circuit Failures. See docs/configuration.md (advanced). |
 | `AGENT_PROVIDER_IGNORE` | `` | yes | no | harness | Harness environment toggle for Provider Ignore. See docs/configuration.md (harness). |
 | `AGENT_PROVIDER_MAX_PRICE_COMPLETION` | `` | yes | no | harness | Harness environment toggle for Provider Max Price Completion. See docs/configuration.md (harness). |
 | `AGENT_PROVIDER_MAX_PRICE_PROMPT` | `` | yes | no | harness | Harness environment toggle for Provider Max Price Prompt. See docs/configuration.md (harness). |
@@ -213,8 +218,8 @@ Web **Settings** writes to (2). See [Configuration basics](../start/configuratio
 | `AGENT_RECIPE_LIBRARY` | `1` | yes | no | advanced | Harness environment toggle for Recipe Library. See docs/configuration.md (advanced). |
 | `AGENT_REFLEXION_SEMANTIC` | `1` | yes | no | harness | Harness environment toggle for Reflexion Semantic. See docs/configuration.md (harness). |
 | `AGENT_RETRY_FOREVER` | `0` | yes | no | models_api | Harness environment toggle for Retry Forever. See docs/configuration.md (models api). |
-| `AGENT_RETRY_MAX_DELAY_MS` | `30000` | yes | yes | models_api | Harness environment toggle for Retry Max Delay Ms. See docs/configuration.md (models api). |
-| `AGENT_RETRY_WALL_TIME_MS` | `90000` | yes | yes | models_api | Harness environment toggle for Retry Wall Time Ms. See docs/configuration.md (models api). |
+| `AGENT_RETRY_MAX_DELAY_MS` | `30000` | yes | no | models_api | Harness environment toggle for Retry Max Delay Ms. See docs/configuration.md (models api). |
+| `AGENT_RETRY_WALL_TIME_MS` | `90000` | yes | no | models_api | Harness environment toggle for Retry Wall Time Ms. See docs/configuration.md (models api). |
 | `AGENT_RULE_DEMOTE_MIN_SAMPLES` | `20` | yes | no | harness | Harness environment toggle for Rule Demote Min Samples. See docs/configuration.md (harness). |
 | `AGENT_RULE_DEMOTE_THRESHOLD` | `0.4` | yes | no | harness | Harness environment toggle for Rule Demote Threshold. See docs/configuration.md (harness). |
 | `AGENT_RULE_RECALL` | `1` | yes | no | memory_vault | Harness environment toggle for Rule Recall. See docs/configuration.md (memory vault). |
@@ -273,9 +278,9 @@ Web **Settings** writes to (2). See [Configuration basics](../start/configuratio
 | `AGENT_VAULT_REQUIRE_LINKS` | `0` | yes | no | memory_vault | Harness environment toggle for Vault Require Links. See docs/configuration.md (memory vault). |
 | `AGENT_VAULT_WRITE_BUDGET` | `8` | yes | no | memory_vault | Harness environment toggle for Vault Write Budget. See docs/configuration.md (memory vault). |
 | `AGENT_VIREON_SITE_URL` | `https://www.vireondynamics.com` | yes | no | harness | Harness environment toggle for Vireon Site Url. See docs/configuration.md (harness). |
-| `AGENT_VISION_BASE_URL` | `https://openrouter.ai/api/v1` | yes | yes | models_api | Harness environment toggle for Vision Base Url. See docs/configuration.md (models api). |
+| `AGENT_VISION_BASE_URL` | `https://openrouter.ai/api/v1` | yes | no | models_api | Harness environment toggle for Vision Base Url. See docs/configuration.md (models api). |
 | `AGENT_VISION_MAX_IMAGE_BYTES` | `4194304` | yes | no | models_api | Harness environment toggle for Vision Max Image Bytes. See docs/configuration.md (models api). |
-| `AGENT_VISION_MODEL` | `nvidia/nemotron-nano-12b-v2-vl:free` | yes | yes | models_api | Harness environment toggle for Vision Model. See docs/configuration.md (models api). |
+| `AGENT_VISION_MODEL` | `nvidia/nemotron-nano-12b-v2-vl:free` | yes | no | models_api | Harness environment toggle for Vision Model. See docs/configuration.md (models api). |
 | `AGENT_VISION_RETRIES` | `2` | yes | no | models_api | Harness environment toggle for Vision Retries. See docs/configuration.md (models api). |
 | `AGENT_VISION_RETRY_BASE_MS` | `800` | yes | no | models_api | Harness environment toggle for Vision Retry Base Ms. See docs/configuration.md (models api). |
 | `AGENT_VISION_TIMEOUT_MS` | `45000` | yes | no | models_api | Harness environment toggle for Vision Timeout Ms. See docs/configuration.md (models api). |
@@ -314,19 +319,18 @@ Web **Settings** writes to (2). See [Configuration basics](../start/configuratio
 - `AGENT_API_KEY`
 - `AGENT_APPROVAL_TIMEOUT_MS`
 - `AGENT_CAPTCHA_KEY`
+- `AGENT_MANAGED_BUSY_MAX_RETRIES`
+- `AGENT_MANAGED_BYOK_FALLBACK`
+- `AGENT_MANAGED_FREE_FALLBACK`
+- `AGENT_MANAGED_FREE_FALLBACK_FAST`
+- `AGENT_MANAGED_FREE_FALLBACK_MODEL`
 - `AGENT_OAUTH_ENCRYPTION_KEY`
-- `AGENT_PROVIDER_CIRCUIT_COOLDOWN_MS`
-- `AGENT_PROVIDER_CIRCUIT_FAILURES`
 - `AGENT_RATE_LIMIT_MAX_RETRIES`
-- `AGENT_RETRY_MAX_DELAY_MS`
-- `AGENT_RETRY_WALL_TIME_MS`
 - `AGENT_TRANSCRIBE_API_KEY`
 - `AGENT_TRANSIENT_5XX_MAX_RETRIES`
 - `AGENT_UI_VERBOSITY`
 - `AGENT_VAULT_AUTO_WRITE`
 - `AGENT_VISION_API_KEY`
-- `AGENT_VISION_BASE_URL`
-- `AGENT_VISION_MODEL`
 - `ANTHROPIC_API_KEY`
 - `OPENAI_API_KEY`
 - `OPENROUTER_API_KEY`

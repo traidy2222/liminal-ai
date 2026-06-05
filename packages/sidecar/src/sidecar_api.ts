@@ -10,6 +10,10 @@ import {
   resolveProviderConfig,
   type RuntimePreferences,
 } from "@liminal/core";
+import {
+  listProviderPresetsForSettings,
+  resolveProviderPresetId,
+} from "@liminal/core/provider-presets";
 import type { PersonaUiThemeV2 } from "@liminal/core";
 import type { WireAppConfig } from "@liminal/protocol";
 import { loadPersonaUiThemeFromWorkspace } from "@liminal/tools";
@@ -80,20 +84,50 @@ export async function buildDesktopConfig(
   };
 }
 
-export function buildSettingsSnapshot(prefs: RuntimePreferences | null) {
-  const cfg = resolveProviderConfig();
+export function buildSettingsSnapshot(
+  prefs: RuntimePreferences | null,
+  bridge?: SessionBridge
+) {
   const envModel = process.env["AGENT_MODEL"]?.trim();
   const envBase = process.env["AGENT_API_BASE_URL"]?.trim();
+  const harnessCfg = bridge?.harness.config;
+  const model = (
+    harnessCfg?.model ??
+    prefs?.provider?.model?.trim() ??
+    envModel ??
+    ""
+  ).slice(0, 200);
+  const baseURL = (
+    harnessCfg?.baseURL ??
+    prefs?.provider?.baseURL?.trim() ??
+    envBase ??
+    ""
+  ).slice(0, 500);
+
+  let apiKeyConfigured = false;
+  try {
+    const cfg = resolveProviderConfig();
+    apiKeyConfigured = !!(cfg.apiKey?.trim());
+  } catch {
+    apiKeyConfigured = !!(
+      harnessCfg?.openRouterApiKey?.trim() ||
+      process.env["AGENT_API_KEY"]?.trim() ||
+      process.env["OPENROUTER_API_KEY"]?.trim()
+    );
+  }
+
   return {
     tabs: HARNESS_SETTINGS_TABS,
     fields: buildHarnessSettingsApiFields(prefs),
+    providerPresets: listProviderPresetsForSettings(),
     provider: {
-      model: (cfg.model ?? "").slice(0, 200),
-      baseURL: (cfg.baseURL ?? "").slice(0, 500),
+      model,
+      baseURL,
       modelLockedByEnv: !!envModel,
       baseURLLockedByEnv: !!envBase,
-      apiKeyConfigured: !!(cfg.apiKey?.trim()),
+      apiKeyConfigured,
       inferenceMode: resolveInferenceMode(prefs),
+      resolvedPresetId: resolveProviderPresetId(model, baseURL),
     },
     hint:
       "API keys are stored in .env only and are never sent over the desktop protocol. Use save_provider to set AGENT_API_KEY.",
@@ -103,35 +137,47 @@ export function buildSettingsSnapshot(prefs: RuntimePreferences | null) {
 export async function saveProviderCredentials(
   registry: ChatRegistry,
   repoRoot: string,
-  input: { apiKey: string; model?: string; baseURL?: string }
+  input: { apiKey?: string; model?: string; baseURL?: string }
 ): Promise<void> {
-  const key = input.apiKey.trim();
-  if (key.length < 8) {
+  const key = (input.apiKey ?? "").trim();
+  const model = input.model?.trim();
+  const baseURL = input.baseURL?.trim();
+
+  if (key.length > 0 && key.length < 8) {
     throw new Error("API key is too short.");
   }
-  if (!existsSync(join(repoRoot, "packages", "sidecar"))) {
-    throw new Error(`Invalid repo root: ${repoRoot}`);
+
+  const updates: Record<string, string> = {};
+  if (key.length >= 8) updates.AGENT_API_KEY = key;
+  if (model && !process.env["AGENT_MODEL"]?.trim()) {
+    updates.AGENT_MODEL = model.slice(0, 200);
   }
-  const updates: Record<string, string> = { AGENT_API_KEY: key };
-  if (input.model?.trim() && !process.env["AGENT_MODEL"]?.trim()) {
-    updates["AGENT_MODEL"] = input.model.trim().slice(0, 200);
+  if (baseURL && !process.env["AGENT_API_BASE_URL"]?.trim()) {
+    updates.AGENT_API_BASE_URL = baseURL.slice(0, 500);
   }
-  if (input.baseURL?.trim() && !process.env["AGENT_API_BASE_URL"]?.trim()) {
-    updates["AGENT_API_BASE_URL"] = input.baseURL.trim().slice(0, 500);
-  }
-  writeEnvMerge(repoRoot, updates);
-  applyApiKeyToProcess(key);
 
   const prefsPatch: Partial<RuntimePreferences> = {};
-  if (input.model?.trim() || input.baseURL?.trim()) {
+  if (model || baseURL) {
     prefsPatch.provider = {
-      ...(input.model?.trim() ? { model: input.model.trim() } : {}),
-      ...(input.baseURL?.trim() ? { baseURL: input.baseURL.trim() } : {}),
+      ...(model ? { model } : {}),
+      ...(baseURL ? { baseURL } : {}),
     };
   }
 
+  if (Object.keys(updates).length === 0 && !prefsPatch.provider) {
+    throw new Error("Nothing to save — enter a new API key or change model/base URL.");
+  }
+
+  if (Object.keys(updates).length > 0) {
+    if (!existsSync(join(repoRoot, "packages", "sidecar"))) {
+      throw new Error(`Invalid repo root: ${repoRoot}`);
+    }
+    writeEnvMerge(repoRoot, updates);
+    if (updates.AGENT_API_KEY) applyApiKeyToProcess(updates.AGENT_API_KEY);
+  }
+
   await registry.reloadRuntimePrefs();
-  if (Object.keys(prefsPatch).length > 0) {
+  if (prefsPatch.provider) {
     const active = registry.getActiveBridge();
     if (active && !active.harness.getIsRunning()) {
       await active.harness.patchRuntimePreferences(prefsPatch, { persist: true });

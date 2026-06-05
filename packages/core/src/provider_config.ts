@@ -11,6 +11,7 @@ import {
 } from "./openrouter_session.js";
 import type { ProviderRouteState } from "./provider_route_state.js";
 import type { RuntimePreferences } from "./runtime_prefs.js";
+import { ensureLocalProviderApiKeyInProcess } from "./provider_api_key.js";
 
 // ─── Provider routing (OpenRouter sticky cache + dynamic price sort) ─────────
 
@@ -60,7 +61,7 @@ const SLUG_PREFIX_TO_PROVIDER: Record<string, string> = {
 export const OPENROUTER_STEALTH_MODEL_SLUGS: readonly string[] = ["openrouter/owl-alpha"];
 
 export function isOpenRouterStealthModel(modelSlug: string): boolean {
-  const s = modelSlug.trim().toLowerCase();
+  const s = (modelSlug ?? "").trim().toLowerCase();
   return OPENROUTER_STEALTH_MODEL_SLUGS.some((m) => m.toLowerCase() === s);
 }
 
@@ -294,6 +295,7 @@ export interface VisionProviderConfig {
 function firstNonEmpty(
   keys: Array<ProviderConfig["keySource"]>
 ): { key: ProviderConfig["keySource"]; value: string } | null {
+  ensureLocalProviderApiKeyInProcess();
   for (const key of keys) {
     const value = process.env[key]?.trim();
     if (value) return { key, value };

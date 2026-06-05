@@ -455,8 +455,21 @@ export {
   describeProviderError,
   formatInferenceBudgetExceededMessage,
   inferenceAccountUrl,
+  isInferenceBudgetExceededError,
+  isManagedInferenceAuthError,
   proManagedInferencePrefsPatch,
 } from "./inference_provider.js";
+export {
+  ensureLocalProviderApiKeyInProcess,
+  resolveLocalProviderApiKey,
+  providerApiKeyEnvFileCandidates,
+} from "./provider_api_key.js";
+export {
+  buildManagedFreeFallbackHarnessEnv,
+  managedFreeFallbackEnabled,
+  resolveManagedFreeFallbackFastModel,
+  resolveManagedFreeFallbackMainModel,
+} from "./managed_free_fallback.js";
 export { applyProManagedInferenceDefaults } from "./vireon_account.js";
 export type { InferenceMode, InferenceSessionResult, InferenceUsageStatus, OpenRouterRoute, ManagedOpenRouterCredentials } from "./inference_provider.js";
 export {

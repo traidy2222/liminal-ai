@@ -3,15 +3,13 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import {
-
   buildHarnessModelPackEnvPatch,
-
+  listProviderPresetsForSettings,
   OPENROUTER_MODEL_SLUG,
-
   PROVIDER_MODEL_PRESETS,
-
+  PROVIDER_PRESET_CUSTOM_ID,
   resolveProviderModelPresetId,
-
+  resolveProviderPresetId,
 } from "./provider_model_presets.js";
 
 
@@ -87,9 +85,23 @@ test("owl stealth preset pins Stealth provider and owl-alpha slug", () => {
   const owl = PROVIDER_MODEL_PRESETS.find((p) => p.id === "openrouter-owl-stealth")!;
   assert.equal(owl.model, OPENROUTER_MODEL_SLUG.OWL_ALPHA);
   assert.equal(owl.harnessEnvPatch.AGENT_MODEL, OPENROUTER_MODEL_SLUG.OWL_ALPHA);
+  assert.equal(owl.harnessEnvPatch.AGENT_FAST_MODEL, OPENROUTER_MODEL_SLUG.OWL_ALPHA);
   assert.equal(owl.harnessEnvPatch.AGENT_PROVIDER_STRATEGY, "cache_first");
   assert.equal(owl.harnessEnvPatch.AGENT_PROVIDER_ORDER, "Stealth");
   assert.equal(owl.harnessEnvPatch.AGENT_PROVIDER_ORDER_FAST, "Stealth");
+});
+
+test("resolveProviderPresetId matches owl stealth pack", () => {
+  assert.equal(
+    resolveProviderPresetId(OPENROUTER_MODEL_SLUG.OWL_ALPHA, "https://openrouter.ai/api/v1"),
+    "openrouter-owl-stealth"
+  );
+});
+
+test("listProviderPresetsForSettings includes custom and owl stealth", () => {
+  const presets = listProviderPresetsForSettings();
+  assert.ok(presets.some((p) => p.id === PROVIDER_PRESET_CUSTOM_ID));
+  assert.ok(presets.some((p) => p.id === "openrouter-owl-stealth"));
 });
 
 
