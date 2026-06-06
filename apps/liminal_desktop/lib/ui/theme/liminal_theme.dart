@@ -10,7 +10,10 @@ ThemeData buildLiminalTheme({PersonaUiTheme? persona}) {
   final fonts = LiminalFontSet.resolve(p);
   final tokens = LiminalTokens.fromPersona(p, fonts: fonts);
   final scale = p.densityScale;
-  final baseText = fonts.textTheme(tokens, scale);
+  // Font sizing combines density with the persona's open type-scale token, so
+  // a "spacious + larger type" persona reads distinctly from a tight one.
+  final textScale = scale * p.typeScale;
+  final baseText = fonts.textTheme(tokens, textScale);
 
   final colorScheme = ColorScheme.dark(
     primary: tokens.accent,

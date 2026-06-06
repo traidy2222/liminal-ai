@@ -55,6 +55,23 @@ export type PersonaUiPanelLayout = "both" | "left" | "right" | "none";
 /** Where the input area is docked. */
 export type PersonaUiInputDock = "bottom-bar" | "floating" | "inline";
 
+/**
+ * Structured, cross-platform background gradient (Phase 1 open token).
+ *
+ * Replaces the web-only `backgroundCss` string with data that both the web
+ * (→ CSS) and Flutter (→ `LinearGradient`/`RadialGradient`) can render. Stops
+ * are ordered by `at` ∈ [0,1]; `angle` (degrees) applies to linear only.
+ */
+export interface PersonaGradientStop {
+  color: string;
+  at: number;
+}
+export interface PersonaGradient {
+  kind: "linear" | "radial";
+  angle?: number;
+  stops: PersonaGradientStop[];
+}
+
 export type PersonaCategoryKey =
   | "shell"
   | "file"
@@ -132,6 +149,16 @@ export interface PersonaUiThemeV2 {
   headerStyle: PersonaUiHeaderStyle;
   panelLayout: PersonaUiPanelLayout;
   inputDock: PersonaUiInputDock;
+  // ── Open-token overrides (Phase 1) ───────────────────────────────────────
+  // When present, these continuous values take precedence over the coarse enum
+  // above; when absent, consumers derive the value from the enum (back-compat).
+  // All are clamped to legible/usable ranges at normalization time.
+  densityScale?: number;   // overrides `density`; clamped 0.8–1.25
+  radiusPx?: number;       // overrides `radius`; clamped 0–28 (px)
+  motionScale?: number;    // global motion multiplier; clamped 0.4–1.6 (1 = preset baseline)
+  typeScale?: number;      // global font-size multiplier; clamped 0.85–1.3
+  glowIntensity?: number;  // accent glow / shadow strength; clamped 0–1
+  gradient?: PersonaGradient; // structured cross-platform background gradient
 }
 
 /** Canonical defaults (web + document CSS). */
@@ -356,6 +383,52 @@ function sanitizeAvatarGlyph(raw: unknown): string | undefined {
   return [...t].slice(0, 3).join("") || undefined;
 }
 
+/** Clamp a finite number into [min,max]; return undefined for non-numbers. */
+function clampOptionalNumber(raw: unknown, min: number, max: number): number | undefined {
+  const n = typeof raw === "number" ? raw : typeof raw === "string" ? Number(raw) : NaN;
+  if (!Number.isFinite(n)) return undefined;
+  return Math.max(min, Math.min(max, n));
+}
+
+/** Open-token clamp ranges, exported so consumers derive identical bounds. */
+export const PERSONA_OPEN_TOKEN_RANGES = {
+  densityScale: [0.8, 1.25] as const,
+  radiusPx: [0, 28] as const,
+  motionScale: [0.4, 1.6] as const,
+  typeScale: [0.85, 1.3] as const,
+  glowIntensity: [0, 1] as const,
+} as const;
+
+/** Validate a structured gradient: 2–6 hex stops with ordered `at` ∈ [0,1]. */
+function normalizeGradient(raw: unknown): PersonaGradient | undefined {
+  if (!raw || typeof raw !== "object") return undefined;
+  const o = raw as Record<string, unknown>;
+  const kind = o["kind"] === "radial" ? "radial" : o["kind"] === "linear" ? "linear" : undefined;
+  if (!kind) return undefined;
+  const rawStops = Array.isArray(o["stops"]) ? o["stops"] : [];
+  const stops: PersonaGradientStop[] = [];
+  for (const s of rawStops) {
+    if (!s || typeof s !== "object") continue;
+    const so = s as Record<string, unknown>;
+    if (!parseHexToRgb(typeof so["color"] === "string" ? (so["color"] as string) : "")) continue;
+    const at = clampOptionalNumber(so["at"], 0, 1);
+    if (at === undefined) continue;
+    stops.push({ color: sanitizeHex(so["color"], DEFAULT_PERSONA_UI_THEME.surfaceTint), at });
+    if (stops.length >= 6) break;
+  }
+  if (stops.length < 2) return undefined;
+  stops.sort((a, b) => a.at - b.at);
+  const angle = clampOptionalNumber(o["angle"], 0, 360);
+  return { kind, ...(angle !== undefined ? { angle } : {}), stops };
+}
+
+/** Render a structured gradient to a CSS string (web consumers). */
+export function gradientToCss(g: PersonaGradient): string {
+  const stops = g.stops.map((s) => `${s.color} ${Math.round(s.at * 100)}%`).join(", ");
+  if (g.kind === "radial") return `radial-gradient(circle at 50% 0%, ${stops})`;
+  return `linear-gradient(${Math.round(g.angle ?? 135)}deg, ${stops})`;
+}
+
 function normalizeCategoryTint(raw: unknown): PersonaCategoryTint | undefined {
   if (!raw || typeof raw !== "object") return undefined;
   const o = raw as Record<string, unknown>;
@@ -497,7 +570,49 @@ export function validateAndNormalizePersonaUiTheme(
     headerStyle: normalizeEnum(o["headerStyle"], HEADER_STYLE_VALUES, DEFAULT_PERSONA_UI_THEME.headerStyle),
     panelLayout: normalizeEnum(o["panelLayout"], PANEL_LAYOUT_VALUES, DEFAULT_PERSONA_UI_THEME.panelLayout),
     inputDock: normalizeEnum(o["inputDock"], INPUT_DOCK_VALUES, DEFAULT_PERSONA_UI_THEME.inputDock),
+    ...normalizeOpenTokens(o),
   };
+}
+
+/** Normalize the optional Phase-1 open tokens; omits any that are absent/invalid. */
+function normalizeOpenTokens(o: Record<string, unknown>): Partial<PersonaUiThemeV2> {
+  const R = PERSONA_OPEN_TOKEN_RANGES;
+  const out: Partial<PersonaUiThemeV2> = {};
+  const densityScale = clampOptionalNumber(o["densityScale"], R.densityScale[0], R.densityScale[1]);
+  if (densityScale !== undefined) out.densityScale = densityScale;
+  const radiusPx = clampOptionalNumber(o["radiusPx"], R.radiusPx[0], R.radiusPx[1]);
+  if (radiusPx !== undefined) out.radiusPx = radiusPx;
+  const motionScale = clampOptionalNumber(o["motionScale"], R.motionScale[0], R.motionScale[1]);
+  if (motionScale !== undefined) out.motionScale = motionScale;
+  const typeScale = clampOptionalNumber(o["typeScale"], R.typeScale[0], R.typeScale[1]);
+  if (typeScale !== undefined) out.typeScale = typeScale;
+  const glowIntensity = clampOptionalNumber(o["glowIntensity"], R.glowIntensity[0], R.glowIntensity[1]);
+  if (glowIntensity !== undefined) out.glowIntensity = glowIntensity;
+  const gradient = normalizeGradient(o["gradient"]);
+  if (gradient !== undefined) out.gradient = gradient;
+  return out;
+}
+
+/** Effective density multiplier: open token if set, else derived from the enum. */
+export function resolveDensityScale(theme: PersonaUiThemeV2): number {
+  if (theme.densityScale !== undefined) return theme.densityScale;
+  return theme.density === "compact" ? 0.88 : theme.density === "spacious" ? 1.12 : 1;
+}
+
+/** Effective corner radius in px: open token if set, else derived from the enum. */
+export function resolveRadiusPx(theme: PersonaUiThemeV2): number {
+  if (theme.radiusPx !== undefined) return theme.radiusPx;
+  return theme.radius === "sharp" ? 2 : theme.radius === "pill" ? 14 : 6;
+}
+
+/** Effective global motion multiplier: open token if set, else 1 (preset baseline). */
+export function resolveMotionScale(theme: PersonaUiThemeV2): number {
+  return theme.motionScale ?? 1;
+}
+
+/** Effective global font-size multiplier: open token if set, else 1. */
+export function resolveTypeScale(theme: PersonaUiThemeV2): number {
+  return theme.typeScale ?? 1;
 }
 
 /** Shift hue on RGB for category harmonics (degrees). */
@@ -692,10 +807,19 @@ function resolveFontStacks(pair: PersonaUiFontPair, typography: PersonaUiTypogra
 export function themeToCssVars(theme: PersonaUiThemeV2): PersonaCssVarMap {
   const t = validateAndNormalizePersonaUiTheme(theme);
   const sem = derivePersonaSemanticTokens(t);
-  const m = motionPresetToCssMultipliers(t.motion);
-  const densityScale =
-    t.density === "compact" ? 0.88 : t.density === "spacious" ? 1.12 : 1;
-  const radiusPx = t.radius === "sharp" ? 2 : t.radius === "pill" ? 14 : 6;
+  const presetMotion = motionPresetToCssMultipliers(t.motion);
+  // Open motion token scales the preset baseline (lower = faster).
+  const motionScale = resolveMotionScale(t);
+  const m = {
+    orbIdle: presetMotion.orbIdle * motionScale,
+    orbSpin: presetMotion.orbSpin * motionScale,
+    orbThink: presetMotion.orbThink * motionScale,
+    orbApprov: presetMotion.orbApprov * motionScale,
+    blink: presetMotion.blink * motionScale,
+  };
+  const densityScale = resolveDensityScale(t);
+  const radiusPx = resolveRadiusPx(t);
+  const typeScale = resolveTypeScale(t);
   const fonts = resolveFontStacks(t.fontPair, t.typography);
   const fontMono = fonts.mono;
   const fontBody = fonts.body;
@@ -731,6 +855,11 @@ export function themeToCssVars(theme: PersonaUiThemeV2): PersonaCssVarMap {
     "--lim-surface-rgb": rgbTriplet(parseHexToRgb(t.surfaceTint)!),
     "--lim-density-scale": String(densityScale),
     "--lim-radius": `${radiusPx}px`,
+    "--lim-type-scale": String(typeScale),
+    "--lim-glow": String(t.glowIntensity ?? 0.35),
+    "--lim-bg-gradient": t.gradient
+      ? gradientToCss(t.gradient)
+      : t.backgroundCss ?? "none",
     "--lim-font-body": fontBody,
     "--lim-font-mono": fontMono,
     "--lim-font-heading": fonts.heading,

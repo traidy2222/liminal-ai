@@ -28,6 +28,10 @@ class LiminalTokens {
     required this.fontFamily,
     required this.fontFamilyMono,
     required this.fontFamilyHeading,
+    required this.typeScale,
+    required this.glow,
+    required this.messageStyle,
+    this.gradient,
   });
 
   final Color accent;
@@ -52,6 +56,11 @@ class LiminalTokens {
   final String? fontFamily;
   final String fontFamilyMono;
   final String? fontFamilyHeading;
+  final double typeScale;
+  final double glow;
+  /// `bubble` | `flat` | `transcript` — how message rows are rendered.
+  final String messageStyle;
+  final PersonaGradient? gradient;
 
   static const _bg = Color(0xFF020408);
 
@@ -81,6 +90,10 @@ class LiminalTokens {
       fontFamily: f.themeFontFamily,
       fontFamilyMono: f.monoFamily,
       fontFamilyHeading: f.headingFamily,
+      typeScale: persona.typeScale,
+      glow: persona.glowIntensity ?? 0.35,
+      messageStyle: persona.messageStyle,
+      gradient: persona.gradient,
     );
   }
 

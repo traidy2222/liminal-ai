@@ -8,7 +8,8 @@ export type PersonaArtifactId =
   | "soul_voice"
   | "soul_stance"
   | "soul_rails"
-  | "ui_theme";
+  | "ui_theme"
+  | "ui_copy";
 
 export type PersonaArtifactStatus = "pending" | "streaming" | "done" | "error";
 
@@ -39,6 +40,7 @@ export const PERSONA_ARTIFACT_LABELS: Record<PersonaArtifactId, string> = {
   soul_stance: "soul/stance.md",
   soul_rails: "soul/rails.md",
   ui_theme: "ui_theme.json",
+  ui_copy: "ui_copy.json",
 };
 
 export const PERSONA_ARTIFACT_ORDER: readonly PersonaArtifactId[] = [
@@ -48,4 +50,5 @@ export const PERSONA_ARTIFACT_ORDER: readonly PersonaArtifactId[] = [
   "soul_stance",
   "soul_rails",
   "ui_theme",
+  "ui_copy",
 ];
