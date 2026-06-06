@@ -57,6 +57,7 @@ function artifactPaths() {
     legacyLexiconPath: join(dir, "style_lexicon.json"),
     manifestPath: join(dir, "manifest.json"),
     uiThemePath: join(dir, "ui_theme.json"),
+    uiCopyPath: join(dir, "ui_copy.json"),
   };
 }
 
@@ -99,6 +100,9 @@ export async function writePersonaArtifact(
     case "ui_theme":
       await writeFile(paths.uiThemePath, content, "utf8");
       break;
+    case "ui_copy":
+      await writeFile(paths.uiCopyPath, content, "utf8");
+      break;
     default:
       break;
   }
@@ -138,6 +142,7 @@ export async function finalizePersonaManifest(args: {
           soulRails: "soul/rails.md",
           soulLiving: "soul/living.md",
           uiTheme: "ui_theme.json",
+          uiCopy: "ui_copy.json",
         },
       },
       null,

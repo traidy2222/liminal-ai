@@ -3,7 +3,10 @@ import type { PersonaArtifactId } from "@liminal/core/persona-bootstrap-progress
 import {
   migratePersonaUiTheme,
   personaActivePaths,
+  sanitizePersonaUiCopy,
+  DEFAULT_PERSONA_UI_COPY,
   type PersonaUiThemeV2,
+  type PersonaUiCopy,
 } from "@liminal/core";
 import { existsSync } from "node:fs";
 import type { RuntimePersonaControls } from "@liminal/core";
@@ -15,6 +18,7 @@ import {
   generatePersonaBundle,
   generatePersonaSoulArtifacts,
   generatePersonaUiTheme,
+  generatePersonaUiCopy,
   type PersonaGenerationBundle,
   type PersonaSoulBundle,
 } from "./persona_generator.js";
@@ -66,6 +70,7 @@ export interface PersonaArtifactsPaths {
   legacyLexiconPath: string;
   manifestPath: string;
   uiThemePath: string;
+  uiCopyPath: string;
 }
 
 export function getPersonaArtifactsPaths(): PersonaArtifactsPaths {
@@ -106,6 +111,7 @@ export function getPersonaArtifactsPaths(): PersonaArtifactsPaths {
     legacyLexiconPath: join(dir, "style_lexicon.json"),
     manifestPath: join(dir, "manifest.json"),
     uiThemePath: join(dir, "ui_theme.json"),
+    uiCopyPath: join(dir, "ui_copy.json"),
   };
 }
 
@@ -308,6 +314,18 @@ export async function generatePersonaFromInput(
     throw err;
   });
 
+  // In-voice interface microcopy (best-effort; falls back to defaults). Runs
+  // after soul so it can draw on the finished voice excerpt.
+  progress?.("ui_copy_start", "Writing interface copy in voice…");
+  const uiCopy = await generatePersonaUiCopy(
+    profile,
+    soulBundle,
+    openRouterApiKey,
+    model,
+    baseURL,
+    preview
+  ).catch(() => DEFAULT_PERSONA_UI_COPY);
+
   if (streamArtifacts && preview) {
     progress?.("artifact_manifest", "Writing manifest and living notes…");
     await finalizePersonaManifest({
@@ -320,6 +338,11 @@ export async function generatePersonaFromInput(
         `**Operating context at persona creation**\n\nCapability domains: ${harnessCapabilityHint}.`
       ).catch(() => undefined);
     }
+    await writeFile(
+      getPersonaArtifactsPaths().uiCopyPath,
+      JSON.stringify(uiCopy, null, 2),
+      "utf8"
+    ).catch(() => undefined);
     progress?.("artifact_ready", "Persona artifacts ready.");
     progress?.("ui_theme_ready", "HUD theme saved.");
     return bundle;
@@ -329,6 +352,7 @@ export async function generatePersonaFromInput(
   await persistPersonaArtifacts(coreInput, profile, soulBundle, bundle.defaultControls);
   const paths = getPersonaArtifactsPaths();
   await writeFile(paths.uiThemePath, JSON.stringify(uiTheme, null, 2), "utf8");
+  await writeFile(paths.uiCopyPath, JSON.stringify(uiCopy, null, 2), "utf8").catch(() => undefined);
   if (harnessCapabilityHint) {
     await appendPersonaLivingSection(
       `**Operating context at persona creation**\n\nCapability domains: ${harnessCapabilityHint}.`
@@ -361,6 +385,20 @@ export async function loadPersonaUiThemeFromWorkspace(): Promise<PersonaUiThemeV
     const raw = await readFile(paths.uiThemePath, "utf8");
     const parsed = JSON.parse(raw) as unknown;
     return migratePersonaUiTheme(parsed);
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Load sanitized persona UI copy from `persona/active/ui_copy.json` if present.
+ * Returns null when absent (callers fall back to {@link DEFAULT_PERSONA_UI_COPY}).
+ */
+export async function loadPersonaUiCopyFromWorkspace(): Promise<PersonaUiCopy | null> {
+  try {
+    const paths = getPersonaArtifactsPaths();
+    const raw = await readFile(paths.uiCopyPath, "utf8");
+    return sanitizePersonaUiCopy(JSON.parse(raw));
   } catch {
     return null;
   }

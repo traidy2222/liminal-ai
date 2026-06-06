@@ -434,6 +434,7 @@ export {
   applyPersonaProfileToHarness,
   clearPersistedPersonaArtifacts,
   loadPersonaUiThemeFromWorkspace,
+  loadPersonaUiCopyFromWorkspace,
   loadPersonaProfileFromWorkspace,
   appendPersonaLivingSection,
   buildPersonaSoulMarkdownFromSlices,
@@ -454,6 +455,15 @@ export {
 } from "./audio_attachments.js";
 export type { AudioAttachmentInput, AudioAttachmentRecord } from "./audio_attachments.js";
 export { saveTtsClip, readTtsClip, ttsClipAudioUrl } from "./tts_clips.js";
+export {
+  handleAudioUpload,
+  handleTranscribe,
+  handleTtsPost,
+  readTtsClipBytes,
+  sanitizeAudioFilename,
+  type AudioBridgeContext,
+  type AudioHandlerResult,
+} from "./audio_http_handlers.js";
 export type { SavedTtsClip } from "./tts_clips.js";
 export { defineTool } from "./helpers.js";
 export {

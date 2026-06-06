@@ -137,6 +137,10 @@ export const recallRelevantTool = defineTool({
         description: "Hypothetical answer text for semantic embedding only (optional)",
       },
       k: { type: "number", description: "Max results per source (default 8, max 30)" },
+      max_results: {
+        type: "number",
+        description: "Alias for k — max results per source (default 8, max 30)",
+      },
       scope: {
         type: "string",
         enum: ["notes", "vault", "both"],

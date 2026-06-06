@@ -6,10 +6,14 @@ import {
   withProviderRequestSpacing,
   effectiveHarnessEnvRaw,
   validateAndNormalizePersonaUiTheme,
+  repairPersonaUi,
   derivePersonaShellHeuristics,
   deriveDeterministicPersonaPalette,
   buildOpenRouterAttributionHeaders,
+  sanitizePersonaUiCopy,
+  DEFAULT_PERSONA_UI_COPY,
   type PersonaUiThemeV2,
+  type PersonaUiCopy,
   type RuntimePersonaControls,
 } from "@liminal/core";
 import type { PersonaArtifactId } from "@liminal/core/persona-bootstrap-progress";
@@ -2173,6 +2177,17 @@ function toStringArray(value: unknown, maxLen = 120): string[] {
 /**
  * Structured HUD colors + motion for web/TUI. Presentation-only; normalized for contrast.
  */
+/**
+ * Normalize model output and then run it through the invariants repair gate so
+ * the persisted theme is guaranteed conformant (contrast, danger/success
+ * distinctness, identity anchor) — the open-token freedom never ships a broken
+ * UI. Deterministic fallback palettes pass through unchanged.
+ */
+function finalizePersonaUiTheme(raw: unknown, name: string): PersonaUiThemeV2 {
+  const normalized = validateAndNormalizePersonaUiTheme(raw, name);
+  return repairPersonaUi(normalized).theme;
+}
+
 export async function generatePersonaUiTheme(
   profile: PersonaProfile,
   soulBundle: PersonaSoulBundle,
@@ -2252,7 +2267,14 @@ Return JSON with exactly these keys:
 - headerStyle: bar|pill|none
 - panelLayout: both|left|right|none
 - inputDock: bottom-bar|floating|inline
-- categoryTint (optional object): keys shell,file,web,memory,vault,code,git,markets,vision,docs,orchestration,context,other → hex`;
+- categoryTint (optional object): keys shell,file,web,memory,vault,code,git,markets,vision,docs,orchestration,context,other → hex
+OPEN TOKENS (optional — continuous values that override the coarse enums; omit to use the enum). Use these to fine-tune the feel beyond the presets:
+- densityScale (number 0.8–1.25): spacing multiplier (lower = tighter)
+- radiusPx (number 0–28): exact corner radius
+- motionScale (number 0.4–1.6): animation speed multiplier (lower = faster/snappier)
+- typeScale (number 0.85–1.3): global font-size multiplier
+- glowIntensity (number 0–1): accent glow/shadow strength
+- gradient (optional object): structured background gradient { "kind":"linear"|"radial", "angle":number(deg, linear only), "stops":[{"color":"#hex","at":0..1}, …] } — 2–6 stops, prefer over backgroundCss for cross-platform`;
 
   if (preview && personaGenerationStreamEnabled()) {
     preview.setStatus("ui_theme", "streaming");
@@ -2271,7 +2293,7 @@ Return JSON with exactly these keys:
         }
       );
       const parsed = JSON.parse(parseFirstJsonObject(buf)) as Record<string, unknown>;
-      const theme = validateAndNormalizePersonaUiTheme(
+      const theme = finalizePersonaUiTheme(
         { v: 2, ...shellHints, ...deterministicPalette, ...parsed },
         profile.name
       );
@@ -2313,7 +2335,7 @@ Return JSON with exactly these keys:
     }
     return theme;
   }
-  const theme = validateAndNormalizePersonaUiTheme(
+  const theme = finalizePersonaUiTheme(
     { v: 2, ...shellHints, ...deterministicPalette, ...(res.parsed as Record<string, unknown>) },
     profile.name
   );
@@ -2322,4 +2344,80 @@ Return JSON with exactly these keys:
     await preview.completeArtifact("ui_theme", json);
   }
   return theme;
+}
+
+/** End-of-bootstrap microcopy generation toggle (default on; cheap fast-model call). */
+export function personaUiCopyEnabled(): boolean {
+  return effectiveHarnessEnvRaw("AGENT_PERSONA_UI_COPY")?.trim() !== "0";
+}
+
+/**
+ * Generate the app's interface text *in the persona's voice* (composer
+ * placeholder, send/stop labels, empty-state, thinking/connecting status,
+ * error prefix). Always returns sanitized, length-clamped copy — defaults on
+ * any failure, so the chrome is never broken or empty. One fast-model call.
+ */
+export async function generatePersonaUiCopy(
+  profile: PersonaProfile,
+  soulBundle: PersonaSoulBundle,
+  apiKey: string,
+  model: string,
+  baseURL: string,
+  preview?: PersonaGenerationPreview
+): Promise<PersonaUiCopy> {
+  const finalize = async (copy: PersonaUiCopy): Promise<PersonaUiCopy> => {
+    if (preview) {
+      await preview.completeArtifact("ui_copy", JSON.stringify(copy, null, 2));
+    }
+    return copy;
+  };
+
+  if (!personaUiCopyEnabled()) {
+    return finalize(DEFAULT_PERSONA_UI_COPY);
+  }
+
+  const excerpt = buildSoulExcerptForUiTheme(soulBundle, 1400);
+  const inferModel = personaInferModel(model);
+  const client = new OpenAI({ apiKey, baseURL });
+  const systemPrompt =
+    "You write tiny interface microcopy IN A SPECIFIC PERSONA'S VOICE. Return JSON only. " +
+    "Each value is plain UI text — no markup, no emoji unless the voice clearly calls for it, no quotes around the whole string. " +
+    "Keep it natural for a chat app's chrome: short, in-character, never breaking the fourth wall about being an AI or a theme. " +
+    "A noir analyst's composer placeholder is 'State your query.', not 'Type a message…'.";
+  const userPrompt = `Persona: ${profile.name}
+Voice/tone: ${JSON.stringify({ tone: profile.tone, formality: profile.speechStyle.formality, rhythm: profile.speechStyle.rhythm })}
+Soul excerpt:
+"""${excerpt}"""
+
+Return JSON with these keys (each a short in-voice string):
+- composerPlaceholder (≤80 chars): empty input-box placeholder
+- sendLabel (≤18): the send button/action label
+- stopLabel (≤18): the stop-generation label
+- emptyTitle (≤60): heading on a fresh empty chat
+- emptyBody (≤140): one line under that heading
+- thinkingLabel (≤28): status while the agent is working (e.g. "Thinking…")
+- connectingLabel (≤28): status while connecting
+- errorPrefix (≤48): short prefix shown before an error line
+- newChatLabel (≤24): label for starting a new conversation`;
+
+  try {
+    const res = await completeChatJson(client, {
+      model: inferModel,
+      messages: [
+        { role: "system", content: systemPrompt },
+        { role: "user", content: userPrompt },
+      ],
+      maxTokens: 420,
+      temperature: 0.5,
+    });
+    if (!res.ok) {
+      preview?.emit("ui_copy_fallback", "Microcopy model unavailable — using default labels.");
+      return finalize(DEFAULT_PERSONA_UI_COPY);
+    }
+    return finalize(sanitizePersonaUiCopy(res.parsed));
+  } catch (err) {
+    console.warn("[persona] UI copy LLM failed, using defaults:", err);
+    preview?.emit("ui_copy_fallback", "Microcopy model failed — using default labels.");
+    return finalize(DEFAULT_PERSONA_UI_COPY);
+  }
 }
