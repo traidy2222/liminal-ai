@@ -1,5 +1,8 @@
+import 'dart:math' as math;
+
 import 'package:flutter/material.dart';
 
+import '../../models/persona_ui_theme.dart';
 import '../theme/liminal_theme_extension.dart';
 
 /// HUD grid + top glow (web `backgroundLayers` for hud/grid shell).
@@ -7,6 +10,35 @@ class LiminalBackground extends StatelessWidget {
   const LiminalBackground({super.key, required this.child});
 
   final Widget child;
+
+  /// Build the base fill: a persona-authored structured gradient when present,
+  /// else the default surface→background vertical wash.
+  Gradient _baseGradient(PersonaGradient? g, Color surface, Color background) {
+    if (g == null || g.stops.length < 2) {
+      return LinearGradient(
+        begin: Alignment.topCenter,
+        end: Alignment.bottomCenter,
+        colors: [surface, background],
+      );
+    }
+    if (g.kind == 'radial') {
+      return RadialGradient(
+        center: const Alignment(0, -0.6),
+        radius: 1.2,
+        colors: g.colors,
+        stops: g.positions,
+      );
+    }
+    final rad = ((g.angle ?? 135) - 90) * math.pi / 180.0;
+    final dx = math.cos(rad);
+    final dy = math.sin(rad);
+    return LinearGradient(
+      begin: Alignment(-dx, -dy),
+      end: Alignment(dx, dy),
+      colors: g.colors,
+      stops: g.positions,
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -16,11 +48,7 @@ class LiminalBackground extends StatelessWidget {
       children: [
         DecoratedBox(
           decoration: BoxDecoration(
-            gradient: LinearGradient(
-              begin: Alignment.topCenter,
-              end: Alignment.bottomCenter,
-              colors: [lim.surface, lim.background],
-            ),
+            gradient: _baseGradient(lim.gradient, lim.surface, lim.background),
           ),
         ),
         if (lim.showGrid)
@@ -33,7 +61,7 @@ class LiminalBackground extends StatelessWidget {
               center: const Alignment(0, -0.85),
               radius: 1.1,
               colors: [
-                lim.accent.withValues(alpha: 0.14),
+                lim.accent.withValues(alpha: (0.14 * (lim.glow / 0.35)).clamp(0.0, 0.4).toDouble()),
                 Colors.transparent,
               ],
             ),

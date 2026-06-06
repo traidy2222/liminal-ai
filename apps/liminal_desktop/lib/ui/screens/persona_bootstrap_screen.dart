@@ -43,6 +43,7 @@ class _PersonaBootstrapScreenState extends State<PersonaBootstrapScreen> {
           TextField(
             controller: _input,
             enabled: !c.setupSaving,
+            onChanged: (_) => setState(() {}),
             minLines: 4,
             maxLines: 8,
             decoration: const InputDecoration(

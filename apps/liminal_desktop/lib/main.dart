@@ -1,6 +1,8 @@
-import 'package:flutter/material.dart';
-import 'package:path/path.dart' as p;
 import 'dart:io';
+
+import 'package:flutter/material.dart';
+import 'package:just_audio_media_kit/just_audio_media_kit.dart';
+import 'package:path/path.dart' as p;
 
 import 'app/liminal_app.dart';
 import 'sidecar/launcher.dart';
@@ -8,6 +10,8 @@ import 'state/app_controller.dart';
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
+  // just_audio needs a native backend on Windows/Linux or playback is silent.
+  JustAudioMediaKit.ensureInitialized();
   final repoRoot = detectRepoRoot();
   final controller = AppController(repoRoot: repoRoot);
   runApp(LiminalApp(controller: controller));

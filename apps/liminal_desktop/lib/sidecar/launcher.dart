@@ -90,6 +90,13 @@ SidecarLocations? resolveSidecarLocations({String? repoRoot}) {
     return SidecarLocations(scriptPath: fromEnvScript, repoRoot: root);
   }
 
+  // Dev `flutter run` passes an explicit monorepo root — prefer fresh `dist/`
+  // over a stale `liminald/repo` bundle copied beside an older Release build.
+  if (repoRoot != null && repoRoot.isNotEmpty) {
+    final fromRepo = _locationsFromRepoRoot(repoRoot);
+    if (fromRepo != null) return fromRepo;
+  }
+
   final exeDir = executableDirectory();
   if (exeDir != null) {
     final bundled = readBundledLocations(exeDir);
@@ -164,6 +171,25 @@ class SidecarReadyLine {
   final int protocolVersion;
 }
 
+/// Best-effort kill for a prior `liminald` left running after a hard app exit.
+Future<void> killStaleSidecarFromHandshake() async {
+  final existing = readHandshakeSync();
+  if (existing == null) return;
+  try {
+    if (Platform.isWindows) {
+      await Process.run(
+        'taskkill',
+        ['/PID', '${existing.pid}', '/T', '/F'],
+        runInShell: true,
+      );
+    } else {
+      await Process.run('kill', ['-TERM', '${existing.pid}']);
+    }
+  } catch (_) {
+    /* process already gone */
+  }
+}
+
 /// Spawn `node <sidecar/dist/index.js>` and wait until it is reachable.
 Future<SidecarProcess> launchSidecar({
   String? repoRoot,
@@ -178,6 +204,8 @@ Future<SidecarProcess> launchSidecar({
         pid: existing.pid,
       );
     }
+  } else {
+    await killStaleSidecarFromHandshake();
   }
 
   final locations = resolveSidecarLocations(repoRoot: repoRoot);

@@ -1,7 +1,11 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../app/app_scope.dart';
+import '../../models/persona_ui_layout.dart';
+import '../../models/persona_ui_theme.dart';
 import '../../routing/routes.dart';
 import '../../state/app_controller.dart';
 import '../theme/liminal_theme_extension.dart';
@@ -22,6 +26,10 @@ class HomeScreen extends StatelessWidget {
     final chatId = host.activeChatId;
     final session = chatId != null ? host.sessionFor(chatId) : null;
     final lim = LiminalTheme.of(context);
+    final copy = host.config?.resolvedCopy;
+    final layout = PersonaLayoutSpec.fromTheme(
+      host.config?.resolvedTheme ?? PersonaUiTheme.liminalDefault,
+    );
 
     return LiminalShell(
       drawer: ChatDrawer(
@@ -96,10 +104,28 @@ class HomeScreen extends StatelessWidget {
                   )
                 : ListenableBuilder(
                     listenable: Listenable.merge([session, host]),
-                    builder: (context, _) => StickyMessageList(
-                      messages: session.messages,
-                      showRawHarness: host.showRawHarness,
-                    ),
+                    builder: (context, _) {
+                      // Empty conversation → persona-voiced empty state.
+                      if (session.messages.isEmpty) {
+                        return _EmptyState(
+                          title: copy?.emptyTitle ?? 'Ready when you are',
+                          body: copy?.emptyBody ?? 'Ask anything, or start with a task.',
+                        );
+                      }
+                      final list = StickyMessageList(
+                        messages: session.messages,
+                        showRawHarness: host.showRawHarness,
+                      );
+                      // Open-token layout: cap the reading column for
+                      // studio/minimal personas; fill for hud/terminal.
+                      if (layout.transcriptMaxWidth <= 0) return list;
+                      return Center(
+                        child: ConstrainedBox(
+                          constraints: BoxConstraints(maxWidth: layout.transcriptMaxWidth),
+                          child: list,
+                        ),
+                      );
+                    },
                   ),
           ),
           ListenableBuilder(
@@ -126,10 +152,21 @@ class HomeScreen extends StatelessWidget {
             builder: (context, _) => Composer(
               enabled: chatId != null,
               busy: session?.busy ?? false,
-              onSend: (text, attachments) => host.sendMessage(
+              config: host.config,
+              dictation: host.dictation,
+              speechOutput: host.speechOutput,
+              dictationNotice: host.dictationNotice,
+              onDismissDictationNotice: host.dismissDictationNotice,
+              onDictationAutoSend: host.handleDictationAutoSend,
+              onSend: (text, attachments) {
+                unawaited(
+                  host.sendMessage(
                     text,
                     attachments: attachments,
+                    liveDictation: host.dictationSessionActive,
                   ),
+                );
+              },
               onAbort: host.abortTurn,
             ),
           ),
@@ -147,3 +184,38 @@ class HomeScreen extends StatelessWidget {
 }
 
 class _EmptyListenable extends ChangeNotifier {}
+
+/// Persona-voiced empty conversation state.
+class _EmptyState extends StatelessWidget {
+  const _EmptyState({required this.title, required this.body});
+
+  final String title;
+  final String body;
+
+  @override
+  Widget build(BuildContext context) {
+    final lim = LiminalTheme.of(context);
+    final theme = Theme.of(context);
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 32),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(
+              title,
+              textAlign: TextAlign.center,
+              style: theme.textTheme.headlineMedium?.copyWith(color: lim.text),
+            ),
+            const SizedBox(height: 10),
+            Text(
+              body,
+              textAlign: TextAlign.center,
+              style: theme.textTheme.bodyMedium?.copyWith(color: lim.textMuted, height: 1.4),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}

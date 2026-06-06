@@ -2,6 +2,9 @@ import 'dart:async';
 
 import 'package:flutter/foundation.dart';
 
+import '../audio/dictation_controller.dart';
+import '../audio/sidecar_audio_client.dart';
+import '../audio/speech_output.dart';
 import '../core/connection_phase.dart';
 import '../core/protocol_client.dart';
 import '../core/session_registry.dart';
@@ -23,11 +26,25 @@ export '../core/connection_phase.dart' show ConnectionPhase, AppConnectionPhase;
 /// Per-chat transcript state lives in [ChatSessionController] instances via
 /// [SessionRegistry] so streaming turns do not rebuild the whole app tree.
 class AppController extends ChangeNotifier {
-  AppController({this.repoRoot}) : _sidecar = SidecarLifecycle(repoRoot: repoRoot) {
+  AppController({this.repoRoot})
+      : _sidecar = SidecarLifecycle(repoRoot: repoRoot),
+        speechOutput = SpeechOutput(),
+        dictation = DictationController() {
     _protocol.onGlobalFrame = _onGlobalFrame;
-    _protocol.onChatFrame = (chatId, event, data) {
-      _sessions.dispatch(chatId, event, data);
+    _protocol.onChatFrame = _onChatFrame;
+    dictation.onSessionActiveChange = _onDictationSessionChange;
+    dictation.onCaptureActiveChange = _onDictationCaptureChange;
+    dictation.shouldBlockSpeechCapture = () => speechOutput.shouldBlockMicCapture();
+    dictation.onBargeIn = speechOutput.interrupt;
+    speechOutput.onPlaybackHoldChange = (hold) {
+      if (hold) {
+        unawaited(dictation.suspendForTts());
+      } else {
+        unawaited(dictation.resumeAfterTts());
+      }
     };
+    speechOutput.addListener(notifyListeners);
+    dictation.addListener(notifyListeners);
   }
 
   final String? repoRoot;
@@ -56,6 +73,16 @@ class AppController extends ChangeNotifier {
   /// Harness internals in the transcript (trace, working state, retries). Tool
   /// activity rows always show; this only toggles verbose tool args/output.
   bool showRawHarness = false;
+
+  final DictationController dictation;
+  final SpeechOutput speechOutput;
+  bool dictationSessionActive = false;
+  bool dictationCaptureActive = false;
+  String? dictationNotice;
+  String? _pendingDictationMessage;
+
+  int? get sidecarPort => _sidecarPort;
+  String? get sidecarToken => _sidecarToken;
 
   void setShowRawHarness(bool value) {
     if (showRawHarness == value) return;
@@ -98,6 +125,7 @@ class AppController extends ChangeNotifier {
       await _protocol.connect(port: proc.port, token: proc.token);
       _syncAssetResolver();
       await _protocol.waitForSidecarReady();
+      _syncDictationAudioClient();
 
       phase = ConnectionPhase.connected;
       if (config == null) {
@@ -118,6 +146,113 @@ class AppController extends ChangeNotifier {
     if (json == null) return;
     config = AppConfig.fromJson(json);
     configLoading = false;
+    _syncVoiceFromConfig();
+  }
+
+  void _syncVoiceFromConfig() {
+    final cfg = config;
+    if (cfg == null) return;
+    speechOutput.setTtsConfigured(cfg.ttsEnabled);
+    dictation.endpointOptions = DictationEndpointOptions.fromAppConfig(
+      minRecordingMs: cfg.dictationMinRecordingMs,
+      silenceMsShort: cfg.dictationSilenceMsShort,
+      silenceMsLong: cfg.dictationSilenceMsLong,
+      maxRecordingMs: cfg.dictationMaxRecordingMs,
+      audioCue: cfg.dictationAudioCue,
+    );
+  }
+
+  SidecarAudioClient? _audioClientForActiveChat() {
+    final chatId = activeChatId;
+    final port = _sidecarPort;
+    final token = _sidecarToken;
+    if (chatId == null || port == null || token == null) return null;
+    return SidecarAudioClient(port: port, token: token, chatId: chatId);
+  }
+
+  void _syncDictationAudioClient() {
+    final client = _audioClientForActiveChat();
+    dictation.bindAudioClient(client);
+    speechOutput.setClipFetcher(
+      client == null ? null : (url) => client.fetchTtsClip(url),
+    );
+  }
+
+  void _onDictationSessionChange() {
+    dictationSessionActive = dictation.sessionActive;
+    if (dictationSessionActive) {
+      unawaited(speechOutput.unlockAudio());
+    } else {
+      speechOutput.flush();
+    }
+    notifyListeners();
+  }
+
+  void _onDictationCaptureChange(bool active) {
+    dictationCaptureActive = active;
+    speechOutput.setPauseWhenCapture(active);
+    notifyListeners();
+  }
+
+  void _onChatFrame(String chatId, String event, Map<String, dynamic> data) {
+    if (event == 'speech' && chatId == activeChatId && dictationSessionActive) {
+      _handleSpeechEvent(data);
+    }
+    if (event == 'turn_end' && chatId == activeChatId) {
+      unawaited(_flushPendingDictationSend());
+    }
+    if (event == 'tool_approval' &&
+        chatId == activeChatId &&
+        dictationSessionActive) {
+      dictationNotice = 'Approval required — review the prompt above.';
+      notifyListeners();
+    }
+    _sessions.dispatch(chatId, event, data);
+    if (event == 'transcript_replay' && chatId == activeChatId) {
+      notifyListeners();
+    }
+  }
+
+  void _handleSpeechEvent(Map<String, dynamic> data) {
+    final clipId = data['clipId'] as String? ?? '';
+    final text = data['text'] as String? ?? '';
+    final audioUrl = data['audioUrl'] as String? ?? '';
+    if (clipId.isEmpty || audioUrl.isEmpty) return;
+    // Server already synthesized — play whenever voice mode is on (matches web SSE).
+    speechOutput.enqueue(
+      SpeechQueueItem(clipId: clipId, text: text, audioUrl: audioUrl),
+    );
+  }
+
+  void dismissDictationNotice() {
+    dictationNotice = null;
+    notifyListeners();
+  }
+
+  /// `null` = sent; `queued` = held until turn ends; else error text.
+  Future<String?> handleDictationAutoSend(String fullMessage) async {
+    final trimmed = fullMessage.trim();
+    if (trimmed.isEmpty) return 'Empty transcript — nothing to send.';
+    if (activeSession?.busy == true) {
+      _pendingDictationMessage = trimmed;
+      dictationNotice = 'Agent busy — message queued.';
+      notifyListeners();
+      return 'queued';
+    }
+    dictationNotice = null;
+    final ok = await sendMessage(trimmed, liveDictation: true);
+    if (!ok) return 'Send failed — message kept in composer.';
+    return null;
+  }
+
+  Future<void> _flushPendingDictationSend() async {
+    final pending = _pendingDictationMessage;
+    if (pending == null) return;
+    if (activeSession?.busy == true) return;
+    _pendingDictationMessage = null;
+    dictationNotice = null;
+    notifyListeners();
+    await sendMessage(pending, liveDictation: dictationSessionActive);
   }
 
   Future<void> refreshConfig() async {
@@ -407,6 +542,7 @@ class AppController extends ChangeNotifier {
         activeChatId = frame.data['activeChatId'] as String?;
         chats = _parseChats(frame.data['chats']);
         _syncAssetResolver();
+        _syncDictationAudioClient();
         _syncPersonaPendingFromActiveChat();
         notifyListeners();
         return;
@@ -432,11 +568,25 @@ class AppController extends ChangeNotifier {
     activeChatId = data['activeChatId'] as String?;
     chats = _parseChats(data['chats']);
     _syncAssetResolver();
+    _syncDictationAudioClient();
     final appConfig = data['appConfig'];
     if (appConfig is Map) {
       _applyConfigFromJson(Map<String, dynamic>.from(appConfig));
     }
     sidecarReady = true;
+    final chatId = activeChatId;
+    if (chatId != null && _protocol.isConnected) {
+      // Sidecar also unicasts replay after `sidecar_ready`; this command is the
+      // fallback when that frame was missed or the payload was too large.
+      unawaited(_ensureTranscriptReplayed(chatId));
+    }
+  }
+
+  Future<void> _ensureTranscriptReplayed(String chatId) async {
+    final session = _sessions.get(chatId);
+    if (session != null && session.messages.isNotEmpty) return;
+    final result = await _protocol.send('replay_transcript', {'chatId': chatId});
+    if (result.ok) notifyListeners();
   }
 
   void _syncAssetResolver({String? chatId}) {
@@ -460,18 +610,8 @@ class AppController extends ChangeNotifier {
       }
     }
     if (active == null) return;
-          config = AppConfig(
-            apiKeyConfigured: config!.apiKeyConfigured,
-            personaBootstrapEnabled: config!.personaBootstrapEnabled,
+          config = config!.copyWith(
             personaBootstrapPending: active.awaitingPersonaBootstrap,
-            personaBootstrapAllowSkip: config!.personaBootstrapAllowSkip,
-            personaDisplayLabel: config!.personaDisplayLabel,
-            providerModel: config!.providerModel,
-            providerBaseUrl: config!.providerBaseUrl,
-            modelLockedByEnv: config!.modelLockedByEnv,
-            baseUrlLockedByEnv: config!.baseUrlLockedByEnv,
-            repoRoot: config!.repoRoot,
-            personaUiTheme: config!.personaUiTheme,
           );
   }
 
@@ -481,18 +621,23 @@ class AppController extends ChangeNotifier {
         .toList();
   }
 
-  Future<void> sendMessage(
+  Future<bool> sendMessage(
     String text, {
     bool freshContext = false,
     List<UserImageAttachment> attachments = const [],
+    bool liveDictation = false,
   }) async {
     final chatId = activeChatId;
     final trimmed = text.trim();
-    if (chatId == null || !_protocol.isConnected) return;
-    if (trimmed.isEmpty && attachments.isEmpty) return;
-    if (needsProviderSetup || needsPersonaBootstrap) return;
+    if (chatId == null || !_protocol.isConnected) return false;
+    if (trimmed.isEmpty && attachments.isEmpty) return false;
+    if (needsProviderSetup || needsPersonaBootstrap) return false;
 
     _syncAssetResolver(chatId: chatId);
+    unawaited(speechOutput.unlockAudio());
+    if (liveDictation || dictationSessionActive) {
+      speechOutput.flush();
+    }
 
     final previews = [
       for (final a in attachments) UserAttachmentPreview(name: a.name),
@@ -505,6 +650,7 @@ class AppController extends ChangeNotifier {
       'chatId': chatId,
       'message': trimmed,
       if (freshContext) 'freshContext': true,
+      if (liveDictation || dictationSessionActive) 'liveDictation': true,
       if (attachments.isNotEmpty)
         'attachments': attachments.map((a) => a.toWire()).toList(),
     });
@@ -512,7 +658,9 @@ class AppController extends ChangeNotifier {
       _sessions.sessionFor(chatId).setConnectionError(
         result.error ?? 'send_message failed',
       );
+      return false;
     }
+    return true;
   }
 
   Future<void> abortTurn() async {
@@ -562,8 +710,12 @@ class AppController extends ChangeNotifier {
 
   Future<void> activateChat(String chatId) async {
     if (!_protocol.isConnected) return;
+    _sessions.sessionFor(chatId).clearTranscript();
     await _protocol.send('activate_chat', {'chatId': chatId});
+    activeChatId = chatId;
+    _syncDictationAudioClient();
     await refreshConfig();
+    notifyListeners();
   }
 
   Future<void> deleteChat(String chatId) async {
@@ -585,6 +737,10 @@ class AppController extends ChangeNotifier {
 
   @override
   void dispose() {
+    speechOutput.removeListener(notifyListeners);
+    dictation.removeListener(notifyListeners);
+    dictation.dispose();
+    speechOutput.dispose();
     _sessions.disposeAll();
     _protocol.disconnect();
     _sidecar.shutdown();

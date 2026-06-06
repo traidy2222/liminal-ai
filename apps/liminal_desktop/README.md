@@ -116,18 +116,28 @@ lib/
   sidecar/        # spawn liminald
   transport/      # WebSocket client
   ui/             # screens + widgets
+  audio/          # dictation (record + VAD), sidecar ASR client, TTS playback queue
 ```
 
 ## Implemented
 
 - Sidecar spawn + WS connect (`hello` / `sidecar_ready`)
 - Multi-chat drawer, send/abort, session reset
+- **Voice dictation + TTS** — mic session, server ASR via sidecar `/api/transcribe`,
+  `liveDictation` sends, `speak()` clip playback (`AGENT_TTS_ENABLED` in Settings)
 - Transcript reducer aligned with web (`think` / `reason` / `plan`, subtasks, turn headers, working state)
 - Rich assistant rendering (GFM, HTML embeds, images, video links) — see `docs/concepts/rich-message-rendering.md`
 - Image attachments in composer (`send_message.attachments`)
 - Sticky auto-scroll
 - Provider setup + persona bootstrap + harness Settings tabs (`get_settings` / `update_settings`)
 - Tool approval + ask-user surfaces
+
+## Voice QA (manual)
+
+1. Settings → enable `AGENT_TTS_ENABLED` and confirm `AGENT_API_KEY` is set.
+2. Composer mic → speak → pause → message sends; agent may call `speak()`.
+3. While agent speaks, speak again to barge in (interrupts TTS).
+4. Send while agent is busy → utterance queues until `turn_end`.
 
 ## Next phases
 
