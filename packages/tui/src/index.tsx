@@ -12,6 +12,12 @@ import {
   resolveWorkspaceRoot,
   saveRuntimePreferences,
   resolveHarnessEnvRaw,
+  resolveChatBoot,
+  saveLastActiveChatId,
+  loadChatTranscriptFromSessionLog,
+  conversationEntriesForHydration,
+  runWithWorkspaceRoot,
+  type ChatMetadata,
 } from "@liminal/core";
 import {
   registerAllTools,
@@ -75,28 +81,37 @@ try {
   process.exit(1);
 }
 
-const harness = new AgentHarness({
-  openRouterApiKey: provider.apiKey,
-  model: provider.model,
-  baseURL: provider.baseURL,
-  maxToolRoundsPerTurn: 128,
-  safetyJudge: resolveSafetyJudge(),
-  workingStateEnabled: true,
-  // World context: auto-gather date/time/OS/shell; optionally include location
-  // Set AGENT_LOCATION="City, Country" in .env to include physical location
-  worldContext: resolveWorldContext(),
-  runtimePreferences,
-  persistRuntimePreferences: async (prefs) =>
-    saveRuntimePreferences(prefs, resolveWorkspaceRoot()),
-  context: {
-    modelMaxTokens: 128_000,
-    thresholdFraction: 0.6,
-    inceptionMessages: INCEPTION_MESSAGES,
-    protocolDynamicBuilder: (names, hint) => buildProtocolDynamicSuffix(names, (hint ?? "any") as import("@liminal/tools").ProtocolIntentHint),
-  },
-});
+const workspaceRoot = resolveWorkspaceRoot();
+const { meta: chatMeta } = await resolveChatBoot({ defaultWorkspaceRoot: workspaceRoot });
+await saveLastActiveChatId(chatMeta.chatId);
 
-await registerAllTools(harness.registry, harness.emitter, harness);
+const harness = runWithWorkspaceRoot(chatMeta.workspaceRoot, () =>
+  new AgentHarness({
+    openRouterApiKey: provider.apiKey,
+    model: provider.model,
+    baseURL: provider.baseURL,
+    taskId: chatMeta.chatId,
+    workspaceRoot: chatMeta.workspaceRoot,
+    maxToolRoundsPerTurn: 128,
+    safetyJudge: resolveSafetyJudge(),
+    workingStateEnabled: true,
+    worldContext: resolveWorldContext(),
+    runtimePreferences,
+    persistRuntimePreferences: async (prefs) =>
+      saveRuntimePreferences(prefs, chatMeta.workspaceRoot),
+    context: {
+      modelMaxTokens: 128_000,
+      thresholdFraction: 0.6,
+      inceptionMessages: INCEPTION_MESSAGES,
+      protocolDynamicBuilder: (names, hint) =>
+        buildProtocolDynamicSuffix(names, (hint ?? "any") as import("@liminal/tools").ProtocolIntentHint),
+    },
+  })
+);
+
+await runWithWorkspaceRoot(chatMeta.workspaceRoot, async () => {
+  await registerAllTools(harness.registry, harness.emitter, harness);
+});
 const { wireEnterpriseWithInstall } = await import("@liminal/core");
 const ee = await wireEnterpriseWithInstall({
   registry: harness.registry,
@@ -107,6 +122,11 @@ if (!ee.wired && ee.reason) {
   console.warn("[enterprise] feature wiring skipped:", ee.reason);
 }
 void maybeAttachSessionEventLog(harness.emitter, harness.taskId);
+
+const replayEntries = await loadChatTranscriptFromSessionLog(chatMeta.chatId);
+harness.restoreConversationFromTranscript(conversationEntriesForHydration(replayEntries));
+const { replayEntriesToMessages } = await import("./replayTranscript.js");
+const initialMessages = replayEntriesToMessages(replayEntries);
 
 try {
   const persisted = harness.getPersistedPersonaProfile();
@@ -121,7 +141,7 @@ try {
     bootstrapOn && (forceBootstrap || !harness.isPersonaBootstrapCompleted());
   if (needBootstrapOverlay) {
     // Web parity: dedicated overlay in App; no in-chat model bootstrap turn here.
-  } else {
+  } else if (initialMessages.length === 0) {
     await harness.sendSessionGreeting();
   }
 } catch (err) {
@@ -137,7 +157,7 @@ function Root() {
   }, []);
   return (
     <PersonaChromeContext.Provider value={chrome}>
-      <App harness={harness} />
+      <App harness={harness} chatMeta={chatMeta} initialMessages={initialMessages} />
     </PersonaChromeContext.Provider>
   );
 }

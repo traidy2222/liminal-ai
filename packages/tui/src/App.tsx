@@ -1,6 +1,7 @@
 import React, { useState, useCallback, useEffect, useRef, useMemo } from "react";
 import { Box, Text, useInput, useStdout } from "ink";
-import type { AgentHarness } from "@liminal/core";
+import type { AgentHarness, ChatMetadata } from "@liminal/core";
+import type { MessageEntry } from "./useAgent.js";
 import { DEFAULT_IMAGE_ATTACHMENT_LIMITS, validateImageAttachments, type ImageAttachment } from "@liminal/core";
 import { PERSONA_QUICK_PRESETS } from "@liminal/core/persona-bootstrap-ui";
 import { useAgent } from "./useAgent.js";
@@ -20,6 +21,8 @@ const WINDOW_SIZE = 90;
 
 interface Props {
   harness: AgentHarness;
+  chatMeta?: ChatMetadata;
+  initialMessages?: MessageEntry[];
 }
 
 function parseMouseWheelDelta(input: string): number | null {
@@ -44,7 +47,7 @@ function isPrintableInputChar(input: string): boolean {
   return true;
 }
 
-export function App({ harness }: Props) {
+export function App({ harness, chatMeta, initialMessages }: Props) {
   const jarvis = usePersonaChrome().colors;
   const {
     state,
@@ -53,7 +56,7 @@ export function App({ harness }: Props) {
     resolveApproval,
     resolveAskUser,
     clearSession,
-  } = useAgent(harness);
+  } = useAgent(harness, { initialMessages });
 
   const { stdout } = useStdout();
   const cols = stdout?.columns ?? 100;
