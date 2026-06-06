@@ -3,7 +3,10 @@ import {
   type AgentHarness,
   type ApprovalDecision,
   type PersonaBootstrapProgressEvent,
+  conversationEntriesForHydration,
+  loadChatTranscriptFromSessionLog,
   runWithWorkspaceRoot,
+  slimReplayEntriesForWire,
 } from "@liminal/core";
 import {
   applyPersonaProfileToHarness,
@@ -52,6 +55,7 @@ export class SessionBridge {
   private detachers: Array<() => void> = [];
   private awaitingPersonaBootstrapInput = false;
   private bootstrapInFlight = false;
+  private transcriptHydrated = false;
 
   constructor(harness: AgentHarness, chatId: string, workspaceRoot: string, sink: FrameSink) {
     this.harness = harness;
@@ -360,10 +364,26 @@ export class SessionBridge {
     });
   }
 
+  /** Restore UI + harness context from `session.jsonl` after restart. */
+  async replayPersistedTranscript(opts?: { uiOnly?: boolean }): Promise<void> {
+    const entries = await loadChatTranscriptFromSessionLog(this.chatId);
+    if (entries.length === 0) return;
+    if (!opts?.uiOnly && !this.transcriptHydrated) {
+      const pairs = conversationEntriesForHydration(entries);
+      this.harness.restoreConversationFromTranscript(pairs);
+      this.transcriptHydrated = true;
+    }
+    this.emit("transcript_replay", {
+      chatId: this.chatId,
+      entries: slimReplayEntriesForWire(entries),
+    });
+  }
+
   /** Clear the transcript without disposing the harness. */
   clearSession(): void {
     this.harness.clearConversation();
     this.awaitingPersonaBootstrapInput = false;
+    this.transcriptHydrated = false;
   }
 
   /** Detach all emitter subscriptions and reject any in-flight gates. */

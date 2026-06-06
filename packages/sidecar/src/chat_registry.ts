@@ -1,11 +1,23 @@
-import { randomUUID } from "node:crypto";
+import { rm } from "node:fs/promises";
+import path from "node:path";
 import {
   AgentHarness,
+  conversationEntriesForHydration,
+  createChatMetadata,
+  globalChatsRoot,
+  listChats,
+  loadChatTranscriptFromSessionLog,
   loadRuntimePreferences,
   maybeAttachSessionEventLog,
+  readChatMetadata,
+  resolveChatBoot,
   resolveWorkspaceRoot,
   runWithWorkspaceRoot,
+  saveLastActiveChatId,
   saveRuntimePreferences,
+  touchChatMetadata,
+  workspaceFingerprint,
+  type ChatMetadata,
   type ProviderConfig,
   type RuntimePreferences,
 } from "@liminal/core";
@@ -29,24 +41,21 @@ interface ChatSlot {
 export interface ChatRegistryDeps {
   provider: ProviderConfig;
   runtimePreferences: RuntimePreferences | null;
-  /** Outbound frame sink (fans a frame to every attached UI socket). */
+  repoRoot: string;
   sink: FrameSink;
 }
 
 /**
- * Owns every live chat = one {@link AgentHarness} + {@link SessionBridge}.
- *
- * The sidecar analogue of the web `ChatManager`, minus the SSE
- * suspend/resume dance: every bridge emits through the shared sink and frames
- * are chat-tagged, so the UI multiplexes by `chatId` and several chats can run
- * concurrently without bleeding into each other.
+ * Disk-backed multi-chat registry — shares `~/.liminal/chats/` with web and TUI.
  */
 export class ChatRegistry {
   private readonly slots = new Map<string, ChatSlot>();
   private activeChatId: string | null = null;
   private readonly deps: ChatRegistryDeps;
   private cachedRuntimePrefs: RuntimePreferences | null;
-  /** Single-flight guard when multiple WS clients call `getOrCreateActive` at once. */
+  private diskMetas: ChatMetadata[] = [];
+  private booted = false;
+  private bootPromise: Promise<void> | null = null;
   private ensureActive: Promise<SessionBridge> | null = null;
 
   constructor(deps: ChatRegistryDeps) {
@@ -60,7 +69,7 @@ export class ChatRegistry {
   }
 
   async reloadRuntimePrefs(): Promise<void> {
-    const root = process.env["LIMINAL_REPO_ROOT"]?.trim() || resolveWorkspaceRoot();
+    const root = this.deps.repoRoot.trim() || resolveWorkspaceRoot();
     this.cachedRuntimePrefs = await loadRuntimePreferences(root).catch(() => null);
   }
 
@@ -75,19 +84,42 @@ export class ChatRegistry {
     return this.activeChatId;
   }
 
-  /** Build a harness + bridge for a new chat and make it active. */
-  async create(input?: { workspaceRoot?: string; title?: string }): Promise<SessionBridge> {
-    const chatId = randomUUID();
-    const workspaceRoot = input?.workspaceRoot?.trim() || resolveWorkspaceRoot();
+  async boot(): Promise<void> {
+    if (this.booted) return;
+    if (this.bootPromise) return this.bootPromise;
+    this.bootPromise = (async () => {
+      const { meta } = await resolveChatBoot({
+        defaultWorkspaceRoot: this.deps.repoRoot,
+      });
+      await this.refreshDiskMetas();
+      await this.openBridgeFromMeta(meta);
+      this.activeChatId = meta.chatId;
+      await saveLastActiveChatId(meta.chatId);
+      this.booted = true;
+    })().finally(() => {
+      this.bootPromise = null;
+    });
+    return this.bootPromise;
+  }
+
+  private async refreshDiskMetas(): Promise<void> {
+    this.diskMetas = await listChats();
+  }
+
+  private async openBridgeFromMeta(meta: ChatMetadata): Promise<SessionBridge> {
+    const existing = this.slots.get(meta.chatId);
+    if (existing) return existing.bridge;
+
     const { provider } = this.deps;
     const runtimePreferences = this.cachedRuntimePrefs;
+    const workspaceRoot = meta.workspaceRoot;
 
     const harness = runWithWorkspaceRoot(workspaceRoot, () =>
       new AgentHarness({
         openRouterApiKey: provider.apiKey,
         model: provider.model,
         baseURL: provider.baseURL,
-        taskId: chatId,
+        taskId: meta.chatId,
         workspaceRoot,
         maxToolRoundsPerTurn: 128,
         workingStateEnabled: true,
@@ -114,15 +146,35 @@ export class ChatRegistry {
       }
     });
 
-    const bridge = new SessionBridge(harness, chatId, workspaceRoot, this.deps.sink);
-    this.slots.set(chatId, {
+    const bridge = new SessionBridge(harness, meta.chatId, workspaceRoot, this.deps.sink);
+    await bridge.replayPersistedTranscript();
+
+    this.slots.set(meta.chatId, {
       bridge,
-      title: input?.title?.trim() || "New chat",
+      title: meta.title,
       workspaceRoot,
-      updatedAt: Date.now(),
+      updatedAt: meta.updatedAt,
     });
-    this.activeChatId = chatId;
     void bridge.beginSession().then(() => this.deps.sink(serverFrame("chat_list", this.chatListPayload())));
+    return bridge;
+  }
+
+  /** Build a harness + bridge for a new chat and make it active. */
+  async create(input?: { workspaceRoot?: string; title?: string }): Promise<SessionBridge> {
+    await this.boot();
+    const workspaceRoot = input?.workspaceRoot?.trim() || this.deps.repoRoot || resolveWorkspaceRoot();
+    const chatId = `chat_${Date.now().toString(36)}`;
+    const meta = await createChatMetadata({
+      chatId,
+      title: input?.title?.trim() || "New chat",
+      workspaceMode: "folder",
+      workspaceRoot,
+      workspaceFingerprint: workspaceFingerprint(workspaceRoot),
+    });
+    await this.refreshDiskMetas();
+    const bridge = await this.openBridgeFromMeta(meta);
+    this.activeChatId = meta.chatId;
+    await saveLastActiveChatId(meta.chatId);
     return bridge;
   }
 
@@ -134,11 +186,20 @@ export class ChatRegistry {
     return this.slots.get(chatId)?.bridge;
   }
 
-  /** Workspace root for `/media` — prefers explicit chat, else active chat. */
+  resolveBridgeForAudio(chatId: string | null): SessionBridge | undefined {
+    if (chatId) {
+      const bridge = this.get(chatId);
+      if (bridge) return bridge;
+    }
+    return this.getActiveBridge();
+  }
+
   resolveWorkspaceForMedia(chatId: string | null): string | null {
     if (chatId) {
       const slot = this.slots.get(chatId);
       if (slot) return slot.workspaceRoot;
+      const meta = this.diskMetas.find((m) => m.chatId === chatId);
+      if (meta) return meta.workspaceRoot;
     }
     if (this.activeChatId) {
       const active = this.slots.get(this.activeChatId);
@@ -147,11 +208,13 @@ export class ChatRegistry {
     return null;
   }
 
-  /** The active chat's bridge, creating one lazily if none exists yet. */
   async getOrCreateActive(): Promise<SessionBridge> {
+    await this.boot();
     if (this.activeChatId) {
       const slot = this.slots.get(this.activeChatId);
       if (slot) return slot.bridge;
+      const meta = await readChatMetadata(this.activeChatId);
+      if (meta) return this.openBridgeFromMeta(meta);
     }
     if (!this.ensureActive) {
       this.ensureActive = this.create().finally(() => {
@@ -161,54 +224,86 @@ export class ChatRegistry {
     return this.ensureActive;
   }
 
-  activate(chatId: string): boolean {
-    if (!this.slots.has(chatId)) return false;
+  async activate(chatId: string): Promise<boolean> {
+    await this.boot();
+    const meta = await readChatMetadata(chatId);
+    if (!meta) return false;
+    await this.openBridgeFromMeta(meta);
     this.activeChatId = chatId;
-    this.touch(chatId);
+    await saveLastActiveChatId(chatId);
+    await touchChatMetadata(chatId);
+    const slot = this.slots.get(chatId);
+    if (slot) slot.updatedAt = Date.now();
+    await slot?.bridge.replayPersistedTranscript({ uiOnly: true });
     return true;
   }
 
-  delete(chatId: string): string | null {
+  async delete(chatId: string): Promise<string | null> {
     const slot = this.slots.get(chatId);
-    if (!slot) return this.activeChatId;
-    slot.bridge.dispose();
-    this.slots.delete(chatId);
+    if (slot) {
+      slot.bridge.dispose();
+      this.slots.delete(chatId);
+    }
+    try {
+      await rm(path.join(globalChatsRoot(), chatId), { recursive: true, force: true });
+    } catch {
+      /* ignore */
+    }
+    await this.refreshDiskMetas();
     if (this.activeChatId === chatId) {
-      // Pick the most-recently-active remaining chat, if any.
-      const next = [...this.slots.entries()].sort(
-        (a, b) => b[1].updatedAt - a[1].updatedAt
-      )[0];
-      this.activeChatId = next ? next[0] : null;
+      const next = this.diskMetas[0];
+      if (next) {
+        await this.activate(next.chatId);
+      } else {
+        this.activeChatId = null;
+      }
     }
     return this.activeChatId;
   }
 
-  /** Bump a chat's activity timestamp (drives most-recent-first ordering). */
   touch(chatId: string, title?: string): void {
     const slot = this.slots.get(chatId);
     if (!slot) return;
     slot.updatedAt = Date.now();
     if (title && (slot.title === "New chat" || !slot.title)) slot.title = title;
+    void touchChatMetadata(chatId).catch(() => undefined);
   }
 
   list(): ChatSummary[] {
-    return [...this.slots.entries()]
-      .map(([chatId, slot]) => ({
-        chatId,
-        title: slot.title,
-        workspaceRoot: slot.workspaceRoot,
-        updatedAt: slot.updatedAt,
-        busy: slot.bridge.isBusy,
-        active: chatId === this.activeChatId,
-        awaitingPersonaBootstrap: slot.bridge.isAwaitingPersonaBootstrap,
-      }))
+    const source = this.diskMetas.length > 0 ? this.diskMetas : [];
+    if (source.length === 0) {
+      return [...this.slots.entries()]
+        .map(([chatId, slot]) => ({
+          chatId,
+          title: slot.title,
+          workspaceRoot: slot.workspaceRoot,
+          updatedAt: slot.updatedAt,
+          busy: slot.bridge.isBusy,
+          active: chatId === this.activeChatId,
+          awaitingPersonaBootstrap: slot.bridge.isAwaitingPersonaBootstrap,
+        }))
+        .sort((a, b) => b.updatedAt - a.updatedAt);
+    }
+    return source
+      .map((meta) => {
+        const slot = this.slots.get(meta.chatId);
+        return {
+          chatId: meta.chatId,
+          title: slot?.title ?? meta.title,
+          workspaceRoot: meta.workspaceRoot,
+          updatedAt: slot?.updatedAt ?? meta.updatedAt,
+          busy: slot?.bridge.isBusy ?? false,
+          active: meta.chatId === this.activeChatId,
+          awaitingPersonaBootstrap: slot?.bridge.isAwaitingPersonaBootstrap ?? false,
+        };
+      })
       .sort((a, b) => b.updatedAt - a.updatedAt);
   }
 
-  /** Dispose every chat (clean shutdown). */
   disposeAll(): void {
     for (const slot of this.slots.values()) slot.bridge.dispose();
     this.slots.clear();
     this.activeChatId = null;
+    this.booted = false;
   }
 }

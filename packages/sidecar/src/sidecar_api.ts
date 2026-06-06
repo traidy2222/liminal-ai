@@ -14,9 +14,9 @@ import {
   listProviderPresetsForSettings,
   resolveProviderPresetId,
 } from "@liminal/core/provider-presets";
-import type { PersonaUiThemeV2 } from "@liminal/core";
+import type { PersonaUiThemeV2, PersonaUiCopy } from "@liminal/core";
 import type { WireAppConfig } from "@liminal/protocol";
-import { loadPersonaUiThemeFromWorkspace } from "@liminal/tools";
+import { loadPersonaUiThemeFromWorkspace, loadPersonaUiCopyFromWorkspace } from "@liminal/tools";
 import type { SessionBridge } from "./session_bridge.js";
 import type { ChatRegistry } from "./chat_registry.js";
 import { applyApiKeyToProcess, firstApiKeyFromEnv, writeEnvMerge } from "./env_file.js";
@@ -35,15 +35,32 @@ export interface DesktopConfigSnapshot {
   };
   repoRoot: string;
   personaUiTheme?: PersonaUiThemeV2;
+  personaUiCopy?: PersonaUiCopy;
+  ttsEnabled: boolean;
+  ttsVoice: string;
+  dictationAudioCue: boolean;
+  dictationMinRecordingMs: number;
+  dictationSilenceMsShort: number;
+  dictationSilenceMsLong: number;
+  dictationMaxRecordingMs: number;
+}
+
+function parseHarnessMs(prefs: RuntimePreferences | null, key: string, fallback: number): number {
+  const raw = resolveHarnessEnvRaw(key, prefs)?.trim();
+  const n = raw ? Number(raw) : NaN;
+  return Number.isFinite(n) && n > 0 ? Math.round(n) : fallback;
 }
 
 /** JSON-safe config for WS `hello` / `sidecar_ready` (persona theme as plain object). */
 export function wireAppConfig(snapshot: DesktopConfigSnapshot): WireAppConfig {
-  const { personaUiTheme, ...rest } = snapshot;
+  const { personaUiTheme, personaUiCopy, ...rest } = snapshot;
   return {
     ...rest,
     ...(personaUiTheme
       ? { personaUiTheme: personaUiTheme as unknown as Record<string, unknown> }
+      : {}),
+    ...(personaUiCopy
+      ? { personaUiCopy: personaUiCopy as unknown as Record<string, unknown> }
       : {}),
   };
 }
@@ -58,6 +75,7 @@ export async function buildDesktopConfig(
   const envBase = process.env["AGENT_API_BASE_URL"]?.trim();
   let personaDisplayLabel = "Liminal";
   let personaUiTheme: PersonaUiThemeV2 | undefined;
+  let personaUiCopy: PersonaUiCopy | undefined;
   try {
     const theme = await loadPersonaUiThemeFromWorkspace();
     if (theme) personaUiTheme = theme;
@@ -65,6 +83,12 @@ export async function buildDesktopConfig(
       theme?.displayLabel?.trim() || bridge.harness.getCurrentPersona()?.name?.trim() || "Liminal";
   } catch {
     personaDisplayLabel = bridge.harness.getCurrentPersona()?.name?.trim() || "Liminal";
+  }
+  try {
+    const copy = await loadPersonaUiCopyFromWorkspace();
+    if (copy) personaUiCopy = copy;
+  } catch {
+    /* defaults applied client-side */
   }
   const apiKeyConfigured = !!(cfg.openRouterApiKey?.trim() || firstApiKeyFromEnv(repoRoot));
   return {
@@ -81,6 +105,14 @@ export async function buildDesktopConfig(
     },
     repoRoot,
     ...(personaUiTheme ? { personaUiTheme } : {}),
+    ...(personaUiCopy ? { personaUiCopy } : {}),
+    ttsEnabled: resolveHarnessEnvRaw("AGENT_TTS_ENABLED", prefs) === "1",
+    ttsVoice: resolveHarnessEnvRaw("AGENT_TTS_VOICE", prefs)?.trim() || "af_sky",
+    dictationAudioCue: resolveHarnessEnvRaw("AGENT_DICTATION_AUDIO_CUE", prefs) === "1",
+    dictationMinRecordingMs: parseHarnessMs(prefs, "AGENT_DICTATION_MIN_RECORDING_MS", 1500),
+    dictationSilenceMsShort: parseHarnessMs(prefs, "AGENT_DICTATION_SILENCE_MS_SHORT", 1500),
+    dictationSilenceMsLong: parseHarnessMs(prefs, "AGENT_DICTATION_SILENCE_MS_LONG", 2500),
+    dictationMaxRecordingMs: parseHarnessMs(prefs, "AGENT_DICTATION_MAX_RECORDING_MS", 60000),
   };
 }
 

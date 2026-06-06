@@ -22,7 +22,13 @@ import {
   vireonSignOut,
   wireVireonAccountPayload,
 } from "./vireon_api.js";
-import type { ProviderConfig, RuntimePreferences } from "@liminal/core";
+import {
+  loadChatTranscriptFromSessionLog,
+  slimReplayEntriesForWire,
+  type ProviderConfig,
+  type RuntimePreferences,
+} from "@liminal/core";
+import { tryHandleAudioRequest } from "./audio_http.js";
 import { tryHandleMediaRequest } from "./media_handler.js";
 import { buildOutboundUserMessage, normalizeWireAttachments } from "./message_attachments.js";
 
@@ -57,6 +63,7 @@ export class WsServer {
     this.registry = new ChatRegistry({
       provider: opts.provider,
       runtimePreferences: opts.runtimePreferences,
+      repoRoot: opts.repoRoot,
       sink: (frame) => this.broadcast(frame),
     });
 
@@ -65,6 +72,14 @@ export class WsServer {
         tryHandleMediaRequest(req, res, {
           token: this.token,
           resolveWorkspaceRoot: (chatId) => this.registry.resolveWorkspaceForMedia(chatId),
+        })
+      ) {
+        return;
+      }
+      if (
+        tryHandleAudioRequest(req, res, {
+          token: this.token,
+          resolveBridge: (chatId) => this.registry.resolveBridgeForAudio(chatId),
         })
       ) {
         return;
@@ -194,6 +209,25 @@ export class WsServer {
         ...(initError ? { initError } : {}),
       })
     );
+
+    const activeId = this.registry.activeId;
+    if (activeId) {
+      await this.unicastTranscriptReplay(ws, activeId);
+    }
+  }
+
+  /** Guaranteed delivery to the socket that just finished cold start. */
+  private async unicastTranscriptReplay(ws: WebSocket, chatId: string): Promise<void> {
+    const entries = await loadChatTranscriptFromSessionLog(chatId);
+    if (entries.length === 0) return;
+    this.sendTo(
+      ws,
+      serverFrame(
+        "transcript_replay",
+        { chatId, entries: slimReplayEntriesForWire(entries) },
+        chatId
+      )
+    );
   }
 
   /** Acknowledge a command back to the originating socket. */
@@ -230,7 +264,7 @@ export class WsServer {
 
         case "activate_chat": {
           const d = data as { chatId: string };
-          const ok = this.registry.activate(d.chatId);
+          const ok = await this.registry.activate(d.chatId);
           if (ok) this.broadcastChatList();
           this.ack(ws, id, ok, ok ? undefined : "Unknown chatId.");
           return;
@@ -238,9 +272,23 @@ export class WsServer {
 
         case "delete_chat": {
           const d = data as { chatId: string };
-          const newActive = this.registry.delete(d.chatId);
+          const newActive = await this.registry.delete(d.chatId);
           this.broadcastChatList();
           this.ack(ws, id, true, undefined, { activeChatId: newActive });
+          return;
+        }
+
+        case "replay_transcript": {
+          const d = data as { chatId: string };
+          const bridge = this.registry.get(d.chatId);
+          if (!bridge) {
+            const ok = await this.registry.activate(d.chatId);
+            if (!ok) return this.ack(ws, id, false, "Unknown chatId.");
+          }
+          const active = this.registry.get(d.chatId);
+          if (!active) return this.ack(ws, id, false, "Unknown chatId.");
+          await active.replayPersistedTranscript({ uiOnly: true });
+          this.ack(ws, id, true);
           return;
         }
 
