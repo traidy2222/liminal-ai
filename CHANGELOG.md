@@ -2,7 +2,7 @@
 
 All notable changes to [Liminal AI](https://github.com/traidy2222/liminal-ai) are documented here and on the docs portal: [docs.vireondynamics.com/liminal/reference/changelog](https://docs.vireondynamics.com/liminal/reference/changelog).
 
-**Current stage:** **alpha** (`v0.0.20` tip of `main`, 2026-06-06). **Beta**, **RC**, and **v0.1.0 public preview** have not been declared as product releases yet.
+**Current stage:** **alpha** (`v0.0.21` tip of `main`, 2026-06-06). **Beta**, **RC**, and **v0.1.0 public preview** have not been declared as product releases yet.
 
 **Single source:** edit [`changelog/releases.json`](changelog/releases.json), then run `npm run changelog:gen`.
 
@@ -10,7 +10,13 @@ Format: **v0.0.x** entries keyed to the last GitHub push in each slice. Dates ar
 
 Marketing (richer notes): [vireondynamics.com/liminal/changelog](https://www.vireondynamics.com/liminal/changelog)
 
-## [v0.0.20] — 2026-06-06 — Current alpha
+## [v0.0.21] — 2026-06-06 — Current alpha
+
+Fixes stacked empty Plan cards with a single in-place progress tracker on web/TUI/desktop; adds session replay hydration, sidecar TTS/STT HTTP, desktop dictation, persona UI copy/layout/invariants, and provider token scrub.
+
+[Full notes](https://docs.vireondynamics.com/liminal/reference/changelog#v0-0-21)
+
+## [v0.0.20] — 2026-06-06
 
 Entity dossier tools (vault_ingest_entities, vault_recall, vault_lint), R-VAULT-ENTITIES protocol guidance, desktop Settings provider presets, and automatic OpenRouter BYOK fallback when managed credits are exhausted.
 

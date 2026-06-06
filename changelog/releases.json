@@ -1,7 +1,30 @@
 {
   "stage": "alpha",
-  "currentVersion": "0.0.20",
+  "currentVersion": "0.0.21",
   "releases": [
+    {
+      "version": "0.0.21",
+      "date": "2026-06-06",
+      "tagline": "Plan progress UI, chat replay, desktop voice, persona UI v2.",
+      "summary": "Fixes stacked empty Plan cards with a single in-place progress tracker on web/TUI/desktop; adds session replay hydration, sidecar TTS/STT HTTP, desktop dictation, persona UI copy/layout/invariants, and provider token scrub.",
+      "bullets": [
+        "**Plan progress UI** — One updatable Progress card per turn (web `PlanProgressBlock`, TUI `PlanCard`, desktop `PlanProgressTile`); `step_index` checkoffs no longer spawn empty Plan shells",
+        "**Chat session replay** — `chat_session_replay` + `active_chat_state` hydrate transcripts from `.agent_sessions` JSONL on web, TUI, and sidecar multi-chat registry",
+        "**Desktop voice** — Sidecar `/audio` HTTP for TTS/STT; Flutter dictation (VAD), composer mic, and `speech_output` playback; `docs/guides/voice.md`",
+        "**Persona UI v2** — `persona_ui_copy`, `persona_ui_layout`, `persona_ui_invariants` in core; desktop persona chrome tokens and bootstrap polish",
+        "**Provider hygiene** — `provider_token_scrub` strips leaked API keys from model output; OpenRouter routing and managed BYOK fallback refinements"
+      ],
+      "docs": [
+        {
+          "label": "Voice",
+          "href": "../guides/voice.md"
+        },
+        {
+          "label": "Rich message rendering",
+          "href": "../concepts/rich-message-rendering.md"
+        }
+      ]
+    },
     {
       "version": "0.0.20",
       "date": "2026-06-06",

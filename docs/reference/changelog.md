@@ -2,7 +2,7 @@
 
 All notable changes to [Liminal AI](https://github.com/traidy2222/liminal-ai) on the `main` branch.
 
-**Current stage:** **alpha** (`v0.0.20` tip of `main`, 2026-06-06). The workspace package may read `0.1.0`, but **beta**, **RC**, and a **v0.1.0 public preview** have not been declared as product releases yet.
+**Current stage:** **alpha** (`v0.0.21` tip of `main`, 2026-06-06). The workspace package may read `0.1.0`, but **beta**, **RC**, and a **v0.1.0 public preview** have not been declared as product releases yet.
 
 Format: **v0.0.x** entries keyed to the last GitHub push in each slice. Dates are real push dates.
 
@@ -17,9 +17,24 @@ After editing JSON: `npm run changelog:gen`, commit, push, then in [vireondynami
 
 ---
 
+## v0.0.21 — 2026-06-06 {#v0-0-21}
+
+**Current alpha.** Plan progress UI, chat replay, desktop voice, persona UI v2.
+
+**Shipped**
+
+- **Plan progress UI** — One updatable Progress card per turn (web `PlanProgressBlock`, TUI `PlanCard`, desktop `PlanProgressTile`); `step_index` checkoffs no longer spawn empty Plan shells
+- **Chat session replay** — `chat_session_replay` + `active_chat_state` hydrate transcripts from `.agent_sessions` JSONL on web, TUI, and sidecar multi-chat registry
+- **Desktop voice** — Sidecar `/audio` HTTP for TTS/STT; Flutter dictation (VAD), composer mic, and `speech_output` playback; `docs/guides/voice.md`
+- **Persona UI v2** — `persona_ui_copy`, `persona_ui_layout`, `persona_ui_invariants` in core; desktop persona chrome tokens and bootstrap polish
+- **Provider hygiene** — `provider_token_scrub` strips leaked API keys from model output; OpenRouter routing and managed BYOK fallback refinements
+- **Docs** — [Voice](../guides/voice.md), [Rich message rendering](../concepts/rich-message-rendering.md)
+
+---
+
 ## v0.0.20 — 2026-06-06 {#v0-0-20}
 
-**Current alpha.** Vault knowledge graph, desktop provider presets, managed-inference BYOK fallback.
+Vault knowledge graph, desktop provider presets, managed-inference BYOK fallback.
 
 **Shipped**
 
