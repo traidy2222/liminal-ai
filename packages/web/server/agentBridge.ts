@@ -12,6 +12,8 @@ import {
   resolveHarnessEnvRaw,
   touchChatMetadata,
   loadSessionSnippet,
+  loadChatTranscriptFromSessionLog,
+  conversationEntriesForHydration,
   resolveConsolidateOnIdleConfig,
   type PersonaBootstrapProgressEvent,
 } from "@liminal/core";
@@ -111,6 +113,8 @@ export class AgentBridge {
   private readonly bridgeRuntimePreferences: RuntimePreferences | null;
   /** Detach functions for all emitter subscriptions, so dispose() can fully unwire. */
   private emitterDetachers: Array<() => void> = [];
+  /** True after session.jsonl was loaded into harness context once this bridge lifetime. */
+  private transcriptHydrated = false;
 
   private emitBootstrapProgress(
     stageOrEvent: string | PersonaBootstrapProgressEvent,
@@ -193,7 +197,9 @@ export class AgentBridge {
         console.warn("[enterprise] feature wiring skipped:", ee.reason);
       }
     });
-    this.sessionReady = this.toolsRegistered.then(() => this.beginSession());
+    this.sessionReady = this.toolsRegistered
+      .then(() => this.replayPersistedTranscript())
+      .then(() => this.beginSession());
   }
 
   /** Wait until the tool registry is populated (before binding HTTP in dev, avoid races on /api/message). */
@@ -207,10 +213,20 @@ export class AgentBridge {
   }
 
   /**
-   * Activate this bridge as the live SSE source. Called by ChatManager when the
-   * user switches to this chat. Also touches chat metadata so the list-sort
-   * reflects most-recent-active first.
+   * Load `session.jsonl` into harness context and push a `transcript_replay`
+   * SSE event so the web UI can render prior turns after restart or eviction.
    */
+  async replayPersistedTranscript(opts?: { uiOnly?: boolean }): Promise<void> {
+    const entries = await loadChatTranscriptFromSessionLog(this.chatId);
+    if (entries.length === 0) return;
+    if (!opts?.uiOnly && !this.transcriptHydrated) {
+      const pairs = conversationEntriesForHydration(entries);
+      this.harness.restoreConversationFromTranscript(pairs);
+      this.transcriptHydrated = true;
+    }
+    this.maybeSend("transcript_replay", { chatId: this.chatId, entries });
+  }
+
   async resumeSSE(): Promise<void> {
     this.sseSuspended = false;
     await touchChatMetadata(this.chatId).catch(() => undefined);

@@ -33,12 +33,13 @@ import {
   ensurePerChatDir,
   globalChatsRoot,
   loadRuntimePreferences,
+  resolveChatBoot,
   resolveProviderConfigWithInference,
+  saveLastActiveChatId,
   type ChatMetadata,
   type ChatWorkspaceMode,
   type RuntimePreferences,
 } from "@liminal/core";
-import { existsSync } from "node:fs";
 import { rm } from "node:fs/promises";
 import path from "node:path";
 import { AgentBridge } from "./agentBridge.js";
@@ -98,36 +99,13 @@ export class ChatManager {
   async boot(): Promise<{ activeChatId: string; activeMeta: ChatMetadata }> {
     this.cachedRuntimePrefs = await loadRuntimePreferences().catch(() => null);
 
-    const chats = await listChats();
-    let chosen: ChatMetadata;
-    if (chats.length > 0) {
-      chosen = chats[0]!; // listChats is sorted by updatedAt desc
-    } else {
-      // First-run: bind the default chat to the directory the user launched
-      // the server from (AGENT_WORKSPACE_ROOT or cwd), not a scratch dir.
-      //
-      // Rationale: when a developer runs `npm run web` from their project, they
-      // expect the agent to operate on that project. The previous default
-      // (scratch under ~/.liminal/chats/<id>/workspace/) silently isolated the
-      // agent from the project they were sitting in — surprising and useless
-      // until they made a folder-mode chat manually. Scratch is still
-      // available via the "+ new chat" modal.
-      const cwd = path.resolve(
-        process.env["AGENT_WORKSPACE_ROOT"]?.trim() || process.cwd()
-      );
-      const chatId = `chat_${Date.now().toString(36)}`;
-      const mode: "scratch" | "folder" =
-        cwd && existsSync(cwd) && !looksLikeUserHome(cwd) ? "folder" : "scratch";
-      const root = mode === "folder" ? cwd : scratchWorkspaceRoot(chatId);
-      const title = mode === "folder" ? path.basename(cwd) || "Workspace" : "First chat";
-      chosen = await createChatMetadata({
-        chatId,
-        title,
-        workspaceMode: mode,
-        workspaceRoot: root,
-        workspaceFingerprint: workspaceFingerprint(root),
-      });
-    }
+    const cwd = path.resolve(
+      process.env["AGENT_WORKSPACE_ROOT"]?.trim() || process.cwd()
+    );
+    const { meta: chosen } = await resolveChatBoot({
+      defaultWorkspaceRoot: cwd,
+      looksLikeUserHome,
+    });
 
     await this.activate(chosen.chatId, { announce: false });
     this.startEvictionTimer();
@@ -202,8 +180,10 @@ export class ChatManager {
 
     this.activeChatId = chatId;
     this.sse.setActiveChatId(chatId);
+    await saveLastActiveChatId(chatId).catch(() => undefined);
 
     await slot.bridge.resumeSSE();
+    await slot.bridge.replayPersistedTranscript();
 
     if (opts?.announce !== false) {
       this.sse.send("chat_switched", {

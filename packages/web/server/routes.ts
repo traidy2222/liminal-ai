@@ -18,14 +18,9 @@ import {
   resolvePersonalityHeartbeatConfig,
   listChats,
   listOrphanChatIds,
+  loadChatTranscriptFromSessionLog,
   readChatMetadata,
   workspaceFingerprint,
-  resolveTranscriptionConfigAsync,
-  transcribeAudio,
-  resolveSpeechSynthesisConfigAsync,
-  synthesizeSpeechMulti,
-  sanitizeTextForTts,
-  coerceTtsConfigForBrowserPlayback,
   applyVireonLicenseToken,
   readVireonAccount,
   loadHarnessEntitlements,
@@ -41,14 +36,10 @@ import {
   resolveGoogleServices,
 } from "@liminal/core";
 import {
-  saveAudioAttachment,
-  findAudioAttachment,
-  readAudioAttachment,
-  normalizeAudioMimeType,
-  SUPPORTED_AUDIO_MIME_TYPES,
-  saveTtsClip,
-  readTtsClip,
-  ttsClipAudioUrl,
+  handleAudioUpload,
+  handleTranscribe,
+  handleTtsPost,
+  readTtsClipBytes,
   getGoogleSidecarStatus,
   connectGoogleWorkspaceFromServer,
   disconnectGoogleWorkspaceFromServer,
@@ -59,20 +50,12 @@ import {
   disconnectOpenApiFromServer,
   parseAuthBody,
 } from "@liminal/tools";
-import { loadPersonaUiThemeFromWorkspace } from "@liminal/tools";
+import { loadPersonaUiThemeFromWorkspace, loadPersonaUiCopyFromWorkspace } from "@liminal/tools";
 import { persistIncomingAttachments } from "./image_attachment_store.js";
 import type { LocalWebAuth } from "./local_auth.js";
 import path from "node:path";
 
 const WEB_PORT = Number(process.env["PORT"] ?? 3001);
-
-/** Strip path segments and dangerous chars; cap length for safe storage/display. */
-function sanitizeAudioFilename(raw: string): string {
-  const base = path.basename(String(raw ?? "").trim());
-  const cleaned = base.replace(/[^a-zA-Z0-9._-]+/g, "_").replace(/^\.+/, "");
-  const trimmed = cleaned.slice(0, 120);
-  return trimmed || `audio-${Date.now()}.webm`;
-}
 
 type IncomingAttachment = {
   name?: string;
@@ -164,6 +147,12 @@ export function createRouter(
       } catch {
         personaUiTheme = null;
       }
+      let personaUiCopy: import("@liminal/core").PersonaUiCopy | null = null;
+      try {
+        personaUiCopy = await loadPersonaUiCopyFromWorkspace();
+      } catch {
+        personaUiCopy = null;
+      }
       const persona = bridge.harness.getCurrentPersona();
       const personaDisplayLabel =
         personaUiTheme?.displayLabel?.trim() ||
@@ -181,6 +170,7 @@ export function createRouter(
         personaBootstrapPending: bridge.isAwaitingPersonaBootstrap,
         personaBootstrapAllowSkip: resolveHarnessEnvRaw("AGENT_PERSONA_BOOTSTRAP_ALLOW_SKIP", prefs) !== "0",
         personaUiTheme,
+        personaUiCopy,
         personaDisplayLabel,
         personalityHeartbeatEnabled: ph.enabled,
         personalityHeartbeatUiStrip: ph.uiStripDefault,
@@ -818,6 +808,14 @@ export function createRouter(
           `event: harness_running\ndata: ${JSON.stringify({ startedAt: bridge.turnStartTime })}\n\n`
         );
       }
+      const replayHistory = req.query["replayHistory"] === "1";
+      const hasLastEventId = Boolean(req.header("last-event-id") ?? req.query["lastEventId"]);
+      if (
+        (!replayHistory || sse.historyLength(chatId) === 0) &&
+        !hasLastEventId
+      ) {
+        void bridge.replayPersistedTranscript({ uiOnly: true });
+      }
     }
   });
 
@@ -1001,6 +999,20 @@ export function createRouter(
     }
   });
 
+  router.get("/api/chats/:id/transcript", async (req, res) => {
+    try {
+      const meta = await readChatMetadata(req.params.id);
+      if (!meta) {
+        res.status(404).json({ error: "chat not found" });
+        return;
+      }
+      const entries = await loadChatTranscriptFromSessionLog(req.params.id);
+      res.json({ chatId: req.params.id, entries });
+    } catch (err) {
+      res.status(500).json({ error: (err as Error).message });
+    }
+  });
+
   router.post("/api/chats", async (req, res) => {
     try {
       const { title, workspaceMode, workspaceRoot, activate: shouldActivate } = req.body as {
@@ -1071,71 +1083,14 @@ export function createRouter(
   router.post("/api/audio/upload", async (req, res) => {
     try {
       const bridge = active();
-      const body = req.body as {
-        dataUrl?: string;
-        filename?: string;
-        mimeType?: string;
-      };
-      const dataUrl = String(body.dataUrl ?? "").trim();
-      if (!dataUrl.startsWith("data:")) {
-        res.status(400).json({ error: "dataUrl required (data:<mime>;base64,<payload>)" });
-        return;
-      }
-      // MediaRecorder produces mime types like `audio/webm;codecs=opus`, which
-      // adds a parameter segment before `;base64,`. The previous regex
-      // /^data:([^;]+);base64,(.+)$/ failed on these because [^;]+ stopped at
-      // the FIRST semicolon. The new pattern grabs everything between `data:`
-      // and the LAST `;base64,` so codec/charset parameters survive intact.
-      const base64Idx = dataUrl.indexOf(";base64,");
-      if (base64Idx < 5) {
-        res.status(400).json({ error: "Invalid data URL format (expected ;base64, segment)" });
-        return;
-      }
-      const fullMimeHeader = dataUrl.slice(5, base64Idx); // strip "data:" prefix
-      const payload = dataUrl.slice(base64Idx + ";base64,".length);
-      if (!fullMimeHeader || !payload) {
-        res.status(400).json({ error: "Invalid data URL format" });
-        return;
-      }
-      // Extract just the media type (drop ;codecs=…, ;charset=…) for our
-      // allow-list check. Keep the full header for content-type if we ever
-      // need it downstream.
-      const mimeFromUrl = normalizeAudioMimeType(fullMimeHeader);
-      const bodyMime =
-        typeof body.mimeType === "string" ? normalizeAudioMimeType(body.mimeType) : "";
-      // Trust the data URL MIME only; ignore a mismatched client-supplied mimeType.
-      const mimeType =
-        bodyMime && bodyMime === mimeFromUrl ? bodyMime : mimeFromUrl;
-      if (!mimeType || !SUPPORTED_AUDIO_MIME_TYPES.has(mimeType)) {
-        res.status(400).json({
-          error: `Unsupported audio MIME: ${fullMimeHeader}. Supported: ${[...SUPPORTED_AUDIO_MIME_TYPES].join(", ")}`,
-        });
-        return;
-      }
-      const bytes = Buffer.from(payload, "base64");
-      const config = await resolveTranscriptionConfigAsync(bridge.harness.getRuntimePreferences());
-      if (bytes.byteLength > config.maxBytes) {
-        res.status(413).json({
-          error: `Audio file ${bytes.byteLength} bytes exceeds AGENT_TRANSCRIBE_MAX_BYTES (${config.maxBytes}).`,
-        });
-        return;
-      }
-      const filename = sanitizeAudioFilename(
-        (typeof body.filename === "string" && body.filename.trim()) || `audio-${Date.now()}.webm`
+      const result = await handleAudioUpload(
+        {
+          chatId: bridge.chatId,
+          getRuntimePreferences: () => bridge.harness.getRuntimePreferences(),
+        },
+        req.body as Parameters<typeof handleAudioUpload>[1]
       );
-      const rec = await saveAudioAttachment(bridge.chatId, {
-        bytes,
-        filename,
-        mimeType,
-      });
-      res.json({
-        ok: true,
-        attachmentId: rec.id,
-        filename: rec.filename,
-        mimeType: rec.mimeType,
-        sizeBytes: rec.sizeBytes,
-        chatId: bridge.chatId,
-      });
+      res.status(result.status).json(result.body);
     } catch (err) {
       res.status(500).json({ error: (err as Error).message });
     }
@@ -1144,74 +1099,29 @@ export function createRouter(
   router.post("/api/transcribe", async (req, res) => {
     try {
       const bridge = active();
-      const body = req.body as {
-        attachmentId?: string;
-        language?: string;
-        prompt?: string;
-        timestamps?: "none" | "segment" | "word";
-        model?: string;
-      };
-      const id = String(body.attachmentId ?? "").trim();
-      if (!id) {
-        res.status(400).json({ error: "attachmentId required (upload first via /api/audio/upload)" });
-        return;
-      }
-      const found = await findAudioAttachment(bridge.chatId, id);
-      if (!found) {
-        res.status(404).json({ error: `Audio attachment ${id} not found for this chat.` });
-        return;
-      }
-      const { record, bytes } = await readAudioAttachment(bridge.chatId, id);
-      const config = await resolveTranscriptionConfigAsync(bridge.harness.getRuntimePreferences());
-      if (!config.enabled) {
-        res.status(503).json({ error: "Transcription disabled (AGENT_TRANSCRIBE_ENABLED=0)." });
-        return;
-      }
-      if (!config.apiKey) {
-        res.status(503).json({
-          error: "No transcription API key. Set AGENT_TRANSCRIBE_API_KEY, AGENT_API_KEY, or OPENROUTER_API_KEY.",
-        });
-        return;
-      }
-      const result = await transcribeAudio(
-        {
-          audio: bytes,
-          filename: record.filename,
-          language: body.language?.trim() || undefined,
-          prompt: body.prompt?.slice(0, 1500),
-          timestamps:
-            body.timestamps === "none" || body.timestamps === "word" || body.timestamps === "segment"
-              ? body.timestamps
-              : undefined,
-          model: body.model?.trim() || undefined,
-        },
-        config
-      );
-      // Surface to SSE so the client UI's cost chip stays in sync even if the
-      // browser tab that triggered the call already moved on.
-      sse.send(
-        "transcription",
+      const result = await handleTranscribe(
         {
           chatId: bridge.chatId,
-          attachmentId: id,
-          durationSec: result.durationSec,
-          costUsd: result.costUsd,
-          model: result.model,
-          language: result.language,
-          at: Date.now(),
+          getRuntimePreferences: () => bridge.harness.getRuntimePreferences(),
         },
-        bridge.chatId
+        req.body as Parameters<typeof handleTranscribe>[1]
       );
-      res.json({
-        ok: true,
-        attachmentId: id,
-        text: result.text,
-        language: result.language,
-        durationSec: result.durationSec,
-        costUsd: result.costUsd,
-        model: result.model,
-        provider: result.provider,
-      });
+      if (result.ok && typeof result.body.durationSec === "number") {
+        sse.send(
+          "transcription",
+          {
+            chatId: bridge.chatId,
+            attachmentId: String(result.body.attachmentId ?? ""),
+            durationSec: result.body.durationSec,
+            costUsd: result.body.costUsd,
+            model: result.body.model,
+            language: result.body.language,
+            at: Date.now(),
+          },
+          bridge.chatId
+        );
+      }
+      res.status(result.status).json(result.body);
     } catch (err) {
       res.status(500).json({ error: (err as Error).message });
     }
@@ -1220,44 +1130,14 @@ export function createRouter(
   router.post("/api/tts", async (req, res) => {
     try {
       const bridge = active();
-      const body = req.body as { text?: string; voice?: string };
-      const raw = String(body.text ?? "").trim();
-      if (!raw) {
-        res.status(400).json({ error: "text required" });
-        return;
-      }
-      const prefs = bridge.harness.getRuntimePreferences();
-      const config = await resolveSpeechSynthesisConfigAsync(prefs);
-      if (!config.enabled) {
-        res.status(400).json({ error: "TTS is disabled (AGENT_TTS_ENABLED=0)." });
-        return;
-      }
-      const sanitized = sanitizeTextForTts(raw, config.maxCharsPerCall);
-      if (!sanitized) {
-        res.status(400).json({ error: "Nothing to speak after sanitization." });
-        return;
-      }
-      const multi = await synthesizeSpeechMulti(
-        { text: sanitized, voice: body.voice?.trim() || undefined },
-        coerceTtsConfigForBrowserPlayback(config)
+      const result = await handleTtsPost(
+        {
+          chatId: bridge.chatId,
+          getRuntimePreferences: () => bridge.harness.getRuntimePreferences(),
+        },
+        req.body as Parameters<typeof handleTtsPost>[1]
       );
-      const clips = [];
-      for (const seg of multi.segments) {
-        const saved = await saveTtsClip(bridge.chatId, seg.audio, seg.mimeType, seg.spokenText);
-        clips.push({
-          clipId: saved.clipId,
-          audioUrl: ttsClipAudioUrl(saved.clipId),
-          text: seg.spokenText,
-          cacheHit: saved.cacheHit,
-        });
-      }
-      res.json({
-        ok: true,
-        segments: clips.length,
-        clips,
-        charCount: multi.charCount,
-        costUsd: multi.costUsd,
-      });
+      res.status(result.status).json(result.body);
     } catch (err) {
       res.status(500).json({ error: (err as Error).message });
     }
@@ -1266,8 +1146,13 @@ export function createRouter(
   router.get("/api/tts/clip/:clipId", async (req, res) => {
     try {
       const bridge = active();
-      const clipId = String(req.params.clipId ?? "");
-      const clip = await readTtsClip(bridge.chatId, clipId);
+      const clip = await readTtsClipBytes(
+        {
+          chatId: bridge.chatId,
+          getRuntimePreferences: () => bridge.harness.getRuntimePreferences(),
+        },
+        String(req.params.clipId ?? "")
+      );
       if (!clip) {
         res.status(404).json({ error: "clip not found" });
         return;

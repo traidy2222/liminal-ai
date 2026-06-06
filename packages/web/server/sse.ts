@@ -37,6 +37,10 @@ export class SSEManager {
     }
   }
 
+  historyLength(chatId: string): number {
+    return this.histories.get(chatId)?.length ?? 0;
+  }
+
   add(req: Request, res: Response, chatId: string): string {
     const id = String(++this.idCounter);
 
