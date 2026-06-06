@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../../state/message_models.dart';
 import '../rich_message/liminal_message_content.dart';
 import '../theme/liminal_theme_extension.dart';
+import 'plan_progress_tile.dart';
 import 'tool_activity_tile.dart';
 
 class MessageTile extends StatelessWidget {
@@ -100,36 +101,8 @@ class MessageTile extends StatelessWidget {
           body: inference.isNotEmpty ? inference : argsPreview,
           streaming: streaming,
         ),
-      PlanMessage(:final steps, :final streaming) => Card(
-          margin: const EdgeInsets.symmetric(vertical: 6),
-          child: Padding(
-            padding: const EdgeInsets.all(12),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(
-                  children: [
-                    Text('Plan', style: theme.textTheme.titleSmall),
-                    if (streaming) ...[
-                      const SizedBox(width: 8),
-                      const SizedBox(
-                        width: 12,
-                        height: 12,
-                        child: CircularProgressIndicator(strokeWidth: 2),
-                      ),
-                    ],
-                  ],
-                ),
-                const SizedBox(height: 8),
-                for (final s in steps)
-                  Padding(
-                    padding: const EdgeInsets.only(bottom: 4),
-                    child: Text('• $s'),
-                  ),
-              ],
-            ),
-          ),
-        ),
+      PlanMessage(:final steps, :final streaming) =>
+        PlanProgressTile(steps: steps, streaming: streaming),
       TraceMessage(:final text) => Padding(
           padding: const EdgeInsets.symmetric(vertical: 2),
           child: Text(
@@ -286,19 +259,59 @@ class MessageTile extends StatelessWidget {
     required Widget child,
     Border? border,
   }) {
-    final radius = LiminalTheme.of(context).radius;
+    final lim = LiminalTheme.of(context);
+    final style = lim.messageStyle;
+    final width = MediaQuery.sizeOf(context).width;
+    final isUser = alignment == Alignment.centerRight;
+
+    // `transcript`: terminal-style flat rows, full width, no fill/round, a
+    // colored left rule marks the speaker.
+    if (style == 'transcript') {
+      return Container(
+        width: double.infinity,
+        margin: const EdgeInsets.symmetric(vertical: 3),
+        padding: const EdgeInsets.fromLTRB(12, 6, 8, 6),
+        decoration: BoxDecoration(
+          border: Border(
+            left: BorderSide(
+              color: (isUser ? lim.accent : lim.assistantAccent).withValues(alpha: 0.7),
+              width: 2,
+            ),
+          ),
+        ),
+        child: child,
+      );
+    }
+
+    // `flat`: minimal fill, near-sharp corners, near-full width, no big bubble.
+    if (style == 'flat') {
+      return Align(
+        alignment: alignment,
+        child: Container(
+          constraints: BoxConstraints(maxWidth: width * 0.92),
+          margin: const EdgeInsets.symmetric(vertical: 4),
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
+          decoration: BoxDecoration(
+            color: color.withValues(alpha: 0.45),
+            border: isUser ? null : Border(left: BorderSide(color: lim.border, width: 2)),
+            borderRadius: BorderRadius.circular((lim.radius * 0.35).clamp(0.0, 6.0).toDouble()),
+          ),
+          child: child,
+        ),
+      );
+    }
+
+    // `bubble` (default): rounded chat bubbles.
     return Align(
       alignment: alignment,
       child: Container(
-        constraints: BoxConstraints(
-          maxWidth: MediaQuery.sizeOf(context).width * 0.85,
-        ),
+        constraints: BoxConstraints(maxWidth: width * 0.85),
         margin: const EdgeInsets.symmetric(vertical: 6),
         padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
         decoration: BoxDecoration(
           color: color,
           border: border,
-          borderRadius: BorderRadius.circular(radius),
+          borderRadius: BorderRadius.circular(lim.radius),
         ),
         child: child,
       ),

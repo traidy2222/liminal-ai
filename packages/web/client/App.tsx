@@ -18,6 +18,7 @@ import {
   isStreamingWriteTool,
 } from "@liminal/core/streaming-write-preview";
 import { StreamingWritePreviewBox } from "./StreamingWritePreviewBox.js";
+import { PlanProgressBlock } from "./PlanProgressBlock.js";
 import { PersonaGenerationWorkbench } from "./persona/PersonaGenerationWorkbench.js";
 import {
   DEFAULT_IMAGE_ATTACHMENT_LIMITS,
@@ -1457,37 +1458,14 @@ function MessageView({
     case "think":
       return <ThinkBlock entry={entry} surface={surface} />;
 
-    case "plan": {
-      const steps = Array.isArray(entry.steps) ? entry.steps : [];
-      if (steps.length === 0 && entry.streaming && entry.previewText) {
-        return (
-          <div style={styles.planCard}>
-            <div style={{ color: CYAN, fontWeight: 700, marginBottom: 8, fontSize: 12, letterSpacing: "0.06em" }}>
-              ▸ PLAN · LIVE
-            </div>
-            <pre style={{ margin: 0, fontSize: 11, color: "#667788", whiteSpace: "pre-wrap", fontFamily: "inherit" }}>
-              {entry.previewText.slice(-1200)}
-            </pre>
-          </div>
-        );
-      }
-      if (steps.length === 0) return null;
+    case "plan":
       return (
-        <div style={styles.planCard}>
-          <div style={{ color: CYAN, fontWeight: 700, marginBottom: 8, fontSize: 12, letterSpacing: "0.06em" }}>▸ PLAN</div>
-          {steps.map((step, i) => {
-            const done = step.startsWith("✓");
-            const text = done ? step.slice(2) : step;
-            return (
-              <div key={i} style={{ display: "flex", gap: 8, alignItems: "flex-start", color: done ? GREEN : "#667788", fontSize: 12, lineHeight: 1.6, paddingLeft: 4 }}>
-                <span style={{ flexShrink: 0, color: done ? GREEN : "#334455" }}>{done ? "✓" : "○"}</span>
-                <span style={{ textDecoration: done ? "line-through" : "none", opacity: done ? 0.6 : 1 }}>{i + 1}. {text}</span>
-              </div>
-            );
-          })}
-        </div>
+        <PlanProgressBlock
+          steps={Array.isArray(entry.steps) ? entry.steps : []}
+          streaming={entry.streaming}
+          previewText={entry.previewText}
+        />
       );
-    }
 
     case "subtask":
       return <SubtaskView entry={entry} onInspect={onInspectSubtask} />;

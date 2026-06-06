@@ -125,11 +125,43 @@ ChatTranscriptState reduceChatEvent(
         m.finalOutput = data['error'] as String? ?? 'subtask failed';
         return m;
       });
+    case 'transcript_replay':
+      return _onTranscriptReplay(state, data);
     case 'session_reset':
       return ChatTranscriptState.initial;
     default:
       return state;
   }
+}
+
+ChatTranscriptState _onTranscriptReplay(
+  ChatTranscriptState state,
+  Map<String, dynamic> data,
+) {
+  final raw = data['entries'];
+  if (raw is! List) return state;
+  final messages = <MessageEntry>[];
+  for (final item in raw) {
+    if (item is! Map) continue;
+    final map = Map<String, dynamic>.from(item);
+    final kind = map['kind'] as String? ?? '';
+    final text = map['text'] as String? ?? '';
+    if (kind == 'user' && text.isNotEmpty) {
+      messages.add(UserMessage(text));
+    } else if (kind == 'assistant' && text.isNotEmpty) {
+      messages.add(AssistantMessage(text: text, streaming: false));
+    } else if (kind == 'tool_call') {
+      messages.add(ToolCallMessage(
+        callId: map['toolCallId'] as String? ?? map['id'] as String? ?? '',
+        name: map['toolName'] as String? ?? 'tool',
+        status: ToolCallStatus.done,
+        output: map['toolOutput'] as String? ?? text,
+      ));
+    } else if (kind == 'error' && text.isNotEmpty) {
+      messages.add(ErrorMessage(text));
+    }
+  }
+  return ChatTranscriptState(messages: messages, busy: false);
 }
 
 ChatTranscriptState applyUserMessage(
@@ -206,14 +238,8 @@ ChatTranscriptState _onToolStart(ChatTranscriptState state, Map<String, dynamic>
       ],
     );
   }
-  if (name == 'plan') {
-    return base.copyWith(
-      messages: [
-        ...base.messages,
-        PlanMessage(callId: callId, streaming: true),
-      ],
-    );
-  }
+  // plan() renders on tool_result only — avoids empty Plan shells on step_index calls
+  if (name == 'plan') return base;
   if (_orchTools.contains(name)) return base;
   return base.copyWith(
     messages: [
@@ -366,14 +392,71 @@ ChatTranscriptState _replaceStreamingPlan(
   String callId,
   Map<String, dynamic> args,
 ) {
+  if (args['step_index'] is num) {
+    return _applyPlanStepDone(state, (args['step_index'] as num).toInt(), callId);
+  }
   final steps = args['steps'] is List
       ? (args['steps'] as List).map((e) => e.toString()).toList()
       : <String>[];
-  final msgs = state.messages
-      .where((m) => !(m is PlanMessage && m.streaming && m.callId == callId))
-      .toList();
-  msgs.add(PlanMessage(callId: callId, steps: steps, streaming: false));
-  return state.copyWith(messages: msgs);
+  if (steps.isEmpty) {
+    return state.copyWith(messages: _stripEphemeralPlans(state.messages, callId));
+  }
+  return state.copyWith(messages: _upsertPlanSteps(state.messages, steps, callId));
+}
+
+List<MessageEntry> _stripEphemeralPlans(List<MessageEntry> messages, [String? callId]) {
+  return messages.where((m) {
+    if (m is! PlanMessage) return true;
+    if (m.steps.isEmpty && m.argsPreview.trim().isEmpty) return false;
+    if (m.streaming && callId != null && m.callId == callId) return false;
+    if (m.streaming && m.steps.isEmpty && m.argsPreview.trim().isEmpty) return false;
+    return true;
+  }).toList();
+}
+
+List<MessageEntry> _upsertPlanSteps(
+  List<MessageEntry> messages,
+  List<String> steps,
+  String callId,
+) {
+  final cleaned = _stripEphemeralPlans(messages, callId);
+  for (var i = cleaned.length - 1; i >= 0; i--) {
+    if (cleaned[i] is PlanMessage) {
+      final next = List<MessageEntry>.from(cleaned);
+      next[i] = PlanMessage(callId: callId, steps: steps, streaming: false);
+      return next;
+    }
+  }
+  return [...cleaned, PlanMessage(callId: callId, steps: steps, streaming: false)];
+}
+
+ChatTranscriptState _applyPlanStepDone(
+  ChatTranscriptState state,
+  int stepIndex,
+  String callId,
+) {
+  final cleaned = _stripEphemeralPlans(state.messages, callId);
+  for (var i = cleaned.length - 1; i >= 0; i--) {
+    final m = cleaned[i];
+    if (m is PlanMessage && m.steps.isNotEmpty) {
+      final steps = List<String>.from(m.steps);
+      if (stepIndex >= 0 && stepIndex < steps.length) {
+        final current = steps[stepIndex];
+        if (!current.startsWith('✓')) {
+          steps[stepIndex] = '✓ $current';
+        }
+      }
+      final next = List<MessageEntry>.from(cleaned);
+      next[i] = PlanMessage(
+        callId: m.callId,
+        steps: steps,
+        streaming: false,
+        argsPreview: m.argsPreview,
+      );
+      return state.copyWith(messages: next);
+    }
+  }
+  return state.copyWith(messages: cleaned);
 }
 
 ChatTranscriptState _onTurnEnd(ChatTranscriptState state, Map<String, dynamic> data) {
@@ -408,10 +491,11 @@ ChatTranscriptState _onTurnEnd(ChatTranscriptState state, Map<String, dynamic> d
 }
 
 ChatTranscriptState _finalizeStreaming(ChatTranscriptState state) {
-  final msgs = List<MessageEntry>.from(state.messages);
+  final msgs = _stripEphemeralPlans(List<MessageEntry>.from(state.messages));
   for (final m in msgs) {
     if (m is AssistantMessage && m.streaming) m.streaming = false;
     if (m is ModelReasoningMessage && m.streaming) m.streaming = false;
+    if (m is PlanMessage && m.streaming) m.streaming = false;
     if (m is ToolCallMessage &&
         (m.status == ToolCallStatus.streaming || m.status == ToolCallStatus.running)) {
       m.status = ToolCallStatus.done;

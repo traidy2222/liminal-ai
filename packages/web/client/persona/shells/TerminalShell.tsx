@@ -11,6 +11,7 @@ import { ShellComposer } from "./ShellComposer.js";
 import { ShellChatSwitcher } from "../../chat/ShellChatSwitcher.js";
 import { LIM } from "../personaVars.js";
 import { SubtaskInlineCard } from "../../SubtaskInspectorModal.js";
+import { PlanProgressBlock } from "../../PlanProgressBlock.js";
 
 // ── Palette ───────────────────────────────────────────────────────────────────
 
@@ -213,24 +214,16 @@ export function TerminalShell({ contract }: { contract: ShellContract }) {
                   </div>
                 );
 
-              case "plan": {
-                const steps = Array.isArray(m.steps) ? m.steps : [];
-                if (steps.length === 0) return null;
+              case "plan":
                 return (
-                  <div key={i} style={{ paddingLeft: 18, color: "#445566", fontSize: 11, lineHeight: 1.6 }}>
-                    <span style={{ color: CYAN }}>--- plan ---</span>
-                    {steps.map((step, si) => {
-                      const done = step.startsWith("✓");
-                      const text = done ? step.slice(2) : step;
-                      return (
-                        <div key={si} style={{ color: done ? "#334455" : "#556677", textDecoration: done ? "line-through" : "none", marginLeft: 8 }}>
-                          {done ? "✓" : "○"} {si + 1}. {text}
-                        </div>
-                      );
-                    })}
+                  <div key={i}>
+                    <PlanProgressBlock
+                      steps={Array.isArray(m.steps) ? m.steps : []}
+                      streaming={m.streaming}
+                      previewText={m.previewText}
+                    />
                   </div>
                 );
-              }
 
               case "subtask":
                 return (

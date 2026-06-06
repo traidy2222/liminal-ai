@@ -20,6 +20,7 @@ import {
   parsePersonaInput,
 } from "@liminal/tools";
 import type { AutoDreamState } from "./autoDreamPresent.js";
+import { applyPlanStepDone, upsertPlanSteps } from "./planTranscript.js";
 
 function isAgentUiQuiet(): boolean {
   return process.env["AGENT_UI_VERBOSITY"]?.trim() === "quiet";
@@ -196,8 +197,8 @@ type Action =
       confidence?: "low" | "medium" | "high";
       next_action?: string;
     }
-  | { type: "plan"; steps: string[] }
-  | { type: "plan_step_done"; stepIndex: number }
+  | { type: "plan"; steps: string[]; callId?: string }
+  | { type: "plan_step_done"; stepIndex: number; callId?: string }
   | { type: "subtask_spawned"; taskId: string; parentTaskId: string; goal: string; depth: number }
   | { type: "subtask_complete"; taskId: string; ok: boolean }
   | { type: "subtask_output"; taskId: string; delta: string }
@@ -375,14 +376,8 @@ function reducer(state: AgentState, action: Action): AgentState {
           ]),
         };
       }
-      if (action.name === "plan") {
-        return {
-          ...state,
-          messages: baseAfterReasoning.concat([
-            { kind: "plan", callId: action.callId, streaming: true, argsJson: "", steps: [], previewText: "" },
-          ]),
-        };
-      }
+      // plan() materializes on tool_result — avoid empty "Plan" shells on step_index calls
+      if (action.name === "plan") return state;
       // Suppress orchestration tools — they appear as subtask entries
       if (
         action.name === "spawn_agent" ||
@@ -494,20 +489,11 @@ function reducer(state: AgentState, action: Action): AgentState {
       };
     }
 
-    case "plan_step_done": {
-      const msgs = [...state.messages];
-      for (let i = msgs.length - 1; i >= 0; i--) {
-        const m = msgs[i]!;
-        if (m.kind === "plan" && action.stepIndex < m.steps.length) {
-          const updatedSteps = m.steps.map((s, j) =>
-            j === action.stepIndex && !s.startsWith("✓") ? `✓ ${s}` : s
-          );
-          msgs[i] = { ...m, steps: updatedSteps };
-          break;
-        }
-      }
-      return { ...state, messages: msgs };
-    }
+    case "plan_step_done":
+      return {
+        ...state,
+        messages: applyPlanStepDone(state.messages, action.stepIndex, action.callId),
+      };
 
     case "ask_user":
       return { ...state, pendingAskUser: action.payload };
@@ -604,7 +590,7 @@ function reducer(state: AgentState, action: Action): AgentState {
       if (isAgentUiQuiet()) return state;
       return {
         ...state,
-        messages: [...state.messages, { kind: "plan", steps: action.steps }],
+        messages: upsertPlanSteps(state.messages, action.steps, action.callId),
       };
 
     case "subtask_spawned":
@@ -732,8 +718,18 @@ function reducer(state: AgentState, action: Action): AgentState {
   }
 }
 
-export function useAgent(harness: AgentHarness) {
-  const [state, dispatch] = useReducer(reducer, harness, createInitialAgentState);
+export function useAgent(
+  harness: AgentHarness,
+  options?: { initialMessages?: MessageEntry[] }
+) {
+  const [state, dispatch] = useReducer(
+    reducer,
+    { harness, initialMessages: options?.initialMessages ?? [] },
+    (init) => ({
+      ...createInitialAgentState(init.harness),
+      messages: init.initialMessages,
+    })
+  );
   const queuedTextRef = useRef("");
   const queuedTraceRef = useRef("");
   const flushTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -834,9 +830,9 @@ export function useAgent(harness: AgentHarness) {
         const steps = args["steps"] as string[] | undefined;
         const stepIndex = args["step_index"] as number | undefined;
         if (steps && steps.length > 0) {
-          dispatch({ type: "plan", steps });
+          dispatch({ type: "plan", steps, callId });
         } else if (stepIndex !== undefined) {
-          dispatch({ type: "plan_step_done", stepIndex });
+          dispatch({ type: "plan_step_done", stepIndex, callId });
         }
         return;
       }

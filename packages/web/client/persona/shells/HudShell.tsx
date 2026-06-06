@@ -21,6 +21,7 @@ import {
 } from "../shellLayout.js";
 import { LIM } from "../personaVars.js";
 import { StreamingWritePreviewBox } from "../../StreamingWritePreviewBox.js";
+import { PlanProgressBlock } from "../../PlanProgressBlock.js";
 import { SubtaskInlineCard } from "../../SubtaskInspectorModal.js";
 import {
   extractStreamingWritePreview,
@@ -1014,33 +1015,14 @@ function MessageView({
     case "reason":
       return <ReasonBlock entry={entry} />;
 
-    case "plan": {
-      const steps = Array.isArray(entry.steps) ? entry.steps : [];
-      if (steps.length === 0 && entry.streaming && entry.previewText) {
-        return (
-          <div style={{ padding: "9px 14px", background: "rgba(0,8,20,0.7)", border: "1px solid rgba(var(--lim-accent-rgb),0.1)", borderLeft: "2px solid rgba(var(--lim-accent-rgb),0.35)", borderRadius: 3 }}>
-            <div style={{ color: CYAN, fontWeight: 700, marginBottom: 8, fontSize: 12, letterSpacing: "0.06em" }}>▸ PLAN · LIVE</div>
-            <pre style={{ margin: 0, fontSize: 11, color: "#667788", whiteSpace: "pre-wrap", fontFamily: "inherit" }}>{entry.previewText.slice(-1200)}</pre>
-          </div>
-        );
-      }
-      if (steps.length === 0) return null;
+    case "plan":
       return (
-        <div style={{ padding: "9px 14px", background: "rgba(0,8,20,0.7)", border: "1px solid rgba(var(--lim-accent-rgb),0.1)", borderLeft: "2px solid rgba(var(--lim-accent-rgb),0.35)", borderRadius: 3 }}>
-          <div style={{ color: CYAN, fontWeight: 700, marginBottom: 8, fontSize: 12, letterSpacing: "0.06em" }}>▸ PLAN</div>
-          {steps.map((step, i) => {
-            const done = step.startsWith("✓");
-            const text = done ? step.slice(2) : step;
-            return (
-              <div key={i} style={{ display: "flex", gap: 8, alignItems: "flex-start", color: done ? GREEN : "#667788", fontSize: 12, lineHeight: 1.6, paddingLeft: 4 }}>
-                <span style={{ flexShrink: 0, color: done ? GREEN : "#334455" }}>{done ? "✓" : "○"}</span>
-                <span style={{ textDecoration: done ? "line-through" : "none", opacity: done ? 0.6 : 1 }}>{i + 1}. {text}</span>
-              </div>
-            );
-          })}
-        </div>
+        <PlanProgressBlock
+          steps={Array.isArray(entry.steps) ? entry.steps : []}
+          streaming={entry.streaming}
+          previewText={entry.previewText}
+        />
       );
-    }
 
     case "subtask":
       return <SubtaskInlineCard entry={entry} onInspect={onInspectSubtask} />;

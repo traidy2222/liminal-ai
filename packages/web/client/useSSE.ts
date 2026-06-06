@@ -15,6 +15,8 @@ import {
   webApiFetch,
   webApiStreamUrl,
 } from "./webApiAuth.js";
+import { replayEntriesToMessages } from "./replayTranscript.js";
+import { applyPlanStepDone, upsertPlanSteps } from "./planTranscript.js";
 
 /** Set only after a successful auto-greet reset (survives remount within the tab). */
 const SS_AUTO_GREET_DONE = "liminal:auto_greet_done_v1";
@@ -92,21 +94,24 @@ function finalizeStreamingModelReasoning(messages: MessageEntry[]): MessageEntry
 }
 
 function finalizeStreamingReasoningEntries(messages: MessageEntry[]): MessageEntry[] {
-  return messages.map((m) => {
+  return messages.flatMap((m) => {
     if (m.kind === "think" && m.streaming) {
-      return {
-        ...m,
-        streaming: false,
-        content: m.content.trim() ? m.content : "(reasoning interrupted before completion)",
-      };
+      return [
+        {
+          ...m,
+          streaming: false as const,
+          content: m.content.trim() ? m.content : "(reasoning interrupted before completion)",
+        },
+      ];
     }
     if (m.kind === "plan" && m.streaming) {
-      return { ...m, streaming: false };
+      if (m.steps.length === 0 && !m.previewText?.trim()) return [];
+      return [{ ...m, streaming: false as const }];
     }
     if (m.kind === "model_reasoning" && m.streaming) {
-      return { ...m, streaming: false };
+      return [{ ...m, streaming: false as const }];
     }
-    return m;
+    return [m];
   });
 }
 
@@ -543,6 +548,10 @@ type Action =
         artifacts?: PersonaArtifactPreview[];
       };
     }
+  | {
+      type: "transcript_replay";
+      payload: { chatId?: string; entries: import("./replayTranscript.js").WireReplayEntry[] };
+    }
   | { type: "session_reset" }
   | { type: "heartbeat_scheduled"; payload: { taskId: string; firesAtMs: number; idleMs: number } }
   | { type: "heartbeat_started"; payload: { taskId: string; runId: string } }
@@ -657,6 +666,14 @@ function reducer(state: SSEState, action: Action): SSEState {
 
     case "harness_running":
       return { ...state, busy: true };
+
+    case "transcript_replay":
+      return {
+        ...state,
+        messages: replayEntriesToMessages(action.payload.entries),
+        busy: false,
+        error: null,
+      };
 
     case "session_reset":
       return {
@@ -817,22 +834,7 @@ function reducer(state: SSEState, action: Action): SSEState {
           ],
         };
       }
-      if (name === "plan") {
-        return {
-          ...state,
-          messages: [
-            ...baseAfterReasoning,
-            {
-              kind: "plan",
-              callId,
-              streaming: true,
-              argsJson: "",
-              steps: [],
-              previewText: "",
-            },
-          ],
-        };
-      }
+      if (name === "plan") return state;
       if (name === "reason") {
         return {
           ...state,
@@ -974,18 +976,15 @@ function reducer(state: SSEState, action: Action): SSEState {
         return { ...state, messages: [...withoutStreaming, finalized] };
       }
       if (name === "plan" && ok) {
-        const steps = Array.isArray(args["steps"])
-          ? (args["steps"] as string[])
-          : typeof args["step_index"] === "number"
-          ? [`Step ${args["step_index"] as number} marked complete`]
-          : [];
-        const withoutStreaming = state.messages.filter(
-          (m) => !(m.kind === "plan" && m.streaming && m.callId === callId)
-        );
-        return {
-          ...state,
-          messages: [...withoutStreaming, { kind: "plan", steps, streaming: false }],
-        };
+        const steps = Array.isArray(args["steps"]) ? (args["steps"] as string[]) : undefined;
+        const stepIndex = typeof args["step_index"] === "number" ? (args["step_index"] as number) : undefined;
+        if (steps && steps.length > 0) {
+          return { ...state, messages: upsertPlanSteps(state.messages, steps, callId) };
+        }
+        if (stepIndex !== undefined) {
+          return { ...state, messages: applyPlanStepDone(state.messages, stepIndex, callId) };
+        }
+        return state;
       }
       if (ORCH_TOOLS.has(name)) return state;
 
@@ -1236,20 +1235,11 @@ function reducer(state: SSEState, action: Action): SSEState {
         }),
       };
 
-    case "plan_step_done": {
-      const msgs = [...state.messages];
-      for (let i = msgs.length - 1; i >= 0; i--) {
-        const m = msgs[i]!;
-        if (m.kind === "plan" && action.payload.stepIndex < m.steps.length) {
-          const updatedSteps = m.steps.map((s, j) =>
-            j === action.payload.stepIndex && !s.startsWith("✓") ? `✓ ${s}` : s
-          );
-          msgs[i] = { ...m, steps: updatedSteps };
-          break;
-        }
-      }
-      return { ...state, messages: msgs };
-    }
+    case "plan_step_done":
+      return {
+        ...state,
+        messages: applyPlanStepDone(state.messages, action.payload.stepIndex),
+      };
 
     case "context_compressed": {
       const snap = {
@@ -2033,6 +2023,15 @@ export function useSSE(options?: {
         } catch {
           /* ignore malformed */
         }
+      });
+
+      es.addEventListener("transcript_replay", (e: MessageEvent) => {
+        trackId(e);
+        const p = parseEventData(e) as
+          | { chatId?: string; entries?: import("./replayTranscript.js").WireReplayEntry[] }
+          | undefined;
+        if (!p?.entries?.length) return;
+        dispatch({ type: "transcript_replay", payload: { chatId: p.chatId, entries: p.entries } });
       });
 
       es.addEventListener("tool_start", (e: MessageEvent) => {

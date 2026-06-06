@@ -9,6 +9,7 @@ import { ShellControls } from "./ShellControls.js";
 import { ShellComposer } from "./ShellComposer.js";
 import { ShellChatSwitcher } from "../../chat/ShellChatSwitcher.js";
 import { SubtaskInlineCard } from "../../SubtaskInspectorModal.js";
+import { PlanProgressBlock } from "../../PlanProgressBlock.js";
 
 // ── Palette ───────────────────────────────────────────────────────────────────
 
@@ -153,23 +154,15 @@ export function MinimalShell({ contract }: { contract: ShellContract }) {
                   </div>
                 )}
 
-                {m.kind === "plan" && (() => {
-                  const steps = Array.isArray(m.steps) ? m.steps : [];
-                  if (steps.length === 0) return null;
-                  return (
-                    <div style={{ marginBottom: 10, color: "#556677", fontSize: 13, lineHeight: 1.65 }}>
-                      {steps.map((step, si) => {
-                        const done = step.startsWith("✓");
-                        const text = done ? step.slice(2) : step;
-                        return (
-                          <div key={si} style={{ color: done ? "#334455" : "#556677", opacity: done ? 0.5 : 1 }}>
-                            {done ? "✓" : "○"} {si + 1}. {text}
-                          </div>
-                        );
-                      })}
-                    </div>
-                  );
-                })()}
+                {m.kind === "plan" && (
+                  <div style={{ marginBottom: 10 }}>
+                    <PlanProgressBlock
+                      steps={Array.isArray(m.steps) ? m.steps : []}
+                      streaming={m.streaming}
+                      previewText={m.previewText}
+                    />
+                  </div>
+                )}
 
                 {m.kind === "subtask" && (
                   <SubtaskInlineCard entry={m} onInspect={onInspectSubtask} />

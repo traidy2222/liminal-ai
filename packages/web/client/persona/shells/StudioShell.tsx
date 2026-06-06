@@ -12,6 +12,7 @@ import { buildMessagesStyle, messageEntranceClass } from "../shellLayout.js";
 import { LIM } from "../personaVars.js";
 import type { MessageEntry } from "../../useSSE.js";
 import { SubtaskInlineCard } from "../../SubtaskInspectorModal.js";
+import { PlanProgressBlock } from "../../PlanProgressBlock.js";
 
 // ── Palette ───────────────────────────────────────────────────────────────────
 
@@ -310,25 +311,16 @@ export function StudioShell({ contract }: { contract: ShellContract }) {
                       </div>
                     );
 
-                  case "plan": {
-                    const steps = Array.isArray(m.steps) ? m.steps : [];
-                    if (steps.length === 0) return null;
+                  case "plan":
                     return (
-                      <div key={i} style={{ padding: "10px 16px", borderRadius: 10, background: "rgba(0,8,20,0.6)", border: "1px solid rgba(var(--lim-accent-rgb),0.09)" }}>
-                        <div style={{ color: CYAN, fontWeight: 700, fontSize: 12, marginBottom: 8, letterSpacing: "0.04em" }}>▸ Plan</div>
-                        {steps.map((step, si) => {
-                          const done = step.startsWith("✓");
-                          const text = done ? step.slice(2) : step;
-                          return (
-                            <div key={si} style={{ display: "flex", gap: 8, alignItems: "flex-start", color: done ? "#334455" : "#667788", fontSize: 13, lineHeight: 1.6, textDecoration: done ? "line-through" : "none", opacity: done ? 0.5 : 1 }}>
-                              <span style={{ flexShrink: 0, color: done ? GREEN : "#445566" }}>{done ? "✓" : "○"}</span>
-                              <span>{si + 1}. {text}</span>
-                            </div>
-                          );
-                        })}
+                      <div key={i}>
+                        <PlanProgressBlock
+                          steps={Array.isArray(m.steps) ? m.steps : []}
+                          streaming={m.streaming}
+                          previewText={m.previewText}
+                        />
                       </div>
                     );
-                  }
 
                   case "subtask":
                     return (

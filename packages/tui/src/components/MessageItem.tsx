@@ -5,6 +5,7 @@ import { ToolCallCard } from "./ToolCallCard.js";
 import { SubtaskCard } from "./SubtaskCard.js";
 import { ThinkCard } from "./ThinkCard.js";
 import { ReasonCard } from "./ReasonCard.js";
+import { PlanCard } from "./PlanCard.js";
 import { usePersonaChrome, type TuiJarvisColors } from "../personaChromeContext.js";
 
 const MAX_RESULT_LINES = 8;
@@ -211,18 +212,8 @@ export function MessageItem({ entry, width }: Props) {
     case "plan":
       if (!entry.steps.length) return null;
       return (
-        <Box flexDirection="column" paddingLeft={2} width={w}>
-          <Text color={jarvis.accent} bold>▸ Plan</Text>
-          {entry.steps.map((step, i) => {
-            const done = step.startsWith("✓");
-            const text = done ? step.slice(2) : step;
-            return (
-              <Box key={i} paddingLeft={2} gap={1}>
-                <Text color={done ? jarvis.assistant : jarvis.muted}>{done ? "✓" : "○"}</Text>
-                <Text color={done ? jarvis.assistant : jarvis.muted}>{`${i + 1}. ${text}`}</Text>
-              </Box>
-            );
-          })}
+        <Box width={w}>
+          <PlanCard steps={entry.steps} />
         </Box>
       );
 
