@@ -158,3 +158,47 @@ export async function listOrphanChatIds(): Promise<string[]> {
   }
   return out;
 }
+
+/**
+ * Legacy desktop / TUI sessions wrote `session.jsonl` without `meta.json`.
+ * Materialize metadata so shared boot + chat lists can see them.
+ */
+export async function adoptOrphanChatMetadata(chatId: string): Promise<ChatMetadata | null> {
+  const existing = await readChatMetadata(chatId);
+  if (existing) return existing;
+  let sessionStat: Awaited<ReturnType<typeof stat>>;
+  try {
+    sessionStat = await stat(perChatPath(chatId, "session.jsonl"));
+    if (!sessionStat.isFile()) return null;
+  } catch {
+    return null;
+  }
+  const workspaceRoot = scratchWorkspaceRoot(chatId);
+  const ts =
+    typeof sessionStat.mtimeMs === "number"
+      ? sessionStat.mtimeMs
+      : sessionStat.mtime.getTime();
+  const meta: ChatMetadata = {
+    chatId: sanitizeChatId(chatId),
+    title: `Chat ${chatId.slice(0, 8)}`,
+    workspaceMode: "scratch",
+    workspaceRoot: path.resolve(workspaceRoot),
+    createdAt: ts,
+    updatedAt: ts,
+  };
+  await ensurePerChatDir(meta.chatId);
+  await writeFile(metaPath(meta.chatId), JSON.stringify(meta, null, 2), "utf8");
+  await mkdir(workspaceRoot, { recursive: true });
+  return meta;
+}
+
+/** Adopt every orphan session dir that has a jsonl log but no meta.json. */
+export async function adoptAllOrphanChats(): Promise<number> {
+  const orphans = await listOrphanChatIds();
+  let adopted = 0;
+  for (const id of orphans) {
+    const meta = await adoptOrphanChatMetadata(id);
+    if (meta) adopted++;
+  }
+  return adopted;
+}
