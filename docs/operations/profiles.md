@@ -4,6 +4,16 @@ Copy flags into **Web Settings** or `.agent_runtime_prefs.json` → `harness.env
 
 See [Configuration basics](../start/configuration-basics.md) for precedence.
 
+## Shared chats (web / desktop / TUI)
+
+All clients read and write `~/.liminal/chats/<chatId>/` (`meta.json` + `session.jsonl`). The last active chat is stored in `~/.liminal/active_chat.json`.
+
+- `AGENT_CHAT_BOOT=restore_last` (default) — reopen the last active chat on process start
+- `AGENT_CHAT_BOOT=new_chat` — always create a fresh chat when the server/sidecar/TUI starts
+- `AGENT_CHAT_BOOT=most_recent` — open the newest chat on disk, ignoring the active pointer
+
+Transcripts and harness context are restored from `session.jsonl` after restart.
+
 ## Stable local dev
 
 - `AGENT_TOOL_LAZY=1`

@@ -44,6 +44,7 @@ Web **Settings** writes to (2). See [Configuration basics](../start/configuratio
 | `AGENT_CAPTCHA_POLL_MS` | `3000` | yes | no | harness | Harness environment toggle for Captcha Poll Ms. See docs/configuration.md (harness). |
 | `AGENT_CAPTCHA_SERVICE` | `2captcha` | yes | no | harness | Harness environment toggle for Captcha Service. See docs/configuration.md (harness). |
 | `AGENT_CAPTCHA_TIMEOUT_MS` | `120000` | yes | no | harness | Harness environment toggle for Captcha Timeout Ms. See docs/configuration.md (harness). |
+| `AGENT_CHAT_BOOT` | `restore_last` | yes | no | session_ui | Which chat to open on startup: restore_last (default), new_chat, or most_recent. Shared across web, desktop, and TUI. |
 | `AGENT_CHILD_TIMEOUT_MS` | `1800000` | yes | no | harness | Harness environment toggle for Child Timeout Ms. See docs/configuration.md (harness). |
 | `AGENT_COMPENSATION_ENABLED` | `1` | yes | no | harness | Harness environment toggle for Compensation Enabled. See docs/configuration.md (harness). |
 | `AGENT_COMPENSATION_MAX_ACTIONS` | `32` | yes | no | harness | Harness environment toggle for Compensation Max Actions. See docs/configuration.md (harness). |
@@ -134,8 +135,8 @@ Web **Settings** writes to (2). See [Configuration basics](../start/configuratio
 | `AGENT_MANAGED_BUSY_MAX_RETRIES` | `4` | yes | yes | models_api | Bounded local retries (with backoff) when managed inference reports its upstream is busy, before surfacing a 'providers  |
 | `AGENT_MANAGED_BYOK_FALLBACK` | `0` | yes | yes | models_api | When managed inference stays busy, fall back to your local provider API key for the rest of the session. Off by default  |
 | `AGENT_MANAGED_FREE_FALLBACK` | `1` | yes | yes | models_api | When managed inference credits are exhausted (HTTP 402), switch to your OpenRouter API key on a free model (see Free Fal |
-| `AGENT_MANAGED_FREE_FALLBACK_FAST` | `` | yes | yes | models_api | Sidecar/fast model for free fallback; empty = same as Free Fallback Model. |
-| `AGENT_MANAGED_FREE_FALLBACK_MODEL` | `openrouter/owl-alpha` | yes | yes | models_api | OpenRouter slug used when managed credits are exhausted and free fallback is on (default openrouter/owl-alpha — Stealth, |
+| `AGENT_MANAGED_FREE_FALLBACK_FAST` | `nvidia/nemotron-3-ultra-550b-a55b:free` | yes | yes | models_api | Second free model for sidecars when managed credits are exhausted (default Nemotron 3 Ultra free; main stays Free Fallba |
+| `AGENT_MANAGED_FREE_FALLBACK_MODEL` | `openrouter/free` | yes | yes | models_api | OpenRouter slug when managed credits are exhausted and free fallback is on (default openrouter/free; owl-alpha Stealth i |
 | `AGENT_MARKETS_ENABLE` | `1` | yes | no | web_research | Harness environment toggle for Markets Enable. See docs/configuration.md (web research). |
 | `AGENT_MARKETS_MAX_DELAY_MS` | `2000` | yes | no | web_research | Harness environment toggle for Markets Max Delay Ms. See docs/configuration.md (web research). |
 | `AGENT_MARKETS_RETRIES` | `2` | yes | no | web_research | Harness environment toggle for Markets Retries. See docs/configuration.md (web research). |
@@ -183,6 +184,7 @@ Web **Settings** writes to (2). See [Configuration basics](../start/configuratio
 | `AGENT_PERSONA_PREVIEW_MAX_CHARS` | `16000` | yes | no | harness | Harness environment toggle for Persona Preview Max Chars. See docs/configuration.md (harness). |
 | `AGENT_PERSONA_REPAIR_MAX` | `1` | yes | no | harness | Harness environment toggle for Persona Repair Max. See docs/configuration.md (harness). |
 | `AGENT_PERSONA_SOUL_MODE` | `batch` | yes | no | harness | Harness environment toggle for Persona Soul Mode. See docs/configuration.md (harness). |
+| `AGENT_PERSONA_UI_COPY` | `1` | yes | no | harness | Generate in-voice interface microcopy at persona bootstrap (composer placeholder, labels, empty state). Set 0 to use def |
 | `AGENT_PERSONA_UI_THEME_LLM` | `1` | yes | no | harness | Harness environment toggle for Persona Ui Theme Llm. See docs/configuration.md (harness). |
 | `AGENT_PLUGIN_DIR` | `` | yes | no | advanced | Harness environment toggle for Plugin Dir. See docs/configuration.md (advanced). |
 | `AGENT_PROCESS_HEALTH` | `0` | yes | no | advanced | Harness environment toggle for Process Health. See docs/configuration.md (advanced). |
@@ -266,7 +268,7 @@ Web **Settings** writes to (2). See [Configuration basics](../start/configuratio
 | `AGENT_TTS_MAX_CHARS_PER_CALL` | `4096` | yes | no | harness | Harness environment toggle for Tts Max Chars Per Call. See docs/configuration.md (harness). |
 | `AGENT_TTS_MAX_OUTPUT_TOKENS` | `4096` | yes | no | harness | Harness environment toggle for Tts Max Output Tokens. See docs/configuration.md (harness). |
 | `AGENT_TTS_MIN_INTERVAL_MS` | `800` | yes | no | harness | Harness environment toggle for Tts Min Interval Ms. See docs/configuration.md (harness). |
-| `AGENT_TTS_MODEL` | `hexgrad/kokoro-82m` | yes | no | harness | Harness environment toggle for Tts Model. See docs/configuration.md (harness). |
+| `AGENT_TTS_MODEL` | `hexgrad/kokoro-82m` | yes | no | harness | OpenRouter speech model slug. Default hexgrad/kokoro-82m (~$0.62/M chars).  |
 | `AGENT_TTS_RESPONSE_FORMAT` | `mp3` | yes | no | harness | Harness environment toggle for Tts Response Format. See docs/configuration.md (harness). |
 | `AGENT_TTS_TIMEOUT_MS` | `45000` | yes | no | harness | Harness environment toggle for Tts Timeout Ms. See docs/configuration.md (harness). |
 | `AGENT_TTS_VOICE` | `af_sky` | yes | no | harness | Harness environment toggle for Tts Voice. See docs/configuration.md (harness). |
@@ -274,6 +276,7 @@ Web **Settings** writes to (2). See [Configuration basics](../start/configuratio
 | `AGENT_UPSTREAM_429_SUGGESTED_WAIT_MS` | `` | yes | no | models_api | Harness environment toggle for Upstream 429 Suggested Wait Ms. See docs/configuration.md (models api). |
 | `AGENT_VAULT_AUTO_WRITE` | `research` | yes | yes | memory_vault | Harness environment toggle for Vault Auto Write. See docs/configuration.md (memory vault). |
 | `AGENT_VAULT_DEDUPE` | `0` | yes | no | memory_vault | Harness environment toggle for Vault Dedupe. See docs/configuration.md (memory vault). |
+| `AGENT_VAULT_ENTITY_EXTRACT` | `1` | yes | no | memory_vault | Decompose vault writes into per-entity notes (people, orgs/businesses, places, events) that merge into existing dossiers |
 | `AGENT_VAULT_PATH` | `` | yes | no | memory_vault | Harness environment toggle for Vault Path. See docs/configuration.md (memory vault). |
 | `AGENT_VAULT_REQUIRE_LINKS` | `0` | yes | no | memory_vault | Harness environment toggle for Vault Require Links. See docs/configuration.md (memory vault). |
 | `AGENT_VAULT_WRITE_BUDGET` | `8` | yes | no | memory_vault | Harness environment toggle for Vault Write Budget. See docs/configuration.md (memory vault). |
