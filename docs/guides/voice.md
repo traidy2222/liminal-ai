@@ -55,6 +55,28 @@ OpenRouter TTS model slug you choose in Settings (e.g. `openai/gpt-4o-mini-tts-2
 `hexgrad/kokoro-82m`) is forwarded on `audio/speech`; the chat model allowlist does not block
 TTS. No separate key needed. See [Managed inference](./managed-inference.md).
 
+## Desktop (Flutter + liminald)
+
+The native desktop app uses the **same HTTP paths** on the sidecar loopback server
+(`127.0.0.1`, token-gated):
+
+- `POST /api/audio/upload?token=…&chatId=…`
+- `POST /api/transcribe?token=…&chatId=…`
+- `GET /api/tts/clip/:clipId?token=…&chatId=…`
+
+Dictation flow:
+
+1. Arm the **mic** in the composer (session stays on across turns).
+2. VAD detects end-of-speech → clip uploads → server ASR (`AGENT_TRANSCRIBE_MODEL`).
+3. Message sends with `liveDictation: true` over the WebSocket protocol.
+4. Harness `speak()` events play through `just_audio` when `AGENT_TTS_ENABLED=1`.
+
+Desktop uses **server-side transcription only** (no Web Speech). Timing knobs
+(`AGENT_DICTATION_*_MS`) are exposed on `WireAppConfig` / Settings like web.
+
+**Permissions:** grant microphone access when prompted (Windows Privacy → Microphone;
+macOS `NSMicrophoneUsageDescription`; Linux PulseAudio/PipeWire).
+
 ## API reference
 
 Endpoints are documented in [Web API → Audio](../reference/web-api.md#audio-transcription-tts).

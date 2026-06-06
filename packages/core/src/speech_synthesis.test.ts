@@ -16,11 +16,24 @@ import {
   coerceTtsConfigForBrowserPlayback,
   wrapPcm16LeMonoAsWav,
   normalizeTtsBytesForBrowserPlayback,
+  normalizeTtsModelSlug,
 } from "./speech_synthesis.js";
 import { TtsTurnBudget } from "./tts_budget.js";
 
 test("default TTS model is Kokoro 82M", () => {
   assert.equal(DEFAULT_TTS_MODEL, "hexgrad/kokoro-82m");
+});
+
+test("normalizeTtsModelSlug maps GPT-4o Mini TTS ids to affordable Kokoro", () => {
+  assert.equal(
+    normalizeTtsModelSlug("openai/gpt-4o-mini-tts-2024-12-19"),
+    "hexgrad/kokoro-82m"
+  );
+  assert.equal(
+    normalizeTtsModelSlug("openai/gpt-4o-mini-tts-2025-12-15"),
+    "hexgrad/kokoro-82m"
+  );
+  assert.equal(normalizeTtsModelSlug("hexgrad/kokoro-82m"), "hexgrad/kokoro-82m");
 });
 
 test("estimateTtsCostUsd returns 0 for unknown models", () => {

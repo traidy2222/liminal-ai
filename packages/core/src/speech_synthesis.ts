@@ -32,6 +32,39 @@ export const TTS_MODEL_RATES: Readonly<Record<string, TtsModelRate>> = {
 };
 
 export const DEFAULT_TTS_MODEL = "hexgrad/kokoro-82m";
+
+/**
+ * Cheapest OpenRouter speech model we ship by default ($0.62/M characters).
+ * Prefer this over GPT-4o Mini TTS slugs that are easy to mistype in Settings.
+ */
+export const AFFORDABLE_TTS_MODEL = DEFAULT_TTS_MODEL;
+
+/** Stale GPT-4o Mini TTS slugs from old Settings / docs → Kokoro. */
+const TTS_MODEL_SLUG_ALIASES: Readonly<Record<string, string>> = {
+  "openai/gpt-4o-mini-tts": AFFORDABLE_TTS_MODEL,
+  "gpt-4o-mini-tts": AFFORDABLE_TTS_MODEL,
+  "openai/gpt-4o-mini-tts-2024-12-19": AFFORDABLE_TTS_MODEL,
+  "gpt-4o-mini-tts-2024-12-19": AFFORDABLE_TTS_MODEL,
+  "openai/gpt-4o-mini-tts-2024-03-20": AFFORDABLE_TTS_MODEL,
+  "openai/gpt-4o-mini-tts-2025-12-15": AFFORDABLE_TTS_MODEL,
+};
+
+/** Map deprecated / expensive TTS slugs to the default affordable OpenRouter model. */
+export function normalizeTtsModelSlug(model: string): string {
+  const trimmed = model.trim();
+  if (!trimmed) return AFFORDABLE_TTS_MODEL;
+  const alias = TTS_MODEL_SLUG_ALIASES[trimmed];
+  if (alias) return alias;
+  const lower = trimmed.toLowerCase();
+  if (lower.includes("gpt-4o") && lower.includes("tts")) {
+    return AFFORDABLE_TTS_MODEL;
+  }
+  return trimmed;
+}
+
+function isTtsModelMissingError(detail: string): boolean {
+  return /does not exist|model not found|unknown model|invalid model/i.test(detail);
+}
 /** Kokoro preset (hexgrad/kokoro-82m). */
 export const DEFAULT_TTS_VOICE = "af_sky";
 export const DEFAULT_KOKORO_TTS_VOICE = DEFAULT_TTS_VOICE;
@@ -235,8 +268,9 @@ export function resolveSpeechSynthesisConfig(
   prefs: RuntimePreferences | null
 ): SpeechSynthesisConfig {
   const enabled = resolveHarnessEnvRaw("AGENT_TTS_ENABLED", prefs) === "1";
-  const model =
-    resolveHarnessEnvRaw("AGENT_TTS_MODEL", prefs)?.trim() || DEFAULT_TTS_MODEL;
+  const model = normalizeTtsModelSlug(
+    resolveHarnessEnvRaw("AGENT_TTS_MODEL", prefs)?.trim() || DEFAULT_TTS_MODEL
+  );
   const voiceRaw = resolveHarnessEnvRaw("AGENT_TTS_VOICE", prefs)?.trim() ?? "";
   const voice = coerceTtsVoiceForModel(model, voiceRaw || defaultTtsVoiceForModel(model));
   const baseURL =
@@ -409,11 +443,45 @@ async function synthesizeSpeechSegment(
   config: SpeechSynthesisConfig,
   sanitized: string
 ): Promise<SynthesizeSpeechResult> {
-  const model = (input.model ?? config.model).trim() || DEFAULT_TTS_MODEL;
-  const voice = coerceTtsVoiceForModel(
-    model,
-    (input.voice ?? config.voice).trim() || DEFAULT_TTS_VOICE
+  const requestedModel = normalizeTtsModelSlug(
+    (input.model ?? config.model).trim() || AFFORDABLE_TTS_MODEL
   );
+  const requestedVoice = (input.voice ?? config.voice).trim() || DEFAULT_TTS_VOICE;
+  try {
+    return await synthesizeSpeechSegmentWithModel(
+      input,
+      config,
+      sanitized,
+      requestedModel,
+      requestedVoice
+    );
+  } catch (err) {
+    const detail = err instanceof Error ? err.message : String(err);
+    if (
+      requestedModel !== AFFORDABLE_TTS_MODEL &&
+      isTtsModelMissingError(detail)
+    ) {
+      const fallbackVoice = coerceTtsVoiceForModel(AFFORDABLE_TTS_MODEL, requestedVoice);
+      return synthesizeSpeechSegmentWithModel(
+        input,
+        config,
+        sanitized,
+        AFFORDABLE_TTS_MODEL,
+        fallbackVoice
+      );
+    }
+    throw err;
+  }
+}
+
+async function synthesizeSpeechSegmentWithModel(
+  input: SynthesizeSpeechInput,
+  config: SpeechSynthesisConfig,
+  sanitized: string,
+  model: string,
+  voiceRaw: string
+): Promise<SynthesizeSpeechResult> {
+  const voice = coerceTtsVoiceForModel(model, voiceRaw);
   const storedFormat = input.format ?? config.responseFormat;
   const wireFormat = wireTtsResponseFormat(config.baseURL, storedFormat);
   const maxOutputTokens = ttsMaxOutputTokensForInput(sanitized.length, config.maxOutputTokens);

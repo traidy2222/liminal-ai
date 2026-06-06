@@ -12,7 +12,7 @@
     "build": "node -e \"require('node:fs').rmSync('dist',{recursive:true,force:true})\" && tsc -p tsconfig.json",
     "typecheck": "tsc --noEmit",
     "start": "node --import tsx/esm src/index.ts",
-    "test": "tsx --test src/event_mapper.test.ts src/handshake.test.ts src/ws_server.test.ts"
+    "test": "tsx --test src/event_mapper.test.ts src/handshake.test.ts src/ws_server.test.ts src/audio_http.test.ts"
   },
   "dependencies": {
     "@liminal/core": "*",

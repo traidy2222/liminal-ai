@@ -1,10 +1,9 @@
 /**
  * Audio transcription provider abstraction.
  *
- * One code path for every OpenAI-compatible `/audio/transcriptions` endpoint:
- * OpenAI, OpenRouter (which proxies Whisper, Voxtral, Qwen-ASR, Chirp under
- * one API), and any self-hosted endpoint that speaks the same protocol. Models
- * differ only in slug + cost — the wire protocol is identical.
+ * Two wire formats for `/audio/transcriptions`:
+ * - **OpenRouter** (`openrouter.ai`): JSON + base64 `input_audio` (Parakeet, Whisper, …).
+ * - **Direct OpenAI** (`api.openai.com`): multipart upload + `verbose_json`.
  *
  * Model registry — defaults to `nvidia/parakeet-tdt-0.6b-v3` at $0.0015/minute
  * (English + EU languages). Falls back to `openai/whisper-large-v3-turbo` for
@@ -192,13 +191,19 @@ export interface TranscriptionInput {
   signal?: AbortSignal;
 }
 
+/** OpenRouter STT rejects multipart; it requires JSON + base64 `input_audio`. */
+export function usesOpenRouterSttJson(baseURL: string): boolean {
+  try {
+    const host = new URL(baseURL).hostname.toLowerCase();
+    return host === "openrouter.ai" || host.endsWith(".openrouter.ai");
+  } catch {
+    return /openrouter\.ai/i.test(baseURL);
+  }
+}
+
 /**
- * Call the OpenAI-compatible `/audio/transcriptions` endpoint with multipart
- * form data. Returns parsed transcript + computed cost.
- *
- * The endpoint shape is consistent across providers — only model slug + key
- * change. Whisper / Voxtral / Qwen / Chirp all accept the same request format
- * when proxied through OpenRouter (the most common configuration here).
+ * Call `/audio/transcriptions` on the configured provider. OpenRouter uses JSON;
+ * direct OpenAI uses multipart + `verbose_json`. Returns parsed transcript + cost.
  */
 export async function transcribeAudio(
   input: TranscriptionInput,
@@ -221,26 +226,9 @@ export async function transcribeAudio(
   const timestamps = input.timestamps ?? config.timestamps;
 
   const url = `${config.baseURL.replace(/\/$/, "")}/audio/transcriptions`;
-  const form = new FormData();
-  // Convert the buffer to a Blob — works in Node 18+ undici without extra deps.
-  const blob = new Blob([toArrayBuffer(input.audio)], {
-    type: inferContentType(input.filename),
-  });
-  form.append("file", blob, input.filename);
-  form.append("model", model);
-  form.append("response_format", "verbose_json");
-  if (input.language) form.append("language", input.language);
-  if (input.prompt) form.append("prompt", input.prompt);
-  if (timestamps === "word") {
-    form.append("timestamp_granularities[]", "word");
-  } else if (timestamps === "segment") {
-    form.append("timestamp_granularities[]", "segment");
-  }
-
   const headers: Record<string, string> = {
     Authorization: `Bearer ${config.apiKey}`,
   };
-  // OpenRouter recommends these headers for attribution / rate-limit fairness.
   if (config.baseURL.includes("openrouter")) {
     headers["HTTP-Referer"] = "https://github.com/yourorg/liminal";
     headers["X-Title"] = "Liminal Harness";
@@ -252,12 +240,39 @@ export async function transcribeAudio(
 
   let resp: Response;
   try {
-    resp = await fetch(url, {
-      method: "POST",
-      headers,
-      body: form,
-      signal,
-    });
+    if (usesOpenRouterSttJson(config.baseURL)) {
+      const body: Record<string, unknown> = {
+        model,
+        input_audio: {
+          data: Buffer.from(input.audio).toString("base64"),
+          format: inferAudioFormat(input.filename),
+        },
+      };
+      if (input.language) body.language = input.language;
+      headers["Content-Type"] = "application/json";
+      resp = await fetch(url, {
+        method: "POST",
+        headers,
+        body: JSON.stringify(body),
+        signal,
+      });
+    } else {
+      const form = new FormData();
+      const blob = new Blob([toArrayBuffer(input.audio)], {
+        type: inferContentType(input.filename),
+      });
+      form.append("file", blob, input.filename);
+      form.append("model", model);
+      form.append("response_format", "verbose_json");
+      if (input.language) form.append("language", input.language);
+      if (input.prompt) form.append("prompt", input.prompt);
+      if (timestamps === "word") {
+        form.append("timestamp_granularities[]", "word");
+      } else if (timestamps === "segment") {
+        form.append("timestamp_granularities[]", "segment");
+      }
+      resp = await fetch(url, { method: "POST", headers, body: form, signal });
+    }
   } finally {
     clearTimeout(timer);
   }
@@ -273,11 +288,16 @@ export async function transcribeAudio(
     language?: string;
     duration?: number;
     segments?: Array<{ start: number; end: number; text: string }>;
+    usage?: { seconds?: number };
   };
   const text = String(json.text ?? "").trim();
   const language = typeof json.language === "string" ? json.language : undefined;
   const durationSec =
-    typeof json.duration === "number" && Number.isFinite(json.duration) ? json.duration : undefined;
+    typeof json.duration === "number" && Number.isFinite(json.duration)
+      ? json.duration
+      : typeof json.usage?.seconds === "number" && Number.isFinite(json.usage.seconds)
+        ? json.usage.seconds
+        : undefined;
   const segments = Array.isArray(json.segments)
     ? json.segments
         .filter((s) => typeof s.text === "string")
@@ -320,6 +340,20 @@ function inferContentType(filename: string): string {
   if (lower.endsWith(".flac")) return "audio/flac";
   if (lower.endsWith(".aac")) return "audio/aac";
   return "application/octet-stream";
+}
+
+/** OpenRouter `input_audio.format` — extension without dot. */
+function inferAudioFormat(filename: string): string {
+  const lower = filename.toLowerCase();
+  if (lower.endsWith(".wav")) return "wav";
+  if (lower.endsWith(".mp3")) return "mp3";
+  if (lower.endsWith(".flac")) return "flac";
+  if (lower.endsWith(".m4a")) return "m4a";
+  if (lower.endsWith(".mp4")) return "m4a";
+  if (lower.endsWith(".ogg") || lower.endsWith(".oga")) return "ogg";
+  if (lower.endsWith(".webm")) return "webm";
+  if (lower.endsWith(".aac")) return "aac";
+  return "wav";
 }
 
 function providerFromBaseUrl(url: string): string {

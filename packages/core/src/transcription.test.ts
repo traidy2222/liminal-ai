@@ -5,7 +5,13 @@ import {
   TRANSCRIPTION_MODEL_RATES,
   estimateTranscriptionCostUsd,
   resolveTranscriptionConfig,
+  usesOpenRouterSttJson,
 } from "./transcription.js";
+
+test("usesOpenRouterSttJson detects OpenRouter hosts", () => {
+  assert.equal(usesOpenRouterSttJson("https://openrouter.ai/api/v1"), true);
+  assert.equal(usesOpenRouterSttJson("https://api.openai.com/v1"), false);
+});
 
 test("default transcription model is the cheapest in the registry", () => {
   const rates = Object.entries(TRANSCRIPTION_MODEL_RATES);

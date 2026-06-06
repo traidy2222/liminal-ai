@@ -46,6 +46,8 @@ export interface ClientCommandMap {
   delete_chat: { chatId: string };
   /** Re-request the chat list (also pushed proactively on change). */
   list_chats: Record<string, never>;
+  /** Push `transcript_replay` from disk for a chat (UI refresh after connect). */
+  replay_transcript: { chatId: string };
 
   /** Clear a chat's transcript; `greet` re-runs the opening greeting / bootstrap gate. */
   reset_session: { chatId: string; greet?: boolean };

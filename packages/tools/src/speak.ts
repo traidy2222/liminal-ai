@@ -65,7 +65,7 @@ export function createSpeakTool(harness: AgentHarness) {
       "WHAT: Speak a short line you author aloud (Jarvis-style), separate from your written reply. Only this tool produces audio.\n" +
       "WHEN: TTS is on and a brief, situation-specific cue helps (≤2 sentences). Write fresh wording for this turn — not generic status templates.\n" +
       "NOT WHEN: The line is code, a long recap, stock filler, or duplicates what you already spoke this turn.\n" +
-      "ARGS: text — spoken line (up to 4096 chars after sanitization; prefer one full utterance in voice mode).",
+      "ARGS: text (required — NOT content/think) — spoken line (up to 4096 chars after sanitization; prefer one full utterance in voice mode).",
     requiresApproval: false,
     parameters: {
       type: "object",
@@ -76,7 +76,7 @@ export function createSpeakTool(harness: AgentHarness) {
       additionalProperties: false,
     },
     handler: async (args) => {
-      const raw = String(args["text"] ?? "").trim();
+      const raw = String(args["text"] ?? args["content"] ?? "").trim();
       if (!raw) {
         return { ok: false, error: "text is required" };
       }

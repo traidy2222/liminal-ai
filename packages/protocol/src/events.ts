@@ -75,6 +75,19 @@ export interface WireAppConfig {
   repoRoot: string;
   /** Persona presentation JSON (`persona/active/ui_theme.json`) when present. */
   personaUiTheme?: Record<string, unknown>;
+  /** Persona interface microcopy (`persona/active/ui_copy.json`) when present. */
+  personaUiCopy?: Record<string, unknown>;
+  /** `AGENT_TTS_ENABLED=1` */
+  ttsEnabled?: boolean;
+  /** `AGENT_TTS_VOICE` */
+  ttsVoice?: string;
+  /** `AGENT_DICTATION_AUDIO_CUE=1` */
+  dictationAudioCue?: boolean;
+  /** Pause-send tuning (ms) — mirrors web `/api/config`. */
+  dictationMinRecordingMs?: number;
+  dictationSilenceMsShort?: number;
+  dictationSilenceMsLong?: number;
+  dictationMaxRecordingMs?: number;
 }
 
 /** Events the sidecar emits that have no harness equivalent. */
@@ -100,6 +113,21 @@ export interface TransportEventMap {
   harness_running: { chatId: string; startedAt: number };
   /** Pushed whenever the chat set or active chat changes; also answers `list_chats`. */
   chat_list: { chats: ChatSummary[]; activeChatId: string };
+  /** Prior turns rebuilt from `session.jsonl` after restart or chat activation. */
+  transcript_replay: {
+    chatId: string;
+    entries: Array<{
+      id: string;
+      kind: "user" | "assistant" | "tool_call" | "error";
+      turnIndex?: number;
+      text?: string;
+      toolName?: string;
+      toolCallId?: string;
+      toolArgs?: Record<string, unknown>;
+      toolOk?: boolean;
+      toolOutput?: string;
+    }>;
+  };
   /** Per-command acknowledgement, correlated by the command's `id`. */
   command_result: { commandId: string; ok: boolean; error?: string; data?: unknown };
   /** Current effective settings snapshot (answers `get_settings` / follows `update_settings`). */
