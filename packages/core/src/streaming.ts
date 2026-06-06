@@ -1,13 +1,16 @@
 import type { AccumulatedToolCall, StreamChunk } from "./types.js";
 import type OpenAI from "openai";
 import { extractReasoningDeltaFromChunk } from "./reasoning_stream.js";
+import { stripProviderSpecialTokens } from "./provider_token_scrub.js";
 
 function sanitizeStreamText(text: string): string {
-  return text
-    .replace(/\uFFFD/g, "")
-    .replace(/([A-Za-z])⚙([A-Za-z])/g, "$1$2")
-    // Drop only control chars; keep Unicode punctuation (e.g. en dash for ranges: 3.5–4.0).
-    .replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/g, "");
+  return stripProviderSpecialTokens(
+    text
+      .replace(/\uFFFD/g, "")
+      .replace(/([A-Za-z])⚙([A-Za-z])/g, "$1$2")
+      // Drop only control chars; keep Unicode punctuation (e.g. en dash for ranges: 3.5–4.0).
+      .replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/g, "")
+  );
 }
 
 export class StreamAccumulator {

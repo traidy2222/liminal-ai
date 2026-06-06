@@ -20,6 +20,7 @@ import { ToolRegistry } from "./registry.js";
 import { ToolDispatcher } from "./dispatcher.js";
 import { SafetyJudge } from "./safety_judge.js";
 import { StreamAccumulator } from "./streaming.js";
+import { scrubMessagesSpecialTokens } from "./provider_token_scrub.js";
 import {
   isStreamTransportRetryable,
   resolveStreamChunkTimeoutMs,
@@ -69,14 +70,20 @@ import {
   loadLatestInProgressTask,
 } from "./mission_controller.js";
 import { SharedMemoryBus } from "./shared_memory_bus.js";
+import { DEFAULT_AGENT_MODEL_SLUG } from "./harness_default_constants.js";
 import {
   resolveProviderConfig,
   buildOpenRouterChatRequestExtras,
+  isOpenRouterStealthModel,
   resolveProviderStrategy,
   sessionEpochBumpOn429Enabled,
 } from "./provider_config.js";
 import {
+  formatOpenRouterStealthOwlUnavailableMessage,
   isExhaustedProviderRoutingError,
+  isOpenRouterStealthOwlProviderError,
+  isOpenRouterUpstreamProviderError,
+  isStaleStealthPinMismatch,
   parseOpenRouterProviderSlug,
 } from "./openrouter_errors.js";
 import { ProviderRouteState } from "./provider_route_state.js";
@@ -111,6 +118,7 @@ import type { RuntimePreferences, RuntimePersonaProfile } from "./runtime_prefs.
 import {
   runHarnessEffectiveEnvContext,
   effectiveHarnessEnvRaw,
+  harnessEnvResolutionMeta,
   resolveHarnessEnvRaw,
 } from "./harness_effective_env.js";
 import { HARNESS_MANAGED_ENV_KEY_SET, HARNESS_SECRET_ENV_KEYS } from "./harness_env_inventory.js";
@@ -542,6 +550,7 @@ function describeError(err: unknown): string {
 
 /** Returns true for errors worth retrying. */
 function isRetryable(err: unknown): boolean {
+  if (isOpenRouterUpstreamProviderError(err)) return false;
   if (err instanceof OpenAI.RateLimitError) return true;
   if (err instanceof OpenAI.InternalServerError) return true;
   if (err instanceof OpenAI.APIConnectionError) return true;
@@ -1617,6 +1626,30 @@ export class AgentHarness {
   }
 
   /**
+   * Restore prior user/assistant turns from a persisted session log so the model
+   * retains thread context after a process restart. Tool rounds are not replayed
+   * into context — use `read_artifact` / memory if deeper history is needed.
+   */
+  restoreConversationFromTranscript(
+    pairs: Array<{ role: "user" | "assistant"; content: string }>
+  ): void {
+    if (this.running || pairs.length === 0) return;
+    for (const p of pairs) {
+      const content = p.content.trim();
+      if (!content) continue;
+      if (p.role === "user") {
+        this.context.append({ role: "user", content });
+      } else {
+        this.context.append({ role: "assistant", content });
+      }
+    }
+    if (pairs.length > 0) {
+      this.worldContextInjected = true;
+      this.sessionGreetingSentThisHarness = true;
+    }
+  }
+
+  /**
    * Hot-swap the agent's persona without restarting the session.
    * @param config - The new persona metadata (name, description, traits…)
    * @param block  - The pre-built system-prompt string for the identity block.
@@ -1717,27 +1750,87 @@ export class AgentHarness {
    * - `upstream_busy`: same model on BYOK when AGENT_MANAGED_BYOK_FALLBACK=1.
    * Sticky for the rest of the session.
    */
+  /** Clear Stealth pins left from Owl when the active model needs Nvidia/other providers. */
+  private async clearStaleStealthProviderPins(): Promise<void> {
+    const candidates: Record<string, string> = {
+      AGENT_PROVIDER_ORDER: "",
+      AGENT_PROVIDER_ORDER_FAST: "",
+      AGENT_PROVIDER_STRATEGY: "price",
+      AGENT_PROVIDER_ROUTE_AUTO: "1",
+      AGENT_PROVIDER_ALLOW_FALLBACKS: "1",
+    };
+    const env: Record<string, string> = {};
+    for (const [key, value] of Object.entries(candidates)) {
+      if (harnessEnvResolutionMeta(key, this.runtimePreferences).lockedByEnv) continue;
+      env[key] = value;
+    }
+    if (Object.keys(env).length === 0) return;
+    await this.patchRuntimePreferences({ harness: { env } }, { persist: true });
+    if (!this.isUiQuiet()) {
+      this.emitter.emit("text", {
+        delta:
+          "\n⚠ Cleared stale Stealth provider pin (from Owl Alpha) — routing now matches the active model.\n",
+        channel: "user",
+      });
+    }
+  }
+
   private async tryActivateManagedOpenRouterFallback(
-    reason: "budget_exceeded" | "upstream_busy"
+    reason: "budget_exceeded" | "upstream_busy" | "provider_error"
   ): Promise<boolean> {
     if (this.managedByokFallbackActive) return true;
     if (!isManagedInferenceBaseUrl(this.config.baseURL)) return false;
 
     const useFreePack =
-      reason === "budget_exceeded" && managedFreeFallbackEnabled(this.runtimePreferences);
-    if (reason === "budget_exceeded") {
+      (reason === "budget_exceeded" || reason === "provider_error") &&
+      managedFreeFallbackEnabled(this.runtimePreferences);
+    if (reason === "budget_exceeded" || reason === "provider_error") {
       if (!useFreePack && !managedByokFallbackEnabled(this.runtimePreferences)) return false;
     } else if (!managedByokFallbackEnabled(this.runtimePreferences)) {
       return false;
     }
 
     if (!hasLocalProviderApiKey()) {
-      if (!this.isUiQuiet() && reason === "budget_exceeded") {
+      if (
+        reason === "provider_error" &&
+        isOpenRouterStealthModel(this.config.model)
+      ) {
+        const fallbackModel = DEFAULT_AGENT_MODEL_SLUG;
+        await this.patchRuntimePreferences(
+          {
+            harness: {
+              env: {
+                AGENT_MODEL: fallbackModel,
+                AGENT_PROVIDER_ORDER: "",
+                AGENT_PROVIDER_ORDER_FAST: "",
+                AGENT_PROVIDER_ROUTE_AUTO: "1",
+                AGENT_PROVIDER_ALLOW_FALLBACKS: "1",
+                AGENT_PROVIDER_STRATEGY: "price",
+              },
+            },
+            provider: { model: fallbackModel },
+          },
+          { persist: true }
+        );
+        this.config.model = fallbackModel;
+        await this.refreshProviderConfig();
+        if (!this.isUiQuiet()) {
+          this.emitter.emit("text", {
+            delta:
+              `\n⚠ Owl Alpha (Stealth) is unavailable on managed inference — switched to \`${fallbackModel}\` for this session.\n`,
+            channel: "user",
+          });
+        }
+        return true;
+      }
+      if (!this.isUiQuiet() && (reason === "budget_exceeded" || reason === "provider_error")) {
         const model = resolveManagedFreeFallbackMainModel(this.runtimePreferences);
         this.emitter.emit("text", {
           delta:
-            `\n⚠ Managed inference credits exhausted. Add credits: ${inferenceAccountUrl()} ` +
-            `— or set AGENT_API_KEY in .env to continue on free model \`${model}\` via OpenRouter BYOK.\n`,
+            reason === "provider_error"
+              ? `\n⚠ Managed inference provider error. Add AGENT_API_KEY in Settings for OpenRouter BYOK, or switch to a DeepSeek preset.\n`
+              : `\n⚠ Managed inference credits exhausted. Add credits: ${inferenceAccountUrl()} ` +
+                `— or set AGENT_API_KEY in .env to continue on free model \`${model}\` via OpenRouter BYOK.\n`,
           channel: "user",
         });
       }
@@ -1782,7 +1875,11 @@ export class AgentHarness {
         const delta =
           reason === "budget_exceeded" && useFreePack
             ? `\n⚠ Managed inference credits exhausted — switching to free model \`${this.config.model}\` on your OpenRouter key for this session.\n`
-            : "\n⚠ Managed inference is busy — switching to your local provider key (BYOK) for this session.\n";
+            : reason === "provider_error" && useFreePack
+              ? `\n⚠ Managed inference provider error — switching to free model \`${this.config.model}\` on your OpenRouter key for this session.\n`
+              : reason === "provider_error"
+                ? "\n⚠ Managed inference provider error — switching to your local provider key (BYOK) for this session.\n"
+                : "\n⚠ Managed inference is busy — switching to your local provider key (BYOK) for this session.\n";
         this.emitter.emit("text", { delta, channel: "user" });
       }
       return true;
@@ -4529,7 +4626,7 @@ export class AgentHarness {
       });
     }
 
-    let messages = await this.context.buildMessages();
+    let messages = scrubMessagesSpecialTokens(await this.context.buildMessages());
     // ── Adaptive intent routing ───────────────────────────────────────────────
     // Cache the routing profile for the duration of this turn. Intent/model/maxTokens
     // are stable across rounds — rebuilding every round is wasteful and causes
@@ -4749,7 +4846,7 @@ export class AgentHarness {
             retryLabel,
             speculativePromises
           );
-          messages = await this.context.buildMessages();
+          messages = scrubMessagesSpecialTokens(await this.context.buildMessages());
         }
 
         this.emitter.emit("provider_retry", {
@@ -5950,6 +6047,12 @@ export class AgentHarness {
         const exhaustedRouting = isExhaustedProviderRoutingError(err);
         if (exhaustedRouting) {
           this.providerRouteState.clearProviderIgnores();
+          if (isStaleStealthPinMismatch(err, modelSlug)) {
+            await this.clearStaleStealthProviderPins();
+            attempt = 0;
+            this.consecutiveProviderFailures = 0;
+            continue;
+          }
         }
 
         const rateLimited = isRateLimitError(err);
@@ -6037,6 +6140,24 @@ export class AgentHarness {
             continue;
           }
           throw new Error(msg);
+        }
+        if (
+          isManagedInferenceBaseUrl(this.config.baseURL) &&
+          isOpenRouterUpstreamProviderError(err)
+        ) {
+          if (await this.tryActivateManagedOpenRouterFallback("provider_error")) {
+            managedBusyRetries = 0;
+            attempt = 0;
+            this.consecutiveProviderFailures = 0;
+            continue;
+          }
+          const owlHint = isOpenRouterStealthOwlProviderError(err, modelSlug)
+            ? ` ${formatOpenRouterStealthOwlUnavailableMessage()}`
+            : " Try Settings → provider preset (e.g. DeepSeek) or add AGENT_API_KEY for OpenRouter BYOK.";
+          throw new Error(`${msg}.${owlHint}`);
+        }
+        if (isOpenRouterStealthOwlProviderError(err, modelSlug)) {
+          throw new Error(formatOpenRouterStealthOwlUnavailableMessage());
         }
         const retryForever = isRetryForeverEnabled();
         const maxRetriesForError = rateLimited

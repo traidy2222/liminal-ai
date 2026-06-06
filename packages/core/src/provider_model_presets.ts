@@ -41,9 +41,17 @@ export const OPENROUTER_MODEL_SLUG = {
   KIMI_K25: "moonshotai/kimi-k2.5",
   GLM_47: "z-ai/glm-4.7",
   GLM_47_FLASH: "z-ai/glm-4.7-flash",
-  // OpenRouter Stealth (Hermes / owl line)
+  // OpenRouter Stealth (Hermes / owl line) — single Stealth endpoint; may be unavailable upstream
   OWL_ALPHA: "openrouter/owl-alpha",
+  /** OpenRouter auto-picks a free model (reliable BYOK fallback when owl-alpha Stealth is down). */
+  FREE_ROUTER: "openrouter/free",
+  /** NVIDIA Nemotron 3 Ultra on OpenRouter's free tier (1M ctx; NVIDIA logs sessions per their ToS). */
+  NEMOTRON_3_ULTRA_FREE: "nvidia/nemotron-3-ultra-550b-a55b:free",
 } as const;
+
+/** Shown on NVIDIA free-model presets — matches OpenRouter model card disclaimer. */
+export const NVIDIA_FREE_ENDPOINT_PRIVACY_HINT =
+  "NVIDIA free endpoint: do not send confidential or personal data. Use is logged for security and product improvement (not linked to your identity). See NVIDIA Privacy Policy and API Trial ToS on OpenRouter.";
 
 export interface ProviderModelPreset {
   id: string;
@@ -202,11 +210,35 @@ export const PROVIDER_MODEL_PRESETS: readonly ProviderModelPreset[] = [
     deepseekV4PinPatch()
   ),
   preset(
+    "nemotron-3-ultra",
+    "Nemotron 3 Ultra (free)",
+    "NVIDIA Nemotron 3 Ultra on OpenRouter — 55B active / 550B MoE, 1M ctx, agent orchestration and coding. " +
+      "Single model for main ReAct loop and sidecars. " +
+      NVIDIA_FREE_ENDPOINT_PRIVACY_HINT,
+    OPENROUTER_MODEL_SLUG.NEMOTRON_3_ULTRA_FREE,
+    openRouterAutoRoutePatch(
+      OPENROUTER_MODEL_SLUG.NEMOTRON_3_ULTRA_FREE,
+      OPENROUTER_MODEL_SLUG.NEMOTRON_3_ULTRA_FREE
+    )
+  ),
+  preset(
+    "free-router-nemotron-ultra",
+    "Free mix — OpenRouter router + Nemotron 3 Ultra",
+    "Main ReAct loop on openrouter/free; fast tier and sidecars on Nemotron 3 Ultra (free, 1M ctx). " +
+      NVIDIA_FREE_ENDPOINT_PRIVACY_HINT,
+    OPENROUTER_MODEL_SLUG.FREE_ROUTER,
+    openRouterAutoRoutePatch(
+      OPENROUTER_MODEL_SLUG.FREE_ROUTER,
+      OPENROUTER_MODEL_SLUG.NEMOTRON_3_ULTRA_FREE
+    )
+  ),
+  preset(
     "openrouter-owl-stealth",
     "Owl Alpha — Stealth (single model)",
-    "Free Stealth owl-alpha for the main ReAct loop and all sidecars — no separate fast tier. " +
-      "Must pin to Stealth provider (DeepInfra/DeepSeek pins return HTTP 404 for this slug). " +
-      "Note: prompts and completions may be logged by the provider and used to improve the model.",
+    "Free Stealth owl-alpha — when the Stealth endpoint is healthy. " +
+      "Only routes through OpenRouter Stealth (no DeepInfra fallback). " +
+      "If you see HTTP 400 Provider returned error, Stealth is down upstream — use DeepSeek V4 or openrouter/free instead. " +
+      "Prompts may be logged by the provider for model improvement.",
     OPENROUTER_MODEL_SLUG.OWL_ALPHA,
     owlStealthPinPatch()
   ),

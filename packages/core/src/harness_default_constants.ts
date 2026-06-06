@@ -37,10 +37,10 @@ export const HARNESS_ENV_DEFAULTS: Readonly<Record<string, string>> = {
   AGENT_MANAGED_BYOK_FALLBACK: "0",
   /** When managed inference credits are exhausted (402), switch to OpenRouter BYOK on a free model. */
   AGENT_MANAGED_FREE_FALLBACK: "1",
-  /** Default free model when managed wallet is empty (Stealth owl-alpha on OpenRouter). */
-  AGENT_MANAGED_FREE_FALLBACK_MODEL: "openrouter/owl-alpha",
-  /** Fast/sidecar slot for free fallback; empty = same as AGENT_MANAGED_FREE_FALLBACK_MODEL. */
-  AGENT_MANAGED_FREE_FALLBACK_FAST: "",
+  /** Default free model when managed wallet is empty (OpenRouter free router; owl-alpha Stealth often 400). */
+  AGENT_MANAGED_FREE_FALLBACK_MODEL: "openrouter/free",
+  /** Fast/sidecar slot for free fallback (2nd free model; main stays AGENT_MANAGED_FREE_FALLBACK_MODEL). */
+  AGENT_MANAGED_FREE_FALLBACK_FAST: "nvidia/nemotron-3-ultra-550b-a55b:free",
   AGENT_RETRY_MAX_DELAY_MS: "30000",
   AGENT_RETRY_WALL_TIME_MS: "90000",
   AGENT_PROVIDER_CIRCUIT_FAILURES: "3",
@@ -105,6 +105,7 @@ export const HARNESS_ENV_DEFAULTS: Readonly<Record<string, string>> = {
   AGENT_PERSONA_GEN_TIMEOUT_MS: "90000",
   AGENT_PERSONA_GEN_RETRIES: "2",
   AGENT_PERSONA_UI_THEME_LLM: "1",
+  AGENT_PERSONA_UI_COPY: "1",
   AGENT_PERSONA_SOUL_MODE: "batch",
   AGENT_PERSONA_REPAIR_MAX: "1",
   AGENT_PERSONA_GENERATION_STREAM: "1",
@@ -378,6 +379,8 @@ export const HARNESS_ENV_DEFAULTS: Readonly<Record<string, string>> = {
   AGENT_BROWSER_HEADED: "0",
   AGENT_BROWSER_AUTO_VISION: "0",
   AGENT_SESSION_MODE: "",
+  /** Chat boot: restore_last | new_chat | most_recent — which chat to open on process start. */
+  AGENT_CHAT_BOOT: "restore_last",
   AGENT_LOCATION: "",
   AGENT_UPSTREAM_429_SUGGESTED_WAIT_MS: "",
   AGENT_HEARTBEAT: "0",

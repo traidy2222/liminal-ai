@@ -1,6 +1,7 @@
 /**
  * Parse OpenRouter / upstream error bodies for provider identification.
  */
+import { isOpenRouterStealthModel } from "./provider_config.js";
 
 /** Max dynamic 429 ignores per harness session — prevents "all providers ignored" 404s. */
 export const MAX_DYNAMIC_PROVIDER_IGNORES = 6;
@@ -23,6 +24,63 @@ export function isExhaustedProviderRoutingMessage(message: string): boolean {
 
 export function isExhaustedProviderRoutingError(err: unknown): boolean {
   return isExhaustedProviderRoutingMessage(errorMessage(err));
+}
+
+/** Parse OpenRouter 404 when requested provider(s) are incompatible with the model. */
+export function parseOpenRouterProviderMismatch(err: unknown): {
+  requested: string[];
+  available: string[];
+} | null {
+  const msg = errorMessage(err);
+  if (!isExhaustedProviderRoutingMessage(msg)) return null;
+  const parseList = (key: string): string[] => {
+    const m = msg.match(new RegExp(`"${key}"\\s*:\\s*\\[([^\\]]*)\\]`, "i"));
+    if (!m?.[1]) return [];
+    return m[1]
+      .split(",")
+      .map((s) => s.replace(/["'\s]/g, ""))
+      .filter(Boolean);
+  };
+  const requested = parseList("requested_providers");
+  const available = parseList("available_providers");
+  if (requested.length === 0 && available.length === 0) return null;
+  return { requested, available };
+}
+
+export function isStaleStealthPinMismatch(err: unknown, modelSlug: string): boolean {
+  if (isOpenRouterStealthModel(modelSlug)) return false;
+  const mismatch = parseOpenRouterProviderMismatch(err);
+  if (!mismatch) return false;
+  return mismatch.requested.some((p) => p.toLowerCase() === "stealth");
+}
+
+/** Owl Alpha has a single Stealth endpoint; opaque Stealth 400 = upstream outage (not harness config). */
+export function isOpenRouterStealthOwlProviderError(
+  err: unknown,
+  modelSlug?: string | null
+): boolean {
+  if (!isOpenRouterUpstreamProviderError(err)) return false;
+  const slug = (modelSlug ?? "").trim().toLowerCase();
+  if (slug === "openrouter/owl-alpha") return true;
+  const provider = parseOpenRouterProviderSlug(err);
+  return provider?.toLowerCase() === "stealth" && /owl-alpha/i.test(errorMessage(err));
+}
+
+export function formatOpenRouterStealthOwlUnavailableMessage(): string {
+  return (
+    "OpenRouter Owl Alpha (Stealth) is failing upstream (HTTP 400 Provider returned error). " +
+    "This model only has one Stealth endpoint — when Stealth is down, every request fails. " +
+    "Switch Settings → Free (OpenRouter router + Nemotron 3 Ultra), DeepSeek V4, or AGENT_MODEL=openrouter/free until Stealth recovers."
+  );
+}
+
+/** OpenRouter upstream reseller returned a hard error (often opaque HTTP 400 on Stealth). */
+export function isOpenRouterUpstreamProviderError(err: unknown): boolean {
+  const msg = errorMessage(err);
+  if (/provider returned error/i.test(msg)) return true;
+  if (/"raw"\s*:\s*"ERROR"/i.test(msg)) return true;
+  if (/\bmetadata\b[^}]*"provider_name"/i.test(msg) && /\b400\b/.test(msg)) return true;
+  return false;
 }
 
 /** Normalize OpenRouter provider slug from error metadata (case preserved). */

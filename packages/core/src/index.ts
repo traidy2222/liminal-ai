@@ -48,6 +48,7 @@ export {
   resolveTranscriptionConfig,
   resolveTranscriptionConfigAsync,
   transcribeAudio,
+  usesOpenRouterSttJson,
 } from "./transcription.js";
 export type {
   TranscriptionConfig,
@@ -59,6 +60,8 @@ export type {
 export {
   TTS_MODEL_RATES,
   DEFAULT_TTS_MODEL,
+  AFFORDABLE_TTS_MODEL,
+  normalizeTtsModelSlug,
   DEFAULT_TTS_VOICE,
   TTS_MODEL_INPUT_MAX_CHARS,
   TTS_MODEL_OUTPUT_MAX_TOKENS,
@@ -95,9 +98,22 @@ export {
   createChatMetadata,
   listChats,
   listOrphanChatIds,
+  adoptOrphanChatMetadata,
+  adoptAllOrphanChats,
   scratchWorkspaceRoot,
 } from "./chat_metadata.js";
 export type { ChatMetadata, ChatWorkspaceMode } from "./chat_metadata.js";
+export { readLastActiveChatId, saveLastActiveChatId } from "./active_chat_state.js";
+export type { ActiveChatState } from "./active_chat_state.js";
+export { resolveChatBoot } from "./chat_boot.js";
+export type { ChatBootMode, ChatBootOptions, ChatBootResult } from "./chat_boot.js";
+export {
+  loadChatTranscriptFromSessionLog,
+  slimReplayEntriesForWire,
+  parseSessionJsonlForReplay,
+  conversationEntriesForHydration,
+} from "./chat_session_replay.js";
+export type { ReplayTranscriptEntry, ReplayEntryKind } from "./chat_session_replay.js";
 export {
   runHarnessEffectiveEnvContext,
   resolveHarnessEnvRaw,
@@ -347,6 +363,12 @@ export {
 export type { IdentityNameExtraction } from "./user_identity_memory.js";
 export type { RewriteQueryResult } from "./query_rewrite.js";
 export {
+  isPlanStepDone,
+  planStepLabel,
+  markPlanStepDone,
+  countPlanStepsDone,
+} from "./plan_transcript.js";
+export {
   emptyEpistemicState,
   mergeEpistemicState,
   renderEpistemicStateBlock,
@@ -509,6 +531,16 @@ export {
   motionPresetToStatusBarIntervalMs,
   motionPresetToCssMultipliers,
   PERSONA_CATEGORY_KEYS,
+  PERSONA_OPEN_TOKEN_RANGES,
+  resolveDensityScale,
+  resolveRadiusPx,
+  resolveMotionScale,
+  resolveTypeScale,
+  gradientToCss,
+} from "./persona_ui_theme.js";
+export type {
+  PersonaGradient,
+  PersonaGradientStop,
 } from "./persona_ui_theme.js";
 export type {
   PersonaUiThemeV1,
@@ -535,6 +567,34 @@ export type {
   PersonaSemanticTokens,
   PersonaCssVarMap,
 } from "./persona_ui_theme.js";
+export {
+  PERSONA_UI_INVARIANTS,
+  lintPersonaUi,
+  repairPersonaUi,
+  isPersonaUiConformant,
+} from "./persona_ui_invariants.js";
+export type {
+  PersonaUiInvariantId,
+  PersonaUiViolation,
+  PersonaUiViolationSeverity,
+  PersonaUiRepairResult,
+} from "./persona_ui_invariants.js";
+export {
+  DEFAULT_PERSONA_UI_COPY,
+  sanitizePersonaUiCopy,
+  isDefaultPersonaUiCopy,
+} from "./persona_ui_copy.js";
+export type { PersonaUiCopy } from "./persona_ui_copy.js";
+export {
+  deriveLayoutFromTheme,
+  validatePersonaLayout,
+} from "./persona_ui_layout.js";
+export type {
+  PersonaLayoutSpec,
+  PersonaComposerDock,
+  PersonaHeaderStyle,
+  PersonaHeaderAlign,
+} from "./persona_ui_layout.js";
 export {
   PERSONA_ARTIFACT_LABELS,
   PERSONA_ARTIFACT_ORDER,

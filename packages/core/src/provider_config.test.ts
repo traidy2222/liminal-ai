@@ -63,6 +63,21 @@ test("resolveVisionProviderConfig uses product vision defaults, not chat model",
   }
 });
 
+test("buildProviderRouting ignores stale Stealth pin for Nemotron (Nvidia only)", () => {
+  const prev = saveEnv(ROUTING_ENV_KEYS);
+  try {
+    process.env["AGENT_PROVIDER_STRATEGY"] = "price";
+    process.env["AGENT_PROVIDER_ORDER"] = "Stealth";
+    const routing = buildProviderRouting("nvidia/nemotron-3-ultra-550b-a55b:free");
+    assert.ok(routing);
+    assert.equal(routing!.only, undefined);
+    assert.equal(routing!.order, undefined);
+    assert.equal(routing!.sort, "price");
+  } finally {
+    restoreEnv(prev);
+  }
+});
+
 test("buildProviderRouting pins openrouter/owl-alpha to Stealth despite DeepInfra env", () => {
   const prev = saveEnv(ROUTING_ENV_KEYS);
   try {
@@ -183,6 +198,24 @@ test("buildOpenRouterChatRequestExtras works for managed inference proxy base", 
     });
     assert.equal(extras.session_id, "chat-managed");
     assert.equal(extras.provider?.sort, "price");
+  } finally {
+    restoreEnv(prev);
+  }
+});
+
+test("buildOpenRouterChatRequestExtras softens Stealth pin on managed inference", () => {
+  const prev = saveEnv(ROUTING_ENV_KEYS);
+  try {
+    process.env["AGENT_PROVIDER_STRATEGY"] = "cache_first";
+    process.env["AGENT_PROVIDER_ORDER"] = "Stealth";
+    process.env["AGENT_PROVIDER_ALLOW_FALLBACKS"] = "0";
+    const extras = buildOpenRouterChatRequestExtras({
+      baseURL: "https://api.vireondynamics.com/v1/inference",
+      modelSlug: "openrouter/owl-alpha",
+      sessionId: "chat-stealth",
+    });
+    assert.deepEqual(extras.provider?.order, ["Stealth"]);
+    assert.equal(extras.provider?.allow_fallbacks, true);
   } finally {
     restoreEnv(prev);
   }

@@ -3,6 +3,10 @@ import assert from "node:assert/strict";
 import {
   isExhaustedProviderRoutingError,
   isExhaustedProviderRoutingMessage,
+  isOpenRouterStealthOwlProviderError,
+  isOpenRouterUpstreamProviderError,
+  isStaleStealthPinMismatch,
+  parseOpenRouterProviderMismatch,
   parseOpenRouterProviderSlug,
 } from "./openrouter_errors.js";
 
@@ -32,6 +36,36 @@ test("isExhaustedProviderRoutingMessage detects ignore exhaustion", () => {
     true
   );
   assert.equal(isExhaustedProviderRoutingMessage("rate limited"), false);
+});
+
+test("parseOpenRouterProviderMismatch extracts requested vs available providers", () => {
+  const err = new Error(
+    'HTTP 404 from Error: {"message":"No allowed providers are available for the selected model.","metadata":{"available_providers":["nvidia"],"requested_providers":["stealth"]}}'
+  );
+  assert.deepEqual(parseOpenRouterProviderMismatch(err), {
+    requested: ["stealth"],
+    available: ["nvidia"],
+  });
+  assert.equal(
+    isStaleStealthPinMismatch(err, "nvidia/nemotron-3-ultra-550b-a55b:free"),
+    true
+  );
+  assert.equal(isStaleStealthPinMismatch(err, "openrouter/owl-alpha"), false);
+});
+
+test("isOpenRouterStealthOwlProviderError matches owl-alpha model slug", () => {
+  const err = new Error(
+    'HTTP 400 from Error: {"message":"Provider returned error","metadata":{"provider_name":"Stealth"}}'
+  );
+  assert.equal(isOpenRouterStealthOwlProviderError(err, "openrouter/owl-alpha"), true);
+  assert.equal(isOpenRouterStealthOwlProviderError(err, "deepseek/deepseek-v4-pro"), false);
+});
+
+test("isOpenRouterUpstreamProviderError detects Stealth opaque 400", () => {
+  const err = new Error(
+    'HTTP 400 from Error: {"message":"Provider returned error","code":400,"metadata":{"raw":"ERROR","provider_name":"Stealth","is_byok":false}}'
+  );
+  assert.equal(isOpenRouterUpstreamProviderError(err), true);
 });
 
 test("isExhaustedProviderRoutingError wraps message helper", () => {

@@ -12,6 +12,7 @@ import {
 import type { ProviderRouteState } from "./provider_route_state.js";
 import type { RuntimePreferences } from "./runtime_prefs.js";
 import { ensureLocalProviderApiKeyInProcess } from "./provider_api_key.js";
+import { isManagedInferenceBaseUrl } from "./inference_session.js";
 
 // ─── Provider routing (OpenRouter sticky cache + dynamic price sort) ─────────
 
@@ -55,6 +56,8 @@ const SLUG_PREFIX_TO_PROVIDER: Record<string, string> = {
   cohere: "Cohere",
   "x-ai": "xAI",
   xai: "xAI",
+  nvidia: "Nvidia",
+  openrouter: "OpenRouter",
 };
 
 /** OpenRouter slugs that only accept the Stealth provider (not DeepInfra / vendor pins). */
@@ -68,6 +71,38 @@ export function isOpenRouterStealthModel(modelSlug: string): boolean {
 function deriveProviderFromModelSlug(slug: string): string | null {
   const prefix = slug.split("/")[0]?.toLowerCase() ?? "";
   return SLUG_PREFIX_TO_PROVIDER[prefix] ?? null;
+}
+
+function isStealthProviderName(name: string): boolean {
+  return name.trim().toLowerCase() === "stealth";
+}
+
+/**
+ * Drop env/provider pins that do not apply to the active model slug (e.g. Stealth
+ * left over from Owl Alpha while running Nemotron — OpenRouter only offers Nvidia).
+ */
+export function filterProviderOrderForModel(modelSlug: string, order: string[]): string[] {
+  if (order.length === 0) return [];
+  if (isOpenRouterStealthModel(modelSlug)) return order;
+  const filtered = order.filter((name) => !isStealthProviderName(name));
+  if (filtered.length === 0) return [];
+  const slug = modelSlug.trim().toLowerCase();
+  if (slug.startsWith("nvidia/")) {
+    const hasNvidia = filtered.some((n) => n.toLowerCase() === "nvidia");
+    if (!hasNvidia && filtered.length > 0) {
+      // Stale DeepInfra/etc. pins from another preset — prefer OpenRouter auto-route.
+      const derived = deriveProviderFromModelSlug(modelSlug);
+      return derived ? [derived] : [];
+    }
+  }
+  return filtered;
+}
+
+function resolveExplicitProviderOrder(modelSlug: string, isFastModel: boolean): string[] {
+  const fast = parseCsvList(effectiveHarnessEnvRaw("AGENT_PROVIDER_ORDER_FAST"));
+  const main = parseCsvList(effectiveHarnessEnvRaw("AGENT_PROVIDER_ORDER"));
+  const raw = isFastModel && fast.length > 0 ? fast : main;
+  return filterProviderOrderForModel(modelSlug, raw);
 }
 
 function parseCsvList(raw: string | undefined | null): string[] {
@@ -107,12 +142,8 @@ function resolveSortAxis(strategy: ProviderStrategy): ProviderSortAxis {
   return "price";
 }
 
-function resolveAllowlist(isFastModel: boolean): string[] {
-  if (isFastModel) {
-    const fast = parseCsvList(effectiveHarnessEnvRaw("AGENT_PROVIDER_ORDER_FAST"));
-    if (fast.length > 0) return fast;
-  }
-  return parseCsvList(effectiveHarnessEnvRaw("AGENT_PROVIDER_ORDER"));
+function resolveAllowlist(modelSlug: string, isFastModel: boolean): string[] {
+  return resolveExplicitProviderOrder(modelSlug, isFastModel);
 }
 
 function resolveStaticIgnores(): string[] {
@@ -144,18 +175,9 @@ function buildCacheFirstRouting(modelSlug: string, isFastModel: boolean): Provid
     return { order: ["Stealth"], allow_fallbacks: allowFallbacks };
   }
 
-  if (isFastModel) {
-    const fastExplicit = effectiveHarnessEnvRaw("AGENT_PROVIDER_ORDER_FAST")?.trim();
-    if (fastExplicit && fastExplicit.length > 0) {
-      const order = parseCsvList(fastExplicit);
-      if (order.length > 0) return { order, allow_fallbacks: allowFallbacks };
-    }
-  }
-
-  const explicit = effectiveHarnessEnvRaw("AGENT_PROVIDER_ORDER")?.trim();
-  if (explicit && explicit.length > 0) {
-    const order = parseCsvList(explicit);
-    if (order.length > 0) return { order, allow_fallbacks: allowFallbacks };
+  const order = resolveExplicitProviderOrder(modelSlug, isFastModel);
+  if (order.length > 0) {
+    return { order, allow_fallbacks: allowFallbacks };
   }
 
   const auto = effectiveHarnessEnvRaw("AGENT_PROVIDER_ROUTE_AUTO")?.trim();
@@ -177,7 +199,7 @@ function buildDynamicRouting(
   }
 
   const sort = resolveSortAxis(strategy);
-  const only = resolveAllowlist(isFastModel);
+  const only = resolveAllowlist(modelSlug, isFastModel);
   const ignore = mergeIgnores(routeState);
   const max_price = resolveMaxPrice();
 
@@ -223,6 +245,24 @@ export type OpenRouterChatRequestExtras = {
 };
 
 /**
+ * Vireon managed-inference proxy already coordinates upstream retries. Strict
+ * Stealth-only pins with fallbacks disabled often fail closed with opaque 400s.
+ */
+export function softenProviderRoutingForManagedProxy(
+  routing: ProviderRouting | null,
+  modelSlug: string
+): ProviderRouting | null {
+  if (!routing) return null;
+  if (isOpenRouterStealthModel(modelSlug)) {
+    return { order: ["Stealth"], allow_fallbacks: true };
+  }
+  if (routing.allow_fallbacks === false && (routing.order?.length || routing.only?.length)) {
+    return { ...routing, allow_fallbacks: true };
+  }
+  return routing;
+}
+
+/**
  * Merge provider routing + session stickiness (with optional epoch suffix) for OpenRouter chat calls.
  */
 export function buildOpenRouterChatRequestExtras(opts: {
@@ -235,12 +275,15 @@ export function buildOpenRouterChatRequestExtras(opts: {
 }): OpenRouterChatRequestExtras {
   if (!supportsOpenRouterRequestExtras(opts.baseURL)) return {};
 
-  const provider = resolveProviderRouting({
+  let provider = resolveProviderRouting({
     modelSlug: opts.modelSlug,
     isFastModel: opts.isFastModel,
     routeState: opts.routeState,
     retryAttempt: opts.retryAttempt,
   });
+  if (isManagedInferenceBaseUrl(opts.baseURL)) {
+    provider = softenProviderRoutingForManagedProxy(provider, opts.modelSlug);
+  }
 
   const sessionExtras = buildOpenRouterSessionExtras(opts.baseURL, opts.sessionId);
   if (sessionExtras.session_id && opts.routeState) {

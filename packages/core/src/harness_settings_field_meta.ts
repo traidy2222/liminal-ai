@@ -165,7 +165,7 @@ const _META_RAW: Record<string, HarnessSettingsFieldMeta> = {
     subgroupId: "resilience",
     label: "Free Fallback Model",
     description:
-      "OpenRouter slug used when managed credits are exhausted and free fallback is on (default openrouter/owl-alpha — Stealth, no separate fast tier).",
+      "OpenRouter slug when managed credits are exhausted and free fallback is on (default openrouter/free; owl-alpha Stealth is often unavailable upstream).",
     valueKind: "string",
   },
   "AGENT_MANAGED_FREE_FALLBACK_FAST": {
@@ -173,7 +173,7 @@ const _META_RAW: Record<string, HarnessSettingsFieldMeta> = {
     subgroupId: "resilience",
     label: "Free Fallback Fast Model",
     description:
-      "Sidecar/fast model for free fallback; empty = same as Free Fallback Model.",
+      "Second free model for sidecars when managed credits are exhausted (default Nemotron 3 Ultra free; main stays Free Fallback Model).",
     valueKind: "string",
   },
   "AGENT_RETRY_MAX_DELAY_MS": {
@@ -306,7 +306,9 @@ const _META_RAW: Record<string, HarnessSettingsFieldMeta> = {
     tabId: "harness",
     subgroupId: "harness_misc",
     label: "Tts Model",
-    description: "Harness environment toggle for Tts Model. See docs/configuration.md (harness).",
+    description:
+      "OpenRouter speech model slug. Default hexgrad/kokoro-82m (~$0.62/M chars). " +
+      "GPT-4o Mini TTS slugs are remapped to Kokoro automatically.",
     valueKind: "string",
   },
   "AGENT_TTS_VOICE": {
@@ -539,6 +541,13 @@ const _META_RAW: Record<string, HarnessSettingsFieldMeta> = {
     label: "Persona Ui Theme Llm",
     description: "Harness environment toggle for Persona Ui Theme Llm. See docs/configuration.md (harness).",
     valueKind: "string",
+  },
+  "AGENT_PERSONA_UI_COPY": {
+    tabId: "harness",
+    subgroupId: "harness_misc",
+    label: "Persona Ui Copy",
+    description: "Generate in-voice interface microcopy at persona bootstrap (composer placeholder, labels, empty state). Set 0 to use default labels.",
+    valueKind: "boolean",
   },
   "AGENT_PERSONA_SOUL_MODE": {
     tabId: "harness",
@@ -1137,6 +1146,14 @@ const _META_RAW: Record<string, HarnessSettingsFieldMeta> = {
     subgroupId: "session_recording",
     label: "Session Mode",
     description: "Harness environment toggle for Session Mode. See docs/configuration.md (session ui).",
+    valueKind: "string",
+  },
+  "AGENT_CHAT_BOOT": {
+    tabId: "session_ui",
+    subgroupId: "session_recording",
+    label: "Chat boot mode",
+    description:
+      "Which chat to open on startup: restore_last (default), new_chat, or most_recent. Shared across web, desktop, and TUI.",
     valueKind: "string",
   },
   "AGENT_LOCATION": {

@@ -80,6 +80,33 @@ function validateValue(key: string, val: unknown, schema: PropertySchema): strin
   return null;
 }
 
+/** Common model hallucinations → registered tool names. */
+const TOOL_NAME_ALIASES: Readonly<Record<string, string>> = {
+  repository_map: "repo_map",
+};
+
+function resolveToolName(name: string): string {
+  return TOOL_NAME_ALIASES[name] ?? name;
+}
+
+/** Per-tool arg aliases applied before JSON-schema validation. */
+function normalizeToolArgs(
+  name: string,
+  args: Record<string, unknown>
+): Record<string, unknown> {
+  if (name === "speak") {
+    const out = { ...args };
+    const text = String(out["text"] ?? "").trim();
+    const content = String(out["content"] ?? "").trim();
+    if (!text && content) {
+      out["text"] = content;
+      delete out["content"];
+    }
+    return out;
+  }
+  return args;
+}
+
 function validateArgs(
   schema: ToolParameterSchema,
   args: Record<string, unknown>
@@ -225,8 +252,10 @@ export class ToolDispatcher {
     name: string,
     args: Record<string, unknown>
   ): Promise<ToolResult> {
+    name = resolveToolName(name);
     const tool = this.registry.get(name);
     if (!tool) return { ok: false, error: `Unknown tool: "${name}"` };
+    args = normalizeToolArgs(name, args);
     const guardMsg = guardToolArgs(name, args);
     if (guardMsg) return { ok: false, error: `[ARG GUARD] ${guardMsg}` };
     try {
@@ -244,6 +273,7 @@ export class ToolDispatcher {
     /** Names of all tools being called in the same round (for pre-flight checks). */
     batchToolNames?: string[]
   ): Promise<ToolResult> {
+    name = resolveToolName(name);
     const tool = this.registry.get(name);
     if (!tool) {
       return { ok: false, error: `Unknown tool: "${name}"` };
@@ -276,6 +306,7 @@ export class ToolDispatcher {
         error: `Invalid JSON args for tool "${name}": ${argsJson}`,
       };
     }
+    args = normalizeToolArgs(name, args);
 
     // Circuit breaker: reject if this tool's circuit is open due to repeated failures.
     const circuitOpenUntilTs = this.circuitOpenUntil.get(name) ?? 0;
@@ -443,7 +474,7 @@ export class ToolDispatcher {
             return result;
           }
           if (decision.decision === "edit") {
-            args = decision.editedArgs;
+            args = normalizeToolArgs(name, decision.editedArgs);
             const reErr = validateArgs(tool.parameters, args);
             if (reErr) {
               const result: ToolResult = {
@@ -465,7 +496,7 @@ export class ToolDispatcher {
       }
 
       if (this.fileWriteHooks) {
-        args = await this.fileWriteHooks.prepareArgs(callId, name, args);
+        args = normalizeToolArgs(name, await this.fileWriteHooks.prepareArgs(callId, name, args));
         const reErr = validateArgs(tool.parameters, args);
         if (reErr) {
           const result: ToolResult = {

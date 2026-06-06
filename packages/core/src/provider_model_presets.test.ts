@@ -81,6 +81,26 @@ test("deepseek deepinfra pin preset uses cache_first", () => {
   assert.equal(pin.harnessEnvPatch.AGENT_PROVIDER_ORDER, "DeepInfra");
 });
 
+test("nemotron-3-ultra preset uses Nemotron 3 Ultra free slug for main and fast", () => {
+  const pack = PROVIDER_MODEL_PRESETS.find((p) => p.id === "nemotron-3-ultra")!;
+  assert.equal(pack.model, OPENROUTER_MODEL_SLUG.NEMOTRON_3_ULTRA_FREE);
+  assert.equal(pack.harnessEnvPatch.AGENT_MODEL, OPENROUTER_MODEL_SLUG.NEMOTRON_3_ULTRA_FREE);
+  assert.equal(pack.harnessEnvPatch.AGENT_FAST_MODEL, OPENROUTER_MODEL_SLUG.NEMOTRON_3_ULTRA_FREE);
+});
+
+test("free-router-nemotron-ultra preset pairs openrouter/free with Nemotron 3 Ultra fast", () => {
+  const pack = PROVIDER_MODEL_PRESETS.find((p) => p.id === "free-router-nemotron-ultra")!;
+  assert.equal(pack.harnessEnvPatch.AGENT_MODEL, OPENROUTER_MODEL_SLUG.FREE_ROUTER);
+  assert.equal(pack.harnessEnvPatch.AGENT_FAST_MODEL, OPENROUTER_MODEL_SLUG.NEMOTRON_3_ULTRA_FREE);
+});
+
+test("resolveProviderPresetId matches nemotron-3-ultra pack", () => {
+  assert.equal(
+    resolveProviderPresetId(OPENROUTER_MODEL_SLUG.NEMOTRON_3_ULTRA_FREE, "https://openrouter.ai/api/v1"),
+    "nemotron-3-ultra"
+  );
+});
+
 test("owl stealth preset pins Stealth provider and owl-alpha slug", () => {
   const owl = PROVIDER_MODEL_PRESETS.find((p) => p.id === "openrouter-owl-stealth")!;
   assert.equal(owl.model, OPENROUTER_MODEL_SLUG.OWL_ALPHA);

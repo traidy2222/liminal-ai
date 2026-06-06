@@ -4,6 +4,7 @@ import OpenAI from "openai";
 import {
   buildManagedFreeFallbackHarnessEnv,
   managedFreeFallbackEnabled,
+  resolveManagedFreeFallbackFastModel,
   resolveManagedFreeFallbackMainModel,
 } from "./managed_free_fallback.js";
 import { isInferenceBudgetExceededError } from "./inference_provider.js";
@@ -13,14 +14,32 @@ test("managedFreeFallbackEnabled defaults on", () => {
   assert.equal(managedFreeFallbackEnabled(null), true);
 });
 
-test("resolveManagedFreeFallbackMainModel defaults to owl-alpha", () => {
-  assert.equal(resolveManagedFreeFallbackMainModel(null), OPENROUTER_MODEL_SLUG.OWL_ALPHA);
+test("resolveManagedFreeFallbackMainModel defaults to openrouter/free", () => {
+  assert.equal(resolveManagedFreeFallbackMainModel(null), OPENROUTER_MODEL_SLUG.FREE_ROUTER);
 });
 
-test("buildManagedFreeFallbackHarnessEnv pins Stealth for owl-alpha", () => {
+test("resolveManagedFreeFallbackFastModel defaults to Nemotron 3 Ultra when main is openrouter/free", () => {
+  assert.equal(
+    resolveManagedFreeFallbackFastModel(OPENROUTER_MODEL_SLUG.FREE_ROUTER, null),
+    OPENROUTER_MODEL_SLUG.NEMOTRON_3_ULTRA_FREE
+  );
+});
+
+test("buildManagedFreeFallbackHarnessEnv pairs openrouter/free main with Nemotron ultra fast", () => {
   const env = buildManagedFreeFallbackHarnessEnv(null);
+  assert.equal(env.AGENT_MODEL, OPENROUTER_MODEL_SLUG.FREE_ROUTER);
+  assert.equal(env.AGENT_FAST_MODEL, OPENROUTER_MODEL_SLUG.NEMOTRON_3_ULTRA_FREE);
+  assert.equal(env.AGENT_PROVIDER_STRATEGY, "price");
+  assert.equal(env.AGENT_PROVIDER_ORDER, "");
+});
+
+test("buildManagedFreeFallbackHarnessEnv pins Stealth for owl-alpha override", () => {
+  const env = buildManagedFreeFallbackHarnessEnv({
+    version: 1,
+    updatedAt: 0,
+    harness: { env: { AGENT_MANAGED_FREE_FALLBACK_MODEL: OPENROUTER_MODEL_SLUG.OWL_ALPHA } },
+  });
   assert.equal(env.AGENT_MODEL, OPENROUTER_MODEL_SLUG.OWL_ALPHA);
-  assert.equal(env.AGENT_FAST_MODEL, OPENROUTER_MODEL_SLUG.OWL_ALPHA);
   assert.equal(env.AGENT_PROVIDER_ORDER, "Stealth");
 });
 
