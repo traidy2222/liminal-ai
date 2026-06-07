@@ -12,6 +12,10 @@ import {
   peekLooksLikeBotWall,
   resolveTextDecoderLabel,
 } from "./web_fetch_http.js";
+import {
+  runSerperWebFetch,
+  shouldAttemptSerperWebFetch,
+} from "./web_fetch_serper.js";
 
 /** Per-request HTTP timeout for web_fetch page fetches. Clamp 3000–120000 ms. */
 export function resolveWebFetchTimeoutMs(): number {
@@ -774,6 +778,17 @@ async function runWebFetchInner(
     return { ok: true, output: (header + slice + footer).trim() };
   }
 
+  if (shouldAttemptSerperWebFetch(url, { includeAssets })) {
+    const serper = await runSerperWebFetch(url, maxChars, {
+      charOffset,
+      signal: externalSignal,
+    });
+    if (serper.ok) {
+      return { ok: true, output: serper.output };
+    }
+    /* quota/auth/network — fall through to local fetch */
+  }
+
   const chunkIdleMs = resolveWebFetchBodyChunkIdleMs(timeoutMs);
 
   const retried = await obtainWebFetchResponse(url, externalSignal, timeoutMs, retries, maxBackoff);
@@ -1014,7 +1029,7 @@ function extractPageAssets(
 export const webFetchTool = defineTool({
   name: "web_fetch",
   description:
-    "WHAT: Fetch URL content as plain text. Refuses obvious binary/archive/installer URL suffixes (e.g. .gz, .zip, .exe, .dmg) and matching Content-Type values before downloading. Optional discovery of useful links and image URLs from the page for follow-up browsing/vision. Strips HTML; with AGENT_WEB_READABILITY=1 runs Mozilla Readability inside JSDOM on **only the first N characters** of HTML (`AGENT_WEB_FETCH_READABILITY_MAX_INPUT_CHARS`, default 72000) so huge pages + parallel `web_fetch` cannot freeze the Node process for many minutes. Author style/script tags are stripped before parse (JSDOM cannot parse many modern stylesheets). PDFs → text when pdf-parse available. Direct image URLs return metadata + vision hint.\n" +
+    "WHAT: Fetch URL content as plain text. When AGENT_SERPER_API_KEY is set and AGENT_WEB_FETCH_SERPER=1 (default), tries Serper scrape (scrape.serper.dev) first for normal http(s) pages — bills Serper credits; on auth/quota/empty responses falls back to the local fetch path below. Refuses obvious binary/archive/installer URL suffixes (e.g. .gz, .zip, .exe, .dmg) and matching Content-Type values before downloading. Optional discovery of useful links and image URLs from the page for follow-up browsing/vision (local path only — Serper scrape does not populate assets). Strips HTML; with AGENT_WEB_READABILITY=1 runs Mozilla Readability inside JSDOM on **only the first N characters** of HTML (`AGENT_WEB_FETCH_READABILITY_MAX_INPUT_CHARS`, default 72000) so huge pages + parallel `web_fetch` cannot freeze the Node process for many minutes. Author style/script tags are stripped before parse (JSDOM cannot parse many modern stylesheets). PDFs → text when pdf-parse available. Direct image URLs return metadata + vision hint.\n" +
     "RELIABILITY: Chromium-style navigation fingerprint (Accept incl. avif/webp/sxg, Sec-Fetch-*, Priority, gzip/deflate/br — not zstd, to avoid servers returning encodings some Node builds decode poorly; optional Sec-CH-UA* when UA is Chrome-like — tune with AGENT_WEB_FETCH_USER_AGENT, AGENT_WEB_FETCH_SEC_CH_PLATFORM, AGENT_WEB_FETCH_ACCEPT_LANGUAGE, AGENT_WEB_FETCH_REFERER for cross-site retries). On HTTP 403/401 after a bot-wall body peek: retries Firefox+Referer (AGENT_WEB_FETCH_ALT_USER_AGENT), then Chrome+Referer+cross-site, then optional AGENT_WEB_FETCH_FALLBACK_URL_TEMPLATE `{url}` reader proxy. Disable extra retries with AGENT_WEB_FETCH_403_RETRY=0. TLS fingerprint is still Node's — hard paywalls / heavy bot scores need browser_open or a real browser proxy.\n" +
     "TIME: Per-attempt timeout AGENT_WEB_FETCH_TIMEOUT_MS (default 20s) covers **headers + body** for each GET (not TTFB-only). Retries AGENT_WEB_FETCH_RETRIES (default 2); **hard total wall** AGENT_WEB_FETCH_TOTAL_WALL_MS (default 55s) aborts the whole call—avoid many parallel web_fetch on slow news sites.\n" +
     "WHEN: You already have the exact URL — use web_search first to find it.\n" +
