@@ -3,7 +3,7 @@ import { defineTool } from "./helpers.js";
 import type { RuntimePersonaProfile } from "@liminal/core";
 import {
   applyPersonaProfileToHarness,
-  clearPersistedPersonaArtifacts,
+  installDefaultPersonaArtifacts,
   generatePersonaFromInput,
   isResetToDefaultRequest,
   parsePersonaInput,
@@ -53,28 +53,11 @@ export function createSetPersonaTool(harness: AgentHarness) {
       const { coreInput, strength, modifier } = parsePersonaInput(args["input"] as string);
 
       if (isResetToDefaultRequest(coreInput)) {
-        harness.resetPersona();
-        await clearPersistedPersonaArtifacts().catch(() => undefined);
-        try {
-          await harness.patchRuntimePreferences(
-            {
-              persona: {
-                // First-run bootstrap stays completed; only clear custom profile.
-                bootstrapCompleted: true,
-                sourcePrompt: "",
-                activeProfile: null,
-                updatedAt: Date.now(),
-              },
-            },
-            { persist: true }
-          );
-        } catch {
-          // non-fatal
-        }
+        await installDefaultPersonaArtifacts(harness);
         return {
           ok: true,
           output:
-            "Persona cleared — restored default inception identity (no model call).\n" +
+            "Default Liminal persona installed (profile, soul, HUD theme, UI copy).\n" +
             "Operational rules unchanged.",
         };
       }

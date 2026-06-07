@@ -4,7 +4,10 @@ Short guide for first-run voice setup. Deep implementation: [Persona system](../
 
 ## What happens
 
-When `AGENT_PERSONA_BOOTSTRAP` is on (default), web/TUI show a modal/overlay asking how the assistant should sound. The harness runs `persona_generator` pipelines, writes `persona/active/*`, and applies the profile to the live harness.
+When `AGENT_PERSONA_BOOTSTRAP` is on (default), web/TUI show a modal/overlay asking how the assistant should sound.
+
+- **Custom prompt** — `persona_generator` pipelines write `persona/active/*` and apply the profile.
+- **Skip / default voice** — installs the bundled **Liminal** persona from `packages/tools/src/persona_default.ts` (profile, soul slices, HUD `ui_theme.json`, `ui_copy.json`). Reference copy: `persona/default/active/` in the repo. No LLM calls.
 
 ## Flags
 

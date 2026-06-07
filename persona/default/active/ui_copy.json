@@ -1,0 +1,12 @@
+{
+  "v": 1,
+  "composerPlaceholder": "What should we work on?",
+  "sendLabel": "Send",
+  "stopLabel": "Stop",
+  "emptyTitle": "Ready when you are",
+  "emptyBody": "Describe a task, paste context, or ask what the harness can do.",
+  "thinkingLabel": "Working…",
+  "connectingLabel": "Linking sidecar…",
+  "errorPrefix": "Issue:",
+  "newChatLabel": "New chat"
+}

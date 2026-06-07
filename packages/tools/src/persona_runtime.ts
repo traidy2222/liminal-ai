@@ -9,7 +9,7 @@ import {
   type PersonaUiCopy,
 } from "@liminal/core";
 import { existsSync } from "node:fs";
-import type { RuntimePersonaControls } from "@liminal/core";
+import type { RuntimePersonaControls, RuntimePersonaProfile } from "@liminal/core";
 import { mkdir, readFile, rm, stat, unlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import {
@@ -28,6 +28,13 @@ import {
   type PersonaProgressFn,
 } from "./persona_generation_preview.js";
 import { writePersonaArtifact, writePersonaArtifactStreaming, finalizePersonaManifest } from "./persona_artifact_io.js";
+import {
+  LIMINAL_DEFAULT_CONTROLS,
+  LIMINAL_DEFAULT_PROFILE,
+  LIMINAL_DEFAULT_SOUL,
+  LIMINAL_DEFAULT_UI_COPY,
+  LIMINAL_DEFAULT_UI_THEME,
+} from "./persona_default.js";
 import {
   buildPersonaTraitTags,
   buildPersonaVoiceSummary,
@@ -246,6 +253,58 @@ async function persistPersonaArtifacts(
 export async function clearPersistedPersonaArtifacts(): Promise<void> {
   const paths = getPersonaArtifactsPaths();
   await rm(paths.dir, { recursive: true, force: true });
+}
+
+/** Install bundled Liminal default persona (profile, soul, HUD theme, UI copy). */
+export async function installDefaultPersonaArtifacts(
+  harness: AgentHarness,
+  options?: { sourcePrompt?: "" | "default" }
+): Promise<PersonaProfile> {
+  const profile = LIMINAL_DEFAULT_PROFILE;
+  const controls = LIMINAL_DEFAULT_CONTROLS;
+  const sourcePrompt = options?.sourcePrompt ?? "default";
+
+  await writePersonaArtifact("runtime_profile", JSON.stringify(profile, null, 2));
+  await writePersonaArtifact("soul_identity", LIMINAL_DEFAULT_SOUL.identity);
+  await writePersonaArtifact("soul_voice", LIMINAL_DEFAULT_SOUL.voice);
+  await writePersonaArtifact("soul_stance", LIMINAL_DEFAULT_SOUL.stance);
+  await writePersonaArtifact("soul_rails", LIMINAL_DEFAULT_SOUL.rails);
+  await writePersonaArtifact("ui_theme", JSON.stringify(LIMINAL_DEFAULT_UI_THEME, null, 2));
+  await writePersonaArtifact("ui_copy", JSON.stringify(LIMINAL_DEFAULT_UI_COPY, null, 2));
+  await finalizePersonaManifest({ sourcePrompt, profile, controls });
+
+  await applyPersonaProfileToHarness(harness, profile);
+  await harness.patchRuntimePreferences(
+    {
+      persona: {
+        bootstrapCompleted: true,
+        sourcePrompt,
+        activeProfile: profile as RuntimePersonaProfile,
+        controls,
+        updatedAt: Date.now(),
+      },
+    },
+    { persist: true }
+  );
+
+  return profile;
+}
+
+/** Wipe persona artifacts + prefs so first-run bootstrap can run again. */
+export async function resetPersonaBootstrapState(harness: AgentHarness): Promise<void> {
+  harness.resetPersona();
+  await clearPersistedPersonaArtifacts().catch(() => undefined);
+  await harness.patchRuntimePreferences(
+    {
+      persona: {
+        bootstrapCompleted: false,
+        sourcePrompt: "",
+        activeProfile: null,
+        updatedAt: Date.now(),
+      },
+    },
+    { persist: true }
+  );
 }
 
 export async function generatePersonaFromInput(
