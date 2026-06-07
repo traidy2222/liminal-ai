@@ -10,10 +10,12 @@ import { join } from "node:path";
 import {
   AgentHarness,
   appendGoldenEvalRecord,
+  buildAppSpecFromSpawn,
   loadRuntimePreferences,
   resolveProviderConfig,
   resolveWorkspaceRoot,
   type AgentConfig,
+  type LiminalAppManagerPort,
   type ToolResult,
   type ToolHandler,
   type AgentEventMap,
@@ -276,6 +278,31 @@ function telemetryFromTraces(traces: TraceEvent[][]): Pick<
 
 // ─── Runner ───────────────────────────────────────────────────────────────────
 
+function createEvalMockAppManager(): LiminalAppManagerPort {
+  return {
+    isEnabled: () => true,
+    listApps: async () => [],
+    listAppsWithCaches: async () => ({ apps: [], caches: {} }),
+    spawnApp: async (input) => {
+      const built = buildAppSpecFromSpawn(input);
+      if (!built.ok) throw new Error(built.error);
+      return built.spec;
+    },
+    updateApp: async (appId, patch) => {
+      const built = buildAppSpecFromSpawn({
+        type: "weather",
+        id: appId,
+        props: (patch.props as Record<string, unknown>) ?? { location: "London" },
+        title: patch.title,
+      });
+      if (!built.ok) throw new Error(built.error);
+      return built.spec;
+    },
+    closeApp: async () => true,
+    refreshApp: async () => ({ fetched_at: Date.now(), ok: true, data: {} }),
+  };
+}
+
 const runtimePreferences = await loadRuntimePreferences();
 const provider = resolveProviderConfig(runtimePreferences?.provider);
 export const EVAL_MODEL = process.env["EVAL_MODEL"]?.trim() || provider.model;
@@ -318,7 +345,13 @@ export async function runSingleHarnessSend(scenario: Scenario, userMessage: stri
   const harness = new AgentHarness(
     makeEvalConfig(scenario.maxRounds ?? 20, timeoutFor(scenario))
   );
-  await registerAllTools(harness.registry, harness.emitter, harness);
+  const mockApps = envPatches["AGENT_EVAL_LIMINAL_APPS_MOCK"] === "1";
+  await registerAllTools(
+    harness.registry,
+    harness.emitter,
+    harness,
+    mockApps ? { appManager: createEvalMockAppManager() } : undefined
+  );
 
   for (const mock of scenario.mocks ?? []) {
     const existing = harness.registry.get(mock.toolName);

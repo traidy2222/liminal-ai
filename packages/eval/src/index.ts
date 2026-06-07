@@ -26,6 +26,7 @@ import {
   writeEvalRunSummary,
 } from "./runner.js";
 import { ALL_SCENARIOS as BASIC_SCENARIOS } from "./scenarios/basic.js";
+import { LIMINAL_DESKTOP_APPS_SCENARIOS } from "./scenarios/liminal_desktop_apps.js";
 import { RELIABILITY_SCENARIOS } from "./scenarios/reliability.js";
 import { NOISE_SCENARIOS } from "./scenarios/noise.js";
 import { MEMORY_SCENARIOS } from "./scenarios/memory_retrieval.js";
@@ -79,6 +80,7 @@ const ALL_SCENARIOS = [
   ...WORKFLOW_EVAL_SCENARIOS,
   ...MONOLITHIC_HTML_GAME_SCENARIOS,
   ...GOOGLE_CONNECTORS_SCENARIOS,
+  ...LIMINAL_DESKTOP_APPS_SCENARIOS,
 ];
 const REAL_SCENARIOS = ALL_SCENARIOS.filter((s) => !s.mocks || s.mocks.length === 0);
 
