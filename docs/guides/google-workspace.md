@@ -92,8 +92,11 @@ Google's official Gmail MCP (`gmailmcp.googleapis.com`) covers **search, read, d
 
 | Task | Tool |
 |------|------|
-| Search, read threads, list labels, draft for review | `mcp_google_gmail_*` (official MCP) |
-| **Send now** (user said send / deliver) | `gmail_send_message` (classic `users.messages.send` on `gmail.googleapis.com`) |
+| Search, read threads, list labels | `mcp_google_gmail_*` (official MCP) |
+| **Draft for review (styled HTML)** | `gmail_create_draft` (REST — `body_html`, images, attachments) |
+| **Send now** (user said send / deliver) | `gmail_send_message` (classic `users.messages.send`) |
+
+Google's MCP `create_draft` is **plain text only**. The harness rejects substantive plain-only new mail there and routes styled drafts through `gmail_create_draft` instead.
 
 After `liminal connect google --attach` with `gmail` in services, MCP tools register automatically. **`gmail_send_message`** is always registered when `AGENT_GOOGLE_GMAIL_SEND=1` (default) and uses the **same OAuth token** (`gmail.compose` scope).
 
@@ -103,7 +106,7 @@ Requires:
 - [Workspace Developer Preview](https://developers.google.com/workspace/preview) enrollment for MCP
 - OAuth scopes `gmail.readonly` and `gmail.compose` (re-connect if `list_connectors` shows `gmail_mcp=no`)
 
-**Rich email.** `gmail_send_message` supports plain `body`, optional `body_html`, `inline_images`, and `attachments`. The harness **Email composition** protocol applies when Gmail MCP or send tools are active.
+**Rich email.** `gmail_create_draft` and `gmail_send_message` support plain `body`, `body_html`, `inline_images`, and `attachments`. New outbound mail without a thread id must include FORMATTED `body_html` (the tools enforce R-EMAIL-STYLE). The harness **Email composition** protocol applies when Gmail MCP or REST compose tools are active.
 
 Set `AGENT_GOOGLE_GMAIL_SEND=0` to disable REST send (draft-only via MCP).
 
@@ -112,7 +115,8 @@ Set `AGENT_GOOGLE_GMAIL_SEND=0` to disable REST send (draft-only via MCP).
 | Service | Backend |
 |---------|---------|
 | Drive, Calendar, Chat, People | Official remote MCP |
-| Gmail read / draft / labels | Official Gmail MCP (`mcp_google_gmail_*`) |
+| Gmail read / labels | Official Gmail MCP (`mcp_google_gmail_*`) |
+| Gmail styled draft | Classic REST (`gmail_create_draft`) |
 | Gmail immediate send | Classic REST (`gmail_send_message`) |
 | Docs, Sheets, Slides, Forms, Tasks, … | Local `workspace-mcp` sidecar on port 8010 |
 
@@ -126,7 +130,7 @@ Connections persist under `~/.liminal/api_connections/`. OAuth tokens are encryp
 | `AGENT_GOOGLE_SIDECAR_CMD` | `uvx workspace-mcp` | Sidecar launch command |
 | `AGENT_GOOGLE_SIDECAR_PORT` | `8010` | Local MCP port |
 | `AGENT_GOOGLE_CONNECT_ON_BOOT` | `0` | Auto-restore connections on harness start |
-| `AGENT_GOOGLE_GMAIL_SEND` | `1` | Register `gmail_send_message` (REST); MCP has no send tool |
+| `AGENT_GOOGLE_GMAIL_SEND` | `1` | Register `gmail_create_draft` + `gmail_send_message` (REST); MCP has no HTML draft or send |
 
 ## Safety
 

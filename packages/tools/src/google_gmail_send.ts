@@ -7,6 +7,7 @@ import type { PropertySchema, ToolDefinition, ToolResult } from "@liminal/core";
 import { readFile } from "node:fs/promises";
 import { basename, extname } from "node:path";
 import { defineTool } from "./helpers.js";
+import { validateOutboundEmailStyle } from "./gmail_compose_guard.js";
 import { buildMimeMessage, type MimeBlob } from "./gmail_message_body.js";
 
 const GMAIL_BASE = "https://gmail.googleapis.com/gmail/v1/users/me";
@@ -136,6 +137,7 @@ interface ComposeArgs {
   inlineImages?: MimeBlob[];
   attachments?: MimeBlob[];
   inReplyTo?: string;
+  threadId?: string;
 }
 
 async function resolveComposeArgs(
@@ -177,6 +179,13 @@ async function resolveComposeArgs(
   if (inlineImages?.length) value.inlineImages = inlineImages;
   if (attachments?.length) value.attachments = attachments;
   if (typeof args["reply_to_message_id"] === "string") value.inReplyTo = args["reply_to_message_id"];
+  const threadId =
+    typeof args["thread_id"] === "string"
+      ? (args["thread_id"] as string).trim()
+      : typeof args["threadId"] === "string"
+        ? (args["threadId"] as string).trim()
+        : "";
+  if (threadId) value.threadId = threadId;
   return { ok: true, value };
 }
 
@@ -188,13 +197,15 @@ const composeProperties: Record<string, PropertySchema> = {
   body: {
     type: "string",
     description:
-      "Plain-text body. Always provide this; it is the fallback shown when a client can't render HTML. " +
-      "If omitted but body_html is set, a plain-text version is auto-derived.",
+      "Plain-text body — always include alongside body_html (fallback when HTML can't render). " +
+      "PLAIN-tier only: omit body_html and use body alone for thread replies and one-liners.",
   },
   body_html: {
     type: "string",
     description:
-      "Optional rich HTML body — email-safe inline styles, table layout, cid: images. Omit for plain email.",
+      "Rich HTML body (email-safe inline styles, nested tables, cid: images). " +
+      "Default for new outbound mail. Put bgcolor+color on the same <td> — Gmail strips outer dark backgrounds. " +
+      "Body band: #333 on #fff; dark header bands: #fff text on bgcolor on that same td.",
   },
   inline_images: {
     type: "array",
@@ -228,27 +239,69 @@ const composeProperties: Record<string, PropertySchema> = {
     type: "string",
     description: "Optional Message-ID header for threading (from mcp_google_gmail_get_thread or message headers).",
   },
+  thread_id: {
+    type: "string",
+    description: "Optional Gmail thread id when drafting/replying in an existing conversation.",
+  },
 };
 
-/** REST send tool — registered when AGENT_GOOGLE_GMAIL_SEND is on (default). */
+const composeParameters = {
+  type: "object" as const,
+  properties: composeProperties,
+  required: ["to", "subject"] as string[],
+  additionalProperties: false as const,
+};
+
+/** REST Gmail compose tools — registered when AGENT_GOOGLE_GMAIL_SEND is on (default). */
 export function createGmailSendTools(): ToolDefinition[] {
+  const gmailCreateDraft = defineTool({
+    name: "gmail_create_draft",
+    description:
+      "WHAT: Create a Gmail draft via REST (users.drafts.create) with full body_html, inline_images, and attachments.\n" +
+      "WHEN: User wants to review mail in Gmail before sending — **prefer this over mcp_google_gmail_create_draft** for styled HTML (MCP draft is plain-only).\n" +
+      "STYLE: FORMATTED body_html + body for new outbound mail (R-EMAIL-STYLE); plain-only for thread replies and one-liners.\n" +
+      "SAFETY: approval-gated — verify recipients before approving.",
+    parameters: composeParameters,
+    requiresApproval: true,
+    dangerLevel: "destructive",
+    handler: async (args): Promise<ToolResult> => {
+      const styleErr = validateOutboundEmailStyle(args);
+      if (styleErr) return { ok: false, error: styleErr };
+      const resolved = await resolveComposeArgs(args);
+      if (!resolved.ok) return { ok: false, error: resolved.error };
+      const raw = buildMimeMessage(resolved.value);
+      const message: { raw: string; threadId?: string } = { raw };
+      if (resolved.value.threadId) message.threadId = resolved.value.threadId;
+      const res = await gmailApiJson<{ id?: string; message?: { id?: string; threadId?: string } }>(
+        "/drafts",
+        { method: "POST", body: JSON.stringify({ message }) }
+      );
+      if (!res.ok) return { ok: false, error: res.error };
+      const v = resolved.value;
+      const recip = [...v.to, ...(v.cc ?? []), ...(v.bcc ?? [])].join(", ");
+      return {
+        ok: true,
+        output:
+          `Draft created for ${recip}. draftId=${res.data.id ?? "?"}, ` +
+          `messageId=${res.data.message?.id ?? "?"}, threadId=${res.data.message?.threadId ?? "?"}`,
+      };
+    },
+  });
+
   const gmailSendMessage = defineTool({
     name: "gmail_send_message",
     description:
       "WHAT: Send email immediately via Gmail REST (users.messages.send). Same OAuth as Google Workspace MCP.\n" +
-      "WHEN: User explicitly asked to SEND now — official mcp_google_gmail_* has create_draft only, not send.\n" +
-      "HOW: Prefer mcp_google_gmail_* for search/read/drafts/labels; use this tool only for immediate delivery.\n" +
-      "STYLE: plain body and/or body_html with inline_images/attachments per Email composition protocol.\n" +
+      "WHEN: User explicitly asked to SEND now.\n" +
+      "HOW: Prefer mcp_google_gmail_* for search/read/labels; gmail_create_draft for styled drafts; this tool for immediate delivery.\n" +
+      "STYLE: FORMATTED body_html + body for new outbound mail; plain-only for thread replies per Email composition protocol.\n" +
       "SAFETY: approval-gated — verify recipients; real mail leaves the account on approve.",
-    parameters: {
-      type: "object",
-      properties: composeProperties,
-      required: ["to", "subject"],
-      additionalProperties: false,
-    },
+    parameters: composeParameters,
     requiresApproval: true,
     dangerLevel: "destructive",
     handler: async (args): Promise<ToolResult> => {
+      const styleErr = validateOutboundEmailStyle(args);
+      if (styleErr) return { ok: false, error: styleErr };
       const resolved = await resolveComposeArgs(args);
       if (!resolved.ok) return { ok: false, error: resolved.error };
       const raw = buildMimeMessage(resolved.value);
@@ -266,5 +319,5 @@ export function createGmailSendTools(): ToolDefinition[] {
     },
   });
 
-  return [gmailSendMessage];
+  return [gmailCreateDraft, gmailSendMessage];
 }

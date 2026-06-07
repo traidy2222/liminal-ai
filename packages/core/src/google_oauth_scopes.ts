@@ -1,25 +1,50 @@
 import {
-  GOOGLE_OAUTH_SCOPES_FULL,
+  GOOGLE_WORKSPACE_SERVICES,
+  apiScopesForGoogleServices,
   type GoogleServicePreset,
-  scopesForGoogleServices,
 } from "./connector_catalog.js";
 
-/** Scopes required for the given service presets (read_write). */
+const SCOPE_EQUIVALENTS: Record<string, readonly string[]> = {
+  email: ["email", "https://www.googleapis.com/auth/userinfo.email"],
+  profile: ["profile", "https://www.googleapis.com/auth/userinfo.profile"],
+  openid: ["openid"],
+};
+
+/** Normalize Google-returned scope strings to short OIDC names where applicable. */
+export function normalizeGoogleScope(scope: string): string {
+  const s = scope.trim();
+  if (s === "https://www.googleapis.com/auth/userinfo.email") return "email";
+  if (s === "https://www.googleapis.com/auth/userinfo.profile") return "profile";
+  return s;
+}
+
+export function normalizeGoogleScopes(scopes: string[]): string[] {
+  return [...new Set(scopes.map(normalizeGoogleScope).filter(Boolean))];
+}
+
+function grantedIncludesScope(granted: string[], required: string): boolean {
+  const normGranted = new Set(normalizeGoogleScopes(granted));
+  const normRequired = normalizeGoogleScope(required);
+  const aliases = SCOPE_EQUIVALENTS[normRequired];
+  if (aliases) return aliases.some((a) => normGranted.has(normalizeGoogleScope(a)));
+  return normGranted.has(normRequired);
+}
+
+/** API scopes required for the given service presets (read_write). */
 export function requiredScopesForPresets(presets: GoogleServicePreset[]): string[] {
-  return scopesForGoogleServices(presets, "read_write");
+  return apiScopesForGoogleServices(presets, "read_write");
 }
 
 /** Scopes the stored token is missing for the requested presets. */
 export function missingGoogleScopes(granted: string[], presets: GoogleServicePreset[]): string[] {
-  const grantedSet = new Set(granted);
   const required = requiredScopesForPresets(presets);
-  return required.filter((s) => !grantedSet.has(s));
+  return required.filter((s) => !grantedIncludesScope(granted, s));
 }
 
-/** Scopes from {@link GOOGLE_OAUTH_SCOPES_FULL} not present on the token. */
+/** API scopes from the full workspace catalog not present on the token. */
 export function missingDefaultWorkspaceScopes(granted: string[]): string[] {
-  const grantedSet = new Set(granted);
-  return GOOGLE_OAUTH_SCOPES_FULL.filter((s) => !grantedSet.has(s));
+  const required = apiScopesForGoogleServices(GOOGLE_WORKSPACE_SERVICES, "read_write");
+  return required.filter((s) => !grantedIncludesScope(granted, s));
 }
 
 export function formatGoogleScopeDiagnostics(granted: string[], presets: GoogleServicePreset[]): string {

@@ -1,6 +1,7 @@
 /**
  * Google OAuth 2.0 — authorization URL, code exchange, refresh, access token resolution.
  */
+import { normalizeGoogleScopes } from "./google_oauth_scopes.js";
 import {
   type OAuthTokenBundle,
   readOAuthBundle,
@@ -9,6 +10,10 @@ import {
   deleteOAuthBundle,
   sanitizeOAuthAccountId,
 } from "./oauth_store.js";
+
+function mergeGoogleGrantedScopes(existing: string[], incoming: string[]): string[] {
+  return normalizeGoogleScopes([...existing, ...incoming]);
+}
 
 const GOOGLE_AUTH_URL = "https://accounts.google.com/o/oauth2/v2/auth";
 const GOOGLE_TOKEN_URL = "https://oauth2.googleapis.com/token";
@@ -111,7 +116,10 @@ export async function exchangeGoogleCode(opts: {
   const email = await fetchGoogleEmail(tok.access_token);
   const accountId = sanitizeOAuthAccountId(email ?? "default");
   const expiresAt = Date.now() + (tok.expires_in ?? 3600) * 1000 - 60_000;
-  const grantedScopes = tok.scope?.split(" ").filter(Boolean) ?? opts.scopes;
+  const grantedScopes = mergeGoogleGrantedScopes(
+    [],
+    tok.scope?.split(" ").filter(Boolean) ?? opts.scopes
+  );
   const existing = await readOAuthBundle("google", accountId);
   const bundle: OAuthTokenBundle = {
     provider: "google",
@@ -144,7 +152,9 @@ export async function refreshGoogleAccessToken(accountId?: string): Promise<OAut
     if (!tok.access_token) return null;
     bundle.accessToken = tok.access_token;
     bundle.expiresAt = Date.now() + (tok.expires_in ?? 3600) * 1000 - 60_000;
-    if (tok.scope) bundle.scopes = tok.scope.split(" ").filter(Boolean);
+    if (tok.scope) {
+      bundle.scopes = mergeGoogleGrantedScopes(bundle.scopes, tok.scope.split(" ").filter(Boolean));
+    }
     bundle.updatedAt = Date.now();
     await writeOAuthBundle(bundle);
     accessCache.set(bundle.accountId, { token: bundle.accessToken, expiresAt: bundle.expiresAt });
