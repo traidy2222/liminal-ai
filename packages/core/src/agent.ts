@@ -44,9 +44,13 @@ import {
 import { inferIntentToolFamilies } from "./intent_tool_families.js";
 import {
   batchHasUndispatchableFileWrites,
+  batchHasUndispatchableLiminalAppHtml,
   fileWriteSafeToDispatch,
   isFileWriteToolName,
+  isLiminalAppHtmlToolName,
   LENGTH_RESUME_FILE_WRITE_MESSAGE,
+  LENGTH_RESUME_LIMINAL_APP_HTML_MESSAGE,
+  liminalAppHtmlToolNeedsLengthResume,
   shouldDispatchToolBatch,
   shouldEagerDispatchWhenArgsComplete,
   tryParseToolArgs,
@@ -60,6 +64,10 @@ import {
   resolveWriteStreamSinkEnabled,
   resolveWriteStreamSinkMinChars,
 } from "./file_write_stream_sink.js";
+import {
+  SpawnAppHtmlStreamSink,
+  resolveSpawnAppHtmlStreamSinkEnabled,
+} from "./spawn_app_html_stream_sink.js";
 import { formatRecipeLibraryHints, recordRecipe } from "./recipe_library.js";
 import { addCompressionGuideline, formatCompressionGuidelines } from "./compression_guidelines.js";
 import { bumpRuleHits, getRuleHitCounts, extractRuleIds, recordRuleOutcomes, getDemotedRuleIds } from "./rule_stats.js";
@@ -115,6 +123,7 @@ import { applyPromptCacheBreakpoints, extractCachedTokens } from "./prompt_cache
 import { buildOpenRouterAttributionHeaders } from "./openrouter_attribution.js";
 import { withProviderRequestSpacing } from "./provider_request_gate.js";
 import type { RuntimePreferences, RuntimePersonaProfile } from "./runtime_prefs.js";
+import { hasPersistedPersonaProfile } from "./persona_artifacts.js";
 import {
   runHarnessEffectiveEnvContext,
   effectiveHarnessEnvRaw,
@@ -1159,6 +1168,7 @@ export class AgentHarness {
   private lengthResumeRemaining = 0;
   private writeIntegrityNudgeThisSend = false;
   private fileWriteStreamSink: FileWriteStreamSink | null = null;
+  private spawnAppHtmlStreamSink: SpawnAppHtmlStreamSink | null = null;
   /** Serialize write_file / edit_file on the same path within one send(). */
   private readonly fileWritePathTail = new Map<string, Promise<void>>();
   /** Retry budget when model emits pseudo tool markup instead of actual tool calls. */
@@ -2432,8 +2442,39 @@ export class AgentHarness {
       resolveWriteStreamSinkMinChars(this.runtimePreferences),
       this.taskId
     );
+    this.spawnAppHtmlStreamSink = new SpawnAppHtmlStreamSink(
+      resolveSpawnAppHtmlStreamSinkEnabled(),
+      this.taskId
+    );
     this.dispatcher.setFileWriteHooks({
       prepareArgs: async (callId, name, args) => {
+        if (isLiminalAppHtmlToolName(name)) {
+          const spawnSink = this.spawnAppHtmlStreamSink;
+          if (!spawnSink) return args;
+          await spawnSink.finalize(callId);
+          const staged = await spawnSink.readStagedContentForDispatch(callId);
+          if (staged) {
+            const baseProps =
+              args["props"] && typeof args["props"] === "object" && !Array.isArray(args["props"])
+                ? { ...(args["props"] as Record<string, unknown>) }
+                : {};
+            const existingBody =
+              typeof baseProps[staged.key] === "string" ? String(baseProps[staged.key]) : "";
+            const body = staged.body.length > existingBody.length ? staged.body : existingBody;
+            const props = { ...baseProps, [staged.key]: body };
+            if (staged.key === "html" && props["interactivity"] == null) {
+              props["interactivity"] = "sandbox";
+            }
+            spawnSink.takeEntry(callId);
+            return { ...args, props };
+          }
+          const repaired = await spawnSink.tryBuildArgsJson(callId);
+          if (repaired) {
+            spawnSink.takeEntry(callId);
+            return JSON.parse(repaired) as Record<string, unknown>;
+          }
+          return args;
+        }
         const sink = this.fileWriteStreamSink;
         if (!sink || !isFileWriteToolName(name)) return args;
         await sink.finalize(callId);
@@ -2449,6 +2490,9 @@ export class AgentHarness {
         return { ...args, __harness_call_id: callId };
       },
       onRejected: (callId, name) => {
+        if (isLiminalAppHtmlToolName(name)) {
+          this.spawnAppHtmlStreamSink?.discard(callId);
+        }
         if (isFileWriteToolName(name)) {
           this.fileWriteStreamSink?.discard(callId);
           discardFileWriteStreamManifest(callId);
@@ -3054,9 +3098,17 @@ export class AgentHarness {
     await this.send("", { sessionGreeting: true });
   }
 
-  /** Returns true when runtime preferences show first-run persona bootstrap complete. */
+  /**
+   * Returns true when first-run persona bootstrap is done for this install.
+   * Custom personas require `runtime_profile.json` on disk; skip/default flows
+   * may complete without artifacts (`sourcePrompt` empty or `"default"`).
+   */
   isPersonaBootstrapCompleted(): boolean {
-    return this.runtimePreferences?.persona?.bootstrapCompleted === true;
+    const persona = this.runtimePreferences?.persona;
+    if (persona?.bootstrapCompleted !== true) return false;
+    if (hasPersistedPersonaProfile()) return true;
+    const source = persona.sourcePrompt?.trim() ?? "";
+    return source === "" || source === "default";
   }
 
   getPersistedPersonaProfile(): RuntimePersonaProfile | undefined {
@@ -4752,6 +4804,9 @@ export class AgentHarness {
               if (this.fileWriteStreamSink && isFileWriteToolName(name)) {
                 this.fileWriteStreamSink.open(id, name);
               }
+              if (this.spawnAppHtmlStreamSink && isLiminalAppHtmlToolName(name)) {
+                this.spawnAppHtmlStreamSink.open(id, name);
+              }
 
               // PASTE: when the model starts streaming a new tool call (index N),
               // tool call N-1's args are complete. Speculatively dispatch if safe.
@@ -4766,6 +4821,9 @@ export class AgentHarness {
                 this.emitter.emit("tool_delta", { callId: tc.id, argsDelta });
                 if (this.fileWriteStreamSink && isFileWriteToolName(tc.name)) {
                   await this.fileWriteStreamSink.ingestDelta(tc.id, tc.name, argsDelta);
+                }
+                if (this.spawnAppHtmlStreamSink && isLiminalAppHtmlToolName(tc.name)) {
+                  await this.spawnAppHtmlStreamSink.ingestDelta(tc.id, tc.name, argsDelta);
                 }
                 this.maybeStartEagerDispatch(accumulator, index, speculativePromises, pasteEnabled);
               }
@@ -4837,7 +4895,7 @@ export class AgentHarness {
 
         if (interruptedToolCalls.length > 0) {
           for (const tc of interruptedToolCalls) {
-            if (!isFileWriteToolName(tc.name)) continue;
+            if (!isFileWriteToolName(tc.name) && !isLiminalAppHtmlToolName(tc.name)) continue;
             speculativePromises.delete(tc.id);
           }
           await this.commitInterruptedStreamAttempt(
@@ -4891,6 +4949,43 @@ export class AgentHarness {
     const skipStreamContinuationsForIntro =
       toolCalls.length === 0 &&
       shouldSkipHarnessSecondaryPassesForTurn(this.lastUserMessage, this.turnInference);
+
+    if (this.spawnAppHtmlStreamSink) {
+      await this.repairLiminalAppHtmlToolCallArgs(toolCalls, finishReason);
+    }
+
+    if (
+      !skipStreamContinuationsForIntro &&
+      toolCalls.length > 0 &&
+      this.lengthResumeRemaining > 0 &&
+      batchHasUndispatchableLiminalAppHtml(toolCalls, finishReason)
+    ) {
+      this.lengthResumeRemaining--;
+      for (const tc of toolCalls) {
+        if (!isLiminalAppHtmlToolName(tc.name)) continue;
+        speculativePromises.delete(tc.id);
+      }
+      let resumeMsg = LENGTH_RESUME_LIMINAL_APP_HTML_MESSAGE;
+      if (this.spawnAppHtmlStreamSink) {
+        for (const tc of toolCalls) {
+          if (!isLiminalAppHtmlToolName(tc.name)) continue;
+          const bytes = await this.spawnAppHtmlStreamSink.stagedByteCount(tc.id);
+          if (bytes > 0) {
+            resumeMsg += ` Staged ${bytes} bytes of widget HTML before cutoff.`;
+          } else {
+            resumeMsg += this.spawnAppHtmlStreamSink.buildLengthResumeHint(tc.id);
+          }
+          this.spawnAppHtmlStreamSink.discard(tc.id);
+        }
+      }
+      this.context.append(assistantMessage);
+      this.context.appendMessage({
+        role: "user",
+        content: resumeMsg,
+      });
+      await this.runReActLoop(round);
+      return;
+    }
 
     if (
       !skipStreamContinuationsForIntro &&
@@ -6360,6 +6455,28 @@ export class AgentHarness {
     return scheduler.promote(toolName, argsKey);
   }
 
+  /** Rebuild spawn_app / update_app JSON from staged widget HTML when the provider ended mid-string. */
+  private async repairLiminalAppHtmlToolCallArgs(
+    toolCalls: AccumulatedToolCall[],
+    finishReason: string | null
+  ): Promise<void> {
+    const sink = this.spawnAppHtmlStreamSink;
+    if (!sink) return;
+    for (const tc of toolCalls) {
+      if (!isLiminalAppHtmlToolName(tc.name)) continue;
+      await sink.finalize(tc.id);
+      if (!tryParseToolArgs(tc.argsJson).ok) {
+        const repaired = await sink.tryBuildArgsJson(tc.id);
+        if (repaired) tc.argsJson = repaired;
+        continue;
+      }
+      if (liminalAppHtmlToolNeedsLengthResume(tc, finishReason)) {
+        const repaired = await sink.tryBuildArgsJson(tc.id);
+        if (repaired && tryParseToolArgs(repaired).ok) tc.argsJson = repaired;
+      }
+    }
+  }
+
   /**
    * Emit tool_result + context for tool calls that could not enter the normal dispatch batch.
    */
@@ -6513,6 +6630,9 @@ export class AgentHarness {
         if (isFileWriteToolName(tc.name)) {
           this.fileWriteStreamSink?.discard(tc.id);
           discardFileWriteStreamManifest(tc.id);
+        }
+        if (isLiminalAppHtmlToolName(tc.name)) {
+          this.spawnAppHtmlStreamSink?.discard(tc.id);
         }
         result = {
           ok: false,

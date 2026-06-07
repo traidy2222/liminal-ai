@@ -743,18 +743,30 @@ export function createRouter(
     const body = req.body as { mode?: string; greet?: boolean } | undefined;
     const mode = String(body?.mode ?? "soft").toLowerCase();
     if (mode === "hard") {
-      bridge.clearSession({ preserveBootstrapState: false });
       sse.clearHistory(bridge.chatId);
-      res.json({ ok: true, mode: "hard" });
-      void bridge.initializeSessionAfterReset().catch((err) => {
-        sse.send(
-          "error",
-          {
-            message: err instanceof Error ? err.message : "Session greeting failed after reset.",
-          },
-          bridge.chatId
-        );
-      });
+      try {
+        await bridge.resetPersonaBootstrapForSession();
+        res.json({
+          ok: true,
+          mode: "hard",
+          personaBootstrapPending: bridge.isAwaitingPersonaBootstrap,
+        });
+      } catch (err) {
+        const message = err instanceof Error ? err.message : "Hard reset failed.";
+        res.status(500).json({ error: message });
+        return;
+      }
+      if (!bridge.isAwaitingPersonaBootstrap) {
+        void bridge.initializeSessionAfterReset().catch((err) => {
+          sse.send(
+            "error",
+            {
+              message: err instanceof Error ? err.message : "Session greeting failed after reset.",
+            },
+            bridge.chatId
+          );
+        });
+      }
       return;
     }
     const greet = body?.greet === true;

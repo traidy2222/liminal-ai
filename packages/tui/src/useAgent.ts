@@ -14,7 +14,7 @@ import {
 } from "@liminal/core/streaming-write-preview";
 import {
   applyPersonaProfileToHarness,
-  clearPersistedPersonaArtifacts,
+  installDefaultPersonaArtifacts,
   generatePersonaFromInput,
   isResetToDefaultRequest,
   parsePersonaInput,
@@ -1012,19 +1012,8 @@ export function useAgent(
       });
       try {
         if (options?.skip) {
-          dispatch({ type: "persona_bootstrap_progress", message: "Skipping…", stage: "skip" });
-          await clearPersistedPersonaArtifacts().catch(() => undefined);
-          await harness.patchRuntimePreferences(
-            {
-              persona: {
-                bootstrapCompleted: true,
-                sourcePrompt: "",
-                activeProfile: null,
-                updatedAt: Date.now(),
-              },
-            },
-            { persist: true }
-          );
+          dispatch({ type: "persona_bootstrap_progress", message: "Installing default Liminal persona…", stage: "skip" });
+          await installDefaultPersonaArtifacts(harness, { sourcePrompt: "" });
           await harness.sendSessionGreeting();
           bootstrapPendingRef.current = false;
           dispatch({ type: "persona_bootstrap_done" });
@@ -1033,18 +1022,7 @@ export function useAgent(
         const trimmed = text.trim();
         const skipAllowed = personaBootstrapAllowSkipFromHarness(harness);
         if (skipAllowed && /^(skip|\/skip)$/i.test(trimmed)) {
-          await clearPersistedPersonaArtifacts().catch(() => undefined);
-          await harness.patchRuntimePreferences(
-            {
-              persona: {
-                bootstrapCompleted: true,
-                sourcePrompt: "",
-                activeProfile: null,
-                updatedAt: Date.now(),
-              },
-            },
-            { persist: true }
-          );
+          await installDefaultPersonaArtifacts(harness, { sourcePrompt: "" });
           await harness.sendSessionGreeting();
           bootstrapPendingRef.current = false;
           dispatch({ type: "persona_bootstrap_done" });
@@ -1056,18 +1034,7 @@ export function useAgent(
         }
         if (isResetToDefaultRequest(parsed.coreInput)) {
           harness.resetPersona();
-          await clearPersistedPersonaArtifacts().catch(() => undefined);
-          await harness.patchRuntimePreferences(
-            {
-              persona: {
-                bootstrapCompleted: true,
-                sourcePrompt: "default",
-                activeProfile: null,
-                updatedAt: Date.now(),
-              },
-            },
-            { persist: true }
-          );
+          await installDefaultPersonaArtifacts(harness);
           await harness.sendSessionGreeting();
           bootstrapPendingRef.current = false;
           dispatch({ type: "persona_bootstrap_done" });

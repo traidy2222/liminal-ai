@@ -23,6 +23,8 @@ import {
   buildProtocolDynamicSuffix,
   applyPersonaProfileToHarness,
   clearPersistedPersonaArtifacts,
+  resetPersonaBootstrapState,
+  installDefaultPersonaArtifacts,
   parsePersonaInput,
   generatePersonaFromInput,
   isResetToDefaultRequest,
@@ -281,20 +283,19 @@ export class AgentBridge {
    */
   private async beginSession(options?: { greet?: boolean }): Promise<void> {
     return runWithWorkspaceRoot(this.workspaceRoot, async () => {
+      const forceBootstrap = process.env["AGENT_PERSONA_BOOTSTRAP_FORCE"] === "1";
+      const bootstrapPending =
+        process.env["AGENT_PERSONA_BOOTSTRAP"] !== "0" &&
+        (forceBootstrap || !this.harness.isPersonaBootstrapCompleted());
+      this.awaitingPersonaBootstrapInput = bootstrapPending;
+      if (bootstrapPending) {
+        // Web uses a dedicated client modal for bootstrap input; do not spend a model turn
+        // by asking in chat here — and do not load the previous persona chrome/voice.
+        return;
+      }
       const persisted = this.harness.getPersistedPersonaProfile();
       if (persisted) {
         await applyPersonaProfileToHarness(this.harness, persisted);
-      }
-      const forceBootstrap = process.env["AGENT_PERSONA_BOOTSTRAP_FORCE"] === "1";
-      this.awaitingPersonaBootstrapInput = false;
-      if (
-        process.env["AGENT_PERSONA_BOOTSTRAP"] !== "0" &&
-        (forceBootstrap || !this.harness.isPersonaBootstrapCompleted())
-      ) {
-        this.awaitingPersonaBootstrapInput = true;
-        // Web uses a dedicated client modal for bootstrap input; do not spend a model turn
-        // by asking in chat here.
-        return;
       }
       if (options?.greet !== true) return;
       try {
@@ -462,6 +463,15 @@ export class AgentBridge {
     this.bootstrapInFlight = false;
   }
 
+  /** Clear transcript + persona artifacts/prefs and reopen bootstrap when enabled. */
+  async resetPersonaBootstrapForSession(): Promise<void> {
+    void this.maybeConsolidateOnIdle();
+    this.harness.clearConversation();
+    this.bootstrapInFlight = false;
+    await resetPersonaBootstrapState(this.harness);
+    await this.beginSession();
+  }
+
   private async maybeConsolidateOnIdle(): Promise<void> {
     const cfg = resolveConsolidateOnIdleConfig(this.bridgeRuntimePreferences);
     if (!cfg.enabled) return;
@@ -526,20 +536,9 @@ export class AgentBridge {
         const trimmed = input.trim();
         const skipAllowed = process.env["AGENT_PERSONA_BOOTSTRAP_ALLOW_SKIP"] !== "0";
         if (options?.skip || (skipAllowed && /^(skip|\/skip)$/i.test(trimmed))) {
-          this.emitBootstrapProgress("skip", "Skipping persona generation. Restoring default voice...");
+          this.emitBootstrapProgress("skip", "Installing default Liminal persona…");
           this.awaitingPersonaBootstrapInput = false;
-          await clearPersistedPersonaArtifacts().catch(() => undefined);
-          await this.harness.patchRuntimePreferences(
-            {
-              persona: {
-                bootstrapCompleted: true,
-                sourcePrompt: "",
-                activeProfile: null,
-                updatedAt: Date.now(),
-              },
-            },
-            { persist: true }
-          );
+          await installDefaultPersonaArtifacts(this.harness, { sourcePrompt: "" });
           await this.harness.sendSessionGreeting();
           this.emitBootstrapProgress("done", "Session ready.");
           return;
@@ -552,20 +551,9 @@ export class AgentBridge {
         this.emitBootstrapProgress("parsed", "Input parsed. Building persona profile...");
 
         if (isResetToDefaultRequest(parsed.coreInput)) {
-          this.emitBootstrapProgress("reset", "Resetting to default persona...");
+          this.emitBootstrapProgress("reset", "Installing default Liminal persona…");
           this.harness.resetPersona();
-          await clearPersistedPersonaArtifacts().catch(() => undefined);
-          await this.harness.patchRuntimePreferences(
-            {
-              persona: {
-                bootstrapCompleted: true,
-                sourcePrompt: "default",
-                activeProfile: null,
-                updatedAt: Date.now(),
-              },
-            },
-            { persist: true }
-          );
+          await installDefaultPersonaArtifacts(this.harness);
           this.awaitingPersonaBootstrapInput = false;
           await this.harness.sendSessionGreeting();
           this.emitBootstrapProgress("done", "Session ready.");

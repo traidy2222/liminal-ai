@@ -266,7 +266,7 @@ export function createConnectorTools(registry: ToolRegistry, _emitter: AgentEmit
     handler: async (): Promise<ToolResult> => {
       const lines: string[] = ["## Connectors", ""];
       lines.push(
-        `Gmail: hybrid — mcp_google_gmail_* (read/search/draft/labels) + gmail_send_message REST send: ${
+        `Gmail: hybrid — mcp_google_gmail_* (read/search/labels) + gmail_create_draft + gmail_send_message REST: ${
           gmailSendRestEnabled() ? "on" : "off (set AGENT_GOOGLE_GMAIL_SEND=1)"
         }`
       );

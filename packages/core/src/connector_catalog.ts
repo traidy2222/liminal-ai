@@ -232,7 +232,7 @@ export function resolveGoogleServices(serviceIds?: string[]): GoogleServicePrese
   return out;
 }
 
-export function scopesForGoogleServices(
+function collectGooglePresetScopes(
   presets: GoogleServicePreset[],
   mode: "read_write" | "read_only"
 ): string[] {
@@ -249,6 +249,23 @@ export function scopesForGoogleServices(
       for (const s of p.scopes) scopeSet.add(s);
     }
   }
+  return [...scopeSet];
+}
+
+/** Workspace API scopes for the selected services (no OIDC identity scopes). */
+export function apiScopesForGoogleServices(
+  presets: GoogleServicePreset[],
+  mode: "read_write" | "read_only"
+): string[] {
+  return collectGooglePresetScopes(presets, mode);
+}
+
+/** Full OAuth consent scope list (API + openid/email/profile for account identity). */
+export function scopesForGoogleServices(
+  presets: GoogleServicePreset[],
+  mode: "read_write" | "read_only"
+): string[] {
+  const scopeSet = new Set(collectGooglePresetScopes(presets, mode));
   scopeSet.add("openid");
   scopeSet.add("email");
   scopeSet.add("profile");

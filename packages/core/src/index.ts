@@ -41,6 +41,54 @@ export {
   workspaceFingerprint,
 } from "./global_storage.js";
 export type { TieredPaths } from "./global_storage.js";
+export { hasPersistedPersonaProfile } from "./persona_artifacts.js";
+export {
+  LIMINAL_APP_TYPES,
+  LIMINAL_APP_SPEC_V,
+  buildAppSpecFromSpawn,
+  liminalAppsEnabled,
+  liminalAppsDesktopRuntime,
+  sanitizeAppId,
+  validateAppProps,
+  validateWeatherAppProps,
+  getAppTypeMeta,
+  listApps,
+  getApp,
+  upsertApp,
+  removeApp,
+  readAppCache,
+  writeAppCache,
+  readAllAppCaches,
+  readAppManifest,
+  readAppHtml,
+  writeAppHtml,
+  resolveStoredAppHtml,
+  isHtmlCapableType,
+  normalizeHtmlPropsForPersist,
+  resolveAppBodyHtml,
+  repairWidgetHtmlDocument,
+  applyHtmlEdit,
+  grepAppHtmlLines,
+  readAppHtmlSlice,
+  isProxyUrlAllowed,
+  normalizeProxyHosts,
+  extractHostsFromDataFetch,
+  defaultShellForType,
+  normalizeAppShell,
+} from "./liminal_apps/index.js";
+export type {
+  LiminalAppType,
+  LiminalAppSpec,
+  LiminalAppSource,
+  AppCacheEntry,
+  SpawnAppInput,
+  WeatherAppProps,
+  LiminalAppTypeMeta,
+  LiminalAppManagerPort,
+  UpdateAppPatch,
+  LiminalAppShell,
+  LiminalAppShellMode,
+} from "./liminal_apps/index.js";
 export {
   TRANSCRIPTION_MODEL_RATES,
   DEFAULT_TRANSCRIBE_MODEL,
@@ -170,12 +218,17 @@ export type { RepoMapOptions } from "./repo_map.js";
 export { guardToolArgs } from "./tool_arg_guard.js";
 export {
   FILE_WRITE_TOOL_NAMES,
+  SPAWN_APP_TOOL_NAME,
   isFileWriteToolName,
+  isSpawnAppToolName,
   isLikelyTruncatedFileContent,
   batchHasUndispatchableFileWrites,
+  batchHasUndispatchableSpawnApps,
+  spawnAppToolNeedsLengthResume,
   canEagerDispatchTool,
   shouldDispatchToolBatch,
   shouldEagerDispatchWhenArgsComplete,
+  LENGTH_RESUME_SPAWN_APP_MESSAGE,
 } from "./file_write_resume.js";
 export {
   setFileWriteStreamManifest,
@@ -188,6 +241,10 @@ export {
   resolveWriteStreamSinkEnabled,
   resolveWriteStreamSinkMinChars,
 } from "./file_write_stream_sink.js";
+export {
+  SpawnAppHtmlStreamSink,
+  resolveSpawnAppHtmlStreamSinkEnabled,
+} from "./spawn_app_html_stream_sink.js";
 export {
   tryExtractJsonStringField,
   decodePartialJsonStringField,
@@ -868,6 +925,7 @@ export {
   getGoogleServicePreset,
   resolveGoogleServices,
   scopesForGoogleServices,
+  apiScopesForGoogleServices,
   needsGoogleSidecar,
   sidecarServiceIds,
   GOOGLE_OFFICIAL_MCP_API_IDS,
@@ -880,6 +938,8 @@ export {
   requiredScopesForPresets,
   formatGoogleScopeDiagnostics,
   missingDefaultWorkspaceScopes,
+  normalizeGoogleScope,
+  normalizeGoogleScopes,
 } from "./google_oauth_scopes.js";
 export type { GoogleServiceId, GoogleServicePreset, ConnectorBackend } from "./connector_catalog.js";
 export { runGoogleConnectFlow, buildGoogleAuthUrlForWeb } from "./google_connect.js";

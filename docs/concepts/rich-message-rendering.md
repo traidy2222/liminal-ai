@@ -17,6 +17,8 @@ The harness streams assistant text on the `text` channel (`channel: "assistant"`
 
 Tool rows, harness trace, and working-state snapshots are **not** rich-rendered.
 
+**Persistent desktop widgets** (weather panels, calculators, live dashboards) are **not** chat HTML — the agent uses `spawn_app` and separate OS windows. See [Liminal desktop apps](./liminal-apps.md).
+
 ## Web UI (reference)
 
 Implementation: [`packages/web/client/liminalMarkdown.tsx`](../../packages/web/client/liminalMarkdown.tsx), [`App.tsx`](../../packages/web/client/App.tsx) assistant case.

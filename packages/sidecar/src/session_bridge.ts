@@ -11,6 +11,8 @@ import {
 import {
   applyPersonaProfileToHarness,
   clearPersistedPersonaArtifacts,
+  resetPersonaBootstrapState,
+  installDefaultPersonaArtifacts,
   generatePersonaFromInput,
   isResetToDefaultRequest,
   parsePersonaInput,
@@ -95,17 +97,15 @@ export class SessionBridge {
   /** Persisted persona + bootstrap gate (mirrors web `AgentBridge.beginSession`). */
   async beginSession(): Promise<void> {
     await runWithWorkspaceRoot(this.workspaceRoot, async () => {
+      const forceBootstrap = process.env["AGENT_PERSONA_BOOTSTRAP_FORCE"] === "1";
+      const bootstrapPending =
+        process.env["AGENT_PERSONA_BOOTSTRAP"] !== "0" &&
+        (forceBootstrap || !this.harness.isPersonaBootstrapCompleted());
+      this.awaitingPersonaBootstrapInput = bootstrapPending;
+      if (bootstrapPending) return;
       const persisted = this.harness.getPersistedPersonaProfile();
       if (persisted) {
         await applyPersonaProfileToHarness(this.harness, persisted).catch(() => undefined);
-      }
-      const forceBootstrap = process.env["AGENT_PERSONA_BOOTSTRAP_FORCE"] === "1";
-      this.awaitingPersonaBootstrapInput = false;
-      if (
-        process.env["AGENT_PERSONA_BOOTSTRAP"] !== "0" &&
-        (forceBootstrap || !this.harness.isPersonaBootstrapCompleted())
-      ) {
-        this.awaitingPersonaBootstrapInput = true;
       }
     });
   }
@@ -127,20 +127,9 @@ export class SessionBridge {
         const trimmed = input.trim();
         const skipAllowed = process.env["AGENT_PERSONA_BOOTSTRAP_ALLOW_SKIP"] !== "0";
         if (options?.skip || (skipAllowed && /^(skip|\/skip)$/i.test(trimmed))) {
-          this.emitBootstrapProgress("skip", "Skipping persona generation…");
+          this.emitBootstrapProgress("skip", "Installing default Liminal persona…");
           this.awaitingPersonaBootstrapInput = false;
-          await clearPersistedPersonaArtifacts().catch(() => undefined);
-          await this.harness.patchRuntimePreferences(
-            {
-              persona: {
-                bootstrapCompleted: true,
-                sourcePrompt: "",
-                activeProfile: null,
-                updatedAt: Date.now(),
-              },
-            },
-            { persist: true }
-          );
+          await installDefaultPersonaArtifacts(this.harness, { sourcePrompt: "" });
           await this.harness.sendSessionGreeting();
           this.emitBootstrapProgress("done", "Session ready.");
           return;
@@ -152,18 +141,7 @@ export class SessionBridge {
         this.emitBootstrapProgress("parsed", "Building persona profile…");
         if (isResetToDefaultRequest(parsed.coreInput)) {
           this.harness.resetPersona();
-          await clearPersistedPersonaArtifacts().catch(() => undefined);
-          await this.harness.patchRuntimePreferences(
-            {
-              persona: {
-                bootstrapCompleted: true,
-                sourcePrompt: "default",
-                activeProfile: null,
-                updatedAt: Date.now(),
-              },
-            },
-            { persist: true }
-          );
+          await installDefaultPersonaArtifacts(this.harness);
           this.awaitingPersonaBootstrapInput = false;
           await this.harness.sendSessionGreeting();
           this.emitBootstrapProgress("done", "Session ready.");
@@ -258,6 +236,7 @@ export class SessionBridge {
       this.emit("tool_start", p);
     });
     on("speech", (p) => this.emit("speech", p));
+    on("browser_view", (p) => this.emit("browser_view", p));
     on("tool_delta", (p) => this.emit("tool_delta", p));
     on("tool_result", (p) => this.emit("tool_result", wireToolResult(p)));
     on("turn_summary", (p) => this.emit("turn_summary", p));
@@ -384,6 +363,15 @@ export class SessionBridge {
     this.harness.clearConversation();
     this.awaitingPersonaBootstrapInput = false;
     this.transcriptHydrated = false;
+  }
+
+  /** Clear transcript + persona state and reopen bootstrap when enabled. */
+  async resetPersonaBootstrapForSession(): Promise<void> {
+    this.harness.clearConversation();
+    this.bootstrapInFlight = false;
+    this.transcriptHydrated = false;
+    await resetPersonaBootstrapState(this.harness);
+    await this.beginSession();
   }
 
   /** Detach all emitter subscriptions and reject any in-flight gates. */

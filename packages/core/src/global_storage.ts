@@ -23,7 +23,7 @@
  * users see no data loss. Set `AGENT_STORAGE_LAYOUT=legacy` to disable the
  * split entirely (kept for users who pin against the old behavior).
  */
-import { existsSync, mkdirSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync } from "node:fs";
 import { copyFile, mkdir, readFile, stat } from "node:fs/promises";
 import { homedir } from "node:os";
 import path from "node:path";
@@ -278,10 +278,7 @@ export function workspaceFingerprint(workspaceRoot?: string): string {
 
 function readFileSyncSafe(p: string): string | null {
   try {
-    // Defer to fs.readFileSync via a tiny helper; cheap and one-shot.
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
-    const fs = require("node:fs") as typeof import("node:fs");
-    return fs.readFileSync(p, "utf8");
+    return readFileSync(p, "utf8");
   } catch {
     return null;
   }

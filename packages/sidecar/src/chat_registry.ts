@@ -27,6 +27,7 @@ import {
   buildProtocolDynamicSuffix,
   applyPersonaProfileToHarness,
   type ProtocolIntentHint,
+  type RegisterAllToolsDeps,
 } from "@liminal/tools";
 import { serverFrame, type ChatSummary } from "@liminal/protocol";
 import { SessionBridge, type FrameSink } from "./session_bridge.js";
@@ -43,6 +44,7 @@ export interface ChatRegistryDeps {
   runtimePreferences: RuntimePreferences | null;
   repoRoot: string;
   sink: FrameSink;
+  registerToolsDeps?: RegisterAllToolsDeps;
 }
 
 /**
@@ -139,7 +141,7 @@ export class ChatRegistry {
     maybeAttachSessionEventLog(harness.emitter, harness.taskId);
 
     await runWithWorkspaceRoot(workspaceRoot, async () => {
-      registerAllTools(harness.registry, harness.emitter, harness);
+      await registerAllTools(harness.registry, harness.emitter, harness, this.deps.registerToolsDeps);
       const persisted = harness.getPersistedPersonaProfile();
       if (persisted) {
         await applyPersonaProfileToHarness(harness, persisted).catch(() => undefined);

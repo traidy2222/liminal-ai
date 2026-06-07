@@ -1,6 +1,7 @@
 import { createWriteStream } from "node:fs";
 import { appendFile, copyFile, mkdir, readFile, rm, stat } from "node:fs/promises";
 import path from "node:path";
+import { ensurePerChatDirSync } from "./global_storage.js";
 import { resolveWorkspaceRoot } from "./workspace_root.js";
 import { resolveHarnessEnvRaw } from "./harness_effective_env.js";
 import type { RuntimePreferences } from "./runtime_prefs.js";
@@ -42,9 +43,7 @@ export function resolveWriteStreamSinkMinChars(prefs: RuntimePreferences | null)
 
 function inflightDir(chatId: string | null): string {
   if (chatId) {
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
-    const gs = require("./global_storage.js") as typeof import("./global_storage.js");
-    return gs.ensurePerChatDirSync(chatId, "write_staging", "inflight");
+    return ensurePerChatDirSync(chatId, "write_staging", "inflight");
   }
   return path.join(resolveWorkspaceRoot(), ".agent_write_staging", "inflight");
 }

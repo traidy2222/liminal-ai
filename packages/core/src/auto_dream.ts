@@ -1,5 +1,6 @@
 import { mkdir, readdir, readFile, stat, unlink, utimes, writeFile } from "node:fs/promises";
 import path from "node:path";
+import { globalChatsRoot } from "./global_storage.js";
 import { resolveWorkspaceRoot } from "./workspace_root.js";
 import { effectiveHarnessEnvRaw, resolveHarnessEnvRaw } from "./harness_effective_env.js";
 import type { RuntimePreferences } from "./runtime_prefs.js";
@@ -69,10 +70,7 @@ function legacySessionLogDir(): string {
 
 /** Per-chat dirs live under `~/.liminal/chats/`. */
 function perChatSessionsRoot(): string {
-  // Lazy import to keep the existing import graph stable.
-  // eslint-disable-next-line @typescript-eslint/no-require-imports
-  const gs = require("./global_storage.js") as typeof import("./global_storage.js");
-  return gs.globalChatsRoot();
+  return globalChatsRoot();
 }
 
 function lockPath(): string {

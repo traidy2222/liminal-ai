@@ -24,6 +24,7 @@ import {
 } from "./api_connections_store.js";
 import { filterMcpToolRecords, isMcpReadTool, isMcpWriteTool } from "./mcp_tool_classify.js";
 import { registerConnectorToolFamilies } from "./connector_family_map.js";
+import { validateOutboundEmailStyle } from "./gmail_compose_guard.js";
 
 const MCP_PROTOCOL_VERSION = "2025-06-18";
 const MCP_CLIENT_INFO = { name: "liminal-harness", version: "0.1.0" };
@@ -215,9 +216,21 @@ function buildMcpTool(record: McpConnectionRecord, tool: McpToolRecord): ToolDef
   const { properties, required } = ensureToolParameterShape(tool.inputSchema);
   const isWrite = isMcpWriteTool(tool.remoteName, tool.description);
   const isRead = isMcpReadTool(tool.remoteName, tool.description);
+  let description = `[mcp:${record.name}] ${tool.description || tool.remoteName}`;
+  let handler = buildMcpToolHandler(record, tool);
+  if (record.name === "google_gmail" && tool.remoteName === "create_draft") {
+    description +=
+      " — PLAIN body only (no HTML). For styled outbound mail use gmail_create_draft with body_html + body.";
+    const inner = handler;
+    handler = async (args) => {
+      const styleErr = validateOutboundEmailStyle(args);
+      if (styleErr) return { ok: false, error: styleErr };
+      return inner(args);
+    };
+  }
   return defineTool({
     name: tool.toolName,
-    description: `[mcp:${record.name}] ${tool.description || tool.remoteName}`,
+    description,
     parameters: {
       type: "object",
       properties,
@@ -227,7 +240,7 @@ function buildMcpTool(record: McpConnectionRecord, tool: McpToolRecord): ToolDef
     dangerLevel: isWrite ? "destructive" : "safe",
     cacheable: isRead && !isWrite,
     cacheTtlMs: isRead ? 30_000 : undefined,
-    handler: buildMcpToolHandler(record, tool),
+    handler,
   });
 }
 

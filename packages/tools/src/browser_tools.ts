@@ -16,6 +16,7 @@ import {
   parseHarnessMs,
   resolveBrowseHref,
   registerBrowserTurnCleanup,
+  setBrowserViewPublisher,
   startStaticFileServer,
   waitForInSession,
   extractFromSession,
@@ -397,6 +398,9 @@ export const browserServeFileTool = defineTool({
 /** Wire harness turn_end → close browser sessions + static servers for this task. */
 export function wireBrowserHarnessCleanup(harness: AgentHarness): void {
   registerBrowserTurnCleanup(harness);
+  setBrowserViewPublisher((payload) => {
+    harness.emitter.emit("browser_view", payload);
+  });
 }
 
 export const browserWaitForTool = defineTool({

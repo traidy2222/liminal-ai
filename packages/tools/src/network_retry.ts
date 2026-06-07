@@ -37,6 +37,8 @@ export interface RetryHttpConfig {
    * Default false: timer clears at first byte of response (legacy behavior for short API calls).
    */
   tieTimeoutToFullDownload?: boolean;
+  /** Test hook — override global fetch. */
+  fetchImpl?: typeof fetch;
 }
 
 export async function fetchWithRetry(url: string, init: RequestInit, cfg: RetryHttpConfig): Promise<Response> {
@@ -56,7 +58,8 @@ export async function fetchWithRetry(url: string, init: RequestInit, cfg: RetryH
     if (init.signal) signals.push(init.signal);
     const reqSignal = signals.length === 1 ? signals[0]! : AbortSignal.any(signals);
     try {
-      const res = await fetch(url, { ...init, signal: reqSignal });
+      const doFetch = cfg.fetchImpl ?? fetch;
+      const res = await doFetch(url, { ...init, signal: reqSignal });
       const tie = cfg.tieTimeoutToFullDownload === true;
       if (res.status === 429 || res.status >= 500) {
         clearTimeout(timeout);

@@ -50,7 +50,9 @@ function sectionIdForKey(key: string): keyof typeof SECTION_META {
     key === "AGENT_YIELD_EVERY_N" ||
     key === "AGENT_PASTE" ||
     key.startsWith("AGENT_AUTO_DREAM") ||
-    key.startsWith("AGENT_HEARTBEAT")
+    key.startsWith("AGENT_HEARTBEAT") ||
+    key.startsWith("AGENT_LIMINAL_APPS") ||
+    key.startsWith("AGENT_APP_")
   ) {
     return "session";
   }
@@ -69,7 +71,9 @@ function sectionIdForKey(key: string): keyof typeof SECTION_META {
     key === "AGENT_BROWSER" ||
     key.startsWith("AGENT_BROWSER_") ||
     key === "AGENT_WEB_RESEARCH" ||
-    key === "AGENT_WEB_READABILITY"
+    key === "AGENT_WEB_READABILITY" ||
+    key.startsWith("AGENT_WEB_SEARCH_") ||
+    key.startsWith("AGENT_SERPER_")
   ) {
     return "web";
   }

@@ -4,6 +4,13 @@
 import type { TurnIntentClass } from "./intent_inference.js";
 import { mapContractToToolFamilies } from "./contract_tool_mapper.js";
 
+/** Shared AgentCard intent detector (duplicated here to avoid core → tools import). */
+function messageMentionsAgentcard(text: string): boolean {
+  return /agent\s*card|agentcard(?:\.ai)?|virtual card|x402|pay online|prepaid card|single-use card/i.test(
+    text
+  );
+}
+
 const INTENT_BASE_FAMILIES: Partial<Record<TurnIntentClass, string[]>> = {
   coding: ["shell", "git", "code_intel"],
   execution: ["shell", "git", "code_intel"],
@@ -44,6 +51,16 @@ export function inferIntentToolFamilies(
     }
     if (/google|gmail|sheet|spreadsheet|gdoc|drive|calendar|workspace/i.test(trimmed)) {
       if (has("connectors")) out.add("connectors");
+    }
+    if (messageMentionsAgentcard(trimmed)) {
+      if (has("agentcard")) out.add("agentcard");
+    }
+    if (
+      /widget|dashboard|desktop app|spawn_app|pin.*visible|keep.*open|always.?visible|calculator window|live chart/i.test(
+        trimmed
+      )
+    ) {
+      if (has("liminal_apps")) out.add("liminal_apps");
     }
   }
 

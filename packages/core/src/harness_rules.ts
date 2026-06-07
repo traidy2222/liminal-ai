@@ -78,6 +78,12 @@ export const HARNESS_RULES: Record<string, string> = {
   // ── Persona / runtime ───────────────────────────────────────────────────────
   "R-RUNTIME-PERSONA-TOOLS":
     "For persona dial changes (humor %, formality, confidence, verbosity, persona strength), call set_runtime_settings(persona_controls:…) — never claim a dial changed from prose alone. Full persona swap → set_persona.",
+  "R-EMAIL-STYLE":
+    "Gmail compose/draft/send: FORMATTED body_html + plain body for new outbound mail. Gmail strips outer dark backgrounds — co-locate bgcolor and color on each td. Body = #222/#333 on #fff; dark bands = light text only on the same dark td. Plain-only for thread replies and one-liners.",
+  "R-AGENTCARD":
+    "AgentCard is external (agentcard_* tools), not a repo path. Never grep the codebase for agent card. On test/setup/pay: agentcard_whoami first.",
+  "R-LIMINAL-WIDGET":
+    "Persistent/pinned desktop UI → list_apps first. NEW window only when none exists: list_app_types then spawn_app (one complete props.html; default shell.mode=widget). If a widget id/type already exists, update_app only — never spawn_app again for the same widget. Edits: grep_app_html + update_app html_edit replacements — NOT respawn, NOT append chunks, NOT write_file to workspace .html. Widget HTML lives in ~/.liminal/apps/html/. Browser-only JS in widgets.",
 
   // ── Shell bounds ────────────────────────────────────────────────────────────
   "R-SHELL-BOUNDS":
@@ -107,7 +113,7 @@ export const HARNESS_RULES: Record<string, string> = {
 import type { TurnIntentClass } from "./intent_inference.js";
 
 const INTENT_RULE_IDS: Record<TurnIntentClass, string[]> = {
-  conversational: ["R-OUTPUT-QUALITY", "R-MULTI-PART-USER", "R-MEMORY-CONTEXT"],
+  conversational: ["R-OUTPUT-QUALITY", "R-MULTI-PART-USER", "R-MEMORY-CONTEXT", "R-EMAIL-STYLE", "R-AGENTCARD"],
   introspection: ["R-OUTPUT-QUALITY", "R-MEMORY-CONTEXT", "R-TURN-FRESHNESS"],
   knowledge: [
     "R-MEMORY-CONTEXT",
@@ -131,6 +137,7 @@ const INTENT_RULE_IDS: Record<TurnIntentClass, string[]> = {
     "R-WRITE-DISCIPLINE",
     "R-TOOL-RETRY",
     "R-SCOPE-CREEP",
+    "R-AGENTCARD",
   ],
   execution: [
     "R-EXEC-ORDER",
@@ -138,8 +145,10 @@ const INTENT_RULE_IDS: Record<TurnIntentClass, string[]> = {
     "R-TYPECHECK-VERIFY",
     "R-TOOL-RETRY",
     "R-SHELL-BOUNDS",
+    "R-EMAIL-STYLE",
+    "R-AGENTCARD",
   ],
-  creative: ["R-OUTPUT-QUALITY", "R-TURN-FRESHNESS", "R-WRITE-DISCIPLINE", "R-TERM-SCOPE"],
+  creative: ["R-OUTPUT-QUALITY", "R-TURN-FRESHNESS", "R-WRITE-DISCIPLINE", "R-TERM-SCOPE", "R-EMAIL-STYLE"],
 };
 
 const TOP_VIOLATION_APPEND = 3;

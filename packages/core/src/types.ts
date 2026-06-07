@@ -544,6 +544,16 @@ export interface AgentEventMap {
     durationSec?: number;
     costUsd?: number;
   };
+  /** Live browser panel for embedded UIs (desktop/web) — viewport JPEG under workspace .agent_artifacts/browser/. */
+  browser_view: {
+    sessionId: string;
+    url: string;
+    title?: string;
+    /** Workspace-relative path to the latest panel screenshot (jpeg). */
+    imagePath?: string;
+    open: boolean;
+    updatedAt: number;
+  };
   tool_delta: { callId: string; argsDelta: string };
   tool_approval: {
     callId: string;

@@ -16,9 +16,16 @@ Web **Settings** writes to (2). See [Configuration basics](../start/configuratio
 
 | Key | Default | Settings | Secret | Tab | Description |
 |-----|---------|----------|--------|-----|-------------|
+| `AGENT_AGENTCARD` | `1` | yes | no | harness | Register agentcard_* tools (virtual cards, agent email, Base USDC/x402). Requires agentcard CLI on the sidecar host: npm |
+| `AGENT_AGENTCARD_CMD` | `agentcard` | yes | no | harness | Executable name or path for the AgentCard CLI (default: agentcard). |
+| `AGENT_AGENTCARD_SIGNUP_TIMEOUT_MS` | `330000` | yes | no | harness | Wall clock for agentcard signup magic-link polling (default 330000). |
+| `AGENT_AGENTCARD_TIMEOUT_MS` | `120000` | yes | no | harness | Wall clock per agentcard CLI call except signup (default 120000). |
 | `AGENT_ALWAYS_TOOLS_PROFILE` | `balanced` | yes | no | harness | Harness environment toggle for Always Tools Profile. See docs/configuration.md (harness). |
 | `AGENT_API_BASE_URL` | `https://openrouter.ai/api/v1` | yes | no | models_api | Harness environment toggle for Api Base Url. See docs/configuration.md (models api). |
 | `AGENT_APPROVAL_TIMEOUT_MS` | `120000` | yes | yes | safety | Harness environment toggle for Approval Timeout Ms. See docs/configuration.md (safety). |
+| `AGENT_APP_MAX_COUNT` | `8` | yes | no | session_ui | Maximum concurrent liminal desktop app specs (default 8). |
+| `AGENT_APP_REFRESH_ENABLED` | `1` | yes | no | session_ui | Sidecar background refresh loop for open desktop apps. |
+| `AGENT_APP_REFRESH_MIN_INTERVAL_MS` | `300000` | yes | no | session_ui | Minimum milliseconds between sidecar refreshes per app. |
 | `AGENT_AUTO_APPROVE_TOOLS` | `run_lint,run_tests,git_status` | yes | no | harness | Harness environment toggle for Auto Approve Tools. See docs/configuration.md (harness). |
 | `AGENT_AUTO_DREAM` | `0` | yes | no | session_ui | Harness environment toggle for Auto Dream. See docs/configuration.md (session ui). |
 | `AGENT_AUTO_DREAM_ALLOW_DELETE` | `0` | yes | no | session_ui | Harness environment toggle for Auto Dream Allow Delete. See docs/configuration.md (session ui). |
@@ -100,7 +107,7 @@ Web **Settings** writes to (2). See [Configuration basics](../start/configuratio
 | `AGENT_FINALIZE_RETRY_BUDGET` | `0` | yes | no | harness | Harness environment toggle for Finalize Retry Budget. See docs/configuration.md (harness). |
 | `AGENT_GOLDEN_EVAL` | `1` | yes | no | advanced | Harness environment toggle for Golden Eval. See docs/configuration.md (advanced). |
 | `AGENT_GOOGLE_CONNECT_ON_BOOT` | `0` | yes | no | harness | Harness environment toggle for Google Connect On Boot. See docs/configuration.md (harness). |
-| `AGENT_GOOGLE_GMAIL_SEND` | `1` | yes | no | harness | Register gmail_send_message (classic users.messages.send). Official Gmail MCP has create_draft only; keep this on for im |
+| `AGENT_GOOGLE_GMAIL_SEND` | `1` | yes | no | harness | Register gmail_create_draft and gmail_send_message (classic Gmail REST). Official Gmail MCP create_draft is plain-only;  |
 | `AGENT_GOOGLE_OAUTH_CLIENT_ID` | `` | yes | no | harness | Harness environment toggle for Google Oauth Client Id. See docs/configuration.md (harness). |
 | `AGENT_GOOGLE_SIDECAR_CMD` | `uvx workspace-mcp` | yes | no | harness | Harness environment toggle for Google Sidecar Cmd. See docs/configuration.md (harness). |
 | `AGENT_GOOGLE_SIDECAR_ENABLE` | `1` | yes | no | harness | Harness environment toggle for Google Sidecar Enable. See docs/configuration.md (harness). |
@@ -128,6 +135,7 @@ Web **Settings** writes to (2). See [Configuration basics](../start/configuratio
 | `AGENT_INTENT_ROUTING` | `1` | yes | no | harness | Harness environment toggle for Intent Routing. See docs/configuration.md (harness). |
 | `AGENT_LENGTH_RESUME_MAX` | `8` | yes | no | harness | Harness environment toggle for Length Resume Max. See docs/configuration.md (harness). |
 | `AGENT_LICENSE_PREFER_ENV` | `0` | yes | no | harness | Harness environment toggle for License Prefer Env. See docs/configuration.md (harness). |
+| `AGENT_LIMINAL_APPS` | `1` | yes | no | session_ui | Enable harness tools that spawn typed native desktop app windows (weather v1). |
 | `AGENT_LINT_ALLOWED_COMMANDS` | `` | yes | no | advanced | Harness environment toggle for Lint Allowed Commands. See docs/configuration.md (advanced). |
 | `AGENT_LLM_JSON_CACHE` | `1` | yes | no | harness | Harness environment toggle for Llm Json Cache. See docs/configuration.md (harness). |
 | `AGENT_LLM_JSON_CACHE_TTL_MS` | `300000` | yes | no | harness | Harness environment toggle for Llm Json Cache Ttl Ms. See docs/configuration.md (harness). |
@@ -135,7 +143,7 @@ Web **Settings** writes to (2). See [Configuration basics](../start/configuratio
 | `AGENT_MANAGED_BUSY_MAX_RETRIES` | `4` | yes | yes | models_api | Bounded local retries (with backoff) when managed inference reports its upstream is busy, before surfacing a 'providers  |
 | `AGENT_MANAGED_BYOK_FALLBACK` | `0` | yes | yes | models_api | When managed inference stays busy, fall back to your local provider API key for the rest of the session. Off by default  |
 | `AGENT_MANAGED_FREE_FALLBACK` | `1` | yes | yes | models_api | When managed inference credits are exhausted (HTTP 402), switch to your OpenRouter API key on a free model (see Free Fal |
-| `AGENT_MANAGED_FREE_FALLBACK_FAST` | `nvidia/nemotron-3-ultra-550b-a55b:free` | yes | yes | models_api | Second free model for sidecars when managed credits are exhausted (default Nemotron 3 Ultra free; main stays Free Fallba |
+| `AGENT_MANAGED_FREE_FALLBACK_FAST` | `nvidia/nemotron-3-ultra-550b-a55b:free` | yes | no | models_api | Second free model for sidecars when managed credits are exhausted (default Nemotron 3 Ultra free; main stays Free Fallba |
 | `AGENT_MANAGED_FREE_FALLBACK_MODEL` | `openrouter/free` | yes | yes | models_api | OpenRouter slug when managed credits are exhausted and free fallback is on (default openrouter/free; owl-alpha Stealth i |
 | `AGENT_MARKETS_ENABLE` | `1` | yes | no | web_research | Harness environment toggle for Markets Enable. See docs/configuration.md (web research). |
 | `AGENT_MARKETS_MAX_DELAY_MS` | `2000` | yes | no | web_research | Harness environment toggle for Markets Max Delay Ms. See docs/configuration.md (web research). |
@@ -233,6 +241,8 @@ Web **Settings** writes to (2). See [Configuration basics](../start/configuratio
 | `AGENT_SELF_HEAL_REPO_WIDE` | `0` | yes | no | harness | Harness environment toggle for Self Heal Repo Wide. See docs/configuration.md (harness). |
 | `AGENT_SELF_HEAL_STOP_ON_NO_PROGRESS` | `1` | yes | no | harness | Harness environment toggle for Self Heal Stop On No Progress. See docs/configuration.md (harness). |
 | `AGENT_SEND_TIMEOUT_MS` | `1800000` | yes | no | models_api | Harness environment toggle for Send Timeout Ms. See docs/configuration.md (models api). |
+| `AGENT_SERPER_GL` | `us` | yes | no | web_research | Serper geolocation country code passed as gl (e.g. us, gb, au). |
+| `AGENT_SERPER_HL` | `en` | yes | no | web_research | Serper interface language passed as hl (e.g. en). |
 | `AGENT_SESSION_GREET` | `0` | yes | no | session_ui | Harness environment toggle for Session Greet. See docs/configuration.md (session ui). |
 | `AGENT_SESSION_JSONL` | `1` | yes | no | session_ui | Harness environment toggle for Session Jsonl. See docs/configuration.md (session ui). |
 | `AGENT_SESSION_JSONL_MAX_ROLLUP_CHARS` | `500000` | yes | no | session_ui | Harness environment toggle for Session Jsonl Max Rollup Chars. See docs/configuration.md (session ui). |
@@ -300,11 +310,14 @@ Web **Settings** writes to (2). See [Configuration basics](../start/configuratio
 | `AGENT_WEB_FETCH_RETRIES` | `2` | yes | no | web_research | Harness environment toggle for Web Fetch Retries. See docs/configuration.md (web research). |
 | `AGENT_WEB_FETCH_RETRY_MAX_DELAY_MS` | `6000` | yes | no | web_research | Harness environment toggle for Web Fetch Retry Max Delay Ms. See docs/configuration.md (web research). |
 | `AGENT_WEB_FETCH_SEC_CH_PLATFORM` | `` | yes | no | web_research | Harness environment toggle for Web Fetch Sec Ch Platform. See docs/configuration.md (web research). |
+| `AGENT_WEB_FETCH_SERPER` | `1` | yes | no | web_research | When AGENT_SERPER_API_KEY is set, try Serper scrape for web_fetch before the local HTTP/readability path (1 = on). Falls |
 | `AGENT_WEB_FETCH_TIMEOUT_MS` | `20000` | yes | no | web_research | Harness environment toggle for Web Fetch Timeout Ms. See docs/configuration.md (web research). |
 | `AGENT_WEB_FETCH_TOTAL_WALL_MS` | `55000` | yes | no | web_research | Harness environment toggle for Web Fetch Total Wall Ms. See docs/configuration.md (web research). |
 | `AGENT_WEB_FETCH_USER_AGENT` | `Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/136.0.0.0 Safari/537.36` | yes | no | web_research | Harness environment toggle for Web Fetch User Agent. See docs/configuration.md (web research). |
 | `AGENT_WEB_READABILITY` | `1` | yes | no | web_research | Harness environment toggle for Web Readability. See docs/configuration.md (web research). |
 | `AGENT_WEB_RESEARCH` | `1` | yes | no | web_research | Harness environment toggle for Web Research. See docs/configuration.md (web research). |
+| `AGENT_WEB_SEARCH_FALLBACK` | `1` | yes | no | web_research | When serper is selected and fails, retry once via DuckDuckGo (1 = on). |
+| `AGENT_WEB_SEARCH_PROVIDER` | `duckduckgo` | yes | no | web_research | Backend for web_search: duckduckgo (default, no API key) or serper (Google organic via serper.dev — requires AGENT_SERPE |
 | `AGENT_WORKFLOWS` | `1` | yes | no | harness | Harness environment toggle for Workflows. See docs/configuration.md (harness). |
 | `AGENT_WORKFLOW_MAX_AGENTS` | `64` | yes | no | harness | Harness environment toggle for Workflow Max Agents. See docs/configuration.md (harness). |
 | `AGENT_WORKFLOW_MAX_CONCURRENT` | `4` | yes | no | harness | Harness environment toggle for Workflow Max Concurrent. See docs/configuration.md (harness). |
@@ -325,10 +338,10 @@ Web **Settings** writes to (2). See [Configuration basics](../start/configuratio
 - `AGENT_MANAGED_BUSY_MAX_RETRIES`
 - `AGENT_MANAGED_BYOK_FALLBACK`
 - `AGENT_MANAGED_FREE_FALLBACK`
-- `AGENT_MANAGED_FREE_FALLBACK_FAST`
 - `AGENT_MANAGED_FREE_FALLBACK_MODEL`
 - `AGENT_OAUTH_ENCRYPTION_KEY`
 - `AGENT_RATE_LIMIT_MAX_RETRIES`
+- `AGENT_SERPER_API_KEY`
 - `AGENT_TRANSCRIBE_API_KEY`
 - `AGENT_TRANSIENT_5XX_MAX_RETRIES`
 - `AGENT_UI_VERBOSITY`

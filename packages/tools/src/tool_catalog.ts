@@ -138,7 +138,33 @@ export const TOOL_FAMILIES: Record<string, { description: string; tools: readonl
     description:
       "Curated provider integrations: Google Workspace (Drive, Gmail, Calendar, Docs, Sheets, …) via connect_provider. " +
       "Requires OAuth (Settings → Integrations or `liminal connect google`).",
-    tools: ["connect_provider", "disconnect_provider", "list_connectors", "gmail_send_message"],
+    tools: ["connect_provider", "disconnect_provider", "list_connectors", "gmail_create_draft", "gmail_send_message"],
+  },
+  agentcard: {
+    description:
+      "AgentCard payments: capped single-use virtual cards, @agentcard.email inbox, Base USDC wallet and x402 fetch. " +
+      "Requires `npm install -g agentcard` and one-time signup/setup on the sidecar host.",
+    tools: [
+      "agentcard_whoami",
+      "agentcard_signup",
+      "agentcard_setup",
+      "agentcard_limit",
+      "agentcard_limit_request",
+      "agentcard_card_request",
+      "agentcard_card_list",
+      "agentcard_card_get",
+      "agentcard_3ds",
+      "agentcard_mail_info",
+      "agentcard_mail_list",
+      "agentcard_mail_get",
+      "agentcard_mail_send",
+      "agentcard_mail_reply",
+      "agentcard_wallet_info",
+      "agentcard_wallet_balance",
+      "agentcard_wallet_fetch",
+      "agentcard_wallet_send",
+      "agentcard_support",
+    ],
   },
   external_api: {
     description:
@@ -214,6 +240,20 @@ export const TOOL_FAMILIES: Record<string, { description: string; tools: readonl
       "set_runtime_settings",
       "extract_structured",
       "hypothesize",
+    ],
+  },
+  liminal_apps: {
+    description:
+      "Liminal desktop apps — spawn separate OS windows (weather, html widgets, charts, tables) that refresh on a timer. Desktop sidecar only.",
+    tools: [
+      "list_app_types",
+      "list_apps",
+      "read_app_html",
+      "grep_app_html",
+      "preview_app_html",
+      "spawn_app",
+      "update_app",
+      "close_app",
     ],
   },
   orchestration: {
@@ -349,6 +389,11 @@ function browserAlwaysActiveTools(): readonly string[] {
   return TOOL_FAMILIES.browser.tools;
 }
 
+function agentcardAlwaysActiveTools(): readonly string[] {
+  if (effectiveHarnessEnvRaw("AGENT_AGENTCARD") === "0") return [];
+  return TOOL_FAMILIES.agentcard.tools;
+}
+
 export function getCoreAlwaysToolNames(
   hasHarness: boolean,
   prefs?: RuntimePreferences | null
@@ -357,6 +402,7 @@ export function getCoreAlwaysToolNames(
     ...CORE_ALWAYS_TOOLS_BASE,
     ...getProfileSeedTools(resolveAlwaysToolsProfile()),
     ...browserAlwaysActiveTools(),
+    ...agentcardAlwaysActiveTools(),
   ];
   if (hasHarness) {
     out.push(...CORE_HARNESS_TOOLS);

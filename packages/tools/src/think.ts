@@ -15,7 +15,7 @@ export const thinkTool = defineTool({
     "clarification_needed=true → pauses execution and surfaces question to user. " +
     "scope declared → arms compensation ledger on mutating/destructive work.\n" +
     "ARGS: content (required — planning text); " +
-    "tool_families[] (families needed: shell/git/code_intel/web/memory_advanced/vault/files_edit/tasks/vision/browser/document/markets/harness_ui/orchestration/navigation/meta/dynamic_tools); " +
+    "tool_families[] (families needed: shell/git/code_intel/web/memory_advanced/vault/files_edit/tasks/vision/browser/document/markets/harness_ui/orchestration/navigation/meta/dynamic_tools/agentcard/connectors); " +
     "scope (read_only|additive|mutating|destructive); " +
     "unknowns[] (gaps to resolve before acting); " +
     "clarification_needed + clarification_question; " +

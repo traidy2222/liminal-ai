@@ -58,6 +58,7 @@ export const HARNESS_SETTINGS_SUBGROUP_LABELS: Record<
     session_ui: "Session surface",
     session_recording: "Session recording (JSONL)",
     heartbeat: "Personality heartbeat",
+    desktop_apps: "Desktop apps",
     auto_dream: "Auto dream consolidation",
   },
   memory_vault: {
@@ -69,6 +70,7 @@ export const HARNESS_SETTINGS_SUBGROUP_LABELS: Record<
   },
   web_research: {
     features: "Web features",
+    search_provider: "Search provider",
     http_client: "HTTP fetch client",
     markets: "Markets quotes",
   },
@@ -860,6 +862,44 @@ const _META_RAW: Record<string, HarnessSettingsFieldMeta> = {
     description: "Harness environment toggle for Web Research. See docs/configuration.md (web research).",
     valueKind: "boolean",
   },
+  "AGENT_WEB_SEARCH_PROVIDER": {
+    tabId: "web_research",
+    subgroupId: "search_provider",
+    label: "Web search provider",
+    description:
+      "Backend for web_search: duckduckgo (default, no API key) or serper (Google organic via serper.dev — requires AGENT_SERPER_API_KEY in .env).",
+    valueKind: "enum",
+    enumValues: ["duckduckgo", "serper"] as const,
+  },
+  "AGENT_WEB_SEARCH_FALLBACK": {
+    tabId: "web_research",
+    subgroupId: "search_provider",
+    label: "Web search fallback",
+    description: "When serper is selected and fails, retry once via DuckDuckGo (1 = on).",
+    valueKind: "boolean",
+  },
+  "AGENT_WEB_FETCH_SERPER": {
+    tabId: "web_research",
+    subgroupId: "search_provider",
+    label: "Serper web_fetch",
+    description:
+      "When AGENT_SERPER_API_KEY is set, try Serper scrape for web_fetch before the local HTTP/readability path (1 = on). Falls back locally on quota/auth errors.",
+    valueKind: "boolean",
+  },
+  "AGENT_SERPER_GL": {
+    tabId: "web_research",
+    subgroupId: "search_provider",
+    label: "Serper country (gl)",
+    description: "Serper geolocation country code passed as gl (e.g. us, gb, au).",
+    valueKind: "string",
+  },
+  "AGENT_SERPER_HL": {
+    tabId: "web_research",
+    subgroupId: "search_provider",
+    label: "Serper language (hl)",
+    description: "Serper interface language passed as hl (e.g. en).",
+    valueKind: "string",
+  },
   "AGENT_WEB_FETCH_RETRIES": {
     tabId: "web_research",
     subgroupId: "http_client",
@@ -1034,6 +1074,13 @@ const _META_RAW: Record<string, HarnessSettingsFieldMeta> = {
     label: "Browser Headed",
     description: "Harness environment toggle for Browser Headed. See docs/configuration.md (harness).",
     valueKind: "string",
+  },
+  "AGENT_BROWSER_EMBED": {
+    tabId: "web_research",
+    subgroupId: "features",
+    label: "Browser Embed",
+    description: "Stream viewport previews to the desktop browser dock via browser_view events.",
+    valueKind: "boolean",
   },
   "AGENT_BROWSER_AUTO_VISION": {
     tabId: "harness",
@@ -1706,6 +1753,56 @@ const _META_RAW: Record<string, HarnessSettingsFieldMeta> = {
     description: "Harness environment toggle for Heartbeat User Nudge Confidence Min. See docs/configuration.md (session ui).",
     valueKind: "number",
   },
+  "AGENT_LIMINAL_APPS": {
+    tabId: "session_ui",
+    subgroupId: "desktop_apps",
+    label: "Liminal desktop apps",
+    description:
+      "Enable spawn_app / update_app desktop widget tools (off by default — preview only).",
+    valueKind: "boolean",
+  },
+  "AGENT_LIMINAL_APPS_DESKTOP": {
+    tabId: "session_ui",
+    subgroupId: "desktop_apps",
+    label: "Desktop apps runtime hint",
+    description: "Inject slim spawn_app protocol when the sidecar runs inside Liminal Desktop (set automatically by sidecar).",
+    valueKind: "boolean",
+  },
+  "AGENT_APP_MAX_COUNT": {
+    tabId: "session_ui",
+    subgroupId: "desktop_apps",
+    label: "Desktop app max count",
+    description: "Maximum concurrent liminal desktop app specs (default 8).",
+    valueKind: "number",
+  },
+  "AGENT_APP_HTML_MAX_BYTES": {
+    tabId: "session_ui",
+    subgroupId: "desktop_apps",
+    label: "Widget HTML max bytes",
+    description: "Maximum persisted HTML document size per desktop app (default 409600).",
+    valueKind: "number",
+  },
+  "AGENT_APP_PROXY_MAX_HOSTS": {
+    tabId: "session_ui",
+    subgroupId: "desktop_apps",
+    label: "Widget proxy host cap",
+    description: "Maximum allowlisted proxy hosts per html/chart app (default 8).",
+    valueKind: "number",
+  },
+  "AGENT_APP_REFRESH_ENABLED": {
+    tabId: "session_ui",
+    subgroupId: "desktop_apps",
+    label: "Desktop app refresh",
+    description: "Sidecar background refresh loop for open desktop apps.",
+    valueKind: "boolean",
+  },
+  "AGENT_APP_REFRESH_MIN_INTERVAL_MS": {
+    tabId: "session_ui",
+    subgroupId: "desktop_apps",
+    label: "Desktop app refresh floor (ms)",
+    description: "Minimum milliseconds between sidecar refreshes per app.",
+    valueKind: "number",
+  },
   "AGENT_FAILURE_DIGEST": {
     tabId: "advanced",
     subgroupId: "telemetry",
@@ -1767,8 +1864,37 @@ const _META_RAW: Record<string, HarnessSettingsFieldMeta> = {
     subgroupId: "harness_misc",
     label: "Gmail REST Send",
     description:
-      "Register gmail_send_message (classic users.messages.send). Official Gmail MCP has create_draft only; keep this on for immediate send. Uses the same OAuth token as MCP.",
+      "Register gmail_create_draft and gmail_send_message (classic Gmail REST). Official Gmail MCP create_draft is plain-only; use REST for styled HTML drafts and immediate send. Uses the same OAuth token as MCP.",
     valueKind: "boolean",
+  },
+  "AGENT_AGENTCARD": {
+    tabId: "harness",
+    subgroupId: "harness_misc",
+    label: "AgentCard tools",
+    description:
+      "Register agentcard_* tools (virtual cards, agent email, Base USDC/x402). Requires agentcard CLI on the sidecar host: npm install -g agentcard.",
+    valueKind: "boolean",
+  },
+  "AGENT_AGENTCARD_CMD": {
+    tabId: "harness",
+    subgroupId: "harness_misc",
+    label: "AgentCard CLI command",
+    description: "Executable name or path for the AgentCard CLI (default: agentcard).",
+    valueKind: "string",
+  },
+  "AGENT_AGENTCARD_TIMEOUT_MS": {
+    tabId: "harness",
+    subgroupId: "harness_misc",
+    label: "AgentCard timeout (ms)",
+    description: "Wall clock per agentcard CLI call except signup (default 120000).",
+    valueKind: "number",
+  },
+  "AGENT_AGENTCARD_SIGNUP_TIMEOUT_MS": {
+    tabId: "harness",
+    subgroupId: "harness_misc",
+    label: "AgentCard signup timeout (ms)",
+    description: "Wall clock for agentcard signup magic-link polling (default 330000).",
+    valueKind: "number",
   },
   "AGENT_PROCESS_HEALTH": {
     tabId: "advanced",

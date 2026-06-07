@@ -99,6 +99,8 @@ import { createApiConnectionTools, restoreOpenApiConnections } from "./api_conne
 import { createMcpAttachTools, restoreMcpConnections } from "./mcp_attach.js";
 import { createConnectorTools } from "./connect_provider.js";
 import { createGmailSendTools, gmailSendRestEnabled } from "./google_gmail_send.js";
+import { agentcardEnabled } from "./agentcard_cli.js";
+import { createAgentcardTools, bootstrapAgentcardTools } from "./agentcard_tools.js";
 import { memoryPromoteTool } from "./memory_promote.js";
 import { memoryNeighborsTool } from "./memory_neighbors.js";
 import { consolidateChatTool } from "./consolidate_chat.js";
@@ -152,10 +154,19 @@ import { vaultLintTool } from "./vault_lint.js";
  * Register all tools onto a registry.
  * Pass `harness` to also register orchestration tools + context tools scoped to that harness.
  */
+import type { LiminalAppManagerPort } from "@liminal/core";
+import { liminalAppsEnabled } from "@liminal/core";
+import { createLiminalAppTools, bootstrapLiminalAppsTools } from "./liminal_apps.js";
+
+export interface RegisterAllToolsDeps {
+  appManager?: LiminalAppManagerPort;
+}
+
 export async function registerAllTools(
   registry: ToolRegistry,
   emitter: AgentEmitter,
-  harness?: AgentHarness
+  harness?: AgentHarness,
+  deps?: RegisterAllToolsDeps
 ): Promise<void> {
   registry.register(thinkTool);
   registry.register(breakdownTool);
@@ -390,9 +401,14 @@ export async function registerAllTools(
   if (gmailSendRestEnabled()) {
     for (const t of createGmailSendTools()) registry.register(t);
   }
+  if (agentcardEnabled()) {
+    for (const t of createAgentcardTools()) registry.register(t);
+  }
   // Re-register previously-attached connections so their generated tools are
   // live on the next ReAct turn. Best-effort — failures are logged via emitter.
   applyLazyRegistrationPolicy(registry, harness);
+
+  bootstrapAgentcardTools(registry);
 
   // Restore persisted connections after lazy seed so autoActivate tools stay visible.
   await restoreOpenApiConnections(registry, emitter);
@@ -403,10 +419,26 @@ export async function registerAllTools(
   } catch {
     /* best effort */
   }
+  if (deps?.appManager && liminalAppsEnabled()) {
+    const appTools = createLiminalAppTools(registry, deps.appManager, harness);
+    registry.register(appTools.listAppTypesTool);
+    registry.register(appTools.listAppsTool);
+    registry.register(appTools.previewAppHtmlTool);
+    registry.register(appTools.readAppHtmlTool);
+    registry.register(appTools.grepAppHtmlTool);
+    registry.register(appTools.spawnAppTool);
+    registry.register(appTools.updateAppTool);
+    registry.register(appTools.closeAppTool);
+    bootstrapLiminalAppsTools(registry);
+  }
+
   if (harness) {
     harness.getContext().refreshProtocolDynamic(harness.registry.getActiveToolNames());
   }
 }
+
+export { fetchWeather } from "./weather_fetch.js";
+export type { WeatherFetchInput, WeatherFetchResult } from "./weather_fetch.js";
 
 export { createAskUserTool } from "./ask_user.js";
 export {
@@ -433,6 +465,8 @@ export {
   generatePersonaFromInput,
   applyPersonaProfileToHarness,
   clearPersistedPersonaArtifacts,
+  installDefaultPersonaArtifacts,
+  resetPersonaBootstrapState,
   loadPersonaUiThemeFromWorkspace,
   loadPersonaUiCopyFromWorkspace,
   loadPersonaProfileFromWorkspace,
@@ -442,6 +476,13 @@ export {
   PERSONA_LIVING_MAX_APPEND_CHARS,
   PERSONA_LIVING_MAX_FILE_CHARS,
 } from "./persona_runtime.js";
+export {
+  LIMINAL_DEFAULT_PROFILE,
+  LIMINAL_DEFAULT_UI_THEME,
+  LIMINAL_DEFAULT_UI_COPY,
+  LIMINAL_DEFAULT_CONTROLS,
+  LIMINAL_DEFAULT_SOUL,
+} from "./persona_default.js";
 export { loadPlugins } from "./plugin_loader.js";
 export type { PluginModule, PluginLoadResult } from "./plugin_loader.js";
 // Audio attachment helpers — re-exported for the web layer so it can persist
@@ -466,6 +507,7 @@ export {
 } from "./audio_http_handlers.js";
 export type { SavedTtsClip } from "./tts_clips.js";
 export { defineTool } from "./helpers.js";
+export { getBrowserPanelFrame } from "./browser_runtime.js";
 export {
   connectGoogleWorkspaceFromServer,
   disconnectGoogleWorkspaceFromServer,

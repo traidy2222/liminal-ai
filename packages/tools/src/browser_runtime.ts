@@ -79,6 +79,118 @@ interface BrowserSession {
 
 const sessions = new Map<string, BrowserSession>();
 
+export type BrowserViewPayload = {
+  sessionId: string;
+  url: string;
+  title?: string;
+  imagePath?: string;
+  open: boolean;
+  updatedAt: number;
+};
+
+let browserViewPublisher: ((payload: BrowserViewPayload) => void) | null = null;
+
+/** Sidecar/desktop UI subscribes via harness emitter to drive an embedded browser panel. */
+export function setBrowserViewPublisher(fn: ((payload: BrowserViewPayload) => void) | null): void {
+  browserViewPublisher = fn;
+}
+
+function browserEmbedEnabled(): boolean {
+  return effectiveHarnessEnvRaw("AGENT_BROWSER_EMBED") !== "0";
+}
+
+function workspaceRelativePath(absPath: string): string {
+  const root = path.resolve(resolveWorkspaceRoot());
+  const abs = path.resolve(absPath);
+  const rel = path.relative(root, abs);
+  if (rel.startsWith("..") || path.isAbsolute(rel)) return absPath.replace(/\\/g, "/");
+  return rel.split(path.sep).join("/");
+}
+
+/** In-memory latest viewport JPEG per session — served via sidecar `/browser_preview`. */
+const panelFrames = new Map<string, Buffer>();
+const panelFramePaths = new Map<string, string>();
+
+export function getBrowserPanelFrame(sessionId: string): Buffer | undefined {
+  const buf = panelFrames.get(sessionId);
+  if (buf && buf.length > 0) return buf;
+  const diskPath = panelFramePaths.get(sessionId);
+  if (diskPath) {
+    try {
+      const fromDisk = fs.readFileSync(diskPath);
+      if (fromDisk.length > 64) {
+        panelFrames.set(sessionId, fromDisk);
+        return fromDisk;
+      }
+    } catch {
+      // fall through
+    }
+  }
+  return undefined;
+}
+
+async function capturePanelFrame(page: Page): Promise<Buffer | null> {
+  for (let attempt = 0; attempt < 4; attempt++) {
+    try {
+      if (attempt > 0) {
+        await new Promise<void>((r) => setTimeout(r, 180 * attempt));
+      }
+      const buf = await page.screenshot({
+        type: "jpeg",
+        quality: 68,
+        fullPage: false,
+        timeout: 20_000,
+      });
+      if (buf.length > 64) return buf;
+    } catch {
+      // retry
+    }
+  }
+  return null;
+}
+
+async function publishBrowserView(session: BrowserSession, open: boolean): Promise<void> {
+  if (!browserEmbedEnabled()) return;
+  let imagePath: string | undefined;
+  let title: string | undefined;
+  if (open) {
+    title = (await session.page.title().catch(() => "")) || undefined;
+    const buf = await capturePanelFrame(session.page);
+    if (buf) {
+      panelFrames.set(session.sessionId, buf);
+      try {
+        const shotPath = browserArtifactPath("panel", "jpg");
+        fs.writeFileSync(shotPath, buf);
+        panelFramePaths.set(session.sessionId, shotPath);
+        imagePath = workspaceRelativePath(shotPath);
+      } catch {
+        // disk write optional — HTTP preview uses in-memory buffer
+      }
+    }
+  }
+  if (!browserViewPublisher) return;
+  browserViewPublisher({
+    sessionId: session.sessionId,
+    url: session.currentUrl,
+    title,
+    imagePath,
+    open,
+    updatedAt: Date.now(),
+  });
+}
+
+function publishBrowserViewClosed(sessionId: string): void {
+  panelFrames.delete(sessionId);
+  panelFramePaths.delete(sessionId);
+  if (!browserViewPublisher || !browserEmbedEnabled()) return;
+  browserViewPublisher({
+    sessionId,
+    url: "",
+    open: false,
+    updatedAt: Date.now(),
+  });
+}
+
 type StaticServerRecord = { server: Server; ownerTaskId: string; rootDir: string };
 const staticServers: StaticServerRecord[] = [];
 
@@ -847,6 +959,7 @@ export async function openBrowserSession(options: {
       shotLine +
       diag;
 
+    await publishBrowserView(session, true);
     return { ok: true, sessionId, output };
     });
   } catch (err) {
@@ -922,6 +1035,7 @@ export async function navigateBrowserSession(options: {
         .slice(0, 4000);
       const diag = options.includeConsole ? formatDiagnosticsOutput(session.diagnostics) : "";
       const shotLine = session.lastScreenshotPath ? `\nSCREENSHOT_PATH: ${session.lastScreenshotPath}` : "";
+      await publishBrowserView(session, true);
       return {
         ok: true,
         output:
@@ -1440,11 +1554,11 @@ export async function runBrowserActions(
   return { urlChanged };
 }
 
-export function browserArtifactPath(prefix: string): string {
+export function browserArtifactPath(prefix: string, ext: "png" | "jpg" = "png"): string {
   const root = resolveWorkspaceRoot();
   const dir = path.join(root, ".agent_artifacts", "browser");
   fs.mkdirSync(dir, { recursive: true });
-  return path.join(dir, `${prefix}-${Date.now()}.png`);
+  return path.join(dir, `${prefix}-${Date.now()}.${ext}`);
 }
 
 export async function actOnBrowserSession(options: {
@@ -1478,6 +1592,7 @@ export async function actOnBrowserSession(options: {
     const shotLine = session.lastScreenshotPath
       ? `\nSCREENSHOT_PATH: ${session.lastScreenshotPath}`
       : "";
+    await publishBrowserView(session, true);
     return {
       ok: true,
       output:
@@ -1569,6 +1684,7 @@ export async function closeBrowserSession(options: {
     }
     });
   } finally {
+    publishBrowserViewClosed(options.sessionId);
     sessions.delete(options.sessionId);
     await session.context.close().catch(() => undefined);
     await session.browser.close().catch(() => undefined);

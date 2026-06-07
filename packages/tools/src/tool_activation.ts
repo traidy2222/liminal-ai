@@ -2,6 +2,7 @@ import type { ToolRegistry } from "@liminal/core";
 import { isFamilyEntitled, loadHarnessEntitlements, ENTITLEMENT_GATED_FAMILIES } from "@liminal/core";
 import { defineTool } from "./helpers.js";
 import { TOOL_FAMILIES, summarizeFamilyActivity } from "./tool_catalog.js";
+import { matchesAgentcardIntent } from "./agentcard_cli.js";
 
 /**
  * Tools for discovering and loading tool families when AGENT_TOOL_LAZY=1.
@@ -11,6 +12,7 @@ export function createToolDiscoveryTools(registry: ToolRegistry) {
   function recommendFamilyFromHint(raw: string): string | null {
     const hint = raw.trim().toLowerCase();
     if (!hint) return null;
+    if (matchesAgentcardIntent(hint)) return "agentcard";
     if (/(write|edit|patch|create file|rewrite|modify file)/.test(hint)) return "files_edit";
     if (/(shell|terminal|command|npm|build|test|install|process)/.test(hint)) return "shell";
     if (/(git|commit|branch|diff|status|log)/.test(hint)) return "git";
@@ -68,6 +70,11 @@ export function createToolDiscoveryTools(registry: ToolRegistry) {
       }
       if (families.some((f) => f.family === "markets")) {
         lines.push(`Note: Use "markets_quote" from markets family for prices/costing with as-of + source metadata.`);
+      }
+      if (families.some((f) => f.family === "agentcard")) {
+        lines.push(
+          `Note: AgentCard payments — agentcard_whoami, agentcard_setup, agentcard_card_request, agentcard_wallet_fetch. Family is auto-active when AGENT_AGENTCARD=1.`
+        );
       }
       lines.push("");
       lines.push("Active tools:");

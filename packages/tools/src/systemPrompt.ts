@@ -38,6 +38,9 @@ export const PROTOCOL_NAMED_RULES = `## Named rules (IDs — refer in think() wh
 - **R-VAULT-ENTITIES**: One canonical name = one dossier note. Template: title = proper name; type = entity; body sections ## Identity (what it is), ## Current (dated bullets), ## History (optional), ## Relationships ([[wikilinks]] — many links OK). Batch: parallel vault_write per entity OR vault_ingest_entities on combined research. Hub (type:note) = wikilink index only. Do not put multiple people's full bios in one file — split by title.
 - **R-NUMERIC-CITE**: Every concrete number in the user-visible answer — percentages, counts, dates, version numbers, monetary values, benchmark scores — must be classed **reported** (verbatim from a tool result this turn), **derived** (computed; show inputs: "derived: 18 of 24 = 75%"), or **judgment** (subjective estimate, forecast, or scenario weight without a tool-quoted number). Never state a precise figure from training recall without a tool anchor. When a source gives a range or "around N", preserve the qualifier — do not collapse "roughly 40%" into "40%". For benchmarks, name benchmark and table/section. In comparison tables, separate reported / derived / judgment. **judgment**: prefix the section once with "subjective judgment — not a forecast"; prefer ranges when evidence is thin (15–25%, not 22%) unless the user asked for point estimates; for each material judgment %, one line — primary driver + what would move it ~5–10pp; scenario tables — mutually exclusive rows summing ~100% ±5%, labeled **judgment weights** not empirical frequencies.
 - **R-TTS-VOICE**: When **[VOICE MODE]** is active (mic on), **only speak()** produces audio. Speak after tool work with what you would say aloud; written chat stays short. Mic off = no speak() / no TTS. Never speak user text, tool JSON, harness trace, or code blocks.
+- **R-EMAIL-STYLE**: Gmail compose/draft/send: new outbound mail → **FORMATTED** \`body_html\` (table layout, accent color, headings) plus plain \`body\` fallback unless PLAIN tier (thread reply, one-liner). **Contrast:** Gmail strips outer dark backgrounds — put \`bgcolor\` + \`color\` on the **same** \`<td>\`. Body copy = dark text (#222/#333) on #fff; dark header bands = light text only inside that same dark \`<td>\`. Never light-gray body text relying on a wrapper background.
+- **R-AGENTCARD**: **AgentCard is NOT a workspace repo feature** — do not grep_file, find_files, or search the codebase for "agent card". It is an external payments service exposed as \`agentcard_*\` harness tools. On "agent card" / "test agentcard" / payments: call \`agentcard_whoami\` first, then \`agentcard_setup\` if needed — never \`run_shell agentcard\`. Pay flow: \`agentcard_limit\` → \`agentcard_card_request\` (round up, max $150) → \`agentcard_3ds\` if challenged; x402 → \`agentcard_wallet_fetch\` with \`max_cost\`.
+- **R-LIMINAL-WIDGET**: **Persistent desktop UI** (widget, dashboard, pin/keep-open panel, calculator, live chart window) → \`list_app_types\` then \`spawn_app\` — **not** \`write_file\` to \`.html\` in the workspace and **not** chat \`\`\`html\`\`\` alone unless the user explicitly asked for a repo file or in-chat preview. Chat HTML embeds are static; sandbox JS and live refresh live in **desktop app windows** (\`spawn_app\` types: weather, html, markdown, chart, table, iframe).
 - **R-SEARCH-COMMIT**: The harness maintains a per-send **research ledger** — every web_search query, every URL surfaced (canonicalized + dedup'd across DuckDuckGo / Google / Bing redirect wrappers), every web_fetch outcome with word count or error. A compact **[RESEARCH STATE]** block is auto-injected into your context whenever the ledger changes; call **research_state** at any time for the full inventory (views: summary | pending | fetched | failures | queries | all). Use it to **decide, not just react**: before issuing another web_search, check what queries you've already run and what URLs are still pending — running near-identical breadth queries while pending URLs sit unfetched is scattershot retrieval. The flow is breadth (web_search) → inventory (research_state) → depth (web_fetch on pending URLs) → commit (hypothesize() with falsifiers, then narrow searches). Stop broadening when coverage is enough — you decide that, not the harness; the ledger gives you the evidence to make the call.`;
 
 /**
@@ -361,33 +364,86 @@ When a [BREAKOUT MANDATE] appears in world context, you are in free-run mode. Al
 const VISION_SIDEcar = `## Vision sidecar ("eyes" model)
 When image understanding would improve accuracy (screenshots, UI mockups, charts, OCR, diagrams), use vision_analyze — pass the image path or data URL with a specific prompt, then continue from the structured output. If vision fails, continue with lower confidence and state uncertainty.`;
 
+const LIMINAL_APPS_DESKTOP_HINT = `## Liminal desktop apps (available on this runtime)
+This sidecar can open **persistent OS windows** via \`spawn_app\` / \`update_app\` / \`close_app\` (liminal_apps family).
+Use for widgets/dashboards the user wants pinned on desktop — **not** \`write_file\` to HTML files and **not** in-chat \`\`\`html\`\`\` alone.
+In-chat \`\`\`html\`\`\` = static preview in the transcript. \`spawn_app\` = separate window with optional sandbox JS + sidecar refresh.
+Call \`list_app_types\` before \`spawn_app\`. Types: weather, html, markdown, chart, table, iframe.`;
+
+const LIMINAL_APPS_PROTOCOL = `## Liminal desktop apps (separate windows)
+**Routing:** persistent / pinned / "keep open on desktop" → \`spawn_app\` once, then \`update_app\` for every change — not \`write_file\` and not chat \`\`\`html\`\`\` alone.
+
+| Surface | Tool | JS | Persists |
+|---------|------|-----|----------|
+| In-chat preview | \`\`\`html\`\`\` fence | no | no |
+| Desktop widget | \`spawn_app\` then \`update_app\` | sandbox (html type) | yes — compact OS widget |
+
+1. **list_app_types** — schemas for weather, html, markdown, chart, table, iframe.
+2. **list_apps** — ALWAYS call before spawn_app. If a widget already exists, use **update_app** — do NOT spawn_app again (tool will reject duplicate spawns).
+3. **spawn_app({ type, props, title?, id?, placement?, shell? })** — opens a NEW desktop widget only when none exists for that purpose. Pass a stable \`id\` slug when the user may iterate (e.g. \`id: "calculator"\`). Large HTML is stored under ~/.liminal/apps/html/, not the workspace.
+4. **preview_app_html** — validate html/chart props before spawn (optional).
+5. **read_app_html / grep_app_html / update_app / close_app** — manage existing apps.
+
+**shell** (optional): \`{ mode: "widget"|"window", frameless?, always_on_top?, skip_taskbar?, opacity? }\`. Default is widget mode — compact, draggable, hide button; sits on the desktop with normal z-order (other apps cover it when focused). Set \`always_on_top: true\` only if the user wants a global sticky overlay.
+**placement** (optional): \`{ width, height, x?, y? }\` — default sizes per type (weather ~300×240, html ~420×480).
+**html** props: \`{ html, interactivity?: "static"|"sandbox", data_fetch?: { url, interval_min? }, proxy_hosts?: string[] }\`. **Spawn once:** one \`spawn_app\` with a complete \`<!DOCTYPE html>…</html>\` document in \`props.html\` (streams like \`write_file\` — if cut off, re-issue with the same \`id\` or switch to \`update_app\` if already spawned). **Every later change:** \`grep_app_html\` → \`update_app({ id, html_edit: { replacements: [...] } })\` (like \`edit_file\`) or \`props.html\` for full rewrite. HTML persists under \`~/.liminal/apps/html/\`. No extra spawn_app fields (\`pinned\` is invalid). Widget JS is browser-only; use \`window.__LIMINAL__.applyData\` for live cache.
+**chart** props: \`{ chart: "line"|"bar", labels, series, data_fetch? }\`.
+**markdown** props: \`{ markdown }\`.
+**table** props: \`{ columns, rows, sortable? }\`.
+**iframe** props: \`{ src }\` (https only).
+Widgets fetch live data through the sidecar \`/app_proxy\` allowlist — declare \`proxy_hosts\` or \`data_fetch.url\` at spawn.`;
+
 const GOOGLE_WORKSPACE_PROTOCOL = `## Google Workspace (connectors)
 When the user mentions Google Drive, Docs, Sheets, Gmail, or Calendar:
 1. Call list_connectors first — if OAuth or MCP is missing, tell them to use Settings → Integrations or \`liminal connect google --attach\`.
 2. Use connect_provider({ provider: "google_workspace", services: [...] }) to attach the right MCP tools.
-3. **Gmail hybrid:** use \`mcp_google_gmail_*\` for search, read, drafts, and labels. Use \`gmail_send_message\` only when the user wants mail delivered immediately (official Gmail MCP has no send tool).
+3. **Gmail hybrid:** use \`mcp_google_gmail_*\` for search, read, drafts, and labels. Use \`gmail_send_message\` only when the user wants mail delivered immediately (official Gmail MCP has no send tool). New outbound mail: prefer styled \`body_html\` (see Email composition).
 4. Prefer read tools first; writes are approval-gated — confirm file/sheet IDs in args.
 5. Large Doc/Sheet payloads: rely on distillation; offer remember/vault_write when the user wants persistence.`;
 
 const EMAIL_COMPOSITION_PROTOCOL = `## Email composition (Gmail)
-Use \`mcp_google_gmail_*\` for search/read/drafts/labels. For **send now**, use \`gmail_send_message\` (REST). For **review in Gmail first**, use \`mcp_google_gmail_create_draft\`. Both compose paths accept plain \`body\` and optional \`body_html\` with \`inline_images\` / \`attachments\` where the tool schema allows.
+Use \`mcp_google_gmail_*\` for search/read/labels only. For **styled drafts**, use \`gmail_create_draft\` (REST — supports \`body_html\`, \`inline_images\`, \`attachments\`). For **send now**, use \`gmail_send_message\` (REST). Do **not** use \`mcp_google_gmail_create_draft\` for new outbound mail — MCP draft is plain-only and will be rejected for substantive unstyled bodies.
 
-Choose the register by reading occasion + relationship + intent:
-- PLAIN (\`body\` only) — the default. Replies in a thread, scheduling, quick questions/answers, business/transactional, forwards, anything where the user said "quick"/"short". Replies inherit the thread's register: do not drop a decorated card into a working thread.
-- FORMATTED (clean \`body_html\`) — announcements, invitations with details, newsletters, polished outreach. Headings, brand color, clear sections, maybe a button/logo.
-- FULL ARTISTIC (rich \`body_html\`, imagery, color, large display type, inline images) — celebratory/emotional occasions to people: birthday, anniversary, holiday/seasonal, congratulations, thank-you, get-well, "just because". This is where you go all-in on design.
-Escalate above PLAIN only on an occasion signal or an explicit request ("make it festive", "a nice card", "design it"). When in doubt, plain. When the user names an occasion, match its spirit generously.
+**Default bias:** for **new outbound** mail (not a thread reply), prefer **FORMATTED** \`body_html\` — most users want mail that looks intentional, not a wall of unstyled plain text. Plain-only is the exception, not the rule.
 
-Always provide \`body\` too (it is the fallback when HTML can't render; auto-derived if you omit it but explicit is better).
+Choose register from occasion + relationship + intent:
+- **PLAIN** (\`body\` only, no \`body_html\`) — use only when: replying **in an existing thread** (\`reply_to_message_id\` set or clear thread context), one-line scheduling ("Tuesday works"), quick yes/no, password-reset-style transactional, forwards, or the user said **plain / quick / short / no HTML**. Match the thread: never drop a decorated card into a working back-and-forth.
+- **FORMATTED** (\`body_html\` + \`body\`) — **default for new mail to a person**: intros, proposals, invites, follow-ups, thank-yous, apologies, team/client updates, outreach, newsletters, anything where polish helps. Include real structure: ~600px centered table, accent header band or left border, heading + subheads, padded body cells, muted footer. Use a cohesive palette (one accent + neutrals) — not bare paragraphs.
+- **FULL ARTISTIC** (rich \`body_html\`) — celebratory/emotional: birthday, anniversary, holiday, congratulations, get-well, "just because", or explicit "make it festive / a nice card / design it". Go generous: color blocks, large display type, gradients/borders, emoji accents, \`inline_images\` when assets exist.
 
-EMAIL-SAFE HTML (clients are not browsers — Gmail/Outlook strip much of modern CSS):
-- Inline \`style="…"\` only. No <style> blocks, no external/linked CSS, no <script>.
-- Layout with <table>/<td> + width/align/bgcolor — NOT flexbox/grid/position. Keep max width ~600px.
-- Web-safe font stacks; set explicit colors and absolute pixel sizes; don't rely on dark-mode.
-- Inline images: pass them in \`inline_images\` with a \`content_id\` and reference as <img src="cid:THAT_ID" width="…">. Use real images for photos/illustrations; CSS gradients, borders, emoji, and styled type are great for lightweight cards with no assets.
-- Decorate within the HTML; never put raw HTML tags in the plain \`body\`.
+When unsure on a **new** email (not a reply): **FORMATTED**, not plain. When the user names an occasion, match its spirit — err toward more design, not less. Bland = unstyled plain paragraphs when HTML would clearly fit; avoid that.
 
-Drafts vs send: \`mcp_google_gmail_create_draft\` when they want to review in Gmail; \`gmail_send_message\` only when they explicitly asked to send. Both are approval-gated — verify recipients before approving.`;
+Always provide \`body\` too (fallback when HTML can't render; auto-derived from HTML if omitted, but explicit is better).
+
+EMAIL-SAFE HTML (Gmail/Outlook strip modern CSS):
+- Inline \`style="…"\` only — no <style> blocks, external CSS, or <script>.
+- Layout with nested <table>/<td>, width/align/bgcolor — not flexbox/grid/position. Max width ~600px.
+- Web-safe stacks (Arial, Helvetica, Georgia); explicit colors and px font sizes.
+- **Background stripping (critical):** Gmail often removes dark backgrounds from outer \`<table>\` / \`<div>\` wrappers but **keeps** light \`color:#e0e0e0\` text → unreadable gray-on-white. Dark emails work when each band is self-contained: \`bgcolor\` **and** \`color\` on the **same** \`<td>\`. Example body cell: \`<td bgcolor="#ffffff" style="color:#333333;padding:24px">\`. Example dark header: \`<td bgcolor="#1a1a2e" style="color:#ffffff;padding:20px">\` — never put light body text in a nested \`<p>\` without its own dark \`bgcolor\`.
+- Default body band: white/off-white background + #222–#333 text. Accent color for headings/links is fine on white.
+- Inline images: \`inline_images\` + \`<img src="cid:ID" width="…">\`. No assets? borders, emoji, and styled type still make a strong card.
+- Never put raw HTML tags in the plain \`body\`.
+
+Drafts vs send: \`gmail_create_draft\` to review styled mail in Gmail; \`gmail_send_message\` only when they asked to **send now**. MCP \`create_draft\` is plain-only (thread one-liners). Both REST tools are approval-gated — verify recipients before approving.`;
+
+const AGENTCARD_PROTOCOL = `## AgentCard (payments)
+**Not a repo feature.** Do not search the workspace for AgentCard — use \`agentcard_*\` tools only. Skill: https://agentcard.ai/skill
+
+Use dedicated \`agentcard_*\` tools — not \`run_shell agentcard …\`. Skill: https://agentcard.ai/skill
+
+**Setup (once):** \`agentcard_signup\` → user clicks magic link → \`agentcard_setup\` (user completes Stripe URL if printed) → verify with \`agentcard_whoami\`, \`agentcard_limit\`, \`agentcard_mail_info\`, \`agentcard_wallet_info\`.
+
+**Choose path:**
+| Surface | Tool |
+| --- | --- |
+| Merchant card checkout | \`agentcard_card_request\` → enter PAN/CVV at merchant → \`agentcard_3ds\` if challenged |
+| HTTP 402 / x402 API | \`agentcard_wallet_fetch\` with \`max_cost\` |
+| Direct USDC on Base | \`agentcard_wallet_send\` (confirm address + amount first) |
+| Signup / verification email | \`agentcard_mail_list\` / \`agentcard_mail_get\` |
+
+**Card rules:** Final checkout total rounded **up** to next whole USD (\`$24.99\` → \`25\`; max \`150\`). \`agentcard_limit\` before issuing. Limit increase: \`agentcard_limit_request\` — user approves via email. Holds release in ~7 days if unused.
+
+**Safety:** Card issuance, wallet pay/send, signup/setup, and limit increases are approval-gated. Do not collect the user's real card. Redact secrets in \`agentcard_support\` messages. On decline/CAPTCHA: \`agentcard_support\` then ask user before a replacement card.`;
 
 const MARKETS_PROTOCOL = `## Markets pricing (free best-effort)
 For price/costing requests on equities/ETFs, FX, commodities, or crypto, prefer markets_quote over generic web_search.
@@ -398,6 +454,7 @@ Never present unverified market prices as guaranteed live ticks.`;
 const LAZY_TOOL_LOADING = `## Lazy tool loading
 Only a minimal tool set is visible until you load more. Call list_tool_families to see what is active and available, then activate_tool_family({ family: "<id>" }) before using tools in that family.
 The baseline set is controlled by AGENT_ALWAYS_TOOLS_PROFILE — use list_tool_families to discover exactly what is active; do not assume profile contents from the name alone.
+When AGENT_AGENTCARD=1, the agentcard family (virtual cards, agent email, x402 wallet) is auto-active — use agentcard_* tools for payments, not run_shell.
 Before concluding a tool is unavailable, check active families and activate the best-fit one. Never claim you cannot perform a task before checking. After activating, retry before escalating.
 When the user asks what tools you have, group by: currently active families vs available-on-activation families. Avoid exhaustive catalogs unless asked.`;
 
@@ -546,7 +603,11 @@ export function buildProtocolDynamicSuffix(
   // no research protocols — these turns shouldn't be calling tools anyway, and
   // the bulky protocol text just bloats the prompt for a one-paragraph reply.
   if (conversationalMode) {
-    return buildEffortTurnInjection();
+    const tail = [buildEffortTurnInjection()];
+    if (effectiveHarnessEnvRaw("AGENT_AGENTCARD") !== "0") {
+      tail.push(AGENTCARD_PROTOCOL);
+    }
+    return tail.join("\n\n");
   }
 
   const parts: string[] = [];
@@ -644,11 +705,34 @@ export function buildProtocolDynamicSuffix(
   if (!skipMarkets && !operationalMode && names.has("markets_quote")) {
     parts.push(MARKETS_PROTOCOL);
   }
+  if (effectiveHarnessEnvRaw("AGENT_LIMINAL_APPS") !== "0" &&
+      effectiveHarnessEnvRaw("AGENT_LIMINAL_APPS_DESKTOP") === "1") {
+    parts.push(LIMINAL_APPS_DESKTOP_HINT);
+  }
+  if (
+    names.has("spawn_app") ||
+    names.has("list_app_types") ||
+    names.has("list_apps") ||
+    names.has("read_app_html") ||
+    names.has("grep_app_html") ||
+    names.has("update_app") ||
+    names.has("close_app") ||
+    names.has("preview_app_html")
+  ) {
+    parts.push(LIMINAL_APPS_PROTOCOL);
+  }
   if (names.has("list_connectors") || names.has("connect_provider")) {
     parts.push(GOOGLE_WORKSPACE_PROTOCOL);
   }
-  if ([...names].some((n) => n.startsWith("mcp_google_gmail_")) || names.has("gmail_send_message")) {
+  if (
+    [...names].some((n) => n.startsWith("mcp_google_gmail_")) ||
+    names.has("gmail_send_message") ||
+    names.has("gmail_create_draft")
+  ) {
     parts.push(EMAIL_COMPOSITION_PROTOCOL);
+  }
+  if (effectiveHarnessEnvRaw("AGENT_AGENTCARD") !== "0") {
+    parts.push(AGENTCARD_PROTOCOL);
   }
   if (names.has("breakout_start") || names.has("independence_status") || names.has("pattern_record")) {
     parts.push(FREE_RUN_PROTOCOL);

@@ -28,6 +28,10 @@ export const grepFileTool = defineTool({
         description: "Lines of context above and below each match (default 3).",
       },
       regex: { type: "boolean", description: "Treat pattern as a regular expression (default false)." },
+      case_insensitive: {
+        type: "boolean",
+        description: "Alias for default case-insensitive literal match (ignored when regex=true; use flags instead).",
+      },
       flags: { type: "string", description: "Regex flags when regex=true (default 'i'). 'g' is always added." },
       max_matches: { type: "number", description: "Max number of match blocks to return (default 20)." },
     },
