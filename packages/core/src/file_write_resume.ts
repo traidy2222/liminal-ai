@@ -7,8 +7,21 @@ export const FILE_WRITE_TOOL_NAMES = new Set([
   "write_file",
 ]);
 
+export const SPAWN_APP_TOOL_NAME = "spawn_app";
+export const UPDATE_APP_TOOL_NAME = "update_app";
+export const LIMINAL_APP_HTML_TOOL_NAMES = new Set([SPAWN_APP_TOOL_NAME, UPDATE_APP_TOOL_NAME]);
+
 export function isFileWriteToolName(name: string): boolean {
   return FILE_WRITE_TOOL_NAMES.has(name);
+}
+
+export function isLiminalAppHtmlToolName(name: string): boolean {
+  return LIMINAL_APP_HTML_TOOL_NAMES.has(name);
+}
+
+/** @deprecated use isLiminalAppHtmlToolName */
+export function isSpawnAppToolName(name: string): boolean {
+  return isLiminalAppHtmlToolName(name);
 }
 
 /** Tools that may dispatch as soon as streamed args are valid JSON (not only at stream end). */
@@ -117,6 +130,46 @@ export function batchHasUndispatchableFileWrites(
   return false;
 }
 
+export function liminalAppHtmlToolNeedsLengthResume(
+  tc: AccumulatedToolCall,
+  finishReason: string | null
+): boolean {
+  if (!isLiminalAppHtmlToolName(tc.name)) return false;
+  const parsed = tryParseToolArgs(tc.argsJson);
+  if (!parsed.ok) {
+    return finishReason === "length" || finishReason === "tool_calls" || finishReason == null;
+  }
+  const props = parsed.args["props"];
+  if (!props || typeof props !== "object" || Array.isArray(props)) return false;
+  const record = props as Record<string, unknown>;
+  for (const key of ["html", "markdown"] as const) {
+    const body = record[key];
+    if (typeof body === "string" && isLikelyTruncatedFileContent(body)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+/** @deprecated use liminalAppHtmlToolNeedsLengthResume */
+export const spawnAppToolNeedsLengthResume = liminalAppHtmlToolNeedsLengthResume;
+
+export function batchHasUndispatchableLiminalAppHtml(
+  toolCalls: AccumulatedToolCall[],
+  finishReason: string | null
+): boolean {
+  for (const tc of toolCalls) {
+    if (!isLiminalAppHtmlToolName(tc.name)) continue;
+    const parsed = tryParseToolArgs(tc.argsJson);
+    if (!parsed.ok) return true;
+    if (liminalAppHtmlToolNeedsLengthResume(tc, finishReason)) return true;
+  }
+  return false;
+}
+
+/** @deprecated use batchHasUndispatchableLiminalAppHtml */
+export const batchHasUndispatchableSpawnApps = batchHasUndispatchableLiminalAppHtml;
+
 /** Whether the harness should run the post-stream tool dispatch batch. */
 export function shouldDispatchToolBatch(
   toolCalls: AccumulatedToolCall[],
@@ -124,6 +177,7 @@ export function shouldDispatchToolBatch(
 ): boolean {
   if (toolCalls.length === 0) return false;
   if (batchHasUndispatchableFileWrites(toolCalls, finishReason)) return false;
+  if (batchHasUndispatchableLiminalAppHtml(toolCalls, finishReason)) return false;
   if (!toolCalls.every((tc) => tryParseToolArgs(tc.argsJson).ok)) return false;
   return (
     finishReason === "tool_calls" ||
@@ -137,3 +191,13 @@ export const LENGTH_RESUME_FILE_WRITE_MESSAGE =
   "[CONTINUE] A file-write tool call was cut off (length limit or incomplete JSON). " +
   "Re-issue the same tool from where you left off. For large files use write_file with mode=create once, then mode=append for each follow-up section. " +
   "Do not assume the partial write succeeded.";
+
+export const LENGTH_RESUME_LIMINAL_APP_HTML_MESSAGE =
+  "[CONTINUE] spawn_app or update_app was cut off while streaming widget HTML (length limit or incomplete JSON). " +
+  "Re-issue the SAME tool call — the harness stages partial props.html like write_file. " +
+  "If list_apps shows the widget already exists, use update_app({ id, props:{ html:\"…\" } }) or html_edit — do NOT spawn_app again. " +
+  "New spawn: one spawn_app({ type:\"html\", id:\"<stable-slug>\", props:{ html:\"<!DOCTYPE html>…full document…</html>\" } }). " +
+  "Edits: grep_app_html → update_app({ id, html_edit:{ replacements:[...] } }). Widget JS is browser-only (no require/fs).";
+
+/** @deprecated */
+export const LENGTH_RESUME_SPAWN_APP_MESSAGE = LENGTH_RESUME_LIMINAL_APP_HTML_MESSAGE;
