@@ -23,7 +23,9 @@ Web **Settings** writes to (2). See [Configuration basics](../start/configuratio
 | `AGENT_ALWAYS_TOOLS_PROFILE` | `balanced` | yes | no | harness | Harness environment toggle for Always Tools Profile. See docs/configuration.md (harness). |
 | `AGENT_API_BASE_URL` | `https://openrouter.ai/api/v1` | yes | no | models_api | Harness environment toggle for Api Base Url. See docs/configuration.md (models api). |
 | `AGENT_APPROVAL_TIMEOUT_MS` | `120000` | yes | yes | safety | Harness environment toggle for Approval Timeout Ms. See docs/configuration.md (safety). |
+| `AGENT_APP_HTML_MAX_BYTES` | `409600` | yes | no | session_ui | Maximum persisted HTML document size per desktop app (default 409600). |
 | `AGENT_APP_MAX_COUNT` | `8` | yes | no | session_ui | Maximum concurrent liminal desktop app specs (default 8). |
+| `AGENT_APP_PROXY_MAX_HOSTS` | `8` | yes | no | session_ui | Maximum allowlisted proxy hosts per html/chart app (default 8). |
 | `AGENT_APP_REFRESH_ENABLED` | `1` | yes | no | session_ui | Sidecar background refresh loop for open desktop apps. |
 | `AGENT_APP_REFRESH_MIN_INTERVAL_MS` | `300000` | yes | no | session_ui | Minimum milliseconds between sidecar refreshes per app. |
 | `AGENT_AUTO_APPROVE_TOOLS` | `run_lint,run_tests,git_status` | yes | no | harness | Harness environment toggle for Auto Approve Tools. See docs/configuration.md (harness). |
@@ -41,6 +43,7 @@ Web **Settings** writes to (2). See [Configuration basics](../start/configuratio
 | `AGENT_BROWSER_ALLOW_FILE_ANY` | `0` | yes | no | harness | Harness environment toggle for Browser Allow File Any. See docs/configuration.md (harness). |
 | `AGENT_BROWSER_ALWAYS_ACTIVE` | `0` | yes | no | harness | Harness environment toggle for Browser Always Active. See docs/configuration.md (harness). |
 | `AGENT_BROWSER_AUTO_VISION` | `0` | yes | no | harness | Harness environment toggle for Browser Auto Vision. See docs/configuration.md (harness). |
+| `AGENT_BROWSER_EMBED` | `1` | yes | no | web_research | Stream viewport previews to the desktop browser dock via browser_view events. |
 | `AGENT_BROWSER_FILE_ROOT` | `` | yes | no | harness | Harness environment toggle for Browser File Root. See docs/configuration.md (harness). |
 | `AGENT_BROWSER_HEADED` | `0` | yes | no | harness | Harness environment toggle for Browser Headed. See docs/configuration.md (harness). |
 | `AGENT_BROWSER_MAX_SESSIONS` | `2` | yes | no | session_ui | Harness environment toggle for Browser Max Sessions. See docs/configuration.md (session ui). |
@@ -135,7 +138,8 @@ Web **Settings** writes to (2). See [Configuration basics](../start/configuratio
 | `AGENT_INTENT_ROUTING` | `1` | yes | no | harness | Harness environment toggle for Intent Routing. See docs/configuration.md (harness). |
 | `AGENT_LENGTH_RESUME_MAX` | `8` | yes | no | harness | Harness environment toggle for Length Resume Max. See docs/configuration.md (harness). |
 | `AGENT_LICENSE_PREFER_ENV` | `0` | yes | no | harness | Harness environment toggle for License Prefer Env. See docs/configuration.md (harness). |
-| `AGENT_LIMINAL_APPS` | `1` | yes | no | session_ui | Enable harness tools that spawn typed native desktop app windows (weather v1). |
+| `AGENT_LIMINAL_APPS` | `0` | yes | no | session_ui | Enable spawn_app / update_app desktop widget tools (off by default — preview only). |
+| `AGENT_LIMINAL_APPS_DESKTOP` | `0` | yes | no | session_ui | Inject slim spawn_app protocol when the sidecar runs inside Liminal Desktop (set automatically by sidecar). |
 | `AGENT_LINT_ALLOWED_COMMANDS` | `` | yes | no | advanced | Harness environment toggle for Lint Allowed Commands. See docs/configuration.md (advanced). |
 | `AGENT_LLM_JSON_CACHE` | `1` | yes | no | harness | Harness environment toggle for Llm Json Cache. See docs/configuration.md (harness). |
 | `AGENT_LLM_JSON_CACHE_TTL_MS` | `300000` | yes | no | harness | Harness environment toggle for Llm Json Cache Ttl Ms. See docs/configuration.md (harness). |
