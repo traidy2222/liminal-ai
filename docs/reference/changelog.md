@@ -2,7 +2,7 @@
 
 All notable changes to [Liminal AI](https://github.com/traidy2222/liminal-ai) on the `main` branch.
 
-**Current stage:** **alpha** (`v0.0.21` tip of `main`, 2026-06-06). The workspace package may read `0.1.0`, but **beta**, **RC**, and a **v0.1.0 public preview** have not been declared as product releases yet.
+**Current stage:** **alpha** (`v0.0.22` tip of `main`, 2026-06-07). The workspace package may read `0.1.0`, but **beta**, **RC**, and a **v0.1.0 public preview** have not been declared as product releases yet.
 
 Format: **v0.0.x** entries keyed to the last GitHub push in each slice. Dates are real push dates.
 
@@ -17,9 +17,26 @@ After editing JSON: `npm run changelog:gen`, commit, push, then in [vireondynami
 
 ---
 
+## v0.0.22 — 2026-06-07 {#v0-0-22}
+
+**Current alpha.** Serper search, agentcard, desktop browser dock; widget apps gated off.
+
+**Shipped**
+
+- **Serper web search** — `AGENT_WEB_SEARCH_PROVIDER` duckduckgo|serper with fallback; optional Serper fetch for `web_fetch`; dedicated `weather_fetch` path
+- **Agentcard tools** — `agentcard` harness tools + CLI shim (`AGENT_AGENTCARD`); operator guide in `docs/guides/agentcard.md`
+- **Gmail compose guard** — Preflight `gmail_send` for missing recipients/subject/body; expanded Google OAuth scope catalog
+- **Desktop browser dock** — `AGENT_BROWSER_EMBED` streams `browser_view` snapshots to the Flutter shell; browser dock UI in chat
+- **Default persona skip** — Bundled `persona/default` Liminal preset installs on bootstrap skip without LLM generation
+- **Liminal widget apps (gated off)** — spawn_app/update_app stack in core/sidecar/tools/desktop ships disabled (`AGENT_LIMINAL_APPS=0`, `desktopAppsEnabled=false`) until widget stability improves
+- **Desktop voice hardening** — Dictation TTS suspend/resume depth counter; incomplete portable `liminald` bundle detection in launcher
+- **Docs** — [Liminal apps](../concepts/liminal-apps.md), [Agentcard](../guides/agentcard.md), [Web research](../guides/web-research.md)
+
+---
+
 ## v0.0.21 — 2026-06-06 {#v0-0-21}
 
-**Current alpha.** Plan progress UI, chat replay, desktop voice, persona UI v2.
+Plan progress UI, chat replay, desktop voice, persona UI v2.
 
 **Shipped**
 

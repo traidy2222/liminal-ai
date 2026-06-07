@@ -1,7 +1,36 @@
 {
   "stage": "alpha",
-  "currentVersion": "0.0.21",
+  "currentVersion": "0.0.22",
   "releases": [
+    {
+      "version": "0.0.22",
+      "date": "2026-06-07",
+      "tagline": "Serper search, agentcard, desktop browser dock; widget apps gated off.",
+      "summary": "Adds Serper-backed web search with DuckDuckGo fallback, agentcard harness tools, Gmail compose guard, embedded browser dock on desktop, default persona on bootstrap skip, and full liminal widget-app stack behind AGENT_LIMINAL_APPS=0 until stable.",
+      "bullets": [
+        "**Serper web search** — `AGENT_WEB_SEARCH_PROVIDER` duckduckgo|serper with fallback; optional Serper fetch for `web_fetch`; dedicated `weather_fetch` path",
+        "**Agentcard tools** — `agentcard` harness tools + CLI shim (`AGENT_AGENTCARD`); operator guide in `docs/guides/agentcard.md`",
+        "**Gmail compose guard** — Preflight `gmail_send` for missing recipients/subject/body; expanded Google OAuth scope catalog",
+        "**Desktop browser dock** — `AGENT_BROWSER_EMBED` streams `browser_view` snapshots to the Flutter shell; browser dock UI in chat",
+        "**Default persona skip** — Bundled `persona/default` Liminal preset installs on bootstrap skip without LLM generation",
+        "**Liminal widget apps (gated off)** — spawn_app/update_app stack in core/sidecar/tools/desktop ships disabled (`AGENT_LIMINAL_APPS=0`, `desktopAppsEnabled=false`) until widget stability improves",
+        "**Desktop voice hardening** — Dictation TTS suspend/resume depth counter; incomplete portable `liminald` bundle detection in launcher"
+      ],
+      "docs": [
+        {
+          "label": "Liminal apps",
+          "href": "../concepts/liminal-apps.md"
+        },
+        {
+          "label": "Agentcard",
+          "href": "../guides/agentcard.md"
+        },
+        {
+          "label": "Web research",
+          "href": "../guides/web-research.md"
+        }
+      ]
+    },
     {
       "version": "0.0.21",
       "date": "2026-06-06",
