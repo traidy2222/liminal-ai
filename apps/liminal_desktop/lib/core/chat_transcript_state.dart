@@ -1,3 +1,4 @@
+import '../models/browser_view_state.dart';
 import '../state/message_models.dart';
 
 /// Immutable per-chat transcript + interactive gates (reducer input/output).
@@ -10,6 +11,7 @@ class ChatTranscriptState {
     this.connectionError,
     this.personaBootstrapProgress,
     this.personaBootstrapStage,
+    this.browserView,
   });
 
   final List<MessageEntry> messages;
@@ -19,6 +21,7 @@ class ChatTranscriptState {
   final String? connectionError;
   final String? personaBootstrapProgress;
   final String? personaBootstrapStage;
+  final BrowserViewState? browserView;
 
   static const initial = ChatTranscriptState();
 
@@ -33,6 +36,8 @@ class ChatTranscriptState {
     bool clearConnectionError = false,
     String? personaBootstrapProgress,
     String? personaBootstrapStage,
+    BrowserViewState? browserView,
+    bool clearBrowserView = false,
   }) {
     return ChatTranscriptState(
       messages: messages ?? this.messages,
@@ -47,6 +52,7 @@ class ChatTranscriptState {
       personaBootstrapProgress:
           personaBootstrapProgress ?? this.personaBootstrapProgress,
       personaBootstrapStage: personaBootstrapStage ?? this.personaBootstrapStage,
+      browserView: clearBrowserView ? null : (browserView ?? this.browserView),
     );
   }
 }

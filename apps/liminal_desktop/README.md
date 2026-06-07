@@ -131,6 +131,7 @@ lib/
 - Sticky auto-scroll
 - Provider setup + persona bootstrap + harness Settings tabs (`get_settings` / `update_settings`)
 - Tool approval + ask-user surfaces
+- **Desktop apps** — separate OS windows (weather v1); see [Liminal desktop apps](../../docs/concepts/liminal-apps.md)
 
 ## Voice QA (manual)
 

@@ -19,10 +19,34 @@ $BundleRoot = Join-Path $ReleaseDir "liminald"
 $BundleRepo = Join-Path $BundleRoot "repo"
 $Packages = @("core", "protocol", "tools", "sidecar")
 
-if (Test-Path $BundleRepo) {
-  Remove-Item -Recurse -Force $BundleRepo
+function Initialize-BundleRepo([string]$Path) {
+  if (-not (Test-Path $Path)) {
+    New-Item -ItemType Directory -Force -Path $Path, (Join-Path $Path "packages") | Out-Null
+    return
+  }
+  $removed = $false
+  try {
+    Remove-Item -Recurse -Force $Path -ErrorAction Stop
+    $removed = $true
+  } catch {
+    $staleName = "repo.stale.$([DateTime]::UtcNow.Ticks)"
+    $stalePath = Join-Path (Split-Path $Path -Parent) $staleName
+    try {
+      Rename-Item -Path $Path -NewName $staleName -Force -ErrorAction Stop
+      $removed = $true
+      Write-Host "==> Bundle repo locked - staged fresh tree; stale copy at $stalePath"
+    } catch {
+      Write-Host "==> Bundle repo locked - refreshing packages in place (close liminal_desktop.exe for clean rebundle)"
+    }
+  }
+  if ($removed) {
+    New-Item -ItemType Directory -Force -Path $Path, (Join-Path $Path "packages") | Out-Null
+  } else {
+    New-Item -ItemType Directory -Force -Path $Path, (Join-Path $Path "packages") | Out-Null
+  }
 }
-New-Item -ItemType Directory -Force -Path $BundleRepo, (Join-Path $BundleRepo "packages") | Out-Null
+
+Initialize-BundleRepo $BundleRepo
 
 Write-Host "==> Staging portable liminald repo -> $BundleRepo"
 
@@ -93,6 +117,19 @@ if ($CopyNodeModulesFromRepo -and (Test-Path $srcModules)) {
 if (-not (Test-Path (Join-Path $BundleRepo "packages\sidecar\dist\index.js"))) {
   throw "Bundle incomplete: sidecar dist missing after install"
 }
+
+$pwBrowsers = Join-Path $BundleRoot "playwright-browsers"
+New-Item -ItemType Directory -Force $pwBrowsers | Out-Null
+Write-Host "==> Installing Playwright Chromium for bundled browser tools..."
+Push-Location $BundleRepo
+$env:PLAYWRIGHT_BROWSERS_PATH = $pwBrowsers
+npx playwright install chromium
+if ($LASTEXITCODE -ne 0) {
+  Write-Host "==> WARNING: playwright install chromium failed - browser dock may stay empty until browsers are installed."
+  $global:LASTEXITCODE = 0
+}
+Pop-Location
+Remove-Item Env:PLAYWRIGHT_BROWSERS_PATH -ErrorAction SilentlyContinue
 
 $scriptRel = "liminald\repo\packages\sidecar\dist\index.js"
 $rootRel = "liminald\repo"

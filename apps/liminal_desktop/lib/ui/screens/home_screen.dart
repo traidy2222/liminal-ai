@@ -12,6 +12,8 @@ import '../theme/liminal_theme_extension.dart';
 import '../widgets/approval_sheet.dart';
 import '../widgets/ask_user_sheet.dart';
 import '../widgets/chat_drawer.dart';
+import '../../state/chat_session_controller.dart';
+import '../widgets/browser_dock.dart';
 import '../widgets/composer.dart';
 import '../widgets/liminal_app_bar.dart';
 import '../widgets/liminal_shell.dart';
@@ -75,6 +77,8 @@ class HomeScreen extends StatelessWidget {
                   host.toggleShowRawHarness();
                 case 'reset':
                   if (chatId != null) host.resetSession();
+                case 'rebootstrap':
+                  if (chatId != null) host.resetSession(rebootstrap: true);
               }
             },
             itemBuilder: (context) => [
@@ -86,6 +90,10 @@ class HomeScreen extends StatelessWidget {
               ),
               const PopupMenuItem(value: 'settings', child: Text('Settings')),
               const PopupMenuItem(value: 'reset', child: Text('Reset session')),
+              const PopupMenuItem(
+                value: 'rebootstrap',
+                child: Text('Reset persona & rebootstrap'),
+              ),
             ],
           ),
         ],
@@ -105,25 +113,29 @@ class HomeScreen extends StatelessWidget {
                 : ListenableBuilder(
                     listenable: Listenable.merge([session, host]),
                     builder: (context, _) {
-                      // Empty conversation → persona-voiced empty state.
-                      if (session.messages.isEmpty) {
-                        return _EmptyState(
-                          title: copy?.emptyTitle ?? 'Ready when you are',
-                          body: copy?.emptyBody ?? 'Ask anything, or start with a task.',
-                        );
+                      final browser = session.browserView;
+                      final chatPane = session.messages.isEmpty
+                          ? _EmptyState(
+                              title: copy?.emptyTitle ?? 'Ready when you are',
+                              body: copy?.emptyBody ??
+                                  'Ask anything, or start with a task.',
+                            )
+                          : _buildTranscript(context, session, host, layout);
+
+                      if (browser == null || !browser.open) {
+                        return chatPane;
                       }
-                      final list = StickyMessageList(
-                        messages: session.messages,
-                        showRawHarness: host.showRawHarness,
-                      );
-                      // Open-token layout: cap the reading column for
-                      // studio/minimal personas; fill for hud/terminal.
-                      if (layout.transcriptMaxWidth <= 0) return list;
-                      return Center(
-                        child: ConstrainedBox(
-                          constraints: BoxConstraints(maxWidth: layout.transcriptMaxWidth),
-                          child: list,
-                        ),
+
+                      return Row(
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        children: [
+                          Expanded(child: chatPane),
+                          BrowserDock(
+                            view: browser,
+                            expanded: session.browserDockExpanded,
+                            onToggleExpanded: session.toggleBrowserDock,
+                          ),
+                        ],
                       );
                     },
                   ),
@@ -180,6 +192,25 @@ class HomeScreen extends StatelessWidget {
         host.chats.where((x) => x.chatId == host.activeChatId).toList();
     if (active.isEmpty) return null;
     return active.first.title;
+  }
+
+  Widget _buildTranscript(
+    BuildContext context,
+    ChatSessionController session,
+    AppController host,
+    PersonaLayoutSpec layout,
+  ) {
+    final list = StickyMessageList(
+      messages: session.messages,
+      showRawHarness: host.showRawHarness,
+    );
+    if (layout.transcriptMaxWidth <= 0) return list;
+    return Center(
+      child: ConstrainedBox(
+        constraints: BoxConstraints(maxWidth: layout.transcriptMaxWidth),
+        child: list,
+      ),
+    );
   }
 }
 

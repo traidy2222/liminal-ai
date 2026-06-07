@@ -2,10 +2,12 @@ import 'dart:async';
 
 import 'package:flutter/foundation.dart';
 
+import '../apps/app_window_manager.dart';
 import '../audio/dictation_controller.dart';
 import '../audio/sidecar_audio_client.dart';
 import '../audio/speech_output.dart';
 import '../core/connection_phase.dart';
+import '../core/feature_flags.dart';
 import '../core/protocol_client.dart';
 import '../core/session_registry.dart';
 import '../core/sidecar_lifecycle.dart';
@@ -13,6 +15,7 @@ import '../models/user_image_attachment.dart';
 import '../ui/rich_message/asset_url_resolver.dart';
 import '../models/app_config.dart';
 import '../models/harness_settings.dart';
+import '../models/liminal_app_spec.dart';
 import '../models/vireon_account.dart';
 import '../protocol/chat_summary.dart';
 import '../protocol/frames.dart';
@@ -36,15 +39,10 @@ class AppController extends ChangeNotifier {
     dictation.onCaptureActiveChange = _onDictationCaptureChange;
     dictation.shouldBlockSpeechCapture = () => speechOutput.shouldBlockMicCapture();
     dictation.onBargeIn = speechOutput.interrupt;
-    speechOutput.onPlaybackHoldChange = (hold) {
-      if (hold) {
-        unawaited(dictation.suspendForTts());
-      } else {
-        unawaited(dictation.resumeAfterTts());
-      }
-    };
+    speechOutput.onPlaybackHoldChange = _applyTtsPlaybackHold;
     speechOutput.addListener(notifyListeners);
     dictation.addListener(notifyListeners);
+    _appWindows.bindMainWindowHandler();
   }
 
   final String? repoRoot;
@@ -52,6 +50,13 @@ class AppController extends ChangeNotifier {
   final SidecarLifecycle _sidecar;
   final ProtocolClient _protocol = ProtocolClient();
   final SessionRegistry _sessions = SessionRegistry();
+  late final AppWindowManager _appWindows = AppWindowManager(
+    resolveAccentHex: () => _accentHex,
+    resolveSidecarPort: () => _sidecarPort,
+    resolveSidecarToken: () => _sidecarToken,
+    onRefresh: refreshDesktopApp,
+  );
+  bool _desktopAppsBootPending = false;
   int? _sidecarPort;
   String? _sidecarToken;
 
@@ -80,6 +85,7 @@ class AppController extends ChangeNotifier {
   bool dictationCaptureActive = false;
   String? dictationNotice;
   String? _pendingDictationMessage;
+  Future<void> _ttsHoldChain = Future.value();
 
   int? get sidecarPort => _sidecarPort;
   String? get sidecarToken => _sidecarToken;
@@ -97,6 +103,9 @@ class AppController extends ChangeNotifier {
 
   String? activeChatId;
   List<ChatSummary> chats = [];
+  List<LiminalAppSpec> desktopApps = [];
+  Map<String, AppCacheEntry> desktopAppCaches = {};
+  bool desktopAppsLoading = false;
 
   bool get needsProviderSetup => config != null && !config!.apiKeyConfigured;
   bool get needsPersonaBootstrap =>
@@ -126,8 +135,14 @@ class AppController extends ChangeNotifier {
       _syncAssetResolver();
       await _protocol.waitForSidecarReady();
       _syncDictationAudioClient();
+      if (!sidecarReady) {
+        sidecarReady = true;
+      }
 
       phase = ConnectionPhase.connected;
+      if (LiminalFeatureFlags.desktopAppsEnabled) {
+        await _appWindows.ensureChannelReady();
+      }
       if (config == null) {
         await refreshConfig();
       } else {
@@ -147,6 +162,13 @@ class AppController extends ChangeNotifier {
     config = AppConfig.fromJson(json);
     configLoading = false;
     _syncVoiceFromConfig();
+  }
+
+  String get _accentHex {
+    final accent = config?.resolvedTheme.accent;
+    if (accent == null) return '#6EE7B7';
+    final argb = accent.toARGB32();
+    return '#${(argb & 0xFFFFFF).toRadixString(16).padLeft(6, '0')}';
   }
 
   void _syncVoiceFromConfig() {
@@ -194,12 +216,29 @@ class AppController extends ChangeNotifier {
     notifyListeners();
   }
 
+  void _applyTtsPlaybackHold(bool hold) {
+    _ttsHoldChain = _ttsHoldChain.then((_) async {
+      if (hold) {
+        await dictation.suspendForTts();
+      } else {
+        await dictation.resumeAfterTts();
+      }
+    });
+    unawaited(_ttsHoldChain);
+  }
+
   void _onChatFrame(String chatId, String event, Map<String, dynamic> data) {
+    if (chatId == activeChatId) {
+      _syncAssetResolver(chatId: chatId);
+    }
     if (event == 'speech' && chatId == activeChatId && dictationSessionActive) {
       _handleSpeechEvent(data);
     }
     if (event == 'turn_end' && chatId == activeChatId) {
       unawaited(_flushPendingDictationSend());
+      if (dictationSessionActive) {
+        unawaited(dictation.ensureListening());
+      }
     }
     if (event == 'tool_approval' &&
         chatId == activeChatId &&
@@ -536,6 +575,56 @@ class AppController extends ChangeNotifier {
         _applyHelloPayload(frame.data);
         sidecarInitError = frame.data['initError'] as String?;
         sidecarReady = true;
+        _desktopAppsBootPending = true;
+        notifyListeners();
+        return;
+      case 'app_list':
+        if (!LiminalFeatureFlags.desktopAppsEnabled) return;
+        _applyAppList(frame.data, openAuto: _desktopAppsBootPending);
+        _desktopAppsBootPending = false;
+        notifyListeners();
+        return;
+      case 'app_spawned':
+        if (!LiminalFeatureFlags.desktopAppsEnabled) return;
+        final appJson = frame.data['app'];
+        if (appJson is Map) {
+          final spec = LiminalAppSpec.fromJson(Map<String, dynamic>.from(appJson));
+          _upsertDesktopApp(spec);
+          if (spec.autoOpen && !_appWindows.isOpen(spec.id)) {
+            unawaited(_appWindows.openWindow(spec));
+          }
+        }
+        notifyListeners();
+        return;
+      case 'app_updated':
+        if (!LiminalFeatureFlags.desktopAppsEnabled) return;
+        final updatedJson = frame.data['app'];
+        if (updatedJson is Map) {
+          final spec = LiminalAppSpec.fromJson(Map<String, dynamic>.from(updatedJson));
+          _upsertDesktopApp(spec);
+        }
+        notifyListeners();
+        return;
+      case 'app_closed':
+        if (!LiminalFeatureFlags.desktopAppsEnabled) return;
+        final appId = frame.data['appId'] as String? ?? '';
+        if (appId.isNotEmpty) {
+          desktopApps = desktopApps.where((a) => a.id != appId).toList();
+          desktopAppCaches.remove(appId);
+          _appWindows.removeApp(appId);
+          unawaited(_appWindows.closeWindow(appId));
+        }
+        notifyListeners();
+        return;
+      case 'app_data':
+        if (!LiminalFeatureFlags.desktopAppsEnabled) return;
+        final appId = frame.data['appId'] as String? ?? '';
+        final cacheJson = frame.data['cache'];
+        if (appId.isNotEmpty && cacheJson is Map) {
+          final cache = AppCacheEntry.fromJson(Map<String, dynamic>.from(cacheJson));
+          desktopAppCaches[appId] = cache;
+          _appWindows.updateCache(appId, cache);
+        }
         notifyListeners();
         return;
       case 'chat_list':
@@ -713,6 +802,7 @@ class AppController extends ChangeNotifier {
     _sessions.sessionFor(chatId).clearTranscript();
     await _protocol.send('activate_chat', {'chatId': chatId});
     activeChatId = chatId;
+    _syncAssetResolver(chatId: chatId);
     _syncDictationAudioClient();
     await refreshConfig();
     notifyListeners();
@@ -725,18 +815,114 @@ class AppController extends ChangeNotifier {
     notifyListeners();
   }
 
-  Future<void> resetSession({bool greet = false}) async {
+  Future<void> resetSession({bool greet = false, bool rebootstrap = false}) async {
     final chatId = activeChatId;
     if (chatId == null || !_protocol.isConnected) return;
     await _protocol.send('reset_session', {
       'chatId': chatId,
       if (greet) 'greet': true,
+      if (rebootstrap) 'rebootstrap': true,
     });
     _sessions.sessionFor(chatId).clearTranscript();
+    if (rebootstrap) {
+      await refreshConfig();
+    }
+  }
+
+  void _applyAppList(Map<String, dynamic> data, {bool openAuto = false}) {
+    final appsRaw = data['apps'];
+    final cachesRaw = data['caches'];
+    if (appsRaw is List) {
+      desktopApps = appsRaw
+          .whereType<Map>()
+          .map((m) => LiminalAppSpec.fromJson(Map<String, dynamic>.from(m)))
+          .toList();
+    }
+    if (cachesRaw is Map) {
+      desktopAppCaches = {};
+      for (final entry in cachesRaw.entries) {
+        if (entry.value is Map) {
+          desktopAppCaches[entry.key] = AppCacheEntry.fromJson(
+            Map<String, dynamic>.from(entry.value as Map),
+          );
+        }
+      }
+    }
+    _appWindows.syncRegistry(
+      apps: desktopApps,
+      caches: desktopAppCaches,
+      openAutoOnBoot: openAuto,
+    );
+    desktopAppsLoading = false;
+  }
+
+  void _upsertDesktopApp(LiminalAppSpec spec) {
+    final next = List<LiminalAppSpec>.from(desktopApps);
+    final idx = next.indexWhere((a) => a.id == spec.id);
+    if (idx >= 0) {
+      next[idx] = spec;
+    } else {
+      next.add(spec);
+    }
+    desktopApps = next;
+    _appWindows.updateSpec(spec);
+    _appWindows.syncRegistry(apps: desktopApps, caches: desktopAppCaches);
+  }
+
+  Future<void> loadDesktopApps() async {
+    if (!LiminalFeatureFlags.desktopAppsEnabled) return;
+    if (!_protocol.isConnected) return;
+    desktopAppsLoading = true;
+    notifyListeners();
+    await _protocol.send('list_apps', {});
+  }
+
+  Future<bool> openDesktopAppWindow(String appId) async {
+    if (!_protocol.isConnected) return false;
+    final result = await _protocol.send('open_app_window', {'appId': appId});
+    return result.ok;
+  }
+
+  Future<bool> refreshDesktopApp(String appId) async {
+    if (!_protocol.isConnected) return false;
+    final result = await _protocol.send('refresh_app', {'appId': appId});
+    if (result.ok && result.data is Map) {
+      final cacheJson = (result.data as Map)['cache'];
+      if (cacheJson is Map) {
+        final cache = AppCacheEntry.fromJson(Map<String, dynamic>.from(cacheJson));
+        desktopAppCaches[appId] = cache;
+        _appWindows.updateCache(appId, cache);
+        notifyListeners();
+      }
+    }
+    return result.ok;
+  }
+
+  Future<bool> removeDesktopApp(String appId) async {
+    if (!_protocol.isConnected) return false;
+    final result = await _protocol.send('remove_app', {'appId': appId});
+    return result.ok;
+  }
+
+  Future<bool> updateDesktopApp({
+    required String appId,
+    String? title,
+    Map<String, dynamic>? props,
+    bool? autoOpen,
+  }) async {
+    if (!_protocol.isConnected) return false;
+    final result = await _protocol.send('update_app', {
+      'appId': appId,
+      if (title != null) 'title': title,
+      if (props != null) 'props': props,
+      if (autoOpen != null) 'auto_open': autoOpen,
+    });
+    return result.ok;
   }
 
   @override
   void dispose() {
+    unawaited(_appWindows.closeAll());
     speechOutput.removeListener(notifyListeners);
     dictation.removeListener(notifyListeners);
     dictation.dispose();

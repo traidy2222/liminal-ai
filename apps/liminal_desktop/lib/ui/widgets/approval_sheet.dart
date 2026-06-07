@@ -21,6 +21,7 @@ class ApprovalSheet extends StatelessWidget {
   Widget build(BuildContext context) {
     final lim = LiminalTheme.of(context);
     final argsJson = const JsonEncoder.withIndent('  ').convert(pending.args);
+    final summary = _spawnAppSummary(pending);
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.all(16),
@@ -49,6 +50,15 @@ class ApprovalSheet extends StatelessWidget {
             ],
           ),
           const SizedBox(height: 8),
+          if (summary != null) ...[
+            Text(
+              summary,
+              style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                    color: lim.text,
+                  ),
+            ),
+            const SizedBox(height: 8),
+          ],
           SizedBox(
             height: 120,
             child: SingleChildScrollView(
@@ -81,5 +91,38 @@ class ApprovalSheet extends StatelessWidget {
         ],
       ),
     );
+  }
+
+  static String? _spawnAppSummary(PendingApproval pending) {
+    if (pending.name != 'spawn_app') return null;
+    final args = pending.args;
+    final type = args['type']?.toString() ?? 'unknown';
+    final title = args['title']?.toString();
+    final props = args['props'];
+    final parts = <String>[
+      'Desktop widget: type=$type',
+      if (title != null && title.isNotEmpty) 'title="$title"',
+    ];
+    final shell = args['shell'];
+    if (shell is Map && shell['mode'] == 'window') {
+      parts[0] = 'Desktop window: type=$type';
+    }
+    final placement = args['placement'];
+    if (placement is Map) {
+      final w = placement['width'];
+      final h = placement['height'];
+      if (w != null && h != null) parts.add('${w}×$h');
+    }
+    if (props is Map) {
+      final fetch = props['data_fetch'];
+      if (fetch is Map && fetch['url'] != null) {
+        parts.add('data_fetch=${fetch['url']}');
+      }
+      final hosts = props['proxy_hosts'];
+      if (hosts is List && hosts.isNotEmpty) {
+        parts.add('proxy_hosts=${hosts.join(", ")}');
+      }
+    }
+    return parts.join(' · ');
   }
 }

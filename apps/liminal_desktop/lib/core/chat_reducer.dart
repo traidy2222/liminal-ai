@@ -1,5 +1,6 @@
 import 'dart:convert';
 
+import '../models/browser_view_state.dart';
 import '../state/message_models.dart';
 import 'chat_transcript_state.dart';
 import 'tool_wire.dart';
@@ -78,6 +79,25 @@ ChatTranscriptState reduceChatEvent(
     }
     case 'harness_running':
       return state.copyWith(busy: true);
+    case 'browser_view': {
+      final view = BrowserViewState.fromWire(data);
+      if (!view.open) {
+        return state.copyWith(clearBrowserView: true);
+      }
+      final prev = state.browserView;
+      return state.copyWith(
+        browserView: BrowserViewState(
+          sessionId: view.sessionId.isNotEmpty ? view.sessionId : (prev?.sessionId ?? ''),
+          url: view.url.isNotEmpty ? view.url : (prev?.url ?? ''),
+          title: view.title ?? prev?.title,
+          imageRelPath: view.imageRelPath ?? prev?.imageRelPath,
+          open: true,
+          updatedAt: view.updatedAt > 0
+              ? view.updatedAt
+              : (prev?.updatedAt ?? DateTime.now().millisecondsSinceEpoch),
+        ),
+      );
+    }
     case 'persona_bootstrap_progress':
       return state.copyWith(
         busy: true,
@@ -151,12 +171,14 @@ ChatTranscriptState _onTranscriptReplay(
     } else if (kind == 'assistant' && text.isNotEmpty) {
       messages.add(AssistantMessage(text: text, streaming: false));
     } else if (kind == 'tool_call') {
-      messages.add(ToolCallMessage(
-        callId: map['toolCallId'] as String? ?? map['id'] as String? ?? '',
-        name: map['toolName'] as String? ?? 'tool',
-        status: ToolCallStatus.done,
-        output: map['toolOutput'] as String? ?? text,
-      ));
+      messages.add(
+        ToolCallMessage(
+          callId: map['toolCallId'] as String? ?? map['id'] as String? ?? '',
+          name: map['toolName'] as String? ?? 'tool',
+          status: ToolCallStatus.done,
+          output: map['toolOutput'] as String? ?? text,
+        ),
+      );
     } else if (kind == 'error' && text.isNotEmpty) {
       messages.add(ErrorMessage(text));
     }
@@ -241,6 +263,17 @@ ChatTranscriptState _onToolStart(ChatTranscriptState state, Map<String, dynamic>
   // plan() renders on tool_result only — avoids empty Plan shells on step_index calls
   if (name == 'plan') return base;
   if (_orchTools.contains(name)) return base;
+  if (name.startsWith('browser_')) {
+    return base.copyWith(
+      browserView: BrowserViewState(
+        sessionId: base.browserView?.sessionId ?? '',
+        url: base.browserView?.url ?? 'Starting browser…',
+        title: base.browserView?.title,
+        open: true,
+        updatedAt: DateTime.now().millisecondsSinceEpoch,
+      ),
+    );
+  }
   return base.copyWith(
     messages: [
       ...base.messages,
@@ -345,9 +378,39 @@ ChatTranscriptState _onToolResult(ChatTranscriptState state, Map<String, dynamic
       ),
     );
   }
-  return state.copyWith(
+  var next = state.copyWith(
     messages: [...msgs, ToolResultMessage(callId: callId, output: output, ok: ok)],
   );
+  if (name.startsWith('browser_') && ok && output.isNotEmpty) {
+    final sessionId = _browserWireField(output, 'SESSION_ID');
+    final url = _browserWireField(output, 'URL');
+    if (sessionId != null || url != null) {
+      final prev = next.browserView;
+      next = next.copyWith(
+        browserView: BrowserViewState(
+          sessionId: sessionId ?? prev?.sessionId ?? '',
+          url: url ?? prev?.url ?? '',
+          title: prev?.title,
+          imageRelPath: prev?.imageRelPath,
+          open: true,
+          updatedAt: DateTime.now().millisecondsSinceEpoch,
+        ),
+      );
+    }
+  }
+  return next;
+}
+
+String? _browserWireField(String output, String key) {
+  final prefix = '$key:';
+  for (final line in output.split('\n')) {
+    final trimmed = line.trim();
+    if (trimmed.startsWith(prefix)) {
+      final value = trimmed.substring(prefix.length).trim();
+      if (value.isNotEmpty) return value;
+    }
+  }
+  return null;
 }
 
 ChatTranscriptState _replaceStreamingThink(

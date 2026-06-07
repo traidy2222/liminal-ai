@@ -20,6 +20,7 @@ dependencies:
   fwfh_url_launcher: ^0.9.1
   webview_flutter: ^4.10.0
   webview_flutter_wkwebview: ^3.16.0
+  webview_win_floating: ^3.0.3
   flutter_highlight: ^0.7.0
   highlight: ^0.7.0
   url_launcher: ^6.3.1
@@ -33,6 +34,8 @@ dependencies:
   just_audio_media_kit: ^2.1.0
   media_kit_libs_windows_audio: ^1.0.9
   media_kit_libs_linux: ^1.2.1
+  desktop_multi_window: ^0.3.0
+  window_manager: ^0.4.3
 
 dev_dependencies:
   flutter_test:

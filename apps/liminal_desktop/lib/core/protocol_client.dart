@@ -71,6 +71,11 @@ class ProtocolClient {
       case 'settings':
       case 'vireon_account':
       case 'pong':
+      case 'app_list':
+      case 'app_spawned':
+      case 'app_updated':
+      case 'app_closed':
+      case 'app_data':
         onGlobalFrame?.call(frame);
         return;
       default:

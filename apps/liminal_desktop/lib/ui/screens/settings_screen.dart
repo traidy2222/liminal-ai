@@ -4,8 +4,10 @@ import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../app/app_scope.dart';
+import '../../core/feature_flags.dart';
 import '../../models/app_config.dart';
 import '../../models/harness_settings.dart';
+import '../../models/liminal_app_spec.dart';
 import '../../models/vireon_account.dart';
 import '../layout/liminal_breakpoints.dart';
 import '../layout/liminal_spacing.dart';
@@ -28,6 +30,7 @@ class _SettingsScreenState extends State<SettingsScreen>
   final _model = TextEditingController();
   final _baseUrl = TextEditingController();
   final Map<String, TextEditingController> _fieldControllers = {};
+  final _search = TextEditingController();
   TabController? _tabs;
   bool _saving = false;
   String? _error;
@@ -35,6 +38,7 @@ class _SettingsScreenState extends State<SettingsScreen>
   @override
   void initState() {
     super.initState();
+    _search.addListener(_onSearchChanged);
     WidgetsBinding.instance.addPostFrameCallback((_) async {
       final cfg = AppScope.of(context).config;
       if (cfg != null) {
@@ -44,6 +48,8 @@ class _SettingsScreenState extends State<SettingsScreen>
       await Future.wait([
         AppScope.of(context).loadHarnessSettings(),
         AppScope.of(context).loadVireonAccount(),
+        if (LiminalFeatureFlags.desktopAppsEnabled)
+          AppScope.of(context).loadDesktopApps(),
       ]);
       if (mounted) _syncFieldControllers();
     });
@@ -64,9 +70,15 @@ class _SettingsScreenState extends State<SettingsScreen>
     }
   }
 
+  void _onSearchChanged() {
+    if (mounted) setState(() {});
+  }
+
   @override
   void dispose() {
+    _search.removeListener(_onSearchChanged);
     _tabs?.dispose();
+    _search.dispose();
     _apiKey.dispose();
     _model.dispose();
     _baseUrl.dispose();
@@ -153,6 +165,11 @@ class _SettingsScreenState extends State<SettingsScreen>
     final cfg = host.config;
     final snap = host.harnessSettings;
     final lim = LiminalTheme.of(context);
+    final searchQ = _search.text.trim().toLowerCase();
+    final harnessSearchActive = searchQ.isNotEmpty;
+    final filteredHarnessFields = harnessSearchActive && snap != null
+        ? snap.fields.where((f) => harnessFieldMatchesSearch(f, searchQ)).toList()
+        : null;
 
     if (host.harnessSettingsLoading && snap == null) {
       return LiminalShell(
@@ -201,6 +218,28 @@ class _SettingsScreenState extends State<SettingsScreen>
                       ),
                     ),
                   ),
+                  if (LiminalFeatureFlags.desktopAppsEnabled)
+                    SliverPadding(
+                      padding: const EdgeInsets.only(top: LiminalSpacing.lg),
+                      sliver: SliverToBoxAdapter(
+                        child: LiminalSection(
+                          title: 'Desktop apps',
+                          subtitle:
+                              'Separate OS windows spawned by the agent or opened from here. '
+                              'Closing a window does not remove the app.',
+                          child: _DesktopAppsPanel(
+                            apps: host.desktopApps,
+                            caches: host.desktopAppCaches,
+                            loading: host.desktopAppsLoading,
+                            onOpen: (id) => AppScope.of(context).openDesktopAppWindow(id),
+                            onRemove: (id) => AppScope.of(context).removeDesktopApp(id),
+                            onRefresh: (id) => AppScope.of(context).refreshDesktopApp(id),
+                            onUpdate: (id, props, autoOpen) => AppScope.of(context)
+                                .updateDesktopApp(appId: id, props: props, autoOpen: autoOpen),
+                          ),
+                        ),
+                      ),
+                    ),
                   SliverPadding(
                     padding: const EdgeInsets.only(top: LiminalSpacing.lg),
                     sliver: SliverToBoxAdapter(
@@ -238,35 +277,93 @@ class _SettingsScreenState extends State<SettingsScreen>
                         ),
                       ),
                     ),
+                    if (snap.hint != null && snap.hint!.trim().isNotEmpty)
+                      SliverPadding(
+                        padding: const EdgeInsets.only(bottom: LiminalSpacing.sm),
+                        sliver: SliverToBoxAdapter(
+                          child: Text(
+                            snap.hint!,
+                            style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                                  color: lim.textMuted,
+                                  height: 1.45,
+                                ),
+                          ),
+                        ),
+                      ),
                     SliverPersistentHeader(
                       pinned: true,
-                      delegate: _TabBarHeader(
-                        tabBar: TabBar(
-                          controller: _tabs,
-                          isScrollable: true,
-                          tabAlignment: TabAlignment.start,
-                          labelStyle: Theme.of(context).textTheme.titleSmall,
-                          tabs: [for (final t in snap.tabs) Tab(text: t.title)],
-                        ),
+                      delegate: _HarnessSearchHeader(
+                        search: _search,
+                        searchText: _search.text,
+                        saving: _saving,
                         background: lim.panel.withValues(alpha: 0.95),
                       ),
                     ),
+                    if (!harnessSearchActive)
+                      SliverPersistentHeader(
+                        pinned: true,
+                        delegate: _TabBarHeader(
+                          tabBar: TabBar(
+                            controller: _tabs,
+                            isScrollable: true,
+                            tabAlignment: TabAlignment.start,
+                            labelStyle: Theme.of(context).textTheme.titleSmall,
+                            tabs: [for (final t in snap.tabs) Tab(text: t.title)],
+                          ),
+                          background: lim.panel.withValues(alpha: 0.95),
+                        ),
+                      ),
+                    if (harnessSearchActive)
+                      SliverToBoxAdapter(
+                        child: Padding(
+                          padding: const EdgeInsets.fromLTRB(
+                            LiminalSpacing.md,
+                            LiminalSpacing.sm,
+                            LiminalSpacing.md,
+                            LiminalSpacing.xs,
+                          ),
+                          child: Text(
+                            filteredHarnessFields!.isEmpty
+                                ? 'No settings match "$searchQ".'
+                                : 'Search results (${filteredHarnessFields.length})',
+                            style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                                  color: filteredHarnessFields.isEmpty
+                                      ? Theme.of(context).colorScheme.error
+                                      : lim.warn,
+                                ),
+                          ),
+                        ),
+                      ),
                     SliverFillRemaining(
                       hasScrollBody: true,
-                      child: TabBarView(
-                        controller: _tabs,
-                        children: [
-                          for (final tab in snap.tabs)
-                            _HarnessTabPane(
-                              fields: snap.fields
-                                  .where((f) => f.tabId == tab.id)
-                                  .toList(),
+                      child: harnessSearchActive
+                          ? _HarnessTabPane(
+                              fields: filteredHarnessFields ?? const [],
                               controllers: _fieldControllers,
                               saving: _saving,
                               onSave: (f, v) => _saveHarnessField(f, v),
+                              showTabContext: true,
+                              tabTitleFor: (field) {
+                                for (final t in snap.tabs) {
+                                  if (t.id == field.tabId) return t.title;
+                                }
+                                return null;
+                              },
+                            )
+                          : TabBarView(
+                              controller: _tabs,
+                              children: [
+                                for (final tab in snap.tabs)
+                                  _HarnessTabPane(
+                                    fields: snap.fields
+                                        .where((f) => f.tabId == tab.id)
+                                        .toList(),
+                                    controllers: _fieldControllers,
+                                    saving: _saving,
+                                    onSave: (f, v) => _saveHarnessField(f, v),
+                                  ),
+                              ],
                             ),
-                        ],
-                      ),
                     ),
                   ] else
                     const SliverPadding(
@@ -649,18 +746,59 @@ LinkedHashMap<String, List<HarnessSettingsField>> _groupBySubgroup(
   return LinkedHashMap.fromEntries(order.map((k) => MapEntry(k, map[k]!)));
 }
 
+bool harnessFieldMatchesSearch(HarnessSettingsField field, String query) {
+  if (query.isEmpty) return true;
+  final haystack = [
+    field.label,
+    field.key,
+    field.description ?? '',
+    field.subgroupLabel,
+    field.subgroupId,
+  ].join('\n').toLowerCase();
+  return haystack.contains(query);
+}
+
+LinkedHashMap<String, List<HarnessSettingsField>> _groupByTabThenSubgroup(
+  List<HarnessSettingsField> fields,
+  String? Function(HarnessSettingsField field) tabTitleFor,
+) {
+  final tabOrder = <String>[];
+  final tabMap = <String, List<HarnessSettingsField>>{};
+  for (final f in fields) {
+    final tab = tabTitleFor(f)?.trim();
+    final tabLabel = tab != null && tab.isNotEmpty ? tab : 'Other';
+    tabMap.putIfAbsent(tabLabel, () {
+      tabOrder.add(tabLabel);
+      return [];
+    });
+    tabMap[tabLabel]!.add(f);
+  }
+  final out = LinkedHashMap<String, List<HarnessSettingsField>>();
+  for (final tab in tabOrder) {
+    for (final entry in _groupBySubgroup(tabMap[tab]!).entries) {
+      final key = entry.key.isEmpty ? tab : '$tab · ${entry.key}';
+      out[key] = entry.value;
+    }
+  }
+  return out;
+}
+
 class _HarnessTabPane extends StatelessWidget {
   const _HarnessTabPane({
     required this.fields,
     required this.controllers,
     required this.saving,
     required this.onSave,
+    this.showTabContext = false,
+    this.tabTitleFor,
   });
 
   final List<HarnessSettingsField> fields;
   final Map<String, TextEditingController> controllers;
   final bool saving;
   final void Function(HarnessSettingsField field, String value) onSave;
+  final bool showTabContext;
+  final String? Function(HarnessSettingsField field)? tabTitleFor;
 
   @override
   Widget build(BuildContext context) {
@@ -668,7 +806,9 @@ class _HarnessTabPane extends StatelessWidget {
       return const Center(child: Text('No settings in this tab.'));
     }
 
-    final groups = _groupBySubgroup(fields);
+    final groups = showTabContext && tabTitleFor != null
+        ? _groupByTabThenSubgroup(fields, tabTitleFor!)
+        : _groupBySubgroup(fields);
     final lim = LiminalTheme.of(context);
 
     return LayoutBuilder(
@@ -733,6 +873,79 @@ class _HarnessTabPane extends StatelessWidget {
   }
 }
 
+class _HarnessSearchHeader extends SliverPersistentHeaderDelegate {
+  _HarnessSearchHeader({
+    required this.search,
+    required this.searchText,
+    required this.saving,
+    required this.background,
+  });
+
+  final TextEditingController search;
+  final String searchText;
+  final bool saving;
+  final Color background;
+
+  static const double _height = 56;
+
+  @override
+  double get minExtent => _height;
+
+  @override
+  double get maxExtent => _height;
+
+  @override
+  Widget build(BuildContext context, double shrinkOffset, bool overlapsContent) {
+    final lim = LiminalTheme.of(context);
+    return Material(
+      color: background,
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(
+          LiminalSpacing.md,
+          LiminalSpacing.xs,
+          LiminalSpacing.md,
+          LiminalSpacing.sm,
+        ),
+        child: TextField(
+          controller: search,
+          enabled: !saving,
+          textInputAction: TextInputAction.search,
+          decoration: InputDecoration(
+            isDense: true,
+            hintText: 'Search settings…',
+            prefixIcon: const Icon(Icons.search, size: 20),
+            suffixIcon: searchText.isEmpty
+                ? null
+                : IconButton(
+                    icon: const Icon(Icons.clear, size: 18),
+                    onPressed: saving
+                        ? null
+                        : () {
+                            search.clear();
+                          },
+                    tooltip: 'Clear search',
+                  ),
+            border: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(4),
+              borderSide: BorderSide(color: lim.border),
+            ),
+            enabledBorder: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(4),
+              borderSide: BorderSide(color: lim.border),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  @override
+  bool shouldRebuild(covariant _HarnessSearchHeader oldDelegate) =>
+      oldDelegate.searchText != searchText ||
+      oldDelegate.saving != saving ||
+      oldDelegate.background != background;
+}
+
 class _TabBarHeader extends SliverPersistentHeaderDelegate {
   _TabBarHeader({required this.tabBar, required this.background});
 
@@ -758,4 +971,362 @@ class _TabBarHeader extends SliverPersistentHeaderDelegate {
   @override
   bool shouldRebuild(covariant _TabBarHeader oldDelegate) =>
       oldDelegate.tabBar != tabBar || oldDelegate.background != background;
+}
+
+class _DesktopAppsPanel extends StatefulWidget {
+  const _DesktopAppsPanel({
+    required this.apps,
+    required this.caches,
+    required this.loading,
+    required this.onOpen,
+    required this.onRemove,
+    required this.onRefresh,
+    required this.onUpdate,
+  });
+
+  final List<LiminalAppSpec> apps;
+  final Map<String, AppCacheEntry> caches;
+  final bool loading;
+  final Future<bool> Function(String id) onOpen;
+  final Future<bool> Function(String id) onRemove;
+  final Future<bool> Function(String id) onRefresh;
+  final Future<bool> Function(
+    String id,
+    Map<String, dynamic>? props,
+    bool? autoOpen,
+  ) onUpdate;
+
+  @override
+  State<_DesktopAppsPanel> createState() => _DesktopAppsPanelState();
+}
+
+class _DesktopAppsPanelState extends State<_DesktopAppsPanel> {
+  String? _busyId;
+
+  String _formatUpdated(AppCacheEntry? cache) {
+    if (cache == null) return 'Never refreshed';
+    final dt = DateTime.fromMillisecondsSinceEpoch(cache.fetchedAt);
+    final local = dt.toLocal();
+    final h = local.hour.toString().padLeft(2, '0');
+    final m = local.minute.toString().padLeft(2, '0');
+    return cache.ok ? 'Updated $h:$m' : 'Error · $h:$m';
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (widget.loading && widget.apps.isEmpty) {
+      return const Center(child: CircularProgressIndicator());
+    }
+    if (widget.apps.isEmpty) {
+      return Text(
+        'No desktop apps yet. Ask the agent to spawn one (e.g. weather for your city).',
+        style: Theme.of(context).textTheme.bodyMedium,
+      );
+    }
+
+    return Column(
+      children: [
+        for (final app in widget.apps) ...[
+          Card(
+            margin: const EdgeInsets.only(bottom: LiminalSpacing.sm),
+            child: Padding(
+              padding: const EdgeInsets.all(LiminalSpacing.md),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Row(
+                    children: [
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              app.title,
+                              style: Theme.of(context).textTheme.titleSmall,
+                            ),
+                            Text(
+                              '${app.type} · ${_formatUpdated(widget.caches[app.id])}',
+                              style: Theme.of(context).textTheme.bodySmall,
+                            ),
+                          ],
+                        ),
+                      ),
+                      if (_busyId == app.id)
+                        const SizedBox(
+                          width: 20,
+                          height: 20,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        ),
+                    ],
+                  ),
+                  if (app.type == 'weather') ...[
+                    const SizedBox(height: LiminalSpacing.sm),
+                    _WeatherAppEditor(
+                      app: app,
+                      enabled: _busyId == null,
+                      onSave: (location, units, autoOpen) async {
+                        setState(() => _busyId = app.id);
+                        final ok = await widget.onUpdate(
+                          app.id,
+                          {
+                            'location': location,
+                            'units': units,
+                          },
+                          autoOpen,
+                        );
+                        if (mounted) setState(() => _busyId = null);
+                        return ok;
+                      },
+                    ),
+                  ],
+                  if (app.type == 'html' || app.type == 'markdown') ...[
+                    const SizedBox(height: LiminalSpacing.sm),
+                    _WidgetContentEditor(
+                      app: app,
+                      enabled: _busyId == null,
+                      onSave: (props, autoOpen) async {
+                        setState(() => _busyId = app.id);
+                        final ok = await widget.onUpdate(app.id, props, autoOpen);
+                        if (mounted) setState(() => _busyId = null);
+                        return ok;
+                      },
+                    ),
+                  ],
+                  const SizedBox(height: LiminalSpacing.sm),
+                  Wrap(
+                    spacing: 8,
+                    runSpacing: 4,
+                    children: [
+                      FilledButton.tonal(
+                        onPressed: _busyId != null
+                            ? null
+                            : () async {
+                                setState(() => _busyId = app.id);
+                                await widget.onOpen(app.id);
+                                if (mounted) setState(() => _busyId = null);
+                              },
+                        child: const Text('Open'),
+                      ),
+                      OutlinedButton(
+                        onPressed: _busyId != null
+                            ? null
+                            : () async {
+                                setState(() => _busyId = app.id);
+                                await widget.onRefresh(app.id);
+                                if (mounted) setState(() => _busyId = null);
+                              },
+                        child: const Text('Refresh'),
+                      ),
+                      TextButton(
+                        onPressed: _busyId != null
+                            ? null
+                            : () async {
+                                setState(() => _busyId = app.id);
+                                await widget.onRemove(app.id);
+                                if (mounted) setState(() => _busyId = null);
+                              },
+                        child: const Text('Remove'),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ],
+      ],
+    );
+  }
+}
+
+class _WeatherAppEditor extends StatefulWidget {
+  const _WeatherAppEditor({
+    required this.app,
+    required this.enabled,
+    required this.onSave,
+  });
+
+  final LiminalAppSpec app;
+  final bool enabled;
+  final Future<bool> Function(String location, String units, bool autoOpen) onSave;
+
+  @override
+  State<_WeatherAppEditor> createState() => _WeatherAppEditorState();
+}
+
+class _WeatherAppEditorState extends State<_WeatherAppEditor> {
+  late final TextEditingController _location;
+  late String _units;
+  late bool _autoOpen;
+
+  @override
+  void initState() {
+    super.initState();
+    _location = TextEditingController(
+      text: widget.app.props['location'] as String? ?? '',
+    );
+    _units = widget.app.props['units'] as String? ?? 'metric';
+    _autoOpen = widget.app.autoOpen;
+  }
+
+  @override
+  void didUpdateWidget(covariant _WeatherAppEditor oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.app.id != widget.app.id) {
+      _location.text = widget.app.props['location'] as String? ?? '';
+      _units = widget.app.props['units'] as String? ?? 'metric';
+      _autoOpen = widget.app.autoOpen;
+    }
+  }
+
+  @override
+  void dispose() {
+    _location.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        TextField(
+          controller: _location,
+          enabled: widget.enabled,
+          decoration: const InputDecoration(
+            labelText: 'Location',
+            border: OutlineInputBorder(),
+          ),
+        ),
+        const SizedBox(height: LiminalSpacing.sm),
+        DropdownButtonFormField<String>(
+          value: _units,
+          decoration: const InputDecoration(labelText: 'Units'),
+          items: const [
+            DropdownMenuItem(value: 'metric', child: Text('Metric')),
+            DropdownMenuItem(value: 'imperial', child: Text('Imperial')),
+          ],
+          onChanged: widget.enabled
+              ? (v) {
+                  if (v != null) setState(() => _units = v);
+                }
+              : null,
+        ),
+        SwitchListTile(
+          contentPadding: EdgeInsets.zero,
+          title: const Text('Open at startup'),
+          value: _autoOpen,
+          onChanged: widget.enabled
+              ? (v) => setState(() => _autoOpen = v)
+              : null,
+        ),
+        Align(
+          alignment: Alignment.centerRight,
+          child: TextButton(
+            onPressed: widget.enabled
+                ? () async {
+                    await widget.onSave(
+                      _location.text.trim(),
+                      _units,
+                      _autoOpen,
+                    );
+                  }
+                : null,
+            child: const Text('Save'),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _WidgetContentEditor extends StatefulWidget {
+  const _WidgetContentEditor({
+    required this.app,
+    required this.enabled,
+    required this.onSave,
+  });
+
+  final LiminalAppSpec app;
+  final bool enabled;
+  final Future<bool> Function(Map<String, dynamic> props, bool autoOpen) onSave;
+
+  @override
+  State<_WidgetContentEditor> createState() => _WidgetContentEditorState();
+}
+
+class _WidgetContentEditorState extends State<_WidgetContentEditor> {
+  late final TextEditingController _content;
+  late bool _autoOpen;
+
+  String get _fieldKey => widget.app.type == 'markdown' ? 'markdown' : 'html';
+
+  @override
+  void initState() {
+    super.initState();
+    final props = widget.app.props;
+    final stored = props[_fieldKey] as String? ?? '';
+    final ref = props['html_ref'] as String?;
+    _content = TextEditingController(
+      text: stored.isNotEmpty
+          ? stored
+          : (ref != null ? '(content stored on disk: $ref)' : ''),
+    );
+    _autoOpen = widget.app.autoOpen;
+  }
+
+  @override
+  void didUpdateWidget(covariant _WidgetContentEditor oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.app.id != widget.app.id) {
+      final props = widget.app.props;
+      _content.text = props[_fieldKey] as String? ?? '';
+      _autoOpen = widget.app.autoOpen;
+    }
+  }
+
+  @override
+  void dispose() {
+    _content.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final label = widget.app.type == 'markdown' ? 'Markdown' : 'HTML body';
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        TextField(
+          controller: _content,
+          enabled: widget.enabled,
+          maxLines: 6,
+          decoration: InputDecoration(
+            labelText: label,
+            border: const OutlineInputBorder(),
+            helperText: widget.app.type == 'html'
+                ? 'Saved HTML opens in the desktop widget window.'
+                : null,
+          ),
+        ),
+        SwitchListTile(
+          contentPadding: EdgeInsets.zero,
+          title: const Text('Open at startup'),
+          value: _autoOpen,
+          onChanged: widget.enabled ? (v) => setState(() => _autoOpen = v) : null,
+        ),
+        Align(
+          alignment: Alignment.centerRight,
+          child: TextButton(
+            onPressed: widget.enabled && !_content.text.startsWith('(content stored')
+                ? () async {
+                    await widget.onSave({_fieldKey: _content.text}, _autoOpen);
+                  }
+                : null,
+            child: const Text('Save'),
+          ),
+        ),
+      ],
+    );
+  }
 }

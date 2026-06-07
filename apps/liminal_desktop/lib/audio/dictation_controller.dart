@@ -47,6 +47,7 @@ class DictationController extends ChangeNotifier {
   bool _utteranceActive = false;
   bool _endpointInFlight = false;
   bool _suspendedForTts = false;
+  int _ttsSuspendDepth = 0;
   SidecarAudioClient? _audioClient;
 
   /// Fallback pause detection (peak-relative) when AGC skews the noise floor.
@@ -132,15 +133,18 @@ class DictationController extends ChangeNotifier {
 
   /// Release the mic while agent TTS plays (Windows WASAPI conflicts otherwise).
   Future<void> suspendForTts() async {
-    if (_suspendedForTts || !sessionActive) return;
+    if (!sessionActive) return;
+    _ttsSuspendDepth++;
     _suspendedForTts = true;
     await _ampSub?.cancel();
     _ampSub = null;
     if (await _recorder.isRecording()) {
       await _recorder.stop();
     }
-    _utteranceActive = false;
-    _vad?.disarmUtterance();
+    if (!_endpointInFlight) {
+      _utteranceActive = false;
+      _vad?.disarmUtterance();
+    }
     autoSendCountdownMs = null;
     if (status != DictationStatus.error) {
       status = DictationStatus.listening;
@@ -149,13 +153,31 @@ class DictationController extends ChangeNotifier {
   }
 
   Future<void> resumeAfterTts() async {
-    if (!_suspendedForTts || !sessionActive) return;
+    if (!sessionActive) return;
+    if (_ttsSuspendDepth > 0) _ttsSuspendDepth--;
+    if (_ttsSuspendDepth > 0) return;
     _suspendedForTts = false;
+    await ensureListening();
+  }
+
+  /// Restart mic capture when the session is armed and nothing else holds the recorder.
+  Future<void> ensureListening() async {
+    if (!sessionActive || _suspendedForTts || _ttsSuspendDepth > 0 || _endpointInFlight) {
+      return;
+    }
+    if (status == DictationStatus.error) {
+      error = null;
+    }
+    if (status == DictationStatus.uploading ||
+        status == DictationStatus.transcribing ||
+        status == DictationStatus.recording) {
+      return;
+    }
     await _startMicCapture();
   }
 
   Future<void> _startMicCapture() async {
-    if (!sessionActive || _suspendedForTts) return;
+    if (!sessionActive || _suspendedForTts || _ttsSuspendDepth > 0) return;
 
     _vad ??= AmplitudeVad(
       onSpeechStart: () => unawaited(_onSpeechStart()),
@@ -302,7 +324,7 @@ class DictationController extends ChangeNotifier {
 
     if (path == null || !File(path).existsSync()) {
       _finishEndpoint(clearError: true);
-      if (sessionActive) await _startMicCapture();
+      await ensureListening();
       return;
     }
 
@@ -313,7 +335,7 @@ class DictationController extends ChangeNotifier {
 
     if (bytes.length < 1200 && !force) {
       _finishEndpoint(clearError: true);
-      if (sessionActive) await _startMicCapture();
+      await ensureListening();
       return;
     }
 
@@ -322,6 +344,7 @@ class DictationController extends ChangeNotifier {
       status = DictationStatus.error;
       error = 'Audio client not configured.';
       _finishEndpoint();
+      await ensureListening();
       notifyListeners();
       return;
     }
@@ -345,21 +368,22 @@ class DictationController extends ChangeNotifier {
         await onAutoSend?.call(text);
         sessionCostUsd += result?.costUsd ?? 0;
       } else if (force || silenceDeadline) {
-        error = 'No speech detected — try again.';
-        status = DictationStatus.error;
+        liveText = '';
       }
     } catch (e) {
       onCaptureActiveChange?.call(false);
-      status = DictationStatus.error;
       liveText = '';
       error = e is HttpException ? (e.message ?? e.toString()) : e.toString();
+      status = DictationStatus.error;
     }
 
     _finishEndpoint();
-    if (sessionActive && status != DictationStatus.error) {
-      status = DictationStatus.listening;
-      liveText = '';
-      await _startMicCapture();
+    if (sessionActive) {
+      if (status != DictationStatus.error) {
+        status = DictationStatus.listening;
+        liveText = '';
+      }
+      await ensureListening();
     }
     notifyListeners();
   }
@@ -379,6 +403,8 @@ class DictationController extends ChangeNotifier {
     }
     _utteranceActive = false;
     _endpointInFlight = false;
+    _suspendedForTts = false;
+    _ttsSuspendDepth = 0;
     _vad?.disarmUtterance();
     onCaptureActiveChange?.call(false);
   }

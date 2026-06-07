@@ -59,6 +59,19 @@ String? _resolveBundledPath(String exeDir, String? raw) {
   return p.normalize(p.join(exeDir, trimmed));
 }
 
+/// Portable bundle beside the `.exe` must include package.json + node_modules.
+bool isPortableBundleRootComplete(String repoRoot) {
+  return File(p.join(repoRoot, 'package.json')).existsSync() &&
+      Directory(p.join(repoRoot, 'node_modules')).existsSync() &&
+      File(p.join(repoRoot, 'packages', 'sidecar', 'dist', 'index.js')).existsSync();
+}
+
+SidecarLocations? _locationsIfComplete(String scriptPath, String repoRoot) {
+  if (!File(scriptPath).existsSync()) return null;
+  if (!isPortableBundleRootComplete(repoRoot)) return null;
+  return SidecarLocations(scriptPath: p.normalize(scriptPath), repoRoot: p.normalize(repoRoot));
+}
+
 /// Read `liminald/bundle.json` written by the desktop bundle scripts.
 SidecarLocations? readBundledLocations(String exeDir) {
   final manifest = File(p.join(exeDir, 'liminald', 'bundle.json'));
@@ -68,8 +81,7 @@ SidecarLocations? readBundledLocations(String exeDir) {
     final script = _resolveBundledPath(exeDir, json['sidecarScript'] as String?);
     final root = _resolveBundledPath(exeDir, json['repoRoot'] as String?);
     if (script == null || root == null) return null;
-    if (!File(script).existsSync()) return null;
-    return SidecarLocations(scriptPath: script, repoRoot: root);
+    return _locationsIfComplete(script, root);
   } catch (_) {
     return null;
   }
@@ -102,7 +114,9 @@ SidecarLocations? resolveSidecarLocations({String? repoRoot}) {
     final bundled = readBundledLocations(exeDir);
     if (bundled != null) return bundled;
 
-    final nextToExe = _locationsFromRepoRoot(p.join(exeDir, 'liminald', 'repo'));
+    final bundledScript = p.join(exeDir, 'liminald', 'repo', 'packages', 'sidecar', 'dist', 'index.js');
+    final bundledRoot = p.join(exeDir, 'liminald', 'repo');
+    final nextToExe = _locationsIfComplete(bundledScript, bundledRoot);
     if (nextToExe != null) return nextToExe;
 
     var dir = Directory(exeDir);
@@ -224,14 +238,20 @@ Future<SidecarProcess> launchSidecar({
 
   final stderrBuffer = StringBuffer();
   final completer = Completer<SidecarReadyLine>();
+  final bundleRoot = p.dirname(locations.repoRoot);
+  final pwBrowsers = p.join(bundleRoot, 'playwright-browsers');
+  final env = {
+    ...Platform.environment,
+    'LIMINAL_REPO_ROOT': locations.repoRoot,
+  };
+  if (Directory(pwBrowsers).existsSync()) {
+    env['PLAYWRIGHT_BROWSERS_PATH'] = pwBrowsers;
+  }
   final process = await Process.start(
     node,
     [locations.scriptPath],
     workingDirectory: locations.repoRoot,
-    environment: {
-      ...Platform.environment,
-      'LIMINAL_REPO_ROOT': locations.repoRoot,
-    },
+    environment: env,
   );
 
   final stdoutSub = process.stdout

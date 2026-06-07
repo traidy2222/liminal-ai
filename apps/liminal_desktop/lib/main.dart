@@ -3,15 +3,29 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:just_audio_media_kit/just_audio_media_kit.dart';
 import 'package:path/path.dart' as p;
+import 'package:webview_win_floating/webview_win_floating.dart';
 
 import 'app/liminal_app.dart';
+import 'apps/app_window_manager.dart';
+import 'apps/app_window_root.dart';
 import 'sidecar/launcher.dart';
 import 'state/app_controller.dart';
 
-void main() {
+Future<void> main(List<String> args) async {
   WidgetsFlutterBinding.ensureInitialized();
-  // just_audio needs a native backend on Windows/Linux or playback is silent.
   JustAudioMediaKit.ensureInitialized();
+
+  final launchArgs = await AppWindowManager.currentSubWindowLaunchArgs();
+  if (launchArgs != null && launchArgs.appId.isNotEmpty) {
+    runApp(
+      AppWindowRoot(
+        appId: launchArgs.appId,
+        launchArgs: launchArgs,
+      ),
+    );
+    return;
+  }
+
   final repoRoot = detectRepoRoot();
   final controller = AppController(repoRoot: repoRoot);
   runApp(LiminalApp(controller: controller));
@@ -26,6 +40,7 @@ String? detectRepoRoot() {
   if (exeDir != null) {
     final bundled = readBundledLocations(exeDir);
     if (bundled != null) return bundled.repoRoot;
+    // Ignore stale bundle.json when liminald/repo is incomplete (e.g. failed rebundle).
   }
 
   final roots = <String>[

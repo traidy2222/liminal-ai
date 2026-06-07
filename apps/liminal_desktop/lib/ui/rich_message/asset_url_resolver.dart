@@ -22,6 +22,19 @@ class AssetUrlResolver extends ChangeNotifier {
     notifyListeners();
   }
 
+  String? resolveBrowserPreview(String sessionId, int updatedAt) {
+    if (sessionId.trim().isEmpty) return null;
+    final port = _port;
+    final token = _token;
+    if (port == null || token == null) return null;
+    final chatParam =
+        _chatId != null ? '&chatId=${Uri.encodeComponent(_chatId!)}' : '';
+    return 'http://127.0.0.1:$port/browser_preview'
+        '?token=${Uri.encodeComponent(token)}'
+        '&sessionId=${Uri.encodeComponent(sessionId)}'
+        '$chatParam&v=$updatedAt';
+  }
+
   String? resolveImageSrc(String? src) {
     if (src == null || src.trim().isEmpty) return null;
     final s = src.trim();
