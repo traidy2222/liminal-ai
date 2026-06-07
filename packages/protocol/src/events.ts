@@ -145,6 +145,42 @@ export interface TransportEventMap {
   pong: { at: number };
   /** Persona bootstrap pipeline progress (sidecar-synthesized, mirrors web SSE). */
   persona_bootstrap_progress: PersonaBootstrapProgressEvent;
+
+  /** Full desktop app registry + caches. */
+  app_list: {
+    apps: WireLiminalAppSpec[];
+    caches: Record<string, WireAppCacheEntry>;
+  };
+  /** Desktop should open a separate OS window for this app. */
+  app_spawned: { app: WireLiminalAppSpec };
+  /** Desktop should refresh an existing window (no new OS window). */
+  app_updated: { app: WireLiminalAppSpec };
+  /** Desktop should close the window for this app id. */
+  app_closed: { appId: string };
+  /** Fresh cache payload for one app (refresh loop or manual). */
+  app_data: { appId: string; cache: WireAppCacheEntry };
+}
+
+/** Wire shape for `~/.liminal/apps/manifest.json` entries. */
+export interface WireLiminalAppSpec {
+  v: 1;
+  id: string;
+  type: string;
+  title: string;
+  props: Record<string, unknown>;
+  refresh?: { interval_min: number };
+  placement?: { width: number; height: number; x?: number; y?: number };
+  auto_open?: boolean;
+  created_at: number;
+  updated_at: number;
+  source: "model" | "user";
+}
+
+export interface WireAppCacheEntry {
+  fetched_at: number;
+  ok: boolean;
+  data?: unknown;
+  error?: string;
 }
 
 /** The full server→UI event surface. */

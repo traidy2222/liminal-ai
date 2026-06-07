@@ -50,7 +50,7 @@ export interface ClientCommandMap {
   replay_transcript: { chatId: string };
 
   /** Clear a chat's transcript; `greet` re-runs the opening greeting / bootstrap gate. */
-  reset_session: { chatId: string; greet?: boolean };
+  reset_session: { chatId: string; greet?: boolean; rebootstrap?: boolean };
   /** Submit persona-bootstrap input (or `skip`) for a chat awaiting it. */
   submit_persona_bootstrap: { chatId: string; input: string; skip?: boolean };
 
@@ -75,6 +75,23 @@ export interface ClientCommandMap {
   vireon_sign_in: { openBrowser?: boolean };
   /** Clear local Vireon license + account binding. */
   vireon_sign_out: Record<string, never>;
+
+  /** List persisted Liminal desktop apps + cache snapshots. */
+  list_apps: Record<string, never>;
+  /** Ask desktop shell to open (or focus) a window for an existing app. */
+  open_app_window: { appId: string };
+  /** Force refresh one app's data cache. */
+  refresh_app: { appId: string };
+  /** Remove app spec + cache (same as close_app tool). */
+  remove_app: { appId: string };
+  /** User/settings patch for an app spec. */
+  update_app: {
+    appId: string;
+    title?: string;
+    props?: Record<string, unknown>;
+    refresh?: { interval_min: number };
+    auto_open?: boolean;
+  };
 
   /** Keepalive. Sidecar answers with a `pong` event. */
   ping: Record<string, never>;
