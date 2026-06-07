@@ -23,14 +23,20 @@ import {
   wireVireonAccountPayload,
 } from "./vireon_api.js";
 import {
+  liminalAppsEnabled,
   loadChatTranscriptFromSessionLog,
   slimReplayEntriesForWire,
   type ProviderConfig,
   type RuntimePreferences,
 } from "@liminal/core";
 import { tryHandleAudioRequest } from "./audio_http.js";
+import { tryHandleBrowserPreviewRequest } from "./browser_preview_handler.js";
+import { tryHandleAppProxyRequest } from "./app_proxy_handler.js";
+import { tryHandleAppHtmlRequest } from "./app_html_handler.js";
 import { tryHandleMediaRequest } from "./media_handler.js";
+import { getBrowserPanelFrame } from "@liminal/tools";
 import { buildOutboundUserMessage, normalizeWireAttachments } from "./message_attachments.js";
+import { LiminalAppManager } from "./app_manager.js";
 
 const SIDECAR_VERSION = "0.1.0";
 
@@ -54,20 +60,47 @@ export class WsServer {
   private readonly wss: WebSocketServer;
   private readonly clients = new Set<WebSocket>();
   private readonly registry: ChatRegistry;
+  private readonly appManager: LiminalAppManager;
   private readonly token: string;
   private readonly repoRoot: string;
 
   constructor(opts: WsServerOptions) {
     this.token = opts.token;
     this.repoRoot = opts.repoRoot;
+    this.appManager = new LiminalAppManager((frame) => this.broadcast(frame));
     this.registry = new ChatRegistry({
       provider: opts.provider,
       runtimePreferences: opts.runtimePreferences,
       repoRoot: opts.repoRoot,
       sink: (frame) => this.broadcast(frame),
+      registerToolsDeps: { appManager: this.appManager },
     });
 
     this.http = createServer((req, res) => {
+      if (
+        liminalAppsEnabled() &&
+        tryHandleAppHtmlRequest(req, res, {
+          token: this.token,
+        })
+      ) {
+        return;
+      }
+      if (
+        liminalAppsEnabled() &&
+        tryHandleAppProxyRequest(req, res, {
+          token: this.token,
+        })
+      ) {
+        return;
+      }
+      if (
+        tryHandleBrowserPreviewRequest(req, res, {
+          token: this.token,
+          resolveFrame: (sessionId) => getBrowserPanelFrame(sessionId),
+        })
+      ) {
+        return;
+      }
       if (
         tryHandleMediaRequest(req, res, {
           token: this.token,
@@ -110,6 +143,9 @@ export class WsServer {
     return new Promise((resolve, reject) => {
       this.http.once("error", reject);
       this.http.listen(0, "127.0.0.1", () => {
+        if (liminalAppsEnabled()) {
+          this.appManager.startRefreshLoop();
+        }
         const addr = this.http.address();
         if (addr && typeof addr === "object") resolve(addr.port);
         else reject(new Error("Failed to resolve sidecar port."));
@@ -209,6 +245,10 @@ export class WsServer {
         ...(initError ? { initError } : {}),
       })
     );
+
+    if (liminalAppsEnabled()) {
+      void this.appManager.broadcastAppList();
+    }
 
     const activeId = this.registry.activeId;
     if (activeId) {
@@ -350,12 +390,27 @@ export class WsServer {
         }
 
         case "reset_session": {
-          const d = data as { chatId: string; greet?: boolean };
+          const d = data as { chatId: string; greet?: boolean; rebootstrap?: boolean };
           const bridge = this.registry.get(d.chatId);
           if (!bridge) return this.ack(ws, id, false, "Unknown chatId.");
-          bridge.clearSession();
-          this.ack(ws, id, true);
-          if (d.greet) {
+          if (d.rebootstrap) {
+            try {
+              await bridge.resetPersonaBootstrapForSession();
+            } catch (err) {
+              return this.ack(
+                ws,
+                id,
+                false,
+                err instanceof Error ? err.message : "Persona rebootstrap failed."
+              );
+            }
+          } else {
+            bridge.clearSession();
+          }
+          this.ack(ws, id, true, undefined, {
+            awaitingPersonaBootstrap: bridge.isAwaitingPersonaBootstrap,
+          });
+          if (d.greet && !bridge.isAwaitingPersonaBootstrap) {
             bridge.greet().catch(() => undefined);
           }
           return;
@@ -442,6 +497,77 @@ export class WsServer {
           return;
         }
 
+        case "list_apps": {
+          if (!liminalAppsEnabled()) {
+            return this.ack(ws, id, false, "Liminal desktop apps are disabled (AGENT_LIMINAL_APPS=0).");
+          }
+          const payload = await this.appManager.listAppsWithCaches();
+          this.sendTo(ws, serverFrame("app_list", payload));
+          this.ack(ws, id, true, undefined, payload);
+          return;
+        }
+
+        case "open_app_window": {
+          if (!liminalAppsEnabled()) {
+            return this.ack(ws, id, false, "Liminal desktop apps are disabled (AGENT_LIMINAL_APPS=0).");
+          }
+          const d = data as { appId: string };
+          const app = (await this.appManager.listApps()).find((a) => a.id === d.appId);
+          if (!app) return this.ack(ws, id, false, "Unknown appId.");
+          this.broadcast(serverFrame("app_spawned", { app }));
+          this.ack(ws, id, true);
+          return;
+        }
+
+        case "refresh_app": {
+          if (!liminalAppsEnabled()) {
+            return this.ack(ws, id, false, "Liminal desktop apps are disabled (AGENT_LIMINAL_APPS=0).");
+          }
+          const d = data as { appId: string };
+          try {
+            const cache = await this.appManager.refreshApp(d.appId);
+            this.ack(ws, id, true, undefined, { cache });
+          } catch (err) {
+            this.ack(ws, id, false, err instanceof Error ? err.message : String(err));
+          }
+          return;
+        }
+
+        case "remove_app": {
+          if (!liminalAppsEnabled()) {
+            return this.ack(ws, id, false, "Liminal desktop apps are disabled (AGENT_LIMINAL_APPS=0).");
+          }
+          const d = data as { appId: string };
+          const ok = await this.appManager.closeApp(d.appId);
+          this.ack(ws, id, ok, ok ? undefined : "Unknown appId.");
+          return;
+        }
+
+        case "update_app": {
+          if (!liminalAppsEnabled()) {
+            return this.ack(ws, id, false, "Liminal desktop apps are disabled (AGENT_LIMINAL_APPS=0).");
+          }
+          const d = data as {
+            appId: string;
+            title?: string;
+            props?: Record<string, unknown>;
+            refresh?: { interval_min: number };
+            auto_open?: boolean;
+          };
+          try {
+            const app = await this.appManager.updateApp(d.appId, {
+              title: d.title,
+              props: d.props,
+              refresh: d.refresh,
+              auto_open: d.auto_open,
+            });
+            this.ack(ws, id, true, undefined, { app });
+          } catch (err) {
+            this.ack(ws, id, false, err instanceof Error ? err.message : String(err));
+          }
+          return;
+        }
+
         default:
           this.ack(ws, id, false, `Unknown command "${String(command)}".`);
           return;
@@ -461,6 +587,7 @@ export class WsServer {
       }
     }
     this.clients.clear();
+    this.appManager.stopRefreshLoop();
     this.registry.disposeAll();
     this.wss.close();
     this.http.close();

@@ -33,7 +33,7 @@ export function tryHandleMediaRequest(
     return true;
   }
 
-  const relPath = url.searchParams.get("path") ?? "";
+  const relPath = (url.searchParams.get("path") ?? "").replace(/\\/g, "/");
   if (!relPath || relPath.includes("..")) {
     res.writeHead(400);
     res.end("Invalid path");
