@@ -11,14 +11,14 @@ For day-to-day setup see the guides [Accounts &amp; licensing](../guides/account
 and [Managed inference](../guides/managed-inference.md).
 
 > **CE never degrades.** Everything in [Configuration](../configuration.md) — the ReAct loop,
-> 140+ tools, memory, vault, persona, both UIs — works with no license. Paid tiers only *add*
+> 245+ tools in the family catalog (300+ with MCP sidecars), memory, vault, persona, both UIs — works with no license. Paid tiers only *add*
 > cloud and team capabilities; they never paywall a local capability.
 
 ## Tiers at a glance
 
 | Capability | Community | Pro | Team | Enterprise |
 | ---------- | :-------: | :-: | :--: | :--------: |
-| Full local harness (140+ tools, both UIs, memory, vault, persona) | ✅ | ✅ | ✅ | ✅ |
+| Full local harness (245+ catalog tools, both UIs, memory, vault, persona) | ✅ | ✅ | ✅ | ✅ |
 | Bring-your-own-key inference (any OpenAI-compatible model) | ✅ | ✅ | ✅ | ✅ |
 | **Managed inference** (no key, metered credits) | — | ✅ | ✅ | ✅ |
 | **Cloud memory sync** (notes + vault across machines) | — | ✅ | ✅ | ✅ |

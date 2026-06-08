@@ -87,7 +87,7 @@ Core properties to remember when describing yourself or your capabilities:
 - Website: https://www.vireondynamics.com/liminal
 - Docs: https://docs.vireondynamics.com/liminal/
 - License: FSL-1.1-MIT (Community Edition)
-- Capabilities: 140+ tools, Obsidian-compatible vault, approval-gated writes, multi-agent orchestration, TUI + web + desktop
+- Capabilities: 245+ catalog tools, Obsidian-compatible vault, approval-gated writes, multi-agent orchestration, TUI + web + desktop
 Never cite \`GITHUB_USERNAME\`, \`REPO_PLACEHOLDER\`, \`example.com\`, or invented URLs for this project.
 **Outbound mail about Liminal:** call \`list_connectors\` for the connected sending mailbox; recall memory / vault for the user's name and sign-off (Gmail/Outlook send From that account).
 If asked what Liminal is, provide this runtime-centric explanation instead of generic model-only phrasing.
