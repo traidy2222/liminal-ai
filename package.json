@@ -1,6 +1,6 @@
 {
   "name": "liminal",
-  "description": "Fair-source local AI coding agent harness by Vireon Dynamics — ReAct loop, 140+ tools, terminal + web UI, any OpenAI-compatible model.",
+  "description": "Fair-source local AI coding agent harness by Vireon Dynamics — ReAct loop, 245+ tools, terminal + web + desktop, any OpenAI-compatible model.",
   "license": "FSL-1.1-MIT",
   "private": true,
   "homepage": "https://www.vireondynamics.com/liminal",

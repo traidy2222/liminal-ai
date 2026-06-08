@@ -1,7 +1,39 @@
 {
   "stage": "alpha",
-  "currentVersion": "0.0.22",
+  "currentVersion": "0.0.23",
   "releases": [
+    {
+      "version": "0.0.23",
+      "date": "2026-06-07",
+      "tagline": "Microsoft 365, styled email dock, lazy tools, Google REST hybrid.",
+      "summary": "Adds Microsoft 365 OAuth + Graph REST + MCP sidecar, Google Workspace REST hybrid (Docs/Sheets/Slides/Calendar), GitHub connector, lazy tool-family loading, enterprise email compose (style infer, live preview dock, MIME repair, product-truth guards), desktop integrations hub, and sidecar orchestrator handoff.",
+      "bullets": [
+        "**Microsoft 365** — Entra OAuth broker, `connect_provider({ provider: \"microsoft_365\" })`, MCP sidecar, Graph REST for Outlook send/draft, Teams, Planner, To Do, OneNote, OneDrive, Excel, SharePoint, and unified search; guide in `docs/guides/microsoft-365.md`",
+        "**Google Workspace hybrid** — REST tools for Docs (`docs_rest_*`), Sheets, Slides, Calendar alongside existing Gmail MCP; styled HTML drafts via `gmail_create_draft` / `gmail_send_message` REST",
+        "**GitHub connector** — `connect_provider({ provider: \"github\" })` with token/OAuth and MCP tool attach",
+        "**Lazy tool loading** — `AGENT_TOOL_LAZY=1` default; `connectors` family activates on demand; persisted MCP connections no longer auto-register 300+ tools at boot (`AGENT_INTEGRATION_AUTO_ACTIVATE=1` opt-in)",
+        "**OAuth mail routing** — Gmail preferred over Entra `#EXT#` guest admin mailboxes; `list_connectors` shows primary mail provider",
+        "**Email composition** — `email_style_infer` sidecar, R-EMAIL-COPY / R-PRODUCT-TRUTH protocol rules, MIME mojibake repair + em-dash humanization, placeholder URL guard on send, Liminal product facts baked into system prompt",
+        "**Desktop email dock** — Live HTML/plain preview while `gmail_*` / `outlook_*` tools stream; preview sanitization matches send path",
+        "**Desktop shell** — Integrations screen, Vireon hub, orchestrator panel, chat pane with file + email compose rails",
+        "**Sidecar orchestrator** — Worker handoff protocol, integrations snapshot API, orchestration status on wire",
+        "**Web integrations** — Settings Integrations accordion for Google, Microsoft 365, and GitHub connect/disconnect"
+      ],
+      "docs": [
+        {
+          "label": "Microsoft 365",
+          "href": "../guides/microsoft-365.md"
+        },
+        {
+          "label": "Google Workspace",
+          "href": "../guides/google-workspace.md"
+        },
+        {
+          "label": "Tool families",
+          "href": "../reference/tools/index.md"
+        }
+      ]
+    },
     {
       "version": "0.0.22",
       "date": "2026-06-07",

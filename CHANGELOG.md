@@ -2,7 +2,7 @@
 
 All notable changes to [Liminal AI](https://github.com/traidy2222/liminal-ai) are documented here and on the docs portal: [docs.vireondynamics.com/liminal/reference/changelog](https://docs.vireondynamics.com/liminal/reference/changelog).
 
-**Current stage:** **alpha** (`v0.0.22` tip of `main`, 2026-06-07). **Beta**, **RC**, and **v0.1.0 public preview** have not been declared as product releases yet.
+**Current stage:** **alpha** (`v0.0.23` tip of `main`, 2026-06-07). **Beta**, **RC**, and **v0.1.0 public preview** have not been declared as product releases yet.
 
 **Single source:** edit [`changelog/releases.json`](changelog/releases.json), then run `npm run changelog:gen`.
 
@@ -10,7 +10,13 @@ Format: **v0.0.x** entries keyed to the last GitHub push in each slice. Dates ar
 
 Marketing (richer notes): [vireondynamics.com/liminal/changelog](https://www.vireondynamics.com/liminal/changelog)
 
-## [v0.0.22] — 2026-06-07 — Current alpha
+## [v0.0.23] — 2026-06-07 — Current alpha
+
+Adds Microsoft 365 OAuth + Graph REST + MCP sidecar, Google Workspace REST hybrid (Docs/Sheets/Slides/Calendar), GitHub connector, lazy tool-family loading, enterprise email compose (style infer, live preview dock, MIME repair, product-truth guards), desktop integrations hub, and sidecar orchestrator handoff.
+
+[Full notes](https://docs.vireondynamics.com/liminal/reference/changelog#v0-0-23)
+
+## [v0.0.22] — 2026-06-07
 
 Adds Serper-backed web search with DuckDuckGo fallback, agentcard harness tools, Gmail compose guard, embedded browser dock on desktop, default persona on bootstrap skip, and full liminal widget-app stack behind AGENT_LIMINAL_APPS=0 until stable.
 

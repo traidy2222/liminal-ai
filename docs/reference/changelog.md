@@ -2,7 +2,7 @@
 
 All notable changes to [Liminal AI](https://github.com/traidy2222/liminal-ai) on the `main` branch.
 
-**Current stage:** **alpha** (`v0.0.22` tip of `main`, 2026-06-07). The workspace package may read `0.1.0`, but **beta**, **RC**, and a **v0.1.0 public preview** have not been declared as product releases yet.
+**Current stage:** **alpha** (`v0.0.23` tip of `main`, 2026-06-07). The workspace package may read `0.1.0`, but **beta**, **RC**, and a **v0.1.0 public preview** have not been declared as product releases yet.
 
 Format: **v0.0.x** entries keyed to the last GitHub push in each slice. Dates are real push dates.
 
@@ -17,9 +17,29 @@ After editing JSON: `npm run changelog:gen`, commit, push, then in [vireondynami
 
 ---
 
+## v0.0.23 — 2026-06-07 {#v0-0-23}
+
+**Current alpha.** Microsoft 365, styled email dock, lazy tools, Google REST hybrid.
+
+**Shipped**
+
+- **Microsoft 365** — Entra OAuth broker, `connect_provider({ provider: "microsoft_365" })`, MCP sidecar, Graph REST for Outlook send/draft, Teams, Planner, To Do, OneNote, OneDrive, Excel, SharePoint, and unified search; guide in `docs/guides/microsoft-365.md`
+- **Google Workspace hybrid** — REST tools for Docs (`docs_rest_*`), Sheets, Slides, Calendar alongside existing Gmail MCP; styled HTML drafts via `gmail_create_draft` / `gmail_send_message` REST
+- **GitHub connector** — `connect_provider({ provider: "github" })` with token/OAuth and MCP tool attach
+- **Lazy tool loading** — `AGENT_TOOL_LAZY=1` default; `connectors` family activates on demand; persisted MCP connections no longer auto-register 300+ tools at boot (`AGENT_INTEGRATION_AUTO_ACTIVATE=1` opt-in)
+- **OAuth mail routing** — Gmail preferred over Entra `#EXT#` guest admin mailboxes; `list_connectors` shows primary mail provider
+- **Email composition** — `email_style_infer` sidecar, R-EMAIL-COPY / R-PRODUCT-TRUTH protocol rules, MIME mojibake repair + em-dash humanization, placeholder URL guard on send, Liminal product facts baked into system prompt
+- **Desktop email dock** — Live HTML/plain preview while `gmail_*` / `outlook_*` tools stream; preview sanitization matches send path
+- **Desktop shell** — Integrations screen, Vireon hub, orchestrator panel, chat pane with file + email compose rails
+- **Sidecar orchestrator** — Worker handoff protocol, integrations snapshot API, orchestration status on wire
+- **Web integrations** — Settings Integrations accordion for Google, Microsoft 365, and GitHub connect/disconnect
+- **Docs** — [Microsoft 365](../guides/microsoft-365.md), [Google Workspace](../guides/google-workspace.md), [Tool families](../reference/tools/index.md)
+
+---
+
 ## v0.0.22 — 2026-06-07 {#v0-0-22}
 
-**Current alpha.** Serper search, agentcard, desktop browser dock; widget apps gated off.
+Serper search, agentcard, desktop browser dock; widget apps gated off.
 
 **Shipped**
 

@@ -7,7 +7,7 @@
 </p>
 
 <p align="center">
-  <strong>Fair-source ReAct harness</strong> · <strong>140+ tools</strong> · <strong>Terminal + web UI</strong> · <strong>Any OpenAI-compatible model</strong>
+  <strong>Fair-source ReAct harness</strong> · <strong>245+ tools</strong> · <strong>Terminal + web + desktop</strong> · <strong>Any OpenAI-compatible model</strong>
 </p>
 
 <p align="center">
@@ -144,7 +144,7 @@ More demos and install walkthrough: **[Liminal home](https://www.vireondynamics.
 
 ## What's new
 
-**Latest:** [Liminal 0.0.19 — Desktop downloads for Windows, Mac & Linux](https://www.vireondynamics.com/liminal/changelog/v0-0-19) (2026-06-05)
+**Latest:** [Liminal 0.0.23 — Microsoft 365, styled email dock, lazy tools](https://www.vireondynamics.com/liminal/changelog/v0-0-23) (2026-06-07)
 
 - **Team shared memory** — workspace/global notes sync across org members on the same repo fingerprint ([Team pricing](https://www.vireondynamics.com/liminal/pricing))
 - **Org admin** — members, invites (email via Resend), audit log, fleet/policy ([Team admin docs](https://docs.vireondynamics.com/liminal/) on site)
