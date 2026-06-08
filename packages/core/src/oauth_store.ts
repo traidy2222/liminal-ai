@@ -19,6 +19,8 @@ export interface OAuthTokenBundle {
   refreshToken: string;
   expiresAt: number;
   scopes: string[];
+  /** Provider-specific payload (e.g. Xero tenantId / tenant list). */
+  metadata?: Record<string, unknown>;
   createdAt: number;
   updatedAt: number;
 }

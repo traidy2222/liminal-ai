@@ -964,6 +964,15 @@ class AppController extends ChangeNotifier {
   Future<bool> disconnectMicrosoft({bool revoke = false}) =>
       _runIntegrationCommand('disconnect_microsoft', {'revoke': revoke});
 
+  Future<bool> connectXeroOAuth({String mode = 'read_write'}) =>
+      _runIntegrationCommand('connect_xero_oauth', {
+        'mode': mode,
+        'openBrowser': true,
+      });
+
+  Future<bool> disconnectXero({bool revoke = false}) =>
+      _runIntegrationCommand('disconnect_xero', {'revoke': revoke});
+
   Future<bool> connectGithub({String mode = 'read_write'}) =>
       _runIntegrationCommand('connect_github', {'mode': mode});
 

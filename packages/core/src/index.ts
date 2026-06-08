@@ -1000,6 +1000,31 @@ export {
   microsoftOAuthCallbackUri,
 } from "./microsoft_connect.js";
 export type { MicrosoftConnectResult, RunMicrosoftConnectFlowOptions } from "./microsoft_connect.js";
+export {
+  xeroOAuthClientConfig,
+  buildXeroAuthUrl,
+  exchangeXeroCode,
+  refreshXeroAccessToken,
+  getXeroAccessToken,
+  revokeXeroAccount,
+  listXeroOAuthAccounts,
+  fetchXeroConnections,
+  resolveXeroTenantId,
+  scopesForXeroMode,
+  XERO_DEFAULT_MODE,
+} from "./xero_oauth_broker.js";
+export type { XeroTenantConnection, XeroMode } from "./xero_oauth_broker.js";
+export {
+  isHostedOAuthHandoffUri,
+  hostedOAuthHandoffPath,
+  buildHostedIntegrationConnectUrl,
+  applyHostedOAuthHandoff,
+} from "./hosted_oauth_connect.js";
+export type { HostedOAuthHandoffPayload } from "./hosted_oauth_connect.js";
+export {
+  runXeroHostedConnectFlow,
+} from "./xero_connect.js";
+export type { XeroConnectResult, RunXeroHostedConnectOptions } from "./xero_connect.js";
 export type {
   LicenseTier,
   EntitlementKey,

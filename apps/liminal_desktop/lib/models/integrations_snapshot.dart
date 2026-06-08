@@ -3,12 +3,14 @@ class IntegrationsSnapshot {
     required this.google,
     required this.microsoft,
     required this.github,
+    required this.xero,
     required this.connections,
   });
 
   final GoogleIntegrations google;
   final MicrosoftIntegrations microsoft;
   final GithubIntegrations github;
+  final XeroIntegrations xero;
   final List<IntegrationConnection> connections;
 
   factory IntegrationsSnapshot.fromJson(Map<String, dynamic> json) {
@@ -21,6 +23,9 @@ class IntegrationsSnapshot {
       ),
       github: GithubIntegrations.fromJson(
         Map<String, dynamic>.from(json['github'] as Map? ?? {}),
+      ),
+      xero: XeroIntegrations.fromJson(
+        Map<String, dynamic>.from(json['xero'] as Map? ?? {}),
       ),
       connections: (json['connections'] as List<dynamic>? ?? [])
           .map(
@@ -36,6 +41,7 @@ class IntegrationsSnapshot {
     google: GoogleIntegrations.empty,
     microsoft: MicrosoftIntegrations.empty,
     github: GithubIntegrations.empty,
+    xero: XeroIntegrations.empty,
     connections: [],
   );
 
@@ -69,6 +75,8 @@ class IntegrationsSnapshot {
   bool get microsoftConnected => microsoftMcp.isNotEmpty;
 
   bool get githubConnected => githubMcp.isNotEmpty;
+
+  bool get xeroConnected => xero.accounts.isNotEmpty;
 
   int get googleToolCount => googleMcp.fold(0, (n, c) => n + c.toolCount);
 
@@ -185,6 +193,52 @@ class GithubIntegrations {
   }
 
   static final empty = GithubIntegrations(tokenConfigured: false, mcpUrl: '');
+}
+
+class XeroIntegrations {
+  XeroIntegrations({required this.accounts});
+
+  final List<XeroOAuthAccount> accounts;
+
+  factory XeroIntegrations.fromJson(Map<String, dynamic> json) {
+    return XeroIntegrations(
+      accounts: (json['accounts'] as List<dynamic>? ?? [])
+          .map(
+            (e) => XeroOAuthAccount.fromJson(
+              Map<String, dynamic>.from(e as Map),
+            ),
+          )
+          .toList(),
+    );
+  }
+
+  static final empty = XeroIntegrations(accounts: []);
+}
+
+class XeroOAuthAccount {
+  XeroOAuthAccount({
+    required this.accountId,
+    this.email,
+    required this.scopes,
+    this.tenantId,
+    this.tenantName,
+  });
+
+  final String accountId;
+  final String? email;
+  final List<String> scopes;
+  final String? tenantId;
+  final String? tenantName;
+
+  factory XeroOAuthAccount.fromJson(Map<String, dynamic> json) {
+    return XeroOAuthAccount(
+      accountId: json['accountId'] as String? ?? '',
+      email: json['email'] as String?,
+      scopes: (json['scopes'] as List<dynamic>? ?? []).map((e) => e.toString()).toList(),
+      tenantId: json['tenantId'] as String?,
+      tenantName: json['tenantName'] as String?,
+    );
+  }
 }
 
 class GoogleIntegrations {

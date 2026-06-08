@@ -58,6 +58,7 @@ irm https://vireondynamics.com/install/install.ps1 | iex          # Windows
 | [Tuning via Settings](./guides/tuning-via-settings.md) | Change behavior without editing `.env` |
 | [Running the eval suite](./guides/running-eval.md) | Regression-test the harness |
 | [Google Workspace](./guides/google-workspace.md) · [Microsoft 365](./guides/microsoft-365.md) | OAuth connectors, REST + MCP tools, Integrations UI |
+| [Xero](./guides/xero.md) | Hosted OAuth accounting — invoices, contacts, organisations |
 | [Agentcard](./guides/agentcard.md) | Operator signup flows via harness tools |
 
 ## 4. Pro &amp; Enterprise

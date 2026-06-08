@@ -33,6 +33,8 @@ import {
   pickBestOAuthAccountByEmail,
   resolvePreferredMailProvider,
   formatPreferredMailRouteLine,
+  listXeroOAuthAccounts,
+  revokeXeroAccount,
 } from "@liminal/core";
 import { defineTool } from "./helpers.js";
 import {
@@ -60,6 +62,7 @@ import { onedriveRestEnabled } from "./onedrive_rest.js";
 import { excelRestEnabled } from "./excel_rest.js";
 import { microsoftOfficeRestEnabled } from "./microsoft_office_rest.js";
 import { graphSearchRestEnabled } from "./graph_search_rest.js";
+import { xeroRestEnabled } from "./xero_rest.js";
 import {
   connectGithubMcp,
   disconnectGithubMcp,
@@ -215,15 +218,15 @@ export function createConnectorTools(registry: ToolRegistry, _emitter: AgentEmit
   const connectProviderTool = defineTool({
     name: "connect_provider",
     description:
-      "WHAT: Connect curated providers — Google Workspace, Microsoft 365 (OAuth), or GitHub (PAT).\n" +
-      "WHEN: User asks to work with Google/Microsoft mail, calendar, files, or GitHub repos.\n" +
-      "HOW: google_workspace / microsoft_365 → OAuth + services[]; github → GITHUB_TOKEN in .env.",
+      "WHAT: Connect curated providers — Google Workspace, Microsoft 365 (OAuth), Xero (OAuth), or GitHub (PAT).\n" +
+      "WHEN: User asks to work with Google/Microsoft mail, calendar, files, Xero accounting, or GitHub repos.\n" +
+      "HOW: google_workspace / microsoft_365 / xero → OAuth via Settings → Integrations; github → GITHUB_TOKEN in .env.",
     parameters: {
       type: "object",
       properties: {
         provider: {
           type: "string",
-          enum: ["google_workspace", "microsoft_365", "github"],
+          enum: ["google_workspace", "microsoft_365", "xero", "github"],
           description: "Provider preset id.",
         },
         services: {
@@ -257,6 +260,24 @@ export function createConnectorTools(registry: ToolRegistry, _emitter: AgentEmit
       }
       if (provider === "microsoft_365") {
         return connectMicrosoft365Handler(registry, args);
+      }
+      if (provider === "xero") {
+        const accounts = await listXeroOAuthAccounts();
+        if (accounts.length === 0) {
+          return {
+            ok: false,
+            error:
+              "Xero OAuth not connected — open Settings → Integrations → Connect Xero (hosted sign-in, no .env setup).",
+          };
+        }
+        const a = accounts[0]!;
+        return {
+          ok: true,
+          output:
+            `Xero connected as ${a.email ?? a.accountId}` +
+            (a.tenantName ? ` (${a.tenantName})` : a.tenantId ? ` (tenant ${a.tenantId})` : "") +
+            ".\nTools: xero_list_organisations, xero_list_invoices, xero_get_invoice, xero_list_contacts, xero_create_invoice.",
+        };
       }
       if (provider !== "google_workspace") {
         return { ok: false, error: `unsupported provider '${provider}'` };
@@ -398,10 +419,10 @@ export function createConnectorTools(registry: ToolRegistry, _emitter: AgentEmit
     parameters: {
       type: "object",
       properties: {
-        provider: { type: "string", enum: ["google_workspace", "microsoft_365", "github"] },
+        provider: { type: "string", enum: ["google_workspace", "microsoft_365", "xero", "github"] },
         revoke_oauth: {
           type: "boolean",
-          description: "Google/Microsoft: delete local OAuth tokens (default false).",
+          description: "Google/Microsoft/Xero: delete local OAuth tokens (default false).",
         },
       },
       required: ["provider"],
@@ -415,6 +436,18 @@ export function createConnectorTools(registry: ToolRegistry, _emitter: AgentEmit
         const result = await disconnectGithubMcp(registry);
         if (!result.ok) return { ok: false, error: result.error };
         return { ok: true, output: result.output };
+      }
+      if (provider === "xero") {
+        if (args["revoke_oauth"] === true) {
+          const accounts = await listXeroOAuthAccounts();
+          for (const a of accounts) {
+            await revokeXeroAccount(a.accountId);
+          }
+        }
+        return {
+          ok: true,
+          output: `Disconnected xero${args["revoke_oauth"] === true ? " (OAuth tokens revoked)" : ""}.`,
+        };
       }
       if (provider === "microsoft_365") {
         const conns = await listConnectionsByParent(MICROSOFT_PARENT_PROVIDER);
@@ -515,6 +548,29 @@ export function createConnectorTools(registry: ToolRegistry, _emitter: AgentEmit
       lines.push(
         `Microsoft 365: mcp_microsoft_* sidecar + outlook/calendar/onedrive REST — outlook=${outlookRestEnabled()}, calendar=${microsoftCalendarRestEnabled()}, onedrive=${onedriveRestEnabled()}, office=${microsoftOfficeRestEnabled()}`
       );
+      lines.push(
+        `Xero: REST accounting tools — ${xeroRestEnabled() ? "on" : "off (set AGENT_XERO_REST=0 to disable)"}, connect via Settings → Integrations (hosted OAuth)`
+      );
+      lines.push("");
+
+      const xeroAccounts = await listXeroOAuthAccounts();
+      lines.push("### Xero OAuth");
+      if (xeroAccounts.length === 0) {
+        const onDisk = await countOAuthAccountFiles("xero");
+        if (onDisk > 0) {
+          lines.push(`- (tokens on disk but unreadable — ${onDisk} file(s))`);
+          lines.push(`  ${oauthDecryptHint("xero")}`);
+        } else {
+          lines.push("- (not connected — Settings → Integrations → Connect Xero)");
+        }
+      } else {
+        for (const a of xeroAccounts) {
+          const exp = new Date(a.expiresAt).toISOString();
+          lines.push(
+            `- ${a.email ?? a.accountId}${a.tenantName ? ` · ${a.tenantName}` : a.tenantId ? ` · tenant ${a.tenantId}` : ""} (expires ~${exp}, ${a.scopes.length} scopes)`
+          );
+        }
+      }
       lines.push("");
 
       const githubConns = await listConnectionsByParent(GITHUB_PARENT_PROVIDER);
@@ -726,6 +782,29 @@ export async function connectGoogleWorkspaceFromServer(
     services: opts.services,
     mode: opts.mode ?? "read_write",
     account_hint: opts.accountId,
+  });
+  if (result.ok) return { ok: true, output: result.output };
+  return { ok: false, error: result.error };
+}
+
+/** Server-side Xero connect status (web API). */
+export async function connectXeroFromServer(
+  registry: ToolRegistry
+): Promise<{ ok: boolean; output?: string; error?: string }> {
+  const { connectProviderTool } = createConnectorTools(registry, { emit: () => {} } as unknown as AgentEmitter);
+  const result = await connectProviderTool.handler({ provider: "xero" });
+  if (result.ok) return { ok: true, output: result.output };
+  return { ok: false, error: result.error };
+}
+
+export async function disconnectXeroFromServer(
+  registry: ToolRegistry,
+  revokeOAuth = false
+): Promise<{ ok: boolean; output?: string; error?: string }> {
+  const { disconnectProviderTool } = createConnectorTools(registry, { emit: () => {} } as unknown as AgentEmitter);
+  const result = await disconnectProviderTool.handler({
+    provider: "xero",
+    revoke_oauth: revokeOAuth,
   });
   if (result.ok) return { ok: true, output: result.output };
   return { ok: false, error: result.error };

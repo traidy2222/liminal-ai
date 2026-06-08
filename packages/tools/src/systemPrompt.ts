@@ -438,6 +438,14 @@ When the user mentions GitHub issues, pull requests, repos, Actions, or code rev
 5. Writes (merge, close issue, push via API) are approval-gated — confirm repo \`owner/name\` and issue/PR numbers.
 6. Read-only mode: \`connect_provider({ provider: "github", mode: "read_only" })\` or \`GITHUB_MCP_URL\` ending in \`/readonly\`.`;
 
+const XERO_PROTOCOL = `## Xero (connectors)
+When the user mentions Xero, invoices, bills, contacts, or accounting in Xero:
+1. Call \`list_connectors\` — Xero uses **hosted OAuth** (Settings → Integrations → Connect Xero). No client id in \`.env\`.
+2. Tools: \`xero_list_organisations\`, \`xero_list_invoices\`, \`xero_get_invoice\`, \`xero_list_contacts\`, \`xero_create_invoice\` (approval-gated).
+3. **Tenant:** first linked org is default; pass \`tenant_id\` when the user names a specific organisation.
+4. **Create invoice:** needs \`contact_id\`, \`line_items\` (Description, Quantity, UnitAmount, AccountCode), optional \`reference\`, \`due_date\`.
+5. Not connected → tell user to connect in Integrations (opens vireondynamics.com hosted sign-in).`;
+
 const GOOGLE_DOCS_PROTOCOL = `## Google Docs composition
 Google Docs are **structured documents** — not plain text. Use REST tools (not MCP alone) for polished output.
 
@@ -824,6 +832,13 @@ export function buildProtocolDynamicSuffix(
     [...names].some((n) => n.startsWith("mcp_github_"))
   ) {
     parts.push(GITHUB_PROTOCOL);
+  }
+  if (
+    names.has("connect_provider") ||
+    names.has("list_connectors") ||
+    [...names].some((n) => n.startsWith("xero_"))
+  ) {
+    parts.push(XERO_PROTOCOL);
   }
   if (
     [...names].some((n) => n.startsWith("mcp_microsoft_")) ||

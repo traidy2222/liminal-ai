@@ -69,6 +69,14 @@ interface IntegrationsData {
     tokenConfigured: boolean;
     mcpUrl: string;
   };
+  xero?: {
+    accounts: Array<
+      GoogleAccount & {
+        tenantId?: string;
+        tenantName?: string;
+      }
+    >;
+  };
   connections: ConnectionSummary[];
 }
 
@@ -76,7 +84,7 @@ export interface IntegrationsPanelProps {
   agentBusy: boolean;
 }
 
-type ExpandedId = "google" | "microsoft" | "github" | "advanced" | null;
+type ExpandedId = "google" | "microsoft" | "xero" | "github" | "advanced" | null;
 
 function FieldLabel({ children }: { children: React.ReactNode }) {
   return <div style={{ fontSize: 10, color: "#8899aa", marginBottom: 4 }}>{children}</div>;
@@ -192,6 +200,7 @@ export function IntegrationsPanel({ agentBusy }: IntegrationsPanelProps) {
 
   const [mode, setMode] = useState<"read_write" | "read_only">("read_write");
   const [msMode, setMsMode] = useState<"read_write" | "read_only">("read_write");
+  const [xeroMode, setXeroMode] = useState<"read_write" | "read_only">("read_write");
   const [selectedServices, setSelectedServices] = useState<Set<string>>(new Set());
   const [msSelectedServices, setMsSelectedServices] = useState<Set<string>>(new Set());
 
@@ -297,9 +306,11 @@ export function IntegrationsPanel({ agentBusy }: IntegrationsPanelProps) {
   const msAccounts = data?.microsoft?.accounts ?? [];
   const msSidecar = data?.microsoft?.sidecar;
   const msServices = data?.microsoft?.services ?? [];
+  const xeroAccounts = data?.xero?.accounts ?? [];
 
   const googleConnected = googleMcp.length > 0;
   const microsoftConnected = microsoftMcp.length > 0;
+  const xeroConnected = xeroAccounts.length > 0;
   const githubConnected = githubMcp.length > 0;
   const googleToolCount = googleMcp.reduce((n, c) => n + c.toolCount, 0);
   const microsoftToolCount = microsoftMcp.reduce((n, c) => n + c.toolCount, 0);
@@ -371,6 +382,19 @@ export function IntegrationsPanel({ agentBusy }: IntegrationsPanelProps) {
     });
     const json = (await res.json()) as { error?: string };
     if (!res.ok) throw new Error(json.error ?? "GitHub connect failed");
+  };
+
+  const xeroPrimary = async () => {
+    if (xeroConnected) {
+      const res = await webApiFetch("/api/integrations/xero?revoke=0", { method: "DELETE" });
+      const json = (await res.json()) as { error?: string };
+      if (!res.ok) throw new Error(json.error ?? "disconnect failed");
+      return;
+    }
+    const res = await webApiFetch(`/api/integrations/xero/begin?mode=${xeroMode}`);
+    if (!res.ok) throw new Error(await res.text());
+    const { connectUrl } = (await res.json()) as { connectUrl: string };
+    window.open(connectUrl, "_blank", "noopener,noreferrer");
   };
 
   return (
@@ -604,6 +628,77 @@ export function IntegrationsPanel({ agentBusy }: IntegrationsPanelProps) {
             }
           >
             Revoke Microsoft access
+          </button>
+        </div>
+      </IntegrationRow>
+
+      <IntegrationRow
+        title="Xero"
+        summary={
+          xeroConnected
+            ? `${xeroAccounts[0]?.email ?? "Xero"}${xeroAccounts[0]?.tenantName ? ` · ${xeroAccounts[0]?.tenantName}` : ""} · invoices & contacts`
+            : "Hosted OAuth — invoices, contacts, organisations (no .env setup)"
+        }
+        connected={xeroConnected}
+        expanded={expanded === "xero"}
+        onToggle={() => toggleExpand("xero")}
+        primaryLabel={xeroConnected ? "Disconnect" : "Connect"}
+        primaryDanger={xeroConnected}
+        primaryDisabled={disabled}
+        onPrimary={() => void run(xeroPrimary)}
+      >
+        <p style={{ fontSize: 10, color: "#778899", lineHeight: 1.45, margin: "10px 0" }}>
+          Opens Vireon-hosted Xero sign-in, then saves tokens locally. No Azure/Google-style client setup in your{" "}
+          <code>.env</code>.
+        </p>
+        {xeroAccounts.map((a) => (
+          <div key={a.accountId} style={{ fontSize: 11, fontFamily: "monospace", color: GREEN, marginBottom: 6 }}>
+            {a.email ?? a.accountId}
+            {a.tenantName ? ` · ${a.tenantName}` : a.tenantId ? ` · tenant ${a.tenantId}` : ""} — {a.scopes.length} scopes
+          </div>
+        ))}
+        <div style={{ marginBottom: 8 }}>
+          <label style={{ fontSize: 11, color: "#aabbcc", marginRight: 12 }}>
+            <input
+              type="radio"
+              checked={xeroMode === "read_write"}
+              onChange={() => setXeroMode("read_write")}
+              disabled={disabled || xeroConnected}
+            />{" "}
+            Read + write
+          </label>
+          <label style={{ fontSize: 11, color: "#aabbcc" }}>
+            <input
+              type="radio"
+              checked={xeroMode === "read_only"}
+              onChange={() => setXeroMode("read_only")}
+              disabled={disabled || xeroConnected}
+            />{" "}
+            Read only
+          </label>
+        </div>
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+          <button
+            type="button"
+            style={{ ...btn, fontSize: 10, padding: "6px 10px" }}
+            disabled={disabled}
+            onClick={() => void run(load)}
+          >
+            Refresh status
+          </button>
+          <button
+            type="button"
+            style={{ ...btnDanger, fontSize: 10, padding: "6px 10px" }}
+            disabled={disabled || !xeroConnected}
+            onClick={() =>
+              void run(async () => {
+                const res = await webApiFetch("/api/integrations/xero?revoke=1", { method: "DELETE" });
+                const json = (await res.json()) as { error?: string };
+                if (!res.ok) throw new Error(json.error ?? "revoke failed");
+              })
+            }
+          >
+            Revoke Xero access
           </button>
         </div>
       </IntegrationRow>

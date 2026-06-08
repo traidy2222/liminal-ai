@@ -69,6 +69,13 @@ export async function createLocalWebAuth(): Promise<LocalWebAuth> {
     ) {
       return true;
     }
+    if (
+      req.method === "POST" &&
+      path === "/api/integrations/oauth/handoff" &&
+      isLoopbackAddress(req.socket.remoteAddress)
+    ) {
+      return true;
+    }
     if (req.method === "GET" && path === "/oauth/google/callback") {
       return isLoopbackAddress(req.socket.remoteAddress);
     }
@@ -109,6 +116,8 @@ export function allowedWebCorsOrigins(port: number): string[] {
     `http://localhost:3000`,
     `http://127.0.0.1:5173`,
     `http://localhost:5173`,
+    "https://www.vireondynamics.com",
+    "https://vireondynamics.com",
   ];
   if (extra) {
     for (const o of extra.split(",")) {

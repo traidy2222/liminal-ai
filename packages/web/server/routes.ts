@@ -42,6 +42,10 @@ import {
   scopesForMicrosoftServices,
   resolveMicrosoftServices,
   missingDefaultMicrosoftScopes,
+  listXeroOAuthAccounts,
+  buildHostedIntegrationConnectUrl,
+  hostedOAuthHandoffPath,
+  applyHostedOAuthHandoff,
 } from "@liminal/core";
 import {
   handleAudioUpload,
@@ -56,6 +60,8 @@ import {
   disconnectMicrosoft365FromServer,
   connectGithubFromServer,
   disconnectGithubFromServer,
+  connectXeroFromServer,
+  disconnectXeroFromServer,
   githubTokenPresent,
   listIntegrationConnections,
   attachCustomMcpFromServer,
@@ -98,6 +104,18 @@ const pendingMicrosoftConnect = new Map<
   string,
   { exp: number; redirectUri: string; services?: string[]; mode: "read_write" | "read_only" }
 >();
+
+const pendingHostedOAuth = new Map<
+  string,
+  { exp: number; provider: string; mode: "read_write" | "read_only" }
+>();
+
+function prunePendingHostedOAuth(): void {
+  const now = Date.now();
+  for (const [k, v] of pendingHostedOAuth) {
+    if (v.exp < now) pendingHostedOAuth.delete(k);
+  }
+}
 
 function prunePendingMicrosoftConnect(): void {
   const now = Date.now();
@@ -525,6 +543,16 @@ export function createRouter(
           tokenConfigured: githubTokenPresent(),
           mcpUrl: "https://api.githubcopilot.com/mcp/",
         },
+        xero: {
+          accounts: (await listXeroOAuthAccounts()).map((a) => ({
+            accountId: a.accountId,
+            email: a.email,
+            scopes: a.scopes,
+            expiresAt: a.expiresAt,
+            tenantId: a.tenantId,
+            tenantName: a.tenantName,
+          })),
+        },
         connections,
       });
     } catch (e) {
@@ -759,6 +787,98 @@ export function createRouter(
     const bridge = active();
     const revoke = req.query["revoke"] === "1" || req.query["revoke"] === "true";
     const result = await disconnectMicrosoft365FromServer(bridge.harness.registry, revoke);
+    if (!result.ok) {
+      res.status(400).json({ error: result.error });
+      return;
+    }
+    bridge.harness.getContext().refreshProtocolDynamic(bridge.harness.registry.getActiveToolNames());
+    res.json({ ok: true, output: result.output });
+  });
+
+  router.get("/api/integrations/xero/begin", (req, res) => {
+    prunePendingHostedOAuth();
+    const state = randomBytes(16).toString("hex");
+    const mode = req.query["mode"] === "read_only" ? "read_only" : "read_write";
+    pendingHostedOAuth.set(state, { exp: Date.now() + 10 * 60_000, provider: "xero", mode });
+    const harnessRedirectUri = hostedOAuthHandoffPath(WEB_PORT);
+    const site = defaultVireonSiteOrigin();
+    const connectUrl = buildHostedIntegrationConnectUrl({
+      provider: "xero",
+      harnessRedirectUri,
+      harnessState: state,
+      siteOrigin: site,
+      mode,
+    });
+    res.json({ connectUrl, authUrl: connectUrl, state });
+  });
+
+  router.post("/api/integrations/oauth/handoff", async (req, res) => {
+    prunePendingHostedOAuth();
+    const body = req.body as {
+      state?: string;
+      provider?: string;
+      bundle?: {
+        provider?: string;
+        accountId?: string;
+        email?: string;
+        accessToken?: string;
+        refreshToken?: string;
+        expiresAt?: number;
+        scopes?: string[];
+        metadata?: Record<string, unknown>;
+      };
+    };
+    const state = body.state?.trim() ?? "";
+    const pending = state ? pendingHostedOAuth.get(state) : undefined;
+    if (!pending || pending.exp < Date.now()) {
+      res.status(403).json({ error: "Invalid or expired connect session" });
+      return;
+    }
+    const provider = body.provider?.trim() || pending.provider;
+    if (provider !== pending.provider) {
+      res.status(400).json({ error: "Provider mismatch" });
+      return;
+    }
+    const b = body.bundle;
+    if (!b?.accessToken || !b.refreshToken || !b.accountId) {
+      res.status(400).json({ error: "Incomplete OAuth bundle" });
+      return;
+    }
+    try {
+      await applyHostedOAuthHandoff({
+        provider,
+        state,
+        bundle: {
+          provider,
+          accountId: b.accountId,
+          email: b.email,
+          accessToken: b.accessToken,
+          refreshToken: b.refreshToken,
+          expiresAt: b.expiresAt ?? Date.now() + 3600_000,
+          scopes: b.scopes ?? [],
+          metadata: b.metadata,
+        },
+      });
+      pendingHostedOAuth.delete(state);
+      try {
+        const bridge = active();
+        if (!bridge.harness.getIsRunning() && provider === "xero") {
+          await connectXeroFromServer(bridge.harness.registry);
+          bridge.harness.getContext().refreshProtocolDynamic(bridge.harness.registry.getActiveToolNames());
+        }
+      } catch {
+        /* ok — user can retry from Integrations */
+      }
+      res.json({ ok: true, provider });
+    } catch (e) {
+      res.status(400).json({ error: e instanceof Error ? e.message : String(e) });
+    }
+  });
+
+  router.delete("/api/integrations/xero", async (req, res) => {
+    const bridge = active();
+    const revoke = req.query["revoke"] === "1" || req.query["revoke"] === "true";
+    const result = await disconnectXeroFromServer(bridge.harness.registry, revoke);
     if (!result.ok) {
       res.status(400).json({ error: result.error });
       return;

@@ -111,6 +111,7 @@ import { createTeamsRestTools, teamsRestEnabled } from "./teams_rest.js";
 import { createPlannerRestTools, plannerRestEnabled } from "./planner_rest.js";
 import { createGraphSearchRestTools, graphSearchRestEnabled } from "./graph_search_rest.js";
 import { createMicrosoftOfficeRestTools, microsoftOfficeRestEnabled } from "./microsoft_office_rest.js";
+import { registerXeroRestTools, xeroRestEnabled } from "./xero_rest.js";
 import { agentcardEnabled } from "./agentcard_cli.js";
 import { createAgentcardTools } from "./agentcard_tools.js";
 import { memoryPromoteTool } from "./memory_promote.js";
@@ -450,6 +451,9 @@ export async function registerAllTools(
   if (microsoftOfficeRestEnabled()) {
     for (const t of createMicrosoftOfficeRestTools()) registry.register(t);
   }
+  if (xeroRestEnabled()) {
+    registerXeroRestTools(registry);
+  }
   if (agentcardEnabled()) {
     for (const t of createAgentcardTools()) registry.register(t);
   }
@@ -559,6 +563,8 @@ export {
   disconnectMicrosoft365FromServer,
   connectGithubFromServer,
   disconnectGithubFromServer,
+  connectXeroFromServer,
+  disconnectXeroFromServer,
 } from "./connect_provider.js";
 export { getMicrosoftSidecarStatus, stopMicrosoftSidecar } from "./microsoft_sidecar.js";
 export {

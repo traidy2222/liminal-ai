@@ -14,7 +14,9 @@ tag when Express serves `index.html`. The Vireon auth callback
 callback (`/api/vireon/auth/callback`) is also exempt so the browser sign-in redirect can land.
 
 Bind host defaults to `127.0.0.1` (`AGENT_WEB_BIND_HOST`); extra CORS origins via
-`AGENT_WEB_CORS_ORIGINS`.
+`AGENT_WEB_CORS_ORIGINS` (defaults include `https://www.vireondynamics.com` for hosted OAuth handoff).
+
+Exempt from web token auth: `/api/vireon/auth/callback`, `POST /api/integrations/oauth/handoff` (loopback only).
 
 ## Session and config
 
@@ -34,6 +36,20 @@ Bind host defaults to `127.0.0.1` (`AGENT_WEB_BIND_HOST`); extra CORS origins vi
 
 Locked fields: keys set in real `process.env` cannot be overridden via PUT. `PUT` also accepts
 `provider.inferenceMode` (`byok` \| `managed` \| `auto`).
+
+## Integrations (OAuth)
+
+Hosted OAuth for Google, Microsoft, Xero, and GitHub. Status and connect flows from
+`packages/web/client/settings/IntegrationsPanel.tsx`.
+
+| Method | Path | Purpose |
+|--------|------|---------|
+| `GET` | `/api/integrations` | Snapshot: google, microsoft, github, xero accounts + MCP/OpenAPI connections |
+| `GET` | `/api/integrations/xero/begin?mode=read_write\|read_only` | Start hosted Xero OAuth — returns `connectUrl` + `state`; opens vireondynamics.com |
+| `POST` | `/api/integrations/oauth/handoff` | Receives token bundle from hosted callback (loopback only, auth-exempt) |
+| `DELETE` | `/api/integrations/xero?revoke=0\|1` | Disconnect Xero; `revoke=1` also revokes tokens at Xero |
+
+See [Xero](../guides/xero.md) for operator setup on vireondynamics.com.
 
 ## Vireon account, licensing &amp; managed inference
 

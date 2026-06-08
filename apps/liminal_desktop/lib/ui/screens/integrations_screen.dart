@@ -23,6 +23,7 @@ class _IntegrationsScreenState extends State<IntegrationsScreen> {
   String? _expandedId;
   String _googleMode = 'read_write';
   String _microsoftMode = 'read_write';
+  String _xeroMode = 'read_write';
   final Set<String> _googleServices = {};
   final Set<String> _microsoftServices = {};
   bool _servicesInitialized = false;
@@ -115,6 +116,14 @@ class _IntegrationsScreenState extends State<IntegrationsScreen> {
       return;
     }
     await host.connectMicrosoft365(services: services, mode: _microsoftMode);
+  }
+
+  Future<void> _xeroPrimary(AppController host, IntegrationsSnapshot snap) async {
+    if (snap.xeroConnected) {
+      await host.disconnectXero(revoke: false);
+      return;
+    }
+    await host.connectXeroOAuth(mode: _xeroMode);
   }
 
   @override
@@ -238,6 +247,59 @@ class _IntegrationsScreenState extends State<IntegrationsScreen> {
                   onReattach: () =>
                       host.connectMicrosoft365(services: msServices, mode: _microsoftMode),
                   onRevoke: () => host.disconnectMicrosoft(revoke: true),
+                ),
+              ),
+              const SizedBox(height: 10),
+              _IntegrationTile(
+                title: 'Xero',
+                summary: snap.xeroConnected
+                    ? '${snap.xero.accounts.first.email ?? "Xero"}${snap.xero.accounts.first.tenantName != null ? " · ${snap.xero.accounts.first.tenantName}" : ""} · accounting'
+                    : 'Hosted OAuth — invoices, contacts, organisations',
+                connected: snap.xeroConnected,
+                expanded: _expandedId == 'xero',
+                onToggle: () => _toggleExpanded('xero'),
+                primaryLabel: snap.xeroConnected ? 'Disconnect' : 'Connect',
+                primaryDanger: snap.xeroConnected,
+                disabled: disabled,
+                onPrimary: () => _xeroPrimary(host, snap),
+                child: Padding(
+                  padding: const EdgeInsets.only(top: 8),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'Opens Vireon-hosted Xero sign-in — no client id in .env.',
+                        style: TextStyle(color: lim.textMuted, fontSize: 12, height: 1.4),
+                      ),
+                      const SizedBox(height: 8),
+                      Row(
+                        children: [
+                          Radio<String>(
+                            value: 'read_write',
+                            groupValue: _xeroMode,
+                            onChanged: disabled || snap.xeroConnected
+                                ? null
+                                : (v) => setState(() => _xeroMode = v ?? 'read_write'),
+                          ),
+                          const Text('Read + write'),
+                          const SizedBox(width: 12),
+                          Radio<String>(
+                            value: 'read_only',
+                            groupValue: _xeroMode,
+                            onChanged: disabled || snap.xeroConnected
+                                ? null
+                                : (v) => setState(() => _xeroMode = v ?? 'read_only'),
+                          ),
+                          const Text('Read only'),
+                        ],
+                      ),
+                      if (snap.xeroConnected)
+                        TextButton(
+                          onPressed: disabled ? null : () => host.disconnectXero(revoke: true),
+                          child: Text('Revoke Xero access', style: TextStyle(color: lim.danger)),
+                        ),
+                    ],
+                  ),
                 ),
               ),
               const SizedBox(height: 10),

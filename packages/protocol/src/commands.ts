@@ -137,6 +137,11 @@ export interface ClientCommandMap {
     mode?: "read_write" | "read_only";
   };
   disconnect_microsoft: { revoke?: boolean };
+  connect_xero_oauth: {
+    mode?: "read_write" | "read_only";
+    openBrowser?: boolean;
+  };
+  disconnect_xero: { revoke?: boolean };
   connect_github: { mode?: "read_write" | "read_only" };
   disconnect_github: Record<string, never>;
   attach_integration_mcp: {

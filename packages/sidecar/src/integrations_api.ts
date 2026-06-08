@@ -3,21 +3,25 @@ import {
   ALL_MICROSOFT_SERVICE_IDS,
   listGoogleOAuthAccounts,
   listMicrosoftOAuthAccounts,
+  listXeroOAuthAccounts,
   missingDefaultWorkspaceScopes,
   missingDefaultMicrosoftScopes,
   runGoogleConnectFlow,
   runMicrosoftConnectFlow,
+  runXeroHostedConnectFlow,
 } from "@liminal/core";
 import {
   attachCustomMcpFromServer,
   connectGithubFromServer,
   connectGoogleWorkspaceFromServer,
   connectMicrosoft365FromServer,
+  connectXeroFromServer,
   connectOpenApiFromServer,
   detachCustomMcpFromServer,
   disconnectGithubFromServer,
   disconnectGoogleWorkspaceFromServer,
   disconnectMicrosoft365FromServer,
+  disconnectXeroFromServer,
   disconnectOpenApiFromServer,
   getGoogleSidecarStatus,
   getMicrosoftSidecarStatus,
@@ -51,6 +55,16 @@ export async function buildIntegrationsSnapshot() {
     github: {
       tokenConfigured: githubTokenPresent(),
       mcpUrl: "https://api.githubcopilot.com/mcp/",
+    },
+    xero: {
+      accounts: (await listXeroOAuthAccounts()).map((a) => ({
+        accountId: a.accountId,
+        email: a.email,
+        scopes: a.scopes,
+        expiresAt: a.expiresAt,
+        tenantId: a.tenantId,
+        tenantName: a.tenantName,
+      })),
     },
     connections: await listIntegrationConnections(),
   };
@@ -195,6 +209,41 @@ export async function disconnectGoogle(
   if (!result.ok) throw new Error(result.error ?? "Google disconnect failed.");
   await refreshIntegrationsOnAllHarnesses(registry);
   return result.output ?? "Google disconnected.";
+}
+
+export async function connectXeroOAuth(
+  registry: ChatRegistry,
+  opts: {
+    mode?: "read_write" | "read_only";
+    openBrowser?: boolean;
+  }
+): Promise<{ email?: string; accountId: string; tenantName?: string }> {
+  const result = await runXeroHostedConnectFlow({
+    mode: opts.mode ?? "read_write",
+    openBrowser: opts.openBrowser !== false,
+    onStatus: (m) => console.log(`[xero-oauth] ${m}`),
+  });
+  try {
+    assertHarnessesIdle(registry);
+    const bridge = await registry.getOrCreateActive();
+    await connectXeroFromServer(bridge.harness.registry);
+    await refreshIntegrationsOnAllHarnesses(registry);
+  } catch (e) {
+    console.warn(
+      "[xero-oauth] tokens saved but harness refresh failed:",
+      e instanceof Error ? e.message : e
+    );
+  }
+  return result;
+}
+
+export async function disconnectXero(registry: ChatRegistry, revoke: boolean): Promise<string> {
+  assertHarnessesIdle(registry);
+  const bridge = await registry.getOrCreateActive();
+  const result = await disconnectXeroFromServer(bridge.harness.registry, revoke);
+  if (!result.ok) throw new Error(result.error ?? "Xero disconnect failed.");
+  await refreshIntegrationsOnAllHarnesses(registry);
+  return result.output ?? "Xero disconnected.";
 }
 
 export async function attachIntegrationMcp(

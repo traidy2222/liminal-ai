@@ -137,7 +137,7 @@ export const TOOL_FAMILIES: Record<string, { description: string; tools: readonl
   connectors: {
     description:
       "Curated provider integrations: Google Workspace (OAuth) and GitHub (GITHUB_TOKEN) via connect_provider. " +
-      "Google: Settings → Integrations or `liminal connect google`. GitHub: PAT in .env + connect_provider github.",
+      "Google: Settings → Integrations or `liminal connect google`. GitHub: PAT in .env. Xero: hosted OAuth (no .env).",
     tools: [
       "connect_provider",
       "disconnect_provider",
@@ -207,6 +207,11 @@ export const TOOL_FAMILIES: Record<string, { description: string; tools: readonl
       "slides_rest_get_page",
       "slides_rest_get_thumbnail",
       "office_rest_export_file",
+      "xero_list_organisations",
+      "xero_list_invoices",
+      "xero_get_invoice",
+      "xero_list_contacts",
+      "xero_create_invoice",
     ],
   },
   agentcard: {
