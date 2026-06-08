@@ -101,14 +101,10 @@ export async function connectGoogleOAuth(
   });
   let attachOutput: string | undefined;
   if (opts.attach !== false) {
-    try {
-      attachOutput = await connectGoogleWorkspace(registry, {
-        services: opts.services,
-        mode: opts.mode ?? "read_write",
-      });
-    } catch (e) {
-      attachOutput = `OAuth OK but MCP attach failed: ${e instanceof Error ? e.message : String(e)}`;
-    }
+    attachOutput = await connectGoogleWorkspace(registry, {
+      services: opts.services,
+      mode: opts.mode ?? "read_write",
+    });
   }
   return { email: result.email, accountId: result.accountId, attachOutput };
 }
@@ -163,14 +159,10 @@ export async function connectMicrosoftOAuth(
   });
   let attachOutput: string | undefined;
   if (opts.attach !== false) {
-    try {
-      attachOutput = await connectMicrosoft365(registry, {
-        services: opts.services,
-        mode: opts.mode ?? "read_write",
-      });
-    } catch (e) {
-      attachOutput = `OAuth OK but MCP attach failed: ${e instanceof Error ? e.message : String(e)}`;
-    }
+    attachOutput = await connectMicrosoft365(registry, {
+      services: opts.services,
+      mode: opts.mode ?? "read_write",
+    });
   }
   return { email: result.email, accountId: result.accountId, attachOutput };
 }

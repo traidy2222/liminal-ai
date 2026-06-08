@@ -90,6 +90,17 @@ class _IntegrationsScreenState extends State<IntegrationsScreen> {
     setState(() => _expandedId = _expandedId == id ? null : id);
   }
 
+  Future<void> _attachGoogleToolsIfNeeded(
+    AppController host,
+    List<String> services,
+  ) async {
+    if (host.integrations.googleConnected || host.integrations.google.accounts.isEmpty) {
+      return;
+    }
+    if (host.chats.any((c) => c.busy)) return;
+    await host.connectGoogleWorkspace(services: services, mode: _googleMode);
+  }
+
   Future<void> _googlePrimary(AppController host, IntegrationsSnapshot snap, List<String> services) async {
     if (snap.googleConnected) {
       await host.disconnectGoogle(revoke: true);
@@ -97,6 +108,7 @@ class _IntegrationsScreenState extends State<IntegrationsScreen> {
     }
     if (snap.google.accounts.isEmpty) {
       await host.connectGoogleOAuth(services: services, mode: _googleMode);
+      await _attachGoogleToolsIfNeeded(host, services);
       return;
     }
     await host.connectGoogleWorkspace(services: services, mode: _googleMode);
@@ -188,12 +200,18 @@ class _IntegrationsScreenState extends State<IntegrationsScreen> {
                 summary: snap.googleConnected
                     ? '${snap.google.accounts.first.email ?? "Google"} · ${snap.googleToolCount} tools'
                     : snap.google.accounts.isNotEmpty
-                        ? 'Signed in — Connect for tools, or expand → Revoke to sign out'
+                        ? host.integrationsBusy
+                            ? 'Signing in as ${snap.google.accounts.first.email ?? "Google"} — attaching agent tools…'
+                            : 'Signed in as ${snap.google.accounts.first.email ?? "Google"} — tap Enable tools'
                         : 'Gmail, Calendar, Drive, Docs, Sheets',
                 connected: snap.googleConnected,
                 expanded: _expandedId == 'google',
                 onToggle: () => _toggleExpanded('google'),
-                primaryLabel: snap.googleConnected ? 'Disconnect' : 'Connect',
+                primaryLabel: snap.googleConnected
+                    ? 'Disconnect'
+                    : snap.google.accounts.isNotEmpty
+                        ? 'Enable tools'
+                        : 'Connect',
                 primaryDanger: snap.googleConnected,
                 disabled: disabled,
                 onPrimary: () => unawaited(_googlePrimary(host, host.integrations, services)),

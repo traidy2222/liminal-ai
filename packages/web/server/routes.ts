@@ -921,22 +921,45 @@ export function createRouter(
           metadata: b.metadata,
         },
       });
+      const pendingServices = pending.services;
+      const pendingMode = pending.mode;
       pendingHostedOAuth.delete(state);
+      let attachWarning: string | undefined;
       try {
         const bridge = active();
-        if (!bridge.harness.getIsRunning() && provider === "xero") {
-          await connectXeroFromServer(bridge.harness.registry);
-          bridge.harness.getContext().refreshProtocolDynamic(bridge.harness.registry.getActiveToolNames());
+        if (provider === "xero") {
+          const xeroResult = await connectXeroFromServer(bridge.harness.registry);
+          if (!xeroResult.ok) attachWarning = xeroResult.error;
+          else
+            bridge.harness.getContext().refreshProtocolDynamic(bridge.harness.registry.getActiveToolNames());
         }
-        if (!bridge.harness.getIsRunning() && provider === "google") {
-          await connectGoogleWorkspaceFromServer(bridge.harness.registry, {
-            services: pending.services,
-            mode: pending.mode,
+        if (provider === "google") {
+          const googleResult = await connectGoogleWorkspaceFromServer(bridge.harness.registry, {
+            services: pendingServices,
+            mode: pendingMode,
           });
-          bridge.harness.getContext().refreshProtocolDynamic(bridge.harness.registry.getActiveToolNames());
+          if (!googleResult.ok) attachWarning = googleResult.error;
+          else
+            bridge.harness.getContext().refreshProtocolDynamic(bridge.harness.registry.getActiveToolNames());
         }
-      } catch {
-        /* ok — user can retry from Integrations */
+      } catch (e) {
+        attachWarning = e instanceof Error ? e.message : String(e);
+      }
+      if (attachWarning && wantsIntegrationHandoffHtml(req)) {
+        res
+          .status(200)
+          .type("html")
+          .send(
+            integrationHandoffSuccessHtml(provider).replace(
+              "Close this tab",
+              `Signed in, but agent tools failed to attach: ${escapeHtml(attachWarning)}. Close this tab`
+            )
+          );
+        return;
+      }
+      if (attachWarning) {
+        respondIntegrationHandoffError(req, res, 500, attachWarning);
+        return;
       }
       if (wantsIntegrationHandoffHtml(req)) {
         res.status(200).type("html").send(integrationHandoffSuccessHtml(provider));

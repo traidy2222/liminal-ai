@@ -954,9 +954,12 @@ class AppController extends ChangeNotifier {
         await _refreshIntegrationsFromServer();
         final attachOutput = data['attachOutput'] as String?;
         if (attachOutput != null &&
+            attachOutput.trim().isNotEmpty &&
             (attachOutput.contains('failed') ||
                 attachOutput.contains('Skipped') ||
-                attachOutput.contains('Partial'))) {
+                attachOutput.contains('Partial') ||
+                attachOutput.contains('error') ||
+                attachOutput.contains('busy'))) {
           integrationsError = attachOutput;
         }
         notifyListeners();

@@ -243,6 +243,12 @@ export function IntegrationsPanel({ agentBusy }: IntegrationsPanelProps) {
     void load();
   }, [load]);
 
+  const googleToolsConnected = (d: IntegrationsData) =>
+    d.connections.some((c) => c.parentProvider === "google_workspace");
+
+  const microsoftToolsConnected = (d: IntegrationsData) =>
+    d.connections.some((c) => c.parentProvider === "microsoft_365");
+
   /** Poll after opening a browser OAuth tab until tokens/tools appear on the harness. */
   const pollIntegrationsUntil = async (
     predicate: (d: IntegrationsData) => boolean,
@@ -348,11 +354,7 @@ export function IntegrationsPanel({ agentBusy }: IntegrationsPanelProps) {
       if (!res.ok) throw new Error(await res.text());
       const { connectUrl } = (await res.json()) as { connectUrl: string };
       window.open(connectUrl, "_blank", "noopener,noreferrer");
-      await pollIntegrationsUntil(
-        (d) =>
-          d.google.accounts.length > 0 ||
-          d.connections.some((c) => c.parentProvider === "google_workspace")
-      );
+      await pollIntegrationsUntil((d) => googleToolsConnected(d));
       return;
     }
     const res = await webApiFetch("/api/integrations/google/connect", {
@@ -379,11 +381,7 @@ export function IntegrationsPanel({ agentBusy }: IntegrationsPanelProps) {
       if (!res.ok) throw new Error(await res.text());
       const { authUrl } = (await res.json()) as { authUrl: string };
       window.open(authUrl, "_blank", "noopener,noreferrer");
-      await pollIntegrationsUntil(
-        (d) =>
-          (d.microsoft?.accounts.length ?? 0) > 0 ||
-          d.connections.some((c) => c.parentProvider === "microsoft_365")
-      );
+      await pollIntegrationsUntil((d) => microsoftToolsConnected(d));
       return;
     }
     const res = await webApiFetch("/api/integrations/microsoft/connect", {
@@ -454,13 +452,17 @@ export function IntegrationsPanel({ agentBusy }: IntegrationsPanelProps) {
           googleConnected
             ? `${accounts[0]?.email ?? "Google"} · ${googleToolCount} agent tools`
             : accounts.length > 0
-              ? `Signed in as ${accounts[0]?.email ?? "Google"} — Connect for tools, or Revoke below to sign out`
+              ? busy
+                ? `Signing in as ${accounts[0]?.email ?? "Google"} — attaching agent tools…`
+                : `Signed in as ${accounts[0]?.email ?? "Google"} — tap Enable tools (or Revoke below)`
               : "Gmail, Calendar, Drive, Docs, Sheets"
         }
         connected={googleConnected}
         expanded={expanded === "google"}
         onToggle={() => toggleExpand("google")}
-        primaryLabel={googleConnected ? "Disconnect" : "Connect"}
+        primaryLabel={
+          googleConnected ? "Disconnect" : accounts.length > 0 ? "Enable tools" : "Connect"
+        }
         primaryDanger={googleConnected}
         primaryDisabled={disabled}
         onPrimary={() => void run(googlePrimary)}
