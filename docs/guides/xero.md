@@ -14,7 +14,7 @@ Or ask the agent: `connect_provider({ provider: "xero" })` after OAuth is on dis
 ### Read vs write
 
 - **Read + write** (default): list/get invoices & contacts, create draft sales invoices (`xero_create_invoice` is approval-gated).
-- **Read only**: transactions/contacts/settings/reports read scopes only — reconnect to change mode.
+- **Read only**: invoices/contacts/settings read scopes only — reconnect to change mode.
 
 ## Agent tools
 
@@ -68,3 +68,4 @@ Same hosted handoff pattern as Vireon license connect (`/connect/harness`).
 - **"Harness rejected handoff"** — Liminal web server must be running on `:3001` when you finish Xero sign-in.
 - **No organisation** — reconnect; the harness stores the first linked tenant from `GET /connections`.
 - **403 on API calls** — wrong tenant or missing scope; revoke in Integrations and reconnect with the mode you need.
+- **`invalid_scope` on Xero sign-in** — Xero apps created after 2026-03-02 require granular scopes (`accounting.invoices`, not legacy `accounting.transactions`). Redeploy the latest vireondynamics.com connect routes.

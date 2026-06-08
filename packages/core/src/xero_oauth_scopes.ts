@@ -5,21 +5,21 @@ export type XeroMode = "read_write" | "read_only";
 
 const IDENTITY = ["openid", "profile", "email", "offline_access"] as const;
 
+/** Granular scopes (required for Xero apps created on/after 2026-03-02). */
 const READ_SCOPES = [
-  "accounting.transactions.read",
+  "accounting.invoices.read",
   "accounting.contacts.read",
   "accounting.settings.read",
-  "accounting.reports.read",
 ] as const;
 
 const WRITE_SCOPES = [
-  "accounting.transactions",
+  "accounting.invoices",
   "accounting.contacts",
   "accounting.settings",
 ] as const;
 
 export function scopesForXeroMode(mode: XeroMode): string[] {
-  const accounting = mode === "read_only" ? [...READ_SCOPES] : [...WRITE_SCOPES, "accounting.reports.read"];
+  const accounting = mode === "read_only" ? [...READ_SCOPES] : [...WRITE_SCOPES];
   return [...IDENTITY, ...accounting];
 }
 
