@@ -1,5 +1,3 @@
-import 'dart:async';
-
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 
@@ -9,48 +7,104 @@ import '../../models/persona_ui_theme.dart';
 import '../../routing/routes.dart';
 import '../../state/app_controller.dart';
 import '../theme/liminal_theme_extension.dart';
-import '../widgets/approval_sheet.dart';
-import '../widgets/ask_user_sheet.dart';
+import '../theme/liminal_tokens.dart';
 import '../widgets/chat_drawer.dart';
-import '../../state/chat_session_controller.dart';
-import '../widgets/browser_dock.dart';
-import '../widgets/composer.dart';
+import '../widgets/chat_pane.dart';
 import '../widgets/liminal_app_bar.dart';
 import '../widgets/liminal_shell.dart';
-import '../widgets/sticky_message_list.dart';
 
-class HomeScreen extends StatelessWidget {
+/// Liminal chat workspace (multi-pane, up to [AppController.maxVisibleChats]). Opened from [VireonHubScreen].
+class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
+
+  @override
+  State<HomeScreen> createState() => _HomeScreenState();
+}
+
+class _HomeScreenState extends State<HomeScreen> {
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) => _ensureWorkspace());
+  }
+
+  Future<void> _ensureWorkspace() async {
+    final host = AppScope.of(context);
+    if (host.inChatWorkspace && host.visibleChatIds.isNotEmpty) return;
+
+    if (host.activeChatId != null) {
+      await host.enterChatWorkspace(host.activeChatId!);
+      return;
+    }
+    if (host.chats.isNotEmpty) {
+      final sorted = List.of(host.chats)
+        ..sort((a, b) => b.updatedAt.compareTo(a.updatedAt));
+      await host.enterChatWorkspace(sorted.first.chatId);
+      return;
+    }
+    if (!mounted) return;
+    host.returnToHub();
+    context.go(AppRoutes.hub);
+  }
+
+  void _goHome(AppController host) {
+    host.returnToHub();
+    context.go(AppRoutes.hub);
+  }
 
   @override
   Widget build(BuildContext context) {
     final host = AppScope.watch(context);
     final chatId = host.activeChatId;
-    final session = chatId != null ? host.sessionFor(chatId) : null;
     final lim = LiminalTheme.of(context);
     final copy = host.config?.resolvedCopy;
     final layout = PersonaLayoutSpec.fromTheme(
       host.config?.resolvedTheme ?? PersonaUiTheme.liminalDefault,
     );
+    final panes = host.visibleChatIds;
+    final paneListenables = [
+      host,
+      ...panes.map(host.sessionFor),
+    ];
 
     return LiminalShell(
       drawer: ChatDrawer(
         chats: host.chats,
         activeChatId: host.activeChatId,
-        onSelect: host.activateChat,
-        onNewChat: () => host.createChat(),
+        visibleChatIds: host.visibleChatIds,
+        onHome: () => _goHome(host),
+        onSelect: host.enterChatWorkspace,
+        onOpenBeside: host.openChatBeside,
+        onNewChat: () async {
+          final id = await host.createChat();
+          if (id != null) await host.enterChatWorkspace(id);
+        },
         onDelete: host.deleteChat,
       ),
       appBar: AppBar(
+        leading: Builder(
+          builder: (context) => IconButton(
+            tooltip: 'All chats',
+            icon: const Icon(Icons.menu),
+            onPressed: () => Scaffold.of(context).openDrawer(),
+          ),
+        ),
         title: LiminalAppBarTitle(
           title: host.config?.personaDisplayLabel ?? 'Liminal',
           subtitle: _subtitle(host),
         ),
         actions: [
+          IconButton(
+            tooltip: 'Back to home',
+            icon: const Icon(Icons.home_outlined),
+            onPressed: () => _goHome(host),
+          ),
           ListenableBuilder(
-            listenable: session ?? _EmptyListenable(),
+            listenable: Listenable.merge(paneListenables),
             builder: (context, _) {
-              if (session?.busy != true) return const SizedBox.shrink();
+              final anyBusy =
+                  panes.any((id) => host.sessionFor(id).busy);
+              if (!anyBusy) return const SizedBox.shrink();
               return Padding(
                 padding: const EdgeInsets.only(right: 4),
                 child: Icon(Icons.bolt, color: lim.accent, size: 20),
@@ -98,155 +152,117 @@ class HomeScreen extends StatelessWidget {
           ),
         ],
       ),
-      body: Column(
-        children: [
-          Expanded(
-            child: session == null
-                ? Center(
-                    child: Text(
-                      'No active chat',
-                      style: Theme.of(context).textTheme.bodyLarge?.copyWith(
-                            color: lim.textMuted,
-                          ),
+      body: panes.isEmpty
+          ? Center(
+              child: Text(
+                'Opening chat…',
+                style: Theme.of(context).textTheme.bodyLarge?.copyWith(
+                      color: lim.textMuted,
                     ),
-                  )
-                : ListenableBuilder(
-                    listenable: Listenable.merge([session, host]),
-                    builder: (context, _) {
-                      final browser = session.browserView;
-                      final chatPane = session.messages.isEmpty
-                          ? _EmptyState(
-                              title: copy?.emptyTitle ?? 'Ready when you are',
-                              body: copy?.emptyBody ??
-                                  'Ask anything, or start with a task.',
-                            )
-                          : _buildTranscript(context, session, host, layout);
-
-                      if (browser == null || !browser.open) {
-                        return chatPane;
-                      }
-
-                      return Row(
-                        crossAxisAlignment: CrossAxisAlignment.stretch,
-                        children: [
-                          Expanded(child: chatPane),
-                          BrowserDock(
-                            view: browser,
-                            expanded: session.browserDockExpanded,
-                            onToggleExpanded: session.toggleBrowserDock,
+              ),
+            )
+          : panes.length == 1
+              ? ChatPane(
+                  chatId: panes.first,
+                  host: host,
+                  session: host.sessionFor(panes.first),
+                  layout: layout,
+                  focused: true,
+                  title: chatTitleFor(host.chats, panes.first),
+                  busy: host.sessionFor(panes.first).busy,
+                  emptyTitle: copy?.emptyTitle ?? 'Ready when you are',
+                  emptyBody:
+                      copy?.emptyBody ?? 'Ask anything, or start with a task.',
+                )
+              : panes.length == 2
+                  ? Row(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: _paneRowChildren(
+                        panes: panes,
+                        host: host,
+                        layout: layout,
+                        chatId: chatId,
+                        lim: lim,
+                        copy: copy,
+                        expand: true,
+                      ),
+                    )
+                  : SingleChildScrollView(
+                      scrollDirection: Axis.horizontal,
+                      child: SizedBox(
+                        height: MediaQuery.sizeOf(context).height,
+                        child: Row(
+                          crossAxisAlignment: CrossAxisAlignment.stretch,
+                          children: _paneRowChildren(
+                            panes: panes,
+                            host: host,
+                            layout: layout,
+                            chatId: chatId,
+                            lim: lim,
+                            copy: copy,
+                            expand: false,
+                            paneWidth: 380,
                           ),
-                        ],
-                      );
-                    },
-                  ),
-          ),
-          ListenableBuilder(
-            listenable: session ?? _EmptyListenable(),
-            builder: (context, _) {
-              if (session?.pendingApproval != null) {
-                return ApprovalSheet(
-                  pending: session!.pendingApproval!,
-                  onApprove: () => host.resolveApproval('approve'),
-                  onReject: () => host.resolveApproval('reject'),
-                );
-              }
-              if (session?.pendingAskUser != null) {
-                return AskUserSheet(
-                  pending: session!.pendingAskUser!,
-                  onSubmit: host.resolveAskUser,
-                );
-              }
-              return const SizedBox.shrink();
-            },
-          ),
-          ListenableBuilder(
-            listenable: session ?? _EmptyListenable(),
-            builder: (context, _) => Composer(
-              enabled: chatId != null,
-              busy: session?.busy ?? false,
-              config: host.config,
-              dictation: host.dictation,
-              speechOutput: host.speechOutput,
-              dictationNotice: host.dictationNotice,
-              onDismissDictationNotice: host.dismissDictationNotice,
-              onDictationAutoSend: host.handleDictationAutoSend,
-              onSend: (text, attachments) {
-                unawaited(
-                  host.sendMessage(
-                    text,
-                    attachments: attachments,
-                    liveDictation: host.dictationSessionActive,
-                  ),
-                );
-              },
-              onAbort: host.abortTurn,
-            ),
-          ),
-        ],
-      ),
+                        ),
+                      ),
+                    ),
     );
   }
 
+  static const _scrollPaneWidth = 380.0;
+
+  List<Widget> _paneRowChildren({
+    required List<String> panes,
+    required AppController host,
+    required PersonaLayoutSpec layout,
+    required String? chatId,
+    required LiminalTokens lim,
+    required dynamic copy,
+    required bool expand,
+    double paneWidth = _scrollPaneWidth,
+  }) {
+    final children = <Widget>[];
+    for (var i = 0; i < panes.length; i++) {
+      if (i > 0) {
+        children.add(
+          VerticalDivider(
+            width: 1,
+            thickness: 1,
+            color: lim.border,
+          ),
+        );
+      }
+      final pane = ChatPane(
+        chatId: panes[i],
+        host: host,
+        session: host.sessionFor(panes[i]),
+        layout: layout,
+        focused: panes[i] == chatId,
+        title: chatTitleFor(host.chats, panes[i]),
+        busy: host.sessionFor(panes[i]).busy,
+        showClose: true,
+        onFocus: () => host.focusChat(panes[i]),
+        onClose: () => host.closeChatPane(panes[i]),
+        emptyTitle: copy?.emptyTitle ?? 'Ready when you are',
+        emptyBody:
+            copy?.emptyBody ?? 'Ask anything, or start with a task.',
+      );
+      if (expand) {
+        children.add(Expanded(child: pane));
+      } else {
+        children.add(SizedBox(width: paneWidth, child: pane));
+      }
+    }
+    return children;
+  }
+
   String? _subtitle(AppController host) {
+    if (host.visibleChatIds.length > 1) {
+      return '${host.visibleChatIds.length} chats open';
+    }
     final active =
         host.chats.where((x) => x.chatId == host.activeChatId).toList();
     if (active.isEmpty) return null;
     return active.first.title;
-  }
-
-  Widget _buildTranscript(
-    BuildContext context,
-    ChatSessionController session,
-    AppController host,
-    PersonaLayoutSpec layout,
-  ) {
-    final list = StickyMessageList(
-      messages: session.messages,
-      showRawHarness: host.showRawHarness,
-    );
-    if (layout.transcriptMaxWidth <= 0) return list;
-    return Center(
-      child: ConstrainedBox(
-        constraints: BoxConstraints(maxWidth: layout.transcriptMaxWidth),
-        child: list,
-      ),
-    );
-  }
-}
-
-class _EmptyListenable extends ChangeNotifier {}
-
-/// Persona-voiced empty conversation state.
-class _EmptyState extends StatelessWidget {
-  const _EmptyState({required this.title, required this.body});
-
-  final String title;
-  final String body;
-
-  @override
-  Widget build(BuildContext context) {
-    final lim = LiminalTheme.of(context);
-    final theme = Theme.of(context);
-    return Center(
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 32),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Text(
-              title,
-              textAlign: TextAlign.center,
-              style: theme.textTheme.headlineMedium?.copyWith(color: lim.text),
-            ),
-            const SizedBox(height: 10),
-            Text(
-              body,
-              textAlign: TextAlign.center,
-              style: theme.textTheme.bodyMedium?.copyWith(color: lim.textMuted, height: 1.4),
-            ),
-          ],
-        ),
-      ),
-    );
   }
 }

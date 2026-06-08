@@ -112,6 +112,7 @@ class _ComposerState extends State<Composer> {
       }
       _controller.clear();
       _dictationSpan.clearAfterSend();
+      _dictationSpan.onStart();
       setState(() {
         _localDictationNotice = null;
         _attachError = null;
@@ -396,6 +397,8 @@ class _ComposerState extends State<Composer> {
     switch (d.status) {
       case DictationStatus.listening:
         return 'Listening…';
+      case DictationStatus.paused:
+        return 'Paused (agent speaking)…';
       case DictationStatus.recording:
         return 'Recording…';
       case DictationStatus.uploading:

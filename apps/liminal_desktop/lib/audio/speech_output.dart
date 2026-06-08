@@ -49,6 +49,9 @@ class SpeechOutput extends ChangeNotifier {
   /// True while TTS is playing or clips are queued — pause mic capture (Windows).
   void Function(bool hold)? onPlaybackHoldChange;
 
+  /// Fired when post-playback mic cooldown ends — dictation can re-arm VAD.
+  void Function()? onMicCaptureUnblocked;
+
   void setClipFetcher(TtsClipFetcher? fetcher) {
     _clipFetcher = fetcher;
   }
@@ -68,11 +71,16 @@ class SpeechOutput extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// Block speech onset while audio is playing or during the short echo tail.
+  /// Queued (not yet playing) clips do not block — avoids stuck dictation when
+  /// the queue cannot drain while transcribing.
   bool shouldBlockMicCapture() {
     return _playing ||
-        _queue.isNotEmpty ||
         DateTime.now().millisecondsSinceEpoch < _micBlockUntil;
   }
+
+  /// True only while a clip is actively playing (used to heal mic suspend).
+  bool get isTtsPipelineActive => _playing;
 
   void _setPlaybackHold(bool hold) {
     if (_playbackHold == hold) return;
@@ -81,7 +89,20 @@ class SpeechOutput extends ChangeNotifier {
   }
 
   void _syncPlaybackHold() {
-    _setPlaybackHold(_playing || _queue.isNotEmpty);
+    // Suspend mic only during actual playback — not for queued clips waiting to play.
+    _setPlaybackHold(_playing);
+  }
+
+  void _scheduleMicUnblockNotify() {
+    final delayMs =
+        _micBlockUntil - DateTime.now().millisecondsSinceEpoch;
+    if (delayMs <= 0) {
+      if (!_playing) onMicCaptureUnblocked?.call();
+      return;
+    }
+    Future.delayed(Duration(milliseconds: delayMs), () {
+      if (!_playing) onMicCaptureUnblocked?.call();
+    });
   }
 
   Future<bool> unlockAudio() async {
@@ -166,7 +187,10 @@ class SpeechOutput extends ChangeNotifier {
     if (_queue.isEmpty) {
       _playing = false;
       isSpeaking = false;
+      _micBlockUntil =
+          DateTime.now().millisecondsSinceEpoch + micBlockAfterTtsMs;
       _syncPlaybackHold();
+      _scheduleMicUnblockNotify();
       notifyListeners();
       return;
     }
@@ -182,9 +206,7 @@ class SpeechOutput extends ChangeNotifier {
     try {
       await _loadAndPlayClip(item, gen);
       if (gen != _playGen) return;
-      await _player.processingStateStream.firstWhere(
-        (s) => s == ProcessingState.completed,
-      );
+      await _waitForClipCompletion(gen);
       if (gen != _playGen) return;
     } catch (e) {
       if (gen == _playGen) {
@@ -200,6 +222,8 @@ class SpeechOutput extends ChangeNotifier {
         notifyListeners();
         if (_queue.isNotEmpty && !_pauseWhenCapture) {
           unawaited(_playNext());
+        } else if (_queue.isEmpty) {
+          _scheduleMicUnblockNotify();
         }
       }
     }
@@ -210,6 +234,23 @@ class SpeechOutput extends ChangeNotifier {
     await _player.processingStateStream.firstWhere(
       (s) => s == ProcessingState.ready || s == ProcessingState.completed,
     );
+  }
+
+  /// Windows/media_kit can miss `completed`; a hung wait leaves `_playing` true and
+  /// dictation suspended forever while the UI still shows "listening".
+  Future<void> _waitForClipCompletion(int gen) async {
+    final duration = _player.duration;
+    final maxWait = duration != null && duration > Duration.zero
+        ? duration + const Duration(milliseconds: 750)
+        : const Duration(seconds: 90);
+    try {
+      await _player.processingStateStream
+          .firstWhere((s) => s == ProcessingState.completed)
+          .timeout(maxWait);
+    } on TimeoutException {
+      if (gen != _playGen) return;
+      await _player.stop();
+    }
   }
 
   Future<void> _loadAndPlayClip(SpeechQueueItem item, int gen) async {

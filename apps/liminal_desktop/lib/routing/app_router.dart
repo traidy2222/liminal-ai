@@ -7,6 +7,8 @@ import '../ui/screens/home_screen.dart';
 import '../ui/screens/persona_bootstrap_screen.dart';
 import '../ui/screens/settings_screen.dart';
 import '../ui/screens/setup_screen.dart';
+import '../ui/screens/integrations_screen.dart';
+import '../ui/screens/vireon_hub_screen.dart';
 import 'routes.dart';
 
 GoRouter createAppRouter(AppController controller) {
@@ -50,7 +52,7 @@ GoRouter createAppRouter(AppController controller) {
           loc == AppRoutes.configError ||
           loc == AppRoutes.setup ||
           loc == AppRoutes.persona) {
-        return AppRoutes.chat;
+        return AppRoutes.hub;
       }
       return null;
     },
@@ -80,12 +82,20 @@ GoRouter createAppRouter(AppController controller) {
         builder: (_, __) => const PersonaBootstrapScreen(),
       ),
       GoRoute(
+        path: AppRoutes.hub,
+        builder: (_, __) => const VireonHubScreen(),
+      ),
+      GoRoute(
         path: AppRoutes.chat,
         builder: (_, __) => const HomeScreen(),
       ),
       GoRoute(
         path: AppRoutes.settings,
         builder: (_, __) => const SettingsScreen(),
+      ),
+      GoRoute(
+        path: AppRoutes.integrations,
+        builder: (_, __) => const IntegrationsScreen(),
       ),
     ],
   );

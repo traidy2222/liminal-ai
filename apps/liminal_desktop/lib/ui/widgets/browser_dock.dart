@@ -144,19 +144,41 @@ class _BrowserDockState extends State<BrowserDock> {
   Widget build(BuildContext context) {
     final lim = LiminalTheme.of(context);
     final theme = Theme.of(context);
-    final panelWidth = widget.expanded ? widget.width : widget.collapsedWidth;
 
-    return AnimatedContainer(
-      duration: const Duration(milliseconds: 200),
-      curve: Curves.easeOut,
-      width: panelWidth,
-      decoration: BoxDecoration(
-        color: lim.panel.withValues(alpha: 0.98),
-        border: Border(left: BorderSide(color: lim.border)),
-      ),
-      child: widget.expanded
-          ? _expandedBody(context, lim, theme)
-          : _collapsedRail(context, lim),
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final maxW = constraints.maxWidth;
+        final maxH = constraints.maxHeight;
+        if (!maxW.isFinite || !maxH.isFinite || maxW <= 0 || maxH <= 0) {
+          return const SizedBox.shrink();
+        }
+
+        if (!widget.expanded) {
+          return SizedBox(
+            width: widget.collapsedWidth.clamp(0, maxW),
+            height: maxH,
+            child: DecoratedBox(
+              decoration: BoxDecoration(
+                color: lim.panel.withValues(alpha: 0.98),
+                border: Border(left: BorderSide(color: lim.border)),
+              ),
+              child: _collapsedRail(context, lim),
+            ),
+          );
+        }
+
+        return DecoratedBox(
+          decoration: BoxDecoration(
+            color: lim.panel.withValues(alpha: 0.98),
+            border: Border(left: BorderSide(color: lim.border)),
+          ),
+          child: SizedBox(
+            width: maxW,
+            height: maxH,
+            child: _expandedBody(context, lim, theme),
+          ),
+        );
+      },
     );
   }
 

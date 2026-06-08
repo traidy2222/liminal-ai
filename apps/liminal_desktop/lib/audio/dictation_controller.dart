@@ -1,25 +1,32 @@
 import 'dart:async';
 import 'dart:io';
+import 'dart:typed_data';
 
 import 'package:flutter/foundation.dart';
-import 'package:path_provider/path_provider.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:record/record.dart';
 
 import 'sidecar_audio_client.dart';
 import 'vad.dart';
+import 'wav_pcm.dart';
 
 enum DictationStatus {
   idle,
   permissionPending,
   listening,
+  /// Mic session on but stream released while agent TTS plays.
+  paused,
   recording,
   uploading,
   transcribing,
   error,
 }
 
-/// Desktop dictation — continuous mic capture + amplitude VAD pause-send.
+/// Desktop dictation — session-long PCM stream + amplitude VAD (mirrors web).
+///
+/// The mic stream stays open between utterances; only TTS playback stops it
+/// (Windows WASAPI). Utterance audio is buffered in memory, not via stop/start
+/// per send.
 class DictationController extends ChangeNotifier {
   DictationController({
     DictationEndpointOptions? endpointOptions,
@@ -29,8 +36,9 @@ class DictationController extends ChangeNotifier {
 
   DictationEndpointOptions endpointOptions;
   bool Function()? shouldBlockSpeechCapture;
+  bool Function()? isTtsPipelineActive;
 
-  final AudioRecorder _recorder = AudioRecorder();
+  AudioRecorder _recorder = AudioRecorder();
 
   DictationStatus status = DictationStatus.idle;
   String? error;
@@ -39,20 +47,29 @@ class DictationController extends ChangeNotifier {
   String liveText = '';
   double sessionCostUsd = 0;
 
-  StreamSubscription<Amplitude>? _ampSub;
+  StreamSubscription<Uint8List>? _pcmSub;
+  Timer? _ampPollTimer;
   Timer? _maxRecordingTimer;
+  Timer? _micWatchdog;
   AmplitudeVad? _vad;
-  String? _recordPath;
   int _recordingStartedAt = 0;
   bool _utteranceActive = false;
   bool _endpointInFlight = false;
   bool _suspendedForTts = false;
-  int _ttsSuspendDepth = 0;
+  bool _streamLive = false;
+  bool _vadNeedsSessionReset = true;
   SidecarAudioClient? _audioClient;
 
-  /// Fallback pause detection (peak-relative) when AGC skews the noise floor.
-  double _utterancePeakDb = -90;
-  int _lastLoudAtMs = 0;
+  /// Rolling pre-roll so utterance capture includes speech onset.
+  final List<Uint8List> _preRollChunks = [];
+  int _preRollBytes = 0;
+  BytesBuilder? _utterancePcm;
+
+  Future<void> _micChain = Future.value();
+
+  static const _sampleRate = 16000;
+  static const _preRollMs = 450;
+  static int get _preRollMaxBytes => _sampleRate * 2 * _preRollMs ~/ 1000;
 
   void bindAudioClient(SidecarAudioClient? client) {
     _audioClient = client;
@@ -78,13 +95,17 @@ class DictationController extends ChangeNotifier {
     }
     sessionActive = true;
     _autoSentLatch = false;
+    _vadNeedsSessionReset = true;
+    _clearPreRoll();
+    _utterancePcm = null;
+    _startMicWatchdog();
     onSessionActiveChange?.call();
-    await _startMicCapture();
+    await _runMicOp(() => _openSessionStream());
   }
 
   Future<void> endSession() async {
     sessionActive = false;
-    await _teardown();
+    await _runMicOp(() => _teardownStream());
     status = DictationStatus.idle;
     autoSendCountdownMs = null;
     liveText = '';
@@ -94,7 +115,7 @@ class DictationController extends ChangeNotifier {
 
   Future<void> cancel() async {
     sessionActive = false;
-    await _teardown();
+    await _runMicOp(() => _teardownStream());
     status = DictationStatus.idle;
     autoSendCountdownMs = null;
     liveText = '';
@@ -121,65 +142,96 @@ class DictationController extends ChangeNotifier {
   void Function(bool captureActive)? onCaptureActiveChange;
   void Function()? onBargeIn;
 
-  static const _recordConfig = RecordConfig(
-    encoder: AudioEncoder.wav,
-    sampleRate: 16000,
+  static const _streamConfig = RecordConfig(
+    encoder: AudioEncoder.pcm16bits,
+    sampleRate: _sampleRate,
     numChannels: 1,
-    // AGC keeps levels high after speech and breaks pause detection.
     autoGain: false,
     echoCancel: true,
     noiseSuppress: true,
   );
 
+  Future<void> _runMicOp(Future<void> Function() op) {
+    _micChain = _micChain.then((_) => op()).catchError((_) {});
+    return _micChain;
+  }
+
   /// Release the mic while agent TTS plays (Windows WASAPI conflicts otherwise).
   Future<void> suspendForTts() async {
-    if (!sessionActive) return;
-    _ttsSuspendDepth++;
-    _suspendedForTts = true;
-    await _ampSub?.cancel();
-    _ampSub = null;
-    if (await _recorder.isRecording()) {
-      await _recorder.stop();
-    }
-    if (!_endpointInFlight) {
-      _utteranceActive = false;
-      _vad?.disarmUtterance();
-    }
-    autoSendCountdownMs = null;
-    if (status != DictationStatus.error) {
-      status = DictationStatus.listening;
-    }
-    notifyListeners();
+    if (!sessionActive || _suspendedForTts) return;
+    await _runMicOp(() async {
+      _suspendedForTts = true;
+      await _closeSessionStream();
+      if (!_endpointInFlight) {
+        _utteranceActive = false;
+        _utterancePcm = null;
+        _vad?.disarmUtterance();
+      }
+      autoSendCountdownMs = null;
+      if (status != DictationStatus.error) {
+        status = DictationStatus.paused;
+      }
+      notifyListeners();
+    });
   }
 
   Future<void> resumeAfterTts() async {
     if (!sessionActive) return;
-    if (_ttsSuspendDepth > 0) _ttsSuspendDepth--;
-    if (_ttsSuspendDepth > 0) return;
-    _suspendedForTts = false;
-    await ensureListening();
+    await _runMicOp(() async {
+      _suspendedForTts = false;
+      await _openSessionStream();
+      notifyListeners();
+    });
   }
 
-  /// Restart mic capture when the session is armed and nothing else holds the recorder.
-  Future<void> ensureListening() async {
-    if (!sessionActive || _suspendedForTts || _ttsSuspendDepth > 0 || _endpointInFlight) {
-      return;
-    }
-    if (status == DictationStatus.error) {
-      error = null;
-    }
+  /// Heal stale pause / dead stream after agent turn or TTS tail.
+  Future<void> reconcileListening() async {
+    if (!sessionActive || _endpointInFlight) return;
     if (status == DictationStatus.uploading ||
         status == DictationStatus.transcribing ||
         status == DictationStatus.recording) {
       return;
     }
-    await _startMicCapture();
+    if (isTtsPipelineActive?.call() == true) return;
+    if (shouldBlockSpeechCapture?.call() == true) return;
+
+    await _runMicOp(() async {
+      if (_suspendedForTts) {
+        _suspendedForTts = false;
+      }
+      if (!_streamLive) {
+        await _openSessionStream();
+      }
+      notifyListeners();
+    });
   }
 
-  Future<void> _startMicCapture() async {
-    if (!sessionActive || _suspendedForTts || _ttsSuspendDepth > 0) return;
+  void _startMicWatchdog() {
+    _micWatchdog?.cancel();
+    _micWatchdog = Timer.periodic(const Duration(seconds: 2), (_) {
+      if (!sessionActive || _endpointInFlight) return;
+      if (_streamLive) return;
+      if (isTtsPipelineActive?.call() == true) return;
+      if (shouldBlockSpeechCapture?.call() == true) return;
+      if (status == DictationStatus.uploading ||
+          status == DictationStatus.transcribing ||
+          status == DictationStatus.recording) {
+        return;
+      }
+      unawaited(reconcileListening());
+    });
+  }
+
+  Future<void> ensureListening({bool recreateRecorder = false}) async {
+    await reconcileListening();
+  }
+
+  Future<void> _openSessionStream() async {
+    if (!sessionActive || _suspendedForTts || _endpointInFlight) return;
+    if (_streamLive) return;
 
     _vad ??= AmplitudeVad(
+      calibrationMs: 600,
       onSpeechStart: () => unawaited(_onSpeechStart()),
       onSilenceTick: _onSilenceTick,
       onSpeechResume: () {
@@ -187,82 +239,160 @@ class DictationController extends ChangeNotifier {
         notifyListeners();
       },
     );
-    _vad!.resetSession();
-
-    await _ampSub?.cancel();
-    if (await _recorder.isRecording()) {
-      await _recorder.stop();
+    if (_vadNeedsSessionReset) {
+      _vad!.resetSession();
+      _vadNeedsSessionReset = false;
+    } else {
+      _vad!.disarmUtterance();
     }
 
-    _recordPath = await _tempPath('utterance-${DateTime.now().millisecondsSinceEpoch}.wav');
-    await _recorder.start(_recordConfig, path: _recordPath!);
+    try {
+      final stream = await _recorder.startStream(_streamConfig);
+      if (!sessionActive || _suspendedForTts) {
+        await _recorder.cancel();
+        return;
+      }
 
-    _ampSub = _recorder.onAmplitudeChanged(const Duration(milliseconds: 50)).listen(
-      (amp) {
-        final db = AmplitudeVad.sanitizeDb(amp.current);
-        _vad?.ingestAmplitudeDb(db);
-        _trackPeakSilence(db);
-      },
+      _streamLive = true;
+      _pcmSub = stream.listen(
+        _onPcmChunk,
+        onError: (_) => unawaited(_handleStreamLost()),
+        onDone: () => unawaited(_handleStreamLost()),
+      );
+      _startAmplitudePolling();
+
+      _utteranceActive = false;
+      _utterancePcm = null;
+      _clearPreRoll();
+      error = null;
+      status = DictationStatus.listening;
+      liveText = '';
+      autoSendCountdownMs = null;
+      notifyListeners();
+    } catch (e) {
+      _streamLive = false;
+      _stopAmplitudePolling();
+      if (!_endpointInFlight) {
+        status = DictationStatus.error;
+        error = 'Microphone stream failed: $e';
+      }
+      notifyListeners();
+    }
+  }
+
+  /// `onAmplitudeChanged()` is single-subscription per [AudioRecorder] — polling
+  /// survives TTS suspend/resume without "Stream has already been listened to".
+  void _startAmplitudePolling() {
+    _stopAmplitudePolling();
+    _ampPollTimer = Timer.periodic(
+      const Duration(milliseconds: 50),
+      (_) => unawaited(_pollAmplitude()),
     );
+  }
 
+  void _stopAmplitudePolling() {
+    _ampPollTimer?.cancel();
+    _ampPollTimer = null;
+  }
+
+  Future<void> _pollAmplitude() async {
+    if (!_streamLive || _suspendedForTts || !sessionActive) return;
+    try {
+      if (!await _recorder.isRecording()) return;
+      final amp = await _recorder.getAmplitude();
+      final db = AmplitudeVad.sanitizeDb(amp.current);
+      _vad?.ingestAmplitudeDb(db);
+    } catch (_) {}
+  }
+
+  Future<void> _closeSessionStream() async {
+    _stopAmplitudePolling();
+    await _pcmSub?.cancel();
+    _pcmSub = null;
+    try {
+      if (await _recorder.isRecording()) {
+        await _recorder.cancel();
+      }
+      await _recorder.dispose();
+    } catch (_) {}
+    _recorder = AudioRecorder();
+    _streamLive = false;
+  }
+
+  Future<void> _teardownStream() async {
+    _micWatchdog?.cancel();
+    _micWatchdog = null;
+    _maxRecordingTimer?.cancel();
+    await _closeSessionStream();
     _utteranceActive = false;
     _endpointInFlight = false;
-    _autoSentLatch = false;
-    _utterancePeakDb = -90;
-    status = DictationStatus.listening;
-    liveText = '';
-    autoSendCountdownMs = null;
-    notifyListeners();
+    _suspendedForTts = false;
+    _utterancePcm = null;
+    _clearPreRoll();
+    _vad?.disarmUtterance();
+    onCaptureActiveChange?.call(false);
   }
 
-  /// Peak-relative silence — immune to AGC / noise-floor drift between words.
-  void _trackPeakSilence(double db) {
-    if (shouldBlockSpeechCapture?.call() == true) return;
-    if (!_utteranceActive || _endpointInFlight || _autoSentLatch) return;
-    final now = DateTime.now().millisecondsSinceEpoch;
-
-    // Absolute loudness or within 14 dB of utterance peak counts as voice.
-    const peakMarginDb = 14;
-    const absoluteLoudDb = -42;
-    final relativeThreshold = _utterancePeakDb - peakMarginDb;
-    final isVoice = db > absoluteLoudDb || db > relativeThreshold;
-
-    if (isVoice) {
-      if (db > _utterancePeakDb) _utterancePeakDb = db;
-      _lastLoudAtMs = now;
-      if (autoSendCountdownMs != null) {
-        autoSendCountdownMs = null;
-        notifyListeners();
-      }
+  Future<void> _handleStreamLost() async {
+    if (!sessionActive || _suspendedForTts || _endpointInFlight) {
+      _streamLive = false;
       return;
     }
-
-    final recordingMs = now - _recordingStartedAt;
-    if (recordingMs < endpointOptions.minRecordingMs) return;
-
-    final msSinceVoice = now - _lastLoudAtMs;
-    final threshold = recordingMs < 5000
-        ? endpointOptions.silenceMsShort
-        : endpointOptions.silenceMsLong;
-    final remaining = threshold - msSinceVoice;
-    if (remaining > 0) {
-      if (autoSendCountdownMs != remaining) {
-        autoSendCountdownMs = remaining;
-        notifyListeners();
-      }
-    } else if (!_endpointInFlight) {
-      unawaited(_endpointUtterance(silenceDeadline: true));
+    _streamLive = false;
+    if (status != DictationStatus.error &&
+        status != DictationStatus.uploading &&
+        status != DictationStatus.transcribing) {
+      status = DictationStatus.listening;
+    }
+    notifyListeners();
+    await Future<void>.delayed(const Duration(milliseconds: 300));
+    if (sessionActive && !_streamLive && !_suspendedForTts && !_endpointInFlight) {
+      await _runMicOp(() => _openSessionStream());
     }
   }
+
+  void _clearPreRoll() {
+    _preRollChunks.clear();
+    _preRollBytes = 0;
+  }
+
+  void _pushPreRoll(Uint8List chunk) {
+    _preRollChunks.add(chunk);
+    _preRollBytes += chunk.length;
+    while (_preRollBytes > _preRollMaxBytes && _preRollChunks.isNotEmpty) {
+      _preRollBytes -= _preRollChunks.removeAt(0).length;
+    }
+  }
+
+  void _onPcmChunk(Uint8List chunk) {
+    if (chunk.isEmpty) return;
+    if (_utteranceActive) {
+      _utterancePcm ??= BytesBuilder(copy: false);
+      _utterancePcm!.add(chunk);
+      return;
+    }
+    if (!_endpointInFlight && !_suspendedForTts) {
+      _pushPreRoll(chunk);
+    }
+  }
+
+  int get _minPcmBytes =>
+      _sampleRate * 2 * endpointOptions.minRecordingMs ~/ 1000;
 
   Future<void> _onSpeechStart() async {
     if (shouldBlockSpeechCapture?.call() == true) return;
-    if (!sessionActive || _utteranceActive || _endpointInFlight) return;
+    if (!sessionActive || _utteranceActive || _endpointInFlight || !_streamLive) {
+      return;
+    }
     onBargeIn?.call();
     _utteranceActive = true;
+    _utterancePcm = BytesBuilder(copy: false);
+    for (final chunk in _preRollChunks) {
+      _utterancePcm!.add(chunk);
+    }
+    _clearPreRoll();
+
     _recordingStartedAt = DateTime.now().millisecondsSinceEpoch;
-    _lastLoudAtMs = _recordingStartedAt;
-    _utterancePeakDb = -90;
     _vad?.armUtterance();
     _maxRecordingTimer?.cancel();
     _maxRecordingTimer = Timer(
@@ -313,29 +443,22 @@ class DictationController extends ChangeNotifier {
     _utteranceActive = false;
     _vad?.disarmUtterance();
 
-    final path = _recordPath;
-    await _ampSub?.cancel();
-    _ampSub = null;
-    if (await _recorder.isRecording()) {
-      await _recorder.stop();
-    }
+    final pcm = _utterancePcm?.toBytes() ?? Uint8List(0);
+    _utterancePcm = null;
 
+    if (status != DictationStatus.error) {
+      status = DictationStatus.listening;
+    }
     notifyListeners();
 
-    if (path == null || !File(path).existsSync()) {
+    if (pcm.length < _minPcmBytes && !force) {
       _finishEndpoint(clearError: true);
-      await ensureListening();
       return;
     }
 
-    final bytes = await File(path).readAsBytes();
-    try {
-      await File(path).delete();
-    } catch (_) {}
-
-    if (bytes.length < 1200 && !force) {
+    final wav = buildWavFromPcm16(pcm, sampleRate: _sampleRate);
+    if (wav.length < 1200 && !force) {
       _finishEndpoint(clearError: true);
-      await ensureListening();
       return;
     }
 
@@ -344,7 +467,6 @@ class DictationController extends ChangeNotifier {
       status = DictationStatus.error;
       error = 'Audio client not configured.';
       _finishEndpoint();
-      await ensureListening();
       notifyListeners();
       return;
     }
@@ -356,7 +478,7 @@ class DictationController extends ChangeNotifier {
     notifyListeners();
 
     try {
-      final attachmentId = await client.uploadWavBytes(bytes);
+      final attachmentId = await client.uploadWavBytes(wav);
       status = DictationStatus.transcribing;
       notifyListeners();
       final result = await client.transcribe(attachmentId);
@@ -373,17 +495,17 @@ class DictationController extends ChangeNotifier {
     } catch (e) {
       onCaptureActiveChange?.call(false);
       liveText = '';
-      error = e is HttpException ? (e.message ?? e.toString()) : e.toString();
+      error = e is HttpException ? e.message : e.toString();
       status = DictationStatus.error;
     }
 
     _finishEndpoint();
-    if (sessionActive) {
-      if (status != DictationStatus.error) {
-        status = DictationStatus.listening;
-        liveText = '';
+    if (sessionActive && status != DictationStatus.error) {
+      status = _streamLive ? DictationStatus.listening : DictationStatus.paused;
+      liveText = '';
+      if (!_streamLive && !_suspendedForTts) {
+        unawaited(reconcileListening());
       }
-      await ensureListening();
     }
     notifyListeners();
   }
@@ -394,29 +516,9 @@ class DictationController extends ChangeNotifier {
     if (clearError) error = null;
   }
 
-  Future<void> _teardown() async {
-    _maxRecordingTimer?.cancel();
-    await _ampSub?.cancel();
-    _ampSub = null;
-    if (await _recorder.isRecording()) {
-      await _recorder.stop();
-    }
-    _utteranceActive = false;
-    _endpointInFlight = false;
-    _suspendedForTts = false;
-    _ttsSuspendDepth = 0;
-    _vad?.disarmUtterance();
-    onCaptureActiveChange?.call(false);
-  }
-
-  Future<String> _tempPath(String name) async {
-    final dir = await getTemporaryDirectory();
-    return '${dir.path}/liminal-$name';
-  }
-
   @override
   void dispose() {
-    unawaited(_teardown());
+    unawaited(_teardownStream());
     unawaited(_recorder.dispose());
     super.dispose();
   }

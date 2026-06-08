@@ -45,7 +45,7 @@ class StartingSidecarScreen extends StatelessWidget {
               CircularProgressIndicator(color: lim.accent),
               const SizedBox(height: 16),
               Text(
-                'First launch can take up to a minute while tools register.',
+                'Starting harness — integrations (Google/Microsoft MCP) finish in the background.',
                 style: Theme.of(context).textTheme.bodySmall,
                 textAlign: TextAlign.center,
               ),

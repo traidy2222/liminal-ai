@@ -119,10 +119,28 @@ ThemeData buildLiminalTheme({PersonaUiTheme? persona}) {
     ),
     filledButtonTheme: FilledButtonThemeData(
       style: FilledButton.styleFrom(
-        backgroundColor: tokens.accent,
-        foregroundColor: Colors.black,
-        textStyle: fonts.body(fontWeight: FontWeight.w600, fontSize: 14 * scale),
-        padding: EdgeInsets.symmetric(horizontal: 20 * scale, vertical: 14 * scale),
+        backgroundColor: tokens.accent.withValues(alpha: 0.14),
+        foregroundColor: tokens.accent,
+        disabledBackgroundColor: tokens.surface.withValues(alpha: 0.35),
+        disabledForegroundColor: tokens.textDim,
+        elevation: 0,
+        textStyle: fonts.body(fontWeight: FontWeight.w600, fontSize: 13 * scale),
+        padding: EdgeInsets.symmetric(horizontal: 16 * scale, vertical: 12 * scale),
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(tokens.radius),
+          side: BorderSide(color: tokens.accent.withValues(alpha: 0.22)),
+        ),
+      ),
+    ),
+    outlinedButtonTheme: OutlinedButtonThemeData(
+      style: OutlinedButton.styleFrom(
+        foregroundColor: tokens.text,
+        disabledForegroundColor: tokens.textDim,
+        backgroundColor: tokens.surface.withValues(alpha: 0.35),
+        side: BorderSide(color: tokens.border),
+        elevation: 0,
+        textStyle: fonts.body(fontWeight: FontWeight.w500, fontSize: 13 * scale),
+        padding: EdgeInsets.symmetric(horizontal: 16 * scale, vertical: 12 * scale),
         shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(tokens.radius),
         ),
@@ -130,17 +148,24 @@ ThemeData buildLiminalTheme({PersonaUiTheme? persona}) {
     ),
     textButtonTheme: TextButtonThemeData(
       style: TextButton.styleFrom(
-        foregroundColor: tokens.accent,
-        textStyle: fonts.body(fontWeight: FontWeight.w600, fontSize: 14 * scale),
+        foregroundColor: tokens.textMuted,
+        disabledForegroundColor: tokens.textDim,
+        textStyle: fonts.body(fontWeight: FontWeight.w500, fontSize: 13 * scale),
+        padding: EdgeInsets.symmetric(horizontal: 12 * scale, vertical: 10 * scale),
       ),
     ),
     chipTheme: ChipThemeData(
-      backgroundColor: tokens.accent.withValues(alpha: 0.12),
-      labelStyle: fonts.mono(fontSize: 11 * scale, color: tokens.accent),
+      backgroundColor: tokens.surface.withValues(alpha: 0.45),
+      selectedColor: tokens.accent.withValues(alpha: 0.12),
+      disabledColor: tokens.surface.withValues(alpha: 0.25),
+      labelStyle: fonts.body(fontSize: 12 * scale, color: tokens.textMuted),
+      secondaryLabelStyle: fonts.body(fontSize: 12 * scale, color: tokens.accent),
       side: BorderSide(color: tokens.border),
+      selectedShadowColor: Colors.transparent,
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(tokens.radius),
       ),
+      padding: EdgeInsets.symmetric(horizontal: 8 * scale, vertical: 2 * scale),
     ),
     snackBarTheme: SnackBarThemeData(
       backgroundColor: tokens.panel,

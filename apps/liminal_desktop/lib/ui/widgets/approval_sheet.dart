@@ -11,11 +11,15 @@ class ApprovalSheet extends StatelessWidget {
     required this.pending,
     required this.onApprove,
     required this.onReject,
+    this.queueIndex = 1,
+    this.queueTotal = 1,
   });
 
   final PendingApproval pending;
   final VoidCallback onApprove;
   final VoidCallback onReject;
+  final int queueIndex;
+  final int queueTotal;
 
   @override
   Widget build(BuildContext context) {
@@ -41,7 +45,9 @@ class ApprovalSheet extends StatelessWidget {
               const SizedBox(width: 8),
               Expanded(
                 child: Text(
-                  'Approve tool: ${pending.name}',
+                  queueTotal > 1
+                      ? 'Approve tool: ${pending.name} ($queueIndex of $queueTotal)'
+                      : 'Approve tool: ${pending.name}',
                   style: Theme.of(context).textTheme.titleMedium?.copyWith(
                         color: lim.warn,
                       ),
@@ -49,6 +55,15 @@ class ApprovalSheet extends StatelessWidget {
               ),
             ],
           ),
+          if (queueTotal > 1) ...[
+            const SizedBox(height: 4),
+            Text(
+              '$queueTotal tools waiting — resolve each prompt to continue.',
+              style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                    color: lim.textMuted,
+                  ),
+            ),
+          ],
           const SizedBox(height: 8),
           if (summary != null) ...[
             Text(

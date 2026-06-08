@@ -6,6 +6,8 @@ abstract final class AppRoutes {
   static const configError = '/config-error';
   static const setup = '/setup';
   static const persona = '/persona';
+  static const hub = '/hub';
   static const chat = '/chat';
   static const settings = '/settings';
+  static const integrations = '/integrations';
 }

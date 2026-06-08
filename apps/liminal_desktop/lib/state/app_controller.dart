@@ -16,6 +16,8 @@ import '../ui/rich_message/asset_url_resolver.dart';
 import '../models/app_config.dart';
 import '../models/harness_settings.dart';
 import '../models/liminal_app_spec.dart';
+import '../models/integrations_snapshot.dart';
+import '../models/orchestration_snapshot.dart';
 import '../models/vireon_account.dart';
 import '../protocol/chat_summary.dart';
 import '../protocol/frames.dart';
@@ -38,8 +40,14 @@ class AppController extends ChangeNotifier {
     dictation.onSessionActiveChange = _onDictationSessionChange;
     dictation.onCaptureActiveChange = _onDictationCaptureChange;
     dictation.shouldBlockSpeechCapture = () => speechOutput.shouldBlockMicCapture();
+    dictation.isTtsPipelineActive = () => speechOutput.isTtsPipelineActive;
     dictation.onBargeIn = speechOutput.interrupt;
     speechOutput.onPlaybackHoldChange = _applyTtsPlaybackHold;
+    speechOutput.onMicCaptureUnblocked = () {
+      if (dictationSessionActive) {
+        unawaited(dictation.reconcileListening());
+      }
+    };
     speechOutput.addListener(notifyListeners);
     dictation.addListener(notifyListeners);
     _appWindows.bindMainWindowHandler();
@@ -102,10 +110,22 @@ class AppController extends ChangeNotifier {
   String get sidecarVersion => _protocol.sidecarVersion;
 
   String? activeChatId;
+  /// Chats shown in the main area (up to [maxVisibleChats] panes). [activeChatId] is focused.
+  List<String> visibleChatIds = [];
+  /// False on the Vireon hub; true while the chat workspace route is open.
+  bool inChatWorkspace = false;
+  static const maxVisibleChats = 10;
   List<ChatSummary> chats = [];
   List<LiminalAppSpec> desktopApps = [];
   Map<String, AppCacheEntry> desktopAppCaches = {};
   bool desktopAppsLoading = false;
+  OrchestrationSnapshot orchestration = OrchestrationSnapshot.empty;
+  bool orchestrationBusy = false;
+
+  IntegrationsSnapshot integrations = IntegrationsSnapshot.empty;
+  bool integrationsLoading = false;
+  bool integrationsBusy = false;
+  String? integrationsError;
 
   bool get needsProviderSetup => config != null && !config!.apiKeyConfigured;
   bool get needsPersonaBootstrap =>
@@ -222,6 +242,9 @@ class AppController extends ChangeNotifier {
         await dictation.suspendForTts();
       } else {
         await dictation.resumeAfterTts();
+        if (dictationSessionActive) {
+          await dictation.reconcileListening();
+        }
       }
     });
     unawaited(_ttsHoldChain);
@@ -237,7 +260,12 @@ class AppController extends ChangeNotifier {
     if (event == 'turn_end' && chatId == activeChatId) {
       unawaited(_flushPendingDictationSend());
       if (dictationSessionActive) {
-        unawaited(dictation.ensureListening());
+        unawaited(dictation.reconcileListening());
+        Future.delayed(const Duration(milliseconds: 1400), () {
+          if (dictationSessionActive) {
+            unawaited(dictation.reconcileListening());
+          }
+        });
       }
     }
     if (event == 'tool_approval' &&
@@ -247,7 +275,7 @@ class AppController extends ChangeNotifier {
       notifyListeners();
     }
     _sessions.dispatch(chatId, event, data);
-    if (event == 'transcript_replay' && chatId == activeChatId) {
+    if (event == 'transcript_replay' && visibleChatIds.contains(chatId)) {
       notifyListeners();
     }
   }
@@ -630,6 +658,8 @@ class AppController extends ChangeNotifier {
       case 'chat_list':
         activeChatId = frame.data['activeChatId'] as String?;
         chats = _parseChats(frame.data['chats']);
+        _pruneVisibleChats();
+        _ensureVisibleInitialized();
         _syncAssetResolver();
         _syncDictationAudioClient();
         _syncPersonaPendingFromActiveChat();
@@ -646,6 +676,10 @@ class AppController extends ChangeNotifier {
         return;
       case 'vireon_account':
         _applyVireonFromJson(frame.data);
+        notifyListeners();
+        return;
+      case 'orchestration_status':
+        orchestration = OrchestrationSnapshot.fromJson(frame.data);
         notifyListeners();
         return;
       default:
@@ -712,17 +746,18 @@ class AppController extends ChangeNotifier {
 
   Future<bool> sendMessage(
     String text, {
+    String? chatId,
     bool freshContext = false,
     List<UserImageAttachment> attachments = const [],
     bool liveDictation = false,
   }) async {
-    final chatId = activeChatId;
+    final targetChatId = chatId ?? activeChatId;
+    if (targetChatId == null || !_protocol.isConnected) return false;
     final trimmed = text.trim();
-    if (chatId == null || !_protocol.isConnected) return false;
     if (trimmed.isEmpty && attachments.isEmpty) return false;
     if (needsProviderSetup || needsPersonaBootstrap) return false;
 
-    _syncAssetResolver(chatId: chatId);
+    _syncAssetResolver(chatId: targetChatId);
     unawaited(speechOutput.unlockAudio());
     if (liveDictation || dictationSessionActive) {
       speechOutput.flush();
@@ -731,12 +766,12 @@ class AppController extends ChangeNotifier {
     final previews = [
       for (final a in attachments) UserAttachmentPreview(name: a.name),
     ];
-    _sessions.sessionFor(chatId).applyUserMessage(
+    _sessions.sessionFor(targetChatId).applyUserMessage(
       trimmed,
       attachmentPreviews: previews,
     );
     final result = await _protocol.send('send_message', {
-      'chatId': chatId,
+      'chatId': targetChatId,
       'message': trimmed,
       if (freshContext) 'freshContext': true,
       if (liveDictation || dictationSessionActive) 'liveDictation': true,
@@ -744,7 +779,7 @@ class AppController extends ChangeNotifier {
         'attachments': attachments.map((a) => a.toWire()).toList(),
     });
     if (!result.ok) {
-      _sessions.sessionFor(chatId).setConnectionError(
+      _sessions.sessionFor(targetChatId).setConnectionError(
         result.error ?? 'send_message failed',
       );
       return false;
@@ -752,17 +787,24 @@ class AppController extends ChangeNotifier {
     return true;
   }
 
-  Future<void> abortTurn() async {
-    final chatId = activeChatId;
-    if (chatId == null || !_protocol.isConnected) return;
-    await _protocol.send('abort', {'chatId': chatId});
+  Future<void> abortTurn({String? chatId}) async {
+    final id = chatId ?? activeChatId;
+    if (id == null || !_protocol.isConnected) return;
+    await _protocol.send('abort', {'chatId': id});
   }
 
-  Future<void> resolveApproval(String decision, {String? reason}) async {
-    final chatId = activeChatId;
-    final session = activeSession;
+  Future<void> resolveApproval(
+    String decision, {
+    String? chatId,
+    String? reason,
+  }) async {
+    final targetChatId = chatId ?? activeChatId;
+    final session =
+        targetChatId != null ? _sessions.get(targetChatId) : null;
     final pending = session?.pendingApproval;
-    if (chatId == null || !_protocol.isConnected || pending == null) return;
+    if (targetChatId == null || !_protocol.isConnected || pending == null) {
+      return;
+    }
 
     final approvalPayload = decision == 'approve'
         ? {'decision': 'approve'}
@@ -772,35 +814,370 @@ class AppController extends ChangeNotifier {
                 ? reason!.trim()
                 : 'user declined',
           };
-    await _protocol.send('resolve_approval', {
-      'chatId': chatId,
+    final result = await _protocol.send('resolve_approval', {
+      'chatId': targetChatId,
       'callId': pending.callId,
       'approvalNonce': pending.approvalNonce,
       'decision': approvalPayload,
     });
-    session!.applyServerEvent('approval_decision', {});
+    if (!result.ok) return;
+    session!.applyServerEvent('approval_decision', {
+      'callId': pending.callId,
+      'decision': decision == 'approve' ? 'approve' : 'reject',
+    });
   }
 
-  Future<void> resolveAskUser(String answer) async {
-    final chatId = activeChatId;
-    if (chatId == null || !_protocol.isConnected) return;
+  Future<void> resolveAskUser(String answer, {String? chatId}) async {
+    final id = chatId ?? activeChatId;
+    if (id == null || !_protocol.isConnected) return;
     await _protocol.send('resolve_ask_user', {
-      'chatId': chatId,
+      'chatId': id,
       'answer': answer,
     });
-    activeSession?.applyServerEvent('ask_user_answered', {});
+    _sessions.get(id)?.applyServerEvent('ask_user_answered', {});
   }
 
-  Future<void> createChat({String? title}) async {
-    if (!_protocol.isConnected) return;
-    await _protocol.send('create_chat', {if (title != null) 'title': title});
+  String? get orchestratorChatId {
+    for (final c in chats) {
+      if (c.isOrchestrator) return c.chatId;
+    }
+    return null;
+  }
+
+  bool isOrchestratorChat(String chatId) =>
+      chats.any((c) => c.chatId == chatId && c.isOrchestrator);
+
+  Future<String?> openOrchestratorChat() async {
+    if (!_protocol.isConnected) return null;
+    final result = await _protocol.send('get_or_create_orchestrator_chat', {});
+    if (!result.ok || result.data is! Map) return null;
+    final chatId = (result.data as Map)['chatId'] as String?;
+    if (chatId == null || chatId.isEmpty) return null;
     await refreshConfig();
+    await enterChatWorkspace(chatId);
+    return chatId;
   }
 
+  Future<void> loadIntegrations() async {
+    if (!_protocol.isConnected) return;
+    integrationsLoading = true;
+    integrationsError = null;
+    notifyListeners();
+    try {
+      final result = await _protocol.send('get_integrations', {});
+      if (result.ok && result.data is Map) {
+        integrations = IntegrationsSnapshot.fromJson(
+          Map<String, dynamic>.from(result.data! as Map),
+        );
+      } else {
+        integrationsError = result.error ?? 'Failed to load integrations';
+      }
+    } catch (e) {
+      integrationsError = e.toString();
+    } finally {
+      integrationsLoading = false;
+      notifyListeners();
+    }
+  }
+
+  void _applyIntegrationsPayload(Map<String, dynamic>? json) {
+    final raw = json?['integrations'];
+    if (raw is Map) {
+      integrations = IntegrationsSnapshot.fromJson(Map<String, dynamic>.from(raw));
+    }
+  }
+
+  Future<bool> _runIntegrationCommand(
+    String command,
+    Map<String, dynamic> payload,
+  ) async {
+    if (!_protocol.isConnected || integrationsBusy) return false;
+    integrationsBusy = true;
+    integrationsError = null;
+    notifyListeners();
+    try {
+      final result = await _protocol.send(command, payload);
+      if (result.ok && result.data is Map) {
+        final data = Map<String, dynamic>.from(result.data! as Map);
+        _applyIntegrationsPayload(data);
+        final attachOutput = data['attachOutput'] as String?;
+        if (attachOutput != null &&
+            (attachOutput.contains('failed') ||
+                attachOutput.contains('Skipped') ||
+                attachOutput.contains('Partial'))) {
+          integrationsError = attachOutput;
+        }
+        return true;
+      }
+      integrationsError = result.error ?? 'Integration command failed';
+      return false;
+    } catch (e) {
+      integrationsError = e.toString();
+      return false;
+    } finally {
+      integrationsBusy = false;
+      notifyListeners();
+    }
+  }
+
+  Future<bool> connectGoogleOAuth({
+    List<String>? services,
+    String mode = 'read_write',
+  }) =>
+      _runIntegrationCommand('connect_google_oauth', {
+        if (services != null) 'services': services,
+        'mode': mode,
+        'openBrowser': true,
+      });
+
+  Future<bool> connectGoogleWorkspace({
+    List<String>? services,
+    String mode = 'read_write',
+  }) =>
+      _runIntegrationCommand('connect_google_workspace', {
+        if (services != null) 'services': services,
+        'mode': mode,
+      });
+
+  Future<bool> disconnectGoogle({bool revoke = false}) =>
+      _runIntegrationCommand('disconnect_google', {'revoke': revoke});
+
+  Future<bool> connectMicrosoftOAuth({
+    List<String>? services,
+    String mode = 'read_write',
+  }) =>
+      _runIntegrationCommand('connect_microsoft_oauth', {
+        if (services != null) 'services': services,
+        'mode': mode,
+        'openBrowser': true,
+      });
+
+  Future<bool> connectMicrosoft365({
+    List<String>? services,
+    String mode = 'read_write',
+  }) =>
+      _runIntegrationCommand('connect_microsoft_365', {
+        if (services != null) 'services': services,
+        'mode': mode,
+      });
+
+  Future<bool> disconnectMicrosoft({bool revoke = false}) =>
+      _runIntegrationCommand('disconnect_microsoft', {'revoke': revoke});
+
+  Future<bool> connectGithub({String mode = 'read_write'}) =>
+      _runIntegrationCommand('connect_github', {'mode': mode});
+
+  Future<bool> disconnectGithub() => _runIntegrationCommand('disconnect_github', {});
+
+  Future<bool> attachIntegrationMcp({
+    required String name,
+    required String url,
+    bool readOnly = false,
+    String authKind = 'none',
+    String authEnv = '',
+    String authHeader = 'Authorization',
+  }) =>
+      _runIntegrationCommand('attach_integration_mcp', {
+        'name': name,
+        'url': url,
+        'read_only': readOnly,
+        'auth': _integrationAuthPayload(authKind, authEnv, authHeader),
+      });
+
+  Future<bool> detachIntegrationMcp(String name) =>
+      _runIntegrationCommand('detach_integration_mcp', {'name': name});
+
+  Future<bool> connectIntegrationOpenApi({
+    required String name,
+    required String specUrl,
+    String baseUrl = '',
+    String authKind = 'bearer',
+    String authEnv = '',
+    String authHeader = 'X-Api-Key',
+  }) =>
+      _runIntegrationCommand('connect_integration_openapi', {
+        'name': name,
+        'specUrl': specUrl,
+        if (baseUrl.isNotEmpty) 'baseUrl': baseUrl,
+        'auth': _integrationAuthPayload(authKind, authEnv, authHeader),
+      });
+
+  Future<bool> disconnectIntegrationOpenApi(String name) =>
+      _runIntegrationCommand('disconnect_integration_openapi', {'name': name});
+
+  Map<String, dynamic> _integrationAuthPayload(
+    String kind,
+    String envVar,
+    String headerName,
+  ) {
+    if (kind == 'none' || envVar.trim().isEmpty) {
+      return {'kind': 'none'};
+    }
+    if (kind == 'header') {
+      return {
+        'kind': 'header',
+        'envVar': envVar.trim(),
+        'headerName': headerName.trim().isEmpty ? 'Authorization' : headerName.trim(),
+      };
+    }
+    return {'kind': kind, 'envVar': envVar.trim()};
+  }
+
+  Future<void> loadOrchestration() async {
+    if (!_protocol.isConnected) return;
+    final result = await _protocol.send('get_orchestration', {});
+    if (result.ok && result.data is Map) {
+      orchestration = OrchestrationSnapshot.fromJson(
+        Map<String, dynamic>.from(result.data! as Map),
+      );
+      notifyListeners();
+    }
+  }
+
+  Future<bool> startOrchestration(String goal, {int maxWorkers = 4}) async {
+    if (!_protocol.isConnected || orchestrationBusy) return false;
+    orchestrationBusy = true;
+    notifyListeners();
+    try {
+      final result = await _protocol.send('start_orchestration', {
+        'goal': goal,
+        'maxWorkers': maxWorkers,
+        'yolo': true,
+      });
+      if (result.ok && result.data is Map) {
+        orchestration = OrchestrationSnapshot.fromJson(
+          Map<String, dynamic>.from(result.data! as Map),
+        );
+        notifyListeners();
+        return true;
+      }
+      return false;
+    } finally {
+      orchestrationBusy = false;
+      notifyListeners();
+    }
+  }
+
+  Future<void> stopOrchestration() async {
+    if (!_protocol.isConnected) return;
+    orchestrationBusy = true;
+    notifyListeners();
+    try {
+      await _protocol.send('stop_orchestration', {
+        if (orchestration.id.isNotEmpty) 'orchestrationId': orchestration.id,
+      });
+    } finally {
+      orchestrationBusy = false;
+      notifyListeners();
+    }
+  }
+
+  /// Open worker + synthesis chats in the workspace (up to [maxVisibleChats]).
+  Future<void> openOrchestrationWorkspace() async {
+    final ids = orchestration.workerChatIds;
+    if (ids.isEmpty) return;
+    inChatWorkspace = true;
+    await _ensureChatOpen(ids.first);
+    visibleChatIds = [ids.first];
+    if (activeChatId != ids.first) {
+      await _protocol.send('activate_chat', {'chatId': ids.first});
+      activeChatId = ids.first;
+    }
+    for (var i = 1; i < ids.length && visibleChatIds.length < maxVisibleChats; i++) {
+      await openChatBeside(ids[i]);
+    }
+    _syncAssetResolver(chatId: activeChatId);
+    _syncDictationAudioClient();
+    notifyListeners();
+  }
+
+  Future<String?> createChat({String? title}) async {
+    if (!_protocol.isConnected) return null;
+    final result = await _protocol.send(
+      'create_chat',
+      {if (title != null) 'title': title},
+    );
+    await refreshConfig();
+    if (!result.ok) return null;
+    final data = result.data;
+    if (data is Map) {
+      return data['chatId'] as String?;
+    }
+    return activeChatId;
+  }
+
+  void returnToHub() {
+    inChatWorkspace = false;
+    visibleChatIds = [];
+    if (dictationSessionActive) {
+      unawaited(dictation.endSession());
+    }
+    notifyListeners();
+  }
+
+  Future<void> enterChatWorkspace(String chatId) async {
+    if (!_protocol.isConnected) return;
+    inChatWorkspace = true;
+    await _ensureChatOpen(chatId);
+    if (activeChatId != chatId) {
+      await _protocol.send('activate_chat', {'chatId': chatId});
+      activeChatId = chatId;
+      await refreshConfig();
+    }
+    visibleChatIds = [chatId];
+    _syncAssetResolver(chatId: chatId);
+    _syncDictationAudioClient();
+    _syncPersonaPendingFromActiveChat();
+    notifyListeners();
+  }
+
+  void _ensureVisibleInitialized() {
+    if (!inChatWorkspace) return;
+    if (visibleChatIds.isEmpty && activeChatId != null) {
+      visibleChatIds = [activeChatId!];
+    }
+  }
+
+  void _pruneVisibleChats() {
+    final ids = chats.map((c) => c.chatId).toSet();
+    visibleChatIds = visibleChatIds.where(ids.contains).toList();
+    if (!inChatWorkspace) return;
+    if (visibleChatIds.isEmpty && activeChatId != null && ids.contains(activeChatId)) {
+      visibleChatIds = [activeChatId!];
+    }
+  }
+
+  Future<void> _ensureChatOpen(String chatId, {bool replayIfEmpty = true}) async {
+    await _protocol.send('open_chat', {'chatId': chatId});
+    if (replayIfEmpty && _sessions.sessionFor(chatId).messages.isEmpty) {
+      await _protocol.send('replay_transcript', {'chatId': chatId});
+    }
+  }
+
+  /// Switch to a single chat (closes split layout).
   Future<void> activateChat(String chatId) async {
     if (!_protocol.isConnected) return;
+    inChatWorkspace = true;
     _sessions.sessionFor(chatId).clearTranscript();
     await _protocol.send('activate_chat', {'chatId': chatId});
+    activeChatId = chatId;
+    visibleChatIds = [chatId];
+    _syncAssetResolver(chatId: chatId);
+    _syncDictationAudioClient();
+    await refreshConfig();
+    notifyListeners();
+  }
+
+  /// Focus composer + dictation on a chat already visible in a pane.
+  Future<void> focusChat(String chatId) async {
+    if (activeChatId == chatId) return;
+    if (!visibleChatIds.contains(chatId)) {
+      await activateChat(chatId);
+      return;
+    }
+    if (dictationSessionActive) {
+      await dictation.endSession();
+    }
     activeChatId = chatId;
     _syncAssetResolver(chatId: chatId);
     _syncDictationAudioClient();
@@ -808,10 +1185,44 @@ class AppController extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// Add a second pane without tearing down the first chat's harness.
+  Future<void> openChatBeside(String chatId) async {
+    if (!_protocol.isConnected) return;
+    inChatWorkspace = true;
+    if (visibleChatIds.contains(chatId)) {
+      await focusChat(chatId);
+      return;
+    }
+    await _ensureChatOpen(chatId);
+    final next = List<String>.from(visibleChatIds);
+    if (next.length >= maxVisibleChats) {
+      next.removeLast();
+    }
+    if (!next.contains(chatId)) {
+      next.add(chatId);
+    }
+    if (next.isEmpty) {
+      next.add(chatId);
+    }
+    visibleChatIds = next;
+    await focusChat(chatId);
+  }
+
+  Future<void> closeChatPane(String chatId) async {
+    if (visibleChatIds.length <= 1) return;
+    visibleChatIds = visibleChatIds.where((id) => id != chatId).toList();
+    if (activeChatId == chatId && visibleChatIds.isNotEmpty) {
+      await focusChat(visibleChatIds.first);
+      return;
+    }
+    notifyListeners();
+  }
+
   Future<void> deleteChat(String chatId) async {
     if (!_protocol.isConnected) return;
     await _protocol.send('delete_chat', {'chatId': chatId});
     _sessions.remove(chatId);
+    visibleChatIds = visibleChatIds.where((id) => id != chatId).toList();
     notifyListeners();
   }
 

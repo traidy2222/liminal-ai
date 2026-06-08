@@ -76,6 +76,7 @@ class ProtocolClient {
       case 'app_updated':
       case 'app_closed':
       case 'app_data':
+      case 'orchestration_status':
         onGlobalFrame?.call(frame);
         return;
       default:
