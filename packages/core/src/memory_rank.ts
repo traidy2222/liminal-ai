@@ -344,6 +344,49 @@ export function scoreTurnAgainstIndex(turn: string, docs: RankableDoc[]): number
   return Math.min(1, maxScore / 12);
 }
 
+// ─── Recall output parsing ────────────────────────────────────────────────────
+
+const RECALL_NOTE_LINE_RE = /^-\s+\[([^\]]+)\]\s+score=/;
+
+/**
+ * Parse recall_relevant / memory_query note blocks into keyed entries for
+ * contradiction detection and auto-resolve.
+ */
+export function parseRecalledNoteBlocks(output: string): Array<{ key?: string; text: string }> {
+  const trimmed = output.trim();
+  if (!trimmed) return [];
+
+  const notes: Array<{ key?: string; text: string }> = [];
+  for (const line of trimmed.split("\n")) {
+    const m = RECALL_NOTE_LINE_RE.exec(line.trim());
+    if (!m) continue;
+    const key = m[1];
+    const text = line.trim();
+    if (text.length < 10) continue;
+    notes.push({ key, text });
+  }
+
+  if (notes.length > 0) return notes;
+
+  // Legacy multi-block format (blocks separated by ---)
+  const blocks = trimmed.includes("\n---\n")
+    ? trimmed.split("\n---\n").map((s) => s.trim())
+    : [trimmed];
+  for (const block of blocks) {
+    if (block.length < 10) continue;
+    let key: string | undefined;
+    for (const line of block.split("\n")) {
+      const m = RECALL_NOTE_LINE_RE.exec(line.trim());
+      if (m) {
+        key = m[1];
+        break;
+      }
+    }
+    notes.push({ key, text: block });
+  }
+  return notes;
+}
+
 // ─── Contradiction detection ──────────────────────────────────────────────────
 
 export interface Contradiction {

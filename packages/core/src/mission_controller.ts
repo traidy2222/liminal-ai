@@ -38,7 +38,8 @@ export function resolveMissionAutonomyConfig(prefs: RuntimePreferences | null = 
   const raw = resolveHarnessEnvRaw("AGENT_MISSION_MAX_ITERATIONS", prefs)?.trim();
   const n = raw ? parseInt(raw, 10) : 20;
   const maxIterations = Number.isFinite(n) ? Math.max(1, Math.min(100, n)) : 20;
-  return { enabled, maxIterations, requiresYolo: true };
+  const requiresYolo = resolveHarnessEnvRaw("AGENT_MISSION_REQUIRES_YOLO", prefs) === "1";
+  return { enabled, maxIterations, requiresYolo };
 }
 
 export async function loadLatestInProgressTask(): Promise<InProgressTask | null> {
@@ -95,9 +96,7 @@ export function buildResumeMissionBlock(
       yieldSnap.epistemicSummary ? `Epistemic: ${yieldSnap.epistemicSummary.slice(0, 400)}` : ""
     );
   }
-  lines.push(
-    "Call resume_task({ id }) if you need the full checkpoint, then continue the plan or feature_checklist."
-  );
+  lines.push("Call resume_task({ id }) if you need the full checkpoint, then continue the plan.");
   return lines.filter(Boolean).join("\n");
 }
 
@@ -129,8 +128,8 @@ export async function evaluateMissionContinue(input: {
 
   const msg =
     `[mission_continue] Continue task:${task.id}. ` +
-    (task.nextSteps?.trim() || "Pick up the next checklist item and execute it.") +
-    " Report progress; call task_checkpoint when a milestone completes.";
+    (task.nextSteps?.trim() || "Pick up the next step and execute it.") +
+    " Report progress when done.";
 
   return { continue: true, userMessage: msg, reason: "in_progress_task" };
 }

@@ -1,5 +1,5 @@
 import type { Scenario } from "../runner.js";
-import { traceHasTool, traceHasTurnEnd } from "../runner.js";
+import { traceHasTool, traceHasTurnEnd, traceToolRanOk } from "../runner.js";
 
 /**
  * Smoke that think() is available as a structured reasoning tool.
@@ -31,4 +31,37 @@ export const spawnContractSignalSmoke: Scenario = {
   ],
 };
 
-export const APPROVAL_CORRECTNESS_SCENARIOS = [thinkToolSmoke, spawnContractSignalSmoke];
+/** Exercises reject path on destructive tools (not auto-approved like default eval). */
+export const approvalRejectDestructiveSmoke: Scenario = {
+  name: "approval-reject-destructive-smoke",
+  harnessInteraction: "reject_destructive",
+  userMessage:
+    "Try to delete the file eval_approval_reject_probe.txt using delete_file. " +
+    "If rejected, reply exactly: REJECTED_OK",
+  maxRounds: 8,
+  timeoutMs: 60_000,
+  assertions: [
+    {
+      name: "approval_decision reject seen",
+      check: (t) =>
+        t.some(
+          (e) =>
+            e.type === "approval_decision" &&
+            (e.payload as { decision?: string }).decision === "reject"
+        ),
+    },
+    {
+      name: "delete_file not successful",
+      check: (t) => !traceToolRanOk(t, "delete_file"),
+    },
+    { name: "turn_end", check: (t) => traceHasTurnEnd(t) },
+  ],
+};
+
+export const HARNESS_INTERACTION_SCENARIOS = [approvalRejectDestructiveSmoke];
+
+export const APPROVAL_CORRECTNESS_SCENARIOS = [
+  thinkToolSmoke,
+  spawnContractSignalSmoke,
+  approvalRejectDestructiveSmoke,
+];

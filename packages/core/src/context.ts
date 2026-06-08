@@ -563,18 +563,26 @@ export class ContextManager {
     const rounds = extractRounds(conv);
 
     if (rounds.length <= keepRecent) {
-      return this.fallbackMaskObservations(inception, conv);
+      return await this.fallbackMaskObservations(inception, conv);
     }
 
     const snapBefore = this.computeSnapshot([...inception, ...conv]);
 
     const compressUpTo = rounds.length - keepRecent;
-    const toCompress = rounds.slice(0, compressUpTo).filter(
-      (r) => !r.hasError && !r.hasThinkOrPlan
-    );
+    const toCompress = rounds
+      .slice(0, compressUpTo)
+      .filter((r) => !r.hasThinkOrPlan)
+      .map((r) =>
+        r.hasError
+          ? {
+              ...r,
+              summary: `[FAILED ROUND — errors preserved in summary]\n${r.summary}`,
+            }
+          : r
+      );
 
     if (toCompress.length === 0) {
-      return this.fallbackMaskObservations(inception, conv);
+      return await this.fallbackMaskObservations(inception, conv);
     }
 
     // Build set of indices to remove (same for both tiered and flat paths)
@@ -713,21 +721,42 @@ export class ContextManager {
    * Iterates oldest-first, blanking tool results until usage drops below threshold.
    * (#1 Fix: keepRecent uses config value × 2, not a hardcoded 8)
    */
-  private fallbackMaskObservations(
+  private async fallbackMaskObservations(
     inception: Message[],
     conv: Message[]
-  ): Message[] {
+  ): Promise<Message[]> {
     const masked = conv.map((m) => ({ ...m }));
     // Keep at least keepRecentRounds * 2 messages untouched (1 assistant + 1 tool ≈ 2 per round)
     const keepMessages = (this.config.keepRecentRounds ?? 6) * 2;
+    const minMaskChars = 400;
 
     for (let i = 0; i < masked.length - keepMessages; i++) {
       const m = masked[i];
       if (!m) continue;
       if (m.role === "tool" && typeof m.content === "string") {
+        if (
+          m.content.startsWith("[observation masked") ||
+          m.content.startsWith("[TOOL_BODY_ELIDED") ||
+          m.content.startsWith("ERROR:")
+        ) {
+          continue;
+        }
+        let replacement = "[observation masked — context full]";
+        if (m.content.length >= minMaskChars) {
+          try {
+            const { hash, pointer } = await stashToolBodyElide(m.content);
+            const preview = m.content.slice(0, 300).replace(/\n/g, " ");
+            replacement =
+              `[observation masked — context full; hash=${hash}]\n` +
+              `Recover with read_artifact({ hash: "${hash}" }) or path: ${pointer}\n` +
+              `Preview: ${preview}${m.content.length > 300 ? "…" : ""}`;
+          } catch {
+            /* keep bare mask */
+          }
+        }
         masked[i] = {
           ...m,
-          content: "[observation masked — context full]",
+          content: replacement,
         } as Message;
         const check = this.computeSnapshot([...inception, ...masked]);
         if (check.usageFraction < this.config.thresholdFraction) break;
@@ -803,9 +832,17 @@ export class ContextManager {
     const snapBefore = this.computeSnapshot([...inception, ...this.conversation]);
 
     const compressUpTo = rounds.length - keepRecent;
-    const toCompress = rounds.slice(0, compressUpTo).filter(
-      (r) => !r.hasError && !r.hasThinkOrPlan
-    );
+    const toCompress = rounds
+      .slice(0, compressUpTo)
+      .filter((r) => !r.hasThinkOrPlan)
+      .map((r) =>
+        r.hasError
+          ? {
+              ...r,
+              summary: `[FAILED ROUND — errors preserved in summary]\n${r.summary}`,
+            }
+          : r
+      );
     if (toCompress.length === 0) return;
 
     const removeIdxs = new Set<number>();

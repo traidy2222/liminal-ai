@@ -9,6 +9,7 @@
  *   (Alias: --eval-only also works.)
  *   --repeat <k>     Run each scenario k times (fresh harness each time).
  *   --any-pass       With --repeat: pass if any run passes (default: all k must pass).
+ *   --harness-interaction  Run approval/interaction scenarios only (reject_destructive path).
  *
  * Exit code 0 = all scenarios passed. Exit code 1 = one or more failed.
  * Requires: AGENT_API_KEY (preferred) or provider-specific key env var.
@@ -36,7 +37,10 @@ import { MULTI_HOP_SCENARIOS } from "./scenarios/multi_hop.js";
 import { CONTRADICTION_SCENARIOS } from "./scenarios/contradiction.js";
 import { RETRIEVAL_PRECISION_SCENARIOS } from "./scenarios/retrieval_precision.js";
 import { CONTEXT_ROT_SCENARIOS } from "./scenarios/context_rot.js";
-import { APPROVAL_CORRECTNESS_SCENARIOS } from "./scenarios/approval_correctness.js";
+import {
+  APPROVAL_CORRECTNESS_SCENARIOS,
+  HARNESS_INTERACTION_SCENARIOS,
+} from "./scenarios/approval_correctness.js";
 import { WEB_RESEARCH_QUALITY_SCENARIOS } from "./scenarios/web_research_quality.js";
 import {
   RESEARCH_GRADE_SCENARIOS,
@@ -150,11 +154,13 @@ function parseCli(argv: string[]) {
 
   if (argv.includes("--any-pass")) anyPass = true;
 
-  return { parallel, only, repeat, anyPass };
+  const harnessInteraction = argv.includes("--harness-interaction");
+
+  return { parallel, only, repeat, anyPass, harnessInteraction };
 }
 
-function selectScenarios(only: string | undefined): Scenario[] {
-  let list = REAL_SCENARIOS;
+function selectScenarios(only: string | undefined, harnessInteraction: boolean): Scenario[] {
+  let list = harnessInteraction ? HARNESS_INTERACTION_SCENARIOS : REAL_SCENARIOS;
   if (!only) return list;
   if (only === "research-grade") {
     return list.filter((s) => RESEARCH_GRADE_SET.has(s));
@@ -250,14 +256,14 @@ async function main() {
   }
 
   const argv = process.argv.slice(2);
-  const { parallel, only, repeat, anyPass } = parseCli(argv);
-  const scenarios = selectScenarios(only);
+  const { parallel, only, repeat, anyPass, harnessInteraction } = parseCli(argv);
+  const scenarios = selectScenarios(only, harnessInteraction);
 
   console.log(`\n${fmt(BOLD, "Liminal eval")}  ${fmt(DIM, `model: ${EVAL_MODEL}`)}\n`);
   console.log(
     fmt(
       DIM,
-      `Running ${scenarios.length} real (no-mock) scenarios ` +
+      `Running ${scenarios.length} ${harnessInteraction ? "harness-interaction" : "real (no-mock)"} scenarios ` +
         `(parallel=${parallel}, repeat=${repeat}${anyPass ? ", any-pass" : ""})…\n`
     )
   );

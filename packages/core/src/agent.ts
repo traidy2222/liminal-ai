@@ -232,7 +232,12 @@ import {
 import { resolveSpeechSynthesisConfig } from "./speech_synthesis.js";
 // isImplementShipUserMessage is still imported as a fallback for the
 // implementShip override below when the classifier wasn't available.
-import { scoreTurnAgainstIndex, detectContradictions, type RankableDoc } from "./memory_rank.js";
+import {
+  scoreTurnAgainstIndex,
+  detectContradictions,
+  parseRecalledNoteBlocks,
+  type RankableDoc,
+} from "./memory_rank.js";
 import { EDIT_TOOL_NAMES, collectEditToolTargetPaths } from "./tool_changed_paths.js";
 import { ToolDag } from "./tool_dag.js";
 import { SessionToolIndex } from "./session_tool_index.js";
@@ -1343,7 +1348,7 @@ export class AgentHarness {
     if (!planId) return;
     const ledger = getCompensationLedger();
     if (ledger.entriesForPlan(planId).length === 0) return;
-    const results = await ledger.playback(planId);
+    const results = await ledger.playback(planId, { workspaceRoot: this.workspaceRoot });
     ledger.clear(planId);
     if (results.length === 0) return;
     const report = formatCompensationReport(results);
@@ -4229,18 +4234,28 @@ export class AgentHarness {
       // model. Under lazy loading verify_contract lives in the (activation-only)
       // reasoning_advanced family, so activate it before nudging — otherwise the
       // model is told to call a tool it cannot see.
-      if (this.registry.has("verify_contract") && !this.registry.isActive("verify_contract")) {
+      const verifyToolsOn =
+        resolveHarnessEnvRaw("AGENT_VERIFY_TOOLS", this.runtimePreferences) !== "0";
+      if (
+        verifyToolsOn &&
+        this.registry.has("verify_contract") &&
+        !this.registry.isActive("verify_contract")
+      ) {
         this.registry.activate(["verify_contract"]);
       }
       this.context.appendMessage({
         role: "user",
         content:
           `[CONTRACT BUDGET] ${contractBudgetMsg} ` +
-          (this.registry.has("verify_contract")
+          (verifyToolsOn && this.registry.has("verify_contract")
             ? "Call verify_contract to assess partial progress, then finalize your answer."
-            : "Stop calling tools and finalize your answer with what you have verified."),
+            : "Stop calling tools and finalize your answer with what you have completed."),
       });
-      if (!this.registry.has("verify_contract") || this.roundCount >= this.config.maxToolRoundsPerTurn - 1) {
+      if (
+        !verifyToolsOn ||
+        !this.registry.has("verify_contract") ||
+        this.roundCount >= this.config.maxToolRoundsPerTurn - 1
+      ) {
         this.emitTurnEnd("contract_budget");
         return;
       }
@@ -4616,11 +4631,7 @@ export class AgentHarness {
                     recentOutputs.push(m.content.slice(0, 800));
                   }
                 }
-                // Parse recalled output into note-like objects
-                const recalledNotes = r.output
-                  .split("\n---\n")
-                  .map((s) => ({ text: s.trim() }))
-                  .filter((n) => n.text.length > 10);
+                const recalledNotes = parseRecalledNoteBlocks(r.output);
                 const contradictions = detectContradictions(recalledNotes, recentOutputs, {
                   confidenceThreshold: contradictThreshold,
                 });
@@ -5107,7 +5118,7 @@ export class AgentHarness {
               mode === "overwrite" ||
               mode === "append";
             if (filePath && needsSnapshot) {
-              const original = await snapshotFileForCompensation(filePath);
+              const original = await snapshotFileForCompensation(filePath, this.workspaceRoot);
               if (original !== null) {
                 const planId =
                   this.executionState.activeContractId ?? this.executionState.mission?.id;
@@ -5901,10 +5912,6 @@ export class AgentHarness {
     } else {
       // Text-only completion: end the turn when the model stops (no post-assistant
       // critic, synthesis judge, cite guard, or stream [CONTINUE] loops).
-      await this.maybePersistEpisodeTurn();
-      await this.maybeAutoWriteVaultNotes();
-      await this.maybeAutoExtractMemories();
-
       // Per-turn outcome score (used by summary + root-only learning paths).
       const turnOutcome = scoreTurnOutcome({
         toolsUsed: this._toolOutcomesThisTurn,
@@ -5963,6 +5970,10 @@ export class AgentHarness {
       }
 
       this.emitTurnEnd("ok");
+      // Post-turn housekeeping off the critical path (turn_end / UI busy clears first).
+      void this.maybePersistEpisodeTurn();
+      void this.maybeAutoWriteVaultNotes();
+      void this.maybeAutoExtractMemories();
       if (!this.sessionGreetingThisSend && !this.personaBootstrapPromptThisSend) {
         this.triggerAutoDreamConsolidationBackground();
       }

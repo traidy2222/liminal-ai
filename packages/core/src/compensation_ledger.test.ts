@@ -46,3 +46,14 @@ test("snapshotFileForCompensation returns null for missing file", async () => {
   const snap = await snapshotFileForCompensation(path.join(tmpdir(), "nonexistent-file-xyz.txt"));
   assert.equal(snap, null);
 });
+
+test("snapshotFileForCompensation resolves relative paths against workspace root", async () => {
+  const root = await mkdtemp(path.join(tmpdir(), "comp-snap-"));
+  try {
+    await writeFile(path.join(root, "nested.txt"), "nested-content", "utf8");
+    const snap = await snapshotFileForCompensation("nested.txt", root);
+    assert.equal(snap, "nested-content");
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});

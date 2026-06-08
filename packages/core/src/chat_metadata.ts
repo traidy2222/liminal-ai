@@ -21,10 +21,15 @@ import {
 
 export type ChatWorkspaceMode = "scratch" | "folder" | "reuse";
 
+/** Special chat roles surfaced in the desktop shell. */
+export type ChatKind = "default" | "orchestrator";
+
 export interface ChatMetadata {
   chatId: string;
   /** Human-readable title (user-set, AI-summarized, or "Chat <id-prefix>"). */
   title: string;
+  /** When `orchestrator`, this chat is Mission Control (multi-worker coordinator). */
+  kind?: ChatKind;
   /** Which mode the chat was created with. */
   workspaceMode: ChatWorkspaceMode;
   /**
@@ -89,6 +94,7 @@ export async function touchChatMetadata(chatId: string): Promise<void> {
 export async function createChatMetadata(input: {
   chatId: string;
   title?: string;
+  kind?: ChatKind;
   workspaceMode: ChatWorkspaceMode;
   workspaceRoot: string;
   workspaceFingerprint?: string;
@@ -96,6 +102,7 @@ export async function createChatMetadata(input: {
   const meta: ChatMetadata = {
     chatId: sanitizeChatId(input.chatId),
     title: input.title?.trim() || `Chat ${input.chatId.slice(0, 8)}`,
+    kind: input.kind,
     workspaceMode: input.workspaceMode,
     workspaceRoot: path.resolve(input.workspaceRoot),
     workspaceFingerprint: input.workspaceFingerprint,

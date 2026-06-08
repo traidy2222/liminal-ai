@@ -3,7 +3,7 @@
  * as plan steps execute. On plan failure, plays back in reverse order to clean up
  * side-effects from completed steps.
  *
- * Phase 1 scope: delete_file, git_reset_to_checkpoint, remove_artifact.
+ * Phase 1 scope: delete_file, git_reset_to_checkpoint, remove_artifact, restore_file_content.
  * Phase 2 will extend this into a full saga / two-phase-commit pattern.
  */
 
@@ -34,6 +34,11 @@ export interface CompensationResult {
   error?: string;
 }
 
+export interface CompensationPlaybackOptions {
+  /** Workspace root for relative paths and git commands. */
+  workspaceRoot?: string;
+}
+
 function isEnabled(): boolean {
   return effectiveHarnessEnvRaw("AGENT_COMPENSATION_ENABLED") !== "0";
 }
@@ -41,6 +46,11 @@ function isEnabled(): boolean {
 function maxActions(): number {
   const n = parseInt(effectiveHarnessEnvRaw("AGENT_COMPENSATION_MAX_ACTIONS") ?? "32", 10);
   return Number.isFinite(n) && n > 0 ? Math.min(n, 256) : 32;
+}
+
+function resolvePath(filePath: string, workspaceRoot?: string): string {
+  if (path.isAbsolute(filePath)) return filePath;
+  return path.resolve(workspaceRoot ?? process.cwd(), filePath);
 }
 
 export class CompensationLedger {
@@ -59,14 +69,17 @@ export class CompensationLedger {
   }
 
   /** Replay compensation actions for a plan in reverse step order. */
-  async playback(planId: string): Promise<CompensationResult[]> {
+  async playback(
+    planId: string,
+    opts?: CompensationPlaybackOptions
+  ): Promise<CompensationResult[]> {
     const relevant = this.entries
       .filter((e) => e.planId === planId)
       .sort((a, b) => b.stepIndex - a.stepIndex || b.recordedAt - a.recordedAt);
 
     const results: CompensationResult[] = [];
     for (const entry of relevant) {
-      const result = await executeCompensationAction(entry.action);
+      const result = await executeCompensationAction(entry.action, opts);
       results.push(result);
     }
     return results;
@@ -89,23 +102,28 @@ export class CompensationLedger {
   }
 }
 
-async function executeCompensationAction(action: CompensationAction): Promise<CompensationResult> {
+async function executeCompensationAction(
+  action: CompensationAction,
+  opts?: CompensationPlaybackOptions
+): Promise<CompensationResult> {
+  const root = opts?.workspaceRoot;
   try {
     if (action.kind === "delete_file") {
-      await unlink(action.path);
+      await unlink(resolvePath(action.path, root));
       return { action, ok: true };
     }
     if (action.kind === "git_reset") {
-      const cwd = process.cwd();
+      const cwd = root ?? process.cwd();
       await execFileAsync("git", ["reset", "--hard", action.checkpointRef], { cwd });
       return { action, ok: true };
     }
     if (action.kind === "remove_artifact") {
-      await unlink(action.artifactPath);
+      await unlink(resolvePath(action.artifactPath, root));
       return { action, ok: true };
     }
     if (action.kind === "restore_file_content") {
-      await writeFile(action.path, action.originalContent, "utf8");
+      const p = resolvePath(action.path, root);
+      await writeFile(p, action.originalContent, "utf8");
       return { action, ok: true };
     }
     return { action, ok: false, error: "unknown action kind" };
@@ -122,9 +140,13 @@ async function executeCompensationAction(action: CompensationAction): Promise<Co
  * Snapshot a file's content before a mutating tool call so it can be restored
  * on plan failure. Returns null if the file does not exist (new file — use delete_file).
  */
-export async function snapshotFileForCompensation(filePath: string): Promise<string | null> {
+export async function snapshotFileForCompensation(
+  filePath: string,
+  workspaceRoot?: string
+): Promise<string | null> {
+  const resolved = resolvePath(filePath, workspaceRoot);
   try {
-    return await readFile(filePath, "utf8");
+    return await readFile(resolved, "utf8");
   } catch {
     return null;
   }

@@ -3,6 +3,7 @@ import type { AgentEmitter } from "./events.js";
 import type { ToolRegistry } from "./registry.js";
 import type { TaskOrchestrator } from "./orchestrator.js";
 import { guardToolArgs } from "./tool_arg_guard.js";
+import { coerceArgsToSchema, coerceJsonArrayValue } from "./tool_arg_coerce.js";
 import type { SafetyJudge } from "./safety_judge.js";
 import { stableArgsJsonKey } from "./json_stable.js";
 import { effectiveHarnessEnvRaw } from "./harness_effective_env.js";
@@ -103,6 +104,15 @@ function normalizeToolArgs(
       delete out["content"];
     }
     return out;
+  }
+  if (name === "docs_rest_write_blocks" && "blocks" in args) {
+    return { ...args, blocks: coerceJsonArrayValue(args["blocks"]) };
+  }
+  if (name === "docs_rest_batch_update" && "requests" in args) {
+    return { ...args, requests: coerceJsonArrayValue(args["requests"]) };
+  }
+  if (name === "docs_rest_insert_table" && "rows" in args) {
+    return { ...args, rows: coerceJsonArrayValue(args["rows"]) };
   }
   return args;
 }
@@ -256,6 +266,7 @@ export class ToolDispatcher {
     const tool = this.registry.get(name);
     if (!tool) return { ok: false, error: `Unknown tool: "${name}"` };
     args = normalizeToolArgs(name, args);
+    args = coerceArgsToSchema(tool.parameters, args);
     const guardMsg = guardToolArgs(name, args);
     if (guardMsg) return { ok: false, error: `[ARG GUARD] ${guardMsg}` };
     try {
@@ -307,6 +318,7 @@ export class ToolDispatcher {
       };
     }
     args = normalizeToolArgs(name, args);
+    args = coerceArgsToSchema(tool.parameters, args);
 
     // Circuit breaker: reject if this tool's circuit is open due to repeated failures.
     const circuitOpenUntilTs = this.circuitOpenUntil.get(name) ?? 0;
@@ -474,7 +486,7 @@ export class ToolDispatcher {
             return result;
           }
           if (decision.decision === "edit") {
-            args = normalizeToolArgs(name, decision.editedArgs);
+            args = coerceArgsToSchema(tool.parameters, normalizeToolArgs(name, decision.editedArgs));
             const reErr = validateArgs(tool.parameters, args);
             if (reErr) {
               const result: ToolResult = {
@@ -496,7 +508,10 @@ export class ToolDispatcher {
       }
 
       if (this.fileWriteHooks) {
-        args = normalizeToolArgs(name, await this.fileWriteHooks.prepareArgs(callId, name, args));
+        args = coerceArgsToSchema(
+          tool.parameters,
+          normalizeToolArgs(name, await this.fileWriteHooks.prepareArgs(callId, name, args))
+        );
         const reErr = validateArgs(tool.parameters, args);
         if (reErr) {
           const result: ToolResult = {

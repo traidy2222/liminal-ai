@@ -79,6 +79,11 @@ export interface Scenario {
   tags?: string[];
   /** When true, do not append to runs.jsonl (caller aggregates, e.g. CLI --repeat). */
   skipJsonSink?: boolean;
+  /**
+   * Approval / ask_user interaction mode for harness-interaction evals.
+   * Default `auto_approve` (legacy). Use `reject_destructive` to exercise approval gates.
+   */
+  harnessInteraction?: "auto_approve" | "reject_destructive";
 }
 
 export interface ScenarioResult {
@@ -144,6 +149,30 @@ export function traceGetSnapshot(
   const ev = trace.find((e) => e.type === "turn_end");
   if (!ev) return null;
   return (ev.payload as AgentEventMap["turn_end"]).contextSnapshot;
+}
+
+/** Concatenate assistant-channel text deltas after the last user message (final reply). */
+export function traceGetFinalAssistantText(trace: TraceEvent[]): string | null {
+  let lastUserIdx = -1;
+  for (let i = trace.length - 1; i >= 0; i--) {
+    if (trace[i]?.type === "text") {
+      const ch = (trace[i]!.payload as AgentEventMap["text"]).channel;
+      if (ch === "user" || ch === undefined) {
+        lastUserIdx = i;
+        break;
+      }
+    }
+  }
+  const parts: string[] = [];
+  for (let i = lastUserIdx + 1; i < trace.length; i++) {
+    const e = trace[i];
+    if (!e || e.type !== "text") continue;
+    const p = e.payload as AgentEventMap["text"];
+    if (p.channel && p.channel !== "assistant") continue;
+    if (typeof p.delta === "string" && p.delta.length > 0) parts.push(p.delta);
+  }
+  const joined = parts.join("").trim();
+  return joined.length > 0 ? joined : null;
 }
 
 /** harnessMetrics from last turn_end, if present. */
@@ -398,7 +427,24 @@ export async function runSingleHarnessSend(scenario: Scenario, userMessage: stri
     });
   }
 
+  const interaction = scenario.harnessInteraction ?? "auto_approve";
+  const destructiveTools = new Set([
+    "delete_file",
+    "run_shell",
+    "write_file",
+    "edit_file",
+    "git_commit",
+    "git_push",
+    "git_rollback",
+    "git_reset",
+    "multi_file_apply",
+  ]);
+
   harness.emitter.on("tool_approval", (payload) => {
+    if (interaction === "reject_destructive" && destructiveTools.has(payload.name)) {
+      payload.resolve({ decision: "reject" });
+      return;
+    }
     payload.resolve({ decision: "approve" });
   });
 
