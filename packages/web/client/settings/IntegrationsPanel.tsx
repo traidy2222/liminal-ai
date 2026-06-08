@@ -318,7 +318,7 @@ export function IntegrationsPanel({ agentBusy }: IntegrationsPanelProps) {
 
   const googlePrimary = async () => {
     if (googleConnected) {
-      const res = await webApiFetch("/api/integrations/google?revoke=0", { method: "DELETE" });
+      const res = await webApiFetch("/api/integrations/google?revoke=1", { method: "DELETE" });
       const json = (await res.json()) as { error?: string };
       if (!res.ok) throw new Error(json.error ?? "disconnect failed");
       return;
@@ -344,7 +344,7 @@ export function IntegrationsPanel({ agentBusy }: IntegrationsPanelProps) {
 
   const microsoftPrimary = async () => {
     if (microsoftConnected) {
-      const res = await webApiFetch("/api/integrations/microsoft?revoke=0", { method: "DELETE" });
+      const res = await webApiFetch("/api/integrations/microsoft?revoke=1", { method: "DELETE" });
       const json = (await res.json()) as { error?: string };
       if (!res.ok) throw new Error(json.error ?? "disconnect failed");
       return;
@@ -386,7 +386,7 @@ export function IntegrationsPanel({ agentBusy }: IntegrationsPanelProps) {
 
   const xeroPrimary = async () => {
     if (xeroConnected) {
-      const res = await webApiFetch("/api/integrations/xero?revoke=0", { method: "DELETE" });
+      const res = await webApiFetch("/api/integrations/xero?revoke=1", { method: "DELETE" });
       const json = (await res.json()) as { error?: string };
       if (!res.ok) throw new Error(json.error ?? "disconnect failed");
       return;
@@ -426,7 +426,7 @@ export function IntegrationsPanel({ agentBusy }: IntegrationsPanelProps) {
           googleConnected
             ? `${accounts[0]?.email ?? "Google"} · ${googleToolCount} agent tools`
             : accounts.length > 0
-              ? `Signed in as ${accounts[0]?.email ?? "Google"} — tap Connect to enable tools`
+              ? `Signed in as ${accounts[0]?.email ?? "Google"} — Connect for tools, or Revoke below to sign out`
               : "Gmail, Calendar, Drive, Docs, Sheets"
         }
         connected={googleConnected}
@@ -438,8 +438,8 @@ export function IntegrationsPanel({ agentBusy }: IntegrationsPanelProps) {
         onPrimary={() => void run(googlePrimary)}
       >
         <p style={{ fontSize: 10, color: "#778899", lineHeight: 1.45, margin: "10px 0" }}>
-          Opens Google sign-in, then attaches MCP tools for the agent. Needs{" "}
-          <code>GOOGLE_OAUTH_CLIENT_ID</code> / <code>SECRET</code> in .env.
+          Opens Google sign-in via vireondynamics.com, then attaches MCP tools for the agent.
+          Disconnect removes tools and signs out locally.
         </p>
         {accounts.map((a) => (
           <div key={a.accountId} style={{ fontSize: 11, fontFamily: "monospace", color: GREEN, marginBottom: 6 }}>

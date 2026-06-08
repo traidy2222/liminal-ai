@@ -92,7 +92,7 @@ class _IntegrationsScreenState extends State<IntegrationsScreen> {
 
   Future<void> _googlePrimary(AppController host, IntegrationsSnapshot snap, List<String> services) async {
     if (snap.googleConnected) {
-      await host.disconnectGoogle(revoke: false);
+      await host.disconnectGoogle(revoke: true);
       return;
     }
     if (snap.google.accounts.isEmpty) {
@@ -108,7 +108,7 @@ class _IntegrationsScreenState extends State<IntegrationsScreen> {
     List<String> services,
   ) async {
     if (snap.microsoftConnected) {
-      await host.disconnectMicrosoft(revoke: false);
+      await host.disconnectMicrosoft(revoke: true);
       return;
     }
     if (snap.microsoft.accounts.isEmpty) {
@@ -120,7 +120,7 @@ class _IntegrationsScreenState extends State<IntegrationsScreen> {
 
   Future<void> _xeroPrimary(AppController host, IntegrationsSnapshot snap) async {
     if (snap.xeroConnected) {
-      await host.disconnectXero(revoke: false);
+      await host.disconnectXero(revoke: true);
       return;
     }
     await host.connectXeroOAuth(mode: _xeroMode);
@@ -188,7 +188,7 @@ class _IntegrationsScreenState extends State<IntegrationsScreen> {
                 summary: snap.googleConnected
                     ? '${snap.google.accounts.first.email ?? "Google"} · ${snap.googleToolCount} tools'
                     : snap.google.accounts.isNotEmpty
-                        ? 'Signed in — tap Connect to enable tools'
+                        ? 'Signed in — Connect for tools, or expand → Revoke to sign out'
                         : 'Gmail, Calendar, Drive, Docs, Sheets',
                 connected: snap.googleConnected,
                 expanded: _expandedId == 'google',
