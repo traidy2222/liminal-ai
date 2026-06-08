@@ -45,7 +45,7 @@ const CONTENT = {
       color: BRAND,
       title: "👋 Welcome to Vireon Dynamics",
       description:
-        "This is the community home for **Liminal AI** — a fair-source ReAct coding agent you run on **your own machine**. Any OpenAI-compatible model, 140+ tools, terminal + web UI, full visibility into every tool call and approval.\n\n" +
+        "This is the community home for **Liminal AI** — a fair-source ReAct coding agent you run on **your own machine**. Any OpenAI-compatible model, 245+ tools, terminal + web UI, full visibility into every tool call and approval.\n\n" +
         "**New here?** Head to **#start-here** for a 60-second tour and the channel guide.",
       fields: [
         { name: "🚀 Install (90s)", value: `[Get started →](${GET_STARTED})`, inline: true },
@@ -218,7 +218,7 @@ const CONTENT = {
       color: BRAND,
       title: "💳 Liminal editions",
       fields: [
-        { name: "🆓 Community", value: "Free, runs on your machine. The full harness — 140+ tools, TUI + web, any OpenAI-compatible model. FSL-1.1-MIT.", inline: false },
+        { name: "🆓 Community", value: "Free, runs on your machine. The full harness — 245+ tools, TUI + web, any OpenAI-compatible model. FSL-1.1-MIT.", inline: false },
         { name: "⭐ Pro", value: "Adds cloud sync for your memory/notes across machines.", inline: false },
         { name: "👥 Team", value: "Org admin, member invites, audit log, and shared memory across your org.", inline: false },
       ],
