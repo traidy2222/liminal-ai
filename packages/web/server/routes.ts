@@ -812,36 +812,77 @@ export function createRouter(
     res.json({ connectUrl, authUrl: connectUrl, state });
   });
 
-  router.post("/api/integrations/oauth/handoff", async (req, res) => {
-    prunePendingHostedOAuth();
-    const body = req.body as {
+  type IntegrationHandoffBundle = {
+    provider?: string;
+    accountId?: string;
+    email?: string;
+    accessToken?: string;
+    refreshToken?: string;
+    expiresAt?: number;
+    scopes?: string[];
+    metadata?: Record<string, unknown>;
+  };
+
+  const wantsIntegrationHandoffHtml = (req: import("express").Request): boolean => {
+    const ct = (req.get("Content-Type") ?? "").toLowerCase();
+    return ct.includes("application/x-www-form-urlencoded") || ct.includes("multipart/form-data");
+  };
+
+  const parseIntegrationHandoffBody = (
+    req: import("express").Request
+  ): { state?: string; provider?: string; bundle?: IntegrationHandoffBundle } => {
+    let body = req.body as {
+      payload?: string;
       state?: string;
       provider?: string;
-      bundle?: {
-        provider?: string;
-        accountId?: string;
-        email?: string;
-        accessToken?: string;
-        refreshToken?: string;
-        expiresAt?: number;
-        scopes?: string[];
-        metadata?: Record<string, unknown>;
-      };
+      bundle?: IntegrationHandoffBundle;
     };
+    if (typeof body?.payload === "string" && body.payload.trim()) {
+      try {
+        body = JSON.parse(Buffer.from(body.payload.trim(), "base64url").toString("utf8")) as typeof body;
+      } catch {
+        return {};
+      }
+    }
+    return body;
+  };
+
+  const integrationHandoffSuccessHtml = (provider: string) =>
+    vireonCallbackHtml(
+      `${escapeHtml(provider)} connected`,
+      `<strong style="color:#6ee7b7">${escapeHtml(provider)} connected.</strong> Close this tab and return to Liminal Integrations.`
+    );
+
+  const respondIntegrationHandoffError = (
+    req: import("express").Request,
+    res: import("express").Response,
+    status: number,
+    message: string
+  ) => {
+    if (wantsIntegrationHandoffHtml(req)) {
+      res.status(status).type("html").send(vireonCallbackHtml("Connection failed", escapeHtml(message)));
+      return;
+    }
+    res.status(status).json({ error: message });
+  };
+
+  router.post("/api/integrations/oauth/handoff", async (req, res) => {
+    prunePendingHostedOAuth();
+    const body = parseIntegrationHandoffBody(req);
     const state = body.state?.trim() ?? "";
     const pending = state ? pendingHostedOAuth.get(state) : undefined;
     if (!pending || pending.exp < Date.now()) {
-      res.status(403).json({ error: "Invalid or expired connect session" });
+      respondIntegrationHandoffError(req, res, 403, "Invalid or expired connect session");
       return;
     }
     const provider = body.provider?.trim() || pending.provider;
     if (provider !== pending.provider) {
-      res.status(400).json({ error: "Provider mismatch" });
+      respondIntegrationHandoffError(req, res, 400, "Provider mismatch");
       return;
     }
     const b = body.bundle;
     if (!b?.accessToken || !b.refreshToken || !b.accountId) {
-      res.status(400).json({ error: "Incomplete OAuth bundle" });
+      respondIntegrationHandoffError(req, res, 400, "Incomplete OAuth bundle");
       return;
     }
     try {
@@ -869,9 +910,14 @@ export function createRouter(
       } catch {
         /* ok — user can retry from Integrations */
       }
+      if (wantsIntegrationHandoffHtml(req)) {
+        res.status(200).type("html").send(integrationHandoffSuccessHtml(provider));
+        return;
+      }
       res.json({ ok: true, provider });
     } catch (e) {
-      res.status(400).json({ error: e instanceof Error ? e.message : String(e) });
+      const message = e instanceof Error ? e.message : String(e);
+      respondIntegrationHandoffError(req, res, 400, message);
     }
   });
 

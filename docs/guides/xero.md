@@ -65,7 +65,7 @@ Same hosted handoff pattern as Vireon license connect (`/connect/harness`).
 
 ## Troubleshooting
 
-- **"Harness rejected handoff"** — Liminal web server must be running on `:3001` when you finish Xero sign-in.
+- **"Harness rejected handoff"** / **"Failed to fetch"** — Liminal web server must be running (`liminal web` or desktop app) **before** you click Connect and through the whole Xero sign-in. The callback uses a form POST to `http://127.0.0.1:3001` (not `fetch`) so Chrome can reach localhost.
 - **No organisation** — reconnect; the harness stores the first linked tenant from `GET /connections`.
 - **403 on API calls** — wrong tenant or missing scope; revoke in Integrations and reconnect with the mode you need.
 - **`invalid_scope` on Xero sign-in** — Xero apps created after 2026-03-02 require granular scopes (`accounting.invoices`, not legacy `accounting.transactions`). Redeploy the latest vireondynamics.com connect routes.

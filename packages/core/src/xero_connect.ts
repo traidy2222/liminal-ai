@@ -27,11 +27,20 @@ function isLoopbackHost(host: string): boolean {
   return h === "127.0.0.1" || h === "localhost" || h === "[::1]";
 }
 
-async function readJsonBody(req: IncomingMessage): Promise<unknown> {
+async function readRequestBody(req: IncomingMessage): Promise<unknown> {
   const chunks: Buffer[] = [];
   for await (const c of req) chunks.push(c as Buffer);
   const raw = Buffer.concat(chunks).toString("utf8");
   if (!raw.trim()) return {};
+  const contentType = (req.headers["content-type"] ?? "").toLowerCase();
+  if (contentType.includes("application/x-www-form-urlencoded")) {
+    const params = new URLSearchParams(raw);
+    const payload = params.get("payload")?.trim();
+    if (payload) {
+      return JSON.parse(Buffer.from(payload, "base64url").toString("utf8")) as unknown;
+    }
+    return Object.fromEntries(params.entries());
+  }
   return JSON.parse(raw) as unknown;
 }
 
@@ -63,6 +72,7 @@ export function runXeroHostedConnectFlow(
           "Access-Control-Allow-Origin": siteOriginHeader,
           "Access-Control-Allow-Methods": "POST, OPTIONS",
           "Access-Control-Allow-Headers": "Content-Type",
+          "Access-Control-Allow-Private-Network": "true",
         });
         res.end();
         return;
@@ -75,9 +85,13 @@ export function runXeroHostedConnectFlow(
       }
 
       try {
-        const body = (await readJsonBody(req)) as HostedOAuthHandoffPayload & {
+        const body = (await readRequestBody(req)) as HostedOAuthHandoffPayload & {
           bundle?: HostedOAuthHandoffPayload["bundle"];
         };
+        const contentType = (req.headers["content-type"] ?? "").toLowerCase();
+        const htmlHandoff =
+          contentType.includes("application/x-www-form-urlencoded") ||
+          contentType.includes("multipart/form-data");
         if (body.state !== state) {
           res.writeHead(403, { "Content-Type": "application/json" });
           res.end(JSON.stringify({ error: "Invalid state" }));
@@ -105,11 +119,21 @@ export function runXeroHostedConnectFlow(
           },
         });
 
-        res.writeHead(200, {
-          "Content-Type": "application/json",
-          "Access-Control-Allow-Origin": siteOriginHeader,
-        });
-        res.end(JSON.stringify({ ok: true }));
+        if (htmlHandoff) {
+          res.writeHead(200, {
+            "Content-Type": "text/html; charset=utf-8",
+            "Access-Control-Allow-Origin": siteOriginHeader,
+          });
+          res.end(
+            "<!DOCTYPE html><html><body style=\"font-family:system-ui,sans-serif;padding:2rem\"><p><strong>Connected.</strong> Close this tab and return to Liminal.</p></body></html>"
+          );
+        } else {
+          res.writeHead(200, {
+            "Content-Type": "application/json",
+            "Access-Control-Allow-Origin": siteOriginHeader,
+          });
+          res.end(JSON.stringify({ ok: true }));
+        }
 
         clearTimeout(timer);
         server.close();

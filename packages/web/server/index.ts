@@ -64,7 +64,13 @@ app.use(
     credentials: true,
   })
 );
+// Chrome Private Network Access — public site (vireondynamics.com) → loopback handoff.
+app.use((_req, res, next) => {
+  res.setHeader("Access-Control-Allow-Private-Network", "true");
+  next();
+});
 app.use(express.json({ limit: "20mb" }));
+app.use(express.urlencoded({ extended: false, limit: "20mb" }));
 
 const sse = new SSEManager();
 // Multi-chat manager owns every AgentBridge in process. boot() loads chats
