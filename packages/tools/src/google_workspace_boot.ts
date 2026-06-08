@@ -15,8 +15,17 @@ import { ensureGoogleSidecarRunning } from "./google_sidecar.js";
 
 const PARENT = "google_workspace";
 
+export type IntegrationBootstrapOptions = {
+  /** When false, skip AGENT_GOOGLE_CONNECT_ON_BOOT auto-attach (use after disconnect / refresh). */
+  autoConnect?: boolean;
+};
+
 /** Start sidecar when a persisted google_ext connection exists; optionally auto-connect all services. */
-export async function bootstrapGoogleWorkspace(registry: ToolRegistry): Promise<void> {
+export async function bootstrapGoogleWorkspace(
+  registry: ToolRegistry,
+  opts: IntegrationBootstrapOptions = {}
+): Promise<void> {
+  const autoConnect = opts.autoConnect !== false;
   const accounts = await listGoogleOAuthAccounts();
   const googleConns = await listConnectionsByParent(PARENT);
 
@@ -32,7 +41,7 @@ export async function bootstrapGoogleWorkspace(registry: ToolRegistry): Promise<
   }
 
   const onBoot = effectiveHarnessEnvRaw("AGENT_GOOGLE_CONNECT_ON_BOOT") === "1";
-  if (onBoot && accounts.length > 0 && googleConns.length === 0) {
+  if (autoConnect && onBoot && accounts.length > 0 && googleConns.length === 0) {
     await connectGoogleWorkspaceFromServer(registry, { mode: "read_write" });
   }
 }

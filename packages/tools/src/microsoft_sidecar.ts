@@ -200,11 +200,13 @@ export async function ensureMicrosoftSidecarRunning(
   if (!bin) {
     return { ok: false, url, error: "AGENT_MICROSOFT_SIDECAR_CMD is empty" };
   }
-  if (!microsoftOAuthClientId()) {
+  if (!microsoftOAuthClientId() && !accessToken?.trim()) {
     return {
       ok: false,
       url,
-      error: "MICROSOFT_OAUTH_CLIENT_ID is required for ms-365-mcp-server sidecar.",
+      error:
+        "Microsoft OAuth not connected — connect via Settings → Integrations (hosted sign-in). " +
+        "Legacy: set MICROSOFT_OAUTH_CLIENT_ID in .env for ms-365-mcp-server.",
     };
   }
 

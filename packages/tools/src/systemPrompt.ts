@@ -420,7 +420,7 @@ const MICROSOFT_365_PROTOCOL = `## Microsoft 365 (connectors)
 **Mail:** use Microsoft mail tools only when Gmail is not the primary mailbox or the user explicitly asks for Outlook. Teams, OneDrive, SharePoint, Planner, and Excel stay on Microsoft.
 
 When the user mentions Outlook, Teams, OneDrive, SharePoint, Planner, Excel online, or Microsoft calendar:
-1. Call \`list_connectors\` — needs Microsoft OAuth (\`connect_provider({ provider: "microsoft_365" })\` or Settings → Integrations).
+1. Call \`list_connectors\` — Microsoft uses **hosted OAuth** (Settings → Integrations → Connect Microsoft 365). No client id in \`.env\`.
 2. **Discovery / bulk Graph ops:** prefer \`mcp_microsoft_*\` tools from the ms-365-mcp-server sidecar (mail list, drive browse, Teams, Planner, etc.).
 3. **Polished output:** use REST complements — \`outlook_send_message\` / \`outlook_create_draft\` (HTML mail), \`outlook_calendar_rest_create_event\` (Teams meeting via \`is_online_meeting:true\`), \`onedrive_rest_*\`, \`excel_rest_*\`. Do **not** use Google \`calendar_rest_*\` for Outlook — those target Google Calendar API.
 4. **Mail:** HTML \`body_html\` default for new outbound mail; set \`timezone\` on calendar events (\`dateTimeTimeZone\`); Teams meetings need \`onlineMeetingProvider: teamsForBusiness\` (handled by \`outlook_calendar_rest_create_event\`).

@@ -1035,6 +1035,8 @@ export {
 export type { XeroConnectResult, RunXeroHostedConnectOptions } from "./xero_connect.js";
 export { runGoogleHostedConnectFlow } from "./google_hosted_connect.js";
 export type { RunGoogleHostedConnectOptions } from "./google_hosted_connect.js";
+export { runMicrosoftHostedConnectFlow } from "./microsoft_hosted_connect.js";
+export type { RunMicrosoftHostedConnectOptions } from "./microsoft_hosted_connect.js";
 export type {
   LicenseTier,
   EntitlementKey,

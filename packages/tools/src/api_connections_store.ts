@@ -190,3 +190,29 @@ export function listConnectionsByParent(parentProvider: string): Promise<McpConn
     )
   );
 }
+
+function isGoogleWorkspaceMcp(c: McpConnectionRecord): boolean {
+  if (c.parentProvider === "google_workspace") return true;
+  if (c.auth.kind === "oauth2" && c.auth.provider === "google") return true;
+  if (c.name === "google_ext" || c.name.startsWith("google_")) return true;
+  return false;
+}
+
+function isMicrosoft365Mcp(c: McpConnectionRecord): boolean {
+  if (c.parentProvider === "microsoft_365") return true;
+  if (c.auth.kind === "oauth2" && c.auth.provider === "microsoft") return true;
+  if (c.name === "microsoft_graph" || c.name.startsWith("microsoft_")) return true;
+  return false;
+}
+
+/** Curated Google Workspace MCP rows — includes legacy records missing parentProvider. */
+export async function listGoogleWorkspaceConnections(): Promise<McpConnectionRecord[]> {
+  const all = await listConnections();
+  return all.filter((c): c is McpConnectionRecord => c.kind === "mcp" && isGoogleWorkspaceMcp(c));
+}
+
+/** Curated Microsoft 365 MCP rows — includes legacy records missing parentProvider. */
+export async function listMicrosoft365Connections(): Promise<McpConnectionRecord[]> {
+  const all = await listConnections();
+  return all.filter((c): c is McpConnectionRecord => c.kind === "mcp" && isMicrosoft365Mcp(c));
+}

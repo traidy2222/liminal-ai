@@ -7,42 +7,36 @@ Liminal connects to Microsoft 365 through a **hybrid architecture**:
 
 ## Connect once (recommended)
 
-### 1. Azure Portal (one time)
-
-1. [Azure Portal](https://portal.azure.com) → **Microsoft Entra ID** → **App registrations** → **New registration**
-2. **Redirect URIs** (Web) — use `localhost` (Azure often rejects `127.0.0.1`):
-   - Web UI: `http://localhost:3001/oauth/microsoft/callback`
-   - CLI/desktop loopback: `http://localhost:38476/oauth/microsoft/callback`
-3. **API permissions** → Microsoft Graph → **Delegated** permissions for services you need:
-   - Mail: `Mail.Read`, `Mail.ReadWrite`, `Mail.Send`
-   - Calendar: `Calendars.ReadWrite`, `OnlineMeetings.ReadWrite`
-   - Files: `Files.ReadWrite.All`
-   - Teams: `Chat.ReadWrite`, `ChannelMessage.Send`, `ChannelMessage.Read.All`, `Team.ReadBasic.All`
-   - Planner/To Do: `Tasks.ReadWrite`, `Group.Read.All`
-   - OneNote: `Notes.ReadWrite.All`
-   - SharePoint: `Sites.ReadWrite.All`
-4. Grant admin consent if your tenant requires it.
-5. Add to `.env`:
-
-```env
-MICROSOFT_OAUTH_CLIENT_ID=your-application-client-id
-MICROSOFT_OAUTH_CLIENT_SECRET=your-secret   # optional for public/native apps
-MICROSOFT_TENANT_ID=common                  # or your org tenant id
-AGENT_MICROSOFT_SIDECAR_ENABLE=1
-AGENT_MICROSOFT_SIDECAR_PORT=8011
-# AGENT_MICROSOFT_CONNECT_ON_BOOT=1   # optional — auto-attach MCP on startup (off by default; saves tokens when lazy)
-# AGENT_INTEGRATION_AUTO_ACTIVATE=1   # optional — expose all MCP tools immediately (off when AGENT_TOOL_LAZY=1)
-```
-
-With **`AGENT_TOOL_LAZY=1`** (default), Microsoft tools register when you Connect but stay **off the model API** until the agent calls `activate_tool_family({ family: "connectors" })` or the user message mentions mail/calendar/Teams (intent pre-seed). Simple coding questions therefore do not pay for 200+ `mcp_microsoft_*` schemas.
-
-### 2. Connect in UI
+### 1. Connect in UI
 
 **Settings → Integrations → Microsoft 365 → Connect**
 
-One tap runs OAuth (if needed) and attaches MCP tools.
+Opens `vireondynamics.com/connect/microsoft`, stores encrypted tokens under `~/.liminal/oauth/microsoft/`, and attaches MCP tools.
 
-### 3. Agent tools
+No `MICROSOFT_OAUTH_CLIENT_ID` in your local `.env` — OAuth runs on Vireon-hosted Entra app registration.
+
+### 2. Optional local tuning
+
+```env
+AGENT_MICROSOFT_SIDECAR_ENABLE=1
+AGENT_MICROSOFT_SIDECAR_PORT=8011
+# AGENT_MICROSOFT_CONNECT_ON_BOOT=1   # optional — auto-attach MCP on startup
+# AGENT_INTEGRATION_AUTO_ACTIVATE=1   # optional — expose all MCP tools immediately (off when AGENT_TOOL_LAZY=1)
+```
+
+With **`AGENT_TOOL_LAZY=1`** (default), Microsoft tools register when you Connect but stay **off the model API** until the agent calls `activate_tool_family({ family: "connectors" })` or the user message mentions mail/calendar/Teams (intent pre-seed).
+
+### 3. Hosted OAuth flow
+
+```
+Liminal (local) → opens vireondynamics.com/connect/microsoft?redirect_uri=…&state=…
+                → Microsoft Entra consent
+                → site /connect/microsoft/callback (token exchange)
+                → form POST → http://127.0.0.1:<port>/api/integrations/oauth/handoff
+                → ~/.liminal/oauth/microsoft/
+```
+
+### 4. Agent tools
 
 | User ask | Tool path |
 |----------|-----------|
@@ -63,6 +57,16 @@ Microsoft Graph does **not** support in-place Word body editing like Google Docs
 - Export PDF via `office_rest_export_pdf`
 - Re-upload after local transforms
 
+## Vireon site operator setup (one time)
+
+For self-hosted Liminal builds that still use `vireondynamics.com`:
+
+1. [Azure Portal](https://portal.azure.com) → **Microsoft Entra ID** → **App registrations** → app used by Vireon
+2. **Redirect URI** (Web): `https://www.vireondynamics.com/connect/microsoft/callback`
+3. **API permissions** → Microsoft Graph → **Delegated** permissions for services you need (mail, calendar, files, Teams, …)
+4. Grant admin consent if your tenant requires it
+5. Vercel env: `MICROSOFT_OAUTH_CLIENT_ID`, `MICROSOFT_OAUTH_CLIENT_SECRET`, optional `MICROSOFT_TENANT_ID=common`
+
 ## Manual test checklist
 
 1. Connect Microsoft 365 in Integrations (all services checked)
@@ -76,6 +80,7 @@ Microsoft Graph does **not** support in-place Word body editing like Google Docs
 
 ## Troubleshooting
 
-- **Sidecar won't start:** ensure Node.js/npx available; port 8011 free; `MICROSOFT_OAUTH_CLIENT_ID` set
-- **403 from Graph:** reconnect with expanded service checkboxes; verify Azure API permissions + admin consent
-- **Missing refresh token:** ensure `offline_access` scope; revoke app at [mysignins.microsoft.com](https://mysignins.microsoft.com/) and reconnect
+- **Sidecar won't start:** ensure Node.js/npx available; port 8011 free
+- **403 from Graph:** reconnect with expanded service checkboxes; verify Azure API permissions + admin consent on the Vireon app
+- **Missing refresh token:** revoke app at [mysignins.microsoft.com](https://mysignins.microsoft.com/) and reconnect
+- **Legacy local OAuth:** older builds used `http://localhost:3001/oauth/microsoft/callback` with `MICROSOFT_OAUTH_CLIENT_ID` in `.env` — disconnect, upgrade, and use hosted Connect

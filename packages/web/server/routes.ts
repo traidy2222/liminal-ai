@@ -34,12 +34,7 @@ import {
   scopesForGoogleServices,
   resolveGoogleServices,
   listMicrosoftOAuthAccounts,
-  exchangeMicrosoftCode,
-  buildMicrosoftAuthUrlForWeb,
-  microsoftOAuthCallbackUri,
   ALL_MICROSOFT_SERVICE_IDS,
-  scopesForMicrosoftServices,
-  resolveMicrosoftServices,
   missingDefaultMicrosoftScopes,
   listXeroOAuthAccounts,
   buildHostedIntegrationConnectUrl,
@@ -101,11 +96,6 @@ const pendingGoogleConnect = new Map<
   { exp: number; redirectUri: string; services?: string[]; mode: "read_write" | "read_only" }
 >();
 
-const pendingMicrosoftConnect = new Map<
-  string,
-  { exp: number; redirectUri: string; services?: string[]; mode: "read_write" | "read_only" }
->();
-
 const pendingHostedOAuth = new Map<
   string,
   {
@@ -120,13 +110,6 @@ function prunePendingHostedOAuth(): void {
   const now = Date.now();
   for (const [k, v] of pendingHostedOAuth) {
     if (v.exp < now) pendingHostedOAuth.delete(k);
-  }
-}
-
-function prunePendingMicrosoftConnect(): void {
-  const now = Date.now();
-  for (const [k, v] of pendingMicrosoftConnect) {
-    if (v.exp < now) pendingMicrosoftConnect.delete(k);
   }
 }
 
@@ -712,73 +695,33 @@ export function createRouter(
   });
 
   router.get("/api/integrations/microsoft/begin", (req, res) => {
-    prunePendingMicrosoftConnect();
+    prunePendingHostedOAuth();
     const state = randomBytes(16).toString("hex");
-    const redirectUri = microsoftOAuthCallbackUri(WEB_PORT);
     const servicesRaw = req.query["services"];
     const services =
       typeof servicesRaw === "string"
         ? servicesRaw.split(",").map((s) => s.trim()).filter(Boolean)
         : undefined;
     const mode = req.query["mode"] === "read_only" ? "read_only" : "read_write";
-    pendingMicrosoftConnect.set(state, { exp: Date.now() + 5 * 60_000, redirectUri, services, mode });
-    try {
-      const authUrl = buildMicrosoftAuthUrlForWeb({ redirectUri, state, services, mode });
-      res.json({ authUrl, state });
-    } catch (e) {
-      res.status(400).json({ error: e instanceof Error ? e.message : String(e) });
-    }
-  });
-
-  router.get("/oauth/microsoft/callback", async (req, res) => {
-    prunePendingMicrosoftConnect();
-    const state = String(req.query["state"] ?? "");
-    const pending = pendingMicrosoftConnect.get(state);
-    const code = String(req.query["code"] ?? "");
-    const err = req.query["error"];
-
-    if (err) {
-      res.status(400).send(vireonCallbackHtml("Microsoft sign-in failed", escapeHtml(String(err))));
-      return;
-    }
-    if (!pending || !code) {
-      res.status(400).send(vireonCallbackHtml("Invalid request", "Missing or expired OAuth state."));
-      return;
-    }
-    pendingMicrosoftConnect.delete(state);
-
-    try {
-      const presets = resolveMicrosoftServices(pending.services);
-      const scopes = scopesForMicrosoftServices(
-        presets.length > 0 ? presets : resolveMicrosoftServices(undefined),
-        pending.mode
-      );
-      const bundle = await exchangeMicrosoftCode({ code, redirectUri: pending.redirectUri, scopes });
-      try {
-        const bridge = active();
-        if (!bridge.harness.getIsRunning()) {
-          const attach = await connectMicrosoft365FromServer(bridge.harness.registry, {
-            services: pending.services,
-            mode: pending.mode,
-          });
-          if (attach.ok) {
-            bridge.harness.getContext().refreshProtocolDynamic(bridge.harness.registry.getActiveToolNames());
-          }
-        }
-      } catch {
-        /* attach can be retried from Integrations */
-      }
-      res.send(
-        vireonCallbackSuccessRedirect(bundle.email ?? bundle.accountId, "microsoft_365").replace(
-          "vireon=connected",
-          "microsoft=connected"
-        )
-      );
-    } catch (e) {
-      res.status(500).send(
-        vireonCallbackHtml("Token exchange failed", escapeHtml(e instanceof Error ? e.message : String(e)))
-      );
-    }
+    pendingHostedOAuth.set(state, {
+      exp: Date.now() + 10 * 60_000,
+      provider: "microsoft",
+      mode,
+      services,
+    });
+    const harnessRedirectUri = hostedOAuthHandoffPath(WEB_PORT);
+    const site = defaultVireonSiteOrigin();
+    const extra: Record<string, string> = {};
+    if (services?.length) extra.services = services.join(",");
+    const connectUrl = buildHostedIntegrationConnectUrl({
+      provider: "microsoft",
+      harnessRedirectUri,
+      harnessState: state,
+      siteOrigin: site,
+      mode,
+      extra: Object.keys(extra).length > 0 ? extra : undefined,
+    });
+    res.json({ connectUrl, authUrl: connectUrl, state });
   });
 
   router.post("/api/integrations/microsoft/connect", async (req, res) => {
@@ -939,6 +882,15 @@ export function createRouter(
             mode: pendingMode,
           });
           if (!googleResult.ok) attachWarning = googleResult.error;
+          else
+            bridge.harness.getContext().refreshProtocolDynamic(bridge.harness.registry.getActiveToolNames());
+        }
+        if (provider === "microsoft") {
+          const msResult = await connectMicrosoft365FromServer(bridge.harness.registry, {
+            services: pendingServices,
+            mode: pendingMode,
+          });
+          if (!msResult.ok) attachWarning = msResult.error;
           else
             bridge.harness.getContext().refreshProtocolDynamic(bridge.harness.registry.getActiveToolNames());
         }

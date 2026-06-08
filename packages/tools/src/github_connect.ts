@@ -74,8 +74,9 @@ export async function connectGithubMcp(
 }
 
 export async function disconnectGithubMcp(
-  registry: ToolRegistry
+  registry: ToolRegistry | ToolRegistry[]
 ): Promise<{ ok: true; output: string } | { ok: false; error: string }> {
+  const registries = Array.isArray(registry) ? registry : [registry];
   const conns = await listConnectionsByParent(GITHUB_PARENT_PROVIDER);
   const legacy = await readConnection(GITHUB_MCP_CONNECTION_NAME);
   const toRemove =
@@ -89,7 +90,9 @@ export async function disconnectGithubMcp(
   }
   let removed = 0;
   for (const c of toRemove) {
-    removed += unregisterMcpConnection(registry, c);
+    for (const reg of registries) {
+      removed += unregisterMcpConnection(reg, c);
+    }
     await deleteConnection(c.name);
   }
   return {

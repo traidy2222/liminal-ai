@@ -240,7 +240,7 @@ class _IntegrationsScreenState extends State<IntegrationsScreen> {
                     ? '${snap.microsoft.accounts.first.email ?? "Microsoft"} · ${snap.microsoftToolCount} tools'
                     : snap.microsoft.accounts.isNotEmpty
                         ? 'Signed in — tap Connect to enable tools'
-                        : 'Outlook, Calendar, OneDrive, Teams',
+                        : 'Hosted OAuth — Outlook, Calendar, OneDrive, Teams',
                 connected: snap.microsoftConnected,
                 expanded: _expandedId == 'microsoft',
                 onToggle: () => _toggleExpanded('microsoft'),
@@ -617,7 +617,7 @@ class _MicrosoftDetails extends StatelessWidget {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Text(
-          'Sign in with Microsoft, then attach Graph MCP tools (ms-365-mcp-server sidecar).',
+          'Opens Vireon-hosted Microsoft sign-in, then attaches Graph MCP tools (ms-365-mcp-server sidecar).',
           style: TextStyle(color: lim.textMuted, fontSize: 12, height: 1.4),
         ),
         const SizedBox(height: 8),

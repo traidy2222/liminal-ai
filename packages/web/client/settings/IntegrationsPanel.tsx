@@ -379,8 +379,8 @@ export function IntegrationsPanel({ agentBusy }: IntegrationsPanelProps) {
         `/api/integrations/microsoft/begin?mode=${msMode}${svc ? `&services=${encodeURIComponent(svc)}` : ""}`
       );
       if (!res.ok) throw new Error(await res.text());
-      const { authUrl } = (await res.json()) as { authUrl: string };
-      window.open(authUrl, "_blank", "noopener,noreferrer");
+      const { connectUrl } = (await res.json()) as { connectUrl: string };
+      window.open(connectUrl, "_blank", "noopener,noreferrer");
       await pollIntegrationsUntil((d) => microsoftToolsConnected(d));
       return;
     }
@@ -564,7 +564,7 @@ export function IntegrationsPanel({ agentBusy }: IntegrationsPanelProps) {
             ? `${msAccounts[0]?.email ?? "Microsoft"} · ${microsoftToolCount} agent tools`
             : msAccounts.length > 0
               ? `Signed in as ${msAccounts[0]?.email ?? "Microsoft"} — tap Connect to enable tools`
-              : "Outlook, Calendar, OneDrive, Teams, Planner"
+              : "Hosted OAuth — Outlook, Calendar, OneDrive, Teams, Planner"
         }
         connected={microsoftConnected}
         expanded={expanded === "microsoft"}
@@ -575,8 +575,9 @@ export function IntegrationsPanel({ agentBusy }: IntegrationsPanelProps) {
         onPrimary={() => void run(microsoftPrimary)}
       >
         <p style={{ fontSize: 10, color: "#778899", lineHeight: 1.45, margin: "10px 0" }}>
-          Opens Microsoft sign-in, then attaches <code>mcp_microsoft_*</code> Graph tools via local sidecar.
-          Needs <code>MICROSOFT_OAUTH_CLIENT_ID</code> in .env.
+          Opens Microsoft sign-in via <code>vireondynamics.com</code>, then attaches{" "}
+          <code>mcp_microsoft_*</code> Graph tools via local sidecar. No Azure app setup in your{" "}
+          <code>.env</code>.
         </p>
         {msAccounts.map((a) => (
           <div key={a.accountId} style={{ fontSize: 11, fontFamily: "monospace", color: GREEN, marginBottom: 6 }}>

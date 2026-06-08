@@ -14,7 +14,16 @@ import { ensureMicrosoftSidecarRunning } from "./microsoft_sidecar.js";
 
 const PARENT = "microsoft_365";
 
-export async function bootstrapMicrosoft365(registry: ToolRegistry): Promise<void> {
+export type IntegrationBootstrapOptions = {
+  /** When false, skip AGENT_MICROSOFT_CONNECT_ON_BOOT auto-attach (use after disconnect / refresh). */
+  autoConnect?: boolean;
+};
+
+export async function bootstrapMicrosoft365(
+  registry: ToolRegistry,
+  opts: IntegrationBootstrapOptions = {}
+): Promise<void> {
+  const autoConnect = opts.autoConnect !== false;
   const accounts = await listMicrosoftOAuthAccounts();
   const msConns = await listConnectionsByParent(PARENT);
 
@@ -28,7 +37,7 @@ export async function bootstrapMicrosoft365(registry: ToolRegistry): Promise<voi
   }
 
   const onBoot = effectiveHarnessEnvRaw("AGENT_MICROSOFT_CONNECT_ON_BOOT") === "1";
-  if (onBoot && accounts.length > 0 && msConns.length === 0) {
+  if (autoConnect && onBoot && accounts.length > 0 && msConns.length === 0) {
     try {
       await connectMicrosoft365FromServer(registry, { mode: "read_write" });
     } catch {

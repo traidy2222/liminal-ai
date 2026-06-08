@@ -43,6 +43,8 @@ import {
   microsoftOAuthAuthScheme,
   listConnections,
   listConnectionsByParent,
+  listGoogleWorkspaceConnections,
+  listMicrosoft365Connections,
   type McpConnectionRecord,
 } from "./api_connections_store.js";
 import { attachMcpConnection, unregisterMcpConnection } from "./mcp_attach.js";
@@ -137,9 +139,7 @@ async function connectMicrosoft365Handler(
     return {
       ok: false,
       error:
-        "Microsoft OAuth not configured or no token on disk.\n\n" +
-        "Connect first: Settings → Integrations → Microsoft 365, or run OAuth flow.\n" +
-        "Set MICROSOFT_OAUTH_CLIENT_ID in .env (see docs/guides/microsoft-365.md).",
+        "Microsoft OAuth not connected — open Settings → Integrations → Connect Microsoft 365 (hosted sign-in, no .env setup).",
     };
   }
 
@@ -450,54 +450,13 @@ export function createConnectorTools(registry: ToolRegistry, _emitter: AgentEmit
         };
       }
       if (provider === "microsoft_365") {
-        const conns = await listConnectionsByParent(MICROSOFT_PARENT_PROVIDER);
-        let removed = 0;
-        let hadSidecar = false;
-        for (const c of conns) {
-          if (c.sidecarManaged) hadSidecar = true;
-          removed += unregisterMcpConnection(registry, c);
-          await deleteConnection(c.name);
-        }
-        if (hadSidecar) await releaseMicrosoftSidecar();
-        if (args["revoke_oauth"] === true) {
-          const accounts = await listMicrosoftOAuthAccounts();
-          for (const a of accounts) {
-            await revokeMicrosoftAccount(a.accountId);
-          }
-          await stopMicrosoftSidecar(true);
-        }
-        return {
-          ok: true,
-          output: `Disconnected microsoft_365. Removed ${removed} tools from ${conns.length} connection(s).`,
-        };
+        return disconnectMicrosoft365Mcp(registry, args["revoke_oauth"] === true);
       }
       if (provider !== "google_workspace") {
         return { ok: false, error: `unsupported provider '${provider}'` };
       }
 
-      const conns = await listConnectionsByParent(PARENT_PROVIDER);
-      let removed = 0;
-      let hadSidecar = false;
-      for (const c of conns) {
-        if (c.sidecarManaged) hadSidecar = true;
-        removed += unregisterMcpConnection(registry, c);
-        await deleteConnection(c.name);
-      }
-
-      if (hadSidecar) await releaseGoogleSidecar();
-
-      if (args["revoke_oauth"] === true) {
-        const accounts = await listGoogleOAuthAccounts();
-        for (const a of accounts) {
-          await revokeGoogleAccount(a.accountId);
-        }
-        await stopGoogleSidecar(true);
-      }
-
-      return {
-        ok: true,
-        output: `Disconnected ${provider}. Removed ${removed} tools from ${conns.length} connection(s).`,
-      };
+      return disconnectGoogleWorkspaceMcp(registry, args["revoke_oauth"] === true);
     },
   });
 
@@ -711,15 +670,80 @@ export function createConnectorTools(registry: ToolRegistry, _emitter: AgentEmit
   return { connectProviderTool, disconnectProviderTool, listConnectorsTool };
 }
 
+function normalizeRegistries(registry: ToolRegistry | ToolRegistry[]): ToolRegistry[] {
+  return Array.isArray(registry) ? registry : [registry];
+}
+
+async function disconnectGoogleWorkspaceMcp(
+  registry: ToolRegistry | ToolRegistry[],
+  revokeOAuth: boolean
+): Promise<ToolResult> {
+  const registries = normalizeRegistries(registry);
+  const conns = await listGoogleWorkspaceConnections();
+  let removed = 0;
+  let hadSidecar = false;
+  for (const c of conns) {
+    if (c.sidecarManaged) hadSidecar = true;
+    for (const reg of registries) {
+      removed += unregisterMcpConnection(reg, c);
+    }
+    await deleteConnection(c.name);
+  }
+
+  if (hadSidecar) await releaseGoogleSidecar();
+
+  if (revokeOAuth) {
+    const accounts = await listGoogleOAuthAccounts();
+    for (const a of accounts) {
+      await revokeGoogleAccount(a.accountId);
+    }
+    await stopGoogleSidecar(true);
+  }
+
+  return {
+    ok: true,
+    output:
+      `Disconnected google_workspace${revokeOAuth ? " (OAuth tokens revoked)" : ""}. ` +
+      `Removed ${removed} tools from ${conns.length} connection(s).`,
+  };
+}
+
+async function disconnectMicrosoft365Mcp(
+  registry: ToolRegistry | ToolRegistry[],
+  revokeOAuth: boolean
+): Promise<ToolResult> {
+  const registries = normalizeRegistries(registry);
+  const conns = await listMicrosoft365Connections();
+  let removed = 0;
+  let hadSidecar = false;
+  for (const c of conns) {
+    if (c.sidecarManaged) hadSidecar = true;
+    for (const reg of registries) {
+      removed += unregisterMcpConnection(reg, c);
+    }
+    await deleteConnection(c.name);
+  }
+  if (hadSidecar) await releaseMicrosoftSidecar();
+  if (revokeOAuth) {
+    const accounts = await listMicrosoftOAuthAccounts();
+    for (const a of accounts) {
+      await revokeMicrosoftAccount(a.accountId);
+    }
+    await stopMicrosoftSidecar(true);
+  }
+  return {
+    ok: true,
+    output:
+      `Disconnected microsoft_365${revokeOAuth ? " (OAuth tokens revoked)" : ""}. ` +
+      `Removed ${removed} tools from ${conns.length} connection(s).`,
+  };
+}
+
 export async function disconnectGoogleWorkspaceFromServer(
-  registry: ToolRegistry,
+  registry: ToolRegistry | ToolRegistry[],
   revokeOAuth = false
 ): Promise<{ ok: boolean; output?: string; error?: string }> {
-  const { disconnectProviderTool } = createConnectorTools(registry, { emit: () => {} } as unknown as AgentEmitter);
-  const result = await disconnectProviderTool.handler({
-    provider: "google_workspace",
-    revoke_oauth: revokeOAuth,
-  });
+  const result = await disconnectGoogleWorkspaceMcp(registry, revokeOAuth);
   if (result.ok) return { ok: true, output: result.output };
   return { ok: false, error: result.error };
 }
@@ -735,7 +759,7 @@ export async function connectGithubFromServer(
 }
 
 export async function disconnectGithubFromServer(
-  registry: ToolRegistry
+  registry: ToolRegistry | ToolRegistry[]
 ): Promise<{ ok: boolean; output?: string; error?: string }> {
   const result = await disconnectGithubMcp(registry);
   if (!result.ok) return { ok: false, error: result.error };
@@ -743,14 +767,10 @@ export async function disconnectGithubFromServer(
 }
 
 export async function disconnectMicrosoft365FromServer(
-  registry: ToolRegistry,
+  registry: ToolRegistry | ToolRegistry[],
   revokeOAuth = false
 ): Promise<{ ok: boolean; output?: string; error?: string }> {
-  const { disconnectProviderTool } = createConnectorTools(registry, { emit: () => {} } as unknown as AgentEmitter);
-  const result = await disconnectProviderTool.handler({
-    provider: "microsoft_365",
-    revoke_oauth: revokeOAuth,
-  });
+  const result = await disconnectMicrosoft365Mcp(registry, revokeOAuth);
   if (result.ok) return { ok: true, output: result.output };
   return { ok: false, error: result.error };
 }

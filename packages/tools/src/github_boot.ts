@@ -10,8 +10,17 @@ import {
   githubMcpEnabled,
 } from "./github_connect.js";
 
-export async function bootstrapGithub(registry: ToolRegistry): Promise<void> {
-  if (!githubMcpEnabled() || !githubConnectOnBoot()) return;
+export type IntegrationBootstrapOptions = {
+  /** When false, skip GITHUB_TOKEN boot attach (use after disconnect / refresh). */
+  autoConnect?: boolean;
+};
+
+export async function bootstrapGithub(
+  registry: ToolRegistry,
+  opts: IntegrationBootstrapOptions = {}
+): Promise<void> {
+  const autoConnect = opts.autoConnect !== false;
+  if (!autoConnect || !githubMcpEnabled() || !githubConnectOnBoot()) return;
   const existing = await readConnection(GITHUB_MCP_CONNECTION_NAME);
   if (existing?.kind === "mcp") return;
   await connectGithubMcp(registry);

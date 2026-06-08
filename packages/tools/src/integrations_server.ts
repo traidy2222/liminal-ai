@@ -165,13 +165,14 @@ export async function refreshIntegrationToolsOnRegistry(
   emitter: AgentEmitter
 ): Promise<void> {
   await restoreOpenApiConnections(registry, emitter);
+  const refreshOpts = { autoConnect: false as const };
   const { bootstrapGoogleWorkspace } = await import("./google_workspace_boot.js");
-  await bootstrapGoogleWorkspace(registry);
+  await bootstrapGoogleWorkspace(registry, refreshOpts);
   await restoreMcpConnections(registry, emitter);
   const { bootstrapGithub } = await import("./github_boot.js");
-  await bootstrapGithub(registry);
+  await bootstrapGithub(registry, refreshOpts);
   const { bootstrapMicrosoft365 } = await import("./microsoft_365_boot.js");
-  await bootstrapMicrosoft365(registry);
+  await bootstrapMicrosoft365(registry, refreshOpts);
 }
 
 export { parseAuthBody };

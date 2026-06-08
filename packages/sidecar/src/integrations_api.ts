@@ -7,7 +7,7 @@ import {
   missingDefaultWorkspaceScopes,
   missingDefaultMicrosoftScopes,
   runGoogleHostedConnectFlow,
-  runMicrosoftConnectFlow,
+  runMicrosoftHostedConnectFlow,
   runXeroHostedConnectFlow,
 } from "@liminal/core";
 import {
@@ -76,6 +76,13 @@ function assertHarnessesIdle(registry: ChatRegistry): void {
   }
 }
 
+async function allHarnessRegistries(registry: ChatRegistry) {
+  const registries = registry.listBridges().map((b) => b.harness.registry);
+  if (registries.length > 0) return registries;
+  const bridge = await registry.getOrCreateActive();
+  return [bridge.harness.registry];
+}
+
 export async function refreshIntegrationsOnAllHarnesses(registry: ChatRegistry): Promise<void> {
   for (const bridge of registry.listBridges()) {
     const harness = bridge.harness;
@@ -135,8 +142,7 @@ export async function connectGithub(
 
 export async function disconnectGithub(registry: ChatRegistry): Promise<string> {
   assertHarnessesIdle(registry);
-  const bridge = await registry.getOrCreateActive();
-  const result = await disconnectGithubFromServer(bridge.harness.registry);
+  const result = await disconnectGithubFromServer(await allHarnessRegistries(registry));
   if (!result.ok) throw new Error(result.error ?? "GitHub disconnect failed.");
   await refreshIntegrationsOnAllHarnesses(registry);
   return result.output ?? "GitHub disconnected.";
@@ -151,7 +157,7 @@ export async function connectMicrosoftOAuth(
     attach?: boolean;
   }
 ): Promise<{ email?: string; accountId: string; attachOutput?: string }> {
-  const result = await runMicrosoftConnectFlow({
+  const result = await runMicrosoftHostedConnectFlow({
     services: opts.services,
     mode: opts.mode ?? "read_write",
     openBrowser: opts.openBrowser !== false,
@@ -184,8 +190,7 @@ export async function disconnectMicrosoft(
   revoke: boolean
 ): Promise<string> {
   assertHarnessesIdle(registry);
-  const bridge = await registry.getOrCreateActive();
-  const result = await disconnectMicrosoft365FromServer(bridge.harness.registry, revoke);
+  const result = await disconnectMicrosoft365FromServer(await allHarnessRegistries(registry), revoke);
   if (!result.ok) throw new Error(result.error ?? "Microsoft disconnect failed.");
   await refreshIntegrationsOnAllHarnesses(registry);
   return result.output ?? "Microsoft disconnected.";
@@ -196,8 +201,7 @@ export async function disconnectGoogle(
   revoke: boolean
 ): Promise<string> {
   assertHarnessesIdle(registry);
-  const bridge = await registry.getOrCreateActive();
-  const result = await disconnectGoogleWorkspaceFromServer(bridge.harness.registry, revoke);
+  const result = await disconnectGoogleWorkspaceFromServer(await allHarnessRegistries(registry), revoke);
   if (!result.ok) throw new Error(result.error ?? "Google disconnect failed.");
   await refreshIntegrationsOnAllHarnesses(registry);
   return result.output ?? "Google disconnected.";
