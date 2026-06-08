@@ -14,7 +14,7 @@ What you can run today from [Install](../start/install.md):
 |------|--------|
 | ReAct harness | Retries, circuit breaker, compression, approvals, optional self-heal lint |
 | Interfaces | Terminal UI (Ink) + Web UI (Express + React + SSE, multi-chat) + **Desktop** (Windows / macOS / Linux alpha, Flutter + sidecar) |
-| Tools | 140+ tools — files, shell, git, web, browser, memory, vault, documents, orchestration, OpenAPI/MCP attach |
+| Tools | 245+ catalog tools (300+ with MCP sidecars); lazy family loading — files, shell, git, web, browser, memory, vault, documents, orchestration, Google/Microsoft/GitHub connectors, OpenAPI/MCP attach |
 | Inference | **BYOK** (any OpenAI-compatible provider) or **Pro managed** via Vireon proxy — `liminal login`, `AGENT_INFERENCE_MODE` |
 | Provider routing | Price-sorted OpenRouter resellers, sticky sessions, 429-aware rotation (`AGENT_PROVIDER_STRATEGY`) |
 | Licensing | Open-core CE (FSL-1.1-MIT, no account) + offline Ed25519 tiers; EE auto-install on Pro login |

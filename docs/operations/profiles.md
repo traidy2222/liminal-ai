@@ -40,7 +40,7 @@ For migrations and multi-hour jobs — pair with `liminal web --yolo` or `AGENT_
 - `AGENT_YIELD_EVERY_N=8`
 - `AGENT_SESSION_MODE=coding`
 - `AGENT_COMPENSATION_ENABLED=1`
-- `AGENT_MISSION_AUTONOMY=1` (chains sends while `task:*` stays `in_progress`; requires YOLO)
+- `AGENT_MISSION_AUTONOMY=1` (chains sends while `task:*` stays `in_progress`; default on — set `AGENT_MISSION_REQUIRES_YOLO=1` to require YOLO)
 - `AGENT_CONSOLIDATE_ON_IDLE=1` (fold session learnings on chat reset)
 - `AGENT_AUTO_APPROVE_TOOLS=run_lint,run_tests,git_status` (optional middle ground without full YOLO)
 

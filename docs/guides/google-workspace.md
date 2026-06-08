@@ -24,7 +24,9 @@ In [Google Cloud Console](https://console.cloud.google.com/) for your OAuth proj
 
    Gmail uses **`mcp_google_gmail_*`** tools against `gmailmcp.googleapis.com`. Enable **Gmail MCP API** in addition to Gmail API.
 
-   Sidecar (Docs/Sheets/…): Google Docs API, Sheets API, Slides API, Forms API, Tasks API, People API.
+   Sidecar (Docs/Sheets/…): Google Docs API, Sheets API, Slides API, Forms API, Tasks API, People API, Apps Script API.
+
+   OAuth scopes (read+write) now include **full Drive** (`drive`), **Calendar event write** (`calendar.events`), **Contacts write** (`contacts`), and **drive.readonly** on Docs/Sheets/Slides/Forms so the agent can open existing files — not only files the app created.
 2. **OAuth consent screen** — add test users if app is in *Testing* mode. Under **Data access**, manually add Google's **MCP** scopes (not only the classic REST scopes). Minimum for Gmail MCP: `gmail.readonly` + `gmail.compose` ([Google doc](https://developers.google.com/workspace/gmail/api/guides/configure-mcp-server)).
 3. **Workspace Developer Preview (required for MCP)** — Gmail/Drive/Calendar **MCP** APIs are preview-only. Enroll your Cloud project at [Google Workspace Developer Preview Program](https://developers.google.com/workspace/preview) (Workspace account + Cloud project). Until Google confirms enrollment, `tools/call` on `gmailmcp.googleapis.com` often returns *The caller does not have permission* even when classic Gmail API returns 200 and OAuth includes `gmail.compose`.
 4. **Credentials → OAuth 2.0 Client** (Web or Desktop).
@@ -51,6 +53,8 @@ GOOGLE_OAUTH_CLIENT_SECRET=...
 AGENT_GOOGLE_CONNECT_ON_BOOT=1
 ```
 
+`AGENT_GOOGLE_CONNECT_ON_BOOT` defaults to **1** — MCP tools and the Docs/Sheets sidecar restore automatically when OAuth tokens exist.
+
 ### 3. OAuth + attach (one command)
 
 ```bash
@@ -62,12 +66,15 @@ This stores the refresh token, registers Drive/Gmail/Calendar/… MCP tools, and
 
 On later **web/tui** starts, `AGENT_GOOGLE_CONNECT_ON_BOOT=1` re-attaches MCP connections and restarts the sidecar automatically.
 
-### Web UI (two clicks instead of CLI)
+### Web / Desktop UI
 
-**Settings → Integrations**:
+**Settings → Integrations** (or Hub → Manage):
 
-1. **Connect Google (OAuth)** — approve **all** requested permissions (Gmail, Drive, …).
-2. **Attach MCP tools** — required; OAuth alone does not register tools.
+1. Leave **Read + write** selected and keep **all services** checked (default).
+2. **Connect Google (OAuth + attach)** — approves scopes and registers MCP tools in one step.
+3. Use **Attach MCP tools** separately only if you changed service checkboxes after OAuth.
+
+**Re-connect after scope updates:** revoke Liminal at [Google Account permissions](https://myaccount.google.com/permissions), then connect again so new scopes (Calendar write, full Drive, Contacts write, …) are granted.
 
 ## Connect
 
@@ -110,6 +117,68 @@ Requires:
 
 Set `AGENT_GOOGLE_GMAIL_SEND=0` to disable REST send (draft-only via MCP).
 
+## Calendar (hybrid: MCP + REST)
+
+Official Calendar MCP (`calendarmcp.googleapis.com`) covers **list/get/create/update/delete events**, **respond to invites**, and **suggest_time**. Liminal adds classic REST tools when `AGENT_GOOGLE_CALENDAR_REST=1` (default):
+
+| Task | Tool |
+|------|------|
+| List/get events, MCP create/update/delete, suggest_time | `mcp_google_calendar_*` |
+| **Get calendar** metadata (incl. primary `timeZone`) | `calendar_rest_get_calendar` |
+| **List calendars** in account | `calendar_rest_list_calendars` |
+| **Account settings** (timezone read-only via API) | `calendar_rest_list_settings`, `calendar_rest_get_setting` |
+| **Change calendar timezone** (primary or secondary) | `calendar_rest_set_timezone` |
+| **UI colors** for calendars/events | `calendar_rest_list_colors` |
+| **Hide/show, colors, default reminders** on calendar list | `calendar_rest_patch_calendar_list` |
+| **Subscribe** to a shared calendar / **hide** from list | `calendar_rest_subscribe_calendar`, `calendar_rest_unsubscribe_calendar` |
+| **Clear all events** from a calendar | `calendar_rest_clear_calendar` |
+| **List/get events** (REST, full query params) | `calendar_rest_list_events`, `calendar_rest_get_event` |
+| **Batch free/busy** across calendars | `calendar_rest_freebusy` |
+| **Natural language** event ("lunch Tuesday noon") | `calendar_rest_quick_add` |
+| **Full Event JSON** + **Google Meet** + recurrence | `calendar_rest_insert_event` / `calendar_rest_patch_event` / `calendar_rest_replace_event` |
+| **Recurring instances** in a window | `calendar_rest_list_instances` |
+| **RSVP** accept/decline/tentative | `calendar_rest_respond_to_event` |
+| **Cancel with guest email control** | `calendar_rest_delete_event` (`send_updates`) |
+| **Move** event to another calendar | `calendar_rest_move_event` |
+| **Import iCal** event | `calendar_rest_import_event` |
+| **Calendar** create/update/delete | `calendar_rest_manage_calendar` |
+| **Sharing / ACL** | `calendar_rest_list_acl`, `calendar_rest_set_acl` |
+
+Requires **Google Calendar API** enabled (classic `calendar-json.googleapis.com`) plus Calendar MCP API for MCP tools. OAuth needs `calendar.events` and full `calendar` scope for ACL/calendar CRUD — re-connect OAuth after scope updates.
+
+Set `AGENT_GOOGLE_CALENDAR_REST=0` to disable REST calendar tools (MCP-only).
+
+## Docs / Sheets / Slides (hybrid: sidecar MCP + REST)
+
+Docs, Sheets, and Slides use the local **`workspace-mcp`** sidecar (`mcp_google_ext_*`). Liminal adds classic REST when `AGENT_GOOGLE_OFFICE_REST=1` (default):
+
+| Task | Tool |
+|------|------|
+| High-level read/edit via sidecar | `mcp_google_ext_*` (after `connect_provider` with docs/sheets/slides) |
+| **Read Doc** (outline + tables as text) | `docs_rest_extract_text` |
+| **Get full Doc JSON** (indices, structure) | `docs_rest_get_document` |
+| **Create blank Doc** | `docs_rest_create_document` |
+| **Copy template Doc** | `docs_rest_copy_document` |
+| **Write rich content** (headings, lists, tables, links, images) | `docs_rest_write_blocks` |
+| **Insert image** (upload + inline) | `docs_rest_insert_image` |
+| **Find/replace placeholders** | `docs_rest_replace_all_text` |
+| **Format index range** (bold, colors, alignment, headings) | `docs_rest_format_range` |
+| **Delete content range** | `docs_rest_delete_content` |
+| **Advanced API** (headers, merge cells, …) | `docs_rest_batch_update` |
+| **Spreadsheet metadata** | `sheets_rest_get_spreadsheet` |
+| **Create spreadsheet** | `sheets_rest_create_spreadsheet` |
+| **Read/write cell values** | `sheets_rest_get_values`, `sheets_rest_update_values`, `sheets_rest_append_values` |
+| **Multiple ranges** | `sheets_rest_batch_get_values`, `sheets_rest_batch_update_values` |
+| **Clear range / format / add sheets** | `sheets_rest_clear_values`, `sheets_rest_batch_update` |
+| **Get Slides deck** | `slides_rest_get_presentation` |
+| **Create deck / edit slides** | `slides_rest_create_presentation`, `slides_rest_batch_update` |
+| **Single slide / thumbnail** | `slides_rest_get_page`, `slides_rest_get_thumbnail` |
+| **Export PDF, CSV, plain text, Office formats** | `office_rest_export_file` (Drive export) |
+
+Requires **Google Docs API**, **Sheets API**, **Slides API**, and **Drive API** enabled. OAuth scopes `documents`, `spreadsheets`, and `presentations` (write) plus `drive.readonly` for opening existing files — re-connect OAuth after scope updates.
+
+Set `AGENT_GOOGLE_OFFICE_REST=0` to disable REST office tools (sidecar MCP only).
+
 ## Architecture
 
 | Service | Backend |
@@ -118,7 +187,10 @@ Set `AGENT_GOOGLE_GMAIL_SEND=0` to disable REST send (draft-only via MCP).
 | Gmail read / labels | Official Gmail MCP (`mcp_google_gmail_*`) |
 | Gmail styled draft | Classic REST (`gmail_create_draft`) |
 | Gmail immediate send | Classic REST (`gmail_send_message`) |
-| Docs, Sheets, Slides, Forms, Tasks, … | Local `workspace-mcp` sidecar on port 8010 |
+| Calendar timezone/settings/colors/events/freebusy/ACL/Meet | Classic REST (`calendar_rest_*`) |
+| Docs/Sheets/Slides read-edit (sidecar) | Local `workspace-mcp` → `mcp_google_ext_*` |
+| Docs/Sheets/Slides batch API + export | Classic REST (`docs_rest_*`, `sheets_rest_*`, `slides_rest_*`, `office_rest_export_file`) |
+| Forms, Tasks, … | Local `workspace-mcp` sidecar on port 8010 |
 
 Connections persist under `~/.liminal/api_connections/`. OAuth tokens are encrypted under `~/.liminal/oauth/google/`.
 
@@ -129,8 +201,10 @@ Connections persist under `~/.liminal/api_connections/`. OAuth tokens are encryp
 | `AGENT_GOOGLE_SIDECAR_ENABLE` | `1` | Enable productivity sidecar |
 | `AGENT_GOOGLE_SIDECAR_CMD` | `uvx workspace-mcp` | Sidecar launch command |
 | `AGENT_GOOGLE_SIDECAR_PORT` | `8010` | Local MCP port |
-| `AGENT_GOOGLE_CONNECT_ON_BOOT` | `0` | Auto-restore connections on harness start |
+| `AGENT_GOOGLE_CONNECT_ON_BOOT` | `1` | Auto-restore connections on harness start |
 | `AGENT_GOOGLE_GMAIL_SEND` | `1` | Register `gmail_create_draft` + `gmail_send_message` (REST); MCP has no HTML draft or send |
+| `AGENT_GOOGLE_CALENDAR_REST` | `1` | Register full `calendar_rest_*` surface (calendars, timezone, events, freebusy, ACL, Meet, …) alongside Calendar MCP |
+| `AGENT_GOOGLE_OFFICE_REST` | `1` | Register `docs_rest_*`, `sheets_rest_*`, `slides_rest_*`, `office_rest_export_file` alongside workspace-mcp |
 
 ## Safety
 
@@ -144,7 +218,7 @@ Connections persist under `~/.liminal/api_connections/`. OAuth tokens are encryp
 - **Gmail MCP tools return HTTP 403 "API disabled"**: Enable **Gmail MCP API** (`gmailmcp.googleapis.com`), not only Gmail API. Wait 1–2 minutes, then retry.
 - **Gmail tools / missing scopes**: Confirm `list_connectors` shows `gmail_mcp=yes`; if not, revoke at [Google Account permissions](https://myaccount.google.com/permissions) and run `liminal connect google --attach` again.
 - **OAuth error / no refresh token**: Revoke app access in [Google Account permissions](https://myaccount.google.com/permissions) and reconnect with `prompt=consent`.
-- **Sidecar not ready** (Docs/Sheets): Run `uvx workspace-mcp --help` manually; ensure port 8010 is free.
+- **Sidecar not ready** (Docs/Sheets): Install [uv](https://docs.astral.sh/uv/), ensure `GOOGLE_OAUTH_CLIENT_ID` is in `.env`, and port `8010` is free (`AGENT_GOOGLE_SIDECAR_PORT`). Liminal sets `WORKSPACE_MCP_PORT` — do **not** pass `--port` to workspace-mcp (unsupported). Test: `set WORKSPACE_MCP_PORT=8010 && uvx workspace-mcp --transport streamable-http --tools docs sheets slides`.
 - **Tools invisible under lazy loading**: Call `list_connectors` or `activate_tool_family("connectors")`; restored Google connections auto-activate by default.
 
 Probe both APIs: `node scripts/lib/google-mcp-probe.mjs` (after `npm run build -w @liminal/core`).

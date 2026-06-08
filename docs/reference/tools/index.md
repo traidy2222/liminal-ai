@@ -1,6 +1,7 @@
 # Tool families
 
-Liminal ships **140+ tools**. With `AGENT_TOOL_LAZY=1` (default) only a baseline subset is
+Liminal ships **245+ tools** in the family catalog (100+ more when Google/Microsoft MCP
+sidecars attach). With `AGENT_TOOL_LAZY=1` (default) only a baseline subset is
 registered at startup; the model activates more **families** on demand. This keeps the tool
 list the model reasons over small and relevant.
 
@@ -50,7 +51,7 @@ editing, navigating, and reasoning never wait on activation.
 | `meta` | `suggest_improvement`, `view_insights`, `self_telemetry`, dynamic-tool + connector tools | — |
 | `dynamic_tools` | `create_tool`, `edit_tool`, `remove_tool`, `list_dynamic_tools` | — |
 | `external_api` | `api_<conn>_<op>` (from `api_connect`), `mcp_<conn>_<tool>` (from `mcp_attach`) | — |
-| `connectors` | `connect_provider`, `disconnect_provider`, `list_connectors` (Google Workspace presets) | OAuth in `.env` |
+| `connectors` | `connect_provider`, `disconnect_provider`, `list_connectors`, `email_style_infer`, Gmail/Outlook REST send+draft, Google + **Microsoft 365** + GitHub presets | OAuth in `.env` / Settings |
 | `reasoning_advanced` | `decompose_goal`, `verify_contract`, `dispatch_graph`, `query_tool_outputs`, `research_state` | harness-scoped |
 | `synthesis` | `synthesis_run` (cross-domain synthesis sub-agent) | harness-scoped |
 | `orchestration` | `spawn_agent`, `wait_for_agents`, `cancel_agent`, `list_agents`, `verify_result`, `evidence_critic`, `path_critic`, `policy_critic`, `reflect_debate`, `branch_explore`, `branch_evaluate` | harness-scoped |

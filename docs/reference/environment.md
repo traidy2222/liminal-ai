@@ -29,15 +29,15 @@ Web **Settings** writes to (2). See [Configuration basics](../start/configuratio
 | `AGENT_APP_REFRESH_ENABLED` | `1` | yes | no | session_ui | Sidecar background refresh loop for open desktop apps. |
 | `AGENT_APP_REFRESH_MIN_INTERVAL_MS` | `300000` | yes | no | session_ui | Minimum milliseconds between sidecar refreshes per app. |
 | `AGENT_AUTO_APPROVE_TOOLS` | `run_lint,run_tests,git_status` | yes | no | harness | Harness environment toggle for Auto Approve Tools. See docs/configuration.md (harness). |
-| `AGENT_AUTO_DREAM` | `0` | yes | no | session_ui | Harness environment toggle for Auto Dream. See docs/configuration.md (session ui). |
+| `AGENT_AUTO_DREAM` | `1` | yes | no | session_ui | Harness environment toggle for Auto Dream. See docs/configuration.md (session ui). |
 | `AGENT_AUTO_DREAM_ALLOW_DELETE` | `0` | yes | no | session_ui | Harness environment toggle for Auto Dream Allow Delete. See docs/configuration.md (session ui). |
 | `AGENT_AUTO_DREAM_INJECT_TRANSCRIPT` | `1` | yes | no | session_ui | Harness environment toggle for Auto Dream Inject Transcript. See docs/configuration.md (session ui). |
 | `AGENT_AUTO_DREAM_LOCK_STALE_MS` | `3600000` | yes | no | session_ui | Harness environment toggle for Auto Dream Lock Stale Ms. See docs/configuration.md (session ui). |
 | `AGENT_AUTO_DREAM_MAX_CHARS_PER_SESSION` | `10000` | yes | no | session_ui | Harness environment toggle for Auto Dream Max Chars Per Session. See docs/configuration.md (session ui). |
 | `AGENT_AUTO_DREAM_MAX_SESSION_FILES` | `8` | yes | no | session_ui | Harness environment toggle for Auto Dream Max Session Files. See docs/configuration.md (session ui). |
 | `AGENT_AUTO_DREAM_MAX_TOTAL_CHARS` | `40000` | yes | no | session_ui | Harness environment toggle for Auto Dream Max Total Chars. See docs/configuration.md (session ui). |
-| `AGENT_AUTO_DREAM_MIN_HOURS` | `5` | yes | no | session_ui | Harness environment toggle for Auto Dream Min Hours. See docs/configuration.md (session ui). |
-| `AGENT_AUTO_DREAM_MIN_SESSIONS` | `10` | yes | no | session_ui | Harness environment toggle for Auto Dream Min Sessions. See docs/configuration.md (session ui). |
+| `AGENT_AUTO_DREAM_MIN_HOURS` | `4` | yes | no | session_ui | Harness environment toggle for Auto Dream Min Hours. See docs/configuration.md (session ui). |
+| `AGENT_AUTO_DREAM_MIN_SESSIONS` | `3` | yes | no | session_ui | Harness environment toggle for Auto Dream Min Sessions. See docs/configuration.md (session ui). |
 | `AGENT_AUTO_DREAM_SCAN_INTERVAL_MS` | `30000` | yes | no | session_ui | Harness environment toggle for Auto Dream Scan Interval Ms. See docs/configuration.md (session ui). |
 | `AGENT_BROWSER` | `1` | yes | no | web_research | Harness environment toggle for Browser. See docs/configuration.md (web research). |
 | `AGENT_BROWSER_ALLOW_FILE_ANY` | `0` | yes | no | harness | Harness environment toggle for Browser Allow File Any. See docs/configuration.md (harness). |
@@ -109,9 +109,11 @@ Web **Settings** writes to (2). See [Configuration basics](../start/configuratio
 | `AGENT_FINALIZE_JUDGE` | `0` | yes | no | harness | Harness environment toggle for Finalize Judge. See docs/configuration.md (harness). |
 | `AGENT_FINALIZE_RETRY_BUDGET` | `0` | yes | no | harness | Harness environment toggle for Finalize Retry Budget. See docs/configuration.md (harness). |
 | `AGENT_GOLDEN_EVAL` | `1` | yes | no | advanced | Harness environment toggle for Golden Eval. See docs/configuration.md (advanced). |
-| `AGENT_GOOGLE_CONNECT_ON_BOOT` | `0` | yes | no | harness | Harness environment toggle for Google Connect On Boot. See docs/configuration.md (harness). |
+| `AGENT_GOOGLE_CALENDAR_REST` | `1` | yes | no | harness | Register calendar_rest_* tools (classic Calendar API): calendars/settings/timezone, colors, subscribe/hide, clear events |
+| `AGENT_GOOGLE_CONNECT_ON_BOOT` | `1` | yes | no | harness | Harness environment toggle for Google Connect On Boot. See docs/configuration.md (harness). |
 | `AGENT_GOOGLE_GMAIL_SEND` | `1` | yes | no | harness | Register gmail_create_draft and gmail_send_message (classic Gmail REST). Official Gmail MCP create_draft is plain-only;  |
 | `AGENT_GOOGLE_OAUTH_CLIENT_ID` | `` | yes | no | harness | Harness environment toggle for Google Oauth Client Id. See docs/configuration.md (harness). |
+| `AGENT_GOOGLE_OFFICE_REST` | `1` | yes | no | harness | Register docs_rest_*, sheets_rest_*, slides_rest_*, and office_rest_export_file (classic Docs/Sheets/Slides/Drive APIs). |
 | `AGENT_GOOGLE_SIDECAR_CMD` | `uvx workspace-mcp` | yes | no | harness | Harness environment toggle for Google Sidecar Cmd. See docs/configuration.md (harness). |
 | `AGENT_GOOGLE_SIDECAR_ENABLE` | `1` | yes | no | harness | Harness environment toggle for Google Sidecar Enable. See docs/configuration.md (harness). |
 | `AGENT_GOOGLE_SIDECAR_PORT` | `8010` | yes | no | harness | Harness environment toggle for Google Sidecar Port. See docs/configuration.md (harness). |
@@ -134,7 +136,7 @@ Web **Settings** writes to (2). See [Configuration basics](../start/configuratio
 | `AGENT_INTENT_FAST_THRESHOLD` | `0.6` | yes | no | harness | Harness environment toggle for Intent Fast Threshold. See docs/configuration.md (harness). |
 | `AGENT_INTENT_INFERENCE` | `1` | yes | no | harness | Harness environment toggle for Intent Inference. See docs/configuration.md (harness). |
 | `AGENT_INTENT_OPERATIONAL_MODEL` | `` | yes | no | harness | Harness environment toggle for Intent Operational Model. See docs/configuration.md (harness). |
-| `AGENT_INTENT_REPO_CONTEXT` | `0` | yes | no | harness | Harness environment toggle for Intent Repo Context. See docs/configuration.md (harness). |
+| `AGENT_INTENT_REPO_CONTEXT` | `1` | yes | no | harness | Harness environment toggle for Intent Repo Context. See docs/configuration.md (harness). |
 | `AGENT_INTENT_ROUTING` | `1` | yes | no | harness | Harness environment toggle for Intent Routing. See docs/configuration.md (harness). |
 | `AGENT_LENGTH_RESUME_MAX` | `8` | yes | no | harness | Harness environment toggle for Length Resume Max. See docs/configuration.md (harness). |
 | `AGENT_LICENSE_PREFER_ENV` | `0` | yes | no | harness | Harness environment toggle for License Prefer Env. See docs/configuration.md (harness). |
@@ -173,6 +175,7 @@ Web **Settings** writes to (2). See [Configuration basics](../start/configuratio
 | `AGENT_MIN_CONCURRENT_AGENTS` | `1` | yes | no | harness | Harness environment toggle for Min Concurrent Agents. See docs/configuration.md (harness). |
 | `AGENT_MISSION_AUTONOMY` | `0` | yes | no | harness | Harness environment toggle for Mission Autonomy. See docs/configuration.md (harness). |
 | `AGENT_MISSION_MAX_ITERATIONS` | `20` | yes | no | harness | Harness environment toggle for Mission Max Iterations. See docs/configuration.md (harness). |
+| `AGENT_MISSION_REQUIRES_YOLO` | `0` | yes | no | harness | When 1, mission_continue chained sends require AGENT_YOLO=1. Default 0 allows continuation with normal approval gates. |
 | `AGENT_MODEL` | `deepseek/deepseek-v4-pro` | yes | no | models_api | Harness environment toggle for Model. See docs/configuration.md (models api). |
 | `AGENT_OBSIDIAN_DISCOVER` | `1` | yes | no | memory_vault | Harness environment toggle for Obsidian Discover. See docs/configuration.md (memory vault). |
 | `AGENT_OBSIDIAN_REQUIRE_DOT_OBSIDIAN` | `1` | yes | no | memory_vault | Harness environment toggle for Obsidian Require Dot Obsidian. See docs/configuration.md (memory vault). |
@@ -181,7 +184,7 @@ Web **Settings** writes to (2). See [Configuration basics](../start/configuratio
 | `AGENT_OPENROUTER_SESSION_ID` | `` | yes | no | session_ui | Harness environment toggle for Openrouter Session Id. See docs/configuration.md (session ui). |
 | `AGENT_OVERINFERENCE_GUARD` | `1` | yes | no | harness | Harness environment toggle for Overinference Guard. See docs/configuration.md (harness). |
 | `AGENT_OVERINFERENCE_LLM_CHECK` | `0` | yes | no | harness | Harness environment toggle for Overinference Llm Check. See docs/configuration.md (harness). |
-| `AGENT_PASTE` | `0` | yes | no | session_ui | Harness environment toggle for Paste. See docs/configuration.md (session ui). |
+| `AGENT_PASTE` | `1` | yes | no | session_ui | Harness environment toggle for Paste. See docs/configuration.md (session ui). |
 | `AGENT_PASTE_BUDGET_MS` | `2000` | yes | no | harness | Harness environment toggle for Paste Budget Ms. See docs/configuration.md (harness). |
 | `AGENT_PASTE_CONTEXT_WINDOW` | `2` | yes | no | harness | Harness environment toggle for Paste Context Window. See docs/configuration.md (harness). |
 | `AGENT_PASTE_MAX_CONCURRENT` | `2` | yes | no | harness | Harness environment toggle for Paste Max Concurrent. See docs/configuration.md (harness). |
@@ -294,6 +297,7 @@ Web **Settings** writes to (2). See [Configuration basics](../start/configuratio
 | `AGENT_VAULT_PATH` | `` | yes | no | memory_vault | Harness environment toggle for Vault Path. See docs/configuration.md (memory vault). |
 | `AGENT_VAULT_REQUIRE_LINKS` | `0` | yes | no | memory_vault | Harness environment toggle for Vault Require Links. See docs/configuration.md (memory vault). |
 | `AGENT_VAULT_WRITE_BUDGET` | `8` | yes | no | memory_vault | Harness environment toggle for Vault Write Budget. See docs/configuration.md (memory vault). |
+| `AGENT_VERIFY_TOOLS` | `0` | yes | no | harness | When 1, verify_result and critic tools spawn verification sub-agents. Default 0 — skips them for faster turn completion. |
 | `AGENT_VIREON_SITE_URL` | `https://www.vireondynamics.com` | yes | no | harness | Harness environment toggle for Vireon Site Url. See docs/configuration.md (harness). |
 | `AGENT_VISION_BASE_URL` | `https://openrouter.ai/api/v1` | yes | no | models_api | Harness environment toggle for Vision Base Url. See docs/configuration.md (models api). |
 | `AGENT_VISION_MAX_IMAGE_BYTES` | `4194304` | yes | no | models_api | Harness environment toggle for Vision Max Image Bytes. See docs/configuration.md (models api). |
@@ -331,7 +335,7 @@ Web **Settings** writes to (2). See [Configuration basics](../start/configuratio
 | `AGENT_WRITE_PART_MAX_CHARS` | `512000` | yes | no | harness | Harness environment toggle for Write Part Max Chars. See docs/configuration.md (harness). |
 | `AGENT_WRITE_STREAM_SINK` | `1` | yes | no | harness | Harness environment toggle for Write Stream Sink. See docs/configuration.md (harness). |
 | `AGENT_WRITE_STREAM_SINK_MIN_CHARS` | `8000` | yes | no | harness | Harness environment toggle for Write Stream Sink Min Chars. See docs/configuration.md (harness). |
-| `AGENT_YIELD_EVERY_N` | `0` | yes | no | session_ui | Harness environment toggle for Yield Every N. See docs/configuration.md (session ui). |
+| `AGENT_YIELD_EVERY_N` | `4` | yes | no | session_ui | Harness environment toggle for Yield Every N. See docs/configuration.md (session ui). |
 | `AGENT_YOLO` | `0` | yes | no | safety | Harness environment toggle for Yolo. See docs/configuration.md (safety). |
 
 ## Secret keys (.env only)
