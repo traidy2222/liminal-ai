@@ -1,6 +1,6 @@
 # Liminal documentation
 
-Run, configure, and extend the Liminal agent harness (alpha v0.0.19).
+Run, configure, and extend the Liminal agent harness (alpha v0.0.23).
 
 **Published:** [docs.vireondynamics.com/liminal/](https://docs.vireondynamics.com/liminal/)
 
@@ -57,6 +57,8 @@ irm https://vireondynamics.com/install/install.ps1 | iex          # Windows
 | [Reasoning &amp; effort](./guides/reasoning-and-effort.md) | Reasoning budget vs output effort vs routing |
 | [Tuning via Settings](./guides/tuning-via-settings.md) | Change behavior without editing `.env` |
 | [Running the eval suite](./guides/running-eval.md) | Regression-test the harness |
+| [Google Workspace](./guides/google-workspace.md) · [Microsoft 365](./guides/microsoft-365.md) | OAuth connectors, REST + MCP tools, Integrations UI |
+| [Agentcard](./guides/agentcard.md) | Operator signup flows via harness tools |
 
 ## 4. Pro &amp; Enterprise
 
@@ -72,7 +74,7 @@ irm https://vireondynamics.com/install/install.ps1 | iex          # Windows
 
 | Document | Contents |
 |----------|----------|
-| [Changelog](./reference/changelog.md) | Alpha release notes v0.0.1–v0.0.19 |
+| [Changelog](./reference/changelog.md) | Alpha release notes v0.0.1–v0.0.23 |
 | [Roadmap](./reference/roadmap.md) | Alpha → beta → RC → v0.1.0 public preview |
 | [Environment reference](./reference/environment.md) | Generated full `AGENT_*` table (`npm run docs:gen`) |
 | [Configuration (narrative)](./configuration.md) | Flag groups by subsystem |

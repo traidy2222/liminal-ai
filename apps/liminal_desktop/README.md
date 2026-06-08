@@ -41,7 +41,7 @@ Each build includes **`liminald/repo/`** (portable sidecar + `node_modules`) and
 
 ## GitHub Release (all platforms)
 
-From the monorepo root, tag `v<version>-desktop` (e.g. `v0.0.19-desktop`) and push — **Actions → Release Desktop** builds Windows, macOS (arm64), and Linux x64 and uploads:
+From the monorepo root, tag `v<version>-desktop` (e.g. `v0.0.23-desktop`) and push — **Actions → Release Desktop** builds Windows, macOS (arm64), and Linux x64 and uploads:
 
 - `liminal-desktop-windows-x64-v<version>.zip`
 - `liminal-desktop-macos-arm64-v<version>.zip`

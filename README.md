@@ -146,9 +146,10 @@ More demos and install walkthrough: **[Liminal home](https://www.vireondynamics.
 
 **Latest:** [Liminal 0.0.23 — Microsoft 365, styled email dock, lazy tools](https://www.vireondynamics.com/liminal/changelog/v0-0-23) (2026-06-07)
 
-- **Team shared memory** — workspace/global notes sync across org members on the same repo fingerprint ([Team pricing](https://www.vireondynamics.com/liminal/pricing))
-- **Org admin** — members, invites (email via Resend), audit log, fleet/policy ([Team admin docs](https://docs.vireondynamics.com/liminal/) on site)
-- **Pro cloud sync** APIs on the control plane; CE ships hooks, EE performs sync when signed in
+- **Microsoft 365** — Entra OAuth, Graph REST, MCP sidecar (Outlook, Teams, Planner, OneDrive, Excel, SharePoint)
+- **Google Workspace hybrid** — REST tools for Docs, Sheets, Slides, Calendar alongside Gmail MCP
+- **Email compose dock** — live HTML preview on desktop, MIME repair, product-truth guards on send
+- **Lazy tool loading** — 245+ catalog tools; connectors activate on demand (`AGENT_TOOL_LAZY=1` default)
 
 **Product changelog (readable releases):** [vireondynamics.com/liminal/changelog](https://www.vireondynamics.com/liminal/changelog) · **Technical:** [docs reference changelog](https://docs.vireondynamics.com/liminal/reference/changelog)
 
