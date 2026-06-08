@@ -60,4 +60,9 @@ describe("connector_catalog", () => {
     const names = workspaceMcpToolNamesForServices(["docs", "drive", "sheets"]);
     assert.deepEqual(names, ["docs", "sheets"]);
   });
+
+  it("workspaceMcpToolNamesForServices maps apps_script to appscript for workspace-mcp CLI", () => {
+    const names = workspaceMcpToolNamesForServices(["apps_script", "docs"]);
+    assert.deepEqual(names, ["appscript", "docs"]);
+  });
 });

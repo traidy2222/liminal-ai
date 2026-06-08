@@ -298,9 +298,16 @@ export function sidecarServiceIds(presets: GoogleServicePreset[]): GoogleService
   return presets.filter((p) => GOOGLE_SIDECAR_SERVICE_IDS.includes(p.id)).map((p) => p.id);
 }
 
+/** Internal service id → `workspace-mcp --tools` flag (CLI names differ for some services). */
+const WORKSPACE_MCP_TOOL_CLI_NAMES: Partial<Record<GoogleServiceId, string>> = {
+  apps_script: "appscript",
+};
+
 /** `workspace-mcp --tools` names for selected sidecar-backed services. */
 export function workspaceMcpToolNamesForServices(serviceIds: GoogleServiceId[]): string[] {
-  return serviceIds.filter((id) => GOOGLE_SIDECAR_SERVICE_IDS.includes(id));
+  return serviceIds
+    .filter((id) => GOOGLE_SIDECAR_SERVICE_IDS.includes(id))
+    .map((id) => WORKSPACE_MCP_TOOL_CLI_NAMES[id] ?? id);
 }
 
 export const GOOGLE_OAUTH_SCOPES_FULL = scopesForGoogleServices(GOOGLE_WORKSPACE_SERVICES, "read_write");
