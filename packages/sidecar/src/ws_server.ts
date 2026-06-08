@@ -37,6 +37,22 @@ import { tryHandleMediaRequest } from "./media_handler.js";
 import { getBrowserPanelFrame } from "@liminal/tools";
 import { buildOutboundUserMessage, normalizeWireAttachments } from "./message_attachments.js";
 import { LiminalAppManager } from "./app_manager.js";
+import { ChatOrchestrator } from "./chat_orchestrator.js";
+import {
+  attachIntegrationMcp,
+  buildIntegrationsSnapshot,
+  connectGithub,
+  connectGoogleOAuth,
+  connectGoogleWorkspace,
+  connectIntegrationOpenApi,
+  detachIntegrationMcp,
+  disconnectGithub,
+  disconnectGoogle,
+  disconnectMicrosoft,
+  connectMicrosoftOAuth,
+  connectMicrosoft365,
+  disconnectIntegrationOpenApi,
+} from "./integrations_api.js";
 
 const SIDECAR_VERSION = "0.1.0";
 
@@ -61,6 +77,7 @@ export class WsServer {
   private readonly clients = new Set<WebSocket>();
   private readonly registry: ChatRegistry;
   private readonly appManager: LiminalAppManager;
+  private readonly orchestrator: ChatOrchestrator;
   private readonly token: string;
   private readonly repoRoot: string;
 
@@ -72,9 +89,19 @@ export class WsServer {
       provider: opts.provider,
       runtimePreferences: opts.runtimePreferences,
       repoRoot: opts.repoRoot,
-      sink: (frame) => this.broadcast(frame),
+      sink: (frame) => {
+        this.orchestrator.handleFrame(frame);
+        this.broadcast(frame);
+      },
       registerToolsDeps: { appManager: this.appManager },
     });
+    this.orchestrator = new ChatOrchestrator({
+      registry: this.registry,
+      repoRoot: opts.repoRoot,
+      provider: opts.provider,
+      emit: (frame) => this.broadcast(frame),
+    });
+    this.registry.setOrchestrator(() => this.orchestrator);
 
     this.http = createServer((req, res) => {
       if (
@@ -295,10 +322,29 @@ export class WsServer {
           return;
 
         case "create_chat": {
-          const d = data as { workspaceRoot?: string; title?: string };
-          const bridge = await this.registry.create(d);
+          const d = data as {
+            workspaceRoot?: string;
+            title?: string;
+            kind?: "default" | "orchestrator";
+          };
+          const bridge = await this.registry.create({
+            workspaceRoot: d.workspaceRoot,
+            title: d.title,
+            kind: d.kind === "orchestrator" ? "orchestrator" : "default",
+          });
           this.broadcastChatList();
           this.ack(ws, id, true, undefined, { chatId: bridge.chatId });
+          return;
+        }
+
+        case "get_or_create_orchestrator_chat": {
+          try {
+            const bridge = await this.registry.getOrCreateOrchestratorChat();
+            this.broadcastChatList();
+            this.ack(ws, id, true, undefined, { chatId: bridge.chatId });
+          } catch (err) {
+            this.ack(ws, id, false, err instanceof Error ? err.message : String(err));
+          }
           return;
         }
 
@@ -306,6 +352,13 @@ export class WsServer {
           const d = data as { chatId: string };
           const ok = await this.registry.activate(d.chatId);
           if (ok) this.broadcastChatList();
+          this.ack(ws, id, ok, ok ? undefined : "Unknown chatId.");
+          return;
+        }
+
+        case "open_chat": {
+          const d = data as { chatId: string };
+          const ok = await this.registry.open(d.chatId);
           this.ack(ws, id, ok, ok ? undefined : "Unknown chatId.");
           return;
         }
@@ -320,14 +373,14 @@ export class WsServer {
 
         case "replay_transcript": {
           const d = data as { chatId: string };
-          const bridge = this.registry.get(d.chatId);
+          let bridge = this.registry.get(d.chatId);
           if (!bridge) {
-            const ok = await this.registry.activate(d.chatId);
+            const ok = await this.registry.open(d.chatId);
             if (!ok) return this.ack(ws, id, false, "Unknown chatId.");
+            bridge = this.registry.get(d.chatId);
           }
-          const active = this.registry.get(d.chatId);
-          if (!active) return this.ack(ws, id, false, "Unknown chatId.");
-          await active.replayPersistedTranscript({ uiOnly: true });
+          if (!bridge) return this.ack(ws, id, false, "Unknown chatId.");
+          await bridge.replayPersistedTranscript({ uiOnly: true });
           this.ack(ws, id, true);
           return;
         }
@@ -562,6 +615,223 @@ export class WsServer {
               auto_open: d.auto_open,
             });
             this.ack(ws, id, true, undefined, { app });
+          } catch (err) {
+            this.ack(ws, id, false, err instanceof Error ? err.message : String(err));
+          }
+          return;
+        }
+
+        case "start_orchestration": {
+          const d = data as { goal?: string; maxWorkers?: number; yolo?: boolean };
+          try {
+            const snap = this.orchestrator.start(String(d.goal ?? ""), {
+              maxWorkers: d.maxWorkers,
+              yolo: d.yolo,
+            });
+            this.broadcastChatList();
+            this.ack(ws, id, true, undefined, snap);
+          } catch (err) {
+            this.ack(ws, id, false, err instanceof Error ? err.message : String(err));
+          }
+          return;
+        }
+
+        case "stop_orchestration": {
+          const d = data as { orchestrationId?: string };
+          const ok = this.orchestrator.stop(d.orchestrationId);
+          this.ack(ws, id, ok, ok ? undefined : "No orchestration to stop.");
+          return;
+        }
+
+        case "get_orchestration": {
+          const snap = this.orchestrator.getSnapshot();
+          this.sendTo(ws, serverFrame("orchestration_status", snap));
+          this.ack(ws, id, true, undefined, snap);
+          return;
+        }
+
+        case "get_integrations": {
+          try {
+            const snap = await buildIntegrationsSnapshot();
+            this.ack(ws, id, true, undefined, snap);
+          } catch (err) {
+            this.ack(ws, id, false, err instanceof Error ? err.message : String(err));
+          }
+          return;
+        }
+
+        case "connect_google_oauth": {
+          const d = data as {
+            services?: string[];
+            mode?: "read_write" | "read_only";
+            openBrowser?: boolean;
+          };
+          try {
+            const result = await connectGoogleOAuth(this.registry, d);
+            const snap = await buildIntegrationsSnapshot();
+            this.ack(ws, id, true, undefined, { ...result, integrations: snap });
+          } catch (err) {
+            this.ack(ws, id, false, err instanceof Error ? err.message : String(err));
+          }
+          return;
+        }
+
+        case "connect_google_workspace": {
+          const d = data as { services?: string[]; mode?: "read_write" | "read_only" };
+          try {
+            const output = await connectGoogleWorkspace(this.registry, d);
+            const snap = await buildIntegrationsSnapshot();
+            this.ack(ws, id, true, undefined, { output, integrations: snap });
+          } catch (err) {
+            this.ack(ws, id, false, err instanceof Error ? err.message : String(err));
+          }
+          return;
+        }
+
+        case "disconnect_google": {
+          const d = data as { revoke?: boolean };
+          try {
+            const output = await disconnectGoogle(this.registry, d.revoke === true);
+            const snap = await buildIntegrationsSnapshot();
+            this.ack(ws, id, true, undefined, { output, integrations: snap });
+          } catch (err) {
+            this.ack(ws, id, false, err instanceof Error ? err.message : String(err));
+          }
+          return;
+        }
+
+        case "connect_microsoft_oauth": {
+          const d = data as {
+            services?: string[];
+            mode?: "read_write" | "read_only";
+            openBrowser?: boolean;
+          };
+          try {
+            const result = await connectMicrosoftOAuth(this.registry, d);
+            const snap = await buildIntegrationsSnapshot();
+            this.ack(ws, id, true, undefined, { ...result, integrations: snap });
+          } catch (err) {
+            this.ack(ws, id, false, err instanceof Error ? err.message : String(err));
+          }
+          return;
+        }
+
+        case "connect_microsoft_365": {
+          const d = data as { services?: string[]; mode?: "read_write" | "read_only" };
+          try {
+            const output = await connectMicrosoft365(this.registry, d);
+            const snap = await buildIntegrationsSnapshot();
+            this.ack(ws, id, true, undefined, { output, integrations: snap });
+          } catch (err) {
+            this.ack(ws, id, false, err instanceof Error ? err.message : String(err));
+          }
+          return;
+        }
+
+        case "disconnect_microsoft": {
+          const d = data as { revoke?: boolean };
+          try {
+            const output = await disconnectMicrosoft(this.registry, d.revoke === true);
+            const snap = await buildIntegrationsSnapshot();
+            this.ack(ws, id, true, undefined, { output, integrations: snap });
+          } catch (err) {
+            this.ack(ws, id, false, err instanceof Error ? err.message : String(err));
+          }
+          return;
+        }
+
+        case "connect_github": {
+          const d = data as { mode?: "read_write" | "read_only" };
+          try {
+            const output = await connectGithub(this.registry, {
+              readOnly: d.mode === "read_only",
+            });
+            const snap = await buildIntegrationsSnapshot();
+            this.ack(ws, id, true, undefined, { output, integrations: snap });
+          } catch (err) {
+            this.ack(ws, id, false, err instanceof Error ? err.message : String(err));
+          }
+          return;
+        }
+
+        case "disconnect_github": {
+          try {
+            const output = await disconnectGithub(this.registry);
+            const snap = await buildIntegrationsSnapshot();
+            this.ack(ws, id, true, undefined, { output, integrations: snap });
+          } catch (err) {
+            this.ack(ws, id, false, err instanceof Error ? err.message : String(err));
+          }
+          return;
+        }
+
+        case "attach_integration_mcp": {
+          const d = data as {
+            name?: string;
+            url?: string;
+            read_only?: boolean;
+            auth?: unknown;
+          };
+          try {
+            const output = await attachIntegrationMcp(this.registry, {
+              name: String(d.name ?? "").trim(),
+              url: String(d.url ?? "").trim(),
+              readOnly: d.read_only === true,
+              auth: d.auth,
+            });
+            const snap = await buildIntegrationsSnapshot();
+            this.ack(ws, id, true, undefined, { output, integrations: snap });
+          } catch (err) {
+            this.ack(ws, id, false, err instanceof Error ? err.message : String(err));
+          }
+          return;
+        }
+
+        case "detach_integration_mcp": {
+          const d = data as { name?: string };
+          try {
+            const output = await detachIntegrationMcp(this.registry, String(d.name ?? "").trim());
+            const snap = await buildIntegrationsSnapshot();
+            this.ack(ws, id, true, undefined, { output, integrations: snap });
+          } catch (err) {
+            this.ack(ws, id, false, err instanceof Error ? err.message : String(err));
+          }
+          return;
+        }
+
+        case "connect_integration_openapi": {
+          const d = data as {
+            name?: string;
+            specUrl?: string;
+            baseUrl?: string;
+            auth?: unknown;
+            autoApproveReads?: boolean;
+          };
+          try {
+            const output = await connectIntegrationOpenApi(this.registry, {
+              name: String(d.name ?? "").trim(),
+              specUrl: String(d.specUrl ?? "").trim(),
+              baseUrl: typeof d.baseUrl === "string" ? d.baseUrl.trim() : undefined,
+              auth: d.auth,
+              autoApproveReads: d.autoApproveReads,
+            });
+            const snap = await buildIntegrationsSnapshot();
+            this.ack(ws, id, true, undefined, { output, integrations: snap });
+          } catch (err) {
+            this.ack(ws, id, false, err instanceof Error ? err.message : String(err));
+          }
+          return;
+        }
+
+        case "disconnect_integration_openapi": {
+          const d = data as { name?: string };
+          try {
+            const output = await disconnectIntegrationOpenApi(
+              this.registry,
+              String(d.name ?? "").trim()
+            );
+            const snap = await buildIntegrationsSnapshot();
+            this.ack(ws, id, true, undefined, { output, integrations: snap });
           } catch (err) {
             this.ack(ws, id, false, err instanceof Error ? err.message : String(err));
           }

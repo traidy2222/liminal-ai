@@ -48,6 +48,8 @@ export type WireAgentEventMap = Omit<
 export interface ChatSummary {
   chatId: string;
   title: string;
+  /** `orchestrator` = Mission Control chat (multi-worker coordinator). */
+  kind?: "default" | "orchestrator";
   workspaceRoot: string;
   /** Wall-clock ms of last activity — UI sorts most-recent-first. */
   updatedAt: number;
@@ -159,6 +161,37 @@ export interface TransportEventMap {
   app_closed: { appId: string };
   /** Fresh cache payload for one app (refresh loop or manual). */
   app_data: { appId: string; cache: WireAppCacheEntry };
+
+  /** Multi-chat orchestrator progress (planning → workers → synthesis). */
+  orchestration_status: {
+    id: string;
+    goal: string;
+    status: "idle" | "planning" | "running" | "synthesizing" | "completed" | "failed" | "stopped";
+    phase?: string;
+    yolo: boolean;
+    workers: Array<{
+      taskId: string;
+      title: string;
+      chatId?: string;
+      status: "pending" | "running" | "done" | "failed" | "skipped";
+      summary?: string;
+      handoff?: {
+        status: "done" | "blocked" | "partial";
+        artifacts: string[];
+        commandsRun: string[];
+        decisions: string[];
+        blockers: string[];
+        summary: string;
+      };
+      error?: string;
+    }>;
+    synthesisChatId?: string;
+    parentChatId?: string;
+    summary?: string;
+    error?: string;
+    startedAt?: number;
+    finishedAt?: number;
+  };
 }
 
 /** Wire shape for `~/.liminal/apps/manifest.json` entries. */

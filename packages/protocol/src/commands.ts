@@ -39,9 +39,13 @@ export interface ClientCommandMap {
   resolve_ask_user: { chatId: string; answer: string };
 
   /** Create a new chat (optionally bound to a workspace folder) and return its summary. */
-  create_chat: { workspaceRoot?: string; title?: string };
+  create_chat: { workspaceRoot?: string; title?: string; kind?: "default" | "orchestrator" };
+  /** Return the persistent Mission Control chat (create if missing). */
+  get_or_create_orchestrator_chat: Record<string, never>;
   /** Make a chat the live event source. */
   activate_chat: { chatId: string };
+  /** Open harness + hydrate transcript without changing the active chat. */
+  open_chat: { chatId: string };
   /** Permanently dispose a chat and its harness. */
   delete_chat: { chatId: string };
   /** Re-request the chat list (also pushed proactively on change). */
@@ -95,6 +99,61 @@ export interface ClientCommandMap {
 
   /** Keepalive. Sidecar answers with a `pong` event. */
   ping: Record<string, never>;
+
+  /**
+   * Start a multi-chat orchestration: plan → spawn worker chats → synthesize.
+   * Progress streams via `orchestration_status`.
+   */
+  start_orchestration: {
+    goal: string;
+    maxWorkers?: number;
+    /** Auto-approve tool gates (default true). */
+    yolo?: boolean;
+  };
+  /** Cooperatively stop the active orchestration. */
+  stop_orchestration: { orchestrationId?: string };
+  /** Snapshot of the current or last orchestration run. */
+  get_orchestration: Record<string, never>;
+
+  /** Google / MCP / OpenAPI integration snapshot (Settings parity). */
+  get_integrations: Record<string, never>;
+  connect_google_oauth: {
+    services?: string[];
+    mode?: "read_write" | "read_only";
+    openBrowser?: boolean;
+  };
+  connect_google_workspace: {
+    services?: string[];
+    mode?: "read_write" | "read_only";
+  };
+  disconnect_google: { revoke?: boolean };
+  connect_microsoft_oauth: {
+    services?: string[];
+    mode?: "read_write" | "read_only";
+    openBrowser?: boolean;
+  };
+  connect_microsoft_365: {
+    services?: string[];
+    mode?: "read_write" | "read_only";
+  };
+  disconnect_microsoft: { revoke?: boolean };
+  connect_github: { mode?: "read_write" | "read_only" };
+  disconnect_github: Record<string, never>;
+  attach_integration_mcp: {
+    name: string;
+    url: string;
+    read_only?: boolean;
+    auth?: { kind?: string; envVar?: string; headerName?: string };
+  };
+  detach_integration_mcp: { name: string };
+  connect_integration_openapi: {
+    name: string;
+    specUrl: string;
+    baseUrl?: string;
+    auth?: { kind?: string; envVar?: string; headerName?: string };
+    autoApproveReads?: boolean;
+  };
+  disconnect_integration_openapi: { name: string };
 }
 
 export type ClientCommandType = keyof ClientCommandMap;

@@ -17,6 +17,7 @@ import {
   saveRuntimePreferences,
   touchChatMetadata,
   workspaceFingerprint,
+  type ChatKind,
   type ChatMetadata,
   type ProviderConfig,
   type RuntimePreferences,
@@ -26,15 +27,20 @@ import {
   INCEPTION_MESSAGES,
   buildProtocolDynamicSuffix,
   applyPersonaProfileToHarness,
+  installDefaultPersonaArtifacts,
   type ProtocolIntentHint,
   type RegisterAllToolsDeps,
 } from "@liminal/tools";
 import { serverFrame, type ChatSummary } from "@liminal/protocol";
 import { SessionBridge, type FrameSink } from "./session_bridge.js";
+import { buildOrchestratorInceptionMessages } from "./orchestrator_chat_prompt.js";
+import { registerOrchestratorChatTools } from "./orchestrator_chat_tools.js";
+import type { ChatOrchestrator } from "./chat_orchestrator.js";
 
 interface ChatSlot {
   bridge: SessionBridge;
   title: string;
+  kind?: ChatKind;
   workspaceRoot: string;
   updatedAt: number;
 }
@@ -59,10 +65,16 @@ export class ChatRegistry {
   private booted = false;
   private bootPromise: Promise<void> | null = null;
   private ensureActive: Promise<SessionBridge> | null = null;
+  private getOrchestrator?: () => ChatOrchestrator;
 
   constructor(deps: ChatRegistryDeps) {
     this.deps = deps;
     this.cachedRuntimePrefs = deps.runtimePreferences;
+  }
+
+  /** Wired after {@link ChatOrchestrator} construction (avoids circular deps). */
+  setOrchestrator(getter: () => ChatOrchestrator): void {
+    this.getOrchestrator = getter;
   }
 
   getActiveBridge(): SessionBridge | undefined {
@@ -115,6 +127,7 @@ export class ChatRegistry {
     const { provider } = this.deps;
     const runtimePreferences = this.cachedRuntimePrefs;
     const workspaceRoot = meta.workspaceRoot;
+    const isOrchestrator = meta.kind === "orchestrator";
 
     const harness = runWithWorkspaceRoot(workspaceRoot, () =>
       new AgentHarness({
@@ -123,7 +136,7 @@ export class ChatRegistry {
         baseURL: provider.baseURL,
         taskId: meta.chatId,
         workspaceRoot,
-        maxToolRoundsPerTurn: 128,
+        maxToolRoundsPerTurn: isOrchestrator ? 48 : 128,
         workingStateEnabled: true,
         runtimePreferences,
         persistRuntimePreferences: async (prefs) =>
@@ -131,7 +144,9 @@ export class ChatRegistry {
         context: {
           modelMaxTokens: 128_000,
           thresholdFraction: 0.6,
-          inceptionMessages: INCEPTION_MESSAGES,
+          inceptionMessages: isOrchestrator
+            ? buildOrchestratorInceptionMessages()
+            : INCEPTION_MESSAGES,
           protocolDynamicBuilder: (names, hint) =>
             buildProtocolDynamicSuffix(names, (hint ?? "any") as ProtocolIntentHint),
         },
@@ -142,9 +157,29 @@ export class ChatRegistry {
 
     await runWithWorkspaceRoot(workspaceRoot, async () => {
       await registerAllTools(harness.registry, harness.emitter, harness, this.deps.registerToolsDeps);
-      const persisted = harness.getPersistedPersonaProfile();
-      if (persisted) {
-        await applyPersonaProfileToHarness(harness, persisted).catch(() => undefined);
+      if (isOrchestrator) {
+        const orch = this.getOrchestrator?.();
+        if (orch) {
+          registerOrchestratorChatTools(harness.registry, orch, meta.chatId);
+        }
+        if (!harness.isPersonaBootstrapCompleted()) {
+          await installDefaultPersonaArtifacts(harness);
+          await harness.patchRuntimePreferences(
+            {
+              persona: {
+                bootstrapCompleted: true,
+                sourcePrompt: "Mission Control",
+                updatedAt: Date.now(),
+              },
+            },
+            { persist: true }
+          );
+        }
+      } else {
+        const persisted = harness.getPersistedPersonaProfile();
+        if (persisted) {
+          await applyPersonaProfileToHarness(harness, persisted).catch(() => undefined);
+        }
       }
     });
 
@@ -154,6 +189,7 @@ export class ChatRegistry {
     this.slots.set(meta.chatId, {
       bridge,
       title: meta.title,
+      kind: meta.kind,
       workspaceRoot,
       updatedAt: meta.updatedAt,
     });
@@ -162,13 +198,22 @@ export class ChatRegistry {
   }
 
   /** Build a harness + bridge for a new chat and make it active. */
-  async create(input?: { workspaceRoot?: string; title?: string }): Promise<SessionBridge> {
+  async create(input?: {
+    workspaceRoot?: string;
+    title?: string;
+    kind?: ChatKind;
+  }): Promise<SessionBridge> {
     await this.boot();
     const workspaceRoot = input?.workspaceRoot?.trim() || this.deps.repoRoot || resolveWorkspaceRoot();
-    const chatId = `chat_${Date.now().toString(36)}`;
+    const kind = input?.kind ?? "default";
+    const chatId =
+      kind === "orchestrator"
+        ? `orch_${Date.now().toString(36)}`
+        : `chat_${Date.now().toString(36)}`;
     const meta = await createChatMetadata({
       chatId,
-      title: input?.title?.trim() || "New chat",
+      title: input?.title?.trim() || (kind === "orchestrator" ? "Mission Control" : "New chat"),
+      kind: kind === "default" ? undefined : kind,
       workspaceMode: "folder",
       workspaceRoot,
       workspaceFingerprint: workspaceFingerprint(workspaceRoot),
@@ -180,12 +225,37 @@ export class ChatRegistry {
     return bridge;
   }
 
+  /** Persistent Mission Control chat — created once per install, reused thereafter. */
+  async getOrCreateOrchestratorChat(): Promise<SessionBridge> {
+    await this.boot();
+    await this.refreshDiskMetas();
+    const existing = this.diskMetas.find((m) => m.kind === "orchestrator");
+    if (existing) {
+      const bridge = await this.openBridgeFromMeta(existing);
+      this.activeChatId = existing.chatId;
+      await saveLastActiveChatId(existing.chatId);
+      return bridge;
+    }
+    return this.create({ kind: "orchestrator", title: "Mission Control" });
+  }
+
   private chatListPayload(): { chats: ChatSummary[]; activeChatId: string } {
     return { chats: this.list(), activeChatId: this.activeChatId ?? "" };
   }
 
   get(chatId: string): SessionBridge | undefined {
     return this.slots.get(chatId)?.bridge;
+  }
+
+  listBridges(): SessionBridge[] {
+    return [...this.slots.values()].map((s) => s.bridge);
+  }
+
+  anyHarnessBusy(): boolean {
+    for (const slot of this.slots.values()) {
+      if (slot.bridge.harness.getIsRunning()) return true;
+    }
+    return false;
   }
 
   resolveBridgeForAudio(chatId: string | null): SessionBridge | undefined {
@@ -224,6 +294,18 @@ export class ChatRegistry {
       });
     }
     return this.ensureActive;
+  }
+
+  /** Open bridge for a chat without changing which chat is "active" on the server. */
+  async open(chatId: string): Promise<boolean> {
+    await this.boot();
+    const meta = await readChatMetadata(chatId);
+    if (!meta) return false;
+    await this.openBridgeFromMeta(meta);
+    await touchChatMetadata(chatId);
+    const slot = this.slots.get(chatId);
+    if (slot) slot.updatedAt = Date.now();
+    return true;
   }
 
   async activate(chatId: string): Promise<boolean> {
@@ -278,6 +360,7 @@ export class ChatRegistry {
         .map(([chatId, slot]) => ({
           chatId,
           title: slot.title,
+          kind: slot.kind === "orchestrator" ? ("orchestrator" as const) : undefined,
           workspaceRoot: slot.workspaceRoot,
           updatedAt: slot.updatedAt,
           busy: slot.bridge.isBusy,
@@ -292,6 +375,7 @@ export class ChatRegistry {
         return {
           chatId: meta.chatId,
           title: slot?.title ?? meta.title,
+          kind: meta.kind === "orchestrator" ? ("orchestrator" as const) : undefined,
           workspaceRoot: meta.workspaceRoot,
           updatedAt: slot?.updatedAt ?? meta.updatedAt,
           busy: slot?.bridge.isBusy ?? false,
