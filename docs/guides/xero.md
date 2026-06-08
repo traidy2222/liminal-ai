@@ -41,7 +41,7 @@ Register a **Web app** at [developer.xero.com](https://developer.xero.com/myapps
 | AI training on Xero data? | **No** |
 | Security requirements | **Yes** |
 | Company URL | `https://www.vireondynamics.com/liminal` |
-| Redirect URI | `https://www.vireondynamics.com/connect/xero/callback` |
+| Redirect URI | `https://www.vireondynamics.com/connect/xero/callback` (must include `/callback` — not `/connect/xero` alone) |
 
 Add to **Vercel** env for `vireondynamics-website` (not the user's `.env`):
 
@@ -69,4 +69,4 @@ Same hosted handoff pattern as Vireon license connect (`/connect/harness`).
 - **No organisation** — reconnect; the harness stores the first linked tenant from `GET /connections`.
 - **403 on API calls** — wrong tenant or missing scope; revoke in Integrations and reconnect with the mode you need.
 - **`invalid_scope` on Xero sign-in** — Xero apps created after 2026-03-02 require granular scopes (`accounting.invoices`, not legacy `accounting.transactions`). Redeploy the latest vireondynamics.com connect routes.
-- **Supabase “invalid flow state” after Xero consent** — site middleware was misrouting Xero `?code=` to `/auth/callback`. Update vireondynamics.com to the latest connect middleware fix and retry.
+- **Supabase “invalid flow state” after Xero consent** — Xero `?code=` was misrouted to `/auth/callback` (especially when the redirect URI omitted `/callback`). Deploy latest vireondynamics.com connect middleware, confirm the Xero app redirect URI ends with `/connect/xero/callback`, clear cookies for vireondynamics.com, retry in a private window.
