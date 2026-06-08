@@ -16,7 +16,7 @@ test("matchesAgentcardIntent accepts spaced agent card", async () => {
   assert.equal(matchesAgentcardIntent("hello world"), false);
 });
 
-test("bootstrapAgentcardTools activates family when lazy", async () => {
+test("bootstrapAgentcardTools does not auto-activate under lazy loading", async () => {
   const { ToolRegistry } = await import("@liminal/core");
   const { createAgentcardTools, bootstrapAgentcardTools } = await import("./agentcard_tools.js");
   const registry = new ToolRegistry();
@@ -25,6 +25,6 @@ test("bootstrapAgentcardTools activates family when lazy", async () => {
   registry.setLazyToolLoading(true);
   registry.seedActiveTools([]);
   const newly = bootstrapAgentcardTools(registry);
-  assert.ok(newly.length > 0);
-  assert.ok(registry.isActive("agentcard_whoami"));
+  assert.equal(newly.length, 0);
+  assert.equal(registry.isActive("agentcard_whoami"), false);
 });

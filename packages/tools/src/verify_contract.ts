@@ -6,6 +6,7 @@
  * tasks and before claiming a contract complete.
  */
 import type { AgentHarness } from "@liminal/core";
+import { effectiveHarnessEnvRaw } from "@liminal/core";
 import { defineTool } from "./helpers.js";
 
 export function createVerifyContractTool(harness: AgentHarness) {
@@ -13,7 +14,7 @@ export function createVerifyContractTool(harness: AgentHarness) {
     name: "verify_contract",
     description:
       "WHAT: Inspect the active ExecutionContract — check budget consumption, milestone status, and commitment integrity.\n" +
-      "WHEN: Before claiming a long task complete; when drift score is high; when approaching round/time limits.\n" +
+      "WHEN: Only when user explicitly requested verification or AGENT_VERIFY_TOOLS=1.\n" +
       "NOT WHEN: No execution state has been set (new session with no plan).\n" +
       "ARGS: mark_done — if true, mark the active contract as 'verified' (use only after full success); " +
       "goal_summary — optional one-line description of what was accomplished (included in verdict).",
@@ -33,6 +34,13 @@ export function createVerifyContractTool(harness: AgentHarness) {
       additionalProperties: false,
     },
     handler: async (args) => {
+      if (effectiveHarnessEnvRaw("AGENT_VERIFY_TOOLS") === "0") {
+        return {
+          ok: true,
+          output:
+            "[verify_contract skipped] AGENT_VERIFY_TOOLS=0 — finalize your answer to the user without a contract verification pass.",
+        };
+      }
       const markDone = Boolean(args["mark_done"]);
       const goalSummary = (args["goal_summary"] as string | undefined) ?? "";
 

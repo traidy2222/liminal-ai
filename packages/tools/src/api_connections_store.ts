@@ -4,7 +4,7 @@
 import { mkdir, readFile, readdir, unlink, writeFile } from "node:fs/promises";
 import { existsSync, mkdirSync } from "node:fs";
 import path from "node:path";
-import { globalPath, getGoogleAccessToken } from "@liminal/core";
+import { globalPath, getGoogleAccessToken, getMicrosoftAccessToken } from "@liminal/core";
 
 const CONNECTIONS_DIR_SEG = "api_connections";
 
@@ -34,7 +34,8 @@ export type AuthScheme =
   | { kind: "bearer"; envVar: string }
   | { kind: "header"; headerName: string; envVar: string }
   | { kind: "basic"; envVar: string }
-  | { kind: "oauth2"; provider: "google"; accountId?: string; scopes: string[] };
+  | { kind: "oauth2"; provider: "google"; accountId?: string; scopes: string[] }
+  | { kind: "oauth2"; provider: "microsoft"; accountId?: string; scopes: string[] };
 
 export interface McpToolFilter {
   include?: string[];
@@ -165,11 +166,20 @@ export async function resolveAuthHeaderAsync(auth: AuthScheme): Promise<Record<s
     if (!token) return {};
     return { Authorization: `Bearer ${token}` };
   }
+  if (auth.kind === "oauth2" && auth.provider === "microsoft") {
+    const token = await getMicrosoftAccessToken(auth.accountId);
+    if (!token) return {};
+    return { Authorization: `Bearer ${token}` };
+  }
   return resolveAuthHeader(auth);
 }
 
 export function googleOAuthAuthScheme(accountId?: string, scopes: string[] = []): AuthScheme {
   return { kind: "oauth2", provider: "google", accountId, scopes };
+}
+
+export function microsoftOAuthAuthScheme(accountId?: string, scopes: string[] = []): AuthScheme {
+  return { kind: "oauth2", provider: "microsoft", accountId, scopes };
 }
 
 export function listConnectionsByParent(parentProvider: string): Promise<McpConnectionRecord[]> {

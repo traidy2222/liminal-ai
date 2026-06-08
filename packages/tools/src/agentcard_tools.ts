@@ -418,9 +418,7 @@ export function createAgentcardTools(): ToolDefinition[] {
 /** Tool names for catalog registration. */
 export const AGENTCARD_TOOL_NAMES = createAgentcardTools().map((t) => t.name);
 
-/** When AgentCard is enabled, keep the family visible under lazy tool loading. */
-export function bootstrapAgentcardTools(registry: ToolRegistry): string[] {
-  if (!agentcardEnabled() || !registry.isLazyToolLoading()) return [];
-  const names = TOOL_FAMILIES.agentcard.tools.filter((t) => registry.has(t));
-  return names.length > 0 ? registry.activate(names) : [];
+/** AgentCard is lazy-loaded like other families — activate via activate_tool_family("agentcard"). */
+export function bootstrapAgentcardTools(_registry: ToolRegistry): string[] {
+  return [];
 }

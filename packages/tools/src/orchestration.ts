@@ -1,6 +1,12 @@
 import OpenAI from "openai";
-import type { AgentHarness, TaskOrchestrator, SubtaskResult } from "@liminal/core";
-import { completeChatJson, getFastModelSlug, resolveHarnessEnvRaw, detectContradictions } from "@liminal/core";
+import type { AgentHarness, TaskOrchestrator, SubtaskResult, ToolResult } from "@liminal/core";
+import {
+  completeChatJson,
+  getFastModelSlug,
+  resolveHarnessEnvRaw,
+  detectContradictions,
+  effectiveHarnessEnvRaw,
+} from "@liminal/core";
 import { defineTool } from "./helpers.js";
 import { createContextTools } from "./context_tools.js";
 import { loadRawNotes, getNoteValue } from "./notes_store.js";
@@ -24,6 +30,18 @@ import { createAgentContextTools } from "./agent_context_tools.js";
 
 function sleep(ms: number) {
   return new Promise<void>((r) => setTimeout(r, ms));
+}
+
+/** Sub-agent verification (verify_result, critics) is expensive — off unless AGENT_VERIFY_TOOLS=1. */
+function verificationToolsEnabled(): boolean {
+  return effectiveHarnessEnvRaw("AGENT_VERIFY_TOOLS") !== "0";
+}
+
+const VERIFY_TOOLS_DISABLED_OUTPUT =
+  "[verification disabled] AGENT_VERIFY_TOOLS=0 — do not retry. Finish with your answer to the user.";
+
+function skipVerificationTool(): ToolResult {
+  return { ok: true, output: VERIFY_TOOLS_DISABLED_OUTPUT };
 }
 
 type ContractSource = "provided" | "synthesized";
@@ -631,8 +649,8 @@ export function createOrchestrationTools(harness: AgentHarness) {
     name: "verify_result",
     description:
       "WHAT: Spawn a critic sub-agent to independently verify that a task was actually completed correctly.\n" +
-      "WHEN: After completing a complex multi-step task (5+ tool calls) before reporting success to the user.\n" +
-      "NOT WHEN: Simple single-tool tasks — verify manually. NOT for sub-agents verifying their own work.\n" +
+      "WHEN: Only when the user explicitly asked for verification (disabled by default — AGENT_VERIFY_TOOLS=0).\n" +
+      "NOT WHEN: Normal task completion — reply to the user directly. NOT for sub-agents verifying their own work.\n" +
       "ARGS: goal — original task description; result — summary of what was done; tools — optional subset (default: read_file, list_dir, think — no shell so verification does not block on approvals).",
     requiresApproval: false,
     parameters: {
@@ -655,6 +673,7 @@ export function createOrchestrationTools(harness: AgentHarness) {
       additionalProperties: false,
     },
     handler: async (args) => {
+      if (!verificationToolsEnabled()) return skipVerificationTool();
       try {
         const ev = (args["evidence_pack"] as string | undefined)?.trim();
         const evBlock =
@@ -700,7 +719,7 @@ export function createOrchestrationTools(harness: AgentHarness) {
     name: "evidence_critic",
     description:
       "WHAT: Spawn a sub-agent that checks whether result_text is supported only by evidence_pack + optional file reads.\n" +
-      "WHEN: After a long answer — bind claims to tool excerpts.\n" +
+      "WHEN: Only when user explicitly requested verification (AGENT_VERIFY_TOOLS=1).\n" +
       "ARGS: result_text, evidence_pack; optional context_goal.",
     requiresApproval: false,
     parameters: {
@@ -714,6 +733,7 @@ export function createOrchestrationTools(harness: AgentHarness) {
       additionalProperties: false,
     },
     handler: async (args) => {
+      if (!verificationToolsEnabled()) return skipVerificationTool();
       try {
         const rt = args["result_text"] as string;
         const ev = args["evidence_pack"] as string;
@@ -740,7 +760,7 @@ export function createOrchestrationTools(harness: AgentHarness) {
     name: "path_critic",
     description:
       "WHAT: Sub-agent checks that file paths mentioned in result_text exist under the repo (read_file/list_dir).\n" +
-      "WHEN: Answer cites many paths.\n" +
+      "WHEN: Only when user explicitly requested verification (AGENT_VERIFY_TOOLS=1).\n" +
       "ARGS: result_text.",
     requiresApproval: false,
     parameters: {
@@ -752,6 +772,7 @@ export function createOrchestrationTools(harness: AgentHarness) {
       additionalProperties: false,
     },
     handler: async (args) => {
+      if (!verificationToolsEnabled()) return skipVerificationTool();
       try {
         const rt = args["result_text"] as string;
         const { promise } = harness.forkChild({
@@ -775,7 +796,7 @@ export function createOrchestrationTools(harness: AgentHarness) {
     name: "policy_critic",
     description:
       "WHAT: Sub-agent checks whether result_text violates safety / policy (e.g. malware, credential theft, disallowed exfiltration).\n" +
-      "WHEN: Sensitive domains or high-risk edits.\n" +
+      "WHEN: Only when user explicitly requested verification (AGENT_VERIFY_TOOLS=1).\n" +
       "ARGS: result_text; optional policy_notes.",
     requiresApproval: false,
     parameters: {
@@ -788,6 +809,7 @@ export function createOrchestrationTools(harness: AgentHarness) {
       additionalProperties: false,
     },
     handler: async (args) => {
+      if (!verificationToolsEnabled()) return skipVerificationTool();
       try {
         const rt = args["result_text"] as string;
         const pol = (args["policy_notes"] as string | undefined)?.trim() ?? "";
@@ -816,8 +838,8 @@ export function createOrchestrationTools(harness: AgentHarness) {
     name: "reflect_debate",
     description:
       "WHAT: Spawn 3 parallel persona-guided critics (correctness, security/risk, completeness) that debate the result, then return a consensus verdict.\n" +
-      "WHEN: After complex multi-step tasks where a single critic might miss issues. More thorough than verify_result.\n" +
-      "NOT WHEN: Simple tasks or when latency matters — this runs 3 sub-agents in parallel.\n" +
+      "WHEN: Only when user explicitly requested verification (AGENT_VERIFY_TOOLS=1).\n" +
+      "NOT WHEN: Default task completion — runs 3 sub-agents and adds major latency.\n" +
       "ARGS: goal, result; optional evidence_pack (tool-output excerpts to ground critiques).",
     requiresApproval: false,
     parameters: {
@@ -834,6 +856,7 @@ export function createOrchestrationTools(harness: AgentHarness) {
       additionalProperties: false,
     },
     handler: async (args) => {
+      if (!verificationToolsEnabled()) return skipVerificationTool();
       try {
         const goalText = args["goal"] as string;
         const resultText = args["result"] as string;

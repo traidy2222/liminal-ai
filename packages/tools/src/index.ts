@@ -1,5 +1,5 @@
 import type { ToolRegistry, AgentEmitter, AgentHarness } from "@liminal/core";
-import { resolveHarnessEnvRaw } from "@liminal/core";
+import { resolveHarnessEnvRaw, emailStyleInferEnabled } from "@liminal/core";
 import { readFileTool } from "./read_file.js";
 import { writeFileTool } from "./write_file.js";
 import { listDirTool } from "./list_dir.js";
@@ -92,6 +92,7 @@ import { createSynthesisRunTool } from "./synthesis_run.js";
 import { createWorkflowTools } from "./workflow_tools.js";
 // New tools — Upgrade V
 import { createDecomposeGoalTool } from "./decompose_goal.js";
+import { createEmailStyleInferTool } from "./email_style_infer.js";
 import { createBranchExploreTool } from "./branch_explore.js";
 import { createVerifyContractTool } from "./verify_contract.js";
 import { createDynamicToolsTools, loadDynamicTools } from "./dynamic_tools.js";
@@ -99,8 +100,19 @@ import { createApiConnectionTools, restoreOpenApiConnections } from "./api_conne
 import { createMcpAttachTools, restoreMcpConnections } from "./mcp_attach.js";
 import { createConnectorTools } from "./connect_provider.js";
 import { createGmailSendTools, gmailSendRestEnabled } from "./google_gmail_send.js";
+import { createGoogleCalendarRestTools, calendarRestEnabled } from "./google_calendar_rest.js";
+import { createGoogleOfficeRestTools, officeRestEnabled } from "./google_office_rest.js";
+import { createOutlookSendTools, outlookRestEnabled } from "./outlook_send.js";
+import { createMicrosoftCalendarRestTools, microsoftCalendarRestEnabled } from "./microsoft_calendar_rest.js";
+import { createOnedriveRestTools, onedriveRestEnabled } from "./onedrive_rest.js";
+import { createExcelRestTools, excelRestEnabled } from "./excel_rest.js";
+import { createOnenoteRestTools, onenoteRestEnabled } from "./onenote_rest.js";
+import { createTeamsRestTools, teamsRestEnabled } from "./teams_rest.js";
+import { createPlannerRestTools, plannerRestEnabled } from "./planner_rest.js";
+import { createGraphSearchRestTools, graphSearchRestEnabled } from "./graph_search_rest.js";
+import { createMicrosoftOfficeRestTools, microsoftOfficeRestEnabled } from "./microsoft_office_rest.js";
 import { agentcardEnabled } from "./agentcard_cli.js";
-import { createAgentcardTools, bootstrapAgentcardTools } from "./agentcard_tools.js";
+import { createAgentcardTools } from "./agentcard_tools.js";
 import { memoryPromoteTool } from "./memory_promote.js";
 import { memoryNeighborsTool } from "./memory_neighbors.js";
 import { consolidateChatTool } from "./consolidate_chat.js";
@@ -347,6 +359,10 @@ export async function registerAllTools(
       installVoiceTtsFallback(harness);
     }
 
+    if (emailStyleInferEnabled()) {
+      registry.register(createEmailStyleInferTool(harness));
+    }
+
     // Upgrade V: goal decomposer, branch explorer, contract verifier
     registry.register(createDecomposeGoalTool(harness));
     registry.register(createBranchExploreTool(harness));
@@ -401,6 +417,39 @@ export async function registerAllTools(
   if (gmailSendRestEnabled()) {
     for (const t of createGmailSendTools()) registry.register(t);
   }
+  if (calendarRestEnabled()) {
+    for (const t of createGoogleCalendarRestTools()) registry.register(t);
+  }
+  if (officeRestEnabled()) {
+    for (const t of createGoogleOfficeRestTools()) registry.register(t);
+  }
+  if (outlookRestEnabled()) {
+    for (const t of createOutlookSendTools()) registry.register(t);
+  }
+  if (microsoftCalendarRestEnabled()) {
+    for (const t of createMicrosoftCalendarRestTools()) registry.register(t);
+  }
+  if (onedriveRestEnabled()) {
+    for (const t of createOnedriveRestTools()) registry.register(t);
+  }
+  if (excelRestEnabled()) {
+    for (const t of createExcelRestTools()) registry.register(t);
+  }
+  if (onenoteRestEnabled()) {
+    for (const t of createOnenoteRestTools()) registry.register(t);
+  }
+  if (teamsRestEnabled()) {
+    for (const t of createTeamsRestTools()) registry.register(t);
+  }
+  if (plannerRestEnabled()) {
+    for (const t of createPlannerRestTools()) registry.register(t);
+  }
+  if (graphSearchRestEnabled()) {
+    for (const t of createGraphSearchRestTools()) registry.register(t);
+  }
+  if (microsoftOfficeRestEnabled()) {
+    for (const t of createMicrosoftOfficeRestTools()) registry.register(t);
+  }
   if (agentcardEnabled()) {
     for (const t of createAgentcardTools()) registry.register(t);
   }
@@ -408,17 +457,12 @@ export async function registerAllTools(
   // live on the next ReAct turn. Best-effort — failures are logged via emitter.
   applyLazyRegistrationPolicy(registry, harness);
 
-  bootstrapAgentcardTools(registry);
-
-  // Restore persisted connections after lazy seed so autoActivate tools stay visible.
+  // Restore persisted MCP/OpenAPI connections (under lazy loading, tools stay inactive until activate_tool_family).
   await restoreOpenApiConnections(registry, emitter);
   await restoreMcpConnections(registry, emitter);
-  try {
-    const { bootstrapGoogleWorkspace } = await import("./google_workspace_boot.js");
-    await bootstrapGoogleWorkspace(registry);
-  } catch {
-    /* best effort */
-  }
+  // Sidecar spawn + live MCP attach can take minutes (npx download). Do not block harness init.
+  const { deferIntegrationBootstrap } = await import("./integration_boot.js");
+  deferIntegrationBootstrap(registry, emitter, harness);
   if (deps?.appManager && liminalAppsEnabled()) {
     const appTools = createLiminalAppTools(registry, deps.appManager, harness);
     registry.register(appTools.listAppTypesTool);
@@ -511,7 +555,19 @@ export { getBrowserPanelFrame } from "./browser_runtime.js";
 export {
   connectGoogleWorkspaceFromServer,
   disconnectGoogleWorkspaceFromServer,
+  connectMicrosoft365FromServer,
+  disconnectMicrosoft365FromServer,
+  connectGithubFromServer,
+  disconnectGithubFromServer,
 } from "./connect_provider.js";
+export { getMicrosoftSidecarStatus, stopMicrosoftSidecar } from "./microsoft_sidecar.js";
+export {
+  githubMcpEnabled,
+  githubTokenPresent,
+  githubConnectOnBoot,
+  connectGithubMcp,
+  disconnectGithubMcp,
+} from "./github_connect.js";
 export { getGoogleSidecarStatus, stopGoogleSidecar } from "./google_sidecar.js";
 export {
   listIntegrationConnections,
@@ -520,5 +576,6 @@ export {
   connectOpenApiFromServer,
   disconnectOpenApiFromServer,
   parseAuthBody,
+  refreshIntegrationToolsOnRegistry,
 } from "./integrations_server.js";
 export type { IntegrationConnectionSummary } from "./integrations_server.js";

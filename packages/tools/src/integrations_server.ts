@@ -1,7 +1,7 @@
 /**
  * Server-side integration helpers for web Settings → Integrations UI.
  */
-import type { ToolRegistry } from "@liminal/core";
+import type { AgentEmitter, ToolRegistry } from "@liminal/core";
 import {
   deleteConnection,
   listConnections,
@@ -9,12 +9,12 @@ import {
   type AuthScheme,
   type ConnectionRecord,
 } from "./api_connections_store.js";
-import { attachMcpConnection, unregisterMcpConnection } from "./mcp_attach.js";
+import { attachMcpConnection, restoreMcpConnections, unregisterMcpConnection } from "./mcp_attach.js";
 import {
   createApiConnectionTools,
+  restoreOpenApiConnections,
   unregisterOpenApiConnection,
 } from "./api_connect.js";
-import type { AgentEmitter } from "@liminal/core";
 
 export interface IntegrationConnectionSummary {
   kind: "mcp" | "openapi";
@@ -94,7 +94,6 @@ export async function attachCustomMcpFromServer(
       url: opts.url,
       auth: opts.auth ?? { kind: "none" },
       readOnly: opts.readOnly ?? false,
-      autoActivate: true,
     });
     return {
       ok: true,
@@ -141,7 +140,7 @@ export async function connectOpenApiFromServer(
   const record = await readConnection(opts.name);
   const toolNames =
     record?.kind === "openapi" ? record.operations.map((o) => o.toolName) : [];
-  if (registry.isLazyToolLoading() && toolNames.length > 0) {
+  if (!registry.isLazyToolLoading() && toolNames.length > 0) {
     registry.activate(toolNames);
   }
   return { ok: true, output: result.output, toolNames };
@@ -158,6 +157,21 @@ export async function disconnectOpenApiFromServer(
   const removed = unregisterOpenApiConnection(registry, record);
   await deleteConnection(name);
   return { ok: true, output: `Disconnected OpenAPI '${name}' (${removed} tools).` };
+}
+
+/** Re-register persisted MCP/OpenAPI/Google tools after integration changes. */
+export async function refreshIntegrationToolsOnRegistry(
+  registry: ToolRegistry,
+  emitter: AgentEmitter
+): Promise<void> {
+  await restoreOpenApiConnections(registry, emitter);
+  const { bootstrapGoogleWorkspace } = await import("./google_workspace_boot.js");
+  await bootstrapGoogleWorkspace(registry);
+  await restoreMcpConnections(registry, emitter);
+  const { bootstrapGithub } = await import("./github_boot.js");
+  await bootstrapGithub(registry);
+  const { bootstrapMicrosoft365 } = await import("./microsoft_365_boot.js");
+  await bootstrapMicrosoft365(registry);
 }
 
 export { parseAuthBody };

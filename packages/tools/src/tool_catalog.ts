@@ -136,9 +136,78 @@ export const TOOL_FAMILIES: Record<string, { description: string; tools: readonl
   },
   connectors: {
     description:
-      "Curated provider integrations: Google Workspace (Drive, Gmail, Calendar, Docs, Sheets, …) via connect_provider. " +
-      "Requires OAuth (Settings → Integrations or `liminal connect google`).",
-    tools: ["connect_provider", "disconnect_provider", "list_connectors", "gmail_create_draft", "gmail_send_message"],
+      "Curated provider integrations: Google Workspace (OAuth) and GitHub (GITHUB_TOKEN) via connect_provider. " +
+      "Google: Settings → Integrations or `liminal connect google`. GitHub: PAT in .env + connect_provider github.",
+    tools: [
+      "connect_provider",
+      "disconnect_provider",
+      "list_connectors",
+      "email_style_infer",
+      "gmail_create_draft",
+      "gmail_send_message",
+      "calendar_rest_get_calendar",
+      "calendar_rest_list_calendars",
+      "calendar_rest_list_settings",
+      "calendar_rest_get_setting",
+      "calendar_rest_set_timezone",
+      "calendar_rest_list_colors",
+      "calendar_rest_patch_calendar_list",
+      "calendar_rest_subscribe_calendar",
+      "calendar_rest_unsubscribe_calendar",
+      "calendar_rest_clear_calendar",
+      "calendar_rest_freebusy",
+      "calendar_rest_list_acl",
+      "calendar_rest_set_acl",
+      "calendar_rest_list_events",
+      "calendar_rest_get_event",
+      "calendar_rest_list_instances",
+      "calendar_rest_quick_add",
+      "calendar_rest_manage_calendar",
+      "calendar_rest_insert_event",
+      "calendar_rest_patch_event",
+      "calendar_rest_replace_event",
+      "calendar_rest_delete_event",
+      "calendar_rest_move_event",
+      "calendar_rest_import_event",
+      "calendar_rest_respond_to_event",
+      "outlook_send_message",
+      "outlook_create_draft",
+      "outlook_calendar_rest_list_events",
+      "outlook_calendar_rest_create_event",
+      "outlook_calendar_rest_find_meeting_times",
+      "outlook_calendar_rest_get_schedule",
+      "onedrive_rest_list_children",
+      "onedrive_rest_upload_file",
+      "onedrive_rest_download_file",
+      "onedrive_rest_create_share_link",
+      "docs_rest_get_document",
+      "docs_rest_extract_text",
+      "docs_rest_create_document",
+      "docs_rest_set_document_style",
+      "docs_rest_copy_document",
+      "docs_rest_write_blocks",
+      "docs_rest_insert_table",
+      "docs_rest_insert_image",
+      "docs_rest_replace_all_text",
+      "docs_rest_format_range",
+      "docs_rest_delete_content",
+      "docs_rest_batch_update",
+      "sheets_rest_get_spreadsheet",
+      "sheets_rest_create_spreadsheet",
+      "sheets_rest_get_values",
+      "sheets_rest_update_values",
+      "sheets_rest_append_values",
+      "sheets_rest_batch_get_values",
+      "sheets_rest_batch_update_values",
+      "sheets_rest_clear_values",
+      "sheets_rest_batch_update",
+      "slides_rest_get_presentation",
+      "slides_rest_create_presentation",
+      "slides_rest_batch_update",
+      "slides_rest_get_page",
+      "slides_rest_get_thumbnail",
+      "office_rest_export_file",
+    ],
   },
   agentcard: {
     description:
@@ -389,11 +458,6 @@ function browserAlwaysActiveTools(): readonly string[] {
   return TOOL_FAMILIES.browser.tools;
 }
 
-function agentcardAlwaysActiveTools(): readonly string[] {
-  if (effectiveHarnessEnvRaw("AGENT_AGENTCARD") === "0") return [];
-  return TOOL_FAMILIES.agentcard.tools;
-}
-
 export function getCoreAlwaysToolNames(
   hasHarness: boolean,
   prefs?: RuntimePreferences | null
@@ -402,7 +466,6 @@ export function getCoreAlwaysToolNames(
     ...CORE_ALWAYS_TOOLS_BASE,
     ...getProfileSeedTools(resolveAlwaysToolsProfile()),
     ...browserAlwaysActiveTools(),
-    ...agentcardAlwaysActiveTools(),
   ];
   if (hasHarness) {
     out.push(...CORE_HARNESS_TOOLS);
