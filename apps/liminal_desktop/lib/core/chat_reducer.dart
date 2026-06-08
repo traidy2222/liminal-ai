@@ -1,8 +1,10 @@
 import 'dart:convert';
 
 import '../models/browser_view_state.dart';
+import '../models/file_edit_view_state.dart';
 import '../state/message_models.dart';
 import 'chat_transcript_state.dart';
+import 'streaming_write_preview.dart';
 import 'tool_wire.dart';
 
 const _reasoningTools = {'think', 'reason', 'plan', 'hypothesize', 'breakdown'};
@@ -39,7 +41,7 @@ ChatTranscriptState reduceChatEvent(
     case 'tool_approval':
       return _onToolApproval(state, data);
     case 'approval_decision':
-      return state.copyWith(clearPendingApproval: true);
+      return _onApprovalDecision(state, data);
     case 'tool_result':
       return _onToolResult(state, data);
     case 'ask_user':
@@ -274,7 +276,7 @@ ChatTranscriptState _onToolStart(ChatTranscriptState state, Map<String, dynamic>
       ),
     );
   }
-  return base.copyWith(
+  final withTool = base.copyWith(
     messages: [
       ...base.messages,
       ToolCallMessage(
@@ -285,6 +287,12 @@ ChatTranscriptState _onToolStart(ChatTranscriptState state, Map<String, dynamic>
       ),
     ],
   );
+  if (isComposeDockTool(name)) {
+    return withTool.copyWith(
+      fileEditView: _openComposeDockView(callId: callId, toolName: name, argsJson: ''),
+    );
+  }
+  return withTool;
 }
 
 ChatTranscriptState _onToolDelta(ChatTranscriptState state, Map<String, dynamic> data) {
@@ -309,7 +317,18 @@ ChatTranscriptState _onToolDelta(ChatTranscriptState state, Map<String, dynamic>
     }
     if (m is ToolCallMessage && m.callId == callId) {
       m.argsPreview += argsDelta;
-      return state.copyWith(messages: msgs);
+      var next = state.copyWith(messages: msgs);
+      if (isComposeDockTool(m.name) && next.fileEditView?.callId == callId) {
+        next = next.copyWith(
+          fileEditView: _refreshComposeDockView(
+            callId: callId,
+            toolName: m.name,
+            argsJson: m.argsPreview,
+            phase: next.fileEditView!.phase,
+          ),
+        );
+      }
+      return next;
     }
   }
   return state;
@@ -323,16 +342,86 @@ ChatTranscriptState _onToolApproval(ChatTranscriptState state, Map<String, dynam
       m.status = ToolCallStatus.pendingApproval;
     }
   }
-  return state.copyWith(
-    messages: msgs,
-    pendingApproval: PendingApproval(
-      callId: callId,
-      name: data['name'] as String,
-      args: Map<String, dynamic>.from(data['args'] as Map? ?? {}),
-      approvalNonce: data['approvalNonce'] as String,
-      approvalTimeoutMs: (data['approvalTimeoutMs'] as num?)?.toInt() ?? 120000,
-    ),
+  var next = state;
+  if (state.fileEditView?.callId == callId) {
+    final tool = _toolCallById(msgs, callId);
+    if (tool != null && isComposeDockTool(tool.name)) {
+      final argsMap = Map<String, dynamic>.from(data['args'] as Map? ?? {});
+      final argsJson =
+          argsMap.isNotEmpty ? jsonEncode(argsMap) : tool.argsPreview;
+      if (argsJson.isNotEmpty) tool.argsPreview = argsJson;
+      next = state.copyWith(
+        fileEditView: _refreshComposeDockView(
+          callId: callId,
+          toolName: tool.name,
+          argsJson: argsJson,
+          phase: FileEditPhase.pendingApproval,
+        ),
+      );
+    }
+  }
+  if (next.pendingApprovals.any((a) => a.callId == callId)) {
+    return next.copyWith(messages: msgs);
+  }
+  final approval = PendingApproval(
+    callId: callId,
+    name: data['name'] as String,
+    args: Map<String, dynamic>.from(data['args'] as Map? ?? {}),
+    approvalNonce: data['approvalNonce'] as String,
+    approvalTimeoutMs: (data['approvalTimeoutMs'] as num?)?.toInt() ?? 120000,
   );
+  return next.copyWith(
+    messages: msgs,
+    pendingApprovals: [...next.pendingApprovals, approval],
+  );
+}
+
+ChatTranscriptState _onApprovalDecision(
+  ChatTranscriptState state,
+  Map<String, dynamic> data,
+) {
+  final callId = data['callId'] as String?;
+  final decision = data['decision'] as String? ?? 'approve';
+  final approvals = List<PendingApproval>.from(state.pendingApprovals);
+  if (callId != null) {
+    approvals.removeWhere((a) => a.callId == callId);
+  } else if (approvals.isNotEmpty) {
+    approvals.removeAt(0);
+  }
+
+  if (callId == null) {
+    return state.copyWith(pendingApprovals: approvals);
+  }
+
+  final msgs = List<MessageEntry>.from(state.messages);
+  for (final m in msgs) {
+    if (m is! ToolCallMessage || m.callId != callId) continue;
+    if (m.status != ToolCallStatus.pendingApproval) continue;
+    if (decision == 'reject') {
+      m.status = ToolCallStatus.error;
+    } else {
+      m.status = ToolCallStatus.running;
+    }
+  }
+  var next = state.copyWith(messages: msgs, pendingApprovals: approvals);
+  if (next.fileEditView?.callId == callId) {
+    final tool = _toolCallById(msgs, callId);
+    if (tool != null && isComposeDockTool(tool.name)) {
+      if (decision == 'reject') {
+        next = next.copyWith(clearFileEditView: true);
+      } else {
+        next = next.copyWith(
+          fileEditView: _refreshComposeDockView(
+            callId: callId,
+            toolName: tool.name,
+            argsJson: tool.argsPreview,
+            phase: FileEditPhase.writing,
+          ),
+        );
+      }
+    }
+  }
+  return next;
 }
 
 ChatTranscriptState _onToolResult(ChatTranscriptState state, Map<String, dynamic> data) {
@@ -397,6 +486,10 @@ ChatTranscriptState _onToolResult(ChatTranscriptState state, Map<String, dynamic
         ),
       );
     }
+  }
+  if (shouldCloseComposeDockOnToolResult(name) &&
+      next.fileEditView?.callId == callId) {
+    next = next.copyWith(clearFileEditView: true);
   }
   return next;
 }
@@ -523,7 +616,7 @@ ChatTranscriptState _applyPlanStepDone(
 }
 
 ChatTranscriptState _onTurnEnd(ChatTranscriptState state, Map<String, dynamic> data) {
-  var next = _finalizeStreaming(state).copyWith(busy: false);
+  var next = _finalizeStreaming(state).copyWith(busy: false, clearFileEditView: true);
   final hm = data['harnessMetrics'] as Map<String, dynamic>?;
   if (hm != null) {
     final ep = hm['epistemicState'] as Map<String, dynamic>?;
@@ -593,4 +686,102 @@ String? _extractJsonString(String partial, String key) {
     if (match != null) return match.group(1);
   }
   return null;
+}
+
+ToolCallMessage? _toolCallById(List<MessageEntry> msgs, String callId) {
+  for (final m in msgs) {
+    if (m is ToolCallMessage && m.callId == callId) return m;
+  }
+  return null;
+}
+
+FileEditViewState _openComposeDockView({
+  required String callId,
+  required String toolName,
+  required String argsJson,
+  FileEditPhase phase = FileEditPhase.streaming,
+}) {
+  return _refreshComposeDockView(
+    callId: callId,
+    toolName: toolName,
+    argsJson: argsJson,
+    phase: phase,
+  );
+}
+
+FileEditViewState _emailViewFromPreview({
+  required String callId,
+  required String toolName,
+  required EmailStreamPreview preview,
+  required FileEditPhase phase,
+  required bool incomplete,
+}) {
+  final now = DateTime.now().millisecondsSinceEpoch;
+  final html = preview.bodyHtml ?? '';
+  final plain = preview.bodyPlain ?? '';
+  return FileEditViewState(
+    open: true,
+    callId: callId,
+    toolName: toolName,
+    kind: ComposeDockKind.email,
+    subject: preview.subject,
+    recipients: preview.recipients,
+    path: preview.subject,
+    bodyHtml: preview.bodyHtml,
+    bodyPlain: preview.bodyPlain,
+    content: plain,
+    charCount: html.isNotEmpty ? html.length : plain.length,
+    lineCount: (html.isNotEmpty ? html : plain).split('\n').length,
+    incomplete: incomplete,
+    phase: phase,
+    updatedAt: now,
+  );
+}
+
+FileEditViewState _refreshComposeDockView({
+  required String callId,
+  required String toolName,
+  required String argsJson,
+  required FileEditPhase phase,
+}) {
+  final now = DateTime.now().millisecondsSinceEpoch;
+
+  if (isEmailComposeDockTool(toolName)) {
+    final email = extractEmailStreamPreview(toolName, argsJson);
+    return _emailViewFromPreview(
+      callId: callId,
+      toolName: toolName,
+      preview: email,
+      phase: phase,
+      incomplete: email.htmlIncomplete,
+    );
+  }
+
+  final preview = extractStreamingWritePreview(toolName, argsJson);
+  if (preview == null) {
+    return FileEditViewState(
+      open: true,
+      callId: callId,
+      toolName: toolName,
+      kind: ComposeDockKind.file,
+      phase: phase,
+      updatedAt: now,
+    );
+  }
+  final display = preview.content.isNotEmpty
+      ? preview.content
+      : (preview.rawArgsTail ?? '');
+  return FileEditViewState(
+    open: true,
+    callId: callId,
+    toolName: toolName,
+    kind: ComposeDockKind.file,
+    path: preview.label,
+    content: display,
+    charCount: preview.charCount,
+    lineCount: preview.lineCount,
+    incomplete: preview.incomplete,
+    phase: phase,
+    updatedAt: now,
+  );
 }

@@ -171,3 +171,24 @@ String wrapHtmlDocument(String body, {required String background}) {
 </html>
 ''';
 }
+
+/// Email-client style wrapper — light chrome; inline email styles drive appearance.
+String wrapEmailPreviewDocument(String body) {
+  return '''
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+  html, body { margin: 0; padding: 0; background: #ececec; overflow-x: hidden; }
+  body { padding: 16px 12px; max-width: 100%; word-wrap: break-word; overflow-wrap: anywhere; }
+  img { max-width: 100% !important; height: auto !important; }
+  table { border-collapse: collapse; max-width: 100% !important; }
+  td, th, div, p { max-width: 100%; box-sizing: border-box; }
+</style>
+</head>
+<body>$body</body>
+</html>
+''';
+}
