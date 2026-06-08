@@ -10,6 +10,7 @@ import '../../models/vireon_account.dart';
 import '../../state/app_controller.dart';
 import '../layout/liminal_breakpoints.dart';
 import '../theme/liminal_theme_extension.dart';
+import '../widgets/integration_brand_icon.dart';
 import '../widgets/liminal_page_canvas.dart';
 import '../widgets/liminal_section.dart';
 import '../widgets/liminal_shell.dart';
@@ -228,7 +229,7 @@ class _VireonHubScreenState extends State<VireonHubScreen> {
               const SizedBox(height: 24),
               LiminalSection(
                 title: 'Integrations',
-                subtitle: 'Google Workspace, custom MCP servers, and OpenAPI specs.',
+                subtitle: 'Connect Google, Microsoft, GitHub, Xero, and more for your agent.',
                 trailing: FilledButton.icon(
                   onPressed: () => context.push(AppRoutes.integrations),
                   icon: const Icon(Icons.extension_outlined, size: 18),
@@ -450,21 +451,47 @@ class _IntegrationsHubSummary extends StatelessWidget {
         child: LinearProgressIndicator(),
       );
     }
-    final googleOk = snap.google.accounts.isNotEmpty;
+    final connectedCount = [
+      snap.googleConnected,
+      snap.microsoftConnected,
+      snap.githubConnected,
+      snap.xeroConnected,
+      snap.slackConnected,
+      snap.linearConnected,
+      snap.stripeConnected,
+    ].where((v) => v).length;
     final connCount = snap.connections.length;
     final parts = <String>[
-      if (googleOk) 'Google connected',
-      if (snap.googleMcp.isNotEmpty) '${snap.googleMcp.length} Google MCP',
-      if (snap.customMcp.isNotEmpty) '${snap.customMcp.length} custom MCP',
-      if (snap.openApi.isNotEmpty) '${snap.openApi.length} OpenAPI',
+      if (snap.googleConnected) 'Google',
+      if (snap.microsoftConnected) 'Microsoft',
+      if (snap.githubConnected) 'GitHub',
+      if (snap.xeroConnected) 'Xero',
+      if (snap.slackConnected) 'Slack',
+      if (snap.linearConnected) 'Linear',
+      if (snap.stripeConnected) 'Stripe',
+      if (snap.customMcp.isNotEmpty) '${snap.customMcp.length} custom',
     ];
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
+        Wrap(
+          spacing: 8,
+          runSpacing: 8,
+          children: const [
+            IntegrationBrandIcon(id: IntegrationBrandId.google, size: 36),
+            IntegrationBrandIcon(id: IntegrationBrandId.microsoft, size: 36),
+            IntegrationBrandIcon(id: IntegrationBrandId.xero, size: 36),
+            IntegrationBrandIcon(id: IntegrationBrandId.slack, size: 36),
+            IntegrationBrandIcon(id: IntegrationBrandId.linear, size: 36),
+            IntegrationBrandIcon(id: IntegrationBrandId.stripe, size: 36),
+            IntegrationBrandIcon(id: IntegrationBrandId.github, size: 36),
+          ],
+        ),
+        const SizedBox(height: 10),
         Text(
           parts.isEmpty
-              ? 'No integrations connected yet — attach Google, MCP, or OpenAPI for agent tools.'
-              : parts.join(' · '),
+              ? 'No apps connected yet — link email, files, code, or accounting in one tap.'
+              : '${connectedCount > 0 ? "Connected: " : ""}${parts.join(", ")}',
           style: Theme.of(context).textTheme.bodyMedium?.copyWith(
                 color: lim.textMuted,
                 height: 1.4,

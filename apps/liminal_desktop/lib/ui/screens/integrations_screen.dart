@@ -8,6 +8,7 @@ import '../../models/integrations_snapshot.dart';
 import '../../state/app_controller.dart';
 import '../layout/liminal_breakpoints.dart';
 import '../theme/liminal_theme_extension.dart';
+import '../widgets/integration_brand_icon.dart';
 import '../widgets/liminal_form_field.dart';
 import '../widgets/liminal_page_canvas.dart';
 import '../widgets/liminal_shell.dart';
@@ -24,6 +25,9 @@ class _IntegrationsScreenState extends State<IntegrationsScreen> {
   String _googleMode = 'read_write';
   String _microsoftMode = 'read_write';
   String _xeroMode = 'read_write';
+  String _slackMode = 'read_write';
+  String _linearMode = 'read_write';
+  String _stripeMode = 'read_write';
   String _githubMode = 'read_write';
   final Set<String> _googleServices = {};
   final Set<String> _microsoftServices = {};
@@ -139,6 +143,30 @@ class _IntegrationsScreenState extends State<IntegrationsScreen> {
     await host.connectXeroOAuth(mode: _xeroMode);
   }
 
+  Future<void> _slackPrimary(AppController host, IntegrationsSnapshot snap) async {
+    if (snap.slackConnected) {
+      await host.disconnectSlack(revoke: true);
+      return;
+    }
+    await host.connectSlackOAuth(mode: _slackMode);
+  }
+
+  Future<void> _linearPrimary(AppController host, IntegrationsSnapshot snap) async {
+    if (snap.linearConnected) {
+      await host.disconnectLinear(revoke: true);
+      return;
+    }
+    await host.connectLinearOAuth(mode: _linearMode);
+  }
+
+  Future<void> _stripePrimary(AppController host, IntegrationsSnapshot snap) async {
+    if (snap.stripeConnected) {
+      await host.disconnectStripe(revoke: true);
+      return;
+    }
+    await host.connectStripeOAuth(mode: _stripeMode);
+  }
+
   Future<void> _githubPrimary(AppController host, IntegrationsSnapshot snap) async {
     if (snap.githubConnected) {
       await host.disconnectGithub(revoke: true);
@@ -190,7 +218,7 @@ class _IntegrationsScreenState extends State<IntegrationsScreen> {
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
               Text(
-                'One tap to connect each service. Tap a row for options.',
+                'Connect the apps you use every day. Sign in once — your agent can read email, files, code, and more.',
                 style: Theme.of(context).textTheme.bodyMedium?.copyWith(
                       color: lim.textMuted,
                       height: 1.4,
@@ -208,27 +236,40 @@ class _IntegrationsScreenState extends State<IntegrationsScreen> {
                 ),
               ],
               const SizedBox(height: 16),
-              _IntegrationTile(
-                title: 'Google Workspace',
-                summary: snap.googleConnected
-                    ? '${snap.google.accounts.first.email ?? "Google"} · ${snap.googleToolCount} tools'
-                    : snap.google.accounts.isNotEmpty
-                        ? host.integrationsBusy
-                            ? 'Signing in as ${snap.google.accounts.first.email ?? "Google"} — attaching agent tools…'
-                            : 'Signed in as ${snap.google.accounts.first.email ?? "Google"} — tap Enable tools'
-                        : 'Gmail, Calendar, Drive, Docs, Sheets',
-                connected: snap.googleConnected,
-                expanded: _expandedId == 'google',
-                onToggle: () => _toggleExpanded('google'),
-                primaryLabel: snap.googleConnected
-                    ? 'Disconnect'
-                    : snap.google.accounts.isNotEmpty
-                        ? 'Enable tools'
-                        : 'Connect',
-                primaryDanger: snap.googleConnected,
-                disabled: disabled,
-                onPrimary: () => unawaited(_googlePrimary(host, host.integrations, services)),
-                child: _GoogleDetails(
+              LayoutBuilder(
+                builder: (context, constraints) {
+                  final tileWidth = constraints.maxWidth >= 720
+                      ? (constraints.maxWidth - 24) / 3
+                      : constraints.maxWidth >= 480
+                          ? (constraints.maxWidth - 12) / 2
+                          : constraints.maxWidth;
+                  return Wrap(
+                    spacing: 12,
+                    runSpacing: 12,
+                    children: [
+                      SizedBox(
+                        width: _expandedId == 'google' ? constraints.maxWidth : tileWidth.clamp(148, 280),
+                        child: _IntegrationCard(
+                          brandId: IntegrationBrandId.google,
+                          statusLine: snap.googleConnected
+                              ? 'Ready · ${snap.googleToolCount} tools'
+                              : snap.google.accounts.isNotEmpty
+                                  ? host.integrationsBusy
+                                      ? 'Finishing sign-in…'
+                                      : 'Signed in — tap Enable tools'
+                                  : integrationBrands[IntegrationBrandId.google]!.tagline,
+                          connected: snap.googleConnected,
+                          expanded: _expandedId == 'google',
+                          onToggle: () => _toggleExpanded('google'),
+                          primaryLabel: snap.googleConnected
+                              ? 'Disconnect'
+                              : snap.google.accounts.isNotEmpty
+                                  ? 'Enable tools'
+                                  : 'Connect',
+                          primaryDanger: snap.googleConnected,
+                          disabled: disabled,
+                          onPrimary: () => unawaited(_googlePrimary(host, host.integrations, services)),
+                          child: _GoogleDetails(
                   snap: snap,
                   disabled: disabled,
                   mode: _googleMode,
@@ -245,213 +286,397 @@ class _IntegrationsScreenState extends State<IntegrationsScreen> {
                   onReattach: () => host.connectGoogleWorkspace(services: services, mode: _googleMode),
                   onRevoke: () => host.disconnectGoogle(revoke: true),
                 ),
-              ),
-              const SizedBox(height: 10),
-              _IntegrationTile(
-                title: 'Microsoft 365',
-                summary: snap.microsoftConnected
-                    ? '${snap.microsoft.accounts.first.email ?? "Microsoft"} · ${snap.microsoftToolCount} tools'
-                    : snap.microsoft.accounts.isNotEmpty
-                        ? 'Signed in — tap Connect to enable tools'
-                        : 'Hosted OAuth — Outlook, Calendar, OneDrive, Teams',
-                connected: snap.microsoftConnected,
-                expanded: _expandedId == 'microsoft',
-                onToggle: () => _toggleExpanded('microsoft'),
-                primaryLabel: snap.microsoftConnected ? 'Disconnect' : 'Connect',
-                primaryDanger: snap.microsoftConnected,
-                disabled: disabled,
-                onPrimary: () => unawaited(_microsoftPrimary(host, host.integrations, msServices)),
-                child: _MicrosoftDetails(
-                  snap: snap,
-                  disabled: disabled,
-                  mode: _microsoftMode,
-                  services: msServices,
-                  selected: _microsoftServices,
-                  onMode: (m) => setState(() => _microsoftMode = m),
-                  onToggleService: (id) => setState(() {
-                    if (_microsoftServices.contains(id)) {
-                      _microsoftServices.remove(id);
-                    } else {
-                      _microsoftServices.add(id);
-                    }
-                  }),
-                  onReattach: () =>
-                      host.connectMicrosoft365(services: msServices, mode: _microsoftMode),
-                  onRevoke: () => host.disconnectMicrosoft(revoke: true),
-                ),
-              ),
-              const SizedBox(height: 10),
-              _IntegrationTile(
-                title: 'Xero',
-                summary: snap.xeroConnected
-                    ? '${snap.xero.accounts.first.email ?? "Xero"}${snap.xero.accounts.first.tenantName != null ? " · ${snap.xero.accounts.first.tenantName}" : ""} · accounting'
-                    : 'Hosted OAuth — invoices, contacts, organisations',
-                connected: snap.xeroConnected,
-                expanded: _expandedId == 'xero',
-                onToggle: () => _toggleExpanded('xero'),
-                primaryLabel: snap.xeroConnected ? 'Disconnect' : 'Connect',
-                primaryDanger: snap.xeroConnected,
-                disabled: disabled,
-                onPrimary: () => unawaited(_xeroPrimary(host, host.integrations)),
-                child: Padding(
-                  padding: const EdgeInsets.only(top: 8),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        'Opens Vireon-hosted Xero sign-in — no client id in .env.',
-                        style: TextStyle(color: lim.textMuted, fontSize: 12, height: 1.4),
-                      ),
-                      const SizedBox(height: 8),
-                      Row(
-                        children: [
-                          Radio<String>(
-                            value: 'read_write',
-                            groupValue: _xeroMode,
-                            onChanged: disabled || snap.xeroConnected
-                                ? null
-                                : (v) => setState(() => _xeroMode = v ?? 'read_write'),
-                          ),
-                          const Text('Read + write'),
-                          const SizedBox(width: 12),
-                          Radio<String>(
-                            value: 'read_only',
-                            groupValue: _xeroMode,
-                            onChanged: disabled || snap.xeroConnected
-                                ? null
-                                : (v) => setState(() => _xeroMode = v ?? 'read_only'),
-                          ),
-                          const Text('Read only'),
-                        ],
-                      ),
-                      if (snap.xeroConnected)
-                        TextButton(
-                          onPressed: disabled ? null : () => host.disconnectXero(revoke: true),
-                          child: Text('Revoke Xero access', style: TextStyle(color: lim.danger)),
                         ),
-                    ],
-                  ),
-                ),
-              ),
-              const SizedBox(height: 10),
-              _IntegrationTile(
-                title: 'GitHub',
-                summary: snap.githubConnected
-                    ? '${snap.github.accounts.first.login ?? snap.github.accounts.first.email ?? "GitHub"} · ${snap.githubToolCount} tools'
-                    : snap.github.accounts.isNotEmpty
-                        ? 'Signed in — tap Connect to enable tools'
-                        : snap.github.tokenConfigured
-                            ? 'PAT in .env — tap Connect'
-                            : 'Repos, issues, PRs via hosted sign-in',
-                connected: snap.githubConnected,
-                expanded: _expandedId == 'github',
-                onToggle: () => _toggleExpanded('github'),
-                primaryLabel: snap.githubConnected
-                    ? 'Disconnect'
-                    : snap.github.accounts.isNotEmpty
-                        ? 'Enable tools'
-                        : 'Connect',
-                primaryDanger: snap.githubConnected,
-                disabled: disabled,
-                onPrimary: () => _githubPrimary(host, snap),
-                child: Padding(
-                  padding: const EdgeInsets.only(top: 8),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        'Opens GitHub sign-in via vireondynamics.com. Legacy: set GITHUB_TOKEN in .env for PAT auth.',
-                        style: TextStyle(color: lim.textMuted, fontSize: 12, height: 1.4),
                       ),
-                      if (snap.github.accounts.isNotEmpty) ...[
-                        const SizedBox(height: 8),
-                        for (final a in snap.github.accounts)
-                          Text(
-                            '${a.login ?? a.email ?? a.accountId} — ${a.scopes.length} scopes',
-                            style: TextStyle(color: lim.success, fontSize: 12, fontFamily: 'monospace'),
+                      SizedBox(
+                        width: _expandedId == 'microsoft' ? constraints.maxWidth : tileWidth.clamp(148, 280),
+                        child: _IntegrationCard(
+                          brandId: IntegrationBrandId.microsoft,
+                          statusLine: snap.microsoftConnected
+                              ? 'Ready · ${snap.microsoftToolCount} tools'
+                              : snap.microsoft.accounts.isNotEmpty
+                                  ? 'Signed in — tap Connect'
+                                  : integrationBrands[IntegrationBrandId.microsoft]!.tagline,
+                          connected: snap.microsoftConnected,
+                          expanded: _expandedId == 'microsoft',
+                          onToggle: () => _toggleExpanded('microsoft'),
+                          primaryLabel: snap.microsoftConnected ? 'Disconnect' : 'Connect',
+                          primaryDanger: snap.microsoftConnected,
+                          disabled: disabled,
+                          onPrimary: () => unawaited(_microsoftPrimary(host, host.integrations, msServices)),
+                          child: _MicrosoftDetails(
+                            snap: snap,
+                            disabled: disabled,
+                            mode: _microsoftMode,
+                            services: msServices,
+                            selected: _microsoftServices,
+                            onMode: (m) => setState(() => _microsoftMode = m),
+                            onToggleService: (id) => setState(() {
+                              if (_microsoftServices.contains(id)) {
+                                _microsoftServices.remove(id);
+                              } else {
+                                _microsoftServices.add(id);
+                              }
+                            }),
+                            onReattach: () => host.connectMicrosoft365(
+                              services: msServices,
+                              mode: _microsoftMode,
+                            ),
+                            onRevoke: () => host.disconnectMicrosoft(revoke: true),
                           ),
-                      ],
-                      const SizedBox(height: 8),
-                      Row(
-                        children: [
-                          Radio<String>(
-                            value: 'read_write',
-                            groupValue: _githubMode,
-                            onChanged: disabled || snap.githubConnected
-                                ? null
-                                : (v) => setState(() => _githubMode = v ?? 'read_write'),
-                          ),
-                          const Text('Read + write'),
-                          const SizedBox(width: 12),
-                          Radio<String>(
-                            value: 'read_only',
-                            groupValue: _githubMode,
-                            onChanged: disabled || snap.githubConnected
-                                ? null
-                                : (v) => setState(() => _githubMode = v ?? 'read_only'),
-                          ),
-                          const Text('Read only'),
-                        ],
-                      ),
-                      if (snap.githubConnected || snap.github.accounts.isNotEmpty)
-                        TextButton(
-                          onPressed: disabled || snap.github.accounts.isEmpty
-                              ? null
-                              : () => host.disconnectGithub(revoke: true),
-                          child: Text('Revoke GitHub access', style: TextStyle(color: lim.danger)),
                         ),
+                      ),
+                      SizedBox(
+                        width: _expandedId == 'xero' ? constraints.maxWidth : tileWidth.clamp(148, 280),
+                        child: _IntegrationCard(
+                          brandId: IntegrationBrandId.xero,
+                          statusLine: snap.xeroConnected
+                              ? 'Ready · ${snap.xeroAccountLabel}'
+                              : integrationBrands[IntegrationBrandId.xero]!.tagline,
+                          connected: snap.xeroConnected,
+                          expanded: _expandedId == 'xero',
+                          onToggle: () => _toggleExpanded('xero'),
+                          primaryLabel: snap.xeroConnected ? 'Disconnect' : 'Connect',
+                          primaryDanger: snap.xeroConnected,
+                          disabled: disabled,
+                          onPrimary: () => unawaited(_xeroPrimary(host, host.integrations)),
+                          child: Padding(
+                            padding: const EdgeInsets.only(top: 8),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  'Sign in with your Xero account — invoices and contacts sync locally.',
+                                  style: TextStyle(color: lim.textMuted, fontSize: 12, height: 1.4),
+                                ),
+                                const SizedBox(height: 8),
+                                Row(
+                                  children: [
+                                    Radio<String>(
+                                      value: 'read_write',
+                                      groupValue: _xeroMode,
+                                      onChanged: disabled || snap.xeroConnected
+                                          ? null
+                                          : (v) => setState(() => _xeroMode = v ?? 'read_write'),
+                                    ),
+                                    const Text('Read + write'),
+                                    const SizedBox(width: 12),
+                                    Radio<String>(
+                                      value: 'read_only',
+                                      groupValue: _xeroMode,
+                                      onChanged: disabled || snap.xeroConnected
+                                          ? null
+                                          : (v) => setState(() => _xeroMode = v ?? 'read_only'),
+                                    ),
+                                    const Text('Read only'),
+                                  ],
+                                ),
+                                if (snap.xeroConnected)
+                                  TextButton(
+                                    onPressed: disabled ? null : () => host.disconnectXero(revoke: true),
+                                    child: Text('Revoke Xero access', style: TextStyle(color: lim.danger)),
+                                  ),
+                              ],
+                            ),
+                          ),
+                        ),
+                      ),
+                      SizedBox(
+                        width: _expandedId == 'slack' ? constraints.maxWidth : tileWidth.clamp(148, 280),
+                        child: _IntegrationCard(
+                          brandId: IntegrationBrandId.slack,
+                          statusLine: snap.slackConnected
+                              ? 'Ready · ${snap.slackAccountLabel}'
+                              : integrationBrands[IntegrationBrandId.slack]!.tagline,
+                          connected: snap.slackConnected,
+                          expanded: _expandedId == 'slack',
+                          onToggle: () => _toggleExpanded('slack'),
+                          primaryLabel: snap.slackConnected ? 'Disconnect' : 'Connect',
+                          primaryDanger: snap.slackConnected,
+                          disabled: disabled,
+                          onPrimary: () => unawaited(_slackPrimary(host, snap)),
+                          child: Padding(
+                            padding: const EdgeInsets.only(top: 8),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  'Sign in with Slack so your agent can read channels and post updates.',
+                                  style: TextStyle(color: lim.textMuted, fontSize: 12, height: 1.4),
+                                ),
+                                const SizedBox(height: 8),
+                                Row(
+                                  children: [
+                                    Radio<String>(
+                                      value: 'read_write',
+                                      groupValue: _slackMode,
+                                      onChanged: disabled || snap.slackConnected
+                                          ? null
+                                          : (v) => setState(() => _slackMode = v ?? 'read_write'),
+                                    ),
+                                    const Text('Read + write'),
+                                    const SizedBox(width: 12),
+                                    Radio<String>(
+                                      value: 'read_only',
+                                      groupValue: _slackMode,
+                                      onChanged: disabled || snap.slackConnected
+                                          ? null
+                                          : (v) => setState(() => _slackMode = v ?? 'read_only'),
+                                    ),
+                                    const Text('Read only'),
+                                  ],
+                                ),
+                                if (snap.slackConnected)
+                                  TextButton(
+                                    onPressed: disabled ? null : () => host.disconnectSlack(revoke: true),
+                                    child: Text('Revoke Slack access', style: TextStyle(color: lim.danger)),
+                                  ),
+                              ],
+                            ),
+                          ),
+                        ),
+                      ),
+                      SizedBox(
+                        width: _expandedId == 'linear' ? constraints.maxWidth : tileWidth.clamp(148, 280),
+                        child: _IntegrationCard(
+                          brandId: IntegrationBrandId.linear,
+                          statusLine: snap.linearConnected
+                              ? 'Ready · ${snap.linearAccountLabel}'
+                              : integrationBrands[IntegrationBrandId.linear]!.tagline,
+                          connected: snap.linearConnected,
+                          expanded: _expandedId == 'linear',
+                          onToggle: () => _toggleExpanded('linear'),
+                          primaryLabel: snap.linearConnected ? 'Disconnect' : 'Connect',
+                          primaryDanger: snap.linearConnected,
+                          disabled: disabled,
+                          onPrimary: () => unawaited(_linearPrimary(host, snap)),
+                          child: Padding(
+                            padding: const EdgeInsets.only(top: 8),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  'Sign in with Linear so your agent can list issues and create tickets.',
+                                  style: TextStyle(color: lim.textMuted, fontSize: 12, height: 1.4),
+                                ),
+                                const SizedBox(height: 8),
+                                Row(
+                                  children: [
+                                    Radio<String>(
+                                      value: 'read_write',
+                                      groupValue: _linearMode,
+                                      onChanged: disabled || snap.linearConnected
+                                          ? null
+                                          : (v) => setState(() => _linearMode = v ?? 'read_write'),
+                                    ),
+                                    const Text('Read + write'),
+                                    const SizedBox(width: 12),
+                                    Radio<String>(
+                                      value: 'read_only',
+                                      groupValue: _linearMode,
+                                      onChanged: disabled || snap.linearConnected
+                                          ? null
+                                          : (v) => setState(() => _linearMode = v ?? 'read_only'),
+                                    ),
+                                    const Text('Read only'),
+                                  ],
+                                ),
+                                if (snap.linearConnected)
+                                  TextButton(
+                                    onPressed: disabled ? null : () => host.disconnectLinear(revoke: true),
+                                    child: Text('Revoke Linear access', style: TextStyle(color: lim.danger)),
+                                  ),
+                              ],
+                            ),
+                          ),
+                        ),
+                      ),
+                      SizedBox(
+                        width: _expandedId == 'stripe' ? constraints.maxWidth : tileWidth.clamp(148, 280),
+                        child: _IntegrationCard(
+                          brandId: IntegrationBrandId.stripe,
+                          statusLine: snap.stripeConnected
+                              ? 'Ready · ${snap.stripeAccountLabel}'
+                              : integrationBrands[IntegrationBrandId.stripe]!.tagline,
+                          connected: snap.stripeConnected,
+                          expanded: _expandedId == 'stripe',
+                          onToggle: () => _toggleExpanded('stripe'),
+                          primaryLabel: snap.stripeConnected ? 'Disconnect' : 'Connect',
+                          primaryDanger: snap.stripeConnected,
+                          disabled: disabled,
+                          onPrimary: () => unawaited(_stripePrimary(host, snap)),
+                          child: Padding(
+                            padding: const EdgeInsets.only(top: 8),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  'Connect Stripe so your agent can read balances, customers, subscriptions, and invoices.',
+                                  style: TextStyle(color: lim.textMuted, fontSize: 12, height: 1.4),
+                                ),
+                                const SizedBox(height: 8),
+                                Row(
+                                  children: [
+                                    Radio<String>(
+                                      value: 'read_write',
+                                      groupValue: _stripeMode,
+                                      onChanged: disabled || snap.stripeConnected
+                                          ? null
+                                          : (v) => setState(() => _stripeMode = v ?? 'read_write'),
+                                    ),
+                                    const Text('Read + write'),
+                                    const SizedBox(width: 12),
+                                    Radio<String>(
+                                      value: 'read_only',
+                                      groupValue: _stripeMode,
+                                      onChanged: disabled || snap.stripeConnected
+                                          ? null
+                                          : (v) => setState(() => _stripeMode = v ?? 'read_only'),
+                                    ),
+                                    const Text('Read only'),
+                                  ],
+                                ),
+                                if (snap.stripeConnected)
+                                  TextButton(
+                                    onPressed: disabled ? null : () => host.disconnectStripe(revoke: true),
+                                    child: Text('Revoke Stripe access', style: TextStyle(color: lim.danger)),
+                                  ),
+                              ],
+                            ),
+                          ),
+                        ),
+                      ),
+                      SizedBox(
+                        width: _expandedId == 'github' ? constraints.maxWidth : tileWidth.clamp(148, 280),
+                        child: _IntegrationCard(
+                          brandId: IntegrationBrandId.github,
+                          statusLine: snap.githubConnected
+                              ? 'Ready · ${snap.githubToolCount} tools'
+                              : snap.github.accounts.isNotEmpty
+                                  ? 'Signed in — tap Enable tools'
+                                  : integrationBrands[IntegrationBrandId.github]!.tagline,
+                          connected: snap.githubConnected,
+                          expanded: _expandedId == 'github',
+                          onToggle: () => _toggleExpanded('github'),
+                          primaryLabel: snap.githubConnected
+                              ? 'Disconnect'
+                              : snap.github.accounts.isNotEmpty
+                                  ? 'Enable tools'
+                                  : 'Connect',
+                          primaryDanger: snap.githubConnected,
+                          disabled: disabled,
+                          onPrimary: () => _githubPrimary(host, snap),
+                          child: Padding(
+                            padding: const EdgeInsets.only(top: 8),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  'Sign in with GitHub — your agent can work with repos and pull requests.',
+                                  style: TextStyle(color: lim.textMuted, fontSize: 12, height: 1.4),
+                                ),
+                                if (snap.github.accounts.isNotEmpty) ...[
+                                  const SizedBox(height: 8),
+                                  for (final a in snap.github.accounts)
+                                    Text(
+                                      '${a.login ?? a.email ?? a.accountId} — ${a.scopes.length} scopes',
+                                      style: TextStyle(
+                                        color: lim.success,
+                                        fontSize: 12,
+                                        fontFamily: 'monospace',
+                                      ),
+                                    ),
+                                ],
+                                const SizedBox(height: 8),
+                                Row(
+                                  children: [
+                                    Radio<String>(
+                                      value: 'read_write',
+                                      groupValue: _githubMode,
+                                      onChanged: disabled || snap.githubConnected
+                                          ? null
+                                          : (v) => setState(() => _githubMode = v ?? 'read_write'),
+                                    ),
+                                    const Text('Read + write'),
+                                    const SizedBox(width: 12),
+                                    Radio<String>(
+                                      value: 'read_only',
+                                      groupValue: _githubMode,
+                                      onChanged: disabled || snap.githubConnected
+                                          ? null
+                                          : (v) => setState(() => _githubMode = v ?? 'read_only'),
+                                    ),
+                                    const Text('Read only'),
+                                  ],
+                                ),
+                                if (snap.githubConnected || snap.github.accounts.isNotEmpty)
+                                  TextButton(
+                                    onPressed: disabled || snap.github.accounts.isEmpty
+                                        ? null
+                                        : () => host.disconnectGithub(revoke: true),
+                                    child: Text('Revoke GitHub access', style: TextStyle(color: lim.danger)),
+                                  ),
+                              ],
+                            ),
+                          ),
+                        ),
+                      ),
+                      SizedBox(
+                        width: _expandedId == 'advanced' ? constraints.maxWidth : tileWidth.clamp(148, 280),
+                        child: _IntegrationCard(
+                          brandId: IntegrationBrandId.advanced,
+                          statusLine: snap.customMcp.isNotEmpty || snap.openApi.isNotEmpty
+                              ? '${snap.customMcp.length + snap.openApi.length} custom connections'
+                              : integrationBrands[IntegrationBrandId.advanced]!.tagline,
+                          connected: snap.customMcp.isNotEmpty || snap.openApi.isNotEmpty,
+                          expanded: _expandedId == 'advanced',
+                          onToggle: () => _toggleExpanded('advanced'),
+                          showPrimary: false,
+                          primaryLabel: '',
+                          disabled: disabled,
+                          onPrimary: () {},
+                          child: _AdvancedSection(
+                            snap: snap,
+                            disabled: disabled,
+                            mcpName: _mcpName,
+                            mcpUrl: _mcpUrl,
+                            mcpAuthKind: _mcpAuthKind,
+                            mcpAuthHeader: _mcpAuthHeader,
+                            mcpAuthEnv: _mcpAuthEnv,
+                            mcpReadOnly: _mcpReadOnly,
+                            onMcpReadOnly: (v) => setState(() => _mcpReadOnly = v),
+                            onMcpAuthKind: (v) => setState(() => _mcpAuthKind = v),
+                            onAttachMcp: () => host.attachIntegrationMcp(
+                              name: _mcpName.text.trim(),
+                              url: _mcpUrl.text.trim(),
+                              readOnly: _mcpReadOnly,
+                              authKind: _mcpAuthKind,
+                              authEnv: _mcpAuthEnv.text,
+                              authHeader: _mcpAuthHeader.text,
+                            ),
+                            onDetachMcp: host.detachIntegrationMcp,
+                            apiName: _apiName,
+                            apiSpecUrl: _apiSpecUrl,
+                            apiBaseUrl: _apiBaseUrl,
+                            apiAuthKind: _apiAuthKind,
+                            apiAuthEnv: _apiAuthEnv,
+                            apiAuthHeader: _apiAuthHeader,
+                            onApiAuthKind: (v) => setState(() => _apiAuthKind = v),
+                            onConnectOpenApi: () => host.connectIntegrationOpenApi(
+                              name: _apiName.text.trim(),
+                              specUrl: _apiSpecUrl.text.trim(),
+                              baseUrl: _apiBaseUrl.text.trim(),
+                              authKind: _apiAuthKind,
+                              authEnv: _apiAuthEnv.text,
+                              authHeader: _apiAuthHeader.text,
+                            ),
+                            onDisconnectOpenApi: host.disconnectIntegrationOpenApi,
+                          ),
+                        ),
+                      ),
                     ],
-                  ),
-                ),
-              ),
-              const SizedBox(height: 10),
-              _IntegrationTile(
-                title: 'Advanced',
-                summary: 'Custom MCP (${snap.customMcp.length}) · OpenAPI (${snap.openApi.length})',
-                connected: snap.customMcp.isNotEmpty || snap.openApi.isNotEmpty,
-                expanded: _expandedId == 'advanced',
-                onToggle: () => _toggleExpanded('advanced'),
-                showPrimary: false,
-                primaryLabel: '',
-                disabled: disabled,
-                onPrimary: () {},
-                child: _AdvancedSection(
-                  snap: snap,
-                  disabled: disabled,
-                  mcpName: _mcpName,
-                  mcpUrl: _mcpUrl,
-                  mcpAuthKind: _mcpAuthKind,
-                  mcpAuthHeader: _mcpAuthHeader,
-                  mcpAuthEnv: _mcpAuthEnv,
-                  mcpReadOnly: _mcpReadOnly,
-                  onMcpReadOnly: (v) => setState(() => _mcpReadOnly = v),
-                  onMcpAuthKind: (v) => setState(() => _mcpAuthKind = v),
-                  onAttachMcp: () => host.attachIntegrationMcp(
-                    name: _mcpName.text.trim(),
-                    url: _mcpUrl.text.trim(),
-                    readOnly: _mcpReadOnly,
-                    authKind: _mcpAuthKind,
-                    authEnv: _mcpAuthEnv.text,
-                    authHeader: _mcpAuthHeader.text,
-                  ),
-                  onDetachMcp: host.detachIntegrationMcp,
-                  apiName: _apiName,
-                  apiSpecUrl: _apiSpecUrl,
-                  apiBaseUrl: _apiBaseUrl,
-                  apiAuthKind: _apiAuthKind,
-                  apiAuthEnv: _apiAuthEnv,
-                  apiAuthHeader: _apiAuthHeader,
-                  onApiAuthKind: (v) => setState(() => _apiAuthKind = v),
-                  onConnectOpenApi: () => host.connectIntegrationOpenApi(
-                    name: _apiName.text.trim(),
-                    specUrl: _apiSpecUrl.text.trim(),
-                    baseUrl: _apiBaseUrl.text.trim(),
-                    authKind: _apiAuthKind,
-                    authEnv: _apiAuthEnv.text,
-                    authHeader: _apiAuthHeader.text,
-                  ),
-                  onDisconnectOpenApi: host.disconnectIntegrationOpenApi,
-                ),
+                  );
+                },
               ),
             ],
           ),
@@ -461,10 +686,10 @@ class _IntegrationsScreenState extends State<IntegrationsScreen> {
   }
 }
 
-class _IntegrationTile extends StatelessWidget {
-  const _IntegrationTile({
-    required this.title,
-    required this.summary,
+class _IntegrationCard extends StatelessWidget {
+  const _IntegrationCard({
+    required this.brandId,
+    required this.statusLine,
     required this.connected,
     required this.expanded,
     required this.onToggle,
@@ -476,8 +701,8 @@ class _IntegrationTile extends StatelessWidget {
     this.child,
   });
 
-  final String title;
-  final String summary;
+  final IntegrationBrandId brandId;
+  final String statusLine;
   final bool connected;
   final bool expanded;
   final VoidCallback onToggle;
@@ -491,63 +716,80 @@ class _IntegrationTile extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final lim = LiminalTheme.of(context);
+    final brand = integrationBrands[brandId]!;
     final statusColor = connected ? lim.success : lim.warn;
 
     return Material(
-      color: lim.surface.withValues(alpha: 0.5),
+      color: connected ? lim.success.withValues(alpha: 0.05) : lim.surface.withValues(alpha: 0.5),
       shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(4),
-        side: BorderSide(color: lim.accent.withValues(alpha: 0.15)),
+        borderRadius: BorderRadius.circular(10),
+        side: BorderSide(
+          color: connected ? lim.success.withValues(alpha: 0.35) : lim.accent.withValues(alpha: 0.14),
+        ),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           InkWell(
             onTap: onToggle,
+            borderRadius: BorderRadius.circular(10),
             child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
-              child: Row(
+              padding: const EdgeInsets.fromLTRB(12, 14, 12, 12),
+              child: Column(
                 children: [
-                  Icon(expanded ? Icons.expand_more : Icons.chevron_right, size: 20, color: lim.textDim),
-                  const SizedBox(width: 8),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(title, style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 14)),
-                        const SizedBox(height: 2),
-                        Text(summary, style: TextStyle(color: lim.textMuted, fontSize: 12)),
-                      ],
-                    ),
+                  IntegrationBrandIcon(id: brandId, size: 52),
+                  const SizedBox(height: 10),
+                  Text(
+                    brand.title,
+                    textAlign: TextAlign.center,
+                    style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 14),
                   ),
+                  const SizedBox(height: 4),
+                  Text(
+                    statusLine,
+                    textAlign: TextAlign.center,
+                    style: TextStyle(color: lim.textMuted, fontSize: 12, height: 1.35),
+                  ),
+                  const SizedBox(height: 8),
                   Container(
                     padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
                     decoration: BoxDecoration(
                       border: Border.all(color: statusColor.withValues(alpha: 0.6)),
-                      borderRadius: BorderRadius.circular(2),
+                      borderRadius: BorderRadius.circular(12),
                     ),
                     child: Text(
                       connected ? 'Connected' : 'Not connected',
-                      style: TextStyle(color: statusColor, fontSize: 10, fontFamily: 'monospace'),
+                      style: TextStyle(color: statusColor, fontSize: 10),
                     ),
                   ),
                   if (showPrimary) ...[
-                    const SizedBox(width: 8),
-                    FilledButton(
-                      onPressed: disabled ? null : onPrimary,
-                      style: primaryDanger
-                          ? FilledButton.styleFrom(backgroundColor: lim.danger.withValues(alpha: 0.85))
-                          : null,
-                      child: Text(primaryLabel),
+                    const SizedBox(height: 10),
+                    SizedBox(
+                      width: double.infinity,
+                      child: FilledButton(
+                        onPressed: disabled ? null : onPrimary,
+                        style: primaryDanger
+                            ? FilledButton.styleFrom(backgroundColor: lim.danger.withValues(alpha: 0.85))
+                            : null,
+                        child: Text(primaryLabel),
+                      ),
                     ),
+                  ] else ...[
+                    const SizedBox(height: 8),
+                    Text('Tap for options', style: TextStyle(color: lim.textDim, fontSize: 11)),
                   ],
+                  const SizedBox(height: 6),
+                  Text(
+                    expanded ? 'Hide options' : 'More options',
+                    style: TextStyle(color: lim.textDim, fontSize: 10),
+                  ),
                 ],
               ),
             ),
           ),
           if (expanded && child != null)
             Padding(
-              padding: const EdgeInsets.fromLTRB(36, 0, 12, 12),
+              padding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
               child: child!,
             ),
         ],

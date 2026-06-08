@@ -2,6 +2,7 @@
  * Microsoft Entra ID OAuth 2.0 — authorization URL, code exchange, refresh, access token.
  */
 import { normalizeMicrosoftScopes } from "./microsoft_oauth_scopes.js";
+import { refreshOAuthViaVireonHostedBroker } from "./hosted_oauth_refresh.js";
 import {
   type OAuthTokenBundle,
   readOAuthBundle,
@@ -149,27 +150,44 @@ export async function exchangeMicrosoftCode(opts: {
 export async function refreshMicrosoftAccessToken(accountId?: string): Promise<OAuthTokenBundle | null> {
   const bundle = await readOAuthBundle("microsoft", accountId);
   if (!bundle?.refreshToken) return null;
-  const body = new URLSearchParams({
-    refresh_token: bundle.refreshToken,
-    grant_type: "refresh_token",
-    scope: bundle.scopes.join(" "),
-  });
-  try {
-    const tok = await postToken(body);
-    if (!tok.access_token) return null;
-    bundle.accessToken = tok.access_token;
-    bundle.expiresAt = Date.now() + (tok.expires_in ?? 3600) * 1000 - 60_000;
-    if (tok.refresh_token) bundle.refreshToken = tok.refresh_token;
-    if (tok.scope) {
-      bundle.scopes = mergeMicrosoftGrantedScopes(bundle.scopes, tok.scope.split(" ").filter(Boolean));
+
+  if (microsoftOAuthClientConfig()) {
+    try {
+      const body = new URLSearchParams({
+        refresh_token: bundle.refreshToken,
+        grant_type: "refresh_token",
+        scope: bundle.scopes.join(" "),
+      });
+      const tok = await postToken(body);
+      if (tok.access_token) {
+        bundle.accessToken = tok.access_token;
+        bundle.expiresAt = Date.now() + (tok.expires_in ?? 3600) * 1000 - 60_000;
+        if (tok.refresh_token) bundle.refreshToken = tok.refresh_token;
+        if (tok.scope) {
+          bundle.scopes = mergeMicrosoftGrantedScopes(bundle.scopes, tok.scope.split(" ").filter(Boolean));
+        }
+        bundle.updatedAt = Date.now();
+        await writeOAuthBundle(bundle);
+        accessCache.set(bundle.accountId, { token: bundle.accessToken, expiresAt: bundle.expiresAt });
+        return bundle;
+      }
+    } catch {
+      /* try hosted broker */
     }
-    bundle.updatedAt = Date.now();
-    await writeOAuthBundle(bundle);
-    accessCache.set(bundle.accountId, { token: bundle.accessToken, expiresAt: bundle.expiresAt });
-    return bundle;
-  } catch {
-    return null;
   }
+
+  const hosted = await refreshOAuthViaVireonHostedBroker("microsoft", bundle.refreshToken);
+  if (!hosted) return null;
+  bundle.accessToken = hosted.accessToken;
+  bundle.refreshToken = hosted.refreshToken;
+  bundle.expiresAt = hosted.expiresAt;
+  if (hosted.scopes?.length) {
+    bundle.scopes = mergeMicrosoftGrantedScopes(bundle.scopes, hosted.scopes);
+  }
+  bundle.updatedAt = Date.now();
+  await writeOAuthBundle(bundle);
+  accessCache.set(bundle.accountId, { token: bundle.accessToken, expiresAt: bundle.expiresAt });
+  return bundle;
 }
 
 export async function getMicrosoftAccessToken(accountId?: string): Promise<string | null> {

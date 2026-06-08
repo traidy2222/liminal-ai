@@ -38,6 +38,9 @@ import {
   missingDefaultMicrosoftScopes,
   listGithubOAuthAccounts,
   listXeroOAuthAccounts,
+  listSlackOAuthAccounts,
+  listLinearOAuthAccounts,
+  listStripeOAuthAccounts,
   buildHostedIntegrationConnectUrl,
   hostedOAuthHandoffPath,
   applyHostedOAuthHandoff,
@@ -59,7 +62,12 @@ import {
   disconnectGithubFromServer,
   connectXeroFromServer,
   disconnectXeroFromServer,
-  githubTokenPresent,
+  connectSlackFromServer,
+  disconnectSlackFromServer,
+  connectLinearFromServer,
+  disconnectLinearFromServer,
+  connectStripeFromServer,
+  disconnectStripeFromServer,
   listIntegrationConnections,
   attachCustomMcpFromServer,
   detachCustomMcpFromServer,
@@ -537,8 +545,6 @@ export function createRouter(
             scopes: a.scopes,
             expiresAt: a.expiresAt,
           })),
-          tokenConfigured: githubTokenPresent(),
-          mcpUrl: "https://api.githubcopilot.com/mcp/",
         },
         xero: {
           accounts: (await listXeroOAuthAccounts()).map((a) => ({
@@ -548,6 +554,36 @@ export function createRouter(
             expiresAt: a.expiresAt,
             tenantId: a.tenantId,
             tenantName: a.tenantName,
+          })),
+        },
+        slack: {
+          accounts: (await listSlackOAuthAccounts()).map((a) => ({
+            accountId: a.accountId,
+            email: a.email,
+            scopes: a.scopes,
+            expiresAt: a.expiresAt,
+            teamId: a.teamId,
+            teamName: a.teamName,
+          })),
+        },
+        linear: {
+          accounts: (await listLinearOAuthAccounts()).map((a) => ({
+            accountId: a.accountId,
+            email: a.email,
+            scopes: a.scopes,
+            expiresAt: a.expiresAt,
+            organizationName: a.organizationName,
+          })),
+        },
+        stripe: {
+          accounts: (await listStripeOAuthAccounts()).map((a) => ({
+            accountId: a.accountId,
+            email: a.email,
+            scopes: a.scopes,
+            expiresAt: a.expiresAt,
+            stripeUserId: a.stripeUserId,
+            livemode: a.livemode,
+            businessName: a.businessName,
           })),
         },
         connections,
@@ -794,6 +830,57 @@ export function createRouter(
     res.json({ connectUrl, authUrl: connectUrl, state });
   });
 
+  router.get("/api/integrations/slack/begin", (req, res) => {
+    prunePendingHostedOAuth();
+    const state = randomBytes(16).toString("hex");
+    const mode = req.query["mode"] === "read_only" ? "read_only" : "read_write";
+    pendingHostedOAuth.set(state, { exp: Date.now() + 10 * 60_000, provider: "slack", mode });
+    const harnessRedirectUri = hostedOAuthHandoffPath(WEB_PORT);
+    const site = defaultVireonSiteOrigin();
+    const connectUrl = buildHostedIntegrationConnectUrl({
+      provider: "slack",
+      harnessRedirectUri,
+      harnessState: state,
+      siteOrigin: site,
+      mode,
+    });
+    res.json({ connectUrl, authUrl: connectUrl, state });
+  });
+
+  router.get("/api/integrations/linear/begin", (req, res) => {
+    prunePendingHostedOAuth();
+    const state = randomBytes(16).toString("hex");
+    const mode = req.query["mode"] === "read_only" ? "read_only" : "read_write";
+    pendingHostedOAuth.set(state, { exp: Date.now() + 10 * 60_000, provider: "linear", mode });
+    const harnessRedirectUri = hostedOAuthHandoffPath(WEB_PORT);
+    const site = defaultVireonSiteOrigin();
+    const connectUrl = buildHostedIntegrationConnectUrl({
+      provider: "linear",
+      harnessRedirectUri,
+      harnessState: state,
+      siteOrigin: site,
+      mode,
+    });
+    res.json({ connectUrl, authUrl: connectUrl, state });
+  });
+
+  router.get("/api/integrations/stripe/begin", (req, res) => {
+    prunePendingHostedOAuth();
+    const state = randomBytes(16).toString("hex");
+    const mode = req.query["mode"] === "read_only" ? "read_only" : "read_write";
+    pendingHostedOAuth.set(state, { exp: Date.now() + 10 * 60_000, provider: "stripe", mode });
+    const harnessRedirectUri = hostedOAuthHandoffPath(WEB_PORT);
+    const site = defaultVireonSiteOrigin();
+    const connectUrl = buildHostedIntegrationConnectUrl({
+      provider: "stripe",
+      harnessRedirectUri,
+      harnessState: state,
+      siteOrigin: site,
+      mode,
+    });
+    res.json({ connectUrl, authUrl: connectUrl, state });
+  });
+
   type IntegrationHandoffBundle = {
     provider?: string;
     accountId?: string;
@@ -924,6 +1011,24 @@ export function createRouter(
           else
             bridge.harness.getContext().refreshProtocolDynamic(bridge.harness.registry.getActiveToolNames());
         }
+        if (provider === "slack") {
+          const slackResult = await connectSlackFromServer(bridge.harness.registry);
+          if (!slackResult.ok) attachWarning = slackResult.error;
+          else
+            bridge.harness.getContext().refreshProtocolDynamic(bridge.harness.registry.getActiveToolNames());
+        }
+        if (provider === "linear") {
+          const linearResult = await connectLinearFromServer(bridge.harness.registry);
+          if (!linearResult.ok) attachWarning = linearResult.error;
+          else
+            bridge.harness.getContext().refreshProtocolDynamic(bridge.harness.registry.getActiveToolNames());
+        }
+        if (provider === "stripe") {
+          const stripeResult = await connectStripeFromServer(bridge.harness.registry);
+          if (!stripeResult.ok) attachWarning = stripeResult.error;
+          else
+            bridge.harness.getContext().refreshProtocolDynamic(bridge.harness.registry.getActiveToolNames());
+        }
       } catch (e) {
         attachWarning = e instanceof Error ? e.message : String(e);
       }
@@ -958,6 +1063,42 @@ export function createRouter(
     const bridge = active();
     const revoke = req.query["revoke"] === "1" || req.query["revoke"] === "true";
     const result = await disconnectXeroFromServer(bridge.harness.registry, revoke);
+    if (!result.ok) {
+      res.status(400).json({ error: result.error });
+      return;
+    }
+    bridge.harness.getContext().refreshProtocolDynamic(bridge.harness.registry.getActiveToolNames());
+    res.json({ ok: true, output: result.output });
+  });
+
+  router.delete("/api/integrations/slack", async (req, res) => {
+    const bridge = active();
+    const revoke = req.query["revoke"] === "1" || req.query["revoke"] === "true";
+    const result = await disconnectSlackFromServer(bridge.harness.registry, revoke);
+    if (!result.ok) {
+      res.status(400).json({ error: result.error });
+      return;
+    }
+    bridge.harness.getContext().refreshProtocolDynamic(bridge.harness.registry.getActiveToolNames());
+    res.json({ ok: true, output: result.output });
+  });
+
+  router.delete("/api/integrations/linear", async (req, res) => {
+    const bridge = active();
+    const revoke = req.query["revoke"] === "1" || req.query["revoke"] === "true";
+    const result = await disconnectLinearFromServer(bridge.harness.registry, revoke);
+    if (!result.ok) {
+      res.status(400).json({ error: result.error });
+      return;
+    }
+    bridge.harness.getContext().refreshProtocolDynamic(bridge.harness.registry.getActiveToolNames());
+    res.json({ ok: true, output: result.output });
+  });
+
+  router.delete("/api/integrations/stripe", async (req, res) => {
+    const bridge = active();
+    const revoke = req.query["revoke"] === "1" || req.query["revoke"] === "true";
+    const result = await disconnectStripeFromServer(bridge.harness.registry, revoke);
     if (!result.ok) {
       res.status(400).json({ error: result.error });
       return;

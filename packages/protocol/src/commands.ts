@@ -142,6 +142,21 @@ export interface ClientCommandMap {
     openBrowser?: boolean;
   };
   disconnect_xero: { revoke?: boolean };
+  connect_slack_oauth: {
+    mode?: "read_write" | "read_only";
+    openBrowser?: boolean;
+  };
+  disconnect_slack: { revoke?: boolean };
+  connect_linear_oauth: {
+    mode?: "read_write" | "read_only";
+    openBrowser?: boolean;
+  };
+  disconnect_linear: { revoke?: boolean };
+  connect_stripe_oauth: {
+    mode?: "read_write" | "read_only";
+    openBrowser?: boolean;
+  };
+  disconnect_stripe: { revoke?: boolean };
   connect_github_oauth: {
     mode?: "read_write" | "read_only";
     openBrowser?: boolean;

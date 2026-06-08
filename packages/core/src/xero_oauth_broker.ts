@@ -11,6 +11,7 @@ import {
   sanitizeOAuthAccountId,
 } from "./oauth_store.js";
 import { scopesForXeroMode, type XeroMode, XERO_DEFAULT_MODE } from "./xero_oauth_scopes.js";
+import { refreshOAuthViaVireonHostedBroker } from "./hosted_oauth_refresh.js";
 
 const XERO_AUTH_URL = "https://login.xero.com/identity/connect/authorize";
 const XERO_TOKEN_URL = "https://identity.xero.com/connect/token";
@@ -173,24 +174,39 @@ export async function exchangeXeroCode(opts: {
 export async function refreshXeroAccessToken(accountId?: string): Promise<OAuthTokenBundle | null> {
   const bundle = await readOAuthBundle("xero", accountId);
   if (!bundle?.refreshToken) return null;
-  const body = new URLSearchParams({
-    grant_type: "refresh_token",
-    refresh_token: bundle.refreshToken,
-  });
-  try {
-    const tok = await postXeroToken(body);
-    if (!tok.access_token) return null;
-    bundle.accessToken = tok.access_token;
-    bundle.expiresAt = Date.now() + (tok.expires_in ?? 1800) * 1000 - 60_000;
-    if (tok.refresh_token) bundle.refreshToken = tok.refresh_token;
-    if (tok.scope) bundle.scopes = tok.scope.split(" ").filter(Boolean);
-    bundle.updatedAt = Date.now();
-    await writeOAuthBundle(bundle);
-    accessCache.set(bundle.accountId, { token: bundle.accessToken, expiresAt: bundle.expiresAt });
-    return bundle;
-  } catch {
-    return null;
+
+  if (xeroOAuthClientConfig()) {
+    try {
+      const body = new URLSearchParams({
+        grant_type: "refresh_token",
+        refresh_token: bundle.refreshToken,
+      });
+      const tok = await postXeroToken(body);
+      if (tok.access_token) {
+        bundle.accessToken = tok.access_token;
+        bundle.expiresAt = Date.now() + (tok.expires_in ?? 1800) * 1000 - 60_000;
+        if (tok.refresh_token) bundle.refreshToken = tok.refresh_token;
+        if (tok.scope) bundle.scopes = tok.scope.split(" ").filter(Boolean);
+        bundle.updatedAt = Date.now();
+        await writeOAuthBundle(bundle);
+        accessCache.set(bundle.accountId, { token: bundle.accessToken, expiresAt: bundle.expiresAt });
+        return bundle;
+      }
+    } catch {
+      /* try hosted broker */
+    }
   }
+
+  const hosted = await refreshOAuthViaVireonHostedBroker("xero", bundle.refreshToken);
+  if (!hosted) return null;
+  bundle.accessToken = hosted.accessToken;
+  bundle.refreshToken = hosted.refreshToken;
+  bundle.expiresAt = hosted.expiresAt;
+  if (hosted.scopes?.length) bundle.scopes = hosted.scopes;
+  bundle.updatedAt = Date.now();
+  await writeOAuthBundle(bundle);
+  accessCache.set(bundle.accountId, { token: bundle.accessToken, expiresAt: bundle.expiresAt });
+  return bundle;
 }
 
 export async function getXeroAccessToken(accountId?: string): Promise<string | null> {

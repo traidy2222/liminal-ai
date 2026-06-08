@@ -11,6 +11,7 @@ import {
   sanitizeOAuthAccountId,
 } from "./oauth_store.js";
 import { pickBestOAuthAccountByEmail } from "./oauth_account_pick.js";
+import { refreshOAuthViaVireonHostedBroker } from "./hosted_oauth_refresh.js";
 
 function mergeGoogleGrantedScopes(existing: string[], incoming: string[]): string[] {
   return normalizeGoogleScopes([...existing, ...incoming]);
@@ -144,25 +145,42 @@ export async function exchangeGoogleCode(opts: {
 export async function refreshGoogleAccessToken(accountId?: string): Promise<OAuthTokenBundle | null> {
   const bundle = await readOAuthBundle("google", accountId);
   if (!bundle?.refreshToken) return null;
-  const body = new URLSearchParams({
-    refresh_token: bundle.refreshToken,
-    grant_type: "refresh_token",
-  });
-  try {
-    const tok = await postToken(body);
-    if (!tok.access_token) return null;
-    bundle.accessToken = tok.access_token;
-    bundle.expiresAt = Date.now() + (tok.expires_in ?? 3600) * 1000 - 60_000;
-    if (tok.scope) {
-      bundle.scopes = mergeGoogleGrantedScopes(bundle.scopes, tok.scope.split(" ").filter(Boolean));
+
+  if (googleOAuthClientConfig()) {
+    try {
+      const body = new URLSearchParams({
+        refresh_token: bundle.refreshToken,
+        grant_type: "refresh_token",
+      });
+      const tok = await postToken(body);
+      if (tok.access_token) {
+        bundle.accessToken = tok.access_token;
+        bundle.expiresAt = Date.now() + (tok.expires_in ?? 3600) * 1000 - 60_000;
+        if (tok.scope) {
+          bundle.scopes = mergeGoogleGrantedScopes(bundle.scopes, tok.scope.split(" ").filter(Boolean));
+        }
+        bundle.updatedAt = Date.now();
+        await writeOAuthBundle(bundle);
+        accessCache.set(bundle.accountId, { token: bundle.accessToken, expiresAt: bundle.expiresAt });
+        return bundle;
+      }
+    } catch {
+      /* try hosted broker */
     }
-    bundle.updatedAt = Date.now();
-    await writeOAuthBundle(bundle);
-    accessCache.set(bundle.accountId, { token: bundle.accessToken, expiresAt: bundle.expiresAt });
-    return bundle;
-  } catch {
-    return null;
   }
+
+  const hosted = await refreshOAuthViaVireonHostedBroker("google", bundle.refreshToken);
+  if (!hosted) return null;
+  bundle.accessToken = hosted.accessToken;
+  bundle.refreshToken = hosted.refreshToken;
+  bundle.expiresAt = hosted.expiresAt;
+  if (hosted.scopes?.length) {
+    bundle.scopes = mergeGoogleGrantedScopes(bundle.scopes, hosted.scopes);
+  }
+  bundle.updatedAt = Date.now();
+  await writeOAuthBundle(bundle);
+  accessCache.set(bundle.accountId, { token: bundle.accessToken, expiresAt: bundle.expiresAt });
+  return bundle;
 }
 
 export async function getGoogleAccessToken(accountId?: string): Promise<string | null> {

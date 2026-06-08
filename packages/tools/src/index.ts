@@ -112,6 +112,9 @@ import { createPlannerRestTools, plannerRestEnabled } from "./planner_rest.js";
 import { createGraphSearchRestTools, graphSearchRestEnabled } from "./graph_search_rest.js";
 import { createMicrosoftOfficeRestTools, microsoftOfficeRestEnabled } from "./microsoft_office_rest.js";
 import { registerXeroRestTools, xeroRestEnabled } from "./xero_rest.js";
+import { registerSlackRestTools, slackRestEnabled } from "./slack_rest.js";
+import { registerLinearRestTools, linearRestEnabled } from "./linear_rest.js";
+import { registerStripeRestTools, stripeRestEnabled } from "./stripe_rest.js";
 import { agentcardEnabled } from "./agentcard_cli.js";
 import { createAgentcardTools } from "./agentcard_tools.js";
 import { memoryPromoteTool } from "./memory_promote.js";
@@ -453,6 +456,9 @@ export async function registerAllTools(
   }
   if (xeroRestEnabled()) {
     registerXeroRestTools(registry);
+    registerSlackRestTools(registry);
+    registerLinearRestTools(registry);
+    registerStripeRestTools(registry);
   }
   if (agentcardEnabled()) {
     for (const t of createAgentcardTools()) registry.register(t);
@@ -565,6 +571,12 @@ export {
   disconnectGithubFromServer,
   connectXeroFromServer,
   disconnectXeroFromServer,
+  connectSlackFromServer,
+  disconnectSlackFromServer,
+  connectLinearFromServer,
+  disconnectLinearFromServer,
+  connectStripeFromServer,
+  disconnectStripeFromServer,
 } from "./connect_provider.js";
 export { getMicrosoftSidecarStatus, stopMicrosoftSidecar } from "./microsoft_sidecar.js";
 export {

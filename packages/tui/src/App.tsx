@@ -15,6 +15,10 @@ import { PersonaBootstrapModal } from "./components/PersonaBootstrapModal.js";
 import { extractImagePathsFromText, imagePathToAttachment, parseAttachCommand } from "./imageAttachments.js";
 import { presentAutoDream } from "./autoDreamPresent.js";
 import { usePersonaChrome } from "./personaChromeContext.js";
+import {
+  parseIntegrationSlashCommand,
+  runIntegrationSlashCommand,
+} from "./integrationSlashCommands.js";
 
 /** Message window size; keep moderate to reduce redraw churn. */
 const WINDOW_SIZE = 90;
@@ -93,6 +97,7 @@ export function App({ harness, chatMeta, initialMessages }: Props) {
    */
   const [scrollOffset, setScrollOffset] = useState(0);
   const [bootstrapDraft, setBootstrapDraft] = useState("");
+  const [integrationBusy, setIntegrationBusy] = useState(false);
 
   useEffect(() => {
     if (!state.personaBootstrapPending) setBootstrapDraft("");
@@ -160,9 +165,24 @@ export function App({ harness, chatMeta, initialMessages }: Props) {
   }, []);
 
   const handleSend = useCallback(async () => {
-    if (state.busy) return;
+    if (state.busy || integrationBusy) return;
     if (state.personaBootstrapPending) {
       setInputStatus("Finish personality setup in the panel below first.");
+      return;
+    }
+    const integrationCmd = parseIntegrationSlashCommand(currentDraft);
+    if (integrationCmd) {
+      setIntegrationBusy(true);
+      setInputStatus("Opening browser for integration sign-in…");
+      try {
+        const result = await runIntegrationSlashCommand(integrationCmd);
+        setDraftText("");
+        setInputStatus(result.message);
+      } catch (err) {
+        setInputStatus(err instanceof Error ? err.message : String(err));
+      } finally {
+        setIntegrationBusy(false);
+      }
       return;
     }
     const attachPath = parseAttachCommand(currentDraft);
@@ -215,7 +235,16 @@ export function App({ harness, chatMeta, initialMessages }: Props) {
     setPendingAttachments([]);
     setInputStatus(null);
     setScrollOffset(0);
-  }, [currentDraft, pendingAttachments, pushHistory, sendMessage, setDraftText, state.busy, state.personaBootstrapPending]);
+  }, [
+    currentDraft,
+    integrationBusy,
+    pendingAttachments,
+    pushHistory,
+    sendMessage,
+    setDraftText,
+    state.busy,
+    state.personaBootstrapPending,
+  ]);
 
   const insertTextAtCursor = useCallback((text: string) => {
     const lines = [...chatLines];
@@ -596,7 +625,7 @@ export function App({ harness, chatMeta, initialMessages }: Props) {
           lines={chatLines}
           cursorRow={cursorRow}
           cursorCol={cursorCol}
-          busy={state.busy}
+          busy={state.busy || integrationBusy}
           scrollOffset={scrollOffset}
           attachments={pendingAttachments}
           status={inputStatus}

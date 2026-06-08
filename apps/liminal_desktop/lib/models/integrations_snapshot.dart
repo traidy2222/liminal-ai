@@ -4,6 +4,9 @@ class IntegrationsSnapshot {
     required this.microsoft,
     required this.github,
     required this.xero,
+    required this.slack,
+    required this.linear,
+    required this.stripe,
     required this.connections,
   });
 
@@ -11,6 +14,9 @@ class IntegrationsSnapshot {
   final MicrosoftIntegrations microsoft;
   final GithubIntegrations github;
   final XeroIntegrations xero;
+  final SlackIntegrations slack;
+  final LinearIntegrations linear;
+  final StripeIntegrations stripe;
   final List<IntegrationConnection> connections;
 
   factory IntegrationsSnapshot.fromJson(Map<String, dynamic> json) {
@@ -27,6 +33,15 @@ class IntegrationsSnapshot {
       xero: XeroIntegrations.fromJson(
         Map<String, dynamic>.from(json['xero'] as Map? ?? {}),
       ),
+      slack: SlackIntegrations.fromJson(
+        Map<String, dynamic>.from(json['slack'] as Map? ?? {}),
+      ),
+      linear: LinearIntegrations.fromJson(
+        Map<String, dynamic>.from(json['linear'] as Map? ?? {}),
+      ),
+      stripe: StripeIntegrations.fromJson(
+        Map<String, dynamic>.from(json['stripe'] as Map? ?? {}),
+      ),
       connections: (json['connections'] as List<dynamic>? ?? [])
           .map(
             (e) => IntegrationConnection.fromJson(
@@ -42,6 +57,9 @@ class IntegrationsSnapshot {
     microsoft: MicrosoftIntegrations.empty,
     github: GithubIntegrations.empty,
     xero: XeroIntegrations.empty,
+    slack: SlackIntegrations.empty,
+    linear: LinearIntegrations.empty,
+    stripe: StripeIntegrations.empty,
     connections: [],
   );
 
@@ -78,11 +96,62 @@ class IntegrationsSnapshot {
 
   bool get xeroConnected => xero.accounts.isNotEmpty;
 
+  bool get slackConnected => slack.accounts.isNotEmpty;
+
+  bool get linearConnected => linear.accounts.isNotEmpty;
+
+  bool get stripeConnected => stripe.accounts.isNotEmpty;
+
   int get googleToolCount => googleMcp.fold(0, (n, c) => n + c.toolCount);
 
   int get microsoftToolCount => microsoftMcp.fold(0, (n, c) => n + c.toolCount);
 
   int get githubToolCount => githubMcp.fold(0, (n, c) => n + c.toolCount);
+
+  String get googleAccountLabel {
+    if (google.accounts.isEmpty) return 'Google';
+    return google.accounts.first.email ?? 'Google';
+  }
+
+  String get microsoftAccountLabel {
+    if (microsoft.accounts.isEmpty) return 'Microsoft 365';
+    return microsoft.accounts.first.email ?? 'Microsoft 365';
+  }
+
+  String get xeroAccountLabel {
+    if (xero.accounts.isEmpty) return 'Xero';
+    final a = xero.accounts.first;
+    final tenant = a.tenantName ?? a.tenantId;
+    final base = a.email ?? 'Xero';
+    return tenant != null ? '$base · $tenant' : base;
+  }
+
+  String get githubAccountLabel {
+    if (github.accounts.isEmpty) return 'GitHub';
+    final a = github.accounts.first;
+    return a.login ?? a.email ?? a.accountId;
+  }
+
+  String get slackAccountLabel {
+    if (slack.accounts.isEmpty) return 'Slack';
+    final a = slack.accounts.first;
+    return a.teamName ?? a.email ?? a.accountId;
+  }
+
+  String get linearAccountLabel {
+    if (linear.accounts.isEmpty) return 'Linear';
+    final a = linear.accounts.first;
+    return a.organizationName ?? a.email ?? a.accountId;
+  }
+
+  String get stripeAccountLabel {
+    if (stripe.accounts.isEmpty) return 'Stripe';
+    final a = stripe.accounts.first;
+    final base = a.businessName ?? a.email ?? a.stripeUserId ?? a.accountId;
+    if (a.livemode == false) return '$base (test)';
+    if (a.livemode == true) return '$base (live)';
+    return base;
+  }
 }
 
 class MicrosoftIntegrations {
@@ -177,15 +246,9 @@ class MicrosoftSidecarStatus {
 }
 
 class GithubIntegrations {
-  GithubIntegrations({
-    required this.accounts,
-    required this.tokenConfigured,
-    required this.mcpUrl,
-  });
+  GithubIntegrations({required this.accounts});
 
   final List<GithubOAuthAccount> accounts;
-  final bool tokenConfigured;
-  final String mcpUrl;
 
   factory GithubIntegrations.fromJson(Map<String, dynamic> json) {
     return GithubIntegrations(
@@ -196,16 +259,10 @@ class GithubIntegrations {
             ),
           )
           .toList(),
-      tokenConfigured: json['tokenConfigured'] as bool? ?? false,
-      mcpUrl: json['mcpUrl'] as String? ?? '',
     );
   }
 
-  static final empty = GithubIntegrations(
-    accounts: [],
-    tokenConfigured: false,
-    mcpUrl: '',
-  );
+  static final empty = GithubIntegrations(accounts: []);
 }
 
 class GithubOAuthAccount {
@@ -273,6 +330,132 @@ class XeroOAuthAccount {
       scopes: (json['scopes'] as List<dynamic>? ?? []).map((e) => e.toString()).toList(),
       tenantId: json['tenantId'] as String?,
       tenantName: json['tenantName'] as String?,
+    );
+  }
+}
+
+class SlackIntegrations {
+  SlackIntegrations({required this.accounts});
+
+  final List<SlackOAuthAccount> accounts;
+
+  factory SlackIntegrations.fromJson(Map<String, dynamic> json) {
+    return SlackIntegrations(
+      accounts: (json['accounts'] as List<dynamic>? ?? [])
+          .map((e) => SlackOAuthAccount.fromJson(Map<String, dynamic>.from(e as Map)))
+          .toList(),
+    );
+  }
+
+  static final empty = SlackIntegrations(accounts: []);
+}
+
+class SlackOAuthAccount {
+  SlackOAuthAccount({
+    required this.accountId,
+    this.email,
+    required this.scopes,
+    this.teamId,
+    this.teamName,
+  });
+
+  final String accountId;
+  final String? email;
+  final List<String> scopes;
+  final String? teamId;
+  final String? teamName;
+
+  factory SlackOAuthAccount.fromJson(Map<String, dynamic> json) {
+    return SlackOAuthAccount(
+      accountId: json['accountId'] as String? ?? '',
+      email: json['email'] as String?,
+      scopes: (json['scopes'] as List<dynamic>? ?? []).map((e) => e.toString()).toList(),
+      teamId: json['teamId'] as String?,
+      teamName: json['teamName'] as String?,
+    );
+  }
+}
+
+class LinearIntegrations {
+  LinearIntegrations({required this.accounts});
+
+  final List<LinearOAuthAccount> accounts;
+
+  factory LinearIntegrations.fromJson(Map<String, dynamic> json) {
+    return LinearIntegrations(
+      accounts: (json['accounts'] as List<dynamic>? ?? [])
+          .map((e) => LinearOAuthAccount.fromJson(Map<String, dynamic>.from(e as Map)))
+          .toList(),
+    );
+  }
+
+  static final empty = LinearIntegrations(accounts: []);
+}
+
+class LinearOAuthAccount {
+  LinearOAuthAccount({
+    required this.accountId,
+    this.email,
+    required this.scopes,
+    this.organizationName,
+  });
+
+  final String accountId;
+  final String? email;
+  final List<String> scopes;
+  final String? organizationName;
+
+  factory LinearOAuthAccount.fromJson(Map<String, dynamic> json) {
+    return LinearOAuthAccount(
+      accountId: json['accountId'] as String? ?? '',
+      email: json['email'] as String?,
+      scopes: (json['scopes'] as List<dynamic>? ?? []).map((e) => e.toString()).toList(),
+      organizationName: json['organizationName'] as String?,
+    );
+  }
+}
+
+class StripeIntegrations {
+  StripeIntegrations({required this.accounts});
+
+  final List<StripeOAuthAccount> accounts;
+
+  factory StripeIntegrations.fromJson(Map<String, dynamic> json) {
+    return StripeIntegrations(
+      accounts: (json['accounts'] as List<dynamic>? ?? [])
+          .map((e) => StripeOAuthAccount.fromJson(Map<String, dynamic>.from(e as Map)))
+          .toList(),
+    );
+  }
+
+  static final empty = StripeIntegrations(accounts: []);
+}
+
+class StripeOAuthAccount {
+  StripeOAuthAccount({
+    required this.accountId,
+    this.email,
+    required this.scopes,
+    this.stripeUserId,
+    this.livemode,
+    this.businessName,
+  });
+
+  final String accountId;
+  final String? email;
+  final List<String> scopes;
+  final String? stripeUserId;
+  final bool? livemode;
+  final String? businessName;
+
+  factory StripeOAuthAccount.fromJson(Map<String, dynamic> json) {
+    return StripeOAuthAccount(
+      accountId: json['accountId'] as String? ?? '',
+      email: json['email'] as String?,
+      scopes: (json['scopes'] as List<dynamic>? ?? []).map((e) => e.toString()).toList(),
+      stripeUserId: json['stripeUserId'] as String?,
+      livemode: json['livemode'] as bool?,
+      businessName: json['businessName'] as String?,
     );
   }
 }

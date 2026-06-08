@@ -1,5 +1,10 @@
 import React, { useCallback, useEffect, useState } from "react";
 import { webApiFetch } from "../webApiAuth.js";
+import {
+  INTEGRATION_BRANDS,
+  IntegrationBrandLogo,
+  type IntegrationBrandId,
+} from "./integrationBrands.js";
 
 const CYAN = "var(--lim-accent, #00d4ff)";
 const AMBER = "var(--lim-warn, #ffb347)";
@@ -67,14 +72,36 @@ interface IntegrationsData {
   };
   github?: {
     accounts: Array<GoogleAccount & { login?: string }>;
-    tokenConfigured: boolean;
-    mcpUrl: string;
   };
   xero?: {
     accounts: Array<
       GoogleAccount & {
         tenantId?: string;
         tenantName?: string;
+      }
+    >;
+  };
+  slack?: {
+    accounts: Array<
+      GoogleAccount & {
+        teamId?: string;
+        teamName?: string;
+      }
+    >;
+  };
+  linear?: {
+    accounts: Array<
+      GoogleAccount & {
+        organizationName?: string;
+      }
+    >;
+  };
+  stripe?: {
+    accounts: Array<
+      GoogleAccount & {
+        stripeUserId?: string;
+        livemode?: boolean;
+        businessName?: string;
       }
     >;
   };
@@ -85,7 +112,7 @@ export interface IntegrationsPanelProps {
   agentBusy: boolean;
 }
 
-type ExpandedId = "google" | "microsoft" | "xero" | "github" | "advanced" | null;
+type ExpandedId = "google" | "microsoft" | "xero" | "slack" | "linear" | "stripe" | "github" | "advanced" | null;
 
 function FieldLabel({ children }: { children: React.ReactNode }) {
   return <div style={{ fontSize: 10, color: "#8899aa", marginBottom: 4 }}>{children}</div>;
@@ -108,9 +135,9 @@ function StatusPill({ connected, label }: { connected: boolean; label?: string }
   );
 }
 
-function IntegrationRow({
-  title,
-  summary,
+function IntegrationCard({
+  brandId,
+  statusLine,
   connected,
   expanded,
   onToggle,
@@ -121,8 +148,8 @@ function IntegrationRow({
   hidePrimary,
   children,
 }: {
-  title: string;
-  summary: string;
+  brandId: IntegrationBrandId;
+  statusLine: string;
   connected: boolean;
   expanded: boolean;
   onToggle: () => void;
@@ -133,23 +160,29 @@ function IntegrationRow({
   hidePrimary?: boolean;
   children?: React.ReactNode;
 }) {
+  const brand = INTEGRATION_BRANDS[brandId];
   return (
     <div
       style={{
-        marginBottom: 10,
-        borderRadius: 2,
-        border: "1px solid rgba(var(--lim-accent-rgb),0.15)",
-        background: "rgba(0,12,24,0.6)",
+        gridColumn: expanded ? "1 / -1" : undefined,
+        borderRadius: 10,
+        border: `1px solid ${connected ? "rgba(0,255,136,0.35)" : "rgba(var(--lim-accent-rgb),0.14)"}`,
+        background: connected ? "rgba(0,255,136,0.04)" : "rgba(0,12,24,0.65)",
         overflow: "hidden",
+        display: "flex",
+        flexDirection: "column",
+        minHeight: expanded ? undefined : 196,
       }}
     >
       <div
         style={{
-          display: "flex",
-          alignItems: "center",
-          gap: 10,
-          padding: "12px 12px",
+          padding: "14px 12px 12px",
           cursor: "pointer",
+          flex: 1,
+          display: "flex",
+          flexDirection: "column",
+          alignItems: "center",
+          textAlign: "center",
         }}
         onClick={onToggle}
         role="button"
@@ -158,16 +191,25 @@ function IntegrationRow({
           if (e.key === "Enter" || e.key === " ") onToggle();
         }}
       >
-        <span style={{ fontSize: 12, color: "#8899aa", width: 14 }}>{expanded ? "▾" : "▸"}</span>
-        <div style={{ flex: 1, minWidth: 0 }}>
-          <div style={{ fontSize: 13, fontWeight: 600, color: "#dde8f0" }}>{title}</div>
-          <div style={{ fontSize: 10, color: "#778899", marginTop: 2, lineHeight: 1.4 }}>{summary}</div>
+        <IntegrationBrandLogo id={brandId} size={52} />
+        <div style={{ marginTop: 10, fontSize: 14, fontWeight: 600, color: "#e8f0f8" }}>{brand.title}</div>
+        <div style={{ fontSize: 11, color: "#8fa0b0", marginTop: 4, lineHeight: 1.4, minHeight: 30 }}>
+          {statusLine}
         </div>
-        <StatusPill connected={connected} />
-        {hidePrimary ? null : (
+        <div style={{ marginTop: 8 }}>
+          <StatusPill connected={connected} label={connected ? "Connected" : "Not connected"} />
+        </div>
+        {hidePrimary ? (
+          <div style={{ fontSize: 10, color: "#667788", marginTop: 10 }}>Tap for options</div>
+        ) : (
           <button
             type="button"
-            style={primaryDanger ? btnDanger : btn}
+            style={{
+              ...(primaryDanger ? btnDanger : btn),
+              marginTop: 10,
+              width: "100%",
+              maxWidth: 140,
+            }}
             disabled={primaryDisabled}
             onClick={(e) => {
               e.stopPropagation();
@@ -177,12 +219,16 @@ function IntegrationRow({
             {primaryLabel}
           </button>
         )}
+        <div style={{ fontSize: 10, color: "#556677", marginTop: 8 }}>
+          {expanded ? "Hide options ▴" : "More options ▾"}
+        </div>
       </div>
       {expanded && children ? (
         <div
           style={{
-            padding: "0 12px 12px 36px",
-            borderTop: "1px solid rgba(var(--lim-accent-rgb),0.08)",
+            padding: "12px 14px 14px",
+            borderTop: "1px solid rgba(var(--lim-accent-rgb),0.1)",
+            textAlign: "left",
           }}
         >
           {children}
@@ -202,6 +248,9 @@ export function IntegrationsPanel({ agentBusy }: IntegrationsPanelProps) {
   const [mode, setMode] = useState<"read_write" | "read_only">("read_write");
   const [msMode, setMsMode] = useState<"read_write" | "read_only">("read_write");
   const [xeroMode, setXeroMode] = useState<"read_write" | "read_only">("read_write");
+  const [slackMode, setSlackMode] = useState<"read_write" | "read_only">("read_write");
+  const [linearMode, setLinearMode] = useState<"read_write" | "read_only">("read_write");
+  const [stripeMode, setStripeMode] = useState<"read_write" | "read_only">("read_write");
   const [githubMode, setGithubMode] = useState<"read_write" | "read_only">("read_write");
   const [selectedServices, setSelectedServices] = useState<Set<string>>(new Set());
   const [msSelectedServices, setMsSelectedServices] = useState<Set<string>>(new Set());
@@ -324,7 +373,6 @@ export function IntegrationsPanel({ agentBusy }: IntegrationsPanelProps) {
   const googleMcp = connections.filter((c) => c.kind === "mcp" && c.parentProvider === "google_workspace");
   const microsoftMcp = connections.filter((c) => c.kind === "mcp" && c.parentProvider === "microsoft_365");
   const githubMcp = connections.filter((c) => c.kind === "mcp" && c.parentProvider === "github");
-  const github = data?.github;
   const openApi = connections.filter((c) => c.kind === "openapi");
   const disabled = busy || agentBusy || loading;
 
@@ -332,10 +380,16 @@ export function IntegrationsPanel({ agentBusy }: IntegrationsPanelProps) {
   const msSidecar = data?.microsoft?.sidecar;
   const msServices = data?.microsoft?.services ?? [];
   const xeroAccounts = data?.xero?.accounts ?? [];
+  const slackAccounts = data?.slack?.accounts ?? [];
+  const linearAccounts = data?.linear?.accounts ?? [];
+  const stripeAccounts = data?.stripe?.accounts ?? [];
 
   const googleConnected = googleMcp.length > 0;
   const microsoftConnected = microsoftMcp.length > 0;
   const xeroConnected = xeroAccounts.length > 0;
+  const slackConnected = slackAccounts.length > 0;
+  const linearConnected = linearAccounts.length > 0;
+  const stripeConnected = stripeAccounts.length > 0;
   const githubConnected = githubMcp.length > 0;
   const googleToolCount = googleMcp.reduce((n, c) => n + c.toolCount, 0);
   const microsoftToolCount = microsoftMcp.reduce((n, c) => n + c.toolCount, 0);
@@ -437,14 +491,56 @@ export function IntegrationsPanel({ agentBusy }: IntegrationsPanelProps) {
     await pollIntegrationsUntil((d) => (d.xero?.accounts.length ?? 0) > 0);
   };
 
+  const slackPrimary = async () => {
+    if (slackConnected) {
+      const res = await webApiFetch("/api/integrations/slack?revoke=1", { method: "DELETE" });
+      const json = (await res.json()) as { error?: string };
+      if (!res.ok) throw new Error(json.error ?? "disconnect failed");
+      return;
+    }
+    const res = await webApiFetch(`/api/integrations/slack/begin?mode=${slackMode}`);
+    if (!res.ok) throw new Error(await res.text());
+    const { connectUrl } = (await res.json()) as { connectUrl: string };
+    window.open(connectUrl, "_blank", "noopener,noreferrer");
+    await pollIntegrationsUntil((d) => (d.slack?.accounts.length ?? 0) > 0);
+  };
+
+  const linearPrimary = async () => {
+    if (linearConnected) {
+      const res = await webApiFetch("/api/integrations/linear?revoke=1", { method: "DELETE" });
+      const json = (await res.json()) as { error?: string };
+      if (!res.ok) throw new Error(json.error ?? "disconnect failed");
+      return;
+    }
+    const res = await webApiFetch(`/api/integrations/linear/begin?mode=${linearMode}`);
+    if (!res.ok) throw new Error(await res.text());
+    const { connectUrl } = (await res.json()) as { connectUrl: string };
+    window.open(connectUrl, "_blank", "noopener,noreferrer");
+    await pollIntegrationsUntil((d) => (d.linear?.accounts.length ?? 0) > 0);
+  };
+
+  const stripePrimary = async () => {
+    if (stripeConnected) {
+      const res = await webApiFetch("/api/integrations/stripe?revoke=1", { method: "DELETE" });
+      const json = (await res.json()) as { error?: string };
+      if (!res.ok) throw new Error(json.error ?? "disconnect failed");
+      return;
+    }
+    const res = await webApiFetch(`/api/integrations/stripe/begin?mode=${stripeMode}`);
+    if (!res.ok) throw new Error(await res.text());
+    const { connectUrl } = (await res.json()) as { connectUrl: string };
+    window.open(connectUrl, "_blank", "noopener,noreferrer");
+    await pollIntegrationsUntil((d) => (d.stripe?.accounts.length ?? 0) > 0);
+  };
+
   return (
     <div style={{ paddingBottom: 16 }}>
       <div style={{ fontSize: 11, color: AMBER, fontWeight: 700, letterSpacing: "0.06em", marginBottom: 8 }}>
         INTEGRATIONS
       </div>
-      <p style={{ fontSize: 11, color: "#aab8c4", lineHeight: 1.5, marginBottom: 12 }}>
-        One tap to connect each service. Tap a row to see options. Google, Microsoft, Xero, and GitHub sign in via{" "}
-        <code style={{ color: CYAN }}>vireondynamics.com</code>.
+      <p style={{ fontSize: 12, color: "#aab8c4", lineHeight: 1.5, marginBottom: 14 }}>
+        Connect the apps you use every day. Sign in once — your agent can then read email, files, code, and more. Tap a
+        card for settings.
       </p>
 
       {error ? (
@@ -459,16 +555,24 @@ export function IntegrationsPanel({ agentBusy }: IntegrationsPanelProps) {
 
       {loading && !data ? <div style={{ fontSize: 11, color: "#778899" }}>Loading…</div> : null}
 
-      <IntegrationRow
-        title="Google Workspace"
-        summary={
+      <div
+        style={{
+          display: "grid",
+          gridTemplateColumns: "repeat(auto-fill, minmax(152px, 1fr))",
+          gap: 12,
+          alignItems: "stretch",
+        }}
+      >
+      <IntegrationCard
+        brandId="google"
+        statusLine={
           googleConnected
-            ? `${accounts[0]?.email ?? "Google"} · ${googleToolCount} agent tools`
+            ? `Ready · ${googleToolCount} tools for your agent`
             : accounts.length > 0
               ? busy
-                ? `Signing in as ${accounts[0]?.email ?? "Google"} — attaching agent tools…`
-                : `Signed in as ${accounts[0]?.email ?? "Google"} — tap Enable tools (or Revoke below)`
-              : "Gmail, Calendar, Drive, Docs, Sheets"
+                ? `Finishing sign-in as ${accounts[0]?.email ?? "you"}…`
+                : `Signed in — tap Enable tools`
+              : INTEGRATION_BRANDS.google.tagline
         }
         connected={googleConnected}
         expanded={expanded === "google"}
@@ -480,9 +584,8 @@ export function IntegrationsPanel({ agentBusy }: IntegrationsPanelProps) {
         primaryDisabled={disabled}
         onPrimary={() => void run(googlePrimary)}
       >
-        <p style={{ fontSize: 10, color: "#778899", lineHeight: 1.45, margin: "10px 0" }}>
-          Opens Google sign-in via vireondynamics.com, then attaches MCP tools for the agent.
-          Disconnect removes tools and signs out locally.
+        <p style={{ fontSize: 11, color: "#778899", lineHeight: 1.45, margin: "10px 0" }}>
+          Sign in with Google to let your agent read and send email, manage calendar events, and work with Drive files.
         </p>
         {accounts.map((a) => (
           <div key={a.accountId} style={{ fontSize: 11, fontFamily: "monospace", color: GREEN, marginBottom: 6 }}>
@@ -568,16 +671,16 @@ export function IntegrationsPanel({ agentBusy }: IntegrationsPanelProps) {
             Revoke Google access
           </button>
         </div>
-      </IntegrationRow>
+      </IntegrationCard>
 
-      <IntegrationRow
-        title="Microsoft 365"
-        summary={
+      <IntegrationCard
+        brandId="microsoft"
+        statusLine={
           microsoftConnected
-            ? `${msAccounts[0]?.email ?? "Microsoft"} · ${microsoftToolCount} agent tools`
+            ? `Ready · ${microsoftToolCount} tools for your agent`
             : msAccounts.length > 0
-              ? `Signed in as ${msAccounts[0]?.email ?? "Microsoft"} — tap Connect to enable tools`
-              : "Hosted OAuth — Outlook, Calendar, OneDrive, Teams, Planner"
+              ? `Signed in — tap Connect`
+              : INTEGRATION_BRANDS.microsoft.tagline
         }
         connected={microsoftConnected}
         expanded={expanded === "microsoft"}
@@ -587,10 +690,8 @@ export function IntegrationsPanel({ agentBusy }: IntegrationsPanelProps) {
         primaryDisabled={disabled}
         onPrimary={() => void run(microsoftPrimary)}
       >
-        <p style={{ fontSize: 10, color: "#778899", lineHeight: 1.45, margin: "10px 0" }}>
-          Opens Microsoft sign-in via <code>vireondynamics.com</code>, then attaches{" "}
-          <code>mcp_microsoft_*</code> Graph tools via local sidecar. No Azure app setup in your{" "}
-          <code>.env</code>.
+        <p style={{ fontSize: 11, color: "#778899", lineHeight: 1.45, margin: "10px 0" }}>
+          Sign in with Microsoft to use Outlook, Calendar, OneDrive, and Teams from your agent.
         </p>
         {msAccounts.map((a) => (
           <div key={a.accountId} style={{ fontSize: 11, fontFamily: "monospace", color: GREEN, marginBottom: 6 }}>
@@ -676,14 +777,14 @@ export function IntegrationsPanel({ agentBusy }: IntegrationsPanelProps) {
             Revoke Microsoft access
           </button>
         </div>
-      </IntegrationRow>
+      </IntegrationCard>
 
-      <IntegrationRow
-        title="Xero"
-        summary={
+      <IntegrationCard
+        brandId="xero"
+        statusLine={
           xeroConnected
-            ? `${xeroAccounts[0]?.email ?? "Xero"}${xeroAccounts[0]?.tenantName ? ` · ${xeroAccounts[0]?.tenantName}` : ""} · invoices & contacts`
-            : "Hosted OAuth — invoices, contacts, organisations (no .env setup)"
+            ? `Ready · ${xeroAccounts[0]?.tenantName ?? xeroAccounts[0]?.email ?? "account linked"}`
+            : INTEGRATION_BRANDS.xero.tagline
         }
         connected={xeroConnected}
         expanded={expanded === "xero"}
@@ -693,9 +794,8 @@ export function IntegrationsPanel({ agentBusy }: IntegrationsPanelProps) {
         primaryDisabled={disabled}
         onPrimary={() => void run(xeroPrimary)}
       >
-        <p style={{ fontSize: 10, color: "#778899", lineHeight: 1.45, margin: "10px 0" }}>
-          Opens Vireon-hosted Xero sign-in, then saves tokens locally. No Azure/Google-style client setup in your{" "}
-          <code>.env</code>.
+        <p style={{ fontSize: 11, color: "#778899", lineHeight: 1.45, margin: "10px 0" }}>
+          Sign in with Xero to look up invoices, contacts, and organisation details.
         </p>
         {xeroAccounts.map((a) => (
           <div key={a.accountId} style={{ fontSize: 11, fontFamily: "monospace", color: GREEN, marginBottom: 6 }}>
@@ -747,18 +847,151 @@ export function IntegrationsPanel({ agentBusy }: IntegrationsPanelProps) {
             Revoke Xero access
           </button>
         </div>
-      </IntegrationRow>
+      </IntegrationCard>
 
-      <IntegrationRow
-        title="GitHub"
-        summary={
+      <IntegrationCard
+        brandId="slack"
+        statusLine={
+          slackConnected
+            ? `Ready · ${slackAccounts[0]?.teamName ?? slackAccounts[0]?.email ?? "workspace linked"}`
+            : INTEGRATION_BRANDS.slack.tagline
+        }
+        connected={slackConnected}
+        expanded={expanded === "slack"}
+        onToggle={() => toggleExpand("slack")}
+        primaryLabel={slackConnected ? "Disconnect" : "Connect"}
+        primaryDanger={slackConnected}
+        primaryDisabled={disabled}
+        onPrimary={() => void run(slackPrimary)}
+      >
+        <p style={{ fontSize: 11, color: "#778899", lineHeight: 1.45, margin: "10px 0" }}>
+          Sign in with Slack so your agent can read channels and post updates (with your approval).
+        </p>
+        {slackAccounts.map((a) => (
+          <div key={a.accountId} style={{ fontSize: 11, fontFamily: "monospace", color: GREEN, marginBottom: 6 }}>
+            {a.teamName ?? a.email ?? a.accountId} — {a.scopes.length} scopes
+          </div>
+        ))}
+        <div style={{ marginBottom: 8 }}>
+          <label style={{ fontSize: 11, color: "#aabbcc", marginRight: 12 }}>
+            <input
+              type="radio"
+              checked={slackMode === "read_write"}
+              onChange={() => setSlackMode("read_write")}
+              disabled={disabled || slackConnected}
+            />{" "}
+            Read + write
+          </label>
+          <label style={{ fontSize: 11, color: "#aabbcc" }}>
+            <input
+              type="radio"
+              checked={slackMode === "read_only"}
+              onChange={() => setSlackMode("read_only")}
+              disabled={disabled || slackConnected}
+            />{" "}
+            Read only
+          </label>
+        </div>
+      </IntegrationCard>
+
+      <IntegrationCard
+        brandId="linear"
+        statusLine={
+          linearConnected
+            ? `Ready · ${linearAccounts[0]?.organizationName ?? linearAccounts[0]?.email ?? "workspace linked"}`
+            : INTEGRATION_BRANDS.linear.tagline
+        }
+        connected={linearConnected}
+        expanded={expanded === "linear"}
+        onToggle={() => toggleExpand("linear")}
+        primaryLabel={linearConnected ? "Disconnect" : "Connect"}
+        primaryDanger={linearConnected}
+        primaryDisabled={disabled}
+        onPrimary={() => void run(linearPrimary)}
+      >
+        <p style={{ fontSize: 11, color: "#778899", lineHeight: 1.45, margin: "10px 0" }}>
+          Sign in with Linear so your agent can list issues, read details, and create tickets (with approval).
+        </p>
+        {linearAccounts.map((a) => (
+          <div key={a.accountId} style={{ fontSize: 11, fontFamily: "monospace", color: GREEN, marginBottom: 6 }}>
+            {a.email ?? a.organizationName ?? a.accountId} — {a.scopes.length} scopes
+          </div>
+        ))}
+        <div style={{ marginBottom: 8 }}>
+          <label style={{ fontSize: 11, color: "#aabbcc", marginRight: 12 }}>
+            <input
+              type="radio"
+              checked={linearMode === "read_write"}
+              onChange={() => setLinearMode("read_write")}
+              disabled={disabled || linearConnected}
+            />{" "}
+            Read + write
+          </label>
+          <label style={{ fontSize: 11, color: "#aabbcc" }}>
+            <input
+              type="radio"
+              checked={linearMode === "read_only"}
+              onChange={() => setLinearMode("read_only")}
+              disabled={disabled || linearConnected}
+            />{" "}
+            Read only
+          </label>
+        </div>
+      </IntegrationCard>
+
+      <IntegrationCard
+        brandId="stripe"
+        statusLine={
+          stripeConnected
+            ? `Ready · ${stripeAccounts[0]?.businessName ?? stripeAccounts[0]?.email ?? stripeAccounts[0]?.stripeUserId ?? "account linked"}${stripeAccounts[0]?.livemode === false ? " (test)" : stripeAccounts[0]?.livemode ? " (live)" : ""}`
+            : INTEGRATION_BRANDS.stripe.tagline
+        }
+        connected={stripeConnected}
+        expanded={expanded === "stripe"}
+        onToggle={() => toggleExpand("stripe")}
+        primaryLabel={stripeConnected ? "Disconnect" : "Connect"}
+        primaryDanger={stripeConnected}
+        primaryDisabled={disabled}
+        onPrimary={() => void run(stripePrimary)}
+      >
+        <p style={{ fontSize: 11, color: "#778899", lineHeight: 1.45, margin: "10px 0" }}>
+          Connect your Stripe account so your agent can read balances, customers, subscriptions, invoices, and charges.
+        </p>
+        {stripeAccounts.map((a) => (
+          <div key={a.accountId} style={{ fontSize: 11, fontFamily: "monospace", color: GREEN, marginBottom: 6 }}>
+            {a.businessName ?? a.email ?? a.stripeUserId ?? a.accountId} — {a.scopes.length} scopes
+          </div>
+        ))}
+        <div style={{ marginBottom: 8 }}>
+          <label style={{ fontSize: 11, color: "#aabbcc", marginRight: 12 }}>
+            <input
+              type="radio"
+              checked={stripeMode === "read_write"}
+              onChange={() => setStripeMode("read_write")}
+              disabled={disabled || stripeConnected}
+            />{" "}
+            Read + write
+          </label>
+          <label style={{ fontSize: 11, color: "#aabbcc" }}>
+            <input
+              type="radio"
+              checked={stripeMode === "read_only"}
+              onChange={() => setStripeMode("read_only")}
+              disabled={disabled || stripeConnected}
+            />{" "}
+            Read only
+          </label>
+        </div>
+      </IntegrationCard>
+
+      <IntegrationCard
+        brandId="github"
+        statusLine={
           githubConnected
-            ? `${githubAccounts[0]?.login ?? githubAccounts[0]?.email ?? "GitHub"} · ${githubToolCount} agent tools`
+            ? `Ready · ${githubToolCount} tools for your agent`
             : githubAccounts.length > 0
-              ? `Signed in as ${githubAccounts[0]?.login ?? githubAccounts[0]?.email ?? "GitHub"} — tap Connect`
-              : github?.tokenConfigured
-                ? "PAT in .env — tap Connect to enable"
-                : "Repos, issues, PRs via hosted sign-in"
+              ? `Signed in — tap Enable tools`
+              : INTEGRATION_BRANDS.github.tagline
         }
         connected={githubConnected}
         expanded={expanded === "github"}
@@ -768,53 +1001,47 @@ export function IntegrationsPanel({ agentBusy }: IntegrationsPanelProps) {
         primaryDisabled={disabled}
         onPrimary={() => void run(githubPrimary)}
       >
-        <p style={{ fontSize: 10, color: "#778899", lineHeight: 1.45, margin: "10px 0" }}>
-          Opens GitHub sign-in via vireondynamics.com, then attaches official GitHub MCP (<code>mcp_github_*</code>).
-          Legacy: set <code>GITHUB_TOKEN</code> in .env for PAT auth.
+        <p style={{ fontSize: 11, color: "#778899", lineHeight: 1.45, margin: "10px 0" }}>
+          Sign in with GitHub so your agent can browse repos, issues, and pull requests.
         </p>
         {githubAccounts.map((a) => (
           <div key={a.accountId} style={{ fontSize: 11, fontFamily: "monospace", color: GREEN, marginBottom: 6 }}>
             {a.login ?? a.email ?? a.accountId} — {a.scopes.length} scopes
           </div>
         ))}
-        <div style={{ display: "flex", gap: 12, marginBottom: 8, fontSize: 11 }}>
-          <label style={{ display: "flex", alignItems: "center", gap: 4, color: "#aab8c4" }}>
+        <div style={{ marginBottom: 8 }}>
+          <label style={{ fontSize: 11, color: "#aabbcc", marginRight: 12 }}>
             <input
               type="radio"
               checked={githubMode === "read_write"}
               onChange={() => setGithubMode("read_write")}
               disabled={disabled || githubConnected}
-            />
+            />{" "}
             Read + write
           </label>
-          <label style={{ display: "flex", alignItems: "center", gap: 4, color: "#aab8c4" }}>
+          <label style={{ fontSize: 11, color: "#aabbcc" }}>
             <input
               type="radio"
               checked={githubMode === "read_only"}
               onChange={() => setGithubMode("read_only")}
               disabled={disabled || githubConnected}
-            />
+            />{" "}
             Read only
           </label>
         </div>
-        {github?.tokenConfigured ? (
-          <div style={{ fontSize: 10, fontFamily: "monospace", marginBottom: 8, color: GREEN }}>
-            Legacy PAT: found in environment
-          </div>
-        ) : null}
-        {githubConnected || githubAccounts.length > 0 ? (
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
           <button
             type="button"
-            style={{
-              fontSize: 10,
-              color: MAGENTA,
-              background: "none",
-              border: "none",
-              cursor: disabled ? "not-allowed" : "pointer",
-              padding: 0,
-              textDecoration: "underline",
-            }}
-            disabled={disabled || !githubAccounts.length}
+            style={{ ...btn, fontSize: 10, padding: "6px 10px" }}
+            disabled={disabled}
+            onClick={() => void run(load)}
+          >
+            Refresh status
+          </button>
+          <button
+            type="button"
+            style={{ ...btnDanger, fontSize: 10, padding: "6px 10px" }}
+            disabled={disabled || !githubConnected && githubAccounts.length === 0}
             onClick={() =>
               void run(async () => {
                 const res = await webApiFetch("/api/integrations/github?revoke=1", { method: "DELETE" });
@@ -825,12 +1052,16 @@ export function IntegrationsPanel({ agentBusy }: IntegrationsPanelProps) {
           >
             Revoke GitHub access
           </button>
-        ) : null}
-      </IntegrationRow>
+        </div>
+      </IntegrationCard>
 
-      <IntegrationRow
-        title="Advanced"
-        summary={`Custom MCP (${customMcp.length}) · OpenAPI (${openApi.length}) — tap to configure`}
+      <IntegrationCard
+        brandId="advanced"
+        statusLine={
+          customMcp.length + openApi.length > 0
+            ? `${customMcp.length + openApi.length} custom connection${customMcp.length + openApi.length === 1 ? "" : "s"}`
+            : INTEGRATION_BRANDS.advanced.tagline
+        }
         connected={customMcp.length + openApi.length > 0}
         expanded={expanded === "advanced"}
         onToggle={() => toggleExpand("advanced")}
@@ -1013,7 +1244,8 @@ export function IntegrationsPanel({ agentBusy }: IntegrationsPanelProps) {
             </div>
           ))}
         </div>
-      </IntegrationRow>
+      </IntegrationCard>
+      </div>
     </div>
   );
 }

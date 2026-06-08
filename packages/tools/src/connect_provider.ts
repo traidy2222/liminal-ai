@@ -36,6 +36,12 @@ import {
   listXeroOAuthAccounts,
   revokeXeroAccount,
   listGithubOAuthAccounts,
+  listSlackOAuthAccounts,
+  revokeSlackAccount,
+  listLinearOAuthAccounts,
+  revokeLinearAccount,
+  listStripeOAuthAccounts,
+  revokeStripeAccount,
 } from "@liminal/core";
 import { defineTool } from "./helpers.js";
 import {
@@ -66,6 +72,9 @@ import { excelRestEnabled } from "./excel_rest.js";
 import { microsoftOfficeRestEnabled } from "./microsoft_office_rest.js";
 import { graphSearchRestEnabled } from "./graph_search_rest.js";
 import { xeroRestEnabled } from "./xero_rest.js";
+import { slackRestEnabled } from "./slack_rest.js";
+import { linearRestEnabled } from "./linear_rest.js";
+import { stripeRestEnabled } from "./stripe_rest.js";
 import {
   connectGithubMcp,
   disconnectGithubMcp,
@@ -219,15 +228,15 @@ export function createConnectorTools(registry: ToolRegistry, _emitter: AgentEmit
   const connectProviderTool = defineTool({
     name: "connect_provider",
     description:
-      "WHAT: Connect curated providers — Google Workspace, Microsoft 365 (OAuth), Xero (OAuth), or GitHub (OAuth).\n" +
-      "WHEN: User asks to work with Google/Microsoft mail, calendar, files, Xero accounting, or GitHub repos.\n" +
-      "HOW: All providers → OAuth via Settings → Integrations (hosted sign-in). GitHub also supports legacy GITHUB_TOKEN in .env.",
+      "WHAT: Connect curated providers — Google, Microsoft 365, Xero, GitHub, Slack, Linear, or Stripe (hosted OAuth).\n" +
+      "WHEN: User asks to work with mail/calendar/files, accounting, repos, Slack, Linear, or Stripe revenue.\n" +
+      "HOW: OAuth via Settings → Integrations on vireondynamics.com. GitHub also supports legacy GITHUB_TOKEN in .env.",
     parameters: {
       type: "object",
       properties: {
         provider: {
           type: "string",
-          enum: ["google_workspace", "microsoft_365", "xero", "github"],
+          enum: ["google_workspace", "microsoft_365", "xero", "github", "slack", "linear", "stripe"],
           description: "Provider preset id.",
         },
         services: {
@@ -278,6 +287,58 @@ export function createConnectorTools(registry: ToolRegistry, _emitter: AgentEmit
             `Xero connected as ${a.email ?? a.accountId}` +
             (a.tenantName ? ` (${a.tenantName})` : a.tenantId ? ` (tenant ${a.tenantId})` : "") +
             ".\nTools: xero_list_organisations, xero_list_invoices, xero_get_invoice, xero_list_contacts, xero_create_invoice.",
+        };
+      }
+      if (provider === "slack") {
+        const accounts = await listSlackOAuthAccounts();
+        if (accounts.length === 0) {
+          return {
+            ok: false,
+            error:
+              "Slack OAuth not connected — open Settings → Integrations → Connect Slack (hosted sign-in, no .env setup).",
+          };
+        }
+        const a = accounts[0]!;
+        return {
+          ok: true,
+          output:
+            `Slack connected as ${a.teamName ?? a.accountId}` +
+            ".\nTools: slack_list_channels, slack_get_channel_history, slack_list_users, slack_post_message.",
+        };
+      }
+      if (provider === "linear") {
+        const accounts = await listLinearOAuthAccounts();
+        if (accounts.length === 0) {
+          return {
+            ok: false,
+            error:
+              "Linear OAuth not connected — open Settings → Integrations → Connect Linear (hosted sign-in, no .env setup).",
+          };
+        }
+        const a = accounts[0]!;
+        return {
+          ok: true,
+          output:
+            `Linear connected as ${a.email ?? a.organizationName ?? a.accountId}` +
+            ".\nTools: linear_list_teams, linear_list_issues, linear_get_issue, linear_create_issue, linear_add_comment.",
+        };
+      }
+      if (provider === "stripe") {
+        const accounts = await listStripeOAuthAccounts();
+        if (accounts.length === 0) {
+          return {
+            ok: false,
+            error:
+              "Stripe OAuth not connected — open Settings → Integrations → Connect Stripe (hosted sign-in, no .env setup).",
+          };
+        }
+        const a = accounts[0]!;
+        return {
+          ok: true,
+          output:
+            `Stripe connected as ${a.businessName ?? a.email ?? a.stripeUserId ?? a.accountId}` +
+            (a.livemode === false ? " (test mode)" : a.livemode ? " (live)" : "") +
+            ".\nTools: stripe_get_balance, stripe_list_customers, stripe_list_subscriptions, stripe_list_invoices, stripe_list_charges, stripe_create_refund.",
         };
       }
       if (provider !== "google_workspace") {
@@ -420,10 +481,13 @@ export function createConnectorTools(registry: ToolRegistry, _emitter: AgentEmit
     parameters: {
       type: "object",
       properties: {
-        provider: { type: "string", enum: ["google_workspace", "microsoft_365", "xero", "github"] },
+        provider: {
+          type: "string",
+          enum: ["google_workspace", "microsoft_365", "xero", "github", "slack", "linear", "stripe"],
+        },
         revoke_oauth: {
           type: "boolean",
-          description: "Google/Microsoft/Xero/GitHub: delete local OAuth tokens (default false).",
+          description: "Delete local OAuth tokens when true (default false).",
         },
       },
       required: ["provider"],
@@ -448,6 +512,42 @@ export function createConnectorTools(registry: ToolRegistry, _emitter: AgentEmit
         return {
           ok: true,
           output: `Disconnected xero${args["revoke_oauth"] === true ? " (OAuth tokens revoked)" : ""}.`,
+        };
+      }
+      if (provider === "slack") {
+        if (args["revoke_oauth"] === true) {
+          const accounts = await listSlackOAuthAccounts();
+          for (const a of accounts) {
+            await revokeSlackAccount(a.accountId);
+          }
+        }
+        return {
+          ok: true,
+          output: `Disconnected slack${args["revoke_oauth"] === true ? " (OAuth tokens revoked)" : ""}.`,
+        };
+      }
+      if (provider === "linear") {
+        if (args["revoke_oauth"] === true) {
+          const accounts = await listLinearOAuthAccounts();
+          for (const a of accounts) {
+            await revokeLinearAccount(a.accountId);
+          }
+        }
+        return {
+          ok: true,
+          output: `Disconnected linear${args["revoke_oauth"] === true ? " (OAuth tokens revoked)" : ""}.`,
+        };
+      }
+      if (provider === "stripe") {
+        if (args["revoke_oauth"] === true) {
+          const accounts = await listStripeOAuthAccounts();
+          for (const a of accounts) {
+            await revokeStripeAccount(a.accountId);
+          }
+        }
+        return {
+          ok: true,
+          output: `Disconnected stripe${args["revoke_oauth"] === true ? " (OAuth tokens revoked)" : ""}.`,
         };
       }
       if (provider === "microsoft_365") {
@@ -512,6 +612,15 @@ export function createConnectorTools(registry: ToolRegistry, _emitter: AgentEmit
       lines.push(
         `Xero: REST accounting tools — ${xeroRestEnabled() ? "on" : "off (set AGENT_XERO_REST=0 to disable)"}, connect via Settings → Integrations (hosted OAuth)`
       );
+      lines.push(
+        `Slack: REST workspace tools — ${slackRestEnabled() ? "on" : "off (set AGENT_SLACK_REST=0 to disable)"}, connect via Settings → Integrations or \`liminal connect slack\``
+      );
+      lines.push(
+        `Linear: REST issue tools — ${linearRestEnabled() ? "on" : "off (set AGENT_LINEAR_REST=0 to disable)"}, connect via Settings → Integrations or \`liminal connect linear\``
+      );
+      lines.push(
+        `Stripe: REST payments tools — ${stripeRestEnabled() ? "on" : "off (set AGENT_STRIPE_REST=0 to disable)"}, connect via Settings → Integrations or \`liminal connect stripe\``
+      );
       lines.push("");
 
       const xeroAccounts = await listXeroOAuthAccounts();
@@ -529,6 +638,67 @@ export function createConnectorTools(registry: ToolRegistry, _emitter: AgentEmit
           const exp = new Date(a.expiresAt).toISOString();
           lines.push(
             `- ${a.email ?? a.accountId}${a.tenantName ? ` · ${a.tenantName}` : a.tenantId ? ` · tenant ${a.tenantId}` : ""} (expires ~${exp}, ${a.scopes.length} scopes)`
+          );
+        }
+      }
+      lines.push("");
+
+      const slackAccounts = await listSlackOAuthAccounts();
+      lines.push("### Slack OAuth");
+      if (slackAccounts.length === 0) {
+        const onDisk = await countOAuthAccountFiles("slack");
+        if (onDisk > 0) {
+          lines.push(`- (tokens on disk but unreadable — ${onDisk} file(s))`);
+          lines.push(`  ${oauthDecryptHint("slack")}`);
+        } else {
+          lines.push("- (not connected — Settings → Integrations → Connect Slack, or `liminal connect slack`)");
+        }
+      } else {
+        for (const a of slackAccounts) {
+          const exp = new Date(a.expiresAt).toISOString();
+          lines.push(
+            `- ${a.teamName ?? a.email ?? a.accountId} (expires ~${exp}, ${a.scopes.length} scopes)`
+          );
+        }
+      }
+      lines.push("");
+
+      const linearAccounts = await listLinearOAuthAccounts();
+      lines.push("### Linear OAuth");
+      if (linearAccounts.length === 0) {
+        const onDisk = await countOAuthAccountFiles("linear");
+        if (onDisk > 0) {
+          lines.push(`- (tokens on disk but unreadable — ${onDisk} file(s))`);
+          lines.push(`  ${oauthDecryptHint("linear")}`);
+        } else {
+          lines.push("- (not connected — Settings → Integrations → Connect Linear, or `liminal connect linear`)");
+        }
+      } else {
+        for (const a of linearAccounts) {
+          const exp = new Date(a.expiresAt).toISOString();
+          lines.push(
+            `- ${a.organizationName ?? a.email ?? a.accountId} (expires ~${exp}, ${a.scopes.length} scopes)`
+          );
+        }
+      }
+      lines.push("");
+
+      const stripeAccounts = await listStripeOAuthAccounts();
+      lines.push("### Stripe OAuth");
+      if (stripeAccounts.length === 0) {
+        const onDisk = await countOAuthAccountFiles("stripe");
+        if (onDisk > 0) {
+          lines.push(`- (tokens on disk but unreadable — ${onDisk} file(s))`);
+          lines.push(`  ${oauthDecryptHint("stripe")}`);
+        } else {
+          lines.push("- (not connected — Settings → Integrations → Connect Stripe, or `liminal connect stripe`)");
+        }
+      } else {
+        for (const a of stripeAccounts) {
+          const exp = new Date(a.expiresAt).toISOString();
+          const mode = a.livemode === false ? "test" : a.livemode ? "live" : "mode?";
+          lines.push(
+            `- ${a.businessName ?? a.email ?? a.stripeUserId ?? a.accountId} (${mode}, refresh token on disk, access rotates ~${exp})`
           );
         }
       }
@@ -846,6 +1016,72 @@ export async function disconnectXeroFromServer(
   const { disconnectProviderTool } = createConnectorTools(registry, { emit: () => {} } as unknown as AgentEmitter);
   const result = await disconnectProviderTool.handler({
     provider: "xero",
+    revoke_oauth: revokeOAuth,
+  });
+  if (result.ok) return { ok: true, output: result.output };
+  return { ok: false, error: result.error };
+}
+
+export async function connectSlackFromServer(
+  registry: ToolRegistry
+): Promise<{ ok: boolean; output?: string; error?: string }> {
+  const { connectProviderTool } = createConnectorTools(registry, { emit: () => {} } as unknown as AgentEmitter);
+  const result = await connectProviderTool.handler({ provider: "slack" });
+  if (result.ok) return { ok: true, output: result.output };
+  return { ok: false, error: result.error };
+}
+
+export async function disconnectSlackFromServer(
+  registry: ToolRegistry,
+  revokeOAuth = false
+): Promise<{ ok: boolean; output?: string; error?: string }> {
+  const { disconnectProviderTool } = createConnectorTools(registry, { emit: () => {} } as unknown as AgentEmitter);
+  const result = await disconnectProviderTool.handler({
+    provider: "slack",
+    revoke_oauth: revokeOAuth,
+  });
+  if (result.ok) return { ok: true, output: result.output };
+  return { ok: false, error: result.error };
+}
+
+export async function connectLinearFromServer(
+  registry: ToolRegistry
+): Promise<{ ok: boolean; output?: string; error?: string }> {
+  const { connectProviderTool } = createConnectorTools(registry, { emit: () => {} } as unknown as AgentEmitter);
+  const result = await connectProviderTool.handler({ provider: "linear" });
+  if (result.ok) return { ok: true, output: result.output };
+  return { ok: false, error: result.error };
+}
+
+export async function disconnectLinearFromServer(
+  registry: ToolRegistry,
+  revokeOAuth = false
+): Promise<{ ok: boolean; output?: string; error?: string }> {
+  const { disconnectProviderTool } = createConnectorTools(registry, { emit: () => {} } as unknown as AgentEmitter);
+  const result = await disconnectProviderTool.handler({
+    provider: "linear",
+    revoke_oauth: revokeOAuth,
+  });
+  if (result.ok) return { ok: true, output: result.output };
+  return { ok: false, error: result.error };
+}
+
+export async function connectStripeFromServer(
+  registry: ToolRegistry
+): Promise<{ ok: boolean; output?: string; error?: string }> {
+  const { connectProviderTool } = createConnectorTools(registry, { emit: () => {} } as unknown as AgentEmitter);
+  const result = await connectProviderTool.handler({ provider: "stripe" });
+  if (result.ok) return { ok: true, output: result.output };
+  return { ok: false, error: result.error };
+}
+
+export async function disconnectStripeFromServer(
+  registry: ToolRegistry,
+  revokeOAuth = false
+): Promise<{ ok: boolean; output?: string; error?: string }> {
+  const { disconnectProviderTool } = createConnectorTools(registry, { emit: () => {} } as unknown as AgentEmitter);
+  const result = await disconnectProviderTool.handler({
+    provider: "stripe",
     revoke_oauth: revokeOAuth,
   });
   if (result.ok) return { ok: true, output: result.output };

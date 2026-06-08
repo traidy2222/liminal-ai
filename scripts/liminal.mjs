@@ -7,6 +7,8 @@ import { runSetup } from "./lib/setup.mjs";
 import { runTui, runUpdate, runWeb } from "./lib/commands/web.mjs";
 import { loadEnvForCli } from "./lib/load-env.mjs";
 import { runConnectGoogleCli } from "./lib/google-connect.mjs";
+import { runHostedConnectCli, HOSTED_CONNECT_TARGETS } from "./lib/hosted-connect.mjs";
+import { runHostedDisconnectCli, HOSTED_DISCONNECT_TARGETS } from "./lib/hosted-disconnect.mjs";
 
 const USAGE = `Liminal — one-command setup and launcher
 
@@ -19,7 +21,9 @@ Usage:
   liminal login               Sign in to Vireon (browser); saves license to ~/.liminal/
   liminal logout              Remove local Vireon account + license cache
   liminal connect google      Google OAuth (+ use --attach for MCP tools in one step)
+  liminal connect <provider>  Hosted OAuth: ${HOSTED_CONNECT_TARGETS.join(", ")} (--read-only optional)
   liminal disconnect google   Revoke Google OAuth tokens
+  liminal disconnect <provider> Revoke hosted OAuth: ${HOSTED_DISCONNECT_TARGETS.join(", ")}
   liminal path                Print install directory
 
 Setup options:
@@ -91,15 +95,27 @@ async function main(argv) {
     }
     case "connect": {
       const sub = rest[0];
+      if (!sub) {
+        log("error", "Usage: liminal connect <google|slack|linear|stripe|xero|github>");
+        return 1;
+      }
+      loadEnvForCli();
       if (sub === "google") {
-        loadEnvForCli();
         return runConnectGoogleCli(rest.slice(1));
       }
-      log("error", `Unknown connect target: ${sub ?? "(none)"}. Try: liminal connect google`);
+      if (HOSTED_CONNECT_TARGETS.includes(sub)) {
+        return runHostedConnectCli(sub, rest.slice(1));
+      }
+      log("error", `Unknown connect target: ${sub}. Try: google, ${HOSTED_CONNECT_TARGETS.join(", ")}`);
       return 1;
     }
     case "disconnect": {
       const sub = rest[0];
+      if (!sub) {
+        log("error", "Usage: liminal disconnect <google|slack|linear|stripe|xero|github>");
+        return 1;
+      }
+      loadEnvForCli();
       if (sub === "google") {
         const { spawn } = await import("node:child_process");
         const script = fileURLToPath(new URL("./lib/google-disconnect.mjs", import.meta.url));
@@ -108,7 +124,10 @@ async function main(argv) {
           child.on("exit", (code) => resolve(code ?? 1));
         });
       }
-      log("error", `Unknown disconnect target: ${sub ?? "(none)"}. Try: liminal disconnect google`);
+      if (HOSTED_DISCONNECT_TARGETS.includes(sub)) {
+        return runHostedDisconnectCli(sub);
+      }
+      log("error", `Unknown disconnect target: ${sub}. Try: google, ${HOSTED_DISCONNECT_TARGETS.join(", ")}`);
       return 1;
     }
     case "path": {

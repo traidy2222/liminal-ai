@@ -5,6 +5,12 @@ import {
   listMicrosoftOAuthAccounts,
   listGithubOAuthAccounts,
   listXeroOAuthAccounts,
+  listSlackOAuthAccounts,
+  listLinearOAuthAccounts,
+  listStripeOAuthAccounts,
+  runSlackHostedConnectFlow,
+  runLinearHostedConnectFlow,
+  runStripeHostedConnectFlow,
   missingDefaultWorkspaceScopes,
   missingDefaultMicrosoftScopes,
   runGoogleHostedConnectFlow,
@@ -18,16 +24,21 @@ import {
   connectGoogleWorkspaceFromServer,
   connectMicrosoft365FromServer,
   connectXeroFromServer,
+  connectSlackFromServer,
+  connectLinearFromServer,
+  connectStripeFromServer,
   connectOpenApiFromServer,
   detachCustomMcpFromServer,
   disconnectGithubFromServer,
   disconnectGoogleWorkspaceFromServer,
   disconnectMicrosoft365FromServer,
   disconnectXeroFromServer,
+  disconnectSlackFromServer,
+  disconnectLinearFromServer,
+  disconnectStripeFromServer,
   disconnectOpenApiFromServer,
   getGoogleSidecarStatus,
   getMicrosoftSidecarStatus,
-  githubTokenPresent,
   listIntegrationConnections,
   parseAuthBody,
   refreshIntegrationToolsOnRegistry,
@@ -62,8 +73,6 @@ export async function buildIntegrationsSnapshot() {
         scopes: a.scopes,
         expiresAt: a.expiresAt,
       })),
-      tokenConfigured: githubTokenPresent(),
-      mcpUrl: "https://api.githubcopilot.com/mcp/",
     },
     xero: {
       accounts: (await listXeroOAuthAccounts()).map((a) => ({
@@ -73,6 +82,36 @@ export async function buildIntegrationsSnapshot() {
         expiresAt: a.expiresAt,
         tenantId: a.tenantId,
         tenantName: a.tenantName,
+      })),
+    },
+    slack: {
+      accounts: (await listSlackOAuthAccounts()).map((a) => ({
+        accountId: a.accountId,
+        email: a.email,
+        scopes: a.scopes,
+        expiresAt: a.expiresAt,
+        teamId: a.teamId,
+        teamName: a.teamName,
+      })),
+    },
+    linear: {
+      accounts: (await listLinearOAuthAccounts()).map((a) => ({
+        accountId: a.accountId,
+        email: a.email,
+        scopes: a.scopes,
+        expiresAt: a.expiresAt,
+        organizationName: a.organizationName,
+      })),
+    },
+    stripe: {
+      accounts: (await listStripeOAuthAccounts()).map((a) => ({
+        accountId: a.accountId,
+        email: a.email,
+        scopes: a.scopes,
+        expiresAt: a.expiresAt,
+        stripeUserId: a.stripeUserId,
+        livemode: a.livemode,
+        businessName: a.businessName,
       })),
     },
     connections: await listIntegrationConnections(),
@@ -276,6 +315,93 @@ export async function disconnectXero(registry: ChatRegistry, revoke: boolean): P
   if (!result.ok) throw new Error(result.error ?? "Xero disconnect failed.");
   await refreshIntegrationsOnAllHarnesses(registry);
   return result.output ?? "Xero disconnected.";
+}
+
+export async function connectSlackOAuth(
+  registry: ChatRegistry,
+  opts: { mode?: "read_write" | "read_only"; openBrowser?: boolean }
+): Promise<{ accountId: string; email?: string; teamName?: string }> {
+  const result = await runSlackHostedConnectFlow({
+    mode: opts.mode ?? "read_write",
+    openBrowser: opts.openBrowser !== false,
+    onStatus: (m) => console.log(`[slack-oauth] ${m}`),
+  });
+  try {
+    assertHarnessesIdle(registry);
+    const bridge = await registry.getOrCreateActive();
+    await connectSlackFromServer(bridge.harness.registry);
+    await refreshIntegrationsOnAllHarnesses(registry);
+  } catch (e) {
+    console.warn("[slack-oauth] tokens saved but harness refresh failed:", e instanceof Error ? e.message : e);
+  }
+  return result;
+}
+
+export async function disconnectSlack(registry: ChatRegistry, revoke: boolean): Promise<string> {
+  assertHarnessesIdle(registry);
+  const bridge = await registry.getOrCreateActive();
+  const result = await disconnectSlackFromServer(bridge.harness.registry, revoke);
+  if (!result.ok) throw new Error(result.error ?? "Slack disconnect failed.");
+  await refreshIntegrationsOnAllHarnesses(registry);
+  return result.output ?? "Slack disconnected.";
+}
+
+export async function connectLinearOAuth(
+  registry: ChatRegistry,
+  opts: { mode?: "read_write" | "read_only"; openBrowser?: boolean }
+): Promise<{ accountId: string; email?: string; organizationName?: string }> {
+  const result = await runLinearHostedConnectFlow({
+    mode: opts.mode ?? "read_write",
+    openBrowser: opts.openBrowser !== false,
+    onStatus: (m) => console.log(`[linear-oauth] ${m}`),
+  });
+  try {
+    assertHarnessesIdle(registry);
+    const bridge = await registry.getOrCreateActive();
+    await connectLinearFromServer(bridge.harness.registry);
+    await refreshIntegrationsOnAllHarnesses(registry);
+  } catch (e) {
+    console.warn("[linear-oauth] tokens saved but harness refresh failed:", e instanceof Error ? e.message : e);
+  }
+  return result;
+}
+
+export async function disconnectLinear(registry: ChatRegistry, revoke: boolean): Promise<string> {
+  assertHarnessesIdle(registry);
+  const bridge = await registry.getOrCreateActive();
+  const result = await disconnectLinearFromServer(bridge.harness.registry, revoke);
+  if (!result.ok) throw new Error(result.error ?? "Linear disconnect failed.");
+  await refreshIntegrationsOnAllHarnesses(registry);
+  return result.output ?? "Linear disconnected.";
+}
+
+export async function connectStripeOAuth(
+  registry: ChatRegistry,
+  opts: { mode?: "read_write" | "read_only"; openBrowser?: boolean }
+): Promise<{ accountId: string; email?: string; stripeUserId?: string; livemode?: boolean }> {
+  const result = await runStripeHostedConnectFlow({
+    mode: opts.mode ?? "read_write",
+    openBrowser: opts.openBrowser !== false,
+    onStatus: (m) => console.log(`[stripe-oauth] ${m}`),
+  });
+  try {
+    assertHarnessesIdle(registry);
+    const bridge = await registry.getOrCreateActive();
+    await connectStripeFromServer(bridge.harness.registry);
+    await refreshIntegrationsOnAllHarnesses(registry);
+  } catch (e) {
+    console.warn("[stripe-oauth] tokens saved but harness refresh failed:", e instanceof Error ? e.message : e);
+  }
+  return result;
+}
+
+export async function disconnectStripe(registry: ChatRegistry, revoke: boolean): Promise<string> {
+  assertHarnessesIdle(registry);
+  const bridge = await registry.getOrCreateActive();
+  const result = await disconnectStripeFromServer(bridge.harness.registry, revoke);
+  if (!result.ok) throw new Error(result.error ?? "Stripe disconnect failed.");
+  await refreshIntegrationsOnAllHarnesses(registry);
+  return result.output ?? "Stripe disconnected.";
 }
 
 export async function attachIntegrationMcp(

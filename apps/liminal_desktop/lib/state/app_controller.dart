@@ -914,6 +914,9 @@ class AppController extends ChangeNotifier {
     return command == 'connect_google_oauth' ||
         command == 'connect_microsoft_oauth' ||
         command == 'connect_xero_oauth' ||
+        command == 'connect_slack_oauth' ||
+        command == 'connect_linear_oauth' ||
+        command == 'connect_stripe_oauth' ||
         command == 'connect_github_oauth';
   }
 
@@ -1030,6 +1033,33 @@ class AppController extends ChangeNotifier {
 
   Future<bool> disconnectXero({bool revoke = false}) =>
       _runIntegrationCommand('disconnect_xero', {'revoke': revoke});
+
+  Future<bool> connectSlackOAuth({String mode = 'read_write'}) =>
+      _runIntegrationCommand('connect_slack_oauth', {
+        'mode': mode,
+        'openBrowser': true,
+      });
+
+  Future<bool> disconnectSlack({bool revoke = false}) =>
+      _runIntegrationCommand('disconnect_slack', {'revoke': revoke});
+
+  Future<bool> connectLinearOAuth({String mode = 'read_write'}) =>
+      _runIntegrationCommand('connect_linear_oauth', {
+        'mode': mode,
+        'openBrowser': true,
+      });
+
+  Future<bool> disconnectLinear({bool revoke = false}) =>
+      _runIntegrationCommand('disconnect_linear', {'revoke': revoke});
+
+  Future<bool> connectStripeOAuth({String mode = 'read_write'}) =>
+      _runIntegrationCommand('connect_stripe_oauth', {
+        'mode': mode,
+        'openBrowser': true,
+      });
+
+  Future<bool> disconnectStripe({bool revoke = false}) =>
+      _runIntegrationCommand('disconnect_stripe', {'revoke': revoke});
 
   Future<bool> connectGithubOAuth({String mode = 'read_write'}) =>
       _runIntegrationCommand('connect_github_oauth', {

@@ -1046,6 +1046,34 @@ export { scopesForGithubMode } from "./github_oauth_scopes.js";
 export type { GithubMode } from "./github_oauth_scopes.js";
 export { runGithubHostedConnectFlow } from "./github_hosted_connect.js";
 export type { GithubConnectResult, RunGithubHostedConnectOptions } from "./github_hosted_connect.js";
+export {
+  getSlackAccessToken,
+  listSlackOAuthAccounts,
+  revokeSlackAccount,
+} from "./slack_oauth_broker.js";
+export { scopesForSlackMode, SLACK_DEFAULT_MODE } from "./slack_oauth_scopes.js";
+export type { SlackMode } from "./slack_oauth_scopes.js";
+export { runSlackHostedConnectFlow } from "./slack_connect.js";
+export type { SlackConnectResult, RunSlackHostedConnectOptions } from "./slack_connect.js";
+export {
+  getLinearAccessToken,
+  listLinearOAuthAccounts,
+  revokeLinearAccount,
+} from "./linear_oauth_broker.js";
+export { scopesForLinearMode, LINEAR_DEFAULT_MODE } from "./linear_oauth_scopes.js";
+export type { LinearMode } from "./linear_oauth_scopes.js";
+export { runLinearHostedConnectFlow } from "./linear_connect.js";
+export type { LinearConnectResult, RunLinearHostedConnectOptions } from "./linear_connect.js";
+export {
+  getStripeAccessToken,
+  listStripeOAuthAccounts,
+  revokeStripeAccount,
+  stripeUserIdFromBundle,
+} from "./stripe_oauth_broker.js";
+export { stripeScopeForMode, STRIPE_DEFAULT_MODE } from "./stripe_oauth_scopes.js";
+export type { StripeMode } from "./stripe_oauth_scopes.js";
+export { runStripeHostedConnectFlow } from "./stripe_connect.js";
+export type { StripeConnectResult, RunStripeHostedConnectOptions } from "./stripe_connect.js";
 export type {
   LicenseTier,
   EntitlementKey,
