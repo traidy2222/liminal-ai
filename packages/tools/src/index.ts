@@ -114,7 +114,7 @@ import { createMicrosoftOfficeRestTools, microsoftOfficeRestEnabled } from "./mi
 import { registerXeroRestTools, xeroRestEnabled } from "./xero_rest.js";
 import { registerSlackRestTools, slackRestEnabled } from "./slack_rest.js";
 import { registerLinearRestTools, linearRestEnabled } from "./linear_rest.js";
-import { registerStripeRestTools, stripeRestEnabled } from "./stripe_rest.js";
+import { registerNotionRestTools, notionRestEnabled } from "./notion_rest.js";
 import { agentcardEnabled } from "./agentcard_cli.js";
 import { createAgentcardTools } from "./agentcard_tools.js";
 import { memoryPromoteTool } from "./memory_promote.js";
@@ -458,7 +458,7 @@ export async function registerAllTools(
     registerXeroRestTools(registry);
     registerSlackRestTools(registry);
     registerLinearRestTools(registry);
-    registerStripeRestTools(registry);
+    registerNotionRestTools(registry);
   }
   if (agentcardEnabled()) {
     for (const t of createAgentcardTools()) registry.register(t);
@@ -575,8 +575,8 @@ export {
   disconnectSlackFromServer,
   connectLinearFromServer,
   disconnectLinearFromServer,
-  connectStripeFromServer,
-  disconnectStripeFromServer,
+  connectNotionFromServer,
+  disconnectNotionFromServer,
 } from "./connect_provider.js";
 export { getMicrosoftSidecarStatus, stopMicrosoftSidecar } from "./microsoft_sidecar.js";
 export {

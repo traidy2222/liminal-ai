@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 
-enum IntegrationBrandId { google, microsoft, xero, slack, linear, stripe, github, advanced }
+enum IntegrationBrandId { google, microsoft, xero, slack, linear, notion, github, advanced }
 
 class IntegrationBrandMeta {
   const IntegrationBrandMeta({
@@ -54,12 +54,12 @@ const integrationBrands = <IntegrationBrandId, IntegrationBrandMeta>{
     accent: Color(0xFF5E6AD2),
     accentSoft: Color(0x245E6AD2),
   ),
-  IntegrationBrandId.stripe: IntegrationBrandMeta(
-    id: IntegrationBrandId.stripe,
-    title: 'Stripe',
-    tagline: 'Payments, subscriptions & billing',
-    accent: Color(0xFF635BFF),
-    accentSoft: Color(0x24635BFF),
+  IntegrationBrandId.notion: IntegrationBrandMeta(
+    id: IntegrationBrandId.notion,
+    title: 'Notion',
+    tagline: 'Pages, databases & workspace docs',
+    accent: Color(0xFFFFFFFF),
+    accentSoft: Color(0x14FFFFFF),
   ),
   IntegrationBrandId.github: IntegrationBrandMeta(
     id: IntegrationBrandId.github,
@@ -118,8 +118,8 @@ class _BrandLogo extends StatelessWidget {
         return Icon(Icons.tag_faces_rounded, size: 26, color: integrationBrands[id]!.accent);
       case IntegrationBrandId.linear:
         return Icon(Icons.linear_scale_rounded, size: 26, color: integrationBrands[id]!.accent);
-      case IntegrationBrandId.stripe:
-        return Icon(Icons.payments_rounded, size: 26, color: integrationBrands[id]!.accent);
+      case IntegrationBrandId.notion:
+        return Icon(Icons.description_outlined, size: 26, color: integrationBrands[id]!.accent);
       case IntegrationBrandId.github:
         return CustomPaint(size: const Size(28, 28), painter: _GithubLogoPainter());
       case IntegrationBrandId.advanced:

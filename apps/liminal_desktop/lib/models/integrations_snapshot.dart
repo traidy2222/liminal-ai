@@ -6,7 +6,7 @@ class IntegrationsSnapshot {
     required this.xero,
     required this.slack,
     required this.linear,
-    required this.stripe,
+    required this.notion,
     required this.connections,
   });
 
@@ -16,7 +16,7 @@ class IntegrationsSnapshot {
   final XeroIntegrations xero;
   final SlackIntegrations slack;
   final LinearIntegrations linear;
-  final StripeIntegrations stripe;
+  final NotionIntegrations notion;
   final List<IntegrationConnection> connections;
 
   factory IntegrationsSnapshot.fromJson(Map<String, dynamic> json) {
@@ -39,8 +39,8 @@ class IntegrationsSnapshot {
       linear: LinearIntegrations.fromJson(
         Map<String, dynamic>.from(json['linear'] as Map? ?? {}),
       ),
-      stripe: StripeIntegrations.fromJson(
-        Map<String, dynamic>.from(json['stripe'] as Map? ?? {}),
+      notion: NotionIntegrations.fromJson(
+        Map<String, dynamic>.from(json['notion'] as Map? ?? {}),
       ),
       connections: (json['connections'] as List<dynamic>? ?? [])
           .map(
@@ -59,7 +59,7 @@ class IntegrationsSnapshot {
     xero: XeroIntegrations.empty,
     slack: SlackIntegrations.empty,
     linear: LinearIntegrations.empty,
-    stripe: StripeIntegrations.empty,
+    notion: NotionIntegrations.empty,
     connections: [],
   );
 
@@ -100,7 +100,7 @@ class IntegrationsSnapshot {
 
   bool get linearConnected => linear.accounts.isNotEmpty;
 
-  bool get stripeConnected => stripe.accounts.isNotEmpty;
+  bool get notionConnected => notion.accounts.isNotEmpty;
 
   int get googleToolCount => googleMcp.fold(0, (n, c) => n + c.toolCount);
 
@@ -144,14 +144,12 @@ class IntegrationsSnapshot {
     return a.organizationName ?? a.email ?? a.accountId;
   }
 
-  String get stripeAccountLabel {
-    if (stripe.accounts.isEmpty) return 'Stripe';
-    final a = stripe.accounts.first;
-    final base = a.businessName ?? a.email ?? a.stripeUserId ?? a.accountId;
-    if (a.livemode == false) return '$base (test)';
-    if (a.livemode == true) return '$base (live)';
-    return base;
+  String get notionAccountLabel {
+    if (notion.accounts.isEmpty) return 'Notion';
+    final a = notion.accounts.first;
+    return a.workspaceName ?? a.email ?? a.accountId;
   }
+
 }
 
 class MicrosoftIntegrations {
@@ -415,47 +413,44 @@ class LinearOAuthAccount {
   }
 }
 
-class StripeIntegrations {
-  StripeIntegrations({required this.accounts});
+class NotionIntegrations {
+  NotionIntegrations({required this.accounts});
 
-  final List<StripeOAuthAccount> accounts;
+  final List<NotionOAuthAccount> accounts;
 
-  factory StripeIntegrations.fromJson(Map<String, dynamic> json) {
-    return StripeIntegrations(
+  factory NotionIntegrations.fromJson(Map<String, dynamic> json) {
+    return NotionIntegrations(
       accounts: (json['accounts'] as List<dynamic>? ?? [])
-          .map((e) => StripeOAuthAccount.fromJson(Map<String, dynamic>.from(e as Map)))
+          .map((e) => NotionOAuthAccount.fromJson(Map<String, dynamic>.from(e as Map)))
           .toList(),
     );
   }
 
-  static final empty = StripeIntegrations(accounts: []);
+  static final empty = NotionIntegrations(accounts: []);
 }
 
-class StripeOAuthAccount {
-  StripeOAuthAccount({
+class NotionOAuthAccount {
+  NotionOAuthAccount({
     required this.accountId,
     this.email,
     required this.scopes,
-    this.stripeUserId,
-    this.livemode,
-    this.businessName,
+    this.workspaceId,
+    this.workspaceName,
   });
 
   final String accountId;
   final String? email;
   final List<String> scopes;
-  final String? stripeUserId;
-  final bool? livemode;
-  final String? businessName;
+  final String? workspaceId;
+  final String? workspaceName;
 
-  factory StripeOAuthAccount.fromJson(Map<String, dynamic> json) {
-    return StripeOAuthAccount(
+  factory NotionOAuthAccount.fromJson(Map<String, dynamic> json) {
+    return NotionOAuthAccount(
       accountId: json['accountId'] as String? ?? '',
       email: json['email'] as String?,
       scopes: (json['scopes'] as List<dynamic>? ?? []).map((e) => e.toString()).toList(),
-      stripeUserId: json['stripeUserId'] as String?,
-      livemode: json['livemode'] as bool?,
-      businessName: json['businessName'] as String?,
+      workspaceId: json['workspaceId'] as String?,
+      workspaceName: json['workspaceName'] as String?,
     );
   }
 }

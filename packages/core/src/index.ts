@@ -1065,15 +1065,14 @@ export type { LinearMode } from "./linear_oauth_scopes.js";
 export { runLinearHostedConnectFlow } from "./linear_connect.js";
 export type { LinearConnectResult, RunLinearHostedConnectOptions } from "./linear_connect.js";
 export {
-  getStripeAccessToken,
-  listStripeOAuthAccounts,
-  revokeStripeAccount,
-  stripeUserIdFromBundle,
-} from "./stripe_oauth_broker.js";
-export { stripeScopeForMode, STRIPE_DEFAULT_MODE } from "./stripe_oauth_scopes.js";
-export type { StripeMode } from "./stripe_oauth_scopes.js";
-export { runStripeHostedConnectFlow } from "./stripe_connect.js";
-export type { StripeConnectResult, RunStripeHostedConnectOptions } from "./stripe_connect.js";
+  getNotionAccessToken,
+  listNotionOAuthAccounts,
+  revokeNotionAccount,
+} from "./notion_oauth_broker.js";
+export { notionScopeForMode, NOTION_DEFAULT_MODE } from "./notion_oauth_scopes.js";
+export type { NotionMode } from "./notion_oauth_scopes.js";
+export { runNotionHostedConnectFlow } from "./notion_connect.js";
+export type { NotionConnectResult, RunNotionHostedConnectOptions } from "./notion_connect.js";
 export type {
   LicenseTier,
   EntitlementKey,

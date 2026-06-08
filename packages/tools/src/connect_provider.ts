@@ -40,8 +40,8 @@ import {
   revokeSlackAccount,
   listLinearOAuthAccounts,
   revokeLinearAccount,
-  listStripeOAuthAccounts,
-  revokeStripeAccount,
+  listNotionOAuthAccounts,
+  revokeNotionAccount,
 } from "@liminal/core";
 import { defineTool } from "./helpers.js";
 import {
@@ -74,7 +74,7 @@ import { graphSearchRestEnabled } from "./graph_search_rest.js";
 import { xeroRestEnabled } from "./xero_rest.js";
 import { slackRestEnabled } from "./slack_rest.js";
 import { linearRestEnabled } from "./linear_rest.js";
-import { stripeRestEnabled } from "./stripe_rest.js";
+import { notionRestEnabled } from "./notion_rest.js";
 import {
   connectGithubMcp,
   disconnectGithubMcp,
@@ -228,15 +228,15 @@ export function createConnectorTools(registry: ToolRegistry, _emitter: AgentEmit
   const connectProviderTool = defineTool({
     name: "connect_provider",
     description:
-      "WHAT: Connect curated providers — Google, Microsoft 365, Xero, GitHub, Slack, Linear, or Stripe (hosted OAuth).\n" +
-      "WHEN: User asks to work with mail/calendar/files, accounting, repos, Slack, Linear, or Stripe revenue.\n" +
+      "WHAT: Connect curated providers — Google, Microsoft 365, Xero, GitHub, Slack, Linear, or Notion (hosted OAuth).\n" +
+      "WHEN: User asks to work with mail/calendar/files, accounting, repos, Slack, Linear, or Notion.\n" +
       "HOW: OAuth via Settings → Integrations on vireondynamics.com. GitHub also supports legacy GITHUB_TOKEN in .env.",
     parameters: {
       type: "object",
       properties: {
         provider: {
           type: "string",
-          enum: ["google_workspace", "microsoft_365", "xero", "github", "slack", "linear", "stripe"],
+          enum: ["google_workspace", "microsoft_365", "xero", "github", "slack", "linear", "notion"],
           description: "Provider preset id.",
         },
         services: {
@@ -323,22 +323,21 @@ export function createConnectorTools(registry: ToolRegistry, _emitter: AgentEmit
             ".\nTools: linear_list_teams, linear_list_issues, linear_get_issue, linear_create_issue, linear_add_comment.",
         };
       }
-      if (provider === "stripe") {
-        const accounts = await listStripeOAuthAccounts();
+      if (provider === "notion") {
+        const accounts = await listNotionOAuthAccounts();
         if (accounts.length === 0) {
           return {
             ok: false,
             error:
-              "Stripe OAuth not connected — open Settings → Integrations → Connect Stripe (hosted sign-in, no .env setup).",
+              "Notion OAuth not connected — open Settings → Integrations → Connect Notion (hosted sign-in, no .env setup).",
           };
         }
         const a = accounts[0]!;
         return {
           ok: true,
           output:
-            `Stripe connected as ${a.businessName ?? a.email ?? a.stripeUserId ?? a.accountId}` +
-            (a.livemode === false ? " (test mode)" : a.livemode ? " (live)" : "") +
-            ".\nTools: stripe_get_balance, stripe_list_customers, stripe_list_subscriptions, stripe_list_invoices, stripe_list_charges, stripe_create_refund.",
+            `Notion connected as ${a.workspaceName ?? a.email ?? a.accountId}` +
+            ".\nTools: notion_search, notion_get_page, notion_list_block_children, notion_get_database, notion_query_database, notion_create_page, notion_update_page, notion_append_blocks.",
         };
       }
       if (provider !== "google_workspace") {
@@ -483,7 +482,7 @@ export function createConnectorTools(registry: ToolRegistry, _emitter: AgentEmit
       properties: {
         provider: {
           type: "string",
-          enum: ["google_workspace", "microsoft_365", "xero", "github", "slack", "linear", "stripe"],
+          enum: ["google_workspace", "microsoft_365", "xero", "github", "slack", "linear", "notion"],
         },
         revoke_oauth: {
           type: "boolean",
@@ -538,16 +537,16 @@ export function createConnectorTools(registry: ToolRegistry, _emitter: AgentEmit
           output: `Disconnected linear${args["revoke_oauth"] === true ? " (OAuth tokens revoked)" : ""}.`,
         };
       }
-      if (provider === "stripe") {
+      if (provider === "notion") {
         if (args["revoke_oauth"] === true) {
-          const accounts = await listStripeOAuthAccounts();
+          const accounts = await listNotionOAuthAccounts();
           for (const a of accounts) {
-            await revokeStripeAccount(a.accountId);
+            await revokeNotionAccount(a.accountId);
           }
         }
         return {
           ok: true,
-          output: `Disconnected stripe${args["revoke_oauth"] === true ? " (OAuth tokens revoked)" : ""}.`,
+          output: `Disconnected notion${args["revoke_oauth"] === true ? " (OAuth tokens revoked)" : ""}.`,
         };
       }
       if (provider === "microsoft_365") {
@@ -619,7 +618,7 @@ export function createConnectorTools(registry: ToolRegistry, _emitter: AgentEmit
         `Linear: REST issue tools — ${linearRestEnabled() ? "on" : "off (set AGENT_LINEAR_REST=0 to disable)"}, connect via Settings → Integrations or \`liminal connect linear\``
       );
       lines.push(
-        `Stripe: REST payments tools — ${stripeRestEnabled() ? "on" : "off (set AGENT_STRIPE_REST=0 to disable)"}, connect via Settings → Integrations or \`liminal connect stripe\``
+        `Notion: REST workspace tools — ${notionRestEnabled() ? "on" : "off (set AGENT_NOTION_REST=0 to disable)"}, connect via Settings → Integrations or \`liminal connect notion\``
       );
       lines.push("");
 
@@ -683,22 +682,21 @@ export function createConnectorTools(registry: ToolRegistry, _emitter: AgentEmit
       }
       lines.push("");
 
-      const stripeAccounts = await listStripeOAuthAccounts();
-      lines.push("### Stripe OAuth");
-      if (stripeAccounts.length === 0) {
-        const onDisk = await countOAuthAccountFiles("stripe");
+      const notionAccounts = await listNotionOAuthAccounts();
+      lines.push("### Notion OAuth");
+      if (notionAccounts.length === 0) {
+        const onDisk = await countOAuthAccountFiles("notion");
         if (onDisk > 0) {
           lines.push(`- (tokens on disk but unreadable — ${onDisk} file(s))`);
-          lines.push(`  ${oauthDecryptHint("stripe")}`);
+          lines.push(`  ${oauthDecryptHint("notion")}`);
         } else {
-          lines.push("- (not connected — Settings → Integrations → Connect Stripe, or `liminal connect stripe`)");
+          lines.push("- (not connected — Settings → Integrations → Connect Notion, or `liminal connect notion`)");
         }
       } else {
-        for (const a of stripeAccounts) {
+        for (const a of notionAccounts) {
           const exp = new Date(a.expiresAt).toISOString();
-          const mode = a.livemode === false ? "test" : a.livemode ? "live" : "mode?";
           lines.push(
-            `- ${a.businessName ?? a.email ?? a.stripeUserId ?? a.accountId} (${mode}, refresh token on disk, access rotates ~${exp})`
+            `- ${a.workspaceName ?? a.email ?? a.accountId} (expires ~${exp}, ${a.scopes.length} scopes)`
           );
         }
       }
@@ -1066,22 +1064,22 @@ export async function disconnectLinearFromServer(
   return { ok: false, error: result.error };
 }
 
-export async function connectStripeFromServer(
+export async function connectNotionFromServer(
   registry: ToolRegistry
 ): Promise<{ ok: boolean; output?: string; error?: string }> {
   const { connectProviderTool } = createConnectorTools(registry, { emit: () => {} } as unknown as AgentEmitter);
-  const result = await connectProviderTool.handler({ provider: "stripe" });
+  const result = await connectProviderTool.handler({ provider: "notion" });
   if (result.ok) return { ok: true, output: result.output };
   return { ok: false, error: result.error };
 }
 
-export async function disconnectStripeFromServer(
+export async function disconnectNotionFromServer(
   registry: ToolRegistry,
   revokeOAuth = false
 ): Promise<{ ok: boolean; output?: string; error?: string }> {
   const { disconnectProviderTool } = createConnectorTools(registry, { emit: () => {} } as unknown as AgentEmitter);
   const result = await disconnectProviderTool.handler({
-    provider: "stripe",
+    provider: "notion",
     revoke_oauth: revokeOAuth,
   });
   if (result.ok) return { ok: true, output: result.output };

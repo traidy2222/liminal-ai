@@ -96,7 +96,7 @@ async function main(argv) {
     case "connect": {
       const sub = rest[0];
       if (!sub) {
-        log("error", "Usage: liminal connect <google|slack|linear|stripe|xero|github>");
+        log("error", "Usage: liminal connect <google|slack|linear|notion|xero|github>");
         return 1;
       }
       loadEnvForCli();
@@ -112,7 +112,7 @@ async function main(argv) {
     case "disconnect": {
       const sub = rest[0];
       if (!sub) {
-        log("error", "Usage: liminal disconnect <google|slack|linear|stripe|xero|github>");
+        log("error", "Usage: liminal disconnect <google|slack|linear|notion|xero|github>");
         return 1;
       }
       loadEnvForCli();

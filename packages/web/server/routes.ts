@@ -40,7 +40,7 @@ import {
   listXeroOAuthAccounts,
   listSlackOAuthAccounts,
   listLinearOAuthAccounts,
-  listStripeOAuthAccounts,
+  listNotionOAuthAccounts,
   buildHostedIntegrationConnectUrl,
   hostedOAuthHandoffPath,
   applyHostedOAuthHandoff,
@@ -66,8 +66,8 @@ import {
   disconnectSlackFromServer,
   connectLinearFromServer,
   disconnectLinearFromServer,
-  connectStripeFromServer,
-  disconnectStripeFromServer,
+  connectNotionFromServer,
+  disconnectNotionFromServer,
   listIntegrationConnections,
   attachCustomMcpFromServer,
   detachCustomMcpFromServer,
@@ -575,15 +575,14 @@ export function createRouter(
             organizationName: a.organizationName,
           })),
         },
-        stripe: {
-          accounts: (await listStripeOAuthAccounts()).map((a) => ({
+        notion: {
+          accounts: (await listNotionOAuthAccounts()).map((a) => ({
             accountId: a.accountId,
             email: a.email,
             scopes: a.scopes,
             expiresAt: a.expiresAt,
-            stripeUserId: a.stripeUserId,
-            livemode: a.livemode,
-            businessName: a.businessName,
+            workspaceId: a.workspaceId,
+            workspaceName: a.workspaceName,
           })),
         },
         connections,
@@ -864,15 +863,15 @@ export function createRouter(
     res.json({ connectUrl, authUrl: connectUrl, state });
   });
 
-  router.get("/api/integrations/stripe/begin", (req, res) => {
+  router.get("/api/integrations/notion/begin", (req, res) => {
     prunePendingHostedOAuth();
     const state = randomBytes(16).toString("hex");
     const mode = req.query["mode"] === "read_only" ? "read_only" : "read_write";
-    pendingHostedOAuth.set(state, { exp: Date.now() + 10 * 60_000, provider: "stripe", mode });
+    pendingHostedOAuth.set(state, { exp: Date.now() + 10 * 60_000, provider: "notion", mode });
     const harnessRedirectUri = hostedOAuthHandoffPath(WEB_PORT);
     const site = defaultVireonSiteOrigin();
     const connectUrl = buildHostedIntegrationConnectUrl({
-      provider: "stripe",
+      provider: "notion",
       harnessRedirectUri,
       harnessState: state,
       siteOrigin: site,
@@ -1023,9 +1022,9 @@ export function createRouter(
           else
             bridge.harness.getContext().refreshProtocolDynamic(bridge.harness.registry.getActiveToolNames());
         }
-        if (provider === "stripe") {
-          const stripeResult = await connectStripeFromServer(bridge.harness.registry);
-          if (!stripeResult.ok) attachWarning = stripeResult.error;
+        if (provider === "notion") {
+          const notionResult = await connectNotionFromServer(bridge.harness.registry);
+          if (!notionResult.ok) attachWarning = notionResult.error;
           else
             bridge.harness.getContext().refreshProtocolDynamic(bridge.harness.registry.getActiveToolNames());
         }
@@ -1095,10 +1094,10 @@ export function createRouter(
     res.json({ ok: true, output: result.output });
   });
 
-  router.delete("/api/integrations/stripe", async (req, res) => {
+  router.delete("/api/integrations/notion", async (req, res) => {
     const bridge = active();
     const revoke = req.query["revoke"] === "1" || req.query["revoke"] === "true";
-    const result = await disconnectStripeFromServer(bridge.harness.registry, revoke);
+    const result = await disconnectNotionFromServer(bridge.harness.registry, revoke);
     if (!result.ok) {
       res.status(400).json({ error: result.error });
       return;

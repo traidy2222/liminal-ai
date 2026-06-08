@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-/** liminal disconnect <slack|linear|stripe|xero|github> — revoke OAuth tokens on disk */
+/** liminal disconnect <slack|linear|xero|github> — revoke OAuth tokens on disk */
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { loadEnvForCli } from "./load-env.mjs";
@@ -16,10 +16,10 @@ const HOSTED_PROVIDERS = {
     revoke: "revokeLinearAccount",
     label: "Linear",
   },
-  stripe: {
-    list: "listStripeOAuthAccounts",
-    revoke: "revokeStripeAccount",
-    label: "Stripe",
+  notion: {
+    list: "listNotionOAuthAccounts",
+    revoke: "revokeNotionAccount",
+    label: "Notion",
   },
   xero: {
     list: "listXeroOAuthAccounts",
@@ -48,7 +48,7 @@ export async function runHostedDisconnectCli(provider) {
   const moduleFiles = {
     slack: "slack_oauth_broker.js",
     linear: "linear_oauth_broker.js",
-    stripe: "stripe_oauth_broker.js",
+    notion: "notion_oauth_broker.js",
     xero: "xero_oauth_broker.js",
     github: "github_oauth_broker.js",
   };
@@ -83,8 +83,7 @@ export async function runHostedDisconnectCli(provider) {
     const label =
       a.teamName ??
       a.organizationName ??
-      a.businessName ??
-      a.stripeUserId ??
+      a.workspaceName ??
       a.login ??
       a.email ??
       a.tenantName ??

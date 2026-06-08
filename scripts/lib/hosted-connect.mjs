@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * liminal connect <slack|linear|stripe|xero|github> — hosted OAuth via vireondynamics.com
+ * liminal connect <slack|linear|xero|github> — hosted OAuth via vireondynamics.com
  */
 import path from "node:path";
 import { pathToFileURL } from "node:url";
@@ -10,7 +10,7 @@ import { loadEnvForCli } from "./load-env.mjs";
 const HOSTED_PROVIDERS = {
   slack: { module: "slack_connect.js", export: "runSlackHostedConnectFlow", label: "Slack" },
   linear: { module: "linear_connect.js", export: "runLinearHostedConnectFlow", label: "Linear" },
-  stripe: { module: "stripe_connect.js", export: "runStripeHostedConnectFlow", label: "Stripe" },
+  notion: { module: "notion_connect.js", export: "runNotionHostedConnectFlow", label: "Notion" },
   xero: { module: "xero_connect.js", export: "runXeroHostedConnectFlow", label: "Xero" },
   github: { module: "github_hosted_connect.js", export: "runGithubHostedConnectFlow", label: "GitHub" },
 };
@@ -31,8 +31,8 @@ function formatResult(provider, result) {
       return result.teamName ?? result.email ?? result.accountId;
     case "linear":
       return result.organizationName ?? result.email ?? result.accountId;
-    case "stripe":
-      return result.email ?? result.stripeUserId ?? result.accountId;
+    case "notion":
+      return result.workspaceName ?? result.email ?? result.accountId;
     case "xero":
       return result.tenantName
         ? `${result.email ?? result.accountId} · ${result.tenantName}`

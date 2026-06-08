@@ -96,12 +96,11 @@ interface IntegrationsData {
       }
     >;
   };
-  stripe?: {
+  notion?: {
     accounts: Array<
       GoogleAccount & {
-        stripeUserId?: string;
-        livemode?: boolean;
-        businessName?: string;
+        workspaceId?: string;
+        workspaceName?: string;
       }
     >;
   };
@@ -112,7 +111,7 @@ export interface IntegrationsPanelProps {
   agentBusy: boolean;
 }
 
-type ExpandedId = "google" | "microsoft" | "xero" | "slack" | "linear" | "stripe" | "github" | "advanced" | null;
+type ExpandedId = "google" | "microsoft" | "xero" | "slack" | "linear" | "notion" | "github" | "advanced" | null;
 
 function FieldLabel({ children }: { children: React.ReactNode }) {
   return <div style={{ fontSize: 10, color: "#8899aa", marginBottom: 4 }}>{children}</div>;
@@ -250,7 +249,7 @@ export function IntegrationsPanel({ agentBusy }: IntegrationsPanelProps) {
   const [xeroMode, setXeroMode] = useState<"read_write" | "read_only">("read_write");
   const [slackMode, setSlackMode] = useState<"read_write" | "read_only">("read_write");
   const [linearMode, setLinearMode] = useState<"read_write" | "read_only">("read_write");
-  const [stripeMode, setStripeMode] = useState<"read_write" | "read_only">("read_write");
+  const [notionMode, setNotionMode] = useState<"read_write" | "read_only">("read_write");
   const [githubMode, setGithubMode] = useState<"read_write" | "read_only">("read_write");
   const [selectedServices, setSelectedServices] = useState<Set<string>>(new Set());
   const [msSelectedServices, setMsSelectedServices] = useState<Set<string>>(new Set());
@@ -382,14 +381,13 @@ export function IntegrationsPanel({ agentBusy }: IntegrationsPanelProps) {
   const xeroAccounts = data?.xero?.accounts ?? [];
   const slackAccounts = data?.slack?.accounts ?? [];
   const linearAccounts = data?.linear?.accounts ?? [];
-  const stripeAccounts = data?.stripe?.accounts ?? [];
-
+  const notionAccounts = data?.notion?.accounts ?? [];
   const googleConnected = googleMcp.length > 0;
   const microsoftConnected = microsoftMcp.length > 0;
   const xeroConnected = xeroAccounts.length > 0;
   const slackConnected = slackAccounts.length > 0;
   const linearConnected = linearAccounts.length > 0;
-  const stripeConnected = stripeAccounts.length > 0;
+  const notionConnected = notionAccounts.length > 0;
   const githubConnected = githubMcp.length > 0;
   const googleToolCount = googleMcp.reduce((n, c) => n + c.toolCount, 0);
   const microsoftToolCount = microsoftMcp.reduce((n, c) => n + c.toolCount, 0);
@@ -519,18 +517,18 @@ export function IntegrationsPanel({ agentBusy }: IntegrationsPanelProps) {
     await pollIntegrationsUntil((d) => (d.linear?.accounts.length ?? 0) > 0);
   };
 
-  const stripePrimary = async () => {
-    if (stripeConnected) {
-      const res = await webApiFetch("/api/integrations/stripe?revoke=1", { method: "DELETE" });
+  const notionPrimary = async () => {
+    if (notionConnected) {
+      const res = await webApiFetch("/api/integrations/notion?revoke=1", { method: "DELETE" });
       const json = (await res.json()) as { error?: string };
       if (!res.ok) throw new Error(json.error ?? "disconnect failed");
       return;
     }
-    const res = await webApiFetch(`/api/integrations/stripe/begin?mode=${stripeMode}`);
+    const res = await webApiFetch(`/api/integrations/notion/begin?mode=${notionMode}`);
     if (!res.ok) throw new Error(await res.text());
     const { connectUrl } = (await res.json()) as { connectUrl: string };
     window.open(connectUrl, "_blank", "noopener,noreferrer");
-    await pollIntegrationsUntil((d) => (d.stripe?.accounts.length ?? 0) > 0);
+    await pollIntegrationsUntil((d) => (d.notion?.accounts.length ?? 0) > 0);
   };
 
   return (
@@ -940,44 +938,44 @@ export function IntegrationsPanel({ agentBusy }: IntegrationsPanelProps) {
       </IntegrationCard>
 
       <IntegrationCard
-        brandId="stripe"
+        brandId="notion"
         statusLine={
-          stripeConnected
-            ? `Ready · ${stripeAccounts[0]?.businessName ?? stripeAccounts[0]?.email ?? stripeAccounts[0]?.stripeUserId ?? "account linked"}${stripeAccounts[0]?.livemode === false ? " (test)" : stripeAccounts[0]?.livemode ? " (live)" : ""}`
-            : INTEGRATION_BRANDS.stripe.tagline
+          notionConnected
+            ? `Ready · ${notionAccounts[0]?.workspaceName ?? notionAccounts[0]?.email ?? "workspace linked"}`
+            : INTEGRATION_BRANDS.notion.tagline
         }
-        connected={stripeConnected}
-        expanded={expanded === "stripe"}
-        onToggle={() => toggleExpand("stripe")}
-        primaryLabel={stripeConnected ? "Disconnect" : "Connect"}
-        primaryDanger={stripeConnected}
+        connected={notionConnected}
+        expanded={expanded === "notion"}
+        onToggle={() => toggleExpand("notion")}
+        primaryLabel={notionConnected ? "Disconnect" : "Connect"}
+        primaryDanger={notionConnected}
         primaryDisabled={disabled}
-        onPrimary={() => void run(stripePrimary)}
+        onPrimary={() => void run(notionPrimary)}
       >
         <p style={{ fontSize: 11, color: "#778899", lineHeight: 1.45, margin: "10px 0" }}>
-          Connect your Stripe account so your agent can read balances, customers, subscriptions, invoices, and charges.
+          Sign in with Notion and pick pages to share so your agent can search, read, and update docs (with approval).
         </p>
-        {stripeAccounts.map((a) => (
+        {notionAccounts.map((a) => (
           <div key={a.accountId} style={{ fontSize: 11, fontFamily: "monospace", color: GREEN, marginBottom: 6 }}>
-            {a.businessName ?? a.email ?? a.stripeUserId ?? a.accountId} — {a.scopes.length} scopes
+            {a.email ?? a.workspaceName ?? a.accountId} — {a.scopes.length} scopes
           </div>
         ))}
         <div style={{ marginBottom: 8 }}>
           <label style={{ fontSize: 11, color: "#aabbcc", marginRight: 12 }}>
             <input
               type="radio"
-              checked={stripeMode === "read_write"}
-              onChange={() => setStripeMode("read_write")}
-              disabled={disabled || stripeConnected}
+              checked={notionMode === "read_write"}
+              onChange={() => setNotionMode("read_write")}
+              disabled={disabled || notionConnected}
             />{" "}
             Read + write
           </label>
           <label style={{ fontSize: 11, color: "#aabbcc" }}>
             <input
               type="radio"
-              checked={stripeMode === "read_only"}
-              onChange={() => setStripeMode("read_only")}
-              disabled={disabled || stripeConnected}
+              checked={notionMode === "read_only"}
+              onChange={() => setNotionMode("read_only")}
+              disabled={disabled || notionConnected}
             />{" "}
             Read only
           </label>

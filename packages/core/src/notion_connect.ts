@@ -1,27 +1,26 @@
 import { runHostedIntegrationConnectFlow } from "./hosted_oauth_connect.js";
-import type { StripeMode } from "./stripe_oauth_scopes.js";
+import type { NotionMode } from "./notion_oauth_scopes.js";
 
-export type StripeConnectResult = {
+export type NotionConnectResult = {
   accountId: string;
   email?: string;
-  stripeUserId?: string;
-  livemode?: boolean;
+  workspaceName?: string;
   scopes: string[];
 };
 
-export interface RunStripeHostedConnectOptions {
+export interface RunNotionHostedConnectOptions {
   siteOrigin?: string;
-  mode?: StripeMode;
+  mode?: NotionMode;
   openBrowser?: boolean;
   onStatus?: (message: string) => void;
   timeoutMs?: number;
 }
 
-export function runStripeHostedConnectFlow(
-  options: RunStripeHostedConnectOptions = {}
-): Promise<StripeConnectResult> {
+export function runNotionHostedConnectFlow(
+  options: RunNotionHostedConnectOptions = {}
+): Promise<NotionConnectResult> {
   return runHostedIntegrationConnectFlow({
-    provider: "stripe",
+    provider: "notion",
     siteOrigin: options.siteOrigin,
     mode: options.mode ?? "read_write",
     openBrowser: options.openBrowser,
@@ -30,8 +29,7 @@ export function runStripeHostedConnectFlow(
   }).then((r) => ({
     accountId: r.accountId,
     email: r.email,
-    stripeUserId: (r.metadata as { stripeUserId?: string } | undefined)?.stripeUserId,
-    livemode: (r.metadata as { livemode?: boolean } | undefined)?.livemode,
+    workspaceName: (r.metadata as { workspaceName?: string } | undefined)?.workspaceName,
     scopes: r.scopes ?? [],
   }));
 }

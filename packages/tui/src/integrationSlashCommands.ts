@@ -1,17 +1,17 @@
 import {
   runSlackHostedConnectFlow,
   runLinearHostedConnectFlow,
-  runStripeHostedConnectFlow,
+  runNotionHostedConnectFlow,
   runXeroHostedConnectFlow,
   runGithubHostedConnectFlow,
   listSlackOAuthAccounts,
   listLinearOAuthAccounts,
-  listStripeOAuthAccounts,
+  listNotionOAuthAccounts,
   listXeroOAuthAccounts,
   listGithubOAuthAccounts,
   revokeSlackAccount,
   revokeLinearAccount,
-  revokeStripeAccount,
+  revokeNotionAccount,
   revokeXeroAccount,
   revokeGithubAccount,
 } from "@liminal/core";
@@ -20,7 +20,7 @@ export type IntegrationSlashResult =
   | { kind: "handled"; message: string }
   | { kind: "usage"; message: string };
 
-const CONNECT_TARGETS = ["slack", "linear", "stripe", "xero", "github"] as const;
+const CONNECT_TARGETS = ["slack", "linear", "notion", "xero", "github"] as const;
 type ConnectTarget = (typeof CONNECT_TARGETS)[number];
 
 function isConnectTarget(value: string): value is ConnectTarget {
@@ -66,8 +66,8 @@ function accountLabel(provider: ConnectTarget, account: Record<string, unknown>)
       return String(account.teamName ?? account.email ?? account.accountId);
     case "linear":
       return String(account.organizationName ?? account.email ?? account.accountId);
-    case "stripe":
-      return String(account.businessName ?? account.email ?? account.stripeUserId ?? account.accountId);
+    case "notion":
+      return String(account.workspaceName ?? account.email ?? account.accountId);
     case "xero":
       return String(account.email ?? account.accountId);
     case "github":
@@ -76,17 +76,17 @@ function accountLabel(provider: ConnectTarget, account: Record<string, unknown>)
 }
 
 async function integrationStatusLine(): Promise<string> {
-  const [slack, linear, stripe, xero, github] = await Promise.all([
+  const [slack, linear, notion, xero, github] = await Promise.all([
     listSlackOAuthAccounts(),
     listLinearOAuthAccounts(),
-    listStripeOAuthAccounts(),
+    listNotionOAuthAccounts(),
     listXeroOAuthAccounts(),
     listGithubOAuthAccounts(),
   ]);
   const parts: string[] = [];
   if (slack.length) parts.push(`Slack: ${accountLabel("slack", slack[0]!)}`);
   if (linear.length) parts.push(`Linear: ${accountLabel("linear", linear[0]!)}`);
-  if (stripe.length) parts.push(`Stripe: ${accountLabel("stripe", stripe[0]!)}`);
+  if (notion.length) parts.push(`Notion: ${accountLabel("notion", notion[0]!)}`);
   if (xero.length) parts.push(`Xero: ${accountLabel("xero", xero[0]!)}`);
   if (github.length) parts.push(`GitHub: ${accountLabel("github", github[0]!)}`);
   if (!parts.length) {
@@ -102,8 +102,8 @@ export async function runIntegrationSlashCommand(
     return { kind: "handled", message: await integrationStatusLine() };
   }
 
-  const usageConnect = "Usage: /connect <slack|linear|stripe|xero|github> [--read-only]";
-  const usageDisconnect = "Usage: /disconnect <slack|linear|stripe|xero|github>";
+  const usageConnect = "Usage: /connect <slack|linear|notion|xero|github> [--read-only]";
+  const usageDisconnect = "Usage: /disconnect <slack|linear|notion|xero|github>";
 
   if (!parsed.provider || !isConnectTarget(parsed.provider)) {
     return {
@@ -118,14 +118,14 @@ export async function runIntegrationSlashCommand(
     const listers = {
       slack: listSlackOAuthAccounts,
       linear: listLinearOAuthAccounts,
-      stripe: listStripeOAuthAccounts,
+      notion: listNotionOAuthAccounts,
       xero: listXeroOAuthAccounts,
       github: listGithubOAuthAccounts,
     } as const;
     const revokers = {
       slack: revokeSlackAccount,
       linear: revokeLinearAccount,
-      stripe: revokeStripeAccount,
+      notion: revokeNotionAccount,
       xero: revokeXeroAccount,
       github: revokeGithubAccount,
     } as const;
@@ -153,9 +153,9 @@ export async function runIntegrationSlashCommand(
   } else if (provider === "linear") {
     const result = await runLinearHostedConnectFlow(flowOpts);
     who = result.organizationName ?? result.email ?? result.accountId;
-  } else if (provider === "stripe") {
-    const result = await runStripeHostedConnectFlow(flowOpts);
-    who = result.email ?? result.stripeUserId ?? result.accountId;
+  } else if (provider === "notion") {
+    const result = await runNotionHostedConnectFlow(flowOpts);
+    who = result.workspaceName ?? result.email ?? result.accountId;
   } else if (provider === "github") {
     const result = await runGithubHostedConnectFlow(flowOpts);
     who = result.login ?? result.email ?? result.accountId;

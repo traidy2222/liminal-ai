@@ -152,11 +152,11 @@ export interface ClientCommandMap {
     openBrowser?: boolean;
   };
   disconnect_linear: { revoke?: boolean };
-  connect_stripe_oauth: {
+  connect_notion_oauth: {
     mode?: "read_write" | "read_only";
     openBrowser?: boolean;
   };
-  disconnect_stripe: { revoke?: boolean };
+  disconnect_notion: { revoke?: boolean };
   connect_github_oauth: {
     mode?: "read_write" | "read_only";
     openBrowser?: boolean;

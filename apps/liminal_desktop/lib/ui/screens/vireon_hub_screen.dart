@@ -458,7 +458,6 @@ class _IntegrationsHubSummary extends StatelessWidget {
       snap.xeroConnected,
       snap.slackConnected,
       snap.linearConnected,
-      snap.stripeConnected,
     ].where((v) => v).length;
     final connCount = snap.connections.length;
     final parts = <String>[
@@ -468,7 +467,6 @@ class _IntegrationsHubSummary extends StatelessWidget {
       if (snap.xeroConnected) 'Xero',
       if (snap.slackConnected) 'Slack',
       if (snap.linearConnected) 'Linear',
-      if (snap.stripeConnected) 'Stripe',
       if (snap.customMcp.isNotEmpty) '${snap.customMcp.length} custom',
     ];
     return Column(
@@ -483,7 +481,7 @@ class _IntegrationsHubSummary extends StatelessWidget {
             IntegrationBrandIcon(id: IntegrationBrandId.xero, size: 36),
             IntegrationBrandIcon(id: IntegrationBrandId.slack, size: 36),
             IntegrationBrandIcon(id: IntegrationBrandId.linear, size: 36),
-            IntegrationBrandIcon(id: IntegrationBrandId.stripe, size: 36),
+            IntegrationBrandIcon(id: IntegrationBrandId.notion, size: 36),
             IntegrationBrandIcon(id: IntegrationBrandId.github, size: 36),
           ],
         ),

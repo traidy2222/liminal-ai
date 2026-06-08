@@ -58,8 +58,8 @@ import {
   disconnectSlack,
   connectLinearOAuth,
   disconnectLinear,
-  connectStripeOAuth,
-  disconnectStripe,
+  connectNotionOAuth,
+  disconnectNotion,
   disconnectIntegrationOpenApi,
 } from "./integrations_api.js";
 
@@ -824,10 +824,10 @@ export class WsServer {
           return;
         }
 
-        case "connect_stripe_oauth": {
+        case "connect_notion_oauth": {
           const d = data as { mode?: "read_write" | "read_only"; openBrowser?: boolean };
           try {
-            const result = await connectStripeOAuth(this.registry, d);
+            const result = await connectNotionOAuth(this.registry, d);
             const snap = await buildIntegrationsSnapshot();
             this.ack(ws, id, true, undefined, { ...result, integrations: snap });
           } catch (err) {
@@ -836,10 +836,10 @@ export class WsServer {
           return;
         }
 
-        case "disconnect_stripe": {
+        case "disconnect_notion": {
           const d = data as { revoke?: boolean };
           try {
-            const output = await disconnectStripe(this.registry, d.revoke === true);
+            const output = await disconnectNotion(this.registry, d.revoke === true);
             const snap = await buildIntegrationsSnapshot();
             this.ack(ws, id, true, undefined, { output, integrations: snap });
           } catch (err) {

@@ -7,10 +7,10 @@ import {
   listXeroOAuthAccounts,
   listSlackOAuthAccounts,
   listLinearOAuthAccounts,
-  listStripeOAuthAccounts,
+  listNotionOAuthAccounts,
   runSlackHostedConnectFlow,
   runLinearHostedConnectFlow,
-  runStripeHostedConnectFlow,
+  runNotionHostedConnectFlow,
   missingDefaultWorkspaceScopes,
   missingDefaultMicrosoftScopes,
   runGoogleHostedConnectFlow,
@@ -26,7 +26,7 @@ import {
   connectXeroFromServer,
   connectSlackFromServer,
   connectLinearFromServer,
-  connectStripeFromServer,
+  connectNotionFromServer,
   connectOpenApiFromServer,
   detachCustomMcpFromServer,
   disconnectGithubFromServer,
@@ -35,7 +35,7 @@ import {
   disconnectXeroFromServer,
   disconnectSlackFromServer,
   disconnectLinearFromServer,
-  disconnectStripeFromServer,
+  disconnectNotionFromServer,
   disconnectOpenApiFromServer,
   getGoogleSidecarStatus,
   getMicrosoftSidecarStatus,
@@ -103,15 +103,14 @@ export async function buildIntegrationsSnapshot() {
         organizationName: a.organizationName,
       })),
     },
-    stripe: {
-      accounts: (await listStripeOAuthAccounts()).map((a) => ({
+    notion: {
+      accounts: (await listNotionOAuthAccounts()).map((a) => ({
         accountId: a.accountId,
         email: a.email,
         scopes: a.scopes,
         expiresAt: a.expiresAt,
-        stripeUserId: a.stripeUserId,
-        livemode: a.livemode,
-        businessName: a.businessName,
+        workspaceId: a.workspaceId,
+        workspaceName: a.workspaceName,
       })),
     },
     connections: await listIntegrationConnections(),
@@ -375,33 +374,33 @@ export async function disconnectLinear(registry: ChatRegistry, revoke: boolean):
   return result.output ?? "Linear disconnected.";
 }
 
-export async function connectStripeOAuth(
+export async function connectNotionOAuth(
   registry: ChatRegistry,
   opts: { mode?: "read_write" | "read_only"; openBrowser?: boolean }
-): Promise<{ accountId: string; email?: string; stripeUserId?: string; livemode?: boolean }> {
-  const result = await runStripeHostedConnectFlow({
+): Promise<{ accountId: string; email?: string; workspaceName?: string }> {
+  const result = await runNotionHostedConnectFlow({
     mode: opts.mode ?? "read_write",
     openBrowser: opts.openBrowser !== false,
-    onStatus: (m) => console.log(`[stripe-oauth] ${m}`),
+    onStatus: (m) => console.log(`[notion-oauth] ${m}`),
   });
   try {
     assertHarnessesIdle(registry);
     const bridge = await registry.getOrCreateActive();
-    await connectStripeFromServer(bridge.harness.registry);
+    await connectNotionFromServer(bridge.harness.registry);
     await refreshIntegrationsOnAllHarnesses(registry);
   } catch (e) {
-    console.warn("[stripe-oauth] tokens saved but harness refresh failed:", e instanceof Error ? e.message : e);
+    console.warn("[notion-oauth] tokens saved but harness refresh failed:", e instanceof Error ? e.message : e);
   }
   return result;
 }
 
-export async function disconnectStripe(registry: ChatRegistry, revoke: boolean): Promise<string> {
+export async function disconnectNotion(registry: ChatRegistry, revoke: boolean): Promise<string> {
   assertHarnessesIdle(registry);
   const bridge = await registry.getOrCreateActive();
-  const result = await disconnectStripeFromServer(bridge.harness.registry, revoke);
-  if (!result.ok) throw new Error(result.error ?? "Stripe disconnect failed.");
+  const result = await disconnectNotionFromServer(bridge.harness.registry, revoke);
+  if (!result.ok) throw new Error(result.error ?? "Notion disconnect failed.");
   await refreshIntegrationsOnAllHarnesses(registry);
-  return result.output ?? "Stripe disconnected.";
+  return result.output ?? "Notion disconnected.";
 }
 
 export async function attachIntegrationMcp(

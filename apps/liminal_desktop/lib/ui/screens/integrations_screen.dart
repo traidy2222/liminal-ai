@@ -27,7 +27,7 @@ class _IntegrationsScreenState extends State<IntegrationsScreen> {
   String _xeroMode = 'read_write';
   String _slackMode = 'read_write';
   String _linearMode = 'read_write';
-  String _stripeMode = 'read_write';
+  String _notionMode = 'read_write';
   String _githubMode = 'read_write';
   final Set<String> _googleServices = {};
   final Set<String> _microsoftServices = {};
@@ -159,12 +159,12 @@ class _IntegrationsScreenState extends State<IntegrationsScreen> {
     await host.connectLinearOAuth(mode: _linearMode);
   }
 
-  Future<void> _stripePrimary(AppController host, IntegrationsSnapshot snap) async {
-    if (snap.stripeConnected) {
-      await host.disconnectStripe(revoke: true);
+  Future<void> _notionPrimary(AppController host, IntegrationsSnapshot snap) async {
+    if (snap.notionConnected) {
+      await host.disconnectNotion(revoke: true);
       return;
     }
-    await host.connectStripeOAuth(mode: _stripeMode);
+    await host.connectNotionOAuth(mode: _notionMode);
   }
 
   Future<void> _githubPrimary(AppController host, IntegrationsSnapshot snap) async {
@@ -492,54 +492,49 @@ class _IntegrationsScreenState extends State<IntegrationsScreen> {
                         ),
                       ),
                       SizedBox(
-                        width: _expandedId == 'stripe' ? constraints.maxWidth : tileWidth.clamp(148, 280),
+                        width: _expandedId == 'notion' ? constraints.maxWidth : tileWidth.clamp(148, 280),
                         child: _IntegrationCard(
-                          brandId: IntegrationBrandId.stripe,
-                          statusLine: snap.stripeConnected
-                              ? 'Ready · ${snap.stripeAccountLabel}'
-                              : integrationBrands[IntegrationBrandId.stripe]!.tagline,
-                          connected: snap.stripeConnected,
-                          expanded: _expandedId == 'stripe',
-                          onToggle: () => _toggleExpanded('stripe'),
-                          primaryLabel: snap.stripeConnected ? 'Disconnect' : 'Connect',
-                          primaryDanger: snap.stripeConnected,
+                          brandId: IntegrationBrandId.notion,
+                          statusLine: snap.notionConnected
+                              ? 'Ready · ${snap.notionAccountLabel}'
+                              : integrationBrands[IntegrationBrandId.notion]!.tagline,
+                          connected: snap.notionConnected,
+                          expanded: _expandedId == 'notion',
+                          onToggle: () => _toggleExpanded('notion'),
+                          primaryLabel: snap.notionConnected ? 'Disconnect' : 'Connect',
+                          primaryDanger: snap.notionConnected,
                           disabled: disabled,
-                          onPrimary: () => unawaited(_stripePrimary(host, snap)),
+                          onPrimary: () => unawaited(_notionPrimary(host, snap)),
                           child: Padding(
                             padding: const EdgeInsets.only(top: 8),
                             child: Column(
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
-                                Text(
-                                  'Connect Stripe so your agent can read balances, customers, subscriptions, and invoices.',
-                                  style: TextStyle(color: lim.textMuted, fontSize: 12, height: 1.4),
-                                ),
-                                const SizedBox(height: 8),
                                 Row(
                                   children: [
                                     Radio<String>(
                                       value: 'read_write',
-                                      groupValue: _stripeMode,
-                                      onChanged: disabled || snap.stripeConnected
+                                      groupValue: _notionMode,
+                                      onChanged: disabled || snap.notionConnected
                                           ? null
-                                          : (v) => setState(() => _stripeMode = v ?? 'read_write'),
+                                          : (v) => setState(() => _notionMode = v ?? 'read_write'),
                                     ),
                                     const Text('Read + write'),
                                     const SizedBox(width: 12),
                                     Radio<String>(
                                       value: 'read_only',
-                                      groupValue: _stripeMode,
-                                      onChanged: disabled || snap.stripeConnected
+                                      groupValue: _notionMode,
+                                      onChanged: disabled || snap.notionConnected
                                           ? null
-                                          : (v) => setState(() => _stripeMode = v ?? 'read_only'),
+                                          : (v) => setState(() => _notionMode = v ?? 'read_only'),
                                     ),
                                     const Text('Read only'),
                                   ],
                                 ),
-                                if (snap.stripeConnected)
+                                if (snap.notionConnected)
                                   TextButton(
-                                    onPressed: disabled ? null : () => host.disconnectStripe(revoke: true),
-                                    child: Text('Revoke Stripe access', style: TextStyle(color: lim.danger)),
+                                    onPressed: disabled ? null : () => host.disconnectNotion(revoke: true),
+                                    child: Text('Revoke Notion access', style: TextStyle(color: lim.danger)),
                                   ),
                               ],
                             ),

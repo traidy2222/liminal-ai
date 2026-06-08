@@ -6,7 +6,7 @@ export type IntegrationBrandId =
   | "xero"
   | "slack"
   | "linear"
-  | "stripe"
+  | "notion"
   | "github"
   | "advanced";
 
@@ -54,12 +54,12 @@ export const INTEGRATION_BRANDS: Record<IntegrationBrandId, IntegrationBrandMeta
     accent: "#5E6AD2",
     accentSoft: "rgba(94, 106, 210, 0.14)",
   },
-  stripe: {
-    id: "stripe",
-    title: "Stripe",
-    tagline: "Payments, subscriptions & billing",
-    accent: "#635BFF",
-    accentSoft: "rgba(99, 91, 255, 0.14)",
+  notion: {
+    id: "notion",
+    title: "Notion",
+    tagline: "Pages, databases & workspace docs",
+    accent: "#FFFFFF",
+    accentSoft: "rgba(255, 255, 255, 0.08)",
   },
   github: {
     id: "github",
@@ -122,11 +122,10 @@ function LogoSvg({ id }: { id: IntegrationBrandId }) {
           <path d="M3.5 17.2 17.2 3.5l3.3 3.3L6.8 20.5 3.5 17.2Zm4.9-4.9 6.6-6.6 1.7 1.7-6.6 6.6-1.7-1.7Z" />
         </svg>
       );
-    case "stripe":
+    case "notion":
       return (
-        <svg viewBox="0 0 24 24" width="28" height="28" aria-hidden fill="#635BFF">
-          <path d="M13.3 10.2c0-.9-.7-1.2-1.9-1.4-1.5-.2-1.7-.6-1.7-1 0-.6.5-1 1.5-1 1.1 0 1.7.4 1.8 1.1h1.8c-.1-1.5-1.2-2.6-3.6-2.6-2.1 0-3.5 1.1-3.5 2.7 0 1.7 1.3 2.2 3.2 2.5 1.6.2 1.9.6 1.9 1.1 0 .7-.6 1.1-1.7 1.1-1.4 0-2-.5-2.1-1.3H7.4c.1 1.7 1.4 2.8 4.1 2.8 2.3 0 3.8-1.1 3.8-2.8Z" />
-          <path d="M4.5 6.5h13v11H4.5v-11Z" fill="none" stroke="#635BFF" strokeWidth="1.4" />
+        <svg viewBox="0 0 24 24" width="28" height="28" aria-hidden fill="#FFFFFF">
+          <path d="M4.5 3.2h11.2l4.3 2.5v14.6c0 .9-.7 1.7-1.7 1.7H4.5c-1 0-1.7-.8-1.7-1.7V4.9c0-.9.7-1.7 1.7-1.7Zm.8 1.6v13.2h12.4V7.1l-3.4-2H5.3Zm3.1 2.4h7.8v1.4H8.4V7.2Zm0 3.4h7.8v1.4H8.4v-1.4Zm0 3.4h5.6v1.4H8.4v-1.4Z" />
         </svg>
       );
     case "github":

@@ -916,7 +916,7 @@ class AppController extends ChangeNotifier {
         command == 'connect_xero_oauth' ||
         command == 'connect_slack_oauth' ||
         command == 'connect_linear_oauth' ||
-        command == 'connect_stripe_oauth' ||
+        command == 'connect_notion_oauth' ||
         command == 'connect_github_oauth';
   }
 
@@ -1052,14 +1052,14 @@ class AppController extends ChangeNotifier {
   Future<bool> disconnectLinear({bool revoke = false}) =>
       _runIntegrationCommand('disconnect_linear', {'revoke': revoke});
 
-  Future<bool> connectStripeOAuth({String mode = 'read_write'}) =>
-      _runIntegrationCommand('connect_stripe_oauth', {
+  Future<bool> connectNotionOAuth({String mode = 'read_write'}) =>
+      _runIntegrationCommand('connect_notion_oauth', {
         'mode': mode,
         'openBrowser': true,
       });
 
-  Future<bool> disconnectStripe({bool revoke = false}) =>
-      _runIntegrationCommand('disconnect_stripe', {'revoke': revoke});
+  Future<bool> disconnectNotion({bool revoke = false}) =>
+      _runIntegrationCommand('disconnect_notion', {'revoke': revoke});
 
   Future<bool> connectGithubOAuth({String mode = 'read_write'}) =>
       _runIntegrationCommand('connect_github_oauth', {
