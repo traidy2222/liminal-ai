@@ -25,7 +25,8 @@ export const writeFileTool = defineTool({
     "WHEN: You have the full file content, or a trailing chunk. For very large files, " +
     "call write_file once with mode=create, then mode=append for each follow-up section.\n" +
     "NOT WHEN: Making a targeted change to part of an existing file — use edit_file instead.\n" +
-    "ARGS: path; content; mode (create|overwrite|append); optional expected_lines for integrity hints.",
+    "Existing files with real content: edit_file first; mode=overwrite needs confirm_overwrite: true after read_file.\n" +
+    "ARGS: path; content; mode (create|overwrite|append); confirm_overwrite; optional expected_lines.",
   requiresApproval: true,
   dangerLevel: "cautious",
   resourceLocks: (args) => [`file:write:${args["path"] as string}`],
@@ -42,6 +43,12 @@ export const writeFileTool = defineTool({
           "overwrite: replace an existing file wholesale. " +
           "append: add to the end (creates the file if missing).",
       },
+      confirm_overwrite: {
+        type: "boolean",
+        description:
+          "Required with mode=overwrite on an existing non-trivial file (>8 lines or >400 bytes). " +
+          "Call read_file first; prefer edit_file for partial changes.",
+      },
       expected_lines: {
         type: "number",
         description: "Optional line count you expect in the final file (hints if output looks short).",
@@ -57,6 +64,7 @@ export const writeFileTool = defineTool({
   handler: async (args) => {
     const pathArg = args["path"] as string;
     const mode = resolveMode(args["mode"]);
+    const confirmOverwrite = args["confirm_overwrite"] === true;
     const callId = typeof args["__harness_call_id"] === "string" ? args["__harness_call_id"] : "";
     const streamManifest = callId ? takeFileWriteStreamManifest(callId) : undefined;
     const verb = mode === "append" ? "Appended" : "Wrote";
@@ -76,7 +84,8 @@ export const writeFileTool = defineTool({
         const content = await promoteStagingFile(
           streamManifest.stagingPath,
           streamManifest.targetPath,
-          mode
+          mode,
+          { confirmOverwrite }
         );
         const full =
           mode === "append"
@@ -100,7 +109,7 @@ export const writeFileTool = defineTool({
     const truncErr = rejectIfLikelyTruncated(content);
     if (truncErr) return { ok: false, error: truncErr };
 
-    const prep = await prepareFileWrite(pathArg, mode);
+    const prep = await prepareFileWrite(pathArg, mode, { confirmOverwrite });
     if (!prep.ok) return { ok: false, error: prep.error };
 
     // Append mode: insert a newline separator if the existing file does not end

@@ -13,6 +13,10 @@ import {
 
 export type FileWriteMode = "create" | "append" | "overwrite";
 
+/** Existing files above these thresholds require confirm_overwrite for mode=overwrite. */
+export const OVERWRITE_GUARD_MIN_LINES = 8;
+export const OVERWRITE_GUARD_MIN_BYTES = 400;
+
 export const TRUNCATED_WRITE_ERROR =
   "Refusing write: content looks truncated (unclosed string/brace). Partial bytes NOT written. " +
   "Re-issue from the cut point or use write_file with mode=append.";
@@ -27,9 +31,36 @@ export type PrepareFileWriteResult =
   | { ok: true; resolvedPath: string }
   | { ok: false; error: string };
 
+export async function checkOverwriteAllowed(
+  resolvedPath: string,
+  confirmOverwrite: boolean
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  let existing: string;
+  try {
+    existing = await readFile(resolvedPath, "utf8");
+  } catch {
+    return { ok: true };
+  }
+  const lines = existing.split("\n").length;
+  const substantial =
+    existing.length > OVERWRITE_GUARD_MIN_BYTES || lines > OVERWRITE_GUARD_MIN_LINES;
+  if (!substantial || confirmOverwrite) {
+    return { ok: true };
+  }
+  return {
+    ok: false,
+    error:
+      `Refusing whole-file overwrite of ${resolvedPath} (${lines} lines, ${existing.length} bytes).\n` +
+      "Use edit_file with replacements or diff for targeted changes.\n" +
+      "Workflow: grep_file or read_file → edit_file. " +
+      "Only if you truly need a full replace after read_file, use write_file with mode=overwrite and confirm_overwrite: true.",
+  };
+}
+
 export async function prepareFileWrite(
   pathArg: string,
-  mode: FileWriteMode
+  mode: FileWriteMode,
+  opts?: { confirmOverwrite?: boolean }
 ): Promise<PrepareFileWriteResult> {
   const safe = resolveWithinWorkspace(pathArg);
   if (!safe.ok || !safe.resolvedPath) {
@@ -42,11 +73,19 @@ export async function prepareFileWrite(
         ok: false,
         error:
           `File already exists: ${safe.resolvedPath}\n` +
-          "Use edit_file for a targeted change, or write_file with mode=overwrite / mode=append.",
+          "Use edit_file for a targeted change, write_file mode=append to extend, " +
+          "or mode=overwrite with confirm_overwrite: true only after read_file when a full replace is intentional.",
       };
     } catch {
       /* create */
     }
+  }
+  if (mode === "overwrite") {
+    const guard = await checkOverwriteAllowed(
+      safe.resolvedPath,
+      opts?.confirmOverwrite === true
+    );
+    if (!guard.ok) return guard;
   }
   try {
     await mkdir(dirname(safe.resolvedPath), { recursive: true });
@@ -92,7 +131,8 @@ export async function finishWithIntegrity(
 export async function promoteStagingFile(
   stagingPath: string,
   targetPath: string,
-  mode: FileWriteMode
+  mode: FileWriteMode,
+  opts?: { confirmOverwrite?: boolean }
 ): Promise<string> {
   const staged = await readFile(stagingPath, "utf8");
   const truncErr = rejectIfLikelyTruncated(staged);
@@ -120,6 +160,8 @@ export async function promoteStagingFile(
     }
     await commitContent(targetPath, payload, "append");
   } else {
+    const guard = await checkOverwriteAllowed(targetPath, opts?.confirmOverwrite === true);
+    if (!guard.ok) throw new Error(guard.error);
     await commitContent(targetPath, staged, "overwrite");
   }
   return staged;

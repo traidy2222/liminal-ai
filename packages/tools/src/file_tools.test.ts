@@ -14,7 +14,7 @@ test("resolveWithinWorkspace blocks escaping paths", () => {
   assert.equal(blocked.ok, false);
 });
 
-test("write_file mode=overwrite replaces existing content", async () => {
+test("write_file mode=overwrite replaces small existing content", async () => {
   const root = resolveWorkspaceRoot();
   const rel = ".agent_artifacts/test-write-overwrite.txt";
   const abs = path.resolve(root, rel);
@@ -24,6 +24,27 @@ test("write_file mode=overwrite replaces existing content", async () => {
   const overwritten = await writeFileTool.handler({ path: rel, content: "v2", mode: "overwrite" });
   assert.equal(overwritten.ok, true);
   assert.equal(await readFile(abs, "utf8"), "v2");
+  await rm(abs, { force: true });
+});
+
+test("write_file mode=overwrite refuses substantial file without confirm", async () => {
+  const root = resolveWorkspaceRoot();
+  const rel = ".agent_artifacts/test-write-overwrite-guard.txt";
+  const abs = path.resolve(root, rel);
+  await rm(abs, { force: true });
+  const lines = Array.from({ length: 12 }, (_, i) => `line ${i + 1}`).join("\n");
+  assert.equal((await writeFileTool.handler({ path: rel, content: lines })).ok, true);
+  const blocked = await writeFileTool.handler({ path: rel, content: "replaced", mode: "overwrite" });
+  assert.equal(blocked.ok, false);
+  if (!blocked.ok) assert.match(blocked.error, /edit_file/);
+  const allowed = await writeFileTool.handler({
+    path: rel,
+    content: "replaced",
+    mode: "overwrite",
+    confirm_overwrite: true,
+  });
+  assert.equal(allowed.ok, true);
+  assert.equal(await readFile(abs, "utf8"), "replaced");
   await rm(abs, { force: true });
 });
 

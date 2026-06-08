@@ -2,7 +2,7 @@ import { mkdir, readFile, rename, writeFile, cp } from "node:fs/promises";
 import path from "node:path";
 import { defineTool } from "./helpers.js";
 import { resolveWithinWorkspace } from "./file_path_guard.js";
-import { commitContent, rejectIfLikelyTruncated } from "./file_write_ops.js";
+import { checkOverwriteAllowed, commitContent, rejectIfLikelyTruncated } from "./file_write_ops.js";
 
 type Op =
   | { op: "write"; path: string; content: string }
@@ -53,6 +53,10 @@ export const multiFileApplyTool = defineTool({
           if (!dryRun) {
             const truncErr = rejectIfLikelyTruncated(op.content);
             if (truncErr) throw new Error(truncErr);
+            if (backups.get(safe.resolvedPath) !== null) {
+              const guard = await checkOverwriteAllowed(safe.resolvedPath, false);
+              if (!guard.ok) throw new Error(guard.error);
+            }
             await mkdir(path.dirname(safe.resolvedPath), { recursive: true });
             await commitContent(safe.resolvedPath, op.content, "overwrite");
           }
