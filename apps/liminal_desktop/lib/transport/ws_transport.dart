@@ -52,7 +52,7 @@ class WsTransport {
               CommandResult(
                 ok: frame.data['ok'] as bool? ?? false,
                 error: frame.data['error'] as String?,
-                data: frame.data['data'],
+                data: _coerceCommandData(frame.data['data']),
               ),
             );
           }
@@ -96,6 +96,30 @@ class WsTransport {
         return CommandResult(ok: false, error: 'Command timed out: $command');
       },
     );
+  }
+
+  static Object? _coerceCommandData(Object? raw) {
+    if (raw is Map) {
+      return _coerceJsonMap(raw);
+    }
+    return raw;
+  }
+
+  static Map<String, dynamic> _coerceJsonMap(Map raw) {
+    final out = <String, dynamic>{};
+    raw.forEach((key, value) {
+      final k = key.toString();
+      if (value is Map) {
+        out[k] = _coerceJsonMap(value);
+      } else if (value is List) {
+        out[k] = value
+            .map((item) => item is Map ? _coerceJsonMap(item) : item)
+            .toList();
+      } else {
+        out[k] = value;
+      }
+    });
+    return out;
   }
 
   Future<void> dispose() async {

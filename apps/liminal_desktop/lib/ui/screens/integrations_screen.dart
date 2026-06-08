@@ -196,7 +196,7 @@ class _IntegrationsScreenState extends State<IntegrationsScreen> {
                 primaryLabel: snap.googleConnected ? 'Disconnect' : 'Connect',
                 primaryDanger: snap.googleConnected,
                 disabled: disabled,
-                onPrimary: () => _googlePrimary(host, snap, services),
+                onPrimary: () => unawaited(_googlePrimary(host, host.integrations, services)),
                 child: _GoogleDetails(
                   snap: snap,
                   disabled: disabled,
@@ -229,7 +229,7 @@ class _IntegrationsScreenState extends State<IntegrationsScreen> {
                 primaryLabel: snap.microsoftConnected ? 'Disconnect' : 'Connect',
                 primaryDanger: snap.microsoftConnected,
                 disabled: disabled,
-                onPrimary: () => _microsoftPrimary(host, snap, msServices),
+                onPrimary: () => unawaited(_microsoftPrimary(host, host.integrations, msServices)),
                 child: _MicrosoftDetails(
                   snap: snap,
                   disabled: disabled,
@@ -261,7 +261,7 @@ class _IntegrationsScreenState extends State<IntegrationsScreen> {
                 primaryLabel: snap.xeroConnected ? 'Disconnect' : 'Connect',
                 primaryDanger: snap.xeroConnected,
                 disabled: disabled,
-                onPrimary: () => _xeroPrimary(host, snap),
+                onPrimary: () => unawaited(_xeroPrimary(host, host.integrations)),
                 child: Padding(
                   padding: const EdgeInsets.only(top: 8),
                   child: Column(

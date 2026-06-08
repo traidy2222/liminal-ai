@@ -237,11 +237,28 @@ export function IntegrationsPanel({ agentBusy }: IntegrationsPanelProps) {
     } finally {
       setLoading(false);
     }
-  }, [selectedServices.size]);
+  }, [selectedServices.size, msSelectedServices.size]);
 
   useEffect(() => {
     void load();
   }, [load]);
+
+  /** Poll after opening a browser OAuth tab until tokens/tools appear on the harness. */
+  const pollIntegrationsUntil = async (
+    predicate: (d: IntegrationsData) => boolean,
+    timeoutMs = 10 * 60_000
+  ) => {
+    const deadline = Date.now() + timeoutMs;
+    while (Date.now() < deadline) {
+      await new Promise((r) => setTimeout(r, 1500));
+      const res = await webApiFetch("/api/integrations");
+      if (!res.ok) continue;
+      const json = (await res.json()) as IntegrationsData;
+      setData(json);
+      if (predicate(json)) return;
+    }
+    throw new Error("Timed out waiting for sign-in — complete consent in the browser tab.");
+  };
 
   const run = async (fn: () => Promise<void>) => {
     setBusy(true);
@@ -331,6 +348,11 @@ export function IntegrationsPanel({ agentBusy }: IntegrationsPanelProps) {
       if (!res.ok) throw new Error(await res.text());
       const { connectUrl } = (await res.json()) as { connectUrl: string };
       window.open(connectUrl, "_blank", "noopener,noreferrer");
+      await pollIntegrationsUntil(
+        (d) =>
+          d.google.accounts.length > 0 ||
+          d.connections.some((c) => c.parentProvider === "google_workspace")
+      );
       return;
     }
     const res = await webApiFetch("/api/integrations/google/connect", {
@@ -357,6 +379,11 @@ export function IntegrationsPanel({ agentBusy }: IntegrationsPanelProps) {
       if (!res.ok) throw new Error(await res.text());
       const { authUrl } = (await res.json()) as { authUrl: string };
       window.open(authUrl, "_blank", "noopener,noreferrer");
+      await pollIntegrationsUntil(
+        (d) =>
+          (d.microsoft?.accounts.length ?? 0) > 0 ||
+          d.connections.some((c) => c.parentProvider === "microsoft_365")
+      );
       return;
     }
     const res = await webApiFetch("/api/integrations/microsoft/connect", {
@@ -395,6 +422,7 @@ export function IntegrationsPanel({ agentBusy }: IntegrationsPanelProps) {
     if (!res.ok) throw new Error(await res.text());
     const { connectUrl } = (await res.json()) as { connectUrl: string };
     window.open(connectUrl, "_blank", "noopener,noreferrer");
+    await pollIntegrationsUntil((d) => (d.xero?.accounts.length ?? 0) > 0);
   };
 
   return (

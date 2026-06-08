@@ -126,6 +126,7 @@ class AppController extends ChangeNotifier {
   bool integrationsLoading = false;
   bool integrationsBusy = false;
   String? integrationsError;
+  Timer? _integrationsPollTimer;
 
   bool get needsProviderSetup => config != null && !config!.apiKeyConfigured;
   bool get needsPersonaBootstrap =>
@@ -864,13 +865,9 @@ class AppController extends ChangeNotifier {
     integrationsError = null;
     notifyListeners();
     try {
-      final result = await _protocol.send('get_integrations', {});
-      if (result.ok && result.data is Map) {
-        integrations = IntegrationsSnapshot.fromJson(
-          Map<String, dynamic>.from(result.data! as Map),
-        );
-      } else {
-        integrationsError = result.error ?? 'Failed to load integrations';
+      final ok = await _refreshIntegrationsFromServer();
+      if (!ok) {
+        integrationsError ??= 'Failed to load integrations';
       }
     } catch (e) {
       integrationsError = e.toString();
@@ -880,11 +877,57 @@ class AppController extends ChangeNotifier {
     }
   }
 
-  void _applyIntegrationsPayload(Map<String, dynamic>? json) {
-    final raw = json?['integrations'];
-    if (raw is Map) {
-      integrations = IntegrationsSnapshot.fromJson(Map<String, dynamic>.from(raw));
+  Future<bool> _refreshIntegrationsFromServer() async {
+    if (!_protocol.isConnected) return false;
+    final result = await _protocol.send(
+      'get_integrations',
+      {},
+      timeout: const Duration(seconds: 30),
+    );
+    if (result.ok && result.data is Map) {
+      integrations = IntegrationsSnapshot.fromJson(
+        _coerceJsonMap(result.data! as Map),
+      );
+      return true;
     }
+    integrationsError = result.error ?? integrationsError;
+    return false;
+  }
+
+  Map<String, dynamic> _coerceJsonMap(Map raw) {
+    return Map<String, dynamic>.from(raw);
+  }
+
+  void _applyIntegrationsPayload(Map<String, dynamic>? json) {
+    if (json == null) return;
+    final nested = json['integrations'];
+    if (nested is Map) {
+      integrations = IntegrationsSnapshot.fromJson(_coerceJsonMap(nested));
+      return;
+    }
+    if (json.containsKey('google') && json.containsKey('connections')) {
+      integrations = IntegrationsSnapshot.fromJson(json);
+    }
+  }
+
+  bool _isLongRunningIntegrationCommand(String command) {
+    return command == 'connect_google_oauth' ||
+        command == 'connect_microsoft_oauth' ||
+        command == 'connect_xero_oauth';
+  }
+
+  void _startIntegrationsPolling() {
+    _integrationsPollTimer?.cancel();
+    _integrationsPollTimer = Timer.periodic(const Duration(milliseconds: 1500), (_) {
+      unawaited(_refreshIntegrationsFromServer().then((ok) {
+        if (ok) notifyListeners();
+      }));
+    });
+  }
+
+  void _stopIntegrationsPolling() {
+    _integrationsPollTimer?.cancel();
+    _integrationsPollTimer = null;
   }
 
   Future<bool> _runIntegrationCommand(
@@ -895,11 +938,20 @@ class AppController extends ChangeNotifier {
     integrationsBusy = true;
     integrationsError = null;
     notifyListeners();
+    final pollWhileRunning = _isLongRunningIntegrationCommand(command);
+    if (pollWhileRunning) _startIntegrationsPolling();
     try {
-      final result = await _protocol.send(command, payload);
+      final result = await _protocol.send(
+        command,
+        payload,
+        timeout: pollWhileRunning
+            ? const Duration(minutes: 11)
+            : const Duration(seconds: 120),
+      );
       if (result.ok && result.data is Map) {
         final data = Map<String, dynamic>.from(result.data! as Map);
         _applyIntegrationsPayload(data);
+        await _refreshIntegrationsFromServer();
         final attachOutput = data['attachOutput'] as String?;
         if (attachOutput != null &&
             (attachOutput.contains('failed') ||
@@ -907,6 +959,7 @@ class AppController extends ChangeNotifier {
                 attachOutput.contains('Partial'))) {
           integrationsError = attachOutput;
         }
+        notifyListeners();
         return true;
       }
       integrationsError = result.error ?? 'Integration command failed';
@@ -915,6 +968,7 @@ class AppController extends ChangeNotifier {
       integrationsError = e.toString();
       return false;
     } finally {
+      if (pollWhileRunning) _stopIntegrationsPolling();
       integrationsBusy = false;
       notifyListeners();
     }
@@ -1342,6 +1396,7 @@ class AppController extends ChangeNotifier {
 
   @override
   void dispose() {
+    _stopIntegrationsPolling();
     unawaited(_appWindows.closeAll());
     speechOutput.removeListener(notifyListeners);
     dictation.removeListener(notifyListeners);
