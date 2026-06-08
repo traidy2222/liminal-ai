@@ -46,6 +46,8 @@ import {
   buildHostedIntegrationConnectUrl,
   hostedOAuthHandoffPath,
   applyHostedOAuthHandoff,
+  isHostedOAuthFormHandoffContent,
+  parseHostedOAuthHandoffHttpBody,
 } from "@liminal/core";
 import {
   handleAudioUpload,
@@ -824,27 +826,31 @@ export function createRouter(
   };
 
   const wantsIntegrationHandoffHtml = (req: import("express").Request): boolean => {
-    const ct = (req.get("Content-Type") ?? "").toLowerCase();
-    return ct.includes("application/x-www-form-urlencoded") || ct.includes("multipart/form-data");
+    const ct = req.get("Content-Type") ?? "";
+    const payload = (req.body as { payload?: string } | undefined)?.payload;
+    if (typeof payload === "string") {
+      return isHostedOAuthFormHandoffContent(ct, `payload=${payload}`);
+    }
+    return isHostedOAuthFormHandoffContent(ct, "");
   };
 
   const parseIntegrationHandoffBody = (
     req: import("express").Request
   ): { state?: string; provider?: string; bundle?: IntegrationHandoffBundle } => {
-    let body = req.body as {
+    const body = req.body as {
       payload?: string;
       state?: string;
       provider?: string;
       bundle?: IntegrationHandoffBundle;
     };
     if (typeof body?.payload === "string" && body.payload.trim()) {
-      try {
-        body = JSON.parse(Buffer.from(body.payload.trim(), "base64url").toString("utf8")) as typeof body;
-      } catch {
-        return {};
-      }
+      return parseHostedOAuthHandoffHttpBody(
+        `payload=${body.payload.trim()}`,
+        req.get("Content-Type") ?? "application/x-www-form-urlencoded"
+      );
     }
-    return body;
+    if (body?.state || body?.bundle) return body;
+    return body ?? {};
   };
 
   const integrationHandoffSuccessHtml = (provider: string) =>

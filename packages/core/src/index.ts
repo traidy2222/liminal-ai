@@ -1019,8 +1019,10 @@ export {
   hostedOAuthHandoffPath,
   buildHostedIntegrationConnectUrl,
   applyHostedOAuthHandoff,
+  isHostedOAuthFormHandoffContent,
+  parseHostedOAuthHandoffHttpBody,
 } from "./hosted_oauth_connect.js";
-export type { HostedOAuthHandoffPayload } from "./hosted_oauth_connect.js";
+export type { HostedOAuthHandoffPayload, ParsedHostedOAuthHandoffBody } from "./hosted_oauth_connect.js";
 export {
   runXeroHostedConnectFlow,
 } from "./xero_connect.js";
