@@ -913,7 +913,8 @@ class AppController extends ChangeNotifier {
   bool _isLongRunningIntegrationCommand(String command) {
     return command == 'connect_google_oauth' ||
         command == 'connect_microsoft_oauth' ||
-        command == 'connect_xero_oauth';
+        command == 'connect_xero_oauth' ||
+        command == 'connect_github_oauth';
   }
 
   void _startIntegrationsPolling() {
@@ -1030,10 +1031,17 @@ class AppController extends ChangeNotifier {
   Future<bool> disconnectXero({bool revoke = false}) =>
       _runIntegrationCommand('disconnect_xero', {'revoke': revoke});
 
+  Future<bool> connectGithubOAuth({String mode = 'read_write'}) =>
+      _runIntegrationCommand('connect_github_oauth', {
+        'mode': mode,
+        'openBrowser': true,
+      });
+
   Future<bool> connectGithub({String mode = 'read_write'}) =>
       _runIntegrationCommand('connect_github', {'mode': mode});
 
-  Future<bool> disconnectGithub() => _runIntegrationCommand('disconnect_github', {});
+  Future<bool> disconnectGithub({bool revoke = false}) =>
+      _runIntegrationCommand('disconnect_github', {'revoke': revoke});
 
   Future<bool> attachIntegrationMcp({
     required String name,

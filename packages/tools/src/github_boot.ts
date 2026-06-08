@@ -5,6 +5,7 @@ import type { ToolRegistry } from "@liminal/core";
 import { readConnection } from "./api_connections_store.js";
 import {
   connectGithubMcp,
+  githubAuthAvailable,
   GITHUB_MCP_CONNECTION_NAME,
   githubConnectOnBoot,
   githubMcpEnabled,
@@ -23,5 +24,6 @@ export async function bootstrapGithub(
   if (!autoConnect || !githubMcpEnabled() || !githubConnectOnBoot()) return;
   const existing = await readConnection(GITHUB_MCP_CONNECTION_NAME);
   if (existing?.kind === "mcp") return;
+  if (!(await githubAuthAvailable())) return;
   await connectGithubMcp(registry);
 }

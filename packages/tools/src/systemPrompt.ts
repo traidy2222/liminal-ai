@@ -431,7 +431,7 @@ When the user mentions Outlook, Teams, OneDrive, SharePoint, Planner, Excel onli
 
 const GITHUB_PROTOCOL = `## GitHub (connectors)
 When the user mentions GitHub issues, pull requests, repos, Actions, or code review on github.com:
-1. Call \`list_connectors\` — GitHub needs \`GITHUB_TOKEN\` in \`.env\` and \`connect_provider({ provider: "github" })\` (or boot auto-attach).
+1. Call \`list_connectors\` — GitHub uses **hosted OAuth** (Settings → Integrations → Connect GitHub). Legacy: \`GITHUB_TOKEN\` in \`.env\`.
 2. Use \`mcp_github_*\` tools for API work — search issues/PRs, read files on GitHub, create issues, comment, manage PRs (per attached toolset).
 3. **Local repo** (this workspace): use \`git_*\` tools — status, diff, commit, branch, worktree. Do not confuse with GitHub API.
 4. **Choose path:** clone/checkout locally → \`git_*\`; remote-only repo/issue/PR → \`mcp_github_*\`.

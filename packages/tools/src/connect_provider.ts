@@ -35,6 +35,7 @@ import {
   formatPreferredMailRouteLine,
   listXeroOAuthAccounts,
   revokeXeroAccount,
+  listGithubOAuthAccounts,
 } from "@liminal/core";
 import { defineTool } from "./helpers.js";
 import {
@@ -218,9 +219,9 @@ export function createConnectorTools(registry: ToolRegistry, _emitter: AgentEmit
   const connectProviderTool = defineTool({
     name: "connect_provider",
     description:
-      "WHAT: Connect curated providers — Google Workspace, Microsoft 365 (OAuth), Xero (OAuth), or GitHub (PAT).\n" +
+      "WHAT: Connect curated providers — Google Workspace, Microsoft 365 (OAuth), Xero (OAuth), or GitHub (OAuth).\n" +
       "WHEN: User asks to work with Google/Microsoft mail, calendar, files, Xero accounting, or GitHub repos.\n" +
-      "HOW: google_workspace / microsoft_365 / xero → OAuth via Settings → Integrations; github → GITHUB_TOKEN in .env.",
+      "HOW: All providers → OAuth via Settings → Integrations (hosted sign-in). GitHub also supports legacy GITHUB_TOKEN in .env.",
     parameters: {
       type: "object",
       properties: {
@@ -422,7 +423,7 @@ export function createConnectorTools(registry: ToolRegistry, _emitter: AgentEmit
         provider: { type: "string", enum: ["google_workspace", "microsoft_365", "xero", "github"] },
         revoke_oauth: {
           type: "boolean",
-          description: "Google/Microsoft/Xero: delete local OAuth tokens (default false).",
+          description: "Google/Microsoft/Xero/GitHub: delete local OAuth tokens (default false).",
         },
       },
       required: ["provider"],
@@ -433,7 +434,7 @@ export function createConnectorTools(registry: ToolRegistry, _emitter: AgentEmit
     handler: async (args): Promise<ToolResult> => {
       const provider = String(args["provider"] ?? "").trim();
       if (provider === "github") {
-        const result = await disconnectGithubMcp(registry);
+        const result = await disconnectGithubMcp(registry, args["revoke_oauth"] === true);
         if (!result.ok) return { ok: false, error: result.error };
         return { ok: true, output: result.output };
       }
@@ -499,10 +500,11 @@ export function createConnectorTools(registry: ToolRegistry, _emitter: AgentEmit
             : "off (set AGENT_GOOGLE_OFFICE_REST=1)"
         }`
       );
+      const ghAccounts = await listGithubOAuthAccounts();
       lines.push(
-        `GitHub: mcp_github_* via GitHub MCP — ${githubMcpEnabled() ? "enabled" : "off (AGENT_GITHUB_MCP=0)"}, token=${
-          githubTokenPresent() ? "set in env" : "MISSING (set GITHUB_TOKEN in .env)"
-        }`
+        `GitHub: mcp_github_* via GitHub MCP — ${githubMcpEnabled() ? "enabled" : "off (AGENT_GITHUB_MCP=0)"}, oauth=${
+          ghAccounts.length > 0 ? `${ghAccounts.length} account(s)` : "not connected"
+        }, env_pat=${githubTokenPresent() ? "set" : "off"}`
       );
       lines.push(
         `Microsoft 365: mcp_microsoft_* sidecar + outlook/calendar/onedrive REST — outlook=${outlookRestEnabled()}, calendar=${microsoftCalendarRestEnabled()}, onedrive=${onedriveRestEnabled()}, office=${microsoftOfficeRestEnabled()}`
@@ -532,11 +534,30 @@ export function createConnectorTools(registry: ToolRegistry, _emitter: AgentEmit
       }
       lines.push("");
 
+      lines.push("### GitHub OAuth");
+      if (ghAccounts.length === 0) {
+        const onDisk = await countOAuthAccountFiles("github");
+        if (onDisk > 0) {
+          lines.push(`- (tokens on disk but unreadable — ${onDisk} file(s))`);
+          lines.push(`  ${oauthDecryptHint("github")}`);
+        } else if (githubTokenPresent()) {
+          lines.push("- (using GITHUB_TOKEN from env — hosted OAuth not connected)");
+        } else {
+          lines.push("- (not connected — Settings → Integrations → Connect GitHub)");
+        }
+      } else {
+        for (const a of ghAccounts) {
+          const exp = new Date(a.expiresAt).toISOString();
+          lines.push(
+            `- ${a.login ?? a.email ?? a.accountId} (expires ~${exp}, ${a.scopes.length} scopes)`
+          );
+        }
+      }
       const githubConns = await listConnectionsByParent(GITHUB_PARENT_PROVIDER);
-      lines.push("### GitHub MCP");
+      lines.push("### GitHub MCP connections");
       if (githubConns.length === 0) {
         lines.push(
-          "- (not attached — connect_provider({ provider: \"github\" }) or set GITHUB_TOKEN + restart with AGENT_GITHUB_CONNECT_ON_BOOT=1)"
+          "- (not attached — connect_provider({ provider: \"github\" }) or Settings → Integrations → Connect)"
         );
       } else {
         for (const c of githubConns) {
@@ -759,9 +780,10 @@ export async function connectGithubFromServer(
 }
 
 export async function disconnectGithubFromServer(
-  registry: ToolRegistry | ToolRegistry[]
+  registry: ToolRegistry | ToolRegistry[],
+  revokeOAuth = false
 ): Promise<{ ok: boolean; output?: string; error?: string }> {
-  const result = await disconnectGithubMcp(registry);
+  const result = await disconnectGithubMcp(registry, revokeOAuth);
   if (!result.ok) return { ok: false, error: result.error };
   return { ok: true, output: result.output };
 }

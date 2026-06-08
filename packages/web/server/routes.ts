@@ -36,6 +36,7 @@ import {
   listMicrosoftOAuthAccounts,
   ALL_MICROSOFT_SERVICE_IDS,
   missingDefaultMicrosoftScopes,
+  listGithubOAuthAccounts,
   listXeroOAuthAccounts,
   buildHostedIntegrationConnectUrl,
   hostedOAuthHandoffPath,
@@ -529,6 +530,13 @@ export function createRouter(
           services: ALL_MICROSOFT_SERVICE_IDS,
         },
         github: {
+          accounts: (await listGithubOAuthAccounts()).map((a) => ({
+            accountId: a.accountId,
+            email: a.email,
+            login: a.login,
+            scopes: a.scopes,
+            expiresAt: a.expiresAt,
+          })),
           tokenConfigured: githubTokenPresent(),
           mcpUrl: "https://api.githubcopilot.com/mcp/",
         },
@@ -661,14 +669,27 @@ export function createRouter(
     res.json({ ok: true, output: result.output });
   });
 
+  router.get("/api/integrations/github/begin", (req, res) => {
+    prunePendingHostedOAuth();
+    const state = randomBytes(16).toString("hex");
+    const mode = req.query["mode"] === "read_only" ? "read_only" : "read_write";
+    pendingHostedOAuth.set(state, { exp: Date.now() + 10 * 60_000, provider: "github", mode });
+    const harnessRedirectUri = hostedOAuthHandoffPath(WEB_PORT);
+    const site = defaultVireonSiteOrigin();
+    const connectUrl = buildHostedIntegrationConnectUrl({
+      provider: "github",
+      harnessRedirectUri,
+      harnessState: state,
+      siteOrigin: site,
+      mode,
+    });
+    res.json({ connectUrl, authUrl: connectUrl, state });
+  });
+
   router.post("/api/integrations/github/connect", async (req, res) => {
     const bridge = active();
     if (bridge.harness.getIsRunning()) {
       res.status(409).json({ error: "Agent is busy; finish the current turn first." });
-      return;
-    }
-    if (!githubTokenPresent()) {
-      res.status(400).json({ error: "GITHUB_TOKEN is not set in .env" });
       return;
     }
     const body = req.body as { mode?: "read_write" | "read_only" };
@@ -685,7 +706,8 @@ export function createRouter(
 
   router.delete("/api/integrations/github", async (req, res) => {
     const bridge = active();
-    const result = await disconnectGithubFromServer(bridge.harness.registry);
+    const revoke = req.query["revoke"] === "1" || req.query["revoke"] === "true";
+    const result = await disconnectGithubFromServer(bridge.harness.registry, revoke);
     if (!result.ok) {
       res.status(400).json({ error: result.error });
       return;
@@ -891,6 +913,14 @@ export function createRouter(
             mode: pendingMode,
           });
           if (!msResult.ok) attachWarning = msResult.error;
+          else
+            bridge.harness.getContext().refreshProtocolDynamic(bridge.harness.registry.getActiveToolNames());
+        }
+        if (provider === "github") {
+          const ghResult = await connectGithubFromServer(bridge.harness.registry, {
+            readOnly: pendingMode === "read_only",
+          });
+          if (!ghResult.ok) attachWarning = ghResult.error;
           else
             bridge.harness.getContext().refreshProtocolDynamic(bridge.harness.registry.getActiveToolNames());
         }

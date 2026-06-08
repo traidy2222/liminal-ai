@@ -570,6 +570,7 @@ export { getMicrosoftSidecarStatus, stopMicrosoftSidecar } from "./microsoft_sid
 export {
   githubMcpEnabled,
   githubTokenPresent,
+  githubAuthAvailable,
   githubConnectOnBoot,
   connectGithubMcp,
   disconnectGithubMcp,

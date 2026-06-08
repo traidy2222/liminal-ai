@@ -24,6 +24,7 @@ class _IntegrationsScreenState extends State<IntegrationsScreen> {
   String _googleMode = 'read_write';
   String _microsoftMode = 'read_write';
   String _xeroMode = 'read_write';
+  String _githubMode = 'read_write';
   final Set<String> _googleServices = {};
   final Set<String> _microsoftServices = {};
   bool _servicesInitialized = false;
@@ -136,6 +137,18 @@ class _IntegrationsScreenState extends State<IntegrationsScreen> {
       return;
     }
     await host.connectXeroOAuth(mode: _xeroMode);
+  }
+
+  Future<void> _githubPrimary(AppController host, IntegrationsSnapshot snap) async {
+    if (snap.githubConnected) {
+      await host.disconnectGithub(revoke: true);
+      return;
+    }
+    if (snap.github.accounts.isEmpty) {
+      await host.connectGithubOAuth(mode: _githubMode);
+      return;
+    }
+    await host.connectGithub(mode: _githubMode);
   }
 
   @override
@@ -324,30 +337,70 @@ class _IntegrationsScreenState extends State<IntegrationsScreen> {
               _IntegrationTile(
                 title: 'GitHub',
                 summary: snap.githubConnected
-                    ? '${snap.githubToolCount} tools (issues, PRs, repos)'
-                    : snap.github.tokenConfigured
-                        ? 'Token in .env — tap Connect'
-                        : 'Add GITHUB_TOKEN to .env',
+                    ? '${snap.github.accounts.first.login ?? snap.github.accounts.first.email ?? "GitHub"} · ${snap.githubToolCount} tools'
+                    : snap.github.accounts.isNotEmpty
+                        ? 'Signed in — tap Connect to enable tools'
+                        : snap.github.tokenConfigured
+                            ? 'PAT in .env — tap Connect'
+                            : 'Repos, issues, PRs via hosted sign-in',
                 connected: snap.githubConnected,
                 expanded: _expandedId == 'github',
                 onToggle: () => _toggleExpanded('github'),
-                primaryLabel: snap.githubConnected ? 'Disconnect' : 'Connect',
+                primaryLabel: snap.githubConnected
+                    ? 'Disconnect'
+                    : snap.github.accounts.isNotEmpty
+                        ? 'Enable tools'
+                        : 'Connect',
                 primaryDanger: snap.githubConnected,
-                disabled: disabled || (!snap.githubConnected && !snap.github.tokenConfigured),
-                onPrimary: () async {
-                  if (snap.githubConnected) {
-                    await host.disconnectGithub();
-                  } else {
-                    await host.connectGithub(mode: _googleMode);
-                  }
-                },
+                disabled: disabled,
+                onPrimary: () => _githubPrimary(host, snap),
                 child: Padding(
                   padding: const EdgeInsets.only(top: 8),
-                  child: Text(
-                    snap.github.tokenConfigured
-                        ? 'GITHUB_TOKEN found. Restart the app after changing .env.'
-                        : 'Create a PAT at github.com/settings/tokens and set GITHUB_TOKEN in .env.',
-                    style: TextStyle(color: lim.textMuted, fontSize: 12, height: 1.4),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'Opens GitHub sign-in via vireondynamics.com. Legacy: set GITHUB_TOKEN in .env for PAT auth.',
+                        style: TextStyle(color: lim.textMuted, fontSize: 12, height: 1.4),
+                      ),
+                      if (snap.github.accounts.isNotEmpty) ...[
+                        const SizedBox(height: 8),
+                        for (final a in snap.github.accounts)
+                          Text(
+                            '${a.login ?? a.email ?? a.accountId} — ${a.scopes.length} scopes',
+                            style: TextStyle(color: lim.success, fontSize: 12, fontFamily: 'monospace'),
+                          ),
+                      ],
+                      const SizedBox(height: 8),
+                      Row(
+                        children: [
+                          Radio<String>(
+                            value: 'read_write',
+                            groupValue: _githubMode,
+                            onChanged: disabled || snap.githubConnected
+                                ? null
+                                : (v) => setState(() => _githubMode = v ?? 'read_write'),
+                          ),
+                          const Text('Read + write'),
+                          const SizedBox(width: 12),
+                          Radio<String>(
+                            value: 'read_only',
+                            groupValue: _githubMode,
+                            onChanged: disabled || snap.githubConnected
+                                ? null
+                                : (v) => setState(() => _githubMode = v ?? 'read_only'),
+                          ),
+                          const Text('Read only'),
+                        ],
+                      ),
+                      if (snap.githubConnected || snap.github.accounts.isNotEmpty)
+                        TextButton(
+                          onPressed: disabled || snap.github.accounts.isEmpty
+                              ? null
+                              : () => host.disconnectGithub(revoke: true),
+                          child: Text('Revoke GitHub access', style: TextStyle(color: lim.danger)),
+                        ),
+                    ],
                   ),
                 ),
               ),

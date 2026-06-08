@@ -66,6 +66,7 @@ interface IntegrationsData {
     services: string[];
   };
   github?: {
+    accounts: Array<GoogleAccount & { login?: string }>;
     tokenConfigured: boolean;
     mcpUrl: string;
   };
@@ -201,6 +202,7 @@ export function IntegrationsPanel({ agentBusy }: IntegrationsPanelProps) {
   const [mode, setMode] = useState<"read_write" | "read_only">("read_write");
   const [msMode, setMsMode] = useState<"read_write" | "read_only">("read_write");
   const [xeroMode, setXeroMode] = useState<"read_write" | "read_only">("read_write");
+  const [githubMode, setGithubMode] = useState<"read_write" | "read_only">("read_write");
   const [selectedServices, setSelectedServices] = useState<Set<string>>(new Set());
   const [msSelectedServices, setMsSelectedServices] = useState<Set<string>>(new Set());
 
@@ -393,20 +395,32 @@ export function IntegrationsPanel({ agentBusy }: IntegrationsPanelProps) {
     if (!res.ok) throw new Error(json.error ?? "connect failed");
   };
 
+  const githubAccounts = data?.github?.accounts ?? [];
+
   const githubPrimary = async () => {
     if (githubConnected) {
-      const res = await webApiFetch("/api/integrations/github", { method: "DELETE" });
+      const res = await webApiFetch("/api/integrations/github?revoke=1", { method: "DELETE" });
       const json = (await res.json()) as { error?: string };
       if (!res.ok) throw new Error(json.error ?? "disconnect failed");
       return;
     }
-    const res = await webApiFetch("/api/integrations/github/connect", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ mode }),
-    });
-    const json = (await res.json()) as { error?: string };
-    if (!res.ok) throw new Error(json.error ?? "GitHub connect failed");
+    if (githubAccounts.length > 0) {
+      const res = await webApiFetch("/api/integrations/github/connect", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ mode: githubMode }),
+      });
+      const json = (await res.json()) as { error?: string };
+      if (!res.ok) throw new Error(json.error ?? "GitHub connect failed");
+      return;
+    }
+    const res = await webApiFetch(`/api/integrations/github/begin?mode=${githubMode}`);
+    if (!res.ok) throw new Error(await res.text());
+    const { connectUrl } = (await res.json()) as { connectUrl: string };
+    window.open(connectUrl, "_blank", "noopener,noreferrer");
+    await pollIntegrationsUntil(
+      (d) => d.connections.some((c) => c.parentProvider === "github") || (d.github?.accounts.length ?? 0) > 0
+    );
   };
 
   const xeroPrimary = async () => {
@@ -429,9 +443,8 @@ export function IntegrationsPanel({ agentBusy }: IntegrationsPanelProps) {
         INTEGRATIONS
       </div>
       <p style={{ fontSize: 11, color: "#aab8c4", lineHeight: 1.5, marginBottom: 12 }}>
-        One tap to connect each service. Tap a row to see options. Google and Xero sign in via{" "}
-        <code style={{ color: CYAN }}>vireondynamics.com</code>; GitHub uses a PAT in{" "}
-        <code style={{ color: CYAN }}>.env</code>.
+        One tap to connect each service. Tap a row to see options. Google, Microsoft, Xero, and GitHub sign in via{" "}
+        <code style={{ color: CYAN }}>vireondynamics.com</code>.
       </p>
 
       {error ? (
@@ -740,33 +753,79 @@ export function IntegrationsPanel({ agentBusy }: IntegrationsPanelProps) {
         title="GitHub"
         summary={
           githubConnected
-            ? `${githubToolCount} agent tools (issues, PRs, repos)`
-            : github?.tokenConfigured
-              ? "Token in .env — tap Connect to enable"
-              : "Add GITHUB_TOKEN to .env first"
+            ? `${githubAccounts[0]?.login ?? githubAccounts[0]?.email ?? "GitHub"} · ${githubToolCount} agent tools`
+            : githubAccounts.length > 0
+              ? `Signed in as ${githubAccounts[0]?.login ?? githubAccounts[0]?.email ?? "GitHub"} — tap Connect`
+              : github?.tokenConfigured
+                ? "PAT in .env — tap Connect to enable"
+                : "Repos, issues, PRs via hosted sign-in"
         }
         connected={githubConnected}
         expanded={expanded === "github"}
         onToggle={() => toggleExpand("github")}
-        primaryLabel={githubConnected ? "Disconnect" : "Connect"}
+        primaryLabel={githubConnected ? "Disconnect" : githubAccounts.length > 0 ? "Enable tools" : "Connect"}
         primaryDanger={githubConnected}
-        primaryDisabled={disabled || (!githubConnected && !github?.tokenConfigured)}
+        primaryDisabled={disabled}
         onPrimary={() => void run(githubPrimary)}
       >
         <p style={{ fontSize: 10, color: "#778899", lineHeight: 1.45, margin: "10px 0" }}>
-          Uses official GitHub MCP (<code>mcp_github_*</code>). Create a PAT at github.com/settings/tokens and set{" "}
-          <code>GITHUB_TOKEN</code> in .env, then restart the app.
+          Opens GitHub sign-in via vireondynamics.com, then attaches official GitHub MCP (<code>mcp_github_*</code>).
+          Legacy: set <code>GITHUB_TOKEN</code> in .env for PAT auth.
         </p>
-        <div
-          style={{
-            fontSize: 10,
-            fontFamily: "monospace",
-            marginBottom: 8,
-            color: github?.tokenConfigured ? GREEN : AMBER,
-          }}
-        >
-          Token: {github?.tokenConfigured ? "found in environment" : "not configured"}
+        {githubAccounts.map((a) => (
+          <div key={a.accountId} style={{ fontSize: 11, fontFamily: "monospace", color: GREEN, marginBottom: 6 }}>
+            {a.login ?? a.email ?? a.accountId} — {a.scopes.length} scopes
+          </div>
+        ))}
+        <div style={{ display: "flex", gap: 12, marginBottom: 8, fontSize: 11 }}>
+          <label style={{ display: "flex", alignItems: "center", gap: 4, color: "#aab8c4" }}>
+            <input
+              type="radio"
+              checked={githubMode === "read_write"}
+              onChange={() => setGithubMode("read_write")}
+              disabled={disabled || githubConnected}
+            />
+            Read + write
+          </label>
+          <label style={{ display: "flex", alignItems: "center", gap: 4, color: "#aab8c4" }}>
+            <input
+              type="radio"
+              checked={githubMode === "read_only"}
+              onChange={() => setGithubMode("read_only")}
+              disabled={disabled || githubConnected}
+            />
+            Read only
+          </label>
         </div>
+        {github?.tokenConfigured ? (
+          <div style={{ fontSize: 10, fontFamily: "monospace", marginBottom: 8, color: GREEN }}>
+            Legacy PAT: found in environment
+          </div>
+        ) : null}
+        {githubConnected || githubAccounts.length > 0 ? (
+          <button
+            type="button"
+            style={{
+              fontSize: 10,
+              color: MAGENTA,
+              background: "none",
+              border: "none",
+              cursor: disabled ? "not-allowed" : "pointer",
+              padding: 0,
+              textDecoration: "underline",
+            }}
+            disabled={disabled || !githubAccounts.length}
+            onClick={() =>
+              void run(async () => {
+                const res = await webApiFetch("/api/integrations/github?revoke=1", { method: "DELETE" });
+                const json = (await res.json()) as { error?: string };
+                if (!res.ok) throw new Error(json.error ?? "revoke failed");
+              })
+            }
+          >
+            Revoke GitHub access
+          </button>
+        ) : null}
       </IntegrationRow>
 
       <IntegrationRow

@@ -178,21 +178,57 @@ class MicrosoftSidecarStatus {
 
 class GithubIntegrations {
   GithubIntegrations({
+    required this.accounts,
     required this.tokenConfigured,
     required this.mcpUrl,
   });
 
+  final List<GithubOAuthAccount> accounts;
   final bool tokenConfigured;
   final String mcpUrl;
 
   factory GithubIntegrations.fromJson(Map<String, dynamic> json) {
     return GithubIntegrations(
+      accounts: (json['accounts'] as List<dynamic>? ?? [])
+          .map(
+            (e) => GithubOAuthAccount.fromJson(
+              Map<String, dynamic>.from(e as Map),
+            ),
+          )
+          .toList(),
       tokenConfigured: json['tokenConfigured'] as bool? ?? false,
       mcpUrl: json['mcpUrl'] as String? ?? '',
     );
   }
 
-  static final empty = GithubIntegrations(tokenConfigured: false, mcpUrl: '');
+  static final empty = GithubIntegrations(
+    accounts: [],
+    tokenConfigured: false,
+    mcpUrl: '',
+  );
+}
+
+class GithubOAuthAccount {
+  GithubOAuthAccount({
+    required this.accountId,
+    this.email,
+    this.login,
+    required this.scopes,
+  });
+
+  final String accountId;
+  final String? email;
+  final String? login;
+  final List<String> scopes;
+
+  factory GithubOAuthAccount.fromJson(Map<String, dynamic> json) {
+    return GithubOAuthAccount(
+      accountId: json['accountId'] as String? ?? '',
+      email: json['email'] as String?,
+      login: json['login'] as String?,
+      scopes: (json['scopes'] as List<dynamic>? ?? []).map((e) => e.toString()).toList(),
+    );
+  }
 }
 
 class XeroIntegrations {

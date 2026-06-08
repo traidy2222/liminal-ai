@@ -299,6 +299,14 @@ function parseAuthArg(auth: unknown): AuthScheme {
       scopes: Array.isArray(a.scopes) ? a.scopes : [],
     };
   }
+  if (a.kind === "oauth2" && a.provider === "github") {
+    return {
+      kind: "oauth2",
+      provider: "github",
+      accountId: a.accountId,
+      scopes: Array.isArray(a.scopes) ? a.scopes : [],
+    };
+  }
   if (a.kind === "bearer" && a.envVar) return { kind: "bearer", envVar: a.envVar };
   if (a.kind === "header" && a.envVar && a.headerName) {
     return { kind: "header", headerName: a.headerName, envVar: a.envVar };

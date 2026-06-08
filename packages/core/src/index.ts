@@ -1037,6 +1037,15 @@ export { runGoogleHostedConnectFlow } from "./google_hosted_connect.js";
 export type { RunGoogleHostedConnectOptions } from "./google_hosted_connect.js";
 export { runMicrosoftHostedConnectFlow } from "./microsoft_hosted_connect.js";
 export type { RunMicrosoftHostedConnectOptions } from "./microsoft_hosted_connect.js";
+export {
+  getGithubAccessToken,
+  listGithubOAuthAccounts,
+  revokeGithubAccount,
+} from "./github_oauth_broker.js";
+export { scopesForGithubMode } from "./github_oauth_scopes.js";
+export type { GithubMode } from "./github_oauth_scopes.js";
+export { runGithubHostedConnectFlow } from "./github_hosted_connect.js";
+export type { GithubConnectResult, RunGithubHostedConnectOptions } from "./github_hosted_connect.js";
 export type {
   LicenseTier,
   EntitlementKey,

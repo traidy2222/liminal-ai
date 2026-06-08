@@ -3,10 +3,12 @@ import {
   ALL_MICROSOFT_SERVICE_IDS,
   listGoogleOAuthAccounts,
   listMicrosoftOAuthAccounts,
+  listGithubOAuthAccounts,
   listXeroOAuthAccounts,
   missingDefaultWorkspaceScopes,
   missingDefaultMicrosoftScopes,
   runGoogleHostedConnectFlow,
+  runGithubHostedConnectFlow,
   runMicrosoftHostedConnectFlow,
   runXeroHostedConnectFlow,
 } from "@liminal/core";
@@ -53,6 +55,13 @@ export async function buildIntegrationsSnapshot() {
       services: ALL_MICROSOFT_SERVICE_IDS,
     },
     github: {
+      accounts: (await listGithubOAuthAccounts()).map((a) => ({
+        accountId: a.accountId,
+        email: a.email,
+        login: a.login,
+        scopes: a.scopes,
+        expiresAt: a.expiresAt,
+      })),
       tokenConfigured: githubTokenPresent(),
       mcpUrl: "https://api.githubcopilot.com/mcp/",
     },
@@ -128,6 +137,33 @@ export async function connectGoogleWorkspace(
   return result.output ?? "Google Workspace tools attached.";
 }
 
+export async function connectGithubOAuth(
+  registry: ChatRegistry,
+  opts: {
+    mode?: "read_write" | "read_only";
+    openBrowser?: boolean;
+    attach?: boolean;
+  }
+): Promise<{ email?: string; accountId: string; login?: string; attachOutput?: string }> {
+  const result = await runGithubHostedConnectFlow({
+    mode: opts.mode ?? "read_write",
+    openBrowser: opts.openBrowser !== false,
+    onStatus: (m) => console.log(`[github-oauth] ${m}`),
+  });
+  let attachOutput: string | undefined;
+  if (opts.attach !== false) {
+    attachOutput = await connectGithub(registry, {
+      readOnly: opts.mode === "read_only",
+    });
+  }
+  return {
+    email: result.email,
+    accountId: result.accountId,
+    login: result.login,
+    attachOutput,
+  };
+}
+
 export async function connectGithub(
   registry: ChatRegistry,
   opts?: { readOnly?: boolean }
@@ -140,9 +176,9 @@ export async function connectGithub(
   return result.output ?? "GitHub MCP tools attached.";
 }
 
-export async function disconnectGithub(registry: ChatRegistry): Promise<string> {
+export async function disconnectGithub(registry: ChatRegistry, revoke = false): Promise<string> {
   assertHarnessesIdle(registry);
-  const result = await disconnectGithubFromServer(await allHarnessRegistries(registry));
+  const result = await disconnectGithubFromServer(await allHarnessRegistries(registry), revoke);
   if (!result.ok) throw new Error(result.error ?? "GitHub disconnect failed.");
   await refreshIntegrationsOnAllHarnesses(registry);
   return result.output ?? "GitHub disconnected.";

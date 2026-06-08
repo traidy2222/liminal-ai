@@ -142,8 +142,12 @@ export interface ClientCommandMap {
     openBrowser?: boolean;
   };
   disconnect_xero: { revoke?: boolean };
+  connect_github_oauth: {
+    mode?: "read_write" | "read_only";
+    openBrowser?: boolean;
+  };
   connect_github: { mode?: "read_write" | "read_only" };
-  disconnect_github: Record<string, never>;
+  disconnect_github: { revoke?: boolean };
   attach_integration_mcp: {
     name: string;
     url: string;
