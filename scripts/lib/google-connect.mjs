@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * liminal connect google — OAuth + optional MCP attach
+ * liminal connect google — hosted OAuth via vireondynamics.com + optional MCP attach
  */
 import path from "node:path";
 import { pathToFileURL } from "node:url";
@@ -11,24 +11,21 @@ function parseArgs(argv) {
   let services;
   let readOnly = false;
   let attach = false;
-  let port;
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     if (a === "--read-only") readOnly = true;
     else if (a === "--attach") attach = true;
-    else if (a === "--port" && argv[i + 1]) {
-      port = Number(argv[++i]);
-    } else if (a === "--services" && argv[i + 1]) {
+    else if (a === "--services" && argv[i + 1]) {
       services = argv[++i].split(",").map((s) => s.trim()).filter(Boolean);
     }
   }
-  return { services, readOnly, attach, port };
+  return { services, readOnly, attach };
 }
 
 /** @param {string[]} argv @returns {Promise<number>} exit code */
 export async function runConnectGoogleCli(argv) {
-  const { services, readOnly, attach, port } = parseArgs(argv);
-  const coreUrl = new URL("../../packages/core/dist/google_connect.js", import.meta.url).href;
+  const { services, readOnly, attach } = parseArgs(argv);
+  const coreUrl = new URL("../../packages/core/dist/google_hosted_connect.js", import.meta.url).href;
   let mod;
   try {
     mod = await import(coreUrl);
@@ -39,11 +36,10 @@ export async function runConnectGoogleCli(argv) {
     }
     throw err;
   }
-  const { runGoogleConnectFlow } = mod;
-  const result = await runGoogleConnectFlow({
+  const { runGoogleHostedConnectFlow } = mod;
+  const result = await runGoogleHostedConnectFlow({
     services,
     mode: readOnly ? "read_only" : "read_write",
-    port,
     onStatus: (m) => console.log(m),
   });
   console.log(`\nGoogle connected as ${result.email ?? result.accountId}`);

@@ -1021,12 +1021,20 @@ export {
   applyHostedOAuthHandoff,
   isHostedOAuthFormHandoffContent,
   parseHostedOAuthHandoffHttpBody,
+  runHostedIntegrationConnectFlow,
 } from "./hosted_oauth_connect.js";
-export type { HostedOAuthHandoffPayload, ParsedHostedOAuthHandoffBody } from "./hosted_oauth_connect.js";
+export type {
+  HostedOAuthHandoffPayload,
+  ParsedHostedOAuthHandoffBody,
+  HostedIntegrationConnectResult,
+  RunHostedIntegrationConnectOptions,
+} from "./hosted_oauth_connect.js";
 export {
   runXeroHostedConnectFlow,
 } from "./xero_connect.js";
 export type { XeroConnectResult, RunXeroHostedConnectOptions } from "./xero_connect.js";
+export { runGoogleHostedConnectFlow } from "./google_hosted_connect.js";
+export type { RunGoogleHostedConnectOptions } from "./google_hosted_connect.js";
 export type {
   LicenseTier,
   EntitlementKey,

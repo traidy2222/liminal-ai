@@ -64,6 +64,19 @@ foreach ($name in $Packages) {
   Copy-Item (Join-Path $srcPkg "dist") $destPkg -Recurse -Force
 }
 
+$hostedConnect = Join-Path $BundleRepo "packages\core\dist\hosted_oauth_connect.js"
+if (-not (Test-Path $hostedConnect)) {
+  throw "Bundle incomplete: packages/core/dist/hosted_oauth_connect.js missing"
+}
+$hostedConnectSrc = Get-Content $hostedConnect -Raw
+if ($hostedConnectSrc -notmatch "runHostedIntegrationConnectFlow") {
+  throw "Stale core bundle: missing hosted integration OAuth. Close liminal_desktop.exe and rebundle."
+}
+$googleHosted = Join-Path $BundleRepo "packages\core\dist\google_hosted_connect.js"
+if (-not (Test-Path $googleHosted)) {
+  throw "Bundle incomplete: packages/core/dist/google_hosted_connect.js missing"
+}
+
 $license = Join-Path $RepoRoot "LICENSE"
 if (Test-Path $license) {
   Copy-Item $license (Join-Path $BundleRepo "LICENSE") -Force

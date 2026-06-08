@@ -5,13 +5,21 @@ Liminal connects to Google Workspace through a **hybrid MCP architecture**:
 - **Official Google MCP** (preview): Drive, Gmail, Calendar, Chat, People
 - **Community sidecar** (`workspace-mcp` via `uvx`): Docs, Sheets, Slides, Forms, Tasks, Contacts, Apps Script, Custom Search
 
-## Connect once (recommended)
+## Connect (recommended)
 
-One-time **Google Cloud** setup, then one CLI command. After that, tokens and MCP connections persist under `~/.liminal/`.
+Liminal connects to Google Workspace through **hosted OAuth** on [vireondynamics.com](https://www.vireondynamics.com) — end users do **not** need their own Google Cloud OAuth client or secrets in `.env`.
 
-### 1. Google Cloud (one time)
+1. Run Liminal (web UI, desktop, or CLI).
+2. **Settings → Integrations → Google Workspace → Connect** (pick services and read/write mode).
+3. Complete Google consent in the browser tab opened via Vireon.
+4. Close the tab when you see **Connected** — tokens persist under `~/.liminal/oauth/google/`.
+5. Click **Attach MCP tools** (or `liminal connect google --attach`) to enable agent tools.
 
-In [Google Cloud Console](https://console.cloud.google.com/) for your OAuth project:
+CLI: `liminal connect google --attach` uses the same hosted flow.
+
+### Operator setup (Vireon — one time)
+
+In [Google Cloud Console](https://console.cloud.google.com/) for the **Vireon** OAuth project:
 
 1. **APIs & Services → Library** — enable **both** the classic API and the **MCP** API for each official service:
 
@@ -29,40 +37,52 @@ In [Google Cloud Console](https://console.cloud.google.com/) for your OAuth proj
    OAuth scopes (read+write) now include **full Drive** (`drive`), **Calendar event write** (`calendar.events`), **Contacts write** (`contacts`), and **drive.readonly** on Docs/Sheets/Slides/Forms so the agent can open existing files — not only files the app created.
 2. **OAuth consent screen** — add test users if app is in *Testing* mode. Under **Data access**, manually add Google's **MCP** scopes (not only the classic REST scopes). Minimum for Gmail MCP: `gmail.readonly` + `gmail.compose` ([Google doc](https://developers.google.com/workspace/gmail/api/guides/configure-mcp-server)).
 3. **Workspace Developer Preview (required for MCP)** — Gmail/Drive/Calendar **MCP** APIs are preview-only. Enroll your Cloud project at [Google Workspace Developer Preview Program](https://developers.google.com/workspace/preview) (Workspace account + Cloud project). Until Google confirms enrollment, `tools/call` on `gmailmcp.googleapis.com` often returns *The caller does not have permission* even when classic Gmail API returns 200 and OAuth includes `gmail.compose`.
-4. **Credentials → OAuth 2.0 Client** (Web or Desktop).
-5. Add authorized redirect URIs (Web application client):
-   - Web UI: `http://127.0.0.1:3001/oauth/google/callback`
-   - CLI: `http://127.0.0.1:38475/oauth/google/callback` (default; override with `GOOGLE_OAUTH_LOOPBACK_PORT` or `liminal connect google --port N`)
-   - Or create a **Desktop** OAuth client — Google allows dynamic loopback ports for CLI.
-6. Add to `.env`:
-
-```env
-GOOGLE_OAUTH_CLIENT_ID=your-client-id.apps.googleusercontent.com
-GOOGLE_OAUTH_CLIENT_SECRET=your-secret
-# Optional — stronger token encryption at rest:
-# AGENT_OAUTH_ENCRYPTION_KEY=random-32-byte-secret
-```
-
-7. Install [uv](https://docs.astral.sh/uv/) for the Docs/Sheets sidecar (`uvx workspace-mcp`).
-
-### 2. Liminal `.env`
+4. **Credentials → OAuth 2.0 Client** — **Web application**.
+5. **Authorized redirect URI:** `https://www.vireondynamics.com/connect/google/callback`
+6. Add to **Vercel** env for `vireondynamics-website`:
 
 ```env
 GOOGLE_OAUTH_CLIENT_ID=....apps.googleusercontent.com
 GOOGLE_OAUTH_CLIENT_SECRET=...
+INTEGRATION_OAUTH_STATE_SECRET=...   # optional HMAC for OAuth state
+```
+
+7. Install [uv](https://docs.astral.sh/uv/) on machines using the Docs/Sheets sidecar (`uvx workspace-mcp`).
+
+### Self-hosted / advanced (optional)
+
+Power users can still use a **local** OAuth client with loopback redirect (`runGoogleConnectFlow`):
+
+- Redirect: `http://127.0.0.1:38475/oauth/google/callback` or `http://127.0.0.1:3001/oauth/google/callback`
+- Set `GOOGLE_OAUTH_CLIENT_ID` and `GOOGLE_OAUTH_CLIENT_SECRET` in the repo `.env`
+
+### Liminal `.env` (typical user)
+
+```env
 AGENT_GOOGLE_CONNECT_ON_BOOT=1
+# Optional — stronger token encryption at rest:
+# AGENT_OAUTH_ENCRYPTION_KEY=random-32-byte-secret
 ```
 
 `AGENT_GOOGLE_CONNECT_ON_BOOT` defaults to **1** — MCP tools and the Docs/Sheets sidecar restore automatically when OAuth tokens exist.
 
-### 3. OAuth + attach (one command)
+### OAuth + attach (one command)
 
 ```bash
-npm run build -w packages/core && npm run build -w packages/tools
 liminal connect google --attach
 ```
 
-This stores the refresh token, registers Drive/Gmail/Calendar/… MCP tools, and starts the Docs/Sheets sidecar when needed.
+Opens `vireondynamics.com/connect/google`, stores the refresh token, registers Drive/Gmail/Calendar/… MCP tools, and starts the Docs/Sheets sidecar when needed.
+
+## Architecture
+
+```text
+Liminal (local) → opens vireondynamics.com/connect/google?redirect_uri=…&state=…
+                → Google consent
+                → site /connect/google/callback (token exchange)
+                → form POST tokens to localhost …/api/integrations/oauth/handoff
+                → ~/.liminal/oauth/google/
+```
 
 On later **web/tui** starts, `AGENT_GOOGLE_CONNECT_ON_BOOT=1` re-attaches MCP connections and restarts the sidecar automatically.
 

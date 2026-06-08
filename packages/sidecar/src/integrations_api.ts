@@ -6,7 +6,7 @@ import {
   listXeroOAuthAccounts,
   missingDefaultWorkspaceScopes,
   missingDefaultMicrosoftScopes,
-  runGoogleConnectFlow,
+  runGoogleHostedConnectFlow,
   runMicrosoftConnectFlow,
   runXeroHostedConnectFlow,
 } from "@liminal/core";
@@ -93,7 +93,7 @@ export async function connectGoogleOAuth(
     attach?: boolean;
   }
 ): Promise<{ email?: string; accountId: string; attachOutput?: string }> {
-  const result = await runGoogleConnectFlow({
+  const result = await runGoogleHostedConnectFlow({
     services: opts.services,
     mode: opts.mode ?? "read_write",
     openBrowser: opts.openBrowser !== false,

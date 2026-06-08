@@ -30,7 +30,6 @@ import {
   resolveInferenceMode,
   listGoogleOAuthAccounts,
   exchangeGoogleCode,
-  buildGoogleAuthUrlForWeb,
   ALL_GOOGLE_SERVICE_IDS,
   scopesForGoogleServices,
   resolveGoogleServices,
@@ -109,7 +108,12 @@ const pendingMicrosoftConnect = new Map<
 
 const pendingHostedOAuth = new Map<
   string,
-  { exp: number; provider: string; mode: "read_write" | "read_only" }
+  {
+    exp: number;
+    provider: string;
+    mode: "read_write" | "read_only";
+    services?: string[];
+  }
 >();
 
 function prunePendingHostedOAuth(): void {
@@ -563,22 +567,33 @@ export function createRouter(
   });
 
   router.get("/api/integrations/google/begin", (req, res) => {
-    prunePendingGoogleConnect();
+    prunePendingHostedOAuth();
     const state = randomBytes(16).toString("hex");
-    const redirectUri = googleCallbackRedirectUri(WEB_PORT);
     const servicesRaw = req.query["services"];
     const services =
       typeof servicesRaw === "string"
         ? servicesRaw.split(",").map((s) => s.trim()).filter(Boolean)
         : undefined;
     const mode = req.query["mode"] === "read_only" ? "read_only" : "read_write";
-    pendingGoogleConnect.set(state, { exp: Date.now() + 5 * 60_000, redirectUri, services, mode });
-    try {
-      const authUrl = buildGoogleAuthUrlForWeb({ redirectUri, state, services, mode });
-      res.json({ authUrl, state });
-    } catch (e) {
-      res.status(400).json({ error: e instanceof Error ? e.message : String(e) });
-    }
+    pendingHostedOAuth.set(state, {
+      exp: Date.now() + 10 * 60_000,
+      provider: "google",
+      mode,
+      services,
+    });
+    const harnessRedirectUri = hostedOAuthHandoffPath(WEB_PORT);
+    const site = defaultVireonSiteOrigin();
+    const extra: Record<string, string> = {};
+    if (services?.length) extra.services = services.join(",");
+    const connectUrl = buildHostedIntegrationConnectUrl({
+      provider: "google",
+      harnessRedirectUri,
+      harnessState: state,
+      siteOrigin: site,
+      mode,
+      extra: Object.keys(extra).length > 0 ? extra : undefined,
+    });
+    res.json({ connectUrl, authUrl: connectUrl, state });
   });
 
   router.get("/oauth/google/callback", async (req, res) => {
@@ -911,6 +926,13 @@ export function createRouter(
         const bridge = active();
         if (!bridge.harness.getIsRunning() && provider === "xero") {
           await connectXeroFromServer(bridge.harness.registry);
+          bridge.harness.getContext().refreshProtocolDynamic(bridge.harness.registry.getActiveToolNames());
+        }
+        if (!bridge.harness.getIsRunning() && provider === "google") {
+          await connectGoogleWorkspaceFromServer(bridge.harness.registry, {
+            services: pending.services,
+            mode: pending.mode,
+          });
           bridge.harness.getContext().refreshProtocolDynamic(bridge.harness.registry.getActiveToolNames());
         }
       } catch {

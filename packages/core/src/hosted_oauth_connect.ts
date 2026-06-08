@@ -1,7 +1,10 @@
 /**
  * Hosted OAuth connect — Vireon site completes provider consent, POSTs tokens to local harness.
  */
+import { createServer, type IncomingMessage } from "node:http";
+import { randomBytes } from "node:crypto";
 import { defaultVireonSiteOrigin } from "./vireon_account.js";
+import { openExternalUrl } from "./open_external_url.js";
 import { type OAuthTokenBundle, writeOAuthBundle } from "./oauth_store.js";
 
 export type HostedOAuthHandoffPayload = {
@@ -114,4 +117,183 @@ export async function applyHostedOAuthHandoff(
   }
   await writeOAuthBundle(bundle);
   return bundle;
+}
+
+const HOSTED_FLOW_TIMEOUT_MS = 10 * 60_000;
+
+function isLoopbackHost(host: string): boolean {
+  const h = host.toLowerCase();
+  return h === "127.0.0.1" || h === "localhost" || h === "[::1]";
+}
+
+async function readRawHttpBody(req: IncomingMessage): Promise<string> {
+  const chunks: Buffer[] = [];
+  for await (const c of req) chunks.push(c as Buffer);
+  return Buffer.concat(chunks).toString("utf8");
+}
+
+export type HostedIntegrationConnectResult = {
+  email?: string;
+  accountId: string;
+  scopes?: string[];
+  metadata?: Record<string, unknown>;
+};
+
+export interface RunHostedIntegrationConnectOptions {
+  provider: string;
+  siteOrigin?: string;
+  mode?: string;
+  extra?: Record<string, string>;
+  openBrowser?: boolean;
+  onStatus?: (message: string) => void;
+  timeoutMs?: number;
+}
+
+/** Loopback server + browser to Vireon-hosted integration OAuth; resolves when tokens are POSTed back. */
+export function runHostedIntegrationConnectFlow(
+  options: RunHostedIntegrationConnectOptions
+): Promise<HostedIntegrationConnectResult> {
+  const timeoutMs = options.timeoutMs ?? HOSTED_FLOW_TIMEOUT_MS;
+  const state = randomBytes(16).toString("hex");
+  const origin = (options.siteOrigin?.trim() || defaultVireonSiteOrigin()).replace(/\/$/, "");
+  const log = options.onStatus ?? ((m: string) => console.log(m));
+  const provider = options.provider.trim();
+
+  return new Promise((resolve, reject) => {
+    const server = createServer(async (req, res) => {
+      const url = new URL(req.url ?? "/", "http://127.0.0.1");
+      const siteOriginHeader = origin;
+
+      if (req.method === "OPTIONS") {
+        res.writeHead(204, {
+          "Access-Control-Allow-Origin": siteOriginHeader,
+          "Access-Control-Allow-Methods": "POST, OPTIONS",
+          "Access-Control-Allow-Headers": "Content-Type",
+          "Access-Control-Allow-Private-Network": "true",
+        });
+        res.end();
+        return;
+      }
+
+      if (url.pathname !== DEFAULT_HANDOFF_PATH || req.method !== "POST") {
+        res.writeHead(404);
+        res.end("Not found");
+        return;
+      }
+
+      try {
+        const rawBody = await readRawHttpBody(req);
+        const contentType = req.headers["content-type"] ?? "";
+        const body = parseHostedOAuthHandoffHttpBody(rawBody, contentType) as HostedOAuthHandoffPayload & {
+          bundle?: HostedOAuthHandoffPayload["bundle"];
+        };
+        const htmlHandoff = isHostedOAuthFormHandoffContent(contentType, rawBody);
+        if (body.state !== state) {
+          res.writeHead(403, { "Content-Type": "application/json" });
+          res.end(JSON.stringify({ error: "Invalid state" }));
+          return;
+        }
+        const b = body.bundle;
+        if (!b?.accessToken || !b.refreshToken || !b.accountId) {
+          res.writeHead(400, { "Content-Type": "application/json" });
+          res.end(JSON.stringify({ error: "Incomplete OAuth bundle" }));
+          return;
+        }
+
+        const bundle = await applyHostedOAuthHandoff({
+          provider,
+          state,
+          bundle: {
+            provider: b.provider ?? provider,
+            accountId: b.accountId,
+            email: b.email,
+            accessToken: b.accessToken,
+            refreshToken: b.refreshToken,
+            expiresAt: b.expiresAt,
+            scopes: b.scopes ?? [],
+            metadata: b.metadata,
+          },
+        });
+
+        if (htmlHandoff) {
+          res.writeHead(200, {
+            "Content-Type": "text/html; charset=utf-8",
+            "Access-Control-Allow-Origin": siteOriginHeader,
+          });
+          res.end(
+            "<!DOCTYPE html><html><body style=\"font-family:system-ui,sans-serif;padding:2rem\"><p><strong>Connected.</strong> Close this tab and return to Liminal.</p></body></html>"
+          );
+        } else {
+          res.writeHead(200, {
+            "Content-Type": "application/json",
+            "Access-Control-Allow-Origin": siteOriginHeader,
+          });
+          res.end(JSON.stringify({ ok: true }));
+        }
+
+        clearTimeout(timer);
+        server.close();
+        resolve({
+          email: bundle.email,
+          accountId: bundle.accountId,
+          scopes: bundle.scopes,
+          metadata: bundle.metadata as Record<string, unknown> | undefined,
+        });
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        res.writeHead(400, {
+          "Content-Type": "application/json",
+          "Access-Control-Allow-Origin": siteOriginHeader,
+        });
+        res.end(JSON.stringify({ error: message }));
+      }
+    });
+
+    server.listen(0, "127.0.0.1", () => {
+      const addr = server.address();
+      if (!addr || typeof addr === "string") {
+        reject(new Error("Could not bind loopback port"));
+        return;
+      }
+      const redirectUri = hostedOAuthHandoffPath(addr.port);
+      try {
+        const host = new URL(redirectUri).hostname;
+        if (!isLoopbackHost(host)) {
+          reject(new Error("Invalid redirect URI"));
+          return;
+        }
+      } catch {
+        reject(new Error("Invalid redirect URI"));
+        return;
+      }
+
+      const connectUrl = buildHostedIntegrationConnectUrl({
+        provider,
+        harnessRedirectUri: redirectUri,
+        harnessState: state,
+        siteOrigin: origin,
+        mode: options.mode,
+        extra: options.extra,
+      });
+
+      log(
+        `Opening ${provider} sign-in — complete in your browser (timeout ${Math.round(timeoutMs / 60000)}m)`
+      );
+      log(connectUrl);
+
+      if (options.openBrowser !== false) {
+        openExternalUrl(connectUrl);
+      }
+    });
+
+    const timer = setTimeout(() => {
+      server.close();
+      reject(new Error(`Timed out waiting for ${provider} sign-in. Try again.`));
+    }, timeoutMs);
+
+    server.on("error", (err) => {
+      clearTimeout(timer);
+      reject(err);
+    });
+  });
 }

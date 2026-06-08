@@ -329,8 +329,8 @@ export function IntegrationsPanel({ agentBusy }: IntegrationsPanelProps) {
         `/api/integrations/google/begin?mode=${mode}${svc ? `&services=${encodeURIComponent(svc)}` : ""}`
       );
       if (!res.ok) throw new Error(await res.text());
-      const { authUrl } = (await res.json()) as { authUrl: string };
-      window.open(authUrl, "_blank", "noopener,noreferrer");
+      const { connectUrl } = (await res.json()) as { connectUrl: string };
+      window.open(connectUrl, "_blank", "noopener,noreferrer");
       return;
     }
     const res = await webApiFetch("/api/integrations/google/connect", {
@@ -403,7 +403,9 @@ export function IntegrationsPanel({ agentBusy }: IntegrationsPanelProps) {
         INTEGRATIONS
       </div>
       <p style={{ fontSize: 11, color: "#aab8c4", lineHeight: 1.5, marginBottom: 12 }}>
-        One tap to connect each service. Tap a row to see options. Secrets live in <code style={{ color: CYAN }}>.env</code>.
+        One tap to connect each service. Tap a row to see options. Google and Xero sign in via{" "}
+        <code style={{ color: CYAN }}>vireondynamics.com</code>; GitHub uses a PAT in{" "}
+        <code style={{ color: CYAN }}>.env</code>.
       </p>
 
       {error ? (

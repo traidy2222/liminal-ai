@@ -137,7 +137,7 @@ export const TOOL_FAMILIES: Record<string, { description: string; tools: readonl
   connectors: {
     description:
       "Curated provider integrations: Google Workspace (OAuth) and GitHub (GITHUB_TOKEN) via connect_provider. " +
-      "Google: Settings → Integrations or `liminal connect google`. GitHub: PAT in .env. Xero: hosted OAuth (no .env).",
+      "Google & Xero: hosted OAuth via vireondynamics.com (Settings → Integrations). GitHub: PAT in .env.",
     tools: [
       "connect_provider",
       "disconnect_provider",
