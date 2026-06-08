@@ -2,9 +2,10 @@
  * Google workspace-mcp sidecar process manager.
  */
 import { spawn, type ChildProcess } from "node:child_process";
-import { readFile, writeFile, unlink } from "node:fs/promises";
+import { readFile, writeFile, unlink, mkdir } from "node:fs/promises";
 import { existsSync } from "node:fs";
-import { globalPath } from "@liminal/core";
+import path from "node:path";
+import { globalPath, ensureGlobalStorageRoot } from "@liminal/core";
 import { effectiveHarnessEnvRaw } from "@liminal/core";
 
 const SIDECAR_STATE_SEG = "sidecars/google_workspace.json";
@@ -27,7 +28,7 @@ function sidecarEnabled(): boolean {
   return effectiveHarnessEnvRaw("AGENT_GOOGLE_SIDECAR_ENABLE") !== "0";
 }
 
-function sidecarPort(): number {
+export function sidecarPort(): number {
   const raw = effectiveHarnessEnvRaw("AGENT_GOOGLE_SIDECAR_PORT") ?? "8010";
   const n = parseInt(raw, 10);
   return Number.isFinite(n) && n > 0 ? n : 8010;
@@ -37,8 +38,61 @@ function sidecarCmd(): string {
   return effectiveHarnessEnvRaw("AGENT_GOOGLE_SIDECAR_CMD")?.trim() || "uvx workspace-mcp";
 }
 
-export function googleSidecarMcpUrl(): string {
-  return `http://127.0.0.1:${sidecarPort()}/mcp`;
+function googleOAuthClientId(): string {
+  return (
+    process.env.GOOGLE_OAUTH_CLIENT_ID?.trim() ||
+    process.env.AGENT_GOOGLE_OAUTH_CLIENT_ID?.trim() ||
+    effectiveHarnessEnvRaw("AGENT_GOOGLE_OAUTH_CLIENT_ID")?.trim() ||
+    ""
+  );
+}
+
+function googleOAuthClientSecret(): string {
+  return process.env.GOOGLE_OAUTH_CLIENT_SECRET?.trim() || "";
+}
+
+export function googleSidecarMcpUrl(port = sidecarPort()): string {
+  return `http://127.0.0.1:${port}/mcp`;
+}
+
+/** workspace-mcp listens on WORKSPACE_MCP_PORT (not --port CLI flags). */
+export function buildSidecarEnv(port: number, accessToken?: string): NodeJS.ProcessEnv {
+  const env: NodeJS.ProcessEnv = { ...process.env };
+  env.WORKSPACE_MCP_PORT = String(port);
+  env.WORKSPACE_MCP_HOST = "127.0.0.1";
+  env.WORKSPACE_MCP_TRANSPORT = "streamable-http";
+  // Liminal owns OAuth — pass bearer tokens on each MCP request (mcp_attach).
+  env.MCP_ENABLE_OAUTH21 = "true";
+  env.EXTERNAL_OAUTH21_PROVIDER = "true";
+  env.WORKSPACE_MCP_STATELESS_MODE = "true";
+  env.OAUTHLIB_INSECURE_TRANSPORT = "1";
+  const clientId = googleOAuthClientId();
+  if (clientId) env.GOOGLE_OAUTH_CLIENT_ID = clientId;
+  const secret = googleOAuthClientSecret();
+  if (secret) env.GOOGLE_OAUTH_CLIENT_SECRET = secret;
+  if (accessToken) env.GOOGLE_ACCESS_TOKEN = accessToken;
+  return env;
+}
+
+export function buildSidecarArgs(
+  cmd: string,
+  opts?: { tools?: string[]; readOnly?: boolean }
+): { bin: string; args: string[] } {
+  const cmdParts = cmd.split(/\s+/).filter(Boolean);
+  if (cmdParts.length === 0) {
+    return { bin: "", args: [] };
+  }
+  const args = [...cmdParts.slice(1), "--transport", "streamable-http"];
+  const tools = opts?.tools?.map((t) => t.trim()).filter(Boolean) ?? [];
+  if (tools.length > 0) {
+    args.push("--tools", ...tools);
+  } else {
+    args.push("--tool-tier", "complete");
+  }
+  if (opts?.readOnly) {
+    args.push("--read-only");
+  }
+  return { bin: cmdParts[0]!, args };
 }
 
 async function readState(): Promise<SidecarState | null> {
@@ -50,7 +104,13 @@ async function readState(): Promise<SidecarState | null> {
   }
 }
 
+async function ensureSidecarStateDir(): Promise<void> {
+  await ensureGlobalStorageRoot();
+  await mkdir(path.dirname(statePath()), { recursive: true });
+}
+
 async function writeState(state: SidecarState): Promise<void> {
+  await ensureSidecarStateDir();
   await writeFile(statePath(), JSON.stringify(state, null, 2), "utf8");
 }
 
@@ -62,17 +122,28 @@ async function clearState(): Promise<void> {
   }
 }
 
-async function waitForSidecarReady(port: number, timeoutMs = 30_000): Promise<boolean> {
+function sidecarHttpReadyStatus(status: number): boolean {
+  // 401 = server up but requires bearer token (external OAuth provider mode).
+  return status === 200 || status === 406 || status === 401;
+}
+
+async function waitForSidecarReady(
+  port: number,
+  timeoutMs = 30_000,
+  accessToken?: string
+): Promise<boolean> {
   const deadline = Date.now() + timeoutMs;
   const url = `http://127.0.0.1:${port}/mcp`;
   while (Date.now() < deadline) {
     try {
+      const headers: Record<string, string> = {
+        "Content-Type": "application/json",
+        Accept: "application/json, text/event-stream",
+      };
+      if (accessToken) headers.Authorization = `Bearer ${accessToken}`;
       const res = await fetch(url, {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Accept: "application/json, text/event-stream",
-        },
+        headers,
         body: JSON.stringify({
           jsonrpc: "2.0",
           id: 1,
@@ -85,7 +156,7 @@ async function waitForSidecarReady(port: number, timeoutMs = 30_000): Promise<bo
         }),
         signal: AbortSignal.timeout(3000),
       });
-      if (res.ok || res.status === 406) return true;
+      if (sidecarHttpReadyStatus(res.status)) return true;
     } catch {
       /* retry */
     }
@@ -94,45 +165,52 @@ async function waitForSidecarReady(port: number, timeoutMs = 30_000): Promise<bo
   return false;
 }
 
-export async function ensureGoogleSidecarRunning(accessToken?: string): Promise<{ ok: boolean; url: string; error?: string }> {
+export interface GoogleSidecarStartOptions {
+  /** workspace-mcp `--tools` service ids (docs, sheets, …). */
+  tools?: string[];
+  readOnly?: boolean;
+}
+
+export async function ensureGoogleSidecarRunning(
+  accessToken?: string,
+  opts?: GoogleSidecarStartOptions
+): Promise<{ ok: boolean; url: string; error?: string }> {
   if (!sidecarEnabled()) {
     return { ok: false, url: googleSidecarMcpUrl(), error: "AGENT_GOOGLE_SIDECAR_ENABLE=0" };
   }
 
   const port = sidecarPort();
-  const url = `http://127.0.0.1:${port}/mcp`;
+  const url = googleSidecarMcpUrl(port);
   const existing = await readState();
   if (existing && existing.port === port) {
     localRefCount++;
     existing.refCount = localRefCount;
     await writeState(existing);
-    const ready = await waitForSidecarReady(port, 5000);
+    const ready = await waitForSidecarReady(port, 5000, accessToken);
     if (ready) return { ok: true, url };
   }
 
-  const cmdParts = sidecarCmd().split(/\s+/).filter(Boolean);
-  if (cmdParts.length === 0) {
+  const { bin, args } = buildSidecarArgs(sidecarCmd(), opts);
+  if (!bin) {
     return { ok: false, url, error: "AGENT_GOOGLE_SIDECAR_CMD is empty" };
   }
+  if (!googleOAuthClientId()) {
+    return {
+      ok: false,
+      url,
+      error:
+        "GOOGLE_OAUTH_CLIENT_ID is required for workspace-mcp sidecar (set in .env or AGENT_GOOGLE_OAUTH_CLIENT_ID).",
+    };
+  }
 
-  const env = { ...process.env };
-  if (accessToken) env.GOOGLE_ACCESS_TOKEN = accessToken;
-
-  const args = [
-    ...cmdParts.slice(1),
-    "--transport",
-    "streamable-http",
-    "--host",
-    "127.0.0.1",
-    "--port",
-    String(port),
-  ];
+  const env = buildSidecarEnv(port, accessToken);
+  let stderr = "";
 
   try {
-    managedProcess = spawn(cmdParts[0]!, args, {
+    managedProcess = spawn(bin, args, {
       env,
       detached: false,
-      stdio: "ignore",
+      stdio: ["ignore", "ignore", "pipe"],
       shell: process.platform === "win32",
     });
   } catch (e) {
@@ -140,6 +218,30 @@ export async function ensureGoogleSidecarRunning(accessToken?: string): Promise<
       ok: false,
       url,
       error: `failed to spawn sidecar: ${e instanceof Error ? e.message : String(e)}`,
+    };
+  }
+
+  managedProcess.stderr?.on("data", (chunk: Buffer | string) => {
+    stderr += String(chunk);
+    if (stderr.length > 4000) stderr = stderr.slice(-4000);
+  });
+
+  const earlyExit = await new Promise<number | null>((resolve) => {
+    const timer = setTimeout(() => resolve(null), 2500);
+    managedProcess?.once("exit", (code) => {
+      clearTimeout(timer);
+      resolve(code ?? 1);
+    });
+  });
+  if (earlyExit !== null) {
+    const detail = stderr.trim().split(/\r?\n/).slice(-4).join(" ").trim();
+    await stopGoogleSidecar(true);
+    return {
+      ok: false,
+      url,
+      error:
+        `workspace-mcp exited (code ${earlyExit})` +
+        (detail ? `: ${detail}` : ". Install uv (https://docs.astral.sh/uv/) and run `uvx workspace-mcp --help`."),
     };
   }
 
@@ -152,10 +254,17 @@ export async function ensureGoogleSidecarRunning(accessToken?: string): Promise<
     void clearState();
   });
 
-  const ready = await waitForSidecarReady(port);
+  const ready = await waitForSidecarReady(port, 30_000, accessToken);
   if (!ready) {
+    const detail = stderr.trim().split(/\r?\n/).slice(-4).join(" ").trim();
     await stopGoogleSidecar(true);
-    return { ok: false, url, error: "sidecar did not become ready within 30s (is uv/uvx installed?)" };
+    return {
+      ok: false,
+      url,
+      error:
+        `sidecar did not become ready on port ${port} within 30s` +
+        (detail ? ` — ${detail}` : " (is uv/uvx installed? is the port free?)"),
+    };
   }
   return { ok: true, url };
 }
@@ -199,12 +308,12 @@ export async function getGoogleSidecarStatus(): Promise<{
 }> {
   const port = sidecarPort();
   const state = await readState();
-  const ready = state ? await waitForSidecarReady(port, 2000) : false;
+  const ready = await waitForSidecarReady(port, 2000);
   return {
     enabled: sidecarEnabled(),
     running: ready,
     port,
     pid: state?.pid,
-    url: googleSidecarMcpUrl(),
+    url: googleSidecarMcpUrl(port),
   };
 }

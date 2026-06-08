@@ -6,6 +6,8 @@ import {
   effectiveHarnessEnvRaw,
   getGoogleAccessToken,
   listGoogleOAuthAccounts,
+  workspaceMcpToolNamesForServices,
+  type GoogleServiceId,
 } from "@liminal/core";
 import { listConnectionsByParent } from "./api_connections_store.js";
 import { connectGoogleWorkspaceFromServer } from "./connect_provider.js";
@@ -19,9 +21,14 @@ export async function bootstrapGoogleWorkspace(registry: ToolRegistry): Promise<
   const googleConns = await listConnectionsByParent(PARENT);
 
   if (googleConns.some((c) => c.sidecarManaged)) {
-    const accountId = googleConns.find((c) => c.oauthAccountId)?.oauthAccountId;
+    const extConn = googleConns.find((c) => c.sidecarManaged);
+    const accountId = extConn?.oauthAccountId ?? googleConns.find((c) => c.oauthAccountId)?.oauthAccountId;
     const token = await getGoogleAccessToken(accountId);
-    await ensureGoogleSidecarRunning(token ?? undefined);
+    const sidecarServices = (extConn?.services ?? []) as GoogleServiceId[];
+    await ensureGoogleSidecarRunning(token ?? undefined, {
+      tools: workspaceMcpToolNamesForServices(sidecarServices),
+      readOnly: extConn?.readOnly,
+    });
   }
 
   const onBoot = effectiveHarnessEnvRaw("AGENT_GOOGLE_CONNECT_ON_BOOT") === "1";
