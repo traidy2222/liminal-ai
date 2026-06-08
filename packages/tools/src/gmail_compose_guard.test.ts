@@ -1,10 +1,10 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
-  hasBrokenEmailContrast,
   isGmailThreadReply,
   isSubstantivePlainBody,
   looksLikeFormattedEmailHtml,
+  validateOutboundEmailFactual,
   validateOutboundEmailStyle,
 } from "./gmail_compose_guard.js";
 
@@ -12,6 +12,11 @@ test("looksLikeFormattedEmailHtml detects table layout", () => {
   const html = `<table width="600"><tr><td style="padding:16px">Hi</td></tr></table>`;
   assert.equal(looksLikeFormattedEmailHtml(html), true);
   assert.equal(looksLikeFormattedEmailHtml("<p>Hello world</p>"), false);
+});
+
+test("looksLikeFormattedEmailHtml accepts minimal tier styled paragraphs", () => {
+  const html = `<p style="margin:0 0 16px;font-family:Georgia,serif;color:#444;line-height:1.5">Thanks again for your time.</p>`;
+  assert.equal(looksLikeFormattedEmailHtml(html), true);
 });
 
 test("validateOutboundEmailStyle rejects substantive plain new mail", () => {
@@ -45,21 +50,25 @@ test("validateOutboundEmailStyle allows formatted html", () => {
   assert.equal(err, null);
 });
 
-test("hasBrokenEmailContrast rejects light text without local dark bgcolor", () => {
-  const broken = `<table bgcolor="#1a1a2e"><tr><td><p style="color:#e0e0e0;line-height:1.6">Hey,</p><p style="color:#e0e0e0">Your inbox just got autonomous.</p></td></tr></table>`;
-  assert.equal(hasBrokenEmailContrast(broken), true);
+test("validateOutboundEmailStyle allows light text on table layout", () => {
+  const html = `<table bgcolor="#1a1a2e"><tr><td><p style="color:#e0e0e0;line-height:1.6">Hey,</p><p style="color:#e0e0e0">Your inbox just got autonomous.</p></td></tr></table>`;
   const err = validateOutboundEmailStyle({
     to: ["a@b.com"],
     subject: "Test",
     body: "Hi",
-    body_html: broken,
+    body_html: html,
   });
-  assert.match(err!, /same cell/i);
+  assert.equal(err, null);
 });
 
-test("hasBrokenEmailContrast allows self-contained dark td", () => {
-  const ok = `<table><tr><td bgcolor="#1a1a2e" style="color:#ffffff;padding:20px">Header</td></tr></table>`;
-  assert.equal(hasBrokenEmailContrast(ok), false);
+test("validateOutboundEmailFactual rejects placeholder repo URLs", () => {
+  const err = validateOutboundEmailFactual({
+    to: ["a@b.com"],
+    subject: "Hello",
+    body: "See https://github.com/GITHUB_USERNAME/REPO_PLACEHOLDER",
+  });
+  assert.ok(err);
+  assert.match(err!, /placeholder/i);
 });
 
 test("isGmailThreadReply detects thread_id", () => {

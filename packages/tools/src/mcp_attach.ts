@@ -5,6 +5,7 @@
 import type { AgentEmitter, ToolDefinition, ToolRegistry, ToolResult, PropertySchema } from "@liminal/core";
 import {
   type GoogleServiceId,
+  effectiveHarnessEnvRaw,
   googleCloudMcpApiLibraryUrl,
   googleProjectIdFromClientId,
 } from "@liminal/core";
@@ -28,6 +29,7 @@ import { validateOutboundEmailStyle } from "./gmail_compose_guard.js";
 
 const MCP_PROTOCOL_VERSION = "2025-06-18";
 const MCP_CLIENT_INFO = { name: "liminal-harness", version: "0.1.0" };
+const MCP_FETCH_TIMEOUT_MS = 60_000;
 
 let jsonRpcCounter = 1;
 function nextJsonRpcId(): number {
@@ -56,6 +58,7 @@ async function postJsonRpc<T>(
     method: "POST",
     headers,
     body: JSON.stringify(body),
+    signal: AbortSignal.timeout(MCP_FETCH_TIMEOUT_MS),
   });
   if (!expectReply) return null;
   if (!res.ok) {
@@ -288,12 +291,39 @@ function parseAuthArg(auth: unknown): AuthScheme {
       scopes: Array.isArray(a.scopes) ? a.scopes : [],
     };
   }
+  if (a.kind === "oauth2" && a.provider === "microsoft") {
+    return {
+      kind: "oauth2",
+      provider: "microsoft",
+      accountId: a.accountId,
+      scopes: Array.isArray(a.scopes) ? a.scopes : [],
+    };
+  }
   if (a.kind === "bearer" && a.envVar) return { kind: "bearer", envVar: a.envVar };
   if (a.kind === "header" && a.envVar && a.headerName) {
     return { kind: "header", headerName: a.headerName, envVar: a.envVar };
   }
   if (a.kind === "basic" && a.envVar) return { kind: "basic", envVar: a.envVar };
   return { kind: "none" };
+}
+
+/**
+ * Under AGENT_TOOL_LAZY=1, MCP integrations register tools but stay off the model API
+ * until activate_tool_family("connectors") or connector:<name>. Set
+ * AGENT_INTEGRATION_AUTO_ACTIVATE=1 to restore eager activation (old behavior).
+ */
+export function resolveMcpAutoActivate(
+  registry: ToolRegistry,
+  opts?: { explicit?: boolean; fromRestore?: boolean }
+): boolean {
+  const explicit = opts?.explicit;
+  if (!registry.isLazyToolLoading()) return explicit !== false;
+  if (effectiveHarnessEnvRaw("AGENT_INTEGRATION_AUTO_ACTIVATE") === "1") {
+    return explicit !== false;
+  }
+  // Ignore persisted autoActivate:true from older builds on harness restart.
+  if (opts?.fromRestore) return false;
+  return explicit === true;
 }
 
 export interface AttachMcpOptions {
@@ -332,6 +362,8 @@ export async function attachMcpConnection(
 
   assignMcpToolNames(tools, name);
 
+  const autoActivate = resolveMcpAutoActivate(registry, { explicit: opts.autoActivate });
+
   const record: McpConnectionRecord = {
     kind: "mcp",
     name,
@@ -341,7 +373,7 @@ export async function attachMcpConnection(
     tools,
     attachedAt: Date.now(),
     readOnly: opts.readOnly,
-    autoActivate: opts.autoActivate ?? true,
+    autoActivate,
     toolFilter: opts.toolFilter,
     providerId: opts.providerId,
     parentProvider: opts.parentProvider,
@@ -353,7 +385,7 @@ export async function attachMcpConnection(
   await writeConnection(record);
   const registered = registerMcpConnection(registry, record);
 
-  if (registry.isLazyToolLoading() && record.autoActivate !== false) {
+  if (autoActivate) {
     registry.activate(registered);
   }
 
@@ -374,7 +406,11 @@ export function createMcpAttachTools(registry: ToolRegistry, _emitter: AgentEmit
         url: { type: "string", description: "Streamable HTTP MCP endpoint." },
         auth: { type: "object", description: "Auth scheme (bearer/header/oauth2/none)." },
         read_only: { type: "boolean", description: "Skip write tools." },
-        auto_activate: { type: "boolean", description: "Expose tools immediately under lazy loading (default true)." },
+        auto_activate: {
+          type: "boolean",
+          description:
+            "Expose tools immediately. Under AGENT_TOOL_LAZY=1 defaults to false unless AGENT_INTEGRATION_AUTO_ACTIVATE=1.",
+        },
       },
       required: ["name", "url"],
       additionalProperties: false,
@@ -391,7 +427,7 @@ export function createMcpAttachTools(registry: ToolRegistry, _emitter: AgentEmit
           url,
           auth: parseAuthArg(args["auth"]),
           readOnly: args["read_only"] === true,
-          autoActivate: args["auto_activate"] !== false,
+          autoActivate: args["auto_activate"] === true,
         });
         const sample = record.tools.slice(0, 8).map((t) => `  ${t.toolName}  → ${t.remoteName}`).join("\n");
         const more = record.tools.length > 8 ? `\n  …and ${record.tools.length - 8} more` : "";
@@ -442,7 +478,7 @@ export function restoreMcpConnectionsFromRecords(
   for (const c of records) {
     const names = registerMcpConnection(registry, c);
     toolCount += names.length;
-    if (registry.isLazyToolLoading() && c.autoActivate !== false) {
+    if (resolveMcpAutoActivate(registry, { explicit: c.autoActivate, fromRestore: true })) {
       activated.push(...registry.activate(names));
     }
   }

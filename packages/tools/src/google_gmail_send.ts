@@ -198,14 +198,16 @@ const composeProperties: Record<string, PropertySchema> = {
     type: "string",
     description:
       "Plain-text body — always include alongside body_html (fallback when HTML can't render). " +
-      "PLAIN-tier only: omit body_html and use body alone for thread replies and one-liners.",
+      "PLAIN-tier only: omit body_html and use body alone for thread replies and one-liners. " +
+      "Copy: no em/en dashes (R-EMAIL-COPY); use commas or short sentences instead.",
   },
   body_html: {
     type: "string",
     description:
       "Rich HTML body (email-safe inline styles, nested tables, cid: images). " +
       "Default for new outbound mail. Put bgcolor+color on the same <td> — Gmail strips outer dark backgrounds. " +
-      "Body band: #333 on #fff; dark header bands: #fff text on bgcolor on that same td.",
+      "Body band: #333 on #fff; dark header bands: #fff text on bgcolor on that same td. " +
+      "Copy: no em/en dashes or &mdash; in prose (R-EMAIL-COPY).",
   },
   inline_images: {
     type: "array",
@@ -259,7 +261,7 @@ export function createGmailSendTools(): ToolDefinition[] {
     description:
       "WHAT: Create a Gmail draft via REST (users.drafts.create) with full body_html, inline_images, and attachments.\n" +
       "WHEN: User wants to review mail in Gmail before sending — **prefer this over mcp_google_gmail_create_draft** for styled HTML (MCP draft is plain-only).\n" +
-      "STYLE: FORMATTED body_html + body for new outbound mail (R-EMAIL-STYLE); plain-only for thread replies and one-liners.\n" +
+      "STYLE: Call email_style_infer first for industry-native enterprise HTML; then body_html + body here. Plain-only for thread replies.\n" +
       "SAFETY: approval-gated — verify recipients before approving.",
     parameters: composeParameters,
     requiresApproval: true,
@@ -294,7 +296,7 @@ export function createGmailSendTools(): ToolDefinition[] {
       "WHAT: Send email immediately via Gmail REST (users.messages.send). Same OAuth as Google Workspace MCP.\n" +
       "WHEN: User explicitly asked to SEND now.\n" +
       "HOW: Prefer mcp_google_gmail_* for search/read/labels; gmail_create_draft for styled drafts; this tool for immediate delivery.\n" +
-      "STYLE: FORMATTED body_html + body for new outbound mail; plain-only for thread replies per Email composition protocol.\n" +
+      "STYLE: email_style_infer then enterprise-grade body_html + body; plain-only for thread replies.\n" +
       "SAFETY: approval-gated — verify recipients; real mail leaves the account on approve.",
     parameters: composeParameters,
     requiresApproval: true,

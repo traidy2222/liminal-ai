@@ -82,6 +82,84 @@ export function decodeMimeHeaderValue(value: string): string {
   return parts.join("").replace(/\s+/g, " ").trim();
 }
 
+/** Count common UTF-8-as-Latin-1 / Shift-JIS mojibake markers. */
+function countEmailMojibakeMarkers(text: string): number {
+  const hits = text.match(/\uFFE2\uFF80|\u00e2\u0080|\u00e2\u20ac|Ã.|Â./g);
+  return hits?.length ?? 0;
+}
+
+/**
+ * Repair punctuation corrupted when UTF-8 bytes were misread (LLM output, JSON, or
+ * client copy/paste). Fixes e.g. em dash showing as `￢ﾀﾔ` or `â€"`.
+ */
+export function repairEmailUnicode(text: string): string {
+  if (!text || !/[^\x00-\x7f]/.test(text)) return text;
+
+  let s = text;
+
+  const fullwidth: Array<[RegExp, string]> = [
+    [/\uFFE2\uFF80\uFF94/g, "\u2014"],
+    [/\uFFE2\uFF80\uFF93/g, "\u2013"],
+    [/\uFFE2\uFF80\uFF99/g, "\u2019"],
+    [/\uFFE2\uFF80\uFF98/g, "\u2018"],
+    [/\uFFE2\uFF80\uFF9C/g, "\u201C"],
+    [/\uFFE2\uFF80\uFF9D/g, "\u201D"],
+    [/\uFFE2\uFF80\uFF9A/g, "\u2026"],
+  ];
+  for (const [re, rep] of fullwidth) s = s.replace(re, rep);
+
+  // UTF-8 bytes read as Latin-1 (E2 80 9x) or Windows-1252 (â + € + smart quote).
+  const misreadUtf8: Array<[RegExp, string]> = [
+    [/\u00e2\u0080\u0094/g, "\u2014"],
+    [/\u00e2\u0080\u0093/g, "\u2013"],
+    [/\u00e2\u0080\u0099/g, "\u2019"],
+    [/\u00e2\u0080\u0098/g, "\u2018"],
+    [/\u00e2\u0080\u009c/g, "\u201C"],
+    [/\u00e2\u0080\u009d/g, "\u201D"],
+    [/\u00e2\u0080\u00a6/g, "\u2026"],
+    [/\u00e2\u20ac\u201d/g, "\u2014"],
+    [/\u00e2\u20ac\u201c/g, "\u2013"],
+    [/\u00e2\u20ac\u2122/g, "\u2019"],
+    [/\u00e2\u20ac\u02dc/g, "\u2018"],
+    [/\u00e2\u20ac\u0153/g, "\u201C"],
+    [/\u00e2\u20ac\u009d/g, "\u201D"],
+    [/\u00e2\u20ac\u00a6/g, "\u2026"],
+  ];
+  for (const [re, rep] of misreadUtf8) s = s.replace(re, rep);
+
+  s = s.replace(/\u00C2\u00A0/g, "\u00A0");
+
+  if (countEmailMojibakeMarkers(s) > 0) {
+    try {
+      const recovered = Buffer.from(s, "latin1").toString("utf8");
+      if (
+        recovered &&
+        !recovered.includes("\uFFFD") &&
+        countEmailMojibakeMarkers(recovered) < countEmailMojibakeMarkers(s)
+      ) {
+        s = recovered;
+      }
+    } catch {
+      // keep s
+    }
+  }
+
+  return s;
+}
+
+/** Replace em/en dashes in outbound mail with natural punctuation (less AI-telltale). */
+export function humanizeOutboundEmailCopy(text: string): string {
+  if (!text) return text;
+  let s = text
+    .replace(/&mdash;|&#0*8212;|&#x0*2014;/gi, ", ")
+    .replace(/&ndash;|&#0*8211;|&#x0*2013;/gi, ", ")
+    .replace(/\s*[\u2014\u2013]\s*/g, ", ")
+    .replace(/([,.;])\s*,/g, "$1")
+    .replace(/,\s*([.!?])/g, "$1")
+  s = s.replace(/ {2,}/g, " ");
+  return s;
+}
+
 export function decodeHtmlEntities(text: string): string {
   return text
     .replace(/&nbsp;/gi, " ")
@@ -89,6 +167,13 @@ export function decodeHtmlEntities(text: string): string {
     .replace(/&lt;/gi, "<")
     .replace(/&gt;/gi, ">")
     .replace(/&quot;/gi, '"')
+    .replace(/&mdash;/gi, "\u2014")
+    .replace(/&ndash;/gi, "\u2013")
+    .replace(/&lsquo;/gi, "\u2018")
+    .replace(/&rsquo;/gi, "\u2019")
+    .replace(/&ldquo;/gi, "\u201C")
+    .replace(/&rdquo;/gi, "\u201D")
+    .replace(/&hellip;/gi, "\u2026")
     .replace(/&#0*39;/gi, "'")
     .replace(/&#x0*27;/gi, "'")
     .replace(/&#(\d+);/g, (_, n) => {
@@ -246,20 +331,24 @@ function multipartNode(subtype: string, children: string[]): string {
  * related (alternative + inline images), and/or mixed (… + attachments).
  */
 export function buildMimeMessage(opts: BuildMimeOptions): string {
+  const subject = humanizeOutboundEmailCopy(repairEmailUnicode(opts.subject));
   const headers = [`To: ${opts.to.join(", ")}`];
   if (opts.cc?.length) headers.push(`Cc: ${opts.cc.join(", ")}`);
   if (opts.bcc?.length) headers.push(`Bcc: ${opts.bcc.join(", ")}`);
-  headers.push(`Subject: ${encodeRfc822HeaderValue(opts.subject)}`, "MIME-Version: 1.0");
+  headers.push(`Subject: ${encodeRfc822HeaderValue(subject)}`, "MIME-Version: 1.0");
   if (opts.inReplyTo?.trim()) {
     headers.push(`In-Reply-To: ${opts.inReplyTo.trim()}`, `References: ${opts.inReplyTo.trim()}`);
   }
 
-  const html = opts.html?.trim() ? opts.html : undefined;
-  const text = opts.text != null && opts.text !== ""
-    ? opts.text
-    : html
-      ? htmlToPlainText(html)
-      : "";
+  const html = opts.html?.trim()
+    ? humanizeOutboundEmailCopy(repairEmailUnicode(opts.html))
+    : undefined;
+  const text =
+    opts.text != null && opts.text !== ""
+      ? humanizeOutboundEmailCopy(repairEmailUnicode(opts.text))
+      : html
+        ? htmlToPlainText(html)
+        : "";
   const inline = (opts.inlineImages ?? []).filter((b) => b.data.length > 0);
   const attach = (opts.attachments ?? []).filter((b) => b.data.length > 0);
 

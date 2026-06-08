@@ -7,6 +7,8 @@ import {
   encodeRfc822HeaderValue,
   extractEmailBody,
   htmlToPlainText,
+  humanizeOutboundEmailCopy,
+  repairEmailUnicode,
 } from "./gmail_message_body.js";
 
 function decodeRaw(b64url: string): string {
@@ -106,6 +108,45 @@ test("buildMimeMessage: attachment wraps in multipart/mixed", () => {
   );
   assert.match(raw, /Content-Type: multipart\/mixed/);
   assert.match(raw, /Content-Disposition: attachment; filename="f\.pdf"/);
+});
+
+test("repairEmailUnicode fixes Shift-JIS-style em dash mojibake", () => {
+  const bad = "hope the experience \uFFE2\uFF80\uFF94 and the team \uFFE2\uFF80\uFF94";
+  const fixed = repairEmailUnicode(bad);
+  assert.match(fixed, /experience — and the team —/);
+});
+
+test("repairEmailUnicode fixes Latin-1 misread UTF-8 em dash", () => {
+  const bad = String.fromCharCode(0xe2, 0x80, 0x94);
+  assert.equal(repairEmailUnicode(`Line${bad}end`), "Line—end");
+});
+
+test("humanizeOutboundEmailCopy replaces em dashes with commas", () => {
+  assert.equal(
+    humanizeOutboundEmailCopy("hope the experience — and the team — resonated"),
+    "hope the experience, and the team, resonated"
+  );
+  assert.equal(humanizeOutboundEmailCopy("Hi&mdash;there"), "Hi, there");
+});
+
+test("buildMimeMessage repairs mojibake and humanizes dashes in bodies", () => {
+  const dash = "\uFFE2\uFF80\uFF94";
+  const raw = decodeRaw(
+    buildMimeMessage({
+      to: ["a@b.com"],
+      subject: `Re${dash}`,
+      text: `Hello${dash}world`,
+      html: `<p>Hi${dash}there</p>`,
+    })
+  );
+  const plainB64 = Buffer.from("Hello, world", "utf8").toString("base64");
+  const htmlB64 = Buffer.from("<p>Hi, there</p>", "utf8").toString("base64");
+  assert.ok(raw.replace(/\r\n/g, "").includes(plainB64), "plain body should humanize dashes");
+  assert.ok(raw.replace(/\r\n/g, "").includes(htmlB64), "html body should humanize dashes");
+});
+
+test("decodeHtmlEntities decodes named dashes and quotes", () => {
+  assert.equal(decodeHtmlEntities("&mdash; &ndash; &rsquo;"), "\u2014 \u2013 \u2019");
 });
 
 test("buildMimeMessage: cc/bcc/inReplyTo headers", () => {
