@@ -201,11 +201,8 @@ export function useSpeechOutput(opts: UseSpeechOutputOptions) {
   );
 
   const shouldBlockMicCapture = useCallback((): boolean => {
-    return (
-      playingRef.current ||
-      queueRef.current.length > 0 ||
-      Date.now() < micBlockUntilRef.current
-    );
+    // Queued (not yet playing) clips must not block dictation VAD.
+    return playingRef.current || Date.now() < micBlockUntilRef.current;
   }, []);
 
   useEffect(() => {

@@ -34,6 +34,14 @@ import {
   ALL_GOOGLE_SERVICE_IDS,
   scopesForGoogleServices,
   resolveGoogleServices,
+  listMicrosoftOAuthAccounts,
+  exchangeMicrosoftCode,
+  buildMicrosoftAuthUrlForWeb,
+  microsoftOAuthCallbackUri,
+  ALL_MICROSOFT_SERVICE_IDS,
+  scopesForMicrosoftServices,
+  resolveMicrosoftServices,
+  missingDefaultMicrosoftScopes,
 } from "@liminal/core";
 import {
   handleAudioUpload,
@@ -41,8 +49,14 @@ import {
   handleTtsPost,
   readTtsClipBytes,
   getGoogleSidecarStatus,
+  getMicrosoftSidecarStatus,
   connectGoogleWorkspaceFromServer,
   disconnectGoogleWorkspaceFromServer,
+  connectMicrosoft365FromServer,
+  disconnectMicrosoft365FromServer,
+  connectGithubFromServer,
+  disconnectGithubFromServer,
+  githubTokenPresent,
   listIntegrationConnections,
   attachCustomMcpFromServer,
   detachCustomMcpFromServer,
@@ -79,6 +93,18 @@ const pendingGoogleConnect = new Map<
   string,
   { exp: number; redirectUri: string; services?: string[]; mode: "read_write" | "read_only" }
 >();
+
+const pendingMicrosoftConnect = new Map<
+  string,
+  { exp: number; redirectUri: string; services?: string[]; mode: "read_write" | "read_only" }
+>();
+
+function prunePendingMicrosoftConnect(): void {
+  const now = Date.now();
+  for (const [k, v] of pendingMicrosoftConnect) {
+    if (v.exp < now) pendingMicrosoftConnect.delete(k);
+  }
+}
 
 function prunePendingGoogleConnect(): void {
   const now = Date.now();
@@ -473,13 +499,31 @@ export function createRouter(
   router.get("/api/integrations", async (_req, res) => {
     try {
       const accounts = await listGoogleOAuthAccounts();
+      const msAccounts = await listMicrosoftOAuthAccounts();
       const sidecar = await getGoogleSidecarStatus();
+      const msSidecar = await getMicrosoftSidecarStatus();
       const connections = await listIntegrationConnections();
+      const { missingDefaultWorkspaceScopes } = await import("@liminal/core");
       res.json({
         google: {
-          accounts,
+          accounts: accounts.map((a) => ({
+            ...a,
+            missingScopes: missingDefaultWorkspaceScopes(a.scopes),
+          })),
           sidecar,
           services: ALL_GOOGLE_SERVICE_IDS,
+        },
+        microsoft: {
+          accounts: msAccounts.map((a) => ({
+            ...a,
+            missingScopes: missingDefaultMicrosoftScopes(a.scopes),
+          })),
+          sidecar: msSidecar,
+          services: ALL_MICROSOFT_SERVICE_IDS,
+        },
+        github: {
+          tokenConfigured: githubTokenPresent(),
+          mcpUrl: "https://api.githubcopilot.com/mcp/",
         },
         connections,
       });
@@ -531,6 +575,20 @@ export function createRouter(
         pending.mode
       );
       const bundle = await exchangeGoogleCode({ code, redirectUri: pending.redirectUri, scopes });
+      try {
+        const bridge = active();
+        if (!bridge.harness.getIsRunning()) {
+          const attach = await connectGoogleWorkspaceFromServer(bridge.harness.registry, {
+            services: pending.services,
+            mode: pending.mode,
+          });
+          if (attach.ok) {
+            bridge.harness.getContext().refreshProtocolDynamic(bridge.harness.registry.getActiveToolNames());
+          }
+        }
+      } catch {
+        /* attach can be retried from Integrations → Attach MCP tools */
+      }
       res.send(
         vireonCallbackSuccessRedirect(bundle.email ?? bundle.accountId, "google_workspace").replace(
           "vireon=connected",
@@ -567,6 +625,140 @@ export function createRouter(
     const bridge = active();
     const revoke = req.query["revoke"] === "1" || req.query["revoke"] === "true";
     const result = await disconnectGoogleWorkspaceFromServer(bridge.harness.registry, revoke);
+    if (!result.ok) {
+      res.status(400).json({ error: result.error });
+      return;
+    }
+    bridge.harness.getContext().refreshProtocolDynamic(bridge.harness.registry.getActiveToolNames());
+    res.json({ ok: true, output: result.output });
+  });
+
+  router.post("/api/integrations/github/connect", async (req, res) => {
+    const bridge = active();
+    if (bridge.harness.getIsRunning()) {
+      res.status(409).json({ error: "Agent is busy; finish the current turn first." });
+      return;
+    }
+    if (!githubTokenPresent()) {
+      res.status(400).json({ error: "GITHUB_TOKEN is not set in .env" });
+      return;
+    }
+    const body = req.body as { mode?: "read_write" | "read_only" };
+    const result = await connectGithubFromServer(bridge.harness.registry, {
+      readOnly: body.mode === "read_only",
+    });
+    if (!result.ok) {
+      res.status(400).json({ error: result.error });
+      return;
+    }
+    bridge.harness.getContext().refreshProtocolDynamic(bridge.harness.registry.getActiveToolNames());
+    res.json({ ok: true, output: result.output, toolCount: result.toolCount ?? 0 });
+  });
+
+  router.delete("/api/integrations/github", async (req, res) => {
+    const bridge = active();
+    const result = await disconnectGithubFromServer(bridge.harness.registry);
+    if (!result.ok) {
+      res.status(400).json({ error: result.error });
+      return;
+    }
+    bridge.harness.getContext().refreshProtocolDynamic(bridge.harness.registry.getActiveToolNames());
+    res.json({ ok: true, output: result.output });
+  });
+
+  router.get("/api/integrations/microsoft/begin", (req, res) => {
+    prunePendingMicrosoftConnect();
+    const state = randomBytes(16).toString("hex");
+    const redirectUri = microsoftOAuthCallbackUri(WEB_PORT);
+    const servicesRaw = req.query["services"];
+    const services =
+      typeof servicesRaw === "string"
+        ? servicesRaw.split(",").map((s) => s.trim()).filter(Boolean)
+        : undefined;
+    const mode = req.query["mode"] === "read_only" ? "read_only" : "read_write";
+    pendingMicrosoftConnect.set(state, { exp: Date.now() + 5 * 60_000, redirectUri, services, mode });
+    try {
+      const authUrl = buildMicrosoftAuthUrlForWeb({ redirectUri, state, services, mode });
+      res.json({ authUrl, state });
+    } catch (e) {
+      res.status(400).json({ error: e instanceof Error ? e.message : String(e) });
+    }
+  });
+
+  router.get("/oauth/microsoft/callback", async (req, res) => {
+    prunePendingMicrosoftConnect();
+    const state = String(req.query["state"] ?? "");
+    const pending = pendingMicrosoftConnect.get(state);
+    const code = String(req.query["code"] ?? "");
+    const err = req.query["error"];
+
+    if (err) {
+      res.status(400).send(vireonCallbackHtml("Microsoft sign-in failed", escapeHtml(String(err))));
+      return;
+    }
+    if (!pending || !code) {
+      res.status(400).send(vireonCallbackHtml("Invalid request", "Missing or expired OAuth state."));
+      return;
+    }
+    pendingMicrosoftConnect.delete(state);
+
+    try {
+      const presets = resolveMicrosoftServices(pending.services);
+      const scopes = scopesForMicrosoftServices(
+        presets.length > 0 ? presets : resolveMicrosoftServices(undefined),
+        pending.mode
+      );
+      const bundle = await exchangeMicrosoftCode({ code, redirectUri: pending.redirectUri, scopes });
+      try {
+        const bridge = active();
+        if (!bridge.harness.getIsRunning()) {
+          const attach = await connectMicrosoft365FromServer(bridge.harness.registry, {
+            services: pending.services,
+            mode: pending.mode,
+          });
+          if (attach.ok) {
+            bridge.harness.getContext().refreshProtocolDynamic(bridge.harness.registry.getActiveToolNames());
+          }
+        }
+      } catch {
+        /* attach can be retried from Integrations */
+      }
+      res.send(
+        vireonCallbackSuccessRedirect(bundle.email ?? bundle.accountId, "microsoft_365").replace(
+          "vireon=connected",
+          "microsoft=connected"
+        )
+      );
+    } catch (e) {
+      res.status(500).send(
+        vireonCallbackHtml("Token exchange failed", escapeHtml(e instanceof Error ? e.message : String(e)))
+      );
+    }
+  });
+
+  router.post("/api/integrations/microsoft/connect", async (req, res) => {
+    const bridge = active();
+    if (bridge.harness.getIsRunning()) {
+      res.status(409).json({ error: "Agent is busy; finish the current turn first." });
+      return;
+    }
+    const body = req.body as { services?: string[]; mode?: "read_write" | "read_only" };
+    const result = await connectMicrosoft365FromServer(bridge.harness.registry, {
+      services: body.services,
+      mode: body.mode ?? "read_write",
+    });
+    if (!result.ok) {
+      res.status(400).json({ error: result.error });
+      return;
+    }
+    bridge.harness.getContext().refreshProtocolDynamic(bridge.harness.registry.getActiveToolNames());
+    res.json({ ok: true, output: result.output });
+  });
+
+  router.delete("/api/integrations/microsoft", async (req, res) => {
+    const bridge = active();
+    const revoke = req.query["revoke"] === "1" || req.query["revoke"] === "true";
+    const result = await disconnectMicrosoft365FromServer(bridge.harness.registry, revoke);
     if (!result.ok) {
       res.status(400).json({ error: result.error });
       return;
