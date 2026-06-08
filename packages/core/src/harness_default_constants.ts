@@ -135,7 +135,7 @@ export const HARNESS_ENV_DEFAULTS: Readonly<Record<string, string>> = {
   // (intent/distill/rewrite/critic/rerank). Pure optimization; ON by default.
   AGENT_LLM_JSON_CACHE: "1",
   AGENT_LLM_JSON_CACHE_TTL_MS: "300000",
-  AGENT_MEMORY_AUTO_EXTRACT: "0",   // was "1": end-of-turn extraction call
+  AGENT_MEMORY_AUTO_EXTRACT: "0",   // end-of-turn LLM extraction (off — adds latency per send)
   AGENT_MEMORY_GRAPH: "1",
   AGENT_MEMORY_AUTOLINK: "0",
   AGENT_MEMORY_AUTOLINK_MODEL: "deepseek/deepseek-v4-pro",
@@ -197,6 +197,8 @@ export const HARNESS_ENV_DEFAULTS: Readonly<Record<string, string>> = {
   AGENT_STREAM_CHUNK_TIMEOUT_MS: "120000",
   AGENT_STREAM_MAX_RETRIES: "3",
   AGENT_FAILURE_LOG: "1",
+  /** Spawn-based verify_result / critic tools (adds a full sub-agent round — off by default). */
+  AGENT_VERIFY_TOOLS: "0",
   AGENT_CRITIC: "0",
   AGENT_CRITIC_EVIDENCE: "1",
   AGENT_EVAL_JSON_SINK: "1",
@@ -220,7 +222,7 @@ export const HARNESS_ENV_DEFAULTS: Readonly<Record<string, string>> = {
   AGENT_OVERINFERENCE_GUARD: "1",
   AGENT_MIN_CONCURRENT_AGENTS: "1",
   AGENT_CONCURRENCY_COOLDOWN_MS: "60000",
-  AGENT_YIELD_EVERY_N: "0",
+  AGENT_YIELD_EVERY_N: "4",         // crash-recovery snapshot every N ReAct rounds
   AGENT_VAULT_WRITE_BUDGET: "8",
   AGENT_VAULT_DEDUPE: "0",
   AGENT_VAULT_REQUIRE_LINKS: "0",
@@ -230,14 +232,14 @@ export const HARNESS_ENV_DEFAULTS: Readonly<Record<string, string>> = {
   AGENT_VAULT_ENTITY_EXTRACT: "1",
   AGENT_OBSIDIAN_DISCOVER: "1",
   AGENT_OBSIDIAN_REQUIRE_DOT_OBSIDIAN: "1",
-  AGENT_AUTO_DREAM: "0",
+  AGENT_AUTO_DREAM: "1",            // background session→notes consolidation
   AGENT_AUTO_DREAM_INJECT_TRANSCRIPT: "1",
   AGENT_AUTO_DREAM_ALLOW_DELETE: "0",
   AGENT_RETRY_FOREVER: "0",
   AGENT_INTENT_CONFIDENCE_MIN: "0.65",
   AGENT_INTENT_INFERENCE: "1",      // LLM-only classification — no keyword/regex fallback
   AGENT_INTENT_INFERENCE_TIMEOUT_MS: "8000", // abort if model stalls; falls back to neutral
-  AGENT_INTENT_REPO_CONTEXT: "0",
+  AGENT_INTENT_REPO_CONTEXT: "1",   // shallow repo tree in intent classifier
   AGENT_INTENT_CONTEXT_MAX_CHARS: "12000",
   AGENT_MEMORY_DEBIAS: "1",
   AGENT_MEMORY_EXPLORATORY_AUTO_RECALL: "0",
@@ -245,7 +247,7 @@ export const HARNESS_ENV_DEFAULTS: Readonly<Record<string, string>> = {
   AGENT_MEMORY_MIN_CONFIDENCE_DEFAULT: "0.35",
   AGENT_MEMORY_INTROSPECTION_STRICT: "0",
   AGENT_OVERINFERENCE_LLM_CHECK: "0", // was "1": LLM over-inference classifier call
-  AGENT_PASTE: "0",
+  AGENT_PASTE: "1",                 // speculative tool dispatch during streaming
   AGENT_PASTE_PREDICTIVE: "0",
   AGENT_PASTE_BUDGET_MS: "2000",
   AGENT_PASTE_MIN_PROB: "0.5",
@@ -287,8 +289,8 @@ export const HARNESS_ENV_DEFAULTS: Readonly<Record<string, string>> = {
   AGENT_FAILURE_DIGEST: "1",
   AGENT_RECIPE_LIBRARY: "1",
   AGENT_YOLO: "0",
-  AGENT_AUTO_DREAM_MIN_HOURS: "5",
-  AGENT_AUTO_DREAM_MIN_SESSIONS: "10",
+  AGENT_AUTO_DREAM_MIN_HOURS: "4",
+  AGENT_AUTO_DREAM_MIN_SESSIONS: "3",
   AGENT_AUTO_DREAM_SCAN_INTERVAL_MS: "30000",
   AGENT_AUTO_DREAM_MAX_SESSION_FILES: "8",
   AGENT_AUTO_DREAM_MAX_CHARS_PER_SESSION: "10000",
@@ -300,8 +302,11 @@ export const HARNESS_ENV_DEFAULTS: Readonly<Record<string, string>> = {
   AGENT_GOOGLE_SIDECAR_ENABLE: "1",
   AGENT_GOOGLE_SIDECAR_CMD: "uvx workspace-mcp",
   AGENT_GOOGLE_SIDECAR_PORT: "8010",
-  AGENT_GOOGLE_CONNECT_ON_BOOT: "0",
+  AGENT_GOOGLE_CONNECT_ON_BOOT: "1",
   AGENT_GOOGLE_GMAIL_SEND: "1",
+  AGENT_GOOGLE_CALENDAR_REST: "1",
+  AGENT_GOOGLE_OFFICE_REST: "1",
+  AGENT_EMAIL_STYLE_INFER: "1",
   AGENT_AGENTCARD: "1",
   AGENT_AGENTCARD_CMD: "agentcard",
   AGENT_AGENTCARD_TIMEOUT_MS: "120000",
@@ -419,9 +424,11 @@ export const HARNESS_ENV_DEFAULTS: Readonly<Record<string, string>> = {
   AGENT_CONSOLIDATE_TIMEOUT_MS: "30000",
   // Sub-agent timeout — align with long sends / workflows
   AGENT_CHILD_TIMEOUT_MS: "1800000",
-  // Mission continuation loop (requires AGENT_YOLO=1 when enabled)
-  AGENT_MISSION_AUTONOMY: "0",
+  // Mission continuation loop — chains send() while task:* stays in_progress
+  AGENT_MISSION_AUTONOMY: "0",      // chained send() on task:* — off until explicitly enabled
   AGENT_MISSION_MAX_ITERATIONS: "20",
+  /** When "1", mission_continue requires AGENT_YOLO=1 (legacy). Default off. */
+  AGENT_MISSION_REQUIRES_YOLO: "0",
   // Comma-separated tools that skip destructive approval when safety judge is off
   AGENT_AUTO_APPROVE_TOOLS: "run_lint,run_tests,git_status",
 };

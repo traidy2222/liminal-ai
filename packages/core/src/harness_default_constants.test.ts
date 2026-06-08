@@ -14,6 +14,21 @@ test("HARNESS_ENV_DEFAULTS: smarter routing defaults", () => {
   assert.equal(HARNESS_ENV_DEFAULTS.AGENT_COMPLEXITY_ROUTING, "1");
 });
 
+test("HARNESS_ENV_DEFAULTS: verification sub-agents off by default", () => {
+  assert.equal(HARNESS_ENV_DEFAULTS.AGENT_VERIFY_TOOLS, "0");
+  assert.equal(HARNESS_ENV_DEFAULTS.AGENT_CRITIC, "0");
+});
+
+test("HARNESS_ENV_DEFAULTS: long-horizon reliability (low-overhead subset)", () => {
+  assert.equal(HARNESS_ENV_DEFAULTS.AGENT_YIELD_EVERY_N, "4");
+  assert.equal(HARNESS_ENV_DEFAULTS.AGENT_MISSION_AUTONOMY, "0");
+  assert.equal(HARNESS_ENV_DEFAULTS.AGENT_MISSION_REQUIRES_YOLO, "0");
+  assert.equal(HARNESS_ENV_DEFAULTS.AGENT_MEMORY_AUTO_EXTRACT, "0");
+  assert.equal(HARNESS_ENV_DEFAULTS.AGENT_AUTO_DREAM, "1");
+  assert.equal(HARNESS_ENV_DEFAULTS.AGENT_PASTE, "1");
+  assert.equal(HARNESS_ENV_DEFAULTS.AGENT_INTENT_REPO_CONTEXT, "1");
+});
+
 test("resolveHarnessEnvRaw falls back to typed defaults when unset", () => {
   const prev = process.env.AGENT_TOOL_BODY_ELIDE;
   delete process.env.AGENT_TOOL_BODY_ELIDE;

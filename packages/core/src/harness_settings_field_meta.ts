@@ -1167,6 +1167,14 @@ const _META_RAW: Record<string, HarnessSettingsFieldMeta> = {
     description: "Harness environment toggle for Failure Log. See docs/configuration.md (advanced).",
     valueKind: "boolean",
   },
+  "AGENT_VERIFY_TOOLS": {
+    tabId: "harness",
+    subgroupId: "critic",
+    label: "Verify Tools (sub-agents)",
+    description:
+      "When 1, verify_result and critic tools spawn verification sub-agents. Default 0 — skips them for faster turn completion.",
+    valueKind: "boolean",
+  },
   "AGENT_CRITIC": {
     tabId: "harness",
     subgroupId: "critic",
@@ -1867,6 +1875,22 @@ const _META_RAW: Record<string, HarnessSettingsFieldMeta> = {
       "Register gmail_create_draft and gmail_send_message (classic Gmail REST). Official Gmail MCP create_draft is plain-only; use REST for styled HTML drafts and immediate send. Uses the same OAuth token as MCP.",
     valueKind: "boolean",
   },
+  "AGENT_GOOGLE_CALENDAR_REST": {
+    tabId: "harness",
+    subgroupId: "harness_misc",
+    label: "Calendar REST tools",
+    description:
+      "Register calendar_rest_* tools (classic Calendar API): calendars/settings/timezone, colors, subscribe/hide, clear events, list/get events, freebusy, quick add, Meet links, RSVP, recurrence instances, ACL/sharing, calendar CRUD, move/import. Complements mcp_google_calendar_*. Same OAuth token.",
+    valueKind: "boolean",
+  },
+  "AGENT_GOOGLE_OFFICE_REST": {
+    tabId: "harness",
+    subgroupId: "harness_misc",
+    label: "Docs/Sheets/Slides REST tools",
+    description:
+      "Register docs_rest_*, sheets_rest_*, slides_rest_*, and office_rest_export_file (classic Docs/Sheets/Slides/Drive APIs). Complements mcp_google_ext_* workspace-mcp. Same OAuth token.",
+    valueKind: "boolean",
+  },
   "AGENT_AGENTCARD": {
     tabId: "harness",
     subgroupId: "harness_misc",
@@ -2034,6 +2058,14 @@ const _META_RAW: Record<string, HarnessSettingsFieldMeta> = {
     subgroupId: "harness_misc",
     label: "Mission Autonomy",
     description: "Harness environment toggle for Mission Autonomy. See docs/configuration.md (harness).",
+    valueKind: "string",
+  },
+  "AGENT_MISSION_REQUIRES_YOLO": {
+    tabId: "harness",
+    subgroupId: "harness_misc",
+    label: "Mission Requires YOLO",
+    description:
+      "When 1, mission_continue chained sends require AGENT_YOLO=1. Default 0 allows continuation with normal approval gates.",
     valueKind: "string",
   },
   "AGENT_MISSION_MAX_ITERATIONS": {

@@ -150,7 +150,7 @@ export {
   adoptAllOrphanChats,
   scratchWorkspaceRoot,
 } from "./chat_metadata.js";
-export type { ChatMetadata, ChatWorkspaceMode } from "./chat_metadata.js";
+export type { ChatMetadata, ChatKind, ChatWorkspaceMode } from "./chat_metadata.js";
 export { readLastActiveChatId, saveLastActiveChatId } from "./active_chat_state.js";
 export type { ActiveChatState } from "./active_chat_state.js";
 export { resolveChatBoot } from "./chat_boot.js";
@@ -213,6 +213,7 @@ export { StreamAccumulator } from "./streaming.js";
 export { TaskOrchestrator } from "./orchestrator.js";
 export type { TaskRecord, LockMode } from "./orchestrator.js";
 export { buildWorldContextMessage } from "./world_context.js";
+export { detectEmailPlaceholderViolations } from "./harness_product_identity.js";
 export { gatherRepoMapLines } from "./repo_map.js";
 export type { RepoMapOptions } from "./repo_map.js";
 export { guardToolArgs } from "./tool_arg_guard.js";
@@ -268,6 +269,7 @@ export {
   spacedRepetitionDecay,
   scoreTurnAgainstIndex,
   detectContradictions,
+  parseRecalledNoteBlocks,
 } from "./memory_rank.js";
 export type { RankableDoc, Contradiction } from "./memory_rank.js";
 export { cosineSimilarity, fetchEmbeddings } from "./embeddings.js";
@@ -325,6 +327,12 @@ export type {
 } from "./types.js";
 export { STREAM_WIRE_VERSION } from "./types.js";
 export { getFastModelSlug, completeChatJson, clearJsonResponseCache } from "./router.js";
+export { inferEmailStyle, emailStyleInferEnabled } from "./email_style_infer.js";
+export type {
+  EmailStyleInferInput,
+  EmailStyleInferResult,
+  EmailStyleTier,
+} from "./email_style_infer.js";
 export { buildAutoDreamPrompt } from "./auto_dream.js";
 export {
   resolveEffortLevel,
@@ -919,6 +927,14 @@ export {
 export { loadHarnessEnvFiles } from "./load_harness_env.js";
 export { countOAuthAccountFiles, oauthDecryptHint } from "./oauth_diagnostics.js";
 export {
+  oauthMailboxQualityScore,
+  pickBestOAuthAccountByEmail,
+  resolveMailProviderFromEnv,
+  resolvePreferredMailProvider,
+  formatPreferredMailRouteLine,
+} from "./oauth_mail_routing.js";
+export type { MailProviderId, PreferredMailRoute, OAuthAccountRef } from "./oauth_mail_routing.js";
+export {
   GOOGLE_WORKSPACE_SERVICES,
   ALL_GOOGLE_SERVICE_IDS,
   GOOGLE_OAUTH_SCOPES_FULL,
@@ -928,6 +944,8 @@ export {
   apiScopesForGoogleServices,
   needsGoogleSidecar,
   sidecarServiceIds,
+  GOOGLE_SIDECAR_SERVICE_IDS,
+  workspaceMcpToolNamesForServices,
   GOOGLE_OFFICIAL_MCP_API_IDS,
   googleCloudMcpApiLibraryUrl,
   googleProjectIdFromClientId,
@@ -944,6 +962,44 @@ export {
 export type { GoogleServiceId, GoogleServicePreset, ConnectorBackend } from "./connector_catalog.js";
 export { runGoogleConnectFlow, buildGoogleAuthUrlForWeb } from "./google_connect.js";
 export type { GoogleConnectResult, RunGoogleConnectFlowOptions } from "./google_connect.js";
+export {
+  microsoftOAuthClientConfig,
+  buildMicrosoftAuthUrl,
+  exchangeMicrosoftCode,
+  refreshMicrosoftAccessToken,
+  getMicrosoftAccessToken,
+  revokeMicrosoftAccount,
+  listMicrosoftOAuthAccounts,
+  microsoftTenantId,
+} from "./microsoft_oauth_broker.js";
+export {
+  MICROSOFT_WORKSPACE_SERVICES,
+  ALL_MICROSOFT_SERVICE_IDS,
+  MICROSOFT_OAUTH_SCOPES_FULL,
+  MICROSOFT_GRAPH_CONNECTION,
+  getMicrosoftServicePreset,
+  resolveMicrosoftServices,
+  scopesForMicrosoftServices,
+  apiScopesForMicrosoftServices,
+  needsMicrosoftSidecar,
+  microsoftSidecarServiceIds,
+} from "./microsoft_connector_catalog.js";
+export {
+  missingMicrosoftScopes,
+  requiredScopesForMicrosoftPresets,
+  formatMicrosoftScopeDiagnostics,
+  missingDefaultMicrosoftScopes,
+  normalizeMicrosoftScope,
+  normalizeMicrosoftScopes,
+} from "./microsoft_oauth_scopes.js";
+export type { MicrosoftServiceId, MicrosoftServicePreset, MicrosoftConnectorBackend } from "./microsoft_connector_catalog.js";
+export {
+  runMicrosoftConnectFlow,
+  buildMicrosoftAuthUrlForWeb,
+  microsoftOAuthLoopbackHost,
+  microsoftOAuthCallbackUri,
+} from "./microsoft_connect.js";
+export type { MicrosoftConnectResult, RunMicrosoftConnectFlowOptions } from "./microsoft_connect.js";
 export type {
   LicenseTier,
   EntitlementKey,

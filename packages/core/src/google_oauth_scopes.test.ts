@@ -40,4 +40,18 @@ describe("google_oauth_scopes", () => {
     assert.ok(!missing.includes("email"));
     assert.ok(!missing.includes("profile"));
   });
+
+  it("calendar.events satisfies calendar.events.readonly on token", () => {
+    const calendar = resolveGoogleServices(["calendar"]);
+    const granted = [
+      "openid",
+      "email",
+      "profile",
+      "https://www.googleapis.com/auth/calendar.calendarlist.readonly",
+      "https://www.googleapis.com/auth/calendar.events.freebusy",
+      "https://www.googleapis.com/auth/calendar.events",
+    ];
+    const missing = missingGoogleScopes(granted, calendar);
+    assert.equal(missing.length, 0);
+  });
 });

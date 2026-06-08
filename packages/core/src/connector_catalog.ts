@@ -63,7 +63,7 @@ export function googleProjectIdFromClientId(clientId?: string): string | undefin
 }
 
 /** Sidecar-backed services share one MCP connection (google_ext). */
-const SIDECAR_SERVICES: GoogleServiceId[] = [
+export const GOOGLE_SIDECAR_SERVICE_IDS: GoogleServiceId[] = [
   "docs",
   "sheets",
   "slides",
@@ -73,6 +73,9 @@ const SIDECAR_SERVICES: GoogleServiceId[] = [
   "apps_script",
   "search",
 ];
+
+/** Lets Docs/Sheets/Slides tools discover files opened outside the app. */
+const WORKSPACE_FILE_READ = "https://www.googleapis.com/auth/drive.readonly";
 
 export const GOOGLE_WORKSPACE_SERVICES: GoogleServicePreset[] = [
   {
@@ -84,6 +87,7 @@ export const GOOGLE_WORKSPACE_SERVICES: GoogleServicePreset[] = [
     scopes: [
       "https://www.googleapis.com/auth/drive.readonly",
       "https://www.googleapis.com/auth/drive.file",
+      "https://www.googleapis.com/auth/drive",
     ],
   },
   {
@@ -107,6 +111,8 @@ export const GOOGLE_WORKSPACE_SERVICES: GoogleServicePreset[] = [
       "https://www.googleapis.com/auth/calendar.calendarlist.readonly",
       "https://www.googleapis.com/auth/calendar.events.freebusy",
       "https://www.googleapis.com/auth/calendar.events.readonly",
+      "https://www.googleapis.com/auth/calendar.events",
+      "https://www.googleapis.com/auth/calendar",
     ],
   },
   {
@@ -132,6 +138,7 @@ export const GOOGLE_WORKSPACE_SERVICES: GoogleServicePreset[] = [
     scopes: [
       "https://www.googleapis.com/auth/directory.readonly",
       "https://www.googleapis.com/auth/contacts.readonly",
+      "https://www.googleapis.com/auth/contacts",
     ],
   },
   {
@@ -140,6 +147,8 @@ export const GOOGLE_WORKSPACE_SERVICES: GoogleServicePreset[] = [
     backend: "google_sidecar",
     connectionName: "google_ext",
     scopes: [
+      WORKSPACE_FILE_READ,
+      "https://www.googleapis.com/auth/drive.file",
       "https://www.googleapis.com/auth/documents",
       "https://www.googleapis.com/auth/documents.readonly",
     ],
@@ -150,6 +159,7 @@ export const GOOGLE_WORKSPACE_SERVICES: GoogleServicePreset[] = [
     backend: "google_sidecar",
     connectionName: "google_ext",
     scopes: [
+      WORKSPACE_FILE_READ,
       "https://www.googleapis.com/auth/spreadsheets",
       "https://www.googleapis.com/auth/spreadsheets.readonly",
     ],
@@ -160,6 +170,7 @@ export const GOOGLE_WORKSPACE_SERVICES: GoogleServicePreset[] = [
     backend: "google_sidecar",
     connectionName: "google_ext",
     scopes: [
+      WORKSPACE_FILE_READ,
       "https://www.googleapis.com/auth/presentations",
       "https://www.googleapis.com/auth/presentations.readonly",
     ],
@@ -170,6 +181,7 @@ export const GOOGLE_WORKSPACE_SERVICES: GoogleServicePreset[] = [
     backend: "google_sidecar",
     connectionName: "google_ext",
     scopes: [
+      WORKSPACE_FILE_READ,
       "https://www.googleapis.com/auth/forms.body",
       "https://www.googleapis.com/auth/forms.responses.readonly",
     ],
@@ -179,14 +191,20 @@ export const GOOGLE_WORKSPACE_SERVICES: GoogleServicePreset[] = [
     label: "Google Tasks",
     backend: "google_sidecar",
     connectionName: "google_ext",
-    scopes: ["https://www.googleapis.com/auth/tasks"],
+    scopes: [
+      "https://www.googleapis.com/auth/tasks",
+      "https://www.googleapis.com/auth/tasks.readonly",
+    ],
   },
   {
     id: "contacts",
     label: "Google Contacts (sidecar)",
     backend: "google_sidecar",
     connectionName: "google_ext",
-    scopes: ["https://www.googleapis.com/auth/contacts.readonly"],
+    scopes: [
+      "https://www.googleapis.com/auth/contacts.readonly",
+      "https://www.googleapis.com/auth/contacts",
+    ],
   },
   {
     id: "apps_script",
@@ -219,14 +237,14 @@ export function resolveGoogleServices(serviceIds?: string[]): GoogleServicePrese
       ? serviceIds.map((s) => s.trim().toLowerCase()).filter(Boolean)
       : ALL_GOOGLE_SERVICE_IDS;
   const out: GoogleServicePreset[] = [];
-  const seen = new Set<string>();
+  const seenOfficial = new Set<string>();
   for (const id of ids) {
     const preset = getGoogleServicePreset(id);
     if (!preset) continue;
-    const key = preset.backend === "google_sidecar" ? "google_ext" : preset.connectionName;
-    if (seen.has(key) && preset.backend === "google_sidecar") continue;
-    if (preset.backend !== "google_sidecar") seen.add(preset.connectionName);
-    else seen.add("google_ext");
+    if (preset.backend === "google_official_mcp") {
+      if (seenOfficial.has(preset.connectionName)) continue;
+      seenOfficial.add(preset.connectionName);
+    }
     out.push(preset);
   }
   return out;
@@ -277,7 +295,12 @@ export function needsGoogleSidecar(presets: GoogleServicePreset[]): boolean {
 }
 
 export function sidecarServiceIds(presets: GoogleServicePreset[]): GoogleServiceId[] {
-  return presets.filter((p) => SIDECAR_SERVICES.includes(p.id)).map((p) => p.id);
+  return presets.filter((p) => GOOGLE_SIDECAR_SERVICE_IDS.includes(p.id)).map((p) => p.id);
+}
+
+/** `workspace-mcp --tools` names for selected sidecar-backed services. */
+export function workspaceMcpToolNamesForServices(serviceIds: GoogleServiceId[]): string[] {
+  return serviceIds.filter((id) => GOOGLE_SIDECAR_SERVICE_IDS.includes(id));
 }
 
 export const GOOGLE_OAUTH_SCOPES_FULL = scopesForGoogleServices(GOOGLE_WORKSPACE_SERVICES, "read_write");

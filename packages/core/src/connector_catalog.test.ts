@@ -5,6 +5,7 @@ import {
   scopesForGoogleServices,
   needsGoogleSidecar,
   getGoogleServicePreset,
+  workspaceMcpToolNamesForServices,
 } from "./connector_catalog.js";
 
 describe("connector_catalog", () => {
@@ -21,7 +22,7 @@ describe("connector_catalog", () => {
     assert.equal(preset?.connectionName, "google_ext");
   });
 
-  it("dedupes sidecar services to one connection", () => {
+  it("includes every sidecar service for scopes and tool selection", () => {
     const presets = resolveGoogleServices(["docs", "sheets", "slides"]);
     const ext = presets.filter((p) => p.connectionName === "google_ext");
     assert.equal(ext.length, 3);
@@ -36,5 +37,27 @@ describe("connector_catalog", () => {
     const presets = resolveGoogleServices(["drive", "gmail"]);
     const scopes = scopesForGoogleServices(presets, "read_only");
     assert.ok(scopes.some((s) => s.includes("readonly")));
+  });
+
+  it("read_write calendar includes event write scope", () => {
+    const presets = resolveGoogleServices(["calendar"]);
+    const scopes = scopesForGoogleServices(presets, "read_write");
+    assert.ok(scopes.includes("https://www.googleapis.com/auth/calendar.events"));
+  });
+
+  it("read_write drive includes full drive scope", () => {
+    const presets = resolveGoogleServices(["drive"]);
+    const scopes = scopesForGoogleServices(presets, "read_write");
+    assert.ok(scopes.includes("https://www.googleapis.com/auth/drive"));
+  });
+
+  it("docs preset includes drive.readonly for file discovery", () => {
+    const preset = getGoogleServicePreset("docs");
+    assert.ok(preset?.scopes.includes("https://www.googleapis.com/auth/drive.readonly"));
+  });
+
+  it("workspaceMcpToolNamesForServices filters to sidecar ids", () => {
+    const names = workspaceMcpToolNamesForServices(["docs", "drive", "sheets"]);
+    assert.deepEqual(names, ["docs", "sheets"]);
   });
 });

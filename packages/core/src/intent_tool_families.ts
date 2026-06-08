@@ -49,7 +49,11 @@ export function inferIntentToolFamilies(
     for (const f of mapped.families) {
       if (has(f)) out.add(f);
     }
-    if (/google|gmail|sheet|spreadsheet|gdoc|drive|calendar|workspace/i.test(trimmed)) {
+    if (
+      /google|gmail|sheet|spreadsheet|gdoc|drive|calendar|workspace|microsoft|outlook|onedrive|teams|planner|sharepoint|office 365|m365/i.test(
+        trimmed
+      )
+    ) {
       if (has("connectors")) out.add("connectors");
     }
     if (messageMentionsAgentcard(trimmed)) {

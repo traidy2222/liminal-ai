@@ -10,6 +10,58 @@ const SCOPE_EQUIVALENTS: Record<string, readonly string[]> = {
   openid: ["openid"],
 };
 
+/** Broader granted scopes that satisfy narrower required API scopes (Google often returns these). */
+const BROADER_SCOPE_IMPLIES: ReadonlyArray<{ broader: string; implies: readonly string[] }> = [
+  {
+    broader: "https://www.googleapis.com/auth/calendar",
+    implies: [
+      "https://www.googleapis.com/auth/calendar.calendarlist.readonly",
+      "https://www.googleapis.com/auth/calendar.events.freebusy",
+      "https://www.googleapis.com/auth/calendar.events.readonly",
+      "https://www.googleapis.com/auth/calendar.events",
+      "https://www.googleapis.com/auth/calendar.readonly",
+    ],
+  },
+  {
+    broader: "https://www.googleapis.com/auth/calendar.events",
+    implies: ["https://www.googleapis.com/auth/calendar.events.readonly"],
+  },
+  {
+    broader: "https://www.googleapis.com/auth/drive",
+    implies: [
+      "https://www.googleapis.com/auth/drive.readonly",
+      "https://www.googleapis.com/auth/drive.file",
+    ],
+  },
+  {
+    broader: "https://www.googleapis.com/auth/gmail.modify",
+    implies: [
+      "https://www.googleapis.com/auth/gmail.readonly",
+      "https://www.googleapis.com/auth/gmail.compose",
+    ],
+  },
+  {
+    broader: "https://www.googleapis.com/auth/documents",
+    implies: ["https://www.googleapis.com/auth/documents.readonly"],
+  },
+  {
+    broader: "https://www.googleapis.com/auth/spreadsheets",
+    implies: ["https://www.googleapis.com/auth/spreadsheets.readonly"],
+  },
+  {
+    broader: "https://www.googleapis.com/auth/presentations",
+    implies: ["https://www.googleapis.com/auth/presentations.readonly"],
+  },
+  {
+    broader: "https://www.googleapis.com/auth/contacts",
+    implies: ["https://www.googleapis.com/auth/contacts.readonly"],
+  },
+  {
+    broader: "https://www.googleapis.com/auth/tasks",
+    implies: ["https://www.googleapis.com/auth/tasks.readonly"],
+  },
+];
+
 /** Normalize Google-returned scope strings to short OIDC names where applicable. */
 export function normalizeGoogleScope(scope: string): string {
   const s = scope.trim();
@@ -26,8 +78,16 @@ function grantedIncludesScope(granted: string[], required: string): boolean {
   const normGranted = new Set(normalizeGoogleScopes(granted));
   const normRequired = normalizeGoogleScope(required);
   const aliases = SCOPE_EQUIVALENTS[normRequired];
-  if (aliases) return aliases.some((a) => normGranted.has(normalizeGoogleScope(a)));
-  return normGranted.has(normRequired);
+  if (aliases?.some((a) => normGranted.has(normalizeGoogleScope(a)))) return true;
+  if (normGranted.has(normRequired)) return true;
+  for (const { broader, implies } of BROADER_SCOPE_IMPLIES) {
+    if (implies.includes(required) && normGranted.has(normalizeGoogleScope(broader))) return true;
+  }
+  if (required.endsWith(".readonly")) {
+    const writePeer = required.replace(/\.readonly$/, "");
+    if (normGranted.has(normalizeGoogleScope(writePeer))) return true;
+  }
+  return false;
 }
 
 /** API scopes required for the given service presets (read_write). */

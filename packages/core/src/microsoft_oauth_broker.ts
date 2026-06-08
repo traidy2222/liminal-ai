@@ -1,7 +1,7 @@
 /**
- * Google OAuth 2.0 — authorization URL, code exchange, refresh, access token resolution.
+ * Microsoft Entra ID OAuth 2.0 — authorization URL, code exchange, refresh, access token.
  */
-import { normalizeGoogleScopes } from "./google_oauth_scopes.js";
+import { normalizeMicrosoftScopes } from "./microsoft_oauth_scopes.js";
 import {
   type OAuthTokenBundle,
   readOAuthBundle,
@@ -10,50 +10,58 @@ import {
   deleteOAuthBundle,
   sanitizeOAuthAccountId,
 } from "./oauth_store.js";
-import { pickBestOAuthAccountByEmail } from "./oauth_account_pick.js";
 
-function mergeGoogleGrantedScopes(existing: string[], incoming: string[]): string[] {
-  return normalizeGoogleScopes([...existing, ...incoming]);
+function mergeMicrosoftGrantedScopes(existing: string[], incoming: string[]): string[] {
+  return normalizeMicrosoftScopes([...existing, ...incoming]);
 }
 
-const GOOGLE_AUTH_URL = "https://accounts.google.com/o/oauth2/v2/auth";
-const GOOGLE_TOKEN_URL = "https://oauth2.googleapis.com/token";
-const GOOGLE_REVOKE_URL = "https://oauth2.googleapis.com/revoke";
-const GOOGLE_USERINFO_URL = "https://www.googleapis.com/oauth2/v2/userinfo";
-
-/** In-process access token cache (accountId → { token, expiresAt }). */
 const accessCache = new Map<string, { token: string; expiresAt: number }>();
 
-export function googleOAuthClientConfig(): { clientId: string; clientSecret: string } | null {
+export function microsoftTenantId(): string {
+  return (
+    process.env.MICROSOFT_TENANT_ID?.trim() ||
+    process.env.AGENT_MICROSOFT_TENANT_ID?.trim() ||
+    "common"
+  );
+}
+
+export function microsoftOAuthClientConfig(): { clientId: string; clientSecret: string } | null {
   const clientId =
-    process.env.GOOGLE_OAUTH_CLIENT_ID?.trim() ||
-    process.env.AGENT_GOOGLE_OAUTH_CLIENT_ID?.trim();
+    process.env.MICROSOFT_OAUTH_CLIENT_ID?.trim() ||
+    process.env.AGENT_MICROSOFT_OAUTH_CLIENT_ID?.trim();
   const clientSecret =
-    process.env.GOOGLE_OAUTH_CLIENT_SECRET?.trim() ||
-    process.env.AGENT_GOOGLE_OAUTH_CLIENT_SECRET?.trim();
-  if (!clientId || !clientSecret) return null;
+    process.env.MICROSOFT_OAUTH_CLIENT_SECRET?.trim() ||
+    process.env.AGENT_MICROSOFT_OAUTH_CLIENT_SECRET?.trim() ||
+    "";
+  if (!clientId) return null;
   return { clientId, clientSecret };
 }
 
-export function buildGoogleAuthUrl(opts: {
+function authBaseUrl(): string {
+  return `https://login.microsoftonline.com/${encodeURIComponent(microsoftTenantId())}/oauth2/v2.0`;
+}
+
+export function buildMicrosoftAuthUrl(opts: {
   redirectUri: string;
   scopes: string[];
   state: string;
-  accessType?: "offline" | "online";
 }): string {
-  const cfg = googleOAuthClientConfig();
-  if (!cfg) throw new Error("GOOGLE_OAUTH_CLIENT_ID and GOOGLE_OAUTH_CLIENT_SECRET must be set in .env");
+  const cfg = microsoftOAuthClientConfig();
+  if (!cfg) {
+    throw new Error(
+      "MICROSOFT_OAUTH_CLIENT_ID must be set in .env (see docs/guides/microsoft-365.md)"
+    );
+  }
   const params = new URLSearchParams({
     client_id: cfg.clientId,
     redirect_uri: opts.redirectUri,
     response_type: "code",
     scope: opts.scopes.join(" "),
     state: opts.state,
-    access_type: opts.accessType ?? "offline",
+    response_mode: "query",
     prompt: "consent",
-    include_granted_scopes: "true",
   });
-  return `${GOOGLE_AUTH_URL}?${params.toString()}`;
+  return `${authBaseUrl()}/authorize?${params.toString()}`;
 }
 
 interface TokenResponse {
@@ -67,11 +75,11 @@ interface TokenResponse {
 }
 
 async function postToken(body: URLSearchParams): Promise<TokenResponse> {
-  const cfg = googleOAuthClientConfig();
-  if (!cfg) throw new Error("Google OAuth client not configured");
+  const cfg = microsoftOAuthClientConfig();
+  if (!cfg) throw new Error("Microsoft OAuth client not configured");
   body.set("client_id", cfg.clientId);
-  body.set("client_secret", cfg.clientSecret);
-  const res = await fetch(GOOGLE_TOKEN_URL, {
+  if (cfg.clientSecret) body.set("client_secret", cfg.clientSecret);
+  const res = await fetch(`${authBaseUrl()}/token`, {
     method: "POST",
     headers: { "Content-Type": "application/x-www-form-urlencoded" },
     body: body.toString(),
@@ -79,30 +87,25 @@ async function postToken(body: URLSearchParams): Promise<TokenResponse> {
   const json = (await res.json()) as TokenResponse;
   if (!res.ok || json.error) {
     const desc = json.error_description ?? json.error ?? `token HTTP ${res.status}`;
-    if (json.error === "invalid_client" || /client secret is invalid/i.test(desc)) {
-      throw new Error(
-        `${desc} — check GOOGLE_OAUTH_CLIENT_SECRET in dreamthedream/.env matches Google Cloud → Credentials → your OAuth client (reset secret there if unsure).`
-      );
-    }
     throw new Error(desc);
   }
   return json;
 }
 
-async function fetchGoogleEmail(accessToken: string): Promise<string | undefined> {
+async function fetchMicrosoftEmail(accessToken: string): Promise<string | undefined> {
   try {
-    const res = await fetch(GOOGLE_USERINFO_URL, {
+    const res = await fetch("https://graph.microsoft.com/v1.0/me", {
       headers: { Authorization: `Bearer ${accessToken}` },
     });
     if (!res.ok) return undefined;
-    const data = (await res.json()) as { email?: string };
-    return data.email?.trim();
+    const data = (await res.json()) as { mail?: string; userPrincipalName?: string };
+    return data.mail?.trim() || data.userPrincipalName?.trim();
   } catch {
     return undefined;
   }
 }
 
-export async function exchangeGoogleCode(opts: {
+export async function exchangeMicrosoftCode(opts: {
   code: string;
   redirectUri: string;
   scopes: string[];
@@ -114,16 +117,16 @@ export async function exchangeGoogleCode(opts: {
   });
   const tok = await postToken(body);
   if (!tok.access_token) throw new Error("no access_token in response");
-  const email = await fetchGoogleEmail(tok.access_token);
+  const email = await fetchMicrosoftEmail(tok.access_token);
   const accountId = sanitizeOAuthAccountId(email ?? "default");
   const expiresAt = Date.now() + (tok.expires_in ?? 3600) * 1000 - 60_000;
-  const grantedScopes = mergeGoogleGrantedScopes(
+  const grantedScopes = mergeMicrosoftGrantedScopes(
     [],
     tok.scope?.split(" ").filter(Boolean) ?? opts.scopes
   );
-  const existing = await readOAuthBundle("google", accountId);
+  const existing = await readOAuthBundle("microsoft", accountId);
   const bundle: OAuthTokenBundle = {
-    provider: "google",
+    provider: "microsoft",
     accountId,
     email,
     accessToken: tok.access_token,
@@ -134,27 +137,31 @@ export async function exchangeGoogleCode(opts: {
     updatedAt: Date.now(),
   };
   if (!bundle.refreshToken) {
-    throw new Error("no refresh_token — revoke app access in Google Account and reconnect with prompt=consent");
+    throw new Error(
+      "no refresh_token — ensure offline_access scope is granted and reconnect with prompt=consent"
+    );
   }
   await writeOAuthBundle(bundle);
   accessCache.set(accountId, { token: bundle.accessToken, expiresAt: bundle.expiresAt });
   return bundle;
 }
 
-export async function refreshGoogleAccessToken(accountId?: string): Promise<OAuthTokenBundle | null> {
-  const bundle = await readOAuthBundle("google", accountId);
+export async function refreshMicrosoftAccessToken(accountId?: string): Promise<OAuthTokenBundle | null> {
+  const bundle = await readOAuthBundle("microsoft", accountId);
   if (!bundle?.refreshToken) return null;
   const body = new URLSearchParams({
     refresh_token: bundle.refreshToken,
     grant_type: "refresh_token",
+    scope: bundle.scopes.join(" "),
   });
   try {
     const tok = await postToken(body);
     if (!tok.access_token) return null;
     bundle.accessToken = tok.access_token;
     bundle.expiresAt = Date.now() + (tok.expires_in ?? 3600) * 1000 - 60_000;
+    if (tok.refresh_token) bundle.refreshToken = tok.refresh_token;
     if (tok.scope) {
-      bundle.scopes = mergeGoogleGrantedScopes(bundle.scopes, tok.scope.split(" ").filter(Boolean));
+      bundle.scopes = mergeMicrosoftGrantedScopes(bundle.scopes, tok.scope.split(" ").filter(Boolean));
     }
     bundle.updatedAt = Date.now();
     await writeOAuthBundle(bundle);
@@ -165,17 +172,16 @@ export async function refreshGoogleAccessToken(accountId?: string): Promise<OAut
   }
 }
 
-export async function getGoogleAccessToken(accountId?: string): Promise<string | null> {
+export async function getMicrosoftAccessToken(accountId?: string): Promise<string | null> {
   const id = accountId ? sanitizeOAuthAccountId(accountId) : undefined;
   const cacheKey = id ?? "default";
   const cached = accessCache.get(cacheKey);
   if (cached && Date.now() < cached.expiresAt) return cached.token;
 
-  let bundle = await readOAuthBundle("google", id);
+  let bundle = await readOAuthBundle("microsoft", id);
   if (!bundle) {
-    const accounts = await listOAuthAccounts("google");
-    const best = pickBestOAuthAccountByEmail(accounts);
-    bundle = best ?? accounts[0] ?? null;
+    const accounts = await listOAuthAccounts("microsoft");
+    bundle = accounts[0] ?? null;
   }
   if (!bundle) return null;
 
@@ -184,30 +190,19 @@ export async function getGoogleAccessToken(accountId?: string): Promise<string |
     return bundle.accessToken;
   }
 
-  const refreshed = await refreshGoogleAccessToken(bundle.accountId);
+  const refreshed = await refreshMicrosoftAccessToken(bundle.accountId);
   return refreshed?.accessToken ?? null;
 }
 
-export async function revokeGoogleAccount(accountId: string): Promise<void> {
-  const bundle = await readOAuthBundle("google", accountId);
-  if (bundle?.accessToken) {
-    try {
-      await fetch(`${GOOGLE_REVOKE_URL}?token=${encodeURIComponent(bundle.refreshToken || bundle.accessToken)}`, {
-        method: "POST",
-        headers: { "Content-Type": "application/x-www-form-urlencoded" },
-      });
-    } catch {
-      /* best effort */
-    }
-  }
+export async function revokeMicrosoftAccount(accountId: string): Promise<void> {
   accessCache.delete(accountId);
-  await deleteOAuthBundle("google", accountId);
+  await deleteOAuthBundle("microsoft", accountId);
 }
 
-export async function listGoogleOAuthAccounts(): Promise<
+export async function listMicrosoftOAuthAccounts(): Promise<
   Array<{ accountId: string; email?: string; scopes: string[]; expiresAt: number }>
 > {
-  const accounts = await listOAuthAccounts("google");
+  const accounts = await listOAuthAccounts("microsoft");
   return accounts.map((a) => ({
     accountId: a.accountId,
     email: a.email,
