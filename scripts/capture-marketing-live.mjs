@@ -8,7 +8,7 @@
  *
  * Usage:
  *   npm run marketing:capture:live
- *   node scripts/capture-marketing-live.mjs --id live-coding-debounce
+ *   node scripts/capture-marketing-live.mjs --id live-code-ship-test
  */
 import { spawn } from "node:child_process";
 import fs from "node:fs/promises";
@@ -16,38 +16,22 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { chromium } from "playwright";
 import { messagesFromSessionJsonl, resolveSessionJsonlPath } from "./lib/marketing-jsonl.mjs";
+import { findPrompt, getMarketingPrompts, resolvePromptId } from "./lib/marketing-prompts.mjs";
+import {
+  applyMarketingModelToProcessEnv,
+  ensureMarketingModelLive,
+  marketingModelManifestFields,
+} from "./lib/marketing-model.mjs";
+
+applyMarketingModelToProcessEnv();
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(__dirname, "..");
 const RECORDINGS_DIR = path.join(REPO_ROOT, "assets", "marketing", "recordings");
 const OUT_DIR = path.join(REPO_ROOT, "assets", "marketing");
 
-const PROMPTS = [
-  {
-    id: "live-coding-debounce",
-    prompt:
-      "Write a well-typed TypeScript `debounce` function in `marketing-capture/debounce.ts` (create the folder), then run `npx tsc --noEmit` on that file only and explain in two sentences how it works.",
-    maxWaitMs: 900_000,
-  },
-  {
-    id: "live-repo-grep",
-    prompt:
-      "Use grep_file to find where `AgentHarness` is defined under `packages/core`, read the main file, and summarize the ReAct loop in 3 bullet points. Do not edit any files.",
-    maxWaitMs: 600_000,
-  },
-  {
-    id: "live-web-research",
-    prompt:
-      "Use web_search then web_fetch on OpenRouter's prompt caching docs. Reply in 3 bullets with URLs — keep it short.",
-    maxWaitMs: 900_000,
-  },
-  {
-    id: "live-git-status",
-    prompt:
-      "Run git_status and git_diff with stat summary. In 2–3 sentences, what is modified in this repo? Do not commit.",
-    maxWaitMs: 420_000,
-  },
-];
+const INCLUDE_OPTIONAL = process.env.MARKETING_INCLUDE_OPTIONAL === "1";
+const PROMPTS = getMarketingPrompts("live", INCLUDE_OPTIONAL);
 
 const VIEWPORT = { width: 1280, height: 800 };
 
@@ -345,10 +329,10 @@ async function runOnePrompt({ page, apiBase, uiBase, spec }) {
 
 async function publishWebsiteHeroes() {
   const heroMap = [
-    ["live-coding-debounce.png", path.join(REPO_ROOT, "assets", "web-ui.png")],
-    ["live-repo-grep.png", path.join(OUT_DIR, "website-repo-explore.png")],
-    ["live-web-research.png", path.join(OUT_DIR, "website-web-research.png")],
-    ["live-git-status.png", path.join(OUT_DIR, "website-git-workflow.png")],
+    ["live-code-ship-test.png", path.join(REPO_ROOT, "assets", "web-ui.png")],
+    ["live-repo-react-trace.png", path.join(OUT_DIR, "website-repo-explore.png")],
+    ["live-web-research-cite.png", path.join(OUT_DIR, "website-web-research.png")],
+    ["live-memory-recall.png", path.join(OUT_DIR, "website-memory-recall.png")],
   ];
   for (const [src, dest] of heroMap) {
     const from = path.join(OUT_DIR, src);
@@ -362,14 +346,20 @@ async function publishWebsiteHeroes() {
 
 async function main() {
   const { apiBase, uiBase, only } = parseArgs(process.argv);
-  const specs = only ? PROMPTS.filter((p) => p.id === only) : PROMPTS;
+  const specs = only
+    ? (() => {
+        const spec = findPrompt(only, "live", true);
+        return spec ? [spec] : [];
+      })()
+    : PROMPTS;
   if (!specs.length) {
-    console.error(`Unknown id: ${only}`);
+    console.error(`Unknown id: ${only} (resolved: ${resolvePromptId(only ?? "", "live")})`);
     process.exit(1);
   }
 
   console.log(`[live] API ${apiBase} · UI ${uiBase}`);
   await waitForServer(apiBase);
+  await ensureMarketingModelLive(apiBase, apiJson);
   await ensureBootstrapSkipped(apiBase);
 
   await fs.mkdir(RECORDINGS_DIR, { recursive: true });
@@ -398,6 +388,7 @@ async function main() {
     source: "live",
     apiBase,
     uiBase,
+    ...marketingModelManifestFields(),
     results,
   };
   await fs.writeFile(path.join(OUT_DIR, "live-manifest.json"), JSON.stringify(manifest, null, 2) + "\n", "utf8");

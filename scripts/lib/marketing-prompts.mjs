@@ -1,24 +1,25 @@
 /**
- * Prompts for **live** marketing capture (`npm run marketing:capture:live`).
- * Keep in sync with `scripts/lib/marketing-prompts.mjs` (source of truth).
+ * Single source of truth for **live** and **desktop** marketing capture prompts.
+ * Each run uses the real harness — prompts are chosen to surface distinctive tools.
  */
-export interface LiveMarketingPrompt {
-  id: string;
-  title: string;
-  /** Sent to POST /api/message */
-  prompt: string;
-  /** Skip if harness cannot complete (documented in manifest). */
-  notes?: string;
-  /** Auto-approve destructive tools when approval modal appears. */
-  autoApprove?: boolean;
-  freshContext?: boolean;
-  maxWaitMs?: number;
-}
 
-export const LIVE_MARKETING_PROMPTS: LiveMarketingPrompt[] = [
+/** @typedef {{
+ *   key: string;
+ *   title: string;
+ *   subtitle: string;
+ *   prompt: string;
+ *   maxWaitMs: number;
+ *   accent: string;
+ *   expectTools?: string[];
+ * }} MarketingPromptBase */
+
+/** @type {MarketingPromptBase[]} */
+export const MARKETING_PROMPT_BASES = [
   {
-    id: "live-code-ship-test",
+    key: "code-ship-test",
     title: "Plan, ship, and verify code",
+    subtitle:
+      "plan → write_file → run_shell (node:test) — self-healing loop with every step visible in the harness.",
     prompt: `You are recording a marketing demo. Show how Liminal ships code with verification.
 
 1) Call plan() with exactly 3 steps: implement slugify, add tests, run tests.
@@ -27,11 +28,14 @@ export const LIVE_MARKETING_PROMPTS: LiveMarketingPrompt[] = [
 4) Run: node --test marketing-capture/slugify.test.js marketing-capture/slugify.test.ts (use whichever path exists after you write the file).
 If tests fail, fix the implementation once and re-run. End with PASS/FAIL and one example slugify("Foo Bar!") result.`,
     maxWaitMs: 900_000,
-    autoApprove: true,
+    accent: "#00ff88",
+    expectTools: ["plan", "write_file", "run_shell", "think"],
   },
   {
-    id: "live-repo-react-trace",
+    key: "repo-react-trace",
     title: "Map the repo, trace the ReAct loop",
+    subtitle:
+      "repo_map, grep_file, read_file_chunked — orient in a monorepo and explain how tool results close the loop.",
     prompt: `Read-only repo archaeology for a marketing capture — do not edit any files.
 
 1) repo_map on packages/core/src with depth 2.
@@ -39,10 +43,14 @@ If tests fail, fix the implementation once and re-run. End with PASS/FAIL and on
 3) read_file path packages/core/src/agent.ts offset=<that line minus 5> limit=120 line_numbers true — inspect how a turn dispatches tools and consumes results.
 4) In exactly 4 bullets, explain the ReAct loop as implemented here: user message → model tool calls → tool results → next model turn → turn_end.`,
     maxWaitMs: 600_000,
+    accent: "#00d4ff",
+    expectTools: ["repo_map", "grep_file", "read_file", "think"],
   },
   {
-    id: "live-memory-recall",
+    key: "memory-recall",
     title: "Memory that survives the session",
+    subtitle:
+      "remember, recall_relevant, memory_stats — typed notes with hybrid retrieval, not chat context amnesia.",
     prompt: `Demonstrate persistent memory (marketing capture — safe to write this note):
 
 1) remember key "marketing:capture-policy" value "Liminal marketing videos must be recorded from real harness runs with session.jsonl proof — never fixture UI." type fact scope workspace
@@ -51,20 +59,28 @@ If tests fail, fix the implementation once and re-run. End with PASS/FAIL and on
 
 Reply in 3 short bullets: the stored value, the top recall_relevant hit text, and total note count from memory_stats.`,
     maxWaitMs: 420_000,
+    accent: "#ff4488",
+    expectTools: ["remember", "recall_relevant", "memory_stats"],
   },
   {
-    id: "live-web-research-cite",
+    key: "web-research-cite",
     title: "Research with receipts",
+    subtitle:
+      "web_search + web_fetch — cite primary docs with URLs and concrete API field names from the source.",
     prompt: `Research task for marketing footage:
 
 1) web_search for OpenRouter prompt caching cache_control (official docs first).
 2) web_fetch the best official OpenRouter documentation URL from results (not a forum post).
 3) Answer in exactly 3 bullets. Each bullet must include: a full https URL you fetched, and one exact parameter or JSON field name for caching copied from that page (e.g. cache_control). Max 90 words total.`,
     maxWaitMs: 900_000,
+    accent: "#cc88ff",
+    expectTools: ["web_search", "web_fetch"],
   },
   {
-    id: "live-harness-test-run",
+    key: "harness-test-run",
     title: "Find code, run the test suite",
+    subtitle:
+      "ast_grep, find_files, run_tests — code intelligence and verification on the real @liminal/core package.",
     prompt: `Read-only verification demo:
 
 1) ast_grep under packages/core for "export class AgentHarness" (TypeScript). Report the file path of the first match.
@@ -73,15 +89,58 @@ Reply in 3 short bullets: the stored value, the top recall_relevant hit text, an
 
 Reply with: test file path, pass/fail, and test count if shown. Do not edit any source files.`,
     maxWaitMs: 720_000,
-    notes: "Optional 5th capture — slower; run with --id live-harness-test-run",
+    accent: "#ffb347",
+    expectTools: ["ast_grep", "find_files", "run_tests"],
   },
 ];
 
-/** @deprecated Use live-code-ship-test */
-export const LEGACY_LIVE_PROMPT_IDS: Record<string, string> = {
+/** Back-compat for docs / old capture IDs */
+export const LEGACY_PROMPT_IDS = {
   "live-coding-debounce": "live-code-ship-test",
   "live-repo-grep": "live-repo-react-trace",
   "live-git-status": "live-memory-recall",
   "live-web-research": "live-web-research-cite",
   "live-read-tests": "live-harness-test-run",
+  "desktop-coding-debounce": "desktop-code-ship-test",
+  "desktop-repo-grep": "desktop-repo-react-trace",
+  "desktop-git-status": "desktop-memory-recall",
+  "desktop-web-research": "desktop-web-research-cite",
 };
+
+/**
+ * @param {"live" | "desktop"} channel
+ * @param {boolean} [includeOptional=false] — 5th prompt (run_tests); slower but shows code_intel
+ */
+export function getMarketingPrompts(channel, includeOptional = false) {
+  const bases = includeOptional
+    ? MARKETING_PROMPT_BASES
+    : MARKETING_PROMPT_BASES.filter((p) => p.key !== "harness-test-run");
+
+  return bases.map((base) => ({
+    ...base,
+    id: `${channel}-${base.key}`,
+  }));
+}
+
+/**
+ * @param {string} id
+ * @param {"live" | "desktop"} channel
+ */
+export function resolvePromptId(id, channel) {
+  const resolved = LEGACY_PROMPT_IDS[id] ?? id;
+  const prompts = getMarketingPrompts(channel, true);
+  if (prompts.some((p) => p.id === resolved)) return resolved;
+  return id;
+}
+
+/**
+ * @param {string} id
+ * @param {"live" | "desktop"} channel
+ * @param {boolean} [includeOptional]
+ */
+export function findPrompt(id, channel, includeOptional = false) {
+  const resolved = resolvePromptId(id, channel);
+  const all = getMarketingPrompts(channel, includeOptional);
+  const optional = getMarketingPrompts(channel, true);
+  return all.find((p) => p.id === resolved) ?? optional.find((p) => p.id === resolved) ?? null;
+}

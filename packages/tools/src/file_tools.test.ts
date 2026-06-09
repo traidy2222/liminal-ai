@@ -1,9 +1,12 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { readFile, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import os from "node:os";
 import path from "node:path";
-import { resolveWorkspaceRoot } from "@liminal/core";
+import { resolveWorkspaceRoot, runWithWorkspaceRoot } from "@liminal/core";
 import { resolveWithinWorkspace } from "./file_path_guard.js";
+import { readFileTool } from "./read_file.js";
+import { readFileChunkedTool } from "./read_file_chunked.js";
 import { multiFileApplyTool } from "./multi_file_apply.js";
 import { writeFileTool } from "./write_file.js";
 import { isLikelyTruncatedContent } from "./file_write_integrity.js";
@@ -13,6 +16,49 @@ test("resolveWithinWorkspace blocks escaping paths", () => {
   const blocked = resolveWithinWorkspace("..\\..\\outside.txt");
   assert.equal(blocked.ok, false);
 });
+
+test("read_file resolves paths against workspace root, not process.cwd()", async () => {
+  const ws = await fsMkdtemp();
+  const rel = "nested/read-me.txt";
+  const abs = path.join(ws, rel);
+  await mkdir(path.dirname(abs), { recursive: true });
+  await writeFile(abs, "line1\nline2\nline3\n", "utf8");
+  const prevCwd = process.cwd();
+  try {
+    process.chdir(os.tmpdir());
+    await runWithWorkspaceRoot(ws, async () => {
+      const r = await readFileTool.handler({ path: rel, offset: 2, limit: 1 });
+      assert.equal(r.ok, true);
+      if (r.ok) assert.match(r.output ?? "", /^line2/);
+    });
+  } finally {
+    process.chdir(prevCwd);
+    await rm(ws, { recursive: true, force: true });
+  }
+});
+
+test("read_file_chunked offset mode reads by line number not chunk index", async () => {
+  const ws = await fsMkdtemp();
+  const rel = "big.txt";
+  const lines = Array.from({ length: 50 }, (_, i) => `L${i + 1}`).join("\n");
+  await writeFile(path.join(ws, rel), lines, "utf8");
+  try {
+    await runWithWorkspaceRoot(ws, async () => {
+      const r = await readFileChunkedTool.handler({ path: rel, offset: 10, limit: 3 });
+      assert.equal(r.ok, true);
+      if (r.ok) {
+        assert.match(r.output, /"line_start":\s*10/);
+        assert.match(r.output, /L10\nL11\nL12/);
+      }
+    });
+  } finally {
+    await rm(ws, { recursive: true, force: true });
+  }
+});
+
+async function fsMkdtemp(): Promise<string> {
+  return mkdtemp(path.join(os.tmpdir(), "liminal-file-tools-"));
+}
 
 test("write_file mode=overwrite replaces small existing content", async () => {
   const root = resolveWorkspaceRoot();

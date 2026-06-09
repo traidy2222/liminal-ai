@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:io' show Platform;
 
 import 'package:flutter/foundation.dart';
 
@@ -114,6 +115,9 @@ class AppController extends ChangeNotifier {
   List<String> visibleChatIds = [];
   /// False on the Vireon hub; true while the chat workspace route is open.
   bool inChatWorkspace = false;
+  /// Set by `LIMINAL_MARKETING_CAPTURE=1` when spawned from capture scripts.
+  bool get marketingCaptureMode =>
+      Platform.environment['LIMINAL_MARKETING_CAPTURE'] == '1';
   static const maxVisibleChats = 10;
   List<ChatSummary> chats = [];
   List<LiminalAppSpec> desktopApps = [];
@@ -257,6 +261,11 @@ class AppController extends ChangeNotifier {
     }
     if (event == 'speech' && chatId == activeChatId && dictationSessionActive) {
       _handleSpeechEvent(data);
+    }
+    if (event == 'harness_running' && marketingCaptureMode) {
+      if (!inChatWorkspace || activeChatId != chatId) {
+        unawaited(enterChatWorkspace(chatId));
+      }
     }
     if (event == 'turn_end' && chatId == activeChatId) {
       unawaited(_flushPendingDictationSend());
@@ -661,6 +670,11 @@ class AppController extends ChangeNotifier {
         chats = _parseChats(frame.data['chats']);
         _pruneVisibleChats();
         _ensureVisibleInitialized();
+        if (marketingCaptureMode &&
+            activeChatId != null &&
+            !inChatWorkspace) {
+          unawaited(enterChatWorkspace(activeChatId!));
+        }
         _syncAssetResolver();
         _syncDictationAudioClient();
         _syncPersonaPendingFromActiveChat();

@@ -19,6 +19,12 @@ const COMPOSITIONS = [
   { id: "Liminal-CTA", file: "liminal-cta.mp4" },
   { id: "Liminal-Promo-Full", file: "liminal-promo-full.mp4" },
   { id: "Liminal-Social-Teaser", file: "liminal-social-teaser.mp4" },
+  { id: "Liminal-Desktop-Hero", file: "liminal-desktop-hero.mp4" },
+  { id: "Liminal-Desktop-Features", file: "liminal-desktop-features.mp4" },
+  { id: "Liminal-Desktop-Transparency", file: "liminal-desktop-transparency.mp4" },
+  { id: "Liminal-Desktop-CTA", file: "liminal-desktop-cta.mp4" },
+  { id: "Liminal-Desktop-Promo-Full", file: "liminal-desktop-promo-full.mp4" },
+  { id: "Liminal-Desktop-Social-Teaser", file: "liminal-desktop-social-teaser.mp4" },
 ];
 
 fs.mkdirSync(outDir, { recursive: true });

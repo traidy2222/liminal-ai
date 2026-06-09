@@ -11,6 +11,22 @@ import {
   SocialTeaser,
   SOCIAL_TEASER_DURATION,
 } from "./compositions/MasterPromo";
+import { DesktopHeroIntro, DESKTOP_HERO_DURATION } from "./compositions/DesktopHeroIntro";
+import {
+  DesktopFeatureTourFull,
+  DESKTOP_FEATURE_TOUR_DURATION,
+} from "./compositions/DesktopFeatureTour";
+import {
+  DesktopTransparencyStory,
+  DESKTOP_TRANSPARENCY_DURATION,
+} from "./compositions/DesktopTransparencyStory";
+import { DesktopCTAOutro, DESKTOP_CTA_DURATION } from "./compositions/DesktopCTAOutro";
+import {
+  DesktopPromoFull,
+  DesktopSocialTeaser,
+  DESKTOP_PROMO_DURATION,
+  DESKTOP_SOCIAL_TEASER_DURATION,
+} from "./compositions/DesktopPromo";
 import { VIDEO } from "./theme";
 
 export const RemotionRoot: React.FC = () => (
@@ -67,6 +83,54 @@ export const RemotionRoot: React.FC = () => (
       id="Liminal-Social-Teaser"
       component={SocialTeaser}
       durationInFrames={SOCIAL_TEASER_DURATION}
+      fps={VIDEO.fps}
+      width={VIDEO.width}
+      height={VIDEO.height}
+    />
+    <Composition
+      id="Liminal-Desktop-Hero"
+      component={DesktopHeroIntro}
+      durationInFrames={DESKTOP_HERO_DURATION}
+      fps={VIDEO.fps}
+      width={VIDEO.width}
+      height={VIDEO.height}
+    />
+    <Composition
+      id="Liminal-Desktop-Features"
+      component={DesktopFeatureTourFull}
+      durationInFrames={DESKTOP_FEATURE_TOUR_DURATION}
+      fps={VIDEO.fps}
+      width={VIDEO.width}
+      height={VIDEO.height}
+    />
+    <Composition
+      id="Liminal-Desktop-Transparency"
+      component={DesktopTransparencyStory}
+      durationInFrames={DESKTOP_TRANSPARENCY_DURATION}
+      fps={VIDEO.fps}
+      width={VIDEO.width}
+      height={VIDEO.height}
+    />
+    <Composition
+      id="Liminal-Desktop-CTA"
+      component={DesktopCTAOutro}
+      durationInFrames={DESKTOP_CTA_DURATION}
+      fps={VIDEO.fps}
+      width={VIDEO.width}
+      height={VIDEO.height}
+    />
+    <Composition
+      id="Liminal-Desktop-Promo-Full"
+      component={DesktopPromoFull}
+      durationInFrames={DESKTOP_PROMO_DURATION}
+      fps={VIDEO.fps}
+      width={VIDEO.width}
+      height={VIDEO.height}
+    />
+    <Composition
+      id="Liminal-Desktop-Social-Teaser"
+      component={DesktopSocialTeaser}
+      durationInFrames={DESKTOP_SOCIAL_TEASER_DURATION}
       fps={VIDEO.fps}
       width={VIDEO.width}
       height={VIDEO.height}

@@ -15,6 +15,12 @@ Uses existing repo assets from `assets/` (heroes + `assets/marketing/*.png`).
 | `Liminal-CTA` | 14s | Community Edition + get-started |
 | `Liminal-Promo-Full` | ~2 min | Full reel with cross-fades |
 | `Liminal-Social-Teaser` | ~34s | Short cut: hero → transparency → CTA |
+| `Liminal-Desktop-Hero` | 20s | Desktop brand intro + real capture hero |
+| `Liminal-Desktop-Features` | ~22s | Four desktop capability slides from `desktop-manifest.json` |
+| `Liminal-Desktop-Transparency` | 24s | Real session tool trace vs black-box chat |
+| `Liminal-Desktop-CTA` | 14s | Download desktop CTA |
+| `Liminal-Desktop-Promo-Full` | ~2 min | Full desktop reel |
+| `Liminal-Desktop-Social-Teaser` | ~34s | Desktop hero → real trace → CTA |
 
 ## Quick start
 
@@ -51,7 +57,9 @@ npm run render -- Liminal-Promo-Full ../../assets/marketing/videos/liminal-promo
 | Architecture beats | `src/compositions/HarnessExplainer.tsx` → `PHASES` |
 | New chapter | Add composition + register in `src/Root.tsx` |
 
-Swap illustrative PNGs for **live captures** when publishing (`npm run marketing:capture:live`) — update `SLIDES` paths to `marketing/live-*.png`.
+**Desktop marketing (recommended):** run `npm run marketing:capture:desktop` first, then render `Liminal-Desktop-Promo-Full`. Compositions load `assets/marketing/desktop-manifest.json` and real `messages.json` traces.
+
+**Web marketing:** `npm run marketing:capture:live` — update `FeatureTour.tsx` `SLIDES` to `marketing/live-*.png` if needed.
 
 ## Output
 

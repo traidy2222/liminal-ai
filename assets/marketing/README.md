@@ -4,16 +4,48 @@
 
 | Mode | Command | Accurate? |
 |------|---------|-----------|
-| **Live (use for website/README)** | `npm run marketing:capture:live` | **Yes** — real harness, real tools, session JSONL |
+| **Desktop (primary for desktop marketing)** | `npm run marketing:capture:desktop` | **Yes** — real harness via `liminald`, real Flutter window capture |
+| **Live web (CLI/web marketing)** | `npm run marketing:capture:live` | **Yes** — real harness, real tools, session JSONL |
 | **Illustrative fixtures** | `npm run marketing:capture` | **No** — hand-drawn UI states for layout only |
 
 The PNGs/GIFs already in this folder from `marketing:capture` are **staged examples**, not recordings of the model executing those prompts. Do not ship them as proof of capability without running live capture.
 
 ---
 
-## Live capture (accurate)
+## Desktop capture (accurate · 1:1 with shipped app)
 
-**Requires:** `AGENT_API_KEY` in `.env`, web stack running.
+**Requires:** `AGENT_API_KEY` in `.env`, built desktop (`npm run desktop:build:windows`), Windows for window capture, FFmpeg on PATH.
+
+Captures pin **`openrouter/owl-alpha`** (OpenRouter Stealth) automatically. Override: `MARKETING_AGENT_MODEL=…` or disable: `MARKETING_SKIP_MODEL=1`.
+
+```bash
+# Builds liminal_desktop.exe if needed, launches app, drives harness over WebSocket
+npm run marketing:capture:desktop
+
+# One prompt
+node scripts/capture-marketing-desktop.mjs --id desktop-coding-debounce
+
+# Reuse already-running desktop
+set MARKETING_DESKTOP_SKIP_LAUNCH=1
+npm run marketing:capture:desktop
+```
+
+**Outputs per prompt:**
+
+- `assets/marketing/desktop-*.png` — screenshot of the **real** `liminal_desktop` window after the turn
+- `assets/marketing/desktop-*.gif` / `desktop-*.mp4` — frames while the harness was busy
+- `assets/marketing/recordings/<id>/session.jsonl` — copy of the session log
+- `assets/marketing/recordings/<id>/messages.json` — parsed tool trace (used by Remotion)
+- `assets/marketing/desktop-manifest.json` — tools used, duration, slide copy
+- `assets/desktop-ui.png` — hero copy for website (from coding prompt)
+
+Remotion desktop compositions (`Liminal-Desktop-*`) read `desktop-manifest.json` automatically.
+
+---
+
+## Live capture (accurate · web UI)
+
+**Requires:** `AGENT_API_KEY` in `.env`, web stack running. Model pinned to **`openrouter/owl-alpha`** (see desktop section for overrides).
 
 ```bash
 # Terminal 1 — API + UI
@@ -40,7 +72,7 @@ node scripts/capture-marketing-live.mjs --id live-coding-debounce
 
 **Replay in browser** (verify before publishing):
 
-`http://localhost:5173/marketing.html?recording=live-coding-debounce`
+`http://localhost:5173/marketing.html?recording=live-code-ship-test`
 
 Approval modals: the live script clicks **AUTHORIZE** when a destructive tool blocks.
 
@@ -60,16 +92,33 @@ Edit fiction in `packages/web/client/marketing/scenarios.ts`.
 
 ---
 
-## Suggested live prompts
+## Marketing prompts (real harness)
 
-Defined in `scripts/capture-marketing-live.mjs` and `packages/web/client/marketing/livePrompts.ts`:
+**Source of truth:** `scripts/lib/marketing-prompts.mjs` (desktop + live capture import this).
 
-1. **live-coding-debounce** — write + `tsc` in `marketing-capture/`
-2. **live-repo-grep** — find `AgentHarness`, summarize loop (read-only)
-3. **live-web-research** — search + fetch OpenRouter caching docs
-4. **live-git-status** — `git_status` + diff stat summary
+| ID suffix | What it proves | Expected tools |
+|-----------|----------------|----------------|
+| `code-ship-test` | Plan → implement → `node:test` verify (self-heal once) | `plan`, `write_file`, `run_shell` |
+| `repo-react-trace` | Monorepo orientation + ReAct loop explanation | `repo_map`, `grep_file`, `read_file_chunked` |
+| `memory-recall` | Persistent typed memory + hybrid recall | `remember`, `recall_relevant`, `memory_stats` |
+| `web-research-cite` | Primary-source research with URLs + field names | `web_search`, `web_fetch` |
+| `harness-test-run` | *(optional)* AST locate + scoped `run_tests` | `ast_grep`, `find_files`, `run_tests` |
 
-Add harder live prompts only after you confirm they complete reliably in your environment (browser, doc engine, rename_symbol, etc.).
+```bash
+# Default set (4 prompts)
+npm run marketing:capture:live
+npm run marketing:capture:desktop
+
+# Include optional 5th (slower)
+set MARKETING_INCLUDE_OPTIONAL=1
+npm run marketing:capture:live
+
+# One prompt (legacy IDs still work)
+node scripts/capture-marketing-live.mjs --id live-coding-debounce
+node scripts/capture-marketing-desktop.mjs --id desktop-code-ship-test
+```
+
+Mirror list in `packages/web/client/marketing/livePrompts.ts`.
 
 ---
 

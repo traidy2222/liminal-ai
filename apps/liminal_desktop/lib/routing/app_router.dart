@@ -54,6 +54,9 @@ GoRouter createAppRouter(AppController controller) {
           loc == AppRoutes.persona) {
         return AppRoutes.hub;
       }
+      if (host.inChatWorkspace && loc == AppRoutes.hub) {
+        return AppRoutes.chat;
+      }
       return null;
     },
     routes: [

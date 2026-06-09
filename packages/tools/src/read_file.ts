@@ -2,6 +2,7 @@ import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { defineTool } from "./helpers.js";
 import { effectiveHarnessEnvRaw } from "@liminal/core";
+import { resolveWithinWorkspace } from "./file_path_guard.js";
 
 /** Resolve local import specifiers from TS/JS source (same-dir relative only). */
 function extractLocalImportPaths(mainPath: string, source: string): string[] {
@@ -27,7 +28,7 @@ export const readFileTool = defineTool({
     "WHEN: You know the exact path and need to inspect or process the file's content.\n" +
     "NOT WHEN: File existence is uncertain — use list_dir first to confirm the path. NOT WHEN: You only need existence/size — avoid loading huge bodies.\n" +
     "GOOD OUTPUT: You can quote or reason about specific lines; cite the path in the user reply when the task is file-backed (R-CITE-PATHS).\n" +
-    "ARGS: path — absolute or relative file path; offset — 1-based start line (default: 1); limit — max lines to return (default: all); encoding — optional (default: utf8).\n" +
+    "ARGS: path — workspace-relative or absolute path under the chat workspace (not process CWD); offset — 1-based start line (default: 1); limit — max lines to return (default: all); encoding — optional (default: utf8).\n" +
     "line_numbers — when true, prefix each returned line with its 1-based absolute line number (matches browser stack traces like file.html:224:20). Use offset≈reported line with a small limit. For full-file reads, line_numbers is refused above 2000 lines unless limit is set.",
   requiresApproval: false,
   cacheable: true,
@@ -50,7 +51,12 @@ export const readFileTool = defineTool({
     additionalProperties: false,
   },
   handler: async (args) => {
-    const filePath = args["path"] as string;
+    const pathArg = args["path"] as string;
+    const safe = resolveWithinWorkspace(pathArg);
+    if (!safe.ok || !safe.resolvedPath) {
+      return { ok: false, error: safe.error ?? "invalid path" };
+    }
+    const filePath = safe.resolvedPath;
     const encoding = (args["encoding"] as BufferEncoding | undefined) ?? "utf8";
     const offsetArg = args["offset"] != null ? Math.max(1, Number(args["offset"])) : 1;
     const limitArg = args["limit"] != null ? Math.max(1, Number(args["limit"])) : null;
@@ -97,9 +103,11 @@ export const readFileTool = defineTool({
           let sub: string | null = null;
           let used = rel;
           for (const c of candidates) {
+            const guard = resolveWithinWorkspace(c);
+            if (!guard.ok || !guard.resolvedPath) continue;
             try {
-              sub = await readFile(c, { encoding });
-              used = c;
+              sub = await readFile(guard.resolvedPath, { encoding });
+              used = guard.resolvedPath;
               break;
             } catch {
               /* try next */
