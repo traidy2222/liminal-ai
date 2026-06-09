@@ -51,7 +51,14 @@ editing, navigating, and reasoning never wait on activation.
 | `meta` | `suggest_improvement`, `view_insights`, `self_telemetry`, dynamic-tool + connector tools | — |
 | `dynamic_tools` | `create_tool`, `edit_tool`, `remove_tool`, `list_dynamic_tools` | — |
 | `external_api` | `api_<conn>_<op>` (from `api_connect`), `mcp_<conn>_<tool>` (from `mcp_attach`) | — |
-| `connectors` | `connect_provider`, `disconnect_provider`, `list_connectors`, `email_style_infer`, Gmail/Outlook REST send+draft, Google + **Microsoft 365** + GitHub presets | OAuth in `.env` / Settings |
+| `connectors` | `connect_provider`, `disconnect_provider`, `list_connectors` (meta only) | OAuth in Settings |
+| `google_workspace` | Google MCP + Calendar/Gmail REST + `email_style_infer` | Google OAuth |
+| `microsoft_365` | Microsoft MCP + Outlook REST + `email_style_infer` | Microsoft OAuth |
+| `github` | GitHub MCP (dynamic) | GitHub OAuth / `GITHUB_TOKEN` |
+| `slack` | Slack REST (channels, search, threads, reactions, files) | Slack OAuth |
+| `linear` | Linear REST issues | Linear OAuth |
+| `notion` | Notion REST workspace | Notion OAuth |
+| `xero` | Xero accounting REST | Xero OAuth |
 | `reasoning_advanced` | `decompose_goal`, `verify_contract`, `dispatch_graph`, `query_tool_outputs`, `research_state` | harness-scoped |
 | `synthesis` | `synthesis_run` (cross-domain synthesis sub-agent) | harness-scoped |
 | `orchestration` | `spawn_agent`, `wait_for_agents`, `cancel_agent`, `list_agents`, `verify_result`, `evidence_critic`, `path_critic`, `policy_critic`, `reflect_debate`, `branch_explore`, `branch_evaluate` | harness-scoped |

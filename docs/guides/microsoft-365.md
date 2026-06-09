@@ -24,7 +24,7 @@ AGENT_MICROSOFT_SIDECAR_PORT=8011
 # AGENT_INTEGRATION_AUTO_ACTIVATE=1   # optional — expose all MCP tools immediately (off when AGENT_TOOL_LAZY=1)
 ```
 
-With **`AGENT_TOOL_LAZY=1`** (default), Microsoft tools register when you Connect but stay **off the model API** until the agent calls `activate_tool_family({ family: "connectors" })` or the user message mentions mail/calendar/Teams (intent pre-seed).
+With **`AGENT_TOOL_LAZY=1`** (default), Microsoft tools register when you Connect but stay **off the model API** until the agent calls `activate_tool_family({ family: "microsoft_365" })` or the user message mentions mail/calendar/Teams (intent pre-seed).
 
 ### 3. Hosted OAuth flow
 

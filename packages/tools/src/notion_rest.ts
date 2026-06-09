@@ -4,6 +4,7 @@
 import type { ToolRegistry, ToolResult } from "@liminal/core";
 import { effectiveHarnessEnvRaw, getNotionAccessToken, listNotionOAuthAccounts } from "@liminal/core";
 import { defineTool } from "./helpers.js";
+import { integrationNotConnectedError } from "./integration_oauth_start.js";
 
 const NOTION_API = "https://api.notion.com/v1";
 const NOTION_VERSION = "2022-06-28";
@@ -33,8 +34,7 @@ async function notionApi(
   if (!token) {
     return {
       ok: false,
-      error:
-        "Notion not connected — Settings → Integrations → Connect Notion (hosted sign-in, no .env setup).",
+      error: integrationNotConnectedError("notion"),
     };
   }
   const res = await fetch(`${NOTION_API}${path}`, {

@@ -10,7 +10,7 @@ Harness integration only — not website account login.
 2. Pick pages/databases to share when Notion prompts you.
 3. Tokens persist under `~/.liminal/oauth/notion/`.
 
-Or: `liminal connect notion` or `connect_provider({ provider: "notion" })`.
+Or: `liminal connect notion`, or ask the agent to run `connect_provider({ provider: "notion", start_oauth: true })` (opens sign-in in the browser).
 
 ### Read vs write
 

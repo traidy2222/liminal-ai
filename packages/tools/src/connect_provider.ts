@@ -82,14 +82,23 @@ import {
   githubTokenPresent,
   GITHUB_PARENT_PROVIDER,
 } from "./github_connect.js";
+import {
+  type ConnectProviderId,
+  integrationNotConnectedError,
+  isConnectProviderOAuthReady,
+  startConnectProviderOAuth,
+} from "./integration_oauth_start.js";
+import { buildGoogleLiveProbeLines } from "./connector_live_probes.js";
+import { enrichGoogleMcpProbeError } from "./mcp_attach.js";
 
 const PARENT_PROVIDER = "google_workspace";
 const MICROSOFT_PARENT_PROVIDER = "microsoft_365";
 
-function integrationLazyLoadHint(registry: ToolRegistry): string {
+function integrationLazyLoadHint(registry: ToolRegistry, family?: string): string {
   if (!registry.isLazyToolLoading()) return "";
+  const id = family ?? "google_workspace|microsoft_365|github|slack|linear|notion|xero";
   return (
-    "\nLazy loading: MCP tools are registered but inactive until activate_tool_family({ family: \"connectors\" })."
+    `\nLazy loading: activate_tool_family({ family: "${id}" }) for this provider's tools (not the whole connectors bundle).`
   );
 }
 
@@ -129,10 +138,38 @@ async function ensureMicrosoftOAuth(
   return null;
 }
 
+async function prepareProviderOAuth(
+  provider: ConnectProviderId,
+  args: Record<string, unknown>,
+  emit?: (text: string) => void
+): Promise<ToolResult | null> {
+  if (args["start_oauth"] !== true) return null;
+  if (await isConnectProviderOAuthReady(provider)) {
+    emit?.(`${provider}: OAuth already on disk — continuing…`);
+    return null;
+  }
+  const mode = args["mode"] === "read_only" ? "read_only" : "read_write";
+  const services = Array.isArray(args["services"])
+    ? (args["services"] as unknown[]).map((s) => String(s))
+    : undefined;
+  const started = await startConnectProviderOAuth(provider, {
+    mode,
+    services,
+    onStatus: (m) => emit?.(m),
+  });
+  if (!started.ok) return { ok: false, error: started.error };
+  emit?.(`Signed in as ${started.label}.`);
+  return null;
+}
+
 async function connectMicrosoft365Handler(
   registry: ToolRegistry,
-  args: Record<string, unknown>
+  args: Record<string, unknown>,
+  emit?: (text: string) => void
 ): Promise<ToolResult> {
+  const oauthPrep = await prepareProviderOAuth("microsoft_365", args, emit);
+  if (oauthPrep) return oauthPrep;
+
   const mode = args["mode"] === "read_only" ? "read_only" : "read_write";
   const serviceIds = Array.isArray(args["services"])
     ? (args["services"] as unknown[]).map((s) => String(s))
@@ -146,11 +183,7 @@ async function connectMicrosoft365Handler(
 
   const oauth = await ensureMicrosoftOAuth(accountHint);
   if (!oauth) {
-    return {
-      ok: false,
-      error:
-        "Microsoft OAuth not connected — open Settings → Integrations → Connect Microsoft 365 (hosted sign-in, no .env setup).",
-    };
+    return { ok: false, error: integrationNotConnectedError("microsoft_365") };
   }
 
   const accounts = await listMicrosoftOAuthAccounts();
@@ -219,7 +252,7 @@ async function connectMicrosoft365Handler(
       `Registered MCP tools: ${totalTools}\n` +
       `Services: ${presets.map((p) => p.id).join(", ")}` +
       restNote +
-      integrationLazyLoadHint(registry) +
+      integrationLazyLoadHint(registry, "microsoft_365") +
       partial,
   };
 }
@@ -229,8 +262,8 @@ export function createConnectorTools(registry: ToolRegistry, _emitter: AgentEmit
     name: "connect_provider",
     description:
       "WHAT: Connect curated providers — Google, Microsoft 365, Xero, GitHub, Slack, Linear, or Notion (hosted OAuth).\n" +
-      "WHEN: User asks to work with mail/calendar/files, accounting, repos, Slack, Linear, or Notion.\n" +
-      "HOW: OAuth via Settings → Integrations on vireondynamics.com. GitHub also supports legacy GITHUB_TOKEN in .env.",
+      "WHEN: User asks to work with mail/calendar/files, accounting, repos, Slack, Linear, or Notion; or another tool reports not connected.\n" +
+      "HOW: Set start_oauth:true to open hosted sign-in in the browser and wait for tokens. GitHub also supports legacy GITHUB_TOKEN in .env.",
     parameters: {
       type: "object",
       properties: {
@@ -238,6 +271,11 @@ export function createConnectorTools(registry: ToolRegistry, _emitter: AgentEmit
           type: "string",
           enum: ["google_workspace", "microsoft_365", "xero", "github", "slack", "linear", "notion"],
           description: "Provider preset id.",
+        },
+        start_oauth: {
+          type: "boolean",
+          description:
+            "When true and OAuth is missing, opens vireondynamics.com sign-in in the browser and blocks until tokens are saved.",
         },
         services: {
           type: "array",
@@ -259,26 +297,29 @@ export function createConnectorTools(registry: ToolRegistry, _emitter: AgentEmit
       additionalProperties: false,
     },
     requiresApproval: false,
-    handler: async (args): Promise<ToolResult> => {
+    handler: async (args, emit): Promise<ToolResult> => {
       const provider = String(args["provider"] ?? "").trim();
       if (provider === "github") {
+        const oauthPrep = await prepareProviderOAuth("github", args, emit);
+        if (oauthPrep) return oauthPrep;
         const result = await connectGithubMcp(registry, {
           readOnly: args["mode"] === "read_only",
         });
         if (!result.ok) return { ok: false, error: result.error };
-        return { ok: true, output: result.output };
+        return {
+          ok: true,
+          output: result.output + integrationLazyLoadHint(registry, "github"),
+        };
       }
       if (provider === "microsoft_365") {
-        return connectMicrosoft365Handler(registry, args);
+        return connectMicrosoft365Handler(registry, args, emit);
       }
       if (provider === "xero") {
+        const oauthPrep = await prepareProviderOAuth("xero", args, emit);
+        if (oauthPrep) return oauthPrep;
         const accounts = await listXeroOAuthAccounts();
         if (accounts.length === 0) {
-          return {
-            ok: false,
-            error:
-              "Xero OAuth not connected — open Settings → Integrations → Connect Xero (hosted sign-in, no .env setup).",
-          };
+          return { ok: false, error: integrationNotConnectedError("xero") };
         }
         const a = accounts[0]!;
         return {
@@ -286,63 +327,65 @@ export function createConnectorTools(registry: ToolRegistry, _emitter: AgentEmit
           output:
             `Xero connected as ${a.email ?? a.accountId}` +
             (a.tenantName ? ` (${a.tenantName})` : a.tenantId ? ` (tenant ${a.tenantId})` : "") +
-            ".\nTools: xero_list_organisations, xero_list_invoices, xero_get_invoice, xero_list_contacts, xero_create_invoice.",
+            ".\nTools: xero_list_organisations, xero_list_invoices, xero_get_invoice, xero_list_contacts, xero_create_invoice." +
+            integrationLazyLoadHint(registry, "xero"),
         };
       }
       if (provider === "slack") {
+        const oauthPrep = await prepareProviderOAuth("slack", args, emit);
+        if (oauthPrep) return oauthPrep;
         const accounts = await listSlackOAuthAccounts();
         if (accounts.length === 0) {
-          return {
-            ok: false,
-            error:
-              "Slack OAuth not connected — open Settings → Integrations → Connect Slack (hosted sign-in, no .env setup).",
-          };
+          return { ok: false, error: integrationNotConnectedError("slack") };
         }
         const a = accounts[0]!;
         return {
           ok: true,
           output:
             `Slack connected as ${a.teamName ?? a.accountId}` +
-            ".\nTools: slack_list_channels, slack_get_channel_history, slack_list_users, slack_post_message.",
+            ".\nTools: slack_list_channels, slack_get_channel_history, slack_get_thread_replies, slack_search_messages, " +
+            "slack_list_users, slack_open_dm, slack_post_message, slack_reply_in_thread, slack_add_reaction, slack_upload_file." +
+            integrationLazyLoadHint(registry, "slack"),
         };
       }
       if (provider === "linear") {
+        const oauthPrep = await prepareProviderOAuth("linear", args, emit);
+        if (oauthPrep) return oauthPrep;
         const accounts = await listLinearOAuthAccounts();
         if (accounts.length === 0) {
-          return {
-            ok: false,
-            error:
-              "Linear OAuth not connected — open Settings → Integrations → Connect Linear (hosted sign-in, no .env setup).",
-          };
+          return { ok: false, error: integrationNotConnectedError("linear") };
         }
         const a = accounts[0]!;
         return {
           ok: true,
           output:
             `Linear connected as ${a.email ?? a.organizationName ?? a.accountId}` +
-            ".\nTools: linear_list_teams, linear_list_issues, linear_get_issue, linear_create_issue, linear_add_comment.",
+            ".\nTools: linear_list_teams, linear_list_issues, linear_get_issue, linear_create_issue, linear_add_comment." +
+            integrationLazyLoadHint(registry, "linear"),
         };
       }
       if (provider === "notion") {
+        const oauthPrep = await prepareProviderOAuth("notion", args, emit);
+        if (oauthPrep) return oauthPrep;
         const accounts = await listNotionOAuthAccounts();
         if (accounts.length === 0) {
-          return {
-            ok: false,
-            error:
-              "Notion OAuth not connected — open Settings → Integrations → Connect Notion (hosted sign-in, no .env setup).",
-          };
+          return { ok: false, error: integrationNotConnectedError("notion") };
         }
         const a = accounts[0]!;
         return {
           ok: true,
           output:
             `Notion connected as ${a.workspaceName ?? a.email ?? a.accountId}` +
-            ".\nTools: notion_search, notion_get_page, notion_list_block_children, notion_get_database, notion_query_database, notion_create_page, notion_update_page, notion_append_blocks.",
+            ".\nTools: notion_search, notion_get_page, notion_list_block_children, notion_get_database, notion_query_database, notion_create_page, notion_update_page, notion_append_blocks." +
+            integrationLazyLoadHint(registry, "notion"),
         };
       }
       if (provider !== "google_workspace") {
         return { ok: false, error: `unsupported provider '${provider}'` };
       }
+
+      const oauthPrep = await prepareProviderOAuth("google_workspace", args, emit);
+      if (oauthPrep) return oauthPrep;
 
       const mode = args["mode"] === "read_only" ? "read_only" : "read_write";
       const serviceIds = Array.isArray(args["services"])
@@ -357,19 +400,7 @@ export function createConnectorTools(registry: ToolRegistry, _emitter: AgentEmit
 
       const oauth = await ensureGoogleOAuth(accountHint);
       if (!oauth) {
-        const scopes = scopesForGoogleServices(presets, mode);
-        let authUrlHint = "";
-        try {
-          authUrlHint =
-            "\n\nConnect first: run `liminal connect google --attach` or open Settings → Integrations → Connect Google, then Attach MCP tools.\n" +
-            `(OAuth scopes needed: ${scopes.slice(0, 4).join(", ")}${scopes.length > 4 ? "…" : ""})`;
-        } catch {
-          authUrlHint = "\n\nSet GOOGLE_OAUTH_CLIENT_ID and GOOGLE_OAUTH_CLIENT_SECRET in .env, then connect via Settings or CLI.";
-        }
-        return {
-          ok: false,
-          error: `Google OAuth not configured or no token on disk.${authUrlHint}`,
-        };
+        return { ok: false, error: integrationNotConnectedError("google_workspace", "Google Workspace") };
       }
 
       const accounts = await listGoogleOAuthAccounts();
@@ -446,7 +477,8 @@ export function createConnectorTools(registry: ToolRegistry, _emitter: AgentEmit
           attached.push(connName);
           totalTools += registered.length;
         } catch (e) {
-          attachErrors.push(`${connName}: ${e instanceof Error ? e.message : String(e)}`);
+          const raw = e instanceof Error ? e.message : String(e);
+          attachErrors.push(`${connName}: ${enrichGoogleMcpProbeError(preset.mcpUrl ?? "", raw)}`);
         }
       }
 
@@ -468,7 +500,7 @@ export function createConnectorTools(registry: ToolRegistry, _emitter: AgentEmit
           `Connections: ${attached.join(", ")}\n` +
           `Registered MCP tools: ${totalTools}\n` +
           `Services attached: ${attached.join(", ")}` +
-          integrationLazyLoadHint(registry) +
+          integrationLazyLoadHint(registry, "google_workspace") +
           partial,
       };
     },
@@ -842,10 +874,9 @@ export function createConnectorTools(registry: ToolRegistry, _emitter: AgentEmit
         }
       }
       lines.push("");
-      lines.push("### Official MCP APIs (Cloud Console checklist — not a live probe)");
-      lines.push(
-        "If a specific MCP attach failed with 403, enable the matching MCP API below and enroll in Workspace Developer Preview:"
-      );
+      lines.push(...(await buildGoogleLiveProbeLines()));
+      lines.push("");
+      lines.push("### Cloud Console reference (enable MCP APIs when live probe says disabled)");
       const projectId = googleProjectIdFromClientId();
       for (const [svc, apiId] of Object.entries(GOOGLE_OFFICIAL_MCP_API_IDS)) {
         const url = googleCloudMcpApiLibraryUrl(svc as GoogleServiceId, projectId);

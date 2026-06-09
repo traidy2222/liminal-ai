@@ -15,7 +15,7 @@ export const thinkTool = defineTool({
     "clarification_needed=true → pauses execution and surfaces question to user. " +
     "scope declared → arms compensation ledger on mutating/destructive work.\n" +
     "ARGS: content (required — planning text); " +
-    "tool_families[] (families needed: shell/git/code_intel/web/memory_advanced/vault/files_edit/tasks/vision/browser/document/markets/harness_ui/orchestration/navigation/meta/dynamic_tools/agentcard/connectors); " +
+    "tool_families[] (families: shell/git/code_intel/web/…; integrations: google_workspace, microsoft_365, github, slack, linear, notion, xero, or connectors for connect_provider only); " +
     "scope (read_only|additive|mutating|destructive); " +
     "unknowns[] (gaps to resolve before acting); " +
     "clarification_needed + clarification_question; " +
@@ -34,8 +34,8 @@ export const thinkTool = defineTool({
         description:
           "Tool families needed for this task. Declaring them here pre-activates them — " +
           "no separate activate_tool_family calls needed. Valid: shell, git, code_intel, web, " +
-          "memory_advanced, vault, files_edit, tasks, vision, browser, document, markets, " +
-          "harness_ui, orchestration, navigation, meta, dynamic_tools, captcha, agenda_scheduler",
+      "reasoning, context, memory_advanced, vault, files_edit, tasks, vision, browser, document, markets, " +
+      "harness_ui, orchestration, navigation, meta, dynamic_tools, captcha, agenda_scheduler",
       },
       scope: {
         type: "string",

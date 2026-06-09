@@ -456,8 +456,14 @@ export async function registerAllTools(
   }
   if (xeroRestEnabled()) {
     registerXeroRestTools(registry);
+  }
+  if (slackRestEnabled()) {
     registerSlackRestTools(registry);
+  }
+  if (linearRestEnabled()) {
     registerLinearRestTools(registry);
+  }
+  if (notionRestEnabled()) {
     registerNotionRestTools(registry);
   }
   if (agentcardEnabled()) {

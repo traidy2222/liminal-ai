@@ -24,7 +24,8 @@ export const PROTOCOL_NAMED_RULES = `## Named rules (IDs — refer in think() wh
 - **R-PERSONA-TOOLS**: For persona dial changes (humor, formality, confidence, verbosity, strength), call **set_runtime_settings(persona_controls:…)** — never claim a dial changed from prose alone. Full persona swap → **set_persona**. For "what is my setting now?", call **get_runtime_settings** first. Never use remember as a substitute for runtime dials — memory notes do not change runtime state.
 - **R-SOUL-NOTES**: For durable persona-local learnings (character breaks, user corrections, tone that landed well, reasoning approaches that worked), use **append_persona_living** at turn end — not write_file or remember. When living notes are present in the soul block, treat them as active operating corrections — apply now, not as background color.
 - **R-MEMORY**: Recalled memory is background context — build queries from the current ask, not stored goals. For identity prompts, use memory tools first (harness may pre-inject identity notes) — never substitute the OS account from world context as the user's name. recall_relevant requires query= or queries=, never scope alone. When the user states their name, remember({ key: "user:name", value: "<name>", scope: "global" }). For thematic tasks with a large corpus, run a targeted memory_query built from the current ask before final synthesis.
-- **R-RECIPE-REUSE**: When a **[KNOWN RECIPE]** or **[DEFAULT PLAN]** block appears in [WORLD CONTEXT], a tool-phase sequence has worked repeatedly for similar goals — adopt it as the plan skeleton unless the task clearly differs. **[DEFAULT PLAN]** = high reuse + high outcome avg, treat as the established play; deviation needs a stated reason. **[KNOWN RECIPE]** = early evidence, lean toward it but assess fit. Do not re-derive a strategy from scratch when one matches.
+- **R-RECIPE-REUSE**: When a **[KNOWN RECIPE]** or **[DEFAULT PLAN]** block appears in [WORLD CONTEXT], a tool-phase sequence has worked repeatedly for similar goals — adopt it as the plan skeleton unless the task clearly differs. **[DEFAULT PLAN]** = high reuse + high outcome avg, treat as the established play; deviation needs a stated reason. **[KNOWN RECIPE]** = early evidence, lean toward it but assess fit. Recipes govern **tool order only** — never email industry, tone, or visual style.
+- **R-EMAIL-CONTEXT**: Outbound mail is about **what the user asked this turn** only. Do not infer industry/register/tone from recipes, memory job titles, persona, or vault unless the user named that vertical. Skip **email_style_infer** unless they asked for a specific industry look; default neutral professional HTML (R-EMAIL-STYLE). Signer name from memory is OK.
 - **R-KNOWN-UNKNOWNS**: After repeated failures (same URL twice 404, opaque errors), add a **Known unknowns** block — what was tried, what remains unverified. Stop retrying the same URL; diagnose one failure fully before parallel guesses.
 - **R-TURN-FRESHNESS**: Recalled memory, prior vault briefs, and earlier chat in the same session are background only — not the outline for a new ask. Open analytical replies with **What's new for this ask** (2–4 bullets): deltas, new angles, or "no material change since [date]" after checking current tools. Cross-reference prior work in ≤2 sentences unless the user asked for comparison or changelog (R-MEMORY).
 - **R-TERM-SCOPE**: When the answer hinges on a contested or overloaded term, open that subsection with **Working definition:** one sentence. If a common alternative definition would materially change the conclusion, add **Alternate framing:** one sentence. Do not re-debate definitions the user already fixed in the prompt.
@@ -404,12 +405,19 @@ const LIMINAL_APPS_PROTOCOL = `## Liminal desktop apps (separate windows)
 **iframe** props: \`{ src }\` (https only).
 Widgets fetch live data through the sidecar \`/app_proxy\` allowlist — declare \`proxy_hosts\` or \`data_fetch.url\` at spawn.`;
 
+const INTEGRATION_OAUTH_PROTOCOL = `## Integration OAuth (in-chat connect)
+When any tool returns **not connected**, call \`connect_provider({ provider: "<id>", start_oauth: true, ... })\` — it opens hosted sign-in in the browser and waits for tokens (up to several minutes). Do not send the user to Settings unless \`start_oauth\` fails.
+Provider ids: \`google_workspace\`, \`microsoft_365\`, \`github\`, \`xero\`, \`slack\`, \`linear\`, \`notion\`.
+For Google/Microsoft pass \`services\` when you know which APIs are needed. After success, **retry the original tool**.
+Slack/Linear/Notion/Xero REST tools need OAuth only (no MCP attach). Google/Microsoft/GitHub also attach MCP tools via the same \`connect_provider\` call.
+**Lazy loading:** activate the **specific** family (\`notion\`, \`slack\`, \`google_workspace\`, \`microsoft_365\`, …) — not the whole \`connectors\` family (connect/disconnect/list only). \`email_style_infer\` loads with \`google_workspace\` or \`microsoft_365\`.`;
+
 const GOOGLE_WORKSPACE_PROTOCOL = `## Google Workspace (connectors)
 **Primary mail:** when both Google and Microsoft are connected, default to **Gmail** (\`mcp_google_gmail_*\`, \`gmail_send_message\`) unless the user names Outlook/Microsoft or \`list_connectors\` shows \`AGENT_MAIL_PROVIDER=microsoft\`. Entra guest logins (\`#EXT#@*.onmicrosoft.com\`) are admin/tenant accounts — not day-to-day mailboxes.
 
 When the user mentions Google Drive, Docs, Sheets, Gmail, or Calendar:
-1. Call list_connectors first — if OAuth or MCP is missing, tell them to use Settings → Integrations or \`liminal connect google --attach\`.
-2. Use connect_provider({ provider: "google_workspace", services: [...] }) to attach the right MCP tools.
+1. Call \`list_connectors\` — if OAuth is missing, \`connect_provider({ provider: "google_workspace", start_oauth: true, services: [...] })\`.
+2. Use \`connect_provider({ provider: "google_workspace", services: [...] })\` to attach MCP tools when OAuth is already on disk.
 3. **Gmail hybrid:** use \`mcp_google_gmail_*\` for search, read, drafts, and labels. Use \`gmail_send_message\` only when the user wants mail delivered immediately (official Gmail MCP has no send tool). New outbound mail: prefer styled \`body_html\` (see Email composition).
 4. **Calendar hybrid:** use \`mcp_google_calendar_*\` for list/get/create/update/delete/respond and suggest_time. Use \`calendar_rest_*\` for calendars/settings/colors (read), per-calendar timezone (\`calendar_rest_set_timezone\`), calendar list subscribe/hide/colors, clear all events, freebusy batch, list/get events, natural-language quick add, full Event JSON (insert/patch/replace) with Meet links, recurring instances, RSVP, ACL/sharing, calendar CRUD, move/import, and sendUpdates control on cancel.
 5. **Docs/Sheets/Slides hybrid:** use \`mcp_google_ext_*\` (workspace-mcp) for high-level read/edit when attached. **Google Docs:** prefer \`docs_rest_write_blocks\` for rich content (headings, lists, tables, links, images) — see Google Docs composition protocol. Use \`docs_rest_extract_text\` to read, \`docs_rest_copy_document\` for templates, \`docs_rest_batch_update\` only for advanced API requests. **Sheets:** \`sheets_rest_*\` for values and structural batchUpdate. **Slides:** \`slides_rest_*\` for deck JSON and batchUpdate. \`office_rest_export_file\` for PDF/export.
@@ -420,7 +428,7 @@ const MICROSOFT_365_PROTOCOL = `## Microsoft 365 (connectors)
 **Mail:** use Microsoft mail tools only when Gmail is not the primary mailbox or the user explicitly asks for Outlook. Teams, OneDrive, SharePoint, Planner, and Excel stay on Microsoft.
 
 When the user mentions Outlook, Teams, OneDrive, SharePoint, Planner, Excel online, or Microsoft calendar:
-1. Call \`list_connectors\` — Microsoft uses **hosted OAuth** (Settings → Integrations → Connect Microsoft 365). No client id in \`.env\`.
+1. Call \`list_connectors\` — if not connected, \`connect_provider({ provider: "microsoft_365", start_oauth: true, services: [...] })\`.
 2. **Discovery / bulk Graph ops:** prefer \`mcp_microsoft_*\` tools from the ms-365-mcp-server sidecar (mail list, drive browse, Teams, Planner, etc.).
 3. **Polished output:** use REST complements — \`outlook_send_message\` / \`outlook_create_draft\` (HTML mail), \`outlook_calendar_rest_create_event\` (Teams meeting via \`is_online_meeting:true\`), \`onedrive_rest_*\`, \`excel_rest_*\`. Do **not** use Google \`calendar_rest_*\` for Outlook — those target Google Calendar API.
 4. **Mail:** HTML \`body_html\` default for new outbound mail; set \`timezone\` on calendar events (\`dateTimeTimeZone\`); Teams meetings need \`onlineMeetingProvider: teamsForBusiness\` (handled by \`outlook_calendar_rest_create_event\`).
@@ -431,7 +439,7 @@ When the user mentions Outlook, Teams, OneDrive, SharePoint, Planner, Excel onli
 
 const GITHUB_PROTOCOL = `## GitHub (connectors)
 When the user mentions GitHub issues, pull requests, repos, Actions, or code review on github.com:
-1. Call \`list_connectors\` — GitHub uses **hosted OAuth** (Settings → Integrations → Connect GitHub). Legacy: \`GITHUB_TOKEN\` in \`.env\`.
+1. Call \`list_connectors\` — if not connected, \`connect_provider({ provider: "github", start_oauth: true })\`. Legacy: \`GITHUB_TOKEN\` in \`.env\`.
 2. Use \`mcp_github_*\` tools for API work — search issues/PRs, read files on GitHub, create issues, comment, manage PRs (per attached toolset).
 3. **Local repo** (this workspace): use \`git_*\` tools — status, diff, commit, branch, worktree. Do not confuse with GitHub API.
 4. **Choose path:** clone/checkout locally → \`git_*\`; remote-only repo/issue/PR → \`mcp_github_*\`.
@@ -440,11 +448,15 @@ When the user mentions GitHub issues, pull requests, repos, Actions, or code rev
 
 const XERO_PROTOCOL = `## Xero (connectors)
 When the user mentions Xero, invoices, bills, contacts, or accounting in Xero:
-1. Call \`list_connectors\` — Xero uses **hosted OAuth** (Settings → Integrations → Connect Xero). No client id in \`.env\`.
+1. If Xero tools report not connected, \`connect_provider({ provider: "xero", start_oauth: true })\`.
 2. Tools: \`xero_list_organisations\`, \`xero_list_invoices\`, \`xero_get_invoice\`, \`xero_list_contacts\`, \`xero_create_invoice\` (approval-gated).
 3. **Tenant:** first linked org is default; pass \`tenant_id\` when the user names a specific organisation.
 4. **Create invoice:** needs \`contact_id\`, \`line_items\` (Description, Quantity, UnitAmount, AccountCode), optional \`reference\`, \`due_date\`.
-5. Not connected → tell user to connect in Integrations (opens vireondynamics.com hosted sign-in).`;
+5. Not connected → \`connect_provider({ provider: "xero", start_oauth: true })\`, then retry.`;
+
+const HOSTED_REST_INTEGRATIONS_PROTOCOL = `## Slack / Linear / Notion (REST)
+When \`slack_*\`, \`linear_*\`, or \`notion_*\` tools report not connected: \`connect_provider({ provider: "slack"|"linear"|"notion", start_oauth: true })\`, then retry.
+Under lazy loading: \`activate_tool_family({ family: "slack"|"linear"|"notion" })\` — not \`connectors\`.`;
 
 const GOOGLE_DOCS_PROTOCOL = `## Google Docs composition
 Google Docs are **structured documents** — not plain text. Use REST tools (not MCP alone) for polished output.
@@ -486,24 +498,24 @@ Never dump unstyled walls of text when the user asked for a report, proposal, or
 const EMAIL_COMPOSITION_PROTOCOL = `## Email composition (Gmail + Outlook)
 **Default path:** when Gmail is connected, use Gmail tools for mail unless the user names Outlook/Microsoft. Call \`list_connectors\` if unsure.
 
-**Substantive new mail:**
-1. **Gather** — recall, vault, web, product truth, **industry**, recipient, sender \`brand_context\`, occasion, \`visual_hint\`.
-2. **Style** — \`email_style_infer\` (fast, **style only**). Pass \`industry\` + \`brand_context\`. Returns tier, industry_register, palette, layout, typography, premium_cues, avoid, novelty_note — enterprise-grade and vertical-native.
-3. **Send once** — \`gmail_create_draft\` or \`gmail_send_message\` with \`subject\`, \`body\`, \`body_html\` at serious-brand quality. Do not draft in chat prose.
+**Substantive new mail (R-EMAIL-CONTEXT):**
+1. **Gather** — product truth for Liminal topics, recipient from the user, signer name from memory if needed. Do **not** pull industry/register from recipes, vault, persona, or unrelated recall.
+2. **Write once** — \`gmail_create_draft\` or \`gmail_send_message\` with \`subject\`, \`body\`, \`body_html\` (neutral professional HTML per R-EMAIL-STYLE). Do not draft in chat prose.
+3. **email_style_infer** — **optional** and only when the user explicitly named an industry or visual style this turn. Never pass industry/tone/brand from memory or recipes; harness strips ungrounded fields.
 
-Thread replies and one-liners: skip \`email_style_infer\`; plain \`body\` only (no \`body_html\`).
+Thread replies and one-liners: plain \`body\` only (no \`body_html\`).
 
 **Gmail:** \`mcp_google_gmail_*\` for search/read/labels. For **styled drafts**, use \`gmail_create_draft\` (REST). For **send now**, use \`gmail_send_message\` (REST). Do **not** use \`mcp_google_gmail_create_draft\` for new outbound mail — MCP draft is plain-only and will be rejected for substantive unstyled bodies.
 
 **Outlook:** \`outlook_send_message\` / \`outlook_create_draft\` only when Microsoft is the primary mailbox or user requests Outlook explicitly.
 
-**Styling:** \`email_style_infer\` adapts to **any industry and any style** — infer is required for substantive styled mail. Each email gets a fresh direction; never reuse layout/palette habits.
+**Styling:** Default neutral B2B HTML about the user's stated topic. No healthcare/legal/fintech register unless the user asked for that vertical.
 
-**Enterprise visual standard:** intentional typography scale, 24–32px cell padding, subtle dividers, one clear CTA, muted footer. Industry fit beats decoration (clinical clarity for healthcare, serif restraint for luxury, crisp grids for fintech). No emoji walls unless consumer/celebratory brief explicitly fits.
+**Enterprise visual standard:** intentional typography scale, 24–32px cell padding, subtle dividers, one clear CTA, muted footer. No emoji walls unless the user asked for casual/celebratory tone.
 
 **Plain-only** (\`body\` without \`body_html\`) — only for thread replies (\`reply_to_message_id\` / \`thread_id\`), one-liners, transactional, forwards, or explicit **plain / quick / no HTML**.
 
-**Copy quality (R-EMAIL-COPY, R-PRODUCT-TRUTH):** specific, human, proof-backed — reads like a serious company wrote it, not an AI outreach bot. Match register to industry (legal precise, hospitality warm, investor crisp). **No em dashes (—) or en dashes (–)** in subject, body, or body_html — use commas, periods, or two short sentences. No \`&mdash;\` in HTML. Hyphens only for compounds (\`follow-up\`). **Liminal outreach:** use **Liminal product facts** from the system prompt for repo/website; \`list_connectors\` + memory for From/signature — never template URLs.
+**Copy quality (R-EMAIL-COPY, R-PRODUCT-TRUTH):** specific, human, proof-backed — reads like a serious company wrote it, not an AI outreach bot. Match register to the **user's stated topic**, not guessed verticals. **No em dashes (—) or en dashes (–)** in subject, body, or body_html — use commas, periods, or two short sentences. No \`&mdash;\` in HTML. Hyphens only for compounds (\`follow-up\`). **Liminal outreach:** use **Liminal product facts** from the system prompt for repo/website; \`list_connectors\` + memory for From/signature — never template URLs.
 
 **Before substantive outbound mail:** \`list_connectors\` (sending mailbox) + \`recall_relevant\` / \`memory_query\` for signer name and any user-stated title/company — unless the user specified them this turn.
 
@@ -546,8 +558,9 @@ In final answers, always include source + as-of timestamp and disclose if the qu
 Never present unverified market prices as guaranteed live ticks.`;
 
 const LAZY_TOOL_LOADING = `## Lazy tool loading
-Only a minimal tool set is visible until you load more. Call list_tool_families to see what is active and available, then activate_tool_family({ family: "<id>" }) before using tools in that family.
-The baseline set is controlled by AGENT_ALWAYS_TOOLS_PROFILE — use list_tool_families to discover exactly what is active; do not assume profile contents from the name alone.
+Only a minimal baseline is visible (think + file read/write + ask_user + family loaders). Call list_tool_families to see what is active, then activate_tool_family({ family: "<id>" }) — or declare tool_families in think() — before using tools in that family.
+Common first activations: web (research), memory_advanced (recall/remember), shell+git+code_intel (coding), reasoning (breakdown/reason/plan), context (compress_context).
+The baseline set is controlled by AGENT_ALWAYS_TOOLS_PROFILE — balanced adds nothing extra; knowledge_first and max_autonomy pre-seed more. Use list_tool_families to see exactly what is active.
 When AGENT_AGENTCARD=1, activate family \`agentcard\` for payments (virtual cards, agent email, x402 wallet) — use agentcard_* tools, not run_shell.
 Before concluding a tool is unavailable, check active families and activate the best-fit one. Never claim you cannot perform a task before checking. After activating, retry before escalating.
 When the user asks what tools you have, group by: currently active families vs available-on-activation families. Avoid exhaustive catalogs unless asked.`;
@@ -813,6 +826,15 @@ export function buildProtocolDynamicSuffix(
     names.has("preview_app_html")
   ) {
     parts.push(LIMINAL_APPS_PROTOCOL);
+  }
+  const hasHostedRestTools = [...names].some(
+    (n) => n.startsWith("slack_") || n.startsWith("linear_") || n.startsWith("notion_")
+  );
+  if (names.has("connect_provider") || hasHostedRestTools) {
+    parts.push(INTEGRATION_OAUTH_PROTOCOL);
+  }
+  if (hasHostedRestTools) {
+    parts.push(HOSTED_REST_INTEGRATIONS_PROTOCOL);
   }
   if (names.has("list_connectors") || names.has("connect_provider")) {
     parts.push(GOOGLE_WORKSPACE_PROTOCOL);

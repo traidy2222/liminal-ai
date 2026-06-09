@@ -333,6 +333,13 @@ export type {
   EmailStyleInferResult,
   EmailStyleTier,
 } from "./email_style_infer.js";
+export {
+  isEmailComposeTurn,
+  isEmailStyleFieldGroundedInUserMessage,
+  sanitizeEmailStyleInferInput,
+  EMAIL_COMPOSE_TURN_INJECTION,
+} from "./email_compose_context.js";
+export { LAZY_AUTO_ACTIVATE_TOOL_ONLY } from "./tool_lazy_constants.js";
 export { buildAutoDreamPrompt } from "./auto_dream.js";
 export {
   resolveEffortLevel,

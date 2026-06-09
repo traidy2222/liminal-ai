@@ -1,0 +1,201 @@
+/**
+ * Live integration probes for list_connectors — real OAuth/MCP/REST checks,
+ * not static Cloud Console checklists.
+ */
+import {
+  getGoogleAccessToken,
+  getGoogleServicePreset,
+  googleCloudMcpApiLibraryUrl,
+  googleProjectIdFromClientId,
+  listGoogleOAuthAccounts,
+  missingGoogleScopes,
+  resolveGoogleServices,
+  scopesForGoogleServices,
+  type GoogleServiceId,
+} from "@liminal/core";
+import { googleOAuthAuthScheme, listConnectionsByParent } from "./api_connections_store.js";
+import { calendarRestEnabled } from "./google_calendar_rest.js";
+import { enrichGoogleMcpProbeError, mcpHandshakeAndListTools } from "./mcp_attach.js";
+
+const PARENT = "google_workspace";
+const PROBE_TIMEOUT_MS = 20_000;
+
+export type GoogleMcpProbeResult =
+  | { state: "ok"; toolCount: number }
+  | { state: "not_connected"; detail: string }
+  | { state: "missing_scopes"; detail: string }
+  | { state: "mcp_api_disabled"; detail: string; enableUrl?: string }
+  | { state: "not_attached"; detail: string }
+  | { state: "error"; detail: string };
+
+export type GoogleRestProbeResult =
+  | { state: "ok"; detail?: string }
+  | { state: "off"; detail: string }
+  | { state: "not_connected"; detail: string }
+  | { state: "error"; detail: string };
+
+async function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
+  return Promise.race([
+    promise,
+    new Promise<T>((_, reject) =>
+      setTimeout(() => reject(new Error(`probe timed out after ${ms}ms`)), ms)
+    ),
+  ]);
+}
+
+export async function probeGoogleOfficialMcp(
+  serviceId: GoogleServiceId,
+  accountId?: string
+): Promise<GoogleMcpProbeResult> {
+  const preset = getGoogleServicePreset(serviceId);
+  if (!preset?.mcpUrl) {
+    return { state: "error", detail: `no official MCP URL for ${serviceId}` };
+  }
+
+  const accounts = await listGoogleOAuthAccounts();
+  if (accounts.length === 0) {
+    return { state: "not_connected", detail: "no Google OAuth account on disk" };
+  }
+  const account = accountId
+    ? accounts.find((a) => a.accountId === accountId) ?? accounts[0]!
+    : accounts[0]!;
+  const granted = account.scopes;
+  const group = resolveGoogleServices([serviceId]);
+  const miss = missingGoogleScopes(granted, group);
+  if (miss.length > 0) {
+    return { state: "missing_scopes", detail: `missing scopes: ${miss.join(", ")}` };
+  }
+
+  const attached = (await listConnectionsByParent(PARENT)).some(
+    (c) => c.name === preset.connectionName
+  );
+
+  const token = await getGoogleAccessToken(account.accountId);
+  if (!token) {
+    return { state: "not_connected", detail: "OAuth token unreadable (reconnect or fix LIMINAL_OAUTH_KEY)" };
+  }
+
+  const mode = "read_write" as const;
+  const auth = googleOAuthAuthScheme(account.accountId, scopesForGoogleServices(group, mode));
+  try {
+    const tools = await withTimeout(mcpHandshakeAndListTools(preset.mcpUrl, auth), PROBE_TIMEOUT_MS);
+    if (!attached) {
+      return {
+        state: "not_attached",
+        detail: `API reachable (${tools.length} tools on server) but ${preset.connectionName} not attached — Integrations → Attach Calendar or connect_provider`,
+      };
+    }
+    return { state: "ok", toolCount: tools.length };
+  } catch (e) {
+    const raw = e instanceof Error ? e.message : String(e);
+    const enriched = enrichGoogleMcpProbeError(preset.mcpUrl, raw);
+    const attachNote = attached ? "" : ` (also: ${preset.connectionName} not attached)`;
+    if (/MCP API has not been used|is disabled/i.test(raw)) {
+      const projectId = googleProjectIdFromClientId();
+      return {
+        state: "mcp_api_disabled",
+        detail: enriched + attachNote,
+        enableUrl: googleCloudMcpApiLibraryUrl(serviceId, projectId) ?? undefined,
+      };
+    }
+    return { state: "error", detail: enriched + attachNote };
+  }
+}
+
+export async function probeGoogleCalendarRest(accountId?: string): Promise<GoogleRestProbeResult> {
+  if (!calendarRestEnabled()) {
+    return { state: "off", detail: "AGENT_GOOGLE_CALENDAR_REST=0" };
+  }
+  const accounts = await listGoogleOAuthAccounts();
+  if (accounts.length === 0) {
+    return { state: "not_connected", detail: "no Google OAuth account" };
+  }
+  const account = accountId
+    ? accounts.find((a) => a.accountId === accountId) ?? accounts[0]!
+    : accounts[0]!;
+  const token = await getGoogleAccessToken(account.accountId);
+  if (!token) {
+    return { state: "not_connected", detail: "token unreadable" };
+  }
+  try {
+    const res = await withTimeout(
+      fetch("https://www.googleapis.com/calendar/v3/users/me/calendarList?maxResults=1", {
+        headers: { Authorization: `Bearer ${token}`, Accept: "application/json" },
+        signal: AbortSignal.timeout(PROBE_TIMEOUT_MS),
+      }),
+      PROBE_TIMEOUT_MS
+    );
+    if (res.status === 403) {
+      const body = await res.text();
+      if (/API has not been used|accessNotConfigured/i.test(body)) {
+        return {
+          state: "error",
+          detail:
+            "Classic Calendar API disabled in Cloud Console (separate from calendarmcp.googleapis.com MCP). Enable calendar.googleapis.com.",
+        };
+      }
+      return { state: "error", detail: `Calendar REST HTTP 403` };
+    }
+    if (!res.ok) {
+      return { state: "error", detail: `Calendar REST HTTP ${res.status}` };
+    }
+    return { state: "ok" };
+  } catch (e) {
+    return { state: "error", detail: e instanceof Error ? e.message : String(e) };
+  }
+}
+
+function formatMcpProbeLine(label: string, probe: GoogleMcpProbeResult): string {
+  switch (probe.state) {
+    case "ok":
+      return `- ${label} MCP: **live ok** (${probe.toolCount} tools on server)`;
+    case "not_attached":
+      return `- ${label} MCP: **not attached** — ${probe.detail}`;
+    case "missing_scopes":
+      return `- ${label} MCP: **OAuth scopes missing** — ${probe.detail}`;
+    case "mcp_api_disabled":
+      return (
+        `- ${label} MCP: **MCP API not enabled** (classic API may still work via REST)\n` +
+        `  ${probe.detail.split("\n").join("\n  ")}` +
+        (probe.enableUrl ? `\n  Enable: ${probe.enableUrl}` : "")
+      );
+    case "not_connected":
+      return `- ${label} MCP: **no OAuth** — ${probe.detail}`;
+    case "error":
+      return `- ${label} MCP: **probe failed** — ${probe.detail}`;
+  }
+}
+
+function formatRestProbeLine(label: string, probe: GoogleRestProbeResult): string {
+  switch (probe.state) {
+    case "ok":
+      return `- ${label} REST: **live ok** (calendar.googleapis.com)`;
+    case "off":
+      return `- ${label} REST: off (${probe.detail})`;
+    case "not_connected":
+      return `- ${label} REST: **no OAuth** — ${probe.detail}`;
+    case "error":
+      return `- ${label} REST: **probe failed** — ${probe.detail}`;
+  }
+}
+
+/** Lines for list_connectors — probes run in parallel with short timeouts. */
+export async function buildGoogleLiveProbeLines(): Promise<string[]> {
+  const lines: string[] = ["### Live probes (this session)"];
+  try {
+    const [gmailMcp, calMcp, calRest] = await Promise.all([
+      probeGoogleOfficialMcp("gmail"),
+      probeGoogleOfficialMcp("calendar"),
+      probeGoogleCalendarRest(),
+    ]);
+    lines.push(formatMcpProbeLine("Gmail", gmailMcp));
+    lines.push(formatMcpProbeLine("Calendar", calMcp));
+    lines.push(formatRestProbeLine("Calendar", calRest));
+    lines.push(
+      "Note: Gmail/Calendar **MCP** (gmailmcp/calendarmcp) and **classic REST** are separate Cloud APIs — one can work while the other is disabled."
+    );
+  } catch (e) {
+    lines.push(`- probe error: ${e instanceof Error ? e.message : String(e)}`);
+  }
+  return lines;
+}

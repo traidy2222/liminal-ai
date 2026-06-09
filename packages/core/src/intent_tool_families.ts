@@ -49,12 +49,16 @@ export function inferIntentToolFamilies(
     for (const f of mapped.families) {
       if (has(f)) out.add(f);
     }
-    if (
-      /google|gmail|sheet|spreadsheet|gdoc|drive|calendar|workspace|microsoft|outlook|onedrive|teams|planner|sharepoint|office 365|m365/i.test(
-        trimmed
-      )
-    ) {
-      if (has("connectors")) out.add("connectors");
+    if (/slack|channel message/i.test(trimmed) && has("slack")) out.add("slack");
+    if (/linear|backlog/i.test(trimmed) && has("linear")) out.add("linear");
+    if (/notion/i.test(trimmed) && has("notion")) out.add("notion");
+    if (/xero|accounting invoice/i.test(trimmed) && has("xero")) out.add("xero");
+    if (/github|pull request|merge request/i.test(trimmed) && has("github")) out.add("github");
+    if (/outlook|onedrive|teams|planner|sharepoint|office 365|m365|microsoft/i.test(trimmed)) {
+      if (has("microsoft_365")) out.add("microsoft_365");
+    }
+    if (/google|gmail|sheet|spreadsheet|gdoc|drive|calendar|workspace|docs|slides/i.test(trimmed)) {
+      if (has("google_workspace")) out.add("google_workspace");
     }
     if (messageMentionsAgentcard(trimmed)) {
       if (has("agentcard")) out.add("agentcard");

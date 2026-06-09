@@ -261,7 +261,7 @@ export function createGmailSendTools(): ToolDefinition[] {
     description:
       "WHAT: Create a Gmail draft via REST (users.drafts.create) with full body_html, inline_images, and attachments.\n" +
       "WHEN: User wants to review mail in Gmail before sending — **prefer this over mcp_google_gmail_create_draft** for styled HTML (MCP draft is plain-only).\n" +
-      "STYLE: Call email_style_infer first for industry-native enterprise HTML; then body_html + body here. Plain-only for thread replies.\n" +
+      "STYLE: Neutral professional body_html + body (R-EMAIL-STYLE). email_style_infer only if user named an industry/style this turn. Plain-only for thread replies.\n" +
       "SAFETY: approval-gated — verify recipients before approving.",
     parameters: composeParameters,
     requiresApproval: true,
@@ -296,7 +296,7 @@ export function createGmailSendTools(): ToolDefinition[] {
       "WHAT: Send email immediately via Gmail REST (users.messages.send). Same OAuth as Google Workspace MCP.\n" +
       "WHEN: User explicitly asked to SEND now.\n" +
       "HOW: Prefer mcp_google_gmail_* for search/read/labels; gmail_create_draft for styled drafts; this tool for immediate delivery.\n" +
-      "STYLE: email_style_infer then enterprise-grade body_html + body; plain-only for thread replies.\n" +
+      "STYLE: Neutral professional body_html + body (R-EMAIL-STYLE). email_style_infer only if user named an industry/style this turn. Plain-only for thread replies.\n" +
       "SAFETY: approval-gated — verify recipients; real mail leaves the account on approve.",
     parameters: composeParameters,
     requiresApproval: true,

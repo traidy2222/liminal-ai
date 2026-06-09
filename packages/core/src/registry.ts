@@ -36,10 +36,12 @@ export class ToolRegistry {
   /** Optional tool name -> family id (for inactive-tool error hints). */
   private toolFamilyByName = new Map<string, string>();
 
+  /**
+   * Register a tool. Duplicate names are ignored so harness retry / second
+   * registerAllTools pass does not crash (MCP attach uses unregister+register).
+   */
   register(tool: ToolDefinition): void {
-    if (this.tools.has(tool.name)) {
-      throw new Error(`Tool "${tool.name}" is already registered`);
-    }
+    if (this.tools.has(tool.name)) return;
     this.tools.set(tool.name, tool);
   }
 

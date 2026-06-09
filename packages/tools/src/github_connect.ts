@@ -17,6 +17,7 @@ import {
   type AuthScheme,
 } from "./api_connections_store.js";
 import { attachMcpConnection, unregisterMcpConnection } from "./mcp_attach.js";
+import { integrationNotConnectedError } from "./integration_oauth_start.js";
 
 export const GITHUB_PARENT_PROVIDER = "github";
 export const GITHUB_MCP_CONNECTION_NAME = "github";
@@ -91,9 +92,7 @@ export async function connectGithubMcp(
   if (!resolved) {
     return {
       ok: false,
-      error:
-        "GitHub not connected — open Settings → Integrations → Connect GitHub (hosted sign-in), " +
-        "or set GITHUB_TOKEN in .env for legacy PAT auth.",
+      error: `${integrationNotConnectedError("github")} Legacy alternative: GITHUB_TOKEN in .env.`,
     };
   }
   const token = resolved.auth.kind === "oauth2" ? await getGithubAccessToken(resolved.accountId) : null;

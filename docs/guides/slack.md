@@ -23,9 +23,18 @@ Or: `connect_provider({ provider: "slack" })` after OAuth is on disk.
 | Tool | Purpose |
 | ---- | ------- |
 | `slack_list_channels` | Public/private channels |
+| `slack_list_dms` | Open DM channels |
 | `slack_list_users` | Workspace members |
+| `slack_open_dm` | Open DM with a user (returns channel id) |
 | `slack_get_channel_history` | Recent messages in a channel |
+| `slack_get_thread_replies` | Replies in a thread |
+| `slack_search_messages` | Search workspace messages |
 | `slack_post_message` | Post to a channel (approval required) |
+| `slack_reply_in_thread` | Reply in a thread (approval required) |
+| `slack_add_reaction` | Add emoji reaction (approval required) |
+| `slack_upload_file` | Upload a small text file (approval required) |
+
+With lazy loading: `activate_tool_family({ family: "slack" })`.
 
 Disable with `AGENT_SLACK_REST=0`.
 
@@ -38,5 +47,5 @@ Disable with `AGENT_SLACK_REST=0`.
    https://www.vireondynamics.com/connect/slack/callback
    ```
 
-3. **User Token Scopes** (not bot scopes): `channels:history`, `channels:read`, `groups:history`, `groups:read`, `im:history`, `im:read`, `mpim:history`, `mpim:read`, `users:read`, and `chat:write` for read+write mode.
+3. **User Token Scopes** (not bot scopes): `channels:history`, `channels:read`, `groups:history`, `groups:read`, `im:history`, `im:read`, `mpim:history`, `mpim:read`, `users:read`, `search:read`, and for read+write: `chat:write`, `reactions:write`, `files:write`, `im:write`.
 4. Vercel env: `SLACK_OAUTH_CLIENT_ID`, `SLACK_OAUTH_CLIENT_SECRET`.

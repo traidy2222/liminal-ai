@@ -85,6 +85,51 @@ export const TOOL_FAMILY_DESCRIPTORS: ToolFamilyDescriptor[] = [
     description: "Suggest harness improvements, view insights, self-reflection tools",
     keywords: ["improve", "insight", "reflect", "suggest", "optimize", "self-improve", "harness"],
   },
+  {
+    family: "reasoning",
+    description: "Breakdown decompose reason plan structured thinking",
+    keywords: ["breakdown", "decompose", "reason", "plan", "think step", "infer"],
+  },
+  {
+    family: "context",
+    description: "Context window check compress token limit",
+    keywords: ["context", "compress", "token", "window", "too long"],
+  },
+  {
+    family: "google_workspace",
+    description: "Google Gmail calendar drive docs sheets slides workspace",
+    keywords: ["gmail", "google", "calendar", "drive", "docs", "sheets", "slides", "workspace"],
+  },
+  {
+    family: "microsoft_365",
+    description: "Microsoft Outlook OneDrive Teams Office 365 mail calendar",
+    keywords: ["outlook", "microsoft", "onedrive", "teams", "office 365", "m365", "sharepoint"],
+  },
+  {
+    family: "slack",
+    description: "Slack channels messages team chat",
+    keywords: ["slack", "channel", "dm", "workspace chat"],
+  },
+  {
+    family: "notion",
+    description: "Notion pages databases wiki docs",
+    keywords: ["notion", "wiki", "database", "workspace docs"],
+  },
+  {
+    family: "linear",
+    description: "Linear issues backlog sprint tracking",
+    keywords: ["linear", "issue", "backlog", "sprint"],
+  },
+  {
+    family: "github",
+    description: "GitHub repos issues pull requests code review",
+    keywords: ["github", "pull request", "merge request", "issue", "repository"],
+  },
+  {
+    family: "xero",
+    description: "Xero accounting invoices contacts",
+    keywords: ["xero", "invoice", "accounting", "bookkeeping"],
+  },
 ];
 
 function bm25Score(queryTerms: string[], doc: string[]): number {

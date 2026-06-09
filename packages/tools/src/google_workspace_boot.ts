@@ -5,6 +5,7 @@ import type { ToolRegistry } from "@liminal/core";
 import {
   effectiveHarnessEnvRaw,
   getGoogleAccessToken,
+  getGoogleServicePreset,
   listGoogleOAuthAccounts,
   workspaceMcpToolNamesForServices,
   type GoogleServiceId,
@@ -14,6 +15,9 @@ import { connectGoogleWorkspaceFromServer } from "./connect_provider.js";
 import { ensureGoogleSidecarRunning } from "./google_sidecar.js";
 
 const PARENT = "google_workspace";
+
+/** Core daily-workflow services to auto-attach when OAuth exists but MCP is partial. */
+const CORE_AUTO_ATTACH_SERVICES: GoogleServiceId[] = ["gmail", "calendar"];
 
 export type IntegrationBootstrapOptions = {
   /** When false, skip AGENT_GOOGLE_CONNECT_ON_BOOT auto-attach (use after disconnect / refresh). */
@@ -41,7 +45,22 @@ export async function bootstrapGoogleWorkspace(
   }
 
   const onBoot = effectiveHarnessEnvRaw("AGENT_GOOGLE_CONNECT_ON_BOOT") === "1";
-  if (autoConnect && onBoot && accounts.length > 0 && googleConns.length === 0) {
+  if (!autoConnect || !onBoot || accounts.length === 0) return;
+
+  const attachedNames = new Set(googleConns.map((c) => c.name));
+  if (googleConns.length === 0) {
     await connectGoogleWorkspaceFromServer(registry, { mode: "read_write" });
+    return;
+  }
+
+  const missingCore = CORE_AUTO_ATTACH_SERVICES.filter((sid) => {
+    const preset = getGoogleServicePreset(sid);
+    return preset?.connectionName && !attachedNames.has(preset.connectionName);
+  });
+  if (missingCore.length > 0) {
+    await connectGoogleWorkspaceFromServer(registry, {
+      services: missingCore,
+      mode: "read_write",
+    });
   }
 }

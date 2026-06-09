@@ -239,6 +239,8 @@ Connections persist under `~/.liminal/api_connections/`. OAuth tokens are encryp
 - **Gmail tools / missing scopes**: Confirm `list_connectors` shows `gmail_mcp=yes`; if not, revoke at [Google Account permissions](https://myaccount.google.com/permissions) and run `liminal connect google --attach` again.
 - **OAuth error / no refresh token**: Revoke app access in [Google Account permissions](https://myaccount.google.com/permissions) and reconnect with `prompt=consent`.
 - **Sidecar not ready** (Docs/Sheets): Install [uv](https://docs.astral.sh/uv/), ensure `GOOGLE_OAUTH_CLIENT_ID` is in `.env`, and port `8010` is free (`AGENT_GOOGLE_SIDECAR_PORT`). Liminal sets `WORKSPACE_MCP_PORT` — do **not** pass `--port` to workspace-mcp (unsupported). Test: `set WORKSPACE_MCP_PORT=8010 && uvx workspace-mcp --transport streamable-http --tools docs sheets slides`.
-- **Tools invisible under lazy loading**: Call `list_connectors` or `activate_tool_family("connectors")`; restored Google connections auto-activate by default.
+- **Gmail works, Calendar does not**: Calendar uses a **separate** MCP connection (`google_calendar`) and **calendarmcp.googleapis.com** (not the same as Gmail MCP). Desktop: **Integrations → Attach Calendar**. Agent: `connect_provider({ provider: "google_workspace", services: ["calendar"] })`. `list_connectors` **Live probes** section shows attach + API status for each.
+- **Calendar MCP 403 vs Calendar REST works**: Official MCP (`calendarmcp.googleapis.com`) and classic REST (`calendar.googleapis.com`) are different Cloud APIs — enable both if you use hybrid tools.
+- **Tools invisible under lazy loading**: Call `list_connectors` or `activate_tool_family({ family: "google_workspace" })`; restored Google connections auto-activate by default when `AGENT_INTEGRATION_AUTO_ACTIVATE=1`.
 
 Probe both APIs: `node scripts/lib/google-mcp-probe.mjs` (after `npm run build -w @liminal/core`).

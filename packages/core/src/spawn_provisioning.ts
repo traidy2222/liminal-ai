@@ -18,9 +18,6 @@ export const SPAWN_BASELINE_TOOL_NAMES = [
   "write_file",
   "edit_file",
   "list_dir",
-  "recall_relevant",
-  "web_search",
-  "web_fetch",
   "list_tool_families",
   "activate_tool_family",
 ] as const;

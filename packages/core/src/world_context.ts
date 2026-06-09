@@ -29,6 +29,7 @@ import { notesPaths, pickReadPath } from "./global_storage.js";
 import { formatFailureDigestForWorldContext } from "./failure_digest.js";
 import { formatGoldenEvalHints } from "./golden_eval.js";
 import { formatRecipeLibraryHints } from "./recipe_library.js";
+import { isEmailComposeTurn } from "./email_compose_context.js";
 import { rankNotesForPriming } from "./memory_priming.js";
 import { loadIdentityNotesFromDisk } from "./user_identity_memory.js";
 import {
@@ -1260,10 +1261,12 @@ export async function buildWorldContextMessage(options?: WorldContextOptions): P
       lines.push(sep("Golden eval demos"));
       lines.push(golden);
     }
-    const recipeLib = await withDeadline(formatRecipeLibraryHints(seed), 400);
-    if (recipeLib) {
-      lines.push(sep("Recipe library"));
-      lines.push(recipeLib);
+    if (!isEmailComposeTurn(seed)) {
+      const recipeLib = await withDeadline(formatRecipeLibraryHints(seed), 400);
+      if (recipeLib) {
+        lines.push(sep("Recipe library"));
+        lines.push(recipeLib);
+      }
     }
   }
 

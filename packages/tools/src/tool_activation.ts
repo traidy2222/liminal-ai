@@ -20,12 +20,18 @@ export function createToolDiscoveryTools(registry: ToolRegistry) {
     if (/(price|stock|fx|crypto|commodity|market)/.test(hint)) return "markets";
     if (/(vision|image|screenshot|ocr|diagram)/.test(hint)) return "vision";
     if (/(memory|recall|remember|vault|obsidian|notes)/.test(hint)) return "memory_advanced";
-    if (
-      /(google|gmail|sheet|spreadsheet|drive|calendar|workspace|docs|microsoft|outlook|onedrive|teams|planner|sharepoint|office 365|m365)/.test(
-        hint
-      )
-    )
-      return "connectors";
+    if (/(slack|channel|workspace chat)/.test(hint)) return "slack";
+    if (/(linear|backlog|sprint item)/.test(hint)) return "linear";
+    if (/(notion|wiki page|notion database)/.test(hint)) return "notion";
+    if (/(xero|invoice|accounting)/.test(hint)) return "xero";
+    if (/(github|pull request|merge request|repo issue)/.test(hint)) return "github";
+    if (/(outlook|onedrive|teams|planner|sharepoint|office 365|m365|microsoft)/.test(hint)) {
+      return "microsoft_365";
+    }
+    if (/(google|gmail|sheet|spreadsheet|drive|calendar|workspace|gdoc|docs|slides)/.test(hint)) {
+      return "google_workspace";
+    }
+    if (/(connect|integration|oauth)/.test(hint)) return "connectors";
     if (/(powerpoint|pptx|ppx|slides|docx|pdf|document)/.test(hint)) return "document";
     if (/(code|symbol|reference|lint|execute code|ast)/.test(hint)) return "code_intel";
     if (/(browser|playwright|chromium|frontend|ui test|web page|screenshot)/.test(hint))
@@ -118,9 +124,14 @@ export function createToolDiscoveryTools(registry: ToolRegistry) {
       const family = String(args["family"] ?? "").trim().toLowerCase();
       if (!family) return { ok: false, error: "family is required" };
       const def = TOOL_FAMILIES[family];
-      if (!def) {
+      const knownStatic = family in TOOL_FAMILIES;
+      const isDynamicConnector = family.startsWith("connector:");
+      if (!knownStatic && !isDynamicConnector) {
         const ids = Object.keys(TOOL_FAMILIES).sort().join(", ");
-        return { ok: false, error: `Unknown family "${family}". Known: ${ids}` };
+        return {
+          ok: false,
+          error: `Unknown family "${family}". Known static families: ${ids}. Custom MCP: connector:<name>.`,
+        };
       }
       if (ENTITLEMENT_GATED_FAMILIES[family]) {
         const entitlements = await loadHarnessEntitlements();
@@ -131,11 +142,21 @@ export function createToolDiscoveryTools(registry: ToolRegistry) {
           };
         }
       }
-      const toActivate = def.tools.filter((t) => registry.has(t));
-      if (toActivate.length === 0) {
-        return { ok: false, error: `Family "${family}" has no tools registered in this harness.` };
+      let newly = registry.activateFamilies([family]);
+      if (knownStatic && def?.tools.length) {
+        const fromCatalog = registry.activate(def.tools.filter((t) => registry.has(t)));
+        newly = [...new Set([...newly, ...fromCatalog])];
       }
-      const newly = registry.activate(toActivate);
+      if (newly.length === 0) {
+        const hint =
+          family === "github"
+            ? ' Connect GitHub first (connect_provider start_oauth), then activate family "github".'
+            : "";
+        return {
+          ok: false,
+          error: `Family "${family}" has no tools registered in this harness.${hint}`,
+        };
+      }
       const browserHint =
         family === "browser"
           ? "\nBrowser loop: browser_open → browser_snapshot/browser_act(click_ref) → browser_close (or close_all:true)."

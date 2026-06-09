@@ -67,7 +67,9 @@ avoid: concrete anti-patterns for this brief (cheap gradients, emoji walls, cent
 
 novelty_note: ≤120 chars — one distinctive visual idea so this email cannot be mistaken for a template.
 
-Do NOT output email copy. Style direction only.`;
+Do NOT output email copy. Style direction only.
+
+Never invent an industry or vertical from background context — only INDUSTRY/TONE/VISUAL_HINT lines explicitly grounded in PURPOSE. When industry is omitted, use neutral professional B2B tech register.`;
 
 function normalizeTier(raw: unknown): EmailStyleTier {
   const t = String(raw ?? "polished").trim().toLowerCase();

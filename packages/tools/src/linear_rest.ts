@@ -4,6 +4,7 @@
 import type { ToolRegistry, ToolResult } from "@liminal/core";
 import { effectiveHarnessEnvRaw, getLinearAccessToken, listLinearOAuthAccounts } from "@liminal/core";
 import { defineTool } from "./helpers.js";
+import { integrationNotConnectedError } from "./integration_oauth_start.js";
 
 const LINEAR_GRAPHQL = "https://api.linear.app/graphql";
 
@@ -33,8 +34,7 @@ async function linearGraphql(
   if (!token) {
     return {
       ok: false,
-      error:
-        "Linear not connected — Settings → Integrations → Connect Linear (hosted sign-in, no .env setup).",
+      error: integrationNotConnectedError("linear"),
     };
   }
   const res = await fetch(LINEAR_GRAPHQL, {

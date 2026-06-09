@@ -11,6 +11,7 @@ import {
   type OAuthTokenBundle,
 } from "@liminal/core";
 import { defineTool } from "./helpers.js";
+import { integrationNotConnectedError } from "./integration_oauth_start.js";
 
 const XERO_API = "https://api.xero.com/api.xro/2.0";
 
@@ -52,7 +53,7 @@ async function xeroFetch(
     return {
       ok: false,
       error:
-        "Xero not connected — Settings → Integrations → Connect Xero, or connect_provider({ provider: \"xero\" }).",
+        integrationNotConnectedError("xero"),
     };
   }
   const tenantId = resolveXeroTenantId(auth.bundle, opts.tenantId);
@@ -112,7 +113,7 @@ export function registerXeroRestTools(registry: ToolRegistry): void {
         const auth = await resolveXeroAuth(
           typeof args["account_hint"] === "string" ? args["account_hint"] : undefined
         );
-        if (!auth) return { ok: false, error: "Xero not connected" };
+        if (!auth) return { ok: false, error: integrationNotConnectedError("xero") };
         const meta = auth.bundle.metadata as { tenants?: unknown[] } | undefined;
         return { ok: true, output: jsonOutput(meta?.tenants ?? []) };
       },

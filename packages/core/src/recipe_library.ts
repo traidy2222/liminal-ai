@@ -20,6 +20,7 @@ import {
   recipeStatsPaths,
 } from "./global_storage.js";
 import { effectiveHarnessEnvRaw } from "./harness_effective_env.js";
+import { isEmailComposeTurn } from "./email_compose_context.js";
 
 /** A turn must score at least this (scoreTurnOutcome, 0–1) to become a recipe. */
 const RECIPE_OUTCOME_FLOOR = 0.6;
@@ -227,6 +228,7 @@ export async function formatRecipeLibraryHints(
   intentClass?: string
 ): Promise<string | null> {
   if (effectiveHarnessEnvRaw("AGENT_RECIPE_LIBRARY") === "0") return null;
+  if (isEmailComposeTurn(seed)) return null;
   const file = await loadFile();
   const all = Object.values(file.recipes ?? {});
   if (all.length === 0) return null;

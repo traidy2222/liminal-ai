@@ -284,6 +284,8 @@ class _IntegrationsScreenState extends State<IntegrationsScreen> {
                     }
                   }),
                   onReattach: () => host.connectGoogleWorkspace(services: services, mode: _googleMode),
+                  onAttachCalendar: () =>
+                      host.connectGoogleWorkspace(services: ['calendar'], mode: _googleMode),
                   onRevoke: () => host.disconnectGoogle(revoke: true),
                 ),
                         ),
@@ -803,6 +805,7 @@ class _GoogleDetails extends StatelessWidget {
     required this.onMode,
     required this.onToggleService,
     required this.onReattach,
+    required this.onAttachCalendar,
     required this.onRevoke,
   });
 
@@ -814,6 +817,7 @@ class _GoogleDetails extends StatelessWidget {
   final ValueChanged<String> onMode;
   final ValueChanged<String> onToggleService;
   final Future<bool> Function() onReattach;
+  final Future<bool> Function() onAttachCalendar;
   final Future<bool> Function() onRevoke;
 
   @override
@@ -858,9 +862,24 @@ class _GoogleDetails extends StatelessWidget {
           ),
         ],
         const SizedBox(height: 8),
+        if (snap.google.accounts.isNotEmpty &&
+            !snap.googleCalendarAttached) ...[
+          const SizedBox(height: 4),
+          Text(
+            'Gmail may work while Calendar MCP is not attached — enable Calendar separately.',
+            style: TextStyle(color: lim.warn.withValues(alpha: 0.9), fontSize: 11, height: 1.35),
+          ),
+        ],
+        const SizedBox(height: 8),
         Wrap(
           spacing: 8,
+          runSpacing: 8,
           children: [
+            if (snap.google.accounts.isNotEmpty && !snap.googleCalendarAttached)
+              FilledButton.tonal(
+                onPressed: disabled ? null : () => onAttachCalendar(),
+                child: const Text('Attach Calendar'),
+              ),
             OutlinedButton(
               onPressed: disabled || snap.google.accounts.isEmpty ? null : () => onReattach(),
               child: const Text('Re-attach tools'),

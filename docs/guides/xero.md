@@ -26,7 +26,7 @@ Or ask the agent: `connect_provider({ provider: "xero" })` after OAuth is on dis
 | `xero_list_contacts` | Customers/suppliers |
 | `xero_create_invoice` | Create ACCREC draft invoice (approval required) |
 
-Activate the **connectors** family if lazy loading is on: `activate_tool_family({ family: "connectors" })`.
+Activate the **xero** family if lazy loading is on: `activate_tool_family({ family: "xero" })`.
 
 Disable REST tools with `AGENT_XERO_REST=0`.
 

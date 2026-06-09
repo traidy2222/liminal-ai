@@ -69,6 +69,7 @@ import {
   resolveSpawnAppHtmlStreamSinkEnabled,
 } from "./spawn_app_html_stream_sink.js";
 import { formatRecipeLibraryHints, recordRecipe } from "./recipe_library.js";
+import { EMAIL_COMPOSE_TURN_INJECTION, isEmailComposeTurn } from "./email_compose_context.js";
 import { addCompressionGuideline, formatCompressionGuidelines } from "./compression_guidelines.js";
 import { bumpRuleHits, getRuleHitCounts, extractRuleIds, recordRuleOutcomes, getDemotedRuleIds } from "./rule_stats.js";
 import { readYieldSnapshot, writeYieldSnapshot } from "./session_event_log.js";
@@ -2760,9 +2761,13 @@ export class AgentHarness {
           }
         }
       }
+      if (!openingTurn && isEmailComposeTurn(userMessage)) {
+        this.context.appendMessage({ role: "system", content: EMAIL_COMPOSE_TURN_INJECTION });
+      }
       // Per-turn recipe hint (complements world-context recipe block on first send).
       if (
         !openingTurn &&
+        !isEmailComposeTurn(userMessage) &&
         resolveHarnessEnvRaw("AGENT_RECIPE_LIBRARY", this.runtimePreferences) !== "0" &&
         this.turnInference?.intent
       ) {

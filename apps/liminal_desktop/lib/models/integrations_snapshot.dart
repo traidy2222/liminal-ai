@@ -90,6 +90,11 @@ class IntegrationsSnapshot {
 
   bool get googleConnected => googleMcp.isNotEmpty;
 
+  bool get googleCalendarAttached =>
+      googleMcp.any((c) => c.name == 'google_calendar');
+
+  bool get googleGmailAttached => googleMcp.any((c) => c.name == 'google_gmail');
+
   bool get microsoftConnected => microsoftMcp.isNotEmpty;
 
   bool get githubConnected => githubMcp.isNotEmpty;

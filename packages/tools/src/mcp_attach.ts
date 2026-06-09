@@ -96,7 +96,10 @@ interface McpToolCallResult {
   isError?: boolean;
 }
 
-export async function mcpHandshakeAndListTools(serverUrl: string, auth: AuthScheme): Promise<McpToolRecord[]> {
+export async function mcpHandshakeAndListTools(
+  serverUrl: string,
+  auth: AuthScheme
+): Promise<McpToolRecord[]> {
   await postJsonRpc<{ protocolVersion?: string }>(
     serverUrl,
     {
@@ -156,7 +159,7 @@ const MCP_HOST_TO_SERVICE: Array<{ host: string; service: GoogleServiceId }> = [
   { host: "chatmcp.googleapis.com", service: "chat" },
 ];
 
-function enrichGoogleMcpToolError(serverUrl: string, message: string): string {
+export function enrichGoogleMcpProbeError(serverUrl: string, message: string): string {
   if (!/MCP API has not been used|is disabled/i.test(message)) return message;
   let host = "";
   try {
@@ -199,7 +202,7 @@ function buildMcpToolHandler(record: McpConnectionRecord, tool: McpToolRecord): 
       );
     } catch (e) {
       const raw = e instanceof Error ? e.message : String(e);
-      return { ok: false, error: enrichGoogleMcpToolError(record.serverUrl, `transport error: ${raw}`) };
+      return { ok: false, error: enrichGoogleMcpProbeError(record.serverUrl, `transport error: ${raw}`) };
     }
     if (!reply) return { ok: false, error: "no response" };
     if (reply.error) return { ok: false, error: `MCP error ${reply.error.code}: ${reply.error.message}` };
@@ -209,7 +212,7 @@ function buildMcpToolHandler(record: McpConnectionRecord, tool: McpToolRecord): 
       .filter(Boolean);
     const text = parts.join("\n").trim() || "[empty MCP response]";
     if (result.isError) {
-      return { ok: false, error: enrichGoogleMcpToolError(record.serverUrl, text) };
+      return { ok: false, error: enrichGoogleMcpProbeError(record.serverUrl, text) };
     }
     return { ok: true, output: text };
   };
@@ -261,7 +264,7 @@ export function registerMcpConnection(registry: ToolRegistry, record: McpConnect
     registry.register(buildMcpTool(record, t));
     registered.push(t.toolName);
   }
-  registerConnectorToolFamilies(registry, record.name, registered);
+  registerConnectorToolFamilies(registry, record.name, registered, record.parentProvider);
   return registered;
 }
 
@@ -317,7 +320,7 @@ function parseAuthArg(auth: unknown): AuthScheme {
 
 /**
  * Under AGENT_TOOL_LAZY=1, MCP integrations register tools but stay off the model API
- * until activate_tool_family("connectors") or connector:<name>. Set
+ * until activate_tool_family("<integration>") e.g. google_workspace, github, slack, or connector:<name> for custom MCP. Set
  * AGENT_INTEGRATION_AUTO_ACTIVATE=1 to restore eager activation (old behavior).
  */
 export function resolveMcpAutoActivate(
@@ -361,7 +364,13 @@ export async function attachMcpConnection(
   }
 
   const auth = opts.auth ?? { kind: "none" };
-  let tools = await mcpHandshakeAndListTools(opts.url, auth);
+  let tools: McpToolRecord[];
+  try {
+    tools = await mcpHandshakeAndListTools(opts.url, auth);
+  } catch (e) {
+    const raw = e instanceof Error ? e.message : String(e);
+    throw new Error(enrichGoogleMcpProbeError(opts.url, raw));
+  }
   tools = filterMcpToolRecords(tools, {
     readOnly: opts.readOnly,
     toolFilter: opts.toolFilter,

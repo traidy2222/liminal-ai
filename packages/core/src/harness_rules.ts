@@ -66,7 +66,9 @@ export const HARNESS_RULES: Record<string, string> = {
   "R-VAULT-ENTITIES":
     "Entity brain: one canonical proper name = one vault dossier (## Identity / ## Current / ## History / ## Relationships). Many [[wikilinks]] under ## Relationships is correct. Batch writes: parallel vault_write calls (title=OpenAI, title=Sam Altman, …) OR one vault_ingest_entities on combined research text. Event+cast: separate note per party; hub note (type:note) links only. Avoid ## Participants sections with full bios in one file — put each bio in its own titled dossier.",
   "R-RECIPE-REUSE":
-    "When a [KNOWN RECIPE] or [DEFAULT PLAN] block appears in world context, a tool-phase sequence has worked repeatedly for similar goals — adopt it as the plan skeleton unless the task clearly differs. [DEFAULT PLAN] = high reuse + high outcome, established play; deviation needs a stated reason. [KNOWN RECIPE] = early evidence, lean toward it but assess fit.",
+    "When a [KNOWN RECIPE] or [DEFAULT PLAN] block appears in world context, a tool-phase sequence has worked repeatedly for similar goals — adopt it as the plan skeleton unless the task clearly differs. [DEFAULT PLAN] = high reuse + high outcome, established play; deviation needs a stated reason. [KNOWN RECIPE] = early evidence, lean toward it but assess fit. Recipes never set email industry, tone, visual style, or recipient framing — tool order only.",
+  "R-EMAIL-CONTEXT":
+    "Outbound email subject/body/register: use only what the user asked this turn plus signer facts from memory when needed. Never infer industry or vertical style from recipes, recalled job titles, persona, vault, or prior sessions. Skip email_style_infer unless the user named an industry or visual style; default to neutral professional HTML about the stated topic.",
 
   // ── Output ──────────────────────────────────────────────────────────────────
   "R-OUTPUT-QUALITY":

@@ -522,6 +522,18 @@ export class ContextManager {
     return out;
   }
 
+  /** Returns the latest real user message (skips harness-injected […] lines). */
+  getLastUserMessage(): string | null {
+    for (let i = this.conversation.length - 1; i >= 0; i--) {
+      const m = this.conversation[i]!;
+      if (m.role !== "user" || typeof m.content !== "string") continue;
+      const t = m.content.trim();
+      if (!t || t.startsWith("[")) continue;
+      return m.content;
+    }
+    return null;
+  }
+
   /** Returns the last assistant text message (for subtask result extraction). */
   getLastAssistantMessage(): string | null {
     for (let i = this.conversation.length - 1; i >= 0; i--) {

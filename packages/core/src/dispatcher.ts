@@ -7,6 +7,7 @@ import { coerceArgsToSchema, coerceJsonArrayValue } from "./tool_arg_coerce.js";
 import type { SafetyJudge } from "./safety_judge.js";
 import { stableArgsJsonKey } from "./json_stable.js";
 import { effectiveHarnessEnvRaw } from "./harness_effective_env.js";
+import { LAZY_AUTO_ACTIVATE_TOOL_ONLY } from "./tool_lazy_constants.js";
 import { resolveWorkspaceRoot } from "./workspace_root.js";
 
 function autoApproveToolSet(): Set<string> {
@@ -297,9 +298,10 @@ export class ToolDispatcher {
       // the tool's family transparently and fall through to normal dispatch —
       // schema validation below still catches any guessed args.
       const fam = this.registry.getSuggestedFamilyForTool(name);
-      const newly = fam
-        ? this.registry.activateFamilies([fam])
-        : this.registry.activate([name]);
+      const newly =
+        fam && !LAZY_AUTO_ACTIVATE_TOOL_ONLY.has(name)
+          ? this.registry.activateFamilies([fam])
+          : this.registry.activate([name]);
       this.emitter.emit("text", {
         delta:
           `[TOOL_AUTO_ACTIVATE] "${name}" was inactive — activated ` +

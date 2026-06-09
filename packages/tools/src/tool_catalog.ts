@@ -7,6 +7,15 @@ import { effectiveHarnessEnvRaw, resolveHarnessEnvRaw } from "@liminal/core";
 
 /** Tool families: id -> description + member tool names. */
 export const TOOL_FAMILIES: Record<string, { description: string; tools: readonly string[] }> = {
+  reasoning: {
+    description:
+      "Structured planning helpers — decomposition (breakdown), quick between-step inference (reason), explicit multi-step plans (plan). think() stays always loaded.",
+    tools: ["breakdown", "reason", "plan"],
+  },
+  context: {
+    description: "Context window inspection and compression (harness sessions).",
+    tools: ["check_context", "compress_context"],
+  },
   files_edit: {
     description: "Filesystem operations and rollback-safe multi-file apply.",
     tools: [
@@ -45,6 +54,7 @@ export const TOOL_FAMILIES: Record<string, { description: string; tools: readonl
       "Typed memory CRUD, consolidation, graph, artifacts, plus cross-chat federation (Phase 2): " +
       "scope-aware writes, sibling-chat aware retrieval, semantic neighbor search, and on-demand consolidation.",
     tools: [
+      "recall_relevant",
       "remember",
       "recall",
       "recall_type",
@@ -136,15 +146,17 @@ export const TOOL_FAMILIES: Record<string, { description: string; tools: readonl
   },
   connectors: {
     description:
-      "Curated provider integrations: Google Workspace (OAuth) and GitHub (GITHUB_TOKEN) via connect_provider. " +
-      "Google & Xero: hosted OAuth via vireondynamics.com (Settings → Integrations). GitHub: PAT in .env.",
+      "Integration control plane — connect/disconnect hosted OAuth (connect_provider) and list status (list_connectors). " +
+      "Activate a specific integration family for that provider's tools (google_workspace, slack, notion, …).",
+    tools: ["connect_provider", "disconnect_provider", "list_connectors"],
+  },
+  google_workspace: {
+    description:
+      "Google Workspace REST — Gmail send/draft, Calendar, Docs/Sheets/Slides. Pair with mcp_google_* / mcp_google_ext_* when MCP is attached.",
     tools: [
-      "connect_provider",
-      "disconnect_provider",
-      "list_connectors",
-      "email_style_infer",
       "gmail_create_draft",
       "gmail_send_message",
+      "email_style_infer",
       "calendar_rest_get_calendar",
       "calendar_rest_list_calendars",
       "calendar_rest_list_settings",
@@ -170,16 +182,6 @@ export const TOOL_FAMILIES: Record<string, { description: string; tools: readonl
       "calendar_rest_move_event",
       "calendar_rest_import_event",
       "calendar_rest_respond_to_event",
-      "outlook_send_message",
-      "outlook_create_draft",
-      "outlook_calendar_rest_list_events",
-      "outlook_calendar_rest_create_event",
-      "outlook_calendar_rest_find_meeting_times",
-      "outlook_calendar_rest_get_schedule",
-      "onedrive_rest_list_children",
-      "onedrive_rest_upload_file",
-      "onedrive_rest_download_file",
-      "onedrive_rest_create_share_link",
       "docs_rest_get_document",
       "docs_rest_extract_text",
       "docs_rest_create_document",
@@ -206,21 +208,84 @@ export const TOOL_FAMILIES: Record<string, { description: string; tools: readonl
       "slides_rest_batch_update",
       "slides_rest_get_page",
       "slides_rest_get_thumbnail",
+    ],
+  },
+  microsoft_365: {
+    description:
+      "Microsoft 365 REST — Outlook, Teams, SharePoint, Planner, To Do, OneNote, Excel, Graph search. Pair with mcp_microsoft_* when Graph MCP sidecar is attached.",
+    tools: [
+      "outlook_send_message",
+      "outlook_create_draft",
+      "email_style_infer",
+      "outlook_calendar_rest_list_events",
+      "outlook_calendar_rest_create_event",
+      "outlook_calendar_rest_find_meeting_times",
+      "outlook_calendar_rest_get_schedule",
+      "onedrive_rest_list_children",
+      "onedrive_rest_upload_file",
+      "onedrive_rest_download_file",
+      "onedrive_rest_create_share_link",
       "office_rest_export_file",
+      "office_rest_export_pdf",
+      "office_rest_upload_file",
+      "excel_rest_read_range",
+      "excel_rest_update_range",
+      "graph_search_rest_query",
+      "onenote_rest_create_page",
+      "onenote_rest_list_notebooks",
+      "planner_rest_create_task",
+      "planner_rest_list_my_plans",
+      "sharepoint_rest_list_followed_sites",
+      "teams_rest_list_joined_teams",
+      "teams_rest_post_channel_message",
+      "todo_rest_create_task",
+      "todo_rest_list_lists",
+    ],
+  },
+  github: {
+    description:
+      "GitHub via MCP — repos, issues, PRs, search (mcp_github_* after connect_provider). No REST tools; MCP registers dynamically.",
+    tools: [],
+  },
+  xero: {
+    description: "Xero accounting REST — organisations, invoices, contacts (hosted OAuth).",
+    tools: [
       "xero_list_organisations",
       "xero_list_invoices",
       "xero_get_invoice",
       "xero_list_contacts",
       "xero_create_invoice",
+    ],
+  },
+  slack: {
+    description: "Slack workspace REST — channels, users, message history, post message.",
+    tools: [
       "slack_list_channels",
       "slack_list_users",
+      "slack_list_dms",
       "slack_get_channel_history",
+      "slack_get_thread_replies",
+      "slack_search_messages",
+      "slack_open_dm",
       "slack_post_message",
+      "slack_reply_in_thread",
+      "slack_add_reaction",
+      "slack_upload_file",
+    ],
+  },
+  linear: {
+    description: "Linear REST — teams, issues, create issue, comments.",
+    tools: [
       "linear_list_teams",
       "linear_list_issues",
       "linear_get_issue",
       "linear_create_issue",
       "linear_add_comment",
+    ],
+  },
+  notion: {
+    description: "Notion REST — search, pages, databases, blocks (hosted OAuth).",
+    tools: [
       "notion_search",
       "notion_get_page",
       "notion_list_block_children",
@@ -380,16 +445,46 @@ export interface FamilyActivitySummary {
   total: number;
 }
 
+/** Listed in multiple integration families; omitted from tool→family map (see LAZY_AUTO_ACTIVATE_TOOL_ONLY). */
+export const TOOLS_LISTED_IN_MULTIPLE_FAMILIES = new Set<string>(["email_style_infer"]);
+
+/** Human-readable description for a family id (static catalog + dynamic MCP connections). */
+export function describeToolFamily(family: string): string {
+  const def = TOOL_FAMILIES[family];
+  if (def?.description) return def.description;
+  if (family.startsWith("connector:")) {
+    return `Custom MCP connection (${family.slice("connector:".length)})`;
+  }
+  return `Tool family ${family}`;
+}
+
 /** Shared family activity summarizer for lazy-loading status views. */
 export function summarizeFamilyActivity(registry: ToolRegistry): FamilyActivitySummary[] {
   const active = new Set(registry.getActiveToolNames());
-  const out: FamilyActivitySummary[] = [];
+  const byFamily = new Map<string, string[]>();
+
+  for (const [tool, family] of registry.cloneToolFamilyMap()) {
+    if (!registry.has(tool)) continue;
+    const list = byFamily.get(family) ?? [];
+    if (!list.includes(tool)) list.push(tool);
+    byFamily.set(family, list);
+  }
+
   for (const [family, def] of Object.entries(TOOL_FAMILIES)) {
-    const present = def.tools.filter((t) => registry.has(t));
+    for (const tool of def.tools) {
+      if (!registry.has(tool)) continue;
+      const list = byFamily.get(family) ?? [];
+      if (!list.includes(tool)) list.push(tool);
+      byFamily.set(family, list);
+    }
+  }
+
+  const out: FamilyActivitySummary[] = [];
+  for (const [family, present] of byFamily) {
     if (present.length === 0) continue;
     out.push({
       family,
-      description: def.description,
+      description: describeToolFamily(family),
       active: present.filter((t) => active.has(t)).length,
       total: present.length,
     });
@@ -399,27 +494,19 @@ export function summarizeFamilyActivity(registry: ToolRegistry): FamilyActivityS
 
 /** Tools always exposed to the model when AGENT_TOOL_LAZY=1 (minimal surface). */
 export const CORE_ALWAYS_TOOLS_BASE: readonly string[] = [
-  // Reasoning
+  // Single planning entry — declares tool_families[] for pre-activation
   "think",
-  "breakdown",
-  "reason",
-  "plan",
-  // File surface — read + write essentials only
+  // File surface — read + write essentials (coding agent cannot function without these)
   "read_file",
   "grep_file",
   "write_file",
   "edit_file",
   "list_dir",
-  // Memory — primary retrieval only; write via balanced profile seed
-  "recall_relevant",
   // User interaction
   "ask_user",
   // Lazy loading management — always needed to activate anything else
   "list_tool_families",
   "activate_tool_family",
-  // Web — read-only, needed in nearly every general task
-  "web_search",
-  "web_fetch",
 ];
 
 /** Env-selected always-loaded profile used when AGENT_TOOL_LAZY=1. */
@@ -427,10 +514,8 @@ const ALWAYS_TOOLS_PROFILE_ENV = "AGENT_ALWAYS_TOOLS_PROFILE";
 const ALWAYS_TOOLS_PROFILES = ["balanced", "knowledge_first", "max_autonomy"] as const;
 type AlwaysToolsProfile = (typeof ALWAYS_TOOLS_PROFILES)[number];
 
-// Balanced profile seeds only `remember` — everything else is activation-only.
-const BALANCED_MEMORY_RELIABILITY_TOOLS = TOOL_FAMILIES.memory_advanced.tools.filter((t) =>
-  ["remember"].includes(t)
-);
+// Balanced profile: no extra seeds — activate memory_advanced / web / reasoning on demand.
+const BALANCED_MEMORY_RELIABILITY_TOOLS: readonly string[] = [];
 const BALANCED_VAULT_RELIABILITY_TOOLS: readonly string[] = [];
 
 const KNOWLEDGE_FIRST_TOOLS = [...TOOL_FAMILIES.memory_advanced.tools, ...TOOL_FAMILIES.vault.tools];
@@ -467,13 +552,8 @@ function getProfileSeedTools(profile: AlwaysToolsProfile): readonly string[] {
   return [...BALANCED_MEMORY_RELIABILITY_TOOLS, ...BALANCED_VAULT_RELIABILITY_TOOLS];
 }
 
-/** Context tools only exist after registerAllTools(..., harness). */
-export const CORE_HARNESS_TOOLS: readonly string[] = [
-  "check_context",
-  "compress_context",
-  "share_agent_context",
-  "read_agent_context",
-];
+/** Harness-only always tools (orchestration context tools live in orchestration family). */
+export const CORE_HARNESS_TOOLS: readonly string[] = ["check_context"];
 
 function browserAlwaysActiveTools(): readonly string[] {
   if (effectiveHarnessEnvRaw("AGENT_BROWSER_ALWAYS_ACTIVE") !== "1") return [];
@@ -505,6 +585,7 @@ export function buildToolToFamilyMap(): Map<string, string> {
   const m = new Map<string, string>();
   for (const [familyId, def] of Object.entries(TOOL_FAMILIES)) {
     for (const t of def.tools) {
+      if (TOOLS_LISTED_IN_MULTIPLE_FAMILIES.has(t)) continue;
       if (!m.has(t)) m.set(t, familyId);
     }
   }

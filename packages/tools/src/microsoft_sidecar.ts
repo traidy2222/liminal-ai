@@ -6,6 +6,7 @@ import { readFile, writeFile, unlink, mkdir } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import path from "node:path";
 import { globalPath, ensureGlobalStorageRoot, effectiveHarnessEnvRaw } from "@liminal/core";
+import { integrationNotConnectedError } from "./integration_oauth_start.js";
 
 const SIDECAR_STATE_SEG = "sidecars/microsoft_365.json";
 
@@ -205,8 +206,8 @@ export async function ensureMicrosoftSidecarRunning(
       ok: false,
       url,
       error:
-        "Microsoft OAuth not connected — connect via Settings → Integrations (hosted sign-in). " +
-        "Legacy: set MICROSOFT_OAUTH_CLIENT_ID in .env for ms-365-mcp-server.",
+        integrationNotConnectedError("microsoft_365") +
+        " Legacy: set MICROSOFT_OAUTH_CLIENT_ID in .env for ms-365-mcp-server.",
     };
   }
 

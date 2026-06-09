@@ -16,7 +16,11 @@ import path from "node:path";
 import { mkdtempSync } from "node:fs";
 import { AgentHarness } from "@liminal/core";
 import { registerAllTools } from "./index.js";
-import { TOOL_FAMILIES, getCoreAlwaysToolNames } from "./tool_catalog.js";
+import {
+  TOOL_FAMILIES,
+  TOOLS_LISTED_IN_MULTIPLE_FAMILIES,
+  getCoreAlwaysToolNames,
+} from "./tool_catalog.js";
 
 // Isolate global storage so no persisted dynamic tools / API / MCP connections
 // from the developer's ~/.liminal leak in and make this test machine-dependent.
@@ -52,6 +56,7 @@ test("no tool is listed in more than one family", () => {
   const dupes: string[] = [];
   for (const [family, def] of Object.entries(TOOL_FAMILIES)) {
     for (const tool of def.tools) {
+      if (TOOLS_LISTED_IN_MULTIPLE_FAMILIES.has(tool)) continue;
       const prev = seen.get(tool);
       if (prev) dupes.push(`${tool} (in ${prev} and ${family})`);
       else seen.set(tool, family);
@@ -114,4 +119,12 @@ test("new file tools are registered and reachable", async () => {
   for (const name of ["delete_file", "find_files"]) {
     assert.ok(harness.registry.has(name), `${name} should be registered`);
   }
+});
+
+test("registerAllTools is idempotent on harness retry", async () => {
+  const harness = buildHarness();
+  await registerAllTools(harness.registry, harness.emitter, harness);
+  await registerAllTools(harness.registry, harness.emitter, harness);
+  assert.ok(harness.registry.has("calendar_rest_list_events"));
+  assert.ok(harness.registry.has("slack_search_messages"));
 });
