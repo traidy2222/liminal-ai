@@ -13,6 +13,7 @@ import {
   runNotionHostedConnectFlow,
   missingDefaultWorkspaceScopes,
   missingDefaultMicrosoftScopes,
+  missingSlackScopes,
   runGoogleHostedConnectFlow,
   runGithubHostedConnectFlow,
   runMicrosoftHostedConnectFlow,
@@ -92,6 +93,7 @@ export async function buildIntegrationsSnapshot() {
         expiresAt: a.expiresAt,
         teamId: a.teamId,
         teamName: a.teamName,
+        missingScopes: missingSlackScopes(a.scopes),
       })),
     },
     linear: {

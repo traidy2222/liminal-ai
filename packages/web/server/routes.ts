@@ -39,6 +39,8 @@ import {
   listGithubOAuthAccounts,
   listXeroOAuthAccounts,
   listSlackOAuthAccounts,
+  missingSlackScopes,
+  slackHostedConnectExtra,
   listLinearOAuthAccounts,
   listNotionOAuthAccounts,
   buildHostedIntegrationConnectUrl,
@@ -564,6 +566,7 @@ export function createRouter(
             expiresAt: a.expiresAt,
             teamId: a.teamId,
             teamName: a.teamName,
+            missingScopes: missingSlackScopes(a.scopes),
           })),
         },
         linear: {
@@ -842,6 +845,7 @@ export function createRouter(
       harnessState: state,
       siteOrigin: site,
       mode,
+      extra: slackHostedConnectExtra(mode),
     });
     res.json({ connectUrl, authUrl: connectUrl, state });
   });

@@ -1,5 +1,5 @@
 import { runHostedIntegrationConnectFlow } from "./hosted_oauth_connect.js";
-import type { SlackMode } from "./slack_oauth_scopes.js";
+import { SLACK_DEFAULT_MODE, slackHostedConnectExtra, type SlackMode } from "./slack_oauth_scopes.js";
 
 export type SlackConnectResult = {
   accountId: string;
@@ -19,10 +19,12 @@ export interface RunSlackHostedConnectOptions {
 export function runSlackHostedConnectFlow(
   options: RunSlackHostedConnectOptions = {}
 ): Promise<SlackConnectResult> {
+  const mode = options.mode ?? SLACK_DEFAULT_MODE;
   return runHostedIntegrationConnectFlow({
     provider: "slack",
     siteOrigin: options.siteOrigin,
-    mode: options.mode ?? "read_write",
+    mode,
+    extra: slackHostedConnectExtra(mode),
     openBrowser: options.openBrowser,
     onStatus: options.onStatus,
     timeoutMs: options.timeoutMs,

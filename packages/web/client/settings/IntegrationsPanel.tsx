@@ -921,6 +921,9 @@ export function IntegrationsPanel({ agentBusy }: IntegrationsPanelProps) {
         {slackAccounts.map((a) => (
           <div key={a.accountId} style={{ fontSize: 11, fontFamily: "monospace", color: GREEN, marginBottom: 6 }}>
             {a.teamName ?? a.email ?? a.accountId} — {a.scopes.length} scopes
+            {(a.missingScopes?.length ?? 0) > 0 ? (
+              <span style={{ color: AMBER }}> · missing scopes — disconnect & reconnect below</span>
+            ) : null}
           </div>
         ))}
         <div style={{ marginBottom: 8 }}>

@@ -47,5 +47,12 @@ Disable with `AGENT_SLACK_REST=0`.
    https://www.vireondynamics.com/connect/slack/callback
    ```
 
-3. **User Token Scopes** (not bot scopes): `channels:history`, `channels:read`, `groups:history`, `groups:read`, `im:history`, `im:read`, `mpim:history`, `mpim:read`, `users:read`, `search:read`, and for read+write: `chat:write`, `reactions:write`, `files:write`, `im:write`.
+3. **User Token Scopes** (not bot scopes) — harness requests these explicitly via `scopes=` on the connect URL:
+
+   **Read:** `channels:history`, `channels:read`, `groups:history`, `groups:read`, `im:history`, `im:read`, `mpim:history`, `mpim:read`, `users:read`, `search:read`
+
+   **Write (read+write mode):** `chat:write`, `reactions:write`, `files:write:user`, `im:write`, `channels:write`, `groups:write`, `mpim:write`
+
 4. Vercel env: `SLACK_OAUTH_CLIENT_ID`, `SLACK_OAUTH_CLIENT_SECRET`.
+
+5. **Vireon `/connect/slack` handler** must pass the `scopes` query param through to Slack `oauth/v2/authorize` (comma-separated user scopes). `mode=read_write` alone is not enough — without `scopes=`, users get a minimal token and tools return `missing_scope`.

@@ -1061,6 +1061,7 @@ export {
 export {
   scopesForSlackMode,
   missingSlackScopes,
+  slackHostedConnectExtra,
   SLACK_DEFAULT_MODE,
 } from "./slack_oauth_scopes.js";
 export {

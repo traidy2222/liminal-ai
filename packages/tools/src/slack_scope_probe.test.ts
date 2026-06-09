@@ -6,12 +6,21 @@ import {
   formatSlackScopeProbeLine,
 } from "./slack_scope_probe.js";
 
-test("expectedSlackScopes includes Tier 1 write scopes", () => {
+test("expectedSlackScopes includes full Slack REST write surface", () => {
   const scopes = expectedSlackScopes();
-  for (const s of ["search:read", "reactions:write", "files:write", "im:write", "channels:history"]) {
+  for (const s of [
+    "search:read",
+    "reactions:write",
+    "files:write:user",
+    "im:write",
+    "channels:write",
+    "groups:write",
+    "mpim:write",
+    "channels:history",
+  ]) {
     assert.ok(scopes.includes(s), `missing ${s}`);
   }
-  assert.equal(scopes.length, 14);
+  assert.equal(scopes.length, 17);
 });
 
 test("enrichSlackScopeError passes through non-scope errors", async () => {
