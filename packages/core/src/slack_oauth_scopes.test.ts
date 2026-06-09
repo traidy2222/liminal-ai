@@ -5,28 +5,46 @@ import {
   missingSlackScopes,
   scopesForSlackMode,
   slackHostedConnectExtra,
+  slackRestToolScopeUnion,
+  SLACK_API_METHOD_SCOPES,
 } from "./slack_oauth_scopes.js";
 
-test("read_write requests history, search, and conversation write scopes", () => {
+test("slackRestToolScopeUnion matches read_write OAuth request set", () => {
+  const union = new Set(slackRestToolScopeUnion());
+  for (const s of scopesForSlackMode("read_write")) {
+    assert.ok(union.has(s), `method union missing ${s}`);
+  }
+  assert.equal(scopesForSlackMode("read_write").length, 17);
+});
+
+test("read_write requests method-doc scopes user reported missing", () => {
   const scopes = scopesForSlackMode("read_write");
   for (const s of [
-    "channels:history",
-    "search:read:user",
-    "files:write:user",
-    "im:write:user",
+    "search:read",
+    "reactions:write",
+    "files:write",
+    "im:write",
     "channels:write",
     "groups:write",
     "mpim:write",
+    "channels:history",
   ]) {
     assert.ok(scopes.includes(s), `missing ${s}`);
   }
-  assert.equal(scopes.length, 17);
+});
+
+test("SLACK_API_METHOD_SCOPES documents search and open_dm write scopes", () => {
+  assert.deepEqual(SLACK_API_METHOD_SCOPES["search.messages"], ["search:read"]);
+  assert.ok(SLACK_API_METHOD_SCOPES["conversations.open"]?.includes("im:write"));
+  assert.ok(SLACK_API_METHOD_SCOPES["files.upload"]?.includes("files:write"));
 });
 
 test("slackHostedConnectExtra passes comma-separated scopes to hosted OAuth", () => {
   const extra = slackHostedConnectExtra("read_write");
-  assert.ok(extra.scopes?.includes("search:read:user"));
-  assert.ok(extra.scopes?.includes("channels:write"));
+  assert.ok(extra.scopes?.includes("search:read"));
+  assert.ok(extra.scopes?.includes("reactions:write"));
+  assert.ok(extra.scopes?.includes("im:write"));
+  assert.ok(!extra.scopes?.includes("search:read:user"));
 });
 
 test("buildHostedIntegrationConnectUrl includes scopes query param for Slack", () => {
@@ -41,22 +59,30 @@ test("buildHostedIntegrationConnectUrl includes scopes query param for Slack", (
     })
   );
   const scopes = url.searchParams.get("scopes") ?? "";
-  assert.ok(scopes.includes("search:read:user"));
-  assert.ok(scopes.includes("files:write:user"));
+  assert.ok(scopes.includes("search:read"));
+  assert.ok(scopes.includes("files:write"));
   assert.ok(scopes.includes("channels:write"));
 });
 
 test("missingSlackScopes flags new write scopes after app upgrade", () => {
   const legacy = ["channels:read", "channels:history", "chat:write", "users:read"];
   const miss = missingSlackScopes(legacy, "read_write");
-  assert.ok(miss.includes("search:read:user"));
+  assert.ok(miss.includes("search:read"));
   assert.ok(miss.includes("reactions:write"));
   assert.ok(miss.includes("channels:write"));
 });
 
-test("missingSlackScopes treats files:write as satisfying files:write:user", () => {
-  const granted = scopesForSlackMode("read_write").filter((s) => s !== "files:write:user");
-  granted.push("files:write");
+test("missingSlackScopes treats granular :user aliases as satisfied", () => {
+  const granted = scopesForSlackMode("read_write").filter((s) => s !== "search:read" && s !== "im:write");
+  granted.push("search:read:user", "im:write:user");
   const miss = missingSlackScopes(granted, "read_write");
-  assert.equal(miss.includes("files:write:user"), false);
+  assert.equal(miss.includes("search:read"), false);
+  assert.equal(miss.includes("im:write"), false);
+});
+
+test("missingSlackScopes treats files:write:user as satisfying files:write", () => {
+  const granted = scopesForSlackMode("read_write").filter((s) => s !== "files:write");
+  granted.push("files:write:user");
+  const miss = missingSlackScopes(granted, "read_write");
+  assert.equal(miss.includes("files:write"), false);
 });

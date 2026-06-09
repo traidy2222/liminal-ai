@@ -47,12 +47,23 @@ Disable with `AGENT_SLACK_REST=0`.
    https://www.vireondynamics.com/connect/slack/callback
    ```
 
-3. **User Token Scopes** (not bot scopes) — harness requests these explicitly via `scopes=` on the connect URL:
+3. **User Token Scopes** (not bot scopes) — harness requests these explicitly via `scopes=` on the connect URL. Names match [Slack method docs](https://docs.slack.dev/reference/methods/) user-token scopes:
 
-   **Read:** `channels:history`, `channels:read`, `groups:history`, `groups:read`, `im:history`, `im:read`, `mpim:history`, `mpim:read`, `users:read`, `search:read:user`
+   | Harness tool / API | User scopes |
+   | ------------------ | ----------- |
+   | `slack_list_channels`, `slack_list_dms` | `channels:read`, `groups:read`, `im:read`, `mpim:read` |
+   | `slack_list_users` | `users:read` |
+   | `slack_get_channel_history`, `slack_get_thread_replies` | `channels:history`, `groups:history`, `im:history`, `mpim:history` |
+   | `slack_search_messages` | `search:read` |
+   | `slack_post_message`, `slack_reply_in_thread` | `chat:write` |
+   | `slack_add_reaction` | `reactions:write` |
+   | `slack_open_dm` | `channels:write`, `groups:write`, `im:write`, `mpim:write` |
+   | `slack_upload_file` | `files:write` |
 
-   **Write (read+write mode):** `chat:write`, `reactions:write`, `files:write:user`, `im:write:user`, `channels:write`, `groups:write`, `mpim:write`
+   **Read+write OAuth request (17 scopes):** all rows above.
 
 4. Vercel env: `SLACK_OAUTH_CLIENT_ID`, `SLACK_OAUTH_CLIENT_SECRET`.
 
-5. **Vireon `/connect/slack` handler** must pass the `scopes` query param through to Slack `oauth/v2/authorize` (comma-separated user scopes). `mode=read_write` alone is not enough — without `scopes=`, users get a minimal token and tools return `missing_scope`.
+5. **Vireon `/connect/slack` handler** must pass the full `scopes` query param through to Slack `oauth/v2/authorize` as `user_scope` (comma-separated). `mode=read_write` alone is not enough — without the full list, users get a minimal token and tools return `missing_scope`.
+
+6. Register every scope in the table on the Slack app under **OAuth & Permissions → User Token Scopes**, then reinstall / have users reconnect.

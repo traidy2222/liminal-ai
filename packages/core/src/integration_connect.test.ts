@@ -18,6 +18,6 @@ test("missingSlackScopes flags new write scopes after app upgrade", () => {
     "users:read",
   ];
   const miss = missingSlackScopes(legacy, "read_write");
-  assert.ok(miss.includes("search:read:user"));
+  assert.ok(miss.includes("search:read"));
   assert.ok(miss.includes("reactions:write"));
 });
