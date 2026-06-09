@@ -277,9 +277,12 @@ export const TOOL_FAMILIES: Record<string, { description: string; tools: readonl
     description: "Linear REST — teams, issues, create issue, comments.",
     tools: [
       "linear_list_teams",
+      "linear_list_projects",
       "linear_list_issues",
       "linear_get_issue",
       "linear_create_issue",
+      "linear_update_issue",
+      "linear_assign_issue",
       "linear_add_comment",
     ],
   },

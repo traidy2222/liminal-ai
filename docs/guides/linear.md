@@ -22,10 +22,15 @@ Or: `connect_provider({ provider: "linear" })`.
 | Tool | Purpose |
 | ---- | ------- |
 | `linear_list_teams` | Teams in the workspace |
+| `linear_list_projects` | Projects (optional `team_id`) |
 | `linear_list_issues` | Issue list (optional `team_id`) |
 | `linear_get_issue` | Issue by uuid or identifier (e.g. `ENG-42`) |
 | `linear_create_issue` | Create issue (approval required) |
+| `linear_update_issue` | Update title, description, state, priority (approval required) |
+| `linear_assign_issue` | Assign or unassign issue (approval required) |
 | `linear_add_comment` | Comment on issue (approval required) |
+
+With lazy loading: `activate_tool_family({ family: "linear" })`.
 
 Disable with `AGENT_LINEAR_REST=0`.
 

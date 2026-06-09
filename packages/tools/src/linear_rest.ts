@@ -245,4 +245,132 @@ export function registerLinearRestTools(registry: ToolRegistry): void {
       },
     })
   );
+
+  registry.register(
+    defineTool({
+      name: "linear_list_projects",
+      description:
+        "WHEN: User needs Linear projects or roadmaps.\n" +
+        "HOW: Optional team_id filter; limit default 25.",
+      parameters: {
+        type: "object",
+        properties: {
+          team_id: { type: "string", description: "Optional Linear team uuid." },
+          limit: { type: "number" },
+          account_hint: { type: "string" },
+        },
+        additionalProperties: false,
+      },
+      requiresApproval: false,
+      cacheable: true,
+      cacheTtlMs: 60_000,
+      handler: async (args): Promise<ToolResult> => {
+        const limit = Math.min(50, Math.max(1, Number(args["limit"]) || 25));
+        const teamId = typeof args["team_id"] === "string" ? args["team_id"].trim() : "";
+        const hint = typeof args["account_hint"] === "string" ? args["account_hint"] : undefined;
+        const result = teamId
+          ? await linearGraphql(
+              `query($first: Int!, $teamId: ID!) {
+                team(id: $teamId) {
+                  projects(first: $first) { nodes { id name state url targetDate } }
+                }
+              }`,
+              { first: limit, teamId },
+              hint
+            )
+          : await linearGraphql(
+              `query($first: Int!) {
+                projects(first: $first) { nodes { id name state url targetDate team { key name } } }
+              }`,
+              { first: limit },
+              hint
+            );
+        if (!result.ok) return { ok: false, error: result.error };
+        return { ok: true, output: jsonOutput(result.data) };
+      },
+    })
+  );
+
+  registry.register(
+    defineTool({
+      name: "linear_update_issue",
+      description:
+        "WHEN: User wants to change a Linear issue (title, description, state, priority).\n" +
+        "HOW: issue_id (uuid) + fields to patch. Approval required.",
+      parameters: {
+        type: "object",
+        properties: {
+          issue_id: { type: "string", description: "Linear issue uuid." },
+          title: { type: "string" },
+          description: { type: "string" },
+          state_id: { type: "string", description: "Workflow state uuid." },
+          priority: { type: "number", description: "0=none, 1=urgent, 2=high, 3=medium, 4=low." },
+          account_hint: { type: "string" },
+        },
+        required: ["issue_id"],
+        additionalProperties: false,
+      },
+      requiresApproval: true,
+      handler: async (args): Promise<ToolResult> => {
+        const issueId = String(args["issue_id"] ?? "").trim();
+        if (!issueId) return { ok: false, error: "issue_id is required" };
+        const input: Record<string, unknown> = {};
+        if (typeof args["title"] === "string" && args["title"].trim()) input.title = args["title"].trim();
+        if (typeof args["description"] === "string") input.description = args["description"];
+        if (typeof args["state_id"] === "string" && args["state_id"].trim()) {
+          input.stateId = args["state_id"].trim();
+        }
+        if (typeof args["priority"] === "number" && Number.isFinite(args["priority"])) {
+          input.priority = args["priority"];
+        }
+        if (Object.keys(input).length === 0) {
+          return { ok: false, error: "provide at least one of title, description, state_id, priority" };
+        }
+        const result = await linearGraphql(
+          `mutation($id: String!, $input: IssueUpdateInput!) {
+            issueUpdate(id: $id, input: $input) { success issue { id identifier title state { name } priority url } }
+          }`,
+          { id: issueId, input },
+          typeof args["account_hint"] === "string" ? args["account_hint"] : undefined
+        );
+        if (!result.ok) return { ok: false, error: result.error };
+        return { ok: true, output: jsonOutput(result.data) };
+      },
+    })
+  );
+
+  registry.register(
+    defineTool({
+      name: "linear_assign_issue",
+      description:
+        "WHEN: User wants to assign or unassign a Linear issue.\n" +
+        "HOW: issue_id + assignee_id (user uuid), or assignee_id empty string to unassign. Approval required.",
+      parameters: {
+        type: "object",
+        properties: {
+          issue_id: { type: "string" },
+          assignee_id: { type: "string", description: "Linear user uuid, or \"\" to unassign." },
+          account_hint: { type: "string" },
+        },
+        required: ["issue_id", "assignee_id"],
+        additionalProperties: false,
+      },
+      requiresApproval: true,
+      handler: async (args): Promise<ToolResult> => {
+        const issueId = String(args["issue_id"] ?? "").trim();
+        if (!issueId) return { ok: false, error: "issue_id is required" };
+        const assigneeRaw = typeof args["assignee_id"] === "string" ? args["assignee_id"].trim() : "";
+        const input = { assigneeId: assigneeRaw || null };
+        const result = await linearGraphql(
+          `mutation($id: String!, $input: IssueUpdateInput!) {
+            issueUpdate(id: $id, input: $input) { success issue { id identifier assignee { id name } url } }
+          }`,
+          { id: issueId, input },
+          typeof args["account_hint"] === "string" ? args["account_hint"] : undefined
+        );
+        if (!result.ok) return { ok: false, error: result.error };
+        return { ok: true, output: jsonOutput(result.data) };
+      },
+    })
+  );
 }

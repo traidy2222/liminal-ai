@@ -8,6 +8,10 @@ import type { SafetyJudge } from "./safety_judge.js";
 import { stableArgsJsonKey } from "./json_stable.js";
 import { effectiveHarnessEnvRaw } from "./harness_effective_env.js";
 import { LAZY_AUTO_ACTIVATE_TOOL_ONLY } from "./tool_lazy_constants.js";
+import {
+  CONNECTORS_FAMILY_ID,
+  parseIntegrationNotConnectedProvider,
+} from "./integration_connect.js";
 import { resolveWorkspaceRoot } from "./workspace_root.js";
 
 function autoApproveToolSet(): Set<string> {
@@ -212,6 +216,35 @@ export class ToolDispatcher {
   /** Advance the round counter; call once per ReAct round from agent.ts. */
   advanceTurnRound(): void {
     if (this.turnRoundIndex !== undefined) this.turnRoundIndex += 1;
+  }
+
+  /**
+   * When a REST/MCP integration tool reports OAuth missing, auto-activate the connectors
+   * family so connect_provider is callable on the next turn without a wasted activation round.
+   */
+  private maybeActivateConnectorsForIntegrationError(result: ToolResult): ToolResult {
+    if (result.ok || !result.error) return result;
+    const provider = parseIntegrationNotConnectedProvider(result.error);
+    if (!provider) return result;
+
+    let newly = this.registry.activateFamilies([CONNECTORS_FAMILY_ID]);
+    if (newly.length === 0) {
+      newly = this.registry.activate(
+        ["connect_provider", "list_connectors"].filter((n) => this.registry.has(n))
+      );
+    }
+    if (newly.length === 0) return result;
+
+    this.emitter.emit("text", {
+      delta:
+        `[INTEGRATION] Activated "${CONNECTORS_FAMILY_ID}" (${newly.length} tool(s)) — ` +
+        `call connect_provider({ provider: "${provider}", start_oauth: true }), then retry.\n`,
+      channel: "trace",
+    });
+    return {
+      ...result,
+      error: `${result.error}\n\nconnect_provider is now active in this session.`,
+    };
   }
 
   /** Emit tool_result with optional traceId + roundIndex for event correlation. */
@@ -566,6 +599,8 @@ export class ToolDispatcher {
         const ttl = tool.cacheTtlMs ?? 30_000;
         this.resultCache.set(cacheKeyForRun, { result, expiresAt: Date.now() + ttl });
       }
+
+      result = this.maybeActivateConnectorsForIntegrationError(result);
 
       this.emitToolResult(callId, name, args, result);
       if (name === "vault_write" && result.ok) {

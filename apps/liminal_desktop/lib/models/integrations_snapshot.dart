@@ -95,6 +95,15 @@ class IntegrationsSnapshot {
 
   bool get googleGmailAttached => googleMcp.any((c) => c.name == 'google_gmail');
 
+  bool get microsoftCalendarAttached {
+    for (final c in microsoftMcp) {
+      if (c.name == 'microsoft') {
+        return c.services?.contains('calendar') ?? false;
+      }
+    }
+    return false;
+  }
+
   bool get microsoftConnected => microsoftMcp.isNotEmpty;
 
   bool get githubConnected => githubMcp.isNotEmpty;

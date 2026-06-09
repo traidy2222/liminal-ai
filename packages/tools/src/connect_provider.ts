@@ -42,6 +42,8 @@ import {
   revokeLinearAccount,
   listNotionOAuthAccounts,
   revokeNotionAccount,
+  missingSlackScopes,
+  SLACK_DEFAULT_MODE,
 } from "@liminal/core";
 import { defineTool } from "./helpers.js";
 import {
@@ -88,7 +90,7 @@ import {
   isConnectProviderOAuthReady,
   startConnectProviderOAuth,
 } from "./integration_oauth_start.js";
-import { buildGoogleLiveProbeLines } from "./connector_live_probes.js";
+import { buildIntegrationLiveProbeLines } from "./connector_live_probes.js";
 import { enrichGoogleMcpProbeError } from "./mcp_attach.js";
 
 const PARENT_PROVIDER = "google_workspace";
@@ -360,7 +362,7 @@ export function createConnectorTools(registry: ToolRegistry, _emitter: AgentEmit
           ok: true,
           output:
             `Linear connected as ${a.email ?? a.organizationName ?? a.accountId}` +
-            ".\nTools: linear_list_teams, linear_list_issues, linear_get_issue, linear_create_issue, linear_add_comment." +
+            ".\nTools: linear_list_teams, linear_list_projects, linear_list_issues, linear_get_issue, linear_create_issue, linear_update_issue, linear_assign_issue, linear_add_comment." +
             integrationLazyLoadHint(registry, "linear"),
         };
       }
@@ -687,8 +689,15 @@ export function createConnectorTools(registry: ToolRegistry, _emitter: AgentEmit
       } else {
         for (const a of slackAccounts) {
           const exp = new Date(a.expiresAt).toISOString();
+          const stale = missingSlackScopes(a.scopes, SLACK_DEFAULT_MODE);
           lines.push(
-            `- ${a.teamName ?? a.email ?? a.accountId} (expires ~${exp}, ${a.scopes.length} scopes)`
+            `- ${a.teamName ?? a.email ?? a.accountId} (expires ~${exp}, ${a.scopes.length} scopes` +
+              `${stale.length ? `, **stale scopes** — reconnect Slack for: ${stale.join(", ")}` : ""})`
+          );
+        }
+        if (slackAccounts.some((a) => missingSlackScopes(a.scopes, SLACK_DEFAULT_MODE).length > 0)) {
+          lines.push(
+            "  Reconnect: Settings → Integrations → Slack → Disconnect + Connect, or `connect_provider({ provider: \"slack\", start_oauth: true })`."
           );
         }
       }
@@ -874,7 +883,7 @@ export function createConnectorTools(registry: ToolRegistry, _emitter: AgentEmit
         }
       }
       lines.push("");
-      lines.push(...(await buildGoogleLiveProbeLines()));
+      lines.push(...(await buildIntegrationLiveProbeLines()));
       lines.push("");
       lines.push("### Cloud Console reference (enable MCP APIs when live probe says disabled)");
       const projectId = googleProjectIdFromClientId();

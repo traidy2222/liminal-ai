@@ -370,7 +370,10 @@ export function IntegrationsPanel({ agentBusy }: IntegrationsPanelProps) {
     (c) => c.kind === "mcp" && (!c.parentProvider || !curatedParents.has(c.parentProvider))
   );
   const googleMcp = connections.filter((c) => c.kind === "mcp" && c.parentProvider === "google_workspace");
+  const googleCalendarAttached = googleMcp.some((c) => c.name === "google_calendar");
   const microsoftMcp = connections.filter((c) => c.kind === "mcp" && c.parentProvider === "microsoft_365");
+  const msGraphConn = microsoftMcp.find((c) => c.name === "microsoft");
+  const msCalendarAttached = msGraphConn?.services?.includes("calendar") ?? false;
   const githubMcp = connections.filter((c) => c.kind === "mcp" && c.parentProvider === "github");
   const openApi = connections.filter((c) => c.kind === "openapi");
   const disabled = busy || agentBusy || loading;
@@ -635,7 +638,32 @@ export function IntegrationsPanel({ agentBusy }: IntegrationsPanelProps) {
             Docs sidecar: {sidecar.running ? sidecar.url : "stopped"}
           </div>
         ) : null}
+        {accounts.length > 0 && !googleCalendarAttached ? (
+          <p style={{ fontSize: 11, color: AMBER, lineHeight: 1.35, margin: "0 0 8px" }}>
+            Gmail may work while Calendar MCP is not attached — enable Calendar separately.
+          </p>
+        ) : null}
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+          {accounts.length > 0 && !googleCalendarAttached ? (
+            <button
+              type="button"
+              style={{ ...btn, fontSize: 10, padding: "6px 10px", borderColor: CYAN, color: CYAN }}
+              disabled={disabled}
+              onClick={() =>
+                void run(async () => {
+                  const res = await webApiFetch("/api/integrations/google/connect", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ services: ["calendar"], mode }),
+                  });
+                  const json = (await res.json()) as { error?: string };
+                  if (!res.ok) throw new Error(json.error ?? "attach failed");
+                })
+              }
+            >
+              Attach Calendar
+            </button>
+          ) : null}
           <button
             type="button"
             style={{ ...btn, fontSize: 10, padding: "6px 10px" }}
@@ -741,7 +769,32 @@ export function IntegrationsPanel({ agentBusy }: IntegrationsPanelProps) {
             Graph sidecar: {msSidecar.running ? msSidecar.url : "stopped"}
           </div>
         ) : null}
+        {msAccounts.length > 0 && microsoftConnected && !msCalendarAttached ? (
+          <p style={{ fontSize: 11, color: AMBER, lineHeight: 1.35, margin: "0 0 8px" }}>
+            Outlook mail may work while Calendar is not in your attached Graph services — enable Calendar separately.
+          </p>
+        ) : null}
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+          {msAccounts.length > 0 && !msCalendarAttached ? (
+            <button
+              type="button"
+              style={{ ...btn, fontSize: 10, padding: "6px 10px", borderColor: CYAN, color: CYAN }}
+              disabled={disabled}
+              onClick={() =>
+                void run(async () => {
+                  const res = await webApiFetch("/api/integrations/microsoft/connect", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ services: ["calendar"], mode: msMode }),
+                  });
+                  const json = (await res.json()) as { error?: string };
+                  if (!res.ok) throw new Error(json.error ?? "attach failed");
+                })
+              }
+            >
+              Attach Calendar
+            </button>
+          ) : null}
           <button
             type="button"
             style={{ ...btn, fontSize: 10, padding: "6px 10px" }}

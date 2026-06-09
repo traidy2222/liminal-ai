@@ -324,6 +324,10 @@ class _IntegrationsScreenState extends State<IntegrationsScreen> {
                               services: msServices,
                               mode: _microsoftMode,
                             ),
+                            onAttachCalendar: () => host.connectMicrosoft365(
+                              services: ['calendar'],
+                              mode: _microsoftMode,
+                            ),
                             onRevoke: () => host.disconnectMicrosoft(revoke: true),
                           ),
                         ),
@@ -906,6 +910,7 @@ class _MicrosoftDetails extends StatelessWidget {
     required this.onMode,
     required this.onToggleService,
     required this.onReattach,
+    required this.onAttachCalendar,
     required this.onRevoke,
   });
 
@@ -917,6 +922,7 @@ class _MicrosoftDetails extends StatelessWidget {
   final ValueChanged<String> onMode;
   final ValueChanged<String> onToggleService;
   final Future<bool> Function() onReattach;
+  final Future<bool> Function() onAttachCalendar;
   final Future<bool> Function() onRevoke;
 
   @override
@@ -971,10 +977,25 @@ class _MicrosoftDetails extends StatelessWidget {
             ),
           ),
         ],
+        if (snap.microsoft.accounts.isNotEmpty &&
+            snap.microsoftConnected &&
+            !snap.microsoftCalendarAttached) ...[
+          const SizedBox(height: 4),
+          Text(
+            'Outlook mail may work while Calendar is not in attached Graph services.',
+            style: TextStyle(color: lim.warn.withValues(alpha: 0.9), fontSize: 11, height: 1.35),
+          ),
+        ],
         const SizedBox(height: 8),
         Wrap(
           spacing: 8,
+          runSpacing: 8,
           children: [
+            if (snap.microsoft.accounts.isNotEmpty && !snap.microsoftCalendarAttached)
+              FilledButton.tonal(
+                onPressed: disabled ? null : () => onAttachCalendar(),
+                child: const Text('Attach Calendar'),
+              ),
             OutlinedButton(
               onPressed: disabled || snap.microsoft.accounts.isEmpty ? null : () => onReattach(),
               child: const Text('Re-attach tools'),

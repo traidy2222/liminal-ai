@@ -1058,7 +1058,15 @@ export {
   listSlackOAuthAccounts,
   revokeSlackAccount,
 } from "./slack_oauth_broker.js";
-export { scopesForSlackMode, SLACK_DEFAULT_MODE } from "./slack_oauth_scopes.js";
+export {
+  scopesForSlackMode,
+  missingSlackScopes,
+  SLACK_DEFAULT_MODE,
+} from "./slack_oauth_scopes.js";
+export {
+  CONNECTORS_FAMILY_ID,
+  parseIntegrationNotConnectedProvider,
+} from "./integration_connect.js";
 export type { SlackMode } from "./slack_oauth_scopes.js";
 export { runSlackHostedConnectFlow } from "./slack_connect.js";
 export type { SlackConnectResult, RunSlackHostedConnectOptions } from "./slack_connect.js";
