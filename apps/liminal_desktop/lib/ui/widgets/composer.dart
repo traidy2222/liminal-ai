@@ -9,6 +9,8 @@ import '../../audio/dictation_controller.dart';
 import '../../audio/speech_output.dart';
 import '../../models/app_config.dart';
 import '../../models/user_image_attachment.dart';
+import '../design_system/liminal_design_system.dart';
+import '../layout/liminal_spacing.dart';
 import '../theme/liminal_theme_extension.dart';
 
 typedef ComposerSendCallback = void Function(
@@ -210,13 +212,7 @@ class _ComposerState extends State<Composer> {
         sessionActive && widget.config?.ttsEnabled != true;
 
     return SafeArea(
-        child: Container(
-          decoration: BoxDecoration(
-            color: lim.panel.withValues(alpha: 0.94),
-            border: Border(top: BorderSide(color: lim.border)),
-          ),
-          padding: const EdgeInsets.fromLTRB(12, 10, 12, 12),
-          child: Column(
+        child: Column(
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
@@ -306,13 +302,14 @@ class _ComposerState extends State<Composer> {
                 ),
               if (_attachments.isNotEmpty)
                 Padding(
-                  padding: const EdgeInsets.only(bottom: 8),
+                  padding: const EdgeInsets.only(bottom: LiminalSpacing.xs),
                   child: Wrap(
                     spacing: 6,
                     runSpacing: 6,
                     children: [
                       for (var i = 0; i < _attachments.length; i++)
                         InputChip(
+                          avatar: Icon(Icons.image_outlined, size: 16, color: lim.textMuted),
                           label: Text(
                             _attachments[i].name,
                             style: const TextStyle(fontSize: 11),
@@ -328,18 +325,16 @@ class _ComposerState extends State<Composer> {
                 crossAxisAlignment: CrossAxisAlignment.end,
                 children: [
                   if (d != null)
-                    IconButton(
+                    LiminalIconButton(
+                      icon: sessionActive ? Icons.mic : Icons.mic_none_outlined,
                       tooltip: sessionActive ? 'Stop voice session' : 'Start voice session',
                       onPressed: widget.enabled ? _toggleDictation : null,
-                      icon: Icon(
-                        sessionActive ? Icons.mic : Icons.mic_none_outlined,
-                        color: sessionActive ? lim.accent : lim.textMuted,
-                      ),
+                      selected: sessionActive,
                     ),
-                  IconButton(
+                  LiminalIconButton(
+                    icon: Icons.image_outlined,
                     tooltip: 'Attach images',
                     onPressed: widget.enabled && !widget.busy ? _pickImages : null,
-                    icon: Icon(Icons.image_outlined, color: lim.textMuted),
                   ),
                   Expanded(
                     child: TextField(
@@ -357,38 +352,38 @@ class _ComposerState extends State<Composer> {
                                 'Message ${lim.displayLabel}…'),
                         filled: true,
                         fillColor: lim.surface.withValues(alpha: 0.55),
+                        contentPadding: const EdgeInsets.symmetric(
+                          horizontal: LiminalSpacing.sm,
+                          vertical: LiminalSpacing.sm,
+                        ),
                       ),
                     ),
                   ),
-                  const SizedBox(width: 8),
+                  const SizedBox(width: LiminalSpacing.xs),
                   if (d != null && d.status == DictationStatus.recording)
-                    IconButton(
+                    LiminalIconButton(
+                      icon: Icons.send,
                       tooltip: 'Send now',
                       onPressed: () => unawaited(d.forceSend()),
-                      icon: Icon(Icons.stop, color: lim.accent),
                     )
                   else if (widget.busy)
-                    IconButton(
-                      tooltip: widget.config?.resolvedCopy.stopLabel ?? 'Stop turn',
+                    LiminalButton.icon(
+                      label: widget.config?.resolvedCopy.stopLabel ?? 'Stop',
+                      icon: Icons.stop_circle_outlined,
+                      variant: LiminalButtonVariant.danger,
+                      dense: true,
                       onPressed: widget.onAbort,
-                      icon: Icon(Icons.stop_circle, color: lim.danger),
                     )
                   else
-                    FilledButton(
+                    LiminalButton.icon(
+                      label: widget.config?.resolvedCopy.sendLabel ?? 'Send',
+                      icon: Icons.send,
+                      dense: true,
                       onPressed: widget.enabled ? _submit : null,
-                      style: FilledButton.styleFrom(
-                        minimumSize: const Size(48, 48),
-                        padding: EdgeInsets.zero,
-                      ),
-                      child: Tooltip(
-                        message: widget.config?.resolvedCopy.sendLabel ?? 'Send',
-                        child: const Icon(Icons.send),
-                      ),
                     ),
                 ],
               ),
             ],
-          ),
         ),
     );
   }

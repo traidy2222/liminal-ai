@@ -55,6 +55,10 @@ class LiminalBackground extends StatelessWidget {
           CustomPaint(
             painter: _GridPainter(accent: lim.accent),
           ),
+        if (lim.shell == 'terminal')
+          CustomPaint(
+            painter: _ScanlinePainter(),
+          ),
         DecoratedBox(
           decoration: BoxDecoration(
             gradient: RadialGradient(
@@ -94,4 +98,17 @@ class _GridPainter extends CustomPainter {
 
   @override
   bool shouldRepaint(covariant _GridPainter old) => old.accent != accent;
+}
+
+class _ScanlinePainter extends CustomPainter {
+  @override
+  void paint(Canvas canvas, Size size) {
+    final paint = Paint()..color = Colors.white.withValues(alpha: 0.02);
+    for (var y = 0.0; y < size.height; y += 3) {
+      canvas.drawLine(Offset(0, y), Offset(size.width, y), paint);
+    }
+  }
+
+  @override
+  bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
 }

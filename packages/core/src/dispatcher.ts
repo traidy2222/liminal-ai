@@ -1,10 +1,9 @@
 import type { ToolResult, ToolParameterSchema, PropertySchema, ApprovalDecision } from "./types.js";
-import { normalizeSlackRestToolArgs } from "./slack_tool_args.js";
 import type { AgentEmitter } from "./events.js";
 import type { ToolRegistry } from "./registry.js";
 import type { TaskOrchestrator } from "./orchestrator.js";
 import { guardToolArgs } from "./tool_arg_guard.js";
-import { coerceArgsToSchema, coerceJsonArrayValue } from "./tool_arg_coerce.js";
+import { prepareToolArgsForValidation } from "./tool_dispatch_args.js";
 import type { SafetyJudge } from "./safety_judge.js";
 import { stableArgsJsonKey } from "./json_stable.js";
 import { effectiveHarnessEnvRaw } from "./harness_effective_env.js";
@@ -42,10 +41,18 @@ function validateValue(key: string, val: unknown, schema: PropertySchema): strin
     }
     return lastErr ?? `Field "${key}": value did not match allowed variants`;
   }
-  // Type check
+  // Type check (JSON has no integer type — accept whole numbers for integer schemas)
   if (schema.type) {
     const actual = Array.isArray(val) ? "array" : typeof val;
-    if (actual !== schema.type) {
+    if (schema.type === "integer") {
+      if (actual === "number" && typeof val === "number" && Number.isFinite(val)) {
+        if (!Number.isInteger(val)) {
+          return `Field "${key}": expected integer, got non-integer number`;
+        }
+      } else if (actual !== "number") {
+        return `Field "${key}": expected integer, got ${actual}`;
+      }
+    } else if (actual !== schema.type) {
       return `Field "${key}": expected ${schema.type}, got ${actual}`;
     }
   }
@@ -94,36 +101,6 @@ const TOOL_NAME_ALIASES: Readonly<Record<string, string>> = {
 
 function resolveToolName(name: string): string {
   return TOOL_NAME_ALIASES[name] ?? name;
-}
-
-/** Per-tool arg aliases applied before JSON-schema validation. */
-function normalizeToolArgs(
-  name: string,
-  args: Record<string, unknown>
-): Record<string, unknown> {
-  if (name === "speak") {
-    const out = { ...args };
-    const text = String(out["text"] ?? "").trim();
-    const content = String(out["content"] ?? "").trim();
-    if (!text && content) {
-      out["text"] = content;
-      delete out["content"];
-    }
-    return out;
-  }
-  if (name === "docs_rest_write_blocks" && "blocks" in args) {
-    return { ...args, blocks: coerceJsonArrayValue(args["blocks"]) };
-  }
-  if (name === "docs_rest_batch_update" && "requests" in args) {
-    return { ...args, requests: coerceJsonArrayValue(args["requests"]) };
-  }
-  if (name === "docs_rest_insert_table" && "rows" in args) {
-    return { ...args, rows: coerceJsonArrayValue(args["rows"]) };
-  }
-  if (name.startsWith("slack_")) {
-    return normalizeSlackRestToolArgs(name, args);
-  }
-  return args;
 }
 
 function validateArgs(
@@ -303,8 +280,9 @@ export class ToolDispatcher {
     name = resolveToolName(name);
     const tool = this.registry.get(name);
     if (!tool) return { ok: false, error: `Unknown tool: "${name}"` };
-    args = normalizeToolArgs(name, args);
-    args = coerceArgsToSchema(tool.parameters, args);
+    const directPrep = prepareToolArgsForValidation(name, args, tool.parameters);
+    if (!directPrep.ok) return { ok: false, error: `Invalid args for "${name}": ${directPrep.error}` };
+    args = directPrep.args;
     const guardMsg = guardToolArgs(name, args);
     if (guardMsg) return { ok: false, error: `[ARG GUARD] ${guardMsg}` };
     try {
@@ -356,8 +334,16 @@ export class ToolDispatcher {
         error: `Invalid JSON args for tool "${name}": ${argsJson}`,
       };
     }
-    args = normalizeToolArgs(name, args);
-    args = coerceArgsToSchema(tool.parameters, args);
+    const prep = prepareToolArgsForValidation(name, args, tool.parameters);
+    if (!prep.ok) {
+      const result: ToolResult = {
+        ok: false,
+        error: `Invalid args for "${name}": ${prep.error}`,
+      };
+      this.emitToolResult(callId, name, args, result);
+      return result;
+    }
+    args = prep.args;
 
     // Circuit breaker: reject if this tool's circuit is open due to repeated failures.
     const circuitOpenUntilTs = this.circuitOpenUntil.get(name) ?? 0;
@@ -525,7 +511,16 @@ export class ToolDispatcher {
             return result;
           }
           if (decision.decision === "edit") {
-            args = coerceArgsToSchema(tool.parameters, normalizeToolArgs(name, decision.editedArgs));
+            const editPrep = prepareToolArgsForValidation(name, decision.editedArgs, tool.parameters);
+            if (!editPrep.ok) {
+              const result: ToolResult = {
+                ok: false,
+                error: `Edited args for "${name}" failed validation: ${editPrep.error}`,
+              };
+              this.emitToolResult(callId, name, args, result);
+              return result;
+            }
+            args = editPrep.args;
             const reErr = validateArgs(tool.parameters, args);
             if (reErr) {
               const result: ToolResult = {
@@ -547,10 +542,20 @@ export class ToolDispatcher {
       }
 
       if (this.fileWriteHooks) {
-        args = coerceArgsToSchema(
-          tool.parameters,
-          normalizeToolArgs(name, await this.fileWriteHooks.prepareArgs(callId, name, args))
+        const hookPrep = prepareToolArgsForValidation(
+          name,
+          await this.fileWriteHooks.prepareArgs(callId, name, args),
+          tool.parameters
         );
+        if (!hookPrep.ok) {
+          const result: ToolResult = {
+            ok: false,
+            error: `Invalid args for "${name}" after stream prepare: ${hookPrep.error}`,
+          };
+          this.emitToolResult(callId, name, args, result);
+          return result;
+        }
+        args = hookPrep.args;
         const reErr = validateArgs(tool.parameters, args);
         if (reErr) {
           const result: ToolResult = {

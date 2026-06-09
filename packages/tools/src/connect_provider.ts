@@ -363,7 +363,7 @@ export function createConnectorTools(registry: ToolRegistry, _emitter: AgentEmit
           ok: true,
           output:
             `Linear connected as ${a.email ?? a.organizationName ?? a.accountId}` +
-            ".\nTools: linear_list_teams, linear_list_projects, linear_list_issues, linear_get_issue, linear_create_issue, linear_update_issue, linear_assign_issue, linear_add_comment." +
+            ".\nTools: full Linear suite (viewer, teams, issues, labels, cycles, projects, search, comments, create/update/assign/archive, sub-issues, attachments)." +
             integrationLazyLoadHint(registry, "linear"),
         };
       }

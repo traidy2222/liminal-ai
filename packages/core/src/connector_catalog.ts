@@ -45,6 +45,8 @@ export const GOOGLE_OFFICIAL_MCP_API_IDS: Partial<Record<GoogleServiceId, string
   gmail: "gmailmcp.googleapis.com",
   calendar: "calendarmcp.googleapis.com",
   chat: "chatmcp.googleapis.com",
+  /** People MCP uses people.googleapis.com/mcp/v1 (same host as classic People API). */
+  people: "people.googleapis.com",
 };
 
 export function googleCloudMcpApiLibraryUrl(serviceId: GoogleServiceId, projectId?: string): string | null {
@@ -139,6 +141,8 @@ export const GOOGLE_WORKSPACE_SERVICES: GoogleServicePreset[] = [
       "https://www.googleapis.com/auth/directory.readonly",
       "https://www.googleapis.com/auth/contacts.readonly",
       "https://www.googleapis.com/auth/contacts",
+      "https://www.googleapis.com/auth/userinfo.profile",
+      "https://www.googleapis.com/auth/userinfo.email",
     ],
   },
   {

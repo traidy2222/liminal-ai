@@ -3,6 +3,8 @@
  * as local harness tools.
  */
 import type { AgentEmitter, ToolDefinition, ToolRegistry, ToolResult, PropertySchema } from "@liminal/core";
+import { cleanMcpCallArgs, expandMcpToolProperties } from "@liminal/core";
+import { enrichGoogleMcpToolDescription } from "./google_mcp_tool_hints.js";
 import {
   type GoogleServiceId,
   effectiveHarnessEnvRaw,
@@ -157,16 +159,50 @@ const MCP_HOST_TO_SERVICE: Array<{ host: string; service: GoogleServiceId }> = [
   { host: "drivemcp.googleapis.com", service: "drive" },
   { host: "calendarmcp.googleapis.com", service: "calendar" },
   { host: "chatmcp.googleapis.com", service: "chat" },
+  { host: "people.googleapis.com", service: "people" },
 ];
 
 export function enrichGoogleMcpProbeError(serverUrl: string, message: string): string {
-  if (!/MCP API has not been used|is disabled/i.test(message)) return message;
   let host = "";
   try {
     host = new URL(serverUrl).hostname;
   } catch {
-    return message;
+    /* ignore */
   }
+
+  if (/400|Unknown name|Invalid JSON payload/i.test(message)) {
+    const match = MCP_HOST_TO_SERVICE.find((e) => host === e.host);
+    if (match) {
+      return (
+        `${message}\n\n` +
+        `Google ${match.service} MCP rejects **unknown argument fields** with HTTP 400. ` +
+        `Use only parameters declared on the tool schema (extra keys like calendarId on list_calendars, ` +
+        `time_max on Gmail, or both pageSize and page_size together will fail).`
+      );
+    }
+  }
+
+  if (/403|Forbidden|does not have permission|insufficient.*scope/i.test(message)) {
+    if (host === "people.googleapis.com") {
+      return (
+        `${message}\n\n` +
+        "People MCP (`get_user_profile`, directory search) needs:\n" +
+        "- **People API** enabled in Cloud Console (people.googleapis.com)\n" +
+        "- OAuth scopes: contacts.readonly / contacts (+ directory.readonly for Workspace directory)\n" +
+        "- Re-connect Google after scope changes; `directory.readonly` requires Workspace admin for org directory\n" +
+        "- Workspace Developer Preview enrollment for official MCP (same as Gmail/Drive MCP)"
+      );
+    }
+    const match = MCP_HOST_TO_SERVICE.find((e) => host === e.host);
+    if (match) {
+      return (
+        `${message}\n\n` +
+        `Google ${match.service} MCP often returns 403 when the **MCP API** is disabled, OAuth scopes are stale, or the Cloud project is not enrolled in the [Workspace Developer Preview](https://developers.google.com/workspace/preview). Re-connect Google Workspace after enabling APIs.`
+      );
+    }
+  }
+
+  if (!/MCP API has not been used|is disabled/i.test(message)) return message;
   const match = MCP_HOST_TO_SERVICE.find((e) => host === e.host);
   if (!match) return message;
   const projectId = googleProjectIdFromClientId();
@@ -185,7 +221,11 @@ export function enrichGoogleMcpProbeError(serverUrl: string, message: string): s
   );
 }
 
-function buildMcpToolHandler(record: McpConnectionRecord, tool: McpToolRecord): ToolDefinition["handler"] {
+function buildMcpToolHandler(
+  record: McpConnectionRecord,
+  tool: McpToolRecord,
+  remoteProperties: Record<string, unknown>
+): ToolDefinition["handler"] {
   return async (args): Promise<ToolResult> => {
     let reply: JsonRpcResponse<McpToolCallResult> | null;
     try {
@@ -195,7 +235,10 @@ function buildMcpToolHandler(record: McpConnectionRecord, tool: McpToolRecord): 
           jsonrpc: "2.0",
           id: nextJsonRpcId(),
           method: "tools/call",
-          params: { name: tool.remoteName, arguments: args },
+          params: {
+            name: tool.remoteName,
+            arguments: cleanMcpCallArgs(args, remoteProperties),
+          },
         },
         record.auth,
         true
@@ -219,11 +262,17 @@ function buildMcpToolHandler(record: McpConnectionRecord, tool: McpToolRecord): 
 }
 
 function buildMcpTool(record: McpConnectionRecord, tool: McpToolRecord): ToolDefinition {
-  const { properties, required } = ensureToolParameterShape(tool.inputSchema);
+  const { properties: rawProperties, required } = ensureToolParameterShape(tool.inputSchema);
+  const properties = expandMcpToolProperties(rawProperties);
+  const remoteProperties = rawProperties as Record<string, unknown>;
   const isWrite = isMcpWriteTool(tool.remoteName, tool.description);
   const isRead = isMcpReadTool(tool.remoteName, tool.description);
-  let description = `[mcp:${record.name}] ${tool.description || tool.remoteName}`;
-  let handler = buildMcpToolHandler(record, tool);
+  let description = enrichGoogleMcpToolDescription(
+    record.name,
+    tool.remoteName,
+    `[mcp:${record.name}] ${tool.description || tool.remoteName}`
+  );
+  let handler = buildMcpToolHandler(record, tool, remoteProperties);
   if (record.name === "google_gmail" && tool.remoteName === "create_draft") {
     description +=
       " — PLAIN body only (no HTML). For styled outbound mail use gmail_create_draft with body_html + body.";
@@ -241,6 +290,7 @@ function buildMcpTool(record: McpConnectionRecord, tool: McpToolRecord): ToolDef
       type: "object",
       properties,
       required: required.length > 0 ? required : undefined,
+      additionalProperties: false,
     },
     requiresApproval: isWrite,
     dangerLevel: isWrite ? "destructive" : "safe",

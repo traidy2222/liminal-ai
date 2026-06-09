@@ -2,11 +2,11 @@
 
 Where Liminal is today and what comes next. **Dates are directional, not commitments** — alpha moves fast on `main`.
 
-**Current stage:** **alpha** (`v0.0.23`, June 2026). Beta, RC, and **v0.1.0 public preview** are [planned milestones](./changelog.md#planned-not-started), not shipped yet.
+**Current stage:** **alpha** (`v0.0.25`, June 2026). Beta, RC, and **v0.1.0 public preview** are [planned milestones](./changelog.md#planned-not-started), not shipped yet.
 
 ---
 
-## Now — Alpha (v0.0.23)
+## Now — Alpha (v0.0.25)
 
 What you can run today from [Install](../start/install.md):
 

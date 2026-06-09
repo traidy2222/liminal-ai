@@ -2,7 +2,7 @@
 
 All notable changes to [Liminal AI](https://github.com/traidy2222/liminal-ai) on the `main` branch.
 
-**Current stage:** **alpha** (`v0.0.23` tip of `main`, 2026-06-07). The workspace package may read `0.1.0`, but **beta**, **RC**, and a **v0.1.0 public preview** have not been declared as product releases yet.
+**Current stage:** **alpha** (`v0.0.25` tip of `main`, 2026-06-09). The workspace package may read `0.1.0`, but **beta**, **RC**, and a **v0.1.0 public preview** have not been declared as product releases yet.
 
 Format: **v0.0.x** entries keyed to the last GitHub push in each slice. Dates are real push dates.
 
@@ -17,9 +17,43 @@ After editing JSON: `npm run changelog:gen`, commit, push, then in [vireondynami
 
 ---
 
+## v0.0.25 — 2026-06-09 {#v0-0-25}
+
+**Current alpha.** Desktop design system, Sheets auto-fit, integration arg reliability, research reply fix.
+
+**Shipped**
+
+- **Desktop design system** — Shared tokens, primitives (Button, Card, Badge), patterns (Sheet, EmptyState, SearchField), persona shells; wired through hub, home, chat panes, composer, and settings
+- **Vireon hub** — Status strip, quick actions, mission control, searchable chat list, integration chips, two-column layout, pull-to-refresh
+- **Chat UI** — Distinct user/assistant/tool/reasoning lanes (`chat_message_frame`, `reasoning_block`, `tool_category`); polished composer, drawer, message and tool activity tiles
+- **Tool arg pipeline** — `prepareToolArgsForValidation` normalizes Google MCP, Google REST, and Linear args before schema validation; fixes Sheets `requests`/`data` JSON-string coercion and MCP HTTP 400 from hallucinated fields
+- **Sheets auto-fit** — `AGENT_SHEETS_AUTO_FIT` (default on) resizes columns after value writes; empty spacer columns pinned narrow; `sheets_rest_auto_fit` for manual refit
+- **User reply finalize** — `maybeRunUserReplyFinalizePass` runs one tool-free completion when a turn would end with tools/vault only; streams assistant text without fake user nudges (`AGENT_USER_REPLY_FINALIZE`)
+- **Linear REST** — Expanded issue/project tools, `linear_resolve` helpers, and forgiving arg aliases
+- **Docs** — Google Workspace + Linear guides updated for REST arg shapes and Sheets layout protocol
+- **Docs** — [Google Workspace](../guides/google-workspace.md), [Linear](../guides/linear.md), [Desktop design system](../../apps/liminal_desktop/docs/design-system.md)
+
+---
+
+## v0.0.24 — 2026-06-09 {#v0-0-24}
+
+Hosted OAuth connectors and desktop integrations hub.
+
+**Shipped**
+
+- **Hosted OAuth bridge** — `/connect/<provider>` begin + callback routes broker OAuth; desktop opens the flow and receives tokens on localhost callback
+- **Seven connectors** — Google Workspace, Microsoft 365, GitHub, Slack, Linear, Notion, and Xero through the hosted bridge
+- **Hosted token refresh** — Long-lived connections refresh access tokens server-side; secrets stay on Vireon
+- **Custom GitHub website login** — vireondynamics.com sign-in via shared OAuth callback
+- **Desktop integrations hub** — Connect, disconnect, and inspect providers from Liminal Desktop
+- **Lazy connector tools** — Connector families stay off until a provider is linked
+- **Docs** — [Connectors](../guides/connectors.md)
+
+---
+
 ## v0.0.23 — 2026-06-07 {#v0-0-23}
 
-**Current alpha.** Microsoft 365, styled email dock, lazy tools, Google REST hybrid.
+Microsoft 365, styled email dock, lazy tools, Google REST hybrid.
 
 **Shipped**
 

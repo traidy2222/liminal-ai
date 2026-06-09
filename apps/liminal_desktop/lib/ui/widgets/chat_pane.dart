@@ -7,6 +7,8 @@ import '../../models/persona_ui_layout.dart';
 import '../../protocol/chat_summary.dart';
 import '../../state/app_controller.dart';
 import '../../state/chat_session_controller.dart';
+import '../../models/persona_ui_theme.dart';
+import '../design_system/liminal_design_system.dart';
 import '../theme/liminal_theme_extension.dart';
 import 'approval_sheet.dart';
 import 'ask_user_sheet.dart';
@@ -100,7 +102,12 @@ class ChatPane extends StatelessWidget {
                 final browser = session.browserView;
                 final fileEdit = session.fileEditView;
                 final transcript = session.messages.isEmpty
-                    ? _EmptyPaneBody(title: emptyTitle, body: emptyBody)
+                    ? LiminalEmptyState(
+                        title: emptyTitle,
+                        body: emptyBody,
+                        icon: Icons.chat_bubble_outline,
+                        compact: true,
+                      )
                     : _buildTranscript(context);
 
                 final showBrowser = focused && browser != null && browser.open;
@@ -174,28 +181,38 @@ class ChatPane extends StatelessWidget {
           ),
           ListenableBuilder(
             listenable: Listenable.merge([session, host]),
-            builder: (context, _) => Composer(
-              enabled: true,
-              busy: session.busy,
-              config: host.config,
-              dictation: focused ? host.dictation : null,
-              speechOutput: focused ? host.speechOutput : null,
-              dictationNotice: focused ? host.dictationNotice : null,
-              onDismissDictationNotice: focused ? host.dismissDictationNotice : null,
-              onDictationAutoSend: focused ? host.handleDictationAutoSend : null,
-              onSend: (text, attachments) {
-                unawaited(
-                  host.sendMessage(
-                    text,
-                    chatId: chatId,
-                    attachments: attachments,
-                    liveDictation:
-                        focused && host.dictationSessionActive,
-                  ),
-                );
-              },
-              onAbort: () => host.abortTurn(chatId: chatId),
-            ),
+            builder: (context, _) {
+              final theme =
+                  host.config?.resolvedTheme ?? PersonaUiTheme.liminalDefault;
+              return ChatComposerShell(
+                theme: theme,
+                layout: layout,
+                child: Composer(
+                  enabled: true,
+                  busy: session.busy,
+                  config: host.config,
+                  dictation: focused ? host.dictation : null,
+                  speechOutput: focused ? host.speechOutput : null,
+                  dictationNotice: focused ? host.dictationNotice : null,
+                  onDismissDictationNotice:
+                      focused ? host.dismissDictationNotice : null,
+                  onDictationAutoSend:
+                      focused ? host.handleDictationAutoSend : null,
+                  onSend: (text, attachments) {
+                    unawaited(
+                      host.sendMessage(
+                        text,
+                        chatId: chatId,
+                        attachments: attachments,
+                        liveDictation:
+                            focused && host.dictationSessionActive,
+                      ),
+                    );
+                  },
+                  onAbort: () => host.abortTurn(chatId: chatId),
+                ),
+              );
+            },
           ),
         ],
       ),
@@ -206,6 +223,7 @@ class ChatPane extends StatelessWidget {
     final list = StickyMessageList(
       messages: session.messages,
       showRawHarness: host.showRawHarness,
+      personaLabel: host.config?.personaDisplayLabel,
     );
     if (layout.transcriptMaxWidth <= 0 || !focused) return list;
     return Center(
@@ -237,83 +255,52 @@ class _PaneHeader extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final lim = LiminalTheme.of(context);
-    return InkWell(
-      onTap: focused ? null : onFocus,
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-        decoration: BoxDecoration(
-          border: Border(
-            bottom: BorderSide(
-              color: focused ? lim.accent.withValues(alpha: 0.45) : lim.border,
-              width: focused ? 2 : 1,
+    return LiminalInteractive(
+      enabled: !focused && onFocus != null,
+      onPressed: onFocus,
+      borderRadius: BorderRadius.zero,
+      builder: (context, hovered, _) {
+        return Container(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+          decoration: BoxDecoration(
+            border: Border(
+              bottom: BorderSide(
+                color: focused || hovered
+                    ? lim.accent.withValues(alpha: 0.45)
+                    : lim.border,
+                width: focused ? 2 : 1,
+              ),
             ),
           ),
-        ),
-        child: Row(
-          children: [
-            if (busy)
-              Padding(
-                padding: const EdgeInsets.only(right: 8),
-                child: Icon(Icons.bolt, size: 16, color: lim.accent),
+          child: Row(
+            children: [
+              if (busy)
+                Padding(
+                  padding: const EdgeInsets.only(right: 8),
+                  child: Icon(Icons.bolt, size: 16, color: lim.accent),
+                ),
+              Expanded(
+                child: Text(
+                  title,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                        color: focused ? lim.accent : lim.text,
+                        fontWeight: focused ? FontWeight.w600 : FontWeight.w500,
+                      ),
+                ),
               ),
-            Expanded(
-              child: Text(
-                title,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                      color: focused ? lim.accent : lim.text,
-                      fontWeight: focused ? FontWeight.w600 : FontWeight.w500,
-                    ),
-              ),
-            ),
-            if (showClose && onClose != null)
-              IconButton(
-                tooltip: 'Close pane',
-                visualDensity: VisualDensity.compact,
-                iconSize: 18,
-                onPressed: onClose,
-                icon: Icon(Icons.close, color: lim.textMuted),
-              ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-class _EmptyPaneBody extends StatelessWidget {
-  const _EmptyPaneBody({required this.title, required this.body});
-
-  final String title;
-  final String body;
-
-  @override
-  Widget build(BuildContext context) {
-    final lim = LiminalTheme.of(context);
-    return Center(
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 24),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Text(
-              title,
-              textAlign: TextAlign.center,
-              style: Theme.of(context).textTheme.titleLarge?.copyWith(color: lim.text),
-            ),
-            const SizedBox(height: 8),
-            Text(
-              body,
-              textAlign: TextAlign.center,
-              style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                    color: lim.textMuted,
-                    height: 1.4,
-                  ),
-            ),
-          ],
-        ),
-      ),
+              if (showClose && onClose != null)
+                LiminalIconButton(
+                  icon: Icons.close,
+                  tooltip: 'Close pane',
+                  size: 18,
+                  onPressed: onClose,
+                ),
+            ],
+          ),
+        );
+      },
     );
   }
 }

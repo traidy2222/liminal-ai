@@ -9,9 +9,41 @@ import {
   googleOfficeApiJson,
   qs,
 } from "./google_office_rest_shared.js";
+import { applySheetAutoFit, sheetsAutoFitEnabled } from "./google_sheets_layout.js";
 
 function jsonResult(data: unknown): ToolResult {
   return { ok: true, output: JSON.stringify(data, null, 2) };
+}
+
+const autoFitParam = {
+  type: "boolean" as const,
+  description:
+    "After writing values, auto-fit column widths (and narrow empty spacer columns). " +
+    "Default follows AGENT_SHEETS_AUTO_FIT (on). Set false to skip.",
+};
+
+async function withOptionalAutoFit(
+  args: Record<string, unknown>,
+  spreadsheetId: string,
+  range: string,
+  values: unknown[][],
+  result: ToolResult
+): Promise<ToolResult> {
+  if (!result.ok || !sheetsAutoFitEnabled(args)) return result;
+  const fit = await applySheetAutoFit(spreadsheetId, range, values);
+  if (!fit.ok) {
+    const base = result.output ? `${result.output}\n` : "";
+    return {
+      ok: true,
+      output: `${base}[auto_fit] skipped: ${fit.error}`,
+    };
+  }
+  if (fit.requestsApplied === 0) return result;
+  const base = result.output ? `${result.output}\n` : "";
+  return {
+    ok: true,
+    output: `${base}[auto_fit] applied ${fit.requestsApplied} layout request(s) for ${range}`,
+  };
 }
 
 function valueInputOption(args: Record<string, unknown>): string {
@@ -154,6 +186,7 @@ export function createGoogleSheetsRestTools(): ToolDefinition[] {
         values: arraySchema("2D array of cell values (rows of columns).", { type: "array", items: {} } as never),
         value_input_option: { type: "string", enum: ["RAW", "USER_ENTERED"], description: "Default USER_ENTERED." },
         include_values_in_response: { type: "boolean" },
+        auto_fit: autoFitParam,
       },
       required: ["spreadsheet_id", "range", "values"],
       additionalProperties: false,
@@ -176,7 +209,8 @@ export function createGoogleSheetsRestTools(): ToolDefinition[] {
         { method: "PUT", body: JSON.stringify({ values: args["values"] }) }
       );
       if (!res.ok) return { ok: false, error: res.error };
-      return jsonResult(res.data);
+      const values = args["values"] as unknown[][];
+      return withOptionalAutoFit(args, id, range, values, jsonResult(res.data));
     },
   });
 
@@ -193,6 +227,7 @@ export function createGoogleSheetsRestTools(): ToolDefinition[] {
         values: arraySchema("2D array of rows to append."),
         value_input_option: { type: "string", enum: ["RAW", "USER_ENTERED"] },
         insert_data_option: { type: "string", enum: ["OVERWRITE", "INSERT_ROWS"] },
+        auto_fit: autoFitParam,
       },
       required: ["spreadsheet_id", "range", "values"],
       additionalProperties: false,
@@ -216,7 +251,18 @@ export function createGoogleSheetsRestTools(): ToolDefinition[] {
         { method: "POST", body: JSON.stringify({ values: args["values"] }) }
       );
       if (!res.ok) return { ok: false, error: res.error };
-      return jsonResult(res.data);
+      const values = args["values"] as unknown[][];
+      const updatedRange =
+        res.data &&
+        typeof res.data === "object" &&
+        "updates" in res.data &&
+        res.data.updates &&
+        typeof res.data.updates === "object" &&
+        "updatedRange" in res.data.updates
+          ? String((res.data.updates as { updatedRange?: string }).updatedRange ?? "").trim()
+          : "";
+      const fitRange = updatedRange || range;
+      return withOptionalAutoFit(args, id, fitRange, values, jsonResult(res.data));
     },
   });
 
@@ -278,6 +324,7 @@ export function createGoogleSheetsRestTools(): ToolDefinition[] {
         data: arraySchema("ValueRange objects: { range, values } per Sheets API."),
         value_input_option: { type: "string", enum: ["RAW", "USER_ENTERED"] },
         include_values_in_response: { type: "boolean" },
+        auto_fit: autoFitParam,
       },
       required: ["spreadsheet_id", "data"],
       additionalProperties: false,
@@ -302,7 +349,22 @@ export function createGoogleSheetsRestTools(): ToolDefinition[] {
         { method: "POST", body: JSON.stringify(body) }
       );
       if (!res.ok) return { ok: false, error: res.error };
-      return jsonResult(res.data);
+      let out = jsonResult(res.data);
+      if (sheetsAutoFitEnabled(args) && Array.isArray(args["data"])) {
+        for (const block of args["data"] as Record<string, unknown>[]) {
+          const blockRange = String(block["range"] ?? "").trim();
+          const blockValues = block["values"];
+          if (!blockRange || !Array.isArray(blockValues)) continue;
+          out = await withOptionalAutoFit(
+            args,
+            id,
+            blockRange,
+            blockValues as unknown[][],
+            out
+          );
+        }
+      }
+      return out;
     },
   });
 
@@ -334,6 +396,32 @@ export function createGoogleSheetsRestTools(): ToolDefinition[] {
       );
       if (!res.ok) return { ok: false, error: res.error };
       return jsonResult(res.data);
+    },
+  });
+
+  const sheetsRestAutoFit = defineTool({
+    name: "sheets_rest_auto_fit",
+    description:
+      "WHAT: Auto-fit column widths for an A1 range (Sheets autoResizeDimensions + spacer columns).\n" +
+      "WHEN: After manual edits or batch_update formatting — or when auto_fit on a write was skipped.",
+    parameters: {
+      type: "object",
+      properties: {
+        spreadsheet_id: { type: "string" },
+        range: { type: "string", description: "A1 range to fit, e.g. Sheet1!A1:H50." },
+      },
+      required: ["spreadsheet_id", "range"],
+      additionalProperties: false,
+    },
+    requiresApproval: true,
+    dangerLevel: "destructive",
+    handler: async (args): Promise<ToolResult> => {
+      const id = String(args["spreadsheet_id"] ?? "").trim();
+      const range = String(args["range"] ?? "").trim();
+      if (!id || !range) return { ok: false, error: "spreadsheet_id and range are required" };
+      const fit = await applySheetAutoFit(id, range);
+      if (!fit.ok) return { ok: false, error: fit.error };
+      return jsonResult({ range, requestsApplied: fit.requestsApplied });
     },
   });
 
@@ -392,6 +480,7 @@ export function createGoogleSheetsRestTools(): ToolDefinition[] {
     sheetsRestBatchGetValues,
     sheetsRestBatchUpdateValues,
     sheetsRestClearValues,
+    sheetsRestAutoFit,
     sheetsRestBatchUpdate,
   ];
 }

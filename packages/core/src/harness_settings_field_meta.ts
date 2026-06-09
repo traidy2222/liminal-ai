@@ -1891,6 +1891,14 @@ const _META_RAW: Record<string, HarnessSettingsFieldMeta> = {
       "Register docs_rest_*, sheets_rest_*, slides_rest_*, and office_rest_export_file (classic Docs/Sheets/Slides/Drive APIs). Complements mcp_google_ext_* workspace-mcp. Same OAuth token.",
     valueKind: "boolean",
   },
+  "AGENT_SHEETS_AUTO_FIT": {
+    tabId: "harness",
+    subgroupId: "harness_misc",
+    label: "Sheets auto-fit columns",
+    description:
+      "After sheets_rest_update_values / append / batch_update_values, auto-resize columns to content and pin empty spacer columns to a narrow width. Per-call override: auto_fit:false. sheets_rest_auto_fit for manual refit.",
+    valueKind: "boolean",
+  },
   "AGENT_AGENTCARD": {
     tabId: "harness",
     subgroupId: "harness_misc",

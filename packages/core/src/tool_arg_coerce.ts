@@ -75,6 +75,18 @@ export function coerceValueToSchema(val: unknown, schema: PropertySchema): unkno
     if (typeof val === "boolean") return String(val);
   }
 
+  if (schema.type === "integer" || schema.type === "number") {
+    if (typeof val === "string" && val.trim()) {
+      const n = Number(val.trim());
+      if (Number.isFinite(n)) {
+        return schema.type === "integer" ? Math.trunc(n) : n;
+      }
+    }
+    if (typeof val === "number" && Number.isFinite(val)) {
+      return schema.type === "integer" ? Math.trunc(val) : val;
+    }
+  }
+
   return val;
 }
 
@@ -85,6 +97,18 @@ export function coerceArgsToSchema(
   const out: Record<string, unknown> = { ...args };
   for (const [key, propSchema] of Object.entries(schema.properties)) {
     if (key in out) out[key] = coerceValueToSchema(out[key], propSchema);
+  }
+  return out;
+}
+
+/** Drop keys not declared in the tool schema (after alias normalization). */
+export function pruneArgsToSchema(
+  schema: ToolParameterSchema,
+  args: Record<string, unknown>
+): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  for (const [key, val] of Object.entries(args)) {
+    if (key in schema.properties) out[key] = val;
   }
   return out;
 }

@@ -336,10 +336,13 @@ function formatSidecarProbeLine(label: string, probe: SidecarProbeResult): strin
 export async function buildIntegrationLiveProbeLines(): Promise<string[]> {
   const lines: string[] = ["### Live probes (this session)"];
   try {
-    const [gmailMcp, calMcp, calRest, googleExt, msMcp, githubMcp, slackScopes] =
+    const [gmailMcp, driveMcp, calMcp, chatMcp, peopleMcp, calRest, googleExt, msMcp, githubMcp, slackScopes] =
       await Promise.all([
       probeGoogleOfficialMcp("gmail"),
+      probeGoogleOfficialMcp("drive"),
       probeGoogleOfficialMcp("calendar"),
+      probeGoogleOfficialMcp("chat"),
+      probeGoogleOfficialMcp("people"),
       probeGoogleCalendarRest(),
       probeGoogleExtSidecar(),
       probeMicrosoftGraphMcp(),
@@ -347,7 +350,10 @@ export async function buildIntegrationLiveProbeLines(): Promise<string[]> {
       probeSlackLiveScopes(),
     ]);
     lines.push(formatMcpProbeLine("Gmail", gmailMcp));
+    lines.push(formatMcpProbeLine("Drive", driveMcp));
     lines.push(formatMcpProbeLine("Calendar", calMcp));
+    lines.push(formatMcpProbeLine("Chat", chatMcp));
+    lines.push(formatMcpProbeLine("People", peopleMcp));
     lines.push(formatRestProbeLine("Calendar", calRest));
     lines.push(formatSidecarProbeLine("Google Docs/Sheets (google_ext)", googleExt));
     lines.push(formatSidecarProbeLine("Microsoft Graph MCP", msMcp));

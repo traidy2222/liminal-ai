@@ -31,6 +31,7 @@ class LiminalTokens {
     required this.typeScale,
     required this.glow,
     required this.messageStyle,
+    required this.shell,
     this.gradient,
   });
 
@@ -60,6 +61,8 @@ class LiminalTokens {
   final double glow;
   /// `bubble` | `flat` | `transcript` — how message rows are rendered.
   final String messageStyle;
+  /// `hud` | `terminal` | `studio` | `minimal`.
+  final String shell;
   final PersonaGradient? gradient;
 
   static const _bg = Color(0xFF020408);
@@ -86,7 +89,10 @@ class LiminalTokens {
       codeBackground: const Color(0xFF030810),
       radius: persona.radiusValue,
       displayLabel: persona.displayLabel,
-      showGrid: persona.background == 'grid' && persona.shell != 'minimal',
+      showGrid: persona.background == 'grid' &&
+          persona.shell != 'minimal' &&
+          persona.shell != 'terminal',
+      shell: persona.shell,
       fontFamily: f.themeFontFamily,
       fontFamilyMono: f.monoFamily,
       fontFamilyHeading: f.headingFamily,

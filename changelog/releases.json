@@ -1,7 +1,57 @@
 {
   "stage": "alpha",
-  "currentVersion": "0.0.23",
+  "currentVersion": "0.0.25",
   "releases": [
+    {
+      "version": "0.0.25",
+      "date": "2026-06-09",
+      "tagline": "Desktop design system, Sheets auto-fit, integration arg reliability, research reply fix.",
+      "summary": "Ships a Flutter design system and polished Vireon hub + chat UI, harness-side Google/Linear/Sheets tool-arg normalization, automatic Sheets column/spacer sizing after writes, and a structural user-reply finalize pass so research turns end with a chat answer.",
+      "bullets": [
+        "**Desktop design system** — Shared tokens, primitives (Button, Card, Badge), patterns (Sheet, EmptyState, SearchField), persona shells; wired through hub, home, chat panes, composer, and settings",
+        "**Vireon hub** — Status strip, quick actions, mission control, searchable chat list, integration chips, two-column layout, pull-to-refresh",
+        "**Chat UI** — Distinct user/assistant/tool/reasoning lanes (`chat_message_frame`, `reasoning_block`, `tool_category`); polished composer, drawer, message and tool activity tiles",
+        "**Tool arg pipeline** — `prepareToolArgsForValidation` normalizes Google MCP, Google REST, and Linear args before schema validation; fixes Sheets `requests`/`data` JSON-string coercion and MCP HTTP 400 from hallucinated fields",
+        "**Sheets auto-fit** — `AGENT_SHEETS_AUTO_FIT` (default on) resizes columns after value writes; empty spacer columns pinned narrow; `sheets_rest_auto_fit` for manual refit",
+        "**User reply finalize** — `maybeRunUserReplyFinalizePass` runs one tool-free completion when a turn would end with tools/vault only; streams assistant text without fake user nudges (`AGENT_USER_REPLY_FINALIZE`)",
+        "**Linear REST** — Expanded issue/project tools, `linear_resolve` helpers, and forgiving arg aliases",
+        "**Docs** — Google Workspace + Linear guides updated for REST arg shapes and Sheets layout protocol"
+      ],
+      "docs": [
+        {
+          "label": "Google Workspace",
+          "href": "../guides/google-workspace.md"
+        },
+        {
+          "label": "Linear",
+          "href": "../guides/linear.md"
+        },
+        {
+          "label": "Desktop design system",
+          "href": "../../apps/liminal_desktop/docs/design-system.md"
+        }
+      ]
+    },
+    {
+      "version": "0.0.24",
+      "date": "2026-06-09",
+      "tagline": "Hosted OAuth connectors and desktop integrations hub.",
+      "summary": "Adds hosted OAuth on vireondynamics.com for Google Workspace, Microsoft 365, GitHub, Slack, Linear, Notion, and Xero — no per-user app registration — plus hosted token refresh, custom GitHub website login, and a desktop-first integrations hub.",
+      "bullets": [
+        "**Hosted OAuth bridge** — `/connect/<provider>` begin + callback routes broker OAuth; desktop opens the flow and receives tokens on localhost callback",
+        "**Seven connectors** — Google Workspace, Microsoft 365, GitHub, Slack, Linear, Notion, and Xero through the hosted bridge",
+        "**Hosted token refresh** — Long-lived connections refresh access tokens server-side; secrets stay on Vireon",
+        "**Custom GitHub website login** — vireondynamics.com sign-in via shared OAuth callback",
+        "**Desktop integrations hub** — Connect, disconnect, and inspect providers from Liminal Desktop",
+        "**Lazy connector tools** — Connector families stay off until a provider is linked"
+      ],
+      "docs": [
+        {
+          "label": "Connectors",
+          "href": "../guides/connectors.md"
+        }
+      ]
+    },
     {
       "version": "0.0.23",
       "date": "2026-06-07",

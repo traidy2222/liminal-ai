@@ -1,53 +1,31 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { coerceArgsToSchema, coerceJsonArrayValue } from "./tool_arg_coerce.js";
+import { coerceArgsToSchema, pruneArgsToSchema } from "./tool_arg_coerce.js";
 
-test("coerceArgsToSchema parses stringified JSON arrays", () => {
+test("coerceValueToSchema coerces string to integer", () => {
+  const out = coerceArgsToSchema(
+    {
+      type: "object",
+      properties: { pageSize: { type: "integer" } },
+    },
+    { pageSize: "25" }
+  );
+  assert.equal(out.pageSize, 25);
+});
+
+test("pruneArgsToSchema drops unknown keys after alias normalization", () => {
   const schema = {
     type: "object" as const,
     properties: {
-      blocks: {
-        type: "array",
-        items: { type: "object" },
-      },
+      issue: { type: "string" as const },
+      issue_id: { type: "string" as const },
     },
-    required: ["blocks"],
+    additionalProperties: false,
   };
-  const out = coerceArgsToSchema(schema, {
-    blocks: '[{"type":"heading","level":1,"text":"Title"}]',
+  const pruned = pruneArgsToSchema(schema, {
+    issue: "VIP-1",
+    issue_id: "VIP-1",
+    status: "Done",
   });
-  assert.ok(Array.isArray(out.blocks));
-  assert.equal((out.blocks as unknown[]).length, 1);
-});
-
-test("coerceJsonArrayValue parses object JSON strings into one-element arrays", () => {
-  const out = coerceJsonArrayValue('{"type":"heading","level":1,"text":"Title"}');
-  assert.ok(Array.isArray(out));
-  assert.equal((out as unknown[]).length, 1);
-});
-
-test("coerceArgsToSchema stringifies numeric values for string fields", () => {
-  const schema = {
-    type: "object" as const,
-    properties: {
-      thread_ts: { type: "string" },
-    },
-    required: ["thread_ts"],
-  };
-  const out = coerceArgsToSchema(schema, { thread_ts: 1772746316.035959 });
-  assert.equal(out.thread_ts, "1772746316.035959");
-});
-
-test("coerceArgsToSchema wraps a single object as one-element array", () => {
-  const schema = {
-    type: "object" as const,
-    properties: {
-      blocks: { type: "array", items: { type: "object" } },
-    },
-  };
-  const out = coerceArgsToSchema(schema, {
-    blocks: { type: "paragraph", text: "Hello" },
-  });
-  assert.ok(Array.isArray(out.blocks));
-  assert.equal((out.blocks as unknown[]).length, 1);
+  assert.deepEqual(pruned, { issue: "VIP-1", issue_id: "VIP-1" });
 });

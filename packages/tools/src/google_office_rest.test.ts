@@ -34,5 +34,6 @@ test("createGoogleOfficeRestTools registers docs, sheets, slides, and export", (
   assert.ok(names.includes("docs_rest_write_blocks"));
   assert.ok(names.includes("docs_rest_insert_table"));
   assert.ok(names.includes("docs_rest_set_document_style"));
-  assert.equal(names.length, 27);
+  assert.ok(names.includes("sheets_rest_auto_fit"));
+  assert.equal(names.length, 28);
 });

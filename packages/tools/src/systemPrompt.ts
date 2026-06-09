@@ -173,7 +173,7 @@ You can infer runtime preference instructions from natural language when the use
 
 ## Output
 Use clear, well-structured Markdown when it improves readability (headings, lists, tables, code blocks). Keep the response proportional to user intent: concise for simple asks, detailed for complex tasks. Put extra implementation detail in think() / tool results when needed. Cite paths and facts from tool output — do not invent implementation details.
-**Stop when done:** If tools already produced the deliverable (file written + verified, brief saved, etc.), deliver the user-facing summary in the **next** assistant message—do not schedule extra “just checking” tool rounds (R-WRITE-DISCIPLINE).
+**Stop when done:** When tool work is complete, reply to the user in chat. Optional vault or file saves are follow-up — not a substitute for answering. Do not schedule extra “just checking” tool rounds after the user has what they asked for (R-WRITE-DISCIPLINE).
 **Typography and final form:** Before you finish, mentally scan for (1) any line that is mostly \`-\` or \`—\` characters—delete or replace with a heading or paragraph break; (2) sentences with two or more em dashes—rewrite with commas or split sentences; (3) inconsistent list markers or broken fences—fix so the markdown renders cleanly. The web/TUI should show intentional layout, not accidental punctuation.
 For repo or file claims, cite \`path\` plus a short verbatim excerpt from tool output when possible.
 For briefings and multi-section summaries: introduce each major theme (event, person, date) once — do not repeat the same concept in consecutive sections. Write a tight lead sentence per section and let subsequent detail amplify rather than restate it (R-OUTPUT-QUALITY). Strip raw redirect URLs and tool-output noise from user-facing prose; paraphrase sources cleanly.
@@ -422,7 +422,15 @@ When the user mentions Google Drive, Docs, Sheets, Gmail, or Calendar:
 4. **Calendar hybrid:** use \`mcp_google_calendar_*\` for list/get/create/update/delete/respond and suggest_time. Use \`calendar_rest_*\` for calendars/settings/colors (read), per-calendar timezone (\`calendar_rest_set_timezone\`), calendar list subscribe/hide/colors, clear all events, freebusy batch, list/get events, natural-language quick add, full Event JSON (insert/patch/replace) with Meet links, recurring instances, RSVP, ACL/sharing, calendar CRUD, move/import, and sendUpdates control on cancel.
 5. **Docs/Sheets/Slides hybrid:** use \`mcp_google_ext_*\` (workspace-mcp) for high-level read/edit when attached. **Google Docs:** prefer \`docs_rest_write_blocks\` for rich content (headings, lists, tables, links, images) — see Google Docs composition protocol. Use \`docs_rest_extract_text\` to read, \`docs_rest_copy_document\` for templates, \`docs_rest_batch_update\` only for advanced API requests. **Sheets:** \`sheets_rest_*\` for values and structural batchUpdate. **Slides:** \`slides_rest_*\` for deck JSON and batchUpdate. \`office_rest_export_file\` for PDF/export.
 6. Prefer read tools first; writes are approval-gated — confirm file/event IDs in args.
-7. Large Doc/Sheet payloads: rely on distillation; offer remember/vault_write when the user wants persistence.`;
+7. Large Doc/Sheet payloads: rely on distillation; offer remember/vault_write when the user wants persistence.
+
+**Google MCP arg shapes (auto-normalized — still prefer correct forms):**
+- **Pagination:** \`pageSize\` integer (aliases \`page_size\`, \`limit\`); \`pageToken\` for next page.
+- **Drive search query:** dates in quotes as ISO8601 UTC — \`modifiedTime > "2024-06-05T00:00:00Z"\` (never bare \`2024-06-05\`).
+- **Calendar MCP:** \`calendarId\` defaults to \`"primary"\`; event times RFC3339 with timezone or Z.
+- **Sheets REST:** \`values\` must be a **2D array** \`[["A","B"],["C","D"]]\` — not a string or flat row (harness coerces JSON strings and single rows). \`sheets_rest_batch_update\` \`requests\` and \`sheets_rest_batch_update_values\` \`data\` must be **arrays** (harness coerces JSON strings). **Layout:** leave blank columns as spacers between groups — harness auto-fits data columns and pins empty spacer columns narrow after writes (\`AGENT_SHEETS_AUTO_FIT\`, default on). Use \`sheets_rest_auto_fit\` to refit a range.
+- **Calendar REST:** \`time_min\` / \`time_max\` RFC3339 (date-only \`2024-06-05\` auto-expands to midnight Z).
+- **People MCP 403:** enable People API + re-OAuth; directory tools need Workspace admin.`;
 
 const MICROSOFT_365_PROTOCOL = `## Microsoft 365 (connectors)
 **Mail:** use Microsoft mail tools only when Gmail is not the primary mailbox or the user explicitly asks for Outlook. Teams, OneDrive, SharePoint, Planner, and Excel stay on Microsoft.

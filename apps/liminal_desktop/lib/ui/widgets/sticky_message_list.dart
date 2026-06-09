@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 
 import '../../core/chat_visibility.dart';
 import '../../state/message_models.dart';
+import '../chat/transcript_lane.dart';
+import '../layout/liminal_spacing.dart';
 import '../theme/liminal_theme_extension.dart';
 import 'message_tile.dart';
 
@@ -11,12 +13,14 @@ class StickyMessageList extends StatefulWidget {
     super.key,
     required this.messages,
     required this.showRawHarness,
-    this.padding = const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+    this.padding = const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+    this.personaLabel,
   });
 
   final List<MessageEntry> messages;
   final bool showRawHarness;
   final EdgeInsets padding;
+  final String? personaLabel;
 
   @override
   State<StickyMessageList> createState() => _StickyMessageListState();
@@ -42,6 +46,7 @@ class _StickyMessageListState extends State<StickyMessageList> {
       AssistantMessage(:final text) => text,
       UserMessage(:final text) => text,
       ThinkMessage(:final content) => content,
+      ModelReasoningMessage(:final text) => text,
       _ => '',
     };
   }
@@ -73,6 +78,7 @@ class _StickyMessageListState extends State<StickyMessageList> {
   @override
   Widget build(BuildContext context) {
     final lim = LiminalTheme.of(context);
+    final persona = widget.personaLabel ?? lim.displayLabel;
     final visible = visibleChatMessages(
       widget.messages,
       showRawHarness: widget.showRawHarness,
@@ -94,9 +100,21 @@ class _StickyMessageListState extends State<StickyMessageList> {
       primary: false,
       itemCount: visible.length,
       itemBuilder: (context, i) {
-        return MessageTile(
-          entry: visible[i],
+        final entry = visible[i];
+        final tile = MessageTile(
+          entry: entry,
           verboseTools: widget.showRawHarness,
+          personaLabel: persona,
+        );
+        if (isHarnessLaneMessage(entry)) {
+          return TranscriptActivityLane(child: tile);
+        }
+        if (isConversationMessage(entry)) {
+          return tile;
+        }
+        return Padding(
+          padding: const EdgeInsets.only(bottom: LiminalSpacing.xs),
+          child: tile,
         );
       },
     );

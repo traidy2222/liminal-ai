@@ -29,6 +29,7 @@ In [Google Cloud Console](https://console.cloud.google.com/) for the **Vireon** 
    | Drive | Google Drive API | **Drive MCP API** (`drivemcp.googleapis.com`) |
    | Calendar | Google Calendar API | **Calendar MCP API** (`calendarmcp.googleapis.com`) |
    | Chat | Google Chat API | **Chat MCP API** (`chatmcp.googleapis.com`) |
+   | People | People API | **People API** (`people.googleapis.com`) — MCP at `people.googleapis.com/mcp/v1` |
 
    Gmail uses **`mcp_google_gmail_*`** tools against `gmailmcp.googleapis.com`. Enable **Gmail MCP API** in addition to Gmail API.
 
@@ -226,6 +227,30 @@ Connections persist under `~/.liminal/api_connections/`. OAuth tokens are encryp
 | `AGENT_GOOGLE_CALENDAR_REST` | `1` | Register full `calendar_rest_*` surface (calendars, timezone, events, freebusy, ACL, Meet, …) alongside Calendar MCP |
 | `AGENT_GOOGLE_OFFICE_REST` | `1` | Register `docs_rest_*`, `sheets_rest_*`, `slides_rest_*`, `office_rest_export_file` alongside workspace-mcp |
 
+## Google MCP agent tips (arg aliases)
+
+Official Google MCP tools are registered dynamically (`mcp_google_{service}_{remote_name}`). The harness normalizes common model mistakes before validation:
+
+| You can pass | Maps to |
+|--------------|---------|
+| `page_size`, `limit`, `max_results` | `pageSize` (integer) |
+| `page_token`, `next_page_token` | `pageToken` |
+| `q`, `search`, `term` | `query` |
+| `calendar_id` | `calendarId` |
+| `space_name` | `spaceName` |
+
+**Drive search queries:** Use ISO8601 UTC dates in quotes: `modifiedTime > "2024-06-05T00:00:00Z"`. Bare `2024-06-05` is auto-fixed by the harness but prefer full ISO strings.
+
+**Sheets REST:** `sheets_rest_update_values` needs `values` as a 2D JSON array `[["col1","col2"]]`. JSON strings and single rows are coerced automatically.
+
+**Calendar REST:** `time_min` / `time_max` accept `2024-06-05` and expand to `2024-06-05T00:00:00Z`.
+
+**Integer fields:** Google MCP schemas declare `integer`; JSON only has numbers — the harness coerces `pageSize: 25` and `"25"` correctly (fixes `expected integer, got number`). Default `pageSize` is 25 when omitted on list tools.
+
+**People MCP 403:** Enable People API, re-connect OAuth (adds `userinfo.profile`), enroll in Workspace Developer Preview. `directory.readonly` needs Workspace admin for org directory — personal `get_user_profile` uses contacts/profile scopes.
+
+Re-attach after harness update: `connect_provider({ provider: "google_workspace" })` or Integrations → Attach MCP tools.
+
 ## Safety
 
 - MCP **read** tools run without approval.
@@ -242,5 +267,7 @@ Connections persist under `~/.liminal/api_connections/`. OAuth tokens are encryp
 - **Gmail works, Calendar does not**: Calendar uses a **separate** MCP connection (`google_calendar`) and **calendarmcp.googleapis.com** (not the same as Gmail MCP). Desktop: **Integrations → Attach Calendar**. Agent: `connect_provider({ provider: "google_workspace", services: ["calendar"] })`. `list_connectors` **Live probes** section shows attach + API status for each.
 - **Calendar MCP 403 vs Calendar REST works**: Official MCP (`calendarmcp.googleapis.com`) and classic REST (`calendar.googleapis.com`) are different Cloud APIs — enable both if you use hybrid tools.
 - **Tools invisible under lazy loading**: Call `list_connectors` or `activate_tool_family({ family: "google_workspace" })`; restored Google connections auto-activate by default when `AGENT_INTEGRATION_AUTO_ACTIVATE=1`.
+- **`Invalid args: pageSize expected integer, got number`**: Update harness (fixed in core dispatcher) and restart; aliases `page_size` / `limit` also work.
+- **People MCP 403 on `get_user_profile`**: Enable People API, re-OAuth with People service checked, confirm Workspace Developer Preview enrollment.
 
 Probe both APIs: `node scripts/lib/google-mcp-probe.mjs` (after `npm run build -w @liminal/core`).

@@ -255,6 +255,10 @@ import { inferSpeculationArgs } from "./paste_args_inference.js";
 import { maybeWriteTrajectory } from "./trajectory_writer.js";
 import { scoreTurnOutcome, recordEffortOutcome, getBestEffortForIntent } from "./outcome_scorer.js";
 import { WorldContextRefresher } from "./world_context_delta.js";
+import {
+  needsUserReplyFinalization,
+  USER_REPLY_FINALIZE_SYSTEM,
+} from "./user_reply_guard.js";
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -1206,6 +1210,8 @@ export class AgentHarness {
   /** When true, mic session armed — voice conversation (speak() + short written). */
   private liveDictationThisSend = false;
   private voicePostToolsNudgeFired = false;
+  /** One tool-free finalize completion when tools ran but chat answer is missing. */
+  private userReplyFinalizeAttempted = false;
   /** Per-send TTS budget for speak() and harness fallback dedupe. */
   readonly ttsTurnBudget = new TtsTurnBudget();
   /** Wired from tools/speak.ts — synthesize when the model omits speak() in voice mode. */
@@ -2439,6 +2445,7 @@ export class AgentHarness {
     this.evidenceLog = [];
     this.turnEndEmittedThisSend = false;
     this.voicePostToolsNudgeFired = false;
+    this.userReplyFinalizeAttempted = false;
     this.ruleRecallInjectedThisSend = false;
     this.injectedRuleIdsThisSend = [];
     this.writeIntegrityNudgeThisSend = false;
@@ -2816,7 +2823,7 @@ export class AgentHarness {
           "[RESEARCH TURN] The user needs current, sourced information — not a reasoning essay. " +
           "After at most a few sentences of native reasoning, call web_search and web_fetch (and recall_relevant / vault_search when prior briefings may exist). " +
           "Run multiple queries and fetches in parallel when useful. Do not describe tools you plan to call inside reasoning; execute them. " +
-          "Cite sources and dates in the final answer.",
+          "When tool work is done, reply to the user in chat. vault_write/remember are optional — not a substitute for answering.",
       });
     }
     if (
@@ -5917,6 +5924,7 @@ export class AgentHarness {
     } else {
       // Text-only completion: end the turn when the model stops (no post-assistant
       // critic, synthesis judge, cite guard, or stream [CONTINUE] loops).
+      await this.maybeRunUserReplyFinalizePass();
       // Per-turn outcome score (used by summary + root-only learning paths).
       const turnOutcome = scoreTurnOutcome({
         toolsUsed: this._toolOutcomesThisTurn,
@@ -6691,6 +6699,82 @@ export class AgentHarness {
       role: "user",
       content: `[STREAM RETRY] Provider ${retryLabel}. ${nudge}`,
     });
+  }
+
+  /**
+   * When the model stopped after tools but without a user-visible answer, run one
+   * tool-free completion (ephemeral system instruction — not stored in context).
+   */
+  private async maybeRunUserReplyFinalizePass(): Promise<void> {
+    if (this.userReplyFinalizeAttempted || this.abortSignal?.aborted) return;
+    const openingTurn = this.sessionGreetingThisSend || this.personaBootstrapPromptThisSend;
+    const assistant = (this.context.getLastAssistantMessage() ?? "").trim();
+    if (
+      !needsUserReplyFinalization({
+        assistantText: assistant,
+        toolsUsed: this.toolsUsedThisTurn,
+        intent: this.turnInference?.intent,
+        openingTurn,
+        sessionGreeting: this.sessionGreetingThisSend,
+        personaBootstrap: this.personaBootstrapPromptThisSend,
+      })
+    ) {
+      return;
+    }
+
+    this.userReplyFinalizeAttempted = true;
+    this.emitter.emit("text", {
+      delta: "[HARNESS] Generating user reply after tool work.\n",
+      channel: "trace",
+    });
+
+    const baseMessages = scrubMessagesSpecialTokens(await this.context.buildMessages());
+    const finalizeMessages: Message[] = [
+      ...baseMessages,
+      { role: "system", content: USER_REPLY_FINALIZE_SYSTEM },
+    ];
+    const routingModel = this._turnRoutingProfile?.applied
+      ? this._turnRoutingProfile.modelSlug
+      : undefined;
+
+    const accumulator = new StreamAccumulator();
+    const streamAbort = new AbortController();
+    try {
+      const stream = await this.streamWithRetry(
+        finalizeMessages,
+        [],
+        routingModel,
+        null,
+        streamAbort,
+        "external"
+      );
+      for await (const chunk of withChunkTimeout(stream, () =>
+        resolveStreamChunkTimeoutMs({
+          baseURL: this.config.baseURL,
+          reasoningEffort: null,
+          fileWriteSinkActive: false,
+          largeToolArgInFlight: false,
+          runtimePreferences: this.runtimePreferences,
+        })
+      )) {
+        if (this.abortSignal?.aborted) return;
+        const parsed = accumulator.processChunk(chunk);
+        if (parsed.textDelta) {
+          this.emitter.emit("text", { delta: parsed.textDelta, channel: "user" });
+        }
+      }
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      this.emitter.emit("text", {
+        delta: `\n[HARNESS] User-reply finalize failed: ${msg}\n`,
+        channel: "trace",
+      });
+      return;
+    }
+
+    const text = accumulator.accumulatedText.trim();
+    if (!text) return;
+    this.context.append(this.buildAssistantMessage(text, []));
   }
 
   private buildAssistantMessage(

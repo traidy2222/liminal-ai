@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../theme/liminal_theme_extension.dart';
 import 'html_embed_view.dart';
 import 'liminal_markdown_utils.dart';
 import 'markdown_block.dart';
@@ -59,11 +60,13 @@ class _StreamingCursor extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final lim = LiminalTheme.of(context);
     return Text(
-      '█',
+      '▍',
       style: TextStyle(
-        color: Theme.of(context).colorScheme.primary,
-        fontFamily: 'JetBrains Mono',
+        color: lim.assistantAccent,
+        fontFamily: lim.fontFamilyMono,
+        fontSize: 14,
       ),
     );
   }

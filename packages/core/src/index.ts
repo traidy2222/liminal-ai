@@ -217,6 +217,17 @@ export { detectEmailPlaceholderViolations } from "./harness_product_identity.js"
 export { gatherRepoMapLines } from "./repo_map.js";
 export type { RepoMapOptions } from "./repo_map.js";
 export { guardToolArgs } from "./tool_arg_guard.js";
+export { expandMcpToolProperties, normalizeMcpPropertyType, MCP_FIELD_ALIASES } from "./mcp_schema_normalize.js";
+export {
+  normalizeGoogleMcpToolArgs,
+  coerceMcpInteger,
+  normalizeDriveMcpQuery,
+  cleanMcpCallArgs,
+} from "./google_mcp_tool_args.js";
+export { normalizeGoogleRestToolArgs, coerceSheetsValues, toRfc3339DateTime } from "./google_rest_tool_args.js";
+export { coerceArgsToSchema, pruneArgsToSchema } from "./tool_arg_coerce.js";
+export { prepareToolArgsForValidation } from "./tool_dispatch_args.js";
+export type { ToolArgsPrepResult } from "./tool_dispatch_args.js";
 export {
   FILE_WRITE_TOOL_NAMES,
   SPAWN_APP_TOOL_NAME,

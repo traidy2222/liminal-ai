@@ -41,7 +41,7 @@ Each build includes **`liminald/repo/`** (portable sidecar + `node_modules`) and
 
 ## GitHub Release (all platforms)
 
-From the monorepo root, tag `v<version>-desktop` (e.g. `v0.0.23-desktop`) and push — **Actions → Release Desktop** builds Windows, macOS (arm64), and Linux x64 and uploads:
+From the monorepo root, tag `v<version>-desktop` (e.g. `v0.0.25-desktop`) and push — **Actions → Release Desktop** builds Windows, macOS (arm64), and Linux x64 and uploads:
 
 - `liminal-desktop-windows-x64-v<version>.zip`
 - `liminal-desktop-macos-arm64-v<version>.zip`
@@ -115,7 +115,7 @@ lib/
   protocol/       # Dart mirror of @liminal/protocol frames
   sidecar/        # spawn liminald
   transport/      # WebSocket client
-  ui/             # screens + widgets
+  ui/             # screens + widgets + design_system/
   audio/          # dictation (record + VAD), sidecar ASR client, TTS playback queue
 ```
 
@@ -131,6 +131,7 @@ lib/
 - Sticky auto-scroll
 - Provider setup + persona bootstrap + harness Settings tabs (`get_settings` / `update_settings`)
 - Tool approval + ask-user surfaces
+- **Design system** — `lib/ui/design_system/` (buttons, cards, shells); see [docs/design-system.md](docs/design-system.md)
 - **Desktop apps** — separate OS windows (weather v1); see [Liminal desktop apps](../../docs/concepts/liminal-apps.md)
 
 ## Voice QA (manual)

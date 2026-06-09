@@ -12,9 +12,9 @@ import '../../models/vireon_account.dart';
 import '../layout/liminal_breakpoints.dart';
 import '../layout/liminal_spacing.dart';
 import '../theme/liminal_theme_extension.dart';
+import '../design_system/liminal_design_system.dart';
 import '../widgets/liminal_form_field.dart';
 import '../widgets/liminal_page_canvas.dart';
-import '../widgets/liminal_section.dart';
 import '../widgets/liminal_shell.dart';
 
 class SettingsScreen extends StatefulWidget {
@@ -896,7 +896,6 @@ class _HarnessSearchHeader extends SliverPersistentHeaderDelegate {
 
   @override
   Widget build(BuildContext context, double shrinkOffset, bool overlapsContent) {
-    final lim = LiminalTheme.of(context);
     return Material(
       color: background,
       child: Padding(
@@ -906,32 +905,13 @@ class _HarnessSearchHeader extends SliverPersistentHeaderDelegate {
           LiminalSpacing.md,
           LiminalSpacing.sm,
         ),
-        child: TextField(
-          controller: search,
-          enabled: !saving,
-          textInputAction: TextInputAction.search,
-          decoration: InputDecoration(
-            isDense: true,
-            hintText: 'Search settings…',
-            prefixIcon: const Icon(Icons.search, size: 20),
-            suffixIcon: searchText.isEmpty
-                ? null
-                : IconButton(
-                    icon: const Icon(Icons.clear, size: 18),
-                    onPressed: saving
-                        ? null
-                        : () {
-                            search.clear();
-                          },
-                    tooltip: 'Clear search',
-                  ),
-            border: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(4),
-              borderSide: BorderSide(color: lim.border),
-            ),
-            enabledBorder: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(4),
-              borderSide: BorderSide(color: lim.border),
+        child: IgnorePointer(
+          ignoring: saving,
+          child: Opacity(
+            opacity: saving ? 0.6 : 1,
+            child: LiminalSearchField(
+              controller: search,
+              hintText: 'Search settings…',
             ),
           ),
         ),

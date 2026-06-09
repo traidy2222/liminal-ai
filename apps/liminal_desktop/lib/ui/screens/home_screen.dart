@@ -6,6 +6,7 @@ import '../../models/persona_ui_layout.dart';
 import '../../models/persona_ui_theme.dart';
 import '../../routing/routes.dart';
 import '../../state/app_controller.dart';
+import '../design_system/liminal_design_system.dart';
 import '../theme/liminal_theme_extension.dart';
 import '../theme/liminal_tokens.dart';
 import '../widgets/chat_drawer.dart';
@@ -58,9 +59,10 @@ class _HomeScreenState extends State<HomeScreen> {
     final chatId = host.activeChatId;
     final lim = LiminalTheme.of(context);
     final copy = host.config?.resolvedCopy;
-    final layout = PersonaLayoutSpec.fromTheme(
-      host.config?.resolvedTheme ?? PersonaUiTheme.liminalDefault,
-    );
+    final personaTheme =
+        host.config?.resolvedTheme ?? PersonaUiTheme.liminalDefault;
+    final layout = PersonaLayoutSpec.fromTheme(personaTheme);
+    final shellStyle = PersonaShellStyle.fromTheme(personaTheme);
     final panes = host.visibleChatIds;
     final paneListenables = [
       host,
@@ -82,10 +84,18 @@ class _HomeScreenState extends State<HomeScreen> {
         onDelete: host.deleteChat,
       ),
       appBar: AppBar(
+        backgroundColor: shellStyle.appBarBackground(context),
+        surfaceTintColor: Colors.transparent,
+        shape: shellStyle.appBarBottomSide(context) != null
+            ? RoundedRectangleBorder(
+                side: shellStyle.appBarBottomSide(context)!,
+              )
+            : null,
+        centerTitle: shellStyle.headerCentered,
         leading: Builder(
-          builder: (context) => IconButton(
+          builder: (context) => LiminalIconButton(
+            icon: Icons.menu,
             tooltip: 'All chats',
-            icon: const Icon(Icons.menu),
             onPressed: () => Scaffold.of(context).openDrawer(),
           ),
         ),
@@ -94,9 +104,9 @@ class _HomeScreenState extends State<HomeScreen> {
           subtitle: _subtitle(host),
         ),
         actions: [
-          IconButton(
+          LiminalIconButton(
+            icon: Icons.home_outlined,
             tooltip: 'Back to home',
-            icon: const Icon(Icons.home_outlined),
             onPressed: () => _goHome(host),
           ),
           ListenableBuilder(
@@ -111,15 +121,13 @@ class _HomeScreenState extends State<HomeScreen> {
               );
             },
           ),
-          IconButton(
+          LiminalIconButton(
             tooltip: host.showRawHarness
                 ? 'Hide harness internals (trace, working state, retries)'
                 : 'Show harness internals (tools always visible)',
             onPressed: host.toggleShowRawHarness,
-            icon: Icon(
-              host.showRawHarness ? Icons.data_object : Icons.data_object_outlined,
-              color: host.showRawHarness ? lim.accent : lim.textMuted,
-            ),
+            icon: host.showRawHarness ? Icons.data_object : Icons.data_object_outlined,
+            selected: host.showRawHarness,
           ),
           PopupMenuButton<String>(
             tooltip: 'More',
@@ -153,13 +161,9 @@ class _HomeScreenState extends State<HomeScreen> {
         ],
       ),
       body: panes.isEmpty
-          ? Center(
-              child: Text(
-                'Opening chat…',
-                style: Theme.of(context).textTheme.bodyLarge?.copyWith(
-                      color: lim.textMuted,
-                    ),
-              ),
+          ? const LiminalEmptyState(
+              title: 'Opening chat…',
+              compact: true,
             )
           : panes.length == 1
               ? ChatPane(

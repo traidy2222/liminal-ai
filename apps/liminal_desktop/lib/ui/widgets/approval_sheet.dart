@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 
 import '../../state/message_models.dart';
+import '../design_system/liminal_design_system.dart';
 import '../theme/liminal_theme_extension.dart';
 
 class ApprovalSheet extends StatelessWidget {
@@ -26,51 +27,26 @@ class ApprovalSheet extends StatelessWidget {
     final lim = LiminalTheme.of(context);
     final argsJson = const JsonEncoder.withIndent('  ').convert(pending.args);
     final summary = _spawnAppSummary(pending);
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: lim.panel.withValues(alpha: 0.98),
-        border: Border(
-          top: BorderSide(color: lim.warn.withValues(alpha: 0.6), width: 2),
-        ),
-      ),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
+    return LiminalSheet(
+      title: queueTotal > 1
+          ? 'Approve tool: ${pending.name} ($queueIndex of $queueTotal)'
+          : 'Approve tool: ${pending.name}',
+      leading: Icon(Icons.gavel, color: lim.warn, size: 20),
+      accentColor: lim.warn,
+      body: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
+        mainAxisSize: MainAxisSize.min,
         children: [
-          Row(
-            children: [
-              Icon(Icons.gavel, color: lim.warn, size: 20),
-              const SizedBox(width: 8),
-              Expanded(
-                child: Text(
-                  queueTotal > 1
-                      ? 'Approve tool: ${pending.name} ($queueIndex of $queueTotal)'
-                      : 'Approve tool: ${pending.name}',
-                  style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                        color: lim.warn,
-                      ),
-                ),
-              ),
-            ],
-          ),
-          if (queueTotal > 1) ...[
-            const SizedBox(height: 4),
+          if (queueTotal > 1)
             Text(
               '$queueTotal tools waiting — resolve each prompt to continue.',
-              style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                    color: lim.textMuted,
-                  ),
+              style: LiminalTypography.body(context),
             ),
-          ],
-          const SizedBox(height: 8),
+          if (queueTotal > 1) const SizedBox(height: 8),
           if (summary != null) ...[
             Text(
               summary,
-              style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                    color: lim.text,
-                  ),
+              style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: lim.text),
             ),
             const SizedBox(height: 8),
           ],
@@ -79,29 +55,24 @@ class ApprovalSheet extends StatelessWidget {
             child: SingleChildScrollView(
               child: Text(
                 argsJson,
-                style: TextStyle(
-                  fontFamily: lim.fontFamilyMono,
-                  fontSize: 12,
-                  color: lim.textMuted,
-                ),
+                style: LiminalTypography.mono(context, fontSize: 12, color: lim.textMuted),
               ),
             ),
           ),
-          const SizedBox(height: 12),
-          Row(
-            mainAxisAlignment: MainAxisAlignment.end,
-            children: [
-              TextButton(
-                onPressed: onReject,
-                child: Text('Reject', style: TextStyle(color: lim.danger)),
-              ),
-              const SizedBox(width: 8),
-              FilledButton(
-                onPressed: onApprove,
-                style: FilledButton.styleFrom(backgroundColor: lim.success),
-                child: const Text('Approve'),
-              ),
-            ],
+        ],
+      ),
+      footer: Row(
+        mainAxisAlignment: MainAxisAlignment.end,
+        children: [
+          LiminalButton(
+            label: 'Reject',
+            variant: LiminalButtonVariant.danger,
+            onPressed: onReject,
+          ),
+          const SizedBox(width: 8),
+          LiminalButton(
+            label: 'Approve',
+            onPressed: onApprove,
           ),
         ],
       ),

@@ -2,6 +2,9 @@ import 'package:flutter/material.dart';
 
 import '../../protocol/chat_summary.dart';
 import '../../state/app_controller.dart';
+import '../design_system/liminal_design_system.dart';
+import '../layout/liminal_spacing.dart';
+import '../screens/hub/hub_format.dart';
 import '../theme/liminal_theme_extension.dart';
 import 'liminal_brand.dart';
 
@@ -31,8 +34,12 @@ class ChatDrawer extends StatelessWidget {
   Widget build(BuildContext context) {
     final lim = LiminalTheme.of(context);
     final splitActive = visibleChatIds.length > 1;
+    final sorted = List<ChatSummary>.from(chats)
+      ..sort((a, b) => b.updatedAt.compareTo(a.updatedAt));
+
     return Drawer(
       child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           DrawerHeader(
             margin: EdgeInsets.zero,
@@ -45,90 +52,103 @@ class ChatDrawer extends StatelessWidget {
               child: LiminalBrandMark(compact: true),
             ),
           ),
-          ListTile(
-            leading: Icon(Icons.home_outlined, color: lim.textMuted),
-            title: const Text('Home'),
-            onTap: () {
-              Navigator.pop(context);
-              onHome();
-            },
-          ),
-          ListTile(
-            leading: Icon(Icons.add_circle_outline, color: lim.accent),
-            title: const Text('New chat'),
-            onTap: () {
-              Navigator.pop(context);
-              onNewChat();
-            },
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: LiminalSpacing.sm),
+            child: Column(
+              children: [
+                LiminalListRow(
+                  title: 'Home',
+                  leading: Icon(Icons.home_outlined, size: 18, color: lim.textMuted),
+                  onTap: () {
+                    Navigator.pop(context);
+                    onHome();
+                  },
+                ),
+                LiminalListRow(
+                  title: 'New chat',
+                  leading: Icon(Icons.add_circle_outline, size: 18, color: lim.accent),
+                  onTap: () {
+                    Navigator.pop(context);
+                    onNewChat();
+                  },
+                ),
+              ],
+            ),
           ),
           const Divider(height: 1),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 12, 16, 6),
+            child: Text(
+              'CHATS',
+              style: LiminalTheme.mono(
+                context,
+                fontSize: 10,
+                fontWeight: FontWeight.w700,
+                color: lim.textDim,
+              ).copyWith(letterSpacing: 0.1),
+            ),
+          ),
           Expanded(
             child: ListView.builder(
-              itemCount: chats.length,
+              padding: const EdgeInsets.symmetric(horizontal: LiminalSpacing.xs),
+              itemCount: sorted.length,
               itemBuilder: (context, i) {
-                final chat = chats[i];
+                final chat = sorted[i];
                 final focused = chat.chatId == activeChatId;
                 final inPane = visibleChatIds.contains(chat.chatId);
                 final canSplit = !inPane ||
                     (inPane && visibleChatIds.length < AppController.maxVisibleChats);
-                return ListTile(
-                  selected: focused,
-                  selectedTileColor: lim.accent.withValues(alpha: 0.1),
-                  contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
-                  leading: chat.isOrchestrator
-                      ? Icon(Icons.hub_outlined, size: 20, color: lim.accent)
-                      : inPane && splitActive
-                          ? Icon(
-                              focused ? Icons.radio_button_checked : Icons.circle_outlined,
-                              size: 18,
-                              color: focused ? lim.accent : lim.textDim,
-                            )
-                          : null,
-                  title: Text(
-                    chat.title,
-                    maxLines: 2,
-                    overflow: TextOverflow.ellipsis,
-                    style: TextStyle(
-                      color: focused ? lim.accent : lim.text,
-                      fontWeight: focused ? FontWeight.w600 : null,
-                    ),
-                  ),
-                  subtitle: Padding(
-                    padding: const EdgeInsets.only(top: 4),
-                    child: Text(
-                      chat.busy ? 'Running…' : chat.workspaceRoot,
-                      maxLines: 2,
-                      overflow: TextOverflow.ellipsis,
-                      style: LiminalTheme.mono(
-                        context,
-                        fontSize: 11,
-                        color: lim.textDim,
-                      ).copyWith(height: 1.25),
-                    ),
-                  ),
+                final time = hubRelativeTime(chat.updatedAt);
+
+                return LiminalListRow(
+                  title: chat.title,
+                  subtitle: chat.busy ? 'Running…' : chat.workspaceRoot,
+                  monoSubtitle: true,
+                  enabled: true,
                   onTap: () {
                     Navigator.pop(context);
                     onSelect(chat.chatId);
                   },
+                  leading: chat.isOrchestrator
+                      ? Icon(Icons.hub_outlined, size: 18, color: lim.accent)
+                      : inPane && splitActive
+                          ? Icon(
+                              focused ? Icons.radio_button_checked : Icons.circle_outlined,
+                              size: 16,
+                              color: focused ? lim.accent : lim.textDim,
+                            )
+                          : Icon(
+                              chat.busy ? Icons.bolt : Icons.chat_bubble_outline,
+                              size: 18,
+                              color: focused ? lim.accent : lim.textDim,
+                            ),
                   trailing: Row(
                     mainAxisSize: MainAxisSize.min,
                     children: [
+                      if (chat.busy)
+                        const Padding(
+                          padding: EdgeInsets.only(right: 4),
+                          child: LiminalBadge(label: 'Busy', tone: LiminalBadgeTone.accent),
+                        ),
+                      if (time.isNotEmpty)
+                        Padding(
+                          padding: const EdgeInsets.only(right: 4),
+                          child: Text(time, style: LiminalTypography.caption(context)),
+                        ),
                       if (canSplit)
-                        IconButton(
+                        LiminalIconButton(
+                          icon: Icons.vertical_split_outlined,
                           tooltip: inPane ? 'Focus in split view' : 'Open beside current chat',
-                          visualDensity: VisualDensity.compact,
-                          iconSize: 20,
-                          icon: Icon(Icons.vertical_split_outlined, color: lim.textMuted),
+                          size: 18,
                           onPressed: () {
                             Navigator.pop(context);
                             onOpenBeside(chat.chatId);
                           },
                         ),
-                      IconButton(
+                      LiminalIconButton(
+                        icon: Icons.delete_outline,
                         tooltip: 'Delete chat',
-                        visualDensity: VisualDensity.compact,
-                        iconSize: 20,
-                        icon: Icon(Icons.delete_outline, color: lim.textMuted),
+                        size: 18,
                         onPressed: () => onDelete(chat.chatId),
                       ),
                     ],

@@ -144,7 +144,7 @@ More demos and install walkthrough: **[Liminal home](https://www.vireondynamics.
 
 ## What's new
 
-**Latest:** [Liminal 0.0.23 — Microsoft 365, styled email dock, lazy tools](https://www.vireondynamics.com/liminal/changelog/v0-0-23) (2026-06-07)
+**Latest:** [Liminal 0.0.25 — Desktop design system, Sheets auto-fit, arg reliability](https://www.vireondynamics.com/liminal/changelog/v0-0-25) (2026-06-09)
 
 - **Microsoft 365** — Entra OAuth, Graph REST, MCP sidecar (Outlook, Teams, Planner, OneDrive, Excel, SharePoint)
 - **Google Workspace hybrid** — REST tools for Docs, Sheets, Slides, Calendar alongside Gmail MCP

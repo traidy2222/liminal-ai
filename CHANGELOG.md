@@ -2,7 +2,7 @@
 
 All notable changes to [Liminal AI](https://github.com/traidy2222/liminal-ai) are documented here and on the docs portal: [docs.vireondynamics.com/liminal/reference/changelog](https://docs.vireondynamics.com/liminal/reference/changelog).
 
-**Current stage:** **alpha** (`v0.0.23` tip of `main`, 2026-06-07). **Beta**, **RC**, and **v0.1.0 public preview** have not been declared as product releases yet.
+**Current stage:** **alpha** (`v0.0.25` tip of `main`, 2026-06-09). **Beta**, **RC**, and **v0.1.0 public preview** have not been declared as product releases yet.
 
 **Single source:** edit [`changelog/releases.json`](changelog/releases.json), then run `npm run changelog:gen`.
 
@@ -10,7 +10,19 @@ Format: **v0.0.x** entries keyed to the last GitHub push in each slice. Dates ar
 
 Marketing (richer notes): [vireondynamics.com/liminal/changelog](https://www.vireondynamics.com/liminal/changelog)
 
-## [v0.0.23] — 2026-06-07 — Current alpha
+## [v0.0.25] — 2026-06-09 — Current alpha
+
+Ships a Flutter design system and polished Vireon hub + chat UI, harness-side Google/Linear/Sheets tool-arg normalization, automatic Sheets column/spacer sizing after writes, and a structural user-reply finalize pass so research turns end with a chat answer.
+
+[Full notes](https://docs.vireondynamics.com/liminal/reference/changelog#v0-0-25)
+
+## [v0.0.24] — 2026-06-09
+
+Adds hosted OAuth on vireondynamics.com for Google Workspace, Microsoft 365, GitHub, Slack, Linear, Notion, and Xero — no per-user app registration — plus hosted token refresh, custom GitHub website login, and a desktop-first integrations hub.
+
+[Full notes](https://docs.vireondynamics.com/liminal/reference/changelog#v0-0-24)
+
+## [v0.0.23] — 2026-06-07
 
 Adds Microsoft 365 OAuth + Graph REST + MCP sidecar, Google Workspace REST hybrid (Docs/Sheets/Slides/Calendar), GitHub connector, lazy tool-family loading, enterprise email compose (style infer, live preview dock, MIME repair, product-truth guards), desktop integrations hub, and sidecar orchestrator handoff.
 
