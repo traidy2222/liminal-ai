@@ -69,9 +69,13 @@ export function scopesForSlackMode(mode: SlackMode): string[] {
   return mode === "read_only" ? [...READ_USER_SCOPES] : [...READ_USER_SCOPES, ...WRITE_USER_SCOPES];
 }
 
-/** Query params for Vireon hosted OAuth — explicit scope list (mode alone is insufficient). */
+/** Query params for Vireon hosted OAuth — Slack needs user_scope, not bot scope. */
 export function slackHostedConnectExtra(mode: SlackMode = SLACK_DEFAULT_MODE): Record<string, string> {
-  return { scopes: scopesForSlackMode(mode).join(",") };
+  const userScopes = scopesForSlackMode(mode).join(",");
+  return {
+    user_scope: userScopes,
+    scopes: userScopes,
+  };
 }
 
 /** Scopes granted at connect time but missing after app scope expansion — user must reconnect Slack. */

@@ -43,6 +43,7 @@ import {
   listNotionOAuthAccounts,
   revokeNotionAccount,
   missingSlackScopes,
+  slackOAuthClientConfig,
   SLACK_DEFAULT_MODE,
 } from "@liminal/core";
 import { defineTool } from "./helpers.js";
@@ -702,6 +703,15 @@ export function createConnectorTools(registry: ToolRegistry, _emitter: AgentEmit
         } else {
           lines.push(
             "  If Slack tools return missing_scope anyway, token may predate new tools — still Disconnect + Connect once."
+          );
+        }
+        if (slackOAuthClientConfig()) {
+          lines.push(
+            "  Direct Slack OAuth available (SLACK_OAUTH_CLIENT_ID in .env) — connect uses user_scope on loopback, bypassing Vireon."
+          );
+        } else {
+          lines.push(
+            "  For persistent missing_scope: add SLACK_OAUTH_CLIENT_ID + SLACK_OAUTH_CLIENT_SECRET to .env (see docs/guides/slack.md) or fix Vireon to pass user_scope= to Slack."
           );
         }
       }

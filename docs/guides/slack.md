@@ -13,6 +13,27 @@ This is a **harness integration only** (Settings → Integrations). It is not us
 
 Or: `connect_provider({ provider: "slack" })` after OAuth is on disk.
 
+### Direct OAuth (recommended if scopes stay missing via Vireon)
+
+Slack **user tokens** require `user_scope=` on `oauth/v2/authorize` — not bot `scope=`. If hosted connect keeps returning a thin token, use **direct loopback OAuth**:
+
+1. Slack app → **OAuth & Permissions** → Redirect URL:
+
+   ```
+   http://127.0.0.1:38476/oauth/slack/callback
+   ```
+
+2. Add to `.env` (desktop bundle copies this file):
+
+   ```
+   SLACK_OAUTH_CLIENT_ID=...
+   SLACK_OAUTH_CLIENT_SECRET=...
+   ```
+
+3. Register all user token scopes from the table below on the Slack app.
+
+4. Disconnect + Connect Slack — harness uses direct OAuth automatically when those env vars are set.
+
 ### Read vs write
 
 - **Read + write** (default): list channels, read history, post messages (`slack_post_message` is approval-gated).
@@ -64,6 +85,6 @@ Disable with `AGENT_SLACK_REST=0`.
 
 4. Vercel env: `SLACK_OAUTH_CLIENT_ID`, `SLACK_OAUTH_CLIENT_SECRET`.
 
-5. **Vireon `/connect/slack` handler** must pass the full `scopes` query param through to Slack `oauth/v2/authorize` as `user_scope` (comma-separated). `mode=read_write` alone is not enough — without the full list, users get a minimal token and tools return `missing_scope`.
+5. **Vireon `/connect/slack` handler** must pass harness `user_scope` (or `scopes`) query param through to Slack as **`user_scope=`** on `https://slack.com/oauth/v2/authorize`. Passing bot `scope=` only does not grant user-token permissions.
 
 6. Register every scope in the table on the Slack app under **OAuth & Permissions → User Token Scopes**, then reinstall / have users reconnect.

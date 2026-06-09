@@ -1054,9 +1054,13 @@ export type { GithubMode } from "./github_oauth_scopes.js";
 export { runGithubHostedConnectFlow } from "./github_hosted_connect.js";
 export type { GithubConnectResult, RunGithubHostedConnectOptions } from "./github_hosted_connect.js";
 export {
+  buildSlackAuthUrl,
+  exchangeSlackCode,
   getSlackAccessToken,
   listSlackOAuthAccounts,
   revokeSlackAccount,
+  slackOAuthClientConfig,
+  syncSlackBundleScopes,
 } from "./slack_oauth_broker.js";
 export {
   scopesForSlackMode,
@@ -1071,7 +1075,12 @@ export {
   parseIntegrationNotConnectedProvider,
 } from "./integration_connect.js";
 export type { SlackMode } from "./slack_oauth_scopes.js";
-export { runSlackHostedConnectFlow } from "./slack_connect.js";
+export {
+  runSlackDirectConnectFlow,
+  runSlackHostedConnectFlow,
+  SLACK_OAUTH_LOOPBACK_PORT_DEFAULT,
+  resolveSlackOAuthLoopbackPort,
+} from "./slack_connect.js";
 export type { SlackConnectResult, RunSlackHostedConnectOptions } from "./slack_connect.js";
 export {
   getLinearAccessToken,

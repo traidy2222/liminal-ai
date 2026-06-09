@@ -53,12 +53,12 @@ export async function probeSlackLiveScopes(): Promise<SlackScopeProbeResult> {
     }
     const userInfo = data.info?.find((i) => i.type === "user") ?? data.info?.[0];
     const live = userInfo?.scopes ?? [];
-    const need = new Set(expectedSlackScopes());
-    const missing = [...need].filter((s) => !live.includes(s));
+    const missing = missingSlackScopes(live, SLACK_DEFAULT_MODE);
     if (missing.length > 0) {
+      const expected = expectedSlackScopes().length;
       return {
         state: "stale",
-        detail: `token has ${live.length} scopes, harness needs ${need.size} (${missing.length} missing)`,
+        detail: `token has ${live.length} scopes, harness needs ${expected} (${missing.length} missing)`,
         missing,
       };
     }

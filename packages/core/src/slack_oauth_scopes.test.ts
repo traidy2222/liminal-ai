@@ -39,12 +39,12 @@ test("SLACK_API_METHOD_SCOPES documents search and open_dm write scopes", () => 
   assert.ok(SLACK_API_METHOD_SCOPES["files.upload"]?.includes("files:write"));
 });
 
-test("slackHostedConnectExtra passes comma-separated scopes to hosted OAuth", () => {
+test("slackHostedConnectExtra passes user_scope for Slack OAuth v2", () => {
   const extra = slackHostedConnectExtra("read_write");
-  assert.ok(extra.scopes?.includes("search:read"));
-  assert.ok(extra.scopes?.includes("reactions:write"));
-  assert.ok(extra.scopes?.includes("im:write"));
-  assert.ok(!extra.scopes?.includes("search:read:user"));
+  assert.equal(extra.user_scope, extra.scopes);
+  assert.ok(extra.user_scope?.includes("search:read"));
+  assert.ok(extra.user_scope?.includes("reactions:write"));
+  assert.ok(extra.user_scope?.includes("im:write"));
 });
 
 test("buildHostedIntegrationConnectUrl includes scopes query param for Slack", () => {
