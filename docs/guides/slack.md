@@ -32,7 +32,7 @@ Slack **user tokens** require `user_scope=` on `oauth/v2/authorize` — not bot 
 
 3. Register all user token scopes from the table below on the Slack app.
 
-4. Disconnect + Connect Slack — harness uses direct OAuth automatically when those env vars are set.
+4. Set `SLACK_OAUTH_DIRECT=1` in `.env`, then Disconnect + Connect Slack (hosted Vireon is the default).
 
 ### Read vs write
 

@@ -707,7 +707,7 @@ export function createConnectorTools(registry: ToolRegistry, _emitter: AgentEmit
         }
         if (slackOAuthClientConfig()) {
           lines.push(
-            "  Direct Slack OAuth available (SLACK_OAUTH_CLIENT_ID in .env) — connect uses user_scope on loopback, bypassing Vireon."
+            "  Direct Slack OAuth available — set SLACK_OAUTH_DIRECT=1 to bypass Vireon hosted connect."
           );
         } else {
           lines.push(

@@ -26,6 +26,11 @@ export function normalizeSlackRestToolArgs(
   const out = { ...args };
 
   if (name === "slack_search_messages") {
+    const query = firstString(out, ["query", "q", "search", "text"]);
+    if (query) out["query"] = query;
+    delete out["q"];
+    delete out["search"];
+    delete out["text"];
     if (out["limit"] !== undefined && out["count"] === undefined) {
       out["count"] = out["limit"];
       delete out["limit"];
@@ -40,9 +45,17 @@ export function normalizeSlackRestToolArgs(
   }
 
   if (name === "slack_get_thread_replies" || name === "slack_reply_in_thread") {
-    const ts = slackTs(out["thread_ts"]) ?? slackTs(out["ts"]);
+    const ts =
+      slackTs(out["thread_ts"]) ??
+      slackTs(out["ts"]) ??
+      slackTs(out["timestamp"]) ??
+      slackTs(out["message_ts"]) ??
+      slackTs(out["parent_ts"]);
     if (ts) out["thread_ts"] = ts;
     delete out["ts"];
+    delete out["timestamp"];
+    delete out["message_ts"];
+    delete out["parent_ts"];
   }
 
   if (name === "slack_add_reaction") {

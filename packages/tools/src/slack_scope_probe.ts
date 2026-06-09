@@ -85,8 +85,14 @@ export function formatSlackScopeProbeLine(probe: SlackScopeProbeResult): string 
   }
 }
 
-/** Enrich Slack missing_scope API errors with reconnect guidance. */
-export async function enrichSlackScopeError(
+function slackResponseHints(data: Record<string, unknown>): string {
+  const meta = data.response_metadata as { messages?: string[] } | undefined;
+  const msgs = meta?.messages?.map((m) => m.trim()).filter(Boolean) ?? [];
+  return msgs.length > 0 ? msgs.join("; ") : "";
+}
+
+/** Format Slack API errors; adds response_metadata hints and reconnect guidance for missing_scope. */
+export async function formatSlackApiError(
   data: Record<string, unknown>,
   accountHint?: string,
   httpStatus?: number
@@ -97,7 +103,28 @@ export async function enrichSlackScopeError(
       : httpStatus
         ? `Slack HTTP ${httpStatus}`
         : "Slack API error";
-  if (err !== "missing_scope") return err;
+  const hints = slackResponseHints(data);
+  const base = hints ? `${err} (${hints})` : err;
+  if (err !== "missing_scope") return base;
+  return enrichMissingScopeMessage(base, data, accountHint);
+}
+
+/** Enrich Slack missing_scope API errors with reconnect guidance. */
+export async function enrichSlackScopeError(
+  data: Record<string, unknown>,
+  accountHint?: string,
+  httpStatus?: number
+): Promise<string> {
+  return formatSlackApiError(data, accountHint, httpStatus);
+}
+
+async function enrichMissingScopeMessage(
+  base: string,
+  data: Record<string, unknown>,
+  accountHint?: string
+): Promise<string> {
+  const err = typeof data.error === "string" ? data.error : "missing_scope";
+  if (err !== "missing_scope") return base;
 
   const needed = typeof data.needed === "string" ? data.needed.trim() : "";
   const accounts = await listSlackOAuthAccounts();
@@ -110,8 +137,13 @@ export async function enrichSlackScopeError(
     : accounts[0];
   const staleOnDisk = missingSlackScopes(match?.scopes ?? [], SLACK_DEFAULT_MODE);
 
+  const hints = slackResponseHints(data);
   const parts: string[] = [
-    needed ? `missing_scope (Slack requires **${needed}** on this user token)` : "missing_scope",
+    needed
+      ? `missing_scope (Slack requires **${needed}** on this user token)`
+      : hints
+        ? `missing_scope (${hints})`
+        : "missing_scope",
   ];
   if (staleOnDisk.length > 0) {
     parts.push(`Reconnect Slack to add: ${staleOnDisk.join(", ")}`);

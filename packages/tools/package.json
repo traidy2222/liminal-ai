@@ -12,7 +12,7 @@
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc --noEmit",
-    "test": "tsx --test src/web_fetch.test.ts src/web_fetch_serper.test.ts src/web_search.test.ts src/gmail_compose_guard.test.ts src/google_calendar_rest.test.ts src/agentcard.test.ts src/liminal_apps.test.ts src/persona_runtime.test.ts src/persona_generator.test.ts src/persona_stream_extract.test.ts src/file_tools.test.ts src/html_write_coherence.test.ts src/browser_tools.test.ts src/api_connect.test.ts src/notes_store_scope.test.ts src/notes_archive.test.ts src/recall_rerank.test.ts src/tool_catalog.test.ts src/systemPrompt.effort.test.ts src/gmail_message_body.test.ts src/weather_fetch.test.ts",
+    "test": "tsx --test src/web_fetch.test.ts src/web_fetch_serper.test.ts src/web_search.test.ts src/gmail_compose_guard.test.ts src/google_calendar_rest.test.ts src/agentcard.test.ts src/liminal_apps.test.ts src/persona_runtime.test.ts src/persona_generator.test.ts src/persona_stream_extract.test.ts src/file_tools.test.ts src/html_write_coherence.test.ts src/browser_tools.test.ts src/api_connect.test.ts src/notes_store_scope.test.ts src/notes_archive.test.ts src/recall_rerank.test.ts src/tool_catalog.test.ts src/systemPrompt.effort.test.ts src/gmail_message_body.test.ts src/weather_fetch.test.ts src/slack_upload_v2.test.ts src/slack_api.test.ts",
     "browser:install": "playwright install chromium"
   },
   "dependencies": {

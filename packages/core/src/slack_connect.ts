@@ -167,14 +167,21 @@ export function runSlackDirectConnectFlow(
   });
 }
 
-/** Prefer direct OAuth when client credentials exist; else Vireon hosted handoff. */
+/** True when SLACK_OAUTH_DIRECT=1 (or AGENT_SLACK_OAUTH_DIRECT=1) and client creds exist. */
+export function slackDirectOAuthEnabled(): boolean {
+  const flag =
+    process.env.SLACK_OAUTH_DIRECT?.trim() || process.env.AGENT_SLACK_OAUTH_DIRECT?.trim();
+  return flag === "1" || flag?.toLowerCase() === "true";
+}
+
+/** Vireon hosted OAuth by default; direct loopback only when SLACK_OAUTH_DIRECT=1. */
 export function runSlackHostedConnectFlow(
   options: RunSlackHostedConnectOptions = {}
 ): Promise<SlackConnectResult> {
   const mode = options.mode ?? SLACK_DEFAULT_MODE;
   const log = options.onStatus ?? ((m: string) => console.log(m));
 
-  if (slackOAuthClientConfig() && !options.forceHosted) {
+  if (slackOAuthClientConfig() && slackDirectOAuthEnabled() && !options.forceHosted) {
     return runSlackDirectConnectFlow(options);
   }
 
@@ -203,8 +210,8 @@ export function runSlackHostedConnectFlow(
     })
     .catch((e) => {
       const msg = e instanceof Error ? e.message : String(e);
-      if (slackOAuthClientConfig()) {
-        log("Hosted Slack connect failed — retrying direct OAuth with SLACK_OAUTH_CLIENT_ID from .env");
+      if (slackOAuthClientConfig() && slackDirectOAuthEnabled()) {
+        log("Hosted Slack connect failed — retrying direct OAuth (SLACK_OAUTH_DIRECT=1)");
         return runSlackDirectConnectFlow(options);
       }
       throw new Error(

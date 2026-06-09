@@ -36,7 +36,8 @@ test("read_write requests method-doc scopes user reported missing", () => {
 test("SLACK_API_METHOD_SCOPES documents search and open_dm write scopes", () => {
   assert.deepEqual(SLACK_API_METHOD_SCOPES["search.messages"], ["search:read"]);
   assert.ok(SLACK_API_METHOD_SCOPES["conversations.open"]?.includes("im:write"));
-  assert.ok(SLACK_API_METHOD_SCOPES["files.upload"]?.includes("files:write"));
+  assert.ok(SLACK_API_METHOD_SCOPES["files.getUploadURLExternal"]?.includes("files:write"));
+  assert.ok(SLACK_API_METHOD_SCOPES["files.completeUploadExternal"]?.includes("files:write"));
 });
 
 test("slackHostedConnectExtra passes user_scope for Slack OAuth v2", () => {

@@ -14,7 +14,6 @@ export const SLACK_API_METHOD_SCOPES: Readonly<Record<string, readonly string[]>
   "chat.postMessage": ["chat:write"],
   "reactions.add": ["reactions:write"],
   "conversations.open": ["channels:write", "groups:write", "im:write", "mpim:write"],
-  "files.upload": ["files:write"],
   "files.getUploadURLExternal": ["files:write"],
   "files.completeUploadExternal": ["files:write"],
 };

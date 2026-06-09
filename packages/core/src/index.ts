@@ -1078,6 +1078,7 @@ export type { SlackMode } from "./slack_oauth_scopes.js";
 export {
   runSlackDirectConnectFlow,
   runSlackHostedConnectFlow,
+  slackDirectOAuthEnabled,
   SLACK_OAUTH_LOOPBACK_PORT_DEFAULT,
   resolveSlackOAuthLoopbackPort,
 } from "./slack_connect.js";
