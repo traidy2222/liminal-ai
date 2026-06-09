@@ -5,6 +5,7 @@ import type { ToolRegistry, ToolResult } from "@liminal/core";
 import { effectiveHarnessEnvRaw, getSlackAccessToken, listSlackOAuthAccounts } from "@liminal/core";
 import { defineTool } from "./helpers.js";
 import { integrationNotConnectedError } from "./integration_oauth_start.js";
+import { enrichSlackScopeError } from "./slack_scope_probe.js";
 
 const SLACK_API = "https://slack.com/api";
 
@@ -44,7 +45,10 @@ async function slackFormApi(
   });
   const data = (await res.json()) as { ok?: boolean; error?: string; [key: string]: unknown };
   if (!res.ok || data.ok === false) {
-    return { ok: false, error: data.error ?? `Slack HTTP ${res.status}` };
+    return {
+      ok: false,
+      error: await enrichSlackScopeError(data, accountHint, res.status),
+    };
   }
   return { ok: true, data };
 }
@@ -71,7 +75,10 @@ async function slackApi(
   });
   const data = (await res.json()) as { ok?: boolean; error?: string; [key: string]: unknown };
   if (!res.ok || data.ok === false) {
-    return { ok: false, error: data.error ?? `Slack HTTP ${res.status}` };
+    return {
+      ok: false,
+      error: await enrichSlackScopeError(data, accountHint, res.status),
+    };
   }
   return { ok: true, data };
 }

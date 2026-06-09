@@ -699,6 +699,10 @@ export function createConnectorTools(registry: ToolRegistry, _emitter: AgentEmit
           lines.push(
             "  Reconnect: Settings → Integrations → Slack → Disconnect + Connect, or `connect_provider({ provider: \"slack\", start_oauth: true })`."
           );
+        } else {
+          lines.push(
+            "  If Slack tools return missing_scope anyway, token may predate new tools — still Disconnect + Connect once."
+          );
         }
       }
       lines.push("");

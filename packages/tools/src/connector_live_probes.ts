@@ -33,6 +33,7 @@ import { enrichGoogleMcpProbeError, mcpHandshakeAndListTools } from "./mcp_attac
 import { getGoogleSidecarStatus } from "./google_sidecar.js";
 import { getMicrosoftSidecarStatus } from "./microsoft_sidecar.js";
 import { githubAuthAvailable, githubMcpEnabled, githubMcpUrl, githubTokenEnvVar } from "./github_connect.js";
+import { formatSlackScopeProbeLine, probeSlackLiveScopes } from "./slack_scope_probe.js";
 
 const GOOGLE_PARENT = "google_workspace";
 const MICROSOFT_PARENT = "microsoft_365";
@@ -335,13 +336,15 @@ function formatSidecarProbeLine(label: string, probe: SidecarProbeResult): strin
 export async function buildIntegrationLiveProbeLines(): Promise<string[]> {
   const lines: string[] = ["### Live probes (this session)"];
   try {
-    const [gmailMcp, calMcp, calRest, googleExt, msMcp, githubMcp] = await Promise.all([
+    const [gmailMcp, calMcp, calRest, googleExt, msMcp, githubMcp, slackScopes] =
+      await Promise.all([
       probeGoogleOfficialMcp("gmail"),
       probeGoogleOfficialMcp("calendar"),
       probeGoogleCalendarRest(),
       probeGoogleExtSidecar(),
       probeMicrosoftGraphMcp(),
       probeGithubMcp(),
+      probeSlackLiveScopes(),
     ]);
     lines.push(formatMcpProbeLine("Gmail", gmailMcp));
     lines.push(formatMcpProbeLine("Calendar", calMcp));
@@ -349,6 +352,7 @@ export async function buildIntegrationLiveProbeLines(): Promise<string[]> {
     lines.push(formatSidecarProbeLine("Google Docs/Sheets (google_ext)", googleExt));
     lines.push(formatSidecarProbeLine("Microsoft Graph MCP", msMcp));
     lines.push(formatSidecarProbeLine("GitHub MCP", githubMcp));
+    lines.push(formatSlackScopeProbeLine(slackScopes));
     lines.push(
       "Note: Gmail/Calendar **MCP** (gmailmcp/calendarmcp) and **classic REST** are separate Cloud APIs — one can work while the other is disabled."
     );
