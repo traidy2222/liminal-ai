@@ -11,9 +11,9 @@ test("read_write requests history, search, and conversation write scopes", () =>
   const scopes = scopesForSlackMode("read_write");
   for (const s of [
     "channels:history",
-    "search:read",
+    "search:read:user",
     "files:write:user",
-    "im:write",
+    "im:write:user",
     "channels:write",
     "groups:write",
     "mpim:write",
@@ -25,7 +25,7 @@ test("read_write requests history, search, and conversation write scopes", () =>
 
 test("slackHostedConnectExtra passes comma-separated scopes to hosted OAuth", () => {
   const extra = slackHostedConnectExtra("read_write");
-  assert.ok(extra.scopes?.includes("search:read"));
+  assert.ok(extra.scopes?.includes("search:read:user"));
   assert.ok(extra.scopes?.includes("channels:write"));
 });
 
@@ -41,7 +41,7 @@ test("buildHostedIntegrationConnectUrl includes scopes query param for Slack", (
     })
   );
   const scopes = url.searchParams.get("scopes") ?? "";
-  assert.ok(scopes.includes("search:read"));
+  assert.ok(scopes.includes("search:read:user"));
   assert.ok(scopes.includes("files:write:user"));
   assert.ok(scopes.includes("channels:write"));
 });
@@ -49,7 +49,7 @@ test("buildHostedIntegrationConnectUrl includes scopes query param for Slack", (
 test("missingSlackScopes flags new write scopes after app upgrade", () => {
   const legacy = ["channels:read", "channels:history", "chat:write", "users:read"];
   const miss = missingSlackScopes(legacy, "read_write");
-  assert.ok(miss.includes("search:read"));
+  assert.ok(miss.includes("search:read:user"));
   assert.ok(miss.includes("reactions:write"));
   assert.ok(miss.includes("channels:write"));
 });

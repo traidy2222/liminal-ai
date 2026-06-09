@@ -10,7 +10,7 @@ const READ_USER_SCOPES = [
   "mpim:history",
   "mpim:read",
   "users:read",
-  "search:read",
+  "search:read:user",
 ] as const;
 
 /** Write scopes for full Slack REST tool surface (conversations.open, files.upload, etc.). */
@@ -18,16 +18,24 @@ const WRITE_USER_SCOPES = [
   "chat:write",
   "reactions:write",
   "files:write:user",
-  "im:write",
+  "im:write:user",
   "channels:write",
   "groups:write",
   "mpim:write",
 ] as const;
 
-/** Either scope satisfies the requirement (Slack renamed files:write:user → files:write for some apps). */
+/** Either scope satisfies the requirement (Slack legacy vs :user granular names). */
 const SLACK_SCOPE_SATISFIERS: Record<string, readonly string[]> = {
   "files:write:user": ["files:write:user", "files:write"],
   "files:write": ["files:write", "files:write:user"],
+  "search:read:user": ["search:read:user", "search:read"],
+  "search:read": ["search:read", "search:read:user"],
+  "im:write:user": ["im:write:user", "im:write"],
+  "im:write": ["im:write", "im:write:user"],
+  "chat:write:user": ["chat:write:user", "chat:write"],
+  "chat:write": ["chat:write", "chat:write:user"],
+  "reactions:write:user": ["reactions:write:user", "reactions:write"],
+  "reactions:write": ["reactions:write", "reactions:write:user"],
 };
 
 function grantedHasScope(granted: Set<string>, scope: string): boolean {

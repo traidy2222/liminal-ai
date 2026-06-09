@@ -26,6 +26,18 @@ test("coerceJsonArrayValue parses object JSON strings into one-element arrays", 
   assert.equal((out as unknown[]).length, 1);
 });
 
+test("coerceArgsToSchema stringifies numeric values for string fields", () => {
+  const schema = {
+    type: "object" as const,
+    properties: {
+      thread_ts: { type: "string" },
+    },
+    required: ["thread_ts"],
+  };
+  const out = coerceArgsToSchema(schema, { thread_ts: 1772746316.035959 });
+  assert.equal(out.thread_ts, "1772746316.035959");
+});
+
 test("coerceArgsToSchema wraps a single object as one-element array", () => {
   const schema = {
     type: "object" as const,

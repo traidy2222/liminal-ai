@@ -1,4 +1,5 @@
 import type { ToolResult, ToolParameterSchema, PropertySchema, ApprovalDecision } from "./types.js";
+import { normalizeSlackRestToolArgs } from "./slack_tool_args.js";
 import type { AgentEmitter } from "./events.js";
 import type { ToolRegistry } from "./registry.js";
 import type { TaskOrchestrator } from "./orchestrator.js";
@@ -118,6 +119,9 @@ function normalizeToolArgs(
   }
   if (name === "docs_rest_insert_table" && "rows" in args) {
     return { ...args, rows: coerceJsonArrayValue(args["rows"]) };
+  }
+  if (name.startsWith("slack_")) {
+    return normalizeSlackRestToolArgs(name, args);
   }
   return args;
 }

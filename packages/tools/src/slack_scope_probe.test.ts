@@ -9,10 +9,10 @@ import {
 test("expectedSlackScopes includes full Slack REST write surface", () => {
   const scopes = expectedSlackScopes();
   for (const s of [
-    "search:read",
+    "search:read:user",
     "reactions:write",
     "files:write:user",
-    "im:write",
+    "im:write:user",
     "channels:write",
     "groups:write",
     "mpim:write",

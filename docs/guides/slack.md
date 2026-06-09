@@ -49,9 +49,9 @@ Disable with `AGENT_SLACK_REST=0`.
 
 3. **User Token Scopes** (not bot scopes) — harness requests these explicitly via `scopes=` on the connect URL:
 
-   **Read:** `channels:history`, `channels:read`, `groups:history`, `groups:read`, `im:history`, `im:read`, `mpim:history`, `mpim:read`, `users:read`, `search:read`
+   **Read:** `channels:history`, `channels:read`, `groups:history`, `groups:read`, `im:history`, `im:read`, `mpim:history`, `mpim:read`, `users:read`, `search:read:user`
 
-   **Write (read+write mode):** `chat:write`, `reactions:write`, `files:write:user`, `im:write`, `channels:write`, `groups:write`, `mpim:write`
+   **Write (read+write mode):** `chat:write`, `reactions:write`, `files:write:user`, `im:write:user`, `channels:write`, `groups:write`, `mpim:write`
 
 4. Vercel env: `SLACK_OAUTH_CLIENT_ID`, `SLACK_OAUTH_CLIENT_SECRET`.
 

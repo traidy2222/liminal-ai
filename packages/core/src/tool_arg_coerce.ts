@@ -70,6 +70,11 @@ export function coerceValueToSchema(val: unknown, schema: PropertySchema): unkno
     if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) return parsed;
   }
 
+  if (schema.type === "string") {
+    if (typeof val === "number" && Number.isFinite(val)) return String(val);
+    if (typeof val === "boolean") return String(val);
+  }
+
   return val;
 }
 

@@ -87,6 +87,24 @@ function jsonOutput(data: unknown): string {
   return JSON.stringify(data, null, 2);
 }
 
+function slackLimit(args: Record<string, unknown>, fallback: number, max: number): number {
+  const n = Number(args["limit"] ?? args["count"]);
+  return Math.min(max, Math.max(1, Number.isFinite(n) && n > 0 ? n : fallback));
+}
+
+function slackChannel(args: Record<string, unknown>): string {
+  return String(args["channel"] ?? args["channels"] ?? args["channel_id"] ?? "").trim();
+}
+
+function slackTs(args: Record<string, unknown>, ...keys: string[]): string {
+  for (const key of keys) {
+    const v = args[key];
+    if (typeof v === "number" && Number.isFinite(v)) return String(v);
+    if (typeof v === "string" && v.trim()) return v.trim();
+  }
+  return "";
+}
+
 export function registerSlackRestTools(registry: ToolRegistry): void {
   if (!slackRestEnabled()) return;
 
@@ -159,6 +177,7 @@ export function registerSlackRestTools(registry: ToolRegistry): void {
         properties: {
           channel: { type: "string", description: "Slack channel id." },
           limit: { type: "number", description: "Messages to fetch (default 20, max 100)." },
+          count: { type: "number", description: "Alias for limit." },
           account_hint: { type: "string" },
         },
         required: ["channel"],
@@ -170,7 +189,7 @@ export function registerSlackRestTools(registry: ToolRegistry): void {
       handler: async (args): Promise<ToolResult> => {
         const channel = String(args["channel"] ?? "").trim();
         if (!channel) return { ok: false, error: "channel is required" };
-        const limit = Math.min(100, Math.max(1, Number(args["limit"]) || 20));
+        const limit = slackLimit(args, 20, 100);
         const result = await slackApi(
           "conversations.history",
           { channel, limit },
@@ -193,7 +212,8 @@ export function registerSlackRestTools(registry: ToolRegistry): void {
         properties: {
           channel: { type: "string", description: "Slack channel id." },
           text: { type: "string", description: "Message body (Slack mrkdwn)." },
-          thread_ts: { type: "string", description: "Optional thread parent timestamp." },
+          thread_ts: { type: "string", description: "Optional thread parent timestamp (string)." },
+          ts: { type: "string", description: "Alias for thread_ts." },
           account_hint: { type: "string" },
         },
         required: ["channel", "text"],
@@ -205,7 +225,7 @@ export function registerSlackRestTools(registry: ToolRegistry): void {
         const text = String(args["text"] ?? "").trim();
         if (!channel || !text) return { ok: false, error: "channel and text are required" };
         const body: Record<string, unknown> = { channel, text };
-        const threadTs = typeof args["thread_ts"] === "string" ? args["thread_ts"].trim() : "";
+        const threadTs = slackTs(args, "thread_ts", "ts");
         if (threadTs) body.thread_ts = threadTs;
         const result = await slackApi(
           "chat.postMessage",
@@ -228,8 +248,10 @@ export function registerSlackRestTools(registry: ToolRegistry): void {
         type: "object",
         properties: {
           channel: { type: "string", description: "Slack channel id." },
-          thread_ts: { type: "string", description: "Parent message ts." },
+          thread_ts: { type: "string", description: "Parent message ts (string, not number)." },
+          ts: { type: "string", description: "Alias for thread_ts." },
           limit: { type: "number", description: "Max messages (default 50, max 200)." },
+          count: { type: "number", description: "Alias for limit." },
           account_hint: { type: "string" },
         },
         required: ["channel", "thread_ts"],
@@ -240,9 +262,9 @@ export function registerSlackRestTools(registry: ToolRegistry): void {
       cacheTtlMs: 15_000,
       handler: async (args): Promise<ToolResult> => {
         const channel = String(args["channel"] ?? "").trim();
-        const threadTs = String(args["thread_ts"] ?? "").trim();
+        const threadTs = slackTs(args, "thread_ts", "ts");
         if (!channel || !threadTs) return { ok: false, error: "channel and thread_ts are required" };
-        const limit = Math.min(200, Math.max(1, Number(args["limit"]) || 50));
+        const limit = slackLimit(args, 50, 200);
         const result = await slackApi(
           "conversations.replies",
           { channel, ts: threadTs, limit },
@@ -264,7 +286,8 @@ export function registerSlackRestTools(registry: ToolRegistry): void {
         type: "object",
         properties: {
           channel: { type: "string" },
-          thread_ts: { type: "string" },
+          thread_ts: { type: "string", description: "Parent message ts (string)." },
+          ts: { type: "string", description: "Alias for thread_ts." },
           text: { type: "string" },
           account_hint: { type: "string" },
         },
@@ -274,7 +297,7 @@ export function registerSlackRestTools(registry: ToolRegistry): void {
       requiresApproval: true,
       handler: async (args): Promise<ToolResult> => {
         const channel = String(args["channel"] ?? "").trim();
-        const threadTs = String(args["thread_ts"] ?? "").trim();
+        const threadTs = slackTs(args, "thread_ts", "ts");
         const text = String(args["text"] ?? "").trim();
         if (!channel || !threadTs || !text) {
           return { ok: false, error: "channel, thread_ts, and text are required" };
@@ -301,6 +324,7 @@ export function registerSlackRestTools(registry: ToolRegistry): void {
         properties: {
           query: { type: "string", description: "Slack search query string." },
           count: { type: "number", description: "Max results (default 20, max 100)." },
+          limit: { type: "number", description: "Alias for count." },
           account_hint: { type: "string" },
         },
         required: ["query"],
@@ -312,7 +336,7 @@ export function registerSlackRestTools(registry: ToolRegistry): void {
       handler: async (args): Promise<ToolResult> => {
         const query = String(args["query"] ?? "").trim();
         if (!query) return { ok: false, error: "query is required" };
-        const count = Math.min(100, Math.max(1, Number(args["count"]) || 20));
+        const count = slackLimit(args, 20, 100);
         const result = await slackApi(
           "search.messages",
           { query, count, sort: "timestamp", sort_dir: "desc" },
@@ -333,7 +357,8 @@ export function registerSlackRestTools(registry: ToolRegistry): void {
       parameters: {
         type: "object",
         properties: {
-          user: { type: "string", description: "Slack user id to open DM with." },
+          user: { type: "string", description: "Slack user id (U…) to open DM with." },
+          user_id: { type: "string", description: "Alias for user." },
           account_hint: { type: "string" },
         },
         required: ["user"],
@@ -343,7 +368,7 @@ export function registerSlackRestTools(registry: ToolRegistry): void {
       cacheable: true,
       cacheTtlMs: 60_000,
       handler: async (args): Promise<ToolResult> => {
-        const user = String(args["user"] ?? "").trim();
+        const user = String(args["user"] ?? args["user_id"] ?? "").trim();
         if (!user) return { ok: false, error: "user is required" };
         const result = await slackApi(
           "conversations.open",
@@ -394,7 +419,9 @@ export function registerSlackRestTools(registry: ToolRegistry): void {
         type: "object",
         properties: {
           channel: { type: "string" },
-          timestamp: { type: "string", description: "Message ts to react to." },
+          timestamp: { type: "string", description: "Message ts to react to (string)." },
+          ts: { type: "string", description: "Alias for timestamp." },
+          message_ts: { type: "string", description: "Alias for timestamp." },
           name: { type: "string", description: "Emoji short name without colons." },
           account_hint: { type: "string" },
         },
@@ -404,7 +431,7 @@ export function registerSlackRestTools(registry: ToolRegistry): void {
       requiresApproval: true,
       handler: async (args): Promise<ToolResult> => {
         const channel = String(args["channel"] ?? "").trim();
-        const timestamp = String(args["timestamp"] ?? "").trim();
+        const timestamp = slackTs(args, "timestamp", "ts", "message_ts");
         const name = String(args["name"] ?? "").trim().replace(/^:+|:+$/g, "");
         if (!channel || !timestamp || !name) {
           return { ok: false, error: "channel, timestamp, and name are required" };
@@ -429,9 +456,12 @@ export function registerSlackRestTools(registry: ToolRegistry): void {
       parameters: {
         type: "object",
         properties: {
-          channel: { type: "string", description: "Channel or DM id." },
+          channel: { type: "string", description: "Channel or DM id (C…/D…)." },
+          channels: { type: "string", description: "Alias for channel." },
+          channel_id: { type: "string", description: "Alias for channel." },
           filename: { type: "string" },
           content: { type: "string", description: "File body (plain text / small files)." },
+          file_content: { type: "string", description: "Alias for content." },
           initial_comment: { type: "string", description: "Optional message with the file." },
           account_hint: { type: "string" },
         },
@@ -440,9 +470,9 @@ export function registerSlackRestTools(registry: ToolRegistry): void {
       },
       requiresApproval: true,
       handler: async (args): Promise<ToolResult> => {
-        const channel = String(args["channel"] ?? "").trim();
+        const channel = slackChannel(args);
         const filename = String(args["filename"] ?? "").trim();
-        const content = String(args["content"] ?? "");
+        const content = String(args["content"] ?? args["file_content"] ?? "");
         if (!channel || !filename) return { ok: false, error: "channel and filename are required" };
         const fields: Record<string, string> = { channels: channel, filename, content };
         const comment =
