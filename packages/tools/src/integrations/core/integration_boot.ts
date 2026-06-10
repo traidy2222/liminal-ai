@@ -38,6 +38,14 @@ export function deferIntegrationBootstrap(
         ),
       });
     }
+    try {
+      const { bootstrapAzure } = await import("../azure/azure_boot.js");
+      await bootstrapAzure(registry);
+    } catch (e) {
+      emitter.emit("error", {
+        err: new Error(`Azure boot: ${e instanceof Error ? e.message : String(e)}`),
+      });
+    }
     if (harness) {
       harness.getContext().refreshProtocolDynamic(harness.registry.getActiveToolNames());
     }

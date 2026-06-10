@@ -4,7 +4,13 @@
 import { mkdir, readFile, readdir, unlink, writeFile } from "node:fs/promises";
 import { existsSync, mkdirSync } from "node:fs";
 import path from "node:path";
-import { globalPath, getGoogleAccessToken, getMicrosoftAccessToken, getGithubAccessToken } from "@liminal/core";
+import {
+  globalPath,
+  getGoogleAccessToken,
+  getMicrosoftAccessToken,
+  getGithubAccessToken,
+  getAzureAccessToken,
+} from "@liminal/core";
 
 const CONNECTIONS_DIR_SEG = "api_connections";
 
@@ -36,7 +42,8 @@ export type AuthScheme =
   | { kind: "basic"; envVar: string }
   | { kind: "oauth2"; provider: "google"; accountId?: string; scopes: string[] }
   | { kind: "oauth2"; provider: "microsoft"; accountId?: string; scopes: string[] }
-  | { kind: "oauth2"; provider: "github"; accountId?: string; scopes: string[] };
+  | { kind: "oauth2"; provider: "github"; accountId?: string; scopes: string[] }
+  | { kind: "oauth2"; provider: "azure"; accountId?: string; scopes: string[] };
 
 export interface McpToolFilter {
   include?: string[];
@@ -177,6 +184,11 @@ export async function resolveAuthHeaderAsync(auth: AuthScheme): Promise<Record<s
     if (!token) return {};
     return { Authorization: `Bearer ${token}` };
   }
+  if (auth.kind === "oauth2" && auth.provider === "azure") {
+    const token = await getAzureAccessToken(auth.accountId);
+    if (!token) return {};
+    return { Authorization: `Bearer ${token}` };
+  }
   return resolveAuthHeader(auth);
 }
 
@@ -190,6 +202,10 @@ export function googleOAuthAuthScheme(accountId?: string, scopes: string[] = [])
 
 export function microsoftOAuthAuthScheme(accountId?: string, scopes: string[] = []): AuthScheme {
   return { kind: "oauth2", provider: "microsoft", accountId, scopes };
+}
+
+export function azureOAuthAuthScheme(accountId?: string, scopes: string[] = []): AuthScheme {
+  return { kind: "oauth2", provider: "azure", accountId, scopes };
 }
 
 export function listConnectionsByParent(parentProvider: string): Promise<McpConnectionRecord[]> {
@@ -215,6 +231,13 @@ function isMicrosoft365Mcp(c: McpConnectionRecord): boolean {
   return false;
 }
 
+function isAzureMcp(c: McpConnectionRecord): boolean {
+  if (c.parentProvider === "azure") return true;
+  if (c.auth.kind === "oauth2" && c.auth.provider === "azure") return true;
+  if (c.name === "azure" || c.name.startsWith("azure_")) return true;
+  return false;
+}
+
 /** Curated Google Workspace MCP rows — includes legacy records missing parentProvider. */
 export async function listGoogleWorkspaceConnections(): Promise<McpConnectionRecord[]> {
   const all = await listConnections();
@@ -225,4 +248,10 @@ export async function listGoogleWorkspaceConnections(): Promise<McpConnectionRec
 export async function listMicrosoft365Connections(): Promise<McpConnectionRecord[]> {
   const all = await listConnections();
   return all.filter((c): c is McpConnectionRecord => c.kind === "mcp" && isMicrosoft365Mcp(c));
+}
+
+/** Curated Azure MCP rows — includes legacy records missing parentProvider. */
+export async function listAzureConnections(): Promise<McpConnectionRecord[]> {
+  const all = await listConnections();
+  return all.filter((c): c is McpConnectionRecord => c.kind === "mcp" && isAzureMcp(c));
 }

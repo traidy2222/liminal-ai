@@ -42,6 +42,15 @@ import {
   revokeLinearAccount,
   listNotionOAuthAccounts,
   revokeNotionAccount,
+  getAzureAccessToken,
+  listAzureOAuthAccounts,
+  revokeAzureAccount,
+  resolveAzureServices,
+  needsAzureSidecar,
+  formatAzureScopeDiagnostics,
+  missingAzureScopes,
+  AZURE_MCP_CONNECTION,
+  tryAzCliArmAccessToken,
   missingSlackScopes,
   slackOAuthClientConfig,
   SLACK_DEFAULT_MODE,
@@ -55,6 +64,7 @@ import {
   listConnectionsByParent,
   listGoogleWorkspaceConnections,
   listMicrosoft365Connections,
+  listAzureConnections,
   type McpConnectionRecord,
 } from "../external_api/api_connections_store.js";
 import { attachMcpConnection, unregisterMcpConnection } from "../external_api/mcp_attach.js";
@@ -68,6 +78,13 @@ import {
   stopMicrosoftSidecar,
   getMicrosoftSidecarStatus,
 } from "../microsoft/microsoft_sidecar.js";
+import {
+  ensureAzureSidecarRunning,
+  releaseAzureSidecar,
+  stopAzureSidecar,
+  getAzureSidecarStatus,
+} from "../azure/azure_sidecar.js";
+import { azureRestEnabled } from "../azure/azure_rest.js";
 import { outlookRestEnabled } from "../microsoft/outlook_send.js";
 import { microsoftCalendarRestEnabled } from "../microsoft/microsoft_calendar_rest.js";
 import { onedriveRestEnabled } from "../microsoft/onedrive_rest.js";
@@ -96,10 +113,11 @@ import { enrichGoogleMcpProbeError } from "../external_api/mcp_attach.js";
 
 const PARENT_PROVIDER = "google_workspace";
 const MICROSOFT_PARENT_PROVIDER = "microsoft_365";
+const AZURE_PARENT_PROVIDER = "azure";
 
 function integrationLazyLoadHint(registry: ToolRegistry, family?: string): string {
   if (!registry.isLazyToolLoading()) return "";
-  const id = family ?? "google_workspace|microsoft_365|github|slack|linear|notion|xero";
+  const id = family ?? "google_workspace|microsoft_365|azure|github|slack|linear|notion|xero";
   return (
     `\nLazy loading: activate_tool_family({ family: "${id}" }) for this provider's tools (not the whole connectors bundle).`
   );
@@ -139,6 +157,123 @@ async function ensureMicrosoftOAuth(
     if (match) return { accountId: match.accountId, email: match.email };
   }
   return null;
+}
+
+async function ensureAzureOAuth(
+  accountHint?: string
+): Promise<{ accountId: string; email?: string } | null> {
+  const token = await getAzureAccessToken(accountHint);
+  if (token) {
+    const accounts = await listAzureOAuthAccounts();
+    const match = accountHint
+      ? accounts.find((a) => a.accountId === accountHint || a.email === accountHint)
+      : accounts[0];
+    if (match) return { accountId: match.accountId, email: match.email };
+  }
+  return null;
+}
+
+async function connectAzureHandler(
+  registry: ToolRegistry,
+  args: Record<string, unknown>,
+  emit?: (text: string) => void
+): Promise<ToolResult> {
+  const oauthPrep = await prepareProviderOAuth("azure", args, emit);
+  if (oauthPrep) return oauthPrep;
+
+  const mode = args["mode"] === "read_only" ? "read_only" : "read_write";
+  const serviceIds = Array.isArray(args["services"])
+    ? (args["services"] as unknown[]).map((s) => String(s))
+    : undefined;
+  const accountHint = typeof args["account_hint"] === "string" ? args["account_hint"].trim() : undefined;
+
+  const presets = resolveAzureServices(serviceIds);
+  if (presets.length === 0) {
+    return { ok: false, error: "no valid services in services[]" };
+  }
+
+  const oauth = await ensureAzureOAuth(accountHint);
+  const cliToken = await tryAzCliArmAccessToken();
+  if (!oauth && !cliToken) {
+    return { ok: false, error: integrationNotConnectedError("azure") };
+  }
+
+  const accounts = oauth ? await listAzureOAuthAccounts() : [];
+  const match = oauth ? accounts.find((a) => a.accountId === oauth.accountId) : undefined;
+  const granted = match?.scopes ?? [];
+  const readOnly = mode === "read_only";
+  const attachErrors: string[] = [];
+  let totalTools = 0;
+  const attached: string[] = [];
+
+  if (needsAzureSidecar(presets)) {
+    const sidecarMiss = oauth ? missingAzureScopes(granted, presets, mode) : [];
+    if (sidecarMiss.length > 0) {
+      attachErrors.push(formatAzureScopeDiagnostics(granted, presets, mode));
+    } else {
+      const sidecar = await ensureAzureSidecarRunning({ presets });
+      if (!sidecar.ok) {
+        attachErrors.push(
+          `azure sidecar: ${sidecar.error}. Requires Node.js, npx, and .NET 8+; run \`az login\` for MCP credentials.`
+        );
+      } else {
+        try {
+          const { registered } = await attachMcpConnection(registry, {
+            name: AZURE_MCP_CONNECTION,
+            url: sidecar.url,
+            auth: { kind: "none" },
+            readOnly,
+            providerId: "azure_mcp",
+            parentProvider: AZURE_PARENT_PROVIDER,
+            services: presets.map((p) => p.id),
+            oauthAccountId: oauth?.accountId,
+            sidecarManaged: true,
+          });
+          attached.push(AZURE_MCP_CONNECTION);
+          totalTools += registered.length;
+        } catch (e) {
+          attachErrors.push(`azure: ${e instanceof Error ? e.message : String(e)}`);
+        }
+      }
+    }
+  }
+
+  const identity = oauth?.email ?? oauth?.accountId ?? (cliToken ? "az cli" : "unknown");
+  const restNote = `\nREST tools: ${azureRestEnabled() ? "on" : "off (set AGENT_AZURE_REST=1)"}`;
+
+  if (attached.length === 0) {
+    if (oauth || cliToken) {
+      const partial = attachErrors.length > 0 ? `\n\nMCP skipped:\n${attachErrors.join("\n")}` : "";
+      return {
+        ok: true,
+        output:
+          `Connected azure as ${identity} (${mode}, REST only).\n` +
+          `Services: ${presets.map((p) => p.id).join(", ")}` +
+          restNote +
+          integrationLazyLoadHint(registry, "azure") +
+          partial,
+      };
+    }
+    return {
+      ok: false,
+      error:
+        (attachErrors.length > 0 ? attachErrors.join("\n\n") : "no connections attached") +
+        "\n\nAdd Azure Service Management user_impersonation to your Entra app or run `az login`.",
+    };
+  }
+
+  const partial = attachErrors.length > 0 ? `\n\nSkipped / failed:\n${attachErrors.join("\n")}` : "";
+  return {
+    ok: true,
+    output:
+      `Connected azure as ${identity} (${mode}).\n` +
+      `Connections: ${attached.join(", ")}\n` +
+      `Registered MCP tools: ${totalTools}\n` +
+      `Services: ${presets.map((p) => p.id).join(", ")}` +
+      restNote +
+      integrationLazyLoadHint(registry, "azure") +
+      partial,
+  };
 }
 
 async function prepareProviderOAuth(
@@ -264,15 +399,15 @@ export function createConnectorTools(registry: ToolRegistry, _emitter: AgentEmit
   const connectProviderTool = defineTool({
     name: "connect_provider",
     description:
-      "WHAT: Connect curated providers — Google, Microsoft 365, Xero, GitHub, Slack, Linear, or Notion (hosted OAuth).\n" +
-      "WHEN: User asks to work with mail/calendar/files, accounting, repos, Slack, Linear, or Notion; or another tool reports not connected.\n" +
+      "WHAT: Connect curated providers — Google, Microsoft 365, Azure, Xero, GitHub, Slack, Linear, or Notion (hosted OAuth).\n" +
+      "WHEN: User asks to work with mail/calendar/files, cloud infra, accounting, repos, Slack, Linear, or Notion; or another tool reports not connected.\n" +
       "HOW: Set start_oauth:true to open hosted sign-in in the browser and wait for tokens. GitHub also supports legacy GITHUB_TOKEN in .env.",
     parameters: {
       type: "object",
       properties: {
         provider: {
           type: "string",
-          enum: ["google_workspace", "microsoft_365", "xero", "github", "slack", "linear", "notion"],
+          enum: ["google_workspace", "microsoft_365", "azure", "xero", "github", "slack", "linear", "notion"],
           description: "Provider preset id.",
         },
         start_oauth: {
@@ -284,7 +419,7 @@ export function createConnectorTools(registry: ToolRegistry, _emitter: AgentEmit
           type: "array",
           items: { type: "string" },
           description:
-            "Google: drive, gmail, calendar, … — Microsoft: mail, calendar, onedrive, teams, … Default: all for chosen provider.",
+            "Google: drive, gmail, calendar, … — Microsoft: mail, calendar, onedrive, teams, … — Azure: all, compute, storage, keyvault, … Default: all.",
         },
         mode: {
           type: "string",
@@ -316,6 +451,9 @@ export function createConnectorTools(registry: ToolRegistry, _emitter: AgentEmit
       }
       if (provider === "microsoft_365") {
         return connectMicrosoft365Handler(registry, args, emit);
+      }
+      if (provider === "azure") {
+        return connectAzureHandler(registry, args, emit);
       }
       if (provider === "xero") {
         const oauthPrep = await prepareProviderOAuth("xero", args, emit);
@@ -517,7 +655,7 @@ export function createConnectorTools(registry: ToolRegistry, _emitter: AgentEmit
       properties: {
         provider: {
           type: "string",
-          enum: ["google_workspace", "microsoft_365", "xero", "github", "slack", "linear", "notion"],
+          enum: ["google_workspace", "microsoft_365", "azure", "xero", "github", "slack", "linear", "notion"],
         },
         revoke_oauth: {
           type: "boolean",
@@ -587,6 +725,9 @@ export function createConnectorTools(registry: ToolRegistry, _emitter: AgentEmit
       if (provider === "microsoft_365") {
         return disconnectMicrosoft365Mcp(registry, args["revoke_oauth"] === true);
       }
+      if (provider === "azure") {
+        return disconnectAzureMcp(registry, args["revoke_oauth"] === true);
+      }
       if (provider !== "google_workspace") {
         return { ok: false, error: `unsupported provider '${provider}'` };
       }
@@ -642,6 +783,9 @@ export function createConnectorTools(registry: ToolRegistry, _emitter: AgentEmit
       );
       lines.push(
         `Microsoft 365: mcp_microsoft_* sidecar + outlook/calendar/onedrive REST — outlook=${outlookRestEnabled()}, calendar=${microsoftCalendarRestEnabled()}, onedrive=${onedriveRestEnabled()}, office=${microsoftOfficeRestEnabled()}`
+      );
+      lines.push(
+        `Azure: mcp_azure_* (@azure/mcp sidecar) + ARM REST — rest=${azureRestEnabled() ? "on" : "off"}, connect via Settings or connect_provider({ provider: "azure" })`
       );
       lines.push(
         `Xero: REST accounting tools — ${xeroRestEnabled() ? "on" : "off (set AGENT_XERO_REST=0 to disable)"}, connect via Settings → Integrations (hosted OAuth)`
@@ -809,6 +953,39 @@ export function createConnectorTools(registry: ToolRegistry, _emitter: AgentEmit
           );
         }
       }
+      const azAccounts = await listAzureOAuthAccounts();
+      lines.push("### Azure OAuth");
+      if (azAccounts.length === 0) {
+        const onDisk = await countOAuthAccountFiles("azure");
+        if (onDisk > 0) {
+          lines.push(`- (tokens on disk but unreadable — ${onDisk} file(s))`);
+          lines.push(`  ${oauthDecryptHint("azure")}`);
+        } else {
+          lines.push("- (not connected — Settings → Integrations → Azure, or `az login` for REST only)");
+        }
+      } else {
+        for (const a of azAccounts) {
+          const exp = new Date(a.expiresAt).toISOString();
+          lines.push(`- ${a.email ?? a.accountId} (expires ~${exp}, ${a.scopes.length} scopes)`);
+        }
+      }
+      const azSidecar = await getAzureSidecarStatus();
+      lines.push(
+        `Azure sidecar: enabled=${azSidecar.enabled}, running=${azSidecar.running}, url=${azSidecar.url}`
+      );
+      const azConns = await listConnectionsByParent(AZURE_PARENT_PROVIDER);
+      lines.push("### Azure MCP connections");
+      if (azConns.length === 0) {
+        lines.push("- (none — connect_provider({ provider: \"azure\" }))");
+      } else {
+        for (const c of azConns) {
+          lines.push(
+            `- ${c.name}: ${c.tools.length} tools, services=[${(c.services ?? []).join(",")}], readOnly=${!!c.readOnly}`
+          );
+        }
+      }
+      lines.push("");
+
       const msSidecar = await getMicrosoftSidecarStatus();
       lines.push(
         `Sidecar: enabled=${msSidecar.enabled}, running=${msSidecar.running}, url=${msSidecar.url}`
@@ -951,6 +1128,37 @@ async function disconnectGoogleWorkspaceMcp(
   };
 }
 
+async function disconnectAzureMcp(
+  registry: ToolRegistry | ToolRegistry[],
+  revokeOAuth: boolean
+): Promise<ToolResult> {
+  const registries = normalizeRegistries(registry);
+  const conns = await listAzureConnections();
+  let removed = 0;
+  let hadSidecar = false;
+  for (const c of conns) {
+    if (c.sidecarManaged) hadSidecar = true;
+    for (const reg of registries) {
+      removed += unregisterMcpConnection(reg, c);
+    }
+    await deleteConnection(c.name);
+  }
+  if (hadSidecar) await releaseAzureSidecar();
+  if (revokeOAuth) {
+    const accounts = await listAzureOAuthAccounts();
+    for (const a of accounts) {
+      await revokeAzureAccount(a.accountId);
+    }
+    await stopAzureSidecar(true);
+  }
+  return {
+    ok: true,
+    output:
+      `Disconnected azure${revokeOAuth ? " (OAuth tokens revoked)" : ""}. ` +
+      `Removed ${removed} tools from ${conns.length} connection(s).`,
+  };
+}
+
 async function disconnectMicrosoft365Mcp(
   registry: ToolRegistry | ToolRegistry[],
   revokeOAuth: boolean
@@ -1020,6 +1228,30 @@ export async function disconnectMicrosoft365FromServer(
 }
 
 /** Server-side Microsoft 365 connect (web API). */
+export async function connectAzureFromServer(
+  registry: ToolRegistry,
+  opts: { services?: string[]; mode?: "read_write" | "read_only"; accountId?: string }
+): Promise<{ ok: boolean; output?: string; error?: string }> {
+  const { connectProviderTool } = createConnectorTools(registry, { emit: () => {} } as unknown as AgentEmitter);
+  const result = await connectProviderTool.handler({
+    provider: "azure",
+    services: opts.services,
+    mode: opts.mode ?? "read_write",
+    account_hint: opts.accountId,
+  });
+  if (result.ok) return { ok: true, output: result.output };
+  return { ok: false, error: result.error };
+}
+
+export async function disconnectAzureFromServer(
+  registry: ToolRegistry | ToolRegistry[],
+  revokeOAuth = false
+): Promise<{ ok: boolean; output?: string; error?: string }> {
+  const result = await disconnectAzureMcp(registry, revokeOAuth);
+  if (result.ok) return { ok: true, output: result.output };
+  return { ok: false, error: result.error };
+}
+
 export async function connectMicrosoft365FromServer(
   registry: ToolRegistry,
   opts: { services?: string[]; mode?: "read_write" | "read_only"; accountId?: string }

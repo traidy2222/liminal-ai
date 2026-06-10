@@ -9,8 +9,10 @@ import {
   listSlackOAuthAccounts,
   listLinearOAuthAccounts,
   listNotionOAuthAccounts,
+  listAzureOAuthAccounts,
   runGoogleHostedConnectFlow,
   runMicrosoftHostedConnectFlow,
+  runAzureHostedConnectFlow,
   runGithubHostedConnectFlow,
   runXeroHostedConnectFlow,
   runSlackHostedConnectFlow,
@@ -22,6 +24,7 @@ import { githubAuthAvailable, githubTokenPresent } from "../github/github_connec
 export type ConnectProviderId =
   | "google_workspace"
   | "microsoft_365"
+  | "azure"
   | "xero"
   | "github"
   | "slack"
@@ -31,6 +34,7 @@ export type ConnectProviderId =
 const PROVIDER_LABEL: Record<ConnectProviderId, string> = {
   google_workspace: "Google Workspace",
   microsoft_365: "Microsoft 365",
+  azure: "Azure",
   xero: "Xero",
   github: "GitHub",
   slack: "Slack",
@@ -52,6 +56,8 @@ export async function isConnectProviderOAuthReady(provider: ConnectProviderId): 
       return (await listGoogleOAuthAccounts()).length > 0;
     case "microsoft_365":
       return (await listMicrosoftOAuthAccounts()).length > 0;
+    case "azure":
+      return (await listAzureOAuthAccounts()).length > 0;
     case "xero":
       return (await listXeroOAuthAccounts()).length > 0;
     case "slack":
@@ -93,6 +99,10 @@ export async function startConnectProviderOAuth(
         const r = await runMicrosoftHostedConnectFlow(flowOpts);
         return { ok: true, label: r.email ?? r.accountId };
       }
+      case "azure": {
+        const r = await runAzureHostedConnectFlow(flowOpts);
+        return { ok: true, label: r.email ?? r.accountId };
+      }
       case "xero": {
         const r = await runXeroHostedConnectFlow(flowOpts);
         const tenant = r.tenantName ? ` · ${r.tenantName}` : "";
@@ -128,6 +138,7 @@ export function isConnectProviderId(value: string): value is ConnectProviderId {
   return (
     value === "google_workspace" ||
     value === "microsoft_365" ||
+    value === "azure" ||
     value === "xero" ||
     value === "github" ||
     value === "slack" ||

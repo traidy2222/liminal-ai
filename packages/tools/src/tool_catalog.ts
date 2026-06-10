@@ -19,6 +19,13 @@ export const TOOL_FAMILIES: Record<string, { description: string; tools: readonl
   files_edit: {
     description: "Filesystem operations and rollback-safe multi-file apply.",
     tools: [
+      // Core read/write surface (also in CORE_ALWAYS_TOOLS_BASE — mapped here so
+      // activate_tool_family("files_edit") provisions writes for sub-agents).
+      "read_file",
+      "grep_file",
+      "write_file",
+      "edit_file",
+      "list_dir",
       // Filesystem ops
       "move_file",
       "copy_file",
@@ -39,7 +46,6 @@ export const TOOL_FAMILIES: Record<string, { description: string; tools: readonl
       "kill_process",
       "list_processes",
       "read_process_output",
-      "run_command_with_pty",
     ],
   },
   git: {
@@ -156,6 +162,7 @@ export const TOOL_FAMILIES: Record<string, { description: string; tools: readonl
       "Google Workspace REST — Gmail send/draft, Calendar, Docs/Sheets/Slides. Pair with mcp_google_* / mcp_google_ext_* when MCP is attached.",
     tools: [
       "gmail_create_draft",
+      "gmail_send_draft",
       "gmail_send_message",
       "email_style_infer",
       "calendar_rest_get_calendar",
@@ -212,11 +219,23 @@ export const TOOL_FAMILIES: Record<string, { description: string; tools: readonl
       "slides_rest_get_thumbnail",
     ],
   },
+  azure: {
+    description:
+      "Azure — ARM REST (subscriptions, resource groups, resources) + @azure/mcp sidecar (compute, storage, Key Vault, web, Cosmos, Monitor, …).",
+    tools: [
+      "azure_list_subscriptions",
+      "azure_list_resource_groups",
+      "azure_list_resources",
+      "azure_get_resource",
+      "azure_rest_call",
+    ],
+  },
   microsoft_365: {
     description:
       "Microsoft 365 REST — Outlook, Teams, SharePoint, Planner, To Do, OneNote, Excel, Graph search. Pair with mcp_microsoft_* when Graph MCP sidecar is attached.",
     tools: [
       "outlook_send_message",
+      "outlook_send_draft",
       "outlook_create_draft",
       "email_style_infer",
       "outlook_calendar_rest_list_events",

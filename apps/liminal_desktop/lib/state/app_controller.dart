@@ -1035,6 +1035,7 @@ class AppController extends ChangeNotifier {
   bool _isLongRunningIntegrationCommand(String command) {
     return command == 'connect_google_oauth' ||
         command == 'connect_microsoft_oauth' ||
+        command == 'connect_azure_oauth' ||
         command == 'connect_xero_oauth' ||
         command == 'connect_slack_oauth' ||
         command == 'connect_linear_oauth' ||
@@ -1146,6 +1147,18 @@ class AppController extends ChangeNotifier {
 
   Future<bool> disconnectMicrosoft({bool revoke = false}) =>
       _runIntegrationCommand('disconnect_microsoft', {'revoke': revoke});
+
+  Future<bool> connectAzureOAuth({String mode = 'read_write'}) =>
+      _runIntegrationCommand('connect_azure_oauth', {
+        'mode': mode,
+        'openBrowser': true,
+      });
+
+  Future<bool> connectAzure({String mode = 'read_write'}) =>
+      _runIntegrationCommand('connect_azure', {'mode': mode});
+
+  Future<bool> disconnectAzure({bool revoke = false}) =>
+      _runIntegrationCommand('disconnect_azure', {'revoke': revoke});
 
   Future<bool> connectXeroOAuth({String mode = 'read_write'}) =>
       _runIntegrationCommand('connect_xero_oauth', {

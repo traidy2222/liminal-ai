@@ -6,6 +6,7 @@ import type { ToolRegistry } from "@liminal/core";
 const CURATED_PARENT_FAMILIES = new Set([
   "google_workspace",
   "microsoft_365",
+  "azure",
   "github",
   "xero",
   "slack",

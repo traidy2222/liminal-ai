@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 
-enum IntegrationBrandId { google, microsoft, xero, slack, linear, notion, github, advanced }
+enum IntegrationBrandId { google, microsoft, azure, xero, slack, linear, notion, github, advanced }
 
 class IntegrationBrandMeta {
   const IntegrationBrandMeta({
@@ -32,6 +32,13 @@ const integrationBrands = <IntegrationBrandId, IntegrationBrandMeta>{
     tagline: 'Outlook, Teams & OneDrive',
     accent: Color(0xFF00A4EF),
     accentSoft: Color(0x2400A4EF),
+  ),
+  IntegrationBrandId.azure: IntegrationBrandMeta(
+    id: IntegrationBrandId.azure,
+    title: 'Azure',
+    tagline: 'Cloud infra & ARM tools',
+    accent: Color(0xFF0078D4),
+    accentSoft: Color(0x240078D4),
   ),
   IntegrationBrandId.xero: IntegrationBrandMeta(
     id: IntegrationBrandId.xero,
@@ -112,6 +119,8 @@ class _BrandLogo extends StatelessWidget {
         return CustomPaint(size: const Size(28, 28), painter: _GoogleLogoPainter());
       case IntegrationBrandId.microsoft:
         return CustomPaint(size: const Size(28, 28), painter: _MicrosoftLogoPainter());
+      case IntegrationBrandId.azure:
+        return Icon(Icons.cloud_outlined, size: 26, color: integrationBrands[id]!.accent);
       case IntegrationBrandId.xero:
         return CustomPaint(size: const Size(28, 28), painter: _XeroLogoPainter());
       case IntegrationBrandId.slack:

@@ -1,8 +1,11 @@
 import {
   ALL_GOOGLE_SERVICE_IDS,
   ALL_MICROSOFT_SERVICE_IDS,
+  ALL_AZURE_SERVICE_IDS,
   listGoogleOAuthAccounts,
   listMicrosoftOAuthAccounts,
+  listAzureOAuthAccounts,
+  missingDefaultAzureScopes,
   listGithubOAuthAccounts,
   listXeroOAuthAccounts,
   listSlackOAuthAccounts,
@@ -17,6 +20,7 @@ import {
   runGoogleHostedConnectFlow,
   runGithubHostedConnectFlow,
   runMicrosoftHostedConnectFlow,
+  runAzureHostedConnectFlow,
   runXeroHostedConnectFlow,
 } from "@liminal/core";
 import {
@@ -24,6 +28,7 @@ import {
   connectGithubFromServer,
   connectGoogleWorkspaceFromServer,
   connectMicrosoft365FromServer,
+  connectAzureFromServer,
   connectXeroFromServer,
   connectSlackFromServer,
   connectLinearFromServer,
@@ -33,6 +38,7 @@ import {
   disconnectGithubFromServer,
   disconnectGoogleWorkspaceFromServer,
   disconnectMicrosoft365FromServer,
+  disconnectAzureFromServer,
   disconnectXeroFromServer,
   disconnectSlackFromServer,
   disconnectLinearFromServer,
@@ -40,6 +46,7 @@ import {
   disconnectOpenApiFromServer,
   getGoogleSidecarStatus,
   getMicrosoftSidecarStatus,
+  getAzureSidecarStatus,
   listIntegrationConnections,
   parseAuthBody,
   refreshIntegrationToolsOnRegistry,
@@ -65,6 +72,14 @@ export async function buildIntegrationsSnapshot() {
       })),
       sidecar: await getMicrosoftSidecarStatus(),
       services: ALL_MICROSOFT_SERVICE_IDS,
+    },
+    azure: {
+      accounts: (await listAzureOAuthAccounts()).map((a) => ({
+        ...a,
+        missingScopes: missingDefaultAzureScopes(a.scopes),
+      })),
+      sidecar: await getAzureSidecarStatus(),
+      services: ALL_AZURE_SERVICE_IDS,
     },
     github: {
       accounts: (await listGithubOAuthAccounts()).map((a) => ({
@@ -270,6 +285,51 @@ export async function disconnectMicrosoft(
   if (!result.ok) throw new Error(result.error ?? "Microsoft disconnect failed.");
   await refreshIntegrationsOnAllHarnesses(registry);
   return result.output ?? "Microsoft disconnected.";
+}
+
+export async function connectAzureOAuth(
+  registry: ChatRegistry,
+  opts: {
+    services?: string[];
+    mode?: "read_write" | "read_only";
+    openBrowser?: boolean;
+    attach?: boolean;
+  }
+): Promise<{ email?: string; accountId: string; attachOutput?: string }> {
+  const result = await runAzureHostedConnectFlow({
+    services: opts.services,
+    mode: opts.mode ?? "read_write",
+    openBrowser: opts.openBrowser !== false,
+    onStatus: (m) => console.log(`[azure-oauth] ${m}`),
+  });
+  let attachOutput: string | undefined;
+  if (opts.attach !== false) {
+    attachOutput = await connectAzure(registry, {
+      services: opts.services,
+      mode: opts.mode ?? "read_write",
+    });
+  }
+  return { email: result.email, accountId: result.accountId, attachOutput };
+}
+
+export async function connectAzure(
+  registry: ChatRegistry,
+  opts: { services?: string[]; mode?: "read_write" | "read_only" }
+): Promise<string> {
+  assertHarnessesIdle(registry);
+  const bridge = await registry.getOrCreateActive();
+  const result = await connectAzureFromServer(bridge.harness.registry, opts);
+  if (!result.ok) throw new Error(result.error ?? "Azure connect failed.");
+  await refreshIntegrationsOnAllHarnesses(registry);
+  return result.output ?? "Azure tools attached.";
+}
+
+export async function disconnectAzure(registry: ChatRegistry, revoke: boolean): Promise<string> {
+  assertHarnessesIdle(registry);
+  const result = await disconnectAzureFromServer(await allHarnessRegistries(registry), revoke);
+  if (!result.ok) throw new Error(result.error ?? "Azure disconnect failed.");
+  await refreshIntegrationsOnAllHarnesses(registry);
+  return result.output ?? "Azure disconnected.";
 }
 
 export async function disconnectGoogle(

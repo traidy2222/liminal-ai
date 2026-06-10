@@ -61,6 +61,9 @@ import {
   disconnectMicrosoft,
   connectMicrosoftOAuth,
   connectMicrosoft365,
+  connectAzureOAuth,
+  connectAzure,
+  disconnectAzure,
   connectXeroOAuth,
   disconnectXero,
   connectSlackOAuth,
@@ -111,7 +114,11 @@ export class WsServer {
         this.registry.resolveWorkspaceForMedia(chatId) ?? this.repoRoot,
       fallbackRoot: this.repoRoot,
     });
-    const ptyShellPort = createPtyShellPort(this.ptyManager, ensureTerminal);
+    const ptyShellPort = createPtyShellPort(
+      this.ptyManager,
+      ensureTerminal,
+      (chatId) => this.registry.resolveWorkspaceForMedia(chatId) ?? this.repoRoot
+    );
     this.registry = new ChatRegistry({
       provider: opts.provider,
       runtimePreferences: opts.runtimePreferences,
@@ -803,6 +810,46 @@ export class WsServer {
           const d = data as { revoke?: boolean };
           try {
             const output = await disconnectMicrosoft(this.registry, d.revoke === true);
+            const snap = await buildIntegrationsSnapshot();
+            this.ack(ws, id, true, undefined, { output, integrations: snap });
+          } catch (err) {
+            this.ack(ws, id, false, err instanceof Error ? err.message : String(err));
+          }
+          return;
+        }
+
+        case "connect_azure_oauth": {
+          const d = data as {
+            services?: string[];
+            mode?: "read_write" | "read_only";
+            openBrowser?: boolean;
+          };
+          try {
+            const result = await connectAzureOAuth(this.registry, d);
+            const snap = await buildIntegrationsSnapshot();
+            this.ack(ws, id, true, undefined, { ...result, integrations: snap });
+          } catch (err) {
+            this.ack(ws, id, false, err instanceof Error ? err.message : String(err));
+          }
+          return;
+        }
+
+        case "connect_azure": {
+          const d = data as { services?: string[]; mode?: "read_write" | "read_only" };
+          try {
+            const output = await connectAzure(this.registry, d);
+            const snap = await buildIntegrationsSnapshot();
+            this.ack(ws, id, true, undefined, { output, integrations: snap });
+          } catch (err) {
+            this.ack(ws, id, false, err instanceof Error ? err.message : String(err));
+          }
+          return;
+        }
+
+        case "disconnect_azure": {
+          const d = data as { revoke?: boolean };
+          try {
+            const output = await disconnectAzure(this.registry, d.revoke === true);
             const snap = await buildIntegrationsSnapshot();
             this.ack(ws, id, true, undefined, { output, integrations: snap });
           } catch (err) {

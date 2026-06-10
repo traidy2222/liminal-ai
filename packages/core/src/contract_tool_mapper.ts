@@ -106,6 +106,11 @@ export const TOOL_FAMILY_DESCRIPTORS: ToolFamilyDescriptor[] = [
     keywords: ["outlook", "microsoft", "onedrive", "teams", "office 365", "m365", "sharepoint"],
   },
   {
+    family: "azure",
+    description: "Azure cloud ARM subscriptions resource groups VMs storage Key Vault",
+    keywords: ["azure", "resource group", "subscription", "key vault", "app service", "cosmos", "aks", "blob"],
+  },
+  {
     family: "slack",
     description: "Slack channels messages team chat",
     keywords: ["slack", "channel", "dm", "workspace chat"],
@@ -236,6 +241,16 @@ export function mapContractToToolFamilies(
 
   // Always include files_edit as a baseline (nearly all tasks need file access)
   if (!families.includes("files_edit")) families.push("files_edit");
+
+  // File-deliverable objectives (save/write report to path) need the full write surface.
+  if (
+    /\b(save|write|create|output|deliver|produce|draft|persist)\b[\s\S]{0,48}\b(file|files|document|markdown|\.md|report)\b/i.test(
+      objective
+    ) &&
+    !families.includes("files_edit")
+  ) {
+    families.push("files_edit");
+  }
 
   return {
     families,

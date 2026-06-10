@@ -1,5 +1,5 @@
 import type { ToolRegistry, AgentEmitter, AgentHarness } from "@liminal/core";
-import { resolveHarnessEnvRaw, emailStyleInferEnabled } from "@liminal/core";
+import { effectiveHarnessEnvRaw, resolveHarnessEnvRaw, emailStyleInferEnabled } from "@liminal/core";
 import { readFileTool } from "./families/files/read_file.js";
 import { writeFileTool } from "./families/files/write_file.js";
 import { listDirTool } from "./families/files/list_dir.js";
@@ -125,6 +125,8 @@ import { createTeamsRestTools, teamsRestEnabled } from "./integrations/microsoft
 import { createPlannerRestTools, plannerRestEnabled } from "./integrations/microsoft/planner_rest.js";
 import { createGraphSearchRestTools, graphSearchRestEnabled } from "./integrations/microsoft/graph_search_rest.js";
 import { createMicrosoftOfficeRestTools, microsoftOfficeRestEnabled } from "./integrations/microsoft/microsoft_office_rest.js";
+import { createAzureArmRestTools } from "./integrations/azure/azure_arm_tools.js";
+import { azureRestEnabled } from "./integrations/azure/azure_rest.js";
 import { registerXeroRestTools, xeroRestEnabled } from "./integrations/xero/xero_rest.js";
 import { registerSlackRestTools, slackRestEnabled } from "./integrations/slack/slack_rest.js";
 import { registerLinearRestTools, linearRestEnabled } from "./integrations/linear/linear_rest.js";
@@ -228,13 +230,17 @@ export async function registerAllTools(
     registry.register(createKillProcessTool(harness));
     registry.register(createListProcessesTool(harness));
     registry.register(createReadProcessOutputTool(harness));
-    registry.register(createRunCommandWithPtyTool(harness));
+    if (effectiveHarnessEnvRaw("AGENT_PTY_CONTROL_TOOL") === "1") {
+      registry.register(createRunCommandWithPtyTool(harness));
+    }
   } else {
     registry.register(runBackgroundTool);
     registry.register(killProcessTool);
     registry.register(listProcessesTool);
     registry.register(readProcessOutputTool);
-    registry.register(runCommandWithPtyTool);
+    if (effectiveHarnessEnvRaw("AGENT_PTY_CONTROL_TOOL") === "1") {
+      registry.register(runCommandWithPtyTool);
+    }
   }
   registry.register(webFetchTool);
   registry.register(webSearchTool);
@@ -484,6 +490,9 @@ export async function registerAllTools(
   if (graphSearchRestEnabled()) {
     for (const t of createGraphSearchRestTools()) registry.register(t);
   }
+  if (azureRestEnabled()) {
+    for (const t of createAzureArmRestTools()) registry.register(t);
+  }
   if (microsoftOfficeRestEnabled()) {
     for (const t of createMicrosoftOfficeRestTools()) registry.register(t);
   }
@@ -613,16 +622,14 @@ export {
   getPtyShellPort,
   type PtyManagerPort,
 } from "./families/shell/pty_shell_port.js";
-export {
-  shellUseUiPty,
-  wrapOneshotCommand,
-  LIMINAL_EXIT_MARKER,
-} from "./families/shell/terminal_shell_runtime.js";
+export { shellUseUiPty } from "./families/shell/terminal_shell_runtime.js";
 export {
   connectGoogleWorkspaceFromServer,
   disconnectGoogleWorkspaceFromServer,
   connectMicrosoft365FromServer,
   disconnectMicrosoft365FromServer,
+  connectAzureFromServer,
+  disconnectAzureFromServer,
   connectGithubFromServer,
   disconnectGithubFromServer,
   connectXeroFromServer,
@@ -635,6 +642,7 @@ export {
   disconnectNotionFromServer,
 } from "./integrations/core/connect_provider.js";
 export { getMicrosoftSidecarStatus, stopMicrosoftSidecar } from "./integrations/microsoft/microsoft_sidecar.js";
+export { getAzureSidecarStatus, stopAzureSidecar } from "./integrations/azure/azure_sidecar.js";
 export {
   githubMcpEnabled,
   githubTokenPresent,

@@ -2,6 +2,7 @@ class IntegrationsSnapshot {
   IntegrationsSnapshot({
     required this.google,
     required this.microsoft,
+    required this.azure,
     required this.github,
     required this.xero,
     required this.slack,
@@ -12,6 +13,7 @@ class IntegrationsSnapshot {
 
   final GoogleIntegrations google;
   final MicrosoftIntegrations microsoft;
+  final MicrosoftIntegrations azure;
   final GithubIntegrations github;
   final XeroIntegrations xero;
   final SlackIntegrations slack;
@@ -26,6 +28,9 @@ class IntegrationsSnapshot {
       ),
       microsoft: MicrosoftIntegrations.fromJson(
         Map<String, dynamic>.from(json['microsoft'] as Map? ?? {}),
+      ),
+      azure: MicrosoftIntegrations.fromJson(
+        Map<String, dynamic>.from(json['azure'] as Map? ?? {}),
       ),
       github: GithubIntegrations.fromJson(
         Map<String, dynamic>.from(json['github'] as Map? ?? {}),
@@ -55,6 +60,7 @@ class IntegrationsSnapshot {
   static final empty = IntegrationsSnapshot(
     google: GoogleIntegrations.empty,
     microsoft: MicrosoftIntegrations.empty,
+    azure: MicrosoftIntegrations.empty,
     github: GithubIntegrations.empty,
     xero: XeroIntegrations.empty,
     slack: SlackIntegrations.empty,
@@ -63,7 +69,7 @@ class IntegrationsSnapshot {
     connections: [],
   );
 
-  static const _curatedParents = {'google_workspace', 'microsoft_365', 'github'};
+  static const _curatedParents = {'google_workspace', 'microsoft_365', 'azure', 'github'};
 
   List<IntegrationConnection> get customMcp => connections
       .where(
@@ -83,6 +89,10 @@ class IntegrationsSnapshot {
 
   List<IntegrationConnection> get microsoftMcp => connections
       .where((c) => c.kind == 'mcp' && c.parentProvider == 'microsoft_365')
+      .toList();
+
+  List<IntegrationConnection> get azureMcp => connections
+      .where((c) => c.kind == 'mcp' && c.parentProvider == 'azure')
       .toList();
 
   List<IntegrationConnection> get openApi =>
@@ -106,6 +116,10 @@ class IntegrationsSnapshot {
 
   bool get microsoftConnected => microsoftMcp.isNotEmpty;
 
+  bool get azureConnected => azureMcp.isNotEmpty || azure.accounts.isNotEmpty;
+
+  bool get azureToolsAttached => azureMcp.isNotEmpty;
+
   bool get githubConnected => githubMcp.isNotEmpty;
 
   bool get xeroConnected => xero.accounts.isNotEmpty;
@@ -120,6 +134,8 @@ class IntegrationsSnapshot {
 
   int get microsoftToolCount => microsoftMcp.fold(0, (n, c) => n + c.toolCount);
 
+  int get azureToolCount => azureMcp.fold(0, (n, c) => n + c.toolCount);
+
   int get githubToolCount => githubMcp.fold(0, (n, c) => n + c.toolCount);
 
   String get googleAccountLabel {
@@ -130,6 +146,11 @@ class IntegrationsSnapshot {
   String get microsoftAccountLabel {
     if (microsoft.accounts.isEmpty) return 'Microsoft 365';
     return microsoft.accounts.first.email ?? 'Microsoft 365';
+  }
+
+  String get azureAccountLabel {
+    if (azure.accounts.isEmpty) return 'Azure';
+    return azure.accounts.first.email ?? 'Azure';
   }
 
   String get xeroAccountLabel {

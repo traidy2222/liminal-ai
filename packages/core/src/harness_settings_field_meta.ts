@@ -1825,6 +1825,14 @@ const _META_RAW: Record<string, HarnessSettingsFieldMeta> = {
     description: "Harness environment toggle for Recipe Library. See docs/configuration.md (advanced).",
     valueKind: "boolean",
   },
+  "AGENT_RECIPE_PRIME": {
+    tabId: "advanced",
+    subgroupId: "telemetry",
+    label: "Recipe Prime",
+    description:
+      "At round 2, inject the best matching success recipe for the turn intent (zero extra model calls). Low-outcome turns decay bad recipes.",
+    valueKind: "boolean",
+  },
   "AGENT_PLUGIN_DIR": {
     tabId: "advanced",
     subgroupId: "plugins",
@@ -1867,12 +1875,47 @@ const _META_RAW: Record<string, HarnessSettingsFieldMeta> = {
     description: "Harness environment toggle for Google Connect On Boot. See docs/configuration.md (harness).",
     valueKind: "string",
   },
+  "AGENT_AZURE_REST": {
+    tabId: "harness",
+    subgroupId: "harness_misc",
+    label: "Azure REST Tools",
+    description: "Register azure_list_* and azure_rest_call ARM tools (OAuth or az login).",
+    valueKind: "boolean",
+  },
+  "AGENT_AZURE_SIDECAR_ENABLE": {
+    tabId: "harness",
+    subgroupId: "harness_misc",
+    label: "Azure MCP Sidecar",
+    description: "Spawn @azure/mcp HTTP sidecar for mcp_azure_* tools on connect_provider.",
+    valueKind: "boolean",
+  },
+  "AGENT_AZURE_SIDECAR_CMD": {
+    tabId: "harness",
+    subgroupId: "harness_misc",
+    label: "Azure Sidecar Command",
+    description: "Command to launch @azure/mcp (default: npx -y @azure/mcp@latest server start).",
+    valueKind: "string",
+  },
+  "AGENT_AZURE_SIDECAR_PORT": {
+    tabId: "harness",
+    subgroupId: "harness_misc",
+    label: "Azure Sidecar Port",
+    description: "HTTP port for @azure/mcp (default 8012).",
+    valueKind: "string",
+  },
+  "AGENT_AZURE_CONNECT_ON_BOOT": {
+    tabId: "harness",
+    subgroupId: "harness_misc",
+    label: "Azure Connect On Boot",
+    description: "Auto-attach Azure MCP when OAuth tokens exist at harness startup.",
+    valueKind: "boolean",
+  },
   "AGENT_GOOGLE_GMAIL_SEND": {
     tabId: "harness",
     subgroupId: "harness_misc",
     label: "Gmail REST Send",
     description:
-      "Register gmail_create_draft and gmail_send_message (classic Gmail REST). Official Gmail MCP create_draft is plain-only; use REST for styled HTML drafts and immediate send. Uses the same OAuth token as MCP.",
+      "Register gmail_create_draft, gmail_send_draft, and gmail_send_message (classic Gmail REST). Official Gmail MCP create_draft is plain-only; use REST for styled HTML drafts; gmail_send_draft sends an existing draft without recomposition. Uses the same OAuth token as MCP.",
     valueKind: "boolean",
   },
   "AGENT_GOOGLE_CALENDAR_REST": {

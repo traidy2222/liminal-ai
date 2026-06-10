@@ -196,6 +196,14 @@ export const HARNESS_ENV_DEFAULTS: Readonly<Record<string, string>> = {
   AGENT_SHELL_IMPLICIT_MAX_MS: "180000",
   /** When 1 (default), run_shell/run_background execute in visible UI terminal tabs (desktop/web). */
   AGENT_SHELL_USE_UI_PTY: "1",
+  /** Max wait for the Agent shell PTY to finish booting (first stable prompt). */
+  AGENT_SHELL_BOOT_TIMEOUT_MS: "45000",
+  /** Prompt must stay idle this long before the shell is considered ready for input. */
+  AGENT_SHELL_PROMPT_STABLE_MS: "600",
+  /** Max chars returned to the model from run_shell (full output stays in Terminal). */
+  AGENT_SHELL_TOOL_OUTPUT_MAX_CHARS: "12000",
+  /** When 1, expose deprecated run_command_with_pty (off by default). */
+  AGENT_PTY_CONTROL_TOOL: "0",
   AGENT_STREAM_CHUNK_TIMEOUT_MS: "120000",
   AGENT_STREAM_MAX_RETRIES: "3",
   AGENT_FAILURE_LOG: "1",
@@ -290,6 +298,7 @@ export const HARNESS_ENV_DEFAULTS: Readonly<Record<string, string>> = {
   AGENT_GOLDEN_EVAL: "1",
   AGENT_FAILURE_DIGEST: "1",
   AGENT_RECIPE_LIBRARY: "1",
+  AGENT_RECIPE_PRIME: "1",
   AGENT_YOLO: "0",
   AGENT_AUTO_DREAM_MIN_HOURS: "4",
   AGENT_AUTO_DREAM_MIN_SESSIONS: "3",
@@ -305,6 +314,11 @@ export const HARNESS_ENV_DEFAULTS: Readonly<Record<string, string>> = {
   AGENT_GOOGLE_SIDECAR_CMD: "uvx workspace-mcp",
   AGENT_GOOGLE_SIDECAR_PORT: "8010",
   AGENT_GOOGLE_CONNECT_ON_BOOT: "1",
+  AGENT_AZURE_REST: "1",
+  AGENT_AZURE_SIDECAR_ENABLE: "1",
+  AGENT_AZURE_SIDECAR_CMD: "npx -y @azure/mcp@latest server start",
+  AGENT_AZURE_SIDECAR_PORT: "8012",
+  AGENT_AZURE_CONNECT_ON_BOOT: "0",
   AGENT_GOOGLE_GMAIL_SEND: "1",
   AGENT_GOOGLE_CALENDAR_REST: "1",
   AGENT_GOOGLE_OFFICE_REST: "1",

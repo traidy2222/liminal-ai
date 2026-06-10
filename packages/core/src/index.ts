@@ -272,6 +272,14 @@ export {
 } from "./streaming_write_preview.js";
 export type { StreamingWritePreview, StreamingWriteToolSpec } from "./streaming_write_preview.js";
 export {
+  FILE_COMPOSE_DOCK_TOOLS,
+  EMAIL_COMPOSE_DOCK_TOOLS,
+  isComposeDockTool,
+  isEmailComposeDockTool,
+  extractComposeDockWirePreview,
+} from "./compose_dock_preview.js";
+export type { ComposeDockWirePreview } from "./compose_dock_preview.js";
+export {
   tokenize,
   rankDocumentsForQuery,
   memoryTypeBoost,
@@ -362,6 +370,7 @@ export {
   DEFAULT_EFFORT_LEVEL,
 } from "./output_effort.js";
 export type { EffortLevel } from "./output_effort.js";
+export { buildResearchTurnInjection } from "./research_depth.js";
 export {
   parseWorkflowSpec,
   topoSortPhases,
@@ -488,7 +497,16 @@ export {
 export type { DistilledOutput } from "./output_distill.js";
 export { appendFailureLog, failureLogPath } from "./failure_log.js";
 export { formatFailureDigestForWorldContext } from "./failure_digest.js";
-export { recordRecipe, formatRecipeLibraryHints, formatTopRecipes, phaseShapeForTools } from "./recipe_library.js";
+export {
+  recordRecipe,
+  formatRecipeLibraryHints,
+  formatTopRecipes,
+  phaseShapeForTools,
+  findBestRecipeForPrime,
+  formatRecipePrimeMessage,
+  compactToolSequenceForPrime,
+  recordRecipePrimeOutcome,
+} from "./recipe_library.js";
 export type { RecipeEntry, RecipePhase, RecordRecipeInput } from "./recipe_library.js";
 export {
   attachSessionEventLog,
@@ -537,7 +555,7 @@ export {
   resolveOpenRouterSessionId,
 } from "./openrouter_session.js";
 export type { OpenRouterSessionRequestExtras } from "./openrouter_session.js";
-export { resolveProviderConfig, resolveVisionProviderConfig, resolveVisionProviderConfigAsync, buildProviderRouting, resolveProviderRouting, buildOpenRouterChatRequestExtras, resolveProviderStrategy, sessionEpochBumpOn429Enabled, isOpenRouterStealthModel, OPENROUTER_STEALTH_MODEL_SLUGS } from "./provider_config.js";
+export { resolveProviderConfig, isProviderApiKeyConfigured, resolveVisionProviderConfig, resolveVisionProviderConfigAsync, buildProviderRouting, resolveProviderRouting, buildOpenRouterChatRequestExtras, resolveProviderStrategy, sessionEpochBumpOn429Enabled, isOpenRouterStealthModel, OPENROUTER_STEALTH_MODEL_SLUGS } from "./provider_config.js";
 export type { ProviderConfig, ProviderConfigOverrides, VisionProviderConfig, ProviderRouting, ProviderRoutingContext, ProviderStrategy, ProviderSortAxis, OpenRouterChatRequestExtras } from "./provider_config.js";
 export { ProviderRouteState } from "./provider_route_state.js";
 export type { ProviderRouteSnapshot } from "./provider_route_state.js";
@@ -566,8 +584,11 @@ export {
 } from "./inference_provider.js";
 export {
   ensureLocalProviderApiKeyInProcess,
+  ensureProviderApiKeysInProcess,
+  isCastAiApiKey,
   resolveLocalProviderApiKey,
   providerApiKeyEnvFileCandidates,
+  syncProviderProcessEnvForBase,
 } from "./provider_api_key.js";
 export {
   buildManagedFreeFallbackHarnessEnv,
@@ -769,6 +790,8 @@ export { SharedMemoryBus } from "./shared_memory_bus.js";
 export type { BusListener, SharedBusEnvelope } from "./shared_memory_bus.js";
 export {
   resolveShellRuntime,
+  buildOneshotPtyLaunch,
+  buildInteractivePtyLaunch,
   getShellNote,
   getPlatformIdentity,
   gatherGitContext,
@@ -781,6 +804,7 @@ export type {
   GitContext,
   PortContext,
 } from "./platform_context.js";
+export type { InteractivePtyLaunch } from "./shell_integration_launch.js";
 export { gatherExternalTerminalSnapshots } from "./terminal_snapshot.js";
 export type { TerminalSnapshotSummary } from "./terminal_snapshot.js";
 export {
@@ -864,6 +888,9 @@ export {
   buildSpawnContextInjection,
   finalizeChildSpawnTools,
   ensureChildBaselineTools,
+  ensureChildRegistryBaselineFromParent,
+  isSpawnBaselineTool,
+  spawnObjectiveNeedsFileTools,
   SPAWN_BASELINE_TOOL_NAMES,
 } from "./spawn_provisioning.js";
 export {
@@ -1018,6 +1045,43 @@ export {
   microsoftOAuthCallbackUri,
 } from "./microsoft_connect.js";
 export type { MicrosoftConnectResult, RunMicrosoftConnectFlowOptions } from "./microsoft_connect.js";
+export {
+  buildAzureAuthUrl,
+  exchangeAzureCode,
+  refreshAzureAccessToken,
+  getAzureAccessToken,
+  revokeAzureAccount,
+  listAzureOAuthAccounts,
+  azureOAuthConfigured,
+  scopesForAzureConnect,
+} from "./azure_oauth_broker.js";
+export {
+  AZURE_WORKSPACE_SERVICES,
+  ALL_AZURE_SERVICE_IDS,
+  AZURE_MCP_CONNECTION,
+  ARM_DELEGATED_SCOPE,
+  getAzureServicePreset,
+  resolveAzureServices,
+  scopesForAzureServices,
+  needsAzureSidecar,
+  azureSidecarNamespaces,
+} from "./azure_connector_catalog.js";
+export type { AzureServiceId, AzureServicePreset, AzureConnectorBackend } from "./azure_connector_catalog.js";
+export {
+  missingAzureScopes,
+  formatAzureScopeDiagnostics,
+  missingDefaultAzureScopes,
+  normalizeAzureScopes,
+} from "./azure_oauth_scopes.js";
+export {
+  runAzureConnectFlow,
+  azureOAuthLoopbackHost,
+  azureOAuthCallbackUri,
+} from "./azure_connect.js";
+export type { AzureConnectResult, RunAzureConnectFlowOptions } from "./azure_connect.js";
+export { runAzureHostedConnectFlow } from "./azure_hosted_connect.js";
+export type { RunAzureHostedConnectOptions } from "./azure_hosted_connect.js";
+export { tryAzCliArmAccessToken } from "./azure_cli_token.js";
 export {
   xeroOAuthClientConfig,
   buildXeroAuthUrl,

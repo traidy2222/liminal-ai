@@ -24,6 +24,7 @@ class _IntegrationsScreenState extends State<IntegrationsScreen> {
   String? _expandedId;
   String _googleMode = 'read_write';
   String _microsoftMode = 'read_write';
+  String _azureMode = 'read_write';
   String _xeroMode = 'read_write';
   String _slackMode = 'read_write';
   String _linearMode = 'read_write';
@@ -117,6 +118,19 @@ class _IntegrationsScreenState extends State<IntegrationsScreen> {
       return;
     }
     await host.connectGoogleWorkspace(services: services, mode: _googleMode);
+  }
+
+  Future<void> _azurePrimary(AppController host, IntegrationsSnapshot snap) async {
+    if (snap.azureToolsAttached) {
+      await host.disconnectAzure(revoke: true);
+      return;
+    }
+    if (snap.azure.accounts.isEmpty) {
+      await host.connectAzureOAuth(mode: _azureMode);
+      await host.connectAzure(mode: _azureMode);
+      return;
+    }
+    await host.connectAzure(mode: _azureMode);
   }
 
   Future<void> _microsoftPrimary(
@@ -329,6 +343,58 @@ class _IntegrationsScreenState extends State<IntegrationsScreen> {
                               mode: _microsoftMode,
                             ),
                             onRevoke: () => host.disconnectMicrosoft(revoke: true),
+                          ),
+                        ),
+                      ),
+                      SizedBox(
+                        width: _expandedId == 'azure' ? constraints.maxWidth : tileWidth.clamp(148, 280),
+                        child: _IntegrationCard(
+                          brandId: IntegrationBrandId.azure,
+                          statusLine: snap.azureToolsAttached
+                              ? 'Ready · ${snap.azureToolCount} MCP tools'
+                              : snap.azure.accounts.isNotEmpty
+                                  ? 'Signed in — tap Connect'
+                                  : integrationBrands[IntegrationBrandId.azure]!.tagline,
+                          connected: snap.azureToolsAttached || snap.azure.accounts.isNotEmpty,
+                          expanded: _expandedId == 'azure',
+                          onToggle: () => _toggleExpanded('azure'),
+                          primaryLabel: snap.azureToolsAttached ? 'Disconnect' : 'Connect',
+                          primaryDanger: snap.azureToolsAttached,
+                          disabled: disabled,
+                          onPrimary: () => unawaited(_azurePrimary(host, snap)),
+                          child: Padding(
+                            padding: const EdgeInsets.only(top: 8),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  'ARM REST + @azure/mcp sidecar. Run az login for full MCP coverage.',
+                                  style: TextStyle(color: lim.textMuted, fontSize: 12, height: 1.4),
+                                ),
+                                const SizedBox(height: 8),
+                                Row(
+                                  children: [
+                                    Radio<String>(
+                                      value: 'read_write',
+                                      groupValue: _azureMode,
+                                      onChanged: disabled || snap.azureToolsAttached
+                                          ? null
+                                          : (v) => setState(() => _azureMode = v ?? 'read_write'),
+                                    ),
+                                    const Text('Read + write'),
+                                    const SizedBox(width: 12),
+                                    Radio<String>(
+                                      value: 'read_only',
+                                      groupValue: _azureMode,
+                                      onChanged: disabled || snap.azureToolsAttached
+                                          ? null
+                                          : (v) => setState(() => _azureMode = v ?? 'read_only'),
+                                    ),
+                                    const Text('Read only'),
+                                  ],
+                                ),
+                              ],
+                            ),
                           ),
                         ),
                       ),

@@ -57,6 +57,9 @@ export function inferIntentToolFamilies(
     if (/outlook|onedrive|teams|planner|sharepoint|office 365|m365|microsoft/i.test(trimmed)) {
       if (has("microsoft_365")) out.add("microsoft_365");
     }
+    if (/azure|resource group|key vault|app service|cosmos|aks|blob storage|arm template/i.test(trimmed)) {
+      if (has("azure")) out.add("azure");
+    }
     if (/google|gmail|sheet|spreadsheet|gdoc|drive|calendar|workspace|docs|slides/i.test(trimmed)) {
       if (has("google_workspace")) out.add("google_workspace");
     }

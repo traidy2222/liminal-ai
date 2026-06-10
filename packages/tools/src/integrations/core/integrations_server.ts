@@ -173,6 +173,8 @@ export async function refreshIntegrationToolsOnRegistry(
   await bootstrapGithub(registry, refreshOpts);
   const { bootstrapMicrosoft365 } = await import("../microsoft/microsoft_365_boot.js");
   await bootstrapMicrosoft365(registry, refreshOpts);
+  const { bootstrapAzure } = await import("../azure/azure_boot.js");
+  await bootstrapAzure(registry, refreshOpts);
 }
 
 export { parseAuthBody };
