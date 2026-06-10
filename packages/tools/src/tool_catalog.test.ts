@@ -28,7 +28,7 @@ process.env["AGENT_GLOBAL_STORAGE_ROOT"] = mkdtempSync(path.join(os.tmpdir(), "l
 process.env["AGENT_PLUGIN_DIR"] = "";
 
 function buildHarness(): AgentHarness {
-  return new AgentHarness({
+  const harness = new AgentHarness({
     openRouterApiKey: "test-key-not-used-offline",
     model: "test/model",
     baseURL: "https://example.invalid/v1",
@@ -42,6 +42,8 @@ function buildHarness(): AgentHarness {
       ],
     },
   });
+  harness.emitter.on("error", () => {});
+  return harness;
 }
 
 // Tool names that are intentionally registered but not model-facing via a

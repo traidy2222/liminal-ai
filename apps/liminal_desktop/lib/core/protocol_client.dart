@@ -77,6 +77,8 @@ class ProtocolClient {
       case 'app_closed':
       case 'app_data':
       case 'orchestration_status':
+      case 'pty_opened':
+      case 'pty_exit':
         onGlobalFrame?.call(frame);
         return;
       default:

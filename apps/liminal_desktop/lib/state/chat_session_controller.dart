@@ -4,6 +4,7 @@ import '../core/chat_reducer.dart' as chat_reducer;
 import '../core/chat_transcript_state.dart';
 import '../models/browser_view_state.dart';
 import '../models/file_edit_view_state.dart';
+import '../models/terminal_panel_state.dart';
 import 'message_models.dart';
 
 /// Per-chat transcript + gates; notifies only this chat's listeners.
@@ -17,6 +18,13 @@ class ChatSessionController extends ChangeNotifier {
   bool browserDockExpanded = true;
   /// User-controlled collapse for the live file-edit dock.
   bool fileEditDockExpanded = true;
+  /// User-controlled collapse for the Ghostty terminal dock.
+  bool terminalDockExpanded = true;
+  /// User-dragged terminal body height (px); null = default fraction of screen.
+  double? terminalBodyHeight;
+  /// User-dragged right-rail width (px); null = default layout width.
+  double? dockRailWidth;
+  TerminalPanelState? terminalPanel;
 
   List<MessageEntry> get messages => _state.messages;
   bool get busy => _state.busy;
@@ -30,6 +38,66 @@ class ChatSessionController extends ChangeNotifier {
   BrowserViewState? get browserView => _state.browserView;
   FileEditViewState? get fileEditView => _state.fileEditView;
 
+  void toggleTerminalDock() {
+    terminalDockExpanded = !terminalDockExpanded;
+    notifyListeners();
+  }
+
+  void setTerminalPanel(TerminalPanelState? panel) {
+    terminalPanel = panel;
+    if (panel != null && panel.open) terminalDockExpanded = true;
+    notifyListeners();
+  }
+
+  void upsertTerminalTab(TerminalTabState tab, {bool focus = true}) {
+    final panel = terminalPanel;
+    if (panel == null) {
+      terminalPanel = TerminalPanelState(
+        tabs: [tab],
+        activeSessionId: tab.sessionId,
+        open: true,
+      );
+    } else {
+      final idx = panel.tabs.indexWhere((t) => t.sessionId == tab.sessionId);
+      final tabs = List<TerminalTabState>.from(panel.tabs);
+      if (idx >= 0) {
+        tabs[idx] = tab;
+      } else {
+        tabs.add(tab);
+      }
+      terminalPanel = panel.copyWith(
+        tabs: tabs,
+        activeSessionId: focus ? tab.sessionId : panel.activeSessionId,
+        open: true,
+      );
+    }
+    if (focus) terminalDockExpanded = true;
+    notifyListeners();
+  }
+
+  void removeTerminalTab(String sessionId) {
+    final panel = terminalPanel;
+    if (panel == null) return;
+    final tabs = panel.tabs.where((t) => t.sessionId != sessionId).toList();
+    if (tabs.isEmpty) {
+      terminalPanel = null;
+    } else {
+      final nextActive = panel.activeSessionId == sessionId
+          ? tabs.last.sessionId
+          : panel.activeSessionId;
+      terminalPanel = panel.copyWith(tabs: tabs, activeSessionId: nextActive);
+    }
+    notifyListeners();
+  }
+
+  void setActiveTerminalTab(String sessionId) {
+    final panel = terminalPanel;
+    if (panel == null) return;
+    terminalPanel = panel.copyWith(activeSessionId: sessionId, open: true);
+    terminalDockExpanded = true;
+    notifyListeners();
+  }
+
   void toggleBrowserDock() {
     browserDockExpanded = !browserDockExpanded;
     notifyListeners();
@@ -37,6 +105,38 @@ class ChatSessionController extends ChangeNotifier {
 
   void toggleFileEditDock() {
     fileEditDockExpanded = !fileEditDockExpanded;
+    notifyListeners();
+  }
+
+  void setTerminalBodyHeight(double height) {
+    terminalBodyHeight = height;
+    notifyListeners();
+  }
+
+  void adjustTerminalBodyHeight(
+    double delta, {
+    required double min,
+    required double max,
+    required double fallback,
+  }) {
+    final base = terminalBodyHeight ?? fallback;
+    terminalBodyHeight = (base + delta).clamp(min, max);
+    notifyListeners();
+  }
+
+  void setDockRailWidth(double width) {
+    dockRailWidth = width;
+    notifyListeners();
+  }
+
+  void adjustDockRailWidth(
+    double delta, {
+    required double min,
+    required double max,
+    required double fallback,
+  }) {
+    final base = dockRailWidth ?? fallback;
+    dockRailWidth = (base + delta).clamp(min, max);
     notifyListeners();
   }
 

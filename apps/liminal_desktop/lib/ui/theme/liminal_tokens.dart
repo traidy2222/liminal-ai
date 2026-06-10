@@ -70,6 +70,9 @@ class LiminalTokens {
   factory LiminalTokens.fromPersona(PersonaUiTheme persona, {LiminalFontSet? fonts}) {
     final f = fonts ?? LiminalFontSet.resolve(persona);
     final surface = persona.surfaceTint;
+    // Hairline borders stay neutral with only a whisper of the persona accent —
+    // accent-saturated borders belong to selection/focus states, not resting chrome.
+    final hairline = Color.lerp(Colors.white, persona.accent, 0.30)!;
     return LiminalTokens(
       accent: persona.accent,
       secondary: persona.secondary,
@@ -79,11 +82,11 @@ class LiminalTokens {
       muted: persona.muted,
       background: _bg,
       surface: surface,
-      panel: Color.alphaBlend(Colors.white.withValues(alpha: 0.04), surface),
-      text: const Color(0xFFC8D4E0),
+      panel: Color.alphaBlend(Colors.white.withValues(alpha: 0.045), surface),
+      text: const Color(0xFFE7EDF5),
       textMuted: persona.muted,
-      textDim: const Color(0xFF667788),
-      border: persona.accent.withValues(alpha: 0.18),
+      textDim: const Color(0xFF73808F),
+      border: hairline.withValues(alpha: 0.11),
       userBubble: persona.accent.withValues(alpha: 0.12),
       assistantAccent: persona.success,
       codeBackground: const Color(0xFF030810),
@@ -105,6 +108,33 @@ class LiminalTokens {
 
   static LiminalTokens get defaultTokens =>
       LiminalTokens.fromPersona(PersonaUiTheme.liminalDefault);
+
+  // ---- Derived state colors (computed, so persona themes get them free) ----
+
+  /// Foreground for solid-accent fills — black on bright accents, white on dark.
+  Color get onAccent =>
+      accent.computeLuminance() > 0.45 ? const Color(0xFF06090E) : Colors.white;
+
+  /// One step above [surface] — hovered cards, raised tiles.
+  Color get surfaceRaised =>
+      Color.alphaBlend(Colors.white.withValues(alpha: 0.05), surface);
+
+  /// Opaque popover/dialog/menu surface (sits above everything).
+  Color get overlay =>
+      Color.alphaBlend(Colors.white.withValues(alpha: 0.07), surface);
+
+  /// Stronger hairline for hovered or emphasized containers.
+  Color get borderStrong =>
+      Color.lerp(Colors.white, accent, 0.30)!.withValues(alpha: 0.22);
+
+  /// Accent-saturated border — selection and focus only.
+  Color get accentBorder => accent.withValues(alpha: 0.50);
+
+  /// Flat hover wash for rows, icon buttons, list items.
+  Color get hoverOverlay => Colors.white.withValues(alpha: 0.045);
+
+  /// Pressed-state wash.
+  Color get pressedOverlay => Colors.white.withValues(alpha: 0.08);
 
   TextStyle monoStyle({
     double fontSize = 13,

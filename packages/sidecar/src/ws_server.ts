@@ -34,10 +34,19 @@ import { tryHandleBrowserPreviewRequest } from "./browser_preview_handler.js";
 import { tryHandleAppProxyRequest } from "./app_proxy_handler.js";
 import { tryHandleAppHtmlRequest } from "./app_html_handler.js";
 import { tryHandleMediaRequest } from "./media_handler.js";
-import { getBrowserPanelFrame } from "@liminal/tools";
+import { getBrowserPanelFrame, setTerminalViewPublisher } from "@liminal/tools";
+import { buildPtyOpenedPayload, createSidecarEnsureTerminal } from "./pty_terminal.js";
+import { createPtyShellPort } from "./pty_shell_port.js";
 import { buildOutboundUserMessage, normalizeWireAttachments } from "./message_attachments.js";
 import { LiminalAppManager } from "./app_manager.js";
 import { ChatOrchestrator } from "./chat_orchestrator.js";
+import { PtyManager } from "./pty_manager.js";
+import { createPtyStreamServer, tryHandlePtyUpgrade } from "./pty_stream_handler.js";
+import {
+  tryHandleTerminalAssetRequest,
+  tryHandleTerminalEmbedRequest,
+  tryHandleTerminalResizeRequest,
+} from "./terminal_embed_handler.js";
 import {
   attachIntegrationMcp,
   buildIntegrationsSnapshot,
@@ -89,11 +98,20 @@ export class WsServer {
   private readonly orchestrator: ChatOrchestrator;
   private readonly token: string;
   private readonly repoRoot: string;
+  private readonly ptyManager = new PtyManager();
+  private readonly ptyWss;
 
   constructor(opts: WsServerOptions) {
     this.token = opts.token;
     this.repoRoot = opts.repoRoot;
     this.appManager = new LiminalAppManager((frame) => this.broadcast(frame));
+    const ensureTerminal = createSidecarEnsureTerminal({
+      ptyManager: this.ptyManager,
+      resolveWorkspaceRoot: (chatId) =>
+        this.registry.resolveWorkspaceForMedia(chatId) ?? this.repoRoot,
+      fallbackRoot: this.repoRoot,
+    });
+    const ptyShellPort = createPtyShellPort(this.ptyManager, ensureTerminal);
     this.registry = new ChatRegistry({
       provider: opts.provider,
       runtimePreferences: opts.runtimePreferences,
@@ -102,7 +120,11 @@ export class WsServer {
         this.orchestrator.handleFrame(frame);
         this.broadcast(frame);
       },
-      registerToolsDeps: { appManager: this.appManager },
+      registerToolsDeps: {
+        appManager: this.appManager,
+        ensureTerminal,
+        ptyShellPort,
+      },
     });
     this.orchestrator = new ChatOrchestrator({
       registry: this.registry,
@@ -111,6 +133,21 @@ export class WsServer {
       emit: (frame) => this.broadcast(frame),
     });
     this.registry.setOrchestrator(() => this.orchestrator);
+
+    this.ptyWss = createPtyStreamServer({
+      token: this.token,
+      ptyManager: this.ptyManager,
+    });
+
+    this.ptyManager.on("exit", (sessionId, chatId, exitCode) => {
+      this.broadcast(
+        serverFrame("pty_exit", { sessionId, chatId, exitCode }, chatId)
+      );
+    });
+
+    setTerminalViewPublisher((payload) => {
+      this.broadcast(serverFrame("terminal_view", payload, payload.chatId));
+    });
 
     this.http = createServer((req, res) => {
       if (
@@ -153,6 +190,22 @@ export class WsServer {
       ) {
         return;
       }
+      if (
+        tryHandleTerminalAssetRequest(req, res, { token: this.token })
+      ) {
+        return;
+      }
+      if (
+        tryHandleTerminalResizeRequest(req, res, {
+          token: this.token,
+          ptyManager: this.ptyManager,
+        })
+      ) {
+        return;
+      }
+      if (tryHandleTerminalEmbedRequest(req, res, { token: this.token })) {
+        return;
+      }
       res.writeHead(404);
       res.end();
     });
@@ -168,6 +221,14 @@ export class WsServer {
       if (presented !== this.token) {
         socket.write("HTTP/1.1 401 Unauthorized\r\n\r\n");
         socket.destroy();
+        return;
+      }
+      if (
+        tryHandlePtyUpgrade(req, socket, head, {
+          token: this.token,
+          ptyManager: this.ptyManager,
+        }, this.ptyWss)
+      ) {
         return;
       }
       this.wss.handleUpgrade(req, socket, head, (ws) => this.onConnection(ws));
@@ -374,6 +435,7 @@ export class WsServer {
 
         case "delete_chat": {
           const d = data as { chatId: string };
+          this.ptyManager.closeForChat(d.chatId);
           const newActive = await this.registry.delete(d.chatId);
           this.broadcastChatList();
           this.ack(ws, id, true, undefined, { activeChatId: newActive });
@@ -962,6 +1024,70 @@ export class WsServer {
           return;
         }
 
+        case "pty_open": {
+          const d = data as {
+            chatId: string;
+            cols?: number;
+            rows?: number;
+            label?: string;
+            source?: "agent" | "user";
+            forceNew?: boolean;
+            cwd?: string;
+          };
+          const chatId = String(d.chatId ?? "").trim();
+          if (!chatId) return this.ack(ws, id, false, "chatId required");
+          const workspaceRoot =
+            this.registry.resolveWorkspaceForMedia(chatId) ??
+            this.repoRoot;
+          const info = this.ptyManager.open({
+            chatId,
+            workspaceRoot,
+            cols: d.cols,
+            rows: d.rows,
+            label: d.label,
+            source: d.source,
+            forceNew: d.forceNew,
+            cwd: d.cwd,
+          });
+          const payload = buildPtyOpenedPayload(info);
+          this.broadcast(serverFrame("pty_opened", payload, chatId));
+          this.ack(ws, id, true, undefined, payload);
+          return;
+        }
+
+        case "pty_resize": {
+          const d = data as { sessionId: string; cols: number; rows: number };
+          const ok = this.ptyManager.resize(
+            String(d.sessionId ?? ""),
+            Number(d.cols),
+            Number(d.rows)
+          );
+          this.ack(ws, id, ok, ok ? undefined : "Unknown sessionId.");
+          return;
+        }
+
+        case "pty_close": {
+          const d = data as { sessionId?: string; chatId?: string };
+          let ok = false;
+          if (d.sessionId?.trim()) {
+            ok = this.ptyManager.close(d.sessionId.trim());
+          } else if (d.chatId?.trim()) {
+            this.ptyManager.closeForChat(d.chatId.trim());
+            ok = true;
+          } else {
+            return this.ack(ws, id, false, "sessionId or chatId required");
+          }
+          this.ack(ws, id, ok, ok ? undefined : "Unknown sessionId.");
+          return;
+        }
+
+        case "pty_list": {
+          const d = data as { chatId?: string };
+          const sessions = this.ptyManager.list(d.chatId?.trim());
+          this.ack(ws, id, true, undefined, { sessions });
+          return;
+        }
+
         default:
           this.ack(ws, id, false, `Unknown command "${String(command)}".`);
           return;
@@ -983,7 +1109,24 @@ export class WsServer {
     this.clients.clear();
     this.appManager.stopRefreshLoop();
     this.registry.disposeAll();
+    this.ptyManager.disposeAll();
+    this.ptyWss.close();
     this.wss.close();
     this.http.close();
+  }
+
+  /** Loopback port after `listen()` — used by terminal embed pages. */
+  getHttpPort(): number | null {
+    const addr = this.http.address();
+    if (addr && typeof addr === "object") return addr.port;
+    return null;
+  }
+
+  getPtyManager(): PtyManager {
+    return this.ptyManager;
+  }
+
+  getToken(): string {
+    return this.token;
   }
 }

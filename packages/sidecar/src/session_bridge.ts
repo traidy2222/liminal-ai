@@ -237,6 +237,7 @@ export class SessionBridge {
     });
     on("speech", (p) => this.emit("speech", p));
     on("browser_view", (p) => this.emit("browser_view", p));
+    on("terminal_view", (p) => this.emit("terminal_view", p));
     on("tool_delta", (p) => this.emit("tool_delta", p));
     on("tool_result", (p) => this.emit("tool_result", wireToolResult(p)));
     on("turn_summary", (p) => this.emit("turn_summary", p));

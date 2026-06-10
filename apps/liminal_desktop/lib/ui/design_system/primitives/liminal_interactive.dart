@@ -63,19 +63,18 @@ class _LiminalInteractiveState extends State<LiminalInteractive> {
             decoration: BoxDecoration(
               borderRadius: radius,
               border: _focused
-                  ? Border.all(color: lim.accent.withValues(alpha: 0.65), width: 1.5)
+                  ? Border.all(color: lim.accentBorder, width: 1.5)
                   : null,
             ),
             child: Material(
-              color: _hovered && canPress
-                  ? lim.accent.withValues(alpha: 0.06)
-                  : Colors.transparent,
+              color: _hovered && canPress ? lim.hoverOverlay : Colors.transparent,
               borderRadius: radius,
               child: InkWell(
                 onTap: canPress ? widget.onPressed : null,
                 borderRadius: radius,
-                splashColor: lim.accent.withValues(alpha: 0.12),
-                highlightColor: lim.accent.withValues(alpha: 0.08),
+                splashColor: Colors.transparent,
+                highlightColor: lim.pressedOverlay,
+                hoverColor: Colors.transparent,
                 child: widget.builder(context, _hovered, _focused),
               ),
             ),

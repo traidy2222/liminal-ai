@@ -148,7 +148,7 @@ class MessageTile extends StatelessWidget {
           message: message,
           verbose: verboseTools,
         ),
-      ToolResultMessage(:final output, :final ok) => const SizedBox.shrink(),
+      ToolResultMessage() => const SizedBox.shrink(),
       TurnHeaderMessage(
         :final intentClass,
         :final outcomeScore,

@@ -68,7 +68,7 @@ class _ReasoningBlockState extends State<ReasoningBlock> {
             decoration: BoxDecoration(
               color: lim.panel.withValues(alpha: hovered ? 0.55 : 0.4),
               borderRadius: BorderRadius.circular(lim.radius * 0.5),
-              border: Border.all(color: accent.withValues(alpha: 0.22)),
+              border: Border.all(color: hovered ? lim.borderStrong : lim.border),
             ),
             child: Row(
               children: [
@@ -93,7 +93,7 @@ class _ReasoningBlockState extends State<ReasoningBlock> {
       decoration: BoxDecoration(
         color: lim.panel.withValues(alpha: 0.5),
         borderRadius: BorderRadius.circular(lim.radius * 0.55),
-        border: Border.all(color: accent.withValues(alpha: 0.28)),
+        border: Border.all(color: lim.border),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,

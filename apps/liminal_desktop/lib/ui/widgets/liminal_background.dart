@@ -59,15 +59,30 @@ class LiminalBackground extends StatelessWidget {
           CustomPaint(
             painter: _ScanlinePainter(),
           ),
+        // Soft accent halo at the top — atmosphere, not stage lighting.
         DecoratedBox(
           decoration: BoxDecoration(
             gradient: RadialGradient(
-              center: const Alignment(0, -0.85),
-              radius: 1.1,
+              center: const Alignment(0, -1.1),
+              radius: 1.3,
               colors: [
-                lim.accent.withValues(alpha: (0.14 * (lim.glow / 0.35)).clamp(0.0, 0.4).toDouble()),
+                lim.accent.withValues(alpha: (0.09 * (lim.glow / 0.35)).clamp(0.0, 0.22).toDouble()),
                 Colors.transparent,
               ],
+            ),
+          ),
+        ),
+        // Gentle edge vignette grounds the canvas on large monitors.
+        DecoratedBox(
+          decoration: BoxDecoration(
+            gradient: RadialGradient(
+              center: Alignment.center,
+              radius: 1.5,
+              colors: [
+                Colors.transparent,
+                Colors.black.withValues(alpha: 0.22),
+              ],
+              stops: const [0.62, 1.0],
             ),
           ),
         ),
@@ -86,7 +101,7 @@ class _GridPainter extends CustomPainter {
   @override
   void paint(Canvas canvas, Size size) {
     final paint = Paint()
-      ..color = accent.withValues(alpha: 0.045)
+      ..color = accent.withValues(alpha: 0.028)
       ..strokeWidth = 1;
     for (var x = 0.0; x < size.width; x += _step) {
       canvas.drawLine(Offset(x, 0), Offset(x, size.height), paint);

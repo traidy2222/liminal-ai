@@ -63,7 +63,7 @@ const TOOL_PHASE: Readonly<Record<string, RecipePhase>> = {
   move_file: "MUTATE", copy_file: "MUTATE", copy_tree: "MUTATE", mkdir_p: "MUTATE",
   path_guard: "MUTATE", rename_symbol: "MUTATE",
   // EXECUTE — run processes
-  run_shell: "EXECUTE", run_background: "EXECUTE", execute_code: "EXECUTE",
+  run_shell: "EXECUTE", run_background: "EXECUTE", open_terminal: "EXECUTE", execute_code: "EXECUTE",
   run_command_with_pty: "EXECUTE", kill_process: "EXECUTE", list_processes: "EXECUTE",
   read_process_output: "EXECUTE",
   // VERIFY — check correctness

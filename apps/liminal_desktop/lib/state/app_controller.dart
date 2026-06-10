@@ -19,6 +19,8 @@ import '../models/harness_settings.dart';
 import '../models/liminal_app_spec.dart';
 import '../models/integrations_snapshot.dart';
 import '../models/orchestration_snapshot.dart';
+import '../models/terminal_panel_state.dart';
+import '../models/terminal_view_state.dart';
 import '../models/vireon_account.dart';
 import '../protocol/chat_summary.dart';
 import '../protocol/frames.dart';
@@ -256,6 +258,9 @@ class AppController extends ChangeNotifier {
   }
 
   void _onChatFrame(String chatId, String event, Map<String, dynamic> data) {
+    if (event == 'terminal_view') {
+      _applyTerminalView(chatId, data);
+    }
     if (chatId == activeChatId) {
       _syncAssetResolver(chatId: chatId);
     }
@@ -643,6 +648,14 @@ class AppController extends ChangeNotifier {
         }
         notifyListeners();
         return;
+      case 'pty_exit': {
+        final chatId = frame.chatId ?? frame.data['chatId'] as String?;
+        final sessionId = frame.data['sessionId'] as String?;
+        if (chatId == null || sessionId == null) return;
+        _sessions.get(chatId)?.removeTerminalTab(sessionId);
+        notifyListeners();
+        return;
+      }
       case 'app_closed':
         if (!LiminalFeatureFlags.desktopAppsEnabled) return;
         final appId = frame.data['appId'] as String? ?? '';
@@ -806,6 +819,101 @@ class AppController extends ChangeNotifier {
     final id = chatId ?? activeChatId;
     if (id == null || !_protocol.isConnected) return;
     await _protocol.send('abort', {'chatId': id});
+  }
+
+  String? _terminalEmbedUrl(String sessionId) {
+    final port = _sidecarPort;
+    final token = _sidecarToken;
+    if (port == null || token == null) return null;
+    return 'http://127.0.0.1:$port/terminal/embed?token=${Uri.encodeComponent(token)}'
+        '&sessionId=${Uri.encodeComponent(sessionId)}&port=$port';
+  }
+
+  void _applyTerminalView(String chatId, Map<String, dynamic> data) {
+    final session = _sessions.get(chatId);
+    if (session == null) return;
+    final wire = TerminalViewWire.fromJson(data);
+    if (!wire.open) {
+      if (wire.sessionId.isNotEmpty) {
+        session.removeTerminalTab(wire.sessionId);
+      } else {
+        session.setTerminalPanel(null);
+      }
+      notifyListeners();
+      return;
+    }
+    final embedUrl = _terminalEmbedUrl(wire.sessionId);
+    if (embedUrl == null || wire.sessionId.isEmpty) return;
+    session.upsertTerminalTab(
+      TerminalTabState(
+        sessionId: wire.sessionId,
+        embedUrl: embedUrl,
+        cwd: wire.cwd,
+        label: wire.label,
+        source: wire.source,
+      ),
+      focus: wire.focus,
+    );
+    notifyListeners();
+  }
+
+  /// Toggle terminal dock visibility; opens a user shell when none exist.
+  Future<void> toggleChatTerminal(String chatId) async {
+    final session = _sessions.get(chatId);
+    if (session == null || !_protocol.isConnected) return;
+
+    final panel = session.terminalPanel;
+    if (panel != null && panel.hasTabs) {
+      session.terminalDockExpanded = !session.terminalDockExpanded;
+      notifyListeners();
+      return;
+    }
+
+    await openChatTerminalTab(chatId, forceNew: false);
+  }
+
+  /// Open a user terminal tab (reuses primary when [forceNew] is false).
+  Future<void> openChatTerminalTab(
+    String chatId, {
+    bool forceNew = true,
+  }) async {
+    final session = _sessions.get(chatId);
+    if (session == null || !_protocol.isConnected) return;
+
+    final result = await _protocol.send('pty_open', {
+      'chatId': chatId,
+      'cols': 100,
+      'rows': 28,
+      'source': 'user',
+      if (forceNew) 'forceNew': true,
+    });
+    if (!result.ok) return;
+    final data = result.data;
+    if (data is! Map) return;
+    final map = Map<String, dynamic>.from(data);
+    final sessionId = map['sessionId'] as String? ?? '';
+    if (sessionId.isEmpty) return;
+    final embedUrl = _terminalEmbedUrl(sessionId);
+    if (embedUrl == null) return;
+    session.upsertTerminalTab(
+      TerminalTabState(
+        sessionId: sessionId,
+        embedUrl: embedUrl,
+        cwd: map['cwd'] as String? ?? '',
+        label: map['label'] as String? ?? 'Terminal',
+        source: map['source'] as String? ?? 'user',
+      ),
+      focus: true,
+    );
+    notifyListeners();
+  }
+
+  Future<void> closeChatTerminalTab(String chatId, String sessionId) async {
+    final session = _sessions.get(chatId);
+    if (session == null || !_protocol.isConnected) return;
+    await _protocol.send('pty_close', {'sessionId': sessionId});
+    session.removeTerminalTab(sessionId);
+    notifyListeners();
   }
 
   Future<void> resolveApproval(

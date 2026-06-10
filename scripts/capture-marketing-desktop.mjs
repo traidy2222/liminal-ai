@@ -105,6 +105,7 @@ async function launchDesktop(exe) {
     stdio: "ignore",
     cwd: path.dirname(exe),
     windowsHide: false,
+    env: process.env,
   });
   child.unref();
   return child.pid;

@@ -4,9 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../app/app_scope.dart';
-import '../../core/connection_phase.dart';
 import '../../models/integrations_snapshot.dart';
-import '../../models/orchestration_snapshot.dart';
 import '../../models/vireon_account.dart';
 import '../../protocol/chat_summary.dart';
 import '../../routing/routes.dart';
@@ -180,7 +178,9 @@ class _VireonHubScreenState extends State<VireonHubScreen> {
     final lim = LiminalTheme.of(context);
     final workspaceChats = _workspaceChats(host.chats);
     final filtered = _filteredChats(workspaceChats);
-    final visibleLimit = _showAllChats ? filtered.length : 8;
+    // Fill tall monitors instead of stranding empty space under the list.
+    final defaultVisible = MediaQuery.sizeOf(context).height >= 1000 ? 14 : 8;
+    final visibleLimit = _showAllChats ? filtered.length : defaultVisible;
     final visibleChats = filtered.take(visibleLimit).toList();
     final busyCount = workspaceChats.where((c) => c.busy).length;
     final greeting = _greeting(host);
@@ -231,20 +231,14 @@ class _VireonHubScreenState extends State<VireonHubScreen> {
                   greeting: greeting,
                   subtitle: _hubSubtitle(host),
                   account: host.vireonAccount,
-                );
-                final status = _HubStatusStrip(host: host);
-                final quickActions = _HubQuickActions(
                   opening: _openingChat,
                   onNewChat: () => _newChat(host),
                   onMission: () => _openOrchestrator(host),
-                  onIntegrations: () => context.push(AppRoutes.integrations),
-                  onSettings: () => context.push(AppRoutes.settings),
                 );
-                final stats = _HubStatsRow(
+                final status = _HubStatusStrip(
+                  host: host,
                   chatCount: workspaceChats.length,
                   busyCount: busyCount,
-                  integrationsConnected: _connectedProviderCount(host.integrations),
-                  orchestration: host.orchestration,
                 );
                 final mission = _HubMissionSection(
                   host: host,
@@ -271,6 +265,11 @@ class _VireonHubScreenState extends State<VireonHubScreen> {
                 );
 
                 if (wide) {
+                  // Right rail stays a fixed width so the chat list absorbs
+                  // all extra space on large monitors.
+                  final railWidth = constraints.maxWidth >= LiminalBreakpoints.expanded
+                      ? 400.0
+                      : 360.0;
                   return Column(
                     crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: [
@@ -278,17 +277,13 @@ class _VireonHubScreenState extends State<VireonHubScreen> {
                       const SizedBox(height: LiminalSpacing.md),
                       status,
                       const SizedBox(height: LiminalSpacing.lg),
-                      quickActions,
-                      const SizedBox(height: LiminalSpacing.md),
-                      stats,
-                      const SizedBox(height: LiminalSpacing.lg),
                       Row(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          Expanded(flex: 3, child: chats),
+                          Expanded(child: chats),
                           const SizedBox(width: LiminalSpacing.lg),
-                          Expanded(
-                            flex: 2,
+                          SizedBox(
+                            width: railWidth,
                             child: Column(
                               crossAxisAlignment: CrossAxisAlignment.stretch,
                               children: [
@@ -316,10 +311,6 @@ class _VireonHubScreenState extends State<VireonHubScreen> {
                     header,
                     const SizedBox(height: LiminalSpacing.md),
                     status,
-                    const SizedBox(height: LiminalSpacing.lg),
-                    quickActions,
-                    const SizedBox(height: LiminalSpacing.md),
-                    stats,
                     const SizedBox(height: LiminalSpacing.lg),
                     mission,
                     const SizedBox(height: LiminalSpacing.lg),
@@ -360,17 +351,6 @@ class _VireonHubScreenState extends State<VireonHubScreen> {
     return 'Your $persona workspace — chats, missions, and connected tools.';
   }
 
-  int _connectedProviderCount(IntegrationsSnapshot snap) {
-    return [
-      snap.googleConnected,
-      snap.microsoftConnected,
-      snap.githubConnected,
-      snap.xeroConnected,
-      snap.slackConnected,
-      snap.linearConnected,
-      snap.notionConnected,
-    ].where((v) => v).length;
-  }
 }
 
 class _HubHeader extends StatelessWidget {
@@ -378,16 +358,23 @@ class _HubHeader extends StatelessWidget {
     required this.greeting,
     required this.subtitle,
     required this.account,
+    required this.opening,
+    required this.onNewChat,
+    required this.onMission,
   });
 
   final String greeting;
   final String subtitle;
   final VireonAccountSnapshot account;
+  final bool opening;
+  final VoidCallback onNewChat;
+  final VoidCallback onMission;
 
   @override
   Widget build(BuildContext context) {
-    return Column(
+    final text = Column(
       crossAxisAlignment: CrossAxisAlignment.start,
+      mainAxisSize: MainAxisSize.min,
       children: [
         Text(greeting, style: LiminalTypography.pageTitle(context)),
         const SizedBox(height: 6),
@@ -398,54 +385,125 @@ class _HubHeader extends StatelessWidget {
         ],
       ],
     );
+
+    final actions = Wrap(
+      spacing: LiminalSpacing.xs,
+      runSpacing: LiminalSpacing.xs,
+      children: [
+        LiminalButton.icon(
+          label: 'New chat',
+          icon: Icons.add,
+          onPressed: opening ? null : onNewChat,
+        ),
+        LiminalButton.icon(
+          label: 'Mission control',
+          icon: Icons.hub_outlined,
+          variant: LiminalButtonVariant.secondary,
+          onPressed: opening ? null : onMission,
+        ),
+      ],
+    );
+
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        if (constraints.maxWidth < LiminalBreakpoints.compact) {
+          return Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [text, const SizedBox(height: LiminalSpacing.sm), actions],
+          );
+        }
+        return Row(
+          crossAxisAlignment: CrossAxisAlignment.center,
+          children: [
+            Expanded(child: text),
+            const SizedBox(width: LiminalSpacing.md),
+            actions,
+          ],
+        );
+      },
+    );
   }
 }
 
 class _HubStatusStrip extends StatelessWidget {
-  const _HubStatusStrip({required this.host});
+  const _HubStatusStrip({
+    required this.host,
+    required this.chatCount,
+    required this.busyCount,
+  });
 
   final AppController host;
+  final int chatCount;
+  final int busyCount;
 
   @override
   Widget build(BuildContext context) {
     final lim = LiminalTheme.of(context);
     final online = host.phase == ConnectionPhase.connected && host.sidecarReady;
     final persona = host.config?.personaDisplayLabel ?? 'Liminal';
+    final connected = _connectedCount(host.integrations);
+    final missionLabel = host.orchestration.isActive
+        ? 'running'
+        : host.orchestration.status == 'completed'
+            ? 'done'
+            : host.orchestration.status == 'failed'
+                ? 'failed'
+                : 'idle';
 
     return LiminalCard(
       padding: const EdgeInsets.symmetric(
         horizontal: LiminalSpacing.md,
         vertical: LiminalSpacing.sm,
       ),
-      child: Row(
-        children: [
-          _StatusDot(online: online, label: online ? 'Sidecar ready' : 'Connecting…'),
-          _StripDivider(color: lim.border),
-          Icon(Icons.psychology_outlined, size: 16, color: lim.textMuted),
-          const SizedBox(width: 6),
-          Expanded(
-            child: Text(
-              persona,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: Theme.of(context).textTheme.bodySmall?.copyWith(color: lim.text),
-            ),
-          ),
-          if (host.integrationsLoading)
-            SizedBox(
-              width: 14,
-              height: 14,
-              child: CircularProgressIndicator(strokeWidth: 2, color: lim.accent),
-            )
-          else
-            LiminalBadge(
-              label: '${_connectedCount(host.integrations)} tools',
-              tone: _connectedCount(host.integrations) > 0
-                  ? LiminalBadgeTone.accent
-                  : LiminalBadgeTone.neutral,
-              icon: Icons.link,
-            ),
-        ],
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          final showStats = constraints.maxWidth >= 700;
+          return Row(
+            children: [
+              _StatusDot(online: online, label: online ? 'Sidecar ready' : 'Connecting…'),
+              _StripDivider(color: lim.border),
+              Icon(Icons.psychology_outlined, size: 16, color: lim.textMuted),
+              const SizedBox(width: 6),
+              Flexible(
+                child: Text(
+                  persona,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: Theme.of(context).textTheme.bodySmall?.copyWith(color: lim.text),
+                ),
+              ),
+              if (showStats) ...[
+                _StripDivider(color: lim.border),
+                _StatInline(value: '$chatCount', label: 'chats'),
+                if (busyCount > 0) ...[
+                  _StripDivider(color: lim.border),
+                  _StatInline(value: '$busyCount', label: 'active', highlight: true),
+                ],
+                _StripDivider(color: lim.border),
+                _StatInline(value: '$connected', label: 'integrations'),
+                _StripDivider(color: lim.border),
+                _StatInline(
+                  value: 'Mission',
+                  label: missionLabel,
+                  highlight: host.orchestration.isActive,
+                ),
+              ],
+              const Spacer(),
+              if (host.integrationsLoading)
+                SizedBox(
+                  width: 14,
+                  height: 14,
+                  child: CircularProgressIndicator(strokeWidth: 2, color: lim.accent),
+                )
+              else
+                LiminalBadge(
+                  label: '$connected tools',
+                  tone: connected > 0 ? LiminalBadgeTone.accent : LiminalBadgeTone.neutral,
+                  icon: Icons.link,
+                ),
+            ],
+          );
+        },
       ),
     );
   }
@@ -460,6 +518,44 @@ class _HubStatusStrip extends StatelessWidget {
       snap.linearConnected,
       snap.notionConnected,
     ].where((v) => v).length;
+  }
+}
+
+/// Inline `value label` stat segment for the status strip.
+class _StatInline extends StatelessWidget {
+  const _StatInline({
+    required this.value,
+    required this.label,
+    this.highlight = false,
+  });
+
+  final String value;
+  final String label;
+  final bool highlight;
+
+  @override
+  Widget build(BuildContext context) {
+    final lim = LiminalTheme.of(context);
+    final base = Theme.of(context).textTheme.bodySmall;
+    return Text.rich(
+      TextSpan(
+        children: [
+          TextSpan(
+            text: value,
+            style: base?.copyWith(
+              color: highlight ? lim.accent : lim.text,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+          TextSpan(
+            text: ' $label',
+            style: base?.copyWith(color: lim.textDim),
+          ),
+        ],
+      ),
+      maxLines: 1,
+      overflow: TextOverflow.ellipsis,
+    );
   }
 }
 
@@ -480,9 +576,9 @@ class _StatusDot extends StatelessWidget {
           height: 8,
           decoration: BoxDecoration(
             shape: BoxShape.circle,
-            color: online ? lim.accent : lim.textDim,
+            color: online ? lim.success : lim.textDim,
             boxShadow: online
-                ? [BoxShadow(color: lim.accent.withValues(alpha: 0.45), blurRadius: 6)]
+                ? [BoxShadow(color: lim.success.withValues(alpha: 0.4), blurRadius: 6)]
                 : null,
           ),
         ),
@@ -511,208 +607,6 @@ class _StripDivider extends StatelessWidget {
       height: 20,
       margin: const EdgeInsets.symmetric(horizontal: LiminalSpacing.sm),
       color: color,
-    );
-  }
-}
-
-class _HubQuickActions extends StatelessWidget {
-  const _HubQuickActions({
-    required this.opening,
-    required this.onNewChat,
-    required this.onMission,
-    required this.onIntegrations,
-    required this.onSettings,
-  });
-
-  final bool opening;
-  final VoidCallback onNewChat;
-  final VoidCallback onMission;
-  final VoidCallback onIntegrations;
-  final VoidCallback onSettings;
-
-  @override
-  Widget build(BuildContext context) {
-    return LayoutBuilder(
-      builder: (context, constraints) {
-        final cols = constraints.maxWidth >= LiminalBreakpoints.compact ? 4 : 2;
-        final actions = [
-          _QuickActionTile(
-            icon: Icons.add_comment_outlined,
-            label: 'New chat',
-            hint: 'Start a harness session',
-            onTap: opening ? null : onNewChat,
-          ),
-          _QuickActionTile(
-            icon: Icons.hub_outlined,
-            label: 'Mission control',
-            hint: 'Orchestrator chat',
-            onTap: opening ? null : onMission,
-          ),
-          _QuickActionTile(
-            icon: Icons.extension_outlined,
-            label: 'Integrations',
-            hint: 'Connect tools & APIs',
-            onTap: onIntegrations,
-          ),
-          _QuickActionTile(
-            icon: Icons.tune_outlined,
-            label: 'Settings',
-            hint: 'Harness & persona',
-            onTap: onSettings,
-          ),
-        ];
-
-        return Wrap(
-          spacing: LiminalSpacing.sm,
-          runSpacing: LiminalSpacing.sm,
-          children: [
-            for (var i = 0; i < actions.length; i++)
-              SizedBox(
-                width: cols == 4
-                    ? (constraints.maxWidth - LiminalSpacing.sm * 3) / 4
-                    : (constraints.maxWidth - LiminalSpacing.sm) / 2,
-                child: actions[i],
-              ),
-          ],
-        );
-      },
-    );
-  }
-}
-
-class _QuickActionTile extends StatelessWidget {
-  const _QuickActionTile({
-    required this.icon,
-    required this.label,
-    required this.hint,
-    this.onTap,
-  });
-
-  final IconData icon;
-  final String label;
-  final String hint;
-  final VoidCallback? onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    final lim = LiminalTheme.of(context);
-    return LiminalCard(
-      onTap: onTap,
-      padding: const EdgeInsets.all(LiminalSpacing.sm),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Icon(icon, size: 22, color: lim.accent),
-          const SizedBox(height: LiminalSpacing.xs),
-          Text(
-            label,
-            style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                  color: lim.text,
-                  fontWeight: FontWeight.w600,
-                ),
-          ),
-          const SizedBox(height: 2),
-          Text(
-            hint,
-            maxLines: 2,
-            overflow: TextOverflow.ellipsis,
-            style: LiminalTypography.caption(context),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _HubStatsRow extends StatelessWidget {
-  const _HubStatsRow({
-    required this.chatCount,
-    required this.busyCount,
-    required this.integrationsConnected,
-    required this.orchestration,
-  });
-
-  final int chatCount;
-  final int busyCount;
-  final int integrationsConnected;
-  final OrchestrationSnapshot orchestration;
-
-  @override
-  Widget build(BuildContext context) {
-    final missionLabel = orchestration.isActive
-        ? 'Running'
-        : orchestration.status == 'completed'
-            ? 'Done'
-            : orchestration.status == 'failed'
-                ? 'Failed'
-                : 'Idle';
-
-    return LayoutBuilder(
-      builder: (context, constraints) {
-        final cols = constraints.maxWidth >= LiminalBreakpoints.compact ? 4 : 2;
-        final gap = LiminalSpacing.sm;
-        final w = (constraints.maxWidth - gap * (cols - 1)) / cols;
-        final stats = [
-          _StatTile(value: '$chatCount', label: 'Chats'),
-          _StatTile(
-            value: busyCount > 0 ? '$busyCount' : '—',
-            label: 'Active now',
-            highlight: busyCount > 0,
-          ),
-          _StatTile(
-            value: '$integrationsConnected',
-            label: 'Integrations',
-            highlight: integrationsConnected > 0,
-          ),
-          _StatTile(
-            value: missionLabel,
-            label: 'Mission',
-            highlight: orchestration.isActive,
-          ),
-        ];
-
-        return Wrap(
-          spacing: gap,
-          runSpacing: gap,
-          children: [for (final s in stats) SizedBox(width: w, child: s)],
-        );
-      },
-    );
-  }
-}
-
-class _StatTile extends StatelessWidget {
-  const _StatTile({
-    required this.value,
-    required this.label,
-    this.highlight = false,
-  });
-
-  final String value;
-  final String label;
-  final bool highlight;
-
-  @override
-  Widget build(BuildContext context) {
-    final lim = LiminalTheme.of(context);
-    return LiminalCard(
-      padding: const EdgeInsets.symmetric(
-        horizontal: LiminalSpacing.md,
-        vertical: LiminalSpacing.sm,
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            value,
-            style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                  color: highlight ? lim.accent : lim.text,
-                  fontWeight: FontWeight.w700,
-                ),
-          ),
-          Text(label, style: LiminalTypography.caption(context)),
-        ],
-      ),
     );
   }
 }
@@ -904,12 +798,6 @@ class _HubChatsSection extends StatelessWidget {
     return LiminalSection(
       title: 'Recent chats',
       subtitle: '$totalChats workspace${totalChats == 1 ? '' : 's'} · harness sessions & tools',
-      trailing: LiminalButton.icon(
-        label: 'New chat',
-        icon: Icons.add,
-        dense: true,
-        onPressed: opening ? null : onNewChat,
-      ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [

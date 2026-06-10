@@ -194,6 +194,8 @@ export const HARNESS_ENV_DEFAULTS: Readonly<Record<string, string>> = {
   AGENT_SHELL_MAX_TIMEOUT_MS: "3600000",
   /** Max when timeout_ms is omitted — stops accidental multi-minute one-liners. */
   AGENT_SHELL_IMPLICIT_MAX_MS: "180000",
+  /** When 1 (default), run_shell/run_background execute in visible UI terminal tabs (desktop/web). */
+  AGENT_SHELL_USE_UI_PTY: "1",
   AGENT_STREAM_CHUNK_TIMEOUT_MS: "120000",
   AGENT_STREAM_MAX_RETRIES: "3",
   AGENT_FAILURE_LOG: "1",

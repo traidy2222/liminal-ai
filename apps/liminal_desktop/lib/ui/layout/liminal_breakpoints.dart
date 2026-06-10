@@ -18,8 +18,8 @@ abstract final class LiminalBreakpoints {
   static double contentMaxWidth(double width) {
     final inset = horizontalInset(width);
     final available = width - inset * 2;
-    if (width >= wide) return available.clamp(0, 1280);
-    if (width >= expanded) return available.clamp(0, 1100);
+    if (width >= wide) return available.clamp(0, 1560);
+    if (width >= expanded) return available.clamp(0, 1280);
     return available;
   }
 

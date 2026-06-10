@@ -162,6 +162,21 @@ export interface TransportEventMap {
   /** Fresh cache payload for one app (refresh loop or manual). */
   app_data: { appId: string; cache: WireAppCacheEntry };
 
+  /** Interactive shell session opened for a chat (`pty_open`). */
+  pty_opened: {
+    sessionId: string;
+    chatId: string;
+    workspaceRoot: string;
+    cwd: string;
+    cols: number;
+    rows: number;
+    label: string;
+    source: "agent" | "user";
+    streamPath: string;
+  };
+  /** PTY process exited. */
+  pty_exit: { sessionId: string; chatId: string; exitCode: number };
+
   /** Multi-chat orchestrator progress (planning → workers → synthesis). */
   orchestration_status: {
     id: string;

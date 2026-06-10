@@ -1,0 +1,513 @@
+/**
+ * Slack Web API REST tools (user OAuth token).
+ */
+import type { ToolRegistry, ToolResult } from "@liminal/core";
+import { effectiveHarnessEnvRaw } from "@liminal/core";
+import { callSlackApi } from "./slack_api.js";
+import { defineTool } from "../../shared/helpers.js";
+import { slackUploadFileV2 } from "./slack_upload_v2.js";
+
+export function slackRestEnabled(): boolean {
+  return effectiveHarnessEnvRaw("AGENT_SLACK_REST") !== "0";
+}
+
+function jsonOutput(data: unknown): string {
+  return JSON.stringify(data, null, 2);
+}
+
+function slackLimit(args: Record<string, unknown>, fallback: number, max: number): number {
+  const n = Number(args["limit"] ?? args["count"]);
+  return Math.min(max, Math.max(1, Number.isFinite(n) && n > 0 ? n : fallback));
+}
+
+function slackChannel(args: Record<string, unknown>): string {
+  return String(args["channel"] ?? args["channels"] ?? args["channel_id"] ?? "").trim();
+}
+
+function slackTs(args: Record<string, unknown>, ...keys: string[]): string {
+  for (const key of keys) {
+    const v = args[key];
+    if (typeof v === "number" && Number.isFinite(v)) return String(v);
+    if (typeof v === "string" && v.trim()) return v.trim();
+  }
+  return "";
+}
+
+type SlackCallResult = { ok: true; data: unknown } | { ok: false; error: string };
+
+async function inferThreadTsFromHistory(
+  channel: string,
+  accountHint?: string
+): Promise<{ ok: true; threadTs: string; inferred: boolean } | { ok: false; error: string }> {
+  const hist = await callSlackApi("conversations.history", { channel, limit: 30 }, accountHint);
+  if (!hist.ok) return hist;
+  const messages =
+    (hist.data as { messages?: Array<{ ts?: string; reply_count?: number }> }).messages ?? [];
+  const threaded = messages.find((m) => (m.reply_count ?? 0) > 0 && m.ts);
+  if (threaded?.ts) return { ok: true, threadTs: threaded.ts, inferred: true };
+  const latest = messages[0]?.ts;
+  if (latest) return { ok: true, threadTs: latest, inferred: true };
+  return {
+    ok: false,
+    error:
+      "thread_ts is required — call slack_get_channel_history first and pass the parent message ts (string).",
+  };
+}
+
+async function resolveThreadTs(
+  channel: string,
+  threadTs: string,
+  accountHint?: string
+): Promise<{ ok: true; threadTs: string; inferred: boolean } | { ok: false; error: string }> {
+  if (threadTs) return { ok: true, threadTs, inferred: false };
+  return inferThreadTsFromHistory(channel, accountHint);
+}
+
+async function uploadSlackFileToChannel(
+  opts: {
+    channel: string;
+    filename: string;
+    content: string;
+    initialComment?: string;
+    accountHint?: string;
+  }
+): Promise<SlackCallResult> {
+  const hint = opts.accountHint;
+  return slackUploadFileV2(
+    {
+      getUploadUrl: async (fields) => {
+        const r = await callSlackApi("files.getUploadURLExternal", fields, hint);
+        if (!r.ok) return r;
+        const data = r.data as { upload_url?: string; file_id?: string };
+        const uploadUrl = data.upload_url?.trim();
+        const fileId = data.file_id?.trim();
+        if (!uploadUrl || !fileId) {
+          return { ok: false, error: "Slack upload URL response missing upload_url or file_id" };
+        }
+        return { ok: true, uploadUrl, fileId };
+      },
+      postBytes: async (uploadUrl, bytes) => {
+        try {
+          const res = await fetch(uploadUrl, {
+            method: "POST",
+            body: Buffer.from(bytes),
+          });
+          if (!res.ok) {
+            return { ok: false, error: `Slack file byte upload HTTP ${res.status}` };
+          }
+          return { ok: true };
+        } catch (e) {
+          return { ok: false, error: e instanceof Error ? e.message : String(e) };
+        }
+      },
+      completeUpload: (body) => callSlackApi("files.completeUploadExternal", body, hint),
+    },
+    {
+      channel: opts.channel,
+      filename: opts.filename,
+      content: opts.content,
+      initialComment: opts.initialComment,
+    }
+  );
+}
+
+export function registerSlackRestTools(registry: ToolRegistry): void {
+  if (!slackRestEnabled()) return;
+
+  registry.register(
+    defineTool({
+      name: "slack_list_channels",
+      description:
+        "WHEN: User wants Slack channels the agent can read.\n" +
+        "HOW: Returns public/private channels (excludes archived). Requires Slack integration.",
+      parameters: {
+        type: "object",
+        properties: {
+          account_hint: { type: "string", description: "Optional Slack account or team name." },
+          limit: { type: "number", description: "Max channels (default 100, max 200)." },
+        },
+        additionalProperties: false,
+      },
+      requiresApproval: false,
+      cacheable: true,
+      cacheTtlMs: 30_000,
+      handler: async (args): Promise<ToolResult> => {
+        const limit = Math.min(200, Math.max(1, Number(args["limit"]) || 100));
+        const result = await callSlackApi(
+          "conversations.list",
+          { types: "public_channel,private_channel", exclude_archived: true, limit },
+          typeof args["account_hint"] === "string" ? args["account_hint"] : undefined
+        );
+        if (!result.ok) return { ok: false, error: result.error };
+        return { ok: true, output: jsonOutput(result.data) };
+      },
+    })
+  );
+
+  registry.register(
+    defineTool({
+      name: "slack_list_users",
+      description: "WHEN: User needs Slack workspace members. HOW: Lists users (no bots by default).",
+      parameters: {
+        type: "object",
+        properties: {
+          account_hint: { type: "string" },
+          limit: { type: "number" },
+        },
+        additionalProperties: false,
+      },
+      requiresApproval: false,
+      cacheable: true,
+      cacheTtlMs: 60_000,
+      handler: async (args): Promise<ToolResult> => {
+        const limit = Math.min(200, Math.max(1, Number(args["limit"]) || 100));
+        const result = await callSlackApi(
+          "users.list",
+          { limit },
+          typeof args["account_hint"] === "string" ? args["account_hint"] : undefined
+        );
+        if (!result.ok) return { ok: false, error: result.error };
+        return { ok: true, output: jsonOutput(result.data) };
+      },
+    })
+  );
+
+  registry.register(
+    defineTool({
+      name: "slack_get_channel_history",
+      description:
+        "WHEN: User asks what was said in a Slack channel or DM.\n" +
+        "HOW: Pass channel id (C…/G…/D…) from slack_list_channels.",
+      parameters: {
+        type: "object",
+        properties: {
+          channel: { type: "string", description: "Slack channel id." },
+          limit: { type: "number", description: "Messages to fetch (default 20, max 100)." },
+          count: { type: "number", description: "Alias for limit." },
+          account_hint: { type: "string" },
+        },
+        required: ["channel"],
+        additionalProperties: false,
+      },
+      requiresApproval: false,
+      cacheable: true,
+      cacheTtlMs: 15_000,
+      handler: async (args): Promise<ToolResult> => {
+        const channel = String(args["channel"] ?? "").trim();
+        if (!channel) return { ok: false, error: "channel is required" };
+        const limit = slackLimit(args, 20, 100);
+        const result = await callSlackApi(
+          "conversations.history",
+          { channel, limit },
+          typeof args["account_hint"] === "string" ? args["account_hint"] : undefined
+        );
+        if (!result.ok) return { ok: false, error: result.error };
+        return { ok: true, output: jsonOutput(result.data) };
+      },
+    })
+  );
+
+  registry.register(
+    defineTool({
+      name: "slack_post_message",
+      description:
+        "WHEN: User wants to send a Slack message.\n" +
+        "HOW: channel id + text (mrkdwn). Approval required before posting.",
+      parameters: {
+        type: "object",
+        properties: {
+          channel: { type: "string", description: "Slack channel id." },
+          text: { type: "string", description: "Message body (Slack mrkdwn)." },
+          thread_ts: { type: "string", description: "Optional thread parent timestamp (string)." },
+          ts: { type: "string", description: "Alias for thread_ts." },
+          account_hint: { type: "string" },
+        },
+        required: ["channel", "text"],
+        additionalProperties: false,
+      },
+      requiresApproval: true,
+      handler: async (args): Promise<ToolResult> => {
+        const channel = String(args["channel"] ?? "").trim();
+        const text = String(args["text"] ?? "").trim();
+        if (!channel || !text) return { ok: false, error: "channel and text are required" };
+        const body: Record<string, unknown> = { channel, text };
+        const threadTs = slackTs(args, "thread_ts", "ts");
+        if (threadTs) body.thread_ts = threadTs;
+        const result = await callSlackApi(
+          "chat.postMessage",
+          body,
+          typeof args["account_hint"] === "string" ? args["account_hint"] : undefined
+        );
+        if (!result.ok) return { ok: false, error: result.error };
+        return { ok: true, output: jsonOutput(result.data) };
+      },
+    })
+  );
+
+  registry.register(
+    defineTool({
+      name: "slack_get_thread_replies",
+      description:
+        "WHEN: User asks for replies in a Slack thread.\n" +
+        "HOW: channel id + thread_ts (parent message ts from slack_get_channel_history). " +
+        "If thread_ts omitted, uses the newest message with replies in recent history.",
+      parameters: {
+        type: "object",
+        properties: {
+          channel: { type: "string", description: "Slack channel id." },
+          thread_ts: { type: "string", description: "Parent message ts (string, not number)." },
+          ts: { type: "string", description: "Alias for thread_ts." },
+          timestamp: { type: "string", description: "Alias for thread_ts." },
+          message_ts: { type: "string", description: "Alias for thread_ts." },
+          parent_ts: { type: "string", description: "Alias for thread_ts." },
+          limit: { type: "number", description: "Max messages (default 50, max 200)." },
+          count: { type: "number", description: "Alias for limit." },
+          account_hint: { type: "string" },
+        },
+        required: ["channel"],
+        additionalProperties: false,
+      },
+      requiresApproval: false,
+      cacheable: true,
+      cacheTtlMs: 15_000,
+      handler: async (args): Promise<ToolResult> => {
+        const channel = String(args["channel"] ?? "").trim();
+        if (!channel) return { ok: false, error: "channel is required" };
+        const hint = typeof args["account_hint"] === "string" ? args["account_hint"] : undefined;
+        const explicitTs = slackTs(args, "thread_ts", "ts", "timestamp", "message_ts", "parent_ts");
+        const resolved = await resolveThreadTs(channel, explicitTs, hint);
+        if (!resolved.ok) return { ok: false, error: resolved.error };
+        const limit = slackLimit(args, 50, 200);
+        const result = await callSlackApi(
+          "conversations.replies",
+          { channel, ts: resolved.threadTs, limit },
+          hint
+        );
+        if (!result.ok) return { ok: false, error: result.error };
+        const payload = resolved.inferred
+          ? { inferred_thread_ts: resolved.threadTs, ...(result.data as object) }
+          : result.data;
+        return { ok: true, output: jsonOutput(payload) };
+      },
+    })
+  );
+
+  registry.register(
+    defineTool({
+      name: "slack_reply_in_thread",
+      description:
+        "WHEN: User wants a reply in an existing Slack thread (not a new top-level message).\n" +
+        "HOW: channel id + thread_ts + text. Approval required before posting.",
+      parameters: {
+        type: "object",
+        properties: {
+          channel: { type: "string" },
+          thread_ts: { type: "string", description: "Parent message ts (string)." },
+          ts: { type: "string", description: "Alias for thread_ts." },
+          text: { type: "string" },
+          account_hint: { type: "string" },
+        },
+        required: ["channel", "thread_ts", "text"],
+        additionalProperties: false,
+      },
+      requiresApproval: true,
+      handler: async (args): Promise<ToolResult> => {
+        const channel = String(args["channel"] ?? "").trim();
+        const threadTs = slackTs(args, "thread_ts", "ts");
+        const text = String(args["text"] ?? "").trim();
+        if (!channel || !threadTs || !text) {
+          return { ok: false, error: "channel, thread_ts, and text are required" };
+        }
+        const result = await callSlackApi(
+          "chat.postMessage",
+          { channel, thread_ts: threadTs, text },
+          typeof args["account_hint"] === "string" ? args["account_hint"] : undefined
+        );
+        if (!result.ok) return { ok: false, error: result.error };
+        return { ok: true, output: jsonOutput(result.data) };
+      },
+    })
+  );
+
+  registry.register(
+    defineTool({
+      name: "slack_search_messages",
+      description:
+        "WHEN: User asks to find Slack messages by keyword or from a person.\n" +
+        "HOW: Slack search query (e.g. `deploy in:#eng`, `from:@alice budget`). Use query (not q).",
+      parameters: {
+        type: "object",
+        properties: {
+          query: { type: "string", description: "Slack search query string." },
+          q: { type: "string", description: "Alias for query." },
+          count: { type: "number", description: "Max results (default 20, max 100)." },
+          limit: { type: "number", description: "Alias for count." },
+          account_hint: { type: "string" },
+        },
+        additionalProperties: false,
+      },
+      requiresApproval: false,
+      cacheable: true,
+      cacheTtlMs: 30_000,
+      handler: async (args): Promise<ToolResult> => {
+        const query = String(args["query"] ?? args["q"] ?? "").trim();
+        if (!query) return { ok: false, error: "query is required" };
+        const count = slackLimit(args, 20, 100);
+        const hint = typeof args["account_hint"] === "string" ? args["account_hint"] : undefined;
+        const result = await callSlackApi(
+          "search.messages",
+          {
+            query,
+            count,
+            sort: "timestamp",
+            sort_dir: "desc",
+          },
+          hint
+        );
+        if (!result.ok) return { ok: false, error: result.error };
+        return { ok: true, output: jsonOutput(result.data) };
+      },
+    })
+  );
+
+  registry.register(
+    defineTool({
+      name: "slack_open_dm",
+      description:
+        "WHEN: User wants to DM someone on Slack.\n" +
+        "HOW: Pass Slack user id (U…) from slack_list_users; returns DM channel id (D…).",
+      parameters: {
+        type: "object",
+        properties: {
+          user: { type: "string", description: "Slack user id (U…) to open DM with." },
+          user_id: { type: "string", description: "Alias for user." },
+          account_hint: { type: "string" },
+        },
+        required: ["user"],
+        additionalProperties: false,
+      },
+      requiresApproval: false,
+      cacheable: true,
+      cacheTtlMs: 60_000,
+      handler: async (args): Promise<ToolResult> => {
+        const user = String(args["user"] ?? args["user_id"] ?? "").trim();
+        if (!user) return { ok: false, error: "user is required" };
+        const result = await callSlackApi(
+          "conversations.open",
+          { users: user },
+          typeof args["account_hint"] === "string" ? args["account_hint"] : undefined
+        );
+        if (!result.ok) return { ok: false, error: result.error };
+        return { ok: true, output: jsonOutput(result.data) };
+      },
+    })
+  );
+
+  registry.register(
+    defineTool({
+      name: "slack_list_dms",
+      description: "WHEN: User wants open Slack DMs. HOW: Lists IM channels (excludes archived).",
+      parameters: {
+        type: "object",
+        properties: {
+          limit: { type: "number" },
+          account_hint: { type: "string" },
+        },
+        additionalProperties: false,
+      },
+      requiresApproval: false,
+      cacheable: true,
+      cacheTtlMs: 30_000,
+      handler: async (args): Promise<ToolResult> => {
+        const limit = Math.min(200, Math.max(1, Number(args["limit"]) || 50));
+        const result = await callSlackApi(
+          "conversations.list",
+          { types: "im", exclude_archived: true, limit },
+          typeof args["account_hint"] === "string" ? args["account_hint"] : undefined
+        );
+        if (!result.ok) return { ok: false, error: result.error };
+        return { ok: true, output: jsonOutput(result.data) };
+      },
+    })
+  );
+
+  registry.register(
+    defineTool({
+      name: "slack_add_reaction",
+      description:
+        "WHEN: User wants to react to a Slack message.\n" +
+        "HOW: channel + message timestamp + emoji name (no colons, e.g. thumbsup).",
+      parameters: {
+        type: "object",
+        properties: {
+          channel: { type: "string" },
+          timestamp: { type: "string", description: "Message ts to react to (string)." },
+          ts: { type: "string", description: "Alias for timestamp." },
+          message_ts: { type: "string", description: "Alias for timestamp." },
+          name: { type: "string", description: "Emoji short name without colons." },
+          account_hint: { type: "string" },
+        },
+        required: ["channel", "timestamp", "name"],
+        additionalProperties: false,
+      },
+      requiresApproval: true,
+      handler: async (args): Promise<ToolResult> => {
+        const channel = String(args["channel"] ?? "").trim();
+        const timestamp = slackTs(args, "timestamp", "ts", "message_ts");
+        const name = String(args["name"] ?? "").trim().replace(/^:+|:+$/g, "");
+        if (!channel || !timestamp || !name) {
+          return { ok: false, error: "channel, timestamp, and name are required" };
+        }
+        const result = await callSlackApi(
+          "reactions.add",
+          { channel, timestamp, name },
+          typeof args["account_hint"] === "string" ? args["account_hint"] : undefined
+        );
+        if (!result.ok) return { ok: false, error: result.error };
+        return { ok: true, output: jsonOutput(result.data) };
+      },
+    })
+  );
+
+  registry.register(
+    defineTool({
+      name: "slack_upload_file",
+      description:
+        "WHEN: User wants to share a file in Slack.\n" +
+        "HOW: channel id + filename + text content (UTF-8). Uses Slack external upload API. Approval required.",
+      parameters: {
+        type: "object",
+        properties: {
+          channel: { type: "string", description: "Channel or DM id (C…/D…)." },
+          channels: { type: "string", description: "Alias for channel." },
+          channel_id: { type: "string", description: "Alias for channel." },
+          filename: { type: "string" },
+          content: { type: "string", description: "File body (plain text / small files)." },
+          file_content: { type: "string", description: "Alias for content." },
+          initial_comment: { type: "string", description: "Optional message with the file." },
+          account_hint: { type: "string" },
+        },
+        required: ["channel", "filename", "content"],
+        additionalProperties: false,
+      },
+      requiresApproval: true,
+      handler: async (args): Promise<ToolResult> => {
+        const channel = slackChannel(args);
+        const filename = String(args["filename"] ?? "").trim();
+        const content = String(args["content"] ?? args["file_content"] ?? "");
+        if (!channel || !filename) return { ok: false, error: "channel and filename are required" };
+        const comment =
+          typeof args["initial_comment"] === "string" ? args["initial_comment"].trim() : undefined;
+        const result = await uploadSlackFileToChannel({
+          channel,
+          filename,
+          content,
+          initialComment: comment,
+          accountHint: typeof args["account_hint"] === "string" ? args["account_hint"] : undefined,
+        });
+        if (!result.ok) return { ok: false, error: result.error };
+        return { ok: true, output: jsonOutput(result.data) };
+      },
+    })
+  );
+}

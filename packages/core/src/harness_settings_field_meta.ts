@@ -1935,6 +1935,14 @@ const _META_RAW: Record<string, HarnessSettingsFieldMeta> = {
     description: "Harness environment toggle for Process Health. See docs/configuration.md (advanced).",
     valueKind: "boolean",
   },
+  "AGENT_SHELL_USE_UI_PTY": {
+    tabId: "advanced",
+    subgroupId: "plugins",
+    label: "Shell in Terminal UI",
+    description:
+      "When enabled (default), run_shell and run_background execute in visible Ghostty terminal tabs instead of hidden background processes.",
+    valueKind: "boolean",
+  },
   "AGENT_LINT_ALLOWED_COMMANDS": {
     tabId: "advanced",
     subgroupId: "plugins",

@@ -23,27 +23,27 @@ class LiminalBadge extends StatelessWidget {
     final (bg, fg, border) = switch (tone) {
       LiminalBadgeTone.accent => (
           lim.accent.withValues(alpha: 0.12),
-          lim.accent,
-          lim.accent.withValues(alpha: 0.35),
+          Color.lerp(lim.accent, Colors.white, 0.25)!,
+          lim.accent.withValues(alpha: 0.28),
         ),
       LiminalBadgeTone.success => (
           lim.success.withValues(alpha: 0.12),
-          lim.success,
-          lim.success.withValues(alpha: 0.35),
+          Color.lerp(lim.success, Colors.white, 0.25)!,
+          lim.success.withValues(alpha: 0.28),
         ),
       LiminalBadgeTone.warn => (
           lim.warn.withValues(alpha: 0.12),
-          lim.warn,
-          lim.warn.withValues(alpha: 0.35),
+          Color.lerp(lim.warn, Colors.white, 0.25)!,
+          lim.warn.withValues(alpha: 0.28),
         ),
       LiminalBadgeTone.danger => (
           lim.danger.withValues(alpha: 0.12),
-          lim.danger,
-          lim.danger.withValues(alpha: 0.35),
+          Color.lerp(lim.danger, Colors.white, 0.25)!,
+          lim.danger.withValues(alpha: 0.28),
         ),
       LiminalBadgeTone.neutral => (
-          lim.panel,
-          lim.textDim,
+          Colors.white.withValues(alpha: 0.05),
+          lim.textMuted,
           lim.border,
         ),
     };
@@ -52,7 +52,7 @@ class LiminalBadge extends StatelessWidget {
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
       decoration: BoxDecoration(
         color: bg,
-        borderRadius: BorderRadius.circular(12),
+        borderRadius: BorderRadius.circular(999),
         border: Border.all(color: border),
       ),
       child: Row(
@@ -64,7 +64,12 @@ class LiminalBadge extends StatelessWidget {
           ],
           Text(
             label,
-            style: Theme.of(context).textTheme.labelSmall?.copyWith(color: fg),
+            style: Theme.of(context).textTheme.labelMedium?.copyWith(
+                  color: fg,
+                  fontSize: 11,
+                  fontWeight: FontWeight.w600,
+                  letterSpacing: 0.2,
+                ),
           ),
         ],
       ),

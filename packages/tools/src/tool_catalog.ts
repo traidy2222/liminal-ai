@@ -35,6 +35,7 @@ export const TOOL_FAMILIES: Record<string, { description: string; tools: readonl
     tools: [
       "run_shell",
       "run_background",
+      "open_terminal",
       "kill_process",
       "list_processes",
       "read_process_output",

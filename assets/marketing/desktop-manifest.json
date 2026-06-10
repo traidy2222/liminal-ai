@@ -1,0 +1,16 @@
+{
+  "generatedAt": "2026-06-09T12:16:25.184Z",
+  "source": "desktop",
+  "windowTitle": "liminal_desktop",
+  "exe": "apps/liminal_desktop/build/windows/x64/runner/Release/liminal_desktop.exe",
+  "model": "openrouter/owl-alpha",
+  "providerOrder": "Stealth",
+  "apiBaseURL": "https://openrouter.ai/api/v1",
+  "results": [
+    {
+      "id": "desktop-repo-react-trace",
+      "source": "desktop",
+      "error": "Error: PowerShell exit 1: Add-Type : c:\\Users\\traid\\AppData\\Local\\Temp\\yqs5mhjw.0.cs(3) : The type or namespace name 'Imaging' does not exist in \r\nthe namespace 'System.Drawing' (are you missing an assembly reference?)\r\nc:\\Users\\traid\\AppData\\Local\\Temp\\yqs5mhjw.0.cs(2) : using System.Drawing;\r\nc:\\Users\\traid\\AppData\\Local\\Temp\\yqs5mhjw.0.cs(3) : >>> using System.Drawing.Imaging;\r\nc:\\Users\\traid\\AppData\\Local\\Temp\\yqs5mhjw.0.cs(4) : using System.Runtime.InteropServices;\r\nAt line:2 char:1\r\n+ Add-Type @\"\r\n+ ~~~~~~~~~~~\r\n    + CategoryInfo          : InvalidData: (Microsoft.Power...peCompilerError:AddTypeCompilerError) [Add-Type], Except \r\n   ion\r\n    + FullyQualifiedErrorId : SOURCE_CODE_ERROR,Microsoft.PowerShell.Commands.AddTypeCommand\r\n \r\nAdd-Type : Cannot add type. Compilation errors occurred.\r\nAt line:2 char:1\r\n+ Add-Type @\"\r\n+ ~~~~~~~~~~~\r\n    + CategoryInfo          : InvalidData: (:) [Add-Type], InvalidOperationException\r\n    + FullyQualifiedErrorId : COMPILER_ERRORS,Microsoft.PowerShell.Commands.AddTypeCommand\r\n \r\nUnable to find type [WinCap].\r\nAt line:14 char:6\r\n+ $h = [WinCap]::FindWindow($null, \"liminal_desktop\")\r\n+      ~~~~~~~~\r\n    + CategoryInfo          : InvalidOperation: (WinCap:TypeName) [], RuntimeException\r\n    + FullyQualifiedErrorId : TypeNotFound\r\n \r\nNew-Object : Cannot find type [WinCap+RECT]: verify that the assembly containing this type is loaded.\r\nAt line:16 char:6\r\n+ $r = New-Object WinCap+RECT\r\n+      ~~~~~~~~~~~~~~~~~~~~~~\r\n    + CategoryInfo          : InvalidType: (:) [New-Object], PSArgumentException\r\n    + FullyQualifiedErrorId : TypeNotFound,Microsoft.PowerShell.Commands.NewObjectCommand\r\n \r\nUnable to find type [WinCap].\r\nAt line:17 char:7\r\n+ [void][WinCap]::GetWindowRect($h, [ref]$r)\r\n+       ~~~~~~~~\r\n    + CategoryInfo          : InvalidOperation: (WinCap:TypeName) [], RuntimeException\r\n    + FullyQualifiedErrorId : TypeNotFound\r\n \r\nWindow too small\r\nAt line:19 char:33\r\n+ if ($w -lt 64 -or $ht -lt 64) { throw \"Window too small\" }\r\n+                                 ~~~~~~~~~~~~~~~~~~~~~~~~\r\n    + CategoryInfo          : OperationStopped: (Window too small:String) [], RuntimeException\r\n    + FullyQualifiedErrorId : Window too small"
+    }
+  ]
+}

@@ -30,14 +30,12 @@ class LiminalIconButton extends StatelessWidget {
         borderRadius: BorderRadius.circular(lim.radius),
         semanticLabel: tooltip,
         builder: (context, hovered, focused) {
-          final active = selected || hovered || focused;
+          final color = selected
+              ? lim.accent
+              : (hovered || focused ? lim.text : lim.textMuted);
           return Padding(
             padding: const EdgeInsets.all(8),
-            child: Icon(
-              icon,
-              size: size,
-              color: active ? lim.accent : lim.textMuted,
-            ),
+            child: Icon(icon, size: size, color: color),
           );
         },
       ),

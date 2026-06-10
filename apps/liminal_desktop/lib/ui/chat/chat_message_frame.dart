@@ -58,9 +58,9 @@ class ChatMessageFrame extends StatelessWidget {
             style: LiminalTheme.mono(
               context,
               fontSize: 10,
-              fontWeight: FontWeight.w700,
-              color: roleColor,
-            ).copyWith(letterSpacing: 0.1),
+              fontWeight: FontWeight.w600,
+              color: lim.textDim,
+            ).copyWith(letterSpacing: 0.4),
           ),
           if (alignEnd) ...[
             const SizedBox(width: 6),
@@ -73,7 +73,7 @@ class ChatMessageFrame extends StatelessWidget {
     final body = _frameBody(context, lim, style, width, roleColor, child);
 
     return Padding(
-      padding: EdgeInsets.only(
+      padding: const EdgeInsets.only(
         top: LiminalSpacing.xs,
         bottom: LiminalSpacing.md,
       ),
@@ -148,8 +148,8 @@ class ChatMessageFrame extends StatelessWidget {
               : lim.surface.withValues(alpha: 0.55),
           border: Border.all(
             color: alignEnd
-                ? lim.accent.withValues(alpha: 0.4)
-                : lim.border.withValues(alpha: 0.7),
+                ? lim.accent.withValues(alpha: 0.22)
+                : lim.border,
           ),
           borderRadius: BorderRadius.only(
             topLeft: Radius.circular(lim.radius),

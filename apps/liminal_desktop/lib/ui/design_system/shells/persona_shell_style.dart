@@ -39,8 +39,8 @@ class PersonaShellStyle {
   BorderSide? appBarBottomSide(BuildContext context) {
     final lim = LiminalTheme.of(context);
     return switch (shell) {
-      'terminal' => BorderSide(color: lim.success.withValues(alpha: 0.35), width: 1),
-      'hud' => BorderSide(color: lim.accent.withValues(alpha: 0.25), width: 1),
+      'terminal' => BorderSide(color: lim.success.withValues(alpha: 0.30), width: 1),
+      'hud' => BorderSide(color: lim.border),
       'minimal' => null,
       _ => BorderSide(color: lim.border),
     };

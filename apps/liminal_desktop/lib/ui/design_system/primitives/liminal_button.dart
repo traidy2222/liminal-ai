@@ -68,9 +68,10 @@ class LiminalButton extends StatelessWidget {
         return FilledButton(
           onPressed: onPressed,
           style: FilledButton.styleFrom(
-            backgroundColor: lim.danger.withValues(alpha: 0.14),
-            foregroundColor: lim.danger,
-            side: BorderSide(color: lim.danger.withValues(alpha: 0.35)),
+            backgroundColor: lim.danger,
+            foregroundColor: Colors.white,
+            disabledBackgroundColor: lim.danger.withValues(alpha: 0.25),
+            disabledForegroundColor: Colors.white.withValues(alpha: 0.55),
           ).merge(_denseStyle(context, dense)),
           child: child,
         );
@@ -79,10 +80,11 @@ class LiminalButton extends StatelessWidget {
 
   ButtonStyle? _denseStyle(BuildContext context, bool dense) {
     if (!dense) return null;
-    return ButtonStyle(
-      padding: const WidgetStatePropertyAll(
-        EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+    return const ButtonStyle(
+      padding: WidgetStatePropertyAll(
+        EdgeInsets.symmetric(horizontal: 12, vertical: 8),
       ),
+      minimumSize: WidgetStatePropertyAll(Size(0, 32)),
       visualDensity: VisualDensity.compact,
     );
   }

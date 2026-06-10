@@ -9,16 +9,23 @@
     "liminald": "./dist/index.js"
   },
   "scripts": {
-    "build": "node -e \"require('node:fs').rmSync('dist',{recursive:true,force:true})\" && tsc -p tsconfig.json",
+    "build": "node -e \"require('node:fs').rmSync('dist',{recursive:true,force:true})\" && tsc -p tsconfig.json && node scripts/stage-terminal-vendor.mjs",
     "typecheck": "tsc --noEmit",
     "start": "node --import tsx/esm src/index.ts",
-    "test": "tsx --test src/event_mapper.test.ts src/handshake.test.ts src/ws_server.test.ts src/audio_http.test.ts src/browser_preview_handler.test.ts src/app_proxy_handler.test.ts src/worker_handoff.test.ts"
+    "test": "tsx --test src/event_mapper.test.ts src/handshake.test.ts src/ws_server.test.ts src/audio_http.test.ts src/browser_preview_handler.test.ts src/app_proxy_handler.test.ts src/worker_handoff.test.ts src/pty_manager.test.ts src/terminal_embed_handler.test.ts"
+  },
+  "exports": {
+    ".": "./dist/index.js",
+    "./pty": "./dist/pty_manager.js",
+    "./pty-stream": "./dist/pty_stream_handler.js"
   },
   "dependencies": {
     "@liminal/core": "*",
     "@liminal/tools": "*",
     "@liminal/protocol": "*",
     "dotenv": "^16.4.0",
+    "ghostty-web": "^0.4.0",
+    "node-pty": "^1.0.0",
     "ws": "^8.18.0"
   },
   "devDependencies": {

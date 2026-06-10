@@ -170,16 +170,19 @@ class LiminalFontSet {
         fontSize: 22 * scale,
         fontWeight: FontWeight.w600,
         color: tokens.text,
+        letterSpacing: -0.3,
       ),
       titleLarge: heading(
         fontSize: 18 * scale,
         fontWeight: FontWeight.w600,
         color: tokens.text,
+        letterSpacing: -0.2,
       ),
       titleMedium: body(
         fontSize: 16 * scale,
         fontWeight: FontWeight.w600,
-        color: tokens.accent,
+        color: tokens.text,
+        letterSpacing: -0.1,
       ),
       titleSmall: body(
         fontSize: 14 * scale,
@@ -201,11 +204,17 @@ class LiminalFontSet {
         color: tokens.textMuted,
         height: 1.4,
       ),
-      labelLarge: mono(
-        fontSize: 12 * scale,
+      labelLarge: body(
+        fontSize: 13 * scale,
         fontWeight: FontWeight.w600,
-        color: tokens.accent,
-        letterSpacing: 0.6,
+        color: tokens.text,
+        letterSpacing: 0.1,
+      ),
+      labelMedium: body(
+        fontSize: 12 * scale,
+        fontWeight: FontWeight.w500,
+        color: tokens.textMuted,
+        letterSpacing: 0.1,
       ),
       labelSmall: mono(
         fontSize: 11 * scale,

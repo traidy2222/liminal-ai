@@ -1,51 +1,54 @@
 import type { ToolRegistry, AgentEmitter, AgentHarness } from "@liminal/core";
 import { resolveHarnessEnvRaw, emailStyleInferEnabled } from "@liminal/core";
-import { readFileTool } from "./read_file.js";
-import { writeFileTool } from "./write_file.js";
-import { listDirTool } from "./list_dir.js";
-import { createRunShellTool } from "./run_shell.js";
-import { webFetchTool } from "./web_fetch.js";
-import { webSearchTool } from "./web_search.js";
-import { weatherLookupTool } from "./weather_lookup.js";
-import { marketsQuoteTool } from "./markets_quote.js";
-import { createAskUserTool } from "./ask_user.js";
-import { rememberTool, recallTool, recallByTypeTool, forgetTool, forgetTypeTool, memoryStatsTool } from "./remember_recall.js";
-import { thinkTool } from "./think.js";
-import { breakdownTool } from "./breakdown.js";
-import { reasonTool } from "./reason.js";
-import { planTool } from "./plan.js";
-import { createHypothesizeTool } from "./hypothesize.js";
-import { searchMemoryTool } from "./search_memory.js";
-import { recallRelevantTool } from "./recall_relevant.js";
-import { memoryGraphTool } from "./memory_graph.js";
-import { readArtifactTool } from "./read_artifact.js";
-import { failureReviewTool } from "./failure_review.js";
-import { repoMapTool } from "./repo_map.js";
-import { memoryConsolidateTool } from "./memory_consolidate.js";
-import { memoryQueryTool } from "./memory_query.js";
-import { astGrepTool } from "./ast_grep.js";
-import { runTestsTool } from "./run_tests.js";
-import { runLintTool } from "./run_lint.js";
-import { symbolIndexTool } from "./symbol_index.js";
-import { findReferencesTool } from "./find_references.js";
-import { renameSymbolTool } from "./rename_symbol.js";
-import { executeCodeTool } from "./execute_code.js";
-import { httpRequestTool } from "./http_request.js";
-import { runCommandWithPtyTool } from "./run_command_with_pty.js";
-import { readFileChunkedTool } from "./read_file_chunked.js";
-import { readFileWithImportsTool } from "./read_file_with_imports.js";
-import { fileMetadataTool } from "./file_metadata.js";
-import { workspaceSnapshotTool } from "./workspace_snapshot.js";
-import { grepFileTool } from "./grep_file.js";
-import { editFileTool } from "./edit_file.js";
-import { moveFileTool } from "./move_file.js";
-import { copyFileTool } from "./copy_file.js";
-import { copyTreeTool } from "./copy_tree.js";
-import { mkdirPTool } from "./mkdir_p.js";
-import { deleteFileTool } from "./delete_file.js";
-import { findFilesTool } from "./find_files.js";
-import { multiFileApplyTool } from "./multi_file_apply.js";
-import { pathGuardTool } from "./path_guard.js";
+import { readFileTool } from "./families/files/read_file.js";
+import { writeFileTool } from "./families/files/write_file.js";
+import { listDirTool } from "./families/files/list_dir.js";
+import { createRunShellTool } from "./families/shell/run_shell.js";
+import { webFetchTool } from "./families/web/web_fetch.js";
+import { webSearchTool } from "./families/web/web_search.js";
+import { weatherLookupTool } from "./families/web/weather_lookup.js";
+import { marketsQuoteTool } from "./families/markets/markets_quote.js";
+import { createAskUserTool } from "./families/meta/ask_user.js";
+import { rememberTool, recallTool, recallByTypeTool, forgetTool, forgetTypeTool, memoryStatsTool } from "./families/memory/remember_recall.js";
+import { thinkTool } from "./families/reasoning/think.js";
+import { breakdownTool } from "./families/reasoning/breakdown.js";
+import { reasonTool } from "./families/reasoning/reason.js";
+import { planTool } from "./families/reasoning/plan.js";
+import { createHypothesizeTool } from "./families/reasoning/hypothesize.js";
+import { searchMemoryTool } from "./families/memory/search_memory.js";
+import { recallRelevantTool } from "./families/memory/recall_relevant.js";
+import { memoryGraphTool } from "./families/memory/memory_graph.js";
+import { readArtifactTool } from "./families/memory/read_artifact.js";
+import { failureReviewTool } from "./families/web/failure_review.js";
+import { repoMapTool } from "./families/navigation/repo_map.js";
+import { memoryConsolidateTool } from "./families/memory/memory_consolidate.js";
+import { memoryQueryTool } from "./families/memory/memory_query.js";
+import { astGrepTool } from "./families/code_intel/ast_grep.js";
+import { runTestsTool } from "./families/code_intel/run_tests.js";
+import { runLintTool } from "./families/code_intel/run_lint.js";
+import { symbolIndexTool } from "./families/code_intel/symbol_index.js";
+import { findReferencesTool } from "./families/code_intel/find_references.js";
+import { renameSymbolTool } from "./families/code_intel/rename_symbol.js";
+import { executeCodeTool } from "./families/code_intel/execute_code.js";
+import { httpRequestTool } from "./families/web/http_request.js";
+import {
+  runCommandWithPtyTool,
+  createRunCommandWithPtyTool,
+} from "./families/shell/run_command_with_pty.js";
+import { readFileChunkedTool } from "./families/navigation/read_file_chunked.js";
+import { readFileWithImportsTool } from "./families/navigation/read_file_with_imports.js";
+import { fileMetadataTool } from "./families/files/file_metadata.js";
+import { workspaceSnapshotTool } from "./families/navigation/workspace_snapshot.js";
+import { grepFileTool } from "./families/files/grep_file.js";
+import { editFileTool } from "./families/files/edit_file.js";
+import { moveFileTool } from "./families/files/move_file.js";
+import { copyFileTool } from "./families/files/copy_file.js";
+import { copyTreeTool } from "./families/files/copy_tree.js";
+import { mkdirPTool } from "./families/files/mkdir_p.js";
+import { deleteFileTool } from "./families/files/delete_file.js";
+import { findFilesTool } from "./families/files/find_files.js";
+import { multiFileApplyTool } from "./families/files/multi_file_apply.js";
+import { pathGuardTool } from "./families/files/path_guard.js";
 import {
   browserOpenTool,
   browserNavigateTool,
@@ -57,100 +60,111 @@ import {
   browserExtractTool,
   browserCookiesTool,
   wireBrowserHarnessCleanup,
-} from "./browser_tools.js";
-import { captchaSolveTool } from "./captcha_solve.js";
-import { createOrchestrationTools } from "./orchestration.js";
-import { createAgentContextTools } from "./agent_context_tools.js";
+} from "./families/browser/browser_tools.js";
+import { createOpenTerminalTool, wireTerminalHarness } from "./families/shell/terminal_tools.js";
+import {
+  setTerminalEnsureHandler,
+  type EnsureTerminalOptions,
+  type EnsureTerminalResult,
+} from "./families/shell/terminal_runtime.js";
+import { setPtyShellPort, type PtyManagerPort } from "./families/shell/pty_shell_port.js";
+import { captchaSolveTool } from "./families/browser/captcha_solve.js";
+import { createOrchestrationTools } from "./families/orchestration/orchestration.js";
+import { createAgentContextTools } from "./families/orchestration/agent_context_tools.js";
 import {
   runBackgroundTool,
   killProcessTool,
   listProcessesTool,
   readProcessOutputTool,
-} from "./process_manager.js";
-import { suggestImprovementTool, viewInsightsTool } from "./meta_tools.js";
-import { selfTelemetryTool } from "./self_telemetry.js";
-import { pasteTrainTool } from "./paste_train.js";
-import { createContextTools } from "./context_tools.js";
-import { createRecallCompressionTool } from "./recall_compression.js";
-import { createRefreshWorldContextTool } from "./refresh_world_context.js";
-import { createSetPersonaTool } from "./set_persona.js";
-import { createAppendPersonaLivingTool } from "./append_persona_living.js";
-import { createSetRuntimeSettingsTool } from "./set_runtime_settings.js";
-import { createGetRuntimeSettingsTool } from "./get_runtime_settings.js";
+  createRunBackgroundTool,
+  createKillProcessTool,
+  createListProcessesTool,
+  createReadProcessOutputTool,
+} from "./families/shell/process_manager.js";
+import { suggestImprovementTool, viewInsightsTool } from "./families/meta/meta_tools.js";
+import { selfTelemetryTool } from "./families/meta/self_telemetry.js";
+import { pasteTrainTool } from "./families/meta/paste_train.js";
+import { createContextTools } from "./families/context/context_tools.js";
+import { createRecallCompressionTool } from "./families/context/recall_compression.js";
+import { createRefreshWorldContextTool } from "./families/orchestration/refresh_world_context.js";
+import { createSetPersonaTool } from "./families/harness_ui/set_persona.js";
+import { createAppendPersonaLivingTool } from "./families/harness_ui/append_persona_living.js";
+import { createSetRuntimeSettingsTool } from "./families/harness_ui/set_runtime_settings.js";
+import { createGetRuntimeSettingsTool } from "./families/harness_ui/get_runtime_settings.js";
 import { createToolDiscoveryTools } from "./tool_activation.js";
 import { applyLazyRegistrationPolicy } from "./tool_catalog.js";
 // New tools — Upgrade VI (harness quality)
-import { agendaSetTool, agendaGetTool, agendaClearTool } from "./session_agenda.js";
-import { breakoutStartTool, patternRecordTool, independenceStatusTool } from "./independence.js";
+import { agendaSetTool, agendaGetTool, agendaClearTool } from "./families/agenda_scheduler/session_agenda.js";
+import { breakoutStartTool, patternRecordTool, independenceStatusTool } from "./families/independence/independence.js";
 import {
   scheduleCreateTool,
   scheduleListTool,
   scheduleDeleteTool,
   scheduleRunTool,
-} from "./task_scheduler.js";
-import { createSynthesisRunTool } from "./synthesis_run.js";
-import { createWorkflowTools } from "./workflow_tools.js";
+} from "./families/agenda_scheduler/task_scheduler.js";
+import { createSynthesisRunTool } from "./families/synthesis/synthesis_run.js";
+import { createWorkflowTools } from "./families/workflow/workflow_tools.js";
 // New tools — Upgrade V
-import { createDecomposeGoalTool } from "./decompose_goal.js";
-import { createEmailStyleInferTool } from "./email_style_infer.js";
-import { createBranchExploreTool } from "./branch_explore.js";
-import { createVerifyContractTool } from "./verify_contract.js";
-import { createDynamicToolsTools, loadDynamicTools } from "./dynamic_tools.js";
-import { createApiConnectionTools, restoreOpenApiConnections } from "./api_connect.js";
-import { createMcpAttachTools, restoreMcpConnections } from "./mcp_attach.js";
-import { createConnectorTools } from "./connect_provider.js";
-import { createGmailSendTools, gmailSendRestEnabled } from "./google_gmail_send.js";
-import { createGoogleCalendarRestTools, calendarRestEnabled } from "./google_calendar_rest.js";
-import { createGoogleOfficeRestTools, officeRestEnabled } from "./google_office_rest.js";
-import { createOutlookSendTools, outlookRestEnabled } from "./outlook_send.js";
-import { createMicrosoftCalendarRestTools, microsoftCalendarRestEnabled } from "./microsoft_calendar_rest.js";
-import { createOnedriveRestTools, onedriveRestEnabled } from "./onedrive_rest.js";
-import { createExcelRestTools, excelRestEnabled } from "./excel_rest.js";
-import { createOnenoteRestTools, onenoteRestEnabled } from "./onenote_rest.js";
-import { createTeamsRestTools, teamsRestEnabled } from "./teams_rest.js";
-import { createPlannerRestTools, plannerRestEnabled } from "./planner_rest.js";
-import { createGraphSearchRestTools, graphSearchRestEnabled } from "./graph_search_rest.js";
-import { createMicrosoftOfficeRestTools, microsoftOfficeRestEnabled } from "./microsoft_office_rest.js";
-import { registerXeroRestTools, xeroRestEnabled } from "./xero_rest.js";
-import { registerSlackRestTools, slackRestEnabled } from "./slack_rest.js";
-import { registerLinearRestTools, linearRestEnabled } from "./linear_rest.js";
-import { registerNotionRestTools, notionRestEnabled } from "./notion_rest.js";
-import { agentcardEnabled } from "./agentcard_cli.js";
-import { createAgentcardTools } from "./agentcard_tools.js";
-import { memoryPromoteTool } from "./memory_promote.js";
-import { memoryNeighborsTool } from "./memory_neighbors.js";
-import { consolidateChatTool } from "./consolidate_chat.js";
-import { curateMemoryTool } from "./curate_memory.js";
-import { restoreMemoryTool } from "./restore_memory.js";
+import { createDecomposeGoalTool } from "./families/orchestration/decompose_goal.js";
+import { createEmailStyleInferTool } from "./families/harness_ui/email_style_infer.js";
+import { createBranchExploreTool } from "./families/orchestration/branch_explore.js";
+import { createVerifyContractTool } from "./families/orchestration/verify_contract.js";
+import { createDynamicToolsTools, loadDynamicTools } from "./families/meta/dynamic_tools.js";
+import { createApiConnectionTools, restoreOpenApiConnections } from "./integrations/external_api/api_connect.js";
+import { createMcpAttachTools, restoreMcpConnections } from "./integrations/external_api/mcp_attach.js";
+import { createConnectorTools } from "./integrations/core/connect_provider.js";
+import { createGmailSendTools, gmailSendRestEnabled } from "./integrations/google/google_gmail_send.js";
+import { createGoogleCalendarRestTools, calendarRestEnabled } from "./integrations/google/google_calendar_rest.js";
+import { createGoogleOfficeRestTools, officeRestEnabled } from "./integrations/google/google_office_rest.js";
+import { createOutlookSendTools, outlookRestEnabled } from "./integrations/microsoft/outlook_send.js";
+import { createMicrosoftCalendarRestTools, microsoftCalendarRestEnabled } from "./integrations/microsoft/microsoft_calendar_rest.js";
+import { createOnedriveRestTools, onedriveRestEnabled } from "./integrations/microsoft/onedrive_rest.js";
+import { createExcelRestTools, excelRestEnabled } from "./integrations/microsoft/excel_rest.js";
+import { createOnenoteRestTools, onenoteRestEnabled } from "./integrations/microsoft/onenote_rest.js";
+import { createTeamsRestTools, teamsRestEnabled } from "./integrations/microsoft/teams_rest.js";
+import { createPlannerRestTools, plannerRestEnabled } from "./integrations/microsoft/planner_rest.js";
+import { createGraphSearchRestTools, graphSearchRestEnabled } from "./integrations/microsoft/graph_search_rest.js";
+import { createMicrosoftOfficeRestTools, microsoftOfficeRestEnabled } from "./integrations/microsoft/microsoft_office_rest.js";
+import { registerXeroRestTools, xeroRestEnabled } from "./integrations/xero/xero_rest.js";
+import { registerSlackRestTools, slackRestEnabled } from "./integrations/slack/slack_rest.js";
+import { registerLinearRestTools, linearRestEnabled } from "./integrations/linear/linear_rest.js";
+import { registerNotionRestTools, notionRestEnabled } from "./integrations/notion/notion_rest.js";
+import { agentcardEnabled } from "./integrations/agentcard/agentcard_cli.js";
+import { createAgentcardTools } from "./integrations/agentcard/agentcard_tools.js";
+import { memoryPromoteTool } from "./families/memory/memory_promote.js";
+import { memoryNeighborsTool } from "./families/memory/memory_neighbors.js";
+import { consolidateChatTool } from "./families/memory/consolidate_chat.js";
+import { curateMemoryTool } from "./families/memory/curate_memory.js";
+import { restoreMemoryTool } from "./families/memory/restore_memory.js";
 // New tools — Upgrade IV
-import { gitStatusTool, gitDiffTool, gitLogTool, gitBranchTool, gitCommitTool } from "./git_tools.js";
-import { gitCheckpointTool, gitRollbackTool } from "./git_checkpoint.js";
-import { gitWorktreeTool } from "./git_worktree.js";
-import { taskCheckpointTool, resumeTaskTool } from "./task_persistence.js";
-import { featureChecklistTool } from "./feature_checklist.js";
-import { createExtractStructuredTool } from "./extract_structured.js";
-import { createUploadImageTool } from "./upload_image.js";
-import { visionAnalyzeTool } from "./vision_analyze.js";
-import { createTranscribeAudioTool } from "./transcribe_audio.js";
-import { createSpeakTool, installVoiceTtsFallback } from "./speak.js";
-import { docPlanTool } from "./doc_plan.js";
-import { docResearchBriefTool } from "./doc_research_brief.js";
-import { docCollectSourcesTool } from "./doc_collect_sources.js";
-import { docSelectAssetsTool } from "./doc_select_assets.js";
-import { docGenerateChartDataTool } from "./doc_generate_chart_data.js";
-import { docComposeChunkTool } from "./doc_compose_chunk.js";
-import { docLintLayoutTool } from "./doc_lint_layout.js";
-import { docRepairChunkTool } from "./doc_repair_chunk.js";
-import { docRenderPptxTool } from "./doc_render_pptx.js";
-import { docRenderDocxTool } from "./doc_render_docx.js";
-import { docRenderPdfTool } from "./doc_render_pdf.js";
-import { docExportTool } from "./doc_export.js";
-import { docQualityReportTool } from "./doc_quality_report.js";
+import { gitStatusTool, gitDiffTool, gitLogTool, gitBranchTool, gitCommitTool } from "./families/git/git_tools.js";
+import { gitCheckpointTool, gitRollbackTool } from "./families/git/git_checkpoint.js";
+import { gitWorktreeTool } from "./families/git/git_worktree.js";
+import { taskCheckpointTool, resumeTaskTool } from "./families/tasks/task_persistence.js";
+import { featureChecklistTool } from "./families/tasks/feature_checklist.js";
+import { createExtractStructuredTool } from "./families/harness_ui/extract_structured.js";
+import { createUploadImageTool } from "./families/vision/upload_image.js";
+import { visionAnalyzeTool } from "./families/vision/vision_analyze.js";
+import { createTranscribeAudioTool } from "./families/audio/transcribe_audio.js";
+import { createSpeakTool, installVoiceTtsFallback } from "./families/audio/speak.js";
+import { docPlanTool } from "./families/document/doc_plan.js";
+import { docResearchBriefTool } from "./families/document/doc_research_brief.js";
+import { docCollectSourcesTool } from "./families/document/doc_collect_sources.js";
+import { docSelectAssetsTool } from "./families/document/doc_select_assets.js";
+import { docGenerateChartDataTool } from "./families/document/doc_generate_chart_data.js";
+import { docComposeChunkTool } from "./families/document/doc_compose_chunk.js";
+import { docLintLayoutTool } from "./families/document/doc_lint_layout.js";
+import { docRepairChunkTool } from "./families/document/doc_repair_chunk.js";
+import { docRenderPptxTool } from "./families/document/doc_render_pptx.js";
+import { docRenderDocxTool } from "./families/document/doc_render_docx.js";
+import { docRenderPdfTool } from "./families/document/doc_render_pdf.js";
+import { docExportTool } from "./families/document/doc_export.js";
+import { docQualityReportTool } from "./families/document/doc_quality_report.js";
 // New tools — Upgrade VII (harness power)
-import { createQueryToolOutputsTool } from "./query_tool_outputs.js";
-import { createResearchStateTool } from "./research_state.js";
-import { createDispatchGraphTool } from "./dispatch_graph.js";
-import { createBranchEvaluateTool } from "./branch_evaluate.js";
+import { createQueryToolOutputsTool } from "./families/orchestration/query_tool_outputs.js";
+import { createResearchStateTool } from "./families/web/research_state.js";
+import { createDispatchGraphTool } from "./families/orchestration/dispatch_graph.js";
+import { createBranchEvaluateTool } from "./families/orchestration/branch_evaluate.js";
 // Obsidian brain — vault tools
 import {
   vaultWriteTool,
@@ -160,11 +174,11 @@ import {
   vaultLinksTool,
   vaultGraphTool,
   vaultDeleteTool,
-} from "./vault_tools.js";
-import { vaultIngestTool } from "./vault_ingest.js";
-import { vaultIngestEntitiesTool } from "./vault_ingest_entities.js";
-import { vaultRecallTool } from "./vault_recall.js";
-import { vaultLintTool } from "./vault_lint.js";
+} from "./families/vault/vault_tools.js";
+import { vaultIngestTool } from "./families/vault/vault_ingest.js";
+import { vaultIngestEntitiesTool } from "./families/vault/vault_ingest_entities.js";
+import { vaultRecallTool } from "./families/vault/vault_recall.js";
+import { vaultLintTool } from "./families/vault/vault_lint.js";
 
 /**
  * Register all tools onto a registry.
@@ -172,10 +186,12 @@ import { vaultLintTool } from "./vault_lint.js";
  */
 import type { LiminalAppManagerPort } from "@liminal/core";
 import { liminalAppsEnabled } from "@liminal/core";
-import { createLiminalAppTools, bootstrapLiminalAppsTools } from "./liminal_apps.js";
+import { createLiminalAppTools, bootstrapLiminalAppsTools } from "./families/liminal_apps/liminal_apps.js";
 
 export interface RegisterAllToolsDeps {
   appManager?: LiminalAppManagerPort;
+  ensureTerminal?: (opts: EnsureTerminalOptions) => Promise<EnsureTerminalResult | null>;
+  ptyShellPort?: PtyManagerPort;
 }
 
 export async function registerAllTools(
@@ -206,11 +222,20 @@ export async function registerAllTools(
   registry.register(pathGuardTool);
   registry.register(listDirTool);
   registry.register(repoMapTool);
-  registry.register(createRunShellTool(emitter));
-  registry.register(runBackgroundTool);
-  registry.register(killProcessTool);
-  registry.register(listProcessesTool);
-  registry.register(readProcessOutputTool);
+  registry.register(createRunShellTool(emitter, harness));
+  if (harness) {
+    registry.register(createRunBackgroundTool(harness));
+    registry.register(createKillProcessTool(harness));
+    registry.register(createListProcessesTool(harness));
+    registry.register(createReadProcessOutputTool(harness));
+    registry.register(createRunCommandWithPtyTool(harness));
+  } else {
+    registry.register(runBackgroundTool);
+    registry.register(killProcessTool);
+    registry.register(listProcessesTool);
+    registry.register(readProcessOutputTool);
+    registry.register(runCommandWithPtyTool);
+  }
   registry.register(webFetchTool);
   registry.register(webSearchTool);
   registry.register(weatherLookupTool);
@@ -257,7 +282,6 @@ export async function registerAllTools(
   registry.register(renameSymbolTool);
   registry.register(executeCodeTool);
   registry.register(httpRequestTool);
-  registry.register(runCommandWithPtyTool);
   registry.register(browserOpenTool);
   registry.register(browserNavigateTool);
   registry.register(browserSnapshotTool);
@@ -393,6 +417,15 @@ export async function registerAllTools(
     registry.register(createBranchEvaluateTool(harness));
 
     wireBrowserHarnessCleanup(harness);
+    wireTerminalHarness(harness);
+    registry.register(createOpenTerminalTool(harness));
+  }
+
+  if (deps?.ensureTerminal) {
+    setTerminalEnsureHandler(deps.ensureTerminal);
+  }
+  if (deps?.ptyShellPort) {
+    setPtyShellPort(deps.ptyShellPort);
   }
 
   // Dynamic tool creation — always available
@@ -477,7 +510,7 @@ export async function registerAllTools(
   await restoreOpenApiConnections(registry, emitter);
   await restoreMcpConnections(registry, emitter);
   // Sidecar spawn + live MCP attach can take minutes (npx download). Do not block harness init.
-  const { deferIntegrationBootstrap } = await import("./integration_boot.js");
+  const { deferIntegrationBootstrap } = await import("./integrations/core/integration_boot.js");
   deferIntegrationBootstrap(registry, emitter, harness);
   if (deps?.appManager && liminalAppsEnabled()) {
     const appTools = createLiminalAppTools(registry, deps.appManager, harness);
@@ -497,28 +530,28 @@ export async function registerAllTools(
   }
 }
 
-export { fetchWeather } from "./weather_fetch.js";
-export type { WeatherFetchInput, WeatherFetchResult } from "./weather_fetch.js";
+export { fetchWeather } from "./families/web/weather_fetch.js";
+export type { WeatherFetchInput, WeatherFetchResult } from "./families/web/weather_fetch.js";
 
-export { createAskUserTool } from "./ask_user.js";
+export { createAskUserTool } from "./families/meta/ask_user.js";
 export {
   INCEPTION_MESSAGES,
   buildInceptionMessages,
   PROTOCOL_CORE,
   buildProtocolDynamicSuffix,
   buildAdaptiveProtocolSuffix,
-} from "./systemPrompt.js";
-export type { ProtocolIntentHint } from "./systemPrompt.js";
-export { buildPersonaBlock, buildRichPersonaBlock } from "./persona_presets.js";
-export type { PersonaProfile, SpeechStyle, PersonaTone } from "./persona_presets.js";
+} from "./shared/systemPrompt.js";
+export type { ProtocolIntentHint } from "./shared/systemPrompt.js";
+export { buildPersonaBlock, buildRichPersonaBlock } from "./families/harness_ui/persona_presets.js";
+export type { PersonaProfile, SpeechStyle, PersonaTone } from "./families/harness_ui/persona_presets.js";
 export { applyLazyRegistrationPolicy, TOOL_FAMILIES } from "./tool_catalog.js";
-export { createOrchestrationTools } from "./orchestration.js";
-export { createContextTools } from "./context_tools.js";
-export { createRecallCompressionTool } from "./recall_compression.js";
-export { createSetPersonaTool } from "./set_persona.js";
-export { createAppendPersonaLivingTool } from "./append_persona_living.js";
-export { createGetRuntimeSettingsTool } from "./get_runtime_settings.js";
-export { createSetRuntimeSettingsTool } from "./set_runtime_settings.js";
+export { createOrchestrationTools } from "./families/orchestration/orchestration.js";
+export { createContextTools } from "./families/context/context_tools.js";
+export { createRecallCompressionTool } from "./families/context/recall_compression.js";
+export { createSetPersonaTool } from "./families/harness_ui/set_persona.js";
+export { createAppendPersonaLivingTool } from "./families/harness_ui/append_persona_living.js";
+export { createGetRuntimeSettingsTool } from "./families/harness_ui/get_runtime_settings.js";
+export { createSetRuntimeSettingsTool } from "./families/harness_ui/set_runtime_settings.js";
 export {
   parsePersonaInput,
   isResetToDefaultRequest,
@@ -535,16 +568,16 @@ export {
   getPersonaArtifactsPaths,
   PERSONA_LIVING_MAX_APPEND_CHARS,
   PERSONA_LIVING_MAX_FILE_CHARS,
-} from "./persona_runtime.js";
+} from "./families/harness_ui/persona_runtime.js";
 export {
   LIMINAL_DEFAULT_PROFILE,
   LIMINAL_DEFAULT_UI_THEME,
   LIMINAL_DEFAULT_UI_COPY,
   LIMINAL_DEFAULT_CONTROLS,
   LIMINAL_DEFAULT_SOUL,
-} from "./persona_default.js";
-export { loadPlugins } from "./plugin_loader.js";
-export type { PluginModule, PluginLoadResult } from "./plugin_loader.js";
+} from "./families/harness_ui/persona_default.js";
+export { loadPlugins } from "./families/meta/plugin_loader.js";
+export type { PluginModule, PluginLoadResult } from "./families/meta/plugin_loader.js";
 // Audio attachment helpers — re-exported for the web layer so it can persist
 // uploads and pass attachment_id into the transcribe_audio tool.
 export {
@@ -553,9 +586,9 @@ export {
   readAudioAttachment,
   SUPPORTED_AUDIO_MIME_TYPES,
   normalizeAudioMimeType,
-} from "./audio_attachments.js";
-export type { AudioAttachmentInput, AudioAttachmentRecord } from "./audio_attachments.js";
-export { saveTtsClip, readTtsClip, ttsClipAudioUrl } from "./tts_clips.js";
+} from "./families/audio/audio_attachments.js";
+export type { AudioAttachmentInput, AudioAttachmentRecord } from "./families/audio/audio_attachments.js";
+export { saveTtsClip, readTtsClip, ttsClipAudioUrl } from "./families/audio/tts_clips.js";
 export {
   handleAudioUpload,
   handleTranscribe,
@@ -564,10 +597,27 @@ export {
   sanitizeAudioFilename,
   type AudioBridgeContext,
   type AudioHandlerResult,
-} from "./audio_http_handlers.js";
-export type { SavedTtsClip } from "./tts_clips.js";
-export { defineTool } from "./helpers.js";
-export { getBrowserPanelFrame } from "./browser_runtime.js";
+} from "./families/audio/audio_http_handlers.js";
+export type { SavedTtsClip } from "./families/audio/tts_clips.js";
+export { defineTool } from "./shared/helpers.js";
+export { getBrowserPanelFrame } from "./families/browser/browser_runtime.js";
+export {
+  setTerminalViewPublisher,
+  setTerminalEnsureHandler,
+  type EnsureTerminalOptions,
+  type EnsureTerminalResult,
+  type TerminalViewPayload,
+} from "./families/shell/terminal_runtime.js";
+export {
+  setPtyShellPort,
+  getPtyShellPort,
+  type PtyManagerPort,
+} from "./families/shell/pty_shell_port.js";
+export {
+  shellUseUiPty,
+  wrapOneshotCommand,
+  LIMINAL_EXIT_MARKER,
+} from "./families/shell/terminal_shell_runtime.js";
 export {
   connectGoogleWorkspaceFromServer,
   disconnectGoogleWorkspaceFromServer,
@@ -583,8 +633,8 @@ export {
   disconnectLinearFromServer,
   connectNotionFromServer,
   disconnectNotionFromServer,
-} from "./connect_provider.js";
-export { getMicrosoftSidecarStatus, stopMicrosoftSidecar } from "./microsoft_sidecar.js";
+} from "./integrations/core/connect_provider.js";
+export { getMicrosoftSidecarStatus, stopMicrosoftSidecar } from "./integrations/microsoft/microsoft_sidecar.js";
 export {
   githubMcpEnabled,
   githubTokenPresent,
@@ -592,8 +642,8 @@ export {
   githubConnectOnBoot,
   connectGithubMcp,
   disconnectGithubMcp,
-} from "./github_connect.js";
-export { getGoogleSidecarStatus, stopGoogleSidecar } from "./google_sidecar.js";
+} from "./integrations/github/github_connect.js";
+export { getGoogleSidecarStatus, stopGoogleSidecar } from "./integrations/google/google_sidecar.js";
 export {
   listIntegrationConnections,
   attachCustomMcpFromServer,
@@ -602,5 +652,5 @@ export {
   disconnectOpenApiFromServer,
   parseAuthBody,
   refreshIntegrationToolsOnRegistry,
-} from "./integrations_server.js";
-export type { IntegrationConnectionSummary } from "./integrations_server.js";
+} from "./integrations/core/integrations_server.js";
+export type { IntegrationConnectionSummary } from "./integrations/core/integrations_server.js";

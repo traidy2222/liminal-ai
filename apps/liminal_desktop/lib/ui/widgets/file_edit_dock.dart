@@ -394,7 +394,7 @@ class _PhaseChip extends StatelessWidget {
       decoration: BoxDecoration(
         color: lim.accent.withValues(alpha: 0.12),
         borderRadius: BorderRadius.circular(4),
-        border: Border.all(color: lim.accent.withValues(alpha: 0.35)),
+        border: Border.all(color: lim.accent.withValues(alpha: 0.25)),
       ),
       child: Text(
         label,

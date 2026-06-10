@@ -12,8 +12,9 @@ abstract final class LiminalTypography {
 
   static TextStyle sectionTitle(BuildContext context) =>
       Theme.of(context).textTheme.titleMedium!.copyWith(
-            color: LiminalTheme.of(context).accent,
+            color: LiminalTheme.of(context).text,
             fontWeight: FontWeight.w600,
+            letterSpacing: -0.1,
           );
 
   static TextStyle body(BuildContext context, {Color? color}) =>

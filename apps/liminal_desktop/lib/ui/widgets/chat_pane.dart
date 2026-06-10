@@ -13,7 +13,9 @@ import '../theme/liminal_theme_extension.dart';
 import 'approval_sheet.dart';
 import 'ask_user_sheet.dart';
 import 'browser_dock.dart';
+import 'terminal_dock.dart';
 import 'file_edit_dock.dart';
+import 'panel_resize_handle.dart';
 import 'composer.dart';
 import 'orchestrator_panel.dart';
 import 'sticky_message_list.dart';
@@ -64,6 +66,10 @@ class ChatPane extends StatelessWidget {
             showClose: showClose,
             onFocus: onFocus,
             onClose: onClose,
+            onToggleTerminal: focused
+                ? () => unawaited(host.toggleChatTerminal(chatId))
+                : null,
+            terminalOpen: session.terminalPanel?.hasTabs ?? false,
           ),
           if (host.isOrchestratorChat(chatId))
             ListenableBuilder(
@@ -117,17 +123,33 @@ class ChatPane extends StatelessWidget {
                 }
 
                 final screenW = MediaQuery.sizeOf(context).width;
-                final railW = _dockRailWidth(
+                final defaultRailW = _dockRailWidth(
                   session,
                   showBrowser,
                   showFileEdit,
                   screenW,
                 );
+                final railExpanded = defaultRailW > _dockCollapsedWidth;
+                final maxRail = math.min(_dockExpandedWidth, screenW * 0.48);
+                const minRail = _dockMinExpandedWidth;
+                final railW = railExpanded
+                    ? (session.dockRailWidth ?? defaultRailW).clamp(minRail, maxRail)
+                    : defaultRailW;
 
                 return Row(
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
                     Expanded(child: transcript),
+                    if (railExpanded)
+                      PanelResizeHandle(
+                        axis: PanelResizeAxis.horizontal,
+                        onDragDelta: (delta) => session.adjustDockRailWidth(
+                          delta,
+                          min: minRail,
+                          max: maxRail,
+                          fallback: defaultRailW,
+                        ),
+                      ),
                     SizedBox(
                       width: railW,
                       child: Column(
@@ -214,6 +236,41 @@ class ChatPane extends StatelessWidget {
               );
             },
           ),
+          ListenableBuilder(
+            listenable: session,
+            builder: (context, _) {
+              final panel = session.terminalPanel;
+              final showTerminal =
+                  focused && panel != null && panel.hasTabs;
+              if (!showTerminal) return const SizedBox.shrink();
+              final screenH = MediaQuery.sizeOf(context).height;
+              const minTermH = 120.0;
+              final maxTermH = screenH * 0.65;
+              final defaultTermH =
+                  (screenH * 0.28).clamp(160.0, 520.0);
+              final termH = (session.terminalBodyHeight ?? defaultTermH)
+                  .clamp(minTermH, maxTermH);
+              return TerminalDock(
+                panel: panel,
+                expanded: session.terminalDockExpanded,
+                onToggleExpanded: session.toggleTerminalDock,
+                bodyHeight: termH,
+                onResizeBodyHeight: session.terminalDockExpanded
+                    ? (delta) => session.adjustTerminalBodyHeight(
+                          delta,
+                          min: minTermH,
+                          max: maxTermH,
+                          fallback: defaultTermH,
+                        )
+                    : null,
+                onSelectTab: session.setActiveTerminalTab,
+                onCloseTab: (sid) =>
+                    unawaited(host.closeChatTerminalTab(chatId, sid)),
+                onNewTab: () =>
+                    unawaited(host.openChatTerminalTab(chatId, forceNew: true)),
+              );
+            },
+          ),
         ],
       ),
     );
@@ -243,6 +300,8 @@ class _PaneHeader extends StatelessWidget {
     required this.showClose,
     this.onFocus,
     this.onClose,
+    this.onToggleTerminal,
+    this.terminalOpen = false,
   });
 
   final String title;
@@ -251,6 +310,8 @@ class _PaneHeader extends StatelessWidget {
   final bool showClose;
   final VoidCallback? onFocus;
   final VoidCallback? onClose;
+  final VoidCallback? onToggleTerminal;
+  final bool terminalOpen;
 
   @override
   Widget build(BuildContext context) {
@@ -290,6 +351,14 @@ class _PaneHeader extends StatelessWidget {
                       ),
                 ),
               ),
+              if (onToggleTerminal != null)
+                LiminalIconButton(
+                  icon: Icons.terminal,
+                  tooltip: terminalOpen ? 'Close terminal' : 'Open terminal',
+                  size: 18,
+                  selected: terminalOpen,
+                  onPressed: onToggleTerminal,
+                ),
               if (showClose && onClose != null)
                 LiminalIconButton(
                   icon: Icons.close,

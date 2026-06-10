@@ -5,6 +5,7 @@ import { useComposerDictation } from "../../useComposerDictation.js";
 import type { ShellContract } from "../ShellContract.js";
 import { buildInputAreaStyle, buildInputDockStyle } from "../shellLayout.js";
 import { LIM } from "../personaVars.js";
+import { TerminalDock } from "../../terminal/TerminalDock.js";
 
 export type ShellComposerVariant = "hud" | "terminal" | "studio" | "minimal";
 
@@ -583,29 +584,35 @@ export function ShellComposer({
 
   if (variant === "studio") {
     return (
-      <div style={{ flexShrink: 0, padding: "0 24px 20px", maxWidth: 720, width: "100%", margin: "0 auto", boxSizing: "border-box" }}>
-        <form
-          style={dockStyle}
-          onSubmit={onSubmit}
-          onDragOver={onDragOver}
-          onDragLeave={onDragLeave}
-          onDrop={onDrop}
-        >
-          {formInner}
-        </form>
+      <div style={{ flexShrink: 0, maxWidth: 720, width: "100%", margin: "0 auto", boxSizing: "border-box" }}>
+        <div style={{ padding: "0 24px 20px" }}>
+          <form
+            style={dockStyle}
+            onSubmit={onSubmit}
+            onDragOver={onDragOver}
+            onDragLeave={onDragLeave}
+            onDrop={onDrop}
+          >
+            {formInner}
+          </form>
+        </div>
+        <TerminalDock />
       </div>
     );
   }
 
   return (
-    <form
-      style={dockStyle}
-      onSubmit={onSubmit}
-      onDragOver={onDragOver}
-      onDragLeave={onDragLeave}
-      onDrop={onDrop}
-    >
-      {formInner}
-    </form>
+    <>
+      <form
+        style={dockStyle}
+        onSubmit={onSubmit}
+        onDragOver={onDragOver}
+        onDragLeave={onDragLeave}
+        onDrop={onDrop}
+      >
+        {formInner}
+      </form>
+      <TerminalDock />
+    </>
   );
 }

@@ -41,7 +41,7 @@ class PlanProgressTile extends StatelessWidget {
       decoration: BoxDecoration(
         color: lim.panel.withValues(alpha: 0.5),
         borderRadius: BorderRadius.circular(lim.radius * 0.55),
-        border: Border.all(color: lim.accent.withValues(alpha: 0.28)),
+        border: Border.all(color: lim.border),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,

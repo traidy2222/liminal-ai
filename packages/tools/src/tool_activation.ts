@@ -1,8 +1,8 @@
 import type { ToolRegistry } from "@liminal/core";
 import { isFamilyEntitled, loadHarnessEntitlements, ENTITLEMENT_GATED_FAMILIES } from "@liminal/core";
-import { defineTool } from "./helpers.js";
+import { defineTool } from "./shared/helpers.js";
 import { TOOL_FAMILIES, summarizeFamilyActivity } from "./tool_catalog.js";
-import { matchesAgentcardIntent } from "./agentcard_cli.js";
+import { matchesAgentcardIntent } from "./integrations/agentcard/agentcard_cli.js";
 
 /**
  * Tools for discovering and loading tool families when AGENT_TOOL_LAZY=1.

@@ -17,6 +17,15 @@ import {
   resolveWebBindHost,
 } from "./local_auth.js";
 import { injectWebAuthIntoHtml } from "./serve_client_html.js";
+import { readChatMetadata } from "@liminal/core";
+import { attachWebPtyUpgrade, createWebPtyContext, registerPtyRoutes } from "./pty_http.js";
+import { createWebEnsureTerminal } from "./pty_terminal.js";
+import {
+  setPtyShellPort,
+  setTerminalEnsureHandler,
+  setTerminalViewPublisher,
+} from "@liminal/tools";
+import { createWebPtyShellPort } from "./pty_shell_port.js";
 
 // Load `.env` files in order (dotenv does not override existing `process.env` keys by default):
 // 1) monorepo root, 2) packages/web, 3) workspace root when it differs — before AgentBridge starts.
@@ -78,6 +87,17 @@ const sse = new SSEManager();
 // creates a default scratch chat), and lazy-constructs subsequent bridges
 // on activate. Runtime prefs are loaded inside boot() from the user-global
 // path (Phase 1 storage split).
+const ptyCtx = createWebPtyContext(localAuth.token, async (chatId) => {
+  const meta = await readChatMetadata(chatId);
+  if (!meta) throw new Error(`Unknown chat ${chatId}`);
+  return meta.workspaceRoot;
+});
+setTerminalEnsureHandler(createWebEnsureTerminal(ptyCtx));
+setPtyShellPort(createWebPtyShellPort(ptyCtx));
+setTerminalViewPublisher((payload) => {
+  sse.send("terminal_view", payload, payload.chatId);
+});
+
 const chatManager = new ChatManager(sse);
 const bootedChat = await chatManager.boot();
 console.log(
@@ -92,6 +112,9 @@ app.use((req, res, next) => {
 });
 
 const router = createRouter(chatManager, sse, localAuth);
+registerPtyRoutes(router, ptyCtx, (req, res, next) => {
+  localAuth.requireAuth(req, res, next);
+});
 app.use(router);
 
 const webPkgRoot = join(__dirname, "..");
@@ -178,6 +201,7 @@ if (existsSync(clientIndexHtml)) {
 
 const bindHost = resolveWebBindHost();
 const server = createServer(app);
+attachWebPtyUpgrade(server, ptyCtx);
 
 server.once("error", (err: unknown) => {
   const e = err as NodeJS.ErrnoException;
@@ -234,6 +258,7 @@ for (const sig of ["SIGTERM", "SIGINT"] as const) {
   process.once(sig, () => {
     try {
       chatManager.shutdown();
+      ptyCtx.ptyManager.disposeAll();
     } finally {
       server.close(() => process.exit(0));
       setTimeout(() => process.exit(0), 2000).unref();

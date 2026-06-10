@@ -178,6 +178,24 @@ export interface ClientCommandMap {
     autoApproveReads?: boolean;
   };
   disconnect_integration_openapi: { name: string };
+
+  /** Open (or reattach to) an interactive shell session for a chat. */
+  pty_open: {
+    chatId: string;
+    cols?: number;
+    rows?: number;
+    label?: string;
+    source?: "agent" | "user";
+    /** When true, always spawn a new tab instead of reusing the primary session. */
+    forceNew?: boolean;
+    cwd?: string;
+  };
+  /** Resize the chat's PTY grid. */
+  pty_resize: { sessionId: string; cols: number; rows: number };
+  /** Close the interactive shell session. */
+  pty_close: { sessionId?: string; chatId?: string };
+  /** List active PTY sessions (optional chat filter). */
+  pty_list: { chatId?: string };
 }
 
 export type ClientCommandType = keyof ClientCommandMap;

@@ -1980,6 +1980,35 @@ export function useSSE(options?: {
         persistEventId(e.lastEventId || undefined);
       };
 
+      es.addEventListener("terminal_view", (e: MessageEvent) => {
+        trackId(e);
+        const payload = parseEventData(e) as Record<string, unknown> | undefined;
+        if (!payload) return;
+        try {
+          window.dispatchEvent(new CustomEvent("liminal:terminal_view", { detail: payload }));
+        } catch {
+          /* ignore */
+        }
+      });
+
+      es.addEventListener("pty_exit", (e: MessageEvent) => {
+        trackId(e);
+        const payload = parseEventData(e) as Record<string, unknown> | undefined;
+        if (!payload) return;
+        try {
+          window.dispatchEvent(
+            new CustomEvent("liminal:pty_exit", {
+              detail: {
+                chatId: String(payload.chatId ?? ""),
+                sessionId: String(payload.sessionId ?? ""),
+              },
+            })
+          );
+        } catch {
+          /* ignore */
+        }
+      });
+
       es.addEventListener("text", (e: MessageEvent) => {
         trackId(e);
         const payload = parseEventData(e) as {

@@ -1,0 +1,16 @@
+{
+  "prompt": "Demonstrate persistent memory (marketing capture — safe to write this note):\n\n1) remember key \"marketing:capture-policy\" value \"Liminal marketing videos must be recorded from real harness runs with session.jsonl proof — never fixture UI.\" type fact scope workspace\n2) recall_relevant query \"marketing session jsonl proof\" k 5\n3) memory_stats\n\nReply in 3 short bullets: the stored value, the top recall_relevant hit text, and total note count from memory_stats.",
+  "chatId": "chat_mq6ky82v",
+  "messages": [
+    {
+      "kind": "user",
+      "text": "Demonstrate persistent memory (marketing capture — safe to write this note):\n\n1) remember key \"marketing:capture-policy\" value \"Liminal marketing videos must be recorded from real harness runs with session.jsonl proof — never fixture UI.\" type fact scope workspace\n2) recall_relevant query \"marketing session jsonl proof\" k 5\n3) memory_stats\n\nReply in 3 short bullets: the stored value, the top recall_relevant hit text, and total note count from memory_stats."
+    }
+  ],
+  "meta": {
+    "turnIndex": 1,
+    "tools": []
+  },
+  "capturedAt": "2026-06-09T11:52:42.378Z",
+  "source": "desktop"
+}

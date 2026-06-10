@@ -1,0 +1,50 @@
+[
+  {
+    "url": "https://productivitystack.io/compare/logseq-vs-obsidian/",
+    "title": "Logseq vs Obsidian: Which Is Better in 2026?",
+    "accessed_at": "2026-06-07",
+    "key_claim": "Obsidian scores 9/10 and Logseq 8.4/10; Logseq wins on open-source and free pricing, Obsidian wins on plugin ecosystem and polish."
+  },
+  {
+    "url": "https://blog.openreplay.com/obsidian-vs-logseq-note-taking-app/",
+    "title": "Obsidian vs Logseq: Choosing a Note-Taking App",
+    "accessed_at": "2026-06-07",
+    "key_claim": "Both use local Markdown files and local storage; Obsidian has 1500+ plugins and handles large vaults better; Logseq excels at outlining, built-in tasks, and PDF annotation."
+  },
+  {
+    "url": "https://dev.to/dev_tips/why-i-switched-from-obsidian-a-real-developers-story-and-what-im-using-now-ndn",
+    "title": "Why I switched from obsidian: A real developer's story and what I'm using now",
+    "accessed_at": "2026-06-07",
+    "key_claim": "Developer left Obsidian due to sync issues, plugin maintenance burden, and cost; migrated to a simpler markdown-based workflow."
+  },
+  {
+    "url": "https://fabric.so/comparison/obsidian-vs-logseq",
+    "title": "Obsidian vs Logseq: which should you choose in 2026?",
+    "accessed_at": "2026-06-07",
+    "key_claim": "Updated May 2026; Logseq's DB version is a transitional architecture; Obsidian's CLI is a major 2026 differentiator for developers."
+  },
+  {
+    "url": "https://christiangrech.medium.com/logseq-vs-obsidian-in-2026-which-one-should-you-actually-use-de08b0c35075",
+    "title": "Logseq vs Obsidian in 2026: Which One Should You Actually Use?",
+    "accessed_at": "2026-06-07",
+    "key_claim": "Practical comparison from a 5-month daily Logseq user; Logseq's block-centric model suits task management and daily journaling better than Obsidian's page-centric approach."
+  },
+  {
+    "url": "https://ai.gopubby.com/my-notes-taking-app-story-with-markdown-git-vs-code-and-llm-84ccb3b94354",
+    "title": "My notes taking app story with markdown, git, VS Code and LLM",
+    "accessed_at": "2026-06-07",
+    "key_claim": "Plain markdown + git + VS Code + LLM copilot provides a zero-lock-in, scriptable, secure developer knowledge base with three independent backup strategies."
+  },
+  {
+    "url": "https://obsidian.md/help/cli",
+    "title": "Obsidian CLI — Official Documentation",
+    "accessed_at": "2026-06-07",
+    "key_claim": "Obsidian CLI supports vault operations (create, search, diff, daily notes, tasks), developer commands (eval, devtools, screenshots), and a TUI — all scriptable from the terminal."
+  },
+  {
+    "url": "https://www.xda-developers.com/obsidian-cli-is-the-new-best-way-to-automate-your-notes/",
+    "title": "Obsidian CLI is the new best way to automate your notes",
+    "accessed_at": "2026-06-07",
+    "key_claim": "CLI enables scheduled note creation, tag migration scripts, and vault-wide operations; currently requires Catalyst license but will become free."
+  }
+]

@@ -62,6 +62,11 @@ export default defineConfig({
   server: {
     port: 3000,
     proxy: {
+      "/api/pty/ws": {
+        target: DEV_API_ORIGIN.replace(/^http/, "ws"),
+        ws: true,
+        changeOrigin: false,
+      },
       "/api": {
         target: DEV_API_ORIGIN,
         changeOrigin: false,

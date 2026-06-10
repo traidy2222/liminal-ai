@@ -7,19 +7,23 @@ abstract final class LiminalElevation {
   static const double mid = 2;
   static const double high = 3;
 
+  /// Layered ambient + key shadows. The persona accent contributes only a
+  /// faint halo at high elevation — depth comes from neutral shadow, not glow.
   static List<BoxShadow> shadow(Color accent, {double level = mid, double glow = 0.35}) {
-    final a = accent.withValues(alpha: 0.08 + glow * 0.06);
+    final halo = accent.withValues(alpha: (0.04 + glow * 0.05).clamp(0.0, 0.12));
     return switch (level) {
       low => [
-        BoxShadow(color: Colors.black.withValues(alpha: 0.25), blurRadius: 8, offset: const Offset(0, 2)),
+        BoxShadow(color: Colors.black.withValues(alpha: 0.20), blurRadius: 6, offset: const Offset(0, 1)),
+        BoxShadow(color: Colors.black.withValues(alpha: 0.16), blurRadius: 16, offset: const Offset(0, 6)),
       ],
       high => [
-        BoxShadow(color: Colors.black.withValues(alpha: 0.45), blurRadius: 24, offset: const Offset(0, 8)),
-        BoxShadow(color: a, blurRadius: 16, spreadRadius: -4),
+        BoxShadow(color: Colors.black.withValues(alpha: 0.30), blurRadius: 10, offset: const Offset(0, 2)),
+        BoxShadow(color: Colors.black.withValues(alpha: 0.40), blurRadius: 36, offset: const Offset(0, 16)),
+        BoxShadow(color: halo, blurRadius: 28, spreadRadius: -8),
       ],
       _ => [
-        BoxShadow(color: Colors.black.withValues(alpha: 0.35), blurRadius: 14, offset: const Offset(0, 4)),
-        BoxShadow(color: a, blurRadius: 10, spreadRadius: -6),
+        BoxShadow(color: Colors.black.withValues(alpha: 0.24), blurRadius: 8, offset: const Offset(0, 2)),
+        BoxShadow(color: Colors.black.withValues(alpha: 0.28), blurRadius: 24, offset: const Offset(0, 10)),
       ],
     };
   }

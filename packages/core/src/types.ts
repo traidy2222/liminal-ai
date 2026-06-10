@@ -554,6 +554,17 @@ export interface AgentEventMap {
     open: boolean;
     updatedAt: number;
   };
+  /** Live terminal panel for embedded shells (desktop/web) — PTY session opened by agent or user. */
+  terminal_view: {
+    chatId: string;
+    sessionId: string;
+    label: string;
+    source: "agent" | "user";
+    cwd: string;
+    open: boolean;
+    focus: boolean;
+    updatedAt: number;
+  };
   tool_delta: { callId: string; argsDelta: string };
   tool_approval: {
     callId: string;
