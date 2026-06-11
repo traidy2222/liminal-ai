@@ -35,6 +35,7 @@ import {
   formatPreferredMailRouteLine,
   listXeroOAuthAccounts,
   revokeXeroAccount,
+  xeroBundleMissingScopes,
   listGithubOAuthAccounts,
   listSlackOAuthAccounts,
   revokeSlackAccount,
@@ -468,7 +469,7 @@ export function createConnectorTools(registry: ToolRegistry, _emitter: AgentEmit
           output:
             `Xero connected as ${a.email ?? a.accountId}` +
             (a.tenantName ? ` (${a.tenantName})` : a.tenantId ? ` (tenant ${a.tenantId})` : "") +
-            ".\nTools: xero_list_organisations, xero_list_invoices, xero_get_invoice, xero_list_contacts, xero_create_invoice." +
+            ".\nTools: xero_* family (invoices, bills, contacts, payments, bank, journals, reports) — activate_tool_family({ family: \"xero\" }) if lazy." +
             integrationLazyLoadHint(registry, "xero"),
         };
       }
@@ -814,8 +815,9 @@ export function createConnectorTools(registry: ToolRegistry, _emitter: AgentEmit
       } else {
         for (const a of xeroAccounts) {
           const exp = new Date(a.expiresAt).toISOString();
+          const missing = xeroBundleMissingScopes(a.scopes);
           lines.push(
-            `- ${a.email ?? a.accountId}${a.tenantName ? ` · ${a.tenantName}` : a.tenantId ? ` · tenant ${a.tenantId}` : ""} (expires ~${exp}, ${a.scopes.length} scopes)`
+            `- ${a.email ?? a.accountId}${a.tenantName ? ` · ${a.tenantName}` : a.tenantId ? ` · tenant ${a.tenantId}` : ""} (expires ~${exp}, ${a.scopes.length} scopes${missing.length > 0 ? ` — reconnect needed (${missing.length} missing)` : ""})`
           );
         }
       }

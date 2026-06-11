@@ -38,6 +38,7 @@ import {
   missingDefaultMicrosoftScopes,
   listGithubOAuthAccounts,
   listXeroOAuthAccounts,
+  xeroBundleMissingScopes,
   listSlackOAuthAccounts,
   missingSlackScopes,
   slackHostedConnectExtra,
@@ -554,6 +555,7 @@ export function createRouter(
             expiresAt: a.expiresAt,
             tenantId: a.tenantId,
             tenantName: a.tenantName,
+            missingScopes: xeroBundleMissingScopes(a.scopes),
           })),
         },
         slack: {

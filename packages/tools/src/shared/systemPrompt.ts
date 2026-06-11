@@ -457,12 +457,21 @@ When the user mentions GitHub issues, pull requests, repos, Actions, or code rev
 6. Read-only mode: \`connect_provider({ provider: "github", mode: "read_only" })\` or \`GITHUB_MCP_URL\` ending in \`/readonly\`.`;
 
 const XERO_PROTOCOL = `## Xero (connectors)
-When the user mentions Xero, invoices, bills, contacts, or accounting in Xero:
-1. If Xero tools report not connected, \`connect_provider({ provider: "xero", start_oauth: true })\`.
-2. Tools: \`xero_list_organisations\`, \`xero_list_invoices\`, \`xero_get_invoice\`, \`xero_list_contacts\`, \`xero_create_invoice\` (approval-gated).
-3. **Tenant:** first linked org is default; pass \`tenant_id\` when the user names a specific organisation.
-4. **Create invoice:** needs \`contact_id\`, \`line_items\` (Description, Quantity, UnitAmount, AccountCode), optional \`reference\`, \`due_date\`.
-5. Not connected → \`connect_provider({ provider: "xero", start_oauth: true })\`, then retry.`;
+When the user mentions Xero, invoices, bills, contacts, bank rec, or accounting in Xero:
+1. If Xero tools report not connected, \`connect_provider({ provider: "xero", start_oauth: true })\`. After scope expansion, users must **reconnect** once.
+2. **Tenant:** first linked org is default; pass \`tenant_id\` when the user names a specific organisation.
+3. **Core:** \`xero_list_organisations\`, \`xero_get_organisation\`, \`xero_list_accounts\`, \`xero_list_tax_rates\`, \`xero_list_tracking_categories\`.
+4. **AR/AP:** \`xero_list_invoices\`, \`xero_get_invoice\`, \`xero_create_invoice\`, \`xero_create_bill\`, \`xero_set_invoice_status\` (approve/void — minimal payload), \`xero_update_invoice\` (lines/dates only — never pass raw GET payload), \`xero_email_invoice\`, \`xero_list_credit_notes\`, \`xero_create_credit_note\`, \`xero_list_purchase_orders\`, \`xero_list_quotes\`, \`xero_list_items\`. Quotes need \`TaxType\` per line (\`xero_list_tax_rates\` first).
+5. **Contacts:** \`xero_list_contacts\`, \`xero_get_contact\`, \`xero_create_contact\`.
+6. **Cash:** \`xero_list_payments\`, \`xero_create_payment\`, \`xero_list_bank_transactions\`, \`xero_create_bank_transaction\`.
+7. **Journals:** \`xero_list_manual_journals\`, \`xero_create_manual_journal\`.
+8. **Reports:** \`xero_report_profit_and_loss\`, \`xero_report_balance_sheet\`, \`xero_report_trial_balance\`, \`xero_report_aged_receivables\`, \`xero_report_aged_payables\`, \`xero_report_bank_summary\`, \`xero_report_executive_summary\` — pass \`fromDate\`/\`toDate\` or \`date\` as needed.
+9. **Attachments:** \`xero_list_attachments\`, \`xero_get_attachment\` (save_path or base64), \`xero_upload_attachment\` (file_path or content_base64; parent_type Invoices|CreditNotes|…).
+10. **Reconciliation:** \`xero_list_linked_transactions\`, \`xero_create_linked_transaction\`; \`xero_list_overpayments\`/\`xero_get_overpayment\`; \`xero_list_prepayments\`/\`xero_get_prepayment\`; \`xero_list_bank_transfers\`, \`xero_create_bank_transfer\`.
+11. **Batch & recurring:** \`xero_list_batch_payments\`, \`xero_create_batch_payment\`; \`xero_list_repeating_invoices\`, \`xero_get_repeating_invoice\`, \`xero_create_repeating_invoice\`.
+12. **Quotes/POs:** \`xero_get_quote\`, \`xero_create_quote\`, \`xero_get_purchase_order\`, \`xero_create_purchase_order\`.
+13. **Escape hatch:** \`xero_request\` for uncovered endpoints (approval-gated). Writes are approval-gated.
+14. Lazy loading: \`activate_tool_family({ family: "xero" })\`.`;
 
 const HOSTED_REST_INTEGRATIONS_PROTOCOL = `## Slack / Linear / Notion (REST)
 When \`slack_*\`, \`linear_*\`, or \`notion_*\` tools report not connected: \`connect_provider({ provider: "slack"|"linear"|"notion", start_oauth: true })\`, then retry.

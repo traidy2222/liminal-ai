@@ -128,6 +128,8 @@ import { createMicrosoftOfficeRestTools, microsoftOfficeRestEnabled } from "./in
 import { createAzureArmRestTools } from "./integrations/azure/azure_arm_tools.js";
 import { azureRestEnabled } from "./integrations/azure/azure_rest.js";
 import { registerXeroRestTools, xeroRestEnabled } from "./integrations/xero/xero_rest.js";
+import { registerXeroRestExtendedTools } from "./integrations/xero/xero_rest_extended.js";
+import { registerXeroRestPhase2Tools } from "./integrations/xero/xero_rest_phase2.js";
 import { registerSlackRestTools, slackRestEnabled } from "./integrations/slack/slack_rest.js";
 import { registerLinearRestTools, linearRestEnabled } from "./integrations/linear/linear_rest.js";
 import { registerNotionRestTools, notionRestEnabled } from "./integrations/notion/notion_rest.js";
@@ -498,6 +500,8 @@ export async function registerAllTools(
   }
   if (xeroRestEnabled()) {
     registerXeroRestTools(registry);
+    registerXeroRestExtendedTools(registry);
+    registerXeroRestPhase2Tools(registry);
   }
   if (slackRestEnabled()) {
     registerSlackRestTools(registry);
@@ -609,7 +613,26 @@ export {
 } from "./families/audio/audio_http_handlers.js";
 export type { SavedTtsClip } from "./families/audio/tts_clips.js";
 export { defineTool } from "./shared/helpers.js";
-export { getBrowserPanelFrame } from "./families/browser/browser_runtime.js";
+export {
+  getBrowserPanelFrame,
+  getBrowserSession,
+  getSessionCookies,
+  refreshBrowserEmbedView,
+  setBrowserViewPublisher,
+  setBrowserViewPublisherForTask,
+  userNavigateBrowserSession,
+} from "./families/browser/browser_runtime.js";
+export {
+  startBrowserScreencast,
+  stopBrowserScreencastForSession,
+  subscribeBrowserScreencast,
+  unsubscribeBrowserScreencast,
+  handleBrowserStreamInput,
+  getBrowserScreencastMeta,
+  parseBrowserStreamInput,
+  type BrowserStreamInput,
+  type BrowserStreamSocket,
+} from "./families/browser/browser_screencast.js";
 export {
   setTerminalViewPublisher,
   setTerminalEnsureHandler,

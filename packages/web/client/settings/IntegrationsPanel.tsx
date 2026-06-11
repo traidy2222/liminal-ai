@@ -78,6 +78,7 @@ interface IntegrationsData {
       GoogleAccount & {
         tenantId?: string;
         tenantName?: string;
+        missingScopes?: string[];
       }
     >;
   };
@@ -834,7 +835,9 @@ export function IntegrationsPanel({ agentBusy }: IntegrationsPanelProps) {
         brandId="xero"
         statusLine={
           xeroConnected
-            ? `Ready · ${xeroAccounts[0]?.tenantName ?? xeroAccounts[0]?.email ?? "account linked"}`
+            ? (xeroAccounts[0]?.missingScopes?.length ?? 0) > 0
+              ? `Reconnect needed · ${xeroAccounts[0]?.missingScopes?.length} scopes missing`
+              : `Ready · ${xeroAccounts[0]?.tenantName ?? xeroAccounts[0]?.email ?? "account linked"}`
             : INTEGRATION_BRANDS.xero.tagline
         }
         connected={xeroConnected}
@@ -852,6 +855,9 @@ export function IntegrationsPanel({ agentBusy }: IntegrationsPanelProps) {
           <div key={a.accountId} style={{ fontSize: 11, fontFamily: "monospace", color: GREEN, marginBottom: 6 }}>
             {a.email ?? a.accountId}
             {a.tenantName ? ` · ${a.tenantName}` : a.tenantId ? ` · tenant ${a.tenantId}` : ""} — {a.scopes.length} scopes
+            {(a.missingScopes?.length ?? 0) > 0 ? (
+              <span style={{ color: "#e6b84d" }}> · reconnect for payments, bank, reports</span>
+            ) : null}
           </div>
         ))}
         <div style={{ marginBottom: 8 }}>

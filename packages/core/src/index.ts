@@ -523,10 +523,14 @@ export {
 } from "./consolidate_session.js";
 export type { ConsolidateSessionResult, ConsolidateUpsert } from "./consolidate_session.js";
 export {
+  abandonInProgressTasks,
   evaluateMissionContinue,
   buildResumeMissionBlock,
   loadLatestInProgressTask,
   resolveMissionAutonomyConfig,
+  shouldInjectResumeMission,
+  userDeclinedMissionResume,
+  userRequestedMissionResume,
 } from "./mission_controller.js";
 export type { InProgressTask, MissionContinueDecision } from "./mission_controller.js";
 export { rankNotesForPriming } from "./memory_priming.js";
@@ -1095,6 +1099,12 @@ export {
   scopesForXeroMode,
   XERO_DEFAULT_MODE,
 } from "./xero_oauth_broker.js";
+export {
+  xeroBundleMissingScopes,
+  XERO_FULL_ACCOUNTING_SCOPES,
+  XERO_READ_SCOPES,
+  XERO_WRITE_SCOPES,
+} from "./xero_oauth_scopes.js";
 export type { XeroTenantConnection, XeroMode } from "./xero_oauth_broker.js";
 export {
   isHostedOAuthHandoffUri,
