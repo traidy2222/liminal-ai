@@ -79,6 +79,8 @@ interface IntegrationsData {
         tenantId?: string;
         tenantName?: string;
         missingScopes?: string[];
+        missingCoreScopes?: string[];
+        missingExtendedScopes?: string[];
       }
     >;
   };
@@ -248,6 +250,7 @@ export function IntegrationsPanel({ agentBusy }: IntegrationsPanelProps) {
   const [mode, setMode] = useState<"read_write" | "read_only">("read_write");
   const [msMode, setMsMode] = useState<"read_write" | "read_only">("read_write");
   const [xeroMode, setXeroMode] = useState<"read_write" | "read_only">("read_write");
+  const [xeroExtended, setXeroExtended] = useState(false);
   const [slackMode, setSlackMode] = useState<"read_write" | "read_only">("read_write");
   const [linearMode, setLinearMode] = useState<"read_write" | "read_only">("read_write");
   const [notionMode, setNotionMode] = useState<"read_write" | "read_only">("read_write");
@@ -480,7 +483,9 @@ export function IntegrationsPanel({ agentBusy }: IntegrationsPanelProps) {
   };
 
   const beginXeroOAuth = async () => {
-    const res = await webApiFetch(`/api/integrations/xero/begin?mode=${xeroMode}`);
+    const qs = new URLSearchParams({ mode: xeroMode });
+    if (xeroExtended) qs.set("extended", "1");
+    const res = await webApiFetch(`/api/integrations/xero/begin?${qs.toString()}`);
     if (!res.ok) throw new Error(await res.text());
     const { connectUrl } = (await res.json()) as { connectUrl: string };
     window.open(connectUrl, "_blank", "noopener,noreferrer");
@@ -848,26 +853,36 @@ export function IntegrationsPanel({ agentBusy }: IntegrationsPanelProps) {
         brandId="xero"
         statusLine={
           xeroConnected
-            ? (xeroAccounts[0]?.missingScopes?.length ?? 0) > 0
-              ? `Reconnect needed · ${xeroAccounts[0]?.missingScopes?.length} scopes missing`
-              : `Ready · ${xeroAccounts[0]?.tenantName ?? xeroAccounts[0]?.email ?? "account linked"}`
+            ? (xeroAccounts[0]?.missingCoreScopes?.length ?? 0) > 0
+              ? `Reconnect needed · ${xeroAccounts[0]?.missingCoreScopes?.length} core scopes missing`
+              : (xeroAccounts[0]?.missingExtendedScopes?.length ?? 0) > 0
+                ? `Accounting ready · enable Extended APIs + reconnect for files/projects/payroll`
+                : `Ready · ${xeroAccounts[0]?.tenantName ?? xeroAccounts[0]?.email ?? "account linked"}`
             : INTEGRATION_BRANDS.xero.tagline
         }
         connected={xeroConnected}
         expanded={expanded === "xero"}
         onToggle={() => toggleExpand("xero")}
         primaryLabel={
-          xeroConnected && (xeroAccounts[0]?.missingScopes?.length ?? 0) > 0
+          xeroConnected &&
+          ((xeroAccounts[0]?.missingCoreScopes?.length ?? 0) > 0 ||
+            (xeroExtended && (xeroAccounts[0]?.missingExtendedScopes?.length ?? 0) > 0))
             ? "Reconnect"
             : xeroConnected
               ? "Disconnect"
               : "Connect"
         }
-        primaryDanger={xeroConnected && (xeroAccounts[0]?.missingScopes?.length ?? 0) === 0}
+        primaryDanger={
+          xeroConnected &&
+          (xeroAccounts[0]?.missingCoreScopes?.length ?? 0) === 0 &&
+          !(xeroExtended && (xeroAccounts[0]?.missingExtendedScopes?.length ?? 0) > 0)
+        }
         primaryDisabled={disabled}
         onPrimary={() =>
           void run(
-            xeroConnected && (xeroAccounts[0]?.missingScopes?.length ?? 0) > 0
+            xeroConnected &&
+              ((xeroAccounts[0]?.missingCoreScopes?.length ?? 0) > 0 ||
+                (xeroExtended && (xeroAccounts[0]?.missingExtendedScopes?.length ?? 0) > 0))
               ? xeroReconnect
               : xeroPrimary
           )
@@ -876,10 +891,15 @@ export function IntegrationsPanel({ agentBusy }: IntegrationsPanelProps) {
         <p style={{ fontSize: 11, color: "#778899", lineHeight: 1.45, margin: "10px 0" }}>
           Sign in with Xero to look up invoices, contacts, and organisation details.
         </p>
-        {(xeroAccounts[0]?.missingScopes?.length ?? 0) > 0 ? (
+        {(xeroAccounts[0]?.missingCoreScopes?.length ?? 0) > 0 ? (
           <p style={{ fontSize: 11, color: "#e6b84d", lineHeight: 1.45, margin: "0 0 10px" }}>
-            New tools need updated OAuth scopes (files, projects, payroll, budgets). Click{" "}
-            <strong>Reconnect</strong> — disconnect then sign in again. Token refresh does not add scopes.
+            Core accounting scopes are missing. Click <strong>Reconnect</strong> (leave Extended APIs off
+            first if you saw <code>invalid_scope</code>).
+          </p>
+        ) : (xeroAccounts[0]?.missingExtendedScopes?.length ?? 0) > 0 ? (
+          <p style={{ fontSize: 11, color: "#e6b84d", lineHeight: 1.45, margin: "0 0 10px" }}>
+            For files, projects, and payroll tools: enable <strong>Extended APIs</strong> below, then{" "}
+            <strong>Reconnect</strong>. Your Xero app must include those products at developer.xero.com.
           </p>
         ) : null}
         {xeroAccounts.map((a) => (
@@ -915,6 +935,15 @@ export function IntegrationsPanel({ agentBusy }: IntegrationsPanelProps) {
             Read only
           </label>
         </div>
+        <label style={{ display: "block", fontSize: 11, color: "#aabbcc", marginBottom: 8 }}>
+          <input
+            type="checkbox"
+            checked={xeroExtended}
+            onChange={(e) => setXeroExtended(e.target.checked)}
+            disabled={disabled || xeroConnected}
+          />{" "}
+          Extended APIs (files, projects, payroll, GL journals) — only if enabled on your Xero app
+        </label>
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
           <button
             type="button"
@@ -924,7 +953,9 @@ export function IntegrationsPanel({ agentBusy }: IntegrationsPanelProps) {
           >
             Refresh status
           </button>
-          {xeroConnected && (xeroAccounts[0]?.missingScopes?.length ?? 0) > 0 ? (
+          {xeroConnected &&
+          ((xeroAccounts[0]?.missingCoreScopes?.length ?? 0) > 0 ||
+            (xeroAccounts[0]?.missingExtendedScopes?.length ?? 0) > 0) ? (
             <button
               type="button"
               style={{ ...btn, fontSize: 10, padding: "6px 10px", borderColor: "#e6b84d", color: "#e6b84d" }}

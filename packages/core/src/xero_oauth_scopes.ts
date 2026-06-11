@@ -4,8 +4,18 @@
  * Granular scopes (apps created on/after 2026-03-02): read and write are separate —
  * `read_write` mode requests both `.read` and write scopes. Keep in sync with
  * vireondynamics-website `src/lib/connect/xero-oauth.ts`.
+ *
+ * **Extended** scopes (files, projects, payroll, GL journals) are optional — many Xero
+ * web apps return `invalid_scope` until those products are enabled on the app.
+ * Do not request `accounting.classicexpenses*` (deprecated) or `accounting.budgets.read`
+ * (use `accounting.budgets` only).
  */
 export type XeroMode = "read_write" | "read_only";
+
+export type XeroScopeOptions = {
+  /** Request files, projects, payroll, and GL journal scopes (default false). */
+  extended?: boolean;
+};
 
 const IDENTITY = ["openid", "profile", "email", "offline_access"] as const;
 
@@ -25,8 +35,6 @@ export const XERO_READ_SCOPES = [
   "accounting.reports.profitandloss.read",
   "accounting.reports.trialbalance.read",
   "accounting.reports.taxreports.read",
-  "accounting.budgets.read",
-  "accounting.classicexpenses.read",
 ] as const;
 
 /** Granular write scopes (create/update/delete for those resource types). */
@@ -38,11 +46,12 @@ export const XERO_WRITE_SCOPES = [
   "accounting.banktransactions",
   "accounting.manualjournals",
   "accounting.attachments",
-  "accounting.budgets",
-  "accounting.classicexpenses",
 ] as const;
 
-/** Phase 3 — GL journals, Files, Projects, Payroll (separate API bases). */
+/** Accounting scopes without a separate `.read` variant (budgets). */
+export const XERO_STANDALONE_ACCOUNTING_SCOPES = ["accounting.budgets"] as const;
+
+/** Extended — GL journals, Files, Projects, Payroll (separate API bases). */
 export const XERO_PHASE3_READ_SCOPES = [
   "accounting.journals.read",
   "files.read",
@@ -63,31 +72,37 @@ export const XERO_PHASE3_WRITE_SCOPES = [
   "payroll.settings",
 ] as const;
 
-export function scopesForXeroMode(mode: XeroMode): string[] {
+export function scopesForXeroMode(mode: XeroMode, opts: XeroScopeOptions = {}): string[] {
+  const extended = opts.extended === true;
+  const read = [...XERO_READ_SCOPES, ...XERO_STANDALONE_ACCOUNTING_SCOPES];
+  if (extended) read.push(...XERO_PHASE3_READ_SCOPES);
   if (mode === "read_only") {
-    return [...IDENTITY, ...XERO_READ_SCOPES, ...XERO_PHASE3_READ_SCOPES];
+    return [...IDENTITY, ...read];
   }
   const scopeSet = new Set<string>([
-    ...XERO_READ_SCOPES,
+    ...read,
     ...XERO_WRITE_SCOPES,
-    ...XERO_PHASE3_READ_SCOPES,
-    ...XERO_PHASE3_WRITE_SCOPES,
+    ...XERO_STANDALONE_ACCOUNTING_SCOPES,
+    ...(extended ? XERO_PHASE3_READ_SCOPES : []),
+    ...(extended ? XERO_PHASE3_WRITE_SCOPES : []),
   ]);
   return [...IDENTITY, ...scopeSet];
 }
 
 export const XERO_DEFAULT_MODE: XeroMode = "read_write";
 
-/** Scopes required for accounting-only tools (identity excluded). */
-export const XERO_FULL_ACCOUNTING_SCOPES: readonly string[] = [
-  ...new Set([...XERO_READ_SCOPES, ...XERO_WRITE_SCOPES]),
+/** Core accounting scopes (always requested on connect). */
+export const XERO_CORE_SCOPES: readonly string[] = [
+  ...new Set([...XERO_READ_SCOPES, ...XERO_WRITE_SCOPES, ...XERO_STANDALONE_ACCOUNTING_SCOPES]),
 ];
 
-/** All non-identity scopes for the full Liminal Xero toolset. */
+/** Scopes required for accounting-only tools (identity excluded). */
+export const XERO_FULL_ACCOUNTING_SCOPES: readonly string[] = [...XERO_CORE_SCOPES];
+
+/** All non-identity scopes for the full Liminal Xero toolset (core + extended). */
 export const XERO_FULL_SCOPES: readonly string[] = [
   ...new Set([
-    ...XERO_READ_SCOPES,
-    ...XERO_WRITE_SCOPES,
+    ...XERO_CORE_SCOPES,
     ...XERO_PHASE3_READ_SCOPES,
     ...XERO_PHASE3_WRITE_SCOPES,
   ]),
@@ -103,14 +118,12 @@ const LEGACY_SCOPE_IMPLIES: Readonly<Record<string, readonly string[]>> = {
     "accounting.payments.read",
     "accounting.banktransactions.read",
     "accounting.attachments.read",
-    "accounting.classicexpenses.read",
   ],
   "accounting.transactions": [
     "accounting.invoices",
     "accounting.payments",
     "accounting.banktransactions",
     "accounting.attachments",
-    "accounting.classicexpenses",
   ],
   "accounting.reports.read": [
     "accounting.reports.aged.read",
@@ -131,12 +144,17 @@ function scopeSatisfied(required: string, granted: Set<string>): boolean {
   return false;
 }
 
+export function xeroBundleMissingCoreScopes(granted: string[] | undefined): string[] {
+  const have = new Set((granted ?? []).map((s) => s.trim()).filter(Boolean));
+  return XERO_CORE_SCOPES.filter((s) => !scopeSatisfied(s, have));
+}
+
 export function xeroBundleMissingScopes(granted: string[] | undefined): string[] {
   const have = new Set((granted ?? []).map((s) => s.trim()).filter(Boolean));
   return XERO_FULL_SCOPES.filter((s) => !scopeSatisfied(s, have));
 }
 
-/** Phase 3 scopes missing from the token (files, projects, payroll, GL journals). */
+/** Phase 3 / extended scopes missing from the token (files, projects, payroll, GL journals). */
 export function xeroBundleMissingPhase3Scopes(granted: string[] | undefined): string[] {
   const have = new Set((granted ?? []).map((s) => s.trim()).filter(Boolean));
   const phase3 = [...new Set([...XERO_PHASE3_READ_SCOPES, ...XERO_PHASE3_WRITE_SCOPES])];
@@ -164,7 +182,9 @@ export function xeroRequiredScopesForCall(opts: {
   if (opts.apiBase.includes("payroll.xro")) {
     if (path.includes("/Payslip")) return ["payroll.payslip.read"];
     if (path.includes("/Settings")) return ["payroll.settings.read"];
-    if (path.includes("/PayRuns")) return write ? ["payroll.payruns.read", "payroll.payruns"] : ["payroll.payruns.read"];
+    if (path.includes("/PayRuns")) {
+      return write ? ["payroll.payruns.read", "payroll.payruns"] : ["payroll.payruns.read"];
+    }
     if (path.includes("/Timesheets")) {
       return write ? ["payroll.timesheets.read", "payroll.timesheets"] : ["payroll.timesheets.read"];
     }
@@ -175,12 +195,7 @@ export function xeroRequiredScopesForCall(opts: {
   }
 
   if (path.includes("/Journals")) return ["accounting.journals.read"];
-  if (path.includes("/Budgets")) return write ? ["accounting.budgets.read", "accounting.budgets"] : ["accounting.budgets.read"];
-  if (path.includes("/ExpenseClaims")) {
-    return write
-      ? ["accounting.classicexpenses.read", "accounting.classicexpenses"]
-      : ["accounting.classicexpenses.read"];
-  }
+  if (path.includes("/Budgets")) return ["accounting.budgets"];
   return [];
 }
 
@@ -197,8 +212,19 @@ export function formatXeroReconnectHint(missing: string[]): string {
   if (missing.length === 0) return "";
   const shown = missing.slice(0, 5).join(", ");
   const more = missing.length > 5 ? ", …" : "";
+  const phase3 = missing.some(
+    (s) =>
+      s.startsWith("files") ||
+      s.startsWith("projects") ||
+      s.startsWith("payroll") ||
+      s === "accounting.journals.read"
+  );
+  const extendedNote = phase3
+    ? " Enable “Extended APIs” in Settings → Integrations before reconnecting."
+    : "";
   return (
     `OAuth token is missing scopes (${shown}${more}). ` +
-    "Settings → Integrations → Disconnect Xero, then Connect again (read+write) — token refresh alone does not add scopes."
+    "Settings → Integrations → Disconnect Xero, then Connect again (read+write) — token refresh alone does not add scopes." +
+    extendedNote
   );
 }

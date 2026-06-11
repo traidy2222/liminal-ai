@@ -26,6 +26,7 @@ class _IntegrationsScreenState extends State<IntegrationsScreen> {
   String _microsoftMode = 'read_write';
   String _azureMode = 'read_write';
   String _xeroMode = 'read_write';
+  bool _xeroExtended = false;
   String _slackMode = 'read_write';
   String _linearMode = 'read_write';
   String _notionMode = 'read_write';
@@ -150,14 +151,16 @@ class _IntegrationsScreenState extends State<IntegrationsScreen> {
   }
 
   Future<void> _xeroPrimary(AppController host, IntegrationsSnapshot snap) async {
-    if (snap.xeroConnected && !snap.xeroNeedsReconnect) {
+    if (snap.xeroConnected &&
+        !snap.xeroNeedsReconnect &&
+        !(_xeroExtended && snap.xeroNeedsExtendedReconnect)) {
       await host.disconnectXero(revoke: true);
       return;
     }
-    if (snap.xeroConnected && snap.xeroNeedsReconnect) {
+    if (snap.xeroConnected) {
       await host.disconnectXero(revoke: true);
     }
-    await host.connectXeroOAuth(mode: _xeroMode);
+    await host.connectXeroOAuth(mode: _xeroMode, extended: _xeroExtended);
   }
 
   Future<void> _slackPrimary(AppController host, IntegrationsSnapshot snap) async {
@@ -407,16 +410,23 @@ class _IntegrationsScreenState extends State<IntegrationsScreen> {
                           brandId: IntegrationBrandId.xero,
                           statusLine: snap.xeroConnected
                               ? snap.xeroNeedsReconnect
-                                  ? 'Reconnect needed · scopes missing'
-                                  : 'Ready · ${snap.xeroAccountLabel}'
+                                  ? 'Reconnect needed · core scopes missing'
+                                  : snap.xeroNeedsExtendedReconnect
+                                      ? 'Accounting ready · enable Extended + reconnect'
+                                      : 'Ready · ${snap.xeroAccountLabel}'
                               : integrationBrands[IntegrationBrandId.xero]!.tagline,
                           connected: snap.xeroConnected,
                           expanded: _expandedId == 'xero',
                           onToggle: () => _toggleExpanded('xero'),
                           primaryLabel: snap.xeroConnected
-                              ? (snap.xeroNeedsReconnect ? 'Reconnect' : 'Disconnect')
+                              ? (snap.xeroNeedsReconnect ||
+                                      (_xeroExtended && snap.xeroNeedsExtendedReconnect)
+                                  ? 'Reconnect'
+                                  : 'Disconnect')
                               : 'Connect',
-                          primaryDanger: snap.xeroConnected && !snap.xeroNeedsReconnect,
+                          primaryDanger: snap.xeroConnected &&
+                              !snap.xeroNeedsReconnect &&
+                              !(_xeroExtended && snap.xeroNeedsExtendedReconnect),
                           disabled: disabled,
                           onPrimary: () => unawaited(_xeroPrimary(host, host.integrations)),
                           child: Padding(
@@ -431,7 +441,13 @@ class _IntegrationsScreenState extends State<IntegrationsScreen> {
                                 if (snap.xeroNeedsReconnect) ...[
                                   const SizedBox(height: 8),
                                   Text(
-                                    'New tools need updated OAuth scopes. Tap Reconnect — disconnect then sign in again.',
+                                    'Reconnect with Extended APIs off if you saw invalid_scope.',
+                                    style: TextStyle(color: lim.warn, fontSize: 12, height: 1.4),
+                                  ),
+                                ] else if (snap.xeroNeedsExtendedReconnect) ...[
+                                  const SizedBox(height: 8),
+                                  Text(
+                                    'Enable Extended APIs below, then Reconnect for files/projects/payroll.',
                                     style: TextStyle(color: lim.warn, fontSize: 12, height: 1.4),
                                   ),
                                 ],
@@ -456,6 +472,19 @@ class _IntegrationsScreenState extends State<IntegrationsScreen> {
                                     ),
                                     const Text('Read only'),
                                   ],
+                                ),
+                                CheckboxListTile(
+                                  contentPadding: EdgeInsets.zero,
+                                  dense: true,
+                                  title: const Text(
+                                    'Extended APIs (files, projects, payroll)',
+                                    style: TextStyle(fontSize: 12),
+                                  ),
+                                  value: _xeroExtended,
+                                  onChanged: disabled || snap.xeroConnected
+                                      ? null
+                                      : (v) => setState(() => _xeroExtended = v ?? false),
+                                  controlAffinity: ListTileControlAffinity.leading,
                                 ),
                                 if (snap.xeroConnected)
                                   TextButton(

@@ -38,6 +38,8 @@ import {
   missingDefaultMicrosoftScopes,
   listGithubOAuthAccounts,
   listXeroOAuthAccounts,
+  xeroBundleMissingCoreScopes,
+  xeroBundleMissingPhase3Scopes,
   xeroBundleMissingScopes,
   listSlackOAuthAccounts,
   missingSlackScopes,
@@ -556,6 +558,8 @@ export function createRouter(
             tenantId: a.tenantId,
             tenantName: a.tenantName,
             missingScopes: xeroBundleMissingScopes(a.scopes),
+            missingCoreScopes: xeroBundleMissingCoreScopes(a.scopes),
+            missingExtendedScopes: xeroBundleMissingPhase3Scopes(a.scopes),
           })),
         },
         slack: {
@@ -819,6 +823,7 @@ export function createRouter(
     prunePendingHostedOAuth();
     const state = randomBytes(16).toString("hex");
     const mode = req.query["mode"] === "read_only" ? "read_only" : "read_write";
+    const extended = req.query["extended"] === "1";
     pendingHostedOAuth.set(state, { exp: Date.now() + 10 * 60_000, provider: "xero", mode });
     const harnessRedirectUri = hostedOAuthHandoffPath(WEB_PORT);
     const site = defaultVireonSiteOrigin();
@@ -828,6 +833,7 @@ export function createRouter(
       harnessState: state,
       siteOrigin: site,
       mode,
+      extra: extended ? { extended: "1" } : undefined,
     });
     res.json({ connectUrl, authUrl: connectUrl, state });
   });

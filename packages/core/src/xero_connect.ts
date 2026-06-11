@@ -13,6 +13,8 @@ export type XeroConnectResult = {
 export interface RunXeroHostedConnectOptions {
   siteOrigin?: string;
   mode?: XeroMode;
+  /** Request files, projects, payroll, GL journal scopes (default false). */
+  extended?: boolean;
   openBrowser?: boolean;
   onStatus?: (message: string) => void;
   timeoutMs?: number;
@@ -26,6 +28,7 @@ export function runXeroHostedConnectFlow(
     provider: "xero",
     siteOrigin: options.siteOrigin,
     mode: options.mode ?? "read_write",
+    extra: options.extended ? { extended: "1" } : undefined,
     openBrowser: options.openBrowser,
     onStatus: options.onStatus,
     timeoutMs: options.timeoutMs,

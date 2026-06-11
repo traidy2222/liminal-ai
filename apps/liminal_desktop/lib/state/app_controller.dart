@@ -1168,9 +1168,10 @@ class AppController extends ChangeNotifier {
   Future<bool> disconnectAzure({bool revoke = false}) =>
       _runIntegrationCommand('disconnect_azure', {'revoke': revoke});
 
-  Future<bool> connectXeroOAuth({String mode = 'read_write'}) =>
+  Future<bool> connectXeroOAuth({String mode = 'read_write', bool extended = false}) =>
       _runIntegrationCommand('connect_xero_oauth', {
         'mode': mode,
+        'extended': extended,
         'openBrowser': true,
       });
 

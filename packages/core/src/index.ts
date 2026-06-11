@@ -1100,6 +1100,7 @@ export {
   XERO_DEFAULT_MODE,
 } from "./xero_oauth_broker.js";
 export {
+  xeroBundleMissingCoreScopes,
   xeroBundleMissingScopes,
   xeroBundleMissingPhase3Scopes,
   xeroBundleMissingRequiredScopes,
@@ -1109,9 +1110,12 @@ export {
   XERO_FULL_SCOPES,
   XERO_PHASE3_READ_SCOPES,
   XERO_PHASE3_WRITE_SCOPES,
+  XERO_CORE_SCOPES,
   XERO_READ_SCOPES,
+  XERO_STANDALONE_ACCOUNTING_SCOPES,
   XERO_WRITE_SCOPES,
 } from "./xero_oauth_scopes.js";
+export type { XeroScopeOptions } from "./xero_oauth_scopes.js";
 export type { XeroTenantConnection, XeroMode } from "./xero_oauth_broker.js";
 export {
   isHostedOAuthHandoffUri,

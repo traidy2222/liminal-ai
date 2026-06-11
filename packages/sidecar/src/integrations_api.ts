@@ -22,6 +22,8 @@ import {
   runMicrosoftHostedConnectFlow,
   runAzureHostedConnectFlow,
   runXeroHostedConnectFlow,
+  xeroBundleMissingCoreScopes,
+  xeroBundleMissingPhase3Scopes,
   xeroBundleMissingScopes,
 } from "@liminal/core";
 import {
@@ -100,6 +102,8 @@ export async function buildIntegrationsSnapshot() {
         tenantId: a.tenantId,
         tenantName: a.tenantName,
         missingScopes: xeroBundleMissingScopes(a.scopes),
+        missingCoreScopes: xeroBundleMissingCoreScopes(a.scopes),
+        missingExtendedScopes: xeroBundleMissingPhase3Scopes(a.scopes),
       })),
     },
     slack: {
@@ -349,11 +353,13 @@ export async function connectXeroOAuth(
   registry: ChatRegistry,
   opts: {
     mode?: "read_write" | "read_only";
+    extended?: boolean;
     openBrowser?: boolean;
   }
 ): Promise<{ email?: string; accountId: string; tenantName?: string }> {
   const result = await runXeroHostedConnectFlow({
     mode: opts.mode ?? "read_write",
+    extended: opts.extended === true,
     openBrowser: opts.openBrowser !== false,
     onStatus: (m) => console.log(`[xero-oauth] ${m}`),
   });
