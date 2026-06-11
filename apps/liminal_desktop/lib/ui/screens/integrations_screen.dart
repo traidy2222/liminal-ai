@@ -27,6 +27,7 @@ class _IntegrationsScreenState extends State<IntegrationsScreen> {
   String _azureMode = 'read_write';
   String _xeroMode = 'read_write';
   bool _xeroExtended = false;
+  bool _xeroFullScopes = false;
   String _slackMode = 'read_write';
   String _linearMode = 'read_write';
   String _notionMode = 'read_write';
@@ -160,7 +161,11 @@ class _IntegrationsScreenState extends State<IntegrationsScreen> {
     if (snap.xeroConnected) {
       await host.disconnectXero(revoke: true);
     }
-    await host.connectXeroOAuth(mode: _xeroMode, extended: _xeroExtended);
+    await host.connectXeroOAuth(
+      mode: _xeroMode,
+      extended: _xeroExtended,
+      fullScopes: _xeroFullScopes,
+    );
   }
 
   Future<void> _slackPrimary(AppController host, IntegrationsSnapshot snap) async {
@@ -472,6 +477,19 @@ class _IntegrationsScreenState extends State<IntegrationsScreen> {
                                     ),
                                     const Text('Read only'),
                                   ],
+                                ),
+                                CheckboxListTile(
+                                  contentPadding: EdgeInsets.zero,
+                                  dense: true,
+                                  title: const Text(
+                                    'Full accounting scopes (reports, budgets)',
+                                    style: TextStyle(fontSize: 12),
+                                  ),
+                                  value: _xeroFullScopes,
+                                  onChanged: disabled || snap.xeroConnected
+                                      ? null
+                                      : (v) => setState(() => _xeroFullScopes = v ?? false),
+                                  controlAffinity: ListTileControlAffinity.leading,
                                 ),
                                 CheckboxListTile(
                                   contentPadding: EdgeInsets.zero,

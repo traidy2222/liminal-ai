@@ -354,12 +354,16 @@ export async function connectXeroOAuth(
   opts: {
     mode?: "read_write" | "read_only";
     extended?: boolean;
+    fullScopes?: boolean;
+    journals?: boolean;
     openBrowser?: boolean;
   }
 ): Promise<{ email?: string; accountId: string; tenantName?: string }> {
   const result = await runXeroHostedConnectFlow({
     mode: opts.mode ?? "read_write",
     extended: opts.extended === true,
+    fullScopes: opts.fullScopes === true,
+    journals: opts.journals === true,
     openBrowser: opts.openBrowser !== false,
     onStatus: (m) => console.log(`[xero-oauth] ${m}`),
   });

@@ -10,35 +10,50 @@ import {
 } from "./xero_oauth_scopes.js";
 
 describe("xero_oauth_scopes", () => {
-  it("read_write legacy default uses broad scopes (pre-2026-03-02 apps)", () => {
+  it("granular default connect tier uses minimal scopes for post-2026-03-02 apps", () => {
     const scopes = scopesForXeroMode("read_write");
     assert.ok(scopes.includes("offline_access"));
-    assert.ok(scopes.includes("accounting.transactions"));
-    assert.ok(scopes.includes("accounting.transactions.read"));
-    assert.ok(scopes.includes("accounting.reports.read"));
-    assert.ok(scopes.includes("accounting.budgets"));
-    assert.ok(!scopes.includes("accounting.invoices.read"));
-    assert.ok(!scopes.includes("accounting.classicexpenses"));
+    assert.ok(scopes.includes("accounting.invoices.read"));
+    assert.ok(scopes.includes("accounting.invoices"));
+    assert.ok(!scopes.includes("accounting.transactions"));
+    assert.ok(!scopes.includes("accounting.reports.profitandloss.read"));
+    assert.ok(!scopes.includes("accounting.budgets"));
+    assert.ok(!scopes.includes("accounting.budgets.read"));
+    assert.ok(!scopes.includes("accounting.banktransactions"));
     assert.ok(!scopes.includes("files.read"));
   });
 
-  it("granular style uses split scopes for new Xero apps", () => {
-    const scopes = scopesForXeroMode("read_write", { style: "granular" });
-    assert.ok(scopes.includes("accounting.invoices.read"));
-    assert.ok(scopes.includes("accounting.invoices"));
-    assert.ok(!scopes.includes("accounting.transactions.read"));
+  it("legacy style uses broad scopes for pre-2026-03-02 apps", () => {
+    const scopes = scopesForXeroMode("read_write", { style: "legacy" });
+    assert.ok(scopes.includes("accounting.transactions"));
+    assert.ok(scopes.includes("accounting.transactions.read"));
+    assert.ok(scopes.includes("accounting.reports.read"));
+    assert.ok(!scopes.includes("accounting.invoices.read"));
+    assert.ok(!scopes.includes("accounting.classicexpenses"));
   });
 
-  it("extended adds phase 3 scopes", () => {
+  it("full tier adds reports and budgets.read", () => {
+    const scopes = scopesForXeroMode("read_write", { tier: "full" });
+    assert.ok(scopes.includes("accounting.reports.profitandloss.read"));
+    assert.ok(scopes.includes("accounting.budgets.read"));
+    assert.ok(scopes.includes("accounting.banktransactions"));
+  });
+
+  it("extended adds phase 3 scopes without journals by default", () => {
     const scopes = scopesForXeroMode("read_write", { extended: true });
     assert.ok(scopes.includes("files.read"));
     assert.ok(scopes.includes("projects.read"));
     assert.ok(scopes.includes("payroll.employees.read"));
+    assert.ok(!scopes.includes("accounting.journals.read"));
+  });
+
+  it("journals opt-in", () => {
+    const scopes = scopesForXeroMode("read_write", { journals: true });
     assert.ok(scopes.includes("accounting.journals.read"));
   });
 
   it("read_only legacy omits write scopes", () => {
-    const scopes = scopesForXeroMode("read_only");
+    const scopes = scopesForXeroMode("read_only", { style: "legacy" });
     assert.ok(scopes.includes("accounting.transactions.read"));
     assert.ok(!scopes.includes("accounting.transactions"));
   });
@@ -56,16 +71,16 @@ describe("xero_oauth_scopes", () => {
         apiBase: "https://api.xero.com/api.xro/2.0",
         path: "/Budgets",
       }),
-      ["accounting.budgets"]
+      ["accounting.budgets.read"]
     );
     assert.deepEqual(
-      xeroBundleMissingRequiredScopes(["accounting.budgets"], ["accounting.budgets"]),
+      xeroBundleMissingRequiredScopes(["accounting.budgets.read"], ["accounting.budgets.read"]),
       []
     );
   });
 
-  it("xeroBundleMissingPhase3Scopes detects missing journals/files/projects/payroll", () => {
-    const missing = xeroBundleMissingPhase3Scopes(["accounting.journals.read", "files.read"]);
+  it("xeroBundleMissingPhase3Scopes detects missing files/projects/payroll", () => {
+    const missing = xeroBundleMissingPhase3Scopes(["files.read"]);
     assert.ok(missing.includes("projects.read"));
     assert.ok(missing.includes("payroll.employees.read"));
     assert.ok(!missing.includes("accounting.journals.read"));

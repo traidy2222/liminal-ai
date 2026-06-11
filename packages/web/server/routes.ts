@@ -5,7 +5,6 @@ import type { SSEManager } from "./sse.js";
 import type { ApprovalDecision, ChatWorkspaceMode } from "@liminal/core";
 import {
   DEFAULT_IMAGE_ATTACHMENT_LIMITS,
-  buildMessageWithImageAttachments,
   normalizeImageAttachmentName,
   parseDataUrlImage,
   validateImageAttachments,
@@ -824,6 +823,8 @@ export function createRouter(
     const state = randomBytes(16).toString("hex");
     const mode = req.query["mode"] === "read_only" ? "read_only" : "read_write";
     const extended = req.query["extended"] === "1";
+    const fullScopes = req.query["full_scopes"] === "1";
+    const journals = req.query["journals"] === "1";
     pendingHostedOAuth.set(state, { exp: Date.now() + 10 * 60_000, provider: "xero", mode });
     const harnessRedirectUri = hostedOAuthHandoffPath(WEB_PORT);
     const site = defaultVireonSiteOrigin();
@@ -833,7 +834,11 @@ export function createRouter(
       harnessState: state,
       siteOrigin: site,
       mode,
-      extra: extended ? { extended: "1" } : undefined,
+      extra: {
+        ...(extended ? { extended: "1" } : {}),
+        ...(fullScopes ? { full_scopes: "1" } : {}),
+        ...(journals ? { journals: "1" } : {}),
+      },
     });
     res.json({ connectUrl, authUrl: connectUrl, state });
   });
@@ -1417,12 +1422,12 @@ export function createRouter(
       return;
     }
     const persisted = await persistIncomingAttachments(normalizedAttachments);
-    const normalizedMessage = buildMessageWithImageAttachments(msg, persisted);
     res.json({ ok: true });
     bridge
-      .sendUserMessage(normalizedMessage, {
+      .sendUserMessage(msg, {
         freshContext: Boolean(freshContext),
         liveDictation: Boolean(liveDictation),
+        imageAttachments: persisted,
       })
       .catch((err) => {
       const message = err instanceof Error ? err.message : "Failed to process message.";

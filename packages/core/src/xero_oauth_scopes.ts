@@ -1,10 +1,11 @@
 /**
  * Xero OAuth 2.0 scope presets for Liminal connectors.
  *
- * Xero migrated to granular scopes on 2026-03-02. Apps created **before** that date
- * should authorize with legacy broad scopes (`accounting.transactions`,
- * `accounting.reports.read`) until migrated — requesting granular scopes on those
- * apps returns `invalid_scope`. Apps created on/after 2026-03-02 need granular only.
+ * **Post-2026-03-02 apps** (default): granular scopes only — `accounting.transactions` and
+ * `accounting.reports.read` return `invalid_scope`. Use `accounting.budgets.read` for read
+ * access (bare `accounting.budgets` alone is wrong on the authorize URL for new apps).
+ *
+ * **Pre-2026-03-02 apps**: set `AGENT_XERO_OAUTH_SCOPE_STYLE=legacy`.
  *
  * Keep in sync with vireondynamics-website `src/lib/connect/xero-oauth.ts`.
  */
@@ -12,22 +13,23 @@ import { effectiveHarnessEnvRaw } from "./harness_effective_env.js";
 
 export type XeroMode = "read_write" | "read_only";
 
-/** Legacy broad scopes (default) vs post-2026-03-02 granular scopes. */
 export type XeroScopeStyle = "legacy" | "granular";
 
+/** OAuth authorize URL breadth — start with `connect`, add `full` for reports/budgets. */
+export type XeroOAuthTier = "connect" | "full";
+
 export type XeroScopeOptions = {
-  /** Request files, projects, payroll, and GL journal scopes (default false). */
   extended?: boolean;
-  /** OAuth scope bundle; default legacy for maximum app compatibility. */
+  /** `legacy` only for Xero apps created before 2026-03-02. */
   style?: XeroScopeStyle;
+  /** Authorize tier (granular only). Default `connect` — smallest scope set that signs in. */
+  tier?: XeroOAuthTier;
+  /** GL journals (`accounting.journals.read`) — requires Xero approval on many apps. */
+  journals?: boolean;
 };
 
 const IDENTITY = ["openid", "profile", "email", "offline_access"] as const;
 
-/**
- * Broad read scopes — use for apps created before 2026-03-02 (valid until Sep 2027).
- * See https://developer.xero.com/faq/granular-scopes
- */
 export const XERO_LEGACY_READ_SCOPES = [
   "accounting.transactions.read",
   "accounting.reports.read",
@@ -37,7 +39,6 @@ export const XERO_LEGACY_READ_SCOPES = [
   "accounting.budgets",
 ] as const;
 
-/** Broad write scopes (paired with {@link XERO_LEGACY_READ_SCOPES}). */
 export const XERO_LEGACY_WRITE_SCOPES = [
   "accounting.transactions",
   "accounting.contacts",
@@ -45,8 +46,8 @@ export const XERO_LEGACY_WRITE_SCOPES = [
   "accounting.attachments",
 ] as const;
 
-/** Granular read scopes (apps created on/after 2026-03-02). */
-export const XERO_READ_SCOPES = [
+/** Minimum granular read set for post-2026-03-02 connect (invoices, contacts, payments, …). */
+export const XERO_CONNECT_GRANULAR_READ_SCOPES = [
   "accounting.invoices.read",
   "accounting.contacts.read",
   "accounting.settings.read",
@@ -54,6 +55,19 @@ export const XERO_READ_SCOPES = [
   "accounting.banktransactions.read",
   "accounting.manualjournals.read",
   "accounting.attachments.read",
+] as const;
+
+/** Minimum granular write set (omits `accounting.banktransactions` — not on all new-app manifests). */
+export const XERO_CONNECT_GRANULAR_WRITE_SCOPES = [
+  "accounting.invoices",
+  "accounting.contacts",
+  "accounting.settings",
+  "accounting.payments",
+  "accounting.manualjournals",
+  "accounting.attachments",
+] as const;
+
+export const XERO_REPORT_READ_SCOPES = [
   "accounting.reports.aged.read",
   "accounting.reports.balancesheet.read",
   "accounting.reports.banksummary.read",
@@ -63,23 +77,31 @@ export const XERO_READ_SCOPES = [
   "accounting.reports.taxreports.read",
 ] as const;
 
-/** Granular write scopes. */
-export const XERO_WRITE_SCOPES = [
-  "accounting.invoices",
-  "accounting.contacts",
-  "accounting.settings",
-  "accounting.payments",
-  "accounting.banktransactions",
-  "accounting.manualjournals",
-  "accounting.attachments",
+/** Post-2026-03-02 budget read scope (OpenAPI + Chift); not `accounting.budgets` alone. */
+export const XERO_BUDGET_READ_SCOPE = "accounting.budgets.read" as const;
+
+/** Optional write access to budgets (full tier / legacy). */
+export const XERO_BUDGET_WRITE_SCOPE = "accounting.budgets" as const;
+
+/** Full granular read = connect + reports + budgets.read */
+export const XERO_READ_SCOPES = [
+  ...XERO_CONNECT_GRANULAR_READ_SCOPES,
+  ...XERO_REPORT_READ_SCOPES,
+  XERO_BUDGET_READ_SCOPE,
 ] as const;
 
-/** Accounting scopes without a separate `.read` variant (budgets). */
-export const XERO_STANDALONE_ACCOUNTING_SCOPES = ["accounting.budgets"] as const;
+/** Full granular write = connect + banktransactions write + budgets write */
+export const XERO_WRITE_SCOPES = [
+  ...XERO_CONNECT_GRANULAR_WRITE_SCOPES,
+  "accounting.banktransactions",
+  XERO_BUDGET_WRITE_SCOPE,
+] as const;
 
-/** Extended — GL journals, Files, Projects, Payroll (separate API bases). */
+/** @deprecated Use {@link XERO_BUDGET_READ_SCOPE} / {@link XERO_BUDGET_WRITE_SCOPE}. */
+export const XERO_STANDALONE_ACCOUNTING_SCOPES = [XERO_BUDGET_WRITE_SCOPE] as const;
+
+/** Files, projects, payroll — enable products on the Xero app first. */
 export const XERO_PHASE3_READ_SCOPES = [
-  "accounting.journals.read",
   "files.read",
   "projects.read",
   "payroll.employees.read",
@@ -98,14 +120,22 @@ export const XERO_PHASE3_WRITE_SCOPES = [
   "payroll.settings",
 ] as const;
 
+/** GL journals — separate from phase 3; often requires Xero developer approval. */
+export const XERO_JOURNALS_READ_SCOPE = "accounting.journals.read" as const;
+
 export function resolveXeroScopeStyle(): XeroScopeStyle {
   const raw = effectiveHarnessEnvRaw("AGENT_XERO_OAUTH_SCOPE_STYLE")?.trim().toLowerCase();
-  if (raw === "granular") return "granular";
-  return "legacy";
+  if (raw === "legacy") return "legacy";
+  return "granular";
 }
 
-function scopesForLegacyMode(mode: XeroMode, extended: boolean): string[] {
+function resolveTier(opts: XeroScopeOptions): XeroOAuthTier {
+  return opts.tier === "full" ? "full" : "connect";
+}
+
+function scopesForLegacyMode(mode: XeroMode, extended: boolean, journals: boolean): string[] {
   const read: string[] = [...XERO_LEGACY_READ_SCOPES];
+  if (journals) read.push(XERO_JOURNALS_READ_SCOPE);
   if (extended) read.push(...XERO_PHASE3_READ_SCOPES);
   if (mode === "read_only") {
     return [...IDENTITY, ...read];
@@ -119,16 +149,29 @@ function scopesForLegacyMode(mode: XeroMode, extended: boolean): string[] {
   return [...IDENTITY, ...scopeSet];
 }
 
-function scopesForGranularMode(mode: XeroMode, extended: boolean): string[] {
-  const read: string[] = [...XERO_READ_SCOPES, ...XERO_STANDALONE_ACCOUNTING_SCOPES];
+function scopesForGranularMode(mode: XeroMode, opts: XeroScopeOptions): string[] {
+  const tier = resolveTier(opts);
+  const extended = opts.extended === true;
+  const journals = opts.journals === true;
+
+  const read: string[] =
+    tier === "full"
+      ? [...XERO_READ_SCOPES]
+      : [...XERO_CONNECT_GRANULAR_READ_SCOPES];
+
+  if (journals) read.push(XERO_JOURNALS_READ_SCOPE);
   if (extended) read.push(...XERO_PHASE3_READ_SCOPES);
+
   if (mode === "read_only") {
     return [...IDENTITY, ...read];
   }
+
+  const write =
+    tier === "full" ? [...XERO_WRITE_SCOPES] : [...XERO_CONNECT_GRANULAR_WRITE_SCOPES];
+
   const scopeSet = new Set<string>([
     ...read,
-    ...XERO_WRITE_SCOPES,
-    ...XERO_STANDALONE_ACCOUNTING_SCOPES,
+    ...write,
     ...(extended ? XERO_PHASE3_READ_SCOPES : []),
     ...(extended ? XERO_PHASE3_WRITE_SCOPES : []),
   ]);
@@ -137,16 +180,15 @@ function scopesForGranularMode(mode: XeroMode, extended: boolean): string[] {
 
 export function scopesForXeroMode(mode: XeroMode, opts: XeroScopeOptions = {}): string[] {
   const style = opts.style ?? resolveXeroScopeStyle();
-  const extended = opts.extended === true;
-  if (style === "legacy") return scopesForLegacyMode(mode, extended);
-  return scopesForGranularMode(mode, extended);
+  const journals = opts.journals === true;
+  if (style === "legacy") return scopesForLegacyMode(mode, opts.extended === true, journals);
+  return scopesForGranularMode(mode, opts);
 }
 
 export const XERO_DEFAULT_MODE: XeroMode = "read_write";
 
-/** Core accounting scopes tools expect on the token (granular names; legacy tokens satisfy via implies). */
 export const XERO_CORE_SCOPES: readonly string[] = [
-  ...new Set([...XERO_READ_SCOPES, ...XERO_WRITE_SCOPES, ...XERO_STANDALONE_ACCOUNTING_SCOPES]),
+  ...new Set([...XERO_READ_SCOPES, ...XERO_WRITE_SCOPES]),
 ];
 
 export const XERO_FULL_ACCOUNTING_SCOPES: readonly string[] = [...XERO_CORE_SCOPES];
@@ -154,12 +196,12 @@ export const XERO_FULL_ACCOUNTING_SCOPES: readonly string[] = [...XERO_CORE_SCOP
 export const XERO_FULL_SCOPES: readonly string[] = [
   ...new Set([
     ...XERO_CORE_SCOPES,
+    XERO_JOURNALS_READ_SCOPE,
     ...XERO_PHASE3_READ_SCOPES,
     ...XERO_PHASE3_WRITE_SCOPES,
   ]),
 ];
 
-/** Legacy broad scopes satisfy granular requirements on pre-migration tokens. */
 const LEGACY_SCOPE_IMPLIES: Readonly<Record<string, readonly string[]>> = {
   "accounting.transactions.read": [
     "accounting.invoices.read",
@@ -175,15 +217,8 @@ const LEGACY_SCOPE_IMPLIES: Readonly<Record<string, readonly string[]>> = {
     "accounting.manualjournals",
     "accounting.attachments",
   ],
-  "accounting.reports.read": [
-    "accounting.reports.aged.read",
-    "accounting.reports.balancesheet.read",
-    "accounting.reports.banksummary.read",
-    "accounting.reports.executivesummary.read",
-    "accounting.reports.profitandloss.read",
-    "accounting.reports.trialbalance.read",
-    "accounting.reports.taxreports.read",
-  ],
+  "accounting.reports.read": [...XERO_REPORT_READ_SCOPES],
+  [XERO_BUDGET_WRITE_SCOPE]: [XERO_BUDGET_READ_SCOPE],
 };
 
 function scopeSatisfied(required: string, granted: Set<string>): boolean {
@@ -242,8 +277,10 @@ export function xeroRequiredScopesForCall(opts: {
     return ["payroll.employees.read"];
   }
 
-  if (path.includes("/Journals")) return ["accounting.journals.read"];
-  if (path.includes("/Budgets")) return ["accounting.budgets"];
+  if (path.includes("/Journals")) return [XERO_JOURNALS_READ_SCOPE];
+  if (path.includes("/Budgets")) {
+    return write ? [XERO_BUDGET_WRITE_SCOPE] : [XERO_BUDGET_READ_SCOPE];
+  }
   return [];
 }
 
@@ -265,14 +302,17 @@ export function formatXeroReconnectHint(missing: string[]): string {
       s.startsWith("files") ||
       s.startsWith("projects") ||
       s.startsWith("payroll") ||
-      s === "accounting.journals.read"
+      s === XERO_JOURNALS_READ_SCOPE
   );
-  const extendedNote = phase3
-    ? " Enable “Extended APIs” in Settings → Integrations before reconnecting."
-    : "";
+  const reportsOrBudgets = missing.some(
+    (s) => s.startsWith("accounting.reports.") || s.includes("budgets")
+  );
+  let extra = "";
+  if (phase3) extra += " Enable “Extended APIs” before reconnecting.";
+  if (reportsOrBudgets) extra += " Reconnect with “Full accounting scopes” for reports and budgets.";
   return (
     `OAuth token is missing scopes (${shown}${more}). ` +
-    "Settings → Integrations → Disconnect Xero, then Connect again (read+write) — token refresh alone does not add scopes." +
-    extendedNote
+    "Settings → Integrations → Disconnect Xero, then Connect again — token refresh alone does not add scopes." +
+    extra
   );
 }

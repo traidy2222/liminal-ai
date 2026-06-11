@@ -13,8 +13,12 @@ export type XeroConnectResult = {
 export interface RunXeroHostedConnectOptions {
   siteOrigin?: string;
   mode?: XeroMode;
-  /** Request files, projects, payroll, GL journal scopes (default false). */
+  /** Request files, projects, payroll scopes (default false). */
   extended?: boolean;
+  /** Include reports + budgets on authorize (granular full tier). */
+  fullScopes?: boolean;
+  /** GL journals — requires Xero developer approval on many apps. */
+  journals?: boolean;
   openBrowser?: boolean;
   onStatus?: (message: string) => void;
   timeoutMs?: number;
@@ -28,7 +32,11 @@ export function runXeroHostedConnectFlow(
     provider: "xero",
     siteOrigin: options.siteOrigin,
     mode: options.mode ?? "read_write",
-    extra: options.extended ? { extended: "1" } : undefined,
+    extra: {
+      ...(options.extended ? { extended: "1" } : {}),
+      ...(options.fullScopes ? { full_scopes: "1" } : {}),
+      ...(options.journals ? { journals: "1" } : {}),
+    },
     openBrowser: options.openBrowser,
     onStatus: options.onStatus,
     timeoutMs: options.timeoutMs,

@@ -31,17 +31,25 @@ import {
 } from "@liminal/core";
 import { tryHandleAudioRequest } from "./audio_http.js";
 import { tryHandleBrowserPreviewRequest } from "./browser_preview_handler.js";
+import {
+  tryHandleBrowserCookiesRequest,
+  tryHandleBrowserNavigateRequest,
+} from "./browser_sync_handler.js";
 import { tryHandleAppProxyRequest } from "./app_proxy_handler.js";
 import { tryHandleAppHtmlRequest } from "./app_html_handler.js";
 import { tryHandleMediaRequest } from "./media_handler.js";
 import { getBrowserPanelFrame, setTerminalViewPublisher } from "@liminal/tools";
 import { buildPtyOpenedPayload, createSidecarEnsureTerminal } from "./pty_terminal.js";
 import { createPtyShellPort } from "./pty_shell_port.js";
-import { buildOutboundUserMessage, normalizeWireAttachments } from "./message_attachments.js";
+import { normalizeWireAttachments } from "./message_attachments.js";
 import { LiminalAppManager } from "./app_manager.js";
 import { ChatOrchestrator } from "./chat_orchestrator.js";
 import { PtyManager } from "./pty_manager.js";
 import { createPtyStreamServer, tryHandlePtyUpgrade } from "./pty_stream_handler.js";
+import {
+  createBrowserStreamServer,
+  tryHandleBrowserStreamUpgrade,
+} from "./browser_stream_handler.js";
 import {
   tryHandleTerminalAssetRequest,
   tryHandleTerminalEmbedRequest,
@@ -103,6 +111,7 @@ export class WsServer {
   private readonly repoRoot: string;
   private readonly ptyManager = new PtyManager();
   private readonly ptyWss;
+  private readonly browserWss;
 
   constructor(opts: WsServerOptions) {
     this.token = opts.token;
@@ -145,6 +154,7 @@ export class WsServer {
       token: this.token,
       ptyManager: this.ptyManager,
     });
+    this.browserWss = createBrowserStreamServer();
 
     this.ptyManager.on("exit", (sessionId, chatId, exitCode) => {
       this.broadcast(
@@ -171,6 +181,12 @@ export class WsServer {
           token: this.token,
         })
       ) {
+        return;
+      }
+      if (tryHandleBrowserCookiesRequest(req, res, { token: this.token })) {
+        return;
+      }
+      if (tryHandleBrowserNavigateRequest(req, res, { token: this.token })) {
         return;
       }
       if (
@@ -235,6 +251,17 @@ export class WsServer {
           token: this.token,
           ptyManager: this.ptyManager,
         }, this.ptyWss)
+      ) {
+        return;
+      }
+      if (
+        tryHandleBrowserStreamUpgrade(
+          req,
+          socket,
+          head,
+          { token: this.token },
+          this.browserWss
+        )
       ) {
         return;
       }
@@ -479,14 +506,14 @@ export class WsServer {
           if (!msg && att.attachments.length === 0) {
             return this.ack(ws, id, false, "message or attachments required");
           }
-          const outbound = buildOutboundUserMessage(msg, att.attachments);
           this.registry.touch(d.chatId, msg.slice(0, 60) || "Image attachment");
           this.broadcastChatList();
           this.ack(ws, id, true);
           bridge
-            .sendUserMessage(outbound, {
+            .sendUserMessage(msg, {
               freshContext: d.freshContext,
               liveDictation: d.liveDictation,
+              imageAttachments: att.attachments,
             })
             .catch((err) => {
               this.broadcast(
@@ -861,6 +888,9 @@ export class WsServer {
         case "connect_xero_oauth": {
           const d = data as {
             mode?: "read_write" | "read_only";
+            extended?: boolean;
+            fullScopes?: boolean;
+            journals?: boolean;
             openBrowser?: boolean;
           };
           try {
@@ -1158,6 +1188,7 @@ export class WsServer {
     this.registry.disposeAll();
     this.ptyManager.disposeAll();
     this.ptyWss.close();
+    this.browserWss.close();
     this.wss.close();
     this.http.close();
   }

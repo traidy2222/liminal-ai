@@ -356,7 +356,7 @@ export const HARNESS_ENV_DEFAULTS: Readonly<Record<string, string>> = {
   AGENT_REASONING_NATIVE_SLUGS: "",      // unused by default; set to re-enable native stream for specific slugs
   AGENT_NATIVE_VISION: "1",              // "0" disables routing attachments as image_url on the main model
   AGENT_NATIVE_VISION_SLUGS: "",         // comma substrings; empty uses built-in multimodal slug heuristics
-  AGENT_XERO_OAUTH_SCOPE_STYLE: "legacy", // legacy = broad scopes (pre-2026-03-02 apps); granular = split scopes
+  AGENT_XERO_OAUTH_SCOPE_STYLE: "granular", // granular = post-2026-03-02 apps; legacy = pre-migration broad scopes
   AGENT_REASONING_EXTERNAL_SLUGS: "",    // comma substrings → force external (think-primary)
   // Tiered context preservation
   AGENT_CTX_HOT_ROUNDS: "4",          // verbatim rounds kept

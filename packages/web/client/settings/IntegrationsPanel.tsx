@@ -251,6 +251,7 @@ export function IntegrationsPanel({ agentBusy }: IntegrationsPanelProps) {
   const [msMode, setMsMode] = useState<"read_write" | "read_only">("read_write");
   const [xeroMode, setXeroMode] = useState<"read_write" | "read_only">("read_write");
   const [xeroExtended, setXeroExtended] = useState(false);
+  const [xeroFullScopes, setXeroFullScopes] = useState(false);
   const [slackMode, setSlackMode] = useState<"read_write" | "read_only">("read_write");
   const [linearMode, setLinearMode] = useState<"read_write" | "read_only">("read_write");
   const [notionMode, setNotionMode] = useState<"read_write" | "read_only">("read_write");
@@ -485,6 +486,7 @@ export function IntegrationsPanel({ agentBusy }: IntegrationsPanelProps) {
   const beginXeroOAuth = async () => {
     const qs = new URLSearchParams({ mode: xeroMode });
     if (xeroExtended) qs.set("extended", "1");
+    if (xeroFullScopes) qs.set("full_scopes", "1");
     const res = await webApiFetch(`/api/integrations/xero/begin?${qs.toString()}`);
     if (!res.ok) throw new Error(await res.text());
     const { connectUrl } = (await res.json()) as { connectUrl: string };
@@ -893,8 +895,10 @@ export function IntegrationsPanel({ agentBusy }: IntegrationsPanelProps) {
         </p>
         {(xeroAccounts[0]?.missingCoreScopes?.length ?? 0) > 0 ? (
           <p style={{ fontSize: 11, color: "#e6b84d", lineHeight: 1.45, margin: "0 0 10px" }}>
-            Core accounting scopes are missing. Click <strong>Reconnect</strong> (leave Extended APIs off
-            first if you saw <code>invalid_scope</code>).
+            Core accounting scopes are missing. Click <strong>Reconnect</strong> with{" "}
+            <strong>Full accounting scopes</strong> if you need reports or budgets. Leave Extended APIs off
+            on first connect if you saw <code>invalid_scope</code> (post–March 2026 apps need granular
+            scopes).
           </p>
         ) : (xeroAccounts[0]?.missingExtendedScopes?.length ?? 0) > 0 ? (
           <p style={{ fontSize: 11, color: "#e6b84d", lineHeight: 1.45, margin: "0 0 10px" }}>
@@ -938,11 +942,20 @@ export function IntegrationsPanel({ agentBusy }: IntegrationsPanelProps) {
         <label style={{ display: "block", fontSize: 11, color: "#aabbcc", marginBottom: 8 }}>
           <input
             type="checkbox"
+            checked={xeroFullScopes}
+            onChange={(e) => setXeroFullScopes(e.target.checked)}
+            disabled={disabled || xeroConnected}
+          />{" "}
+          Full accounting scopes (reports, budgets) — enable after a successful basic connect
+        </label>
+        <label style={{ display: "block", fontSize: 11, color: "#aabbcc", marginBottom: 8 }}>
+          <input
+            type="checkbox"
             checked={xeroExtended}
             onChange={(e) => setXeroExtended(e.target.checked)}
             disabled={disabled || xeroConnected}
           />{" "}
-          Extended APIs (files, projects, payroll, GL journals) — only if enabled on your Xero app
+          Extended APIs (files, projects, payroll) — only if enabled on your Xero app at developer.xero.com
         </label>
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
           <button

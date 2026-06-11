@@ -2231,7 +2231,7 @@ const _META_RAW: Record<string, HarnessSettingsFieldMeta> = {
     tabId: "harness",
     subgroupId: "harness_misc",
     label: "Xero OAuth scope style",
-    description: "legacy = broad scopes for pre-2026-03-02 Xero apps (default). granular = split scopes for new apps only.",
+    description: "granular = split scopes for post-2026-03-02 Xero apps (default). legacy = broad scopes for older apps only.",
     valueKind: "string",
   },
   "AGENT_REASONING_EXTERNAL_SLUGS": {
