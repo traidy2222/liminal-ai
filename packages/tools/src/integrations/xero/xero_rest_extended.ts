@@ -464,7 +464,9 @@ export function registerXeroRestExtendedTools(registry: ToolRegistry): void {
   registry.register(
     defineTool({
       name: "xero_create_bank_transaction",
-      description: "WHAT: Create spent (SPEND) or received (RECEIVE) bank transaction.",
+      description:
+        "WHAT: Create spent (SPEND) or received (RECEIVE) bank transaction.\n" +
+        "WHEN: Use xero_list_bank_accounts for bank_account_id; contact_id recommended for SPEND.",
       parameters: {
         type: "object",
         properties: {
@@ -489,9 +491,11 @@ export function registerXeroRestExtendedTools(registry: ToolRegistry): void {
         if (!Array.isArray(lineItems) || lineItems.length === 0 || !bankId) {
           return { ok: false, error: "line_items and bank_account_id required" };
         }
+        const norm = normalizeXeroLineItems(lineItems);
+        if (!norm.ok) return { ok: false, error: norm.error };
         const txn: Record<string, unknown> = {
           Type: type,
-          LineItems: lineItems,
+          LineItems: norm.lineItems,
           BankAccount: { AccountID: bankId },
         };
         const contactId = String(args["contact_id"] ?? "").trim();
@@ -556,11 +560,14 @@ export function registerXeroRestExtendedTools(registry: ToolRegistry): void {
         if (!contactId || !Array.isArray(lineItems) || lineItems.length === 0) {
           return { ok: false, error: "contact_id and line_items required" };
         }
+        const norm = normalizeXeroLineItems(lineItems);
+        if (!norm.ok) return { ok: false, error: norm.error };
         const note: Record<string, unknown> = {
           Type: type,
           Contact: { ContactID: contactId },
-          LineItems: lineItems,
+          LineItems: norm.lineItems,
           Status: "DRAFT",
+          LineAmountTypes: "Exclusive",
         };
         if (typeof args["reference"] === "string" && args["reference"].trim()) {
           note["Reference"] = args["reference"].trim();

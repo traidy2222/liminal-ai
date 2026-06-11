@@ -130,6 +130,7 @@ import { azureRestEnabled } from "./integrations/azure/azure_rest.js";
 import { registerXeroRestTools, xeroRestEnabled } from "./integrations/xero/xero_rest.js";
 import { registerXeroRestExtendedTools } from "./integrations/xero/xero_rest_extended.js";
 import { registerXeroRestPhase2Tools } from "./integrations/xero/xero_rest_phase2.js";
+import { registerXeroRestPhase25Tools } from "./integrations/xero/xero_rest_phase25.js";
 import { registerSlackRestTools, slackRestEnabled } from "./integrations/slack/slack_rest.js";
 import { registerLinearRestTools, linearRestEnabled } from "./integrations/linear/linear_rest.js";
 import { registerNotionRestTools, notionRestEnabled } from "./integrations/notion/notion_rest.js";
@@ -502,6 +503,7 @@ export async function registerAllTools(
     registerXeroRestTools(registry);
     registerXeroRestExtendedTools(registry);
     registerXeroRestPhase2Tools(registry);
+    registerXeroRestPhase25Tools(registry);
   }
   if (slackRestEnabled()) {
     registerSlackRestTools(registry);

@@ -35,6 +35,14 @@ Disable REST tools with `AGENT_XERO_REST=0`.
 | `xero_list_tax_rates` | Tax / GST codes |
 | `xero_list_tracking_categories` | Tracking dimensions |
 
+### Discovery (use before creates)
+
+| Tool | Purpose |
+| ---- | ------- |
+| `xero_find_contact` | Search contacts by name/email |
+| `xero_list_bank_accounts` | Bank AccountIDs for payments & bank txns |
+| `xero_suggest_line_item` | Default AccountCode + TaxType for sales/purchase lines |
+
 ### Invoices & AR/AP
 
 | Tool | Purpose |
@@ -43,13 +51,19 @@ Disable REST tools with `AGENT_XERO_REST=0`.
 | `xero_get_invoice` | Fetch one by GUID |
 | `xero_create_invoice` | Create ACCREC sales invoice (approval) |
 | `xero_create_bill` | Create ACCPAY supplier bill (approval) |
-| `xero_update_invoice` | Update status/lines (approval) |
+| `xero_set_invoice_status` | Approve/void (minimal payload) |
+| `xero_update_invoice` | Update lines/dates (not status) |
+| `xero_authorise_and_email_invoice` | Approve + email in one step (approval) |
+| `xero_record_invoice_payment` | Pay invoice/bill (defaults to AmountDue) |
+| `xero_quote_to_invoice` | Convert quote → invoice (approval) |
+| `xero_po_to_bill` | Convert PO → supplier bill (approval) |
 | `xero_email_invoice` | Email authorised invoice (approval) |
 | `xero_list_credit_notes` | Credit notes |
 | `xero_create_credit_note` | Create credit note (approval) |
 | `xero_list_purchase_orders` | Purchase orders |
 | `xero_list_quotes` | Sales quotes |
 | `xero_list_items` | Inventory / service items |
+| `xero_get_item` / `xero_create_item` / `xero_update_item` | Item catalog |
 
 ### Contacts
 
@@ -57,14 +71,26 @@ Disable REST tools with `AGENT_XERO_REST=0`.
 | ---- | ------- |
 | `xero_list_contacts` | Customers/suppliers |
 | `xero_get_contact` | One contact by GUID |
-| `xero_create_contact` | Create/update contact (approval) |
+| `xero_create_contact` | Create contact (approval) |
+| `xero_update_contact` | Update contact (approval) |
+
+### Quotes, POs, credit notes (lifecycle)
+
+| Tool | Purpose |
+| ---- | ------- |
+| `xero_set_quote_status` / `xero_update_quote` | Quote status & edits |
+| `xero_set_purchase_order_status` / `xero_update_purchase_order` | PO status & edits |
+| `xero_set_credit_note_status` / `xero_update_credit_note` | Credit note status & edits |
+| `xero_allocate_credit_note` | Apply credit note to invoice/bill |
 
 ### Cash & journals
 
 | Tool | Purpose |
 | ---- | ------- |
 | `xero_list_payments` | Payments on invoices |
+| `xero_get_payment` / `xero_delete_payment` | Fetch or void a payment |
 | `xero_create_payment` | Record payment (approval) |
+| `xero_allocate_overpayment` / `xero_allocate_prepayment` | Apply unallocated cash |
 | `xero_list_bank_transactions` | Spent/received money |
 | `xero_create_bank_transaction` | Create bank txn (approval) |
 | `xero_list_manual_journals` | Manual journals |
@@ -81,6 +107,7 @@ Disable REST tools with `AGENT_XERO_REST=0`.
 | `xero_report_aged_payables` | What you owe |
 | `xero_report_bank_summary` | Bank balances |
 | `xero_report_executive_summary` | Dashboard summary |
+| `xero_report_tax_summary` | GST / tax summary (BAS prep) |
 
 Pass `fromDate`, `toDate`, or `date` (YYYY-MM-DD) where applicable.
 
@@ -91,6 +118,7 @@ Pass `fromDate`, `toDate`, or `date` (YYYY-MM-DD) where applicable.
 | `xero_list_attachments` | List files on invoice/bill/PO/quote/etc. |
 | `xero_get_attachment` | Download by file name (`save_path` or base64) |
 | `xero_upload_attachment` | Upload PDF/image from workspace path or base64 (approval) |
+| `xero_delete_attachment` | Remove attachment (approval) |
 
 `parent_type`: `Invoices`, `CreditNotes`, `PurchaseOrders`, `Quotes`, `BankTransactions`, `Contacts`, `Accounts`, `ManualJournals`.
 

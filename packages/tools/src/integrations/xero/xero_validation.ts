@@ -45,6 +45,45 @@ const QUOTE_UPDATE_KEYS = new Set([
   "CurrencyCode",
 ]);
 
+const PO_UPDATE_KEYS = new Set([
+  "PurchaseOrderID",
+  "Contact",
+  "Date",
+  "DeliveryDate",
+  "LineAmountTypes",
+  "LineItems",
+  "Reference",
+  "Status",
+  "CurrencyCode",
+]);
+
+const CREDIT_NOTE_UPDATE_KEYS = new Set([
+  "CreditNoteID",
+  "Type",
+  "Contact",
+  "Date",
+  "DueDate",
+  "LineAmountTypes",
+  "LineItems",
+  "Reference",
+  "Status",
+  "CurrencyCode",
+]);
+
+const CONTACT_UPDATE_KEYS = new Set([
+  "ContactID",
+  "Name",
+  "EmailAddress",
+  "FirstName",
+  "LastName",
+  "IsCustomer",
+  "IsSupplier",
+  "TaxNumber",
+  "Phones",
+  "Addresses",
+  "DefaultCurrency",
+]);
+
 function pascalKey(key: string): string {
   if (LINE_ITEM_KEYS[key]) return LINE_ITEM_KEYS[key]!;
   if (/^[A-Z]/.test(key)) return key;
@@ -127,6 +166,108 @@ export function sanitizeInvoiceUpdate(
       continue;
     }
     out[k] = v;
+  }
+  return out;
+}
+
+function contactRef(v: unknown): Record<string, unknown> | undefined {
+  if (!v || typeof v !== "object") return undefined;
+  const c = v as Record<string, unknown>;
+  const contactId = c["ContactID"] ?? c["contact_id"];
+  if (typeof contactId === "string" && contactId.trim()) {
+    return { ContactID: contactId.trim() };
+  }
+  return undefined;
+}
+
+function applyLineItems(
+  out: Record<string, unknown>,
+  key: string,
+  v: unknown,
+  opts?: { defaultTaxType?: string; requireTaxType?: boolean }
+): void {
+  if (!Array.isArray(v)) return;
+  const norm = normalizeXeroLineItems(v, opts);
+  if (norm.ok) out[key] = norm.lineItems;
+}
+
+export function sanitizeQuoteUpdate(
+  quoteId: string,
+  partial: Record<string, unknown>
+): Record<string, unknown> {
+  const out: Record<string, unknown> = { QuoteID: quoteId };
+  for (const [k, v] of Object.entries(partial)) {
+    if (!QUOTE_UPDATE_KEYS.has(k) || v === undefined) continue;
+    if (k === "Contact") {
+      const ref = contactRef(v);
+      if (ref) out["Contact"] = ref;
+      continue;
+    }
+    if (k === "LineItems") {
+      applyLineItems(out, "LineItems", v, { requireTaxType: true });
+      continue;
+    }
+    out[k] = v;
+  }
+  return out;
+}
+
+export function sanitizePurchaseOrderUpdate(
+  poId: string,
+  partial: Record<string, unknown>
+): Record<string, unknown> {
+  const out: Record<string, unknown> = { PurchaseOrderID: poId };
+  for (const [k, v] of Object.entries(partial)) {
+    if (!PO_UPDATE_KEYS.has(k) || v === undefined) continue;
+    if (k === "Contact") {
+      const ref = contactRef(v);
+      if (ref) out["Contact"] = ref;
+      continue;
+    }
+    if (k === "LineItems") {
+      applyLineItems(out, "LineItems", v);
+      continue;
+    }
+    out[k] = v;
+  }
+  return out;
+}
+
+export function sanitizeCreditNoteUpdate(
+  creditNoteId: string,
+  partial: Record<string, unknown>
+): Record<string, unknown> {
+  const out: Record<string, unknown> = { CreditNoteID: creditNoteId };
+  for (const [k, v] of Object.entries(partial)) {
+    if (!CREDIT_NOTE_UPDATE_KEYS.has(k) || v === undefined) continue;
+    if (k === "Contact") {
+      const ref = contactRef(v);
+      if (ref) out["Contact"] = ref;
+      continue;
+    }
+    if (k === "LineItems") {
+      applyLineItems(out, "LineItems", v);
+      continue;
+    }
+    out[k] = v;
+  }
+  return out;
+}
+
+export function sanitizeContactUpdate(
+  contactId: string,
+  partial: Record<string, unknown>
+): Record<string, unknown> {
+  const out: Record<string, unknown> = { ContactID: contactId };
+  for (const [k, v] of Object.entries(partial)) {
+    if (!CONTACT_UPDATE_KEYS.has(k) || v === undefined) continue;
+    out[k] = v;
+  }
+  if (typeof partial["email"] === "string" && partial["email"].trim()) {
+    out["EmailAddress"] = partial["email"].trim();
+  }
+  if (typeof partial["name"] === "string" && partial["name"].trim()) {
+    out["Name"] = partial["name"].trim();
   }
   return out;
 }
