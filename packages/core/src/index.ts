@@ -1114,9 +1114,11 @@ export {
 } from "./xero_oauth_broker.js";
 export {
   xeroBundleMissingCoreScopes,
+  xeroBundleMissingFullScopes,
   xeroBundleMissingScopes,
   xeroBundleMissingPhase3Scopes,
   xeroBundleMissingRequiredScopes,
+  probeXeroAuthorizeScopes,
   xeroRequiredScopesForCall,
   formatXeroReconnectHint,
   XERO_FULL_ACCOUNTING_SCOPES,

@@ -23,6 +23,7 @@ import {
   runAzureHostedConnectFlow,
   runXeroHostedConnectFlow,
   xeroBundleMissingCoreScopes,
+  xeroBundleMissingFullScopes,
   xeroBundleMissingPhase3Scopes,
   xeroBundleMissingScopes,
 } from "@liminal/core";
@@ -103,6 +104,7 @@ export async function buildIntegrationsSnapshot() {
         tenantName: a.tenantName,
         missingScopes: xeroBundleMissingScopes(a.scopes),
         missingCoreScopes: xeroBundleMissingCoreScopes(a.scopes),
+        missingFullScopes: xeroBundleMissingFullScopes(a.scopes),
         missingExtendedScopes: xeroBundleMissingPhase3Scopes(a.scopes),
       })),
     },

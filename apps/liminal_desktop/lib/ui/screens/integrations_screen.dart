@@ -154,6 +154,7 @@ class _IntegrationsScreenState extends State<IntegrationsScreen> {
   Future<void> _xeroPrimary(AppController host, IntegrationsSnapshot snap) async {
     if (snap.xeroConnected &&
         !snap.xeroNeedsReconnect &&
+        !(_xeroFullScopes && snap.xeroNeedsFullReconnect) &&
         !(_xeroExtended && snap.xeroNeedsExtendedReconnect)) {
       await host.disconnectXero(revoke: true);
       return;
@@ -416,21 +417,25 @@ class _IntegrationsScreenState extends State<IntegrationsScreen> {
                           statusLine: snap.xeroConnected
                               ? snap.xeroNeedsReconnect
                                   ? 'Reconnect needed · core scopes missing'
-                                  : snap.xeroNeedsExtendedReconnect
-                                      ? 'Accounting ready · enable Extended + reconnect'
-                                      : 'Ready · ${snap.xeroAccountLabel}'
+                                  : snap.xeroNeedsFullReconnect
+                                      ? 'Connected · enable Full scopes + reconnect for reports'
+                                      : snap.xeroNeedsExtendedReconnect
+                                          ? 'Accounting ready · enable Extended + reconnect'
+                                          : 'Ready · ${snap.xeroAccountLabel}'
                               : integrationBrands[IntegrationBrandId.xero]!.tagline,
                           connected: snap.xeroConnected,
                           expanded: _expandedId == 'xero',
                           onToggle: () => _toggleExpanded('xero'),
                           primaryLabel: snap.xeroConnected
                               ? (snap.xeroNeedsReconnect ||
+                                      (_xeroFullScopes && snap.xeroNeedsFullReconnect) ||
                                       (_xeroExtended && snap.xeroNeedsExtendedReconnect)
                                   ? 'Reconnect'
                                   : 'Disconnect')
                               : 'Connect',
                           primaryDanger: snap.xeroConnected &&
                               !snap.xeroNeedsReconnect &&
+                              !(_xeroFullScopes && snap.xeroNeedsFullReconnect) &&
                               !(_xeroExtended && snap.xeroNeedsExtendedReconnect),
                           disabled: disabled,
                           onPrimary: () => unawaited(_xeroPrimary(host, host.integrations)),
@@ -446,7 +451,13 @@ class _IntegrationsScreenState extends State<IntegrationsScreen> {
                                 if (snap.xeroNeedsReconnect) ...[
                                   const SizedBox(height: 8),
                                   Text(
-                                    'Reconnect with Extended APIs off if you saw invalid_scope.',
+                                    'Reconnect with Extended and Full scopes off if you saw invalid_scope.',
+                                    style: TextStyle(color: lim.warn, fontSize: 12, height: 1.4),
+                                  ),
+                                ] else if (snap.xeroNeedsFullReconnect) ...[
+                                  const SizedBox(height: 8),
+                                  Text(
+                                    'Enable Full accounting scopes below, then Reconnect for reports/budgets.',
                                     style: TextStyle(color: lim.warn, fontSize: 12, height: 1.4),
                                   ),
                                 ] else if (snap.xeroNeedsExtendedReconnect) ...[

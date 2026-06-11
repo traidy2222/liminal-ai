@@ -127,6 +127,9 @@ class IntegrationsSnapshot {
   bool get xeroNeedsReconnect =>
       xero.accounts.any((a) => a.missingCoreScopes.isNotEmpty);
 
+  bool get xeroNeedsFullReconnect =>
+      xero.accounts.any((a) => a.missingFullScopes.isNotEmpty);
+
   bool get xeroNeedsExtendedReconnect =>
       xero.accounts.any((a) => a.missingExtendedScopes.isNotEmpty);
 
@@ -356,6 +359,7 @@ class XeroOAuthAccount {
     this.tenantName,
     this.missingScopes = const [],
     this.missingCoreScopes = const [],
+    this.missingFullScopes = const [],
     this.missingExtendedScopes = const [],
   });
 
@@ -366,6 +370,7 @@ class XeroOAuthAccount {
   final String? tenantName;
   final List<String> missingScopes;
   final List<String> missingCoreScopes;
+  final List<String> missingFullScopes;
   final List<String> missingExtendedScopes;
 
   factory XeroOAuthAccount.fromJson(Map<String, dynamic> json) {
@@ -379,6 +384,8 @@ class XeroOAuthAccount {
           (json['missingScopes'] as List<dynamic>? ?? []).map((e) => e.toString()).toList(),
       missingCoreScopes:
           (json['missingCoreScopes'] as List<dynamic>? ?? []).map((e) => e.toString()).toList(),
+      missingFullScopes:
+          (json['missingFullScopes'] as List<dynamic>? ?? []).map((e) => e.toString()).toList(),
       missingExtendedScopes: (json['missingExtendedScopes'] as List<dynamic>? ?? [])
           .map((e) => e.toString())
           .toList(),

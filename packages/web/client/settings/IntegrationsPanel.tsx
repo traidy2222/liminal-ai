@@ -80,6 +80,7 @@ interface IntegrationsData {
         tenantName?: string;
         missingScopes?: string[];
         missingCoreScopes?: string[];
+        missingFullScopes?: string[];
         missingExtendedScopes?: string[];
       }
     >;
@@ -857,9 +858,11 @@ export function IntegrationsPanel({ agentBusy }: IntegrationsPanelProps) {
           xeroConnected
             ? (xeroAccounts[0]?.missingCoreScopes?.length ?? 0) > 0
               ? `Reconnect needed · ${xeroAccounts[0]?.missingCoreScopes?.length} core scopes missing`
-              : (xeroAccounts[0]?.missingExtendedScopes?.length ?? 0) > 0
-                ? `Accounting ready · enable Extended APIs + reconnect for files/projects/payroll`
-                : `Ready · ${xeroAccounts[0]?.tenantName ?? xeroAccounts[0]?.email ?? "account linked"}`
+              : (xeroAccounts[0]?.missingFullScopes?.length ?? 0) > 0
+                ? `Connected · enable Full accounting scopes + reconnect for reports/budgets`
+                : (xeroAccounts[0]?.missingExtendedScopes?.length ?? 0) > 0
+                  ? `Accounting ready · enable Extended APIs + reconnect for files/projects/payroll`
+                  : `Ready · ${xeroAccounts[0]?.tenantName ?? xeroAccounts[0]?.email ?? "account linked"}`
             : INTEGRATION_BRANDS.xero.tagline
         }
         connected={xeroConnected}
@@ -868,6 +871,7 @@ export function IntegrationsPanel({ agentBusy }: IntegrationsPanelProps) {
         primaryLabel={
           xeroConnected &&
           ((xeroAccounts[0]?.missingCoreScopes?.length ?? 0) > 0 ||
+            (xeroFullScopes && (xeroAccounts[0]?.missingFullScopes?.length ?? 0) > 0) ||
             (xeroExtended && (xeroAccounts[0]?.missingExtendedScopes?.length ?? 0) > 0))
             ? "Reconnect"
             : xeroConnected
@@ -877,6 +881,7 @@ export function IntegrationsPanel({ agentBusy }: IntegrationsPanelProps) {
         primaryDanger={
           xeroConnected &&
           (xeroAccounts[0]?.missingCoreScopes?.length ?? 0) === 0 &&
+          !(xeroFullScopes && (xeroAccounts[0]?.missingFullScopes?.length ?? 0) > 0) &&
           !(xeroExtended && (xeroAccounts[0]?.missingExtendedScopes?.length ?? 0) > 0)
         }
         primaryDisabled={disabled}
@@ -884,6 +889,7 @@ export function IntegrationsPanel({ agentBusy }: IntegrationsPanelProps) {
           void run(
             xeroConnected &&
               ((xeroAccounts[0]?.missingCoreScopes?.length ?? 0) > 0 ||
+                (xeroFullScopes && (xeroAccounts[0]?.missingFullScopes?.length ?? 0) > 0) ||
                 (xeroExtended && (xeroAccounts[0]?.missingExtendedScopes?.length ?? 0) > 0))
               ? xeroReconnect
               : xeroPrimary
@@ -895,10 +901,12 @@ export function IntegrationsPanel({ agentBusy }: IntegrationsPanelProps) {
         </p>
         {(xeroAccounts[0]?.missingCoreScopes?.length ?? 0) > 0 ? (
           <p style={{ fontSize: 11, color: "#e6b84d", lineHeight: 1.45, margin: "0 0 10px" }}>
-            Core accounting scopes are missing. Click <strong>Reconnect</strong> with{" "}
-            <strong>Full accounting scopes</strong> if you need reports or budgets. Leave Extended APIs off
-            on first connect if you saw <code>invalid_scope</code> (post–March 2026 apps need granular
-            scopes).
+            Core accounting scopes are missing. Click <strong>Reconnect</strong> (leave Extended APIs off).
+          </p>
+        ) : (xeroAccounts[0]?.missingFullScopes?.length ?? 0) > 0 ? (
+          <p style={{ fontSize: 11, color: "#e6b84d", lineHeight: 1.45, margin: "0 0 10px" }}>
+            Basic connect succeeded. For reports and budgets: check <strong>Full accounting scopes</strong>,
+            then <strong>Reconnect</strong>.
           </p>
         ) : (xeroAccounts[0]?.missingExtendedScopes?.length ?? 0) > 0 ? (
           <p style={{ fontSize: 11, color: "#e6b84d", lineHeight: 1.45, margin: "0 0 10px" }}>
@@ -968,6 +976,7 @@ export function IntegrationsPanel({ agentBusy }: IntegrationsPanelProps) {
           </button>
           {xeroConnected &&
           ((xeroAccounts[0]?.missingCoreScopes?.length ?? 0) > 0 ||
+            (xeroAccounts[0]?.missingFullScopes?.length ?? 0) > 0 ||
             (xeroAccounts[0]?.missingExtendedScopes?.length ?? 0) > 0) ? (
             <button
               type="button"
