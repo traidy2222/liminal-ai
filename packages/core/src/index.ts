@@ -727,8 +727,20 @@ export {
   normalizeImageAttachmentName,
   validateImageAttachments,
   buildMessageWithImageAttachments,
+  resolveUserTurnWithAttachments,
 } from "./image_attachments.js";
-export type { ImageAttachment, ImageAttachmentLimits, ImageAttachmentSource } from "./image_attachments.js";
+export type {
+  ImageAttachment,
+  ImageAttachmentLimits,
+  ImageAttachmentSource,
+  UserTurnContent,
+} from "./image_attachments.js";
+export {
+  buildNativeVisionUserContent,
+  modelSupportsNativeVision,
+  resolveNativeVision,
+} from "./native_vision.js";
+export type { NativeVisionResolution } from "./native_vision.js";
 export {
   resolveInputShortcut,
 } from "./input_semantics.js";
@@ -1097,6 +1109,7 @@ export {
   fetchXeroConnections,
   resolveXeroTenantId,
   scopesForXeroMode,
+  resolveXeroScopeStyle,
   XERO_DEFAULT_MODE,
 } from "./xero_oauth_broker.js";
 export {
@@ -1115,7 +1128,7 @@ export {
   XERO_STANDALONE_ACCOUNTING_SCOPES,
   XERO_WRITE_SCOPES,
 } from "./xero_oauth_scopes.js";
-export type { XeroScopeOptions } from "./xero_oauth_scopes.js";
+export type { XeroScopeOptions, XeroScopeStyle } from "./xero_oauth_scopes.js";
 export type { XeroTenantConnection, XeroMode } from "./xero_oauth_broker.js";
 export {
   isHostedOAuthHandoffUri,

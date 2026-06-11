@@ -2213,6 +2213,27 @@ const _META_RAW: Record<string, HarnessSettingsFieldMeta> = {
     description: "Harness environment toggle for Reasoning Native Slugs. See docs/configuration.md (harness).",
     valueKind: "string",
   },
+  "AGENT_NATIVE_VISION": {
+    tabId: "models_api",
+    subgroupId: "vision",
+    label: "Native vision (main model)",
+    description: "Set 0 to disable routing image attachments as image_url parts on the main chat model.",
+    valueKind: "boolean",
+  },
+  "AGENT_NATIVE_VISION_SLUGS": {
+    tabId: "models_api",
+    subgroupId: "vision",
+    label: "Native vision model slugs",
+    description: "Comma-separated substrings; when AGENT_MODEL matches, attachments use native multimodal input.",
+    valueKind: "string",
+  },
+  "AGENT_XERO_OAUTH_SCOPE_STYLE": {
+    tabId: "harness",
+    subgroupId: "harness_misc",
+    label: "Xero OAuth scope style",
+    description: "legacy = broad scopes for pre-2026-03-02 Xero apps (default). granular = split scopes for new apps only.",
+    valueKind: "string",
+  },
   "AGENT_REASONING_EXTERNAL_SLUGS": {
     tabId: "harness",
     subgroupId: "harness_misc",

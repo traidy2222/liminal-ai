@@ -10,16 +10,23 @@ import {
 } from "./xero_oauth_scopes.js";
 
 describe("xero_oauth_scopes", () => {
-  it("read_write includes core granular scopes and offline_access", () => {
+  it("read_write legacy default uses broad scopes (pre-2026-03-02 apps)", () => {
     const scopes = scopesForXeroMode("read_write");
     assert.ok(scopes.includes("offline_access"));
-    assert.ok(scopes.includes("accounting.invoices"));
-    assert.ok(scopes.includes("accounting.invoices.read"));
+    assert.ok(scopes.includes("accounting.transactions"));
+    assert.ok(scopes.includes("accounting.transactions.read"));
+    assert.ok(scopes.includes("accounting.reports.read"));
     assert.ok(scopes.includes("accounting.budgets"));
-    assert.ok(!scopes.includes("accounting.budgets.read"));
+    assert.ok(!scopes.includes("accounting.invoices.read"));
     assert.ok(!scopes.includes("accounting.classicexpenses"));
     assert.ok(!scopes.includes("files.read"));
-    assert.ok(!scopes.includes("accounting.transactions"));
+  });
+
+  it("granular style uses split scopes for new Xero apps", () => {
+    const scopes = scopesForXeroMode("read_write", { style: "granular" });
+    assert.ok(scopes.includes("accounting.invoices.read"));
+    assert.ok(scopes.includes("accounting.invoices"));
+    assert.ok(!scopes.includes("accounting.transactions.read"));
   });
 
   it("extended adds phase 3 scopes", () => {
@@ -30,11 +37,10 @@ describe("xero_oauth_scopes", () => {
     assert.ok(scopes.includes("accounting.journals.read"));
   });
 
-  it("read_only uses granular read scopes only", () => {
+  it("read_only legacy omits write scopes", () => {
     const scopes = scopesForXeroMode("read_only");
-    assert.ok(scopes.includes("accounting.invoices.read"));
-    assert.ok(!scopes.includes("accounting.invoices"));
-    assert.ok(!scopes.includes("accounting.transactions.read"));
+    assert.ok(scopes.includes("accounting.transactions.read"));
+    assert.ok(!scopes.includes("accounting.transactions"));
   });
 
   it("xeroRequiredScopesForCall maps API bases and paths", () => {
@@ -65,29 +71,17 @@ describe("xero_oauth_scopes", () => {
     assert.ok(!missing.includes("accounting.journals.read"));
   });
 
-  it("xeroBundleMissingCoreScopes ignores extended scopes", () => {
+  it("legacy token satisfies granular core scope checks", () => {
     const token = [
-      "accounting.invoices",
-      "accounting.invoices.read",
+      "accounting.transactions",
+      "accounting.transactions.read",
+      "accounting.reports.read",
       "accounting.contacts",
       "accounting.contacts.read",
       "accounting.settings",
       "accounting.settings.read",
-      "accounting.payments",
-      "accounting.payments.read",
-      "accounting.banktransactions",
-      "accounting.banktransactions.read",
-      "accounting.manualjournals",
-      "accounting.manualjournals.read",
       "accounting.attachments",
       "accounting.attachments.read",
-      "accounting.reports.aged.read",
-      "accounting.reports.balancesheet.read",
-      "accounting.reports.banksummary.read",
-      "accounting.reports.executivesummary.read",
-      "accounting.reports.profitandloss.read",
-      "accounting.reports.trialbalance.read",
-      "accounting.reports.taxreports.read",
       "accounting.budgets",
     ];
     assert.equal(xeroBundleMissingCoreScopes(token).length, 0);
@@ -108,6 +102,6 @@ describe("xero_oauth_scopes", () => {
     ]);
     assert.ok(!missing.includes("accounting.payments.read"));
     assert.ok(!missing.includes("accounting.reports.profitandloss.read"));
-    assert.ok(missing.includes("accounting.manualjournals.read"));
+    assert.ok(!missing.includes("accounting.manualjournals.read"));
   });
 });
