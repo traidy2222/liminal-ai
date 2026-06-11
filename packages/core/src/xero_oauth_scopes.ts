@@ -38,19 +38,55 @@ export const XERO_WRITE_SCOPES = [
   "accounting.attachments",
 ] as const;
 
+/** Phase 3 — GL journals, Files, Projects, Payroll (separate API bases). */
+export const XERO_PHASE3_READ_SCOPES = [
+  "accounting.journals.read",
+  "files.read",
+  "projects.read",
+  "payroll.employees.read",
+  "payroll.payruns.read",
+  "payroll.timesheets.read",
+  "payroll.settings.read",
+  "payroll.payslip.read",
+] as const;
+
+export const XERO_PHASE3_WRITE_SCOPES = [
+  "files",
+  "projects",
+  "payroll.employees",
+  "payroll.payruns",
+  "payroll.timesheets",
+  "payroll.settings",
+] as const;
+
 export function scopesForXeroMode(mode: XeroMode): string[] {
   if (mode === "read_only") {
-    return [...IDENTITY, ...XERO_READ_SCOPES];
+    return [...IDENTITY, ...XERO_READ_SCOPES, ...XERO_PHASE3_READ_SCOPES];
   }
-  const scopeSet = new Set<string>([...XERO_READ_SCOPES, ...XERO_WRITE_SCOPES]);
+  const scopeSet = new Set<string>([
+    ...XERO_READ_SCOPES,
+    ...XERO_WRITE_SCOPES,
+    ...XERO_PHASE3_READ_SCOPES,
+    ...XERO_PHASE3_WRITE_SCOPES,
+  ]);
   return [...IDENTITY, ...scopeSet];
 }
 
 export const XERO_DEFAULT_MODE: XeroMode = "read_write";
 
-/** Scopes required for the full Liminal Xero toolset (identity excluded). */
+/** Scopes required for accounting-only tools (identity excluded). */
 export const XERO_FULL_ACCOUNTING_SCOPES: readonly string[] = [
   ...new Set([...XERO_READ_SCOPES, ...XERO_WRITE_SCOPES]),
+];
+
+/** All non-identity scopes for the full Liminal Xero toolset. */
+export const XERO_FULL_SCOPES: readonly string[] = [
+  ...new Set([
+    ...XERO_READ_SCOPES,
+    ...XERO_WRITE_SCOPES,
+    ...XERO_PHASE3_READ_SCOPES,
+    ...XERO_PHASE3_WRITE_SCOPES,
+  ]),
 ];
 
 /**
@@ -91,5 +127,12 @@ function scopeSatisfied(required: string, granted: Set<string>): boolean {
 
 export function xeroBundleMissingScopes(granted: string[] | undefined): string[] {
   const have = new Set((granted ?? []).map((s) => s.trim()).filter(Boolean));
-  return XERO_FULL_ACCOUNTING_SCOPES.filter((s) => !scopeSatisfied(s, have));
+  return XERO_FULL_SCOPES.filter((s) => !scopeSatisfied(s, have));
+}
+
+/** Phase 3 scopes missing from the token (files, projects, payroll, GL journals). */
+export function xeroBundleMissingPhase3Scopes(granted: string[] | undefined): string[] {
+  const have = new Set((granted ?? []).map((s) => s.trim()).filter(Boolean));
+  const phase3 = [...new Set([...XERO_PHASE3_READ_SCOPES, ...XERO_PHASE3_WRITE_SCOPES])];
+  return phase3.filter((s) => !scopeSatisfied(s, have));
 }

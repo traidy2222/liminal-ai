@@ -131,6 +131,8 @@ import { registerXeroRestTools, xeroRestEnabled } from "./integrations/xero/xero
 import { registerXeroRestExtendedTools } from "./integrations/xero/xero_rest_extended.js";
 import { registerXeroRestPhase2Tools } from "./integrations/xero/xero_rest_phase2.js";
 import { registerXeroRestPhase25Tools } from "./integrations/xero/xero_rest_phase25.js";
+import { registerXeroRestPhase3Tools } from "./integrations/xero/xero_rest_phase3.js";
+import { registerXeroRestPhase35Tools } from "./integrations/xero/xero_rest_phase35.js";
 import { registerSlackRestTools, slackRestEnabled } from "./integrations/slack/slack_rest.js";
 import { registerLinearRestTools, linearRestEnabled } from "./integrations/linear/linear_rest.js";
 import { registerNotionRestTools, notionRestEnabled } from "./integrations/notion/notion_rest.js";
@@ -504,6 +506,8 @@ export async function registerAllTools(
     registerXeroRestExtendedTools(registry);
     registerXeroRestPhase2Tools(registry);
     registerXeroRestPhase25Tools(registry);
+    registerXeroRestPhase3Tools(registry);
+    registerXeroRestPhase35Tools(registry);
   }
   if (slackRestEnabled()) {
     registerSlackRestTools(registry);

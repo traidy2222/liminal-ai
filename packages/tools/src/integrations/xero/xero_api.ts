@@ -13,8 +13,21 @@ import {
 import type { PropertySchema, ToolResult } from "@liminal/core";
 import { integrationNotConnectedError } from "../core/integration_oauth_start.js";
 import { formatXeroApiError } from "./xero_validation.js";
+import {
+  XERO_ACCOUNTING_API,
+  XERO_FILES_API,
+  type XeroApiBase,
+} from "./xero_api_bases.js";
 
-export const XERO_ACCOUNTING_API = "https://api.xero.com/api.xro/2.0";
+export {
+  XERO_ACCOUNTING_API,
+  XERO_FILES_API,
+  XERO_PROJECTS_API,
+  XERO_PAYROLL_AU_API,
+  XERO_PAYROLL_UK_NZ_API,
+  XERO_API_BASES,
+} from "./xero_api_bases.js";
+export type { XeroApiBase } from "./xero_api_bases.js";
 
 export function xeroRestEnabled(): boolean {
   return effectiveHarnessEnvRaw("AGENT_XERO_REST") !== "0";
@@ -48,7 +61,11 @@ export type XeroFetchOpts = {
   accept?: string;
   contentType?: string;
   bodyRaw?: Buffer | Uint8Array;
+  /** multipart/form-data body (Content-Type set automatically). */
+  bodyForm?: FormData;
   query?: URLSearchParams;
+  /** API base URL (default: Accounting 2.0). */
+  apiBase?: XeroApiBase;
 };
 
 /** Parent resource types that support Accounting API attachments. */
@@ -73,6 +90,16 @@ function sleep(ms: number): Promise<void> {
   return new Promise((r) => setTimeout(r, ms));
 }
 
+function buildXeroUrl(path: string, apiBase: XeroApiBase, query?: URLSearchParams): string {
+  let url = path.startsWith("http")
+    ? path
+    : `${apiBase}${path.startsWith("/") ? path : `/${path}`}`;
+  if (query?.toString()) {
+    url += `${url.includes("?") ? "&" : "?"}${query.toString()}`;
+  }
+  return url;
+}
+
 export async function xeroFetch(
   path: string,
   opts: XeroFetchOpts = {}
@@ -88,20 +115,19 @@ export async function xeroFetch(
       error: "no Xero organisation (tenant) on this connection — reconnect Xero",
     };
   }
-  let url = path.startsWith("http")
-    ? path
-    : `${XERO_ACCOUNTING_API}${path.startsWith("/") ? path : `/${path}`}`;
-  if (opts.query?.toString()) {
-    url += `${url.includes("?") ? "&" : "?"}${opts.query.toString()}`;
-  }
+  const apiBase = opts.apiBase ?? XERO_ACCOUNTING_API;
+  const url = buildXeroUrl(path, apiBase, opts.query);
 
   const isRawBody = opts.bodyRaw !== undefined;
+  const isForm = opts.bodyForm !== undefined;
   const headers: Record<string, string> = {
     Authorization: `Bearer ${auth.token}`,
     Accept: opts.accept ?? "application/json",
     "xero-tenant-id": tenantId,
   };
-  if (isRawBody) {
+  if (isForm) {
+    /* fetch sets multipart boundary */
+  } else if (isRawBody) {
     headers["Content-Type"] = opts.contentType ?? "application/octet-stream";
   } else if (opts.body !== undefined) {
     headers["Content-Type"] = opts.contentType ?? "application/json";
@@ -112,11 +138,13 @@ export async function xeroFetch(
     const res = await fetch(url, {
       method: opts.method ?? "GET",
       headers,
-      body: isRawBody
-        ? Buffer.from(opts.bodyRaw!)
-        : opts.body !== undefined
-          ? JSON.stringify(opts.body)
-          : undefined,
+      body: isForm
+        ? opts.bodyForm
+        : isRawBody
+          ? Buffer.from(opts.bodyRaw!)
+          : opts.body !== undefined
+            ? JSON.stringify(opts.body)
+            : undefined,
     });
     const text = await res.text();
     let data: unknown = text;
@@ -216,7 +244,7 @@ export function asToolResult(
 
 export async function xeroFetchBinary(
   path: string,
-  opts: Omit<XeroFetchOpts, "body" | "bodyRaw"> = {}
+  opts: Omit<XeroFetchOpts, "body" | "bodyRaw" | "bodyForm"> = {}
 ): Promise<
   | { ok: true; data: Buffer; contentType: string }
   | { ok: false; error: string }
@@ -229,12 +257,8 @@ export async function xeroFetchBinary(
   if (!tenantId) {
     return { ok: false, error: "no Xero organisation (tenant) on this connection — reconnect Xero" };
   }
-  let url = path.startsWith("http")
-    ? path
-    : `${XERO_ACCOUNTING_API}${path.startsWith("/") ? path : `/${path}`}`;
-  if (opts.query?.toString()) {
-    url += `${url.includes("?") ? "&" : "?"}${opts.query.toString()}`;
-  }
+  const apiBase = opts.apiBase ?? XERO_ACCOUNTING_API;
+  const url = buildXeroUrl(path, apiBase, opts.query);
 
   let lastError = "";
   for (let attempt = 0; attempt <= 3; attempt++) {

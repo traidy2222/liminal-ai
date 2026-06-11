@@ -191,15 +191,87 @@ Liminal (local) → opens vireondynamics.com/connect/xero
 
 Same hosted handoff pattern as Vireon license connect (`/connect/harness`).
 
-## Roadmap (Phase 3 — not yet in Liminal)
+## Phase 3 — GL journals, Files, Projects, Payroll
 
-- **Payroll** (AU/UK/NZ) — separate `payroll.*` scopes and API base URLs
-- **Files API** — org-wide file cabinet (distinct from document attachments)
-- **Projects** — time/cost tracking API
-- **Bank feeds** — partner-only
-- **General ledger journals** — `accounting.journals.read` (requires Xero partner approval)
+Requires **reconnect** after upgrade (new OAuth scopes: `accounting.journals.read`, `files`, `projects`, `payroll.*`).
 
-Use `xero_request` for one-off endpoints until dedicated tools land.
+### General ledger journals
+
+| Tool | Purpose |
+| ---- | ------- |
+| `xero_list_journals` | Posted GL journal lines |
+| `xero_get_journal` | One journal by JournalID |
+| `xero_get_journal_by_number` | One journal by number |
+
+### Files cabinet (org-wide)
+
+| Tool | Purpose |
+| ---- | ------- |
+| `xero_files_list` / `xero_files_get` | Browse file metadata |
+| `xero_files_download` | Save to workspace or base64 |
+| `xero_files_upload` / `xero_files_delete` | Manage files (approval on write) |
+| `xero_files_list_folders` / `xero_files_get_folder` | Folder structure |
+| `xero_files_list_associations` | Links to invoices, contacts, etc. |
+
+### Projects (job costing / time)
+
+| Tool | Purpose |
+| ---- | ------- |
+| `xero_list_projects` / `xero_get_project` | Projects with WIP totals |
+| `xero_create_project` / `xero_update_project` | Project lifecycle |
+| `xero_list_project_tasks` / `xero_create_project_task` | Billable tasks |
+| `xero_list_project_time_entries` / `xero_create_project_time_entry` | Time logging |
+| `xero_list_project_users` | Users assignable to time |
+
+### Payroll (AU v1.0 / UK+NZ v2.0)
+
+| Tool | Purpose |
+| ---- | ------- |
+| `xero_payroll_region` | Detect AU vs UK vs NZ from org country |
+| `xero_list_payroll_employees` / `xero_get_payroll_employee` | Staff records |
+| `xero_list_payroll_payruns` / `xero_get_payroll_payrun` | Pay run status |
+| `xero_list_payroll_timesheets` / `xero_get_payroll_timesheet` | Timesheets |
+| `xero_get_payroll_settings` | Payroll org config |
+| `xero_get_payroll_payslip` | Payslip detail |
+| `xero_create_payroll_timesheet` | Create draft timesheet (approval) |
+
+Pass `payroll_region` (`AU` \| `UK` \| `NZ`) to override auto-detection.
+
+### Bank feeds (not available)
+
+`xero_bank_feeds_info` — direct bank feed import requires Xero **partner** approval and is not in hosted OAuth. Use bank transactions + linked transactions instead.
+
+## Phase 3.5 — composites, payroll writes, accounting mutations
+
+### Composites
+
+| Tool | Purpose |
+| ---- | ------- |
+| `xero_upsert_contact` | Find by email/name → update or create |
+| `xero_project_to_invoice` | Bill unbilled project time (grouped by task) |
+| `xero_month_end_close` | P&L, BS, trial, aged AR/AP, bank + close checklist |
+| `xero_duplicate_invoice_check` | Match reference/number/amount before creating |
+
+### Payroll writes
+
+| Tool | Purpose |
+| ---- | ------- |
+| `xero_create_payroll_payrun` | Draft pay run for calendar period |
+| `xero_update_payroll_payrun` | Post/finalise pay run |
+| `xero_update_payroll_employee` | Update employee record |
+| `xero_update_payroll_timesheet` | Correct timesheet lines |
+
+### Accounting mutations
+
+| Tool | Purpose |
+| ---- | ------- |
+| `xero_update_bank_transaction` / `xero_void_bank_transaction` | Fix or remove bank lines |
+| `xero_create_account` / `xero_update_account` | Chart of accounts |
+| `xero_create_tracking_category` / `xero_create_tracking_option` / `xero_update_tracking_category` | Tracking dimensions |
+| `xero_list_expense_claims` / `xero_get_expense_claim` / `xero_create_expense_claim` | Staff reimbursements |
+| `xero_update_repeating_invoice` / `xero_delete_repeating_invoice` | Recurring billing lifecycle |
+| `xero_send_invoice_reminder` | Payment reminder email |
+| `xero_list_budgets` / `xero_get_budget` | Budget vs actual |
 
 ## Troubleshooting
 

@@ -96,3 +96,78 @@ export function contactIdFromEntity(entity: Record<string, unknown>): string | u
   const id = (contact as Record<string, unknown>)["ContactID"];
   return typeof id === "string" && id.trim() ? id.trim() : undefined;
 }
+
+/** Project time entry date (YYYY-MM-DD) from dateUtc ISO string. */
+export function projectTimeEntryDate(entry: Record<string, unknown>): string | undefined {
+  const raw = entry["dateUtc"];
+  if (typeof raw !== "string" || !raw.trim()) return undefined;
+  return raw.trim().slice(0, 10);
+}
+
+export function taskRateValue(task: Record<string, unknown>): number | undefined {
+  const rate = task["rate"];
+  if (!rate || typeof rate !== "object") return undefined;
+  const v = (rate as Record<string, unknown>)["value"];
+  return typeof v === "number" && Number.isFinite(v) ? v : undefined;
+}
+
+export type ProjectTimeAggregateOpts = {
+  fromDate?: string;
+  toDate?: string;
+  unbilledOnly?: boolean;
+};
+
+/**
+ * Roll project time entries into invoice line items grouped by task.
+ */
+export function aggregateProjectTimeByTask(
+  entries: Record<string, unknown>[],
+  tasksById: Map<string, Record<string, unknown>>,
+  opts: ProjectTimeAggregateOpts = {}
+): { ok: true; lineItems: Record<string, unknown>[]; totalMinutes: number } | { ok: false; error: string } {
+  const unbilledOnly = opts.unbilledOnly !== false;
+  const buckets = new Map<string, { minutes: number; descriptions: string[] }>();
+  let totalMinutes = 0;
+
+  for (const entry of entries) {
+    if (unbilledOnly && String(entry["status"] ?? "").toUpperCase() === "INVOICED") continue;
+    const entryDate = projectTimeEntryDate(entry);
+    if (opts.fromDate && entryDate && entryDate < opts.fromDate) continue;
+    if (opts.toDate && entryDate && entryDate > opts.toDate) continue;
+    const taskId = String(entry["taskId"] ?? "").trim();
+    if (!taskId) continue;
+    const mins = Number(entry["duration"]);
+    if (!Number.isFinite(mins) || mins <= 0) continue;
+    totalMinutes += mins;
+    const bucket = buckets.get(taskId) ?? { minutes: 0, descriptions: [] };
+    bucket.minutes += mins;
+    const desc = entry["description"];
+    if (typeof desc === "string" && desc.trim()) bucket.descriptions.push(desc.trim());
+    buckets.set(taskId, bucket);
+  }
+
+  if (buckets.size === 0) {
+    return { ok: false, error: "no billable time entries in range (check dates or unbilled_only)" };
+  }
+
+  const lineItems: Record<string, unknown>[] = [];
+  for (const [taskId, bucket] of buckets) {
+    const task = tasksById.get(taskId);
+    const taskName = task ? String(task["name"] ?? taskId) : taskId;
+    const rate = task ? taskRateValue(task) : undefined;
+    const hours = Math.round((bucket.minutes / 60) * 100) / 100;
+    const descParts = bucket.descriptions.slice(0, 3);
+    const description =
+      descParts.length > 0
+        ? `${taskName}: ${descParts.join("; ")}${bucket.descriptions.length > 3 ? "…" : ""}`
+        : `${taskName} (${hours}h)`;
+    const line: Record<string, unknown> = {
+      Description: description,
+      Quantity: hours,
+    };
+    if (rate != null) line["UnitAmount"] = rate;
+    lineItems.push(line);
+  }
+
+  return { ok: true, lineItems, totalMinutes };
+}

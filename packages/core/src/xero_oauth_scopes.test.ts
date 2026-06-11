@@ -2,6 +2,7 @@ import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import {
   scopesForXeroMode,
+  xeroBundleMissingPhase3Scopes,
   xeroBundleMissingScopes,
 } from "./xero_oauth_scopes.js";
 
@@ -15,6 +16,10 @@ describe("xero_oauth_scopes", () => {
     assert.ok(scopes.includes("accounting.payments.read"));
     assert.ok(scopes.includes("accounting.banktransactions.read"));
     assert.ok(scopes.includes("accounting.reports.profitandloss.read"));
+    assert.ok(scopes.includes("accounting.journals.read"));
+    assert.ok(scopes.includes("files"));
+    assert.ok(scopes.includes("projects.read"));
+    assert.ok(scopes.includes("payroll.employees"));
     assert.ok(!scopes.includes("accounting.transactions"));
   });
 
@@ -37,6 +42,16 @@ describe("xero_oauth_scopes", () => {
     ]);
     assert.ok(missing.includes("accounting.payments.read"));
     assert.ok(missing.includes("accounting.reports.profitandloss.read"));
+  });
+
+  it("xeroBundleMissingPhase3Scopes detects missing journals/files/projects/payroll", () => {
+    const missing = xeroBundleMissingPhase3Scopes([
+      "accounting.journals.read",
+      "files.read",
+    ]);
+    assert.ok(missing.includes("projects.read"));
+    assert.ok(missing.includes("payroll.employees.read"));
+    assert.ok(!missing.includes("accounting.journals.read"));
   });
 
   it("xeroBundleMissingScopes treats legacy monolithic scopes as sufficient", () => {

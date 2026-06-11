@@ -1,6 +1,7 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import {
+  aggregateProjectTimeByTask,
   filterBankAccounts,
   lineItemsFromEntity,
   pickDefaultSalesLineDefaults,
@@ -38,5 +39,26 @@ describe("xero_helpers", () => {
     });
     assert.equal(lines[0]?.["Description"], "X");
     assert.equal(lines[0]?.["LineAmount"], undefined);
+  });
+
+  it("aggregateProjectTimeByTask groups minutes by task with rates", () => {
+    const tasks = new Map<string, Record<string, unknown>>([
+      ["t1", { name: "Design", rate: { value: 120 } }],
+    ]);
+    const agg = aggregateProjectTimeByTask(
+      [
+        { taskId: "t1", duration: 90, dateUtc: "2024-06-01T10:00:00Z", status: "ACTIVE" },
+        { taskId: "t1", duration: 30, dateUtc: "2024-06-02T10:00:00Z", status: "ACTIVE" },
+        { taskId: "t1", duration: 60, dateUtc: "2024-05-01T10:00:00Z", status: "INVOICED" },
+      ],
+      tasks,
+      { fromDate: "2024-06-01", toDate: "2024-06-30" }
+    );
+    assert.equal(agg.ok, true);
+    if (!agg.ok) return;
+    assert.equal(agg.totalMinutes, 120);
+    assert.equal(agg.lineItems.length, 1);
+    assert.equal(agg.lineItems[0]?.["UnitAmount"], 120);
+    assert.equal(agg.lineItems[0]?.["Quantity"], 2);
   });
 });

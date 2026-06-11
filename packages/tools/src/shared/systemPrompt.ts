@@ -468,7 +468,16 @@ When the user mentions Xero, invoices, bills, contacts, bank rec, or accounting 
 8. **Reports:** standard P&L/BS/trial/aged/bank/executive plus \`xero_report_tax_summary\` (GST/BAS) — \`fromDate\`/\`toDate\`.
 9. **Attachments:** \`xero_list_attachments\`, \`xero_upload_attachment\`, \`xero_delete_attachment\`.
 10. **Batch/recurring/reconciliation:** batch payments, repeating invoices, linked transactions, bank transfers (see tool family).
-11. **Escape hatch:** \`xero_request\`. Writes are approval-gated. Lazy: \`activate_tool_family({ family: "xero" })\`.`;
+11. **GL journals:** \`xero_list_journals\`, \`xero_get_journal\` — \`accounting.journals.read\` (reconnect if 401).
+12. **Files cabinet:** \`xero_files_list\`, \`xero_files_upload\`, \`xero_files_download\` — org-wide storage, not invoice attachments.
+13. **Projects:** \`xero_list_projects\`, \`xero_create_project\`, \`xero_list_project_time_entries\`, \`xero_create_project_time_entry\`.
+14. **Payroll (AU/UK/NZ):** \`xero_payroll_region\` first, then employees/payruns/timesheets/payslips — separate API base per region.
+15. **Bank feeds:** \`xero_bank_feeds_info\` — partner-only; use bank transactions + linked txns instead.
+16. **Composites:** \`xero_upsert_contact\`; \`xero_project_to_invoice\` (unbilled time); \`xero_month_end_close\`; \`xero_duplicate_invoice_check\` before creates.
+17. **Payroll writes:** \`xero_create_payroll_payrun\`, \`xero_update_payroll_payrun\`, \`xero_update_payroll_employee\`, \`xero_update_payroll_timesheet\`.
+18. **COA/tracking/expenses:** \`xero_create_account\`, \`xero_create_tracking_category\`; \`xero_list_expense_claims\`; \`xero_send_invoice_reminder\`; \`xero_list_budgets\`.
+19. **Bank fixes:** \`xero_update_bank_transaction\`, \`xero_void_bank_transaction\`.
+20. **Escape hatch:** \`xero_request\`. Writes are approval-gated. Lazy: \`activate_tool_family({ family: "xero" })\`. Reconnect after scope expansion.`;
 
 const HOSTED_REST_INTEGRATIONS_PROTOCOL = `## Slack / Linear / Notion (REST)
 When \`slack_*\`, \`linear_*\`, or \`notion_*\` tools report not connected: \`connect_provider({ provider: "slack"|"linear"|"notion", start_oauth: true })\`, then retry.

@@ -1101,7 +1101,11 @@ export {
 } from "./xero_oauth_broker.js";
 export {
   xeroBundleMissingScopes,
+  xeroBundleMissingPhase3Scopes,
   XERO_FULL_ACCOUNTING_SCOPES,
+  XERO_FULL_SCOPES,
+  XERO_PHASE3_READ_SCOPES,
+  XERO_PHASE3_WRITE_SCOPES,
   XERO_READ_SCOPES,
   XERO_WRITE_SCOPES,
 } from "./xero_oauth_scopes.js";
