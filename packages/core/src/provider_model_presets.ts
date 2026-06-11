@@ -9,6 +9,17 @@ import {
   DEFAULT_AGENT_FAST_MODEL_SLUG,
   DEFAULT_AGENT_MODEL_SLUG,
 } from "./harness_default_constants.js";
+import { KIMCHI_API_BASE_URL, KIMCHI_MODEL_SLUG } from "./kimchi_provider.js";
+import type { ProviderBackendId } from "./provider_backends.js";
+
+export {
+  apiKeyEnvVarForBaseUrl,
+  listProviderBackendsForSettings,
+  resolveProviderBackendId,
+  PROVIDER_BACKENDS,
+  type ProviderBackendId,
+  type ProviderBackendWire,
+} from "./provider_backends.js";
 
 /** OpenRouter slugs (see https://openrouter.ai/models). */
 export const OPENROUTER_MODEL_SLUG = {
@@ -384,15 +395,81 @@ export const PROVIDER_MODEL_PRESETS: readonly ProviderModelPreset[] = [
   ),
 ] as const;
 
+/** Kimchi / Cast AI — direct OpenAI-compatible API (no OpenRouter routing). */
+function kimchiModelPatch(main: string, fast?: string): Record<string, string> {
+  const fastModel = (fast ?? main).trim();
+  return buildHarnessModelPackEnvPatch({
+    main,
+    fast: fastModel,
+    baseURL: KIMCHI_API_BASE_URL,
+    providerStrategy: "openrouter_default",
+    providerOrder: "",
+    providerOrderFast: "",
+    providerRouteAuto: "0",
+    allowFallbacks: "0",
+  });
+}
+
+function kimchiPreset(
+  id: string,
+  label: string,
+  hint: string,
+  main: string,
+  fast?: string
+): ProviderModelPreset {
+  return {
+    id,
+    label,
+    hint,
+    baseURL: KIMCHI_API_BASE_URL,
+    model: main,
+    harnessEnvPatch: kimchiModelPatch(main, fast),
+  };
+}
+
+/** Cast AI model packs (Settings → Kimchi backend). */
+export const KIMCHI_MODEL_PRESETS: readonly ProviderModelPreset[] = [
+  kimchiPreset(
+    "kimchi-minimax-m27",
+    "MiniMax M2.7",
+    "Your deployed Cast AI model — fast multi-turn conversation.",
+    KIMCHI_MODEL_SLUG.MINIMAX_M27
+  ),
+  kimchiPreset(
+    "kimchi-kimi-k25",
+    "Kimi K2.5",
+    "Strong agentic coding and tool-use with long-context support.",
+    KIMCHI_MODEL_SLUG.KIMI_K25
+  ),
+  kimchiPreset(
+    "kimchi-kimi-k26",
+    "Kimi K2.6",
+    "Latest Kimi — stronger agentic coding and tool-use.",
+    KIMCHI_MODEL_SLUG.KIMI_K26
+  ),
+  kimchiPreset(
+    "kimchi-minimax-m25",
+    "MiniMax M2.5",
+    "Fast execution with strong multi-turn conversation.",
+    KIMCHI_MODEL_SLUG.MINIMAX_M25
+  ),
+  kimchiPreset(
+    "kimchi-nemotron-3-super-fp4",
+    "Nemotron 3 Super FP4",
+    "Efficient quantized NVIDIA model for fast, cost-effective inference.",
+    KIMCHI_MODEL_SLUG.NEMOTRON_3_SUPER_FP4
+  ),
+] as const;
+
 export function findProviderModelPreset(id: string): ProviderModelPreset | undefined {
-  return PROVIDER_MODEL_PRESETS.find((p) => p.id === id);
+  return PROVIDER_MODEL_PRESETS.find((p) => p.id === id) ?? KIMCHI_MODEL_PRESETS.find((p) => p.id === id);
 }
 
 /** Match saved provider + main model to a preset id (for Settings dropdown). */
 export function resolveProviderModelPresetId(model: string, baseURL: string): string | null {
   const m = model.trim();
   const b = normalizeProviderBaseUrl(baseURL);
-  for (const p of PROVIDER_MODEL_PRESETS) {
+  for (const p of [...PROVIDER_MODEL_PRESETS, ...KIMCHI_MODEL_PRESETS]) {
     if (p.model === m && normalizeProviderBaseUrl(p.baseURL) === b) return p.id;
   }
   return null;
@@ -408,6 +485,7 @@ export interface ProviderPresetWire {
   baseURL: string;
   model: string;
   harnessEnvPatch?: Record<string, string>;
+  providerBackend?: ProviderBackendId;
 }
 
 export function normalizeProviderBaseUrl(url: string): string {
@@ -431,6 +509,16 @@ export function listProviderPresetsForSettings(): readonly ProviderPresetWire[] 
       baseURL: p.baseURL,
       model: p.model,
       harnessEnvPatch: p.harnessEnvPatch,
+      providerBackend: "openrouter" as const,
+    })),
+    ...KIMCHI_MODEL_PRESETS.map((p) => ({
+      id: p.id,
+      label: p.label,
+      hint: p.hint,
+      baseURL: p.baseURL,
+      model: p.model,
+      harnessEnvPatch: p.harnessEnvPatch,
+      providerBackend: "kimchi" as const,
     })),
     {
       id: "lmstudio",
@@ -442,6 +530,7 @@ export function listProviderPresetsForSettings(): readonly ProviderPresetWire[] 
         AGENT_API_BASE_URL: "http://localhost:1234/v1",
         AGENT_FAST_MODEL: DEFAULT_AGENT_MODEL_SLUG,
       },
+      providerBackend: "local" as const,
     },
     {
       id: "ollama",
@@ -450,8 +539,28 @@ export function listProviderPresetsForSettings(): readonly ProviderPresetWire[] 
       baseURL: "http://localhost:11434/v1",
       model: "qwen3.5:9b",
       harnessEnvPatch: { AGENT_FAST_MODEL: "qwen3.5:9b" },
+      providerBackend: "local" as const,
     },
   ];
+}
+
+/** Infer backend when wire payloads omit `providerBackend` (older sidecars). */
+export function inferPresetBackend(p: ProviderPresetWire): ProviderBackendId {
+  if (p.providerBackend) return p.providerBackend;
+  if (p.id.startsWith("kimchi-")) return "kimchi";
+  const b = normalizeProviderBaseUrl(p.baseURL);
+  if (/llm\.cast\.ai|llm\.kimchi\.dev/i.test(b)) return "kimchi";
+  if (/localhost|127\.0\.0\.1/i.test(b)) return "local";
+  return "openrouter";
+}
+
+/** Presets for one provider backend (excludes the global Custom row). */
+export function listProviderPresetsForBackend(
+  backendId: ProviderBackendId
+): readonly ProviderPresetWire[] {
+  return listProviderPresetsForSettings().filter(
+    (p) => p.id !== PROVIDER_PRESET_CUSTOM_ID && inferPresetBackend(p) === backendId
+  );
 }
 
 /** Resolve current model + base URL to a preset id (includes local stacks). */

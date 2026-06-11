@@ -261,6 +261,7 @@ export function createGmailSendTools(): ToolDefinition[] {
     description:
       "WHAT: Create a Gmail draft via REST (users.drafts.create) with full body_html, inline_images, and attachments.\n" +
       "WHEN: User wants to review mail in Gmail before sending — **prefer this over mcp_google_gmail_create_draft** for styled HTML (MCP draft is plain-only).\n" +
+      "AFTER: To deliver that draft, call **gmail_send_draft** with the returned draftId — do **not** call gmail_send_message with a recomposed body unless the user asked to rewrite.\n" +
       "STYLE: Neutral professional body_html + body (R-EMAIL-STYLE). email_style_infer only if user named an industry/style this turn. Plain-only for thread replies.\n" +
       "SAFETY: approval-gated — verify recipients before approving.",
     parameters: composeParameters,
@@ -290,12 +291,50 @@ export function createGmailSendTools(): ToolDefinition[] {
     },
   });
 
+  const gmailSendDraft = defineTool({
+    name: "gmail_send_draft",
+    description:
+      "WHAT: Send an existing Gmail draft via REST (users.drafts.send) — no body recomposition.\n" +
+      "WHEN: gmail_create_draft already succeeded and the user approved sending that draft (or said send the draft / send it).\n" +
+      "HOW: Pass draft_id from the gmail_create_draft tool result. Do **not** call gmail_send_message with a full body for the same mail.\n" +
+      "SAFETY: approval-gated — real mail leaves the account on approve.",
+    parameters: {
+      type: "object" as const,
+      properties: {
+        draft_id: {
+          type: "string",
+          description: "draftId returned by gmail_create_draft (e.g. from tool output draftId=…).",
+        },
+      },
+      required: ["draft_id"] as string[],
+      additionalProperties: false as const,
+    },
+    requiresApproval: true,
+    dangerLevel: "destructive",
+    handler: async (args): Promise<ToolResult> => {
+      const draftId = String(args["draft_id"] ?? "").trim();
+      if (!draftId) return { ok: false, error: "draft_id is required" };
+      const res = await gmailApiJson<{ id?: string; threadId?: string; labelIds?: string[] }>(
+        "/drafts/send",
+        { method: "POST", body: JSON.stringify({ id: draftId }) }
+      );
+      if (!res.ok) return { ok: false, error: res.error };
+      return {
+        ok: true,
+        output:
+          `Draft sent. draftId=${draftId}, messageId=${res.data.id ?? "?"}, ` +
+          `threadId=${res.data.threadId ?? "?"}`,
+      };
+    },
+  });
+
   const gmailSendMessage = defineTool({
     name: "gmail_send_message",
     description:
       "WHAT: Send email immediately via Gmail REST (users.messages.send). Same OAuth as Google Workspace MCP.\n" +
-      "WHEN: User explicitly asked to SEND now.\n" +
-      "HOW: Prefer mcp_google_gmail_* for search/read/labels; gmail_create_draft for styled drafts; this tool for immediate delivery.\n" +
+      "WHEN: User asked to **send now in one step** with no prior gmail_create_draft in this turn.\n" +
+      "NOT FOR: Mail already drafted via gmail_create_draft — use gmail_send_draft(draft_id) instead (no rewrite).\n" +
+      "HOW: Prefer mcp_google_gmail_* for search/read/labels; gmail_create_draft + gmail_send_draft for draft-then-send.\n" +
       "STYLE: Neutral professional body_html + body (R-EMAIL-STYLE). email_style_infer only if user named an industry/style this turn. Plain-only for thread replies.\n" +
       "SAFETY: approval-gated — verify recipients; real mail leaves the account on approve.",
     parameters: composeParameters,
@@ -321,5 +360,5 @@ export function createGmailSendTools(): ToolDefinition[] {
     },
   });
 
-  return [gmailCreateDraft, gmailSendMessage];
+  return [gmailCreateDraft, gmailSendDraft, gmailSendMessage];
 }

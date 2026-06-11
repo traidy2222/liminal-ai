@@ -2,7 +2,7 @@
 
 Liminal connects to Azure in two layers:
 
-1. **REST tools** (`azure_list_subscriptions`, `azure_list_resource_groups`, `azure_list_resources`, `azure_get_resource`, `azure_rest_call`) — direct Azure Resource Manager calls using OAuth or `az login`.
+1. **REST tools** (`azure_check_auth`, `azure_list_subscriptions`, `azure_get_subscription`, `azure_list_locations`, `azure_list_resource_groups`, `azure_create_resource_group`, `azure_delete_resource_group`, `azure_list_resources`, `azure_list_resource_providers`, `azure_get_provider_api_versions`, `azure_get_resource`, `azure_rest_call`) — direct Azure Resource Manager calls using OAuth or `az login`. Paths are normalized (leading `/` added) and `api-version` is inferred per [Microsoft Learn](https://learn.microsoft.com/en-us/rest/api/resources/) when omitted.
 2. **MCP sidecar** (`mcp_azure_*`) — official [`@azure/mcp`](https://www.npmjs.com/package/@azure/mcp) server with tools for compute, storage, Key Vault, App Service, Cosmos DB, Monitor, and more.
 
 ## Quick start
@@ -71,10 +71,14 @@ connect_provider({
 For APIs not wrapped by MCP tools:
 
 ```text
+azure_check_auth()
+azure_list_subscriptions()
 azure_rest_call({
   method: "GET",
-  path: "/subscriptions?api-version=2024-03-01"
+  path: "/subscriptions"
 })
 ```
+
+`api-version` is added automatically (`2022-12-01` for subscriptions, `2021-04-01` for resource groups/resources). For provider-specific resources use `azure_get_provider_api_versions` or pass `api_version` to `azure_get_resource` / `azure_rest_call`.
 
 Write methods (`POST`, `PUT`, `PATCH`, `DELETE`) require approval.

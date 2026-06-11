@@ -4,7 +4,8 @@ import type { PtyManager } from "./pty_manager.js";
 
 export function createPtyShellPort(
   mgr: PtyManager,
-  ensure: (opts: EnsureTerminalOptions) => Promise<EnsureTerminalResult | null>
+  ensure: (opts: EnsureTerminalOptions) => Promise<EnsureTerminalResult | null>,
+  resolveWorkspaceRoot: (chatId: string) => string
 ): PtyManagerPort {
   return {
     ensure,
@@ -21,5 +22,10 @@ export function createPtyShellPort(
         createdAt: s.createdAt,
         cwd: s.cwd,
       })),
+    runOneshot: (opts) =>
+      mgr.runOneshot({
+        ...opts,
+        workspaceRoot: resolveWorkspaceRoot(opts.chatId)?.trim() || process.cwd(),
+      }),
   };
 }

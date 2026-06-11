@@ -2,8 +2,10 @@ import OpenAI from "openai";
 import type { Stream } from "openai/streaming";
 import type {
   AgentConfig,
+  AgentEventMap,
   Message,
   AccumulatedToolCall,
+  ToolCallStreamDelta,
   ChildAgentConfig,
   SubtaskResult,
   PersonaConfig,
@@ -14,12 +16,17 @@ import type {
   ExecutionState,
   ExecutionContract,
 } from "./types.js";
+import {
+  extractComposeDockWirePreview,
+  isComposeDockTool,
+} from "./compose_dock_preview.js";
+import { mergeStreamingToolArgsJson } from "./tool_arg_content_stream.js";
 import { AgentEmitter } from "./events.js";
 import { ContextManager } from "./context.js";
 import { ToolRegistry } from "./registry.js";
 import { ToolDispatcher } from "./dispatcher.js";
 import { SafetyJudge } from "./safety_judge.js";
-import { StreamAccumulator } from "./streaming.js";
+import { StreamAccumulator, type ProcessedStreamChunk } from "./streaming.js";
 import { scrubMessagesSpecialTokens } from "./provider_token_scrub.js";
 import {
   isStreamTransportRetryable,
@@ -68,7 +75,13 @@ import {
   SpawnAppHtmlStreamSink,
   resolveSpawnAppHtmlStreamSinkEnabled,
 } from "./spawn_app_html_stream_sink.js";
-import { formatRecipeLibraryHints, recordRecipe } from "./recipe_library.js";
+import {
+  formatRecipeLibraryHints,
+  findBestRecipeForPrime,
+  formatRecipePrimeMessage,
+  recordRecipe,
+  recordRecipePrimeOutcome,
+} from "./recipe_library.js";
 import { EMAIL_COMPOSE_TURN_INJECTION, isEmailComposeTurn } from "./email_compose_context.js";
 import { addCompressionGuideline, formatCompressionGuidelines } from "./compression_guidelines.js";
 import { bumpRuleHits, getRuleHitCounts, extractRuleIds, recordRuleOutcomes, getDemotedRuleIds } from "./rule_stats.js";
@@ -90,12 +103,20 @@ import {
 import {
   formatOpenRouterStealthOwlUnavailableMessage,
   isExhaustedProviderRoutingError,
+  isOpaqueInferenceProviderError,
   isOpenRouterStealthOwlProviderError,
   isOpenRouterUpstreamProviderError,
   isStaleStealthPinMismatch,
   parseOpenRouterProviderSlug,
 } from "./openrouter_errors.js";
 import { ProviderRouteState } from "./provider_route_state.js";
+import {
+  isKimchiApiBaseUrl,
+  isKimchiRetryableProviderError,
+  isKimchiThrottleError,
+  parseKimchiRateLimitRetryAfterMs,
+  resolveKimchiTransientMaxRetries,
+} from "./kimchi_provider.js";
 import {
   describeProviderError,
   fetchInferenceUsageStatus,
@@ -188,7 +209,9 @@ import {
 import { wireSubtaskEventForwarding } from "./subtask_telemetry.js";
 import {
   buildSpawnContextInjection,
+  ensureChildRegistryBaselineFromParent,
   finalizeChildSpawnTools,
+  isSpawnBaselineTool,
 } from "./spawn_provisioning.js";
 import {
   shouldSkipHarnessSecondaryPassesForTurn,
@@ -223,6 +246,7 @@ import {
   formatOutputEffortTraceLine,
   scaleMaxCompletionTokensForEffort,
 } from "./output_effort.js";
+import { buildResearchTurnInjection } from "./research_depth.js";
 import { detectWorkflowSignal } from "./workflow_spec.js";
 import { TtsTurnBudget } from "./tts_budget.js";
 import {
@@ -563,12 +587,13 @@ function buildToolCapabilityManifest(registry: ToolRegistry): string {
  * Extract a human-readable message from any error the OpenAI SDK or
  * OpenRouter can throw.
  */
-function describeError(err: unknown): string {
-  return describeProviderError(err);
+function describeError(err: unknown, baseURL?: string, retriesExhausted?: boolean): string {
+  return describeProviderError(err, { baseURL, retriesExhausted });
 }
 
 /** Returns true for errors worth retrying. */
-function isRetryable(err: unknown): boolean {
+function isRetryable(err: unknown, baseURL?: string): boolean {
+  if (isKimchiApiBaseUrl(baseURL) && isKimchiRetryableProviderError(err)) return true;
   if (isOpenRouterUpstreamProviderError(err)) return false;
   if (err instanceof OpenAI.RateLimitError) return true;
   if (err instanceof OpenAI.InternalServerError) return true;
@@ -638,6 +663,9 @@ function getRetryAfterMsFromError(err: unknown): number | null {
 
   const upstream = suggestedWaitMsFromUpstreamThrottleMessage(msg);
   if (upstream != null) candidates.push(upstream);
+
+  const kimchiUntil = parseKimchiRateLimitRetryAfterMs(err);
+  if (kimchiUntil != null) candidates.push(kimchiUntil);
 
   if (candidates.length === 0) return null;
   return Math.max(...candidates.filter((x) => Number.isFinite(x) && x > 0));
@@ -751,6 +779,28 @@ function hasPseudoToolMarkup(text: string): boolean {
     t.includes("<longcat_") ||
     t.includes("</longcat_")
   );
+}
+
+function emitProcessedStreamText(
+  emitter: AgentEmitter,
+  parsed: ProcessedStreamChunk,
+  opts: {
+    reasoningSurface: "native" | "external";
+    onPseudoMarkup?: () => void;
+  }
+): void {
+  if (parsed.inlineReasoningDelta) {
+    emitter.emit("text", { delta: parsed.inlineReasoningDelta, channel: "reasoning" });
+  }
+  if (parsed.reasoningDelta && opts.reasoningSurface === "native") {
+    emitter.emit("text", { delta: parsed.reasoningDelta, channel: "reasoning" });
+  }
+  if (!parsed.textDelta) return;
+  if (hasPseudoToolMarkup(parsed.textDelta)) {
+    opts.onPseudoMarkup?.();
+    return;
+  }
+  emitter.emit("text", { delta: parsed.textDelta, channel: "user" });
 }
 
 /** Harness-injected user turn: model greets on new session (no tools). */
@@ -1174,6 +1224,10 @@ export class AgentHarness {
   private ruleRecallInjectedThisSend = false;
   /** Rule IDs injected by the round-2 rule recall this send (for effectiveness scoring at turn end). */
   private injectedRuleIdsThisSend: string[] = [];
+  /** One-shot recipe prime at round 2 (positive channel — complements rule recall). */
+  private recipePrimeInjectedThisSend = false;
+  /** Recipe key primed this send (for outcome decay at turn end). */
+  private injectedRecipeKeyThisSend: string | null = null;
   /** Extra stream continuation when model hits token limit (max 1 per send). */
   private lengthResumeRemaining = 0;
   private writeIntegrityNudgeThisSend = false;
@@ -1253,6 +1307,15 @@ export class AgentHarness {
   /** When set, blocks side-effecting tools until ask_user resolves clarification. */
   private breakdownClarificationGate: string | null = null;
   private streamingToolNamesByCallId = new Map<string, string>();
+  /** Merged raw JSON per streaming tool call — used for compose-dock live preview. */
+  private composeRawArgsByCallId = new Map<string, string>();
+  /** Per-call arg-delta arrival stats — diagnoses providers that buffer tool args. */
+  private argsChunkStatsByCallId = new Map<
+    string,
+    { chunks: number; chars: number; firstAtMs: number; lastAtMs: number }
+  >();
+  private composeContentLenByCallId = new Map<string, number>();
+  private composePathSeenByCallId = new Map<string, boolean>();
   private lastAutoDreamScanAt = 0;
   private autoDreamBackgroundRunning = false;
 
@@ -1732,9 +1795,16 @@ export class AgentHarness {
   }
 
   private rebuildClient(): void {
-    const hydrated = ensureLocalProviderApiKeyInProcess();
-    if (!this.config.openRouterApiKey?.trim() && hydrated) {
-      this.config.openRouterApiKey = hydrated;
+    if (!this.config.openRouterApiKey?.trim()) {
+      try {
+        const cfg = resolveProviderConfig({
+          baseURL: this.config.baseURL,
+          model: this.config.model,
+        });
+        this.config.openRouterApiKey = cfg.apiKey;
+      } catch {
+        /* resolveProviderConfig throws when no key — handled below */
+      }
     }
     const apiKey = this.config.openRouterApiKey?.trim();
     if (!apiKey && !isManagedInferenceBaseUrl(this.config.baseURL ?? "")) {
@@ -2442,12 +2512,18 @@ export class AgentHarness {
     this.toolCallsDispatchedThisSend = 0;
     this.breakdownClarificationGate = null;
     this.streamingToolNamesByCallId.clear();
+    this.composeRawArgsByCallId.clear();
+    this.argsChunkStatsByCallId.clear();
+    this.composeContentLenByCallId.clear();
+    this.composePathSeenByCallId.clear();
     this.evidenceLog = [];
     this.turnEndEmittedThisSend = false;
     this.voicePostToolsNudgeFired = false;
     this.userReplyFinalizeAttempted = false;
     this.ruleRecallInjectedThisSend = false;
     this.injectedRuleIdsThisSend = [];
+    this.recipePrimeInjectedThisSend = false;
+    this.injectedRecipeKeyThisSend = null;
     this.writeIntegrityNudgeThisSend = false;
     this.fileWritePathTail.clear();
     this.fileWriteStreamSink = new FileWriteStreamSink(
@@ -2819,11 +2895,7 @@ export class AgentHarness {
     ) {
       this.context.appendMessage({
         role: "system",
-        content:
-          "[RESEARCH TURN] The user needs current, sourced information — not a reasoning essay. " +
-          "After at most a few sentences of native reasoning, call web_search and web_fetch (and recall_relevant / vault_search when prior briefings may exist). " +
-          "Run multiple queries and fetches in parallel when useful. Do not describe tools you plan to call inside reasoning; execute them. " +
-          "When tool work is done, reply to the user in chat. vault_write/remember are optional — not a substitute for answering.",
+        content: buildResearchTurnInjection({ userMessage }),
       });
     }
     if (
@@ -3233,12 +3305,18 @@ export class AgentHarness {
         // Skip parent's orchestration tools — child gets fresh ones below
         continue;
       }
-      // If a toolNames filter is specified, only include allowed tools
-      if (childConfig.toolNames && !childConfig.toolNames.includes(tool.name)) {
+      // Restrictive allowlist — but baseline file/discovery tools always copy through
+      // so sub-agents can write deliverables even when tools=[web_search,…].
+      if (
+        childConfig.toolNames &&
+        !childConfig.toolNames.includes(tool.name) &&
+        !isSpawnBaselineTool(tool.name)
+      ) {
         continue;
       }
       childRegistry.register(tool);
     }
+    ensureChildRegistryBaselineFromParent(this.registry, childRegistry);
 
     // NOTE: copyLazyPolicyFromParent is called AFTER onChildCreated below.
     // It must run after all tools are registered so harness-scoped tools
@@ -4347,6 +4425,30 @@ export class AgentHarness {
     }
 
     if (
+      round === 1 &&
+      resolveHarnessEnvRaw("AGENT_RECIPE_PRIME", this.runtimePreferences) !== "0" &&
+      resolveHarnessEnvRaw("AGENT_RECIPE_LIBRARY", this.runtimePreferences) !== "0" &&
+      !this.recipePrimeInjectedThisSend &&
+      !this.sessionGreetingThisSend &&
+      !this.personaBootstrapPromptThisSend
+    ) {
+      this.recipePrimeInjectedThisSend = true;
+      try {
+        const intent = this.turnInference?.intent ?? "knowledge";
+        const recipe = await findBestRecipeForPrime(intent);
+        if (recipe) {
+          this.context.appendMessage({
+            role: "system",
+            content: formatRecipePrimeMessage(recipe),
+          });
+          this.injectedRecipeKeyThisSend = recipe.key;
+        }
+      } catch {
+        /* non-fatal */
+      }
+    }
+
+    if (
       round === 0 &&
       this.liveDictationThisSend &&
       resolveSpeechSynthesisConfig(this.runtimePreferences).enabled &&
@@ -4789,9 +4891,9 @@ export class AgentHarness {
           if (this.abortSignal?.aborted) return;
 
           const parsed = accumulator.processChunk(chunk);
-
-          if (parsed.textDelta) {
-            if (hasPseudoToolMarkup(parsed.textDelta)) {
+          emitProcessedStreamText(this.emitter, parsed, {
+            reasoningSurface: this._turnReasoningSurface,
+            onPseudoMarkup: () => {
               this.pseudoMarkupSuppressCountThisSend += 1;
               if (!this.pseudoMarkupSuppressionNotifiedThisSend) {
                 this.pseudoMarkupSuppressionNotifiedThisSend = true;
@@ -4801,56 +4903,26 @@ export class AgentHarness {
                   channel: "trace",
                 });
               }
-            } else {
-              this.emitter.emit("text", { delta: parsed.textDelta, channel: "user" });
-            }
-          }
+            },
+          });
 
-          if (parsed.reasoningDelta && this._turnReasoningSurface === "native") {
-            this.emitter.emit("text", { delta: parsed.reasoningDelta, channel: "reasoning" });
-          }
-
-          if (parsed.toolCallDelta) {
-            const { index, id, name, argsDelta } = parsed.toolCallDelta;
-            if (id && name) {
-              this.streamingToolNamesByCallId.set(id, name);
-            }
-            const streamToolName =
-              name ?? (id ? this.streamingToolNamesByCallId.get(id) : undefined);
-            if (parsed.isNewTool && id && name) {
-              this.emitter.emit("tool_start", {
-                callId: id,
-                name,
-                traceId: this.currentTurnTraceId,
-                roundIndex: this.roundCount,
-              });
-              if (this.fileWriteStreamSink && isFileWriteToolName(name)) {
-                this.fileWriteStreamSink.open(id, name);
-              }
-              if (this.spawnAppHtmlStreamSink && isLiminalAppHtmlToolName(name)) {
-                this.spawnAppHtmlStreamSink.open(id, name);
-              }
-
-              // PASTE: when the model starts streaming a new tool call (index N),
-              // tool call N-1's args are complete. Speculatively dispatch if safe.
-              if (pasteEnabled && index > 0) {
-                this.maybeStartEagerDispatch(accumulator, index - 1, speculativePromises, pasteEnabled);
-              }
-            }
-
-            if (argsDelta) {
-              const tc = accumulator.accumulatedToolCalls[index];
-              if (tc) {
-                this.emitter.emit("tool_delta", { callId: tc.id, argsDelta });
-                if (this.fileWriteStreamSink && isFileWriteToolName(tc.name)) {
-                  await this.fileWriteStreamSink.ingestDelta(tc.id, tc.name, argsDelta);
-                }
-                if (this.spawnAppHtmlStreamSink && isLiminalAppHtmlToolName(tc.name)) {
-                  await this.spawnAppHtmlStreamSink.ingestDelta(tc.id, tc.name, argsDelta);
-                }
-                this.maybeStartEagerDispatch(accumulator, index, speculativePromises, pasteEnabled);
-              }
-            }
+          const toolCallDeltas =
+            parsed.toolCallDeltas ??
+            (parsed.toolCallDelta
+              ? [
+                  {
+                    ...parsed.toolCallDelta,
+                    isNewTool: Boolean(parsed.isNewTool),
+                  },
+                ]
+              : []);
+          for (const streamDelta of toolCallDeltas) {
+            await this.processToolCallStreamDelta(
+              streamDelta,
+              accumulator,
+              speculativePromises,
+              pasteEnabled
+            );
           }
 
           if (parsed.finishReason) {
@@ -4887,10 +4959,11 @@ export class AgentHarness {
         // Never retry if the task was externally cancelled
         if (this.abortSignal?.aborted) return;
 
-        const streamErrMsg = describeError(streamErr);
+        const streamErrMsg = describeError(streamErr, this.config.baseURL);
         const isChunkTimeout = streamErrMsg.includes("STREAM_CHUNK_TIMEOUT");
         const canRetry =
-          streamAttempt < maxStreamRetries && (isChunkTimeout || isRetryable(streamErr));
+          streamAttempt < maxStreamRetries &&
+          (isChunkTimeout || isRetryable(streamErr, this.config.baseURL));
 
         if (!canRetry) throw streamErr;
 
@@ -4956,6 +5029,27 @@ export class AgentHarness {
           this._turnReasoningSurface
         );
       }
+    }
+
+    emitProcessedStreamText(this.emitter, accumulator.finishInlineReasoning(), {
+      reasoningSurface: this._turnReasoningSurface,
+    });
+
+    // Diagnose providers that buffer tool-call args: a multi-KB call arriving in
+    // 1 chunk means the gateway's tool parser does not stream arguments, so live
+    // write/compose previews cannot update incrementally.
+    for (const call of accumulator.accumulatedToolCalls) {
+      const stats = this.argsChunkStatsByCallId.get(call.id);
+      if (!stats) continue;
+      const spanMs = stats.lastAtMs - stats.firstAtMs;
+      const buffered = stats.chunks <= 2 && stats.chars > 2048;
+      this.emitter.emit("text", {
+        channel: "trace",
+        delta:
+          `\n[args_stream] ${call.name}: ${stats.chars} chars in ${stats.chunks} chunk(s) over ${spanMs}ms` +
+          (buffered ? " — PROVIDER BUFFERED TOOL ARGS (no incremental preview possible)" : "") +
+          `\n`,
+      });
     }
 
     for (let i = 0; i < accumulator.accumulatedToolCalls.length; i++) {
@@ -5971,6 +6065,11 @@ export class AgentHarness {
         if (this.injectedRuleIdsThisSend.length > 0) {
           void recordRuleOutcomes(this.injectedRuleIdsThisSend, turnOutcome).catch(() => { /* non-fatal */ });
         }
+        if (this.injectedRecipeKeyThisSend) {
+          void recordRecipePrimeOutcome(this.injectedRecipeKeyThisSend, turnOutcome).catch(() => {
+            /* non-fatal */
+          });
+        }
         // Adaptive effort learning (AGENT_EFFORT_LEARN=1).
         const budget = this._turnReasoningBudget;
         if (budget) {
@@ -6161,7 +6260,9 @@ export class AgentHarness {
         return stream;
       } catch (err) {
         lastErr = err;
-        const msg = describeError(err);
+        const kimchiTransient =
+          isKimchiApiBaseUrl(this.config.baseURL) && isKimchiRetryableProviderError(err);
+        const msg = describeError(err, this.config.baseURL);
 
         const exhaustedRouting = isExhaustedProviderRoutingError(err);
         if (exhaustedRouting) {
@@ -6262,7 +6363,7 @@ export class AgentHarness {
         }
         if (
           isManagedInferenceBaseUrl(this.config.baseURL) &&
-          isOpenRouterUpstreamProviderError(err)
+          (isOpenRouterUpstreamProviderError(err) || isOpaqueInferenceProviderError(err))
         ) {
           if (await this.tryActivateManagedOpenRouterFallback("provider_error")) {
             managedBusyRetries = 0;
@@ -6281,29 +6382,40 @@ export class AgentHarness {
         const retryForever = isRetryForeverEnabled();
         const maxRetriesForError = rateLimited
           ? this.rateLimitMaxRetries
-          : providerUnavailable
-          ? this.transient5xxMaxRetries
-          : this.maxRetries;
+          : providerUnavailable || kimchiTransient
+            ? kimchiTransient
+              ? resolveKimchiTransientMaxRetries(this.runtimePreferences)
+              : this.transient5xxMaxRetries
+            : this.maxRetries;
         const cappedOut = attempt >= maxRetriesForError;
         const wallExceeded = Date.now() - retryStartedAt >= this.retryWallTimeMs;
-        if (!isRetryable(err) || (cappedOut && !retryForever) || wallExceeded) {
+        if (!isRetryable(err, this.config.baseURL) || (cappedOut && !retryForever) || wallExceeded) {
           if (wallExceeded) {
             throw new Error(
               `Provider retries exceeded wall-time budget (${Math.round(this.retryWallTimeMs / 1000)}s). ` +
                 `Stopping to avoid stalled session; please retry shortly. Last error: ${msg}`
             );
           }
-          throw new Error(msg);
+          throw new Error(
+            describeError(err, this.config.baseURL, kimchiTransient || cappedOut)
+          );
         }
 
         const delay = this.computeRetryDelayMs(
           attempt,
-          rateLimited ? "rate_limited" : providerUnavailable ? "provider_unavailable" : "normal",
+          rateLimited
+            ? "rate_limited"
+            : providerUnavailable || kimchiTransient
+              ? "provider_unavailable"
+              : "normal",
           getRetryAfterMsFromError(err)
         );
+        const kimchiThrottle = isKimchiThrottleError(err, this.config.baseURL);
         if (rateLimited || providerUnavailable || exhaustedRouting) {
-          this.consecutiveProviderFailures += 1;
-          if (rateLimited && !exhaustedRouting) {
+          if (!kimchiThrottle) {
+            this.consecutiveProviderFailures += 1;
+          }
+          if (rateLimited && !exhaustedRouting && !kimchiThrottle) {
             const slug = parseOpenRouterProviderSlug(err);
             const strategy = resolveProviderStrategy();
             const bumpEpoch =
@@ -6327,7 +6439,10 @@ export class AgentHarness {
             ) || 45_000
           );
           this.providerDegradedUntilMs = Date.now() + cooldown;
-          if (this.consecutiveProviderFailures >= this.providerCircuitFailureThreshold) {
+          if (
+            !kimchiThrottle &&
+            this.consecutiveProviderFailures >= this.providerCircuitFailureThreshold
+          ) {
             this.providerCircuitOpenUntilMs = Date.now() + this.providerCircuitCooldownMs;
             throw new Error(
               `Provider circuit opened after ${this.consecutiveProviderFailures} consecutive upstream failures. ` +
@@ -6344,9 +6459,10 @@ export class AgentHarness {
           backoffMs: delay,
         });
         if (!this.isUiQuiet()) {
+          const retryLabel = kimchiTransient ? "Cast AI busy" : msg;
           this.emitter.emit("text", {
             delta:
-              `\n⟳ ${msg} — retrying in ${Math.round(delay / 1000)}s ` +
+              `\n⟳ ${retryLabel} — retrying in ${Math.round(delay / 1000)}s ` +
               `(attempt ${attempt + 1}/${retryForever ? "∞" : maxRetriesForError + 1})…\n`,
           });
         }
@@ -6356,7 +6472,111 @@ export class AgentHarness {
       }
     }
 
-    throw new Error(describeError(lastErr));
+    throw new Error(describeError(lastErr, this.config.baseURL, true));
+  }
+
+  private async processToolCallStreamDelta(
+    streamDelta: ToolCallStreamDelta,
+    accumulator: StreamAccumulator,
+    speculativePromises: Map<string, Promise<ToolResult>>,
+    pasteEnabled: boolean
+  ): Promise<void> {
+    const { index, id, name, argsDelta, isNewTool } = streamDelta;
+    if (id && name) {
+      this.streamingToolNamesByCallId.set(id, name);
+    }
+    if (isNewTool && id && name) {
+      this.emitter.emit("tool_start", {
+        callId: id,
+        name,
+        traceId: this.currentTurnTraceId,
+        roundIndex: this.roundCount,
+      });
+      if (this.fileWriteStreamSink && isFileWriteToolName(name)) {
+        this.fileWriteStreamSink.open(id, name);
+      }
+      if (this.spawnAppHtmlStreamSink && isLiminalAppHtmlToolName(name)) {
+        this.spawnAppHtmlStreamSink.open(id, name);
+      }
+      if (isComposeDockTool(name)) {
+        const emptyCompose = extractComposeDockWirePreview(name, "");
+        if (emptyCompose) {
+          this.composeRawArgsByCallId.set(id, "");
+          this.composeContentLenByCallId.set(id, 0);
+          this.composePathSeenByCallId.set(id, false);
+          this.emitter.emit("compose_preview", {
+            callId: id,
+            name,
+            argsJson: "",
+            compose: emptyCompose,
+          });
+        }
+      }
+      if (pasteEnabled && index > 0) {
+        this.maybeStartEagerDispatch(accumulator, index - 1, speculativePromises, pasteEnabled);
+      }
+    }
+
+    if (!argsDelta) return;
+
+    const tc = accumulator.getToolCallAtIndex(index);
+    if (!tc) return;
+
+    const nowMs = Date.now();
+    const chunkStats = this.argsChunkStatsByCallId.get(tc.id);
+    if (chunkStats) {
+      chunkStats.chunks += 1;
+      chunkStats.chars += argsDelta.length;
+      chunkStats.lastAtMs = nowMs;
+    } else {
+      this.argsChunkStatsByCallId.set(tc.id, {
+        chunks: 1,
+        chars: argsDelta.length,
+        firstAtMs: nowMs,
+        lastAtMs: nowMs,
+      });
+    }
+
+    const prevMerged = this.composeRawArgsByCallId.get(tc.id) ?? "";
+    const mergedRaw = mergeStreamingToolArgsJson(prevMerged, argsDelta);
+    const rawGrew = mergedRaw.length > prevMerged.length;
+    this.composeRawArgsByCallId.set(tc.id, mergedRaw);
+
+    const toolDeltaPayload: AgentEventMap["tool_delta"] = {
+      callId: tc.id,
+      argsDelta,
+      argsJson: mergedRaw,
+      name: tc.name || this.streamingToolNamesByCallId.get(tc.id) || undefined,
+    };
+    const compose = extractComposeDockWirePreview(tc.name, mergedRaw);
+    if (compose) toolDeltaPayload.compose = compose;
+    this.emitter.emit("tool_delta", toolDeltaPayload);
+
+    if (isComposeDockTool(tc.name) && compose && rawGrew) {
+      const prevChars = this.composeContentLenByCallId.get(tc.id) ?? -1;
+      const grew = compose.charCount > prevChars || (compose.path && !this.composePathSeenByCallId.get(tc.id));
+      if (compose.charCount > prevChars) {
+        this.composeContentLenByCallId.set(tc.id, compose.charCount);
+      }
+      if (compose.path) this.composePathSeenByCallId.set(tc.id, true);
+      if (grew || prevChars < 0) {
+        this.emitter.emit("compose_preview", {
+          callId: tc.id,
+          name: tc.name,
+          argsJson: mergedRaw,
+          compose,
+        });
+        await new Promise<void>((resolve) => setImmediate(resolve));
+      }
+    }
+
+    if (this.fileWriteStreamSink && isFileWriteToolName(tc.name)) {
+      void this.fileWriteStreamSink.ingestDelta(tc.id, tc.name, argsDelta);
+    }
+    if (this.spawnAppHtmlStreamSink && isLiminalAppHtmlToolName(tc.name)) {
+      void this.spawnAppHtmlStreamSink.ingestDelta(tc.id, tc.name, argsDelta);
+    }
+    this.maybeStartEagerDispatch(accumulator, index, speculativePromises, pasteEnabled);
   }
 
   /**
@@ -6759,10 +6979,11 @@ export class AgentHarness {
       )) {
         if (this.abortSignal?.aborted) return;
         const parsed = accumulator.processChunk(chunk);
-        if (parsed.textDelta) {
-          this.emitter.emit("text", { delta: parsed.textDelta, channel: "user" });
-        }
+        emitProcessedStreamText(this.emitter, parsed, { reasoningSurface: "external" });
       }
+      emitProcessedStreamText(this.emitter, accumulator.finishInlineReasoning(), {
+        reasoningSurface: "external",
+      });
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       this.emitter.emit("text", {

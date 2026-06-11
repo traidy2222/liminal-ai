@@ -117,7 +117,7 @@ class ChatPane extends StatelessWidget {
                     : _buildTranscript(context);
 
                 final showBrowser = focused && browser != null && browser.open;
-                final showFileEdit = focused && fileEdit != null && fileEdit.open;
+                final showFileEdit = fileEdit != null && fileEdit.open;
                 if (!showBrowser && !showFileEdit) {
                   return transcript;
                 }
@@ -247,7 +247,7 @@ class ChatPane extends StatelessWidget {
               const minTermH = 120.0;
               final maxTermH = screenH * 0.65;
               final defaultTermH =
-                  (screenH * 0.28).clamp(160.0, 520.0);
+                  (screenH * 0.34).clamp(200.0, 560.0);
               final termH = (session.terminalBodyHeight ?? defaultTermH)
                   .clamp(minTermH, maxTermH);
               return TerminalDock(

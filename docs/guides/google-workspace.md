@@ -122,7 +122,8 @@ Google's official Gmail MCP (`gmailmcp.googleapis.com`) covers **search, read, d
 |------|------|
 | Search, read threads, list labels | `mcp_google_gmail_*` (official MCP) |
 | **Draft for review (styled HTML)** | `gmail_create_draft` (REST — `body_html`, images, attachments) |
-| **Send now** (user said send / deliver) | `gmail_send_message` (classic `users.messages.send`) |
+| **Send an existing draft** | `gmail_send_draft` (`draft_id` from create — no body rewrite) |
+| **Send now** (one step, no prior draft) | `gmail_send_message` (classic `users.messages.send`) |
 
 Google's MCP `create_draft` is **plain text only**. The harness rejects substantive plain-only new mail there and routes styled drafts through `gmail_create_draft` instead.
 

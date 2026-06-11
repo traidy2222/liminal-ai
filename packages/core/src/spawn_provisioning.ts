@@ -22,9 +22,57 @@ export const SPAWN_BASELINE_TOOL_NAMES = [
   "activate_tool_family",
 ] as const;
 
+const SPAWN_BASELINE_SET = new Set<string>(SPAWN_BASELINE_TOOL_NAMES);
+
+/** True when spawn text implies the child must deliver file artifacts (not chat-only research). */
+const FILE_DELIVERABLE_OBJECTIVE_RE =
+  /\b(save|write|create|output|deliver|produce|draft|persist)\b[\s\S]{0,48}\b(file|files|document|markdown|\.md|\.txt|report|notes?|path)\b|\b(file|files|document|markdown|\.md|\.txt|report)\b[\s\S]{0,48}\b(save|write|create|to|under|into)\b/i;
+
+export function isSpawnBaselineTool(name: string): boolean {
+  return SPAWN_BASELINE_SET.has(name);
+}
+
+export function spawnObjectiveNeedsFileTools(cfg: ChildAgentConfig): boolean {
+  const text = [
+    cfg.spawnContract?.objective,
+    cfg.userPrompt,
+    cfg.taskBrief,
+    cfg.goal,
+    cfg.systemPrompt,
+  ]
+    .filter(Boolean)
+    .join("\n");
+  return FILE_DELIVERABLE_OBJECTIVE_RE.test(text);
+}
+
+/**
+ * Copy baseline tools from parent → child even when `toolNames` is a restrictive allowlist.
+ * Without this, research spawns that pass tools=[web_search,…] leave write_file unregistered.
+ */
+export function ensureChildRegistryBaselineFromParent(
+  parent: ToolRegistry,
+  child: ToolRegistry
+): string[] {
+  const registered: string[] = [];
+  for (const name of SPAWN_BASELINE_TOOL_NAMES) {
+    if (child.has(name)) continue;
+    const tool = parent.get(name);
+    if (tool) {
+      child.register(tool);
+      registered.push(name);
+    }
+  }
+  return registered;
+}
+
 export function ensureChildBaselineTools(registry: ToolRegistry): string[] {
   const names = SPAWN_BASELINE_TOOL_NAMES.filter((n) => registry.has(n));
   return registry.activate(names);
+}
+
+function provisionFileDeliverableTools(registry: ToolRegistry, cfg: ChildAgentConfig): string[] {
+  if (!spawnObjectiveNeedsFileTools(cfg)) return [];
+  return registry.activateFamilies(["files_edit"]);
 }
 
 export function ensureSpawnDiscoveryTools(registry: ToolRegistry): string[] {
@@ -173,6 +221,7 @@ export function finalizeChildSpawnTools(
     registry.activate(cfg.activateTools);
   }
 
+  provisionFileDeliverableTools(registry, cfg);
   ensureChildBaselineTools(registry);
 
   const discoveryActivated = ensureSpawnDiscoveryTools(registry);

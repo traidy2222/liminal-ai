@@ -14,6 +14,17 @@ export function createContentStreamParseState(): ContentStreamParseState {
   return { path: null, contentEmittedLen: 0, raw: "" };
 }
 
+/**
+ * Merge provider tool-call argument chunks. Most gateways send incremental
+ * fragments; some resend the full JSON prefix each chunk (cumulative snapshot).
+ */
+export function mergeStreamingToolArgsJson(existing: string, delta: string): string {
+  if (!delta) return existing;
+  if (!existing) return delta;
+  if (delta.startsWith(existing)) return delta;
+  return existing + delta;
+}
+
 function tryExtractPath(raw: string): string | null {
   return tryExtractJsonStringField(raw, "path");
 }
@@ -131,7 +142,7 @@ export function ingestToolArgJsonDelta(
   state: ContentStreamParseState,
   delta: string
 ): { path: string | null; newContent: string } {
-  state.raw += delta;
+  state.raw = mergeStreamingToolArgsJson(state.raw, delta);
   if (!state.path) {
     const p = tryExtractPath(state.raw);
     if (p) state.path = p;

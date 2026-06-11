@@ -23,7 +23,7 @@ function buildWebSearchDescription(): string {
     `WHAT: Search the web via ${via} and return ranked result titles, URLs, and snippets.\n` +
     "WHEN: You need URLs, recent information, documentation, or answers not available in memory/vault.\n" +
     "OPTIONAL: If the question may already be answered locally, consider memory_query, recall_relevant, or vault_search before spending web quota — not required.\n" +
-    "RESEARCH DISCIPLINE: For the first web-search batch, diversify query intents (origins/background, latest status, impact/metrics) and avoid lexical duplicates.\n" +
+    "RESEARCH DISCIPLINE: Use as many searches as the ask needs — diversify intents when breadth matters (background, latest status, dissenting views, primary sources); avoid lexical duplicates. Call research_state to see what you have already done before deciding you are done.\n" +
     "NOT WHEN: You already have the URL — call web_fetch directly instead.\n" +
     "GOOD OUTPUT: A short ranked list of candidate URLs/snippets you will selectively web_fetch or synthesize — not an undifferentiated dump into the user reply.\n" +
     "ARGS: query — search query string; max_results — number of results to return (default: 5)."

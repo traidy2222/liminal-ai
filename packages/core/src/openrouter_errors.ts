@@ -83,6 +83,20 @@ export function isOpenRouterUpstreamProviderError(err: unknown): boolean {
   return false;
 }
 
+/**
+ * OpenAI SDK HTTP 400 with an empty upstream body — common on managed inference /
+ * OpenRouter when the reseller rejects a request without JSON details.
+ */
+export function isOpaqueInferenceProviderError(err: unknown): boolean {
+  if (isOpenRouterUpstreamProviderError(err)) return false;
+  const asApi = err as { status?: number; error?: unknown } | null;
+  if (asApi?.status !== 400) return false;
+  const msg = errorMessage(err).toLowerCase();
+  if (/no body|status code \(no body\)/.test(msg)) return true;
+  const errBody = asApi.error;
+  return errBody === undefined || errBody === null || errBody === "";
+}
+
 /** Normalize OpenRouter provider slug from error metadata (case preserved). */
 export function parseOpenRouterProviderSlug(err: unknown): string | null {
   const msg = errorMessage(err);

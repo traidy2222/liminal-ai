@@ -77,8 +77,8 @@ export function formatPreferredMailRouteLine(route: PreferredMailRoute | null): 
   if (!route) return "Primary mail: (none — connect Google or Microsoft OAuth)";
   const tools =
     route.provider === "google"
-      ? "mcp_google_gmail_* / gmail_send_message / gmail_create_draft"
-      : "mcp_microsoft_* mail tools / outlook_send_message / outlook_create_draft";
+      ? "mcp_google_gmail_* / gmail_create_draft / gmail_send_draft / gmail_send_message"
+      : "mcp_microsoft_* mail tools / outlook_create_draft / outlook_send_draft / outlook_send_message";
   return (
     `Primary mail: ${route.provider} → ${route.email ?? route.accountId} ` +
     `(use ${tools}). ${route.reason}.`

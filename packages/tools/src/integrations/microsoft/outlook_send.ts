@@ -223,9 +223,45 @@ export function createOutlookSendTools(): ToolDefinition[] {
     },
   });
 
+  const sendDraftTool = defineTool({
+    name: "outlook_send_draft",
+    description:
+      "Send an existing Outlook draft via Graph (POST /messages/{id}/send). " +
+      "Use message_id from outlook_create_draft — do not recompose via outlook_send_message unless the user asked to rewrite.",
+    parameters: {
+      type: "object",
+      properties: {
+        message_id: {
+          type: "string",
+          description: "Graph message id returned by outlook_create_draft.",
+        },
+        mailbox: sendParams.mailbox,
+      },
+      required: ["message_id"],
+      additionalProperties: false,
+    },
+    requiresApproval: true,
+    handler: async (args): Promise<ToolResult> => {
+      if (!outlookRestEnabled()) {
+        return graphErrorResult("Outlook REST is off (set AGENT_MICROSOFT_REST=1).");
+      }
+      const blocked = await outlookMailRouteBlocked(args);
+      if (blocked) return blocked;
+      const messageId = String(args["message_id"] ?? "").trim();
+      if (!messageId) return graphErrorResult("message_id is required");
+      const result = await graphApiJson(
+        `${mailboxBase(args)}/messages/${encodeURIComponent(messageId)}/send`,
+        { method: "POST" }
+      );
+      if (!result.ok) return graphErrorResult(result.error);
+      return { ok: true, output: `Outlook draft sent. messageId=${messageId}` };
+    },
+  });
+
   const draftTool = defineTool({
     name: "outlook_create_draft",
-    description: "Create an Outlook draft message (does not send).",
+    description:
+      "Create an Outlook draft message (does not send). To deliver it later, use outlook_send_draft(message_id) — not outlook_send_message with a recomposed body.",
     parameters: {
       type: "object",
       properties: sendParams,
@@ -247,9 +283,16 @@ export function createOutlookSendTools(): ToolDefinition[] {
         body: JSON.stringify(message),
       });
       if (!result.ok) return graphErrorResult(result.error);
-      return graphJsonResult(result.data);
+      const data = result.data as { id?: string };
+      const id = typeof data?.id === "string" ? data.id : "";
+      return {
+        ok: true,
+        output: id
+          ? `Outlook draft created. messageId=${id} (use outlook_send_draft to send).`
+          : JSON.stringify(result.data),
+      };
     },
   });
 
-  return [sendTool, draftTool];
+  return [sendTool, sendDraftTool, draftTool];
 }

@@ -20,7 +20,11 @@ export const STREAMING_WRITE_TOOL_SPECS: Readonly<Record<string, StreamingWriteT
   plan: { contentFields: [], labelFields: [], rawArgsFallback: true },
   breakdown: { contentFields: ["goal"], labelFields: [], rawArgsFallback: true },
   write_file: { contentFields: ["content"], labelFields: ["path"] },
-  edit_file: { contentFields: ["diff"], labelFields: ["path"] },
+  edit_file: {
+    contentFields: ["diff", "replace", "new_string", "replacements"],
+    labelFields: ["path"],
+    rawArgsFallback: true,
+  },
   vault_write: { contentFields: ["content"], labelFields: ["title"] },
   remember: { contentFields: ["value"], labelFields: ["key"] },
   append_persona_living: { contentFields: ["note"], labelFields: [] },
@@ -64,13 +68,14 @@ function resolveStreamingLabel(argsJson: string, labelFields: string[]): string 
 export function extractStreamingWritePreview(
   toolName: string,
   argsJson: string,
-  opts?: { tailLines?: number; maxChars?: number }
+  opts?: { tailLines?: number; maxChars?: number; fullContent?: boolean }
 ): StreamingWritePreview | null {
   const spec = STREAMING_WRITE_TOOL_SPECS[toolName];
   if (!spec) return null;
 
   const tailLines = opts?.tailLines ?? 12;
   const maxChars = opts?.maxChars ?? 24_000;
+  const fullContent = opts?.fullContent === true;
   const raw = argsJson ?? "";
 
   const label = raw.length > 0 ? resolveStreamingLabel(raw, spec.labelFields) : null;
@@ -98,7 +103,7 @@ export function extractStreamingWritePreview(
         toolName,
         field: cf,
         label,
-        content: tail.join("\n"),
+        content: fullContent ? full : tail.join("\n"),
         charCount: partial.value.length,
         lineCount: lines.length,
         incomplete: !partial.closed,

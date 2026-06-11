@@ -1,5 +1,27 @@
 import type { EnsureTerminalOptions, EnsureTerminalResult } from "./terminal_runtime.js";
 
+export interface PtyOneshotOptions {
+  chatId: string;
+  command: string;
+  cwd?: string;
+  label?: string;
+  cols?: number;
+  rows?: number;
+  timeoutMs: number;
+  onData?: (chunk: string) => void;
+  onSessionStart?: (info: {
+    sessionId: string;
+    label: string;
+    cwd: string;
+  }) => void;
+}
+
+export interface PtyOneshotResult {
+  exitCode: number;
+  output: string;
+  sessionId: string;
+}
+
 /** Low-level port to the UI-backed `PtyManager` (sidecar / web). */
 export interface PtyManagerPort {
   ensure(opts: EnsureTerminalOptions): Promise<EnsureTerminalResult | null>;
@@ -15,6 +37,8 @@ export interface PtyManagerPort {
     createdAt: number;
     cwd: string;
   }>;
+  /** Run one command in a short-lived PTY; shell exits with the real exit code. */
+  runOneshot(opts: PtyOneshotOptions): Promise<PtyOneshotResult>;
 }
 
 let ptyShellPort: PtyManagerPort | null = null;

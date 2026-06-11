@@ -16,6 +16,11 @@ import {
   parseOpenRouterProviderSlug,
 } from "./openrouter_errors.js";
 import { isManagedInferenceBaseUrl } from "./inference_session.js";
+import {
+  isKimchiApiBaseUrl,
+  isKimchiRetryableProviderError,
+  resolveKimchiTransientMaxRetries,
+} from "./kimchi_provider.js";
 import { vireonProxyAlreadyRetriedUpstream } from "./vireon_proxy.js";
 import type { ProviderRouteState } from "./provider_route_state.js";
 import type { Message } from "./types.js";
@@ -103,6 +108,14 @@ export function clearJsonResponseCache(): void {
 
 function isRateLimitErrorMessage(msg: string): boolean {
   return /429|503|quota|rate.?limit|too many/i.test(msg);
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((r) => setTimeout(r, ms));
+}
+
+function kimchiJsonRetryDelayMs(attempt: number): number {
+  return Math.min(30_000, Math.max(750, 1_500 * 2 ** attempt));
 }
 
 /**
@@ -195,6 +208,15 @@ export async function completeChatJson(
       const exhaustedRouting = isExhaustedProviderRoutingError(e);
       if (exhaustedRouting && opts.routeState) {
         opts.routeState.clearProviderIgnores();
+      }
+      const kimchiTransient =
+        isKimchiApiBaseUrl(client.baseURL) && isKimchiRetryableProviderError(e);
+      if (
+        kimchiTransient &&
+        retryAttempt < resolveKimchiTransientMaxRetries()
+      ) {
+        await sleep(kimchiJsonRetryDelayMs(retryAttempt));
+        return attemptWithModel(model, isFast, retryAttempt + 1);
       }
       if (
         retryAttempt === 0 &&

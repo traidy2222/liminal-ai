@@ -23,6 +23,7 @@ import {
   ensureManagedInferenceSession,
   isManagedInferenceBaseUrl,
 } from "./inference_session.js";
+import { formatKimchiProviderError, isKimchiApiBaseUrl } from "./kimchi_provider.js";
 import { ensureLocalProviderApiKeyInProcess } from "./provider_api_key.js";
 
 export type InferenceMode = "byok" | "managed" | "auto";
@@ -140,15 +141,34 @@ function parseInferenceBudgetExceeded(err: unknown): string | null {
   }
 }
 
+export interface DescribeProviderErrorOpts {
+  baseURL?: string;
+  retriesExhausted?: boolean;
+}
+
 /** Augment provider errors (402 budget) with account top-up guidance. */
-export function describeProviderError(err: unknown): string {
+export function describeProviderError(
+  err: unknown,
+  opts?: DescribeProviderErrorOpts
+): string {
   const budget = parseInferenceBudgetExceeded(err);
   if (budget) return budget;
+  if (isKimchiApiBaseUrl(opts?.baseURL)) {
+    const kimchi = formatKimchiProviderError(err, { retriesExhausted: opts?.retriesExhausted });
+    if (kimchi) return kimchi;
+  }
   if (err instanceof OpenAI.APIError) {
     const body =
       typeof err.error === "object" && err.error !== null
         ? JSON.stringify(err.error)
         : String(err.error ?? err.message);
+    if (err.status === 400 && /no body|status code \(no body\)/i.test(body)) {
+      return (
+        "HTTP 400 from inference provider (empty upstream body). " +
+        "This is a model/API rejection — not Azure, shell, or a local tool failure. " +
+        "Try Settings → switch model (e.g. DeepSeek V4), add AGENT_API_KEY for OpenRouter BYOK, or send again."
+      );
+    }
     return `HTTP ${err.status} from ${err.name}: ${body}`;
   }
   return err instanceof Error ? err.message : String(err);

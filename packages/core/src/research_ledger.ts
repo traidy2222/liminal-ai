@@ -374,8 +374,7 @@ export class ResearchLedger {
       );
     }
     lines.push(
-      "use research_state for full inventory, query_tool_outputs to retrieve prior search bodies, " +
-        "or fetch a pending URL directly with web_fetch."
+      "ledger is situational awareness only — you decide how many more searches/fetches this ask needs."
     );
     return lines.join("\n");
   }

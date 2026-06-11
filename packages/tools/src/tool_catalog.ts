@@ -223,9 +223,16 @@ export const TOOL_FAMILIES: Record<string, { description: string; tools: readonl
     description:
       "Azure — ARM REST (subscriptions, resource groups, resources) + @azure/mcp sidecar (compute, storage, Key Vault, web, Cosmos, Monitor, …).",
     tools: [
+      "azure_check_auth",
       "azure_list_subscriptions",
+      "azure_get_subscription",
+      "azure_list_locations",
       "azure_list_resource_groups",
+      "azure_create_resource_group",
+      "azure_delete_resource_group",
       "azure_list_resources",
+      "azure_list_resource_providers",
+      "azure_get_provider_api_versions",
       "azure_get_resource",
       "azure_rest_call",
     ],

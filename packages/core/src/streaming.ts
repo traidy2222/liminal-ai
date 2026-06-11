@@ -1,5 +1,7 @@
-import type { AccumulatedToolCall, StreamChunk } from "./types.js";
+import type { AccumulatedToolCall, StreamChunk, ToolCallStreamDelta } from "./types.js";
+import { mergeStreamingToolArgsJson } from "./tool_arg_content_stream.js";
 import type OpenAI from "openai";
+import { InlineReasoningTagStreamParser } from "./inline_reasoning_tags.js";
 import { extractReasoningDeltaFromChunk } from "./reasoning_stream.js";
 import { stripProviderSpecialTokens } from "./provider_token_scrub.js";
 
@@ -13,8 +15,16 @@ function sanitizeStreamText(text: string): string {
   );
 }
 
+export type ProcessedStreamChunk = StreamChunk & {
+  isNewTool?: boolean;
+  indexGap?: { expected: number; received: number };
+  /** Reasoning extracted from inline think / redacted_reasoning tags in content. */
+  inlineReasoningDelta?: string;
+};
+
 export class StreamAccumulator {
   private text = "";
+  private readonly inlineReasoningParser = new InlineReasoningTagStreamParser();
   private toolCallMap: Map<number, AccumulatedToolCall> = new Map();
   private seenToolStart: Set<number> = new Set();
   /** Indices whose argsJson must not grow after eager dispatch. */
@@ -27,7 +37,7 @@ export class StreamAccumulator {
    *  when prompt caching fires. */
   private _usage: unknown = null;
 
-  processChunk(chunk: OpenAI.Chat.Completions.ChatCompletionChunk): StreamChunk & { isNewTool?: boolean; indexGap?: { expected: number; received: number } } {
+  processChunk(chunk: OpenAI.Chat.Completions.ChatCompletionChunk): ProcessedStreamChunk {
     // Some providers attach `usage` on the terminal chunk (choices may be empty).
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const chunkUsage = (chunk as any).usage;
@@ -39,14 +49,20 @@ export class StreamAccumulator {
     if (!choice) return {};
 
     const delta = choice.delta;
-    const result: StreamChunk & { isNewTool?: boolean; indexGap?: { expected: number; received: number } } = {
+    const result: ProcessedStreamChunk = {
       finishReason: (choice.finish_reason as StreamChunk["finishReason"]) ?? null,
     };
 
     if (delta.content) {
       const cleaned = sanitizeStreamText(delta.content);
-      this.text += cleaned;
-      result.textDelta = cleaned;
+      const split = this.inlineReasoningParser.ingest(cleaned);
+      if (split.userDelta) {
+        this.text += split.userDelta;
+        result.textDelta = split.userDelta;
+      }
+      if (split.reasoningDelta) {
+        result.inlineReasoningDelta = split.reasoningDelta;
+      }
     }
 
     const reasoningRaw = extractReasoningDeltaFromChunk(delta);
@@ -56,6 +72,7 @@ export class StreamAccumulator {
     }
 
     if (delta.tool_calls) {
+      const toolCallDeltas: ToolCallStreamDelta[] = [];
       for (const tc of delta.tool_calls) {
         const idx = tc.index;
 
@@ -78,7 +95,7 @@ export class StreamAccumulator {
         const rawArgsDelta = tc.function?.arguments ?? "";
         const frozen = this.frozenIndices.has(idx);
         if (!frozen && rawArgsDelta) {
-          entry.argsJson += rawArgsDelta;
+          entry.argsJson = mergeStreamingToolArgsJson(entry.argsJson, rawArgsDelta);
         }
 
         const isNewTool = !this.seenToolStart.has(idx) && !!entry.name && !!entry.id;
@@ -92,16 +109,36 @@ export class StreamAccumulator {
         // chunk carries name+id but arguments:"", which previously prevented
         // tool_start from firing when isNewTool and toolCallDelta were in separate chunks.
         if (!frozen && (isNewTool || rawArgsDelta)) {
-          result.toolCallDelta = {
+          const streamDelta: ToolCallStreamDelta = {
             index: idx,
             id: entry.id,
             name: entry.name,
             argsDelta: rawArgsDelta,
+            isNewTool,
           };
+          toolCallDeltas.push(streamDelta);
+          result.toolCallDelta = streamDelta;
         }
+      }
+      if (toolCallDeltas.length > 0) {
+        result.toolCallDeltas = toolCallDeltas;
       }
     }
 
+    return result;
+  }
+
+  /** Drain parser tail after the last stream chunk (call before reading accumulatedText). */
+  finishInlineReasoning(): ProcessedStreamChunk {
+    const tail = this.inlineReasoningParser.flush();
+    const result: ProcessedStreamChunk = {};
+    if (tail.userDelta) {
+      this.text += tail.userDelta;
+      result.textDelta = tail.userDelta;
+    }
+    if (tail.reasoningDelta) {
+      result.inlineReasoningDelta = tail.reasoningDelta;
+    }
     return result;
   }
 
@@ -111,6 +148,11 @@ export class StreamAccumulator {
 
   get accumulatedToolCalls(): AccumulatedToolCall[] {
     return [...this.toolCallMap.values()];
+  }
+
+  /** Tool call for the provider stream index (not array position). */
+  getToolCallAtIndex(index: number): AccumulatedToolCall | undefined {
+    return this.toolCallMap.get(index);
   }
 
   /**
@@ -162,6 +204,7 @@ export class StreamAccumulator {
 
   reset(): void {
     this.text = "";
+    this.inlineReasoningParser.reset();
     this.toolCallMap.clear();
     this.seenToolStart.clear();
     this.frozenIndices.clear();

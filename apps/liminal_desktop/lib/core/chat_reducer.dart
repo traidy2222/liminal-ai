@@ -38,6 +38,8 @@ ChatTranscriptState reduceChatEvent(
       return _onToolStart(state, data);
     case 'tool_delta':
       return _onToolDelta(state, data);
+    case 'compose_preview':
+      return _onComposePreview(state, data);
     case 'tool_approval':
       return _onToolApproval(state, data);
     case 'approval_decision':
@@ -295,42 +297,147 @@ ChatTranscriptState _onToolStart(ChatTranscriptState state, Map<String, dynamic>
   return withTool;
 }
 
+ChatTranscriptState _onComposePreview(
+  ChatTranscriptState state,
+  Map<String, dynamic> data,
+) {
+  final callId = data['callId'] as String? ?? '';
+  final toolName = data['name'] as String? ?? '';
+  final rawCompose = data['compose'];
+  final compose =
+      rawCompose is Map ? Map<String, dynamic>.from(rawCompose) : null;
+  final argsJson = data['argsJson'] as String? ?? '';
+  if (callId.isEmpty || toolName.isEmpty || compose == null) return state;
+  if (!isComposeDockTool(toolName)) return state;
+
+  final msgs = List<MessageEntry>.from(state.messages);
+  final existing = _toolCallById(msgs, callId);
+  if (existing == null) {
+    msgs.add(
+      ToolCallMessage(
+        callId: callId,
+        name: toolName,
+        status: ToolCallStatus.streaming,
+        argsPreview: argsJson,
+        startedAt: DateTime.now().millisecondsSinceEpoch,
+      ),
+    );
+  } else {
+    existing.argsPreview = argsJson.isNotEmpty ? argsJson : existing.argsPreview;
+  }
+
+  final prev = state.fileEditView;
+  final phase =
+      prev?.callId == callId ? prev!.phase : FileEditPhase.streaming;
+
+  return state.copyWith(
+    messages: msgs,
+    fileEditView: _fileEditViewFromWireCompose(
+      callId: callId,
+      toolName: toolName,
+      compose: compose,
+      phase: phase,
+    ),
+  );
+}
+
 ChatTranscriptState _onToolDelta(ChatTranscriptState state, Map<String, dynamic> data) {
   final callId = data['callId'] as String;
   final argsDelta = data['argsDelta'] as String? ?? '';
+  final wireArgsJson = data['argsJson'] as String?;
+  final wireName = data['name'] as String?;
+  final rawCompose = data['compose'];
+  final wireCompose =
+      rawCompose is Map ? Map<String, dynamic>.from(rawCompose) : null;
   final msgs = List<MessageEntry>.from(state.messages);
+
+  String accumulateArgs(String current) =>
+      wireArgsJson ?? (current + argsDelta);
+
   for (var i = 0; i < msgs.length; i++) {
     final m = msgs[i];
     if (m is ThinkMessage && m.callId == callId && m.streaming) {
-      m.argsPreview += argsDelta;
+      m.argsPreview = accumulateArgs(m.argsPreview);
       m.content = _extractJsonString(m.argsPreview, 'content') ?? m.content;
       return state.copyWith(messages: msgs);
     }
     if (m is ReasonMessage && m.callId == callId && m.streaming) {
-      m.argsPreview += argsDelta;
+      m.argsPreview = accumulateArgs(m.argsPreview);
       m.inference = _extractJsonString(m.argsPreview, 'inference') ?? m.inference;
       return state.copyWith(messages: msgs);
     }
     if (m is PlanMessage && m.callId == callId && m.streaming) {
-      m.argsPreview += argsDelta;
+      m.argsPreview = accumulateArgs(m.argsPreview);
       return state.copyWith(messages: msgs);
     }
     if (m is ToolCallMessage && m.callId == callId) {
-      m.argsPreview += argsDelta;
+      m.argsPreview = accumulateArgs(m.argsPreview);
       var next = state.copyWith(messages: msgs);
-      if (isComposeDockTool(m.name) && next.fileEditView?.callId == callId) {
+      if (isComposeDockTool(m.name)) {
+        final prev = next.fileEditView;
+        final phase = prev?.callId == callId
+            ? prev!.phase
+            : FileEditPhase.streaming;
         next = next.copyWith(
-          fileEditView: _refreshComposeDockView(
-            callId: callId,
-            toolName: m.name,
-            argsJson: m.argsPreview,
-            phase: next.fileEditView!.phase,
-          ),
+          fileEditView: wireCompose != null
+              ? _fileEditViewFromWireCompose(
+                  callId: callId,
+                  toolName: m.name,
+                  compose: wireCompose,
+                  phase: phase,
+                )
+              : _refreshComposeDockView(
+                  callId: callId,
+                  toolName: m.name,
+                  argsJson: m.argsPreview,
+                  phase: phase,
+                ),
         );
       }
       return next;
     }
   }
+
+  // Self-heal: harness may emit tool_delta before tool_start reaches the UI.
+  final healName = wireName ?? _toolCallById(msgs, callId)?.name;
+  if (healName != null &&
+      isComposeDockTool(healName) &&
+      (wireArgsJson != null || argsDelta.isNotEmpty)) {
+    final argsJson = wireArgsJson ?? argsDelta;
+    final withTool = _toolCallById(msgs, callId) == null
+        ? state.copyWith(
+            messages: [
+              ...msgs,
+              ToolCallMessage(
+                callId: callId,
+                name: healName,
+                status: ToolCallStatus.streaming,
+                argsPreview: argsJson,
+                startedAt: DateTime.now().millisecondsSinceEpoch,
+              ),
+            ],
+          )
+        : state.copyWith(messages: msgs);
+    final prev = withTool.fileEditView;
+    final phase =
+        prev?.callId == callId ? prev!.phase : FileEditPhase.streaming;
+    return withTool.copyWith(
+      fileEditView: wireCompose != null
+          ? _fileEditViewFromWireCompose(
+              callId: callId,
+              toolName: healName,
+              compose: wireCompose,
+              phase: phase,
+            )
+          : _refreshComposeDockView(
+              callId: callId,
+              toolName: healName,
+              argsJson: argsJson,
+              phase: phase,
+            ),
+    );
+  }
+
   return state;
 }
 
@@ -487,9 +594,25 @@ ChatTranscriptState _onToolResult(ChatTranscriptState state, Map<String, dynamic
       );
     }
   }
-  if (shouldCloseComposeDockOnToolResult(name) &&
-      next.fileEditView?.callId == callId) {
-    next = next.copyWith(clearFileEditView: true);
+  if (isComposeDockTool(name)) {
+    final tool = _toolCallById(msgs, callId);
+    final previewArgs = tool?.argsPreview.trim() ?? '';
+    final argsJson =
+        previewArgs.isNotEmpty ? previewArgs : (args.isNotEmpty ? jsonEncode(args) : '');
+    if (argsJson.isNotEmpty) {
+      final prev = next.fileEditView;
+      final phase = prev?.callId == callId
+          ? (ok ? FileEditPhase.writing : prev!.phase)
+          : (ok ? FileEditPhase.writing : FileEditPhase.streaming);
+      next = next.copyWith(
+        fileEditView: _refreshComposeDockView(
+          callId: callId,
+          toolName: name,
+          argsJson: argsJson,
+          phase: phase,
+        ).copyWith(incomplete: !ok),
+      );
+    }
   }
   return next;
 }
@@ -616,7 +739,13 @@ ChatTranscriptState _applyPlanStepDone(
 }
 
 ChatTranscriptState _onTurnEnd(ChatTranscriptState state, Map<String, dynamic> data) {
-  var next = _finalizeStreaming(state).copyWith(busy: false, clearFileEditView: true);
+  var next = _finalizeStreaming(state).copyWith(busy: false);
+  final fev = next.fileEditView;
+  if (fev != null && fev.open) {
+    next = next.copyWith(
+      fileEditView: fev.copyWith(incomplete: false),
+    );
+  }
   final hm = data['harnessMetrics'] as Map<String, dynamic>?;
   if (hm != null) {
     final ep = hm['epistemicState'] as Map<String, dynamic>?;
@@ -709,6 +838,59 @@ FileEditViewState _openComposeDockView({
   );
 }
 
+FileEditViewState _fileEditViewFromWireCompose({
+  required String callId,
+  required String toolName,
+  required Map<String, dynamic> compose,
+  required FileEditPhase phase,
+}) {
+  final now = DateTime.now().millisecondsSinceEpoch;
+  final kindRaw = compose['kind'] as String? ?? 'file';
+  final isEmail = kindRaw == 'email' || isEmailComposeDockTool(toolName);
+  final content = compose['content'] as String? ?? '';
+  final charCount = (compose['charCount'] as num?)?.toInt() ?? content.length;
+  final lineCount = (compose['lineCount'] as num?)?.toInt() ?? 0;
+  final incomplete = compose['incomplete'] as bool? ?? true;
+  final path = compose['path'] as String?;
+
+  if (isEmail) {
+    final subject = compose['subject'] as String? ?? path;
+    final bodyHtml = compose['bodyHtml'] as String?;
+    final bodyPlain = compose['bodyPlain'] as String?;
+    return FileEditViewState(
+      open: true,
+      callId: callId,
+      toolName: toolName,
+      kind: ComposeDockKind.email,
+      subject: subject,
+      recipients: compose['recipients'] as String?,
+      path: subject,
+      content: bodyHtml ?? bodyPlain ?? content,
+      bodyHtml: bodyHtml,
+      bodyPlain: bodyPlain,
+      charCount: charCount,
+      lineCount: lineCount,
+      incomplete: incomplete,
+      phase: phase,
+      updatedAt: now,
+    );
+  }
+
+  return FileEditViewState(
+    open: true,
+    callId: callId,
+    toolName: toolName,
+    kind: ComposeDockKind.file,
+    path: path,
+    content: content,
+    charCount: charCount,
+    lineCount: lineCount,
+    incomplete: incomplete,
+    phase: phase,
+    updatedAt: now,
+  );
+}
+
 FileEditViewState _emailViewFromPreview({
   required String callId,
   required String toolName,
@@ -757,7 +939,7 @@ FileEditViewState _refreshComposeDockView({
     );
   }
 
-  final preview = extractStreamingWritePreview(toolName, argsJson);
+  final preview = extractStreamingWritePreview(toolName, argsJson, fullContent: true);
   if (preview == null) {
     return FileEditViewState(
       open: true,

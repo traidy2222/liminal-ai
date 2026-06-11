@@ -6,12 +6,18 @@ import {
   HARNESS_MANAGED_ENV_KEY_SET,
   harnessEnvResolutionMeta,
   resolveHarnessEnvRaw,
+  ensureProviderApiKeysInProcess,
+  isProviderApiKeyConfigured,
   resolveInferenceMode,
   resolveProviderConfig,
+  syncProviderProcessEnvForBase,
   type RuntimePreferences,
 } from "@liminal/core";
 import {
+  apiKeyEnvVarForBaseUrl,
+  listProviderBackendsForSettings,
   listProviderPresetsForSettings,
+  resolveProviderBackendId,
   resolveProviderPresetId,
 } from "@liminal/core/provider-presets";
 import type { PersonaUiThemeV2, PersonaUiCopy } from "@liminal/core";
@@ -71,8 +77,6 @@ export async function buildDesktopConfig(
 ): Promise<DesktopConfigSnapshot> {
   const prefs = bridge.harness.getRuntimePreferences();
   const cfg = bridge.harness.config;
-  const envModel = process.env["AGENT_MODEL"]?.trim();
-  const envBase = process.env["AGENT_API_BASE_URL"]?.trim();
   let personaDisplayLabel = "Liminal";
   let personaUiTheme: PersonaUiThemeV2 | undefined;
   let personaUiCopy: PersonaUiCopy | undefined;
@@ -90,7 +94,10 @@ export async function buildDesktopConfig(
   } catch {
     /* defaults applied client-side */
   }
-  const apiKeyConfigured = !!(cfg.openRouterApiKey?.trim() || firstApiKeyFromEnv(repoRoot));
+  ensureProviderApiKeysInProcess();
+  const apiKeyConfigured =
+    !!(cfg.openRouterApiKey?.trim()) ||
+    isProviderApiKeyConfigured({ baseURL: cfg.baseURL });
   return {
     apiKeyConfigured,
     personaBootstrapEnabled: resolveHarnessEnvRaw("AGENT_PERSONA_BOOTSTRAP", prefs) !== "0",
@@ -100,8 +107,8 @@ export async function buildDesktopConfig(
     provider: {
       model: (cfg.model ?? "").slice(0, 200),
       baseURL: (cfg.baseURL ?? "").slice(0, 500),
-      modelLockedByEnv: !!envModel,
-      baseURLLockedByEnv: !!envBase,
+      modelLockedByEnv: false,
+      baseURLLockedByEnv: false,
     },
     repoRoot,
     ...(personaUiTheme ? { personaUiTheme } : {}),
@@ -120,49 +127,41 @@ export function buildSettingsSnapshot(
   prefs: RuntimePreferences | null,
   bridge?: SessionBridge
 ) {
-  const envModel = process.env["AGENT_MODEL"]?.trim();
-  const envBase = process.env["AGENT_API_BASE_URL"]?.trim();
   const harnessCfg = bridge?.harness.config;
   const model = (
     harnessCfg?.model ??
     prefs?.provider?.model?.trim() ??
-    envModel ??
     ""
   ).slice(0, 200);
   const baseURL = (
     harnessCfg?.baseURL ??
     prefs?.provider?.baseURL?.trim() ??
-    envBase ??
     ""
   ).slice(0, 500);
 
-  let apiKeyConfigured = false;
-  try {
-    const cfg = resolveProviderConfig();
-    apiKeyConfigured = !!(cfg.apiKey?.trim());
-  } catch {
-    apiKeyConfigured = !!(
-      harnessCfg?.openRouterApiKey?.trim() ||
-      process.env["AGENT_API_KEY"]?.trim() ||
-      process.env["OPENROUTER_API_KEY"]?.trim()
-    );
-  }
+  ensureProviderApiKeysInProcess();
+  const apiKeyConfigured =
+    !!(harnessCfg?.openRouterApiKey?.trim()) ||
+    isProviderApiKeyConfigured({ baseURL: baseURL || undefined });
 
   return {
     tabs: HARNESS_SETTINGS_TABS,
     fields: buildHarnessSettingsApiFields(prefs),
     providerPresets: listProviderPresetsForSettings(),
+    providerBackends: listProviderBackendsForSettings(),
     provider: {
       model,
       baseURL,
-      modelLockedByEnv: !!envModel,
-      baseURLLockedByEnv: !!envBase,
+      modelLockedByEnv: false,
+      baseURLLockedByEnv: false,
       apiKeyConfigured,
       inferenceMode: resolveInferenceMode(prefs),
       resolvedPresetId: resolveProviderPresetId(model, baseURL),
+      resolvedBackendId: resolveProviderBackendId(baseURL),
     },
     hint:
-      "API keys are stored in .env only and are never sent over the desktop protocol. Use save_provider to set AGENT_API_KEY.",
+      "API keys are stored in .env only and are never sent over the desktop protocol. " +
+      "Use save_provider to set OPENROUTER_API_KEY, KIMCHI_API_KEY, or AGENT_API_KEY.",
   };
 }
 
@@ -179,20 +178,21 @@ export async function saveProviderCredentials(
     throw new Error("API key is too short.");
   }
 
-  const updates: Record<string, string> = {};
-  if (key.length >= 8) updates.AGENT_API_KEY = key;
-  if (model && !process.env["AGENT_MODEL"]?.trim()) {
-    updates.AGENT_MODEL = model.slice(0, 200);
-  }
-  if (baseURL && !process.env["AGENT_API_BASE_URL"]?.trim()) {
-    updates.AGENT_API_BASE_URL = baseURL.slice(0, 500);
-  }
+  const effectiveBase =
+    baseURL?.trim() ||
+    process.env["AGENT_API_BASE_URL"]?.trim() ||
+    "";
+  const keyEnvVar = /^castai_v1_/i.test(key)
+    ? "KIMCHI_API_KEY"
+    : apiKeyEnvVarForBaseUrl(effectiveBase);
 
+  const updates: Record<string, string> = {};
+  if (key.length >= 8) updates[keyEnvVar] = key;
   const prefsPatch: Partial<RuntimePreferences> = {};
   if (model || baseURL) {
     prefsPatch.provider = {
-      ...(model ? { model } : {}),
-      ...(baseURL ? { baseURL } : {}),
+      ...(model ? { model: model.slice(0, 200) } : {}),
+      ...(baseURL ? { baseURL: baseURL.slice(0, 500) } : {}),
     };
   }
 
@@ -205,7 +205,17 @@ export async function saveProviderCredentials(
       throw new Error(`Invalid repo root: ${repoRoot}`);
     }
     writeEnvMerge(repoRoot, updates);
-    if (updates.AGENT_API_KEY) applyApiKeyToProcess(updates.AGENT_API_KEY);
+    const savedKey = updates[keyEnvVar];
+    if (savedKey) {
+      applyApiKeyToProcess(savedKey, keyEnvVar);
+      if (keyEnvVar === "OPENROUTER_API_KEY") {
+        applyApiKeyToProcess(savedKey, "AGENT_API_KEY");
+      }
+    }
+  }
+
+  if (baseURL) {
+    syncProviderProcessEnvForBase(baseURL);
   }
 
   await registry.reloadRuntimePrefs();
@@ -248,11 +258,11 @@ export async function patchHarnessSettings(
   }
   if (body.provider && typeof body.provider === "object") {
     const prov: NonNullable<RuntimePreferences["provider"]> = { ...prefs?.provider };
-    if (!process.env["AGENT_MODEL"]?.trim() && typeof body.provider.model === "string") {
+    if (typeof body.provider.model === "string") {
       const m = body.provider.model.trim();
       if (m) prov.model = m.slice(0, 200);
     }
-    if (!process.env["AGENT_API_BASE_URL"]?.trim() && typeof body.provider.baseURL === "string") {
+    if (typeof body.provider.baseURL === "string") {
       const b = body.provider.baseURL.trim();
       if (b) prov.baseURL = b.slice(0, 500);
     }
@@ -267,4 +277,11 @@ export async function patchHarnessSettings(
   }
   await active.harness.patchRuntimePreferences(runtimePatch, { persist: true });
   await registry.reloadRuntimePrefs();
+  const nextBase =
+    runtimePatch.provider?.baseURL?.trim() ||
+    active.harness.getRuntimePreferences()?.provider?.baseURL?.trim();
+  if (nextBase) {
+    syncProviderProcessEnvForBase(nextBase);
+  }
+  await registry.reapplyAllProviders();
 }

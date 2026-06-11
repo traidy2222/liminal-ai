@@ -81,6 +81,13 @@ export function inferWorkflowTaskFamilies(
   if (WORKFLOW_RESEARCH_GOAL_RE.test(goal)) {
     for (const f of ["web", "memory_advanced", "markets"] as const) out.add(f);
   }
+  if (
+    /\b(save|write|create|output|deliver|produce|draft|persist)\b[\s\S]{0,48}\b(file|files|document|markdown|\.md|report)\b/i.test(
+      goal
+    )
+  ) {
+    out.add("files_edit");
+  }
   if (phaseKind === "review" || /\badversarial\b/i.test(goal)) {
     out.add("web");
     out.add("code_intel");

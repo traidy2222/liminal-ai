@@ -4,6 +4,9 @@ import assert from "node:assert/strict";
 
 import {
   buildHarnessModelPackEnvPatch,
+  inferPresetBackend,
+  KIMCHI_MODEL_PRESETS,
+  listProviderPresetsForBackend,
   listProviderPresetsForSettings,
   OPENROUTER_MODEL_SLUG,
   PROVIDER_MODEL_PRESETS,
@@ -11,6 +14,8 @@ import {
   resolveProviderModelPresetId,
   resolveProviderPresetId,
 } from "./provider_model_presets.js";
+import { KIMCHI_API_BASE_URL, KIMCHI_MODEL_SLUG } from "./kimchi_provider.js";
+import { apiKeyEnvVarForBaseUrl, resolveProviderBackendId } from "./provider_backends.js";
 
 
 
@@ -122,6 +127,51 @@ test("listProviderPresetsForSettings includes custom and owl stealth", () => {
   const presets = listProviderPresetsForSettings();
   assert.ok(presets.some((p) => p.id === PROVIDER_PRESET_CUSTOM_ID));
   assert.ok(presets.some((p) => p.id === "openrouter-owl-stealth"));
+});
+
+test("kimchi presets use Cast AI base URL and clear OpenRouter routing", () => {
+  const pack = KIMCHI_MODEL_PRESETS.find((p) => p.id === "kimchi-kimi-k25")!;
+  assert.equal(pack.baseURL, KIMCHI_API_BASE_URL);
+  assert.equal(pack.model, KIMCHI_MODEL_SLUG.KIMI_K25);
+  assert.equal(pack.harnessEnvPatch.AGENT_PROVIDER_STRATEGY, "openrouter_default");
+  assert.equal(pack.harnessEnvPatch.AGENT_PROVIDER_ORDER, "");
+});
+
+test("listProviderPresetsForBackend filters by provider", () => {
+  const kimchi = listProviderPresetsForBackend("kimchi");
+  const openrouter = listProviderPresetsForBackend("openrouter");
+  assert.ok(kimchi.every((p) => inferPresetBackend(p) === "kimchi"));
+  assert.ok(openrouter.every((p) => inferPresetBackend(p) === "openrouter"));
+  assert.ok(kimchi.some((p) => p.id === "kimchi-minimax-m27"));
+  assert.ok(!kimchi.some((p) => p.id === "deepseek-v4"));
+  assert.ok(openrouter.some((p) => p.id === "deepseek-v4"));
+  assert.ok(openrouter.some((p) => p.id === "mix-deepseek-haiku"));
+  assert.ok(!openrouter.some((p) => p.id.startsWith("kimchi-")));
+});
+
+test("inferPresetBackend works without providerBackend field", () => {
+  const deepseek = listProviderPresetsForSettings().find((p) => p.id === "deepseek-v4")!;
+  const kimchi = listProviderPresetsForSettings().find((p) => p.id === "kimchi-kimi-k25")!;
+  assert.equal(inferPresetBackend({ ...deepseek, providerBackend: undefined }), "openrouter");
+  assert.equal(inferPresetBackend({ ...kimchi, providerBackend: undefined }), "kimchi");
+});
+
+test("resolveProviderBackendId detects kimchi and openrouter bases", () => {
+  assert.equal(resolveProviderBackendId(KIMCHI_API_BASE_URL), "kimchi");
+  assert.equal(resolveProviderBackendId("https://openrouter.ai/api/v1"), "openrouter");
+  assert.equal(resolveProviderBackendId("http://localhost:1234/v1"), "local");
+});
+
+test("apiKeyEnvVarForBaseUrl maps kimchi to KIMCHI_API_KEY", () => {
+  assert.equal(apiKeyEnvVarForBaseUrl(KIMCHI_API_BASE_URL), "KIMCHI_API_KEY");
+  assert.equal(apiKeyEnvVarForBaseUrl("https://openrouter.ai/api/v1"), "OPENROUTER_API_KEY");
+});
+
+test("resolveProviderPresetId matches kimchi minimax pack", () => {
+  assert.equal(
+    resolveProviderPresetId(KIMCHI_MODEL_SLUG.MINIMAX_M27, KIMCHI_API_BASE_URL),
+    "kimchi-minimax-m27"
+  );
 });
 
 

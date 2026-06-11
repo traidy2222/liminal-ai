@@ -116,9 +116,9 @@ export function createResearchStateTool(ledger: ResearchLedger) {
       if (view === "summary") {
         lines.push("");
         lines.push(
-          "next moves: web_fetch a pending URL · web_search with a new intent bucket · " +
-            "query_tool_outputs to retrieve a prior result body · hypothesize() to commit to a direction · " +
-            "write the answer if coverage is sufficient."
+          "next moves: web_fetch pending URLs (parallel when independent) · web_search a new intent bucket · " +
+            "query_tool_outputs to retrieve a prior result body · hypothesize() when direction is unclear · " +
+            "synthesize when you judge coverage matches the ask and [OUTPUT EFFORT] — search/fetch count is your call."
         );
       }
 

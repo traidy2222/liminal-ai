@@ -2,6 +2,7 @@ import 'package:flutter/foundation.dart';
 
 import '../core/chat_reducer.dart' as chat_reducer;
 import '../core/chat_transcript_state.dart';
+import '../core/streaming_write_preview.dart';
 import '../models/browser_view_state.dart';
 import '../models/file_edit_view_state.dart';
 import '../models/terminal_panel_state.dart';
@@ -165,6 +166,17 @@ class ChatSessionController extends ChangeNotifier {
     }
     if (!prevFileEditOpen && nextFileEditOpen) {
       fileEditDockExpanded = true;
+      dockRailWidth = null;
+    }
+    if (event == 'tool_delta' ||
+        event == 'compose_preview' ||
+        event == 'tool_start' ||
+        (event == 'tool_result' &&
+            isComposeDockTool(data['name'] as String? ?? ''))) {
+      if (nextFileEditOpen) {
+        fileEditDockExpanded = true;
+        dockRailWidth = null;
+      }
     }
     notifyListeners();
   }

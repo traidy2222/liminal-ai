@@ -351,7 +351,7 @@ packages/tui    packages/web    packages/eval   — run directly via tsx, never 
 
 **File write** — `write_file` (whole-file: create/overwrite/append) and `edit_file` (targeted: `replacements` or fuzzy `diff`) are always loaded. The `files_edit` family (activation-only) adds `move_file`, `copy_file`, `copy_tree`, `mkdir_p`, `delete_file` (file or recursive dir; destructive, approval-gated), `multi_file_apply` (atomic, rollback-aware), `path_guard`. Streaming/integrity support: `file_write_ops.ts`, `file_write_integrity.ts`.
 
-**Shell & process** — `run_shell` (`dangerLevel: "destructive"`), `run_background`, `kill_process`, `list_processes`, `read_process_output`, `run_command_with_pty`, `execute_code`, `run_tests`, `run_lint`.
+**Shell & process** — `run_shell` (`dangerLevel: "destructive"`), `run_background`, `kill_process`, `list_processes`, `read_process_output`, `run_command_with_pty`, `execute_code`, `run_tests`, `run_lint`. The interactive agent terminal uses **OSC 133 shell integration**: core injects prompt markers at PTY launch (`core/shell_integration_launch.ts` — PowerShell prompt function, cmd `PROMPT`, bash/zsh rc shims), and `tools/families/shell/shell_integration.ts` (`Osc133Tracker`) turns them into deterministic "command done, exit N" events — no prompt regexes, no exit-code probe typed into the shell (cmd.exe is the exception: A/B markers only, exit probe kept). `agent_shell_session.ts` is marker-first with the legacy `shell_prompt.ts` `PromptDetector` heuristics as fallback for shells without integration (fish, exotic prompts).
 
 **Web & markets** — `web_fetch`, `web_search`, `http_request`, `weather_lookup`, `markets_quote`.
 

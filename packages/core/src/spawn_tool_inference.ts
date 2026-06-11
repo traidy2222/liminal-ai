@@ -12,6 +12,7 @@ import { effectiveHarnessEnvRaw } from "./harness_effective_env.js";
 import { TOOL_FAMILY_DESCRIPTORS } from "./contract_tool_mapper.js";
 import type { ToolRegistry } from "./registry.js";
 import type { ChildAgentConfig } from "./types.js";
+import { spawnObjectiveNeedsFileTools } from "./spawn_provisioning.js";
 
 export interface SpawnToolInferenceResult {
   families: string[];
@@ -176,6 +177,12 @@ export async function inferSpawnToolsWithFastModel(
     }
 
     const parsed = parseSpawnToolInferencePayload(jr.parsed);
+    if (spawnObjectiveNeedsFileTools(cfg)) {
+      if (!parsed.families.includes("files_edit")) parsed.families.push("files_edit");
+      for (const t of ["write_file", "edit_file", "read_file", "grep_file"] as const) {
+        if (!parsed.activateTools.includes(t)) parsed.activateTools.push(t);
+      }
+    }
     return { ...parsed, source: "llm" };
   } catch (err) {
     return {

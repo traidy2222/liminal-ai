@@ -4,6 +4,8 @@ import { join } from "node:path";
 const API_KEY_VARS = [
   "AGENT_API_KEY",
   "OPENROUTER_API_KEY",
+  "KIMCHI_API_KEY",
+  "CASTAI_API_KEY",
   "OPENAI_API_KEY",
   "ANTHROPIC_API_KEY",
   "XAI_API_KEY",
@@ -59,6 +61,6 @@ export function firstApiKeyFromEnv(repoRoot: string): string | null {
   return null;
 }
 
-export function applyApiKeyToProcess(apiKey: string): void {
-  process.env["AGENT_API_KEY"] = apiKey.trim();
+export function applyApiKeyToProcess(apiKey: string, envVar = "AGENT_API_KEY"): void {
+  process.env[envVar] = apiKey.trim();
 }

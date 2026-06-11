@@ -1,5 +1,7 @@
+import 'dart:async';
 import 'dart:io';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:just_audio_media_kit/just_audio_media_kit.dart';
 import 'package:path/path.dart' as p;
@@ -13,6 +15,7 @@ import 'state/app_controller.dart';
 
 Future<void> main(List<String> args) async {
   WidgetsFlutterBinding.ensureInitialized();
+  _installCrashLogging();
   JustAudioMediaKit.ensureInitialized();
 
   final launchArgs = await AppWindowManager.currentSubWindowLaunchArgs();
@@ -29,6 +32,34 @@ Future<void> main(List<String> args) async {
   final repoRoot = detectRepoRoot();
   final controller = AppController(repoRoot: repoRoot);
   runApp(LiminalApp(controller: controller));
+}
+
+void _installCrashLogging() {
+  final previous = FlutterError.onError;
+  FlutterError.onError = (details) {
+    _appendDesktopLog(
+      'FlutterError: ${details.exceptionAsString()}\n${details.stack}',
+    );
+    previous?.call(details);
+  };
+  PlatformDispatcher.instance.onError = (error, stack) {
+    _appendDesktopLog('Uncaught: $error\n$stack');
+    return false;
+  };
+}
+
+void _appendDesktopLog(String line) {
+  try {
+    final home = Platform.environment['USERPROFILE'] ??
+        Platform.environment['HOME'] ??
+        Directory.current.path;
+    final file = File(p.join(home, '.liminal', 'desktop.log'));
+    file.parent.createSync(recursive: true);
+    final stamp = DateTime.now().toIso8601String();
+    file.writeAsStringSync('[$stamp] $line\n', mode: FileMode.append);
+  } catch (_) {
+    /* logging must never throw */
+  }
 }
 
 /// Monorepo root for dev (`flutter run`) and fallback when bundle.json is absent.

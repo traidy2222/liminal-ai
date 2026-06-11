@@ -136,6 +136,46 @@ void _sanitizeNode(dom.Node node) {
   }
 }
 
+/// Pull inner markup from a full email/document wrapper so [sanitizeEmbedHtml]
+/// does not drop the whole tree when `<html>` / `<body>` are disallowed tags.
+String extractEmailHtmlBodyFragment(String html) {
+  var input = html.trim();
+  if (input.isEmpty) return '';
+
+  final bodyOpen = RegExp(r'<body\b[^>]*>', caseSensitive: false);
+  final open = bodyOpen.firstMatch(input);
+  if (open != null) {
+    var inner = input.substring(open.end);
+    final close = RegExp(r'</body\s*>', caseSensitive: false).firstMatch(inner);
+    if (close != null) {
+      inner = inner.substring(0, close.start);
+    }
+    return inner.trim();
+  }
+
+  if (RegExp(r'<html\b', caseSensitive: false).hasMatch(input)) {
+    try {
+      final doc = html_parser.parse(input);
+      final body = doc.body;
+      if (body != null) {
+        final inner = body.innerHtml.trim();
+        if (inner.isNotEmpty) return inner;
+      }
+    } catch (_) {
+      // fall through to fragment sanitize
+    }
+  }
+
+  return input;
+}
+
+/// Email compose preview — unwrap document chrome, then reuse embed sanitizer.
+String sanitizeEmailPreviewHtml(String html) {
+  final fragment = extractEmailHtmlBodyFragment(html);
+  if (fragment.isEmpty) return '';
+  return sanitizeEmbedHtml(fragment);
+}
+
 /// Sanitize HTML fragment for embed (web `rehype-sanitize` parity, best-effort).
 String sanitizeEmbedHtml(String html) {
   var input = html.trim();

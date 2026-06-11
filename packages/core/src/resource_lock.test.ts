@@ -28,3 +28,16 @@ test("ResourceLockManager blocks a different task until release", async () => {
   assert.equal(await locks.acquireAll([id], "task_b"), true);
   locks.releaseAll([id], "task_b");
 });
+
+test("ResourceLockManager blocks reentrant acquire for UI terminal locks", async () => {
+  const locks = new ResourceLockManager();
+  const id = "ws:/repo::shell:terminal:chat_1";
+  const task = "chat_1";
+
+  assert.equal(await locks.acquireAll([id], task), true);
+  assert.equal(await locks.acquireAll([id], task), false);
+
+  locks.releaseAll([id], task);
+  assert.equal(await locks.acquireAll([id], task), true);
+  locks.releaseAll([id], task);
+});

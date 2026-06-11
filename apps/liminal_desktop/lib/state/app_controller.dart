@@ -293,6 +293,14 @@ class AppController extends ChangeNotifier {
     if (event == 'transcript_replay' && visibleChatIds.contains(chatId)) {
       notifyListeners();
     }
+    if (visibleChatIds.contains(chatId) &&
+        (event == 'tool_start' ||
+            event == 'tool_delta' ||
+            event == 'compose_preview' ||
+            event == 'tool_result' ||
+            event == 'turn_end')) {
+      notifyListeners();
+    }
   }
 
   void _handleSpeechEvent(Map<String, dynamic> data) {

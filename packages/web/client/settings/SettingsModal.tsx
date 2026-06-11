@@ -1,8 +1,11 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import type { HarnessSettingsApiField } from "@liminal/core";
 import {
+  PROVIDER_BACKENDS,
   PROVIDER_PRESETS,
   PROVIDER_PRESET_CUSTOM_ID,
+  presetsForBackend,
+  resolveBackendSelection,
   resolvePresetSelection,
 } from "./providerPresets.js";
 import { IntegrationsPanel } from "./IntegrationsPanel.js";
@@ -214,14 +217,29 @@ export function SettingsModal({
   const showProvider = !!filtered || activeTabId === "models_api";
   const showIntegrations = activeTabId === "integrations" && !filtered;
   const providerPresetLocked = providerModelLocked || providerBaseLocked;
+  const resolvedBackendId = useMemo(
+    () => resolveBackendSelection(providerBase),
+    [providerBase]
+  );
+  const backendPresets = useMemo(
+    () => presetsForBackend(resolvedBackendId),
+    [resolvedBackendId]
+  );
   const resolvedPresetId = useMemo(
     () => resolvePresetSelection(providerModel, providerBase),
     [providerModel, providerBase]
   );
+  const modelDropdownValue = backendPresets.some((p) => p.id === resolvedPresetId)
+    ? resolvedPresetId
+    : PROVIDER_PRESET_CUSTOM_ID;
   const presetHint = useMemo(() => {
     const p = PROVIDER_PRESETS.find((x) => x.id === resolvedPresetId);
     return p?.hint ?? "";
   }, [resolvedPresetId]);
+  const backendHint = useMemo(() => {
+    const b = PROVIDER_BACKENDS.find((x) => x.id === resolvedBackendId);
+    return b?.hint ?? "";
+  }, [resolvedBackendId]);
 
   const providerHintText =
     "Values reflect the running server harness. API keys are never displayed. ENV = read-only field.";
@@ -415,17 +433,17 @@ export function SettingsModal({
                     )}
                     <div style={{ fontSize: 10, color: "#778899", marginBottom: 8 }}>{providerHintText}</div>
                     <div style={{ display: "grid", gridTemplateColumns: "120px 1fr", gap: 8, alignItems: "center", marginBottom: 10 }}>
-                      <span style={{ fontSize: 11, color: "#aabbcc" }}>preset</span>
+                      <span style={{ fontSize: 11, color: "#aabbcc" }}>provider</span>
                       <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
                         <select
                           disabled={saving || loading || providerPresetLocked}
-                          value={resolvedPresetId}
+                          value={resolvedBackendId}
                           onChange={(e) => {
-                            const id = e.target.value;
-                            if (id === PROVIDER_PRESET_CUSTOM_ID) return;
-                            onPresetApply(id);
+                            const backendId = e.target.value;
+                            const first = presetsForBackend(backendId)[0];
+                            if (first) onPresetApply(first.id);
                           }}
-                          aria-label="Provider preset"
+                          aria-label="Provider backend"
                           style={{
                             width: "100%",
                             maxWidth: 520,
@@ -438,11 +456,47 @@ export function SettingsModal({
                             fontFamily: "monospace",
                           }}
                         >
-                          {PROVIDER_PRESETS.map((p) => (
+                          {PROVIDER_BACKENDS.map((b) => (
+                            <option key={b.id} value={b.id}>
+                              {b.label}
+                            </option>
+                          ))}
+                        </select>
+                        {backendHint ? (
+                          <span style={{ fontSize: 10, color: "#8899aa", lineHeight: 1.45 }}>{backendHint}</span>
+                        ) : null}
+                      </div>
+                    </div>
+                    <div style={{ display: "grid", gridTemplateColumns: "120px 1fr", gap: 8, alignItems: "center", marginBottom: 10 }}>
+                      <span style={{ fontSize: 11, color: "#aabbcc" }}>model</span>
+                      <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                        <select
+                          disabled={saving || loading || providerPresetLocked}
+                          value={modelDropdownValue}
+                          onChange={(e) => {
+                            const id = e.target.value;
+                            if (id === PROVIDER_PRESET_CUSTOM_ID) return;
+                            onPresetApply(id);
+                          }}
+                          aria-label="Provider model"
+                          style={{
+                            width: "100%",
+                            maxWidth: 520,
+                            fontSize: 12,
+                            padding: "8px 10px",
+                            borderRadius: 2,
+                            border: "1px solid rgba(var(--lim-accent-rgb),0.2)",
+                            background: "rgba(0,10,20,0.95)",
+                            color: "#dde8f0",
+                            fontFamily: "monospace",
+                          }}
+                        >
+                          {backendPresets.map((p) => (
                             <option key={p.id} value={p.id}>
                               {p.label}
                             </option>
                           ))}
+                          <option value={PROVIDER_PRESET_CUSTOM_ID}>Custom…</option>
                         </select>
                         {providerPresetLocked ? (
                           <span style={{ fontSize: 10, color: MAGENTA, fontFamily: "monospace" }}>

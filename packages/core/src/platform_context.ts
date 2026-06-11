@@ -3,6 +3,13 @@ import path from "node:path";
 import { execFile as execFileCb } from "node:child_process";
 import { readFile } from "node:fs/promises";
 import { promisify } from "node:util";
+import {
+  buildCmdIntegrationPrompt,
+  buildPowerShellIntegrationScript,
+  ensureBashIntegrationRcFile,
+  ensureZshIntegrationDir,
+  type InteractivePtyLaunch,
+} from "./shell_integration_launch.js";
 
 const execFile = promisify(execFileCb);
 
@@ -101,6 +108,101 @@ export function resolveShellRuntime(): ShellRuntime {
     args: ["-c"],
     displayName: path.basename(shellPath),
     commandChainHint: "Use && for success-chain and || for fallback; quote paths with spaces.",
+  };
+}
+
+/** Launch argv for a one-shot PTY (shell exits when the command finishes — no exit markers). */
+export function buildOneshotPtyLaunch(
+  command: string,
+  cwd?: string
+): { executable: string; args: string[] } {
+  const runtime = resolveShellRuntime();
+  const cmd = command.trim();
+  if (!cmd) {
+    throw new Error("buildOneshotPtyLaunch: empty command");
+  }
+
+  if (runtime.kind === "cmd") {
+    const inner = cwd?.trim()
+      ? `cd /d "${cwd.trim().replace(/"/g, '""')}" && ${cmd}`
+      : cmd;
+    return { executable: runtime.executable, args: [...runtime.args, inner] };
+  }
+
+  if (runtime.kind === "powershell" || runtime.kind === "pwsh") {
+    const cd = cwd?.trim()
+      ? `Set-Location -LiteralPath '${cwd.trim().replace(/'/g, "''")}'; `
+      : "";
+    return {
+      executable: runtime.executable,
+      args: [...runtime.args, `${cd}${cmd}`],
+    };
+  }
+
+  const inner = cwd?.trim()
+    ? `cd '${cwd.trim().replace(/'/g, "'\\''")}' && ${cmd}`
+    : cmd;
+  return { executable: runtime.executable, args: [...runtime.args, inner] };
+}
+
+/**
+ * argv (+ env) for an interactive PTY tab, with OSC 133 shell integration
+ * injected so command completion / exit codes are deterministic marker events
+ * instead of prompt-regex guesses. See shell_integration_launch.ts.
+ */
+export function buildInteractivePtyLaunch(): InteractivePtyLaunch {
+  const runtime = resolveShellRuntime();
+  if (runtime.kind === "cmd") {
+    return {
+      executable: runtime.executable,
+      args: [],
+      env: { PROMPT: buildCmdIntegrationPrompt() },
+      exitCodeOnMarker: false,
+      integrationInjected: true,
+    };
+  }
+  if (runtime.kind === "powershell" || runtime.kind === "pwsh") {
+    return {
+      executable: runtime.executable,
+      args: ["-NoLogo", "-NoProfile", "-NoExit", "-Command", buildPowerShellIntegrationScript()],
+      exitCodeOnMarker: true,
+      integrationInjected: true,
+    };
+  }
+  const base = path.basename(runtime.executable).toLowerCase();
+  if (base === "bash") {
+    try {
+      const rcfile = ensureBashIntegrationRcFile();
+      return {
+        executable: runtime.executable,
+        args: ["--rcfile", rcfile],
+        exitCodeOnMarker: true,
+        integrationInjected: true,
+      };
+    } catch {
+      return { executable: runtime.executable, args: ["-l"], exitCodeOnMarker: false, integrationInjected: false };
+    }
+  }
+  if (base === "zsh") {
+    try {
+      const zdotdir = ensureZshIntegrationDir();
+      return {
+        executable: runtime.executable,
+        args: ["-l"],
+        env: { ZDOTDIR: zdotdir },
+        exitCodeOnMarker: true,
+        integrationInjected: true,
+      };
+    } catch {
+      return { executable: runtime.executable, args: ["-l"], exitCodeOnMarker: false, integrationInjected: false };
+    }
+  }
+  const loginArgs = base === "fish" ? ["-l"] : [];
+  return {
+    executable: runtime.executable,
+    args: loginArgs,
+    exitCodeOnMarker: false,
+    integrationInjected: false,
   };
 }
 

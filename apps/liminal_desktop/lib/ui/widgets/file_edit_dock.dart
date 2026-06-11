@@ -1,3 +1,6 @@
+import 'dart:async';
+import 'dart:math' as math;
+
 import 'package:flutter/material.dart';
 
 import '../../models/file_edit_view_state.dart';
@@ -29,17 +32,96 @@ class FileEditDock extends StatefulWidget {
 
 class _FileEditDockState extends State<FileEditDock> {
   final ScrollController _scroll = ScrollController();
+  Timer? _revealTimer;
+  int _revealedChars = 0;
+  String _revealTarget = '';
+
+  @override
+  void initState() {
+    super.initState();
+    _syncRevealAnimation(widget.view);
+  }
 
   @override
   void dispose() {
+    _revealTimer?.cancel();
     _scroll.dispose();
     super.dispose();
+  }
+
+  String _streamableContent(FileEditViewState view, {bool preferPlain = false}) {
+    if (view.isEmail) {
+      final html = view.bodyHtml?.trim() ?? '';
+      final plain = view.bodyPlain?.trim() ?? view.content;
+      if (preferPlain && plain.isNotEmpty) return plain;
+      if (html.isNotEmpty) return html;
+      return plain;
+    }
+    return view.content;
+  }
+
+  void _syncRevealAnimation(FileEditViewState view) {
+    final target = _streamableContent(view);
+    if (!view.incomplete) {
+      _revealTimer?.cancel();
+      _revealTimer = null;
+      _revealedChars = target.length;
+      _revealTarget = target;
+      return;
+    }
+    if (target.length < _revealedChars) {
+      _revealedChars = target.length;
+    }
+    if (target == _revealTarget && _revealedChars >= target.length) return;
+
+    final jump = target.length - _revealedChars;
+    if (jump <= 96) {
+      _revealTimer?.cancel();
+      _revealTimer = null;
+      _revealedChars = target.length;
+      _revealTarget = target;
+      return;
+    }
+
+    _revealTarget = target;
+    _revealTimer?.cancel();
+    _revealTimer = Timer.periodic(const Duration(milliseconds: 16), (timer) {
+      if (!mounted) {
+        timer.cancel();
+        return;
+      }
+      final remaining = _revealTarget.length - _revealedChars;
+      if (remaining <= 0) {
+        timer.cancel();
+        _revealTimer = null;
+        return;
+      }
+      setState(() {
+        _revealedChars += math.max(24, remaining ~/ 12);
+        if (_revealedChars > _revealTarget.length) {
+          _revealedChars = _revealTarget.length;
+        }
+      });
+      WidgetsBinding.instance.addPostFrameCallback((_) => _scrollToEnd());
+    });
+  }
+
+  String _displayContentFor(FileEditViewState view, {bool preferPlain = false}) {
+    final full = _streamableContent(view, preferPlain: preferPlain);
+    if (!view.incomplete || _revealedChars >= full.length) return full;
+    if (_revealTarget != full) return full;
+    return full.substring(0, math.min(_revealedChars, full.length));
   }
 
   @override
   void didUpdateWidget(covariant FileEditDock oldWidget) {
     super.didUpdateWidget(oldWidget);
-    if (widget.view.updatedAt != oldWidget.view.updatedAt) {
+    final view = widget.view;
+    final prev = oldWidget.view;
+    if (view.updatedAt != prev.updatedAt ||
+        view.charCount != prev.charCount ||
+        view.content != prev.content) {
+      _syncRevealAnimation(view);
       WidgetsBinding.instance.addPostFrameCallback((_) => _scrollToEnd());
     }
   }
@@ -318,16 +400,25 @@ class _FileEditDockState extends State<FileEditDock> {
 
         if (view.isEmail) {
           final html = view.bodyHtml?.trim() ?? '';
-          if (html.isNotEmpty) {
+          final plain = view.bodyPlain?.trim() ?? _bodyText(view);
+          final preferPlainWhileStreaming = view.incomplete &&
+              plain.isNotEmpty &&
+              (html.isEmpty || plain.length > html.length);
+          final streamHtml = html.isNotEmpty && !preferPlainWhileStreaming
+              ? html
+              : '';
+          if (streamHtml.isNotEmpty) {
             return ColoredBox(
               color: const Color(0xFFECECEC),
               child: EmailHtmlPreview(
-                html: html,
+                html: streamHtml,
                 streaming: view.incomplete,
               ),
             );
           }
-          final plain = view.bodyPlain?.trim() ?? _bodyText(view);
+          final streamPlain = plain.isNotEmpty
+              ? (view.incomplete ? _displayContentFor(view, preferPlain: true) : plain)
+              : '';
           return ColoredBox(
             color: Colors.white,
             child: Scrollbar(
@@ -339,7 +430,7 @@ class _FileEditDockState extends State<FileEditDock> {
                 child: ConstrainedBox(
                   constraints: BoxConstraints(maxWidth: contentWidth),
                   child: SelectableText(
-                    plain.isNotEmpty ? plain : 'Waiting for styled HTML…',
+                    streamPlain.isNotEmpty ? streamPlain : 'Waiting for styled HTML…',
                     style: theme.textTheme.bodyMedium?.copyWith(
                       fontSize: 14,
                       height: 1.5,
@@ -352,7 +443,13 @@ class _FileEditDockState extends State<FileEditDock> {
           );
         }
 
-        final body = _bodyText(view);
+        // File writes: show streamed content immediately. The reveal animation
+        // kept _revealedChars at 0 during incomplete=true, so the panel looked
+        // empty until tool_result flipped incomplete=false.
+        final streamed = view.content.trim();
+        final body = streamed.isNotEmpty
+            ? streamed
+            : (view.incomplete ? _displayContentFor(view) : _bodyText(view));
         return ColoredBox(
           color: lim.codeBackground.withValues(alpha: 0.85),
           child: Scrollbar(
@@ -364,7 +461,7 @@ class _FileEditDockState extends State<FileEditDock> {
               child: ConstrainedBox(
                 constraints: BoxConstraints(maxWidth: contentWidth),
                 child: SelectableText(
-                  body,
+                  body.isNotEmpty ? body : _bodyText(view),
                   style: theme.textTheme.bodyMedium?.copyWith(
                     fontFamily: 'Consolas, Courier New, monospace',
                     fontSize: 12.5,

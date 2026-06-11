@@ -67,7 +67,9 @@ function synthesizeSpawnContract(input: {
   const deliverableFormat = input.systemPrompt?.trim()
     ? "Follow system_prompt output contract exactly."
     : "Concise markdown with findings, evidence, and explicit caveats.";
-  const allowed = [...new Set([...(input.tools ?? []), ...(input.activateTools ?? [])])];
+  // Restrictive allowlist only from explicit `tools` — activate_tools is additive
+  // provisioning, not a capability ceiling (see spawn_agent TOOL PROVISIONING).
+  const allowed = input.tools?.length ? [...new Set(input.tools)] : undefined;
   return {
     source: "synthesized",
     taskBrief: objective.slice(0, 500),
@@ -81,7 +83,7 @@ function synthesizeSpawnContract(input: {
         "Return output formatted for parent-agent merge.",
       ],
       nonGoals: ["Do not change unrelated files or speculate beyond evidence."],
-      allowedTools: allowed.length > 0 ? allowed : undefined,
+      allowedTools: allowed,
       handoffRequirements: [
         "Provide a final concise summary of what was completed.",
         "List key evidence references used to reach conclusions.",

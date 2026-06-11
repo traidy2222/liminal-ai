@@ -5,6 +5,7 @@
  */
 import { createHash } from "node:crypto";
 import { effectiveHarnessEnvRaw } from "./harness_effective_env.js";
+import { isKimchiApiBaseUrl, resolveKimchiMinIntervalMs } from "./kimchi_provider.js";
 
 export interface ProviderCredentials {
   apiKey: string;
@@ -27,12 +28,16 @@ export function providerSpacingKey(creds: ProviderCredentials): string {
 }
 
 /** Minimum ms between the *start* of consecutive requests sharing the same key. 0 = disabled. */
-export function resolveProviderMinIntervalMs(): number {
+export function resolveProviderMinIntervalMs(baseURL?: string): number {
   const raw = effectiveHarnessEnvRaw("AGENT_PROVIDER_MIN_INTERVAL_MS")?.trim();
-  if (!raw) return 0;
-  const n = parseInt(raw, 10);
-  if (!Number.isFinite(n)) return 0;
-  return Math.max(0, Math.min(120_000, n));
+  if (raw) {
+    const n = parseInt(raw, 10);
+    if (Number.isFinite(n)) return Math.max(0, Math.min(120_000, n));
+  }
+  if (isKimchiApiBaseUrl(baseURL)) {
+    return resolveKimchiMinIntervalMs();
+  }
+  return 0;
 }
 
 /**
@@ -43,7 +48,7 @@ export async function withProviderRequestSpacing<T>(
   creds: ProviderCredentials,
   fn: () => Promise<T>
 ): Promise<T> {
-  const intervalMs = resolveProviderMinIntervalMs();
+  const intervalMs = resolveProviderMinIntervalMs(creds.baseURL);
   if (intervalMs <= 0) {
     return fn();
   }

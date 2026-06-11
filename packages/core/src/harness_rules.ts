@@ -50,13 +50,13 @@ export const HARNESS_RULES: Record<string, string> = {
 
   // ── Research ────────────────────────────────────────────────────────────────
   "R-RESEARCH-SCOPE":
-    "First research pass: cover ≥3 distinct query angles. After 3-4 substantive sources, stop fetching and synthesize — do not keep querying the same angle.",
+    "You decide how much web research the ask needs — one search may suffice; a contested multi-source topic may need many. Loop when useful: web_search (breadth) → research_state (inventory) → web_fetch (depth on pending URLs). Keep going while material claims lack evidence or high-value pending URLs remain; stop on diminishing returns and document gaps under R-KNOWN-UNKNOWNS. Never default to a fixed search/fetch count.",
   "R-RESEARCH-IP-PROBE":
     "Do not http_request https://<bare-IP>:<port> — TLS/SNI usually fails. Use web_fetch on the hostname, run_shell curl.exe with Host header, or answer from Shodan/WHOIS the user already provided.",
   "R-CITE-QUALITY":
     "Match citation confidence to source tier: T1 (Reuters/AP/gov) = state directly; T2 (quality press) = 'According to…'; T3 (Wikipedia) = 'Reports suggest…'; T4 (blogs) = 'Unverified…'. When sources conflict on a key fact, name both sides explicitly.",
   "R-ADVERSARIAL-CHECK":
-    "After synthesizing ≥3 sources, run think() to flag the 2-3 weakest claims, T3/T4-only reliance, and alternative interpretations missed.",
+    "Before final synthesis (once you judge fetch coverage adequate for the ask), run think() to flag the weakest claims, T3/T4-only reliance, and alternative interpretations missed.",
   "R-LIVE-DATA-HONESTY": "For live/current-data claims, include source + as-of time. If unavailable, disclose the fallback and uncertainty.",
 
   // ── Memory ──────────────────────────────────────────────────────────────────
@@ -84,6 +84,8 @@ export const HARNESS_RULES: Record<string, string> = {
     "For persona dial changes (humor %, formality, confidence, verbosity, persona strength), call set_runtime_settings(persona_controls:…) — never claim a dial changed from prose alone. Full persona swap → set_persona.",
   "R-EMAIL-STYLE":
     "Gmail compose/draft/send: FORMATTED body_html + plain body for new outbound mail. Gmail strips outer dark backgrounds — co-locate bgcolor and color on each td. Body = #222/#333 on #fff; dark bands = light text only on the same dark td. Plain-only for thread replies and one-liners.",
+  "R-EMAIL-DRAFT-SEND":
+    "After gmail_create_draft / outlook_create_draft succeeds, send with gmail_send_draft / outlook_send_draft using the returned id — never recompose the same mail via gmail_send_message / outlook_send_message unless the user asked to rewrite. One compose pass per email; no MCP create_draft + REST create_draft for the same message.",
   "R-AGENTCARD":
     "AgentCard is external (agentcard_* tools), not a repo path. Never grep the codebase for agent card. On test/setup/pay: agentcard_whoami first.",
   "R-LIMINAL-WIDGET":
@@ -117,7 +119,7 @@ export const HARNESS_RULES: Record<string, string> = {
 import type { TurnIntentClass } from "./intent_inference.js";
 
 const INTENT_RULE_IDS: Record<TurnIntentClass, string[]> = {
-  conversational: ["R-OUTPUT-QUALITY", "R-MULTI-PART-USER", "R-MEMORY-CONTEXT", "R-EMAIL-STYLE", "R-AGENTCARD"],
+  conversational: ["R-OUTPUT-QUALITY", "R-MULTI-PART-USER", "R-MEMORY-CONTEXT", "R-EMAIL-STYLE", "R-EMAIL-DRAFT-SEND", "R-AGENTCARD"],
   introspection: ["R-OUTPUT-QUALITY", "R-MEMORY-CONTEXT", "R-TURN-FRESHNESS"],
   knowledge: [
     "R-MEMORY-CONTEXT",
@@ -151,9 +153,17 @@ const INTENT_RULE_IDS: Record<TurnIntentClass, string[]> = {
     "R-TOOL-RETRY",
     "R-SHELL-BOUNDS",
     "R-EMAIL-STYLE",
+    "R-EMAIL-DRAFT-SEND",
     "R-AGENTCARD",
   ],
-  creative: ["R-OUTPUT-QUALITY", "R-TURN-FRESHNESS", "R-WRITE-DISCIPLINE", "R-TERM-SCOPE", "R-EMAIL-STYLE"],
+  creative: [
+    "R-OUTPUT-QUALITY",
+    "R-TURN-FRESHNESS",
+    "R-WRITE-DISCIPLINE",
+    "R-TERM-SCOPE",
+    "R-EMAIL-STYLE",
+    "R-EMAIL-DRAFT-SEND",
+  ],
 };
 
 const TOP_VIOLATION_APPEND = 3;

@@ -21,5 +21,9 @@ export function createWebPtyShellPort(ctx: WebPtyContext): PtyManagerPort {
         createdAt: s.createdAt,
         cwd: s.cwd,
       })),
+    runOneshot: async (opts) => {
+      const workspaceRoot = await ctx.resolveWorkspaceRoot(opts.chatId);
+      return mgr.runOneshot({ ...opts, workspaceRoot });
+    },
   };
 }

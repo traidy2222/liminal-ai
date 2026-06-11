@@ -1,12 +1,17 @@
 import 'package:flutter/material.dart';
-import 'package:webview_flutter/webview_flutter.dart';
+import 'package:flutter_widget_from_html/flutter_widget_from_html.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 import '../theme/liminal_theme_extension.dart';
 import 'html_sanitizer.dart';
 import 'liminal_markdown_utils.dart';
 
 /// Live HTML embed (fenced ```html``` or streaming open fence).
-class HtmlEmbedView extends StatefulWidget {
+///
+/// Uses [HtmlWidget] instead of a native WebView so the Agent shell terminal
+/// can keep the sole WebView2 instance in the chat workspace (stacked WebViews
+/// on Windows have been crashing the process at end-of-turn).
+class HtmlEmbedView extends StatelessWidget {
   const HtmlEmbedView({
     super.key,
     required this.html,
@@ -19,91 +24,49 @@ class HtmlEmbedView extends StatefulWidget {
   final String backgroundColor;
 
   @override
-  State<HtmlEmbedView> createState() => _HtmlEmbedViewState();
-}
-
-class _HtmlEmbedViewState extends State<HtmlEmbedView> {
-  WebViewController? _controller;
-  double _height = 120;
-
-  @override
-  void didUpdateWidget(covariant HtmlEmbedView oldWidget) {
-    super.didUpdateWidget(oldWidget);
-    if (oldWidget.html != widget.html || oldWidget.streaming != widget.streaming) {
-      _load();
-    }
-  }
-
-  @override
-  void initState() {
-    super.initState();
-    _initController();
-    _load();
-  }
-
-  void _initController() {
-    _controller = WebViewController()
-      // Unrestricted only for scrollHeight probe on our sanitized document.
-      ..setJavaScriptMode(JavaScriptMode.unrestricted)
-      ..setBackgroundColor(Colors.transparent)
-      ..setNavigationDelegate(
-        NavigationDelegate(
-          onNavigationRequest: (req) {
-            final u = req.url.toLowerCase();
-            if (u.startsWith('about:') || u.startsWith('data:text/html')) {
-              return NavigationDecision.navigate;
-            }
-            return NavigationDecision.prevent;
-          },
-          onPageFinished: (_) => _measureHeight(),
-        ),
-      );
-  }
-
-  Future<void> _measureHeight() async {
-    final c = _controller;
-    if (c == null) return;
-    try {
-      final result = await c.runJavaScriptReturningResult(
-        'Math.min(2400, Math.max(48, document.body.scrollHeight + 16))',
-      );
-      final h = double.tryParse(result.toString()) ?? 120;
-      if (mounted && (h - _height).abs() > 4) {
-        setState(() => _height = h.clamp(48, 2400));
-      }
-    } catch (_) {
-      /* height probe optional */
-    }
-  }
-
-  void _load() {
-    final raw = widget.streaming
-        ? balanceHtmlForStreamingPreview(widget.html)
-        : widget.html;
-    final clean = sanitizeEmbedHtml(raw);
-    if (clean.isEmpty) return;
-    final doc = wrapHtmlDocument(clean, background: widget.backgroundColor);
-    _controller?.loadHtmlString(doc);
-  }
-
-  @override
   Widget build(BuildContext context) {
     final lim = LiminalTheme.of(context);
-    final c = _controller;
-    if (c == null) return const SizedBox.shrink();
+    final raw = streaming ? balanceHtmlForStreamingPreview(html) : html;
+    final clean = sanitizeEmbedHtml(raw);
+    if (clean.isEmpty) return const SizedBox.shrink();
 
     return Container(
       margin: const EdgeInsets.symmetric(vertical: 8),
       decoration: BoxDecoration(
+        color: _parseHexColor(backgroundColor) ?? const Color(0xFF0A0E14),
         borderRadius: BorderRadius.circular(6),
         border: Border.all(color: lim.border.withValues(alpha: 0.5)),
       ),
       clipBehavior: Clip.antiAlias,
-      child: SizedBox(
-        height: _height,
-        width: double.infinity,
-        child: WebViewWidget(controller: c),
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(minHeight: 48, maxHeight: 2400),
+        child: SingleChildScrollView(
+          padding: const EdgeInsets.all(12),
+          child: HtmlWidget(
+            clean,
+            onTapUrl: (url) async {
+              final uri = Uri.tryParse(url);
+              if (uri != null) {
+                await launchUrl(uri, mode: LaunchMode.externalApplication);
+              }
+              return true;
+            },
+            textStyle: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                  color: lim.text,
+                  height: 1.5,
+                ),
+          ),
+        ),
       ),
     );
   }
+}
+
+Color? _parseHexColor(String hex) {
+  var s = hex.trim();
+  if (s.startsWith('#')) s = s.substring(1);
+  if (s.length == 6) s = 'FF$s';
+  if (s.length != 8) return null;
+  final value = int.tryParse(s, radix: 16);
+  return value == null ? null : Color(value);
 }

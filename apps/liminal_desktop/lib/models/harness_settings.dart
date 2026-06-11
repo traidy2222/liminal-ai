@@ -5,6 +5,7 @@ class HarnessSettingsSnapshot {
     required this.fields,
     required this.provider,
     required this.providerPresets,
+    required this.providerBackends,
     this.hint,
   });
 
@@ -12,9 +13,40 @@ class HarnessSettingsSnapshot {
   final List<HarnessSettingsField> fields;
   final HarnessSettingsProvider provider;
   final List<ProviderPreset> providerPresets;
+  final List<ProviderBackend> providerBackends;
   final String? hint;
 
+  static List<ProviderBackend> defaultBackends() {
+    return [
+      ProviderBackend(
+        id: 'openrouter',
+        label: 'OpenRouter',
+        baseURL: 'https://openrouter.ai/api/v1',
+        apiKeyEnv: 'OPENROUTER_API_KEY',
+        hint:
+            'Hundreds of models via one API. Set OPENROUTER_API_KEY or AGENT_API_KEY.',
+      ),
+      ProviderBackend(
+        id: 'kimchi',
+        label: 'Kimchi (Cast AI)',
+        baseURL: 'https://llm.cast.ai/openai/v1',
+        apiKeyEnv: 'KIMCHI_API_KEY',
+        hint:
+            'Cast AI hosted models (kimi, minimax, nemotron). Set KIMCHI_API_KEY (castai_v1_…).',
+      ),
+      ProviderBackend(
+        id: 'local',
+        label: 'Local (LM Studio / Ollama)',
+        baseURL: '',
+        apiKeyEnv: 'AGENT_API_KEY',
+        hint:
+            'Local OpenAI-compatible servers — use any placeholder key (e.g. lm-studio).',
+      ),
+    ];
+  }
+
   factory HarnessSettingsSnapshot.fromJson(Map<String, dynamic> json) {
+    final backendsRaw = json['providerBackends'] as List<dynamic>? ?? [];
     return HarnessSettingsSnapshot(
       tabs: (json['tabs'] as List<dynamic>? ?? [])
           .map((e) => HarnessSettingsTab.fromJson(Map<String, dynamic>.from(e as Map)))
@@ -28,7 +60,38 @@ class HarnessSettingsSnapshot {
       providerPresets: (json['providerPresets'] as List<dynamic>? ?? [])
           .map((e) => ProviderPreset.fromJson(Map<String, dynamic>.from(e as Map)))
           .toList(),
+      providerBackends: backendsRaw.isEmpty
+          ? defaultBackends()
+          : backendsRaw
+              .map((e) => ProviderBackend.fromJson(Map<String, dynamic>.from(e as Map)))
+              .toList(),
       hint: json['hint'] as String?,
+    );
+  }
+}
+
+class ProviderBackend {
+  ProviderBackend({
+    required this.id,
+    required this.label,
+    required this.baseURL,
+    required this.apiKeyEnv,
+    this.hint = '',
+  });
+
+  final String id;
+  final String label;
+  final String baseURL;
+  final String apiKeyEnv;
+  final String hint;
+
+  factory ProviderBackend.fromJson(Map<String, dynamic> json) {
+    return ProviderBackend(
+      id: json['id'] as String? ?? '',
+      label: json['label'] as String? ?? '',
+      baseURL: json['baseURL'] as String? ?? '',
+      apiKeyEnv: json['apiKeyEnv'] as String? ?? 'AGENT_API_KEY',
+      hint: json['hint'] as String? ?? '',
     );
   }
 }
@@ -41,6 +104,7 @@ class ProviderPreset {
     required this.baseURL,
     required this.model,
     this.harnessEnvPatch,
+    this.providerBackend,
   });
 
   final String id;
@@ -49,6 +113,7 @@ class ProviderPreset {
   final String baseURL;
   final String model;
   final Map<String, String>? harnessEnvPatch;
+  final String? providerBackend;
 
   static String resolveSelection(
     List<ProviderPreset> presets,
@@ -78,7 +143,29 @@ class ProviderPreset {
       baseURL: json['baseURL'] as String? ?? '',
       model: json['model'] as String? ?? '',
       harnessEnvPatch: patch,
+      providerBackend: json['providerBackend'] as String?,
     );
+  }
+
+  static String inferBackend(ProviderPreset p) {
+    final tagged = p.providerBackend?.trim();
+    if (tagged != null && tagged.isNotEmpty) return tagged;
+    if (p.id.startsWith('kimchi-')) return 'kimchi';
+    final b = p.baseURL.trim().replaceAll(RegExp(r'/+$'), '');
+    if (b.contains('llm.cast.ai') || b.contains('llm.kimchi.dev')) {
+      return 'kimchi';
+    }
+    if (b.contains('localhost') || b.contains('127.0.0.1')) return 'local';
+    return 'openrouter';
+  }
+
+  static List<ProviderPreset> forBackend(
+    List<ProviderPreset> presets,
+    String backendId,
+  ) {
+    return presets
+        .where((p) => p.id != 'custom' && inferBackend(p) == backendId)
+        .toList();
   }
 }
 
@@ -149,6 +236,7 @@ class HarnessSettingsProvider {
     required this.baseURLLockedByEnv,
     this.inferenceMode,
     this.resolvedPresetId = 'custom',
+    this.resolvedBackendId = 'openrouter',
   });
 
   final String model;
@@ -158,6 +246,7 @@ class HarnessSettingsProvider {
   final bool baseURLLockedByEnv;
   final String? inferenceMode;
   final String resolvedPresetId;
+  final String resolvedBackendId;
 
   bool get presetLockedByEnv => modelLockedByEnv || baseURLLockedByEnv;
 
@@ -170,6 +259,7 @@ class HarnessSettingsProvider {
       baseURLLockedByEnv: json['baseURLLockedByEnv'] as bool? ?? false,
       inferenceMode: json['inferenceMode'] as String?,
       resolvedPresetId: json['resolvedPresetId'] as String? ?? 'custom',
+      resolvedBackendId: json['resolvedBackendId'] as String? ?? 'openrouter',
     );
   }
 }

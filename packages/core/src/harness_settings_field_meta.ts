@@ -138,6 +138,22 @@ const _META_RAW: Record<string, HarnessSettingsFieldMeta> = {
     description: "Harness environment toggle for Transient 5xx Max Retries. See docs/configuration.md (models api).",
     valueKind: "number",
   },
+  "AGENT_KIMCHI_TRANSIENT_MAX_RETRIES": {
+    tabId: "models_api",
+    subgroupId: "resilience",
+    label: "Kimchi (Cast AI) Transient Retries",
+    description:
+      "Retry budget for transient Cast AI / Kimchi errors (opaque HTTP 400, 429, 5xx) per completion before failing the turn.",
+    valueKind: "number",
+  },
+  "AGENT_KIMCHI_MIN_INTERVAL_MS": {
+    tabId: "models_api",
+    subgroupId: "resilience",
+    label: "Kimchi Request Spacing (ms)",
+    description:
+      "Minimum ms between Cast AI completions when AGENT_PROVIDER_MIN_INTERVAL_MS is unset. Lowers RPM/TPM 429s on free tier.",
+    valueKind: "number",
+  },
   "AGENT_MANAGED_BUSY_MAX_RETRIES": {
     tabId: "models_api",
     subgroupId: "resilience",

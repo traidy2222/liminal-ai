@@ -1,8 +1,10 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import OpenAI from "openai";
 import {
   isExhaustedProviderRoutingError,
   isExhaustedProviderRoutingMessage,
+  isOpaqueInferenceProviderError,
   isOpenRouterStealthOwlProviderError,
   isOpenRouterUpstreamProviderError,
   isStaleStealthPinMismatch,
@@ -73,4 +75,10 @@ test("isExhaustedProviderRoutingError wraps message helper", () => {
     isExhaustedProviderRoutingError(new Error("All providers have been ignored")),
     true
   );
+});
+
+test("isOpaqueInferenceProviderError detects empty-body HTTP 400", () => {
+  const err = new OpenAI.APIError(400, undefined, "400 status code (no body)", {});
+  assert.equal(isOpaqueInferenceProviderError(err), true);
+  assert.equal(isOpenRouterUpstreamProviderError(err), false);
 });

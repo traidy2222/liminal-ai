@@ -1,4 +1,4 @@
-# Liminal AI — local coding agent you own
+# Liminal AI — the local AI agent you own
 
 <p align="center">
   <a href="https://www.vireondynamics.com/liminal"><img src="https://img.shields.io/badge/Product-Liminal_AI-7c3aed?style=for-the-badge" alt="Liminal AI"></a>
@@ -7,7 +7,7 @@
 </p>
 
 <p align="center">
-  <strong>Fair-source ReAct harness</strong> · <strong>245+ tools</strong> · <strong>Terminal + web + desktop</strong> · <strong>Any OpenAI-compatible model</strong>
+  <strong>Code · email · documents · research</strong> · <strong>245+ tools</strong> · <strong>Terminal + web + desktop</strong> · <strong>Any OpenAI-compatible model</strong>
 </p>
 
 <p align="center">

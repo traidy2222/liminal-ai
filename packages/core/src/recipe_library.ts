@@ -29,6 +29,16 @@ const RECIPE_OUTCOME_FLOOR = 0.6;
 const PROMOTE_MIN_COUNT = 5;
 const PROMOTE_MIN_OUTCOME = 0.8;
 
+/** Round-2 recipe prime — must clear these before injection (zero extra model calls). */
+const PRIME_MIN_COUNT = 2;
+const PRIME_MIN_AVG_OUTCOME = 0.65;
+/** Turn outcome below this after a prime → decay the recipe's reuse weight. */
+const PRIME_DECAY_OUTCOME_THRESHOLD = 0.45;
+const PRIME_DECAY_OUTCOME_PENALTY = 0.25;
+/** Hide from prime after enough injections with consistently poor follow-on outcomes. */
+const PRIME_DEMOTE_MIN_PRIMES = 5;
+const PRIME_DEMOTE_AVG_THRESHOLD = 0.45;
+
 // ─── Phase taxonomy ───────────────────────────────────────────────────────────
 
 export type RecipePhase =
@@ -129,6 +139,10 @@ export interface RecipeEntry {
   bestExample: RecipeExample;
   firstAt: string;
   lastAt: string;
+  /** Round-2 recipe prime injections that preceded this turn. */
+  primeCount?: number;
+  /** Sum of turn outcomes for turns where this recipe was primed. */
+  primeOutcomeSum?: number;
 }
 
 /** The recipe-stats file also carries outcome_scorer's `effort_stats` — preserve all keys. */
@@ -217,6 +231,104 @@ export async function recordRecipe(input: RecordRecipeInput): Promise<void> {
 
 function avgOutcome(r: RecipeEntry): number {
   return r.outcomeCount > 0 ? r.outcomeSum / r.outcomeCount : 0.5;
+}
+
+function recipePrimeEnabled(): boolean {
+  return (
+    effectiveHarnessEnvRaw("AGENT_RECIPE_PRIME") !== "0" &&
+    effectiveHarnessEnvRaw("AGENT_RECIPE_LIBRARY") !== "0"
+  );
+}
+
+function normalizeIntentClass(intentClass: string): string {
+  return (intentClass || "general").trim().toLowerCase() || "general";
+}
+
+function isRecipeDemotedForPrime(entry: RecipeEntry): boolean {
+  const primes = entry.primeCount ?? 0;
+  if (primes < PRIME_DEMOTE_MIN_PRIMES) return false;
+  const avgPrime = (entry.primeOutcomeSum ?? 0) / primes;
+  return avgPrime < PRIME_DEMOTE_AVG_THRESHOLD;
+}
+
+/** Collapse repeated tools: `grep_file → grep_file → edit_file` → `grep_file ×2 → edit_file`. */
+export function compactToolSequenceForPrime(toolSequence: string): string {
+  const tools = toolSequence
+    .split("→")
+    .map((s) => s.trim())
+    .filter(Boolean);
+  if (tools.length === 0) return toolSequence.trim();
+  const parts: string[] = [];
+  let i = 0;
+  while (i < tools.length) {
+    const tool = tools[i]!;
+    let run = 1;
+    while (i + run < tools.length && tools[i + run] === tool) run++;
+    parts.push(run > 1 ? `${tool} ×${run}` : tool);
+    i += run;
+  }
+  return parts.join(" → ");
+}
+
+/** One-line round-2 system hint (positive channel — complements harness rule recall). */
+export function formatRecipePrimeMessage(entry: RecipeEntry): string {
+  const seq = compactToolSequenceForPrime(entry.bestExample.toolSequence);
+  const avg = avgOutcome(entry);
+  return (
+    `[RECIPE PRIME] Similar past turns succeeded with: ${seq} ` +
+    `(reused ×${entry.count}, avg outcome ${avg.toFixed(2)}). ` +
+    `Use as the plan skeleton unless this task clearly differs.`
+  );
+}
+
+/**
+ * Best recipe for round-2 priming after intent inference — highest reuse × outcome
+ * for the turn's intent class. Returns null when nothing clears the prime threshold.
+ */
+export async function findBestRecipeForPrime(intentClass: string): Promise<RecipeEntry | null> {
+  if (!recipePrimeEnabled()) return null;
+  const file = await loadFile();
+  const all = Object.values(file.recipes ?? {});
+  if (all.length === 0) return null;
+
+  const intent = normalizeIntentClass(intentClass);
+  const pool = all.filter((r) => r.intentClass === intent);
+  const candidates = pool.length > 0 ? pool : all;
+
+  const eligible = candidates.filter((r) => {
+    if (isRecipeDemotedForPrime(r)) return false;
+    const avg = avgOutcome(r);
+    return r.count >= PRIME_MIN_COUNT && avg >= PRIME_MIN_AVG_OUTCOME;
+  });
+  if (eligible.length === 0) return null;
+
+  eligible.sort((a, b) => Math.log1p(b.count) * avgOutcome(b) - Math.log1p(a.count) * avgOutcome(a));
+  return eligible[0] ?? null;
+}
+
+/**
+ * Attribute a completed turn's outcome to a recipe that was primed at round 2.
+ * Low outcomes decay reuse weight; sustained poor prime follow-through auto-demotes.
+ */
+export async function recordRecipePrimeOutcome(recipeKey: string, outcome: number): Promise<void> {
+  if (!recipePrimeEnabled()) return;
+  const clamped = Math.max(0, Math.min(1, outcome));
+  const file = await loadFile();
+  const recipes = file.recipes ?? {};
+  const entry = recipes[recipeKey];
+  if (!entry) return;
+
+  entry.primeCount = (entry.primeCount ?? 0) + 1;
+  entry.primeOutcomeSum = (entry.primeOutcomeSum ?? 0) + clamped;
+
+  if (clamped < PRIME_DECAY_OUTCOME_THRESHOLD) {
+    entry.count = Math.max(1, entry.count - 1);
+    entry.outcomeSum = Math.max(0, entry.outcomeSum - PRIME_DECAY_OUTCOME_PENALTY);
+  }
+
+  recipes[recipeKey] = entry;
+  file.recipes = recipes;
+  await saveFile(file);
 }
 
 /**

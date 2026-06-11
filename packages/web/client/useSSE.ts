@@ -460,7 +460,16 @@ type Action =
   | { type: "text"; payload: { delta: string; channel?: "user" | "trace" | "reasoning" } }
   | { type: "provider_retry"; payload: { attempt: number; maxAttempts: number; message: string; backoffMs: number } }
   | { type: "tool_start"; payload: { callId: string; name: string } }
-  | { type: "tool_delta"; payload: { callId: string; argsDelta: string } }
+  | {
+      type: "tool_delta";
+      payload: {
+        callId: string;
+        argsDelta: string;
+        argsJson?: string;
+        name?: string;
+        compose?: Record<string, unknown>;
+      };
+    }
   | {
       type: "tool_approval";
       payload: {
@@ -868,13 +877,13 @@ function reducer(state: SSEState, action: Action): SSEState {
     }
 
     case "tool_delta": {
-      const { callId, argsDelta } = action.payload;
+      const { callId, argsDelta, argsJson: wireArgsJson } = action.payload;
       const thinkEntry = state.messages.find(
         (m): m is Extract<MessageEntry, { kind: "think" }> =>
           m.kind === "think" && m.streaming === true && m.callId === callId
       );
       if (thinkEntry) {
-        const argsJson = (thinkEntry.argsJson ?? "") + argsDelta;
+        const argsJson = wireArgsJson ?? (thinkEntry.argsJson ?? "") + argsDelta;
         return {
           ...state,
           messages: updateStreamingThinkFromArgs(state.messages, callId, argsJson),
@@ -885,7 +894,7 @@ function reducer(state: SSEState, action: Action): SSEState {
           m.kind === "reason" && m.streaming === true && m.callId === callId
       );
       if (reasonEntry) {
-        const argsJson = (reasonEntry.argsJson ?? "") + argsDelta;
+        const argsJson = wireArgsJson ?? (reasonEntry.argsJson ?? "") + argsDelta;
         return {
           ...state,
           messages: updateStreamingReasonFromArgs(state.messages, callId, argsJson),
@@ -896,7 +905,7 @@ function reducer(state: SSEState, action: Action): SSEState {
           m.kind === "plan" && m.streaming === true && m.callId === callId
       );
       if (planEntry) {
-        const argsJson = (planEntry.argsJson ?? "") + argsDelta;
+        const argsJson = wireArgsJson ?? (planEntry.argsJson ?? "") + argsDelta;
         return {
           ...state,
           messages: updateStreamingPlanFromArgs(state.messages, callId, argsJson),
@@ -906,7 +915,8 @@ function reducer(state: SSEState, action: Action): SSEState {
         ...state,
         messages: state.messages.map((m) => {
           if (m.kind !== "tool_call" || m.callId !== callId) return m;
-          return promoteWriteToolCallIfArgsComplete(m, m.argsJson + argsDelta);
+          const argsJson = wireArgsJson ?? m.argsJson + argsDelta;
+          return promoteWriteToolCallIfArgsComplete(m, argsJson);
         }),
       };
     }

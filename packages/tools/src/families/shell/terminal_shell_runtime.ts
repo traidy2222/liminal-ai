@@ -1,10 +1,34 @@
+/**
+ * Terminal-backed run_shell / run_background runtime.
+ *
+ * Foreground command execution lives in agent_shell_session.ts (one PTY per
+ * chat, OSC 133 marker-driven completion). This module keeps the surrounding
+ * plumbing: background job tabs, session read/kill/list, and raw PTY send/read.
+ */
 import type { AgentHarness, RuntimePreferences, ToolResult } from "@liminal/core";
 import { effectiveHarnessEnvRaw, resolveHarnessEnvRaw } from "@liminal/core";
+import {
+  buildHumanShellInput,
+  buildShellCommandLine,
+  getAgentShellSession,
+  resetAgentShellSessionsForTests,
+  startAgentTerminalWarmup,
+  waitForShellBoot,
+  waitForStablePrompt,
+} from "./agent_shell_session.js";
 import { getPtyShellPort, type PtyManagerPort } from "./pty_shell_port.js";
+import { capShellToolOutput } from "./shell_tool_output.js";
 import { ensureChatTerminal } from "./terminal_runtime.js";
 
-export const LIMINAL_EXIT_MARKER = "__LIMINAL_EXIT_";
-const EXIT_RE = /__LIMINAL_EXIT_(\d+)__/;
+export {
+  buildHumanShellInput,
+  buildShellCommandLine,
+  startAgentTerminalWarmup,
+  waitForShellBoot,
+  waitForStablePrompt,
+  recoverShellToPrompt,
+} from "./agent_shell_session.js";
+
 const MAX_CAPTURE = 512 * 1024;
 
 export interface TerminalBackgroundJob {
@@ -17,7 +41,12 @@ export interface TerminalBackgroundJob {
 }
 
 const backgroundJobs = new Map<string, TerminalBackgroundJob>();
-const sessionQueues = new Map<string, Promise<unknown>>();
+
+/** Test-only: clear per-chat queues and boot caches between cases. */
+export function resetTerminalShellRuntimeForTests(): void {
+  backgroundJobs.clear();
+  resetAgentShellSessionsForTests();
+}
 
 export function shellUseUiPty(prefs?: RuntimePreferences | null): boolean {
   if (!getPtyShellPort()) return false;
@@ -28,32 +57,34 @@ function lineEnding(): string {
   return process.platform === "win32" ? "\r\n" : "\n";
 }
 
-function shellQuotePath(p: string): string {
-  if (process.platform === "win32") {
-    return `'${p.replace(/'/g, "''")}'`;
-  }
-  return `'${p.replace(/'/g, "'\\''")}'`;
+/** Plain command line for a visible terminal tab (optional cwd prefix). */
+export function wrapPlainCommand(command: string, cwd?: string): string {
+  return `${buildShellCommandLine(command, cwd)}${lineEnding()}`;
 }
 
-/** Wrap a one-shot command so we can detect completion + exit code in an interactive PTY. */
-export function wrapOneshotCommand(command: string, cwd?: string): string {
-  const eol = lineEnding();
-  if (process.platform === "win32") {
-    const cd = cwd?.trim() ? `Set-Location -LiteralPath ${shellQuotePath(cwd.trim())}; ` : "";
-    return `${cd}try { ${command} } finally { Write-Host "${LIMINAL_EXIT_MARKER}$LASTEXITCODE__" }${eol}`;
-  }
-  const cd = cwd?.trim() ? `cd ${shellQuotePath(cwd.trim())} && ` : "";
-  return `${cd}(${command}); echo ${LIMINAL_EXIT_MARKER}$?__${eol}`;
+/**
+ * @deprecated Exit codes come from OSC 133 markers (or a probe on cmd.exe);
+ * no exit suffix is appended to commands anymore. Same as wrapPlainCommand.
+ */
+export function wrapPlainCommandWithExit(command: string, cwd?: string): string {
+  return wrapPlainCommand(command, cwd);
 }
 
+/** Write a long-running command into an interactive PTY tab (no exit suffix). */
 export function wrapBackgroundCommand(command: string, cwd?: string): string {
-  const eol = lineEnding();
-  if (process.platform === "win32") {
-    const cd = cwd?.trim() ? `Set-Location -LiteralPath ${shellQuotePath(cwd.trim())}; ` : "";
-    return `${cd}${command}${eol}`;
-  }
-  const cd = cwd?.trim() ? `cd ${shellQuotePath(cwd.trim())} && ` : "";
-  return `${cd}${command}${eol}`;
+  return wrapPlainCommand(command, cwd);
+}
+
+/** @deprecated Use waitForShellBoot (marker-aware). */
+export async function waitForShellReady(
+  port: PtyManagerPort,
+  sessionId: string,
+  timeoutMs = 15_000
+): Promise<void> {
+  return waitForStablePrompt(port, sessionId, {
+    timeoutMs,
+    requireMinBytes: false,
+  });
 }
 
 function truncateLabel(command: string, max = 48): string {
@@ -61,14 +92,36 @@ function truncateLabel(command: string, max = 48): string {
   return one.length <= max ? one : `${one.slice(0, max - 1)}…`;
 }
 
-function enqueueSession<T>(sessionId: string, fn: () => Promise<T>): Promise<T> {
-  const prev = sessionQueues.get(sessionId) ?? Promise.resolve();
-  const next = prev.then(fn, fn);
-  sessionQueues.set(
-    sessionId,
-    next.catch(() => undefined)
-  );
-  return next;
+function backgroundTabLabel(command: string): string {
+  return `bg · ${truncateLabel(command, 36)}`;
+}
+
+async function openDedicatedTerminalTab(
+  port: PtyManagerPort,
+  chatId: string,
+  opts: { label: string; cwd?: string; focus?: boolean }
+): Promise<{ sessionId: string; label: string; cwd: string } | null> {
+  const viaEnsure = await ensureChatTerminal({
+    chatId,
+    label: opts.label,
+    source: "agent",
+    forceNew: true,
+    cwd: opts.cwd,
+    focus: opts.focus ?? true,
+  });
+  if (viaEnsure) return viaEnsure;
+  return port.ensure({
+    chatId,
+    label: opts.label,
+    source: "agent",
+    forceNew: true,
+    cwd: opts.cwd,
+    focus: opts.focus ?? true,
+  });
+}
+
+function formatShellResultBody(raw: string): string {
+  return capShellToolOutput(raw.trimEnd() || "(no output)");
 }
 
 function pruneDeadJobs(port: PtyManagerPort): void {
@@ -91,77 +144,6 @@ export function getTerminalBackgroundJob(sessionId: string): TerminalBackgroundJ
   return backgroundJobs.get(sessionId) ?? null;
 }
 
-async function ensureAgentShell(
-  port: PtyManagerPort,
-  chatId: string,
-  opts?: { label?: string; cwd?: string; forceNew?: boolean; focus?: boolean }
-): Promise<{ sessionId: string; label: string; cwd: string } | null> {
-  const viaEnsure = await ensureChatTerminal({
-    chatId,
-    label: opts?.label ?? "Agent shell",
-    source: "agent",
-    forceNew: opts?.forceNew,
-    cwd: opts?.cwd,
-    focus: opts?.focus ?? false,
-  });
-  if (viaEnsure) return viaEnsure;
-  return port.ensure({
-    chatId,
-    label: opts?.label ?? "Agent shell",
-    source: "agent",
-    forceNew: opts?.forceNew,
-    cwd: opts?.cwd,
-    focus: opts?.focus ?? false,
-  });
-}
-
-export async function waitForExitMarker(
-  port: PtyManagerPort,
-  sessionId: string,
-  timeoutMs: number,
-  baselineLen: number,
-  onChunk?: (chunk: string) => void
-): Promise<{ exitCode: number; output: string }> {
-  return new Promise((resolve, reject) => {
-    let captured = port.readTail(sessionId, MAX_CAPTURE);
-    if (captured.length > baselineLen) {
-      captured = captured.slice(baselineLen);
-    } else {
-      captured = "";
-    }
-
-    const finish = (exitCode: number, output: string) => {
-      clearTimeout(timer);
-      unsub();
-      const cleaned = output.replace(EXIT_RE, "").trimEnd();
-      resolve({ exitCode, output: cleaned });
-    };
-
-    const tryMatch = () => {
-      const m = captured.match(EXIT_RE);
-      if (m) finish(parseInt(m[1]!, 10), captured);
-    };
-
-    tryMatch();
-
-    const unsub = port.onData(sessionId, (chunk) => {
-      captured += chunk;
-      if (captured.length > MAX_CAPTURE) captured = captured.slice(-MAX_CAPTURE);
-      onChunk?.(chunk);
-      tryMatch();
-    });
-
-    const timer = setTimeout(() => {
-      unsub();
-      reject(
-        new Error(
-          `Terminal command timed out after ${timeoutMs}ms.\nOutput tail:\n${captured.slice(-4000) || "(none)"}`
-        )
-      );
-    }, timeoutMs);
-  });
-}
-
 export async function runShellInTerminal(input: {
   harness: AgentHarness;
   command: string;
@@ -170,57 +152,20 @@ export async function runShellInTerminal(input: {
   cappedNote: string;
   onChunk?: (chunk: string) => void;
 }): Promise<ToolResult> {
-  const port = getPtyShellPort();
-  if (!port) {
-    return { ok: false, error: "PTY shell port is not available." };
-  }
+  void input.onChunk;
   const chatId = input.harness.taskId?.trim();
   if (!chatId) {
     return { ok: false, error: "No chat context for terminal shell execution." };
   }
-
-  const session = await ensureAgentShell(port, chatId, {
-    label: truncateLabel(input.command),
-    cwd: input.cwd,
-    focus: false,
-  });
-  if (!session) {
-    return { ok: false, error: "Failed to open agent terminal session." };
+  if (!getPtyShellPort()) {
+    return { ok: false, error: "PTY shell port is not available." };
   }
 
-  return enqueueSession(session.sessionId, async () => {
-    const baselineLen = port.readTail(session.sessionId, MAX_CAPTURE).length;
-    const payload = wrapOneshotCommand(input.command, input.cwd);
-    if (!port.write(session.sessionId, payload)) {
-      return { ok: false, error: "Failed to write command to terminal session." };
-    }
-
-    try {
-      const { exitCode, output } = await waitForExitMarker(
-        port,
-        session.sessionId,
-        input.timeoutMs,
-        baselineLen,
-        input.onChunk
-      );
-      const body = output.trimEnd() || "(no output)";
-      const full = input.cappedNote + body;
-      if (exitCode !== 0) {
-        if (body.length >= 120) {
-          return {
-            ok: true,
-            output: `[exit ${exitCode} — output captured; treat as diagnostic]\n${full}`,
-          };
-        }
-        return { ok: false, error: `Exit code ${exitCode}.\n${full}` };
-      }
-      return { ok: true, output: full };
-    } catch (err) {
-      return {
-        ok: false,
-        error: err instanceof Error ? err.message : String(err),
-      };
-    }
+  return getAgentShellSession(chatId).exec({
+    command: input.command,
+    cwd: input.cwd,
+    timeoutMs: input.timeoutMs,
+    cappedNote: input.cappedNote,
   });
 }
 
@@ -239,19 +184,27 @@ export async function runBackgroundInTerminal(input: {
     return { ok: false, error: "No chat context for terminal background execution." };
   }
 
-  const label = truncateLabel(input.command);
-  const session = await ensureAgentShell(port, chatId, {
+  const label = backgroundTabLabel(input.command);
+  const session = await openDedicatedTerminalTab(port, chatId, {
     label,
     cwd: input.cwd,
-    forceNew: true,
     focus: true,
   });
   if (!session) {
     return { ok: false, error: "Failed to open terminal tab for background command." };
   }
 
+  try {
+    await waitForShellBoot(port, session.sessionId);
+  } catch (err) {
+    return {
+      ok: false,
+      error: err instanceof Error ? err.message : String(err),
+    };
+  }
+
   const baselineLen = port.readTail(session.sessionId, MAX_CAPTURE).length;
-  const payload = wrapBackgroundCommand(input.command, input.cwd);
+  const payload = buildHumanShellInput(input.command, input.cwd);
   if (!port.write(session.sessionId, payload)) {
     return { ok: false, error: "Failed to start command in terminal." };
   }
@@ -259,7 +212,9 @@ export async function runBackgroundInTerminal(input: {
   await sleep(input.startupWaitMs);
 
   const tail = port.readTail(session.sessionId, MAX_CAPTURE);
-  const initial = (tail.length > baselineLen ? tail.slice(baselineLen) : tail).slice(0, 800).trim();
+  const initial = formatShellResultBody(
+    (tail.length > baselineLen ? tail.slice(baselineLen) : tail).slice(0, 4000)
+  );
   const alive = port.isAlive(session.sessionId);
 
   if (!alive) {
@@ -307,7 +262,7 @@ export async function readTerminalOutput(
     };
   }
 
-  const output = port.readTail(sessionId, tailChars).trim();
+  const output = formatShellResultBody(port.readTail(sessionId, tailChars));
   const status = alive ? "running" : "exited";
   if (!alive) backgroundJobs.delete(sessionId);
 
@@ -318,7 +273,7 @@ export async function readTerminalOutput(
 
   return {
     ok: true,
-    output: `session_id: ${sessionId} [${status}]\n${output || "(no output yet)"}${healthLine}`,
+    output: `session_id: ${sessionId} [${status}]\n${output}${healthLine}`,
   };
 }
 
@@ -364,7 +319,11 @@ export function listTerminalJobsForChat(chatId: string): ToolResult {
   return { ok: true, output: lines.join("\n") };
 }
 
-export async function terminalPtySend(sessionId: string, input: string, appendNewline: boolean): Promise<ToolResult> {
+export async function terminalPtySend(
+  sessionId: string,
+  input: string,
+  appendNewline: boolean
+): Promise<ToolResult> {
   const port = getPtyShellPort();
   if (!port) return { ok: false, error: "PTY shell port is not available." };
   if (!port.isAlive(sessionId)) {

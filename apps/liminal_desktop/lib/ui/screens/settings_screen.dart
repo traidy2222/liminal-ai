@@ -254,6 +254,9 @@ class _SettingsScreenState extends State<SettingsScreen>
                           cfg: cfg,
                           provider: snap?.provider,
                           presets: snap?.providerPresets ?? const [],
+                          backends: snap?.providerBackends.isNotEmpty == true
+                              ? snap!.providerBackends
+                              : HarnessSettingsSnapshot.defaultBackends(),
                           saving: _saving,
                           onSave: _saveProvider,
                           onPresetApply: _applyProviderPreset,
@@ -516,6 +519,7 @@ class _ProviderForm extends StatelessWidget {
     required this.baseUrl,
     required this.cfg,
     required this.presets,
+    required this.backends,
     required this.saving,
     required this.onSave,
     required this.onPresetApply,
@@ -528,22 +532,50 @@ class _ProviderForm extends StatelessWidget {
   final AppConfig? cfg;
   final HarnessSettingsProvider? provider;
   final List<ProviderPreset> presets;
+  final List<ProviderBackend> backends;
   final bool saving;
   final VoidCallback onSave;
   final Future<void> Function(String presetId) onPresetApply;
+
+  String _resolveBackendId() {
+    if (provider?.resolvedBackendId.isNotEmpty == true) {
+      return provider!.resolvedBackendId;
+    }
+    final b = baseUrl.text.trim().replaceAll(RegExp(r'/+$'), '');
+    if (b.contains('llm.cast.ai') || b.contains('llm.kimchi.dev')) {
+      return 'kimchi';
+    }
+    if (b.contains('localhost') || b.contains('127.0.0.1')) {
+      return 'local';
+    }
+    return 'openrouter';
+  }
 
   @override
   Widget build(BuildContext context) {
     final lim = LiminalTheme.of(context);
     final theme = Theme.of(context);
     final presetLocked = provider?.presetLockedByEnv ?? false;
+    final resolvedBackendId = _resolveBackendId();
+    final backendPresets =
+        ProviderPreset.forBackend(presets, resolvedBackendId);
     final resolvedPresetId = presets.isEmpty
         ? 'custom'
         : ProviderPreset.resolveSelection(presets, model.text, baseUrl.text);
+    final modelDropdownValue = backendPresets.any((p) => p.id == resolvedPresetId)
+        ? resolvedPresetId
+        : 'custom';
     String? presetHint;
     for (final p in presets) {
       if (p.id == resolvedPresetId) {
         presetHint = p.hint;
+        break;
+      }
+    }
+    String? backendHint;
+    for (final b in backends) {
+      if (b.id == resolvedBackendId) {
+        backendHint = b.hint;
         break;
       }
     }
@@ -582,19 +614,19 @@ class _ProviderForm extends StatelessWidget {
             LiminalTextField(
               controller: apiKey,
               label: 'New API key',
-              hint: 'Leave blank to keep current',
+              hint: 'Optional — keys in .env (KIMCHI_API_KEY, OPENROUTER_API_KEY) load automatically',
               obscure: true,
             ),
-            if (presets.isNotEmpty) ...[
+            if (backends.isNotEmpty) ...[
               Text(
-                'Preset',
+                'Provider',
                 style: theme.textTheme.titleSmall,
               ),
               const SizedBox(height: LiminalSpacing.xs),
               DropdownButtonFormField<String>(
-                value: presets.any((p) => p.id == resolvedPresetId)
-                    ? resolvedPresetId
-                    : 'custom',
+                value: backends.any((b) => b.id == resolvedBackendId)
+                    ? resolvedBackendId
+                    : backends.first.id,
                 decoration: InputDecoration(
                   isDense: true,
                   border: OutlineInputBorder(
@@ -609,11 +641,66 @@ class _ProviderForm extends StatelessWidget {
                 dropdownColor: lim.panel,
                 style: theme.textTheme.bodyMedium?.copyWith(color: lim.text),
                 items: [
-                  for (final p in presets)
+                  for (final b in backends)
+                    DropdownMenuItem(
+                      value: b.id,
+                      child: Text(b.label, overflow: TextOverflow.ellipsis),
+                    ),
+                ],
+                onChanged: (presetLocked || saving)
+                    ? null
+                    : (backendId) {
+                        if (backendId == null) return;
+                        final first = ProviderPreset.forBackend(presets, backendId);
+                        if (first.isNotEmpty) {
+                          onPresetApply(first.first.id);
+                        }
+                      },
+              ),
+              if (backendHint != null && backendHint.isNotEmpty)
+                Padding(
+                  padding: const EdgeInsets.only(top: LiminalSpacing.xs),
+                  child: Text(
+                    backendHint,
+                    style: theme.textTheme.bodySmall?.copyWith(
+                      color: lim.textMuted,
+                      height: 1.45,
+                    ),
+                  ),
+                ),
+              const SizedBox(height: LiminalSpacing.md),
+            ],
+            if (backendPresets.isNotEmpty) ...[
+              Text(
+                'Model',
+                style: theme.textTheme.titleSmall,
+              ),
+              const SizedBox(height: LiminalSpacing.xs),
+              DropdownButtonFormField<String>(
+                value: modelDropdownValue,
+                decoration: InputDecoration(
+                  isDense: true,
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(4),
+                    borderSide: BorderSide(color: lim.border),
+                  ),
+                  enabledBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(4),
+                    borderSide: BorderSide(color: lim.border),
+                  ),
+                ),
+                dropdownColor: lim.panel,
+                style: theme.textTheme.bodyMedium?.copyWith(color: lim.text),
+                items: [
+                  for (final p in backendPresets)
                     DropdownMenuItem(
                       value: p.id,
                       child: Text(p.label, overflow: TextOverflow.ellipsis),
                     ),
+                  const DropdownMenuItem(
+                    value: 'custom',
+                    child: Text('Custom…', overflow: TextOverflow.ellipsis),
+                  ),
                 ],
                 onChanged: (presetLocked || saving)
                     ? null

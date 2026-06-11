@@ -62,8 +62,9 @@ const _streamingWriteToolSpecs = <String, StreamingWriteToolSpec>{
     labelFields: ['path'],
   ),
   'edit_file': StreamingWriteToolSpec(
-    contentFields: ['diff', 'new_string'],
+    contentFields: ['diff', 'replace', 'new_string', 'replacements'],
     labelFields: ['path'],
+    rawArgsFallback: true,
   ),
   'multi_file_apply': StreamingWriteToolSpec(
     contentFields: [],
@@ -144,19 +145,24 @@ EmailStreamPreview extractEmailStreamPreview(String toolName, String argsJson) {
 
   final htmlPartial = decodePartialJsonStringField(argsJson, 'body_html');
   final htmlClosed = tryExtractJsonStringField(argsJson, 'body_html');
+  final htmlStreaming = htmlPartial.started && !htmlPartial.closed && htmlClosed == null;
   final bodyHtmlRaw = htmlPartial.value.isNotEmpty
       ? htmlPartial.value
       : (htmlClosed ?? '');
-  final bodyHtml =
-      bodyHtmlRaw.isNotEmpty ? sanitizeEmailPreviewCopy(bodyHtmlRaw) : '';
+  // Do not humanize HTML markup — only repair mojibake; structure must stay intact.
+  final bodyHtml = bodyHtmlRaw.isNotEmpty
+      ? (htmlStreaming ? bodyHtmlRaw : repairEmailUnicode(bodyHtmlRaw))
+      : '';
 
   final plainPartial = decodePartialJsonStringField(argsJson, 'body');
   final plainClosed = tryExtractJsonStringField(argsJson, 'body');
+  final plainStreaming = plainPartial.started && !plainPartial.closed && plainClosed == null;
   final bodyPlainRaw = plainPartial.value.isNotEmpty
       ? plainPartial.value
       : (plainClosed ?? '');
-  final bodyPlain =
-      bodyPlainRaw.isNotEmpty ? sanitizeEmailPreviewCopy(bodyPlainRaw) : '';
+  final bodyPlain = bodyPlainRaw.isNotEmpty
+      ? (plainStreaming ? bodyPlainRaw : sanitizeEmailPreviewCopy(bodyPlainRaw))
+      : '';
 
   final recipients = tryExtractRecipientsPreview(argsJson);
 
@@ -297,6 +303,7 @@ StreamingWritePreview? extractStreamingWritePreview(
   String argsJson, {
   int tailLines = 24,
   int maxChars = 24000,
+  bool fullContent = false,
 }) {
   final spec = _streamingWriteToolSpecs[toolName];
   if (spec == null) return null;
@@ -328,7 +335,7 @@ StreamingWritePreview? extractStreamingWritePreview(
         toolName: toolName,
         field: cf,
         label: label,
-        content: tail.join('\n'),
+        content: fullContent ? full : tail.join('\n'),
         charCount: partial.value.length,
         lineCount: lines.length,
         incomplete: !partial.closed,

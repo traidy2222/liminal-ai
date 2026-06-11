@@ -52,6 +52,11 @@ export class ResourceLockManager {
       const holders = this.locks.get(resourceId) ?? [];
       const own = holders.find((h) => h.taskId === taskId);
       if (own) {
+        // UI terminal PTY is one interactive shell — never run parallel run_shell on it.
+        if (resourceId.includes("::shell:terminal:")) {
+          await sleep(50);
+          continue;
+        }
         own.refcount += 1;
         own.acquiredAt = Date.now();
         return true;

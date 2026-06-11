@@ -5,6 +5,9 @@ import { HARNESS_SECRET_ENV_KEYS } from "./harness_env_inventory.js";
 
 const harnessEnvAsyncLocal = new AsyncLocalStorage<{ prefs: RuntimePreferences | null }>();
 
+/** Model + API base are UI-managed via runtime prefs — not pinned by `.env` (keys stay in `.env` only). */
+export const PROVIDER_ROUTING_ENV_KEYS = new Set(["AGENT_MODEL", "AGENT_API_BASE_URL"]);
+
 /**
  * Run `fn` with async-local harness env context so `effectiveHarnessEnvRaw` resolves
  * prefs from the active AgentHarness during a `send()` / tool execution chain.
@@ -13,7 +16,7 @@ export function runHarnessEffectiveEnvContext<T>(prefs: RuntimePreferences | nul
   return harnessEnvAsyncLocal.run({ prefs }, fn);
 }
 
-/** Settings → Provider slice (wins over harness.env for model/base URL when env does not lock). */
+/** Settings → Provider slice (model + base URL for the active backend). */
 function providerSliceEnv(prefs: RuntimePreferences | null, key: string): string | undefined {
   if (!prefs?.provider) return undefined;
   if (key === "AGENT_MODEL") {
@@ -48,12 +51,24 @@ function runtimeSliceEnv(prefs: RuntimePreferences | null, key: string): string 
 }
 
 /**
- * Resolve one `AGENT_*` value: **process.env** wins, then persisted runtime / harness prefs,
- * then typed product defaults. Never reads secret keys from prefs (callers must not store them).
+ * Resolve one `AGENT_*` value.
+ * Secrets: `process.env` only.
+ * Model/base URL: runtime provider prefs → `.env` fallback → harness prefs → defaults.
+ * Everything else: `process.env` → prefs → defaults.
  */
 export function resolveHarnessEnvRaw(key: string, prefs: RuntimePreferences | null): string | undefined {
   if (HARNESS_SECRET_ENV_KEYS.has(key)) {
     return process.env[key]?.trim();
+  }
+  if (PROVIDER_ROUTING_ENV_KEYS.has(key)) {
+    const fromProvider = providerSliceEnv(prefs, key);
+    if (fromProvider !== undefined && fromProvider !== "") return fromProvider;
+    const envRaw = process.env[key]?.trim();
+    if (envRaw !== undefined && envRaw !== "") return envRaw;
+    const fromHarness = prefs?.harness?.env?.[key]?.trim();
+    if (fromHarness !== undefined && fromHarness !== "") return fromHarness;
+    const d = HARNESS_ENV_DEFAULTS[key];
+    return d !== undefined && d !== "" ? d : undefined;
   }
   const envFirst = process.env[key]?.trim();
   if (envFirst !== undefined && envFirst !== "") return envFirst;
@@ -95,6 +110,20 @@ export function harnessEnvResolutionMeta(
 ): { value: string | undefined; lockedByEnv: boolean; source: HarnessEnvResolutionSource } {
   if (HARNESS_SECRET_ENV_KEYS.has(key)) {
     return { value: undefined, lockedByEnv: true, source: "environment" };
+  }
+  if (PROVIDER_ROUTING_ENV_KEYS.has(key)) {
+    const value = resolveHarnessEnvRaw(key, prefs);
+    const fromProvider = providerSliceEnv(prefs, key);
+    const source: HarnessEnvResolutionSource = fromProvider
+      ? "runtime_preferences"
+      : process.env[key]?.trim()
+        ? "environment"
+        : prefs?.harness?.env?.[key]?.trim()
+          ? "harness_preferences"
+          : value
+            ? "product_default"
+            : "unset";
+    return { value, lockedByEnv: false, source };
   }
   const envRaw = process.env[key]?.trim();
   const lockedByEnv = !!(envRaw && envRaw.length > 0);

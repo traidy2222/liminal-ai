@@ -4,7 +4,15 @@ import {
   createContentStreamParseState,
   getDecodedContentFromRaw,
   ingestToolArgJsonDelta,
+  mergeStreamingToolArgsJson,
 } from "./tool_arg_content_stream.js";
+
+test("mergeStreamingToolArgsJson handles cumulative provider snapshots", () => {
+  const a = '{"path":"a.ts","content":"hel';
+  const b = '{"path":"a.ts","content":"hello"';
+  assert.equal(mergeStreamingToolArgsJson(a, b), b);
+  assert.equal(mergeStreamingToolArgsJson(a, 'lo"'), '{"path":"a.ts","content":"hello"');
+});
 
 test("ingestToolArgJsonDelta decodes path and content incrementally", () => {
   const state = createContentStreamParseState();

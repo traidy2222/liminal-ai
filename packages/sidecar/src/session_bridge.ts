@@ -239,6 +239,7 @@ export class SessionBridge {
     on("browser_view", (p) => this.emit("browser_view", p));
     on("terminal_view", (p) => this.emit("terminal_view", p));
     on("tool_delta", (p) => this.emit("tool_delta", p));
+    on("compose_preview", (p) => this.emit("compose_preview", p));
     on("tool_result", (p) => this.emit("tool_result", wireToolResult(p)));
     on("turn_summary", (p) => this.emit("turn_summary", p));
     on("turn_end", (p) => {

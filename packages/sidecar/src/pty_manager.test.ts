@@ -46,6 +46,21 @@ test("PtyManager replays backlog on late WebSocket attach", async () => {
   mgr.disposeAll();
 });
 
+test("PtyManager runOneshot runs plain command and returns output", async () => {
+  const mgr = new PtyManager();
+  const result = await mgr.runOneshot({
+    chatId: "oneshot_test",
+    workspaceRoot: process.cwd(),
+    command: process.platform === "win32" ? "whoami" : "whoami",
+    timeoutMs: 15_000,
+  });
+  assert.ok(result.sessionId.startsWith("pty_"));
+  assert.ok(result.output.trim().length > 0);
+  assert.ok(!result.output.includes("__LIMINAL_EXIT"));
+  assert.equal(mgr.isAlive(result.sessionId), false);
+  mgr.disposeAll();
+});
+
 test("PtyManager readTail and onSessionData", async () => {
   const mgr = new PtyManager();
   const info = mgr.open({

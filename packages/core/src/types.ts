@@ -1,4 +1,5 @@
 import type { ChatCompletionMessageParam } from "openai/resources/chat/completions.js";
+import type { ComposeDockWirePreview } from "./compose_dock_preview.js";
 import type { TaskOrchestrator } from "./orchestrator.js";
 import type { WorldContextOptions } from "./world_context.js";
 import type { RuntimePreferences } from "./runtime_prefs.js";
@@ -100,18 +101,23 @@ export interface AccumulatedToolCall {
 /** Current streaming wire protocol version. Bump when StreamChunk shape changes in a breaking way. */
 export const STREAM_WIRE_VERSION = 1 as const;
 
+export type ToolCallStreamDelta = {
+  index: number;
+  id: string;
+  name: string;
+  argsDelta: string;
+  isNewTool: boolean;
+};
+
 export interface StreamChunk {
   /** Wire protocol version — always STREAM_WIRE_VERSION. Lets consumers detect shape changes. */
   version?: typeof STREAM_WIRE_VERSION;
   textDelta?: string;
   /** Provider-native reasoning tokens (OpenRouter / reasoning models). */
   reasoningDelta?: string;
-  toolCallDelta?: {
-    index: number;
-    id?: string;
-    name?: string;
-    argsDelta?: string;
-  };
+  toolCallDelta?: ToolCallStreamDelta;
+  /** Every tool-call delta in this provider chunk (some gateways batch multiple). */
+  toolCallDeltas?: ToolCallStreamDelta[];
   finishReason?: "stop" | "tool_calls" | "length" | null;
 }
 
@@ -565,7 +571,22 @@ export interface AgentEventMap {
     focus: boolean;
     updatedAt: number;
   };
-  tool_delta: { callId: string; argsDelta: string };
+  tool_delta: {
+    callId: string;
+    argsDelta: string;
+    /** Accumulated tool-call args JSON (authoritative for UI preview). */
+    argsJson?: string;
+    name?: string;
+    /** Pre-parsed compose-dock preview (file / email right pane). */
+    compose?: ComposeDockWirePreview;
+  };
+  /** Live right-pane preview — emitted on its own so UIs need not match tool_delta to messages. */
+  compose_preview: {
+    callId: string;
+    name: string;
+    argsJson: string;
+    compose: ComposeDockWirePreview;
+  };
   tool_approval: {
     callId: string;
     name: string;

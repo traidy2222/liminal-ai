@@ -3,7 +3,7 @@ import {
   DEFAULT_AGENT_MODEL_SLUG,
   HARNESS_ENV_DEFAULTS,
 } from "./harness_default_constants.js";
-import { effectiveHarnessEnvRaw } from "./harness_effective_env.js";
+import { effectiveHarnessEnvRaw, resolveHarnessEnvRaw } from "./harness_effective_env.js";
 import { resolveManagedOpenRouterCredentials } from "./inference_provider.js";
 import {
   buildOpenRouterSessionExtras,
@@ -11,8 +11,15 @@ import {
 } from "./openrouter_session.js";
 import type { ProviderRouteState } from "./provider_route_state.js";
 import type { RuntimePreferences } from "./runtime_prefs.js";
-import { ensureLocalProviderApiKeyInProcess } from "./provider_api_key.js";
+import {
+  ensureLocalProviderApiKeyInProcess,
+  ensureProviderApiKeysInProcess,
+  isCastAiApiKey,
+  syncProviderProcessEnvForBase,
+} from "./provider_api_key.js";
 import { isManagedInferenceBaseUrl } from "./inference_session.js";
+import { isKimchiApiBaseUrl, KIMCHI_API_KEY_ENV_NAMES } from "./kimchi_provider.js";
+import { isOpenRouterApiBaseUrl } from "./openrouter_session.js";
 
 // ─── Provider routing (OpenRouter sticky cache + dynamic price sort) ─────────
 
@@ -310,17 +317,21 @@ export function sessionEpochBumpOn429Enabled(): boolean {
 const DEFAULT_BASE_URL = DEFAULT_AGENT_API_BASE_URL;
 const DEFAULT_MODEL = DEFAULT_AGENT_MODEL_SLUG;
 
+export type ProviderApiKeyEnvName =
+  | "AGENT_API_KEY"
+  | "OPENROUTER_API_KEY"
+  | "KIMCHI_API_KEY"
+  | "CASTAI_API_KEY"
+  | "OPENAI_API_KEY"
+  | "ANTHROPIC_API_KEY"
+  | "XAI_API_KEY"
+  | "VIREON_MANAGED";
+
 export interface ProviderConfig {
   apiKey: string;
   baseURL: string;
   model: string;
-  keySource:
-    | "AGENT_API_KEY"
-    | "OPENROUTER_API_KEY"
-    | "OPENAI_API_KEY"
-    | "ANTHROPIC_API_KEY"
-    | "XAI_API_KEY"
-    | "VIREON_MANAGED";
+  keySource: ProviderApiKeyEnvName;
 }
 
 export interface ProviderConfigOverrides {
@@ -336,8 +347,8 @@ export interface VisionProviderConfig {
 }
 
 function firstNonEmpty(
-  keys: Array<ProviderConfig["keySource"]>
-): { key: ProviderConfig["keySource"]; value: string } | null {
+  keys: Array<ProviderApiKeyEnvName>
+): { key: ProviderApiKeyEnvName; value: string } | null {
   ensureLocalProviderApiKeyInProcess();
   for (const key of keys) {
     const value = process.env[key]?.trim();
@@ -346,24 +357,95 @@ function firstNonEmpty(
   return null;
 }
 
-export function resolveProviderConfig(overrides?: ProviderConfigOverrides): ProviderConfig {
-  const order: Array<ProviderConfig["keySource"]> = overrides?.keySource
-    ? [overrides.keySource, "AGENT_API_KEY", "OPENROUTER_API_KEY", "OPENAI_API_KEY", "ANTHROPIC_API_KEY", "XAI_API_KEY"]
-    : ["AGENT_API_KEY", "OPENROUTER_API_KEY", "OPENAI_API_KEY", "ANTHROPIC_API_KEY", "XAI_API_KEY"];
-  const picked = firstNonEmpty(order);
+const FALLBACK_KEY_ORDER: Array<ProviderApiKeyEnvName> = [
+  "AGENT_API_KEY",
+  "OPENROUTER_API_KEY",
+  "KIMCHI_API_KEY",
+  "CASTAI_API_KEY",
+  "OPENAI_API_KEY",
+  "ANTHROPIC_API_KEY",
+  "XAI_API_KEY",
+];
+
+function resolveApiKeyOrderForBaseUrl(baseURL: string): Array<ProviderApiKeyEnvName> {
+  if (isKimchiApiBaseUrl(baseURL)) {
+    return [...KIMCHI_API_KEY_ENV_NAMES];
+  }
+  if (isOpenRouterApiBaseUrl(baseURL)) {
+    return ["OPENROUTER_API_KEY", "AGENT_API_KEY", "OPENAI_API_KEY", "ANTHROPIC_API_KEY", "XAI_API_KEY"];
+  }
+  return FALLBACK_KEY_ORDER;
+}
+
+function pickKimchiApiKey(): { key: ProviderApiKeyEnvName; value: string } | null {
+  const fromNamed = firstNonEmpty([...KIMCHI_API_KEY_ENV_NAMES]);
+  if (fromNamed) return fromNamed;
+  const agent = process.env["AGENT_API_KEY"]?.trim();
+  if (agent && isCastAiApiKey(agent)) {
+    return { key: "AGENT_API_KEY", value: agent };
+  }
+  return null;
+}
+
+function pickOpenRouterApiKey(): { key: ProviderApiKeyEnvName; value: string } | null {
+  const fromNamed = firstNonEmpty(["OPENROUTER_API_KEY"]);
+  if (fromNamed) return fromNamed;
+  const agent = process.env["AGENT_API_KEY"]?.trim();
+  if (agent && !isCastAiApiKey(agent)) {
+    return { key: "AGENT_API_KEY", value: agent };
+  }
+  return firstNonEmpty(["OPENAI_API_KEY", "ANTHROPIC_API_KEY", "XAI_API_KEY"]);
+}
+
+export function resolveProviderConfig(
+  overrides?: ProviderConfigOverrides,
+  prefs?: RuntimePreferences | null
+): ProviderConfig {
+  const baseURL =
+    (overrides?.baseURL ??
+      resolveHarnessEnvRaw("AGENT_API_BASE_URL", prefs ?? null) ??
+      effectiveHarnessEnvRaw("AGENT_API_BASE_URL")) ||
+    DEFAULT_BASE_URL;
+  syncProviderProcessEnvForBase(baseURL);
+  const order: Array<ProviderApiKeyEnvName> = overrides?.keySource
+    ? [overrides.keySource, ...resolveApiKeyOrderForBaseUrl(baseURL)]
+    : resolveApiKeyOrderForBaseUrl(baseURL);
+  const keyOverrideOnly = overrides?.keySource ? [overrides.keySource] : [];
+  const picked = isKimchiApiBaseUrl(baseURL)
+    ? pickKimchiApiKey() ?? firstNonEmpty(keyOverrideOnly)
+    : isOpenRouterApiBaseUrl(baseURL)
+      ? pickOpenRouterApiKey() ?? firstNonEmpty(keyOverrideOnly)
+      : firstNonEmpty([...new Set(order)]);
   if (!picked) {
     throw new Error(
-      "No API key found. Set AGENT_API_KEY (preferred) or one of OPENROUTER_API_KEY / OPENAI_API_KEY / ANTHROPIC_API_KEY / XAI_API_KEY."
+      isKimchiApiBaseUrl(baseURL)
+        ? "No Kimchi API key found. Set KIMCHI_API_KEY (castai_v1_…) in .env or ~/.liminal/.env."
+        : isOpenRouterApiBaseUrl(baseURL)
+          ? "No OpenRouter API key found. Set OPENROUTER_API_KEY or AGENT_API_KEY (sk-or-v1-…) in .env or Settings."
+          : "No API key found. Set AGENT_API_KEY, OPENROUTER_API_KEY, or another provider key in .env."
     );
   }
-  const baseURL = (overrides?.baseURL ?? process.env["AGENT_API_BASE_URL"]?.trim()) || DEFAULT_BASE_URL;
-  const model = (overrides?.model ?? process.env["AGENT_MODEL"]?.trim()) || DEFAULT_MODEL;
+  const model =
+    (overrides?.model ??
+      resolveHarnessEnvRaw("AGENT_MODEL", prefs ?? null) ??
+      effectiveHarnessEnvRaw("AGENT_MODEL")) ||
+    DEFAULT_MODEL;
   return {
     apiKey: picked.value,
     baseURL,
     model,
     keySource: picked.key,
   };
+}
+
+/** True when a provider API key is available for the given base URL (or default). */
+export function isProviderApiKeyConfigured(opts?: { baseURL?: string }): boolean {
+  ensureProviderApiKeysInProcess();
+  try {
+    return !!resolveProviderConfig({ baseURL: opts?.baseURL }).apiKey?.trim();
+  } catch {
+    return false;
+  }
 }
 
 /**

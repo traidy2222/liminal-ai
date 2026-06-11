@@ -1,7 +1,10 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:webview_flutter/webview_flutter.dart';
 
 import '../../models/terminal_panel_state.dart';
+import 'desktop_webview_lifecycle.dart';
 import '../layout/liminal_spacing.dart';
 import '../theme/liminal_theme_extension.dart';
 import 'panel_resize_handle.dart';
@@ -39,11 +42,20 @@ class _TerminalDockState extends State<TerminalDock> {
   WebViewController? _controller;
   String? _loadedSessionId;
   Size? _lastNotifiedSize;
+  int _controllerGen = 0;
 
   @override
   void initState() {
     super.initState();
     _syncController();
+  }
+
+  @override
+  void dispose() {
+    final controller = _controller;
+    _controller = null;
+    unawaited(disposeDesktopWebView(controller));
+    super.dispose();
   }
 
   @override
@@ -61,11 +73,30 @@ class _TerminalDockState extends State<TerminalDock> {
     if (tab == null) return;
     if (_loadedSessionId == tab.sessionId && _controller != null) return;
     _loadedSessionId = tab.sessionId;
-    _controller = WebViewController()
+    final gen = ++_controllerGen;
+    final old = _controller;
+    _controller = null;
+    unawaited(_mountController(tab, gen: gen, disposeOld: old));
+  }
+
+  Future<void> _mountController(
+    TerminalTabState tab, {
+    required int gen,
+    WebViewController? disposeOld,
+  }) async {
+    await disposeDesktopWebView(disposeOld);
+    if (!mounted || gen != _controllerGen || _loadedSessionId != tab.sessionId) {
+      return;
+    }
+    final controller = WebViewController()
       ..setJavaScriptMode(JavaScriptMode.unrestricted)
       ..setBackgroundColor(const Color(0xFF0A0F14))
       ..loadRequest(Uri.parse(tab.embedUrl));
-    setState(() {});
+    if (!mounted || gen != _controllerGen || _loadedSessionId != tab.sessionId) {
+      await disposeDesktopWebView(controller);
+      return;
+    }
+    setState(() => _controller = controller);
   }
 
   void _notifyTerminalFit(Size size) {
@@ -160,6 +191,7 @@ class _TerminalDockState extends State<TerminalDock> {
                               for (final tab in widget.panel.tabs)
                                 _TabChip(
                                   label: tab.label,
+                                  source: tab.source,
                                   selected: tab.sessionId == widget.panel.activeSessionId,
                                   onTap: () => widget.onSelectTab?.call(tab.sessionId),
                                   onClose: () => widget.onCloseTab?.call(tab.sessionId),
@@ -181,16 +213,49 @@ class _TerminalDockState extends State<TerminalDock> {
                   ),
                 ),
               ),
-              if (widget.expanded && active != null)
+              if (widget.expanded && active != null) ...[
+                if (active.cwd.isNotEmpty)
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(
+                      LiminalSpacing.sm,
+                      0,
+                      LiminalSpacing.sm,
+                      4,
+                    ),
+                    child: Text(
+                      active.cwd,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                            color: lim.textMuted,
+                            fontSize: 10,
+                            fontFamily: 'Consolas',
+                          ),
+                    ),
+                  ),
                 SizedBox(
                   height: bodyHeight,
-                  child: _controller == null
-                      ? const Center(child: CircularProgressIndicator(strokeWidth: 2))
-                      : WebViewWidget(
-                          key: ValueKey(active.sessionId),
-                          controller: _controller!,
-                        ),
+                  child: ClipRRect(
+                    borderRadius: const BorderRadius.vertical(top: Radius.circular(6)),
+                    child: _controller == null
+                        ? ColoredBox(
+                            color: const Color(0xFF0A0F14),
+                            child: Center(
+                              child: Text(
+                                'Starting shell…',
+                                style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                                      color: lim.textMuted,
+                                    ),
+                              ),
+                            ),
+                          )
+                        : WebViewWidget(
+                            key: ValueKey(active.sessionId),
+                            controller: _controller!,
+                          ),
+                  ),
                 ),
+              ],
             ],
           ),
         );
@@ -202,58 +267,68 @@ class _TerminalDockState extends State<TerminalDock> {
 class _TabChip extends StatelessWidget {
   const _TabChip({
     required this.label,
+    required this.source,
     required this.selected,
     required this.onTap,
     required this.onClose,
   });
 
   final String label;
+  final String source;
   final bool selected;
   final VoidCallback onTap;
   final VoidCallback onClose;
 
+  bool get _isAgentShell => source == 'agent' && label == 'Agent shell';
+
   @override
   Widget build(BuildContext context) {
     final lim = LiminalTheme.of(context);
+    final accent = _isAgentShell
+        ? lim.success
+        : (source == 'agent' ? const Color(0xFFE6B84D) : lim.textMuted);
+    final icon = _isAgentShell
+        ? Icons.smart_toy_outlined
+        : (source == 'agent' ? Icons.play_circle_outline : Icons.terminal);
+
     return Padding(
-      padding: const EdgeInsets.only(right: 4),
+      padding: const EdgeInsets.only(right: 6),
       child: Material(
-        color: selected
-            ? lim.success.withValues(alpha: 0.15)
-            : lim.panel.withValues(alpha: 0.5),
-        borderRadius: BorderRadius.circular(4),
+        color: selected ? accent.withValues(alpha: 0.14) : Colors.transparent,
+        borderRadius: BorderRadius.circular(6),
         child: InkWell(
           onTap: onTap,
-          borderRadius: BorderRadius.circular(4),
+          borderRadius: BorderRadius.circular(6),
           child: Container(
-            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
             decoration: BoxDecoration(
               border: Border.all(
-                color: selected
-                    ? lim.success.withValues(alpha: 0.4)
-                    : lim.border.withValues(alpha: 0.5),
+                color: selected ? accent.withValues(alpha: 0.55) : lim.border.withValues(alpha: 0.35),
               ),
-              borderRadius: BorderRadius.circular(4),
+              borderRadius: BorderRadius.circular(6),
             ),
             child: Row(
               mainAxisSize: MainAxisSize.min,
               children: [
+                Icon(icon, size: 13, color: accent),
+                const SizedBox(width: 6),
                 ConstrainedBox(
-                  constraints: const BoxConstraints(maxWidth: 120),
+                  constraints: const BoxConstraints(maxWidth: 200),
                   child: Text(
                     label,
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                     style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                          fontSize: 10,
-                          color: lim.text,
+                          fontSize: 11,
+                          fontWeight: selected ? FontWeight.w600 : FontWeight.w500,
+                          color: selected ? lim.text : lim.textMuted,
                         ),
                   ),
                 ),
-                const SizedBox(width: 4),
+                const SizedBox(width: 6),
                 GestureDetector(
                   onTap: onClose,
-                  child: Icon(Icons.close, size: 12, color: lim.textMuted),
+                  child: Icon(Icons.close, size: 13, color: lim.textMuted),
                 ),
               ],
             ),

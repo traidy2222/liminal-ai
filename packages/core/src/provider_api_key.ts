@@ -5,10 +5,14 @@
 import { existsSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
+import { isKimchiApiBaseUrl } from "./kimchi_provider.js";
+import { isOpenRouterApiBaseUrl } from "./openrouter_session.js";
 
 export const PROVIDER_API_KEY_ENV_NAMES = [
   "AGENT_API_KEY",
   "OPENROUTER_API_KEY",
+  "KIMCHI_API_KEY",
+  "CASTAI_API_KEY",
   "OPENAI_API_KEY",
   "ANTHROPIC_API_KEY",
   "XAI_API_KEY",
@@ -52,30 +56,66 @@ export function providerApiKeyEnvFileCandidates(): string[] {
   return paths;
 }
 
+/** Cast AI / Kimchi API keys use the `castai_v1_` prefix. */
+export function isCastAiApiKey(value: string | undefined | null): boolean {
+  return /^castai_v1_/i.test((value ?? "").trim());
+}
+
 /** First non-empty provider key from env vars or `.env` files. */
 export function resolveLocalProviderApiKey(): string | undefined {
+  ensureProviderApiKeysInProcess();
   for (const name of PROVIDER_API_KEY_ENV_NAMES) {
     const v = process.env[name]?.trim();
     if (v) return v;
-  }
-  for (const file of providerApiKeyEnvFileCandidates()) {
-    const parsed = readDotEnvFile(file);
-    for (const name of PROVIDER_API_KEY_ENV_NAMES) {
-      const v = parsed[name]?.trim();
-      if (v) return v;
-    }
   }
   return undefined;
 }
 
 /**
- * Hydrate `AGENT_API_KEY` into process.env when only present on disk (desktop bundle).
- * Returns the resolved key when found.
+ * Load provider API keys from `.env` files into `process.env` (desktop bundle).
+ * Does not override keys already set in the process environment.
+ */
+export function ensureProviderApiKeysInProcess(): void {
+  for (const file of providerApiKeyEnvFileCandidates()) {
+    const parsed = readDotEnvFile(file);
+    for (const name of PROVIDER_API_KEY_ENV_NAMES) {
+      const v = parsed[name]?.trim();
+      if (v && !process.env[name]?.trim()) {
+        process.env[name] = v;
+      }
+    }
+  }
+}
+
+/**
+ * Hydrate provider keys from disk and return the first resolved key.
+ * Also mirrors the first found key into `AGENT_API_KEY` when unset (legacy callers).
+ * Never mirrors Cast AI keys — that breaks OpenRouter after switching off Kimchi.
  */
 export function ensureLocalProviderApiKeyInProcess(): string | undefined {
+  ensureProviderApiKeysInProcess();
   const key = resolveLocalProviderApiKey();
-  if (key && !process.env["AGENT_API_KEY"]?.trim()) {
+  if (key && !process.env["AGENT_API_KEY"]?.trim() && !isCastAiApiKey(key)) {
     process.env["AGENT_API_KEY"] = key;
   }
   return key;
 }
+
+/**
+ * Drop stale in-process keys after switching provider backend (Kimchi ↔ OpenRouter).
+ * `.env` files are authoritative; `AGENT_API_KEY` must not keep a Cast key on OpenRouter.
+ */
+export function syncProviderProcessEnvForBase(baseURL: string): void {
+  ensureProviderApiKeysInProcess();
+  const agent = process.env["AGENT_API_KEY"]?.trim();
+  if (!agent) return;
+  if (isOpenRouterApiBaseUrl(baseURL) && isCastAiApiKey(agent)) {
+    delete process.env["AGENT_API_KEY"];
+  }
+  if (isKimchiApiBaseUrl(baseURL) && !isCastAiApiKey(agent)) {
+    const hasKimchi =
+      process.env["KIMCHI_API_KEY"]?.trim() || process.env["CASTAI_API_KEY"]?.trim();
+    if (hasKimchi) delete process.env["AGENT_API_KEY"];
+  }
+}
+

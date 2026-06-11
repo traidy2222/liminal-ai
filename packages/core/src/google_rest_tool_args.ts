@@ -96,6 +96,8 @@ function mapGmailFields(out: Record<string, unknown>, name: string): void {
   if (body && !out["body"]) out.body = body;
   const threadId = firstString(out, ["thread_id", "threadId"]);
   if (threadId) out.thread_id = threadId;
+  const draftId = firstString(out, ["draft_id", "draftId", "id"]);
+  if (draftId && name === "gmail_send_draft") out.draft_id = draftId;
 }
 
 export function normalizeGoogleRestToolArgs(

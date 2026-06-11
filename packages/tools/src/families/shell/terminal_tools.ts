@@ -1,6 +1,7 @@
 import type { AgentHarness } from "@liminal/core";
 import { defineTool } from "../../shared/helpers.js";
 import { ensureChatTerminal } from "./terminal_runtime.js";
+import { startAgentTerminalWarmup } from "./agent_shell_session.js";
 
 export function createOpenTerminalTool(harness: AgentHarness) {
   return defineTool({
@@ -52,17 +53,12 @@ export function createOpenTerminalTool(harness: AgentHarness) {
   });
 }
 
-/** Auto-open primary agent terminal when shell tools start (agentic-first). */
+/** Begin Agent shell open + boot wait as soon as a shell tool is requested (before handler runs). */
 export function wireTerminalHarness(harness: AgentHarness): void {
-  const chatId = harness.taskId;
+  const chatId = harness.taskId?.trim();
+  if (!chatId) return;
   harness.emitter.on("tool_start", (p) => {
     if (p.name !== "run_shell" && p.name !== "run_background") return;
-    void ensureChatTerminal({
-      chatId,
-      label: "Agent shell",
-      source: "agent",
-      forceNew: false,
-      focus: false,
-    });
+    void startAgentTerminalWarmup(chatId);
   });
 }

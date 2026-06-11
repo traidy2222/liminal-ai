@@ -2,7 +2,7 @@
 
 All notable changes to [Liminal AI](https://github.com/traidy2222/liminal-ai) on the `main` branch.
 
-**Current stage:** **alpha** (`v0.0.25` tip of `main`, 2026-06-09). The workspace package may read `0.1.0`, but **beta**, **RC**, and a **v0.1.0 public preview** have not been declared as product releases yet.
+**Current stage:** **alpha** (`v0.0.26` tip of `main`, 2026-06-10). The workspace package may read `0.1.0`, but **beta**, **RC**, and a **v0.1.0 public preview** have not been declared as product releases yet.
 
 Format: **v0.0.x** entries keyed to the last GitHub push in each slice. Dates are real push dates.
 
@@ -17,9 +17,26 @@ After editing JSON: `npm run changelog:gen`, commit, push, then in [vireondynami
 
 ---
 
+## v0.0.26 — 2026-06-10 {#v0-0-26}
+
+**Current alpha.** Live compose dock, email HTML preview, Azure ARM, Kimchi provider, OSC 133 shell.
+
+**Shipped**
+
+- **Compose dock** — `compose_preview` + streaming `tool_delta` open the right pane immediately on `write_file`/`edit_file`/Gmail/Outlook compose; content streams live and the panel persists through `turn_end`
+- **Email HTML preview** — Extracts `<body>` fragments and sanitizes for `HtmlWidget`; fixes raw-HTML monospace preview during streaming
+- **Azure ARM** — Subscription, resource-group, and location tools; per-resource `api-version` inference; clearer OAuth/ARM errors; guide in `docs/guides/azure.md`
+- **Kimchi provider** — Cast AI rate-limit parsing, transient 400/429 retries, min request interval, throttle-aware circuit breaker; `AGENT_KIMCHI_*` in Settings
+- **OSC 133 shell** — Prompt markers at PTY launch (`shell_integration_launch.ts`); `agent_shell_session` + `Osc133Tracker` for deterministic command-done events without prompt regexes
+- **Provider backends** — Kimchi backend routing in `provider_backends.ts`; web/desktop Settings presets updated
+- **Desktop WebView** — `desktop_webview_lifecycle.dart` pauses off-screen WebView2 instances to cut GPU/memory churn
+- **Docs** — [Azure](../guides/azure.md), [Google Workspace](../guides/google-workspace.md)
+
+---
+
 ## v0.0.25 — 2026-06-09 {#v0-0-25}
 
-**Current alpha.** Desktop design system, Sheets auto-fit, integration arg reliability, research reply fix.
+Desktop design system, Sheets auto-fit, integration arg reliability, research reply fix.
 
 **Shipped**
 

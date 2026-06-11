@@ -260,8 +260,6 @@ export function createRouter(
     const prefs = bridge.harness.getRuntimePreferences();
     const fields = buildHarnessSettingsApiFields(prefs);
     const cfg = bridge.harness.config;
-    const envModel = process.env["AGENT_MODEL"]?.trim();
-    const envBase = process.env["AGENT_API_BASE_URL"]?.trim();
     const apiKeyConfigured = !!(cfg.openRouterApiKey && cfg.openRouterApiKey.trim().length > 0);
     const managedRoute = (cfg.baseURL ?? "").includes("/inference");
     res.json({
@@ -270,8 +268,8 @@ export function createRouter(
       provider: {
         model: (cfg.model ?? "").slice(0, 200),
         baseURL: (cfg.baseURL ?? "").slice(0, 500),
-        modelLockedByEnv: !!envModel,
-        baseURLLockedByEnv: !!envBase,
+        modelLockedByEnv: false,
+        baseURLLockedByEnv: false,
         apiKeyConfigured,
         managedRoute,
         inferenceMode: resolveInferenceMode(prefs),
@@ -1234,16 +1232,14 @@ export function createRouter(
       patch.harness = { env: envPatch };
     }
     if (body.provider && typeof body.provider === "object") {
-      const modelLocked = !!(process.env["AGENT_MODEL"]?.trim());
-      const baseLocked = !!(process.env["AGENT_API_BASE_URL"]?.trim());
       const pm =
         typeof body.provider.model === "string" ? body.provider.model.trim().slice(0, 200) : "";
       const pb =
         typeof body.provider.baseURL === "string" ? body.provider.baseURL.trim().slice(0, 500) : "";
       const prov: { model?: string; baseURL?: string; inferenceMode?: "byok" | "managed" | "auto" } =
         {};
-      if (!modelLocked && pm.length > 0) prov.model = pm;
-      if (!baseLocked && pb.length > 0) prov.baseURL = pb;
+      if (pm.length > 0) prov.model = pm;
+      if (pb.length > 0) prov.baseURL = pb;
       const modeRaw =
         typeof body.provider.inferenceMode === "string"
           ? body.provider.inferenceMode.trim().toLowerCase()

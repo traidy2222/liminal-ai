@@ -148,6 +148,7 @@ export function createRunShellTool(emitter: AgentEmitter, harness?: AgentHarness
     name: "run_shell",
     description:
       "WHAT: Execute a shell command and return its stdout and stderr. Output streams live in the Terminal panel and chat trace. Requires user approval.\n" +
+      "UI TERMINAL: One shared Agent shell tab — commands are pasted into that shell stdin (visible in Terminal). NEVER batch multiple run_shell in one turn. Output lives in Terminal; tool result is a summary only.\n" +
       "WHEN: Installing packages, running build/test scripts, or any system task with no dedicated tool.\n" +
       "NOT WHEN: A dedicated tool already covers the task (read_file, edit_file, list_dir, web_fetch, web_search, git_*).\n" +
       "NOT WHEN: A process runs indefinitely (dev server, watcher) — use run_background; poll with read_process_output (session_id).\n" +
@@ -160,6 +161,11 @@ export function createRunShellTool(emitter: AgentEmitter, harness?: AgentHarness
     requiresApproval: true,
     dangerLevel: "destructive",
     resourceLocks: (args) => {
+      const chatId = harness?.taskId?.trim();
+      const prefs = harness?.getRuntimePreferences() ?? null;
+      if (chatId && shellUseUiPty(prefs)) {
+        return [`shell:terminal:${chatId}`];
+      }
       const cwd = (args["cwd"] as string | undefined) ?? process.cwd();
       return [`shell:${cwd}`];
     },
@@ -200,20 +206,13 @@ export function createRunShellTool(emitter: AgentEmitter, harness?: AgentHarness
 
       const prefs = harness?.getRuntimePreferences() ?? null;
       if (harness && shellUseUiPty(prefs)) {
-        let headerEmitted = false;
+        // Terminal panel is the live view — do not duplicate PTY scrollback into chat trace.
         return runShellInTerminal({
           harness,
           command,
           cwd,
           timeoutMs: timeout,
           cappedNote,
-          onChunk: (text) => {
-            if (!headerEmitted) {
-              headerEmitted = true;
-              emitter.emit("text", { delta: `\n\`${command}\`\n`, channel: "trace" });
-            }
-            emitter.emit("text", { delta: text, channel: "trace" });
-          },
         });
       }
 

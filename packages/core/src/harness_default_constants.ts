@@ -27,6 +27,10 @@ export const HARNESS_ENV_DEFAULTS: Readonly<Record<string, string>> = {
   AGENT_APPROVAL_TIMEOUT_MS: "120000",
   AGENT_RATE_LIMIT_MAX_RETRIES: "8",
   AGENT_TRANSIENT_5XX_MAX_RETRIES: "8",
+  /** Cast AI / Kimchi opaque HTTP 400 + 5xx retry budget per completion. */
+  AGENT_KIMCHI_TRANSIENT_MAX_RETRIES: "8",
+  /** Min ms between Cast AI requests when AGENT_PROVIDER_MIN_INTERVAL_MS is unset. */
+  AGENT_KIMCHI_MIN_INTERVAL_MS: "1500",
   /** Bounded local retries when the managed-inference proxy reports it already
    *  retried upstream and is still busy (429/5xx). Rides out transient OpenRouter
    *  congestion instead of failing the turn immediately. */

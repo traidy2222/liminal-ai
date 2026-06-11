@@ -71,7 +71,8 @@ String balanceHtmlForStreamingPreview(String html) {
   final lastGt = s.lastIndexOf('>');
   final lastLt = s.lastIndexOf('<');
   if (lastLt > lastGt) {
-    s = s.substring(0, lastLt).trimRight();
+    final trimmed = s.substring(0, lastLt).trimRight();
+    s = trimmed.isEmpty ? html.trim() : trimmed;
   }
   if (s.isEmpty) return '';
 
