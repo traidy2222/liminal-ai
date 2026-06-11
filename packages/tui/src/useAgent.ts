@@ -1091,7 +1091,11 @@ export function useAgent(
   );
 
   const sendMessage = useCallback(
-    (text: string, attachments: ImageAttachment[] = []) => {
+    (
+      text: string,
+      attachments: ImageAttachment[] = [],
+      opts?: { workflowPreset?: "receipt_to_xero" }
+    ) => {
       if (bootstrapPendingRef.current) {
         dispatch({
           type: "error",
@@ -1106,7 +1110,10 @@ export function useAgent(
       dispatch({ type: "user_message", text: userText });
       void (async () => {
         try {
-          await harness.send(text, { imageAttachments: attachments });
+          await harness.send(text, {
+            imageAttachments: attachments,
+            workflowPreset: opts?.workflowPreset,
+          });
         } catch (err) {
           dispatch({
             type: "error",

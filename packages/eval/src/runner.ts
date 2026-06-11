@@ -12,6 +12,7 @@ import {
   appendGoldenEvalRecord,
   buildAppSpecFromSpawn,
   loadRuntimePreferences,
+  recordEvalScenarioOutcome,
   resolveProviderConfig,
   resolveWorkspaceRoot,
   type AgentConfig,
@@ -649,6 +650,7 @@ export async function runScenario(scenario: Scenario): Promise<ScenarioResult> {
   if (!scenario.skipJsonSink) {
     await appendEvalRunJsonLine(out);
   }
+  await recordEvalScenarioOutcome({ scenario: scenario.name, passed: out.passed });
   if (out.passed && (!scenario.mocks || scenario.mocks.length === 0)) {
     const firstMsg = variants[0]!;
     void appendGoldenEvalRecord({

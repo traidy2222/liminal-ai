@@ -37,6 +37,7 @@ import {
   missingDefaultMicrosoftScopes,
   listGithubOAuthAccounts,
   listXeroOAuthAccounts,
+  refreshStaleXeroAccounts,
   xeroBundleMissingCoreScopes,
   xeroBundleMissingFullScopes,
   xeroBundleMissingPhase3Scopes,
@@ -517,6 +518,7 @@ export function createRouter(
 
   router.get("/api/integrations", async (_req, res) => {
     try {
+      await refreshStaleXeroAccounts();
       const accounts = await listGoogleOAuthAccounts();
       const msAccounts = await listMicrosoftOAuthAccounts();
       const sidecar = await getGoogleSidecarStatus();
@@ -1384,11 +1386,12 @@ export function createRouter(
       res.status(409).json({ error: "Persona bootstrap is pending. Submit via bootstrap modal." });
       return;
     }
-    const { message, freshContext, attachments, liveDictation } = req.body as {
+    const { message, freshContext, attachments, liveDictation, workflowPreset } = req.body as {
       message?: string;
       freshContext?: boolean;
       attachments?: IncomingAttachment[];
       liveDictation?: boolean;
+      workflowPreset?: import("@liminal/core").ReceiptWorkflowPreset;
     };
     const msg = String(message ?? "").trim();
     const normalizedAttachments: Array<ImageAttachment & { dataUrl: string }> = [];
@@ -1419,6 +1422,10 @@ export function createRouter(
       res.status(400).json({ error: "message or attachments required" });
       return;
     }
+    if (workflowPreset === "receipt_to_xero" && normalizedAttachments.length === 0) {
+      res.status(400).json({ error: "Process receipts requires at least one image attachment." });
+      return;
+    }
     if (bridge.harness.getIsRunning()) {
       res.status(409).json({ error: "Agent is already processing a message" });
       return;
@@ -1430,6 +1437,7 @@ export function createRouter(
         freshContext: Boolean(freshContext),
         liveDictation: Boolean(liveDictation),
         imageAttachments: persisted,
+        workflowPreset,
       })
       .catch((err) => {
       const message = err instanceof Error ? err.message : "Failed to process message.";

@@ -267,6 +267,17 @@ export async function revokeXeroAccount(accountId: string): Promise<void> {
   await deleteOAuthBundle("xero", accountId);
 }
 
+/** Refresh any Xero accounts whose access token expires within `withinMs` (default 5 min). */
+export async function refreshStaleXeroAccounts(withinMs = 5 * 60_000): Promise<void> {
+  const accounts = await listOAuthAccounts("xero");
+  const threshold = Date.now() + withinMs;
+  for (const a of accounts) {
+    if (a.expiresAt < threshold) {
+      await refreshXeroAccessToken(a.accountId).catch(() => { /* non-fatal */ });
+    }
+  }
+}
+
 export async function listXeroOAuthAccounts(): Promise<
   Array<{
     accountId: string;

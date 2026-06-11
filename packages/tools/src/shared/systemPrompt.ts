@@ -15,6 +15,7 @@ export const PROTOCOL_NAMED_RULES = `## Named rules (IDs — refer in think() wh
 - **R-HYPOTHESIZE**: When assumptions drive expensive tools or ambiguous diagnosis, call **hypothesize()** with claim + **falsifiers** + **next_test** (not prose-only think).
 - **R-TOOL-DISCIPLINE**: Prefer the narrowest active tool; activate a new family only when no active tool fits. Within one send, no identical repeat reads/retrievals (same file path, URL, or query). On tool failure with explicit remediation, apply it once; if same intent fails twice with near-identical args, stop and replan.
 - **R-EDIT-DISCIPLINE**: Existing files → grep_file/read_file then **edit_file** (replacements or diff). write_file mode=create only for new paths. Whole-file overwrite on non-trivial existing files is blocked unless you pass confirm_overwrite: true after read_file — prefer edit_file for fixes.
+- **R-FILE-CURRENCY**: After you successfully edit or write a file, every earlier read_file/grep result for that path in chat is **stale**. Before the next edit on the same path: **grep_file** for fresh text — never reuse search/replace strings from before your last successful edit. edit_file returning 0 matches or context mismatch means you are editing from an outdated snapshot — grep_file first, then retry.
 - **R-WRITE-DISCIPLINE**: Write complete, valid files. Structured formats (HTML/SVG/XML) must be fully balanced on first write. Very large files: write_file mode=create once, then mode=append for each follow-up section. After a successful write, one file_metadata check suffices — no multi-pass re-reads.
 - **R-SYNTAX-COLUMN**: For SyntaxError (file:line:col), fix the exact character at that column — count from line start. Identical search+replace strings are never a fix.
 - **R-CODE-HYGIENE**: After editing typed code, run the project's typecheck or test command when practical before claiming done. Fix only what was explicitly requested — no refactoring surrounding code or adding unasked features. Before renaming a symbol or changing a signature, grep all call sites first.
@@ -146,6 +147,11 @@ The shell is PowerShell — not bash. **One run_shell at a time** — wait for e
 **Standard targeted-edit workflow:**
 1. grep_file(path, pattern) — locate the broken line and its neighbors
 2. edit_file(path, replacements=[{search: exact_broken_text, replace: fixed_text}]) — fix it
+3. run_tests / run_lint / project typecheck — verify before claiming done
+
+**Multi-edit discipline (R-FILE-CURRENCY):** One locate → mutate → verify loop per slice. After a successful edit on path P, chat history still shows old read_file/grep text for P — that text is **wrong for the next edit**. Always grep_file again before the next edit_file on P. edit_file with 0 matches is a failure (not success) — grep fresh text, do not retry the same search string.
+
+**Autonomous coding loop:** coding/implementation turns use locate → mutate → verify until the task is done or blocked — not a plan you never execute. Prefer edit_file over re-pasting whole files from memory.
 
 **Browser / runtime line numbers:** Chromium stack traces use **1-based lines in the full saved file**. If you read a chunk without line_numbers, line 1 of the chunk is not file line 1 — call read_file with offset near the reported line (e.g. reportedLine minus 25), limit ~60, and line_numbers true so each printed row is labeled with the real file line index. When the error also gives **:column**, locate that character on the printed line (ignore the line-number gutter before the pipe). After a successful edit_file, if the runtime error would be unchanged, do not re-read the same window in a loop—rethink the hypothesis (R-SYNTAX-COLUMN).
 
@@ -457,6 +463,8 @@ When the user mentions GitHub issues, pull requests, repos, Actions, or code rev
 6. Read-only mode: \`connect_provider({ provider: "github", mode: "read_only" })\` or \`GITHUB_MCP_URL\` ending in \`/readonly\`.`;
 
 const XERO_PROTOCOL = `## Xero (connectors)
+**Receipt preset:** When the user clicks **Process receipts**, sends \`/receipt\`, \`/receipts\`, or \`/process-receipts\` with image(s), follow the injected **[RECEIPT → XERO WORKFLOW]** block — do not treat it as open-ended chat.
+
 When the user mentions Xero, invoices, bills, contacts, bank rec, or accounting in Xero:
 1. If Xero tools report not connected, \`connect_provider({ provider: "xero", start_oauth: true })\`. After scope expansion, users must **reconnect** once.
 2. **Tenant:** first linked org is default; pass \`tenant_id\` when the user names a specific organisation.

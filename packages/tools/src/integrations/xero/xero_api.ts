@@ -6,6 +6,7 @@ import {
   getXeroAccessToken,
   listXeroOAuthAccounts,
   readOAuthBundle,
+  refreshXeroAccessToken,
   resolveXeroTenantId,
   formatXeroReconnectHint,
   xeroBundleMissingRequiredScopes,
@@ -147,6 +148,7 @@ export async function xeroFetch(
   }
 
   let lastError = "";
+  let refreshedOn401 = false;
   for (let attempt = 0; attempt <= 3; attempt++) {
     const res = await fetch(url, {
       method: opts.method ?? "GET",
@@ -170,6 +172,16 @@ export async function xeroFetch(
       const retryAfter = parseInt(res.headers.get("Retry-After") ?? "2", 10);
       await sleep(Number.isFinite(retryAfter) ? retryAfter * 1000 : 2000);
       continue;
+    }
+    if (res.status === 401 && !refreshedOn401) {
+      const renewed = await refreshXeroAccessToken(auth.bundle.accountId);
+      if (renewed?.accessToken) {
+        refreshedOn401 = true;
+        headers.Authorization = `Bearer ${renewed.accessToken}`;
+        auth.token = renewed.accessToken;
+        auth.bundle = renewed;
+        continue;
+      }
     }
     if (!res.ok) {
       lastError = formatXeroApiError(res.status, data, text);

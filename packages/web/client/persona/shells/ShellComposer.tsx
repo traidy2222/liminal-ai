@@ -7,6 +7,7 @@ import { buildInputAreaStyle, buildInputDockStyle } from "../shellLayout.js";
 import { LIM } from "../personaVars.js";
 import { TerminalDock } from "../../terminal/TerminalDock.js";
 import { BrowserDock } from "../../browser/BrowserDock.js";
+import { SlashCommandMenu } from "../../composer/SlashCommandMenu.js";
 
 export type ShellComposerVariant = "hud" | "terminal" | "studio" | "minimal";
 
@@ -188,6 +189,44 @@ function AttachmentChips({
   );
 }
 
+function ProcessReceiptsButton({
+  enabled,
+  busy,
+  variant,
+  onClick,
+}: {
+  enabled: boolean;
+  busy: boolean;
+  variant: ShellComposerVariant;
+  onClick: () => void;
+}) {
+  const mono = variant === "hud" || variant === "terminal";
+  const label = mono ? "RECEIPTS" : "Process receipts";
+  return (
+    <button
+      type="button"
+      disabled={!enabled}
+      onClick={onClick}
+      title="Run guided receipt → Xero draft bill workflow (attach image first)"
+      style={{
+        flexShrink: 0,
+        border: `1px solid ${enabled ? "rgba(var(--lim-accent-rgb),0.28)" : "rgba(var(--lim-accent-rgb),0.08)"}`,
+        borderRadius: mono ? 3 : 8,
+        color: enabled ? "var(--lim-text, #c8d4e0)" : "rgba(var(--lim-accent-rgb),0.2)",
+        padding: mono ? "8px 10px" : "8px 12px",
+        cursor: enabled ? "pointer" : "default",
+        background: enabled ? "rgba(var(--lim-accent-rgb),0.06)" : LIM.surface1,
+        fontFamily: mono ? "var(--lim-font-mono, monospace)" : "var(--lim-font-body, system-ui)",
+        fontSize: mono ? 10 : 12,
+        letterSpacing: mono ? "0.06em" : "0.01em",
+        whiteSpace: "nowrap",
+      }}
+    >
+      {busy ? "…" : label}
+    </button>
+  );
+}
+
 function SendButton({
   canSend,
   busy,
@@ -327,10 +366,10 @@ export function ShellComposer({
 
   const hintLine =
     variant === "terminal"
-      ? "Enter · Shift+Enter newline · paste/drop images"
+      ? "Enter · Shift+Enter newline · /commands · paste/drop images"
       : variant === "hud"
-        ? "Enter send · Shift+Enter newline · paste/drop images · Ctrl/Cmd+K clear · Ctrl/Cmd+Shift+L new session"
-        : "Enter send · Shift+Enter newline · paste or drop images";
+        ? "Enter send · /commands · Tab complete · paste/drop images · Ctrl/Cmd+K clear · Ctrl/Cmd+Shift+L new session"
+        : "Enter send · Shift+Enter newline · /help · paste or drop images";
 
   const dockStyle: React.CSSProperties =
     variant === "terminal"
@@ -444,6 +483,40 @@ export function ShellComposer({
 
       <AttachmentChips contract={contract} compact={variant === "minimal"} />
 
+      {contract.attachments.length > 0 && (
+        <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+          <ProcessReceiptsButton
+            enabled={contract.canProcessReceipts}
+            busy={busy}
+            variant={variant}
+            onClick={contract.onProcessReceipts}
+          />
+          <span
+            style={{
+              fontSize: 10,
+              color: "rgba(var(--lim-accent-rgb),0.35)",
+              fontFamily: "var(--lim-font-mono, monospace)",
+            }}
+          >
+            or /receipt · /receipts · /process-receipts
+          </span>
+        </div>
+      )}
+
+      {contract.slashNotice && (
+        <div
+          style={{
+            color: CYAN,
+            fontSize: 11,
+            fontFamily: mono ? "monospace" : "inherit",
+            whiteSpace: "pre-wrap",
+            lineHeight: 1.45,
+          }}
+        >
+          {contract.slashNotice}
+        </div>
+      )}
+
       {attachError && (
         <div style={{ color: RED_ERR, fontSize: 11, fontFamily: mono ? "monospace" : "inherit" }}>{attachError}</div>
       )}
@@ -507,11 +580,20 @@ export function ShellComposer({
             display: "flex",
             flexDirection: "column",
             justifyContent: "center",
+            position: "relative",
             ...(variant === "minimal"
               ? { borderBottom: "1px solid rgba(var(--lim-accent-rgb),0.18)" }
               : {}),
           }}
         >
+          {contract.slashCompletion ? (
+            <SlashCommandMenu
+              items={contract.slashCompletion.items}
+              selectedIndex={contract.slashCompletion.selectedIndex}
+              visible={contract.slashCompletion.visible}
+              onSelect={contract.slashCompletion.onPick}
+            />
+          ) : null}
           <textarea
             id="chat-message-input"
             name="message"
@@ -524,9 +606,12 @@ export function ShellComposer({
             value={input}
             onChange={(e) => {
               contract.onInputChange(e.target.value);
+              contract.onComposerSelect?.(e.currentTarget);
               syncTextareaHeight(e.currentTarget);
             }}
             onInput={(e) => syncTextareaHeight(e.currentTarget)}
+            onSelect={(e) => contract.onComposerSelect?.(e.currentTarget)}
+            onClick={(e) => contract.onComposerSelect?.(e.currentTarget)}
             onKeyDown={(e) => void onKeyDown(e)}
             onPaste={(e) => void onPaste(e)}
             placeholder={placeholder}

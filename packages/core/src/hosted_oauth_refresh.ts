@@ -26,7 +26,11 @@ export function expiresAtFromOAuthExpiresIn(expiresIn?: number): number {
   return expiresIn != null ? Date.now() + expiresIn * 1000 - 60_000 : Date.now() + FAR_FUTURE_MS;
 }
 
-/** Exchange refresh_token through Vireon (license Bearer). Returns null when unsigned out or refresh fails. */
+/**
+ * Exchange refresh_token through Vireon hosted broker (client secrets on Vercel).
+ * Uses license Bearer when signed in; otherwise sends refresh_token only (CE path —
+ * same credential the user earned via browser OAuth).
+ */
 export async function refreshOAuthViaVireonHostedBroker(
   provider: string,
   refreshToken: string
@@ -35,16 +39,16 @@ export async function refreshOAuthViaVireonHostedBroker(
   if (!rt) return null;
 
   const license = await resolveLicenseTokenForHarness();
-  if (!license) return null;
+  const headers: Record<string, string> = {
+    "Content-Type": "application/json",
+    Accept: "application/json",
+  };
+  if (license) headers.Authorization = `Bearer ${license}`;
 
   try {
     const res = await fetch(hostedOAuthRefreshUrl(), {
       method: "POST",
-      headers: {
-        Authorization: `Bearer ${license}`,
-        "Content-Type": "application/json",
-        Accept: "application/json",
-      },
+      headers,
       body: JSON.stringify({ provider, refresh_token: rt }),
     });
     const json = (await res.json().catch(() => ({}))) as {

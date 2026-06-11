@@ -1,11 +1,14 @@
 /**
  * Xero Phase 3 — Files API (org-wide file cabinet).
  */
-import { readFile, writeFile, mkdir } from "node:fs/promises";
-import { basename, dirname, resolve } from "node:path";
+import { writeFile, mkdir } from "node:fs/promises";
+import { basename, dirname } from "node:path";
 import type { PropertySchema, ToolRegistry, ToolResult } from "@liminal/core";
-import { resolveWorkspaceRoot } from "@liminal/core";
 import { defineTool } from "../../shared/helpers.js";
+import {
+  readWorkspaceFileBytes,
+  resolveWithinWorkspace,
+} from "../../shared/file_path_guard.js";
 import {
   asToolResult,
   jsonOutput,
@@ -131,13 +134,12 @@ export function registerXeroFilesTools(registry: ToolRegistry): void {
         }
         const savePath = typeof args["save_path"] === "string" ? args["save_path"].trim() : "";
         if (!savePath) return { ok: false, error: "provide save_path or content_base64: true" };
-        const ws = resolveWorkspaceRoot();
-        const abs = resolve(ws, savePath);
-        if (!abs.startsWith(resolve(ws))) {
-          return { ok: false, error: "save_path must stay inside workspace" };
+        const safe = resolveWithinWorkspace(savePath);
+        if (!safe.ok || !safe.resolvedPath) {
+          return { ok: false, error: safe.error ?? "save_path must stay inside workspace" };
         }
-        await mkdir(dirname(abs), { recursive: true });
-        await writeFile(abs, r.data);
+        await mkdir(dirname(safe.resolvedPath), { recursive: true });
+        await writeFile(safe.resolvedPath, r.data);
         return {
           ok: true,
           output: jsonOutput({
@@ -181,13 +183,10 @@ export function registerXeroFilesTools(registry: ToolRegistry): void {
           }
           if (!name) name = "upload.bin";
         } else if (filePath) {
-          const ws = resolveWorkspaceRoot();
-          const abs = resolve(ws, filePath);
-          if (!abs.startsWith(resolve(ws))) {
-            return { ok: false, error: "file_path must stay inside workspace" };
-          }
-          bytes = await readFile(abs);
-          if (!name) name = basename(abs);
+          const file = await readWorkspaceFileBytes(filePath);
+          if (!file.ok) return { ok: false, error: file.error };
+          bytes = file.bytes;
+          if (!name) name = basename(file.resolvedPath);
         } else {
           return { ok: false, error: "provide file_path or content_base64" };
         }

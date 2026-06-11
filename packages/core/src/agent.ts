@@ -84,10 +84,16 @@ import {
   formatRecipeLibraryHints,
   findBestRecipeForPrime,
   formatRecipePrimeMessage,
-  recordRecipe,
-  recordRecipePrimeOutcome,
 } from "./recipe_library.js";
 import { EMAIL_COMPOSE_TURN_INJECTION, isEmailComposeTurn } from "./email_compose_context.js";
+import {
+  buildReceiptWorkflowTurnInjection,
+  isReceiptWorkflowTurn,
+  persistImageAttachmentsToWorkspace,
+  resolveReceiptWorkflowUserMessage,
+  stripReceiptWorkflowCommandPrefix,
+  type ReceiptWorkflowPreset,
+} from "./receipt_workflow.js";
 import { addCompressionGuideline, formatCompressionGuidelines } from "./compression_guidelines.js";
 import { bumpRuleHits, getRuleHitCounts, extractRuleIds, recordRuleOutcomes, getDemotedRuleIds } from "./rule_stats.js";
 import { readYieldSnapshot, writeYieldSnapshot } from "./session_event_log.js";
@@ -259,6 +265,15 @@ import {
   scaleMaxCompletionTokensForEffort,
 } from "./output_effort.js";
 import { buildResearchTurnInjection } from "./research_depth.js";
+import { buildCodingTurnInjection } from "./coding_autonomy.js";
+import {
+  bumpFileRevision,
+  buildEditStaleRecoveryMessage,
+  buildFileRevisionBatchNotice,
+  getFileRevision,
+  isEditStaleFailure,
+  normalizeFilePathKey,
+} from "./file_edit_currency.js";
 import { detectWorkflowSignal } from "./workflow_spec.js";
 import { TtsTurnBudget } from "./tts_budget.js";
 import {
@@ -289,7 +304,15 @@ import { PasteScheduler } from "./paste_scheduler.js";
 import { predictNextTools } from "./paste_pattern_store.js";
 import { inferSpeculationArgs } from "./paste_args_inference.js";
 import { maybeWriteTrajectory } from "./trajectory_writer.js";
-import { scoreTurnOutcome, recordEffortOutcome, getBestEffortForIntent } from "./outcome_scorer.js";
+import {
+  scoreTurnOutcome,
+  getBestEffortForIntent,
+  isDeferredOutcomeLearningEnabled,
+  buildPendingTurnLearning,
+  applyPendingTurnLearning,
+  recordImmediateTurnLearning,
+} from "./outcome_scorer.js";
+import type { PendingTurnLearningRecord } from "./outcome_scorer.js";
 import { WorldContextRefresher } from "./world_context_delta.js";
 import {
   needsUserReplyFinalization,
@@ -873,8 +896,8 @@ function inferLoopBreakSuggestion(toolName: string, errSnippet: string): string 
     }
   }
   if (toolName === "edit_file") {
-    if (err.includes("not found") || err.includes("no match")) {
-      return "the old text wasn't found — re-read the file with `read_file` to see its current exact content, then redo the edit with the verbatim string.";
+    if (err.includes("not found") || err.includes("no match") || err.includes("0 match")) {
+      return "the search text did not match disk — run `grep_file` on the path for a fresh snapshot (earlier read_file output may be stale after your own edits), then edit_file with verbatim grep text.";
     }
   }
   if (toolName === "web_fetch" && (err.includes("403") || err.includes("401"))) {
@@ -918,6 +941,13 @@ const ERROR_TAXONOMY: Array<{
     category: "PATH_NOT_FOUND",
     hint: "File or directory does not exist at the given path.",
     template: "Use list_dir(parent_dir) to confirm the exact path exists, then retry with the corrected path.",
+  },
+  {
+    pattern: /0 match|no changes|context mismatch|could not find the \d+ old lines/i,
+    category: "EDIT_STALE_SNAPSHOT",
+    hint: "edit_file search/diff did not match the file on disk — often stale text from before an earlier edit this turn.",
+    template:
+      "Run grep_file(path, pattern) for fresh text, then edit_file with the verbatim match. Do not reuse search strings from read_file results captured before your last successful edit on that path.",
   },
   {
     pattern: /eperm|eacces|permission denied/i,
@@ -1015,7 +1045,8 @@ function buildAdaptiveHint(toolName: string, failCount: number): string {
   const toolHints: Record<string, string> = {
     read_file: "Use list_dir first to confirm the exact path exists before retrying.",
     write_file: "mode=create errors if the file exists — use mode=overwrite to replace it, or edit_file for a targeted change. For very large files, write once with mode=create then mode=append for follow-up sections.",
-    edit_file: "Targeted change to an existing file: replacements [{search, replace}] or a diff hunk. grep_file first to find the exact text.",
+    edit_file:
+      "grep_file first for fresh text (especially after a prior edit on the same path). replacements [{search, replace}] must match disk verbatim.",
     run_background: "Ensure the command is valid and cwd exists. Check startup_wait_ms.",
     web_fetch: "Verify the URL is correct with web_search first. Check for auth/redirects.",
     http_request:
@@ -1183,6 +1214,10 @@ export class AgentHarness {
   private filesReadThisTurn: string[] = [];
   /** Count repeated full read_file calls per path in this send. */
   private readFilePathCountsThisTurn = new Map<string, number>();
+  /** Per-path edit/write revision counter — drives [FILE REVISION] stale-read hints. */
+  private fileRevisionThisTurn = new Map<string, number>();
+  /** Paths that already received an [EDIT STALE] recovery hint this send. */
+  private editStaleHintsSentThisTurn = new Set<string>();
   /** One-shot nudge when large read_file output is truncated/distilled. */
   private largeReadPivotNudgeThisSend = false;
   /** Last few tool outcome one-liners for working state. */
@@ -1240,6 +1275,10 @@ export class AgentHarness {
   private recipePrimeInjectedThisSend = false;
   /** Recipe key primed this send (for outcome decay at turn end). */
   private injectedRecipeKeyThisSend: string | null = null;
+  /** Prior turn awaiting implicit follow-up feedback before learning loops run. */
+  private pendingTurnLearning: PendingTurnLearningRecord | null = null;
+  /** Raw user goal for the in-flight send (for deferred outcome learning). */
+  private lastTurnUserGoal = "";
   /** Extra stream continuation when model hits token limit (max 1 per send). */
   private lengthResumeRemaining = 0;
   private writeIntegrityNudgeThisSend = false;
@@ -1648,7 +1687,7 @@ export class AgentHarness {
     if (!state) return { ok: true };
     const contract = this.getActiveContract();
     if (contract?.allowedTools && contract.allowedTools.length > 0) {
-      if (!contract.allowedTools.includes(toolName)) {
+      if (!contract.allowedTools.includes(toolName) && !isSpawnBaselineTool(toolName)) {
         return {
           ok: false,
           reason: `Tool "${toolName}" is not allowed by active contract ${contract.id}.`,
@@ -2419,6 +2458,8 @@ export class AgentHarness {
       liveDictation?: boolean;
       /** When set with a native-vision main model, images route as multimodal user content. */
       imageAttachments?: ImageAttachment[];
+      /** Guided preset — e.g. receipt_to_xero (requires image attachments). */
+      workflowPreset?: ReceiptWorkflowPreset;
     }
   ): Promise<void> {
     // Wrap the entire send in an AsyncLocalStorage scope so every file tool,
@@ -2443,6 +2484,7 @@ export class AgentHarness {
       personaBootstrapPrompt?: boolean;
       liveDictation?: boolean;
       imageAttachments?: ImageAttachment[];
+      workflowPreset?: ReceiptWorkflowPreset;
     }
   ): Promise<void> {
     if (this.running) throw new Error("Agent is already processing a message");
@@ -2505,20 +2547,45 @@ export class AgentHarness {
       ? buildPersonaBootstrapUserPrompt(this.getCurrentPersona())
       : userMessage;
     const openingTurn = sessionGreeting || personaBootstrapPrompt;
-    const imageAttachments = options?.imageAttachments ?? [];
+    if (this.agentDepth === 0 && !openingTurn && userMessage.trim()) {
+      void this.resolvePendingTurnLearningFromFollowUp(userMessage);
+    }
+    let imageAttachments = options?.imageAttachments ?? [];
+    let receiptWorkflowActive = false;
+    let effectiveUserMessage = userMessage;
+    if (
+      !openingTurn &&
+      isReceiptWorkflowTurn({
+        workflowPreset: options?.workflowPreset,
+        userMessage,
+        imageAttachmentCount: imageAttachments.length,
+      })
+    ) {
+      receiptWorkflowActive = true;
+      effectiveUserMessage = stripReceiptWorkflowCommandPrefix(userMessage);
+      if (!effectiveUserMessage.trim()) {
+        effectiveUserMessage = resolveReceiptWorkflowUserMessage("");
+      }
+      imageAttachments = await persistImageAttachmentsToWorkspace(imageAttachments);
+    }
+    const conversationUserContentResolved =
+      openingTurn || !receiptWorkflowActive
+        ? conversationUserContent
+        : effectiveUserMessage;
     const userTurnContent =
       !openingTurn && imageAttachments.length > 0
         ? await resolveUserTurnWithAttachments(
-            conversationUserContent,
+            conversationUserContentResolved,
             imageAttachments,
             this.config.model
           )
-        : conversationUserContent;
+        : conversationUserContentResolved;
     const nativeVisionTurn =
       !openingTurn &&
       imageAttachments.length > 0 &&
       modelSupportsNativeVision(this.config.model);
 
+    this.lastTurnUserGoal = openingTurn ? "" : effectiveUserMessage;
     // Reset per-turn tracking state
     this.toolErrorCounts = new Map();
     this.toolsUsedThisTurn = [];
@@ -2529,6 +2596,8 @@ export class AgentHarness {
     this.sendStartTime = Date.now();
     this.filesReadThisTurn = [];
     this.readFilePathCountsThisTurn = new Map();
+    this.fileRevisionThisTurn = new Map();
+    this.editStaleHintsSentThisTurn = new Set();
     this.largeReadPivotNudgeThisSend = false;
     this.recentToolOutcomeLines = [];
     this.toolCallStreak = null;
@@ -2899,10 +2968,42 @@ export class AgentHarness {
       if (!openingTurn && isEmailComposeTurn(userMessage)) {
         this.context.appendMessage({ role: "system", content: EMAIL_COMPOSE_TURN_INJECTION });
       }
+      if (!openingTurn && receiptWorkflowActive) {
+        if (this.turnInference) {
+          this.turnInference = {
+            ...this.turnInference,
+            intent: "execution",
+            toolFirstBias: true,
+            workflowSuitable: false,
+            reason: `${this.turnInference.reason ?? ""} receipt_workflow_preset`.trim(),
+          };
+        }
+        this.context.setProtocolIntentHint("execution");
+        const xeroFamilies = ["xero"].filter((fam) =>
+          this.registry.getToolNames().some(
+            (t) => this.registry.getSuggestedFamilyForTool(t) === fam
+          )
+        );
+        if (xeroFamilies.length > 0) {
+          const newly = this.registry.activateFamilies(xeroFamilies);
+          if (newly.length > 0) {
+            this.context.refreshProtocolDynamic(this.registry.getActiveToolNames());
+            this.refreshToolAwareness("receipt_workflow");
+          }
+        }
+        this.context.appendMessage({
+          role: "system",
+          content: buildReceiptWorkflowTurnInjection({
+            userNote: effectiveUserMessage,
+            attachments: imageAttachments,
+          }),
+        });
+      }
       // Per-turn recipe hint (complements world-context recipe block on first send).
       if (
         !openingTurn &&
         !isEmailComposeTurn(userMessage) &&
+        !receiptWorkflowActive &&
         resolveHarnessEnvRaw("AGENT_RECIPE_LIBRARY", this.runtimePreferences) !== "0" &&
         this.turnInference?.intent
       ) {
@@ -2948,6 +3049,18 @@ export class AgentHarness {
       this.context.appendMessage({
         role: "system",
         content: buildResearchTurnInjection({ userMessage }),
+      });
+    }
+    if (
+      !openingTurn &&
+      this.turnInference &&
+      (this.turnInference.intent === "coding" ||
+        this.turnInference.intent === "execution" ||
+        this.turnInference.implementShip === true)
+    ) {
+      this.context.appendMessage({
+        role: "system",
+        content: buildCodingTurnInjection({ userMessage }),
       });
     }
     if (
@@ -3126,7 +3239,7 @@ export class AgentHarness {
         !openingTurn &&
         !nativeVisionTurn &&
         this.registry.isLazyToolLoading() &&
-        (/\`\`\`attached_images\b/.test(conversationUserContent) ||
+        (/\`\`\`attached_images\b/.test(conversationUserContentResolved) ||
           imageAttachments.length > 0)
       ) {
         const visionToolNames = (["vision_analyze", "upload_image"] as const).filter((n) =>
@@ -3267,31 +3380,9 @@ export class AgentHarness {
     await this.send("", { personaBootstrapPrompt: true });
   }
 
-  /** Post-turn recipe + trajectory writes (background; does not extend `running`). */
+  /** Post-turn trajectory writes (background; recipe learning is outcome-gated separately). */
   private async persistEpisodicRecipeAfterTurn(userMessage: string): Promise<void> {
     if (this.toolsUsedThisTurn.length < 4) return;
-    // Record the turn as a recipe — keyed by (intent class, phase shape),
-    // gated on a good outcome score, merged onto a matching entry if one exists.
-    const recipeOutcome = scoreTurnOutcome({
-      toolsUsed: this._toolOutcomesThisTurn,
-      roundCount: this.roundCount,
-      criticPassed: this.criticConsumedThisSend ? true : null,
-      contradictionCount: 0,
-      terminationReason: "ok",
-    });
-    try {
-      await recordRecipe({
-        intentClass: this.turnInference?.intent ?? "general",
-        tools: [...this.toolsUsedThisTurn],
-        goal: userMessage,
-        outcome: recipeOutcome,
-      });
-    } catch (err) {
-      this.emitter.emit("text", {
-        delta: `\n[HARNESS] Recipe persist failed: ${err instanceof Error ? err.message : String(err)}\n`,
-        channel: "trace",
-      });
-    }
     if (this.agentDepth === 0 && this.registry.has("remember")) {
       const trajectoryKey = `trajectory:${hashString(userMessage).slice(0, 12)}`;
       const finalAnswer = this.context.getLastAssistantMessage() ?? "";
@@ -5441,11 +5532,42 @@ export class AgentHarness {
       let awarenessNeedsRefresh = false;
       let awarenessReason = "";
       const changedPathsCountBeforeBatch = this.changedFilesThisTurn.size;
+      const fileRevisionsThisBatch: Array<{ path: string; rev: number }> = [];
 
       for (let i = 0; i < toolCalls.length; i++) {
         const tc = toolCalls[i]!;
         const r = results[i]!;
         this.rememberChangedPathFromToolCall(tc.name, tc.argsJson, r.ok);
+        if (r.ok && EDIT_TOOL_NAMES.has(tc.name)) {
+          try {
+            const args = JSON.parse(tc.argsJson) as Record<string, unknown>;
+            for (const p of collectEditToolTargetPaths(tc.name, args)) {
+              const rev = bumpFileRevision(this.fileRevisionThisTurn, p);
+              fileRevisionsThisBatch.push({ path: p, rev });
+            }
+          } catch {
+            /* ignore malformed args */
+          }
+        }
+        if (!r.ok && tc.name === "edit_file") {
+          const errText = r.error ?? "";
+          if (isEditStaleFailure(errText)) {
+            try {
+              const args = JSON.parse(tc.argsJson) as { path?: string };
+              const path = typeof args.path === "string" ? args.path.trim() : "";
+              const hintKey = normalizeFilePathKey(path || tc.argsJson.slice(0, 80));
+              if (path && !this.editStaleHintsSentThisTurn.has(hintKey)) {
+                this.editStaleHintsSentThisTurn.add(hintKey);
+                this.context.appendMessage({
+                  role: "user",
+                  content: buildEditStaleRecoveryMessage(path, getFileRevision(this.fileRevisionThisTurn, path)),
+                });
+              }
+            } catch {
+              /* ignore */
+            }
+          }
+        }
         // ── Compensation ledger — record undo action on success ────────────────
         if (r.ok && this.executionState) {
           const planId = this.executionState.activeContractId ?? this.executionState.mission?.id;
@@ -5714,6 +5836,12 @@ export class AgentHarness {
             content:
               "[SYSTEM NOTE] A requested tool is inactive. Reconcile tool state now: call list_tool_families, activate one best-fit family, then retry with updated args.",
           });
+        }
+      }
+      if (fileRevisionsThisBatch.length > 0) {
+        const revisionMsg = buildFileRevisionBatchNotice(fileRevisionsThisBatch);
+        if (revisionMsg) {
+          this.context.appendMessage({ role: "user", content: revisionMsg });
         }
       }
       if (this.changedFilesThisTurn.size > changedPathsCountBeforeBatch) {
@@ -6114,24 +6242,7 @@ export class AgentHarness {
           intentClass: this.turnInference?.intent,
         }).catch(() => { /* non-fatal */ });
 
-        // Rule effectiveness: attribute this turn's outcome to every rule injected.
-        if (this.injectedRuleIdsThisSend.length > 0) {
-          void recordRuleOutcomes(this.injectedRuleIdsThisSend, turnOutcome).catch(() => { /* non-fatal */ });
-        }
-        if (this.injectedRecipeKeyThisSend) {
-          void recordRecipePrimeOutcome(this.injectedRecipeKeyThisSend, turnOutcome).catch(() => {
-            /* non-fatal */
-          });
-        }
-        // Adaptive effort learning (AGENT_EFFORT_LEARN=1).
-        const budget = this._turnReasoningBudget;
-        if (budget) {
-          void recordEffortOutcome(
-            (this.turnInference?.intent ?? "knowledge") as ReasoningIntentClass,
-            budget.reasoningEffort,
-            turnOutcome
-          ).catch(() => { /* non-fatal */ });
-        }
+        this.queueOrRecordTurnLearning(turnOutcome, finalAnswer);
       }
 
       this.emitTurnEnd("ok");
@@ -7073,7 +7184,62 @@ export class AgentHarness {
    * Clear conversation state. Persona override is preserved; call resetPersona() to clear it.
    * World context will be re-injected on the next root send() (same as a fresh session).
    */
+  private async resolvePendingTurnLearningFromFollowUp(followUpMessage: string): Promise<void> {
+    const pending = this.pendingTurnLearning;
+    if (!pending) return;
+    this.pendingTurnLearning = null;
+    try {
+      await applyPendingTurnLearning({
+        pending,
+        followUpMessage,
+        client: this.client,
+        routeState: this.providerRouteState,
+        fastModel: getFastModelSlug(this.config.model),
+      });
+    } catch {
+      /* non-fatal */
+    }
+  }
+
+  private flushPendingTurnLearningProcessOnly(): void {
+    const pending = this.pendingTurnLearning;
+    if (!pending) return;
+    this.pendingTurnLearning = null;
+    void applyPendingTurnLearning({
+      pending,
+      followUpMessage: "",
+      processOnly: true,
+      client: this.client,
+      routeState: this.providerRouteState,
+      fastModel: getFastModelSlug(this.config.model),
+    }).catch(() => { /* non-fatal */ });
+  }
+
+  private queueOrRecordTurnLearning(turnOutcome: number, finalAnswer: string): void {
+    const intent = (this.turnInference?.intent ?? "conversational") as ReasoningIntentClass;
+    const effort = this._turnReasoningBudget?.reasoningEffort;
+    const userGoal = this.lastTurnUserGoal || this.lastUserMessage;
+    const payload = {
+      processScore: turnOutcome,
+      intentClass: intent,
+      effort,
+      ruleIds: this.injectedRuleIdsThisSend,
+      recipeKey: this.injectedRecipeKeyThisSend ?? undefined,
+      userGoal,
+      assistantPreview: finalAnswer.replace(/\s+/g, " ").trim().slice(0, 400),
+      toolOutcomes: this._toolOutcomesThisTurn,
+      toolsUsed: [...this.toolsUsedThisTurn],
+      recipeEligible: this.toolsUsedThisTurn.length >= 4,
+    };
+    if (isDeferredOutcomeLearningEnabled()) {
+      this.pendingTurnLearning = buildPendingTurnLearning(payload);
+      return;
+    }
+    void recordImmediateTurnLearning(payload).catch(() => { /* non-fatal */ });
+  }
+
   reset(): void {
+    this.flushPendingTurnLearningProcessOnly();
     this.clearPersonalityHeartbeatSchedule();
     this.personalityHeartbeatNudgeTimestampsMs = [];
     this.context.clear();

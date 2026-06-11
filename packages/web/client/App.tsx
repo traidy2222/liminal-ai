@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect, useCallback, useMemo, memo } from "react";
-import { useSSE, sendAbortTurn, type MessageEntry, type AutoDreamState, type PersonalityPulseRow, WEB_SERVER_BASE, type ApiReachable, type SseTransport } from "./useSSE.js";
+import { useSSE, sendAbortTurn, type MessageEntry, type AutoDreamState, type PersonalityPulseRow, type SendMessageResult, WEB_SERVER_BASE, type ApiReachable, type SseTransport } from "./useSSE.js";
 import { webApiFetch } from "./webApiAuth.js";
 import { MEMORY_SYNC_LABEL, presentAutoDream } from "./autoDreamPresent.js";
 import { applyPersonaDocumentTheme } from "./applyPersonaDocumentTheme.js";
@@ -13,6 +13,9 @@ import {
   personaBootstrapStageHint,
 } from "@liminal/core/persona-bootstrap-ui";
 import type { HarnessSettingsApiField } from "@liminal/core";
+import type { SlashCompletionItem } from "@liminal/core";
+import { useSlashCommandCompletion } from "./composer/useSlashCommandCompletion.js";
+import { runComposerSlashCommand, tryParseComposerSlash } from "./composer/composerSlashRunner.js";
 import {
   extractStreamingWritePreview,
   isStreamingWriteTool,
@@ -1519,6 +1522,8 @@ export function App() {
   const [input,        setInput]        = useState("");
   const [attachments,  setAttachments]  = useState<ImageAttachment[]>([]);
   const [attachError,  setAttachError]  = useState<string | null>(null);
+  const [slashNotice, setSlashNotice] = useState<string | null>(null);
+  const slash = useSlashCommandCompletion(input);
   const [isDragOver,   setIsDragOver]   = useState(false);
   const [askAnswer,    setAskAnswer]    = useState("");
   const [showRawHarness, setShowRawHarness] = useState(false);
@@ -1948,6 +1953,58 @@ export function App() {
     }
   };
 
+  const applySlashPick = useCallback(
+    (item: SlashCompletionItem) => {
+      const next = slash.applyItem(item);
+      setInput(next.text);
+      queueMicrotask(() => {
+        const el = document.getElementById("chat-message-input") as HTMLTextAreaElement | null;
+        if (!el) return;
+        el.setSelectionRange(next.cursor, next.cursor);
+        slash.onInputCursorChange(el);
+      });
+    },
+    [slash]
+  );
+
+  const dispatchComposerSubmit = useCallback(
+    async (
+      textToSend: string,
+      attachmentsToSend: ImageAttachment[],
+      opts?: { liveDictation?: boolean; workflowPreset?: "receipt_to_xero" }
+    ): Promise<SendMessageResult | { ok: true; slashOnly: true }> => {
+      const parsed = tryParseComposerSlash(textToSend);
+      if (parsed) {
+        const slashResult = await runComposerSlashCommand(parsed, {
+          attachmentCount: attachmentsToSend.length,
+          abortTurn: () => void sendAbortTurn(),
+        });
+        if (slashResult.handled) {
+          if ("message" in slashResult) {
+            setSlashNotice(slashResult.message);
+            setAttachError(null);
+          }
+          if ("send" in slashResult && slashResult.send) {
+            return sendMessage({
+              text: slashResult.send.text,
+              attachments: attachmentsToSend,
+              workflowPreset: slashResult.send.workflowPreset,
+              liveDictation: opts?.liveDictation,
+            });
+          }
+          return { ok: true, slashOnly: true };
+        }
+      }
+      return sendMessage({
+        text: textToSend,
+        attachments: attachmentsToSend,
+        liveDictation: opts?.liveDictation,
+        workflowPreset: opts?.workflowPreset,
+      });
+    },
+    [sendMessage]
+  );
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (state.busy || submittingRef.current) return;
@@ -1957,16 +2014,15 @@ export function App() {
     submittingRef.current = true;
     const textToSend = input;
     const attachmentsToSend = [...attachments];
-    setInput(""); setAttachments([]); setAttachError(null);
+    setInput(""); setAttachments([]); setAttachError(null); setSlashNotice(null);
+    slash.dismissMenu();
     void speechOutput.unlockAudio();
     speechOutput.flush();
-    const result = await sendMessage({
-      text: textToSend,
-      attachments: attachmentsToSend,
+    const result = await dispatchComposerSubmit(textToSend, attachmentsToSend, {
       liveDictation: liveDictationForSend,
     });
     if (!result.ok) { submittingRef.current = false; return; }
-    pushHistory(textToSend);
+    if (!("slashOnly" in result)) pushHistory(textToSend);
   };
 
   const applyHistory = (direction: "prev" | "next") => {
@@ -2022,6 +2078,39 @@ export function App() {
     !state.personaBootstrapPending &&
     (input.trim().length > 0 || attachments.length > 0);
 
+  const canProcessReceipts =
+    state.apiReachable === "ok" &&
+    !state.busy &&
+    !state.personaBootstrapPending &&
+    attachments.length > 0;
+
+  const handleProcessReceipts = async () => {
+    if (!canProcessReceipts || submittingRef.current) return;
+    const validation = validateImageAttachments(attachments, DEFAULT_IMAGE_ATTACHMENT_LIMITS);
+    if (!validation.ok) {
+      setAttachError(validation.error);
+      return;
+    }
+    submittingRef.current = true;
+    const textToSend = input.trim();
+    const attachmentsToSend = [...attachments];
+    setInput("");
+    setAttachments([]);
+    setAttachError(null);
+    void speechOutput.unlockAudio();
+    speechOutput.flush();
+    const result = await sendMessage({
+      text: textToSend,
+      attachments: attachmentsToSend,
+      workflowPreset: "receipt_to_xero",
+    });
+    if (!result.ok) {
+      submittingRef.current = false;
+      return;
+    }
+    if (textToSend) pushHistory(textToSend);
+  };
+
   const handleDictationAutoSend = useCallback(
     (fullMessage: string): void | string => {
       const trimmed = fullMessage.trim();
@@ -2056,6 +2145,14 @@ export function App() {
 
   const handleComposerKeyDown = async (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     const target = e.currentTarget;
+    slash.onInputCursorChange(target);
+    const menuAction = slash.handleMenuKeyDown(e);
+    if (menuAction === "consumed") return;
+    if (menuAction === "apply_selected" && slash.items[slash.selectedIndex]) {
+      e.preventDefault();
+      applySlashPick(slash.items[slash.selectedIndex]!);
+      return;
+    }
     const atStart = target.selectionStart === 0 && target.selectionEnd === 0;
     const atEnd   = target.selectionStart === target.value.length && target.selectionEnd === target.value.length;
     const action  = resolveInputShortcut(
@@ -2069,16 +2166,15 @@ export function App() {
       submittingRef.current = true;
       const textToSend = input;
       const attachmentsToSend = [...attachments];
-      setInput(""); setAttachments([]); setAttachError(null);
+      setInput(""); setAttachments([]); setAttachError(null); setSlashNotice(null);
+      slash.dismissMenu();
       void speechOutput.unlockAudio();
       speechOutput.flush();
-      const result = await sendMessage({
-        text: textToSend,
-        attachments: attachmentsToSend,
+      const result = await dispatchComposerSubmit(textToSend, attachmentsToSend, {
         liveDictation: liveDictationForSend,
       });
       if (!result.ok) { submittingRef.current = false; return; }
-      pushHistory(textToSend);
+      if (!("slashOnly" in result)) pushHistory(textToSend);
       return;
     }
     if (action === "insert_newline") {
@@ -2215,13 +2311,23 @@ export function App() {
     input,
     attachments,
     attachError,
+    slashNotice,
+    slashCompletion: {
+      items: slash.items,
+      selectedIndex: slash.selectedIndex,
+      visible: slash.visible,
+      onPick: applySlashPick,
+    },
     isDragOver,
     canSend,
+    canProcessReceipts,
     totalAttachmentKb,
     busy: state.busy,
     onInputChange: (v) => { setInput(v); if (historyIndex !== -1) setHistoryIndex(-1); },
     onSubmit: (e) => void handleSubmit(e),
+    onProcessReceipts: () => void handleProcessReceipts(),
     onKeyDown: handleComposerKeyDown,
+    onComposerSelect: slash.onInputCursorChange,
     onPaste: handlePaste,
     onDragOver: handleDragOver,
     onDragLeave: handleDragLeave,

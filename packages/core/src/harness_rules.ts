@@ -35,6 +35,8 @@ export const HARNESS_RULES: Record<string, string> = {
     "Write complete, valid files: structured formats (HTML/SVG/XML) must be fully balanced on first write. Very large files: write_file mode=create once, then mode=append for each follow-up section. After a successful write, one file_metadata check suffices — no multi-pass re-reads.",
   "R-EDIT-DISCIPLINE":
     "Existing repo files: grep_file or read_file first, then edit_file (replacements or diff). write_file mode=create only for new paths. Refusing whole-file overwrite on non-trivial existing files — use edit_file; mode=overwrite needs confirm_overwrite: true only after read_file when a full replace is intentional.",
+  "R-FILE-CURRENCY":
+    "After you successfully edit_file or write_file on path P, every earlier read_file/grep result for P in chat is stale. Before the next edit on P: grep_file for fresh text — never reuse search/replace strings from before your last successful edit. edit_file 0 matches or context mismatch → grep_file, not blind retry.",
   "R-SYNTAX-COLUMN":
     "For SyntaxError (path:line:col), diagnose from that exact column — count from line start. Never emit replacements where search and replace strings are identical.",
 
@@ -138,10 +140,12 @@ const INTENT_RULE_IDS: Record<TurnIntentClass, string[]> = {
   ],
   coding: [
     "R-READ-ECONOMY",
+    "R-FILE-CURRENCY",
     "R-GREP-BEFORE-REFACTOR",
     "R-TYPECHECK-VERIFY",
     "R-EDIT-DISCIPLINE",
     "R-WRITE-DISCIPLINE",
+    "R-SYNTAX-COLUMN",
     "R-TOOL-RETRY",
     "R-SCOPE-CREEP",
     "R-AGENTCARD",
@@ -149,6 +153,7 @@ const INTENT_RULE_IDS: Record<TurnIntentClass, string[]> = {
   execution: [
     "R-EXEC-ORDER",
     "R-STAY-IN-BOUNDS",
+    "R-FILE-CURRENCY",
     "R-TYPECHECK-VERIFY",
     "R-TOOL-RETRY",
     "R-SHELL-BOUNDS",

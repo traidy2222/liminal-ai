@@ -82,7 +82,7 @@ export const editFileTool = defineTool({
     "  diff: '<unified diff hunk>'                        — patch via @@ hunk; fuzzy search finds context even if line numbers are slightly off.\n" +
     "WHEN: Changing part of a file that already exists.\n" +
     "NOT WHEN: Creating a new file or replacing a whole file — use write_file (mode=create/overwrite/append).\n" +
-    "WORKFLOW: grep_file first to find the exact line, then edit_file with replacements to fix it.",
+    "WORKFLOW: grep_file first for fresh text (required again after any prior edit on the same path this turn), then edit_file. 0 matches = failure — grep again; do not reuse stale search strings from earlier reads.",
   requiresApproval: true,
   dangerLevel: "cautious",
   resourceLocks: (args) => [`file:write:${args["path"] as string}`],
@@ -201,13 +201,20 @@ export const editFileTool = defineTool({
       }
 
       const changed = current !== rawContent;
-      if (preview || !changed) {
+      if (preview) {
         return {
           ok: true,
-          output: [
-            preview ? "PREVIEW — no changes written" : "No changes (0 matches across all pairs)",
-            ...report,
-          ].join("\n"),
+          output: ["PREVIEW — no changes written", ...report].join("\n"),
+        };
+      }
+      if (!changed) {
+        return {
+          ok: false,
+          error:
+            "edit_file: no changes (0 matches across all replacement pairs). " +
+            "The search text is not on disk — run grep_file(path, pattern) for a fresh snapshot. " +
+            "If you edited this file earlier this turn, earlier read_file output is stale; do not reuse old search strings.\n" +
+            report.join("\n"),
         };
       }
       // Stream the diff preview BEFORE writing so the UI shows what's about

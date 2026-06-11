@@ -6,6 +6,7 @@ import {
   resolveHarnessEnvRaw,
   detectContradictions,
   effectiveHarnessEnvRaw,
+  SPAWN_BASELINE_TOOL_NAMES,
 } from "@liminal/core";
 import { defineTool } from "../../shared/helpers.js";
 import { createContextTools } from "../context/context_tools.js";
@@ -69,7 +70,10 @@ function synthesizeSpawnContract(input: {
     : "Concise markdown with findings, evidence, and explicit caveats.";
   // Restrictive allowlist only from explicit `tools` — activate_tools is additive
   // provisioning, not a capability ceiling (see spawn_agent TOOL PROVISIONING).
-  const allowed = input.tools?.length ? [...new Set(input.tools)] : undefined;
+  // Always union baseline file/discovery tools so contract checks don't block read_file/write_file.
+  const allowed = input.tools?.length
+    ? [...new Set([...SPAWN_BASELINE_TOOL_NAMES, ...input.tools])]
+    : undefined;
   return {
     source: "synthesized",
     taskBrief: objective.slice(0, 500),

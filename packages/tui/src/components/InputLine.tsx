@@ -27,8 +27,8 @@ export function InputLine({
   const jarvis = usePersonaChrome().colors;
   const hints =
     scrollOffset > 0
-      ? "Esc=bottom  ↑↓=scroll  /connect slack  ^K=draft  ^L=session"
-      : "↑↓=scroll  /connect slack|linear  /integrations  ^K=draft  ^L=session";
+      ? "Esc=bottom  ↑↓=scroll  /help  ^K=draft  ^L=session"
+      : "↑↓=scroll  /help  /receipt  /connect xero  /integrations  ^K=draft  ^L=session";
 
   // Reserve space for hints on the right (only on wide terminals)
   const hintText = width >= 70 ? hints : "";

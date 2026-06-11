@@ -348,6 +348,10 @@ export const HARNESS_ENV_DEFAULTS: Readonly<Record<string, string>> = {
   AGENT_REASONING_DEFAULT_EFFORT: "medium", // fallback when classifier off or low confidence
   AGENT_COMPLEXITY_ROUTING: "1", // trivial non-creative turns → fast model (see intent_inference.ts)
   AGENT_EFFORT_LEARN: "1",               // record per-intent effort outcomes and reuse the best as fallback prior
+  AGENT_OUTCOME_IMPLICIT_FEEDBACK: "1",  // defer learning to next user message; mine corrections/thanks as labels
+  AGENT_OUTCOME_JUDGE: "1",              // fast-model outcome judge on a sample of turns
+  AGENT_OUTCOME_JUDGE_SAMPLE_RATE: "0.1", // fraction of deferred turns to judge (0–1)
+  AGENT_EVAL_OUTCOME_LEARN: "1",         // feed eval-suite pass/fail into recipe_stats effort cells
   AGENT_REASONING_NUDGE_CHARS: "2500",   // legacy; stream stall enforcement removed
   AGENT_REASONING_SURFACE: "external",   // native | external | auto — always external: model uses think()+reason() tools
   // Output-effort dial — SEPARATE axis from reasoning above. Governs how thorough

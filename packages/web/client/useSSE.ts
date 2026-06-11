@@ -1524,6 +1524,8 @@ export interface OutgoingChatMessage {
   attachments?: ImageAttachment[];
   /** True when the message was sent from live dictation (mic auto-send). */
   liveDictation?: boolean;
+  /** Guided preset — e.g. receipt_to_xero (requires image attachments). */
+  workflowPreset?: "receipt_to_xero";
 }
 
 export interface SendMessageResult {
@@ -2537,6 +2539,7 @@ export function useSSE(options?: {
           message: text,
           attachments: payload.attachments ?? [],
           liveDictation: Boolean(payload.liveDictation),
+          ...(payload.workflowPreset ? { workflowPreset: payload.workflowPreset } : {}),
         }),
       },
       8

@@ -17,7 +17,9 @@ import '../ui/rich_message/asset_url_resolver.dart';
 import '../models/app_config.dart';
 import '../models/harness_settings.dart';
 import '../models/liminal_app_spec.dart';
+import '../models/composer_slash_outcome.dart';
 import '../models/integrations_snapshot.dart';
+import '../ui/widgets/composer_slash.dart';
 import '../models/orchestration_snapshot.dart';
 import '../models/terminal_panel_state.dart';
 import '../models/terminal_view_state.dart';
@@ -786,6 +788,7 @@ class AppController extends ChangeNotifier {
     bool freshContext = false,
     List<UserImageAttachment> attachments = const [],
     bool liveDictation = false,
+    String? workflowPreset,
   }) async {
     final targetChatId = chatId ?? activeChatId;
     if (targetChatId == null || !_protocol.isConnected) return false;
@@ -811,6 +814,7 @@ class AppController extends ChangeNotifier {
       'message': trimmed,
       if (freshContext) 'freshContext': true,
       if (liveDictation || dictationSessionActive) 'liveDictation': true,
+      if (workflowPreset != null) 'workflowPreset': workflowPreset,
       if (attachments.isNotEmpty)
         'attachments': attachments.map((a) => a.toWire()).toList(),
     });
@@ -1257,6 +1261,126 @@ class AppController extends ChangeNotifier {
 
   Future<bool> disconnectIntegrationOpenApi(String name) =>
       _runIntegrationCommand('disconnect_integration_openapi', {'name': name});
+
+  String _integrationsStatusLine() {
+    final snap = integrations;
+    final parts = <String>[];
+    void push(String label, bool connected, String who) {
+      if (connected) parts.add('$label: $who');
+    }
+    final g = snap.google.accounts.isNotEmpty ? snap.google.accounts.first : null;
+    push('Google', g != null, g?.email ?? g?.accountId ?? '');
+    final ms = snap.microsoft.accounts.isNotEmpty ? snap.microsoft.accounts.first : null;
+    push('Microsoft', ms != null, ms?.email ?? ms?.accountId ?? '');
+    final x = snap.xero.accounts.isNotEmpty ? snap.xero.accounts.first : null;
+    push('Xero', x != null, x?.tenantName ?? x?.email ?? x?.accountId ?? '');
+    final sl = snap.slack.accounts.isNotEmpty ? snap.slack.accounts.first : null;
+    push('Slack', sl != null, sl?.teamName ?? sl?.email ?? '');
+    final ln = snap.linear.accounts.isNotEmpty ? snap.linear.accounts.first : null;
+    push('Linear', ln != null, ln?.organizationName ?? ln?.email ?? '');
+    final no = snap.notion.accounts.isNotEmpty ? snap.notion.accounts.first : null;
+    push('Notion', no != null, no?.workspaceName ?? no?.email ?? '');
+    final gh = snap.github.accounts.isNotEmpty ? snap.github.accounts.first : null;
+    push('GitHub', gh != null, gh?.login ?? gh?.email ?? '');
+    if (parts.isEmpty) {
+      return 'No integrations connected. Try /connect xero';
+    }
+    return parts.join(' · ');
+  }
+
+  Future<ComposerSlashOutcome> handleComposerSlash(
+    ParsedComposerSlash parsed, {
+    required int attachmentCount,
+  }) async {
+    switch (parsed.kind) {
+      case SlashCommandKind.help:
+        return ComposerSlashOutcome.message(formatSlashHelpText());
+      case SlashCommandKind.integrationsStatus:
+        if (!_protocol.isConnected) {
+          return ComposerSlashOutcome.message('Not connected to sidecar.');
+        }
+        await loadIntegrations();
+        return ComposerSlashOutcome.message(_integrationsStatusLine());
+      case SlashCommandKind.abort:
+        await abortTurn();
+        return ComposerSlashOutcome.abort();
+      case SlashCommandKind.receiptWorkflow:
+        if (attachmentCount == 0) {
+          return ComposerSlashOutcome.message(
+            'Attach a receipt image first, then /receipt [note] or Process receipts.',
+            clearInput: false,
+          );
+        }
+        final text = parsed.note.trim().isEmpty
+            ? 'Process the attached receipt(s) into Xero as draft bill(s).'
+            : parsed.note.trim();
+        return ComposerSlashOutcome.send(
+          text: text,
+          workflowPreset: 'receipt_to_xero',
+        );
+      case SlashCommandKind.attach:
+        final path = parsed.args.isNotEmpty ? parsed.args.first.trim() : '';
+        if (path.isEmpty) {
+          return ComposerSlashOutcome.message('Usage: /attach <image-path>', clearInput: false);
+        }
+        return ComposerSlashOutcome.attachPath(path);
+      case SlashCommandKind.connect:
+        final provider = parsed.args.isNotEmpty ? parsed.args.first : '';
+        if (provider.isEmpty) {
+          return ComposerSlashOutcome.message(
+            'Usage: /connect <slack|linear|notion|xero|github|google|microsoft|azure> [--read-only]',
+            clearInput: false,
+          );
+        }
+        final mode = parsed.readOnly ? 'read_only' : 'read_write';
+        final ok = switch (provider) {
+          'slack' => await connectSlackOAuth(mode: mode),
+          'linear' => await connectLinearOAuth(mode: mode),
+          'notion' => await connectNotionOAuth(mode: mode),
+          'xero' => await connectXeroOAuth(mode: mode),
+          'github' => await connectGithubOAuth(mode: mode),
+          'google' => await connectGoogleOAuth(mode: mode),
+          'microsoft' => await connectMicrosoftOAuth(mode: mode),
+          'azure' => await connectAzureOAuth(mode: mode),
+          _ => false,
+        };
+        if (!ok && integrationsError != null) {
+          return ComposerSlashOutcome.message(integrationsError!, clearInput: false);
+        }
+        if (!ok) {
+          return ComposerSlashOutcome.message('Connect failed for $provider', clearInput: false);
+        }
+        return ComposerSlashOutcome.message(
+          '$provider: complete sign-in in the browser tab',
+        );
+      case SlashCommandKind.disconnect:
+        final provider = parsed.args.isNotEmpty ? parsed.args.first : '';
+        if (provider.isEmpty) {
+          return ComposerSlashOutcome.message(
+            'Usage: /disconnect <provider>',
+            clearInput: false,
+          );
+        }
+        final ok = switch (provider) {
+          'slack' => await disconnectSlack(),
+          'linear' => await disconnectLinear(),
+          'notion' => await disconnectNotion(),
+          'xero' => await disconnectXero(),
+          'github' => await disconnectGithub(),
+          'google' => await disconnectGoogle(),
+          'microsoft' => await disconnectMicrosoft(),
+          'azure' => await disconnectAzure(),
+          _ => false,
+        };
+        if (!ok && integrationsError != null) {
+          return ComposerSlashOutcome.message(integrationsError!, clearInput: false);
+        }
+        return ComposerSlashOutcome.message(
+          ok ? '$provider: disconnected' : 'Disconnect failed for $provider',
+          clearInput: ok,
+        );
+    }
+  }
 
   Map<String, dynamic> _integrationAuthPayload(
     String kind,

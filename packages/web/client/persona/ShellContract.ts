@@ -8,6 +8,7 @@ import type {
   SseTransport,
 } from "../useSSE.js";
 import type { ImageAttachment } from "../imageAttachments.js";
+import type { SlashCompletionItem } from "@liminal/core";
 
 export type ToolCallEntry = Extract<MessageEntry, { kind: "tool_call" }>;
 export type SubtaskEntry  = Extract<MessageEntry, { kind: "subtask" }>;
@@ -50,15 +51,25 @@ export interface ShellContract {
   input: string;
   attachments: ImageAttachment[];
   attachError: string | null;
+  slashNotice: string | null;
+  slashCompletion?: {
+    items: SlashCompletionItem[];
+    selectedIndex: number;
+    visible: boolean;
+    onPick(item: SlashCompletionItem): void;
+  };
   isDragOver: boolean;
   canSend: boolean;
+  canProcessReceipts: boolean;
   totalAttachmentKb: number;
   busy: boolean;
 
   // ── Input handlers ────────────────────────────────────────────────────────────
   onInputChange(v: string): void;
   onSubmit(e: React.FormEvent): void;
+  onProcessReceipts(): void;
   onKeyDown(e: React.KeyboardEvent<HTMLTextAreaElement>): Promise<void>;
+  onComposerSelect?(el: HTMLTextAreaElement): void;
   onPaste(e: React.ClipboardEvent<HTMLElement>): Promise<void>;
   onDragOver(e: React.DragEvent<HTMLFormElement>): void;
   onDragLeave(e: React.DragEvent<HTMLFormElement>): void;

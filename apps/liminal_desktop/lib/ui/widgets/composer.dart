@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:io';
 
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
@@ -9,15 +10,24 @@ import '../../audio/composer_dictation.dart';
 import '../../audio/dictation_controller.dart';
 import '../../audio/speech_output.dart';
 import '../../models/app_config.dart';
+import '../../models/composer_slash_outcome.dart';
 import '../../models/user_image_attachment.dart';
 import '../design_system/liminal_design_system.dart';
 import '../layout/liminal_spacing.dart';
 import '../theme/liminal_theme_extension.dart';
 import 'composer_clipboard.dart';
+import 'composer_slash.dart';
+import 'composer_slash_menu.dart';
 
 typedef ComposerSendCallback = void Function(
   String text,
-  List<UserImageAttachment> attachments,
+  List<UserImageAttachment> attachments, {
+  String? workflowPreset,
+});
+
+typedef ComposerSlashCallback = Future<ComposerSlashOutcome> Function(
+  ParsedComposerSlash parsed,
+  int attachmentCount,
 );
 
 class Composer extends StatefulWidget {
@@ -27,6 +37,7 @@ class Composer extends StatefulWidget {
     required this.busy,
     required this.onSend,
     required this.onAbort,
+    this.onSlash,
     this.config,
     this.dictation,
     this.speechOutput,
@@ -39,6 +50,7 @@ class Composer extends StatefulWidget {
   final bool busy;
   final ComposerSendCallback onSend;
   final VoidCallback onAbort;
+  final ComposerSlashCallback? onSlash;
   final AppConfig? config;
   final DictationController? dictation;
   final SpeechOutput? speechOutput;
@@ -56,7 +68,11 @@ class _ComposerState extends State<Composer> {
   final _attachments = <UserImageAttachment>[];
   late final ComposerDictationSpan _dictationSpan;
   String? _attachError;
+  String? _slashNotice;
   String? _localDictationNotice;
+  List<SlashCompletionItem> _slashItems = const [];
+  int _slashSelected = 0;
+  bool _slashMenuOpen = true;
 
   static const _maxCount = 4;
   static const _maxBytesPerImage = 4 * 1024 * 1024;
@@ -66,9 +82,54 @@ class _ComposerState extends State<Composer> {
   void initState() {
     super.initState();
     _dictationSpan = ComposerDictationSpan(_controller);
+    _controller.addListener(_refreshSlashCompletions);
     _wireDictation();
     widget.dictation?.addListener(_onDictationChanged);
     HardwareKeyboard.instance.addHandler(_onKeyEvent);
+  }
+
+  void _refreshSlashCompletions() {
+    final cursor = _controller.selection.baseOffset.clamp(0, _controller.text.length);
+    final items = listSlashCompletions(_controller.text, cursor);
+    if (!mounted) return;
+    setState(() {
+      _slashItems = items;
+      if (_slashSelected >= items.length) _slashSelected = 0;
+    });
+  }
+
+  void _applySlashPick(SlashCompletionItem item) {
+    final cursor = _controller.selection.baseOffset.clamp(0, _controller.text.length);
+    final next = applySlashCompletion(_controller.text, cursor, item);
+    _controller.value = _controller.value.copyWith(
+      text: next.text,
+      selection: TextSelection.collapsed(offset: next.cursor),
+      composing: TextRange.empty,
+    );
+    setState(() => _slashMenuOpen = true);
+  }
+
+  KeyEventResult _onComposerKey(FocusNode node, KeyEvent event) {
+    if (event is! KeyDownEvent) return KeyEventResult.ignored;
+    if (!_slashMenuOpen || _slashItems.isEmpty) return KeyEventResult.ignored;
+
+    if (event.logicalKey == LogicalKeyboardKey.escape) {
+      setState(() => _slashMenuOpen = false);
+      return KeyEventResult.handled;
+    }
+    if (event.logicalKey == LogicalKeyboardKey.arrowDown) {
+      setState(() => _slashSelected = (_slashSelected + 1).clamp(0, _slashItems.length - 1));
+      return KeyEventResult.handled;
+    }
+    if (event.logicalKey == LogicalKeyboardKey.arrowUp) {
+      setState(() => _slashSelected = (_slashSelected - 1).clamp(0, _slashItems.length - 1));
+      return KeyEventResult.handled;
+    }
+    if (event.logicalKey == LogicalKeyboardKey.tab) {
+      _applySlashPick(_slashItems[_slashSelected]);
+      return KeyEventResult.handled;
+    }
+    return KeyEventResult.ignored;
   }
 
   @override
@@ -236,19 +297,92 @@ class _ComposerState extends State<Composer> {
     _attachments.add(item);
   }
 
-  void _submit() {
+  Future<void> _attachFromPath(String path) async {
+    final file = File(path);
+    if (!await file.exists()) {
+      setState(() => _attachError = 'File not found: $path');
+      return;
+    }
+    final bytes = await file.readAsBytes();
+    if (bytes.isEmpty) {
+      setState(() => _attachError = 'Image file is empty.');
+      return;
+    }
+    final name = path.split(RegExp(r'[\\/]')).last;
+    final mime = lookupMimeType(name, headerBytes: bytes) ?? 'image/png';
+    if (!mime.startsWith('image/')) {
+      setState(() => _attachError = 'Not an image file: $path');
+      return;
+    }
+    _tryAdd(UserImageAttachment(
+      name: name,
+      mimeType: mime,
+      bytes: bytes,
+      source: 'path',
+    ));
+    setState(() => _attachError = null);
+  }
+
+  Future<void> _submit({String? workflowPreset}) async {
     final text = _controller.text;
     if (text.trim().isEmpty && _attachments.isEmpty) return;
-    widget.onSend(text.trim(), List.unmodifiable(_attachments));
+    if (workflowPreset == 'receipt_to_xero' && _attachments.isEmpty) {
+      setState(() => _attachError = 'Attach a receipt image first.');
+      return;
+    }
+
+    final parsed = workflowPreset == null ? parseComposerSlashSubmit(text) : null;
+    if (parsed != null && widget.onSlash != null) {
+      final outcome = await widget.onSlash!(parsed, _attachments.length);
+      if (outcome.handled) {
+        if (outcome.attachPath != null) {
+          await _attachFromPath(outcome.attachPath!);
+        }
+        if (outcome.abortTurn) {
+          widget.onAbort();
+        }
+        if (outcome.message != null) {
+          setState(() {
+            _slashNotice = outcome.message;
+            _attachError = null;
+          });
+        }
+        if (outcome.sendText != null) {
+          widget.onSend(
+            outcome.sendText!,
+            List.unmodifiable(_attachments),
+            workflowPreset: outcome.workflowPreset,
+          );
+        }
+        if (outcome.clearInput) {
+          _controller.clear();
+          setState(() {
+            if (outcome.sendText != null) _attachments.clear();
+            _slashMenuOpen = true;
+          });
+        }
+        return;
+      }
+    }
+
+    widget.onSend(
+      text.trim(),
+      List.unmodifiable(_attachments),
+      workflowPreset: workflowPreset,
+    );
     _controller.clear();
     setState(() {
       _attachments.clear();
       _attachError = null;
+      _slashNotice = null;
     });
   }
 
+  void _submitReceipts() => unawaited(_submit(workflowPreset: 'receipt_to_xero'));
+
   @override
   void dispose() {
+    _controller.removeListener(_refreshSlashCompletions);
     HardwareKeyboard.instance.removeHandler(_onKeyEvent);
     widget.dictation?.removeListener(_onDictationChanged);
     _focusNode.dispose();
@@ -349,6 +483,14 @@ class _ComposerState extends State<Composer> {
                     ],
                   ),
                 ),
+              if (_slashNotice != null)
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 6),
+                  child: Text(
+                    _slashNotice!,
+                    style: TextStyle(color: lim.accent, fontSize: 12),
+                  ),
+                ),
               if (_attachError != null)
                 Padding(
                   padding: const EdgeInsets.only(bottom: 6),
@@ -360,22 +502,42 @@ class _ComposerState extends State<Composer> {
               if (_attachments.isNotEmpty)
                 Padding(
                   padding: const EdgeInsets.only(bottom: LiminalSpacing.xs),
-                  child: Wrap(
-                    spacing: 6,
-                    runSpacing: 6,
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      for (var i = 0; i < _attachments.length; i++)
-                        InputChip(
-                          avatar: Icon(Icons.image_outlined, size: 16, color: lim.textMuted),
-                          label: Text(
-                            _attachments[i].name,
-                            style: const TextStyle(fontSize: 11),
-                          ),
-                          onDeleted: widget.enabled
-                              ? () => setState(() => _attachments.removeAt(i))
-                              : null,
-                        ),
+                      Wrap(
+                        spacing: 6,
+                        runSpacing: 6,
+                        children: [
+                          for (var i = 0; i < _attachments.length; i++)
+                            InputChip(
+                              avatar: Icon(Icons.image_outlined, size: 16, color: lim.textMuted),
+                              label: Text(
+                                _attachments[i].name,
+                                style: const TextStyle(fontSize: 11),
+                              ),
+                              onDeleted: widget.enabled
+                                  ? () => setState(() => _attachments.removeAt(i))
+                                  : null,
+                            ),
+                        ],
+                      ),
+                      const SizedBox(height: 6),
+                      TextButton.icon(
+                        onPressed: widget.enabled && !widget.busy ? _submitReceipts : null,
+                        icon: const Icon(Icons.receipt_long_outlined, size: 16),
+                        label: const Text('Process receipts'),
+                      ),
                     ],
+                  ),
+                ),
+              if (_slashMenuOpen && _slashItems.isNotEmpty)
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 6),
+                  child: ComposerSlashMenu(
+                    items: _slashItems,
+                    selectedIndex: _slashSelected,
+                    onPick: _applySlashPick,
                   ),
                 ),
               Row(
@@ -394,7 +556,9 @@ class _ComposerState extends State<Composer> {
                     onPressed: widget.enabled && !widget.busy ? _pickImages : null,
                   ),
                   Expanded(
-                    child: TextField(
+                    child: Focus(
+                      onKeyEvent: _onComposerKey,
+                      child: TextField(
                       controller: _controller,
                       focusNode: _focusNode,
                       enabled: widget.enabled,
@@ -402,7 +566,7 @@ class _ComposerState extends State<Composer> {
                       maxLines: 6,
                       style: Theme.of(context).textTheme.bodyLarge?.copyWith(color: lim.text),
                       textInputAction: TextInputAction.send,
-                      onSubmitted: (_) => _submit(),
+                      onSubmitted: (_) => unawaited(_submit()),
                       contextMenuBuilder: (context, editableTextState) {
                         return AdaptiveTextSelectionToolbar.buttonItems(
                           anchors: editableTextState.contextMenuAnchors,
@@ -451,6 +615,7 @@ class _ComposerState extends State<Composer> {
                         ),
                       ),
                     ),
+                    ),
                   ),
                   const SizedBox(width: LiminalSpacing.xs),
                   if (d != null && d.status == DictationStatus.recording)
@@ -472,7 +637,7 @@ class _ComposerState extends State<Composer> {
                       label: widget.config?.resolvedCopy.sendLabel ?? 'Send',
                       icon: Icons.send,
                       dense: true,
-                      onPressed: widget.enabled ? _submit : null,
+                      onPressed: widget.enabled ? () => unawaited(_submit()) : null,
                     ),
                 ],
               ),

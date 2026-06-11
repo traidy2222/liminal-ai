@@ -122,7 +122,8 @@ export const readFileTool = defineTool({
       }
       return { ok: true, output: content };
     } catch (err) {
-      return { ok: false, error: String(err) };
+      const msg = err instanceof Error ? err.message : String(err);
+      return { ok: false, error: `read_file failed for "${pathArg}": ${msg}` };
     }
   },
 });

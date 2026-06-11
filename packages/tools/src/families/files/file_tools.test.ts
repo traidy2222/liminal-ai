@@ -4,7 +4,12 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { resolveWorkspaceRoot, runWithWorkspaceRoot } from "@liminal/core";
-import { resolveWithinWorkspace } from "../../shared/file_path_guard.js";
+import {
+  isPathInsideWorkspaceRoot,
+  readWorkspaceFileBytes,
+  resolveWithinWorkspace,
+} from "../../shared/file_path_guard.js";
+import { editFileTool } from "./edit_file.js";
 import { readFileTool } from "./read_file.js";
 import { readFileChunkedTool } from "../navigation/read_file_chunked.js";
 import { multiFileApplyTool } from "./multi_file_apply.js";
@@ -15,6 +20,47 @@ import { rejectIfLikelyTruncated, TRUNCATED_WRITE_ERROR } from "./file_write_ops
 test("resolveWithinWorkspace blocks escaping paths", () => {
   const blocked = resolveWithinWorkspace("..\\..\\outside.txt");
   assert.equal(blocked.ok, false);
+});
+
+test("resolveWithinWorkspace accepts absolute paths inside workspace", async () => {
+  const ws = await fsMkdtemp();
+  const rel = "nested/abs-read.txt";
+  const abs = path.join(ws, rel);
+  await mkdir(path.dirname(abs), { recursive: true });
+  await writeFile(abs, "hello", "utf8");
+  try {
+    await runWithWorkspaceRoot(ws, async () => {
+      const safe = resolveWithinWorkspace(abs);
+      assert.equal(safe.ok, true);
+      if (process.platform === "win32" && safe.resolvedPath) {
+        const altCase = safe.resolvedPath[0]!.toUpperCase() + safe.resolvedPath.slice(1);
+        assert.equal(isPathInsideWorkspaceRoot(altCase, ws), true);
+      }
+      const file = await readWorkspaceFileBytes(abs);
+      assert.equal(file.ok, true);
+      if (file.ok) assert.equal(file.bytes.toString("utf8"), "hello");
+    });
+  } finally {
+    await rm(ws, { recursive: true, force: true });
+  }
+});
+
+test("edit_file returns failure when replacements match nothing", async () => {
+  const ws = await fsMkdtemp();
+  const rel = "edit-target.ts";
+  await writeFile(path.join(ws, rel), "export const x = 1;\n", "utf8");
+  try {
+    await runWithWorkspaceRoot(ws, async () => {
+      const r = await editFileTool.handler({
+        path: rel,
+        replacements: [{ search: "THIS_TEXT_IS_NOT_HERE", replace: "y" }],
+      });
+      assert.equal(r.ok, false);
+      if (!r.ok) assert.match(r.error, /0 matches|grep_file/i);
+    });
+  } finally {
+    await rm(ws, { recursive: true, force: true });
+  }
 });
 
 test("read_file resolves paths against workspace root, not process.cwd()", async () => {

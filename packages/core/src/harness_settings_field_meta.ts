@@ -1849,6 +1849,35 @@ const _META_RAW: Record<string, HarnessSettingsFieldMeta> = {
       "At round 2, inject the best matching success recipe for the turn intent (zero extra model calls). Low-outcome turns decay bad recipes.",
     valueKind: "boolean",
   },
+  "AGENT_OUTCOME_IMPLICIT_FEEDBACK": {
+    tabId: "advanced",
+    subgroupId: "telemetry",
+    label: "Outcome implicit feedback",
+    description:
+      "Defer effort/rule/recipe learning until the user's next message. Corrections and retries lower the prior turn score; thanks and topic changes raise it.",
+    valueKind: "boolean",
+  },
+  "AGENT_OUTCOME_JUDGE": {
+    tabId: "advanced",
+    subgroupId: "telemetry",
+    label: "Outcome judge (fast model)",
+    description: "Sample a fraction of turns for a fast-model answer-quality score to calibrate heuristic outcomes.",
+    valueKind: "boolean",
+  },
+  "AGENT_OUTCOME_JUDGE_SAMPLE_RATE": {
+    tabId: "advanced",
+    subgroupId: "telemetry",
+    label: "Outcome judge sample rate",
+    description: "Fraction of deferred turns (0–1) sent to the fast outcome judge. Default 0.1 (10%).",
+    valueKind: "number",
+  },
+  "AGENT_EVAL_OUTCOME_LEARN": {
+    tabId: "advanced",
+    subgroupId: "telemetry",
+    label: "Eval outcome learning",
+    description: "Feed eval-suite pass/fail into the shared recipe stats file as high-trust golden outcomes.",
+    valueKind: "boolean",
+  },
   "AGENT_PLUGIN_DIR": {
     tabId: "advanced",
     subgroupId: "plugins",

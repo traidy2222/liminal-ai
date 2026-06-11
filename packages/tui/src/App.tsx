@@ -2,7 +2,13 @@ import React, { useState, useCallback, useEffect, useRef, useMemo } from "react"
 import { Box, Text, useInput, useStdout } from "ink";
 import type { AgentHarness, ChatMetadata } from "@liminal/core";
 import type { MessageEntry } from "./useAgent.js";
-import { DEFAULT_IMAGE_ATTACHMENT_LIMITS, validateImageAttachments, type ImageAttachment } from "@liminal/core";
+import {
+  DEFAULT_IMAGE_ATTACHMENT_LIMITS,
+  formatSlashHelpText,
+  parseComposerSlashSubmit,
+  validateImageAttachments,
+  type ImageAttachment,
+} from "@liminal/core";
 import { PERSONA_QUICK_PRESETS } from "@liminal/core/persona-bootstrap-ui";
 import { useAgent } from "./useAgent.js";
 import { resolveInputShortcut } from "./inputSemantics.js";
@@ -169,6 +175,81 @@ export function App({ harness, chatMeta, initialMessages }: Props) {
     if (state.personaBootstrapPending) {
       setInputStatus("Finish personality setup in the panel below first.");
       return;
+    }
+    const slashCmd = parseComposerSlashSubmit(currentDraft);
+    if (slashCmd) {
+      if (slashCmd.kind === "help") {
+        setDraftText("");
+        setInputStatus(formatSlashHelpText().slice(0, 4000));
+        return;
+      }
+      if (slashCmd.kind === "integrations_status") {
+        const { runIntegrationSlashCommand } = await import("./integrationSlashCommands.js");
+        const result = await runIntegrationSlashCommand({ action: "status" });
+        setDraftText("");
+        setInputStatus(result.message);
+        return;
+      }
+      if (slashCmd.kind === "connect" || slashCmd.kind === "disconnect") {
+        const { runIntegrationSlashCommand } = await import("./integrationSlashCommands.js");
+        const result = await runIntegrationSlashCommand({
+          action: slashCmd.kind === "connect" ? "connect" : "disconnect",
+          provider: slashCmd.args[0],
+          mode: slashCmd.readOnly ? "read_only" : "read_write",
+        });
+        setDraftText("");
+        setInputStatus(result.message);
+        return;
+      }
+      if (slashCmd.kind === "receipt_workflow") {
+        const validation = validateImageAttachments(
+          pendingAttachments,
+          DEFAULT_IMAGE_ATTACHMENT_LIMITS
+        );
+        if (!validation.ok) {
+          setInputStatus(validation.error);
+          return;
+        }
+        if (pendingAttachments.length === 0) {
+          setInputStatus("Attach a receipt image first (/attach <path>), then /receipt [note].");
+          return;
+        }
+        const text =
+          slashCmd.note.trim() || "Process the attached receipt(s) into Xero as draft bill(s).";
+        sendMessage(text, pendingAttachments, { workflowPreset: "receipt_to_xero" });
+        pushHistory(currentDraft);
+        setDraftText("");
+        setPendingAttachments([]);
+        setInputStatus("");
+        return;
+      }
+      if (slashCmd.kind === "attach") {
+        const path = slashCmd.args[0]?.trim();
+        if (!path) {
+          setInputStatus("Usage: /attach <image-path>");
+          return;
+        }
+        const attached = await imagePathToAttachment(path);
+        if (!attached.ok) {
+          setInputStatus(attached.error);
+          return;
+        }
+        const next = [...pendingAttachments, attached.attachment];
+        const validation = validateImageAttachments(next, DEFAULT_IMAGE_ATTACHMENT_LIMITS);
+        if (!validation.ok) {
+          setInputStatus(validation.error);
+          return;
+        }
+        setPendingAttachments(next);
+        setDraftText("");
+        setInputStatus(`Attached ${attached.attachment.name}`);
+        return;
+      }
+      if (slashCmd.kind === "abort") {
+        setDraftText("");
+        setInputStatus("Abort is not wired in TUI yet — press Ctrl+C or wait for turn end.");
+        return;
+      }
     }
     const integrationCmd = parseIntegrationSlashCommand(currentDraft);
     if (integrationCmd) {

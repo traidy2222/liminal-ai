@@ -25,6 +25,8 @@ export interface ClientCommandMap {
     freshContext?: boolean;
     liveDictation?: boolean;
     attachments?: WireImageAttachment[];
+    /** Guided preset — e.g. `receipt_to_xero` (requires image attachments). */
+    workflowPreset?: "receipt_to_xero";
   };
   /** Cooperatively abort the in-flight turn for a chat. */
   abort: { chatId: string };

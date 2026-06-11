@@ -2,11 +2,14 @@
  * Xero Phase 2 — attachments, batch payments, repeating invoices, linked txns,
  * overpayments/prepayments, bank transfers, quote/PO create.
  */
-import { readFile, writeFile, mkdir } from "node:fs/promises";
-import { basename, dirname, resolve } from "node:path";
+import { writeFile, mkdir } from "node:fs/promises";
+import { basename, dirname } from "node:path";
 import type { PropertySchema, ToolRegistry, ToolResult } from "@liminal/core";
-import { resolveWorkspaceRoot } from "@liminal/core";
 import { defineTool } from "../../shared/helpers.js";
+import {
+  readWorkspaceFileBytes,
+  resolveWithinWorkspace,
+} from "../../shared/file_path_guard.js";
 import {
   asToolResult,
   isXeroAttachmentParent,
@@ -54,22 +57,14 @@ async function readAttachmentBytes(args: Record<string, unknown>): Promise<
   }
 
   if (filePath) {
-    const ws = resolveWorkspaceRoot();
-    const abs = resolve(ws, filePath);
-    if (!abs.startsWith(resolve(ws))) {
-      return { ok: false, error: "file_path must stay inside workspace" };
-    }
-    try {
-      const bytes = await readFile(abs);
-      return {
-        ok: true,
-        bytes,
-        fileName: fileNameArg || basename(abs),
-        contentType: typeof args["mime_type"] === "string" ? args["mime_type"] : undefined,
-      };
-    } catch (e) {
-      return { ok: false, error: e instanceof Error ? e.message : String(e) };
-    }
+    const file = await readWorkspaceFileBytes(filePath);
+    if (!file.ok) return file;
+    return {
+      ok: true,
+      bytes: file.bytes,
+      fileName: fileNameArg || basename(file.resolvedPath),
+      contentType: typeof args["mime_type"] === "string" ? args["mime_type"] : undefined,
+    };
   }
 
   return { ok: false, error: "provide file_path or content_base64" };
@@ -144,13 +139,12 @@ export function registerXeroRestPhase2Tools(registry: ToolRegistry): void {
 
         const savePath = typeof args["save_path"] === "string" ? args["save_path"].trim() : "";
         if (savePath) {
-          const ws = resolveWorkspaceRoot();
-          const abs = resolve(ws, savePath);
-          if (!abs.startsWith(resolve(ws))) {
-            return { ok: false, error: "save_path must stay inside workspace" };
+          const safe = resolveWithinWorkspace(savePath);
+          if (!safe.ok || !safe.resolvedPath) {
+            return { ok: false, error: safe.error ?? "save_path must stay inside workspace" };
           }
-          await mkdir(dirname(abs), { recursive: true });
-          await writeFile(abs, r.data);
+          await mkdir(dirname(safe.resolvedPath), { recursive: true });
+          await writeFile(safe.resolvedPath, r.data);
           return {
             ok: true,
             output: jsonOutput({

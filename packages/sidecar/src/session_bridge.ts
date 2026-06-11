@@ -318,6 +318,7 @@ export class SessionBridge {
       freshContext?: boolean;
       liveDictation?: boolean;
       imageAttachments?: import("@liminal/core").ImageAttachment[];
+      workflowPreset?: import("@liminal/core").ReceiptWorkflowPreset;
     }
   ): Promise<void> {
     if (this.awaitingPersonaBootstrapInput) {
@@ -328,6 +329,7 @@ export class SessionBridge {
         freshContext: opts?.freshContext,
         liveDictation: opts?.liveDictation,
         imageAttachments: opts?.imageAttachments,
+        workflowPreset: opts?.workflowPreset,
       });
       this.startHeartbeat();
       await run;

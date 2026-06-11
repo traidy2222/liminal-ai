@@ -8,6 +8,7 @@ import {
   missingDefaultAzureScopes,
   listGithubOAuthAccounts,
   listXeroOAuthAccounts,
+  refreshStaleXeroAccounts,
   listSlackOAuthAccounts,
   listLinearOAuthAccounts,
   listNotionOAuthAccounts,
@@ -58,6 +59,7 @@ import {
 import type { ChatRegistry } from "./chat_registry.js";
 
 export async function buildIntegrationsSnapshot() {
+  await refreshStaleXeroAccounts();
   const accounts = await listGoogleOAuthAccounts();
   const msAccounts = await listMicrosoftOAuthAccounts();
   return {

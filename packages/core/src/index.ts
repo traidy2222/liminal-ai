@@ -371,6 +371,15 @@ export {
 } from "./output_effort.js";
 export type { EffortLevel } from "./output_effort.js";
 export { buildResearchTurnInjection } from "./research_depth.js";
+export { buildCodingTurnInjection } from "./coding_autonomy.js";
+export {
+  normalizeFilePathKey,
+  bumpFileRevision,
+  getFileRevision,
+  buildFileRevisionBatchNotice,
+  isEditStaleFailure,
+  buildEditStaleRecoveryMessage,
+} from "./file_edit_currency.js";
 export {
   parseWorkflowSpec,
   topoSortPhases,
@@ -736,6 +745,38 @@ export type {
   UserTurnContent,
 } from "./image_attachments.js";
 export {
+  RECEIPT_WORKFLOW_PRESET,
+  parseReceiptSlashCommand,
+  isReceiptWorkflowPreset,
+  isReceiptWorkflowTurn,
+  resolveReceiptWorkflowUserMessage,
+  stripReceiptWorkflowCommandPrefix,
+  persistImageAttachmentsToWorkspace,
+  buildReceiptWorkflowTurnInjection,
+} from "./receipt_workflow.js";
+export type { ReceiptWorkflowPreset } from "./receipt_workflow.js";
+export {
+  COMPOSER_SLASH_COMMANDS,
+  INTEGRATION_SLASH_PROVIDERS,
+  detectSlashInput,
+  listSlashCompletions,
+  applySlashCompletion,
+  parseComposerSlashSubmit,
+  resolveSlashCommandDef,
+  isIntegrationSlashProvider,
+  formatSlashHelpText,
+  slashCompletionHint,
+  allComposerSlashCommandNames,
+} from "./composer_slash_commands.js";
+export type {
+  SlashCommandKind,
+  SlashCommandDef,
+  SlashCompletionItem,
+  SlashInputState,
+  ParsedComposerSlash,
+  IntegrationSlashProviderId,
+} from "./composer_slash_commands.js";
+export {
   buildNativeVisionUserContent,
   modelSupportsNativeVision,
   resolveNativeVision,
@@ -743,11 +784,14 @@ export {
 export type { NativeVisionResolution } from "./native_vision.js";
 export {
   resolveInputShortcut,
+  classifyImplicitFollowUpFeedback,
 } from "./input_semantics.js";
 export type {
   InputShortcutAction,
   InputShortcutEvent,
   InputShortcutContext,
+  ImplicitFollowUpKind,
+  ImplicitFollowUpFeedback,
 } from "./input_semantics.js";
 export {
   buildRoutingProfile,
@@ -873,8 +917,24 @@ export type {
 } from "./paste_scheduler.js";
 export { maybeWriteTrajectory } from "./trajectory_writer.js";
 export type { TrajectoryEntry, TrajectoryWriteInput } from "./trajectory_writer.js";
-export { scoreTurnOutcome, recordEffortOutcome, getBestEffortForIntent, formatEffortStatsReport } from "./outcome_scorer.js";
-export type { TurnOutcomeInput } from "./outcome_scorer.js";
+export {
+  scoreTurnOutcome,
+  refineTurnOutcome,
+  recordEffortOutcome,
+  getBestEffortForIntent,
+  formatEffortStatsReport,
+  isDeferredOutcomeLearningEnabled,
+  buildPendingTurnLearning,
+  applyPendingTurnLearning,
+  recordImmediateTurnLearning,
+  recordEvalScenarioOutcome,
+} from "./outcome_scorer.js";
+export type {
+  TurnOutcomeInput,
+  PendingTurnLearningRecord,
+  RefinedTurnOutcome,
+  RefineTurnOutcomeInput,
+} from "./outcome_scorer.js";
 export { WorldContextRefresher, gatherVolatileSnapshot, diffVolatileSnapshots } from "./world_context_delta.js";
 export type { VolatileSnapshot } from "./world_context_delta.js";
 export { extractFacts, extractFactsRaw, publishToolFacts, readBusFacts } from "./fact_extractor.js";
@@ -1103,6 +1163,7 @@ export {
   buildXeroAuthUrl,
   exchangeXeroCode,
   refreshXeroAccessToken,
+  refreshStaleXeroAccounts,
   getXeroAccessToken,
   revokeXeroAccount,
   listXeroOAuthAccounts,

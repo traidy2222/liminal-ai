@@ -497,6 +497,7 @@ export class WsServer {
             freshContext?: boolean;
             liveDictation?: boolean;
             attachments?: import("@liminal/protocol").WireImageAttachment[];
+            workflowPreset?: import("@liminal/core").ReceiptWorkflowPreset;
           };
           const bridge = this.registry.get(d.chatId);
           if (!bridge) return this.ack(ws, id, false, "Unknown chatId.");
@@ -514,6 +515,7 @@ export class WsServer {
               freshContext: d.freshContext,
               liveDictation: d.liveDictation,
               imageAttachments: att.attachments,
+              workflowPreset: d.workflowPreset,
             })
             .catch((err) => {
               this.broadcast(

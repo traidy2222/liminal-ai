@@ -220,7 +220,7 @@ class ChatPane extends StatelessWidget {
                       focused ? host.dismissDictationNotice : null,
                   onDictationAutoSend:
                       focused ? host.handleDictationAutoSend : null,
-                  onSend: (text, attachments) {
+                  onSend: (text, attachments, {workflowPreset}) {
                     unawaited(
                       host.sendMessage(
                         text,
@@ -228,10 +228,13 @@ class ChatPane extends StatelessWidget {
                         attachments: attachments,
                         liveDictation:
                             focused && host.dictationSessionActive,
+                        workflowPreset: workflowPreset,
                       ),
                     );
                   },
                   onAbort: () => host.abortTurn(chatId: chatId),
+                  onSlash: (parsed, count) =>
+                      host.handleComposerSlash(parsed, attachmentCount: count),
                 ),
               );
             },

@@ -18,6 +18,16 @@ Or ask the agent: `connect_provider({ provider: "xero" })` after OAuth is on dis
 
 **After upgrading Liminal** (or if tools return HTTP 401 `AuthorizationUnsuccessful` on payments, bank, journals, or reports): **Disconnect** Xero in Settings → Integrations, then **Connect** again with **Read + write**. OAuth tokens keep the scopes granted at connect time — refresh does not add new ones. The hosted connect site must also be deployed with the full granular scope list.
 
+## Process receipts (guided preset)
+
+A fixed workflow — not open-ended chat — for supplier receipts → **DRAFT** bills in Xero:
+
+1. Attach one or more receipt images (paste, drop, or file picker).
+2. Optional note in the composer (e.g. `fuel receipt`).
+3. Start via **Process receipts** (web/desktop composer) or slash: `/receipt`, `/receipts`, `/process-receipts [note]`. Type `/` in the composer for tab-completion of all slash commands (`/help` lists them).
+
+The harness activates the **xero** family and injects the recipe: find/create contact → suggest purchase lines → `xero_duplicate_invoice_check` → `xero_create_bill` (DRAFT) → `xero_upload_attachment` (source file required) → plain-language summary. Bank accounts are listed for context; this preset always creates a draft bill (not spend-money) unless you ask otherwise in chat.
+
 ## Agent tools
 
 Activate the **xero** family if lazy loading is on: `activate_tool_family({ family: "xero" })`.
