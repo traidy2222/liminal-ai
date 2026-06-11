@@ -124,6 +124,9 @@ class IntegrationsSnapshot {
 
   bool get xeroConnected => xero.accounts.isNotEmpty;
 
+  bool get xeroNeedsReconnect =>
+      xero.accounts.any((a) => a.missingScopes.isNotEmpty);
+
   bool get slackConnected => slack.accounts.isNotEmpty;
 
   bool get linearConnected => linear.accounts.isNotEmpty;
@@ -348,6 +351,7 @@ class XeroOAuthAccount {
     required this.scopes,
     this.tenantId,
     this.tenantName,
+    this.missingScopes = const [],
   });
 
   final String accountId;
@@ -355,6 +359,7 @@ class XeroOAuthAccount {
   final List<String> scopes;
   final String? tenantId;
   final String? tenantName;
+  final List<String> missingScopes;
 
   factory XeroOAuthAccount.fromJson(Map<String, dynamic> json) {
     return XeroOAuthAccount(
@@ -363,6 +368,8 @@ class XeroOAuthAccount {
       scopes: (json['scopes'] as List<dynamic>? ?? []).map((e) => e.toString()).toList(),
       tenantId: json['tenantId'] as String?,
       tenantName: json['tenantName'] as String?,
+      missingScopes:
+          (json['missingScopes'] as List<dynamic>? ?? []).map((e) => e.toString()).toList(),
     );
   }
 }

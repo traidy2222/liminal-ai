@@ -22,6 +22,7 @@ import {
   runMicrosoftHostedConnectFlow,
   runAzureHostedConnectFlow,
   runXeroHostedConnectFlow,
+  xeroBundleMissingScopes,
 } from "@liminal/core";
 import {
   attachCustomMcpFromServer,
@@ -98,6 +99,7 @@ export async function buildIntegrationsSnapshot() {
         expiresAt: a.expiresAt,
         tenantId: a.tenantId,
         tenantName: a.tenantName,
+        missingScopes: xeroBundleMissingScopes(a.scopes),
       })),
     },
     slack: {

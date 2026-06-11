@@ -7,7 +7,10 @@ import {
   listXeroOAuthAccounts,
   readOAuthBundle,
   resolveXeroTenantId,
+  formatXeroReconnectHint,
+  xeroBundleMissingRequiredScopes,
   xeroBundleMissingScopes,
+  xeroRequiredScopesForCall,
   type OAuthTokenBundle,
 } from "@liminal/core";
 import type { PropertySchema, ToolResult } from "@liminal/core";
@@ -116,6 +119,16 @@ export async function xeroFetch(
     };
   }
   const apiBase = opts.apiBase ?? XERO_ACCOUNTING_API;
+  const requiredScopes = xeroRequiredScopesForCall({
+    apiBase,
+    method: opts.method,
+    path,
+  });
+  const missingPreflight = xeroBundleMissingRequiredScopes(auth.bundle.scopes, requiredScopes);
+  if (missingPreflight.length > 0) {
+    return { ok: false, error: formatXeroReconnectHint(missingPreflight) };
+  }
+
   const url = buildXeroUrl(path, apiBase, opts.query);
 
   const isRawBody = opts.bodyRaw !== undefined;
@@ -161,13 +174,12 @@ export async function xeroFetch(
     if (!res.ok) {
       lastError = formatXeroApiError(res.status, data, text);
       if (res.status === 401) {
-        const bundle = auth.bundle;
-        const missing = xeroBundleMissingScopes(bundle.scopes);
-        if (missing.length > 0) {
-          lastError +=
-            ` — OAuth token is missing scopes (${missing.slice(0, 4).join(", ")}` +
-            `${missing.length > 4 ? ", …" : ""}). Disconnect Xero in Settings → Integrations and reconnect (read+write) to grant full access.`;
-        } else {
+        const missingCall = xeroBundleMissingRequiredScopes(auth.bundle.scopes, requiredScopes);
+        const missing =
+          missingCall.length > 0 ? missingCall : xeroBundleMissingScopes(auth.bundle.scopes);
+        const hint = formatXeroReconnectHint(missing);
+        if (hint) lastError += ` — ${hint}`;
+        else {
           lastError +=
             " — try disconnecting and reconnecting Xero in Settings → Integrations to refresh scopes.";
         }

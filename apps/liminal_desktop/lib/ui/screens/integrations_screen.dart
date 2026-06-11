@@ -150,9 +150,12 @@ class _IntegrationsScreenState extends State<IntegrationsScreen> {
   }
 
   Future<void> _xeroPrimary(AppController host, IntegrationsSnapshot snap) async {
-    if (snap.xeroConnected) {
+    if (snap.xeroConnected && !snap.xeroNeedsReconnect) {
       await host.disconnectXero(revoke: true);
       return;
+    }
+    if (snap.xeroConnected && snap.xeroNeedsReconnect) {
+      await host.disconnectXero(revoke: true);
     }
     await host.connectXeroOAuth(mode: _xeroMode);
   }
@@ -403,13 +406,17 @@ class _IntegrationsScreenState extends State<IntegrationsScreen> {
                         child: _IntegrationCard(
                           brandId: IntegrationBrandId.xero,
                           statusLine: snap.xeroConnected
-                              ? 'Ready · ${snap.xeroAccountLabel}'
+                              ? snap.xeroNeedsReconnect
+                                  ? 'Reconnect needed · scopes missing'
+                                  : 'Ready · ${snap.xeroAccountLabel}'
                               : integrationBrands[IntegrationBrandId.xero]!.tagline,
                           connected: snap.xeroConnected,
                           expanded: _expandedId == 'xero',
                           onToggle: () => _toggleExpanded('xero'),
-                          primaryLabel: snap.xeroConnected ? 'Disconnect' : 'Connect',
-                          primaryDanger: snap.xeroConnected,
+                          primaryLabel: snap.xeroConnected
+                              ? (snap.xeroNeedsReconnect ? 'Reconnect' : 'Disconnect')
+                              : 'Connect',
+                          primaryDanger: snap.xeroConnected && !snap.xeroNeedsReconnect,
                           disabled: disabled,
                           onPrimary: () => unawaited(_xeroPrimary(host, host.integrations)),
                           child: Padding(
@@ -421,6 +428,13 @@ class _IntegrationsScreenState extends State<IntegrationsScreen> {
                                   'Sign in with your Xero account — invoices and contacts sync locally.',
                                   style: TextStyle(color: lim.textMuted, fontSize: 12, height: 1.4),
                                 ),
+                                if (snap.xeroNeedsReconnect) ...[
+                                  const SizedBox(height: 8),
+                                  Text(
+                                    'New tools need updated OAuth scopes. Tap Reconnect — disconnect then sign in again.',
+                                    style: TextStyle(color: lim.warn, fontSize: 12, height: 1.4),
+                                  ),
+                                ],
                                 const SizedBox(height: 8),
                                 Row(
                                   children: [

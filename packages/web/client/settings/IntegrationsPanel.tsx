@@ -479,6 +479,14 @@ export function IntegrationsPanel({ agentBusy }: IntegrationsPanelProps) {
     );
   };
 
+  const beginXeroOAuth = async () => {
+    const res = await webApiFetch(`/api/integrations/xero/begin?mode=${xeroMode}`);
+    if (!res.ok) throw new Error(await res.text());
+    const { connectUrl } = (await res.json()) as { connectUrl: string };
+    window.open(connectUrl, "_blank", "noopener,noreferrer");
+    await pollIntegrationsUntil((d) => (d.xero?.accounts.length ?? 0) > 0);
+  };
+
   const xeroPrimary = async () => {
     if (xeroConnected) {
       const res = await webApiFetch("/api/integrations/xero?revoke=1", { method: "DELETE" });
@@ -486,11 +494,16 @@ export function IntegrationsPanel({ agentBusy }: IntegrationsPanelProps) {
       if (!res.ok) throw new Error(json.error ?? "disconnect failed");
       return;
     }
-    const res = await webApiFetch(`/api/integrations/xero/begin?mode=${xeroMode}`);
-    if (!res.ok) throw new Error(await res.text());
-    const { connectUrl } = (await res.json()) as { connectUrl: string };
-    window.open(connectUrl, "_blank", "noopener,noreferrer");
-    await pollIntegrationsUntil((d) => (d.xero?.accounts.length ?? 0) > 0);
+    await beginXeroOAuth();
+  };
+
+  const xeroReconnect = async () => {
+    if (xeroConnected) {
+      const res = await webApiFetch("/api/integrations/xero?revoke=1", { method: "DELETE" });
+      const json = (await res.json()) as { error?: string };
+      if (!res.ok) throw new Error(json.error ?? "disconnect failed");
+    }
+    await beginXeroOAuth();
   };
 
   const slackPrimary = async () => {
@@ -843,20 +856,42 @@ export function IntegrationsPanel({ agentBusy }: IntegrationsPanelProps) {
         connected={xeroConnected}
         expanded={expanded === "xero"}
         onToggle={() => toggleExpand("xero")}
-        primaryLabel={xeroConnected ? "Disconnect" : "Connect"}
-        primaryDanger={xeroConnected}
+        primaryLabel={
+          xeroConnected && (xeroAccounts[0]?.missingScopes?.length ?? 0) > 0
+            ? "Reconnect"
+            : xeroConnected
+              ? "Disconnect"
+              : "Connect"
+        }
+        primaryDanger={xeroConnected && (xeroAccounts[0]?.missingScopes?.length ?? 0) === 0}
         primaryDisabled={disabled}
-        onPrimary={() => void run(xeroPrimary)}
+        onPrimary={() =>
+          void run(
+            xeroConnected && (xeroAccounts[0]?.missingScopes?.length ?? 0) > 0
+              ? xeroReconnect
+              : xeroPrimary
+          )
+        }
       >
         <p style={{ fontSize: 11, color: "#778899", lineHeight: 1.45, margin: "10px 0" }}>
           Sign in with Xero to look up invoices, contacts, and organisation details.
         </p>
+        {(xeroAccounts[0]?.missingScopes?.length ?? 0) > 0 ? (
+          <p style={{ fontSize: 11, color: "#e6b84d", lineHeight: 1.45, margin: "0 0 10px" }}>
+            New tools need updated OAuth scopes (files, projects, payroll, budgets). Click{" "}
+            <strong>Reconnect</strong> — disconnect then sign in again. Token refresh does not add scopes.
+          </p>
+        ) : null}
         {xeroAccounts.map((a) => (
           <div key={a.accountId} style={{ fontSize: 11, fontFamily: "monospace", color: GREEN, marginBottom: 6 }}>
             {a.email ?? a.accountId}
             {a.tenantName ? ` · ${a.tenantName}` : a.tenantId ? ` · tenant ${a.tenantId}` : ""} — {a.scopes.length} scopes
             {(a.missingScopes?.length ?? 0) > 0 ? (
-              <span style={{ color: "#e6b84d" }}> · reconnect for payments, bank, reports</span>
+              <span style={{ color: "#e6b84d" }}>
+                {" "}
+                · missing: {a.missingScopes!.slice(0, 4).join(", ")}
+                {a.missingScopes!.length > 4 ? ", …" : ""}
+              </span>
             ) : null}
           </div>
         ))}
@@ -889,6 +924,16 @@ export function IntegrationsPanel({ agentBusy }: IntegrationsPanelProps) {
           >
             Refresh status
           </button>
+          {xeroConnected && (xeroAccounts[0]?.missingScopes?.length ?? 0) > 0 ? (
+            <button
+              type="button"
+              style={{ ...btn, fontSize: 10, padding: "6px 10px", borderColor: "#e6b84d", color: "#e6b84d" }}
+              disabled={disabled}
+              onClick={() => void run(xeroReconnect)}
+            >
+              Reconnect for new scopes
+            </button>
+          ) : null}
           <button
             type="button"
             style={{ ...btnDanger, fontSize: 10, padding: "6px 10px" }}

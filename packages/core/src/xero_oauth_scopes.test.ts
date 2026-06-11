@@ -3,7 +3,9 @@ import assert from "node:assert/strict";
 import {
   scopesForXeroMode,
   xeroBundleMissingPhase3Scopes,
+  xeroBundleMissingRequiredScopes,
   xeroBundleMissingScopes,
+  xeroRequiredScopesForCall,
 } from "./xero_oauth_scopes.js";
 
 describe("xero_oauth_scopes", () => {
@@ -20,6 +22,8 @@ describe("xero_oauth_scopes", () => {
     assert.ok(scopes.includes("files"));
     assert.ok(scopes.includes("projects.read"));
     assert.ok(scopes.includes("payroll.employees"));
+    assert.ok(scopes.includes("accounting.budgets.read"));
+    assert.ok(scopes.includes("accounting.classicexpenses.read"));
     assert.ok(!scopes.includes("accounting.transactions"));
   });
 
@@ -42,6 +46,27 @@ describe("xero_oauth_scopes", () => {
     ]);
     assert.ok(missing.includes("accounting.payments.read"));
     assert.ok(missing.includes("accounting.reports.profitandloss.read"));
+  });
+
+  it("xeroRequiredScopesForCall maps API bases and paths", () => {
+    assert.deepEqual(
+      xeroRequiredScopesForCall({
+        apiBase: "https://api.xero.com/files.xro/1.0",
+        path: "/Files",
+      }),
+      ["files.read"]
+    );
+    assert.deepEqual(
+      xeroRequiredScopesForCall({
+        apiBase: "https://api.xero.com/api.xro/2.0",
+        path: "/Budgets",
+      }),
+      ["accounting.budgets.read"]
+    );
+    assert.deepEqual(
+      xeroBundleMissingRequiredScopes(["accounting.budgets.read"], ["accounting.budgets.read"]),
+      []
+    );
   });
 
   it("xeroBundleMissingPhase3Scopes detects missing journals/files/projects/payroll", () => {

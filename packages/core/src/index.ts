@@ -1102,6 +1102,9 @@ export {
 export {
   xeroBundleMissingScopes,
   xeroBundleMissingPhase3Scopes,
+  xeroBundleMissingRequiredScopes,
+  xeroRequiredScopesForCall,
+  formatXeroReconnectHint,
   XERO_FULL_ACCOUNTING_SCOPES,
   XERO_FULL_SCOPES,
   XERO_PHASE3_READ_SCOPES,
