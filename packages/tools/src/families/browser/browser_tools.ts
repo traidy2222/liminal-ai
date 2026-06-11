@@ -399,8 +399,11 @@ export const browserServeFileTool = defineTool({
 export function wireBrowserHarnessCleanup(harness: AgentHarness): void {
   registerBrowserTurnCleanup(harness);
   setBrowserViewPublisher((payload) => {
-    harness.emitter.emit("browser_view", payload);
-  });
+    harness.emitter.emit("browser_view", {
+      ...payload,
+      chatId: harness.taskId,
+    });
+  }, harness.taskId);
 }
 
 export const browserWaitForTool = defineTool({

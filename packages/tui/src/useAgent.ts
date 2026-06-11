@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useReducer, useRef } from "react";
 import {
-  buildMessageWithImageAttachments,
   type AgentEventMap,
   type AgentHarness,
   type ContextSnapshot,
@@ -1107,7 +1106,7 @@ export function useAgent(
       dispatch({ type: "user_message", text: userText });
       void (async () => {
         try {
-          await harness.send(buildMessageWithImageAttachments(text, attachments));
+          await harness.send(text, { imageAttachments: attachments });
         } catch (err) {
           dispatch({
             type: "error",

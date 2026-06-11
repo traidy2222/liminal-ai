@@ -112,10 +112,8 @@ export function syncProviderProcessEnvForBase(baseURL: string): void {
   if (isOpenRouterApiBaseUrl(baseURL) && isCastAiApiKey(agent)) {
     delete process.env["AGENT_API_KEY"];
   }
-  if (isKimchiApiBaseUrl(baseURL) && !isCastAiApiKey(agent)) {
-    const hasKimchi =
-      process.env["KIMCHI_API_KEY"]?.trim() || process.env["CASTAI_API_KEY"]?.trim();
-    if (hasKimchi) delete process.env["AGENT_API_KEY"];
+  if (isKimchiApiBaseUrl(baseURL) && agent && !isCastAiApiKey(agent)) {
+    delete process.env["AGENT_API_KEY"];
   }
 }
 

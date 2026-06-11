@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import OpenAI from "openai";
 import {
+  formatKimchiProviderError,
   isKimchiApiBaseUrl,
   isKimchiRetryableProviderError,
   isKimchiThrottleError,
@@ -50,4 +51,11 @@ test("isKimchiThrottleError is true for Kimchi base + 429", () => {
 
 test("resolveKimchiMinIntervalMs defaults to 1500", () => {
   assert.equal(resolveKimchiMinIntervalMs(), 1_500);
+});
+
+test("formatKimchiProviderError explains HTTP 401", () => {
+  const err = new OpenAI.APIError(401, { error: "Unauthorized" }, "401", {});
+  const msg = formatKimchiProviderError(err);
+  assert.ok(msg?.includes("401"));
+  assert.ok(msg?.includes("KIMCHI_API_KEY"));
 });

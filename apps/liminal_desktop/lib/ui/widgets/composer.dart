@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:mime/mime.dart';
 
 import '../../audio/composer_dictation.dart';
@@ -12,6 +13,7 @@ import '../../models/user_image_attachment.dart';
 import '../design_system/liminal_design_system.dart';
 import '../layout/liminal_spacing.dart';
 import '../theme/liminal_theme_extension.dart';
+import 'composer_clipboard.dart';
 
 typedef ComposerSendCallback = void Function(
   String text,
@@ -50,6 +52,7 @@ class Composer extends StatefulWidget {
 
 class _ComposerState extends State<Composer> {
   final _controller = TextEditingController();
+  final _focusNode = FocusNode();
   final _attachments = <UserImageAttachment>[];
   late final ComposerDictationSpan _dictationSpan;
   String? _attachError;
@@ -65,6 +68,7 @@ class _ComposerState extends State<Composer> {
     _dictationSpan = ComposerDictationSpan(_controller);
     _wireDictation();
     widget.dictation?.addListener(_onDictationChanged);
+    HardwareKeyboard.instance.addHandler(_onKeyEvent);
   }
 
   @override
@@ -161,6 +165,57 @@ class _ComposerState extends State<Composer> {
     setState(() {});
   }
 
+  Future<void> _handlePaste() async {
+    if (!widget.enabled || widget.busy) return;
+
+    final imageBytes = await ComposerClipboard.readImageBytes();
+    if (imageBytes != null) {
+      setState(() => _attachError = null);
+      _tryAdd(ComposerClipboard.attachmentFromClipboardBytes(imageBytes));
+      setState(() {});
+      return;
+    }
+
+    final paths = await ComposerClipboard.readImageFilePaths();
+    if (paths.isNotEmpty) {
+      setState(() => _attachError = null);
+      for (final item in await ComposerClipboard.attachmentsFromPaths(paths)) {
+        _tryAdd(item);
+      }
+      setState(() {});
+      return;
+    }
+
+    final text = await ComposerClipboard.readPlainText();
+    if (text == null) return;
+    _insertTextAtSelection(text);
+    setState(() {});
+  }
+
+  void _insertTextAtSelection(String text) {
+    final value = _controller.value;
+    final selection = value.selection;
+    final start = selection.isValid ? selection.start : value.text.length;
+    final end = selection.isValid ? selection.end : value.text.length;
+    final newText = value.text.replaceRange(start, end, text);
+    final offset = start + text.length;
+    _controller.value = value.copyWith(
+      text: newText,
+      selection: TextSelection.collapsed(offset: offset),
+      composing: TextRange.empty,
+    );
+  }
+
+  bool _onKeyEvent(KeyEvent event) {
+    if (!_focusNode.hasFocus || !widget.enabled) return false;
+    if (event is! KeyDownEvent) return false;
+    if (event.logicalKey != LogicalKeyboardKey.keyV) return false;
+    final hw = HardwareKeyboard.instance;
+    if (!hw.isControlPressed && !hw.isMetaPressed) return false;
+    unawaited(_handlePaste());
+    return true;
+  }
+
   void _tryAdd(UserImageAttachment item) {
     if (_attachments.length >= _maxCount) {
       _attachError = 'Max $_maxCount images.';
@@ -194,7 +249,9 @@ class _ComposerState extends State<Composer> {
 
   @override
   void dispose() {
+    HardwareKeyboard.instance.removeHandler(_onKeyEvent);
     widget.dictation?.removeListener(_onDictationChanged);
+    _focusNode.dispose();
     _controller.dispose();
     super.dispose();
   }
@@ -333,18 +390,54 @@ class _ComposerState extends State<Composer> {
                     ),
                   LiminalIconButton(
                     icon: Icons.image_outlined,
-                    tooltip: 'Attach images',
+                    tooltip: 'Attach images (or Ctrl+V / Cmd+V paste)',
                     onPressed: widget.enabled && !widget.busy ? _pickImages : null,
                   ),
                   Expanded(
                     child: TextField(
                       controller: _controller,
+                      focusNode: _focusNode,
                       enabled: widget.enabled,
                       minLines: 1,
                       maxLines: 6,
                       style: Theme.of(context).textTheme.bodyLarge?.copyWith(color: lim.text),
                       textInputAction: TextInputAction.send,
                       onSubmitted: (_) => _submit(),
+                      contextMenuBuilder: (context, editableTextState) {
+                        return AdaptiveTextSelectionToolbar.buttonItems(
+                          anchors: editableTextState.contextMenuAnchors,
+                          buttonItems: <ContextMenuButtonItem>[
+                            ContextMenuButtonItem(
+                              onPressed: () {
+                                ContextMenuController.removeAny();
+                                editableTextState.cutSelection(SelectionChangedCause.toolbar);
+                              },
+                              type: ContextMenuButtonType.cut,
+                            ),
+                            ContextMenuButtonItem(
+                              onPressed: () {
+                                ContextMenuController.removeAny();
+                                editableTextState.copySelection(SelectionChangedCause.toolbar);
+                              },
+                              type: ContextMenuButtonType.copy,
+                            ),
+                            ContextMenuButtonItem(
+                              onPressed: () {
+                                ContextMenuController.removeAny();
+                                unawaited(_handlePaste());
+                              },
+                              type: ContextMenuButtonType.paste,
+                            ),
+                            ContextMenuButtonItem(
+                              onPressed: () {
+                                ContextMenuController.removeAny();
+                                editableTextState.selectAll(SelectionChangedCause.toolbar);
+                              },
+                              type: ContextMenuButtonType.selectAll,
+                            ),
+                          ],
+                        );
+                      },
                       decoration: InputDecoration(
                         hintText: sessionActive
                             ? 'Voice session on — speak or type…'

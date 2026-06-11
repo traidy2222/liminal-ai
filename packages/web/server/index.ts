@@ -19,6 +19,11 @@ import {
 import { injectWebAuthIntoHtml } from "./serve_client_html.js";
 import { readChatMetadata } from "@liminal/core";
 import { attachWebPtyUpgrade, createWebPtyContext, registerPtyRoutes } from "./pty_http.js";
+import {
+  attachBrowserStreamUpgrade,
+  createWebBrowserContext,
+  registerBrowserRoutes,
+} from "./browser_http.js";
 import { createWebEnsureTerminal } from "./pty_terminal.js";
 import {
   setPtyShellPort,
@@ -87,6 +92,7 @@ const sse = new SSEManager();
 // creates a default scratch chat), and lazy-constructs subsequent bridges
 // on activate. Runtime prefs are loaded inside boot() from the user-global
 // path (Phase 1 storage split).
+const browserCtx = createWebBrowserContext(localAuth.token);
 const ptyCtx = createWebPtyContext(localAuth.token, async (chatId) => {
   const meta = await readChatMetadata(chatId);
   if (!meta) throw new Error(`Unknown chat ${chatId}`);
@@ -97,7 +103,6 @@ setPtyShellPort(createWebPtyShellPort(ptyCtx));
 setTerminalViewPublisher((payload) => {
   sse.send("terminal_view", payload, payload.chatId);
 });
-
 const chatManager = new ChatManager(sse);
 const bootedChat = await chatManager.boot();
 console.log(
@@ -113,6 +118,9 @@ app.use((req, res, next) => {
 
 const router = createRouter(chatManager, sse, localAuth);
 registerPtyRoutes(router, ptyCtx, (req, res, next) => {
+  localAuth.requireAuth(req, res, next);
+});
+registerBrowserRoutes(router, browserCtx, (req, res, next) => {
   localAuth.requireAuth(req, res, next);
 });
 app.use(router);
@@ -202,6 +210,7 @@ if (existsSync(clientIndexHtml)) {
 const bindHost = resolveWebBindHost();
 const server = createServer(app);
 attachWebPtyUpgrade(server, ptyCtx);
+attachBrowserStreamUpgrade(server, browserCtx);
 
 server.once("error", (err: unknown) => {
   const e = err as NodeJS.ErrnoException;

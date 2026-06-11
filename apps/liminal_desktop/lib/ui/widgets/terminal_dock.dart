@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:webview_flutter/webview_flutter.dart';
 
 import '../../models/terminal_panel_state.dart';
+import 'desktop_webview_host.dart';
 import 'desktop_webview_lifecycle.dart';
 import '../layout/liminal_spacing.dart';
 import '../theme/liminal_theme_extension.dart';
@@ -249,7 +250,7 @@ class _TerminalDockState extends State<TerminalDock> {
                               ),
                             ),
                           )
-                        : WebViewWidget(
+                        : DesktopWebViewHost(
                             key: ValueKey(active.sessionId),
                             controller: _controller!,
                           ),

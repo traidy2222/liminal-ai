@@ -314,7 +314,11 @@ export class SessionBridge {
   /** Start a turn, pinned to this chat's workspace so file/git/repo tools resolve correctly. */
   async sendUserMessage(
     message: string,
-    opts?: { freshContext?: boolean; liveDictation?: boolean }
+    opts?: {
+      freshContext?: boolean;
+      liveDictation?: boolean;
+      imageAttachments?: import("@liminal/core").ImageAttachment[];
+    }
   ): Promise<void> {
     if (this.awaitingPersonaBootstrapInput) {
       throw new Error("Complete persona setup before chatting.");
@@ -323,6 +327,7 @@ export class SessionBridge {
       const run = this.harness.send(message, {
         freshContext: opts?.freshContext,
         liveDictation: opts?.liveDictation,
+        imageAttachments: opts?.imageAttachments,
       });
       this.startHeartbeat();
       await run;

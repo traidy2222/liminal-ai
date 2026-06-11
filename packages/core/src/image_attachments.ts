@@ -1,3 +1,6 @@
+import type { ChatCompletionContentPart } from "openai/resources/chat/completions.js";
+import { buildNativeVisionUserContent, modelSupportsNativeVision } from "./native_vision.js";
+
 export type ImageAttachmentSource = "clipboard" | "drop" | "path" | "command";
 
 export interface ImageAttachment {
@@ -104,6 +107,21 @@ export function validateImageAttachments(
     }
   }
   return { ok: true };
+}
+
+export type UserTurnContent = string | ChatCompletionContentPart[];
+
+/** Plain text or native multimodal parts when the main model supports image input. */
+export async function resolveUserTurnWithAttachments(
+  message: string,
+  attachments: ImageAttachment[],
+  modelSlug: string
+): Promise<UserTurnContent> {
+  if (attachments.length === 0) return message.trim();
+  if (modelSupportsNativeVision(modelSlug)) {
+    return buildNativeVisionUserContent(message, attachments);
+  }
+  return buildMessageWithImageAttachments(message, attachments);
 }
 
 export function buildMessageWithImageAttachments(message: string, attachments: ImageAttachment[]): string {

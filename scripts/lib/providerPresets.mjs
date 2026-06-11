@@ -30,6 +30,15 @@ export const PROVIDER_PRESETS = [
     hint: "Main: openrouter/free. Fast: nvidia/nemotron-3-ultra-550b-a55b:free.",
   },
   {
+    id: "nex-n2-pro-free",
+    label: "Nex AGI — Nex N2 Pro (free, native vision)",
+    baseURL: "https://openrouter.ai/api/v1",
+    model: "nex-agi/nex-n2-pro:free",
+    apiKey: "",
+    needsKey: true,
+    hint: "Free MoE agent model with text+image input on the main API (262K ctx).",
+  },
+  {
     id: "openrouter-owl-stealth",
     label: "OpenRouter Stealth — Owl Alpha (Hermes)",
     baseURL: "https://openrouter.ai/api/v1",

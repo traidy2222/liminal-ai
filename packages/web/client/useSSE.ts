@@ -2001,6 +2001,17 @@ export function useSSE(options?: {
         }
       });
 
+      es.addEventListener("browser_view", (e: MessageEvent) => {
+        trackId(e);
+        const payload = parseEventData(e) as Record<string, unknown> | undefined;
+        if (!payload) return;
+        try {
+          window.dispatchEvent(new CustomEvent("liminal:browser_view", { detail: payload }));
+        } catch {
+          /* ignore */
+        }
+      });
+
       es.addEventListener("pty_exit", (e: MessageEvent) => {
         trackId(e);
         const payload = parseEventData(e) as Record<string, unknown> | undefined;

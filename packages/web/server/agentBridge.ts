@@ -419,6 +419,9 @@ export class AgentBridge {
     on("heartbeat_started", (p) => this.maybeSend("heartbeat_started", p));
     on("heartbeat_completed", (p) => this.maybeSend("heartbeat_completed", p));
     on("heartbeat_skipped", (p) => this.maybeSend("heartbeat_skipped", p));
+    on("browser_view", (p) =>
+      this.maybeSend("browser_view", { ...p, chatId: this.chatId })
+    );
 
     on("tool_approval", (payload) => {
       const nonce = randomBytes(16).toString("hex");
@@ -502,7 +505,11 @@ export class AgentBridge {
 
   async sendUserMessage(
     message: string,
-    opts?: { freshContext?: boolean; liveDictation?: boolean }
+    opts?: {
+      freshContext?: boolean;
+      liveDictation?: boolean;
+      imageAttachments?: import("@liminal/core").ImageAttachment[];
+    }
   ): Promise<void> {
     if (this.awaitingPersonaBootstrapInput) {
       throw new Error("Persona bootstrap is pending. Submit via /api/persona/bootstrap.");
@@ -513,6 +520,7 @@ export class AgentBridge {
       const run = this.harness.send(message, {
         freshContext: opts?.freshContext,
         liveDictation: opts?.liveDictation,
+        imageAttachments: opts?.imageAttachments,
       });
       this.startHeartbeat();
       await run;

@@ -12,12 +12,14 @@
     "build": "node -e \"require('node:fs').rmSync('dist',{recursive:true,force:true})\" && tsc -p tsconfig.json && node scripts/stage-terminal-vendor.mjs",
     "typecheck": "tsc --noEmit",
     "start": "node --import tsx/esm src/index.ts",
-    "test": "tsx --test src/event_mapper.test.ts src/handshake.test.ts src/ws_server.test.ts src/audio_http.test.ts src/browser_preview_handler.test.ts src/app_proxy_handler.test.ts src/worker_handoff.test.ts src/pty_manager.test.ts src/terminal_embed_handler.test.ts"
+    "test": "tsx --test src/event_mapper.test.ts src/handshake.test.ts src/ws_server.test.ts src/audio_http.test.ts src/browser_preview_handler.test.ts src/browser_stream_handler.test.ts src/app_proxy_handler.test.ts src/worker_handoff.test.ts src/pty_manager.test.ts src/terminal_embed_handler.test.ts"
   },
   "exports": {
     ".": "./dist/index.js",
     "./pty": "./dist/pty_manager.js",
-    "./pty-stream": "./dist/pty_stream_handler.js"
+    "./pty-stream": "./dist/pty_stream_handler.js",
+    "./browser-stream": "./dist/browser_stream_handler.js",
+    "./browser-sync": "./dist/browser_sync_handler.js"
   },
   "dependencies": {
     "@liminal/core": "*",

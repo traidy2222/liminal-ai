@@ -99,6 +99,12 @@ ChatTranscriptState reduceChatEvent(
           updatedAt: view.updatedAt > 0
               ? view.updatedAt
               : (prev?.updatedAt ?? DateTime.now().millisecondsSinceEpoch),
+          viewportWidth: view.viewportWidth > 0 ? view.viewportWidth : (prev?.viewportWidth ?? 1280),
+          viewportHeight: view.viewportHeight > 0 ? view.viewportHeight : (prev?.viewportHeight ?? 800),
+          liveStream: view.liveStream || (prev?.liveStream ?? false),
+          embedMode: view.embedMode != 'webview'
+              ? view.embedMode
+              : (prev?.embedMode ?? 'webview'),
         ),
       );
     }

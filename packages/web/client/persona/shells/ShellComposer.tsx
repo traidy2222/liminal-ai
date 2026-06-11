@@ -6,6 +6,7 @@ import type { ShellContract } from "../ShellContract.js";
 import { buildInputAreaStyle, buildInputDockStyle } from "../shellLayout.js";
 import { LIM } from "../personaVars.js";
 import { TerminalDock } from "../../terminal/TerminalDock.js";
+import { BrowserDock } from "../../browser/BrowserDock.js";
 
 export type ShellComposerVariant = "hud" | "terminal" | "studio" | "minimal";
 
@@ -596,6 +597,7 @@ export function ShellComposer({
             {formInner}
           </form>
         </div>
+        <BrowserDock />
         <TerminalDock />
       </div>
     );
@@ -612,6 +614,7 @@ export function ShellComposer({
       >
         {formInner}
       </form>
+      <BrowserDock />
       <TerminalDock />
     </>
   );

@@ -210,6 +210,8 @@ export async function saveProviderCredentials(
       applyApiKeyToProcess(savedKey, keyEnvVar);
       if (keyEnvVar === "OPENROUTER_API_KEY") {
         applyApiKeyToProcess(savedKey, "AGENT_API_KEY");
+      } else if (keyEnvVar === "KIMCHI_API_KEY" || keyEnvVar === "CASTAI_API_KEY") {
+        delete process.env["AGENT_API_KEY"];
       }
     }
   }

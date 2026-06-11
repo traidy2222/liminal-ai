@@ -29,6 +29,11 @@ import { SafetyJudge } from "./safety_judge.js";
 import { StreamAccumulator, type ProcessedStreamChunk } from "./streaming.js";
 import { scrubMessagesSpecialTokens } from "./provider_token_scrub.js";
 import {
+  resolveUserTurnWithAttachments,
+  type ImageAttachment,
+} from "./image_attachments.js";
+import { modelSupportsNativeVision } from "./native_vision.js";
+import {
   isStreamTransportRetryable,
   resolveStreamChunkTimeoutMs,
 } from "./stream_chunk_timeout.js";
@@ -89,7 +94,10 @@ import { readYieldSnapshot, writeYieldSnapshot } from "./session_event_log.js";
 import {
   buildResumeMissionBlock,
   evaluateMissionContinue,
+  abandonInProgressTasks,
   loadLatestInProgressTask,
+  shouldInjectResumeMission,
+  userDeclinedMissionResume,
 } from "./mission_controller.js";
 import { SharedMemoryBus } from "./shared_memory_bus.js";
 import { DEFAULT_AGENT_MODEL_SLUG } from "./harness_default_constants.js";
@@ -126,7 +134,11 @@ import {
   isManagedInferenceAuthError,
   resolveProviderConfigWithInference,
 } from "./inference_provider.js";
-import { ensureLocalProviderApiKeyInProcess } from "./provider_api_key.js";
+import {
+  ensureLocalProviderApiKeyInProcess,
+  syncProviderProcessEnvForBase,
+} from "./provider_api_key.js";
+import { isOpenRouterApiBaseUrl } from "./openrouter_session.js";
 import {
   buildManagedFreeFallbackHarnessEnv,
   managedFreeFallbackEnabled,
@@ -1795,28 +1807,37 @@ export class AgentHarness {
   }
 
   private rebuildClient(): void {
-    if (!this.config.openRouterApiKey?.trim()) {
+    const baseURL = this.config.baseURL ?? "";
+    if (!isManagedInferenceBaseUrl(baseURL)) {
       try {
+        syncProviderProcessEnvForBase(baseURL);
         const cfg = resolveProviderConfig({
           baseURL: this.config.baseURL,
           model: this.config.model,
+          keySource: this.runtimePreferences?.provider?.keySource,
         });
         this.config.openRouterApiKey = cfg.apiKey;
+        this.config.baseURL = cfg.baseURL;
+        this.config.model = cfg.model;
       } catch {
         /* resolveProviderConfig throws when no key — handled below */
       }
     }
     const apiKey = this.config.openRouterApiKey?.trim();
-    if (!apiKey && !isManagedInferenceBaseUrl(this.config.baseURL ?? "")) {
+    if (!apiKey && !isManagedInferenceBaseUrl(baseURL)) {
       throw new Error(
-        "Provider API key missing — set AGENT_API_KEY in .env or save your key in Settings."
+        isKimchiApiBaseUrl(baseURL)
+          ? "Kimchi API key missing — set KIMCHI_API_KEY (castai_v1_…) in Settings or .env."
+          : "Provider API key missing — set AGENT_API_KEY in .env or save your key in Settings."
       );
     }
     this.client = new OpenAI({
       apiKey: apiKey ?? "",
       baseURL: this.config.baseURL,
       maxRetries: 0,
-      defaultHeaders: buildOpenRouterAttributionHeaders(),
+      defaultHeaders: isOpenRouterApiBaseUrl(baseURL)
+        ? buildOpenRouterAttributionHeaders()
+        : {},
     });
   }
 
@@ -2396,6 +2417,8 @@ export class AgentHarness {
       sessionGreeting?: boolean;
       personaBootstrapPrompt?: boolean;
       liveDictation?: boolean;
+      /** When set with a native-vision main model, images route as multimodal user content. */
+      imageAttachments?: ImageAttachment[];
     }
   ): Promise<void> {
     // Wrap the entire send in an AsyncLocalStorage scope so every file tool,
@@ -2419,6 +2442,7 @@ export class AgentHarness {
       sessionGreeting?: boolean;
       personaBootstrapPrompt?: boolean;
       liveDictation?: boolean;
+      imageAttachments?: ImageAttachment[];
     }
   ): Promise<void> {
     if (this.running) throw new Error("Agent is already processing a message");
@@ -2481,6 +2505,19 @@ export class AgentHarness {
       ? buildPersonaBootstrapUserPrompt(this.getCurrentPersona())
       : userMessage;
     const openingTurn = sessionGreeting || personaBootstrapPrompt;
+    const imageAttachments = options?.imageAttachments ?? [];
+    const userTurnContent =
+      !openingTurn && imageAttachments.length > 0
+        ? await resolveUserTurnWithAttachments(
+            conversationUserContent,
+            imageAttachments,
+            this.config.model
+          )
+        : conversationUserContent;
+    const nativeVisionTurn =
+      !openingTurn &&
+      imageAttachments.length > 0 &&
+      modelSupportsNativeVision(this.config.model);
 
     // Reset per-turn tracking state
     this.toolErrorCounts = new Map();
@@ -2731,14 +2768,29 @@ export class AgentHarness {
     }
     if (!openingTurn && this.agentDepth === 0 && !this.resumeMissionInjectedThisSend) {
       try {
-        const task = await loadLatestInProgressTask();
-        if (task) {
-          const yieldSnap = await readYieldSnapshot(this.taskId);
-          this.context.appendMessage({
-            role: "system",
-            content: buildResumeMissionBlock(task, yieldSnap),
-          });
+        if (userDeclinedMissionResume(userMessage)) {
+          const cleared = await abandonInProgressTasks();
+          if (cleared.length > 0) {
+            this.context.appendMessage({
+              role: "system",
+              content:
+                `[MISSION CLEARED] User abandoned prior checkpoint(s): ${cleared.map((id) => `task:${id}`).join(", ")}. ` +
+                "Do not resume that work unless they explicitly ask. Follow the user's latest message only.",
+            });
+          }
           this.resumeMissionInjectedThisSend = true;
+        } else if (
+          shouldInjectResumeMission(userMessage, this.turnInference?.intent ?? null)
+        ) {
+          const task = await loadLatestInProgressTask();
+          if (task) {
+            const yieldSnap = await readYieldSnapshot(this.taskId);
+            this.context.appendMessage({
+              role: "system",
+              content: buildResumeMissionBlock(task, yieldSnap),
+            });
+            this.resumeMissionInjectedThisSend = true;
+          }
         }
       } catch {
         /* non-fatal */
@@ -3067,14 +3119,15 @@ export class AgentHarness {
         }
       }
 
-      this.context.append({ role: "user", content: conversationUserContent });
+      this.context.append({ role: "user", content: userTurnContent });
 
-      // Lazy mode: image attachments are text (data_url in ```attached_images```), not native
-      // multimodal input—expose vision_analyze/upload_image before the first model round.
+      // Lazy mode: text-only image attachments need vision_analyze; native-vision models get pixels on the main API.
       if (
         !openingTurn &&
+        !nativeVisionTurn &&
         this.registry.isLazyToolLoading() &&
-        /\`\`\`attached_images\b/.test(conversationUserContent)
+        (/\`\`\`attached_images\b/.test(conversationUserContent) ||
+          imageAttachments.length > 0)
       ) {
         const visionToolNames = (["vision_analyze", "upload_image"] as const).filter((n) =>
           this.registry.has(n)

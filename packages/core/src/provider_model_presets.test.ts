@@ -106,6 +106,21 @@ test("resolveProviderPresetId matches nemotron-3-ultra pack", () => {
   );
 });
 
+test("nex-n2-pro-free preset enables native vision and aligns vision model", () => {
+  const pack = PROVIDER_MODEL_PRESETS.find((p) => p.id === "nex-n2-pro-free")!;
+  assert.equal(pack.model, OPENROUTER_MODEL_SLUG.NEX_N2_PRO_FREE);
+  assert.equal(pack.harnessEnvPatch.AGENT_MODEL, OPENROUTER_MODEL_SLUG.NEX_N2_PRO_FREE);
+  assert.equal(pack.harnessEnvPatch.AGENT_NATIVE_VISION_SLUGS, OPENROUTER_MODEL_SLUG.NEX_N2_PRO_FREE);
+  assert.equal(pack.harnessEnvPatch.AGENT_VISION_MODEL, OPENROUTER_MODEL_SLUG.NEX_N2_PRO_FREE);
+});
+
+test("resolveProviderPresetId matches nex-n2-pro-free pack", () => {
+  assert.equal(
+    resolveProviderPresetId(OPENROUTER_MODEL_SLUG.NEX_N2_PRO_FREE, "https://openrouter.ai/api/v1"),
+    "nex-n2-pro-free"
+  );
+});
+
 test("owl stealth preset pins Stealth provider and owl-alpha slug", () => {
   const owl = PROVIDER_MODEL_PRESETS.find((p) => p.id === "openrouter-owl-stealth")!;
   assert.equal(owl.model, OPENROUTER_MODEL_SLUG.OWL_ALPHA);

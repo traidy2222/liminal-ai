@@ -8,6 +8,7 @@ import {
   ensureProviderApiKeysInProcess,
   isCastAiApiKey,
   providerApiKeyEnvFileCandidates,
+  syncProviderProcessEnvForBase,
 } from "./provider_api_key.js";
 import { isProviderApiKeyConfigured, resolveProviderConfig } from "./provider_config.js";
 import { KIMCHI_API_BASE_URL } from "./kimchi_provider.js";
@@ -71,6 +72,18 @@ test("openrouter base ignores castai AGENT_API_KEY and uses OPENROUTER_API_KEY",
     const cfg = resolveProviderConfig({ baseURL: "https://openrouter.ai/api/v1" });
     assert.equal(cfg.apiKey, "sk-or-v1-openrouter-live");
     assert.equal(cfg.keySource, "OPENROUTER_API_KEY");
+    assert.equal(process.env["AGENT_API_KEY"], undefined);
+  } finally {
+    restoreEnv(prev);
+  }
+});
+
+test("syncProviderProcessEnvForBase clears stale OpenRouter AGENT_API_KEY on Kimchi", () => {
+  const prev = saveEnv(["KIMCHI_API_KEY", "AGENT_API_KEY"]);
+  try {
+    process.env["AGENT_API_KEY"] = "sk-or-v1-openrouter";
+    delete process.env["KIMCHI_API_KEY"];
+    syncProviderProcessEnvForBase(KIMCHI_API_BASE_URL);
     assert.equal(process.env["AGENT_API_KEY"], undefined);
   } finally {
     restoreEnv(prev);

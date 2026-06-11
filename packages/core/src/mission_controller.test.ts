@@ -1,8 +1,15 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
+import { tmpdir } from "node:os";
 import {
+  abandonInProgressTasks,
+  loadLatestInProgressTask,
   resolveMissionAutonomyConfig,
   evaluateMissionContinue,
+  shouldInjectResumeMission,
+  userDeclinedMissionResume,
 } from "./mission_controller.js";
 import { parseRecalledNoteBlocks } from "./memory_rank.js";
 import { detectContradictions } from "./memory_rank.js";
@@ -21,6 +28,57 @@ test("resolveMissionAutonomyConfig: mission off by default; no YOLO requirement 
     else process.env.AGENT_MISSION_AUTONOMY = prevAuto;
     if (prevYolo === undefined) delete process.env.AGENT_MISSION_REQUIRES_YOLO;
     else process.env.AGENT_MISSION_REQUIRES_YOLO = prevYolo;
+  }
+});
+
+test("userDeclinedMissionResume detects abandonment phrasing", () => {
+  assert.equal(userDeclinedMissionResume("we abandoned the KB research task"), true);
+  assert.equal(userDeclinedMissionResume("we abondoned it"), true);
+  assert.equal(userDeclinedMissionResume("don't continue that"), true);
+  assert.equal(userDeclinedMissionResume("hEY!"), false);
+});
+
+test("shouldInjectResumeMission skips conversational turns", () => {
+  assert.equal(shouldInjectResumeMission("hEY!", "conversational"), false);
+  assert.equal(shouldInjectResumeMission("fix the auth bug", "coding"), true);
+  assert.equal(
+    shouldInjectResumeMission("please resume the KB research task", "conversational"),
+    true
+  );
+  assert.equal(shouldInjectResumeMission("we abandoned that task", "coding"), false);
+});
+
+test("abandonInProgressTasks clears checkpoint on disk", async () => {
+  const prevRoot = process.env.AGENT_GLOBAL_STORAGE_ROOT;
+  const dir = mkdtempSync(join(tmpdir(), "liminal-mission-"));
+  process.env.AGENT_GLOBAL_STORAGE_ROOT = dir;
+  const notesPath = join(dir, "notes.json");
+  writeFileSync(
+    notesPath,
+    JSON.stringify({
+      "task:kb-research": JSON.stringify({
+        id: "kb-research",
+        goal: "KB research",
+        progress_summary: "half done",
+        next_steps: ["write guide"],
+        status: "in_progress",
+        updatedAt: "2026-06-10T00:00:00.000Z",
+      }),
+    }),
+    "utf8"
+  );
+  try {
+    assert.ok(await loadLatestInProgressTask());
+    const cleared = await abandonInProgressTasks();
+    assert.deepEqual(cleared, ["kb-research"]);
+    assert.equal(await loadLatestInProgressTask(), null);
+    const raw = JSON.parse(readFileSync(notesPath, "utf8")) as Record<string, string>;
+    const body = JSON.parse(raw["task:kb-research"]!) as { status: string };
+    assert.equal(body.status, "abandoned");
+  } finally {
+    if (prevRoot === undefined) delete process.env.AGENT_GLOBAL_STORAGE_ROOT;
+    else process.env.AGENT_GLOBAL_STORAGE_ROOT = prevRoot;
+    rmSync(dir, { recursive: true, force: true });
   }
 });
 

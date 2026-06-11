@@ -58,6 +58,8 @@ export const OPENROUTER_MODEL_SLUG = {
   FREE_ROUTER: "openrouter/free",
   /** NVIDIA Nemotron 3 Ultra on OpenRouter's free tier (1M ctx; NVIDIA logs sessions per their ToS). */
   NEMOTRON_3_ULTRA_FREE: "nvidia/nemotron-3-ultra-550b-a55b:free",
+  /** Nex AGI Nex-N2-Pro MoE — text + image input, 262K ctx, free on OpenRouter (Jun 2026). */
+  NEX_N2_PRO_FREE: "nex-agi/nex-n2-pro:free",
 } as const;
 
 /** Shown on NVIDIA free-model presets — matches OpenRouter model card disclaimer. */
@@ -163,6 +165,17 @@ function owlStealthPinPatch(): Record<string, string> {
   });
 }
 
+/** Pack for models that accept image_url on the main chat API (native vision). */
+function nativeVisionModelPatch(main: string, fast?: string): Record<string, string> {
+  const fastModel = (fast ?? main).trim();
+  return {
+    ...openRouterAutoRoutePatch(main, fastModel),
+    AGENT_NATIVE_VISION_SLUGS: main,
+    AGENT_VISION_MODEL: main,
+    AGENT_VISION_BASE_URL: DEFAULT_AGENT_API_BASE_URL,
+  };
+}
+
 /** Same-vendor or cross-vendor pack with OpenRouter auto routing + fallbacks. */
 function openRouterAutoRoutePatch(main: string, fast: string): Record<string, string> {
   return buildHarnessModelPackEnvPatch({
@@ -242,6 +255,36 @@ export const PROVIDER_MODEL_PRESETS: readonly ProviderModelPreset[] = [
       OPENROUTER_MODEL_SLUG.FREE_ROUTER,
       OPENROUTER_MODEL_SLUG.NEMOTRON_3_ULTRA_FREE
     )
+  ),
+  preset(
+    "nex-n2-pro-free",
+    "Nex N2 Pro (free) — native vision",
+    "Nex AGI Nex-N2-Pro on OpenRouter — 17B active / 397B MoE (Qwen3.5), 262K ctx, free. " +
+      "Accepts text and image input on the main model (no vision_analyze hop for attachments). " +
+      "Agentic coding, tool use, and long-horizon workflows.",
+    OPENROUTER_MODEL_SLUG.NEX_N2_PRO_FREE,
+    nativeVisionModelPatch(OPENROUTER_MODEL_SLUG.NEX_N2_PRO_FREE)
+  ),
+  preset(
+    "mix-nex-n2-pro-deepseek-flash",
+    "Mix — Nex N2 Pro (free) + DeepSeek Flash",
+    "Multimodal Nex N2 Pro main ReAct loop (native image input) + DeepSeek v4-flash sidecars.",
+    OPENROUTER_MODEL_SLUG.NEX_N2_PRO_FREE,
+    {
+      ...buildHarnessModelPackEnvPatch({
+        main: OPENROUTER_MODEL_SLUG.NEX_N2_PRO_FREE,
+        fast: OPENROUTER_MODEL_SLUG.DEEPSEEK_V4_FLASH,
+        baseURL: DEFAULT_AGENT_API_BASE_URL,
+        providerStrategy: "price",
+        providerOrder: "",
+        providerOrderFast: "",
+        providerRouteAuto: "1",
+        allowFallbacks: "1",
+      }),
+      AGENT_NATIVE_VISION_SLUGS: OPENROUTER_MODEL_SLUG.NEX_N2_PRO_FREE,
+      AGENT_VISION_MODEL: OPENROUTER_MODEL_SLUG.NEX_N2_PRO_FREE,
+      AGENT_VISION_BASE_URL: DEFAULT_AGENT_API_BASE_URL,
+    }
   ),
   preset(
     "openrouter-owl-stealth",

@@ -559,6 +559,11 @@ export interface AgentEventMap {
     imagePath?: string;
     open: boolean;
     updatedAt: number;
+    viewportWidth?: number;
+    viewportHeight?: number;
+    liveStream?: boolean;
+    embedMode?: "webview" | "screencast";
+    chatId?: string;
   };
   /** Live terminal panel for embedded shells (desktop/web) — PTY session opened by agent or user. */
   terminal_view: {

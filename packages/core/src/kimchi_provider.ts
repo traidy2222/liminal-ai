@@ -115,6 +115,12 @@ export function formatKimchiProviderError(
   err: unknown,
   opts?: { retriesExhausted?: boolean }
 ): string | null {
+  if (err instanceof OpenAI.APIError && err.status === 401) {
+    return (
+      "Cast AI (Kimchi) HTTP 401 Unauthorized. Set KIMCHI_API_KEY (castai_v1_…) in Settings — " +
+      "an OpenRouter key cannot authenticate to llm.cast.ai. Create keys in the Cast AI console."
+    );
+  }
   if (!(err instanceof OpenAI.APIError) || err.status !== 400) return null;
   if (!isKimchiRetryableProviderError(err) && !isOpaqueInferenceProviderError(err)) return null;
   if (opts?.retriesExhausted) {

@@ -22,6 +22,19 @@ class AssetUrlResolver extends ChangeNotifier {
     notifyListeners();
   }
 
+  int? get sidecarPort => _port;
+  String? get sidecarToken => _token;
+
+  String? resolveBrowserStream(String sessionId) {
+    if (sessionId.trim().isEmpty) return null;
+    final port = _port;
+    final token = _token;
+    if (port == null || token == null) return null;
+    return 'ws://127.0.0.1:$port/browser/stream'
+        '?token=${Uri.encodeComponent(token)}'
+        '&sessionId=${Uri.encodeComponent(sessionId)}';
+  }
+
   String? resolveBrowserPreview(String sessionId, int updatedAt) {
     if (sessionId.trim().isEmpty) return null;
     final port = _port;

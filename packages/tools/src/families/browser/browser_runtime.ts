@@ -9,6 +9,10 @@ import { randomUUID } from "node:crypto";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { effectiveHarnessEnvRaw, resolveWorkspaceRoot } from "@liminal/core";
 import type { Page, Browser, BrowserContext } from "playwright";
+import {
+  startBrowserScreencast,
+  stopBrowserScreencastForSession,
+} from "./browser_screencast.js";
 
 export type WaitUntilNav = "domcontentloaded" | "load" | "networkidle";
 
@@ -86,13 +90,59 @@ export type BrowserViewPayload = {
   imagePath?: string;
   open: boolean;
   updatedAt: number;
+  viewportWidth?: number;
+  viewportHeight?: number;
+  /** CDP screencast WebSocket is available for this session. */
+  liveStream?: boolean;
+  /** `webview` = native embed (desktop); `screencast` = JPEG stream (web fallback). */
+  embedMode?: "webview" | "screencast";
 };
 
-let browserViewPublisher: ((payload: BrowserViewPayload) => void) | null = null;
+/** Minimal session handle for stream handlers (sidecar / web). */
+export type BrowserSessionHandle = {
+  sessionId: string;
+  currentUrl: string;
+  page: Page;
+};
+
+export function getBrowserSession(sessionId: string): BrowserSessionHandle | undefined {
+  const s = sessions.get(sessionId);
+  if (!s) return undefined;
+  return { sessionId: s.sessionId, currentUrl: s.currentUrl, page: s.page };
+}
+
+export function syncBrowserSessionUrl(sessionId: string): void {
+  const s = sessions.get(sessionId);
+  if (s) s.currentUrl = s.page.url();
+}
+
+export function applyScreencastFrame(sessionId: string, buf: Buffer): void {
+  if (buf.length > 64) panelFrames.set(sessionId, buf);
+}
+
+export async function refreshBrowserEmbedView(sessionId: string): Promise<void> {
+  const session = sessions.get(sessionId);
+  if (!session) return;
+  await publishBrowserView(session, true);
+}
+
+const browserViewPublishers = new Map<string, (payload: BrowserViewPayload) => void>();
 
 /** Sidecar/desktop UI subscribes via harness emitter to drive an embedded browser panel. */
-export function setBrowserViewPublisher(fn: ((payload: BrowserViewPayload) => void) | null): void {
-  browserViewPublisher = fn;
+export function setBrowserViewPublisher(
+  fn: ((payload: BrowserViewPayload) => void) | null,
+  taskId?: string
+): void {
+  const key = taskId?.trim() || "__default__";
+  if (fn) browserViewPublishers.set(key, fn);
+  else browserViewPublishers.delete(key);
+}
+
+export function setBrowserViewPublisherForTask(
+  taskId: string,
+  fn: ((payload: BrowserViewPayload) => void) | null
+): void {
+  setBrowserViewPublisher(fn, taskId);
 }
 
 function browserEmbedEnabled(): boolean {
@@ -168,27 +218,46 @@ async function publishBrowserView(session: BrowserSession, open: boolean): Promi
       }
     }
   }
-  if (!browserViewPublisher) return;
-  browserViewPublisher({
+  const vp = session.page.viewportSize();
+  const viewportWidth = vp?.width ?? 1280;
+  const viewportHeight = vp?.height ?? 800;
+  if (open && effectiveHarnessEnvRaw("AGENT_BROWSER_EMBED_MODE") === "screencast") {
+    void startBrowserScreencast(session.sessionId).catch(() => undefined);
+  }
+  const publisher =
+    browserViewPublishers.get(session.ownerTaskId) ??
+    browserViewPublishers.get("__default__");
+  if (!publisher) return;
+  publisher({
     sessionId: session.sessionId,
     url: session.currentUrl,
     title,
     imagePath,
     open,
     updatedAt: Date.now(),
+    viewportWidth,
+    viewportHeight,
+    liveStream: open && effectiveHarnessEnvRaw("AGENT_BROWSER_EMBED_MODE") === "screencast",
+    embedMode:
+      effectiveHarnessEnvRaw("AGENT_BROWSER_EMBED_MODE") === "screencast"
+        ? "screencast"
+        : "webview",
   });
 }
 
 function publishBrowserViewClosed(sessionId: string): void {
+  void stopBrowserScreencastForSession(sessionId);
   panelFrames.delete(sessionId);
   panelFramePaths.delete(sessionId);
-  if (!browserViewPublisher || !browserEmbedEnabled()) return;
-  browserViewPublisher({
-    sessionId,
-    url: "",
-    open: false,
-    updatedAt: Date.now(),
-  });
+  if (!browserEmbedEnabled()) return;
+  for (const publisher of browserViewPublishers.values()) {
+    publisher({
+      sessionId,
+      url: "",
+      open: false,
+      updatedAt: Date.now(),
+    });
+  }
 }
 
 type StaticServerRecord = { server: Server; ownerTaskId: string; rootDir: string };
@@ -986,6 +1055,7 @@ export async function snapshotBrowserSession(
     const captcha = await detectCaptchaSignals(session.page);
     const captchaHint = captcha ? formatCaptchaHint(captcha) : "";
     const diag = includeConsole ? formatDiagnosticsOutput(session.diagnostics) : "";
+    await publishBrowserView(session, true);
     return {
       ok: true,
       output: `SESSION_ID: ${sessionId}\nURL: ${session.currentUrl}\nTITLE: ${title}\n${snapshotText}${captchaHint}${diag}`,
@@ -1041,6 +1111,35 @@ export async function navigateBrowserSession(options: {
         output:
           `SESSION_ID: ${options.sessionId}\nURL: ${session.currentUrl}\nTITLE: ${title}\nBODY_EXCERPT:\n${body}\n${snapshotText}${shotLine}${diag}`,
       };
+    });
+  } catch (err) {
+    return { ok: false, error: playwrightInstallHint(err instanceof Error ? err.message : String(err)) };
+  }
+}
+
+/** User-driven navigation from the native WebView embed (keeps Playwright in sync). */
+export async function userNavigateBrowserSession(options: {
+  sessionId: string;
+  href: string;
+}): Promise<{ ok: true; url: string } | { ok: false; error: string }> {
+  const session = sessions.get(options.sessionId);
+  if (!session) return { ok: false, error: `Unknown session_id: ${options.sessionId}` };
+  const resolved = resolveBrowseHref(options.href);
+  if (!resolved.ok) return { ok: false, error: resolved.error };
+  touchSession(session);
+  const current = session.page.url();
+  if (resolved.href === current) return { ok: true, url: current };
+  try {
+    return await withBrowserWall(async () => {
+      const navTimeoutMs = parseHarnessMs("AGENT_BROWSER_NAV_TIMEOUT_MS", 45_000, 120_000);
+      await session.page.goto(resolved.href, {
+        waitUntil: "domcontentloaded",
+        timeout: navTimeoutMs,
+      });
+      session.currentUrl = session.page.url();
+      const { refs } = await buildPageSnapshot(session.page);
+      session.refs = refs;
+      return { ok: true, url: session.currentUrl };
     });
   } catch (err) {
     return { ok: false, error: playwrightInstallHint(err instanceof Error ? err.message : String(err)) };
