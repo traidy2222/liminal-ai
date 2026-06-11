@@ -1108,11 +1108,11 @@ export {
   listXeroOAuthAccounts,
   fetchXeroConnections,
   resolveXeroTenantId,
-  scopesForXeroMode,
-  resolveXeroScopeStyle,
   XERO_DEFAULT_MODE,
 } from "./xero_oauth_broker.js";
 export {
+  scopesForXeroMode,
+  resolveXeroScopeStyle,
   xeroBundleMissingCoreScopes,
   xeroBundleMissingFullScopes,
   xeroBundleMissingScopes,
@@ -1121,6 +1121,8 @@ export {
   probeXeroAuthorizeScopes,
   xeroRequiredScopesForCall,
   formatXeroReconnectHint,
+  XERO_CONNECT_SCOPES,
+  XERO_FULL_TIER_SCOPES,
   XERO_FULL_ACCOUNTING_SCOPES,
   XERO_FULL_SCOPES,
   XERO_PHASE3_READ_SCOPES,
