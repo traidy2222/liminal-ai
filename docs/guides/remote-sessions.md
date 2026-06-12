@@ -68,5 +68,5 @@ When using `npm run web` without desktop, remote guests attach to the web server
 ## Limitations
 
 - **TUI** does not host remote sessions.
-- **Cloud relay** is a frame forwarder (not full duplex WS on all hosts); prefer LAN for lowest latency.
+- **Cloud relay** uses HTTP polling on Vireon (not browser SSE) and requires **Upstash Redis** (`UPSTASH_REDIS_REST_URL` + `UPSTASH_REDIS_REST_TOKEN`) on the website so serverless instances share session state. Prefer **LAN** for lowest latency.
 - Re-run `/remote` after sidecar restart (tokens are in-memory only).
