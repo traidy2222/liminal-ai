@@ -1987,6 +1987,14 @@ const _META_RAW: Record<string, HarnessSettingsFieldMeta> = {
       "Register search_console_rest_* tools: list sites, search analytics queries, URL inspection, sitemap list/submit/delete. OAuth scope webmasters.readonly / webmasters. Enable searchconsole.googleapis.com in Cloud Console.",
     valueKind: "boolean",
   },
+  "AGENT_WORKSPACE_BOUND": {
+    tabId: "harness",
+    subgroupId: "harness_misc",
+    label: "Restrict file tools to workspace root",
+    description:
+      "When on, read_file/grep_file/edit_file and other path tools reject paths outside AGENT_WORKSPACE_ROOT. Off (default): absolute paths and .. escapes are allowed so the agent can work across projects the user names.",
+    valueKind: "boolean",
+  },
   "AGENT_GOOGLE_OFFICE_REST": {
     tabId: "harness",
     subgroupId: "harness_misc",

@@ -1,6 +1,6 @@
 import path from "node:path";
 import { readFile, stat } from "node:fs/promises";
-import { resolveWorkspaceRoot } from "@liminal/core";
+import { effectiveHarnessEnvRaw, resolveWorkspaceRoot } from "@liminal/core";
 
 export interface GuardResult {
   ok: boolean;
@@ -22,14 +22,21 @@ export function isPathInsideWorkspaceRoot(resolved: string, workspaceRoot: strin
   return false;
 }
 
+/** When true, file tools reject paths outside the active workspace root. Default off. */
+export function isWorkspacePathBound(): boolean {
+  return effectiveHarnessEnvRaw("AGENT_WORKSPACE_BOUND") === "1";
+}
+
 export function resolveWithinWorkspace(inputPath: string): GuardResult {
   const trimmed = inputPath.trim();
   if (!trimmed) {
     return { ok: false, error: "empty path" };
   }
   const workspaceRoot = path.resolve(resolveWorkspaceRoot());
-  const resolved = path.resolve(workspaceRoot, trimmed);
-  if (!isPathInsideWorkspaceRoot(resolved, workspaceRoot)) {
+  const resolved = path.isAbsolute(trimmed)
+    ? path.resolve(trimmed)
+    : path.resolve(workspaceRoot, trimmed);
+  if (isWorkspacePathBound() && !isPathInsideWorkspaceRoot(resolved, workspaceRoot)) {
     return { ok: false, error: `Path escapes workspace root: ${inputPath}` };
   }
   return { ok: true, resolvedPath: resolved };

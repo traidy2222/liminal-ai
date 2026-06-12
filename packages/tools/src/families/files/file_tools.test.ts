@@ -6,6 +6,7 @@ import path from "node:path";
 import { resolveWorkspaceRoot, runWithWorkspaceRoot } from "@liminal/core";
 import {
   isPathInsideWorkspaceRoot,
+  isWorkspacePathBound,
   readWorkspaceFileBytes,
   resolveWithinWorkspace,
 } from "../../shared/file_path_guard.js";
@@ -17,9 +18,30 @@ import { writeFileTool } from "./write_file.js";
 import { isLikelyTruncatedContent } from "./file_write_integrity.js";
 import { rejectIfLikelyTruncated, TRUNCATED_WRITE_ERROR } from "./file_write_ops.js";
 
-test("resolveWithinWorkspace blocks escaping paths", () => {
-  const blocked = resolveWithinWorkspace("..\\..\\outside.txt");
-  assert.equal(blocked.ok, false);
+test("resolveWithinWorkspace allows paths outside workspace by default", () => {
+  const prev = process.env.AGENT_WORKSPACE_BOUND;
+  delete process.env.AGENT_WORKSPACE_BOUND;
+  try {
+    assert.equal(isWorkspacePathBound(), false);
+    const outside = resolveWithinWorkspace("..\\..\\outside.txt");
+    assert.equal(outside.ok, true);
+    assert.ok(outside.resolvedPath?.includes("outside.txt"));
+  } finally {
+    if (prev !== undefined) process.env.AGENT_WORKSPACE_BOUND = prev;
+    else delete process.env.AGENT_WORKSPACE_BOUND;
+  }
+});
+
+test("resolveWithinWorkspace blocks escaping paths when AGENT_WORKSPACE_BOUND=1", () => {
+  const prev = process.env.AGENT_WORKSPACE_BOUND;
+  process.env.AGENT_WORKSPACE_BOUND = "1";
+  try {
+    const blocked = resolveWithinWorkspace("..\\..\\outside.txt");
+    assert.equal(blocked.ok, false);
+  } finally {
+    if (prev !== undefined) process.env.AGENT_WORKSPACE_BOUND = prev;
+    else delete process.env.AGENT_WORKSPACE_BOUND;
+  }
 });
 
 test("resolveWithinWorkspace accepts absolute paths inside workspace", async () => {

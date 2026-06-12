@@ -7,15 +7,17 @@
 </p>
 
 <p align="center">
-  <strong>Code · email · documents · research</strong> · <strong>245+ tools</strong> · <strong>Terminal + web + desktop</strong> · <strong>Any OpenAI-compatible model</strong>
+  <strong>Self-hosted AI agent</strong> · Code · email · documents · research · <strong>245+ tools</strong> · <strong>Terminal + web + desktop</strong> · <strong>Any OpenAI-compatible model</strong>
 </p>
 
 <p align="center">
+  <a href="https://www.vireondynamics.com/liminal"><b>Product site</b></a>
+  ·
   <a href="https://www.vireondynamics.com/liminal/get-started"><b>Install</b></a>
   ·
-  <a href="https://www.vireondynamics.com/liminal">Website</a>
+  <a href="https://www.vireondynamics.com/liminal/use-cases/local-first-privacy">Self-hosted guide</a>
   ·
-  <a href="https://www.vireondynamics.com/liminal/compare">Compare</a>
+  <a href="https://www.vireondynamics.com/liminal/compare/cursor">vs Cursor</a>
   ·
   <a href="https://docs.vireondynamics.com/liminal/">Docs</a>
   ·

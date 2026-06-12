@@ -4,7 +4,7 @@ import { resolveWithinWorkspace, existsAtPath } from "../../shared/file_path_gua
 export const pathGuardTool = defineTool({
   name: "path_guard",
   description:
-    "WHAT: Validate one or more paths are inside workspace and optionally verify existence.\n" +
+    "WHAT: Resolve and validate file paths (existence optional). When AGENT_WORKSPACE_BOUND=1, paths must stay inside workspace.\n" +
     "WHEN: Before write/move/copy operations where path safety matters.\n" +
     "ARGS: paths[] and optional require_exists.",
   requiresApproval: false,
