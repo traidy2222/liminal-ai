@@ -77,6 +77,12 @@ import {
   tryParseToolArgs,
 } from "./file_write_resume.js";
 import {
+  batchHasUndispatchableEmailCompose,
+  LENGTH_RESUME_EMAIL_COMPOSE_MESSAGE,
+  sanitizeToolCallArgsForContext,
+  tryRepairEmailComposeArgsJson,
+} from "./email_compose_resume.js";
+import {
   discardFileWriteStreamManifest,
   setFileWriteStreamManifest,
 } from "./file_write_stream_manifest.js";
@@ -5431,10 +5437,6 @@ export class AgentHarness {
 
     const toolCalls = accumulator.accumulatedToolCalls;
     const accumulatedText = accumulator.accumulatedText;
-    const assistantMessage = this.buildAssistantMessage(
-      accumulatedText,
-      toolCalls
-    );
 
     const skipStreamContinuationsForIntro =
       toolCalls.length === 0 &&
@@ -5443,6 +5445,9 @@ export class AgentHarness {
     if (this.spawnAppHtmlStreamSink) {
       await this.repairLiminalAppHtmlToolCallArgs(toolCalls, finishReason);
     }
+    this.repairEmailComposeToolCallArgs(toolCalls);
+
+    const assistantMessage = this.buildAssistantMessage(accumulatedText, toolCalls);
 
     if (
       !skipStreamContinuationsForIntro &&
@@ -5507,6 +5512,26 @@ export class AgentHarness {
       this.context.appendMessage({
         role: "user",
         content: resumeMsg,
+      });
+      await this.runReActLoop(round);
+      return;
+    }
+
+    if (
+      !skipStreamContinuationsForIntro &&
+      toolCalls.length > 0 &&
+      this.lengthResumeRemaining > 0 &&
+      batchHasUndispatchableEmailCompose(toolCalls, finishReason)
+    ) {
+      this.lengthResumeRemaining--;
+      for (const tc of toolCalls) {
+        if (!isComposeDockTool(tc.name)) continue;
+        speculativePromises.delete(tc.id);
+      }
+      this.context.append(assistantMessage);
+      this.context.appendMessage({
+        role: "user",
+        content: LENGTH_RESUME_EMAIL_COMPOSE_MESSAGE,
       });
       await this.runReActLoop(round);
       return;
@@ -7122,6 +7147,17 @@ export class AgentHarness {
     }
   }
 
+  /** Rebuild gmail/outlook compose JSON from staged streaming args when the provider cut off mid-string. */
+  private repairEmailComposeToolCallArgs(toolCalls: AccumulatedToolCall[]): void {
+    for (const tc of toolCalls) {
+      if (!isComposeDockTool(tc.name)) continue;
+      if (tryParseToolArgs(tc.argsJson).ok) continue;
+      const raw = this.composeRawArgsByCallId.get(tc.id) ?? tc.argsJson;
+      const repaired = tryRepairEmailComposeArgsJson(raw, tc.name);
+      if (repaired) tc.argsJson = repaired;
+    }
+  }
+
   /**
    * Emit tool_result + context for tool calls that could not enter the normal dispatch batch.
    */
@@ -7184,7 +7220,8 @@ export class AgentHarness {
       role: "user",
       content:
         `[SYSTEM NOTE] ${toolCalls.length} tool call(s) could not run: ${reason}. ` +
-        "For large files use write_file mode=create once, then mode=append. Continue from the errors above.",
+        "For large files use write_file mode=create once, then mode=append. " +
+        "For long email HTML use a shorter body_html or retry gmail_create_draft after truncation. Continue from the errors above.",
     });
   }
 
@@ -7412,7 +7449,10 @@ export class AgentHarness {
       tool_calls: toolCalls.map((tc) => ({
         id: tc.id,
         type: "function" as const,
-        function: { name: tc.name, arguments: tc.argsJson },
+        function: {
+          name: tc.name,
+          arguments: sanitizeToolCallArgsForContext(tc.argsJson),
+        },
       })),
     };
   }
