@@ -26,6 +26,7 @@ import {
   defaultVireonSiteOrigin,
   clearVireonAccount,
   fetchInferenceUsageStatus,
+  fetchManagedInferenceModels,
   resolveInferenceMode,
   listGoogleOAuthAccounts,
   exchangeGoogleCode,
@@ -300,6 +301,22 @@ export function createRouter(
     } catch (e) {
       res.status(400).json({
         error: e instanceof Error ? e.message : "Inference status failed",
+      });
+    }
+  });
+
+  router.get("/api/vireon/inference-models", async (_req, res) => {
+    try {
+      const catalog = await fetchManagedInferenceModels();
+      if (!catalog) {
+        res.status(401).json({ error: "Not signed in to Vireon", models: [] });
+        return;
+      }
+      res.json(catalog);
+    } catch (e) {
+      res.status(502).json({
+        error: e instanceof Error ? e.message : "Failed to load managed inference models",
+        models: [],
       });
     }
   });

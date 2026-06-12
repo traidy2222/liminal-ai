@@ -586,6 +586,7 @@ export {
   managedInferenceBaseUrl,
   fetchInferenceSession,
   fetchInferenceUsageStatus,
+  fetchManagedInferenceModels,
   hasLocalProviderApiKey,
   inferencePreferManaged,
   describeProviderError,
@@ -610,7 +611,15 @@ export {
   resolveManagedFreeFallbackMainModel,
 } from "./managed_free_fallback.js";
 export { applyProManagedInferenceDefaults } from "./vireon_account.js";
-export type { InferenceMode, InferenceSessionResult, InferenceUsageStatus, OpenRouterRoute, ManagedOpenRouterCredentials } from "./inference_provider.js";
+export type {
+  InferenceMode,
+  InferenceSessionResult,
+  InferenceUsageStatus,
+  ManagedInferenceModel,
+  ManagedInferenceModelsResult,
+  OpenRouterRoute,
+  ManagedOpenRouterCredentials,
+} from "./inference_provider.js";
 export {
   RUNTIME_PREFS_FILE,
   getRuntimePrefsPath,

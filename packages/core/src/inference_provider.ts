@@ -343,6 +343,43 @@ export type InferenceUsageStatus = {
   periodEnd: string | null;
 };
 
+export type ManagedInferenceModel = {
+  id: string;
+  label: string;
+  family: string;
+};
+
+export type ManagedInferenceModelsResult = {
+  upstream: string;
+  region: string;
+  models: ManagedInferenceModel[];
+};
+
+/** Bedrock catalog for managed-inference model pickers (license Bearer). */
+export async function fetchManagedInferenceModels(): Promise<ManagedInferenceModelsResult | null> {
+  const license = await resolveLicenseTokenForHarness();
+  if (!license) return null;
+  const base = defaultVireonSiteOriginForInference();
+  const res = await fetch(`${base}/api/inference/models`, {
+    method: "GET",
+    headers: { Authorization: `Bearer ${license}`, Accept: "application/json" },
+  });
+  const body = (await res.json().catch(() => ({}))) as {
+    error?: string;
+    upstream?: string;
+    region?: string;
+    models?: ManagedInferenceModel[];
+  };
+  if (!res.ok) {
+    throw new Error(body.error ?? `HTTP ${res.status}`);
+  }
+  return {
+    upstream: body.upstream ?? "bedrock",
+    region: body.region ?? "us-east-1",
+    models: Array.isArray(body.models) ? body.models : [],
+  };
+}
+
 /** Poll Vireon control plane for wallet / entitlement (license Bearer). */
 export async function fetchInferenceUsageStatus(
   prefs?: RuntimePreferences | null

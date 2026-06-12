@@ -1,6 +1,6 @@
 /**
- * Browser-based Vireon sign-in for local harness (TUI / CLI / web).
- * Opens www/connect/harness; user signs in; site POSTs license to loopback.
+ * Browser-based Vireon sign-in for local harness (TUI / CLI / web / desktop).
+ * Opens www/connect/harness; user signs in; site redirects license to loopback GET.
  */
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { randomBytes } from "node:crypto";
@@ -9,13 +9,22 @@ import { ensureEnterpriseEditionInstalled, tierRequiresEnterprisePackage } from 
 import { openExternalUrl } from "./open_external_url.js";
 
 const CONNECT_PATH = "/connect/harness";
-const CALLBACK_PATH = "/callback";
+/** Matches web harness + HarnessConnectClient GET redirect handoff. */
+const CALLBACK_PATH = "/api/vireon/auth/callback";
+const LEGACY_CALLBACK_PATH = "/callback";
 const FLOW_TIMEOUT_MS = 5 * 60_000;
 
 export type VireonConnectResult = {
   email: string;
   tier: string;
   entitlements: string[];
+};
+
+type CallbackParams = {
+  token: string;
+  state: string;
+  email?: string;
+  licenseSub?: string;
 };
 
 function isAllowedRedirectUri(uri: string): boolean {
@@ -33,12 +42,78 @@ function siteOrigin(override?: string): string {
   return (override?.trim() || defaultVireonSiteOrigin()).replace(/\/$/, "");
 }
 
+function corsHeaders(origin: string): Record<string, string> {
+  return {
+    "Access-Control-Allow-Origin": origin,
+    "Access-Control-Allow-Private-Network": "true",
+  };
+}
+
+function escapeHtml(value: string): string {
+  return value
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
+}
+
+function callbackHtml(title: string, bodyHtml: string): string {
+  return `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>${escapeHtml(title)}</title>
+  <style>
+    body { font-family: system-ui, sans-serif; max-width: 32rem; margin: 3rem auto; padding: 0 1rem; color: #e8e8e8; background: #0a0a0a; }
+    h1 { font-size: 1.25rem; margin-bottom: 0.75rem; }
+    p { color: #aaa; line-height: 1.5; margin: 0 0 0.75rem; }
+  </style>
+</head>
+<body>
+  <h1>${escapeHtml(title)}</h1>
+  <p>${bodyHtml}</p>
+</body>
+</html>`;
+}
+
 async function readJsonBody(req: IncomingMessage): Promise<unknown> {
   const chunks: Buffer[] = [];
   for await (const c of req) chunks.push(c as Buffer);
   const raw = Buffer.concat(chunks).toString("utf8");
   if (!raw.trim()) return {};
   return JSON.parse(raw) as unknown;
+}
+
+function readCallbackParams(req: IncomingMessage, url: URL): CallbackParams | null {
+  if (req.method === "GET") {
+    return {
+      token: url.searchParams.get("token")?.trim() ?? "",
+      state: url.searchParams.get("state")?.trim() ?? "",
+      email: url.searchParams.get("email")?.trim() || undefined,
+      licenseSub: url.searchParams.get("licenseSub")?.trim() || undefined,
+    };
+  }
+  return null;
+}
+
+async function readPostCallbackParams(req: IncomingMessage): Promise<CallbackParams> {
+  const body = (await readJsonBody(req)) as {
+    token?: string;
+    state?: string;
+    email?: string;
+    licenseSub?: string;
+  };
+  return {
+    token: body.token?.trim() ?? "",
+    state: body.state?.trim() ?? "",
+    email: body.email?.trim() || undefined,
+    licenseSub: body.licenseSub?.trim() || undefined,
+  };
+}
+
+function isCallbackPath(pathname: string): boolean {
+  return pathname === CALLBACK_PATH || pathname === LEGACY_CALLBACK_PATH;
 }
 
 export interface RunVireonConnectOptions {
@@ -49,7 +124,7 @@ export interface RunVireonConnectOptions {
 }
 
 /**
- * Run the loopback connect flow. Resolves when the browser POSTs a license token.
+ * Run the loopback connect flow. Resolves when the browser hands off a license token.
  */
 export function runVireonConnectFlow(
   options: RunVireonConnectOptions = {}
@@ -60,49 +135,84 @@ export function runVireonConnectFlow(
   const log = options.onStatus ?? ((m: string) => console.log(m));
 
   return new Promise((resolve, reject) => {
+    let settled = false;
+
+    const finish = (result: VireonConnectResult) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      server.close();
+      resolve(result);
+    };
+
+    const respondJson = (
+      res: ServerResponse,
+      status: number,
+      body: Record<string, unknown>
+    ) => {
+      res.writeHead(status, {
+        "Content-Type": "application/json",
+        ...corsHeaders(origin),
+      });
+      res.end(JSON.stringify(body));
+    };
+
+    const respondHtml = (res: ServerResponse, status: number, html: string) => {
+      res.writeHead(status, { "Content-Type": "text/html; charset=utf-8" });
+      res.end(html);
+    };
+
     const server = createServer(async (req, res) => {
-      const url = new URL(req.url ?? "/", `http://127.0.0.1`);
+      const url = new URL(req.url ?? "/", "http://127.0.0.1");
 
       if (req.method === "OPTIONS") {
         res.writeHead(204, {
-          "Access-Control-Allow-Origin": origin,
-          "Access-Control-Allow-Methods": "POST, OPTIONS",
+          ...corsHeaders(origin),
+          "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
           "Access-Control-Allow-Headers": "Content-Type",
         });
         res.end();
         return;
       }
 
-      if (url.pathname !== CALLBACK_PATH || req.method !== "POST") {
+      if (!isCallbackPath(url.pathname)) {
         res.writeHead(404);
         res.end("Not found");
         return;
       }
 
+      const isGet = req.method === "GET";
+      const isPost = req.method === "POST";
+      if (!isGet && !isPost) {
+        res.writeHead(405);
+        res.end("Method not allowed");
+        return;
+      }
+
       try {
-        const body = (await readJsonBody(req)) as {
-          token?: string;
-          state?: string;
-          email?: string;
-          licenseSub?: string;
-        };
-        if (body.state !== state) {
-          res.writeHead(403, { "Content-Type": "application/json" });
-          res.end(JSON.stringify({ error: "Invalid state" }));
+        const params =
+          (isGet ? readCallbackParams(req, url) : null) ?? (isPost ? await readPostCallbackParams(req) : null);
+        if (!params) {
+          respondVireonError(res, isGet, 400, "Invalid request");
           return;
         }
-        const token = body.token?.trim();
-        const email = body.email?.trim() || "vireon@user";
+
+        if (params.state !== state) {
+          respondVireonError(res, isGet, 403, "Invalid state");
+          return;
+        }
+
+        const token = params.token;
+        const email = params.email?.trim() || "vireon@user";
         if (!token) {
-          res.writeHead(400, { "Content-Type": "application/json" });
-          res.end(JSON.stringify({ error: "Missing token" }));
+          respondVireonError(res, isGet, 400, "Missing token");
           return;
         }
 
         const resolved = await applyVireonLicenseToken(token, {
           email,
           source: "browser",
-          licenseSub: body.licenseSub,
+          licenseSub: params.licenseSub,
         });
 
         if (tierRequiresEnterprisePackage(resolved.tier)) {
@@ -113,28 +223,42 @@ export function runVireonConnectFlow(
           }
         }
 
-        res.writeHead(200, {
-          "Content-Type": "application/json",
-          "Access-Control-Allow-Origin": origin,
-        });
-        res.end(JSON.stringify({ ok: true }));
+        if (isGet) {
+          respondHtml(
+            res,
+            200,
+            callbackHtml(
+              "Connected to Liminal",
+              `Signed in as <strong>${escapeHtml(email)}</strong> (${escapeHtml(resolved.tier)}). You can close this tab and return to Liminal.`
+            )
+          );
+        } else {
+          respondJson(res, 200, { ok: true });
+        }
 
-        clearTimeout(timer);
-        server.close();
-        resolve({
+        finish({
           email,
           tier: resolved.tier,
           entitlements: [...resolved.entitlements],
         });
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
-        res.writeHead(400, {
-          "Content-Type": "application/json",
-          "Access-Control-Allow-Origin": origin,
-        });
-        res.end(JSON.stringify({ error: message }));
+        respondVireonError(res, isGet, 400, message);
       }
     });
+
+    function respondVireonError(
+      res: ServerResponse,
+      isGet: boolean,
+      status: number,
+      message: string
+    ) {
+      if (isGet) {
+        respondHtml(res, status, callbackHtml("Could not connect Liminal", escapeHtml(message)));
+        return;
+      }
+      respondJson(res, status, { error: message });
+    }
 
     server.listen(0, "127.0.0.1", () => {
       const addr = server.address();
@@ -160,11 +284,15 @@ export function runVireonConnectFlow(
     });
 
     const timer = setTimeout(() => {
+      if (settled) return;
+      settled = true;
       server.close();
       reject(new Error("Timed out waiting for Vireon sign-in. Try again."));
     }, timeoutMs);
 
     server.on("error", (err) => {
+      if (settled) return;
+      settled = true;
       clearTimeout(timer);
       reject(err);
     });

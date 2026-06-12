@@ -9,6 +9,7 @@ import {
   resolvePresetSelection,
 } from "./providerPresets.js";
 import { IntegrationsPanel } from "./IntegrationsPanel.js";
+import { ManagedBedrockModelsSection } from "./ManagedBedrockModelsSection.js";
 
 const CYAN = "var(--lim-accent, #00d4ff)";
 const AMBER = "var(--lim-warn, #ffb347)";
@@ -135,6 +136,8 @@ export interface SettingsModalProps {
   vireonBusy?: boolean;
   teamMemoryStatus?: "active" | "offline" | "not_entitled";
   orgId?: string | null;
+  /** Pro managed inference — show Bedrock model picker instead of BYOK presets. */
+  managedRoute?: boolean;
 }
 
 export function SettingsModal({
@@ -166,6 +169,7 @@ export function SettingsModal({
   vireonBusy = false,
   teamMemoryStatus = "not_entitled",
   orgId = null,
+  managedRoute = false,
 }: SettingsModalProps) {
   const [activeTabId, setActiveTabId] = useState<string>("models_api");
   const [search, setSearch] = useState("");
@@ -432,6 +436,21 @@ export function SettingsModal({
                       </div>
                     )}
                     <div style={{ fontSize: 10, color: "#778899", marginBottom: 8 }}>{providerHintText}</div>
+                    {managedRoute ? (
+                      <ManagedBedrockModelsSection
+                        disabled={saving || loading || providerPresetLocked}
+                        mainModel={providerModel}
+                        fastModel={envDraft["AGENT_FAST_MODEL"] ?? ""}
+                        vireonConnected={Boolean(vireonConnected)}
+                        onMainModel={(modelId) => {
+                          onProviderModel(modelId);
+                          onEnvChange("AGENT_MODEL", modelId);
+                        }}
+                        onFastModel={(modelId) => onEnvChange("AGENT_FAST_MODEL", modelId)}
+                      />
+                    ) : null}
+                    {!managedRoute ? (
+                    <>
                     <div style={{ display: "grid", gridTemplateColumns: "120px 1fr", gap: 8, alignItems: "center", marginBottom: 10 }}>
                       <span style={{ fontSize: 11, color: "#aabbcc" }}>provider</span>
                       <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
@@ -517,6 +536,8 @@ export function SettingsModal({
                         ) : null}
                       </div>
                     </div>
+                    </>
+                    ) : null}
                     <div style={{ display: "grid", gridTemplateColumns: "120px 1fr", gap: 8, alignItems: "center", marginBottom: 6 }}>
                       <span style={{ fontSize: 11, color: "#aabbcc", display: "flex", alignItems: "center", gap: 6 }}>
                         model
