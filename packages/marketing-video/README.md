@@ -8,6 +8,8 @@ Uses existing repo assets from `assets/` (heroes + `assets/marketing/*.png`).
 
 | ID | ~Length | Purpose |
 |----|---------|---------|
+| `Liminal-Desktop-Cinematic` | 48s · **60fps** | Flagship website reel — cold open, 3D hero window, real-session trace cascade, capability beat, integrations wall, CTA (`src/cinematic/` design system) |
+| `Liminal-Hero-Ambient` | 12s · **60fps** | Seamless background loop for the website hero — aurora + floating desktop window, no text |
 | `Liminal-Hero` | 20s | Brand intro + web UI hero + install commands |
 | `Liminal-Harness` | 38s | Animated ReAct architecture story (5 beats) |
 | `Liminal-Features` | ~22s | Six capability slides (coding, memory, web, agents, approvals, persona) |

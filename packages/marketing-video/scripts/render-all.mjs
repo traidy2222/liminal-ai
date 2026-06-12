@@ -12,6 +12,8 @@ const pkgRoot = path.join(__dirname, "..");
 const outDir = path.join(pkgRoot, "../../assets/marketing/videos");
 
 const COMPOSITIONS = [
+  { id: "Liminal-Desktop-Cinematic", file: "liminal-desktop-cinematic.mp4" },
+  { id: "Liminal-Hero-Ambient", file: "liminal-hero-ambient.mp4" },
   { id: "Liminal-Hero", file: "liminal-hero.mp4" },
   { id: "Liminal-Harness", file: "liminal-harness.mp4" },
   { id: "Liminal-Features", file: "liminal-features.mp4" },

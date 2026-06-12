@@ -28,9 +28,31 @@ import {
   DESKTOP_SOCIAL_TEASER_DURATION,
 } from "./compositions/DesktopPromo";
 import { VIDEO } from "./theme";
+import {
+  DesktopCinematic,
+  DESKTOP_CINEMATIC_DURATION,
+} from "./compositions/DesktopCinematic";
+import { HeroAmbient, HERO_AMBIENT_DURATION } from "./compositions/HeroAmbient";
+import { CINEMA_VIDEO } from "./cinematic/cinema";
 
 export const RemotionRoot: React.FC = () => (
   <>
+    <Composition
+      id="Liminal-Desktop-Cinematic"
+      component={DesktopCinematic}
+      durationInFrames={DESKTOP_CINEMATIC_DURATION}
+      fps={CINEMA_VIDEO.fps}
+      width={CINEMA_VIDEO.width}
+      height={CINEMA_VIDEO.height}
+    />
+    <Composition
+      id="Liminal-Hero-Ambient"
+      component={HeroAmbient}
+      durationInFrames={HERO_AMBIENT_DURATION}
+      fps={CINEMA_VIDEO.fps}
+      width={CINEMA_VIDEO.width}
+      height={CINEMA_VIDEO.height}
+    />
     <Composition
       id="Liminal-Hero"
       component={HeroIntro}

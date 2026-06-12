@@ -269,6 +269,13 @@ async function main() {
 
   let desktopPid = null;
   if (!skipLaunch) {
+    // Remove any stale handshake so waitForHandshake can't race against the
+    // previous run's sidecar.json (it has no freshness check — a dead port wins).
+    try {
+      await fs.rm(path.join(os.homedir(), ".liminal", "sidecar.json"), { force: true });
+    } catch {
+      /* best-effort */
+    }
     desktopPid = await launchDesktop(exe);
     await sleep(4000);
   }

@@ -1,16 +1,47 @@
 {
-  "generatedAt": "2026-06-09T12:16:25.184Z",
+  "generatedAt": "2026-06-12T12:10:32.032Z",
   "source": "desktop",
   "windowTitle": "liminal_desktop",
   "exe": "apps/liminal_desktop/build/windows/x64/runner/Release/liminal_desktop.exe",
-  "model": "openrouter/owl-alpha",
-  "providerOrder": "Stealth",
-  "apiBaseURL": "https://openrouter.ai/api/v1",
+  "model": null,
+  "providerOrder": null,
   "results": [
+    {
+      "id": "desktop-code-ship-test",
+      "title": "Plan, ship, and verify code",
+      "subtitle": "plan → write_file → run_shell (node:test) — self-healing loop with every step visible in the harness.",
+      "accent": "#00ff88",
+      "prompt": "You are recording a marketing demo. Show how Liminal ships code with verification.\n\n1) Call plan() with exactly 3 steps: implement slugify, add tests, run tests.\n2) Create marketing-capture/slugify.ts exporting slugify(input: string): string — lowercase, trim, collapse whitespace to single hyphens, strip characters outside [a-z0-9-].\n3) Create marketing-capture/slugify.test.ts using node:test (import test, assert from node:test / node:assert) with 3 cases: \"Hello World\" → \"hello-world\", leading/trailing spaces, punctuation stripped.\n4) Run: node --test marketing-capture/slugify.test.js marketing-capture/slugify.test.ts (use whichever path exists after you write the file).\nIf tests fail, fix the implementation once and re-run. End with PASS/FAIL and one example slugify(\"Foo Bar!\") result.",
+      "png": "marketing/desktop-code-ship-test.png",
+      "gif": "marketing/desktop-code-ship-test.gif",
+      "mp4": "marketing/desktop-code-ship-test.mp4",
+      "messagesPath": "marketing/recordings/desktop-code-ship-test/messages.json",
+      "tools": [
+        "activate_tool_family",
+        "plan",
+        "mkdir_p",
+        "write_file",
+        "run_shell"
+      ],
+      "durationMs": 134463,
+      "messageCount": 29,
+      "chatId": "chat_mqavmbib",
+      "source": "desktop"
+    },
     {
       "id": "desktop-repo-react-trace",
       "source": "desktop",
-      "error": "Error: PowerShell exit 1: Add-Type : c:\\Users\\traid\\AppData\\Local\\Temp\\yqs5mhjw.0.cs(3) : The type or namespace name 'Imaging' does not exist in \r\nthe namespace 'System.Drawing' (are you missing an assembly reference?)\r\nc:\\Users\\traid\\AppData\\Local\\Temp\\yqs5mhjw.0.cs(2) : using System.Drawing;\r\nc:\\Users\\traid\\AppData\\Local\\Temp\\yqs5mhjw.0.cs(3) : >>> using System.Drawing.Imaging;\r\nc:\\Users\\traid\\AppData\\Local\\Temp\\yqs5mhjw.0.cs(4) : using System.Runtime.InteropServices;\r\nAt line:2 char:1\r\n+ Add-Type @\"\r\n+ ~~~~~~~~~~~\r\n    + CategoryInfo          : InvalidData: (Microsoft.Power...peCompilerError:AddTypeCompilerError) [Add-Type], Except \r\n   ion\r\n    + FullyQualifiedErrorId : SOURCE_CODE_ERROR,Microsoft.PowerShell.Commands.AddTypeCommand\r\n \r\nAdd-Type : Cannot add type. Compilation errors occurred.\r\nAt line:2 char:1\r\n+ Add-Type @\"\r\n+ ~~~~~~~~~~~\r\n    + CategoryInfo          : InvalidData: (:) [Add-Type], InvalidOperationException\r\n    + FullyQualifiedErrorId : COMPILER_ERRORS,Microsoft.PowerShell.Commands.AddTypeCommand\r\n \r\nUnable to find type [WinCap].\r\nAt line:14 char:6\r\n+ $h = [WinCap]::FindWindow($null, \"liminal_desktop\")\r\n+      ~~~~~~~~\r\n    + CategoryInfo          : InvalidOperation: (WinCap:TypeName) [], RuntimeException\r\n    + FullyQualifiedErrorId : TypeNotFound\r\n \r\nNew-Object : Cannot find type [WinCap+RECT]: verify that the assembly containing this type is loaded.\r\nAt line:16 char:6\r\n+ $r = New-Object WinCap+RECT\r\n+      ~~~~~~~~~~~~~~~~~~~~~~\r\n    + CategoryInfo          : InvalidType: (:) [New-Object], PSArgumentException\r\n    + FullyQualifiedErrorId : TypeNotFound,Microsoft.PowerShell.Commands.NewObjectCommand\r\n \r\nUnable to find type [WinCap].\r\nAt line:17 char:7\r\n+ [void][WinCap]::GetWindowRect($h, [ref]$r)\r\n+       ~~~~~~~~\r\n    + CategoryInfo          : InvalidOperation: (WinCap:TypeName) [], RuntimeException\r\n    + FullyQualifiedErrorId : TypeNotFound\r\n \r\nWindow too small\r\nAt line:19 char:33\r\n+ if ($w -lt 64 -or $ht -lt 64) { throw \"Window too small\" }\r\n+                                 ~~~~~~~~~~~~~~~~~~~~~~~~\r\n    + CategoryInfo          : OperationStopped: (Window too small:String) [], RuntimeException\r\n    + FullyQualifiedErrorId : Window too small"
+      "error": "Error: PowerShell exit 1: Window not found: liminal_desktop\r\nAt line:14 char:30\r\n+ ... ($h -eq [IntPtr]::Zero) { throw \"Window not found: liminal_desktop\" }\r\n+                               ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~\r\n    + CategoryInfo          : OperationStopped: (Window not found: liminal_desktop:String) [], RuntimeException\r\n    + FullyQualifiedErrorId : Window not found: liminal_desktop"
+    },
+    {
+      "id": "desktop-memory-recall",
+      "source": "desktop",
+      "error": "Error: PowerShell exit 1: Window not found: liminal_desktop\r\nAt line:14 char:30\r\n+ ... ($h -eq [IntPtr]::Zero) { throw \"Window not found: liminal_desktop\" }\r\n+                               ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~\r\n    + CategoryInfo          : OperationStopped: (Window not found: liminal_desktop:String) [], RuntimeException\r\n    + FullyQualifiedErrorId : Window not found: liminal_desktop"
+    },
+    {
+      "id": "desktop-web-research-cite",
+      "source": "desktop",
+      "error": "Error: PowerShell exit 1: Window not found: liminal_desktop\r\nAt line:14 char:30\r\n+ ... ($h -eq [IntPtr]::Zero) { throw \"Window not found: liminal_desktop\" }\r\n+                               ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~\r\n    + CategoryInfo          : OperationStopped: (Window not found: liminal_desktop:String) [], RuntimeException\r\n    + FullyQualifiedErrorId : Window not found: liminal_desktop"
     }
   ]
 }

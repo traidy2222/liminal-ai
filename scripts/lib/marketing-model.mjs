@@ -1,14 +1,19 @@
 /**
- * Marketing captures always run on OpenRouter owl-alpha (Stealth pin).
+ * Marketing captures run on a pinned model for deterministic output.
+ * Default: the repo's main model (deepseek/deepseek-v4-pro). The old
+ * `openrouter/owl-alpha` stealth slug is delisted — pinning it made every
+ * capture turn fail silently (empty transcript, 0 tools).
  * Override with MARKETING_AGENT_MODEL / MARKETING_SKIP_MODEL=1.
  */
 
 export const MARKETING_AGENT_MODEL =
-  process.env.MARKETING_AGENT_MODEL?.trim() || "openrouter/owl-alpha";
+  process.env.MARKETING_AGENT_MODEL?.trim() || "deepseek/deepseek-v4-pro";
 
 const OPENROUTER_V1 = "https://openrouter.ai/api/v1";
 
-/** Mirrors `owlStealthPinPatch()` in packages/core/src/provider_model_presets.ts */
+/** Stealth provider pin only applies to owl/stealth slugs. */
+const IS_STEALTH = /owl|stealth/i.test(MARKETING_AGENT_MODEL);
+
 export function marketingModelEnvPatch() {
   const model = MARKETING_AGENT_MODEL;
   return {
@@ -18,16 +23,24 @@ export function marketingModelEnvPatch() {
     AGENT_MEMORY_AUTOLINK_MODEL: model,
     AGENT_MEMORY_CONSOLIDATE_MODEL: model,
     AGENT_API_BASE_URL: OPENROUTER_V1,
-    AGENT_PROVIDER_STRATEGY: "cache_first",
-    AGENT_PROVIDER_ORDER: "Stealth",
-    AGENT_PROVIDER_ORDER_FAST: "Stealth",
-    AGENT_PROVIDER_ROUTE_AUTO: "0",
-    AGENT_PROVIDER_ALLOW_FALLBACKS: "0",
+    ...(IS_STEALTH
+      ? {
+          AGENT_PROVIDER_STRATEGY: "cache_first",
+          AGENT_PROVIDER_ORDER: "Stealth",
+          AGENT_PROVIDER_ORDER_FAST: "Stealth",
+          AGENT_PROVIDER_ROUTE_AUTO: "0",
+          AGENT_PROVIDER_ALLOW_FALLBACKS: "0",
+        }
+      : {}),
   };
 }
 
 /** For child processes (liminal_desktop → liminald). */
 export function applyMarketingModelToProcessEnv() {
+  // Desktop shell auto-opens the chat workspace when the sidecar activates a
+  // marketing chat. Must be set even with MARKETING_SKIP_MODEL=1 — otherwise
+  // frames capture the home hub instead of the live transcript.
+  process.env.LIMINAL_MARKETING_CAPTURE = "1";
   if (process.env.MARKETING_SKIP_MODEL === "1") {
     return { model: process.env.AGENT_MODEL?.trim() || "(unchanged)", skipped: true };
   }
@@ -35,8 +48,6 @@ export function applyMarketingModelToProcessEnv() {
   for (const [k, v] of Object.entries(patch)) {
     process.env[k] = v;
   }
-  // Desktop shell auto-opens chat workspace when sidecar activates a marketing chat.
-  process.env.LIMINAL_MARKETING_CAPTURE = "1";
   return { model: MARKETING_AGENT_MODEL, patch, skipped: false };
 }
 
