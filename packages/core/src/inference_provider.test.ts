@@ -48,6 +48,18 @@ describe("inference_provider", () => {
     else process.env.AGENT_API_KEY = saved.AGENT_API_KEY;
   });
 
+  it("managed mode ignores BYOK-pinned base URL in prefs", async () => {
+    const prefs = {
+      version: 1 as const,
+      provider: {
+        inferenceMode: "managed" as const,
+        baseURL: "https://openrouter.ai/api/v1",
+      },
+      updatedAt: 0,
+    };
+    assert.equal(await shouldRouteOpenRouterViaManaged(prefs), true);
+  });
+
   it("shouldRouteOpenRouterViaManaged is false in byok mode", async () => {
     const route = await shouldRouteOpenRouterViaManaged({
       version: 1,

@@ -83,6 +83,9 @@ class AppController extends ChangeNotifier {
   bool setupSaving = false;
   HarnessSettingsSnapshot? harnessSettings;
   bool harnessSettingsLoading = false;
+  ManagedInferenceModelsCatalog? managedInferenceModels;
+  bool managedInferenceModelsLoading = false;
+  String? managedInferenceModelsError;
   VireonAccountSnapshot vireonAccount = VireonAccountSnapshot.empty;
   bool vireonAccountLoading = false;
   bool vireonAuthBusy = false;
@@ -422,6 +425,8 @@ class AppController extends ChangeNotifier {
         }
       }
       await loadHarnessSettings();
+      await refreshConfig();
+      await loadManagedInferenceModels();
       return vireonAccount.connected;
     } catch (e) {
       vireonAuthError = e.toString();
@@ -454,6 +459,8 @@ class AppController extends ChangeNotifier {
       }
       await loadHarnessSettings();
       await refreshConfig();
+      managedInferenceModels = null;
+      managedInferenceModelsError = null;
       return true;
     } catch (e) {
       vireonAuthError = e.toString();
@@ -464,11 +471,26 @@ class AppController extends ChangeNotifier {
     }
   }
 
-  Future<void> loadHarnessSettings() async {
+  Future<void> loadHarnessSettings({bool reconnectVireon = false}) async {
     if (!_protocol.isConnected) return;
     harnessSettingsLoading = true;
     notifyListeners();
     try {
+      if (reconnectVireon && vireonAccount.connected) {
+        final reconnect = await _protocol.send(
+          'vireon_reconnect',
+          {},
+          timeout: const Duration(seconds: 30),
+        );
+        if (reconnect.ok && reconnect.data is Map) {
+          final map = Map<String, dynamic>.from(reconnect.data! as Map);
+          final appConfig = map.remove('appConfig');
+          _applyVireonFromJson(map);
+          if (appConfig is Map) {
+            _applyConfigFromJson(Map<String, dynamic>.from(appConfig));
+          }
+        }
+      }
       final result = await _protocol.send(
         'get_settings',
         {},
@@ -483,6 +505,73 @@ class AppController extends ChangeNotifier {
       harnessSettingsLoading = false;
       notifyListeners();
     }
+  }
+
+  Future<void> loadManagedInferenceModels() async {
+    final showManaged = harnessSettings?.provider.showManagedInference == true;
+    if (!_protocol.isConnected || !vireonAccount.connected || !showManaged) {
+      managedInferenceModels = null;
+      managedInferenceModelsError = null;
+      managedInferenceModelsLoading = false;
+      notifyListeners();
+      return;
+    }
+    managedInferenceModelsLoading = true;
+    managedInferenceModelsError = null;
+    notifyListeners();
+    try {
+      final result = await _protocol.send(
+        'get_vireon_inference_models',
+        {},
+        timeout: const Duration(seconds: 45),
+      );
+      if (result.ok && result.data is Map) {
+        managedInferenceModels = ManagedInferenceModelsCatalog.fromJson(
+          Map<String, dynamic>.from(result.data! as Map),
+        );
+      } else {
+        managedInferenceModels = null;
+        managedInferenceModelsError = result.error ?? 'Failed to load managed models';
+      }
+    } catch (e) {
+      managedInferenceModels = null;
+      managedInferenceModelsError = e.toString();
+    } finally {
+      managedInferenceModelsLoading = false;
+      notifyListeners();
+    }
+  }
+
+  Future<bool> patchManagedInferenceModels({
+    String? mainModel,
+    String? fastModel,
+  }) async {
+    if (!_protocol.isConnected) return false;
+    final envPatch = <String, String>{};
+    if (mainModel != null && mainModel.trim().isNotEmpty) {
+      envPatch['AGENT_MODEL'] = mainModel.trim();
+    }
+    if (fastModel != null && fastModel.trim().isNotEmpty) {
+      envPatch['AGENT_FAST_MODEL'] = fastModel.trim();
+    }
+    if (envPatch.isEmpty) return false;
+
+    final providerPatch = <String, String>{};
+    if (mainModel != null && mainModel.trim().isNotEmpty) {
+      providerPatch['model'] = mainModel.trim();
+    }
+
+    final result = await _protocol.send('update_settings', {
+      'patch': {
+        'harness': {'env': envPatch},
+        if (providerPatch.isNotEmpty) 'provider': providerPatch,
+      },
+    });
+    if (result.ok) {
+      await loadHarnessSettings();
+      await refreshConfig();
+    }
+    return result.ok;
   }
 
   Future<bool> patchHarnessSettings(Map<String, String> envPatch) async {

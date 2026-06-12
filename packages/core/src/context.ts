@@ -284,9 +284,17 @@ export class ContextManager {
   private executionStateBlock = "";
   /** ACON-style runtime notes appended to compression policy in summary blocks. */
   private compressionNotes: string[] = [];
+  /** Mutable — synced from active model context window (see syncModelMaxTokens). */
+  private effectiveModelMaxTokens: number;
 
   constructor(config: ContextConfig) {
     this.config = config;
+    this.effectiveModelMaxTokens = config.modelMaxTokens;
+  }
+
+  /** Align compression thresholds with the active model's real context window. */
+  syncModelMaxTokens(maxTokens: number): void {
+    this.effectiveModelMaxTokens = Math.max(8192, maxTokens);
   }
 
   /** Recompute protocol suffix from current tool names (root + child registries). */
@@ -551,10 +559,10 @@ export class ContextManager {
 
   private computeSnapshot(messages: Message[]): ContextSnapshot {
     const tokenCount = estimateMessagesTokens(messages);
-    const usageFraction = tokenCount / this.config.modelMaxTokens;
+    const usageFraction = tokenCount / this.effectiveModelMaxTokens;
     return {
       tokenCount,
-      maxTokens: this.config.modelMaxTokens,
+      maxTokens: this.effectiveModelMaxTokens,
       usageFraction,
       masked: usageFraction >= this.config.thresholdFraction,
     };
@@ -787,6 +795,57 @@ export class ContextManager {
    * Replace very large tool result bodies outside the last N tool rounds with
    * `[TOOL_BODY_ELIDED …]` + artifact pointer (AGENT_TOOL_BODY_ELIDE=1).
    */
+  /**
+   * Elide large tool bodies even in recent rounds — used when the prompt is near
+   * the provider context ceiling (web_fetch dumps, etc.).
+   */
+  async elideOversizedToolBodies(opts: {
+    minChars: number;
+    toolNames?: string[];
+  }): Promise<number> {
+    const minChars = Math.max(1000, opts.minChars);
+    const toolFilter = opts.toolNames?.length
+      ? new Set(opts.toolNames.map((n) => n.toLowerCase()))
+      : null;
+    const idToName = new Map<string, string>();
+    for (const m of this.conversation) {
+      if (m.role !== "assistant" || !("tool_calls" in m) || !Array.isArray(m.tool_calls)) continue;
+      for (const tc of m.tool_calls as Array<{ id: string; function?: { name?: string } }>) {
+        idToName.set(tc.id, tc.function?.name ?? "?");
+      }
+    }
+    let elided = 0;
+    for (let i = 0; i < this.conversation.length; i++) {
+      const m = this.conversation[i];
+      if (!m || m.role !== "tool" || typeof m.content !== "string") continue;
+      if (
+        m.content.startsWith("[TOOL_BODY_ELIDED") ||
+        m.content.startsWith("[observation masked") ||
+        m.content.startsWith("ERROR:")
+      ) {
+        continue;
+      }
+      if (m.content.length < minChars) continue;
+      const id = "tool_call_id" in m ? (m.tool_call_id as string) : "";
+      const name = idToName.get(id) ?? "tool";
+      if (toolFilter && !toolFilter.has(name.toLowerCase())) continue;
+      try {
+        const { hash, pointer } = await stashToolBodyElide(m.content);
+        const preview = m.content.slice(0, 400).replace(/\n/g, " ");
+        this.conversation[i] = {
+          ...m,
+          content:
+            `[TOOL_BODY_ELIDED tool=${name} original_chars=${m.content.length} hash=${hash}]\n` +
+            `Full body: ${pointer}\nPreview: ${preview}${m.content.length > 400 ? "…" : ""}`,
+        } as Message;
+        elided += 1;
+      } catch {
+        /* keep original on artifact failure */
+      }
+    }
+    return elided;
+  }
+
   async elideStaleToolResults(): Promise<void> {
     if (effectiveHarnessEnvRaw("AGENT_TOOL_BODY_ELIDE") !== "1") return;
     const minChars = Math.max(

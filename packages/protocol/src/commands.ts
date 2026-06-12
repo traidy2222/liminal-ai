@@ -81,6 +81,10 @@ export interface ClientCommandMap {
   vireon_sign_in: { openBrowser?: boolean };
   /** Clear local Vireon license + account binding. */
   vireon_sign_out: Record<string, never>;
+  /** Re-resolve BYOK vs managed inference after sign-in or harness update. */
+  vireon_reconnect: Record<string, never>;
+  /** Bedrock model catalog for Pro managed inference (license Bearer). */
+  get_vireon_inference_models: Record<string, never>;
 
   /** List persisted Liminal desktop apps + cache snapshots. */
   list_apps: Record<string, never>;

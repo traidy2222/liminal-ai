@@ -29,6 +29,7 @@ export const OPENROUTER_MODEL_SLUG = {
   MIMO_V25_PRO: "xiaomi/mimo-v2.5-pro",
   MIMO_V25: "xiaomi/mimo-v2.5",
   // Anthropic
+  CLAUDE_OPUS_48: "anthropic/claude-opus-4.8",
   CLAUDE_OPUS_47: "anthropic/claude-opus-4.7",
   CLAUDE_OPUS_47_FAST: "anthropic/claude-opus-4.7-fast",
   CLAUDE_SONNET_46: "anthropic/claude-sonnet-4.6",
@@ -327,6 +328,27 @@ export const PROVIDER_MODEL_PRESETS: readonly ProviderModelPreset[] = [
       "Replaces deprecated Gemini 2.5 / 3.1-preview packs.",
     OPENROUTER_MODEL_SLUG.GEMINI_35_FLASH,
     openRouterAutoRoutePatch(OPENROUTER_MODEL_SLUG.GEMINI_35_FLASH, OPENROUTER_MODEL_SLUG.GEMINI_31_FLASH_LITE)
+  ),
+  preset(
+    "bedrock-claude-opus-4.8",
+    "AWS Bedrock — Claude Opus 4.8 + Haiku 4.5",
+    "Vireon managed inference via Bedrock Mantle (AWS billing). Main: anthropic.claude-opus-4-8. " +
+      "Fast: anthropic.claude-haiku-4-5. Requires Pro managed inference + Bedrock on api.vireondynamics.com.",
+    "anthropic.claude-opus-4-8",
+    {
+      ...buildHarnessModelPackEnvPatch({
+        main: "anthropic.claude-opus-4-8",
+        fast: "anthropic.claude-haiku-4-5",
+        baseURL: DEFAULT_AGENT_API_BASE_URL,
+        providerStrategy: "price",
+        providerOrder: "",
+        providerOrderFast: "",
+        providerRouteAuto: "0",
+        allowFallbacks: "0",
+      }),
+      AGENT_INFERENCE_MODE: "managed",
+      AGENT_INFERENCE_PREFER_MANAGED: "1",
+    }
   ),
   preset(
     "anthropic-claude-opus-4.7",

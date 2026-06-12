@@ -11,6 +11,8 @@ import {
   maybeAttachSessionEventLog,
   readChatMetadata,
   resolveChatBoot,
+  recoverManagedInferencePreferences,
+  resolveProviderConfigWithInference,
   resolveWorkspaceRoot,
   runWithWorkspaceRoot,
   saveLastActiveChatId,
@@ -87,9 +89,36 @@ export class ChatRegistry {
     this.cachedRuntimePrefs = await loadRuntimePreferences(root).catch(() => null);
   }
 
+  async recoverManagedInferenceIfNeeded(): Promise<boolean> {
+    const root = this.deps.repoRoot.trim() || resolveWorkspaceRoot();
+    const prefs =
+      this.cachedRuntimePrefs ?? (await loadRuntimePreferences(root).catch(() => null));
+    const { recovered, prefs: next } = await recoverManagedInferencePreferences(prefs);
+    if (!recovered || !next) return false;
+    await saveRuntimePreferences(next, root);
+    this.cachedRuntimePrefs = next;
+    this.deps.runtimePreferences = next;
+    return true;
+  }
+
   async reapplyAllProviders(): Promise<void> {
+    await this.reloadRuntimePrefs();
+    await this.recoverManagedInferenceIfNeeded();
+    await this.reloadRuntimePrefs();
+    try {
+      const modelOverride =
+        this.cachedRuntimePrefs?.provider?.model?.trim() ||
+        this.cachedRuntimePrefs?.harness?.env?.AGENT_MODEL?.trim();
+      this.deps.provider = await resolveProviderConfigWithInference(
+        modelOverride ? { model: modelOverride } : undefined,
+        this.cachedRuntimePrefs
+      );
+    } catch {
+      /* keep prior provider snapshot */
+    }
     for (const slot of this.slots.values()) {
       if (slot.bridge.harness.getIsRunning()) continue;
+      await slot.bridge.harness.recoverManagedInferenceRouteIfNeeded().catch(() => false);
       await slot.bridge.refreshProviderConfig().catch(() => undefined);
     }
   }

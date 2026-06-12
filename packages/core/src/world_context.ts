@@ -1306,3 +1306,15 @@ export async function buildWorldContextMessage(options?: WorldContextOptions): P
 
   return lines.join("\n");
 }
+
+/** Mid-session patch when provider model/baseURL changes after the initial world context block. */
+export function buildActiveLlmContextUpdateMessage(model: string, baseURL: string): string {
+  const m = model.trim() || DEFAULT_AGENT_MODEL_SLUG;
+  const b = baseURL.trim() || DEFAULT_AGENT_API_BASE_URL;
+  return (
+    `[WORLD CONTEXT UPDATE]\n` +
+    `LLM active: model=${m}  ·  baseURL=${b}\n` +
+    `This supersedes the LLM active line from session-start world context. ` +
+    `Use it for "what model are you on?" and other technical runtime questions.`
+  );
+}

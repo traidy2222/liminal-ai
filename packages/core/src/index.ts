@@ -595,6 +595,7 @@ export {
   isInferenceBudgetExceededError,
   isManagedInferenceAuthError,
   proManagedInferencePrefsPatch,
+  recoverManagedInferencePreferences,
 } from "./inference_provider.js";
 export {
   ensureLocalProviderApiKeyInProcess,
@@ -606,9 +607,12 @@ export {
 } from "./provider_api_key.js";
 export {
   buildManagedFreeFallbackHarnessEnv,
+  buildManagedRecoveryHarnessEnv,
+  isModelIncompatibleWithManagedProxy,
   managedFreeFallbackEnabled,
   resolveManagedFreeFallbackFastModel,
   resolveManagedFreeFallbackMainModel,
+  resolveModelForManagedInference,
 } from "./managed_free_fallback.js";
 export { applyProManagedInferenceDefaults } from "./vireon_account.js";
 export type {

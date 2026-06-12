@@ -38,7 +38,10 @@ import {
   resolveStreamChunkTimeoutMs,
 } from "./stream_chunk_timeout.js";
 import { TaskOrchestrator } from "./orchestrator.js";
-import { buildWorldContextMessage } from "./world_context.js";
+import {
+  buildActiveLlmContextUpdateMessage,
+  buildWorldContextMessage,
+} from "./world_context.js";
 import { gatherRepoMapLines } from "./repo_map.js";
 import {
   rewriteQueryForRecall,
@@ -48,6 +51,12 @@ import {
 import { distillToolOutput, shouldDistillToolOutput } from "./output_distill.js";
 import { appendFailureLog } from "./failure_log.js";
 import { completeChatJson, getFastModelSlug } from "./router.js";
+import { estimateMessagesTokens } from "./token_estimate.js";
+import {
+  clampMaxCompletionTokensForContext,
+  isContextLengthExceededError,
+  resolveModelContextWindowTokens,
+} from "./model_context_window.js";
 import { stableArgsJsonKey } from "./json_stable.js";
 import {
   buildHarnessRuleRecallMessage,
@@ -138,7 +147,10 @@ import {
   inferenceAccountUrl,
   isInferenceBudgetExceededError,
   isManagedInferenceAuthError,
+  managedInferenceBaseUrl,
+  resolveInferenceMode,
   resolveProviderConfigWithInference,
+  shouldRouteOpenRouterViaManaged,
 } from "./inference_provider.js";
 import {
   ensureLocalProviderApiKeyInProcess,
@@ -147,8 +159,11 @@ import {
 import { isOpenRouterApiBaseUrl } from "./openrouter_session.js";
 import {
   buildManagedFreeFallbackHarnessEnv,
+  buildManagedRecoveryHarnessEnv,
+  isModelIncompatibleWithManagedProxy,
   managedFreeFallbackEnabled,
   resolveManagedFreeFallbackMainModel,
+  resolveModelForManagedInference,
 } from "./managed_free_fallback.js";
 import {
   clearManagedInferenceSessionCache,
@@ -1248,6 +1263,7 @@ export class AgentHarness {
   private reasoningStallNudgeLevel = 0;
   private suppressReasoningToolsThisSend = false;
   private proactiveCompressedThisSend = false;
+  private contextOverflowRecoveredThisRound = false;
   private criticConsumedThisSend = false;
   /** Timestamp of the last compression event in this send (for ACON failure analysis). */
   private lastCompressionTimestampThisSend = 0;
@@ -1863,6 +1879,11 @@ export class AgentHarness {
       }
     }
     const apiKey = this.config.openRouterApiKey?.trim();
+    if (!apiKey && isManagedInferenceBaseUrl(baseURL)) {
+      throw new Error(
+        "Managed inference session missing — open Settings → Sign in to Vireon and try again."
+      );
+    }
     if (!apiKey && !isManagedInferenceBaseUrl(baseURL)) {
       throw new Error(
         isKimchiApiBaseUrl(baseURL)
@@ -1878,6 +1899,84 @@ export class AgentHarness {
         ? buildOpenRouterAttributionHeaders()
         : {},
     });
+  }
+
+  /**
+   * Clear sticky BYOK free-model fallback when managed credits are available again.
+   * Also fixes persisted prefs that still carry openrouter/free on the managed proxy URL.
+   */
+  private async maybeRecoverManagedInferenceRoute(): Promise<void> {
+    const mode = resolveInferenceMode(this.runtimePreferences);
+    const onInference = isManagedInferenceBaseUrl(this.config.baseURL);
+    const badModel = isModelIncompatibleWithManagedProxy(this.config.model);
+    const shouldTry =
+      this.managedByokFallbackActive ||
+      (onInference && badModel) ||
+      (mode === "managed" && badModel);
+    if (!shouldTry) return;
+
+    let status: Awaited<ReturnType<typeof fetchInferenceUsageStatus>> = null;
+    try {
+      status = await fetchInferenceUsageStatus(this.runtimePreferences);
+    } catch {
+      return;
+    }
+    if (!status?.entitled) return;
+    if (status.remainingUsd != null && status.remainingUsd <= 0) return;
+
+    const model = resolveModelForManagedInference(this.config.model, this.runtimePreferences);
+    clearManagedInferenceSessionCache();
+    this.managedByokFallbackActive = false;
+
+    const { baseURL: _pinnedByokBase, ...providerSansBase } =
+      this.runtimePreferences?.provider ?? {};
+    await this.patchRuntimePreferences(
+      {
+        harness: {
+          env: buildManagedRecoveryHarnessEnv(this.runtimePreferences, model),
+        },
+        provider: {
+          ...providerSansBase,
+          inferenceMode: "managed",
+          model,
+        },
+      },
+      { persist: true }
+    );
+
+    if (!this.isUiQuiet()) {
+      this.emitter.emit("text", {
+        delta:
+          `\n✓ Managed inference credits available — routing through Vireon on \`${model}\`.\n`,
+        channel: "user",
+      });
+    }
+
+    if (!this.running) {
+      await this.refreshProviderConfig();
+    } else {
+      const provider = await resolveProviderConfigWithInference(
+        { model },
+        this.runtimePreferences
+      );
+      this.config.openRouterApiKey = provider.apiKey;
+      this.config.baseURL = provider.baseURL;
+      this.config.model = provider.model;
+      this.rebuildClient();
+    }
+  }
+
+  /** Public entry for sidecar reconnect — clears in-memory BYOK fallback when credits return. */
+  async recoverManagedInferenceRouteIfNeeded(): Promise<boolean> {
+    const before =
+      this.managedByokFallbackActive ||
+      isModelIncompatibleWithManagedProxy(this.config.model);
+    if (!before) return false;
+    await this.maybeRecoverManagedInferenceRoute();
+    return (
+      !this.managedByokFallbackActive &&
+      !isModelIncompatibleWithManagedProxy(this.config.model)
+    );
   }
 
   /** Switch to free BYOK before the first completion when the wallet is already empty. */
@@ -2040,6 +2139,28 @@ export class AgentHarness {
     }
   }
 
+  /** Model slug from persisted prefs — not the in-memory harness snapshot (may be stale). */
+  private resolveEffectiveModelFromPreferences(): string | undefined {
+    return (
+      this.runtimePreferences?.provider?.model?.trim() ||
+      resolveHarnessEnvRaw("AGENT_MODEL", this.runtimePreferences)?.trim() ||
+      this.config.model?.trim()
+    );
+  }
+
+  /** Keep conversation grounding in sync when the user changes model mid-session. */
+  private injectActiveLlmContextUpdateIfNeeded(prevModel: string, prevBaseURL: string): void {
+    if (!this.worldContextInjected || this.agentDepth > 0) return;
+    const model = this.config.model?.trim() ?? "";
+    const baseURL = this.config.baseURL?.trim() ?? "";
+    if (!model) return;
+    if (model === prevModel.trim() && baseURL === prevBaseURL.trim()) return;
+    this.context.appendMessage({
+      role: "system",
+      content: buildActiveLlmContextUpdateMessage(model, baseURL),
+    });
+  }
+
   /**
    * Re-resolve provider (BYOK vs managed inference) after Vireon sign-in or settings change.
    */
@@ -2047,28 +2168,31 @@ export class AgentHarness {
     if (this.running) {
       throw new Error("Cannot refresh provider while a turn is in progress.");
     }
+    const prevModel = this.config.model ?? "";
+    const prevBaseURL = this.config.baseURL ?? "";
+    const effectiveModel = this.resolveEffectiveModelFromPreferences();
     if (this.managedByokFallbackActive) {
       const byok = resolveProviderConfig({
         baseURL: this.config.baseURL,
-        model: this.config.model,
+        model: effectiveModel ?? this.config.model,
       });
       this.config.openRouterApiKey = byok.apiKey;
       this.config.baseURL = byok.baseURL;
       this.config.model = byok.model;
       this.rebuildClient();
+      this.injectActiveLlmContextUpdateIfNeeded(prevModel, prevBaseURL);
       return;
     }
     const provider = await resolveProviderConfigWithInference(
-      {
-        baseURL: this.config.baseURL,
-        model: this.config.model,
-      },
+      effectiveModel ? { model: effectiveModel } : undefined,
       this.runtimePreferences
     );
     this.config.openRouterApiKey = provider.apiKey;
     this.config.baseURL = provider.baseURL;
     this.config.model = provider.model;
     this.rebuildClient();
+    this.syncContextWindowForModel();
+    this.injectActiveLlmContextUpdateIfNeeded(prevModel, prevBaseURL);
     if (this.agentDepth === 0) {
       this.emitter.emit("text", {
         delta:
@@ -2125,6 +2249,9 @@ export class AgentHarness {
   }
 
   private async applyRuntimePreferencePatch(patch: Partial<RuntimePreferences>): Promise<void> {
+    const prevModel = this.config.model ?? "";
+    const prevBaseURL = this.config.baseURL ?? "";
+    const harnessModelTouched = patch.harness?.env?.AGENT_MODEL !== undefined;
     const merged: RuntimePreferences = {
       ...(this.runtimePreferences ?? { updatedAt: Date.now() }),
       ...patch,
@@ -2156,8 +2283,12 @@ export class AgentHarness {
     this.runtimePreferences = merged;
     this.config.runtimePreferences = merged;
 
-    if (merged.provider?.model) {
-      this.config.model = merged.provider.model;
+    const effectiveModel =
+      merged.provider?.model?.trim() ||
+      merged.harness?.env?.AGENT_MODEL?.trim() ||
+      this.config.model;
+    if (effectiveModel) {
+      this.config.model = effectiveModel;
     }
     if (merged.provider?.baseURL) {
       this.config.baseURL = merged.provider.baseURL;
@@ -2166,7 +2297,8 @@ export class AgentHarness {
       merged.provider?.keySource ||
       merged.provider?.baseURL ||
       merged.provider?.model ||
-      merged.provider?.inferenceMode
+      merged.provider?.inferenceMode ||
+      harnessModelTouched
     ) {
       let keySource: string;
       if (this.managedByokFallbackActive && merged.provider?.inferenceMode !== "managed") {
@@ -2184,7 +2316,7 @@ export class AgentHarness {
           {
             keySource: merged.provider?.keySource,
             baseURL: this.config.baseURL,
-            model: this.config.model,
+            model: effectiveModel,
           },
           merged
         );
@@ -2194,6 +2326,7 @@ export class AgentHarness {
         keySource = provider.keySource;
         this.rebuildClient();
       }
+      this.injectActiveLlmContextUpdateIfNeeded(prevModel, prevBaseURL);
       this.emitter.emit("text", {
         delta:
           `\n[Runtime] Effective provider updated: model=${this.config.model}, ` +
@@ -2447,6 +2580,39 @@ export class AgentHarness {
       status: "running",
       abortController: new AbortController(),
     });
+    this.syncContextWindowForModel();
+  }
+
+  private syncContextWindowForModel(model?: string): void {
+    const slug = (model ?? this.config.model ?? "").trim();
+    if (!slug) return;
+    this.context.syncModelMaxTokens(resolveModelContextWindowTokens(slug));
+  }
+
+  /** Shrink / compress history when the prompt nears the provider context ceiling. */
+  private async prepareMessagesForContextLimit(
+    messages: Message[],
+    modelSlug: string
+  ): Promise<Message[]> {
+    this.syncContextWindowForModel(modelSlug);
+    const window = resolveModelContextWindowTokens(modelSlug);
+    const margin = Math.max(1024, Math.floor(window * 0.05));
+    let inputTokens = estimateMessagesTokens(messages);
+    let passes = 0;
+    while (inputTokens + 512 > window - margin && passes < 4) {
+      passes += 1;
+      await this.context.elideStaleToolResults();
+      await this.context.elideOversizedToolBodies({
+        minChars: 6000,
+        toolNames: ["web_fetch", "read_file", "browser_snapshot", "browser_extract"],
+      });
+      this.context.forceCompress(
+        `Context near model limit (~${inputTokens}/${window} tokens) — compressing before completion`
+      );
+      messages = scrubMessagesSpecialTokens(await this.context.buildMessages());
+      inputTokens = estimateMessagesTokens(messages);
+    }
+    return messages;
   }
 
   async send(
@@ -2488,6 +2654,7 @@ export class AgentHarness {
     }
   ): Promise<void> {
     if (this.running) throw new Error("Agent is already processing a message");
+    await this.maybeRecoverManagedInferenceRoute();
     await this.maybePreemptManagedCreditExhaustion();
     if (options?.freshContext === true && this.agentDepth === 0) {
       this.reset();
@@ -2512,26 +2679,52 @@ export class AgentHarness {
     this.clearPersonalityHeartbeatSchedule();
     this.lastTurnTerminationReason = null;
 
-    if (this.agentDepth === 0 && isManagedInferenceBaseUrl(this.config.baseURL)) {
-      try {
-        const session = await ensureManagedInferenceSession(
-          this.runtimePreferences,
-          this.config.baseURL
+    if (this.agentDepth === 0) {
+      const mode = resolveInferenceMode(this.runtimePreferences);
+      const routeManaged =
+        !this.managedByokFallbackActive &&
+        (mode === "managed" ||
+          (mode !== "byok" && (await shouldRouteOpenRouterViaManaged(this.runtimePreferences))));
+      if (routeManaged) {
+        const managedModel = resolveModelForManagedInference(
+          this.config.model,
+          this.runtimePreferences
         );
-        if (session && session.apiKey !== this.config.openRouterApiKey) {
-          this.config.openRouterApiKey = session.apiKey;
-          this.config.baseURL = session.baseURL;
-          this.rebuildClient();
+        if (managedModel !== this.config.model) {
+          this.config.model = managedModel;
+          await this.patchRuntimePreferences(
+            {
+              provider: { model: managedModel },
+              harness: { env: { AGENT_MODEL: managedModel } },
+            },
+            { persist: true }
+          );
         }
-      } catch (err) {
-        const msg = err instanceof Error ? err.message : String(err);
-        this.running = false;
-        this.emitter.emit("error", {
-          err: new Error(
-            `Managed inference session failed: ${msg}. Run \`liminal login\` or use Settings → Sign in to Vireon.`
-          ),
-        });
-        return;
+        try {
+          const session = await ensureManagedInferenceSession(
+            this.runtimePreferences,
+            managedInferenceBaseUrl()
+          );
+          if (!session?.apiKey?.trim()) {
+            throw new Error("Managed inference session unavailable — sign in to Vireon first.");
+          }
+          const normalizedBase = session.baseURL.replace(/\/$/, "");
+          const currentBase = (this.config.baseURL ?? "").replace(/\/$/, "");
+          if (session.apiKey !== this.config.openRouterApiKey || normalizedBase !== currentBase) {
+            this.config.openRouterApiKey = session.apiKey;
+            this.config.baseURL = normalizedBase;
+            this.rebuildClient();
+          }
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : String(err);
+          this.running = false;
+          this.emitter.emit("error", {
+            err: new Error(
+              `Managed inference session failed: ${msg}. Run \`liminal login\` or use Settings → Sign in to Vireon.`
+            ),
+          });
+          return;
+        }
       }
     }
 
@@ -4672,6 +4865,12 @@ export class AgentHarness {
       this.context.forceCompress(anchor);
       this.proactiveCompressedThisSend = true;
     }
+    if (pctBefore >= 75) {
+      await this.context.elideOversizedToolBodies({
+        minChars: 8000,
+        toolNames: ["web_fetch", "read_file"],
+      });
+    }
 
     const recallEvery = parseInt(resolveHarnessEnvRaw("AGENT_RECALL_EVERY_N", this.runtimePreferences) ?? "2", 10);
     const intent = this.turnInference?.intent ?? "knowledge";
@@ -5007,15 +5206,44 @@ export class AgentHarness {
     );
 
     const routingModel = routingProfile.applied ? routingProfile.modelSlug : undefined;
+    const activeModelSlug = routingModel ?? this.config.model;
+    this.contextOverflowRecoveredThisRound = false;
     let streamAbort = new AbortController();
-    let stream = await this.streamWithRetry(
-      messages,
-      tools,
-      routingModel,
-      this._turnReasoningBudget,
-      streamAbort,
-      this._turnReasoningSurface
-    );
+    const openStream = async () => {
+      const prepared = await this.prepareMessagesForContextLimit(messages, activeModelSlug);
+      return this.streamWithRetry(
+        prepared,
+        tools,
+        routingModel,
+        this._turnReasoningBudget,
+        streamAbort,
+        this._turnReasoningSurface
+      );
+    };
+    let stream: Stream<OpenAI.Chat.Completions.ChatCompletionChunk>;
+    try {
+      stream = await openStream();
+    } catch (err) {
+      if (isContextLengthExceededError(err) && !this.contextOverflowRecoveredThisRound) {
+        this.contextOverflowRecoveredThisRound = true;
+        await this.context.elideOversizedToolBodies({
+          minChars: 4000,
+          toolNames: ["web_fetch", "read_file", "browser_snapshot", "browser_extract"],
+        });
+        this.context.forceCompress("Provider context length exceeded — emergency compress");
+        messages = scrubMessagesSpecialTokens(await this.context.buildMessages());
+        if (!this.isUiQuiet()) {
+          this.emitter.emit("text", {
+            delta:
+              "\n⚠ Context full — compressed history and elided large tool outputs. Retrying…\n",
+            channel: "user",
+          });
+        }
+        stream = await openStream();
+      } else {
+        throw err;
+      }
+    }
     let finishReason: string | null = null;
     let streamAttempt = 0;
 
@@ -5164,6 +5392,7 @@ export class AgentHarness {
           /* already settled */
         }
         streamAbort = new AbortController();
+        messages = await this.prepareMessagesForContextLimit(messages, activeModelSlug);
         stream = await this.streamWithRetry(
           messages,
           tools,
@@ -6365,12 +6594,20 @@ export class AgentHarness {
         ? maxCompletionRaw
         : 0;
       const effectiveMaxTokens = routingMaxTokens > 0 ? routingMaxTokens : defaultMaxTokens;
-      const maxCompletionTokens = effectiveMaxTokens > 0
-        ? Math.min(scaleMaxCompletionTokensForEffort(effectiveMaxTokens), 128_000)
-        : undefined;
+      const scaledMaxTokens =
+        effectiveMaxTokens > 0
+          ? Math.min(scaleMaxCompletionTokensForEffort(effectiveMaxTokens), 128_000)
+          : undefined;
 
       // OpenRouter provider routing: adaptive price sort + session_id stickiness for cache affinity.
       const modelSlug = modelOverride ?? this.config.model;
+      const contextWindow = resolveModelContextWindowTokens(modelSlug);
+      const inputTokens = estimateMessagesTokens(messages);
+      const maxCompletionTokens = clampMaxCompletionTokensForContext(
+        inputTokens,
+        scaledMaxTokens,
+        contextWindow
+      );
       const orExtras = buildOpenRouterChatRequestExtras({
         baseURL: this.config.baseURL,
         modelSlug,

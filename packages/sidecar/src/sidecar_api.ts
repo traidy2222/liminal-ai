@@ -144,6 +144,7 @@ export function buildSettingsSnapshot(
     !!(harnessCfg?.openRouterApiKey?.trim()) ||
     isProviderApiKeyConfigured({ baseURL: baseURL || undefined });
 
+  const managedRoute = baseURL.includes("/inference");
   return {
     tabs: HARNESS_SETTINGS_TABS,
     fields: buildHarnessSettingsApiFields(prefs),
@@ -155,13 +156,15 @@ export function buildSettingsSnapshot(
       modelLockedByEnv: false,
       baseURLLockedByEnv: false,
       apiKeyConfigured,
+      managedRoute,
       inferenceMode: resolveInferenceMode(prefs),
       resolvedPresetId: resolveProviderPresetId(model, baseURL),
-      resolvedBackendId: resolveProviderBackendId(baseURL),
+      resolvedBackendId: managedRoute ? "managed" : resolveProviderBackendId(baseURL),
     },
-    hint:
-      "API keys are stored in .env only and are never sent over the desktop protocol. " +
-      "Use save_provider to set OPENROUTER_API_KEY, KIMCHI_API_KEY, or AGENT_API_KEY.",
+    hint: managedRoute
+      ? "Pro managed inference — models route through Vireon (no API key in .env)."
+      : "API keys are stored in .env only and are never sent over the desktop protocol. " +
+        "Sign in to Vireon for Pro managed inference, or set BYOK keys in .env.",
   };
 }
 
@@ -267,6 +270,7 @@ export async function patchHarnessSettings(
     if (typeof body.provider.baseURL === "string") {
       const b = body.provider.baseURL.trim();
       if (b) prov.baseURL = b.slice(0, 500);
+      else delete prov.baseURL;
     }
     const mode = body.provider.inferenceMode?.trim().toLowerCase();
     if (mode === "byok" || mode === "managed" || mode === "auto") {

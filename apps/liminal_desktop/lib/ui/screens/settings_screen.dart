@@ -16,6 +16,7 @@ import '../design_system/liminal_design_system.dart';
 import '../widgets/liminal_form_field.dart';
 import '../widgets/liminal_page_canvas.dart';
 import '../widgets/liminal_shell.dart';
+import '../widgets/managed_inference_panel.dart';
 
 class SettingsScreen extends StatefulWidget {
   const SettingsScreen({super.key});
@@ -45,14 +46,65 @@ class _SettingsScreenState extends State<SettingsScreen>
         _model.text = cfg.providerModel;
         _baseUrl.text = cfg.providerBaseUrl;
       }
+      await AppScope.of(context).loadVireonAccount();
       await Future.wait([
-        AppScope.of(context).loadHarnessSettings(),
-        AppScope.of(context).loadVireonAccount(),
+        AppScope.of(context).loadHarnessSettings(reconnectVireon: true),
         if (LiminalFeatureFlags.desktopAppsEnabled)
           AppScope.of(context).loadDesktopApps(),
       ]);
-      if (mounted) _syncFieldControllers();
+      if (mounted) {
+        _syncFieldControllers();
+        await AppScope.of(context).loadManagedInferenceModels();
+      }
     });
+  }
+
+  void _syncProviderControllersFromHost() {
+    final host = AppScope.of(context);
+    final cfg = host.config;
+    final snap = host.harnessSettings;
+    if (cfg != null) {
+      _model.text = cfg.providerModel;
+      _baseUrl.text = cfg.providerBaseUrl;
+    } else if (snap != null) {
+      _model.text = snap.provider.model;
+      _baseUrl.text = snap.provider.baseURL;
+    }
+  }
+
+  String _fastModelFromSnapshot(HarnessSettingsSnapshot? snap) {
+    if (snap == null) return '';
+    for (final f in snap.fields) {
+      if (f.key == 'AGENT_FAST_MODEL') return f.value.trim();
+    }
+    return '';
+  }
+
+  Future<void> _onManagedMainModel(String modelId) async {
+    setState(() {
+      _saving = true;
+      _error = null;
+    });
+    final ok = await AppScope.of(context).patchManagedInferenceModels(mainModel: modelId);
+    if (!mounted) return;
+    if (ok) {
+      _syncProviderControllersFromHost();
+      _syncFieldControllers();
+    } else {
+      _error = 'Failed to update main model';
+    }
+    setState(() => _saving = false);
+  }
+
+  Future<void> _onManagedFastModel(String modelId) async {
+    setState(() {
+      _saving = true;
+      _error = null;
+    });
+    final ok = await AppScope.of(context).patchManagedInferenceModels(fastModel: modelId);
+    if (!mounted) return;
+    if (!ok) _error = 'Failed to update fast model';
+    setState(() => _saving = false);
   }
 
   void _syncFieldControllers() {
@@ -203,7 +255,11 @@ class _SettingsScreenState extends State<SettingsScreen>
                           onSignIn: () async {
                             setState(() => _error = null);
                             final ok = await AppScope.of(context).signInToVireon();
-                            if (mounted && !ok) {
+                            if (!mounted) return;
+                            if (ok) {
+                              _syncProviderControllersFromHost();
+                              _syncFieldControllers();
+                            } else {
                               setState(() => _error = AppScope.of(context).vireonAuthError);
                             }
                           },
@@ -245,22 +301,34 @@ class _SettingsScreenState extends State<SettingsScreen>
                     sliver: SliverToBoxAdapter(
                       child: LiminalSection(
                         title: 'Provider',
-                        subtitle:
-                            'API keys live in `.env` only — never sent over the socket.',
-                        child: _ProviderForm(
-                          apiKey: _apiKey,
-                          model: _model,
-                          baseUrl: _baseUrl,
-                          cfg: cfg,
-                          provider: snap?.provider,
-                          presets: snap?.providerPresets ?? const [],
-                          backends: snap?.providerBackends.isNotEmpty == true
-                              ? snap!.providerBackends
-                              : HarnessSettingsSnapshot.defaultBackends(),
-                          saving: _saving,
-                          onSave: _saveProvider,
-                          onPresetApply: _applyProviderPreset,
-                        ),
+                        subtitle: snap?.provider.showManagedInference == true
+                            ? 'Pro managed inference — routed through Vireon (Bedrock).'
+                            : 'API keys live in `.env` only — never sent over the socket.',
+                        child: snap?.provider.showManagedInference == true
+                            ? ManagedInferencePanel(
+                                mainModel: snap!.provider.model,
+                                fastModel: _fastModelFromSnapshot(snap),
+                                catalog: host.managedInferenceModels,
+                                loading: host.managedInferenceModelsLoading,
+                                error: host.managedInferenceModelsError,
+                                saving: _saving,
+                                onMainModel: _onManagedMainModel,
+                                onFastModel: _onManagedFastModel,
+                              )
+                            : _ProviderForm(
+                                apiKey: _apiKey,
+                                model: _model,
+                                baseUrl: _baseUrl,
+                                cfg: cfg,
+                                provider: snap?.provider,
+                                presets: snap?.providerPresets ?? const [],
+                                backends: snap?.providerBackends.isNotEmpty == true
+                                    ? snap!.providerBackends
+                                    : HarnessSettingsSnapshot.defaultBackends(),
+                                saving: _saving,
+                                onSave: _saveProvider,
+                                onPresetApply: _applyProviderPreset,
+                              ),
                       ),
                     ),
                   ),

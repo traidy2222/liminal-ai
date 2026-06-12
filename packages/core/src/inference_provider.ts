@@ -25,6 +25,11 @@ import {
 } from "./inference_session.js";
 import { formatKimchiProviderError, isKimchiApiBaseUrl } from "./kimchi_provider.js";
 import { ensureLocalProviderApiKeyInProcess } from "./provider_api_key.js";
+import {
+  buildManagedRecoveryHarnessEnv,
+  isModelIncompatibleWithManagedProxy,
+  resolveModelForManagedInference,
+} from "./managed_free_fallback.js";
 
 export type InferenceMode = "byok" | "managed" | "auto";
 export type OpenRouterRoute = "managed" | "byok";
@@ -248,7 +253,13 @@ export async function shouldRouteOpenRouterViaManaged(
   const mode = resolveInferenceMode(prefs);
   if (mode === "byok") return false;
   const pinnedBase = prefs?.provider?.baseURL?.trim();
-  if (pinnedBase && !isManagedInferenceBaseUrl(pinnedBase)) return false;
+  if (
+    mode !== "managed" &&
+    pinnedBase &&
+    !isManagedInferenceBaseUrl(pinnedBase)
+  ) {
+    return false;
+  }
   const entitlements = await loadResolvedEntitlements();
   const entitled = hasEntitlement(entitlements, ENTITLEMENTS.PRO_MANAGED_INFERENCE);
   if (!entitled) return false;
@@ -306,7 +317,11 @@ export async function resolveProviderConfigWithInference(
 
   const requestedBase =
     overrides?.baseURL?.trim() || prefs?.provider?.baseURL?.trim();
-  if (requestedBase && !isManagedInferenceBaseUrl(requestedBase)) {
+  if (
+    mode !== "managed" &&
+    requestedBase &&
+    !isManagedInferenceBaseUrl(requestedBase)
+  ) {
     return resolveProviderConfig({ ...overrides, baseURL: requestedBase });
   }
 
@@ -319,9 +334,12 @@ export async function resolveProviderConfigWithInference(
 
   if (managed) {
     const creds = await resolveManagedOpenRouterCredentials(prefs);
-    const model =
+    const rawModel =
       (overrides?.model ?? prefs?.provider?.model ?? process.env["AGENT_MODEL"]?.trim()) ||
       DEFAULT_AGENT_MODEL_SLUG;
+    const model = isModelIncompatibleWithManagedProxy(rawModel)
+      ? resolveModelForManagedInference(rawModel, prefs)
+      : rawModel;
     return {
       apiKey: creds.apiKey,
       baseURL: creds.baseURL,
@@ -428,4 +446,65 @@ export function proManagedInferencePrefsPatch(): Partial<RuntimePreferences> {
     provider: { inferenceMode: "managed" },
     harness: { env: { AGENT_INFERENCE_MODE: "managed", AGENT_INFERENCE_PREFER_MANAGED: "1" } },
   };
+}
+
+function prefsNeedManagedRecovery(prefs: RuntimePreferences): boolean {
+  const mode = resolveInferenceMode(prefs);
+  const model =
+    prefs.provider?.model?.trim() ||
+    resolveHarnessEnvRaw("AGENT_MODEL", prefs)?.trim() ||
+    DEFAULT_AGENT_MODEL_SLUG;
+  if (isModelIncompatibleWithManagedProxy(model)) {
+    return mode === "managed" || (mode !== "byok" && inferencePreferManaged(prefs));
+  }
+  const pinnedBase = prefs.provider?.baseURL?.trim();
+  if (
+    mode === "managed" &&
+    pinnedBase &&
+    !isManagedInferenceBaseUrl(pinnedBase)
+  ) {
+    return true;
+  }
+  return false;
+}
+
+/**
+ * When credits return after a free-model BYOK fallback, restore managed routing in prefs.
+ * Safe to call on reconnect / sign-in — no-op when BYOK is intentional or wallet is empty.
+ */
+export async function recoverManagedInferencePreferences(
+  prefs: RuntimePreferences | null
+): Promise<{ recovered: boolean; prefs: RuntimePreferences | null }> {
+  if (!prefs) return { recovered: false, prefs };
+  if (!prefsNeedManagedRecovery(prefs)) return { recovered: false, prefs };
+
+  const entitlements = await loadResolvedEntitlements();
+  if (!hasEntitlement(entitlements, ENTITLEMENTS.PRO_MANAGED_INFERENCE)) {
+    return { recovered: false, prefs };
+  }
+
+  const status = await fetchInferenceUsageStatus(prefs);
+  if (!status?.entitled) return { recovered: false, prefs };
+  if (status.remainingUsd != null && status.remainingUsd <= 0) {
+    return { recovered: false, prefs };
+  }
+
+  const model = resolveModelForManagedInference(prefs.provider?.model, prefs);
+  const { baseURL: _pinnedByokBase, ...providerSansBase } = prefs.provider ?? {};
+  const recovered: RuntimePreferences = {
+    ...prefs,
+    updatedAt: Date.now(),
+    provider: {
+      ...providerSansBase,
+      inferenceMode: "managed",
+      model,
+    },
+    harness: {
+      env: {
+        ...prefs.harness?.env,
+        ...buildManagedRecoveryHarnessEnv(prefs, model),
+      },
+    },
+  };
+  return { recovered: true, prefs: recovered };
 }

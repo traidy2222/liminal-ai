@@ -38,7 +38,9 @@ const workspaceRoot = resolveWorkspaceRoot();
 async function main(): Promise<void> {
   const runtimePreferences = await loadRuntimePreferences(workspaceRoot);
   const provider = await resolveProviderConfigWithInference(
-    runtimePreferences?.provider,
+    runtimePreferences?.provider?.model
+      ? { model: runtimePreferences.provider.model }
+      : undefined,
     runtimePreferences
   );
 

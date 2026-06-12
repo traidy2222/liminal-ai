@@ -3,10 +3,13 @@ import test from "node:test";
 import OpenAI from "openai";
 import {
   buildManagedFreeFallbackHarnessEnv,
+  isModelIncompatibleWithManagedProxy,
   managedFreeFallbackEnabled,
   resolveManagedFreeFallbackFastModel,
   resolveManagedFreeFallbackMainModel,
+  resolveModelForManagedInference,
 } from "./managed_free_fallback.js";
+import { DEFAULT_AGENT_MODEL_SLUG } from "./harness_default_constants.js";
 import { isInferenceBudgetExceededError } from "./inference_provider.js";
 import { OPENROUTER_MODEL_SLUG } from "./provider_model_presets.js";
 
@@ -46,4 +49,17 @@ test("buildManagedFreeFallbackHarnessEnv pins Stealth for owl-alpha override", (
 test("isInferenceBudgetExceededError detects 402 budget body", () => {
   const err = new OpenAI.APIError(402, { error: "inference_budget_exceeded" }, "budget", {});
   assert.equal(isInferenceBudgetExceededError(err), true);
+});
+
+test("isModelIncompatibleWithManagedProxy flags openrouter/free and :free slugs", () => {
+  assert.equal(isModelIncompatibleWithManagedProxy(OPENROUTER_MODEL_SLUG.FREE_ROUTER), true);
+  assert.equal(isModelIncompatibleWithManagedProxy("nvidia/foo:free"), true);
+  assert.equal(isModelIncompatibleWithManagedProxy(DEFAULT_AGENT_MODEL_SLUG), false);
+});
+
+test("resolveModelForManagedInference replaces fallback slug with default main model", () => {
+  assert.equal(
+    resolveModelForManagedInference(OPENROUTER_MODEL_SLUG.FREE_ROUTER, null),
+    DEFAULT_AGENT_MODEL_SLUG
+  );
 });

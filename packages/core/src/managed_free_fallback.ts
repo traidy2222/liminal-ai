@@ -2,7 +2,11 @@
  * When Vireon managed-inference credits are exhausted (HTTP 402), optionally
  * route through the user's OpenRouter BYOK key on free models (openrouter/free + Nemotron 3 Ultra fast).
  */
-import { DEFAULT_AGENT_API_BASE_URL } from "./harness_default_constants.js";
+import {
+  DEFAULT_AGENT_API_BASE_URL,
+  DEFAULT_AGENT_FAST_MODEL_SLUG,
+  DEFAULT_AGENT_MODEL_SLUG,
+} from "./harness_default_constants.js";
 import { resolveHarnessEnvRaw } from "./harness_effective_env.js";
 import {
   buildHarnessModelPackEnvPatch,
@@ -23,6 +27,53 @@ export function managedFreeFallbackEnabled(prefs?: RuntimePreferences | null): b
 export function resolveManagedFreeFallbackMainModel(prefs?: RuntimePreferences | null): string {
   const raw = resolveHarnessEnvRaw("AGENT_MANAGED_FREE_FALLBACK_MODEL", prefs ?? null)?.trim();
   return raw || OPENROUTER_MODEL_SLUG.FREE_ROUTER;
+}
+
+/** OpenRouter-only slugs that the Vireon managed proxy rejects (Bedrock chat path). */
+export function isModelIncompatibleWithManagedProxy(model: string): boolean {
+  const m = model.trim().toLowerCase();
+  if (!m) return false;
+  if (m === OPENROUTER_MODEL_SLUG.FREE_ROUTER) return true;
+  if (m.startsWith("openrouter/")) return true;
+  if (m.includes(":free")) return true;
+  if (m === resolveManagedFreeFallbackMainModel(null).toLowerCase()) return true;
+  return false;
+}
+
+/** Pick a managed-routable model when prefs still carry a BYOK free-fallback slug. */
+export function resolveModelForManagedInference(
+  currentModel: string | undefined,
+  prefs?: RuntimePreferences | null
+): string {
+  const cur = currentModel?.trim() ?? "";
+  if (cur && !isModelIncompatibleWithManagedProxy(cur)) return cur;
+  const fromProvider = prefs?.provider?.model?.trim();
+  if (fromProvider && !isModelIncompatibleWithManagedProxy(fromProvider)) return fromProvider;
+  const fromEnv = resolveHarnessEnvRaw("AGENT_MODEL", prefs ?? null)?.trim();
+  if (fromEnv && !isModelIncompatibleWithManagedProxy(fromEnv)) return fromEnv;
+  return DEFAULT_AGENT_MODEL_SLUG;
+}
+
+/** Harness env patch when switching back from credit-exhaustion BYOK fallback. */
+export function buildManagedRecoveryHarnessEnv(
+  prefs: RuntimePreferences | null,
+  model: string
+): Record<string, string> {
+  return {
+    AGENT_INFERENCE_MODE: "managed",
+    AGENT_INFERENCE_PREFER_MANAGED: "1",
+    AGENT_MODEL: model,
+    AGENT_API_BASE_URL: DEFAULT_AGENT_API_BASE_URL,
+    AGENT_PROVIDER_ORDER: "",
+    AGENT_PROVIDER_ORDER_FAST: "",
+    AGENT_PROVIDER_STRATEGY: "price",
+    AGENT_PROVIDER_ROUTE_AUTO: "1",
+    AGENT_PROVIDER_ALLOW_FALLBACKS: "1",
+    ...(prefs?.harness?.env?.AGENT_FAST_MODEL &&
+    isModelIncompatibleWithManagedProxy(prefs.harness.env.AGENT_FAST_MODEL)
+      ? { AGENT_FAST_MODEL: DEFAULT_AGENT_FAST_MODEL_SLUG }
+      : {}),
+  };
 }
 
 export function resolveManagedFreeFallbackFastModel(

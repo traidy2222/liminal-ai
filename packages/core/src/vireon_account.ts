@@ -19,6 +19,11 @@ import {
   saveRuntimePreferences,
   type RuntimePreferences,
 } from "./runtime_prefs.js";
+import {
+  buildManagedRecoveryHarnessEnv,
+  isModelIncompatibleWithManagedProxy,
+  resolveModelForManagedInference,
+} from "./managed_free_fallback.js";
 
 const ACCOUNT_FILE = "account.json";
 const SECURE_FILE_MODE = 0o600;
@@ -95,21 +100,25 @@ export async function applyVireonLicenseToken(
 
 /** After Pro sign-in, default harness routing to Vireon managed inference (overridable in Settings). */
 export async function applyProManagedInferenceDefaults(): Promise<void> {
-  const patch = {
-    provider: { inferenceMode: "managed" as const },
-    harness: {
-      env: { AGENT_INFERENCE_MODE: "managed", AGENT_INFERENCE_PREFER_MANAGED: "1" },
-    },
-  };
   const existing =
     (await loadRuntimePreferences()) ??
     ({ version: 1, updatedAt: Date.now() } satisfies RuntimePreferences);
+  const currentModel =
+    existing.provider?.model?.trim() || existing.harness?.env?.AGENT_MODEL?.trim() || "";
+  const model =
+    currentModel && !isModelIncompatibleWithManagedProxy(currentModel)
+      ? currentModel
+      : resolveModelForManagedInference(currentModel, existing);
+  const { baseURL: _pinnedByokBase, ...providerSansBase } = existing.provider ?? {};
   const merged: RuntimePreferences = {
     ...existing,
     updatedAt: Date.now(),
-    provider: { ...existing.provider, ...patch.provider },
+    provider: { ...providerSansBase, inferenceMode: "managed", model },
     harness: {
-      env: { ...existing.harness?.env, ...patch.harness?.env },
+      env: {
+        ...existing.harness?.env,
+        ...buildManagedRecoveryHarnessEnv(existing, model),
+      },
     },
   };
   await saveRuntimePreferences(merged);

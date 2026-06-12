@@ -50,6 +50,13 @@ export async function vireonSignOut(registry: ChatRegistry): Promise<WireVireonA
   return buildVireonAccountSnapshot();
 }
 
+/** Reload prefs and re-resolve BYOK vs managed after sign-in or app update. */
+export async function vireonReconnect(registry: ChatRegistry): Promise<WireVireonAccountSnapshot> {
+  await registry.reloadRuntimePrefs();
+  await registry.reapplyAllProviders();
+  return buildVireonAccountSnapshot();
+}
+
 /** JSON-safe payload for `vireon_account` transport frames. */
 export function wireVireonAccountPayload(snapshot: WireVireonAccountSnapshot) {
   return {

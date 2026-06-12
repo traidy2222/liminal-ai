@@ -235,6 +235,7 @@ class HarnessSettingsProvider {
     required this.modelLockedByEnv,
     required this.baseURLLockedByEnv,
     this.inferenceMode,
+    this.managedRoute = false,
     this.resolvedPresetId = 'custom',
     this.resolvedBackendId = 'openrouter',
   });
@@ -245,10 +246,14 @@ class HarnessSettingsProvider {
   final bool modelLockedByEnv;
   final bool baseURLLockedByEnv;
   final String? inferenceMode;
+  final bool managedRoute;
   final String resolvedPresetId;
   final String resolvedBackendId;
 
   bool get presetLockedByEnv => modelLockedByEnv || baseURLLockedByEnv;
+
+  bool get showManagedInference =>
+      managedRoute || (inferenceMode?.trim().toLowerCase() == 'managed');
 
   factory HarnessSettingsProvider.fromJson(Map<String, dynamic> json) {
     return HarnessSettingsProvider(
@@ -258,8 +263,51 @@ class HarnessSettingsProvider {
       modelLockedByEnv: json['modelLockedByEnv'] as bool? ?? false,
       baseURLLockedByEnv: json['baseURLLockedByEnv'] as bool? ?? false,
       inferenceMode: json['inferenceMode'] as String?,
+      managedRoute: json['managedRoute'] as bool? ?? false,
       resolvedPresetId: json['resolvedPresetId'] as String? ?? 'custom',
       resolvedBackendId: json['resolvedBackendId'] as String? ?? 'openrouter',
+    );
+  }
+}
+
+class ManagedInferenceModel {
+  ManagedInferenceModel({
+    required this.id,
+    required this.label,
+    required this.family,
+  });
+
+  final String id;
+  final String label;
+  final String family;
+
+  factory ManagedInferenceModel.fromJson(Map<String, dynamic> json) {
+    return ManagedInferenceModel(
+      id: json['id'] as String? ?? '',
+      label: json['label'] as String? ?? json['id'] as String? ?? '',
+      family: json['family'] as String? ?? 'other',
+    );
+  }
+}
+
+class ManagedInferenceModelsCatalog {
+  ManagedInferenceModelsCatalog({
+    required this.upstream,
+    required this.region,
+    required this.models,
+  });
+
+  final String upstream;
+  final String region;
+  final List<ManagedInferenceModel> models;
+
+  factory ManagedInferenceModelsCatalog.fromJson(Map<String, dynamic> json) {
+    return ManagedInferenceModelsCatalog(
+      upstream: json['upstream'] as String? ?? 'bedrock',
+      region: json['region'] as String? ?? '',
+      models: (json['models'] as List<dynamic>? ?? [])
+          .map((e) => ManagedInferenceModel.fromJson(Map<String, dynamic>.from(e as Map)))
+          .toList(),
     );
   }
 }

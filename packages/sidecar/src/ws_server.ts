@@ -18,11 +18,13 @@ import {
 } from "./sidecar_api.js";
 import {
   buildVireonAccountSnapshot,
+  vireonReconnect,
   vireonSignIn,
   vireonSignOut,
   wireVireonAccountPayload,
 } from "./vireon_api.js";
 import {
+  fetchManagedInferenceModels,
   liminalAppsEnabled,
   loadChatTranscriptFromSessionLog,
   slimReplayEntriesForWire,
@@ -634,6 +636,20 @@ export class WsServer {
           return;
         }
 
+        case "get_vireon_inference_models": {
+          try {
+            const catalog = await fetchManagedInferenceModels();
+            if (!catalog) {
+              return this.ack(ws, id, false, "Not signed in to Vireon");
+            }
+            this.ack(ws, id, true, undefined, catalog);
+          } catch (e) {
+            const message = e instanceof Error ? e.message : String(e);
+            this.ack(ws, id, false, message);
+          }
+          return;
+        }
+
         case "vireon_sign_in": {
           const d = data as { openBrowser?: boolean };
           const snapshot = await vireonSignIn(this.registry, {
@@ -654,6 +670,17 @@ export class WsServer {
           this.broadcast(serverFrame("vireon_account", wire));
           this.broadcastChatList();
           this.ack(ws, id, true, undefined, wire);
+          return;
+        }
+
+        case "vireon_reconnect": {
+          const snapshot = await vireonReconnect(this.registry);
+          const wire = wireVireonAccountPayload(snapshot);
+          this.broadcast(serverFrame("vireon_account", wire));
+          this.broadcastChatList();
+          const bridge = this.registry.getActiveBridge() ?? (await this.registry.getOrCreateActive());
+          const config = await buildDesktopConfig(bridge, this.repoRoot);
+          this.ack(ws, id, true, undefined, { ...wire, appConfig: wireAppConfig(config) });
           return;
         }
 
