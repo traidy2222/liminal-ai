@@ -61,6 +61,28 @@ export function isCastAiApiKey(value: string | undefined | null): boolean {
   return /^castai_v1_/i.test((value ?? "").trim());
 }
 
+/**
+ * Distinct key-material strings used for legacy OAuth blob decryption
+ * (API keys from process + `.env` files, then machine id fallback).
+ */
+export function legacyOAuthKeyMaterial(): string[] {
+  ensureProviderApiKeysInProcess();
+  const materials: string[] = [];
+  for (const name of PROVIDER_API_KEY_ENV_NAMES) {
+    const v = process.env[name]?.trim()?.slice(0, 32);
+    if (v) materials.push(v);
+  }
+  for (const file of providerApiKeyEnvFileCandidates()) {
+    const parsed = readDotEnvFile(file);
+    for (const name of PROVIDER_API_KEY_ENV_NAMES) {
+      const v = parsed[name]?.trim()?.slice(0, 32);
+      if (v) materials.push(v);
+    }
+  }
+  materials.push(`${process.env.USERNAME ?? "liminal"}@${process.env.COMPUTERNAME ?? "local"}`);
+  return [...new Set(materials)];
+}
+
 /** First non-empty provider key from env vars or `.env` files. */
 export function resolveLocalProviderApiKey(): string | undefined {
   ensureProviderApiKeysInProcess();

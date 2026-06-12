@@ -8,6 +8,7 @@ import {
   loadRuntimePreferences,
   resolveProviderConfigWithInference,
   resolveWorkspaceRoot,
+  refreshStaleXeroAccounts,
 } from "@liminal/core";
 import { WsServer } from "./ws_server.js";
 import { clearHandshake, handshakePath, mintToken, writeHandshake } from "./handshake.js";
@@ -28,6 +29,9 @@ const repoRoot =
 loadHarnessEnvFiles({ repoRoot, cwd: process.cwd() });
 ensureProviderApiKeysInProcess();
 ensureLocalProviderApiKeyInProcess();
+void refreshStaleXeroAccounts().catch(() => {
+  /* non-fatal — refresh on integrations load / first tool call */
+});
 
 const workspaceRoot = resolveWorkspaceRoot();
 
