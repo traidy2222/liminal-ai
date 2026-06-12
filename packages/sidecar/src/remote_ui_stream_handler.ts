@@ -99,6 +99,13 @@ export function clearRemoteUiStream(joinToken: string): void {
   streamsByToken.delete(joinToken.trim());
 }
 
+export function hasAnyRemoteUiSubscriber(): boolean {
+  for (const state of streamsByToken.values()) {
+    if (state.subscribers.size > 0) return true;
+  }
+  return false;
+}
+
 export type RemoteUiInputHandler = (input: RemoteUiInput) => void;
 
 export function tryHandleRemoteUiStreamUpgrade(

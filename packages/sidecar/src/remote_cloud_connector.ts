@@ -144,6 +144,7 @@ export class CloudRelayForwarder {
       `${origin}/api/remote/input/poll?join=${encodeURIComponent(joinCode)}`,
       {
         headers: { Authorization: `Bearer ${joinToken}` },
+        signal: AbortSignal.timeout(5000),
       }
     ).catch(() => null);
     if (!res?.ok) return [];

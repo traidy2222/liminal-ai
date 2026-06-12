@@ -1512,6 +1512,9 @@ class AppController extends ChangeNotifier {
         }
         final data = (result.data as Map<String, dynamic>?) ?? {};
         final joinCode = data['joinCode'] as String? ?? '';
+        if (remote.cloud) {
+          _remoteDesktop.noteCloudJoinCode(joinCode);
+        }
         final lanUrl = data['lanUrl'] as String?;
         final cloudUrl = data['cloudUrl'] as String?;
         final expiresAt = (data['expiresAt'] as num?)?.toInt();

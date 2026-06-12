@@ -62,6 +62,7 @@ import {
 import {
   clearRemoteUiStream,
   createRemoteUiStreamServer,
+  hasAnyRemoteUiSubscriber,
   publishRemoteUiFrame,
   tryHandleRemoteUiStreamUpgrade,
   type RemoteUiInput,
@@ -1452,15 +1453,17 @@ export class WsServer {
           if (!b64 || !Number.isFinite(width) || !Number.isFinite(height)) {
             return this.ack(ws, id, false, "jpegBase64, width, height required");
           }
-          const buf = Buffer.from(b64, "base64");
           const meta = {
             width,
             height,
             windowId: d.windowId,
             title: d.title,
           };
-          for (const grant of this.remoteHost.activeGrants()) {
-            publishRemoteUiFrame(grant.joinToken, buf, meta);
+          if (hasAnyRemoteUiSubscriber()) {
+            const buf = Buffer.from(b64, "base64");
+            for (const grant of this.remoteHost.activeGrants()) {
+              publishRemoteUiFrame(grant.joinToken, buf, meta);
+            }
           }
           this.cloudRelay.forwardUiFrame({
             jpegBase64: b64,
