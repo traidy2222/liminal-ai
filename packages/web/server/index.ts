@@ -31,6 +31,7 @@ import {
   setTerminalViewPublisher,
 } from "@liminal/tools";
 import { createWebPtyShellPort } from "./pty_shell_port.js";
+import { WebRemoteService } from "./web_remote.js";
 
 // Load `.env` files in order (dotenv does not override existing `process.env` keys by default):
 // 1) monorepo root, 2) packages/web, 3) workspace root when it differs — before AgentBridge starts.
@@ -104,10 +105,18 @@ setTerminalViewPublisher((payload) => {
   sse.send("terminal_view", payload, payload.chatId);
 });
 const chatManager = new ChatManager(sse);
+const webRemote = new WebRemoteService(chatManager, sse);
 const bootedChat = await chatManager.boot();
 console.log(
   `Liminal chat manager → active chat ${bootedChat.activeChatId} (${bootedChat.activeMeta.workspaceMode} @ ${bootedChat.activeMeta.workspaceRoot})`
 );
+app.use((req, res, next) => {
+  if (req.path.startsWith("/remote")) {
+    if (webRemote.handleHttp(req, res)) return;
+  }
+  next();
+});
+
 app.use((req, res, next) => {
   if (!req.path.startsWith("/api")) {
     next();
@@ -116,7 +125,7 @@ app.use((req, res, next) => {
   localAuth.requireAuth(req, res, next);
 });
 
-const router = createRouter(chatManager, sse, localAuth);
+const router = createRouter(chatManager, sse, localAuth, webRemote);
 registerPtyRoutes(router, ptyCtx, (req, res, next) => {
   localAuth.requireAuth(req, res, next);
 });
@@ -209,6 +218,7 @@ if (existsSync(clientIndexHtml)) {
 
 const bindHost = resolveWebBindHost();
 const server = createServer(app);
+webRemote.attach(server);
 attachWebPtyUpgrade(server, ptyCtx);
 attachBrowserStreamUpgrade(server, browserCtx);
 
@@ -228,6 +238,10 @@ server.once("error", (err: unknown) => {
 server.listen(PORT, bindHost);
 
 server.once("listening", () => {
+  const addr = server.address();
+  if (addr && typeof addr === "object") {
+    webRemote.setPrimaryPort(addr.port);
+  }
   console.log(`Liminal web server → http://${bindHost}:${PORT}`);
   console.log(`SSE stream         → http://${bindHost}:${PORT}/api/stream`);
   if (bindHost !== "127.0.0.1" && bindHost !== "::1" && bindHost !== "localhost") {
@@ -267,6 +281,7 @@ for (const sig of ["SIGTERM", "SIGINT"] as const) {
   process.once(sig, () => {
     try {
       chatManager.shutdown();
+      webRemote.dispose();
       ptyCtx.ptyManager.disposeAll();
     } finally {
       server.close(() => process.exit(0));

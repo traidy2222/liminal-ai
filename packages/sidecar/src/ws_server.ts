@@ -27,10 +27,17 @@ import {
   fetchManagedInferenceModels,
   liminalAppsEnabled,
   loadChatTranscriptFromSessionLog,
+  remoteCommandAllowed,
   slimReplayEntriesForWire,
   type ProviderConfig,
+  type RemoteSessionStatus,
   type RuntimePreferences,
 } from "@liminal/core";
+import { RemoteHostManager, type RemoteClientMeta } from "./remote_host.js";
+import {
+  CloudRelayForwarder,
+  registerCloudRemoteSession,
+} from "./remote_cloud_connector.js";
 import { tryHandleAudioRequest } from "./audio_http.js";
 import { tryHandleBrowserPreviewRequest } from "./browser_preview_handler.js";
 import {
@@ -114,6 +121,9 @@ export class WsServer {
   private readonly ptyManager = new PtyManager();
   private readonly ptyWss;
   private readonly browserWss;
+  private readonly remoteHost: RemoteHostManager;
+  private readonly cloudRelay = new CloudRelayForwarder();
+  private readonly clientMeta = new Map<WebSocket, RemoteClientMeta>();
 
   constructor(opts: WsServerOptions) {
     this.token = opts.token;
@@ -151,6 +161,8 @@ export class WsServer {
       emit: (frame) => this.broadcast(frame),
     });
     this.registry.setOrchestrator(() => this.orchestrator);
+
+    this.remoteHost = new RemoteHostManager((status) => this.broadcastRemoteSession(status));
 
     this.ptyWss = createPtyStreamServer({
       token: this.token,
@@ -231,23 +243,56 @@ export class WsServer {
       if (tryHandleTerminalEmbedRequest(req, res, { token: this.token })) {
         return;
       }
+      if (
+        this.remoteHost.handleLanHttp(req, res)
+      ) {
+        return;
+      }
       res.writeHead(404);
       res.end();
     });
     this.wss = new WebSocketServer({ noServer: true });
 
-    // Authenticate at the HTTP upgrade so an unauthorized peer never gets a
-    // WebSocket at all. Token may arrive as `?token=` or the `sec-websocket-protocol` header.
     this.http.on("upgrade", (req, socket, head) => {
-      const url = new URL(req.url ?? "/", "http://127.0.0.1");
-      const headerToken = (req.headers["sec-websocket-protocol"] as string | undefined)?.trim();
-      const queryToken = url.searchParams.get("token") ?? undefined;
-      const presented = queryToken ?? headerToken;
-      if (presented !== this.token) {
+      this.handleProtocolUpgrade(req, socket, head);
+    });
+    this.remoteHost.setLanUpgradeHandler((req, socket, head) => {
+      this.handleProtocolUpgrade(req, socket, head, { lanOnly: true });
+    });
+  }
+
+  private handleProtocolUpgrade(
+    req: import("node:http").IncomingMessage,
+    socket: import("node:stream").Duplex,
+    head: Buffer,
+    opts?: { lanOnly?: boolean }
+  ): void {
+    const url = new URL(req.url ?? "/", "http://127.0.0.1");
+    const headerToken = (req.headers["sec-websocket-protocol"] as string | undefined)?.trim();
+    const queryToken = url.searchParams.get("token") ?? undefined;
+    const joinToken = url.searchParams.get("join") ?? undefined;
+    const presented = queryToken ?? headerToken;
+
+    let meta: RemoteClientMeta = { role: "owner" };
+    if (joinToken) {
+      const resolved = this.remoteHost.resolveJoinToken(joinToken);
+      if (!resolved) {
         socket.write("HTTP/1.1 401 Unauthorized\r\n\r\n");
         socket.destroy();
         return;
       }
+      meta = { role: resolved.role, chatId: resolved.chatId };
+    } else if (presented !== this.token) {
+      socket.write("HTTP/1.1 401 Unauthorized\r\n\r\n");
+      socket.destroy();
+      return;
+    } else if (opts?.lanOnly) {
+      socket.write("HTTP/1.1 401 Unauthorized\r\n\r\n");
+      socket.destroy();
+      return;
+    }
+
+    if (!joinToken) {
       if (
         tryHandlePtyUpgrade(req, socket, head, {
           token: this.token,
@@ -256,6 +301,19 @@ export class WsServer {
       ) {
         return;
       }
+    } else if (meta.role === "control") {
+      if (
+        tryHandlePtyUpgrade(req, socket, head, {
+          token: joinToken,
+          ptyManager: this.ptyManager,
+          requireTokenQuery: false,
+        }, this.ptyWss)
+      ) {
+        return;
+      }
+    }
+
+    if (!joinToken) {
       if (
         tryHandleBrowserStreamUpgrade(
           req,
@@ -267,8 +325,25 @@ export class WsServer {
       ) {
         return;
       }
-      this.wss.handleUpgrade(req, socket, head, (ws) => this.onConnection(ws));
-    });
+    } else if (meta.role === "control" && joinToken) {
+      if (
+        tryHandleBrowserStreamUpgrade(
+          req,
+          socket,
+          head,
+          { token: joinToken, requireTokenQuery: false },
+          this.browserWss
+        )
+      ) {
+        return;
+      }
+    }
+
+    this.wss.handleUpgrade(req, socket, head, (ws) => this.onConnection(ws, meta));
+  }
+
+  private broadcastRemoteSession(status: RemoteSessionStatus): void {
+    this.broadcast(serverFrame("remote_session", status));
   }
 
   /** Start listening on an ephemeral 127.0.0.1 port; resolves with the chosen port. */
@@ -280,16 +355,24 @@ export class WsServer {
           this.appManager.startRefreshLoop();
         }
         const addr = this.http.address();
-        if (addr && typeof addr === "object") resolve(addr.port);
-        else reject(new Error("Failed to resolve sidecar port."));
+        if (addr && typeof addr === "object") {
+          this.remoteHost.setPrimaryPort(addr.port);
+          resolve(addr.port);
+        } else reject(new Error("Failed to resolve sidecar port."));
       });
     });
   }
 
   private broadcast(frame: ServerFrame): void {
     const payload = JSON.stringify(frame);
+    this.cloudRelay.forward(payload);
     for (const ws of this.clients) {
-      if (ws.readyState === WebSocket.OPEN) ws.send(payload);
+      if (ws.readyState !== WebSocket.OPEN) continue;
+      const meta = this.clientMeta.get(ws);
+      if (meta?.role !== "owner" && meta?.chatId && frame.chatId && frame.chatId !== meta.chatId) {
+        continue;
+      }
+      ws.send(payload);
     }
   }
 
@@ -304,8 +387,16 @@ export class WsServer {
     };
   }
 
-  private async onConnection(ws: WebSocket): Promise<void> {
+  private clientRole(ws: WebSocket): RemoteClientMeta["role"] {
+    return this.clientMeta.get(ws)?.role ?? "owner";
+  }
+
+  private async onConnection(ws: WebSocket, meta: RemoteClientMeta = { role: "owner" }): Promise<void> {
     this.clients.add(ws);
+    this.clientMeta.set(ws, meta);
+    if (meta.role !== "owner") {
+      this.remoteHost.attachGuest(ws);
+    }
 
     // Attach the command handler immediately. Cold start (tool registration) can
     // take 10–30s; frames that arrive before we finish must be queued, not dropped.
@@ -321,13 +412,24 @@ export class WsServer {
       }
       void this.dispatch(ws, frame);
     });
-    ws.on("close", () => this.clients.delete(ws));
-    ws.on("error", () => this.clients.delete(ws));
+    ws.on("close", () => {
+      if (meta.role !== "owner") this.remoteHost.detachGuest(ws);
+      this.clientMeta.delete(ws);
+      this.clients.delete(ws);
+    });
+    ws.on("error", () => {
+      if (meta.role !== "owner") this.remoteHost.detachGuest(ws);
+      this.clientMeta.delete(ws);
+      this.clients.delete(ws);
+    });
 
     acceptCommands = true;
     for (const frame of pending) {
       void this.dispatch(ws, frame);
     }
+
+    const guestChatId = meta.chatId;
+    const clientRole = meta.role;
 
     // Let the UI connect immediately; full harness init can take 30–60s on cold start.
     this.sendTo(
@@ -335,11 +437,26 @@ export class WsServer {
       serverFrame("hello", {
         protocolVersion: PROTOCOL_VERSION,
         sidecarVersion: SIDECAR_VERSION,
-        activeChatId: "",
+        activeChatId: guestChatId ?? "",
         chats: [],
-        starting: true,
+        starting: clientRole === "owner",
+        clientRole,
       })
     );
+
+    if (clientRole !== "owner" && guestChatId) {
+      await this.registry.open(guestChatId);
+      this.sendTo(
+        ws,
+        serverFrame("sidecar_ready", {
+          activeChatId: guestChatId,
+          chats: this.registry.list(),
+          clientRole,
+        })
+      );
+      await this.unicastTranscriptReplay(ws, guestChatId);
+      return;
+    }
 
     const INIT_TIMEOUT_MS = 120_000;
     let initError: string | undefined;
@@ -374,6 +491,7 @@ export class WsServer {
       serverFrame("sidecar_ready", {
         activeChatId: this.registry.activeId ?? "",
         chats: this.registry.list(),
+        clientRole: "owner",
         ...(appConfig ? { appConfig: wireAppConfig(appConfig) } : {}),
         ...(initError ? { initError } : {}),
       })
@@ -415,6 +533,11 @@ export class WsServer {
 
   private async dispatch(ws: WebSocket, frame: ClientFrame): Promise<void> {
     const { id, command, data } = frame;
+    const role = this.clientRole(ws);
+    if (!remoteCommandAllowed(role, command)) {
+      this.ack(ws, id, false, `Command "${command}" not allowed for remote role "${role}".`);
+      return;
+    }
     try {
       switch (command) {
         case "ping":
@@ -638,7 +761,10 @@ export class WsServer {
 
         case "get_vireon_inference_models": {
           try {
-            const catalog = await fetchManagedInferenceModels();
+            const d = data as { refresh?: boolean };
+            const catalog = await fetchManagedInferenceModels({
+              refresh: d.refresh === true,
+            });
             if (!catalog) {
               return this.ack(ws, id, false, "Not signed in to Vireon");
             }
@@ -1194,6 +1320,80 @@ export class WsServer {
           return;
         }
 
+        case "remote_enable": {
+          const d = data as {
+            chatId: string;
+            mode?: "view" | "control";
+            cloud?: boolean;
+          };
+          const chatId = d.chatId?.trim();
+          if (!chatId) return this.ack(ws, id, false, "chatId required");
+          const mode = d.mode === "control" ? "control" : "view";
+          try {
+            let cloudUrl: string | null = null;
+            const result = await this.remoteHost.enable({ chatId, mode, cloud: d.cloud });
+            if (d.cloud) {
+              const cloud = await registerCloudRemoteSession({
+                chatId,
+                mode,
+                joinCode: result.joinCode,
+                joinToken: result.joinToken,
+              });
+              if (cloud) {
+                cloudUrl = cloud.cloudUrl;
+                result.cloudUrl = cloud.cloudUrl;
+                this.cloudRelay.setRelay({
+                  relayHostUrl: cloud.relayHostUrl,
+                  joinCode: cloud.joinCode,
+                  joinToken: result.joinToken,
+                });
+              } else {
+                return this.ack(
+                  ws,
+                  id,
+                  false,
+                  "Cloud remote requires Vireon Pro sign-in (pro.remote_sessions)."
+                );
+              }
+            } else {
+              this.cloudRelay.clear();
+            }
+            this.ack(ws, id, true, undefined, {
+              joinCode: result.joinCode,
+              joinToken: result.joinToken,
+              lanUrl: result.lanUrl,
+              cloudUrl: cloudUrl ?? result.cloudUrl,
+              expiresAt: result.expiresAt,
+              mode,
+            });
+          } catch (err) {
+            this.ack(ws, id, false, err instanceof Error ? err.message : String(err));
+          }
+          return;
+        }
+
+        case "remote_disable": {
+          const d = data as { chatId?: string };
+          const removed = this.remoteHost.disable(d.chatId?.trim());
+          this.cloudRelay.clear();
+          this.ack(ws, id, true, undefined, { removed });
+          return;
+        }
+
+        case "remote_status": {
+          const d = data as { chatId?: string };
+          const status = this.remoteHost.status(d.chatId?.trim());
+          this.ack(ws, id, true, undefined, status);
+          return;
+        }
+
+        case "remote_revoke": {
+          const d = data as { joinCode: string };
+          const ok = this.remoteHost.revokeCode(d.joinCode ?? "");
+          this.ack(ws, id, ok, ok ? undefined : "Unknown join code.");
+          return;
+        }
+
         default:
           this.ack(ws, id, false, `Unknown command "${String(command)}".`);
           return;
@@ -1216,6 +1416,7 @@ export class WsServer {
     this.appManager.stopRefreshLoop();
     this.registry.disposeAll();
     this.ptyManager.disposeAll();
+    this.remoteHost.dispose();
     this.ptyWss.close();
     this.browserWss.close();
     this.wss.close();

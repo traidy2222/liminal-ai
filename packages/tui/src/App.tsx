@@ -250,6 +250,14 @@ export function App({ harness, chatMeta, initialMessages }: Props) {
         setInputStatus("Abort is not wired in TUI yet — press Ctrl+C or wait for turn end.");
         return;
       }
+      if (slashCmd.kind === "remote") {
+        setDraftText("");
+        setInputStatus(
+          "/remote requires the desktop app or web UI (npm run web). " +
+            "TUI does not host remote sessions — use desktop /remote or web /remote on the same machine."
+        );
+        return;
+      }
     }
     const integrationCmd = parseIntegrationSlashCommand(currentDraft);
     if (integrationCmd) {

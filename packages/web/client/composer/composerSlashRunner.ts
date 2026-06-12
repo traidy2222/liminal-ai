@@ -1,6 +1,9 @@
 import {
+  formatRemoteEnableMessage,
+  formatRemoteStatusMessage,
   formatSlashHelpText,
   parseComposerSlashSubmit,
+  remoteSlashToCommand,
   type ParsedComposerSlash,
 } from "@liminal/core";
 import { webApiFetch } from "../webApiAuth.js";
@@ -214,6 +217,92 @@ export async function runComposerSlashCommand(
       try {
         const msg = await disconnectProvider(provider);
         return { handled: true, message: msg, clearInput: true };
+      } catch (err) {
+        return {
+          handled: true,
+          message: err instanceof Error ? err.message : String(err),
+          clearInput: false,
+        };
+      }
+    }
+    case "remote": {
+      if (!parsed.remote) {
+        return { handled: true, message: "Invalid /remote usage.", clearInput: false };
+      }
+      const cmd = remoteSlashToCommand(parsed.remote, "");
+      try {
+        if (cmd.action === "enable") {
+          const res = await webApiFetch("/api/remote/enable", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              mode: cmd.mode,
+              cloud: cmd.cloud,
+            }),
+          });
+          const body = (await res.json()) as {
+            error?: string;
+            message?: string;
+            joinCode?: string;
+            lanUrl?: string | null;
+            cloudUrl?: string | null;
+            expiresAt?: number;
+            mode?: string;
+          };
+          if (!res.ok) {
+            return {
+              handled: true,
+              message: body.error ?? `Remote enable failed (${res.status})`,
+              clearInput: false,
+            };
+          }
+          return {
+            handled: true,
+            message:
+              body.message ??
+              formatRemoteEnableMessage({
+                joinCode: body.joinCode ?? "",
+                lanUrl: body.lanUrl,
+                cloudUrl: body.cloudUrl,
+                expiresAt: body.expiresAt ?? Date.now(),
+                mode: body.mode ?? cmd.mode,
+              }),
+            clearInput: true,
+          };
+        }
+        if (cmd.action === "disable") {
+          const res = await webApiFetch("/api/remote/disable", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({}),
+          });
+          const body = (await res.json()) as { message?: string; error?: string };
+          return {
+            handled: true,
+            message: body.message ?? body.error ?? "Remote disabled.",
+            clearInput: true,
+          };
+        }
+        if (cmd.action === "status") {
+          const res = await webApiFetch("/api/remote/status");
+          const body = (await res.json()) as Record<string, unknown> & { message?: string };
+          return {
+            handled: true,
+            message: body.message ?? formatRemoteStatusMessage(body as never),
+            clearInput: true,
+          };
+        }
+        const res = await webApiFetch("/api/remote/revoke", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ joinCode: cmd.joinCode }),
+        });
+        const body = (await res.json()) as { message?: string; error?: string };
+        return {
+          handled: true,
+          message: body.message ?? body.error ?? "Revoked.",
+          clearInput: true,
+        };
       } catch (err) {
         return {
           handled: true,

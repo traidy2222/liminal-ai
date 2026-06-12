@@ -8,6 +8,34 @@ enum SlashCommandKind {
   integrationsStatus,
   abort,
   help,
+  remote,
+}
+
+enum RemoteSlashAction { enable, disable, status, revoke }
+
+class ParsedRemoteSlash {
+  const ParsedRemoteSlash.enable({required this.mode, required this.cloud})
+      : action = RemoteSlashAction.enable,
+        joinCode = null;
+  const ParsedRemoteSlash.disable()
+      : action = RemoteSlashAction.disable,
+        mode = 'view',
+        cloud = false,
+        joinCode = null;
+  const ParsedRemoteSlash.status()
+      : action = RemoteSlashAction.status,
+        mode = 'view',
+        cloud = false,
+        joinCode = null;
+  const ParsedRemoteSlash.revoke(this.joinCode)
+      : action = RemoteSlashAction.revoke,
+        mode = 'view',
+        cloud = false;
+
+  final RemoteSlashAction action;
+  final String mode;
+  final bool cloud;
+  final String? joinCode;
 }
 
 class SlashCommandDef {
@@ -48,6 +76,7 @@ class ParsedComposerSlash {
     required this.readOnly,
     required this.raw,
     required this.note,
+    this.remote,
   });
 
   final SlashCommandKind kind;
@@ -56,6 +85,7 @@ class ParsedComposerSlash {
   final bool readOnly;
   final String raw;
   final String note;
+  final ParsedRemoteSlash? remote;
 }
 
 class SlashInputState {
@@ -133,7 +163,42 @@ const _commands = <SlashCommandDef>[
     usage: '/help',
     kind: SlashCommandKind.help,
   ),
+  SlashCommandDef(
+    name: 'remote',
+    summary: 'Share a view link for this chat (LAN; /remote cloud for Pro anywhere)',
+    usage: '/remote [control|cloud|off|status|revoke CODE]',
+    kind: SlashCommandKind.remote,
+  ),
 ];
+
+ParsedRemoteSlash? parseRemoteSlashCommand(String text) {
+  final trimmed = text.trim();
+  if (!trimmed.startsWith('/')) return null;
+  final body = trimmed.substring(1).trim();
+  final tokens = body.split(RegExp(r'\s+')).where((t) => t.isNotEmpty).toList();
+  if (tokens.isEmpty || tokens.first.toLowerCase() != 'remote') return null;
+  final sub = tokens.length > 1 ? tokens[1].toLowerCase() : '';
+  if (sub.isEmpty || sub == 'view') {
+    return const ParsedRemoteSlash.enable(mode: 'view', cloud: false);
+  }
+  if (sub == 'control') {
+    return const ParsedRemoteSlash.enable(mode: 'control', cloud: false);
+  }
+  if (sub == 'cloud') {
+    final mode = tokens.length > 2 && tokens[2].toLowerCase() == 'control' ? 'control' : 'view';
+    return ParsedRemoteSlash.enable(mode: mode, cloud: true);
+  }
+  if (sub == 'off' || sub == 'disable' || sub == 'stop') {
+    return const ParsedRemoteSlash.disable();
+  }
+  if (sub == 'status') {
+    return const ParsedRemoteSlash.status();
+  }
+  if (sub == 'revoke' && tokens.length > 2) {
+    return ParsedRemoteSlash.revoke(tokens[2].toUpperCase());
+  }
+  return const ParsedRemoteSlash.enable(mode: 'view', cloud: false);
+}
 
 SlashCommandDef? resolveSlashCommandDef(String name) {
   final key = name.trim().toLowerCase();
@@ -325,6 +390,20 @@ ParsedComposerSlash? parseComposerSlashSubmit(String text) {
       readOnly: readOnly,
       raw: trimmed,
       note: '',
+    );
+  }
+
+  if (def.kind == SlashCommandKind.remote) {
+    final remote = parseRemoteSlashCommand(trimmed);
+    if (remote == null) return null;
+    return ParsedComposerSlash(
+      kind: SlashCommandKind.remote,
+      command: def.name,
+      args: rest,
+      readOnly: false,
+      raw: trimmed,
+      note: '',
+      remote: remote,
     );
   }
 

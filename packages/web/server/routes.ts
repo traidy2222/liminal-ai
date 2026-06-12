@@ -2,6 +2,7 @@ import { Router } from "express";
 import { randomBytes } from "node:crypto";
 import type { ChatManager } from "./chatManager.js";
 import type { SSEManager } from "./sse.js";
+import type { WebRemoteService } from "./web_remote.js";
 import type { ApprovalDecision, ChatWorkspaceMode } from "@liminal/core";
 import {
   DEFAULT_IMAGE_ATTACHMENT_LIMITS,
@@ -173,7 +174,8 @@ function vireonCallbackRedirectUri(port: number): string {
 export function createRouter(
   chatManager: ChatManager,
   sse: SSEManager,
-  localAuth: LocalWebAuth
+  localAuth: LocalWebAuth,
+  webRemote?: WebRemoteService
 ): Router {
   const router = Router();
 
@@ -1747,6 +1749,37 @@ export function createRouter(
       res.status(500).json({ error: (err as Error).message });
     }
   });
+
+  if (webRemote) {
+    router.post("/api/remote/enable", async (req, res) => {
+      try {
+        const chatId =
+          typeof req.body?.chatId === "string" && req.body.chatId.trim()
+            ? req.body.chatId.trim()
+            : chatManager.activeId;
+        const mode = req.body?.mode === "control" ? "control" : "view";
+        const cloud = Boolean(req.body?.cloud);
+        const data = await webRemote.enable({ chatId, mode, cloud });
+        res.json(data);
+      } catch (e) {
+        res.status(400).json({ error: e instanceof Error ? e.message : String(e) });
+      }
+    });
+    router.post("/api/remote/disable", (req, res) => {
+      const chatId =
+        typeof req.body?.chatId === "string" ? req.body.chatId.trim() : undefined;
+      res.json(webRemote.disable(chatId));
+    });
+    router.get("/api/remote/status", (req, res) => {
+      const chatId =
+        typeof req.query.chatId === "string" ? req.query.chatId.trim() : undefined;
+      res.json(webRemote.status(chatId));
+    });
+    router.post("/api/remote/revoke", (req, res) => {
+      const joinCode = typeof req.body?.joinCode === "string" ? req.body.joinCode : "";
+      res.json(webRemote.revoke(joinCode));
+    });
+  }
 
   return router;
 }

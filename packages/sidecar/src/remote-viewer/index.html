@@ -1,0 +1,135 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Liminal Remote</title>
+  <style>
+    :root { color-scheme: dark; }
+    body { margin: 0; background: #0a0e14; color: #dde8f0; font-family: system-ui, sans-serif; }
+    #app { padding: 12px; max-width: 720px; margin: 0 auto; }
+    #status { font-size: 12px; color: #6a8a9a; margin-bottom: 12px; }
+    .msg { margin: 8px 0; padding: 8px 10px; border-radius: 4px; background: #111820; border: 1px solid #1e2a36; white-space: pre-wrap; word-break: break-word; }
+    .msg.user { border-color: #2a4a5a; }
+    .msg.assistant { border-color: #1a3a2a; }
+    .tool { font-size: 12px; color: #8aa0b4; margin-top: 4px; }
+    #composer { display: none; margin-top: 12px; gap: 8px; }
+    #composer.control { display: flex; }
+    #composer input { flex: 1; padding: 8px; background: #0d1218; border: 1px solid #2a3a48; color: #dde8f0; border-radius: 4px; }
+    #composer button { padding: 8px 12px; background: #1a4a3a; border: 1px solid #2a6a4a; color: #dde8f0; border-radius: 4px; }
+    #approval { display: none; margin-top: 12px; padding: 10px; border: 1px solid #4a3a1a; background: #1a1408; border-radius: 4px; }
+    #approval.control { display: block; }
+  </style>
+</head>
+<body>
+  <div id="app">
+    <div id="status">Connecting…</div>
+    <div id="log"></div>
+    <div id="approval">
+      <div id="approvalText"></div>
+      <button type="button" id="approveBtn">Approve</button>
+      <button type="button" id="denyBtn">Deny</button>
+    </div>
+    <div id="composer">
+      <input id="input" placeholder="Message…" autocomplete="off" />
+      <button type="button" id="send">Send</button>
+    </div>
+  </div>
+  <script>
+    const params = new URLSearchParams(location.search);
+    const code = params.get("code") || "";
+    const logEl = document.getElementById("log");
+    const statusEl = document.getElementById("status");
+    const composer = document.getElementById("composer");
+    const approval = document.getElementById("approval");
+    const input = document.getElementById("input");
+    let role = "view", chatId = "", cmdId = 0, ws = null;
+    let pendingApproval = null;
+
+    function addMsg(kind, text, extra) {
+      const d = document.createElement("div");
+      d.className = "msg " + kind;
+      d.textContent = (kind === "user" ? "You: " : "") + text;
+      if (extra) {
+        const t = document.createElement("div");
+        t.className = "tool";
+        t.textContent = extra;
+        d.appendChild(t);
+      }
+      logEl.appendChild(d);
+      logEl.scrollTop = logEl.scrollHeight;
+    }
+
+    function sendCmd(command, data) {
+      const id = "c" + (++cmdId);
+      ws.send(JSON.stringify({ t: "cmd", v: 1, id, command, data }));
+      return id;
+    }
+
+    fetch("/remote/resolve?code=" + encodeURIComponent(code))
+      .then((r) => r.json())
+      .then((cfg) => {
+        if (!cfg.ok) throw new Error(cfg.error || "resolve failed");
+        role = cfg.role || "view";
+        chatId = cfg.chatId;
+        const proto = location.protocol === "https:" ? "wss:" : "ws:";
+        ws = new WebSocket(proto + "//" + location.host + "?join=" + encodeURIComponent(cfg.joinToken));
+        ws.onmessage = (ev) => {
+          try {
+            const f = JSON.parse(ev.data);
+            if (f.t !== "evt") return;
+            const p = f.p || {};
+            if (f.e === "text") addMsg("assistant", p.text || "");
+            if (f.e === "transcript_replay" && Array.isArray(p.entries)) {
+              p.entries.forEach((e) => { if (e.text) addMsg(e.kind === "user" ? "user" : "assistant", e.text); });
+            }
+            if (f.e === "tool_start") addMsg("assistant", "", "Tool: " + (p.toolName || p.name));
+            if (f.e === "tool_result" && p.output) addMsg("assistant", "", String(p.output).slice(0, 500));
+            if (f.e === "tool_approval") {
+              pendingApproval = p;
+              document.getElementById("approvalText").textContent =
+                "Approval: " + (p.toolName || "") + (role === "view" ? " (view-only)" : "");
+              approval.classList.toggle("control", role === "control");
+            }
+            if (f.e === "hello" || f.e === "sidecar_ready") {
+              statusEl.textContent = "Connected (" + role + ") · " + chatId;
+              if (role === "control") composer.classList.add("control");
+            }
+          } catch (e) { console.error(e); }
+        };
+        ws.onclose = () => { statusEl.textContent = "Disconnected"; };
+      })
+      .catch((e) => { statusEl.textContent = "Error: " + e.message; });
+
+    document.getElementById("send").onclick = () => {
+      const m = input.value.trim();
+      if (!m || !ws || role !== "control") return;
+      sendCmd("send_message", { chatId, message: m });
+      addMsg("user", m);
+      input.value = "";
+    };
+    document.getElementById("approveBtn").onclick = () => {
+      if (!pendingApproval || role !== "control" || !ws) return;
+      sendCmd("resolve_approval", {
+        chatId,
+        callId: pendingApproval.callId,
+        approvalNonce: pendingApproval.approvalNonce,
+        decision: "approve",
+      });
+      pendingApproval = null;
+      approval.classList.remove("control");
+    };
+    document.getElementById("denyBtn").onclick = () => {
+      if (!pendingApproval || role !== "control" || !ws) return;
+      sendCmd("resolve_approval", {
+        chatId,
+        callId: pendingApproval.callId,
+        approvalNonce: pendingApproval.approvalNonce,
+        decision: "reject",
+      });
+      pendingApproval = null;
+      approval.classList.remove("control");
+    };
+  </script>
+</body>
+</html>

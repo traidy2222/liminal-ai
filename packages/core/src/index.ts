@@ -769,6 +769,35 @@ export {
 } from "./receipt_workflow.js";
 export type { ReceiptWorkflowPreset } from "./receipt_workflow.js";
 export {
+  buildCloudJoinUrl,
+  buildLanJoinUrl,
+  createRemoteSessionGrant,
+  defaultVireonRemoteJoinOrigin,
+  discoverLanIPv4,
+  formatRemoteStatusMessage,
+  grantIsExpired,
+  mintJoinCode,
+  mintJoinToken,
+  mintRemoteSessionId,
+  parseRemoteSlashCommand,
+  remoteBindHost,
+  remoteCommandAllowed,
+  remoteSessionTtlMs,
+} from "./remote_session.js";
+export type {
+  ParsedRemoteSlash,
+  RemoteEnableResult,
+  RemoteSessionGrant,
+  RemoteSessionMode,
+  RemoteSessionRole,
+  RemoteSessionStatus,
+} from "./remote_session.js";
+export {
+  formatRemoteEnableMessage,
+  remoteSlashToCommand,
+} from "./remote_slash.js";
+export type { RemoteSlashCommandResult } from "./remote_slash.js";
+export {
   COMPOSER_SLASH_COMMANDS,
   INTEGRATION_SLASH_PROVIDERS,
   detectSlashInput,

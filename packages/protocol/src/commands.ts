@@ -212,6 +212,19 @@ export interface ClientCommandMap {
   pty_close: { sessionId?: string; chatId?: string };
   /** List active PTY sessions (optional chat filter). */
   pty_list: { chatId?: string };
+
+  /** Enable remote join link for a chat (view by default). */
+  remote_enable: {
+    chatId: string;
+    mode?: "view" | "control";
+    cloud?: boolean;
+  };
+  /** Revoke all remote grants for a chat (or active chat when omitted). */
+  remote_disable: { chatId?: string };
+  /** Snapshot of active remote grants and guest count. */
+  remote_status: { chatId?: string };
+  /** Revoke a single join code. */
+  remote_revoke: { joinCode: string };
 }
 
 export type ClientCommandType = keyof ClientCommandMap;

@@ -38,6 +38,8 @@ export const ENTITLEMENTS = {
   PRO_SESSION_HISTORY: "pro.session_history",
   /** Pro: optional Vireon-managed inference key (metered). */
   PRO_MANAGED_INFERENCE: "pro.managed_inference",
+  /** Pro: cloud relay for /remote session viewing from anywhere. */
+  PRO_REMOTE_SESSIONS: "pro.remote_sessions",
   /** Team: hosted, multi-tenant shared memory bus keyed by workspace/org. */
   TEAM_SHARED_MEMORY: "team.shared_memory",
   /** Team: ship session events to the control-plane audit log. */
@@ -59,7 +61,12 @@ export type EntitlementKey = (typeof ENTITLEMENTS)[keyof typeof ENTITLEMENTS];
 /** What each tier grants. Higher tiers are unions of all lower tiers (built below). */
 const TIER_OWN_ENTITLEMENTS: Record<LicenseTier, readonly EntitlementKey[]> = {
   community: [],
-  pro: [ENTITLEMENTS.PRO_CLOUD_SYNC, ENTITLEMENTS.PRO_SESSION_HISTORY, ENTITLEMENTS.PRO_MANAGED_INFERENCE],
+  pro: [
+    ENTITLEMENTS.PRO_CLOUD_SYNC,
+    ENTITLEMENTS.PRO_SESSION_HISTORY,
+    ENTITLEMENTS.PRO_MANAGED_INFERENCE,
+    ENTITLEMENTS.PRO_REMOTE_SESSIONS,
+  ],
   team: [
     ENTITLEMENTS.TEAM_SHARED_MEMORY,
     ENTITLEMENTS.TEAM_AUDIT_LOG,

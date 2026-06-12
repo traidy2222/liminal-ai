@@ -104,12 +104,15 @@ export interface TransportEventMap {
     starting?: boolean;
     /** Shell snapshot so the UI can render without racing `get_config`. */
     appConfig?: WireAppConfig;
+    /** Present for remote guest sockets (view / control). */
+    clientRole?: "owner" | "view" | "control";
   };
   /** Sent when the first harness + chat exist; follows a `starting` hello. */
   sidecar_ready: {
     activeChatId: string;
     chats: ChatSummary[];
     appConfig?: WireAppConfig;
+    clientRole?: "owner" | "view" | "control";
   };
   /** Busy reconciliation tick (mirrors the web `harness_running` heartbeat). */
   harness_running: { chatId: string; startedAt: number };
@@ -145,6 +148,20 @@ export interface TransportEventMap {
   };
   /** Keepalive response to a `ping` command. */
   pong: { at: number };
+  /** Remote join grants changed (enable / disable / revoke / guest connect). */
+  remote_session: {
+    active: boolean;
+    chatId: string | null;
+    grants: Array<{
+      joinCode: string;
+      role: "view" | "control";
+      expiresAt: number;
+      cloud?: boolean;
+    }>;
+    lanUrl: string | null;
+    cloudUrl: string | null;
+    guestCount: number;
+  };
   /** Persona bootstrap pipeline progress (sidecar-synthesized, mirrors web SSE). */
   persona_bootstrap_progress: PersonaBootstrapProgressEvent;
 

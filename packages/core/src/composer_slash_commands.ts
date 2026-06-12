@@ -3,6 +3,7 @@
  * Used by web, desktop (Dart mirror), and TUI.
  */
 import { parseReceiptSlashCommand } from "./receipt_workflow.js";
+import { parseRemoteSlashCommand, type ParsedRemoteSlash } from "./remote_session.js";
 
 export type SlashCommandKind =
   | "receipt_workflow"
@@ -11,7 +12,8 @@ export type SlashCommandKind =
   | "disconnect"
   | "integrations_status"
   | "abort"
-  | "help";
+  | "help"
+  | "remote";
 
 export interface SlashCommandDef {
   name: string;
@@ -55,6 +57,8 @@ export interface ParsedComposerSlash {
   raw: string;
   /** Receipt / free-text tail. */
   note: string;
+  /** Set when kind is `remote`. */
+  remote?: ParsedRemoteSlash;
 }
 
 export const INTEGRATION_SLASH_PROVIDERS = [
@@ -115,6 +119,12 @@ export const COMPOSER_SLASH_COMMANDS: readonly SlashCommandDef[] = [
     summary: "List composer slash commands",
     usage: "/help",
     kind: "help",
+  },
+  {
+    name: "remote",
+    summary: "Share a view link for this chat (LAN; /remote cloud for Pro anywhere)",
+    usage: "/remote [control|cloud|off|status|revoke CODE]",
+    kind: "remote",
   },
 ] as const;
 
@@ -370,6 +380,20 @@ export function parseComposerSlashSubmit(text: string): ParsedComposerSlash | nu
       readOnly,
       raw: trimmed,
       note: "",
+    };
+  }
+
+  if (def.kind === "remote") {
+    const remote = parseRemoteSlashCommand(trimmed);
+    if (!remote) return null;
+    return {
+      kind: "remote",
+      command: def.name,
+      args: rest,
+      readOnly: false,
+      raw: trimmed,
+      note: "",
+      remote,
     };
   }
 

@@ -522,7 +522,7 @@ class AppController extends ChangeNotifier {
     try {
       final result = await _protocol.send(
         'get_vireon_inference_models',
-        {},
+        const {'refresh': true},
         timeout: const Duration(seconds: 45),
       );
       if (result.ok && result.data is Map) {
@@ -1467,6 +1467,103 @@ class AppController extends ChangeNotifier {
         return ComposerSlashOutcome.message(
           ok ? '$provider: disconnected' : 'Disconnect failed for $provider',
           clearInput: ok,
+        );
+      case SlashCommandKind.remote:
+        return _handleRemoteSlash(parsed);
+    }
+  }
+
+  Future<ComposerSlashOutcome> _handleRemoteSlash(ParsedComposerSlash parsed) async {
+    if (!_protocol.isConnected) {
+      return ComposerSlashOutcome.message('Not connected to sidecar.');
+    }
+    final chatId = activeChatId;
+    if (chatId == null || chatId.isEmpty) {
+      return ComposerSlashOutcome.message('No active chat.', clearInput: false);
+    }
+    final remote = parsed.remote;
+    if (remote == null) {
+      return ComposerSlashOutcome.message('Invalid /remote usage.', clearInput: false);
+    }
+    switch (remote.action) {
+      case RemoteSlashAction.enable:
+        final result = await _protocol.send('remote_enable', {
+          'chatId': chatId,
+          'mode': remote.mode,
+          'cloud': remote.cloud,
+        });
+        if (!result.ok) {
+          return ComposerSlashOutcome.message(
+            result.error ?? 'Remote enable failed',
+            clearInput: false,
+          );
+        }
+        final data = (result.data as Map<String, dynamic>?) ?? {};
+        final joinCode = data['joinCode'] as String? ?? '';
+        final lanUrl = data['lanUrl'] as String?;
+        final cloudUrl = data['cloudUrl'] as String?;
+        final expiresAt = (data['expiresAt'] as num?)?.toInt();
+        final mode = data['mode'] as String? ?? remote.mode;
+        final lines = <String>[
+          'Remote $mode link ready (code $joinCode).',
+          if (expiresAt != null)
+            'Expires: ${DateTime.fromMillisecondsSinceEpoch(expiresAt).toLocal()}',
+          if (lanUrl != null && lanUrl.isNotEmpty) 'LAN: $lanUrl',
+          if (cloudUrl != null && cloudUrl.isNotEmpty) 'Cloud: $cloudUrl',
+          if ((lanUrl == null || lanUrl.isEmpty) && (cloudUrl == null || cloudUrl.isEmpty))
+            'No LAN URL — check Wi‑Fi and LIMINAL_REMOTE_BIND_HOST.',
+          'Use /remote off to revoke.',
+        ];
+        return ComposerSlashOutcome.message(lines.join('\n'));
+      case RemoteSlashAction.disable:
+        final result = await _protocol.send('remote_disable', {'chatId': chatId});
+        if (!result.ok) {
+          return ComposerSlashOutcome.message(result.error ?? 'Remote disable failed', clearInput: false);
+        }
+        final removed =
+            ((result.data as Map<String, dynamic>?)?['removed'] as num?)?.toInt() ?? 0;
+        return ComposerSlashOutcome.message(
+          removed > 0 ? 'Remote access revoked.' : 'No active remote session.',
+        );
+      case RemoteSlashAction.status:
+        final result = await _protocol.send('remote_status', {'chatId': chatId});
+        if (!result.ok) {
+          return ComposerSlashOutcome.message(result.error ?? 'Remote status failed', clearInput: false);
+        }
+        final data = (result.data as Map<String, dynamic>?) ?? {};
+        final active = data['active'] as bool? ?? false;
+        if (!active) {
+          return ComposerSlashOutcome.message('Remote access is off for this chat.');
+        }
+        final buf = StringBuffer('Remote session active:\n');
+        final lan = data['lanUrl'] as String?;
+        final cloud = data['cloudUrl'] as String?;
+        if (lan != null && lan.isNotEmpty) buf.writeln('LAN: $lan');
+        if (cloud != null && cloud.isNotEmpty) buf.writeln('Cloud: $cloud');
+        final grants = data['grants'] as List<dynamic>? ?? [];
+        for (final g in grants) {
+          if (g is! Map) continue;
+          final code = g['joinCode'] as String? ?? '';
+          final role = g['role'] as String? ?? 'view';
+          final exp = (g['expiresAt'] as num?)?.toInt();
+          final expStr = exp != null
+              ? DateTime.fromMillisecondsSinceEpoch(exp).toLocal().toString()
+              : '?';
+          buf.writeln('  · $code ($role) expires $expStr');
+        }
+        final guests = (data['guestCount'] as num?)?.toInt() ?? 0;
+        if (guests > 0) buf.writeln('$guests guest(s) connected.');
+        buf.write('Use /remote off to revoke.');
+        return ComposerSlashOutcome.message(buf.toString());
+      case RemoteSlashAction.revoke:
+        final code = remote.joinCode ?? '';
+        if (code.isEmpty) {
+          return ComposerSlashOutcome.message('Usage: /remote revoke CODE', clearInput: false);
+        }
+        final result = await _protocol.send('remote_revoke', {'joinCode': code});
+        return ComposerSlashOutcome.message(
+          result.ok ? 'Revoked join code $code.' : (result.error ?? 'Unknown join code.'),
+          clearInput: result.ok,
         );
     }
   }
