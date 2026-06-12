@@ -374,11 +374,14 @@ export type ManagedInferenceModelsResult = {
 };
 
 /** Bedrock catalog for managed-inference model pickers (license Bearer). */
-export async function fetchManagedInferenceModels(): Promise<ManagedInferenceModelsResult | null> {
+export async function fetchManagedInferenceModels(opts?: {
+  refresh?: boolean;
+}): Promise<ManagedInferenceModelsResult | null> {
   const license = await resolveLicenseTokenForHarness();
   if (!license) return null;
   const base = defaultVireonSiteOriginForInference();
-  const res = await fetch(`${base}/api/inference/models`, {
+  const qs = opts?.refresh ? "?refresh=1" : "";
+  const res = await fetch(`${base}/api/inference/models${qs}`, {
     method: "GET",
     headers: { Authorization: `Bearer ${license}`, Accept: "application/json" },
   });
