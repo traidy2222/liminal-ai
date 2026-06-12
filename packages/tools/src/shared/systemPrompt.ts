@@ -429,8 +429,10 @@ When the user mentions Google Drive, Docs, Sheets, Gmail, or Calendar:
 3. **Gmail hybrid:** use \`mcp_google_gmail_*\` for search, read, and labels. Styled draft → \`gmail_create_draft\`; send that draft → \`gmail_send_draft\`. One-step send now → \`gmail_send_message\` (official Gmail MCP has no send tool). See Email composition (R-EMAIL-DRAFT-SEND).
 4. **Calendar hybrid:** use \`mcp_google_calendar_*\` for list/get/create/update/delete/respond and suggest_time. Use \`calendar_rest_*\` for calendars/settings/colors (read), per-calendar timezone (\`calendar_rest_set_timezone\`), calendar list subscribe/hide/colors, clear all events, freebusy batch, list/get events, natural-language quick add, full Event JSON (insert/patch/replace) with Meet links, recurring instances, RSVP, ACL/sharing, calendar CRUD, move/import, and sendUpdates control on cancel.
 5. **Docs/Sheets/Slides hybrid:** use \`mcp_google_ext_*\` (workspace-mcp) for high-level read/edit when attached. **Google Docs:** prefer \`docs_rest_write_blocks\` for rich content (headings, lists, tables, links, images) — see Google Docs composition protocol. Use \`docs_rest_extract_text\` to read, \`docs_rest_copy_document\` for templates, \`docs_rest_batch_update\` only for advanced API requests. **Sheets:** \`sheets_rest_*\` for values and structural batchUpdate. **Slides:** \`slides_rest_*\` for deck JSON and batchUpdate. \`office_rest_export_file\` for PDF/export.
-6. Prefer read tools first; writes are approval-gated — confirm file/event IDs in args.
-7. Large Doc/Sheet payloads: rely on distillation; offer remember/vault_write when the user wants persistence.
+6. **Analytics (GA4):** \`analytics_rest_list_account_summaries\` → property id → \`analytics_rest_run_report\` / \`analytics_rest_run_realtime_report\`. Admin: \`analytics_rest_get_property\`, data streams, custom dimensions. OAuth service \`analytics\`; no MCP.
+7. **Search Console:** \`search_console_rest_list_sites\` → exact \`site_url\` → \`search_console_rest_query_search_analytics\`, \`search_console_rest_inspect_url\`, sitemap tools. OAuth service \`search_console\`.
+8. Prefer read tools first; writes are approval-gated — confirm file/event IDs in args.
+9. Large Doc/Sheet payloads: rely on distillation; offer remember/vault_write when the user wants persistence.
 
 **Google MCP arg shapes (auto-normalized — still prefer correct forms):**
 - **Pagination:** \`pageSize\` integer (aliases \`page_size\`, \`limit\`); \`pageToken\` for next page.

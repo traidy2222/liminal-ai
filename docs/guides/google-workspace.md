@@ -35,6 +35,15 @@ In [Google Cloud Console](https://console.cloud.google.com/) for the **Vireon** 
 
    Sidecar (Docs/Sheets/…): Google Docs API, Sheets API, Slides API, Forms API, Tasks API, People API, Apps Script API.
 
+   Analytics + Search Console (REST-only — no MCP):
+
+   | You want | Enable in Cloud Console | OAuth scopes |
+   |----------|-------------------------|--------------|
+   | Google Analytics (GA4) | **Google Analytics Admin API** + **Google Analytics Data API** | `analytics.readonly`, `analytics.edit` |
+   | Search Console | **Google Search Console API** (`searchconsole.googleapis.com`) | `webmasters.readonly`, `webmasters` |
+
+   Check **Analytics (GA4)** and **Search Console** in Integrations when connecting (or pass `services: ["analytics","search_console"]`).
+
    OAuth scopes (read+write) now include **full Drive** (`drive`), **Calendar event write** (`calendar.events`), **Contacts write** (`contacts`), and **drive.readonly** on Docs/Sheets/Slides/Forms so the agent can open existing files — not only files the app created.
 2. **OAuth consent screen** — add test users if app is in *Testing* mode. Under **Data access**, manually add Google's **MCP** scopes (not only the classic REST scopes). Minimum for Gmail MCP: `gmail.readonly` + `gmail.compose` ([Google doc](https://developers.google.com/workspace/gmail/api/guides/configure-mcp-server)).
 3. **Workspace Developer Preview (required for MCP)** — Gmail/Drive/Calendar **MCP** APIs are preview-only. Enroll your Cloud project at [Google Workspace Developer Preview Program](https://developers.google.com/workspace/preview) (Workspace account + Cloud project). Until Google confirms enrollment, `tools/call` on `gmailmcp.googleapis.com` often returns *The caller does not have permission* even when classic Gmail API returns 200 and OAuth includes `gmail.compose`.
@@ -201,6 +210,41 @@ Requires **Google Docs API**, **Sheets API**, **Slides API**, and **Drive API** 
 
 Set `AGENT_GOOGLE_OFFICE_REST=0` to disable REST office tools (sidecar MCP only).
 
+## Google Analytics (GA4) — REST
+
+No official Google MCP for GA4. Liminal registers `analytics_rest_*` when `AGENT_GOOGLE_ANALYTICS_REST=1` (default) and OAuth includes the **analytics** service.
+
+| Task | Tool |
+|------|------|
+| Discover accounts / properties | `analytics_rest_list_account_summaries`, `analytics_rest_list_properties` |
+| Property metadata / edit | `analytics_rest_get_property`, `analytics_rest_update_property` |
+| Data streams | `analytics_rest_list_data_streams` |
+| Custom dimensions | `analytics_rest_list_custom_dimensions`, `analytics_rest_create_custom_dimension` |
+| Available dimensions/metrics | `analytics_rest_get_metadata` |
+| Standard reports | `analytics_rest_run_report`, `analytics_rest_batch_run_reports` |
+| Realtime | `analytics_rest_run_realtime_report` |
+
+Workflow: `list_account_summaries` → pick `property_id` (e.g. `properties/123456789`) → `run_report` with `start_date`, `end_date`, `metrics`, optional `dimensions`.
+
+Requires **Analytics Admin API** and **Analytics Data API** enabled. Re-connect OAuth after adding the analytics service.
+
+Set `AGENT_GOOGLE_ANALYTICS_REST=0` to disable.
+
+## Search Console — REST
+
+REST-only (`search_console_rest_*`) when `AGENT_GOOGLE_SEARCH_CONSOLE_REST=1` (default) and OAuth includes **search_console**.
+
+| Task | Tool |
+|------|------|
+| List properties | `search_console_rest_list_sites` |
+| Performance (queries, pages, CTR, position) | `search_console_rest_query_search_analytics` |
+| URL index status | `search_console_rest_inspect_url` |
+| Sitemaps | `search_console_rest_list_sitemaps`, `search_console_rest_get_sitemap`, `search_console_rest_submit_sitemap`, `search_console_rest_delete_sitemap` |
+
+`site_url` must match Search Console exactly (`sc-domain:example.com` or `https://www.example.com/`).
+
+Requires **Search Console API** enabled. Set `AGENT_GOOGLE_SEARCH_CONSOLE_REST=0` to disable.
+
 ## Architecture
 
 | Service | Backend |
@@ -212,6 +256,8 @@ Set `AGENT_GOOGLE_OFFICE_REST=0` to disable REST office tools (sidecar MCP only)
 | Calendar timezone/settings/colors/events/freebusy/ACL/Meet | Classic REST (`calendar_rest_*`) |
 | Docs/Sheets/Slides read-edit (sidecar) | Local `workspace-mcp` → `mcp_google_ext_*` |
 | Docs/Sheets/Slides batch API + export | Classic REST (`docs_rest_*`, `sheets_rest_*`, `slides_rest_*`, `office_rest_export_file`) |
+| Google Analytics (GA4) | Classic REST (`analytics_rest_*`) — Admin + Data APIs |
+| Search Console | Classic REST (`search_console_rest_*`) |
 | Forms, Tasks, … | Local `workspace-mcp` sidecar on port 8010 |
 
 Connections persist under `~/.liminal/api_connections/`. OAuth tokens are encrypted under `~/.liminal/oauth/google/`.
@@ -227,6 +273,8 @@ Connections persist under `~/.liminal/api_connections/`. OAuth tokens are encryp
 | `AGENT_GOOGLE_GMAIL_SEND` | `1` | Register `gmail_create_draft` + `gmail_send_message` (REST); MCP has no HTML draft or send |
 | `AGENT_GOOGLE_CALENDAR_REST` | `1` | Register full `calendar_rest_*` surface (calendars, timezone, events, freebusy, ACL, Meet, …) alongside Calendar MCP |
 | `AGENT_GOOGLE_OFFICE_REST` | `1` | Register `docs_rest_*`, `sheets_rest_*`, `slides_rest_*`, `office_rest_export_file` alongside workspace-mcp |
+| `AGENT_GOOGLE_ANALYTICS_REST` | `1` | Register `analytics_rest_*` (GA4 Admin + Data APIs) |
+| `AGENT_GOOGLE_SEARCH_CONSOLE_REST` | `1` | Register `search_console_rest_*` (sites, analytics, inspection, sitemaps) |
 
 ## Google MCP agent tips (arg aliases)
 

@@ -1971,6 +1971,22 @@ const _META_RAW: Record<string, HarnessSettingsFieldMeta> = {
       "Register calendar_rest_* tools (classic Calendar API): calendars/settings/timezone, colors, subscribe/hide, clear events, list/get events, freebusy, quick add, Meet links, RSVP, recurrence instances, ACL/sharing, calendar CRUD, move/import. Complements mcp_google_calendar_*. Same OAuth token.",
     valueKind: "boolean",
   },
+  "AGENT_GOOGLE_ANALYTICS_REST": {
+    tabId: "harness",
+    subgroupId: "harness_misc",
+    label: "Google Analytics (GA4) REST tools",
+    description:
+      "Register analytics_rest_* tools (Analytics Admin + Data APIs): list accounts/properties, run reports, realtime, data streams, custom dimensions. OAuth scope analytics.readonly / analytics.edit. Enable analyticsadmin.googleapis.com and analyticsdata.googleapis.com in Cloud Console.",
+    valueKind: "boolean",
+  },
+  "AGENT_GOOGLE_SEARCH_CONSOLE_REST": {
+    tabId: "harness",
+    subgroupId: "harness_misc",
+    label: "Search Console REST tools",
+    description:
+      "Register search_console_rest_* tools: list sites, search analytics queries, URL inspection, sitemap list/submit/delete. OAuth scope webmasters.readonly / webmasters. Enable searchconsole.googleapis.com in Cloud Console.",
+    valueKind: "boolean",
+  },
   "AGENT_GOOGLE_OFFICE_REST": {
     tabId: "harness",
     subgroupId: "harness_misc",

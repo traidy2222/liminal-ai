@@ -115,6 +115,11 @@ import { createMcpAttachTools, restoreMcpConnections } from "./integrations/exte
 import { createConnectorTools } from "./integrations/core/connect_provider.js";
 import { createGmailSendTools, gmailSendRestEnabled } from "./integrations/google/google_gmail_send.js";
 import { createGoogleCalendarRestTools, calendarRestEnabled } from "./integrations/google/google_calendar_rest.js";
+import { createGoogleAnalyticsRestTools, analyticsRestEnabled } from "./integrations/google/google_analytics_rest.js";
+import {
+  createGoogleSearchConsoleRestTools,
+  searchConsoleRestEnabled,
+} from "./integrations/google/google_search_console_rest.js";
 import { createGoogleOfficeRestTools, officeRestEnabled } from "./integrations/google/google_office_rest.js";
 import { createOutlookSendTools, outlookRestEnabled } from "./integrations/microsoft/outlook_send.js";
 import { createMicrosoftCalendarRestTools, microsoftCalendarRestEnabled } from "./integrations/microsoft/microsoft_calendar_rest.js";
@@ -467,6 +472,12 @@ export async function registerAllTools(
   }
   if (calendarRestEnabled()) {
     for (const t of createGoogleCalendarRestTools()) registry.register(t);
+  }
+  if (analyticsRestEnabled()) {
+    for (const t of createGoogleAnalyticsRestTools()) registry.register(t);
+  }
+  if (searchConsoleRestEnabled()) {
+    for (const t of createGoogleSearchConsoleRestTools()) registry.register(t);
   }
   if (officeRestEnabled()) {
     for (const t of createGoogleOfficeRestTools()) registry.register(t);

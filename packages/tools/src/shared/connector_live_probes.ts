@@ -29,6 +29,8 @@ import {
   type AuthScheme,
 } from "../integrations/external_api/api_connections_store.js";
 import { calendarRestEnabled } from "../integrations/google/google_calendar_rest.js";
+import { analyticsRestEnabled } from "../integrations/google/google_analytics_rest.js";
+import { searchConsoleRestEnabled } from "../integrations/google/google_search_console_rest.js";
 import { enrichGoogleMcpProbeError, mcpHandshakeAndListTools } from "../integrations/external_api/mcp_attach.js";
 import { getGoogleSidecarStatus } from "../integrations/google/google_sidecar.js";
 import { getMicrosoftSidecarStatus } from "../integrations/microsoft/microsoft_sidecar.js";
@@ -119,6 +121,99 @@ export async function probeGoogleOfficialMcp(
       };
     }
     return { state: "error", detail: enriched + attachNote };
+  }
+}
+
+export async function probeGoogleAnalyticsRest(accountId?: string): Promise<GoogleRestProbeResult> {
+  if (!analyticsRestEnabled()) {
+    return { state: "off", detail: "AGENT_GOOGLE_ANALYTICS_REST=0" };
+  }
+  const accounts = await listGoogleOAuthAccounts();
+  if (accounts.length === 0) {
+    return { state: "not_connected", detail: "no Google OAuth account" };
+  }
+  const account = accountId
+    ? accounts.find((a) => a.accountId === accountId) ?? accounts[0]!
+    : accounts[0]!;
+  const miss = missingGoogleScopes(account.scopes, resolveGoogleServices(["analytics"]));
+  if (miss.length > 0) {
+    return { state: "error", detail: `missing analytics scopes — reconnect OAuth: ${miss.join(", ")}` };
+  }
+  const token = await getGoogleAccessToken(account.accountId);
+  if (!token) {
+    return { state: "not_connected", detail: "token unreadable" };
+  }
+  try {
+    const res = await withTimeout(
+      fetch("https://analyticsadmin.googleapis.com/v1beta/accountSummaries?pageSize=1", {
+        headers: { Authorization: `Bearer ${token}`, Accept: "application/json" },
+        signal: AbortSignal.timeout(PROBE_TIMEOUT_MS),
+      }),
+      PROBE_TIMEOUT_MS
+    );
+    if (res.status === 403) {
+      const body = await res.text();
+      if (/API has not been used|accessNotConfigured/i.test(body)) {
+        return {
+          state: "error",
+          detail:
+            "Analytics Admin API disabled in Cloud Console. Enable analyticsadmin.googleapis.com and analyticsdata.googleapis.com.",
+        };
+      }
+      return { state: "error", detail: "Analytics REST HTTP 403 (check OAuth scopes)" };
+    }
+    if (!res.ok) {
+      return { state: "error", detail: `Analytics REST HTTP ${res.status}` };
+    }
+    return { state: "ok" };
+  } catch (e) {
+    return { state: "error", detail: e instanceof Error ? e.message : String(e) };
+  }
+}
+
+export async function probeGoogleSearchConsoleRest(accountId?: string): Promise<GoogleRestProbeResult> {
+  if (!searchConsoleRestEnabled()) {
+    return { state: "off", detail: "AGENT_GOOGLE_SEARCH_CONSOLE_REST=0" };
+  }
+  const accounts = await listGoogleOAuthAccounts();
+  if (accounts.length === 0) {
+    return { state: "not_connected", detail: "no Google OAuth account" };
+  }
+  const account = accountId
+    ? accounts.find((a) => a.accountId === accountId) ?? accounts[0]!
+    : accounts[0]!;
+  const miss = missingGoogleScopes(account.scopes, resolveGoogleServices(["search_console"]));
+  if (miss.length > 0) {
+    return { state: "error", detail: `missing Search Console scopes — reconnect OAuth: ${miss.join(", ")}` };
+  }
+  const token = await getGoogleAccessToken(account.accountId);
+  if (!token) {
+    return { state: "not_connected", detail: "token unreadable" };
+  }
+  try {
+    const res = await withTimeout(
+      fetch("https://www.googleapis.com/webmasters/v3/sites", {
+        headers: { Authorization: `Bearer ${token}`, Accept: "application/json" },
+        signal: AbortSignal.timeout(PROBE_TIMEOUT_MS),
+      }),
+      PROBE_TIMEOUT_MS
+    );
+    if (res.status === 403) {
+      const body = await res.text();
+      if (/API has not been used|accessNotConfigured/i.test(body)) {
+        return {
+          state: "error",
+          detail: "Search Console API disabled in Cloud Console. Enable searchconsole.googleapis.com.",
+        };
+      }
+      return { state: "error", detail: "Search Console REST HTTP 403 (check OAuth scopes)" };
+    }
+    if (!res.ok) {
+      return { state: "error", detail: `Search Console REST HTTP ${res.status}` };
+    }
+    return { state: "ok" };
+  } catch (e) {
+    return { state: "error", detail: e instanceof Error ? e.message : String(e) };
   }
 }
 
@@ -336,14 +431,28 @@ function formatSidecarProbeLine(label: string, probe: SidecarProbeResult): strin
 export async function buildIntegrationLiveProbeLines(): Promise<string[]> {
   const lines: string[] = ["### Live probes (this session)"];
   try {
-    const [gmailMcp, driveMcp, calMcp, chatMcp, peopleMcp, calRest, googleExt, msMcp, githubMcp, slackScopes] =
-      await Promise.all([
+    const [
+      gmailMcp,
+      driveMcp,
+      calMcp,
+      chatMcp,
+      peopleMcp,
+      calRest,
+      analyticsRest,
+      searchConsoleRest,
+      googleExt,
+      msMcp,
+      githubMcp,
+      slackScopes,
+    ] = await Promise.all([
       probeGoogleOfficialMcp("gmail"),
       probeGoogleOfficialMcp("drive"),
       probeGoogleOfficialMcp("calendar"),
       probeGoogleOfficialMcp("chat"),
       probeGoogleOfficialMcp("people"),
       probeGoogleCalendarRest(),
+      probeGoogleAnalyticsRest(),
+      probeGoogleSearchConsoleRest(),
       probeGoogleExtSidecar(),
       probeMicrosoftGraphMcp(),
       probeGithubMcp(),
@@ -355,6 +464,8 @@ export async function buildIntegrationLiveProbeLines(): Promise<string[]> {
     lines.push(formatMcpProbeLine("Chat", chatMcp));
     lines.push(formatMcpProbeLine("People", peopleMcp));
     lines.push(formatRestProbeLine("Calendar", calRest));
+    lines.push(formatRestProbeLine("Analytics (GA4)", analyticsRest));
+    lines.push(formatRestProbeLine("Search Console", searchConsoleRest));
     lines.push(formatSidecarProbeLine("Google Docs/Sheets (google_ext)", googleExt));
     lines.push(formatSidecarProbeLine("Microsoft Graph MCP", msMcp));
     lines.push(formatSidecarProbeLine("GitHub MCP", githubMcp));

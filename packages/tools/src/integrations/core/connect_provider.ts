@@ -71,6 +71,8 @@ import {
 import { attachMcpConnection, unregisterMcpConnection } from "../external_api/mcp_attach.js";
 import { gmailSendRestEnabled } from "../google/google_gmail_send.js";
 import { calendarRestEnabled } from "../google/google_calendar_rest.js";
+import { analyticsRestEnabled } from "../google/google_analytics_rest.js";
+import { searchConsoleRestEnabled } from "../google/google_search_console_rest.js";
 import { officeRestEnabled } from "../google/google_office_rest.js";
 import { ensureGoogleSidecarRunning, releaseGoogleSidecar, stopGoogleSidecar, getGoogleSidecarStatus } from "../google/google_sidecar.js";
 import {
@@ -596,10 +598,21 @@ export function createConnectorTools(registry: ToolRegistry, _emitter: AgentEmit
         }
       }
 
+      const restAttached: string[] = [];
+      for (const preset of presets.filter((p) => p.backend === "google_rest")) {
+        const miss = missingGoogleScopes(granted, [preset]);
+        if (miss.length > 0) {
+          attachErrors.push(`${preset.connectionName}: ${formatGoogleScopeDiagnostics(granted, [preset])}`);
+        } else {
+          restAttached.push(preset.id);
+          attached.push(preset.connectionName);
+        }
+      }
+
       for (const [connName, group] of byConn) {
         if (connName === "google_ext") continue;
         const preset = group[0]!;
-        if (!preset.mcpUrl) continue;
+        if (preset.backend === "google_rest" || !preset.mcpUrl) continue;
         const miss = missingGoogleScopes(granted, group);
         if (miss.length > 0) {
           attachErrors.push(`${connName}: ${formatGoogleScopeDiagnostics(granted, group)}`);
@@ -634,6 +647,10 @@ export function createConnectorTools(registry: ToolRegistry, _emitter: AgentEmit
       }
 
       const partial = attachErrors.length > 0 ? `\n\nSkipped / failed:\n${attachErrors.join("\n")}` : "";
+      const restNote =
+        restAttached.length > 0
+          ? `\nREST services (tools register when AGENT_GOOGLE_*_REST=1): ${restAttached.join(", ")} — analytics_rest_*, search_console_rest_*`
+          : "";
 
       return {
         ok: true,
@@ -642,6 +659,7 @@ export function createConnectorTools(registry: ToolRegistry, _emitter: AgentEmit
           `Connections: ${attached.join(", ")}\n` +
           `Registered MCP tools: ${totalTools}\n` +
           `Services attached: ${attached.join(", ")}` +
+          restNote +
           integrationLazyLoadHint(registry, "google_workspace") +
           partial,
       };
@@ -774,6 +792,20 @@ export function createConnectorTools(registry: ToolRegistry, _emitter: AgentEmit
           officeRestEnabled()
             ? "on (docs write_blocks/tables/images, sheets values, export PDF/CSV)"
             : "off (set AGENT_GOOGLE_OFFICE_REST=1)"
+        }`
+      );
+      lines.push(
+        `Analytics (GA4): REST-only — analytics_rest_* (accounts, properties, reports, realtime, custom dimensions): ${
+          analyticsRestEnabled()
+            ? "on — connect OAuth with analytics service; enable Analytics Admin + Data APIs in Cloud Console"
+            : "off (set AGENT_GOOGLE_ANALYTICS_REST=1)"
+        }`
+      );
+      lines.push(
+        `Search Console: REST-only — search_console_rest_* (sites, search analytics, URL inspection, sitemaps): ${
+          searchConsoleRestEnabled()
+            ? "on — connect OAuth with search_console service; enable Search Console API in Cloud Console"
+            : "off (set AGENT_GOOGLE_SEARCH_CONSOLE_REST=1)"
         }`
       );
       const ghAccounts = await listGithubOAuthAccounts();

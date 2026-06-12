@@ -159,7 +159,7 @@ export const TOOL_FAMILIES: Record<string, { description: string; tools: readonl
   },
   google_workspace: {
     description:
-      "Google Workspace REST — Gmail send/draft, Calendar, Docs/Sheets/Slides. Pair with mcp_google_* / mcp_google_ext_* when MCP is attached.",
+      "Google Workspace REST — Gmail send/draft, Calendar, Docs/Sheets/Slides, Analytics (GA4), Search Console. Pair with mcp_google_* / mcp_google_ext_* when MCP is attached.",
     tools: [
       "gmail_create_draft",
       "gmail_send_draft",
@@ -217,6 +217,24 @@ export const TOOL_FAMILIES: Record<string, { description: string; tools: readonl
       "slides_rest_batch_update",
       "slides_rest_get_page",
       "slides_rest_get_thumbnail",
+      "analytics_rest_list_account_summaries",
+      "analytics_rest_list_properties",
+      "analytics_rest_get_property",
+      "analytics_rest_update_property",
+      "analytics_rest_list_data_streams",
+      "analytics_rest_list_custom_dimensions",
+      "analytics_rest_create_custom_dimension",
+      "analytics_rest_get_metadata",
+      "analytics_rest_run_report",
+      "analytics_rest_run_realtime_report",
+      "analytics_rest_batch_run_reports",
+      "search_console_rest_list_sites",
+      "search_console_rest_query_search_analytics",
+      "search_console_rest_inspect_url",
+      "search_console_rest_list_sitemaps",
+      "search_console_rest_get_sitemap",
+      "search_console_rest_submit_sitemap",
+      "search_console_rest_delete_sitemap",
     ],
   },
   azure: {

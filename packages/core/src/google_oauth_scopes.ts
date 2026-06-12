@@ -60,6 +60,14 @@ const BROADER_SCOPE_IMPLIES: ReadonlyArray<{ broader: string; implies: readonly 
     broader: "https://www.googleapis.com/auth/tasks",
     implies: ["https://www.googleapis.com/auth/tasks.readonly"],
   },
+  {
+    broader: "https://www.googleapis.com/auth/analytics.edit",
+    implies: ["https://www.googleapis.com/auth/analytics.readonly"],
+  },
+  {
+    broader: "https://www.googleapis.com/auth/webmasters",
+    implies: ["https://www.googleapis.com/auth/webmasters.readonly"],
+  },
 ];
 
 /** Normalize Google-returned scope strings to short OIDC names where applicable. */

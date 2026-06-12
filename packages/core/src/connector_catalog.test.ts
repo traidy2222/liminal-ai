@@ -65,4 +65,29 @@ describe("connector_catalog", () => {
     const names = workspaceMcpToolNamesForServices(["apps_script", "docs"]);
     assert.deepEqual(names, ["appscript", "docs"]);
   });
+
+  it("resolves analytics to google_rest backend", () => {
+    const preset = getGoogleServicePreset("analytics");
+    assert.equal(preset?.backend, "google_rest");
+    assert.equal(preset?.connectionName, "google_analytics");
+  });
+
+  it("resolves search_console to google_rest backend", () => {
+    const preset = getGoogleServicePreset("search_console");
+    assert.equal(preset?.backend, "google_rest");
+    assert.equal(preset?.connectionName, "google_search_console");
+  });
+
+  it("read_write analytics includes edit scope", () => {
+    const presets = resolveGoogleServices(["analytics"]);
+    const scopes = scopesForGoogleServices(presets, "read_write");
+    assert.ok(scopes.includes("https://www.googleapis.com/auth/analytics.edit"));
+  });
+
+  it("read_only search_console prefers webmasters.readonly", () => {
+    const presets = resolveGoogleServices(["search_console"]);
+    const scopes = scopesForGoogleServices(presets, "read_only");
+    assert.ok(scopes.includes("https://www.googleapis.com/auth/webmasters.readonly"));
+    assert.ok(!scopes.includes("https://www.googleapis.com/auth/webmasters"));
+  });
 });

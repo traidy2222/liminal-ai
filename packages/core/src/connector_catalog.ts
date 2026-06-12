@@ -14,9 +14,11 @@ export type GoogleServiceId =
   | "tasks"
   | "contacts"
   | "apps_script"
-  | "search";
+  | "search"
+  | "analytics"
+  | "search_console";
 
-export type ConnectorBackend = "google_official_mcp" | "google_sidecar";
+export type ConnectorBackend = "google_official_mcp" | "google_sidecar" | "google_rest";
 
 export interface GoogleServicePreset {
   id: GoogleServiceId;
@@ -227,7 +229,30 @@ export const GOOGLE_WORKSPACE_SERVICES: GoogleServicePreset[] = [
     connectionName: "google_ext",
     scopes: ["https://www.googleapis.com/auth/cse"],
   },
+  {
+    id: "analytics",
+    label: "Google Analytics (GA4)",
+    backend: "google_rest",
+    connectionName: "google_analytics",
+    scopes: [
+      "https://www.googleapis.com/auth/analytics.readonly",
+      "https://www.googleapis.com/auth/analytics.edit",
+    ],
+  },
+  {
+    id: "search_console",
+    label: "Google Search Console",
+    backend: "google_rest",
+    connectionName: "google_search_console",
+    scopes: [
+      "https://www.googleapis.com/auth/webmasters.readonly",
+      "https://www.googleapis.com/auth/webmasters",
+    ],
+  },
 ];
+
+/** REST-only Google services (no MCP attach — tools register via env gates). */
+export const GOOGLE_REST_SERVICE_IDS: GoogleServiceId[] = ["analytics", "search_console"];
 
 export const ALL_GOOGLE_SERVICE_IDS: GoogleServiceId[] = GOOGLE_WORKSPACE_SERVICES.map((s) => s.id);
 
@@ -296,6 +321,10 @@ export function scopesForGoogleServices(
 
 export function needsGoogleSidecar(presets: GoogleServicePreset[]): boolean {
   return presets.some((p) => p.backend === "google_sidecar");
+}
+
+export function needsGoogleRest(presets: GoogleServicePreset[]): boolean {
+  return presets.some((p) => p.backend === "google_rest");
 }
 
 export function sidecarServiceIds(presets: GoogleServicePreset[]): GoogleServiceId[] {
