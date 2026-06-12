@@ -26,6 +26,7 @@ import '../models/terminal_view_state.dart';
 import '../models/vireon_account.dart';
 import '../protocol/chat_summary.dart';
 import '../protocol/frames.dart';
+import '../remote/remote_desktop_host.dart';
 import 'chat_session_controller.dart';
 import 'message_models.dart';
 
@@ -62,6 +63,7 @@ class AppController extends ChangeNotifier {
 
   final SidecarLifecycle _sidecar;
   final ProtocolClient _protocol = ProtocolClient();
+  late final RemoteDesktopHost _remoteDesktop = RemoteDesktopHost(_protocol);
   final SessionRegistry _sessions = SessionRegistry();
   late final AppWindowManager _appWindows = AppWindowManager(
     resolveAccentHex: () => _accentHex,
@@ -733,10 +735,19 @@ class AppController extends ChangeNotifier {
           final spec = LiminalAppSpec.fromJson(Map<String, dynamic>.from(appJson));
           _upsertDesktopApp(spec);
           if (spec.autoOpen && !_appWindows.isOpen(spec.id)) {
-            unawaited(_appWindows.openWindow(spec));
+            unawaited(_appWindows.openWindow(spec).then((_) {
+              unawaited(_remoteDesktop.registerSubWindow(spec.id));
+            }));
           }
         }
         notifyListeners();
+        return;
+      case 'remote_session':
+        _remoteDesktop.onRemoteSession(frame.data);
+        notifyListeners();
+        return;
+      case 'remote_ui_input':
+        _remoteDesktop.onRemoteUiInput(frame.data);
         return;
       case 'app_updated':
         if (!LiminalFeatureFlags.desktopAppsEnabled) return;
@@ -763,6 +774,7 @@ class AppController extends ChangeNotifier {
           desktopAppCaches.remove(appId);
           _appWindows.removeApp(appId);
           unawaited(_appWindows.closeWindow(appId));
+          unawaited(_remoteDesktop.unregisterSubWindow(appId));
         }
         notifyListeners();
         return;

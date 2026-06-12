@@ -79,6 +79,9 @@ class ProtocolClient {
       case 'orchestration_status':
       case 'pty_opened':
       case 'pty_exit':
+      case 'remote_session':
+      case 'remote_ui_input':
+      case 'remote_ui_meta':
         onGlobalFrame?.call(frame);
         return;
       default:

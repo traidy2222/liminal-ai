@@ -103,6 +103,9 @@ export function tryHandleRemoteJoinRequest(
       expiresAt: grant.expiresAt,
       wsPort: deps.lanPort,
       loopbackPort: deps.loopbackPort,
+      uiStreamUrl: `/remote/ui/stream?join=${encodeURIComponent(grant.joinToken)}`,
+      viewportWidth: 1280,
+      viewportHeight: 720,
     });
     return true;
   }

@@ -73,6 +73,11 @@ export class RemoteHostManager {
     return this.guests.size;
   }
 
+  /** Active grants for UI frame fan-out (host-only). */
+  activeGrants(): RemoteSessionGrant[] {
+    return [...this.byToken.values()].filter((g) => !grantIsExpired(g));
+  }
+
   resolveJoinToken(presented: string): { role: RemoteClientRole; chatId: string } | null {
     const token = presented.trim();
     if (!token) return null;

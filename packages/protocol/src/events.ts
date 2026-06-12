@@ -162,6 +162,24 @@ export interface TransportEventMap {
     cloudUrl: string | null;
     guestCount: number;
   };
+  /** Forwarded pointer/keyboard input for app mirroring (owner desktop only). */
+  remote_ui_input: {
+    type: "click" | "wheel" | "keydown" | "type";
+    x?: number;
+    y?: number;
+    button?: "left" | "right" | "middle";
+    deltaX?: number;
+    deltaY?: number;
+    key?: string;
+    text?: string;
+  };
+  /** UI stream metadata (viewport / focused window). */
+  remote_ui_meta: {
+    width: number;
+    height: number;
+    windowId?: string;
+    title?: string;
+  };
   /** Persona bootstrap pipeline progress (sidecar-synthesized, mirrors web SSE). */
   persona_bootstrap_progress: PersonaBootstrapProgressEvent;
 

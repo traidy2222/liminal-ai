@@ -17,5 +17,13 @@ macos/
 windows/
 web/
 
-# Keep lib/ and pubspec — runners are local-only until `flutter create`.
+# Federated plugins ship their own native implementations.
+!packages/**/linux/
+!packages/**/linux/**
+!packages/**/macos/
+!packages/**/macos/**
+!packages/**/windows/
+!packages/**/windows/**
+
+# Keep lib/ and pubspec — app runners are local-only until `flutter create`.
 .idea/

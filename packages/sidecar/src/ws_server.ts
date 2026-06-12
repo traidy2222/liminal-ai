@@ -60,6 +60,13 @@ import {
   tryHandleBrowserStreamUpgrade,
 } from "./browser_stream_handler.js";
 import {
+  clearRemoteUiStream,
+  createRemoteUiStreamServer,
+  publishRemoteUiFrame,
+  tryHandleRemoteUiStreamUpgrade,
+  type RemoteUiInput,
+} from "./remote_ui_stream_handler.js";
+import {
   tryHandleTerminalAssetRequest,
   tryHandleTerminalEmbedRequest,
   tryHandleTerminalResizeRequest,
@@ -121,6 +128,7 @@ export class WsServer {
   private readonly ptyManager = new PtyManager();
   private readonly ptyWss;
   private readonly browserWss;
+  private readonly remoteUiWss;
   private readonly remoteHost: RemoteHostManager;
   private readonly cloudRelay = new CloudRelayForwarder();
   private readonly clientMeta = new Map<WebSocket, RemoteClientMeta>();
@@ -169,6 +177,7 @@ export class WsServer {
       ptyManager: this.ptyManager,
     });
     this.browserWss = createBrowserStreamServer();
+    this.remoteUiWss = createRemoteUiStreamServer();
 
     this.ptyManager.on("exit", (sessionId, chatId, exitCode) => {
       this.broadcast(
@@ -339,11 +348,39 @@ export class WsServer {
       }
     }
 
+    if (joinToken) {
+      if (
+        tryHandleRemoteUiStreamUpgrade(
+          req,
+          socket,
+          head,
+          {
+            joinToken,
+            role: meta.role === "control" ? "control" : "view",
+            onInput: meta.role === "control" ? (input) => this.forwardRemoteUiInput(input) : undefined,
+          },
+          this.remoteUiWss
+        )
+      ) {
+        return;
+      }
+    }
+
     this.wss.handleUpgrade(req, socket, head, (ws) => this.onConnection(ws, meta));
   }
 
   private broadcastRemoteSession(status: RemoteSessionStatus): void {
     this.broadcast(serverFrame("remote_session", status));
+  }
+
+  private forwardRemoteUiInput(input: RemoteUiInput): void {
+    const frame = serverFrame("remote_ui_input", input);
+    const payload = JSON.stringify(frame);
+    for (const ws of this.clients) {
+      if (this.clientMeta.get(ws)?.role !== "owner") continue;
+      if (ws.readyState !== WebSocket.OPEN) continue;
+      ws.send(payload);
+    }
   }
 
   /** Start listening on an ephemeral 127.0.0.1 port; resolves with the chosen port. */
@@ -1374,6 +1411,9 @@ export class WsServer {
 
         case "remote_disable": {
           const d = data as { chatId?: string };
+          for (const grant of this.remoteHost.activeGrants()) {
+            clearRemoteUiStream(grant.joinToken);
+          }
           const removed = this.remoteHost.disable(d.chatId?.trim());
           this.cloudRelay.clear();
           this.ack(ws, id, true, undefined, { removed });
@@ -1391,6 +1431,66 @@ export class WsServer {
           const d = data as { joinCode: string };
           const ok = this.remoteHost.revokeCode(d.joinCode ?? "");
           this.ack(ws, id, ok, ok ? undefined : "Unknown join code.");
+          return;
+        }
+
+        case "remote_ui_frame": {
+          if (this.clientRole(ws) !== "owner") {
+            return this.ack(ws, id, false, "Owner only");
+          }
+          const d = data as {
+            jpegBase64?: string;
+            width?: number;
+            height?: number;
+            windowId?: string;
+            title?: string;
+            seq?: number;
+          };
+          const b64 = d.jpegBase64?.trim();
+          const width = Number(d.width);
+          const height = Number(d.height);
+          if (!b64 || !Number.isFinite(width) || !Number.isFinite(height)) {
+            return this.ack(ws, id, false, "jpegBase64, width, height required");
+          }
+          const buf = Buffer.from(b64, "base64");
+          const meta = {
+            width,
+            height,
+            windowId: d.windowId,
+            title: d.title,
+          };
+          for (const grant of this.remoteHost.activeGrants()) {
+            publishRemoteUiFrame(grant.joinToken, buf, meta);
+          }
+          this.cloudRelay.forwardUiFrame({
+            jpegBase64: b64,
+            width,
+            height,
+            windowId: d.windowId,
+            title: d.title,
+            seq: d.seq,
+          });
+          this.ack(ws, id, true);
+          return;
+        }
+
+        case "remote_ui_poll_input": {
+          if (this.clientRole(ws) !== "owner") {
+            return this.ack(ws, id, false, "Owner only");
+          }
+          const d = data as { joinCode?: string };
+          const code = d.joinCode?.trim().toUpperCase();
+          const grant = code ? this.remoteHost.resolveJoinCode(code) : this.remoteHost.activeGrants()[0];
+          if (!grant) {
+            this.ack(ws, id, true, undefined, { events: [] });
+            return;
+          }
+          const events = await this.cloudRelay.pollInputs(grant.joinCode, grant.joinToken);
+          for (const ev of events) {
+            const input = ev as RemoteUiInput;
+            this.forwardRemoteUiInput(input);
+          }
+          this.ack(ws, id, true, undefined, { events });
           return;
         }
 

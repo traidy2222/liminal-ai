@@ -122,7 +122,7 @@ export const COMPOSER_SLASH_COMMANDS: readonly SlashCommandDef[] = [
   },
   {
     name: "remote",
-    summary: "Share a view link for this chat (LAN; /remote cloud for Pro anywhere)",
+    summary: "Mirror the app window to another device (LAN; /remote cloud for Pro)",
     usage: "/remote [control|cloud|off|status|revoke CODE]",
     kind: "remote",
   },

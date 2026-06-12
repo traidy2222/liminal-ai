@@ -37,6 +37,9 @@ dependencies:
   media_kit_libs_linux: ^1.2.1
   desktop_multi_window: ^0.3.0
   window_manager: ^0.4.3
+  image: ^4.5.4
+  liminal_remote_desktop:
+    path: packages/liminal_remote_desktop
 
 dev_dependencies:
   flutter_test:

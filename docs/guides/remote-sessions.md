@@ -1,13 +1,13 @@
 # Remote sessions (`/remote`)
 
-Share a **live view** of the active chat with another device on your LAN, or (with Vireon Pro) from anywhere via the cloud relay.
+Mirror the **live Liminal desktop app** to another device — like RDP for the harness UI. Guests see the real window (chat, terminal, browser dock, file panel, settings) and in **control** mode can click, scroll, and type anywhere in the mirrored surface.
 
 ## Quick start (desktop)
 
 1. Open a chat in **Liminal Desktop**.
-2. Type `/remote` in the composer.
+2. Type `/remote` in the composer (or `/remote control` for full UI control).
 3. Open the **LAN** URL on your phone or another computer on the same Wi‑Fi.
-4. Watch the assistant stream in real time (view-only by default).
+4. You see a **live JPEG mirror** of the app window.
 
 Revoke with `/remote off`.
 
@@ -15,36 +15,38 @@ Revoke with `/remote off`.
 
 | Command | Effect |
 |---------|--------|
-| `/remote` | Enable **view-only** join link for the active chat |
-| `/remote control` | Enable **control** link (send messages, approve tools) |
-| `/remote cloud` | View link + register with Vireon cloud relay (Pro) |
-| `/remote cloud control` | Control link + cloud relay |
+| `/remote` | Enable **view-only** app mirror link for the active chat |
+| `/remote control` | Enable **control** link (pointer + keyboard in the mirrored UI) |
+| `/remote cloud` | View mirror + register with Vireon cloud relay (Pro) |
+| `/remote cloud control` | Control mirror + cloud relay |
 | `/remote off` | Revoke all join links for this chat |
 | `/remote status` | Show active codes, URLs, expiry, guest count |
 | `/remote revoke CODE` | Revoke a single join code |
 
-Works in **desktop**, **web** (`npm run web`), and is listed in **TUI** help (TUI cannot host sessions — use desktop or web).
+Works in **desktop** (host). **TUI** lists help only — use desktop to host.
 
 ## Roles
 
 | Role | Can |
 |------|-----|
-| **view** | Replay transcript, watch live events |
-| **control** | Above + `send_message`, `abort`, `resolve_approval`, `resolve_ask_user`, PTY/browser streams |
-| **owner** | Full sidecar command set (desktop / web host UI) |
+| **view** | Watch the live app mirror |
+| **control** | Above + send pointer/keyboard input into the mirrored window |
+| **owner** | Full sidecar command set (desktop UI) |
 
-ACL is enforced in `@liminal/core` (`remoteCommandAllowed`) and gated in `liminald` / web `WebRemoteService`.
+ACL is enforced in `@liminal/core` (`remoteCommandAllowed`) and on the UI stream path (`/remote/ui/stream`).
 
 ## Architecture
 
-- **Host authority:** The process that owns the harness — desktop `liminald` (sidecar) or web `ChatManager` when running `npm run web`.
-- **LAN transport:** Secondary HTTP listener on `LIMINAL_REMOTE_BIND_HOST` (default `0.0.0.0`) serves `/remote/join` and upgrades guests with `?join=<token>`.
-- **Cloud transport (Pro):** Host registers with `POST https://www.vireondynamics.com/api/remote/sessions` (`pro.remote_sessions`). Frames are forwarded to the relay; guests open `/remote/join/<code>` and subscribe to SSE.
+- **Host:** Liminal Desktop captures its native window(s) via `liminal_remote_desktop` (Win / macOS / Linux) and publishes JPEG frames to `liminald`.
+- **LAN transport:** Secondary HTTP listener serves `/remote/join`; guests open a full-screen mirror page that connects to `WS /remote/ui/stream?join=TOKEN` for binary JPEG + JSON input.
+- **Cloud transport (Pro):** Host registers with Vireon; UI frames relay through `POST /api/remote/frames`; guests poll `GET /api/remote/poll` and post input to `POST /api/remote/input`.
 
 ```text
-Host UI  →  remote_enable  →  RemoteHostManager
-Guest    →  /remote/join?code=…  →  WS ?join=token  →  live events
+Desktop (capture)  →  remote_ui_frame  →  sidecar UI hub  →  guest mirror page
+Guest input        →  WS or cloud POST  →  remote_ui_input  →  desktop inject
 ```
+
+Multi-window: spawned Liminal app windows register with the capture plugin; the stream **follows the focused** Liminal-owned window.
 
 ## Environment
 
@@ -58,15 +60,11 @@ Guest    →  /remote/join?code=…  →  WS ?join=token  →  live events
 
 - Join tokens are ephemeral (not persisted across sidecar restart).
 - View-only is the default; use `/remote control` only when you trust the guest device.
-- Guests only receive events for their bound `chatId`.
-- Failed join attempts on the LAN listener should be rate-limited at the network edge in untrusted environments.
-
-## Web-only / same-machine dev
-
-When using `npm run web` without desktop, remote guests attach to the web server's LAN port with the same join flow (`WebRemoteService`).
+- Harness destructive approvals still appear in the mirrored UI — the guest clicks Approve/Deny in the real app surface.
 
 ## Limitations
 
-- **TUI** does not host remote sessions.
-- **Cloud relay** uses HTTP polling on Vireon (not browser SSE). Session state is stored in **Supabase** by default (already on Vercel); optional **Upstash Redis** (`UPSTASH_REDIS_REST_URL` + `UPSTASH_REDIS_REST_TOKEN`) overrides when set. Prefer **LAN** for lowest latency.
+- **Web** (`npm run web`) does not host pixel mirror sessions — desktop only.
+- **Cloud** mirror is lower FPS than LAN (JPEG polling through Vireon).
+- **Linux Wayland** may require `xdg-desktop-portal` permission for capture/input.
 - Re-run `/remote` after sidecar restart (tokens are in-memory only).

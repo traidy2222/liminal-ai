@@ -2,68 +2,70 @@
 <html lang="en">
 <head>
   <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
   <title>Liminal Remote</title>
   <style>
     :root { color-scheme: dark; }
-    body { margin: 0; background: #0a0e14; color: #dde8f0; font-family: system-ui, sans-serif; }
-    #app { padding: 12px; max-width: 720px; margin: 0 auto; }
-    #status { font-size: 12px; color: #6a8a9a; margin-bottom: 12px; }
-    .msg { margin: 8px 0; padding: 8px 10px; border-radius: 4px; background: #111820; border: 1px solid #1e2a36; white-space: pre-wrap; word-break: break-word; }
-    .msg.user { border-color: #2a4a5a; }
-    .msg.assistant { border-color: #1a3a2a; }
-    .tool { font-size: 12px; color: #8aa0b4; margin-top: 4px; }
-    #composer { display: none; margin-top: 12px; gap: 8px; }
-    #composer.control { display: flex; }
-    #composer input { flex: 1; padding: 8px; background: #0d1218; border: 1px solid #2a3a48; color: #dde8f0; border-radius: 4px; }
-    #composer button { padding: 8px 12px; background: #1a4a3a; border: 1px solid #2a6a4a; color: #dde8f0; border-radius: 4px; }
-    #approval { display: none; margin-top: 12px; padding: 10px; border: 1px solid #4a3a1a; background: #1a1408; border-radius: 4px; }
-    #approval.control { display: block; }
+    * { box-sizing: border-box; }
+    html, body { margin: 0; height: 100%; background: #05080c; color: #dde8f0; font-family: system-ui, sans-serif; overflow: hidden; }
+    #status {
+      position: fixed; top: 0; left: 0; right: 0; z-index: 10;
+      padding: 8px 12px; font-size: 12px; color: #8aa0b4;
+      background: linear-gradient(#0a0e14ee, #0a0e1400);
+      pointer-events: none;
+    }
+    #pane {
+      width: 100vw; height: 100vh; display: flex; align-items: center; justify-content: center;
+      touch-action: none; cursor: crosshair;
+    }
+    #mirror {
+      max-width: 100%; max-height: 100%; object-fit: contain; user-select: none;
+      -webkit-user-drag: none;
+    }
+    #error { position: fixed; bottom: 12px; left: 12px; right: 12px; color: #f07178; font-size: 13px; }
   </style>
 </head>
 <body>
-  <div id="app">
-    <div id="status">Connecting…</div>
-    <div id="log"></div>
-    <div id="approval">
-      <div id="approvalText"></div>
-      <button type="button" id="approveBtn">Approve</button>
-      <button type="button" id="denyBtn">Deny</button>
-    </div>
-    <div id="composer">
-      <input id="input" placeholder="Message…" autocomplete="off" />
-      <button type="button" id="send">Send</button>
-    </div>
+  <div id="status">Connecting…</div>
+  <div id="pane">
+    <img id="mirror" alt="Liminal app mirror" draggable="false" />
   </div>
+  <div id="error" hidden></div>
   <script>
     const params = new URLSearchParams(location.search);
     const code = params.get("code") || "";
-    const logEl = document.getElementById("log");
     const statusEl = document.getElementById("status");
-    const composer = document.getElementById("composer");
-    const approval = document.getElementById("approval");
-    const input = document.getElementById("input");
-    let role = "view", chatId = "", cmdId = 0, ws = null;
-    let pendingApproval = null;
+    const pane = document.getElementById("pane");
+    const mirror = document.getElementById("mirror");
+    const errorEl = document.getElementById("error");
+    let role = "view", joinToken = "", viewportW = 1280, viewportH = 720, ws = null, objectUrl = null;
 
-    function addMsg(kind, text, extra) {
-      const d = document.createElement("div");
-      d.className = "msg " + kind;
-      d.textContent = (kind === "user" ? "You: " : "") + text;
-      if (extra) {
-        const t = document.createElement("div");
-        t.className = "tool";
-        t.textContent = extra;
-        d.appendChild(t);
-      }
-      logEl.appendChild(d);
-      logEl.scrollTop = logEl.scrollHeight;
+    function mapToViewport(clientX, clientY) {
+      const rect = pane.getBoundingClientRect();
+      const scale = Math.min(rect.width / viewportW, rect.height / viewportH);
+      const drawW = viewportW * scale;
+      const drawH = viewportH * scale;
+      const offsetX = rect.left + (rect.width - drawW) / 2;
+      const offsetY = rect.top + (rect.height - drawH) / 2;
+      if (clientX < offsetX || clientY < offsetY || clientX > offsetX + drawW || clientY > offsetY + drawH) return null;
+      return {
+        x: Math.round(((clientX - offsetX) / drawW) * viewportW),
+        y: Math.round(((clientY - offsetY) / drawH) * viewportH),
+      };
     }
 
-    function sendCmd(command, data) {
-      const id = "c" + (++cmdId);
-      ws.send(JSON.stringify({ t: "cmd", v: 1, id, command, data }));
-      return id;
+    function sendInput(payload) {
+      if (!ws || ws.readyState !== WebSocket.OPEN || role !== "control") return;
+      ws.send(JSON.stringify(payload));
+    }
+
+    function showFrame(buf) {
+      const blob = new Blob([buf], { type: "image/jpeg" });
+      const next = URL.createObjectURL(blob);
+      mirror.src = next;
+      if (objectUrl) URL.revokeObjectURL(objectUrl);
+      objectUrl = next;
+      statusEl.textContent = "Live (" + role + ")";
     }
 
     fetch("/remote/resolve?code=" + encodeURIComponent(code))
@@ -71,65 +73,55 @@
       .then((cfg) => {
         if (!cfg.ok) throw new Error(cfg.error || "resolve failed");
         role = cfg.role || "view";
-        chatId = cfg.chatId;
+        joinToken = cfg.joinToken;
+        viewportW = cfg.viewportWidth || 1280;
+        viewportH = cfg.viewportHeight || 720;
         const proto = location.protocol === "https:" ? "wss:" : "ws:";
-        ws = new WebSocket(proto + "//" + location.host + "?join=" + encodeURIComponent(cfg.joinToken));
+        const uiPath = cfg.uiStreamUrl || "/remote/ui/stream?join=" + encodeURIComponent(joinToken);
+        ws = new WebSocket(proto + "//" + location.host + uiPath);
+        ws.binaryType = "arraybuffer";
+        ws.onopen = () => { statusEl.textContent = "Connected (" + role + ") — waiting for frames…"; };
         ws.onmessage = (ev) => {
-          try {
-            const f = JSON.parse(ev.data);
-            if (f.t !== "evt") return;
-            const p = f.p || {};
-            if (f.e === "text") addMsg("assistant", p.text || "");
-            if (f.e === "transcript_replay" && Array.isArray(p.entries)) {
-              p.entries.forEach((e) => { if (e.text) addMsg(e.kind === "user" ? "user" : "assistant", e.text); });
-            }
-            if (f.e === "tool_start") addMsg("assistant", "", "Tool: " + (p.toolName || p.name));
-            if (f.e === "tool_result" && p.output) addMsg("assistant", "", String(p.output).slice(0, 500));
-            if (f.e === "tool_approval") {
-              pendingApproval = p;
-              document.getElementById("approvalText").textContent =
-                "Approval: " + (p.toolName || "") + (role === "view" ? " (view-only)" : "");
-              approval.classList.toggle("control", role === "control");
-            }
-            if (f.e === "hello" || f.e === "sidecar_ready") {
-              statusEl.textContent = "Connected (" + role + ") · " + chatId;
-              if (role === "control") composer.classList.add("control");
-            }
-          } catch (e) { console.error(e); }
+          if (typeof ev.data === "string") {
+            try {
+              const meta = JSON.parse(ev.data);
+              if (meta.type === "meta") {
+                viewportW = meta.width || viewportW;
+                viewportH = meta.height || viewportH;
+                if (meta.title) statusEl.textContent = "Live: " + meta.title + " (" + role + ")";
+              }
+            } catch (_) {}
+            return;
+          }
+          if (ev.data instanceof ArrayBuffer && ev.data.byteLength > 64) showFrame(ev.data);
         };
+        ws.onerror = () => { errorEl.hidden = false; errorEl.textContent = "UI stream error"; };
         ws.onclose = () => { statusEl.textContent = "Disconnected"; };
       })
-      .catch((e) => { statusEl.textContent = "Error: " + e.message; });
+      .catch((e) => {
+        statusEl.textContent = "Error";
+        errorEl.hidden = false;
+        errorEl.textContent = e.message;
+      });
 
-    document.getElementById("send").onclick = () => {
-      const m = input.value.trim();
-      if (!m || !ws || role !== "control") return;
-      sendCmd("send_message", { chatId, message: m });
-      addMsg("user", m);
-      input.value = "";
-    };
-    document.getElementById("approveBtn").onclick = () => {
-      if (!pendingApproval || role !== "control" || !ws) return;
-      sendCmd("resolve_approval", {
-        chatId,
-        callId: pendingApproval.callId,
-        approvalNonce: pendingApproval.approvalNonce,
-        decision: "approve",
-      });
-      pendingApproval = null;
-      approval.classList.remove("control");
-    };
-    document.getElementById("denyBtn").onclick = () => {
-      if (!pendingApproval || role !== "control" || !ws) return;
-      sendCmd("resolve_approval", {
-        chatId,
-        callId: pendingApproval.callId,
-        approvalNonce: pendingApproval.approvalNonce,
-        decision: "reject",
-      });
-      pendingApproval = null;
-      approval.classList.remove("control");
-    };
+    pane.addEventListener("pointerdown", (ev) => {
+      if (role !== "control") return;
+      const pt = mapToViewport(ev.clientX, ev.clientY);
+      if (!pt || ev.button !== 0) return;
+      sendInput({ type: "click", x: pt.x, y: pt.y, button: "left" });
+    });
+    pane.addEventListener("wheel", (ev) => {
+      if (role !== "control") return;
+      ev.preventDefault();
+      const pt = mapToViewport(ev.clientX, ev.clientY);
+      if (!pt) return;
+      sendInput({ type: "wheel", x: pt.x, y: pt.y, deltaX: ev.deltaX, deltaY: ev.deltaY });
+    }, { passive: false });
+    window.addEventListener("keydown", (ev) => {
+      if (role !== "control" || ev.target !== document.body) return;
+      if (ev.key.length === 1) sendInput({ type: "type", text: ev.key });
+      else sendInput({ type: "keydown", key: ev.key });
+    });
   </script>
 </body>
 </html>

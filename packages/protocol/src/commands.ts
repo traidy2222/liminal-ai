@@ -225,6 +225,17 @@ export interface ClientCommandMap {
   remote_status: { chatId?: string };
   /** Revoke a single join code. */
   remote_revoke: { joinCode: string };
+  /** Owner publishes a JPEG UI frame for remote guests. */
+  remote_ui_frame: {
+    jpegBase64: string;
+    width: number;
+    height: number;
+    windowId?: string;
+    title?: string;
+    seq?: number;
+  };
+  /** Owner polls cloud relay for queued remote UI input events. */
+  remote_ui_poll_input: { joinCode: string };
 }
 
 export type ClientCommandType = keyof ClientCommandMap;

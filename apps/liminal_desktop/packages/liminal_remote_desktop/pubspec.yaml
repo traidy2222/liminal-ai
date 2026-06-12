@@ -1,0 +1,25 @@
+name: liminal_remote_desktop
+description: Native window capture and input injection for Liminal /remote app mirroring.
+version: 0.1.0
+publish_to: none
+
+environment:
+  sdk: ">=3.4.0 <4.0.0"
+  flutter: ">=3.22.0"
+
+dependencies:
+  flutter:
+    sdk: flutter
+  plugin_platform_interface: ^2.1.8
+
+flutter:
+  plugin:
+    platforms:
+      windows:
+        pluginClass: LiminalRemoteDesktopPlugin
+        fileName: liminal_remote_desktop_plugin.cpp
+      macos:
+        pluginClass: LiminalRemoteDesktopPlugin
+      linux:
+        pluginClass: LiminalRemoteDesktopPlugin
+        fileName: liminal_remote_desktop_plugin.cc

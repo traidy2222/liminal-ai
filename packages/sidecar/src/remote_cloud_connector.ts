@@ -102,4 +102,52 @@ export class CloudRelayForwarder {
       /* relay is best-effort */
     });
   }
+
+  forwardUiFrame(opts: {
+    jpegBase64: string;
+    width: number;
+    height: number;
+    windowId?: string;
+    title?: string;
+    seq?: number;
+  }): void {
+    const relay = this.relay;
+    if (!relay) return;
+    void fetch(relay.url, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${relay.joinToken}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        joinCode: relay.joinCode,
+        frame: JSON.stringify({
+          kind: "ui",
+          b64: opts.jpegBase64,
+          w: opts.width,
+          h: opts.height,
+          windowId: opts.windowId,
+          title: opts.title,
+          seq: opts.seq,
+        }),
+      }),
+    }).catch(() => {
+      /* relay is best-effort */
+    });
+  }
+
+  async pollInputs(joinCode: string, joinToken: string): Promise<unknown[]> {
+    const relay = this.relay;
+    if (!relay) return [];
+    const origin = new URL(relay.url).origin;
+    const res = await fetch(
+      `${origin}/api/remote/input/poll?join=${encodeURIComponent(joinCode)}`,
+      {
+        headers: { Authorization: `Bearer ${joinToken}` },
+      }
+    ).catch(() => null);
+    if (!res?.ok) return [];
+    const body = (await res.json().catch(() => ({}))) as { events?: unknown[] };
+    return Array.isArray(body.events) ? body.events : [];
+  }
 }

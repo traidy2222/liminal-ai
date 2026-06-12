@@ -377,7 +377,7 @@ packages:
     source: hosted
     version: "4.1.2"
   image:
-    dependency: transitive
+    dependency: "direct main"
     description:
       name: image
       sha256: "6300175e00616bbc832e2fc91bfa4d776af5402c81c7151bee6905bb08473c52"
@@ -464,6 +464,13 @@ packages:
       url: "https://pub.dev"
     source: hosted
     version: "3.0.2"
+  liminal_remote_desktop:
+    dependency: "direct main"
+    description:
+      path: "packages/liminal_remote_desktop"
+      relative: true
+    source: path
+    version: "0.1.0"
   lints:
     dependency: transitive
     description:

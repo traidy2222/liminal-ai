@@ -4,6 +4,7 @@ import 'dart:convert';
 import 'package:desktop_multi_window/desktop_multi_window.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:liminal_remote_desktop/liminal_remote_desktop.dart';
 import 'package:window_manager/window_manager.dart';
 
 import '../models/liminal_app_spec.dart';
@@ -45,6 +46,7 @@ class _AppWindowRootState extends State<AppWindowRoot> {
 
   Future<void> _init() async {
     await windowManager.ensureInitialized();
+    await LiminalRemoteDesktop.registerWindow(windowId: widget.appId);
     final launch = widget.launchArgs;
     if (launch != null && launch.hasEmbeddedChrome) {
       await applyChromeFromLaunchArgs(launch);
