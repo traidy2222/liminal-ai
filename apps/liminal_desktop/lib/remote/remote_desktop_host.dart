@@ -14,6 +14,7 @@ class RemoteDesktopHost {
 
   final ProtocolClient _protocol;
   Timer? _timer;
+  Timer? _inputPollTimer;
   bool _active = false;
   bool _cloud = false;
   String? _cloudJoinCode;
@@ -23,11 +24,11 @@ class RemoteDesktopHost {
   bool _tickInFlight = false;
   bool _pollInFlight = false;
   int _focusPass = 0;
-  int _cloudPollPass = 0;
   int _pendingFrames = 0;
 
   static const _lanInterval = Duration(milliseconds: 100); // ~10 fps max
   static const _cloudInterval = Duration(milliseconds: 350); // ~3 fps — keeps UI responsive
+  static const _cloudInputPollInterval = Duration(milliseconds: 120);
   static const _cloudMaxWidth = 1280;
   static const _maxPendingFrames = 1;
 
@@ -83,7 +84,13 @@ class RemoteDesktopHost {
     await ensureMainWindowRegistered();
     final interval = cloud ? _cloudInterval : _lanInterval;
     _timer = Timer.periodic(interval, (_) => unawaited(_tick()));
+    if (cloud) {
+      _inputPollTimer = Timer.periodic(_cloudInputPollInterval, (_) {
+        unawaited(_pollCloudInput());
+      });
+    }
     unawaited(_tick());
+    if (cloud) unawaited(_pollCloudInput());
   }
 
   void _stop() {
@@ -92,10 +99,11 @@ class RemoteDesktopHost {
     _cloudJoinCode = null;
     _timer?.cancel();
     _timer = null;
+    _inputPollTimer?.cancel();
+    _inputPollTimer = null;
     _tickInFlight = false;
     _pollInFlight = false;
     _focusPass = 0;
-    _cloudPollPass = 0;
     _pendingFrames = 0;
     _seq = 0;
     _lastWindowId = null;
@@ -115,8 +123,8 @@ class RemoteDesktopHost {
       final frame = await LiminalRemoteDesktop.captureFrame();
       if (frame == null || !_active) return;
 
-      final jpegBytes = await _frameToJpeg(frame);
-      if (jpegBytes == null || jpegBytes.isEmpty || !_active) return;
+      final encoded = await _frameToJpeg(frame);
+      if (encoded == null || !_active) return;
 
       if (frame.windowId.isNotEmpty && frame.windowId != _lastWindowId) {
         _lastWindowId = frame.windowId;
@@ -129,9 +137,9 @@ class RemoteDesktopHost {
             .send(
               'remote_ui_frame',
               {
-                'jpegBase64': base64Encode(jpegBytes),
-                'width': frame.width,
-                'height': frame.height,
+                'jpegBase64': base64Encode(encoded.bytes),
+                'width': encoded.width,
+                'height': encoded.height,
                 'windowId': frame.windowId,
                 'title': frame.title,
                 'seq': _seq,
@@ -142,11 +150,6 @@ class RemoteDesktopHost {
           if (_pendingFrames > 0) _pendingFrames -= 1;
         }),
       );
-
-      if (_cloud && _cloudJoinCode != null && ++_cloudPollPass >= 4) {
-        _cloudPollPass = 0;
-        unawaited(_pollCloudInput());
-      }
     } catch (_) {
       /* capture is best-effort */
     } finally {
@@ -164,10 +167,12 @@ class RemoteDesktopHost {
     }
   }
 
-  Future<Uint8List?> _frameToJpeg(RemoteDesktopFrame frame) async {
+  Future<_EncodedJpeg?> _frameToJpeg(RemoteDesktopFrame frame) async {
     if (frame.jpeg.length >= 2 && frame.jpeg[0] == 0xff && frame.jpeg[1] == 0xd8) {
       final bytes = Uint8List.fromList(frame.jpeg);
-      if (!_cloud || frame.width <= _cloudMaxWidth) return bytes;
+      if (!_cloud || frame.width <= _cloudMaxWidth) {
+        return _EncodedJpeg(bytes: bytes, width: frame.width, height: frame.height);
+      }
       return compute(
         _recompressJpeg,
         _JpegEncodeRequest(
@@ -213,6 +218,14 @@ class RemoteDesktopHost {
   void dispose() => _stop();
 }
 
+class _EncodedJpeg {
+  const _EncodedJpeg({required this.bytes, required this.width, required this.height});
+
+  final Uint8List bytes;
+  final int width;
+  final int height;
+}
+
 class _JpegEncodeRequest {
   const _JpegEncodeRequest({
     required this.pixels,
@@ -231,7 +244,7 @@ class _JpegEncodeRequest {
   final int maxWidth;
 }
 
-Uint8List? _encodePixelsToJpeg(_JpegEncodeRequest req) {
+_EncodedJpeg? _encodePixelsToJpeg(_JpegEncodeRequest req) {
   if (req.width <= 0 || req.height <= 0) return null;
   final expected = req.width * req.height * 4;
   if (req.pixels.length < expected) return null;
@@ -246,15 +259,25 @@ Uint8List? _encodePixelsToJpeg(_JpegEncodeRequest req) {
   if (req.maxWidth > 0 && image.width > req.maxWidth) {
     image = img.copyResize(image, width: req.maxWidth);
   }
-  return Uint8List.fromList(img.encodeJpg(image, quality: req.quality));
+  return _EncodedJpeg(
+    bytes: Uint8List.fromList(img.encodeJpg(image, quality: req.quality)),
+    width: image.width,
+    height: image.height,
+  );
 }
 
-Uint8List? _recompressJpeg(_JpegEncodeRequest req) {
+_EncodedJpeg? _recompressJpeg(_JpegEncodeRequest req) {
   final decoded = img.decodeImage(req.pixels);
-  if (decoded == null) return req.pixels;
+  if (decoded == null) {
+    return _EncodedJpeg(bytes: req.pixels, width: req.width, height: req.height);
+  }
   var image = decoded;
   if (req.maxWidth > 0 && image.width > req.maxWidth) {
     image = img.copyResize(image, width: req.maxWidth);
   }
-  return Uint8List.fromList(img.encodeJpg(image, quality: req.quality));
+  return _EncodedJpeg(
+    bytes: Uint8List.fromList(img.encodeJpg(image, quality: req.quality)),
+    width: image.width,
+    height: image.height,
+  );
 }

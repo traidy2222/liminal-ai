@@ -139,7 +139,9 @@ void InjectWheel(HWND hwnd, int x, int y, double deltaY) {
   INPUT input{};
   input.type = INPUT_MOUSE;
   input.mi.dwFlags = MOUSEEVENTF_WHEEL;
-  input.mi.mouseData = static_cast<DWORD>(deltaY);
+  // Browser wheel deltas are pixel-ish; Windows expects multiples of 120 (WHEEL_DELTA).
+  const LONG wheel = static_cast<LONG>(-deltaY * 120.0 / 100.0);
+  input.mi.mouseData = static_cast<DWORD>(wheel);
   SendInput(1, &input, sizeof(INPUT));
 }
 

@@ -63,6 +63,7 @@ import {
   clearRemoteUiStream,
   createRemoteUiStreamServer,
   hasAnyRemoteUiSubscriber,
+  parseRemoteUiInput,
   publishRemoteUiFrame,
   tryHandleRemoteUiStreamUpgrade,
   type RemoteUiInput,
@@ -1490,8 +1491,8 @@ export class WsServer {
           }
           const events = await this.cloudRelay.pollInputs(grant.joinCode, grant.joinToken);
           for (const ev of events) {
-            const input = ev as RemoteUiInput;
-            this.forwardRemoteUiInput(input);
+            const input = parseRemoteUiInput(ev);
+            if (input) this.forwardRemoteUiInput(input);
           }
           this.ack(ws, id, true, undefined, { events });
           return;
