@@ -448,7 +448,12 @@ export function SettingsModal({
                           onEnvChange("AGENT_MODEL", modelId);
                         }}
                         onFastModel={(modelId) => onEnvChange("AGENT_FAST_MODEL", modelId)}
-                        onManagedProvider={(provider) => onEnvChange("AGENT_MANAGED_PROVIDER", provider)}
+                        onManagedProvider={(provider, remapped) => {
+                          onEnvChange("AGENT_MANAGED_PROVIDER", provider);
+                          onEnvChange("AGENT_MODEL", remapped.mainModel);
+                          onProviderModel(remapped.mainModel);
+                          onEnvChange("AGENT_FAST_MODEL", remapped.fastModel);
+                        }}
                       />
                     ) : null}
                     {!managedRoute ? (

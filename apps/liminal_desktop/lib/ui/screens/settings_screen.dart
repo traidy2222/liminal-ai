@@ -94,15 +94,13 @@ class _SettingsScreenState extends State<SettingsScreen>
     return 'auto';
   }
 
-  String _resolveManagedModelId(String catalogId, HarnessSettingsSnapshot? snap) {
+  String _resolveManagedModelId(String modelOrCatalogId, HarnessSettingsSnapshot? snap) {
     final catalog = AppScope.of(context).managedInferenceModels;
     final pref = _managedProviderPref(snap);
-    if (catalog == null) return catalogId;
-    for (final row in catalog.models) {
-      if (row.id != catalogId) continue;
-      return resolveModelIdForManagedProvider(catalogId, pref, row.providers);
-    }
-    return catalogId;
+    if (catalog == null) return modelOrCatalogId;
+    final row = findManagedCatalogRowByModelId(catalog.models, modelOrCatalogId);
+    if (row == null) return modelOrCatalogId;
+    return resolveModelIdForManagedProvider(row.id, pref, row.providers);
   }
 
   Future<void> _onManagedMainModel(String modelId) async {
@@ -141,9 +139,25 @@ class _SettingsScreenState extends State<SettingsScreen>
       _saving = true;
       _error = null;
     });
-    final ok = await AppScope.of(context).patchManagedInferenceModels(managedProvider: provider);
+    final catalog = AppScope.of(context).managedInferenceModels;
+    final snap = AppScope.of(context).harnessSettings;
+    final main = snap?.provider.model.trim() ?? '';
+    final fast = _fastModelFromSnapshot(snap);
+    final models = catalog?.models ?? const <ManagedInferenceModel>[];
+    final remappedMain = remapManagedModelIdForProvider(main, provider, models);
+    final remappedFast = remapManagedModelIdForProvider(fast, provider, models);
+    final ok = await AppScope.of(context).patchManagedInferenceModels(
+      managedProvider: provider,
+      mainModel: remappedMain,
+      fastModel: remappedFast,
+    );
     if (!mounted) return;
-    if (!ok) _error = 'Failed to update managed provider';
+    if (ok) {
+      _syncProviderControllersFromHost();
+      _syncFieldControllers();
+    } else {
+      _error = 'Failed to update managed provider';
+    }
     setState(() => _saving = false);
   }
 

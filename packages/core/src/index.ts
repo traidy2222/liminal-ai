@@ -647,7 +647,15 @@ export {
 } from "./managed_model_family.js";
 export {
   buildManagedInferenceRequestHeaders,
+  catalogPickerValueForManagedProvider,
+  displayLabelForManagedCatalogRow,
+  emptyManagedProviderFilterMessage,
+  filterManagedCatalogForProvider,
+  findManagedCatalogRowByModelId,
   formatManagedModelProviderBadge,
+  inferManagedModelProviders,
+  managedCatalogHasProvider,
+  remapManagedModelIdForProvider,
   resolveManagedProviderPreference,
   resolveModelIdForManagedProvider,
   VIREON_MANAGED_PROVIDER_HEADER,

@@ -1,9 +1,14 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import {
+  catalogPickerValueForManagedProvider,
+  displayLabelForManagedCatalogRow,
+  emptyManagedProviderFilterMessage,
+  filterManagedCatalogForProvider,
+  findManagedCatalogRowByModelId,
   formatManagedModelProviderBadge,
   managedModelFamilyLabel,
   managedModelFamilyRank,
-  resolveModelIdForManagedProvider,
+  remapManagedModelIdForProvider,
   type ManagedInferenceModel,
   type ManagedProviderPreference,
 } from "@liminal/core";
@@ -37,7 +42,10 @@ export interface ManagedBedrockModelsSectionProps {
   managedProvider?: string;
   onMainModel: (modelId: string) => void;
   onFastModel: (modelId: string) => void;
-  onManagedProvider?: (provider: ManagedProviderPreference) => void;
+  onManagedProvider?: (
+    provider: ManagedProviderPreference,
+    remapped: { mainModel: string; fastModel: string }
+  ) => void;
   vireonConnected: boolean;
 }
 
@@ -86,9 +94,18 @@ export function ManagedBedrockModelsSection({
     void load();
   }, [load]);
 
+  const pref = (managedProvider === "bedrock" || managedProvider === "openrouter"
+    ? managedProvider
+    : "auto") as ManagedProviderPreference;
+
+  const visibleModels = useMemo(
+    () => filterManagedCatalogForProvider(models, pref),
+    [models, pref]
+  );
+
   const grouped = useMemo(() => {
     const m = new Map<string, ManagedInferenceModel[]>();
-    for (const row of models) {
+    for (const row of visibleModels) {
       const key = row.family || "other";
       const list = m.get(key) ?? [];
       list.push(row);
@@ -99,23 +116,12 @@ export function ManagedBedrockModelsSection({
       if (dr !== 0) return dr;
       return a.localeCompare(b);
     });
-  }, [models]);
+  }, [visibleModels]);
 
-  const pref = (managedProvider === "bedrock" || managedProvider === "openrouter"
-    ? managedProvider
-    : "auto") as ManagedProviderPreference;
-
-  const resolveForPref = (catalogId: string): string => {
-    const row = models.find((m) => m.id === catalogId);
-    return resolveModelIdForManagedProvider(catalogId, pref, row?.providers);
-  };
-
-  const mainValue = models.some((m) => m.id === mainModel || m.providers?.some((p) => p.id === mainModel))
-    ? models.find((m) => m.id === mainModel || m.providers?.some((p) => p.id === mainModel))?.id ?? ""
-    : "";
-  const fastValue = models.some((m) => m.id === fastModel || m.providers?.some((p) => p.id === fastModel))
-    ? models.find((m) => m.id === fastModel || m.providers?.some((p) => p.id === fastModel))?.id ?? ""
-    : "";
+  const mainRow = findManagedCatalogRowByModelId(visibleModels, mainModel);
+  const fastRow = findManagedCatalogRowByModelId(visibleModels, fastModel);
+  const mainValue = mainRow?.id ?? "";
+  const fastValue = fastRow?.id ?? "";
 
   return (
     <div
@@ -155,8 +161,10 @@ export function ManagedBedrockModelsSection({
             Retry
           </button>
         </div>
-      ) : models.length === 0 ? (
-        <div style={{ fontSize: 11, color: AMBER }}>No chat models returned from Bedrock.</div>
+      ) : visibleModels.length === 0 ? (
+        <div style={{ fontSize: 11, color: AMBER, lineHeight: 1.45 }}>
+          {emptyManagedProviderFilterMessage(models, pref, upstream)}
+        </div>
       ) : (
         <>
           {onManagedProvider ? (
@@ -168,7 +176,13 @@ export function ManagedBedrockModelsSection({
                     key={p}
                     type="button"
                     disabled={disabled}
-                    onClick={() => onManagedProvider(p)}
+                    onClick={() => {
+                      const remapped = {
+                        mainModel: remapManagedModelIdForProvider(mainModel, p, models),
+                        fastModel: remapManagedModelIdForProvider(fastModel, p, models),
+                      };
+                      onManagedProvider(p, remapped);
+                    }}
                     style={{
                       fontSize: 11,
                       padding: "6px 10px",
@@ -196,9 +210,17 @@ export function ManagedBedrockModelsSection({
           >
             <span style={{ fontSize: 11, color: "#aabbcc" }}>main model</span>
             <select
+              key={`main-${pref}`}
               disabled={disabled}
               value={mainValue}
-              onChange={(e) => onMainModel(resolveForPref(e.target.value))}
+              onChange={(e) => {
+                const row = visibleModels.find((m) => m.id === e.target.value);
+                onMainModel(
+                  row
+                    ? catalogPickerValueForManagedProvider(row, pref)
+                    : e.target.value
+                );
+              }}
               aria-label="Managed main model"
               style={selectStyle}
             >
@@ -207,7 +229,7 @@ export function ManagedBedrockModelsSection({
                 <optgroup key={family} label={groupLabel(family)}>
                   {rows.map((row) => (
                     <option key={row.id} value={row.id}>
-                      {row.label}
+                      {displayLabelForManagedCatalogRow(row, pref)}
                       {formatManagedModelProviderBadge(row.providers)
                         ? ` · ${formatManagedModelProviderBadge(row.providers)}`
                         : ""}
@@ -227,9 +249,17 @@ export function ManagedBedrockModelsSection({
           >
             <span style={{ fontSize: 11, color: "#aabbcc" }}>fast model</span>
             <select
+              key={`fast-${pref}`}
               disabled={disabled}
               value={fastValue}
-              onChange={(e) => onFastModel(resolveForPref(e.target.value))}
+              onChange={(e) => {
+                const row = visibleModels.find((m) => m.id === e.target.value);
+                onFastModel(
+                  row
+                    ? catalogPickerValueForManagedProvider(row, pref)
+                    : e.target.value
+                );
+              }}
               aria-label="Managed fast model"
               style={selectStyle}
             >
@@ -238,7 +268,7 @@ export function ManagedBedrockModelsSection({
                 <optgroup key={`fast-${family}`} label={groupLabel(family)}>
                   {rows.map((row) => (
                     <option key={`fast-${row.id}`} value={row.id}>
-                      {row.label}
+                      {displayLabelForManagedCatalogRow(row, pref)}
                       {formatManagedModelProviderBadge(row.providers)
                         ? ` · ${formatManagedModelProviderBadge(row.providers)}`
                         : ""}

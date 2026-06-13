@@ -36,6 +36,7 @@ class ManagedInferencePanel extends StatelessWidget {
 
   List<DropdownMenuItem<String>> _modelItems(
     List<ManagedInferenceModel> models,
+    String preference,
     LiminalTokens lim,
     TextTheme textTheme,
   ) {
@@ -84,7 +85,11 @@ class ManagedInferencePanel extends StatelessWidget {
               child: Row(
                 children: [
                   Expanded(
-                    child: Text(row.label, overflow: TextOverflow.ellipsis, style: modelStyle),
+                    child: Text(
+                      displayLabelForManagedCatalogRow(row, preference),
+                      overflow: TextOverflow.ellipsis,
+                      style: modelStyle,
+                    ),
                   ),
                   if (badge != null) ...[
                     const SizedBox(width: 8),
@@ -101,13 +106,7 @@ class ManagedInferencePanel extends StatelessWidget {
   }
 
   String? _dropdownValue(String current, List<ManagedInferenceModel> models) {
-    if (models.any((m) => m.id == current)) return current;
-    for (final row in models) {
-      for (final p in row.providers) {
-        if (p.id == current) return row.id;
-      }
-    }
-    return null;
+    return findManagedCatalogRowByModelId(models, current)?.id;
   }
 
   String _providerLabel(String value) {
@@ -125,7 +124,9 @@ class ManagedInferencePanel extends StatelessWidget {
   Widget build(BuildContext context) {
     final lim = LiminalTheme.of(context);
     final theme = Theme.of(context);
-    final models = catalog?.models ?? const <ManagedInferenceModel>[];
+    final pref = managedProvider.isEmpty ? 'auto' : managedProvider;
+    final allModels = catalog?.models ?? const <ManagedInferenceModel>[];
+    final models = filterManagedCatalogForProvider(allModels, pref);
     final upstreamLabel = upstream ?? catalog?.upstream ?? 'hybrid';
 
     InputDecoration fieldDecoration() => InputDecoration(
@@ -200,29 +201,33 @@ class ManagedInferencePanel extends StatelessWidget {
             Text(error!, style: TextStyle(color: theme.colorScheme.error))
           else if (models.isEmpty)
             Text(
-              'No managed models returned. Check your license or try again.',
+              allModels.isEmpty
+                  ? 'No managed models returned. Check your license or try again.'
+                  : emptyManagedProviderFilterMessage(allModels, pref, upstreamLabel),
               style: theme.textTheme.bodySmall?.copyWith(color: lim.warn),
             )
           else ...[
             Text('Main model', style: theme.textTheme.titleSmall),
             const SizedBox(height: LiminalSpacing.xs),
             DropdownButtonFormField<String>(
+              key: ValueKey('managed-main-$pref'),
               value: _dropdownValue(mainModel, models),
               decoration: fieldDecoration(),
               dropdownColor: lim.panel,
               style: theme.textTheme.bodyMedium?.copyWith(color: lim.text),
-              items: _modelItems(models, lim, theme.textTheme),
+              items: _modelItems(models, pref, lim, theme.textTheme),
               onChanged: saving ? null : (id) => id == null ? null : onMainModel(id),
             ),
             const SizedBox(height: LiminalSpacing.md),
             Text('Fast model', style: theme.textTheme.titleSmall),
             const SizedBox(height: LiminalSpacing.xs),
             DropdownButtonFormField<String>(
+              key: ValueKey('managed-fast-$pref'),
               value: _dropdownValue(fastModel, models),
               decoration: fieldDecoration(),
               dropdownColor: lim.panel,
               style: theme.textTheme.bodyMedium?.copyWith(color: lim.text),
-              items: _modelItems(models, lim, theme.textTheme),
+              items: _modelItems(models, pref, lim, theme.textTheme),
               onChanged: saving ? null : (id) => id == null ? null : onFastModel(id),
             ),
           ],

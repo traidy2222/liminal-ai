@@ -129,6 +129,35 @@ int managedModelFamilyRank(String family) {
   return _familyRank[family.trim().toLowerCase()] ?? 50;
 }
 
+bool looksLikeBedrockModelId(String model) {
+  final m = model.trim();
+  if (m.isEmpty) return false;
+  if (_regionalPrefix.hasMatch(m)) return true;
+  return m.contains('.') && !m.contains('/');
+}
+
+List<ManagedInferenceProviderRef> inferManagedModelProviders(
+  String id, [
+  List<ManagedInferenceProviderRef>? existing,
+]) {
+  if (existing != null && existing.isNotEmpty) return existing;
+  final trimmed = id.trim();
+  if (trimmed.isEmpty) return const [];
+  if (looksLikeBedrockModelId(trimmed)) {
+    return [ManagedInferenceProviderRef(provider: 'bedrock', id: trimmed)];
+  }
+  return [ManagedInferenceProviderRef(provider: 'openrouter', id: trimmed)];
+}
+
+bool managedModelAvailableOnProvider(
+  List<ManagedInferenceProviderRef> providers,
+  String preference,
+) {
+  final pref = preference.trim().toLowerCase();
+  if (pref != 'bedrock' && pref != 'openrouter') return true;
+  return providers.any((p) => p.provider == pref);
+}
+
 String resolveModelIdForManagedProvider(
   String displayId,
   String preference,

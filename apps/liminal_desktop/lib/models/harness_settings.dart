@@ -296,7 +296,10 @@ class ManagedInferenceModel {
       id: id,
       label: json['label'] as String? ?? id,
       family: resolveManagedModelFamily(id, upstreamFamily),
-      providers: providers,
+      providers: inferManagedModelProviders(
+        id,
+        providers.isEmpty ? null : providers,
+      ),
     );
   }
 }
@@ -321,4 +324,102 @@ class ManagedInferenceModelsCatalog {
           .toList(),
     );
   }
+}
+
+ManagedInferenceModel _withInferredProviders(ManagedInferenceModel row) {
+  return ManagedInferenceModel(
+    id: row.id,
+    label: row.label,
+    family: row.family,
+    providers: inferManagedModelProviders(row.id, row.providers),
+  );
+}
+
+List<ManagedInferenceModel> filterManagedCatalogForProvider(
+  List<ManagedInferenceModel> models,
+  String preference,
+) {
+  final pref = preference.trim().isEmpty ? 'auto' : preference.trim().toLowerCase();
+  final normalized = models.map(_withInferredProviders).toList();
+  if (pref == 'auto') return normalized;
+  return normalized.where((m) => managedModelAvailableOnProvider(m.providers, pref)).toList();
+}
+
+ManagedInferenceModel? findManagedCatalogRowByModelId(
+  List<ManagedInferenceModel> models,
+  String modelId,
+) {
+  final needle = modelId.trim();
+  if (needle.isEmpty) return null;
+  for (final row in models) {
+    final providers = inferManagedModelProviders(row.id, row.providers);
+    if (row.id == needle || providers.any((p) => p.id == needle)) {
+      return ManagedInferenceModel(
+        id: row.id,
+        label: row.label,
+        family: row.family,
+        providers: providers,
+      );
+    }
+  }
+  return null;
+}
+
+String displayLabelForManagedCatalogRow(ManagedInferenceModel row, String preference) {
+  final pref = preference.trim().isEmpty ? 'auto' : preference.trim().toLowerCase();
+  final providers = inferManagedModelProviders(row.id, row.providers);
+  final slug = resolveModelIdForManagedProvider(row.id, pref, providers);
+  if (pref == 'bedrock' || pref == 'openrouter') return slug;
+  return row.label.trim().isNotEmpty ? row.label.trim() : row.id;
+}
+
+String emptyManagedProviderFilterMessage(
+  List<ManagedInferenceModel> models,
+  String preference, [
+  String? upstream,
+]) {
+  final pref = preference.trim().isEmpty ? 'auto' : preference.trim().toLowerCase();
+  if (pref == 'auto' || models.isEmpty) {
+    return pref == 'openrouter'
+        ? 'No OpenRouter models in the managed catalog.'
+        : pref == 'bedrock'
+            ? 'No Bedrock models in the managed catalog.'
+            : 'No managed models returned.';
+  }
+  final hasMeta = models.any((m) => m.providers.isNotEmpty);
+  final upstreamHint = upstream?.trim().toLowerCase();
+  if (pref == 'openrouter' && !managedCatalogHasProvider(models, 'openrouter')) {
+    if (!hasMeta || upstreamHint == 'bedrock') {
+      return 'OpenRouter catalog not available from Vireon yet — the server is still '
+          'returning Bedrock-only models. Use Auto/Bedrock, or deploy hybrid inference '
+          'with VIREON_OPENROUTER_API_KEY on the control plane.';
+    }
+    return 'No OpenRouter models in the merged catalog for this account.';
+  }
+  if (pref == 'bedrock' && !managedCatalogHasProvider(models, 'bedrock')) {
+    return 'No Bedrock models in the managed catalog for this account.';
+  }
+  return 'No models on $pref for this account.';
+}
+
+bool managedCatalogHasProvider(List<ManagedInferenceModel> models, String provider) {
+  final pref = provider.trim().toLowerCase();
+  if (pref != 'bedrock' && pref != 'openrouter') return models.isNotEmpty;
+  return models.any((m) => managedModelAvailableOnProvider(
+        inferManagedModelProviders(m.id, m.providers),
+        pref,
+      ));
+}
+
+String remapManagedModelIdForProvider(
+  String currentModelId,
+  String nextPreference,
+  List<ManagedInferenceModel> models,
+) {
+  final current = currentModelId.trim();
+  final pref = nextPreference.trim().toLowerCase();
+  if (current.isEmpty || pref == 'auto') return currentModelId;
+  final row = findManagedCatalogRowByModelId(models, current);
+  if (row == null) return currentModelId;
+  return resolveModelIdForManagedProvider(row.id, pref, row.providers);
 }
