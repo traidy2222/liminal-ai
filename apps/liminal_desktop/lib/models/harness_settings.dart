@@ -369,7 +369,7 @@ String displayLabelForManagedCatalogRow(ManagedInferenceModel row, String prefer
   final pref = preference.trim().isEmpty ? 'auto' : preference.trim().toLowerCase();
   final providers = inferManagedModelProviders(row.id, row.providers);
   final slug = resolveModelIdForManagedProvider(row.id, pref, providers);
-  if (pref == 'bedrock' || pref == 'openrouter') return slug;
+  if (pref == 'bedrock' || pref == 'openrouter' || pref == 'kimchi') return slug;
   return row.label.trim().isNotEmpty ? row.label.trim() : row.id;
 }
 
@@ -384,7 +384,9 @@ String emptyManagedProviderFilterMessage(
         ? 'No OpenRouter models in the managed catalog.'
         : pref == 'bedrock'
             ? 'No Bedrock models in the managed catalog.'
-            : 'No managed models returned.';
+            : pref == 'kimchi'
+                ? 'No Kimchi (Cast AI) models in the managed catalog.'
+                : 'No managed models returned.';
   }
   final hasMeta = models.any((m) => m.providers.isNotEmpty);
   final upstreamHint = upstream?.trim().toLowerCase();
@@ -399,12 +401,17 @@ String emptyManagedProviderFilterMessage(
   if (pref == 'bedrock' && !managedCatalogHasProvider(models, 'bedrock')) {
     return 'No Bedrock models in the managed catalog for this account.';
   }
+  if (pref == 'kimchi' && !managedCatalogHasProvider(models, 'kimchi')) {
+    return 'No Kimchi (Cast AI) models in the managed catalog for this account.';
+  }
   return 'No models on $pref for this account.';
 }
 
 bool managedCatalogHasProvider(List<ManagedInferenceModel> models, String provider) {
   final pref = provider.trim().toLowerCase();
-  if (pref != 'bedrock' && pref != 'openrouter') return models.isNotEmpty;
+  if (pref != 'bedrock' && pref != 'openrouter' && pref != 'kimchi') {
+    return models.isNotEmpty;
+  }
   return models.any((m) => managedModelAvailableOnProvider(
         inferManagedModelProviders(m.id, m.providers),
         pref,

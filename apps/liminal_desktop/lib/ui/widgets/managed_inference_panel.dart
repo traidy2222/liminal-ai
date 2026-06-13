@@ -115,6 +115,8 @@ class ManagedInferencePanel extends StatelessWidget {
         return 'Bedrock';
       case 'openrouter':
         return 'OpenRouter';
+      case 'kimchi':
+        return 'Kimchi';
       default:
         return 'Auto';
     }
@@ -157,7 +159,7 @@ class ManagedInferencePanel extends StatelessWidget {
           ),
           const SizedBox(height: LiminalSpacing.xs),
           Text(
-            'Hybrid routing — Bedrock and OpenRouter models with per-provider fallback when both exist.',
+            'Hybrid routing — Bedrock, OpenRouter, and Kimchi (Cast AI) with per-provider fallback when equivalents exist.',
             style: theme.textTheme.bodySmall?.copyWith(
               color: lim.textMuted,
               height: 1.45,
@@ -171,6 +173,7 @@ class ManagedInferencePanel extends StatelessWidget {
               ButtonSegment(value: 'auto', label: Text('Auto')),
               ButtonSegment(value: 'bedrock', label: Text('Bedrock')),
               ButtonSegment(value: 'openrouter', label: Text('OpenRouter')),
+              ButtonSegment(value: 'kimchi', label: Text('Kimchi')),
             ],
             selected: {managedProvider.isEmpty ? 'auto' : managedProvider},
             onSelectionChanged: saving

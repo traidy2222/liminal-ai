@@ -94,7 +94,9 @@ export function ManagedBedrockModelsSection({
     void load();
   }, [load]);
 
-  const pref = (managedProvider === "bedrock" || managedProvider === "openrouter"
+  const pref = (managedProvider === "bedrock" ||
+  managedProvider === "openrouter" ||
+  managedProvider === "kimchi"
     ? managedProvider
     : "auto") as ManagedProviderPreference;
 
@@ -171,7 +173,7 @@ export function ManagedBedrockModelsSection({
             <div style={{ marginBottom: 10 }}>
               <div style={{ fontSize: 11, color: "#aabbcc", marginBottom: 6 }}>managed provider</div>
               <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-                {(["auto", "bedrock", "openrouter"] as const).map((p) => (
+                {(["auto", "bedrock", "openrouter", "kimchi"] as const).map((p) => (
                   <button
                     key={p}
                     type="button"
@@ -193,7 +195,13 @@ export function ManagedBedrockModelsSection({
                       cursor: disabled ? "not-allowed" : "pointer",
                     }}
                   >
-                    {p === "auto" ? "Auto" : p === "bedrock" ? "Bedrock" : "OpenRouter"}
+                    {p === "auto"
+                      ? "Auto"
+                      : p === "bedrock"
+                        ? "Bedrock"
+                        : p === "openrouter"
+                          ? "OpenRouter"
+                          : "Kimchi"}
                   </button>
                 ))}
               </div>

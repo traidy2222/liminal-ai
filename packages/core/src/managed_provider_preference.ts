@@ -8,19 +8,27 @@ import { resolveHarnessEnvRaw } from "./harness_effective_env.js";
 import type { RuntimePreferences } from "./runtime_prefs.js";
 
 export type ManagedInferenceProviderRef = {
-  provider: "bedrock" | "openrouter";
+  provider: "bedrock" | "openrouter" | "kimchi";
   id: string;
 };
 
 export const VIREON_MANAGED_PROVIDER_HEADER = "x-vireon-managed-provider";
 
-export type ManagedProviderPreference = "auto" | "bedrock" | "openrouter";
+export type ManagedProviderPreference = "auto" | "bedrock" | "openrouter" | "kimchi";
 
 const BEDROCK_GEO_PREFIX = /^(us|eu|global|au|jp|ap)-?\./i;
 
+const KIMCHI_MODEL_PREFIX = /^(kimi-|minimax-|nemotron-)/i;
+
+function looksLikeKimchiManagedModelId(model: string): boolean {
+  const m = model.trim().toLowerCase();
+  if (!m || m.includes("/")) return false;
+  return KIMCHI_MODEL_PREFIX.test(m);
+}
+
 function looksLikeBedrockModelId(model: string): boolean {
   const m = model.trim();
-  if (!m) return false;
+  if (!m || looksLikeKimchiManagedModelId(m)) return false;
   if (BEDROCK_GEO_PREFIX.test(m)) return true;
   return m.includes(".") && !m.includes("/");
 }
@@ -33,6 +41,7 @@ export function inferManagedModelProviders(
   if (existing?.length) return existing;
   const trimmed = id.trim();
   if (!trimmed) return [];
+  if (looksLikeKimchiManagedModelId(trimmed)) return [{ provider: "kimchi", id: trimmed }];
   if (looksLikeBedrockModelId(trimmed)) return [{ provider: "bedrock", id: trimmed }];
   if (trimmed.includes("/")) return [{ provider: "openrouter", id: trimmed }];
   return [{ provider: "openrouter", id: trimmed }];
@@ -122,7 +131,9 @@ export function emptyManagedProviderFilterMessage(
       ? "No OpenRouter models in the managed catalog."
       : preference === "bedrock"
         ? "No Bedrock models in the managed catalog."
-        : "No managed models returned.";
+        : preference === "kimchi"
+          ? "No Kimchi (Cast AI) models in the managed catalog."
+          : "No managed models returned.";
   }
   const hasMeta = models.some((m) => (m.providers?.length ?? 0) > 0);
   const upstreamHint = upstream?.trim().toLowerCase();
@@ -139,6 +150,9 @@ export function emptyManagedProviderFilterMessage(
   if (preference === "bedrock" && !managedCatalogHasProvider(models, "bedrock")) {
     return "No Bedrock models in the managed catalog for this account.";
   }
+  if (preference === "kimchi" && !managedCatalogHasProvider(models, "kimchi")) {
+    return "No Kimchi (Cast AI) models in the managed catalog. Deploy models in Cast AI or check VIREON_KIMCHI_API_KEY on the control plane.";
+  }
   return `No models on ${preference} for this account.`;
 }
 
@@ -146,7 +160,7 @@ export function resolveManagedProviderPreference(
   prefs?: RuntimePreferences | null | undefined
 ): ManagedProviderPreference {
   const raw = resolveHarnessEnvRaw("AGENT_MANAGED_PROVIDER", prefs ?? null)?.trim().toLowerCase();
-  if (raw === "bedrock" || raw === "openrouter") return raw;
+  if (raw === "bedrock" || raw === "openrouter" || raw === "kimchi") return raw;
   return "auto";
 }
 
@@ -180,8 +194,13 @@ export function formatManagedModelProviderBadge(
   if (!providers?.length) return null;
   const hasBedrock = providers.some((p) => p.provider === "bedrock");
   const hasOr = providers.some((p) => p.provider === "openrouter");
+  const hasKimchi = providers.some((p) => p.provider === "kimchi");
+  if (hasBedrock && hasOr && hasKimchi) return "BR+OR+KC";
   if (hasBedrock && hasOr) return "BR+OR";
+  if (hasBedrock && hasKimchi) return "BR+KC";
+  if (hasOr && hasKimchi) return "OR+KC";
   if (hasBedrock) return "BR";
   if (hasOr) return "OR";
+  if (hasKimchi) return "KC";
   return null;
 }

@@ -475,9 +475,9 @@ const _META_RAW: Record<string, HarnessSettingsFieldMeta> = {
     subgroupId: "harness_misc",
     label: "Managed provider",
     description:
-      "When using Vireon managed inference in hybrid mode: auto (route by model id shape), bedrock, or openrouter. The proxy can fail over to the equivalent model on the other provider when available.",
+      "When using Vireon managed inference in hybrid mode: auto (route by model id shape), bedrock, openrouter, or kimchi (Cast AI). The proxy can fail over to an equivalent model on another provider when available.",
     valueKind: "enum",
-    enumValues: ["auto", "bedrock", "openrouter"],
+    enumValues: ["auto", "bedrock", "openrouter", "kimchi"],
   },
   "AGENT_INFERENCE_BASE_URL": {
     tabId: "harness",

@@ -129,9 +129,15 @@ int managedModelFamilyRank(String family) {
   return _familyRank[family.trim().toLowerCase()] ?? 50;
 }
 
+bool looksLikeKimchiModelId(String model) {
+  final m = model.trim().toLowerCase();
+  if (m.isEmpty || m.contains('/')) return false;
+  return RegExp(r'^(kimi-|minimax-|nemotron-)').hasMatch(m);
+}
+
 bool looksLikeBedrockModelId(String model) {
   final m = model.trim();
-  if (m.isEmpty) return false;
+  if (m.isEmpty || looksLikeKimchiModelId(m)) return false;
   if (_regionalPrefix.hasMatch(m)) return true;
   return m.contains('.') && !m.contains('/');
 }
@@ -146,6 +152,9 @@ List<ManagedInferenceProviderRef> inferManagedModelProviders(
   if (looksLikeBedrockModelId(trimmed)) {
     return [ManagedInferenceProviderRef(provider: 'bedrock', id: trimmed)];
   }
+  if (looksLikeKimchiModelId(trimmed)) {
+    return [ManagedInferenceProviderRef(provider: 'kimchi', id: trimmed)];
+  }
   return [ManagedInferenceProviderRef(provider: 'openrouter', id: trimmed)];
 }
 
@@ -154,7 +163,7 @@ bool managedModelAvailableOnProvider(
   String preference,
 ) {
   final pref = preference.trim().toLowerCase();
-  if (pref != 'bedrock' && pref != 'openrouter') return true;
+  if (pref != 'bedrock' && pref != 'openrouter' && pref != 'kimchi') return true;
   return providers.any((p) => p.provider == pref);
 }
 
@@ -164,7 +173,7 @@ String resolveModelIdForManagedProvider(
   List<ManagedInferenceProviderRef> providers,
 ) {
   final pref = preference.trim().toLowerCase();
-  if (pref != 'bedrock' && pref != 'openrouter') return displayId;
+  if (pref != 'bedrock' && pref != 'openrouter' && pref != 'kimchi') return displayId;
   if (providers.isEmpty) return displayId;
   for (final p in providers) {
     if (p.provider == pref && p.id.trim().isNotEmpty) return p.id.trim();
@@ -176,9 +185,14 @@ String? formatManagedModelProviderBadge(List<ManagedInferenceProviderRef> provid
   if (providers.isEmpty) return null;
   final hasBedrock = providers.any((p) => p.provider == 'bedrock');
   final hasOr = providers.any((p) => p.provider == 'openrouter');
+  final hasKimchi = providers.any((p) => p.provider == 'kimchi');
+  if (hasBedrock && hasOr && hasKimchi) return 'BR+OR+KC';
   if (hasBedrock && hasOr) return 'BR+OR';
+  if (hasBedrock && hasKimchi) return 'BR+KC';
+  if (hasOr && hasKimchi) return 'OR+KC';
   if (hasBedrock) return 'BR';
   if (hasOr) return 'OR';
+  if (hasKimchi) return 'KC';
   return null;
 }
 
