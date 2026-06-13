@@ -431,12 +431,35 @@ export async function fetchManagedInferenceModels(opts?: {
   };
 }
 
+const INFERENCE_USAGE_STATUS_TTL_MS = 45_000;
+let inferenceUsageStatusCache: {
+  fetchedAt: number;
+  value: InferenceUsageStatus | null;
+} | null = null;
+
+export function clearInferenceUsageStatusCache(): void {
+  inferenceUsageStatusCache = null;
+}
+
 /** Poll Vireon control plane for wallet / entitlement (license Bearer). */
 export async function fetchInferenceUsageStatus(
-  prefs?: RuntimePreferences | null
+  prefs?: RuntimePreferences | null,
+  opts?: { bypassCache?: boolean }
 ): Promise<InferenceUsageStatus | null> {
+  const now = Date.now();
+  if (
+    !opts?.bypassCache &&
+    inferenceUsageStatusCache &&
+    now - inferenceUsageStatusCache.fetchedAt < INFERENCE_USAGE_STATUS_TTL_MS
+  ) {
+    return inferenceUsageStatusCache.value;
+  }
+
   const license = await resolveLicenseTokenForHarness();
-  if (!license) return null;
+  if (!license) {
+    inferenceUsageStatusCache = { fetchedAt: now, value: null };
+    return null;
+  }
   const base = defaultVireonSiteOriginForInference();
   const res = await fetch(`${base}/api/inference/status`, {
     method: "GET",
@@ -452,7 +475,7 @@ export async function fetchInferenceUsageStatus(
     periodEnd?: string | null;
   };
   if (!res.ok) {
-    return {
+    const failed: InferenceUsageStatus = {
       configured: Boolean(body.configured),
       entitled: false,
       reason: body.reason ?? `HTTP ${res.status}`,
@@ -461,8 +484,10 @@ export async function fetchInferenceUsageStatus(
       usedUsd: null,
       periodEnd: null,
     };
+    inferenceUsageStatusCache = { fetchedAt: now, value: failed };
+    return failed;
   }
-  return {
+  const status: InferenceUsageStatus = {
     configured: Boolean(body.configured),
     entitled: Boolean(body.entitled),
     reason: body.reason ?? "ok",
@@ -471,6 +496,8 @@ export async function fetchInferenceUsageStatus(
     usedUsd: body.usedUsd ?? null,
     periodEnd: body.periodEnd ?? null,
   };
+  inferenceUsageStatusCache = { fetchedAt: now, value: status };
+  return status;
 }
 
 /** Runtime prefs patch after Pro sign-in — route through included managed inference. */
@@ -522,7 +549,7 @@ export async function recoverManagedInferencePreferences(
     return { recovered: false, prefs };
   }
 
-  const model = resolveModelForManagedInference(prefs.provider?.model, prefs);
+  const model = resolveModelForManagedInference(undefined, prefs);
   const { baseURL: _pinnedByokBase, ...providerSansBase } = prefs.provider ?? {};
   const recovered: RuntimePreferences = {
     ...prefs,

@@ -254,7 +254,8 @@ export const HARNESS_ENV_DEFAULTS: Readonly<Record<string, string>> = {
   AGENT_RETRY_FOREVER: "0",
   AGENT_INTENT_CONFIDENCE_MIN: "0.65",
   AGENT_INTENT_INFERENCE: "1",      // LLM-only classification — no keyword/regex fallback
-  AGENT_INTENT_INFERENCE_TIMEOUT_MS: "8000", // abort if model stalls; falls back to neutral
+  AGENT_INTENT_INFERENCE_TIMEOUT_MS: "4000", // abort if fast classifier stalls; falls back to neutral
+  AGENT_CONVERSATIONAL_FAST_PATH: "1", // heuristic greetings skip heavy preflight; LLM classifier unchanged for other turns
   AGENT_INTENT_REPO_CONTEXT: "1",   // shallow repo tree in intent classifier
   AGENT_INTENT_CONTEXT_MAX_CHARS: "12000",
   AGENT_MEMORY_DEBIAS: "1",

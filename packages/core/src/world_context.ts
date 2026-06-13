@@ -1307,6 +1307,58 @@ export async function buildWorldContextMessage(options?: WorldContextOptions): P
   return lines.join("\n");
 }
 
+/**
+ * Sub-5ms session grounding for conversational fast-path turns.
+ * Full async gather (git, memory priming, vault, etc.) is deferred to the next turn.
+ */
+export function buildMinimalWorldContextMessage(
+  options?: Pick<WorldContextOptions, "location" | "workspaceRoot" | "activeLlm" | "disabled">
+): string {
+  if (options?.disabled === true) return "";
+  const workspaceRoot = path.resolve(
+    options?.workspaceRoot?.trim() || resolveWorkspaceRoot()
+  );
+  const now = new Date();
+  const isoDate = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
+  const isoTime = `${String(now.getHours()).padStart(2, "0")}:${String(now.getMinutes()).padStart(2, "0")}`;
+  const dow = now.toLocaleDateString("en-US", { weekday: "long" });
+  const tz = getTimezone();
+  const offset = getUtcOffset();
+  const shell = getShell();
+  const user = getUsername();
+  const home = os.homedir();
+  const host = os.hostname();
+  const platform =
+    process.platform === "win32"
+      ? `Windows ${os.release()}`
+      : process.platform === "darwin"
+        ? `macOS ${os.release()}`
+        : `${os.type()} ${os.release()}`;
+  const activeModel =
+    options?.activeLlm?.model?.trim() ||
+    effectiveHarnessEnvRaw("AGENT_MODEL")?.trim() ||
+    DEFAULT_AGENT_MODEL_SLUG;
+  const activeBaseURL =
+    options?.activeLlm?.baseURL?.trim() ||
+    effectiveHarnessEnvRaw("AGENT_API_BASE_URL")?.trim() ||
+    DEFAULT_AGENT_API_BASE_URL;
+
+  const lines = [
+    `[WORLD CONTEXT — lightweight session grounding, ${isoDate}]`,
+    ``,
+    `Date/Time:  ${dow}, ${isoDate}  ${isoTime}  (${offset} · ${tz})`,
+    ...(options?.location ? [`Location:   ${options.location}`] : []),
+    `Platform:   ${platform}`,
+    `Shell:      ${shell}  —  ${getShellNote(shell)}`,
+    `CWD:        ${workspaceRoot}`,
+    `OS account: ${user} @ ${host}  →  ${home}`,
+    `LLM active: model=${activeModel}  ·  baseURL=${activeBaseURL}`,
+    ``,
+    `(Full project/git/memory grounding loads on your next substantive message.)`,
+  ];
+  return lines.join("\n");
+}
+
 /** Mid-session patch when provider model/baseURL changes after the initial world context block. */
 export function buildActiveLlmContextUpdateMessage(model: string, baseURL: string): string {
   const m = model.trim() || DEFAULT_AGENT_MODEL_SLUG;

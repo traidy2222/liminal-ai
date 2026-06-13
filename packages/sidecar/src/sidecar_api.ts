@@ -264,9 +264,18 @@ export async function patchHarnessSettings(
   const runtimePatch: Partial<RuntimePreferences> = {};
   if (Object.keys(envPatch).length > 0) {
     runtimePatch.harness = { env: envPatch };
+    if (envPatch.AGENT_MODEL && !body.provider?.model) {
+      runtimePatch.provider = {
+        ...(prefs?.provider ?? {}),
+        ...(runtimePatch.provider ?? {}),
+        model: envPatch.AGENT_MODEL,
+      };
+    }
   }
   if (body.provider && typeof body.provider === "object") {
-    const prov: NonNullable<RuntimePreferences["provider"]> = { ...prefs?.provider };
+    const prov: NonNullable<RuntimePreferences["provider"]> = {
+      ...(runtimePatch.provider ?? prefs?.provider ?? {}),
+    };
     if (typeof body.provider.model === "string") {
       const m = body.provider.model.trim();
       if (m) prov.model = m.slice(0, 200);

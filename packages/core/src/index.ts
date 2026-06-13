@@ -227,7 +227,7 @@ export { ToolDispatcher } from "./dispatcher.js";
 export { StreamAccumulator } from "./streaming.js";
 export { TaskOrchestrator } from "./orchestrator.js";
 export type { TaskRecord, LockMode } from "./orchestrator.js";
-export { buildWorldContextMessage } from "./world_context.js";
+export { buildWorldContextMessage, buildMinimalWorldContextMessage } from "./world_context.js";
 export { detectEmailPlaceholderViolations } from "./harness_product_identity.js";
 export { gatherRepoMapLines } from "./repo_map.js";
 export type { RepoMapOptions } from "./repo_map.js";
@@ -875,8 +875,12 @@ export type {
 } from "./input_semantics.js";
 export {
   buildRoutingProfile,
+  enrichTurnInferenceFromMessage,
   neutralTurnInferenceResult,
   isIntentInferenceEnabled,
+  isConversationalFastPathEnabled,
+  isHeuristicConversationalFastPath,
+  tryHeuristicTurnInference,
   applyTurnInferenceHeuristics,
 } from "./intent_inference.js";
 export type {

@@ -51,16 +51,43 @@ test("isInferenceBudgetExceededError detects 402 budget body", () => {
   assert.equal(isInferenceBudgetExceededError(err), true);
 });
 
-test("isModelIncompatibleWithManagedProxy flags openrouter/free and :free slugs", () => {
+test("isModelIncompatibleWithManagedProxy flags openrouter/free BYOK fallback only", () => {
   assert.equal(isModelIncompatibleWithManagedProxy(OPENROUTER_MODEL_SLUG.FREE_ROUTER), true);
-  assert.equal(isModelIncompatibleWithManagedProxy("nvidia/foo:free"), true);
+  assert.equal(isModelIncompatibleWithManagedProxy("nvidia/foo:free"), false);
+  assert.equal(isModelIncompatibleWithManagedProxy(OPENROUTER_MODEL_SLUG.NEX_N2_PRO_FREE), false);
   assert.equal(isModelIncompatibleWithManagedProxy(DEFAULT_AGENT_MODEL_SLUG), false);
   assert.equal(isModelIncompatibleWithManagedProxy("deepseek/deepseek-v4-pro"), false);
+});
+
+test("resolveModelForManagedInference keeps nex-n2-pro:free from prefs", () => {
+  const prefs = {
+    version: 1 as const,
+    updatedAt: 0,
+    provider: { model: OPENROUTER_MODEL_SLUG.NEX_N2_PRO_FREE },
+    harness: { env: { AGENT_MODEL: OPENROUTER_MODEL_SLUG.NEX_N2_PRO_FREE } },
+  };
+  assert.equal(
+    resolveModelForManagedInference("deepseek/deepseek-v4-pro", prefs),
+    OPENROUTER_MODEL_SLUG.NEX_N2_PRO_FREE
+  );
 });
 
 test("resolveModelForManagedInference replaces fallback slug with default main model", () => {
   assert.equal(
     resolveModelForManagedInference(OPENROUTER_MODEL_SLUG.FREE_ROUTER, null),
     DEFAULT_AGENT_MODEL_SLUG
+  );
+});
+
+test("resolveModelForManagedInference prefers persisted prefs over stale harness config", () => {
+  const prefs = {
+    version: 1 as const,
+    updatedAt: 0,
+    provider: { model: "anthropic/claude-sonnet-4" },
+    harness: { env: { AGENT_MODEL: "anthropic/claude-sonnet-4" } },
+  };
+  assert.equal(
+    resolveModelForManagedInference("deepseek/deepseek-v4-pro", prefs),
+    "anthropic/claude-sonnet-4"
   );
 });

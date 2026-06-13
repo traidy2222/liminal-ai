@@ -14,6 +14,7 @@ import {
   isImplementShipUserMessage,
   isResearchFreshnessUserMessage,
 } from "./reasoning_surface.js";
+import { detectWorkflowSignal } from "./workflow_spec.js";
 
 export type TurnIntentClass =
   | "introspection"
@@ -474,8 +475,8 @@ export function buildIntentInferenceUserContent(
 
 function resolveIntentInferenceTimeoutMs(): number {
   const raw = effectiveHarnessEnvRaw("AGENT_INTENT_INFERENCE_TIMEOUT_MS")?.trim();
-  const n = raw ? Number(raw) : 8000;
-  if (!Number.isFinite(n) || n <= 0) return 8000;
+  const n = raw ? Number(raw) : 4000;
+  if (!Number.isFinite(n) || n <= 0) return 4000;
   return Math.max(1000, Math.min(30000, n));
 }
 
@@ -490,6 +491,176 @@ export function isIntentInferenceEnabled(): boolean {
   return effectiveHarnessEnvRaw("AGENT_INTENT_INFERENCE") !== "0";
 }
 
+/** Regex signals the harness derives locally (kept out of the LLM prompt for speed). */
+export function deriveMessagePolicySignals(userMessage: string): {
+  identityQuery: boolean;
+  identityProvision: boolean;
+  personaIdentityPrompt: boolean;
+  runtimeIdentityPrompt: boolean;
+  deckIntent: boolean;
+  runtimePreferenceIntent: boolean;
+  runtimeSettingsQuery: boolean;
+  regexBuildDeliverable: boolean;
+  regexImplementShip: boolean;
+  regexFreshnessSensitive: boolean;
+  regexWorkflowSuitable: boolean;
+} {
+  const msg = userMessage.trim();
+  const lower = msg.toLowerCase();
+  const identityQuery =
+    /\b(what(?:'s| is) my name|do you (know|remember) my name|who am i|what do you call me|what should i call myself)\b/i.test(
+      msg
+    );
+  const identityProvision =
+    !identityQuery &&
+    /\b(i'?m |i am |call me |my name is |you can call me )\b/i.test(msg);
+  const personaIdentityPrompt =
+    /\b(who are you|describe yourself|your persona|in character|how do you present yourself)\b/i.test(
+      lower
+    );
+  const runtimeIdentityPrompt =
+    /\b(which model|what model|openrouter|provider slug|api key|what llm|inference stack)\b/i.test(
+      lower
+    );
+  const deckIntent = /\b(slide deck|slideshow|powerpoint|pptx|presentation deck|pitch deck)\b/i.test(
+    lower
+  );
+  const runtimePreferenceIntent =
+    /\b(change (your )?tone|be more (formal|casual|funny)|persona dial|humor level|formality)\b/i.test(
+      lower
+    );
+  const runtimeSettingsQuery =
+    /\b(current (runtime )?settings|current persona|what are my settings|read (runtime )?settings)\b/i.test(
+      lower
+    );
+  return {
+    identityQuery,
+    identityProvision,
+    personaIdentityPrompt,
+    runtimeIdentityPrompt,
+    deckIntent,
+    runtimePreferenceIntent,
+    runtimeSettingsQuery,
+    regexBuildDeliverable: isBuildDeliverableUserMessage(msg),
+    regexImplementShip: isImplementShipUserMessage(msg),
+    regexFreshnessSensitive: isResearchFreshnessUserMessage(msg),
+    regexWorkflowSuitable: detectWorkflowSignal(msg).match,
+  };
+}
+
+/**
+ * Fill policy booleans + reasoning budget after the compact classifier returns
+ * intent/complexity only. Keeps the fast-model call small and off the hot path.
+ */
+export function enrichTurnInferenceFromMessage(
+  userMessage: string,
+  inference: TurnInferenceResult,
+  parsed?: Record<string, unknown>
+): TurnInferenceResult {
+  const msg = userMessage.trim();
+  const signals = deriveMessagePolicySignals(msg);
+  const trustLlm = inference.source === "llm";
+
+  let intent = inference.intent;
+  if (signals.identityQuery || signals.personaIdentityPrompt || signals.runtimeIdentityPrompt) {
+    intent = "conversational";
+  }
+
+  const complexity =
+    intent === "conversational" ? "trivial" : inference.complexity;
+
+  let exploratoryCreative =
+    intent === "conversational" || signals.identityQuery
+      ? false
+      : trustLlm
+        ? Boolean(parsed?.["exploratoryCreative"])
+        : inference.exploratoryCreative;
+
+  let visionIntent =
+    intent === "conversational"
+      ? false
+      : trustLlm
+        ? Boolean(parsed?.["visionIntent"])
+        : inference.visionIntent;
+
+  let workflowSuitable =
+    intent === "conversational"
+      ? false
+      : trustLlm
+        ? Boolean(parsed?.["workflowSuitable"])
+        : signals.regexWorkflowSuitable;
+
+  let buildDeliverable = signals.regexBuildDeliverable;
+  let implementShip = signals.regexImplementShip;
+  let freshnessSensitive = signals.regexFreshnessSensitive;
+
+  if (trustLlm) {
+    if (intent === "research") {
+      freshnessSensitive = true;
+      if (!implementShip) buildDeliverable = false;
+    } else if (intent === "coding" || intent === "execution") {
+      buildDeliverable = true;
+    } else if (intent === "knowledge" || intent === "introspection") {
+      if (!signals.regexImplementShip) buildDeliverable = false;
+    }
+    if (intent === "conversational") {
+      buildDeliverable = false;
+      implementShip = false;
+      freshnessSensitive = false;
+    }
+  }
+
+  if (intent === "conversational") {
+    buildDeliverable = false;
+    implementShip = false;
+  }
+
+  const budgetFromLlm =
+    trustLlm && parsed ? parseReasoningBudgetFromParsed(parsed) : {};
+  const fb = fallbackReasoningBudget(intent, exploratoryCreative);
+  const reasoningEffort = budgetFromLlm.reasoningEffort ?? inference.reasoningEffort ?? fb.reasoningEffort;
+  const thinkDepth = budgetFromLlm.thinkDepth ?? inference.thinkDepth ?? fb.thinkDepth;
+  const toolFirstBias = budgetFromLlm.toolFirstBias ?? inference.toolFirstBias ?? fb.toolFirstBias;
+  const reasoningWordBudget =
+    budgetFromLlm.reasoningWordBudget ?? inference.reasoningWordBudget ?? fb.reasoningWordBudget;
+  const essayRisk = budgetFromLlm.essayRisk ?? inference.essayRisk ?? fb.essayRisk;
+
+  const skipHarnessSecondaryPasses =
+    intent === "conversational" ||
+    signals.personaIdentityPrompt ||
+    signals.identityQuery ||
+    Boolean(parsed?.["skipHarnessSecondaryPasses"]);
+
+  return {
+    ...inference,
+    intent,
+    complexity,
+    likelyEditPaths: intent === "conversational" ? [] : inference.likelyEditPaths,
+    stancePrompt: signals.identityQuery ? false : exploratoryCreative,
+    overInferenceRisk: /\b(you (always|never)|why do you think i|you assume)\b/i.test(msg),
+    exploratoryCreative,
+    identityQuery: signals.identityQuery,
+    identityProvision: signals.identityProvision,
+    personaIdentityPrompt: signals.personaIdentityPrompt,
+    runtimeIdentityPrompt: signals.runtimeIdentityPrompt,
+    deckIntent: signals.deckIntent,
+    freshnessSensitive,
+    visionIntent,
+    buildDeliverable,
+    implementShip,
+    runtimePreferenceIntent: signals.runtimePreferenceIntent,
+    runtimeSettingsQuery: signals.runtimeSettingsQuery,
+    skipHarnessSecondaryPasses,
+    workflowSuitable,
+    reasoningEffort,
+    thinkDepth,
+    toolFirstBias,
+    reasoningWordBudget,
+    essayRisk,
+    reasoningBudgetSource: trustLlm && Object.keys(budgetFromLlm).length > 0 ? "llm" : "fallback",
+  };
+}
+
 function buildInferenceFromParsed(
   parsed: Record<string, unknown>,
   confidence: number,
@@ -497,137 +668,74 @@ function buildInferenceFromParsed(
   reason: string,
   fallbackReason?: string
 ): TurnInferenceResult {
-  const identityQuery = Boolean(parsed["identityQuery"]);
-  const identityProvision = Boolean(parsed["identityProvision"]);
-  const personaIdentityPrompt = Boolean(parsed["personaIdentityPrompt"]);
-  const runtimeIdentityPrompt = Boolean(parsed["runtimeIdentityPrompt"]);
   const intentRaw = parseIntent(parsed["intent"]);
-
-  // Identity/persona prompts that the classifier didn't tag as conversational
-  // get coerced — they fit the "no tools, fast, near-zero reasoning" profile.
-  let intent: TurnIntentClass =
-    identityQuery || personaIdentityPrompt || runtimeIdentityPrompt
-      ? "conversational"
-      : intentRaw ?? "knowledge";
-
+  const intent: TurnIntentClass = intentRaw ?? "knowledge";
   const complexity: TurnComplexity =
-    intent === "conversational" ? "trivial" : parseComplexity(parsed["complexity"]) ?? "normal";
+    intent === "conversational"
+      ? "trivial"
+      : parseComplexity(parsed["complexity"]) ?? "normal";
 
   const likelyEditPaths =
     intent === "conversational" ? [] : parseLikelyEditPathsField(parsed["likelyEditPaths"]);
 
-  const budgetFields = parseReasoningBudgetFromParsed(parsed);
+  const fb = fallbackReasoningBudget(intent, Boolean(parsed["exploratoryCreative"]));
 
   return {
     intent,
     complexity,
     likelyEditPaths,
-    stancePrompt: identityQuery ? false : Boolean(parsed["stancePrompt"]),
-    overInferenceRisk: identityQuery ? false : Boolean(parsed["overInferenceRisk"]),
-    exploratoryCreative:
-      identityQuery || intent === "conversational"
-        ? false
-        : Boolean(parsed["exploratoryCreative"]),
-    identityQuery,
-    identityProvision,
-    personaIdentityPrompt,
-    runtimeIdentityPrompt,
-    deckIntent: Boolean(parsed["deckIntent"]),
-    freshnessSensitive: Boolean(parsed["freshnessSensitive"]),
-    // Conversational turns never inspect images.
-    visionIntent: intent === "conversational" ? false : Boolean(parsed["visionIntent"]),
-    // Conversational turns are short replies; they never produce build artifacts
-    // or implement-ship deliverables, so coerce those to false defensively even
-    // if the classifier flagged them (a misclassified "build" verb in chitchat
-    // shouldn't bias the heuristic stack).
-    buildDeliverable:
-      intent === "conversational" ? false : Boolean(parsed["buildDeliverable"]),
-    implementShip:
-      intent === "conversational" ? false : Boolean(parsed["implementShip"]),
-    runtimePreferenceIntent: Boolean(parsed["runtimePreferenceIntent"]),
-    runtimeSettingsQuery: Boolean(parsed["runtimeSettingsQuery"]),
-    skipHarnessSecondaryPasses: Boolean(parsed["skipHarnessSecondaryPasses"]),
-    workflowSuitable: intent === "conversational" ? false : Boolean(parsed["workflowSuitable"]),
+    stancePrompt: false,
+    overInferenceRisk: false,
+    exploratoryCreative: Boolean(parsed["exploratoryCreative"]),
+    identityQuery: false,
+    identityProvision: false,
+    personaIdentityPrompt: false,
+    runtimeIdentityPrompt: false,
+    deckIntent: false,
+    freshnessSensitive: false,
+    visionIntent: Boolean(parsed["visionIntent"]),
+    buildDeliverable: false,
+    implementShip: false,
+    runtimePreferenceIntent: false,
+    runtimeSettingsQuery: false,
+    skipHarnessSecondaryPasses: false,
+    workflowSuitable: Boolean(parsed["workflowSuitable"]),
     confidence,
     source,
     reason,
     fallbackReason,
-    ...budgetFields,
+    reasoningEffort: fb.reasoningEffort,
+    thinkDepth: fb.thinkDepth,
+    toolFirstBias: fb.toolFirstBias,
+    reasoningWordBudget: fb.reasoningWordBudget,
+    essayRisk: fb.essayRisk,
+    reasoningBudgetSource: "fallback",
   };
 }
 
-const INFERENCE_SYSTEM_PROMPT =
-  "Classify the user message for harness policy. Return JSON only with exactly these keys: " +
-  "{intent:'introspection|knowledge|research|coding|execution|conversational|creative'," +
-  "complexity:'trivial|normal|complex'," +
-  "likelyEditPaths:string[],stancePrompt:boolean,overInferenceRisk:boolean," +
-  "exploratoryCreative:boolean,identityQuery:boolean,identityProvision:boolean,personaIdentityPrompt:boolean,runtimeIdentityPrompt:boolean,deckIntent:boolean," +
-  "freshnessSensitive:boolean,visionIntent:boolean,buildDeliverable:boolean,implementShip:boolean," +
-  "runtimePreferenceIntent:boolean,runtimeSettingsQuery:boolean,skipHarnessSecondaryPasses:boolean,workflowSuitable:boolean," +
-  "reasoningEffort:'none'|'low'|'medium'|'high'|'xhigh',thinkDepth:'skip'|'brief'|'standard'|'deep',toolFirstBias:boolean," +
-  "reasoningWordBudget:number,essayRisk:boolean,confidence:number,reason:string}. " +
-  "INTENT CLASSES (mutually exclusive): " +
-  "conversational=greetings/thanks/acknowledgments/continuation ('keep going'/'yes do it')/persona or identity questions about YOU or the USER — no tools needed; " +
-  "introspection=memory queries, capability checks, self-reflection about prior turns; " +
-  "knowledge=background Q&A, explanations, factual recall without live web sources; " +
-  "research=live multi-source investigation using web_search/web_fetch — news, markets, current events, fact-checking; " +
-  "coding=code edits, repo work, debugging, refactoring, tests, anything that mutates files OR produces a runnable/openable artifact (html page, app, site, script, tool, game); " +
-  "execution=builds, deploys, CI/CD, process runs, scheduled briefs, file-system maintenance, tool-heavy pipelines without narrative output; " +
-  "creative=generative writing/ideation where the PROSE ITSELF is the deliverable (stories, poems, copy, naming, blue-sky brainstorm, design exploration with no expected file output). The text the model emits IS the product — no file is written, no app runs. " +
-  "INTENT PRECEDENCE (resolve ambiguity in this order): " +
-  "(1) If the user asks for a working/runnable/openable artifact — file, app, page, game, tool, script, OS, demo — classify as coding REGARDLESS of how creative the subject is. 'build me a poetry app', 'make me a browser OS', 'design and code a Tetris clone' are all coding. The verbs 'build/make/create/code/implement/ship' applied to a noun that lives on disk = coding, never creative. " +
-  "(2) Creative subject ≠ creative intent. 'a browser OS inspired by Socrates' is still coding (a runnable HTML app). 'write a Socratic dialogue about epistemology' is creative (the dialogue IS the output). The test: would the user open a file/app after this turn, or read your reply? File/app → coding. Reply → creative. " +
-  "(3) Live web data needed → research, even if the subject is technical. " +
-  "(4) Self/memory/capability question → introspection, even if framed as a coding question. " +
-  "COMPLEXITY (orthogonal to intent — predict independently): " +
-  "trivial=one-shot answer, ≤1 tool call, no multi-step reasoning, response fits in a few lines; " +
-  "normal=2–8 tool calls, single coherent goal, no cross-file refactor; " +
-  "complex=long-horizon, multi-file, cross-domain synthesis, ambiguous or open-ended goal, OR a single-file artifact >300 lines (a full HTML app, a multi-section deck, a small game). " +
-  "Examples: 'hi' → conversational/trivial. 'what's 2+2' → knowledge/trivial. 'fix this typo on line 42' → coding/trivial. " +
-  "'add a new endpoint with tests' → coding/normal. 'refactor the harness module split' → coding/complex. " +
-  "'build me a browser OS with games' → coding/complex (runnable HTML app, large single-file deliverable). " +
-  "'make me a single-page Tetris clone' → coding/normal. 'build hello.py and run it' → coding/trivial. " +
-  "'write me a haiku' → creative/trivial. 'draft a launch announcement' → creative/normal. 'brainstorm names for my startup' → creative/normal. " +
-  "'write a story about a Socratic AI' → creative/normal (prose deliverable). " +
-  "'build an interactive Socratic-themed app' → coding/complex (runnable deliverable). " +
-  "'what's going on with iran' → research/normal. " +
-  "REASONING BUDGET (defaults when uncertain: reasoningEffort=high; thinkDepth=standard for knowledge/research/coding/execution; skip for conversational/trivial): " +
-  "reasoningEffort=none only for trivial one-liners (hi/thanks/yes/no). " +
-  "toolFirstBias=true when user wants implement/run/test/show results/ship code now/build me X — even for hard-sounding or creative-subject tasks. " +
-  "Lower reasoningWordBudget (80-200) when toolFirstBias=true; use brief thinkDepth. " +
-  "essayRisk=true when task invites long design essays before tools (novel algorithms + implement, zero-shot challenges, big 'build me X' requests where the model might over-narrate). " +
-  "thinkDepth=deep only for open ideation without a clear ship-now clause. NEVER deep on a coding turn with a runnable deliverable — that's how single-shot HTML writes stall mid-generation. " +
-  "likelyEditPaths: up to 8 repo-relative file/dir paths the user will most likely need to read or edit for this turn, " +
-  "inferred from USER_MESSAGE plus any RECENT_FILES_* / REPO_TREE / LAST_ASSISTANT sections; use [] when not a coding task or nothing fits. " +
-  "exploratoryCreative=true when the user mainly wants open-ended ideation/hypotheticals tied to their own work or roadmap " +
-  "('what would make X more likely', 'imagine…', 'ignore my roadmap for a moment'). For pure generative writing prefer intent=creative instead. " +
-  "identityQuery=true when the user asks about THEIR name, what to call them, who they are, or whether you know/remember their name (set intent=conversational). " +
-  "identityProvision=true when they STATE their name or how to address them (e.g. 'I'm Alex', 'call me Sam', 'my name is …') — not when merely asking. " +
-  "personaIdentityPrompt=true when they ask for YOUR persona/identity (who you are in character, describe yourself) (set intent=conversational). " +
-  "runtimeIdentityPrompt=true ONLY when they explicitly want base LLM/provider/model slug/API/stack facts " +
-  "(e.g. which model, which provider, OpenRouter slug) (set intent=conversational). If ambiguous, set runtimeIdentityPrompt=false. " +
-  "skipHarnessSecondaryPasses=true for short openers / persona surface / compact capability overviews — always true when intent=conversational. " +
-  "deckIntent=true for presentations, slides, decks, slideshows. " +
-  "freshnessSensitive=true when they need current/live/recent/up-to-date information. " +
-  "visionIntent=true when the user wants you to look at / read / analyze / OCR an image, screenshot, photo, diagram, figure, chart, screencap, ui mockup, or any pixel-level content. " +
-  "Includes paraphrases the keyword list misses: 'what do you see here', 'what's in the upper-left', 'can you read this chart', 'pull the numbers from this graph', 'what does this UI show', 'describe what's happening in the picture'. " +
-  "Set false for purely textual prompts even when an image was attached for unrelated context. " +
-  "buildDeliverable=true when the user wants a runnable/openable artifact on disk — a file, app, page, game, OS, deck, tool, script, site, dashboard, plugin, prototype, demo, clone, simulator, etc. " +
-  "Includes informal phrasings: 'build me a X', 'spin up a Y', 'throw together a Z', 'whip up something for me', 'prototype a W'. Set true REGARDLESS of how creative the subject is (a Socratic browser OS still needs a file written). " +
-  "Set false for pure prose deliverables (haiku, story, copy), pure explanation Q&A, or research turns. " +
-  "implementShip=true when the user wants the result to actually RUN: 'make it runnable', 'run it', 'test it', 'zero-shot Python algorithm', 'implement and ship', 'from scratch and runnable', 'show me the result of running it'. " +
-  "implementShip is a subtype of buildDeliverable — when implementShip=true, buildDeliverable=true too. " +
-  "runtimePreferenceIntent=true when the user asks to change runtime behavior/settings/preferences (humor, formality, persona dials). " +
-  "runtimeSettingsQuery=true when user asks to check/read current runtime settings or current persona controls. " +
-  "overInferenceRisk=true when the request invites speculative user-belief attribution. " +
-  "workflowSuitable=true ONLY when the task naturally splits into MANY INDEPENDENT sub-tasks that could run in parallel — e.g. auditing/sweeping every file·endpoint·route·module across a codebase, a large migration/refactor spanning many files, building several independent components in parallel, or multi-angle research that cross-checks several sources against each other. " +
-  "These benefit from a dynamic workflow (fan-out sub-agents, results kept out of context). Set FALSE for ordinary single-goal coding, a single-file build, one-shot Q&A, or anything a handful of sequential tool calls handles — bigness alone is not enough; it must be PARALLELIZABLE into independent pieces. " +
-  "confidence is 0–1 for your overall classification certainty.";
+/** Compact classifier prompt — policy flags are derived locally in {@link enrichTurnInferenceFromMessage}. */
+export const INFERENCE_SYSTEM_PROMPT =
+  "Classify the user turn for harness routing. Return JSON only: " +
+  "{intent,complexity,likelyEditPaths,exploratoryCreative,visionIntent,workflowSuitable,confidence,reason}. " +
+  "intent: introspection|knowledge|research|coding|execution|conversational|creative. " +
+  "complexity: trivial|normal|complex (orthogonal to intent). " +
+  "likelyEditPaths: up to 8 repo-relative paths if coding/execution else []. " +
+  "exploratoryCreative: open hypotheticals about the user's work (not pure creative writing). " +
+  "visionIntent: user wants image/screenshot/diagram/chart analyzed or OCR'd. " +
+  "workflowSuitable: task fans out into many independent parallel sub-tasks (codebase-wide audit, large migration, multi-angle research). " +
+  "Rules: conversational=greetings/thanks/short acks/persona or identity chat; " +
+  "research=needs live web sources; coding=file edits OR runnable artifacts (apps/pages/games) even if subject sounds creative; " +
+  "creative=prose IS the deliverable (story/poem/copy) with no file output; " +
+  "coding beats creative when the user would open a file/app after the turn.";
 
 const HEURISTIC_GREETING_RE =
   /^(hi|hello|hey|yo|sup|howdy|greetings?|good\s+(morning|afternoon|evening|night)|evening|morning|afternoon)\b/i;
 const HEURISTIC_THANKS_RE = /^(thanks|thank you|thx|ty|cheers)\b/i;
 const HEURISTIC_CHITCHAT_RE = /^(how\s+are\s+you|what'?s\s+up|how\s+goes\s+it)\b/i;
+const HEURISTIC_ACK_RE =
+  /^(yes|yep|yeah|ok|okay|sure|go ahead|do it|continue|keep going|sounds good|perfect|great)\b/i;
+const HEURISTIC_FILE_PATH_RE =
+  /(?:^|\s)(?:[\w@.-]+\/)+[\w.-]+\.(?:tsx?|jsx?|py|rs|go|md|dart|json)\b/i;
 
 /**
  * Skip the fast-model classifier for obvious short greetings/chitchat — saves several
@@ -635,14 +743,53 @@ const HEURISTIC_CHITCHAT_RE = /^(how\s+are\s+you|what'?s\s+up|how\s+goes\s+it)\b
  */
 export function tryHeuristicTurnInference(userMessage: string): TurnInferenceResult | null {
   const msg = userMessage.trim();
-  if (!msg || msg.length > 160) return null;
+  if (!msg) return null;
+
+  if (isResearchFreshnessUserMessage(msg) && msg.length < 280) {
+    const fb = fallbackReasoningBudget("research", false);
+    return applyTurnInferenceHeuristics(
+      userMessage,
+      neutralTurnInferenceResult("heuristic_research_freshness", {
+        intent: "research",
+        complexity: msg.length < 80 ? "normal" : "normal",
+        confidence: 0.88,
+        freshnessSensitive: true,
+        toolFirstBias: true,
+        thinkDepth: "brief",
+        reasoningWordBudget: 140,
+        reasoningEffort: fb.reasoningEffort,
+        essayRisk: false,
+        reasoningBudgetSource: "fallback",
+      })
+    );
+  }
+
+  if (HEURISTIC_FILE_PATH_RE.test(msg) && msg.length < 220) {
+    const fb = fallbackReasoningBudget("coding", false);
+    return applyTurnInferenceHeuristics(
+      userMessage,
+      neutralTurnInferenceResult("heuristic_coding_path", {
+        intent: "coding",
+        complexity: "trivial",
+        confidence: 0.86,
+        buildDeliverable: false,
+        toolFirstBias: true,
+        thinkDepth: fb.thinkDepth,
+        reasoningEffort: fb.reasoningEffort,
+        reasoningBudgetSource: "fallback",
+      })
+    );
+  }
+
+  if (msg.length > 160) return null;
   const words = msg.split(/\s+/).filter(Boolean);
   if (words.length > 14) return null;
   const lower = msg.toLowerCase();
   const looksConversational =
     HEURISTIC_GREETING_RE.test(lower) ||
     HEURISTIC_THANKS_RE.test(lower) ||
-    HEURISTIC_CHITCHAT_RE.test(lower);
+    HEURISTIC_CHITCHAT_RE.test(lower) ||
+    HEURISTIC_ACK_RE.test(lower);
   if (!looksConversational) return null;
   if (
     /\b(fix|implement|build|write|debug|refactor|create|add|remove|delete|search|grep|file|code)\b/i.test(
@@ -666,6 +813,34 @@ export function tryHeuristicTurnInference(userMessage: string): TurnInferenceRes
       essayRisk: fb.essayRisk,
       reasoningBudgetSource: "fallback",
     })
+  );
+}
+
+/** Env gate — heuristic conversational fast path (skips heavy preflight, keeps LLM for other turns). */
+export function isConversationalFastPathEnabled(): boolean {
+  return effectiveHarnessEnvRaw("AGENT_CONVERSATIONAL_FAST_PATH") !== "0";
+}
+
+/**
+ * True only for high-confidence heuristic greetings/chitchat — never for LLM-classified turns.
+ * Used to skip world-context gather, tool manifest, and usage polling without disabling
+ * the fast-model classifier on ambiguous messages.
+ */
+export function isHeuristicConversationalFastPath(
+  userMessage: string,
+  inference?: TurnInferenceResult | null
+): boolean {
+  if (!isConversationalFastPathEnabled()) return false;
+  const inf = inference ?? tryHeuristicTurnInference(userMessage);
+  if (!inf) return false;
+  return (
+    inf.reason === "heuristic_conversational" &&
+    inf.intent === "conversational" &&
+    inf.complexity === "trivial" &&
+    (inf.confidence ?? 0) >= 0.85 &&
+    !inf.identityQuery &&
+    !inf.runtimeIdentityPrompt &&
+    !inf.personaIdentityPrompt
   );
 }
 
@@ -698,7 +873,7 @@ export async function inferTurnInference(
       { role: "system", content: INFERENCE_SYSTEM_PROMPT },
       { role: "user", content: userContent },
     ],
-    maxTokens: 420,
+    maxTokens: 240,
     temperature: 0,
     signal: AbortSignal.timeout(resolveIntentInferenceTimeoutMs()),
   });
@@ -721,7 +896,11 @@ export async function inferTurnInference(
     typeof parsed["reason"] === "string" ? parsed["reason"].slice(0, 200) : "classified_by_llm";
 
   if (confidence < threshold) {
-    const base = buildInferenceFromParsed(parsed, confidence, "llm", reasonStr);
+    const base = enrichTurnInferenceFromMessage(
+      userMessage,
+      buildInferenceFromParsed(parsed, confidence, "llm", reasonStr),
+      parsed
+    );
     const withFb = applyFallbackReasoningFields(
       {
         ...base,
@@ -732,7 +911,11 @@ export async function inferTurnInference(
     return applyTurnInferenceHeuristics(userMessage, withFb);
   }
 
-  const result = buildInferenceFromParsed(parsed, confidence, "llm", reasonStr);
+  const result = enrichTurnInferenceFromMessage(
+    userMessage,
+    buildInferenceFromParsed(parsed, confidence, "llm", reasonStr),
+    parsed
+  );
   return applyTurnInferenceHeuristics(userMessage, applyFallbackReasoningFields(result, true));
 }
 

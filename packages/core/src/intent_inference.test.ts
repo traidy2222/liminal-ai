@@ -2,16 +2,31 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import {
   buildIntentInferenceUserContent,
+  enrichTurnInferenceFromMessage,
+  INFERENCE_SYSTEM_PROMPT,
   shouldSkipHarnessSecondaryPassesForTurn,
   parseLikelyEditPathsField,
   resolveMemoryPolicy,
   neutralTurnInferenceResult,
   applyTurnInferenceHeuristics,
   tryHeuristicTurnInference,
+  isHeuristicConversationalFastPath,
+  isConversationalFastPathEnabled,
   fallbackComplexityForUserMessage,
   buildRoutingProfile,
   type TurnInferenceResult,
 } from "./intent_inference.js";
+
+test("INFERENCE_SYSTEM_PROMPT stays compact for fast classifier latency", () => {
+  assert.ok(INFERENCE_SYSTEM_PROMPT.length < 1400, `prompt grew to ${INFERENCE_SYSTEM_PROMPT.length} chars`);
+});
+
+test("enrichTurnInferenceFromMessage coerces identity questions to conversational", () => {
+  const base = neutralTurnInferenceResult("test", { intent: "knowledge", source: "llm", confidence: 0.9 });
+  const enriched = enrichTurnInferenceFromMessage("do you remember my name?", base, { intent: "knowledge" });
+  assert.equal(enriched.intent, "conversational");
+  assert.equal(enriched.identityQuery, true);
+});
 
 test("tryHeuristicTurnInference matches short greetings only", () => {
   const hi = tryHeuristicTurnInference("hi!");
@@ -19,8 +34,22 @@ test("tryHeuristicTurnInference matches short greetings only", () => {
   assert.equal(hi?.intent, "conversational");
   assert.equal(hi?.complexity, "trivial");
   assert.equal(tryHeuristicTurnInference("good evening")?.intent, "conversational");
+  assert.equal(tryHeuristicTurnInference("hey")?.intent, "conversational");
   assert.equal(tryHeuristicTurnInference("fix the greeting in README"), null);
   assert.equal(tryHeuristicTurnInference("a".repeat(200)), null);
+});
+
+test("isHeuristicConversationalFastPath only for heuristic greetings", () => {
+  assert.equal(isHeuristicConversationalFastPath("hey"), true);
+  assert.equal(isHeuristicConversationalFastPath("thanks!"), true);
+  assert.equal(isHeuristicConversationalFastPath("fix the auth bug"), false);
+  const llmTurn = neutralTurnInferenceResult("llm", {
+    intent: "conversational",
+    complexity: "trivial",
+    confidence: 0.95,
+    source: "llm",
+  });
+  assert.equal(isHeuristicConversationalFastPath("tell me a joke", llmTurn), false);
 });
 
 test("parseLikelyEditPathsField caps and normalizes", () => {
@@ -101,9 +130,7 @@ test("applyTurnInferenceHeuristics upgrades build-for-yourself to coding tool-fi
   assert.equal(refined.toolFirstBias, true);
 });
 
-test("applyTurnInferenceHeuristics trusts LLM buildDeliverable over regex on novel paraphrases", () => {
-  // Phrase the old regex wouldn't catch ("whip up", "Socratic dashboard"), but the
-  // fast-model classifier handles via paraphrase understanding.
+test("applyTurnInferenceHeuristics trusts LLM coding intent on novel build paraphrases", () => {
   const llmInference: TurnInferenceResult = {
     ...neutralTurnInferenceResult("test", { intent: "creative" }),
     source: "llm",
@@ -115,28 +142,27 @@ test("applyTurnInferenceHeuristics trusts LLM buildDeliverable over regex on nov
     "whip up a little Socratic dashboard for me whenever you get a chance",
     llmInference
   );
-  assert.equal(refined.intent, "coding", "should override creative→coding from LLM signal");
+  assert.equal(refined.intent, "coding", "should override creative→coding from build signal");
   assert.equal(refined.toolFirstBias, true);
   assert.equal(refined.essayRisk, true);
   assert.equal(refined.thinkDepth, "brief");
 });
 
-test("applyTurnInferenceHeuristics ignores regex when LLM source says buildDeliverable=false", () => {
-  // Even though the message contains "build me a tool", the LLM classifier knows
-  // this is actually a research question about an existing tool. Trust it.
-  const llmInference: TurnInferenceResult = {
-    ...neutralTurnInferenceResult("test", { intent: "research" }),
-    source: "llm",
-    confidence: 0.9,
-    buildDeliverable: false,
-    implementShip: false,
-    freshnessSensitive: true,
-  };
+test("applyTurnInferenceHeuristics respects research intent over build verbs", () => {
+  const llmInference = enrichTurnInferenceFromMessage(
+    "build me a comparison of which tool is best for X — what's the current consensus",
+    neutralTurnInferenceResult("test", {
+      intent: "research",
+      source: "llm",
+      confidence: 0.9,
+      freshnessSensitive: true,
+    }),
+    { intent: "research" }
+  );
   const refined = applyTurnInferenceHeuristics(
     "build me a comparison of which tool is best for X — what's the current consensus",
     llmInference
   );
-  // Should NOT flip to coding — research wins because LLM said buildDeliverable=false.
   assert.equal(refined.intent, "research");
 });
 

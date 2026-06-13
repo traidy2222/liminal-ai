@@ -40,6 +40,7 @@ import {
 import { TaskOrchestrator } from "./orchestrator.js";
 import {
   buildActiveLlmContextUpdateMessage,
+  buildMinimalWorldContextMessage,
   buildWorldContextMessage,
 } from "./world_context.js";
 import { gatherRepoMapLines } from "./repo_map.js";
@@ -257,6 +258,8 @@ import {
   shouldSkipHarnessSecondaryPassesForTurn,
   applyTurnInferenceHeuristics,
   inferTurnInference,
+  isHeuristicConversationalFastPath,
+  tryHeuristicTurnInference,
   neutralTurnInferenceResult,
   resolveMemoryPolicy,
   buildRoutingProfile,
@@ -268,6 +271,7 @@ import {
   buildOpenRouterReasoningParam,
   buildReasoningBudgetInjection,
   evaluateReasoningStall,
+  fallbackReasoningBudget,
   formatReasoningBudgetTraceLine,
   resolveReasoningBudget,
   tightenReasoningBudgetForUserMessage,
@@ -1222,6 +1226,8 @@ export class AgentHarness {
 
   /** True once world context has been injected (only happens on the first send() of a root agent). */
   private worldContextInjected = false;
+  /** Full world context built in background after a conversational fast-path first turn. */
+  private worldContextFullDeferred: string | null = null;
   /** Cached tool capability manifest — invalidated when active tool set changes. */
   private toolManifestCache: { hash: string; text: string } | null = null;
   private resumeMissionInjectedThisSend = false;
@@ -1921,7 +1927,9 @@ export class AgentHarness {
   private async maybeRecoverManagedInferenceRoute(): Promise<void> {
     const mode = resolveInferenceMode(this.runtimePreferences);
     const onInference = isManagedInferenceBaseUrl(this.config.baseURL);
-    const badModel = isModelIncompatibleWithManagedProxy(this.config.model);
+    const badModel = isModelIncompatibleWithManagedProxy(
+      resolveModelForManagedInference(this.config.model, this.runtimePreferences)
+    );
     const shouldTry =
       this.managedByokFallbackActive ||
       (onInference && badModel) ||
@@ -1937,7 +1945,7 @@ export class AgentHarness {
     if (!status?.entitled) return;
     if (status.remainingUsd != null && status.remainingUsd <= 0) return;
 
-    const model = resolveModelForManagedInference(this.config.model, this.runtimePreferences);
+    const model = resolveModelForManagedInference(undefined, this.runtimePreferences);
     clearManagedInferenceSessionCache();
     this.managedByokFallbackActive = false;
 
@@ -2667,8 +2675,19 @@ export class AgentHarness {
     }
   ): Promise<void> {
     if (this.running) throw new Error("Agent is already processing a message");
-    await this.maybeRecoverManagedInferenceRoute();
-    await this.maybePreemptManagedCreditExhaustion();
+    const openingOptionsEarly =
+      Boolean(options?.sessionGreeting) || Boolean(options?.personaBootstrapPrompt);
+    const conversationalFastPath =
+      !openingOptionsEarly &&
+      this.agentDepth === 0 &&
+      isHeuristicConversationalFastPath(userMessage);
+    if (conversationalFastPath) {
+      void this.maybeRecoverManagedInferenceRoute();
+      void this.maybePreemptManagedCreditExhaustion();
+    } else {
+      await this.maybeRecoverManagedInferenceRoute();
+      await this.maybePreemptManagedCreditExhaustion();
+    }
     if (options?.freshContext === true && this.agentDepth === 0) {
       this.reset();
     }
@@ -2699,19 +2718,26 @@ export class AgentHarness {
         (mode === "managed" ||
           (mode !== "byok" && (await shouldRouteOpenRouterViaManaged(this.runtimePreferences))));
       if (routeManaged) {
+        const effectiveModel = this.resolveEffectiveModelFromPreferences();
+        if (effectiveModel && effectiveModel !== this.config.model) {
+          this.config.model = effectiveModel;
+        }
         const managedModel = resolveModelForManagedInference(
           this.config.model,
           this.runtimePreferences
         );
+        const fixingIncompatible = isModelIncompatibleWithManagedProxy(this.config.model);
         if (managedModel !== this.config.model) {
           this.config.model = managedModel;
-          await this.patchRuntimePreferences(
-            {
-              provider: { model: managedModel },
-              harness: { env: { AGENT_MODEL: managedModel } },
-            },
-            { persist: true }
-          );
+          if (fixingIncompatible) {
+            await this.patchRuntimePreferences(
+              {
+                provider: { model: managedModel },
+                harness: { env: { AGENT_MODEL: managedModel } },
+              },
+              { persist: true }
+            );
+          }
         }
         try {
           const session = await ensureManagedInferenceSession(
@@ -2927,19 +2953,29 @@ export class AgentHarness {
     this.resumeMissionInjectedThisSend = false;
     let worldCtxForTurn: string | null | undefined;
     let worldCtxPromise: Promise<string | null> | null = null;
+    const worldCtxOpts = {
+      ...this.config.worldContext,
+      firstUserMessage: telemetryUserLabel,
+      chatId: this.taskId,
+      activeLlm: {
+        model: this.config.model,
+        baseURL: this.config.baseURL ?? "",
+      },
+    };
     if (!this.worldContextInjected && this.agentDepth === 0) {
       this.worldContextInjected = true;
       this._worldRefresher = new WorldContextRefresher(resolveWorkspaceRoot());
       void this._worldRefresher.init().catch(() => { /* non-fatal */ });
-      worldCtxPromise = buildWorldContextMessage({
-        ...this.config.worldContext,
-        firstUserMessage: telemetryUserLabel,
-        chatId: this.taskId,
-        activeLlm: {
-          model: this.config.model,
-          baseURL: this.config.baseURL ?? "",
-        },
-      }).catch(() => null);
+      if (conversationalFastPath) {
+        worldCtxForTurn = buildMinimalWorldContextMessage(worldCtxOpts);
+        void buildWorldContextMessage(worldCtxOpts)
+          .then((full) => {
+            if (full) this.worldContextFullDeferred = full;
+          })
+          .catch(() => { /* non-fatal */ });
+      } else {
+        worldCtxPromise = buildWorldContextMessage(worldCtxOpts).catch(() => null);
+      }
     }
     try {
       if (openingTurn) {
@@ -2967,6 +3003,8 @@ export class AgentHarness {
           source: "default",
           reason: "session_greeting",
         };
+      } else if (conversationalFastPath) {
+        this.turnInference = tryHeuristicTurnInference(userMessage)!;
       } else {
         const prevEpistemic = this.context.getEpistemicState();
         const intentWorkspace: IntentInferenceWorkspaceContext = {
@@ -2985,7 +3023,13 @@ export class AgentHarness {
         };
         if (effectiveHarnessEnvRaw("AGENT_INTENT_REPO_CONTEXT") === "1") {
           try {
-            intentWorkspace.repoMapLines = await gatherRepoMapLines();
+            const lines = await Promise.race([
+              gatherRepoMapLines(),
+              new Promise<string[]>((resolve) => {
+                setTimeout(() => resolve([]), 400);
+              }),
+            ]);
+            if (lines.length > 0) intentWorkspace.repoMapLines = lines;
           } catch {
             /* optional orientation */
           }
@@ -3076,6 +3120,18 @@ export class AgentHarness {
       const routingModel = this._turnRoutingProfile.modelSlug;
       const surfaceRes = resolveReasoningSurface(routingModel);
       this._turnReasoningSurface = surfaceRes.surface;
+      if (conversationalFastPath) {
+        this._turnReasoningBudget = applySurfaceToBudget(
+          fallbackReasoningBudget("conversational", false),
+          this._turnReasoningSurface
+        );
+        this.context.appendMessage({
+          role: "system",
+          content:
+            "[CONVERSATIONAL TURN] Reply naturally and briefly — no tools unless the user asks for work.\n\n" +
+            buildEffortTurnInjection(),
+        });
+      } else {
       // Adaptive reasoning effort: seed the fallback prior with the statistically
       // best effort recorded for this intent class (AGENT_EFFORT_LEARN).
       const learnedEffort = this.turnInference
@@ -3224,6 +3280,7 @@ export class AgentHarness {
         } catch {
           /* non-fatal */
         }
+      }
       }
     }
     if (
@@ -3404,6 +3461,17 @@ export class AgentHarness {
         traceId: this.currentTurnTraceId,
       });
 
+      if (this.agentDepth === 0 && this.worldContextFullDeferred) {
+        const deferred = this.worldContextFullDeferred;
+        this.worldContextFullDeferred = null;
+        this.context.append({ role: "user", content: deferred });
+        this.context.append({
+          role: "assistant",
+          content:
+            "[Extended session grounding received — project, git, memory, and tool context are now available.]",
+        });
+      }
+
       // Inject world context on the first turn of a root agent (#world-context).
       // Child agents (depth > 0) skip this — they inherit context from their parent.
       if (worldCtxForTurn === undefined && worldCtxPromise) {
@@ -3427,7 +3495,7 @@ export class AgentHarness {
 
       // ACON adaptive compression: inject persisted guidelines so future compressions
       // preserve information that previously caused errors after compression.
-      if (this.agentDepth === 0) {
+      if (this.agentDepth === 0 && !conversationalFastPath) {
         try {
           const guidelinePreamble = await formatCompressionGuidelines();
           if (guidelinePreamble) {
@@ -3458,7 +3526,11 @@ export class AgentHarness {
         }
       }
 
-      if (!openingTurn) {
+      if (
+        !openingTurn &&
+        !conversationalFastPath &&
+        !shouldSkipHarnessSecondaryPassesForTurn(userMessage, this.turnInference)
+      ) {
         this.context.append({
           role: "user",
           content:
@@ -3474,7 +3546,7 @@ export class AgentHarness {
         parseInt(resolveHarnessEnvRaw("AGENT_SEND_TIMEOUT_MS", this.runtimePreferences) ?? "0", 10) || 0;
       const sendTimeoutMs = sendTimeoutRaw > 0 ? Math.max(30_000, sendTimeoutRaw) : 0;
       // Mid-session world context delta refresh (root agent only, AGENT_WORLD_REFRESH_EVERY).
-      if (this.agentDepth === 0 && this._worldRefresher) {
+      if (this.agentDepth === 0 && this._worldRefresher && !conversationalFastPath) {
         try {
           const worldDelta = await this._worldRefresher.tick();
           if (worldDelta) this.context.appendMessage(worldDelta);
@@ -3486,10 +3558,16 @@ export class AgentHarness {
       this.syncVoiceModeTools();
 
       if (this.onTurnStartMemorySync) {
-        try {
-          await Promise.resolve(this.onTurnStartMemorySync(this.taskId));
-        } catch {
-          /* non-fatal */
+        if (conversationalFastPath) {
+          void Promise.resolve(this.onTurnStartMemorySync(this.taskId)).catch(() => {
+            /* non-fatal */
+          });
+        } else {
+          try {
+            await Promise.resolve(this.onTurnStartMemorySync(this.taskId));
+          } catch {
+            /* non-fatal */
+          }
         }
       }
 
@@ -7530,6 +7608,7 @@ export class AgentHarness {
     this.roundCount = 0;
     this.persistedHypotheses = [];
     this.worldContextInjected = false;
+    this.worldContextFullDeferred = null;
     this.sessionGreetingSentThisHarness = false;
     this.personaBootstrapPromptSentThisHarness = false;
   }

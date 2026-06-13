@@ -3,7 +3,7 @@
  * Refreshed automatically before expiry on each root send().
  */
 import type { RuntimePreferences } from "./runtime_prefs.js";
-import { fetchInferenceSession } from "./inference_provider.js";
+import { clearInferenceUsageStatusCache, fetchInferenceSession } from "./inference_provider.js";
 
 const REFRESH_BUFFER_MS = 2 * 60_000;
 
@@ -15,6 +15,7 @@ export function isManagedInferenceBaseUrl(baseURL: string): boolean {
 
 export function clearManagedInferenceSessionCache(): void {
   cached = null;
+  clearInferenceUsageStatusCache();
 }
 
 export async function ensureManagedInferenceSession(

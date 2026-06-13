@@ -29,27 +29,32 @@ export function resolveManagedFreeFallbackMainModel(prefs?: RuntimePreferences |
   return raw || OPENROUTER_MODEL_SLUG.FREE_ROUTER;
 }
 
-/** OpenRouter-only slugs the managed proxy rejects (free-tier BYOK fallback models). */
+/** BYOK-only slugs that must not route through the Vireon managed proxy (credit-exhaustion fallback). */
 export function isModelIncompatibleWithManagedProxy(model: string): boolean {
   const m = model.trim().toLowerCase();
   if (!m) return false;
   if (m === OPENROUTER_MODEL_SLUG.FREE_ROUTER) return true;
-  if (m.includes(":free")) return true;
-  if (m === resolveManagedFreeFallbackMainModel(null).toLowerCase()) return true;
+  const fallbackMain = resolveManagedFreeFallbackMainModel(null).toLowerCase();
+  if (m === fallbackMain && m === OPENROUTER_MODEL_SLUG.FREE_ROUTER) return true;
+  // Vendor OpenRouter ":free" tier slugs (nex-n2-pro:free, nemotron:free, …) are valid on managed OR.
   return false;
 }
 
-/** Pick a managed-routable model when prefs still carry a BYOK free-fallback slug. */
+/** Pick a managed-routable model — persisted prefs win over stale in-memory harness config. */
 export function resolveModelForManagedInference(
   currentModel: string | undefined,
   prefs?: RuntimePreferences | null
 ): string {
+  const fromProvider = prefs?.provider?.model?.trim();
+  if (fromProvider && !isModelIncompatibleWithManagedProxy(fromProvider)) {
+    return fromProvider;
+  }
+  const fromEnv = resolveHarnessEnvRaw("AGENT_MODEL", prefs ?? null)?.trim();
+  if (fromEnv && !isModelIncompatibleWithManagedProxy(fromEnv)) {
+    return fromEnv;
+  }
   const cur = currentModel?.trim() ?? "";
   if (cur && !isModelIncompatibleWithManagedProxy(cur)) return cur;
-  const fromProvider = prefs?.provider?.model?.trim();
-  if (fromProvider && !isModelIncompatibleWithManagedProxy(fromProvider)) return fromProvider;
-  const fromEnv = resolveHarnessEnvRaw("AGENT_MODEL", prefs ?? null)?.trim();
-  if (fromEnv && !isModelIncompatibleWithManagedProxy(fromEnv)) return fromEnv;
   return DEFAULT_AGENT_MODEL_SLUG;
 }
 
@@ -58,21 +63,25 @@ export function buildManagedRecoveryHarnessEnv(
   prefs: RuntimePreferences | null,
   model: string
 ): Record<string, string> {
-  return {
+  const env: Record<string, string> = {
     AGENT_INFERENCE_MODE: "managed",
     AGENT_INFERENCE_PREFER_MANAGED: "1",
     AGENT_MODEL: model,
-    AGENT_API_BASE_URL: DEFAULT_AGENT_API_BASE_URL,
     AGENT_PROVIDER_ORDER: "",
     AGENT_PROVIDER_ORDER_FAST: "",
     AGENT_PROVIDER_STRATEGY: "price",
     AGENT_PROVIDER_ROUTE_AUTO: "1",
     AGENT_PROVIDER_ALLOW_FALLBACKS: "1",
-    ...(prefs?.harness?.env?.AGENT_FAST_MODEL &&
-    isModelIncompatibleWithManagedProxy(prefs.harness.env.AGENT_FAST_MODEL)
-      ? { AGENT_FAST_MODEL: DEFAULT_AGENT_FAST_MODEL_SLUG }
-      : {}),
   };
+  const fast =
+    prefs?.harness?.env?.AGENT_FAST_MODEL?.trim() ||
+    resolveHarnessEnvRaw("AGENT_FAST_MODEL", prefs ?? null)?.trim();
+  if (fast && !isModelIncompatibleWithManagedProxy(fast)) {
+    env.AGENT_FAST_MODEL = fast;
+  } else if (fast && isModelIncompatibleWithManagedProxy(fast)) {
+    env.AGENT_FAST_MODEL = DEFAULT_AGENT_FAST_MODEL_SLUG;
+  }
+  return env;
 }
 
 export function resolveManagedFreeFallbackFastModel(
