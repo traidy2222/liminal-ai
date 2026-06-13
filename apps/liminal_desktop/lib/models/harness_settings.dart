@@ -290,7 +290,9 @@ class ManagedInferenceModel {
     final upstreamFamily = json['family'] as String?;
     final providers = (json['providers'] as List<dynamic>? ?? [])
         .map((e) => ManagedInferenceProviderRef.fromJson(Map<String, dynamic>.from(e as Map)))
-        .where((p) => p.id.isNotEmpty && (p.provider == 'bedrock' || p.provider == 'openrouter'))
+        .where((p) =>
+            p.id.isNotEmpty &&
+            (p.provider == 'bedrock' || p.provider == 'openrouter' || p.provider == 'kimchi'))
         .toList();
     return ManagedInferenceModel(
       id: id,

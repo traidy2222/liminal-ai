@@ -87,7 +87,7 @@ class _SettingsScreenState extends State<SettingsScreen>
     for (final f in snap.fields) {
       if (f.key == 'AGENT_MANAGED_PROVIDER') {
         final v = f.value.trim().toLowerCase();
-        if (v == 'bedrock' || v == 'openrouter') return v;
+        if (v == 'bedrock' || v == 'openrouter' || v == 'kimchi') return v;
         return 'auto';
       }
     }
@@ -392,7 +392,7 @@ class _SettingsScreenState extends State<SettingsScreen>
                       child: LiminalSection(
                         title: 'Provider',
                         subtitle: snap?.provider.showManagedInference == true
-                            ? 'Pro managed inference — hybrid Bedrock + OpenRouter via Vireon.'
+                            ? 'Pro managed inference — hybrid Bedrock, OpenRouter, and Kimchi via Vireon.'
                             : 'API keys live in `.env` only — never sent over the socket.',
                         child: snap?.provider.showManagedInference == true
                             ? ManagedInferencePanel(
