@@ -132,7 +132,11 @@ int managedModelFamilyRank(String family) {
 bool looksLikeKimchiModelId(String model) {
   final m = model.trim().toLowerCase();
   if (m.isEmpty || m.contains('/')) return false;
-  return RegExp(r'^(kimi-|minimax-|nemotron-)').hasMatch(m);
+  if (RegExp(r'^(kimi-|minimax-|nemotron-)').hasMatch(m)) return true;
+  // Cast AI serves flat slugs (`qwen3-coder-next-fp8`, `gpt-oss-120b`,
+  // `smollm2-360m`). OpenRouter slugs always carry a vendor `/`; Bedrock ids are
+  // dotted (`vendor.model`). A flat id with neither is a Cast AI / Kimchi slug.
+  return !m.contains('.');
 }
 
 bool looksLikeBedrockModelId(String model) {
