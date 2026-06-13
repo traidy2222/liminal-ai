@@ -10,7 +10,7 @@ import {
   resolveModelForManagedInference,
 } from "./managed_free_fallback.js";
 import { DEFAULT_AGENT_MODEL_SLUG } from "./harness_default_constants.js";
-import { isInferenceBudgetExceededError } from "./inference_provider.js";
+import { isInferenceBudgetExceededError, isManagedInferenceAuthError } from "./inference_provider.js";
 import { OPENROUTER_MODEL_SLUG } from "./provider_model_presets.js";
 
 test("managedFreeFallbackEnabled defaults on", () => {
@@ -49,6 +49,24 @@ test("buildManagedFreeFallbackHarnessEnv pins Stealth for owl-alpha override", (
 test("isInferenceBudgetExceededError detects 402 budget body", () => {
   const err = new OpenAI.APIError(402, { error: "inference_budget_exceeded" }, "budget", {});
   assert.equal(isInferenceBudgetExceededError(err), true);
+});
+
+test("isManagedInferenceAuthError detects every 401 session reason (incl. expired)", () => {
+  // The proxy returns these as the 401 body; the lapsed-session case ("expired")
+  // is the one that used to slip through and hard-fail a long run mid-stream.
+  for (const reason of ["expired", "bad signature", "malformed token", "bad payload", "invalid claims"]) {
+    const err = new OpenAI.APIError(401, { error: reason }, reason, {});
+    assert.equal(isManagedInferenceAuthError(err), true, `should flag 401 "${reason}"`);
+  }
+  // Non-401s are not session-auth errors.
+  assert.equal(
+    isManagedInferenceAuthError(new OpenAI.APIError(402, { error: "inference_budget_exceeded" }, "x", {})),
+    false
+  );
+  assert.equal(
+    isManagedInferenceAuthError(new OpenAI.APIError(403, { error: "not entitled" }, "x", {})),
+    false
+  );
 });
 
 test("isModelIncompatibleWithManagedProxy flags openrouter/free BYOK fallback only", () => {

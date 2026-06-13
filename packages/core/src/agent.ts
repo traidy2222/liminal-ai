@@ -6683,10 +6683,30 @@ export class AgentHarness {
     const allowToollessRetry = this.config.allowToollessStreamRetry === true;
     let attempt = 0;
     let managedBusyRetries = 0;
+    let sessionRefreshes = 0;
     while (true) {
       if (Date.now() < this.providerCircuitOpenUntilMs) {
         const sec = Math.ceil((this.providerCircuitOpenUntilMs - Date.now()) / 1000);
         throw new Error(`Provider circuit open due to repeated upstream failures. Retry in ~${sec}s.`);
+      }
+
+      // Proactively renew the managed-inference session token before each request.
+      // A single long ReAct run can outlast the ~15m JWT; ensureManagedInferenceSession
+      // re-mints when within the refresh buffer, so we never hit a mid-run 401.
+      if (isManagedInferenceBaseUrl(this.config.baseURL)) {
+        try {
+          const session = await ensureManagedInferenceSession(
+            this.runtimePreferences,
+            this.config.baseURL
+          );
+          if (session?.apiKey?.trim() && session.apiKey !== this.config.openRouterApiKey) {
+            this.config.openRouterApiKey = session.apiKey;
+            this.config.baseURL = session.baseURL;
+            this.rebuildClient();
+          }
+        } catch {
+          /* fall through — a stale token still gets the reactive 401 refresh below */
+        }
       }
       const useTools =
         tools.length > 0 && (allowToollessRetry ? attempt < 2 : true);
@@ -6845,8 +6865,13 @@ export class AgentHarness {
         }
         if (
           isManagedInferenceAuthError(err) &&
-          isManagedInferenceBaseUrl(this.config.baseURL)
+          isManagedInferenceBaseUrl(this.config.baseURL) &&
+          sessionRefreshes < 3
         ) {
+          // Session token rejected (expired / invalid mid-run): re-mint a fresh
+          // one and retry. Bounded so a token that keeps 401ing (e.g. an expired
+          // license) falls through to BYOK instead of looping.
+          sessionRefreshes += 1;
           clearManagedInferenceSessionCache();
           try {
             const session = await ensureManagedInferenceSession(

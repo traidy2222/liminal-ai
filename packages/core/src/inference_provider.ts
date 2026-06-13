@@ -110,17 +110,18 @@ export function isInferenceBudgetExceededError(err: unknown): boolean {
   return parseInferenceBudgetExceeded(err) !== null;
 }
 
-/** Managed proxy / session errors that should trigger BYOK free-model fallback. */
+/**
+ * A 401 from the managed-inference proxy — always a session/auth problem worth
+ * re-minting the session token for. The proxy emits 401 *only* for session
+ * issues (`expired`, `bad signature`, `malformed token`, `bad payload`,
+ * `invalid claims`, missing token); entitlement is 403 and budget is 402. The
+ * caller gates on the managed base URL, so any 401 here means "re-mint and
+ * retry". Previously this matched a narrow string list that missed `expired`,
+ * so a session that lapsed mid-run hard-failed with "HTTP 401 … expired"
+ * instead of refreshing.
+ */
 export function isManagedInferenceAuthError(err: unknown): boolean {
-  if (!(err instanceof OpenAI.APIError) || err.status !== 401) return false;
-  const raw =
-    typeof err.error === "object" && err.error !== null
-      ? JSON.stringify(err.error)
-      : String(err.error ?? err.message);
-  const msg = raw.toLowerCase();
-  return /missing auth|auth header|unauthorized|no authorization|invalid token|invalid.*session/i.test(
-    msg
-  );
+  return err instanceof OpenAI.APIError && err.status === 401;
 }
 
 function parseInferenceBudgetExceeded(err: unknown): string | null {
