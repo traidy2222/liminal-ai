@@ -23,7 +23,11 @@ const KIMCHI_MODEL_PREFIX = /^(kimi-|minimax-|nemotron-)/i;
 function looksLikeKimchiManagedModelId(model: string): boolean {
   const m = model.trim().toLowerCase();
   if (!m || m.includes("/")) return false;
-  return KIMCHI_MODEL_PREFIX.test(m);
+  if (KIMCHI_MODEL_PREFIX.test(m)) return true;
+  // Cast AI serves flat slugs (`qwen3-coder-next-fp8`, `gpt-oss-120b`, `smollm2-360m`).
+  // OpenRouter slugs always carry a vendor `/`; Bedrock ids are dotted (`vendor.model`).
+  // A flat id with neither is a Cast AI / Kimchi slug.
+  return !m.includes(".");
 }
 
 function looksLikeBedrockModelId(model: string): boolean {

@@ -60,6 +60,22 @@ describe("managed_provider_preference", () => {
     ]);
   });
 
+  it("infers kimchi for flat Cast AI slugs without a known prefix", () => {
+    // Regression: flat Cast AI slugs were mislabeled OpenRouter, so the kimchi
+    // pin filter hid them and the badge was wrong.
+    assert.deepEqual(inferManagedModelProviders("qwen3-coder-next-fp8"), [
+      { provider: "kimchi", id: "qwen3-coder-next-fp8" },
+    ]);
+    assert.deepEqual(inferManagedModelProviders("gpt-oss-120b"), [
+      { provider: "kimchi", id: "gpt-oss-120b" },
+    ]);
+    assert.equal(
+      filterManagedCatalogForProvider([{ id: "qwen3-coder-next-fp8", label: "Qwen" }], "kimchi")
+        .length,
+      1
+    );
+  });
+
   it("filters catalog to pinned provider", () => {
     const models = [
       {
