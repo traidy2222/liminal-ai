@@ -547,6 +547,7 @@ class AppController extends ChangeNotifier {
   Future<bool> patchManagedInferenceModels({
     String? mainModel,
     String? fastModel,
+    String? managedProvider,
   }) async {
     if (!_protocol.isConnected) return false;
     final envPatch = <String, String>{};
@@ -555,6 +556,9 @@ class AppController extends ChangeNotifier {
     }
     if (fastModel != null && fastModel.trim().isNotEmpty) {
       envPatch['AGENT_FAST_MODEL'] = fastModel.trim();
+    }
+    if (managedProvider != null && managedProvider.trim().isNotEmpty) {
+      envPatch['AGENT_MANAGED_PROVIDER'] = managedProvider.trim();
     }
     if (envPatch.isEmpty) return false;
 
@@ -1669,12 +1673,19 @@ class AppController extends ChangeNotifier {
     notifyListeners();
   }
 
-  Future<String?> createChat({String? title}) async {
+  Future<String?> createChat({
+    String? title,
+    String workspaceMode = 'scratch',
+    String? workspaceRoot,
+  }) async {
     if (!_protocol.isConnected) return null;
-    final result = await _protocol.send(
-      'create_chat',
-      {if (title != null) 'title': title},
-    );
+    final payload = <String, dynamic>{
+      'workspaceMode': workspaceMode,
+      if (title != null) 'title': title,
+      if (workspaceRoot != null && workspaceRoot.trim().isNotEmpty)
+        'workspaceRoot': workspaceRoot.trim(),
+    };
+    final result = await _protocol.send('create_chat', payload);
     await refreshConfig();
     if (!result.ok) return null;
     final data = result.data;
@@ -1682,6 +1693,24 @@ class AppController extends ChangeNotifier {
       return data['chatId'] as String?;
     }
     return activeChatId;
+  }
+
+  Future<bool> setDefaultWorkspaceFolder(String? folderPath) async {
+    if (!_protocol.isConnected) return false;
+    final result = await _protocol.send('set_desktop_prefs', {
+      'defaultWorkspaceFolder': folderPath?.trim().isNotEmpty == true
+          ? folderPath!.trim()
+          : null,
+    });
+    if (!result.ok) return false;
+    final data = result.data;
+    if (data is Map && data['appConfig'] is Map) {
+      _applyConfigFromJson(Map<String, dynamic>.from(data['appConfig'] as Map));
+    } else {
+      await refreshConfig();
+    }
+    notifyListeners();
+    return true;
   }
 
   void returnToHub() {

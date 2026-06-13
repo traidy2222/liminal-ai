@@ -41,7 +41,12 @@ export interface ClientCommandMap {
   resolve_ask_user: { chatId: string; answer: string };
 
   /** Create a new chat (optionally bound to a workspace folder) and return its summary. */
-  create_chat: { workspaceRoot?: string; title?: string; kind?: "default" | "orchestrator" };
+  create_chat: {
+    workspaceRoot?: string;
+    workspaceMode?: "scratch" | "folder" | "reuse";
+    title?: string;
+    kind?: "default" | "orchestrator";
+  };
   /** Return the persistent Mission Control chat (create if missing). */
   get_or_create_orchestrator_chat: Record<string, never>;
   /** Make a chat the live event source. */
@@ -66,6 +71,8 @@ export interface ClientCommandMap {
   get_settings: Record<string, never>;
   /** Patch managed settings (persisted to runtime prefs by the harness). */
   update_settings: { patch: Record<string, unknown> };
+  /** Persist desktop-shell prefs (`~/.liminal/desktop_prefs.json`). */
+  set_desktop_prefs: { defaultWorkspaceFolder?: string | null };
   /**
    * Persist BYOK provider credentials (writes `AGENT_API_KEY` to repo `.env`) and
    * refresh every live harness. Secrets are never returned on the wire.

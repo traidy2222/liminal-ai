@@ -23,7 +23,12 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { messagesFromSessionJsonl, resolveSessionJsonlPath } from "./lib/marketing-jsonl.mjs";
 import { framesToGif, framesToMp4 } from "./lib/marketing-media.mjs";
-import { captureWindowPng, DEFAULT_TITLE, focusWindow } from "./lib/marketing-window-capture.mjs";
+import {
+  captureWindowPng,
+  DEFAULT_TITLE,
+  focusWindow,
+  waitForWindowReady,
+} from "./lib/marketing-window-capture.mjs";
 import { SidecarWsClient, waitForHandshake } from "./lib/sidecar-ws-client.mjs";
 import { findPrompt, getMarketingPrompts, resolvePromptId } from "./lib/marketing-prompts.mjs";
 import {
@@ -130,6 +135,9 @@ async function runOnePrompt({ client, spec, windowTitle }) {
     await focusWindow(windowTitle);
     await sleep(1200);
 
+    // Wait out Flutter cold-start so the first frame can't race window creation.
+    await waitForWindowReady(windowTitle, 60_000);
+
     console.log("[desktop]   sending prompt…");
     await client.postMessageWhenIdle(chatId, spec.prompt);
 
@@ -139,8 +147,13 @@ async function runOnePrompt({ client, spec, windowTitle }) {
 
     while (Date.now() - pollStart < spec.maxWaitMs) {
       const fp = path.join(framesDir, `f${String(i).padStart(2, "0")}.png`);
-      await captureWindowPng(fp, windowTitle);
-      framePaths.push(fp);
+      try {
+        await captureWindowPng(fp, windowTitle);
+        framePaths.push(fp);
+      } catch (err) {
+        // A single dropped frame must not abort the whole prompt — keep polling.
+        console.warn(`[desktop]   frame ${i} skipped: ${err instanceof Error ? err.message : err}`);
+      }
       i++;
 
       if (client.turnEndedChats.has(chatId) && client.sawHarnessRunning(chatId)) break;
@@ -159,7 +172,12 @@ async function runOnePrompt({ client, spec, windowTitle }) {
     await sleep(2000);
 
     const heroPng = path.join(OUT_DIR, `${spec.id}.png`);
-    await captureWindowPng(heroPng, windowTitle);
+    try {
+      await captureWindowPng(heroPng, windowTitle);
+    } catch {
+      await waitForWindowReady(windowTitle, 30_000);
+      await captureWindowPng(heroPng, windowTitle);
+    }
     if (framePaths.length > 0) {
       await fs.copyFile(heroPng, framePaths[framePaths.length - 1]);
     }

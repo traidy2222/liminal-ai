@@ -92,6 +92,8 @@ export const HARNESS_ENV_DEFAULTS: Readonly<Record<string, string>> = {
   AGENT_INFERENCE_MODE: "auto",
   /** When 1, auto mode uses Vireon managed inference for entitled Pro+ even if AGENT_API_KEY is set. */
   AGENT_INFERENCE_PREFER_MANAGED: "1",
+  /** Managed hybrid routing: `auto` | `bedrock` | `openrouter` (Vireon proxy header). */
+  AGENT_MANAGED_PROVIDER: "auto",
   AGENT_INFERENCE_BASE_URL: "https://api.vireondynamics.com/v1/inference",
   AGENT_INFERENCE_SESSION_URL: "https://www.vireondynamics.com/api/inference/session",
   AGENT_INFERENCE_SESSION_TOKEN: "",
@@ -448,6 +450,13 @@ export const HARNESS_ENV_DEFAULTS: Readonly<Record<string, string>> = {
   AGENT_HEARTBEAT_TIMEOUT_MS: "20000",
   AGENT_HEARTBEAT_UI_STRIP: "0",
   AGENT_HEARTBEAT_USER_NUDGE_CONFIDENCE_MIN: "0.86",
+  AGENT_CHAT_TITLE: "1",
+  AGENT_CHAT_TITLE_MIN_INTERVAL_MS: "60000",
+  AGENT_CHAT_TITLE_MIN_TURNS: "1",
+  AGENT_CHAT_TITLE_EVERY_N_TURNS: "1",
+  AGENT_CHAT_TITLE_MAX_TOKENS: "80",
+  AGENT_CHAT_TITLE_TIMEOUT_MS: "20000",
+  AGENT_CHAT_TITLE_TRANSCRIPT_CHARS: "4000",
   // Closed-loop self-tuning — auto-demote rules with consistently low avg outcome
   AGENT_RULE_DEMOTE_THRESHOLD: "0.4",   // rules below this avg_outcome get demoted
   AGENT_RULE_DEMOTE_MIN_SAMPLES: "20",  // minimum sample size before demotion can fire

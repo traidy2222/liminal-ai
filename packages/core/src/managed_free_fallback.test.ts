@@ -55,6 +55,7 @@ test("isModelIncompatibleWithManagedProxy flags openrouter/free and :free slugs"
   assert.equal(isModelIncompatibleWithManagedProxy(OPENROUTER_MODEL_SLUG.FREE_ROUTER), true);
   assert.equal(isModelIncompatibleWithManagedProxy("nvidia/foo:free"), true);
   assert.equal(isModelIncompatibleWithManagedProxy(DEFAULT_AGENT_MODEL_SLUG), false);
+  assert.equal(isModelIncompatibleWithManagedProxy("deepseek/deepseek-v4-pro"), false);
 });
 
 test("resolveModelForManagedInference replaces fallback slug with default main model", () => {

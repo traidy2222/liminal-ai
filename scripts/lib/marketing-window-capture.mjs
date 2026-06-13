@@ -4,6 +4,7 @@
  */
 import { spawn } from "node:child_process";
 import fs from "node:fs/promises";
+import os from "node:os";
 import path from "node:path";
 
 const DEFAULT_TITLE = "liminal_desktop";
@@ -69,6 +70,42 @@ if ($h -ne [IntPtr]::Zero) {
 `;
   await runPowerShell(ps);
   await sleep(400);
+}
+
+/**
+ * Poll until the desktop window exists and a real frame can be grabbed.
+ * Flutter release cold-start can take longer than the launcher's fixed wait, so
+ * the first frame must not race window creation (a single "window not found"
+ * used to abort the whole prompt). Resolves the live title each attempt.
+ *
+ * @param {string} [title]
+ * @param {number} [timeoutMs]
+ * @returns {Promise<string>} the resolved window title once capturable
+ */
+export async function waitForWindowReady(title = DEFAULT_TITLE, timeoutMs = 60_000) {
+  const start = Date.now();
+  let lastErr = null;
+  let attempt = 0;
+  while (Date.now() - start < timeoutMs) {
+    cachedTitle = null; // re-resolve every attempt — boot title can change
+    const live = await resolveWindowTitle(title);
+    const probe = path.join(os.tmpdir(), `liminal-winprobe-${process.pid}.png`);
+    try {
+      await captureWithFfmpeg(probe, live);
+      await fs.rm(probe, { force: true }).catch(() => {});
+      if (attempt > 0) console.log(`[desktop] window ready ("${live}") after ${attempt + 1} probes`);
+      return live;
+    } catch (err) {
+      lastErr = err;
+    }
+    attempt++;
+    await sleep(1500);
+  }
+  throw new Error(
+    `Desktop window not capturable within ${Math.round(timeoutMs / 1000)}s: ${
+      lastErr instanceof Error ? lastErr.message : lastErr
+    }`
+  );
 }
 
 /**

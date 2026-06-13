@@ -1,16 +1,71 @@
 {
   "prompt": "Demonstrate persistent memory (marketing capture — safe to write this note):\n\n1) remember key \"marketing:capture-policy\" value \"Liminal marketing videos must be recorded from real harness runs with session.jsonl proof — never fixture UI.\" type fact scope workspace\n2) recall_relevant query \"marketing session jsonl proof\" k 5\n3) memory_stats\n\nReply in 3 short bullets: the stored value, the top recall_relevant hit text, and total note count from memory_stats.",
-  "chatId": "chat_mq6ky82v",
+  "chatId": "chat_mqbvxb7d",
   "messages": [
     {
       "kind": "user",
       "text": "Demonstrate persistent memory (marketing capture — safe to write this note):\n\n1) remember key \"marketing:capture-policy\" value \"Liminal marketing videos must be recorded from real harness runs with session.jsonl proof — never fixture UI.\" type fact scope workspace\n2) recall_relevant query \"marketing session jsonl proof\" k 5\n3) memory_stats\n\nReply in 3 short bullets: the stored value, the top recall_relevant hit text, and total note count from memory_stats."
+    },
+    {
+      "kind": "tool_call",
+      "callId": "chatcmpl-tool-bd62d2ef694de52a",
+      "name": "remember",
+      "argsJson": "{\"key\":\"marketing:capture-policy\",\"value\":\"Liminal marketing videos must be recorded from real harness runs with session.jsonl proof — never fixture UI.\",\"type\":\"fact\",\"scope\":\"workspace\"}",
+      "status": "done",
+      "startedAt": 1781326481190,
+      "endedAt": 1781326482390
+    },
+    {
+      "kind": "tool_call",
+      "callId": "chatcmpl-tool-b37c5ab4a7cf75c8",
+      "name": "recall_relevant",
+      "argsJson": "{\"query\":\"marketing session jsonl proof\",\"k\":5,\"scope\":\"both\"}",
+      "status": "done",
+      "startedAt": 1781326481270,
+      "endedAt": 1781326482470
+    },
+    {
+      "kind": "tool_call",
+      "callId": "chatcmpl-tool-a60d5ec6d6c3bf90",
+      "name": "memory_stats",
+      "argsJson": "{}",
+      "status": "done",
+      "startedAt": 1781326481350,
+      "endedAt": 1781326482550
+    },
+    {
+      "kind": "tool_result",
+      "callId": "chatcmpl-tool-a60d5ec6d6c3bf90",
+      "ok": true,
+      "output": "Total: 87 memories\n  experience: 7 (newest: 2026-06-13)\n  fact: 16 (newest: 2026-06-13)\n  reflection: 28 (newest: 2026-06-13)\n  trajectory: 36 (newest: 2026-06-13)\nNo entries older than 90d by updatedAt."
+    },
+    {
+      "kind": "tool_result",
+      "callId": "chatcmpl-tool-bd62d2ef694de52a",
+      "ok": true,
+      "output": "Remembered \"fact:marketing:capture-policy\" (scope=workspace)"
+    },
+    {
+      "kind": "tool_result",
+      "callId": "chatcmpl-tool-b37c5ab4a7cf75c8",
+      "ok": true,
+      "output": "## Notes\n- [trajectory:0d879fb6d6b3c644] score=0.550 (sibling chat chat_mqb) — {\"version\":1,\"createdAt\":\"2026-06-13T04:31:32.847Z\",\"trigger\":\"You are recording a marketing demo. Show how Liminal ships code with verification.\\n\\n1) Call plan() with exactly 3 steps: implement slug…\n- [trajectory:trajectory:84056371] score=0.512 (global) — GOAL: okay done retry\nTOOL_SEQUENCE: analytics_rest_run_report → analytics_rest_run_realtime_report → analytics_rest_get_metadata → analytics_rest_run_report\nROUNDS: 4\nOUTCOME: **Real-time:** 1 active…\n- [trajectory:trajectory:c1c65b9d] score=0.472 (global) — GOAL: can u review liminal website and coorabarate search console and analytics and improve visibility?C:\\Users\\traid\\vireondy\nTOOL_SEQUENCE: list_dir → think → list_dir → list_dir → grep_file → read_…\n- [fact:marketing:capture-policy] score=0.450 — \n- [trajectory:trajectory:899fe68d] score=0.449 (sibling chat chat_mqb) — GOAL: You are recording a marketing demo. Show how Liminal ships code with verification.\n\n1) Call plan() with exactly 3 steps:\nTOOL_SEQUENCE: think → plan → plan → mkdir → write_file → read_file → wri…\n- [trajectory:trajectory:cce6f75a] score=0.157 (graph neighbor) — GOAL: try again\nTOOL_SEQUENCE: analytics_rest_list_account_summaries → analytics_rest_get_property → analytics_rest_list_data_streams → analytics_rest_run_report → analytics_rest_run_realtime_report\nR…\n- [trajectory:trajectory:3751c21a] score=0.157 (graph neighbor) — GOAL: Hey! Please handle my receipts for my business in xero youve got full access\nTOOL_SEQUENCE: vision_analyze → think → xero_get_organisation → xero_list_accounts → memory_query → xero_create_conta…\n- [trajectory:trajectory:b76b57ee] score=0.157 (graph neighbor) — GOAL: Read-only repo archaeology for a marketing capture — do not edit any files.\n\n1) repo_map on packages/core/src with depth\nTOOL_SEQUENCE: grep_file → read_file → grep_file → grep_file → grep_file …\n- [trajectory:trajectory:b07f6592] score=0.157 (graph neighbor) — GOAL: please code a html todo list advanced and functional\nTOOL_SEQUENCE: think → list_dir → read_file → read_file → run_shell → run_shell → read_file → run_shell → run_shell → run_shell → execute_cod…\n## Vault\n- [[Proof email]] (note) score=1.197 — ...## Identity The email itself, claimed as proof of autonomous agent operation. ## Current - 2026-06-06: Exists as draft; send decision pending. ## History - Com...\n- [[traid]] (entity) score=0.700 — ...gin. ## Current - 2026-06-12: System account name used for session identification. ## History - Identified as a system account name in a user interaction regarding session prefe\n- [[EMDG]] (entity) score=0.533 — ...et Development Grants offering 50% reimbursement for export marketing costs. ## Current - 2026-06-13: Active. ## History - Relevant once Liminal actively exports to US/EU/Asia; \n- [[AI agent (generic)]] (entity) score=0.447 — ...Liminal. ## Current - 2026-06-06: Exemplified by BabyBot's proof-of-life and Liminal's inquiry about stack. ## Relationships - [[BabyBot]] - [[Liminal]]...\n- [[Memory]] (entity) score=0.400 — ## Identity Advanced memory tool family with 17 enabled tools. ## Relationships - [[Microsoft 365 connector]]\n- [[OpenClaw AI Agent]] (entity) score=0.399 — ## Identity AI agent discussed in a Substack article about security, cost, architecture, and setup.\n- [[Proof-of-life]] (note) score=0.397 — ...## Identity Action by BabyBot to demonstrate its existence and capability by emailing Anaelle. ## Current - 2026-06-06:...\n- [[GenAI Unplugged]] (entity) score=0.389 — ## Identity Substack publication covering AI agent topics.\n- [[memory_advanced]] (entity) score=0.389 — ## Identity Fully loaded tool family (17/17 active). ## Current - 2026-06-08: All 17 tools active. ## Relationships - [[OWL]]"
+    },
+    {
+      "kind": "assistant",
+      "text": "- Stored policy: \"Liminal marketing videos must be recorded from real harness runs with session.jsonl proof — never fixture UI.\"\n- Top recall_relevant hit: Mentions [[\"Proof email]] from 2026-06-06 as proof of autonomous agent operation; also references Liminal in a Substack article and mentions Export Marketing Development Grants.\n- Memory totals: 87 notes overall (experience: 7, fact: 16, reflection: 28, trajectory: 36).",
+      "streaming": false
     }
   ],
   "meta": {
     "turnIndex": 1,
-    "tools": []
+    "tools": [
+      "remember",
+      "recall_relevant",
+      "memory_stats"
+    ],
+    "durationMs": 41545
   },
-  "capturedAt": "2026-06-09T11:52:42.378Z",
+  "capturedAt": "2026-06-13T04:59:24.814Z",
   "source": "desktop"
 }

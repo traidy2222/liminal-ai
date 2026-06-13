@@ -24,10 +24,15 @@ export type ChatWorkspaceMode = "scratch" | "folder" | "reuse";
 /** Special chat roles surfaced in the desktop shell. */
 export type ChatKind = "default" | "orchestrator";
 
+/** Who last set the chat title — auto refreshes skip when `user`. */
+export type ChatTitleSource = "auto" | "user";
+
 export interface ChatMetadata {
   chatId: string;
   /** Human-readable title (user-set, AI-summarized, or "Chat <id-prefix>"). */
   title: string;
+  /** When `user`, background title refresh will not overwrite. */
+  titleSource?: ChatTitleSource;
   /** When `orchestrator`, this chat is Mission Control (multi-worker coordinator). */
   kind?: ChatKind;
   /** Which mode the chat was created with. */
@@ -86,6 +91,27 @@ export async function touchChatMetadata(chatId: string): Promise<void> {
   await writeChatMetadata({ ...cur, updatedAt: Date.now() });
 }
 
+/** Update a chat title on disk. Auto refresh skips chats with `titleSource: user`. */
+export async function setChatTitle(
+  chatId: string,
+  title: string,
+  opts?: { titleSource?: ChatTitleSource }
+): Promise<ChatMetadata | null> {
+  const cur = await readChatMetadata(chatId);
+  if (!cur) return null;
+  if (cur.titleSource === "user" && opts?.titleSource !== "user") return cur;
+  const trimmed = title.trim().replace(/\s+/g, " ").slice(0, 120);
+  if (!trimmed || trimmed === cur.title) return cur;
+  const next: ChatMetadata = {
+    ...cur,
+    title: trimmed,
+    titleSource: opts?.titleSource ?? cur.titleSource ?? "auto",
+    updatedAt: Date.now(),
+  };
+  await writeChatMetadata(next);
+  return next;
+}
+
 /**
  * Create a new chat metadata record. Caller picks the workspace mode + root;
  * for scratch chats, pass `scratchWorkspaceRoot(chatId)` and ensure the dir
@@ -94,6 +120,7 @@ export async function touchChatMetadata(chatId: string): Promise<void> {
 export async function createChatMetadata(input: {
   chatId: string;
   title?: string;
+  titleSource?: ChatTitleSource;
   kind?: ChatKind;
   workspaceMode: ChatWorkspaceMode;
   workspaceRoot: string;
@@ -102,6 +129,7 @@ export async function createChatMetadata(input: {
   const meta: ChatMetadata = {
     chatId: sanitizeChatId(input.chatId),
     title: input.title?.trim() || `Chat ${input.chatId.slice(0, 8)}`,
+    titleSource: input.titleSource ?? (input.title?.trim() ? "user" : "auto"),
     kind: input.kind,
     workspaceMode: input.workspaceMode,
     workspaceRoot: path.resolve(input.workspaceRoot),

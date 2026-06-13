@@ -29,12 +29,11 @@ export function resolveManagedFreeFallbackMainModel(prefs?: RuntimePreferences |
   return raw || OPENROUTER_MODEL_SLUG.FREE_ROUTER;
 }
 
-/** OpenRouter-only slugs that the Vireon managed proxy rejects (Bedrock chat path). */
+/** OpenRouter-only slugs the managed proxy rejects (free-tier BYOK fallback models). */
 export function isModelIncompatibleWithManagedProxy(model: string): boolean {
   const m = model.trim().toLowerCase();
   if (!m) return false;
   if (m === OPENROUTER_MODEL_SLUG.FREE_ROUTER) return true;
-  if (m.startsWith("openrouter/")) return true;
   if (m.includes(":free")) return true;
   if (m === resolveManagedFreeFallbackMainModel(null).toLowerCase()) return true;
   return false;

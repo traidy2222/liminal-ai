@@ -29,43 +29,51 @@ class StickyMessageList extends StatefulWidget {
 class _StickyMessageListState extends State<StickyMessageList> {
   final _scroll = ScrollController();
   static const _stickThreshold = 120.0;
+  bool _pinnedToEnd = true;
+
+  @override
+  void initState() {
+    super.initState();
+    // Land at the newest message when a chat first opens.
+    WidgetsBinding.instance.addPostFrameCallback((_) => _jumpToEnd());
+  }
 
   @override
   void didUpdateWidget(covariant StickyMessageList oldWidget) {
     super.didUpdateWidget(oldWidget);
-    if (widget.messages.length != oldWidget.messages.length ||
-        _lastText(widget.messages) != _lastText(oldWidget.messages)) {
-      _maybeScrollToEnd();
-    }
+    // Follow every update — tool cards and in-place tool_start→tool_result
+    // changes don't move messages.length or the last *text*, so gating on
+    // those used to freeze the view exactly while the agent was working.
+    // `_pinnedToEnd` is sampled against the pre-layout position so a user who
+    // scrolled up to read is never yanked back down.
+    if (_identicalTranscript(oldWidget)) return;
+    if (_nearBottom) _maybeScrollToEnd();
   }
 
-  String _lastText(List<MessageEntry> msgs) {
-    if (msgs.isEmpty) return '';
-    final last = msgs.last;
-    return switch (last) {
-      AssistantMessage(:final text) => text,
-      UserMessage(:final text) => text,
-      ThinkMessage(:final content) => content,
-      ModelReasoningMessage(:final text) => text,
-      _ => '',
-    };
-  }
+  bool _identicalTranscript(StickyMessageList oldWidget) =>
+      identical(widget.messages, oldWidget.messages) &&
+      widget.showRawHarness == oldWidget.showRawHarness;
 
   bool get _nearBottom {
-    if (!_scroll.hasClients) return true;
+    if (!_scroll.hasClients) return _pinnedToEnd;
     final max = _scroll.position.maxScrollExtent;
     return max - _scroll.offset <= _stickThreshold;
   }
 
+  void _jumpToEnd() {
+    if (!_scroll.hasClients) return;
+    _scroll.jumpTo(_scroll.position.maxScrollExtent);
+    _pinnedToEnd = true;
+  }
+
   void _maybeScrollToEnd() {
-    if (!_nearBottom) return;
+    _pinnedToEnd = true;
+    // Pin to the bottom after the new frame lays out. jumpTo (not animateTo)
+    // because streaming fires many updates per second and overlapping
+    // animations stutter; an instant pin reads as a live, following view.
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!_scroll.hasClients) return;
-      _scroll.animateTo(
-        _scroll.position.maxScrollExtent,
-        duration: const Duration(milliseconds: 180),
-        curve: Curves.easeOut,
-      );
+      _scroll.jumpTo(_scroll.position.maxScrollExtent);
     });
   }
 

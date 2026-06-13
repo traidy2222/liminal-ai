@@ -441,12 +441,14 @@ export function SettingsModal({
                         disabled={saving || loading || providerPresetLocked}
                         mainModel={providerModel}
                         fastModel={envDraft["AGENT_FAST_MODEL"] ?? ""}
+                        managedProvider={envDraft["AGENT_MANAGED_PROVIDER"] ?? "auto"}
                         vireonConnected={Boolean(vireonConnected)}
                         onMainModel={(modelId) => {
                           onProviderModel(modelId);
                           onEnvChange("AGENT_MODEL", modelId);
                         }}
                         onFastModel={(modelId) => onEnvChange("AGENT_FAST_MODEL", modelId)}
+                        onManagedProvider={(provider) => onEnvChange("AGENT_MANAGED_PROVIDER", provider)}
                       />
                     ) : null}
                     {!managedRoute ? (

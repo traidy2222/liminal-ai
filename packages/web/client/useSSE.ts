@@ -1987,6 +1987,19 @@ export function useSSE(options?: {
         }
       });
 
+      es.addEventListener("chat_meta_updated", (e: MessageEvent) => {
+        trackId(e);
+        const payload = parseEventData(e) as
+          | { chatId?: string; title?: string; at?: number }
+          | undefined;
+        if (!payload?.chatId || !payload.title) return;
+        try {
+          window.dispatchEvent(new CustomEvent("liminal:chat_meta_updated", { detail: payload }));
+        } catch {
+          /* ignore */
+        }
+      });
+
       // Grab the event ID from every event so we can resume after reconnect.
       const trackId = (e: MessageEvent) => {
         persistEventId(e.lastEventId || undefined);

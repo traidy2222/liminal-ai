@@ -5,6 +5,7 @@ import {
   conversationEntriesForHydration,
   createChatMetadata,
   globalChatsRoot,
+  isBundledRepoPath,
   listChats,
   loadChatTranscriptFromSessionLog,
   loadRuntimePreferences,
@@ -19,8 +20,10 @@ import {
   saveRuntimePreferences,
   touchChatMetadata,
   workspaceFingerprint,
+  ChatTitleRefresher,
   type ChatKind,
   type ChatMetadata,
+  type ChatWorkspaceMode,
   type ProviderConfig,
   type RuntimePreferences,
 } from "@liminal/core";
@@ -38,6 +41,7 @@ import { SessionBridge, type FrameSink } from "./session_bridge.js";
 import { buildOrchestratorInceptionMessages } from "./orchestrator_chat_prompt.js";
 import { registerOrchestratorChatTools } from "./orchestrator_chat_tools.js";
 import type { ChatOrchestrator } from "./chat_orchestrator.js";
+import { resolveNewChatWorkspace } from "./chat_workspace_resolve.js";
 
 interface ChatSlot {
   bridge: SessionBridge;
@@ -68,10 +72,21 @@ export class ChatRegistry {
   private bootPromise: Promise<void> | null = null;
   private ensureActive: Promise<SessionBridge> | null = null;
   private getOrchestrator?: () => ChatOrchestrator;
+  private readonly titleRefresher: ChatTitleRefresher;
+  private readonly titleRefreshDetach = new Map<string, () => void>();
 
   constructor(deps: ChatRegistryDeps) {
     this.deps = deps;
     this.cachedRuntimePrefs = deps.runtimePreferences;
+    this.titleRefresher = new ChatTitleRefresher({
+      getRuntimePrefs: () => this.cachedRuntimePrefs,
+      onTitleUpdated: async (chatId, title) => {
+        const slot = this.slots.get(chatId);
+        if (slot) slot.title = title;
+        await this.refreshDiskMetas();
+        this.deps.sink(serverFrame("chat_list", this.chatListPayload()));
+      },
+    });
   }
 
   /** Wired after {@link ChatOrchestrator} construction (avoids circular deps). */
@@ -132,7 +147,7 @@ export class ChatRegistry {
     if (this.bootPromise) return this.bootPromise;
     this.bootPromise = (async () => {
       const { meta } = await resolveChatBoot({
-        defaultWorkspaceRoot: this.deps.repoRoot,
+        rejectDefaultWorkspace: (p) => isBundledRepoPath(p, this.deps.repoRoot),
       });
       await this.refreshDiskMetas();
       await this.openBridgeFromMeta(meta);
@@ -151,7 +166,10 @@ export class ChatRegistry {
 
   private async openBridgeFromMeta(meta: ChatMetadata): Promise<SessionBridge> {
     const existing = this.slots.get(meta.chatId);
-    if (existing) return existing.bridge;
+    if (existing) {
+      this.wireChatTitleRefresh(meta, existing.bridge);
+      return existing.bridge;
+    }
 
     const { provider } = this.deps;
     const runtimePreferences = this.cachedRuntimePrefs;
@@ -222,30 +240,51 @@ export class ChatRegistry {
       workspaceRoot,
       updatedAt: meta.updatedAt,
     });
+    this.wireChatTitleRefresh(meta, bridge);
     void bridge.beginSession().then(() => this.deps.sink(serverFrame("chat_list", this.chatListPayload())));
     return bridge;
+  }
+
+  private wireChatTitleRefresh(meta: ChatMetadata, bridge: SessionBridge): void {
+    this.titleRefreshDetach.get(meta.chatId)?.();
+    this.titleRefreshDetach.delete(meta.chatId);
+    if (meta.kind === "orchestrator") return;
+    const onTurnEnd = (): void => {
+      this.titleRefresher.scheduleAfterTurn(meta.chatId);
+    };
+    bridge.harness.emitter.on("turn_end", onTurnEnd);
+    this.titleRefreshDetach.set(meta.chatId, () => {
+      bridge.harness.emitter.off("turn_end", onTurnEnd);
+    });
   }
 
   /** Build a harness + bridge for a new chat and make it active. */
   async create(input?: {
     workspaceRoot?: string;
+    workspaceMode?: ChatWorkspaceMode;
     title?: string;
     kind?: ChatKind;
   }): Promise<SessionBridge> {
     await this.boot();
-    const workspaceRoot = input?.workspaceRoot?.trim() || this.deps.repoRoot || resolveWorkspaceRoot();
     const kind = input?.kind ?? "default";
     const chatId =
       kind === "orchestrator"
         ? `orch_${Date.now().toString(36)}`
         : `chat_${Date.now().toString(36)}`;
+    const { mode, root } = await resolveNewChatWorkspace({
+      chatId,
+      repoRoot: this.deps.repoRoot,
+      workspaceMode: input?.workspaceMode,
+      workspaceRoot: input?.workspaceRoot,
+      orchestrator: kind === "orchestrator",
+    });
     const meta = await createChatMetadata({
       chatId,
       title: input?.title?.trim() || (kind === "orchestrator" ? "Mission Control" : "New chat"),
       kind: kind === "default" ? undefined : kind,
-      workspaceMode: "folder",
-      workspaceRoot,
-      workspaceFingerprint: workspaceFingerprint(workspaceRoot),
+      workspaceMode: mode,
+      workspaceRoot: root,
+      workspaceFingerprint: workspaceFingerprint(root),
     });
     await this.refreshDiskMetas();
     const bridge = await this.openBridgeFromMeta(meta);
@@ -352,6 +391,9 @@ export class ChatRegistry {
   }
 
   async delete(chatId: string): Promise<string | null> {
+    this.titleRefreshDetach.get(chatId)?.();
+    this.titleRefreshDetach.delete(chatId);
+    this.titleRefresher.forget(chatId);
     const slot = this.slots.get(chatId);
     if (slot) {
       slot.bridge.dispose();
@@ -416,6 +458,8 @@ export class ChatRegistry {
   }
 
   disposeAll(): void {
+    for (const detach of this.titleRefreshDetach.values()) detach();
+    this.titleRefreshDetach.clear();
     for (const slot of this.slots.values()) slot.bridge.dispose();
     this.slots.clear();
     this.activeChatId = null;

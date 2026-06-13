@@ -1,3 +1,5 @@
+import 'managed_model_family.dart';
+
 /// Snapshot from sidecar `get_settings` (mirrors core `buildHarnessSettingsApiFields`).
 class HarnessSettingsSnapshot {
   HarnessSettingsSnapshot({
@@ -275,17 +277,26 @@ class ManagedInferenceModel {
     required this.id,
     required this.label,
     required this.family,
+    this.providers = const [],
   });
 
   final String id;
   final String label;
   final String family;
+  final List<ManagedInferenceProviderRef> providers;
 
   factory ManagedInferenceModel.fromJson(Map<String, dynamic> json) {
+    final id = json['id'] as String? ?? '';
+    final upstreamFamily = json['family'] as String?;
+    final providers = (json['providers'] as List<dynamic>? ?? [])
+        .map((e) => ManagedInferenceProviderRef.fromJson(Map<String, dynamic>.from(e as Map)))
+        .where((p) => p.id.isNotEmpty && (p.provider == 'bedrock' || p.provider == 'openrouter'))
+        .toList();
     return ManagedInferenceModel(
-      id: json['id'] as String? ?? '',
-      label: json['label'] as String? ?? json['id'] as String? ?? '',
-      family: json['family'] as String? ?? 'other',
+      id: id,
+      label: json['label'] as String? ?? id,
+      family: resolveManagedModelFamily(id, upstreamFamily),
+      providers: providers,
     );
   }
 }

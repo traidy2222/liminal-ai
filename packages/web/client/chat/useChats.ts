@@ -92,6 +92,21 @@ export function useChats(): {
     return () => window.removeEventListener("liminal:chat_switched", handler as EventListener);
   }, [refresh]);
 
+  useEffect(() => {
+    const handler = (e: Event): void => {
+      const detail = (e as CustomEvent<{ chatId?: string; title?: string }>).detail;
+      if (!detail?.chatId || !detail.title) return;
+      setState((s) => ({
+        ...s,
+        chats: s.chats.map((c) =>
+          c.chatId === detail.chatId ? { ...c, title: detail.title! } : c
+        ),
+      }));
+    };
+    window.addEventListener("liminal:chat_meta_updated", handler as EventListener);
+    return () => window.removeEventListener("liminal:chat_meta_updated", handler as EventListener);
+  }, []);
+
   const create = useCallback(
     async (input: {
       title?: string;

@@ -28,6 +28,8 @@ import {
   liminalAppsEnabled,
   loadChatTranscriptFromSessionLog,
   remoteCommandAllowed,
+  writeDesktopPrefs,
+  type ChatWorkspaceMode,
   slimReplayEntriesForWire,
   type ProviderConfig,
   type RemoteSessionStatus,
@@ -592,16 +594,22 @@ export class WsServer {
         case "create_chat": {
           const d = data as {
             workspaceRoot?: string;
+            workspaceMode?: ChatWorkspaceMode;
             title?: string;
             kind?: "default" | "orchestrator";
           };
-          const bridge = await this.registry.create({
-            workspaceRoot: d.workspaceRoot,
-            title: d.title,
-            kind: d.kind === "orchestrator" ? "orchestrator" : "default",
-          });
-          this.broadcastChatList();
-          this.ack(ws, id, true, undefined, { chatId: bridge.chatId });
+          try {
+            const bridge = await this.registry.create({
+              workspaceRoot: d.workspaceRoot,
+              workspaceMode: d.workspaceMode,
+              title: d.title,
+              kind: d.kind === "orchestrator" ? "orchestrator" : "default",
+            });
+            this.broadcastChatList();
+            this.ack(ws, id, true, undefined, { chatId: bridge.chatId });
+          } catch (err) {
+            this.ack(ws, id, false, err instanceof Error ? err.message : String(err));
+          }
           return;
         }
 
@@ -766,6 +774,26 @@ export class WsServer {
           this.broadcast(serverFrame("settings", { values: snapshot }));
           this.broadcastChatList();
           this.ack(ws, id, true);
+          return;
+        }
+
+        case "set_desktop_prefs": {
+          const d = data as { defaultWorkspaceFolder?: string | null };
+          try {
+            const prefs = await writeDesktopPrefs({
+              defaultWorkspaceFolder: d.defaultWorkspaceFolder,
+            });
+            const bridge = this.registry.getActiveBridge();
+            const config = bridge
+              ? await buildDesktopConfig(bridge, this.repoRoot)
+              : undefined;
+            this.ack(ws, id, true, undefined, {
+              defaultWorkspaceFolder: prefs.defaultWorkspaceFolder ?? null,
+              ...(config ? { appConfig: wireAppConfig(config) } : {}),
+            });
+          } catch (err) {
+            this.ack(ws, id, false, err instanceof Error ? err.message : String(err));
+          }
           return;
         }
 

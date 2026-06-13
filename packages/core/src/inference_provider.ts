@@ -1,4 +1,7 @@
 import OpenAI from "openai";
+import { resolveManagedModelFamily } from "./managed_model_family.js";
+import type { ManagedInferenceProviderRef } from "./managed_provider_preference.js";
+export type { ManagedInferenceProviderRef } from "./managed_provider_preference.js";
 import {
   DEFAULT_AGENT_MODEL_SLUG,
   HARNESS_ENV_DEFAULTS,
@@ -365,6 +368,8 @@ export type ManagedInferenceModel = {
   id: string;
   label: string;
   family: string;
+  key?: string;
+  providers?: ManagedInferenceProviderRef[];
 };
 
 export type ManagedInferenceModelsResult = {
@@ -394,10 +399,31 @@ export async function fetchManagedInferenceModels(opts?: {
   if (!res.ok) {
     throw new Error(body.error ?? `HTTP ${res.status}`);
   }
+  const models = (Array.isArray(body.models) ? body.models : []).map((row) => {
+    const id = typeof row.id === "string" ? row.id.trim() : "";
+    const label = typeof row.label === "string" && row.label.trim() ? row.label.trim() : id;
+    const family = resolveManagedModelFamily(id, row.family);
+    const key = typeof row.key === "string" && row.key.trim() ? row.key.trim() : undefined;
+    const providers = Array.isArray(row.providers)
+      ? row.providers
+          .map((p) => {
+            if (!p || typeof p !== "object") return null;
+            const rec = p as { provider?: string; id?: string };
+            const provider = rec.provider === "bedrock" || rec.provider === "openrouter"
+              ? rec.provider
+              : null;
+            const pid = typeof rec.id === "string" ? rec.id.trim() : "";
+            if (!provider || !pid) return null;
+            return { provider, id: pid };
+          })
+          .filter((p): p is ManagedInferenceProviderRef => p !== null)
+      : undefined;
+    return { id, label, family, ...(key ? { key } : {}), ...(providers?.length ? { providers } : {}) };
+  });
   return {
     upstream: body.upstream ?? "bedrock",
     region: body.region ?? "us-east-1",
-    models: Array.isArray(body.models) ? body.models : [],
+    models,
   };
 }
 

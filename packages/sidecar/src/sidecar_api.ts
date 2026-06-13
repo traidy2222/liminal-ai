@@ -11,6 +11,7 @@ import {
   resolveInferenceMode,
   resolveProviderConfig,
   syncProviderProcessEnvForBase,
+  readDesktopPrefs,
   type RuntimePreferences,
 } from "@liminal/core";
 import {
@@ -49,6 +50,7 @@ export interface DesktopConfigSnapshot {
   dictationSilenceMsShort: number;
   dictationSilenceMsLong: number;
   dictationMaxRecordingMs: number;
+  defaultWorkspaceFolder?: string | null;
 }
 
 function parseHarnessMs(prefs: RuntimePreferences | null, key: string, fallback: number): number {
@@ -98,6 +100,7 @@ export async function buildDesktopConfig(
   const apiKeyConfigured =
     !!(cfg.openRouterApiKey?.trim()) ||
     isProviderApiKeyConfigured({ baseURL: cfg.baseURL });
+  const desktopPrefs = await readDesktopPrefs();
   return {
     apiKeyConfigured,
     personaBootstrapEnabled: resolveHarnessEnvRaw("AGENT_PERSONA_BOOTSTRAP", prefs) !== "0",
@@ -120,6 +123,7 @@ export async function buildDesktopConfig(
     dictationSilenceMsShort: parseHarnessMs(prefs, "AGENT_DICTATION_SILENCE_MS_SHORT", 1500),
     dictationSilenceMsLong: parseHarnessMs(prefs, "AGENT_DICTATION_SILENCE_MS_LONG", 2500),
     dictationMaxRecordingMs: parseHarnessMs(prefs, "AGENT_DICTATION_MAX_RECORDING_MS", 60000),
+    defaultWorkspaceFolder: desktopPrefs.defaultWorkspaceFolder ?? null,
   };
 }
 

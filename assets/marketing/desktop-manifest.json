@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-06-12T12:10:32.032Z",
+  "generatedAt": "2026-06-13T05:00:27.315Z",
   "source": "desktop",
   "windowTitle": "liminal_desktop",
   "exe": "apps/liminal_desktop/build/windows/x64/runner/Release/liminal_desktop.exe",
@@ -17,31 +17,63 @@
       "mp4": "marketing/desktop-code-ship-test.mp4",
       "messagesPath": "marketing/recordings/desktop-code-ship-test/messages.json",
       "tools": [
-        "activate_tool_family",
+        "think",
         "plan",
-        "mkdir_p",
+        "mkdir",
         "write_file",
-        "run_shell"
+        "read_file",
+        "run_shell",
+        "execute_code"
       ],
-      "durationMs": 134463,
+      "durationMs": 98201,
       "messageCount": 29,
-      "chatId": "chat_mqavmbib",
+      "chatId": "chat_mqbvsq7w",
       "source": "desktop"
     },
     {
       "id": "desktop-repo-react-trace",
-      "source": "desktop",
-      "error": "Error: PowerShell exit 1: Window not found: liminal_desktop\r\nAt line:14 char:30\r\n+ ... ($h -eq [IntPtr]::Zero) { throw \"Window not found: liminal_desktop\" }\r\n+                               ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~\r\n    + CategoryInfo          : OperationStopped: (Window not found: liminal_desktop:String) [], RuntimeException\r\n    + FullyQualifiedErrorId : Window not found: liminal_desktop"
+      "title": "Map the repo, trace the ReAct loop",
+      "subtitle": "repo_map, grep_file, read_file_chunked — orient in a monorepo and explain how tool results close the loop.",
+      "accent": "#00d4ff",
+      "prompt": "Read-only repo archaeology for a marketing capture — do not edit any files.\n\n1) repo_map on packages/core/src with depth 2.\n2) grep_file path packages/core/src/agent.ts pattern \"class AgentHarness\" — note the line number of the match.\n3) read_file path packages/core/src/agent.ts offset=<that line minus 5> limit=120 line_numbers true — inspect how a turn dispatches tools and consumes results.\n4) In exactly 4 bullets, explain the ReAct loop as implemented here: user message → model tool calls → tool results → next model turn → turn_end.",
+      "png": "marketing/desktop-repo-react-trace.png",
+      "gif": "marketing/desktop-repo-react-trace.gif",
+      "mp4": "marketing/desktop-repo-react-trace.mp4",
+      "messagesPath": "marketing/recordings/desktop-repo-react-trace/messages.json",
+      "tools": [
+        "repo_map",
+        "grep_file",
+        "read_file"
+      ],
+      "durationMs": 68896,
+      "messageCount": 8,
+      "chatId": "chat_mqbvvbh3",
+      "source": "desktop"
     },
     {
       "id": "desktop-memory-recall",
-      "source": "desktop",
-      "error": "Error: PowerShell exit 1: Window not found: liminal_desktop\r\nAt line:14 char:30\r\n+ ... ($h -eq [IntPtr]::Zero) { throw \"Window not found: liminal_desktop\" }\r\n+                               ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~\r\n    + CategoryInfo          : OperationStopped: (Window not found: liminal_desktop:String) [], RuntimeException\r\n    + FullyQualifiedErrorId : Window not found: liminal_desktop"
+      "title": "Memory that survives the session",
+      "subtitle": "remember, recall_relevant, memory_stats — typed notes with hybrid retrieval, not chat context amnesia.",
+      "accent": "#ff4488",
+      "prompt": "Demonstrate persistent memory (marketing capture — safe to write this note):\n\n1) remember key \"marketing:capture-policy\" value \"Liminal marketing videos must be recorded from real harness runs with session.jsonl proof — never fixture UI.\" type fact scope workspace\n2) recall_relevant query \"marketing session jsonl proof\" k 5\n3) memory_stats\n\nReply in 3 short bullets: the stored value, the top recall_relevant hit text, and total note count from memory_stats.",
+      "png": "marketing/desktop-memory-recall.png",
+      "gif": "marketing/desktop-memory-recall.gif",
+      "mp4": "marketing/desktop-memory-recall.mp4",
+      "messagesPath": "marketing/recordings/desktop-memory-recall/messages.json",
+      "tools": [
+        "remember",
+        "recall_relevant",
+        "memory_stats"
+      ],
+      "durationMs": 41545,
+      "messageCount": 8,
+      "chatId": "chat_mqbvxb7d",
+      "source": "desktop"
     },
     {
       "id": "desktop-web-research-cite",
       "source": "desktop",
-      "error": "Error: PowerShell exit 1: Window not found: liminal_desktop\r\nAt line:14 char:30\r\n+ ... ($h -eq [IntPtr]::Zero) { throw \"Window not found: liminal_desktop\" }\r\n+                               ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~\r\n    + CategoryInfo          : OperationStopped: (Window not found: liminal_desktop:String) [], RuntimeException\r\n    + FullyQualifiedErrorId : Window not found: liminal_desktop"
+      "error": "Error: desktop-web-research-cite: capture invalid — need session log with real tool calls (got 0 tools)"
     }
   ]
 }

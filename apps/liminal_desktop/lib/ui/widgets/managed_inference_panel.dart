@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../../models/harness_settings.dart';
+import '../../models/managed_model_family.dart';
 import '../layout/liminal_spacing.dart';
 import '../theme/liminal_theme_extension.dart';
 import '../theme/liminal_tokens.dart';
@@ -10,17 +11,20 @@ class ManagedInferencePanel extends StatelessWidget {
     super.key,
     required this.mainModel,
     required this.fastModel,
+    required this.managedProvider,
     required this.catalog,
     required this.loading,
     required this.error,
     required this.saving,
     required this.onMainModel,
     required this.onFastModel,
+    required this.onManagedProvider,
     this.upstream,
   });
 
   final String mainModel;
   final String fastModel;
+  final String managedProvider;
   final ManagedInferenceModelsCatalog? catalog;
   final bool loading;
   final String? error;
@@ -28,6 +32,7 @@ class ManagedInferencePanel extends StatelessWidget {
   final String? upstream;
   final ValueChanged<String> onMainModel;
   final ValueChanged<String> onFastModel;
+  final ValueChanged<String> onManagedProvider;
 
   List<DropdownMenuItem<String>> _modelItems(
     List<ManagedInferenceModel> models,
@@ -44,6 +49,11 @@ class ManagedInferencePanel extends StatelessWidget {
     final modelStyle = textTheme.bodySmall?.copyWith(
       color: lim.text,
       fontFamily: lim.fontFamilyMono,
+    );
+    final badgeStyle = textTheme.labelSmall?.copyWith(
+      color: lim.textMuted,
+      fontSize: 10,
+      letterSpacing: 0.2,
     );
 
     for (var gi = 0; gi < groups.length; gi++) {
@@ -65,12 +75,23 @@ class ManagedInferencePanel extends StatelessWidget {
         ),
       );
       for (final row in entry.models) {
+        final badge = formatManagedModelProviderBadge(row.providers);
         items.add(
           DropdownMenuItem<String>(
             value: row.id,
             child: Padding(
               padding: const EdgeInsets.only(left: 8),
-              child: Text(row.id, overflow: TextOverflow.ellipsis, style: modelStyle),
+              child: Row(
+                children: [
+                  Expanded(
+                    child: Text(row.label, overflow: TextOverflow.ellipsis, style: modelStyle),
+                  ),
+                  if (badge != null) ...[
+                    const SizedBox(width: 8),
+                    Text(badge, style: badgeStyle),
+                  ],
+                ],
+              ),
             ),
           ),
         );
@@ -81,7 +102,23 @@ class ManagedInferencePanel extends StatelessWidget {
 
   String? _dropdownValue(String current, List<ManagedInferenceModel> models) {
     if (models.any((m) => m.id == current)) return current;
+    for (final row in models) {
+      for (final p in row.providers) {
+        if (p.id == current) return row.id;
+      }
+    }
     return null;
+  }
+
+  String _providerLabel(String value) {
+    switch (value) {
+      case 'bedrock':
+        return 'Bedrock';
+      case 'openrouter':
+        return 'OpenRouter';
+      default:
+        return 'Auto';
+    }
   }
 
   @override
@@ -89,7 +126,7 @@ class ManagedInferencePanel extends StatelessWidget {
     final lim = LiminalTheme.of(context);
     final theme = Theme.of(context);
     final models = catalog?.models ?? const <ManagedInferenceModel>[];
-    final upstreamLabel = upstream ?? catalog?.upstream ?? 'bedrock';
+    final upstreamLabel = upstream ?? catalog?.upstream ?? 'hybrid';
 
     InputDecoration fieldDecoration() => InputDecoration(
           isDense: true,
@@ -119,10 +156,38 @@ class ManagedInferencePanel extends StatelessWidget {
           ),
           const SizedBox(height: LiminalSpacing.xs),
           Text(
-            'Pro routing through Vireon — no OpenRouter or Kimchi API key required.',
+            'Hybrid routing — Bedrock and OpenRouter models with per-provider fallback when both exist.',
             style: theme.textTheme.bodySmall?.copyWith(
               color: lim.textMuted,
               height: 1.45,
+            ),
+          ),
+          const SizedBox(height: LiminalSpacing.md),
+          Text('Managed provider', style: theme.textTheme.titleSmall),
+          const SizedBox(height: LiminalSpacing.xs),
+          SegmentedButton<String>(
+            segments: const [
+              ButtonSegment(value: 'auto', label: Text('Auto')),
+              ButtonSegment(value: 'bedrock', label: Text('Bedrock')),
+              ButtonSegment(value: 'openrouter', label: Text('OpenRouter')),
+            ],
+            selected: {managedProvider.isEmpty ? 'auto' : managedProvider},
+            onSelectionChanged: saving
+                ? null
+                : (selected) {
+                    final next = selected.first;
+                    if (next != managedProvider) onManagedProvider(next);
+                  },
+            style: ButtonStyle(
+              visualDensity: VisualDensity.compact,
+              textStyle: WidgetStatePropertyAll(theme.textTheme.labelSmall),
+            ),
+          ),
+          Padding(
+            padding: const EdgeInsets.only(top: LiminalSpacing.xs),
+            child: Text(
+              '${_providerLabel(managedProvider.isEmpty ? 'auto' : managedProvider)}: route by model shape, or pin a provider and fail over to the equivalent.',
+              style: theme.textTheme.bodySmall?.copyWith(color: lim.textMuted, height: 1.4),
             ),
           ),
           const SizedBox(height: LiminalSpacing.md),
@@ -135,7 +200,7 @@ class ManagedInferencePanel extends StatelessWidget {
             Text(error!, style: TextStyle(color: theme.colorScheme.error))
           else if (models.isEmpty)
             Text(
-              'No Bedrock models returned. Check your license or try again.',
+              'No managed models returned. Check your license or try again.',
               style: theme.textTheme.bodySmall?.copyWith(color: lim.warn),
             )
           else ...[
@@ -192,43 +257,9 @@ List<_ManagedModelFamilyGroup> _groupModelsByFamily(List<ManagedInferenceModel> 
   ];
 }
 
-int _familyRank(String family) {
-  switch (family) {
-    case 'anthropic':
-      return 0;
-    case 'amazon':
-      return 1;
-    case 'meta':
-      return 2;
-    case 'mistral':
-      return 3;
-    case 'openai':
-      return 4;
-    case 'cohere':
-      return 5;
-    default:
-      return 9;
-  }
-}
+int _familyRank(String family) => managedModelFamilyRank(family);
 
-String _familyLabel(String family) {
-  switch (family) {
-    case 'anthropic':
-      return 'Anthropic';
-    case 'amazon':
-      return 'Amazon';
-    case 'meta':
-      return 'Meta';
-    case 'mistral':
-      return 'Mistral';
-    case 'openai':
-      return 'OpenAI';
-    case 'cohere':
-      return 'Cohere';
-    default:
-      return 'Other';
-  }
-}
+String _familyLabel(String family) => managedModelFamilyLabel(family);
 
 extension on BorderSide {
   Border toBorder() => Border.fromBorderSide(this);

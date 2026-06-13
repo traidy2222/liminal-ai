@@ -13,6 +13,7 @@ import '../widgets/chat_drawer.dart';
 import '../widgets/chat_pane.dart';
 import '../widgets/liminal_app_bar.dart';
 import '../widgets/liminal_shell.dart';
+import '../widgets/new_chat_dialog.dart';
 
 /// Liminal chat workspace (multi-pane, up to [AppController.maxVisibleChats]). Opened from [VireonHubScreen].
 class HomeScreen extends StatefulWidget {
@@ -78,7 +79,17 @@ class _HomeScreenState extends State<HomeScreen> {
         onSelect: host.enterChatWorkspace,
         onOpenBeside: host.openChatBeside,
         onNewChat: () async {
-          final id = await host.createChat();
+          final input = await NewChatDialog.show(
+            context,
+            host: host,
+            knownChats: host.chats,
+          );
+          if (!context.mounted || input == null) return;
+          final id = await host.createChat(
+            title: input.title,
+            workspaceMode: input.workspaceMode,
+            workspaceRoot: input.workspaceRoot,
+          );
           if (id != null) await host.enterChatWorkspace(id);
         },
         onDelete: host.deleteChat,
@@ -100,8 +111,8 @@ class _HomeScreenState extends State<HomeScreen> {
           ),
         ),
         title: LiminalAppBarTitle(
-          title: host.config?.personaDisplayLabel ?? 'Liminal',
-          subtitle: _subtitle(host),
+          title: _appBarTitle(host),
+          subtitle: _appBarSubtitle(host),
         ),
         actions: [
           LiminalIconButton(
@@ -260,13 +271,32 @@ class _HomeScreenState extends State<HomeScreen> {
     return children;
   }
 
-  String? _subtitle(AppController host) {
+  String? _activeChatTitle(AppController host) {
+    final id = host.activeChatId;
+    if (id == null) return null;
+    for (final chat in host.chats) {
+      if (chat.chatId != id) continue;
+      final t = chat.title.trim();
+      if (t.isEmpty || t == 'New chat') return null;
+      return t;
+    }
+    return null;
+  }
+
+  String _appBarTitle(AppController host) {
+    if (host.visibleChatIds.length > 1) {
+      return host.config?.personaDisplayLabel ?? 'Liminal';
+    }
+    return _activeChatTitle(host) ?? host.config?.personaDisplayLabel ?? 'Liminal';
+  }
+
+  String? _appBarSubtitle(AppController host) {
     if (host.visibleChatIds.length > 1) {
       return '${host.visibleChatIds.length} chats open';
     }
-    final active =
-        host.chats.where((x) => x.chatId == host.activeChatId).toList();
-    if (active.isEmpty) return null;
-    return active.first.title;
+    final chatTitle = _activeChatTitle(host);
+    final persona = host.config?.personaDisplayLabel ?? 'Liminal';
+    if (chatTitle != null) return persona;
+    return null;
   }
 }

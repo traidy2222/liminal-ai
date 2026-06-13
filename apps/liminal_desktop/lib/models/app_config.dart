@@ -22,6 +22,7 @@ class AppConfig {
     this.dictationSilenceMsShort = 1500,
     this.dictationSilenceMsLong = 2500,
     this.dictationMaxRecordingMs = 60000,
+    this.defaultWorkspaceFolder,
   });
 
   final bool apiKeyConfigured;
@@ -43,6 +44,7 @@ class AppConfig {
   final int dictationSilenceMsShort;
   final int dictationSilenceMsLong;
   final int dictationMaxRecordingMs;
+  final String? defaultWorkspaceFolder;
 
   PersonaUiTheme get resolvedTheme {
     if (personaUiTheme != null) return personaUiTheme!;
@@ -81,6 +83,7 @@ class AppConfig {
     int? dictationSilenceMsShort,
     int? dictationSilenceMsLong,
     int? dictationMaxRecordingMs,
+    String? defaultWorkspaceFolder,
   }) {
     return AppConfig(
       apiKeyConfigured: apiKeyConfigured ?? this.apiKeyConfigured,
@@ -102,6 +105,7 @@ class AppConfig {
       dictationSilenceMsShort: dictationSilenceMsShort ?? this.dictationSilenceMsShort,
       dictationSilenceMsLong: dictationSilenceMsLong ?? this.dictationSilenceMsLong,
       dictationMaxRecordingMs: dictationMaxRecordingMs ?? this.dictationMaxRecordingMs,
+      defaultWorkspaceFolder: defaultWorkspaceFolder ?? this.defaultWorkspaceFolder,
     );
   }
 
@@ -141,6 +145,7 @@ class AppConfig {
       dictationSilenceMsShort: ms('dictationSilenceMsShort', 1500),
       dictationSilenceMsLong: ms('dictationSilenceMsLong', 2500),
       dictationMaxRecordingMs: ms('dictationMaxRecordingMs', 60000),
+      defaultWorkspaceFolder: json['defaultWorkspaceFolder'] as String?,
     );
   }
 }

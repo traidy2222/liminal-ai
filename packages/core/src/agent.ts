@@ -182,6 +182,7 @@ import {
 } from "./vireon_proxy.js";
 import { applyPromptCacheBreakpoints, extractCachedTokens } from "./prompt_cache.js";
 import { buildOpenRouterAttributionHeaders } from "./openrouter_attribution.js";
+import { buildManagedInferenceRequestHeaders } from "./managed_provider_preference.js";
 import { withProviderRequestSpacing } from "./provider_request_gate.js";
 import type { RuntimePreferences, RuntimePersonaProfile } from "./runtime_prefs.js";
 import { hasPersistedPersonaProfile } from "./persona_artifacts.js";
@@ -1897,13 +1898,19 @@ export class AgentHarness {
           : "Provider API key missing — set AGENT_API_KEY in .env or save your key in Settings."
       );
     }
+    const resolvedBase = this.config.baseURL ?? "";
     this.client = new OpenAI({
       apiKey: apiKey ?? "",
       baseURL: this.config.baseURL,
       maxRetries: 0,
-      defaultHeaders: isOpenRouterApiBaseUrl(baseURL)
-        ? buildOpenRouterAttributionHeaders()
-        : {},
+      defaultHeaders: {
+        ...(isOpenRouterApiBaseUrl(resolvedBase) || isManagedInferenceBaseUrl(resolvedBase)
+          ? buildOpenRouterAttributionHeaders()
+          : {}),
+        ...(isManagedInferenceBaseUrl(resolvedBase)
+          ? buildManagedInferenceRequestHeaders(this.runtimePreferences)
+          : {}),
+      },
     });
   }
 

@@ -26,10 +26,12 @@ export type ChatBootMode = "restore_last" | "new_chat" | "most_recent";
 export interface ChatBootOptions {
   /** Override env `AGENT_CHAT_BOOT`. */
   mode?: ChatBootMode;
-  /** Default folder for new folder-mode chats (web: cwd; desktop: repo root). */
+  /** Default folder for new folder-mode chats (web: cwd). */
   defaultWorkspaceRoot?: string;
   /** When true, refuse to bind default workspace to user home (web heuristic). */
   looksLikeUserHome?: (absPath: string) => boolean;
+  /** When true, refuse to bind default workspace to this path (e.g. bundled repo). */
+  rejectDefaultWorkspace?: (absPath: string) => boolean;
 }
 
 export interface ChatBootResult {
@@ -59,9 +61,10 @@ async function createDefaultChat(opts: ChatBootOptions): Promise<ChatMetadata> {
       process.cwd()
   );
   const looksHome = opts.looksLikeUserHome ?? defaultLooksLikeUserHome;
+  const reject = opts.rejectDefaultWorkspace ?? (() => false);
   const chatId = `chat_${Date.now().toString(36)}`;
   const mode: ChatWorkspaceMode =
-    cwd && existsSync(cwd) && !looksHome(cwd) ? "folder" : "scratch";
+    cwd && existsSync(cwd) && !looksHome(cwd) && !reject(cwd) ? "folder" : "scratch";
   const root = mode === "folder" ? cwd : scratchWorkspaceRoot(chatId);
   const title = mode === "folder" ? path.basename(cwd) || "Workspace" : "New chat";
   return createChatMetadata({

@@ -1,5 +1,12 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
-import type { ManagedInferenceModel } from "@liminal/core";
+import {
+  formatManagedModelProviderBadge,
+  managedModelFamilyLabel,
+  managedModelFamilyRank,
+  resolveModelIdForManagedProvider,
+  type ManagedInferenceModel,
+  type ManagedProviderPreference,
+} from "@liminal/core";
 import { webApiFetch } from "../webApiAuth.js";
 import { WEB_SERVER_BASE } from "../useSSE.js";
 
@@ -20,30 +27,17 @@ const selectStyle: React.CSSProperties = {
 };
 
 function groupLabel(family: string): string {
-  switch (family) {
-    case "anthropic":
-      return "Anthropic";
-    case "amazon":
-      return "Amazon";
-    case "meta":
-      return "Meta";
-    case "mistral":
-      return "Mistral";
-    case "openai":
-      return "OpenAI";
-    case "cohere":
-      return "Cohere";
-    default:
-      return "Other";
-  }
+  return managedModelFamilyLabel(family);
 }
 
 export interface ManagedBedrockModelsSectionProps {
   disabled?: boolean;
   mainModel: string;
   fastModel: string;
+  managedProvider?: string;
   onMainModel: (modelId: string) => void;
   onFastModel: (modelId: string) => void;
+  onManagedProvider?: (provider: ManagedProviderPreference) => void;
   vireonConnected: boolean;
 }
 
@@ -51,8 +45,10 @@ export function ManagedBedrockModelsSection({
   disabled = false,
   mainModel,
   fastModel,
+  managedProvider = "auto",
   onMainModel,
   onFastModel,
+  onManagedProvider,
   vireonConnected,
 }: ManagedBedrockModelsSectionProps) {
   const [models, setModels] = useState<ManagedInferenceModel[]>([]);
@@ -98,11 +94,28 @@ export function ManagedBedrockModelsSection({
       list.push(row);
       m.set(key, list);
     }
-    return [...m.entries()].sort(([a], [b]) => a.localeCompare(b));
+    return [...m.entries()].sort(([a], [b]) => {
+      const dr = managedModelFamilyRank(a) - managedModelFamilyRank(b);
+      if (dr !== 0) return dr;
+      return a.localeCompare(b);
+    });
   }, [models]);
 
-  const mainValue = models.some((m) => m.id === mainModel) ? mainModel : "";
-  const fastValue = models.some((m) => m.id === fastModel) ? fastModel : "";
+  const pref = (managedProvider === "bedrock" || managedProvider === "openrouter"
+    ? managedProvider
+    : "auto") as ManagedProviderPreference;
+
+  const resolveForPref = (catalogId: string): string => {
+    const row = models.find((m) => m.id === catalogId);
+    return resolveModelIdForManagedProvider(catalogId, pref, row?.providers);
+  };
+
+  const mainValue = models.some((m) => m.id === mainModel || m.providers?.some((p) => p.id === mainModel))
+    ? models.find((m) => m.id === mainModel || m.providers?.some((p) => p.id === mainModel))?.id ?? ""
+    : "";
+  const fastValue = models.some((m) => m.id === fastModel || m.providers?.some((p) => p.id === fastModel))
+    ? models.find((m) => m.id === fastModel || m.providers?.some((p) => p.id === fastModel))?.id ?? ""
+    : "";
 
   return (
     <div
@@ -115,7 +128,7 @@ export function ManagedBedrockModelsSection({
       }}
     >
       <div style={{ fontSize: 11, color: GREEN, marginBottom: 6, fontWeight: 700 }}>
-        Managed models (Bedrock{upstream ? ` · ${upstream}` : ""})
+        Managed models (hybrid{upstream ? ` · ${upstream}` : ""})
       </div>
       {!vireonConnected ? (
         <div style={{ fontSize: 11, color: AMBER, lineHeight: 1.45 }}>
@@ -146,6 +159,32 @@ export function ManagedBedrockModelsSection({
         <div style={{ fontSize: 11, color: AMBER }}>No chat models returned from Bedrock.</div>
       ) : (
         <>
+          {onManagedProvider ? (
+            <div style={{ marginBottom: 10 }}>
+              <div style={{ fontSize: 11, color: "#aabbcc", marginBottom: 6 }}>managed provider</div>
+              <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                {(["auto", "bedrock", "openrouter"] as const).map((p) => (
+                  <button
+                    key={p}
+                    type="button"
+                    disabled={disabled}
+                    onClick={() => onManagedProvider(p)}
+                    style={{
+                      fontSize: 11,
+                      padding: "6px 10px",
+                      borderRadius: 2,
+                      border: `1px solid ${pref === p ? CYAN : "rgba(var(--lim-accent-rgb),0.2)"}`,
+                      background: pref === p ? "rgba(var(--lim-accent-rgb),0.12)" : "transparent",
+                      color: pref === p ? CYAN : "#aabbcc",
+                      cursor: disabled ? "not-allowed" : "pointer",
+                    }}
+                  >
+                    {p === "auto" ? "Auto" : p === "bedrock" ? "Bedrock" : "OpenRouter"}
+                  </button>
+                ))}
+              </div>
+            </div>
+          ) : null}
           <div
             style={{
               display: "grid",
@@ -159,7 +198,7 @@ export function ManagedBedrockModelsSection({
             <select
               disabled={disabled}
               value={mainValue}
-              onChange={(e) => onMainModel(e.target.value)}
+              onChange={(e) => onMainModel(resolveForPref(e.target.value))}
               aria-label="Managed main model"
               style={selectStyle}
             >
@@ -169,6 +208,9 @@ export function ManagedBedrockModelsSection({
                   {rows.map((row) => (
                     <option key={row.id} value={row.id}>
                       {row.label}
+                      {formatManagedModelProviderBadge(row.providers)
+                        ? ` · ${formatManagedModelProviderBadge(row.providers)}`
+                        : ""}
                     </option>
                   ))}
                 </optgroup>
@@ -187,7 +229,7 @@ export function ManagedBedrockModelsSection({
             <select
               disabled={disabled}
               value={fastValue}
-              onChange={(e) => onFastModel(e.target.value)}
+              onChange={(e) => onFastModel(resolveForPref(e.target.value))}
               aria-label="Managed fast model"
               style={selectStyle}
             >
@@ -197,6 +239,9 @@ export function ManagedBedrockModelsSection({
                   {rows.map((row) => (
                     <option key={`fast-${row.id}`} value={row.id}>
                       {row.label}
+                      {formatManagedModelProviderBadge(row.providers)
+                        ? ` · ${formatManagedModelProviderBadge(row.providers)}`
+                        : ""}
                     </option>
                   ))}
                 </optgroup>
@@ -204,8 +249,8 @@ export function ManagedBedrockModelsSection({
             </select>
           </div>
           <div style={{ fontSize: 10, color: "#6a7a8a", marginTop: 8, lineHeight: 1.45 }}>
-            Chat routes through Vireon → Bedrock. Embeddings and voice sidecars may still use OpenRouter in hybrid
-            mode. Save runtime prefs after changing models.
+            Hybrid chat routes through Vireon — Bedrock dotted ids and OpenRouter slugs, with failover when a
+            model exists on both. Embeddings and voice may still use OpenRouter directly.
           </div>
         </>
       )}

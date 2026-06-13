@@ -90,6 +90,8 @@ export interface WireAppConfig {
   dictationSilenceMsShort?: number;
   dictationSilenceMsLong?: number;
   dictationMaxRecordingMs?: number;
+  /** Default folder for new chats (`~/.liminal/desktop_prefs.json`). */
+  defaultWorkspaceFolder?: string | null;
 }
 
 /** Events the sidecar emits that have no harness equivalent. */
@@ -118,6 +120,8 @@ export interface TransportEventMap {
   harness_running: { chatId: string; startedAt: number };
   /** Pushed whenever the chat set or active chat changes; also answers `list_chats`. */
   chat_list: { chats: ChatSummary[]; activeChatId: string };
+  /** Background title refresh updated one chat's display name. */
+  chat_meta_updated: { chatId: string; title: string; at: number };
   /** Prior turns rebuilt from `session.jsonl` after restart or chat activation. */
   transcript_replay: {
     chatId: string;

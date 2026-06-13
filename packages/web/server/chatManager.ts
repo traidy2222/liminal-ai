@@ -36,6 +36,7 @@ import {
   resolveChatBoot,
   resolveProviderConfigWithInference,
   saveLastActiveChatId,
+  ChatTitleRefresher,
   type ChatMetadata,
   type ChatWorkspaceMode,
   type RuntimePreferences,
@@ -82,8 +83,21 @@ export class ChatManager {
    * fallback). Persisted on patch by each individual harness.
    */
   private cachedRuntimePrefs: RuntimePreferences | null = null;
+  private readonly titleRefresher: ChatTitleRefresher;
+  private readonly titleRefreshWired = new Set<string>();
 
-  constructor(private readonly sse: SSEManager) {}
+  constructor(private readonly sse: SSEManager) {
+    this.titleRefresher = new ChatTitleRefresher({
+      getRuntimePrefs: () => this.cachedRuntimePrefs,
+      onTitleUpdated: async (chatId, title) => {
+        this.sse.send(
+          "chat_meta_updated",
+          { chatId, title, at: Date.now() },
+          chatId
+        );
+      },
+    });
+  }
 
   /**
    * Boot the manager:
@@ -169,6 +183,7 @@ export class ChatManager {
       );
       slot = { bridge, lastTouchedAt: Date.now() };
       this.bridges.set(chatId, slot);
+      this.wireChatTitleRefresh(meta, bridge);
       await bridge.whenSessionReady().catch((err) => {
         // Tool registration / persona bootstrap failures shouldn't poison the
         // manager — surface via the API and let the user reset / retry.
@@ -234,6 +249,8 @@ export class ChatManager {
    * the UI doesn't end up with a dead pointer.
    */
   async delete(chatId: string): Promise<{ newActiveId: string | null }> {
+    this.titleRefreshWired.delete(chatId);
+    this.titleRefresher.forget(chatId);
     const slot = this.bridges.get(chatId);
     if (slot) {
       slot.bridge.dispose();
@@ -306,6 +323,14 @@ export class ChatManager {
   }
 
   /** Full shutdown — disposes every bridge. Called on server SIGTERM. */
+  private wireChatTitleRefresh(meta: ChatMetadata, bridge: AgentBridge): void {
+    if (this.titleRefreshWired.has(meta.chatId)) return;
+    this.titleRefreshWired.add(meta.chatId);
+    bridge.harness.emitter.on("turn_end", () => {
+      this.titleRefresher.scheduleAfterTurn(meta.chatId);
+    });
+  }
+
   shutdown(): void {
     if (this.evictionTimer) clearInterval(this.evictionTimer);
     this.evictionTimer = null;

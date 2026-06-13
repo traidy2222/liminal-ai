@@ -18,6 +18,7 @@ import '../widgets/liminal_page_canvas.dart';
 import '../widgets/liminal_shell.dart';
 import '../widgets/orchestrator_panel.dart';
 import '../widgets/vireon_brand.dart';
+import '../widgets/new_chat_dialog.dart';
 import 'hub/hub_format.dart';
 
 class VireonHubScreen extends StatefulWidget {
@@ -115,7 +116,17 @@ class _VireonHubScreenState extends State<VireonHubScreen> {
     if (_openingChat) return;
     setState(() => _openingChat = true);
     try {
-      final chatId = await host.createChat();
+      final input = await NewChatDialog.show(
+        context,
+        host: host,
+        knownChats: host.chats,
+      );
+      if (!mounted || input == null) return;
+      final chatId = await host.createChat(
+        title: input.title,
+        workspaceMode: input.workspaceMode,
+        workspaceRoot: input.workspaceRoot,
+      );
       if (!mounted) return;
       if (chatId == null) return;
       await host.enterChatWorkspace(chatId);

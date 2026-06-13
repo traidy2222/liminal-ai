@@ -149,12 +149,27 @@ export {
   adoptOrphanChatMetadata,
   adoptAllOrphanChats,
   scratchWorkspaceRoot,
+  setChatTitle,
 } from "./chat_metadata.js";
-export type { ChatMetadata, ChatKind, ChatWorkspaceMode } from "./chat_metadata.js";
+export type { ChatMetadata, ChatKind, ChatWorkspaceMode, ChatTitleSource } from "./chat_metadata.js";
 export { readLastActiveChatId, saveLastActiveChatId } from "./active_chat_state.js";
 export type { ActiveChatState } from "./active_chat_state.js";
 export { resolveChatBoot } from "./chat_boot.js";
 export type { ChatBootMode, ChatBootOptions, ChatBootResult } from "./chat_boot.js";
+export {
+  ChatTitleRefresher,
+  resolveChatTitleRefreshConfig,
+  shouldRefreshTitleAtTurn,
+  buildChatTitleTranscriptExcerpt,
+  chatTitleRefreshEligible,
+} from "./chat_title_refresh.js";
+export type { ChatTitleRefreshConfig, ChatTitleRefresherDeps } from "./chat_title_refresh.js";
+export {
+  readDesktopPrefs,
+  writeDesktopPrefs,
+  isBundledRepoPath,
+} from "./desktop_prefs.js";
+export type { DesktopPrefs } from "./desktop_prefs.js";
 export {
   loadChatTranscriptFromSessionLog,
   slimReplayEntriesForWire,
@@ -624,6 +639,21 @@ export type {
   OpenRouterRoute,
   ManagedOpenRouterCredentials,
 } from "./inference_provider.js";
+export {
+  inferManagedModelFamily,
+  managedModelFamilyLabel,
+  managedModelFamilyRank,
+  resolveManagedModelFamily,
+} from "./managed_model_family.js";
+export {
+  buildManagedInferenceRequestHeaders,
+  formatManagedModelProviderBadge,
+  resolveManagedProviderPreference,
+  resolveModelIdForManagedProvider,
+  VIREON_MANAGED_PROVIDER_HEADER,
+  type ManagedInferenceProviderRef,
+  type ManagedProviderPreference,
+} from "./managed_provider_preference.js";
 export {
   RUNTIME_PREFS_FILE,
   getRuntimePrefsPath,

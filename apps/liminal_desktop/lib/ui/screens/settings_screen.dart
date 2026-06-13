@@ -1,5 +1,6 @@
 import 'dart:collection';
 
+import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 
@@ -7,6 +8,7 @@ import '../../app/app_scope.dart';
 import '../../core/feature_flags.dart';
 import '../../models/app_config.dart';
 import '../../models/harness_settings.dart';
+import '../../models/managed_model_family.dart';
 import '../../models/liminal_app_spec.dart';
 import '../../models/vireon_account.dart';
 import '../layout/liminal_breakpoints.dart';
@@ -80,12 +82,37 @@ class _SettingsScreenState extends State<SettingsScreen>
     return '';
   }
 
+  String _managedProviderPref(HarnessSettingsSnapshot? snap) {
+    if (snap == null) return 'auto';
+    for (final f in snap.fields) {
+      if (f.key == 'AGENT_MANAGED_PROVIDER') {
+        final v = f.value.trim().toLowerCase();
+        if (v == 'bedrock' || v == 'openrouter') return v;
+        return 'auto';
+      }
+    }
+    return 'auto';
+  }
+
+  String _resolveManagedModelId(String catalogId, HarnessSettingsSnapshot? snap) {
+    final catalog = AppScope.of(context).managedInferenceModels;
+    final pref = _managedProviderPref(snap);
+    if (catalog == null) return catalogId;
+    for (final row in catalog.models) {
+      if (row.id != catalogId) continue;
+      return resolveModelIdForManagedProvider(catalogId, pref, row.providers);
+    }
+    return catalogId;
+  }
+
   Future<void> _onManagedMainModel(String modelId) async {
     setState(() {
       _saving = true;
       _error = null;
     });
-    final ok = await AppScope.of(context).patchManagedInferenceModels(mainModel: modelId);
+    final snap = AppScope.of(context).harnessSettings;
+    final resolved = _resolveManagedModelId(modelId, snap);
+    final ok = await AppScope.of(context).patchManagedInferenceModels(mainModel: resolved);
     if (!mounted) return;
     if (ok) {
       _syncProviderControllersFromHost();
@@ -101,9 +128,22 @@ class _SettingsScreenState extends State<SettingsScreen>
       _saving = true;
       _error = null;
     });
-    final ok = await AppScope.of(context).patchManagedInferenceModels(fastModel: modelId);
+    final snap = AppScope.of(context).harnessSettings;
+    final resolved = _resolveManagedModelId(modelId, snap);
+    final ok = await AppScope.of(context).patchManagedInferenceModels(fastModel: resolved);
     if (!mounted) return;
     if (!ok) _error = 'Failed to update fast model';
+    setState(() => _saving = false);
+  }
+
+  Future<void> _onManagedProvider(String provider) async {
+    setState(() {
+      _saving = true;
+      _error = null;
+    });
+    final ok = await AppScope.of(context).patchManagedInferenceModels(managedProvider: provider);
+    if (!mounted) return;
+    if (!ok) _error = 'Failed to update managed provider';
     setState(() => _saving = false);
   }
 
@@ -300,20 +340,58 @@ class _SettingsScreenState extends State<SettingsScreen>
                     padding: const EdgeInsets.only(top: LiminalSpacing.lg),
                     sliver: SliverToBoxAdapter(
                       child: LiminalSection(
+                        title: 'Workspace',
+                        subtitle:
+                            'New chats can start in a scratch folder, a folder you pick, or this default project directory.',
+                        child: _DefaultWorkspacePanel(
+                          folderPath: cfg?.defaultWorkspaceFolder,
+                          saving: _saving,
+                          onPick: () async {
+                            final picked = await FilePicker.platform.getDirectoryPath(
+                              dialogTitle: 'Default workspace folder',
+                            );
+                            if (picked == null || !mounted) return;
+                            setState(() => _saving = true);
+                            final ok = await AppScope.of(context)
+                                .setDefaultWorkspaceFolder(picked);
+                            if (mounted) setState(() => _saving = false);
+                            if (!ok && mounted) {
+                              setState(() => _error = 'Could not save default workspace');
+                            }
+                          },
+                          onClear: () async {
+                            setState(() => _saving = true);
+                            final ok = await AppScope.of(context)
+                                .setDefaultWorkspaceFolder(null);
+                            if (mounted) setState(() => _saving = false);
+                            if (!ok && mounted) {
+                              setState(() => _error = 'Could not clear default workspace');
+                            }
+                          },
+                        ),
+                      ),
+                    ),
+                  ),
+                  SliverPadding(
+                    padding: const EdgeInsets.only(top: LiminalSpacing.lg),
+                    sliver: SliverToBoxAdapter(
+                      child: LiminalSection(
                         title: 'Provider',
                         subtitle: snap?.provider.showManagedInference == true
-                            ? 'Pro managed inference — routed through Vireon (Bedrock).'
+                            ? 'Pro managed inference — hybrid Bedrock + OpenRouter via Vireon.'
                             : 'API keys live in `.env` only — never sent over the socket.',
                         child: snap?.provider.showManagedInference == true
                             ? ManagedInferencePanel(
                                 mainModel: snap!.provider.model,
                                 fastModel: _fastModelFromSnapshot(snap),
+                                managedProvider: _managedProviderPref(snap),
                                 catalog: host.managedInferenceModels,
                                 loading: host.managedInferenceModelsLoading,
                                 error: host.managedInferenceModelsError,
                                 saving: _saving,
                                 onMainModel: _onManagedMainModel,
                                 onFastModel: _onManagedFastModel,
+                                onManagedProvider: _onManagedProvider,
                               )
                             : _ProviderForm(
                                 apiKey: _apiKey,
@@ -1460,6 +1538,58 @@ class _WidgetContentEditorState extends State<_WidgetContentEditor> {
                 : null,
             child: const Text('Save'),
           ),
+        ),
+      ],
+    );
+  }
+}
+
+class _DefaultWorkspacePanel extends StatelessWidget {
+  const _DefaultWorkspacePanel({
+    required this.folderPath,
+    required this.saving,
+    required this.onPick,
+    required this.onClear,
+  });
+
+  final String? folderPath;
+  final bool saving;
+  final VoidCallback onPick;
+  final VoidCallback onClear;
+
+  @override
+  Widget build(BuildContext context) {
+    final lim = LiminalTheme.of(context);
+    final path = folderPath?.trim();
+    final hasPath = path != null && path.isNotEmpty;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Text(
+          hasPath
+              ? path!
+              : 'No default folder — new chats use a scratch workspace unless you pick one.',
+          style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                color: hasPath ? lim.text : lim.textMuted,
+                height: 1.45,
+              ),
+        ),
+        const SizedBox(height: LiminalSpacing.md),
+        Wrap(
+          spacing: LiminalSpacing.sm,
+          runSpacing: LiminalSpacing.sm,
+          children: [
+            FilledButton.icon(
+              onPressed: saving ? null : onPick,
+              icon: const Icon(Icons.folder_open_outlined, size: 18),
+              label: Text(hasPath ? 'Change folder' : 'Choose folder'),
+            ),
+            if (hasPath)
+              OutlinedButton(
+                onPressed: saving ? null : onClear,
+                child: const Text('Clear default'),
+              ),
+          ],
         ),
       ],
     );

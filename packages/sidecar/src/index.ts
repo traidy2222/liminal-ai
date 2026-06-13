@@ -13,6 +13,24 @@ import {
 import { WsServer } from "./ws_server.js";
 import { clearHandshake, handshakePath, mintToken, writeHandshake } from "./handshake.js";
 
+// Persist the upstream TLS connection across ReAct rounds. The OpenAI SDK uses
+// the global fetch (undici); its 4s default keep-alive idles the socket out
+// between rounds spaced wider than that, forcing a fresh TLS handshake — a full
+// extra round-trip (~200-400ms on a US<->AU link, plus jitter) before every
+// model call. A 60s pool lets the per-turn fast + main model calls reuse one
+// warm socket. Measured against the managed inference proxy: ~3.2s±jitter
+// (default) -> ~2.7s steady per round (4030ms tail spike removed).
+// Dynamic import + try/catch keeps this a soft optimization: if undici isn't
+// resolvable in the shipped bundle, the sidecar still starts on the default pool.
+try {
+  const { Agent, setGlobalDispatcher } = await import("undici");
+  setGlobalDispatcher(
+    new Agent({ keepAliveTimeout: 60_000, keepAliveMaxTimeout: 600_000 })
+  );
+} catch {
+  /* undici unavailable in this runtime — fall back to the default fetch pool */
+}
+
 /**
  * `liminald` — the Liminal harness sidecar.
  *
