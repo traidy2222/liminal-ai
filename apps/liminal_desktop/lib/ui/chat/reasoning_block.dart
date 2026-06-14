@@ -4,6 +4,7 @@ import '../design_system/liminal_design_system.dart';
 import '../layout/liminal_spacing.dart';
 import '../theme/liminal_theme_extension.dart';
 import '../theme/liminal_tokens.dart';
+import 'selectable_message_scope.dart';
 
 enum ReasoningKind { model, think, reason }
 
@@ -145,15 +146,17 @@ class _ReasoningBlockState extends State<ReasoningBlock> {
           if (preview.isNotEmpty)
             Padding(
               padding: const EdgeInsets.fromLTRB(10, 6, 10, 10),
-              child: SelectableText(
-                preview,
-                style: LiminalTheme.mono(
-                  context,
-                  fontSize: 12,
-                  color: lim.textMuted,
-                ).copyWith(
-                  fontStyle: FontStyle.italic,
-                  height: 1.55,
+              child: SelectableMessageScope(
+                child: Text(
+                  preview,
+                  style: LiminalTheme.mono(
+                    context,
+                    fontSize: 12,
+                    color: lim.textMuted,
+                  ).copyWith(
+                    fontStyle: FontStyle.italic,
+                    height: 1.55,
+                  ),
                 ),
               ),
             ),

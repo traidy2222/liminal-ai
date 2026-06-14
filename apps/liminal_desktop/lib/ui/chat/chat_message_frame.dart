@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../layout/liminal_spacing.dart';
 import '../theme/liminal_theme_extension.dart';
 import '../theme/liminal_tokens.dart';
+import 'selectable_message_scope.dart';
 
 /// Role-labeled conversation frame for user and assistant turns.
 class ChatMessageFrame extends StatelessWidget {
@@ -105,7 +106,7 @@ class ChatMessageFrame extends StatelessWidget {
             left: BorderSide(color: roleColor.withValues(alpha: 0.75), width: 2),
           ),
         ),
-        child: child,
+        child: SelectableMessageScope(child: child),
       );
     }
 
@@ -129,7 +130,7 @@ class ChatMessageFrame extends StatelessWidget {
               (lim.radius * 0.35).clamp(0.0, 6.0).toDouble(),
             ),
           ),
-          child: child,
+          child: SelectableMessageScope(child: child),
         ),
       );
     }
@@ -167,7 +168,7 @@ class ChatMessageFrame extends StatelessWidget {
                 ]
               : null,
         ),
-        child: child,
+        child: SelectableMessageScope(child: child),
       ),
     );
   }

@@ -1,6 +1,7 @@
 import 'dart:convert';
 
 import '../models/browser_view_state.dart';
+import '../models/context_snapshot.dart';
 import '../models/file_edit_view_state.dart';
 import '../state/message_models.dart';
 import 'chat_transcript_state.dart';
@@ -119,12 +120,27 @@ ChatTranscriptState reduceChatEvent(
         messages: [
           ...state.messages,
           ContextCompressedMessage(
-            beforePct: (data['beforePct'] as num?)?.toDouble() ?? 0,
-            afterPct: (data['afterPct'] as num?)?.toDouble() ?? 0,
-            rounds: (data['rounds'] as num?)?.toInt() ?? 0,
+            beforePct: ((data['beforePct'] ?? data['beforeFraction']) as num?)
+                    ?.toDouble() ??
+                0,
+            afterPct: ((data['afterPct'] ?? data['afterFraction']) as num?)
+                    ?.toDouble() ??
+                0,
+            rounds: ((data['rounds'] ?? data['roundsCompressed']) as num?)
+                    ?.toInt() ??
+                0,
           ),
         ],
       );
+    case 'context_snapshot': {
+      final snap = ContextSnapshot.fromWire(
+        data['snapshot'] is Map
+            ? Map<String, dynamic>.from(data['snapshot'] as Map)
+            : null,
+      );
+      if (snap == null) return state;
+      return state.copyWith(contextSnapshot: snap);
+    }
     case 'subtask_spawned':
       return state.copyWith(
         messages: [
@@ -745,7 +761,15 @@ ChatTranscriptState _applyPlanStepDone(
 }
 
 ChatTranscriptState _onTurnEnd(ChatTranscriptState state, Map<String, dynamic> data) {
-  var next = _finalizeStreaming(state).copyWith(busy: false);
+  final snap = ContextSnapshot.fromWire(
+    data['contextSnapshot'] is Map
+        ? Map<String, dynamic>.from(data['contextSnapshot'] as Map)
+        : null,
+  );
+  var next = _finalizeStreaming(state).copyWith(
+    busy: false,
+    contextSnapshot: snap ?? state.contextSnapshot,
+  );
   final fev = next.fileEditView;
   if (fev != null && fev.open) {
     next = next.copyWith(

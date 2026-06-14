@@ -172,6 +172,7 @@ type Action =
   | { type: "ask_user"; payload: AgentEventMap["ask_user"] }
   | { type: "ask_user_resolved" }
   | { type: "turn_end"; snapshot: ContextSnapshot; harnessMetrics?: AgentEventMap["turn_end"]["harnessMetrics"] }
+  | { type: "context_snapshot"; snapshot: ContextSnapshot }
   | {
       type: "turn_summary";
       payload: AgentEventMap["turn_summary"];
@@ -519,6 +520,9 @@ function reducer(state: AgentState, action: Action): AgentState {
       return { ...state, messages, contextSnapshot: action.snapshot, busy: false };
     }
 
+    case "context_snapshot":
+      return { ...state, contextSnapshot: action.snapshot };
+
     case "turn_summary":
       return {
         ...state,
@@ -859,6 +863,9 @@ export function useAgent(
     emitter.on("turn_end", ({ contextSnapshot }) => {
       flushNow();
       dispatch({ type: "turn_end", snapshot: contextSnapshot });
+    });
+    emitter.on("context_snapshot", ({ snapshot }) => {
+      dispatch({ type: "context_snapshot", snapshot });
     });
     emitter.on("turn_summary", (payload) => {
       flushNow();

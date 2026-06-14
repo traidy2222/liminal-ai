@@ -15,6 +15,7 @@ import type {
   ToolResult,
   ExecutionState,
   ExecutionContract,
+  ContextSnapshot,
 } from "./types.js";
 import {
   extractComposeDockWirePreview,
@@ -52,6 +53,7 @@ import { distillToolOutput, shouldDistillToolOutput } from "./output_distill.js"
 import { appendFailureLog } from "./failure_log.js";
 import { completeChatJson, getFastModelSlug } from "./router.js";
 import { estimateMessagesTokens, estimateRequestTokens } from "./token_estimate.js";
+import { enrichContextSnapshot } from "./context_snapshot_ui.js";
 import {
   clampMaxCompletionTokensForContext,
   isContextLengthExceededError,
@@ -1301,6 +1303,8 @@ export class AgentHarness {
 
   /** At most one turn_end per send() — round cap / timeout / error paths share this. */
   private turnEndEmittedThisSend = false;
+  /** Last tool list passed to the provider stream — used for live context snapshots. */
+  private lastStreamTools: OpenAI.Chat.Completions.ChatCompletionTool[] = [];
   /** One-shot rule recall suffix (named protocol rules) at round 2. */
   private ruleRecallInjectedThisSend = false;
   /** Rule IDs injected by the round-2 rule recall this send (for effectiveness scoring at turn end). */
@@ -2538,6 +2542,7 @@ export class AgentHarness {
           afterFraction: after,
           roundsCompressed: rounds,
         });
+        this.emitContextSnapshot(this.lastStreamTools);
       },
     });
 
@@ -2884,6 +2889,7 @@ export class AgentHarness {
     this.composePathSeenByCallId.clear();
     this.evidenceLog = [];
     this.turnEndEmittedThisSend = false;
+    this.lastStreamTools = [];
     this.voicePostToolsNudgeFired = false;
     this.userReplyFinalizeAttempted = false;
     this.ruleRecallInjectedThisSend = false;
@@ -4595,6 +4601,26 @@ export class AgentHarness {
     this.onMissionContinue?.(decision.userMessage);
   }
 
+  private buildUiContextSnapshot(
+    tools: OpenAI.Chat.Completions.ChatCompletionTool[],
+    modelSlug?: string
+  ): ContextSnapshot {
+    return enrichContextSnapshot(this.context.snapshot(), {
+      context: this.context,
+      tools,
+      modelSlug: modelSlug ?? this.config.model,
+    });
+  }
+
+  private emitContextSnapshot(
+    tools: OpenAI.Chat.Completions.ChatCompletionTool[],
+    modelSlug?: string
+  ): void {
+    this.emitter.emit("context_snapshot", {
+      snapshot: this.buildUiContextSnapshot(tools, modelSlug),
+    });
+  }
+
   /** Emit a single turn_end per send() with telemetry (idempotent). */
   private emitTurnEnd(reason: TurnEndTerminationReason): void {
     if (this.turnEndEmittedThisSend) return;
@@ -4609,7 +4635,7 @@ export class AgentHarness {
     } else {
       this.persistedHypotheses = [];
     }
-    const snapshot = this.context.snapshot();
+    const snapshot = this.buildUiContextSnapshot(this.lastStreamTools);
     const payload = {
       contextSnapshot: snapshot,
       durationMs: Date.now() - this.sendStartTime,
@@ -5262,6 +5288,7 @@ export class AgentHarness {
     if (this.suppressReasoningToolsThisSend && tools.length > 0) {
       tools = tools.filter((t) => !REASONING_TOOL_NAMES.has(t.function?.name ?? ""));
     }
+    this.lastStreamTools = tools;
     const accumulator = new StreamAccumulator();
     // PASTE: speculative tool dispatch — start safe tool calls while stream is still running.
     const pasteEnabled = resolveHarnessEnvRaw("AGENT_PASTE", this.runtimePreferences) === "1";
@@ -5274,6 +5301,7 @@ export class AgentHarness {
 
     const routingModel = routingProfile.applied ? routingProfile.modelSlug : undefined;
     const activeModelSlug = routingModel ?? this.config.model;
+    this.emitContextSnapshot(tools, activeModelSlug);
     this.contextOverflowRecoveredThisRound = false;
     this.streamContextOverflowRecoveries = 0;
     let streamAbort = new AbortController();
@@ -5308,6 +5336,7 @@ export class AgentHarness {
           });
         }
         stream = await openStream();
+        this.emitContextSnapshot(tools, activeModelSlug);
       } else {
         throw err;
       }

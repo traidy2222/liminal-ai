@@ -1,5 +1,4 @@
 import 'package:flutter/material.dart';
-import 'package:flutter_highlight/flutter_highlight.dart';
 import 'package:flutter_markdown/flutter_markdown.dart';
 import 'package:flutter_widget_from_html/flutter_widget_from_html.dart';
 import 'package:highlight/highlight.dart' show highlight;
@@ -74,7 +73,7 @@ class LiminalMarkdownBlock extends StatelessWidget {
 
     return MarkdownBody(
       data: data,
-      selectable: true,
+      selectable: false,
       extensionSet: md.ExtensionSet.gitHubWeb,
       styleSheet: MarkdownStyleSheet.fromTheme(Theme.of(context)).copyWith(
         p: Theme.of(context).textTheme.bodyLarge?.copyWith(
@@ -139,17 +138,21 @@ class _PreElementBuilder extends MarkdownElementBuilder {
 
     final hasHighlight = lang != null && _isRegisteredLanguage(lang);
 
-    if (hasHighlight) {
-      return Container(
-        margin: const EdgeInsets.symmetric(vertical: 10),
-        decoration: BoxDecoration(
-          borderRadius: BorderRadius.circular(6),
-          border: Border.all(color: lim.border.withValues(alpha: 0.5)),
-        ),
-        clipBehavior: Clip.antiAlias,
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
+    return _codeBlock(code, lang: hasHighlight ? lang : null);
+  }
+
+  Widget _codeBlock(String code, {String? lang}) {
+    return Container(
+      margin: const EdgeInsets.symmetric(vertical: 10),
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(6),
+        border: Border.all(color: lim.border.withValues(alpha: 0.5)),
+      ),
+      clipBehavior: Clip.antiAlias,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          if (lang != null)
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
               color: lim.surface.withValues(alpha: 0.9),
@@ -162,45 +165,21 @@ class _PreElementBuilder extends MarkdownElementBuilder {
                 ),
               ),
             ),
-            HighlightView(
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.all(12),
+            color: lim.codeBackground,
+            child: Text(
               code,
-              language: lang,
-              theme: {
-                'root': TextStyle(
-                  backgroundColor: lim.codeBackground,
-                  color: lim.text,
-                  fontFamily: lim.fontFamilyMono,
-                  fontSize: 13,
-                ),
-              },
-              padding: const EdgeInsets.all(12),
-              textStyle: TextStyle(
+              style: TextStyle(
                 fontFamily: lim.fontFamilyMono,
                 fontSize: 13,
                 color: lim.text,
+                height: 1.35,
               ),
             ),
-          ],
-        ),
-      );
-    }
-
-    return Container(
-      margin: const EdgeInsets.symmetric(vertical: 8),
-      padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(
-        color: lim.codeBackground,
-        borderRadius: BorderRadius.circular(6),
-        border: Border.all(color: lim.border.withValues(alpha: 0.4)),
-      ),
-      child: SelectableText(
-        code,
-        style: TextStyle(
-          fontFamily: lim.fontFamilyMono,
-          fontSize: 12,
-          color: lim.text,
-          height: 1.35,
-        ),
+          ),
+        ],
       ),
     );
   }

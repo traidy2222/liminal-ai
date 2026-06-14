@@ -1,4 +1,5 @@
 import '../models/browser_view_state.dart';
+import '../models/context_snapshot.dart';
 import '../models/file_edit_view_state.dart';
 import '../state/message_models.dart';
 
@@ -14,6 +15,7 @@ class ChatTranscriptState {
     this.personaBootstrapStage,
     this.browserView,
     this.fileEditView,
+    this.contextSnapshot,
   });
 
   final List<MessageEntry> messages;
@@ -26,6 +28,7 @@ class ChatTranscriptState {
   final String? personaBootstrapStage;
   final BrowserViewState? browserView;
   final FileEditViewState? fileEditView;
+  final ContextSnapshot? contextSnapshot;
 
   PendingApproval? get pendingApproval =>
       pendingApprovals.isNotEmpty ? pendingApprovals.first : null;
@@ -47,6 +50,8 @@ class ChatTranscriptState {
     bool clearBrowserView = false,
     FileEditViewState? fileEditView,
     bool clearFileEditView = false,
+    ContextSnapshot? contextSnapshot,
+    bool clearContextSnapshot = false,
   }) {
     return ChatTranscriptState(
       messages: messages ?? this.messages,
@@ -64,6 +69,8 @@ class ChatTranscriptState {
       personaBootstrapStage: personaBootstrapStage ?? this.personaBootstrapStage,
       browserView: clearBrowserView ? null : (browserView ?? this.browserView),
       fileEditView: clearFileEditView ? null : (fileEditView ?? this.fileEditView),
+      contextSnapshot:
+          clearContextSnapshot ? null : (contextSnapshot ?? this.contextSnapshot),
     );
   }
 }

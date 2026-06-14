@@ -307,6 +307,11 @@ interface ContextSnapshot {
   maxTokens: number;
   usageFraction: number;
   masked: boolean;
+  toolTokenCount?: number;
+  requestTokenCount?: number;
+  requestUsageFraction?: number;
+  contextTier?: string;
+  modelSlug?: string;
 }
 
 export interface AutoDreamState {
@@ -520,6 +525,7 @@ type Action =
     }
   | { type: "plan_step_done"; payload: { stepIndex: number } }
   | { type: "context_compressed"; payload: { beforeFraction: number; afterFraction: number; roundsCompressed: number } }
+  | { type: "context_snapshot"; payload: { snapshot: ContextSnapshot } }
   | { type: "persona_changed"; payload: { name: string } }
   | {
       type: "auto_dream";
@@ -1271,6 +1277,9 @@ function reducer(state: SSEState, action: Action): SSEState {
         ],
       };
     }
+
+    case "context_snapshot":
+      return { ...state, contextSnapshot: action.payload.snapshot };
 
     case "persona_changed":
       return { ...state, personaName: action.payload.name };
@@ -2209,6 +2218,12 @@ export function useSSE(options?: {
         const p = parseEventData(e);
         if (p == null) return;
         dispatch({ type: "context_compressed", payload: p as never });
+      });
+      es.addEventListener("context_snapshot", (e: MessageEvent) => {
+        trackId(e);
+        const p = parseEventData(e);
+        if (p == null) return;
+        dispatch({ type: "context_snapshot", payload: p as never });
       });
       es.addEventListener("persona_changed", (e: MessageEvent) => {
         trackId(e); flushNow();

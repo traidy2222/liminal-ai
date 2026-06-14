@@ -11,6 +11,7 @@ import '../../audio/dictation_controller.dart';
 import '../../audio/speech_output.dart';
 import '../../models/app_config.dart';
 import '../../models/composer_slash_outcome.dart';
+import '../../models/context_snapshot.dart';
 import '../../models/user_image_attachment.dart';
 import '../design_system/liminal_design_system.dart';
 import '../layout/liminal_spacing.dart';
@@ -18,6 +19,7 @@ import '../theme/liminal_theme_extension.dart';
 import 'composer_clipboard.dart';
 import 'composer_slash.dart';
 import 'composer_slash_menu.dart';
+import 'context_meter.dart';
 
 typedef ComposerSendCallback = void Function(
   String text,
@@ -44,6 +46,7 @@ class Composer extends StatefulWidget {
     this.onDictationAutoSend,
     this.dictationNotice,
     this.onDismissDictationNotice,
+    this.contextSnapshot,
   });
 
   final bool enabled;
@@ -57,6 +60,7 @@ class Composer extends StatefulWidget {
   final Future<String?> Function(String fullMessage)? onDictationAutoSend;
   final String? dictationNotice;
   final VoidCallback? onDismissDictationNotice;
+  final ContextSnapshot? contextSnapshot;
 
   @override
   State<Composer> createState() => _ComposerState();
@@ -407,6 +411,8 @@ class _ComposerState extends State<Composer> {
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
+              if (widget.contextSnapshot != null)
+                ContextMeter(snapshot: widget.contextSnapshot!),
               if (showTtsBanner)
                 Padding(
                   padding: const EdgeInsets.only(bottom: 6),

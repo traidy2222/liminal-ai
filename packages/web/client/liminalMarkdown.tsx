@@ -155,9 +155,22 @@ export function renderFencedCodeBlock(
         <SyntaxHighlighter
           language={lang}
           style={vscDarkPlus}
-          customStyle={{ margin: 0, borderRadius: 0, fontSize: 13, background: codeBg }}
+          customStyle={{
+            margin: 0,
+            borderRadius: 0,
+            fontSize: 13,
+            background: codeBg,
+            userSelect: "text",
+            WebkitUserSelect: "text",
+          }}
+          codeTagProps={{
+            style: {
+              userSelect: "text",
+              WebkitUserSelect: "text",
+            },
+          }}
           showLineNumbers={raw.split("\n").length > 6}
-          lineNumberStyle={{ color: LIM.textDim, minWidth: "2.5em", opacity: 0.45 }}
+          lineNumberStyle={{ color: LIM.textDim, minWidth: "2.5em", opacity: 0.45, userSelect: "none" }}
           wrapLongLines
         >
           {raw}

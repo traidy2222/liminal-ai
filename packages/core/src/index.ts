@@ -640,6 +640,7 @@ export {
 export type { ModelContextLimits, ModelContextSource, ResolveModelContextLimitsOpts } from "./model_context_registry.js";
 export { buildContextPolicy } from "./context_policy.js";
 export type { ContextPolicy, ContextPolicyTier } from "./context_policy.js";
+export { enrichContextSnapshot } from "./context_snapshot_ui.js";
 export {
   fetchOpenRouterModelCatalog,
   parseOpenRouterModelCatalog,

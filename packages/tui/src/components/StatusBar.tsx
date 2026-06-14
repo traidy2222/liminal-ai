@@ -33,7 +33,9 @@ export function StatusBar({
     return () => clearInterval(id);
   }, [busy, statusBarIntervalMs]);
 
-  const pct = snapshot ? Math.round(snapshot.usageFraction * 100) : null;
+  const pct = snapshot
+    ? Math.round((snapshot.requestUsageFraction ?? snapshot.usageFraction) * 100)
+    : null;
   const ctxColor = pct == null ? jarvis.muted : pct >= 80 ? jarvis.danger : pct >= 60 ? jarvis.warn : jarvis.assistant;
 
   // Shorten slug: "provider/name" → last segment (e.g. qwen/qwen3.5-9b → qwen3.5-9b)

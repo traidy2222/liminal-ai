@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../../core/tool_args_format.dart';
 import '../../state/message_models.dart';
 import '../chat/tool_category.dart';
+import '../chat/selectable_message_scope.dart';
 import '../design_system/primitives/liminal_badge.dart';
 import '../layout/liminal_spacing.dart';
 import '../theme/liminal_theme_extension.dart';
@@ -176,14 +177,17 @@ class _ToolActivityTileState extends State<ToolActivityTile> {
                                 ),
                               ),
                             ),
-                          if (_expanded || widget.verbose) ...[
+                          if (_expanded || widget.verbose)
+                            SelectableMessageScope(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
                             if (!isTrivialToolArgs(m.argsPreview) &&
                                 m.argsPreview.trim().isNotEmpty) ...[
                               const SizedBox(height: 6),
                               _CodeBlock(
                                 lim: lim,
                                 text: m.argsPreview,
-                                maxLines: widget.verbose ? 24 : 8,
                                 label: 'Arguments',
                               ),
                             ],
@@ -192,12 +196,13 @@ class _ToolActivityTileState extends State<ToolActivityTile> {
                               _CodeBlock(
                                 lim: lim,
                                 text: output,
-                                maxLines: widget.verbose ? 32 : 12,
                                 label: 'Output',
                                 error: isError,
                               ),
                             ],
-                          ],
+                                ],
+                              ),
+                            ),
                         ],
                       ),
                     ),
@@ -237,14 +242,12 @@ class _CodeBlock extends StatelessWidget {
   const _CodeBlock({
     required this.lim,
     required this.text,
-    required this.maxLines,
     required this.label,
     this.error = false,
   });
 
   final LiminalTokens lim;
   final String text;
-  final int maxLines;
   final String label;
   final bool error;
 
@@ -266,9 +269,8 @@ class _CodeBlock extends StatelessWidget {
             borderRadius: BorderRadius.circular(4),
             border: Border.all(color: lim.border.withValues(alpha: 0.35)),
           ),
-          child: SelectableText(
+          child: Text(
             text,
-            maxLines: maxLines,
             style: LiminalTheme.mono(
               context,
               fontSize: 10,

@@ -2203,7 +2203,11 @@ export function App() {
 
   // ── Derived state ────────────────────────────────────────────────────────────
 
-  const pct = state.contextSnapshot ? Math.round(state.contextSnapshot.usageFraction * 100) : 0;
+  const pct = state.contextSnapshot
+    ? Math.round(
+        (state.contextSnapshot.requestUsageFraction ?? state.contextSnapshot.usageFraction) * 100
+      )
+    : 0;
 
   const surface: ToolSurface = showRawHarness ? "verbose" : "clean";
   const toolCardsMode = resolveToolCardsMode(personaTheme.toolCards, surface);

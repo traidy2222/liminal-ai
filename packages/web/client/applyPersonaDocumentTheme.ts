@@ -97,6 +97,10 @@ export function applyPersonaDocumentTheme(theme: PersonaUiThemeV2 | null): void 
 .msg-entrance-slide      { animation: msg-slide ${entranceDur} cubic-bezier(.22,.68,0,1.2) both; }
 .msg-entrance-typewriter { animation: msg-typewriter ${entranceDur} steps(40,end) both; }
 /* ── .lim-md — markdown content themed via CSS vars ─────────────────── */
+.lim-md { user-select: text; -webkit-user-select: text; }
+.lim-md p, .lim-md li, .lim-md h1, .lim-md h2, .lim-md h3, .lim-md h4,
+.lim-md blockquote, .lim-md td, .lim-md th, .lim-md pre, .lim-md code,
+.lim-md pre *, .lim-md .token { user-select: text; -webkit-user-select: text; }
 .lim-md h1 { color: var(--lim-markdown-h1); border-bottom-color: rgba(var(--lim-success-rgb),.15); }
 .lim-md h2 { color: var(--lim-markdown-h2); }
 .lim-md h3 { color: var(--lim-secondary); }

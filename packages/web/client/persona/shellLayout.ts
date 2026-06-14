@@ -174,6 +174,8 @@ export function buildMessagesStyle(
     display: "flex",
     flexDirection: "column",
     gap: t.density === "compact" ? 5 : 8,
+    userSelect: "text",
+    WebkitUserSelect: "text",
   };
 }
 
@@ -191,6 +193,8 @@ export function buildUserMessageStyle(theme: PersonaUiThemeV2 | null): CSSProper
     padding: t.messageStyle === "transcript" ? "4px 0" : "8px 12px",
     lineHeight: 1.5,
     borderRadius: radius,
+    userSelect: "text",
+    WebkitUserSelect: "text",
   };
   if (t.messageStyle === "flat" || t.messageStyle === "transcript") {
     return {
@@ -212,6 +216,8 @@ export function buildAssistantMessageStyle(): CSSProperties {
     padding: "5px 0",
     color: LIM.assistant,
     lineHeight: 1.65,
+    userSelect: "text",
+    WebkitUserSelect: "text",
   };
 }
 

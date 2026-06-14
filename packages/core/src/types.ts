@@ -167,6 +167,14 @@ export interface ContextSnapshot {
   maxTokens: number;
   usageFraction: number;
   masked: boolean;
+  /** Tool schema tokens in the active completion request (when tools are known). */
+  toolTokenCount?: number;
+  /** Messages + tools + framing overhead (when enriched for UI). */
+  requestTokenCount?: number;
+  /** Window fraction including tool schemas (when enriched for UI). */
+  requestUsageFraction?: number;
+  contextTier?: "small" | "medium" | "large" | "xlarge";
+  modelSlug?: string;
 }
 
 /** Structured working snapshot (COMPASS-style); rendered into [WORKING STATE]. */
@@ -709,6 +717,8 @@ export interface AgentEventMap {
     afterFraction: number;
     roundsCompressed: number;
   };
+  /** Live context window usage — each ReAct round and after compression. */
+  context_snapshot: { snapshot: ContextSnapshot };
   /** Wall-clock time for a tool handler execution. (#7) */
   tool_timing: { callId: string; name: string; durationMs: number };
   /** Emitted when the agent's persona is changed via set_persona(). */

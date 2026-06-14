@@ -4,6 +4,7 @@ import '../core/chat_reducer.dart' as chat_reducer;
 import '../core/chat_transcript_state.dart';
 import '../core/streaming_write_preview.dart';
 import '../models/browser_view_state.dart';
+import '../models/context_snapshot.dart';
 import '../models/file_edit_view_state.dart';
 import '../models/terminal_panel_state.dart';
 import 'message_models.dart';
@@ -38,6 +39,7 @@ class ChatSessionController extends ChangeNotifier {
   String? get personaBootstrapStage => _state.personaBootstrapStage;
   BrowserViewState? get browserView => _state.browserView;
   FileEditViewState? get fileEditView => _state.fileEditView;
+  ContextSnapshot? get contextSnapshot => _state.contextSnapshot;
 
   void toggleTerminalDock() {
     terminalDockExpanded = !terminalDockExpanded;

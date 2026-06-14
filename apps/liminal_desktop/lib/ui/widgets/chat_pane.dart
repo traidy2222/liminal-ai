@@ -212,6 +212,7 @@ class ChatPane extends StatelessWidget {
                 child: Composer(
                   enabled: true,
                   busy: session.busy,
+                  contextSnapshot: session.contextSnapshot,
                   config: host.config,
                   dictation: focused ? host.dictation : null,
                   speechOutput: focused ? host.speechOutput : null,

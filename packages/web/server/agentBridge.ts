@@ -401,6 +401,7 @@ export class AgentBridge {
     on("ask_user_answered", (p) => this.maybeSend("ask_user_answered", p));
     on("approval_decision", (p) => this.maybeSend("approval_decision", p));
     on("context_compressed", (p) => this.maybeSend("context_compressed", p));
+    on("context_snapshot", (p) => this.maybeSend("context_snapshot", p));
     on("tool_timing", (p) => this.maybeSend("tool_timing", p));
     on("persona_changed", (p) => this.maybeSend("persona_changed", p));
     on("execution_state", (p) => this.maybeSend("execution_state", p));

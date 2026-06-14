@@ -263,6 +263,7 @@ export class SessionBridge {
     on("ask_user_answered", (p) => this.emit("ask_user_answered", p));
     on("approval_decision", (p) => this.emit("approval_decision", p));
     on("context_compressed", (p) => this.emit("context_compressed", p));
+    on("context_snapshot", (p) => this.emit("context_snapshot", p));
     on("tool_timing", (p) => this.emit("tool_timing", p));
     on("persona_changed", (p) => this.emit("persona_changed", p));
     on("execution_state", (p) => this.emit("execution_state", p));

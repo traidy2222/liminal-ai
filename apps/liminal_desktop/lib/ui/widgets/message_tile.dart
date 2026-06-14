@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../../state/message_models.dart';
 import '../chat/chat_message_frame.dart';
 import '../chat/reasoning_block.dart';
+import '../chat/selectable_message_scope.dart';
 import '../design_system/primitives/liminal_badge.dart';
 import '../rich_message/liminal_message_content.dart';
 import '../theme/liminal_theme_extension.dart';
@@ -48,7 +49,7 @@ class MessageTile extends StatelessWidget {
                   ),
                 ),
               if (text.trim().isNotEmpty)
-                SelectableText(
+                Text(
                   text,
                   style: Theme.of(context).textTheme.bodyLarge?.copyWith(
                         color: lim.text,
@@ -121,7 +122,8 @@ class MessageTile extends StatelessWidget {
         ),
       PlanMessage(:final steps, :final streaming) =>
         PlanProgressTile(steps: steps, streaming: streaming),
-      TraceMessage(:final text) => Padding(
+      TraceMessage(:final text) => SelectableMessageScope(
+          child: Padding(
           padding: const EdgeInsets.symmetric(vertical: 2),
           child: Row(
             crossAxisAlignment: CrossAxisAlignment.start,
@@ -143,6 +145,7 @@ class MessageTile extends StatelessWidget {
               ),
             ],
           ),
+        ),
         ),
       ToolCallMessage message => ToolActivityTile(
           message: message,
@@ -205,7 +208,9 @@ class MessageTile extends StatelessWidget {
           ),
         ),
       SubtaskMessage(:final goal, :final status, :final partialOutput) =>
-        _SubtaskCard(goal: goal, status: status, partialOutput: partialOutput),
+        SelectableMessageScope(
+          child: _SubtaskCard(goal: goal, status: status, partialOutput: partialOutput),
+        ),
       ErrorMessage(:final message) => ChatMessageFrame.assistant(
           roleLabel: 'Error',
           child: Text(
@@ -284,8 +289,6 @@ class _SubtaskCard extends StatelessWidget {
                     padding: const EdgeInsets.only(top: 4),
                     child: Text(
                       partialOutput,
-                      maxLines: 6,
-                      overflow: TextOverflow.ellipsis,
                       style: LiminalTheme.mono(context, fontSize: 11, color: lim.textMuted),
                     ),
                   ),
@@ -344,6 +347,10 @@ class _WorkingStatePanel extends StatelessWidget {
             style: LiminalTheme.mono(context, fontSize: 12, color: lim.textMuted),
           ),
           children: [
+            SelectableMessageScope(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
             if (goal != null && goal!.isNotEmpty)
               Padding(
                 padding: const EdgeInsets.only(bottom: 6),
@@ -370,7 +377,10 @@ class _WorkingStatePanel extends StatelessWidget {
                 child: Text('Subgoals: $subgoalsPreview', style: bodyStyle),
               ),
             if (executionPreview != null && executionPreview!.isNotEmpty)
-              SelectableText(executionPreview!, style: mono.copyWith(height: 1.45)),
+              Text(executionPreview!, style: mono.copyWith(height: 1.45)),
+                ],
+              ),
+            ),
           ],
         ),
       ),
