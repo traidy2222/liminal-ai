@@ -5,6 +5,7 @@ import '../../app/app_scope.dart';
 import '../../models/persona_ui_layout.dart';
 import '../../models/persona_ui_theme.dart';
 import '../../routing/routes.dart';
+import '../../protocol/chat_summary.dart';
 import '../../state/app_controller.dart';
 import '../design_system/liminal_design_system.dart';
 import '../theme/liminal_theme_extension.dart';
@@ -285,7 +286,7 @@ class _SafeChatPane extends StatelessWidget {
   final PersonaLayoutSpec layout;
   final String? chatIdParam;
   final dynamic copy;
-  final List<dynamic> chats;
+  final List<ChatSummary> chats;
 
   @override
   Widget build(BuildContext context) {

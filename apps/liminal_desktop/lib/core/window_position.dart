@@ -78,8 +78,8 @@ class WindowPosition {
     } catch (_) {}
   }
 
-  Offset get offset => Offset(x.toDouble(), y.toDouble());
-  Size get size => Size(width.toDouble(), height.toDouble());
+  Offset get offset => ui.Offset(x.toDouble(), y.toDouble());
+  Size get size => ui.Size(width.toDouble(), height.toDouble());
 }
 
 class WindowPositionManager with WindowListener {
@@ -118,7 +118,7 @@ class WindowPositionManager with WindowListener {
       final displays = ui.PlatformDispatcher.instance.displays;
       if (displays.isEmpty) return false;
 
-      final windowRect = Rect.fromLTWH(
+      final windowRect = ui.Rect.fromLTWH(
         pos.x.toDouble(),
         pos.y.toDouble(),
         pos.width.toDouble(),
@@ -126,11 +126,11 @@ class WindowPositionManager with WindowListener {
       );
 
       for (final display in displays) {
-        final screenRect = Rect.fromLTWH(
-          display.bounds.left,
-          display.bounds.top,
-          display.width,
-          display.height,
+        final screenRect = ui.Rect.fromLTWH(
+          display.visiblePosition.dx,
+          display.visiblePosition.dy,
+          display.size.width,
+          display.size.height,
         );
         if (screenRect.overlaps(windowRect)) {
           return true;

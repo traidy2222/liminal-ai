@@ -15,10 +15,10 @@ bool _positionIsValidOnAnyMonitor(double x, double y, double width, double heigh
 
     for (final display in displays) {
       final screenRect = Rect.fromLTWH(
-        display.bounds.left,
-        display.bounds.top,
-        display.width,
-        display.height,
+        display.visiblePosition.dx,
+        display.visiblePosition.dy,
+        display.size.width,
+        display.size.height,
       );
       if (screenRect.overlaps(windowRect)) {
         return true;
