@@ -156,6 +156,7 @@ import {
   resolveKimchiTransientMaxRetries,
 } from "./kimchi_provider.js";
 import {
+  buildManagedInferenceClientHeaders,
   describeProviderError,
   fetchInferenceUsageStatus,
   fetchManagedInferenceModels,
@@ -348,8 +349,22 @@ import type { PendingTurnLearningRecord } from "./outcome_scorer.js";
 import { WorldContextRefresher } from "./world_context_delta.js";
 import {
   needsUserReplyFinalization,
-  USER_REPLY_FINALIZE_SYSTEM,
 } from "./user_reply_guard.js";
+import {
+  buildOpenRouterFusionRequestExtras,
+} from "./openrouter_fusion.js";
+import {
+  BROWSER_VERIFY_TOOL_NAMES,
+  buildProactiveBrowserDiagnosticMessage,
+  buildProactiveLintFailMessage,
+  buildProactiveLintPassMessage,
+  buildProactiveWebAssetHintMessage,
+  classifyChangedFiles,
+  CONTINUE_AFTER_TOOLS_MESSAGE,
+  proactiveLintAfterEditsEnabled,
+  proactiveVerificationEnabled,
+  toolCallCountsAsVerification,
+} from "./proactive_verification.js";
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -597,56 +612,6 @@ function buildToolAwarenessSnapshot(registry: ToolRegistry, recentTools: string[
     `ACTIVE TOOLS (sample): ${tail}\n` +
     `RECENT TOOLS THIS TURN: ${recent}\n` +
     `${lazyHint}`
-  );
-}
-
-function activeToolNamesHash(registry: ToolRegistry): string {
-  return registry.getActiveToolNames().slice().sort().join("\0");
-}
-
-function buildToolCapabilityManifest(registry: ToolRegistry): string {
-  const allTools = registry.getToolNames();
-  const activeSet = new Set(registry.getActiveToolNames());
-  const byFamily = new Map<string, string[]>();
-  const unmapped: string[] = [];
-
-  for (const tool of allTools) {
-    const fam = registry.getSuggestedFamilyForTool(tool);
-    if (!fam) {
-      unmapped.push(tool);
-      continue;
-    }
-    const bucket = byFamily.get(fam) ?? [];
-    bucket.push(tool);
-    byFamily.set(fam, bucket);
-  }
-
-  const famLines = [...byFamily.entries()]
-    .sort(([a], [b]) => (a < b ? -1 : 1))
-    .map(([fam, tools]) => {
-      const sorted = [...tools].sort();
-      const active = sorted.filter((t) => activeSet.has(t));
-      const inactive = sorted.filter((t) => !activeSet.has(t));
-      return (
-        `- ${fam}: active=${active.length}/${sorted.length}\n` +
-        `  tools: ${sorted.join(", ")}\n` +
-        `  inactive_tools: ${inactive.length > 0 ? inactive.join(", ") : "(none)"}`
-      );
-    });
-
-  if (unmapped.length > 0) {
-    famLines.push(
-      `- unmapped: active=${unmapped.filter((t) => activeSet.has(t)).length}/${unmapped.length}\n` +
-      `  tools: ${unmapped.sort().join(", ")}`
-    );
-  }
-
-  return (
-    `TOOL CAPABILITY MANIFEST\n` +
-    `lazy_mode=${registry.isLazyToolLoading() ? "on" : "off"}; ` +
-    `registered_total=${allTools.length}; active_total=${activeSet.size}\n` +
-    `Families and tools:\n${famLines.join("\n")}\n` +
-    `Activation path: call list_tool_families (optionally with task_hint), then activate_tool_family({family}), then retry needed tool.`
   );
 }
 
@@ -1209,6 +1174,12 @@ export class AgentHarness {
    */
   onTurnEndCleanup?: (taskId: string) => void | Promise<void>;
 
+  /**
+   * Optional browser console/page-error snapshot for verify-before-done gate.
+   * Set by `packages/tools` browser runtime — must not import tools from core.
+   */
+  onCollectBrowserDiagnostics?: (taskId: string) => string | null;
+
   /** EE: pull org / cloud notes before ReAct round 0 (team.shared_memory / pro.cloud_sync). */
   onTurnStartMemorySync?: (taskId: string) => void | Promise<void>;
   /** EE: push dirty notes after turn_end (chained with onTurnEndCleanup). */
@@ -1232,8 +1203,6 @@ export class AgentHarness {
 
   /** True once world context has been injected (only happens on the first send() of a root agent). */
   private worldContextInjected = false;
-  /** Cached tool capability manifest — invalidated when active tool set changes. */
-  private toolManifestCache: { hash: string; text: string } | null = null;
   private resumeMissionInjectedThisSend = false;
   private missionChainedSendsThisSession = 0;
   /**
@@ -1355,6 +1324,12 @@ export class AgentHarness {
   private voicePostToolsNudgeFired = false;
   /** One tool-free finalize completion when tools ran but chat answer is missing. */
   private userReplyFinalizeAttempted = false;
+  /** Tool calls with args — used for verify-before-done heuristics (run_shell test commands). */
+  private toolCallsWithArgsThisTurn: Array<{ name: string; argsJson: string }> = [];
+  /** Set when run_lint/run_tests (or equivalent) succeeded this send. */
+  private verificationSatisfiedThisSend = false;
+  /** Last batch fingerprint we already ran proactive lint for (avoid duplicate lint per batch). */
+  private proactiveLintBatchKey = "";
   /** Per-send TTS budget for speak() and harness fallback dedupe. */
   readonly ttsTurnBudget = new TtsTurnBudget();
   /** Wired from tools/speak.ts — synthesize when the model omits speak() in voice mode. */
@@ -1682,6 +1657,79 @@ export class AgentHarness {
     });
   }
 
+  /**
+   * Run verification inline after a tool batch (expert workflow: check while you work).
+   * Injects [VERIFY RESULT] into context before the next model round — no turn-end gate.
+   */
+  private async runProactiveVerificationAfterBatch(opts: {
+    hadEdits: boolean;
+    hadBrowserTools: boolean;
+    batchKey: string;
+  }): Promise<void> {
+    if (this.agentDepth > 0 || !proactiveVerificationEnabled()) return;
+
+    if (opts.hadEdits && proactiveLintAfterEditsEnabled() && this.registry.has("run_lint")) {
+      const { typedCode, webAssets } = classifyChangedFiles([...this.changedFilesThisTurn]);
+      if (typedCode.length > 0 && opts.batchKey !== this.proactiveLintBatchKey) {
+        this.proactiveLintBatchKey = opts.batchKey;
+        const scope = this.resolveSelfHealChangedFirstScope();
+        if (scope.length > 0) {
+          const lintRes = await this.dispatcher.directCall("run_lint", {
+            cwd: ".",
+            mode: this.resolveSelfHealMode(),
+            format: "structured",
+          });
+          const body = lintRes.ok ? lintRes.output : lintRes.error;
+          const parsed = parseLintEnvelope(body);
+          if (parsed && parsed.summary.errors === 0) {
+            this.verificationSatisfiedThisSend = true;
+            this.context.appendMessage({
+              role: "user",
+              content: buildProactiveLintPassMessage(scope, body),
+            });
+            this.emitter.emit("text", {
+              delta: "[HARNESS] Proactive lint passed after edits.\n",
+              channel: "trace",
+            });
+          } else if (parsed && parsed.summary.errors > 0) {
+            this.context.appendMessage({
+              role: "user",
+              content: buildProactiveLintFailMessage(scope, body),
+            });
+          } else if (!lintRes.ok) {
+            this.context.appendMessage({
+              role: "user",
+              content:
+                "[VERIFY RESULT] run_lint failed to run after your edits — run it manually or run_tests before claiming done.\n" +
+                String(body).slice(0, 1200),
+            });
+          }
+        }
+      }
+      if (webAssets.length > 0 && !this.verificationSatisfiedThisSend) {
+        this.context.appendMessage({
+          role: "user",
+          content: buildProactiveWebAssetHintMessage(webAssets),
+        });
+      }
+    }
+
+    if (opts.hadBrowserTools) {
+      const diag = this.onCollectBrowserDiagnostics?.(this.taskId) ?? null;
+      if (diag?.trim()) {
+        this.context.appendMessage({
+          role: "user",
+          content: buildProactiveBrowserDiagnosticMessage(diag),
+        });
+      }
+    }
+  }
+
+  private noteVerificationToolOutcome(toolName: string, argsJson: string, ok: boolean): void {
+    if (!ok || !toolCallCountsAsVerification(toolName, argsJson)) return;
+    this.verificationSatisfiedThisSend = true;
+  }
+
   private checkContractAndCommitments(
     toolName: string,
     args: Record<string, unknown>
@@ -1780,15 +1828,6 @@ export class AgentHarness {
     this.context.patchEpistemicState({
       harnessNotes: buildToolAwarenessSnapshot(this.registry, this.toolsUsedThisTurn) + suffix,
     });
-  }
-
-  /** Session-scoped manifest — rebuild only when the active tool set changes. */
-  private getToolCapabilityManifest(): string {
-    const hash = activeToolNamesHash(this.registry);
-    if (this.toolManifestCache?.hash === hash) return this.toolManifestCache.text;
-    const text = buildToolCapabilityManifest(this.registry);
-    this.toolManifestCache = { hash, text };
-    return text;
   }
 
   /**
@@ -1917,9 +1956,12 @@ export class AgentHarness {
       apiKey: apiKey ?? "",
       baseURL: this.config.baseURL,
       maxRetries: 0,
-      defaultHeaders: isOpenRouterApiBaseUrl(baseURL)
-        ? buildOpenRouterAttributionHeaders()
-        : {},
+      defaultHeaders: {
+        ...(isOpenRouterApiBaseUrl(baseURL) ? buildOpenRouterAttributionHeaders() : {}),
+        ...(isManagedInferenceBaseUrl(baseURL)
+          ? buildManagedInferenceClientHeaders(this.runtimePreferences)
+          : {}),
+      },
     });
   }
 
@@ -2546,6 +2588,8 @@ export class AgentHarness {
       },
     });
 
+    this.context.setProtocolRegistry(this.registry);
+
     // Root creates orchestrator; children receive the same instance
     this.orchestrator =
       config.orchestrator ?? new TaskOrchestrator();
@@ -2983,6 +3027,9 @@ export class AgentHarness {
     this._lastResearchLedgerInjectedVersion = 0;
     this.changedFilesThisTurn = new Set();
     this.lintRelatedFilesThisTurn = new Set();
+    this.toolCallsWithArgsThisTurn = [];
+    this.verificationSatisfiedThisSend = false;
+    this.proactiveLintBatchKey = "";
     this.turnInference = null;
     this.resumeMissionInjectedThisSend = false;
     let worldCtxForTurn: string | null | undefined;
@@ -3518,16 +3565,6 @@ export class AgentHarness {
         }
       }
 
-      if (!openingTurn) {
-        this.context.append({
-          role: "user",
-          content:
-            "[SYSTEM NOTE] Capability awareness preface (non-forcing): use this to know all available families/tools, " +
-            "then choose the minimal family activation only when needed.\n" +
-            this.getToolCapabilityManifest(),
-        });
-      }
-
       // Wall-clock abort for one full send(): positive AGENT_SEND_TIMEOUT_MS (typed default),
       // or set to "0" to disable.
       const sendTimeoutRaw =
@@ -3785,6 +3822,7 @@ export class AgentHarness {
     // Replace child's empty registry with the scoped one
     childHarness.registry = childRegistry;
     childHarness.abortSignal = abortController.signal;
+    childHarness.getContext().setProtocolRegistry(childRegistry);
 
     // Propagate hook so depth-2+ children get harness-scoped tools (orchestration, context, …).
     // Only the root had this set from registerAllTools — without inheritance, grandchildren
@@ -3829,8 +3867,11 @@ export class AgentHarness {
       .map((f) => f.family);
 
     const dyn =
-      this.config.context.protocolDynamicBuilder?.(childRegistry.getActiveToolNames()) ??
-      "";
+      this.config.context.protocolDynamicBuilder?.(
+        childRegistry.getActiveToolNames(),
+        undefined,
+        childRegistry
+      ) ?? "";
     const customSystemMsg: Message[] = childConfig.systemPrompt?.trim()
       ? [{ role: "system" as const, content: childConfig.systemPrompt.trim() }]
       : [];
@@ -5867,6 +5908,7 @@ export class AgentHarness {
       // Track tools used this turn (for recipe recording)
       for (const tc of toolCalls) {
         this.toolsUsedThisTurn.push(tc.name);
+        this.toolCallsWithArgsThisTurn.push({ name: tc.name, argsJson: tc.argsJson || "{}" });
       }
       // PASTE: feed successful tool names into the pattern context window.
       for (let i = 0; i < toolCalls.length; i++) {
@@ -5887,6 +5929,7 @@ export class AgentHarness {
         const tc = toolCalls[i]!;
         const r = results[i]!;
         this.rememberChangedPathFromToolCall(tc.name, tc.argsJson, r.ok);
+        this.noteVerificationToolOutcome(tc.name, tc.argsJson, r.ok);
         if (r.ok && EDIT_TOOL_NAMES.has(tc.name)) {
           try {
             const args = JSON.parse(tc.argsJson) as Record<string, unknown>;
@@ -6538,6 +6581,17 @@ export class AgentHarness {
 
       this.updateReasoningStallState(toolCalls);
 
+      const hadEditsThisBatch = this.changedFilesThisTurn.size > changedPathsCountBeforeBatch;
+      const hadBrowserToolsThisBatch = toolCalls.some((tc) =>
+        BROWSER_VERIFY_TOOL_NAMES.has(tc.name)
+      );
+      const batchKey = toolCalls.map((tc) => tc.id).join(",");
+      await this.runProactiveVerificationAfterBatch({
+        hadEdits: hadEditsThisBatch,
+        hadBrowserTools: hadBrowserToolsThisBatch,
+        batchKey,
+      });
+
       await this.runLintSelfHealIfNeeded();
 
       await this.runReActLoop(round + 1);
@@ -6546,9 +6600,26 @@ export class AgentHarness {
       await this.runLintSelfHealIfNeeded();
       await this.runReActLoop(round + 1);
     } else {
-      // Text-only completion: end the turn when the model stops (no post-assistant
-      // critic, synthesis judge, cite guard, or stream [CONTINUE] loops).
-      await this.maybeRunUserReplyFinalizePass();
+      // Text-only completion — end only when the model stops with a real answer.
+      const openingTurn = this.sessionGreetingThisSend || this.personaBootstrapPromptThisSend;
+      const assistant = (this.context.getLastAssistantMessage() ?? "").trim();
+      if (
+        !this.userReplyFinalizeAttempted &&
+        needsUserReplyFinalization({
+          assistantText: assistant,
+          toolsUsed: this.toolsUsedThisTurn,
+          intent: this.turnInference?.intent,
+          openingTurn,
+          sessionGreeting: this.sessionGreetingThisSend,
+          personaBootstrap: this.personaBootstrapPromptThisSend,
+        })
+      ) {
+        this.userReplyFinalizeAttempted = true;
+        this.context.appendMessage({ role: "user", content: CONTINUE_AFTER_TOOLS_MESSAGE });
+        await this.runReActLoop(round + 1);
+        return;
+      }
+
       // Per-turn outcome score (used by summary + root-only learning paths).
       const turnOutcome = scoreTurnOutcome({
         toolsUsed: this._toolOutcomesThisTurn,
@@ -6744,6 +6815,10 @@ export class AgentHarness {
         sessionId: this.taskId,
         retryAttempt: attempt,
       });
+      const fusionExtras = buildOpenRouterFusionRequestExtras({
+        baseURL: this.config.baseURL,
+        modelSlug,
+      });
 
       const reasoningParam =
         reasoningBudget != null
@@ -6762,6 +6837,7 @@ export class AgentHarness {
         user?: string;
         reasoning?: { effort: string };
         stream_options?: { include_usage: boolean };
+        plugins?: import("./openrouter_fusion.js").OpenRouterFusionPlugin[];
       } = {
         model: modelSlug,
         messages: cachedMessages,
@@ -6772,6 +6848,7 @@ export class AgentHarness {
         ...(useTools && { tools }),
         ...(useToolChoice && { tool_choice: "auto" as const }),
         ...orExtras,
+        ...fusionExtras,
         ...reasoningParam,
       };
 
@@ -7330,6 +7407,8 @@ export class AgentHarness {
         content,
       });
       this.toolsUsedThisTurn.push(tc.name);
+      this.toolCallsWithArgsThisTurn.push({ name: tc.name, argsJson: tc.argsJson || "{}" });
+      this.noteVerificationToolOutcome(tc.name, tc.argsJson, result.ok);
       this.rememberChangedPathFromToolCall(tc.name, tc.argsJson, result.ok);
     }
 
@@ -7464,6 +7543,8 @@ export class AgentHarness {
         content,
       });
       this.toolsUsedThisTurn.push(tc.name);
+      this.toolCallsWithArgsThisTurn.push({ name: tc.name, argsJson: tc.argsJson || "{}" });
+      this.noteVerificationToolOutcome(tc.name, tc.argsJson, result.ok);
       this.rememberChangedPathFromToolCall(tc.name, tc.argsJson, result.ok);
     }
 
@@ -7474,83 +7555,6 @@ export class AgentHarness {
       role: "user",
       content: `[STREAM RETRY] Provider ${retryLabel}. ${nudge}`,
     });
-  }
-
-  /**
-   * When the model stopped after tools but without a user-visible answer, run one
-   * tool-free completion (ephemeral system instruction — not stored in context).
-   */
-  private async maybeRunUserReplyFinalizePass(): Promise<void> {
-    if (this.userReplyFinalizeAttempted || this.abortSignal?.aborted) return;
-    const openingTurn = this.sessionGreetingThisSend || this.personaBootstrapPromptThisSend;
-    const assistant = (this.context.getLastAssistantMessage() ?? "").trim();
-    if (
-      !needsUserReplyFinalization({
-        assistantText: assistant,
-        toolsUsed: this.toolsUsedThisTurn,
-        intent: this.turnInference?.intent,
-        openingTurn,
-        sessionGreeting: this.sessionGreetingThisSend,
-        personaBootstrap: this.personaBootstrapPromptThisSend,
-      })
-    ) {
-      return;
-    }
-
-    this.userReplyFinalizeAttempted = true;
-    this.emitter.emit("text", {
-      delta: "[HARNESS] Generating user reply after tool work.\n",
-      channel: "trace",
-    });
-
-    const baseMessages = scrubMessagesSpecialTokens(await this.context.buildMessages());
-    const finalizeMessages: Message[] = [
-      ...baseMessages,
-      { role: "system", content: USER_REPLY_FINALIZE_SYSTEM },
-    ];
-    const routingModel = this._turnRoutingProfile?.applied
-      ? this._turnRoutingProfile.modelSlug
-      : undefined;
-
-    const accumulator = new StreamAccumulator();
-    const streamAbort = new AbortController();
-    try {
-      const stream = await this.streamWithRetry(
-        finalizeMessages,
-        [],
-        routingModel,
-        null,
-        streamAbort,
-        "external"
-      );
-      for await (const chunk of withChunkTimeout(stream, () =>
-        resolveStreamChunkTimeoutMs({
-          baseURL: this.config.baseURL,
-          reasoningEffort: null,
-          fileWriteSinkActive: false,
-          largeToolArgInFlight: false,
-          runtimePreferences: this.runtimePreferences,
-        })
-      )) {
-        if (this.abortSignal?.aborted) return;
-        const parsed = accumulator.processChunk(chunk);
-        emitProcessedStreamText(this.emitter, parsed, { reasoningSurface: "external" });
-      }
-      emitProcessedStreamText(this.emitter, accumulator.finishInlineReasoning(), {
-        reasoningSurface: "external",
-      });
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      this.emitter.emit("text", {
-        delta: `\n[HARNESS] User-reply finalize failed: ${msg}\n`,
-        channel: "trace",
-      });
-      return;
-    }
-
-    const text = accumulator.accumulatedText.trim();
-    if (!text) return;
-    this.context.append(this.buildAssistantMessage(text, []));
   }
 
   private buildAssistantMessage(

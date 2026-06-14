@@ -176,8 +176,8 @@ export class ChatRegistry {
           inceptionMessages: isOrchestrator
             ? buildOrchestratorInceptionMessages()
             : INCEPTION_MESSAGES,
-          protocolDynamicBuilder: (names, hint) =>
-            buildProtocolDynamicSuffix(names, (hint ?? "any") as ProtocolIntentHint),
+          protocolDynamicBuilder: (names, hint, registry) =>
+            buildProtocolDynamicSuffix(names, (hint ?? "any") as ProtocolIntentHint, registry),
         },
       })
     );

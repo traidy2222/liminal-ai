@@ -1,6 +1,11 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_markdown/flutter_markdown.dart';
+import 'package:markdown/markdown.dart' as md;
+import 'package:url_launcher/url_launcher.dart';
 
 import '../theme/liminal_theme_extension.dart';
+import 'markdown_style_sheet.dart';
+import 'video_embed.dart';
 
 final _alertMeta = {
   'NOTE': (icon: Icons.info_outline, colorKey: 'note'),
@@ -73,12 +78,20 @@ class AlertCallout extends StatelessWidget {
           ),
           if (body.isNotEmpty) ...[
             const SizedBox(height: 6),
-            Text(
-              body,
-              style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                    color: lim.text,
-                    height: 1.45,
-                  ),
+            MarkdownBody(
+              data: body,
+              selectable: false,
+              softLineBreak: true,
+              extensionSet: md.ExtensionSet.gitHubWeb,
+              styleSheet: liminalMarkdownStyleSheet(context, lim),
+              onTapLink: (text, href, title) {
+                if (href == null) return;
+                if (detectVideoEmbed(href) != null) return;
+                final uri = Uri.tryParse(href);
+                if (uri != null) {
+                  launchUrl(uri, mode: LaunchMode.externalApplication);
+                }
+              },
             ),
           ],
         ],

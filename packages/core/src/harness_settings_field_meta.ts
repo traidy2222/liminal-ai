@@ -469,6 +469,14 @@ const _META_RAW: Record<string, HarnessSettingsFieldMeta> = {
     description: "Harness environment toggle for Inference Prefer Managed. See docs/configuration.md (harness).",
     valueKind: "string",
   },
+  "AGENT_MANAGED_PROVIDER": {
+    tabId: "models_api",
+    subgroupId: "routing",
+    label: "Managed upstream provider",
+    description:
+      "When using Vireon managed inference: auto (shape-based routing + failover), bedrock, openrouter, or kimchi (Cast AI). Sent as x-vireon-managed-provider on each request.",
+    valueKind: "string",
+  },
   "AGENT_INFERENCE_BASE_URL": {
     tabId: "harness",
     subgroupId: "harness_misc",
@@ -849,6 +857,59 @@ const _META_RAW: Record<string, HarnessSettingsFieldMeta> = {
     description: "Harness environment toggle for Self Heal Lint Mode. See docs/configuration.md (harness).",
     valueKind: "enum",
     enumValues: ["tsc","eslint","command"] as const,
+  },
+  "AGENT_VERIFY_BEFORE_DONE": {
+    tabId: "harness",
+    subgroupId: "self_heal",
+    label: "Proactive verify (legacy key)",
+    description:
+      "Deprecated — use AGENT_PROACTIVE_VERIFY. When on, verification runs after edit/browser batches, not at turn end.",
+    valueKind: "boolean",
+  },
+  "AGENT_PROACTIVE_VERIFY": {
+    tabId: "harness",
+    subgroupId: "self_heal",
+    label: "Proactive verify",
+    description:
+      "After file edits or browser tools, inject lint/console [VERIFY RESULT] into context before the next model round (no turn-end gate).",
+    valueKind: "boolean",
+  },
+  "AGENT_PROACTIVE_VERIFY_LINT": {
+    tabId: "harness",
+    subgroupId: "self_heal",
+    label: "Proactive lint after edits",
+    description: "Auto run_lint on changed typed files after each edit batch (default on).",
+    valueKind: "boolean",
+  },
+  "AGENT_OPENROUTER_FUSION_PRESET": {
+    tabId: "models_api",
+    subgroupId: "routing",
+    label: "Fusion panel preset",
+    description:
+      "When AGENT_MODEL is openrouter/fusion: quality (frontier panel), budget (cheaper panel), or custom (AGENT_OPENROUTER_FUSION_ANALYSIS_MODELS).",
+    valueKind: "enum",
+    enumValues: ["quality", "budget", "custom"] as const,
+  },
+  "AGENT_OPENROUTER_FUSION_ANALYSIS_MODELS": {
+    tabId: "models_api",
+    subgroupId: "routing",
+    label: "Fusion custom panel",
+    description: "Comma-separated model slugs (1–8) for Fusion when preset=custom.",
+    valueKind: "string",
+  },
+  "AGENT_OPENROUTER_FUSION_JUDGE": {
+    tabId: "models_api",
+    subgroupId: "routing",
+    label: "Fusion judge model",
+    description: "Judge / final writer slug for Fusion (empty = preset default).",
+    valueKind: "string",
+  },
+  "AGENT_OPENROUTER_FUSION_MAX_TOOL_CALLS": {
+    tabId: "models_api",
+    subgroupId: "routing",
+    label: "Fusion max tool calls",
+    description: "Max web_search/web_fetch steps per Fusion panel member and judge (1–16).",
+    valueKind: "string",
   },
   "AGENT_SAFETY_JUDGE": {
     tabId: "safety",

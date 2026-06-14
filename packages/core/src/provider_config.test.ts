@@ -187,6 +187,10 @@ test("openrouter_default strategy omits provider field", () => {
   }
 });
 
+test("resolveProviderRouting returns null for OpenRouter Fusion router", () => {
+  assert.equal(resolveProviderRouting({ modelSlug: "openrouter/fusion" }), null);
+});
+
 test("buildOpenRouterChatRequestExtras works for managed inference proxy base", () => {
   const prev = saveEnv(ROUTING_ENV_KEYS);
   try {

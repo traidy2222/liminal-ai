@@ -572,6 +572,14 @@ export {
   buildAdaptiveProtocolSuffix,
 } from "./shared/systemPrompt.js";
 export type { ProtocolIntentHint } from "./shared/systemPrompt.js";
+export {
+  buildHarnessCapabilityDomains,
+  buildHarnessProductFacts,
+  buildHarnessToolManifest,
+  buildLiminalRuntimeIdentityBlock,
+  countCatalogFamilies,
+  countCatalogToolNames,
+} from "./shared/harness_runtime_prompt.js";
 export { buildPersonaBlock, buildRichPersonaBlock } from "./families/harness_ui/persona_presets.js";
 export type { PersonaProfile, SpeechStyle, PersonaTone } from "./families/harness_ui/persona_presets.js";
 export { applyLazyRegistrationPolicy, TOOL_FAMILIES } from "./tool_catalog.js";

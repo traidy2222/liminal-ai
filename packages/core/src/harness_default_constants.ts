@@ -92,6 +92,8 @@ export const HARNESS_ENV_DEFAULTS: Readonly<Record<string, string>> = {
   AGENT_INFERENCE_MODE: "auto",
   /** When 1, auto mode uses Vireon managed inference for entitled Pro+ even if AGENT_API_KEY is set. */
   AGENT_INFERENCE_PREFER_MANAGED: "1",
+  /** auto | bedrock | openrouter | kimchi — upstream preference on Vireon managed inference (x-vireon-managed-provider). */
+  AGENT_MANAGED_PROVIDER: "auto",
   AGENT_INFERENCE_BASE_URL: "https://api.vireondynamics.com/v1/inference",
   AGENT_INFERENCE_SESSION_URL: "https://www.vireondynamics.com/api/inference/session",
   AGENT_INFERENCE_SESSION_TOKEN: "",
@@ -154,6 +156,20 @@ export const HARNESS_ENV_DEFAULTS: Readonly<Record<string, string>> = {
   AGENT_SELF_HEAL_REPO_WIDE: "0",
   AGENT_SELF_HEAL_STOP_ON_NO_PROGRESS: "1",
   AGENT_SELF_HEAL_LINT_MODE: "tsc",
+  /** After typed file edits, harness auto-runs run_lint and injects [VERIFY RESULT] before the next round. */
+  AGENT_PROACTIVE_VERIFY: "1",
+  AGENT_PROACTIVE_VERIFY_LINT: "1",
+  /** @deprecated Use AGENT_PROACTIVE_VERIFY — kept for prefs migration. */
+  AGENT_VERIFY_BEFORE_DONE: "1",
+  AGENT_VERIFY_BEFORE_DONE_AUTO_LINT: "1",
+  /** Fusion panel preset when AGENT_MODEL=openrouter/fusion: quality | budget | custom. */
+  AGENT_OPENROUTER_FUSION_PRESET: "quality",
+  /** Custom Fusion panel (comma-separated, 1–8 slugs) when preset=custom. */
+  AGENT_OPENROUTER_FUSION_ANALYSIS_MODELS: "",
+  /** Judge / final writer model for Fusion (empty = preset default). */
+  AGENT_OPENROUTER_FUSION_JUDGE: "",
+  /** Max web_search/web_fetch steps per Fusion panel member + judge (1–16). */
+  AGENT_OPENROUTER_FUSION_MAX_TOOL_CALLS: "4",
   AGENT_SAFETY_JUDGE: "0",          // was "1": LLM single-token call on every approval gate
   AGENT_WEB_READABILITY: "1",
   AGENT_WEB_RESEARCH: "1",

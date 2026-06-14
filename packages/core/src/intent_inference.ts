@@ -1,6 +1,7 @@
 import OpenAI from "openai";
 import { completeChatJson, getFastModelSlug } from "./router.js";
 import { effectiveHarnessEnvRaw } from "./harness_effective_env.js";
+import { isOpenRouterFusionModel } from "./openrouter_fusion.js";
 import {
   applyFallbackReasoningFields,
   fallbackReasoningBudget,
@@ -120,6 +121,29 @@ export function buildRoutingProfile(
 
   if (effectiveHarnessEnvRaw("AGENT_INTENT_ROUTING") !== "1") return noOp;
   if (!inference) return noOp;
+
+  // Fusion is a deliberate multi-model router — never downgrade to the fast tier.
+  if (isOpenRouterFusionModel(mainModel)) {
+    const intent = inference.intent;
+    const maxTokens =
+      intent === "research" || intent === "creative" || intent === "coding" || intent === "execution"
+        ? 16000
+        : intent === "knowledge"
+          ? 8192
+          : 4096;
+    return {
+      modelSlug: mainModel,
+      toolFilter: null,
+      maxTokens,
+      applied: false,
+      intent,
+      complexity: inference.complexity ?? "normal",
+      source: inference.source ?? "default",
+      confidence: inference.confidence ?? 0,
+      toolFilterActive: false,
+      routingReason: "fusion_main_pinned",
+    };
+  }
 
   const threshold = resolveIntentFastThreshold();
   const confidence = inference.confidence ?? 0;

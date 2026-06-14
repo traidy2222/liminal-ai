@@ -20,6 +20,7 @@ import {
 import { isManagedInferenceBaseUrl } from "./inference_session.js";
 import { isKimchiApiBaseUrl, KIMCHI_API_KEY_ENV_NAMES } from "./kimchi_provider.js";
 import { isOpenRouterApiBaseUrl } from "./openrouter_session.js";
+import { isOpenRouterRouterModel } from "./openrouter_fusion.js";
 
 // ─── Provider routing (OpenRouter sticky cache + dynamic price sort) ─────────
 
@@ -225,6 +226,7 @@ function buildDynamicRouting(
  * Returns null for `openrouter_default` or non-OpenRouter bases (caller should omit field).
  */
 export function resolveProviderRouting(ctx: ProviderRoutingContext): ProviderRouting | null {
+  if (isOpenRouterRouterModel(ctx.modelSlug)) return null;
   const strategy = resolveProviderStrategy();
   if (strategy === "openrouter_default") return null;
   if (strategy === "cache_first") {

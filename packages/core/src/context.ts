@@ -1,4 +1,5 @@
 import type { Message, ContextConfig, ContextSnapshot, EpistemicState } from "./types.js";
+import type { ToolRegistry } from "./registry.js";
 import {
   emptyEpistemicState,
   mergeEpistemicState,
@@ -292,6 +293,9 @@ export class ContextManager {
   private effectiveWarmRounds: number;
   private activeContextPolicy: ContextPolicy | null = null;
 
+  /** Live tool registry for dynamic protocol manifest (optional). */
+  private protocolRegistry?: ToolRegistry;
+
   constructor(config: ContextConfig) {
     this.config = config;
     this.effectiveModelMaxTokens = config.modelMaxTokens;
@@ -330,10 +334,17 @@ export class ContextManager {
     return this.effectiveWarmRounds;
   }
 
+  /** Bind the live registry so protocolDynamicBuilder can emit a tool manifest. */
+  setProtocolRegistry(registry: ToolRegistry): void {
+    this.protocolRegistry = registry;
+  }
+
   /** Recompute protocol suffix from current tool names (root + child registries). */
   refreshProtocolDynamic(toolNames: string[]): void {
     const builder = this.config.protocolDynamicBuilder;
-    this.protocolDynamicSuffix = builder ? builder(toolNames, this.currentIntentHint) : "";
+    this.protocolDynamicSuffix = builder
+      ? builder(toolNames, this.currentIntentHint, this.protocolRegistry)
+      : "";
   }
 
   /** Update the per-turn intent hint used to suppress irrelevant protocol sections. */

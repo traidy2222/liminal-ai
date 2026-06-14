@@ -103,8 +103,8 @@ const harness = runWithWorkspaceRoot(chatMeta.workspaceRoot, () =>
       modelMaxTokens: 128_000,
       thresholdFraction: 0.6,
       inceptionMessages: INCEPTION_MESSAGES,
-      protocolDynamicBuilder: (names, hint) =>
-        buildProtocolDynamicSuffix(names, (hint ?? "any") as import("@liminal/tools").ProtocolIntentHint),
+      protocolDynamicBuilder: (names, hint, registry) =>
+        buildProtocolDynamicSuffix(names, (hint ?? "any") as import("@liminal/tools").ProtocolIntentHint, registry),
     },
   })
 );

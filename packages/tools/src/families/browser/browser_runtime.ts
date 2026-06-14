@@ -448,6 +448,31 @@ export function formatDiagnosticsOutput(b: DiagnosticBuffers): string {
   );
 }
 
+/** True when buffered console/page/network signals indicate a broken page. */
+export function browserDiagnosticsHasErrors(b: DiagnosticBuffers): boolean {
+  if (b.pageErrors.length > 0) return true;
+  const consoleErr = b.consoleMsgs.some(
+    (line) =>
+      /\[(error|warning)\]/i.test(line) ||
+      (/\b(error|exception|uncaught|failed)\b/i.test(line) && !/\bno errors?\b/i.test(line))
+  );
+  if (consoleErr) return true;
+  return b.failedReqs.some((r) => /\b(404|500|net::ERR_|failed to load)\b/i.test(r));
+}
+
+/** Summarize error-level browser diagnostics for open sessions owned by a task. */
+export function collectBrowserDiagnosticsForTask(taskId: string): string | null {
+  const parts: string[] = [];
+  for (const s of sessions.values()) {
+    if (s.ownerTaskId !== taskId) continue;
+    if (!browserDiagnosticsHasErrors(s.diagnostics)) continue;
+    parts.push(
+      `SESSION ${s.sessionId} (${s.currentUrl}):\n${formatDiagnosticsOutput(s.diagnostics)}`
+    );
+  }
+  return parts.length > 0 ? parts.join("\n\n") : null;
+}
+
 function maxSessionsPerTask(): number {
   const n = parseInt(effectiveHarnessEnvRaw("AGENT_BROWSER_MAX_SESSIONS") ?? "2", 10);
   return Number.isFinite(n) ? Math.max(1, Math.min(4, n)) : 2;
@@ -969,7 +994,7 @@ export async function openBrowserSession(options: {
     page.setDefaultNavigationTimeout(options.navTimeoutMs);
 
     const diagnostics: DiagnosticBuffers = { consoleMsgs: [], pageErrors: [], failedReqs: [] };
-    if (options.includeConsole) attachDiagnostics(page, diagnostics);
+    attachDiagnostics(page, diagnostics);
 
     await page.goto(options.href, {
       waitUntil: options.waitUntil,
@@ -1718,7 +1743,7 @@ export async function runOneShotBrowserAct(options: {
     const context = await buildStealthContext(browser);
     const page = await context.newPage();
     const diagnostics: DiagnosticBuffers = { consoleMsgs: [], pageErrors: [], failedReqs: [] };
-    if (options.includeConsole) attachDiagnostics(page, diagnostics);
+    attachDiagnostics(page, diagnostics);
     await page.goto(options.href, {
       waitUntil: options.waitUntil,
       timeout: options.navTimeoutMs,

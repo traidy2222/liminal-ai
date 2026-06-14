@@ -1,10 +1,12 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import {
+  buildManagedInferenceClientHeaders,
   hasLocalProviderApiKey,
   inferencePreferManaged,
   resolveInferenceMode,
   resolveManagedOpenRouterCredentials,
+  resolveManagedProviderPreference,
   shouldRouteOpenRouterViaManaged,
 } from "./inference_provider.js";
 import { HARNESS_ENV_DEFAULTS } from "./harness_default_constants.js";
@@ -25,6 +27,13 @@ describe("inference_provider", () => {
       }),
       "managed"
     );
+  });
+
+  it("defaults managed provider preference to auto", () => {
+    assert.equal(resolveManagedProviderPreference(null), "auto");
+    assert.deepEqual(buildManagedInferenceClientHeaders(null), {
+      "x-vireon-managed-provider": "auto",
+    });
   });
 
   it("defaults prefer-managed to on from product defaults", () => {

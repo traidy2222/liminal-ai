@@ -17,12 +17,8 @@ import 'asset_url_resolver.dart';
 import 'html_embed_view.dart';
 import 'html_sanitizer.dart';
 import 'liminal_markdown_utils.dart';
+import 'markdown_style_sheet.dart';
 import 'video_embed.dart';
-
-bool _isRegisteredLanguage(String lang) {
-  const known = {'dart', 'javascript', 'json', 'python', 'typescript'};
-  return known.contains(lang.toLowerCase());
-}
 
 class LiminalMarkdownBlock extends StatelessWidget {
   const LiminalMarkdownBlock({
@@ -65,7 +61,7 @@ class LiminalMarkdownBlock extends StatelessWidget {
           },
           textStyle: Theme.of(context).textTheme.bodyLarge?.copyWith(
                 color: lim.text,
-                height: 1.5,
+                height: 1.72,
               ),
         );
       }
@@ -74,32 +70,13 @@ class LiminalMarkdownBlock extends StatelessWidget {
     return MarkdownBody(
       data: data,
       selectable: false,
+      softLineBreak: true,
       extensionSet: md.ExtensionSet.gitHubWeb,
-      styleSheet: MarkdownStyleSheet.fromTheme(Theme.of(context)).copyWith(
-        p: Theme.of(context).textTheme.bodyLarge?.copyWith(
-              color: lim.text,
-              height: 1.5,
-            ),
-        listBullet: Theme.of(context).textTheme.bodyLarge?.copyWith(color: lim.text),
-        h1: Theme.of(context).textTheme.titleLarge?.copyWith(color: lim.success),
-        h2: Theme.of(context).textTheme.titleMedium?.copyWith(color: lim.accent),
-        h3: Theme.of(context).textTheme.titleSmall?.copyWith(color: lim.text),
-        a: TextStyle(color: lim.accent, decoration: TextDecoration.underline),
-        code: TextStyle(
-          fontFamily: lim.fontFamilyMono,
-          fontSize: 13,
-          color: lim.text,
-          backgroundColor: lim.codeBackground,
-        ),
-        tableBorder: TableBorder.all(color: lim.border.withValues(alpha: 0.6)),
-        tableCellsPadding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-        blockquote: Theme.of(context).textTheme.bodyMedium?.copyWith(color: lim.textMuted),
-      ),
+      styleSheet: liminalMarkdownStyleSheet(context, lim),
       builders: {
         'pre': _PreElementBuilder(streaming: streaming, lim: lim),
         'blockquote': _AlertBlockquoteBuilder(lim: lim),
         'img': _ImageElementBuilder(lim: lim),
-        'a': _LinkElementBuilder(lim: lim),
       },
       onTapLink: (text, href, title) {
         if (href == null) return;
@@ -136,9 +113,7 @@ class _PreElementBuilder extends MarkdownElementBuilder {
       return HtmlEmbedView(html: code, streaming: streaming);
     }
 
-    final hasHighlight = lang != null && _isRegisteredLanguage(lang);
-
-    return _codeBlock(code, lang: hasHighlight ? lang : null);
+    return _codeBlock(code, lang: lang);
   }
 
   Widget _codeBlock(String code, {String? lang}) {
@@ -152,7 +127,7 @@ class _PreElementBuilder extends MarkdownElementBuilder {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          if (lang != null)
+          if (lang != null && lang.isNotEmpty)
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
               color: lim.surface.withValues(alpha: 0.9),
@@ -175,7 +150,7 @@ class _PreElementBuilder extends MarkdownElementBuilder {
                 fontFamily: lim.fontFamilyMono,
                 fontSize: 13,
                 color: lim.text,
-                height: 1.35,
+                height: 1.4,
               ),
             ),
           ),
@@ -197,17 +172,9 @@ class _AlertBlockquoteBuilder extends MarkdownElementBuilder {
     if (parsed != null) {
       return AlertCallout(type: parsed.type, body: parsed.body);
     }
-    return Container(
-      margin: const EdgeInsets.symmetric(vertical: 8),
-      padding: const EdgeInsets.only(left: 12),
-      decoration: BoxDecoration(
-        border: Border(left: BorderSide(color: lim.border, width: 3)),
-      ),
-      child: Text(
-        text,
-        style: TextStyle(color: lim.textMuted, height: 1.4),
-      ),
-    );
+    // Default blockquote — let MarkdownStyleSheet.blockquote* handle visuals;
+    // return null so flutter_markdown renders children inline in the quote style.
+    return null;
   }
 }
 
@@ -255,41 +222,6 @@ class _ImageElementBuilder extends MarkdownElementBuilder {
             'Image failed to load',
             style: TextStyle(color: lim.textDim, fontSize: 12),
           ),
-        ),
-      ),
-    );
-  }
-}
-
-class _LinkElementBuilder extends MarkdownElementBuilder {
-  _LinkElementBuilder({required this.lim});
-
-  final LiminalTokens lim;
-
-  @override
-  Widget? visitElementAfter(md.Element element, TextStyle? preferredStyle) {
-    final href = element.attributes['href'] ?? '';
-    final label = element.textContent;
-    final embed = detectVideoEmbed(href.isNotEmpty ? href : label);
-    if (embed != null) {
-      return HtmlEmbedView(
-        html: videoEmbedIframeHtml(embed),
-        backgroundColor: '#010305',
-      );
-    }
-    return GestureDetector(
-      onTap: () {
-        final uri = Uri.tryParse(href);
-        if (uri != null) {
-          launchUrl(uri, mode: LaunchMode.externalApplication);
-        }
-      },
-      child: Text(
-        label,
-        style: TextStyle(
-          color: lim.accent,
-          decoration: TextDecoration.underline,
-          decorationStyle: TextDecorationStyle.dotted,
         ),
       ),
     );

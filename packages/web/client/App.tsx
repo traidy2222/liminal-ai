@@ -1560,12 +1560,17 @@ export function App() {
   const [vireonConnectNotice, setVireonConnectNotice] = useState<string | null>(null);
   const [settingsManagedRoute, setSettingsManagedRoute] = useState(false);
 
+  const inferenceModeDraft = (settingsEnvDraft["AGENT_INFERENCE_MODE"] ?? "auto").trim().toLowerCase();
+
   const showManagedInferenceModels = useMemo(() => {
-    if (settingsManagedRoute) return true;
-    if (!vireonConnected) return false;
-    const mode = (settingsEnvDraft["AGENT_INFERENCE_MODE"] ?? "auto").trim().toLowerCase();
-    return mode === "managed" || mode === "auto";
-  }, [settingsManagedRoute, vireonConnected, settingsEnvDraft]);
+    if (inferenceModeDraft === "byok") return false;
+    if (inferenceModeDraft === "managed") return vireonConnected;
+    return vireonConnected;
+  }, [inferenceModeDraft, vireonConnected]);
+
+  const showByokProviderPresets = useMemo(() => {
+    return inferenceModeDraft !== "managed";
+  }, [inferenceModeDraft]);
 
   const submittingRef = useRef(false);
   const sessionStartRef = useRef<number | null>(null);
@@ -2462,7 +2467,8 @@ export function App() {
         onVireonSignOut={() => void handleVireonSignOut()}
         teamMemoryStatus={teamMemoryStatus}
         orgId={orgId}
-        managedRoute={showManagedInferenceModels}
+        showManagedModels={showManagedInferenceModels}
+        showByokPresets={showByokProviderPresets}
       />
 
       {/* ── Approval modal ────────────────────────────────────────────────────── */}

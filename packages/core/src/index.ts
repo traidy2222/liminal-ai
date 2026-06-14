@@ -373,6 +373,18 @@ export type { EffortLevel } from "./output_effort.js";
 export { buildResearchTurnInjection } from "./research_depth.js";
 export { buildCodingTurnInjection } from "./coding_autonomy.js";
 export {
+  proactiveVerificationEnabled,
+  proactiveLintAfterEditsEnabled,
+  toolCallCountsAsVerification,
+  classifyChangedFiles,
+  buildProactiveLintPassMessage,
+  buildProactiveLintFailMessage,
+  buildProactiveBrowserDiagnosticMessage,
+  buildProactiveWebAssetHintMessage,
+  CONTINUE_AFTER_TOOLS_MESSAGE,
+  BROWSER_VERIFY_TOOL_NAMES,
+} from "./proactive_verification.js";
+export {
   normalizeFilePathKey,
   bumpFileRevision,
   getFileRevision,
@@ -569,6 +581,17 @@ export {
 } from "./openrouter_session.js";
 export type { OpenRouterSessionRequestExtras } from "./openrouter_session.js";
 export { resolveProviderConfig, isProviderApiKeyConfigured, resolveVisionProviderConfig, resolveVisionProviderConfigAsync, buildProviderRouting, resolveProviderRouting, buildOpenRouterChatRequestExtras, resolveProviderStrategy, sessionEpochBumpOn429Enabled, isOpenRouterStealthModel, OPENROUTER_STEALTH_MODEL_SLUGS } from "./provider_config.js";
+export {
+  OPENROUTER_FUSION_MODEL_SLUG,
+  OPENROUTER_FUSION_QUALITY_PANEL,
+  OPENROUTER_FUSION_BUDGET_PANEL,
+  isOpenRouterFusionModel,
+  isOpenRouterRouterModel,
+  buildOpenRouterFusionPlugin,
+  buildOpenRouterFusionRequestExtras,
+  resolveOpenRouterFusionPreset,
+} from "./openrouter_fusion.js";
+export type { OpenRouterFusionPlugin, OpenRouterFusionPreset, OpenRouterFusionRequestExtras } from "./openrouter_fusion.js";
 export type { ProviderConfig, ProviderConfigOverrides, VisionProviderConfig, ProviderRouting, ProviderRoutingContext, ProviderStrategy, ProviderSortAxis, OpenRouterChatRequestExtras } from "./provider_config.js";
 export { ProviderRouteState } from "./provider_route_state.js";
 export type { ProviderRouteSnapshot } from "./provider_route_state.js";
@@ -587,6 +610,9 @@ export {
   fetchInferenceSession,
   fetchInferenceUsageStatus,
   fetchManagedInferenceModels,
+  buildManagedInferenceClientHeaders,
+  resolveManagedProviderPreference,
+  MANAGED_INFERENCE_PROVIDER_HEADER,
   hasLocalProviderApiKey,
   inferencePreferManaged,
   describeProviderError,
@@ -620,7 +646,9 @@ export type {
   InferenceSessionResult,
   InferenceUsageStatus,
   ManagedInferenceModel,
+  ManagedInferenceProviderRef,
   ManagedInferenceModelsResult,
+  ManagedProviderPreference,
   OpenRouterRoute,
   ManagedOpenRouterCredentials,
 } from "./inference_provider.js";

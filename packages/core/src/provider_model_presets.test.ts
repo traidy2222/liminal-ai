@@ -191,6 +191,14 @@ test("resolveProviderPresetId matches kimchi minimax pack", () => {
 
 
 
+test("openrouter fusion presets pin fusion model and panel env", () => {
+  const quality = PROVIDER_MODEL_PRESETS.find((p) => p.id === "openrouter-fusion-quality")!;
+  assert.equal(quality.harnessEnvPatch.AGENT_MODEL, OPENROUTER_MODEL_SLUG.FUSION);
+  assert.equal(quality.harnessEnvPatch.AGENT_OPENROUTER_FUSION_PRESET, "quality");
+  const budget = PROVIDER_MODEL_PRESETS.find((p) => p.id === "openrouter-fusion-budget")!;
+  assert.equal(budget.harnessEnvPatch.AGENT_OPENROUTER_FUSION_PRESET, "budget");
+});
+
 test("latest vendor packs use current OpenRouter slugs", () => {
 
   const google = PROVIDER_MODEL_PRESETS.find((p) => p.id === "google-gemini-3.5")!;

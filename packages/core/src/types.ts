@@ -1,4 +1,5 @@
 import type { ChatCompletionMessageParam } from "openai/resources/chat/completions.js";
+import type { ToolRegistry } from "./registry.js";
 import type { ComposeDockWirePreview } from "./compose_dock_preview.js";
 import type { TaskOrchestrator } from "./orchestrator.js";
 import type { WorldContextOptions } from "./world_context.js";
@@ -152,7 +153,7 @@ export interface ContextConfig {
    * Appended to inception message[1] (protocol core) each send from registered tool names.
    * Keeps core prompt small; expanded rules only when matching tools exist (e.g. child agents).
    */
-  protocolDynamicBuilder?: (toolNames: string[], intentHint?: string) => string;
+  protocolDynamicBuilder?: (toolNames: string[], intentHint?: string, registry?: ToolRegistry) => string;
   /**
    * Optional async callback that produces a 2-3 sentence causal narrative summary for a
    * batch of compressed tool rounds. Used by AGENT_COMPRESS_SEMANTIC=1 to replace

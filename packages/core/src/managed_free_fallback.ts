@@ -12,6 +12,7 @@ import {
   buildHarnessModelPackEnvPatch,
   OPENROUTER_MODEL_SLUG,
 } from "./provider_model_presets.js";
+import { isOpenRouterFusionModel } from "./openrouter_fusion.js";
 import { isOpenRouterStealthModel } from "./provider_config.js";
 import type { RuntimePreferences } from "./runtime_prefs.js";
 
@@ -33,7 +34,10 @@ export function resolveManagedFreeFallbackMainModel(prefs?: RuntimePreferences |
 export function isModelIncompatibleWithManagedProxy(model: string): boolean {
   const m = model.trim().toLowerCase();
   if (!m) return false;
+  // Fusion is served by the managed proxy's OpenRouter upstream (plugins forwarded).
+  if (isOpenRouterFusionModel(m)) return false;
   if (m === OPENROUTER_MODEL_SLUG.FREE_ROUTER) return true;
+  if (m === "openrouter/auto") return true;
   if (m.startsWith("openrouter/")) return true;
   if (m.includes(":free")) return true;
   if (m === resolveManagedFreeFallbackMainModel(null).toLowerCase()) return true;

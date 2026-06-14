@@ -5,6 +5,19 @@
 import type { AgentHarness, RuntimePreferences, ToolRegistry } from "@liminal/core";
 import { effectiveHarnessEnvRaw, resolveHarnessEnvRaw } from "@liminal/core";
 
+/** Unique tool names declared across TOOL_FAMILIES (baseline catalog size). */
+export function countCatalogToolNames(): number {
+  const seen = new Set<string>();
+  for (const def of Object.values(TOOL_FAMILIES)) {
+    for (const t of def.tools) seen.add(t);
+  }
+  return seen.size;
+}
+
+export function countCatalogFamilies(): number {
+  return Object.keys(TOOL_FAMILIES).length;
+}
+
 /** Tool families: id -> description + member tool names. */
 export const TOOL_FAMILIES: Record<string, { description: string; tools: readonly string[] }> = {
   reasoning: {

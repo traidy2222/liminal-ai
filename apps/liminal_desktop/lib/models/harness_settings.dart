@@ -275,17 +275,39 @@ class ManagedInferenceModel {
     required this.id,
     required this.label,
     required this.family,
+    this.providers = const [],
   });
 
   final String id;
   final String label;
   final String family;
+  final List<ManagedInferenceProviderRef> providers;
 
   factory ManagedInferenceModel.fromJson(Map<String, dynamic> json) {
+    final rawProviders = json['providers'] as List<dynamic>? ?? const [];
     return ManagedInferenceModel(
       id: json['id'] as String? ?? '',
       label: json['label'] as String? ?? json['id'] as String? ?? '',
       family: json['family'] as String? ?? 'other',
+      providers: rawProviders
+          .map((e) => ManagedInferenceProviderRef.fromJson(
+                Map<String, dynamic>.from(e as Map),
+              ))
+          .toList(),
+    );
+  }
+}
+
+class ManagedInferenceProviderRef {
+  const ManagedInferenceProviderRef({required this.provider, required this.id});
+
+  final String provider;
+  final String id;
+
+  factory ManagedInferenceProviderRef.fromJson(Map<String, dynamic> json) {
+    return ManagedInferenceProviderRef(
+      provider: json['provider'] as String? ?? '',
+      id: json['id'] as String? ?? '',
     );
   }
 }

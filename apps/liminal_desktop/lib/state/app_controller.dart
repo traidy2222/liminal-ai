@@ -32,6 +32,18 @@ import 'message_models.dart';
 
 export '../core/connection_phase.dart' show ConnectionPhase, AppConnectionPhase;
 
+String _readHarnessEnvField(
+  HarnessSettingsSnapshot? snap,
+  String key,
+  String fallback,
+) {
+  if (snap == null) return fallback;
+  for (final f in snap.fields) {
+    if (f.key == key && f.value.trim().isNotEmpty) return f.value.trim();
+  }
+  return fallback;
+}
+
 /// App shell orchestrator: sidecar lifecycle, protocol transport, config, chat list.
 ///
 /// Per-chat transcript state lives in [ChatSessionController] instances via
@@ -510,8 +522,14 @@ class AppController extends ChangeNotifier {
   }
 
   Future<void> loadManagedInferenceModels() async {
-    final showManaged = harnessSettings?.provider.showManagedInference == true;
-    if (!_protocol.isConnected || !vireonAccount.connected || !showManaged) {
+    final snap = harnessSettings;
+    final mode = (snap?.provider.inferenceMode?.trim().isNotEmpty == true
+            ? snap!.provider.inferenceMode!
+            : _readHarnessEnvField(snap, 'AGENT_INFERENCE_MODE', 'auto'))
+        .trim()
+        .toLowerCase();
+    final showManaged = _protocol.isConnected && vireonAccount.connected && mode != 'byok';
+    if (!showManaged) {
       managedInferenceModels = null;
       managedInferenceModelsError = null;
       managedInferenceModelsLoading = false;
@@ -547,6 +565,8 @@ class AppController extends ChangeNotifier {
   Future<bool> patchManagedInferenceModels({
     String? mainModel,
     String? fastModel,
+    String? managedProvider,
+    String? inferenceMode,
   }) async {
     if (!_protocol.isConnected) return false;
     final envPatch = <String, String>{};
@@ -556,11 +576,20 @@ class AppController extends ChangeNotifier {
     if (fastModel != null && fastModel.trim().isNotEmpty) {
       envPatch['AGENT_FAST_MODEL'] = fastModel.trim();
     }
+    if (managedProvider != null && managedProvider.trim().isNotEmpty) {
+      envPatch['AGENT_MANAGED_PROVIDER'] = managedProvider.trim();
+    }
+    if (inferenceMode != null && inferenceMode.trim().isNotEmpty) {
+      envPatch['AGENT_INFERENCE_MODE'] = inferenceMode.trim();
+    }
     if (envPatch.isEmpty) return false;
 
     final providerPatch = <String, String>{};
     if (mainModel != null && mainModel.trim().isNotEmpty) {
       providerPatch['model'] = mainModel.trim();
+    }
+    if (inferenceMode != null && inferenceMode.trim().isNotEmpty) {
+      providerPatch['inferenceMode'] = inferenceMode.trim();
     }
 
     final result = await _protocol.send('update_settings', {
@@ -572,6 +601,9 @@ class AppController extends ChangeNotifier {
     if (result.ok) {
       await loadHarnessSettings();
       await refreshConfig();
+      if (inferenceMode != null || managedProvider != null) {
+        await loadManagedInferenceModels();
+      }
     }
     return result.ok;
   }

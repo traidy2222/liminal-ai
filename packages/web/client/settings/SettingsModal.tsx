@@ -136,8 +136,10 @@ export interface SettingsModalProps {
   vireonBusy?: boolean;
   teamMemoryStatus?: "active" | "offline" | "not_entitled";
   orgId?: string | null;
-  /** Pro managed inference — show Bedrock model picker instead of BYOK presets. */
-  managedRoute?: boolean;
+  /** Show Vireon managed model catalog (inference mode is not byok). */
+  showManagedModels?: boolean;
+  /** Show BYOK backend/preset pickers (inference mode is not managed-only). */
+  showByokPresets?: boolean;
 }
 
 export function SettingsModal({
@@ -169,7 +171,8 @@ export function SettingsModal({
   vireonBusy = false,
   teamMemoryStatus = "not_entitled",
   orgId = null,
-  managedRoute = false,
+  showManagedModels = false,
+  showByokPresets = true,
 }: SettingsModalProps) {
   const [activeTabId, setActiveTabId] = useState<string>("models_api");
   const [search, setSearch] = useState("");
@@ -436,12 +439,40 @@ export function SettingsModal({
                       </div>
                     )}
                     <div style={{ fontSize: 10, color: "#778899", marginBottom: 8 }}>{providerHintText}</div>
-                    {managedRoute ? (
+                    <div style={{ display: "grid", gridTemplateColumns: "120px 1fr", gap: 8, alignItems: "center", marginBottom: 10 }}>
+                      <span style={{ fontSize: 11, color: "#aabbcc" }}>inference</span>
+                      <select
+                        disabled={saving || loading}
+                        value={envDraft["AGENT_INFERENCE_MODE"] ?? "auto"}
+                        onChange={(e) => onEnvChange("AGENT_INFERENCE_MODE", e.target.value)}
+                        aria-label="Inference mode"
+                        style={{
+                          width: "100%",
+                          maxWidth: 520,
+                          fontSize: 12,
+                          padding: "8px 10px",
+                          borderRadius: 2,
+                          border: "1px solid rgba(var(--lim-accent-rgb),0.2)",
+                          background: "rgba(0,10,20,0.95)",
+                          color: "#dde8f0",
+                          fontFamily: "monospace",
+                        }}
+                      >
+                        <option value="auto">
+                          auto — Pro uses Vireon credits when signed in (BYOK fallback if configured)
+                        </option>
+                        <option value="byok">byok — always your API key / chosen base URL</option>
+                        <option value="managed">managed — always Vireon proxy (Pro license)</option>
+                      </select>
+                    </div>
+                    {showManagedModels ? (
                       <ManagedBedrockModelsSection
                         disabled={saving || loading || providerPresetLocked}
                         mainModel={providerModel}
                         fastModel={envDraft["AGENT_FAST_MODEL"] ?? ""}
+                        managedProvider={envDraft["AGENT_MANAGED_PROVIDER"] ?? "auto"}
                         vireonConnected={Boolean(vireonConnected)}
+                        onManagedProvider={(v) => onEnvChange("AGENT_MANAGED_PROVIDER", v)}
                         onMainModel={(modelId) => {
                           onProviderModel(modelId);
                           onEnvChange("AGENT_MODEL", modelId);
@@ -449,7 +480,7 @@ export function SettingsModal({
                         onFastModel={(modelId) => onEnvChange("AGENT_FAST_MODEL", modelId)}
                       />
                     ) : null}
-                    {!managedRoute ? (
+                    {showByokPresets ? (
                     <>
                     <div style={{ display: "grid", gridTemplateColumns: "120px 1fr", gap: 8, alignItems: "center", marginBottom: 10 }}>
                       <span style={{ fontSize: 11, color: "#aabbcc" }}>provider</span>
@@ -538,7 +569,7 @@ export function SettingsModal({
                     </div>
                     </>
                     ) : null}
-                    <div style={{ display: "grid", gridTemplateColumns: "120px 1fr", gap: 8, alignItems: "center", marginBottom: 6 }}>
+                    <div style={{ display: "grid", gridTemplateColumns: "120px 1fr", gap: 8, alignItems: "center", marginBottom: 6, marginTop: 8 }}>
                       <span style={{ fontSize: 11, color: "#aabbcc", display: "flex", alignItems: "center", gap: 6 }}>
                         model
                         {providerModelLocked ? (
@@ -602,32 +633,6 @@ export function SettingsModal({
                           ? "Loaded (value never shown in UI)"
                           : "Not configured — set AGENT_API_KEY or OPENROUTER_API_KEY in .env"}
                       </div>
-                    </div>
-                    <div style={{ display: "grid", gridTemplateColumns: "120px 1fr", gap: 8, alignItems: "center", marginTop: 8 }}>
-                      <span style={{ fontSize: 11, color: "#aabbcc" }}>inference</span>
-                      <select
-                        disabled={saving || loading}
-                        value={envDraft["AGENT_INFERENCE_MODE"] ?? "auto"}
-                        onChange={(e) => onEnvChange("AGENT_INFERENCE_MODE", e.target.value)}
-                        aria-label="Inference mode"
-                        style={{
-                          width: "100%",
-                          maxWidth: 520,
-                          fontSize: 12,
-                          padding: "8px 10px",
-                          borderRadius: 2,
-                          border: "1px solid rgba(var(--lim-accent-rgb),0.2)",
-                          background: "rgba(0,10,20,0.95)",
-                          color: "#dde8f0",
-                          fontFamily: "monospace",
-                        }}
-                      >
-                        <option value="auto">
-                          auto — Pro uses Vireon included credits (even if .env has a key)
-                        </option>
-                        <option value="byok">byok — always your API key</option>
-                        <option value="managed">managed — always Vireon proxy (Pro license)</option>
-                      </select>
                     </div>
                   </div>
                 ) : null}

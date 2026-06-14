@@ -350,7 +350,8 @@ function makeEvalConfig(maxRounds: number, timeoutMs: number): AgentConfig {
       modelMaxTokens: 32_000,
       thresholdFraction: 0.8,
       inceptionMessages: INCEPTION_MESSAGES,
-      protocolDynamicBuilder: (names, hint) => buildProtocolDynamicSuffix(names, (hint ?? "any") as import("@liminal/tools").ProtocolIntentHint),
+      protocolDynamicBuilder: (names, hint, registry) =>
+        buildProtocolDynamicSuffix(names, (hint ?? "any") as import("@liminal/tools").ProtocolIntentHint, registry),
       compressionGuideline:
         "Preserve file paths, error codes, and user-stated constraints when summarizing older tool rounds.",
     },

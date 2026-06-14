@@ -18,6 +18,7 @@ import {
 } from "@liminal/core";
 import type { PersonaArtifactId } from "@liminal/core/persona-bootstrap-progress";
 import type { PersonaProfile } from "./persona_presets.js";
+import { buildHarnessCapabilityDomains } from "../../shared/harness_runtime_prompt.js";
 import {
   PersonaGenerationPreview,
   personaGenerationStreamEnabled,
@@ -96,36 +97,10 @@ export interface PersonaSoulArtifactsOptions {
 
 /**
  * Map registered tool names → compact capability-domain summary for persona generation.
- * Returns a comma-separated string of human-readable domains, or empty string if none match.
+ * @deprecated Import from harness_runtime_prompt.js — alias kept for callers.
  */
 export function buildHarnessCapabilitySummary(toolNames: string[]): string {
-  const has = (re: RegExp) => toolNames.some((n) => re.test(n));
-  const cats: string[] = [];
-  if (has(/^(read_file|write_file|edit_file|list_dir|multi_file_apply|move_file|copy_file|mkdir_p)/))
-    cats.push("file read/write");
-  if (has(/^(run_shell|run_background|kill_process|list_processes|read_process_output)/))
-    cats.push("shell execution");
-  if (has(/^(web_search|web_fetch)/))
-    cats.push("web search + live fetch");
-  if (has(/^(remember|recall\b|recall_type|recall_relevant|search_memory|memory_query|memory_consolidate)/))
-    cats.push("persistent memory across sessions");
-  if (has(/^(vault_write|vault_read|vault_search|vault_list|vault_links)/))
-    cats.push("knowledge vault");
-  if (has(/^(git_status|git_diff|git_log|git_branch|git_commit)/))
-    cats.push("git");
-  if (has(/^(execute_code|run_tests|run_lint|ast_grep|symbol_index|find_references)/))
-    cats.push("code execution + intelligence");
-  if (has(/^vision_analyze/))
-    cats.push("image analysis");
-  if (has(/^(browser_open|browser_act)/))
-    cats.push("browser automation");
-  if (has(/^(spawn_agent|wait_for_agents)/))
-    cats.push("multi-agent orchestration");
-  if (has(/^markets_quote/))
-    cats.push("live market data");
-  if (has(/^doc_(plan|render|compose)/))
-    cats.push("document generation");
-  return cats.join(", ");
+  return buildHarnessCapabilityDomains(toolNames);
 }
 
 function soulSliceArtifactId(slice: "identity" | "voice" | "stance" | "rails"): PersonaArtifactId {

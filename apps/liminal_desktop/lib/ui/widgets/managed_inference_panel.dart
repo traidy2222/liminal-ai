@@ -5,6 +5,13 @@ import '../layout/liminal_spacing.dart';
 import '../theme/liminal_theme_extension.dart';
 import '../theme/liminal_tokens.dart';
 
+const _managedProviderOptions = <MapEntry<String, String>>[
+  MapEntry('auto', 'auto — routing + failover'),
+  MapEntry('bedrock', 'AWS Bedrock'),
+  MapEntry('openrouter', 'OpenRouter'),
+  MapEntry('kimchi', 'Cast AI (Kimchi)'),
+];
+
 class ManagedInferencePanel extends StatelessWidget {
   const ManagedInferencePanel({
     super.key,
@@ -16,6 +23,8 @@ class ManagedInferencePanel extends StatelessWidget {
     required this.saving,
     required this.onMainModel,
     required this.onFastModel,
+    required this.managedProvider,
+    required this.onManagedProvider,
     this.upstream,
   });
 
@@ -25,9 +34,11 @@ class ManagedInferencePanel extends StatelessWidget {
   final bool loading;
   final String? error;
   final bool saving;
-  final String? upstream;
+  final String managedProvider;
+  final ValueChanged<String> onManagedProvider;
   final ValueChanged<String> onMainModel;
   final ValueChanged<String> onFastModel;
+  final String? upstream;
 
   List<DropdownMenuItem<String>> _modelItems(
     List<ManagedInferenceModel> models,
@@ -70,7 +81,11 @@ class ManagedInferencePanel extends StatelessWidget {
             value: row.id,
             child: Padding(
               padding: const EdgeInsets.only(left: 8),
-              child: Text(row.id, overflow: TextOverflow.ellipsis, style: modelStyle),
+              child: Text(
+                _optionLabel(row),
+                overflow: TextOverflow.ellipsis,
+                style: modelStyle,
+              ),
             ),
           ),
         );
@@ -84,12 +99,24 @@ class ManagedInferencePanel extends StatelessWidget {
     return null;
   }
 
+  String _optionLabel(ManagedInferenceModel row) {
+    final providers = row.providers.map((p) => p.provider).where((p) => p.isNotEmpty).toList();
+    final badge = providers.length > 1
+        ? providers.join(' + ')
+        : (providers.isNotEmpty ? providers.first : '');
+    final base = row.label.isNotEmpty && row.label != row.id ? row.label : row.id;
+    return badge.isEmpty ? base : '$base · $badge';
+  }
+
   @override
   Widget build(BuildContext context) {
     final lim = LiminalTheme.of(context);
     final theme = Theme.of(context);
     final models = catalog?.models ?? const <ManagedInferenceModel>[];
-    final upstreamLabel = upstream ?? catalog?.upstream ?? 'bedrock';
+    final upstreamRaw = upstream ?? catalog?.upstream ?? 'managed';
+    final upstreamLabel = upstreamRaw == 'hybrid'
+        ? 'hybrid (Bedrock + OpenRouter + Kimchi)'
+        : upstreamRaw;
 
     InputDecoration fieldDecoration() => InputDecoration(
           isDense: true,
@@ -119,11 +146,31 @@ class ManagedInferencePanel extends StatelessWidget {
           ),
           const SizedBox(height: LiminalSpacing.xs),
           Text(
-            'Pro routing through Vireon — no OpenRouter or Kimchi API key required.',
+            'Pick upstream provider and models from the Vireon catalog (${models.length} loaded).',
             style: theme.textTheme.bodySmall?.copyWith(
               color: lim.textMuted,
               height: 1.45,
             ),
+          ),
+          const SizedBox(height: LiminalSpacing.md),
+          Text('Upstream preference', style: theme.textTheme.titleSmall),
+          const SizedBox(height: LiminalSpacing.xs),
+          DropdownButtonFormField<String>(
+            value: _managedProviderOptions.any((e) => e.key == managedProvider)
+                ? managedProvider
+                : 'auto',
+            decoration: fieldDecoration(),
+            dropdownColor: lim.panel,
+            style: theme.textTheme.bodyMedium?.copyWith(color: lim.text),
+            items: [
+              for (final opt in _managedProviderOptions)
+                DropdownMenuItem(value: opt.key, child: Text(opt.value)),
+            ],
+            onChanged: saving
+                ? null
+                : (v) {
+                    if (v != null) onManagedProvider(v);
+                  },
           ),
           const SizedBox(height: LiminalSpacing.md),
           if (loading)
@@ -135,7 +182,7 @@ class ManagedInferencePanel extends StatelessWidget {
             Text(error!, style: TextStyle(color: theme.colorScheme.error))
           else if (models.isEmpty)
             Text(
-              'No Bedrock models returned. Check your license or try again.',
+              'No managed models returned. Check your license or try again.',
               style: theme.textTheme.bodySmall?.copyWith(color: lim.warn),
             )
           else ...[
@@ -204,8 +251,12 @@ int _familyRank(String family) {
       return 3;
     case 'openai':
       return 4;
-    case 'cohere':
+    case 'deepseek':
       return 5;
+    case 'qwen':
+      return 6;
+    case 'google':
+      return 7;
     default:
       return 9;
   }
@@ -226,7 +277,7 @@ String _familyLabel(String family) {
     case 'cohere':
       return 'Cohere';
     default:
-      return 'Other';
+      return family.isEmpty ? 'Other' : family[0].toUpperCase() + family.substring(1);
   }
 }
 

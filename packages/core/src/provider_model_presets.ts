@@ -57,6 +57,8 @@ export const OPENROUTER_MODEL_SLUG = {
   OWL_ALPHA: "openrouter/owl-alpha",
   /** OpenRouter auto-picks a free model (reliable BYOK fallback when owl-alpha Stealth is down). */
   FREE_ROUTER: "openrouter/free",
+  /** OpenRouter multi-model deliberation router (panel + judge synthesis). */
+  FUSION: "openrouter/fusion",
   /** NVIDIA Nemotron 3 Ultra on OpenRouter's free tier (1M ctx; NVIDIA logs sessions per their ToS). */
   NEMOTRON_3_ULTRA_FREE: "nvidia/nemotron-3-ultra-550b-a55b:free",
   /** Nex AGI Nex-N2-Pro MoE — text + image input, 262K ctx, free on OpenRouter (Jun 2026). */
@@ -233,6 +235,45 @@ export const PROVIDER_MODEL_PRESETS: readonly ProviderModelPreset[] = [
       "Use when you want a fixed reseller instead of live price routing.",
     OPENROUTER_MODEL_SLUG.DEEPSEEK_V4_PRO,
     deepseekV4PinPatch()
+  ),
+  preset(
+    "openrouter-fusion-quality",
+    "OpenRouter Fusion — Quality panel",
+    "Multi-model deliberation: Claude Opus 4.8 + GPT-5.5 panel, Opus judge. " +
+      "Best for research, critique, and high-stakes synthesis — not for fast tool-heavy coding loops. " +
+      "Expect ~4–5× single-model cost and multi-second latency when Fusion deliberates.",
+    OPENROUTER_MODEL_SLUG.FUSION,
+    {
+      ...buildHarnessModelPackEnvPatch({
+        main: OPENROUTER_MODEL_SLUG.FUSION,
+        fast: OPENROUTER_MODEL_SLUG.DEEPSEEK_V4_FLASH,
+        baseURL: DEFAULT_AGENT_API_BASE_URL,
+        providerStrategy: "openrouter_default",
+        providerOrder: "",
+        providerOrderFast: "",
+        providerRouteAuto: "0",
+        allowFallbacks: "1",
+      }),
+      AGENT_OPENROUTER_FUSION_PRESET: "quality",
+    }
+  ),
+  preset(
+    "openrouter-fusion-budget",
+    "OpenRouter Fusion — Budget panel",
+    "Cheaper Fusion panel: DeepSeek v4-flash + Gemini 3.1 Flash Lite; DeepSeek v4-pro judge. " +
+      "Good for multi-angle research on a budget. Still slower than a single model when deliberation runs.",
+    OPENROUTER_MODEL_SLUG.FUSION,
+    {
+      ...buildHarnessModelPackEnvPatch({
+        main: OPENROUTER_MODEL_SLUG.FUSION,
+        fast: OPENROUTER_MODEL_SLUG.DEEPSEEK_V4_FLASH,
+        baseURL: DEFAULT_AGENT_API_BASE_URL,
+        providerStrategy: "openrouter_default",
+        providerRouteAuto: "0",
+        allowFallbacks: "1",
+      }),
+      AGENT_OPENROUTER_FUSION_PRESET: "budget",
+    }
   ),
   preset(
     "nemotron-3-ultra",

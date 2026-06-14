@@ -33,6 +33,10 @@ import {
 
 export type InferenceMode = "byok" | "managed" | "auto";
 export type OpenRouterRoute = "managed" | "byok";
+export type ManagedProviderPreference = "auto" | "bedrock" | "openrouter" | "kimchi";
+
+/** Request header read by the Vireon inference proxy for upstream routing. */
+export const MANAGED_INFERENCE_PROVIDER_HEADER = "x-vireon-managed-provider";
 
 export type ManagedOpenRouterCredentials = {
   route: OpenRouterRoute;
@@ -64,6 +68,26 @@ export function resolveInferenceMode(prefs?: RuntimePreferences | null): Inferen
   const fromPrefs = prefs?.provider?.inferenceMode;
   if (fromPrefs) return fromPrefs;
   return parseInferenceMode(effectiveHarnessEnvRaw("AGENT_INFERENCE_MODE"));
+}
+
+function parseManagedProviderPreference(raw: string | undefined): ManagedProviderPreference {
+  const v = raw?.trim().toLowerCase();
+  if (v === "bedrock" || v === "openrouter" || v === "kimchi") return v;
+  return "auto";
+}
+
+/** Upstream preference for Vireon managed inference (Bedrock / OpenRouter / Kimchi). */
+export function resolveManagedProviderPreference(prefs?: RuntimePreferences | null): ManagedProviderPreference {
+  const fromPrefs = prefs?.harness?.env?.["AGENT_MANAGED_PROVIDER"]?.trim();
+  if (fromPrefs) return parseManagedProviderPreference(fromPrefs);
+  return parseManagedProviderPreference(resolveHarnessEnvRaw("AGENT_MANAGED_PROVIDER", prefs ?? null));
+}
+
+/** Headers attached to chat/embedding calls through the Vireon inference proxy. */
+export function buildManagedInferenceClientHeaders(
+  prefs?: RuntimePreferences | null
+): Record<string, string> {
+  return { [MANAGED_INFERENCE_PROVIDER_HEADER]: resolveManagedProviderPreference(prefs) };
 }
 
 function truthyEnv(raw: string | undefined): boolean {
@@ -361,12 +385,19 @@ export type InferenceUsageStatus = {
   periodEnd: string | null;
 };
 
+export type ManagedInferenceProviderRef = {
+  provider: ManagedProviderPreference;
+  id: string;
+};
+
 export type ManagedInferenceModel = {
   id: string;
   label: string;
   family: string;
   contextLength?: number;
   maxCompletionTokens?: number;
+  /** When set, model is reachable on multiple managed upstreams (catalog merge). */
+  providers?: ManagedInferenceProviderRef[];
 };
 
 export type ManagedInferenceModelsResult = {
@@ -397,6 +428,7 @@ export async function fetchManagedInferenceModels(opts?: {
       family?: string;
       contextLength?: number;
       maxCompletionTokens?: number;
+      providers?: Array<{ provider?: string; id?: string }>;
     }>;
   };
   if (!res.ok) {
@@ -404,15 +436,28 @@ export async function fetchManagedInferenceModels(opts?: {
   }
   const models: ManagedInferenceModel[] = Array.isArray(body.models)
     ? body.models
-        .map((m) => ({
-          id: String(m.id ?? "").trim(),
-          label: String(m.label ?? m.id ?? "").trim(),
-          family: String(m.family ?? "other").trim(),
-          ...(typeof m.contextLength === "number" &&
-            m.contextLength > 0 && { contextLength: m.contextLength }),
-          ...(typeof m.maxCompletionTokens === "number" &&
-            m.maxCompletionTokens > 0 && { maxCompletionTokens: m.maxCompletionTokens }),
-        }))
+        .map((m) => {
+          const providers = Array.isArray(m.providers)
+            ? m.providers
+                .map((p) => ({
+                  provider: parseManagedProviderPreference(
+                    typeof p.provider === "string" ? p.provider : undefined
+                  ),
+                  id: String(p.id ?? "").trim(),
+                }))
+                .filter((p) => p.id.length > 0 && p.provider !== "auto")
+            : undefined;
+          return {
+            id: String(m.id ?? "").trim(),
+            label: String(m.label ?? m.id ?? "").trim(),
+            family: String(m.family ?? "other").trim(),
+            ...(typeof m.contextLength === "number" &&
+              m.contextLength > 0 && { contextLength: m.contextLength }),
+            ...(typeof m.maxCompletionTokens === "number" &&
+              m.maxCompletionTokens > 0 && { maxCompletionTokens: m.maxCompletionTokens }),
+            ...(providers && providers.length > 0 && { providers }),
+          };
+        })
         .filter((m) => m.id.length > 0)
     : [];
   return {

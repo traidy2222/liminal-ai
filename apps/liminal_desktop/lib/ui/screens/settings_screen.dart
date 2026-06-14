@@ -35,6 +35,8 @@ class _SettingsScreenState extends State<SettingsScreen>
   TabController? _tabs;
   bool _saving = false;
   String? _error;
+  String _inferenceMode = 'auto';
+  String _managedProvider = 'auto';
 
   @override
   void initState() {
@@ -107,9 +109,59 @@ class _SettingsScreenState extends State<SettingsScreen>
     setState(() => _saving = false);
   }
 
+  Future<void> _onInferenceModeChanged(String? mode) async {
+    if (mode == null || mode == _inferenceMode) return;
+    setState(() {
+      _saving = true;
+      _error = null;
+      _inferenceMode = mode;
+    });
+    final ok = await AppScope.of(context).patchManagedInferenceModels(
+      inferenceMode: mode,
+      managedProvider: _managedProvider,
+    );
+    if (!mounted) return;
+    if (ok) {
+      _syncFieldControllers();
+      await AppScope.of(context).loadManagedInferenceModels();
+    } else {
+      _error = 'Failed to update inference mode';
+    }
+    setState(() => _saving = false);
+  }
+
+  Future<void> _onManagedProviderChanged(String? provider) async {
+    if (provider == null || provider == _managedProvider) return;
+    setState(() {
+      _saving = true;
+      _error = null;
+      _managedProvider = provider;
+    });
+    final ok = await AppScope.of(context).patchManagedInferenceModels(
+      managedProvider: provider,
+      inferenceMode: _inferenceMode,
+    );
+    if (!mounted) return;
+    if (!ok) _error = 'Failed to update managed upstream';
+    setState(() => _saving = false);
+  }
+
+  String _readHarnessEnvField(HarnessSettingsSnapshot snap, String key, String fallback) {
+    for (final f in snap.fields) {
+      if (f.key == key && f.value.trim().isNotEmpty) return f.value.trim();
+    }
+    return fallback;
+  }
+
   void _syncFieldControllers() {
     final snap = AppScope.of(context).harnessSettings;
     if (snap == null) return;
+    final fromProvider = snap.provider.inferenceMode?.trim();
+    _inferenceMode = (fromProvider != null && fromProvider.isNotEmpty)
+        ? fromProvider.toLowerCase()
+        : _readHarnessEnvField(snap, 'AGENT_INFERENCE_MODE', 'auto').toLowerCase();
+    _managedProvider =
+        _readHarnessEnvField(snap, 'AGENT_MANAGED_PROVIDER', 'auto').toLowerCase();
     for (final f in snap.fields) {
       if (f.valueKind == 'boolean' || f.valueKind == 'enum') continue;
       _fieldControllers.putIfAbsent(f.key, () => TextEditingController(text: f.value));
@@ -301,21 +353,53 @@ class _SettingsScreenState extends State<SettingsScreen>
                     sliver: SliverToBoxAdapter(
                       child: LiminalSection(
                         title: 'Provider',
-                        subtitle: snap?.provider.showManagedInference == true
-                            ? 'Pro managed inference — routed through Vireon (Bedrock).'
-                            : 'API keys live in `.env` only — never sent over the socket.',
-                        child: snap?.provider.showManagedInference == true
-                            ? ManagedInferencePanel(
-                                mainModel: snap!.provider.model,
+                        subtitle: _inferenceMode == 'byok'
+                            ? 'Bring your own key — API keys live in `.env` only.'
+                            : _inferenceMode == 'managed'
+                                ? 'Pro managed inference — routed through Vireon.'
+                                : 'Auto uses Vireon when signed in; BYOK presets available below.',
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.stretch,
+                          children: [
+                            Text('Inference mode', style: Theme.of(context).textTheme.titleSmall),
+                            const SizedBox(height: LiminalSpacing.xs),
+                            DropdownButtonFormField<String>(
+                              value: _inferenceMode,
+                              decoration: const InputDecoration(isDense: true),
+                              items: const [
+                                DropdownMenuItem(
+                                  value: 'auto',
+                                  child: Text('auto — Vireon when signed in, BYOK fallback'),
+                                ),
+                                DropdownMenuItem(
+                                  value: 'byok',
+                                  child: Text('byok — your API key / base URL'),
+                                ),
+                                DropdownMenuItem(
+                                  value: 'managed',
+                                  child: Text('managed — always Vireon proxy'),
+                                ),
+                              ],
+                              onChanged: _saving ? null : _onInferenceModeChanged,
+                            ),
+                            if (_inferenceMode != 'byok' && host.vireonAccount.connected) ...[
+                              const SizedBox(height: LiminalSpacing.md),
+                              ManagedInferencePanel(
+                                mainModel: snap?.provider.model ?? _model.text,
                                 fastModel: _fastModelFromSnapshot(snap),
                                 catalog: host.managedInferenceModels,
                                 loading: host.managedInferenceModelsLoading,
                                 error: host.managedInferenceModelsError,
                                 saving: _saving,
+                                managedProvider: _managedProvider,
+                                onManagedProvider: _onManagedProviderChanged,
                                 onMainModel: _onManagedMainModel,
                                 onFastModel: _onManagedFastModel,
-                              )
-                            : _ProviderForm(
+                              ),
+                            ],
+                            if (_inferenceMode != 'managed') ...[
+                              const SizedBox(height: LiminalSpacing.md),
+                              _ProviderForm(
                                 apiKey: _apiKey,
                                 model: _model,
                                 baseUrl: _baseUrl,
@@ -329,6 +413,9 @@ class _SettingsScreenState extends State<SettingsScreen>
                                 onSave: _saveProvider,
                                 onPresetApply: _applyProviderPreset,
                               ),
+                            ],
+                          ],
+                        ),
                       ),
                     ),
                   ),

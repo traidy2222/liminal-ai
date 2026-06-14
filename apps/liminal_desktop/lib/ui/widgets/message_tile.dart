@@ -63,16 +63,10 @@ class MessageTile extends StatelessWidget {
         ChatMessageFrame.assistant(
           roleLabel: personaLabel,
           child: Row(
-            crossAxisAlignment: CrossAxisAlignment.end,
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Expanded(
-                child: DefaultTextStyle(
-                  style: Theme.of(context).textTheme.bodyLarge!.copyWith(
-                        color: lim.text,
-                        height: 1.65,
-                      ),
-                  child: LiminalMessageContent(text: text, streaming: streaming),
-                ),
+                child: LiminalMessageContent(text: text, streaming: streaming),
               ),
               if (streaming)
                 Padding(

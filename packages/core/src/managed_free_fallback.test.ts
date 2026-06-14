@@ -53,8 +53,20 @@ test("isInferenceBudgetExceededError detects 402 budget body", () => {
 
 test("isModelIncompatibleWithManagedProxy flags openrouter/free and :free slugs", () => {
   assert.equal(isModelIncompatibleWithManagedProxy(OPENROUTER_MODEL_SLUG.FREE_ROUTER), true);
+  assert.equal(isModelIncompatibleWithManagedProxy("openrouter/auto"), true);
   assert.equal(isModelIncompatibleWithManagedProxy("nvidia/foo:free"), true);
   assert.equal(isModelIncompatibleWithManagedProxy(DEFAULT_AGENT_MODEL_SLUG), false);
+});
+
+test("isModelIncompatibleWithManagedProxy allows openrouter/fusion on managed inference", () => {
+  assert.equal(isModelIncompatibleWithManagedProxy(OPENROUTER_MODEL_SLUG.FUSION), false);
+});
+
+test("resolveModelForManagedInference keeps openrouter/fusion", () => {
+  assert.equal(
+    resolveModelForManagedInference(OPENROUTER_MODEL_SLUG.FUSION, null),
+    OPENROUTER_MODEL_SLUG.FUSION
+  );
 });
 
 test("resolveModelForManagedInference replaces fallback slug with default main model", () => {
