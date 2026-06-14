@@ -69,3 +69,23 @@ export function isContextLengthExceededError(err: unknown): boolean {
     (blob.includes("validation_error") && blob.includes("token"))
   );
 }
+
+/** Parse provider 400 bodies: "maximum context length is 162144 tokens". */
+export function parseContextLimitFromError(err: unknown): number | null {
+  const parts: string[] = [];
+  if (err instanceof Error) {
+    parts.push(err.message);
+    const api = err as Error & { error?: unknown };
+    if (api.error !== undefined) parts.push(JSON.stringify(api.error));
+  } else {
+    parts.push(String(err));
+  }
+  const blob = parts.join(" ");
+  const m =
+    blob.match(/maximum context length is\s+([\d,]+)\s*tokens?/i) ??
+    blob.match(/context length is\s+([\d,]+)\s*tokens?/i) ??
+    blob.match(/max(?:imum)?\s+context\s+(?:window\s+)?(?:is\s+)?([\d,]+)/i);
+  if (!m?.[1]) return null;
+  const n = parseInt(m[1].replace(/,/g, ""), 10);
+  return Number.isFinite(n) && n > 0 ? n : null;
+}

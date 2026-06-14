@@ -5,6 +5,7 @@ import {
   renderEpistemicStateBlock,
 } from "./epistemic_state.js";
 import { estimateMessagesTokens } from "./token_estimate.js";
+import { type ContextPolicy } from "./context_policy.js";
 import { stashToolBodyElide, writeArtifact, artifactPathForHash } from "./output_distill.js";
 import { effectiveHarnessEnvRaw } from "./harness_effective_env.js";
 import { extractFactsRaw } from "./fact_extractor.js";
@@ -284,17 +285,49 @@ export class ContextManager {
   private executionStateBlock = "";
   /** ACON-style runtime notes appended to compression policy in summary blocks. */
   private compressionNotes: string[] = [];
-  /** Mutable — synced from active model context window (see syncModelMaxTokens). */
+  /** Mutable — synced from active model context window (see applyContextPolicy). */
   private effectiveModelMaxTokens: number;
+  private effectiveThresholdFraction: number;
+  private effectiveHotRounds: number;
+  private effectiveWarmRounds: number;
+  private activeContextPolicy: ContextPolicy | null = null;
 
   constructor(config: ContextConfig) {
     this.config = config;
     this.effectiveModelMaxTokens = config.modelMaxTokens;
+    this.effectiveThresholdFraction = config.thresholdFraction;
+    this.effectiveHotRounds = resolveCtxHotRounds();
+    this.effectiveWarmRounds = resolveCtxWarmRounds();
   }
 
   /** Align compression thresholds with the active model's real context window. */
   syncModelMaxTokens(maxTokens: number): void {
     this.effectiveModelMaxTokens = Math.max(8192, maxTokens);
+  }
+
+  /** Apply tiered compression policy derived from resolved model context limits. */
+  applyContextPolicy(policy: ContextPolicy): void {
+    this.activeContextPolicy = policy;
+    this.effectiveModelMaxTokens = Math.max(8192, policy.contextLength);
+    this.effectiveThresholdFraction = policy.thresholdFraction;
+    this.effectiveHotRounds = policy.hotRounds;
+    this.effectiveWarmRounds = policy.warmRounds;
+  }
+
+  getActiveContextPolicy(): ContextPolicy | null {
+    return this.activeContextPolicy;
+  }
+
+  private thresholdFraction(): number {
+    return this.effectiveThresholdFraction;
+  }
+
+  private hotRounds(): number {
+    return this.effectiveHotRounds;
+  }
+
+  private warmRounds(): number {
+    return this.effectiveWarmRounds;
   }
 
   /** Recompute protocol suffix from current tool names (root + child registries). */
@@ -486,7 +519,7 @@ export class ContextManager {
       // stays byte-identical round-to-round (prompt-cache friendly).
       let core = [...inception, ...this.conversation];
       const snap = this.computeSnapshot([...core, ...working]);
-      if (snap.usageFraction >= this.config.thresholdFraction) {
+      if (snap.usageFraction >= this.thresholdFraction()) {
         core = await this.compressOldRounds(inception, this.conversation);
       }
       return [...core, ...working];
@@ -495,7 +528,7 @@ export class ContextManager {
     // Legacy ordering: volatile blocks between inception and conversation.
     let messages = [...inception, ...working, ...this.conversation];
     const snap = this.computeSnapshot(messages);
-    if (snap.usageFraction >= this.config.thresholdFraction) {
+    if (snap.usageFraction >= this.thresholdFraction()) {
       messages = await this.compressOldRounds(inception, this.conversation);
     }
     return messages;
@@ -564,7 +597,7 @@ export class ContextManager {
       tokenCount,
       maxTokens: this.effectiveModelMaxTokens,
       usageFraction,
-      masked: usageFraction >= this.config.thresholdFraction,
+      masked: usageFraction >= this.effectiveThresholdFraction,
     };
   }
 
@@ -578,7 +611,7 @@ export class ContextManager {
    * When tiered mode is off (AGENT_CTX_PROVENANCE=0), falls back to the original flat summary.
    */
   private async compressOldRounds(inception: Message[], conv: Message[]): Promise<Message[]> {
-    const hotRounds = resolveCtxHotRounds();
+    const hotRounds = this.hotRounds();
     const keepRecent = this.config.keepRecentRounds ?? hotRounds;
     const rounds = extractRounds(conv);
 
@@ -615,7 +648,7 @@ export class ContextManager {
 
     // ── Tiered path ────────────────────────────────────────────────────────────
     if (isProvenanceEnabled()) {
-      const warmCount = resolveCtxWarmRounds();
+      const warmCount = this.warmRounds();
       const summaryMessages: Message[] = [];
 
       if (toCompress.length > warmCount) {
@@ -779,7 +812,7 @@ export class ContextManager {
           content: replacement,
         } as Message;
         const check = this.computeSnapshot([...inception, ...masked]);
-        if (check.usageFraction < this.config.thresholdFraction) break;
+        if (check.usageFraction < this.thresholdFraction()) break;
       }
     }
 
@@ -895,7 +928,7 @@ export class ContextManager {
 
   forceCompress(anchorSummary: string): void {
     const inception = this.getEffectiveInception();
-    const keepRecent = this.config.keepRecentRounds ?? 6;
+    const keepRecent = this.config.keepRecentRounds ?? this.hotRounds();
     const rounds = extractRounds(this.conversation);
 
     if (rounds.length <= keepRecent) return; // nothing to compress

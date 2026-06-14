@@ -51,12 +51,19 @@ import {
 import { distillToolOutput, shouldDistillToolOutput } from "./output_distill.js";
 import { appendFailureLog } from "./failure_log.js";
 import { completeChatJson, getFastModelSlug } from "./router.js";
-import { estimateMessagesTokens } from "./token_estimate.js";
+import { estimateMessagesTokens, estimateRequestTokens } from "./token_estimate.js";
 import {
   clampMaxCompletionTokensForContext,
   isContextLengthExceededError,
+  parseContextLimitFromError,
   resolveModelContextWindowTokens,
 } from "./model_context_window.js";
+import { buildContextPolicy } from "./context_policy.js";
+import {
+  recordLearnedLimit,
+  resolveModelContextLimits,
+  type ModelContextLimits,
+} from "./model_context_registry.js";
 import { stableArgsJsonKey } from "./json_stable.js";
 import {
   buildHarnessRuleRecallMessage,
@@ -149,6 +156,7 @@ import {
 import {
   describeProviderError,
   fetchInferenceUsageStatus,
+  fetchManagedInferenceModels,
   hasLocalProviderApiKey,
   inferenceAccountUrl,
   isInferenceBudgetExceededError,
@@ -157,6 +165,7 @@ import {
   resolveInferenceMode,
   resolveProviderConfigWithInference,
   shouldRouteOpenRouterViaManaged,
+  type ManagedInferenceModel,
 } from "./inference_provider.js";
 import {
   ensureLocalProviderApiKeyInProcess,
@@ -1270,6 +1279,9 @@ export class AgentHarness {
   private suppressReasoningToolsThisSend = false;
   private proactiveCompressedThisSend = false;
   private contextOverflowRecoveredThisRound = false;
+  private streamContextOverflowRecoveries = 0;
+  private activeContextLimits: ModelContextLimits | null = null;
+  private managedInferenceCatalog: ManagedInferenceModel[] | null = null;
   private criticConsumedThisSend = false;
   /** Timestamp of the last compression event in this send (for ACON failure analysis). */
   private lastCompressionTimestampThisSend = 0;
@@ -2197,7 +2209,8 @@ export class AgentHarness {
     this.config.baseURL = provider.baseURL;
     this.config.model = provider.model;
     this.rebuildClient();
-    this.syncContextWindowForModel();
+    await this.refreshManagedInferenceCatalog();
+    await this.syncContextWindowForModel();
     this.injectActiveLlmContextUpdateIfNeeded(prevModel, prevBaseURL);
     if (this.agentDepth === 0) {
       this.emitter.emit("text", {
@@ -2586,37 +2599,84 @@ export class AgentHarness {
       status: "running",
       abortController: new AbortController(),
     });
-    this.syncContextWindowForModel();
+    this.syncContextWindowForModel().catch(() => {});
   }
 
-  private syncContextWindowForModel(model?: string): void {
+  private contextLimitsResolveOpts(): {
+    apiKey?: string;
+    baseURL?: string;
+    managedCatalog?: ManagedInferenceModel[];
+  } {
+    return {
+      apiKey: this.config.openRouterApiKey,
+      baseURL: this.config.baseURL,
+      managedCatalog: this.managedInferenceCatalog ?? undefined,
+    };
+  }
+
+  private async refreshManagedInferenceCatalog(): Promise<void> {
+    try {
+      const catalog = await fetchManagedInferenceModels();
+      this.managedInferenceCatalog = catalog?.models ?? null;
+    } catch {
+      /* keep prior catalog */
+    }
+  }
+
+  private async syncContextWindowForModel(model?: string): Promise<void> {
     const slug = (model ?? this.config.model ?? "").trim();
     if (!slug) return;
-    this.context.syncModelMaxTokens(resolveModelContextWindowTokens(slug));
+    const limits = await resolveModelContextLimits(slug, this.contextLimitsResolveOpts());
+    this.activeContextLimits = limits;
+    this.context.applyContextPolicy(buildContextPolicy(limits));
+  }
+
+  private async recoverContextAfterOverflow(
+    modelSlug: string,
+    err?: unknown
+  ): Promise<void> {
+    const parsed = err != null ? parseContextLimitFromError(err) : null;
+    if (parsed != null) {
+      await recordLearnedLimit(modelSlug, parsed);
+      await this.syncContextWindowForModel(modelSlug);
+    }
+    const policy = this.context.getActiveContextPolicy();
+    const elideMin = policy?.elideMinChars ?? 4000;
+    await this.context.elideStaleToolResults();
+    await this.context.elideOversizedToolBodies({
+      minChars: elideMin,
+      toolNames: ["web_fetch", "read_file", "browser_snapshot", "browser_extract"],
+    });
+    this.context.forceCompress("Provider context length exceeded — emergency compress");
   }
 
   /** Shrink / compress history when the prompt nears the provider context ceiling. */
   private async prepareMessagesForContextLimit(
     messages: Message[],
-    modelSlug: string
+    modelSlug: string,
+    tools: OpenAI.Chat.Completions.ChatCompletionTool[] = []
   ): Promise<Message[]> {
-    this.syncContextWindowForModel(modelSlug);
-    const window = resolveModelContextWindowTokens(modelSlug);
+    await this.syncContextWindowForModel(modelSlug);
+    const policy = this.context.getActiveContextPolicy();
+    const window =
+      this.activeContextLimits?.contextLength ?? resolveModelContextWindowTokens(modelSlug);
     const margin = Math.max(1024, Math.floor(window * 0.05));
-    let inputTokens = estimateMessagesTokens(messages);
+    const elideMin = policy?.elideMinChars ?? 6000;
+    const maxPasses = policy?.preflightPasses ?? 4;
+    let inputTokens = estimateRequestTokens(messages, tools);
     let passes = 0;
-    while (inputTokens + 512 > window - margin && passes < 4) {
+    while (inputTokens + 512 > window - margin && passes < maxPasses) {
       passes += 1;
       await this.context.elideStaleToolResults();
       await this.context.elideOversizedToolBodies({
-        minChars: 6000,
+        minChars: elideMin,
         toolNames: ["web_fetch", "read_file", "browser_snapshot", "browser_extract"],
       });
       this.context.forceCompress(
         `Context near model limit (~${inputTokens}/${window} tokens) — compressing before completion`
       );
       messages = scrubMessagesSpecialTokens(await this.context.buildMessages());
-      inputTokens = estimateMessagesTokens(messages);
+      inputTokens = estimateRequestTokens(messages, tools);
     }
     return messages;
   }
@@ -2662,6 +2722,7 @@ export class AgentHarness {
     if (this.running) throw new Error("Agent is already processing a message");
     await this.maybeRecoverManagedInferenceRoute();
     await this.maybePreemptManagedCreditExhaustion();
+    void this.refreshManagedInferenceCatalog().then(() => this.syncContextWindowForModel());
     if (options?.freshContext === true && this.agentDepth === 0) {
       this.reset();
     }
@@ -5214,16 +5275,21 @@ export class AgentHarness {
     const routingModel = routingProfile.applied ? routingProfile.modelSlug : undefined;
     const activeModelSlug = routingModel ?? this.config.model;
     this.contextOverflowRecoveredThisRound = false;
+    this.streamContextOverflowRecoveries = 0;
     let streamAbort = new AbortController();
     const openStream = async () => {
-      const prepared = await this.prepareMessagesForContextLimit(messages, activeModelSlug);
+      const prepared = await this.prepareMessagesForContextLimit(messages, activeModelSlug, tools);
       return this.streamWithRetry(
         prepared,
         tools,
         routingModel,
         this._turnReasoningBudget,
         streamAbort,
-        this._turnReasoningSurface
+        this._turnReasoningSurface,
+        async () => {
+          messages = scrubMessagesSpecialTokens(await this.context.buildMessages());
+          return this.prepareMessagesForContextLimit(messages, activeModelSlug, tools);
+        }
       );
     };
     let stream: Stream<OpenAI.Chat.Completions.ChatCompletionChunk>;
@@ -5232,11 +5298,7 @@ export class AgentHarness {
     } catch (err) {
       if (isContextLengthExceededError(err) && !this.contextOverflowRecoveredThisRound) {
         this.contextOverflowRecoveredThisRound = true;
-        await this.context.elideOversizedToolBodies({
-          minChars: 4000,
-          toolNames: ["web_fetch", "read_file", "browser_snapshot", "browser_extract"],
-        });
-        this.context.forceCompress("Provider context length exceeded — emergency compress");
+        await this.recoverContextAfterOverflow(activeModelSlug, err);
         messages = scrubMessagesSpecialTokens(await this.context.buildMessages());
         if (!this.isUiQuiet()) {
           this.emitter.emit("text", {
@@ -5398,14 +5460,18 @@ export class AgentHarness {
           /* already settled */
         }
         streamAbort = new AbortController();
-        messages = await this.prepareMessagesForContextLimit(messages, activeModelSlug);
+        messages = await this.prepareMessagesForContextLimit(messages, activeModelSlug, tools);
         stream = await this.streamWithRetry(
           messages,
           tools,
           routingModel,
           this._turnReasoningBudget,
           streamAbort,
-          this._turnReasoningSurface
+          this._turnReasoningSurface,
+          async () => {
+            messages = scrubMessagesSpecialTokens(await this.context.buildMessages());
+            return this.prepareMessagesForContextLimit(messages, activeModelSlug, tools);
+          }
         );
       }
     }
@@ -6588,10 +6654,12 @@ export class AgentHarness {
     modelOverride?: string,
     reasoningBudget?: ReasoningBudget | null,
     streamAbort?: AbortController,
-    reasoningSurface: ReasoningSurface = "native"
+    reasoningSurface: ReasoningSurface = "native",
+    rebuildMessagesAfterOverflow?: () => Promise<Message[]>
   ): Promise<Stream<OpenAI.Chat.Completions.ChatCompletionChunk>> {
     let lastErr: unknown;
     const retryStartedAt = Date.now();
+    let currentMessages = messages;
 
     // Toolless retries can produce plausible text claims without executing required tools.
     // Default to tools-on for all retries unless explicitly opted-in.
@@ -6624,13 +6692,20 @@ export class AgentHarness {
           ? Math.min(scaleMaxCompletionTokensForEffort(effectiveMaxTokens), 128_000)
           : undefined;
 
+      let cappedScaledMax = scaledMaxTokens;
+      const policyMaxOut = this.activeContextLimits?.maxCompletionTokens;
+      if (cappedScaledMax != null && policyMaxOut != null && policyMaxOut > 0) {
+        cappedScaledMax = Math.min(cappedScaledMax, policyMaxOut);
+      }
+
       // OpenRouter provider routing: adaptive price sort + session_id stickiness for cache affinity.
       const modelSlug = modelOverride ?? this.config.model;
-      const contextWindow = resolveModelContextWindowTokens(modelSlug);
-      const inputTokens = estimateMessagesTokens(messages);
+      const contextWindow =
+        this.activeContextLimits?.contextLength ?? resolveModelContextWindowTokens(modelSlug);
+      const inputTokens = estimateRequestTokens(currentMessages, useTools ? tools : []);
       const maxCompletionTokens = clampMaxCompletionTokensForContext(
         inputTokens,
-        scaledMaxTokens,
+        cappedScaledMax,
         contextWindow
       );
       const orExtras = buildOpenRouterChatRequestExtras({
@@ -6650,7 +6725,7 @@ export class AgentHarness {
       // `cache_control: { type: "ephemeral" }` so cache-supporting providers
       // (DeepInfra, GMICloud, NovitaAI, …) serve the prefix at ~1/10× cost on
       // every round after the first. No-op when AGENT_PROMPT_CACHE=0.
-      const cachedMessages = applyPromptCacheBreakpoints(messages);
+      const cachedMessages = applyPromptCacheBreakpoints(currentMessages);
 
       const params: OpenAI.Chat.Completions.ChatCompletionCreateParamsStreaming & {
         provider?: import("./provider_config.js").ProviderRouting;
@@ -6689,6 +6764,19 @@ export class AgentHarness {
         const kimchiTransient =
           isKimchiApiBaseUrl(this.config.baseURL) && isKimchiRetryableProviderError(err);
         const msg = describeError(err, this.config.baseURL);
+
+        if (
+          isContextLengthExceededError(err) &&
+          this.streamContextOverflowRecoveries < 2 &&
+          rebuildMessagesAfterOverflow
+        ) {
+          this.streamContextOverflowRecoveries += 1;
+          await this.recoverContextAfterOverflow(modelSlug, err);
+          currentMessages = await rebuildMessagesAfterOverflow();
+          attempt = 0;
+          managedBusyRetries = 0;
+          continue;
+        }
 
         const exhaustedRouting = isExhaustedProviderRoutingError(err);
         if (exhaustedRouting) {

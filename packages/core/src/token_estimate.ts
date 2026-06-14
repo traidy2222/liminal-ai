@@ -1,5 +1,9 @@
 import { createRequire } from "node:module";
+import type OpenAI from "openai";
 import type { Message } from "./types.js";
+
+/** Rough API framing overhead per completion request. */
+export const REQUEST_TOKEN_OVERHEAD = 16;
 
 const require = createRequire(import.meta.url);
 
@@ -40,4 +44,32 @@ export function estimateMessagesTokens(messages: Message[]): number {
     n += e.encode(messageText(m)).length + 4;
   }
   return n;
+}
+
+function estimateStringTokens(text: string): number {
+  const e = getEncoder();
+  if (!e) return Math.ceil(text.length / 4);
+  return e.encode(text).length;
+}
+
+/** Approximate token count for the OpenAI `tools` array (schemas dominate). */
+export function estimateToolsTokens(
+  tools: OpenAI.Chat.Completions.ChatCompletionTool[]
+): number {
+  if (!tools.length) return 0;
+  try {
+    return estimateStringTokens(JSON.stringify(tools));
+  } catch {
+    const chars = tools.reduce((s, t) => s + JSON.stringify(t).length, 0);
+    return Math.ceil(chars / 4);
+  }
+}
+
+/** Messages + optional tool schemas + request overhead — for pre-flight context budgeting. */
+export function estimateRequestTokens(
+  messages: Message[],
+  tools?: OpenAI.Chat.Completions.ChatCompletionTool[]
+): number {
+  const toolTokens = tools?.length ? estimateToolsTokens(tools) : 0;
+  return estimateMessagesTokens(messages) + toolTokens + REQUEST_TOKEN_OVERHEAD;
 }

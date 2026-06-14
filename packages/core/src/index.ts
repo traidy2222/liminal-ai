@@ -625,6 +625,35 @@ export type {
   ManagedOpenRouterCredentials,
 } from "./inference_provider.js";
 export {
+  DEFAULT_MODEL_CONTEXT_TOKENS,
+  clampMaxCompletionTokensForContext,
+  isContextLengthExceededError,
+  parseContextLimitFromError,
+  resolveModelContextWindowTokens,
+} from "./model_context_window.js";
+export {
+  clearModelContextCache,
+  recordLearnedLimit,
+  resolveModelContextLimits,
+  warmModelContextRegistry,
+} from "./model_context_registry.js";
+export type { ModelContextLimits, ModelContextSource, ResolveModelContextLimitsOpts } from "./model_context_registry.js";
+export { buildContextPolicy } from "./context_policy.js";
+export type { ContextPolicy, ContextPolicyTier } from "./context_policy.js";
+export {
+  fetchOpenRouterModelCatalog,
+  parseOpenRouterModelCatalog,
+  parseOpenRouterModelLimits,
+  warmOpenRouterModelCatalog,
+} from "./openrouter_models.js";
+export type { OpenRouterModelLimits } from "./openrouter_models.js";
+export {
+  estimateMessagesTokens,
+  estimateRequestTokens,
+  estimateToolsTokens,
+  REQUEST_TOKEN_OVERHEAD,
+} from "./token_estimate.js";
+export {
   RUNTIME_PREFS_FILE,
   getRuntimePrefsPath,
   loadRuntimePreferences,

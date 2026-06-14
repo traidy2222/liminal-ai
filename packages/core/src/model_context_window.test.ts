@@ -3,6 +3,7 @@ import test from "node:test";
 import {
   clampMaxCompletionTokensForContext,
   isContextLengthExceededError,
+  parseContextLimitFromError,
   resolveModelContextWindowTokens,
 } from "./model_context_window.js";
 
@@ -23,4 +24,11 @@ test("isContextLengthExceededError detects Bedrock validation bodies", () => {
     'HTTP 400 from Error: {"code":"validation_error","message":"maximum context length is 202752 tokens"}'
   );
   assert.equal(isContextLengthExceededError(err), true);
+});
+
+test("parseContextLimitFromError extracts numeric limit", () => {
+  const err = new Error(
+    'HTTP 400 from Error: {"message":"This endpoint\'s maximum context length is 162144 tokens."}'
+  );
+  assert.equal(parseContextLimitFromError(err), 162_144);
 });

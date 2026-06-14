@@ -365,6 +365,8 @@ export type ManagedInferenceModel = {
   id: string;
   label: string;
   family: string;
+  contextLength?: number;
+  maxCompletionTokens?: number;
 };
 
 export type ManagedInferenceModelsResult = {
@@ -389,15 +391,34 @@ export async function fetchManagedInferenceModels(opts?: {
     error?: string;
     upstream?: string;
     region?: string;
-    models?: ManagedInferenceModel[];
+    models?: Array<{
+      id?: string;
+      label?: string;
+      family?: string;
+      contextLength?: number;
+      maxCompletionTokens?: number;
+    }>;
   };
   if (!res.ok) {
     throw new Error(body.error ?? `HTTP ${res.status}`);
   }
+  const models: ManagedInferenceModel[] = Array.isArray(body.models)
+    ? body.models
+        .map((m) => ({
+          id: String(m.id ?? "").trim(),
+          label: String(m.label ?? m.id ?? "").trim(),
+          family: String(m.family ?? "other").trim(),
+          ...(typeof m.contextLength === "number" &&
+            m.contextLength > 0 && { contextLength: m.contextLength }),
+          ...(typeof m.maxCompletionTokens === "number" &&
+            m.maxCompletionTokens > 0 && { maxCompletionTokens: m.maxCompletionTokens }),
+        }))
+        .filter((m) => m.id.length > 0)
+    : [];
   return {
     upstream: body.upstream ?? "bedrock",
     region: body.region ?? "us-east-1",
-    models: Array.isArray(body.models) ? body.models : [],
+    models,
   };
 }
 
