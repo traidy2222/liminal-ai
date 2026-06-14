@@ -126,7 +126,7 @@ jobs:
       - name: Linux build dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y clang cmake ninja-build pkg-config libgtk-3-dev libblkid-dev liblzma-dev libwebkit2gtk-4.1-dev
+          sudo apt-get install -y clang cmake ninja-build pkg-config libgtk-3-dev libblkid-dev liblzma-dev libwebkit2gtk-4.1-dev libcurl4-openssl-dev libcurl4-openssl-dev
 
       - uses: subosito/flutter-action@v2
         with:
@@ -164,7 +164,7 @@ jobs:
         run: |
           ver="${{ needs.meta.outputs.version }}"
           cat > "$RUNNER_TEMP/release-notes.md" <<EOF
-          ## Liminal Desktop $ver (alpha)
+          ## Liminal Desktop $ver (beta public preview)
 
           **Requirements (all platforms):** [Node.js 20+](https://nodejs.org/) on PATH.
 

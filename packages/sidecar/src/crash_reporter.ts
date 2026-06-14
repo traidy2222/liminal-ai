@@ -92,9 +92,9 @@ export function addBreadcrumb(
   });
 }
 
-export function close(): Promise<void> {
-  if (!initialized) return Promise.resolve();
-  return Sentry.close();
+export async function close(): Promise<void> {
+  if (!initialized) return;
+  await Sentry.close();
 }
 
 export async function readDsnFromFile(path: string): Promise<string> {

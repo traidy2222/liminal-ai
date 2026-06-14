@@ -24,11 +24,20 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Build core
-        run: npm run build -w @liminal/core
+      - name: Build compiled packages
+        run: |
+          npm run build -w @liminal/core
+          npm run build -w @liminal/tools
+          npm run build -w @liminal/sidecar
 
-      - name: Typecheck all workspaces
-        run: npm run typecheck
+      - name: Typecheck compiled workspaces
+        run: |
+          npm run typecheck -w @liminal/core
+          npm run typecheck -w @liminal/tools
+          npm run typecheck -w @liminal/sidecar
+          npm run typecheck -w @liminal/protocol
+          npm run typecheck -w @liminal/tui
+          npm run typecheck -w @liminal/web
 
   test-core:
     name: Test packages/core

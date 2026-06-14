@@ -30,15 +30,8 @@ class CrashReporter {
         options.profilesSampleRate = 0.1;
         options.attachStacktrace = true;
         options.reportSilentFlutterErrors = true;
-        options.enablePrintBreadcrumbIntegration = true;
         options.enableUserInteractionBreadcrumbs = false;
         options.sendDefaultPii = false;
-        options.beforeSend = (event, hint) {
-          if (!_userOptIn && event.user?.id != null) {
-            event.user = SentryUser(id: null);
-          }
-          return event;
-        };
       },
     );
 
@@ -48,7 +41,7 @@ class CrashReporter {
 
   void _captureNativeCrashes() {
     if (_userOptIn) {
-      SentryFlutter.captureMessage('Crash reporter initialized');
+      Sentry.captureMessage('Crash reporter initialized');
     }
   }
 
@@ -65,13 +58,13 @@ class CrashReporter {
       username: username,
     );
 
-    SentryFlutter.configureScope((scope) {
+    Sentry.configureScope((scope) {
       scope.setUser(user);
     });
   }
 
   Future<void> clearUserContext() async {
-    SentryFlutter.configureScope((scope) {
+    Sentry.configureScope((scope) {
       scope.setUser(null);
     });
   }
@@ -108,7 +101,7 @@ class CrashReporter {
   }) async {
     if (!_initialized) return;
 
-    Sentry.captureException(
+    await Sentry.captureException(
       exception,
       stackTrace: stackTrace,
       withScope: (scope) {
@@ -122,7 +115,7 @@ class CrashReporter {
   Future<void> captureMessage(String message, {String? level}) async {
     if (!_initialized) return;
 
-    Sentry.captureMessage(
+    await Sentry.captureMessage(
       message,
       level: _parseLevel(level),
     );
