@@ -1,0 +1,71 @@
+name: CI
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+    branches: [main, master]
+
+permissions:
+  contents: read
+
+jobs:
+  typecheck:
+    name: Typecheck
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build core
+        run: npm run build -w @liminal/core
+
+      - name: Typecheck all workspaces
+        run: npm run typecheck
+
+  test-core:
+    name: Test packages/core
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build core
+        run: npm run build -w @liminal/core
+
+      - name: Run tests
+        run: npm run test -w @liminal/core
+
+  verify-harness-defaults:
+    name: Verify harness defaults
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build core
+        run: npm run build -w @liminal/core
+
+      - name: Verify no secrets in defaults
+        run: npm run verify-harness-defaults-no-secrets

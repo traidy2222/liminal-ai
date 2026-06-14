@@ -2,6 +2,7 @@ import { AsyncLocalStorage } from "node:async_hooks";
 import type { RuntimePreferences } from "./runtime_prefs.js";
 import { HARNESS_ENV_DEFAULTS } from "./harness_default_constants.js";
 import { HARNESS_SECRET_ENV_KEYS } from "./harness_env_inventory.js";
+import { latencyModePatchForKey } from "./latency_mode.js";
 
 const harnessEnvAsyncLocal = new AsyncLocalStorage<{ prefs: RuntimePreferences | null }>();
 
@@ -78,6 +79,8 @@ export function resolveHarnessEnvRaw(key: string, prefs: RuntimePreferences | nu
   if (fromRuntime !== undefined && fromRuntime !== "") return fromRuntime;
   const fromHarness = prefs?.harness?.env?.[key]?.trim();
   if (fromHarness !== undefined && fromHarness !== "") return fromHarness;
+  const latencyPatch = latencyModePatchForKey(key, prefs);
+  if (latencyPatch !== undefined) return latencyPatch;
   const d = HARNESS_ENV_DEFAULTS[key];
   return d !== undefined && d !== "" ? d : undefined;
 }

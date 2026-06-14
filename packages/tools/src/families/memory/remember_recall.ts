@@ -15,6 +15,25 @@ import { archiveNotes } from "./notes_archive.js";
 const MEMORY_TYPES = ["fact", "experience", "entity", "belief", "reflection", "recipe", "hypothesis", "trajectory"] as const;
 type MemoryType = (typeof MEMORY_TYPES)[number];
 
+/** Resolve a user-facing key to the stored note key (typed keys, suffix match). */
+export function resolveRecallStorageKey(
+  notes: Record<string, string>,
+  rawKey: string
+): string | null {
+  if (rawKey in notes) return rawKey;
+  const typedMatches: string[] = [];
+  for (const t of MEMORY_TYPES) {
+    const typed = makeTypedKey(t, rawKey);
+    if (typed in notes) typedMatches.push(typed);
+  }
+  if (typedMatches.length === 1) return typedMatches[0]!;
+  if (typedMatches.length > 1) return null;
+
+  const suffixMatches = Object.keys(notes).filter((k) => k.endsWith(`:${rawKey}`));
+  if (suffixMatches.length === 1) return suffixMatches[0]!;
+  return null;
+}
+
 function looksLikePersonaDialSetting(rawKey: string, value: string): boolean {
   const text = `${rawKey} ${value}`.toLowerCase();
   const hasDial = /\b(humou?r|formality|confidence|verbosity|persona\s*strength|style\s*setting|tone\s*setting)\b/.test(
@@ -129,10 +148,10 @@ export const rememberTool = defineTool({
 export const recallTool = defineTool({
   name: "recall",
   description:
-    "WHAT: Retrieve a stored note by exact key. Omit key to list all stored keys.\n" +
-    "WHEN: You know the exact key you stored earlier.\n" +
+    "WHAT: Retrieve a stored note by key. Omit key to list all stored keys.\n" +
+    "WHEN: You know the key you stored earlier (with or without the type prefix).\n" +
     "NOT WHEN: Key is unknown or uncertain — use search_memory to find it by content instead.\n" +
-    "ARGS: key — exact key to fetch (optional; omit to list all keys).",
+    "ARGS: key — key to fetch (optional; omit to list all keys).",
   requiresApproval: false,
   parameters: {
     type: "object",
@@ -145,10 +164,10 @@ export const recallTool = defineTool({
     const notes = await loadNotes();
     if (args["key"]) {
       const key = args["key"] as string;
-      const val = notes[key];
-      if (val !== undefined) void bumpNoteMetadata([key]);
-      return val !== undefined
-        ? { ok: true, output: val }
+      const storageKey = resolveRecallStorageKey(notes, key);
+      if (storageKey) void bumpNoteMetadata([storageKey]);
+      return storageKey
+        ? { ok: true, output: notes[storageKey]! }
         : { ok: false, error: `No note found for key "${key}". Use search_memory if the key is uncertain.` };
     }
     const keys = Object.keys(notes);
@@ -214,23 +233,25 @@ export const forgetTool = defineTool({
   },
   handler: async (args) => {
     const targetKey = args["key"] as string;
+    const notes = await loadNotes();
+    const storageKey = resolveRecallStorageKey(notes, targetKey) ?? targetKey;
     // Soft-delete: archive the full StoredNote before removing so the delete is
     // reversible via restore_memory (no-op when AGENT_MEMORY_ARCHIVE=0).
     const raw = await loadRawNotes();
-    const existing = raw[targetKey];
+    const existing = raw[storageKey];
     if (existing && typeof existing === "object") {
-      await archiveNotes([{ key: targetKey, note: existing, reason: "forget" }]);
+      await archiveNotes([{ key: storageKey, note: existing, reason: "forget" }]);
     }
     let found = false;
     await atomicUpdate((notes) => {
-      if (!(targetKey in notes)) return notes;
+      if (!(storageKey in notes)) return notes;
       found = true;
       const updated = { ...notes };
-      delete updated[targetKey];
+      delete updated[storageKey];
       return updated;
     });
     return found
-      ? { ok: true, output: `Deleted memory: "${targetKey}"${existing && typeof existing === "object" ? " (archived — restore_memory can recover it)" : ""}` }
+      ? { ok: true, output: `Deleted memory: "${storageKey}"${existing && typeof existing === "object" ? " (archived — restore_memory can recover it)" : ""}` }
       : { ok: false, error: `No memory found for key "${targetKey}". Use search_memory to find the correct key.` };
   },
 });

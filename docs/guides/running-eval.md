@@ -17,13 +17,23 @@ npm run eval -w packages/eval -- --any-pass    # pass if any repetition passes
 The suite needs a working provider key (the same `AGENT_API_KEY` / model config as a normal
 run), and `core` + `tools` built first (`npm run build`).
 
+### Sandbox capability lab
+
+Isolated temp workspaces with seeded fixtures — real tool side effects, no monorepo pollution.
+See [Sandbox capability lab](./sandbox-capability-lab.md).
+
+```bash
+npm run eval:sandbox -w packages/eval
+node scripts/sandbox-lab-report.mjs
+```
+
 ## Scenario packs
 
 `basic`, `reliability`, `harness_reliability`, `noise`, `memory_retrieval`,
 `retrieval_precision`, `harness_quality`, `harness_capability`, `epistemic_eval`, `multi_hop`,
 `contradiction`, `context_rot`, `approval_correctness`, `web_research_quality`,
 `research_grade`, `long_horizon`, `tool_lazy_load`, `large_file_write`, `reasoning_budget`,
-`browser_local`, `document_quality`, `document_autonomy`.
+`browser_local`, `document_quality`, `document_autonomy`, `sandbox_capability_lab`.
 
 ## JSON sink
 

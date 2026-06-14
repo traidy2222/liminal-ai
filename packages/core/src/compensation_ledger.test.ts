@@ -42,6 +42,36 @@ test("playback restores file content", async () => {
   }
 });
 
+test("playback scoped to onlyStepIndex leaves other rounds intact", async () => {
+  const root = await mkdtemp(path.join(tmpdir(), "comp-scope-"));
+  const keepPath = path.join(root, "keep.txt");
+  const undoPath = path.join(root, "undo.txt");
+  try {
+    await writeFile(keepPath, "keep-me", "utf8");
+    await writeFile(undoPath, "undo-me", "utf8");
+    const ledger = new CompensationLedger();
+    ledger.record("p1", 1, { kind: "delete_file", path: keepPath });
+    ledger.record("p1", 2, { kind: "delete_file", path: undoPath });
+    const results = await ledger.playback("p1", { onlyStepIndex: 2, workspaceRoot: root });
+    assert.equal(results.length, 1);
+    assert.equal(await readFile(keepPath, "utf8"), "keep-me");
+    assert.equal(ledger.entriesForPlan("p1").length, 1);
+    assert.equal(ledger.entriesForPlan("p1")[0]?.stepIndex, 1);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("commitPath drops pending undo for a file path", () => {
+  const ledger = new CompensationLedger();
+  ledger.record("p1", 0, { kind: "delete_file", path: "foo.ts" });
+  ledger.record("p1", 0, { kind: "restore_file_content", path: "bar.ts", originalContent: "x" });
+  ledger.commitPath("p1", "foo.ts");
+  const entries = ledger.entriesForPlan("p1");
+  assert.equal(entries.length, 1);
+  assert.equal(entries[0]?.action.kind, "restore_file_content");
+});
+
 test("snapshotFileForCompensation returns null for missing file", async () => {
   const snap = await snapshotFileForCompensation(path.join(tmpdir(), "nonexistent-file-xyz.txt"));
   assert.equal(snap, null);

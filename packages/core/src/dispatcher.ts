@@ -13,6 +13,7 @@ import {
   parseIntegrationNotConnectedProvider,
 } from "./integration_connect.js";
 import { resolveWorkspaceRoot } from "./workspace_root.js";
+import { isRecoverableToolFailure } from "./tool_circuit.js";
 
 function autoApproveToolSet(): Set<string> {
   const raw = effectiveHarnessEnvRaw("AGENT_AUTO_APPROVE_TOOLS")?.trim();
@@ -619,7 +620,7 @@ export class ToolDispatcher {
       if (result.ok) {
         this.failStreaks.delete(name);
         this.circuitOpenUntil.delete(name);
-      } else {
+      } else if (!isRecoverableToolFailure(name, result)) {
         const streak = (this.failStreaks.get(name) ?? 0) + 1;
         this.failStreaks.set(name, streak);
         if (streak >= CIRCUIT_FAIL_THRESHOLD) {

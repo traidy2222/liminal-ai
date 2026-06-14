@@ -37,6 +37,8 @@ export interface CompensationResult {
 export interface CompensationPlaybackOptions {
   /** Workspace root for relative paths and git commands. */
   workspaceRoot?: string;
+  /** When set, only replay entries recorded at this ReAct round index. */
+  onlyStepIndex?: number;
 }
 
 function isEnabled(): boolean {
@@ -73,16 +75,38 @@ export class CompensationLedger {
     planId: string,
     opts?: CompensationPlaybackOptions
   ): Promise<CompensationResult[]> {
-    const relevant = this.entries
+    let relevant = this.entries
       .filter((e) => e.planId === planId)
       .sort((a, b) => b.stepIndex - a.stepIndex || b.recordedAt - a.recordedAt);
+    if (opts?.onlyStepIndex !== undefined) {
+      relevant = relevant.filter((e) => e.stepIndex === opts.onlyStepIndex);
+    }
 
     const results: CompensationResult[] = [];
     for (const entry of relevant) {
       const result = await executeCompensationAction(entry.action, opts);
       results.push(result);
     }
+    const undoneIds = new Set(relevant.map((e) => e));
+    this.entries = this.entries.filter((e) => !undoneIds.has(e));
     return results;
+  }
+
+  /**
+   * Drop pending undo actions for a path after a successful write/edit — the
+   * artifact should survive later failures in other rounds.
+   */
+  commitPath(planId: string, filePath: string): void {
+    const norm = filePath.trim().replace(/\\/g, "/");
+    if (!norm) return;
+    this.entries = this.entries.filter((e) => {
+      if (e.planId !== planId) return true;
+      const a = e.action;
+      if (a.kind === "delete_file" || a.kind === "restore_file_content") {
+        return a.path.trim().replace(/\\/g, "/") !== norm;
+      }
+      return true;
+    });
   }
 
   clear(planId: string): void {

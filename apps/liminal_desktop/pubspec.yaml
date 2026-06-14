@@ -40,6 +40,7 @@ dependencies:
   image: ^4.5.4
   liminal_remote_desktop:
     path: packages/liminal_remote_desktop
+  sentry_flutter: ^8.9.0
 
 dev_dependencies:
   flutter_test:

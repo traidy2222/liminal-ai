@@ -5,7 +5,8 @@
  *
  * Flags:
  *   --parallel <n>   Run up to n scenarios concurrently (default 3 when flag present without value).
- *   --only <filter>  Substring match on scenario name, or pack alias `research-grade` / `long-horizon`.
+ *   --only <filter>  Substring match on scenario name, or pack alias `research-grade` /
+ *                    `long-horizon` / `sandbox-lab`.
  *   (Alias: --eval-only also works.)
  *   --repeat <k>     Run each scenario k times (fresh harness each time).
  *   --any-pass       With --repeat: pass if any run passes (default: all k must pass).
@@ -21,11 +22,15 @@ import {
   runScenario,
   appendEvalRunJsonLine,
   flushEvalJsonSink,
-  EVAL_MODEL,
   type ScenarioResult,
   type Scenario,
   writeEvalRunSummary,
 } from "./runner.js";
+import {
+  assertEvalCredentials,
+  describeEvalProvider,
+  formatEvalProviderLine,
+} from "./evalProvider.js";
 import { ALL_SCENARIOS as BASIC_SCENARIOS } from "./scenarios/basic.js";
 import { LIMINAL_DESKTOP_APPS_SCENARIOS } from "./scenarios/liminal_desktop_apps.js";
 import { RELIABILITY_SCENARIOS } from "./scenarios/reliability.js";
@@ -57,6 +62,8 @@ import { HARNESS_RELIABILITY_SCENARIOS } from "./scenarios/harness_reliability.j
 import { WORKFLOW_EVAL_SCENARIOS } from "./scenarios/workflow_evals.js";
 import { MONOLITHIC_HTML_GAME_SCENARIOS } from "./scenarios/monolithic_html_game.js";
 import { GOOGLE_CONNECTORS_SCENARIOS } from "./scenarios/google_connectors.js";
+import { SANDBOX_CAPABILITY_LAB_SCENARIOS } from "./scenarios/sandbox_capability_lab.js";
+import { DESKTOP_PARITY_SCENARIOS, DESKTOP_PARITY_SMOKE_SCENARIOS } from "./scenarios/desktop_parity_lab.js";
 
 const ALL_SCENARIOS = [
   ...BASIC_SCENARIOS,
@@ -85,11 +92,16 @@ const ALL_SCENARIOS = [
   ...MONOLITHIC_HTML_GAME_SCENARIOS,
   ...GOOGLE_CONNECTORS_SCENARIOS,
   ...LIMINAL_DESKTOP_APPS_SCENARIOS,
+  ...SANDBOX_CAPABILITY_LAB_SCENARIOS,
+  ...DESKTOP_PARITY_SCENARIOS,
 ];
 const REAL_SCENARIOS = ALL_SCENARIOS.filter((s) => !s.mocks || s.mocks.length === 0);
 
 const RESEARCH_GRADE_SET = new Set<Scenario>(RESEARCH_GRADE_SCENARIOS);
 const LONG_HORIZON_SET = new Set<Scenario>(LONG_HORIZON_SCENARIOS);
+const SANDBOX_LAB_SET = new Set<Scenario>(SANDBOX_CAPABILITY_LAB_SCENARIOS);
+const DESKTOP_PARITY_SET = new Set<Scenario>(DESKTOP_PARITY_SCENARIOS);
+const DESKTOP_PARITY_SMOKE_SET = new Set<Scenario>(DESKTOP_PARITY_SMOKE_SCENARIOS);
 
 const RESET = "\x1b[0m";
 const GREEN = "\x1b[32m";
@@ -111,6 +123,11 @@ function printResult(r: ScenarioResult) {
 
   if (r.error) {
     console.log(`     ${fmt(RED, "Error:")} ${r.error}`);
+  }
+  if (r.parityMeta) {
+    console.log(
+      `     ${fmt(CYAN, "desktop-parity:")} model=${r.parityMeta.model} approvals=${r.parityMeta.approvalPrompts} frames=${r.parityMeta.bridgeFrames}`
+    );
   }
 
   for (const a of r.assertions) {
@@ -167,6 +184,15 @@ function selectScenarios(only: string | undefined, harnessInteraction: boolean):
   }
   if (only === "long-horizon") {
     return list.filter((s) => LONG_HORIZON_SET.has(s));
+  }
+  if (only === "sandbox-lab" || only === "sandbox") {
+    return list.filter((s) => SANDBOX_LAB_SET.has(s));
+  }
+  if (only === "desktop-parity" || only === "desktop") {
+    return list.filter((s) => DESKTOP_PARITY_SET.has(s));
+  }
+  if (only === "desktop-smoke") {
+    return list.filter((s) => DESKTOP_PARITY_SMOKE_SET.has(s));
   }
   return list.filter((s) => s.name.includes(only));
 }
@@ -238,28 +264,30 @@ async function runScenarioWithRepeat(
 }
 
 async function main() {
-  const hasKey = Boolean(
-    process.env["AGENT_API_KEY"] ||
-      process.env["OPENROUTER_API_KEY"] ||
-      process.env["OPENAI_API_KEY"] ||
-      process.env["ANTHROPIC_API_KEY"] ||
-      process.env["XAI_API_KEY"]
-  );
-  if (!hasKey) {
-    console.error(
-      fmt(
-        RED,
-        "✗ No provider API key set — define AGENT_API_KEY (preferred) or OPENROUTER/OPENAI/ANTHROPIC/XAI key."
-      )
-    );
+  try {
+    await assertEvalCredentials();
+  } catch (err) {
+    console.error(fmt(RED, `✗ ${err instanceof Error ? err.message : String(err)}`));
     process.exit(1);
   }
 
   const argv = process.argv.slice(2);
   const { parallel, only, repeat, anyPass, harnessInteraction } = parseCli(argv);
+  if (only === "sandbox-lab" || only === "sandbox") {
+    process.env["EVAL_SANDBOX_LAB"] = "1";
+  }
+  if (
+    only === "desktop-parity" ||
+    only === "desktop" ||
+    only === "desktop-smoke" ||
+    (only?.startsWith("desktop-") ?? false)
+  ) {
+    process.env["EVAL_DESKTOP_PARITY"] = "1";
+  }
   const scenarios = selectScenarios(only, harnessInteraction);
+  const providerSummary = await describeEvalProvider();
 
-  console.log(`\n${fmt(BOLD, "Liminal eval")}  ${fmt(DIM, `model: ${EVAL_MODEL}`)}\n`);
+  console.log(`\n${fmt(BOLD, "Liminal eval")}  ${fmt(DIM, formatEvalProviderLine(providerSummary))}\n`);
   console.log(
     fmt(
       DIM,
@@ -269,14 +297,10 @@ async function main() {
   );
 
   const suiteStartedAt = Date.now();
-  const results: ScenarioResult[] =
-    parallel <= 1
-      ? await Promise.all(
-          scenarios.map((scenario) => runScenarioWithRepeat(scenario, repeat, anyPass))
-        )
-      : await mapPool(scenarios, parallel, (scenario) =>
-          runScenarioWithRepeat(scenario, repeat, anyPass)
-        );
+  const workers = parallel <= 0 ? 1 : parallel;
+  const results: ScenarioResult[] = await mapPool(scenarios, workers, (scenario) =>
+    runScenarioWithRepeat(scenario, repeat, anyPass)
+  );
 
   let anyFailed = false;
   for (let i = 0; i < results.length; i++) {

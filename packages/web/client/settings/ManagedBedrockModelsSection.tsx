@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
-import type { ManagedInferenceModel } from "@liminal/core";
+import { filterManagedInferenceCatalog, type ManagedInferenceModel } from "@liminal/core";
 import { webApiFetch } from "../webApiAuth.js";
 import { WEB_SERVER_BASE } from "../useSSE.js";
 
@@ -124,19 +124,24 @@ export function ManagedBedrockModelsSection({
     void load();
   }, [load]);
 
+  const filteredModels = useMemo(
+    () => filterManagedInferenceCatalog(models, managedProvider),
+    [models, managedProvider]
+  );
+
   const grouped = useMemo(() => {
     const m = new Map<string, ManagedInferenceModel[]>();
-    for (const row of models) {
+    for (const row of filteredModels) {
       const key = row.family || "other";
       const list = m.get(key) ?? [];
       list.push(row);
       m.set(key, list);
     }
     return [...m.entries()].sort(([a], [b]) => a.localeCompare(b));
-  }, [models]);
+  }, [filteredModels]);
 
-  const mainValue = models.some((m) => m.id === mainModel) ? mainModel : "";
-  const fastValue = models.some((m) => m.id === fastModel) ? fastModel : "";
+  const mainValue = filteredModels.some((m) => m.id === mainModel) ? mainModel : "";
+  const fastValue = filteredModels.some((m) => m.id === fastModel) ? fastModel : "";
   const upstreamLabel =
     upstream === "hybrid" ? "hybrid (Bedrock + OpenRouter + Kimchi)" : upstream || "managed";
 
@@ -202,8 +207,12 @@ export function ManagedBedrockModelsSection({
             Retry
           </button>
         </div>
-      ) : models.length === 0 ? (
-        <div style={{ fontSize: 11, color: AMBER }}>No models returned from managed inference.</div>
+      ) : filteredModels.length === 0 ? (
+        <div style={{ fontSize: 11, color: AMBER }}>
+          {models.length === 0
+            ? "No models returned from managed inference."
+            : `No models available on ${managedProvider || "auto"} upstream.`}
+        </div>
       ) : (
         <>
           <div
@@ -268,9 +277,12 @@ export function ManagedBedrockModelsSection({
             </select>
           </div>
           <div style={{ fontSize: 10, color: "#6a7a8a", marginTop: 8, lineHeight: 1.45 }}>
-            {models.length} models in catalog. Dual-provider entries show which upstreams can serve
-            them. Save runtime prefs after changes. Set inference mode to <strong>byok</strong> below
-            to use your own API key instead.
+            {filteredModels.length}
+            {managedProvider && managedProvider !== "auto"
+              ? ` models on ${managedProvider}`
+              : " models in catalog"}
+            . Save runtime prefs after changes. Set inference mode to <strong>byok</strong> below to
+            use your own API key instead.
           </div>
         </>
       )}

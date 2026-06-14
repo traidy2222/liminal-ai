@@ -1,4 +1,5 @@
 import OpenAI from "openai";
+import { InferenceLatencyTracker } from "./inference_latency.js";
 import type { Stream } from "openai/streaming";
 import type {
   AgentConfig,
@@ -157,6 +158,7 @@ import {
 } from "./kimchi_provider.js";
 import {
   buildManagedInferenceClientHeaders,
+  buildByokRoutingPatchForModel,
   describeProviderError,
   fetchInferenceUsageStatus,
   fetchManagedInferenceModels,
@@ -179,6 +181,7 @@ import {
   buildManagedFreeFallbackHarnessEnv,
   buildManagedRecoveryHarnessEnv,
   isModelIncompatibleWithManagedProxy,
+  isUserIntentOpenRouterOnlyModel,
   managedFreeFallbackEnabled,
   resolveManagedFreeFallbackMainModel,
   resolveModelForManagedInference,
@@ -245,6 +248,7 @@ import {
   updateDriftScore,
   getCompensationLedger,
   recordCompensation,
+  commitCompensationPath,
   renderExecutionStateBlock,
 } from "./execution_state.js";
 import {
@@ -526,6 +530,10 @@ function normalizeRuntimePreferencePatch(patch: Partial<RuntimePreferences>): Pa
       p.baseURL = patch.provider.baseURL.trim();
     }
     if (patch.provider.keySource) p.keySource = patch.provider.keySource;
+    const mode = patch.provider.inferenceMode;
+    if (mode === "byok" || mode === "managed" || mode === "auto") {
+      p.inferenceMode = mode;
+    }
     if (Object.keys(p).length > 0) out.provider = p;
   }
   if (patch.runtime) {
@@ -1475,15 +1483,27 @@ export class AgentHarness {
     return null;
   }
 
-  private async maybePlaybackCompensation(reason: string): Promise<void> {
+  private async maybePlaybackCompensation(
+    reason: string,
+    opts?: { onlyStepIndex?: number }
+  ): Promise<void> {
     if (resolveHarnessEnvRaw("AGENT_COMPENSATION_ENABLED", this.runtimePreferences) === "0") return;
     const planId =
       this.executionState?.activeContractId ?? this.executionState?.mission?.id;
     if (!planId) return;
     const ledger = getCompensationLedger();
-    if (ledger.entriesForPlan(planId).length === 0) return;
-    const results = await ledger.playback(planId, { workspaceRoot: this.workspaceRoot });
-    ledger.clear(planId);
+    const pending = ledger.entriesForPlan(planId);
+    if (pending.length === 0) return;
+    if (opts?.onlyStepIndex !== undefined) {
+      if (!pending.some((e) => e.stepIndex === opts.onlyStepIndex)) return;
+    }
+    const results = await ledger.playback(planId, {
+      workspaceRoot: this.workspaceRoot,
+      onlyStepIndex: opts?.onlyStepIndex,
+    });
+    if (opts?.onlyStepIndex === undefined) {
+      ledger.clear(planId);
+    }
     if (results.length === 0) return;
     const report = formatCompensationReport(results);
     this.context.appendMessage({ role: "system", content: report });
@@ -1666,7 +1686,9 @@ export class AgentHarness {
     hadBrowserTools: boolean;
     batchKey: string;
   }): Promise<void> {
-    if (this.agentDepth > 0 || !proactiveVerificationEnabled()) return;
+    if (this.agentDepth > 0) return;
+
+    const proactiveMaster = proactiveVerificationEnabled();
 
     if (opts.hadEdits && proactiveLintAfterEditsEnabled() && this.registry.has("run_lint")) {
       const { typedCode, webAssets } = classifyChangedFiles([...this.changedFilesThisTurn]);
@@ -1696,6 +1718,10 @@ export class AgentHarness {
               role: "user",
               content: buildProactiveLintFailMessage(scope, body),
             });
+            this.emitter.emit("text", {
+              delta: "[HARNESS] Proactive lint found errors after edits — see [VERIFY RESULT] above.\n",
+              channel: "trace",
+            });
           } else if (!lintRes.ok) {
             this.context.appendMessage({
               role: "user",
@@ -1706,13 +1732,15 @@ export class AgentHarness {
           }
         }
       }
-      if (webAssets.length > 0 && !this.verificationSatisfiedThisSend) {
+      if (proactiveMaster && webAssets.length > 0 && !this.verificationSatisfiedThisSend) {
         this.context.appendMessage({
           role: "user",
           content: buildProactiveWebAssetHintMessage(webAssets),
         });
       }
     }
+
+    if (!proactiveMaster) return;
 
     if (opts.hadBrowserTools) {
       const diag = this.onCollectBrowserDiagnostics?.(this.taskId) ?? null;
@@ -1971,8 +1999,21 @@ export class AgentHarness {
    */
   private async maybeRecoverManagedInferenceRoute(): Promise<void> {
     const mode = resolveInferenceMode(this.runtimePreferences);
+    if (mode === "byok" && !this.managedByokFallbackActive) return;
+
     const onInference = isManagedInferenceBaseUrl(this.config.baseURL);
     const badModel = isModelIncompatibleWithManagedProxy(this.config.model);
+    const userIntent =
+      this.runtimePreferences?.provider?.model?.trim() ||
+      resolveHarnessEnvRaw("AGENT_MODEL", this.runtimePreferences)?.trim() ||
+      "";
+    if (
+      userIntent &&
+      isUserIntentOpenRouterOnlyModel(userIntent) &&
+      !this.managedByokFallbackActive
+    ) {
+      return;
+    }
     const shouldTry =
       this.managedByokFallbackActive ||
       (onInference && badModel) ||
@@ -2059,12 +2100,68 @@ export class AgentHarness {
     }
   }
 
-  /**
-   * Leave the Vireon managed-inference proxy for direct OpenRouter BYOK.
-   * - `budget_exceeded`: optional free model pack (owl-alpha default).
-   * - `upstream_busy`: same model on BYOK when AGENT_MANAGED_BYOK_FALLBACK=1.
-   * Sticky for the rest of the session.
-   */
+  /** Switch to OpenRouter BYOK when the selected model cannot use the Vireon managed proxy. */
+  private async maybeRouteByokForIncompatibleModel(): Promise<void> {
+    if (this.managedByokFallbackActive) return;
+    if (resolveInferenceMode(this.runtimePreferences) === "byok") return;
+
+    const model =
+      this.config.model?.trim() ||
+      this.runtimePreferences?.provider?.model?.trim() ||
+      resolveHarnessEnvRaw("AGENT_MODEL", this.runtimePreferences)?.trim() ||
+      "";
+    if (!model || !isModelIncompatibleWithManagedProxy(model)) return;
+    if (!hasLocalProviderApiKey()) return;
+
+    const patch = buildByokRoutingPatchForModel(model, this.runtimePreferences);
+    if (!patch) return;
+
+    await this.patchRuntimePreferences(patch, { persist: true });
+    const slug =
+      patch.harness?.env?.AGENT_MODEL?.trim() ||
+      patch.provider?.model?.trim() ||
+      model;
+    const byok = resolveProviderConfig({ model: slug });
+    if (!byok.apiKey?.trim()) return;
+
+    this.config.openRouterApiKey = byok.apiKey;
+    this.config.baseURL = byok.baseURL;
+    this.config.model = byok.model || slug;
+    this.rebuildClient();
+    if (!this.isUiQuiet()) {
+      this.emitter.emit("text", {
+        delta:
+          `\nℹ \`${slug}\` is OpenRouter-only — using your API key instead of Vireon managed inference.\n`,
+        channel: "user",
+      });
+    }
+  }
+
+  /** Block managed routing when the user picked an OpenRouter-only model without a BYOK key. */
+  private async incompatibleManagedModelBlockMessage(): Promise<string | null> {
+    if (this.managedByokFallbackActive) return null;
+    const mode = resolveInferenceMode(this.runtimePreferences);
+    if (mode === "byok") return null;
+
+    const model =
+      this.config.model?.trim() ||
+      this.runtimePreferences?.provider?.model?.trim() ||
+      resolveHarnessEnvRaw("AGENT_MODEL", this.runtimePreferences)?.trim() ||
+      "";
+    if (!model || !isModelIncompatibleWithManagedProxy(model)) return null;
+    if (hasLocalProviderApiKey()) return null;
+
+    const routeManaged =
+      mode === "managed" || (await shouldRouteOpenRouterViaManaged(this.runtimePreferences));
+    if (!routeManaged) return null;
+
+    return (
+      `Model \`${model}\` is only available through OpenRouter with your own API key ` +
+      `(not Vireon managed inference). Add an OpenRouter key in Settings → Provider, ` +
+      `or pick a managed-compatible preset (e.g. DeepSeek, GLM).`
+    );
+  }
+
   /** Clear Stealth pins left from Owl when the active model needs Nvidia/other providers. */
   private async clearStaleStealthProviderPins(): Promise<void> {
     const candidates: Record<string, string> = {
@@ -2090,6 +2187,12 @@ export class AgentHarness {
     }
   }
 
+  /**
+   * Leave the Vireon managed-inference proxy for direct OpenRouter BYOK.
+   * - `budget_exceeded`: optional free model pack (owl-alpha default).
+   * - `upstream_busy`: same model on BYOK when AGENT_MANAGED_BYOK_FALLBACK=1.
+   * Sticky for the rest of the session.
+   */
   private async tryActivateManagedOpenRouterFallback(
     reason: "budget_exceeded" | "upstream_busy" | "provider_error"
   ): Promise<boolean> {
@@ -2235,10 +2338,23 @@ export class AgentHarness {
     const prevModel = this.config.model ?? "";
     const prevBaseURL = this.config.baseURL ?? "";
     const effectiveModel = this.resolveEffectiveModelFromPreferences();
+    if (effectiveModel && isModelIncompatibleWithManagedProxy(effectiveModel)) {
+      const byokPatch = buildByokRoutingPatchForModel(
+        effectiveModel,
+        this.runtimePreferences
+      );
+      if (
+        byokPatch &&
+        resolveInferenceMode(this.runtimePreferences) !== "byok"
+      ) {
+        await this.patchRuntimePreferences(byokPatch, { persist: true });
+      }
+    }
+    const resolvedModel = this.resolveEffectiveModelFromPreferences();
     if (this.managedByokFallbackActive) {
       const byok = resolveProviderConfig({
         baseURL: this.config.baseURL,
-        model: effectiveModel ?? this.config.model,
+        model: resolvedModel ?? this.config.model,
       });
       this.config.openRouterApiKey = byok.apiKey;
       this.config.baseURL = byok.baseURL;
@@ -2248,7 +2364,7 @@ export class AgentHarness {
       return;
     }
     const provider = await resolveProviderConfigWithInference(
-      effectiveModel ? { model: effectiveModel } : undefined,
+      resolvedModel ? { model: resolvedModel } : undefined,
       this.runtimePreferences
     );
     this.config.openRouterApiKey = provider.apiKey;
@@ -2374,6 +2490,17 @@ export class AgentHarness {
           model: this.config.model,
         });
         this.config.openRouterApiKey = byok.apiKey;
+        keySource = byok.keySource;
+        this.rebuildClient();
+      } else if (resolveInferenceMode(merged) === "byok") {
+        const byok = resolveProviderConfig({
+          baseURL: this.config.baseURL,
+          model: effectiveModel,
+          keySource: merged.provider?.keySource,
+        });
+        this.config.openRouterApiKey = byok.apiKey;
+        this.config.baseURL = byok.baseURL;
+        this.config.model = byok.model;
         keySource = byok.keySource;
         this.rebuildClient();
       } else {
@@ -2771,6 +2898,12 @@ export class AgentHarness {
     if (this.running) throw new Error("Agent is already processing a message");
     await this.maybeRecoverManagedInferenceRoute();
     await this.maybePreemptManagedCreditExhaustion();
+    await this.maybeRouteByokForIncompatibleModel();
+    const incompatibleMsg = await this.incompatibleManagedModelBlockMessage();
+    if (incompatibleMsg) {
+      this.emitter.emit("error", { err: new Error(incompatibleMsg) });
+      return;
+    }
     void this.refreshManagedInferenceCatalog().then(() => this.syncContextWindowForModel());
     if (options?.freshContext === true && this.agentDepth === 0) {
       this.reset();
@@ -2802,19 +2935,15 @@ export class AgentHarness {
         (mode === "managed" ||
           (mode !== "byok" && (await shouldRouteOpenRouterViaManaged(this.runtimePreferences))));
       if (routeManaged) {
-        const managedModel = resolveModelForManagedInference(
-          this.config.model,
-          this.runtimePreferences
-        );
-        if (managedModel !== this.config.model) {
-          this.config.model = managedModel;
-          await this.patchRuntimePreferences(
-            {
-              provider: { model: managedModel },
-              harness: { env: { AGENT_MODEL: managedModel } },
-            },
-            { persist: true }
-          );
+        const rawModel =
+          this.resolveEffectiveModelFromPreferences() || this.config.model || "";
+        if (rawModel && isModelIncompatibleWithManagedProxy(rawModel)) {
+          this.running = false;
+          const blockMsg =
+            (await this.incompatibleManagedModelBlockMessage()) ??
+            `Model \`${rawModel}\` requires OpenRouter BYOK.`;
+          this.emitter.emit("error", { err: new Error(blockMsg) });
+          return;
         }
         try {
           const session = await ensureManagedInferenceSession(
@@ -3036,17 +3165,19 @@ export class AgentHarness {
     let worldCtxPromise: Promise<string | null> | null = null;
     if (!this.worldContextInjected && this.agentDepth === 0) {
       this.worldContextInjected = true;
-      this._worldRefresher = new WorldContextRefresher(resolveWorkspaceRoot());
-      void this._worldRefresher.init().catch(() => { /* non-fatal */ });
-      worldCtxPromise = buildWorldContextMessage({
-        ...this.config.worldContext,
-        firstUserMessage: telemetryUserLabel,
-        chatId: this.taskId,
-        activeLlm: {
-          model: this.config.model,
-          baseURL: this.config.baseURL ?? "",
-        },
-      }).catch(() => null);
+      if (effectiveHarnessEnvRaw("AGENT_WORLD_CONTEXT") !== "0") {
+        this._worldRefresher = new WorldContextRefresher(resolveWorkspaceRoot());
+        void this._worldRefresher.init().catch(() => { /* non-fatal */ });
+        worldCtxPromise = buildWorldContextMessage({
+          ...this.config.worldContext,
+          firstUserMessage: telemetryUserLabel,
+          chatId: this.taskId,
+          activeLlm: {
+            model: this.config.model,
+            baseURL: this.config.baseURL ?? "",
+          },
+        }).catch(() => null);
+      }
     }
     try {
       if (openingTurn) {
@@ -4831,9 +4962,6 @@ export class AgentHarness {
       if (this.roundCount > 1 && this.roundCount % 4 === 0) {
         const next = updateDriftScore(this.executionState, 0.06);
         const triggeredReplan = next.driftScore >= 0.55;
-        if (triggeredReplan) {
-          void this.maybePlaybackCompensation("drift replan threshold");
-        }
         this.executionState = triggeredReplan ? advanceExecutionStateForPlan(next, [
           "Reconfirm mission objective and constraints",
           "Regenerate milestone contracts from latest evidence",
@@ -5362,8 +5490,14 @@ export class AgentHarness {
       );
     };
     let stream: Stream<OpenAI.Chat.Completions.ChatCompletionChunk>;
+    const inferenceLatencyTracker = new InferenceLatencyTracker(
+      activeModelSlug,
+      this.currentTurnTraceId
+    );
+    inferenceLatencyTracker.markRequestStart();
     try {
       stream = await openStream();
+      inferenceLatencyTracker.markResponseStart();
     } catch (err) {
       if (isContextLengthExceededError(err) && !this.contextOverflowRecoveredThisRound) {
         this.contextOverflowRecoveredThisRound = true;
@@ -5401,6 +5535,14 @@ export class AgentHarness {
           if (this.abortSignal?.aborted) return;
 
           const parsed = accumulator.processChunk(chunk);
+          if (
+            parsed.textDelta ||
+            parsed.reasoningDelta ||
+            parsed.inlineReasoningDelta ||
+            parsed.toolCallDelta
+          ) {
+            inferenceLatencyTracker.markFirstToken();
+          }
           emitProcessedStreamText(this.emitter, parsed, {
             reasoningSurface: this._turnReasoningSurface,
             onPseudoMarkup: () => {
@@ -5464,6 +5606,8 @@ export class AgentHarness {
         } catch {
           /* non-fatal */
         }
+        const latencyMetrics = inferenceLatencyTracker.markCompletion();
+        this.emitter.emit("inference_latency", latencyMetrics);
         break streamLoop; // stream completed successfully
       } catch (streamErr) {
         // Never retry if the task was externally cancelled
@@ -5960,14 +6104,22 @@ export class AgentHarness {
             }
           }
         }
-        // ── Compensation ledger — record undo action on success ────────────────
+        // ── Compensation ledger — commit successful file ops; record other undo actions ──
         if (r.ok && this.executionState) {
           const planId = this.executionState.activeContractId ?? this.executionState.mission?.id;
           if (planId) {
             try {
               const args = JSON.parse(tc.argsJson) as Record<string, unknown>;
-              const action = inferCompensationAction(tc.name, args);
-              if (action) recordCompensation(planId, this.roundCount, action);
+              const filePath = String(args["path"] ?? "").trim();
+              if (
+                filePath &&
+                (tc.name === "write_file" || tc.name === "edit_file" || tc.name === "mkdir_p")
+              ) {
+                commitCompensationPath(planId, filePath);
+              } else {
+                const action = inferCompensationAction(tc.name, args);
+                if (action) recordCompensation(planId, this.roundCount, action);
+              }
             } catch { /* non-fatal */ }
           }
         }
@@ -6467,7 +6619,9 @@ export class AgentHarness {
         });
         if (this.executionState) {
           this.executionState = updateDriftScore(this.executionState, 0.15);
-          void this.maybePlaybackCompensation("all tools failed in round");
+          void this.maybePlaybackCompensation("all tools failed in round", {
+            onlyStepIndex: this.roundCount,
+          });
           this.executionState = appendRecoveryRecord(this.executionState, {
             at: Date.now(),
             reason: "all_tools_failed",
@@ -6612,6 +6766,7 @@ export class AgentHarness {
           openingTurn,
           sessionGreeting: this.sessionGreetingThisSend,
           personaBootstrap: this.personaBootstrapPromptThisSend,
+          userMessage: this.lastUserMessage,
         })
       ) {
         this.userReplyFinalizeAttempted = true;

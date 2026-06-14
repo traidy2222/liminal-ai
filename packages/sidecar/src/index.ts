@@ -27,6 +27,11 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 const repoRoot =
   process.env["LIMINAL_REPO_ROOT"]?.trim() || join(__dirname, "../../../");
 loadHarnessEnvFiles({ repoRoot, cwd: process.cwd() });
+process.env["LIMINAL_SIDECAR"] = "1";
+/** Desktop turns feel slow with sidecar LLM passes — enable unless user set this in .env. */
+if (!process.env["AGENT_LATENCY_MODE"]?.trim()) {
+  process.env["AGENT_LATENCY_MODE"] = "1";
+}
 ensureProviderApiKeysInProcess();
 ensureLocalProviderApiKeyInProcess();
 void refreshStaleXeroAccounts().catch(() => {

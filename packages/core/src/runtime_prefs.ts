@@ -138,3 +138,39 @@ export async function saveRuntimePreferences(
   return filePath;
 }
 
+/** Deep-merge a sparse prefs patch (sidecar settings saves). */
+export function mergeRuntimePreferences(
+  base: RuntimePreferences | null,
+  patch: Partial<RuntimePreferences>
+): RuntimePreferences {
+  const prev = base ?? { version: 1, updatedAt: Date.now() };
+  return {
+    ...prev,
+    ...patch,
+    version: 1,
+    provider: {
+      ...(prev.provider ?? {}),
+      ...(patch.provider ?? {}),
+    },
+    runtime: {
+      ...(prev.runtime ?? {}),
+      ...(patch.runtime ?? {}),
+    },
+    persona: {
+      ...(prev.persona ?? {}),
+      ...(patch.persona ?? {}),
+      controls: {
+        ...(prev.persona?.controls ?? {}),
+        ...(patch.persona?.controls ?? {}),
+      },
+    },
+    harness: {
+      env: {
+        ...(prev.harness?.env ?? {}),
+        ...(patch.harness?.env ?? {}),
+      },
+    },
+    updatedAt: Date.now(),
+  };
+}
+

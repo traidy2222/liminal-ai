@@ -1,5 +1,6 @@
 import OpenAI from "openai";
 import {
+  DEFAULT_AGENT_API_BASE_URL,
   DEFAULT_AGENT_MODEL_SLUG,
   HARNESS_ENV_DEFAULTS,
 } from "./harness_default_constants.js";
@@ -23,7 +24,8 @@ import {
   ensureManagedInferenceSession,
   isManagedInferenceBaseUrl,
 } from "./inference_session.js";
-import { formatKimchiProviderError, isKimchiApiBaseUrl } from "./kimchi_provider.js";
+import { formatKimchiProviderError } from "./kimchi_provider.js";
+import { isKimchiApiBaseUrl } from "./kimchi_constants.js";
 import { ensureLocalProviderApiKeyInProcess } from "./provider_api_key.js";
 import {
   buildManagedRecoveryHarnessEnv,
@@ -51,6 +53,37 @@ const DEFAULT_INFERENCE_BASE_URL =
 const DEFAULT_INFERENCE_SESSION_URL =
   HARNESS_ENV_DEFAULTS["AGENT_INFERENCE_SESSION_URL"]?.trim() ||
   "https://www.vireondynamics.com/api/inference/session";
+
+const INFERENCE_SESSION_RETRIES = 3;
+const INFERENCE_SESSION_RETRY_BASE_MS = 800;
+const INFERENCE_SESSION_RETRY_MAX_MS = 10_000;
+
+function isRetryableSessionError(err: unknown): boolean {
+  if (err instanceof TypeError && /fetch|network/i.test(err.message)) return true;
+  if (err instanceof Error) {
+    const msg = err.message.toLowerCase();
+    return /econnreset|econnrefused|etimedout|socket|network|fetch failed|und_err/i.test(msg);
+  }
+  return false;
+}
+
+function parseSessionRetryAfterMs(res: Response): number | null {
+  const header = res.headers.get("retry-after");
+  if (!header) return null;
+  const secs = Number(header);
+  if (Number.isFinite(secs) && secs > 0) return Math.round(secs * 1000);
+  const ts = Date.parse(header);
+  if (!Number.isFinite(ts)) return null;
+  return Math.max(0, ts - Date.now());
+}
+
+async function sleepWithAbort(ms: number, signal?: AbortSignal): Promise<void> {
+  if (signal?.aborted) return;
+  await new Promise<void>((resolve) => {
+    const t = setTimeout(resolve, ms);
+    signal?.addEventListener("abort", () => { clearTimeout(t); resolve(); }, { once: true });
+  });
+}
 
 export interface InferenceSessionResult {
   token: string;
@@ -207,6 +240,44 @@ export function hasLocalProviderApiKey(): boolean {
   return Boolean(ensureLocalProviderApiKeyInProcess());
 }
 
+/**
+ * OpenRouter-only slugs (openrouter/*, :free) cannot ride the Vireon managed proxy.
+ * When the user picks one explicitly and a BYOK key exists, route through OpenRouter directly.
+ */
+export function buildByokRoutingPatchForModel(
+  model: string,
+  prefs?: RuntimePreferences | null
+): Partial<RuntimePreferences> | null {
+  const slug = model.trim();
+  if (!slug || !isModelIncompatibleWithManagedProxy(slug)) return null;
+  const mode = resolveInferenceMode(prefs);
+  if (mode === "byok") {
+    return {
+      harness: { env: { AGENT_MODEL: slug } },
+      provider: { model: slug },
+    };
+  }
+  return {
+    provider: {
+      inferenceMode: "byok",
+      model: slug,
+      baseURL: DEFAULT_AGENT_API_BASE_URL,
+    },
+    harness: {
+      env: {
+        AGENT_INFERENCE_MODE: "byok",
+        AGENT_INFERENCE_PREFER_MANAGED: "0",
+        AGENT_MODEL: slug,
+        AGENT_API_BASE_URL: DEFAULT_AGENT_API_BASE_URL,
+        AGENT_PROVIDER_ORDER: "",
+        AGENT_PROVIDER_ORDER_FAST: "",
+        AGENT_PROVIDER_ROUTE_AUTO: "1",
+        AGENT_PROVIDER_ALLOW_FALLBACKS: "1",
+      },
+    },
+  };
+}
+
 export function managedInferenceBaseUrl(): string {
   return (
     effectiveHarnessEnvRaw("AGENT_INFERENCE_BASE_URL")?.trim() || DEFAULT_INFERENCE_BASE_URL
@@ -244,30 +315,74 @@ export async function fetchInferenceSession(
   }
 
   const url = inferenceSessionUrl();
-  const res = await fetch(url, {
-    method: "GET",
-    headers: {
-      Authorization: `Bearer ${license}`,
-      Accept: "application/json",
-    },
-  });
-  const body = (await res.json().catch(() => ({}))) as {
-    error?: string;
-    token?: string;
-    expiresAt?: string;
-    baseURL?: string;
-  };
-  if (!res.ok) {
-    throw new Error(body.error ?? `Inference session failed (${res.status})`);
+  let attempt = 0;
+  let lastErr: unknown = null;
+
+  while (attempt <= INFERENCE_SESSION_RETRIES) {
+    try {
+      const res = await fetch(url, {
+        method: "GET",
+        headers: {
+          Authorization: `Bearer ${license}`,
+          Accept: "application/json",
+        },
+      });
+
+      if (res.status === 429 || (res.status >= 500 && res.status < 600)) {
+        if (attempt >= INFERENCE_SESSION_RETRIES) {
+          const body = (await res.json().catch(() => ({}))) as { error?: string };
+          throw new Error(body.error ?? `Inference session failed (${res.status})`);
+        }
+        const retryMs = parseSessionRetryAfterMs(res);
+        const exp = Math.min(10, attempt);
+        const base = Math.min(
+          INFERENCE_SESSION_RETRY_MAX_MS,
+          Math.round(INFERENCE_SESSION_RETRY_BASE_MS * Math.pow(2, exp))
+        );
+        const jitter = Math.round(Math.random() * base * 0.3);
+        const delay = Math.max(200, Math.min(INFERENCE_SESSION_RETRY_MAX_MS, retryMs ?? base + jitter));
+        console.log(`[inference_session] retry ${attempt + 1}/${INFERENCE_SESSION_RETRIES} after ${delay}ms (status ${res.status})`);
+        await sleepWithAbort(delay);
+        attempt += 1;
+        continue;
+      }
+
+      const body = (await res.json().catch(() => ({}))) as {
+        error?: string;
+        token?: string;
+        expiresAt?: string;
+        baseURL?: string;
+      };
+      if (!res.ok) {
+        throw new Error(body.error ?? `Inference session failed (${res.status})`);
+      }
+      if (!body.token?.trim()) {
+        throw new Error("Inference session response missing token");
+      }
+      return {
+        token: body.token.trim(),
+        expiresAt: body.expiresAt ?? new Date(Date.now() + 15 * 60_000).toISOString(),
+        baseURL: (body.baseURL ?? inferenceBaseUrl()).replace(/\/$/, ""),
+      };
+    } catch (err) {
+      lastErr = err;
+      if (!isRetryableSessionError(err) || attempt >= INFERENCE_SESSION_RETRIES) {
+        throw err;
+      }
+      const exp = Math.min(10, attempt);
+      const base = Math.min(
+        INFERENCE_SESSION_RETRY_MAX_MS,
+        Math.round(INFERENCE_SESSION_RETRY_BASE_MS * Math.pow(2, exp))
+      );
+      const jitter = Math.round(Math.random() * base * 0.3);
+      const delay = Math.max(200, base + jitter);
+      console.log(`[inference_session] network retry ${attempt + 1}/${INFERENCE_SESSION_RETRIES} after ${delay}ms`);
+      await sleepWithAbort(delay);
+      attempt += 1;
+    }
   }
-  if (!body.token?.trim()) {
-    throw new Error("Inference session response missing token");
-  }
-  return {
-    token: body.token.trim(),
-    expiresAt: body.expiresAt ?? new Date(Date.now() + 15 * 60_000).toISOString(),
-    baseURL: (body.baseURL ?? inferenceBaseUrl()).replace(/\/$/, ""),
-  };
+
+  throw lastErr instanceof Error ? lastErr : new Error(String(lastErr ?? "inference session retry exhausted"));
 }
 
 /** True when OpenRouter sidecar calls should route through the Vireon inference proxy. */
@@ -351,9 +466,7 @@ export async function resolveProviderConfigWithInference(
 
   const managed = await shouldRouteOpenRouterViaManaged(prefs);
   if (mode === "managed" && !managed) {
-    throw new Error(
-      "AGENT_INFERENCE_MODE=managed requires pro.managed_inference on an active Pro (or higher) license."
-    );
+    return resolveProviderConfig(overrides);
   }
 
   if (managed) {
@@ -405,6 +518,72 @@ export type ManagedInferenceModelsResult = {
   region: string;
   models: ManagedInferenceModel[];
 };
+
+const BEDROCK_GEO_PREFIX = /^(us|eu|global|apac|au|jp)\./i;
+
+/** True when the slug is a flat Cast AI / Kimchi id (no vendor slash). */
+export function looksLikeKimchiModelId(model: string): boolean {
+  const m = model.trim().toLowerCase();
+  if (!m || m.includes("/")) return false;
+  if (/^(kimi-|minimax-|nemotron-)/.test(m)) return true;
+  return !m.includes(".");
+}
+
+/** True when the slug is already a Bedrock model / inference-profile id. */
+export function looksLikeBedrockModelId(model: string): boolean {
+  const m = model.trim();
+  if (!m || looksLikeKimchiModelId(m)) return false;
+  if (BEDROCK_GEO_PREFIX.test(m)) return true;
+  return m.includes(".") && !m.includes("/");
+}
+
+/** The provider a model id natively belongs to, by shape alone. */
+export function modelNativeManagedProvider(
+  model: string
+): Exclude<ManagedProviderPreference, "auto"> {
+  if (looksLikeBedrockModelId(model)) return "bedrock";
+  if (looksLikeKimchiModelId(model)) return "kimchi";
+  return "openrouter";
+}
+
+function narrowManagedModelForProvider(
+  model: ManagedInferenceModel,
+  preference: Exclude<ManagedProviderPreference, "auto">
+): ManagedInferenceModel | null {
+  const providers = model.providers ?? [];
+  const ref = providers.find((p) => p.provider === preference && p.id.trim().length > 0);
+  if (ref) {
+    return {
+      ...model,
+      id: ref.id,
+      providers: [ref],
+    };
+  }
+  if (providers.length > 0) return null;
+  if (modelNativeManagedProvider(model.id) !== preference) return null;
+  return {
+    ...model,
+    providers: [{ provider: preference, id: model.id }],
+  };
+}
+
+/** Filter merged catalog rows to models reachable on the selected managed upstream. */
+export function filterManagedInferenceCatalog(
+  models: ManagedInferenceModel[],
+  preference: ManagedProviderPreference | string | null | undefined
+): ManagedInferenceModel[] {
+  const pref =
+    typeof preference === "string"
+      ? parseManagedProviderPreference(preference)
+      : (preference ?? "auto");
+  if (pref === "auto") return models;
+  const out: ManagedInferenceModel[] = [];
+  for (const model of models) {
+    const narrowed = narrowManagedModelForProvider(model, pref);
+    if (narrowed) out.push(narrowed);
+  }
+  return out;
+}
 
 /** Bedrock catalog for managed-inference model pickers (license Bearer). */
 export async function fetchManagedInferenceModels(opts?: {
@@ -519,12 +698,14 @@ export function proManagedInferencePrefsPatch(): Partial<RuntimePreferences> {
 
 function prefsNeedManagedRecovery(prefs: RuntimePreferences): boolean {
   const mode = resolveInferenceMode(prefs);
+  if (mode === "byok") return false;
   const model =
     prefs.provider?.model?.trim() ||
     resolveHarnessEnvRaw("AGENT_MODEL", prefs)?.trim() ||
     DEFAULT_AGENT_MODEL_SLUG;
   if (isModelIncompatibleWithManagedProxy(model)) {
-    return mode === "managed" || (mode !== "byok" && inferencePreferManaged(prefs));
+    // Deliberate OpenRouter-only pick — never auto-recover to managed (would swap to DeepSeek).
+    return false;
   }
   const pinnedBase = prefs.provider?.baseURL?.trim();
   if (

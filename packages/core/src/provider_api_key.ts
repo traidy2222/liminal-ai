@@ -5,7 +5,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
-import { isKimchiApiBaseUrl } from "./kimchi_provider.js";
+import { isKimchiApiBaseUrl } from "./kimchi_constants.js";
 import { isOpenRouterApiBaseUrl } from "./openrouter_session.js";
 
 export const PROVIDER_API_KEY_ENV_NAMES = [

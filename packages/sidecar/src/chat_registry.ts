@@ -8,10 +8,12 @@ import {
   listChats,
   loadChatTranscriptFromSessionLog,
   loadRuntimePreferences,
+  mergeRuntimePreferences,
   maybeAttachSessionEventLog,
   readChatMetadata,
   resolveChatBoot,
   recoverManagedInferencePreferences,
+  resolveInferenceMode,
   resolveProviderConfigWithInference,
   resolveWorkspaceRoot,
   runWithWorkspaceRoot,
@@ -89,10 +91,28 @@ export class ChatRegistry {
     this.cachedRuntimePrefs = await loadRuntimePreferences(root).catch(() => null);
   }
 
+  /** Persist prefs to disk and sync the registry + open harness snapshots. */
+  async applyRuntimePreferencesPatch(
+    patch: Partial<RuntimePreferences>,
+    repoRoot?: string
+  ): Promise<RuntimePreferences> {
+    const root = repoRoot?.trim() || this.deps.repoRoot.trim() || resolveWorkspaceRoot();
+    const merged = mergeRuntimePreferences(this.cachedRuntimePrefs, patch);
+    await saveRuntimePreferences(merged, root);
+    this.cachedRuntimePrefs = merged;
+    this.deps.runtimePreferences = merged;
+    for (const slot of this.slots.values()) {
+      if (slot.bridge.harness.getIsRunning()) continue;
+      await slot.bridge.harness.patchRuntimePreferences(patch, { persist: false });
+    }
+    return merged;
+  }
+
   async recoverManagedInferenceIfNeeded(): Promise<boolean> {
     const root = this.deps.repoRoot.trim() || resolveWorkspaceRoot();
     const prefs =
       this.cachedRuntimePrefs ?? (await loadRuntimePreferences(root).catch(() => null));
+    if (prefs && resolveInferenceMode(prefs) === "byok") return false;
     const { recovered, prefs: next } = await recoverManagedInferencePreferences(prefs);
     if (!recovered || !next) return false;
     await saveRuntimePreferences(next, root);

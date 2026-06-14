@@ -10,6 +10,7 @@ import 'package:webview_win_floating/webview_win_floating.dart';
 import 'app/liminal_app.dart';
 import 'apps/app_window_manager.dart';
 import 'apps/app_window_root.dart';
+import 'core/crash_reporter.dart';
 import 'sidecar/launcher.dart';
 import 'state/app_controller.dart';
 
@@ -34,18 +35,69 @@ Future<void> main(List<String> args) async {
   runApp(LiminalApp(controller: controller));
 }
 
-void _installCrashLogging() {
+void _installCrashLogging() async {
+  final dsn = await _getSentryDsn();
+
+  final userOptIn = await _getUserOptInPreference();
+
+  final crashReporter = CrashReporter.instance;
+
+  if (dsn.isNotEmpty) {
+    try {
+      await crashReporter.init(
+        dsn: dsn,
+        environment: kDebugMode ? 'development' : 'production',
+        release: '0.1.0',
+        userOptIn: userOptIn,
+      );
+    } catch (_) {
+      // Fall through to file logging
+    }
+  }
+
   final previous = FlutterError.onError;
   FlutterError.onError = (details) {
     _appendDesktopLog(
       'FlutterError: ${details.exceptionAsString()}\n${details.stack}',
     );
+    crashReporter.captureException(
+      details.exception,
+      details.stack,
+      context: 'flutter_error',
+    );
     previous?.call(details);
   };
   PlatformDispatcher.instance.onError = (error, stack) {
     _appendDesktopLog('Uncaught: $error\n$stack');
+    crashReporter.captureException(error, stack, context: 'platform_error');
     return false;
   };
+}
+
+Future<String> _getSentryDsn() async {
+  final home = Platform.environment['USERPROFILE'] ??
+      Platform.environment['HOME'] ??
+      Directory.current.path;
+  final envPath = p.join(home, '.liminal', 'sentry.dsn');
+  return CrashReporter.readDsnFromFile(envPath);
+
+  // Or use environment variable:
+  // return Platform.environment['SENTRY_DSN'] ?? '';
+}
+
+Future<bool> _getUserOptInPreference() async {
+  final home = Platform.environment['USERPROFILE'] ??
+      Platform.environment['HOME'] ??
+      Directory.current.path;
+  final prefsFile = File(p.join(home, '.liminal', 'crash_reporter_prefs.json'));
+  if (!prefsFile.existsSync()) return false;
+  try {
+    final content = prefsFile.readAsStringSync();
+    // Simple JSON parsing for opt-in flag
+    return content.contains('"optIn":true') || content.contains('"optIn": true');
+  } catch (_) {
+    return false;
+  }
 }
 
 void _appendDesktopLog(String line) {

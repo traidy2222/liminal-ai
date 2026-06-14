@@ -5,6 +5,15 @@
   "type": "module",
   "scripts": {
     "eval": "node --import tsx/esm src/index.ts",
+    "eval:sandbox": "node --env-file=../../.env --import tsx/esm src/index.ts --only sandbox-lab --parallel 2",
+    "eval:sandbox:research": "node --env-file=../../.env --import tsx/esm src/index.ts --only sandbox-research-audit --parallel 1",
+    "eval:desktop": "node --env-file=../../.env --import tsx/esm src/index.ts --only desktop-parity --parallel 1",
+    "eval:desktop:read": "node --env-file=../../.env --import tsx/esm src/index.ts --only desktop-read-edit-verify --parallel 1",
+    "eval:desktop:research": "node --env-file=../../.env --import tsx/esm src/index.ts --only desktop-research-audit --parallel 1",
+    "eval:desktop:smoke": "node --env-file=../../.env --import tsx/esm src/index.ts --only desktop-smoke --parallel 1",
+    "bench:parity": "node --env-file=../../.env --import tsx/esm src/benchParityCompare.ts",
+    "bench:sandbox": "node --env-file=../../.env --import tsx/esm src/benchSingleTurn.ts",
+    "test:sandbox": "node --import tsx/esm --test src/sandboxLabBootstrap.test.ts src/evalProvider.test.ts",
     "ab:rerank": "node --env-file=../../.env --import tsx/esm src/ab/rerank_ab.ts",
     "typecheck": "tsc --noEmit"
   },

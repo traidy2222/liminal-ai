@@ -68,7 +68,7 @@ class _VireonHubScreenState extends State<VireonHubScreen> {
     if (!silent) setState(() => _refreshing = true);
     try {
       await Future.wait([
-        host.refreshConfig(),
+        host.refreshConfig(background: true),
         host.loadVireonAccount(),
         host.loadOrchestration(),
         host.loadIntegrations(),

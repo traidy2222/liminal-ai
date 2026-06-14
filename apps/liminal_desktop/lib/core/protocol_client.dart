@@ -57,15 +57,23 @@ class ProtocolClient {
         if (!starting) {
           _completeReady();
         }
-        onGlobalFrame?.call(frame);
+        try {
+          onGlobalFrame?.call(frame);
+        } catch (_) {
+          /* AppController handles malformed payloads */
+        }
         return;
       case 'sidecar_ready':
         _completeReady();
-        // Non-empty cases do not fall through in Dart 3, so the shared
-        // `onGlobalFrame` dispatch below is unreachable from here — call it
-        // explicitly or the UI never sets `sidecarReady` and hangs on the
-        // "Starting…" spinner forever.
-        onGlobalFrame?.call(frame);
+        try {
+          onGlobalFrame?.call(frame);
+        } catch (e, st) {
+          assert(() {
+            // ignore: avoid_print
+            print('Protocol global frame error ($e): $st');
+            return true;
+          }());
+        }
         return;
       case 'chat_list':
       case 'settings':

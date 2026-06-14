@@ -148,6 +148,8 @@ export const HARNESS_ENV_DEFAULTS: Readonly<Record<string, string>> = {
   AGENT_MEMORY_CONSOLIDATE_MODEL: "deepseek/deepseek-v4-pro",
   AGENT_MEMORY_EPISODE: "0",
   AGENT_MEMORY_PRIME_ROUND0: "1",
+  /** Set 0 to skip first-turn world-context gather (faster isolated/sandbox workspaces). */
+  AGENT_WORLD_CONTEXT: "1",
   AGENT_TRAJECTORY_WRITE: "1",       // write causal trajectory: memory entries at turn end (zero LLM cost)
   AGENT_TOOL_LAZY: "1",
   AGENT_ALWAYS_TOOLS_PROFILE: "balanced",
@@ -376,6 +378,8 @@ export const HARNESS_ENV_DEFAULTS: Readonly<Record<string, string>> = {
   // Output-effort dial — SEPARATE axis from reasoning above. Governs how thorough
   // the DELIVERABLE is (completeness, edge cases, polish) via a system-prompt block.
   AGENT_EFFORT: "medium",                // low | medium | high | xhigh — deliverable thoroughness
+  /** When 1, apply latency_mode.ts patches unless a key is explicitly overridden. */
+  AGENT_LATENCY_MODE: "0",
   AGENT_REASONING_NATIVE_SLUGS: "",      // unused by default; set to re-enable native stream for specific slugs
   AGENT_NATIVE_VISION: "1",              // "0" disables routing attachments as image_url on the main model
   AGENT_NATIVE_VISION_SLUGS: "",         // comma substrings; empty uses built-in multimodal slug heuristics
@@ -480,4 +484,6 @@ export const HARNESS_ENV_DEFAULTS: Readonly<Record<string, string>> = {
   AGENT_MISSION_REQUIRES_YOLO: "0",
   // Comma-separated tools that skip destructive approval when safety judge is off
   AGENT_AUTO_APPROVE_TOOLS: "run_lint,run_tests,git_status",
+  // User reply finalize — run a final pass when turn would end with tools/vault only
+  AGENT_USER_REPLY_FINALIZE: "0",
 };

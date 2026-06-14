@@ -7,10 +7,15 @@ import {
   harnessEnvResolutionMeta,
   resolveHarnessEnvRaw,
   ensureProviderApiKeysInProcess,
+  hasLocalProviderApiKey,
   isProviderApiKeyConfigured,
   resolveInferenceMode,
   resolveProviderConfig,
   syncProviderProcessEnvForBase,
+  buildByokRoutingPatchForModel,
+  DEFAULT_AGENT_API_BASE_URL,
+  isModelIncompatibleWithManagedProxy,
+  loadRuntimePreferences,
   type RuntimePreferences,
 } from "@liminal/core";
 import {
@@ -128,9 +133,12 @@ export function buildSettingsSnapshot(
   bridge?: SessionBridge
 ) {
   const harnessCfg = bridge?.harness.config;
+  const prefsModel = prefs?.provider?.model?.trim() || "";
+  const harnessModel = harnessCfg?.model?.trim() || "";
   const model = (
-    harnessCfg?.model ??
-    prefs?.provider?.model?.trim() ??
+    (prefsModel && isModelIncompatibleWithManagedProxy(prefsModel) ? prefsModel : "") ||
+    harnessModel ||
+    prefsModel ||
     ""
   ).slice(0, 200);
   const baseURL = (
@@ -199,7 +207,58 @@ export async function saveProviderCredentials(
     };
   }
 
-  if (Object.keys(updates).length === 0 && !prefsPatch.provider) {
+  const activePrefs = registry.getActiveBridge()?.harness.getRuntimePreferences() ?? null;
+  const prefsBase =
+    activePrefs ?? (await loadRuntimePreferences(repoRoot).catch(() => null));
+  const modelForRouting =
+    model?.trim() ||
+    prefsPatch.provider?.model?.trim() ||
+    prefsBase?.provider?.model?.trim() ||
+    prefsBase?.harness?.env?.AGENT_MODEL?.trim() ||
+    "";
+  if (modelForRouting) {
+    const byokPatch = buildByokRoutingPatchForModel(modelForRouting, prefsBase);
+    if (byokPatch) {
+      Object.assign(prefsPatch, {
+        provider: { ...prefsPatch.provider, ...byokPatch.provider },
+        harness: {
+          env: {
+            ...(prefsPatch.harness?.env ?? {}),
+            ...(byokPatch.harness?.env ?? {}),
+          },
+        },
+      });
+    } else if (!baseURL && model) {
+      prefsPatch.harness = {
+        env: {
+          ...(prefsPatch.harness?.env ?? {}),
+          AGENT_MODEL: model.slice(0, 200),
+        },
+      };
+    }
+  }
+
+  // Saving a BYOK API key (or using one already in .env) → direct OpenRouter, not Vireon proxy.
+  const hasKey = key.length >= 8 || hasLocalProviderApiKey();
+  if (hasKey) {
+    prefsPatch.provider = {
+      ...prefsPatch.provider,
+      inferenceMode: "byok",
+      baseURL: effectiveBase || DEFAULT_AGENT_API_BASE_URL,
+      ...(model ? { model: model.slice(0, 200) } : {}),
+    };
+    prefsPatch.harness = {
+      env: {
+        ...(prefsPatch.harness?.env ?? {}),
+        AGENT_INFERENCE_MODE: "byok",
+        AGENT_INFERENCE_PREFER_MANAGED: "0",
+        AGENT_API_BASE_URL: effectiveBase || DEFAULT_AGENT_API_BASE_URL,
+        ...(model ? { AGENT_MODEL: model.slice(0, 200) } : {}),
+      },
+    };
+  }
+
+  if (Object.keys(updates).length === 0 && !prefsPatch.provider && !prefsPatch.harness) {
     throw new Error("Nothing to save — enter a new API key or change model/base URL.");
   }
 
@@ -223,12 +282,12 @@ export async function saveProviderCredentials(
     syncProviderProcessEnvForBase(baseURL);
   }
 
-  await registry.reloadRuntimePrefs();
-  if (prefsPatch.provider) {
-    const active = registry.getActiveBridge();
-    if (active && !active.harness.getIsRunning()) {
-      await active.harness.patchRuntimePreferences(prefsPatch, { persist: true });
-    }
+  ensureProviderApiKeysInProcess();
+
+  if (prefsPatch.provider || prefsPatch.harness) {
+    await registry.applyRuntimePreferencesPatch(prefsPatch, repoRoot);
+  } else {
+    await registry.reloadRuntimePrefs();
   }
   await registry.reapplyAllProviders();
 }
@@ -281,8 +340,35 @@ export async function patchHarnessSettings(
   if (!runtimePatch.harness && !runtimePatch.provider) {
     throw new Error("No valid harness.env or provider fields in patch.");
   }
-  await active.harness.patchRuntimePreferences(runtimePatch, { persist: true });
-  await registry.reloadRuntimePrefs();
+
+  const modelCandidate =
+    runtimePatch.provider?.model?.trim() ||
+    envPatch.AGENT_MODEL?.trim() ||
+    "";
+  if (modelCandidate) {
+    const byokPatch = buildByokRoutingPatchForModel(modelCandidate, prefs);
+    if (byokPatch) {
+      runtimePatch.provider = { ...runtimePatch.provider, ...byokPatch.provider };
+      runtimePatch.harness = {
+        env: {
+          ...(runtimePatch.harness?.env ?? {}),
+          ...(byokPatch.harness?.env ?? {}),
+        },
+      };
+    }
+  }
+
+  if (runtimePatch.provider?.inferenceMode === "byok") {
+    runtimePatch.harness = {
+      env: {
+        ...(runtimePatch.harness?.env ?? {}),
+        AGENT_INFERENCE_MODE: "byok",
+        AGENT_INFERENCE_PREFER_MANAGED: "0",
+      },
+    };
+  }
+
+  await registry.applyRuntimePreferencesPatch(runtimePatch);
   const nextBase =
     runtimePatch.provider?.baseURL?.trim() ||
     active.harness.getRuntimePreferences()?.provider?.baseURL?.trim();

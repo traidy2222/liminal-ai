@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../../models/harness_settings.dart';
+import '../../models/managed_inference_catalog.dart';
 import '../layout/liminal_spacing.dart';
 import '../theme/liminal_theme_extension.dart';
 import '../theme/liminal_tokens.dart';
@@ -112,7 +113,11 @@ class ManagedInferencePanel extends StatelessWidget {
   Widget build(BuildContext context) {
     final lim = LiminalTheme.of(context);
     final theme = Theme.of(context);
-    final models = catalog?.models ?? const <ManagedInferenceModel>[];
+    final models = filterManagedInferenceCatalog(
+      catalog?.models ?? const <ManagedInferenceModel>[],
+      managedProvider,
+    );
+    final catalogSize = catalog?.models.length ?? 0;
     final upstreamRaw = upstream ?? catalog?.upstream ?? 'managed';
     final upstreamLabel = upstreamRaw == 'hybrid'
         ? 'hybrid (Bedrock + OpenRouter + Kimchi)'
@@ -146,7 +151,9 @@ class ManagedInferencePanel extends StatelessWidget {
           ),
           const SizedBox(height: LiminalSpacing.xs),
           Text(
-            'Pick upstream provider and models from the Vireon catalog (${models.length} loaded).',
+            managedProvider.trim().isNotEmpty && managedProvider != 'auto'
+                ? 'Models on $managedProvider upstream ($catalogSize in full catalog, ${models.length} shown).'
+                : 'Pick upstream provider and models from the Vireon catalog ($catalogSize loaded).',
             style: theme.textTheme.bodySmall?.copyWith(
               color: lim.textMuted,
               height: 1.45,
@@ -182,7 +189,9 @@ class ManagedInferencePanel extends StatelessWidget {
             Text(error!, style: TextStyle(color: theme.colorScheme.error))
           else if (models.isEmpty)
             Text(
-              'No managed models returned. Check your license or try again.',
+              catalogSize == 0
+                  ? 'No managed models returned. Check your license or try again.'
+                  : 'No models available on $managedProvider upstream.',
               style: theme.textTheme.bodySmall?.copyWith(color: lim.warn),
             )
           else ...[

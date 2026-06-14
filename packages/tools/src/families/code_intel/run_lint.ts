@@ -6,9 +6,26 @@ import { promisify } from "node:util";
 import path from "node:path";
 import { resolveWorkspaceRoot, effectiveHarnessEnvRaw } from "@liminal/core";
 import { defineTool } from "../../shared/helpers.js";
+import { resolveNodeToolExec } from "../../shared/node_toolchain.js";
 
 const execFileAsync = promisify(execFile);
 const DEFAULT_TIMEOUT_MS = 300_000;
+
+async function execLintCommand(
+  command: string,
+  argv: string[],
+  cwd: string
+): Promise<{ stdout: string; stderr: string }> {
+  const shell =
+    process.platform === "win32" && /\.(cmd|bat)$/i.test(command);
+  return execFileAsync(command, argv, {
+    cwd,
+    maxBuffer: 6_000_000,
+    timeout: DEFAULT_TIMEOUT_MS,
+    windowsHide: true,
+    ...(shell ? { shell: true } : {}),
+  });
+}
 
 type LintSeverity = "error" | "warning";
 type LintMode = "tsc" | "eslint" | "command";
@@ -189,7 +206,7 @@ export const runLintTool = defineTool({
     "ARGS: cwd required; mode = tsc | eslint | command; format = text | structured.",
   requiresApproval: true,
   dangerLevel: "cautious",
-  resourceLocks: (args) => [`shell:${(args["cwd"] as string | undefined) ?? process.cwd()}`],
+  resourceLocks: (args) => [`shell:${(args["cwd"] as string | undefined) ?? resolveWorkspaceRoot()}`],
   parameters: {
     type: "object",
     properties: {
@@ -217,16 +234,16 @@ export const runLintTool = defineTool({
     const mode = (((args["mode"] as string | undefined) ?? "tsc").toLowerCase() as LintMode);
     emit?.(`\nrun_lint: ${mode} in ${cwd}\n`);
     const structured = ((args["format"] as string | undefined) ?? "text").toLowerCase() === "structured";
-    const npx = process.platform === "win32" ? "npx.cmd" : "npx";
     try {
       if (mode === "eslint") {
         const paths = (args["eslint_paths"] as string[] | undefined)?.length
           ? (args["eslint_paths"] as string[])
           : ["."];
-        const { stdout, stderr } = await execFileAsync(
-          npx,
-          ["eslint", "--format", "json", ...paths],
-          { cwd, maxBuffer: 6_000_000, timeout: DEFAULT_TIMEOUT_MS }
+        const { command, argsPrefix } = resolveNodeToolExec("eslint", "eslint/bin/eslint.js", cwd);
+        const { stdout, stderr } = await execLintCommand(
+          command,
+          [...argsPrefix, "--format", "json", ...paths],
+          cwd
         );
         const raw = (stdout || stderr).trim();
         const diagnostics = parseEslintDiagnostics(raw);
@@ -254,13 +271,10 @@ export const runLintTool = defineTool({
       }
 
       const proj = args["project"] as string | undefined;
-      const argv = ["tsc", "--noEmit"];
-      if (proj) argv.push("-p", proj);
-      const { stdout, stderr } = await execFileAsync(npx, argv, {
-        cwd,
-        maxBuffer: 6_000_000,
-        timeout: DEFAULT_TIMEOUT_MS,
-      });
+      const tsconfigPath = proj ? path.resolve(cwd, proj) : path.join(cwd, "tsconfig.json");
+      const { command, argsPrefix } = resolveNodeToolExec("tsc", "typescript/bin/tsc", cwd);
+      const tscArgv = [...argsPrefix, "--noEmit", "-p", tsconfigPath];
+      const { stdout, stderr } = await execLintCommand(command, tscArgv, cwd);
       const raw = (stdout + "\n" + stderr).trim();
       const diagnostics = parseTscDiagnostics(raw);
       return { ok: true, output: lintEnvelopeOutput("tsc", cwd, diagnostics, raw, structured) };

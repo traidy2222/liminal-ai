@@ -41,7 +41,8 @@ export const HARNESS_RULES: Record<string, string> = {
     "For SyntaxError (path:line:col), diagnose from that exact column — count from line start. Never emit replacements where search and replace strings are identical.",
 
   // ── Code quality ────────────────────────────────────────────────────────────
-  "R-TYPECHECK-VERIFY": "After editing typed code, run the project's typecheck or build command before claiming the fix is complete.",
+  "R-TYPECHECK-VERIFY":
+    "After editing typed code, run run_lint or the project's typecheck/build before claiming the fix is complete — especially when the harness did not inject [VERIFY RESULT] after your edit batch.",
   "R-SCOPE-CREEP": "Fix only what was explicitly requested — no refactoring surrounding code, adding unasked features, or introducing new abstractions.",
   "R-GREP-BEFORE-REFACTOR": "Before renaming a symbol, changing a signature, or moving a type, grep all call sites and import paths first.",
 
@@ -96,6 +97,8 @@ export const HARNESS_RULES: Record<string, string> = {
   // ── Shell bounds ────────────────────────────────────────────────────────────
   "R-SHELL-BOUNDS":
     "Omitting timeout_ms → short default (~60s, implicit max ~3m). Long builds/tests → pass explicit timeout_ms (hours OK if approved). Indefinite daemons/watchers → run_background + read_process_output, not run_shell. Never put hundreds of probes in one shell loop without an explicit long timeout.",
+  "R-PATH-GROUNDING":
+    "When the user asks for this workspace's folder, cwd, or full path: run run_shell (e.g. node -e \"console.log(process.cwd())\" on Windows too) or cite cwd from [WORLD CONTEXT] if present — never invent or recall a path from training.",
 
   // ── Harness self-improvement ────────────────────────────────────────────────
   "R-HARNESS-REFLECT":
@@ -148,6 +151,7 @@ const INTENT_RULE_IDS: Record<TurnIntentClass, string[]> = {
     "R-SYNTAX-COLUMN",
     "R-TOOL-RETRY",
     "R-SCOPE-CREEP",
+    "R-PATH-GROUNDING",
     "R-AGENTCARD",
   ],
   execution: [
@@ -157,6 +161,7 @@ const INTENT_RULE_IDS: Record<TurnIntentClass, string[]> = {
     "R-TYPECHECK-VERIFY",
     "R-TOOL-RETRY",
     "R-SHELL-BOUNDS",
+    "R-PATH-GROUNDING",
     "R-EMAIL-STYLE",
     "R-EMAIL-DRAFT-SEND",
     "R-AGENTCARD",

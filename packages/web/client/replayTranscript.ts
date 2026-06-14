@@ -1,6 +1,5 @@
-import type { MessageEntry } from "./useSSE";
+import type { MessageEntry } from "./useSSE.js";
 
-/** Mirrors core `ReplayTranscriptEntry` on the wire. */
 export interface WireReplayEntry {
   id: string;
   kind: "user" | "assistant" | "tool_call" | "error";
@@ -29,16 +28,20 @@ export function replayEntriesToMessages(entries: WireReplayEntry[]): MessageEntr
         kind: "tool_call",
         callId: e.toolCallId ?? e.id,
         name: e.toolName ?? "tool",
-        status: "done",
-        ok: e.toolOk !== false,
-        args: e.toolArgs ?? {},
-        output: e.toolOutput ?? e.text ?? "",
+        argsJson: JSON.stringify(e.toolArgs ?? {}),
+        status: e.toolOk !== false ? "done" : "error",
         startedAt: 0,
+      });
+      out.push({
+        kind: "tool_result",
+        callId: e.toolCallId ?? e.id,
+        output: e.toolOutput ?? e.text ?? "",
+        ok: e.toolOk !== false,
       });
       continue;
     }
     if (e.kind === "error" && e.text) {
-      out.push({ kind: "error", text: e.text });
+      out.push({ kind: "trace", text: `[error] ${e.text}` });
     }
   }
   return out;

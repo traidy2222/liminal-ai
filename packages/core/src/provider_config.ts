@@ -18,7 +18,8 @@ import {
   syncProviderProcessEnvForBase,
 } from "./provider_api_key.js";
 import { isManagedInferenceBaseUrl } from "./inference_session.js";
-import { isKimchiApiBaseUrl, KIMCHI_API_KEY_ENV_NAMES } from "./kimchi_provider.js";
+import { KIMCHI_API_KEY_ENV_NAMES } from "./kimchi_provider.js";
+import { isKimchiApiBaseUrl } from "./kimchi_constants.js";
 import { isOpenRouterApiBaseUrl } from "./openrouter_session.js";
 import { isOpenRouterRouterModel } from "./openrouter_fusion.js";
 

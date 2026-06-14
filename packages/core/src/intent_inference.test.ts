@@ -8,6 +8,7 @@ import {
   neutralTurnInferenceResult,
   applyTurnInferenceHeuristics,
   tryHeuristicTurnInference,
+  tryHeuristicToolFirstTurn,
   fallbackComplexityForUserMessage,
   buildRoutingProfile,
   type TurnInferenceResult,
@@ -21,6 +22,47 @@ test("tryHeuristicTurnInference matches short greetings only", () => {
   assert.equal(tryHeuristicTurnInference("good evening")?.intent, "conversational");
   assert.equal(tryHeuristicTurnInference("fix the greeting in README"), null);
   assert.equal(tryHeuristicTurnInference("a".repeat(200)), null);
+});
+
+test("tryHeuristicToolFirstTurn matches file edit prompts without classifier", () => {
+  const r = tryHeuristicToolFirstTurn(
+    "read `src/greeting.txt`, fix the typo with edit_file. Reply FIXED when done."
+  );
+  assert.ok(r);
+  assert.equal(r?.intent, "coding");
+  assert.equal(r?.confidence, 0.92);
+  assert.equal(tryHeuristicToolFirstTurn("research the history of Rome"), null);
+});
+
+test("tryHeuristicToolFirstTurn matches workspace path queries", () => {
+  const r = tryHeuristicToolFirstTurn("What folder is this project in? I need the full path.");
+  assert.ok(r);
+  assert.equal(r?.intent, "coding");
+  assert.equal(r?.toolFirstBias, true);
+  assert.equal(r?.reasoningBudgetSource, "fallback");
+});
+
+test("heuristic tool-first routes trivial coding to fast model", () => {
+  const prevRouting = process.env["AGENT_INTENT_ROUTING"];
+  const prevComp = process.env["AGENT_COMPLEXITY_ROUTING"];
+  const prevFast = process.env["AGENT_FAST_MODEL"];
+  process.env["AGENT_INTENT_ROUTING"] = "1";
+  process.env["AGENT_COMPLEXITY_ROUTING"] = "1";
+  process.env["AGENT_FAST_MODEL"] = "deepseek/deepseek-v4-flash";
+  try {
+    const inf = tryHeuristicToolFirstTurn("read `src/a.ts` and edit_file to fix the bug");
+    assert.ok(inf);
+    const profile = buildRoutingProfile(inf, "deepseek/deepseek-v4-pro");
+    assert.equal(profile.modelSlug, "deepseek/deepseek-v4-flash");
+    assert.match(profile.routingReason ?? "", /complexity_trivial|coding/);
+  } finally {
+    if (prevRouting === undefined) delete process.env["AGENT_INTENT_ROUTING"];
+    else process.env["AGENT_INTENT_ROUTING"] = prevRouting;
+    if (prevComp === undefined) delete process.env["AGENT_COMPLEXITY_ROUTING"];
+    else process.env["AGENT_COMPLEXITY_ROUTING"] = prevComp;
+    if (prevFast === undefined) delete process.env["AGENT_FAST_MODEL"];
+    else process.env["AGENT_FAST_MODEL"] = prevFast;
+  }
 });
 
 test("parseLikelyEditPathsField caps and normalizes", () => {

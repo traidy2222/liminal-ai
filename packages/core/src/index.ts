@@ -500,6 +500,7 @@ export {
   renderExecutionStateBlock,
   getCompensationLedger,
   recordCompensation,
+  commitCompensationPath,
 } from "./execution_state.js";
 export {
   CompensationLedger,
@@ -610,10 +611,15 @@ export {
   fetchInferenceSession,
   fetchInferenceUsageStatus,
   fetchManagedInferenceModels,
+  filterManagedInferenceCatalog,
   buildManagedInferenceClientHeaders,
   resolveManagedProviderPreference,
+  looksLikeBedrockModelId,
+  looksLikeKimchiModelId,
+  modelNativeManagedProvider,
   MANAGED_INFERENCE_PROVIDER_HEADER,
   hasLocalProviderApiKey,
+  buildByokRoutingPatchForModel,
   inferencePreferManaged,
   describeProviderError,
   formatInferenceBudgetExceededMessage,
@@ -635,6 +641,7 @@ export {
   buildManagedFreeFallbackHarnessEnv,
   buildManagedRecoveryHarnessEnv,
   isModelIncompatibleWithManagedProxy,
+  isUserIntentOpenRouterOnlyModel,
   managedFreeFallbackEnabled,
   resolveManagedFreeFallbackFastModel,
   resolveManagedFreeFallbackMainModel,
@@ -686,6 +693,7 @@ export {
   RUNTIME_PREFS_FILE,
   getRuntimePrefsPath,
   loadRuntimePreferences,
+  mergeRuntimePreferences,
   saveRuntimePreferences,
 } from "./runtime_prefs.js";
 export type {
@@ -1123,6 +1131,17 @@ export {
   tierRequiresEnterprisePackage,
 } from "./enterprise_install.js";
 export type { EnterpriseInstallResult, EnterpriseManifest } from "./enterprise_install.js";
+export { inferenceLatencyEnabled } from "./inference_latency.js";
+export type {
+  InferenceLatencyEvent,
+  InferenceLatencySink,
+} from "./inference_latency.js";
+export {
+  InferenceLatencyTracker,
+  registerInferenceLatencySink,
+  clearInferenceLatencySinks,
+  createConsoleLatencySink,
+} from "./inference_latency.js";
 export {
   ensureManagedInferenceSession,
   clearManagedInferenceSessionCache,

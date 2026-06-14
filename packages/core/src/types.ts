@@ -722,6 +722,17 @@ export interface AgentEventMap {
   context_snapshot: { snapshot: ContextSnapshot };
   /** Wall-clock time for a tool handler execution. (#7) */
   tool_timing: { callId: string; name: string; durationMs: number };
+  /** Inference latency metrics for observability. */
+  inference_latency: {
+    traceId?: string;
+    model: string;
+    requestStartMs: number;
+    responseStartMs?: number;
+    firstTokenMs?: number;
+    completionMs?: number;
+    totalLatencyMs?: number;
+    ttftMs?: number;
+  };
   /** Emitted when the agent's persona is changed via set_persona(). */
   persona_changed: { name: string; description: string };
   execution_state: {

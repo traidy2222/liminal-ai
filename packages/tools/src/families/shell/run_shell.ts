@@ -6,7 +6,7 @@
  */
 import { spawn } from "node:child_process";
 import type { AgentEmitter, AgentHarness } from "@liminal/core";
-import { effectiveHarnessEnvRaw, resolveShellRuntime } from "@liminal/core";
+import { effectiveHarnessEnvRaw, resolveShellRuntime, resolveWorkspaceRoot } from "@liminal/core";
 import { defineTool } from "../../shared/helpers.js";
 import { resolveWithinWorkspace } from "../../shared/file_path_guard.js";
 import { runShellInTerminal, shellUseUiPty } from "./terminal_shell_runtime.js";
@@ -16,6 +16,11 @@ function parseEnvMs(key: string, fallback: number): number {
   if (raw === "0") return 0;
   const n = parseInt(raw ?? String(fallback), 10);
   return Number.isFinite(n) && n >= 0 ? n : fallback;
+}
+
+function defaultShellCwd(harness?: AgentHarness): string {
+  const fromHarness = harness?.workspaceRoot?.trim();
+  return fromHarness || resolveWorkspaceRoot();
 }
 
 export type ShellTimeoutResolution = {
@@ -166,8 +171,12 @@ export function createRunShellTool(emitter: AgentEmitter, harness?: AgentHarness
       if (chatId && shellUseUiPty(prefs)) {
         return [`shell:terminal:${chatId}`];
       }
-      const cwd = (args["cwd"] as string | undefined) ?? process.cwd();
-      return [`shell:${cwd}`];
+      const cwdArg = args["cwd"] as string | undefined;
+      if (cwdArg) {
+        const guard = resolveWithinWorkspace(cwdArg);
+        return [`shell:${guard.ok ? guard.resolvedPath : cwdArg}`];
+      }
+      return [`shell:${defaultShellCwd(harness)}`];
     },
     parameters: {
       type: "object",
@@ -190,13 +199,15 @@ export function createRunShellTool(emitter: AgentEmitter, harness?: AgentHarness
     handler: async (args) => {
       const command = args["command"] as string;
       const cwdArg = args["cwd"] as string | undefined;
-      let cwd: string | undefined;
+      let cwd: string;
       if (cwdArg) {
         const guard = resolveWithinWorkspace(cwdArg);
         if (!guard.ok) {
           return { ok: false, error: guard.error ?? "cwd must stay inside the workspace root." };
         }
-        cwd = guard.resolvedPath;
+        cwd = guard.resolvedPath ?? defaultShellCwd(harness);
+      } else {
+        cwd = defaultShellCwd(harness);
       }
       const requested =
         (args["timeout_ms"] as number | undefined) ?? (args["timeout"] as number | undefined);

@@ -25,12 +25,28 @@ class BootScreen extends StatelessWidget {
   }
 }
 
-class StartingSidecarScreen extends StatelessWidget {
+class StartingSidecarScreen extends StatefulWidget {
   const StartingSidecarScreen({super.key});
+
+  @override
+  State<StartingSidecarScreen> createState() => _StartingSidecarScreenState();
+}
+
+class _StartingSidecarScreenState extends State<StartingSidecarScreen> {
+  bool _slow = false;
+
+  @override
+  void initState() {
+    super.initState();
+    Future<void>.delayed(const Duration(seconds: 45), () {
+      if (mounted) setState(() => _slow = true);
+    });
+  }
 
   @override
   Widget build(BuildContext context) {
     final lim = LiminalTheme.of(context);
+    final host = AppScope.watch(context);
     return LiminalShell(
       body: Center(
         child: Padding(
@@ -45,10 +61,19 @@ class StartingSidecarScreen extends StatelessWidget {
               CircularProgressIndicator(color: lim.accent),
               const SizedBox(height: 16),
               Text(
-                'Starting harness — integrations (Google/Microsoft MCP) finish in the background.',
+                _slow
+                    ? 'Still starting — first launch can take up to two minutes while tools register.'
+                    : 'Starting harness — integrations (Google/Microsoft MCP) finish in the background.',
                 style: Theme.of(context).textTheme.bodySmall,
                 textAlign: TextAlign.center,
               ),
+              if (_slow) ...[
+                const SizedBox(height: 20),
+                FilledButton(
+                  onPressed: host.boot,
+                  child: const Text('Retry connection'),
+                ),
+              ],
             ],
           ),
         ),

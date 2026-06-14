@@ -213,7 +213,7 @@ export function buildRoutingProfile(
     complexity === "trivial" &&
     intent !== "creative" &&
     confidence >= threshold &&
-    inference.source === "llm" &&
+    (inference.source === "llm" || confidence >= 0.88) &&
     modelSlug === mainModel
   ) {
     modelSlug = resolveFastModelSlug(mainModel);
@@ -693,6 +693,76 @@ export function tryHeuristicTurnInference(userMessage: string): TurnInferenceRes
   );
 }
 
+const FILE_EXT_RE =
+  /(?:[`'"][\w./\\-]+\.(?:ts|tsx|js|jsx|mjs|cjs|txt|md|json|py|rs|go|css|html)[`'"]|[\w./\\-]+\.(?:ts|tsx|js|jsx|mjs|cjs|txt|md|json|py|rs|go|css|html))/i;
+
+/**
+ * Skip the classifier for obvious file read/edit/fix turns — keeps fast-model routing
+ * when AGENT_INTENT_INFERENCE=0 (latency mode) without a sidecar LLM pass.
+ */
+export function tryHeuristicToolFirstTurn(userMessage: string): TurnInferenceResult | null {
+  const msg = userMessage.trim();
+  if (!msg || msg.length < 12 || msg.length > 1200) return null;
+  if (/\b(?:web_search|web_fetch|research|essay|explain\s+why|write\s+a\s+(?:blog|paper|report))\b/i.test(msg)) {
+    return null;
+  }
+
+  const pathQuery =
+    /\b(?:full path|absolute path|working directory|current directory|project (?:folder|directory|path)|what folder|which folder|where (?:is|am) i(?:\s+running)?|print.*\bcwd\b)\b/i.test(
+      msg
+    );
+  if (pathQuery) {
+    const fb = fallbackReasoningBudget("coding", false);
+    return applyTurnInferenceHeuristics(
+      userMessage,
+      neutralTurnInferenceResult("heuristic_path_query", {
+        intent: "coding",
+        complexity: "trivial",
+        confidence: 0.88,
+        skipHarnessSecondaryPasses: true,
+        reasoningEffort: fb.reasoningEffort,
+        thinkDepth: "brief",
+        toolFirstBias: true,
+        reasoningWordBudget: 120,
+        essayRisk: false,
+        reasoningBudgetSource: "fallback",
+      })
+    );
+  }
+
+  const namesFileTool = /\b(?:read_file|edit_file|write_file|run_lint|run_tests|grep_file|list_dir|run_shell)\b/i.test(
+    msg
+  );
+  const pathRef = FILE_EXT_RE.test(msg);
+  const editVerb = /\b(?:fix|edit|change|update|typo|patch|correct|replace|rename)\b/i.test(msg);
+  if (!namesFileTool && !(pathRef && editVerb)) return null;
+
+  let complexity = fallbackComplexityForUserMessage(msg);
+  const multiStep =
+    /\b(?:and then|step\s*\d|multi[- ]file|entire (?:repo|codebase|project)|migrate|refactor all)\b/i.test(
+      msg
+    );
+  if (!multiStep && (namesFileTool || (pathRef && editVerb)) && msg.length < 600) {
+    complexity = complexity === "complex" ? "normal" : "trivial";
+  }
+  const fb = fallbackReasoningBudget("coding", false);
+  return applyTurnInferenceHeuristics(
+    userMessage,
+    neutralTurnInferenceResult("heuristic_tool_first", {
+      intent: "coding",
+      complexity: complexity === "complex" ? "normal" : complexity,
+      confidence: 0.92,
+      toolFirstBias: true,
+      thinkDepth: "brief",
+      skipHarnessSecondaryPasses: complexity === "trivial",
+      reasoningEffort: fb.reasoningEffort,
+      reasoningWordBudget: Math.min(fb.reasoningWordBudget, 140),
+      essayRisk: false,
+      reasoningBudgetSource: "fallback",
+    })
+  );
+}
+
 export async function inferTurnInference(
   client: OpenAI,
   model: string,
@@ -700,17 +770,22 @@ export async function inferTurnInference(
   workspace?: IntentInferenceWorkspaceContext
 ): Promise<TurnInferenceResult> {
   if (!isIntentInferenceEnabled()) {
+    const toolFirst = tryHeuristicToolFirstTurn(userMessage);
+    if (toolFirst) return toolFirst;
     return applyTurnInferenceHeuristics(
       userMessage,
       neutralTurnInferenceResult("intent_inference_disabled", {
         fallbackReason: "AGENT_INTENT_INFERENCE=0",
         confidence: 0.51,
+        complexity: fallbackComplexityForUserMessage(userMessage),
       })
     );
   }
 
-  const heuristic = tryHeuristicTurnInference(userMessage);
-  if (heuristic) return heuristic;
+  const conversational = tryHeuristicTurnInference(userMessage);
+  if (conversational) return conversational;
+  const toolFirst = tryHeuristicToolFirstTurn(userMessage);
+  if (toolFirst) return toolFirst;
 
   const userContent = buildIntentInferenceUserContent(userMessage, workspace);
 

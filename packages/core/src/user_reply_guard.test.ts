@@ -49,3 +49,37 @@ test("skips opening turns", () => {
     false
   );
 });
+
+test("skips finalize when user asked Reply TOKEN when and assistant includes token", () => {
+  assert.equal(
+    needsUserReplyFinalization({
+      assistantText: "FIXED",
+      toolsUsed: ["read_file", "edit_file"],
+      intent: "coding",
+      userMessage: "Reply FIXED when the file on disk is correct.",
+    }),
+    false
+  );
+});
+
+test("skips finalize for file-mutate-only turns with short coding reply", () => {
+  assert.equal(
+    needsUserReplyFinalization({
+      assistantText: "Done.",
+      toolsUsed: ["read_file", "edit_file"],
+      intent: "coding",
+    }),
+    false
+  );
+});
+
+test("still finalizes research when web tools ran and chat empty", () => {
+  assert.equal(
+    needsUserReplyFinalization({
+      assistantText: "",
+      toolsUsed: ["web_search", "web_fetch"],
+      intent: "research",
+    }),
+    true
+  );
+});

@@ -159,6 +159,10 @@ export function recordCompensation(planId: string, stepIndex: number, action: Co
   _globalLedger.record(planId, stepIndex, action);
 }
 
+export function commitCompensationPath(planId: string, filePath: string): void {
+  _globalLedger.commitPath(planId, filePath);
+}
+
 export function renderExecutionStateBlock(state: ExecutionState): string {
   const mission = state.mission
     ? `${state.mission.title}: ${state.mission.objective.slice(0, 120)} (${state.mission.status})`

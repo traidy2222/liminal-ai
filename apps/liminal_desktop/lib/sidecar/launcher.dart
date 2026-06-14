@@ -268,6 +268,18 @@ Future<SidecarProcess> launchSidecar({
     stderrBuffer.write(chunk);
   });
 
+  process.exitCode.then((code) {
+    if (!completer.isCompleted && code != 0) {
+      final detail = stderrBuffer.toString().trim();
+      completer.completeError(
+        StateError(
+          'liminald exited with code $code before ready.'
+          '${detail.isNotEmpty ? "\nliminald stderr:\n$detail" : ""}',
+        ),
+      );
+    }
+  });
+
   SidecarReadyLine ready;
   try {
     ready = await completer.future.timeout(

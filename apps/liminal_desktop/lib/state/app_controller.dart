@@ -166,7 +166,6 @@ class AppController extends ChangeNotifier {
     if (phase == ConnectionPhase.booting) return;
     phase = ConnectionPhase.booting;
     bootError = null;
-    configLoading = true;
     sidecarReady = false;
     sidecarInitError = null;
     notifyListeners();
@@ -191,8 +190,6 @@ class AppController extends ChangeNotifier {
       }
       if (config == null) {
         await refreshConfig();
-      } else {
-        configLoading = false;
       }
       notifyListeners();
     } catch (e) {
@@ -205,8 +202,14 @@ class AppController extends ChangeNotifier {
 
   void _applyConfigFromJson(Map<String, dynamic>? json) {
     if (json == null) return;
-    config = AppConfig.fromJson(json);
-    configLoading = false;
+    try {
+      config = AppConfig.fromJson(json);
+      setupError = null;
+    } catch (e) {
+      setupError = 'Invalid configuration payload: $e';
+    } finally {
+      configLoading = false;
+    }
     _syncVoiceFromConfig();
   }
 
@@ -364,13 +367,16 @@ class AppController extends ChangeNotifier {
     await sendMessage(pending, liveDictation: dictationSessionActive);
   }
 
-  Future<void> refreshConfig() async {
+  Future<void> refreshConfig({bool background = false}) async {
     if (!_protocol.isConnected) {
       configLoading = false;
       return;
     }
-    configLoading = true;
-    notifyListeners();
+    final showBlockingLoad = !background || config == null;
+    if (showBlockingLoad) {
+      configLoading = true;
+      notifyListeners();
+    }
     try {
       final result = await _protocol.send(
         'get_config',
@@ -381,12 +387,16 @@ class AppController extends ChangeNotifier {
         _applyConfigFromJson(Map<String, dynamic>.from(result.data! as Map));
       } else if (config == null) {
         setupError = result.error ?? 'Could not load configuration';
+        configLoading = false;
       }
     } catch (e) {
       if (config == null) setupError = e.toString();
-    } finally {
       configLoading = false;
-      notifyListeners();
+    } finally {
+      if (showBlockingLoad) {
+        configLoading = false;
+        notifyListeners();
+      }
     }
   }
 
@@ -748,9 +758,15 @@ class AppController extends ChangeNotifier {
         notifyListeners();
         return;
       case 'sidecar_ready':
-        _applyHelloPayload(frame.data);
         sidecarInitError = frame.data['initError'] as String?;
         sidecarReady = true;
+        try {
+          _applyHelloPayload(frame.data);
+        } catch (e) {
+          setupError ??= 'Could not apply sidecar configuration: $e';
+          configLoading = false;
+        }
+        _syncDictationAudioClient();
         _desktopAppsBootPending = true;
         notifyListeners();
         return;
@@ -1727,14 +1743,15 @@ class AppController extends ChangeNotifier {
 
   Future<void> enterChatWorkspace(String chatId) async {
     if (!_protocol.isConnected) return;
+    visibleChatIds = [chatId];
     inChatWorkspace = true;
+    notifyListeners();
     await _ensureChatOpen(chatId);
     if (activeChatId != chatId) {
       await _protocol.send('activate_chat', {'chatId': chatId});
       activeChatId = chatId;
-      await refreshConfig();
+      await refreshConfig(background: true);
     }
-    visibleChatIds = [chatId];
     _syncAssetResolver(chatId: chatId);
     _syncDictationAudioClient();
     _syncPersonaPendingFromActiveChat();

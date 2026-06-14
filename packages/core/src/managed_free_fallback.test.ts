@@ -21,6 +21,17 @@ test("resolveManagedFreeFallbackMainModel defaults to openrouter/free", () => {
   assert.equal(resolveManagedFreeFallbackMainModel(null), OPENROUTER_MODEL_SLUG.FREE_ROUTER);
 });
 
+test("resolveManagedFreeFallbackMainModel prefers user-selected OpenRouter-only model", () => {
+  assert.equal(
+    resolveManagedFreeFallbackMainModel({
+      version: 1,
+      updatedAt: 0,
+      provider: { model: OPENROUTER_MODEL_SLUG.NEX_N2_PRO_FREE },
+    }),
+    OPENROUTER_MODEL_SLUG.NEX_N2_PRO_FREE
+  );
+});
+
 test("resolveManagedFreeFallbackFastModel defaults to Nemotron 3 Ultra when main is openrouter/free", () => {
   assert.equal(
     resolveManagedFreeFallbackFastModel(OPENROUTER_MODEL_SLUG.FREE_ROUTER, null),

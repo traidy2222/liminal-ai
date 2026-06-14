@@ -13,8 +13,8 @@ import {
   buildAppSpecFromSpawn,
   loadRuntimePreferences,
   recordEvalScenarioOutcome,
-  resolveProviderConfig,
   resolveWorkspaceRoot,
+  type ProviderConfig,
   type AgentConfig,
   type LiminalAppManagerPort,
   type ToolResult,
@@ -26,6 +26,14 @@ import {
   INCEPTION_MESSAGES,
   buildProtocolDynamicSuffix,
 } from "@liminal/tools";
+import { prepareSandboxLab } from "./sandboxLabBootstrap.js";
+import { runDesktopParitySend } from "./desktopParityRunner.js";
+import {
+  applyEvalModelEnv,
+  evalFastModelSlug,
+  mergeEvalManagedEnv,
+  resolveEvalProvider,
+} from "./evalProvider.js";
 
 // ─── Public types ─────────────────────────────────────────────────────────────
 
@@ -50,7 +58,12 @@ export interface MockHandler {
 
 export interface ScenarioAssertion {
   name: string;
-  check: (trace: TraceEvent[]) => boolean;
+  check: (trace: TraceEvent[], ctx?: ScenarioRunContext) => boolean;
+}
+
+/** Per-run context passed to scenario assertions (e.g. isolated sandbox root). */
+export interface ScenarioRunContext {
+  sandboxRoot?: string;
 }
 
 export interface Scenario {
@@ -85,6 +98,16 @@ export interface Scenario {
    * Default `auto_approve` (legacy). Use `reject_destructive` to exercise approval gates.
    */
   harnessInteraction?: "auto_approve" | "reject_destructive";
+  /**
+   * Copy `packages/eval/fixtures/sandbox/<id>/` into a temp workspace for this run.
+   * Pins AGENT_WORKSPACE_ROOT + AGENT_GLOBAL_STORAGE_ROOT to the temp tree.
+   */
+  sandboxFixture?: string;
+  /**
+   * `sandbox` (default): lean eval harness + YOLO + SANDBOX_SPEED_ENV.
+   * `desktop`: liminald-equivalent config + SessionBridge transport.
+   */
+  parityProfile?: "sandbox" | "desktop";
 }
 
 export interface ScenarioResult {
@@ -96,6 +119,8 @@ export interface ScenarioResult {
   error?: string;
   /** One result per ε-variant when paraphrases were used. */
   variantErrors?: string[];
+  /** Desktop-parity telemetry when parityProfile=desktop. */
+  parityMeta?: import("./desktopParityRunner.js").DesktopParityRunMeta;
   /** From last `turn_end` harnessMetrics (when present). */
   terminationReason?: string | null;
   /** Count of successful tool_result events in the captured trace. */
@@ -334,18 +359,23 @@ function createEvalMockAppManager(): LiminalAppManagerPort {
 }
 
 const runtimePreferences = await loadRuntimePreferences();
-const provider = resolveProviderConfig(runtimePreferences?.provider);
-export const EVAL_MODEL = process.env["EVAL_MODEL"]?.trim() || provider.model;
 
 /** Build a minimal AgentConfig suitable for eval runs. */
-function makeEvalConfig(maxRounds: number, timeoutMs: number): AgentConfig {
+function makeEvalConfig(
+  provider: ProviderConfig,
+  maxRounds: number,
+  _timeoutMs: number,
+  workspaceRoot?: string,
+  lean = false
+): AgentConfig {
   return {
     openRouterApiKey: provider.apiKey,
-    model: EVAL_MODEL,
+    model: provider.model,
     baseURL: provider.baseURL,
     maxToolRoundsPerTurn: maxRounds,
-    workingStateEnabled: true,
+    workingStateEnabled: !lean,
     runtimePreferences,
+    ...(workspaceRoot ? { workspaceRoot } : {}),
     context: {
       modelMaxTokens: 32_000,
       thresholdFraction: 0.8,
@@ -362,19 +392,51 @@ export async function runSingleHarnessSend(scenario: Scenario, userMessage: stri
   trace: TraceEvent[];
   runError?: string;
   durationMs: number;
+  sandboxRoot?: string;
+  sandboxCleanup?: () => void;
+  modelSlug?: string;
 }> {
   const t0 = Date.now();
   const trace: TraceEvent[] = [];
 
-  const envPatches = scenario.env ?? {};
+  let sandboxCleanup: (() => void) | undefined;
+  let sandboxRoot: string | undefined;
+  const envPatches = { ...(scenario.env ?? {}) };
+  if (scenario.sandboxFixture) {
+    const session = prepareSandboxLab(scenario.sandboxFixture);
+    sandboxRoot = session.root;
+    sandboxCleanup = session.cleanup;
+    Object.assign(envPatches, mergeEvalManagedEnv(session.env));
+  } else if (process.env["EVAL_SANDBOX_LAB"] === "1") {
+    Object.assign(envPatches, mergeEvalManagedEnv({}));
+  }
+
+  const smokeFastModel =
+    scenario.sandboxFixture &&
+    scenario.tags?.includes("smoke") &&
+    process.env["EVAL_SANDBOX_FAST_SMOKE"] !== "0"
+      ? evalFastModelSlug()
+      : undefined;
+
   const prevEnv: Record<string, string | undefined> = {};
   for (const [k, v] of Object.entries(envPatches)) {
     prevEnv[k] = process.env[k];
     process.env[k] = v;
   }
+  applyEvalModelEnv();
+  if (smokeFastModel) {
+    process.env["AGENT_MODEL"] = smokeFastModel;
+  }
 
+  const provider = await resolveEvalProvider(runtimePreferences);
   const harness = new AgentHarness(
-    makeEvalConfig(scenario.maxRounds ?? 20, timeoutFor(scenario))
+    makeEvalConfig(
+      provider,
+      scenario.maxRounds ?? 20,
+      timeoutFor(scenario),
+      sandboxRoot,
+      Boolean(sandboxRoot)
+    )
   );
   const mockApps = envPatches["AGENT_EVAL_LIMINAL_APPS_MOCK"] === "1";
   await registerAllTools(
@@ -467,7 +529,7 @@ export async function runSingleHarnessSend(scenario: Scenario, userMessage: stri
     }
   }
 
-  return { trace, runError, durationMs: Date.now() - t0 };
+  return { trace, runError, durationMs: Date.now() - t0, sandboxRoot, sandboxCleanup, modelSlug: provider.model };
 }
 
 /** Serialize JSONL writes when scenarios run in parallel. */
@@ -552,13 +614,14 @@ export async function writeEvalRunSummary(
 
 function checkAssertions(
   trace: TraceEvent[],
-  assertions: ScenarioAssertion[]
+  assertions: ScenarioAssertion[],
+  ctx?: ScenarioRunContext
 ): Array<{ name: string; passed: boolean }> {
   return assertions.map((a) => ({
     name: a.name,
     passed: (() => {
       try {
-        return a.check(trace);
+        return a.check(trace, ctx);
       } catch {
         return false;
       }
@@ -614,13 +677,23 @@ export async function runScenario(scenario: Scenario): Promise<ScenarioResult> {
     runError?: string;
     durationMs: number;
     assertions: Array<{ name: string; passed: boolean }>;
+    parityMeta?: import("./desktopParityRunner.js").DesktopParityRunMeta;
   }> = [];
 
   for (let vi = 0; vi < variants.length; vi++) {
     const msg = variants[vi]!;
-    const { trace, runError, durationMs } = await runSingleHarnessSend(scenario, msg);
-    const assertions = checkAssertions(trace, scenario.assertions);
-    variantResults.push({ msg, trace, runError, durationMs, assertions });
+    const sendResult =
+      scenario.parityProfile === "desktop"
+        ? await runDesktopParitySend(scenario, msg)
+        : await runSingleHarnessSend(scenario, msg);
+    const { trace, runError, durationMs, sandboxRoot, sandboxCleanup, parityMeta } = sendResult;
+    const ctx: ScenarioRunContext | undefined = sandboxRoot ? { sandboxRoot } : undefined;
+    const assertions = checkAssertions(trace, scenario.assertions, ctx);
+    try {
+      variantResults.push({ msg, trace, runError, durationMs, assertions, parityMeta });
+    } finally {
+      sandboxCleanup?.();
+    }
   }
 
   const passed = variantResults.every(
@@ -639,6 +712,7 @@ export async function runScenario(scenario: Scenario): Promise<ScenarioResult> {
     .filter(Boolean);
 
   const telem = telemetryFromTraces(variantResults.map((vr) => vr.trace));
+  const lastParity = variantResults[variantResults.length - 1]?.parityMeta;
   const out: ScenarioResult = {
     scenario: scenario.name,
     passed,
@@ -646,6 +720,7 @@ export async function runScenario(scenario: Scenario): Promise<ScenarioResult> {
     durationMs: variantResults.reduce((s, vr) => s + vr.durationMs, 0),
     error: variantErrors[0],
     variantErrors: variantErrors.length ? variantErrors : undefined,
+    ...(lastParity ? { parityMeta: lastParity } : {}),
     ...telem,
   };
   if (!scenario.skipJsonSink) {

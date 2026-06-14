@@ -16,8 +16,8 @@ import {
   parseOpenRouterProviderSlug,
 } from "./openrouter_errors.js";
 import { isManagedInferenceBaseUrl } from "./inference_session.js";
+import { isKimchiApiBaseUrl } from "./kimchi_constants.js";
 import {
-  isKimchiApiBaseUrl,
   isKimchiRetryableProviderError,
   resolveKimchiTransientMaxRetries,
 } from "./kimchi_provider.js";

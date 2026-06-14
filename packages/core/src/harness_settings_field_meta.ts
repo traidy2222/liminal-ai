@@ -110,6 +110,14 @@ const _META_RAW: Record<string, HarnessSettingsFieldMeta> = {
     valueKind: "enum",
     enumValues: ["quiet","normal"] as const,
   },
+  "AGENT_USER_REPLY_FINALIZE": {
+    tabId: "harness",
+    subgroupId: "harness_misc",
+    label: "User reply finalize",
+    description:
+      "When on, runs one extra tool-free completion if tools ran but the visible reply was very short (common after read/edit turns). Turn off for lower latency.",
+    valueKind: "boolean",
+  },
   "AGENT_VAULT_AUTO_WRITE": {
     tabId: "memory_vault",
     subgroupId: "vault_limits",
@@ -779,6 +787,14 @@ const _META_RAW: Record<string, HarnessSettingsFieldMeta> = {
     description: "Harness environment toggle for Memory Prime Round0. See docs/configuration.md (memory vault).",
     valueKind: "boolean",
   },
+  "AGENT_WORLD_CONTEXT": {
+    tabId: "harness",
+    subgroupId: "context",
+    label: "World Context",
+    description:
+      "When on, gather OS/git/tools/vault snapshot on the first turn of a root chat. Set 0 for faster isolated workspaces.",
+    valueKind: "boolean",
+  },
   "AGENT_VAULT_PATH": {
     tabId: "memory_vault",
     subgroupId: "obsidian",
@@ -864,6 +880,14 @@ const _META_RAW: Record<string, HarnessSettingsFieldMeta> = {
     label: "Proactive verify (legacy key)",
     description:
       "Deprecated — use AGENT_PROACTIVE_VERIFY. When on, verification runs after edit/browser batches, not at turn end.",
+    valueKind: "boolean",
+  },
+  "AGENT_VERIFY_BEFORE_DONE_AUTO_LINT": {
+    tabId: "harness",
+    subgroupId: "self_heal",
+    label: "Proactive lint (legacy key)",
+    description:
+      "Deprecated — use AGENT_PROACTIVE_VERIFY_LINT. Auto run_lint after edit batches when proactive verify is on.",
     valueKind: "boolean",
   },
   "AGENT_PROACTIVE_VERIFY": {
@@ -2305,6 +2329,14 @@ const _META_RAW: Record<string, HarnessSettingsFieldMeta> = {
     label: "Effort",
     description: "Harness environment toggle for Effort. See docs/configuration.md (harness).",
     valueKind: "string",
+  },
+  "AGENT_LATENCY_MODE": {
+    tabId: "harness",
+    subgroupId: "harness_misc",
+    label: "Latency mode",
+    description:
+      "When on, skips world-context gather, intent-inference LLM, proactive verify lint, session JSONL, forced reply-finalize, and caps completion tokens — faster turns with less sidecar work.",
+    valueKind: "boolean",
   },
   "AGENT_REASONING_NUDGE_CHARS": {
     tabId: "harness",

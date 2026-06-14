@@ -26,8 +26,25 @@ export function managedFreeFallbackEnabled(prefs?: RuntimePreferences | null): b
 }
 
 export function resolveManagedFreeFallbackMainModel(prefs?: RuntimePreferences | null): string {
+  const userModel =
+    prefs?.provider?.model?.trim() ||
+    resolveHarnessEnvRaw("AGENT_MODEL", prefs ?? null)?.trim() ||
+    "";
+  if (userModel && isUserIntentOpenRouterOnlyModel(userModel)) {
+    return userModel;
+  }
   const raw = resolveHarnessEnvRaw("AGENT_MANAGED_FREE_FALLBACK_MODEL", prefs ?? null)?.trim();
   return raw || OPENROUTER_MODEL_SLUG.FREE_ROUTER;
+}
+
+/** User-picked OpenRouter-only slug (no recursive default-model lookup). */
+export function isUserIntentOpenRouterOnlyModel(model: string): boolean {
+  const m = model.trim().toLowerCase();
+  if (!m) return false;
+  if (isOpenRouterFusionModel(m)) return false;
+  if (m.startsWith("openrouter/")) return true;
+  if (m.includes(":free")) return true;
+  return false;
 }
 
 /** OpenRouter-only slugs that the Vireon managed proxy rejects (Bedrock chat path). */
@@ -40,7 +57,10 @@ export function isModelIncompatibleWithManagedProxy(model: string): boolean {
   if (m === "openrouter/auto") return true;
   if (m.startsWith("openrouter/")) return true;
   if (m.includes(":free")) return true;
-  if (m === resolveManagedFreeFallbackMainModel(null).toLowerCase()) return true;
+  const fallbackMain =
+    resolveHarnessEnvRaw("AGENT_MANAGED_FREE_FALLBACK_MODEL", null)?.trim() ||
+    OPENROUTER_MODEL_SLUG.FREE_ROUTER;
+  if (m === fallbackMain.toLowerCase()) return true;
   return false;
 }
 

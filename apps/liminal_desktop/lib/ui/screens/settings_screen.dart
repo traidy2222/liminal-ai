@@ -50,7 +50,7 @@ class _SettingsScreenState extends State<SettingsScreen>
       }
       await AppScope.of(context).loadVireonAccount();
       await Future.wait([
-        AppScope.of(context).loadHarnessSettings(reconnectVireon: true),
+        AppScope.of(context).loadHarnessSettings(),
         if (LiminalFeatureFlags.desktopAppsEnabled)
           AppScope.of(context).loadDesktopApps(),
       ]);
@@ -278,7 +278,22 @@ class _SettingsScreenState extends State<SettingsScreen>
     if (host.harnessSettingsLoading && snap == null) {
       return LiminalShell(
         appBar: _appBar(context),
-        body: const Center(child: CircularProgressIndicator()),
+        body: LiminalPageCanvas(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              const SizedBox(height: LiminalSpacing.lg),
+              LiminalSection(
+                title: 'Loading settings',
+                subtitle: 'Fetching harness configuration from liminald…',
+                child: const Padding(
+                  padding: EdgeInsets.symmetric(vertical: LiminalSpacing.lg),
+                  child: Center(child: CircularProgressIndicator()),
+                ),
+              ),
+            ],
+          ),
+        ),
       );
     }
 

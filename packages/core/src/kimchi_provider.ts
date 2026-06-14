@@ -6,33 +6,17 @@ import OpenAI from "openai";
 import { resolveHarnessEnvRaw } from "./harness_effective_env.js";
 import { isOpaqueInferenceProviderError, errorMessage } from "./openrouter_errors.js";
 import type { RuntimePreferences } from "./runtime_prefs.js";
+import { isKimchiApiBaseUrl as isKimchiApiBaseUrlImpl, KIMCHI_API_BASE_URL, KIMCHI_MODEL_SLUG } from "./kimchi_constants.js";
 
-export const KIMCHI_API_BASE_URL = "https://llm.cast.ai/openai/v1";
+export { KIMCHI_API_BASE_URL, KIMCHI_MODEL_SLUG };
 
-/** Cast AI model slugs (user-deployed + model library). */
-export const KIMCHI_MODEL_SLUG = {
-  MINIMAX_M27: "minimax-m2.7",
-  KIMI_K25: "kimi-k2.5",
-  KIMI_K26: "kimi-k2.6",
-  MINIMAX_M25: "minimax-m2.5",
-  NEMOTRON_3_SUPER_FP4: "nemotron-3-super-fp4",
-} as const;
+export function isKimchiApiBaseUrl(baseURL: string | undefined | null): boolean {
+  return isKimchiApiBaseUrlImpl(baseURL);
+}
 
 export const KIMCHI_API_KEY_ENV_NAMES = ["KIMCHI_API_KEY", "CASTAI_API_KEY"] as const;
 
 export type KimchiApiKeyEnvName = (typeof KIMCHI_API_KEY_ENV_NAMES)[number];
-
-/** True when the configured API base is Cast AI / Kimchi. */
-export function isKimchiApiBaseUrl(baseURL: string | undefined | null): boolean {
-  const raw = (baseURL ?? "").trim();
-  if (!raw) return false;
-  try {
-    const host = new URL(raw).hostname.toLowerCase();
-    return host === "llm.cast.ai" || host === "llm.kimchi.dev" || host.endsWith(".kimchi.dev");
-  } catch {
-    return /llm\.cast\.ai|llm\.kimchi\.dev/i.test(raw);
-  }
-}
 
 /** Default ms between Kimchi requests when AGENT_PROVIDER_MIN_INTERVAL_MS is unset (RPM protection). */
 export const KIMCHI_DEFAULT_MIN_INTERVAL_MS = 1_500;

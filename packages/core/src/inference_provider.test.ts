@@ -1,7 +1,9 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import {
+  buildByokRoutingPatchForModel,
   buildManagedInferenceClientHeaders,
+  filterManagedInferenceCatalog,
   hasLocalProviderApiKey,
   inferencePreferManaged,
   resolveInferenceMode,
@@ -57,7 +59,31 @@ describe("inference_provider", () => {
     else process.env.AGENT_API_KEY = saved.AGENT_API_KEY;
   });
 
-  it("managed mode ignores BYOK-pinned base URL in prefs", async () => {
+  it("buildByokRoutingPatchForModel switches managed auto to byok for openrouter slugs", () => {
+    saved.AGENT_API_KEY = process.env.AGENT_API_KEY;
+    delete process.env.AGENT_API_KEY;
+    const patch = buildByokRoutingPatchForModel("openrouter/free", {
+      version: 1,
+      provider: { inferenceMode: "managed" },
+      harness: { env: { AGENT_INFERENCE_MODE: "managed" } },
+      updatedAt: 0,
+    });
+    assert.ok(patch);
+    assert.equal(patch?.provider?.inferenceMode, "byok");
+    assert.equal(patch?.harness?.env?.AGENT_MODEL, "openrouter/free");
+    assert.equal(patch?.harness?.env?.AGENT_INFERENCE_MODE, "byok");
+    const n2 = buildByokRoutingPatchForModel("nex-agi/nex-n2-pro:free", {
+      version: 1,
+      provider: { inferenceMode: "auto" },
+      updatedAt: 0,
+    });
+    assert.equal(n2?.provider?.inferenceMode, "byok");
+    assert.equal(n2?.harness?.env?.AGENT_MODEL, "nex-agi/nex-n2-pro:free");
+    if (saved.AGENT_API_KEY === undefined) delete process.env.AGENT_API_KEY;
+    else process.env.AGENT_API_KEY = saved.AGENT_API_KEY;
+  });
+
+  it("managed mode requires entitlement even with pinned base URL", async () => {
     const prefs = {
       version: 1 as const,
       provider: {
@@ -66,7 +92,8 @@ describe("inference_provider", () => {
       },
       updatedAt: 0,
     };
-    assert.equal(await shouldRouteOpenRouterViaManaged(prefs), true);
+    // Without a valid license token, managed mode returns false (entitlement check fails)
+    assert.equal(await shouldRouteOpenRouterViaManaged(prefs), false);
   });
 
   it("shouldRouteOpenRouterViaManaged is false in byok mode", async () => {
@@ -95,5 +122,73 @@ describe("inference_provider", () => {
     else process.env.AGENT_API_KEY = saved.AGENT_API_KEY;
     if (saved.AGENT_INFERENCE_MODE === undefined) delete process.env.AGENT_INFERENCE_MODE;
     else process.env.AGENT_INFERENCE_MODE = saved.AGENT_INFERENCE_MODE;
+  });
+
+  it("filterManagedInferenceCatalog keeps all models in auto mode", () => {
+    const models = [
+      {
+        id: "anthropic.claude-sonnet-4-6",
+        label: "Claude Sonnet",
+        family: "anthropic",
+        providers: [
+          { provider: "bedrock" as const, id: "anthropic.claude-sonnet-4-6" },
+          { provider: "openrouter" as const, id: "anthropic/claude-sonnet-4-6" },
+        ],
+      },
+      {
+        id: "deepseek/deepseek-v4-pro",
+        label: "DeepSeek V4 Pro",
+        family: "deepseek",
+        providers: [{ provider: "openrouter" as const, id: "deepseek/deepseek-v4-pro" }],
+      },
+    ];
+    assert.equal(filterManagedInferenceCatalog(models, "auto").length, 2);
+  });
+
+  it("filterManagedInferenceCatalog narrows dual-provider rows to bedrock ids", () => {
+    const models = [
+      {
+        id: "anthropic.claude-sonnet-4-6",
+        label: "Claude Sonnet",
+        family: "anthropic",
+        providers: [
+          { provider: "bedrock" as const, id: "anthropic.claude-sonnet-4-6" },
+          { provider: "openrouter" as const, id: "anthropic/claude-sonnet-4-6" },
+        ],
+      },
+      {
+        id: "deepseek/deepseek-v4-pro",
+        label: "DeepSeek V4 Pro",
+        family: "deepseek",
+        providers: [{ provider: "openrouter" as const, id: "deepseek/deepseek-v4-pro" }],
+      },
+    ];
+    const bedrock = filterManagedInferenceCatalog(models, "bedrock");
+    assert.equal(bedrock.length, 1);
+    assert.equal(bedrock[0]?.id, "anthropic.claude-sonnet-4-6");
+    assert.deepEqual(bedrock[0]?.providers, [
+      { provider: "bedrock", id: "anthropic.claude-sonnet-4-6" },
+    ]);
+  });
+
+  it("filterManagedInferenceCatalog uses shape fallback when providers missing", () => {
+    const models = [
+      {
+        id: "meta.llama3-70b-instruct-v1:0",
+        label: "Llama 3 70B",
+        family: "meta",
+      },
+      {
+        id: "deepseek/deepseek-v4-pro",
+        label: "DeepSeek V4 Pro",
+        family: "deepseek",
+      },
+    ];
+    const bedrock = filterManagedInferenceCatalog(models, "bedrock");
+    assert.equal(bedrock.length, 1);
+    assert.equal(bedrock[0]?.id, "meta.llama3-70b-instruct-v1:0");
+    const openrouter = filterManagedInferenceCatalog(models, "openrouter");
+    assert.equal(openrouter.length, 1);
+    assert.equal(openrouter[0]?.id, "deepseek/deepseek-v4-pro");
   });
 });

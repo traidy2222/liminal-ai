@@ -43,7 +43,7 @@ export function replayEntriesToMessages(entries: WireReplayEntry[]): MessageEntr
       continue;
     }
     if (e.kind === "error" && e.text) {
-      out.push({ kind: "error", text: e.text });
+      out.push({ kind: "trace", text: `[error] ${e.text}` });
     }
   }
   return out;
