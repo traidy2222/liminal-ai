@@ -12,6 +12,7 @@ import '../theme/liminal_tokens.dart';
 import '../widgets/chat_drawer.dart';
 import '../widgets/chat_pane.dart';
 import '../widgets/liminal_app_bar.dart';
+import '../widgets/liminal_error_boundary.dart';
 import '../widgets/liminal_shell.dart';
 
 /// Liminal chat workspace (multi-pane, up to [AppController.maxVisibleChats]). Opened from [VireonHubScreen].
@@ -165,37 +166,18 @@ class _HomeScreenState extends State<HomeScreen> {
               title: 'Opening chat…',
               compact: true,
             )
-          : panes.length == 1
-              ? ChatPane(
-                  chatId: panes.first,
-                  host: host,
-                  session: host.sessionFor(panes.first),
-                  layout: layout,
-                  focused: true,
-                  title: chatTitleFor(host.chats, panes.first),
-                  busy: host.sessionFor(panes.first).busy,
-                  emptyTitle: copy?.emptyTitle ?? 'Ready when you are',
-                  emptyBody:
-                      copy?.emptyBody ?? 'Ask anything, or start with a task.',
-                )
-              : panes.length == 2
-                  ? Row(
-                      crossAxisAlignment: CrossAxisAlignment.stretch,
-                      children: _paneRowChildren(
-                        panes: panes,
-                        host: host,
-                        layout: layout,
-                        chatId: chatId,
-                        lim: lim,
-                        copy: copy,
-                        expand: true,
-                      ),
+          : LiminalErrorBoundary(
+              child: panes.length == 1
+                  ? _SafeChatPane(
+                      chatId: panes.first,
+                      host: host,
+                      layout: layout,
+                      chatIdParam: chatId,
+                      copy: copy,
+                      chats: host.chats,
                     )
-                  : SingleChildScrollView(
-                      scrollDirection: Axis.horizontal,
-                      child: SizedBox(
-                        height: MediaQuery.sizeOf(context).height,
-                        child: Row(
+                  : panes.length == 2
+                      ? Row(
                           crossAxisAlignment: CrossAxisAlignment.stretch,
                           children: _paneRowChildren(
                             panes: panes,
@@ -204,12 +186,29 @@ class _HomeScreenState extends State<HomeScreen> {
                             chatId: chatId,
                             lim: lim,
                             copy: copy,
-                            expand: false,
-                            paneWidth: 380,
+                            expand: true,
+                          ),
+                        )
+                      : SingleChildScrollView(
+                          scrollDirection: Axis.horizontal,
+                          child: SizedBox(
+                            height: MediaQuery.sizeOf(context).height,
+                            child: Row(
+                              crossAxisAlignment: CrossAxisAlignment.stretch,
+                              children: _paneRowChildren(
+                                panes: panes,
+                                host: host,
+                                layout: layout,
+                                chatId: chatId,
+                                lim: lim,
+                                copy: copy,
+                                expand: false,
+                                paneWidth: 380,
+                              ),
+                            ),
                           ),
                         ),
-                      ),
-                    ),
+            ),
     );
   }
 
@@ -268,5 +267,38 @@ class _HomeScreenState extends State<HomeScreen> {
         host.chats.where((x) => x.chatId == host.activeChatId).toList();
     if (active.isEmpty) return null;
     return active.first.title;
+  }
+}
+
+class _SafeChatPane extends StatelessWidget {
+  const _SafeChatPane({
+    required this.chatId,
+    required this.host,
+    required this.layout,
+    required this.chatIdParam,
+    required this.copy,
+    required this.chats,
+  });
+
+  final String chatId;
+  final AppController host;
+  final PersonaLayoutSpec layout;
+  final String? chatIdParam;
+  final dynamic copy;
+  final List<dynamic> chats;
+
+  @override
+  Widget build(BuildContext context) {
+    return ChatPane(
+      chatId: chatId,
+      host: host,
+      session: host.sessionFor(chatId),
+      layout: layout,
+      focused: true,
+      title: chatTitleFor(chats, chatId),
+      busy: host.sessionFor(chatId).busy,
+      emptyTitle: copy?.emptyTitle ?? 'Ready when you are',
+      emptyBody: copy?.emptyBody ?? 'Ask anything, or start with a task.',
+    );
   }
 }

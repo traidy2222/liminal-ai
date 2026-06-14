@@ -2,7 +2,7 @@
 
 All notable changes to [Liminal AI](https://github.com/traidy2222/liminal-ai) on the `main` branch.
 
-**Current stage:** **alpha** (`v0.0.26` tip of `main`, 2026-06-10). The workspace package may read `0.1.0`, but **beta**, **RC**, and a **v0.1.0 public preview** have not been declared as product releases yet.
+**Current stage:** **beta** (`v0.1.0` tip of `main`, 2026-06-15). The workspace package may read `0.1.0`, but **beta**, **RC**, and a **v0.1.0 public preview** have not been declared as product releases yet.
 
 Format: **v0.0.x** entries keyed to the last GitHub push in each slice. Dates are real push dates.
 
@@ -17,9 +17,28 @@ After editing JSON: `npm run changelog:gen`, commit, push, then in [vireondynami
 
 ---
 
+## v0.1.0 — 2026-06-15 {#v0-1-0}
+
+**Current alpha.** First public preview release — stability milestone with CI, eval framework, latency optimization.
+
+**Shipped**
+
+- **CI workflow** — `.github/workflows/ci.yml` runs build, typecheck, and test on every push to main
+- **Eval sandbox framework** — `packages/eval/fixtures/` sandbox scenarios; `npm run eval:sandbox` for reproducible agent tests
+- **Inference latency mode** — `AGENT_LATENCY_MODE` patches for performance-optimized inference paths
+- **Tool circuit** — `tool_circuit.ts` for parallel tool execution optimization
+- **Kimchi constants** — Extracted `AGENT_KIMCHI_*` constants for Cast AI provider tuning
+- **Desktop managed inference catalog** — Flutter UI for managed inference model selection
+- **Sidecar multi-chat** — `chat_registry.ts` for multi-session support
+- **Inference path validation** — `scripts/validate-inference-path.ts` for diagnosing routing issues
+- **Release checklist** — `docs/RELEASE-CHECKLIST.md` documents the v0.1.0 release process
+- **Docs** — [Running evals](../guides/running-eval.md), [Sandbox capability lab](../guides/sandbox-capability-lab.md), [Inference path validation](../reference/inference-path-validation.md)
+
+---
+
 ## v0.0.26 — 2026-06-10 {#v0-0-26}
 
-**Current alpha.** Live compose dock, email HTML preview, Azure ARM, Kimchi provider, OSC 133 shell.
+Live compose dock, email HTML preview, Azure ARM, Kimchi provider, OSC 133 shell.
 
 **Shipped**
 

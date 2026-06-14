@@ -9,12 +9,16 @@ import '../ui/screens/settings_screen.dart';
 import '../ui/screens/setup_screen.dart';
 import '../ui/screens/integrations_screen.dart';
 import '../ui/screens/vireon_hub_screen.dart';
+import '../ui/theme/liminal_theme_extension.dart';
+import '../ui/widgets/liminal_background.dart';
+import '../ui/widgets/liminal_brand.dart';
 import 'routes.dart';
 
 GoRouter createAppRouter(AppController controller) {
   return GoRouter(
     initialLocation: AppRoutes.boot,
     refreshListenable: controller,
+    errorBuilder: (context, state) => const _RouterErrorScreen(),
     redirect: (context, state) {
       final host = AppScope.of(context);
       final loc = state.matchedLocation;
@@ -101,4 +105,58 @@ GoRouter createAppRouter(AppController controller) {
       ),
     ],
   );
+}
+
+class _RouterErrorScreen extends StatelessWidget {
+  const _RouterErrorScreen();
+
+  @override
+  Widget build(BuildContext context) {
+    final lim = LiminalThemeExtension.of(context).tokens;
+    return LiminalBackground(
+      child: Center(
+        child: Padding(
+          padding: const EdgeInsets.all(24),
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 420),
+            child: Card(
+              child: Padding(
+                padding: const EdgeInsets.all(24),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(
+                      Icons.route_outlined,
+                      size: 48,
+                      color: lim.warn,
+                    ),
+                    const SizedBox(height: 16),
+                    const LiminalBrandMark(compact: true),
+                    const SizedBox(height: 16),
+                    Text(
+                      'Page not found',
+                      style: Theme.of(context).textTheme.titleMedium,
+                    ),
+                    const SizedBox(height: 12),
+                    Text(
+                      'The page you were looking for doesn\'t exist or was moved.',
+                      style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                            color: lim.textMuted,
+                          ),
+                      textAlign: TextAlign.center,
+                    ),
+                    const SizedBox(height: 20),
+                    FilledButton(
+                      onPressed: () => context.go(AppRoutes.hub),
+                      child: const Text('Go home'),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
 }

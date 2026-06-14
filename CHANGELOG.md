@@ -2,7 +2,7 @@
 
 All notable changes to [Liminal AI](https://github.com/traidy2222/liminal-ai) are documented here and on the docs portal: [docs.vireondynamics.com/liminal/reference/changelog](https://docs.vireondynamics.com/liminal/reference/changelog).
 
-**Current stage:** **alpha** (`v0.0.26` tip of `main`, 2026-06-10). **Beta**, **RC**, and **v0.1.0 public preview** have not been declared as product releases yet.
+**Current stage:** **beta** (`v0.1.0` tip of `main`, 2026-06-15). **Beta**, **RC**, and **v0.1.0 public preview** have not been declared as product releases yet.
 
 **Single source:** edit [`changelog/releases.json`](changelog/releases.json), then run `npm run changelog:gen`.
 
@@ -10,7 +10,13 @@ Format: **v0.0.x** entries keyed to the last GitHub push in each slice. Dates ar
 
 Marketing (richer notes): [vireondynamics.com/liminal/changelog](https://www.vireondynamics.com/liminal/changelog)
 
-## [v0.0.26] — 2026-06-10 — Current alpha
+## [v0.1.0] — 2026-06-15 — Current alpha
+
+First tagged public preview. Stabilization milestone: CI workflow on main, eval sandbox framework, inference latency mode, tool circuit for performance, desktop managed inference catalog, and sidecar multi-chat registry.
+
+[Full notes](https://docs.vireondynamics.com/liminal/reference/changelog#v0-1-0)
+
+## [v0.0.26] — 2026-06-10
 
 Ships immediate desktop compose preview for file edits and email drafts, rendered HTML in the email dock, expanded Azure Resource Manager REST tools with API-version inference, Kimchi/Cast AI provider throttling and retries, and OSC 133 shell-integration markers for deterministic agent-terminal command completion.
 

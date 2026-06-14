@@ -1,12 +1,35 @@
+import 'dart:ui' as ui;
+
 import 'package:flutter/material.dart';
 import 'package:window_manager/window_manager.dart';
 
 import '../models/liminal_app_spec.dart';
 import 'app_window_args.dart';
 
-/// Applies native window chrome (size, position, frameless).
-/// Widgets use normal z-order by default — visible on the desktop, covered when
-/// another app is focused. Opt in to global topmost via `shell.always_on_top`.
+bool _positionIsValidOnAnyMonitor(double x, double y, double width, double height) {
+  try {
+    final displays = ui.PlatformDispatcher.instance.displays;
+    if (displays.isEmpty) return true;
+
+    final windowRect = Rect.fromLTWH(x, y, width, height);
+
+    for (final display in displays) {
+      final screenRect = Rect.fromLTWH(
+        display.bounds.left,
+        display.bounds.top,
+        display.width,
+        display.height,
+      );
+      if (screenRect.overlaps(windowRect)) {
+        return true;
+      }
+    }
+    return false;
+  } catch (_) {
+    return true;
+  }
+}
+
 Future<void> applyWidgetWindowChrome({
   required LiminalAppShell shell,
   required int width,
@@ -20,10 +43,12 @@ Future<void> applyWidgetWindowChrome({
   final frameless = shell.frameless && shell.isWidget;
   final size = Size(width.clamp(200, 1200).toDouble(), height.clamp(150, 900).toDouble());
 
+  final hasValidPosition = x != null && y != null && _positionIsValidOnAnyMonitor(x, y, size.width, size.height);
+
   final options = WindowOptions(
     size: size,
     minimumSize: Size(size.width * 0.85, size.height * 0.85),
-    center: x == null || y == null,
+    center: !hasValidPosition,
     title: title ?? 'Liminal',
     titleBarStyle: frameless ? TitleBarStyle.hidden : TitleBarStyle.normal,
     windowButtonVisibility: !frameless,
@@ -34,8 +59,8 @@ Future<void> applyWidgetWindowChrome({
 
   await windowManager.waitUntilReadyToShow(options, () async {
     await windowManager.setSize(size);
-    if (x != null && y != null) {
-      await windowManager.setPosition(Offset(x, y));
+    if (hasValidPosition) {
+      await windowManager.setPosition(Offset(x!, y!));
     }
     if (shell.opacity < 1) {
       await windowManager.setOpacity(shell.opacity.clamp(0.5, 1));

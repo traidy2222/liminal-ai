@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { homedir } from "node:os";
 import {
   ensureLocalProviderApiKeyInProcess,
   ensureProviderApiKeysInProcess,
@@ -12,6 +13,12 @@ import {
 } from "@liminal/core";
 import { WsServer } from "./ws_server.js";
 import { clearHandshake, handshakePath, mintToken, writeHandshake } from "./handshake.js";
+import {
+  initCrashReporter,
+  captureException,
+  close as closeCrashReporter,
+  readDsnFromFile,
+} from "./crash_reporter.js";
 
 /**
  * `liminald` — the Liminal harness sidecar.
@@ -28,6 +35,21 @@ const repoRoot =
   process.env["LIMINAL_REPO_ROOT"]?.trim() || join(__dirname, "../../../");
 loadHarnessEnvFiles({ repoRoot, cwd: process.cwd() });
 process.env["LIMINAL_SIDECAR"] = "1";
+
+// Initialize crash reporter before main work starts.
+(async () => {
+  const sentryDsnPath = join(homedir(), ".liminal", "sentry.dsn");
+  const dsn = await readDsnFromFile(sentryDsnPath);
+  if (dsn) {
+    initCrashReporter({
+      dsn,
+      environment: process.env["NODE_ENV"] === "development" ? "development" : "production",
+      release: "0.1.0",
+    });
+  }
+})().catch(() => {
+  // Crash reporter init failure is non-fatal.
+});
 /** Desktop turns feel slow with sidecar LLM passes — enable unless user set this in .env. */
 if (!process.env["AGENT_LATENCY_MODE"]?.trim()) {
   process.env["AGENT_LATENCY_MODE"] = "1";
@@ -63,7 +85,9 @@ async function main(): Promise<void> {
   const shutdown = (signal: string): void => {
     process.stdout.write(`liminald: shutting down (${signal})\n`);
     server.close();
-    void clearHandshake().finally(() => process.exit(0));
+    void clearHandshake()
+      .then(() => closeCrashReporter())
+      .finally(() => process.exit(0));
   };
   process.on("SIGINT", () => shutdown("SIGINT"));
   process.on("SIGTERM", () => shutdown("SIGTERM"));
@@ -73,6 +97,8 @@ async function main(): Promise<void> {
 }
 
 main().catch((err) => {
-  process.stderr.write(`liminald: fatal: ${err instanceof Error ? err.stack ?? err.message : String(err)}\n`);
-  process.exit(1);
+  const message = `liminald: fatal: ${err instanceof Error ? err.stack ?? err.message : String(err)}`;
+  process.stderr.write(`${message}\n`);
+  captureException(err, { context: "sidecar_fatal" });
+  void closeCrashReporter().finally(() => process.exit(1));
 });

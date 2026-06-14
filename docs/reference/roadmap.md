@@ -1,22 +1,22 @@
 # Roadmap
 
-Where Liminal is today and what comes next. **Dates are directional, not commitments** — alpha moves fast on `main`.
+Where Liminal is today and what comes next. **Dates are directional, not commitments** — we ship fast on `main`.
 
-**Current stage:** **alpha** (`v0.0.25`, June 2026). Beta, RC, and **v0.1.0 public preview** are [planned milestones](./changelog.md#planned-not-started), not shipped yet.
+**Current stage:** **beta** (`v0.1.0` public preview, June 2026). [RC](#release-candidate-rc) and **install GA** are [planned](./changelog.md#planned), not shipped yet.
 
 ---
 
-## Now — Alpha (v0.0.25)
+## Now — Beta (v0.1.0 public preview)
 
 What you can run today from [Install](../start/install.md):
 
 | Area | Status |
 |------|--------|
 | ReAct harness | Retries, circuit breaker, compression, approvals, optional self-heal lint |
-| Interfaces | Terminal UI (Ink) + Web UI (Express + React + SSE, multi-chat) + **Desktop** (Windows / macOS / Linux alpha, Flutter + sidecar) |
-| Tools | 245+ catalog tools (300+ with MCP sidecars); lazy family loading — files, shell, git, web, browser, memory, vault, documents, orchestration, Google/Microsoft/GitHub connectors, OpenAPI/MCP attach |
+| Interfaces | **Desktop** (Windows / macOS / Linux, Flutter + sidecar) + Web UI (Express + React + SSE, multi-chat) + Terminal UI (Ink) |
+| Tools | 245+ catalog tools (300+ with MCP sidecars); lazy family loading — files, shell, git, web, browser, memory, vault, documents, orchestration, Google/Microsoft/Azure/GitHub connectors, OpenAPI/MCP attach |
 | Inference | **BYOK** (any OpenAI-compatible provider) or **Pro managed** via Vireon proxy — `liminal login`, `AGENT_INFERENCE_MODE` |
-| Provider routing | Price-sorted OpenRouter resellers, sticky sessions, 429-aware rotation (`AGENT_PROVIDER_STRATEGY`) |
+| Provider routing | Price-sorted OpenRouter resellers, Kimchi/Cast AI, sticky sessions, 429-aware rotation (`AGENT_PROVIDER_STRATEGY`) |
 | Licensing | Open-core CE (FSL-1.1-MIT, no account) + offline Ed25519 tiers; EE auto-install on Pro login |
 | Workflows | `plan_workflow` / `run_workflow` — multi-phase parallel sub-agents, out-of-context store |
 | Persona | Bootstrap, soul slices, UI themes (web shells) |
@@ -24,17 +24,24 @@ What you can run today from [Install](../start/install.md):
 | Memory | Typed notes, hybrid recall, curator + soft-delete archive, federation, recipe library, optional auto-dream |
 | Research | Per-send research ledger + `research_state` tool (web search/fetch discipline) |
 | Audio / voice | `transcribe_audio`, TTS (`speak`), web dictation, voice-mode tool gating |
-| Install | Hosted one-command scripts + `liminal` CLI (alpha onboarding) |
-| Settings | Full `AGENT_*` catalog in web UI + OpenRouter **model presets** (one-click packs) |
+| Install | Hosted one-command scripts + `liminal` CLI + desktop installers |
+| Quality gates | CI on main (build, typecheck, core tests); eval sandbox framework (`npm run eval:sandbox`) |
+| Settings | Full `AGENT_*` catalog in web UI + managed inference model picker on desktop |
 | Docs | Self-contained portal at [docs.vireondynamics.com/liminal/](https://docs.vireondynamics.com/liminal/) |
 
 See [Changelog](./changelog.md) for version-by-version notes.
 
 ---
 
-## Beta — stability & defaults freeze
+## Alpha history (v0.0.1–v0.0.26)
 
-**Goal:** fewer surprises on upgrade; eval suite gates regressions before we call it beta.
+Rapid iteration on `main` through June 2026 — desktop design system, hosted OAuth connectors, compose dock, Azure ARM, Kimchi provider, and work-integration tooling. Summarized in the [changelog](./changelog.md#v0-0-26).
+
+---
+
+## Beta — ongoing stability work
+
+**Goal:** fewer surprises on upgrade; eval suite gates regressions before we call the next milestone RC.
 
 | Focus | Target |
 |-------|--------|
@@ -43,8 +50,9 @@ See [Changelog](./changelog.md) for version-by-version notes.
 | Install hardening | `liminal doctor`, wizard edge cases, clearer failure messages |
 | Docs | Operator path complete (install → configure → troubleshoot) |
 | Breaking changes | Called out in changelog; migration notes where needed |
+| CI expansion | Tools, sidecar, eval sandbox smoke in CI |
 
-**Not in beta scope:** npm global package, Docker images, or “GA” install channel — those stay on the v0.1.0 track.
+**Not in beta scope:** npm global package, Docker images, or full install GA — those stay on the post-RC track.
 
 ---
 
@@ -54,25 +62,24 @@ See [Changelog](./changelog.md) for version-by-version notes.
 
 | Focus | Target |
 |-------|--------|
-| Release checklist | Build, typecheck, eval, manual TUI/web smoke |
+| Release checklist | Build, typecheck, eval, manual TUI/web/desktop smoke |
 | Docs freeze | Generated env reference + operator guides match the tag |
 | Security pass | Approval paths, secret handling, default safety posture reviewed |
 | Performance | Known hot paths documented (web_fetch walls, context compression) |
 
 ---
 
-## v0.1.0 — public preview
+## Install GA (post-RC)
 
-**Goal:** first **tagged** public preview — not “latest `main`”, but a named release people can pin.
+**Goal:** hosted installers and CLI promoted from “public preview” to a supported GA onboarding channel.
 
 | Focus | Target |
 |-------|--------|
-| Version tag | `v0.1.0` on GitHub with release notes |
-| Install GA | Hosted installers + CLI promoted from “alpha helper” to supported onboarding |
-| Upgrade story | `liminal update` + documented migration from alpha installs |
+| Upgrade story | `liminal update` + documented migration from preview installs |
 | Eval bar | Scenario packs green on the release branch |
+| Packaging | Explore bundled `liminald` (no external Node dependency) |
 
-Still **local-first** and **FSL-1.1-MIT** (fair source; converts to MIT after two years per release) — v0.1.0 is a stability/packaging milestone, not a hosted SaaS product.
+Still **local-first** and **FSL-1.1-MIT** (fair source; converts to MIT after two years per release).
 
 ---
 
@@ -94,8 +101,8 @@ Liminal is the only product you can install today. Vireon Dynamics names the res
 
 | Product | Status | What it is |
 |---------|--------|------------|
-| **Liminal AI** | Alpha · shipping | This repo — local-first harness + TUI/web |
-| **Liminal for Teams** | Alpha (since v0.0.17) | Org-scoped shared memory sync; fleet/audit/policy governance still planned |
+| **Liminal AI** | Beta · shipping | This repo — local-first harness + desktop/web/TUI |
+| **Liminal for Teams** | Beta (since v0.0.17) | Org-scoped shared memory sync; fleet/audit/policy governance still planned |
 | **Vireon Bench** | Research | CI-grade harness regression testing from the eval suite |
 | **Harness SDK** | Research | Embed the loop in your own IDE, bot, or vertical agent |
 
@@ -107,9 +114,9 @@ Liminal is the only product you can install today. Vireon Dynamics names the res
 
 ## How to follow along
 
-- **Changelog:** [reference/changelog](./changelog.md) — what landed each alpha slice
+- **Changelog:** [reference/changelog](./changelog.md) — what landed each release slice
 - **GitHub:** [github.com/traidy2222/liminal-ai](https://github.com/traidy2222/liminal-ai) — source of truth for `main`
-- **Liminal release phases:** [vireondynamics.com/liminal/roadmap](https://vireondynamics.com/liminal/roadmap) — alpha → beta → RC → v0.1.0
+- **Liminal release phases:** [vireondynamics.com/liminal/roadmap](https://vireondynamics.com/liminal/roadmap) — beta → RC → install GA
 - **Studio product pipeline:** [vireondynamics.com/roadmap](https://vireondynamics.com/roadmap)
 
 Want something prioritized? Open a [GitHub discussion](https://github.com/traidy2222/liminal-ai/discussions) or use the contact form on the marketing site.

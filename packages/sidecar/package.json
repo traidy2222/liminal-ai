@@ -27,6 +27,7 @@
     "@liminal/core": "*",
     "@liminal/tools": "*",
     "@liminal/protocol": "*",
+    "@sentry/node": "^8.33.0",
     "dotenv": "^16.4.0",
     "ghostty-web": "^0.4.0",
     "node-pty": "^1.0.0",

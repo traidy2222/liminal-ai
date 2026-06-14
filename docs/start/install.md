@@ -2,7 +2,7 @@
 
 Official one-command installers are hosted by Vireon Dynamics. They clone [liminal-ai](https://github.com/traidy2222/liminal-ai), build the monorepo, run setup, and open the web UI with persona bootstrap.
 
-**Stage:** alpha (v0.0.25) — installers are onboarding helpers, not a GA release channel yet. Pro users can optionally sign in with `liminal login` for managed inference instead of pasting an API key.
+**Stage:** beta (v0.1.0 public preview) — tagged releases and hosted installers are the supported onboarding path; GA packaging is still on the roadmap. Pro users can sign in with `liminal login` for managed inference instead of pasting an API key.
 
 ## One command (recommended)
 

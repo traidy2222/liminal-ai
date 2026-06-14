@@ -1,7 +1,38 @@
 {
-  "stage": "alpha",
-  "currentVersion": "0.0.26",
+  "stage": "beta",
+  "currentVersion": "0.1.0",
   "releases": [
+    {
+      "version": "0.1.0",
+      "date": "2026-06-15",
+      "tagline": "First public preview release — stability milestone with CI, eval framework, latency optimization.",
+      "summary": "First tagged public preview. Stabilization milestone: CI workflow on main, eval sandbox framework, inference latency mode, tool circuit for performance, desktop managed inference catalog, and sidecar multi-chat registry.",
+      "bullets": [
+        "**CI workflow** — `.github/workflows/ci.yml` runs build, typecheck, and test on every push to main",
+        "**Eval sandbox framework** — `packages/eval/fixtures/` sandbox scenarios; `npm run eval:sandbox` for reproducible agent tests",
+        "**Inference latency mode** — `AGENT_LATENCY_MODE` patches for performance-optimized inference paths",
+        "**Tool circuit** — `tool_circuit.ts` for parallel tool execution optimization",
+        "**Kimchi constants** — Extracted `AGENT_KIMCHI_*` constants for Cast AI provider tuning",
+        "**Desktop managed inference catalog** — Flutter UI for managed inference model selection",
+        "**Sidecar multi-chat** — `chat_registry.ts` for multi-session support",
+        "**Inference path validation** — `scripts/validate-inference-path.ts` for diagnosing routing issues",
+        "**Release checklist** — `docs/RELEASE-CHECKLIST.md` documents the v0.1.0 release process"
+      ],
+      "docs": [
+        {
+          "label": "Running evals",
+          "href": "../guides/running-eval.md"
+        },
+        {
+          "label": "Sandbox capability lab",
+          "href": "../guides/sandbox-capability-lab.md"
+        },
+        {
+          "label": "Inference path validation",
+          "href": "../reference/inference-path-validation.md"
+        }
+      ]
+    },
     {
       "version": "0.0.26",
       "date": "2026-06-10",

@@ -6,11 +6,13 @@ import 'package:flutter/material.dart';
 import 'package:just_audio_media_kit/just_audio_media_kit.dart';
 import 'package:path/path.dart' as p;
 import 'package:webview_win_floating/webview_win_floating.dart';
+import 'package:window_manager/window_manager.dart';
 
 import 'app/liminal_app.dart';
 import 'apps/app_window_manager.dart';
 import 'apps/app_window_root.dart';
 import 'core/crash_reporter.dart';
+import 'core/window_position.dart';
 import 'sidecar/launcher.dart';
 import 'state/app_controller.dart';
 
@@ -30,9 +32,13 @@ Future<void> main(List<String> args) async {
     return;
   }
 
+  await windowManager.ensureInitialized();
+  final windowPositionManager = WindowPositionManager();
+  await windowPositionManager.initialize();
+
   final repoRoot = detectRepoRoot();
   final controller = AppController(repoRoot: repoRoot);
-  runApp(LiminalApp(controller: controller));
+  runApp(LiminalApp(controller: controller, windowPositionManager: windowPositionManager));
 }
 
 void _installCrashLogging() async {
