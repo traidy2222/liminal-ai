@@ -236,6 +236,19 @@ export interface ClientCommandMap {
   };
   /** Owner polls cloud relay for queued remote UI input events. */
   remote_ui_poll_input: { joinCode: string };
+
+  /** Current inbox triage queue snapshot. */
+  get_inbox_status: Record<string, never>;
+  /** Escalate triaged items to the harness in a chat. */
+  process_inbox_items: { chatId: string; itemIds: string[] };
+  /** Mark inbox items handled without harness. */
+  dismiss_inbox_items: { itemIds: string[] };
+  /** Persist VIP / newsletter domain rules for inbox heuristics. */
+  update_inbox_rules: {
+    vipSenders?: string[];
+    newsletterDomains?: string[];
+    denyDomains?: string[];
+  };
 }
 
 export type ClientCommandType = keyof ClientCommandMap;

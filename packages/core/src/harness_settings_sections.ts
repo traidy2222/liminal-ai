@@ -51,6 +51,7 @@ function sectionIdForKey(key: string): keyof typeof SECTION_META {
     key === "AGENT_PASTE" ||
     key.startsWith("AGENT_AUTO_DREAM") ||
     key.startsWith("AGENT_HEARTBEAT") ||
+    key.startsWith("AGENT_INBOX_") ||
     key.startsWith("AGENT_LIMINAL_APPS") ||
     key.startsWith("AGENT_APP_")
   ) {

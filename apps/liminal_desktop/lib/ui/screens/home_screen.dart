@@ -12,6 +12,8 @@ import '../theme/liminal_theme_extension.dart';
 import '../theme/liminal_tokens.dart';
 import '../widgets/chat_drawer.dart';
 import '../widgets/chat_pane.dart';
+import '../widgets/inbox_panel.dart';
+import '../widgets/inbox_strip.dart';
 import '../widgets/liminal_app_bar.dart';
 import '../widgets/liminal_error_boundary.dart';
 import '../widgets/liminal_shell.dart';
@@ -55,9 +57,40 @@ class _HomeScreenState extends State<HomeScreen> {
     context.go(AppRoutes.hub);
   }
 
+  void _goHome(AppController host) {
+    host.returnToHub();
+    context.go(AppRoutes.hub);
+  }
+
+  Future<void> _openInboxPanel(AppController host) async {
+    await showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      showDragHandle: true,
+      builder: (ctx) => InboxPanel(
+        snapshot: host.inbox,
+        busy: host.inboxBusy,
+        onRefresh: host.loadInboxStatus,
+        onDismiss: host.dismissInboxItems,
+        onProcess: host.processInboxItems,
+      ),
+    );
+  }
+
+  void _maybeShowInboxToast(AppController host) {
+    final msg = host.inboxToastMessage;
+    if (msg == null) return;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
+      host.clearInboxToast();
+    });
+  }
+
   @override
   Widget build(BuildContext context) {
     final host = AppScope.watch(context);
+    _maybeShowInboxToast(host);
     final chatId = host.activeChatId;
     final lim = LiminalTheme.of(context);
     final copy = host.config?.resolvedCopy;
@@ -162,54 +195,65 @@ class _HomeScreenState extends State<HomeScreen> {
           ),
         ],
       ),
-      body: panes.isEmpty
-          ? const LiminalEmptyState(
-              title: 'Opening chat…',
-              compact: true,
-            )
-          : LiminalErrorBoundary(
-              child: panes.length == 1
-                  ? _SafeChatPane(
-                      chatId: panes.first,
-                      host: host,
-                      layout: layout,
-                      chatIdParam: chatId,
-                      copy: copy,
-                      chats: host.chats,
-                    )
-                  : panes.length == 2
-                      ? Row(
-                          crossAxisAlignment: CrossAxisAlignment.stretch,
-                          children: _paneRowChildren(
-                            panes: panes,
+      body: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          InboxStrip(
+            snapshot: host.inbox,
+            onTap: () => _openInboxPanel(host),
+          ),
+          Expanded(
+            child: panes.isEmpty
+                ? const LiminalEmptyState(
+                    title: 'Opening chat…',
+                    compact: true,
+                  )
+                : LiminalErrorBoundary(
+                    child: panes.length == 1
+                        ? _SafeChatPane(
+                            chatId: panes.first,
                             host: host,
                             layout: layout,
-                            chatId: chatId,
-                            lim: lim,
+                            chatIdParam: chatId,
                             copy: copy,
-                            expand: true,
-                          ),
-                        )
-                      : SingleChildScrollView(
-                          scrollDirection: Axis.horizontal,
-                          child: SizedBox(
-                            height: MediaQuery.sizeOf(context).height,
-                            child: Row(
-                              crossAxisAlignment: CrossAxisAlignment.stretch,
-                              children: _paneRowChildren(
-                                panes: panes,
-                                host: host,
-                                layout: layout,
-                                chatId: chatId,
-                                lim: lim,
-                                copy: copy,
-                                expand: false,
-                                paneWidth: 380,
+                            chats: host.chats,
+                          )
+                        : panes.length == 2
+                            ? Row(
+                                crossAxisAlignment: CrossAxisAlignment.stretch,
+                                children: _paneRowChildren(
+                                  panes: panes,
+                                  host: host,
+                                  layout: layout,
+                                  chatId: chatId,
+                                  lim: lim,
+                                  copy: copy,
+                                  expand: true,
+                                ),
+                              )
+                            : SingleChildScrollView(
+                                scrollDirection: Axis.horizontal,
+                                child: SizedBox(
+                                  height: MediaQuery.sizeOf(context).height,
+                                  child: Row(
+                                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                                    children: _paneRowChildren(
+                                      panes: panes,
+                                      host: host,
+                                      layout: layout,
+                                      chatId: chatId,
+                                      lim: lim,
+                                      copy: copy,
+                                      expand: false,
+                                      paneWidth: 380,
+                                    ),
+                                  ),
+                                ),
                               ),
-                            ),
-                          ),
-                        ),
-            ),
+                  ),
+          ),
+        ],
+      ),
     );
   }
 

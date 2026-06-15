@@ -14,6 +14,8 @@ import '../layout/liminal_breakpoints.dart';
 import '../layout/liminal_spacing.dart';
 import '../theme/liminal_theme_extension.dart';
 import '../widgets/integration_brand_icon.dart';
+import '../widgets/inbox_panel.dart';
+import '../widgets/inbox_strip.dart';
 import '../widgets/liminal_page_canvas.dart';
 import '../widgets/liminal_shell.dart';
 import '../widgets/orchestrator_panel.dart';
@@ -73,6 +75,7 @@ class _VireonHubScreenState extends State<VireonHubScreen> {
         host.loadVireonAccount(),
         host.loadOrchestration(),
         host.loadIntegrations(),
+        host.loadInboxStatus(),
       ]);
     } finally {
       if (mounted && !silent) setState(() => _refreshing = false);
@@ -126,6 +129,31 @@ class _VireonHubScreenState extends State<VireonHubScreen> {
     }
   }
 
+  Future<void> _openInboxPanel(AppController host) async {
+    await showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      showDragHandle: true,
+      builder: (ctx) => InboxPanel(
+        snapshot: host.inbox,
+        busy: host.inboxBusy,
+        onRefresh: host.loadInboxStatus,
+        onDismiss: host.dismissInboxItems,
+        onProcess: host.processInboxItems,
+      ),
+    );
+  }
+
+  void _maybeShowInboxToast(AppController host) {
+    final msg = host.inboxToastMessage;
+    if (msg == null) return;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
+      host.clearInboxToast();
+    });
+  }
+
   Future<void> _confirmDeleteChat(AppController host, ChatSummary chat) async {
     final lim = LiminalTheme.of(context);
     final ok = await showDialog<bool>(
@@ -176,6 +204,7 @@ class _VireonHubScreenState extends State<VireonHubScreen> {
   Widget build(BuildContext context) {
     final host = AppScope.watch(context);
     _syncOrchestrationPoll(host);
+    _maybeShowInboxToast(host);
     final lim = LiminalTheme.of(context);
     final workspaceChats = _workspaceChats(host.chats);
     final filtered = _filteredChats(workspaceChats);
@@ -277,6 +306,10 @@ class _VireonHubScreenState extends State<VireonHubScreen> {
                       const UpdateBanner(),
                       header,
                       const SizedBox(height: LiminalSpacing.md),
+                      InboxStrip(
+                        snapshot: host.inbox,
+                        onTap: () => _openInboxPanel(host),
+                      ),
                       status,
                       const SizedBox(height: LiminalSpacing.lg),
                       Row(
@@ -313,6 +346,10 @@ class _VireonHubScreenState extends State<VireonHubScreen> {
                     const UpdateBanner(),
                     header,
                     const SizedBox(height: LiminalSpacing.md),
+                    InboxStrip(
+                      snapshot: host.inbox,
+                      onTap: () => _openInboxPanel(host),
+                    ),
                     status,
                     const SizedBox(height: LiminalSpacing.lg),
                     mission,

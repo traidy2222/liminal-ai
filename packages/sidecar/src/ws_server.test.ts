@@ -122,3 +122,32 @@ test("WsServer: handshake, auth, ping, and create_chat round-trip", async (t) =>
   const chats = (list.data as { chats: unknown[] }).chats;
   assert.ok(chats.length >= 2, "should now have at least two chats");
 });
+
+test("WsServer: get_inbox_status when watcher disabled", async (t) => {
+  const server = new WsServer({
+    token: "test-token",
+    provider: DUMMY_PROVIDER,
+    runtimePreferences: null,
+    repoRoot: process.cwd(),
+  });
+  const port = await server.listen();
+  t.after(() => server.close());
+
+  const ws = new WebSocket(`ws://127.0.0.1:${port}?token=test-token`);
+  const frames = new FrameCollector(ws);
+  await new Promise<void>((resolve, reject) => {
+    ws.on("open", () => resolve());
+    ws.on("error", reject);
+  });
+  t.after(() => ws.close());
+
+  await frames.waitFor((f) => f.event === "sidecar_ready");
+
+  ws.send(JSON.stringify(clientFrame("inbox1", "get_inbox_status", {})));
+  const ack = await frames.waitFor(
+    (f) => f.event === "command_result" && (f.data as { commandId: string }).commandId === "inbox1"
+  );
+  const ackData = ack.data as { ok: boolean; data?: { pendingCount: number } };
+  assert.equal(ackData.ok, true);
+  assert.equal(typeof ackData.data?.pendingCount, "number");
+});

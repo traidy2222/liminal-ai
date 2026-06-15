@@ -20,6 +20,7 @@ import '../models/harness_settings.dart';
 import '../models/liminal_app_spec.dart';
 import '../models/composer_slash_outcome.dart';
 import '../models/integrations_snapshot.dart';
+import '../models/inbox_snapshot.dart';
 import '../ui/widgets/composer_slash.dart';
 import '../models/orchestration_snapshot.dart';
 import '../models/terminal_panel_state.dart';
@@ -162,6 +163,10 @@ class AppController extends ChangeNotifier {
   bool integrationsBusy = false;
   String? integrationsError;
   Timer? _integrationsPollTimer;
+
+  InboxSnapshot inbox = InboxSnapshot.empty;
+  bool inboxBusy = false;
+  String? inboxToastMessage;
 
   bool get needsProviderSetup => config != null && !config!.apiKeyConfigured;
   bool get needsPersonaBootstrap =>
@@ -781,6 +786,7 @@ class AppController extends ChangeNotifier {
         }
         _syncDictationAudioClient();
         _desktopAppsBootPending = true;
+        unawaited(loadInboxStatus());
         notifyListeners();
         return;
       case 'app_list':
@@ -881,6 +887,17 @@ class AppController extends ChangeNotifier {
       case 'orchestration_status':
         orchestration = OrchestrationSnapshot.fromJson(frame.data);
         notifyListeners();
+        return;
+      case 'inbox_status':
+        inbox = InboxSnapshot.fromJson(frame.data);
+        notifyListeners();
+        return;
+      case 'inbox_notify':
+        inboxToastMessage = frame.data['message'] as String?;
+        notifyListeners();
+        return;
+      case 'inbox_watch_completed':
+        unawaited(loadInboxStatus());
         return;
       default:
         return;
@@ -1188,6 +1205,59 @@ class AppController extends ChangeNotifier {
     }
     integrationsError = result.error ?? integrationsError;
     return false;
+  }
+
+  Future<void> loadInboxStatus() async {
+    if (!_protocol.isConnected) return;
+    final result = await _protocol.send('get_inbox_status', {});
+    if (result.ok && result.data is Map) {
+      inbox = InboxSnapshot.fromJson(_coerceJsonMap(result.data! as Map));
+      notifyListeners();
+    }
+  }
+
+  void clearInboxToast() {
+    if (inboxToastMessage == null) return;
+    inboxToastMessage = null;
+    notifyListeners();
+  }
+
+  Future<bool> processInboxItems(List<String> itemIds, {String? chatId}) async {
+    if (!_protocol.isConnected || itemIds.isEmpty || inboxBusy) return false;
+    var cid = chatId ?? activeChatId;
+    if (cid == null) {
+      cid = await createChat();
+      if (cid == null) return false;
+      await enterChatWorkspace(cid);
+    }
+    inboxBusy = true;
+    notifyListeners();
+    try {
+      final result = await _protocol.send('process_inbox_items', {
+        'chatId': cid,
+        'itemIds': itemIds,
+      });
+      if (result.ok) {
+        await loadInboxStatus();
+      }
+      return result.ok;
+    } finally {
+      inboxBusy = false;
+      notifyListeners();
+    }
+  }
+
+  Future<void> dismissInboxItems(List<String> itemIds) async {
+    if (!_protocol.isConnected || itemIds.isEmpty) return;
+    inboxBusy = true;
+    notifyListeners();
+    try {
+      await _protocol.send('dismiss_inbox_items', {'itemIds': itemIds});
+      await loadInboxStatus();
+    } finally {
+      inboxBusy = false;
+      notifyListeners();
+    }
   }
 
   Map<String, dynamic> _coerceJsonMap(Map raw) {

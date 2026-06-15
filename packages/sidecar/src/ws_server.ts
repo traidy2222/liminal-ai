@@ -27,6 +27,7 @@ import {
   fetchManagedInferenceModels,
   liminalAppsEnabled,
   loadChatTranscriptFromSessionLog,
+  readInboxRules,
   remoteCommandAllowed,
   slimReplayEntriesForWire,
   type ProviderConfig,
@@ -100,6 +101,7 @@ import {
   disconnectNotion,
   disconnectIntegrationOpenApi,
 } from "./integrations_api.js";
+import { InboxWatcherService } from "./inbox_watcher_service.js";
 
 const SIDECAR_VERSION = "0.1.0";
 
@@ -134,6 +136,7 @@ export class WsServer {
   private readonly remoteHost: RemoteHostManager;
   private readonly cloudRelay = new CloudRelayForwarder();
   private readonly clientMeta = new Map<WebSocket, RemoteClientMeta>();
+  private readonly inboxWatcher: InboxWatcherService;
 
   constructor(opts: WsServerOptions) {
     this.token = opts.token;
@@ -171,6 +174,13 @@ export class WsServer {
       emit: (frame) => this.broadcast(frame),
     });
     this.registry.setOrchestrator(() => this.orchestrator);
+
+    this.inboxWatcher = new InboxWatcherService(
+      (frame) => this.broadcast(frame),
+      this.registry,
+      opts.provider
+    );
+    this.inboxWatcher.start();
 
     this.remoteHost = new RemoteHostManager((status) => this.broadcastRemoteSession(status));
 
@@ -581,6 +591,7 @@ export class WsServer {
       switch (command) {
         case "ping":
           this.sendTo(ws, serverFrame("pong", { at: Date.now() }));
+          void this.inboxWatcher.runOnce("resume");
           this.ack(ws, id, true);
           return;
 
@@ -956,6 +967,52 @@ export class WsServer {
           } catch (err) {
             this.ack(ws, id, false, err instanceof Error ? err.message : String(err));
           }
+          return;
+        }
+
+        case "get_inbox_status": {
+          try {
+            const snap = await this.inboxWatcher.getStatus();
+            this.inboxWatcher.emitStatus(snap);
+            this.ack(ws, id, true, undefined, snap);
+          } catch (err) {
+            this.ack(ws, id, false, err instanceof Error ? err.message : String(err));
+          }
+          return;
+        }
+
+        case "process_inbox_items": {
+          const d = data as { chatId: string; itemIds: string[] };
+          const result = await this.inboxWatcher.processItems(
+            Array.isArray(d.itemIds) ? d.itemIds.map(String) : [],
+            String(d.chatId ?? "")
+          );
+          this.ack(ws, id, result.ok, result.error);
+          return;
+        }
+
+        case "dismiss_inbox_items": {
+          const d = data as { itemIds: string[] };
+          await this.inboxWatcher.dismissItems(
+            Array.isArray(d.itemIds) ? d.itemIds.map(String) : []
+          );
+          this.ack(ws, id, true);
+          return;
+        }
+
+        case "update_inbox_rules": {
+          const d = data as {
+            vipSenders?: string[];
+            newsletterDomains?: string[];
+            denyDomains?: string[];
+          };
+          const current = await readInboxRules();
+          await this.inboxWatcher.updateRules({
+            vipSenders: d.vipSenders ?? current.vipSenders,
+            newsletterDomains: d.newsletterDomains ?? current.newsletterDomains,
+            denyDomains: d.denyDomains ?? current.denyDomains,
+          });
+          this.ack(ws, id, true);
           return;
         }
 

@@ -242,6 +242,56 @@ export interface TransportEventMap {
     startedAt?: number;
     finishedAt?: number;
   };
+
+  /** Inbox watcher skipped a cycle (no LLM). */
+  inbox_watch_skipped: {
+    reason: string;
+    provider?: string;
+    nextScanAt?: string;
+    error?: string;
+  };
+  /** Inbox watcher started a poll cycle. */
+  inbox_watch_started: { trigger: string; providers: number };
+  /** Inbox watcher finished triage for new mail. */
+  inbox_watch_completed: {
+    trigger: string;
+    newCount: number;
+    triagedCount: number;
+    labeledCount: number;
+    needsActionCount: number;
+    durationMs: number;
+  };
+  /** Rolling inbox triage snapshot for UI strip. */
+  inbox_status: {
+    lastScanAt: string | null;
+    nextScanAt: string | null;
+    needsActionCount: number;
+    fyiCount: number;
+    pendingCount: number;
+    items: Array<{
+      itemId: string;
+      status: string;
+      message: {
+        id: string;
+        provider: string;
+        subject: string;
+        from: string;
+        fromEmail: string;
+        snippet: string;
+        receivedAt: string;
+      };
+      verdict: {
+        category: string;
+        needsReply: boolean;
+        confidence: number;
+        summary: string;
+        suggestedLabel: string;
+      };
+      triagedAt: string;
+    }>;
+  };
+  /** Urgent/action items detected — desktop may toast. */
+  inbox_notify: { needsActionCount: number; message: string };
 }
 
 /** Wire shape for `~/.liminal/apps/manifest.json` entries. */

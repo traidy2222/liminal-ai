@@ -560,6 +560,8 @@ export async function registerAllTools(
   }
 }
 
+export { createInboxProviderPolls } from "./integrations/inbox/inbox_poll_registry.js";
+
 export { fetchWeather } from "./families/web/weather_fetch.js";
 export type { WeatherFetchInput, WeatherFetchResult } from "./families/web/weather_fetch.js";
 

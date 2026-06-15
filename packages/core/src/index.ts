@@ -554,6 +554,39 @@ export {
 } from "./consolidate_session.js";
 export type { ConsolidateSessionResult, ConsolidateUpsert } from "./consolidate_session.js";
 export {
+  resolveInboxWatcherConfig,
+  autoLabelConfidenceFloor,
+  labelNameForCategory,
+  buildInboxProcessPrompt,
+  buildInboxStatusSnapshot,
+  ensureInboxDir,
+  readInboxQueue,
+  readInboxRules,
+  writeInboxRules,
+  updateQueueItemStatus,
+  getInboxStatusSnapshot,
+  runInboxWatchCycle,
+  resetInboxWatcherCycleStateForTests,
+  triageInboxMessage,
+  parseInboxTriagePayload,
+  tryHeuristicInboxTriage,
+} from "./inbox_watcher/index.js";
+export type {
+  InboxProvider,
+  InboxTriageCategory,
+  InboxTriageVerdict,
+  InboxTriagedItem,
+  InboxStatusSnapshot,
+  InboxProviderPoll,
+  InboxWatchCycleResult,
+  InboxWatchSkipReason,
+  InboxRules,
+  InboxMessageMeta,
+  InboxProviderCursorState,
+  InboxPollResult,
+  InboxLabelResult,
+} from "./inbox_watcher/index.js";
+export {
   abandonInProgressTasks,
   evaluateMissionContinue,
   buildResumeMissionBlock,
