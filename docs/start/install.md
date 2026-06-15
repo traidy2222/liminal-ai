@@ -55,9 +55,25 @@ liminal doctor             # Verify Node, builds, API key, port
 liminal web --bootstrap    # Production web UI
 liminal web --bootstrap --open   # Web UI + open browser
 liminal tui --bootstrap    # Terminal UI
-liminal update             # git pull + npm install + build
+liminal update             # git pull + npm install + build (git installs)
+liminal update --check     # portable desktop: compare to latest GitHub Release
+liminal update --harness-only   # apply harness-only update (sidecar stopped)
 liminal path               # Print install directory
 ```
+
+### Liminal Desktop (portable zip)
+
+Download Windows / macOS / Linux builds from [GitHub Releases](https://github.com/traidy2222/liminal-ai/releases) (`v{version}-desktop` tags) or the [install page](https://www.vireondynamics.com/liminal/get-started#desktop-app).
+
+**Auto-update:** On launch, the desktop app checks GitHub Releases when you are on a portable install (`liminald/bundle.json` beside the executable). **Harness updates** download `liminald-runtime-v{version}.zip` and reconnect the sidecar in place. **App updates** download the full platform archive and restart once. Manage this under **Settings → About & updates**, or run `liminal update --check` from a folder containing `liminald/`.
+
+| Env | Purpose |
+|-----|---------|
+| `LIMINAL_SKIP_UPDATE_CHECK=1` | Disable automatic check on launch |
+| `LIMINAL_UPDATE_CHANNEL=beta` | Include pre-releases (default feed during beta) |
+| `LIMINAL_DESKTOP_EXE_DIR` | Override install directory for CLI update commands |
+
+Git-based installs (`~/.liminal/liminal-ai`) continue to use `liminal update` (pull + build). Dev builds with `LIMINAL_REPO_ROOT` skip release checks.
 
 From a **cloned repo** without global shim:
 

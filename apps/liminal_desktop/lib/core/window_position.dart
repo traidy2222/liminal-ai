@@ -5,6 +5,8 @@ import 'dart:ui' as ui;
 import 'package:path/path.dart' as p;
 import 'package:window_manager/window_manager.dart';
 
+import 'display_bounds.dart';
+
 class WindowPosition {
   const WindowPosition({
     required this.x,
@@ -78,8 +80,8 @@ class WindowPosition {
     } catch (_) {}
   }
 
-  Offset get offset => ui.Offset(x.toDouble(), y.toDouble());
-  Size get size => ui.Size(width.toDouble(), height.toDouble());
+  ui.Offset get offset => ui.Offset(x.toDouble(), y.toDouble());
+  ui.Size get size => ui.Size(width.toDouble(), height.toDouble());
 }
 
 class WindowPositionManager with WindowListener {
@@ -96,7 +98,7 @@ class WindowPositionManager with WindowListener {
     await windowManager.ensureInitialized();
 
     final saved = await WindowPosition.load();
-    if (saved != null && _isValidPosition(saved)) {
+    if (saved != null && await _isValidPosition(saved)) {
       _lastPosition = saved;
       _ignoreNextMove = true;
       await windowManager.setPosition(saved.offset);
@@ -113,33 +115,13 @@ class WindowPositionManager with WindowListener {
     windowManager.addListener(this);
   }
 
-  bool _isValidPosition(WindowPosition pos) {
-    try {
-      final displays = ui.PlatformDispatcher.instance.displays;
-      if (displays.isEmpty) return false;
-
-      final windowRect = ui.Rect.fromLTWH(
-        pos.x.toDouble(),
-        pos.y.toDouble(),
-        pos.width.toDouble(),
-        pos.height.toDouble(),
-      );
-
-      for (final display in displays) {
-        final screenRect = ui.Rect.fromLTWH(
-          display.visiblePosition.dx,
-          display.visiblePosition.dy,
-          display.size.width,
-          display.size.height,
-        );
-        if (screenRect.overlaps(windowRect)) {
-          return true;
-        }
-      }
-      return false;
-    } catch (_) {
-      return true;
-    }
+  Future<bool> _isValidPosition(WindowPosition pos) {
+    return windowOverlapsAnyDisplay(
+      x: pos.x.toDouble(),
+      y: pos.y.toDouble(),
+      width: pos.width.toDouble(),
+      height: pos.height.toDouble(),
+    );
   }
 
   Future<void> saveCurrentPosition() async {

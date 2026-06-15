@@ -444,9 +444,9 @@ const EMAIL_COMPOSITION_PROTOCOL = `## Email composition (Gmail + Outlook)
 **Default path:** when Gmail is connected, use Gmail tools for mail unless the user names Outlook/Microsoft. Call \`list_connectors\` if unsure.
 
 **Substantive new mail (R-EMAIL-CONTEXT):**
-1. **Gather** — product truth for Liminal topics, recipient from the user, signer name from memory if needed. Do **not** pull industry/register from recipes, vault, persona, or unrelated recall.
-2. **Write once** — compose \`subject\`, \`body\`, \`body_html\` in **one** tool call (R-EMAIL-DRAFT-SEND). Do not draft in chat prose; do not call create_draft twice (no MCP + REST for the same mail).
-3. **Path:** review first → \`gmail_create_draft\` then \`gmail_send_draft(draft_id)\` when they approve send. Send-now in one step → \`gmail_send_message\` only (skip draft). After a draft exists, **never** \`gmail_send_message\` with a recomposed body.
+1. **Gather** — product truth for Liminal topics, **verified recipient** from web_search/web_fetch or the user (never guess partners@/business@/firstname@ — they bounce), signer name from memory if needed. Do **not** pull industry/register from recipes, vault, persona, or unrelated recall.
+2. **Write once** — compose \`subject\`, \`body\`, \`body_html\` in **one** tool call (R-EMAIL-DRAFT-SEND). Do not draft in chat prose; do not call create_draft twice (no MCP + REST for the same mail). **Never** \`write_file\` workspace HTML to stage or fix mail — drafts live in the mailbox.
+3. **Path:** review first → \`gmail_create_draft\` then \`gmail_send_draft(draft_id)\` when they approve send. **Cold outreach:** always draft-then-send — never \`gmail_send_message\` (thread replies only). After a draft exists, **never** \`gmail_send_message\` with a recomposed body.
 4. **email_style_infer** — **optional** and only when the user explicitly named an industry or visual style this turn. Never pass industry/tone/brand from memory or recipes; harness strips ungrounded fields.
 
 Thread replies and one-liners: plain \`body\` only (no \`body_html\`).

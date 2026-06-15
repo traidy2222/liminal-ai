@@ -8,6 +8,7 @@ import { readFile } from "node:fs/promises";
 import { basename, extname } from "node:path";
 import { defineTool } from "../../shared/helpers.js";
 import { validateOutboundEmailStyle } from "./gmail_compose_guard.js";
+import { validateOutboundEmailRecipients } from "@liminal/core";
 import { buildMimeMessage, type MimeBlob } from "./gmail_message_body.js";
 
 const GMAIL_BASE = "https://gmail.googleapis.com/gmail/v1/users/me";
@@ -245,6 +246,16 @@ const composeProperties: Record<string, PropertySchema> = {
     type: "string",
     description: "Optional Gmail thread id when drafting/replying in an existing conversation.",
   },
+  recipients_verified: {
+    type: "boolean",
+    description:
+      "Set true only after web_search + web_fetch found each To/Cc address (official site or business directory listing). Never guess partners@/business@/firstname@ — they bounce.",
+  },
+  recipient_source: {
+    type: "string",
+    description:
+      "Required when recipients_verified is true: https URL from web_fetch (official site, Yellow Pages, True Local, Google Maps) or email plus URL.",
+  },
 };
 
 const composeParameters = {
@@ -262,12 +273,20 @@ export function createGmailSendTools(): ToolDefinition[] {
       "WHAT: Create a Gmail draft via REST (users.drafts.create) with full body_html, inline_images, and attachments.\n" +
       "WHEN: User wants to review mail in Gmail before sending — **prefer this over mcp_google_gmail_create_draft** for styled HTML (MCP draft is plain-only).\n" +
       "AFTER: To deliver that draft, call **gmail_send_draft** with the returned draftId — do **not** call gmail_send_message with a recomposed body unless the user asked to rewrite.\n" +
+      "RECIPIENTS: web_search + web_fetch (official site, Yellow Pages, True Local, Google Maps, LinkedIn) — set recipient_source + recipients_verified: true. Never guess addresses.\n" +
       "STYLE: Neutral professional body_html + body (R-EMAIL-STYLE). email_style_infer only if user named an industry/style this turn. Plain-only for thread replies.\n" +
       "SAFETY: approval-gated — verify recipients before approving.",
     parameters: composeParameters,
     requiresApproval: true,
     dangerLevel: "destructive",
+    intentDedupArgs: ["to", "subject", "thread_id"],
+    intentPayloadComplete: (args, output) =>
+      /draftId=[^\s?,]+/i.test(output) &&
+      validateOutboundEmailStyle(args) === null &&
+      validateOutboundEmailRecipients(args, "draft") === null,
     handler: async (args): Promise<ToolResult> => {
+      const recipErr = validateOutboundEmailRecipients(args, "draft");
+      if (recipErr) return { ok: false, error: recipErr };
       const styleErr = validateOutboundEmailStyle(args);
       if (styleErr) return { ok: false, error: styleErr };
       const resolved = await resolveComposeArgs(args);
@@ -332,8 +351,8 @@ export function createGmailSendTools(): ToolDefinition[] {
     name: "gmail_send_message",
     description:
       "WHAT: Send email immediately via Gmail REST (users.messages.send). Same OAuth as Google Workspace MCP.\n" +
-      "WHEN: User asked to **send now in one step** with no prior gmail_create_draft in this turn.\n" +
-      "NOT FOR: Mail already drafted via gmail_create_draft — use gmail_send_draft(draft_id) instead (no rewrite).\n" +
+      "WHEN: **Thread reply only** — existing Gmail thread with thread_id or reply_to_message_id.\n" +
+      "NOT FOR: Cold outreach, new mail, or bulk sends — use gmail_create_draft + gmail_send_draft (harness blocks cold gmail_send_message).\n" +
       "HOW: Prefer mcp_google_gmail_* for search/read/labels; gmail_create_draft + gmail_send_draft for draft-then-send.\n" +
       "STYLE: Neutral professional body_html + body (R-EMAIL-STYLE). email_style_infer only if user named an industry/style this turn. Plain-only for thread replies.\n" +
       "SAFETY: approval-gated — verify recipients; real mail leaves the account on approve.",
@@ -341,6 +360,8 @@ export function createGmailSendTools(): ToolDefinition[] {
     requiresApproval: true,
     dangerLevel: "destructive",
     handler: async (args): Promise<ToolResult> => {
+      const recipErr = validateOutboundEmailRecipients(args, "send");
+      if (recipErr) return { ok: false, error: recipErr };
       const styleErr = validateOutboundEmailStyle(args);
       if (styleErr) return { ok: false, error: styleErr };
       const resolved = await resolveComposeArgs(args);

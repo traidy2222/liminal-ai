@@ -4,7 +4,7 @@
 import { readFile } from "node:fs/promises";
 import { basename, extname } from "node:path";
 import type { PropertySchema, ToolDefinition, ToolResult } from "@liminal/core";
-import { resolvePreferredMailProvider } from "@liminal/core";
+import { resolvePreferredMailProvider, validateOutboundEmailRecipients } from "@liminal/core";
 import { defineTool } from "../../shared/helpers.js";
 import { graphApiJson, graphJsonResult, graphErrorResult, microsoftRestEnabled } from "./graph_rest.js";
 import { humanizeOutboundEmailCopy, repairEmailUnicode } from "../google/gmail_message_body.js";
@@ -145,6 +145,16 @@ const sendParams: Record<string, PropertySchema> = {
     type: "string",
     description: "Graph message id to reply to (sets conversation threading).",
   },
+  recipients_verified: {
+    type: "boolean",
+    description:
+      "Set true only after web_search + web_fetch found each address on an official company page.",
+  },
+  recipient_source: {
+    type: "string",
+    description:
+      "Required when recipients_verified is true: quote the exact To address and https URL from web_fetch.",
+  },
   mailbox: {
     type: "string",
     description: "Optional shared mailbox user id or UPN (default: /me).",
@@ -185,6 +195,8 @@ export function createOutlookSendTools(): ToolDefinition[] {
       if (!outlookRestEnabled()) {
         return graphErrorResult("Outlook REST is off (set AGENT_MICROSOFT_REST=1).");
       }
+      const recipErr = validateOutboundEmailRecipients(args, "send");
+      if (recipErr) return { ok: false, error: recipErr };
       const blocked = await outlookMailRouteBlocked(args);
       if (blocked) return blocked;
       const message = buildMessageBody(args);
@@ -269,10 +281,21 @@ export function createOutlookSendTools(): ToolDefinition[] {
       additionalProperties: false,
     },
     requiresApproval: false,
+    intentDedupArgs: ["to", "subject"],
+    intentPayloadComplete: (args, output) => {
+      if (!/messageId=[^\s?,]+/i.test(output)) return false;
+      const html = String(args["body_html"] ?? args["html"] ?? "").trim();
+      const plain = String(args["body"] ?? "").trim();
+      return (
+        !!(html || plain) && validateOutboundEmailRecipients(args, "draft") === null
+      );
+    },
     handler: async (args): Promise<ToolResult> => {
       if (!outlookRestEnabled()) {
         return graphErrorResult("Outlook REST is off (set AGENT_MICROSOFT_REST=1).");
       }
+      const recipErr = validateOutboundEmailRecipients(args, "draft");
+      if (recipErr) return { ok: false, error: recipErr };
       const blocked = await outlookMailRouteBlocked(args);
       if (blocked) return blocked;
       const message = buildMessageBody(args);

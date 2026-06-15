@@ -88,7 +88,9 @@ export const HARNESS_RULES: Record<string, string> = {
   "R-EMAIL-STYLE":
     "Gmail compose/draft/send: FORMATTED body_html + plain body for new outbound mail. Gmail strips outer dark backgrounds — co-locate bgcolor and color on each td. Body = #222/#333 on #fff; dark bands = light text only on the same dark td. Plain-only for thread replies and one-liners.",
   "R-EMAIL-DRAFT-SEND":
-    "After gmail_create_draft / outlook_create_draft succeeds, send with gmail_send_draft / outlook_send_draft using the returned id — never recompose the same mail via gmail_send_message / outlook_send_message unless the user asked to rewrite. One compose pass per email; no MCP create_draft + REST create_draft for the same message.",
+    "After gmail_create_draft / outlook_create_draft succeeds once for a given recipients+subject with complete body_html, reuse that draftId with gmail_send_draft / outlook_send_draft — do not call create_draft again with a tweaked body. If body_html was missing or rejected, re-call the compose tool with a fixed payload — never write_file workspace .html to stage mail. Never recompose the same mail via gmail_send_message / outlook_send_message unless the user asked to rewrite. One compose pass per email; no MCP create_draft + REST create_draft for the same message.",
+  "R-EMAIL-RECIPIENTS":
+    "Never invent To/Cc addresses (YouTuber guesses, partners@, business@ bounce). web_search + web_fetch official sites and business directories (Yellow Pages, True Local, Google Maps); set recipient_source + recipients_verified: true before gmail_create_draft. Cold outreach: draft per recipient → gmail_send_draft — never gmail_send_message (thread replies only).",
   "R-AGENTCARD":
     "AgentCard is external (agentcard_* tools), not a repo path. Never grep the codebase for agent card. On test/setup/pay: agentcard_whoami first.",
   "R-LIMINAL-WIDGET":
@@ -124,7 +126,7 @@ export const HARNESS_RULES: Record<string, string> = {
 import type { TurnIntentClass } from "./intent_inference.js";
 
 const INTENT_RULE_IDS: Record<TurnIntentClass, string[]> = {
-  conversational: ["R-OUTPUT-QUALITY", "R-MULTI-PART-USER", "R-MEMORY-CONTEXT", "R-EMAIL-STYLE", "R-EMAIL-DRAFT-SEND", "R-AGENTCARD"],
+  conversational: ["R-OUTPUT-QUALITY", "R-MULTI-PART-USER", "R-MEMORY-CONTEXT", "R-EMAIL-STYLE", "R-EMAIL-DRAFT-SEND", "R-EMAIL-RECIPIENTS", "R-AGENTCARD"],
   introspection: ["R-OUTPUT-QUALITY", "R-MEMORY-CONTEXT", "R-TURN-FRESHNESS"],
   knowledge: [
     "R-MEMORY-CONTEXT",
@@ -164,6 +166,7 @@ const INTENT_RULE_IDS: Record<TurnIntentClass, string[]> = {
     "R-PATH-GROUNDING",
     "R-EMAIL-STYLE",
     "R-EMAIL-DRAFT-SEND",
+    "R-EMAIL-RECIPIENTS",
     "R-AGENTCARD",
   ],
   creative: [
@@ -173,6 +176,7 @@ const INTENT_RULE_IDS: Record<TurnIntentClass, string[]> = {
     "R-TERM-SCOPE",
     "R-EMAIL-STYLE",
     "R-EMAIL-DRAFT-SEND",
+    "R-EMAIL-RECIPIENTS",
   ],
 };
 

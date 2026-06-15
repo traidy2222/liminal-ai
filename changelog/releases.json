@@ -1,7 +1,26 @@
 {
   "stage": "beta",
-  "currentVersion": "0.1.0",
+  "currentVersion": "0.1.1",
   "releases": [
+    {
+      "version": "0.1.1",
+      "date": "2026-06-15",
+      "tagline": "Desktop auto-update — harness hot-swap and app restart from GitHub Releases.",
+      "summary": "Portable Liminal Desktop installs can check GitHub Releases on launch, apply harness updates in place (liminald-runtime zip), and schedule full app updates with a one-time restart. CLI gains liminal update --check for portable installs.",
+      "bullets": [
+        "**Desktop auto-update** — Settings → About & updates; hub banner when a newer `v*-desktop` release exists",
+        "**Harness hot-swap** — downloads `liminald-runtime-v{version}.zip`, stops sidecar, swaps `liminald/`, reconnects",
+        "**App update** — downloads full platform archive, verifies SHA256, relaunches via bundled updater scripts",
+        "**Release manifest** — `liminal-desktop-manifest-v{version}.json` on each desktop GitHub Release",
+        "**CLI** — `liminal update --check`, `--json`, `--harness-only` for portable installs; git path unchanged"
+      ],
+      "docs": [
+        {
+          "label": "Install (desktop auto-update)",
+          "href": "../start/install.md"
+        }
+      ]
+    },
     {
       "version": "0.1.0",
       "date": "2026-06-15",

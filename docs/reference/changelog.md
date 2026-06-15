@@ -2,7 +2,7 @@
 
 All notable changes to [Liminal AI](https://github.com/traidy2222/liminal-ai) on the `main` branch.
 
-**Current stage:** **beta** (`v0.1.0` tip of `main`, 2026-06-15). The workspace package may read `0.1.0`, but **beta**, **RC**, and a **v0.1.0 public preview** have not been declared as product releases yet.
+**Current stage:** **beta** (`v0.1.1` tip of `main`, 2026-06-15). The workspace package may read `0.1.0`, but **beta**, **RC**, and a **v0.1.0 public preview** have not been declared as product releases yet.
 
 Format: **v0.0.x** entries keyed to the last GitHub push in each slice. Dates are real push dates.
 
@@ -17,9 +17,24 @@ After editing JSON: `npm run changelog:gen`, commit, push, then in [vireondynami
 
 ---
 
+## v0.1.1 — 2026-06-15 {#v0-1-1}
+
+**Current alpha.** Desktop auto-update — harness hot-swap and app restart from GitHub Releases.
+
+**Shipped**
+
+- **Desktop auto-update** — Settings → About & updates; hub banner when a newer `v*-desktop` release exists
+- **Harness hot-swap** — downloads `liminald-runtime-v{version}.zip`, stops sidecar, swaps `liminald/`, reconnects
+- **App update** — downloads full platform archive, verifies SHA256, relaunches via bundled updater scripts
+- **Release manifest** — `liminal-desktop-manifest-v{version}.json` on each desktop GitHub Release
+- **CLI** — `liminal update --check`, `--json`, `--harness-only` for portable installs; git path unchanged
+- **Docs** — [Install (desktop auto-update)](../start/install.md)
+
+---
+
 ## v0.1.0 — 2026-06-15 {#v0-1-0}
 
-**Current alpha.** First public preview release — stability milestone with CI, eval framework, latency optimization.
+First public preview release — stability milestone with CI, eval framework, latency optimization.
 
 **Shipped**
 

@@ -103,8 +103,8 @@ export function batchHasUndispatchableEmailCompose(
 
 export const LENGTH_RESUME_EMAIL_COMPOSE_MESSAGE =
   "[CONTINUE] An email compose tool call was cut off (length limit or incomplete JSON). " +
-  "Re-issue the SAME tool with the same to/subject. If body_html was truncated, send a complete but shorter HTML body (or finish with body plain text). " +
-  "Do not call gmail_send_message for mail already drafted — use gmail_send_draft after a successful gmail_create_draft.";
+  "Re-issue the SAME tool with the same core args. If a large payload field was truncated, send a shorter complete version. " +
+  "If this tool already succeeded for the same intent this turn, reuse that result and continue with the next step.";
 
 /** Args safe to store in assistant tool_calls history (providers reject malformed JSON). */
 export function sanitizeToolCallArgsForContext(argsJson: string): string {

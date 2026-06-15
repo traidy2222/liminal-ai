@@ -1,7 +1,7 @@
 name: liminal_desktop
 description: "Liminal — the native desktop app for the Liminal agent harness."
 publish_to: "none"
-version: 0.1.0
+version: 0.1.1
 
 environment:
   sdk: ">=3.4.0 <4.0.0"
@@ -32,11 +32,16 @@ dependencies:
   just_audio: ^0.9.42
   permission_handler: ^11.3.1
   path_provider: ^2.1.5
+  package_info_plus: ^8.1.2
+  archive: ^4.0.2
+  http: ^1.2.2
+  crypto: ^3.0.6
   just_audio_media_kit: ^2.1.0
   media_kit_libs_windows_audio: ^1.0.9
   media_kit_libs_linux: ^1.2.1
   desktop_multi_window: ^0.3.0
   window_manager: ^0.4.3
+  screen_retriever: ^0.2.0
   image: ^4.5.4
   liminal_remote_desktop:
     path: packages/liminal_remote_desktop

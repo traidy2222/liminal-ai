@@ -214,6 +214,15 @@ export { TaskOrchestrator } from "./orchestrator.js";
 export type { TaskRecord, LockMode } from "./orchestrator.js";
 export { buildWorldContextMessage } from "./world_context.js";
 export { detectEmailPlaceholderViolations } from "./harness_product_identity.js";
+export {
+  collectOutboundRecipientEmails,
+  isCredibleRecipientSource,
+  isOutboundThreadReply,
+  isRoleMailboxAddress,
+  validateEmailAddressFormat,
+  validateOutboundEmailRecipients,
+} from "./email_recipient_guard.js";
+export type { OutboundMailDispatchMode } from "./email_recipient_guard.js";
 export { gatherRepoMapLines } from "./repo_map.js";
 export type { RepoMapOptions } from "./repo_map.js";
 export { guardToolArgs } from "./tool_arg_guard.js";

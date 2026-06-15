@@ -17,6 +17,7 @@ import '../widgets/liminal_form_field.dart';
 import '../widgets/liminal_page_canvas.dart';
 import '../widgets/liminal_shell.dart';
 import '../widgets/managed_inference_panel.dart';
+import '../widgets/about_updates_panel.dart';
 
 class SettingsScreen extends StatefulWidget {
   const SettingsScreen({super.key});
@@ -338,6 +339,18 @@ class _SettingsScreenState extends State<SettingsScreen>
                             }
                           },
                         ),
+                      ),
+                    ),
+                  ),
+                  SliverPadding(
+                    padding: const EdgeInsets.only(top: LiminalSpacing.lg),
+                    sliver: SliverToBoxAdapter(
+                      child: LiminalSection(
+                        title: 'About & updates',
+                        subtitle:
+                            'Liminal Desktop checks GitHub Releases for harness and app updates. '
+                            'Harness updates reconnect the sidecar; app updates restart once.',
+                        child: const AboutUpdatesPanel(),
                       ),
                     ),
                   ),

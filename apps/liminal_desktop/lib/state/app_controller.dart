@@ -12,6 +12,7 @@ import '../core/feature_flags.dart';
 import '../core/protocol_client.dart';
 import '../core/session_registry.dart';
 import '../core/sidecar_lifecycle.dart';
+import '../core/update/update_coordinator.dart';
 import '../models/user_image_attachment.dart';
 import '../ui/rich_message/asset_url_resolver.dart';
 import '../models/app_config.dart';
@@ -69,7 +70,16 @@ class AppController extends ChangeNotifier {
     speechOutput.addListener(notifyListeners);
     dictation.addListener(notifyListeners);
     _appWindows.bindMainWindowHandler();
+    updates = UpdateCoordinator(
+      repoRoot: repoRoot,
+      shutdownSidecar: () => _sidecar.shutdown(),
+      reboot: boot,
+    );
+    updates.addListener(notifyListeners);
+    unawaited(updates.loadPrefs());
   }
+
+  late final UpdateCoordinator updates;
 
   final String? repoRoot;
 
@@ -190,6 +200,9 @@ class AppController extends ChangeNotifier {
       }
       if (config == null) {
         await refreshConfig();
+      }
+      if (updates.shouldAutoCheck) {
+        unawaited(updates.check(silent: true));
       }
       notifyListeners();
     } catch (e) {
@@ -1962,6 +1975,8 @@ class AppController extends ChangeNotifier {
   void dispose() {
     _stopIntegrationsPolling();
     unawaited(_appWindows.closeAll());
+    updates.removeListener(notifyListeners);
+    updates.dispose();
     speechOutput.removeListener(notifyListeners);
     dictation.removeListener(notifyListeners);
     dictation.dispose();

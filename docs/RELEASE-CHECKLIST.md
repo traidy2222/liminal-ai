@@ -208,8 +208,12 @@ Desktop releases should have:
 | Windows | `liminal-desktop-windows-x64-v{version}.zip` + `.sha256` |
 | macOS | `liminal-desktop-macos-arm64-v{version}.zip` + `.sha256` |
 | Linux | `liminal-desktop-linux-x64-v{version}.tar.gz` + `.sha256` |
+| Harness only | `liminald-runtime-v{version}.zip` + `.sha256` |
+| Manifest | `liminal-desktop-manifest-v{version}.json` |
 
 - [ ] All platform artifacts present
+- [ ] `liminald-runtime` harness zip present (in-app harness auto-update)
+- [ ] Desktop manifest JSON attached (`node scripts/generate-desktop-manifest.mjs`)
 - [ ] SHA256 checksums attached
 - [ ] Artifacts downloadable
 

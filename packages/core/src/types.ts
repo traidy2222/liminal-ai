@@ -63,6 +63,18 @@ export interface ToolDefinition {
   /** TTL in ms for cached results. Default: 30_000 if cacheable is true. */
   cacheTtlMs?: number;
   /**
+   * Arg field names that define tool *intent* for within-send dedup (e.g. to+subject
+   * for compose tools). Large/tweakable fields (body_html, content) are ignored so
+   * the model cannot loop re-issuing the same action with a edited payload.
+   */
+  intentDedupArgs?: string[];
+  /**
+   * When set with intentDedupArgs, prior results are only reused if this returns true
+   * for the stored args+output (e.g. draft has draftId and passes style validation).
+   * Incomplete payloads may be re-dispatched with fixed args.
+   */
+  intentPayloadComplete?: (args: Record<string, unknown>, output: string) => boolean;
+  /**
    * Hard cap on tool result length in approximate tokens (1 token ≈ 4 chars).
    * When set, the dispatcher truncates over-long results and appends a notice.
    * Use for tools that may emit arbitrarily large output (e.g. run_shell, run_tests).

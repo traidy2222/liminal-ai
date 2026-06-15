@@ -94,3 +94,5 @@ fs.writeFileSync(process.argv[5], JSON.stringify(manifest, null, 2));
 echo "==> bundle.json (paths relative to release binary folder)"
 echo "    repoRoot:      $ROOT_REL"
 echo "    sidecarScript: $SCRIPT_REL"
+
+bash "$SCRIPT_DIR/copy-desktop-updater.sh" "$BUNDLE_ROOT"

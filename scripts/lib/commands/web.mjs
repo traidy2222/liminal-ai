@@ -7,6 +7,7 @@ import { log } from "../log.mjs";
 import { envPath, resolveRepoRoot } from "../paths.mjs";
 import { scheduleBrowserOpen } from "../openBrowser.mjs";
 import { resolveAutoUpdatePolicy, runRepoSync } from "../update.mjs";
+import { isGitRepository, runReleaseUpdate } from "../update-release-cli.mjs";
 
 const SCRIPTS_DIR = path.dirname(path.dirname(path.dirname(fileURLToPath(import.meta.url))));
 
@@ -109,9 +110,21 @@ export function runTui(argv) {
 }
 
 /**
- * @returns {number}
+ * @param {string[]} [argv]
+ * @returns {number | Promise<number>}
  */
-export function runUpdate() {
+export function runUpdate(argv = []) {
+  const releaseFlags = argv.some((a) =>
+    a === "--check" || a === "--json" || a === "--harness-only",
+  );
+
+  if (releaseFlags) {
+    return runReleaseUpdate(argv);
+  }
+
   const repoRoot = resolveRepoRoot();
-  return runRepoSync(repoRoot, { pull: true, install: true, build: true });
+  if (isGitRepository(repoRoot)) {
+    return runRepoSync(repoRoot, { pull: true, install: true, build: true });
+  }
+  return runReleaseUpdate(argv);
 }

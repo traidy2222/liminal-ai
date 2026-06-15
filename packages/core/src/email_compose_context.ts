@@ -17,6 +17,23 @@ export function isEmailComposeTurn(text: string): boolean {
   );
 }
 
+/** Outreach / influencer discovery turns that often lead to mail — need compose guards too. */
+export function isOutreachResearchTurn(text: string): boolean {
+  const t = text.trim();
+  if (t.length < 8) return false;
+  const wantsContact =
+    /\b(email|e-?mail|contact|reach\s+out|outreach|dm|message)\b/i.test(t) ||
+    /\b(find|get|collect|gather|list)\b[\s\S]{0,48}\b(emails?|addresses?)\b/i.test(t);
+  const audience =
+    /\b(youtuber|influencer|creator|podcast|streamer|partnership|sponsor|collab)\b/i.test(t) ||
+    /\binterested\s+in\s+liminal\b/i.test(t);
+  return wantsContact && audience;
+}
+
+export function shouldInjectEmailComposeGuidance(text: string): boolean {
+  return isEmailComposeTurn(text) || isOutreachResearchTurn(text);
+}
+
 function messageContentLower(text: string): string {
   return text.trim().toLowerCase();
 }
@@ -58,8 +75,16 @@ export function sanitizeEmailStyleInferInput(
   };
 }
 
+export const OUTREACH_RESEARCH_TURN_INJECTION =
+  "[OUTREACH] Find contact emails with web_search + web_fetch — official sites, Google Maps, Yellow Pages, True Local, LinkedIn, etc. Never invent addresses. " +
+  "gmail_create_draft: recipients_verified: true + recipient_source = listing URL or \"email — https://page\" from web_fetch. " +
+  "Use gmail_create_draft per recipient; do not gmail_send_message cold blasts. " +
+  "Write about **only what the user asked** — not unrelated past verticals.";
+
 export const EMAIL_COMPOSE_TURN_INJECTION =
   "[EMAIL COMPOSE] Write mail about **only what the user asked this turn**. " +
+  "Mail lives in **Gmail/Outlook drafts** (gmail_create_draft / outlook_create_draft) — **never** write_file workspace .html/.md to stage or fix email. " +
+  "If body_html was missing or rejected, re-call the compose tool with complete body_html + body in one call. " +
   "Do **not** infer industry, job title, vertical register, or visual style from recipes, " +
   "[KNOWN RECIPE]/[DEFAULT PLAN], recalled memory, persona, vault, or prior sessions unless the user named that vertical explicitly. " +
   "Signer name / company from memory is OK when needed for signature. " +

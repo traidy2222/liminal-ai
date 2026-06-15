@@ -17,7 +17,9 @@ Usage:
   liminal doctor              Verify Node, build artifacts, API key, port
   liminal web [options]       Start web UI (production — same as customers)
   liminal tui [options]       Start terminal UI
-  liminal update              git pull + npm install + build (also runs before web/tui)
+  liminal update              git pull + npm install + build (git) or check desktop release (portable)
+  liminal update --check      show current vs latest desktop release (--json for machine output)
+  liminal update --harness-only  apply harness update only (portable install; sidecar must be stopped)
   liminal login               Sign in to Vireon (browser); saves license to ~/.liminal/
   liminal logout              Remove local Vireon account + license cache
   liminal connect google      Google OAuth (+ use --attach for MCP tools in one step)
@@ -72,7 +74,7 @@ async function main(argv) {
     case "tui":
       return runTui(rest);
     case "update":
-      return runUpdate();
+      return runUpdate(rest);
     case "login": {
       const { spawn } = await import("node:child_process");
       const script = fileURLToPath(new URL("./lib/vireon-login.mjs", import.meta.url));

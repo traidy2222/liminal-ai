@@ -18,6 +18,7 @@ import '../widgets/liminal_page_canvas.dart';
 import '../widgets/liminal_shell.dart';
 import '../widgets/orchestrator_panel.dart';
 import '../widgets/vireon_brand.dart';
+import '../widgets/update_banner.dart';
 import 'hub/hub_format.dart';
 
 class VireonHubScreen extends StatefulWidget {
@@ -273,6 +274,7 @@ class _VireonHubScreenState extends State<VireonHubScreen> {
                   return Column(
                     crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: [
+                      const UpdateBanner(),
                       header,
                       const SizedBox(height: LiminalSpacing.md),
                       status,
@@ -308,6 +310,7 @@ class _VireonHubScreenState extends State<VireonHubScreen> {
                 return Column(
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
+                    const UpdateBanner(),
                     header,
                     const SizedBox(height: LiminalSpacing.md),
                     status,

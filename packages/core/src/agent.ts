@@ -93,6 +93,15 @@ import {
   tryRepairEmailComposeArgsJson,
 } from "./email_compose_resume.js";
 import {
+  buildIntentProgressBlock,
+  buildToolIntentDedupKey,
+  evaluateIntentPayloadComplete,
+  formatIntentSummary,
+  intentDedupReuseOutput,
+  type IntentResultRecord,
+} from "./tool_intent_dedup.js";
+import { CONTINUATION_TURN_INJECTION, isShortContinuationTurn } from "./turn_continuation.js";
+import {
   discardFileWriteStreamManifest,
   setFileWriteStreamManifest,
 } from "./file_write_stream_manifest.js";
@@ -110,7 +119,7 @@ import {
   findBestRecipeForPrime,
   formatRecipePrimeMessage,
 } from "./recipe_library.js";
-import { EMAIL_COMPOSE_TURN_INJECTION, isEmailComposeTurn } from "./email_compose_context.js";
+import { EMAIL_COMPOSE_TURN_INJECTION, isEmailComposeTurn, isOutreachResearchTurn, OUTREACH_RESEARCH_TURN_INJECTION, shouldInjectEmailComposeGuidance } from "./email_compose_context.js";
 import {
   buildReceiptWorkflowTurnInjection,
   isReceiptWorkflowTurn,
@@ -1240,6 +1249,8 @@ export class AgentHarness {
    */
   private toolCallStreak: { name: string; argsHash: string; failures: number } | null = null;
   private bannedToolCallShapesThisSend = new Set<string>();
+  /** Successful tool intents keyed for within-send dedup (tools opt in via intentDedupArgs). */
+  private intentResultsThisSend = new Map<string, IntentResultRecord>();
   private loopBreakNudgeFiredThisSend = false;
   /**
    * Reasoning-stall breaker. The failure-gated {@link toolCallStreak} detector
@@ -2799,6 +2810,28 @@ export class AgentHarness {
     }
   }
 
+  /** Refresh the Vireon managed-inference JWT before each provider stream (15m TTL). */
+  private async refreshManagedInferenceIfNeeded(opts?: {
+    managedBaseURL?: string;
+  }): Promise<void> {
+    if (this.managedByokFallbackActive) return;
+    const base =
+      opts?.managedBaseURL?.replace(/\/$/, "") ??
+      (isManagedInferenceBaseUrl(this.config.baseURL ?? "")
+        ? (this.config.baseURL ?? "").replace(/\/$/, "")
+        : "");
+    if (!base || !isManagedInferenceBaseUrl(base)) return;
+    const session = await ensureManagedInferenceSession(this.runtimePreferences, base);
+    if (!session?.apiKey?.trim()) return;
+    const normalizedBase = session.baseURL.replace(/\/$/, "");
+    const currentBase = (this.config.baseURL ?? "").replace(/\/$/, "");
+    if (session.apiKey !== this.config.openRouterApiKey || normalizedBase !== currentBase) {
+      this.config.openRouterApiKey = session.apiKey;
+      this.config.baseURL = normalizedBase;
+      this.rebuildClient();
+    }
+  }
+
   private async syncContextWindowForModel(model?: string): Promise<void> {
     const slug = (model ?? this.config.model ?? "").trim();
     if (!slug) return;
@@ -2946,19 +2979,11 @@ export class AgentHarness {
           return;
         }
         try {
-          const session = await ensureManagedInferenceSession(
-            this.runtimePreferences,
-            managedInferenceBaseUrl()
-          );
-          if (!session?.apiKey?.trim()) {
+          await this.refreshManagedInferenceIfNeeded({
+            managedBaseURL: managedInferenceBaseUrl(),
+          });
+          if (!this.config.openRouterApiKey?.trim()) {
             throw new Error("Managed inference session unavailable — sign in to Vireon first.");
-          }
-          const normalizedBase = session.baseURL.replace(/\/$/, "");
-          const currentBase = (this.config.baseURL ?? "").replace(/\/$/, "");
-          if (session.apiKey !== this.config.openRouterApiKey || normalizedBase !== currentBase) {
-            this.config.openRouterApiKey = session.apiKey;
-            this.config.baseURL = normalizedBase;
-            this.rebuildClient();
           }
         } catch (err) {
           const msg = err instanceof Error ? err.message : String(err);
@@ -3054,6 +3079,7 @@ export class AgentHarness {
     this._turnReasoningBudget = null;
     this._turnReasoningSurface = "external";
     this.toolCallsDispatchedThisSend = 0;
+    this.intentResultsThisSend.clear();
     this.breakdownClarificationGate = null;
     this.streamingToolNamesByCallId.clear();
     this.composeRawArgsByCallId.clear();
@@ -3409,8 +3435,14 @@ export class AgentHarness {
           }
         }
       }
-      if (!openingTurn && isEmailComposeTurn(userMessage)) {
+      if (!openingTurn && shouldInjectEmailComposeGuidance(userMessage)) {
         this.context.appendMessage({ role: "system", content: EMAIL_COMPOSE_TURN_INJECTION });
+        if (isOutreachResearchTurn(userMessage)) {
+          this.context.appendMessage({ role: "system", content: OUTREACH_RESEARCH_TURN_INJECTION });
+        }
+      }
+      if (!openingTurn && isShortContinuationTurn(userMessage)) {
+        this.context.appendMessage({ role: "system", content: CONTINUATION_TURN_INJECTION });
       }
       if (!openingTurn && receiptWorkflowActive) {
         if (this.turnInference) {
@@ -5615,9 +5647,22 @@ export class AgentHarness {
 
         const streamErrMsg = describeError(streamErr, this.config.baseURL);
         const isChunkTimeout = streamErrMsg.includes("STREAM_CHUNK_TIMEOUT");
+        const isManagedSessionExpired =
+          isManagedInferenceAuthError(streamErr) &&
+          isManagedInferenceBaseUrl(this.config.baseURL ?? "");
+        if (isManagedSessionExpired) {
+          clearManagedInferenceSessionCache();
+          try {
+            await this.refreshManagedInferenceIfNeeded();
+          } catch {
+            /* streamWithRetry will surface on reopen */
+          }
+        }
         const canRetry =
           streamAttempt < maxStreamRetries &&
-          (isChunkTimeout || isRetryable(streamErr, this.config.baseURL));
+          (isChunkTimeout ||
+            isRetryable(streamErr, this.config.baseURL) ||
+            isManagedSessionExpired);
 
         if (!canRetry) throw streamErr;
 
@@ -5859,7 +5904,7 @@ export class AgentHarness {
         const firstIdxByKey = new Map<string, number>();
         for (let i = 0; i < toolCalls.length; i++) {
           const tc = toolCalls[i]!;
-          const k = `${tc.name}:${stableArgsJsonKey(tc.argsJson)}`;
+          const k = this.toolCallDedupKey(tc);
           const fi = firstIdxByKey.get(k);
           if (fi === undefined) {
             firstIdxByKey.set(k, i);
@@ -5931,20 +5976,49 @@ export class AgentHarness {
             error: `[loop_break] This (${tc.name}, args) combination was blocked after 3 consecutive failures earlier this turn. Try a different tool or change the arguments meaningfully.`,
           };
         } else {
-          const runDispatch = async () => {
-            const speculative = speculativePromises.get(tc.id);
-            if (speculative) return speculative;
-            const promoted = this.tryPromotePasteSpeculation(tc.name, tc.argsJson);
-            if (promoted) return promoted;
-            return this.dispatcher.dispatch(tc.id, tc.name, tc.argsJson, batchToolNames);
-          };
-          if (tc.name === "write_file" || tc.name === "edit_file") {
-            const pathKey = this.fileWritePathKeyFromArgs(tc.argsJson);
-            result = pathKey
-              ? await this.runSerializedOnFileWritePath(pathKey, runDispatch)
-              : await runDispatch();
+          const intentFields = this.registry.getIntentDedupArgs(tc.name);
+          const intentKey = buildToolIntentDedupKey(tc.name, tc.argsJson, intentFields);
+          const priorIntent =
+            intentFields?.length ? this.intentResultsThisSend.get(intentKey) : undefined;
+          if (priorIntent?.payloadComplete) {
+            duplicateHints.push(
+              `${tc.name} already succeeded for the same intent this turn (${priorIntent.summary}). ` +
+                "Reuse the earlier result and continue with the next step from the user's request."
+            );
+            result = {
+              ok: true,
+              output: intentDedupReuseOutput(priorIntent),
+            };
           } else {
-            result = await runDispatch();
+            const runDispatch = async () => {
+              const speculative = speculativePromises.get(tc.id);
+              if (speculative) return speculative;
+              const promoted = this.tryPromotePasteSpeculation(tc.name, tc.argsJson);
+              if (promoted) return promoted;
+              return this.dispatcher.dispatch(tc.id, tc.name, tc.argsJson, batchToolNames);
+            };
+            if (tc.name === "write_file" || tc.name === "edit_file") {
+              const pathKey = this.fileWritePathKeyFromArgs(tc.argsJson);
+              result = pathKey
+                ? await this.runSerializedOnFileWritePath(pathKey, runDispatch)
+                : await runDispatch();
+            } else {
+              result = await runDispatch();
+            }
+            if (result.ok && intentFields?.length) {
+              const toolDef = this.registry.get(tc.name);
+              this.intentResultsThisSend.set(intentKey, {
+                toolName: tc.name,
+                intentKey,
+                output: String(result.output ?? ""),
+                summary: formatIntentSummary(tc.name, tc.argsJson, intentFields),
+                payloadComplete: evaluateIntentPayloadComplete(
+                  toolDef?.intentPayloadComplete,
+                  tc.argsJson,
+                  String(result.output ?? "")
+                ),
+              });
+            }
           }
         }
         results[idx] = result;
@@ -6023,9 +6097,16 @@ export class AgentHarness {
             "[DUPLICATE TOOL CALLS] " +
             duplicateHints.join(" ") +
             (hasQueryOutputs
-              ? " Reuse the earlier result via query_tool_outputs instead of re-running identical calls."
-              : " Reuse the earlier result instead of re-running identical calls."),
+              ? " Reuse the earlier result via query_tool_outputs instead of re-running identical calls. Continue with the next step from the user's request."
+              : " Reuse the earlier result instead of re-running identical calls. Continue with the next step from the user's request."),
         });
+      }
+
+      if (this.intentResultsThisSend.size > 0) {
+        const progress = buildIntentProgressBlock([...this.intentResultsThisSend.values()]);
+        if (progress) {
+          this.context.appendMessage({ role: "system", content: progress });
+        }
       }
 
       for (let i = 0; i < toolCalls.length; i++) {
@@ -6493,7 +6574,10 @@ export class AgentHarness {
           `OUTCOMES: ${outcomes}\n` +
           `RECENT TOOL LINES: ${this.recentToolOutcomeLines.join(" · ")}\n` +
           `SPAWN_AGENT CALLS THIS SEND: ${this.toolsUsedThisTurn.filter((n) => n === "spawn_agent").length}\n` +
-          `${buildToolAwarenessSnapshot(this.registry, this.toolsUsedThisTurn)}`;
+          `${buildToolAwarenessSnapshot(this.registry, this.toolsUsedThisTurn)}` +
+          (this.intentResultsThisSend.size > 0
+            ? `\n${buildIntentProgressBlock([...this.intentResultsThisSend.values()])}`
+            : "");
         const modifiedSorted = [...this.changedFilesThisTurn].sort((a, b) =>
           a.localeCompare(b, undefined, { sensitivity: "base" })
         );
@@ -6922,6 +7006,7 @@ export class AgentHarness {
     let attempt = 0;
     let managedBusyRetries = 0;
     while (true) {
+      await this.refreshManagedInferenceIfNeeded();
       if (Date.now() < this.providerCircuitOpenUntilMs) {
         const sec = Math.ceil((this.providerCircuitOpenUntilMs - Date.now()) / 1000);
         throw new Error(`Provider circuit open due to repeated upstream failures. Retry in ~${sec}s.`);
@@ -7571,8 +7656,7 @@ export class AgentHarness {
       role: "user",
       content:
         `[SYSTEM NOTE] ${toolCalls.length} tool call(s) could not run: ${reason}. ` +
-        "For large files use write_file mode=create once, then mode=append. " +
-        "For long email HTML use a shorter body_html or retry gmail_create_draft after truncation. Continue from the errors above.",
+        "For large files use write_file mode=create once, then mode=append. Continue from the errors above.",
     });
   }
 
@@ -7580,6 +7664,14 @@ export class AgentHarness {
    * When a provider stream stalls mid-tool-call, commit partial assistant + tool
    * messages so the model does not blindly re-issue write_file on the same path.
    */
+  private toolCallDedupKey(tc: AccumulatedToolCall): string {
+    return buildToolIntentDedupKey(
+      tc.name,
+      tc.argsJson,
+      this.registry.getIntentDedupArgs(tc.name)
+    );
+  }
+
   private fileWritePathKeyFromArgs(argsJson: string): string | null {
     const parsed = tryParseToolArgs(argsJson);
     if (!parsed.ok) return null;

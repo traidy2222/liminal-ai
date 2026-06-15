@@ -1,34 +1,9 @@
-import 'dart:ui' as ui;
-
 import 'package:flutter/material.dart';
 import 'package:window_manager/window_manager.dart';
 
+import '../core/display_bounds.dart';
 import '../models/liminal_app_spec.dart';
 import 'app_window_args.dart';
-
-bool _positionIsValidOnAnyMonitor(double x, double y, double width, double height) {
-  try {
-    final displays = ui.PlatformDispatcher.instance.displays;
-    if (displays.isEmpty) return true;
-
-    final windowRect = Rect.fromLTWH(x, y, width, height);
-
-    for (final display in displays) {
-      final screenRect = Rect.fromLTWH(
-        display.visiblePosition.dx,
-        display.visiblePosition.dy,
-        display.size.width,
-        display.size.height,
-      );
-      if (screenRect.overlaps(windowRect)) {
-        return true;
-      }
-    }
-    return false;
-  } catch (_) {
-    return true;
-  }
-}
 
 Future<void> applyWidgetWindowChrome({
   required LiminalAppShell shell,
@@ -43,7 +18,14 @@ Future<void> applyWidgetWindowChrome({
   final frameless = shell.frameless && shell.isWidget;
   final size = Size(width.clamp(200, 1200).toDouble(), height.clamp(150, 900).toDouble());
 
-  final hasValidPosition = x != null && y != null && _positionIsValidOnAnyMonitor(x, y, size.width, size.height);
+  final hasValidPosition = x != null &&
+      y != null &&
+      await windowOverlapsAnyDisplay(
+        x: x,
+        y: y,
+        width: size.width,
+        height: size.height,
+      );
 
   final options = WindowOptions(
     size: size,

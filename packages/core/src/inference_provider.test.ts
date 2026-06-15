@@ -1,11 +1,13 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
+import OpenAI from "openai";
 import {
   buildByokRoutingPatchForModel,
   buildManagedInferenceClientHeaders,
   filterManagedInferenceCatalog,
   hasLocalProviderApiKey,
   inferencePreferManaged,
+  isManagedInferenceAuthError,
   resolveInferenceMode,
   resolveManagedOpenRouterCredentials,
   resolveManagedProviderPreference,
@@ -190,5 +192,10 @@ describe("inference_provider", () => {
     const openrouter = filterManagedInferenceCatalog(models, "openrouter");
     assert.equal(openrouter.length, 1);
     assert.equal(openrouter[0]?.id, "deepseek/deepseek-v4-pro");
+  });
+
+  it("isManagedInferenceAuthError matches expired session JWT (HTTP 401)", () => {
+    const err = new OpenAI.APIError(401, { message: "expired" }, "expired", undefined);
+    assert.equal(isManagedInferenceAuthError(err), true);
   });
 });

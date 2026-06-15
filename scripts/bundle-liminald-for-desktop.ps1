@@ -159,4 +159,6 @@ $manifest | ConvertTo-Json | Set-Content (Join-Path $BundleRoot "bundle.json") -
 Write-Host "==> bundle.json (paths relative to Release/)"
 Write-Host "    repoRoot:      $rootRel"
 Write-Host "    sidecarScript: $scriptRel"
+
+& (Join-Path $RepoRoot "scripts\copy-desktop-updater.ps1") $BundleRoot
 exit 0

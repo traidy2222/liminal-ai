@@ -66,6 +66,10 @@ export class ToolRegistry {
     return this.tools.get(name);
   }
 
+  getIntentDedupArgs(name: string): string[] | undefined {
+    return this.tools.get(name)?.intentDedupArgs;
+  }
+
   has(name: string): boolean {
     return this.tools.has(name);
   }

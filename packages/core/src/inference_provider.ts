@@ -169,7 +169,7 @@ export function isManagedInferenceAuthError(err: unknown): boolean {
       ? JSON.stringify(err.error)
       : String(err.error ?? err.message);
   const msg = raw.toLowerCase();
-  return /missing auth|auth header|unauthorized|no authorization|invalid token|invalid.*session/i.test(
+  return /missing auth|auth header|unauthorized|no authorization|invalid token|invalid.*session|\bexpired\b|jwt.*expired|session.*expired|token.*expired/i.test(
     msg
   );
 }

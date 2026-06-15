@@ -150,8 +150,36 @@ jobs:
             dist/liminal-desktop-linux-x64-v${{ needs.meta.outputs.version }}.tar.gz
             dist/liminal-desktop-linux-x64-v${{ needs.meta.outputs.version }}.tar.gz.sha256
 
+  liminald-runtime:
+    needs: meta
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Package harness runtime (liminald only)
+        env:
+          COPY_NODE_MODULES_FROM_REPO: "1"
+        run: |
+          chmod +x scripts/*.sh
+          ./scripts/package-liminald-runtime.sh --version "${{ needs.meta.outputs.version }}" --copy-node-modules
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: desktop-liminald-runtime
+          path: |
+            dist/liminald-runtime-v${{ needs.meta.outputs.version }}.zip
+            dist/liminald-runtime-v${{ needs.meta.outputs.version }}.zip.sha256
+
   release:
-    needs: [meta, windows, macos, linux]
+    needs: [meta, windows, macos, linux, liminald-runtime]
     runs-on: ubuntu-latest
     steps:
       - name: Download artifacts
@@ -159,6 +187,10 @@ jobs:
         with:
           path: dist
           merge-multiple: true
+
+      - name: Generate release manifest
+        run: |
+          node scripts/generate-desktop-manifest.mjs --version "${{ needs.meta.outputs.version }}" --dist dist
 
       - name: Write release notes
         run: |
@@ -173,6 +205,9 @@ jobs:
           | **Windows x64** | \`liminal-desktop-windows-x64-v$ver.zip\` | Unzip; run \`liminal_desktop.exe\` (keep \`liminald\\\` next to the exe) |
           | **macOS arm64** | \`liminal-desktop-macos-arm64-v$ver.zip\` | Unzip \`liminal_desktop.app\`; right-click → Open if Gatekeeper blocks |
           | **Linux x64** | \`liminal-desktop-linux-x64-v$ver.tar.gz\` | Extract; run \`./liminal_desktop\` from the bundle folder |
+          | **Harness only** | \`liminald-runtime-v$ver.zip\` | In-app harness update artifact (desktop auto-update) |
+
+          **Auto-update:** Desktop checks GitHub Releases on launch. Harness updates apply in place; app updates restart once.
 
           **API key:** copy \`liminald/repo/.env.example\` → \`.env\` and set \`AGENT_API_KEY\`, or sign in with Vireon in the app.
 
@@ -194,6 +229,9 @@ jobs:
             dist/liminal-desktop-macos-arm64-v${{ needs.meta.outputs.version }}.zip.sha256
             dist/liminal-desktop-linux-x64-v${{ needs.meta.outputs.version }}.tar.gz
             dist/liminal-desktop-linux-x64-v${{ needs.meta.outputs.version }}.tar.gz.sha256
+            dist/liminald-runtime-v${{ needs.meta.outputs.version }}.zip
+            dist/liminald-runtime-v${{ needs.meta.outputs.version }}.zip.sha256
+            dist/liminal-desktop-manifest-v${{ needs.meta.outputs.version }}.json
           draft: false
           prerelease: true
           generate_release_notes: false
