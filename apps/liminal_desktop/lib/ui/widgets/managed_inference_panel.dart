@@ -119,6 +119,7 @@ class ManagedInferencePanel extends StatelessWidget {
     );
     final catalogSize = catalog?.models.length ?? 0;
     final catalogRegions = catalog?.catalogRegions ?? const <String>[];
+    final curatedSource = catalog?.curatedBedrockSource;
     final regionalBedrockCount = models
         .where((m) => RegExp(r'^(us|eu|global|apac|au|jp)\.', caseSensitive: false).hasMatch(m.id))
         .length;
@@ -158,7 +159,7 @@ class ManagedInferencePanel extends StatelessWidget {
             managedProvider.trim().isNotEmpty && managedProvider != 'auto'
                 ? 'Models on $managedProvider upstream ($catalogSize in full catalog, ${models.length} shown${regionalBedrockCount > 0 ? ', $regionalBedrockCount regional Bedrock profiles' : ''}).'
                 : catalogRegions.isNotEmpty
-                    ? 'Pick upstream provider and models from the Vireon catalog ($catalogSize loaded across ${catalogRegions.length} Bedrock regions).'
+                    ? 'Pick upstream provider and models from the Vireon catalog ($catalogSize loaded${curatedSource != null ? ', $curatedSource regional manifest' : ''}${catalogRegions.isNotEmpty ? ' across ${catalogRegions.length} Bedrock regions' : ''}).'
                     : 'Pick upstream provider and models from the Vireon catalog ($catalogSize loaded).',
             style: theme.textTheme.bodySmall?.copyWith(
               color: lim.textMuted,

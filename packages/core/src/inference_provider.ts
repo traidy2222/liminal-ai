@@ -517,6 +517,12 @@ export type ManagedInferenceModelsResult = {
   upstream: string;
   region: string;
   catalogRegions?: string[];
+  curatedBedrock?: {
+    source: string;
+    sourceUrl: string;
+    providerId: string;
+    syncedAt: string;
+  };
   models: ManagedInferenceModel[];
 };
 
@@ -603,6 +609,12 @@ export async function fetchManagedInferenceModels(opts?: {
     upstream?: string;
     region?: string;
     catalogRegions?: string[];
+    curatedBedrock?: {
+      source?: string;
+      sourceUrl?: string;
+      providerId?: string;
+      syncedAt?: string;
+    };
     models?: Array<{
       id?: string;
       label?: string;
@@ -647,6 +659,15 @@ export async function fetchManagedInferenceModels(opts?: {
     ...(Array.isArray(body.catalogRegions) &&
       body.catalogRegions.length > 0 && {
         catalogRegions: body.catalogRegions.map((r) => String(r).trim()).filter(Boolean),
+      }),
+    ...(body.curatedBedrock &&
+      typeof body.curatedBedrock === "object" && {
+        curatedBedrock: {
+          source: String(body.curatedBedrock.source ?? "models.dev"),
+          sourceUrl: String(body.curatedBedrock.sourceUrl ?? "https://models.dev/api.json"),
+          providerId: String(body.curatedBedrock.providerId ?? "amazon-bedrock"),
+          syncedAt: String(body.curatedBedrock.syncedAt ?? ""),
+        },
       }),
     models,
   };
