@@ -267,13 +267,16 @@ export function createRouter(
     const prefs = bridge.harness.getRuntimePreferences();
     const fields = buildHarnessSettingsApiFields(prefs);
     const cfg = bridge.harness.config;
+    const prefsModel = prefs?.provider?.model?.trim() || "";
+    const envModel = resolveHarnessEnvRaw("AGENT_MODEL", prefs)?.trim() || "";
+    const harnessModel = (cfg.model ?? "").trim();
     const apiKeyConfigured = !!(cfg.openRouterApiKey && cfg.openRouterApiKey.trim().length > 0);
     const managedRoute = (cfg.baseURL ?? "").includes("/inference");
     res.json({
       tabs: HARNESS_SETTINGS_TABS,
       fields,
       provider: {
-        model: (cfg.model ?? "").slice(0, 200),
+        model: (prefsModel || envModel || harnessModel || "").slice(0, 200),
         baseURL: (cfg.baseURL ?? "").slice(0, 500),
         modelLockedByEnv: false,
         baseURLLockedByEnv: false,

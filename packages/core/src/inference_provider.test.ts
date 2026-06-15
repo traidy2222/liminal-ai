@@ -11,6 +11,7 @@ import {
   resolveInferenceMode,
   resolveManagedOpenRouterCredentials,
   resolveManagedProviderPreference,
+  resolveManagedModelForProviderPreference,
   shouldRouteOpenRouterViaManaged,
 } from "./inference_provider.js";
 import { HARNESS_ENV_DEFAULTS } from "./harness_default_constants.js";
@@ -192,6 +193,59 @@ describe("inference_provider", () => {
     const openrouter = filterManagedInferenceCatalog(models, "openrouter");
     assert.equal(openrouter.length, 1);
     assert.equal(openrouter[0]?.id, "deepseek/deepseek-v4-pro");
+  });
+
+  it("resolveManagedModelForProviderPreference keeps regional Bedrock id in auto mode", () => {
+    const catalog = [
+      {
+        id: "global.anthropic.claude-sonnet-4-6",
+        label: "Claude Sonnet 4.6 (Global)",
+        family: "anthropic",
+        providers: [{ provider: "bedrock" as const, id: "global.anthropic.claude-sonnet-4-6" }],
+      },
+      {
+        id: "anthropic.claude-opus-4-8",
+        label: "Claude Opus 4.8",
+        family: "anthropic",
+        providers: [{ provider: "bedrock" as const, id: "anthropic.claude-opus-4-8" }],
+      },
+    ];
+    assert.equal(
+      resolveManagedModelForProviderPreference(
+        "global.anthropic.claude-sonnet-4-6",
+        catalog,
+        "auto"
+      ),
+      "global.anthropic.claude-sonnet-4-6"
+    );
+  });
+
+  it("resolveManagedModelForProviderPreference maps regional id to unprefixed bedrock twin", () => {
+    const catalog = [
+      {
+        id: "anthropic.claude-sonnet-4-6",
+        label: "Claude Sonnet 4.6",
+        family: "anthropic",
+        providers: [
+          { provider: "bedrock" as const, id: "anthropic.claude-sonnet-4-6" },
+          { provider: "openrouter" as const, id: "anthropic/claude-sonnet-4.6" },
+        ],
+      },
+      {
+        id: "global.anthropic.claude-sonnet-4-6",
+        label: "Claude Sonnet 4.6 (Global)",
+        family: "anthropic",
+        providers: [{ provider: "bedrock" as const, id: "global.anthropic.claude-sonnet-4-6" }],
+      },
+    ];
+    assert.equal(
+      resolveManagedModelForProviderPreference(
+        "global.anthropic.claude-sonnet-4-6",
+        catalog,
+        "openrouter"
+      ),
+      "anthropic/claude-sonnet-4.6"
+    );
   });
 
   it("isManagedInferenceAuthError matches expired session JWT (HTTP 401)", () => {

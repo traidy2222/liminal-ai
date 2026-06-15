@@ -592,6 +592,68 @@ export function filterManagedInferenceCatalog(
   return out;
 }
 
+function catalogRowOwnsModelId(row: ManagedInferenceModel, modelId: string): boolean {
+  const target = modelId.trim();
+  if (!target) return false;
+  if (row.id.trim() === target) return true;
+  return (row.providers ?? []).some((p) => p.id.trim() === target);
+}
+
+const BEDROCK_GEO_STRIP = /^(us|eu|global|apac|au|jp)\./i;
+
+function bedrockIdWithoutGeoPrefix(modelId: string): string | null {
+  const m = modelId.trim();
+  if (!m || m.includes("/")) return null;
+  if (!BEDROCK_GEO_STRIP.test(m)) return null;
+  return m.replace(BEDROCK_GEO_STRIP, "");
+}
+
+function catalogRowMatchesBedrockStem(row: ManagedInferenceModel, stem: string): boolean {
+  const ids = [row.id, ...(row.providers ?? []).map((p) => p.id)];
+  return ids.some((id) => {
+    const bare = id.trim();
+    if (!bare) return false;
+    if (bare === stem) return true;
+    const stripped = bedrockIdWithoutGeoPrefix(bare);
+    return stripped === stem;
+  });
+}
+
+/**
+ * Map a saved model id to the catalog row id shown for a managed upstream filter.
+ * Regional Bedrock profiles (e.g. global.anthropic.claude-sonnet-4-6) are absent from
+ * openrouter-only views — without remapping, pickers show the wrong selection.
+ */
+export function resolveManagedModelForProviderPreference(
+  model: string,
+  catalog: ManagedInferenceModel[],
+  preference: ManagedProviderPreference | string | null | undefined
+): string {
+  const trimmed = model.trim();
+  if (!trimmed) return trimmed;
+  const pref =
+    typeof preference === "string"
+      ? parseManagedProviderPreference(preference)
+      : (preference ?? "auto");
+  const filtered = filterManagedInferenceCatalog(catalog, pref);
+  if (filtered.some((m) => m.id === trimmed)) return trimmed;
+  for (const row of catalog) {
+    if (!catalogRowOwnsModelId(row, trimmed)) continue;
+    if (pref === "auto") return row.id;
+    const narrowed = narrowManagedModelForProvider(row, pref);
+    if (narrowed) return narrowed.id;
+  }
+  const stem = bedrockIdWithoutGeoPrefix(trimmed) ?? trimmed;
+  if (pref !== "auto") {
+    for (const row of catalog) {
+      if (!catalogRowMatchesBedrockStem(row, stem)) continue;
+      const narrowed = narrowManagedModelForProvider(row, pref);
+      if (narrowed) return narrowed.id;
+    }
+  }
+  return trimmed;
+}
+
 /** Bedrock catalog for managed-inference model pickers (license Bearer). */
 export async function fetchManagedInferenceModels(opts?: {
   refresh?: boolean;

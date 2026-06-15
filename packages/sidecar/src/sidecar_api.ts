@@ -134,13 +134,11 @@ export function buildSettingsSnapshot(
 ) {
   const harnessCfg = bridge?.harness.config;
   const prefsModel = prefs?.provider?.model?.trim() || "";
+  const envModel = resolveHarnessEnvRaw("AGENT_MODEL", prefs)?.trim() || "";
   const harnessModel = harnessCfg?.model?.trim() || "";
-  const model = (
-    (prefsModel && isModelIncompatibleWithManagedProxy(prefsModel) ? prefsModel : "") ||
-    harnessModel ||
-    prefsModel ||
-    ""
-  ).slice(0, 200);
+  // Persisted prefs/env are the user's explicit pick; harness.config.model can lag
+  // (e.g. regional Bedrock ids like global.anthropic.claude-sonnet-4-6 vs default opus).
+  const model = (prefsModel || envModel || harnessModel || "").slice(0, 200);
   const baseURL = (
     harnessCfg?.baseURL ??
     prefs?.provider?.baseURL?.trim() ??

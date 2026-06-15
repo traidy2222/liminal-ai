@@ -63,3 +63,59 @@ List<ManagedInferenceModel> filterManagedInferenceCatalog(
   }
   return out;
 }
+
+bool _catalogRowOwnsModelId(ManagedInferenceModel row, String modelId) {
+  final target = modelId.trim();
+  if (target.isEmpty) return false;
+  if (row.id.trim() == target) return true;
+  return row.providers.any((p) => p.id.trim() == target);
+}
+
+final _bedrockGeoStrip = RegExp(r'^(us|eu|global|apac|au|jp)\.', caseSensitive: false);
+
+String? _bedrockIdWithoutGeoPrefix(String modelId) {
+  final m = modelId.trim();
+  if (m.isEmpty || m.contains('/')) return null;
+  if (!_bedrockGeoStrip.hasMatch(m)) return null;
+  return m.replaceFirst(_bedrockGeoStrip, '');
+}
+
+bool _catalogRowMatchesBedrockStem(ManagedInferenceModel row, String stem) {
+  final ids = <String>[row.id, ...row.providers.map((p) => p.id)];
+  for (final bare in ids) {
+    final trimmed = bare.trim();
+    if (trimmed.isEmpty) continue;
+    if (trimmed == stem) return true;
+    final stripped = _bedrockIdWithoutGeoPrefix(trimmed);
+    if (stripped == stem) return true;
+  }
+  return false;
+}
+
+/// Map a saved model id to the catalog row id for the active upstream filter.
+String resolveManagedModelForProviderPreference(
+  String model,
+  List<ManagedInferenceModel> catalog,
+  String preference,
+) {
+  final trimmed = model.trim();
+  if (trimmed.isEmpty) return trimmed;
+  final pref = preference.trim().toLowerCase();
+  final filtered = filterManagedInferenceCatalog(catalog, pref);
+  if (filtered.any((m) => m.id == trimmed)) return trimmed;
+  for (final row in catalog) {
+    if (!_catalogRowOwnsModelId(row, trimmed)) continue;
+    if (pref.isEmpty || pref == 'auto') return row.id;
+    final narrowed = narrowManagedModelForProvider(row, pref);
+    if (narrowed != null) return narrowed.id;
+  }
+  final stem = _bedrockIdWithoutGeoPrefix(trimmed) ?? trimmed;
+  if (pref.isNotEmpty && pref != 'auto') {
+    for (final row in catalog) {
+      if (!_catalogRowMatchesBedrockStem(row, stem)) continue;
+      final narrowed = narrowManagedModelForProvider(row, pref);
+      if (narrowed != null) return narrowed.id;
+    }
+  }
+  return trimmed;
+}

@@ -7,6 +7,7 @@ import '../../app/app_scope.dart';
 import '../../core/feature_flags.dart';
 import '../../models/app_config.dart';
 import '../../models/harness_settings.dart';
+import '../../models/managed_inference_catalog.dart';
 import '../../models/liminal_app_spec.dart';
 import '../../models/vireon_account.dart';
 import '../layout/liminal_breakpoints.dart';
@@ -138,12 +139,27 @@ class _SettingsScreenState extends State<SettingsScreen>
       _error = null;
       _managedProvider = provider;
     });
+    final host = AppScope.of(context);
+    final snap = host.harnessSettings;
+    final currentMain = snap?.provider.model ?? _model.text;
+    final catalog = host.managedInferenceModels?.models ?? const [];
+    final remapped = resolveManagedModelForProviderPreference(
+      currentMain,
+      catalog,
+      provider,
+    );
     final ok = await AppScope.of(context).patchManagedInferenceModels(
       managedProvider: provider,
       inferenceMode: _inferenceMode,
+      mainModel: remapped != currentMain.trim() ? remapped : null,
     );
     if (!mounted) return;
-    if (!ok) _error = 'Failed to update managed upstream';
+    if (ok) {
+      _syncProviderControllersFromHost();
+      _syncFieldControllers();
+    } else {
+      _error = 'Failed to update managed upstream';
+    }
     setState(() => _saving = false);
   }
 

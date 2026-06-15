@@ -43,10 +43,35 @@ class ManagedInferencePanel extends StatelessWidget {
 
   List<DropdownMenuItem<String>> _modelItems(
     List<ManagedInferenceModel> models,
+    List<ManagedInferenceModel> allModels,
+    String currentModel,
+    String managedProviderPref,
     LiminalTokens lim,
     TextTheme textTheme,
   ) {
     final items = <DropdownMenuItem<String>>[];
+    final resolvedCurrent = resolveManagedModelForProviderPreference(
+      currentModel,
+      allModels,
+      managedProviderPref,
+    );
+    final inList = models.any((m) => m.id == resolvedCurrent);
+    if (resolvedCurrent.isNotEmpty && !inList) {
+      final label = _labelForModelId(allModels, resolvedCurrent);
+      items.add(
+        DropdownMenuItem<String>(
+          value: resolvedCurrent,
+          child: Text(
+            'Current: $label',
+            overflow: TextOverflow.ellipsis,
+            style: textTheme.bodySmall?.copyWith(
+              color: lim.text,
+              fontFamily: lim.fontFamilyMono,
+            ),
+          ),
+        ),
+      );
+    }
     final groups = _groupModelsByFamily(models);
     final headerStyle = textTheme.labelSmall?.copyWith(
       color: lim.textMuted,
@@ -95,9 +120,30 @@ class ManagedInferencePanel extends StatelessWidget {
     return items;
   }
 
-  String? _dropdownValue(String current, List<ManagedInferenceModel> models) {
-    if (models.any((m) => m.id == current)) return current;
-    return null;
+  String? _dropdownValue(
+    String current,
+    List<ManagedInferenceModel> allModels,
+    List<ManagedInferenceModel> filtered,
+    String managedProviderPref,
+  ) {
+    final resolved = resolveManagedModelForProviderPreference(
+      current,
+      allModels,
+      managedProviderPref,
+    );
+    if (resolved.isEmpty) return null;
+    if (filtered.any((m) => m.id == resolved)) return resolved;
+    return resolved;
+  }
+
+  String _labelForModelId(List<ManagedInferenceModel> allModels, String modelId) {
+    for (final row in allModels) {
+      if (row.id == modelId) return _optionLabel(row);
+      for (final p in row.providers) {
+        if (p.id == modelId) return _optionLabel(row);
+      }
+    }
+    return modelId;
   }
 
   String _optionLabel(ManagedInferenceModel row) {
@@ -113,10 +159,8 @@ class ManagedInferencePanel extends StatelessWidget {
   Widget build(BuildContext context) {
     final lim = LiminalTheme.of(context);
     final theme = Theme.of(context);
-    final models = filterManagedInferenceCatalog(
-      catalog?.models ?? const <ManagedInferenceModel>[],
-      managedProvider,
-    );
+    final allModels = catalog?.models ?? const <ManagedInferenceModel>[];
+    final models = filterManagedInferenceCatalog(allModels, managedProvider);
     final catalogSize = catalog?.models.length ?? 0;
     final catalogRegions = catalog?.catalogRegions ?? const <String>[];
     final curatedSource = catalog?.curatedBedrockSource;
@@ -205,22 +249,22 @@ class ManagedInferencePanel extends StatelessWidget {
             Text('Main model', style: theme.textTheme.titleSmall),
             const SizedBox(height: LiminalSpacing.xs),
             DropdownButtonFormField<String>(
-              value: _dropdownValue(mainModel, models),
+              value: _dropdownValue(mainModel, allModels, models, managedProvider),
               decoration: fieldDecoration(),
               dropdownColor: lim.panel,
               style: theme.textTheme.bodyMedium?.copyWith(color: lim.text),
-              items: _modelItems(models, lim, theme.textTheme),
+              items: _modelItems(models, allModels, mainModel, managedProvider, lim, theme.textTheme),
               onChanged: saving ? null : (id) => id == null ? null : onMainModel(id),
             ),
             const SizedBox(height: LiminalSpacing.md),
             Text('Fast model', style: theme.textTheme.titleSmall),
             const SizedBox(height: LiminalSpacing.xs),
             DropdownButtonFormField<String>(
-              value: _dropdownValue(fastModel, models),
+              value: _dropdownValue(fastModel, allModels, models, managedProvider),
               decoration: fieldDecoration(),
               dropdownColor: lim.panel,
               style: theme.textTheme.bodyMedium?.copyWith(color: lim.text),
-              items: _modelItems(models, lim, theme.textTheme),
+              items: _modelItems(models, allModels, fastModel, managedProvider, lim, theme.textTheme),
               onChanged: saving ? null : (id) => id == null ? null : onFastModel(id),
             ),
           ],

@@ -621,6 +621,7 @@ export {
   fetchInferenceUsageStatus,
   fetchManagedInferenceModels,
   filterManagedInferenceCatalog,
+  resolveManagedModelForProviderPreference,
   buildManagedInferenceClientHeaders,
   resolveManagedProviderPreference,
   looksLikeBedrockModelId,
