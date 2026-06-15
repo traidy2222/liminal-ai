@@ -317,16 +317,22 @@ class ManagedInferenceModelsCatalog {
     required this.upstream,
     required this.region,
     required this.models,
+    this.catalogRegions = const [],
   });
 
   final String upstream;
   final String region;
   final List<ManagedInferenceModel> models;
+  final List<String> catalogRegions;
 
   factory ManagedInferenceModelsCatalog.fromJson(Map<String, dynamic> json) {
     return ManagedInferenceModelsCatalog(
       upstream: json['upstream'] as String? ?? 'bedrock',
       region: json['region'] as String? ?? '',
+      catalogRegions: (json['catalogRegions'] as List<dynamic>? ?? [])
+          .map((e) => e.toString())
+          .where((e) => e.trim().isNotEmpty)
+          .toList(),
       models: (json['models'] as List<dynamic>? ?? [])
           .map((e) => ManagedInferenceModel.fromJson(Map<String, dynamic>.from(e as Map)))
           .toList(),

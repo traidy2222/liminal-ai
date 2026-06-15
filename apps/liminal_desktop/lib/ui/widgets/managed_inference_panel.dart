@@ -118,6 +118,10 @@ class ManagedInferencePanel extends StatelessWidget {
       managedProvider,
     );
     final catalogSize = catalog?.models.length ?? 0;
+    final catalogRegions = catalog?.catalogRegions ?? const <String>[];
+    final regionalBedrockCount = models
+        .where((m) => RegExp(r'^(us|eu|global|apac|au|jp)\.', caseSensitive: false).hasMatch(m.id))
+        .length;
     final upstreamRaw = upstream ?? catalog?.upstream ?? 'managed';
     final upstreamLabel = upstreamRaw == 'hybrid'
         ? 'hybrid (Bedrock + OpenRouter + Kimchi)'
@@ -152,8 +156,10 @@ class ManagedInferencePanel extends StatelessWidget {
           const SizedBox(height: LiminalSpacing.xs),
           Text(
             managedProvider.trim().isNotEmpty && managedProvider != 'auto'
-                ? 'Models on $managedProvider upstream ($catalogSize in full catalog, ${models.length} shown).'
-                : 'Pick upstream provider and models from the Vireon catalog ($catalogSize loaded).',
+                ? 'Models on $managedProvider upstream ($catalogSize in full catalog, ${models.length} shown${regionalBedrockCount > 0 ? ', $regionalBedrockCount regional Bedrock profiles' : ''}).'
+                : catalogRegions.isNotEmpty
+                    ? 'Pick upstream provider and models from the Vireon catalog ($catalogSize loaded across ${catalogRegions.length} Bedrock regions).'
+                    : 'Pick upstream provider and models from the Vireon catalog ($catalogSize loaded).',
             style: theme.textTheme.bodySmall?.copyWith(
               color: lim.textMuted,
               height: 1.45,
@@ -244,7 +250,10 @@ List<_ManagedModelFamilyGroup> _groupModelsByFamily(List<ManagedInferenceModel> 
     });
   return [
     for (final family in families)
-      _ManagedModelFamilyGroup(family: family, models: grouped[family]!),
+      _ManagedModelFamilyGroup(
+        family: family,
+        models: grouped[family]!..sort((a, b) => a.id.compareTo(b.id)),
+      ),
   ];
 }
 

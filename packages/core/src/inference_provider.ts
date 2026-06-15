@@ -516,6 +516,7 @@ export type ManagedInferenceModel = {
 export type ManagedInferenceModelsResult = {
   upstream: string;
   region: string;
+  catalogRegions?: string[];
   models: ManagedInferenceModel[];
 };
 
@@ -601,6 +602,7 @@ export async function fetchManagedInferenceModels(opts?: {
     error?: string;
     upstream?: string;
     region?: string;
+    catalogRegions?: string[];
     models?: Array<{
       id?: string;
       label?: string;
@@ -642,6 +644,10 @@ export async function fetchManagedInferenceModels(opts?: {
   return {
     upstream: body.upstream ?? "bedrock",
     region: body.region ?? "us-east-1",
+    ...(Array.isArray(body.catalogRegions) &&
+      body.catalogRegions.length > 0 && {
+        catalogRegions: body.catalogRegions.map((r) => String(r).trim()).filter(Boolean),
+      }),
     models,
   };
 }
