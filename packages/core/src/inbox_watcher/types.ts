@@ -16,6 +16,7 @@ export type InboxWatchSkipReason =
   | "throttled"
   | "busy"
   | "no_change"
+  | "baseline_set"
   | "auth_expired"
   | "in_flight"
   | "error";
@@ -61,6 +62,8 @@ export interface InboxProviderCursorState {
   cursor: string;
   lastScanAt: string | null;
   baselineEstablished: boolean;
+  /** One-time import of existing inbox mail completed. */
+  backfillCompleted?: boolean;
 }
 
 export interface InboxRules {
@@ -82,6 +85,27 @@ export interface InboxStatusSnapshot {
   fyiCount: number;
   pendingCount: number;
   items: InboxTriagedItem[];
+  /** Recent poll cycles (newest first) — activity log for UI */
+  recentRuns?: InboxWatchRunEntry[];
+}
+
+export type InboxWatchRunOutcome = "completed" | "skipped";
+
+export interface InboxWatchRunEntry {
+  runId: string;
+  trigger: string;
+  startedAt: string;
+  finishedAt: string;
+  durationMs: number;
+  outcome: InboxWatchRunOutcome;
+  skipReason?: InboxWatchSkipReason | string;
+  provider?: string;
+  error?: string;
+  newCount: number;
+  triagedCount: number;
+  labeledCount: number;
+  needsActionCount: number;
+  summary: string;
 }
 
 export interface InboxPrecheckResult {
@@ -97,6 +121,7 @@ export interface InboxPollResult {
   messages: InboxMessageMeta[];
   cursor: string;
   baselineEstablished: boolean;
+  backfillCompleted?: boolean;
 }
 
 export interface InboxLabelResult {

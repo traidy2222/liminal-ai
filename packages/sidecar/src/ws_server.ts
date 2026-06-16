@@ -769,6 +769,10 @@ export class WsServer {
         case "update_settings": {
           const d = data as { patch: Record<string, unknown> };
           await patchHarnessSettings(this.registry, d.patch ?? {});
+          const envPatch = (d.patch?.harness as { env?: Record<string, string> } | undefined)?.env;
+          if (envPatch && Object.keys(envPatch).some((k) => k.startsWith("AGENT_INBOX_"))) {
+            this.inboxWatcher.restart();
+          }
           const bridge = this.registry.getActiveBridge();
           const snapshot = buildSettingsSnapshot(
             bridge?.harness.getRuntimePreferences() ?? null,
@@ -973,7 +977,7 @@ export class WsServer {
         case "get_inbox_status": {
           try {
             const snap = await this.inboxWatcher.getStatus();
-            this.inboxWatcher.emitStatus(snap);
+            this.inboxWatcher.emitStatus(true);
             this.ack(ws, id, true, undefined, snap);
           } catch (err) {
             this.ack(ws, id, false, err instanceof Error ? err.message : String(err));
@@ -1013,6 +1017,12 @@ export class WsServer {
             denyDomains: d.denyDomains ?? current.denyDomains,
           });
           this.ack(ws, id, true);
+          return;
+        }
+
+        case "trigger_inbox_watch": {
+          const run = await this.inboxWatcher.runOnce("manual");
+          this.ack(ws, id, true, undefined, run ?? undefined);
           return;
         }
 

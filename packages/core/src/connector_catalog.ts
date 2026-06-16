@@ -101,8 +101,7 @@ export const GOOGLE_WORKSPACE_SERVICES: GoogleServicePreset[] = [
     mcpUrl: OFFICIAL_BASE.gmail,
     connectionName: "google_gmail",
     scopes: [
-      "https://www.googleapis.com/auth/gmail.readonly",
-      "https://www.googleapis.com/auth/gmail.compose",
+      "https://www.googleapis.com/auth/gmail.modify",
     ],
   },
   {

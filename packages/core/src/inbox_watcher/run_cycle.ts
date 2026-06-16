@@ -1,8 +1,9 @@
 import type OpenAI from "openai";
+import type { RuntimePreferences } from "../runtime_prefs.js";
 import {
-  autoLabelConfidenceFloor,
-  labelNameForCategory,
   resolveInboxWatcherConfig,
+  resolveLabelForVerdict,
+  shouldAutoLabelVerdict,
   type InboxWatcherConfig,
 } from "./config.js";
 import {
@@ -12,8 +13,9 @@ import {
   markProcessedIds,
   readInboxQueue,
   readInboxRules,
-  readProcessedIds,
   readProviderCursor,
+  readRecentInboxWatchRuns,
+  recoverStaleProcessingQueueItems,
   upsertQueueItems,
   writeProviderCursor,
 } from "./state.js";
@@ -32,6 +34,8 @@ export interface InboxWatchCycleDeps {
   mainModel: string;
   harnessBusy: () => boolean;
   config?: InboxWatcherConfig;
+  /** When `manual`, bypasses min-interval throttle (Scan now). */
+  trigger?: string;
 }
 
 let lastCycleAt = 0;
@@ -44,7 +48,7 @@ export function resetInboxWatcherCycleStateForTests(): void {
 
 export async function runInboxWatchCycle(deps: InboxWatchCycleDeps): Promise<InboxWatchCycleResult> {
   const started = Date.now();
-  const cfg = deps.config ?? resolveInboxWatcherConfig();
+  const cfg = deps.config ?? resolveInboxWatcherConfig(null);
 
   if (!cfg.enabled) {
     return skip("disabled", started);
@@ -59,7 +63,8 @@ export async function runInboxWatchCycle(deps: InboxWatchCycleDeps): Promise<Inb
     return skip("busy", started);
   }
   const now = Date.now();
-  if (lastCycleAt > 0 && now - lastCycleAt < cfg.minIntervalMs) {
+  const bypassThrottle = deps.trigger === "manual";
+  if (lastCycleAt > 0 && now - lastCycleAt < cfg.minIntervalMs && !bypassThrottle) {
     return skip("throttled", started);
   }
 
@@ -73,12 +78,21 @@ export async function runInboxWatchCycle(deps: InboxWatchCycleDeps): Promise<Inb
 
   try {
     const rules = await readInboxRules();
-    const processed = await readProcessedIds();
+    let queue = await readInboxQueue();
+    if (!deps.harnessBusy()) {
+      await recoverStaleProcessingQueueItems(0);
+      queue = await readInboxQueue();
+    } else {
+      await recoverStaleProcessingQueueItems();
+      queue = await readInboxQueue();
+    }
     const newItems: InboxTriagedItem[] = [];
     let anyChange = false;
+    let baselineJustEstablished = false;
 
     for (const poll of deps.polls) {
       const cursor = await readProviderCursor(poll.provider, poll.accountId);
+      const hadBaseline = cursor?.baselineEstablished ?? false;
       const result = await poll.poll(cursor);
 
       if (!result.ok) {
@@ -105,13 +119,25 @@ export async function runInboxWatchCycle(deps: InboxWatchCycleDeps): Promise<Inb
         cursor: result.cursor,
         lastScanAt: new Date().toISOString(),
         baselineEstablished: result.baselineEstablished,
+        backfillCompleted:
+          result.backfillCompleted ?? cursor?.backfillCompleted ?? false,
       });
+
+      if (!hadBaseline && result.baselineEstablished) {
+        baselineJustEstablished = true;
+      }
 
       if (!result.baselineEstablished && result.messages.length === 0) {
         continue;
       }
 
-      const fresh = result.messages.filter((m) => !processed.has(m.id) && !processed.has(makeItemId(m)));
+      const fresh = result.messages.filter((m) => {
+        const itemId = makeItemId(m);
+        const existing = queue.find((q) => q.itemId === itemId || q.message.id === m.id);
+        if (existing?.status === "done" || existing?.status === "dismissed") return false;
+        if (existing) return false;
+        return true;
+      });
       if (fresh.length === 0) {
         continue;
       }
@@ -120,10 +146,11 @@ export async function runInboxWatchCycle(deps: InboxWatchCycleDeps): Promise<Inb
       newCount += fresh.length;
 
       const batch = fresh.slice(0, cfg.maxTriagePerCycle);
+      const triagedIds: string[] = [];
       for (const message of batch) {
         const verdict =
           deps.client != null
-            ? await triageInboxMessage(deps.client, deps.mainModel, message, rules)
+            ? await triageInboxMessage(deps.client, deps.mainModel, message, rules, cfg)
             : tryHeuristicInboxTriage(message, rules) ?? triageInboxWithRules(message);
 
         triagedCount += 1;
@@ -139,24 +166,29 @@ export async function runInboxWatchCycle(deps: InboxWatchCycleDeps): Promise<Inb
           needsActionCount += 1;
         }
 
-        const label = labelNameForCategory(verdict.category);
+        const label = resolveLabelForVerdict(verdict);
         const shouldLabel =
-          cfg.autoLabel &&
-          label &&
-          verdict.confidence >= autoLabelConfidenceFloor(verdict.category) &&
-          (verdict.category !== "spam" || cfg.autoSpamLabel) &&
-          poll.applyLabel;
+          cfg.autoLabel && label && shouldAutoLabelVerdict(verdict, cfg) && poll.applyLabel;
 
         if (shouldLabel && poll.applyLabel) {
           const lr = await poll.applyLabel(message, label);
           if (lr.ok) {
-            item.status = "labeled";
             item.labeledAt = new Date().toISOString();
             labeledCount += 1;
+            const needsAgent =
+              verdict.category === "urgent" || verdict.category === "action";
+            item.status = needsAgent ? "pending" : "done";
+          } else {
+            await appendTriageAudit({
+              itemId: item.itemId,
+              labelError: lr.error ?? "label apply failed",
+              provider: message.provider,
+            });
           }
         }
 
         newItems.push(item);
+        triagedIds.push(message.id);
         await appendTriageAudit({
           itemId: item.itemId,
           category: verdict.category,
@@ -166,15 +198,21 @@ export async function runInboxWatchCycle(deps: InboxWatchCycleDeps): Promise<Inb
         });
       }
 
-      await markProcessedIds(fresh.map((m) => m.id));
+      if (triagedIds.length > 0) {
+        await markProcessedIds(triagedIds);
+      }
     }
 
     if (!anyChange) {
+      if (baselineJustEstablished) {
+        return skip("baseline_set", started);
+      }
       return skip("no_change", started);
     }
 
-    const queue = await upsertQueueItems(newItems);
-    const snapshot = buildInboxStatusSnapshot(queue, new Date().toISOString(), null);
+    const mergedQueue = await upsertQueueItems(newItems);
+    const recentRuns = await readRecentInboxWatchRuns(30);
+    const snapshot = buildInboxStatusSnapshot(mergedQueue, new Date().toISOString(), null, recentRuns);
     needsActionCount = snapshot.needsActionCount;
 
     return {
@@ -213,8 +251,16 @@ function skip(reason: InboxWatchSkipReason, started: number): InboxWatchCycleRes
   };
 }
 
-export async function getInboxStatusSnapshot(): Promise<ReturnType<typeof buildInboxStatusSnapshot>> {
+export async function getInboxStatusSnapshot(
+  prefs: RuntimePreferences | null = null
+): Promise<ReturnType<typeof buildInboxStatusSnapshot>> {
   const queue = await readInboxQueue();
-  const lastScan = queue[0]?.triagedAt ?? null;
-  return buildInboxStatusSnapshot(queue, lastScan, null);
+  const recentRuns = await readRecentInboxWatchRuns(30);
+  const lastScan = recentRuns[0]?.finishedAt ?? queue[0]?.triagedAt ?? null;
+  const cfg = resolveInboxWatcherConfig(prefs);
+  const nextScanAt =
+    cfg.enabled && recentRuns[0]
+      ? new Date(Date.parse(recentRuns[0].finishedAt) + cfg.intervalMs).toISOString()
+      : null;
+  return buildInboxStatusSnapshot(queue, lastScan, nextScanAt, recentRuns);
 }

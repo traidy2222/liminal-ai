@@ -1881,7 +1881,14 @@ const _META_RAW: Record<string, HarnessSettingsFieldMeta> = {
     tabId: "session_ui",
     subgroupId: "inbox_watch",
     label: "Inbox auto-label",
-    description: "Apply Liminal/* labels for high-confidence newsletter/FYI mail.",
+    description: "Create Liminal/* labels or Outlook categories and sort triaged mail automatically.",
+    valueKind: "boolean",
+  },
+  "AGENT_INBOX_AUTO_PROCESS": {
+    tabId: "session_ui",
+    subgroupId: "inbox_watch",
+    label: "Inbox auto-process urgent",
+    description: "Send urgent/action mail to the agent automatically (drafts still require approval).",
     valueKind: "boolean",
   },
   "AGENT_INBOX_NOTIFY_URGENT": {
@@ -1938,6 +1945,13 @@ const _META_RAW: Record<string, HarnessSettingsFieldMeta> = {
     subgroupId: "inbox_watch",
     label: "Inbox triage timeout (ms)",
     description: "Wall-clock cap for a single inbox triage completion.",
+    valueKind: "number",
+  },
+  "AGENT_INBOX_BACKFILL_MAX": {
+    tabId: "session_ui",
+    subgroupId: "inbox_watch",
+    label: "Inbox backfill max",
+    description: "On first connect, triage up to this many unread (then recent) inbox messages per account. 0 = incremental only.",
     valueKind: "number",
   },
   "AGENT_LIMINAL_APPS": {

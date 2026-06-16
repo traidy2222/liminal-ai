@@ -77,7 +77,70 @@ class InboxTriagedItem {
     );
   }
 
-  bool get isPending => status == 'pending' || status == 'labeled';
+  bool get isPending => status == 'pending' || status == 'labeled' || status == 'processing';
+}
+
+class InboxWatchRun {
+  InboxWatchRun({
+    required this.runId,
+    required this.trigger,
+    required this.startedAt,
+    required this.finishedAt,
+    required this.durationMs,
+    required this.outcome,
+    required this.summary,
+    this.skipReason,
+    this.provider,
+    this.error,
+    this.newCount = 0,
+    this.triagedCount = 0,
+    this.labeledCount = 0,
+    this.needsActionCount = 0,
+  });
+
+  final String runId;
+  final String trigger;
+  final String startedAt;
+  final String finishedAt;
+  final int durationMs;
+  final String outcome;
+  final String summary;
+  final String? skipReason;
+  final String? provider;
+  final String? error;
+  final int newCount;
+  final int triagedCount;
+  final int labeledCount;
+  final int needsActionCount;
+
+  bool get isSkipped => outcome == 'skipped';
+
+  factory InboxWatchRun.fromJson(Map<String, dynamic> json) {
+    return InboxWatchRun(
+      runId: json['runId'] as String? ?? '',
+      trigger: json['trigger'] as String? ?? '',
+      startedAt: json['startedAt'] as String? ?? '',
+      finishedAt: json['finishedAt'] as String? ?? '',
+      durationMs: (json['durationMs'] as num?)?.toInt() ?? 0,
+      outcome: json['outcome'] as String? ?? 'skipped',
+      summary: json['summary'] as String? ?? '',
+      skipReason: json['skipReason'] as String?,
+      provider: json['provider'] as String?,
+      error: json['error'] as String?,
+      newCount: (json['newCount'] as num?)?.toInt() ?? 0,
+      triagedCount: (json['triagedCount'] as num?)?.toInt() ?? 0,
+      labeledCount: (json['labeledCount'] as num?)?.toInt() ?? 0,
+      needsActionCount: (json['needsActionCount'] as num?)?.toInt() ?? 0,
+    );
+  }
+
+  String get triggerLabel => switch (trigger) {
+        'manual' => 'Manual scan',
+        'interval' => 'Scheduled',
+        'boot' => 'Startup',
+        'resume' => 'Resume',
+        _ => trigger,
+      };
 }
 
 class InboxSnapshot {
@@ -88,6 +151,7 @@ class InboxSnapshot {
     required this.fyiCount,
     required this.pendingCount,
     required this.items,
+    required this.recentRuns,
   });
 
   final String? lastScanAt;
@@ -96,9 +160,11 @@ class InboxSnapshot {
   final int fyiCount;
   final int pendingCount;
   final List<InboxTriagedItem> items;
+  final List<InboxWatchRun> recentRuns;
 
   factory InboxSnapshot.fromJson(Map<String, dynamic> json) {
     final itemsRaw = json['items'] as List<dynamic>? ?? [];
+    final runsRaw = json['recentRuns'] as List<dynamic>? ?? [];
     return InboxSnapshot(
       lastScanAt: json['lastScanAt'] as String?,
       nextScanAt: json['nextScanAt'] as String?,
@@ -107,6 +173,9 @@ class InboxSnapshot {
       pendingCount: (json['pendingCount'] as num?)?.toInt() ?? 0,
       items: itemsRaw
           .map((e) => InboxTriagedItem.fromJson(Map<String, dynamic>.from(e as Map)))
+          .toList(),
+      recentRuns: runsRaw
+          .map((e) => InboxWatchRun.fromJson(Map<String, dynamic>.from(e as Map)))
           .toList(),
     );
   }
@@ -118,6 +187,7 @@ class InboxSnapshot {
     fyiCount: 0,
     pendingCount: 0,
     items: [],
+    recentRuns: [],
   );
 
   List<InboxTriagedItem> get pendingItems =>

@@ -7,7 +7,10 @@ import {
 } from "../microsoft/mail_inbox_poll.js";
 
 /** Build inbox poll adapters for all connected mail OAuth accounts. */
-export async function createInboxProviderPolls(): Promise<InboxProviderPoll[]> {
+export async function createInboxProviderPolls(options?: {
+  backfillMax?: number;
+}): Promise<InboxProviderPoll[]> {
+  const backfillMax = options?.backfillMax ?? 0;
   const polls: InboxProviderPoll[] = [];
 
   const gmailAccounts = await listGmailInboxAccounts();
@@ -16,7 +19,7 @@ export async function createInboxProviderPolls(): Promise<InboxProviderPoll[]> {
       provider: "gmail",
       accountId: acct.accountId,
       email: acct.email,
-      poll: (cursor) => pollGmailInbox(acct.accountId, cursor),
+      poll: (cursor) => pollGmailInbox(acct.accountId, cursor, { backfillMax }),
       applyLabel: async (message, labelName) => {
         const r = await applyGmailLabel(acct.accountId, message.id, labelName);
         return { ok: r.ok, error: r.error, labelApplied: r.labelApplied };
@@ -30,7 +33,7 @@ export async function createInboxProviderPolls(): Promise<InboxProviderPoll[]> {
       provider: "microsoft",
       accountId: acct.accountId,
       email: acct.email,
-      poll: (cursor) => pollMicrosoftInbox(acct.accountId, cursor),
+      poll: (cursor) => pollMicrosoftInbox(acct.accountId, cursor, { backfillMax }),
       applyLabel: async (message, labelName) => {
         const r = await applyMicrosoftCategory(acct.accountId, message.id, labelName);
         return { ok: r.ok, error: r.error, labelApplied: r.labelApplied };

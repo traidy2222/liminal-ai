@@ -4,3 +4,4 @@ export * from "./state.js";
 export * from "./heuristics.js";
 export * from "./inbox_triage.js";
 export * from "./run_cycle.js";
+export * from "./run_log.js";

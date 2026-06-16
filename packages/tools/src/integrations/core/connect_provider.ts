@@ -1049,13 +1049,14 @@ export function createConnectorTools(registry: ToolRegistry, _emitter: AgentEmit
       } else {
         for (const a of googleAccounts) {
           const exp = new Date(a.expiresAt).toISOString();
-          const hasGmailRead = a.scopes.includes("https://www.googleapis.com/auth/gmail.readonly");
-          const hasGmailCompose = a.scopes.includes("https://www.googleapis.com/auth/gmail.compose");
+          const hasGmailModify = a.scopes.includes("https://www.googleapis.com/auth/gmail.modify");
+          const gmailPresets = resolveGoogleServices(["gmail"]);
+          const gmailScopesOk = missingGoogleScopes(a.scopes, gmailPresets).length === 0;
           const hasDriveMcp = a.scopes.includes("https://www.googleapis.com/auth/drive.file");
           const calPresets = resolveGoogleServices(["calendar"]);
           const hasCalScopes = missingGoogleScopes(a.scopes, calPresets).length === 0;
           lines.push(
-            `- ${a.email ?? a.accountId} (expires ~${exp}, ${a.scopes.length} scopes, gmail_mcp=${hasGmailRead && hasGmailCompose ? "yes" : "NO"}, drive_scopes=${hasDriveMcp ? "yes" : "partial"}, calendar_scopes=${hasCalScopes ? "yes" : "NO — revoke + reconnect OAuth"})`
+            `- ${a.email ?? a.accountId} (expires ~${exp}, ${a.scopes.length} scopes, gmail=${gmailScopesOk ? "yes" : "NO"}, gmail_modify=${hasGmailModify ? "yes" : "no"}, drive_scopes=${hasDriveMcp ? "yes" : "partial"}, calendar_scopes=${hasCalScopes ? "yes" : "NO — revoke + reconnect OAuth"})`
           );
           const gmailOnly = resolveGoogleServices(["gmail"]);
           const miss = missingGoogleScopes(a.scopes, gmailOnly);

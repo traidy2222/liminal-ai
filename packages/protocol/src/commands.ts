@@ -249,6 +249,8 @@ export interface ClientCommandMap {
     newsletterDomains?: string[];
     denyDomains?: string[];
   };
+  /** Run one inbox poll cycle immediately (sidecar background). */
+  trigger_inbox_watch: Record<string, never>;
 }
 
 export type ClientCommandType = keyof ClientCommandMap;

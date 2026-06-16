@@ -57,11 +57,6 @@ class _HomeScreenState extends State<HomeScreen> {
     context.go(AppRoutes.hub);
   }
 
-  void _goHome(AppController host) {
-    host.returnToHub();
-    context.go(AppRoutes.hub);
-  }
-
   Future<void> _openInboxPanel(AppController host) async {
     await showModalBottomSheet<void>(
       context: context,

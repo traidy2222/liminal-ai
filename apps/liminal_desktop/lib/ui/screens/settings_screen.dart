@@ -20,6 +20,17 @@ import '../widgets/liminal_shell.dart';
 import '../widgets/managed_inference_panel.dart';
 import '../widgets/about_updates_panel.dart';
 
+/// Harness fields surfaced on Integrations instead of Settings.
+const _integrationsHarnessSubgroups = {'inbox_watch'};
+
+List<HarnessSettingsField> _settingsVisibleHarnessFields(
+  List<HarnessSettingsField> fields,
+) {
+  return fields
+      .where((f) => !_integrationsHarnessSubgroups.contains(f.subgroupId))
+      .toList();
+}
+
 class SettingsScreen extends StatefulWidget {
   const SettingsScreen({super.key});
 
@@ -289,7 +300,9 @@ class _SettingsScreenState extends State<SettingsScreen>
     final searchQ = _search.text.trim().toLowerCase();
     final harnessSearchActive = searchQ.isNotEmpty;
     final filteredHarnessFields = harnessSearchActive && snap != null
-        ? snap.fields.where((f) => harnessFieldMatchesSearch(f, searchQ)).toList()
+        ? _settingsVisibleHarnessFields(snap.fields)
+            .where((f) => harnessFieldMatchesSearch(f, searchQ))
+            .toList()
         : null;
 
     if (host.harnessSettingsLoading && snap == null) {
@@ -557,9 +570,9 @@ class _SettingsScreenState extends State<SettingsScreen>
                               children: [
                                 for (final tab in snap.tabs)
                                   _HarnessTabPane(
-                                    fields: snap.fields
-                                        .where((f) => f.tabId == tab.id)
-                                        .toList(),
+                                    fields: _settingsVisibleHarnessFields(
+                                      snap.fields.where((f) => f.tabId == tab.id).toList(),
+                                    ),
                                     controllers: _fieldControllers,
                                     saving: _saving,
                                     onSave: (f, v) => _saveHarnessField(f, v),

@@ -3,11 +3,15 @@ import {
   buildInboxProcessPrompt,
   getInboxStatusSnapshot,
   readInboxQueue,
+  recordInboxWatchRun,
   resolveInboxWatcherConfig,
   runInboxWatchCycle,
   updateQueueItemStatus,
   writeInboxRules,
   type InboxRules,
+  type InboxWatchCycleResult,
+  type InboxWatchRunEntry,
+  type InboxProvider,
   type ProviderConfig,
 } from "@liminal/core";
 import { createInboxProviderPolls } from "@liminal/tools";
@@ -39,7 +43,7 @@ export class InboxWatcherService {
   }
 
   start(): void {
-    const cfg = resolveInboxWatcherConfig();
+    const cfg = resolveInboxWatcherConfig(this.registry.getRuntimePreferences());
     if (!cfg.enabled) return;
     this.stop();
     void this.runOnce("boot");
@@ -52,27 +56,49 @@ export class InboxWatcherService {
     this.timer = null;
   }
 
-  async runOnce(trigger: string): Promise<void> {
-    if (this.inFlight) return;
+  /** Re-read config and reschedule (after settings change). */
+  restart(): void {
+    this.stop();
+    this.start();
+  }
+
+  async runOnce(trigger: string): Promise<InboxWatchRunEntry | null> {
+    const started = Date.now();
+    const prefs = this.registry.getRuntimePreferences();
+    const cfg = resolveInboxWatcherConfig(prefs);
+
+    if (this.inFlight) {
+      const entry = await recordInboxWatchRun(trigger, started, {
+        skipped: true,
+        skipReason: "in_flight",
+        newCount: 0,
+        triagedCount: 0,
+        labeledCount: 0,
+        needsActionCount: 0,
+        durationMs: 0,
+      });
+      this.emitRun(entry);
+      return entry;
+    }
+
     this.inFlight = true;
-    const cfg = resolveInboxWatcherConfig();
     try {
       if (!cfg.enabled) {
-        this.emitSkipped("disabled");
-        return;
+        const entry = await this.finishSkipped(trigger, started, "disabled");
+        return entry;
       }
 
       let polls;
       try {
-        polls = await createInboxProviderPolls();
+        polls = await createInboxProviderPolls({ backfillMax: cfg.backfillMax });
       } catch (e) {
-        this.emitSkipped("error", undefined, e instanceof Error ? e.message : String(e));
-        return;
+        const entry = await this.finishSkipped(trigger, started, "error", undefined, e);
+        return entry;
       }
 
       if (polls.length === 0) {
-        this.emitSkipped("no_connector");
-        return;
+        const entry = await this.finishSkipped(trigger, started, "no_connector");
+        return entry;
       }
 
       this.sink(serverFrame("inbox_watch_started", { trigger, providers: polls.length }));
@@ -84,41 +110,87 @@ export class InboxWatcherService {
         client: this.client,
         mainModel: this.provider.model,
         harnessBusy: () => Boolean(bridge?.isBusy),
+        config: cfg,
+        trigger,
       });
 
-      if (result.skipped) {
-        this.emitSkipped(result.skipReason ?? "no_change", result.provider, result.error);
-        return;
+      const entry = await recordInboxWatchRun(trigger, started, result);
+      this.emitRun(entry);
+      if (!result.skipped && cfg.autoProcess && result.needsActionCount > 0) {
+        void this.autoProcessNeedsAction();
       }
-
-      const status = await getInboxStatusSnapshot();
-      this.sink(
-        serverFrame("inbox_watch_completed", {
-          trigger,
-          newCount: result.newCount,
-          triagedCount: result.triagedCount,
-          labeledCount: result.labeledCount,
-          needsActionCount: result.needsActionCount,
-          durationMs: result.durationMs,
-        })
-      );
-      this.emitStatus(status);
-
-      if (cfg.notifyUrgent && result.needsActionCount > 0) {
-        this.sink(
-          serverFrame("inbox_notify", {
-            needsActionCount: result.needsActionCount,
-            message: `${result.needsActionCount} inbox item(s) need your attention`,
-          })
-        );
-      }
+      return entry;
     } finally {
       this.inFlight = false;
     }
   }
 
+  private async finishSkipped(
+    trigger: string,
+    started: number,
+    reason: InboxWatchCycleResult["skipReason"],
+    provider?: InboxProvider,
+    err?: unknown
+  ): Promise<InboxWatchRunEntry> {
+    const error = err instanceof Error ? err.message : err != null ? String(err) : undefined;
+    const result: InboxWatchCycleResult = {
+      skipped: true,
+      skipReason: reason,
+      provider,
+      newCount: 0,
+      triagedCount: 0,
+      labeledCount: 0,
+      needsActionCount: 0,
+      durationMs: Date.now() - started,
+      error,
+    };
+    const entry = await recordInboxWatchRun(trigger, started, result);
+    this.emitRun(entry);
+    return entry;
+  }
+
+  private emitRun(entry: InboxWatchRunEntry): void {
+    const cfg = resolveInboxWatcherConfig(this.registry.getRuntimePreferences());
+    const nextScanAt = new Date(Date.now() + cfg.intervalMs).toISOString();
+
+    if (entry.outcome === "skipped") {
+      this.sink(
+        serverFrame("inbox_watch_skipped", {
+          reason: entry.skipReason ?? "skipped",
+          provider: entry.provider,
+          nextScanAt,
+          error: entry.error,
+          run: entry,
+        })
+      );
+    } else {
+      this.sink(
+        serverFrame("inbox_watch_completed", {
+          trigger: entry.trigger,
+          newCount: entry.newCount,
+          triagedCount: entry.triagedCount,
+          labeledCount: entry.labeledCount,
+          needsActionCount: entry.needsActionCount,
+          durationMs: entry.durationMs,
+          run: entry,
+        })
+      );
+
+      if (cfg.notifyUrgent && entry.needsActionCount > 0) {
+        this.sink(
+          serverFrame("inbox_notify", {
+            needsActionCount: entry.needsActionCount,
+            message: `${entry.needsActionCount} inbox item(s) need your attention`,
+          })
+        );
+      }
+    }
+
+    void this.emitStatus(true);
+  }
+
   async getStatus() {
-    return getInboxStatusSnapshot();
+    return getInboxStatusSnapshot(this.registry.getRuntimePreferences());
   }
 
   async processItems(itemIds: string[], chatId: string): Promise<{ ok: boolean; error?: string }> {
@@ -137,7 +209,7 @@ export class InboxWatcherService {
     try {
       await bridge.sendUserMessage(prompt);
       await updateQueueItemStatus(items.map((i) => i.itemId), "done");
-      this.emitStatus();
+      void this.emitStatus(true);
       return { ok: true };
     } catch (e) {
       await updateQueueItemStatus(items.map((i) => i.itemId), "pending");
@@ -147,24 +219,50 @@ export class InboxWatcherService {
 
   async dismissItems(itemIds: string[]): Promise<void> {
     await updateQueueItemStatus(itemIds, "dismissed");
-    this.emitStatus();
+    void this.emitStatus(true);
   }
 
   async updateRules(rules: InboxRules): Promise<void> {
     await writeInboxRules(rules);
   }
 
-  private emitSkipped(reason: string, provider?: string, error?: string): void {
-    const cfg = resolveInboxWatcherConfig();
-    const nextScanAt = new Date(Date.now() + cfg.intervalMs).toISOString();
-    this.sink(serverFrame("inbox_watch_skipped", { reason, provider, nextScanAt, error }));
+  /** Background escalation — urgent/action mail to the active chat without a manual Process click. */
+  private async autoProcessNeedsAction(): Promise<void> {
+    const cfg = resolveInboxWatcherConfig(this.registry.getRuntimePreferences());
+    if (!cfg.autoProcess) return;
+
+    const bridge = this.registry.getActiveBridge();
+    if (bridge?.isBusy) return;
+
+    const queue = await readInboxQueue();
+    const pending = queue.filter(
+      (i) =>
+        i.status === "pending" &&
+        (i.verdict.category === "urgent" || i.verdict.category === "action")
+    );
+    if (pending.length === 0) return;
+
+    let chatId = this.registry.activeId;
+    if (!chatId) {
+      try {
+        chatId = (await this.registry.getOrCreateActive()).chatId;
+      } catch {
+        return;
+      }
+    }
+
+    const batch = pending.slice(0, 5);
+    await this.processItems(
+      batch.map((i) => i.itemId),
+      chatId
+    );
   }
 
-  emitStatus(status?: Awaited<ReturnType<typeof getInboxStatusSnapshot>>): void {
+  emitStatus(force = false): void {
     const now = Date.now();
-    if (now - this.lastStatusAt < 500) return;
+    if (!force && now - this.lastStatusAt < 500) return;
     this.lastStatusAt = now;
-    void (status ? Promise.resolve(status) : getInboxStatusSnapshot()).then((snap) => {
+    void getInboxStatusSnapshot(this.registry.getRuntimePreferences()).then((snap) => {
       this.sink(serverFrame("inbox_status", snap));
     });
   }

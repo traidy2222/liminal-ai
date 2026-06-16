@@ -68,10 +68,87 @@ function headerValue(headers: Array<{ name?: string; value?: string }> | undefin
   return h?.value;
 }
 
+export interface GmailInboxPollOptions {
+  /** Max unread/recent inbox messages to import on first connect (0 = incremental only). */
+  backfillMax?: number;
+}
+
+async function fetchGmailMessageMeta(
+  accountId: string,
+  ref: { id: string; threadId?: string }
+): Promise<InboxMessageMeta | null> {
+  const msg = await gmailJson<{
+    id?: string;
+    threadId?: string;
+    snippet?: string;
+    internalDate?: string;
+    payload?: { headers?: Array<{ name?: string; value?: string }> };
+  }>(
+    `/messages/${encodeURIComponent(ref.id)}?format=metadata&metadataHeaders=From&metadataHeaders=Subject&metadataHeaders=List-Unsubscribe`,
+    accountId
+  );
+  if (!msg.ok || !msg.data.id) return null;
+  const fromRaw = headerValue(msg.data.payload?.headers, "From") ?? "";
+  const { from, fromEmail } = parseFromHeader(fromRaw);
+  const subject = headerValue(msg.data.payload?.headers, "Subject") ?? "(no subject)";
+  const listUnsub = Boolean(headerValue(msg.data.payload?.headers, "List-Unsubscribe"));
+  const ms = msg.data.internalDate ? parseInt(msg.data.internalDate, 10) : Date.now();
+  return {
+    id: msg.data.id,
+    threadId: msg.data.threadId ?? ref.threadId,
+    provider: "gmail",
+    accountId,
+    from,
+    fromEmail,
+    subject,
+    snippet: msg.data.snippet ?? "",
+    receivedAt: new Date(ms).toISOString(),
+    listUnsubscribe: listUnsub,
+  };
+}
+
+async function fetchGmailBackfill(accountId: string, max: number): Promise<InboxMessageMeta[]> {
+  if (max <= 0) return [];
+
+  const unreadList = await gmailJson<{ messages?: Array<{ id?: string; threadId?: string }> }>(
+    `/messages?q=${encodeURIComponent("in:inbox is:unread")}&maxResults=${max}`,
+    accountId
+  );
+  const refs: Array<{ id: string; threadId?: string }> = [];
+  const seen = new Set<string>();
+  for (const m of unreadList.ok ? unreadList.data.messages ?? [] : []) {
+    if (!m.id || seen.has(m.id)) continue;
+    seen.add(m.id);
+    refs.push({ id: m.id, threadId: m.threadId });
+  }
+
+  if (refs.length < max) {
+    const recentList = await gmailJson<{ messages?: Array<{ id?: string; threadId?: string }> }>(
+      `/messages?labelIds=INBOX&maxResults=${max}`,
+      accountId
+    );
+    for (const m of recentList.ok ? recentList.data.messages ?? [] : []) {
+      if (!m.id || seen.has(m.id)) continue;
+      seen.add(m.id);
+      refs.push({ id: m.id, threadId: m.threadId });
+      if (refs.length >= max) break;
+    }
+  }
+
+  const messages: InboxMessageMeta[] = [];
+  for (const ref of refs.slice(0, max)) {
+    const meta = await fetchGmailMessageMeta(accountId, ref);
+    if (meta) messages.push(meta);
+  }
+  return messages;
+}
+
 export async function pollGmailInbox(
   accountId: string,
-  cursorState: InboxProviderCursorState | null
+  cursorState: InboxProviderCursorState | null,
+  options?: GmailInboxPollOptions
 ): Promise<InboxPollResult> {
+  const backfillMax = options?.backfillMax ?? 0;
   const profile = await gmailJson<{ historyId?: string; emailAddress?: string }>("/profile", accountId);
   if (!profile.ok) return { ok: false, error: profile.error, messages: [], cursor: "", baselineEstablished: false };
 
@@ -82,9 +159,40 @@ export async function pollGmailInbox(
 
   if (!cursorState?.baselineEstablished) {
     if (!cursorState) {
-      return { ok: true, messages: [], cursor: currentHistoryId, baselineEstablished: false };
+      if (backfillMax <= 0) {
+        return { ok: true, messages: [], cursor: currentHistoryId, baselineEstablished: false };
+      }
+      const messages = await fetchGmailBackfill(accountId, backfillMax);
+      return {
+        ok: true,
+        messages,
+        cursor: currentHistoryId,
+        baselineEstablished: true,
+        backfillCompleted: true,
+      };
     }
-    return { ok: true, messages: [], cursor: currentHistoryId, baselineEstablished: true };
+    if (backfillMax <= 0) {
+      return { ok: true, messages: [], cursor: currentHistoryId, baselineEstablished: true };
+    }
+    const messages = await fetchGmailBackfill(accountId, backfillMax);
+    return {
+      ok: true,
+      messages,
+      cursor: currentHistoryId,
+      baselineEstablished: true,
+      backfillCompleted: true,
+    };
+  }
+
+  if (backfillMax > 0 && !cursorState.backfillCompleted) {
+    const messages = await fetchGmailBackfill(accountId, backfillMax);
+    return {
+      ok: true,
+      messages,
+      cursor: currentHistoryId,
+      baselineEstablished: true,
+      backfillCompleted: true,
+    };
   }
 
   const stored = cursorState.cursor;
@@ -117,34 +225,8 @@ export async function pollGmailInbox(
 
   const messages: InboxMessageMeta[] = [];
   for (const ref of ids.slice(0, 25)) {
-    const msg = await gmailJson<{
-      id?: string;
-      threadId?: string;
-      snippet?: string;
-      internalDate?: string;
-      payload?: { headers?: Array<{ name?: string; value?: string }> };
-    }>(
-      `/messages/${encodeURIComponent(ref.id)}?format=metadata&metadataHeaders=From&metadataHeaders=Subject&metadataHeaders=List-Unsubscribe`,
-      accountId
-    );
-    if (!msg.ok || !msg.data.id) continue;
-    const fromRaw = headerValue(msg.data.payload?.headers, "From") ?? "";
-    const { from, fromEmail } = parseFromHeader(fromRaw);
-    const subject = headerValue(msg.data.payload?.headers, "Subject") ?? "(no subject)";
-    const listUnsub = Boolean(headerValue(msg.data.payload?.headers, "List-Unsubscribe"));
-    const ms = msg.data.internalDate ? parseInt(msg.data.internalDate, 10) : Date.now();
-    messages.push({
-      id: msg.data.id,
-      threadId: msg.data.threadId ?? ref.threadId,
-      provider: "gmail",
-      accountId,
-      from,
-      fromEmail,
-      subject,
-      snippet: msg.data.snippet ?? "",
-      receivedAt: new Date(ms).toISOString(),
-      listUnsubscribe: listUnsub,
-    });
+    const meta = await fetchGmailMessageMeta(accountId, { id: ref.id, threadId: ref.threadId });
+    if (meta) messages.push(meta);
   }
 
   return {

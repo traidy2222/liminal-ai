@@ -86,6 +86,11 @@ export class ChatRegistry {
     return this.slots.get(this.activeChatId)?.bridge;
   }
 
+  /** Cached runtime prefs (`.agent_runtime_prefs.json`) — use for background services. */
+  getRuntimePreferences(): RuntimePreferences | null {
+    return this.cachedRuntimePrefs ?? this.deps.runtimePreferences;
+  }
+
   async reloadRuntimePrefs(): Promise<void> {
     const root = this.deps.repoRoot.trim() || resolveWorkspaceRoot();
     this.cachedRuntimePrefs = await loadRuntimePreferences(root).catch(() => null);

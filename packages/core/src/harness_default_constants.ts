@@ -472,13 +472,15 @@ export const HARNESS_ENV_DEFAULTS: Readonly<Record<string, string>> = {
   AGENT_INBOX_WATCH_INTERVAL_MS: "300000",
   AGENT_INBOX_WATCH_MIN_INTERVAL_MS: "60000",
   AGENT_INBOX_WATCH_WHILE_BUSY: "0",
-  AGENT_INBOX_WATCH_MAX_TRIAGE_PER_CYCLE: "10",
+  AGENT_INBOX_WATCH_MAX_TRIAGE_PER_CYCLE: "25",
   AGENT_INBOX_AUTO_LABEL: "1",
   AGENT_INBOX_AUTO_SPAM_LABEL: "0",
+  AGENT_INBOX_AUTO_PROCESS: "1",
   AGENT_INBOX_TRIAGE_CONFIDENCE_MIN: "0.75",
   AGENT_INBOX_NOTIFY_URGENT: "1",
   AGENT_INBOX_TRIAGE: "1",
   AGENT_INBOX_TRIAGE_TIMEOUT_MS: "6000",
+  AGENT_INBOX_BACKFILL_MAX: "25",
   // Closed-loop self-tuning — auto-demote rules with consistently low avg outcome
   AGENT_RULE_DEMOTE_THRESHOLD: "0.4",   // rules below this avg_outcome get demoted
   AGENT_RULE_DEMOTE_MIN_SAMPLES: "20",  // minimum sample size before demotion can fire

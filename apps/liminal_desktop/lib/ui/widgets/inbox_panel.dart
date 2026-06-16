@@ -74,7 +74,7 @@ class _InboxPanelState extends State<InboxPanel> {
               Padding(
                 padding: const EdgeInsets.symmetric(vertical: 24),
                 child: Text(
-                  'No pending inbox items.',
+                  'No pending items. The watcher triages unread inbox mail on first connect, then new arrivals. Auto-labeled newsletters may not appear here.',
                   textAlign: TextAlign.center,
                   style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: lim.textDim),
                 ),
@@ -122,7 +122,20 @@ class _InboxPanelState extends State<InboxPanel> {
                               ),
                           ],
                         ),
-                        secondary: _CategoryChip(category: item.verdict.category),
+                        secondary: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            if (item.status == 'processing')
+                              Padding(
+                                padding: const EdgeInsets.only(right: 6),
+                                child: Text(
+                                  'Processing',
+                                  style: Theme.of(context).textTheme.labelSmall?.copyWith(color: lim.accent),
+                                ),
+                              ),
+                            _CategoryChip(category: item.verdict.category),
+                          ],
+                        ),
                       ),
                     );
                   },

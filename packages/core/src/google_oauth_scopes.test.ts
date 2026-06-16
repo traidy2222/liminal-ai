@@ -19,11 +19,23 @@ describe("google_oauth_scopes", () => {
       "openid",
       "https://www.googleapis.com/auth/userinfo.email",
       "https://www.googleapis.com/auth/userinfo.profile",
+      "https://www.googleapis.com/auth/gmail.modify",
+    ];
+    const missing = missingGoogleScopes(granted, gmail);
+    assert.equal(missing.length, 0);
+  });
+
+  it("gmail.modify satisfies gmail preset scopes", () => {
+    const gmail = resolveGoogleServices(["gmail"]);
+    const granted = [
+      "openid",
+      "email",
+      "profile",
       "https://www.googleapis.com/auth/gmail.readonly",
       "https://www.googleapis.com/auth/gmail.compose",
     ];
     const missing = missingGoogleScopes(granted, gmail);
-    assert.equal(missing.length, 0);
+    assert.ok(missing.some((s) => s.includes("gmail.modify")));
   });
 
   it("normalizes stored scope aliases", () => {

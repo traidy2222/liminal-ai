@@ -92,6 +92,24 @@ export interface WireAppConfig {
   dictationMaxRecordingMs?: number;
 }
 
+/** One inbox poll cycle entry for activity log UI. */
+export interface InboxWatchRunWire {
+  runId: string;
+  trigger: string;
+  startedAt: string;
+  finishedAt: string;
+  durationMs: number;
+  outcome: "completed" | "skipped";
+  skipReason?: string;
+  provider?: string;
+  error?: string;
+  newCount: number;
+  triagedCount: number;
+  labeledCount: number;
+  needsActionCount: number;
+  summary: string;
+}
+
 /** Events the sidecar emits that have no harness equivalent. */
 export interface TransportEventMap {
   /** First frame after a socket attaches — declares protocol version + active chat. */
@@ -249,6 +267,7 @@ export interface TransportEventMap {
     provider?: string;
     nextScanAt?: string;
     error?: string;
+    run?: InboxWatchRunWire;
   };
   /** Inbox watcher started a poll cycle. */
   inbox_watch_started: { trigger: string; providers: number };
@@ -260,6 +279,7 @@ export interface TransportEventMap {
     labeledCount: number;
     needsActionCount: number;
     durationMs: number;
+    run?: InboxWatchRunWire;
   };
   /** Rolling inbox triage snapshot for UI strip. */
   inbox_status: {
@@ -289,6 +309,7 @@ export interface TransportEventMap {
       };
       triagedAt: string;
     }>;
+    recentRuns?: InboxWatchRunWire[];
   };
   /** Urgent/action items detected — desktop may toast. */
   inbox_notify: { needsActionCount: number; message: string };

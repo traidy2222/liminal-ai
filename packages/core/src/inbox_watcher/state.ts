@@ -7,6 +7,7 @@ import type {
   InboxRules,
   InboxStatusSnapshot,
   InboxTriagedItem,
+  InboxWatchRunEntry,
 } from "./types.js";
 import { DEFAULT_INBOX_RULES } from "./types.js";
 
@@ -39,6 +40,45 @@ function processedPath(): string {
 
 function rulesPath(): string {
   return path.join(inboxRoot(), "rules.json");
+}
+
+function runsLogPath(): string {
+  return path.join(inboxRoot(), "runs.jsonl");
+}
+
+const RUNS_LOG_MAX_LINES = 200;
+
+export async function appendInboxWatchRun(entry: InboxWatchRunEntry): Promise<void> {
+  await ensureInboxDir();
+  const line = JSON.stringify(entry) + "\n";
+  await appendFile(runsLogPath(), line, "utf8");
+  try {
+    const raw = await readFile(runsLogPath(), "utf8");
+    const lines = raw.split("\n").filter((l) => l.trim().length > 0);
+    if (lines.length > RUNS_LOG_MAX_LINES) {
+      await writeFile(runsLogPath(), lines.slice(-RUNS_LOG_MAX_LINES).join("\n") + "\n", "utf8");
+    }
+  } catch {
+    // best-effort trim
+  }
+}
+
+export async function readRecentInboxWatchRuns(limit = 30): Promise<InboxWatchRunEntry[]> {
+  try {
+    const raw = await readFile(runsLogPath(), "utf8");
+    const lines = raw.split("\n").filter((l) => l.trim().length > 0);
+    const out: InboxWatchRunEntry[] = [];
+    for (let i = lines.length - 1; i >= 0 && out.length < limit; i--) {
+      try {
+        out.push(JSON.parse(lines[i]!) as InboxWatchRunEntry);
+      } catch {
+        // skip corrupt line
+      }
+    }
+    return out;
+  } catch {
+    return [];
+  }
 }
 
 function triageLogPath(date = new Date()): string {
@@ -139,6 +179,24 @@ export async function updateQueueItemStatus(
   return next;
 }
 
+/** Items stuck in `processing` return to `pending` when older than maxAgeMs (0 = any age). */
+export async function recoverStaleProcessingQueueItems(maxAgeMs = 45 * 60 * 1000): Promise<number> {
+  const queue = await readInboxQueue();
+  const cutoff = maxAgeMs <= 0 ? Number.POSITIVE_INFINITY : Date.now() - maxAgeMs;
+  let recovered = 0;
+  const next = queue.map((item) => {
+    if (item.status !== "processing") return item;
+    if (maxAgeMs > 0) {
+      const at = Date.parse(item.triagedAt);
+      if (!Number.isFinite(at) || at > cutoff) return item;
+    }
+    recovered += 1;
+    return { ...item, status: "pending" as const };
+  });
+  if (recovered > 0) await writeInboxQueue(next);
+  return recovered;
+}
+
 export async function readInboxRules(): Promise<InboxRules> {
   try {
     const raw = await readFile(rulesPath(), "utf8");
@@ -167,9 +225,12 @@ export async function appendTriageAudit(entry: Record<string, unknown>): Promise
 export function buildInboxStatusSnapshot(
   items: InboxTriagedItem[],
   lastScanAt: string | null,
-  nextScanAt: string | null
+  nextScanAt: string | null,
+  recentRuns: InboxWatchRunEntry[] = []
 ): InboxStatusSnapshot {
-  const pending = items.filter((i) => i.status === "pending" || i.status === "labeled");
+  const pending = items.filter(
+    (i) => i.status === "pending" || i.status === "labeled" || i.status === "processing"
+  );
   const needsAction = pending.filter(
     (i) => i.verdict.category === "urgent" || i.verdict.category === "action"
   );
@@ -181,6 +242,7 @@ export function buildInboxStatusSnapshot(
     fyiCount: fyi.length,
     pendingCount: pending.length,
     items: pending.slice(0, 100),
+    recentRuns: recentRuns.slice(0, 30),
   };
 }
 

@@ -1,10 +1,11 @@
 import type OpenAI from "openai";
-import { effectiveHarnessEnvRaw } from "../harness_effective_env.js";
+import { resolveHarnessEnvRaw } from "../harness_effective_env.js";
+import type { RuntimePreferences } from "../runtime_prefs.js";
 import { completeChatJson, getFastModelSlug } from "../router.js";
 import type { InboxMessageMeta, InboxTriageCategory, InboxTriageVerdict } from "./types.js";
 import { buildTriageUserContent, tryHeuristicInboxTriage } from "./heuristics.js";
 import type { InboxRules } from "./types.js";
-import { labelNameForCategory, resolveInboxWatcherConfig } from "./config.js";
+import { labelNameForCategory, type InboxWatcherConfig } from "./config.js";
 
 const KNOWN_CATEGORIES = new Set<InboxTriageCategory>([
   "urgent",
@@ -23,8 +24,8 @@ const TRIAGE_SYSTEM_PROMPT =
   "fyi=informational; newsletter=marketing/digest; automated=system/notification; spam=unwanted. " +
   "confidence: 0-1. summary: <=120 chars. suggestedLabel: Liminal/* namespace. reason: <=120 chars.";
 
-function isTriageEnabled(): boolean {
-  return effectiveHarnessEnvRaw("AGENT_INBOX_TRIAGE") !== "0";
+function isTriageEnabled(prefs: RuntimePreferences | null): boolean {
+  return resolveHarnessEnvRaw("AGENT_INBOX_TRIAGE", prefs) !== "0";
 }
 
 function deriveNeedsReply(category: InboxTriageCategory): boolean {
@@ -65,16 +66,17 @@ export async function triageInboxMessage(
   client: OpenAI,
   mainModel: string,
   message: InboxMessageMeta,
-  rules: InboxRules
+  rules: InboxRules,
+  config: InboxWatcherConfig
 ): Promise<InboxTriageVerdict> {
   const heuristic = tryHeuristicInboxTriage(message, rules);
   if (heuristic) return heuristic;
 
-  if (!isTriageEnabled()) {
+  if (!isTriageEnabled(null)) {
     return triageInboxWithRules(message);
   }
 
-  const cfg = resolveInboxWatcherConfig();
+  const cfg = config;
   const jr = await completeChatJson(client, {
     model: getFastModelSlug(mainModel),
     messages: [

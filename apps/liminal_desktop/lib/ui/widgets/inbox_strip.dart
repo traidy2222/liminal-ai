@@ -21,7 +21,7 @@ class InboxStrip extends StatelessWidget {
     final urgent = snapshot.needsActionCount > 0;
 
     return Material(
-      color: urgent ? lim.accent.withValues(alpha: 0.08) : lim.surfaceElevated,
+      color: urgent ? lim.accent.withValues(alpha: 0.08) : lim.surfaceRaised,
       child: InkWell(
         onTap: onTap,
         child: Padding(

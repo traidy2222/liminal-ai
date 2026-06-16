@@ -166,7 +166,9 @@ class AppController extends ChangeNotifier {
 
   InboxSnapshot inbox = InboxSnapshot.empty;
   bool inboxBusy = false;
+  bool inboxScanBusy = false;
   String? inboxToastMessage;
+  String? inboxLastScanMessage;
 
   bool get needsProviderSetup => config != null && !config!.apiKeyConfigured;
   bool get needsPersonaBootstrap =>
@@ -892,13 +894,39 @@ class AppController extends ChangeNotifier {
         inbox = InboxSnapshot.fromJson(frame.data);
         notifyListeners();
         return;
+      case 'inbox_watch_started':
+        inboxScanBusy = true;
+        notifyListeners();
+        return;
+      case 'inbox_watch_skipped': {
+        final run = frame.data['run'];
+        if (run is Map) {
+          inboxLastScanMessage = InboxWatchRun.fromJson(
+            Map<String, dynamic>.from(run),
+          ).summary;
+        } else {
+          inboxLastScanMessage = frame.data['reason'] as String?;
+        }
+        inboxScanBusy = false;
+        unawaited(loadInboxStatus());
+        notifyListeners();
+        return;
+      }
       case 'inbox_notify':
         inboxToastMessage = frame.data['message'] as String?;
         notifyListeners();
         return;
-      case 'inbox_watch_completed':
+      case 'inbox_watch_completed': {
+        final run = frame.data['run'];
+        if (run is Map) {
+          inboxLastScanMessage = InboxWatchRun.fromJson(
+            Map<String, dynamic>.from(run),
+          ).summary;
+        }
+        inboxScanBusy = false;
         unawaited(loadInboxStatus());
         return;
+      }
       default:
         return;
     }
@@ -1257,6 +1285,42 @@ class AppController extends ChangeNotifier {
     } finally {
       inboxBusy = false;
       notifyListeners();
+    }
+  }
+
+  Future<String?> triggerInboxWatch() async {
+    if (!_protocol.isConnected) return 'Not connected to sidecar';
+    if (inboxScanBusy) return 'Scan already in progress';
+    inboxScanBusy = true;
+    inboxLastScanMessage = null;
+    notifyListeners();
+    try {
+      final result = await _protocol.send(
+        'trigger_inbox_watch',
+        {},
+        timeout: const Duration(seconds: 90),
+      );
+      if (!result.ok) {
+        inboxScanBusy = false;
+        notifyListeners();
+        return result.error ?? 'Scan failed';
+      }
+      if (result.data is Map) {
+        final run = InboxWatchRun.fromJson(_coerceJsonMap(result.data! as Map));
+        inboxLastScanMessage = run.summary;
+        await loadInboxStatus();
+        inboxScanBusy = false;
+        notifyListeners();
+        return run.summary;
+      }
+      await loadInboxStatus();
+      inboxScanBusy = false;
+      notifyListeners();
+      return inboxLastScanMessage;
+    } catch (e) {
+      inboxScanBusy = false;
+      notifyListeners();
+      return e.toString();
     }
   }
 

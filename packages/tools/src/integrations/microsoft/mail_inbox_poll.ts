@@ -18,6 +18,7 @@ interface GraphMessage {
   receivedDateTime?: string;
   bodyPreview?: string;
   conversationId?: string;
+  isRead?: boolean;
 }
 
 interface GraphDeltaResponse {
@@ -26,10 +27,94 @@ interface GraphDeltaResponse {
   "@odata.deltaLink"?: string;
 }
 
+interface GraphListResponse {
+  value?: GraphMessage[];
+}
+
+export interface MicrosoftInboxPollOptions {
+  /** Max unread/recent inbox messages to import on first connect (0 = incremental only). */
+  backfillMax?: number;
+}
+
+function mapGraphMessage(m: GraphMessage, accountId: string): InboxMessageMeta | null {
+  if (!m.id) return null;
+  const fromEmail = m.from?.emailAddress?.address ?? "";
+  const fromName = m.from?.emailAddress?.name ?? fromEmail;
+  return {
+    id: m.id,
+    threadId: m.conversationId,
+    provider: "microsoft",
+    accountId,
+    from: fromName,
+    fromEmail,
+    subject: m.subject ?? "(no subject)",
+    snippet: m.bodyPreview ?? "",
+    receivedAt: m.receivedDateTime ?? new Date().toISOString(),
+  };
+}
+
+function selectBackfillMessages(value: GraphMessage[], max: number): GraphMessage[] {
+  const withId = value.filter((m) => m.id);
+  const byDate = (a: GraphMessage, b: GraphMessage) =>
+    Date.parse(b.receivedDateTime ?? "") - Date.parse(a.receivedDateTime ?? "");
+  const unread = withId.filter((m) => m.isRead === false).sort(byDate);
+  if (unread.length >= max) return unread.slice(0, max);
+
+  const read = withId.filter((m) => m.isRead !== false).sort(byDate);
+  const seen = new Set<string>();
+  const out: GraphMessage[] = [];
+  for (const m of [...unread, ...read]) {
+    if (!m.id || seen.has(m.id)) continue;
+    seen.add(m.id);
+    out.push(m);
+    if (out.length >= max) break;
+  }
+  return out;
+}
+
+async function fetchMicrosoftBackfill(accountId: string, max: number): Promise<InboxMessageMeta[]> {
+  if (max <= 0) return [];
+
+  const unreadRes = await graphApiJson<GraphListResponse>(
+    `/me/mailFolders/inbox/messages?$filter=isRead eq false&$select=${DELTA_SELECT}&$orderby=receivedDateTime desc&$top=${max}`,
+    { accountId }
+  );
+  const messages: InboxMessageMeta[] = [];
+  const seen = new Set<string>();
+  if (unreadRes.ok) {
+    for (const m of unreadRes.data.value ?? []) {
+      const meta = mapGraphMessage(m, accountId);
+      if (!meta || seen.has(meta.id)) continue;
+      seen.add(meta.id);
+      messages.push(meta);
+    }
+  }
+
+  if (messages.length < max) {
+    const recentRes = await graphApiJson<GraphListResponse>(
+      `/me/mailFolders/inbox/messages?$select=${DELTA_SELECT}&$orderby=receivedDateTime desc&$top=${max}`,
+      { accountId }
+    );
+    if (recentRes.ok) {
+      for (const m of recentRes.data.value ?? []) {
+        const meta = mapGraphMessage(m, accountId);
+        if (!meta || seen.has(meta.id)) continue;
+        seen.add(meta.id);
+        messages.push(meta);
+        if (messages.length >= max) break;
+      }
+    }
+  }
+
+  return messages.slice(0, max);
+}
+
 export async function pollMicrosoftInbox(
   accountId: string,
-  cursorState: InboxProviderCursorState | null
+  cursorState: InboxProviderCursorState | null,
+  options?: MicrosoftInboxPollOptions
 ): Promise<InboxPollResult> {
+  const backfillMax = options?.backfillMax ?? 0;
   const deltaPath =
     cursorState?.baselineEstablished && cursorState.cursor
       ? cursorState.cursor
@@ -46,10 +131,48 @@ export async function pollMicrosoftInbox(
   }
 
   if (!cursorState?.baselineEstablished) {
+    const value = res.data.value ?? [];
     if (!cursorState) {
-      return { ok: true, messages: [], cursor: deltaLink, baselineEstablished: false };
+      if (backfillMax <= 0) {
+        return { ok: true, messages: [], cursor: deltaLink, baselineEstablished: false };
+      }
+      const picked = selectBackfillMessages(value, backfillMax);
+      const messages = picked
+        .map((m) => mapGraphMessage(m, accountId))
+        .filter((m): m is InboxMessageMeta => m != null);
+      return {
+        ok: true,
+        messages,
+        cursor: deltaLink,
+        baselineEstablished: true,
+        backfillCompleted: true,
+      };
     }
-    return { ok: true, messages: [], cursor: deltaLink, baselineEstablished: true };
+    if (backfillMax <= 0) {
+      return { ok: true, messages: [], cursor: deltaLink, baselineEstablished: true };
+    }
+    const picked = selectBackfillMessages(value, backfillMax);
+    const messages = picked
+      .map((m) => mapGraphMessage(m, accountId))
+      .filter((m): m is InboxMessageMeta => m != null);
+    return {
+      ok: true,
+      messages,
+      cursor: deltaLink,
+      baselineEstablished: true,
+      backfillCompleted: true,
+    };
+  }
+
+  if (backfillMax > 0 && !cursorState.backfillCompleted) {
+    const messages = await fetchMicrosoftBackfill(accountId, backfillMax);
+    return {
+      ok: true,
+      messages,
+      cursor: deltaLink,
+      baselineEstablished: true,
+      backfillCompleted: true,
+    };
   }
 
   const value = res.data.value ?? [];
@@ -58,22 +181,8 @@ export async function pollMicrosoftInbox(
   }
 
   const messages: InboxMessageMeta[] = value
-    .filter((m) => m.id)
-    .map((m) => {
-      const fromEmail = m.from?.emailAddress?.address ?? "";
-      const fromName = m.from?.emailAddress?.name ?? fromEmail;
-      return {
-        id: m.id!,
-        threadId: m.conversationId,
-        provider: "microsoft" as const,
-        accountId,
-        from: fromName,
-        fromEmail,
-        subject: m.subject ?? "(no subject)",
-        snippet: m.bodyPreview ?? "",
-        receivedAt: m.receivedDateTime ?? new Date().toISOString(),
-      };
-    });
+    .map((m) => mapGraphMessage(m, accountId))
+    .filter((m): m is InboxMessageMeta => m != null);
 
   return { ok: true, messages, cursor: deltaLink, baselineEstablished: true };
 }

@@ -567,6 +567,9 @@ export {
   getInboxStatusSnapshot,
   runInboxWatchCycle,
   resetInboxWatcherCycleStateForTests,
+  readRecentInboxWatchRuns,
+  recordInboxWatchRun,
+  summarizeInboxWatchRun,
   triageInboxMessage,
   parseInboxTriagePayload,
   tryHeuristicInboxTriage,
@@ -585,6 +588,7 @@ export type {
   InboxProviderCursorState,
   InboxPollResult,
   InboxLabelResult,
+  InboxWatchRunEntry,
 } from "./inbox_watcher/index.js";
 export {
   abandonInProgressTasks,

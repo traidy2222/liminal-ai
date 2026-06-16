@@ -9,6 +9,7 @@ import '../../state/app_controller.dart';
 import '../layout/liminal_breakpoints.dart';
 import '../theme/liminal_theme_extension.dart';
 import '../widgets/integration_brand_icon.dart';
+import '../widgets/integrations_automation_section.dart';
 import '../widgets/liminal_form_field.dart';
 import '../widgets/liminal_page_canvas.dart';
 import '../widgets/liminal_shell.dart';
@@ -55,7 +56,12 @@ class _IntegrationsScreenState extends State<IntegrationsScreen> {
   void initState() {
     super.initState();
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      unawaited(AppScope.of(context).loadIntegrations());
+      final host = AppScope.of(context);
+      unawaited(Future.wait([
+        host.loadIntegrations(),
+        host.loadHarnessSettings(),
+        host.loadInboxStatus(),
+      ]));
     });
   }
 
@@ -262,6 +268,14 @@ class _IntegrationsScreenState extends State<IntegrationsScreen> {
                 ),
               ],
               const SizedBox(height: 16),
+              IntegrationsAutomationSection(
+                host: host,
+                integrations: snap,
+                inbox: host.inbox,
+                harness: host.harnessSettings,
+                busy: disabled,
+                onOpenInbox: () => showInboxPanelSheet(context, host),
+              ),
               LayoutBuilder(
                 builder: (context, constraints) {
                   final tileWidth = constraints.maxWidth >= 720
