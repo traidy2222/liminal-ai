@@ -47,25 +47,29 @@ if (-not (Test-Path "windows")) {
 }
 
 # MSVC 18+ errors on permission_handler_windows' experimental/coroutine (STL1011).
-$cmakePath = Join-Path $AppDir "windows\CMakeLists.txt"
-if (Test-Path $cmakePath) {
-  $cmake = Get-Content $cmakePath -Raw
-  if ($cmake -notmatch '_SILENCE_EXPERIMENTAL_COROUTINE') {
-    $patch = @"
-
-# Third-party plugins (permission_handler_windows) still include <experimental/coroutine>.
-add_definitions(-D_SILENCE_EXPERIMENTAL_COROUTINE_DEPRECATION_WARNINGS)
-"@
-    Set-Content -Path $cmakePath -Value ($cmake.TrimEnd() + $patch) -Encoding utf8
+function Patch-WindowsCmake {
+  param([string]$CmakePath)
+  if (-not (Test-Path $CmakePath)) { return }
+  $cmake = Get-Content $CmakePath -Raw
+  if ($cmake -match '_SILENCE_EXPERIMENTAL_COROUTINE') { return }
+  $define = "add_compile_definitions(_SILENCE_EXPERIMENTAL_COROUTINE_DEPRECATION_WARNINGS)"
+  if ($cmake -match 'project\(liminal_desktop LANGUAGES CXX\)') {
+    $cmake = $cmake -replace '(project\(liminal_desktop LANGUAGES CXX\)\r?\n)', "`$1$define`n"
+  } else {
+    $cmake = "$define`n$cmake"
   }
+  Set-Content -Path $CmakePath -Value $cmake -Encoding utf8
 }
+
+Patch-WindowsCmake (Join-Path $AppDir "windows\CMakeLists.txt")
 
 Write-Host "==> flutter pub get"
 & $flutter pub get
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
 Write-Host "==> flutter build windows --release"
-& $flutter build windows --release
+& $flutter build windows --release `
+  --cmake-args="-DCMAKE_CXX_FLAGS=/D_SILENCE_EXPERIMENTAL_COROUTINE_DEPRECATION_WARNINGS"
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
 Pop-Location

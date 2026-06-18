@@ -4,23 +4,8 @@
 
 #include <cstring>
 #include <map>
-#include <memory>
 #include <string>
 #include <vector>
-
-struct LiminalRemoteDesktopPlugin {
-  GObject parent_instance;
-  FlMethodChannel* channel;
-};
-
-G_DECLARE_FINAL_TYPE(LiminalRemoteDesktopPlugin, liminal_remote_desktop_plugin,
-                     LIMINAL_REMOTE_DESKTOP, PLUGIN)
-
-G_DEFINE_TYPE(LiminalRemoteDesktopPlugin, liminal_remote_desktop_plugin, g_object_get_type())
-
-#define LIMINAL_REMOTE_DESKTOP_PLUGIN(obj)                                      \
-  (G_TYPE_CHECK_INSTANCE_CAST((obj), liminal_remote_desktop_plugin_get_type(), \
-                              LiminalRemoteDesktopPlugin))
 
 #include <X11/Xlib.h>
 #include <X11/extensions/XTest.h>
@@ -66,9 +51,6 @@ static FlValue* capture_frame_value() {
   if (w <= 0 || h <= 0) return nullptr;
   XImage* img = XGetImage(dpy, win, 0, 0, w, h, AllPlanes, ZPixmap);
   if (!img) return nullptr;
-  // Minimal BMP-in-memory is heavy; return raw RGB for now encoded as simple payload.
-  // GTK apps on Linux typically use X11 — ship uncompressed RGBA and let Dart encode if needed.
-  // For plugin simplicity, build a tiny PPM-like buffer (not ideal but functional).
   std::vector<uint8_t> rgba(static_cast<size_t>(w) * h * 4);
   for (int y = 0; y < h; y++) {
     for (int x = 0; x < w; x++) {
@@ -173,24 +155,11 @@ static void method_call_cb(FlMethodChannel* channel, FlMethodCall* method_call,
   fl_method_call_respond(method_call, response, nullptr);
 }
 
-static void liminal_remote_desktop_plugin_dispose(GObject* object) {
-  G_OBJECT_CLASS(liminal_remote_desktop_plugin_parent_class)->dispose(object);
-}
-
-static void liminal_remote_desktop_plugin_class_init(LiminalRemoteDesktopPluginClass* klass) {
-  G_OBJECT_CLASS(klass)->dispose = liminal_remote_desktop_plugin_dispose;
-}
-
-static void liminal_remote_desktop_plugin_init(LiminalRemoteDesktopPlugin* self) {}
-
 void liminal_remote_desktop_plugin_register_with_registrar(FlPluginRegistrar* registrar) {
-  LiminalRemoteDesktopPlugin* plugin = LIMINAL_REMOTE_DESKTOP_PLUGIN(
-      g_object_new(liminal_remote_desktop_plugin_get_type(), nullptr));
   g_autoptr(FlStandardMethodCodec) codec = fl_standard_method_codec_new();
-  plugin->channel = fl_method_channel_new(
+  g_autoptr(FlMethodChannel) channel = fl_method_channel_new(
       fl_plugin_registrar_get_messenger(registrar),
       "liminal/remote_desktop", FL_METHOD_CODEC(codec));
-  fl_method_channel_set_method_call_handler(plugin->channel, method_call_cb,
+  fl_method_channel_set_method_call_handler(channel, method_call_cb,
                                             g_object_ref(registrar), g_object_unref);
-  g_object_unref(plugin);
 }

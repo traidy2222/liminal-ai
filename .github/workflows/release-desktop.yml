@@ -45,6 +45,8 @@ jobs:
   windows:
     needs: meta
     runs-on: windows-latest
+    env:
+      CMAKE_CXX_FLAGS: /D_SILENCE_EXPERIMENTAL_COROUTINE_DEPRECATION_WARNINGS
     steps:
       - uses: actions/checkout@v4
 
