@@ -48,8 +48,8 @@ In [Google Cloud Console](https://console.cloud.google.com/) for the **Vireon** 
 2. **OAuth consent screen** — add test users if app is in *Testing* mode. Under **Data access**, add Gmail scopes for connect + inbox automation: **`gmail.modify`** (read, compose, and label mail). For Gmail **MCP** preview tools you may also need `gmail.readonly` + `gmail.compose` on the consent screen ([Google doc](https://developers.google.com/workspace/gmail/api/guides/configure-mcp-server)).
 3. **Workspace Developer Preview (required for MCP)** — Gmail/Drive/Calendar **MCP** APIs are preview-only. Enroll your Cloud project at [Google Workspace Developer Preview Program](https://developers.google.com/workspace/preview) (Workspace account + Cloud project). Until Google confirms enrollment, `tools/call` on `gmailmcp.googleapis.com` often returns *The caller does not have permission* even when classic Gmail API returns 200 and OAuth includes `gmail.compose`.
 4. **Credentials → OAuth 2.0 Client** — **Web application**.
-5. **Authorized redirect URI:** `https://www.vireondynamics.com/connect/google/callback`
-6. **YouTube (separate integration)** — add a second redirect URI on the same OAuth client: `https://www.vireondynamics.com/connect/youtube/callback`, enable **YouTube Data API v3**, and add `youtube.readonly` / `youtube.upload` on the consent screen. See [YouTube channel integration](youtube.md).
+5. **Authorized redirect URI:** `https://www.vireondynamics.com/connect/google/callback` (YouTube uses the same URI — no second redirect needed).
+6. **YouTube (separate integration)** — enable **YouTube Data API v3** and add `youtube.readonly` / `youtube.upload` on the consent screen. See [YouTube channel integration](youtube.md).
 7. Add to **Vercel** env for `vireondynamics-website`:
 
 ```env

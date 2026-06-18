@@ -35,13 +35,13 @@ Uses the **same** Google Cloud OAuth client as Google Workspace (`GOOGLE_OAUTH_C
 2. **OAuth consent screen → Data access** — add scopes:
    - `https://www.googleapis.com/auth/youtube.readonly`
    - `https://www.googleapis.com/auth/youtube.upload`
-3. **Credentials → OAuth 2.0 Client (Web application)** → **Authorized redirect URIs** — add:
+3. **Credentials → OAuth 2.0 Client (Web application)** — YouTube reuses the Workspace redirect URI (already registered):
 
    ```
-   https://www.vireondynamics.com/connect/youtube/callback
+   https://www.vireondynamics.com/connect/google/callback
    ```
 
-   (Keep existing URIs such as `/connect/google/callback` — this is an additional redirect, not a replacement.)
+   No separate `/connect/youtube/callback` entry is required.
 
 4. Vercel env on `vireondynamics-website` (already required for Google Workspace):
 
@@ -57,7 +57,7 @@ Token refresh for the `youtube` provider reuses the Google token endpoint via `P
 ```
 Liminal (local) → opens vireondynamics.com/connect/youtube?redirect_uri=…&state=…
                 → Google OAuth (YouTube scopes only)
-                → site /connect/youtube/callback (token exchange + channels.list mine=true)
+                → site /connect/google/callback (token exchange + channels.list mine=true)
                 → POST tokens to local harness handoff
                 → youtube_rest_* tools active
 ```
