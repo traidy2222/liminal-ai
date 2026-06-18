@@ -8,6 +8,7 @@ export type IntegrationBrandId =
   | "slack"
   | "linear"
   | "notion"
+  | "youtube"
   | "github"
   | "advanced";
 
@@ -68,6 +69,13 @@ export const INTEGRATION_BRANDS: Record<IntegrationBrandId, IntegrationBrandMeta
     tagline: "Pages, databases & workspace docs",
     accent: "#FFFFFF",
     accentSoft: "rgba(255, 255, 255, 0.08)",
+  },
+  youtube: {
+    id: "youtube",
+    title: "YouTube",
+    tagline: "Channel, videos & uploads",
+    accent: "#FF0000",
+    accentSoft: "rgba(255, 0, 0, 0.12)",
   },
   github: {
     id: "github",
@@ -140,6 +148,16 @@ function LogoSvg({ id }: { id: IntegrationBrandId }) {
       return (
         <svg viewBox="0 0 24 24" width="28" height="28" aria-hidden fill="#FFFFFF">
           <path d="M4.5 3.2h11.2l4.3 2.5v14.6c0 .9-.7 1.7-1.7 1.7H4.5c-1 0-1.7-.8-1.7-1.7V4.9c0-.9.7-1.7 1.7-1.7Zm.8 1.6v13.2h12.4V7.1l-3.4-2H5.3Zm3.1 2.4h7.8v1.4H8.4V7.2Zm0 3.4h7.8v1.4H8.4v-1.4Zm0 3.4h5.6v1.4H8.4v-1.4Z" />
+        </svg>
+      );
+    case "youtube":
+      return (
+        <svg viewBox="0 0 24 24" width="28" height="28" aria-hidden>
+          <path
+            fill="#FF0000"
+            d="M21.6 7.2a2.5 2.5 0 0 0-1.8-1.8C18 5 12 5 12 5s-6 0-7.8.4a2.5 2.5 0 0 0-1.8 1.8C2 9 2 12 2 12s0 3 .4 4.8a2.5 2.5 0 0 0 1.8 1.8C6 19 12 19 12 19s6 0 7.8-.4a2.5 2.5 0 0 0 1.8-1.8c.4-1.8.4-4.8.4-4.8s0-3-.4-4.8Z"
+          />
+          <path fill="#FFFFFF" d="M10 15.5v-7l6 3.5-6 3.5Z" />
         </svg>
       );
     case "github":

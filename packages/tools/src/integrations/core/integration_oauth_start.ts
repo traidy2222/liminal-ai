@@ -9,6 +9,7 @@ import {
   listSlackOAuthAccounts,
   listLinearOAuthAccounts,
   listNotionOAuthAccounts,
+  listYoutubeOAuthAccounts,
   listAzureOAuthAccounts,
   runGoogleHostedConnectFlow,
   runMicrosoftHostedConnectFlow,
@@ -18,6 +19,9 @@ import {
   runSlackHostedConnectFlow,
   runLinearHostedConnectFlow,
   runNotionHostedConnectFlow,
+  runYoutubeHostedConnectFlow,
+  enrichYoutubeBundleChannel,
+  readOAuthBundle,
 } from "@liminal/core";
 import { githubAuthAvailable, githubTokenPresent } from "../github/github_connect.js";
 
@@ -29,7 +33,8 @@ export type ConnectProviderId =
   | "github"
   | "slack"
   | "linear"
-  | "notion";
+  | "notion"
+  | "youtube";
 
 const PROVIDER_LABEL: Record<ConnectProviderId, string> = {
   google_workspace: "Google Workspace",
@@ -40,6 +45,7 @@ const PROVIDER_LABEL: Record<ConnectProviderId, string> = {
   slack: "Slack",
   linear: "Linear",
   notion: "Notion",
+  youtube: "YouTube",
 };
 
 export function integrationNotConnectedError(provider: ConnectProviderId, label?: string): string {
@@ -66,6 +72,8 @@ export async function isConnectProviderOAuthReady(provider: ConnectProviderId): 
       return (await listLinearOAuthAccounts()).length > 0;
     case "notion":
       return (await listNotionOAuthAccounts()).length > 0;
+    case "youtube":
+      return (await listYoutubeOAuthAccounts()).length > 0;
     case "github":
       return await githubAuthAvailable();
   }
@@ -124,6 +132,15 @@ export async function startConnectProviderOAuth(
         const r = await runNotionHostedConnectFlow(flowOpts);
         return { ok: true, label: r.workspaceName ?? r.email ?? r.accountId };
       }
+      case "youtube": {
+        const r = await runYoutubeHostedConnectFlow(flowOpts);
+        const bundle = await readOAuthBundle("youtube", r.accountId);
+        if (bundle) await enrichYoutubeBundleChannel(bundle);
+        const meta = (bundle?.metadata ?? r.metadata) as
+          | { channelTitle?: string; customUrl?: string }
+          | undefined;
+        return { ok: true, label: meta?.channelTitle ?? meta?.customUrl ?? r.email ?? r.accountId };
+      }
     }
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
@@ -143,6 +160,7 @@ export function isConnectProviderId(value: string): value is ConnectProviderId {
     value === "github" ||
     value === "slack" ||
     value === "linear" ||
-    value === "notion"
+    value === "notion" ||
+    value === "youtube"
   );
 }

@@ -11,6 +11,8 @@ import {
   listLinearOAuthAccounts,
   listMicrosoftOAuthAccounts,
   listNotionOAuthAccounts,
+  listYoutubeOAuthAccounts,
+  missingYoutubeScopes,
   listSlackOAuthAccounts,
   listXeroOAuthAccounts,
   missingDefaultAzureScopes,
@@ -110,6 +112,15 @@ export interface IntegrationsSnapshot {
       }
     >;
   };
+  youtube: {
+    accounts: Array<
+      IntegrationsOAuthAccount & {
+        channelId?: string;
+        channelTitle?: string;
+        customUrl?: string;
+      }
+    >;
+  };
   connections: IntegrationConnectionSummary[];
   providerStatus: Record<string, IntegrationProviderStatus>;
 }
@@ -137,6 +148,7 @@ export function deriveIntegrationProviderStatuses(
     slack: { accounts: IntegrationsOAuthAccount[] };
     linear: { accounts: IntegrationsOAuthAccount[] };
     notion: { accounts: IntegrationsOAuthAccount[] };
+    youtube: { accounts: IntegrationsOAuthAccount[] };
   }
 ): Record<string, IntegrationProviderStatus> {
   const { connections } = snapshot;
@@ -202,6 +214,7 @@ export function deriveIntegrationProviderStatuses(
     slack: oauthAuto("slack", snapshot.slack.accounts, accountHasMissingScopes(snapshot.slack.accounts)),
     linear: oauthAuto("linear", snapshot.linear.accounts, false),
     notion: oauthAuto("notion", snapshot.notion.accounts, false),
+    youtube: oauthAuto("youtube", snapshot.youtube.accounts, accountHasMissingScopes(snapshot.youtube.accounts)),
   };
 }
 
@@ -285,6 +298,18 @@ export async function buildIntegrationsSnapshot(): Promise<IntegrationsSnapshot>
         expiresAt: a.expiresAt,
         workspaceId: a.workspaceId,
         workspaceName: a.workspaceName,
+      })),
+    },
+    youtube: {
+      accounts: (await listYoutubeOAuthAccounts()).map((a) => ({
+        accountId: a.accountId,
+        email: a.email,
+        scopes: a.scopes,
+        expiresAt: a.expiresAt,
+        missingScopes: missingYoutubeScopes(a.scopes),
+        channelId: a.channelId,
+        channelTitle: a.channelTitle,
+        customUrl: a.customUrl,
       })),
     },
     connections: await listIntegrationConnections(),

@@ -99,6 +99,8 @@ import {
   disconnectLinear,
   connectNotionOAuth,
   disconnectNotion,
+  connectYoutubeOAuth,
+  disconnectYoutube,
   disconnectIntegrationOpenApi,
   revokeIntegrationAccount,
 } from "./integrations_api.js";
@@ -1241,6 +1243,30 @@ export class WsServer {
           const d = data as { revoke?: boolean };
           try {
             const output = await disconnectNotion(this.registry, d.revoke === true);
+            const snap = await buildIntegrationsSnapshot();
+            this.ack(ws, id, true, undefined, { output, integrations: snap });
+          } catch (err) {
+            this.ack(ws, id, false, err instanceof Error ? err.message : String(err));
+          }
+          return;
+        }
+
+        case "connect_youtube_oauth": {
+          const d = data as { mode?: "read_write" | "read_only"; openBrowser?: boolean };
+          try {
+            const result = await connectYoutubeOAuth(this.registry, d);
+            const snap = await buildIntegrationsSnapshot();
+            this.ack(ws, id, true, undefined, { ...result, integrations: snap });
+          } catch (err) {
+            this.ack(ws, id, false, err instanceof Error ? err.message : String(err));
+          }
+          return;
+        }
+
+        case "disconnect_youtube": {
+          const d = data as { revoke?: boolean };
+          try {
+            const output = await disconnectYoutube(this.registry, d.revoke === true);
             const snap = await buildIntegrationsSnapshot();
             this.ack(ws, id, true, undefined, { output, integrations: snap });
           } catch (err) {

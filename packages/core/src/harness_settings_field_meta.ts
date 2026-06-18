@@ -2164,6 +2164,14 @@ const _META_RAW: Record<string, HarnessSettingsFieldMeta> = {
       "Register search_console_rest_* tools: list sites, search analytics queries, URL inspection, sitemap list/submit/delete. OAuth scope webmasters.readonly / webmasters. Enable searchconsole.googleapis.com in Cloud Console.",
     valueKind: "boolean",
   },
+  "AGENT_YOUTUBE_REST": {
+    tabId: "harness",
+    subgroupId: "harness_misc",
+    label: "YouTube REST tools",
+    description:
+      "Register youtube_rest_* tools (channel metadata, list videos, update snippet). Requires a separate YouTube integration connect — not Google Workspace. OAuth scopes youtube.readonly / youtube.upload via Settings → Integrations → YouTube.",
+    valueKind: "boolean",
+  },
   "AGENT_WORKSPACE_BOUND": {
     tabId: "harness",
     subgroupId: "harness_misc",

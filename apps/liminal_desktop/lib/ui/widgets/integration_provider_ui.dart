@@ -250,6 +250,25 @@ IntegrationProviderPresentation integrationPresentation({
         signedIn: false,
       );
 
+    case IntegrationBrandId.youtube:
+      if (snap.youtubeConnected) {
+        final n = snap.youtube.accounts.length;
+        return IntegrationProviderPresentation(
+          nextStep: n > 1 ? '$n channels connected' : 'Ready · ${snap.youtubeAccountLabel}',
+          actionLabel: 'Add account',
+          ready: true,
+          highlight: true,
+          statusMode: IntegrationStatusMode.oauthAutoAttach,
+          signedIn: true,
+        );
+      }
+      return const IntegrationProviderPresentation(
+        nextStep: 'Connect your YouTube channel (separate from Google Workspace)',
+        actionLabel: 'Sign in',
+        statusMode: IntegrationStatusMode.oauthAutoAttach,
+        signedIn: false,
+      );
+
     case IntegrationBrandId.advanced:
       final count = snap.customMcp.length + snap.openApi.length;
       return IntegrationProviderPresentation(

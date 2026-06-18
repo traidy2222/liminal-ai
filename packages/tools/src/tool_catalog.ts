@@ -251,6 +251,15 @@ export const TOOL_FAMILIES: Record<string, { description: string; tools: readonl
       "search_console_rest_delete_sitemap",
     ],
   },
+  youtube: {
+    description: "YouTube channel — list videos, read channel metadata, update video snippet (separate from Google Workspace).",
+    tools: [
+      "youtube_rest_get_channel",
+      "youtube_rest_list_videos",
+      "youtube_rest_update_video",
+      "youtube_rest_upload_video",
+    ],
+  },
   azure: {
     description:
       "Azure — ARM REST (subscriptions, resource groups, resources) + @azure/mcp sidecar (compute, storage, Key Vault, web, Cosmos, Monitor, …).",

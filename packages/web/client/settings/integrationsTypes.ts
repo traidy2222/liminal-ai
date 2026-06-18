@@ -61,6 +61,11 @@ export interface IntegrationsData {
   notion?: {
     accounts: Array<OAuthAccount & { workspaceId?: string; workspaceName?: string }>;
   };
+  youtube?: {
+    accounts: Array<
+      OAuthAccount & { channelId?: string; channelTitle?: string; customUrl?: string }
+    >;
+  };
   connections: ConnectionSummary[];
   providerStatus?: Record<
     string,
@@ -82,6 +87,7 @@ export type IntegrationExpandedId =
   | "slack"
   | "linear"
   | "notion"
+  | "youtube"
   | "github"
   | "advanced"
   | null;

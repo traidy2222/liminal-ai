@@ -557,6 +557,7 @@ class _HubStatusStrip extends StatelessWidget {
       snap.slackConnected,
       snap.linearConnected,
       snap.notionConnected,
+      snap.youtubeConnected,
     ].where((v) => v).length;
   }
 }
@@ -1058,6 +1059,7 @@ class _HubIntegrationsSection extends StatelessWidget {
       (id: IntegrationBrandId.slack, connected: snap.slackConnected),
       (id: IntegrationBrandId.linear, connected: snap.linearConnected),
       (id: IntegrationBrandId.notion, connected: snap.notionConnected),
+      (id: IntegrationBrandId.youtube, connected: snap.youtubeConnected),
     ];
   }
 }

@@ -110,6 +110,7 @@ const _providers = <({String id, String label})>[
   (id: 'slack', label: 'Slack'),
   (id: 'linear', label: 'Linear'),
   (id: 'notion', label: 'Notion'),
+  (id: 'youtube', label: 'YouTube'),
   (id: 'xero', label: 'Xero'),
   (id: 'github', label: 'GitHub'),
   (id: 'google', label: 'Google Workspace'),

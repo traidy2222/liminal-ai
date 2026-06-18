@@ -142,6 +142,7 @@ import { registerXeroRestPhase35Tools } from "./integrations/xero/xero_rest_phas
 import { registerSlackRestTools, slackRestEnabled } from "./integrations/slack/slack_rest.js";
 import { registerLinearRestTools, linearRestEnabled } from "./integrations/linear/linear_rest.js";
 import { registerNotionRestTools, notionRestEnabled } from "./integrations/notion/notion_rest.js";
+import { createYoutubeRestTools, youtubeRestEnabled } from "./integrations/youtube/youtube_rest.js";
 import { agentcardEnabled } from "./integrations/agentcard/agentcard_cli.js";
 import { createAgentcardTools } from "./integrations/agentcard/agentcard_tools.js";
 import { memoryPromoteTool } from "./families/memory/memory_promote.js";
@@ -481,6 +482,9 @@ export async function registerAllTools(
   if (searchConsoleRestEnabled()) {
     for (const t of createGoogleSearchConsoleRestTools()) registry.register(t);
   }
+  if (youtubeRestEnabled()) {
+    for (const t of createYoutubeRestTools()) registry.register(t);
+  }
   if (officeRestEnabled()) {
     for (const t of createGoogleOfficeRestTools()) registry.register(t);
   }
@@ -692,6 +696,8 @@ export {
   disconnectLinearFromServer,
   connectNotionFromServer,
   disconnectNotionFromServer,
+  connectYoutubeFromServer,
+  disconnectYoutubeFromServer,
 } from "./integrations/core/connect_provider.js";
 export {
   revokeIntegrationAccountFromServer,

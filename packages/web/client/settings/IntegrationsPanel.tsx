@@ -72,6 +72,7 @@ export function IntegrationsPanel({ agentBusy }: IntegrationsPanelProps) {
     slackAccounts,
     linearAccounts,
     notionAccounts,
+    youtubeAccounts,
     githubAccounts,
     googleConnected,
     microsoftConnected,
@@ -80,6 +81,7 @@ export function IntegrationsPanel({ agentBusy }: IntegrationsPanelProps) {
     slackConnected,
     linearConnected,
     notionConnected,
+    youtubeConnected,
     githubConnected,
     googleToolCount,
     microsoftToolCount,
@@ -107,6 +109,7 @@ export function IntegrationsPanel({ agentBusy }: IntegrationsPanelProps) {
     slackPrimary,
     linearPrimary,
     notionPrimary,
+    youtubePrimary,
     revokeAccount,
     load,
   } = actions;
@@ -130,6 +133,8 @@ export function IntegrationsPanel({ agentBusy }: IntegrationsPanelProps) {
     setLinearMode,
     notionMode,
     setNotionMode,
+    youtubeMode,
+    setYoutubeMode,
     githubMode,
     setGithubMode,
   } = m;
@@ -855,6 +860,54 @@ export function IntegrationsPanel({ agentBusy }: IntegrationsPanelProps) {
               checked={notionMode === "read_only"}
               onChange={() => setNotionMode("read_only")}
               disabled={disabled || notionConnected}
+            />{" "}
+            Read only
+          </label>
+        </div>
+      </IntegrationCard>
+
+      <IntegrationCard
+        brandId="youtube"
+        statusLine={
+          youtubeConnected
+            ? `Ready · ${youtubeAccounts[0]?.channelTitle ?? youtubeAccounts[0]?.customUrl ?? youtubeAccounts[0]?.email ?? "channel linked"}`
+            : INTEGRATION_BRANDS.youtube.tagline
+        }
+        connected={youtubeConnected}
+        statusMode="oauth_auto_attach"
+        signedIn={youtubeConnected}
+        expanded={expanded === "youtube"}
+        onToggle={() => toggleExpand("youtube")}
+        primaryLabel={youtubeConnected ? "Disconnect" : "Connect"}
+        primaryDanger={youtubeConnected}
+        primaryDisabled={disabled}
+        onPrimary={() => void run(youtubePrimary)}
+      >
+        <p style={{ fontSize: 11, color: "#778899", lineHeight: 1.45, margin: "10px 0" }}>
+          Connect a YouTube channel separately from Google Workspace — list videos, read channel metadata, and update snippets.
+        </p>
+        {youtubeAccounts.map((a) => (
+          <div key={a.accountId} style={{ fontSize: 11, fontFamily: "monospace", color: GREEN, marginBottom: 6 }}>
+            {a.channelTitle ?? a.customUrl ?? a.email ?? a.accountId}
+            {a.channelId ? ` (${a.channelId})` : ""} — {a.scopes.length} scopes
+          </div>
+        ))}
+        <div style={{ marginBottom: 8 }}>
+          <label style={{ fontSize: 11, color: "#aabbcc", marginRight: 12 }}>
+            <input
+              type="radio"
+              checked={youtubeMode === "read_write"}
+              onChange={() => setYoutubeMode("read_write")}
+              disabled={disabled || youtubeConnected}
+            />{" "}
+            Read + write
+          </label>
+          <label style={{ fontSize: 11, color: "#aabbcc" }}>
+            <input
+              type="radio"
+              checked={youtubeMode === "read_only"}
+              onChange={() => setYoutubeMode("read_only")}
+              disabled={disabled || youtubeConnected}
             />{" "}
             Read only
           </label>

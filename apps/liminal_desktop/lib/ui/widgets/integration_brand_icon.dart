@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 
-enum IntegrationBrandId { google, microsoft, azure, xero, slack, linear, notion, github, advanced }
+enum IntegrationBrandId { google, microsoft, azure, xero, slack, linear, notion, youtube, github, advanced }
 
 class IntegrationBrandMeta {
   const IntegrationBrandMeta({
@@ -68,6 +68,13 @@ const integrationBrands = <IntegrationBrandId, IntegrationBrandMeta>{
     accent: Color(0xFFFFFFFF),
     accentSoft: Color(0x14FFFFFF),
   ),
+  IntegrationBrandId.youtube: IntegrationBrandMeta(
+    id: IntegrationBrandId.youtube,
+    title: 'YouTube',
+    tagline: 'Channel, videos & uploads',
+    accent: Color(0xFFFF0000),
+    accentSoft: Color(0x24FF0000),
+  ),
   IntegrationBrandId.github: IntegrationBrandMeta(
     id: IntegrationBrandId.github,
     title: 'GitHub',
@@ -129,6 +136,8 @@ class _BrandLogo extends StatelessWidget {
         return Icon(Icons.linear_scale_rounded, size: 26, color: integrationBrands[id]!.accent);
       case IntegrationBrandId.notion:
         return Icon(Icons.description_outlined, size: 26, color: integrationBrands[id]!.accent);
+      case IntegrationBrandId.youtube:
+        return Icon(Icons.play_circle_fill, size: 26, color: integrationBrands[id]!.accent);
       case IntegrationBrandId.github:
         return CustomPaint(size: const Size(28, 28), painter: _GithubLogoPainter());
       case IntegrationBrandId.advanced:

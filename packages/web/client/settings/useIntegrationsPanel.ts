@@ -35,6 +35,7 @@ export function useIntegrationsPanel(agentBusy: boolean) {
   const [slackMode, setSlackMode] = useState<ReadWriteMode>("read_write");
   const [linearMode, setLinearMode] = useState<ReadWriteMode>("read_write");
   const [notionMode, setNotionMode] = useState<ReadWriteMode>("read_write");
+  const [youtubeMode, setYoutubeMode] = useState<ReadWriteMode>("read_write");
   const [githubMode, setGithubMode] = useState<ReadWriteMode>("read_write");
   const [selectedServices, setSelectedServices] = useState<Set<string>>(new Set());
   const [msSelectedServices, setMsSelectedServices] = useState<Set<string>>(new Set());
@@ -149,6 +150,7 @@ export function useIntegrationsPanel(agentBusy: boolean) {
     const slackAccounts = data?.slack?.accounts ?? [];
     const linearAccounts = data?.linear?.accounts ?? [];
     const notionAccounts = data?.notion?.accounts ?? [];
+    const youtubeAccounts = data?.youtube?.accounts ?? [];
 
     const providerStatus = data?.providerStatus;
     return {
@@ -176,6 +178,7 @@ export function useIntegrationsPanel(agentBusy: boolean) {
       slackAccounts,
       linearAccounts,
       notionAccounts,
+      youtubeAccounts,
       githubAccounts,
       googleConnected: googleMcp.length > 0,
       microsoftConnected: microsoftMcp.length > 0,
@@ -186,6 +189,7 @@ export function useIntegrationsPanel(agentBusy: boolean) {
       slackConnected: slackAccounts.length > 0,
       linearConnected: linearAccounts.length > 0,
       notionConnected: notionAccounts.length > 0,
+      youtubeConnected: youtubeAccounts.length > 0,
       googleToolCount: googleMcp.reduce((n, c) => n + c.toolCount, 0),
       microsoftToolCount: microsoftMcp.reduce((n, c) => n + c.toolCount, 0),
       azureToolCount: azureMcp.reduce((n, c) => n + c.toolCount, 0),
@@ -430,6 +434,23 @@ export function useIntegrationsPanel(agentBusy: boolean) {
     await pollIntegrationsUntil((d) => (d.notion?.accounts.length ?? 0) > 0);
   }, [data?.notion?.accounts.length, derived.notionConnected, notionMode, pollIntegrationsUntil]);
 
+  const youtubePrimary = useCallback(async () => {
+    const before = data?.youtube?.accounts.length ?? 0;
+    if (derived.youtubeConnected) {
+      const res = await webApiFetch(`/api/integrations/youtube/begin?mode=${youtubeMode}`);
+      if (!res.ok) throw new Error(await res.text());
+      const { connectUrl } = (await res.json()) as { connectUrl: string };
+      window.open(connectUrl, "_blank", "noopener,noreferrer");
+      await pollIntegrationsUntil((d) => (d.youtube?.accounts.length ?? 0) > before);
+      return;
+    }
+    const res = await webApiFetch(`/api/integrations/youtube/begin?mode=${youtubeMode}`);
+    if (!res.ok) throw new Error(await res.text());
+    const { connectUrl } = (await res.json()) as { connectUrl: string };
+    window.open(connectUrl, "_blank", "noopener,noreferrer");
+    await pollIntegrationsUntil((d) => (d.youtube?.accounts.length ?? 0) > 0);
+  }, [data?.youtube?.accounts.length, derived.youtubeConnected, pollIntegrationsUntil, youtubeMode]);
+
   return {
     data,
     loading,
@@ -457,6 +478,8 @@ export function useIntegrationsPanel(agentBusy: boolean) {
       setLinearMode,
       notionMode,
       setNotionMode,
+      youtubeMode,
+      setYoutubeMode,
       githubMode,
       setGithubMode,
     },
@@ -505,6 +528,7 @@ export function useIntegrationsPanel(agentBusy: boolean) {
       slackPrimary,
       linearPrimary,
       notionPrimary,
+      youtubePrimary,
       revokeAccount,
     },
   };

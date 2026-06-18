@@ -179,6 +179,11 @@ export interface ClientCommandMap {
     openBrowser?: boolean;
   };
   disconnect_notion: { revoke?: boolean };
+  connect_youtube_oauth: {
+    mode?: "read_write" | "read_only";
+    openBrowser?: boolean;
+  };
+  disconnect_youtube: { revoke?: boolean };
   revoke_integration_account: { provider: string; accountId: string };
   connect_github_oauth: {
     mode?: "read_write" | "read_only";

@@ -45,6 +45,10 @@ import {
   revokeLinearAccount,
   listNotionOAuthAccounts,
   revokeNotionAccount,
+  listYoutubeOAuthAccounts,
+  revokeYoutubeAccount,
+  enrichYoutubeBundleChannel,
+  missingYoutubeScopes,
   getAzureAccessToken,
   listAzureOAuthAccounts,
   revokeAzureAccount,
@@ -404,15 +408,15 @@ export function createConnectorTools(registry: ToolRegistry, _emitter: AgentEmit
   const connectProviderTool = defineTool({
     name: "connect_provider",
     description:
-      "WHAT: Connect curated providers — Google, Microsoft 365, Azure, Xero, GitHub, Slack, Linear, or Notion (hosted OAuth).\n" +
-      "WHEN: User asks to work with mail/calendar/files, cloud infra, accounting, repos, Slack, Linear, or Notion; or another tool reports not connected.\n" +
+      "WHAT: Connect curated providers — Google, Microsoft 365, Azure, Xero, GitHub, Slack, Linear, Notion, or YouTube (hosted OAuth).\n" +
+      "WHEN: User asks to work with mail/calendar/files, cloud infra, accounting, repos, Slack, Linear, Notion, or YouTube; or another tool reports not connected.\n" +
       "HOW: Set start_oauth:true to open hosted sign-in in the browser and wait for tokens. GitHub also supports legacy GITHUB_TOKEN in .env.",
     parameters: {
       type: "object",
       properties: {
         provider: {
           type: "string",
-          enum: ["google_workspace", "microsoft_365", "azure", "xero", "github", "slack", "linear", "notion"],
+          enum: ["google_workspace", "microsoft_365", "azure", "xero", "github", "slack", "linear", "notion", "youtube"],
           description: "Provider preset id.",
         },
         start_oauth: {
@@ -524,6 +528,24 @@ export function createConnectorTools(registry: ToolRegistry, _emitter: AgentEmit
             `Notion connected as ${a.workspaceName ?? a.email ?? a.accountId}` +
             ".\nTools: notion_search, notion_get_page, notion_list_block_children, notion_get_database, notion_query_database, notion_create_page, notion_update_page, notion_append_blocks." +
             integrationLazyLoadHint(registry, "notion"),
+        };
+      }
+      if (provider === "youtube") {
+        const oauthPrep = await prepareProviderOAuth("youtube", args, emit);
+        if (oauthPrep) return oauthPrep;
+        const accounts = await listYoutubeOAuthAccounts();
+        if (accounts.length === 0) {
+          return { ok: false, error: integrationNotConnectedError("youtube") };
+        }
+        const a = accounts[0]!;
+        const label = a.channelTitle ?? a.customUrl ?? a.email ?? a.accountId;
+        return {
+          ok: true,
+          output:
+            `YouTube channel connected: ${label}` +
+            (a.channelId ? ` (${a.channelId})` : "") +
+            ".\nTools: youtube_rest_get_channel, youtube_rest_list_videos, youtube_rest_update_video." +
+            integrationLazyLoadHint(registry, "youtube"),
         };
       }
       if (provider !== "google_workspace") {
@@ -676,7 +698,7 @@ export function createConnectorTools(registry: ToolRegistry, _emitter: AgentEmit
       properties: {
         provider: {
           type: "string",
-          enum: ["google_workspace", "microsoft_365", "azure", "xero", "github", "slack", "linear", "notion"],
+          enum: ["google_workspace", "microsoft_365", "azure", "xero", "github", "slack", "linear", "notion", "youtube"],
         },
         revoke_oauth: {
           type: "boolean",
@@ -741,6 +763,18 @@ export function createConnectorTools(registry: ToolRegistry, _emitter: AgentEmit
         return {
           ok: true,
           output: `Disconnected notion${args["revoke_oauth"] === true ? " (OAuth tokens revoked)" : ""}.`,
+        };
+      }
+      if (provider === "youtube") {
+        if (args["revoke_oauth"] === true) {
+          const accounts = await listYoutubeOAuthAccounts();
+          for (const a of accounts) {
+            await revokeYoutubeAccount(a.accountId);
+          }
+        }
+        return {
+          ok: true,
+          output: `Disconnected youtube${args["revoke_oauth"] === true ? " (OAuth tokens revoked)" : ""}.`,
         };
       }
       if (provider === "microsoft_365") {
@@ -1408,6 +1442,28 @@ export async function disconnectNotionFromServer(
   const { disconnectProviderTool } = createConnectorTools(registry, { emit: () => {} } as unknown as AgentEmitter);
   const result = await disconnectProviderTool.handler({
     provider: "notion",
+    revoke_oauth: revokeOAuth,
+  });
+  if (result.ok) return { ok: true, output: result.output };
+  return { ok: false, error: result.error };
+}
+
+export async function connectYoutubeFromServer(
+  registry: ToolRegistry
+): Promise<{ ok: boolean; output?: string; error?: string }> {
+  const { connectProviderTool } = createConnectorTools(registry, { emit: () => {} } as unknown as AgentEmitter);
+  const result = await connectProviderTool.handler({ provider: "youtube" });
+  if (result.ok) return { ok: true, output: result.output };
+  return { ok: false, error: result.error };
+}
+
+export async function disconnectYoutubeFromServer(
+  registry: ToolRegistry,
+  revokeOAuth = false
+): Promise<{ ok: boolean; output?: string; error?: string }> {
+  const { disconnectProviderTool } = createConnectorTools(registry, { emit: () => {} } as unknown as AgentEmitter);
+  const result = await disconnectProviderTool.handler({
+    provider: "youtube",
     revoke_oauth: revokeOAuth,
   });
   if (result.ok) return { ok: true, output: result.output };

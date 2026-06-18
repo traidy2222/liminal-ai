@@ -1348,6 +1348,7 @@ class AppController extends ChangeNotifier {
         command == 'connect_slack_oauth' ||
         command == 'connect_linear_oauth' ||
         command == 'connect_notion_oauth' ||
+        command == 'connect_youtube_oauth' ||
         command == 'connect_github_oauth';
   }
 
@@ -1515,6 +1516,15 @@ class AppController extends ChangeNotifier {
   Future<bool> disconnectNotion({bool revoke = false}) =>
       _runIntegrationCommand('disconnect_notion', {'revoke': revoke});
 
+  Future<bool> connectYoutubeOAuth({String mode = 'read_write'}) =>
+      _runIntegrationCommand('connect_youtube_oauth', {
+        'mode': mode,
+        'openBrowser': true,
+      });
+
+  Future<bool> disconnectYoutube({bool revoke = false}) =>
+      _runIntegrationCommand('disconnect_youtube', {'revoke': revoke});
+
   Future<bool> revokeIntegrationAccount({
     required String provider,
     required String accountId,
@@ -1642,7 +1652,7 @@ class AppController extends ChangeNotifier {
         final provider = parsed.args.isNotEmpty ? parsed.args.first : '';
         if (provider.isEmpty) {
           return ComposerSlashOutcome.message(
-            'Usage: /connect <slack|linear|notion|xero|github|google|microsoft|azure> [--read-only]',
+            'Usage: /connect <slack|linear|notion|youtube|xero|github|google|microsoft|azure> [--read-only]',
             clearInput: false,
           );
         }
@@ -1651,6 +1661,7 @@ class AppController extends ChangeNotifier {
           'slack' => await connectSlackOAuth(mode: mode),
           'linear' => await connectLinearOAuth(mode: mode),
           'notion' => await connectNotionOAuth(mode: mode),
+          'youtube' => await connectYoutubeOAuth(mode: mode),
           'xero' => await connectXeroOAuth(mode: mode),
           'github' => await connectGithubOAuth(mode: mode),
           'google' => await connectGoogleOAuth(mode: mode),
@@ -1679,6 +1690,7 @@ class AppController extends ChangeNotifier {
           'slack' => await disconnectSlack(),
           'linear' => await disconnectLinear(),
           'notion' => await disconnectNotion(),
+          'youtube' => await disconnectYoutube(),
           'xero' => await disconnectXero(),
           'github' => await disconnectGithub(),
           'google' => await disconnectGoogle(),

@@ -11,7 +11,8 @@ export type IntegrationProviderId =
   | "xero"
   | "slack"
   | "linear"
-  | "notion";
+  | "notion"
+  | "youtube";
 
 export interface IntegrationProviderCatalogEntry {
   id: IntegrationProviderId;
@@ -66,6 +67,13 @@ export const INTEGRATION_PROVIDER_CATALOG: IntegrationProviderCatalogEntry[] = [
     id: "notion",
     title: "Notion",
     tagline: "Pages, databases & workspace docs",
+    connectMode: "oauth_auto_attach",
+    group: "collaboration",
+  },
+  {
+    id: "youtube",
+    title: "YouTube",
+    tagline: "Channel, videos & uploads",
     connectMode: "oauth_auto_attach",
     group: "collaboration",
   },

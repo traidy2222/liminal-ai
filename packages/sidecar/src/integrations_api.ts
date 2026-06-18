@@ -2,6 +2,7 @@ import {
   runSlackHostedConnectFlow,
   runLinearHostedConnectFlow,
   runNotionHostedConnectFlow,
+  runYoutubeHostedConnectFlow,
   runGoogleHostedConnectFlow,
   runGithubHostedConnectFlow,
   runMicrosoftHostedConnectFlow,
@@ -18,6 +19,7 @@ import {
   connectSlackFromServer,
   connectLinearFromServer,
   connectNotionFromServer,
+  connectYoutubeFromServer,
   connectOpenApiFromServer,
   detachCustomMcpFromServer,
   disconnectGithubFromServer,
@@ -28,6 +30,7 @@ import {
   disconnectSlackFromServer,
   disconnectLinearFromServer,
   disconnectNotionFromServer,
+  disconnectYoutubeFromServer,
   disconnectOpenApiFromServer,
   buildIntegrationsSnapshot,
   listIntegrationConnections,
@@ -391,6 +394,35 @@ export async function disconnectNotion(registry: ChatRegistry, revoke: boolean):
   if (!result.ok) throw new Error(result.error ?? "Notion disconnect failed.");
   await refreshIntegrationsOnAllHarnesses(registry);
   return result.output ?? "Notion disconnected.";
+}
+
+export async function connectYoutubeOAuth(
+  registry: ChatRegistry,
+  opts: { mode?: "read_write" | "read_only"; openBrowser?: boolean }
+): Promise<{ accountId: string; email?: string; metadata?: Record<string, unknown> }> {
+  const result = await runYoutubeHostedConnectFlow({
+    mode: opts.mode ?? "read_write",
+    openBrowser: opts.openBrowser !== false,
+    onStatus: (m) => console.log(`[youtube-oauth] ${m}`),
+  });
+  try {
+    assertHarnessesIdle(registry);
+    const bridge = await registry.getOrCreateActive();
+    await connectYoutubeFromServer(bridge.harness.registry);
+    await refreshIntegrationsOnAllHarnesses(registry);
+  } catch (e) {
+    console.warn("[youtube-oauth] tokens saved but harness refresh failed:", e instanceof Error ? e.message : e);
+  }
+  return result;
+}
+
+export async function disconnectYoutube(registry: ChatRegistry, revoke: boolean): Promise<string> {
+  assertHarnessesIdle(registry);
+  const bridge = await registry.getOrCreateActive();
+  const result = await disconnectYoutubeFromServer(bridge.harness.registry, revoke);
+  if (!result.ok) throw new Error(result.error ?? "YouTube disconnect failed.");
+  await refreshIntegrationsOnAllHarnesses(registry);
+  return result.output ?? "YouTube disconnected.";
 }
 
 export async function attachIntegrationMcp(

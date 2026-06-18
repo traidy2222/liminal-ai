@@ -62,6 +62,8 @@ import {
   disconnectLinearFromServer,
   connectNotionFromServer,
   disconnectNotionFromServer,
+  connectYoutubeFromServer,
+  disconnectYoutubeFromServer,
   buildIntegrationsSnapshot,
   attachCustomMcpFromServer,
   detachCustomMcpFromServer,
@@ -918,6 +920,23 @@ export function createRouter(
     res.json({ connectUrl, authUrl: connectUrl, state });
   });
 
+  router.get("/api/integrations/youtube/begin", (req, res) => {
+    prunePendingHostedOAuth();
+    const state = randomBytes(16).toString("hex");
+    const mode = req.query["mode"] === "read_only" ? "read_only" : "read_write";
+    pendingHostedOAuth.set(state, { exp: Date.now() + 10 * 60_000, provider: "youtube", mode });
+    const harnessRedirectUri = hostedOAuthHandoffPath(WEB_PORT);
+    const site = defaultVireonSiteOrigin();
+    const connectUrl = buildHostedIntegrationConnectUrl({
+      provider: "youtube",
+      harnessRedirectUri,
+      harnessState: state,
+      siteOrigin: site,
+      mode,
+    });
+    res.json({ connectUrl, authUrl: connectUrl, state });
+  });
+
   type IntegrationHandoffBundle = {
     provider?: string;
     accountId?: string;
@@ -1074,6 +1093,12 @@ export function createRouter(
           else
             bridge.harness.getContext().refreshProtocolDynamic(bridge.harness.registry.getActiveToolNames());
         }
+        if (provider === "youtube") {
+          const youtubeResult = await connectYoutubeFromServer(bridge.harness.registry);
+          if (!youtubeResult.ok) attachWarning = youtubeResult.error;
+          else
+            bridge.harness.getContext().refreshProtocolDynamic(bridge.harness.registry.getActiveToolNames());
+        }
       } catch (e) {
         attachWarning = e instanceof Error ? e.message : String(e);
       }
@@ -1144,6 +1169,18 @@ export function createRouter(
     const bridge = active();
     const revoke = req.query["revoke"] === "1" || req.query["revoke"] === "true";
     const result = await disconnectNotionFromServer(bridge.harness.registry, revoke);
+    if (!result.ok) {
+      res.status(400).json({ error: result.error });
+      return;
+    }
+    bridge.harness.getContext().refreshProtocolDynamic(bridge.harness.registry.getActiveToolNames());
+    res.json({ ok: true, output: result.output });
+  });
+
+  router.delete("/api/integrations/youtube", async (req, res) => {
+    const bridge = active();
+    const revoke = req.query["revoke"] === "1" || req.query["revoke"] === "true";
+    const result = await disconnectYoutubeFromServer(bridge.harness.registry, revoke);
     if (!result.ok) {
       res.status(400).json({ error: result.error });
       return;

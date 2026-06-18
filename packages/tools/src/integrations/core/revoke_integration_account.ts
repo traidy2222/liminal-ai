@@ -9,6 +9,7 @@ import {
   listLinearOAuthAccounts,
   listMicrosoftOAuthAccounts,
   listNotionOAuthAccounts,
+  listYoutubeOAuthAccounts,
   listSlackOAuthAccounts,
   listXeroOAuthAccounts,
   revokeAzureAccount,
@@ -17,6 +18,7 @@ import {
   revokeLinearAccount,
   revokeMicrosoftAccount,
   revokeNotionAccount,
+  revokeYoutubeAccount,
   revokeSlackAccount,
   revokeXeroAccount,
   sanitizeOAuthAccountId,
@@ -43,7 +45,8 @@ export type IntegrationAccountSlug =
   | "xero"
   | "slack"
   | "linear"
-  | "notion";
+  | "notion"
+  | "youtube";
 
 const VALID_SLUGS = new Set<IntegrationAccountSlug>([
   "google",
@@ -54,6 +57,7 @@ const VALID_SLUGS = new Set<IntegrationAccountSlug>([
   "slack",
   "linear",
   "notion",
+  "youtube",
 ]);
 
 function normalizeRegistries(registry: ToolRegistry | ToolRegistry[]): ToolRegistry[] {
@@ -88,13 +92,14 @@ async function detachMcpForAccount(
 function accountLabel(
   slug: IntegrationAccountSlug,
   accountId: string,
-  meta?: { email?: string; login?: string; tenantName?: string; teamName?: string; organizationName?: string; workspaceName?: string }
+  meta?: { email?: string; login?: string; tenantName?: string; teamName?: string; organizationName?: string; workspaceName?: string; channelTitle?: string }
 ): string {
   if (slug === "github" && meta?.login) return meta.login;
   if (slug === "xero" && meta?.tenantName) return meta.tenantName;
   if (slug === "slack" && meta?.teamName) return meta.teamName;
   if (slug === "linear" && meta?.organizationName) return meta.organizationName;
   if (slug === "notion" && meta?.workspaceName) return meta.workspaceName;
+  if (slug === "youtube" && meta?.channelTitle) return meta.channelTitle;
   return meta?.email ?? accountId;
 }
 
@@ -236,6 +241,17 @@ export async function revokeIntegrationAccountFromServer(
         workspaceName: match.workspaceName,
       });
       return { ok: true, output: `Removed Notion workspace ${label}.` };
+    }
+    case "youtube": {
+      const accounts = await listYoutubeOAuthAccounts();
+      const match = accounts.find((a) => a.accountId === accountId);
+      if (!match) return { ok: false, error: "YouTube account not found" };
+      await revokeYoutubeAccount(accountId);
+      const label = accountLabel(slug, accountId, {
+        email: match.email,
+        channelTitle: match.channelTitle,
+      });
+      return { ok: true, output: `Removed YouTube channel ${label}.` };
     }
   }
 }

@@ -13,6 +13,7 @@ describe("deriveIntegrationProviderStatuses", () => {
       slack: { accounts: [] },
       linear: { accounts: [] },
       notion: { accounts: [] },
+      youtube: { accounts: [] },
       connections: [
         {
           kind: "mcp",
@@ -39,6 +40,7 @@ describe("deriveIntegrationProviderStatuses", () => {
       slack: { accounts: [] },
       linear: { accounts: [] },
       notion: { accounts: [] },
+      youtube: { accounts: [] },
       connections: [],
     });
     assert.equal(signedInOnly.google?.signedIn, true);
@@ -56,6 +58,7 @@ describe("deriveIntegrationProviderStatuses", () => {
       slack: { accounts: [{ accountId: "s1", scopes: [], expiresAt: 0 }] },
       linear: { accounts: [] },
       notion: { accounts: [] },
+      youtube: { accounts: [] },
       connections: [],
     });
     assert.equal(status.slack?.connectMode, "oauth_auto_attach");

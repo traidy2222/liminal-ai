@@ -49,7 +49,8 @@ In [Google Cloud Console](https://console.cloud.google.com/) for the **Vireon** 
 3. **Workspace Developer Preview (required for MCP)** — Gmail/Drive/Calendar **MCP** APIs are preview-only. Enroll your Cloud project at [Google Workspace Developer Preview Program](https://developers.google.com/workspace/preview) (Workspace account + Cloud project). Until Google confirms enrollment, `tools/call` on `gmailmcp.googleapis.com` often returns *The caller does not have permission* even when classic Gmail API returns 200 and OAuth includes `gmail.compose`.
 4. **Credentials → OAuth 2.0 Client** — **Web application**.
 5. **Authorized redirect URI:** `https://www.vireondynamics.com/connect/google/callback`
-6. Add to **Vercel** env for `vireondynamics-website`:
+6. **YouTube (separate integration)** — add a second redirect URI on the same OAuth client: `https://www.vireondynamics.com/connect/youtube/callback`, enable **YouTube Data API v3**, and add `youtube.readonly` / `youtube.upload` on the consent screen. See [YouTube channel integration](youtube.md).
+7. Add to **Vercel** env for `vireondynamics-website`:
 
 ```env
 GOOGLE_OAUTH_CLIENT_ID=....apps.googleusercontent.com
@@ -57,7 +58,7 @@ GOOGLE_OAUTH_CLIENT_SECRET=...
 INTEGRATION_OAUTH_STATE_SECRET=...   # optional HMAC for OAuth state
 ```
 
-7. Install [uv](https://docs.astral.sh/uv/) on machines using the Docs/Sheets sidecar (`uvx workspace-mcp`).
+8. Install [uv](https://docs.astral.sh/uv/) on machines using the Docs/Sheets sidecar (`uvx workspace-mcp`).
 
 ### Self-hosted / advanced (optional)
 

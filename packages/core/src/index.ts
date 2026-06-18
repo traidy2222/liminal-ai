@@ -1515,6 +1515,21 @@ export {
 } from "./notion_oauth_broker.js";
 export { notionScopeForMode, NOTION_DEFAULT_MODE } from "./notion_oauth_scopes.js";
 export type { NotionMode } from "./notion_oauth_scopes.js";
+export {
+  getYoutubeAccessToken,
+  listYoutubeOAuthAccounts,
+  revokeYoutubeAccount,
+  enrichYoutubeBundleChannel,
+  writeYoutubeOAuthBundle,
+  ensureYoutubeOAuthBundle,
+  scopesForYoutubeMode,
+} from "./youtube_oauth_broker.js";
+export { missingYoutubeScopes } from "./youtube_oauth_scopes.js";
+export type { YoutubeConnectMode } from "./youtube_oauth_scopes.js";
+export { fetchPrimaryYoutubeChannel } from "./youtube_channel.js";
+export type { YoutubeChannelSummary } from "./youtube_channel.js";
+export { runYoutubeHostedConnectFlow } from "./youtube_hosted_connect.js";
+export type { RunYoutubeHostedConnectOptions } from "./youtube_hosted_connect.js";
 export { runNotionHostedConnectFlow } from "./notion_connect.js";
 export type { NotionConnectResult, RunNotionHostedConnectOptions } from "./notion_connect.js";
 export type {

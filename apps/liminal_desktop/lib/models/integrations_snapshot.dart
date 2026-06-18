@@ -8,6 +8,7 @@ class IntegrationsSnapshot {
     required this.slack,
     required this.linear,
     required this.notion,
+    required this.youtube,
     required this.connections,
     this.providerStatus = const {},
   });
@@ -20,6 +21,7 @@ class IntegrationsSnapshot {
   final SlackIntegrations slack;
   final LinearIntegrations linear;
   final NotionIntegrations notion;
+  final YoutubeIntegrations youtube;
   final List<IntegrationConnection> connections;
   final Map<String, IntegrationProviderStatus> providerStatus;
 
@@ -50,6 +52,9 @@ class IntegrationsSnapshot {
       notion: NotionIntegrations.fromJson(
         Map<String, dynamic>.from(json['notion'] as Map? ?? {}),
       ),
+      youtube: YoutubeIntegrations.fromJson(
+        Map<String, dynamic>.from(json['youtube'] as Map? ?? {}),
+      ),
       connections: (json['connections'] as List<dynamic>? ?? [])
           .map(
             (e) => IntegrationConnection.fromJson(
@@ -77,6 +82,7 @@ class IntegrationsSnapshot {
     slack: SlackIntegrations.empty,
     linear: LinearIntegrations.empty,
     notion: NotionIntegrations.empty,
+    youtube: YoutubeIntegrations.empty,
     connections: [],
   );
 
@@ -166,6 +172,8 @@ class IntegrationsSnapshot {
 
   bool get notionConnected => notion.accounts.isNotEmpty;
 
+  bool get youtubeConnected => youtube.accounts.isNotEmpty;
+
   int get googleToolCount => googleMcp.fold(0, (n, c) => n + c.toolCount);
 
   int get microsoftToolCount => microsoftMcp.fold(0, (n, c) => n + c.toolCount);
@@ -219,6 +227,12 @@ class IntegrationsSnapshot {
     if (notion.accounts.isEmpty) return 'Notion';
     final a = notion.accounts.first;
     return a.workspaceName ?? a.email ?? a.accountId;
+  }
+
+  String get youtubeAccountLabel {
+    if (youtube.accounts.isEmpty) return 'YouTube';
+    final a = youtube.accounts.first;
+    return a.channelTitle ?? a.customUrl ?? a.email ?? a.accountId;
   }
 
 }
@@ -574,6 +588,56 @@ class NotionOAuthAccount {
       scopes: (json['scopes'] as List<dynamic>? ?? []).map((e) => e.toString()).toList(),
       workspaceId: json['workspaceId'] as String?,
       workspaceName: json['workspaceName'] as String?,
+    );
+  }
+}
+
+class YoutubeIntegrations {
+  YoutubeIntegrations({required this.accounts});
+
+  final List<YoutubeOAuthAccount> accounts;
+
+  factory YoutubeIntegrations.fromJson(Map<String, dynamic> json) {
+    return YoutubeIntegrations(
+      accounts: (json['accounts'] as List<dynamic>? ?? [])
+          .map((e) => YoutubeOAuthAccount.fromJson(Map<String, dynamic>.from(e as Map)))
+          .toList(),
+    );
+  }
+
+  static final empty = YoutubeIntegrations(accounts: []);
+}
+
+class YoutubeOAuthAccount {
+  YoutubeOAuthAccount({
+    required this.accountId,
+    this.email,
+    required this.scopes,
+    this.channelId,
+    this.channelTitle,
+    this.customUrl,
+    this.missingScopes = const [],
+  });
+
+  final String accountId;
+  final String? email;
+  final List<String> scopes;
+  final String? channelId;
+  final String? channelTitle;
+  final String? customUrl;
+  final List<String> missingScopes;
+
+  factory YoutubeOAuthAccount.fromJson(Map<String, dynamic> json) {
+    return YoutubeOAuthAccount(
+      accountId: json['accountId'] as String? ?? '',
+      email: json['email'] as String?,
+      scopes: (json['scopes'] as List<dynamic>? ?? []).map((e) => e.toString()).toList(),
+      channelId: json['channelId'] as String?,
+      channelTitle: json['channelTitle'] as String?,
+      customUrl: json['customUrl'] as String?,
+      missingScopes: (json['missingScopes'] as List<dynamic>? ?? [])
+          .map((e) => e.toString())
+          .toList(),
     );
   }
 }

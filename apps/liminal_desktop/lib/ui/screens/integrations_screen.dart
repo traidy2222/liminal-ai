@@ -37,6 +37,7 @@ class _IntegrationsScreenState extends State<IntegrationsScreen> {
   String _slackMode = 'read_write';
   String _linearMode = 'read_write';
   String _notionMode = 'read_write';
+  String _youtubeMode = 'read_write';
   String _githubMode = 'read_write';
   final Set<String> _googleServices = {};
   final Set<String> _microsoftServices = {};
@@ -218,6 +219,14 @@ class _IntegrationsScreenState extends State<IntegrationsScreen> {
       return;
     }
     await host.connectNotionOAuth(mode: _notionMode);
+  }
+
+  Future<void> _youtubePrimary(AppController host, IntegrationsSnapshot snap) async {
+    if (snap.youtubeConnected) {
+      await host.connectYoutubeOAuth(mode: _youtubeMode);
+      return;
+    }
+    await host.connectYoutubeOAuth(mode: _youtubeMode);
   }
 
   Future<void> _githubPrimary(AppController host, IntegrationsSnapshot snap) async {
@@ -627,6 +636,43 @@ class _IntegrationsScreenState extends State<IntegrationsScreen> {
                   mode: _notionMode,
                   modeLocked: snap.notionConnected,
                   onMode: (m) => setState(() => _notionMode = m),
+                ),
+              ],
+            ),
+          ),
+          IntegrationProviderRow(
+            brandId: IntegrationBrandId.youtube,
+            presentation: integrationPresentation(brandId: IntegrationBrandId.youtube, snap: snap),
+            expanded: _expandedId == 'youtube',
+            disabled: disabled,
+            onToggleDetails: () => _toggleExpanded('youtube'),
+            onAction: () => unawaited(_youtubePrimary(host, snap)),
+            showDivider: false,
+            details: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                IntegrationAccountsList(
+                  accounts: [
+                    for (final a in snap.youtube.accounts)
+                      IntegrationAccountEntry(
+                        accountId: a.accountId,
+                        label: a.channelTitle ?? a.customUrl ?? a.email ?? a.accountId,
+                        meta: a.channelId,
+                      ),
+                  ],
+                  disabled: disabled,
+                  onRemove: (id) => _revokeAccount(host, 'youtube', id),
+                  onDisconnectAll: () => host.disconnectYoutube(revoke: true),
+                ),
+                Text(
+                  'Connect a YouTube channel separately from Google Workspace.',
+                  style: TextStyle(color: lim.textMuted, fontSize: 12, height: 1.4),
+                ),
+                const SizedBox(height: 8),
+                oauthModeRow(
+                  mode: _youtubeMode,
+                  modeLocked: snap.youtubeConnected,
+                  onMode: (m) => setState(() => _youtubeMode = m),
                 ),
               ],
             ),
