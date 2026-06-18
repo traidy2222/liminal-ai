@@ -365,8 +365,43 @@ export {
   isEmailComposeTurn,
   isEmailStyleFieldGroundedInUserMessage,
   sanitizeEmailStyleInferInput,
+  shouldInjectEmailComposeGuidance,
+  EMAIL_COMPOSE_MENTAL_MODEL,
+  EMAIL_COMPOSE_CAPABILITY_NUDGE,
   EMAIL_COMPOSE_TURN_INJECTION,
 } from "./email_compose_context.js";
+export {
+  isMailInboxTurn,
+  isMailReplyContinuationTurn,
+  shouldInjectMailAccountGuidance,
+  MAIL_ACCOUNT_TURN_INJECTION,
+  matchMailAccountByHint,
+  resolveGoogleMailAccount,
+  resolveMicrosoftMailAccount,
+  parseMailSessionFromToolOutput,
+  mergeMailSessionContext,
+  buildMailSessionContextInjection,
+} from "./mail_account_context.js";
+export type { MailAccountRef, MailProvider, MailSessionContext } from "./mail_account_context.js";
+export {
+  EMAIL_PRIVACY_TURN_INJECTION,
+  isEmailPrivacyTurn,
+  redactMailSearchToolOutput,
+  redactSensitiveEmailContent,
+} from "./email_redaction.js";
+export type { EmailRedactionOptions } from "./email_redaction.js";
+export type { MailOAuthAccount } from "./mail_oauth_filter.js";
+export {
+  filterGoogleMailAccounts,
+  filterMicrosoftMailAccounts,
+  formatConnectedMailboxesLine,
+  googleAccountHasMailScopes,
+  isEntraGuestMailbox,
+  listConnectedMailOAuthAccounts,
+  listGoogleMailOAuthAccounts,
+  listMicrosoftMailOAuthAccounts,
+  microsoftAccountHasMailScopes,
+} from "./mail_oauth_filter.js";
 export { LAZY_AUTO_ACTIVATE_TOOL_ONLY } from "./tool_lazy_constants.js";
 export { buildAutoDreamPrompt } from "./auto_dream.js";
 export {
@@ -394,7 +429,31 @@ export {
   BROWSER_VERIFY_TOOL_NAMES,
 } from "./proactive_verification.js";
 export {
-  normalizeFilePathKey,
+  verifyToolsEnabled,
+  criticGateEnabled,
+  criticMinTools,
+  userRequestsVerificationTools,
+  userRequestsCritics,
+  userRequestsOrderedSteps,
+  userRequestsSymbolTools,
+  userRequestsVaultTools,
+  userRequestsSpawnOrchestration,
+  extractExplicitRepoPaths,
+  distillArtifactHashFromOutput,
+  buildDistillArtifactNudge,
+  buildOrderedStepsNudge,
+  buildExplicitPathReadNudge,
+  buildSymbolIndexNudge,
+  buildVaultToolsNudge,
+  buildVerificationToolsNudge,
+  verificationToolsNeeded,
+  getMissingVerificationTools,
+  needsVerificationContinuation,
+  isCriticToolName,
+  CRITIC_TOOL_NAMES,
+  VERIFY_ORCHESTRATION_TOOL_NAMES,
+} from "./capability_gates.js";
+export {
   bumpFileRevision,
   getFileRevision,
   buildFileRevisionBatchNotice,
@@ -669,9 +728,11 @@ export {
   buildByokRoutingPatchForModel,
   inferencePreferManaged,
   describeProviderError,
+  extractProviderErrorBody,
   formatInferenceBudgetExceededMessage,
   inferenceAccountUrl,
   isInferenceBudgetExceededError,
+  isInferenceServerError,
   isManagedInferenceAuthError,
   proManagedInferencePrefsPatch,
   recoverManagedInferencePreferences,
@@ -870,6 +931,19 @@ export type {
   ImageAttachmentSource,
   UserTurnContent,
 } from "./image_attachments.js";
+export {
+  DEFAULT_CHAT_ATTACHMENT_LIMITS,
+  buildMessageWithFileAttachments,
+  decodeDataUrl,
+  isChatImageAttachment,
+  normalizeChatAttachmentName,
+  parseDataUrlAttachment,
+  partitionChatAttachments,
+  persistChatAttachmentsToWorkspace,
+  resolveUserTurnWithChatAttachments,
+  validateChatAttachments,
+} from "./chat_attachments.js";
+export type { ChatAttachmentLimits, ChatFileAttachment } from "./chat_attachments.js";
 export {
   RECEIPT_WORKFLOW_PRESET,
   parseReceiptSlashCommand,

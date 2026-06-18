@@ -31,7 +31,6 @@ import { SafetyJudge } from "./safety_judge.js";
 import { StreamAccumulator, type ProcessedStreamChunk } from "./streaming.js";
 import { scrubMessagesSpecialTokens } from "./provider_token_scrub.js";
 import {
-  resolveUserTurnWithAttachments,
   type ImageAttachment,
 } from "./image_attachments.js";
 import { modelSupportsNativeVision } from "./native_vision.js";
@@ -119,11 +118,28 @@ import {
   findBestRecipeForPrime,
   formatRecipePrimeMessage,
 } from "./recipe_library.js";
-import { EMAIL_COMPOSE_TURN_INJECTION, isEmailComposeTurn, isOutreachResearchTurn, OUTREACH_RESEARCH_TURN_INJECTION, shouldInjectEmailComposeGuidance } from "./email_compose_context.js";
+import { EMAIL_COMPOSE_CAPABILITY_NUDGE, EMAIL_COMPOSE_TURN_INJECTION, isEmailComposeTurn, shouldInjectEmailComposeGuidance } from "./email_compose_context.js";
+import {
+  EMAIL_PRIVACY_TURN_INJECTION,
+  isEmailPrivacyTurn,
+} from "./email_redaction.js";
+import {
+  buildMailSessionContextInjection,
+  MAIL_ACCOUNT_TURN_INJECTION,
+  mergeMailSessionContext,
+  parseMailSessionFromToolOutput,
+  shouldInjectMailAccountGuidance,
+  type MailSessionContext,
+} from "./mail_account_context.js";
+import {
+  partitionChatAttachments,
+  persistChatAttachmentsToWorkspace,
+  resolveUserTurnWithChatAttachments,
+  type ChatFileAttachment,
+} from "./chat_attachments.js";
 import {
   buildReceiptWorkflowTurnInjection,
   isReceiptWorkflowTurn,
-  persistImageAttachmentsToWorkspace,
   resolveReceiptWorkflowUserMessage,
   stripReceiptWorkflowCommandPrefix,
   type ReceiptWorkflowPreset,
@@ -174,6 +190,7 @@ import {
   hasLocalProviderApiKey,
   inferenceAccountUrl,
   isInferenceBudgetExceededError,
+  isInferenceServerError,
   isManagedInferenceAuthError,
   managedInferenceBaseUrl,
   resolveInferenceMode,
@@ -378,6 +395,26 @@ import {
   proactiveVerificationEnabled,
   toolCallCountsAsVerification,
 } from "./proactive_verification.js";
+import {
+  buildDistillArtifactNudge,
+  buildExplicitPathReadNudge,
+  buildOrderedStepsNudge,
+  buildSymbolIndexNudge,
+  buildVaultToolsNudge,
+  distillArtifactHashFromOutput,
+  extractExplicitRepoPaths,
+  isCriticToolName,
+  verificationToolsNeeded,
+  getMissingVerificationTools,
+  criticMinTools,
+  needsVerificationContinuation,
+  buildVerificationToolsNudge,
+  userRequestsOrderedSteps,
+  userRequestsSpawnOrchestration,
+  userRequestsSymbolTools,
+  userRequestsVaultTools,
+  VERIFY_ORCHESTRATION_TOOL_NAMES,
+} from "./capability_gates.js";
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -644,6 +681,7 @@ function describeError(err: unknown, baseURL?: string, retriesExhausted?: boolea
 function isRetryable(err: unknown, baseURL?: string): boolean {
   if (isKimchiApiBaseUrl(baseURL) && isKimchiRetryableProviderError(err)) return true;
   if (isOpenRouterUpstreamProviderError(err)) return false;
+  if (isInferenceServerError(err)) return true;
   if (err instanceof OpenAI.RateLimitError) return true;
   if (err instanceof OpenAI.InternalServerError) return true;
   if (err instanceof OpenAI.APIConnectionError) return true;
@@ -673,6 +711,7 @@ function isRateLimitError(err: unknown): boolean {
 }
 
 function isProviderUnavailableError(err: unknown): boolean {
+  if (isInferenceServerError(err)) return true;
   if (err instanceof OpenAI.APIError && err.status != null && err.status >= 500) return true;
   const msg = describeError(err).toLowerCase();
   return /provider.*unavailable|temporarily unavailable|bad gateway|gateway|upstream|econnreset|socket hang up|etimedout/i.test(msg);
@@ -1273,6 +1312,11 @@ export class AgentHarness {
   private activeContextLimits: ModelContextLimits | null = null;
   private managedInferenceCatalog: ManagedInferenceModel[] | null = null;
   private criticConsumedThisSend = false;
+  private verificationGateAttemptedThisSend = false;
+  private verificationMidNudgesThisSend = 0;
+  private static readonly MAX_VERIFICATION_MID_NUDGES = 3;
+  private distillArtifactNudgeThisSend = false;
+  private capabilityNudgesInjectedThisSend = false;
   /** Timestamp of the last compression event in this send (for ACON failure analysis). */
   private lastCompressionTimestampThisSend = 0;
   /** Whether ACON guideline analysis has fired this send (one-shot). */
@@ -1384,6 +1428,8 @@ export class AgentHarness {
 
   private pendingRiskyPreferenceSummary: string | null = null;
   private turnInference: TurnInferenceResult | null = null;
+  /** Active mailbox/thread from recent mail tool calls — guides account_hint on follow-up turns. */
+  private mailSessionContext: MailSessionContext | null = null;
   private _turnReasoningBudget: ReasoningBudget | null = null;
   private _turnReasoningSurface: ReasoningSurface = "external";
   private toolCallsDispatchedThisSend = 0;
@@ -1767,6 +1813,115 @@ export class AgentHarness {
   private noteVerificationToolOutcome(toolName: string, argsJson: string, ok: boolean): void {
     if (!ok || !toolCallCountsAsVerification(toolName, argsJson)) return;
     this.verificationSatisfiedThisSend = true;
+    if (isCriticToolName(toolName)) {
+      this.criticConsumedThisSend = true;
+    }
+  }
+
+  /** Pre-activate tool families + inject turn nudges for explicit multi-step / verify / vault / email asks. */
+  private ensureCapabilityToolPreseed(userMessage: string, openingTurn: boolean): void {
+    if (this.agentDepth > 0) return;
+    const emailCompose = shouldInjectEmailComposeGuidance(userMessage);
+    if (openingTurn && !emailCompose) return;
+
+    const families = new Set<string>();
+    if (verificationToolsNeeded(userMessage, this.runtimePreferences)) {
+      families.add("orchestration");
+    }
+    if (userRequestsSpawnOrchestration(userMessage)) {
+      families.add("orchestration");
+    }
+    if (userRequestsSymbolTools(userMessage)) {
+      families.add("code_intel");
+    }
+    if (userRequestsVaultTools(userMessage)) {
+      families.add("vault");
+    }
+    if (shouldInjectEmailComposeGuidance(userMessage)) {
+      families.add("google_workspace");
+      if (/\boutlook|microsoft|m365|office 365/i.test(userMessage)) {
+        families.add("microsoft_365");
+      }
+    }
+
+    if (this.registry.isLazyToolLoading() && families.size > 0) {
+      const registryHas = (fam: string) =>
+        this.registry.getToolNames().some(
+          (t) => this.registry.getSuggestedFamilyForTool(t) === fam
+        );
+      const toActivate = [...families].filter(registryHas);
+      if (toActivate.length > 0) {
+        const newly = this.registry.activateFamilies(toActivate);
+        if (newly.length > 0) {
+          this.context.refreshProtocolDynamic(this.registry.getActiveToolNames());
+          this.refreshToolAwareness("capability_family_preseed");
+        }
+      }
+    } else if (verificationToolsNeeded(userMessage, this.runtimePreferences)) {
+      const tools = VERIFY_ORCHESTRATION_TOOL_NAMES.filter(
+        (n) => this.registry.has(n) && !this.registry.isActive(n)
+      );
+      if (tools.length > 0) {
+        this.registry.activate(tools);
+        this.context.refreshProtocolDynamic(this.registry.getActiveToolNames());
+      }
+    }
+
+    if (!this.capabilityNudgesInjectedThisSend) {
+      const nudges: string[] = [];
+      if (userRequestsOrderedSteps(userMessage)) {
+        nudges.push(buildOrderedStepsNudge(userMessage));
+      }
+      const paths = extractExplicitRepoPaths(userMessage);
+      if (paths.length > 0) {
+        nudges.push(buildExplicitPathReadNudge(paths));
+      }
+      if (userRequestsSymbolTools(userMessage)) {
+        nudges.push(buildSymbolIndexNudge());
+      }
+      if (userRequestsVaultTools(userMessage)) {
+        nudges.push(buildVaultToolsNudge());
+      }
+      if (verificationToolsNeeded(userMessage, this.runtimePreferences)) {
+        nudges.push(
+          "[VERIFICATION TOOLS ACTIVE] verify_result and critic tools are enabled for this turn — " +
+            "call them when the user sequence or harness critic gate requires verification (R-VERIFY-READ)."
+        );
+      }
+      if (shouldInjectEmailComposeGuidance(userMessage)) {
+        nudges.push(EMAIL_COMPOSE_CAPABILITY_NUDGE);
+      }
+      for (const content of nudges) {
+        this.context.appendMessage({ role: "system", content });
+      }
+      if (nudges.length > 0) {
+        this.capabilityNudgesInjectedThisSend = true;
+      }
+    }
+  }
+
+  /** Mid-turn nudge when verification/critics are required but still missing. */
+  private maybeInjectVerificationMidTurn(round: number): void {
+    if (this.agentDepth > 0) return;
+    if (this.verificationMidNudgesThisSend >= AgentHarness.MAX_VERIFICATION_MID_NUDGES) return;
+    if (!verificationToolsNeeded(this.lastUserMessage, this.runtimePreferences)) return;
+
+    const missing = getMissingVerificationTools(
+      this.lastUserMessage,
+      this.toolsUsedThisTurn,
+      this.runtimePreferences
+    );
+    if (missing.length === 0) return;
+
+    const minRound = Math.max(2, criticMinTools(this.runtimePreferences));
+    if (round < minRound) return;
+
+    this.verificationMidNudgesThisSend += 1;
+    this.ensureCapabilityToolPreseed(this.lastUserMessage, false);
+    this.context.appendMessage({
+      role: "user",
+      content: buildVerificationToolsNudge(missing),
+    });
   }
 
   private checkContractAndCommitments(
@@ -2356,7 +2511,7 @@ export class AgentHarness {
       );
       if (
         byokPatch &&
-        resolveInferenceMode(this.runtimePreferences) !== "byok"
+        resolveInferenceMode(this.runtimePreferences) === "auto"
       ) {
         await this.patchRuntimePreferences(byokPatch, { persist: true });
       }
@@ -2897,7 +3052,9 @@ export class AgentHarness {
       sessionGreeting?: boolean;
       personaBootstrapPrompt?: boolean;
       liveDictation?: boolean;
-      /** When set with a native-vision main model, images route as multimodal user content. */
+      /** Images + any other files attached to the user turn. */
+      chatAttachments?: ChatFileAttachment[];
+      /** @deprecated use chatAttachments */
       imageAttachments?: ImageAttachment[];
       /** Guided preset — e.g. receipt_to_xero (requires image attachments). */
       workflowPreset?: ReceiptWorkflowPreset;
@@ -2924,6 +3081,8 @@ export class AgentHarness {
       sessionGreeting?: boolean;
       personaBootstrapPrompt?: boolean;
       liveDictation?: boolean;
+      chatAttachments?: ChatFileAttachment[];
+      /** @deprecated use chatAttachments */
       imageAttachments?: ImageAttachment[];
       workflowPreset?: ReceiptWorkflowPreset;
     }
@@ -3013,15 +3172,17 @@ export class AgentHarness {
     if (this.agentDepth === 0 && !openingTurn && userMessage.trim()) {
       void this.resolvePendingTurnLearningFromFollowUp(userMessage);
     }
-    let imageAttachments = options?.imageAttachments ?? [];
+    let chatAttachments: ChatFileAttachment[] =
+      options?.chatAttachments ?? (options?.imageAttachments as ChatFileAttachment[] | undefined) ?? [];
     let receiptWorkflowActive = false;
     let effectiveUserMessage = userMessage;
+    const initialImages = partitionChatAttachments(chatAttachments).images;
     if (
       !openingTurn &&
       isReceiptWorkflowTurn({
         workflowPreset: options?.workflowPreset,
         userMessage,
-        imageAttachmentCount: imageAttachments.length,
+        imageAttachmentCount: initialImages.length,
       })
     ) {
       receiptWorkflowActive = true;
@@ -3029,23 +3190,28 @@ export class AgentHarness {
       if (!effectiveUserMessage.trim()) {
         effectiveUserMessage = resolveReceiptWorkflowUserMessage("");
       }
-      imageAttachments = await persistImageAttachmentsToWorkspace(imageAttachments);
+      chatAttachments = await persistChatAttachmentsToWorkspace(chatAttachments);
+    } else if (!openingTurn) {
+      const split = partitionChatAttachments(chatAttachments);
+      const persistedFiles =
+        split.files.length > 0 ? await persistChatAttachmentsToWorkspace(split.files) : [];
+      chatAttachments = [...split.images, ...persistedFiles];
     }
     const conversationUserContentResolved =
       openingTurn || !receiptWorkflowActive
         ? conversationUserContent
         : effectiveUserMessage;
     const userTurnContent =
-      !openingTurn && imageAttachments.length > 0
-        ? await resolveUserTurnWithAttachments(
+      !openingTurn && chatAttachments.length > 0
+        ? await resolveUserTurnWithChatAttachments(
             conversationUserContentResolved,
-            imageAttachments,
+            chatAttachments,
             this.config.model
           )
         : conversationUserContentResolved;
     const nativeVisionTurn =
       !openingTurn &&
-      imageAttachments.length > 0 &&
+      partitionChatAttachments(chatAttachments).images.length > 0 &&
       modelSupportsNativeVision(this.config.model);
 
     this.lastTurnUserGoal = openingTurn ? "" : effectiveUserMessage;
@@ -3072,6 +3238,10 @@ export class AgentHarness {
     this.suppressReasoningToolsThisSend = false;
     this.proactiveCompressedThisSend = false;
     this.criticConsumedThisSend = false;
+    this.verificationGateAttemptedThisSend = false;
+    this.verificationMidNudgesThisSend = 0;
+    this.distillArtifactNudgeThisSend = false;
+    this.capabilityNudgesInjectedThisSend = false;
     this.lastCompressionTimestampThisSend = 0;
     this.aconGuidelineAnalyzedThisSend = false;
     this.recallRewriteThisSend = null;
@@ -3279,7 +3449,11 @@ export class AgentHarness {
     }
     // Wire the resolved intent into the context so refreshProtocolDynamic can
     // suppress irrelevant protocol sections (saves 300–800 tokens per turn).
-    this.context.setProtocolIntentHint(this.turnInference?.intent ?? "any");
+    if (shouldInjectEmailComposeGuidance(userMessage)) {
+      this.context.setProtocolIntentHint("execution");
+    } else {
+      this.context.setProtocolIntentHint(this.turnInference?.intent ?? "any");
+    }
     if (!openingTurn) {
       this.context.appendMessage({
         role: "system",
@@ -3435,11 +3609,24 @@ export class AgentHarness {
           }
         }
       }
-      if (!openingTurn && shouldInjectEmailComposeGuidance(userMessage)) {
+      this.ensureCapabilityToolPreseed(userMessage, openingTurn);
+      if (shouldInjectEmailComposeGuidance(userMessage)) {
         this.context.appendMessage({ role: "system", content: EMAIL_COMPOSE_TURN_INJECTION });
-        if (isOutreachResearchTurn(userMessage)) {
-          this.context.appendMessage({ role: "system", content: OUTREACH_RESEARCH_TURN_INJECTION });
-        }
+      }
+      if (shouldInjectMailAccountGuidance(userMessage)) {
+        this.context.appendMessage({ role: "system", content: MAIL_ACCOUNT_TURN_INJECTION });
+      }
+      if (isEmailPrivacyTurn(userMessage)) {
+        this.context.appendMessage({ role: "system", content: EMAIL_PRIVACY_TURN_INJECTION });
+      }
+      const mailCtxLine = buildMailSessionContextInjection(this.mailSessionContext);
+      if (
+        mailCtxLine &&
+        (shouldInjectMailAccountGuidance(userMessage) ||
+          isEmailComposeTurn(userMessage) ||
+          isShortContinuationTurn(userMessage))
+      ) {
+        this.context.appendMessage({ role: "system", content: mailCtxLine });
       }
       if (!openingTurn && isShortContinuationTurn(userMessage)) {
         this.context.appendMessage({ role: "system", content: CONTINUATION_TURN_INJECTION });
@@ -3471,7 +3658,7 @@ export class AgentHarness {
           role: "system",
           content: buildReceiptWorkflowTurnInjection({
             userNote: effectiveUserMessage,
-            attachments: imageAttachments,
+            attachments: partitionChatAttachments(chatAttachments).images,
           }),
         });
       }
@@ -3716,7 +3903,8 @@ export class AgentHarness {
         !nativeVisionTurn &&
         this.registry.isLazyToolLoading() &&
         (/\`\`\`attached_images\b/.test(conversationUserContentResolved) ||
-          imageAttachments.length > 0)
+          /\`\`\`attached_files\b/.test(conversationUserContentResolved) ||
+          chatAttachments.length > 0)
       ) {
         const visionToolNames = (["vision_analyze", "upload_image"] as const).filter((n) =>
           this.registry.has(n)
@@ -4951,6 +5139,7 @@ export class AgentHarness {
 
     this.roundCount = round + 1;
     this.dispatcher.advanceTurnRound();
+    this.maybeInjectVerificationMidTurn(this.roundCount);
     this.syncExecutionStateToContext();
     const contractBudgetMsg = this.checkContractBudgetExceeded();
     if (contractBudgetMsg) {
@@ -4958,8 +5147,10 @@ export class AgentHarness {
       // model. Under lazy loading verify_contract lives in the (activation-only)
       // reasoning_advanced family, so activate it before nudging — otherwise the
       // model is told to call a tool it cannot see.
-      const verifyToolsOn =
-        resolveHarnessEnvRaw("AGENT_VERIFY_TOOLS", this.runtimePreferences) !== "0";
+      const verifyToolsOn = verificationToolsNeeded(
+        this.lastUserMessage,
+        this.runtimePreferences
+      );
       if (
         verifyToolsOn &&
         this.registry.has("verify_contract") &&
@@ -6033,6 +6224,16 @@ export class AgentHarness {
           at: new Date().toISOString(),
           ok: result.ok,
         });
+        if (result.ok) {
+          const mailPatch = parseMailSessionFromToolOutput(
+            tc.name,
+            tc.argsJson,
+            String(result.output ?? "")
+          );
+          if (mailPatch) {
+            this.mailSessionContext = mergeMailSessionContext(this.mailSessionContext, mailPatch);
+          }
+        }
         if (prior) {
           duplicateHints.push(
             `${tc.name} was already called with identical arguments earlier this turn (call ${prior.callId}).`
@@ -6657,6 +6858,39 @@ export class AgentHarness {
               "For typed project code in a repo, run_lint/run_tests may still apply (R-TYPECHECK-VERIFY); skip ad-hoc shell parsers for static HTML/JS demos unless the user asked.",
           });
         }
+        if (
+          result.ok &&
+          !this.distillArtifactNudgeThisSend &&
+          (tc.name === "read_file" || tc.name === "grep_file")
+        ) {
+          const hash = distillArtifactHashFromOutput(content);
+          if (hash) {
+            this.distillArtifactNudgeThisSend = true;
+            this.context.appendMessage({
+              role: "user",
+              content: buildDistillArtifactNudge(hash),
+            });
+          }
+        }
+        if (tc.name === "read_file" && !result.ok) {
+          const explicit = extractExplicitRepoPaths(this.lastUserMessage);
+          if (explicit.length > 0) {
+            let pathHint = "";
+            try {
+              const a = JSON.parse(tc.argsJson) as { path?: string };
+              if (typeof a.path === "string") pathHint = a.path;
+            } catch {
+              /* ignore */
+            }
+            this.context.appendMessage({
+              role: "user",
+              content:
+                `[READ FAILED] read_file failed${pathHint ? ` on ${pathHint}` : ""} — retry with exact user-named paths: ` +
+                `${explicit.slice(0, 4).join(", ")}. ` +
+                "Paths are repo-root relative (R-PATH-GROUNDING).",
+            });
+          }
+        }
       }
 
       await this.context.elideStaleToolResults();
@@ -6841,6 +7075,21 @@ export class AgentHarness {
       // Text-only completion — end only when the model stops with a real answer.
       const openingTurn = this.sessionGreetingThisSend || this.personaBootstrapPromptThisSend;
       const assistant = (this.context.getLastAssistantMessage() ?? "").trim();
+
+      const verificationGate = needsVerificationContinuation({
+        userMessage: this.lastUserMessage,
+        toolsUsed: this.toolsUsedThisTurn,
+        prefs: this.runtimePreferences,
+        gateAttempted: this.verificationGateAttemptedThisSend,
+      });
+      if (verificationGate.needed) {
+        this.verificationGateAttemptedThisSend = true;
+        this.ensureCapabilityToolPreseed(this.lastUserMessage, false);
+        this.context.appendMessage({ role: "user", content: verificationGate.message });
+        await this.runReActLoop(round + 1);
+        return;
+      }
+
       if (
         !this.userReplyFinalizeAttempted &&
         needsUserReplyFinalization({
@@ -7891,6 +8140,7 @@ export class AgentHarness {
     this.roundCount = 0;
     this.persistedHypotheses = [];
     this.worldContextInjected = false;
+    this.mailSessionContext = null;
     this.sessionGreetingSentThisHarness = false;
     this.personaBootstrapPromptSentThisHarness = false;
   }

@@ -318,6 +318,8 @@ export class SessionBridge {
     opts?: {
       freshContext?: boolean;
       liveDictation?: boolean;
+      chatAttachments?: import("@liminal/core").ChatFileAttachment[];
+      /** @deprecated use chatAttachments */
       imageAttachments?: import("@liminal/core").ImageAttachment[];
       workflowPreset?: import("@liminal/core").ReceiptWorkflowPreset;
     }
@@ -329,7 +331,7 @@ export class SessionBridge {
       const run = this.harness.send(message, {
         freshContext: opts?.freshContext,
         liveDictation: opts?.liveDictation,
-        imageAttachments: opts?.imageAttachments,
+        chatAttachments: opts?.chatAttachments ?? opts?.imageAttachments,
         workflowPreset: opts?.workflowPreset,
       });
       this.startHeartbeat();

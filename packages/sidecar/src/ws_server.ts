@@ -100,6 +100,7 @@ import {
   connectNotionOAuth,
   disconnectNotion,
   disconnectIntegrationOpenApi,
+  revokeIntegrationAccount,
 } from "./integrations_api.js";
 import { InboxWatcherService } from "./inbox_watcher_service.js";
 
@@ -689,7 +690,7 @@ export class WsServer {
             .sendUserMessage(msg, {
               freshContext: d.freshContext,
               liveDictation: d.liveDictation,
-              imageAttachments: att.attachments,
+              chatAttachments: att.attachments,
               workflowPreset: d.workflowPreset,
             })
             .catch((err) => {
@@ -1240,6 +1241,24 @@ export class WsServer {
           const d = data as { revoke?: boolean };
           try {
             const output = await disconnectNotion(this.registry, d.revoke === true);
+            const snap = await buildIntegrationsSnapshot();
+            this.ack(ws, id, true, undefined, { output, integrations: snap });
+          } catch (err) {
+            this.ack(ws, id, false, err instanceof Error ? err.message : String(err));
+          }
+          return;
+        }
+
+        case "revoke_integration_account": {
+          const d = data as { provider?: string; accountId?: string };
+          const provider = String(d.provider ?? "").trim();
+          const accountId = String(d.accountId ?? "").trim();
+          try {
+            const output = await revokeIntegrationAccount(
+              this.registry,
+              provider as Parameters<typeof revokeIntegrationAccount>[1],
+              accountId
+            );
             const snap = await buildIntegrationsSnapshot();
             this.ack(ws, id, true, undefined, { output, integrations: snap });
           } catch (err) {

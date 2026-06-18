@@ -1,10 +1,9 @@
-import React, { useCallback, useEffect, useState } from "react";
+import React from "react";
 import { webApiFetch } from "../webApiAuth.js";
-import {
-  INTEGRATION_BRANDS,
-  IntegrationBrandLogo,
-  type IntegrationBrandId,
-} from "./integrationBrands.js";
+import { INTEGRATION_BRANDS } from "./integrationBrands.js";
+import { IntegrationAccountsList } from "./IntegrationAccountsList.js";
+import { IntegrationCard } from "./IntegrationCard.js";
+import { buildAuth, useIntegrationsPanel } from "./useIntegrationsPanel.js";
 
 const CYAN = "var(--lim-accent, #00d4ff)";
 const AMBER = "var(--lim-warn, #ffb347)";
@@ -36,525 +35,131 @@ const input: React.CSSProperties = {
   boxSizing: "border-box",
 };
 
-interface GoogleAccount {
-  accountId: string;
-  email?: string;
-  scopes: string[];
-  expiresAt: number;
-  missingScopes?: string[];
-}
-
-interface ConnectionSummary {
-  kind: "mcp" | "openapi";
-  name: string;
-  toolCount: number;
-  sampleTools: string[];
-  authKind: string;
-  attachedAt: number;
-  parentProvider?: string;
-  serverUrl?: string;
-  specUrl?: string;
-  baseUrl?: string;
-  readOnly?: boolean;
-  services?: string[];
-}
-
-interface IntegrationsData {
-  google: {
-    accounts: GoogleAccount[];
-    sidecar: { enabled: boolean; running: boolean; port: number; url: string; pid?: number };
-    services: string[];
-  };
-  microsoft?: {
-    accounts: GoogleAccount[];
-    sidecar: { enabled: boolean; running: boolean; port: number; url: string; pid?: number };
-    services: string[];
-  };
-  github?: {
-    accounts: Array<GoogleAccount & { login?: string }>;
-  };
-  xero?: {
-    accounts: Array<
-      GoogleAccount & {
-        tenantId?: string;
-        tenantName?: string;
-        missingScopes?: string[];
-        missingCoreScopes?: string[];
-        missingFullScopes?: string[];
-        missingExtendedScopes?: string[];
-      }
-    >;
-  };
-  slack?: {
-    accounts: Array<
-      GoogleAccount & {
-        teamId?: string;
-        teamName?: string;
-      }
-    >;
-  };
-  linear?: {
-    accounts: Array<
-      GoogleAccount & {
-        organizationName?: string;
-      }
-    >;
-  };
-  notion?: {
-    accounts: Array<
-      GoogleAccount & {
-        workspaceId?: string;
-        workspaceName?: string;
-      }
-    >;
-  };
-  connections: ConnectionSummary[];
-}
-
 export interface IntegrationsPanelProps {
   agentBusy: boolean;
 }
-
-type ExpandedId = "google" | "microsoft" | "xero" | "slack" | "linear" | "notion" | "github" | "advanced" | null;
 
 function FieldLabel({ children }: { children: React.ReactNode }) {
   return <div style={{ fontSize: 10, color: "#8899aa", marginBottom: 4 }}>{children}</div>;
 }
 
-function StatusPill({ connected, label }: { connected: boolean; label?: string }) {
-  return (
-    <span
-      style={{
-        fontSize: 10,
-        fontFamily: "monospace",
-        padding: "2px 8px",
-        borderRadius: 2,
-        border: `1px solid ${connected ? GREEN : AMBER}`,
-        color: connected ? GREEN : AMBER,
-      }}
-    >
-      {label ?? (connected ? "Connected" : "Not connected")}
-    </span>
-  );
-}
-
-function IntegrationCard({
-  brandId,
-  statusLine,
-  connected,
-  expanded,
-  onToggle,
-  primaryLabel,
-  onPrimary,
-  primaryDisabled,
-  primaryDanger,
-  hidePrimary,
-  children,
-}: {
-  brandId: IntegrationBrandId;
-  statusLine: string;
-  connected: boolean;
-  expanded: boolean;
-  onToggle: () => void;
-  primaryLabel: string;
-  onPrimary: () => void;
-  primaryDisabled?: boolean;
-  primaryDanger?: boolean;
-  hidePrimary?: boolean;
-  children?: React.ReactNode;
-}) {
-  const brand = INTEGRATION_BRANDS[brandId];
-  return (
-    <div
-      style={{
-        gridColumn: expanded ? "1 / -1" : undefined,
-        borderRadius: 10,
-        border: `1px solid ${connected ? "rgba(0,255,136,0.35)" : "rgba(var(--lim-accent-rgb),0.14)"}`,
-        background: connected ? "rgba(0,255,136,0.04)" : "rgba(0,12,24,0.65)",
-        overflow: "hidden",
-        display: "flex",
-        flexDirection: "column",
-        minHeight: expanded ? undefined : 196,
-      }}
-    >
-      <div
-        style={{
-          padding: "14px 12px 12px",
-          cursor: "pointer",
-          flex: 1,
-          display: "flex",
-          flexDirection: "column",
-          alignItems: "center",
-          textAlign: "center",
-        }}
-        onClick={onToggle}
-        role="button"
-        tabIndex={0}
-        onKeyDown={(e) => {
-          if (e.key === "Enter" || e.key === " ") onToggle();
-        }}
-      >
-        <IntegrationBrandLogo id={brandId} size={52} />
-        <div style={{ marginTop: 10, fontSize: 14, fontWeight: 600, color: "#e8f0f8" }}>{brand.title}</div>
-        <div style={{ fontSize: 11, color: "#8fa0b0", marginTop: 4, lineHeight: 1.4, minHeight: 30 }}>
-          {statusLine}
-        </div>
-        <div style={{ marginTop: 8 }}>
-          <StatusPill connected={connected} label={connected ? "Connected" : "Not connected"} />
-        </div>
-        {hidePrimary ? (
-          <div style={{ fontSize: 10, color: "#667788", marginTop: 10 }}>Tap for options</div>
-        ) : (
-          <button
-            type="button"
-            style={{
-              ...(primaryDanger ? btnDanger : btn),
-              marginTop: 10,
-              width: "100%",
-              maxWidth: 140,
-            }}
-            disabled={primaryDisabled}
-            onClick={(e) => {
-              e.stopPropagation();
-              onPrimary();
-            }}
-          >
-            {primaryLabel}
-          </button>
-        )}
-        <div style={{ fontSize: 10, color: "#556677", marginTop: 8 }}>
-          {expanded ? "Hide options ▴" : "More options ▾"}
-        </div>
-      </div>
-      {expanded && children ? (
-        <div
-          style={{
-            padding: "12px 14px 14px",
-            borderTop: "1px solid rgba(var(--lim-accent-rgb),0.1)",
-            textAlign: "left",
-          }}
-        >
-          {children}
-        </div>
-      ) : null}
-    </div>
-  );
-}
-
 export function IntegrationsPanel({ agentBusy }: IntegrationsPanelProps) {
-  const [data, setData] = useState<IntegrationsData | null>(null);
-  const [loading, setLoading] = useState(false);
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [expanded, setExpanded] = useState<ExpandedId>(null);
+  const ctrl = useIntegrationsPanel(agentBusy);
+  const {
+    data,
+    loading,
+    busy,
+    error,
+    expanded,
+    disabled,
+    derived: d,
+    modes: m,
+    services: svc,
+    advanced: adv,
+    actions,
+  } = ctrl;
 
-  const [mode, setMode] = useState<"read_write" | "read_only">("read_write");
-  const [msMode, setMsMode] = useState<"read_write" | "read_only">("read_write");
-  const [xeroMode, setXeroMode] = useState<"read_write" | "read_only">("read_write");
-  const [xeroExtended, setXeroExtended] = useState(false);
-  const [xeroFullScopes, setXeroFullScopes] = useState(false);
-  const [slackMode, setSlackMode] = useState<"read_write" | "read_only">("read_write");
-  const [linearMode, setLinearMode] = useState<"read_write" | "read_only">("read_write");
-  const [notionMode, setNotionMode] = useState<"read_write" | "read_only">("read_write");
-  const [githubMode, setGithubMode] = useState<"read_write" | "read_only">("read_write");
-  const [selectedServices, setSelectedServices] = useState<Set<string>>(new Set());
-  const [msSelectedServices, setMsSelectedServices] = useState<Set<string>>(new Set());
+  const {
+    accounts,
+    sidecar,
+    services,
+    msAccounts,
+    msSidecar,
+    msServices,
+    azureAccounts,
+    azureSidecar,
+    xeroAccounts,
+    slackAccounts,
+    linearAccounts,
+    notionAccounts,
+    githubAccounts,
+    googleConnected,
+    microsoftConnected,
+    azureConnected,
+    xeroConnected,
+    slackConnected,
+    linearConnected,
+    notionConnected,
+    githubConnected,
+    googleToolCount,
+    microsoftToolCount,
+    azureToolCount,
+    githubToolCount,
+    googleSignedIn,
+    microsoftSignedIn,
+    azureSignedIn,
+    githubSignedIn,
+    googleCalendarAttached,
+    msCalendarAttached,
+    customMcp,
+    openApi,
+  } = d;
 
-  const [mcpName, setMcpName] = useState("");
-  const [mcpUrl, setMcpUrl] = useState("");
-  const [mcpReadOnly, setMcpReadOnly] = useState(false);
-  const [mcpAuthKind, setMcpAuthKind] = useState<"none" | "bearer" | "header" | "basic">("none");
-  const [mcpAuthEnv, setMcpAuthEnv] = useState("");
-  const [mcpAuthHeader, setMcpAuthHeader] = useState("Authorization");
+  const { run, toggleExpand } = actions;
+  const { toggleService, toggleMsService } = svc;
+  const {
+    googlePrimary,
+    microsoftPrimary,
+    azurePrimary,
+    githubPrimary,
+    xeroPrimary,
+    xeroReconnect,
+    slackPrimary,
+    linearPrimary,
+    notionPrimary,
+    revokeAccount,
+    load,
+  } = actions;
 
-  const [apiName, setApiName] = useState("");
-  const [apiSpecUrl, setApiSpecUrl] = useState("");
-  const [apiBaseUrl, setApiBaseUrl] = useState("");
-  const [apiAuthKind, setApiAuthKind] = useState<"none" | "bearer" | "header" | "basic">("bearer");
-  const [apiAuthEnv, setApiAuthEnv] = useState("");
-  const [apiAuthHeader, setApiAuthHeader] = useState("X-Api-Key");
-
-  const load = useCallback(async () => {
-    setLoading(true);
-    setError(null);
-    try {
-      const res = await webApiFetch("/api/integrations");
-      if (!res.ok) throw new Error(await res.text());
-      const json = (await res.json()) as IntegrationsData;
-      setData(json);
-      if (selectedServices.size === 0 && json.google.services.length > 0) {
-        setSelectedServices(new Set(json.google.services));
-      }
-      if (msSelectedServices.size === 0 && (json.microsoft?.services.length ?? 0) > 0) {
-        setMsSelectedServices(new Set(json.microsoft!.services));
-      }
-    } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
-    } finally {
-      setLoading(false);
-    }
-  }, [selectedServices.size, msSelectedServices.size]);
-
-  useEffect(() => {
-    void load();
-  }, [load]);
-
-  const googleToolsConnected = (d: IntegrationsData) =>
-    d.connections.some((c) => c.parentProvider === "google_workspace");
-
-  const microsoftToolsConnected = (d: IntegrationsData) =>
-    d.connections.some((c) => c.parentProvider === "microsoft_365");
-
-  /** Poll after opening a browser OAuth tab until tokens/tools appear on the harness. */
-  const pollIntegrationsUntil = async (
-    predicate: (d: IntegrationsData) => boolean,
-    timeoutMs = 10 * 60_000
-  ) => {
-    const deadline = Date.now() + timeoutMs;
-    while (Date.now() < deadline) {
-      await new Promise((r) => setTimeout(r, 1500));
-      const res = await webApiFetch("/api/integrations");
-      if (!res.ok) continue;
-      const json = (await res.json()) as IntegrationsData;
-      setData(json);
-      if (predicate(json)) return;
-    }
-    throw new Error("Timed out waiting for sign-in — complete consent in the browser tab.");
-  };
-
-  const run = async (fn: () => Promise<void>) => {
-    setBusy(true);
-    setError(null);
-    try {
-      await fn();
-      await load();
-    } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  const buildAuth = (
-    kind: "none" | "bearer" | "header" | "basic",
-    envVar: string,
-    headerName: string
-  ) => {
-    if (kind === "none" || !envVar.trim()) return { kind: "none" as const };
-    if (kind === "header") return { kind, envVar: envVar.trim(), headerName: headerName.trim() || "Authorization" };
-    return { kind, envVar: envVar.trim() };
-  };
-
-  const toggleService = (id: string) => {
-    setSelectedServices((prev) => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
-      return next;
-    });
-  };
-
-  const toggleMsService = (id: string) => {
-    setMsSelectedServices((prev) => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
-      return next;
-    });
-  };
-
-  const toggleExpand = (id: ExpandedId) => {
-    setExpanded((prev) => (prev === id ? null : id));
-  };
-
-  const accounts = data?.google.accounts ?? [];
-  const sidecar = data?.google.sidecar;
-  const services = data?.google.services ?? [];
-  const connections = data?.connections ?? [];
-  const curatedParents = new Set(["google_workspace", "microsoft_365", "github"]);
-  const customMcp = connections.filter(
-    (c) => c.kind === "mcp" && (!c.parentProvider || !curatedParents.has(c.parentProvider))
-  );
-  const googleMcp = connections.filter((c) => c.kind === "mcp" && c.parentProvider === "google_workspace");
-  const googleCalendarAttached = googleMcp.some((c) => c.name === "google_calendar");
-  const microsoftMcp = connections.filter((c) => c.kind === "mcp" && c.parentProvider === "microsoft_365");
-  const msGraphConn = microsoftMcp.find((c) => c.name === "microsoft");
-  const msCalendarAttached = msGraphConn?.services?.includes("calendar") ?? false;
-  const githubMcp = connections.filter((c) => c.kind === "mcp" && c.parentProvider === "github");
-  const openApi = connections.filter((c) => c.kind === "openapi");
-  const disabled = busy || agentBusy || loading;
-
-  const msAccounts = data?.microsoft?.accounts ?? [];
-  const msSidecar = data?.microsoft?.sidecar;
-  const msServices = data?.microsoft?.services ?? [];
-  const xeroAccounts = data?.xero?.accounts ?? [];
-  const slackAccounts = data?.slack?.accounts ?? [];
-  const linearAccounts = data?.linear?.accounts ?? [];
-  const notionAccounts = data?.notion?.accounts ?? [];
-  const googleConnected = googleMcp.length > 0;
-  const microsoftConnected = microsoftMcp.length > 0;
-  const xeroConnected = xeroAccounts.length > 0;
-  const slackConnected = slackAccounts.length > 0;
-  const linearConnected = linearAccounts.length > 0;
-  const notionConnected = notionAccounts.length > 0;
-  const githubConnected = githubMcp.length > 0;
-  const googleToolCount = googleMcp.reduce((n, c) => n + c.toolCount, 0);
-  const microsoftToolCount = microsoftMcp.reduce((n, c) => n + c.toolCount, 0);
-  const githubToolCount = githubMcp.reduce((n, c) => n + c.toolCount, 0);
-
-  const googlePrimary = async () => {
-    if (googleConnected) {
-      const res = await webApiFetch("/api/integrations/google?revoke=1", { method: "DELETE" });
-      const json = (await res.json()) as { error?: string };
-      if (!res.ok) throw new Error(json.error ?? "disconnect failed");
-      return;
-    }
-    if (accounts.length === 0) {
-      const svc = [...selectedServices].join(",");
-      const res = await webApiFetch(
-        `/api/integrations/google/begin?mode=${mode}${svc ? `&services=${encodeURIComponent(svc)}` : ""}`
-      );
-      if (!res.ok) throw new Error(await res.text());
-      const { connectUrl } = (await res.json()) as { connectUrl: string };
-      window.open(connectUrl, "_blank", "noopener,noreferrer");
-      await pollIntegrationsUntil((d) => googleToolsConnected(d));
-      return;
-    }
-    const res = await webApiFetch("/api/integrations/google/connect", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ services: [...selectedServices], mode }),
-    });
-    const json = (await res.json()) as { error?: string };
-    if (!res.ok) throw new Error(json.error ?? "connect failed");
-  };
-
-  const microsoftPrimary = async () => {
-    if (microsoftConnected) {
-      const res = await webApiFetch("/api/integrations/microsoft?revoke=1", { method: "DELETE" });
-      const json = (await res.json()) as { error?: string };
-      if (!res.ok) throw new Error(json.error ?? "disconnect failed");
-      return;
-    }
-    if (msAccounts.length === 0) {
-      const svc = [...msSelectedServices].join(",");
-      const res = await webApiFetch(
-        `/api/integrations/microsoft/begin?mode=${msMode}${svc ? `&services=${encodeURIComponent(svc)}` : ""}`
-      );
-      if (!res.ok) throw new Error(await res.text());
-      const { connectUrl } = (await res.json()) as { connectUrl: string };
-      window.open(connectUrl, "_blank", "noopener,noreferrer");
-      await pollIntegrationsUntil((d) => microsoftToolsConnected(d));
-      return;
-    }
-    const res = await webApiFetch("/api/integrations/microsoft/connect", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ services: [...msSelectedServices], mode: msMode }),
-    });
-    const json = (await res.json()) as { error?: string };
-    if (!res.ok) throw new Error(json.error ?? "connect failed");
-  };
-
-  const githubAccounts = data?.github?.accounts ?? [];
-
-  const githubPrimary = async () => {
-    if (githubConnected) {
-      const res = await webApiFetch("/api/integrations/github?revoke=1", { method: "DELETE" });
-      const json = (await res.json()) as { error?: string };
-      if (!res.ok) throw new Error(json.error ?? "disconnect failed");
-      return;
-    }
-    if (githubAccounts.length > 0) {
-      const res = await webApiFetch("/api/integrations/github/connect", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ mode: githubMode }),
-      });
-      const json = (await res.json()) as { error?: string };
-      if (!res.ok) throw new Error(json.error ?? "GitHub connect failed");
-      return;
-    }
-    const res = await webApiFetch(`/api/integrations/github/begin?mode=${githubMode}`);
-    if (!res.ok) throw new Error(await res.text());
-    const { connectUrl } = (await res.json()) as { connectUrl: string };
-    window.open(connectUrl, "_blank", "noopener,noreferrer");
-    await pollIntegrationsUntil(
-      (d) => d.connections.some((c) => c.parentProvider === "github") || (d.github?.accounts.length ?? 0) > 0
-    );
-  };
-
-  const beginXeroOAuth = async () => {
-    const qs = new URLSearchParams({ mode: xeroMode });
-    if (xeroExtended) qs.set("extended", "1");
-    if (xeroFullScopes) qs.set("full_scopes", "1");
-    const res = await webApiFetch(`/api/integrations/xero/begin?${qs.toString()}`);
-    if (!res.ok) throw new Error(await res.text());
-    const { connectUrl } = (await res.json()) as { connectUrl: string };
-    window.open(connectUrl, "_blank", "noopener,noreferrer");
-    await pollIntegrationsUntil((d) => (d.xero?.accounts.length ?? 0) > 0);
-  };
-
-  const xeroPrimary = async () => {
-    if (xeroConnected) {
-      const res = await webApiFetch("/api/integrations/xero?revoke=1", { method: "DELETE" });
-      const json = (await res.json()) as { error?: string };
-      if (!res.ok) throw new Error(json.error ?? "disconnect failed");
-      return;
-    }
-    await beginXeroOAuth();
-  };
-
-  const xeroReconnect = async () => {
-    if (xeroConnected) {
-      const res = await webApiFetch("/api/integrations/xero?revoke=1", { method: "DELETE" });
-      const json = (await res.json()) as { error?: string };
-      if (!res.ok) throw new Error(json.error ?? "disconnect failed");
-    }
-    await beginXeroOAuth();
-  };
-
-  const slackPrimary = async () => {
-    if (slackConnected) {
-      const res = await webApiFetch("/api/integrations/slack?revoke=1", { method: "DELETE" });
-      const json = (await res.json()) as { error?: string };
-      if (!res.ok) throw new Error(json.error ?? "disconnect failed");
-      return;
-    }
-    const res = await webApiFetch(`/api/integrations/slack/begin?mode=${slackMode}`);
-    if (!res.ok) throw new Error(await res.text());
-    const { connectUrl } = (await res.json()) as { connectUrl: string };
-    window.open(connectUrl, "_blank", "noopener,noreferrer");
-    await pollIntegrationsUntil((d) => (d.slack?.accounts.length ?? 0) > 0);
-  };
-
-  const linearPrimary = async () => {
-    if (linearConnected) {
-      const res = await webApiFetch("/api/integrations/linear?revoke=1", { method: "DELETE" });
-      const json = (await res.json()) as { error?: string };
-      if (!res.ok) throw new Error(json.error ?? "disconnect failed");
-      return;
-    }
-    const res = await webApiFetch(`/api/integrations/linear/begin?mode=${linearMode}`);
-    if (!res.ok) throw new Error(await res.text());
-    const { connectUrl } = (await res.json()) as { connectUrl: string };
-    window.open(connectUrl, "_blank", "noopener,noreferrer");
-    await pollIntegrationsUntil((d) => (d.linear?.accounts.length ?? 0) > 0);
-  };
-
-  const notionPrimary = async () => {
-    if (notionConnected) {
-      const res = await webApiFetch("/api/integrations/notion?revoke=1", { method: "DELETE" });
-      const json = (await res.json()) as { error?: string };
-      if (!res.ok) throw new Error(json.error ?? "disconnect failed");
-      return;
-    }
-    const res = await webApiFetch(`/api/integrations/notion/begin?mode=${notionMode}`);
-    if (!res.ok) throw new Error(await res.text());
-    const { connectUrl } = (await res.json()) as { connectUrl: string };
-    window.open(connectUrl, "_blank", "noopener,noreferrer");
-    await pollIntegrationsUntil((d) => (d.notion?.accounts.length ?? 0) > 0);
-  };
+  const {
+    mode,
+    setMode,
+    msMode,
+    setMsMode,
+    azureMode,
+    setAzureMode,
+    xeroMode,
+    setXeroMode,
+    xeroExtended,
+    setXeroExtended,
+    xeroFullScopes,
+    setXeroFullScopes,
+    slackMode,
+    setSlackMode,
+    linearMode,
+    setLinearMode,
+    notionMode,
+    setNotionMode,
+    githubMode,
+    setGithubMode,
+  } = m;
+  const { selectedServices, msSelectedServices } = svc;
+  const {
+    mcpName,
+    setMcpName,
+    mcpUrl,
+    setMcpUrl,
+    mcpReadOnly,
+    setMcpReadOnly,
+    mcpAuthKind,
+    setMcpAuthKind,
+    mcpAuthEnv,
+    setMcpAuthEnv,
+    mcpAuthHeader,
+    setMcpAuthHeader,
+    apiName,
+    setApiName,
+    apiSpecUrl,
+    setApiSpecUrl,
+    apiBaseUrl,
+    setApiBaseUrl,
+    apiAuthKind,
+    setApiAuthKind,
+    apiAuthEnv,
+    setApiAuthEnv,
+    apiAuthHeader,
+    setApiAuthHeader,
+  } = adv;
 
   return (
     <div style={{ paddingBottom: 16 }}>
@@ -562,7 +167,8 @@ export function IntegrationsPanel({ agentBusy }: IntegrationsPanelProps) {
         INTEGRATIONS
       </div>
       <p style={{ fontSize: 12, color: "#aab8c4", lineHeight: 1.5, marginBottom: 14 }}>
-        Connect the apps you use every day. Sign in once — your agent can then read email, files, code, and more. Tap a
+        Connect apps your agent can use. Workspace providers (Google, Microsoft, Azure) are two steps: sign in with
+        OAuth, then enable tools for the agent. Slack, Linear, and others attach tools automatically after sign-in. Tap a
         card for settings.
       </p>
 
@@ -598,26 +204,41 @@ export function IntegrationsPanel({ agentBusy }: IntegrationsPanelProps) {
               : INTEGRATION_BRANDS.google.tagline
         }
         connected={googleConnected}
+        statusMode="oauth_mcp"
+        signedIn={googleSignedIn}
+        toolsAttached={googleConnected}
         expanded={expanded === "google"}
         onToggle={() => toggleExpand("google")}
         primaryLabel={
-          googleConnected ? "Disconnect" : accounts.length > 0 ? "Enable tools" : "Connect"
+          googleConnected ? "Add account" : accounts.length > 0 ? "Enable tools" : "Connect"
         }
-        primaryDanger={googleConnected}
+        primaryDanger={false}
         primaryDisabled={disabled}
         onPrimary={() => void run(googlePrimary)}
       >
         <p style={{ fontSize: 11, color: "#778899", lineHeight: 1.45, margin: "10px 0" }}>
           Sign in with Google to let your agent read and send email, manage calendar events, and work with Drive files.
         </p>
-        {accounts.map((a) => (
-          <div key={a.accountId} style={{ fontSize: 11, fontFamily: "monospace", color: GREEN, marginBottom: 6 }}>
-            {a.email ?? a.accountId} — {a.scopes.length} scopes
-            {(a.missingScopes?.length ?? 0) > 0 ? (
-              <span style={{ color: AMBER }}> · missing scopes — revoke & reconnect below</span>
-            ) : null}
-          </div>
-        ))}
+        <IntegrationAccountsList
+          accounts={accounts.map((a) => ({
+            accountId: a.accountId,
+            label: a.email ?? a.accountId,
+            meta:
+              (a.missingScopes?.length ?? 0) > 0
+                ? `${a.scopes.length} scopes · missing scopes`
+                : `${a.scopes.length} scopes`,
+          }))}
+          disabled={disabled}
+          onRemove={(id) => run(() => revokeAccount("google", id))}
+          onDisconnectAll={() =>
+            run(async () => {
+              const res = await webApiFetch("/api/integrations/google?revoke=1", { method: "DELETE" });
+              const json = (await res.json()) as { error?: string };
+              if (!res.ok) throw new Error(json.error ?? "revoke failed");
+              await load();
+            })
+          }
+        />
         <div style={{ marginBottom: 8 }}>
           <label style={{ fontSize: 11, color: "#aabbcc", marginRight: 12 }}>
             <input type="radio" checked={mode === "read_write"} onChange={() => setMode("read_write")} disabled={disabled} />{" "}
@@ -699,24 +320,11 @@ export function IntegrationsPanel({ agentBusy }: IntegrationsPanelProps) {
                 });
                 const json = (await res.json()) as { error?: string };
                 if (!res.ok) throw new Error(json.error ?? "attach failed");
+                await load();
               })
             }
           >
             Re-attach tools
-          </button>
-          <button
-            type="button"
-            style={{ ...btnDanger, fontSize: 10, padding: "6px 10px" }}
-            disabled={disabled || accounts.length === 0}
-            onClick={() =>
-              void run(async () => {
-                const res = await webApiFetch("/api/integrations/google?revoke=1", { method: "DELETE" });
-                const json = (await res.json()) as { error?: string };
-                if (!res.ok) throw new Error(json.error ?? "revoke failed");
-              })
-            }
-          >
-            Revoke Google access
           </button>
         </div>
       </IntegrationCard>
@@ -731,6 +339,9 @@ export function IntegrationsPanel({ agentBusy }: IntegrationsPanelProps) {
               : INTEGRATION_BRANDS.microsoft.tagline
         }
         connected={microsoftConnected}
+        statusMode="oauth_mcp"
+        signedIn={microsoftSignedIn}
+        toolsAttached={microsoftConnected}
         expanded={expanded === "microsoft"}
         onToggle={() => toggleExpand("microsoft")}
         primaryLabel={microsoftConnected ? "Disconnect" : "Connect"}
@@ -853,6 +464,106 @@ export function IntegrationsPanel({ agentBusy }: IntegrationsPanelProps) {
       </IntegrationCard>
 
       <IntegrationCard
+        brandId="azure"
+        statusLine={
+          azureConnected
+            ? `Ready · ${azureToolCount} MCP tools`
+            : azureAccounts.length > 0
+              ? `Signed in — tap Connect`
+              : INTEGRATION_BRANDS.azure.tagline
+        }
+        connected={azureConnected || azureAccounts.length > 0}
+        statusMode="oauth_mcp"
+        signedIn={azureSignedIn}
+        toolsAttached={azureConnected}
+        expanded={expanded === "azure"}
+        onToggle={() => toggleExpand("azure")}
+        primaryLabel={azureConnected ? "Disconnect" : "Connect"}
+        primaryDanger={azureConnected}
+        primaryDisabled={disabled}
+        onPrimary={() => void run(azurePrimary)}
+      >
+        <p style={{ fontSize: 11, color: "#778899", lineHeight: 1.45, margin: "10px 0" }}>
+          ARM REST + @azure/mcp sidecar. Run <code style={{ fontFamily: "monospace" }}>az login</code> for full MCP
+          coverage.
+        </p>
+        {azureAccounts.map((a) => (
+          <div key={a.accountId} style={{ fontSize: 11, fontFamily: "monospace", color: GREEN, marginBottom: 6 }}>
+            {a.email ?? a.accountId} — {a.scopes.length} scopes
+            {(a.missingScopes?.length ?? 0) > 0 ? (
+              <span style={{ color: AMBER }}> · missing scopes — revoke & reconnect</span>
+            ) : null}
+          </div>
+        ))}
+        <div style={{ marginBottom: 8 }}>
+          <label style={{ fontSize: 11, color: "#aabbcc", marginRight: 12 }}>
+            <input
+              type="radio"
+              checked={azureMode === "read_write"}
+              onChange={() => setAzureMode("read_write")}
+              disabled={disabled || azureConnected}
+            />{" "}
+            Read + write
+          </label>
+          <label style={{ fontSize: 11, color: "#aabbcc" }}>
+            <input
+              type="radio"
+              checked={azureMode === "read_only"}
+              onChange={() => setAzureMode("read_only")}
+              disabled={disabled || azureConnected}
+            />{" "}
+            Read only
+          </label>
+        </div>
+        {azureSidecar ? (
+          <div
+            style={{
+              fontSize: 10,
+              fontFamily: "monospace",
+              color: azureSidecar.running ? GREEN : AMBER,
+              marginBottom: 10,
+            }}
+          >
+            Azure MCP sidecar: {azureSidecar.running ? azureSidecar.url : "stopped"}
+          </div>
+        ) : null}
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+          <button
+            type="button"
+            style={{ ...btn, fontSize: 10, padding: "6px 10px" }}
+            disabled={disabled || azureAccounts.length === 0}
+            onClick={() =>
+              void run(async () => {
+                const res = await webApiFetch("/api/integrations/azure/connect", {
+                  method: "POST",
+                  headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify({ mode: azureMode }),
+                });
+                const json = (await res.json()) as { error?: string };
+                if (!res.ok) throw new Error(json.error ?? "attach failed");
+              })
+            }
+          >
+            Re-attach tools
+          </button>
+          <button
+            type="button"
+            style={{ ...btnDanger, fontSize: 10, padding: "6px 10px" }}
+            disabled={disabled || azureAccounts.length === 0}
+            onClick={() =>
+              void run(async () => {
+                const res = await webApiFetch("/api/integrations/azure?revoke=1", { method: "DELETE" });
+                const json = (await res.json()) as { error?: string };
+                if (!res.ok) throw new Error(json.error ?? "revoke failed");
+              })
+            }
+          >
+            Revoke Azure access
+          </button>
+        </div>
+      </IntegrationCard>
+
+      <IntegrationCard
         brandId="xero"
         statusLine={
           xeroConnected
@@ -866,6 +577,8 @@ export function IntegrationsPanel({ agentBusy }: IntegrationsPanelProps) {
             : INTEGRATION_BRANDS.xero.tagline
         }
         connected={xeroConnected}
+        statusMode="oauth_auto_attach"
+        signedIn={xeroConnected}
         expanded={expanded === "xero"}
         onToggle={() => toggleExpand("xero")}
         primaryLabel={
@@ -1012,6 +725,8 @@ export function IntegrationsPanel({ agentBusy }: IntegrationsPanelProps) {
             : INTEGRATION_BRANDS.slack.tagline
         }
         connected={slackConnected}
+        statusMode="oauth_auto_attach"
+        signedIn={slackConnected}
         expanded={expanded === "slack"}
         onToggle={() => toggleExpand("slack")}
         primaryLabel={slackConnected ? "Disconnect" : "Connect"}
@@ -1060,6 +775,8 @@ export function IntegrationsPanel({ agentBusy }: IntegrationsPanelProps) {
             : INTEGRATION_BRANDS.linear.tagline
         }
         connected={linearConnected}
+        statusMode="oauth_auto_attach"
+        signedIn={linearConnected}
         expanded={expanded === "linear"}
         onToggle={() => toggleExpand("linear")}
         primaryLabel={linearConnected ? "Disconnect" : "Connect"}
@@ -1105,6 +822,8 @@ export function IntegrationsPanel({ agentBusy }: IntegrationsPanelProps) {
             : INTEGRATION_BRANDS.notion.tagline
         }
         connected={notionConnected}
+        statusMode="oauth_auto_attach"
+        signedIn={notionConnected}
         expanded={expanded === "notion"}
         onToggle={() => toggleExpand("notion")}
         primaryLabel={notionConnected ? "Disconnect" : "Connect"}
@@ -1152,6 +871,9 @@ export function IntegrationsPanel({ agentBusy }: IntegrationsPanelProps) {
               : INTEGRATION_BRANDS.github.tagline
         }
         connected={githubConnected}
+        statusMode="oauth_mcp"
+        signedIn={githubSignedIn}
+        toolsAttached={githubConnected}
         expanded={expanded === "github"}
         onToggle={() => toggleExpand("github")}
         primaryLabel={githubConnected ? "Disconnect" : githubAccounts.length > 0 ? "Enable tools" : "Connect"}

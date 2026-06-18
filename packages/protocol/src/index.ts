@@ -26,6 +26,7 @@ export type {
   ClientCommandMap,
   ClientCommandType,
   ClientCommandData,
+  WireChatAttachment,
   WireImageAttachment,
 } from "./commands.js";
 

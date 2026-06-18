@@ -249,18 +249,21 @@ export function buildInboxStatusSnapshot(
 export function buildInboxProcessPrompt(items: InboxTriagedItem[]): string {
   const lines = items.map((item, idx) => {
     const m = item.message;
+    const mailbox = m.accountEmail ?? m.accountId;
     return (
       `${idx + 1}. [${item.verdict.category}] ${m.subject}\n` +
+      `   Mailbox: ${mailbox} (${m.provider})\n` +
       `   From: ${m.from} <${m.fromEmail}>\n` +
-      `   Provider: ${m.provider} messageId=${m.id}\n` +
+      `   messageId=${m.id}${m.threadId ? `, threadId=${m.threadId}` : ""}\n` +
       `   Summary: ${item.verdict.summary}\n` +
-      `   Suggested: ${item.verdict.needsReply ? "draft reply for review" : "label/archive as appropriate"}`
+      `   Suggested: ${item.verdict.needsReply ? `draft reply from ${mailbox} (account_hint="${mailbox}")` : "label/archive as appropriate"}`
     );
   });
   return (
     "[INBOX PROCESS — automated triage escalation; not casual chat]\n" +
     "Process the following triaged inbox items. Use mail tools to draft replies (never send without approval), " +
-    "apply labels, or mark handled. Confirm what you did for each item.\n\n" +
+    "apply labels, or mark handled. **Each item lists its Mailbox** — pass that as account_hint on compose/send tools. " +
+    "Confirm what you did for each item.\n\n" +
     lines.join("\n\n")
   );
 }

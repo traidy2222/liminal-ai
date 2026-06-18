@@ -1,13 +1,16 @@
 import type { ApprovalDecision, ImageAttachmentSource } from "@liminal/core";
 
-/** Image attached to `send_message` (base64 data URL on the wire). */
-export interface WireImageAttachment {
+/** Chat attachment on the wire (any file as base64 data URL). */
+export interface WireChatAttachment {
   name: string;
   mimeType: string;
   dataUrl: string;
   sizeBytes: number;
   source?: ImageAttachmentSource;
 }
+
+/** @deprecated alias — wire format supports any MIME, not only images */
+export type WireImageAttachment = WireChatAttachment;
 
 /**
  * UI → server commands.
@@ -24,7 +27,7 @@ export interface ClientCommandMap {
     message: string;
     freshContext?: boolean;
     liveDictation?: boolean;
-    attachments?: WireImageAttachment[];
+    attachments?: WireChatAttachment[];
     /** Guided preset — e.g. `receipt_to_xero` (requires image attachments). */
     workflowPreset?: "receipt_to_xero";
   };
@@ -127,6 +130,7 @@ export interface ClientCommandMap {
     services?: string[];
     mode?: "read_write" | "read_only";
     openBrowser?: boolean;
+    attach?: boolean;
   };
   connect_google_workspace: {
     services?: string[];
@@ -137,6 +141,7 @@ export interface ClientCommandMap {
     services?: string[];
     mode?: "read_write" | "read_only";
     openBrowser?: boolean;
+    attach?: boolean;
   };
   connect_microsoft_365: {
     services?: string[];
@@ -147,6 +152,7 @@ export interface ClientCommandMap {
     services?: string[];
     mode?: "read_write" | "read_only";
     openBrowser?: boolean;
+    attach?: boolean;
   };
   connect_azure: {
     services?: string[];
@@ -173,9 +179,11 @@ export interface ClientCommandMap {
     openBrowser?: boolean;
   };
   disconnect_notion: { revoke?: boolean };
+  revoke_integration_account: { provider: string; accountId: string };
   connect_github_oauth: {
     mode?: "read_write" | "read_only";
     openBrowser?: boolean;
+    attach?: boolean;
   };
   connect_github: { mode?: "read_write" | "read_only" };
   disconnect_github: { revoke?: boolean };

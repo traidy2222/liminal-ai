@@ -3,6 +3,7 @@ import React from "react";
 export type IntegrationBrandId =
   | "google"
   | "microsoft"
+  | "azure"
   | "xero"
   | "slack"
   | "linear"
@@ -32,6 +33,13 @@ export const INTEGRATION_BRANDS: Record<IntegrationBrandId, IntegrationBrandMeta
     tagline: "Outlook, Teams & OneDrive",
     accent: "#00A4EF",
     accentSoft: "rgba(0, 164, 239, 0.14)",
+  },
+  azure: {
+    id: "azure",
+    title: "Azure",
+    tagline: "ARM resources & @azure/mcp",
+    accent: "#0078D4",
+    accentSoft: "rgba(0, 120, 212, 0.14)",
   },
   xero: {
     id: "xero",
@@ -95,6 +103,12 @@ function LogoSvg({ id }: { id: IntegrationBrandId }) {
           <rect x="12.8" y="2" width="9.2" height="9.2" fill="#7FBA00" />
           <rect x="2" y="12.8" width="9.2" height="9.2" fill="#00A4EF" />
           <rect x="12.8" y="12.8" width="9.2" height="9.2" fill="#FFB900" />
+        </svg>
+      );
+    case "azure":
+      return (
+        <svg viewBox="0 0 24 24" width="28" height="28" aria-hidden>
+          <path fill="#0078D4" d="M5.5 18.2 2 6.4h4.1l2.1 8.2 2.4-8.2H15l-3.5 11.8H5.5ZM16.8 6.4h4.2L24 18.2h-4.1l-.9-3.4h-4.5l-.9 3.4h-4.1l3.6-11.8Zm.3 5.2 1.5-5.1.9 3.4h-2.4Z" />
         </svg>
       );
     case "xero":

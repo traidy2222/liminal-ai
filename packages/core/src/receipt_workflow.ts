@@ -4,13 +4,11 @@
  * Activated via UI "Process receipts", slash commands, or `workflowPreset` on send.
  * Not a new tool — a fixed recipe injected as a system turn + Xero family pre-seed.
  */
-import { mkdir, writeFile } from "node:fs/promises";
-import { join, relative } from "node:path";
 import {
   normalizeImageAttachmentName,
   type ImageAttachment,
 } from "./image_attachments.js";
-import { resolveWorkspaceRoot } from "./workspace_root.js";
+import { persistChatAttachmentsToWorkspace } from "./chat_attachments.js";
 
 export const RECEIPT_WORKFLOW_PRESET = "receipt_to_xero" as const;
 export type ReceiptWorkflowPreset = typeof RECEIPT_WORKFLOW_PRESET;
@@ -19,20 +17,6 @@ const RECEIPT_SLASH_RE = /^\/(?:receipt|receipts|process-receipts)(?:\s+(.*))?$/
 
 const DEFAULT_USER_MESSAGE =
   "Process the attached receipt(s) into Xero as draft bill(s).";
-
-function mimeToExt(mime: string): string {
-  if (mime === "image/jpeg") return ".jpg";
-  if (mime === "image/png") return ".png";
-  if (mime === "image/gif") return ".gif";
-  if (mime === "image/webp") return ".webp";
-  return ".img";
-}
-
-function decodeDataUrl(dataUrl: string): Buffer {
-  const comma = dataUrl.indexOf(",");
-  if (comma < 0) return Buffer.from([]);
-  return Buffer.from(dataUrl.slice(comma + 1), "base64");
-}
 
 /** Parse `/receipt`, `/receipts`, or `/process-receipts [optional note]`. */
 export function parseReceiptSlashCommand(text: string): { note: string } | null {
@@ -79,41 +63,7 @@ export async function persistImageAttachmentsToWorkspace(
   attachments: ImageAttachment[],
   workspaceRoot?: string
 ): Promise<ImageAttachment[]> {
-  if (attachments.length === 0) return [];
-  const root = workspaceRoot ?? resolveWorkspaceRoot();
-  const dir = join(root, ".agent_artifacts", "uploads");
-  await mkdir(dir, { recursive: true });
-  const timestamp = Date.now();
-  const stored: ImageAttachment[] = [];
-
-  for (let i = 0; i < attachments.length; i++) {
-    const item = attachments[i]!;
-    if (item.filePath?.trim()) {
-      stored.push({ ...item });
-      continue;
-    }
-    const dataUrl = item.dataUrl?.trim();
-    if (!dataUrl) {
-      stored.push({ ...item });
-      continue;
-    }
-    const base = normalizeImageAttachmentName(
-      item.name.replace(/\.[^.]+$/, ""),
-      "receipt"
-    );
-    const ext = mimeToExt(item.mimeType);
-    const filename = `${timestamp}-${i + 1}-${base}${ext}`;
-    const absPath = join(dir, filename);
-    await writeFile(absPath, decodeDataUrl(dataUrl));
-    // Workspace-relative paths work reliably with read_file / xero_upload_attachment.
-    const filePath = relative(root, absPath) || filename;
-    stored.push({
-      ...item,
-      filePath,
-      dataUrl: undefined,
-    });
-  }
-  return stored;
+  return persistChatAttachmentsToWorkspace(attachments, workspaceRoot);
 }
 
 function buildAttachmentPathsBlock(attachments: ImageAttachment[]): string {

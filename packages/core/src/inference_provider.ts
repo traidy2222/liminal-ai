@@ -208,6 +208,28 @@ export interface DescribeProviderErrorOpts {
   retriesExhausted?: boolean;
 }
 
+/** Stable string body for OpenAI SDK / proxy errors (status may be undefined). */
+export function extractProviderErrorBody(err: unknown): string {
+  if (err instanceof OpenAI.APIError) {
+    if (typeof err.error === "object" && err.error !== null) return JSON.stringify(err.error);
+    return String(err.error ?? err.message ?? "");
+  }
+  return err instanceof Error ? err.message : String(err);
+}
+
+/** True for transient upstream/server failures worth retrying (incl. undefined HTTP status). */
+export function isInferenceServerError(err: unknown): boolean {
+  if (err instanceof OpenAI.InternalServerError) return true;
+  if (err instanceof OpenAI.APIError && err.status != null && err.status >= 500) return true;
+  const body = extractProviderErrorBody(err).toLowerCase();
+  const msg = (err instanceof Error ? err.message : String(err)).toLowerCase();
+  const combined = `${body} ${msg}`;
+  if (/internal_server_error|server_error|"type"\s*:\s*"server_error"/.test(combined)) return true;
+  if (/\b500\b|\b502\b|\b503\b|\b504\b|bad gateway|service unavailable|gateway timeout/.test(combined))
+    return true;
+  return false;
+}
+
 /** Augment provider errors (402 budget) with account top-up guidance. */
 export function describeProviderError(
   err: unknown,
@@ -220,10 +242,7 @@ export function describeProviderError(
     if (kimchi) return kimchi;
   }
   if (err instanceof OpenAI.APIError) {
-    const body =
-      typeof err.error === "object" && err.error !== null
-        ? JSON.stringify(err.error)
-        : String(err.error ?? err.message);
+    const body = extractProviderErrorBody(err);
     if (err.status === 400 && /no body|status code \(no body\)/i.test(body)) {
       return (
         "HTTP 400 from inference provider (empty upstream body). " +
@@ -231,7 +250,13 @@ export function describeProviderError(
         "Try Settings → switch model (e.g. DeepSeek V4), add AGENT_API_KEY for OpenRouter BYOK, or send again."
       );
     }
-    return `HTTP ${err.status} from ${err.name}: ${body}`;
+    if (err.status == null && isInferenceServerError(err)) {
+      return `HTTP 500 from inference provider (transient): ${body || err.message}`;
+    }
+    return `HTTP ${err.status ?? "unknown"} from ${err.name}: ${body}`;
+  }
+  if (isInferenceServerError(err)) {
+    return `HTTP 500 from inference provider (transient): ${extractProviderErrorBody(err)}`;
   }
   return err instanceof Error ? err.message : String(err);
 }
@@ -251,6 +276,8 @@ export function buildByokRoutingPatchForModel(
   const slug = model.trim();
   if (!slug || !isModelIncompatibleWithManagedProxy(slug)) return null;
   const mode = resolveInferenceMode(prefs);
+  // User explicitly chose managed — settings save must not override to BYOK.
+  if (mode === "managed") return null;
   if (mode === "byok") {
     return {
       harness: { env: { AGENT_MODEL: slug } },

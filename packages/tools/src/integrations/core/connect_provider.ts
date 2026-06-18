@@ -33,6 +33,8 @@ import {
   pickBestOAuthAccountByEmail,
   resolvePreferredMailProvider,
   formatPreferredMailRouteLine,
+  formatConnectedMailboxesLine,
+  listConnectedMailOAuthAccounts,
   listXeroOAuthAccounts,
   revokeXeroAccount,
   xeroBundleMissingScopes,
@@ -770,13 +772,14 @@ export function createConnectorTools(registry: ToolRegistry, _emitter: AgentEmit
       const lines: string[] = ["## Connectors", ""];
       const mailRoute = await resolvePreferredMailProvider();
       lines.push(formatPreferredMailRouteLine(mailRoute));
+      const connectedMail = await listConnectedMailOAuthAccounts();
+      lines.push(formatConnectedMailboxesLine(connectedMail));
       lines.push(
-        "Mail routing: use Google/Gmail tools for primary mail unless the user names Outlook/Microsoft. " +
-          "Entra guest accounts (#EXT#@*.onmicrosoft.com) are not day-to-day mailboxes."
+        "Inbox scan: mail_search_inboxes uses **connected mailboxes only** (mail OAuth scopes; skips unconnected providers and Entra guest admin accounts)."
       );
       lines.push("");
       lines.push(
-        `Gmail: hybrid — mcp_google_gmail_* (read/search/labels) + gmail_create_draft + gmail_send_message REST: ${
+        `Gmail: hybrid — mail_search_inboxes (all accounts) + mcp_google_gmail_* (single bound account) + gmail_create_draft + gmail_send_message REST: ${
           gmailSendRestEnabled() ? "on" : "off (set AGENT_GOOGLE_GMAIL_SEND=1)"
         }`
       );
@@ -1095,8 +1098,12 @@ export function createConnectorTools(registry: ToolRegistry, _emitter: AgentEmit
         lines.push("- (none — call connect_provider)");
       } else {
         for (const c of google) {
+          const oauthLabel =
+            c.oauthAccountId || (c.auth.kind === "oauth2" && c.auth.accountId)
+              ? `, oauthAccount=${c.oauthAccountId ?? (c.auth.kind === "oauth2" ? c.auth.accountId : "")}`
+              : "";
           lines.push(
-            `- ${c.name}: ${c.tools.length} tools, services=[${(c.services ?? []).join(",")}], readOnly=${!!c.readOnly}`
+            `- ${c.name}: ${c.tools.length} tools, services=[${(c.services ?? []).join(",")}], readOnly=${!!c.readOnly}${oauthLabel}`
           );
           if (c.name === "google_gmail" && c.readOnly) {
             lines.push(

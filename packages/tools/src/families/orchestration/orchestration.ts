@@ -7,6 +7,7 @@ import {
   detectContradictions,
   effectiveHarnessEnvRaw,
   SPAWN_BASELINE_TOOL_NAMES,
+  verifyToolsEnabled,
 } from "@liminal/core";
 import { defineTool } from "../../shared/helpers.js";
 import { createContextTools } from "../context/context_tools.js";
@@ -33,9 +34,9 @@ function sleep(ms: number) {
   return new Promise<void>((r) => setTimeout(r, ms));
 }
 
-/** Sub-agent verification (verify_result, critics) is expensive — off unless AGENT_VERIFY_TOOLS=1. */
+/** Sub-agent verification (verify_result, critics) — off unless enabled or critic gate is on. */
 function verificationToolsEnabled(): boolean {
-  return effectiveHarnessEnvRaw("AGENT_VERIFY_TOOLS") !== "0";
+  return verifyToolsEnabled();
 }
 
 const VERIFY_TOOLS_DISABLED_OUTPUT =

@@ -24,9 +24,13 @@ import { StreamingWritePreviewBox } from "./StreamingWritePreviewBox.js";
 import { PlanProgressBlock } from "./PlanProgressBlock.js";
 import { PersonaGenerationWorkbench } from "./persona/PersonaGenerationWorkbench.js";
 import {
+  DEFAULT_CHAT_ATTACHMENT_LIMITS,
   DEFAULT_IMAGE_ATTACHMENT_LIMITS,
+  isImageComposerAttachment,
   normalizeImageAttachmentName,
+  parseDataUrlAttachment,
   parseDataUrlImage,
+  validateComposerAttachments,
   validateImageAttachments,
   type ImageAttachment,
 } from "./imageAttachments.js";
@@ -1882,7 +1886,7 @@ export function App() {
   };
 
   const tryAddAttachments = (next: ImageAttachment[]) => {
-    const validation = validateImageAttachments(next, DEFAULT_IMAGE_ATTACHMENT_LIMITS);
+    const validation = validateComposerAttachments(next, DEFAULT_CHAT_ATTACHMENT_LIMITS);
     if (!validation.ok) { setAttachError(validation.error); return false; }
     setAttachments(next); setAttachError(null); return true;
   };
@@ -1893,17 +1897,32 @@ export function App() {
     const prepared: ImageAttachment[] = [];
     const audioFiles: File[] = [];
     for (const file of incoming) {
+      if (file.type.startsWith("audio/") || file.type.startsWith("video/")) {
+        audioFiles.push(file);
+        continue;
+      }
+      const dataUrl = await fileToDataUrl(file);
       if (file.type.startsWith("image/")) {
-        const dataUrl = await fileToDataUrl(file);
         const parsed = parseDataUrlImage(dataUrl);
         if (!parsed.ok) { setAttachError(parsed.error); return; }
-        prepared.push({ name: normalizeImageAttachmentName(file.name, `image-${Date.now()}.png`), mimeType: parsed.mimeType, dataUrl, sizeBytes: parsed.sizeBytes, source });
-      } else if (file.type.startsWith("audio/") || file.type.startsWith("video/")) {
-        // Audio (or audio-bearing video like mp4 podcasts) → transcribe and
-        // append the transcript to the input draft. Original file is persisted
-        // server-side so the agent can re-transcribe with different settings
-        // later via the transcribe_audio tool.
-        audioFiles.push(file);
+        prepared.push({
+          name: normalizeImageAttachmentName(file.name, `image-${Date.now()}.png`),
+          mimeType: parsed.mimeType,
+          dataUrl,
+          sizeBytes: parsed.sizeBytes,
+          source,
+        });
+      } else {
+        const parsed = parseDataUrlAttachment(dataUrl);
+        if (!parsed.ok) { setAttachError(parsed.error); return; }
+        const mimeType = file.type.trim().toLowerCase() || parsed.mimeType;
+        prepared.push({
+          name: normalizeImageAttachmentName(file.name, `file-${Date.now()}`),
+          mimeType,
+          dataUrl,
+          sizeBytes: parsed.sizeBytes,
+          source,
+        });
       }
     }
     if (audioFiles.length > 0) {
@@ -1912,7 +1931,7 @@ export function App() {
       }
     }
     if (prepared.length === 0 && audioFiles.length === 0) {
-      setAttachError("No supported files found (images, audio, or video).");
+      setAttachError("No attachments could be read.");
       return;
     }
     if (prepared.length > 0) {
@@ -2051,10 +2070,10 @@ export function App() {
   };
 
   const handlePaste = async (e: React.ClipboardEvent<HTMLElement>) => {
-    const imageFiles = Array.from(e.clipboardData.files).filter(f => f.type.startsWith("image/"));
-    if (imageFiles.length === 0) return;
+    const files = Array.from(e.clipboardData.files);
+    if (files.length === 0) return;
     e.preventDefault();
-    await addFilesAsAttachments(imageFiles, "clipboard");
+    await addFilesAsAttachments(files, "clipboard");
   };
 
   const handleDrop = async (e: React.DragEvent<HTMLFormElement>) => {

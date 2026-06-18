@@ -34,6 +34,7 @@ class IntegrationsAutomationSection extends StatefulWidget {
 }
 
 class _IntegrationsAutomationSectionState extends State<IntegrationsAutomationSection> {
+  bool _sectionExpanded = false;
   bool _showActivityLog = false;
 
   bool get _mailConnected =>
@@ -148,229 +149,296 @@ class _IntegrationsAutomationSectionState extends State<IntegrationsAutomationSe
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        Text(
-          'Automations',
-          style: Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w600),
-        ),
-        const SizedBox(height: 4),
-        Text(
-          'Background tasks for connected integrations. Configure here — not in Settings.',
-          style: Theme.of(context).textTheme.bodySmall?.copyWith(color: lim.textMuted, height: 1.4),
-        ),
-        const SizedBox(height: 12),
         Material(
           color: lim.surface.withValues(alpha: 0.55),
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(10),
             side: BorderSide(color: lim.accent.withValues(alpha: 0.18)),
           ),
-          child: Padding(
-            padding: const EdgeInsets.all(14),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                Row(
-                  children: [
-                    Icon(Icons.inbox_outlined, size: 20, color: lim.accent),
-                    const SizedBox(width: 8),
-                    Expanded(
-                      child: Text(
-                        'Inbox watcher',
-                        style: Theme.of(context).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w600),
-                      ),
-                    ),
-                    if (watchLocked)
-                      Tooltip(
-                        message: 'Locked by .env',
-                        child: Icon(Icons.lock_outline, size: 16, color: lim.textDim),
-                      ),
-                  ],
-                ),
-                const SizedBox(height: 6),
-                Text(
-                  'Fully automated: polls mail, triages, creates Liminal labels/categories in Gmail or Outlook, and handles urgent items in chat. No manual sorting. Reconnect Google once for label permissions.',
-                  style: Theme.of(context).textTheme.bodySmall?.copyWith(color: lim.textMuted, height: 1.4),
-                ),
-                const SizedBox(height: 10),
-                Wrap(
-                  spacing: 8,
-                  runSpacing: 6,
-                  children: [
-                    _ConnectorChip(
-                      label: 'Gmail',
-                      connected: widget.integrations.googleConnected,
-                      lim: lim,
-                    ),
-                    _ConnectorChip(
-                      label: 'Outlook',
-                      connected: widget.integrations.microsoftConnected,
-                      lim: lim,
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 8),
-                Text(
-                  _statusLine(),
-                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                        color: watchOn && _mailConnected ? lim.text : lim.textMuted,
-                      ),
-                ),
-                const SizedBox(height: 10),
-                SwitchListTile(
-                  contentPadding: EdgeInsets.zero,
-                  dense: true,
-                  title: const Text('Enable inbox watcher'),
-                  subtitle: watchLocked ? const Text('Set AGENT_INBOX_WATCH in .env') : null,
-                  value: watchOn,
-                  onChanged: widget.busy || watchLocked || !_mailConnected
-                      ? null
-                      : (v) => unawaited(_patchBool('AGENT_INBOX_WATCH', v)),
-                ),
-                if (watchOn && _mailConnected) ...[
-                  SwitchListTile(
-                    contentPadding: EdgeInsets.zero,
-                    dense: true,
-                    title: const Text('Sort mail into Liminal labels'),
-                    subtitle: const Text('Creates Liminal/Urgent, Action, FYI, etc. in your mailbox'),
-                    value: _boolField('AGENT_INBOX_AUTO_LABEL', fallback: true),
-                    onChanged: widget.busy || _locked('AGENT_INBOX_AUTO_LABEL')
-                        ? null
-                        : (v) => unawaited(_patchBool('AGENT_INBOX_AUTO_LABEL', v)),
-                  ),
-                  SwitchListTile(
-                    contentPadding: EdgeInsets.zero,
-                    dense: true,
-                    title: const Text('Auto-handle urgent mail in chat'),
-                    subtitle: const Text('Agent drafts replies — never sends without approval'),
-                    value: _boolField('AGENT_INBOX_AUTO_PROCESS', fallback: true),
-                    onChanged: widget.busy || _locked('AGENT_INBOX_AUTO_PROCESS')
-                        ? null
-                        : (v) => unawaited(_patchBool('AGENT_INBOX_AUTO_PROCESS', v)),
-                  ),
-                  SwitchListTile(
-                    contentPadding: EdgeInsets.zero,
-                    dense: true,
-                    title: const Text('Desktop notification on urgent mail'),
-                    value: _boolField('AGENT_INBOX_NOTIFY_URGENT', fallback: true),
-                    onChanged: widget.busy || _locked('AGENT_INBOX_NOTIFY_URGENT')
-                        ? null
-                        : (v) => unawaited(_patchBool('AGENT_INBOX_NOTIFY_URGENT', v)),
-                  ),
-                  Row(
+          clipBehavior: Clip.antiAlias,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              InkWell(
+                onTap: () => setState(() => _sectionExpanded = !_sectionExpanded),
+                child: Padding(
+                  padding: const EdgeInsets.fromLTRB(14, 12, 10, 12),
+                  child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text('Poll every', style: Theme.of(context).textTheme.bodySmall),
-                      const SizedBox(width: 12),
-                      DropdownButton<int>(
-                        value: switch (interval) {
-                          >= 1800000 => 1800000,
-                          >= 900000 => 900000,
-                          _ => 300000,
-                        },
-                        items: const [
-                          DropdownMenuItem(value: 300000, child: Text('5 minutes')),
-                          DropdownMenuItem(value: 900000, child: Text('15 minutes')),
-                          DropdownMenuItem(value: 1800000, child: Text('30 minutes')),
-                        ],
-                        onChanged: widget.busy || _locked('AGENT_INBOX_WATCH_INTERVAL_MS')
-                            ? null
-                            : (v) {
-                                if (v != null) unawaited(_patchInterval(v));
-                              },
+                      Icon(Icons.auto_awesome_motion_outlined, size: 20, color: lim.accent),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              'Automations',
+                              style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                                    fontWeight: FontWeight.w600,
+                                  ),
+                            ),
+                            const SizedBox(height: 3),
+                            Text(
+                              _statusLine(),
+                              maxLines: _sectionExpanded ? null : 2,
+                              overflow: _sectionExpanded ? null : TextOverflow.ellipsis,
+                              style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                                    color: lim.textMuted,
+                                    height: 1.35,
+                                  ),
+                            ),
+                          ],
+                        ),
+                      ),
+                      Icon(
+                        _sectionExpanded ? Icons.expand_less : Icons.expand_more,
+                        color: lim.textDim,
                       ),
                     ],
                   ),
-                ],
-                const SizedBox(height: 4),
-                Wrap(
-                  spacing: 8,
-                  runSpacing: 8,
-                  children: [
-                    OutlinedButton.icon(
-                      onPressed: widget.busy || scanning || !watchOn || !_mailConnected
-                          ? null
-                          : () => unawaited(_scanNow()),
-                      icon: scanning
-                          ? SizedBox(
-                              width: 18,
-                              height: 18,
-                              child: CircularProgressIndicator(strokeWidth: 2, color: lim.accent),
-                            )
-                          : const Icon(Icons.radar, size: 18),
-                      label: Text(scanning ? 'Scanning…' : 'Scan now'),
-                    ),
-                    OutlinedButton.icon(
-                      onPressed: widget.busy ? null : widget.onOpenInbox,
-                      icon: const Icon(Icons.list_alt, size: 18),
-                      label: const Text('Review queue'),
-                    ),
-                  ],
                 ),
-                if (runs.isNotEmpty) ...[
-                  const SizedBox(height: 10),
-                  InkWell(
-                    onTap: () => setState(() => _showActivityLog = !_showActivityLog),
-                    child: Row(
-                      children: [
-                        Icon(
-                          _showActivityLog ? Icons.expand_less : Icons.expand_more,
-                          size: 18,
-                          color: lim.textDim,
-                        ),
-                        const SizedBox(width: 4),
-                        Text(
-                          'Activity log (${runs.length})',
-                          style: Theme.of(context).textTheme.labelLarge?.copyWith(color: lim.textDim),
-                        ),
-                        const Spacer(),
-                        Text(
-                          'saved locally',
-                          style: Theme.of(context).textTheme.labelSmall?.copyWith(color: lim.textDim),
-                        ),
-                      ],
-                    ),
-                  ),
-                  if (_showActivityLog)
-                    Container(
-                      margin: const EdgeInsets.only(top: 8),
-                      constraints: const BoxConstraints(maxHeight: 220),
-                      decoration: BoxDecoration(
-                        border: Border.all(color: lim.border.withValues(alpha: 0.35)),
-                        borderRadius: BorderRadius.circular(8),
+              ),
+              if (_sectionExpanded) ...[
+                Divider(height: 1, color: lim.accent.withValues(alpha: 0.12)),
+                Padding(
+                  padding: const EdgeInsets.all(14),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      Text(
+                        'Background tasks for connected integrations. Configure here — not in Settings.',
+                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                              color: lim.textMuted,
+                              height: 1.4,
+                            ),
                       ),
-                      child: ListView.separated(
-                        shrinkWrap: true,
-                        padding: const EdgeInsets.symmetric(vertical: 4),
-                        itemCount: runs.length.clamp(0, 20),
-                        separatorBuilder: (_, __) => Divider(height: 1, color: lim.border.withValues(alpha: 0.25)),
-                        itemBuilder: (context, i) {
-                          final run = runs[i];
-                          final color = run.isSkipped ? lim.textDim : lim.success;
-                          return ListTile(
+                      const SizedBox(height: 12),
+                      Column(
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        children: [
+                          Row(
+                            children: [
+                              Icon(Icons.inbox_outlined, size: 20, color: lim.accent),
+                              const SizedBox(width: 8),
+                              Expanded(
+                                child: Text(
+                                  'Inbox watcher',
+                                  style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                                        fontWeight: FontWeight.w600,
+                                      ),
+                                ),
+                              ),
+                              if (watchLocked)
+                                Tooltip(
+                                  message: 'Locked by .env',
+                                  child: Icon(Icons.lock_outline, size: 16, color: lim.textDim),
+                                ),
+                            ],
+                          ),
+                          const SizedBox(height: 6),
+                          Text(
+                            'Fully automated: polls mail, triages, creates Liminal labels/categories in Gmail or Outlook, and handles urgent items in chat. No manual sorting. Reconnect Google once for label permissions.',
+                            style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                                  color: lim.textMuted,
+                                  height: 1.4,
+                                ),
+                          ),
+                          const SizedBox(height: 10),
+                          Wrap(
+                            spacing: 8,
+                            runSpacing: 6,
+                            children: [
+                              _ConnectorChip(
+                                label: 'Gmail',
+                                connected: widget.integrations.googleConnected,
+                                lim: lim,
+                              ),
+                              _ConnectorChip(
+                                label: 'Outlook',
+                                connected: widget.integrations.microsoftConnected,
+                                lim: lim,
+                              ),
+                            ],
+                          ),
+                          const SizedBox(height: 10),
+                          SwitchListTile(
+                            contentPadding: EdgeInsets.zero,
                             dense: true,
-                            visualDensity: VisualDensity.compact,
-                            leading: Icon(
-                              run.isSkipped ? Icons.remove_circle_outline : Icons.check_circle_outline,
-                              size: 18,
-                              color: color,
+                            title: const Text('Enable inbox watcher'),
+                            subtitle: watchLocked ? const Text('Set AGENT_INBOX_WATCH in .env') : null,
+                            value: watchOn,
+                            onChanged: widget.busy || watchLocked || !_mailConnected
+                                ? null
+                                : (v) => unawaited(_patchBool('AGENT_INBOX_WATCH', v)),
+                          ),
+                          if (watchOn && _mailConnected) ...[
+                            SwitchListTile(
+                              contentPadding: EdgeInsets.zero,
+                              dense: true,
+                              title: const Text('Sort mail into Liminal labels'),
+                              subtitle: const Text(
+                                'Creates Liminal/Urgent, Action, FYI, etc. in your mailbox',
+                              ),
+                              value: _boolField('AGENT_INBOX_AUTO_LABEL', fallback: true),
+                              onChanged: widget.busy || _locked('AGENT_INBOX_AUTO_LABEL')
+                                  ? null
+                                  : (v) => unawaited(_patchBool('AGENT_INBOX_AUTO_LABEL', v)),
                             ),
-                            title: Text(
-                              run.summary,
-                              style: Theme.of(context).textTheme.bodySmall,
+                            SwitchListTile(
+                              contentPadding: EdgeInsets.zero,
+                              dense: true,
+                              title: const Text('Auto-handle urgent mail in chat'),
+                              subtitle: const Text(
+                                'Agent drafts replies — never sends without approval',
+                              ),
+                              value: _boolField('AGENT_INBOX_AUTO_PROCESS', fallback: true),
+                              onChanged: widget.busy || _locked('AGENT_INBOX_AUTO_PROCESS')
+                                  ? null
+                                  : (v) => unawaited(_patchBool('AGENT_INBOX_AUTO_PROCESS', v)),
                             ),
-                            subtitle: Text(
-                              '${run.triggerLabel} · ${_formatRunTime(run.finishedAt)} · ${run.durationMs}ms',
-                              style: Theme.of(context).textTheme.labelSmall?.copyWith(color: lim.textDim),
+                            SwitchListTile(
+                              contentPadding: EdgeInsets.zero,
+                              dense: true,
+                              title: const Text('Desktop notification on urgent mail'),
+                              value: _boolField('AGENT_INBOX_NOTIFY_URGENT', fallback: true),
+                              onChanged: widget.busy || _locked('AGENT_INBOX_NOTIFY_URGENT')
+                                  ? null
+                                  : (v) => unawaited(_patchBool('AGENT_INBOX_NOTIFY_URGENT', v)),
                             ),
-                          );
-                        },
+                            Row(
+                              children: [
+                                Text('Poll every', style: Theme.of(context).textTheme.bodySmall),
+                                const SizedBox(width: 12),
+                                DropdownButton<int>(
+                                  value: switch (interval) {
+                                    >= 1800000 => 1800000,
+                                    >= 900000 => 900000,
+                                    _ => 300000,
+                                  },
+                                  items: const [
+                                    DropdownMenuItem(value: 300000, child: Text('5 minutes')),
+                                    DropdownMenuItem(value: 900000, child: Text('15 minutes')),
+                                    DropdownMenuItem(value: 1800000, child: Text('30 minutes')),
+                                  ],
+                                  onChanged: widget.busy || _locked('AGENT_INBOX_WATCH_INTERVAL_MS')
+                                      ? null
+                                      : (v) {
+                                          if (v != null) unawaited(_patchInterval(v));
+                                        },
+                                ),
+                              ],
+                            ),
+                          ],
+                          const SizedBox(height: 4),
+                          Wrap(
+                            spacing: 8,
+                            runSpacing: 8,
+                            children: [
+                              OutlinedButton.icon(
+                                onPressed: widget.busy || scanning || !watchOn || !_mailConnected
+                                    ? null
+                                    : () => unawaited(_scanNow()),
+                                icon: scanning
+                                    ? SizedBox(
+                                        width: 18,
+                                        height: 18,
+                                        child: CircularProgressIndicator(
+                                          strokeWidth: 2,
+                                          color: lim.accent,
+                                        ),
+                                      )
+                                    : const Icon(Icons.radar, size: 18),
+                                label: Text(scanning ? 'Scanning…' : 'Scan now'),
+                              ),
+                              OutlinedButton.icon(
+                                onPressed: widget.busy ? null : widget.onOpenInbox,
+                                icon: const Icon(Icons.list_alt, size: 18),
+                                label: const Text('Review queue'),
+                              ),
+                            ],
+                          ),
+                          if (runs.isNotEmpty) ...[
+                            const SizedBox(height: 10),
+                            InkWell(
+                              onTap: () => setState(() => _showActivityLog = !_showActivityLog),
+                              child: Row(
+                                children: [
+                                  Icon(
+                                    _showActivityLog ? Icons.expand_less : Icons.expand_more,
+                                    size: 18,
+                                    color: lim.textDim,
+                                  ),
+                                  const SizedBox(width: 4),
+                                  Text(
+                                    'Activity log (${runs.length})',
+                                    style: Theme.of(context).textTheme.labelLarge?.copyWith(
+                                          color: lim.textDim,
+                                        ),
+                                  ),
+                                  const Spacer(),
+                                  Text(
+                                    'saved locally',
+                                    style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                                          color: lim.textDim,
+                                        ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                            if (_showActivityLog)
+                              Container(
+                                margin: const EdgeInsets.only(top: 8),
+                                constraints: const BoxConstraints(maxHeight: 220),
+                                decoration: BoxDecoration(
+                                  border: Border.all(color: lim.border.withValues(alpha: 0.35)),
+                                  borderRadius: BorderRadius.circular(8),
+                                ),
+                                child: ListView.separated(
+                                  shrinkWrap: true,
+                                  padding: const EdgeInsets.symmetric(vertical: 4),
+                                  itemCount: runs.length.clamp(0, 20),
+                                  separatorBuilder: (_, __) => Divider(
+                                    height: 1,
+                                    color: lim.border.withValues(alpha: 0.25),
+                                  ),
+                                  itemBuilder: (context, i) {
+                                    final run = runs[i];
+                                    final color = run.isSkipped ? lim.textDim : lim.success;
+                                    return ListTile(
+                                      dense: true,
+                                      visualDensity: VisualDensity.compact,
+                                      leading: Icon(
+                                        run.isSkipped
+                                            ? Icons.remove_circle_outline
+                                            : Icons.check_circle_outline,
+                                        size: 18,
+                                        color: color,
+                                      ),
+                                      title: Text(
+                                        run.summary,
+                                        style: Theme.of(context).textTheme.bodySmall,
+                                      ),
+                                      subtitle: Text(
+                                        '${run.triggerLabel} · ${_formatRunTime(run.finishedAt)} · ${run.durationMs}ms',
+                                        style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                                              color: lim.textDim,
+                                            ),
+                                      ),
+                                    );
+                                  },
+                                ),
+                              ),
+                          ],
+                        ],
                       ),
-                    ),
-                ],
+                    ],
+                  ),
+                ),
               ],
-            ),
+            ],
           ),
         ),
-        const SizedBox(height: 20),
       ],
     );
   }

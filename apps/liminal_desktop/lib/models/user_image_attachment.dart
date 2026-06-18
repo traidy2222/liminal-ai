@@ -1,7 +1,7 @@
 import 'dart:convert';
 import 'dart:typed_data';
 
-/// Outbound image attachment (web `ImageAttachment` parity).
+/// Outbound chat attachment (images + any file; web `ImageAttachment` parity).
 class UserImageAttachment {
   UserImageAttachment({
     required this.name,
@@ -14,6 +14,8 @@ class UserImageAttachment {
   final String mimeType;
   final Uint8List bytes;
   final String source;
+
+  bool get isImage => mimeType.startsWith('image/');
 
   int get sizeBytes => bytes.length;
 

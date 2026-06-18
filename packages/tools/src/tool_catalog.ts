@@ -177,6 +177,7 @@ export const TOOL_FAMILIES: Record<string, { description: string; tools: readonl
       "gmail_create_draft",
       "gmail_send_draft",
       "gmail_send_message",
+      "mail_search_inboxes",
       "email_style_infer",
       "calendar_rest_get_calendar",
       "calendar_rest_list_calendars",

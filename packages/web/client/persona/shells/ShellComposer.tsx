@@ -1,5 +1,6 @@
 import React, { useCallback, useLayoutEffect, useRef, type CSSProperties } from "react";
 import { migratePersonaUiTheme, type PersonaUiThemeV2 } from "@liminal/core/persona-ui-theme";
+import { isImageComposerAttachment } from "../imageAttachments.js";
 import { DictationButton } from "../../audio/DictationButton.js";
 import { useComposerDictation } from "../../useComposerDictation.js";
 import type { ShellContract } from "../ShellContract.js";
@@ -139,16 +140,36 @@ function AttachmentChips({
             border: "1px solid rgba(var(--lim-accent-rgb),0.14)",
           }}
         >
-          <img
-            src={attachment.dataUrl}
-            alt={attachment.name}
-            style={{
-              width: compact ? 22 : 28,
-              height: compact ? 22 : 28,
-              objectFit: "cover",
-              borderRadius: compact ? 4 : 6,
-            }}
-          />
+          {isImageComposerAttachment(attachment) ? (
+            <img
+              src={attachment.dataUrl}
+              alt={attachment.name}
+              style={{
+                width: compact ? 22 : 28,
+                height: compact ? 22 : 28,
+                objectFit: "cover",
+                borderRadius: compact ? 4 : 6,
+              }}
+            />
+          ) : (
+            <span
+              aria-hidden
+              style={{
+                width: compact ? 22 : 28,
+                height: compact ? 22 : 28,
+                display: "inline-flex",
+                alignItems: "center",
+                justifyContent: "center",
+                borderRadius: compact ? 4 : 6,
+                background: "rgba(var(--lim-accent-rgb),0.12)",
+                fontSize: compact ? 10 : 11,
+                fontFamily: "var(--lim-font-mono, monospace)",
+                color: LIM.textDim,
+              }}
+            >
+              FILE
+            </span>
+          )}
           <span
             style={{
               fontSize: compact ? 10 : 11,
@@ -183,7 +204,7 @@ function AttachmentChips({
         </div>
       ))}
       <span style={{ fontSize: 10, color: "rgba(var(--lim-accent-rgb),0.35)", fontFamily: "var(--lim-font-mono, monospace)" }}>
-        {attachments.length} image{attachments.length === 1 ? "" : "s"} · {totalAttachmentKb} KB
+        {attachments.length} attachment{attachments.length === 1 ? "" : "s"} · {totalAttachmentKb} KB
       </span>
     </div>
   );

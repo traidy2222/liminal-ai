@@ -6,7 +6,7 @@
  * tasks and before claiming a contract complete.
  */
 import type { AgentHarness } from "@liminal/core";
-import { effectiveHarnessEnvRaw } from "@liminal/core";
+import { effectiveHarnessEnvRaw, verifyToolsEnabled } from "@liminal/core";
 import { defineTool } from "../../shared/helpers.js";
 
 export function createVerifyContractTool(harness: AgentHarness) {
@@ -34,11 +34,11 @@ export function createVerifyContractTool(harness: AgentHarness) {
       additionalProperties: false,
     },
     handler: async (args) => {
-      if (effectiveHarnessEnvRaw("AGENT_VERIFY_TOOLS") === "0") {
+      if (!verifyToolsEnabled()) {
         return {
           ok: true,
           output:
-            "[verify_contract skipped] AGENT_VERIFY_TOOLS=0 — finalize your answer to the user without a contract verification pass.",
+            "[verify_contract skipped] Verification tools disabled — finalize your answer to the user without a contract verification pass.",
         };
       }
       const markDone = Boolean(args["mark_done"]);

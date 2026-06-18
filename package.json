@@ -23,6 +23,8 @@
     "sidecar": "npm run build:sidecar && npm run start -w @liminal/sidecar",
     "sidecar:dev": "npm run start -w @liminal/sidecar",
     "eval:sandbox": "npm run eval:sandbox -w packages/eval",
+    "eval:capability": "npm run eval:capability -w packages/eval",
+    "eval:long-horizon": "npm run eval:long-horizon -w packages/eval",
     "desktop:build:windows": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/build-desktop-windows.ps1",
     "desktop:build:macos": "bash scripts/build-desktop.sh macos",
     "desktop:build:linux": "bash scripts/build-desktop.sh linux",

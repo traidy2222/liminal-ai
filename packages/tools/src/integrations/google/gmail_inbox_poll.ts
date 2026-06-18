@@ -3,7 +3,7 @@
  */
 import {
   getGoogleAccessToken,
-  listOAuthAccounts,
+  listGoogleMailOAuthAccounts,
   type InboxMessageMeta,
   type InboxPollResult,
   type InboxProviderCursorState,
@@ -13,7 +13,7 @@ const GMAIL_BASE = "https://gmail.googleapis.com/gmail/v1/users/me";
 
 type GmailJson<T> = { ok: true; data: T } | { ok: false; error: string };
 
-async function gmailJson<T>(
+export async function gmailJson<T>(
   path: string,
   accountId: string,
   init?: RequestInit
@@ -75,6 +75,7 @@ export interface GmailInboxPollOptions {
 
 async function fetchGmailMessageMeta(
   accountId: string,
+  accountEmail: string | undefined,
   ref: { id: string; threadId?: string }
 ): Promise<InboxMessageMeta | null> {
   const msg = await gmailJson<{
@@ -98,6 +99,7 @@ async function fetchGmailMessageMeta(
     threadId: msg.data.threadId ?? ref.threadId,
     provider: "gmail",
     accountId,
+    accountEmail,
     from,
     fromEmail,
     subject,
@@ -107,7 +109,11 @@ async function fetchGmailMessageMeta(
   };
 }
 
-async function fetchGmailBackfill(accountId: string, max: number): Promise<InboxMessageMeta[]> {
+async function fetchGmailBackfill(
+  accountId: string,
+  accountEmail: string | undefined,
+  max: number
+): Promise<InboxMessageMeta[]> {
   if (max <= 0) return [];
 
   const unreadList = await gmailJson<{ messages?: Array<{ id?: string; threadId?: string }> }>(
@@ -137,7 +143,7 @@ async function fetchGmailBackfill(accountId: string, max: number): Promise<Inbox
 
   const messages: InboxMessageMeta[] = [];
   for (const ref of refs.slice(0, max)) {
-    const meta = await fetchGmailMessageMeta(accountId, ref);
+    const meta = await fetchGmailMessageMeta(accountId, accountEmail, ref);
     if (meta) messages.push(meta);
   }
   return messages;
@@ -157,12 +163,14 @@ export async function pollGmailInbox(
     return { ok: false, error: "Gmail profile missing historyId", messages: [], cursor: "", baselineEstablished: false };
   }
 
+  const accountEmail = profile.data.emailAddress?.trim() || undefined;
+
   if (!cursorState?.baselineEstablished) {
     if (!cursorState) {
       if (backfillMax <= 0) {
         return { ok: true, messages: [], cursor: currentHistoryId, baselineEstablished: false };
       }
-      const messages = await fetchGmailBackfill(accountId, backfillMax);
+      const messages = await fetchGmailBackfill(accountId, accountEmail, backfillMax);
       return {
         ok: true,
         messages,
@@ -174,7 +182,7 @@ export async function pollGmailInbox(
     if (backfillMax <= 0) {
       return { ok: true, messages: [], cursor: currentHistoryId, baselineEstablished: true };
     }
-    const messages = await fetchGmailBackfill(accountId, backfillMax);
+      const messages = await fetchGmailBackfill(accountId, accountEmail, backfillMax);
     return {
       ok: true,
       messages,
@@ -185,7 +193,7 @@ export async function pollGmailInbox(
   }
 
   if (backfillMax > 0 && !cursorState.backfillCompleted) {
-    const messages = await fetchGmailBackfill(accountId, backfillMax);
+      const messages = await fetchGmailBackfill(accountId, accountEmail, backfillMax);
     return {
       ok: true,
       messages,
@@ -225,7 +233,7 @@ export async function pollGmailInbox(
 
   const messages: InboxMessageMeta[] = [];
   for (const ref of ids.slice(0, 25)) {
-    const meta = await fetchGmailMessageMeta(accountId, { id: ref.id, threadId: ref.threadId });
+    const meta = await fetchGmailMessageMeta(accountId, accountEmail, { id: ref.id, threadId: ref.threadId });
     if (meta) messages.push(meta);
   }
 
@@ -269,6 +277,6 @@ export async function applyGmailLabel(
 }
 
 export async function listGmailInboxAccounts(): Promise<Array<{ accountId: string; email?: string }>> {
-  const accounts = await listOAuthAccounts("google");
+  const accounts = await listGoogleMailOAuthAccounts();
   return accounts.map((a) => ({ accountId: a.accountId, email: a.email }));
 }

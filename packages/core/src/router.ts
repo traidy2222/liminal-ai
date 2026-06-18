@@ -22,6 +22,7 @@ import {
   resolveKimchiTransientMaxRetries,
 } from "./kimchi_provider.js";
 import { vireonProxyAlreadyRetriedUpstream } from "./vireon_proxy.js";
+import { isInferenceServerError } from "./inference_provider.js";
 import type { ProviderRouteState } from "./provider_route_state.js";
 import type { Message } from "./types.js";
 
@@ -109,6 +110,17 @@ export function clearJsonResponseCache(): void {
 function isRateLimitErrorMessage(msg: string): boolean {
   return /429|503|quota|rate.?limit|too many/i.test(msg);
 }
+
+function isTransientSidecarError(msg: string): boolean {
+  return (
+    isRateLimitErrorMessage(msg) ||
+    /internal_server_error|server_error|\b500\b|\b502\b|\b504\b|bad gateway|service unavailable/i.test(
+      msg
+    )
+  );
+}
+
+const JSON_SIDEcar_5XX_MAX_RETRIES = 2;
 
 function sleep(ms: number): Promise<void> {
   return new Promise((r) => setTimeout(r, ms));
@@ -219,6 +231,14 @@ export async function completeChatJson(
         return attemptWithModel(model, isFast, retryAttempt + 1);
       }
       if (
+        isInferenceServerError(e) &&
+        retryAttempt < JSON_SIDEcar_5XX_MAX_RETRIES &&
+        !(isManagedInferenceBaseUrl(client.baseURL) && vireonProxyAlreadyRetriedUpstream(e))
+      ) {
+        await sleep(kimchiJsonRetryDelayMs(retryAttempt));
+        return attemptWithModel(model, isFast, retryAttempt + 1);
+      }
+      if (
         retryAttempt === 0 &&
         (isRateLimitErrorMessage(error) || exhaustedRouting) &&
         opts.routeState &&
@@ -256,7 +276,7 @@ export async function completeChatJson(
   if (primary.ok || !opts.fallbackModel || opts.fallbackModel === opts.model) return cacheOk(primary);
 
   // Retry with fallback model on quota or transient server errors.
-  const isRetryableError = isRateLimitErrorMessage(primary.error);
+  const isRetryableError = isTransientSidecarError(primary.error);
   if (!isRetryableError) return primary;
 
   console.warn(`[router] fast model "${opts.model}" failed (${primary.error.slice(0, 80)}); retrying with fallback "${opts.fallbackModel}"`);

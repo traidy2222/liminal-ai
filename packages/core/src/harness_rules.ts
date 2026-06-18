@@ -45,13 +45,19 @@ export const HARNESS_RULES: Record<string, string> = {
     "After editing typed code, run run_lint or the project's typecheck/build before claiming the fix is complete — especially when the harness did not inject [VERIFY RESULT] after your edit batch.",
   "R-SCOPE-CREEP": "Fix only what was explicitly requested — no refactoring surrounding code, adding unasked features, or introducing new abstractions.",
   "R-GREP-BEFORE-REFACTOR": "Before renaming a symbol, changing a signature, or moving a type, grep all call sites and import paths first.",
+  "R-CODE-LOCATE":
+    "For symbol-level navigation (definitions, references, rename prep), prefer symbol_index and find_references over repo_map or grep alone — activate code_intel when those tools are inactive.",
 
   // ── Orchestration ───────────────────────────────────────────────────────────
   "R-ORCH-ID": "After spawn_agent, capture the returned task_id and pass it in wait_for_agents({ task_ids: [...] }).",
   "R-SPAWN-PROMPT":
-    "Every spawn_agent call must include system_prompt (role + constraints + output format) and user_prompt (full detailed task) — bare goal= only produces generic results.",
+    "Every spawn_agent call must include system_prompt (role + constraints + output format) and user_prompt (full detailed task) — bare goal= only produces generic results. Even minimal telemetry spawns need all three fields plus wait_for_agents on the returned task_id.",
 
   // ── Research ────────────────────────────────────────────────────────────────
+  "R-DISTILL-ARTIFACT":
+    "When read_file/grep output contains NEXT_ACTIONS_JSON or points to read_artifact with a hash, call read_artifact before summarizing — distilled pointers are not substitutes for the full artifact body.",
+  "R-VERIFY-READ":
+    "Before verify_result or evidence_critic on file/path claims, read_file (or grep_file) the cited paths first — critics must ground on fresh file content, not memory or prior summaries.",
   "R-RESEARCH-SCOPE":
     "You decide how much web research the ask needs — one search may suffice; a contested multi-source topic may need many. Loop when useful: web_search (breadth) → research_state (inventory) → web_fetch (depth on pending URLs). Keep going while material claims lack evidence or high-value pending URLs remain; stop on diminishing returns and document gaps under R-KNOWN-UNKNOWNS. Never default to a fixed search/fetch count.",
   "R-RESEARCH-IP-PROBE":
@@ -76,6 +82,8 @@ export const HARNESS_RULES: Record<string, string> = {
   // ── Output ──────────────────────────────────────────────────────────────────
   "R-OUTPUT-QUALITY":
     "Final replies: if file/repo tools were used, cite at least one real path from tool output. Introduce each major theme once — no repeated key concept in consecutive sections. No hyphen-run separators; fix markdown before sending.",
+  "R-ANSWER-FIDELITY":
+    "When the user asks to cite paths, values, or quotes from tool output, echo them verbatim in the final reply — successful tool runs without the requested fields in the answer count as incomplete.",
   "R-MULTI-PART-USER": "Answer or explicitly defer every sub-question in a multi-part message — do not silently skip any part.",
   "R-TURN-FRESHNESS":
     "New analytical asks: open with What's new for this ask (2–4 bullets); prior memory/vault/chat is background only — ≤2 sentences cross-reference unless user asked for comparison/changelog.",
@@ -86,11 +94,15 @@ export const HARNESS_RULES: Record<string, string> = {
   "R-RUNTIME-PERSONA-TOOLS":
     "For persona dial changes (humor %, formality, confidence, verbosity, persona strength), call set_runtime_settings(persona_controls:…) — never claim a dial changed from prose alone. Full persona swap → set_persona.",
   "R-EMAIL-STYLE":
-    "Gmail compose/draft/send: FORMATTED body_html + plain body for new outbound mail. Gmail strips outer dark backgrounds — co-locate bgcolor and color on each td. Body = #222/#333 on #fff; dark bands = light text only on the same dark td. Plain-only for thread replies and one-liners.",
+    "Outbound mail: the first gmail_create_draft / outlook_create_draft call is the finished email — formatted body_html + plain body together. Compose full HTML in reasoning before the tool call; plain-only only for thread replies and one-liners.",
   "R-EMAIL-DRAFT-SEND":
-    "After gmail_create_draft / outlook_create_draft succeeds once for a given recipients+subject with complete body_html, reuse that draftId with gmail_send_draft / outlook_send_draft — do not call create_draft again with a tweaked body. If body_html was missing or rejected, re-call the compose tool with a fixed payload — never write_file workspace .html to stage mail. Never recompose the same mail via gmail_send_message / outlook_send_message unless the user asked to rewrite. One compose pass per email; no MCP create_draft + REST create_draft for the same message.",
+    "One compose pass per email: plan subject + body_html + body, then create_draft once. After success, gmail_send_draft / outlook_send_draft with that draftId. Never write_file workspace .html to stage mail. Never stack MCP create_draft with REST create_draft.",
   "R-EMAIL-RECIPIENTS":
-    "Never invent To/Cc addresses (YouTuber guesses, partners@, business@ bounce). web_search + web_fetch official sites and business directories (Yellow Pages, True Local, Google Maps); set recipient_source + recipients_verified: true before gmail_create_draft. Cold outreach: draft per recipient → gmail_send_draft — never gmail_send_message (thread replies only).",
+    "Use addresses the user gave or that you found in tool output — do not fabricate. Cold outreach: gmail_create_draft per recipient → gmail_send_draft when approved — never gmail_send_message (thread replies only).",
+  "R-EMAIL-ACCOUNT":
+    "Multiple mailboxes: use mail_search_inboxes first — it scans **connected** Gmail/Outlook accounts only (mail OAuth scopes). Do not connect_provider or probe MCP/REST for providers list_connectors shows as not connected. Replies need account_hint for the receiving mailbox plus thread_id/messageId from that mailbox.",
+  "R-EMAIL-PRIVACY":
+    "When the user asks to see/summarize mail and redact or omit sensitive details: call mail_search_inboxes with redact_sensitive:true; in your reply mask account numbers, SSN, cards, passwords, OTPs, tokens, and unneeded third-party emails/phones as [REDACTED]. Keep mailbox, subject gist, sender, messageId, threadId for routing — never paste raw secrets from snippets or full bodies.",
   "R-AGENTCARD":
     "AgentCard is external (agentcard_* tools), not a repo path. Never grep the codebase for agent card. On test/setup/pay: agentcard_whoami first.",
   "R-LIMINAL-WIDGET":
@@ -126,7 +138,7 @@ export const HARNESS_RULES: Record<string, string> = {
 import type { TurnIntentClass } from "./intent_inference.js";
 
 const INTENT_RULE_IDS: Record<TurnIntentClass, string[]> = {
-  conversational: ["R-OUTPUT-QUALITY", "R-MULTI-PART-USER", "R-MEMORY-CONTEXT", "R-EMAIL-STYLE", "R-EMAIL-DRAFT-SEND", "R-EMAIL-RECIPIENTS", "R-AGENTCARD"],
+  conversational: ["R-OUTPUT-QUALITY", "R-MULTI-PART-USER", "R-MEMORY-CONTEXT", "R-EMAIL-STYLE", "R-EMAIL-DRAFT-SEND", "R-EMAIL-RECIPIENTS", "R-EMAIL-ACCOUNT", "R-EMAIL-PRIVACY", "R-AGENTCARD"],
   introspection: ["R-OUTPUT-QUALITY", "R-MEMORY-CONTEXT", "R-TURN-FRESHNESS"],
   knowledge: [
     "R-MEMORY-CONTEXT",
@@ -142,11 +154,15 @@ const INTENT_RULE_IDS: Record<TurnIntentClass, string[]> = {
     "R-TURN-FRESHNESS",
     "R-ADVERSARIAL-CHECK",
     "R-VAULT-ENTITIES",
+    "R-DISTILL-ARTIFACT",
+    "R-VERIFY-READ",
+    "R-ANSWER-FIDELITY",
   ],
   coding: [
     "R-READ-ECONOMY",
     "R-FILE-CURRENCY",
     "R-GREP-BEFORE-REFACTOR",
+    "R-CODE-LOCATE",
     "R-TYPECHECK-VERIFY",
     "R-EDIT-DISCIPLINE",
     "R-WRITE-DISCIPLINE",
@@ -154,6 +170,7 @@ const INTENT_RULE_IDS: Record<TurnIntentClass, string[]> = {
     "R-TOOL-RETRY",
     "R-SCOPE-CREEP",
     "R-PATH-GROUNDING",
+    "R-ANSWER-FIDELITY",
     "R-AGENTCARD",
   ],
   execution: [
@@ -167,6 +184,8 @@ const INTENT_RULE_IDS: Record<TurnIntentClass, string[]> = {
     "R-EMAIL-STYLE",
     "R-EMAIL-DRAFT-SEND",
     "R-EMAIL-RECIPIENTS",
+    "R-EMAIL-ACCOUNT",
+    "R-EMAIL-PRIVACY",
     "R-AGENTCARD",
   ],
   creative: [
@@ -177,6 +196,8 @@ const INTENT_RULE_IDS: Record<TurnIntentClass, string[]> = {
     "R-EMAIL-STYLE",
     "R-EMAIL-DRAFT-SEND",
     "R-EMAIL-RECIPIENTS",
+    "R-EMAIL-ACCOUNT",
+    "R-EMAIL-PRIVACY",
   ],
 };
 

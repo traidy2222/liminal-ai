@@ -55,17 +55,6 @@ export function validateEmailAddressFormat(email: string): string | null {
   return null;
 }
 
-function hasVerifiedRecipients(args: Record<string, unknown>): boolean {
-  const v = args["recipients_verified"];
-  if (v === true) return true;
-  if (v === "true" || v === 1 || v === "1") return true;
-  return false;
-}
-
-function recipientSource(args: Record<string, unknown>): string {
-  return String(args["recipient_source"] ?? "").trim();
-}
-
 /** Registrable domain — handles com.au, co.uk, org.au, etc. */
 function emailRegistrableDomain(email: string): string {
   const domain = email.split("@")[1]?.toLowerCase() ?? "";
@@ -156,22 +145,12 @@ export function isCredibleRecipientSource(source: string, emails: string[]): boo
   }
 }
 
-function coldMailVerificationError(mode: OutboundMailDispatchMode): string {
-  if (mode === "send") {
-    return (
-      "Cold outbound mail must use gmail_create_draft then gmail_send_draft — not gmail_send_message. " +
-      "gmail_send_message is for thread replies only. Guessed addresses bounce with Address not found."
-    );
-  }
-  return (
-    "Cold outbound mail requires recipients_verified: true after web_search + web_fetch found each address " +
-    "(official site, business directory listing, Google Maps, LinkedIn company page, or user named it in chat). " +
-    "Never invent YouTuber/partners@/business@ addresses. Prefer gmail_create_draft for human review before send."
-  );
-}
+const COLD_SEND_REQUIRES_DRAFT =
+  "Cold outbound mail must use gmail_create_draft then gmail_send_draft — not gmail_send_message. " +
+  "gmail_send_message is for thread replies only.";
 
 /**
- * Block guessed outreach addresses. Cold mail requires research-backed recipients.
+ * Basic outbound recipient validation — format checks and draft-first cold sends.
  */
 export function validateOutboundEmailRecipients(
   args: Record<string, unknown>,
@@ -189,23 +168,7 @@ export function validateOutboundEmailRecipients(
 
   // No cold blast sends — draft → review → send_draft only.
   if (mode === "send") {
-    return coldMailVerificationError("send");
-  }
-
-  const verified = hasVerifiedRecipients(args);
-  const source = recipientSource(args);
-
-  if (!verified) {
-    return coldMailVerificationError("draft");
-  }
-
-  if (!isCredibleRecipientSource(source, emails)) {
-    const sample = emails[0] ?? "name@company.com";
-    return (
-      "recipient_source is not credible — cite where web_fetch found the address: official site URL, " +
-      "business directory listing (Yellow Pages, True Local, Google Maps), or quote the exact email. " +
-      `Example: "https://www.truelocal.com.au/business/acme — ${sample}". User-provided: say so explicitly.`
-    );
+    return COLD_SEND_REQUIRES_DRAFT;
   }
 
   return null;

@@ -39,6 +39,17 @@ test("validateOutboundEmailStyle allows thread reply plain", () => {
   assert.equal(err, null);
 });
 
+test("validateOutboundEmailStyle rejects bare unstyled html", () => {
+  const err = validateOutboundEmailStyle({
+    to: ["a@b.com"],
+    subject: "Hello",
+    body: "Hello",
+    body_html: "<p>Hello world</p><p>Thanks for your time.</p>",
+  });
+  assert.ok(err);
+  assert.match(err!, /body_html/i);
+});
+
 test("validateOutboundEmailStyle allows formatted html", () => {
   const html = `<table width="600" style="margin:0 auto"><tr><td bgcolor="#1a1a2e" style="padding:24px;color:#fff"><h1 style="margin:0">Hello</h1></td></tr><tr><td bgcolor="#ffffff" style="padding:24px;color:#333333"><p>Body copy</p></td></tr></table>`;
   const err = validateOutboundEmailStyle({

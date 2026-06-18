@@ -1,32 +1,12 @@
 import {
-  ALL_GOOGLE_SERVICE_IDS,
-  ALL_MICROSOFT_SERVICE_IDS,
-  ALL_AZURE_SERVICE_IDS,
-  listGoogleOAuthAccounts,
-  listMicrosoftOAuthAccounts,
-  listAzureOAuthAccounts,
-  missingDefaultAzureScopes,
-  listGithubOAuthAccounts,
-  listXeroOAuthAccounts,
-  refreshStaleXeroAccounts,
-  listSlackOAuthAccounts,
-  listLinearOAuthAccounts,
-  listNotionOAuthAccounts,
   runSlackHostedConnectFlow,
   runLinearHostedConnectFlow,
   runNotionHostedConnectFlow,
-  missingDefaultWorkspaceScopes,
-  missingDefaultMicrosoftScopes,
-  missingSlackScopes,
   runGoogleHostedConnectFlow,
   runGithubHostedConnectFlow,
   runMicrosoftHostedConnectFlow,
   runAzureHostedConnectFlow,
   runXeroHostedConnectFlow,
-  xeroBundleMissingCoreScopes,
-  xeroBundleMissingFullScopes,
-  xeroBundleMissingPhase3Scopes,
-  xeroBundleMissingScopes,
 } from "@liminal/core";
 import {
   attachCustomMcpFromServer,
@@ -49,100 +29,16 @@ import {
   disconnectLinearFromServer,
   disconnectNotionFromServer,
   disconnectOpenApiFromServer,
-  getGoogleSidecarStatus,
-  getMicrosoftSidecarStatus,
-  getAzureSidecarStatus,
+  buildIntegrationsSnapshot,
   listIntegrationConnections,
   parseAuthBody,
   refreshIntegrationToolsOnRegistry,
+  revokeIntegrationAccountFromServer,
+  type IntegrationAccountSlug,
 } from "@liminal/tools";
 import type { ChatRegistry } from "./chat_registry.js";
 
-export async function buildIntegrationsSnapshot() {
-  await refreshStaleXeroAccounts();
-  const accounts = await listGoogleOAuthAccounts();
-  const msAccounts = await listMicrosoftOAuthAccounts();
-  return {
-    google: {
-      accounts: accounts.map((a) => ({
-        ...a,
-        missingScopes: missingDefaultWorkspaceScopes(a.scopes),
-      })),
-      sidecar: await getGoogleSidecarStatus(),
-      services: ALL_GOOGLE_SERVICE_IDS,
-    },
-    microsoft: {
-      accounts: msAccounts.map((a) => ({
-        ...a,
-        missingScopes: missingDefaultMicrosoftScopes(a.scopes),
-      })),
-      sidecar: await getMicrosoftSidecarStatus(),
-      services: ALL_MICROSOFT_SERVICE_IDS,
-    },
-    azure: {
-      accounts: (await listAzureOAuthAccounts()).map((a) => ({
-        ...a,
-        missingScopes: missingDefaultAzureScopes(a.scopes),
-      })),
-      sidecar: await getAzureSidecarStatus(),
-      services: ALL_AZURE_SERVICE_IDS,
-    },
-    github: {
-      accounts: (await listGithubOAuthAccounts()).map((a) => ({
-        accountId: a.accountId,
-        email: a.email,
-        login: a.login,
-        scopes: a.scopes,
-        expiresAt: a.expiresAt,
-      })),
-    },
-    xero: {
-      accounts: (await listXeroOAuthAccounts()).map((a) => ({
-        accountId: a.accountId,
-        email: a.email,
-        scopes: a.scopes,
-        expiresAt: a.expiresAt,
-        tenantId: a.tenantId,
-        tenantName: a.tenantName,
-        missingScopes: xeroBundleMissingScopes(a.scopes),
-        missingCoreScopes: xeroBundleMissingCoreScopes(a.scopes),
-        missingFullScopes: xeroBundleMissingFullScopes(a.scopes),
-        missingExtendedScopes: xeroBundleMissingPhase3Scopes(a.scopes),
-      })),
-    },
-    slack: {
-      accounts: (await listSlackOAuthAccounts()).map((a) => ({
-        accountId: a.accountId,
-        email: a.email,
-        scopes: a.scopes,
-        expiresAt: a.expiresAt,
-        teamId: a.teamId,
-        teamName: a.teamName,
-        missingScopes: missingSlackScopes(a.scopes),
-      })),
-    },
-    linear: {
-      accounts: (await listLinearOAuthAccounts()).map((a) => ({
-        accountId: a.accountId,
-        email: a.email,
-        scopes: a.scopes,
-        expiresAt: a.expiresAt,
-        organizationName: a.organizationName,
-      })),
-    },
-    notion: {
-      accounts: (await listNotionOAuthAccounts()).map((a) => ({
-        accountId: a.accountId,
-        email: a.email,
-        scopes: a.scopes,
-        expiresAt: a.expiresAt,
-        workspaceId: a.workspaceId,
-        workspaceName: a.workspaceName,
-      })),
-    },
-    connections: await listIntegrationConnections(),
-  };
-}
+export { buildIntegrationsSnapshot };
 
 function assertHarnessesIdle(registry: ChatRegistry): void {
   if (registry.anyHarnessBusy()) {
@@ -351,6 +247,22 @@ export async function disconnectGoogle(
   if (!result.ok) throw new Error(result.error ?? "Google disconnect failed.");
   await refreshIntegrationsOnAllHarnesses(registry);
   return result.output ?? "Google disconnected.";
+}
+
+export async function revokeIntegrationAccount(
+  registry: ChatRegistry,
+  provider: IntegrationAccountSlug,
+  accountId: string
+): Promise<string> {
+  assertHarnessesIdle(registry);
+  const result = await revokeIntegrationAccountFromServer(
+    await allHarnessRegistries(registry),
+    provider,
+    accountId
+  );
+  if (!result.ok) throw new Error(result.error ?? "Failed to remove account.");
+  await refreshIntegrationsOnAllHarnesses(registry);
+  return result.output ?? "Account removed.";
 }
 
 export async function connectXeroOAuth(

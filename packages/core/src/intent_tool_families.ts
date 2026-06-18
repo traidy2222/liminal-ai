@@ -2,6 +2,7 @@
  * Intent → tool-family pre-seed for lazy loading (avoids activate_tool_family round-trips).
  */
 import type { TurnIntentClass } from "./intent_inference.js";
+import { isEmailComposeTurn } from "./email_compose_context.js";
 import { mapContractToToolFamilies } from "./contract_tool_mapper.js";
 
 /** Shared AgentCard intent detector (duplicated here to avoid core → tools import). */
@@ -49,6 +50,21 @@ export function inferIntentToolFamilies(
     for (const f of mapped.families) {
       if (has(f)) out.add(f);
     }
+    if (/\bspawn_agent\b|\bwait_for_agents\b|\bdepends_on\b/i.test(trimmed) && has("orchestration")) {
+      out.add("orchestration");
+    }
+    if (/\bsymbol_index\b|\bfind_references\b|\bcode-ops\b/i.test(trimmed) && has("code_intel")) {
+      out.add("code_intel");
+    }
+    if (/\bvault_write\b|\bvault_search\b|\bwiki knowledge\b/i.test(trimmed) && has("vault")) {
+      out.add("vault");
+    }
+    if (
+      /\b(verify_result|evidence_critic|path_critic|policy_critic)\b/i.test(trimmed) &&
+      has("orchestration")
+    ) {
+      out.add("orchestration");
+    }
     if (/slack|channel message/i.test(trimmed) && has("slack")) out.add("slack");
     if (/linear|backlog/i.test(trimmed) && has("linear")) out.add("linear");
     if (/notion/i.test(trimmed) && has("notion")) out.add("notion");
@@ -62,6 +78,10 @@ export function inferIntentToolFamilies(
     }
     if (/google|gmail|sheet|spreadsheet|gdoc|drive|calendar|workspace|docs|slides/i.test(trimmed)) {
       if (has("google_workspace")) out.add("google_workspace");
+    }
+    if (isEmailComposeTurn(trimmed)) {
+      if (has("google_workspace")) out.add("google_workspace");
+      if (has("microsoft_365")) out.add("microsoft_365");
     }
     if (messageMentionsAgentcard(trimmed)) {
       if (has("agentcard")) out.add("agentcard");

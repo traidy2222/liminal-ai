@@ -2,7 +2,7 @@
  * Microsoft Graph inbox delta polling for the inbox watcher.
  */
 import {
-  listOAuthAccounts,
+  listMicrosoftMailOAuthAccounts,
   type InboxMessageMeta,
   type InboxPollResult,
   type InboxProviderCursorState,
@@ -36,7 +36,11 @@ export interface MicrosoftInboxPollOptions {
   backfillMax?: number;
 }
 
-function mapGraphMessage(m: GraphMessage, accountId: string): InboxMessageMeta | null {
+function mapGraphMessage(
+  m: GraphMessage,
+  accountId: string,
+  accountEmail?: string
+): InboxMessageMeta | null {
   if (!m.id) return null;
   const fromEmail = m.from?.emailAddress?.address ?? "";
   const fromName = m.from?.emailAddress?.name ?? fromEmail;
@@ -45,6 +49,7 @@ function mapGraphMessage(m: GraphMessage, accountId: string): InboxMessageMeta |
     threadId: m.conversationId,
     provider: "microsoft",
     accountId,
+    accountEmail,
     from: fromName,
     fromEmail,
     subject: m.subject ?? "(no subject)",
@@ -72,7 +77,11 @@ function selectBackfillMessages(value: GraphMessage[], max: number): GraphMessag
   return out;
 }
 
-async function fetchMicrosoftBackfill(accountId: string, max: number): Promise<InboxMessageMeta[]> {
+async function fetchMicrosoftBackfill(
+  accountId: string,
+  accountEmail: string | undefined,
+  max: number
+): Promise<InboxMessageMeta[]> {
   if (max <= 0) return [];
 
   const unreadRes = await graphApiJson<GraphListResponse>(
@@ -83,7 +92,7 @@ async function fetchMicrosoftBackfill(accountId: string, max: number): Promise<I
   const seen = new Set<string>();
   if (unreadRes.ok) {
     for (const m of unreadRes.data.value ?? []) {
-      const meta = mapGraphMessage(m, accountId);
+      const meta = mapGraphMessage(m, accountId, accountEmail);
       if (!meta || seen.has(meta.id)) continue;
       seen.add(meta.id);
       messages.push(meta);
@@ -97,7 +106,7 @@ async function fetchMicrosoftBackfill(accountId: string, max: number): Promise<I
     );
     if (recentRes.ok) {
       for (const m of recentRes.data.value ?? []) {
-        const meta = mapGraphMessage(m, accountId);
+        const meta = mapGraphMessage(m, accountId, accountEmail);
         if (!meta || seen.has(meta.id)) continue;
         seen.add(meta.id);
         messages.push(meta);
@@ -115,6 +124,8 @@ export async function pollMicrosoftInbox(
   options?: MicrosoftInboxPollOptions
 ): Promise<InboxPollResult> {
   const backfillMax = options?.backfillMax ?? 0;
+  const accounts = await listMicrosoftMailOAuthAccounts();
+  const accountEmail = accounts.find((a) => a.accountId === accountId)?.email;
   const deltaPath =
     cursorState?.baselineEstablished && cursorState.cursor
       ? cursorState.cursor
@@ -138,7 +149,7 @@ export async function pollMicrosoftInbox(
       }
       const picked = selectBackfillMessages(value, backfillMax);
       const messages = picked
-        .map((m) => mapGraphMessage(m, accountId))
+        .map((m) => mapGraphMessage(m, accountId, accountEmail))
         .filter((m): m is InboxMessageMeta => m != null);
       return {
         ok: true,
@@ -153,7 +164,7 @@ export async function pollMicrosoftInbox(
     }
     const picked = selectBackfillMessages(value, backfillMax);
     const messages = picked
-      .map((m) => mapGraphMessage(m, accountId))
+      .map((m) => mapGraphMessage(m, accountId, accountEmail))
       .filter((m): m is InboxMessageMeta => m != null);
     return {
       ok: true,
@@ -165,7 +176,7 @@ export async function pollMicrosoftInbox(
   }
 
   if (backfillMax > 0 && !cursorState.backfillCompleted) {
-    const messages = await fetchMicrosoftBackfill(accountId, backfillMax);
+    const messages = await fetchMicrosoftBackfill(accountId, accountEmail, backfillMax);
     return {
       ok: true,
       messages,
@@ -181,7 +192,7 @@ export async function pollMicrosoftInbox(
   }
 
   const messages: InboxMessageMeta[] = value
-    .map((m) => mapGraphMessage(m, accountId))
+    .map((m) => mapGraphMessage(m, accountId, accountEmail))
     .filter((m): m is InboxMessageMeta => m != null);
 
   return { ok: true, messages, cursor: deltaLink, baselineEstablished: true };
@@ -202,6 +213,6 @@ export async function applyMicrosoftCategory(
 }
 
 export async function listMicrosoftInboxAccounts(): Promise<Array<{ accountId: string; email?: string }>> {
-  const accounts = await listOAuthAccounts("microsoft");
+  const accounts = await listMicrosoftMailOAuthAccounts();
   return accounts.map((a) => ({ accountId: a.accountId, email: a.email }));
 }

@@ -1,102 +1,310 @@
 # AGENTS.md
 
-This file provides guidance to Codex (Codex.ai/code) when working with code in this repository.
+This file provides comprehensive guidance for AI coding agents (Codex, Claude Code, Cursor, etc.) when working with the Liminal AI codebase.
 
-## Harness pillars (product defaults)
+## Project Identity
 
-Three coordinated behaviors ship by default (see `docs/operations/profiles.md` for presets):
+**Liminal AI** is a self-hosted, open-core AI agent harness for developers. It's a complete ReAct loop implementation with 245+ tools, running locally with any OpenAI-compatible model (OpenRouter, Anthropic, local LM Studio, etc.).
 
-1. **Smarter harness** — `AGENT_TOOL_BODY_ELIDE`, `AGENT_DISTILL`, `AGENT_REASONING_DEFAULT_EFFORT=medium`, `AGENT_COMPLEXITY_ROUTING`; intent-scoped tool-family pre-seed, selective rule recall (~8–12 IDs), session-cached tool manifest, knowledge→fast routing when confident.
-2. **Unique self** — federation-aware session priming (`memory_priming.ts`), per-turn recipe hints, identity block in world context, idle `AGENT_CONSOLIDATE_ON_IDLE`, `AGENT_VAULT_AUTO_WRITE=research`.
-3. **Long-run autonomy** — `AGENT_CHILD_TIMEOUT_MS`, yield/task resume injection, optional `AGENT_MISSION_AUTONOMY` (with `AGENT_YOLO`), workflow phase cursors on disk, `AGENT_AUTO_APPROVE_TOOLS` allowlist.
+**Core value proposition:**
+- **Self-hosted** — Your API keys, code, and logs stay on your machine
+- **Model-agnostic** — Works with any OpenAI-compatible provider
+- **Transparent** — Full ReAct loop visibility with retries, compression, approvals, and telemetry
+- **Production-grade** — Extensive test coverage, evaluation packs, and real-world harness logic
 
-## Commands
+**License:** Fair-Source (FSL-1.1-MIT) — Community Edition becomes MIT 2 years after each release. Enterprise Edition available for team/org features.
 
-```bash
-# Build compiled packages (core + tools must be built before tui/web can run)
-npm run build                          # all workspaces
-npm run build -w packages/core         # core only
-npm run build -w packages/tools        # tools only (requires core built first)
+## Product Architecture Overview
 
-# Run the interfaces
-npm run tui                            # terminal UI (ink/React)
-npm run tui -- --bootstrap             # same + AGENT_PERSONA_BOOTSTRAP_FORCE (re-show TUI persona overlay)
-npm run tui:bootstrap                  # alias for `npm run tui -- --bootstrap`
-liminal web                            # customer path: auto sync (pull/install/build) + production UI (:3001)
-liminal web --open                     # same + open browser
-liminal web --no-update                # skip auto sync (fast local iteration after you built)
-liminal tui                            # auto sync + terminal UI
-liminal update                         # explicit sync only (also runs before web/tui by default)
-npm run web                            # same production stack as liminal web (no auto sync)
-npm run web -- --bootstrap             # same + AGENT_PERSONA_BOOTSTRAP_FORCE (re-show web persona modal)
-npm run web:dev                        # dev only: Vite HMR on :5173 (not what end users run)
-npm run web:dev -- --bootstrap         # web:dev + bootstrap force (or: npm run web:dev:bootstrap)
+Liminal is built as a **monorepo** with a clear dependency hierarchy:
 
-# Run the eval suite
-npm run eval -w packages/eval                        # all scenarios
-npm run eval -w packages/eval -- --only memory       # filter by name
-npm run eval -w packages/eval -- --parallel 4        # parallel workers
-npm run eval -w packages/eval -- --repeat 3          # repeat each scenario
-npm run eval -w packages/eval -- --any-pass          # pass if any repetition passes
-
-# Typecheck (no build output — fast CI check)
-npm run typecheck                      # all workspaces
-npx tsc --noEmit -p packages/core/tsconfig.json
-npx tsc --noEmit -p packages/tools/tsconfig.json
-npx tsc --noEmit -p packages/tui/tsconfig.json
-npx tsc --noEmit -p packages/web/tsconfig.json
-
-# After modifying core/src/*.ts, always rebuild before typechecking dependents:
-npm run build -w packages/core && npx tsc --noEmit -p packages/tools/tsconfig.json
-
-# Unit tests
-npm run test                           # core unit tests (alias for the line below)
-npm run test --workspace=@liminal/core # core: 28 test files (~120 cases)
-npm run test -w packages/tools         # tools: web_fetch, persona, file, browser tests
-
-# CI: ensure typed harness defaults contain no obvious secrets
-npm run verify-harness-defaults-no-secrets
-
-# Docs site (VitePress)
-npm run docs:gen                       # regenerate docs/reference/environment.md from env inventory
-npm run docs:check                     # validate docs links / structure
-npm run docs:dev | docs:build | docs:preview
-
-# Browser tools — one-time Playwright Chromium install
-npm run browser:install
+```text
+packages/
+├── core/          Harness engine (71 files, 28 tests) → dist/
+├── protocol/      Protocol definitions → dist/
+├── tools/         245+ tool implementations (114 files, 6 tests) → dist/
+├── sidecar/       WebSocket server for MCP + desktop features → dist/
+├── tui/           Terminal UI (Ink/React)
+├── web/           Web UI (Express + SSE + React)
+├── eval/          Evaluation suite (22 scenario packs)
+├── enterprise/    Enterprise Edition features (proprietary)
+└── marketing-video/ Remotion-based video generation
 ```
 
-Verification: `npm run typecheck`, `npm run test`, and manual TUI/web runs.
+**Build order is critical:** `core` → `protocol` → `tools` → `sidecar` must be built before `tui`/`web`/`eval` can run.
 
-## Environment variables
+**Dependency rules:**
+- `core` has ZERO knowledge of `tools` (no circular imports)
+- `tools` depends on `core` dist/
+- Everything else depends on `core` + `tools` dist/
+- `sidecar` enables MCP servers, PTY shells, desktop features
 
-`.env` at the monorepo root. All `AGENT_*` vars are optional unless marked required.
+## Essential Commands
 
-**Where defaults live:** non-secret product defaults are typed in `packages/core/src/harness_default_constants.ts` (`HARNESS_ENV_DEFAULTS`), not generated from `.env`. Optional overrides without editing `.env` are persisted in `.agent_runtime_prefs.json` (local, gitignored — `harness.env` plus `provider` / `runtime` slices) and can be changed from the web **Settings** modal (`GET`/`PUT /api/settings`). **Precedence** per managed key: real `process.env` wins, then persisted prefs, then the typed defaults module. API keys stay in `.env` only. CI sanity check: `npm run verify-harness-defaults-no-secrets`.
+### Build Commands (Required First!)
+```bash
+# CRITICAL: Build order matters! Core → Protocol → Tools → Sidecar
+npm run build                          # Build all: core → protocol → tools → sidecar → enterprise
+npm run build -w packages/core         # Core only (always build first)
+npm run build -w packages/protocol     # Protocol only (after core)
+npm run build -w packages/tools        # Tools only (after core + protocol)
+npm run build:sidecar                  # Sidecar build (core + protocol + tools + sidecar)
 
-The harness manages ~190 keys. The tables below are the curated subset that matters most when working in the repo; the **full generated list** is `docs/reference/environment.md` (`npm run docs:gen`). Secret keys (never persisted to prefs): `AGENT_API_KEY`, `OPENROUTER_API_KEY`, `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `XAI_API_KEY`, `AGENT_VISION_API_KEY`, `AGENT_CAPTCHA_KEY`.
+# After modifying core/src/*.ts:
+npm run build -w packages/core && npm run build -w packages/tools && npm run typecheck
+```
 
-### Provider (key required)
+### Run Interfaces
+```bash
+# Terminal UI (Ink/React)
+npm run tui                            # Start TUI
+npm run tui:bootstrap                  # TUI with persona bootstrap modal
+liminal tui                            # Production path: auto-sync + TUI
 
-| Var                  | Default                        | Purpose                                  |
-| -------------------- | ------------------------------ | ---------------------------------------- |
-| `AGENT_API_KEY`      | — (required)                   | OpenRouter (or provider) API key         |
-| `AGENT_API_BASE_URL` | `https://openrouter.ai/api/v1` | Provider base URL                        |
-| `AGENT_MODEL`        | `deepseek/deepseek-v4-pro`     | Main model slug — full ReAct loop        |
+# Web UI (Express + React)
+npm run web                            # Production web server (:3001)
+npm run web:dev                        # Dev mode: API :3001 + Vite HMR :5173
+npm run web:dev:bootstrap              # Dev mode with persona bootstrap
+liminal web --open                     # Production: auto-sync + open browser
+liminal web --no-update                # Skip sync (fast iteration)
 
-### Model routing
+# Sidecar (MCP + Desktop features)
+npm run sidecar                        # Build + start sidecar
+npm run sidecar:dev                    # Start sidecar without build (dev iteration)
+```
 
-| Var                            | Default                        | Purpose                                                          |
-| ------------------------------ | ------------------------------ | ---------------------------------------------------------------- |
-| `AGENT_FAST_MODEL`             | `deepseek/deepseek-v4-flash`   | Small model: intent/distill/rewrite/critic/safety/auto-dream     |
-| `AGENT_SAFETY_JUDGE_MODEL`     | `AGENT_FAST_MODEL`             | Classifier for safety judge (single-token 0/1)                   |
-| `AGENT_EMBED_MODEL`            | `qwen/qwen3-embedding-8b`      | Embedding model for hybrid BM25+vector recall (`""` = BM25-only) |
-| `AGENT_VISION_MODEL`           | `nvidia/nemotron-nano-12b-v2-vl:free` | Sidecar vision model for `vision_analyze`                  |
-| `AGENT_VISION_BASE_URL` / `AGENT_VISION_API_KEY` | inherit provider | Vision provider URL / key                              |
-| `AGENT_VISION_TIMEOUT_MS`      | `45000`                        | Vision call timeout                                              |
-| `AGENT_VISION_MAX_IMAGE_BYTES` | `4194304`                      | Per-image size limit (4 MB)                                      |
+### CLI Tools
+```bash
+liminal setup                          # First-run wizard (.env setup)
+liminal doctor                         # Verify Node, build, API key
+liminal update                         # Pull latest + rebuild
+```
 
-Two-tier model: main model runs the full loop; fast model runs background JSON tasks. Sidecar model calls (`AGENT_RECALL_EVERY_N`, `AGENT_QUERY_REWRITE`, `AGENT_MEMORY_AUTO_EXTRACT`, `AGENT_SELF_HEAL_LINT`, `AGENT_SAFETY_JUDGE`) are **off by default** — each fires a full completion.
+### Testing & Quality
+```bash
+# Unit tests
+npm run test                           # Core tests (28 files, ~120 cases)
+npm run test -w packages/tools         # Tools tests
+npm run test -w packages/sidecar       # Sidecar tests
+
+# Eval suite (22 scenario packs)
+npm run eval -w packages/eval                        # All scenarios
+npm run eval -w packages/eval -- --only memory       # Filter by name
+npm run eval -w packages/eval -- --parallel 4        # Parallel workers
+npm run eval -w packages/eval -- --repeat 3          # Repeat each
+npm run eval:sandbox                                 # Sandbox capability tests
+npm run eval:capability                              # Capability tests
+npm run eval:long-horizon                            # Long-horizon scenarios
+
+# Typecheck (fast CI validation)
+npm run typecheck                      # All workspaces
+npx tsc --noEmit -p packages/core/tsconfig.json
+npx tsc --noEmit -p packages/tools/tsconfig.json
+
+# Security & Quality Gates
+npm run verify-harness-defaults-no-secrets  # Ensure no secrets in typed defaults
+npm run verify:repo-secrets                 # Check for exposed secrets
+```
+
+### Documentation
+```bash
+npm run docs:gen                       # Regenerate environment.md from harness_env_inventory.ts
+npm run docs:check                     # Validate VitePress links
+npm run docs:dev                       # Start docs dev server
+npm run docs:build                     # Build docs site
+npm run docs:preview                   # Preview built docs
+```
+
+### Browser Automation
+```bash
+npm run browser:install                # One-time: Install Playwright Chromium
+```
+
+### Marketing & Assets
+```bash
+npm run marketing:capture              # Capture marketing GIFs (basic)
+npm run marketing:capture:advanced     # Advanced capture scenarios
+npm run marketing:capture:desktop      # Desktop capture
+npm run marketing:video                # Remotion video studio
+npm run marketing:video:render         # Render specific video
+npm run marketing:video:render:all     # Render all videos
+```
+
+### Enterprise
+```bash
+npm run enterprise:pack                # Pack enterprise bundle
+npm run e2e:install-ee                 # E2E: Install EE from token
+npm run keys:generate                  # Generate license keys
+```
+
+**Verification workflow:**
+1. `npm run build` (full build)
+2. `npm run typecheck` (no errors)
+3. `npm run test` (all pass)
+4. `npm run tui` or `npm run web` (smoke test)
+
+## Environment Configuration
+
+`.env` at monorepo root. All `AGENT_*` vars are optional unless marked required.
+
+**Configuration precedence (per managed key):**
+1. **Real `process.env`** (highest priority)
+2. **Persisted prefs** (`.agent_runtime_prefs.json`, gitignored)
+3. **Typed defaults** (`packages/core/src/harness_default_constants.ts`)
+
+**API keys** (secrets, never in prefs): `AGENT_API_KEY`, `OPENROUTER_API_KEY`, `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `XAI_API_KEY`, `AGENT_VISION_API_KEY`, `AGENT_CAPTCHA_KEY`
+
+**Full reference:** `docs/reference/environment.md` (auto-generated via `npm run docs:gen` from `harness_env_inventory.ts`)
+
+### Minimal .env for First Run
+
+```bash
+AGENT_API_KEY=your_openrouter_key_here
+AGENT_API_BASE_URL=https://openrouter.ai/api/v1
+AGENT_MODEL=deepseek/deepseek-chat
+```
+
+### Core Provider Settings (Required)
+
+| Variable | Default | Purpose |
+|----------|---------|---------|
+| `AGENT_API_KEY` | — (required) | OpenRouter (or provider) API key |
+| `AGENT_API_BASE_URL` | `https://openrouter.ai/api/v1` | Provider base URL |
+| `AGENT_MODEL` | `deepseek/deepseek-v4-pro` | Main ReAct loop model |
+| `AGENT_FAST_MODEL` | `deepseek/deepseek-v4-flash` | Background tasks (intent/distill/critic) |
+| `AGENT_EMBED_MODEL` | `qwen/qwen3-embedding-8b` | Hybrid BM25+vector recall (empty = BM25 only) |
+| `AGENT_VISION_MODEL` | `nvidia/nemotron-nano-12b-v2-vl:free` | Sidecar vision analysis |
+
+### Harness Quality & Performance
+
+| Variable | Default | Purpose |
+|----------|---------|---------|
+| `AGENT_TOOL_LAZY` | **on** | Lazy tool loading (245+ tools, activate on demand) |
+| `AGENT_ALWAYS_TOOLS_PROFILE` | `balanced` | Baseline: `balanced`, `knowledge_first`, `max_autonomy` |
+| `AGENT_DISTILL` | on | Shrink huge outputs → `.agent_artifacts/` |
+| `AGENT_DISTILL_READ_FILE` | off | Distill `read_file` >25k chars (off = keep code verbatim) |
+| `AGENT_TOOL_BODY_ELIDE` | on | Replace stale tool results with pointers (>12k chars) |
+| `AGENT_PROMPT_CACHE` | on | OpenRouter cache breakpoint on static prefix (~1/10× cost on round 2+) |
+| `AGENT_FAILURE_LOG` | on | Append-only `.agent_failures.jsonl` + `failure_review` tool |
+| `AGENT_RULE_RECALL` | on | Inject harness rules at round 2 |
+| `AGENT_RECIPE_LIBRARY` | on | Success-pattern telemetry |
+
+### Reasoning & Routing
+
+| Variable | Default | Purpose |
+|----------|---------|---------|
+| `AGENT_REASONING_BUDGET` | on | Infer per-turn reasoning effort from intent classifier |
+| `AGENT_REASONING_DEFAULT_EFFORT` | `high` | Fallback when classifier is off/low-confidence |
+| `AGENT_REASONING_SURFACE` | `external` | `native` \| `external` \| `auto` — external uses `think()` + `reason()` tools |
+| `AGENT_EFFORT` | `medium` | Output thoroughness: `low` \| `medium` \| `high` \| `xhigh` |
+| `AGENT_INTENT_INFERENCE` | on | LLM-tier intent classification |
+| `AGENT_INTENT_ROUTING` | on | Route knowledge/introspection to fast model |
+| `AGENT_EFFORT_LEARN` | on | Record per-intent reasoning outcomes, reuse best as prior |
+
+### Memory & Knowledge
+
+| Variable | Default | Purpose |
+|----------|---------|---------|
+| `AGENT_MEMORY_GRAPH` | on | Link notes in graph + enable `memory_graph` tool |
+| `AGENT_TRAJECTORY_WRITE` | on | Causal-trajectory entries at turn end (zero LLM cost) |
+| `AGENT_MEMORY_AUTO_EXTRACT` | off | End-of-turn completion that calls `remember` |
+| `AGENT_MEMORY_EPISODE` | off | Per-turn `vault_write` episode chunks |
+| `AGENT_VAULT_PATH` | — | Explicit Obsidian vault folder (absolute path) |
+| `AGENT_OBSIDIAN_DISCOVER` | on | Auto-detect vault from `obsidian.json` |
+| `AGENT_MEMORY_ARCHIVE` | on | Soft-delete to `notes.archive.json` before removal |
+| `AGENT_MEMORY_CURATOR_MODEL` | (fast) | Model for `curate_memory` LLM prune |
+
+### Auto-Dream (Background Consolidation)
+
+| Variable | Default | Purpose |
+|----------|---------|---------|
+| `AGENT_AUTO_DREAM` | off | Background consolidation: session logs → memory/vault |
+| `AGENT_AUTO_DREAM_MIN_HOURS` | `24` | Min idle hours before eligible |
+| `AGENT_AUTO_DREAM_MIN_SESSIONS` | `5` | Min unprocessed sessions to trigger |
+| `AGENT_AUTO_DREAM_ALLOW_DELETE` | off | Allow dream pass to prune contradicted notes |
+
+### Context & Session
+
+| Variable | Default | Purpose |
+|----------|---------|---------|
+| `AGENT_WORKSPACE_ROOT` | auto | Root for world context, notes, artifacts, persona |
+| `AGENT_SEND_TIMEOUT_MS` | `1800000` | Wall-clock cap for one full send() / ReAct run (30 min) |
+| `AGENT_CTX_HOT_ROUNDS` | `4` | Verbatim rounds kept |
+| `AGENT_CTX_WARM_ROUNDS` | `8` | Tier-2 provenance rounds |
+| `AGENT_SESSION_JSONL` | on | Append-only trace → `.agent_sessions/<taskId>.jsonl` |
+| `AGENT_MAX_COMPLETION_TOKENS` | `4000` | Per-completion token cap |
+
+### Web & Research
+
+| Variable | Default | Purpose |
+|----------|---------|---------|
+| `AGENT_WEB_READABILITY` | on | Article extraction in `web_fetch` |
+| `AGENT_WEB_FETCH_TIMEOUT_MS` | `20000` | Per-request timeout |
+| `AGENT_WEB_FETCH_TOTAL_WALL_MS` | `55000` | Hard wall clock (all retries + parse) |
+| `AGENT_WEB_FETCH_403_RETRY` | on | Firefox + Chrome cross-site retries after bot-wall |
+
+### Browser & CAPTCHA
+
+| Variable | Default | Purpose |
+|----------|---------|---------|
+| `AGENT_BROWSER` | on | Master switch for headless-browser family |
+| `AGENT_BROWSER_HEADED` | off | Run Chromium visible instead of headless |
+| `AGENT_BROWSER_ALWAYS_ACTIVE` | off | Keep browser family loaded even under lazy loading |
+| `AGENT_BROWSER_STEALTH` | on | Fingerprint patches + disable AutomationControlled |
+| `AGENT_CAPTCHA_KEY` | — (secret) | 2captcha / CapSolver API key |
+| `AGENT_CAPTCHA_SERVICE` | `2captcha` | Service: `2captcha` \| `capsolver` |
+
+### Cloud Integrations (OAuth)
+
+| Variable | Default | Purpose |
+|----------|---------|---------|
+| `AGENT_GMAIL_REST` | on | Gmail send/draft REST tools |
+| `AGENT_GOOGLE_CALENDAR_REST` | on | Google Calendar REST tools |
+| `AGENT_GOOGLE_DOCS_REST` | on | Docs/Sheets/Slides REST |
+| `AGENT_GOOGLE_ANALYTICS_REST` | on | GA4 REST tools |
+| `AGENT_AZURE_ARM` | on | Azure ARM REST + MCP sidecar |
+| `AGENT_MICROSOFT_365` | on | Outlook/Teams/SharePoint/Excel REST |
+| `AGENT_XERO` | on | Xero accounting REST |
+| `AGENT_SLACK` | on | Slack workspace REST |
+| `AGENT_LINEAR` | on | Linear issue tracking REST |
+| `AGENT_NOTION` | on | Notion REST |
+
+### Dynamic Workflows
+
+| Variable | Default | Purpose |
+|----------|---------|---------|
+| `AGENT_WORKFLOWS` | on | Master switch for `plan_workflow` / `run_workflow` |
+| `AGENT_WORKFLOW_MAX_CONCURRENT` | `4` | Max concurrent sub-agents per phase (1–16) |
+| `AGENT_WORKFLOW_MAX_AGENTS` | `64` | Total sub-agent cap per workflow (1–500) |
+| `AGENT_WORKFLOW_TIMEOUT_MS` | `1800000` | Wall-clock cap for one workflow run |
+
+### Document Engine
+
+| Variable | Default | Purpose |
+|----------|---------|---------|
+| `AGENT_DOC_ENGINE` | **on** | Register all `doc_*` tools (PPTX/DOCX/PDF) |
+| `AGENT_DOC_AUTONOMY` | on | Auto-compose without explicit section prompts |
+| `AGENT_DOC_QUALITY_MIN` | `90` | Min quality score (0–100) before export |
+
+### Safety & Approvals
+
+| Variable | Default | Purpose |
+|----------|---------|---------|
+| `AGENT_SAFETY_JUDGE` | off | Heuristic + LLM pre-flight to skip approval on safe tools |
+| `AGENT_APPROVAL_TIMEOUT_MS` | `120000` | Auto-reject after timeout (10s–600s) |
+| `AGENT_YOLO` | off | Auto-approve all tools — **trusted environments only** |
+
+### UI & Persona
+
+| Variable | Default | Purpose |
+|----------|---------|---------|
+| `PORT` | `3001` | Web server port |
+| `AGENT_SESSION_GREET` | off | Enable model's opening greeting on new sessions |
+| `AGENT_PERSONA_BOOTSTRAP` | on | First-run modal for persona voice |
+| `AGENT_PERSONA_BOOTSTRAP_FORCE` | off | Re-show persona UI (or `--bootstrap` flag) |
+| `AGENT_PERSONA_GENERATION_STREAM` | on | Stream persona artifacts incrementally |
+
+**Settings changes:** Use web **Settings** modal (syncs to `.agent_runtime_prefs.json`) or edit `.env`. API keys stay in `.env` only.
 
 ### Harness quality
 

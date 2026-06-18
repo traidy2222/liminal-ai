@@ -275,7 +275,7 @@ function buildMcpTool(record: McpConnectionRecord, tool: McpToolRecord): ToolDef
   let handler = buildMcpToolHandler(record, tool, remoteProperties);
   if (record.name === "google_gmail" && tool.remoteName === "create_draft") {
     description +=
-      " — PLAIN body only (no HTML). For styled outbound mail use gmail_create_draft with body_html + body.";
+      " — PLAIN body only. For outbound mail, compose formatted body_html + body in gmail_create_draft before calling any draft tool.";
     const inner = handler;
     handler = async (args) => {
       const styleErr = validateOutboundEmailStyle(args);

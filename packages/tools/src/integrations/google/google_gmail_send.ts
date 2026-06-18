@@ -2,7 +2,7 @@
  * Gmail immediate send via classic REST (gmail.googleapis.com).
  * Read/search/draft/label use official mcp_google_gmail_*; this tool covers users.messages.send only.
  */
-import { effectiveHarnessEnvRaw, getGoogleAccessToken } from "@liminal/core";
+import { effectiveHarnessEnvRaw, getGoogleAccessToken, listGoogleMailOAuthAccounts, resolveGoogleMailAccount } from "@liminal/core";
 import type { PropertySchema, ToolDefinition, ToolResult } from "@liminal/core";
 import { readFile } from "node:fs/promises";
 import { basename, extname } from "node:path";
@@ -19,12 +19,13 @@ export function gmailSendRestEnabled(): boolean {
 
 async function gmailApiJson<T>(
   path: string,
+  accountId: string,
   init?: RequestInit
 ): Promise<{ ok: true; data: T } | { ok: false; error: string }> {
   if (!gmailSendRestEnabled()) {
     return { ok: false, error: "Gmail REST send is off (set AGENT_GOOGLE_GMAIL_SEND=1)." };
   }
-  const token = await getGoogleAccessToken();
+  const token = await getGoogleAccessToken(accountId);
   if (!token) {
     return {
       ok: false,
@@ -190,25 +191,32 @@ async function resolveComposeArgs(
   return { ok: true, value };
 }
 
+async function resolveGmailAccountForArgs(
+  args: Record<string, unknown>
+): Promise<{ accountId: string; email?: string } | { error: string }> {
+  const hint = typeof args["account_hint"] === "string" ? args["account_hint"].trim() : undefined;
+  const accounts = await listGoogleMailOAuthAccounts();
+  const resolved = resolveGoogleMailAccount(hint, accounts);
+  if ("error" in resolved) return resolved;
+  return { accountId: resolved.account.accountId, email: resolved.account.email };
+}
+
 const composeProperties: Record<string, PropertySchema> = {
   to: { type: "array", items: { type: "string" }, description: "Recipient email addresses." },
   cc: { type: "array", items: { type: "string" }, description: "Optional CC addresses." },
   bcc: { type: "array", items: { type: "string" }, description: "Optional BCC addresses." },
   subject: { type: "string", description: "Email subject." },
-  body: {
-    type: "string",
-    description:
-      "Plain-text body — always include alongside body_html (fallback when HTML can't render). " +
-      "PLAIN-tier only: omit body_html and use body alone for thread replies and one-liners. " +
-      "Copy: no em/en dashes (R-EMAIL-COPY); use commas or short sentences instead.",
-  },
   body_html: {
     type: "string",
     description:
-      "Rich HTML body (email-safe inline styles, nested tables, cid: images). " +
-      "Default for new outbound mail. Put bgcolor+color on the same <td> — Gmail strips outer dark backgrounds. " +
-      "Body band: #333 on #fff; dark header bands: #fff text on bgcolor on that same td. " +
-      "Copy: no em/en dashes or &mdash; in prose (R-EMAIL-COPY).",
+      "The finished HTML email (required for new outbound mail, with body). Nested tables + inline styles. " +
+      "Compose this fully before calling the tool — it is the deliverable, not a later upgrade.",
+  },
+  body: {
+    type: "string",
+    description:
+      "Plain-text fallback (required alongside body_html for new outbound mail). " +
+      "Thread replies and one-liners may omit body_html and use body alone.",
   },
   inline_images: {
     type: "array",
@@ -246,15 +254,10 @@ const composeProperties: Record<string, PropertySchema> = {
     type: "string",
     description: "Optional Gmail thread id when drafting/replying in an existing conversation.",
   },
-  recipients_verified: {
-    type: "boolean",
-    description:
-      "Set true only after web_search + web_fetch found each To/Cc address (official site or business directory listing). Never guess partners@/business@/firstname@ — they bounce.",
-  },
-  recipient_source: {
+  account_hint: {
     type: "string",
     description:
-      "Required when recipients_verified is true: https URL from web_fetch (official site, Yellow Pages, True Local, Google Maps) or email plus URL.",
+      "Mailbox email or account id to send from. **Required when multiple Gmail accounts are connected** — use the account that received the thread (see mail_search_inboxes / inbox triage).",
   },
 };
 
@@ -270,10 +273,10 @@ export function createGmailSendTools(): ToolDefinition[] {
   const gmailCreateDraft = defineTool({
     name: "gmail_create_draft",
     description:
-      "WHAT: Create a Gmail draft via REST (users.drafts.create) with full body_html, inline_images, and attachments.\n" +
-      "WHEN: User wants to review mail in Gmail before sending — **prefer this over mcp_google_gmail_create_draft** for styled HTML (MCP draft is plain-only).\n" +
-      "AFTER: To deliver that draft, call **gmail_send_draft** with the returned draftId — do **not** call gmail_send_message with a recomposed body unless the user asked to rewrite.\n" +
-      "RECIPIENTS: web_search + web_fetch (official site, Yellow Pages, True Local, Google Maps, LinkedIn) — set recipient_source + recipients_verified: true. Never guess addresses.\n" +
+      "WHAT: Create a Gmail draft (users.drafts.create) — this call **is** the finished styled email.\n" +
+      "WHEN: Any new outbound mail the user wants drafted or reviewed in Gmail.\n" +
+      "HOW: Plan subject + formatted body_html + plain body **before** calling. Pass all three in **one** invocation — body_html is the real email (nested tables, inline styles). Not mcp_google_gmail_create_draft (plain-only).\n" +
+      "AFTER: gmail_send_draft(draftId) when the user approves send.\n" +
       "STYLE: Neutral professional body_html + body (R-EMAIL-STYLE). email_style_infer only if user named an industry/style this turn. Plain-only for thread replies.\n" +
       "SAFETY: approval-gated — verify recipients before approving.",
     parameters: composeParameters,
@@ -289,6 +292,8 @@ export function createGmailSendTools(): ToolDefinition[] {
       if (recipErr) return { ok: false, error: recipErr };
       const styleErr = validateOutboundEmailStyle(args);
       if (styleErr) return { ok: false, error: styleErr };
+      const acct = await resolveGmailAccountForArgs(args);
+      if ("error" in acct) return { ok: false, error: acct.error };
       const resolved = await resolveComposeArgs(args);
       if (!resolved.ok) return { ok: false, error: resolved.error };
       const raw = buildMimeMessage(resolved.value);
@@ -296,16 +301,19 @@ export function createGmailSendTools(): ToolDefinition[] {
       if (resolved.value.threadId) message.threadId = resolved.value.threadId;
       const res = await gmailApiJson<{ id?: string; message?: { id?: string; threadId?: string } }>(
         "/drafts",
+        acct.accountId,
         { method: "POST", body: JSON.stringify({ message }) }
       );
       if (!res.ok) return { ok: false, error: res.error };
       const v = resolved.value;
       const recip = [...v.to, ...(v.cc ?? []), ...(v.bcc ?? [])].join(", ");
+      const fromLabel = acct.email ?? acct.accountId;
       return {
         ok: true,
         output:
-          `Draft created for ${recip}. draftId=${res.data.id ?? "?"}, ` +
-          `messageId=${res.data.message?.id ?? "?"}, threadId=${res.data.message?.threadId ?? "?"}`,
+          `Draft created for ${recip} from ${fromLabel}. draftId=${res.data.id ?? "?"}, ` +
+          `messageId=${res.data.message?.id ?? "?"}, threadId=${res.data.message?.threadId ?? "?"}, ` +
+          `fromAccount=${fromLabel}`,
       };
     },
   });
@@ -324,6 +332,7 @@ export function createGmailSendTools(): ToolDefinition[] {
           type: "string",
           description: "draftId returned by gmail_create_draft (e.g. from tool output draftId=…).",
         },
+        account_hint: composeProperties.account_hint,
       },
       required: ["draft_id"] as string[],
       additionalProperties: false as const,
@@ -333,16 +342,20 @@ export function createGmailSendTools(): ToolDefinition[] {
     handler: async (args): Promise<ToolResult> => {
       const draftId = String(args["draft_id"] ?? "").trim();
       if (!draftId) return { ok: false, error: "draft_id is required" };
+      const acct = await resolveGmailAccountForArgs(args);
+      if ("error" in acct) return { ok: false, error: acct.error };
       const res = await gmailApiJson<{ id?: string; threadId?: string; labelIds?: string[] }>(
         "/drafts/send",
+        acct.accountId,
         { method: "POST", body: JSON.stringify({ id: draftId }) }
       );
       if (!res.ok) return { ok: false, error: res.error };
+      const fromLabel = acct.email ?? acct.accountId;
       return {
         ok: true,
         output:
-          `Draft sent. draftId=${draftId}, messageId=${res.data.id ?? "?"}, ` +
-          `threadId=${res.data.threadId ?? "?"}`,
+          `Draft sent from ${fromLabel}. draftId=${draftId}, messageId=${res.data.id ?? "?"}, ` +
+          `threadId=${res.data.threadId ?? "?"}, fromAccount=${fromLabel}`,
       };
     },
   });
@@ -364,19 +377,24 @@ export function createGmailSendTools(): ToolDefinition[] {
       if (recipErr) return { ok: false, error: recipErr };
       const styleErr = validateOutboundEmailStyle(args);
       if (styleErr) return { ok: false, error: styleErr };
+      const acct = await resolveGmailAccountForArgs(args);
+      if ("error" in acct) return { ok: false, error: acct.error };
       const resolved = await resolveComposeArgs(args);
       if (!resolved.ok) return { ok: false, error: resolved.error };
       const raw = buildMimeMessage(resolved.value);
-      const res = await gmailApiJson<{ id?: string; threadId?: string }>("/messages/send", {
+      const res = await gmailApiJson<{ id?: string; threadId?: string }>("/messages/send", acct.accountId, {
         method: "POST",
         body: JSON.stringify({ raw }),
       });
       if (!res.ok) return { ok: false, error: res.error };
       const v = resolved.value;
       const recip = [...v.to, ...(v.cc ?? []), ...(v.bcc ?? [])].join(", ");
+      const fromLabel = acct.email ?? acct.accountId;
       return {
         ok: true,
-        output: `Email sent to ${recip}. messageId=${res.data.id ?? "?"}, threadId=${res.data.threadId ?? "?"}`,
+        output:
+          `Email sent from ${fromLabel} to ${recip}. messageId=${res.data.id ?? "?"}, ` +
+          `threadId=${res.data.threadId ?? "?"}, fromAccount=${fromLabel}`,
       };
     },
   });

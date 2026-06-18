@@ -2,7 +2,7 @@
 
 All notable changes to [Liminal AI](https://github.com/traidy2222/liminal-ai) are documented here and on the docs portal: [docs.vireondynamics.com/liminal/reference/changelog](https://docs.vireondynamics.com/liminal/reference/changelog).
 
-**Current stage:** **beta** (`v0.1.1` tip of `main`, 2026-06-15). **Beta**, **RC**, and **v0.1.0 public preview** have not been declared as product releases yet.
+**Current stage:** **beta** (`v0.1.2` tip of `main`, 2026-06-18). **Beta**, **RC**, and **v0.1.0 public preview** have not been declared as product releases yet.
 
 **Single source:** edit [`changelog/releases.json`](changelog/releases.json), then run `npm run changelog:gen`.
 
@@ -10,7 +10,13 @@ Format: **v0.0.x** entries keyed to the last GitHub push in each slice. Dates ar
 
 Marketing (richer notes): [vireondynamics.com/liminal/changelog](https://www.vireondynamics.com/liminal/changelog)
 
-## [v0.1.1] — 2026-06-15 — Current alpha
+## [v0.1.2] — 2026-06-18 — Current alpha
+
+Scans all connected Gmail/Outlook mailboxes with account-aware replies, automated inbox watcher with Gmail labels, email privacy redaction, composer drag-and-drop for any file type, redesigned integrations panel on web and desktop, and managed inference Settings that stay on managed mode.
+
+[Full notes](https://docs.vireondynamics.com/liminal/reference/changelog#v0-1-2)
+
+## [v0.1.1] — 2026-06-15
 
 Portable Liminal Desktop installs can check GitHub Releases on launch, apply harness updates in place (liminald-runtime zip), and schedule full app updates with a one-time restart. CLI gains liminal update --check for portable installs.
 

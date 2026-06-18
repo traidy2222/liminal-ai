@@ -5,10 +5,12 @@ import type { SSEManager } from "./sse.js";
 import type { WebRemoteService } from "./web_remote.js";
 import type { ApprovalDecision, ChatWorkspaceMode } from "@liminal/core";
 import {
-  DEFAULT_IMAGE_ATTACHMENT_LIMITS,
-  normalizeImageAttachmentName,
-  parseDataUrlImage,
-  validateImageAttachments,
+  DEFAULT_CHAT_ATTACHMENT_LIMITS,
+  normalizeChatAttachmentName,
+  parseDataUrlAttachment,
+  validateChatAttachments,
+  partitionChatAttachments,
+  type ChatFileAttachment,
   type ImageAttachment,
   buildHarnessSettingsApiFields,
   HARNESS_SETTINGS_TABS,
@@ -29,43 +31,27 @@ import {
   fetchInferenceUsageStatus,
   fetchManagedInferenceModels,
   resolveInferenceMode,
-  listGoogleOAuthAccounts,
   exchangeGoogleCode,
-  ALL_GOOGLE_SERVICE_IDS,
   scopesForGoogleServices,
   resolveGoogleServices,
-  listMicrosoftOAuthAccounts,
-  ALL_MICROSOFT_SERVICE_IDS,
-  missingDefaultMicrosoftScopes,
-  listGithubOAuthAccounts,
-  listXeroOAuthAccounts,
-  refreshStaleXeroAccounts,
-  xeroBundleMissingCoreScopes,
-  xeroBundleMissingFullScopes,
-  xeroBundleMissingPhase3Scopes,
-  xeroBundleMissingScopes,
-  listSlackOAuthAccounts,
-  missingSlackScopes,
-  slackHostedConnectExtra,
-  listLinearOAuthAccounts,
-  listNotionOAuthAccounts,
   buildHostedIntegrationConnectUrl,
   hostedOAuthHandoffPath,
   applyHostedOAuthHandoff,
   isHostedOAuthFormHandoffContent,
   parseHostedOAuthHandoffHttpBody,
+  slackHostedConnectExtra,
 } from "@liminal/core";
 import {
   handleAudioUpload,
   handleTranscribe,
   handleTtsPost,
   readTtsClipBytes,
-  getGoogleSidecarStatus,
-  getMicrosoftSidecarStatus,
   connectGoogleWorkspaceFromServer,
   disconnectGoogleWorkspaceFromServer,
   connectMicrosoft365FromServer,
   disconnectMicrosoft365FromServer,
+  connectAzureFromServer,
+  disconnectAzureFromServer,
   connectGithubFromServer,
   disconnectGithubFromServer,
   connectXeroFromServer,
@@ -76,12 +62,14 @@ import {
   disconnectLinearFromServer,
   connectNotionFromServer,
   disconnectNotionFromServer,
-  listIntegrationConnections,
+  buildIntegrationsSnapshot,
   attachCustomMcpFromServer,
   detachCustomMcpFromServer,
   connectOpenApiFromServer,
   disconnectOpenApiFromServer,
   parseAuthBody,
+  revokeIntegrationAccountFromServer,
+  type IntegrationAccountSlug,
 } from "@liminal/tools";
 import { loadPersonaUiThemeFromWorkspace, loadPersonaUiCopyFromWorkspace } from "@liminal/tools";
 import { persistIncomingAttachments } from "./image_attachment_store.js";
@@ -540,85 +528,7 @@ export function createRouter(
 
   router.get("/api/integrations", async (_req, res) => {
     try {
-      await refreshStaleXeroAccounts();
-      const accounts = await listGoogleOAuthAccounts();
-      const msAccounts = await listMicrosoftOAuthAccounts();
-      const sidecar = await getGoogleSidecarStatus();
-      const msSidecar = await getMicrosoftSidecarStatus();
-      const connections = await listIntegrationConnections();
-      const { missingDefaultWorkspaceScopes } = await import("@liminal/core");
-      res.json({
-        google: {
-          accounts: accounts.map((a) => ({
-            ...a,
-            missingScopes: missingDefaultWorkspaceScopes(a.scopes),
-          })),
-          sidecar,
-          services: ALL_GOOGLE_SERVICE_IDS,
-        },
-        microsoft: {
-          accounts: msAccounts.map((a) => ({
-            ...a,
-            missingScopes: missingDefaultMicrosoftScopes(a.scopes),
-          })),
-          sidecar: msSidecar,
-          services: ALL_MICROSOFT_SERVICE_IDS,
-        },
-        github: {
-          accounts: (await listGithubOAuthAccounts()).map((a) => ({
-            accountId: a.accountId,
-            email: a.email,
-            login: a.login,
-            scopes: a.scopes,
-            expiresAt: a.expiresAt,
-          })),
-        },
-        xero: {
-          accounts: (await listXeroOAuthAccounts()).map((a) => ({
-            accountId: a.accountId,
-            email: a.email,
-            scopes: a.scopes,
-            expiresAt: a.expiresAt,
-            tenantId: a.tenantId,
-            tenantName: a.tenantName,
-            missingScopes: xeroBundleMissingScopes(a.scopes),
-            missingCoreScopes: xeroBundleMissingCoreScopes(a.scopes),
-            missingFullScopes: xeroBundleMissingFullScopes(a.scopes),
-            missingExtendedScopes: xeroBundleMissingPhase3Scopes(a.scopes),
-          })),
-        },
-        slack: {
-          accounts: (await listSlackOAuthAccounts()).map((a) => ({
-            accountId: a.accountId,
-            email: a.email,
-            scopes: a.scopes,
-            expiresAt: a.expiresAt,
-            teamId: a.teamId,
-            teamName: a.teamName,
-            missingScopes: missingSlackScopes(a.scopes),
-          })),
-        },
-        linear: {
-          accounts: (await listLinearOAuthAccounts()).map((a) => ({
-            accountId: a.accountId,
-            email: a.email,
-            scopes: a.scopes,
-            expiresAt: a.expiresAt,
-            organizationName: a.organizationName,
-          })),
-        },
-        notion: {
-          accounts: (await listNotionOAuthAccounts()).map((a) => ({
-            accountId: a.accountId,
-            email: a.email,
-            scopes: a.scopes,
-            expiresAt: a.expiresAt,
-            workspaceId: a.workspaceId,
-            workspaceName: a.workspaceName,
-          })),
-        },
-        connections,
-      });
+      res.json(await buildIntegrationsSnapshot());
     } catch (e) {
       res.status(500).json({ error: e instanceof Error ? e.message : String(e) });
     }
@@ -736,6 +646,42 @@ export function createRouter(
     res.json({ ok: true, output: result.output });
   });
 
+  const INTEGRATION_ACCOUNT_SLUGS = new Set<IntegrationAccountSlug>([
+    "google",
+    "microsoft",
+    "azure",
+    "github",
+    "xero",
+    "slack",
+    "linear",
+    "notion",
+  ]);
+
+  router.delete("/api/integrations/:provider/accounts/:accountId", async (req, res) => {
+    const bridge = active();
+    if (bridge.harness.getIsRunning()) {
+      res.status(409).json({ error: "Agent is busy; finish the current turn first." });
+      return;
+    }
+    const provider = String(req.params["provider"] ?? "").trim() as IntegrationAccountSlug;
+    const accountId = String(req.params["accountId"] ?? "").trim();
+    if (!INTEGRATION_ACCOUNT_SLUGS.has(provider)) {
+      res.status(400).json({ error: `Unknown provider: ${provider}` });
+      return;
+    }
+    if (!accountId) {
+      res.status(400).json({ error: "accountId required" });
+      return;
+    }
+    const result = await revokeIntegrationAccountFromServer(bridge.harness.registry, provider, accountId);
+    if (!result.ok) {
+      res.status(400).json({ error: result.error });
+      return;
+    }
+    bridge.harness.getContext().refreshProtocolDynamic(bridge.harness.registry.getActiveToolNames());
+    res.json({ ok: true, output: result.output });
+  });
+
   router.get("/api/integrations/github/begin", (req, res) => {
     prunePendingHostedOAuth();
     const state = randomBytes(16).toString("hex");
@@ -836,6 +782,57 @@ export function createRouter(
     const bridge = active();
     const revoke = req.query["revoke"] === "1" || req.query["revoke"] === "true";
     const result = await disconnectMicrosoft365FromServer(bridge.harness.registry, revoke);
+    if (!result.ok) {
+      res.status(400).json({ error: result.error });
+      return;
+    }
+    bridge.harness.getContext().refreshProtocolDynamic(bridge.harness.registry.getActiveToolNames());
+    res.json({ ok: true, output: result.output });
+  });
+
+  router.get("/api/integrations/azure/begin", (req, res) => {
+    prunePendingHostedOAuth();
+    const state = randomBytes(16).toString("hex");
+    const mode = req.query["mode"] === "read_only" ? "read_only" : "read_write";
+    pendingHostedOAuth.set(state, {
+      exp: Date.now() + 10 * 60_000,
+      provider: "azure",
+      mode,
+    });
+    const harnessRedirectUri = hostedOAuthHandoffPath(WEB_PORT);
+    const site = defaultVireonSiteOrigin();
+    const connectUrl = buildHostedIntegrationConnectUrl({
+      provider: "azure",
+      harnessRedirectUri,
+      harnessState: state,
+      siteOrigin: site,
+      mode,
+    });
+    res.json({ connectUrl, authUrl: connectUrl, state });
+  });
+
+  router.post("/api/integrations/azure/connect", async (req, res) => {
+    const bridge = active();
+    if (bridge.harness.getIsRunning()) {
+      res.status(409).json({ error: "Agent is busy; finish the current turn first." });
+      return;
+    }
+    const body = req.body as { mode?: "read_write" | "read_only" };
+    const result = await connectAzureFromServer(bridge.harness.registry, {
+      mode: body.mode ?? "read_write",
+    });
+    if (!result.ok) {
+      res.status(400).json({ error: result.error });
+      return;
+    }
+    bridge.harness.getContext().refreshProtocolDynamic(bridge.harness.registry.getActiveToolNames());
+    res.json({ ok: true, output: result.output });
+  });
+
+  router.delete("/api/integrations/azure", async (req, res) => {
+    const bridge = active();
+    const revoke = req.query["revoke"] === "1" || req.query["revoke"] === "true";
+    const result = await disconnectAzureFromServer(bridge.harness.registry, revoke);
     if (!result.ok) {
       res.status(400).json({ error: result.error });
       return;
@@ -1040,6 +1037,14 @@ export function createRouter(
             mode: pendingMode,
           });
           if (!msResult.ok) attachWarning = msResult.error;
+          else
+            bridge.harness.getContext().refreshProtocolDynamic(bridge.harness.registry.getActiveToolNames());
+        }
+        if (provider === "azure") {
+          const azureResult = await connectAzureFromServer(bridge.harness.registry, {
+            mode: pendingMode,
+          });
+          if (!azureResult.ok) attachWarning = azureResult.error;
           else
             bridge.harness.getContext().refreshProtocolDynamic(bridge.harness.registry.getActiveToolNames());
         }
@@ -1416,25 +1421,26 @@ export function createRouter(
       workflowPreset?: import("@liminal/core").ReceiptWorkflowPreset;
     };
     const msg = String(message ?? "").trim();
-    const normalizedAttachments: Array<ImageAttachment & { dataUrl: string }> = [];
+    const normalizedAttachments: Array<ChatFileAttachment & { dataUrl: string }> = [];
     for (const item of attachments ?? []) {
       const dataUrl = String(item?.dataUrl ?? "").trim();
-      const parsed = parseDataUrlImage(dataUrl);
+      const parsed = parseDataUrlAttachment(dataUrl);
       if (!parsed.ok) {
         res.status(400).json({ error: parsed.error });
         return;
       }
+      const declaredMime = String((item as { mimeType?: string })?.mimeType ?? "").trim().toLowerCase();
       normalizedAttachments.push({
-        name: normalizeImageAttachmentName(String(item?.name ?? "image")),
-        mimeType: parsed.mimeType,
+        name: normalizeChatAttachmentName(String(item?.name ?? "file")),
+        mimeType: declaredMime || parsed.mimeType,
         dataUrl,
         sizeBytes: parsed.sizeBytes,
         source: item?.source ?? "clipboard",
       });
     }
-    const validation = validateImageAttachments(
+    const validation = validateChatAttachments(
       normalizedAttachments,
-      DEFAULT_IMAGE_ATTACHMENT_LIMITS
+      DEFAULT_CHAT_ATTACHMENT_LIMITS
     );
     if (!validation.ok) {
       res.status(400).json({ error: validation.error });
@@ -1444,7 +1450,7 @@ export function createRouter(
       res.status(400).json({ error: "message or attachments required" });
       return;
     }
-    if (workflowPreset === "receipt_to_xero" && normalizedAttachments.length === 0) {
+    if (workflowPreset === "receipt_to_xero" && partitionChatAttachments(normalizedAttachments).images.length === 0) {
       res.status(400).json({ error: "Process receipts requires at least one image attachment." });
       return;
     }
@@ -1458,7 +1464,7 @@ export function createRouter(
       .sendUserMessage(msg, {
         freshContext: Boolean(freshContext),
         liveDictation: Boolean(liveDictation),
-        imageAttachments: persisted,
+        chatAttachments: persisted,
         workflowPreset,
       })
       .catch((err) => {

@@ -4,7 +4,7 @@
 import { detectEmailPlaceholderViolations } from "@liminal/core";
 
 const HTML_FIELD_KEYS = ["body_html", "html", "htmlBody", "html_body"] as const;
-const PLAIN_FIELD_KEYS = ["body", "text", "plain", "message", "plain_body"] as const;
+const PLAIN_FIELD_KEYS = ["body", "body_text", "text", "plain", "message", "plain_body"] as const;
 const REPLY_FIELD_KEYS = [
   "reply_to_message_id",
   "thread_id",
@@ -85,21 +85,17 @@ export function validateOutboundEmailStyle(args: Record<string, unknown>): strin
 
   if (html) {
     if (looksLikeFormattedEmailHtml(html)) return null;
-    if (html.length >= 80) {
-      return (
-        "body_html looks unstyled (bare tags without inline styles or structure). " +
-        "Infer appropriate styling from occasion and audience — intentional inline styles " +
-        "(typography, spacing, color) suited to the message. Co-locate bgcolor and color on the same <td> when using colored bands."
-      );
-    }
-    return null;
+    return (
+      "body_html must use intentional email-safe styling (nested tables and/or inline styles on text elements). " +
+      "Compose the full formatted HTML before calling create_draft — the tool call is the deliverable."
+    );
   }
 
   if (plain && isSubstantivePlainBody(plain)) {
     return (
-      "New outbound mail needs body_html with intentional styling plus a plain body fallback. " +
-      "Plain-only is for thread replies and one-liners. " +
-      "Use gmail_create_draft or gmail_send_message with body_html — not plain MCP create_draft."
+      "New outbound mail is delivered as formatted body_html + plain body in one create_draft call. " +
+      "Plan and write the HTML first, then call gmail_create_draft / outlook_create_draft with both fields. " +
+      "Plain-only is for thread replies and one-liners."
     );
   }
 

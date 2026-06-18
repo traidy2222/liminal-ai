@@ -469,6 +469,7 @@ export async function runSingleHarnessSend(scenario: Scenario, userMessage: stri
     "tool_timing",
     "subtask_spawned",
     "subtask_complete",
+    "subtask_handoff_written",
     "execution_state",
     "contract_transition",
     "contract_violation",

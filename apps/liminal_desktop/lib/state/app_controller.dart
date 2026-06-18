@@ -1415,11 +1415,13 @@ class AppController extends ChangeNotifier {
   Future<bool> connectGoogleOAuth({
     List<String>? services,
     String mode = 'read_write',
+    bool attach = true,
   }) =>
       _runIntegrationCommand('connect_google_oauth', {
         if (services != null) 'services': services,
         'mode': mode,
         'openBrowser': true,
+        if (!attach) 'attach': false,
       });
 
   Future<bool> connectGoogleWorkspace({
@@ -1437,11 +1439,13 @@ class AppController extends ChangeNotifier {
   Future<bool> connectMicrosoftOAuth({
     List<String>? services,
     String mode = 'read_write',
+    bool attach = true,
   }) =>
       _runIntegrationCommand('connect_microsoft_oauth', {
         if (services != null) 'services': services,
         'mode': mode,
         'openBrowser': true,
+        if (!attach) 'attach': false,
       });
 
   Future<bool> connectMicrosoft365({
@@ -1456,10 +1460,11 @@ class AppController extends ChangeNotifier {
   Future<bool> disconnectMicrosoft({bool revoke = false}) =>
       _runIntegrationCommand('disconnect_microsoft', {'revoke': revoke});
 
-  Future<bool> connectAzureOAuth({String mode = 'read_write'}) =>
+  Future<bool> connectAzureOAuth({String mode = 'read_write', bool attach = true}) =>
       _runIntegrationCommand('connect_azure_oauth', {
         'mode': mode,
         'openBrowser': true,
+        if (!attach) 'attach': false,
       });
 
   Future<bool> connectAzure({String mode = 'read_write'}) =>
@@ -1510,10 +1515,23 @@ class AppController extends ChangeNotifier {
   Future<bool> disconnectNotion({bool revoke = false}) =>
       _runIntegrationCommand('disconnect_notion', {'revoke': revoke});
 
-  Future<bool> connectGithubOAuth({String mode = 'read_write'}) =>
+  Future<bool> revokeIntegrationAccount({
+    required String provider,
+    required String accountId,
+  }) =>
+      _runIntegrationCommand('revoke_integration_account', {
+        'provider': provider,
+        'accountId': accountId,
+      });
+
+  Future<bool> connectGithubOAuth({
+    String mode = 'read_write',
+    bool attach = true,
+  }) =>
       _runIntegrationCommand('connect_github_oauth', {
         'mode': mode,
         'openBrowser': true,
+        if (!attach) 'attach': false,
       });
 
   Future<bool> connectGithub({String mode = 'read_write'}) =>

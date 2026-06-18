@@ -3,7 +3,6 @@ import { test } from "node:test";
 import {
   isEmailComposeTurn,
   isEmailStyleFieldGroundedInUserMessage,
-  isOutreachResearchTurn,
   sanitizeEmailStyleInferInput,
 } from "./email_compose_context.js";
 
@@ -12,12 +11,12 @@ test("isEmailComposeTurn detects send-email asks", () => {
   assert.equal(isEmailComposeTurn("fix the bug in auth.ts"), false);
 });
 
-test("isOutreachResearchTurn detects youtuber email hunts", () => {
+test("isEmailComposeTurn detects outreach with address", () => {
   assert.equal(
-    isOutreachResearchTurn("Find some youtubers emails that might be interested in liminal"),
+    isEmailComposeTurn("reach out to founder@console.dev about Liminal"),
     true
   );
-  assert.equal(isOutreachResearchTurn("fix auth.ts"), false);
+  assert.equal(isEmailComposeTurn("fix auth.ts"), false);
 });
 
 test("sanitizeEmailStyleInferInput drops ungrounded industry", () => {

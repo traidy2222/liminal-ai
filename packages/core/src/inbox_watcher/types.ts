@@ -28,6 +28,8 @@ export interface InboxMessageMeta {
   threadId?: string;
   provider: InboxProvider;
   accountId: string;
+  /** Owning mailbox address (for multi-account reply routing). */
+  accountEmail?: string;
   from: string;
   fromEmail: string;
   subject: string;

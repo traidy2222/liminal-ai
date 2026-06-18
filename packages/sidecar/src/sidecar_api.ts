@@ -343,8 +343,17 @@ export async function patchHarnessSettings(
     runtimePatch.provider?.model?.trim() ||
     envPatch.AGENT_MODEL?.trim() ||
     "";
-  if (modelCandidate) {
-    const byokPatch = buildByokRoutingPatchForModel(modelCandidate, prefs);
+  const explicitMode = runtimePatch.provider?.inferenceMode;
+  if (modelCandidate && explicitMode !== "managed") {
+    const mergedPrefs: RuntimePreferences = {
+      version: prefs?.version ?? 1,
+      updatedAt: prefs?.updatedAt ?? Date.now(),
+      provider: { ...prefs?.provider, ...runtimePatch.provider },
+      harness: {
+        env: { ...prefs?.harness?.env, ...(runtimePatch.harness?.env ?? {}) },
+      },
+    };
+    const byokPatch = buildByokRoutingPatchForModel(modelCandidate, mergedPrefs);
     if (byokPatch) {
       runtimePatch.provider = { ...runtimePatch.provider, ...byokPatch.provider };
       runtimePatch.harness = {
@@ -364,6 +373,18 @@ export async function patchHarnessSettings(
         AGENT_INFERENCE_PREFER_MANAGED: "0",
       },
     };
+  } else if (runtimePatch.provider?.inferenceMode === "managed") {
+    runtimePatch.harness = {
+      env: {
+        ...(runtimePatch.harness?.env ?? {}),
+        AGENT_INFERENCE_MODE: "managed",
+        AGENT_INFERENCE_PREFER_MANAGED: "1",
+      },
+    };
+    // Drop pinned BYOK base URL so routing uses the Vireon proxy.
+    if (runtimePatch.provider?.baseURL && !runtimePatch.provider.baseURL.includes("/inference")) {
+      delete runtimePatch.provider.baseURL;
+    }
   }
 
   await registry.applyRuntimePreferencesPatch(runtimePatch);

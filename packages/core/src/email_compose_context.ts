@@ -4,7 +4,7 @@
  */
 import type { EmailStyleInferInput } from "./email_style_infer.js";
 
-/** User turn that asks to compose, draft, or send email. */
+/** User turn that asks to compose, draft, or send email (including outreach with explicit addresses). */
 export function isEmailComposeTurn(text: string): boolean {
   const t = text.trim();
   if (t.length < 4) return false;
@@ -12,27 +12,40 @@ export function isEmailComposeTurn(text: string): boolean {
     /\b(send|draft|compose|write)\b[\s\S]{0,96}\b(e-?mail|gmail|outlook|mail)\b/i.test(t) ||
     /\b(e-?mail|gmail|outlook)\b[\s\S]{0,96}\b(send|draft|compose|write)\b/i.test(t) ||
     /\bmail\s+to\b/i.test(t) ||
+    /\b(reach\s+out|outreach|cold\s+(?:email|mail))\b/i.test(t) ||
+    (/\b(send|draft|compose|write|email|e-?mail|outreach)\b/i.test(t) &&
+      /@[\w.-]+\.\w{2,}/.test(t)) ||
     /\bgmail_(send|create_draft)\b/i.test(t) ||
     /\boutlook_(send|create_draft)\b/i.test(t)
   );
 }
 
-/** Outreach / influencer discovery turns that often lead to mail — need compose guards too. */
-export function isOutreachResearchTurn(text: string): boolean {
-  const t = text.trim();
-  if (t.length < 8) return false;
-  const wantsContact =
-    /\b(email|e-?mail|contact|reach\s+out|outreach|dm|message)\b/i.test(t) ||
-    /\b(find|get|collect|gather|list)\b[\s\S]{0,48}\b(emails?|addresses?)\b/i.test(t);
-  const audience =
-    /\b(youtuber|influencer|creator|podcast|streamer|partnership|sponsor|collab)\b/i.test(t) ||
-    /\binterested\s+in\s+liminal\b/i.test(t);
-  return wantsContact && audience;
+export function shouldInjectEmailComposeGuidance(text: string): boolean {
+  return isEmailComposeTurn(text);
 }
 
-export function shouldInjectEmailComposeGuidance(text: string): boolean {
-  return isEmailComposeTurn(text) || isOutreachResearchTurn(text);
-}
+/**
+ * Always-on mental model — appended to PROTOCOL_CORE so the model knows the default
+ * before any tool call (not only after validation failures).
+ */
+export const EMAIL_COMPOSE_MENTAL_MODEL = `## Outbound email (default)
+When the user wants mail sent or drafted, your **first** \`gmail_create_draft\` / \`outlook_create_draft\` call is the finished product: **subject + formatted \`body_html\` + plain \`body\` together**. Compose the full styled HTML in your reasoning first; the tool call delivers it — not plain text to upgrade later. Plain-only is only for thread replies (\`thread_id\` / \`reply_to_message_id\`) and one-liners. Never draft the letter in chat prose, never \`write_file\` workspace HTML, never \`mcp_google_gmail_create_draft\` for styled outbound mail.`;
+
+/** Per-turn planning injection — what to produce before invoking compose tools. */
+export const EMAIL_COMPOSE_TURN_INJECTION =
+  "[EMAIL COMPOSE] Plan the **finished HTML email** before any tool call. " +
+  "Your **first** gmail_create_draft / outlook_create_draft must already contain: `subject`, formatted `body_html` (nested `<table>` / inline styles, R-EMAIL-STYLE), and plain `body` fallback. " +
+  "The tool call **is** the email — not a rough draft to fix later. " +
+  "Use gmail_create_draft (REST), not mcp_google_gmail_create_draft (plain-only). " +
+  "Do not write the letter in chat. Do not write_file workspace .html/.md. " +
+  "Write about **only what the user asked this turn** — not recipes, memory verticals, persona, or vault unless they named that industry. " +
+  "Signer name from memory is OK. Skip email_style_infer unless they asked for a specific visual style; default neutral professional B2B HTML. " +
+  "Minimal shell to fill: `<table width=\"600\" role=\"presentation\"><tr><td style=\"padding:24px;font-family:Arial,Helvetica,sans-serif;color:#333;background:#fff\">…copy with inline styles…</td></tr></table>`";
+
+/** Paired with google_workspace family preseed — reinforces tool choice. */
+export const EMAIL_COMPOSE_CAPABILITY_NUDGE =
+  "[EMAIL COMPOSE] gmail_create_draft carries the full styled email in body_html + body on the first call. " +
+  "Gather signer/recipient if needed, then compose — do not plain-draft first.";
 
 function messageContentLower(text: string): string {
   return text.trim().toLowerCase();
@@ -74,18 +87,3 @@ export function sanitizeEmailStyleInferInput(
     background: undefined,
   };
 }
-
-export const OUTREACH_RESEARCH_TURN_INJECTION =
-  "[OUTREACH] Find contact emails with web_search + web_fetch — official sites, Google Maps, Yellow Pages, True Local, LinkedIn, etc. Never invent addresses. " +
-  "gmail_create_draft: recipients_verified: true + recipient_source = listing URL or \"email — https://page\" from web_fetch. " +
-  "Use gmail_create_draft per recipient; do not gmail_send_message cold blasts. " +
-  "Write about **only what the user asked** — not unrelated past verticals.";
-
-export const EMAIL_COMPOSE_TURN_INJECTION =
-  "[EMAIL COMPOSE] Write mail about **only what the user asked this turn**. " +
-  "Mail lives in **Gmail/Outlook drafts** (gmail_create_draft / outlook_create_draft) — **never** write_file workspace .html/.md to stage or fix email. " +
-  "If body_html was missing or rejected, re-call the compose tool with complete body_html + body in one call. " +
-  "Do **not** infer industry, job title, vertical register, or visual style from recipes, " +
-  "[KNOWN RECIPE]/[DEFAULT PLAN], recalled memory, persona, vault, or prior sessions unless the user named that vertical explicitly. " +
-  "Signer name / company from memory is OK when needed for signature. " +
-  "Default: neutral professional B2B HTML (R-EMAIL-STYLE) about the stated topic — skip email_style_infer unless the user asked for a specific industry look.";

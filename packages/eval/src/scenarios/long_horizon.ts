@@ -32,6 +32,7 @@ export const lhPlanMemoryCodeCritic: Scenario = {
     AGENT_CRITIC_REQUIRE: "1",
     AGENT_CRITIC_EVIDENCE: "1",
     AGENT_CRITIC_MIN_TOOLS: "3",
+    AGENT_VERIFY_TOOLS: "1",
   },
   userMessage:
     "This is a 6-step task: " +
@@ -128,6 +129,7 @@ export const lhCriticSuiteCoverage: Scenario = {
   userMessage:
     "Use repo_map and read_file on packages/core/src/agent.ts to craft a short implementation summary, " +
     "then run evidence_critic, path_critic, and policy_critic over your draft and provide a revised final.",
+  env: { AGENT_VERIFY_TOOLS: "1" },
   assertions: [
     { name: "evidence_critic ran", check: (t) => traceHasTool(t, "evidence_critic") },
     { name: "path_critic ran", check: (t) => traceHasTool(t, "path_critic") },
@@ -156,6 +158,7 @@ export const lhOrderedProtocolCompliance: Scenario = {
   name: "long-horizon-ordered-protocol-compliance",
   tags: ["slow", "retrieval"],
   maxRounds: 24,
+  env: { AGENT_VERIFY_TOOLS: "1" },
   userMessage:
     "Strictly follow this order: think -> plan -> remember -> memory_query -> repo_map -> read_file -> verify_result -> final answer. " +
     "Do not skip any stage.",

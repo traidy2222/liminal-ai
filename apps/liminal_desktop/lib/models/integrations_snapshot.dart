@@ -9,6 +9,7 @@ class IntegrationsSnapshot {
     required this.linear,
     required this.notion,
     required this.connections,
+    this.providerStatus = const {},
   });
 
   final GoogleIntegrations google;
@@ -20,8 +21,10 @@ class IntegrationsSnapshot {
   final LinearIntegrations linear;
   final NotionIntegrations notion;
   final List<IntegrationConnection> connections;
+  final Map<String, IntegrationProviderStatus> providerStatus;
 
   factory IntegrationsSnapshot.fromJson(Map<String, dynamic> json) {
+    final rawStatus = json['providerStatus'] as Map<String, dynamic>? ?? {};
     return IntegrationsSnapshot(
       google: GoogleIntegrations.fromJson(
         Map<String, dynamic>.from(json['google'] as Map? ?? {}),
@@ -54,6 +57,14 @@ class IntegrationsSnapshot {
             ),
           )
           .toList(),
+      providerStatus: rawStatus.map(
+        (key, value) => MapEntry(
+          key,
+          IntegrationProviderStatus.fromJson(
+            Map<String, dynamic>.from(value as Map),
+          ),
+        ),
+      ),
     );
   }
 
@@ -100,6 +111,10 @@ class IntegrationsSnapshot {
 
   bool get googleConnected => googleMcp.isNotEmpty;
 
+  bool get googleSignedIn => providerStatus['google']?.signedIn ?? google.accounts.isNotEmpty;
+
+  bool get googleToolsAttached => providerStatus['google']?.toolsAttached ?? googleConnected;
+
   bool get googleCalendarAttached =>
       googleMcp.any((c) => c.name == 'google_calendar');
 
@@ -116,11 +131,23 @@ class IntegrationsSnapshot {
 
   bool get microsoftConnected => microsoftMcp.isNotEmpty;
 
+  bool get microsoftSignedIn =>
+      providerStatus['microsoft']?.signedIn ?? microsoft.accounts.isNotEmpty;
+
+  bool get microsoftToolsAttached =>
+      providerStatus['microsoft']?.toolsAttached ?? microsoftConnected;
+
   bool get azureConnected => azureMcp.isNotEmpty || azure.accounts.isNotEmpty;
 
   bool get azureToolsAttached => azureMcp.isNotEmpty;
 
+  bool get azureSignedIn => providerStatus['azure']?.signedIn ?? azure.accounts.isNotEmpty;
+
   bool get githubConnected => githubMcp.isNotEmpty;
+
+  bool get githubSignedIn => providerStatus['github']?.signedIn ?? github.accounts.isNotEmpty;
+
+  bool get githubToolsAttached => providerStatus['github']?.toolsAttached ?? githubConnected;
 
   bool get xeroConnected => xero.accounts.isNotEmpty;
 
@@ -194,6 +221,41 @@ class IntegrationsSnapshot {
     return a.workspaceName ?? a.email ?? a.accountId;
   }
 
+}
+
+class IntegrationProviderStatus {
+  IntegrationProviderStatus({
+    required this.id,
+    required this.connectMode,
+    required this.signedIn,
+    required this.toolsAttached,
+    required this.toolCount,
+    required this.ready,
+    required this.accountCount,
+    required this.needsScopeReconnect,
+  });
+
+  final String id;
+  final String connectMode;
+  final bool signedIn;
+  final bool toolsAttached;
+  final int toolCount;
+  final bool ready;
+  final int accountCount;
+  final bool needsScopeReconnect;
+
+  factory IntegrationProviderStatus.fromJson(Map<String, dynamic> json) {
+    return IntegrationProviderStatus(
+      id: json['id'] as String? ?? '',
+      connectMode: json['connectMode'] as String? ?? 'oauth_auto_attach',
+      signedIn: json['signedIn'] as bool? ?? false,
+      toolsAttached: json['toolsAttached'] as bool? ?? false,
+      toolCount: (json['toolCount'] as num?)?.toInt() ?? 0,
+      ready: json['ready'] as bool? ?? false,
+      accountCount: (json['accountCount'] as num?)?.toInt() ?? 0,
+      needsScopeReconnect: json['needsScopeReconnect'] as bool? ?? false,
+    );
+  }
 }
 
 class MicrosoftIntegrations {

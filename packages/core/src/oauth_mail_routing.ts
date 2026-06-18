@@ -1,8 +1,7 @@
 /**
  * Pick a primary mailbox when Google and Microsoft OAuth are both connected.
  */
-import { listGoogleOAuthAccounts } from "./oauth_broker.js";
-import { listMicrosoftOAuthAccounts } from "./microsoft_oauth_broker.js";
+import { listGoogleMailOAuthAccounts, listMicrosoftMailOAuthAccounts } from "./mail_oauth_filter.js";
 import {
   oauthMailboxQualityScore,
   pickBestOAuthAccountByEmail,
@@ -32,8 +31,8 @@ export interface PreferredMailRoute {
 
 export async function resolvePreferredMailProvider(): Promise<PreferredMailRoute | null> {
   const forced = resolveMailProviderFromEnv();
-  const google = await listGoogleOAuthAccounts();
-  const microsoft = await listMicrosoftOAuthAccounts();
+  const google = await listGoogleMailOAuthAccounts();
+  const microsoft = await listMicrosoftMailOAuthAccounts();
 
   if (forced !== "auto") {
     const pool = forced === "google" ? google : microsoft;

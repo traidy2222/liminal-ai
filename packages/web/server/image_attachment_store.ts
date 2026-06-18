@@ -1,8 +1,8 @@
-import type { ImageAttachment } from "@liminal/core";
-import { persistImageAttachmentsToWorkspace } from "@liminal/core";
+import type { ChatFileAttachment } from "@liminal/core";
+import { persistChatAttachmentsToWorkspace } from "@liminal/core";
 
 export async function persistIncomingAttachments(
-  attachments: Array<ImageAttachment & { dataUrl: string }>
-): Promise<ImageAttachment[]> {
-  return persistImageAttachmentsToWorkspace(attachments);
+  attachments: Array<ChatFileAttachment & { dataUrl: string }>
+): Promise<ChatFileAttachment[]> {
+  return persistChatAttachmentsToWorkspace(attachments);
 }

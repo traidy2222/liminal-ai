@@ -53,6 +53,15 @@ export function tryRepairEmailComposeArgsJson(raw: string, toolName: string): st
 
   if (!bodyHtml && !bodyPlain) return null;
 
+  const threadId =
+    tryExtractJsonStringField(raw, "thread_id") ??
+    tryExtractJsonStringField(raw, "threadId") ??
+    decodePartialJsonStringField(raw, "thread_id").value.trim();
+  if (!bodyHtml && bodyPlain && !threadId && bodyPlain.length > 120) {
+    // Do not repair truncated plain-only substantive outbound mail — forces HTML-first retry.
+    return null;
+  }
+
   const out: Record<string, unknown> = { to, subject };
   const cc = extractEmailsNearField(raw, "cc");
   const bcc = extractEmailsNearField(raw, "bcc");
@@ -61,10 +70,6 @@ export function tryRepairEmailComposeArgsJson(raw: string, toolName: string): st
   if (bodyPlain) out.body = bodyPlain;
   if (bodyHtml) out.body_html = bodyHtml;
 
-  const threadId =
-    tryExtractJsonStringField(raw, "thread_id") ??
-    tryExtractJsonStringField(raw, "threadId") ??
-    decodePartialJsonStringField(raw, "thread_id").value.trim();
   if (threadId) out.thread_id = threadId;
 
   const repaired = JSON.stringify(out);
@@ -102,9 +107,8 @@ export function batchHasUndispatchableEmailCompose(
 }
 
 export const LENGTH_RESUME_EMAIL_COMPOSE_MESSAGE =
-  "[CONTINUE] An email compose tool call was cut off (length limit or incomplete JSON). " +
-  "Re-issue the SAME tool with the same core args. If a large payload field was truncated, send a shorter complete version. " +
-  "If this tool already succeeded for the same intent this turn, reuse that result and continue with the next step.";
+  "[CONTINUE] Email compose was cut off mid-stream. Re-issue gmail_create_draft / outlook_create_draft with the same to/subject and a **complete** body_html (styled) + body pair. " +
+  "Plan the full HTML before calling — shorten copy if needed to fit one complete payload.";
 
 /** Args safe to store in assistant tool_calls history (providers reject malformed JSON). */
 export function sanitizeToolCallArgsForContext(argsJson: string): string {

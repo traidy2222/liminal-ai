@@ -4,9 +4,11 @@ import OpenAI from "openai";
 import {
   buildByokRoutingPatchForModel,
   buildManagedInferenceClientHeaders,
+  describeProviderError,
   filterManagedInferenceCatalog,
   hasLocalProviderApiKey,
   inferencePreferManaged,
+  isInferenceServerError,
   isManagedInferenceAuthError,
   resolveInferenceMode,
   resolveManagedOpenRouterCredentials,
@@ -14,6 +16,7 @@ import {
   resolveManagedModelForProviderPreference,
   shouldRouteOpenRouterViaManaged,
 } from "./inference_provider.js";
+import { ENTITLEMENTS, hasEntitlement, loadResolvedEntitlements } from "./entitlements.js";
 import { HARNESS_ENV_DEFAULTS } from "./harness_default_constants.js";
 
 describe("inference_provider", () => {
@@ -62,13 +65,20 @@ describe("inference_provider", () => {
     else process.env.AGENT_API_KEY = saved.AGENT_API_KEY;
   });
 
-  it("buildByokRoutingPatchForModel switches managed auto to byok for openrouter slugs", () => {
+  it("buildByokRoutingPatchForModel switches auto to byok for openrouter slugs", () => {
     saved.AGENT_API_KEY = process.env.AGENT_API_KEY;
     delete process.env.AGENT_API_KEY;
-    const patch = buildByokRoutingPatchForModel("openrouter/free", {
+    const managedPatch = buildByokRoutingPatchForModel("openrouter/free", {
       version: 1,
       provider: { inferenceMode: "managed" },
       harness: { env: { AGENT_INFERENCE_MODE: "managed" } },
+      updatedAt: 0,
+    });
+    assert.equal(managedPatch, null);
+    const patch = buildByokRoutingPatchForModel("openrouter/free", {
+      version: 1,
+      provider: { inferenceMode: "auto" },
+      harness: { env: { AGENT_INFERENCE_MODE: "auto" } },
       updatedAt: 0,
     });
     assert.ok(patch);
@@ -86,7 +96,7 @@ describe("inference_provider", () => {
     else process.env.AGENT_API_KEY = saved.AGENT_API_KEY;
   });
 
-  it("managed mode requires entitlement even with pinned base URL", async () => {
+  it("managed mode follows entitlement for pinned non-managed base URL", async () => {
     const prefs = {
       version: 1 as const,
       provider: {
@@ -95,8 +105,9 @@ describe("inference_provider", () => {
       },
       updatedAt: 0,
     };
-    // Without a valid license token, managed mode returns false (entitlement check fails)
-    assert.equal(await shouldRouteOpenRouterViaManaged(prefs), false);
+    const entitlements = await loadResolvedEntitlements();
+    const entitled = hasEntitlement(entitlements, ENTITLEMENTS.PRO_MANAGED_INFERENCE);
+    assert.equal(await shouldRouteOpenRouterViaManaged(prefs), entitled);
   });
 
   it("shouldRouteOpenRouterViaManaged is false in byok mode", async () => {
@@ -251,5 +262,21 @@ describe("inference_provider", () => {
   it("isManagedInferenceAuthError matches expired session JWT (HTTP 401)", () => {
     const err = new OpenAI.APIError(401, { message: "expired" }, "expired", undefined);
     assert.equal(isManagedInferenceAuthError(err), true);
+  });
+
+  it("isInferenceServerError matches internal_server_error with undefined status", () => {
+    const err = new OpenAI.APIError(undefined, { type: "server_error" }, "internal_server_error", undefined);
+    assert.equal(isInferenceServerError(err), true);
+  });
+
+  it("isInferenceServerError matches plain Error with HTTP 500 message", () => {
+    assert.equal(isInferenceServerError(new Error("HTTP 500 from Error: {}")), true);
+  });
+
+  it("describeProviderError surfaces HTTP 500 when status is undefined", () => {
+    const err = new OpenAI.APIError(undefined, { type: "server_error" }, "internal_server_error", undefined);
+    const msg = describeProviderError(err);
+    assert.match(msg, /HTTP 500/i);
+    assert.match(msg, /server_error|internal_server/i);
   });
 });

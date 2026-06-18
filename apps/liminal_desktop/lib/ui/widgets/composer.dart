@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:io';
 
+import 'package:desktop_drop/desktop_drop.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -78,9 +79,12 @@ class _ComposerState extends State<Composer> {
   int _slashSelected = 0;
   bool _slashMenuOpen = true;
 
-  static const _maxCount = 4;
-  static const _maxBytesPerImage = 4 * 1024 * 1024;
-  static const _maxTotalBytes = 12 * 1024 * 1024;
+  bool _dragOver = false;
+
+  static const _maxCount = 12;
+  static const _maxImageBytes = 4 * 1024 * 1024;
+  static const _maxFileBytes = 25 * 1024 * 1024;
+  static const _maxTotalBytes = 64 * 1024 * 1024;
 
   @override
   void initState() {
@@ -205,9 +209,9 @@ class _ComposerState extends State<Composer> {
     }
   }
 
-  Future<void> _pickImages() async {
+  Future<void> _pickFiles() async {
     final result = await FilePicker.platform.pickFiles(
-      type: FileType.image,
+      type: FileType.any,
       allowMultiple: true,
       withData: true,
     );
@@ -216,8 +220,7 @@ class _ComposerState extends State<Composer> {
     for (final f in result.files) {
       final bytes = f.bytes;
       if (bytes == null || bytes.isEmpty) continue;
-      final mime = lookupMimeType(f.name, headerBytes: bytes) ?? 'image/png';
-      if (!mime.startsWith('image/')) continue;
+      final mime = lookupMimeType(f.name, headerBytes: bytes) ?? 'application/octet-stream';
       _tryAdd(
         UserImageAttachment(
           name: f.name,
@@ -229,6 +232,31 @@ class _ComposerState extends State<Composer> {
     }
     setState(() {});
   }
+
+  Future<void> _onDragDone(DropDoneDetails details) async {
+    if (!widget.enabled || widget.busy) return;
+    setState(() {
+      _dragOver = false;
+      _attachError = null;
+    });
+    for (final xfile in details.files) {
+      final bytes = await xfile.readAsBytes();
+      if (bytes.isEmpty) continue;
+      final name = xfile.name;
+      final mime = lookupMimeType(name, headerBytes: bytes) ?? 'application/octet-stream';
+      _tryAdd(
+        UserImageAttachment(
+          name: name,
+          mimeType: mime,
+          bytes: bytes,
+          source: 'drop',
+        ),
+      );
+    }
+    if (mounted) setState(() {});
+  }
+
+  Future<void> _pickImages() async => _pickFiles();
 
   Future<void> _handlePaste() async {
     if (!widget.enabled || widget.busy) return;
@@ -283,11 +311,13 @@ class _ComposerState extends State<Composer> {
 
   void _tryAdd(UserImageAttachment item) {
     if (_attachments.length >= _maxCount) {
-      _attachError = 'Max $_maxCount images.';
+      _attachError = 'Max $_maxCount attachments.';
       return;
     }
-    if (item.sizeBytes > _maxBytesPerImage) {
-      _attachError = 'Image too large (max ${(_maxBytesPerImage / (1024 * 1024)).round()} MB).';
+    final maxOne = item.isImage ? _maxImageBytes : _maxFileBytes;
+    if (item.sizeBytes > maxOne) {
+      _attachError =
+          '${item.name} is too large (max ${(maxOne / (1024 * 1024)).round()} MB).';
       return;
     }
     var total = item.sizeBytes;
@@ -313,11 +343,7 @@ class _ComposerState extends State<Composer> {
       return;
     }
     final name = path.split(RegExp(r'[\\/]')).last;
-    final mime = lookupMimeType(name, headerBytes: bytes) ?? 'image/png';
-    if (!mime.startsWith('image/')) {
-      setState(() => _attachError = 'Not an image file: $path');
-      return;
-    }
+    final mime = lookupMimeType(name, headerBytes: bytes) ?? 'application/octet-stream';
     _tryAdd(UserImageAttachment(
       name: name,
       mimeType: mime,
@@ -330,7 +356,8 @@ class _ComposerState extends State<Composer> {
   Future<void> _submit({String? workflowPreset}) async {
     final text = _controller.text;
     if (text.trim().isEmpty && _attachments.isEmpty) return;
-    if (workflowPreset == 'receipt_to_xero' && _attachments.isEmpty) {
+    if (workflowPreset == 'receipt_to_xero' &&
+        !_attachments.any((a) => a.isImage)) {
       setState(() => _attachError = 'Attach a receipt image first.');
       return;
     }
@@ -406,7 +433,22 @@ class _ComposerState extends State<Composer> {
     final showTtsBanner =
         sessionActive && widget.config?.ttsEnabled != true;
 
-    return SafeArea(
+    return DropTarget(
+      onDragEntered: (_) {
+        if (!widget.enabled || widget.busy) return;
+        setState(() => _dragOver = true);
+      },
+      onDragExited: (_) => setState(() => _dragOver = false),
+      onDragDone: _onDragDone,
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 120),
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(12),
+          border: _dragOver
+              ? Border.all(color: lim.accent.withValues(alpha: 0.55), width: 1.5)
+              : null,
+        ),
+        child: SafeArea(
         child: Column(
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -517,7 +559,13 @@ class _ComposerState extends State<Composer> {
                         children: [
                           for (var i = 0; i < _attachments.length; i++)
                             InputChip(
-                              avatar: Icon(Icons.image_outlined, size: 16, color: lim.textMuted),
+                              avatar: Icon(
+                                _attachments[i].isImage
+                                    ? Icons.image_outlined
+                                    : Icons.attach_file,
+                                size: 16,
+                                color: lim.textMuted,
+                              ),
                               label: Text(
                                 _attachments[i].name,
                                 style: const TextStyle(fontSize: 11),
@@ -557,9 +605,9 @@ class _ComposerState extends State<Composer> {
                       selected: sessionActive,
                     ),
                   LiminalIconButton(
-                    icon: Icons.image_outlined,
-                    tooltip: 'Attach images (or Ctrl+V / Cmd+V paste)',
-                    onPressed: widget.enabled && !widget.busy ? _pickImages : null,
+                    icon: Icons.attach_file_outlined,
+                    tooltip: 'Attach files (drag & drop, or Ctrl+V / Cmd+V paste)',
+                    onPressed: widget.enabled && !widget.busy ? _pickFiles : null,
                   ),
                   Expanded(
                     child: Focus(
@@ -649,6 +697,8 @@ class _ComposerState extends State<Composer> {
               ),
             ],
         ),
+      ),
+    ),
     );
   }
 

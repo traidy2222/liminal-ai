@@ -2,7 +2,7 @@
 
 All notable changes to [Liminal AI](https://github.com/traidy2222/liminal-ai) on the `main` branch.
 
-**Current stage:** **beta** (`v0.1.1` tip of `main`, 2026-06-15). The workspace package may read `0.1.0`, but **beta**, **RC**, and a **v0.1.0 public preview** have not been declared as product releases yet.
+**Current stage:** **beta** (`v0.1.2` tip of `main`, 2026-06-18). The workspace package may read `0.1.0`, but **beta**, **RC**, and a **v0.1.0 public preview** have not been declared as product releases yet.
 
 Format: **v0.0.x** entries keyed to the last GitHub push in each slice. Dates are real push dates.
 
@@ -17,9 +17,27 @@ After editing JSON: `npm run changelog:gen`, commit, push, then in [vireondynami
 
 ---
 
+## v0.1.2 — 2026-06-18 {#v0-1-2}
+
+**Current alpha.** Multi-account mail, inbox watcher, file attachments, integrations hub polish, managed inference fixes.
+
+**Shipped**
+
+- **Multi-account mail** — `mail_search_inboxes` scans every connected mailbox; `account_hint` on Gmail/Outlook compose and send; session `mail_account_context` persists the chosen mailbox across turns (rule **R-EMAIL-ACCOUNT**)
+- **Connected mail only** — `mail_oauth_filter` ignores unconnected integrations and Entra `#EXT#` guest admin mailboxes; `list_connectors` shows **Connected mailboxes**
+- **Email privacy** — `email_redaction` masks SSN, cards, phones, and addresses in summaries; `mail_search_inboxes` defaults `redact_sensitive: true` (rule **R-EMAIL-PRIVACY**)
+- **Inbox watcher** — Background Gmail/Outlook polling with label support; automated receipt workflow hooks; capability gates for mail tools
+- **File attachments** — Drag, drop, or paste any file into web and desktop composer; `chat_attachments` persists to `.agent_artifacts/uploads/` with limits (12 total: 4 images, 8 files)
+- **Integrations hub** — Web `IntegrationCard` + per-account list; desktop provider rows, connection status, revoke account; `integrations_snapshot` and `revoke_integration_account` tools
+- **Managed inference fix** — Settings **managed** mode no longer flips back to BYOK on Pro; sidecar skips BYOK auto-patch when user chose managed; regional Bedrock profile ids in desktop model picker
+- **Email compose** — Expanded recipient guard, compose context/resume, Gmail compose guard tests; capability gates and long-horizon eval updates
+- **Docs** — [Google Workspace](../guides/google-workspace.md), [Microsoft 365](../guides/microsoft-365.md), [Connectors](../guides/connectors.md)
+
+---
+
 ## v0.1.1 — 2026-06-15 {#v0-1-1}
 
-**Current alpha.** Desktop auto-update — harness hot-swap and app restart from GitHub Releases.
+Desktop auto-update — harness hot-swap and app restart from GitHub Releases.
 
 **Shipped**
 

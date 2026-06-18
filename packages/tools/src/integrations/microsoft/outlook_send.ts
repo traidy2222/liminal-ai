@@ -4,7 +4,13 @@
 import { readFile } from "node:fs/promises";
 import { basename, extname } from "node:path";
 import type { PropertySchema, ToolDefinition, ToolResult } from "@liminal/core";
-import { resolvePreferredMailProvider, validateOutboundEmailRecipients } from "@liminal/core";
+import {
+  listMicrosoftMailOAuthAccounts,
+  resolveMicrosoftMailAccount,
+  resolvePreferredMailProvider,
+  validateOutboundEmailRecipients,
+} from "@liminal/core";
+import { validateOutboundEmailStyle } from "../google/gmail_compose_guard.js";
 import { defineTool } from "../../shared/helpers.js";
 import { graphApiJson, graphJsonResult, graphErrorResult, microsoftRestEnabled } from "./graph_rest.js";
 import { humanizeOutboundEmailCopy, repairEmailUnicode } from "../google/gmail_message_body.js";
@@ -129,11 +135,15 @@ const sendParams: Record<string, PropertySchema> = {
   subject: { type: "string" },
   body_html: {
     type: "string",
-    description: "HTML body (preferred). No em/en dashes or &mdash; in copy (R-EMAIL-COPY).",
+    description:
+      "**Required for new outbound mail** (with body_text). HTML body — inline styles, nested tables. " +
+      "Include on the **first** outlook_create_draft call. No em/en dashes or &mdash; (R-EMAIL-COPY).",
   },
   body_text: {
     type: "string",
-    description: "Plain text fallback. No em/en dashes in copy (R-EMAIL-COPY).",
+    description:
+      "**Required alongside body_html** for new outbound mail. Plain fallback. " +
+      "PLAIN-tier only: thread replies and one-liners may omit body_html. No em/en dashes (R-EMAIL-COPY).",
   },
   attachments: {
     type: "array",
@@ -145,25 +155,30 @@ const sendParams: Record<string, PropertySchema> = {
     type: "string",
     description: "Graph message id to reply to (sets conversation threading).",
   },
-  recipients_verified: {
-    type: "boolean",
-    description:
-      "Set true only after web_search + web_fetch found each address on an official company page.",
-  },
-  recipient_source: {
-    type: "string",
-    description:
-      "Required when recipients_verified is true: quote the exact To address and https URL from web_fetch.",
-  },
   mailbox: {
     type: "string",
     description: "Optional shared mailbox user id or UPN (default: /me).",
+  },
+  account_hint: {
+    type: "string",
+    description:
+      "Sending mailbox email or account id. Required when multiple Microsoft accounts are connected — use the account that received the thread.",
   },
 };
 
 function mailboxBase(args: Record<string, unknown>): string {
   const mb = String(args["mailbox"] ?? "").trim();
   return mb ? `/users/${encodeURIComponent(mb)}` : "/me";
+}
+
+async function resolveOutlookAccountId(
+  args: Record<string, unknown>
+): Promise<{ accountId: string; email?: string } | { error: string }> {
+  const hint = typeof args["account_hint"] === "string" ? args["account_hint"].trim() : undefined;
+  const accounts = await listMicrosoftMailOAuthAccounts();
+  const resolved = resolveMicrosoftMailAccount(hint, accounts);
+  if ("error" in resolved) return resolved;
+  return { accountId: resolved.account.accountId, email: resolved.account.email };
 }
 
 async function outlookMailRouteBlocked(
@@ -197,8 +212,12 @@ export function createOutlookSendTools(): ToolDefinition[] {
       }
       const recipErr = validateOutboundEmailRecipients(args, "send");
       if (recipErr) return { ok: false, error: recipErr };
+      const styleErr = validateOutboundEmailStyle(args);
+      if (styleErr) return graphErrorResult(styleErr);
       const blocked = await outlookMailRouteBlocked(args);
       if (blocked) return blocked;
+      const acct = await resolveOutlookAccountId(args);
+      if ("error" in acct) return graphErrorResult(acct.error);
       const message = buildMessageBody(args);
       const attachments = await buildAttachments(args);
       if (attachments.length) message.attachments = attachments;
@@ -217,9 +236,11 @@ export function createOutlookSendTools(): ToolDefinition[] {
         const result = await graphApiJson(`${base}/messages/${encodeURIComponent(replyId)}/reply`, {
           method: "POST",
           body: JSON.stringify(replyBody),
+          accountId: acct.accountId,
         });
         if (!result.ok) return graphErrorResult(result.error);
-        return { ok: true, output: `Reply sent for message ${replyId}.` };
+        const fromLabel = acct.email ?? acct.accountId;
+        return { ok: true, output: `Reply sent from ${fromLabel} for message ${replyId}. fromAccount=${fromLabel}` };
       }
 
       const payload = {
@@ -229,9 +250,11 @@ export function createOutlookSendTools(): ToolDefinition[] {
       const result = await graphApiJson(`${base}/sendMail`, {
         method: "POST",
         body: JSON.stringify(payload),
+        accountId: acct.accountId,
       });
       if (!result.ok) return graphErrorResult(result.error);
-      return { ok: true, output: "Message sent via Outlook." };
+      const fromLabel = acct.email ?? acct.accountId;
+      return { ok: true, output: `Message sent via Outlook from ${fromLabel}. fromAccount=${fromLabel}` };
     },
   });
 
@@ -248,6 +271,7 @@ export function createOutlookSendTools(): ToolDefinition[] {
           description: "Graph message id returned by outlook_create_draft.",
         },
         mailbox: sendParams.mailbox,
+        account_hint: sendParams.account_hint,
       },
       required: ["message_id"],
       additionalProperties: false,
@@ -261,19 +285,23 @@ export function createOutlookSendTools(): ToolDefinition[] {
       if (blocked) return blocked;
       const messageId = String(args["message_id"] ?? "").trim();
       if (!messageId) return graphErrorResult("message_id is required");
+      const acct = await resolveOutlookAccountId(args);
+      if ("error" in acct) return graphErrorResult(acct.error);
       const result = await graphApiJson(
         `${mailboxBase(args)}/messages/${encodeURIComponent(messageId)}/send`,
-        { method: "POST" }
+        { method: "POST", accountId: acct.accountId }
       );
       if (!result.ok) return graphErrorResult(result.error);
-      return { ok: true, output: `Outlook draft sent. messageId=${messageId}` };
+      const fromLabel = acct.email ?? acct.accountId;
+      return { ok: true, output: `Outlook draft sent from ${fromLabel}. messageId=${messageId}, fromAccount=${fromLabel}` };
     },
   });
 
   const draftTool = defineTool({
     name: "outlook_create_draft",
     description:
-      "Create an Outlook draft message (does not send). To deliver it later, use outlook_send_draft(message_id) — not outlook_send_message with a recomposed body.",
+      "Create an Outlook draft message (does not send). **First call** must include body_html + body_text together for new outbound mail. " +
+      "To deliver later, use outlook_send_draft(message_id) — not outlook_send_message with a recomposed body.",
     parameters: {
       type: "object",
       properties: sendParams,
@@ -284,10 +312,9 @@ export function createOutlookSendTools(): ToolDefinition[] {
     intentDedupArgs: ["to", "subject"],
     intentPayloadComplete: (args, output) => {
       if (!/messageId=[^\s?,]+/i.test(output)) return false;
-      const html = String(args["body_html"] ?? args["html"] ?? "").trim();
-      const plain = String(args["body"] ?? "").trim();
       return (
-        !!(html || plain) && validateOutboundEmailRecipients(args, "draft") === null
+        validateOutboundEmailRecipients(args, "draft") === null &&
+        validateOutboundEmailStyle(args) === null
       );
     },
     handler: async (args): Promise<ToolResult> => {
@@ -296,22 +323,28 @@ export function createOutlookSendTools(): ToolDefinition[] {
       }
       const recipErr = validateOutboundEmailRecipients(args, "draft");
       if (recipErr) return { ok: false, error: recipErr };
+      const styleErr = validateOutboundEmailStyle(args);
+      if (styleErr) return graphErrorResult(styleErr);
       const blocked = await outlookMailRouteBlocked(args);
       if (blocked) return blocked;
+      const acct = await resolveOutlookAccountId(args);
+      if ("error" in acct) return graphErrorResult(acct.error);
       const message = buildMessageBody(args);
       const attachments = await buildAttachments(args);
       if (attachments.length) message.attachments = attachments;
       const result = await graphApiJson(`${mailboxBase(args)}/messages`, {
         method: "POST",
         body: JSON.stringify(message),
+        accountId: acct.accountId,
       });
       if (!result.ok) return graphErrorResult(result.error);
       const data = result.data as { id?: string };
       const id = typeof data?.id === "string" ? data.id : "";
+      const fromLabel = acct.email ?? acct.accountId;
       return {
         ok: true,
         output: id
-          ? `Outlook draft created. messageId=${id} (use outlook_send_draft to send).`
+          ? `Outlook draft created from ${fromLabel}. messageId=${id} (use outlook_send_draft to send). fromAccount=${fromLabel}`
           : JSON.stringify(result.data),
       };
     },

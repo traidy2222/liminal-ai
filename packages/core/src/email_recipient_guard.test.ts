@@ -131,7 +131,7 @@ test("validateOutboundEmailRecipients allows verified cold draft", () => {
   assert.equal(err, null);
 });
 
-test("validateOutboundEmailRecipients blocks unverified draft", () => {
+test("validateOutboundEmailRecipients allows cold draft without verification", () => {
   const err = validateOutboundEmailRecipients(
     {
       to: ["business@fireship.dev"],
@@ -141,8 +141,7 @@ test("validateOutboundEmailRecipients blocks unverified draft", () => {
     },
     "draft"
   );
-  assert.ok(err);
-  assert.match(err!, /recipients_verified/i);
+  assert.equal(err, null);
 });
 
 test("thread replies skip recipient verification", () => {

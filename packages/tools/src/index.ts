@@ -114,6 +114,7 @@ import { createApiConnectionTools, restoreOpenApiConnections } from "./integrati
 import { createMcpAttachTools, restoreMcpConnections } from "./integrations/external_api/mcp_attach.js";
 import { createConnectorTools } from "./integrations/core/connect_provider.js";
 import { createGmailSendTools, gmailSendRestEnabled } from "./integrations/google/google_gmail_send.js";
+import { createMailSearchInboxesTool } from "./integrations/mail/mail_search_inboxes.js";
 import { createGoogleCalendarRestTools, calendarRestEnabled } from "./integrations/google/google_calendar_rest.js";
 import { createGoogleAnalyticsRestTools, analyticsRestEnabled } from "./integrations/google/google_analytics_rest.js";
 import {
@@ -469,6 +470,7 @@ export async function registerAllTools(
   registry.register(connectorTools.listConnectorsTool);
   if (gmailSendRestEnabled()) {
     for (const t of createGmailSendTools()) registry.register(t);
+    registry.register(createMailSearchInboxesTool());
   }
   if (calendarRestEnabled()) {
     for (const t of createGoogleCalendarRestTools()) registry.register(t);
@@ -691,6 +693,10 @@ export {
   connectNotionFromServer,
   disconnectNotionFromServer,
 } from "./integrations/core/connect_provider.js";
+export {
+  revokeIntegrationAccountFromServer,
+  type IntegrationAccountSlug,
+} from "./integrations/core/revoke_integration_account.js";
 export { getMicrosoftSidecarStatus, stopMicrosoftSidecar } from "./integrations/microsoft/microsoft_sidecar.js";
 export { getAzureSidecarStatus, stopAzureSidecar } from "./integrations/azure/azure_sidecar.js";
 export {
@@ -712,3 +718,17 @@ export {
   refreshIntegrationToolsOnRegistry,
 } from "./integrations/core/integrations_server.js";
 export type { IntegrationConnectionSummary } from "./integrations/core/integrations_server.js";
+export {
+  buildIntegrationsSnapshot,
+  deriveIntegrationProviderStatuses,
+} from "./integrations/core/integrations_snapshot.js";
+export type {
+  IntegrationsSnapshot,
+  IntegrationProviderStatus,
+  IntegrationConnectMode,
+} from "./integrations/core/integrations_snapshot.js";
+export {
+  INTEGRATION_PROVIDER_CATALOG,
+  INTEGRATION_PROVIDER_BY_ID,
+} from "./integrations/core/integration_providers.js";
+export type { IntegrationProviderId, IntegrationProviderCatalogEntry } from "./integrations/core/integration_providers.js";
