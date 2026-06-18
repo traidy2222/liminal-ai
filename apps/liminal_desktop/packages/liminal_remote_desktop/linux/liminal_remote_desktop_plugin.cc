@@ -1,8 +1,6 @@
 #include <flutter_linux/flutter_linux.h>
 #include <gtk/gtk.h>
-#include <X11/Xlib.h>
-#include <X11/extensions/XTest.h>
-#include <X11/Xutil.h>
+#include <gdk/gdkx.h>
 
 #include <cstring>
 #include <map>
@@ -10,19 +8,23 @@
 #include <string>
 #include <vector>
 
-#define LIMINAL_REMOTE_DESKTOP_PLUGIN(obj) \
-  (G_TYPE_CHECK_INSTANCE_CAST((obj), liminal_remote_desktop_plugin_get_type(), \
-                              LiminalRemoteDesktopPlugin))
-
 struct LiminalRemoteDesktopPlugin {
   GObject parent_instance;
   FlMethodChannel* channel;
 };
 
 G_DECLARE_FINAL_TYPE(LiminalRemoteDesktopPlugin, liminal_remote_desktop_plugin,
-                     liminal_remote_desktop, LIMINAL_REMOTE_DESKTOP_PLUGIN)
+                     LIMINAL_REMOTE_DESKTOP, PLUGIN)
 
 G_DEFINE_TYPE(LiminalRemoteDesktopPlugin, liminal_remote_desktop_plugin, g_object_get_type())
+
+#define LIMINAL_REMOTE_DESKTOP_PLUGIN(obj)                                      \
+  (G_TYPE_CHECK_INSTANCE_CAST((obj), liminal_remote_desktop_plugin_get_type(), \
+                              LiminalRemoteDesktopPlugin))
+
+#include <X11/Xlib.h>
+#include <X11/extensions/XTest.h>
+#include <X11/Xutil.h>
 
 static std::map<std::string, Window> g_x11_windows;
 static std::string g_capture_target;

@@ -46,6 +46,20 @@ if (-not (Test-Path "windows")) {
   if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 }
 
+# MSVC 18+ errors on permission_handler_windows' experimental/coroutine (STL1011).
+$cmakePath = Join-Path $AppDir "windows\CMakeLists.txt"
+if (Test-Path $cmakePath) {
+  $cmake = Get-Content $cmakePath -Raw
+  if ($cmake -notmatch '_SILENCE_EXPERIMENTAL_COROUTINE') {
+    $patch = @"
+
+# Third-party plugins (permission_handler_windows) still include <experimental/coroutine>.
+add_definitions(-D_SILENCE_EXPERIMENTAL_COROUTINE_DEPRECATION_WARNINGS)
+"@
+    Set-Content -Path $cmakePath -Value ($cmake.TrimEnd() + $patch) -Encoding utf8
+  }
+}
+
 Write-Host "==> flutter pub get"
 & $flutter pub get
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
