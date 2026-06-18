@@ -184,6 +184,8 @@ jobs:
     needs: [meta, windows, macos, linux, liminald-runtime]
     runs-on: ubuntu-latest
     steps:
+      - uses: actions/checkout@v4
+
       - name: Download artifacts
         uses: actions/download-artifact@v4
         with:
