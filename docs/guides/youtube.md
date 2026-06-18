@@ -50,8 +50,8 @@ Uses the **same** Google Cloud OAuth client as Google Workspace (`GOOGLE_OAUTH_C
    - **YouTube Data API v3**
    - **YouTube Analytics API**
 2. **OAuth consent screen → Data access** — add scopes:
-   - `https://www.googleapis.com/auth/youtube.readonly`
-   - `https://www.googleapis.com/auth/youtube.upload` (read + write mode)
+   - `https://www.googleapis.com/auth/youtube.readonly` (read-only mode)
+   - `https://www.googleapis.com/auth/youtube` (read + write — required for video metadata updates; `youtube.upload` alone is insufficient)
    - `https://www.googleapis.com/auth/yt-analytics.readonly`
    - `https://www.googleapis.com/auth/yt-analytics-monetary.readonly` (optional — revenue tier)
 3. **Credentials → OAuth 2.0 Client (Web application)** — YouTube reuses the Workspace redirect URI (already registered):

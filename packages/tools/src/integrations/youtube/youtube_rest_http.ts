@@ -60,6 +60,10 @@ export async function youtubeRestJson<T>(
     } catch {
       /* raw */
     }
+    if (/insufficient.*permission|insufficient authentication scopes|403/i.test(detail)) {
+      detail +=
+        " — reconnect YouTube with Read + write (needs https://www.googleapis.com/auth/youtube for video updates). Settings → Integrations → YouTube → Reconnect.";
+    }
     return { ok: false, error: `YouTube API HTTP ${res.status}: ${detail}` };
   }
   if (!text.trim()) return { ok: true, data: {} as T };

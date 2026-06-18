@@ -41,8 +41,10 @@ function scopeGranted(set: Set<string>, scope: string): boolean {
 }
 
 export function scopesForYoutubeConnect(opts: YoutubeConnectOptions): string[] {
-  const scopes: string[] = [YOUTUBE_READONLY_SCOPE, YT_ANALYTICS_READONLY_SCOPE];
-  if (opts.mode === "read_write") scopes.push(YOUTUBE_UPLOAD_SCOPE);
+  const scopes: string[] =
+    opts.mode === "read_write"
+      ? [YOUTUBE_MANAGE_SCOPE, YT_ANALYTICS_READONLY_SCOPE]
+      : [YOUTUBE_READONLY_SCOPE, YT_ANALYTICS_READONLY_SCOPE];
   if (opts.monetary) scopes.push(YT_ANALYTICS_MONETARY_READONLY_SCOPE);
   return [...new Set(scopes)];
 }
