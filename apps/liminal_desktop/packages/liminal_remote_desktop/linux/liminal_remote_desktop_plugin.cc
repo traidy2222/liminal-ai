@@ -2,6 +2,8 @@
 #include <gtk/gtk.h>
 #include <gdk/gdkx.h>
 
+#include "liminal_remote_desktop/liminal_remote_desktop_plugin.h"
+
 #include <cstring>
 #include <map>
 #include <string>

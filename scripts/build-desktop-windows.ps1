@@ -68,8 +68,7 @@ Write-Host "==> flutter pub get"
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
 Write-Host "==> flutter build windows --release"
-& $flutter build windows --release `
-  --cmake-args="-DCMAKE_CXX_FLAGS=/D_SILENCE_EXPERIMENTAL_COROUTINE_DEPRECATION_WARNINGS"
+& $flutter build windows --release
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
 Pop-Location
