@@ -479,7 +479,10 @@ class _HubStatusStrip extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final lim = LiminalTheme.of(context);
-    final online = host.phase == ConnectionPhase.connected && host.sidecarReady;
+    final online =
+        (host.phase == ConnectionPhase.connected ||
+            host.phase == ConnectionPhase.reconnecting) &&
+        host.sidecarReady;
     final persona = host.config?.personaDisplayLabel ?? 'Liminal';
     final connected = _connectedCount(host.integrations);
     final missionLabel = host.orchestration.isActive

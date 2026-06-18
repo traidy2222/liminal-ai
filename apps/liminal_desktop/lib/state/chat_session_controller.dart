@@ -188,6 +188,12 @@ class ChatSessionController extends ChangeNotifier {
     notifyListeners();
   }
 
+  void clearBusyState() {
+    if (!_state.busy && _state.connectionError == null) return;
+    _state = _state.copyWith(busy: false, clearConnectionError: true);
+    notifyListeners();
+  }
+
   void clearTranscript() {
     _state = ChatTranscriptState.initial;
     browserDockExpanded = true;

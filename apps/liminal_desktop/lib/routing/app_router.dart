@@ -30,6 +30,9 @@ GoRouter createAppRouter(AppController controller) {
       if (host.phase == ConnectionPhase.error) {
         return loc == AppRoutes.error ? null : AppRoutes.error;
       }
+      if (host.phase == ConnectionPhase.reconnecting) {
+        return null;
+      }
       if (host.phase != ConnectionPhase.connected) {
         return loc == AppRoutes.boot ? null : AppRoutes.boot;
       }

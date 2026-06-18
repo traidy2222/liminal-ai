@@ -22,10 +22,14 @@ class WsTransport {
   WsTransport({
     required this.port,
     required this.token,
+    this.onDisconnect,
   });
 
   final int port;
   final String token;
+
+  /// Fired when the socket closes or errors (not on intentional [dispose]).
+  void Function(String reason)? onDisconnect;
 
   WebSocketChannel? _channel;
   StreamSubscription? _sub;
@@ -33,11 +37,19 @@ class WsTransport {
   final _pending = <String, Completer<CommandResult>>{};
   int _cmdSeq = 0;
   bool _disposed = false;
+  bool _intentionalClose = false;
 
   Stream<ServerFrame> get frames => _frameController.stream;
 
+  /// True when the WebSocket is open and accepting commands.
+  bool get isLive => _channel != null && !_disposed;
+
   Future<void> connect() async {
-    if (_channel != null) return;
+    if (_disposed) {
+      throw StateError('WsTransport disposed');
+    }
+    if (isLive) return;
+    _intentionalClose = false;
     final uri = Uri.parse('ws://127.0.0.1:$port?token=$token');
     _channel = WebSocketChannel.connect(uri);
     _sub = _channel!.stream.listen(
@@ -63,11 +75,32 @@ class WsTransport {
         if (!_frameController.isClosed) {
           _frameController.addError(e, st);
         }
+        _handleSocketLost('WebSocket error: $e');
       },
       onDone: () {
-        _failPending('WebSocket closed.');
+        _handleSocketLost('WebSocket closed');
       },
     );
+  }
+
+  void _handleSocketLost(String reason) {
+    if (_disposed || _intentionalClose) return;
+    _tearDownSocket(failPendingMessage: reason);
+    onDisconnect?.call(reason);
+  }
+
+  void _tearDownSocket({String? failPendingMessage}) {
+    if (failPendingMessage != null) {
+      _failPending(failPendingMessage);
+    }
+    final sub = _sub;
+    _sub = null;
+    unawaited(sub?.cancel());
+    final ch = _channel;
+    _channel = null;
+    if (ch != null) {
+      unawaited(ch.sink.close().catchError((_) {}));
+    }
   }
 
   void _failPending(String message) {
@@ -79,16 +112,35 @@ class WsTransport {
     _pending.clear();
   }
 
+  /// Close the socket without disposing the frame stream (for reconnect).
+  Future<void> closeSocket() async {
+    if (_disposed) return;
+    _intentionalClose = true;
+    _tearDownSocket(failPendingMessage: 'WebSocket closed.');
+    _intentionalClose = false;
+  }
+
   Future<CommandResult> sendCommand(
     String command,
     Map<String, dynamic> data, {
     Duration timeout = const Duration(seconds: 120),
   }) async {
-    if (_channel == null) await connect();
+    if (_disposed) {
+      return CommandResult(ok: false, error: 'Transport disposed');
+    }
+    if (!isLive) {
+      return CommandResult(ok: false, error: 'WebSocket not connected');
+    }
     final id = 'cmd-${++_cmdSeq}-${DateTime.now().microsecondsSinceEpoch}';
     final completer = Completer<CommandResult>();
     _pending[id] = completer;
-    _channel!.sink.add(ClientFrame(id: id, command: command, data: data).encode());
+    try {
+      _channel!.sink.add(ClientFrame(id: id, command: command, data: data).encode());
+    } catch (e) {
+      _pending.remove(id);
+      _handleSocketLost('WebSocket send failed: $e');
+      return CommandResult(ok: false, error: 'WebSocket send failed: $e');
+    }
     return completer.future.timeout(
       timeout,
       onTimeout: () {
@@ -125,10 +177,8 @@ class WsTransport {
   Future<void> dispose() async {
     if (_disposed) return;
     _disposed = true;
-    _failPending('Transport disposed.');
-    await _sub?.cancel();
-    await _channel?.sink.close();
+    _intentionalClose = true;
+    _tearDownSocket(failPendingMessage: 'Transport disposed.');
     await _frameController.close();
-    _channel = null;
   }
 }

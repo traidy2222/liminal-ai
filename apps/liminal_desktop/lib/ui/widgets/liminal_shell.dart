@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../layout/liminal_breakpoints.dart';
 import '../layout/liminal_spacing.dart';
+import 'connection_status_strip.dart';
 import 'liminal_background.dart';
 import 'liminal_brand.dart';
 
@@ -14,6 +15,7 @@ class LiminalShell extends StatelessWidget {
     this.drawer,
     this.floatingActionButton,
     this.bottomNavigationBar,
+    this.showConnectionBanner = true,
   });
 
   final PreferredSizeWidget? appBar;
@@ -21,6 +23,7 @@ class LiminalShell extends StatelessWidget {
   final Widget? drawer;
   final Widget? floatingActionButton;
   final Widget? bottomNavigationBar;
+  final bool showConnectionBanner;
 
   @override
   Widget build(BuildContext context) {
@@ -29,7 +32,13 @@ class LiminalShell extends StatelessWidget {
         backgroundColor: Colors.transparent,
         appBar: appBar,
         drawer: drawer,
-        body: body,
+        body: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            if (showConnectionBanner) const ConnectionStatusStrip(),
+            Expanded(child: body),
+          ],
+        ),
         floatingActionButton: floatingActionButton,
         bottomNavigationBar: bottomNavigationBar,
       ),

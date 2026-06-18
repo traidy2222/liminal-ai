@@ -11,6 +11,7 @@ class BootScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return LiminalShell(
+      showConnectionBanner: false,
       body: Center(
         child: Column(
           mainAxisSize: MainAxisSize.min,
@@ -48,6 +49,7 @@ class _StartingSidecarScreenState extends State<StartingSidecarScreen> {
     final lim = LiminalTheme.of(context);
     final host = AppScope.watch(context);
     return LiminalShell(
+      showConnectionBanner: false,
       body: Center(
         child: Padding(
           padding: const EdgeInsets.symmetric(horizontal: 32),
@@ -89,6 +91,7 @@ class ErrorBootScreen extends StatelessWidget {
   Widget build(BuildContext context) {
     final host = AppScope.watch(context);
     return LiminalShell(
+      showConnectionBanner: false,
       body: Center(
         child: Padding(
           padding: const EdgeInsets.all(24),

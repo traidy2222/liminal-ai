@@ -37,6 +37,20 @@ void main() {
     expect(split.outerMarkdown, closed);
   });
 
+  test('isMarkdownEmbedLang recognizes markdown embed languages', () {
+    expect(isMarkdownEmbedLang('markdown'), isTrue);
+    expect(isMarkdownEmbedLang('md'), isTrue);
+    expect(isMarkdownEmbedLang('gfm'), isTrue);
+    expect(isMarkdownEmbedLang('javascript'), isFalse);
+  });
+
+  test('unwrapMarkdownDocumentFence unwraps full-document fence', () {
+    const raw = '```markdown\n## Title\n\n| A | B |\n|---|---|\n| 1 | 2 |\n```';
+    final inner = unwrapMarkdownDocumentFence(raw);
+    expect(inner, contains('## Title'));
+    expect(inner, isNot(contains('```markdown')));
+  });
+
   test('splitMessageSegments extracts closed html block', () {
     const text = 'Before\n\n```html\n<div>x</div>\n```\n\nAfter';
     final segs = splitMessageSegments(text);

@@ -23,7 +23,6 @@ import {
   buildPlanWorkflowPrompt,
   WorkflowStore,
   WorkflowRuntime,
-  resolveProviderConfig,
   getFastModelSlug,
   completeChatJson,
   effectiveHarnessEnvRaw,
@@ -75,14 +74,16 @@ export function createWorkflowTools(harness: AgentHarness): {
   workflowStatusTool: ToolDefinition;
   queryWorkflowTool: ToolDefinition;
 } {
-  // Build a fast-model client lazily (shared across the tools).
-  function fastClient(): { client: OpenAI; model: string; fast: string } | null {
-    const provider = resolveProviderConfig();
-    if (!provider.apiKey) return null;
+  // Use the harness session client (managed inference or BYOK) — same as orchestration tools.
+  // resolveProviderConfig() ignores the active managed session and would send Bedrock ids
+  // (e.g. zai.glm-4.7-flash) to OpenRouter BYOK, which fails plan_workflow.
+  function fastClient(): { client: OpenAI; fast: string } | null {
+    const apiKey = harness.config.openRouterApiKey?.trim();
+    if (!apiKey) return null;
     const overrideModel = effectiveHarnessEnvRaw("AGENT_WORKFLOW_MODEL")?.trim();
-    const client = new OpenAI({ apiKey: provider.apiKey, baseURL: provider.baseURL });
-    const fast = overrideModel || getFastModelSlug(provider.model);
-    return { client, model: provider.model, fast };
+    const client = new OpenAI({ apiKey, baseURL: harness.config.baseURL });
+    const fast = overrideModel || getFastModelSlug(harness.config.model);
+    return { client, fast };
   }
 
   async function planSpec(goal: string): Promise<{ ok: true; spec: WorkflowSpec } | { ok: false; error: string }> {
@@ -99,6 +100,7 @@ export function createWorkflowTools(harness: AgentHarness): {
     try {
       const jr = await completeChatJson(fc.client, {
         model: fc.fast,
+        isFastModel: true,
         messages: [{ role: "user", content: prompt }],
         maxTokens: 3000,
         temperature: 0.2,
@@ -123,6 +125,7 @@ export function createWorkflowTools(harness: AgentHarness): {
     try {
       const jr = await completeChatJson(fc.client, {
         model: fc.fast,
+        isFastModel: true,
         messages: [
           {
             role: "user",

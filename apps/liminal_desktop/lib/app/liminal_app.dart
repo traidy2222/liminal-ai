@@ -24,7 +24,7 @@ class LiminalApp extends StatefulWidget {
   State<LiminalApp> createState() => _LiminalAppState();
 }
 
-class _LiminalAppState extends State<LiminalApp> {
+class _LiminalAppState extends State<LiminalApp> with WidgetsBindingObserver {
   late final GoRouter _router;
   String? _fontsWarmedKey;
 
@@ -38,6 +38,7 @@ class _LiminalAppState extends State<LiminalApp> {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _router = createAppRouter(widget.controller);
     _warmFontsIfNeeded(
       widget.controller.config?.resolvedTheme ?? PersonaUiTheme.liminalDefault,
@@ -47,9 +48,15 @@ class _LiminalAppState extends State<LiminalApp> {
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _router.dispose();
     widget.controller.dispose();
     super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    widget.controller.onAppLifecycleState(state);
   }
 
   @override

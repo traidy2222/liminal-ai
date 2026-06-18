@@ -144,6 +144,5 @@ lib/
 ## Next phases
 
 - Persona `PersonaUiTheme` → Flutter `ThemeData`
-- WS reconnect + transcript replay
 - OAuth loopback for Google/MCP connectors
 - Packaged `liminald` binary per OS (SEA/pkg) + installer signing

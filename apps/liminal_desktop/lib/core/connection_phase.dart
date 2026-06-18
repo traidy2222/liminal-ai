@@ -3,6 +3,8 @@ enum ConnectionPhase {
   idle,
   booting,
   connected,
+  /// Recovering from a dropped loopback WebSocket without leaving the current screen.
+  reconnecting,
   error,
 }
 

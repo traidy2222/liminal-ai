@@ -2,6 +2,7 @@
 library;
 
 const _htmlEmbedLangs = {'html', 'htm', 'xhtml'};
+const _markdownEmbedLangs = {'markdown', 'md', 'gfm', 'mdx'};
 
 const _htmlVoid = {
   'area',
@@ -22,6 +23,23 @@ const _htmlVoid = {
 
 bool isHtmlEmbedLang(String? lang) =>
     lang != null && _htmlEmbedLangs.contains(lang.toLowerCase());
+
+bool isMarkdownEmbedLang(String? lang) =>
+    lang != null && _markdownEmbedLangs.contains(lang.toLowerCase());
+
+/// Models often wrap the full reply in a single ```markdown fence — render it, not monospace.
+String unwrapMarkdownDocumentFence(String data) {
+  final trimmed = data.trim();
+  final match = RegExp(
+    r'^```(?:markdown|md|gfm)\s*\r?\n([\s\S]*?)\r?\n```\s*$',
+    caseSensitive: false,
+  ).firstMatch(trimmed);
+  if (match != null) {
+    final inner = match.group(1)?.trim() ?? '';
+    if (inner.isNotEmpty) return inner;
+  }
+  return data;
+}
 
 String extractFencedCodeText(String raw) =>
     raw.replaceAll(RegExp(r'\n$'), '');

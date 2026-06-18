@@ -46,9 +46,10 @@ class LiminalMarkdownBlock extends StatelessWidget {
   Widget build(BuildContext context) {
     final lim = LiminalTheme.of(context);
     _ensureHighlight();
+    final markdown = unwrapMarkdownDocumentFence(data);
 
-    if (looksLikeInlineHtmlFragment(data)) {
-      final clean = sanitizeEmbedHtml(data);
+    if (looksLikeInlineHtmlFragment(markdown)) {
+      final clean = sanitizeEmbedHtml(markdown);
       if (clean.isNotEmpty) {
         return HtmlWidget(
           clean,
@@ -68,7 +69,7 @@ class LiminalMarkdownBlock extends StatelessWidget {
     }
 
     return MarkdownBody(
-      data: data,
+      data: markdown,
       selectable: false,
       softLineBreak: true,
       extensionSet: md.ExtensionSet.gitHubWeb,
@@ -77,6 +78,7 @@ class LiminalMarkdownBlock extends StatelessWidget {
         'pre': _PreElementBuilder(streaming: streaming, lim: lim),
         'blockquote': _AlertBlockquoteBuilder(lim: lim),
         'img': _ImageElementBuilder(lim: lim),
+        'table': _TableElementBuilder(lim: lim),
       },
       onTapLink: (text, href, title) {
         if (href == null) return;
@@ -111,6 +113,10 @@ class _PreElementBuilder extends MarkdownElementBuilder {
 
     if (isHtmlEmbedLang(lang)) {
       return HtmlEmbedView(html: code, streaming: streaming);
+    }
+
+    if (isMarkdownEmbedLang(lang)) {
+      return LiminalMarkdownBlock(data: code, streaming: streaming);
     }
 
     return _codeBlock(code, lang: lang);
@@ -175,6 +181,34 @@ class _AlertBlockquoteBuilder extends MarkdownElementBuilder {
     // Default blockquote — let MarkdownStyleSheet.blockquote* handle visuals;
     // return null so flutter_markdown renders children inline in the quote style.
     return null;
+  }
+}
+
+class _TableElementBuilder extends MarkdownElementBuilder {
+  _TableElementBuilder({required this.lim});
+
+  final LiminalTokens lim;
+
+  @override
+  Widget? visitElementAfter(md.Element element, TextStyle? preferredStyle) {
+    final child = super.visitElementAfter(element, preferredStyle);
+    if (child == null) return null;
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 8),
+      child: DecoratedBox(
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(6),
+          border: Border.all(color: lim.border.withValues(alpha: 0.35)),
+        ),
+        child: ClipRRect(
+          borderRadius: BorderRadius.circular(6),
+          child: SingleChildScrollView(
+            scrollDirection: Axis.horizontal,
+            child: child,
+          ),
+        ),
+      ),
+    );
   }
 }
 

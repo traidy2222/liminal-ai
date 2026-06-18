@@ -2,11 +2,13 @@ import 'dart:async';
 import 'dart:io' show Platform;
 
 import 'package:flutter/foundation.dart';
+import 'package:flutter/widgets.dart';
 
 import '../apps/app_window_manager.dart';
 import '../audio/dictation_controller.dart';
 import '../audio/sidecar_audio_client.dart';
 import '../audio/speech_output.dart';
+import '../core/connection_keepalive.dart';
 import '../core/connection_phase.dart';
 import '../core/feature_flags.dart';
 import '../core/protocol_client.dart';
@@ -57,6 +59,7 @@ class AppController extends ChangeNotifier {
         dictation = DictationController() {
     _protocol.onGlobalFrame = _onGlobalFrame;
     _protocol.onChatFrame = _onChatFrame;
+    _protocol.onConnectionLost = _onTransportDisconnect;
     dictation.onSessionActiveChange = _onDictationSessionChange;
     dictation.onCaptureActiveChange = _onDictationCaptureChange;
     dictation.shouldBlockSpeechCapture = () => speechOutput.shouldBlockMicCapture();
@@ -100,6 +103,14 @@ class AppController extends ChangeNotifier {
 
   ConnectionPhase phase = ConnectionPhase.idle;
   String? bootError;
+  /// Short-lived banner after reconnect ("Back online").
+  String? connectionNotice;
+  bool connectionRecoverBusy = false;
+  bool _hasEverConnected = false;
+  Timer? _connectionHealthTimer;
+  Timer? _connectionNoticeTimer;
+  int _missedConnectionPings = 0;
+  bool _reconnectInFlight = false;
   AppConfig? config;
   bool configLoading = false;
   bool sidecarReady = false;
@@ -202,6 +213,8 @@ class AppController extends ChangeNotifier {
       }
 
       phase = ConnectionPhase.connected;
+      _hasEverConnected = true;
+      _startConnectionHealthMonitor();
       if (LiminalFeatureFlags.desktopAppsEnabled) {
         await _appWindows.ensureChannelReady();
       }
@@ -213,11 +226,166 @@ class AppController extends ChangeNotifier {
       }
       notifyListeners();
     } catch (e) {
+      _stopConnectionHealthMonitor();
       phase = ConnectionPhase.error;
       bootError = e.toString();
       configLoading = false;
       notifyListeners();
     }
+  }
+
+  /// App lifecycle: refresh transport after sleep / resume.
+  void onAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      unawaited(_onAppResumed());
+    }
+  }
+
+  Future<void> _onAppResumed() async {
+    if (!_hasEverConnected) return;
+    if (!_protocol.isLive) {
+      await _scheduleReconnect('app resumed');
+      return;
+    }
+    final ok = await _protocol.ping(timeout: connectionPingTimeout);
+    if (!ok) {
+      await _scheduleReconnect('ping failed on resume');
+    }
+  }
+
+  void _onTransportDisconnect(String reason) {
+    if (phase == ConnectionPhase.booting || !_hasEverConnected) return;
+    unawaited(_scheduleReconnect(reason));
+  }
+
+  void _startConnectionHealthMonitor() {
+    _connectionHealthTimer?.cancel();
+    _missedConnectionPings = 0;
+    _connectionHealthTimer = Timer.periodic(
+      connectionPingInterval,
+      (_) => unawaited(_connectionHealthTick()),
+    );
+  }
+
+  void _stopConnectionHealthMonitor() {
+    _connectionHealthTimer?.cancel();
+    _connectionHealthTimer = null;
+    _missedConnectionPings = 0;
+  }
+
+  Future<void> _connectionHealthTick() async {
+    if (phase != ConnectionPhase.connected && phase != ConnectionPhase.reconnecting) {
+      return;
+    }
+    if (_reconnectInFlight) return;
+    if (!_protocol.isLive) {
+      await _scheduleReconnect('health: socket down');
+      return;
+    }
+    final ok = await _protocol.ping(timeout: connectionPingTimeout);
+    if (!ok) {
+      _missedConnectionPings += 1;
+      if (_missedConnectionPings >= connectionPingMissLimit) {
+        await _scheduleReconnect('health: ping missed');
+      }
+      return;
+    }
+    _missedConnectionPings = 0;
+  }
+
+  Future<void> _scheduleReconnect(String reason) async {
+    if (_reconnectInFlight || phase == ConnectionPhase.booting) return;
+    await _reconnectSidecar(reason);
+  }
+
+  /// User-triggered reconnect from the status strip.
+  Future<void> retryConnection() async {
+    await _reconnectSidecar('manual reconnect');
+  }
+
+  Future<void> _reconnectSidecar(String reason) async {
+    if (_reconnectInFlight) return;
+    _reconnectInFlight = true;
+    connectionRecoverBusy = true;
+    _stopConnectionHealthMonitor();
+    phase = ConnectionPhase.reconnecting;
+    connectionNotice = 'Reconnecting…';
+    bootError = null;
+    notifyListeners();
+
+    try {
+      var attempt = 0;
+      Object? lastError;
+      while (attempt < 8) {
+        if (attempt > 0) {
+          await Future<void>.delayed(
+            Duration(milliseconds: reconnectDelayMs(attempt - 1)),
+          );
+        }
+        try {
+          final proc = await _sidecar.ensureRunning(
+            attachToExisting: SidecarLifecycle.attachFromEnv,
+          );
+          _sidecarPort = proc.port;
+          _sidecarToken = proc.token;
+          if (_protocol.isConnected) {
+            await _protocol.reconnect(port: proc.port, token: proc.token);
+          } else {
+            await _protocol.connect(port: proc.port, token: proc.token);
+          }
+          _syncAssetResolver();
+          await _protocol.waitForSidecarReady(
+            timeout: const Duration(seconds: 90),
+          );
+          _syncDictationAudioClient();
+          sidecarReady = true;
+          await _afterReconnectRestored();
+          phase = ConnectionPhase.connected;
+          _hasEverConnected = true;
+          connectionNotice = 'Back online — chat history restored';
+          _scheduleConnectionNoticeClear();
+          _startConnectionHealthMonitor();
+          notifyListeners();
+          return;
+        } catch (e) {
+          lastError = e;
+          attempt += 1;
+        }
+      }
+
+      phase = ConnectionPhase.error;
+      bootError = lastError?.toString() ?? 'Reconnect failed ($reason)';
+      connectionNotice = null;
+      notifyListeners();
+    } finally {
+      _reconnectInFlight = false;
+      connectionRecoverBusy = false;
+    }
+  }
+
+  void _scheduleConnectionNoticeClear() {
+    _connectionNoticeTimer?.cancel();
+    _connectionNoticeTimer = Timer(const Duration(seconds: 4), () {
+      connectionNotice = null;
+      notifyListeners();
+    });
+  }
+
+  Future<void> _afterReconnectRestored() async {
+    await refreshConfig(background: true);
+    if (vireonAccount.connected) {
+      await loadHarnessSettings(reconnectVireon: true);
+    }
+    final replayIds = <String>{
+      if (activeChatId != null) activeChatId!,
+      ...visibleChatIds,
+    };
+    for (final chatId in replayIds) {
+      _sessions.sessionFor(chatId).clearBusyState();
+      await _protocol.send('open_chat', {'chatId': chatId});
+      await _protocol.send('replay_transcript', {'chatId': chatId});
+    }
+    notifyListeners();
   }
 
   void _applyConfigFromJson(Map<String, dynamic>? json) {
@@ -998,7 +1166,12 @@ class AppController extends ChangeNotifier {
     String? workflowPreset,
   }) async {
     final targetChatId = chatId ?? activeChatId;
-    if (targetChatId == null || !_protocol.isConnected) return false;
+    if (targetChatId == null || !_protocol.isLive) {
+      if (targetChatId != null && _hasEverConnected) {
+        unawaited(_scheduleReconnect('send while offline'));
+      }
+      return false;
+    }
     final trimmed = text.trim();
     if (trimmed.isEmpty && attachments.isEmpty) return false;
     if (needsProviderSetup || needsPersonaBootstrap) return false;
@@ -2141,6 +2314,8 @@ class AppController extends ChangeNotifier {
 
   @override
   void dispose() {
+    _stopConnectionHealthMonitor();
+    _connectionNoticeTimer?.cancel();
     _stopIntegrationsPolling();
     unawaited(_appWindows.closeAll());
     updates.removeListener(notifyListeners);
