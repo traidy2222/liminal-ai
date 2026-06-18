@@ -254,10 +254,14 @@ IntegrationProviderPresentation integrationPresentation({
       if (snap.youtubeConnected) {
         final n = snap.youtube.accounts.length;
         return IntegrationProviderPresentation(
-          nextStep: n > 1 ? '$n channels connected' : 'Ready · ${snap.youtubeAccountLabel}',
-          actionLabel: 'Add account',
-          ready: true,
-          highlight: true,
+          nextStep: snap.youtubeNeedsReconnect
+              ? 'Reconnect for analytics scopes'
+              : n > 1
+                  ? '$n channels connected'
+                  : 'Ready · ${snap.youtubeAccountLabel}',
+          actionLabel: snap.youtubeNeedsReconnect ? 'Reconnect' : 'Add account',
+          ready: !snap.youtubeNeedsReconnect,
+          highlight: !snap.youtubeNeedsReconnect,
           statusMode: IntegrationStatusMode.oauthAutoAttach,
           signedIn: true,
         );

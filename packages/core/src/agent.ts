@@ -2591,7 +2591,7 @@ export class AgentHarness {
         `confidence=${controls.confidence ?? "n/a"}, ` +
         `verbosity=${controls.verbosity ?? "n/a"}, ` +
         `personaStrength=${controls.personaStrength ?? "n/a"}\n` +
-        "If these conflict with persona catchphrases or style examples, treat this snapshot as source of truth.",
+        "If these conflict with persona style or examples, treat this snapshot as source of truth.",
     });
   }
 

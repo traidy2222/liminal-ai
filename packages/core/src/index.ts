@@ -1524,8 +1524,14 @@ export {
   ensureYoutubeOAuthBundle,
   scopesForYoutubeMode,
 } from "./youtube_oauth_broker.js";
-export { missingYoutubeScopes } from "./youtube_oauth_scopes.js";
-export type { YoutubeConnectMode } from "./youtube_oauth_scopes.js";
+export {
+  missingYoutubeScopes,
+  scopesForYoutubeConnect,
+  youtubeConnectOptionsFromMetadata,
+  YT_ANALYTICS_READONLY_SCOPE,
+  YT_ANALYTICS_MONETARY_READONLY_SCOPE,
+} from "./youtube_oauth_scopes.js";
+export type { YoutubeConnectMode, YoutubeConnectOptions } from "./youtube_oauth_scopes.js";
 export { fetchPrimaryYoutubeChannel } from "./youtube_channel.js";
 export type { YoutubeChannelSummary } from "./youtube_channel.js";
 export { runYoutubeHostedConnectFlow } from "./youtube_hosted_connect.js";

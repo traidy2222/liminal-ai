@@ -398,10 +398,11 @@ export async function disconnectNotion(registry: ChatRegistry, revoke: boolean):
 
 export async function connectYoutubeOAuth(
   registry: ChatRegistry,
-  opts: { mode?: "read_write" | "read_only"; openBrowser?: boolean }
+  opts: { mode?: "read_write" | "read_only"; monetary?: boolean; openBrowser?: boolean }
 ): Promise<{ accountId: string; email?: string; metadata?: Record<string, unknown> }> {
   const result = await runYoutubeHostedConnectFlow({
     mode: opts.mode ?? "read_write",
+    monetary: opts.monetary === true,
     openBrowser: opts.openBrowser !== false,
     onStatus: (m) => console.log(`[youtube-oauth] ${m}`),
   });

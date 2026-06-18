@@ -258,6 +258,7 @@ export const TOOL_FAMILIES: Record<string, { description: string; tools: readonl
       "youtube_rest_list_videos",
       "youtube_rest_update_video",
       "youtube_rest_upload_video",
+      "youtube_analytics_query",
     ],
   },
   azure: {

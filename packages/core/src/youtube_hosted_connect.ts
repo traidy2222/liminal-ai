@@ -3,6 +3,8 @@ import { runHostedIntegrationConnectFlow } from "./hosted_oauth_connect.js";
 export interface RunYoutubeHostedConnectOptions {
   siteOrigin?: string;
   mode?: "read_write" | "read_only";
+  /** Request revenue / ad-performance analytics (YouTube Partner Program). */
+  monetary?: boolean;
   openBrowser?: boolean;
   onStatus?: (message: string) => void;
   timeoutMs?: number;
@@ -20,6 +22,7 @@ export function runYoutubeHostedConnectFlow(
     provider: "youtube",
     siteOrigin: options.siteOrigin,
     mode: options.mode ?? "read_write",
+    extra: options.monetary ? { monetary: "1" } : undefined,
     openBrowser: options.openBrowser,
     onStatus: options.onStatus,
     timeoutMs: options.timeoutMs,

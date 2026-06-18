@@ -82,6 +82,7 @@ export function IntegrationsPanel({ agentBusy }: IntegrationsPanelProps) {
     linearConnected,
     notionConnected,
     youtubeConnected,
+    youtubeNeedsReconnect,
     githubConnected,
     googleToolCount,
     microsoftToolCount,
@@ -135,6 +136,8 @@ export function IntegrationsPanel({ agentBusy }: IntegrationsPanelProps) {
     setNotionMode,
     youtubeMode,
     setYoutubeMode,
+    youtubeMonetary,
+    setYoutubeMonetary,
     githubMode,
     setGithubMode,
   } = m;
@@ -878,14 +881,25 @@ export function IntegrationsPanel({ agentBusy }: IntegrationsPanelProps) {
         signedIn={youtubeConnected}
         expanded={expanded === "youtube"}
         onToggle={() => toggleExpand("youtube")}
-        primaryLabel={youtubeConnected ? "Disconnect" : "Connect"}
-        primaryDanger={youtubeConnected}
+        primaryLabel={
+          youtubeConnected
+            ? youtubeNeedsReconnect
+              ? "Reconnect"
+              : "Disconnect"
+            : "Connect"
+        }
+        primaryDanger={youtubeConnected && !youtubeNeedsReconnect}
         primaryDisabled={disabled}
         onPrimary={() => void run(youtubePrimary)}
       >
         <p style={{ fontSize: 11, color: "#778899", lineHeight: 1.45, margin: "10px 0" }}>
-          Connect a YouTube channel separately from Google Workspace — list videos, read channel metadata, and update snippets.
+          Connect a YouTube channel separately from Google Workspace — list videos, Studio analytics, and update snippets.
         </p>
+        {youtubeNeedsReconnect && (
+          <p style={{ fontSize: 11, color: "#e6a23c", margin: "0 0 8px" }}>
+            Reconnect to grant analytics scopes (and revenue metrics if you enabled them).
+          </p>
+        )}
         {youtubeAccounts.map((a) => (
           <div key={a.accountId} style={{ fontSize: 11, fontFamily: "monospace", color: GREEN, marginBottom: 6 }}>
             {a.channelTitle ?? a.customUrl ?? a.email ?? a.accountId}
@@ -912,6 +926,15 @@ export function IntegrationsPanel({ agentBusy }: IntegrationsPanelProps) {
             Read only
           </label>
         </div>
+        <label style={{ display: "block", fontSize: 11, color: "#aabbcc", marginBottom: 8 }}>
+          <input
+            type="checkbox"
+            checked={youtubeMonetary}
+            onChange={(e) => setYoutubeMonetary(e.target.checked)}
+            disabled={disabled || youtubeConnected}
+          />{" "}
+          Include revenue analytics (Partner Program — estimated revenue, ad performance)
+        </label>
       </IntegrationCard>
 
       <IntegrationCard

@@ -38,6 +38,7 @@ class _IntegrationsScreenState extends State<IntegrationsScreen> {
   String _linearMode = 'read_write';
   String _notionMode = 'read_write';
   String _youtubeMode = 'read_write';
+  bool _youtubeMonetary = false;
   String _githubMode = 'read_write';
   final Set<String> _googleServices = {};
   final Set<String> _microsoftServices = {};
@@ -222,11 +223,11 @@ class _IntegrationsScreenState extends State<IntegrationsScreen> {
   }
 
   Future<void> _youtubePrimary(AppController host, IntegrationsSnapshot snap) async {
-    if (snap.youtubeConnected) {
-      await host.connectYoutubeOAuth(mode: _youtubeMode);
+    if (snap.youtubeConnected && !snap.youtubeNeedsReconnect) {
+      await host.connectYoutubeOAuth(mode: _youtubeMode, monetary: _youtubeMonetary);
       return;
     }
-    await host.connectYoutubeOAuth(mode: _youtubeMode);
+    await host.connectYoutubeOAuth(mode: _youtubeMode, monetary: _youtubeMonetary);
   }
 
   Future<void> _githubPrimary(AppController host, IntegrationsSnapshot snap) async {
@@ -665,14 +666,34 @@ class _IntegrationsScreenState extends State<IntegrationsScreen> {
                   onDisconnectAll: () => host.disconnectYoutube(revoke: true),
                 ),
                 Text(
-                  'Connect a YouTube channel separately from Google Workspace.',
+                  'Connect a YouTube channel separately from Google Workspace — Studio analytics and video tools.',
                   style: TextStyle(color: lim.textMuted, fontSize: 12, height: 1.4),
                 ),
+                if (snap.youtubeNeedsReconnect) ...[
+                  const SizedBox(height: 8),
+                  Text(
+                    'Reconnect to grant analytics scopes (and revenue metrics if enabled).',
+                    style: TextStyle(color: lim.warn, fontSize: 12, height: 1.4),
+                  ),
+                ],
                 const SizedBox(height: 8),
                 oauthModeRow(
                   mode: _youtubeMode,
                   modeLocked: snap.youtubeConnected,
                   onMode: (m) => setState(() => _youtubeMode = m),
+                ),
+                CheckboxListTile(
+                  contentPadding: EdgeInsets.zero,
+                  dense: true,
+                  title: const Text(
+                    'Include revenue analytics (Partner Program)',
+                    style: TextStyle(fontSize: 12),
+                  ),
+                  value: _youtubeMonetary,
+                  onChanged: disabled || snap.youtubeConnected
+                      ? null
+                      : (v) => setState(() => _youtubeMonetary = v ?? false),
+                  controlAffinity: ListTileControlAffinity.leading,
                 ),
               ],
             ),

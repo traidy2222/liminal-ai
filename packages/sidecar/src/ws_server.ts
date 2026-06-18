@@ -1252,7 +1252,11 @@ export class WsServer {
         }
 
         case "connect_youtube_oauth": {
-          const d = data as { mode?: "read_write" | "read_only"; openBrowser?: boolean };
+          const d = data as {
+            mode?: "read_write" | "read_only";
+            monetary?: boolean;
+            openBrowser?: boolean;
+          };
           try {
             const result = await connectYoutubeOAuth(this.registry, d);
             const snap = await buildIntegrationsSnapshot();

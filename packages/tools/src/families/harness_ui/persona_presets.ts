@@ -6,12 +6,14 @@ export interface SpeechStyle {
   /** Description of sentence patterns: length, fragments, structure */
   sentenceStructure: string;
   formality: "very_formal" | "formal" | "casual" | "very_casual" | "mixed";
-  /** Words/phrases this persona uses constantly */
-  favoriteWords: string[];
-  /** Words this persona never uses */
+  /**
+   * Prose description of the vocabulary world and diction this voice draws from
+   * (domain, register, sociolect, characteristic imagery). This is DESCRIPTIVE
+   * guidance the model expresses naturally — never a checklist of words to insert.
+   */
+  register: string;
+  /** Clichés and words this voice avoids — a negative constraint only, never injected. */
   avoidWords: string[];
-  /** Recurring metaphors, analogies, or frames */
-  commonMetaphors: string[];
   /** Cadence, pace, and rhythm of speaking */
   rhythm: string;
 }
@@ -32,6 +34,12 @@ export interface PersonaTone {
  * Full rich persona profile — governs identity, speech, tone, cognition, and behavior.
  * Generates a detailed system-prompt block via buildRichPersonaBlock().
  *
+ * Design note: a persona is a *descriptive voice specification*, not a phrase bank.
+ * There are no "catchphrase" / "verbal tic" / "favorite word" fields, by design —
+ * forcing fixed phrases into replies produces scripted, repetitive output. The
+ * voice lives in HOW the model writes (sentence shape, register, what it notices,
+ * how it relates to the reader), expressed freshly each turn.
+ *
  * strength controls how assertively the instructions are phrased:
  *   1-2  background flavor    → barely perceptible
  *   3-4  subtle presence      → noticeable but light
@@ -49,8 +57,6 @@ export interface PersonaProfile {
   // Communication
   speechStyle: SpeechStyle;
   tone: PersonaTone;
-  catchphrases: string[];
-  verbalTics: string[];
 
   // Cognition
   thinkingStyle: string;
@@ -75,14 +81,13 @@ export function buildPersonaVoiceSummary(profile: PersonaProfile): string {
   const bits = [
     `Mechanics: ${profile.speechStyle.sentenceStructure}`,
     `Cadence: ${profile.speechStyle.rhythm}`,
-    `Formality ${profile.speechStyle.formality}; register: ${profile.tone.emotionalFlavor}; posture: ${profile.tone.posture}.`,
-    `Weave in naturally: ${profile.speechStyle.favoriteWords.slice(0, 10).join(", ")}.`,
-    `Never type: ${profile.speechStyle.avoidWords.slice(0, 8).join(", ")}.`,
-    `Sparse catchphrase texture (do not stack): ${profile.catchphrases
-      .slice(0, 4)
-      .map((s) => `"${s}"`)
-      .join(" ")}.`,
-  ];
+    `Register: ${profile.speechStyle.register}`,
+    `Formality ${profile.speechStyle.formality}; emotional register: ${profile.tone.emotionalFlavor}; posture: ${profile.tone.posture}.`,
+    profile.speechStyle.avoidWords.length > 0
+      ? `Never type: ${profile.speechStyle.avoidWords.slice(0, 8).join(", ")}.`
+      : "",
+    `Express the voice through how you write — never by inserting fixed signature phrases.`,
+  ].filter((b) => b.length > 0);
   return bits.join(" ").slice(0, 1400);
 }
 
@@ -116,7 +121,9 @@ function describeDeliveryEnergy(profile: PersonaProfile): string {
 
 /**
  * Build a detailed system-prompt identity block from a PersonaProfile.
- * The more concrete and specific, the better the model adheres.
+ * The block is a *descriptive* voice specification — it tells the model who this
+ * voice is and how it writes, then trusts it to express that naturally. It never
+ * hands the model fixed phrases to stamp into replies.
  *
  * This replaces message[0] of the inception messages. The protocol block
  * (Communication Rules, tool descriptions, etc.) stays in message[1] unchanged.
@@ -139,12 +146,12 @@ export function buildRichPersonaBlock(profile: PersonaProfile): string {
         `USER'S ORIGINAL PERSONA BRIEF (surface-fidelity target — match dialect, register, attitude, and code-switching from this; do not sanitize into generic assistant English unless the task is clearly incompatible, e.g. content for young children):`,
         JSON.stringify(hint),
         ``,
-        `BRIEF USAGE: Use the above for register, dialect, and attitude — not as a literal script. If it lists specific signature phrases to "use naturally" or "always say", treat those as rare flavor available at most once per many replies, NOT as frequent mandatory inserts. Your favoriteWords, catchphrases, and verbalTics fields govern actual usage patterns; the brief does not override sparse-use rules for any of them.`,
-        `IN-CHARACTER LANGUAGE: If the brief or your favoriteWords/catchphrases include profanity or rough slang, use that register naturally. Bigoted slurs, sexual content involving minors, and targeted harassment remain forbidden.`,
+        `BRIEF USAGE: Use the brief for register, dialect, and attitude — not as a literal script. If it names a specific signature phrase, that phrase is available only when it is genuinely the natural thing to say this turn; it is never a mandatory insert and must never open consecutive replies.`,
+        `IN-CHARACTER LANGUAGE: If the brief implies profanity or rough slang, use that register naturally. Bigoted slurs, sexual content involving minors, and targeted harassment remain forbidden.`,
         ``,
       ].join("\n")
     : [
-        `IN-CHARACTER LANGUAGE: If favoriteWords, catchphrases, or rhythm imply profanity or rough slang, use that register naturally—do not default to sanitized "helpful chatbot" diction. Bigoted slurs, sexual content involving minors, and targeted harassment remain forbidden.`,
+        `IN-CHARACTER LANGUAGE: If the register or rhythm implies profanity or rough slang, use it naturally — do not default to sanitized "helpful chatbot" diction. Bigoted slurs, sexual content involving minors, and targeted harassment remain forbidden.`,
         ``,
       ].join("\n");
 
@@ -168,10 +175,9 @@ export function buildRichPersonaBlock(profile: PersonaProfile): string {
     `- Sentence structure: ${profile.speechStyle.sentenceStructure}`,
     `- Formality: ${profile.speechStyle.formality}`,
     `- Rhythm: ${profile.speechStyle.rhythm}`,
-    `- Vocabulary texture (let these color the voice naturally — not forced into every sentence, not every reply): ${profile.speechStyle.favoriteWords.slice(0, 10).join(", ")}`,
-    `- Words you NEVER use: ${profile.speechStyle.avoidWords.slice(0, 6).join(", ")}`,
-    profile.speechStyle.commonMetaphors.length > 0
-      ? `- Your go-to frames/metaphors: ${profile.speechStyle.commonMetaphors.slice(0, 4).join("; ")}`
+    `- Register and diction (the vocabulary world this voice lives in — let it shape word choice naturally; this is a description of HOW the voice sounds, not a list of words to insert): ${profile.speechStyle.register}`,
+    profile.speechStyle.avoidWords.length > 0
+      ? `- Words and clichés you NEVER use: ${profile.speechStyle.avoidWords.slice(0, 8).join(", ")}`
       : null,
     ``,
     `YOUR TONE:`,
@@ -181,47 +187,31 @@ export function buildRichPersonaBlock(profile: PersonaProfile): string {
     `- Emotional flavor: ${profile.tone.emotionalFlavor}`,
     `- Conversational posture: ${profile.tone.posture}`,
     ``,
-    `CATCHPHRASES — sparse functional use only (these are NOT signature openers to lead every reply):`,
-    `- Default: 0 per reply. Use at most 1 when it genuinely serves as a pivot, reframe, or close.`,
-    `- Never reuse the same catchphrase in consecutive replies.`,
-    `- Never open two consecutive replies with the same phrase pattern.`,
-    `- For technical, analytical, or direct requests: skip catchphrases entirely.`,
-    `- For opinion/commentary analysis (social posts, political discourse, LinkedIn content): suppress signature framing entirely — the dramatic apparatus reads as preachiness on practical topics. Engage substance only.`,
-    `- If the user writes briefly/directly, match that register — no stylistic ornament.`,
-    `- NEVER use a catchphrase that presumes the reader's inner state ("you already feel/know/sense this").`,
-    `- NEVER use a catchphrase as a theatrical announcement ("The X tightens…", "Witness:", "Revelation:") — these perform rather than communicate.`,
-    ...profile.catchphrases.slice(0, 7).map((p) => `  "${p}"`),
-    ``,
-    `VERBAL TICS — structural patterns; vary them; do not repeat the same tic every sentence:`,
-    ...profile.verbalTics.slice(0, 5).map((t) => `  • ${t}`),
-    ``,
     `HOW YOU THINK: ${profile.thinkingStyle}`,
     ``,
     `YOUR DECISION FRAMEWORK: ${profile.decisionFramework}`,
     ``,
     `YOU NEVER:`,
     ...profile.neverDo.slice(0, 8).map((d) => `  • ${d}`),
-    `  • Editorialize about how a piece is "framed" or call a framing a "concession" — engage the substance (facts right/wrong, alternatives) not the rhetoric.`,
-    `  • Cite a cost/time/effort range wider than 3× without explaining the key driver of the spread in the same sentence.`,
     ``,
     `YOU ALWAYS:`,
     ...profile.alwaysDo.slice(0, 8).map((d) => `  • ${d}`),
-    `  • When a reply spans two clearly different domains, open the new section with a plain one-sentence pivot ("On the X side:" / "Shifting to Y —") — brief and functional, not theatrical.`,
     ``,
     `PERSONA STRENGTH: ${profile.strength}/10 — ${strengthLabel}`,
     ``,
-    `SURFACE SYNTAX (non-optional):`,
-    `Every assistant reply must *read* in this voice on the page: follow sentenceStructure and rhythm`,
-    `literally (fragments vs long lines, punctuation, repetition, telegraphic opens, where described).`,
-    `Work favoriteWords into sentences where they fit; never use avoidWords. Verbal tics are structural`,
-    `habits—vary which one you use, but at least one should be visible in most replies.`,
-    `This applies equally to greetings, refusals, explanations, and any topic you discuss—stay in this voice.`,
-    `Dynamic inclusion rule: prioritize content-first clarity, then layer persona lightly based on user tone and task.`,
-    `Do not convert the persona into a fixed script of repeated openers/closers.`,
-    ``,
-    profile.strength >= 7
-      ? `TURN SHAPE (strength ≥7): The first sentence should sound in-voice, but lexical choice must vary turn-to-turn. No fixed opener templates.`
-      : `TURN SHAPE: Open in-voice within the first two sentences; vary openings and avoid canned lead-ins.`,
+    `HOW THE VOICE SHOWS UP (this is the whole technique — read it carefully):`,
+    `The persona lives in HOW you write, not in any phrase you repeat. Express it through sentence shape,`,
+    `rhythm, word choice, what you choose to notice, and how you relate to the reader — fresh every turn.`,
+    `- Follow sentenceStructure and rhythm literally (fragments vs long lines, punctuation, where described).`,
+    `- Let register shape vocabulary; never reach for avoidWords.`,
+    `- Do NOT keep a stock of signature phrases, openers, or sign-offs. If you notice yourself reusing the`,
+    `  same opening move, pivot, or closing line across replies, change it before sending.`,
+    `- Never insert a phrase just to "sound like" the persona. If it isn't the natural thing to say this turn,`,
+    `  don't say it. A plain, in-register sentence always beats a forced flourish.`,
+    `- Match the user's energy and length: brief and direct when they are; expansive only when it earns its space.`,
+    `- For technical, analytical, or practical requests, carry the voice in diction and judgment — not ornament.`,
+    `- Never presume the reader's inner state ("you already feel/know/sense this") and never frame lines as`,
+    `  theatrical announcements ("The X tightens…", "Witness:", "Revelation:"). Communicate; do not perform.`,
     ``,
     `FACTS VS VOICE:`,
     `Correctness, safety, and tool use are governed by the system protocol (separate message)—not repeated here.`,
@@ -232,10 +222,9 @@ export function buildRichPersonaBlock(profile: PersonaProfile): string {
     `Do not collapse into a generic "helpful chatbot" register when that contradicts the lines above.`,
     ``,
     `ADHERENCE:`,
-    `Let ${profile.name} describe how **typed lines read** — habits of sentence shape, metaphor, warmth or edge — not a separate actor in a scene.`,
+    `Let ${profile.name} describe how **typed lines read** — habits of sentence shape, register, warmth or edge — not a separate actor in a scene.`,
     `Do not monologue about "being" the persona, "playing" them, or "adopting" a voice on the fly; do not narrate your own performance. Just write in this stance.`,
     `If neutral AI boilerplate surfaces ("Certainly!", "I'd be happy to", "As an AI...", "Of course!") — rephrase into this voice without meta commentary about switching voices.`,
-    `If you notice recurring identical openers, pivots, or sign-offs, rewrite before sending.`,
     ``,
     `IDENTITY ANSWERS:`,
     `If asked "who are you", "what is your personality/persona", or similar, answer as ${profile.name} — the stance described above, without narrating acting or "getting into character."`,

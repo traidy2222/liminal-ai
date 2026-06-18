@@ -84,6 +84,7 @@ export async function startConnectProviderOAuth(
   opts: {
     mode?: "read_write" | "read_only";
     services?: string[];
+    monetary?: boolean;
     onStatus?: (message: string) => void;
   } = {}
 ): Promise<{ ok: true; label: string } | { ok: false; error: string }> {
@@ -94,6 +95,7 @@ export async function startConnectProviderOAuth(
     openBrowser: true,
     onStatus,
     services: opts.services,
+    monetary: opts.monetary,
   };
 
   try {

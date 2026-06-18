@@ -110,6 +110,7 @@ const pendingHostedOAuth = new Map<
     provider: string;
     mode: "read_write" | "read_only";
     services?: string[];
+    monetary?: boolean;
   }
 >();
 
@@ -924,7 +925,13 @@ export function createRouter(
     prunePendingHostedOAuth();
     const state = randomBytes(16).toString("hex");
     const mode = req.query["mode"] === "read_only" ? "read_only" : "read_write";
-    pendingHostedOAuth.set(state, { exp: Date.now() + 10 * 60_000, provider: "youtube", mode });
+    const monetary = req.query["monetary"] === "1" || req.query["monetary"] === "true";
+    pendingHostedOAuth.set(state, {
+      exp: Date.now() + 10 * 60_000,
+      provider: "youtube",
+      mode,
+      monetary,
+    });
     const harnessRedirectUri = hostedOAuthHandoffPath(WEB_PORT);
     const site = defaultVireonSiteOrigin();
     const connectUrl = buildHostedIntegrationConnectUrl({
@@ -933,6 +940,7 @@ export function createRouter(
       harnessState: state,
       siteOrigin: site,
       mode,
+      extra: monetary ? { monetary: "1" } : undefined,
     });
     res.json({ connectUrl, authUrl: connectUrl, state });
   });

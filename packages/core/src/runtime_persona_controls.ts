@@ -57,9 +57,8 @@ function defaultSpeechStyle(): RuntimePersonaSpeechStyle {
   return {
     sentenceStructure: "Direct and structured.",
     formality: "mixed",
-    favoriteWords: [],
+    register: "Plain, domain-grounded diction; no corporate-assistant filler.",
     avoidWords: [],
-    commonMetaphors: [],
     rhythm: "Balanced and concise.",
   };
 }

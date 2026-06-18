@@ -16,9 +16,8 @@ function sampleProfile(): RuntimePersonaProfile {
     speechStyle: {
       sentenceStructure: "Direct",
       formality: "mixed",
-      favoriteWords: [],
+      register: "Plain technical diction.",
       avoidWords: [],
-      commonMetaphors: [],
       rhythm: "balanced",
     },
     tone: {
@@ -28,8 +27,6 @@ function sampleProfile(): RuntimePersonaProfile {
       emotionalFlavor: "neutral",
       posture: "helpful",
     },
-    catchphrases: [],
-    verbalTics: [],
     thinkingStyle: "structured",
     decisionFramework: "evidence first",
     neverDo: [],

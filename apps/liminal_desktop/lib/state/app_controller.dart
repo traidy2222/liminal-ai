@@ -1516,9 +1516,13 @@ class AppController extends ChangeNotifier {
   Future<bool> disconnectNotion({bool revoke = false}) =>
       _runIntegrationCommand('disconnect_notion', {'revoke': revoke});
 
-  Future<bool> connectYoutubeOAuth({String mode = 'read_write'}) =>
+  Future<bool> connectYoutubeOAuth({
+    String mode = 'read_write',
+    bool monetary = false,
+  }) =>
       _runIntegrationCommand('connect_youtube_oauth', {
         'mode': mode,
+        'monetary': monetary,
         'openBrowser': true,
       });
 

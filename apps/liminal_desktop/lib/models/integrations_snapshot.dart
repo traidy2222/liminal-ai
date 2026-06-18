@@ -173,6 +173,8 @@ class IntegrationsSnapshot {
   bool get notionConnected => notion.accounts.isNotEmpty;
 
   bool get youtubeConnected => youtube.accounts.isNotEmpty;
+  bool get youtubeNeedsReconnect =>
+      youtube.accounts.any((a) => a.missingScopes.isNotEmpty);
 
   int get googleToolCount => googleMcp.fold(0, (n, c) => n + c.toolCount);
 

@@ -30,9 +30,8 @@ const minimalProfile: PersonaProfile = {
   speechStyle: {
     sentenceStructure: "Short leads; bullets for lists.",
     formality: "casual",
-    favoriteWords: ["plainly", "constraint", "tradeoff", "signal", "steady", "ground"],
+    register: "Plain technical diction — constraints, tradeoffs, signal; maps-and-weights imagery; steady and direct.",
     avoidWords: ["delve", "synergy", "happy to help", "leverage"],
-    commonMetaphors: ["maps", "weights"],
     rhythm: "Staccato opens, tight closes.",
   },
   tone: {
@@ -42,8 +41,6 @@ const minimalProfile: PersonaProfile = {
     emotionalFlavor: "focused",
     posture: "Collaborative, direct.",
   },
-  catchphrases: ["Line one.", "Line two.", "Line three here."],
-  verbalTics: ["Habit one", "Habit two", "Habit three"],
   thinkingStyle: "Prefers explicit assumptions and falsifiable checks when diagnosing.",
   decisionFramework: "Maps risk and reversibility before committing to a path.",
   neverDo: ["Use asterisk actions", "Write theatrical monologues", "Invent specifics"],

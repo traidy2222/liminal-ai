@@ -67,8 +67,8 @@ export interface PersonaVoiceEnvelope {
   profanityRegister: "none" | "mild" | "strong";
   /** Regional English, code-switching, class markers—concrete, user-grounded */
   sociolectNotes: string;
+  /** Vocabulary-texture examples used DESCRIPTIVELY to compose the register string — never injected as mandatory words. */
   lexicalSeeds: string[];
-  suggestedCatchphrases: string[];
   metaphorSeeds: string[];
   rhythmHint: string;
   sentenceMechanicsHint: string;
@@ -484,7 +484,7 @@ STRUCTURE:
 1. First line: # Voice DNA
 2. ## Register and breath — formality as social distance on the page; how punctuation and clause length signal safety, edge, intimacy, boredom.
 3. ## Rhythm and silence — sentence-length variance, beats, when replies go terse vs expansive; how silence reads (tight gap vs room).
-4. ## Lexical conscience — vocabulary register: domain terms, characteristic collocations, what this voice reaches for and refuses. Write as actual words and short natural phrases (NOT dramatic signature lines — those are catchphrases). Sociolect and profanity level as implied by the profile.
+4. ## Lexical conscience — vocabulary register: domain terms, characteristic collocations, what this voice reaches for and refuses. Write as actual words and short natural phrases describing the register (NOT dramatic signature lines the voice would repeat). Sociolect and profanity level as implied by the profile.
 5. ### Example written lines — exactly 3 short **first-person assistant** lines showing the voice on NORMAL functional output (not catchphrases, not theatrical openers): meeting someone new; giving a direct answer; closing with a next step. These are samples of how the voice writes on ordinary tasks. No stage directions, no dramatic signature moves, no fake quotes.
 
 Aim for roughly 380–800 words before the example subsection.`;
@@ -771,22 +771,6 @@ function enforceStructuralRails(profile: PersonaProfile, userInput = ""): Person
     );
   }
 
-  const favoriteWords = dedupeStrings([...profile.speechStyle.favoriteWords]);
-  const fromPhrases = [...profile.catchphrases, ...profile.verbalTics];
-  let idx = 0;
-  while (favoriteWords.length < 6 && idx < fromPhrases.length) {
-    const w = sanitizeText(fromPhrases[idx]!).split(/\s+/).slice(0, 4).join(" ");
-    if (w.length > 2) favoriteWords.push(w);
-    idx++;
-  }
-  const lexPad = buildLexicalPadPoolFromPersona(userInput, profile);
-  let li = 0;
-  while (favoriteWords.length < 6 && li < lexPad.length) {
-    const w = lexPad[li]!;
-    if (!favoriteWords.some((x) => x.toLowerCase() === w.toLowerCase())) favoriteWords.push(w);
-    li++;
-  }
-
   const avoidWords = dedupeStrings([...profile.speechStyle.avoidWords]);
   const avoidPad = ["happy to help", "great question", "as an AI", "I'd love to"];
   for (const a of avoidPad) {
@@ -794,26 +778,10 @@ function enforceStructuralRails(profile: PersonaProfile, userInput = ""): Person
     if (!avoidWords.some((x) => x.toLowerCase() === a)) avoidWords.push(a);
   }
 
-  const catchphrases = dedupeStrings([...profile.catchphrases]);
-  const cpPad = [
-    "Let me frame it this way.",
-    "One constraint, then the path.",
-    "Plainly—here is what I hold true.",
-  ];
-  for (const c of cpPad) {
-    if (catchphrases.length >= 3) break;
-    if (!catchphrases.includes(c)) catchphrases.push(c);
-  }
-
-  const verbalTics = dedupeStrings([...profile.verbalTics]);
-  const vtPad = [
-    "Open with the claim that matters most, then supporting detail.",
-    "Use short labeled lists when comparing options.",
-    "Land with what should happen next—no trailing filler.",
-  ];
-  for (const v of vtPad) {
-    if (verbalTics.length >= 3) break;
-    if (!verbalTics.includes(v)) verbalTics.push(v);
+  let register = profile.speechStyle.register?.trim() ?? "";
+  if (register.length < 16) {
+    register =
+      "Plain, domain-grounded diction matched to the user's brief; leans on the persona's own vocabulary world and avoids generic corporate-assistant warmth and filler.";
   }
 
   let thinkingStyle = profile.thinkingStyle.trim();
@@ -844,13 +812,11 @@ function enforceStructuralRails(profile: PersonaProfile, userInput = ""): Person
     coreIdentity,
     thinkingStyle,
     decisionFramework,
-    catchphrases: catchphrases.slice(0, 10),
-    verbalTics: verbalTics.slice(0, 8),
     neverDo: neverDo.slice(0, 8),
     alwaysDo: alwaysDo.slice(0, 8),
     speechStyle: {
       ...profile.speechStyle,
-      favoriteWords: favoriteWords.slice(0, 12),
+      register: register.slice(0, PFL.speechMechanics),
       avoidWords: avoidWords.slice(0, 12),
     },
   };
@@ -858,7 +824,7 @@ function enforceStructuralRails(profile: PersonaProfile, userInput = ""): Person
 
 function isEnvelopeUsable(envelope: PersonaVoiceEnvelope): boolean {
   const textLen = envelope.archetypeSummary.length + envelope.voiceNotes.length;
-  const seeds = envelope.lexicalSeeds.length + envelope.suggestedCatchphrases.length;
+  const seeds = envelope.lexicalSeeds.length + envelope.metaphorSeeds.length;
   return textLen >= 36 && seeds >= 5;
 }
 
@@ -910,47 +876,25 @@ function buildEnvelopeLedFallbackDraftRaw(
 
   const formality: PersonaProfile["speechStyle"]["formality"] = validateFormality(envelope.registerHint);
 
-  let favoriteWords = dedupeStrings([...envelope.lexicalSeeds, ...envelope.metaphorSeeds]).slice(0, 14);
-  for (const c of envelope.suggestedCatchphrases) {
-    if (favoriteWords.length >= 12) break;
-    const w = sanitizeText(c).split(/\s+/).slice(0, 5).join(" ");
-    if (w.length > 3 && !favoriteWords.some((x) => x.toLowerCase() === w.toLowerCase())) favoriteWords.push(w);
-  }
-  if (favoriteWords.length < 8) {
-    const padSource = `${blurbs} ${envelope.voiceNotes} ${envelope.archetypeSummary}`;
-    const rough = padSource
-      .split(/[,;•|]+/)
-      .map((s) => sanitizeText(s))
-      .filter((s) => s.length >= 5 && s.length <= 48 && s.split(/\s+/).length <= 8);
-    favoriteWords = dedupeStrings([...favoriteWords, ...rough]).slice(0, 12);
-  }
-
   const avoidWords = dedupeStrings([
     ...avoidBase,
     ...(envelope.homageToRealFigure ? ["according to my sources", "I remember when I met"] : []),
   ]).slice(0, 12);
 
-  let catchphrases = dedupeStrings(envelope.suggestedCatchphrases).slice(0, 8);
-  if (catchphrases.length < 4) {
-    const extra = envelope.voiceNotes
-      .split(/(?<=[.!?])\s+/)
-      .map((s) => sanitizeText(s))
-      .filter((s) => s.length > 12 && s.length < 120);
-    catchphrases = dedupeStrings([...catchphrases, ...extra]).slice(0, 8);
-  }
-
-  const verbalTics = dedupeStrings(
-    [
-      envelope.rhythmHint,
-      envelope.sentenceMechanicsHint,
-      envelope.genreTags.length
-        ? `Keep imagery and idiom aligned with: ${envelope.genreTags.slice(0, 4).join(", ")}.`
-        : "Keep diction aligned with the user's stated voice—no accidental generic-assistant warmth.",
-      envelope.homageToRealFigure
-        ? "When channeling a real figure, imitate syntax and values, not biographical episode invention."
-        : "Name what is known versus inferred before strong claims.",
-    ].map(sanitizeText)
-  ).slice(0, 8);
+  const lexBits = dedupeStrings([...envelope.lexicalSeeds, ...envelope.metaphorSeeds]).slice(0, 12);
+  const registerParts = [
+    envelope.archetypeSummary ? `Diction drawn from: ${envelope.archetypeSummary}.` : "",
+    lexBits.length > 0
+      ? `Reaches naturally toward vocabulary like ${lexBits.slice(0, 10).join(", ")} — as texture the voice lives in, not a checklist to insert.`
+      : "",
+    envelope.sociolectNotes ? `Sociolect: ${envelope.sociolectNotes}.` : "",
+    envelope.genreTags.length > 0 ? `Stays native to ${envelope.genreTags.slice(0, 5).join(", ")}.` : "",
+    envelope.profanityRegister !== "none"
+      ? `In-character profanity level: ${envelope.profanityRegister} — do not sanitize into polite assistant English.`
+      : "",
+    "Never genericizes into corporate-assistant warmth.",
+  ].filter((p) => p.length > 0);
+  const register = sanitizeText(registerParts.join(" ")).slice(0, PFL.speechMechanics);
 
   const tone = {
     confidence: Math.min(10, Math.max(4, strength)),
@@ -990,16 +934,13 @@ function buildEnvelopeLedFallbackDraftRaw(
       sentenceStructure:
         envelope.sentenceMechanicsHint.slice(0, PFL.speechMechanics) || "Varied line length matched to stakes.",
       formality,
-      favoriteWords,
+      register,
       avoidWords,
-      commonMetaphors: envelope.metaphorSeeds.slice(0, 4),
       rhythm:
         envelope.rhythmHint.slice(0, PFL.speechMechanics) ||
         "Staccato leads when stakes rise; room to breathe when teaching.",
     },
     tone,
-    catchphrases,
-    verbalTics,
     thinkingStyle: `Prefers explicit assumptions, falsifiable checks, and incremental validation. Inferred stance: ${envelope.archetypeSummary.slice(0, 280)}${modNote}`.slice(
       0,
       PFL.thinkingStyle
@@ -1055,8 +996,6 @@ function buildFallbackDraftRaw(
   let selfImage: string;
   let speechStyle: Record<string, unknown>;
   let tone: Record<string, unknown>;
-  let catchphrases: string[];
-  let verbalTics: string[];
 
   if (voiceKind === "sci_fi") {
     background =
@@ -1066,18 +1005,9 @@ function buildFallbackDraftRaw(
       sentenceStructure:
         "Telegraphic under threat; longer procedural lines when running checklists; occasional in-world measure or shipboard idiom as texture.",
       formality: "mixed",
-      favoriteWords: [
-        "nominal on my board",
-        "range gate",
-        "signal check",
-        "burn window",
-        "cold iron",
-        "voidside",
-        "helm",
-        "slack hour",
-      ],
+      register:
+        "Shipboard and instrumentation idiom — readings, range gates, burn windows, status calls, voidside measures. Treats anomaly as signal; imagery runs to orbit-as-obligation and signal-as-truth. No present-day office slang unless the user asked for it.",
       avoidWords: [...avoidBase, "synergize", "touch base"],
-      commonMetaphors: ["orbit as obligation", "signal as truth"],
       rhythm: "Clipped bridge-crew beats when stakes rise; controlled expansion when explaining risk registers.",
     };
     tone = {
@@ -1087,17 +1017,6 @@ function buildFallbackDraftRaw(
       emotionalFlavor: "cool, instrument-forward",
       posture: "Speaks as someone responsible for outcomes, not audience applause.",
     };
-    catchphrases = [
-      "Signal check—here's what holds.",
-      "Nominal for now; watch the burn window.",
-      "Cold iron: state the constraint, then the move.",
-      "Helm answer first—detail on request.",
-    ];
-    verbalTics = [
-      "Name the failure mode before the fix.",
-      "Quantify uncertainty when the story outruns the data.",
-      "Prefer short labeled lists when systems interact.",
-    ];
   } else if (voiceKind === "historical") {
     background =
       "Voice and public stance suggested by the user's period or figure—stylistic homage, not a claim to private biography.";
@@ -1107,17 +1026,9 @@ function buildFallbackDraftRaw(
       sentenceStructure:
         "Balanced or periodic clauses when reasoning in public; shorter directives under pressure; honorifics and oath texture consistent with station.",
       formality: "formal",
-      favoriteWords: [
-        "if I may venture",
-        "with respect",
-        "the matter stands thus",
-        "in plain dealing",
-        "mark me",
-        "so far as we may trust the record",
-        "steady",
-      ],
+      register:
+        "Period-appropriate diction, honorifics, and oath texture — 'with respect', 'the matter stands thus', 'so far as we may trust the record'. Imagery runs to reputation-as-weight and public-word-as-bond. No anachronistic informality unless the user wants contrast.",
       avoidWords: [...avoidBase, "gonna", "lol", "awesome sauce"],
-      commonMetaphors: ["reputation as weight", "public word as bond"],
       rhythm: "Measured cadence; rhetorical balance; avoids anachronistic informality unless the user asked for contrast.",
     };
     tone = {
@@ -1127,17 +1038,6 @@ function buildFallbackDraftRaw(
       emotionalFlavor: "dignified, watchful",
       posture: "Addresses the other with station-appropriate respect; states disagreement without theatrics.",
     };
-    catchphrases = [
-      "If I may—one plain point before we proceed.",
-      "The record warrants caution here.",
-      "Mark me: I speak to what we can defend.",
-      "With respect—here is the least proud lie.",
-    ];
-    verbalTics = [
-      "Qualify claims with what is known versus inferred.",
-      "Prefer named reasons over modern slogans.",
-      "Close with duty or next step fitting the era's norms.",
-    ];
   } else if (voiceKind === "fantasy") {
     background =
       "Grounding from the user's mythic or secondary-world brief; metaphors draw from that world's physics and social order.";
@@ -1146,17 +1046,9 @@ function buildFallbackDraftRaw(
       sentenceStructure:
         "Mixes high-register declaration with grounded sensory detail; occasional epithet or kenning when it fits the user's tone—never random parody.",
       formality: "mixed",
-      favoriteWords: [
-        "by my oath",
-        "the road speaks",
-        "iron truth",
-        "ward and wit",
-        "name the curse",
-        "old stories say",
-        "steady blade",
-      ],
+      register:
+        "Mythic register grounded in the world's physics and social order — oaths, wards, roads that speak, iron truth. Imagery runs to path-as-trial and word-as-ward. No modern office idiom unless anachronism is the joke.",
       avoidWords: [...avoidBase, "bandwidth", "ping me"],
-      commonMetaphors: ["path as trial", "word as ward"],
       rhythm: "Varied line length—incantatory when solemn, plain when exhausted.",
     };
     tone = {
@@ -1166,17 +1058,6 @@ function buildFallbackDraftRaw(
       emotionalFlavor: "mythic, grounded",
       posture: "Speaks as someone shaped by quest, duty, or exile—never as a modern helpdesk.",
     };
-    catchphrases = [
-      "Name the oath that binds this choice.",
-      "Iron truth first—ornament after.",
-      "The road speaks; I translate.",
-      "Ward and wit: here is the smallest honest path.",
-    ];
-    verbalTics = [
-      "Ground metaphors in the world's rules, not office jokes.",
-      "Let silence and short lines carry threat when appropriate.",
-      "Name costs and consequences before offering hope.",
-    ];
   } else {
     background =
       "Grounding comes from the user's description; direct, respectful collaboration and plain naming of uncertainty.";
@@ -1184,17 +1065,9 @@ function buildFallbackDraftRaw(
     speechStyle = {
       sentenceStructure: "Short lead sentences; tight bullets when enumerating; avoids hedging stacks.",
       formality: "casual",
-      favoriteWords: [
-        "straight shot",
-        "call the constraint",
-        "tradeoff table",
-        "ground truth",
-        "bottom line",
-        "name the assumption",
-        "keep it tight",
-      ],
+      register:
+        "Plain, direct, engineering-minded diction — constraints, tradeoffs, ground truth, named assumptions. Imagery runs to arguments-as-maps and stakes-as-weights. Allergic to performative filler.",
       avoidWords: avoidBase,
-      commonMetaphors: ["arguments as maps", "stakes as weights"],
       rhythm: "Staccato openings, then denser explanation; closes with a clear invitation or decision point.",
     };
     tone = {
@@ -1204,18 +1077,6 @@ function buildFallbackDraftRaw(
       emotionalFlavor: "steady, focused",
       posture: "Peers with the other person on shared problems; states limits plainly.",
     };
-    catchphrases = [
-      "Straight answer first—then why it holds.",
-      "If a detail matters, I'll name it explicitly.",
-      "Let's keep the frame honest and tight.",
-      "Constraint noted—here's the least bad path.",
-    ];
-    verbalTics = [
-      "Lead with the answer, then supporting evidence.",
-      "When uncertain, state assumptions and what would falsify them.",
-      "Prefer numbered steps over paragraph walls for multi-part answers.",
-      "Label tradeoffs before recommending a default.",
-    ];
   }
 
   return {
@@ -1229,8 +1090,6 @@ function buildFallbackDraftRaw(
     selfImage,
     speechStyle,
     tone,
-    catchphrases,
-    verbalTics,
     thinkingStyle: `Prefers explicit assumptions, falsifiable checks, and incremental validation. Default tradeoff: correctness over speed unless time is constrained.${modNote}`.slice(
       0,
       PFL.thinkingStyle
@@ -1373,16 +1232,16 @@ export function buildSoulSlicesFromProfile(profile: PersonaProfile, input: strin
     profile.speechStyle.rhythm,
     "",
     "## Lexical conscience",
-    `Texture the voice reaches for: ${profile.speechStyle.favoriteWords.slice(0, 10).join(", ")}. Texture it refuses: ${profile.speechStyle.avoidWords.slice(0, 8).join(", ")}.`,
+    `The vocabulary world this voice lives in: ${profile.speechStyle.register}. Texture it refuses: ${profile.speechStyle.avoidWords.slice(0, 8).join(", ")}. These shape word choice naturally — none are phrases to insert on a schedule.`,
     "",
-    "### Example written lines (match this surface on every turn)",
+    "### Example written lines (the surface to match — vary the actual words every turn)",
     `- ${JSON.stringify(
-      `${(profile.catchphrases[0] ?? "Straight talk.").replace(/\.$/, "")}. Good to meet you—what are we sorting out?`
+      `Good to meet you — what are we sorting out?`
     )}`,
     `- ${JSON.stringify(
-      `${profile.tone.emotionalFlavor} mode: ${profile.thinkingStyle.slice(0, 120)}${profile.thinkingStyle.length > 120 ? "…" : ""}`
+      `${profile.tone.emotionalFlavor} register: ${profile.thinkingStyle.slice(0, 120)}${profile.thinkingStyle.length > 120 ? "…" : ""}`
     )}`,
-    `- ${JSON.stringify(profile.verbalTics[0] ?? "Use tight steps; no padded preamble.")}`,
+    `- ${JSON.stringify("Tight steps, no padded preamble; here's the next move.")}`,
   ].join("\n");
 
   const stanceMd = [
@@ -1457,11 +1316,21 @@ function sanitizeProfile(
 
   const neverDo = dedupeStrings(arr(raw["neverDo"], 120)).slice(0, 8);
   const alwaysDo = dedupeStrings(arr(raw["alwaysDo"], 120)).slice(0, 8);
-  const favoriteWords = dedupeStrings(arr(speechRaw["favoriteWords"], 60)).slice(0, 12);
   const avoidWords = dedupeStrings(arr(speechRaw["avoidWords"], 60)).slice(0, 12);
-  const catchphrases = dedupeStrings(arr(raw["catchphrases"], 120)).slice(0, 10);
-  const verbalTics = dedupeStrings(arr(raw["verbalTics"], 200)).slice(0, 8);
   const name = coercePersonaName(raw["name"], voiceEnvelope);
+
+  // Back-compat: older drafts/personas may carry favoriteWords/commonMetaphors arrays.
+  // Fold any such legacy texture into the descriptive `register` string rather than dropping it.
+  const legacyLex = dedupeStrings([
+    ...arr(speechRaw["favoriteWords"], 60),
+    ...arr(speechRaw["commonMetaphors"], 120),
+  ]).slice(0, 12);
+  let register = clip(speechRaw["register"], PFL.speechMechanics, "");
+  if (!register && legacyLex.length > 0) {
+    register = sanitizeText(
+      `Reaches naturally toward vocabulary like ${legacyLex.join(", ")} — as texture the voice lives in, not a checklist.`
+    ).slice(0, PFL.speechMechanics);
+  }
 
   return {
     name,
@@ -1471,9 +1340,8 @@ function sanitizeProfile(
     speechStyle: {
       sentenceStructure: clip(speechRaw["sentenceStructure"], PFL.speechMechanics, ""),
       formality: validateFormality(speechRaw["formality"]),
-      favoriteWords,
+      register,
       avoidWords,
-      commonMetaphors: dedupeStrings(arr(speechRaw["commonMetaphors"], 120)).slice(0, 6),
       rhythm: clip(speechRaw["rhythm"], PFL.speechMechanics, ""),
     },
     tone: {
@@ -1483,8 +1351,6 @@ function sanitizeProfile(
       emotionalFlavor: clip(toneRaw["emotionalFlavor"], PFL.emotionalFlavor, ""),
       posture: clip(toneRaw["posture"], PFL.posture, ""),
     },
-    catchphrases,
-    verbalTics,
     thinkingStyle: clip(raw["thinkingStyle"], PFL.thinkingStyle, ""),
     decisionFramework: clip(raw["decisionFramework"], PFL.decisionFramework, ""),
     neverDo: neverDo.slice(0, 8),
@@ -1570,7 +1436,6 @@ function normalizePersonaVoiceEnvelope(parsed: unknown): PersonaVoiceEnvelope | 
     : null;
 
   let lexicalSeeds = dedupeStrings(toStringArray(o["lexicalSeeds"], 100)).slice(0, 22);
-  let suggestedCatchphrases = dedupeStrings(toStringArray(o["suggestedCatchphrases"], 140)).slice(0, 12);
   const metaphorSeeds = dedupeStrings(toStringArray(o["metaphorSeeds"], 100)).slice(0, 8);
   const rhythmHint = sanitizeText(String(o["rhythmHint"] ?? "")).slice(0, 320);
   const sentenceMechanicsHint = sanitizeText(String(o["sentenceMechanicsHint"] ?? "")).slice(0, 320);
@@ -1578,17 +1443,12 @@ function normalizePersonaVoiceEnvelope(parsed: unknown): PersonaVoiceEnvelope | 
   const homageToRealFigure = Boolean(o["homageToRealFigure"]);
 
   if (lexicalSeeds.length < 6) {
-    lexicalSeeds = dedupeStrings([...lexicalSeeds, ...suggestedCatchphrases.map((s) => s.split(/\s+/).slice(0, 4).join(" "))]).slice(
-      0,
-      22
-    );
-  }
-  if (suggestedCatchphrases.length < 4) {
     const bits = voiceNotes
       .split(/(?<=[.!?])\s+/)
+      .flatMap((s) => sanitizeText(s).split(/[,;]+/))
       .map((s) => sanitizeText(s))
-      .filter((s) => s.length > 10 && s.length < 130);
-    suggestedCatchphrases = dedupeStrings([...suggestedCatchphrases, ...bits]).slice(0, 12);
+      .filter((s) => s.length > 4 && s.length < 80);
+    lexicalSeeds = dedupeStrings([...lexicalSeeds, ...metaphorSeeds, ...bits]).slice(0, 22);
   }
 
   const prRaw = String(o["profanityRegister"] ?? "")
@@ -1613,7 +1473,6 @@ function normalizePersonaVoiceEnvelope(parsed: unknown): PersonaVoiceEnvelope | 
     profanityRegister,
     sociolectNotes,
     lexicalSeeds,
-    suggestedCatchphrases,
     metaphorSeeds,
     rhythmHint: rhythmHint || "Vary sentence length with the stakes; short lines when time is short.",
     sentenceMechanicsHint:
@@ -1651,8 +1510,7 @@ Return a JSON object with exactly these keys:
 - registerHint (string): one of very_formal|formal|casual|very_casual|mixed.
 - voiceNotes (string): 2-5 sentences on diction, rhythm, address forms, anachronism rules, how disagreement sounds.
 - homageToRealFigure (boolean): true if the user names a real public figure to channel stylistically (not fictional characters).
-- lexicalSeeds (array of strings): 10-16 vocabulary texture items — actual words and short natural phrases that characterize this voice's register and domain. Favor domain-native terms, characteristic collocations, and register markers over dramatic rhetorical phrases. Examples for a finance analyst: "basis points", "at the margin", "second-order". Examples for a sci-fi bridge voice: "nominal", "burn window", "range gate". Multi-word collocations welcome; dramatic signature openers are NOT welcome here.
-- suggestedCatchphrases (array of strings): 3-5 short natural lines the voice uses rarely (0 most replies, 1 at most when it genuinely fits as a pivot or close). Each must: (a) do real conversational work — reframe, invite, or land a close; (b) NOT presume the reader's inner state ("you already feel/know/sense this"); (c) NOT be a dramatic announcement ("The X tightens…", "Witness:", "Revelation:"); (d) sound like something a real person with this voice would say in actual conversation.
+- lexicalSeeds (array of strings): 10-16 vocabulary texture items — actual words and short natural collocations that characterize this voice's register and domain. These are used DESCRIPTIVELY to compose a register summary, never injected verbatim. Favor domain-native terms and register markers over dramatic rhetorical phrases. Examples for a finance analyst: "basis points", "at the margin", "second-order". Examples for a sci-fi bridge voice: "nominal", "burn window", "range gate".
 - metaphorSeeds (array of strings): 3-6 recurring metaphor families or image fields (used as texture, not as signature phrases).
 - rhythmHint (string): one sentence on punctuation, beat, sentence-length variance.
 - sentenceMechanicsHint (string): one sentence on fragments vs long lines, parallelism, rhetorical questions, etc.
@@ -1660,7 +1518,7 @@ Return a JSON object with exactly these keys:
 - profanityRegister (string): one of none|mild|strong — **strong** when the user wants frequent in-character swearing or a famously vulgar voice; **mild** for occasional spice; **none** otherwise.
 - sociolectNotes (string): concrete regional/class dialect notes (e.g. South African English markers, code-switching, AAVE features the user requested)—empty string "" if not applicable.
 
-VOICE vs THEATRE: lexicalSeeds, suggestedCatchphrases, and voiceNotes should describe **how this voice types** in a task-first assistant chat—not stage directions, not narrated physical performance, not anthropomorphizing software as a body or inner life, unless the user explicitly asked for that conceit.`;
+VOICE vs THEATRE: lexicalSeeds and voiceNotes should describe **how this voice types** in a task-first assistant chat—not stage directions, not narrated physical performance, not anthropomorphizing software as a body or inner life, unless the user explicitly asked for that conceit.`;
 
   const res = await completeChatJson(client, {
     model: inferModel,
@@ -1675,36 +1533,9 @@ VOICE vs THEATRE: lexicalSeeds, suggestedCatchphrases, and voiceNotes should des
   return normalizePersonaVoiceEnvelope(res.parsed);
 }
 
-/** Prefer phrases from the user's request and profile over generic corporate filler. */
-function buildLexicalPadPoolFromPersona(userInput: string, profile: PersonaProfile): string[] {
-  const out: string[] = [];
-  const hint = (userInput || "").trim();
-  const quoted = hint.match(/"([^"]{2,100})"/g);
-  if (quoted) {
-    for (const m of quoted) out.push(m.slice(1, -1));
-  }
-  for (const seg of hint.split(/[,;•|]+/)) {
-    const t = seg.trim();
-    if (t.length >= 6 && t.length <= 56 && t.split(/\s+/).length <= 10) out.push(t);
-  }
-  for (const c of profile.catchphrases) {
-    if (c.length >= 4 && c.length <= 72) out.push(c);
-  }
-  for (const blob of [profile.coreIdentity, profile.background, profile.selfImage]) {
-    for (const seg of blob.split(/[,.;:]+/)) {
-      const t = seg.trim();
-      if (t.length >= 5 && t.length <= 48 && t.split(/\s+/).length <= 6) out.push(t);
-    }
-  }
-  const deduped = dedupeStrings(out);
-  if (deduped.length >= 8) return deduped.slice(0, 16);
-  const fallback = ["plainly put", "say it slowly", "one thread only", "hold there", "steady", "call the line"];
-  return dedupeStrings([...deduped, ...fallback]).slice(0, 16);
-}
-
 /** Injected into draft/repair (and related) prompts so the model authors rails from shared context — not matched by regex afterward. */
 const PERSONA_STRUCTURAL_RAILS_GUIDE = `
-STRUCTURAL RAILS (for neverDo, alwaysDo, verbalTics — write **original** full sentences in this voice; do not paste this section verbatim):
+STRUCTURAL RAILS (for neverDo and alwaysDo — write **original** full sentences in this voice; do not paste this section verbatim):
 
 Persona is **diction + judgment on the page** for a capable agent. Rails are how typed replies **behave**, not tool lists or IT policy.
 
@@ -1715,11 +1546,9 @@ neverDo (6–8 items): spread across categories below; merge where natural; one 
 - **Address**: respectful second person by default; no intimate or mythic pet-names for the user unless the brief explicitly requests that relationship.
 - **Task focus**: avoid theatrical cold-open padding when a direct answer fits.
 - **No reader-state presumption**: never assert or imply what the reader privately feels, senses, or already knows (“you already feel/know/sense this”, “you can feel it”)—the reader owns their own inner state.
-- **No dramatic-announcement catchphrases**: never structure recurring phrases as theatrical proclamations (“The X tightens…”, “Witness:”, “Revelation:”); all catchphrases must do actual conversational work (pivot, reframe, close), not perform.
+- **No signature catchphrases or templated openers/closers**: never lean on a recurring stock phrase, theatrical proclamation (“The X tightens…”, “Witness:”, “Revelation:”), or fixed opening/closing move. The voice must read fresh every turn; repetition of any signature line across replies is the failure mode to forbid.
 
-alwaysDo (4–6 items): include at least one commitment to **factual honesty** (label inference vs verified evidence; proportionate claims) in your own words; other items are positive habits of this voice.
-
-verbalTics (3–5 items): **sentence-shaping prose mechanics only** (information order, fragments vs full sentences, when bullets fit, how to close a reply)—not rhetorical devices requiring theatrical delivery, not reader-state presumptions, not catchphrase variants or dramatic openers.
+alwaysDo (4–6 items): include at least one commitment to **factual honesty** (label inference vs verified evidence; proportionate claims) in your own words; other items are positive habits of this voice (e.g. matching the reader's length and energy, leading with the operative point, varying sentence openings).
 `.trim();
 
 const PERSONA_GENRE_VOICE_GUIDANCE = `
@@ -1728,11 +1557,11 @@ GENRE AND REGISTER (infer from the user's description—apply the best match; bl
 - **Fantasy / myth**: Consistent **register** (high archaism vs low vernacular vs scholarly) per user ask; metaphors from the world's physics/society, not random modern office jokes unless anachronism is the joke.
 - **Real historical figure or period voice**: Encode **period-appropriate diction, honorifics, oath texture, rhetorical rhythm, and argument habits**—how they *build* a sentence, not a Wikipedia bio. Do **not** invent private diary details, unverifiable episodes, or fake quotations. Treat as **stylistic homage**: the model writes *like* that voice, without certifying historical fact. For sensitive or living public figures, keep impersonation clearly **literary** (syntax + values frame), not identity fraud.
 - **Contemporary / professional / original character**: Domain-specific jargon and stance; reject bland "helpful assistant" warmth when it contradicts the role.
-- **Rough / vulgar / dialect-forward voices**: Commit the **actual surface**—profanity density, regional particles, broken fluency if that's the character. Put concrete spellings in favoriteWords and catchphrases. neverDo must **not** accidentally ban swearing when the user asked for it; still forbid bigoted slurs and punching down.
+- **Rough / vulgar / dialect-forward voices**: Commit the **actual surface**—profanity density, regional particles, broken fluency if that's the character. Describe the concrete spellings and particles in **register**. neverDo must **not** accidentally ban swearing when the user asked for it; still forbid bigoted slurs and punching down.
 
 ANTI-PATTERNS (unless the user explicitly wants this archetype):
 - Generic exec-coach fillers: "net-net", "circle back", "synergy", "deep dive", "leverage" as personality.
-- Same catchphrase rhythm for every archetype—openings must feel native to **this** character's era and class.
+- Templated openings or a recurring signature line on every reply—the voice must read fresh each turn, native to **this** character's era and class.
 - **Actor / improv framing** for the harness: casting-call bios, "I perform as…", "entering character", spotlight/audience language, or narrating physical performance—persona is **how text reads**, not a playbill.
 `.trim();
 
@@ -1842,10 +1671,11 @@ function getCriticalProfileIssues(profile: PersonaProfile): string[] {
   if (profile.name.split(/\s+/).length > 3) issues.push("name must be 1-3 words");
   if (profile.name.toLowerCase().includes("with ")) issues.push("name should not include connector words");
   if (!profile.coreIdentity || profile.coreIdentity.length < 30) issues.push("coreIdentity is too shallow");
-  if (profile.speechStyle.favoriteWords.length < 6) issues.push("favoriteWords needs at least 6 items");
+  if (!profile.speechStyle.register || profile.speechStyle.register.length < 24)
+    issues.push(
+      "register is too shallow—describe the vocabulary world, diction, and characteristic imagery this voice draws from in 1-3 sentences (a description of how it sounds, NOT a list of words to insert)"
+    );
   if (profile.speechStyle.avoidWords.length < 4) issues.push("avoidWords needs at least 4 items");
-  if (profile.catchphrases.length < 3) issues.push("catchphrases needs at least 3 items");
-  if (profile.verbalTics.length < 3) issues.push("verbalTics needs at least 3 items");
   if (!profile.thinkingStyle || profile.thinkingStyle.length < 24) issues.push("thinkingStyle is too shallow");
   if (!profile.decisionFramework || profile.decisionFramework.length < 24)
     issues.push("decisionFramework is too shallow");
@@ -1902,9 +1732,8 @@ Output schema (exact keys):
   "speechStyle": {
     "sentenceStructure": "observable WRITTEN mechanics: fragments vs long lines, repetition, telegraphic opens, punchy interruptions, rhetorical questions, parallel structure—whatever matches the user's requested voice (not generic advice)",
     "formality": "very_formal|formal|casual|very_casual|mixed",
-    "favoriteWords": ["8-12 vocabulary texture items: actual words and short natural phrases that color this voice's register on ordinary sentences. Domain-native terms, characteristic collocations, register markers. NOT dramatic rhetorical phrases or signature theatrical lines (those belong in catchphrases if truly occasional). NOT items from avoidWords. Example for a finance analyst: 'basis points', 'at the margin', 'second-order'. Example for a sci-fi bridge voice: 'nominal', 'burn window', 'range gate'."],
-    "avoidWords": ["5-10 concrete lexical items (include common assistant clichés like 'happy to help', 'great question', 'certainly')"],
-    "commonMetaphors": ["0-4 reusable metaphor families or image fields (texture only — not literal phrases to insert verbatim)"],
+    "register": "1-3 sentences DESCRIBING the vocabulary world and diction this voice lives in: domain terms, characteristic collocations, sociolect, profanity level, and recurring imagery. This is a DESCRIPTION of how the voice sounds so the model can express it naturally — NOT a list of words to insert. e.g. 'Shipboard idiom—readings, range gates, burn windows; imagery from orbital mechanics; keeps present-day office slang out.' or 'Trading-desk shorthand—basis points, second-order effects, the tape; numbers-first and dry.'",
+    "avoidWords": ["5-10 concrete lexical items and clichés this voice NEVER uses (include common assistant tells like 'happy to help', 'great question', 'certainly', 'delve')"],
     "rhythm": "cadence mechanics with punctuation/beat detail (commas, periods, colons, sentence length variance) so replies read in this voice; avoid habitual em-dash chains unless the user's requested voice is explicitly dash-heavy"
   },
   "tone": {
@@ -1914,8 +1743,6 @@ Output schema (exact keys):
     "emotionalFlavor": "2-6 words",
     "posture": "how this stance relates to the user in text while advising — not audience/performer dynamics"
   },
-  "catchphrases": ["3-5 short lines the voice uses at most once per reply and ONLY when it genuinely serves as a pivot, reframe, or close. HARD PROHIBITIONS: (1) never presume the reader's inner state ('you already feel/know/sense this'); (2) never structure as a theatrical announcement ('The X tightens…', 'Witness:', 'Revelation:'); (3) must sound natural if said aloud by a real person in conversation — not like a performed opener. Fewer, better catchphrases beat a long list of dramatic ones."],
-  "verbalTics": ["3-5 PROSE MECHANICS only: information order (lead with answer or lead with context?), when to use a fragment, when bullets fit vs prose, how to close (question vs statement vs next step). NOT rhetorical devices requiring dramatic delivery. NOT reader-state presumptions. NOT catchphrase variants."],
   "thinkingStyle": "1-2 sentences with explicit tradeoff preference",
   "decisionFramework": "1-2 sentences with explicit tradeoff preference",
   "neverDo": ["6-8 full-sentence guardrails you author from STRUCTURAL RAILS above—original wording for this voice, one clear prohibition per item where possible"],
@@ -1924,10 +1751,11 @@ Output schema (exact keys):
   "modifier": ${args.modifier ? JSON.stringify(args.modifier) : "null"}
 }
 
-VOCABULARY vs CATCHPHRASE (critical distinction — re-read before filling those fields):
-- **favoriteWords** = vocabulary register: words and short natural collocations that show up on ordinary sentences in this voice. The test: "would this word/phrase appear in 1 out of 5 replies without feeling forced?" If yes — good. If it's a dramatic opener or rhetorical flourish only suitable for specific moments — it belongs in catchphrases or nowhere.
-- **catchphrases** = rare conversational moves, used 0 most turns. The test: "is this something a real person would say naturally to pivot or close?" If it requires setup, theatrical delivery, or assumes the reader's inner state — it fails. A voice with 0 good catchphrases is better than one with 5 dramatic ones.
-- **verbalTics** = prose mechanics only (order, structure, fragment vs long line). Not rhetorical flourishes, not dramatic openers.
+VOICE IS A SENSIBILITY, NOT A PHRASE BANK (critical — this is the whole philosophy):
+- This profile has **no catchphrase, verbal-tic, or favorite-word fields**, by design. A great voice is not a set of phrases stamped into every reply — that reads as scripted and repetitive. It is a *sensibility* the model expresses freshly each turn.
+- Put the lexical character into **register** as a DESCRIPTION ("trading-desk shorthand, numbers-first, dry") — never as a list the model must insert.
+- Put sentence-shaping habits into **sentenceStructure** and **rhythm** as descriptions of mechanics — not as mandatory openers or closers.
+- The test for every field: does it describe HOW this voice writes, so the model can express it naturally? If a field would instead force a specific phrase into replies, it does not belong here.
 
 Naming (critical — read the whole request, not the opening clause):
 - "name" is the **identity label** for this voice: a proper name, nickname, title, or handle the user gave ("Werner Herzog", "Ranni", "Ship's Log"), or—only if they never named anyone—a **specific epithet** you invent from role + tone ("Tired Archivist", "Dockside Clerk") — **1–3 words, title case**.
@@ -1941,11 +1769,11 @@ Naming constraints (format only):
 - Do NOT output names like "Jarvis With".
 
 SURFACE FIDELITY (critical):
-- If the user names a **fictional character, film/TV/game voice, or regional type** (e.g. vulgar South African robot learner), you must encode the **actual surface vocabulary**: particles ("ja", "neh", "ag"), profanity level they use, broken grammar or code-switching if that's the bit—**put real examples in favoriteWords and catchphrases** (spell them as the user/context implies). Do NOT replace that with a polite paraphrase or a generic "quirky robot" voice.
-- When the user wants **R-rated / heavy profanity**, set tone.aggression and humorStyle accordingly and **load swear words into favoriteWords** and short expletive-led catchphrases—avoidWords should list **assistant clichés**, not "bad words" the character freely says.
-- If the user names a public figure or archetype, encode their *communicative style* (syntax, rhetorical moves, pacing, signature phrases) as writerly habits—do not invent biographical claims, private diary detail, or fake quotations about real people.
+- If the user names a **fictional character, film/TV/game voice, or regional type** (e.g. vulgar South African robot learner), encode the **actual surface vocabulary** inside **register**: particles ("ja", "neh", "ag"), profanity level, broken grammar or code-switching if that's the bit (spell them as the user/context implies). Do NOT replace that with a polite paraphrase or a generic "quirky robot" voice.
+- When the user wants **R-rated / heavy profanity**, set tone.aggression and humorStyle accordingly and say so plainly in **register** (e.g. "swears freely, expletive-led")—avoidWords should list **assistant clichés**, not "bad words" the character freely says.
+- If the user names a public figure or archetype, encode their *communicative style* (syntax, rhetorical moves, pacing) as writerly habits in sentenceStructure / rhythm / register—do not invent biographical claims, private diary detail, or fake quotations about real people.
 - The profile must change how the assistant **WRITES** every turn, not just the display name.
-- favoriteWords / catchphrases must sound native to the **genre, register, and sociolect** (shipboard SF, SA street English, film-noir patter, etc.)—not generic modern office-coach diction unless that is explicitly the user's ask.
+- register, sentenceStructure, and rhythm must sound native to the **genre, register, and sociolect** (shipboard SF, SA street English, film-noir patter, etc.)—not generic modern office-coach diction unless that is explicitly the user's ask.
 
 ${
   args.voiceEnvelope
@@ -2019,7 +1847,7 @@ ${JSON.stringify(args.draft, null, 2)}
 Return a fully corrected JSON object using the same schema, with richer specificity and all issues resolved.
 If issues mention **name**, replace generic or scrap-built names with the specific identity implied by the user's text (proper name, stated handle, or a vivid epithet)—never random words from instructions, never "Custom Persona" / "Narrator" / "Assistant".
 
-Preserve vulgar/dialect surface from the user's description in favoriteWords, catchphrases, and rhythm—repairs must not strip profanity the user explicitly wanted.
+Preserve vulgar/dialect surface from the user's description in register, sentenceStructure, and rhythm—repairs must not strip profanity the user explicitly wanted.
 
 ${
   args.voiceEnvelope

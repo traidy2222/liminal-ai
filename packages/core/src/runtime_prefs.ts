@@ -18,9 +18,9 @@ export type ProviderKeySource =
 export interface RuntimePersonaSpeechStyle {
   sentenceStructure: string;
   formality: "very_formal" | "formal" | "casual" | "very_casual" | "mixed";
-  favoriteWords: string[];
+  /** Descriptive prose for the vocabulary world / diction this voice draws from — never a list of words to inject. */
+  register: string;
   avoidWords: string[];
-  commonMetaphors: string[];
   rhythm: string;
 }
 
@@ -39,8 +39,6 @@ export interface RuntimePersonaProfile {
   selfImage: string;
   speechStyle: RuntimePersonaSpeechStyle;
   tone: RuntimePersonaTone;
-  catchphrases: string[];
-  verbalTics: string[];
   thinkingStyle: string;
   decisionFramework: string;
   neverDo: string[];

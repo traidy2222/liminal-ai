@@ -9,10 +9,13 @@ Hosted OAuth runs on [vireondynamics.com](https://www.vireondynamics.com). Token
 1. Run Liminal web UI or desktop.
 2. **Settings → Integrations → YouTube → Connect**.
 3. Pick **Read + write** (upload/update metadata) or **Read only**.
-4. Complete Google consent (`prompt=consent select_account` — pick the Google account that owns the channel).
-5. Close the tab when you see **Connected**.
+4. Optionally enable **Include revenue analytics** (YouTube Partner Program — estimated revenue, ad performance).
+5. Complete Google consent (`prompt=consent select_account` — pick the Google account that owns the channel).
+6. Close the tab when you see **Connected**.
 
 Or: `connect_provider({ provider: "youtube", start_oauth: true })` or desktop `/connect youtube`.
+
+After scope changes ship, **reconnect** so existing tokens pick up analytics scopes.
 
 ## Agent tools
 
@@ -22,6 +25,18 @@ Or: `connect_provider({ provider: "youtube", start_oauth: true })` or desktop `/
 | `youtube_rest_list_videos` | List uploads on the channel |
 | `youtube_rest_update_video` | Update snippet (title, description, tags, privacy) |
 | `youtube_rest_upload_video` | Stub in v1 — use resumable upload externally |
+| `youtube_analytics_query` | Studio metrics via YouTube Analytics API (views, watch time, traffic, revenue when scoped) |
+
+Example analytics call:
+
+```json
+{
+  "start_date": "2026-01-01",
+  "end_date": "2026-01-31",
+  "metrics": "views,estimatedMinutesWatched,subscribersGained",
+  "dimensions": "day"
+}
+```
 
 With lazy loading: `activate_tool_family({ family: "youtube" })`.
 
@@ -31,10 +46,14 @@ Disable with `AGENT_YOUTUBE_REST=0`.
 
 Uses the **same** Google Cloud OAuth client as Google Workspace (`GOOGLE_OAUTH_CLIENT_*` on Vercel).
 
-1. [Google Cloud Console](https://console.cloud.google.com/) → **APIs & Services → Library** → enable **YouTube Data API v3**.
+1. [Google Cloud Console](https://console.cloud.google.com/) → **APIs & Services → Library** → enable:
+   - **YouTube Data API v3**
+   - **YouTube Analytics API**
 2. **OAuth consent screen → Data access** — add scopes:
    - `https://www.googleapis.com/auth/youtube.readonly`
-   - `https://www.googleapis.com/auth/youtube.upload`
+   - `https://www.googleapis.com/auth/youtube.upload` (read + write mode)
+   - `https://www.googleapis.com/auth/yt-analytics.readonly`
+   - `https://www.googleapis.com/auth/yt-analytics-monetary.readonly` (optional — revenue tier)
 3. **Credentials → OAuth 2.0 Client (Web application)** — YouTube reuses the Workspace redirect URI (already registered):
 
    ```
@@ -55,9 +74,9 @@ Token refresh for the `youtube` provider reuses the Google token endpoint via `P
 ## Flow
 
 ```
-Liminal (local) → opens vireondynamics.com/connect/youtube?redirect_uri=…&state=…
-                → Google OAuth (YouTube scopes only)
+Liminal (local) → opens vireondynamics.com/connect/youtube?redirect_uri=…&state=…&monetary=1
+                → Google OAuth (YouTube + Analytics scopes)
                 → site /connect/google/callback (token exchange + channels.list mine=true)
                 → POST tokens to local harness handoff
-                → youtube_rest_* tools active
+                → youtube_rest_* + youtube_analytics_query tools active
 ```

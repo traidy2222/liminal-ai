@@ -13,6 +13,7 @@ import {
   listNotionOAuthAccounts,
   listYoutubeOAuthAccounts,
   missingYoutubeScopes,
+  youtubeConnectOptionsFromMetadata,
   listSlackOAuthAccounts,
   listXeroOAuthAccounts,
   missingDefaultAzureScopes,
@@ -118,6 +119,8 @@ export interface IntegrationsSnapshot {
         channelId?: string;
         channelTitle?: string;
         customUrl?: string;
+        connectMode?: "read_write" | "read_only";
+        monetaryRequested?: boolean;
       }
     >;
   };
@@ -306,7 +309,15 @@ export async function buildIntegrationsSnapshot(): Promise<IntegrationsSnapshot>
         email: a.email,
         scopes: a.scopes,
         expiresAt: a.expiresAt,
-        missingScopes: missingYoutubeScopes(a.scopes),
+        missingScopes: missingYoutubeScopes(
+          a.scopes,
+          youtubeConnectOptionsFromMetadata(
+            { mode: a.connectMode, monetary: a.monetaryRequested },
+            a.connectMode ?? "read_write"
+          )
+        ),
+        connectMode: a.connectMode,
+        monetaryRequested: a.monetaryRequested,
         channelId: a.channelId,
         channelTitle: a.channelTitle,
         customUrl: a.customUrl,

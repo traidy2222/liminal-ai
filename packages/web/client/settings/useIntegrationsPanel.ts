@@ -36,6 +36,7 @@ export function useIntegrationsPanel(agentBusy: boolean) {
   const [linearMode, setLinearMode] = useState<ReadWriteMode>("read_write");
   const [notionMode, setNotionMode] = useState<ReadWriteMode>("read_write");
   const [youtubeMode, setYoutubeMode] = useState<ReadWriteMode>("read_write");
+  const [youtubeMonetary, setYoutubeMonetary] = useState(false);
   const [githubMode, setGithubMode] = useState<ReadWriteMode>("read_write");
   const [selectedServices, setSelectedServices] = useState<Set<string>>(new Set());
   const [msSelectedServices, setMsSelectedServices] = useState<Set<string>>(new Set());
@@ -190,6 +191,7 @@ export function useIntegrationsPanel(agentBusy: boolean) {
       linearConnected: linearAccounts.length > 0,
       notionConnected: notionAccounts.length > 0,
       youtubeConnected: youtubeAccounts.length > 0,
+      youtubeNeedsReconnect: youtubeAccounts.some((a) => (a.missingScopes?.length ?? 0) > 0),
       googleToolCount: googleMcp.reduce((n, c) => n + c.toolCount, 0),
       microsoftToolCount: microsoftMcp.reduce((n, c) => n + c.toolCount, 0),
       azureToolCount: azureMcp.reduce((n, c) => n + c.toolCount, 0),
@@ -436,20 +438,29 @@ export function useIntegrationsPanel(agentBusy: boolean) {
 
   const youtubePrimary = useCallback(async () => {
     const before = data?.youtube?.accounts.length ?? 0;
+    const qs = new URLSearchParams({ mode: youtubeMode });
+    if (youtubeMonetary) qs.set("monetary", "1");
+    const beginUrl = `/api/integrations/youtube/begin?${qs.toString()}`;
     if (derived.youtubeConnected) {
-      const res = await webApiFetch(`/api/integrations/youtube/begin?mode=${youtubeMode}`);
+      const res = await webApiFetch(beginUrl);
       if (!res.ok) throw new Error(await res.text());
       const { connectUrl } = (await res.json()) as { connectUrl: string };
       window.open(connectUrl, "_blank", "noopener,noreferrer");
       await pollIntegrationsUntil((d) => (d.youtube?.accounts.length ?? 0) > before);
       return;
     }
-    const res = await webApiFetch(`/api/integrations/youtube/begin?mode=${youtubeMode}`);
+    const res = await webApiFetch(beginUrl);
     if (!res.ok) throw new Error(await res.text());
     const { connectUrl } = (await res.json()) as { connectUrl: string };
     window.open(connectUrl, "_blank", "noopener,noreferrer");
     await pollIntegrationsUntil((d) => (d.youtube?.accounts.length ?? 0) > 0);
-  }, [data?.youtube?.accounts.length, derived.youtubeConnected, pollIntegrationsUntil, youtubeMode]);
+  }, [
+    data?.youtube?.accounts.length,
+    derived.youtubeConnected,
+    pollIntegrationsUntil,
+    youtubeMode,
+    youtubeMonetary,
+  ]);
 
   return {
     data,
@@ -480,6 +491,8 @@ export function useIntegrationsPanel(agentBusy: boolean) {
       setNotionMode,
       youtubeMode,
       setYoutubeMode,
+      youtubeMonetary,
+      setYoutubeMonetary,
       githubMode,
       setGithubMode,
     },

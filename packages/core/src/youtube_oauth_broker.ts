@@ -192,6 +192,8 @@ export async function listYoutubeOAuthAccounts(): Promise<
     channelId?: string;
     channelTitle?: string;
     customUrl?: string;
+    connectMode?: YoutubeConnectMode;
+    monetaryRequested?: boolean;
   }>
 > {
   const accounts = await listOAuthAccounts(PROVIDER);
@@ -203,6 +205,11 @@ export async function listYoutubeOAuthAccounts(): Promise<
     channelId: typeof a.metadata?.channelId === "string" ? a.metadata.channelId : undefined,
     channelTitle: typeof a.metadata?.channelTitle === "string" ? a.metadata.channelTitle : undefined,
     customUrl: typeof a.metadata?.customUrl === "string" ? a.metadata.customUrl : undefined,
+    connectMode:
+      a.metadata?.mode === "read_only" || a.metadata?.mode === "read_write"
+        ? a.metadata.mode
+        : undefined,
+    monetaryRequested: a.metadata?.monetary === true,
   }));
 }
 

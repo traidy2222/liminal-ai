@@ -296,12 +296,14 @@ async function prepareProviderOAuth(
     return null;
   }
   const mode = args["mode"] === "read_only" ? "read_only" : "read_write";
+  const monetary = args["monetary"] === true;
   const services = Array.isArray(args["services"])
     ? (args["services"] as unknown[]).map((s) => String(s))
     : undefined;
   const started = await startConnectProviderOAuth(provider, {
     mode,
     services,
+    monetary: provider === "youtube" ? monetary : undefined,
     onStatus: (m) => emit?.(m),
   });
   if (!started.ok) return { ok: false, error: started.error };
@@ -544,7 +546,7 @@ export function createConnectorTools(registry: ToolRegistry, _emitter: AgentEmit
           output:
             `YouTube channel connected: ${label}` +
             (a.channelId ? ` (${a.channelId})` : "") +
-            ".\nTools: youtube_rest_get_channel, youtube_rest_list_videos, youtube_rest_update_video." +
+            ".\nTools: youtube_rest_get_channel, youtube_rest_list_videos, youtube_rest_update_video, youtube_analytics_query." +
             integrationLazyLoadHint(registry, "youtube"),
         };
       }

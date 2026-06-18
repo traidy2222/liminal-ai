@@ -181,6 +181,7 @@ export interface ClientCommandMap {
   disconnect_notion: { revoke?: boolean };
   connect_youtube_oauth: {
     mode?: "read_write" | "read_only";
+    monetary?: boolean;
     openBrowser?: boolean;
   };
   disconnect_youtube: { revoke?: boolean };

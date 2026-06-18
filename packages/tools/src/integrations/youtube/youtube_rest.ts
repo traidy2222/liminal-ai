@@ -4,6 +4,7 @@
 import type { PropertySchema, ToolDefinition, ToolResult } from "@liminal/core";
 import { defineTool } from "../../shared/helpers.js";
 import { jsonToolResult, qs, youtubeRestEnabled, youtubeRestJson } from "./youtube_rest_http.js";
+import { createYoutubeAnalyticsRestTools } from "./youtube_analytics_rest.js";
 
 export { youtubeRestEnabled };
 
@@ -182,5 +183,11 @@ export function createYoutubeRestTools(): ToolDefinition[] {
     },
   });
 
-  return [youtubeRestGetChannel, youtubeRestListVideos, youtubeRestUpdateVideo, youtubeRestUploadVideo];
+  return [
+    youtubeRestGetChannel,
+    youtubeRestListVideos,
+    youtubeRestUpdateVideo,
+    youtubeRestUploadVideo,
+    ...createYoutubeAnalyticsRestTools(),
+  ];
 }

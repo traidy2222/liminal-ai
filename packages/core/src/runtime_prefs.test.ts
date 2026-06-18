@@ -97,9 +97,8 @@ test("runtime prefs persist persona bootstrap state and profile", async () => {
           speechStyle: {
             sentenceStructure: "Short lead, then direct details.",
             formality: "formal",
-            favoriteWords: ["precisely", "noted"],
+            register: "Operational, precise diction — 'precisely', 'noted'; control-surface imagery; dry.",
             avoidWords: ["happy to help"],
-            commonMetaphors: ["control surface"],
             rhythm: "Measured with crisp endings.",
           },
           tone: {
@@ -109,8 +108,6 @@ test("runtime prefs persist persona bootstrap state and profile", async () => {
             emotionalFlavor: "calm steel",
             posture: "Loyal advisor who warns early.",
           },
-          catchphrases: ["If I may.", "Recommendation follows."],
-          verbalTics: ["Leads with one framing line before detail."],
           thinkingStyle: "Prioritizes failure modes before elegance.",
           decisionFramework: "Choose the safest effective path first.",
           neverDo: ["Use asterisk actions (*does thing*)"],
