@@ -159,6 +159,17 @@ class _ReasoningBlockState extends State<ReasoningBlock> {
                   ),
                 ),
               ),
+            )
+          else if (widget.streaming)
+            Padding(
+              padding: const EdgeInsets.fromLTRB(10, 4, 10, 10),
+              child: Text(
+                'Thinking…',
+                style: LiminalTypography.caption(context).copyWith(
+                  color: lim.textMuted,
+                  fontStyle: FontStyle.italic,
+                ),
+              ),
             ),
         ],
       ),

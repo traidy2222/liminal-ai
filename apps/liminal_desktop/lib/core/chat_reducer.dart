@@ -289,7 +289,19 @@ ChatTranscriptState _onToolStart(ChatTranscriptState state, Map<String, dynamic>
   }
   // plan() renders on tool_result only — avoids empty Plan shells on step_index calls
   if (name == 'plan') return base;
-  if (_orchTools.contains(name)) return base;
+  if (_orchTools.contains(name)) {
+    return base.copyWith(
+      messages: [
+        ...base.messages,
+        ToolCallMessage(
+          callId: callId,
+          name: name,
+          status: ToolCallStatus.running,
+          startedAt: DateTime.now().millisecondsSinceEpoch,
+        ),
+      ],
+    );
+  }
   if (name.startsWith('browser_')) {
     return base.copyWith(
       browserView: BrowserViewState(
@@ -561,6 +573,7 @@ ChatTranscriptState _onToolResult(ChatTranscriptState state, Map<String, dynamic
   final ok = parsed.ok;
   final output = parsed.output;
   final args = Map<String, dynamic>.from(data['args'] as Map? ?? {});
+  final argsJson = args.isNotEmpty ? jsonEncode(args) : '';
 
   if (name == 'think' && ok) {
     return _replaceStreamingThink(state, callId, args);
@@ -572,11 +585,31 @@ ChatTranscriptState _onToolResult(ChatTranscriptState state, Map<String, dynamic
     return _replaceStreamingPlan(state, callId, args);
   }
   if (_reasoningTools.contains(name) || _orchTools.contains(name)) {
-    return state;
+    final msgs = List<MessageEntry>.from(state.messages);
+    var matched = false;
+    for (final m in msgs) {
+      if (m is ToolCallMessage && m.callId == callId) {
+        matched = true;
+        m.status = ok ? ToolCallStatus.done : ToolCallStatus.error;
+        m.output = output;
+        if (argsJson.isNotEmpty) m.argsPreview = argsJson;
+      }
+    }
+    if (!matched && _orchTools.contains(name)) {
+      msgs.add(
+        ToolCallMessage(
+          callId: callId,
+          name: name.isNotEmpty ? name : 'tool',
+          status: ok ? ToolCallStatus.done : ToolCallStatus.error,
+          argsPreview: argsJson,
+          output: output,
+        ),
+      );
+    }
+    return state.copyWith(messages: msgs);
   }
 
   final msgs = List<MessageEntry>.from(state.messages);
-  final argsJson = args.isNotEmpty ? jsonEncode(args) : '';
   var matched = false;
   for (final m in msgs) {
     if (m is ToolCallMessage && m.callId == callId) {

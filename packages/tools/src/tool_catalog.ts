@@ -252,12 +252,15 @@ export const TOOL_FAMILIES: Record<string, { description: string; tools: readonl
     ],
   },
   youtube: {
-    description: "YouTube channel — list videos, read channel metadata, update video snippet (separate from Google Workspace).",
+    description:
+      "YouTube channel — lifetime video stats (views/likes separated), Studio analytics reports, metadata updates.",
     tools: [
       "youtube_rest_get_channel",
+      "youtube_rest_get_video",
       "youtube_rest_list_videos",
       "youtube_rest_update_video",
       "youtube_rest_upload_video",
+      "youtube_analytics_report",
       "youtube_analytics_query",
     ],
   },

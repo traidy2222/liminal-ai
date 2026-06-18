@@ -1,23 +1,21 @@
 /**
  * YouTube Data API v3 — channel + video REST tools (separate from Google Workspace).
  */
-import type { PropertySchema, ToolDefinition, ToolResult } from "@liminal/core";
+import type { ToolDefinition, ToolResult } from "@liminal/core";
 import { defineTool } from "../../shared/helpers.js";
 import { jsonToolResult, qs, youtubeRestEnabled, youtubeRestJson } from "./youtube_rest_http.js";
 import { createYoutubeAnalyticsRestTools } from "./youtube_analytics_rest.js";
+import { formatChannelPayload, formatVideoPayload } from "./youtube_format.js";
 
 export { youtubeRestEnabled };
-
-function objectSchema(description: string): PropertySchema {
-  return { type: "object", description, additionalProperties: true } as PropertySchema;
-}
 
 export function createYoutubeRestTools(): ToolDefinition[] {
   const youtubeRestGetChannel = defineTool({
     name: "youtube_rest_get_channel",
     description:
-      "WHAT: Get the connected YouTube channel (title, id, custom URL, stats).\n" +
-      "WHEN: Verify which channel is linked or read channel metadata.",
+      "WHAT: Get the connected YouTube channel (title, id, stats).\n" +
+      "WHEN: Verify which channel is linked or read channel metadata.\n" +
+      "STATS: viewCount = lifetime public channel views. subscriberCount = subs. NOT the same as likes or Analytics period views.",
     parameters: {
       type: "object",
       properties: {
@@ -38,15 +36,49 @@ export function createYoutubeRestTools(): ToolDefinition[] {
         : `/channels${qs({ part: "snippet,statistics,contentDetails", mine: true })}`;
       const res = await youtubeRestJson<unknown>(path);
       if (!res.ok) return { ok: false, error: res.error };
-      return jsonToolResult(res.data);
+      return jsonToolResult(formatChannelPayload(res.data));
+    },
+  });
+
+  const youtubeRestGetVideo = defineTool({
+    name: "youtube_rest_get_video",
+    description:
+      "WHAT: Get one video's public metadata and lifetime statistics.\n" +
+      "WHEN: User asks how many views/likes a specific video has right now.\n" +
+      "STATS: statistics.views = lifetime public viewCount. statistics.likes = likeCount. They are different metrics.\n" +
+      "For period performance (last 7/28 days) use youtube_analytics_report with video_daily or top_videos.",
+    parameters: {
+      type: "object",
+      properties: {
+        video_id: { type: "string", description: "YouTube video id." },
+      },
+      required: ["video_id"],
+      additionalProperties: false,
+    },
+    requiresApproval: false,
+    cacheable: true,
+    cacheTtlMs: 60_000,
+    handler: async (args): Promise<ToolResult> => {
+      const videoId = String(args["video_id"] ?? "").trim();
+      if (!videoId) return { ok: false, error: "video_id required" };
+      const res = await youtubeRestJson<unknown>(
+        `/videos${qs({
+          part: "snippet,contentDetails,statistics,status",
+          id: videoId,
+        })}`
+      );
+      if (!res.ok) return { ok: false, error: res.error };
+      return jsonToolResult(formatVideoPayload(res.data));
     },
   });
 
   const youtubeRestListVideos = defineTool({
     name: "youtube_rest_list_videos",
     description:
-      "WHAT: List videos on the connected channel (search → videos details).\n" +
-      "WHEN: Inventory uploads, pick a video id for updates, or audit channel content.",
+      "WHAT: List videos on the connected channel with labeled lifetime stats.\n" +
+      "WHEN: Inventory uploads, audit content, or find video ids.\n" +
+      "STATS per video: views (lifetime viewCount), likes (likeCount), comments — clearly separated.\n" +
+      "For ranked period performance use youtube_analytics_report top_videos.",
     parameters: {
       type: "object",
       properties: {
@@ -56,6 +88,7 @@ export function createYoutubeRestTools(): ToolDefinition[] {
         order: {
           type: "string",
           enum: ["date", "rating", "relevance", "title", "videoCount", "viewCount"],
+          description: "Search sort. viewCount = lifetime public views (Data API), not Analytics period views.",
         },
       },
       additionalProperties: false,
@@ -90,7 +123,7 @@ export function createYoutubeRestTools(): ToolDefinition[] {
         .map((i) => i.id?.videoId)
         .filter((v): v is string => Boolean(v));
       if (ids.length === 0) {
-        return jsonToolResult({ items: [], nextPageToken: search.data.nextPageToken });
+        return jsonToolResult(formatVideoPayload({ items: [], searchNextPageToken: search.data.nextPageToken }));
       }
       const videos = await youtubeRestJson<unknown>(
         `/videos${qs({
@@ -103,7 +136,7 @@ export function createYoutubeRestTools(): ToolDefinition[] {
         videos.data && typeof videos.data === "object"
           ? { ...(videos.data as Record<string, unknown>), searchNextPageToken: search.data.nextPageToken }
           : { searchNextPageToken: search.data.nextPageToken };
-      return jsonToolResult(payload);
+      return jsonToolResult(formatVideoPayload(payload));
     },
   });
 
@@ -149,7 +182,7 @@ export function createYoutubeRestTools(): ToolDefinition[] {
         },
       });
       if (!res.ok) return { ok: false, error: res.error };
-      return jsonToolResult(res.data);
+      return jsonToolResult(formatVideoPayload(res.data));
     },
   });
 
@@ -185,6 +218,7 @@ export function createYoutubeRestTools(): ToolDefinition[] {
 
   return [
     youtubeRestGetChannel,
+    youtubeRestGetVideo,
     youtubeRestListVideos,
     youtubeRestUpdateVideo,
     youtubeRestUploadVideo,

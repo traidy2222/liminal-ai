@@ -14,7 +14,6 @@ import {
   syncProviderProcessEnvForBase,
   buildByokRoutingPatchForModel,
   DEFAULT_AGENT_API_BASE_URL,
-  isModelIncompatibleWithManagedProxy,
   loadRuntimePreferences,
   type RuntimePreferences,
 } from "@liminal/core";

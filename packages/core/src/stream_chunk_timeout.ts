@@ -1,17 +1,29 @@
 /**
- * Per-chunk idle timeout for provider SSE streams (OpenRouter, etc.).
+ * Per-chunk idle timeout for provider SSE streams (OpenRouter, Bedrock proxy, etc.).
  * Resets on every chunk — long gaps during reasoning/tool-arg generation need a
  * higher ceiling than legacy 60s defaults.
+ *
+ * Bedrock (and the Vireon managed proxy in front of it) often has multi-minute
+ * time-to-first-token; AWS documents read timeouts up to 3600s for large models.
+ * We use a separate, longer first-chunk budget so we do not false-positive stall
+ * retries while the model is still thinking.
  */
 import { HARNESS_ENV_DEFAULTS } from "./harness_default_constants.js";
 import { resolveHarnessEnvRaw } from "./harness_effective_env.js";
 import { describeProviderError } from "./inference_provider.js";
+import type { ManagedProviderPreference } from "./inference_provider.js";
+import { resolveManagedProviderPreference } from "./inference_provider.js";
 import type { ReasoningEffort } from "./reasoning_profile.js";
 import type { RuntimePreferences } from "./runtime_prefs.js";
+import { isManagedInferenceBaseUrl } from "./inference_session.js";
 
 const MIN_MS = 10_000;
 const MAX_MS = 600_000;
 const FILE_WRITE_MIN_MS = 180_000;
+const MANAGED_INTER_CHUNK_MIN_MS = 180_000;
+/** First SSE chunk from Bedrock-backed managed inference (TTFT). */
+const MANAGED_FIRST_CHUNK_MIN_MS = 300_000;
+const MANAGED_BEDROCK_FIRST_CHUNK_MIN_MS = 360_000;
 
 export function parseBaseStreamChunkTimeoutMs(
   prefs?: RuntimePreferences | null | undefined
@@ -46,6 +58,9 @@ export interface StreamChunkTimeoutContext {
    * file-write stream sink. Such phases have long inter-chunk gaps.
    */
   largeToolArgInFlight?: boolean;
+  /** No SSE chunk received yet for this completion (Bedrock TTFT). */
+  awaitingFirstChunk?: boolean;
+  managedProvider?: ManagedProviderPreference;
   runtimePreferences?: RuntimePreferences | null | undefined;
 }
 
@@ -60,8 +75,18 @@ export function resolveStreamChunkTimeoutMs(ctx: StreamChunkTimeoutContext): num
     ms = Math.max(ms, 150_000);
   }
 
-  // A large single tool argument streaming (any tool — gmail body, write_file,
-  // etc.) warrants a generous ceiling even without the file-write sink.
+  const managed = isManagedInferenceBaseUrl(ctx.baseURL ?? "");
+  if (managed) {
+    ms = Math.max(ms, MANAGED_INTER_CHUNK_MIN_MS);
+    if (ctx.awaitingFirstChunk) {
+      const provider =
+        ctx.managedProvider ?? resolveManagedProviderPreference(ctx.runtimePreferences);
+      const firstFloor =
+        provider === "bedrock" ? MANAGED_BEDROCK_FIRST_CHUNK_MIN_MS : MANAGED_FIRST_CHUNK_MIN_MS;
+      ms = Math.max(ms, firstFloor);
+    }
+  }
+
   if (ctx.largeToolArgInFlight) {
     ms = Math.max(ms, LARGE_TOOL_ARG_MIN_MS);
   }

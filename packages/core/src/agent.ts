@@ -183,7 +183,6 @@ import {
 } from "./kimchi_provider.js";
 import {
   buildManagedInferenceClientHeaders,
-  buildByokRoutingPatchForModel,
   describeProviderError,
   fetchInferenceUsageStatus,
   fetchManagedInferenceModels,
@@ -194,6 +193,7 @@ import {
   isManagedInferenceAuthError,
   managedInferenceBaseUrl,
   resolveInferenceMode,
+  resolveManagedProviderForRequest,
   resolveProviderConfigWithInference,
   shouldRouteOpenRouterViaManaged,
   type ManagedInferenceModel,
@@ -206,8 +206,6 @@ import { isOpenRouterApiBaseUrl } from "./openrouter_session.js";
 import {
   buildManagedFreeFallbackHarnessEnv,
   buildManagedRecoveryHarnessEnv,
-  isModelIncompatibleWithManagedProxy,
-  isUserIntentOpenRouterOnlyModel,
   managedFreeFallbackEnabled,
   resolveManagedFreeFallbackMainModel,
   resolveModelForManagedInference,
@@ -216,6 +214,8 @@ import {
   clearManagedInferenceSessionCache,
   ensureManagedInferenceSession,
   isManagedInferenceBaseUrl,
+  scheduleManagedInferenceSessionKeeper,
+  stopManagedInferenceSessionKeeper,
 } from "./inference_session.js";
 import {
   managedUpstreamBusyMessage,
@@ -2119,6 +2119,7 @@ export class AgentHarness {
   private rebuildClient(): void {
     const baseURL = this.config.baseURL ?? "";
     if (!isManagedInferenceBaseUrl(baseURL)) {
+      stopManagedInferenceSessionKeeper();
       try {
         syncProviderProcessEnvForBase(baseURL);
         const cfg = resolveProviderConfig({
@@ -2153,10 +2154,13 @@ export class AgentHarness {
       defaultHeaders: {
         ...(isOpenRouterApiBaseUrl(baseURL) ? buildOpenRouterAttributionHeaders() : {}),
         ...(isManagedInferenceBaseUrl(baseURL)
-          ? buildManagedInferenceClientHeaders(this.runtimePreferences)
+          ? buildManagedInferenceClientHeaders(this.runtimePreferences, this.config.model)
           : {}),
       },
     });
+    if (isManagedInferenceBaseUrl(this.config.baseURL ?? "")) {
+      scheduleManagedInferenceSessionKeeper(this.runtimePreferences, this.config.baseURL);
+    }
   }
 
   /**
@@ -2167,24 +2171,7 @@ export class AgentHarness {
     const mode = resolveInferenceMode(this.runtimePreferences);
     if (mode === "byok" && !this.managedByokFallbackActive) return;
 
-    const onInference = isManagedInferenceBaseUrl(this.config.baseURL);
-    const badModel = isModelIncompatibleWithManagedProxy(this.config.model);
-    const userIntent =
-      this.runtimePreferences?.provider?.model?.trim() ||
-      resolveHarnessEnvRaw("AGENT_MODEL", this.runtimePreferences)?.trim() ||
-      "";
-    if (
-      userIntent &&
-      isUserIntentOpenRouterOnlyModel(userIntent) &&
-      !this.managedByokFallbackActive
-    ) {
-      return;
-    }
-    const shouldTry =
-      this.managedByokFallbackActive ||
-      (onInference && badModel) ||
-      (mode === "managed" && badModel);
-    if (!shouldTry) return;
+    if (!this.managedByokFallbackActive) return;
 
     let status: Awaited<ReturnType<typeof fetchInferenceUsageStatus>> = null;
     try {
@@ -2195,7 +2182,10 @@ export class AgentHarness {
     if (!status?.entitled) return;
     if (status.remainingUsd != null && status.remainingUsd <= 0) return;
 
-    const model = resolveModelForManagedInference(this.config.model, this.runtimePreferences);
+    const model =
+      this.runtimePreferences?.provider?.model?.trim() ||
+      resolveHarnessEnvRaw("AGENT_MODEL", this.runtimePreferences)?.trim() ||
+      resolveModelForManagedInference(this.config.model, this.runtimePreferences);
     clearManagedInferenceSessionCache();
     this.managedByokFallbackActive = false;
 
@@ -2239,15 +2229,9 @@ export class AgentHarness {
 
   /** Public entry for sidecar reconnect — clears in-memory BYOK fallback when credits return. */
   async recoverManagedInferenceRouteIfNeeded(): Promise<boolean> {
-    const before =
-      this.managedByokFallbackActive ||
-      isModelIncompatibleWithManagedProxy(this.config.model);
-    if (!before) return false;
+    if (!this.managedByokFallbackActive) return false;
     await this.maybeRecoverManagedInferenceRoute();
-    return (
-      !this.managedByokFallbackActive &&
-      !isModelIncompatibleWithManagedProxy(this.config.model)
-    );
+    return !this.managedByokFallbackActive;
   }
 
   /** Switch to free BYOK before the first completion when the wallet is already empty. */
@@ -2264,68 +2248,6 @@ export class AgentHarness {
     } catch {
       /* non-fatal — 402 handler still applies mid-turn */
     }
-  }
-
-  /** Switch to OpenRouter BYOK when the selected model cannot use the Vireon managed proxy. */
-  private async maybeRouteByokForIncompatibleModel(): Promise<void> {
-    if (this.managedByokFallbackActive) return;
-    if (resolveInferenceMode(this.runtimePreferences) === "byok") return;
-
-    const model =
-      this.config.model?.trim() ||
-      this.runtimePreferences?.provider?.model?.trim() ||
-      resolveHarnessEnvRaw("AGENT_MODEL", this.runtimePreferences)?.trim() ||
-      "";
-    if (!model || !isModelIncompatibleWithManagedProxy(model)) return;
-    if (!hasLocalProviderApiKey()) return;
-
-    const patch = buildByokRoutingPatchForModel(model, this.runtimePreferences);
-    if (!patch) return;
-
-    await this.patchRuntimePreferences(patch, { persist: true });
-    const slug =
-      patch.harness?.env?.AGENT_MODEL?.trim() ||
-      patch.provider?.model?.trim() ||
-      model;
-    const byok = resolveProviderConfig({ model: slug });
-    if (!byok.apiKey?.trim()) return;
-
-    this.config.openRouterApiKey = byok.apiKey;
-    this.config.baseURL = byok.baseURL;
-    this.config.model = byok.model || slug;
-    this.rebuildClient();
-    if (!this.isUiQuiet()) {
-      this.emitter.emit("text", {
-        delta:
-          `\nℹ \`${slug}\` is OpenRouter-only — using your API key instead of Vireon managed inference.\n`,
-        channel: "user",
-      });
-    }
-  }
-
-  /** Block managed routing when the user picked an OpenRouter-only model without a BYOK key. */
-  private async incompatibleManagedModelBlockMessage(): Promise<string | null> {
-    if (this.managedByokFallbackActive) return null;
-    const mode = resolveInferenceMode(this.runtimePreferences);
-    if (mode === "byok") return null;
-
-    const model =
-      this.config.model?.trim() ||
-      this.runtimePreferences?.provider?.model?.trim() ||
-      resolveHarnessEnvRaw("AGENT_MODEL", this.runtimePreferences)?.trim() ||
-      "";
-    if (!model || !isModelIncompatibleWithManagedProxy(model)) return null;
-    if (hasLocalProviderApiKey()) return null;
-
-    const routeManaged =
-      mode === "managed" || (await shouldRouteOpenRouterViaManaged(this.runtimePreferences));
-    if (!routeManaged) return null;
-
-    return (
-      `Model \`${model}\` is only available through OpenRouter with your own API key ` +
-      `(not Vireon managed inference). Add an OpenRouter key in Settings → Provider, ` +
-      `or pick a managed-compatible preset (e.g. DeepSeek, GLM).`
-    );
   }
 
   /** Clear Stealth pins left from Owl when the active model needs Nvidia/other providers. */
@@ -2503,19 +2425,6 @@ export class AgentHarness {
     }
     const prevModel = this.config.model ?? "";
     const prevBaseURL = this.config.baseURL ?? "";
-    const effectiveModel = this.resolveEffectiveModelFromPreferences();
-    if (effectiveModel && isModelIncompatibleWithManagedProxy(effectiveModel)) {
-      const byokPatch = buildByokRoutingPatchForModel(
-        effectiveModel,
-        this.runtimePreferences
-      );
-      if (
-        byokPatch &&
-        resolveInferenceMode(this.runtimePreferences) === "auto"
-      ) {
-        await this.patchRuntimePreferences(byokPatch, { persist: true });
-      }
-    }
     const resolvedModel = this.resolveEffectiveModelFromPreferences();
     if (this.managedByokFallbackActive) {
       const byok = resolveProviderConfig({
@@ -3090,12 +2999,6 @@ export class AgentHarness {
     if (this.running) throw new Error("Agent is already processing a message");
     await this.maybeRecoverManagedInferenceRoute();
     await this.maybePreemptManagedCreditExhaustion();
-    await this.maybeRouteByokForIncompatibleModel();
-    const incompatibleMsg = await this.incompatibleManagedModelBlockMessage();
-    if (incompatibleMsg) {
-      this.emitter.emit("error", { err: new Error(incompatibleMsg) });
-      return;
-    }
     void this.refreshManagedInferenceCatalog().then(() => this.syncContextWindowForModel());
     if (options?.freshContext === true && this.agentDepth === 0) {
       this.reset();
@@ -3127,16 +3030,6 @@ export class AgentHarness {
         (mode === "managed" ||
           (mode !== "byok" && (await shouldRouteOpenRouterViaManaged(this.runtimePreferences))));
       if (routeManaged) {
-        const rawModel =
-          this.resolveEffectiveModelFromPreferences() || this.config.model || "";
-        if (rawModel && isModelIncompatibleWithManagedProxy(rawModel)) {
-          this.running = false;
-          const blockMsg =
-            (await this.incompatibleManagedModelBlockMessage()) ??
-            `Model \`${rawModel}\` requires OpenRouter BYOK.`;
-          this.emitter.emit("error", { err: new Error(blockMsg) });
-          return;
-        }
         try {
           await this.refreshManagedInferenceIfNeeded({
             managedBaseURL: managedInferenceBaseUrl(),
@@ -5741,6 +5634,7 @@ export class AgentHarness {
     }
     let finishReason: string | null = null;
     let streamAttempt = 0;
+    let receivedStreamChunk = false;
 
     const streamChunkTimeoutMs = () =>
       resolveStreamChunkTimeoutMs({
@@ -5748,12 +5642,18 @@ export class AgentHarness {
         reasoningEffort: this._turnReasoningBudget?.reasoningEffort ?? null,
         fileWriteSinkActive: this.fileWriteStreamSink?.hasActiveIngest() ?? false,
         largeToolArgInFlight: accumulator.hasLargePendingToolArg(),
+        awaitingFirstChunk: !receivedStreamChunk,
+        managedProvider: resolveManagedProviderForRequest(
+          this.runtimePreferences,
+          activeModelSlug
+        ),
         runtimePreferences: this.runtimePreferences,
       });
 
     streamLoop: while (true) {
       try {
         for await (const chunk of withChunkTimeout(stream, streamChunkTimeoutMs)) {
+          receivedStreamChunk = true;
           // Check abort between chunks
           if (this.abortSignal?.aborted) return;
 
@@ -5866,6 +5766,7 @@ export class AgentHarness {
         accumulator.reset();
         speculativePromises.clear(); // discard PASTE results from failed stream attempt
         finishReason = null;
+        receivedStreamChunk = false;
 
         const idleSec = Math.round(streamChunkTimeoutMs() / 1000);
         const retryLabel = isChunkTimeout

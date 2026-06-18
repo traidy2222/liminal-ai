@@ -19,6 +19,7 @@ import 'panel_resize_handle.dart';
 import 'composer.dart';
 import 'orchestrator_panel.dart';
 import 'sticky_message_list.dart';
+import 'turn_activity_banner.dart';
 
 /// One chat column in a single- or multi-pane layout.
 class ChatPane extends StatelessWidget {
@@ -178,6 +179,15 @@ class ChatPane extends StatelessWidget {
                 );
               },
             ),
+          ),
+          ListenableBuilder(
+            listenable: session,
+            builder: (context, _) {
+              return TurnActivityBanner(
+                busy: session.busy,
+                messages: session.messages,
+              );
+            },
           ),
           ListenableBuilder(
             listenable: session,

@@ -6,10 +6,10 @@
 import { readFile, writeFile, mkdir, chmod } from "node:fs/promises";
 import path from "node:path";
 import type { RuntimePreferences } from "./runtime_prefs.js";
-import { fetchInferenceSession } from "./inference_provider.js";
+import { fetchInferenceSession, fetchInferenceSessionDeduped } from "./inference_provider.js";
 import { globalPath, ensureGlobalStorageRoot } from "./global_storage.js";
 
-const REFRESH_BUFFER_MS = 2 * 60_000;
+const REFRESH_BUFFER_MS = 5 * 60_000;
 const SESSION_CACHE_FILE = "inference-session.json";
 const SECURE_FILE_MODE = 0o600;
 
@@ -22,6 +22,9 @@ interface SessionCacheRecord {
 }
 
 let cached: { token: string; expiresAtMs: number; baseURL: string } | null = null;
+let sessionKeeperTimer: ReturnType<typeof setTimeout> | null = null;
+let sessionKeeperPrefs: RuntimePreferences | null | undefined;
+let sessionKeeperBaseURL = "";
 
 export function isManagedInferenceBaseUrl(baseURL: string): boolean {
   return baseURL.replace(/\/$/, "").includes("/inference");
@@ -74,7 +77,57 @@ async function clearSessionDiskCache(): Promise<void> {
 
 export function clearManagedInferenceSessionCache(): void {
   cached = null;
+  stopManagedInferenceSessionKeeper();
   void clearSessionDiskCache();
+}
+
+/** Background refresh so sends do not block on a cold session mint near JWT expiry. */
+export function scheduleManagedInferenceSessionKeeper(
+  prefs?: RuntimePreferences | null,
+  currentBaseURL?: string
+): void {
+  sessionKeeperPrefs = prefs;
+  const base = (currentBaseURL ?? cached?.baseURL ?? "").replace(/\/$/, "");
+  sessionKeeperBaseURL = base;
+  if (sessionKeeperTimer) {
+    clearTimeout(sessionKeeperTimer);
+    sessionKeeperTimer = null;
+  }
+  if (!base || !isManagedInferenceBaseUrl(base)) return;
+
+  const plan = (): void => {
+    if (!cached || cached.baseURL !== base) {
+      void ensureManagedInferenceSession(sessionKeeperPrefs, base)
+        .catch(() => undefined)
+        .finally(() => scheduleManagedInferenceSessionKeeper(sessionKeeperPrefs, base));
+      return;
+    }
+    const msUntilRefresh = cached.expiresAtMs - Date.now() - REFRESH_BUFFER_MS;
+    if (msUntilRefresh <= 0) {
+      void ensureManagedInferenceSession(sessionKeeperPrefs, base)
+        .catch(() => undefined)
+        .finally(() => scheduleManagedInferenceSessionKeeper(sessionKeeperPrefs, base));
+      return;
+    }
+    sessionKeeperTimer = setTimeout(
+      () => {
+        sessionKeeperTimer = null;
+        void ensureManagedInferenceSession(sessionKeeperPrefs, base)
+          .catch(() => undefined)
+          .finally(() => scheduleManagedInferenceSessionKeeper(sessionKeeperPrefs, sessionKeeperBaseURL));
+      },
+      Math.min(msUntilRefresh, 8 * 60_000)
+    );
+  };
+  plan();
+}
+
+export function stopManagedInferenceSessionKeeper(): void {
+  if (sessionKeeperTimer) {
+    clearTimeout(sessionKeeperTimer);
+    sessionKeeperTimer = null;
+  }
+  sessionKeeperBaseURL = "";
 }
 
 export async function ensureManagedInferenceSession(
@@ -95,7 +148,7 @@ export async function ensureManagedInferenceSession(
     return { apiKey: cached.token, baseURL: cached.baseURL };
   }
 
-  const session = await fetchInferenceSession(prefs);
+  const session = await fetchInferenceSessionDeduped(prefs);
   const expiresAtMs = Date.parse(session.expiresAt);
   cached = {
     token: session.token,
@@ -103,5 +156,6 @@ export async function ensureManagedInferenceSession(
     baseURL: session.baseURL.replace(/\/$/, ""),
   };
   await writeSessionDiskCache(cached);
+  scheduleManagedInferenceSessionKeeper(prefs, cached.baseURL);
   return { apiKey: cached.token, baseURL: cached.baseURL };
 }

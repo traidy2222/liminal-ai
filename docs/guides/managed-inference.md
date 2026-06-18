@@ -116,7 +116,20 @@ AGENT_API_BASE_URL=https://openrouter.ai/api/v1
 | `AGENT_INFERENCE_MODE=managed requires pro.managed_inference…` | Account isn't Pro+ or the license didn't verify. Check **Account**, or fall back to `byok`. |
 | HTTP 402 / "credit limit reached" | Monthly credits exhausted. Top up at Account → Managed inference. |
 | Still using my own key on Pro | `auto` with `AGENT_INFERENCE_PREFER_MANAGED=0`, or mode is `byok`. Set `managed` (or prefer-managed `1`). |
+| OpenRouter / `:free` model on managed | All vendor slugs (e.g. `nex-agi/nex-v2-pro:free`, `openrouter/free`) route through managed inference on the **OpenRouter** upstream when `AGENT_MANAGED_PROVIDER=auto`. No BYOK key required. |
 | Managed providers "temporarily busy" | Upstream rate limit; the proxy already retried. Retry shortly. |
+| Frequent "stream stalled" / `STREAM_CHUNK_TIMEOUT` on Bedrock | Bedrock often has **multi-minute time-to-first-token** (model thinking before the first SSE chunk). The harness now uses a **6-minute** first-chunk idle budget for `AGENT_MANAGED_PROVIDER=bedrock` (5 minutes for other managed routes) instead of the default 120s. If you still hit timeouts on very slow models, raise `AGENT_STREAM_CHUNK_TIMEOUT_MS` (max 600000). |
+| Long gaps mid-stream during big tool args | Normal for large `write_file` / email bodies — inter-chunk timeout scales automatically; file-write sink mode uses a higher floor. |
+
+## Bedrock latency notes
+
+AWS Bedrock Converse/streaming APIs can take **60s+ before the first token** on large prompts or reasoning-heavy models. That is upstream latency, not a dead connection. Liminal:
+
+- Keeps the managed-inference session JWT **warm in the background** so sends do not block on session mint.
+- Uses a **longer first-chunk stream idle timeout** when routing through the Vireon proxy with `AGENT_MANAGED_PROVIDER=bedrock`.
+- Retries transient stream transport failures (`STREAM_CHUNK_TIMEOUT`, connection reset) with backoff.
+
+For lowest perceived latency on AWS, enable **latency-optimized inference** on supported Bedrock models in your AWS account (see [Amazon Bedrock latency optimization](https://docs.aws.amazon.com/bedrock/latest/userguide/latency-optimized-inference.html)).
 
 ## Environment reference
 

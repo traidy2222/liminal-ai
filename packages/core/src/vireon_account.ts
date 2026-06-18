@@ -21,11 +21,8 @@ import {
 } from "./runtime_prefs.js";
 import {
   buildManagedRecoveryHarnessEnv,
-  isModelIncompatibleWithManagedProxy,
-  isUserIntentOpenRouterOnlyModel,
   resolveModelForManagedInference,
 } from "./managed_free_fallback.js";
-import { buildByokRoutingPatchForModel } from "./inference_provider.js";
 
 const ACCOUNT_FILE = "account.json";
 const SECURE_FILE_MODE = 0o600;
@@ -107,27 +104,7 @@ export async function applyProManagedInferenceDefaults(): Promise<void> {
     ({ version: 1, updatedAt: Date.now() } satisfies RuntimePreferences);
   const currentModel =
     existing.provider?.model?.trim() || existing.harness?.env?.AGENT_MODEL?.trim() || "";
-  if (currentModel && isUserIntentOpenRouterOnlyModel(currentModel)) {
-    const byokPatch = buildByokRoutingPatchForModel(currentModel, existing);
-    if (byokPatch) {
-      await saveRuntimePreferences({
-        ...existing,
-        updatedAt: Date.now(),
-        provider: { ...existing.provider, ...byokPatch.provider },
-        harness: {
-          env: {
-            ...existing.harness?.env,
-            ...byokPatch.harness?.env,
-          },
-        },
-      });
-      return;
-    }
-  }
-  const model =
-    currentModel && !isModelIncompatibleWithManagedProxy(currentModel)
-      ? currentModel
-      : resolveModelForManagedInference(currentModel, existing);
+  const model = currentModel || resolveModelForManagedInference(currentModel, existing);
   const { baseURL: _pinnedByokBase, ...providerSansBase } = existing.provider ?? {};
   const merged: RuntimePreferences = {
     ...existing,

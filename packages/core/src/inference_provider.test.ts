@@ -12,6 +12,7 @@ import {
   isManagedInferenceAuthError,
   resolveInferenceMode,
   resolveManagedOpenRouterCredentials,
+  resolveManagedProviderForRequest,
   resolveManagedProviderPreference,
   resolveManagedModelForProviderPreference,
   shouldRouteOpenRouterViaManaged,
@@ -44,6 +45,23 @@ describe("inference_provider", () => {
     });
   });
 
+  it("resolveManagedProviderForRequest picks openrouter upstream for vendor slugs", () => {
+    assert.equal(
+      resolveManagedProviderForRequest(null, "nex-agi/nex-v2-pro:free"),
+      "openrouter"
+    );
+    assert.equal(
+      resolveManagedProviderForRequest(
+        { version: 1, updatedAt: 0, harness: { env: { AGENT_MANAGED_PROVIDER: "bedrock" } } },
+        "nex-agi/nex-v2-pro:free"
+      ),
+      "bedrock"
+    );
+    assert.deepEqual(buildManagedInferenceClientHeaders(null, "nex-agi/nex-v2-pro:free"), {
+      "x-vireon-managed-provider": "openrouter",
+    });
+  });
+
   it("defaults prefer-managed to on from product defaults", () => {
     const saved = process.env.AGENT_INFERENCE_PREFER_MANAGED;
     delete process.env.AGENT_INFERENCE_PREFER_MANAGED;
@@ -65,9 +83,7 @@ describe("inference_provider", () => {
     else process.env.AGENT_API_KEY = saved.AGENT_API_KEY;
   });
 
-  it("buildByokRoutingPatchForModel switches auto to byok for openrouter slugs", () => {
-    saved.AGENT_API_KEY = process.env.AGENT_API_KEY;
-    delete process.env.AGENT_API_KEY;
+  it("buildByokRoutingPatchForModel only applies in explicit byok mode", () => {
     const managedPatch = buildByokRoutingPatchForModel("openrouter/free", {
       version: 1,
       provider: { inferenceMode: "managed" },
@@ -75,25 +91,20 @@ describe("inference_provider", () => {
       updatedAt: 0,
     });
     assert.equal(managedPatch, null);
-    const patch = buildByokRoutingPatchForModel("openrouter/free", {
+    const autoPatch = buildByokRoutingPatchForModel("openrouter/free", {
       version: 1,
       provider: { inferenceMode: "auto" },
       harness: { env: { AGENT_INFERENCE_MODE: "auto" } },
       updatedAt: 0,
     });
-    assert.ok(patch);
-    assert.equal(patch?.provider?.inferenceMode, "byok");
-    assert.equal(patch?.harness?.env?.AGENT_MODEL, "openrouter/free");
-    assert.equal(patch?.harness?.env?.AGENT_INFERENCE_MODE, "byok");
-    const n2 = buildByokRoutingPatchForModel("nex-agi/nex-n2-pro:free", {
+    assert.equal(autoPatch, null);
+    const byokPatch = buildByokRoutingPatchForModel("nex-agi/nex-n2-pro:free", {
       version: 1,
-      provider: { inferenceMode: "auto" },
+      provider: { inferenceMode: "byok" },
+      harness: { env: { AGENT_INFERENCE_MODE: "byok" } },
       updatedAt: 0,
     });
-    assert.equal(n2?.provider?.inferenceMode, "byok");
-    assert.equal(n2?.harness?.env?.AGENT_MODEL, "nex-agi/nex-n2-pro:free");
-    if (saved.AGENT_API_KEY === undefined) delete process.env.AGENT_API_KEY;
-    else process.env.AGENT_API_KEY = saved.AGENT_API_KEY;
+    assert.equal(byokPatch?.harness?.env?.AGENT_MODEL, "nex-agi/nex-n2-pro:free");
   });
 
   it("managed mode follows entitlement for pinned non-managed base URL", async () => {

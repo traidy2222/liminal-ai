@@ -40,6 +40,39 @@ test("resolveStreamChunkTimeoutMs raises floor for a large tool argument in flig
   assert.equal(ms, 180_000);
 });
 
+test("resolveStreamChunkTimeoutMs allows long Bedrock TTFT on managed inference", () => {
+  const ms = resolveStreamChunkTimeoutMs({
+    baseURL: "https://api.vireondynamics.com/v1/inference",
+    awaitingFirstChunk: true,
+    managedProvider: "bedrock",
+  });
+  assert.equal(ms, 360_000);
+});
+
+test("resolveStreamChunkTimeoutMs uses shorter first-chunk floor for non-bedrock managed", () => {
+  const ms = resolveStreamChunkTimeoutMs({
+    baseURL: "https://api.vireondynamics.com/v1/inference",
+    awaitingFirstChunk: true,
+    managedProvider: "openrouter",
+  });
+  assert.equal(ms, 300_000);
+});
+
+test("resolveStreamChunkTimeoutMs raises inter-chunk floor for managed inference", () => {
+  const ms = resolveStreamChunkTimeoutMs({
+    baseURL: "https://api.vireondynamics.com/v1/inference",
+    awaitingFirstChunk: false,
+  });
+  assert.equal(ms, 180_000);
+});
+
+test("isStreamTransportRetryable treats chunk timeout as retryable", () => {
+  assert.equal(
+    isStreamTransportRetryable(new Error("STREAM_CHUNK_TIMEOUT: No data received for 120s")),
+    true
+  );
+});
+
 test("isStreamTransportRetryable", () => {
   assert.equal(isStreamTransportRetryable(new Error("Network connection lost.")), true);
   assert.equal(isStreamTransportRetryable(new Error("invalid_api_key")), false);

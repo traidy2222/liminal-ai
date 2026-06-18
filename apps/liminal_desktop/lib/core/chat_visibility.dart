@@ -17,6 +17,8 @@ List<MessageEntry> visibleChatMessages(
   if (showRawHarness) return messages;
   return [
     for (final e in messages)
-      if (!isHarnessInternalMessage(e) && e is! ToolResultMessage) e,
+      if (e is! ToolResultMessage &&
+          (!isHarnessInternalMessage(e) || e is ProviderRetryMessage))
+        e,
   ];
 }

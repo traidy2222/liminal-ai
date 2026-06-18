@@ -720,6 +720,7 @@ export {
   filterManagedInferenceCatalog,
   resolveManagedModelForProviderPreference,
   buildManagedInferenceClientHeaders,
+  resolveManagedProviderForRequest,
   resolveManagedProviderPreference,
   looksLikeBedrockModelId,
   looksLikeKimchiModelId,

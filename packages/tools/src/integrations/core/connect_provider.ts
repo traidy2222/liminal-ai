@@ -579,7 +579,7 @@ export function createConnectorTools(registry: ToolRegistry, _emitter: AgentEmit
           output:
             `YouTube channel connected: ${label}` +
             (a.channelId ? ` (${a.channelId})` : "") +
-            ".\nTools: youtube_rest_get_channel, youtube_rest_list_videos, youtube_rest_update_video, youtube_analytics_query." +
+            ".\nTools: youtube_rest_get_video, youtube_analytics_report (preferred), youtube_rest_list_videos, youtube_rest_update_video." +
             integrationLazyLoadHint(registry, "youtube"),
         };
       }

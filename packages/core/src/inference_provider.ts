@@ -29,7 +29,6 @@ import { isKimchiApiBaseUrl } from "./kimchi_constants.js";
 import { ensureLocalProviderApiKeyInProcess } from "./provider_api_key.js";
 import {
   buildManagedRecoveryHarnessEnv,
-  isModelIncompatibleWithManagedProxy,
   resolveModelForManagedInference,
 } from "./managed_free_fallback.js";
 
@@ -116,11 +115,29 @@ export function resolveManagedProviderPreference(prefs?: RuntimePreferences | nu
   return parseManagedProviderPreference(resolveHarnessEnvRaw("AGENT_MANAGED_PROVIDER", prefs ?? null));
 }
 
+/**
+ * Effective managed upstream for one request. When preference is `auto`, pick from
+ * model id shape so OpenRouter slugs (e.g. `nex-agi/...:free`) do not hit Bedrock.
+ */
+export function resolveManagedProviderForRequest(
+  prefs?: RuntimePreferences | null,
+  modelSlug?: string | null
+): ManagedProviderPreference {
+  const pref = resolveManagedProviderPreference(prefs);
+  if (pref !== "auto") return pref;
+  const slug = modelSlug?.trim();
+  if (slug) return modelNativeManagedProvider(slug);
+  return "auto";
+}
+
 /** Headers attached to chat/embedding calls through the Vireon inference proxy. */
 export function buildManagedInferenceClientHeaders(
-  prefs?: RuntimePreferences | null
+  prefs?: RuntimePreferences | null,
+  modelSlug?: string | null
 ): Record<string, string> {
-  return { [MANAGED_INFERENCE_PROVIDER_HEADER]: resolveManagedProviderPreference(prefs) };
+  return {
+    [MANAGED_INFERENCE_PROVIDER_HEADER]: resolveManagedProviderForRequest(prefs, modelSlug),
+  };
 }
 
 function truthyEnv(raw: string | undefined): boolean {
@@ -266,42 +283,21 @@ export function hasLocalProviderApiKey(): boolean {
 }
 
 /**
- * OpenRouter-only slugs (openrouter/*, :free) cannot ride the Vireon managed proxy.
- * When the user picks one explicitly and a BYOK key exists, route through OpenRouter directly.
+ * Optional prefs patch when the user explicitly chose BYOK mode for a model slug.
+ * Managed inference routes all catalog shapes (Bedrock / OpenRouter / Kimchi) — no
+ * auto-switch away from managed when picking openrouter/* or :free slugs.
  */
 export function buildByokRoutingPatchForModel(
   model: string,
   prefs?: RuntimePreferences | null
 ): Partial<RuntimePreferences> | null {
   const slug = model.trim();
-  if (!slug || !isModelIncompatibleWithManagedProxy(slug)) return null;
+  if (!slug) return null;
   const mode = resolveInferenceMode(prefs);
-  // User explicitly chose managed — settings save must not override to BYOK.
-  if (mode === "managed") return null;
-  if (mode === "byok") {
-    return {
-      harness: { env: { AGENT_MODEL: slug } },
-      provider: { model: slug },
-    };
-  }
+  if (mode !== "byok") return null;
   return {
-    provider: {
-      inferenceMode: "byok",
-      model: slug,
-      baseURL: DEFAULT_AGENT_API_BASE_URL,
-    },
-    harness: {
-      env: {
-        AGENT_INFERENCE_MODE: "byok",
-        AGENT_INFERENCE_PREFER_MANAGED: "0",
-        AGENT_MODEL: slug,
-        AGENT_API_BASE_URL: DEFAULT_AGENT_API_BASE_URL,
-        AGENT_PROVIDER_ORDER: "",
-        AGENT_PROVIDER_ORDER_FAST: "",
-        AGENT_PROVIDER_ROUTE_AUTO: "1",
-        AGENT_PROVIDER_ALLOW_FALLBACKS: "1",
-      },
-    },
+    harness: { env: { AGENT_MODEL: slug } },
+    provider: { model: slug },
   };
 }
 
@@ -412,6 +408,20 @@ export async function fetchInferenceSession(
   throw lastErr instanceof Error ? lastErr : new Error(String(lastErr ?? "inference session retry exhausted"));
 }
 
+let inferenceSessionFetchInFlight: Promise<InferenceSessionResult> | null = null;
+
+/** Coalesce concurrent session mints (send + background keeper + multi-tool sidecars). */
+export function fetchInferenceSessionDeduped(
+  prefs?: RuntimePreferences | null
+): Promise<InferenceSessionResult> {
+  if (!inferenceSessionFetchInFlight) {
+    inferenceSessionFetchInFlight = fetchInferenceSession(prefs).finally(() => {
+      inferenceSessionFetchInFlight = null;
+    });
+  }
+  return inferenceSessionFetchInFlight;
+}
+
 /** True when OpenRouter sidecar calls should route through the Vireon inference proxy. */
 export async function shouldRouteOpenRouterViaManaged(
   prefs?: RuntimePreferences | null
@@ -498,12 +508,9 @@ export async function resolveProviderConfigWithInference(
 
   if (managed) {
     const creds = await resolveManagedOpenRouterCredentials(prefs);
-    const rawModel =
+    const model =
       (overrides?.model ?? prefs?.provider?.model ?? process.env["AGENT_MODEL"]?.trim()) ||
       DEFAULT_AGENT_MODEL_SLUG;
-    const model = isModelIncompatibleWithManagedProxy(rawModel)
-      ? resolveModelForManagedInference(rawModel, prefs)
-      : rawModel;
     return {
       apiKey: creds.apiKey,
       baseURL: creds.baseURL,
@@ -819,10 +826,6 @@ function prefsNeedManagedRecovery(prefs: RuntimePreferences): boolean {
     prefs.provider?.model?.trim() ||
     resolveHarnessEnvRaw("AGENT_MODEL", prefs)?.trim() ||
     DEFAULT_AGENT_MODEL_SLUG;
-  if (isModelIncompatibleWithManagedProxy(model)) {
-    // Deliberate OpenRouter-only pick — never auto-recover to managed (would swap to DeepSeek).
-    return false;
-  }
   const pinnedBase = prefs.provider?.baseURL?.trim();
   if (
     mode === "managed" &&

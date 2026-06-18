@@ -47,20 +47,23 @@ export function isUserIntentOpenRouterOnlyModel(model: string): boolean {
   return false;
 }
 
-/** OpenRouter-only slugs that the Vireon managed proxy rejects (Bedrock chat path). */
-export function isModelIncompatibleWithManagedProxy(model: string): boolean {
+/**
+ * Legacy name — all catalog slugs are routable via managed inference (Bedrock /
+ * OpenRouter / Kimchi upstream selected per model). Kept for callers that
+ * gate UX on "needs a specific upstream"; never blocks managed routing.
+ */
+export function isModelIncompatibleWithManagedProxy(_model: string): boolean {
+  return false;
+}
+
+/** True when the slug is natively an OpenRouter vendor/model id (not Bedrock/Kimchi shape). */
+export function isOpenRouterCatalogModel(model: string): boolean {
   const m = model.trim().toLowerCase();
   if (!m) return false;
-  // Fusion is served by the managed proxy's OpenRouter upstream (plugins forwarded).
-  if (isOpenRouterFusionModel(m)) return false;
-  if (m === OPENROUTER_MODEL_SLUG.FREE_ROUTER) return true;
-  if (m === "openrouter/auto") return true;
+  if (isOpenRouterFusionModel(m)) return true;
   if (m.startsWith("openrouter/")) return true;
   if (m.includes(":free")) return true;
-  const fallbackMain =
-    resolveHarnessEnvRaw("AGENT_MANAGED_FREE_FALLBACK_MODEL", null)?.trim() ||
-    OPENROUTER_MODEL_SLUG.FREE_ROUTER;
-  if (m === fallbackMain.toLowerCase()) return true;
+  if (m.includes("/")) return true;
   return false;
 }
 

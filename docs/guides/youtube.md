@@ -21,13 +21,34 @@ After scope changes ship, **reconnect** so existing tokens pick up analytics sco
 
 | Tool | Purpose |
 | ---- | ------- |
-| `youtube_rest_get_channel` | Channel id, title, custom URL for the connected account |
-| `youtube_rest_list_videos` | List uploads on the channel |
+| `youtube_rest_get_channel` | Channel id, title, custom URL, lifetime subscriber/view counts |
+| `youtube_rest_get_video` | One video — lifetime **views** vs **likes** clearly labeled |
+| `youtube_rest_list_videos` | List uploads with separated lifetime stats |
 | `youtube_rest_update_video` | Update snippet (title, description, tags, privacy) |
 | `youtube_rest_upload_video` | Stub in v1 — use resumable upload externally |
-| `youtube_analytics_query` | Studio metrics via YouTube Analytics API (views, watch time, traffic, revenue when scoped) |
+| `youtube_analytics_report` | **Preferred** — preset Studio reports (daily, top videos, traffic, engagement) |
+| `youtube_analytics_query` | Low-level Analytics API (advanced custom queries) |
 
-Example analytics call:
+### Views vs likes (common mistake)
+
+| Source | `views` | `likes` |
+| ------ | ------- | ------- |
+| Data API (`youtube_rest_get_video`) | Lifetime public `viewCount` | Lifetime public `likeCount` |
+| Analytics (`youtube_analytics_report`) | Watch count **in the date range** | Like actions **in the date range** |
+
+Use `youtube_analytics_report` for “how did we do last month?” Use `youtube_rest_get_video` for “how many views does this video have total?”
+
+Example analytics report:
+
+```json
+{
+  "start_date": "2026-01-01",
+  "end_date": "2026-01-31",
+  "report_type": "channel_daily"
+}
+```
+
+Example low-level query:
 
 ```json
 {
