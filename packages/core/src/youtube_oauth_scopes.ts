@@ -21,7 +21,7 @@ export function youtubeConnectOptionsFromMetadata(
     metadata?.mode === "read_only" || metadata?.mode === "read_write"
       ? metadata.mode
       : modeFallback;
-  return { mode, monetary: metadata?.monetary === true };
+  return { mode, monetary: metadata?.monetary !== false };
 }
 
 function scopeGranted(set: Set<string>, scope: string): boolean {
@@ -41,11 +41,17 @@ function scopeGranted(set: Set<string>, scope: string): boolean {
 }
 
 export function scopesForYoutubeConnect(opts: YoutubeConnectOptions): string[] {
+  // Google docs: yt-analytics-monetary.readonly covers user-activity + revenue reports.
+  // reports/query also requires youtube.readonly (satisfied by manage on read_write).
   const scopes: string[] =
     opts.mode === "read_write"
-      ? [YOUTUBE_MANAGE_SCOPE, YT_ANALYTICS_READONLY_SCOPE]
-      : [YOUTUBE_READONLY_SCOPE, YT_ANALYTICS_READONLY_SCOPE];
-  if (opts.monetary) scopes.push(YT_ANALYTICS_MONETARY_READONLY_SCOPE);
+      ? [YOUTUBE_MANAGE_SCOPE, YT_ANALYTICS_MONETARY_READONLY_SCOPE]
+      : [YOUTUBE_READONLY_SCOPE, YT_ANALYTICS_MONETARY_READONLY_SCOPE];
+  if (opts.monetary === false) {
+    return scopes.map((s) =>
+      s === YT_ANALYTICS_MONETARY_READONLY_SCOPE ? YT_ANALYTICS_READONLY_SCOPE : s
+    );
+  }
   return [...new Set(scopes)];
 }
 

@@ -3,7 +3,9 @@
  * `session.jsonl` event logs.
  */
 import { readFile } from "node:fs/promises";
+import type { Message } from "./types.js";
 import { perChatPath } from "./global_storage.js";
+import { legacySessionLogPath } from "./session_event_log.js";
 
 export type ReplayEntryKind = "user" | "assistant" | "tool_call" | "error";
 
@@ -144,17 +146,120 @@ export function slimReplayEntriesForWire(
   });
 }
 
+function extractMessageText(content: Message["content"]): string {
+  if (typeof content === "string") return content;
+  if (Array.isArray(content)) {
+    return content
+      .filter(
+        (part): part is { type: "text"; text: string } =>
+          typeof part === "object" &&
+          part !== null &&
+          (part as { type?: string }).type === "text" &&
+          typeof (part as { text?: string }).text === "string"
+      )
+      .map((part) => part.text)
+      .join("\n");
+  }
+  return "";
+}
+
+function isHarnessInjectedUserLine(text: string): boolean {
+  const trimmed = text.trim();
+  return !trimmed || trimmed.startsWith("[");
+}
+
+/**
+ * Build UI replay rows from an in-memory harness conversation when disk logs
+ * are missing (e.g. before the first post-fix write, or mid-session handoff).
+ */
+export function buildTranscriptReplayFromConversation(
+  messages: readonly Message[],
+  opts?: { maxEntries?: number }
+): ReplayTranscriptEntry[] {
+  const maxEntries = opts?.maxEntries ?? 500;
+  const out: ReplayTranscriptEntry[] = [];
+  const toolNames = new Map<string, string>();
+  let turnIndex = 0;
+
+  for (let i = 0; i < messages.length && out.length < maxEntries; i++) {
+    const message = messages[i]!;
+    if (message.role === "user") {
+      const text = extractMessageText(message.content).trim();
+      if (isHarnessInjectedUserLine(text)) continue;
+      turnIndex += 1;
+      out.push({
+        id: entryId("user", turnIndex, String(out.length)),
+        kind: "user",
+        turnIndex,
+        text,
+      });
+      continue;
+    }
+
+    if (message.role === "assistant") {
+      const text = extractMessageText(message.content).trim();
+      if (text && !text.startsWith("[")) {
+        out.push({
+          id: entryId("assistant", turnIndex, String(out.length)),
+          kind: "assistant",
+          turnIndex,
+          text,
+        });
+      }
+      const toolCalls =
+        "tool_calls" in message && Array.isArray(message.tool_calls)
+          ? (message.tool_calls as Array<{
+              id: string;
+              function?: { name?: string };
+            }>)
+          : [];
+      for (const call of toolCalls) {
+        if (call.id) toolNames.set(call.id, call.function?.name ?? "tool");
+      }
+      continue;
+    }
+
+    if (message.role === "tool") {
+      const toolCallId =
+        "tool_call_id" in message && typeof message.tool_call_id === "string"
+          ? message.tool_call_id
+          : "";
+      const output = extractMessageText(message.content);
+      const looksFailed =
+        output.startsWith("ERROR") ||
+        output.startsWith("Error:") ||
+        output.includes('"ok":false');
+      out.push({
+        id: entryId("tool", turnIndex, toolCallId || String(out.length)),
+        kind: "tool_call",
+        turnIndex,
+        toolCallId,
+        toolName: toolNames.get(toolCallId) ?? "tool",
+        toolOk: !looksFailed,
+        toolOutput: output,
+        text: output,
+      });
+    }
+  }
+
+  return out;
+}
+
 export async function loadChatTranscriptFromSessionLog(
   chatId: string,
   opts?: { maxEntries?: number }
 ): Promise<ReplayTranscriptEntry[]> {
-  try {
-    const raw = await readFile(sessionLogPath(chatId), "utf8");
-    if (!raw.trim()) return [];
-    return parseSessionJsonlForReplay(raw, opts);
-  } catch {
-    return [];
+  for (const target of [sessionLogPath(chatId), legacySessionLogPath(chatId)]) {
+    try {
+      const raw = await readFile(target, "utf8");
+      if (!raw.trim()) continue;
+      const entries = parseSessionJsonlForReplay(raw, opts);
+      if (entries.length > 0) return entries;
+    } catch {
+      /* try next path */
+    }
   }
+  return [];
 }
 
 /** User + assistant lines only — for harness context hydration. */

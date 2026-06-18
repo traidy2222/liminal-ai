@@ -49,6 +49,7 @@ import {
   revokeYoutubeAccount,
   enrichYoutubeBundleChannel,
   missingYoutubeScopes,
+  youtubeConnectOptionsFromMetadata,
   getAzureAccessToken,
   listAzureOAuthAccounts,
   revokeAzureAccount,
@@ -291,19 +292,37 @@ async function prepareProviderOAuth(
   emit?: (text: string) => void
 ): Promise<ToolResult | null> {
   if (args["start_oauth"] !== true) return null;
-  if (await isConnectProviderOAuthReady(provider)) {
-    emit?.(`${provider}: OAuth already on disk — continuing…`);
-    return null;
-  }
   const mode = args["mode"] === "read_only" ? "read_only" : "read_write";
   const monetary = args["monetary"] === true;
+  const forceReconnect = args["force_reconnect"] === true;
   const services = Array.isArray(args["services"])
     ? (args["services"] as unknown[]).map((s) => String(s))
     : undefined;
+
+  if (!forceReconnect) {
+    if (provider === "youtube") {
+      const accounts = await listYoutubeOAuthAccounts();
+      const account = accounts[0];
+      if (account) {
+        const opts = youtubeConnectOptionsFromMetadata(
+          { mode: account.connectMode ?? mode, monetary: account.monetaryRequested },
+          mode
+        );
+        if (missingYoutubeScopes(account.scopes, opts).length === 0) {
+          emit?.("youtube: OAuth already has required scopes — continuing…");
+          return null;
+        }
+      }
+    } else if (await isConnectProviderOAuthReady(provider)) {
+      emit?.(`${provider}: OAuth already on disk — continuing…`);
+      return null;
+    }
+  }
+
   const started = await startConnectProviderOAuth(provider, {
     mode,
     services,
-    monetary: provider === "youtube" ? monetary : undefined,
+    monetary: provider === "youtube" ? args["monetary"] !== false : undefined,
     onStatus: (m) => emit?.(m),
   });
   if (!started.ok) return { ok: false, error: started.error };
@@ -541,6 +560,20 @@ export function createConnectorTools(registry: ToolRegistry, _emitter: AgentEmit
         }
         const a = accounts[0]!;
         const label = a.channelTitle ?? a.customUrl ?? a.email ?? a.accountId;
+        const opts = youtubeConnectOptionsFromMetadata(
+          { mode: a.connectMode, monetary: a.monetaryRequested },
+          a.connectMode ?? "read_write"
+        );
+        const missing = missingYoutubeScopes(a.scopes, opts);
+        if (missing.length > 0) {
+          return {
+            ok: false,
+            error:
+              `YouTube channel ${label} is missing OAuth scopes: ${missing.join(", ")}. ` +
+              "Reconnect in Settings → Integrations → YouTube (enable revenue analytics) or " +
+              'connect_provider({ provider: "youtube", start_oauth: true, force_reconnect: true }).',
+          };
+        }
         return {
           ok: true,
           output:

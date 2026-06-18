@@ -1966,13 +1966,13 @@ class AppController extends ChangeNotifier {
   Future<void> activateChat(String chatId) async {
     if (!_protocol.isConnected) return;
     inChatWorkspace = true;
-    _sessions.sessionFor(chatId).clearTranscript();
     await _protocol.send('activate_chat', {'chatId': chatId});
     activeChatId = chatId;
     visibleChatIds = [chatId];
     _syncAssetResolver(chatId: chatId);
     _syncDictationAudioClient();
     await refreshConfig();
+    await _ensureTranscriptReplayed(chatId);
     notifyListeners();
   }
 

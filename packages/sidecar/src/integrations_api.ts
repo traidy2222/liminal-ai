@@ -402,7 +402,7 @@ export async function connectYoutubeOAuth(
 ): Promise<{ accountId: string; email?: string; metadata?: Record<string, unknown> }> {
   const result = await runYoutubeHostedConnectFlow({
     mode: opts.mode ?? "read_write",
-    monetary: opts.monetary === true,
+    monetary: opts.monetary !== false,
     openBrowser: opts.openBrowser !== false,
     onStatus: (m) => console.log(`[youtube-oauth] ${m}`),
   });

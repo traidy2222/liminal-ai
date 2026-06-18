@@ -1010,6 +1010,11 @@ export class ContextManager {
     );
   }
 
+  /** Shallow copy of user/assistant/tool turns for UI transcript replay. */
+  getConversationMessages(): readonly Message[] {
+    return [...this.conversation];
+  }
+
   clear(): void {
     this.conversation = [];
     this.workingStateBlock = "";

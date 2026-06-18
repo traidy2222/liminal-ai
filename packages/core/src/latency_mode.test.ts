@@ -40,4 +40,5 @@ test("latency mode patches include intent off; edit lint stays available", () =>
   assert.equal(LATENCY_MODE_ENV_PATCHES["AGENT_PROACTIVE_VERIFY"], "0");
   assert.equal(LATENCY_MODE_ENV_PATCHES["AGENT_PROACTIVE_VERIFY_LINT"], undefined);
   assert.equal(LATENCY_MODE_ENV_PATCHES["AGENT_USER_REPLY_FINALIZE"], "0");
+  assert.equal(LATENCY_MODE_ENV_PATCHES["AGENT_SESSION_JSONL"], undefined);
 });

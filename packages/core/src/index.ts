@@ -159,6 +159,7 @@ export {
   loadChatTranscriptFromSessionLog,
   slimReplayEntriesForWire,
   parseSessionJsonlForReplay,
+  buildTranscriptReplayFromConversation,
   conversationEntriesForHydration,
 } from "./chat_session_replay.js";
 export type { ReplayTranscriptEntry, ReplayEntryKind } from "./chat_session_replay.js";

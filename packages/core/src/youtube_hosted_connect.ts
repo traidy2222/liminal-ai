@@ -22,7 +22,7 @@ export function runYoutubeHostedConnectFlow(
     provider: "youtube",
     siteOrigin: options.siteOrigin,
     mode: options.mode ?? "read_write",
-    extra: options.monetary ? { monetary: "1" } : undefined,
+    extra: options.monetary !== false ? { monetary: "1" } : undefined,
     openBrowser: options.openBrowser,
     onStatus: options.onStatus,
     timeoutMs: options.timeoutMs,

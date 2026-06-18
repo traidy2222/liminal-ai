@@ -38,7 +38,7 @@ class _IntegrationsScreenState extends State<IntegrationsScreen> {
   String _linearMode = 'read_write';
   String _notionMode = 'read_write';
   String _youtubeMode = 'read_write';
-  bool _youtubeMonetary = false;
+  bool _youtubeMonetary = true;
   String _githubMode = 'read_write';
   final Set<String> _googleServices = {};
   final Set<String> _microsoftServices = {};

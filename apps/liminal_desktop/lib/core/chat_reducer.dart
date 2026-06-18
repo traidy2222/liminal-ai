@@ -209,6 +209,7 @@ ChatTranscriptState _onTranscriptReplay(
       messages.add(ErrorMessage(text));
     }
   }
+  if (messages.isEmpty) return state;
   return ChatTranscriptState(messages: messages, busy: false);
 }
 

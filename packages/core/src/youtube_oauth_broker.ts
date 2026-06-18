@@ -209,7 +209,7 @@ export async function listYoutubeOAuthAccounts(): Promise<
       a.metadata?.mode === "read_only" || a.metadata?.mode === "read_write"
         ? a.metadata.mode
         : undefined,
-    monetaryRequested: a.metadata?.monetary === true,
+    monetaryRequested: a.metadata?.monetary !== false,
   }));
 }
 

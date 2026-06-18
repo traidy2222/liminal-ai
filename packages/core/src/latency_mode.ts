@@ -9,7 +9,7 @@ export const LATENCY_MODE_ENV_PATCHES: Readonly<Record<string, string>> = {
   AGENT_REASONING_BUDGET: "0",
   /** Master proactive verify (browser hints, etc.) stays off; edit lint is decoupled — see agent.runProactiveVerificationAfterBatch. */
   AGENT_PROACTIVE_VERIFY: "0",
-  AGENT_SESSION_JSONL: "0",
+  /** Session JSONL stays on — required for chat transcript persistence across restarts. */
   AGENT_UI_VERBOSITY: "quiet",
   AGENT_OBSIDIAN_DISCOVER: "0",
   AGENT_EFFORT: "low",

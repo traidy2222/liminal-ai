@@ -27,6 +27,7 @@ import {
   fetchManagedInferenceModels,
   liminalAppsEnabled,
   loadChatTranscriptFromSessionLog,
+  buildTranscriptReplayFromConversation,
   readInboxRules,
   remoteCommandAllowed,
   slimReplayEntriesForWire,
@@ -561,7 +562,15 @@ export class WsServer {
 
   /** Guaranteed delivery to the socket that just finished cold start. */
   private async unicastTranscriptReplay(ws: WebSocket, chatId: string): Promise<void> {
-    const entries = await loadChatTranscriptFromSessionLog(chatId);
+    let entries = await loadChatTranscriptFromSessionLog(chatId);
+    if (entries.length === 0) {
+      const bridge = this.registry.get(chatId);
+      if (bridge) {
+        entries = buildTranscriptReplayFromConversation(
+          bridge.harness.getContext().getConversationMessages()
+        );
+      }
+    }
     if (entries.length === 0) return;
     this.sendTo(
       ws,

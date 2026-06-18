@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import {
+  buildTranscriptReplayFromConversation,
   conversationEntriesForHydration,
   parseSessionJsonlForReplay,
 } from "./chat_session_replay.js";
@@ -44,6 +45,38 @@ describe("parseSessionJsonlForReplay", () => {
     assert.equal(entries[1]?.toolOk, true);
     assert.equal(entries[2]?.kind, "assistant");
     assert.equal(entries[2]?.text, "Here is the answer.");
+  });
+});
+
+describe("buildTranscriptReplayFromConversation", () => {
+  it("maps user, assistant, and tool rows from harness memory", () => {
+    const entries = buildTranscriptReplayFromConversation([
+      { role: "user", content: "Hello" },
+      {
+        role: "assistant",
+        content: "",
+        tool_calls: [
+          { id: "c1", type: "function", function: { name: "read_file", arguments: "{}" } },
+        ],
+      },
+      { role: "tool", tool_call_id: "c1", content: "file body" },
+      { role: "assistant", content: "Here is the answer." },
+    ]);
+    assert.equal(entries.length, 3);
+    assert.equal(entries[0]?.kind, "user");
+    assert.equal(entries[1]?.kind, "tool_call");
+    assert.equal(entries[1]?.toolName, "read_file");
+    assert.equal(entries[2]?.kind, "assistant");
+  });
+
+  it("skips harness-injected user lines", () => {
+    const entries = buildTranscriptReplayFromConversation([
+      { role: "user", content: "[REASONING BUDGET] high" },
+      { role: "user", content: "Real question" },
+      { role: "assistant", content: "Answer" },
+    ]);
+    assert.equal(entries.length, 2);
+    assert.equal(entries[0]?.text, "Real question");
   });
 });
 

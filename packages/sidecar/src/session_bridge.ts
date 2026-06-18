@@ -3,6 +3,7 @@ import {
   type AgentHarness,
   type ApprovalDecision,
   type PersonaBootstrapProgressEvent,
+  buildTranscriptReplayFromConversation,
   conversationEntriesForHydration,
   loadChatTranscriptFromSessionLog,
   runWithWorkspaceRoot,
@@ -357,7 +358,12 @@ export class SessionBridge {
 
   /** Restore UI + harness context from `session.jsonl` after restart. */
   async replayPersistedTranscript(opts?: { uiOnly?: boolean }): Promise<void> {
-    const entries = await loadChatTranscriptFromSessionLog(this.chatId);
+    let entries = await loadChatTranscriptFromSessionLog(this.chatId);
+    if (entries.length === 0) {
+      entries = buildTranscriptReplayFromConversation(
+        this.harness.getContext().getConversationMessages()
+      );
+    }
     if (entries.length === 0) return;
     if (!opts?.uiOnly && !this.transcriptHydrated) {
       const pairs = conversationEntriesForHydration(entries);

@@ -4,6 +4,7 @@
 import type { ToolDefinition, ToolResult } from "@liminal/core";
 import { defineTool } from "../../shared/helpers.js";
 import { jsonToolResult, qs, youtubeAnalyticsJson, youtubeRestEnabled } from "./youtube_rest_http.js";
+import { youtubeAnalyticsScopeError } from "./youtube_analytics_metrics.js";
 
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 
@@ -20,7 +21,9 @@ export function createYoutubeAnalyticsRestTools(): ToolDefinition[] {
     name: "youtube_analytics_query",
     description:
       "WHAT: Query YouTube Analytics (Studio metrics) for the connected channel.\n" +
-      "WHEN: Watch time, views by day, traffic sources, demographics, impressions/CTR, or revenue (if monetary scope granted).\n" +
+      "WHEN: Watch time, views by day, traffic sources, demographics, or revenue (requires monetary OAuth scope).\n" +
+      "METRICS: views, estimatedMinutesWatched, averageViewDuration, subscribersGained, likes, comments, shares, estimatedRevenue (revenue needs reconnect with analytics scopes). " +
+      "Do not use impressions — not a valid channel report metric.\n" +
       "API: https://developers.google.com/youtube/analytics/reference/reports/query",
     parameters: {
       type: "object",
@@ -57,6 +60,8 @@ export function createYoutubeAnalyticsRestTools(): ToolDefinition[] {
       if (typeof end !== "string") return end;
       const metrics = String(args["metrics"] ?? "").trim();
       if (!metrics) return { ok: false, error: "metrics required" };
+      const scopeErr = await youtubeAnalyticsScopeError(metrics);
+      if (scopeErr) return { ok: false, error: scopeErr };
       const max = Math.min(200, Math.max(1, Number(args["max_results"]) || 100));
       const res = await youtubeAnalyticsJson<unknown>(
         `/reports${qs({
