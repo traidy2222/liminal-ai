@@ -1,6 +1,6 @@
 import React, { useCallback, useLayoutEffect, useRef, type CSSProperties } from "react";
 import { migratePersonaUiTheme, type PersonaUiThemeV2 } from "@liminal/core/persona-ui-theme";
-import { isImageComposerAttachment } from "../imageAttachments.js";
+import { isImageComposerAttachment } from "../../imageAttachments.js";
 import { DictationButton } from "../../audio/DictationButton.js";
 import { useComposerDictation } from "../../useComposerDictation.js";
 import type { ShellContract } from "../ShellContract.js";
