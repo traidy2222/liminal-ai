@@ -9,7 +9,7 @@ import {
 import type { PersonaArtifactPreview } from "@liminal/core/persona-bootstrap-progress";
 import {
   extractStreamingWritePreview,
-  isStreamingWriteTool,
+  promoteStreamingToolCallStatus,
 } from "@liminal/core/streaming-write-preview";
 import {
   applyPersonaProfileToHarness,
@@ -42,18 +42,23 @@ function finalizeStreamingModelReasoning(messages: MessageEntry[]): MessageEntry
   );
 }
 
-function promoteWriteToolCallIfArgsComplete(
+function markToolCallRunning(
+  messages: MessageEntry[],
+  callId: string
+): MessageEntry[] {
+  return messages.map((m) => {
+    if (m.kind !== "tool_call" || m.callId !== callId) return m;
+    if (m.status !== "streaming" && m.status !== "pending_approval") return m;
+    return { ...m, status: "running" as const };
+  });
+}
+
+function promoteToolCallAfterArgsDelta(
   entry: Extract<MessageEntry, { kind: "tool_call" }>,
   argsJson: string
 ): Extract<MessageEntry, { kind: "tool_call" }> {
-  if (entry.status !== "streaming" || !isStreamingWriteTool(entry.name)) {
-    return { ...entry, argsJson };
-  }
-  const preview = extractStreamingWritePreview(entry.name, argsJson);
-  if (preview && !preview.incomplete) {
-    return { ...entry, argsJson, status: "running" };
-  }
-  return { ...entry, argsJson };
+  const status = promoteStreamingToolCallStatus(entry.name, entry.status, argsJson);
+  return status === entry.status ? { ...entry, argsJson } : { ...entry, argsJson, status };
 }
 
 export type MessageEntry =
@@ -178,6 +183,8 @@ type Action =
       payload: AgentEventMap["turn_summary"];
     }
   | { type: "tool_timing"; callId: string; durationMs: number }
+  | { type: "tool_progress"; callId: string }
+  | { type: "tool_executing"; callId: string }
   | { type: "error"; msg: string }
   | {
       type: "think";
@@ -440,10 +447,17 @@ function reducer(state: AgentState, action: Action): AgentState {
       }
       const messages = state.messages.map((m) => {
         if (m.kind !== "tool_call" || m.callId !== callId) return m;
-        return promoteWriteToolCallIfArgsComplete(m, m.argsJson + argsDelta);
+        return promoteToolCallAfterArgsDelta(m, m.argsJson + argsDelta);
       });
       return { ...state, messages };
     }
+
+    case "tool_progress":
+    case "tool_executing":
+      return {
+        ...state,
+        messages: markToolCallRunning(state.messages, action.callId),
+      };
 
     case "tool_approval": {
       const messages = state.messages.map((m) =>
@@ -873,6 +887,12 @@ export function useAgent(
     });
     emitter.on("tool_timing", ({ callId, durationMs }) => {
       dispatch({ type: "tool_timing", callId, durationMs });
+    });
+    emitter.on("tool_progress", ({ callId }) => {
+      dispatch({ type: "tool_progress", callId });
+    });
+    emitter.on("tool_executing", ({ callId }) => {
+      dispatch({ type: "tool_executing", callId });
     });
     emitter.on("error", ({ err }) => {
       flushNow();

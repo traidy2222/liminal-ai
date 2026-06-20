@@ -15,7 +15,7 @@ export const thinkTool = defineTool({
     "clarification_needed=true → pauses execution and surfaces question to user. " +
     "scope declared → arms compensation ledger on mutating/destructive work.\n" +
     "ARGS: content (required — planning text); " +
-    "tool_families[] (families: shell/git/code_intel/web/…; integrations: google_workspace, microsoft_365, github, slack, linear, notion, xero, or connectors for connect_provider only); " +
+    "tool_families[] (families: shell/git/code_intel/web/…; integrations: google_workspace, microsoft_365, github, ida, slack, linear, notion, xero, or connectors for connect_provider only); " +
     "scope (read_only|additive|mutating|destructive); " +
     "unknowns[] (gaps to resolve before acting); " +
     "clarification_needed + clarification_question; " +

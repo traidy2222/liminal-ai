@@ -5,6 +5,7 @@
 import type { AgentEmitter, ToolDefinition, ToolRegistry, ToolResult, PropertySchema } from "@liminal/core";
 import { cleanMcpCallArgs, expandMcpToolProperties } from "@liminal/core";
 import { enrichGoogleMcpToolDescription } from "../google/google_mcp_tool_hints.js";
+import { enrichIdaMcpToolDescription } from "../ida/ida_mcp_tool_hints.js";
 import {
   type GoogleServiceId,
   effectiveHarnessEnvRaw,
@@ -28,6 +29,9 @@ import {
 import { filterMcpToolRecords, isMcpReadTool, isMcpWriteTool } from "./mcp_tool_classify.js";
 import { registerConnectorToolFamilies } from "../../shared/connector_family_map.js";
 import { validateOutboundEmailStyle } from "../google/gmail_compose_guard.js";
+import { IDA_PARENT_PROVIDER } from "../ida/ida_connect.js";
+import { registerIdaCompanionTools, unregisterIdaCompanionTools } from "../ida/ida_companion_tools.js";
+import { injectIdaDatabaseArgs, wrapIdaMcpHandler } from "../ida/ida_session.js";
 
 const MCP_PROTOCOL_VERSION = "2025-06-18";
 const MCP_CLIENT_INFO = { name: "liminal-harness", version: "0.1.0" };
@@ -45,24 +49,39 @@ interface JsonRpcResponse<T> {
   error?: { code: number; message: string; data?: unknown };
 }
 
+function readMcpSessionId(res: Response): string | undefined {
+  return res.headers.get("mcp-session-id")?.trim() || undefined;
+}
+
+interface McpJsonRpcResult<T> {
+  reply: JsonRpcResponse<T> | null;
+  sessionId?: string;
+}
+
 async function postJsonRpc<T>(
   serverUrl: string,
   body: object,
   auth: AuthScheme,
-  expectReply: boolean
-): Promise<JsonRpcResponse<T> | null> {
+  expectReply: boolean,
+  sessionId?: string
+): Promise<McpJsonRpcResult<T>> {
   const headers: Record<string, string> = {
     "Content-Type": "application/json",
     Accept: "application/json, text/event-stream",
     ...(await resolveAuthHeaderAsync(auth)),
   };
+  if (sessionId) headers["Mcp-Session-Id"] = sessionId;
   const res = await fetch(serverUrl, {
     method: "POST",
     headers,
     body: JSON.stringify(body),
     signal: AbortSignal.timeout(MCP_FETCH_TIMEOUT_MS),
   });
-  if (!expectReply) return null;
+  const nextSessionId = readMcpSessionId(res) ?? sessionId;
+  if (!expectReply) {
+    await res.arrayBuffer().catch(() => undefined);
+    return { reply: null, sessionId: nextSessionId };
+  }
   if (!res.ok) {
     throw new Error(`HTTP ${res.status} ${res.statusText}`);
   }
@@ -75,14 +94,16 @@ async function postJsonRpc<T>(
       if (!payload || payload === "[DONE]") continue;
       try {
         const parsed = JSON.parse(payload) as JsonRpcResponse<T>;
-        if (parsed && parsed.jsonrpc === "2.0") return parsed;
+        if (parsed && parsed.jsonrpc === "2.0") {
+          return { reply: parsed, sessionId: nextSessionId };
+        }
       } catch {
         /* continue */
       }
     }
     throw new Error("SSE response contained no JSON-RPC payload");
   }
-  return (await res.json()) as JsonRpcResponse<T>;
+  return { reply: (await res.json()) as JsonRpcResponse<T>, sessionId: nextSessionId };
 }
 
 interface McpToolsListResult {
@@ -101,8 +122,8 @@ interface McpToolCallResult {
 export async function mcpHandshakeAndListTools(
   serverUrl: string,
   auth: AuthScheme
-): Promise<McpToolRecord[]> {
-  await postJsonRpc<{ protocolVersion?: string }>(
+): Promise<{ tools: McpToolRecord[]; mcpSessionId?: string }> {
+  const init = await postJsonRpc<{ protocolVersion?: string }>(
     serverUrl,
     {
       jsonrpc: "2.0",
@@ -117,32 +138,41 @@ export async function mcpHandshakeAndListTools(
     auth,
     true
   );
+  let sessionId = init.sessionId;
   try {
-    await postJsonRpc(
+    const notified = await postJsonRpc(
       serverUrl,
       { jsonrpc: "2.0", method: "notifications/initialized" },
       auth,
-      false
+      false,
+      sessionId
     );
+    sessionId = notified.sessionId ?? sessionId;
   } catch {
     /* tolerate */
   }
-  const reply = await postJsonRpc<McpToolsListResult>(
+  const listed = await postJsonRpc<McpToolsListResult>(
     serverUrl,
     { jsonrpc: "2.0", id: nextJsonRpcId(), method: "tools/list" },
     auth,
-    true
+    true,
+    sessionId
   );
+  const reply = listed.reply;
+  sessionId = listed.sessionId ?? sessionId;
   if (!reply || reply.error) {
     throw new Error(`tools/list failed: ${reply?.error?.message ?? "no response"}`);
   }
   const list = reply.result?.tools ?? [];
-  return list.map((t) => ({
-    remoteName: t.name,
-    toolName: "",
-    description: (t.description ?? "").slice(0, 800),
-    inputSchema: t.inputSchema ?? { type: "object", properties: {}, additionalProperties: true },
-  }));
+  return {
+    mcpSessionId: sessionId,
+    tools: list.map((t) => ({
+      remoteName: t.name,
+      toolName: "",
+      description: (t.description ?? "").slice(0, 800),
+      inputSchema: t.inputSchema ?? { type: "object", properties: {}, additionalProperties: true },
+    })),
+  };
 }
 
 function ensureToolParameterShape(schema: Record<string, unknown>): {
@@ -229,7 +259,7 @@ function buildMcpToolHandler(
   return async (args): Promise<ToolResult> => {
     let reply: JsonRpcResponse<McpToolCallResult> | null;
     try {
-      reply = await postJsonRpc<McpToolCallResult>(
+      const rpc = await postJsonRpc<McpToolCallResult>(
         record.serverUrl,
         {
           jsonrpc: "2.0",
@@ -241,8 +271,11 @@ function buildMcpToolHandler(
           },
         },
         record.auth,
-        true
+        true,
+        record.mcpSessionId
       );
+      if (rpc.sessionId) record.mcpSessionId = rpc.sessionId;
+      reply = rpc.reply;
     } catch (e) {
       const raw = e instanceof Error ? e.message : String(e);
       return { ok: false, error: enrichGoogleMcpProbeError(record.serverUrl, `transport error: ${raw}`) };
@@ -261,6 +294,26 @@ function buildMcpToolHandler(
   };
 }
 
+/** Call a remote MCP tool by name on an attached connection (companion wrappers). */
+export async function invokeMcpToolFromRecord(
+  record: McpConnectionRecord,
+  remoteName: string,
+  args: Record<string, unknown>
+): Promise<ToolResult> {
+  const tool = record.tools.find((t) => t.remoteName === remoteName);
+  if (!tool) {
+    return { ok: false, error: `Remote MCP tool not on connection: ${remoteName}` };
+  }
+  const remoteProperties = (tool.inputSchema?.properties as Record<string, unknown>) ?? {};
+  const cleaned = cleanMcpCallArgs(args, remoteProperties);
+  const callArgs =
+    record.parentProvider === IDA_PARENT_PROVIDER || record.name === "ida"
+      ? injectIdaDatabaseArgs(remoteName, cleaned)
+      : cleaned;
+  const handler = buildMcpToolHandler(record, tool, remoteProperties);
+  return handler(callArgs);
+}
+
 function buildMcpTool(record: McpConnectionRecord, tool: McpToolRecord): ToolDefinition {
   const { properties: rawProperties, required } = ensureToolParameterShape(tool.inputSchema);
   const properties = expandMcpToolProperties(rawProperties);
@@ -272,6 +325,9 @@ function buildMcpTool(record: McpConnectionRecord, tool: McpToolRecord): ToolDef
     tool.remoteName,
     `[mcp:${record.name}] ${tool.description || tool.remoteName}`
   );
+  if (record.parentProvider === IDA_PARENT_PROVIDER || record.name === "ida") {
+    description = enrichIdaMcpToolDescription(record.name, tool.remoteName, description);
+  }
   let handler = buildMcpToolHandler(record, tool, remoteProperties);
   if (record.name === "google_gmail" && tool.remoteName === "create_draft") {
     description +=
@@ -282,6 +338,9 @@ function buildMcpTool(record: McpConnectionRecord, tool: McpToolRecord): ToolDef
       if (styleErr) return { ok: false, error: styleErr };
       return inner(args);
     };
+  }
+  if (record.parentProvider === IDA_PARENT_PROVIDER || record.name === "ida") {
+    handler = wrapIdaMcpHandler(tool.remoteName, handler);
   }
   return defineTool({
     name: tool.toolName,
@@ -314,12 +373,20 @@ export function registerMcpConnection(registry: ToolRegistry, record: McpConnect
     registry.register(buildMcpTool(record, t));
     registered.push(t.toolName);
   }
-  registerConnectorToolFamilies(registry, record.name, registered, record.parentProvider);
+  registerConnectorToolFamilies(registry, record.name, registered, record.parentProvider, {
+    services: record.services,
+  });
+  if (record.parentProvider === IDA_PARENT_PROVIDER || record.name === "ida") {
+    registered.push(...registerIdaCompanionTools(registry, record));
+  }
   return registered;
 }
 
 export function unregisterMcpConnection(registry: ToolRegistry, record: McpConnectionRecord): number {
   let count = 0;
+  if (record.parentProvider === IDA_PARENT_PROVIDER || record.name === "ida") {
+    count += unregisterIdaCompanionTools(registry);
+  }
   for (const t of record.tools) {
     if (registry.unregister(t.toolName)) count++;
   }
@@ -415,8 +482,11 @@ export async function attachMcpConnection(
 
   const auth = opts.auth ?? { kind: "none" };
   let tools: McpToolRecord[];
+  let mcpSessionId: string | undefined;
   try {
-    tools = await mcpHandshakeAndListTools(opts.url, auth);
+    const handshake = await mcpHandshakeAndListTools(opts.url, auth);
+    tools = handshake.tools;
+    mcpSessionId = handshake.mcpSessionId;
   } catch (e) {
     const raw = e instanceof Error ? e.message : String(e);
     throw new Error(enrichGoogleMcpProbeError(opts.url, raw));
@@ -447,6 +517,7 @@ export async function attachMcpConnection(
     services: opts.services,
     oauthAccountId: opts.oauthAccountId,
     sidecarManaged: opts.sidecarManaged,
+    mcpSessionId,
   };
 
   await writeConnection(record);

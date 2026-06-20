@@ -132,6 +132,40 @@ export const ALL_MICROSOFT_SERVICE_IDS: MicrosoftServiceId[] = MICROSOFT_WORKSPA
   (s) => s.id
 );
 
+/** Default connect/OAuth surface when services[] is omitted — daily workflow only. */
+export const DEFAULT_MICROSOFT_SERVICE_IDS: MicrosoftServiceId[] = ["mail", "calendar"];
+
+export interface MicrosoftServiceGroup {
+  id: string;
+  label: string;
+  services: MicrosoftServiceId[];
+}
+
+export const MICROSOFT_SERVICE_GROUPS: MicrosoftServiceGroup[] = [
+  { id: "core", label: "Mail & calendar", services: ["mail", "calendar"] },
+  {
+    id: "files",
+    label: "Files & sites",
+    services: ["onedrive", "sharepoint", "excel"],
+  },
+  { id: "collab", label: "Teams & tasks", services: ["teams", "planner", "todo", "onenote"] },
+  { id: "directory", label: "People & search", services: ["contacts", "user", "search"] },
+];
+
+export const MICROSOFT_CONNECT_PRESETS: Array<{
+  id: string;
+  label: string;
+  services: MicrosoftServiceId[];
+}> = [
+  { id: "daily", label: "Mail & calendar", services: ["mail", "calendar"] },
+  {
+    id: "productivity",
+    label: "Mail, calendar & files",
+    services: ["mail", "calendar", "onedrive", "sharepoint", "excel", "teams"],
+  },
+  { id: "all", label: "Everything", services: ALL_MICROSOFT_SERVICE_IDS },
+];
+
 export function getMicrosoftServicePreset(id: string): MicrosoftServicePreset | undefined {
   return MICROSOFT_WORKSPACE_SERVICES.find((s) => s.id === id);
 }
@@ -140,7 +174,7 @@ export function resolveMicrosoftServices(serviceIds?: string[]): MicrosoftServic
   const ids =
     serviceIds && serviceIds.length > 0
       ? serviceIds.map((s) => s.trim().toLowerCase()).filter(Boolean)
-      : ALL_MICROSOFT_SERVICE_IDS;
+      : DEFAULT_MICROSOFT_SERVICE_IDS;
   const out: MicrosoftServicePreset[] = [];
   const seen = new Set<MicrosoftServiceId>();
   for (const id of ids) {

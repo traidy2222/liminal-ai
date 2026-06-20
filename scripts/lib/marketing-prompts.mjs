@@ -21,13 +21,14 @@ export const MARKETING_PROMPT_BASES = [
     subtitle:
       "plan → write_file → run_shell (node:test) — self-healing loop with every step visible in the harness.",
     prompt: `You are recording a marketing demo. Show how Liminal ships code with verification.
+The marketing-capture/ folder was wiped clean for this run — all files are new.
 
 1) Call plan() with exactly 3 steps: implement slugify, add tests, run tests.
 2) Create marketing-capture/slugify.ts exporting slugify(input: string): string — lowercase, trim, collapse whitespace to single hyphens, strip characters outside [a-z0-9-].
-3) Create marketing-capture/slugify.test.ts using node:test (import test, assert from node:test / node:assert) with 3 cases: "Hello World" → "hello-world", leading/trailing spaces, punctuation stripped.
-4) Run: node --test marketing-capture/slugify.test.js marketing-capture/slugify.test.ts (use whichever path exists after you write the file).
-If tests fail, fix the implementation once and re-run. End with PASS/FAIL and one example slugify("Foo Bar!") result.`,
-    maxWaitMs: 900_000,
+3) Create marketing-capture/slugify.test.js using node:test (import test, assert from node:test / node:assert) with 3 cases: "Hello World" → "hello-world", leading/trailing spaces, punctuation stripped.
+4) run_shell command "node --test marketing-capture/slugify.test.js" (do not use run_tests — use run_shell only).
+If tests fail, fix with edit_file (not write_file create) and re-run once. End with PASS/FAIL and one example slugify("Foo Bar!") result.`,
+    maxWaitMs: 600_000,
     accent: "#00ff88",
     expectTools: ["plan", "write_file", "run_shell", "think"],
   },
@@ -42,7 +43,7 @@ If tests fail, fix the implementation once and re-run. End with PASS/FAIL and on
 2) grep_file path packages/core/src/agent.ts pattern "class AgentHarness" — note the line number of the match.
 3) read_file path packages/core/src/agent.ts offset=<that line minus 5> limit=120 line_numbers true — inspect how a turn dispatches tools and consumes results.
 4) In exactly 4 bullets, explain the ReAct loop as implemented here: user message → model tool calls → tool results → next model turn → turn_end.`,
-    maxWaitMs: 600_000,
+    maxWaitMs: 360_000,
     accent: "#00d4ff",
     expectTools: ["repo_map", "grep_file", "read_file", "think"],
   },
@@ -58,7 +59,7 @@ If tests fail, fix the implementation once and re-run. End with PASS/FAIL and on
 3) memory_stats
 
 Reply in 3 short bullets: the stored value, the top recall_relevant hit text, and total note count from memory_stats.`,
-    maxWaitMs: 420_000,
+    maxWaitMs: 300_000,
     accent: "#ff4488",
     expectTools: ["remember", "recall_relevant", "memory_stats"],
   },
@@ -72,7 +73,7 @@ Reply in 3 short bullets: the stored value, the top recall_relevant hit text, an
 1) web_search for OpenRouter prompt caching cache_control (official docs first).
 2) web_fetch the best official OpenRouter documentation URL from results (not a forum post).
 3) Answer in exactly 3 bullets. Each bullet must include: a full https URL you fetched, and one exact parameter or JSON field name for caching copied from that page (e.g. cache_control). Max 90 words total.`,
-    maxWaitMs: 900_000,
+    maxWaitMs: 540_000,
     accent: "#cc88ff",
     expectTools: ["web_search", "web_fetch"],
   },

@@ -11,6 +11,8 @@ import { categoryForTool } from "../categoryMeta.js";
 import { buildMessagesStyle, messageEntranceClass } from "../shellLayout.js";
 import { LIM } from "../personaVars.js";
 import type { MessageEntry } from "../../useSSE.js";
+import { ChatTurnThread, skipUserOrAssistantRow } from "../../ChatTurnThread.js";
+import type { TurnRow } from "../../chatTurnLayout.js";
 import { SubtaskInlineCard } from "../../SubtaskInspectorModal.js";
 import { PlanProgressBlock } from "../../PlanProgressBlock.js";
 
@@ -123,7 +125,7 @@ export function StudioShell({ contract }: { contract: ShellContract }) {
   useStickyAutoScroll(messagesRef, bottomRef, contract.groupedMessages);
 
   const {
-    groupedMessages, toolResultMap, surface, showRawHarness, rawHarnessBlob, error,
+    chatTurns, toolResultMap, surface, showRawHarness, rawHarnessBlob, error,
     busy, allToolCalls, personaDisplayLabel, personaName, showPanels, signalHud, onInspectSubtask,
   } = contract;
 
@@ -133,6 +135,130 @@ export function StudioShell({ contract }: { contract: ShellContract }) {
   // Determine whether to show drawer panel (based on panelLayout)
   const panelLayout = personaTheme.panelLayout ?? "right";
   const showDrawerPanel = showPanels && (panelLayout === "right" || panelLayout === "both");
+
+  const studioMdComponents = (streaming: boolean) => ({
+    p({ children }: { children?: React.ReactNode }) { return <p style={{ margin: "0 0 10px", lineHeight: 1.72 }}>{children}</p>; },
+    a({ href, children }: { href?: string; children?: React.ReactNode }) { return <a href={href} target="_blank" rel="noopener noreferrer" style={{ color: CYAN, textDecoration: "none", borderBottom: "1px dotted rgba(var(--lim-accent-rgb),0.3)" }}>{children}</a>; },
+    h1({ children }: { children?: React.ReactNode }) { return <h1 style={{ fontSize: 20, margin: "16px 0 8px", color: LIM.markdownH1, fontWeight: 700 }}>{children}</h1>; },
+    h2({ children }: { children?: React.ReactNode }) { return <h2 style={{ fontSize: 17, margin: "14px 0 7px", color: LIM.markdownH2, fontWeight: 700 }}>{children}</h2>; },
+    h3({ children }: { children?: React.ReactNode }) { return <h3 style={{ fontSize: 14, margin: "12px 0 6px", color: LIM.secondary, fontWeight: 600 }}>{children}</h3>; },
+    ul({ children }: { children?: React.ReactNode }) { return <ul style={{ margin: "0 0 10px 20px", lineHeight: 1.7 }}>{children}</ul>; },
+    ol({ children }: { children?: React.ReactNode }) { return <ol style={{ margin: "0 0 10px 20px", lineHeight: 1.7 }}>{children}</ol>; },
+    li({ children }: { children?: React.ReactNode }) { return <li style={{ margin: "3px 0" }}>{children}</li>; },
+    pre({ children }: { children?: React.ReactNode }) { return <div style={{ margin: "10px 0" }}>{children}</div>; },
+    code({ className, children }: { className?: string; children?: React.ReactNode }) {
+      return renderFencedCodeBlock(className, children, {
+        streaming,
+        codeBg: LIM.codeBg,
+        inlineCodeStyle: {
+          background: LIM.surface1,
+          border: "1px solid rgba(var(--lim-accent-rgb),0.12)",
+          borderRadius: 4,
+          padding: "1px 5px",
+          color: GREEN,
+          fontFamily: "monospace",
+          fontSize: "0.9em",
+        },
+      });
+    },
+    blockquote({ children }: { children?: React.ReactNode }) {
+      return <blockquote style={{ margin: "12px 0", padding: "8px 14px", borderLeft: "2px solid rgba(var(--lim-accent-rgb),0.25)", color: LIM.textDim, fontStyle: "italic", background: LIM.surface1, borderRadius: "0 8px 8px 0" }}>{children}</blockquote>;
+    },
+    table({ children }: { children?: React.ReactNode }) { return <div style={{ overflowX: "auto", margin: "12px 0" }}><table style={{ width: "100%", borderCollapse: "collapse", background: LIM.surface1 }}>{children}</table></div>; },
+    th({ children }: { children?: React.ReactNode }) { return <th style={{ textAlign: "left", border: "1px solid rgba(var(--lim-accent-rgb),0.1)", padding: "7px 12px", background: LIM.surface2, color: LIM.textMuted, fontWeight: 700, fontSize: 11 }}>{children}</th>; },
+    td({ children }: { children?: React.ReactNode }) { return <td style={{ border: "1px solid rgba(var(--lim-accent-rgb),0.07)", padding: "6px 12px", verticalAlign: "top", color: LIM.textDim }}>{children}</td>; },
+    hr() { return <div style={{ margin: "16px 0", height: 1, background: "linear-gradient(90deg, transparent, rgba(var(--lim-accent-rgb),0.15), rgba(var(--lim-success-rgb),0.2), rgba(var(--lim-accent-rgb),0.15), transparent)" }} />; },
+  });
+
+  const renderStudioWorkingEntry = (entry: TurnRow, key: string) => {
+    if ("kind" in entry && entry.kind === "tool_group") {
+      const grp = entry as ToolCallGroup;
+      const doneCount = grp.entries.filter((e) => e.status === "done").length;
+      const errorCount = grp.entries.filter((e) => e.status === "error").length;
+      const anyRun = grp.entries.some((e) => e.status === "running" || e.status === "streaming");
+      const statusColor = errorCount > 0 ? RED_ERR : anyRun ? CYAN : GREEN;
+      const statusIcon = errorCount > 0 ? "✗" : anyRun ? "⟳" : "✓";
+      return (
+        <div key={key} className={entrance || undefined} style={{ display: "flex", alignItems: "center", gap: 8, padding: "6px 12px", borderRadius: 8, background: "rgba(var(--lim-accent-rgb),0.04)", border: "1px solid rgba(var(--lim-accent-rgb),0.08)", fontSize: 11, fontFamily: "monospace" }}>
+          <span style={{ color: statusColor }}>{statusIcon}</span>
+          <span style={{ color: "#667788" }}>{grp.name}</span>
+          <span style={{ color: "#334455" }}>× {grp.entries.length}</span>
+          <span style={{ color: "#334455" }}>· {doneCount}/{grp.entries.length} done</span>
+        </div>
+      );
+    }
+    if (!skipUserOrAssistantRow(entry)) return null;
+    const m = entry;
+
+    switch (m.kind) {
+      case "working_note":
+        return (
+          <div key={key} style={{ padding: "8px 14px", borderRadius: 8, background: "rgba(0,4,12,0.35)", border: "1px solid rgba(var(--lim-accent-rgb),0.06)", color: "#778899", fontSize: 12, fontStyle: "italic", lineHeight: 1.6, whiteSpace: "pre-wrap" }}>
+            {m.text}
+          </div>
+        );
+      case "tool_call": {
+        const tc = m as ToolCallEntry;
+        if (toolCardsMode === "hidden") return null;
+        const cat = categoryForTool(tc.name);
+        const isActive = tc.status === "running" || tc.status === "streaming";
+        const statusColor = tc.status === "error" ? RED_ERR : tc.status === "done" ? GREEN : tc.status === "pending_approval" ? MAGENTA : CYAN;
+        const statusIcon = tc.status === "error" ? "✗" : tc.status === "done" ? "✓" : tc.status === "pending_approval" ? "⚠" : "⟳";
+        const arg = parsePrimaryArg(tc.argsJson);
+        return (
+          <div key={key} style={{ padding: "6px 12px", borderRadius: 8, background: "rgba(var(--lim-accent-rgb),0.03)", border: "1px solid rgba(var(--lim-accent-rgb),0.07)", fontSize: 11, fontFamily: "monospace", display: "flex", alignItems: "center", gap: 8 }}>
+            <span style={{ color: cat.color }}>{cat.icon}</span>
+            <span style={{ color: isActive ? "#aabbcc" : "#556677" }}>{tc.name}</span>
+            {arg && <span style={{ color: "#334455", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", flex: 1 }}>{arg}</span>}
+            <span style={{ color: statusColor, flexShrink: 0 }}>{statusIcon}</span>
+            {isActive && <span style={{ color: CYAN, fontSize: 9 }}>…</span>}
+          </div>
+        );
+      }
+      case "tool_result":
+        return null;
+      case "think":
+        return (
+          <div key={key} style={{ padding: "8px 14px", borderRadius: 8, background: "rgba(0,4,12,0.45)", border: "1px solid rgba(var(--lim-accent-rgb),0.06)", color: "#556677", fontSize: 12, fontStyle: "italic", lineHeight: 1.6 }}>
+            <div style={{ color: "#334455", fontSize: 9, fontWeight: 700, letterSpacing: "0.08em", marginBottom: 4 }}>◈ REASONING</div>
+            {m.content.length > 800 ? m.content.slice(0, 799) + "…" : m.content}
+          </div>
+        );
+      case "model_reasoning":
+        return (
+          <div key={key} style={{ padding: "8px 14px", borderRadius: 8, background: "rgba(0,4,12,0.45)", border: "1px solid rgba(var(--lim-warn-rgb),0.08)", color: "#554433", fontSize: 12, fontStyle: "italic", lineHeight: 1.6 }}>
+            <div style={{ color: "#443322", fontSize: 9, fontWeight: 700, letterSpacing: "0.08em", marginBottom: 4 }}>◈ MODEL REASONING</div>
+            {m.text.length > 800 ? m.text.slice(0, 799) + "…" : m.text}
+          </div>
+        );
+      case "plan":
+        return (
+          <div key={key}>
+            <PlanProgressBlock steps={Array.isArray(m.steps) ? m.steps : []} streaming={m.streaming} previewText={m.previewText} />
+          </div>
+        );
+      case "subtask":
+        return <SubtaskInlineCard key={key} entry={m} onInspect={onInspectSubtask} />;
+      case "trace":
+        if (!showRawHarness) return null;
+        return <div key={key} style={{ fontSize: 10, color: "#223344", fontFamily: "monospace" }}>[trace] {m.text}</div>;
+      case "provider_retry":
+        if (!showRawHarness) return null;
+        return <div key={key} style={{ fontSize: 10, color: AMBER, fontFamily: "monospace" }}>{m.text}</div>;
+      case "context_compressed":
+        if (!showRawHarness) return null;
+        return <div key={key} style={{ fontSize: 10, color: "#334455", fontFamily: "monospace" }}>⊙ context compressed: {m.beforePct}% → {m.afterPct}%</div>;
+      case "pulse_nudge":
+        return (
+          <div key={key} style={{ padding: "8px 14px", borderRadius: 8, background: "rgba(var(--lim-secondary-rgb),0.04)", border: "1px solid rgba(var(--lim-secondary-rgb),0.07)", fontSize: 12, color: "#778899" }}>
+            <span style={{ color: MAGENTA, marginRight: 6, fontSize: 10 }}>PULSE</span>
+            {m.text}
+          </div>
+        );
+      default:
+        return null;
+    }
+  };
 
   return (
     <>
@@ -187,170 +313,34 @@ export function StudioShell({ contract }: { contract: ShellContract }) {
             style={{ flex: 1, overflowY: "auto", padding: "20px 0", display: "flex", flexDirection: "column", gap: 10 }}
           >
             <div style={{ maxWidth: 720, width: "100%", margin: "0 auto", padding: "0 24px", display: "flex", flexDirection: "column", gap: 10 }}>
-              {groupedMessages.length === 0 && !busy && (
+              {chatTurns.length === 0 && !busy && (
                 <div style={{ color: "rgba(var(--lim-accent-rgb),0.18)", textAlign: "center", marginTop: 60, fontSize: 14 }}>
                   Start a conversation…
                 </div>
               )}
 
-              {groupedMessages.map((entry, i) => {
-                // Tool group
-                if ("kind" in entry && entry.kind === "tool_group") {
-                  const grp = entry as ToolCallGroup;
-                  const doneCount  = grp.entries.filter(e => e.status === "done").length;
-                  const errorCount = grp.entries.filter(e => e.status === "error").length;
-                  const anyRun     = grp.entries.some(e => e.status === "running" || e.status === "streaming");
-                  const statusColor = errorCount > 0 ? RED_ERR : anyRun ? CYAN : GREEN;
-                  const statusIcon  = errorCount > 0 ? "✗" : anyRun ? "⟳" : "✓";
-                  return (
-                    <div key={`grp-${i}`} className={entrance || undefined} style={{ display: "flex", alignItems: "center", gap: 8, padding: "6px 12px", borderRadius: 8, background: "rgba(var(--lim-accent-rgb),0.04)", border: "1px solid rgba(var(--lim-accent-rgb),0.08)", fontSize: 11, fontFamily: "monospace" }}>
-                      <span style={{ color: statusColor }}>{statusIcon}</span>
-                      <span style={{ color: "#667788" }}>{grp.name}</span>
-                      <span style={{ color: "#334455" }}>× {grp.entries.length}</span>
-                      <span style={{ color: "#334455" }}>· {doneCount}/{grp.entries.length} done</span>
+              <ChatTurnThread
+                turns={chatTurns}
+                renderUser={(m) => (
+                  <div className={entrance || undefined} style={{ animation: "studio-in 0.22s ease", display: "flex", justifyContent: "flex-end" }}>
+                    <div style={{ maxWidth: "80%", padding: "10px 16px", borderRadius: 16, background: "rgba(255,255,255,0.07)", border: "1px solid rgba(255,255,255,0.09)", color: "var(--lim-text, #c8d4e0)", lineHeight: 1.6, fontSize: 14, whiteSpace: "pre-wrap" }}>
+                      {m.text}
                     </div>
-                  );
-                }
-
-                const m = entry as MessageEntry;
-
-                switch (m.kind) {
-                  case "user":
-                    return (
-                      <div key={i} className={entrance || undefined} style={{ animation: "studio-in 0.22s ease", display: "flex", justifyContent: "flex-end" }}>
-                        <div style={{ maxWidth: "80%", padding: "10px 16px", borderRadius: 16, background: "rgba(255,255,255,0.07)", border: "1px solid rgba(255,255,255,0.09)", color: "var(--lim-text, #c8d4e0)", lineHeight: 1.6, fontSize: 14, whiteSpace: "pre-wrap" }}>
-                          {m.text}
-                        </div>
-                      </div>
-                    );
-
-                  case "assistant":
-                    return (
-                      <div key={i} className={entrance || undefined} style={{ animation: "studio-in 0.22s ease", display: "flex", justifyContent: "flex-start", alignItems: "flex-start", gap: 10 }}>
-                        <div style={{ width: 28, height: 28, borderRadius: "50%", background: `rgba(var(--lim-accent-rgb),0.1)`, border: `1px solid rgba(var(--lim-accent-rgb),0.2)`, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0, marginTop: 2 }}>
-                          <span style={{ color: CYAN, fontSize: 10 }}>❯</span>
-                        </div>
-                        <div className="lim-md" style={{ flex: 1, minWidth: 0, color: "var(--lim-assistant, #00ff88)", lineHeight: 1.7, fontSize: 14 }}>
-                          <AssistantMessageContent
-                            text={m.text}
-                            streaming={m.streaming}
-                            components={{
-                              p({ children }) { return <p style={{ margin: "0 0 10px", lineHeight: 1.72 }}>{children}</p>; },
-                              a({ href, children }) { return <a href={href} target="_blank" rel="noopener noreferrer" style={{ color: CYAN, textDecoration: "none", borderBottom: "1px dotted rgba(var(--lim-accent-rgb),0.3)" }}>{children}</a>; },
-                              h1({ children }) { return <h1 style={{ fontSize: 20, margin: "16px 0 8px", color: LIM.markdownH1, fontWeight: 700 }}>{children}</h1>; },
-                              h2({ children }) { return <h2 style={{ fontSize: 17, margin: "14px 0 7px", color: LIM.markdownH2, fontWeight: 700 }}>{children}</h2>; },
-                              h3({ children }) { return <h3 style={{ fontSize: 14, margin: "12px 0 6px", color: LIM.secondary, fontWeight: 600 }}>{children}</h3>; },
-                              ul({ children }) { return <ul style={{ margin: "0 0 10px 20px", lineHeight: 1.7 }}>{children}</ul>; },
-                              ol({ children }) { return <ol style={{ margin: "0 0 10px 20px", lineHeight: 1.7 }}>{children}</ol>; },
-                              li({ children }) { return <li style={{ margin: "3px 0" }}>{children}</li>; },
-                              pre({ children }) { return <div style={{ margin: "10px 0" }}>{children}</div>; },
-                              code({ className, children }) {
-                                return renderFencedCodeBlock(className, children, {
-                                  streaming: m.streaming,
-                                  codeBg: LIM.codeBg,
-                                  inlineCodeStyle: {
-                                    background: LIM.surface1,
-                                    border: "1px solid rgba(var(--lim-accent-rgb),0.12)",
-                                    borderRadius: 4,
-                                    padding: "1px 5px",
-                                    color: GREEN,
-                                    fontFamily: "monospace",
-                                    fontSize: "0.9em",
-                                  },
-                                });
-                              },
-                              blockquote({ children }) {
-                                return <blockquote style={{ margin: "12px 0", padding: "8px 14px", borderLeft: "2px solid rgba(var(--lim-accent-rgb),0.25)", color: LIM.textDim, fontStyle: "italic", background: LIM.surface1, borderRadius: "0 8px 8px 0" }}>{children}</blockquote>;
-                              },
-                              table({ children }) { return <div style={{ overflowX: "auto", margin: "12px 0" }}><table style={{ width: "100%", borderCollapse: "collapse", background: LIM.surface1 }}>{children}</table></div>; },
-                              th({ children }) { return <th style={{ textAlign: "left", border: "1px solid rgba(var(--lim-accent-rgb),0.1)", padding: "7px 12px", background: LIM.surface2, color: LIM.textMuted, fontWeight: 700, fontSize: 11 }}>{children}</th>; },
-                              td({ children }) { return <td style={{ border: "1px solid rgba(var(--lim-accent-rgb),0.07)", padding: "6px 12px", verticalAlign: "top", color: LIM.textDim }}>{children}</td>; },
-                              hr() { return <div style={{ margin: "16px 0", height: 1, background: "linear-gradient(90deg, transparent, rgba(var(--lim-accent-rgb),0.15), rgba(var(--lim-success-rgb),0.2), rgba(var(--lim-accent-rgb),0.15), transparent)" }} />; },
-                            }}
-                          />
-                          {m.streaming && <span style={{ color: CYAN, animation: "blink 1s step-end infinite" }}>█</span>}
-                        </div>
-                      </div>
-                    );
-
-                  case "tool_call": {
-                    const tc = m as ToolCallEntry;
-                    if (toolCardsMode === "hidden") return null;
-                    const cat = categoryForTool(tc.name);
-                    const isActive = tc.status === "running" || tc.status === "streaming";
-                    const statusColor = tc.status === "error" ? RED_ERR : tc.status === "done" ? GREEN : tc.status === "pending_approval" ? MAGENTA : CYAN;
-                    const statusIcon  = tc.status === "error" ? "✗" : tc.status === "done" ? "✓" : tc.status === "pending_approval" ? "⚠" : "⟳";
-                    const arg = parsePrimaryArg(tc.argsJson);
-                    return (
-                      <div key={i} style={{ padding: "6px 12px", borderRadius: 8, background: "rgba(var(--lim-accent-rgb),0.03)", border: "1px solid rgba(var(--lim-accent-rgb),0.07)", fontSize: 11, fontFamily: "monospace", display: "flex", alignItems: "center", gap: 8 }}>
-                        <span style={{ color: cat.color }}>{cat.icon}</span>
-                        <span style={{ color: isActive ? "#aabbcc" : "#556677" }}>{tc.name}</span>
-                        {arg && <span style={{ color: "#334455", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", flex: 1 }}>{arg}</span>}
-                        <span style={{ color: statusColor, flexShrink: 0 }}>{statusIcon}</span>
-                        {isActive && <span style={{ color: CYAN, fontSize: 9 }}>…</span>}
-                      </div>
-                    );
-                  }
-
-                  case "tool_result":
-                    return null;
-
-                  case "think":
-                    return (
-                      <div key={i} style={{ padding: "8px 14px", borderRadius: 8, background: "rgba(0,4,12,0.45)", border: "1px solid rgba(var(--lim-accent-rgb),0.06)", color: "#556677", fontSize: 12, fontStyle: "italic", lineHeight: 1.6 }}>
-                        <div style={{ color: "#334455", fontSize: 9, fontWeight: 700, letterSpacing: "0.08em", marginBottom: 4 }}>◈ REASONING</div>
-                        {m.content.length > 800 ? m.content.slice(0, 799) + "…" : m.content}
-                      </div>
-                    );
-
-                  case "model_reasoning":
-                    return (
-                      <div key={i} style={{ padding: "8px 14px", borderRadius: 8, background: "rgba(0,4,12,0.45)", border: "1px solid rgba(var(--lim-warn-rgb),0.08)", color: "#554433", fontSize: 12, fontStyle: "italic", lineHeight: 1.6 }}>
-                        <div style={{ color: "#443322", fontSize: 9, fontWeight: 700, letterSpacing: "0.08em", marginBottom: 4 }}>◈ MODEL REASONING</div>
-                        {m.text.length > 800 ? m.text.slice(0, 799) + "…" : m.text}
-                      </div>
-                    );
-
-                  case "plan":
-                    return (
-                      <div key={i}>
-                        <PlanProgressBlock
-                          steps={Array.isArray(m.steps) ? m.steps : []}
-                          streaming={m.streaming}
-                          previewText={m.previewText}
-                        />
-                      </div>
-                    );
-
-                  case "subtask":
-                    return (
-                      <SubtaskInlineCard key={i} entry={m} onInspect={onInspectSubtask} />
-                    );
-
-                  case "trace":
-                    if (!showRawHarness) return null;
-                    return <div key={i} style={{ fontSize: 10, color: "#223344", fontFamily: "monospace" }}>[trace] {m.text}</div>;
-
-                  case "provider_retry":
-                    if (!showRawHarness) return null;
-                    return <div key={i} style={{ fontSize: 10, color: AMBER, fontFamily: "monospace" }}>{m.text}</div>;
-
-                  case "context_compressed":
-                    if (!showRawHarness) return null;
-                    return <div key={i} style={{ fontSize: 10, color: "#334455", fontFamily: "monospace" }}>⊙ context compressed: {m.beforePct}% → {m.afterPct}%</div>;
-
-                  case "pulse_nudge":
-                    return (
-                      <div key={i} style={{ padding: "8px 14px", borderRadius: 8, background: "rgba(var(--lim-secondary-rgb),0.04)", border: "1px solid rgba(var(--lim-secondary-rgb),0.07)", fontSize: 12, color: "#778899" }}>
-                        <span style={{ color: MAGENTA, marginRight: 6, fontSize: 10 }}>PULSE</span>
-                        {m.text}
-                      </div>
-                    );
-
-                  default:
-                    return null;
-                }
-              })}
+                  </div>
+                )}
+                renderFinalReply={(m) => (
+                  <div className={entrance || undefined} style={{ animation: "studio-in 0.22s ease", display: "flex", justifyContent: "flex-start", alignItems: "flex-start", gap: 10 }}>
+                    <div style={{ width: 28, height: 28, borderRadius: "50%", background: `rgba(var(--lim-accent-rgb),0.1)`, border: `1px solid rgba(var(--lim-accent-rgb),0.2)`, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0, marginTop: 2 }}>
+                      <span style={{ color: CYAN, fontSize: 10 }}>❯</span>
+                    </div>
+                    <div className="lim-md" style={{ flex: 1, minWidth: 0, color: "var(--lim-assistant, #00ff88)", lineHeight: 1.7, fontSize: 14 }}>
+                      <AssistantMessageContent text={m.text} streaming={m.streaming} components={studioMdComponents(m.streaming)} />
+                      {m.streaming && <span style={{ color: CYAN, animation: "blink 1s step-end infinite" }}>█</span>}
+                    </div>
+                  </div>
+                )}
+                renderWorkingEntry={renderStudioWorkingEntry}
+              />
 
               {error && (
                 <div style={{ padding: "10px 16px", borderRadius: 10, background: "rgba(var(--lim-danger-rgb),0.05)", border: "1px solid rgba(var(--lim-danger-rgb),0.15)", color: RED_ERR, fontSize: 13 }}>

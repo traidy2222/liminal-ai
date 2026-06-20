@@ -569,6 +569,7 @@ export class ToolDispatcher {
       }
 
       const runHandler = async (): Promise<ToolResult> => {
+        this.emitter.emit("tool_executing", { callId, name });
         const t0 = Date.now();
         const emit = (text: string) => {
           this.emitter.emit("text", { delta: text, channel: "trace" });

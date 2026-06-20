@@ -1,5 +1,6 @@
 import type OpenAI from "openai";
 import type { ToolDefinition } from "./types.js";
+import { expandWorkspaceToolFamilies } from "./workspace_tool_families.js";
 
 const TOOL_PRIORITY_ORDER = [
   // Core runtime + control path first so model sees these early.
@@ -168,7 +169,7 @@ export class ToolRegistry {
   /** Activate all tools belonging to the given family ids (lazy mode). */
   activateFamilies(familyIds: readonly string[]): string[] {
     if (!this.lazyToolLoading || familyIds.length === 0) return [];
-    const want = new Set(familyIds.map((f) => f.trim().toLowerCase()).filter(Boolean));
+    const want = new Set(expandWorkspaceToolFamilies(familyIds));
     const toolNames: string[] = [];
     for (const [tool, family] of this.toolFamilyByName) {
       if (want.has(family.toLowerCase()) && this.tools.has(tool)) {

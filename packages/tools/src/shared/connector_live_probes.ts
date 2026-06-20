@@ -23,6 +23,7 @@ import {
   missingMicrosoftScopes,
   type GoogleServiceId,
   type MicrosoftServiceId,
+  effectiveHarnessEnvRaw,
 } from "@liminal/core";
 import {
   githubOAuthAuthScheme,
@@ -38,6 +39,13 @@ import { enrichGoogleMcpProbeError, mcpHandshakeAndListTools } from "../integrat
 import { getGoogleSidecarStatus } from "../integrations/google/google_sidecar.js";
 import { getMicrosoftSidecarStatus } from "../integrations/microsoft/microsoft_sidecar.js";
 import { githubAuthAvailable, githubMcpEnabled, githubMcpUrl, githubTokenEnvVar } from "../integrations/github/github_connect.js";
+import {
+  idaMcpEnabled,
+  IDA_MCP_CONNECTION_NAME,
+  IDA_PARENT_PROVIDER,
+} from "../integrations/ida/ida_connect.js";
+import { idaGuiMcpUrl, probeIdaMcpInitialize } from "../integrations/ida/ida_probe.js";
+import { getIdaSidecarStatus } from "../integrations/ida/ida_sidecar.js";
 import { formatSlackScopeProbeLine, probeSlackLiveScopes } from "../integrations/slack/slack_scope_probe.js";
 import { youtubeRestEnabled } from "../integrations/youtube/youtube_rest_http.js";
 
@@ -104,7 +112,8 @@ export async function probeGoogleOfficialMcp(
   const mode = "read_write" as const;
   const auth = googleOAuthAuthScheme(account.accountId, scopesForGoogleServices(group, mode));
   try {
-    const tools = await withTimeout(mcpHandshakeAndListTools(preset.mcpUrl, auth), PROBE_TIMEOUT_MS);
+    const handshake = await withTimeout(mcpHandshakeAndListTools(preset.mcpUrl, auth), PROBE_TIMEOUT_MS);
+    const tools = handshake.tools;
     if (!attached) {
       return {
         state: "not_attached",
@@ -351,7 +360,8 @@ async function probeSidecarMcp(opts: {
     return { state: "not_connected", detail: "no OAuth token for sidecar probe" };
   }
   try {
-    const tools = await withTimeout(mcpHandshakeAndListTools(status.url, auth), PROBE_TIMEOUT_MS);
+    const handshake = await withTimeout(mcpHandshakeAndListTools(status.url, auth), PROBE_TIMEOUT_MS);
+    const tools = handshake.tools;
     if (!attached) {
       return {
         state: "not_attached",
@@ -405,6 +415,48 @@ export async function probeMicrosoftGraphMcp(): Promise<SidecarProbeResult> {
   });
 }
 
+export async function probeIdaMcp(): Promise<SidecarProbeResult | { state: "off"; detail: string }> {
+  if (!idaMcpEnabled()) {
+    return { state: "off", detail: "AGENT_IDA_MCP=0" };
+  }
+  const attached = (await listConnectionsByParent(IDA_PARENT_PROVIDER)).some(
+    (c) => c.name === IDA_MCP_CONNECTION_NAME
+  );
+  const override = effectiveHarnessEnvRaw("AGENT_IDA_MCP_URL")?.trim();
+  let url = override || "";
+  if (!url) {
+    const sidecar = await getIdaSidecarStatus();
+    if (sidecar.running) {
+      url = sidecar.url;
+    } else {
+      const guiUrl = idaGuiMcpUrl();
+      if ((await probeIdaMcpInitialize(guiUrl)).ok) {
+        url = guiUrl;
+      } else {
+        return {
+          state: "error",
+          detail:
+            "idalib sidecar not running and IDA GUI MCP plugin not reachable — start idalib-mcp or IDA Edit → Plugins → MCP",
+        };
+      }
+    }
+  }
+  const auth: AuthScheme = { kind: "none" };
+  try {
+    const handshake = await withTimeout(mcpHandshakeAndListTools(url, auth), PROBE_TIMEOUT_MS);
+    const tools = handshake.tools;
+    if (!attached) {
+      return {
+        state: "not_attached",
+        detail: `IDA MCP reachable (${tools.length} tools) but not attached — connect_provider({ provider: "ida" })`,
+      };
+    }
+    return { state: "ok", toolCount: tools.length, url };
+  } catch (e) {
+    return { state: "error", detail: e instanceof Error ? e.message : String(e) };
+  }
+}
+
 export async function probeGithubMcp(): Promise<SidecarProbeResult | { state: "off"; detail: string }> {
   if (!githubMcpEnabled()) {
     return { state: "off", detail: "AGENT_GITHUB_MCP=0" };
@@ -427,7 +479,8 @@ export async function probeGithubMcp(): Promise<SidecarProbeResult | { state: "o
   }
   const url = githubMcpUrl();
   try {
-    const tools = await withTimeout(mcpHandshakeAndListTools(url, auth), PROBE_TIMEOUT_MS);
+    const handshake = await withTimeout(mcpHandshakeAndListTools(url, auth), PROBE_TIMEOUT_MS);
+    const tools = handshake.tools;
     if (!attached) {
       return {
         state: "not_attached",
@@ -471,6 +524,7 @@ export async function buildIntegrationLiveProbeLines(): Promise<string[]> {
       googleExt,
       msMcp,
       githubMcp,
+      idaMcp,
       slackScopes,
       youtubeRest,
     ] = await Promise.all([
@@ -485,6 +539,7 @@ export async function buildIntegrationLiveProbeLines(): Promise<string[]> {
       probeGoogleExtSidecar(),
       probeMicrosoftGraphMcp(),
       probeGithubMcp(),
+      probeIdaMcp(),
       probeSlackLiveScopes(),
       probeYoutubeChannelRest(),
     ]);
@@ -499,6 +554,7 @@ export async function buildIntegrationLiveProbeLines(): Promise<string[]> {
     lines.push(formatSidecarProbeLine("Google Docs/Sheets (google_ext)", googleExt));
     lines.push(formatSidecarProbeLine("Microsoft Graph MCP", msMcp));
     lines.push(formatSidecarProbeLine("GitHub MCP", githubMcp));
+    lines.push(formatSidecarProbeLine("IDA Pro MCP", idaMcp));
     lines.push(formatSlackScopeProbeLine(slackScopes));
     lines.push(formatRestProbeLine("YouTube channel", youtubeRest));
     lines.push(

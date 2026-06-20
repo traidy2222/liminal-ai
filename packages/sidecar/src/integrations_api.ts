@@ -12,6 +12,7 @@ import {
 import {
   attachCustomMcpFromServer,
   connectGithubFromServer,
+  connectIdaFromServer,
   connectGoogleWorkspaceFromServer,
   connectMicrosoft365FromServer,
   connectAzureFromServer,
@@ -23,6 +24,7 @@ import {
   connectOpenApiFromServer,
   detachCustomMcpFromServer,
   disconnectGithubFromServer,
+  disconnectIdaFromServer,
   disconnectGoogleWorkspaceFromServer,
   disconnectMicrosoft365FromServer,
   disconnectAzureFromServer,
@@ -146,6 +148,29 @@ export async function disconnectGithub(registry: ChatRegistry, revoke = false): 
   if (!result.ok) throw new Error(result.error ?? "GitHub disconnect failed.");
   await refreshIntegrationsOnAllHarnesses(registry);
   return result.output ?? "GitHub disconnected.";
+}
+
+export async function connectIda(
+  registry: ChatRegistry,
+  opts?: { readOnly?: boolean; mcpUrl?: string }
+): Promise<string> {
+  assertHarnessesIdle(registry);
+  const bridge = await registry.getOrCreateActive();
+  const result = await connectIdaFromServer(bridge.harness.registry, {
+    readOnly: opts?.readOnly,
+    mcpUrl: opts?.mcpUrl,
+  });
+  if (!result.ok) throw new Error(result.error ?? "IDA connect failed.");
+  await refreshIntegrationsOnAllHarnesses(registry);
+  return result.output ?? "IDA MCP tools attached.";
+}
+
+export async function disconnectIda(registry: ChatRegistry): Promise<string> {
+  assertHarnessesIdle(registry);
+  const result = await disconnectIdaFromServer(await allHarnessRegistries(registry));
+  if (!result.ok) throw new Error(result.error ?? "IDA disconnect failed.");
+  await refreshIntegrationsOnAllHarnesses(registry);
+  return result.output ?? "IDA disconnected.";
 }
 
 export async function connectMicrosoftOAuth(

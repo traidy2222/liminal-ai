@@ -9,10 +9,12 @@ import '../../state/app_controller.dart';
 import '../layout/liminal_breakpoints.dart';
 import '../theme/liminal_theme_extension.dart';
 import '../theme/liminal_tokens.dart';
+import '../design_system/liminal_design_system.dart';
 import '../widgets/integration_accounts_list.dart';
 import '../widgets/integration_provider_row.dart';
 import '../widgets/integration_provider_ui.dart';
 import '../widgets/integrations_how_to_strip.dart';
+import '../widgets/service_integration_card.dart';
 import '../widgets/integration_brand_icon.dart';
 import '../widgets/integrations_automation_section.dart';
 import '../widgets/liminal_form_field.dart';
@@ -40,10 +42,8 @@ class _IntegrationsScreenState extends State<IntegrationsScreen> {
   String _youtubeMode = 'read_write';
   bool _youtubeMonetary = true;
   String _githubMode = 'read_write';
-  final Set<String> _googleServices = {};
-  final Set<String> _microsoftServices = {};
-  bool _servicesInitialized = false;
-  bool _microsoftServicesInitialized = false;
+  String _idaMode = 'read_write';
+  final _idaMcpUrl = TextEditingController();
 
   final _mcpName = TextEditingController();
   final _mcpUrl = TextEditingController();
@@ -83,89 +83,72 @@ class _IntegrationsScreenState extends State<IntegrationsScreen> {
     _apiBaseUrl.dispose();
     _apiAuthEnv.dispose();
     _apiAuthHeader.dispose();
+    _idaMcpUrl.dispose();
     super.dispose();
   }
 
   bool _disabled(AppController host) =>
       host.integrationsBusy || host.integrationsLoading || host.chats.any((c) => c.busy);
 
-  List<String> _selectedServices(IntegrationsSnapshot snap) {
-    if (_googleServices.isEmpty && !_servicesInitialized && snap.google.services.isNotEmpty) {
-      return snap.google.services;
-    }
-    return _googleServices.isEmpty ? snap.google.services : _googleServices.toList();
-  }
-
-  List<String> _selectedMicrosoftServices(IntegrationsSnapshot snap) {
-    if (_microsoftServices.isEmpty &&
-        !_microsoftServicesInitialized &&
-        snap.microsoft.services.isNotEmpty) {
-      return snap.microsoft.services;
-    }
-    return _microsoftServices.isEmpty
-        ? snap.microsoft.services
-        : _microsoftServices.toList();
-  }
-
-  void _toggleExpanded(String id) {
+  void _toggleExpanded(String? id) {
     setState(() => _expandedId = _expandedId == id ? null : id);
   }
 
-  Future<void> _attachGoogleToolsIfNeeded(
-    AppController host,
-    List<String> services,
-  ) async {
-    if (host.integrations.googleConnected || host.integrations.google.accounts.isEmpty) {
-      return;
-    }
-    if (host.chats.any((c) => c.busy)) return;
-    await host.connectGoogleWorkspace(services: services, mode: _googleMode);
+  String _serviceExpandId(IntegrationServiceCard card) {
+    if (card.vendor == 'azure') return 'azure:${card.serviceId}';
+    return '${card.vendor}:${card.serviceId}';
+  }
+
+  Future<void> _connectService(AppController host, IntegrationServiceCard card) async {
+    final mode = card.vendor == 'azure'
+        ? _azureMode
+        : card.vendor == 'microsoft'
+            ? _microsoftMode
+            : _googleMode;
+    await host.connectWorkspaceService(
+      vendor: card.vendor,
+      serviceId: card.serviceId,
+      mode: mode,
+    );
+  }
+
+  Widget _serviceModeDetails({
+    required IntegrationServiceCard card,
+    required bool disabled,
+    required String mode,
+    required ValueChanged<String> onMode,
+  }) {
+    final hint = card.vendor == 'azure'
+        ? 'Azure Resource Manager scopes for this capability only.'
+        : card.vendor == 'microsoft'
+            ? 'Microsoft Graph scopes for ${card.label} only.'
+            : 'OAuth requests only the scopes for ${card.label}.';
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(hint, style: const TextStyle(fontSize: 10, height: 1.4)),
+        const SizedBox(height: 8),
+        Row(
+          children: [
+            ChoiceChip(
+              label: const Text('Read + write'),
+              selected: mode == 'read_write',
+              onSelected: disabled ? null : (_) => onMode('read_write'),
+            ),
+            const SizedBox(width: 8),
+            ChoiceChip(
+              label: const Text('Read only'),
+              selected: mode == 'read_only',
+              onSelected: disabled ? null : (_) => onMode('read_only'),
+            ),
+          ],
+        ),
+      ],
+    );
   }
 
   Future<void> _revokeAccount(AppController host, String provider, String accountId) async {
     await host.revokeIntegrationAccount(provider: provider, accountId: accountId);
-  }
-
-  Future<void> _googlePrimary(AppController host, IntegrationsSnapshot snap, List<String> services) async {
-    if (snap.googleConnected) {
-      await host.connectGoogleOAuth(services: services, mode: _googleMode, attach: false);
-      return;
-    }
-    if (snap.google.accounts.isEmpty) {
-      await host.connectGoogleOAuth(services: services, mode: _googleMode);
-      await _attachGoogleToolsIfNeeded(host, services);
-      return;
-    }
-    await host.connectGoogleWorkspace(services: services, mode: _googleMode);
-  }
-
-  Future<void> _azurePrimary(AppController host, IntegrationsSnapshot snap) async {
-    if (snap.azureToolsAttached) {
-      await host.connectAzureOAuth(mode: _azureMode, attach: false);
-      return;
-    }
-    if (snap.azure.accounts.isEmpty) {
-      await host.connectAzureOAuth(mode: _azureMode);
-      await host.connectAzure(mode: _azureMode);
-      return;
-    }
-    await host.connectAzure(mode: _azureMode);
-  }
-
-  Future<void> _microsoftPrimary(
-    AppController host,
-    IntegrationsSnapshot snap,
-    List<String> services,
-  ) async {
-    if (snap.microsoftConnected) {
-      await host.connectMicrosoftOAuth(services: services, mode: _microsoftMode, attach: false);
-      return;
-    }
-    if (snap.microsoft.accounts.isEmpty) {
-      await host.connectMicrosoftOAuth(services: services, mode: _microsoftMode);
-      return;
-    }
-    await host.connectMicrosoft365(services: services, mode: _microsoftMode);
   }
 
   Future<void> _xeroPrimary(AppController host, IntegrationsSnapshot snap) async {
@@ -230,6 +213,18 @@ class _IntegrationsScreenState extends State<IntegrationsScreen> {
     await host.connectYoutubeOAuth(mode: _youtubeMode, monetary: _youtubeMonetary);
   }
 
+  Future<void> _idaPrimary(AppController host, IntegrationsSnapshot snap) async {
+    if (snap.idaConnected) {
+      await host.disconnectIda();
+      return;
+    }
+    final url = _idaMcpUrl.text.trim();
+    await host.connectIda(
+      mode: _idaMode,
+      mcpUrl: url.isEmpty ? null : url,
+    );
+  }
+
   Future<void> _githubPrimary(AppController host, IntegrationsSnapshot snap) async {
     if (snap.githubConnected) {
       await host.connectGithubOAuth(mode: _githubMode, attach: false);
@@ -247,17 +242,7 @@ class _IntegrationsScreenState extends State<IntegrationsScreen> {
     final host = AppScope.watch(context);
     final lim = LiminalTheme.of(context);
     final snap = host.integrations;
-    if (!_servicesInitialized && snap.google.services.isNotEmpty) {
-      _googleServices.addAll(snap.google.services);
-      _servicesInitialized = true;
-    }
-    if (!_microsoftServicesInitialized && snap.microsoft.services.isNotEmpty) {
-      _microsoftServices.addAll(snap.microsoft.services);
-      _microsoftServicesInitialized = true;
-    }
     final disabled = _disabled(host);
-    final services = _selectedServices(snap);
-    final msServices = _selectedMicrosoftServices(snap);
 
     return LiminalShell(
       appBar: AppBar(
@@ -281,6 +266,12 @@ class _IntegrationsScreenState extends State<IntegrationsScreen> {
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
               const IntegrationsHowToStrip(),
+              const SizedBox(height: 12),
+              Text(
+                'Connect only what you need — each card is one service with its own OAuth scopes. '
+                'Tap a card for read/write mode and account options.',
+                style: TextStyle(color: lim.textMuted, fontSize: 12, height: 1.45),
+              ),
               if (host.integrationsError != null) ...[
                 const SizedBox(height: 12),
                 Text(host.integrationsError!, style: TextStyle(color: lim.danger, fontSize: 13)),
@@ -293,7 +284,7 @@ class _IntegrationsScreenState extends State<IntegrationsScreen> {
                 ),
               ],
               const SizedBox(height: 16),
-              ..._integrationGroups(context, host, snap, disabled, services, msServices, lim),
+              ..._integrationGroups(context, host, snap, disabled, lim),
               const SizedBox(height: 20),
               IntegrationsAutomationSection(
                 host: host,
@@ -315,8 +306,6 @@ class _IntegrationsScreenState extends State<IntegrationsScreen> {
     AppController host,
     IntegrationsSnapshot snap,
     bool disabled,
-    List<String> services,
-    List<String> msServices,
     LiminalTokens lim,
   ) {
     Widget oauthModeRow({
@@ -342,147 +331,164 @@ class _IntegrationsScreenState extends State<IntegrationsScreen> {
     }
 
     return [
+      IntegrationCategorySection(
+        title: 'Google Workspace',
+        subtitle: 'One Google account — connect Gmail, Calendar, Drive, Docs, and more individually.',
+        cards: snap.googleServiceCards,
+        expandedId: _expandedId,
+        disabled: disabled,
+        expandIdFor: _serviceExpandId,
+        onToggle: (card) {
+          final id = _serviceExpandId(card);
+          _toggleExpanded(_expandedId == id ? null : id);
+        },
+        onConnect: (card) => unawaited(_connectService(host, card)),
+        detailsFor: (card) => _serviceModeDetails(
+          card: card,
+          disabled: disabled,
+          mode: _googleMode,
+          onMode: (m) => setState(() => _googleMode = m),
+        ),
+        footer: _expandedId == 'google-accounts'
+            ? IntegrationAccountsList(
+                accounts: [
+                  for (final a in snap.google.accounts)
+                    IntegrationAccountEntry(
+                      accountId: a.accountId,
+                      label: a.email ?? a.accountId,
+                      meta: '${a.scopes.length} scopes',
+                    ),
+                ],
+                disabled: disabled,
+                onRemove: (id) => _revokeAccount(host, 'google', id),
+                onDisconnectAll: () => host.disconnectGoogle(revoke: true),
+              )
+            : TextButton(
+                onPressed: disabled
+                    ? null
+                    : () => _toggleExpanded(_expandedId == 'google-accounts' ? null : 'google-accounts'),
+                child: Text(
+                  snap.google.accounts.isNotEmpty
+                      ? 'Google accounts (${snap.google.accounts.length})'
+                      : 'Google accounts',
+                ),
+              ),
+      ),
+      IntegrationCategorySection(
+        title: 'Microsoft',
+        subtitle: 'Outlook, Teams, OneDrive, and Azure cloud — each service connects with its own scopes.',
+        cards: snap.microsoftServiceCards,
+        expandedId: _expandedId,
+        disabled: disabled,
+        expandIdFor: _serviceExpandId,
+        onToggle: (card) {
+          final id = _serviceExpandId(card);
+          _toggleExpanded(_expandedId == id ? null : id);
+        },
+        onConnect: (card) => unawaited(_connectService(host, card)),
+        detailsFor: (card) => _serviceModeDetails(
+          card: card,
+          disabled: disabled,
+          mode: card.vendor == 'azure' ? _azureMode : _microsoftMode,
+          onMode: (m) => setState(() {
+            if (card.vendor == 'azure') {
+              _azureMode = m;
+            } else {
+              _microsoftMode = m;
+            }
+          }),
+        ),
+        footer: _expandedId == 'microsoft-accounts'
+            ? Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  for (final a in snap.microsoft.accounts)
+                    Padding(
+                      padding: const EdgeInsets.only(bottom: 6),
+                      child: Text(
+                        'M365: ${a.email ?? a.accountId} — ${a.scopes.length} scopes',
+                        style: TextStyle(color: lim.success, fontSize: 11),
+                      ),
+                    ),
+                  for (final a in snap.azure.accounts)
+                    Padding(
+                      padding: const EdgeInsets.only(bottom: 6),
+                      child: Text(
+                        'Azure: ${a.email ?? a.accountId} — ${a.scopes.length} scopes',
+                        style: TextStyle(color: lim.success, fontSize: 11),
+                      ),
+                    ),
+                  Wrap(
+                    spacing: 8,
+                    children: [
+                      LiminalButton(
+                        label: 'Revoke Microsoft 365',
+                        dense: true,
+                        variant: LiminalButtonVariant.danger,
+                        onPressed: disabled || snap.microsoft.accounts.isEmpty
+                            ? null
+                            : () => host.disconnectMicrosoft(revoke: true),
+                      ),
+                      LiminalButton(
+                        label: 'Revoke Azure',
+                        dense: true,
+                        variant: LiminalButtonVariant.danger,
+                        onPressed: disabled || snap.azure.accounts.isEmpty
+                            ? null
+                            : () => host.disconnectAzure(revoke: true),
+                      ),
+                    ],
+                  ),
+                ],
+              )
+            : TextButton(
+                onPressed: disabled
+                    ? null
+                    : () => _toggleExpanded(
+                          _expandedId == 'microsoft-accounts' ? null : 'microsoft-accounts',
+                        ),
+                child: Text(
+                  'Microsoft accounts (${snap.microsoft.accounts.length + snap.azure.accounts.length})',
+                ),
+              ),
+      ),
       IntegrationProviderGroup(
-        title: 'Workspace',
-        subtitle: 'Sign in, then enable agent tools',
+        title: 'Developer tools',
+        subtitle: 'GitHub repos and IDA Pro reverse engineering',
         children: [
           IntegrationProviderRow(
-            brandId: IntegrationBrandId.google,
+            brandId: IntegrationBrandId.ida,
             presentation: integrationPresentation(
-              brandId: IntegrationBrandId.google,
+              brandId: IntegrationBrandId.ida,
               snap: snap,
               busy: host.integrationsBusy,
             ),
-            expanded: _expandedId == 'google',
+            expanded: _expandedId == 'ida',
             disabled: disabled,
-            onToggleDetails: () => _toggleExpanded('google'),
-            onAction: () => unawaited(_googlePrimary(host, snap, services)),
+            onToggleDetails: () => _toggleExpanded(_expandedId == 'ida' ? null : 'ida'),
+            onAction: () => unawaited(_idaPrimary(host, snap)),
             details: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                IntegrationAccountsList(
-                  accounts: [
-                    for (final a in snap.google.accounts)
-                      IntegrationAccountEntry(
-                        accountId: a.accountId,
-                        label: a.email ?? a.accountId,
-                        meta: '${a.scopes.length} scopes',
-                      ),
-                  ],
-                  disabled: disabled,
-                  onRemove: (id) => _revokeAccount(host, 'google', id),
-                  onDisconnectAll: () => host.disconnectGoogle(revoke: true),
+                Text(
+                  'Reverse engineering via ida-pro-mcp. Headless needs IDA 9.0 SP1+; otherwise start MCP in IDA (Edit → Plugins → MCP).',
+                  style: TextStyle(color: lim.textMuted, fontSize: 12, height: 1.4),
                 ),
-                _GoogleDetails(
-                  snap: snap,
-                  disabled: disabled,
-                  mode: _googleMode,
-                  services: services,
-                  selected: _googleServices,
-                  onMode: (m) => setState(() => _googleMode = m),
-                  onToggleService: (id) => setState(() {
-                    if (_googleServices.contains(id)) {
-                      _googleServices.remove(id);
-                    } else {
-                      _googleServices.add(id);
-                    }
-                  }),
-                  onReattach: () => host.connectGoogleWorkspace(services: services, mode: _googleMode),
-                  onAttachCalendar: () =>
-                      host.connectGoogleWorkspace(services: ['calendar'], mode: _googleMode),
+                const SizedBox(height: 8),
+                TextField(
+                  controller: _idaMcpUrl,
+                  enabled: !disabled && !snap.idaConnected,
+                  decoration: const InputDecoration(
+                    labelText: 'MCP URL override (optional)',
+                    hintText: 'http://127.0.0.1:13337/mcp',
+                    isDense: true,
+                  ),
                 ),
-              ],
-            ),
-          ),
-          IntegrationProviderRow(
-            brandId: IntegrationBrandId.microsoft,
-            presentation: integrationPresentation(
-              brandId: IntegrationBrandId.microsoft,
-              snap: snap,
-              busy: host.integrationsBusy,
-            ),
-            expanded: _expandedId == 'microsoft',
-            disabled: disabled,
-            onToggleDetails: () => _toggleExpanded('microsoft'),
-            onAction: () => unawaited(_microsoftPrimary(host, snap, msServices)),
-            details: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                IntegrationAccountsList(
-                  accounts: [
-                    for (final a in snap.microsoft.accounts)
-                      IntegrationAccountEntry(
-                        accountId: a.accountId,
-                        label: a.email ?? a.accountId,
-                        meta: '${a.scopes.length} scopes',
-                      ),
-                  ],
-                  disabled: disabled,
-                  onRemove: (id) => _revokeAccount(host, 'microsoft', id),
-                  onDisconnectAll: () => host.disconnectMicrosoft(revoke: true),
-                ),
-                _MicrosoftDetails(
-                  snap: snap,
-                  disabled: disabled,
-                  mode: _microsoftMode,
-                  services: msServices,
-                  selected: _microsoftServices,
-                  onMode: (m) => setState(() => _microsoftMode = m),
-                  onToggleService: (id) => setState(() {
-                    if (_microsoftServices.contains(id)) {
-                      _microsoftServices.remove(id);
-                    } else {
-                      _microsoftServices.add(id);
-                    }
-                  }),
-                  onReattach: () => host.connectMicrosoft365(services: msServices, mode: _microsoftMode),
-                  onAttachCalendar: () =>
-                      host.connectMicrosoft365(services: ['calendar'], mode: _microsoftMode),
-                ),
-              ],
-            ),
-          ),
-          IntegrationProviderRow(
-            brandId: IntegrationBrandId.azure,
-            presentation: integrationPresentation(
-              brandId: IntegrationBrandId.azure,
-              snap: snap,
-              busy: host.integrationsBusy,
-            ),
-            expanded: _expandedId == 'azure',
-            disabled: disabled,
-            onToggleDetails: () => _toggleExpanded('azure'),
-            onAction: () => unawaited(_azurePrimary(host, snap)),
-            details: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                IntegrationAccountsList(
-                  accounts: [
-                    for (final a in snap.azure.accounts)
-                      IntegrationAccountEntry(
-                        accountId: a.accountId,
-                        label: a.email ?? a.accountId,
-                        meta: '${a.scopes.length} scopes',
-                      ),
-                  ],
-                  disabled: disabled,
-                  onRemove: (id) => _revokeAccount(host, 'azure', id),
-                  onDisconnectAll: () => host.disconnectAzure(revoke: true),
-                ),
-                Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      'ARM REST + @azure/mcp sidecar. Run az login for full MCP coverage.',
-                      style: TextStyle(color: lim.textMuted, fontSize: 12, height: 1.4),
-                    ),
-                    const SizedBox(height: 8),
-                    oauthModeRow(
-                      mode: _azureMode,
-                      modeLocked: snap.azureToolsAttached,
-                      onMode: (m) => setState(() => _azureMode = m),
-                    ),
-                  ],
+                const SizedBox(height: 8),
+                oauthModeRow(
+                  mode: _idaMode,
+                  modeLocked: snap.idaConnected,
+                  onMode: (m) => setState(() => _idaMode = m),
                 ),
               ],
             ),
@@ -496,7 +502,7 @@ class _IntegrationsScreenState extends State<IntegrationsScreen> {
             ),
             expanded: _expandedId == 'github',
             disabled: disabled,
-            onToggleDetails: () => _toggleExpanded('github'),
+            onToggleDetails: () => _toggleExpanded(_expandedId == 'github' ? null : 'github'),
             onAction: () => unawaited(_githubPrimary(host, snap)),
             showDivider: false,
             details: Column(
@@ -848,205 +854,6 @@ class _IntegrationsScreenState extends State<IntegrationsScreen> {
         ],
       ),
     ];
-  }
-}
-
-class _GoogleDetails extends StatelessWidget {
-  const _GoogleDetails({
-    required this.snap,
-    required this.disabled,
-    required this.mode,
-    required this.services,
-    required this.selected,
-    required this.onMode,
-    required this.onToggleService,
-    required this.onReattach,
-    required this.onAttachCalendar,
-  });
-
-  final IntegrationsSnapshot snap;
-  final bool disabled;
-  final String mode;
-  final List<String> services;
-  final Set<String> selected;
-  final ValueChanged<String> onMode;
-  final ValueChanged<String> onToggleService;
-  final Future<bool> Function() onReattach;
-  final Future<bool> Function() onAttachCalendar;
-
-  @override
-  Widget build(BuildContext context) {
-    final lim = LiminalTheme.of(context);
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text(
-          'Sign in with Google, then enable MCP tools for the agent.',
-          style: TextStyle(color: lim.textMuted, fontSize: 12, height: 1.4),
-        ),
-        const SizedBox(height: 8),
-        Row(
-          children: [
-            ChoiceChip(
-              label: const Text('Read + write'),
-              selected: mode == 'read_write',
-              onSelected: disabled ? null : (_) => onMode('read_write'),
-            ),
-            const SizedBox(width: 8),
-            ChoiceChip(
-              label: const Text('Read only'),
-              selected: mode == 'read_only',
-              onSelected: disabled ? null : (_) => onMode('read_only'),
-            ),
-          ],
-        ),
-        if (services.isNotEmpty) ...[
-          const SizedBox(height: 8),
-          Wrap(
-            spacing: 6,
-            runSpacing: 6,
-            children: [
-              for (final s in services)
-                FilterChip(
-                  label: Text(s),
-                  selected: selected.contains(s),
-                  onSelected: disabled ? null : (_) => onToggleService(s),
-                ),
-            ],
-          ),
-        ],
-        const SizedBox(height: 8),
-        if (snap.google.accounts.isNotEmpty &&
-            !snap.googleCalendarAttached) ...[
-          const SizedBox(height: 4),
-          Text(
-            'Gmail may work while Calendar MCP is not attached — enable Calendar separately.',
-            style: TextStyle(color: lim.warn.withValues(alpha: 0.9), fontSize: 11, height: 1.35),
-          ),
-        ],
-        const SizedBox(height: 8),
-        Wrap(
-          spacing: 8,
-          runSpacing: 8,
-          children: [
-            if (snap.google.accounts.isNotEmpty && !snap.googleCalendarAttached)
-              FilledButton.tonal(
-                onPressed: disabled ? null : () => onAttachCalendar(),
-                child: const Text('Attach Calendar'),
-              ),
-            OutlinedButton(
-              onPressed: disabled || snap.google.accounts.isEmpty ? null : () => onReattach(),
-              child: const Text('Re-attach tools'),
-            ),
-          ],
-        ),
-      ],
-    );
-  }
-}
-
-class _MicrosoftDetails extends StatelessWidget {
-  const _MicrosoftDetails({
-    required this.snap,
-    required this.disabled,
-    required this.mode,
-    required this.services,
-    required this.selected,
-    required this.onMode,
-    required this.onToggleService,
-    required this.onReattach,
-    required this.onAttachCalendar,
-  });
-
-  final IntegrationsSnapshot snap;
-  final bool disabled;
-  final String mode;
-  final List<String> services;
-  final Set<String> selected;
-  final ValueChanged<String> onMode;
-  final ValueChanged<String> onToggleService;
-  final Future<bool> Function() onReattach;
-  final Future<bool> Function() onAttachCalendar;
-
-  @override
-  Widget build(BuildContext context) {
-    final lim = LiminalTheme.of(context);
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text(
-          'Opens Vireon-hosted Microsoft sign-in, then attaches Graph MCP tools (ms-365-mcp-server sidecar).',
-          style: TextStyle(color: lim.textMuted, fontSize: 12, height: 1.4),
-        ),
-        const SizedBox(height: 8),
-        Row(
-          children: [
-            ChoiceChip(
-              label: const Text('Read + write'),
-              selected: mode == 'read_write',
-              onSelected: disabled ? null : (_) => onMode('read_write'),
-            ),
-            const SizedBox(width: 8),
-            ChoiceChip(
-              label: const Text('Read only'),
-              selected: mode == 'read_only',
-              onSelected: disabled ? null : (_) => onMode('read_only'),
-            ),
-          ],
-        ),
-        if (services.isNotEmpty) ...[
-          const SizedBox(height: 8),
-          Wrap(
-            spacing: 6,
-            runSpacing: 6,
-            children: [
-              for (final s in services)
-                FilterChip(
-                  label: Text(s),
-                  selected: selected.contains(s),
-                  onSelected: disabled ? null : (_) => onToggleService(s),
-                ),
-            ],
-          ),
-        ],
-        if (snap.microsoft.sidecar.url.isNotEmpty) ...[
-          const SizedBox(height: 8),
-          Text(
-            'Sidecar: ${snap.microsoft.sidecar.running ? snap.microsoft.sidecar.url : "stopped"}',
-            style: TextStyle(
-              color: snap.microsoft.sidecar.running ? lim.success : lim.warn,
-              fontSize: 11,
-              fontFamily: 'monospace',
-            ),
-          ),
-        ],
-        if (snap.microsoft.accounts.isNotEmpty &&
-            snap.microsoftConnected &&
-            !snap.microsoftCalendarAttached) ...[
-          const SizedBox(height: 4),
-          Text(
-            'Outlook mail may work while Calendar is not in attached Graph services.',
-            style: TextStyle(color: lim.warn.withValues(alpha: 0.9), fontSize: 11, height: 1.35),
-          ),
-        ],
-        const SizedBox(height: 8),
-        Wrap(
-          spacing: 8,
-          runSpacing: 8,
-          children: [
-            if (snap.microsoft.accounts.isNotEmpty && !snap.microsoftCalendarAttached)
-              FilledButton.tonal(
-                onPressed: disabled ? null : () => onAttachCalendar(),
-                child: const Text('Attach Calendar'),
-              ),
-            OutlinedButton(
-              onPressed: disabled || snap.microsoft.accounts.isEmpty ? null : () => onReattach(),
-              child: const Text('Re-attach tools'),
-            ),
-          ],
-        ),
-      ],
-    );
   }
 }
 

@@ -15,8 +15,11 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { chromium } from "playwright";
-import { messagesFromSessionJsonl, resolveSessionJsonlPath } from "./lib/marketing-jsonl.mjs";
+import { messagesFromSessionJsonl, resolveSessionJsonlPath, isLatestTurnComplete } from "./lib/marketing-jsonl.mjs";
 import { findPrompt, getMarketingPrompts, resolvePromptId } from "./lib/marketing-prompts.mjs";
+import { prepMarketingWorkspace } from "./lib/marketing-workspace-prep.mjs";
+import { MarketingCaptureStatus } from "./lib/marketing-capture-status.mjs";
+import { probeWebApi, resolveWebAuthToken, webAuthHeaders } from "./lib/marketing-web-auth.mjs";
 import {
   applyMarketingModelToProcessEnv,
   ensureMarketingModelLive,
@@ -56,10 +59,30 @@ function parseArgs(argv) {
   return { apiBase: apiBase.replace(/\/$/, ""), uiBase: uiBase.replace(/\/$/, ""), only };
 }
 
+/** @type {string | null | undefined} */
+let cachedWebToken;
+
+async function getWebAuthToken() {
+  if (cachedWebToken === undefined) {
+    cachedWebToken = await resolveWebAuthToken();
+  }
+  return cachedWebToken;
+}
+
+const API_TIMEOUT_MS = Number(process.env.MARKETING_API_TIMEOUT_MS ?? "120000");
+/** Extra wall time after the frame budget to wait for turn_end (harness can outlast screenshots). */
+const TURN_GRACE_MS = Number(String(process.env.MARKETING_TURN_GRACE_MS ?? "300000").replace(/_/g, ""));
+
 async function apiJson(base, route, init = {}) {
+  const token = await getWebAuthToken();
   const res = await fetch(`${base}${route}`, {
     ...init,
-    headers: { "Content-Type": "application/json", ...(init.headers ?? {}) },
+    signal: init.signal ?? AbortSignal.timeout(API_TIMEOUT_MS),
+    headers: {
+      "Content-Type": "application/json",
+      ...webAuthHeaders(token),
+      ...(init.headers ?? {}),
+    },
   });
   const text = await res.text();
   let body;
@@ -77,15 +100,10 @@ async function apiJson(base, route, init = {}) {
 async function waitForServer(base) {
   const start = Date.now();
   while (Date.now() - start < 90_000) {
-    try {
-      const res = await fetch(`${base}/api/status`);
-      if (res.ok) return;
-    } catch {
-      /* retry */
-    }
+    if (await probeWebApi(base)) return;
     await sleep(1500);
   }
-  throw new Error(`API not reachable at ${base}/api/status`);
+  throw new Error(`API not reachable at ${base} (tried /api/config and /api/status with token)`);
 }
 
 function sleep(ms) {
@@ -103,11 +121,14 @@ async function ensureBootstrapSkipped(apiBase) {
   await sleep(2500);
 }
 
+const REUSE_CHAT = process.env.MARKETING_REUSE_CHAT === "1";
+const BATCH_CHAT_TITLE = "marketing-batch-capture";
+
 async function createMarketingChat(apiBase, spec) {
   const body = await apiJson(apiBase, "/api/chats", {
     method: "POST",
     body: JSON.stringify({
-      title: `marketing-${spec.id}`,
+      title: REUSE_CHAT ? BATCH_CHAT_TITLE : `marketing-${spec.id}`,
       workspaceMode: "reuse",
       workspaceRoot: REPO_ROOT,
       activate: true,
@@ -116,27 +137,84 @@ async function createMarketingChat(apiBase, spec) {
   return body.meta?.chatId ?? body.meta?.id;
 }
 
+/**
+ * @param {string} apiBase
+ * @returns {Promise<string | null>}
+ */
+async function findBatchChat(apiBase) {
+  const list = await apiJson(apiBase, "/api/chats");
+  const chats = Array.isArray(list.chats) ? list.chats : list;
+  const row = (chats ?? []).find((c) => c.title === BATCH_CHAT_TITLE);
+  return row?.chatId ?? row?.id ?? null;
+}
+
+/**
+ * @param {string} apiBase
+ * @param {{ id: string }} spec
+ * @param {string | null} batchChatId
+ */
+async function resolveChatForPrompt(apiBase, spec, batchChatId) {
+  if (REUSE_CHAT && batchChatId) return batchChatId;
+  return createMarketingChat(apiBase, spec);
+}
+
 async function waitHarnessIdle(apiBase, maxWaitMs, chatId = null) {
   const start = Date.now();
   let idleStreak = 0;
   while (Date.now() - start < maxWaitMs) {
-    const st = await apiJson(apiBase, "/api/status");
-    if (chatId && st.activeChatId !== chatId) {
-      idleStreak = 0;
-      await sleep(1000);
-      continue;
+    if (chatId) {
+      const jsonl = await resolveSessionJsonlPath(chatId);
+      if (jsonl && (await isLatestTurnComplete(jsonl))) {
+        return { busy: false, activeChatId: chatId };
+      }
     }
-    if (!st.busy) {
-      idleStreak++;
-      if (idleStreak >= 3) return st;
-    } else {
+    try {
+      const st = await apiJson(apiBase, "/api/status");
+      if (chatId && st.activeChatId && st.activeChatId !== chatId) {
+        idleStreak = 0;
+        await sleep(1000);
+        continue;
+      }
+      if (!st.busy) {
+        idleStreak++;
+        if (idleStreak >= 2) return st;
+      } else {
+        idleStreak = 0;
+      }
+    } catch {
       idleStreak = 0;
     }
-    await sleep(2000);
+    await sleep(1500);
   }
   throw new Error(
     `Harness still busy after ${maxWaitMs}ms` +
       (chatId ? ` (wanted chat ${chatId})` : "")
+  );
+}
+
+/** Wait until session log shows turn_end or API reports idle (remaining wall budget). */
+async function waitTurnComplete(apiBase, chatId, maxWaitMs) {
+  if (maxWaitMs <= 0) {
+    const jsonl = await resolveSessionJsonlPath(chatId);
+    if (jsonl && (await isLatestTurnComplete(jsonl))) return;
+    throw new Error(`Turn not complete and no time left (chat ${chatId})`);
+  }
+  const start = Date.now();
+  while (Date.now() - start < maxWaitMs) {
+    const jsonl = await resolveSessionJsonlPath(chatId);
+    if (jsonl && (await isLatestTurnComplete(jsonl))) return;
+    try {
+      const st = await apiJson(apiBase, "/api/status");
+      if (st.activeChatId === chatId && !st.busy) return;
+    } catch {
+      /* harness may block the web thread — keep polling jsonl */
+    }
+    await sleep(2000);
+  }
+  const jsonl = await resolveSessionJsonlPath(chatId);
+  if (jsonl && (await isLatestTurnComplete(jsonl))) return;
+  throw new Error(
+    `Turn not complete after ${maxWaitMs}ms` + (chatId ? ` (chat ${chatId})` : "")
   );
 }
 
@@ -145,24 +223,75 @@ async function activateChat(apiBase, chatId) {
     method: "POST",
     body: "{}",
   });
-  await waitHarnessIdle(apiBase, 120_000, chatId);
+  await waitHarnessIdle(apiBase, 90_000, chatId);
 }
 
-async function postMessageWhenIdle(apiBase, chatId, message, maxWaitMs = 120_000) {
+/** Reset transcript on the active chat before each marketing prompt. */
+async function prepareLiveMarketingChat(apiBase, chatId) {
+  await activateChat(apiBase, chatId);
   const start = Date.now();
-  while (Date.now() - start < maxWaitMs) {
-    await activateChat(apiBase, chatId);
+  while (Date.now() - start < 90_000) {
     try {
-      await apiJson(apiBase, "/api/message", {
+      await apiJson(apiBase, "/api/session/reset", {
         method: "POST",
-        body: JSON.stringify({ message, freshContext: true }),
+        body: JSON.stringify({ mode: "soft" }),
       });
+      await waitHarnessIdle(apiBase, 60_000, chatId);
       return;
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
-      if (!/409|already processing|busy/i.test(msg)) throw err;
-      await sleep(2500);
+      if (/409|busy|processing/i.test(msg)) {
+        await sleep(2000);
+        continue;
+      }
+      throw err;
     }
+  }
+  throw new Error(`Could not reset marketing chat ${chatId}`);
+}
+
+async function purgeStaleMarketingChats(apiBase) {
+  const list = await apiJson(apiBase, "/api/chats");
+  const chats = Array.isArray(list.chats) ? list.chats : list;
+  for (const chat of chats ?? []) {
+    const id = chat.chatId ?? chat.id;
+    const title = chat.title ?? "";
+    if (!id || (!title.startsWith("marketing-") && title !== BATCH_CHAT_TITLE)) continue;
+    console.log(`[live] Removing stale marketing chat ${id} (${title})`);
+    try {
+      await apiJson(apiBase, `/api/chats/${encodeURIComponent(id)}`, { method: "DELETE" });
+    } catch {
+      /* best-effort */
+    }
+  }
+}
+
+async function postMessageWhenIdle(apiBase, chatId, message, maxWaitMs = 180_000) {
+  const start = Date.now();
+  let waits = 0;
+  while (Date.now() - start < maxWaitMs) {
+    let busy = false;
+    try {
+      const st = await apiJson(apiBase, "/api/status");
+      busy = !!st.busy;
+    } catch {
+      const jsonl = await resolveSessionJsonlPath(chatId);
+      if (jsonl && (await isLatestTurnComplete(jsonl))) return;
+      busy = true;
+    }
+    if (busy) {
+      waits++;
+      if (waits % 5 === 0) {
+        console.log(`[live]   waiting for harness idle… (${Math.round((Date.now() - start) / 1000)}s)`);
+      }
+      await sleep(2000);
+      continue;
+    }
+    await apiJson(apiBase, "/api/message", {
+      method: "POST",
+      body: JSON.stringify({ message, freshContext: true }),
+    });
+    return;
   }
   throw new Error(`Could not post message for ${chatId} within ${maxWaitMs}ms`);
 }
@@ -225,48 +354,85 @@ async function framesToGif(framePaths, gifPath) {
   await fs.unlink(listFile).catch(() => {});
 }
 
-async function runOnePrompt({ page, apiBase, uiBase, spec }) {
+async function runOnePrompt({ page, apiBase, uiBase, spec, batchChatId, pageReady, status }) {
   const recDir = path.join(RECORDINGS_DIR, spec.id);
   const framesDir = path.join(recDir, "frames");
   await fs.mkdir(framesDir, { recursive: true });
 
-  console.log(`\n[live] ▶ ${spec.id}`);
+  console.log(`\n[live] ▶ ${spec.id}${REUSE_CHAT ? " (batch chat)" : ""}`);
 
-  const chatId = await createMarketingChat(apiBase, spec);
+  await prepMarketingWorkspace(REPO_ROOT, spec);
+
+  const chatId = await resolveChatForPrompt(apiBase, spec, batchChatId);
   console.log(`[live]   chat ${chatId}`);
-  await activateChat(apiBase, chatId);
+  await prepareLiveMarketingChat(apiBase, chatId);
 
-  const captureUrl = `${uiBase}/?capture=1`;
-  await page.goto(captureUrl, { waitUntil: "domcontentloaded", timeout: 60_000 });
-  await waitHarnessIdle(apiBase, 90_000, chatId);
-  await sleep(800);
+  if (!pageReady) {
+    const captureUrl = `${uiBase}/?capture=1`;
+    await page.goto(captureUrl, { waitUntil: "domcontentloaded", timeout: 60_000 });
+    await waitHarnessIdle(apiBase, 90_000, chatId);
+    await sleep(800);
+  } else {
+    await waitHarnessIdle(apiBase, 90_000, chatId);
+  }
   await tryApproveInUi(page);
 
   console.log("[live]   sending prompt…");
   await postMessageWhenIdle(apiBase, chatId, spec.prompt);
+  console.log("[live]   prompt sent — capturing frames…");
 
   const framePaths = [];
   let i = 0;
-  const pollStart = Date.now();
+  const frameDeadline = Date.now() + spec.maxWaitMs;
+  const frameIntervalMs = Number(process.env.MARKETING_FRAME_INTERVAL_MS ?? "2000");
+  let sawBusy = false;
+  let apiFailStreak = 0;
 
-  while (Date.now() - pollStart < spec.maxWaitMs) {
+  while (Date.now() < frameDeadline) {
     await tryApproveInUi(page);
-    let busy = true;
+    let busy = false;
     try {
       const st = await apiJson(apiBase, "/api/status");
-      busy = st.busy;
-    } catch {
-      /* continue screenshots */
+      busy = !!st.busy;
+      apiFailStreak = 0;
+      if (busy) sawBusy = true;
+    } catch (err) {
+      apiFailStreak++;
+      const jsonl = chatId ? await resolveSessionJsonlPath(chatId) : null;
+      if (jsonl && (await isLatestTurnComplete(jsonl))) {
+        busy = false;
+        apiFailStreak = 0;
+      } else if (jsonl && sawBusy) {
+        // Harness blocks the web thread — keep screenshotting; session log is source of truth.
+        busy = true;
+        apiFailStreak = 0;
+      } else if (apiFailStreak >= 15) {
+        throw new Error(
+          `API lost during capture (${apiFailStreak} failures): ${err instanceof Error ? err.message : err}`
+        );
+      } else {
+        busy = sawBusy;
+      }
     }
-    const fp = path.join(framesDir, `f${String(i).padStart(2, "0")}.png`);
+
+    const fp = path.join(framesDir, `f${String(i).padStart(4, "0")}.png`);
     await page.screenshot({ path: fp, type: "png" });
     framePaths.push(fp);
     i++;
-    if (!busy && i >= 2) break;
-    await sleep(3000);
+    if (status && (i === 1 || i % 5 === 0)) {
+      await status.promptProgress(spec.id, { frames: i, detail: busy ? "harness busy" : "idle" });
+    }
+
+    if (chatId) {
+      const jsonl = await resolveSessionJsonlPath(chatId);
+      if (jsonl && (await isLatestTurnComplete(jsonl))) break;
+    }
+    await sleep(frameIntervalMs);
   }
 
-  await waitHarnessIdle(apiBase, Math.min(120_000, spec.maxWaitMs), chatId);
+  const turnWaitMs = TURN_GRACE_MS + Math.max(0, frameDeadline - Date.now());
+  console.log(`[live]   frame capture done (${i} frames) — waiting for turn_end (up to ${Math.round(turnWaitMs / 1000)}s)…`);
+  await waitTurnComplete(apiBase, chatId, turnWaitMs);
   try {
     await waitUiTurnComplete(page, 60_000);
   } catch {
@@ -314,6 +480,8 @@ async function runOnePrompt({ page, apiBase, uiBase, spec }) {
 
   return {
     id: spec.id,
+    chatId,
+    pageReady: true,
     png: path.relative(REPO_ROOT, heroPng).replace(/\\/g, "/"),
     gif:
       framePaths.length > 1
@@ -322,7 +490,6 @@ async function runOnePrompt({ page, apiBase, uiBase, spec }) {
     tools: meta.tools,
     durationMs: meta.durationMs,
     messageCount: messages.length,
-    chatId,
     source: "live",
   };
 }
@@ -357,10 +524,20 @@ async function main() {
     process.exit(1);
   }
 
+  const status = new MarketingCaptureStatus({
+    repoRoot: REPO_ROOT,
+    channel: "live",
+    promptIds: specs.map((s) => s.id),
+  });
+  await status.start();
+
+  let exitCode = 0;
+  try {
   console.log(`[live] API ${apiBase} · UI ${uiBase}`);
   await waitForServer(apiBase);
   await ensureMarketingModelLive(apiBase, apiJson);
   await ensureBootstrapSkipped(apiBase);
+  await purgeStaleMarketingChats(apiBase);
 
   await fs.mkdir(RECORDINGS_DIR, { recursive: true });
   await fs.mkdir(OUT_DIR, { recursive: true });
@@ -370,13 +547,43 @@ async function main() {
     c.newPage()
   );
 
+  let batchChatId = null;
+  if (REUSE_CHAT) {
+    batchChatId = await findBatchChat(apiBase);
+    if (!batchChatId) {
+      batchChatId = await createMarketingChat(apiBase, { id: "batch" });
+      console.log(`[live] batch chat ${batchChatId} (reuse for all prompts)`);
+    } else {
+      console.log(`[live] reusing batch chat ${batchChatId}`);
+    }
+  }
+
   const results = [];
+  let pageReady = false;
   for (const spec of specs) {
+    if (batchChatId && results.length > 0) {
+      await waitTurnComplete(apiBase, batchChatId, 300_000).catch(() => {});
+    }
+    await status.promptStart(spec.id);
     try {
-      results.push(await runOnePrompt({ page, apiBase, uiBase, spec }));
+      const result = await runOnePrompt({
+        page,
+        apiBase,
+        uiBase,
+        spec,
+        batchChatId,
+        pageReady,
+        status,
+      });
+      pageReady = result.pageReady ?? true;
+      const { pageReady: _pr, ...row } = result;
+      results.push(row);
+      await status.promptEnd(spec.id, { ok: true, tools: result.tools });
     } catch (err) {
-      console.error(`[live] FAILED ${spec.id}:`, err instanceof Error ? err.message : err);
+      const msg = err instanceof Error ? err.message : String(err);
+      console.error(`[live] FAILED ${spec.id}:`, msg);
       results.push({ id: spec.id, source: "live", error: String(err) });
+      await status.promptEnd(spec.id, { ok: false, error: msg });
     }
   }
 
@@ -396,10 +603,24 @@ async function main() {
   console.log(JSON.stringify(results, null, 2));
 
   const failed = results.filter((r) => r.error || !r.tools?.length);
-  if (failed.length) process.exit(1);
+  exitCode = failed.length ? 1 : 0;
+  await status.finish({
+    ok: exitCode === 0,
+    exitCode,
+    results,
+    message:
+      exitCode === 0
+        ? `Live capture complete (${results.length} prompt(s))`
+        : `Live capture finished with ${failed.length} failure(s)`,
+  });
+  if (exitCode) process.exit(exitCode);
+  } catch (err) {
+    await status.fail(err);
+    throw err;
+  }
 }
 
-main().catch((err) => {
+main().catch(async (err) => {
   console.error(err);
   process.exit(1);
 });

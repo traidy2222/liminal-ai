@@ -508,6 +508,7 @@ class AppController extends ChangeNotifier {
             event == 'tool_start' ||
             event == 'tool_delta' ||
             event == 'tool_progress' ||
+            event == 'tool_executing' ||
             event == 'compose_preview' ||
             event == 'tool_result' ||
             event == 'turn_end')) {
@@ -1682,15 +1683,82 @@ class AppController extends ChangeNotifier {
   Future<bool> disconnectMicrosoft({bool revoke = false}) =>
       _runIntegrationCommand('disconnect_microsoft', {'revoke': revoke});
 
-  Future<bool> connectAzureOAuth({String mode = 'read_write', bool attach = true}) =>
+  Future<bool> connectAzureOAuth({
+    List<String>? services,
+    String mode = 'read_write',
+    bool attach = true,
+  }) =>
       _runIntegrationCommand('connect_azure_oauth', {
+        if (services != null) 'services': services,
         'mode': mode,
         'openBrowser': true,
         if (!attach) 'attach': false,
       });
 
-  Future<bool> connectAzure({String mode = 'read_write'}) =>
-      _runIntegrationCommand('connect_azure', {'mode': mode});
+  Future<bool> connectAzure({
+    List<String>? services,
+    String mode = 'read_write',
+  }) =>
+      _runIntegrationCommand('connect_azure', {
+        if (services != null) 'services': services,
+        'mode': mode,
+      });
+
+  IntegrationServiceCard? _findServiceCard(String vendor, String serviceId) {
+    final list = vendor == 'google'
+        ? integrations.googleServiceCards
+        : integrations.microsoftServiceCards;
+    for (final card in list) {
+      if (card.serviceId != serviceId) continue;
+      if (vendor == 'azure') {
+        if (card.vendor == 'azure') return card;
+      } else if (card.vendor == vendor) {
+        return card;
+      }
+    }
+    return null;
+  }
+
+  /// OAuth + attach for a single workspace service (Gmail, Calendar, Azure compute, etc.).
+  Future<bool> connectWorkspaceService({
+    required String vendor,
+    required String serviceId,
+    required String mode,
+  }) async {
+    var card = _findServiceCard(vendor, serviceId);
+    if (card == null || !card.signedIn || card.needsScopeReconnect) {
+      final ok = switch (vendor) {
+        'google' => await connectGoogleOAuth(
+            services: [serviceId],
+            mode: mode,
+            attach: true,
+          ),
+        'microsoft' => await connectMicrosoftOAuth(
+            services: [serviceId],
+            mode: mode,
+            attach: true,
+          ),
+        'azure' => await connectAzureOAuth(
+            services: [serviceId],
+            mode: mode,
+            attach: true,
+          ),
+        _ => false,
+      };
+      if (!ok) return false;
+      await loadIntegrations();
+      card = _findServiceCard(vendor, serviceId);
+    }
+    if (card != null && !card.connected) {
+      return switch (vendor) {
+        'google' => connectGoogleWorkspace(services: [serviceId], mode: mode),
+        'microsoft' => connectMicrosoft365(services: [serviceId], mode: mode),
+        'azure' => connectAzure(services: [serviceId], mode: mode),
+        _ => false,
+      };
+    }
+    return true;
+  }
 
   Future<bool> disconnectAzure({bool revoke = false}) =>
       _runIntegrationCommand('disconnect_azure', {'revoke': revoke});
@@ -1774,6 +1842,14 @@ class AppController extends ChangeNotifier {
 
   Future<bool> disconnectGithub({bool revoke = false}) =>
       _runIntegrationCommand('disconnect_github', {'revoke': revoke});
+
+  Future<bool> connectIda({String mode = 'read_write', String? mcpUrl}) =>
+      _runIntegrationCommand('connect_ida', {
+        'mode': mode,
+        if (mcpUrl != null && mcpUrl.isNotEmpty) 'mcp_url': mcpUrl,
+      });
+
+  Future<bool> disconnectIda() => _runIntegrationCommand('disconnect_ida', {});
 
   Future<bool> attachIntegrationMcp({
     required String name,

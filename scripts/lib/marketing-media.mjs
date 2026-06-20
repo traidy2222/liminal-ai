@@ -35,28 +35,41 @@ export async function framesToGif(framePaths, gifPath) {
  * @param {string} mp4Path
  */
 export async function framesToMp4(framePaths, mp4Path) {
-  const listFile = path.join(path.dirname(mp4Path), `.frames-${path.basename(mp4Path, ".mp4")}.txt`);
-  const content = framePaths.map((p) => `file '${p.replace(/\\/g, "/")}'\nduration 0.5`).join("\n");
-  await fs.writeFile(listFile, content + "\n", "utf8");
+  if (!framePaths.length) {
+    throw new Error("framesToMp4: no frames");
+  }
+  const framesDir = path.dirname(framePaths[0]);
+  const stagingDir = path.join(framesDir, ".mp4-seq");
+  await fs.rm(stagingDir, { recursive: true, force: true });
+  await fs.mkdir(stagingDir, { recursive: true });
+
+  let index = 0;
+  for (const fp of framePaths) {
+    index++;
+    await fs.copyFile(fp, path.join(stagingDir, `frame-${String(index).padStart(4, "0")}.png`));
+  }
+
+  // Capture loop sleeps 3s between frames — encode at 2fps for smooth WMP/VLC playback.
+  const captureFps = Number(process.env.MARKETING_CAPTURE_FPS ?? "2");
   await runFfmpeg([
     "-y",
-    "-f",
-    "concat",
-    "-safe",
-    "0",
+    "-framerate",
+    String(captureFps),
     "-i",
-    listFile,
+    path.join(stagingDir, "frame-%04d.png"),
     "-vf",
-    "fps=24,scale=1920:-2:flags=lanczos",
+    "scale=1920:-2:flags=lanczos,format=yuv420p",
     "-c:v",
     "libx264",
-    "-pix_fmt",
-    "yuv420p",
+    "-preset",
+    "medium",
+    "-crf",
+    "23",
     "-movflags",
     "+faststart",
     mp4Path,
   ]);
-  await fs.unlink(listFile).catch(() => {});
+  await fs.rm(stagingDir, { recursive: true, force: true });
 }
 
 /**

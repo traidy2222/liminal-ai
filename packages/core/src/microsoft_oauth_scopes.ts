@@ -1,6 +1,7 @@
 import {
-  MICROSOFT_WORKSPACE_SERVICES,
+  DEFAULT_MICROSOFT_SERVICE_IDS,
   apiScopesForMicrosoftServices,
+  resolveMicrosoftServices,
   type MicrosoftServicePreset,
 } from "./microsoft_connector_catalog.js";
 
@@ -79,7 +80,10 @@ export function missingMicrosoftScopes(
 }
 
 export function missingDefaultMicrosoftScopes(granted: string[]): string[] {
-  const required = apiScopesForMicrosoftServices(MICROSOFT_WORKSPACE_SERVICES, "read_write");
+  const required = apiScopesForMicrosoftServices(
+    resolveMicrosoftServices(DEFAULT_MICROSOFT_SERVICE_IDS),
+    "read_write"
+  );
   return required.filter((s) => !grantedIncludesScope(granted, s));
 }
 

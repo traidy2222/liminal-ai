@@ -46,6 +46,14 @@ export function deferIntegrationBootstrap(
         err: new Error(`Azure boot: ${e instanceof Error ? e.message : String(e)}`),
       });
     }
+    try {
+      const { bootstrapIda } = await import("../ida/ida_boot.js");
+      await bootstrapIda(registry);
+    } catch (e) {
+      emitter.emit("error", {
+        err: new Error(`IDA MCP boot: ${e instanceof Error ? e.message : String(e)}`),
+      });
+    }
     if (harness) {
       harness.getContext().refreshProtocolDynamic(harness.registry.getActiveToolNames());
     }

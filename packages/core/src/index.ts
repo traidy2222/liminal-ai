@@ -280,14 +280,20 @@ export {
   createContentStreamParseState,
   ingestToolArgJsonDelta,
   getDecodedContentFromRaw,
+  isStreamingToolArgsJsonComplete,
 } from "./tool_arg_content_stream.js";
 export type { ContentStreamParseState, PartialJsonStringField } from "./tool_arg_content_stream.js";
 export {
   STREAMING_WRITE_TOOL_SPECS,
   extractStreamingWritePreview,
   isStreamingWriteTool,
+  promoteStreamingToolCallStatus,
 } from "./streaming_write_preview.js";
-export type { StreamingWritePreview, StreamingWriteToolSpec } from "./streaming_write_preview.js";
+export type {
+  StreamingToolCallUiStatus,
+  StreamingWritePreview,
+  StreamingWriteToolSpec,
+} from "./streaming_write_preview.js";
 export {
   FILE_COMPOSE_DOCK_TOOLS,
   EMAIL_COMPOSE_DOCK_TOOLS,
@@ -686,6 +692,11 @@ export type { InProgressTask, MissionContinueDecision } from "./mission_controll
 export { rankNotesForPriming } from "./memory_priming.js";
 export type { MemoryPrimingOptions } from "./memory_priming.js";
 export { inferIntentToolFamilies } from "./intent_tool_families.js";
+export {
+  WORKSPACE_TOOL_FAMILY_ALIASES,
+  expandWorkspaceToolFamilies,
+  registryHasToolFamily,
+} from "./workspace_tool_families.js";
 export { buildHarnessRuleRecallMessageForIntent } from "./harness_rules.js";
 export {
   readWorkflowCursor,
@@ -1325,6 +1336,9 @@ export type { MailProviderId, PreferredMailRoute, OAuthAccountRef } from "./oaut
 export {
   GOOGLE_WORKSPACE_SERVICES,
   ALL_GOOGLE_SERVICE_IDS,
+  DEFAULT_GOOGLE_SERVICE_IDS,
+  GOOGLE_SERVICE_GROUPS,
+  GOOGLE_CONNECT_PRESETS,
   GOOGLE_OAUTH_SCOPES_FULL,
   getGoogleServicePreset,
   resolveGoogleServices,
@@ -1365,6 +1379,9 @@ export {
 export {
   MICROSOFT_WORKSPACE_SERVICES,
   ALL_MICROSOFT_SERVICE_IDS,
+  DEFAULT_MICROSOFT_SERVICE_IDS,
+  MICROSOFT_SERVICE_GROUPS,
+  MICROSOFT_CONNECT_PRESETS,
   MICROSOFT_OAUTH_SCOPES_FULL,
   MICROSOFT_GRAPH_CONNECTION,
   getMicrosoftServicePreset,

@@ -172,6 +172,7 @@ class ChatSessionController extends ChangeNotifier {
     }
     if (event == 'tool_delta' ||
         event == 'tool_progress' ||
+        event == 'tool_executing' ||
         event == 'compose_preview' ||
         event == 'tool_start' ||
         (event == 'tool_result' &&

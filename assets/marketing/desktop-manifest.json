@@ -1,47 +1,18 @@
 {
-  "generatedAt": "2026-06-12T12:10:32.032Z",
+  "generatedAt": "2026-06-20T03:51:43.686Z",
   "source": "desktop",
   "windowTitle": "liminal_desktop",
   "exe": "apps/liminal_desktop/build/windows/x64/runner/Release/liminal_desktop.exe",
-  "model": null,
-  "providerOrder": null,
+  "model": "zai.glm-5",
+  "fastModel": "zai.glm-4.7-flash",
+  "providerOrder": "bedrock",
+  "inferenceMode": "managed",
+  "managedProvider": "bedrock",
   "results": [
     {
       "id": "desktop-code-ship-test",
-      "title": "Plan, ship, and verify code",
-      "subtitle": "plan → write_file → run_shell (node:test) — self-healing loop with every step visible in the harness.",
-      "accent": "#00ff88",
-      "prompt": "You are recording a marketing demo. Show how Liminal ships code with verification.\n\n1) Call plan() with exactly 3 steps: implement slugify, add tests, run tests.\n2) Create marketing-capture/slugify.ts exporting slugify(input: string): string — lowercase, trim, collapse whitespace to single hyphens, strip characters outside [a-z0-9-].\n3) Create marketing-capture/slugify.test.ts using node:test (import test, assert from node:test / node:assert) with 3 cases: \"Hello World\" → \"hello-world\", leading/trailing spaces, punctuation stripped.\n4) Run: node --test marketing-capture/slugify.test.js marketing-capture/slugify.test.ts (use whichever path exists after you write the file).\nIf tests fail, fix the implementation once and re-run. End with PASS/FAIL and one example slugify(\"Foo Bar!\") result.",
-      "png": "marketing/desktop-code-ship-test.png",
-      "gif": "marketing/desktop-code-ship-test.gif",
-      "mp4": "marketing/desktop-code-ship-test.mp4",
-      "messagesPath": "marketing/recordings/desktop-code-ship-test/messages.json",
-      "tools": [
-        "activate_tool_family",
-        "plan",
-        "mkdir_p",
-        "write_file",
-        "run_shell"
-      ],
-      "durationMs": 134463,
-      "messageCount": 29,
-      "chatId": "chat_mqavmbib",
-      "source": "desktop"
-    },
-    {
-      "id": "desktop-repo-react-trace",
       "source": "desktop",
-      "error": "Error: PowerShell exit 1: Window not found: liminal_desktop\r\nAt line:14 char:30\r\n+ ... ($h -eq [IntPtr]::Zero) { throw \"Window not found: liminal_desktop\" }\r\n+                               ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~\r\n    + CategoryInfo          : OperationStopped: (Window not found: liminal_desktop:String) [], RuntimeException\r\n    + FullyQualifiedErrorId : Window not found: liminal_desktop"
-    },
-    {
-      "id": "desktop-memory-recall",
-      "source": "desktop",
-      "error": "Error: PowerShell exit 1: Window not found: liminal_desktop\r\nAt line:14 char:30\r\n+ ... ($h -eq [IntPtr]::Zero) { throw \"Window not found: liminal_desktop\" }\r\n+                               ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~\r\n    + CategoryInfo          : OperationStopped: (Window not found: liminal_desktop:String) [], RuntimeException\r\n    + FullyQualifiedErrorId : Window not found: liminal_desktop"
-    },
-    {
-      "id": "desktop-web-research-cite",
-      "source": "desktop",
-      "error": "Error: PowerShell exit 1: Window not found: liminal_desktop\r\nAt line:14 char:30\r\n+ ... ($h -eq [IntPtr]::Zero) { throw \"Window not found: liminal_desktop\" }\r\n+                               ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~\r\n    + CategoryInfo          : OperationStopped: (Window not found: liminal_desktop:String) [], RuntimeException\r\n    + FullyQualifiedErrorId : Window not found: liminal_desktop"
+      "error": "Error: WebSocket not connected"
     }
   ]
 }

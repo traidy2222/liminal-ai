@@ -1,6 +1,43 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { extractStreamingWritePreview } from "./streaming_write_preview.js";
+import { isStreamingToolArgsJsonComplete } from "./tool_arg_content_stream.js";
+import {
+  extractStreamingWritePreview,
+  promoteStreamingToolCallStatus,
+} from "./streaming_write_preview.js";
+
+test("isStreamingToolArgsJsonComplete accepts closed JSON objects", () => {
+  assert.equal(isStreamingToolArgsJsonComplete('{"database":"foo.i64"}'), true);
+  assert.equal(isStreamingToolArgsJsonComplete('{"path":"a.ts","content":"hi"}'), true);
+  assert.equal(isStreamingToolArgsJsonComplete('{"path":"a.ts","content":"hi'), false);
+  assert.equal(isStreamingToolArgsJsonComplete(""), false);
+});
+
+test("promoteStreamingToolCallStatus moves MCP tools to running when args close", () => {
+  const args = '{"database":"foo.i64","session_id":"abc"}';
+  assert.equal(
+    promoteStreamingToolCallStatus("mcp_ida_list_funcs", "streaming", args),
+    "running"
+  );
+  assert.equal(
+    promoteStreamingToolCallStatus("mcp_ida_list_funcs", "streaming", '{"database":"foo'),
+    "streaming"
+  );
+});
+
+test("promoteStreamingToolCallStatus keeps write tools on incomplete content", () => {
+  const partial = '{"path":"a.ts","content":"hello';
+  assert.equal(promoteStreamingToolCallStatus("write_file", "streaming", partial), "streaming");
+  const complete = '{"path":"a.ts","content":"hello"}';
+  assert.equal(promoteStreamingToolCallStatus("write_file", "streaming", complete), "running");
+});
+
+test("promoteStreamingToolCallStatus ignores non-streaming rows", () => {
+  assert.equal(
+    promoteStreamingToolCallStatus("web_fetch", "done", '{"url":"https://x"}'),
+    "done"
+  );
+});
 
 test("extractStreamingWritePreview decodes partial write_file content", () => {
   const raw = '{"path":"src/solver.ts","content":"export function main() {\\n  return 1;\\n';

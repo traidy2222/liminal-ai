@@ -1,6 +1,7 @@
 import type { ToolRegistry } from "@liminal/core";
 import { isFamilyEntitled, loadHarnessEntitlements, ENTITLEMENT_GATED_FAMILIES } from "@liminal/core";
 import { defineTool } from "./shared/helpers.js";
+import { WORKSPACE_TOOL_FAMILY_ALIASES } from "@liminal/core";
 import { TOOL_FAMILIES, summarizeFamilyActivity } from "./tool_catalog.js";
 import { matchesAgentcardIntent } from "./integrations/agentcard/agentcard_cli.js";
 
@@ -25,9 +26,23 @@ export function createToolDiscoveryTools(registry: ToolRegistry) {
     if (/(notion|wiki page|notion database)/.test(hint)) return "notion";
     if (/(xero|invoice|accounting)/.test(hint)) return "xero";
     if (/(github|pull request|merge request|repo issue)/.test(hint)) return "github";
+    if (/(ida|reverse engineer|disassembl|decompil|crackme|binary analys|xrefs?)/.test(hint)) return "ida";
+    if (/(outlook|mail\b|email inbox)/.test(hint)) return "microsoft_mail";
+    if (/(calendar|meeting|schedule|freebusy)/.test(hint) && /microsoft|outlook|m365|office 365/.test(hint)) {
+      return "microsoft_calendar";
+    }
+    if (/(onedrive|sharepoint|excel)/.test(hint)) return "microsoft_files";
+    if (/(teams|planner|todo|onenote)/.test(hint)) return "microsoft_collab";
     if (/(outlook|onedrive|teams|planner|sharepoint|office 365|m365|microsoft)/.test(hint)) {
       return "microsoft_365";
     }
+    if (/(gmail|inbox|send mail)/.test(hint)) return "google_mail";
+    if (/(calendar|meeting|schedule)/.test(hint) && /google|gmail|workspace/.test(hint)) {
+      return "google_calendar";
+    }
+    if (/(sheet|spreadsheet|gdoc|docs|slides)/.test(hint)) return "google_office";
+    if (/\bdrive\b/.test(hint) && /google/.test(hint)) return "google_drive";
+    if (/(analytics|search console|ga4|seo)/.test(hint)) return "google_marketing";
     if (/(google|gmail|sheet|spreadsheet|drive|calendar|workspace|gdoc|docs|slides)/.test(hint)) {
       return "google_workspace";
     }
@@ -123,6 +138,7 @@ export function createToolDiscoveryTools(registry: ToolRegistry) {
     handler: async (args) => {
       const family = String(args["family"] ?? "").trim().toLowerCase();
       if (!family) return { ok: false, error: "family is required" };
+      const aliasTargets = WORKSPACE_TOOL_FAMILY_ALIASES[family];
       const def = TOOL_FAMILIES[family];
       const knownStatic = family in TOOL_FAMILIES;
       const isDynamicConnector = family.startsWith("connector:");
@@ -142,16 +158,23 @@ export function createToolDiscoveryTools(registry: ToolRegistry) {
           };
         }
       }
-      let newly = registry.activateFamilies([family]);
-      if (knownStatic && def?.tools.length) {
-        const fromCatalog = registry.activate(def.tools.filter((t) => registry.has(t)));
-        newly = [...new Set([...newly, ...fromCatalog])];
+      const familiesToActivate = aliasTargets ? [...aliasTargets] : [family];
+      let newly: string[] = [];
+      for (const fam of familiesToActivate) {
+        newly = [...new Set([...newly, ...registry.activateFamilies([fam])])];
+        const subDef = TOOL_FAMILIES[fam];
+        if (subDef?.tools.length) {
+          const fromCatalog = registry.activate(subDef.tools.filter((t) => registry.has(t)));
+          newly = [...new Set([...newly, ...fromCatalog])];
+        }
       }
       if (newly.length === 0) {
         const hint =
           family === "github"
             ? ' Connect GitHub first (connect_provider start_oauth), then activate family "github".'
-            : "";
+            : family === "ida"
+              ? ' Set AGENT_IDA_MCP=1 and connect_provider({ provider: "ida" }), then activate family "ida".'
+              : "";
         return {
           ok: false,
           error: `Family "${family}" has no tools registered in this harness.${hint}`,

@@ -563,6 +563,8 @@ export interface AgentEventMap {
     backoffMs: number;
   };
   tool_start: { callId: string; name: string; traceId?: string; roundIndex?: number };
+  /** Handler began after args validation / approval — UI leaves "streaming arguments". */
+  tool_executing: { callId: string; name: string };
   /** Spoken-channel clip ready for web playback (not shown in chat transcript). */
   speech: {
     clipId: string;

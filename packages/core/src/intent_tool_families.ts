@@ -70,14 +70,43 @@ export function inferIntentToolFamilies(
     if (/notion/i.test(trimmed) && has("notion")) out.add("notion");
     if (/xero|accounting invoice/i.test(trimmed) && has("xero")) out.add("xero");
     if (/github|pull request|merge request/i.test(trimmed) && has("github")) out.add("github");
+    if (/outlook|mail\b|send email/i.test(trimmed)) {
+      if (has("microsoft_mail")) out.add("microsoft_mail");
+    }
+    if (/calendar|meeting|schedule|freebusy/i.test(trimmed) && /microsoft|outlook|m365|office 365/i.test(trimmed)) {
+      if (has("microsoft_calendar")) out.add("microsoft_calendar");
+    }
+    if (/onedrive|sharepoint|excel/i.test(trimmed)) {
+      if (has("microsoft_files")) out.add("microsoft_files");
+    }
+    if (/teams|planner|todo|onenote/i.test(trimmed)) {
+      if (has("microsoft_collab")) out.add("microsoft_collab");
+    }
     if (/outlook|onedrive|teams|planner|sharepoint|office 365|m365|microsoft/i.test(trimmed)) {
       if (has("microsoft_365")) out.add("microsoft_365");
+      else if (has("microsoft_mail")) out.add("microsoft_mail");
     }
     if (/azure|resource group|key vault|app service|cosmos|aks|blob storage|arm template/i.test(trimmed)) {
       if (has("azure")) out.add("azure");
     }
+    if (/gmail|inbox|send mail/i.test(trimmed)) {
+      if (has("google_mail")) out.add("google_mail");
+    }
+    if (/calendar|meeting|schedule|freebusy/i.test(trimmed) && /google|gmail|workspace/i.test(trimmed)) {
+      if (has("google_calendar")) out.add("google_calendar");
+    }
+    if (/sheet|spreadsheet|gdoc|docs|slides/i.test(trimmed)) {
+      if (has("google_office")) out.add("google_office");
+    }
+    if (/\bdrive\b/i.test(trimmed) && /google/i.test(trimmed)) {
+      if (has("google_drive")) out.add("google_drive");
+    }
+    if (/analytics|search console|ga4|seo\b/i.test(trimmed)) {
+      if (has("google_marketing")) out.add("google_marketing");
+    }
     if (/google|gmail|sheet|spreadsheet|gdoc|drive|calendar|workspace|docs|slides/i.test(trimmed)) {
       if (has("google_workspace")) out.add("google_workspace");
+      else if (has("google_mail")) out.add("google_mail");
     }
     if (
       /youtube|yt studio|channel analytics|video seo|shorts feed|subscriber count|views declined/i.test(
@@ -88,11 +117,22 @@ export function inferIntentToolFamilies(
       out.add("youtube");
     }
     if (isEmailComposeTurn(trimmed)) {
-      if (has("google_workspace")) out.add("google_workspace");
-      if (has("microsoft_365")) out.add("microsoft_365");
+      if (has("google_mail")) out.add("google_mail");
+      else if (has("google_workspace")) out.add("google_workspace");
+      if (has("microsoft_mail")) out.add("microsoft_mail");
+      else if (has("microsoft_365")) out.add("microsoft_365");
     }
     if (messageMentionsAgentcard(trimmed)) {
       if (has("agentcard")) out.add("agentcard");
+    }
+    if (
+      /ida|reverse engineering|disassembl|decompil|crackme|malware analysis|patch.*dll|crack|steam_api|binary analysis|pe file|xrefs? to/i.test(
+        trimmed
+      )
+    ) {
+      if (has("ida")) out.add("ida");
+      if (has("shell")) out.add("shell");
+      if (has("files_edit")) out.add("files_edit");
     }
     if (
       /widget|dashboard|desktop app|spawn_app|pin.*visible|keep.*open|always.?visible|calculator window|live chart/i.test(

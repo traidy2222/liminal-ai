@@ -7,6 +7,7 @@ import type {
   ApiReachable,
   SseTransport,
 } from "../useSSE.js";
+import type { ChatTurn } from "../chatTurnLayout.js";
 import type { ImageAttachment } from "../imageAttachments.js";
 import type { SlashCompletionItem } from "@liminal/core";
 
@@ -41,6 +42,7 @@ export interface ShellContract {
 
   // ── Messages ─────────────────────────────────────────────────────────────────
   groupedMessages: (MessageEntry | ToolCallGroup)[];
+  chatTurns: ChatTurn[];
   toolResultMap: Map<string, ToolResult>;
   surface: ToolSurface;
   showRawHarness: boolean;

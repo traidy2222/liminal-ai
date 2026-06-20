@@ -335,23 +335,25 @@ Widgets fetch live data through the sidecar \`/app_proxy\` allowlist — declare
 const INTEGRATION_OAUTH_PROTOCOL = `## Integration OAuth (in-chat connect)
 When any tool returns **not connected**, call \`connect_provider({ provider: "<id>", start_oauth: true, ... })\` — it opens hosted sign-in in the browser and waits for tokens (up to several minutes). Do not send the user to Settings unless \`start_oauth\` fails.
 Provider ids: \`google_workspace\`, \`microsoft_365\`, \`github\`, \`xero\`, \`slack\`, \`linear\`, \`notion\`.
-For Google/Microsoft pass \`services\` when you know which APIs are needed. After success, **retry the original tool**.
+**IDA Pro** has no OAuth — set \`AGENT_IDA_MCP=1\`, then \`connect_provider({ provider: "ida" })\` and \`activate_tool_family({ family: "ida" })\`.
+For Google/Microsoft **always** pass \`services\` for the APIs you need (default connect is gmail+calendar only). After success, **retry the original tool**.
 Slack/Linear/Notion/Xero REST tools need OAuth only (no MCP attach). Google/Microsoft/GitHub also attach MCP tools via the same \`connect_provider\` call.
-**Lazy loading:** activate the **specific** family (\`notion\`, \`slack\`, \`google_workspace\`, \`microsoft_365\`, …) — not the whole \`connectors\` family (connect/disconnect/list only). \`email_style_infer\` loads with \`google_workspace\` or \`microsoft_365\`.`;
+**Lazy loading:** activate the **narrowest** sub-family (\`google_mail\`, \`google_calendar\`, \`microsoft_mail\`, …) or umbrella \`google_workspace\` / \`microsoft_365\` — not the whole \`connectors\` family. \`email_style_infer\` loads with \`google_mail\` or \`microsoft_mail\`.`;
 
 const GOOGLE_WORKSPACE_PROTOCOL = `## Google Workspace (connectors)
 **Primary mail:** when both Google and Microsoft are connected, default to **Gmail** (\`mcp_google_gmail_*\`, \`gmail_send_message\`) unless the user names Outlook/Microsoft or \`list_connectors\` shows \`AGENT_MAIL_PROVIDER=microsoft\`. Entra guest logins (\`#EXT#@*.onmicrosoft.com\`) are admin/tenant accounts — not day-to-day mailboxes.
 
 When the user mentions Google Drive, Docs, Sheets, Gmail, or Calendar:
-1. Call \`list_connectors\` — if OAuth is missing, \`connect_provider({ provider: "google_workspace", start_oauth: true, services: [...] })\`.
-2. Use \`connect_provider({ provider: "google_workspace", services: [...] })\` to attach MCP tools when OAuth is already on disk.
-3. **Gmail hybrid:** use \`mcp_google_gmail_*\` for search, read, and labels. Styled draft → \`gmail_create_draft\`; send that draft → \`gmail_send_draft\`. One-step send now → \`gmail_send_message\` (official Gmail MCP has no send tool). See Email composition (R-EMAIL-DRAFT-SEND).
-4. **Calendar hybrid:** use \`mcp_google_calendar_*\` for list/get/create/update/delete/respond and suggest_time. Use \`calendar_rest_*\` for calendars/settings/colors (read), per-calendar timezone (\`calendar_rest_set_timezone\`), calendar list subscribe/hide/colors, clear all events, freebusy batch, list/get events, natural-language quick add, full Event JSON (insert/patch/replace) with Meet links, recurring instances, RSVP, ACL/sharing, calendar CRUD, move/import, and sendUpdates control on cancel.
-5. **Docs/Sheets/Slides hybrid:** use \`mcp_google_ext_*\` (workspace-mcp) for high-level read/edit when attached. **Google Docs:** prefer \`docs_rest_write_blocks\` for rich content (headings, lists, tables, links, images) — see Google Docs composition protocol. Use \`docs_rest_extract_text\` to read, \`docs_rest_copy_document\` for templates, \`docs_rest_batch_update\` only for advanced API requests. **Sheets:** \`sheets_rest_*\` for values and structural batchUpdate. **Slides:** \`slides_rest_*\` for deck JSON and batchUpdate. \`office_rest_export_file\` for PDF/export.
-6. **Analytics (GA4):** \`analytics_rest_list_account_summaries\` → property id → \`analytics_rest_run_report\` / \`analytics_rest_run_realtime_report\`. Admin: \`analytics_rest_get_property\`, data streams, custom dimensions. OAuth service \`analytics\`; no MCP.
-7. **Search Console:** \`search_console_rest_list_sites\` → exact \`site_url\` → \`search_console_rest_query_search_analytics\`, \`search_console_rest_inspect_url\`, sitemap tools. OAuth service \`search_console\`.
-8. Prefer read tools first; writes are approval-gated — confirm file/event IDs in args.
-9. Large Doc/Sheet payloads: rely on distillation; offer remember/vault_write when the user wants persistence.
+1. Call \`list_connectors\` — if OAuth is missing, \`connect_provider({ provider: "google_workspace", start_oauth: true, services: [...] })\` with **only** the services needed (never omit \`services\` when you know the task).
+2. **Service picks:** mail → \`["gmail"]\`; calendar → \`["calendar"]\`; daily mail+calendar → \`["gmail","calendar"]\` (default); Docs/Sheets/Slides → \`["docs","sheets","slides","drive"]\`; GA4 → \`["analytics"]\`; Search Console → \`["search_console"]\`; full workspace → pass every id explicitly.
+3. Use \`connect_provider({ provider: "google_workspace", services: [...] })\` to attach MCP tools when OAuth is already on disk.
+4. **Gmail hybrid:** use \`mcp_google_gmail_*\` for search, read, and labels. Styled draft → \`gmail_create_draft\`; send that draft → \`gmail_send_draft\`. One-step send now → \`gmail_send_message\` (official Gmail MCP has no send tool). See Email composition (R-EMAIL-DRAFT-SEND).
+5. **Calendar hybrid:** use \`mcp_google_calendar_*\` for list/get/create/update/delete/respond and suggest_time. Use \`calendar_rest_*\` for calendars/settings/colors (read), per-calendar timezone (\`calendar_rest_set_timezone\`), calendar list subscribe/hide/colors, clear all events, freebusy batch, list/get events, natural-language quick add, full Event JSON (insert/patch/replace) with Meet links, recurring instances, RSVP, ACL/sharing, calendar CRUD, move/import, and sendUpdates control on cancel.
+6. **Docs/Sheets/Slides hybrid:** use \`mcp_google_ext_*\` (workspace-mcp) for high-level read/edit when attached. **Google Docs:** prefer \`docs_rest_write_blocks\` for rich content (headings, lists, tables, links, images) — see Google Docs composition protocol. Use \`docs_rest_extract_text\` to read, \`docs_rest_copy_document\` for templates, \`docs_rest_batch_update\` only for advanced API requests. **Sheets:** \`sheets_rest_*\` for values and structural batchUpdate. **Slides:** \`slides_rest_*\` for deck JSON and batchUpdate. \`office_rest_export_file\` for PDF/export.
+7. **Analytics (GA4):** \`analytics_rest_list_account_summaries\` → property id → \`analytics_rest_run_report\` / \`analytics_rest_run_realtime_report\`. Admin: \`analytics_rest_get_property\`, data streams, custom dimensions. OAuth service \`analytics\`; no MCP.
+8. **Search Console:** \`search_console_rest_list_sites\` → exact \`site_url\` → \`search_console_rest_query_search_analytics\`, \`search_console_rest_inspect_url\`, sitemap tools. OAuth service \`search_console\`.
+9. Prefer read tools first; writes are approval-gated — confirm file/event IDs in args.
+10. Large Doc/Sheet payloads: rely on distillation; offer remember/vault_write when the user wants persistence.
 
 **Google MCP arg shapes (auto-normalized — still prefer correct forms):**
 - **Pagination:** \`pageSize\` integer (aliases \`page_size\`, \`limit\`); \`pageToken\` for next page.
@@ -365,14 +367,15 @@ const MICROSOFT_365_PROTOCOL = `## Microsoft 365 (connectors)
 **Mail:** use Microsoft mail tools only when Gmail is not the primary mailbox or the user explicitly asks for Outlook. Teams, OneDrive, SharePoint, Planner, and Excel stay on Microsoft.
 
 When the user mentions Outlook, Teams, OneDrive, SharePoint, Planner, Excel online, or Microsoft calendar:
-1. Call \`list_connectors\` — if not connected, \`connect_provider({ provider: "microsoft_365", start_oauth: true, services: [...] })\`.
-2. **Discovery / bulk Graph ops:** prefer \`mcp_microsoft_*\` tools from the ms-365-mcp-server sidecar (mail list, drive browse, Teams, Planner, etc.).
-3. **Polished output:** use REST complements — \`outlook_send_message\` / \`outlook_create_draft\` (HTML mail), \`outlook_calendar_rest_create_event\` (Teams meeting via \`is_online_meeting:true\`), \`onedrive_rest_*\`, \`excel_rest_*\`. Do **not** use Google \`calendar_rest_*\` for Outlook — those target Google Calendar API.
-4. **Mail:** HTML \`body_html\` default for new outbound mail; set \`timezone\` on calendar events (\`dateTimeTimeZone\`); Teams meetings need \`onlineMeetingProvider: teamsForBusiness\` (handled by \`outlook_calendar_rest_create_event\`).
-5. **Files:** distinguish OneDrive \`path\` vs drive \`item_id\`; SharePoint uses site/drive ids via sidecar or \`sharepoint_rest_list_followed_sites\`.
-6. **Word/PPT honesty:** Graph has **no** in-place Word body editing like Google Docs. For "edit Word content": download → transform locally → re-upload, or create new content in OneDrive. \`office_rest_export_pdf\` for PDF export.
-7. **Permissions:** Graph 403 → suggest reconnect with expanded service checkboxes in Integrations.
-8. **Search:** \`graph_search_rest_query\` across mail, files, sites, people.`;
+1. Call \`list_connectors\` — if not connected, \`connect_provider({ provider: "microsoft_365", start_oauth: true, services: [...] })\` with **only** needed services (default is mail+calendar).
+2. **Service picks:** mail → \`["mail"]\`; calendar → \`["calendar"]\`; daily → \`["mail","calendar"]\`; OneDrive/Excel → \`["onedrive","excel"]\`; Teams → \`["teams"]\`; SharePoint → \`["sharepoint"]\`.
+3. **Discovery / bulk Graph ops:** prefer \`mcp_microsoft_*\` tools from the ms-365-mcp-server sidecar (mail list, drive browse, Teams, Planner, etc.).
+4. **Polished output:** use REST complements — \`outlook_send_message\` / \`outlook_create_draft\` (HTML mail), \`outlook_calendar_rest_create_event\` (Teams meeting via \`is_online_meeting:true\`), \`onedrive_rest_*\`, \`excel_rest_*\`. Do **not** use Google \`calendar_rest_*\` for Outlook — those target Google Calendar API.
+5. **Mail:** HTML \`body_html\` default for new outbound mail; set \`timezone\` on calendar events (\`dateTimeTimeZone\`); Teams meetings need \`onlineMeetingProvider: teamsForBusiness\` (handled by \`outlook_calendar_rest_create_event\`).
+6. **Files:** distinguish OneDrive \`path\` vs drive \`item_id\`; SharePoint uses site/drive ids via sidecar or \`sharepoint_rest_list_followed_sites\`.
+7. **Word/PPT honesty:** Graph has **no** in-place Word body editing like Google Docs. For "edit Word content": download → transform locally → re-upload, or create new content in OneDrive. \`office_rest_export_pdf\` for PDF export.
+8. **Permissions:** Graph 403 → suggest reconnect with expanded service checkboxes in Integrations.
+9. **Search:** \`graph_search_rest_query\` across mail, files, sites, people.`;
 
 const GITHUB_PROTOCOL = `## GitHub (connectors)
 When the user mentions GitHub issues, pull requests, repos, Actions, or code review on github.com:
@@ -382,6 +385,34 @@ When the user mentions GitHub issues, pull requests, repos, Actions, or code rev
 4. **Choose path:** clone/checkout locally → \`git_*\`; remote-only repo/issue/PR → \`mcp_github_*\`.
 5. Writes (merge, close issue, push via API) are approval-gated — confirm repo \`owner/name\` and issue/PR numbers.
 6. Read-only mode: \`connect_provider({ provider: "github", mode: "read_only" })\` or \`GITHUB_MCP_URL\` ending in \`/readonly\`.`;
+
+const IDA_PROTOCOL = `## IDA Pro (expert reverse engineering)
+When the user mentions IDA, binaries, crackmes, DLL patches, disassembly, or malware analysis:
+
+### Connect
+1. \`AGENT_IDA_MCP=1\`, then \`connect_provider({ provider: "ida" })\`. Liminal registers \`ida_apply_patches_to_input\` + \`ida_get_input_metadata\` in-repo (no pip patch required).
+2. Headless: \`idalib-mcp\` sidecar. GUI: MCP plugin or \`AGENT_IDA_MCP_URL\`. Debugger: \`AGENT_IDA_MCP_DBG_EXT=1\` for \`dbg_*\` tools.
+3. \`activate_tool_family({ family: "ida" })\` if lazy-loaded. Also activate \`shell\` + \`files_edit\` when exporting/verifying patched binaries.
+
+### Session
+4. \`mcp_ida_idb_list\` → \`mcp_ida_idb_open\` if needed. Harness auto-injects \`database\`/\`session_id\` on later calls.
+5. **Never convert number bases manually** — \`mcp_ida_int_convert\` only.
+
+### Analysis loop (prefer fewer, richer calls)
+6. \`mcp_ida_survey_binary\` → exports/imports/strings overview.
+7. \`mcp_ida_list_funcs\` / \`mcp_ida_lookup_funcs\` → targets by name (e.g. SteamAPI_InitSafe).
+8. \`mcp_ida_analyze_funcs\` or \`mcp_ida_decompile\` + \`mcp_ida_disasm\` → understand logic; \`mcp_ida_xrefs_to\` / \`mcp_ida_callees\` for graph.
+9. Rename/comment: \`mcp_ida_rename\`, \`mcp_ida_set_comments\` — keep the IDB readable.
+
+### Patch & ship
+10. Patch in IDA: \`mcp_ida_patch_asm\` (e.g. \`mov al, 1; ret\`) or \`mcp_ida_patch\` with hex bytes.
+11. Export cracked binary: \`ida_apply_patches_to_input({ output_path: "C:/.../steam_api64.patched.dll", overwrite: true })\`.
+12. Verify: \`run_shell\` (hash, dumpbin /exports, load test). \`ida_get_input_metadata\` for paths.
+
+### Rules
+- \`export_funcs\` emits C/prototypes — **not** a patched PE. Use \`ida_apply_patches_to_input\` for on-disk DLL/EXE.
+- Obfuscated binaries: de-obfuscate / FLIRT / Lumina first when possible.
+- Patches and debugger writes are approval-gated. Use \`read_write\` connect mode (not \`read_only\`).`;
 
 const XERO_PROTOCOL = `## Xero (connectors)
 **Receipt preset:** When the user clicks **Process receipts**, sends \`/receipt\`, \`/receipts\`, or \`/process-receipts\` with image(s), follow the injected **[RECEIPT → XERO WORKFLOW]** block — do not treat it as open-ended chat.
@@ -838,6 +869,13 @@ export function buildProtocolDynamicSuffix(
     [...names].some((n) => n.startsWith("mcp_github_"))
   ) {
     parts.push(GITHUB_PROTOCOL);
+  }
+  if (
+    names.has("connect_provider") ||
+    names.has("list_connectors") ||
+    [...names].some((n) => n.startsWith("mcp_ida_"))
+  ) {
+    parts.push(IDA_PROTOCOL);
   }
   if (
     names.has("connect_provider") ||

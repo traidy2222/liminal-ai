@@ -72,6 +72,7 @@ import {
   buildHarnessRuleRecallMessageForIntent,
 } from "./harness_rules.js";
 import { inferIntentToolFamilies } from "./intent_tool_families.js";
+import { registryHasToolFamily } from "./workspace_tool_families.js";
 import {
   batchHasUndispatchableFileWrites,
   batchHasUndispatchableLiminalAppHtml,
@@ -1851,17 +1852,16 @@ export class AgentHarness {
       families.add("vault");
     }
     if (shouldInjectEmailComposeGuidance(userMessage)) {
-      families.add("google_workspace");
+      families.add("google_mail");
       if (/\boutlook|microsoft|m365|office 365/i.test(userMessage)) {
-        families.add("microsoft_365");
+        families.add("microsoft_mail");
       }
     }
 
     if (this.registry.isLazyToolLoading() && families.size > 0) {
+      const names = this.registry.getToolNames();
       const registryHas = (fam: string) =>
-        this.registry.getToolNames().some(
-          (t) => this.registry.getSuggestedFamilyForTool(t) === fam
-        );
+        registryHasToolFamily(fam, names, (t) => this.registry.getSuggestedFamilyForTool(t));
       const toActivate = [...families].filter(registryHas);
       if (toActivate.length > 0) {
         const newly = this.registry.activateFamilies(toActivate);
@@ -3503,8 +3503,8 @@ export class AgentHarness {
           userMessage,
           {
             registryHas: (fam) =>
-              this.registry.getToolNames().some(
-                (t) => this.registry.getSuggestedFamilyForTool(t) === fam
+              registryHasToolFamily(fam, this.registry.getToolNames(), (t) =>
+                this.registry.getSuggestedFamilyForTool(t)
               ),
           }
         );

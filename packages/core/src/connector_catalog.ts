@@ -255,6 +255,41 @@ export const GOOGLE_REST_SERVICE_IDS: GoogleServiceId[] = ["analytics", "search_
 
 export const ALL_GOOGLE_SERVICE_IDS: GoogleServiceId[] = GOOGLE_WORKSPACE_SERVICES.map((s) => s.id);
 
+/** Default connect/OAuth surface when services[] is omitted — daily workflow only. */
+export const DEFAULT_GOOGLE_SERVICE_IDS: GoogleServiceId[] = ["gmail", "calendar"];
+
+export interface WorkspaceServiceGroup {
+  id: string;
+  label: string;
+  services: GoogleServiceId[];
+}
+
+export const GOOGLE_SERVICE_GROUPS: WorkspaceServiceGroup[] = [
+  { id: "core", label: "Mail & calendar", services: ["gmail", "calendar"] },
+  {
+    id: "productivity",
+    label: "Files & docs",
+    services: ["drive", "docs", "sheets", "slides", "forms", "tasks"],
+  },
+  { id: "people", label: "People & chat", services: ["people", "chat", "contacts"] },
+  { id: "marketing", label: "Marketing & SEO", services: ["analytics", "search_console"] },
+  { id: "advanced", label: "Advanced", services: ["apps_script", "search"] },
+];
+
+export const GOOGLE_CONNECT_PRESETS: Array<{
+  id: string;
+  label: string;
+  services: GoogleServiceId[];
+}> = [
+  { id: "daily", label: "Mail & calendar", services: ["gmail", "calendar"] },
+  {
+    id: "productivity",
+    label: "Mail, calendar & docs",
+    services: ["gmail", "calendar", "drive", "docs", "sheets", "slides", "forms", "tasks"],
+  },
+  { id: "all", label: "Everything", services: ALL_GOOGLE_SERVICE_IDS },
+];
+
 export function getGoogleServicePreset(id: string): GoogleServicePreset | undefined {
   return GOOGLE_WORKSPACE_SERVICES.find((s) => s.id === id);
 }
@@ -263,7 +298,7 @@ export function resolveGoogleServices(serviceIds?: string[]): GoogleServicePrese
   const ids =
     serviceIds && serviceIds.length > 0
       ? serviceIds.map((s) => s.trim().toLowerCase()).filter(Boolean)
-      : ALL_GOOGLE_SERVICE_IDS;
+      : DEFAULT_GOOGLE_SERVICE_IDS;
   const out: GoogleServicePreset[] = [];
   const seenOfficial = new Set<string>();
   for (const id of ids) {

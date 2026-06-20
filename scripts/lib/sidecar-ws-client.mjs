@@ -2,7 +2,20 @@
  * Token-gated loopback WebSocket client for `liminald` — drives real harness turns
  * during desktop marketing capture (no HTTP /api shim).
  */
+import { createRequire } from "node:module";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+import { readSidecarHandshake, waitForFreshHandshake } from "./marketing-sidecar.mjs";
+
+const require = createRequire(import.meta.url);
+const { WebSocket } = require(
+  require.resolve("ws", { paths: [path.join(path.dirname(fileURLToPath(import.meta.url)), "../../packages/sidecar")] })
+);
+
 const PROTOCOL_VERSION = 1;
+const BATCH_CHAT_TITLE = "marketing-batch-capture";
+const REUSE_CHAT = process.env.MARKETING_REUSE_CHAT === "1";
+const NO_FOCUS = process.env.MARKETING_CAPTURE_NO_FOCUS === "1";
 
 function sleep(ms) {
   return new Promise((r) => setTimeout(r, ms));
@@ -12,16 +25,18 @@ export class SidecarWsClient {
   /**
    * @param {number} port
    * @param {string} token
+   * @param {{ onHandshakeRefresh?: () => Promise<{ port: number; token: string }> }} [opts]
    */
-  constructor(port, token) {
+  constructor(port, token, opts = {}) {
     this.port = port;
     this.token = token;
-    /** @type {WebSocket | null} */
+    this.onHandshakeRefresh = opts.onHandshakeRefresh ?? null;
+    /** @type {import("ws").WebSocket | null} */
     this.ws = null;
     /** @type {Map<string, { resolve: (v: object) => void; reject: (e: Error) => void; timer: NodeJS.Timeout }>} */
     this.pending = new Map();
     this.cmdSeq = 0;
-    /** @type {{ chatId: string; busy: boolean }[]} */
+    /** @type {{ chatId: string; busy: boolean; title?: string; awaitingPersonaBootstrap?: boolean }[]} */
     this.chats = [];
     this.activeChatId = null;
     /** @type {object | undefined} */
@@ -33,6 +48,7 @@ export class SidecarWsClient {
     this.turnEndedChats = new Set();
     /** @type {Array<(frame: object) => void>} */
     this.listeners = [];
+    this._connecting = false;
   }
 
   onEvent(fn) {
@@ -43,31 +59,81 @@ export class SidecarWsClient {
     };
   }
 
+  #rejectPending(reason) {
+    for (const p of this.pending.values()) {
+      clearTimeout(p.timer);
+      p.reject(reason instanceof Error ? reason : new Error(String(reason)));
+    }
+    this.pending.clear();
+  }
+
+  #attachSocket(ws) {
+    ws.on("message", (data) => this.#onMessage(String(data)));
+    ws.on("close", () => {
+      if (this.ws === ws) {
+        this.ws = null;
+        this.sidecarReady = false;
+      }
+      this.#rejectPending(new Error("WebSocket closed"));
+    });
+    ws.on("error", () => {
+      /* close handler runs after error */
+    });
+  }
+
   async connect(timeoutMs = 30_000) {
     if (this.ws?.readyState === WebSocket.OPEN) return;
-    const url = `ws://127.0.0.1:${this.port}?token=${encodeURIComponent(this.token)}`;
-    await new Promise((resolve, reject) => {
-      const timer = setTimeout(() => reject(new Error(`WS connect timeout: ${url}`)), timeoutMs);
-      const ws = new WebSocket(url);
-      ws.addEventListener("open", () => {
-        clearTimeout(timer);
-        this.ws = ws;
-        resolve();
+    if (this._connecting) {
+      while (this._connecting) await sleep(50);
+      if (this.ws?.readyState === WebSocket.OPEN) return;
+    }
+    this._connecting = true;
+    try {
+      const url = `ws://127.0.0.1:${this.port}?token=${encodeURIComponent(this.token)}`;
+      await new Promise((resolve, reject) => {
+        const timer = setTimeout(() => reject(new Error(`WS connect timeout: ${url}`)), timeoutMs);
+        const ws = new WebSocket(url);
+        ws.once("open", () => {
+          clearTimeout(timer);
+          this.ws = ws;
+          this.#attachSocket(ws);
+          resolve();
+        });
+        ws.once("error", (err) => {
+          clearTimeout(timer);
+          reject(err instanceof Error ? err : new Error(`WebSocket error: ${url}`));
+        });
       });
-      ws.addEventListener("error", () => {
-        clearTimeout(timer);
-        reject(new Error(`WebSocket error: ${url}`));
-      });
-      ws.addEventListener("message", (ev) => this.#onMessage(String(ev.data)));
-      ws.addEventListener("close", () => {
-        for (const p of this.pending.values()) {
-          clearTimeout(p.timer);
-          p.reject(new Error("WebSocket closed"));
-        }
-        this.pending.clear();
-      });
-    });
-    await this.waitForSidecarReady(90_000);
+      await this.waitForSidecarReady(90_000);
+    } finally {
+      this._connecting = false;
+    }
+  }
+
+  async reconnectFromHandshake(minStartedAt = 0) {
+    this.close();
+    let hs;
+    if (this.onHandshakeRefresh) {
+      hs = await this.onHandshakeRefresh();
+    } else {
+      hs = minStartedAt > 0 ? await waitForFreshHandshake(minStartedAt) : await readSidecarHandshake();
+    }
+    if (!hs?.port || !hs?.token) {
+      throw new Error("Cannot reconnect — sidecar handshake missing");
+    }
+    this.port = hs.port;
+    this.token = hs.token;
+    this.sidecarReady = false;
+    await this.connect();
+  }
+
+  async ensureConnected() {
+    if (this.ws?.readyState === WebSocket.OPEN && this.sidecarReady) return;
+    if (this.ws?.readyState === WebSocket.OPEN && !this.sidecarReady) {
+      await this.waitForSidecarReady(90_000);
+      return;
+    }
+    await this.reconnectFromHandshake();
   }
 
   #onMessage(raw) {
@@ -132,26 +198,43 @@ export class SidecarWsClient {
    * @param {number} [timeoutMs]
    */
   async sendCommand(command, data, timeoutMs = 120_000) {
-    if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
-      throw new Error("WebSocket not connected");
+    for (let attempt = 0; attempt < 2; attempt++) {
+      await this.ensureConnected();
+      if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
+        if (attempt === 0) {
+          await this.reconnectFromHandshake();
+          continue;
+        }
+        throw new Error("WebSocket not connected");
+      }
+      const id = `mkt-${++this.cmdSeq}-${Date.now()}`;
+      const frame = { v: PROTOCOL_VERSION, t: "cmd", id, command, data };
+      try {
+        return await new Promise((resolve, reject) => {
+          const timer = setTimeout(() => {
+            this.pending.delete(id);
+            reject(new Error(`Command timed out: ${command}`));
+          }, timeoutMs);
+          this.pending.set(id, {
+            timer,
+            resolve,
+            reject: (e) => {
+              clearTimeout(timer);
+              reject(e);
+            },
+          });
+          this.ws.send(JSON.stringify(frame));
+        });
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        if (attempt === 0 && /WebSocket closed|not connected/i.test(msg)) {
+          await this.reconnectFromHandshake();
+          continue;
+        }
+        throw err;
+      }
     }
-    const id = `mkt-${++this.cmdSeq}-${Date.now()}`;
-    const frame = { v: PROTOCOL_VERSION, t: "cmd", id, command, data };
-    return new Promise((resolve, reject) => {
-      const timer = setTimeout(() => {
-        this.pending.delete(id);
-        reject(new Error(`Command timed out: ${command}`));
-      }, timeoutMs);
-      this.pending.set(id, {
-        timer,
-        resolve,
-        reject: (e) => {
-          clearTimeout(timer);
-          reject(e);
-        },
-      });
-      this.ws.send(JSON.stringify(frame));
-    });
+    throw new Error("WebSocket not connected");
   }
 
   isChatBusy(chatId) {
@@ -190,13 +273,26 @@ export class SidecarWsClient {
     await sleep(2500);
   }
 
+  /** @returns {string | null} */
+  findBatchChat() {
+    const row = this.chats.find((c) => c.title === BATCH_CHAT_TITLE);
+    return row?.chatId ?? null;
+  }
+
   /**
-   * @param {{ id: string; prompt: string }} spec
+   * @param {{ id: string }} spec
    * @param {string} repoRoot
+   * @param {string | null} [batchChatId]
    */
-  async createMarketingChat(spec, repoRoot) {
+  async resolveMarketingChat(spec, repoRoot, batchChatId = null) {
+    if (REUSE_CHAT && batchChatId) {
+      await this.prepareMarketingChat(batchChatId);
+      return batchChatId;
+    }
+
+    const title = REUSE_CHAT ? BATCH_CHAT_TITLE : `marketing-${spec.id}`;
     const result = await this.sendCommand("create_chat", {
-      title: `marketing-${spec.id}`,
+      title,
       workspaceRoot: repoRoot,
     });
     if (!result.ok) {
@@ -204,15 +300,49 @@ export class SidecarWsClient {
     }
     const chatId = result.data?.chatId;
     if (!chatId) throw new Error("create_chat returned no chatId");
-    await this.activateChat(chatId);
-    await this.sendCommand("open_chat", { chatId });
-    await this.sendCommand("replay_transcript", { chatId });
+    await this.prepareMarketingChat(chatId);
     return chatId;
+  }
+
+  /** Fresh chat for capture — no transcript replay (avoids stale "tools done" UI). */
+  async prepareMarketingChat(chatId) {
+    await this.sendCommand("open_chat", { chatId });
+    const activated = await this.sendCommand("activate_chat", { chatId });
+    if (!activated.ok) throw new Error(activated.error ?? "activate_chat failed");
+    if (activated.data?.activeChatId) {
+      this.activeChatId = activated.data.activeChatId;
+    } else {
+      this.activeChatId = chatId;
+    }
+    await this.sendCommand("reset_session", { chatId });
+    this.runningChats.delete(chatId);
+    this.turnEndedChats.delete(chatId);
+    await this.waitHarnessIdle(120_000, chatId);
+  }
+
+  async purgeStaleMarketingChats() {
+    const stale = this.chats.filter(
+      (c) => c.title?.startsWith("marketing-") || c.title === BATCH_CHAT_TITLE
+    );
+    for (const chat of stale) {
+      console.log(`[desktop] Removing stale marketing chat ${chat.chatId} (${chat.title})`);
+      await this.sendCommand("delete_chat", { chatId: chat.chatId });
+    }
+  }
+
+  /**
+   * @param {{ id: string; prompt: string }} spec
+   * @param {string} repoRoot
+   * @deprecated Use resolveMarketingChat
+   */
+  async createMarketingChat(spec, repoRoot) {
+    return this.resolveMarketingChat(spec, repoRoot, null);
   }
 
   async activateChat(chatId) {
     const result = await this.sendCommand("activate_chat", { chatId });
     if (!result.ok) throw new Error(result.error ?? "activate_chat failed");
+    if (result.data?.activeChatId) this.activeChatId = result.data.activeChatId;
     await this.waitHarnessIdle(120_000, chatId);
   }
 
@@ -239,21 +369,36 @@ export class SidecarWsClient {
     );
   }
 
+  async waitForHarnessRunning(chatId, maxWaitMs = 90_000) {
+    if (this.runningChats.has(chatId)) return;
+    const start = Date.now();
+    while (Date.now() - start < maxWaitMs) {
+      if (this.runningChats.has(chatId)) return;
+      await sleep(200);
+    }
+    throw new Error(`harness_running not received for ${chatId} within ${maxWaitMs}ms`);
+  }
+
   async postMessageWhenIdle(chatId, message, maxWaitMs = 120_000) {
     const start = Date.now();
     while (Date.now() - start < maxWaitMs) {
-      await this.activateChat(chatId);
-      const result = await this.sendCommand("send_message", {
-        chatId,
-        message,
-        freshContext: true,
-      });
-      if (result.ok) return;
-      const msg = result.error ?? "";
-      if (!/busy|processing/i.test(msg)) {
-        throw new Error(result.error ?? "send_message failed");
+      const busy = this.isChatBusy(chatId);
+      if (!busy) {
+        const result = await this.sendCommand("send_message", {
+          chatId,
+          message,
+          freshContext: true,
+        });
+        if (result.ok) {
+          await this.waitForHarnessRunning(chatId, Math.min(90_000, maxWaitMs));
+          return;
+        }
+        const msg = result.error ?? "";
+        if (!/busy|processing/i.test(msg)) {
+          throw new Error(result.error ?? "send_message failed");
+        }
       }
-      await sleep(2500);
+      await sleep(1500);
     }
     throw new Error(`Could not post message for ${chatId} within ${maxWaitMs}ms`);
   }
@@ -267,41 +412,35 @@ export class SidecarWsClient {
       const approvalNonce = data.approvalNonce;
       if (!callId || !approvalNonce) return;
       console.log("[desktop] Auto-approving tool gate…");
-      await this.sendCommand("resolve_approval", {
-        chatId,
-        callId,
-        approvalNonce,
-        decision: { decision: "approve" },
-      });
+      try {
+        await this.sendCommand("resolve_approval", {
+          chatId,
+          callId,
+          approvalNonce,
+          decision: { decision: "approve" },
+        });
+      } catch (err) {
+        console.warn(
+          "[desktop] Auto-approve failed:",
+          err instanceof Error ? err.message : err
+        );
+      }
     });
   }
 
   close() {
-    this.ws?.close();
+    if (this.ws) {
+      this.ws.removeAllListeners();
+      try {
+        this.ws.close();
+      } catch {
+        /* already closed */
+      }
+    }
     this.ws = null;
+    this.sidecarReady = false;
+    this.#rejectPending(new Error("WebSocket closed"));
   }
 }
 
-/**
- * Poll `~/.liminal/sidecar.json` until present.
- * @param {number} [timeoutMs]
- */
-export async function waitForHandshake(timeoutMs = 90_000) {
-  const os = await import("node:os");
-  const fs = await import("node:fs/promises");
-  const path = await import("node:path");
-  const home = process.env.LIMINAL_HOME?.trim() || path.join(os.homedir(), ".liminal");
-  const file = path.join(home, "sidecar.json");
-  const start = Date.now();
-  while (Date.now() - start < timeoutMs) {
-    try {
-      const text = await fs.readFile(file, "utf8");
-      const json = JSON.parse(text);
-      if (json.port && json.token) return json;
-    } catch {
-      /* mid-write */
-    }
-    await sleep(250);
-  }
-  throw new Error(`Handshake file not found: ${file}`);
-}
+export { waitForFreshHandshake, waitForHandshake } from "./marketing-sidecar.mjs";

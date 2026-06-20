@@ -18,19 +18,34 @@
  */
 import { spawn } from "node:child_process";
 import fs from "node:fs/promises";
-import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { messagesFromSessionJsonl, resolveSessionJsonlPath } from "./lib/marketing-jsonl.mjs";
 import { framesToGif, framesToMp4 } from "./lib/marketing-media.mjs";
-import { captureWindowPng, DEFAULT_TITLE, focusWindow } from "./lib/marketing-window-capture.mjs";
-import { SidecarWsClient, waitForHandshake } from "./lib/sidecar-ws-client.mjs";
+import {
+  captureWindowPng,
+  DEFAULT_TITLE,
+  focusWindow,
+  minimizeDesktopWindow,
+  NO_FOCUS,
+  resetWindowTitleCache,
+  waitForDesktopWindow,
+} from "./lib/marketing-window-capture.mjs";
+import {
+  killExistingDesktop,
+  killStaleSidecar,
+  marketingDesktopChildEnv,
+  waitForFreshHandshake,
+} from "./lib/marketing-sidecar.mjs";
+import { SidecarWsClient } from "./lib/sidecar-ws-client.mjs";
 import { findPrompt, getMarketingPrompts, resolvePromptId } from "./lib/marketing-prompts.mjs";
 import {
   applyMarketingModelToProcessEnv,
   ensureMarketingModelSidecar,
   marketingModelManifestFields,
 } from "./lib/marketing-model.mjs";
+import { prepMarketingWorkspace } from "./lib/marketing-workspace-prep.mjs";
+import { MarketingCaptureStatus } from "./lib/marketing-capture-status.mjs";
 
 applyMarketingModelToProcessEnv();
 
@@ -52,6 +67,10 @@ const DEFAULT_EXE = path.join(
 );
 
 const INCLUDE_OPTIONAL = process.env.MARKETING_INCLUDE_OPTIONAL === "1";
+// Batch chat + minimized window — same defaults as unattended web capture.
+if (process.env.MARKETING_REUSE_CHAT == null) process.env.MARKETING_REUSE_CHAT = "1";
+if (process.env.MARKETING_CAPTURE_NO_FOCUS == null) process.env.MARKETING_CAPTURE_NO_FOCUS = "1";
+const REUSE_CHAT = process.env.MARKETING_REUSE_CHAT === "1";
 /** Real harness prompts — shared with live capture; desktop window framing. */
 const PROMPTS = getMarketingPrompts("desktop", INCLUDE_OPTIONAL);
 
@@ -59,6 +78,7 @@ function parseArgs(argv) {
   let only = null;
   let skipLaunch = process.env.MARKETING_DESKTOP_SKIP_LAUNCH === "1";
   let keepApp = false;
+  let smoke = false;
   let windowTitle = process.env.LIMINAL_DESKTOP_TITLE ?? DEFAULT_TITLE;
   let exe = process.env.LIMINAL_DESKTOP_EXE ?? DEFAULT_EXE;
 
@@ -68,6 +88,7 @@ function parseArgs(argv) {
     else if (argv[i] === "--title" && argv[i + 1]) windowTitle = argv[++i];
     else if (argv[i] === "--skip-launch") skipLaunch = true;
     else if (argv[i] === "--keep-app") keepApp = true;
+    else if (argv[i] === "--smoke") smoke = true;
     else if (argv[i] === "--help" || argv[i] === "-h") {
       console.log(`Usage: node scripts/capture-marketing-desktop.mjs [options]
 
@@ -77,11 +98,16 @@ Options:
   --title <title>      Window title for capture (default: ${DEFAULT_TITLE})
   --skip-launch        Reuse running desktop (handshake must exist)
   --keep-app           Do not kill desktop process on exit
+  --smoke              Launch app, capture one PNG, exit (no harness prompt)
+
+Env:
+  MARKETING_REUSE_CHAT=1         One chat for all prompts (batch)
+  MARKETING_CAPTURE_NO_FOCUS=1   Minimize window, skip focus steal
 `);
       process.exit(0);
     }
   }
-  return { only, skipLaunch, keepApp, windowTitle, exe };
+  return { only, skipLaunch, keepApp, smoke, windowTitle, exe };
 }
 
 function sleep(ms) {
@@ -90,8 +116,9 @@ function sleep(ms) {
 
 /**
  * @param {string} exe
+ * @param {number} launchStartedAt
  */
-async function launchDesktop(exe) {
+async function launchDesktop(exe, launchStartedAt) {
   try {
     await fs.access(exe);
   } catch {
@@ -99,46 +126,49 @@ async function launchDesktop(exe) {
       `Desktop executable not found: ${exe}\nBuild with: npm run desktop:build:windows`
     );
   }
-  console.log(`[desktop] Launching ${exe}`);
+  await killStaleSidecar();
+  await killExistingDesktop();
+  console.log(`[desktop] Launching ${exe} (LIMINALD_ATTACH=1 — sidecar survives reconnect)`);
   const child = spawn(exe, [], {
     detached: true,
     stdio: "ignore",
     cwd: path.dirname(exe),
-    windowsHide: false,
-    env: process.env,
+    windowsHide: true,
+    env: marketingDesktopChildEnv(),
   });
   child.unref();
-  return child.pid;
+  return { pid: child.pid, launchStartedAt };
 }
 
 /**
- * @param {{ client: SidecarWsClient; spec: object; windowTitle: string }} ctx
+ * @param {{ client: SidecarWsClient; spec: object; windowTitle: string; chatId: string }} ctx
  */
-async function runOnePrompt({ client, spec, windowTitle }) {
+async function runOnePrompt({ client, spec, windowTitle, chatId }) {
   const recDir = path.join(RECORDINGS_DIR, spec.id);
   const framesDir = path.join(recDir, "frames");
   await fs.mkdir(framesDir, { recursive: true });
 
-  console.log(`\n[desktop] ▶ ${spec.id}`);
-
-  const chatId = await client.createMarketingChat(spec, REPO_ROOT);
+  console.log(`\n[desktop] ▶ ${spec.id}${REUSE_CHAT ? " (batch chat)" : ""}`);
   console.log(`[desktop]   chat ${chatId}`);
 
-  const unapprove = client.wireAutoApprove(chatId);
-  try {
-    await client.ensureBootstrapSkipped(chatId);
+  await prepMarketingWorkspace(REPO_ROOT, spec);
+
+  await client.ensureBootstrapSkipped(chatId);
+  if (!NO_FOCUS) {
     await focusWindow(windowTitle);
     await sleep(1200);
+  }
 
-    console.log("[desktop]   sending prompt…");
-    await client.postMessageWhenIdle(chatId, spec.prompt);
+  console.log("[desktop]   sending prompt…");
+  await client.postMessageWhenIdle(chatId, spec.prompt);
+  console.log("[desktop]   harness running — capturing frames…");
 
-    const framePaths = [];
-    let i = 0;
-    const pollStart = Date.now();
+  const framePaths = [];
+  let i = 0;
+  const pollStart = Date.now();
 
-    while (Date.now() - pollStart < spec.maxWaitMs) {
-      const fp = path.join(framesDir, `f${String(i).padStart(2, "0")}.png`);
+  while (Date.now() - pollStart < spec.maxWaitMs) {
+      const fp = path.join(framesDir, `f${String(i).padStart(4, "0")}.png`);
       await captureWindowPng(fp, windowTitle);
       framePaths.push(fp);
       i++;
@@ -150,7 +180,7 @@ async function runOnePrompt({ client, spec, windowTitle }) {
     if (!client.sawHarnessRunning(chatId)) {
       console.log("[desktop]   waiting for harness turn…");
       await client.waitForTurnEnd(chatId, spec.maxWaitMs);
-      const fp = path.join(framesDir, `f${String(i).padStart(2, "0")}.png`);
+      const fp = path.join(framesDir, `f${String(i).padStart(4, "0")}.png`);
       await captureWindowPng(fp, windowTitle);
       framePaths.push(fp);
     }
@@ -224,9 +254,6 @@ async function runOnePrompt({ client, spec, windowTitle }) {
       chatId,
       source: "desktop",
     };
-  } finally {
-    unapprove();
-  }
 }
 
 function rel(abs) {
@@ -249,13 +276,49 @@ async function publishWebsiteHeroes() {
   }
 }
 
+async function runSmokeCapture({ exe, skipLaunch, keepApp }) {
+  let desktopPid = null;
+  if (!skipLaunch) {
+    const launchStartedAt = Date.now() - 3000;
+    const launched = await launchDesktop(exe, launchStartedAt);
+    desktopPid = launched.pid;
+    await waitForFreshHandshake(launchStartedAt, 90_000);
+    await sleep(3000);
+  }
+
+  resetWindowTitleCache();
+  const title = await waitForDesktopWindow(120_000);
+  await focusWindow(title);
+  await sleep(1000);
+
+  const outPath = path.join(OUT_DIR, "desktop-smoke-test.png");
+  await fs.mkdir(OUT_DIR, { recursive: true });
+  await captureWindowPng(outPath, title);
+  console.log(`[desktop] Smoke capture OK → ${path.relative(REPO_ROOT, outPath)}`);
+
+  if (!keepApp && desktopPid && process.platform === "win32") {
+    spawn("taskkill", ["/PID", String(desktopPid), "/T", "/F"], { stdio: "ignore" }).unref();
+  }
+}
+
 async function main() {
   if (process.platform !== "win32") {
     console.error("[desktop] Window capture currently supports Windows only (build desktop for your OS separately).");
     process.exit(1);
   }
 
-  const { only, skipLaunch, keepApp, windowTitle, exe } = parseArgs(process.argv);
+  const { only, skipLaunch, keepApp, smoke, windowTitle, exe } = parseArgs(process.argv);
+
+  if (smoke) {
+    try {
+      await runSmokeCapture({ exe, skipLaunch, keepApp });
+      return;
+    } catch (err) {
+      console.error("[desktop] Smoke capture failed:", err);
+      process.exit(1);
+    }
+  }
+
   const specs = only
     ? (() => {
         const spec = findPrompt(only, "desktop", true);
@@ -267,47 +330,98 @@ async function main() {
     process.exit(1);
   }
 
+  const status = new MarketingCaptureStatus({
+    repoRoot: REPO_ROOT,
+    channel: "desktop",
+    promptIds: specs.map((s) => s.id),
+  });
+  await status.start();
+
+  let exitCode = 0;
+  try {
   let desktopPid = null;
+  const launchStartedAt = Date.now() - 3000;
   if (!skipLaunch) {
-    // Remove any stale handshake so waitForHandshake can't race against the
-    // previous run's sidecar.json (it has no freshness check — a dead port wins).
-    try {
-      await fs.rm(path.join(os.homedir(), ".liminal", "sidecar.json"), { force: true });
-    } catch {
-      /* best-effort */
-    }
-    desktopPid = await launchDesktop(exe);
-    await sleep(4000);
+    const launched = await launchDesktop(exe, launchStartedAt);
+    desktopPid = launched.pid;
   }
 
-  console.log("[desktop] Waiting for sidecar handshake…");
-  const handshake = await waitForHandshake(120_000);
-  console.log(`[desktop] Sidecar ws://127.0.0.1:${handshake.port}`);
+  console.log("[desktop] Waiting for fresh sidecar handshake…");
+  const handshake = skipLaunch
+    ? await waitForFreshHandshake(0, 120_000)
+    : await waitForFreshHandshake(launchStartedAt, 120_000);
+  console.log(`[desktop] Sidecar ws://127.0.0.1:${handshake.port} (pid ${handshake.pid ?? "?"})`);
 
   const client = new SidecarWsClient(handshake.port, handshake.token);
   await client.connect();
+
+  resetWindowTitleCache();
+  const resolvedWindowTitle = await waitForDesktopWindow(120_000);
+  console.log(`[desktop] Capturing window: "${resolvedWindowTitle}"`);
+
+  await client.purgeStaleMarketingChats();
+
+  let batchChatId = REUSE_CHAT ? client.findBatchChat() : null;
+  if (REUSE_CHAT && !batchChatId && specs.length > 0) {
+    console.log("[desktop] Creating batch chat for model + capture…");
+    batchChatId = await client.resolveMarketingChat(specs[0], REPO_ROOT, null);
+  }
   await ensureMarketingModelSidecar(client);
+  if (REUSE_CHAT && batchChatId) {
+    await client.prepareMarketingChat(batchChatId);
+  }
 
   await fs.mkdir(RECORDINGS_DIR, { recursive: true });
   await fs.mkdir(OUT_DIR, { recursive: true });
 
+  if (NO_FOCUS) {
+    console.log(
+      "[desktop] Unattended mode — window stays visible, no focus steal (MARKETING_CAPTURE_NO_FOCUS=1)"
+    );
+    await minimizeDesktopWindow();
+    await sleep(500);
+  }
+
+  if (REUSE_CHAT && batchChatId) {
+    console.log(`[desktop] Batch chat ${batchChatId} — ${specs.length} prompt(s)`);
+  } else if (REUSE_CHAT) {
+    console.log("[desktop] batch chat — one chat for all prompts");
+  }
+
+  let unapprove = null;
   const results = [];
   for (const spec of specs) {
+    await status.promptStart(spec.id);
     try {
-      results.push(await runOnePrompt({ client, spec, windowTitle }));
+      const chatId = await client.resolveMarketingChat(spec, REPO_ROOT, batchChatId);
+      if (REUSE_CHAT && !batchChatId) batchChatId = chatId;
+      if (!unapprove) unapprove = client.wireAutoApprove(chatId);
+
+      const result = await runOnePrompt({
+        client,
+        spec,
+        windowTitle: resolvedWindowTitle,
+        chatId,
+      });
+      results.push(result);
+      await status.promptEnd(spec.id, { ok: true, tools: result.tools });
     } catch (err) {
-      console.error(`[desktop] FAILED ${spec.id}:`, err instanceof Error ? err.message : err);
-      results.push({ id: spec.id, source: "desktop", error: String(err) });
+      const msg = err instanceof Error ? err.message : String(err);
+      console.error(`[desktop] FAILED ${spec.id}:`, msg);
+      const row = { id: spec.id, source: "desktop", error: String(err) };
+      results.push(row);
+      await status.promptEnd(spec.id, { ok: false, error: msg });
     }
   }
 
+  unapprove?.();
   client.close();
   await publishWebsiteHeroes();
 
   const manifest = {
     generatedAt: new Date().toISOString(),
     source: "desktop",
-    windowTitle,
+    windowTitle: resolvedWindowTitle,
     exe: path.relative(REPO_ROOT, exe).replace(/\\/g, "/"),
     ...marketingModelManifestFields(),
     results,
@@ -326,10 +440,24 @@ async function main() {
   }
 
   const failed = results.filter((r) => r.error || !r.tools?.length);
-  if (failed.length) process.exit(1);
+  exitCode = failed.length ? 1 : 0;
+  await status.finish({
+    ok: exitCode === 0,
+    exitCode,
+    results,
+    message:
+      exitCode === 0
+        ? `Desktop capture complete (${results.length} prompt(s))`
+        : `Desktop capture finished with ${failed.length} failure(s)`,
+  });
+  if (exitCode) process.exit(exitCode);
+  } catch (err) {
+    await status.fail(err);
+    throw err;
+  }
 }
 
-main().catch((err) => {
+main().catch(async (err) => {
   console.error(err);
   process.exit(1);
 });

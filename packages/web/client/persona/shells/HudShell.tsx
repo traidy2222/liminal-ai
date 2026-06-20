@@ -29,6 +29,8 @@ import {
 } from "@liminal/core/streaming-write-preview";
 import { MEMORY_SYNC_LABEL, presentAutoDream } from "../../autoDreamPresent.js";
 import type { MessageEntry, PersonalityPulseRow } from "../../useSSE.js";
+import { WorkingPanel } from "../../WorkingPanel.js";
+import type { TurnRow } from "../../chatTurnLayout.js";
 
 // ── Palette ───────────────────────────────────────────────────────────────────
 
@@ -877,6 +879,14 @@ function MessageView({
         </div>
       );
 
+    case "working_note":
+      return (
+        <div {...entranceProp} style={{ margin: "2px 0 4px", padding: "6px 10px", borderRadius: 4, background: "rgba(0,8,16,0.35)", borderLeft: `2px solid rgba(var(--lim-accent-rgb),0.12)`, fontSize: 12, color: "#8899aa", lineHeight: 1.55, whiteSpace: "pre-wrap", fontStyle: "italic" }}>
+          {entry.text}
+          {entry.streaming && <span style={{ color: CYAN, animation: "blink 1s step-end infinite" }}>█</span>}
+        </div>
+      );
+
     case "assistant": {
       const avatarStyle = personaTheme.avatarStyle;
       const showGlyph = avatarStyle === "glyph";
@@ -1035,6 +1045,28 @@ function MessageView({
         </div>
       );
 
+    case "turn_header": {
+      const durSec = Math.round(entry.durationMs / 1000);
+      const tools = entry.keyTools.length > 0 ? entry.keyTools.join(", ") : "—";
+      const term = entry.terminationReason !== "ok" ? ` · ${entry.terminationReason}` : "";
+      return (
+        <div style={{ padding: "4px 10px", borderRadius: 4, background: "rgba(0,12,24,0.6)", border: "1px solid rgba(var(--lim-accent-rgb),0.12)", fontSize: 10, fontFamily: "monospace", color: "#667788" }}>
+          {entry.intentClass} · outcome {entry.outcomeScore.toFixed(2)} · {entry.toolCount} tools · {durSec}s · {tools}{term}
+        </div>
+      );
+    }
+
+    case "working_state":
+      return (
+        <details style={{ padding: "6px 10px", borderRadius: 4, background: "rgba(0,8,16,0.5)", border: "1px solid rgba(var(--lim-accent-rgb),0.08)", fontSize: 11, color: "#778899" }}>
+          <summary style={{ cursor: "pointer", fontFamily: "monospace", color: "#8899aa" }}>Working state</summary>
+          {entry.goal && <div style={{ marginTop: 6 }}><strong>Goal:</strong> {entry.goal}</div>}
+          {entry.subgoalsPreview && <div style={{ marginTop: 4 }}><strong>Subgoals:</strong> {entry.subgoalsPreview}</div>}
+          {entry.driftScore != null && <div style={{ marginTop: 4 }}><strong>Drift:</strong> {entry.driftScore.toFixed(2)}</div>}
+          {entry.executionPreview && <div style={{ marginTop: 4, whiteSpace: "pre-wrap" }}>{entry.executionPreview}</div>}
+        </details>
+      );
+
     default:
       return null;
   }
@@ -1052,7 +1084,7 @@ export function HudShell({ contract }: { contract: ShellContract }) {
 
   useStickyAutoScroll(messagesRef, bottomRef, contract.groupedMessages);
 
-  const { showPanels, groupedMessages, toolResultMap, surface, showRawHarness, rawHarnessBlob,
+  const { showPanels, groupedMessages, chatTurns, toolResultMap, surface, showRawHarness, rawHarnessBlob,
     error, busy,
     onAbortTurn,
     orbState, signalHud, pct, contextSnapshot, sessionSeconds, toolCount, msgCount, toolErrorCount,
@@ -1062,8 +1094,34 @@ export function HudShell({ contract }: { contract: ShellContract }) {
     personaDisplayLabel, personaName, onInspectSubtask,
   } = contract;
 
-  const visibleMessages = groupedMessages;
   const toolCardsMode = resolveToolCardsMode(personaTheme.toolCards, surface);
+
+  const renderTurnRow = (entry: TurnRow, key: string) => {
+    if ("kind" in entry && entry.kind === "tool_group") {
+      return (
+        <ToolGroupCard
+          key={key}
+          group={entry as ToolCallGroup}
+          toolResultMap={toolResultMap}
+          surface={surface}
+          toolCardsMode={toolCardsMode}
+        />
+      );
+    }
+    const m = entry as MessageEntry;
+    if (m.kind === "user" || m.kind === "assistant") return null;
+    return (
+      <MessageView
+        key={key}
+        entry={m}
+        toolResult={m.kind === "tool_call" ? toolResultMap.get(m.callId) : undefined}
+        surface={surface}
+        personaTheme={personaTheme}
+        toolCardsMode={toolCardsMode}
+        onInspectSubtask={onInspectSubtask}
+      />
+    );
+  };
   const panelSides = resolvePersonaPanelSides(personaTheme);
   const showLeftPanel = showPanels && panelSides.left;
   const showRightPanel = showPanels && panelSides.right;
@@ -1159,34 +1217,38 @@ export function HudShell({ contract }: { contract: ShellContract }) {
         {/* Center */}
         <div style={{ flex: 1, display: "flex", flexDirection: "column", overflow: "hidden", minWidth: 0 }}>
           <div ref={messagesRef} style={{ flex: 1, overflowY: "auto", padding: "14px 20px", display: "flex", flexDirection: "column", gap: 7, ...buildMessagesStyle(personaTheme) }}>
-            {visibleMessages.length === 0 && !busy && (
+            {chatTurns.length === 0 && !busy && (
               <div style={{ color: "rgba(var(--lim-accent-rgb),0.12)", textAlign: "center", marginTop: 80, fontSize: 13, fontFamily: "monospace", letterSpacing: "0.1em" }}>AWAITING INPUT</div>
             )}
-            {groupedMessages.map((entry, i) => {
-              if ("kind" in entry && entry.kind === "tool_group") {
-                return (
-                  <ToolGroupCard
-                    key={`grp-${i}-${entry.name}`}
-                    group={entry as ToolCallGroup}
-                    toolResultMap={toolResultMap}
+            {chatTurns.map((turn, ti) => (
+              <React.Fragment key={`turn-${ti}`}>
+                {turn.user && (
+                  <MessageView
+                    key={`turn-${ti}-user`}
+                    entry={turn.user}
                     surface={surface}
+                    personaTheme={personaTheme}
                     toolCardsMode={toolCardsMode}
+                    onInspectSubtask={onInspectSubtask}
                   />
-                );
-              }
-              const m = entry as MessageEntry;
-              return (
-                <MessageView
-                  key={i}
-                  entry={m}
-                  toolResult={m.kind === "tool_call" ? toolResultMap.get(m.callId) : undefined}
-                  surface={surface}
-                  personaTheme={personaTheme}
-                  toolCardsMode={toolCardsMode}
-                  onInspectSubtask={onInspectSubtask}
-                />
-              );
-            })}
+                )}
+                {turn.working.length > 0 && (
+                  <WorkingPanel working={turn.working} isActive={turn.isActive}>
+                    {turn.working.map((entry, wi) => renderTurnRow(entry, `turn-${ti}-w-${wi}`))}
+                  </WorkingPanel>
+                )}
+                {turn.finalReply && (
+                  <MessageView
+                    key={`turn-${ti}-final`}
+                    entry={turn.finalReply}
+                    surface={surface}
+                    personaTheme={personaTheme}
+                    toolCardsMode={toolCardsMode}
+                    onInspectSubtask={onInspectSubtask}
+                  />
+                )}
+              </React.Fragment>
+            ))}
             {error && <div style={{ color: RED_ERR, padding: "8px 0", fontSize: 12, fontFamily: "monospace" }}>✗ {error}</div>}
             {!showRawHarness && rawHarnessBlob.trim().length > 0 && (
               <details style={{ marginTop: 10, borderTop: "1px solid rgba(var(--lim-accent-rgb),0.08)", paddingTop: 8 }}>

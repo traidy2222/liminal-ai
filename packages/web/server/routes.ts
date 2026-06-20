@@ -54,6 +54,8 @@ import {
   disconnectAzureFromServer,
   connectGithubFromServer,
   disconnectGithubFromServer,
+  connectIdaFromServer,
+  disconnectIdaFromServer,
   connectXeroFromServer,
   disconnectXeroFromServer,
   connectSlackFromServer,
@@ -724,6 +726,36 @@ export function createRouter(
     const bridge = active();
     const revoke = req.query["revoke"] === "1" || req.query["revoke"] === "true";
     const result = await disconnectGithubFromServer(bridge.harness.registry, revoke);
+    if (!result.ok) {
+      res.status(400).json({ error: result.error });
+      return;
+    }
+    bridge.harness.getContext().refreshProtocolDynamic(bridge.harness.registry.getActiveToolNames());
+    res.json({ ok: true, output: result.output });
+  });
+
+  router.post("/api/integrations/ida/connect", async (req, res) => {
+    const bridge = active();
+    if (bridge.harness.getIsRunning()) {
+      res.status(409).json({ error: "Agent is busy; finish the current turn first." });
+      return;
+    }
+    const body = req.body as { mode?: "read_write" | "read_only"; mcp_url?: string };
+    const result = await connectIdaFromServer(bridge.harness.registry, {
+      readOnly: body.mode === "read_only",
+      mcpUrl: typeof body.mcp_url === "string" ? body.mcp_url : undefined,
+    });
+    if (!result.ok) {
+      res.status(400).json({ error: result.error });
+      return;
+    }
+    bridge.harness.getContext().refreshProtocolDynamic(bridge.harness.registry.getActiveToolNames());
+    res.json({ ok: true, output: result.output, toolCount: result.toolCount ?? 0 });
+  });
+
+  router.delete("/api/integrations/ida", async (_req, res) => {
+    const bridge = active();
+    const result = await disconnectIdaFromServer(bridge.harness.registry);
     if (!result.ok) {
       res.status(400).json({ error: result.error });
       return;

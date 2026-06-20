@@ -114,6 +114,13 @@ import {
   GITHUB_PARENT_PROVIDER,
 } from "../github/github_connect.js";
 import {
+  connectIdaMcp,
+  disconnectIdaMcp,
+  idaMcpEnabled,
+  IDA_PARENT_PROVIDER,
+} from "../ida/ida_connect.js";
+import { getIdaSidecarStatus } from "../ida/ida_sidecar.js";
+import {
   type ConnectProviderId,
   integrationNotConnectedError,
   isConnectProviderOAuthReady,
@@ -128,9 +135,15 @@ const AZURE_PARENT_PROVIDER = "azure";
 
 function integrationLazyLoadHint(registry: ToolRegistry, family?: string): string {
   if (!registry.isLazyToolLoading()) return "";
-  const id = family ?? "google_workspace|microsoft_365|azure|github|slack|linear|notion|xero";
+  const subHint =
+    family === "google_workspace"
+      ? "google_mail|google_calendar|google_office|google_drive|google_marketing"
+      : family === "microsoft_365"
+        ? "microsoft_mail|microsoft_calendar|microsoft_files|microsoft_collab|microsoft_search"
+        : family;
+  const id = subHint ?? "google_workspace|microsoft_365|azure|github|slack|linear|notion|xero";
   return (
-    `\nLazy loading: activate_tool_family({ family: "${id}" }) for this provider's tools (not the whole connectors bundle).`
+    `\nLazy loading: activate_tool_family({ family: "<sub-family>" }) — e.g. ${id} — or the umbrella (${family ?? "google_workspace|microsoft_365"}). Not the whole connectors bundle.`
   );
 }
 
@@ -430,15 +443,15 @@ export function createConnectorTools(registry: ToolRegistry, _emitter: AgentEmit
   const connectProviderTool = defineTool({
     name: "connect_provider",
     description:
-      "WHAT: Connect curated providers — Google, Microsoft 365, Azure, Xero, GitHub, Slack, Linear, Notion, or YouTube (hosted OAuth).\n" +
-      "WHEN: User asks to work with mail/calendar/files, cloud infra, accounting, repos, Slack, Linear, Notion, or YouTube; or another tool reports not connected.\n" +
-      "HOW: Set start_oauth:true to open hosted sign-in in the browser and wait for tokens. GitHub also supports legacy GITHUB_TOKEN in .env.",
+      "WHAT: Connect curated providers — Google, Microsoft 365, Azure, Xero, GitHub, Slack, Linear, Notion, YouTube (hosted OAuth), or IDA Pro MCP (local reverse engineering).\n" +
+      "WHEN: User asks to work with mail/calendar/files, cloud infra, accounting, repos, Slack, Linear, Notion, YouTube, or IDA/binary analysis; or another tool reports not connected.\n" +
+      "HOW: Set start_oauth:true to open hosted sign-in in the browser and wait for tokens. GitHub also supports legacy GITHUB_TOKEN in .env. IDA: set AGENT_IDA_MCP=1 first (no OAuth).",
     parameters: {
       type: "object",
       properties: {
         provider: {
           type: "string",
-          enum: ["google_workspace", "microsoft_365", "azure", "xero", "github", "slack", "linear", "notion", "youtube"],
+          enum: ["google_workspace", "microsoft_365", "azure", "xero", "github", "slack", "linear", "notion", "youtube", "ida"],
           description: "Provider preset id.",
         },
         start_oauth: {
@@ -450,7 +463,7 @@ export function createConnectorTools(registry: ToolRegistry, _emitter: AgentEmit
           type: "array",
           items: { type: "string" },
           description:
-            "Google: drive, gmail, calendar, … — Microsoft: mail, calendar, onedrive, teams, … — Azure: all, compute, storage, keyvault, … Default: all.",
+            "Required for Google/Microsoft when attaching tools. Google: gmail, calendar, drive, docs, … — Microsoft: mail, calendar, onedrive, teams, … Default when omitted: gmail+calendar (Google) or mail+calendar (Microsoft). Never omit when you know the task — e.g. Sheets → [\"sheets\",\"drive\"], Analytics → [\"analytics\"].",
         },
         mode: {
           type: "string",
@@ -461,6 +474,10 @@ export function createConnectorTools(registry: ToolRegistry, _emitter: AgentEmit
           type: "string",
           description: "Optional Google account email or account id.",
         },
+        mcp_url: {
+          type: "string",
+          description: "IDA only: override MCP URL (e.g. http://127.0.0.1:13337/mcp for IDA GUI plugin).",
+        },
       },
       required: ["provider"],
       additionalProperties: false,
@@ -468,6 +485,17 @@ export function createConnectorTools(registry: ToolRegistry, _emitter: AgentEmit
     requiresApproval: false,
     handler: async (args, emit): Promise<ToolResult> => {
       const provider = String(args["provider"] ?? "").trim();
+      if (provider === "ida") {
+        const result = await connectIdaMcp(registry, {
+          readOnly: args["mode"] === "read_only",
+          mcpUrl: typeof args["mcp_url"] === "string" ? args["mcp_url"] : undefined,
+        });
+        if (!result.ok) return { ok: false, error: result.error };
+        return {
+          ok: true,
+          output: result.output + integrationLazyLoadHint(registry, "ida"),
+        };
+      }
       if (provider === "github") {
         const oauthPrep = await prepareProviderOAuth("github", args, emit);
         if (oauthPrep) return oauthPrep;
@@ -734,7 +762,7 @@ export function createConnectorTools(registry: ToolRegistry, _emitter: AgentEmit
       properties: {
         provider: {
           type: "string",
-          enum: ["google_workspace", "microsoft_365", "azure", "xero", "github", "slack", "linear", "notion", "youtube"],
+          enum: ["google_workspace", "microsoft_365", "azure", "xero", "github", "slack", "linear", "notion", "youtube", "ida"],
         },
         revoke_oauth: {
           type: "boolean",
@@ -748,6 +776,11 @@ export function createConnectorTools(registry: ToolRegistry, _emitter: AgentEmit
     dangerLevel: "destructive",
     handler: async (args): Promise<ToolResult> => {
       const provider = String(args["provider"] ?? "").trim();
+      if (provider === "ida") {
+        const result = await disconnectIdaMcp(registry);
+        if (!result.ok) return { ok: false, error: result.error };
+        return { ok: true, output: result.output };
+      }
       if (provider === "github") {
         const result = await disconnectGithubMcp(registry, args["revoke_oauth"] === true);
         if (!result.ok) return { ok: false, error: result.error };
@@ -886,6 +919,10 @@ export function createConnectorTools(registry: ToolRegistry, _emitter: AgentEmit
         `GitHub: mcp_github_* via GitHub MCP — ${githubMcpEnabled() ? "enabled" : "off (AGENT_GITHUB_MCP=0)"}, oauth=${
           ghAccounts.length > 0 ? `${ghAccounts.length} account(s)` : "not connected"
         }, env_pat=${githubTokenPresent() ? "set" : "off"}`
+      );
+      const idaSidecar = await getIdaSidecarStatus();
+      lines.push(
+        `IDA Pro: mcp_ida_* via idalib-mcp / IDA plugin — ${idaMcpEnabled() ? "enabled" : "off (set AGENT_IDA_MCP=1)"}, sidecar running=${idaSidecar.running}, url=${idaSidecar.url}`
       );
       lines.push(
         `Microsoft 365: mcp_microsoft_* sidecar + outlook/calendar/onedrive REST — outlook=${outlookRestEnabled()}, calendar=${microsoftCalendarRestEnabled()}, onedrive=${onedriveRestEnabled()}, office=${microsoftOfficeRestEnabled()}`
@@ -1073,6 +1110,19 @@ export function createConnectorTools(registry: ToolRegistry, _emitter: AgentEmit
       }
       lines.push("");
 
+      const idaConns = await listConnectionsByParent(IDA_PARENT_PROVIDER);
+      lines.push("### IDA Pro MCP connections");
+      if (idaConns.length === 0) {
+        lines.push(
+          "- (not attached — set AGENT_IDA_MCP=1, then connect_provider({ provider: \"ida\" }))"
+        );
+      } else {
+        for (const c of idaConns) {
+          lines.push(`- ${c.name}: ${c.tools.length} tools, readOnly=${!!c.readOnly}, url=${c.serverUrl ?? "?"}`);
+        }
+      }
+      lines.push("");
+
       const googleAccounts = await listGoogleOAuthAccounts();
       const msAccounts = await listMicrosoftOAuthAccounts();
       lines.push("### Microsoft OAuth");
@@ -1172,8 +1222,8 @@ export function createConnectorTools(registry: ToolRegistry, _emitter: AgentEmit
           const workspaceMiss = missingDefaultWorkspaceScopes(a.scopes);
           if (workspaceMiss.length > 0) {
             lines.push(
-              `  - missing for full workspace (${workspaceMiss.length}): ${workspaceMiss.slice(0, 4).join(", ")}` +
-                `${workspaceMiss.length > 4 ? ` (+${workspaceMiss.length - 4} more)` : ""} — revoke at https://myaccount.google.com/permissions and reconnect OAuth`
+              `  - missing for default bundle (gmail+calendar, ${workspaceMiss.length}): ${workspaceMiss.slice(0, 4).join(", ")}` +
+                `${workspaceMiss.length > 4 ? ` (+${workspaceMiss.length - 4} more)` : ""} — reconnect with those services checked, or add services via connect_provider`
             );
           }
         }
@@ -1342,6 +1392,24 @@ export async function disconnectGoogleWorkspaceFromServer(
   const result = await disconnectGoogleWorkspaceMcp(registry, revokeOAuth);
   if (result.ok) return { ok: true, output: result.output };
   return { ok: false, error: result.error };
+}
+
+/** Server-side IDA Pro MCP connect (web API / boot). */
+export async function connectIdaFromServer(
+  registry: ToolRegistry,
+  opts?: { readOnly?: boolean; mcpUrl?: string }
+): Promise<{ ok: boolean; output?: string; error?: string; toolCount?: number }> {
+  const result = await connectIdaMcp(registry, opts);
+  if (!result.ok) return { ok: false, error: result.error };
+  return { ok: true, output: result.output, toolCount: result.toolCount };
+}
+
+export async function disconnectIdaFromServer(
+  registry: ToolRegistry | ToolRegistry[]
+): Promise<{ ok: boolean; output?: string; error?: string }> {
+  const result = await disconnectIdaMcp(registry);
+  if (!result.ok) return { ok: false, error: result.error };
+  return { ok: true, output: result.output };
 }
 
 /** Server-side GitHub MCP connect (web API / boot). */

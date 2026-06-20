@@ -2,6 +2,8 @@ import React, { useRef, useMemo } from "react";
 import type { ShellContract } from "../ShellContract.js";
 import { migratePersonaUiTheme } from "@liminal/core/persona-ui-theme";
 import type { MessageEntry } from "../../useSSE.js";
+import { ChatTurnThread, skipUserOrAssistantRow } from "../../ChatTurnThread.js";
+import type { TurnRow } from "../../chatTurnLayout.js";
 import { AssistantMessageContent, renderFencedCodeBlock } from "../../liminalMarkdown.js";
 import { LIM } from "../personaVars.js";
 import { useStickyAutoScroll } from "../../useStickyAutoScroll.js";
@@ -40,9 +42,76 @@ export function MinimalShell({ contract }: { contract: ShellContract }) {
   useStickyAutoScroll(messagesRef, bottomRef, contract.groupedMessages);
 
   const {
-    groupedMessages, surface, showRawHarness, error, busy,
+    chatTurns, surface, showRawHarness, error, busy,
     signalHud, onInspectSubtask,
   } = contract;
+
+  const renderWorkingEntry = (entry: TurnRow, key: string) => {
+    if ("kind" in entry && entry.kind === "tool_group") return null;
+    if (!skipUserOrAssistantRow(entry)) return null;
+    const m = entry;
+
+    if (m.kind === "tool_call" || m.kind === "tool_result") return null;
+
+    if (m.kind === "trace" || m.kind === "provider_retry" || m.kind === "context_compressed") {
+      if (!showRawHarness) return null;
+    }
+
+    return (
+      <div key={key}>
+        {m.kind === "working_note" && (
+          <div style={{ marginBottom: 8, color: "#556677", fontSize: 12, fontStyle: "italic", lineHeight: 1.55, whiteSpace: "pre-wrap" }}>
+            <span style={{ color: "#334455" }}>↳ </span>
+            {m.text}
+          </div>
+        )}
+
+        {m.kind === "think" && (
+          <div style={{ marginBottom: 8, color: "#445566", fontSize: 12, fontStyle: "italic", lineHeight: 1.55 }}>
+            <span style={{ color: "#334455" }}>↳ </span>
+            {m.content.length > 500 ? m.content.slice(0, 499) + "…" : m.content}
+          </div>
+        )}
+
+        {m.kind === "model_reasoning" && (
+          <div style={{ marginBottom: 8, color: "#443322", fontSize: 12, fontStyle: "italic", lineHeight: 1.55 }}>
+            <span style={{ color: "#332211" }}>↳ </span>
+            {m.text.length > 500 ? m.text.slice(0, 499) + "…" : m.text}
+          </div>
+        )}
+
+        {m.kind === "plan" && (
+          <div style={{ marginBottom: 10 }}>
+            <PlanProgressBlock
+              steps={Array.isArray(m.steps) ? m.steps : []}
+              streaming={m.streaming}
+              previewText={m.previewText}
+            />
+          </div>
+        )}
+
+        {m.kind === "subtask" && (
+          <SubtaskInlineCard entry={m} onInspect={onInspectSubtask} />
+        )}
+
+        {m.kind === "pulse_nudge" && (
+          <div style={{ fontSize: 12, color: "#556677", fontStyle: "italic" }}>{m.text}</div>
+        )}
+
+        {m.kind === "trace" && showRawHarness && (
+          <div style={{ fontSize: 10, color: "#223344", fontFamily: "monospace" }}>{m.text}</div>
+        )}
+
+        {m.kind === "provider_retry" && showRawHarness && (
+          <div style={{ fontSize: 10, color: AMBER, fontFamily: "monospace" }}>{m.text}</div>
+        )}
+
+        {m.kind === "context_compressed" && showRawHarness && (
+          <div style={{ fontSize: 10, color: "#334455", fontFamily: "monospace" }}>⊙ compressed: {m.beforePct}% → {m.afterPct}%</div>
+        )}
+      </div>
+    );
+  };
 
   const isDisconnected = signalHud.label === "OFFLINE" || signalHud.label === "DEGRADED";
 
@@ -75,117 +144,44 @@ export function MinimalShell({ contract }: { contract: ShellContract }) {
           ref={messagesRef}
           style={{ flex: 1, overflowY: "auto", padding: "32px 24px 16px" }}
         >
-          {groupedMessages.length === 0 && !busy && (
+          {chatTurns.length === 0 && !busy && (
             <div style={{ color: "rgba(var(--lim-accent-rgb),0.15)", textAlign: "center", marginTop: 80, fontSize: 14 }}>
               …
             </div>
           )}
 
-          {groupedMessages.map((entry, i) => {
-            // Tool group — hidden in minimal
-            if ("kind" in entry && entry.kind === "tool_group") {
-              return null;
-            }
-
-            const m = entry as MessageEntry;
-
-            // Tool calls are hidden
-            if (m.kind === "tool_call" || m.kind === "tool_result") return null;
-
-            // Raw lines hidden unless showRawHarness
-            if (m.kind === "trace" || m.kind === "provider_retry" || m.kind === "context_compressed") {
-              if (!showRawHarness) return null;
-            }
-
-            const prevEntry = groupedMessages[i - 1];
-            const prevKind = prevEntry && "kind" in prevEntry ? prevEntry.kind : null;
-            const showSeparator = i > 0 && prevKind !== null && (
-              (m.kind === "user" && prevKind === "assistant") ||
-              (m.kind === "assistant" && prevKind === "user")
-            );
-
-            return (
-              <div key={i}>
-                {showSeparator && (
-                  <div style={{ height: 1, background: "rgba(var(--lim-accent-rgb),0.07)", margin: "18px 0" }} />
-                )}
-
-                {m.kind === "user" && (
-                  <div style={{ marginBottom: 12 }}>
-                    <div style={{ fontSize: 10, color: "rgba(var(--lim-accent-rgb),0.3)", fontFamily: "monospace", letterSpacing: "0.06em", marginBottom: 4 }}>you</div>
-                    <div style={{ color: "var(--lim-text, #c8d4e0)", whiteSpace: "pre-wrap", lineHeight: 1.65, fontSize: 14 }}>{m.text}</div>
-                  </div>
-                )}
-
-                {m.kind === "assistant" && (
-                  <div style={{ marginBottom: 12 }} className="lim-md">
-                    <div style={{ color: "var(--lim-text, #c8d4e0)", lineHeight: 1.75, fontSize: 14 }}>
-                      <AssistantMessageContent
-                        text={m.text}
-                        streaming={m.streaming}
-                        components={{
-                          code({ className, children }) {
-                            return renderFencedCodeBlock(className, children, {
-                              streaming: m.streaming,
-                              codeBg: LIM.codeBg,
-                            });
-                          },
-                          pre({ children }) {
-                            return <div style={{ margin: "8px 0" }}>{children}</div>;
-                          },
-                        }}
-                      />
-                      {m.streaming && <span style={{ color: CYAN, animation: "blink 1s step-end infinite" }}>█</span>}
-                    </div>
-                  </div>
-                )}
-
-                {m.kind === "think" && (
-                  <div style={{ marginBottom: 8, color: "#445566", fontSize: 12, fontStyle: "italic", lineHeight: 1.55 }}>
-                    <span style={{ color: "#334455" }}>↳ </span>
-                    {m.content.length > 500 ? m.content.slice(0, 499) + "…" : m.content}
-                  </div>
-                )}
-
-                {m.kind === "model_reasoning" && (
-                  <div style={{ marginBottom: 8, color: "#443322", fontSize: 12, fontStyle: "italic", lineHeight: 1.55 }}>
-                    <span style={{ color: "#332211" }}>↳ </span>
-                    {m.text.length > 500 ? m.text.slice(0, 499) + "…" : m.text}
-                  </div>
-                )}
-
-                {m.kind === "plan" && (
-                  <div style={{ marginBottom: 10 }}>
-                    <PlanProgressBlock
-                      steps={Array.isArray(m.steps) ? m.steps : []}
-                      streaming={m.streaming}
-                      previewText={m.previewText}
-                    />
-                  </div>
-                )}
-
-                {m.kind === "subtask" && (
-                  <SubtaskInlineCard entry={m} onInspect={onInspectSubtask} />
-                )}
-
-                {m.kind === "pulse_nudge" && (
-                  <div style={{ fontSize: 12, color: "#556677", fontStyle: "italic" }}>{m.text}</div>
-                )}
-
-                {m.kind === "trace" && showRawHarness && (
-                  <div style={{ fontSize: 10, color: "#223344", fontFamily: "monospace" }}>{m.text}</div>
-                )}
-
-                {m.kind === "provider_retry" && showRawHarness && (
-                  <div style={{ fontSize: 10, color: AMBER, fontFamily: "monospace" }}>{m.text}</div>
-                )}
-
-                {m.kind === "context_compressed" && showRawHarness && (
-                  <div style={{ fontSize: 10, color: "#334455", fontFamily: "monospace" }}>⊙ compressed: {m.beforePct}% → {m.afterPct}%</div>
-                )}
+          <ChatTurnThread
+            turns={chatTurns}
+            renderUser={(m) => (
+              <div key={`user-${m.text.slice(0, 24)}`} style={{ marginBottom: 12 }}>
+                <div style={{ fontSize: 10, color: "rgba(var(--lim-accent-rgb),0.3)", fontFamily: "monospace", letterSpacing: "0.06em", marginBottom: 4 }}>you</div>
+                <div style={{ color: "var(--lim-text, #c8d4e0)", whiteSpace: "pre-wrap", lineHeight: 1.65, fontSize: 14 }}>{m.text}</div>
               </div>
-            );
-          })}
+            )}
+            renderFinalReply={(m) => (
+              <div key={`final-${m.text.slice(0, 24)}`} style={{ marginBottom: 12 }} className="lim-md">
+                <div style={{ color: "var(--lim-text, #c8d4e0)", lineHeight: 1.75, fontSize: 14 }}>
+                  <AssistantMessageContent
+                    text={m.text}
+                    streaming={m.streaming}
+                    components={{
+                      code({ className, children }) {
+                        return renderFencedCodeBlock(className, children, {
+                          streaming: m.streaming,
+                          codeBg: LIM.codeBg,
+                        });
+                      },
+                      pre({ children }) {
+                        return <div style={{ margin: "8px 0" }}>{children}</div>;
+                      },
+                    }}
+                  />
+                  {m.streaming && <span style={{ color: CYAN, animation: "blink 1s step-end infinite" }}>█</span>}
+                </div>
+              </div>
+            )}
+            renderWorkingEntry={renderWorkingEntry}
+          />
 
           {error && (
             <div style={{ marginTop: 12, color: RED_ERR, fontSize: 13 }}>✗ {error}</div>

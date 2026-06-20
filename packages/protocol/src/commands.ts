@@ -193,6 +193,8 @@ export interface ClientCommandMap {
   };
   connect_github: { mode?: "read_write" | "read_only" };
   disconnect_github: { revoke?: boolean };
+  connect_ida: { mode?: "read_write" | "read_only"; mcp_url?: string };
+  disconnect_ida: Record<string, never>;
   attach_integration_mcp: {
     name: string;
     url: string;

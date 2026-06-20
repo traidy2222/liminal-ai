@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 
-enum IntegrationBrandId { google, microsoft, azure, xero, slack, linear, notion, youtube, github, advanced }
+enum IntegrationBrandId { google, microsoft, azure, xero, slack, linear, notion, youtube, github, ida, advanced }
 
 class IntegrationBrandMeta {
   const IntegrationBrandMeta({
@@ -82,6 +82,13 @@ const integrationBrands = <IntegrationBrandId, IntegrationBrandMeta>{
     accent: Color(0xFFE6EDF3),
     accentSoft: Color(0x1AE6EDF3),
   ),
+  IntegrationBrandId.ida: IntegrationBrandMeta(
+    id: IntegrationBrandId.ida,
+    title: 'IDA Pro',
+    tagline: 'Reverse engineering & binaries',
+    accent: Color(0xFFF0A030),
+    accentSoft: Color(0x24F0A030),
+  ),
   IntegrationBrandId.advanced: IntegrationBrandMeta(
     id: IntegrationBrandId.advanced,
     title: 'Advanced',
@@ -140,6 +147,8 @@ class _BrandLogo extends StatelessWidget {
         return Icon(Icons.play_circle_fill, size: 26, color: integrationBrands[id]!.accent);
       case IntegrationBrandId.github:
         return CustomPaint(size: const Size(28, 28), painter: _GithubLogoPainter());
+      case IntegrationBrandId.ida:
+        return Icon(Icons.memory_rounded, size: 26, color: integrationBrands[id]!.accent);
       case IntegrationBrandId.advanced:
         return Icon(Icons.tune_rounded, size: 26, color: integrationBrands[id]!.accent);
     }

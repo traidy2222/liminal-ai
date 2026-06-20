@@ -2,7 +2,16 @@
  * Live preview of streaming tool-call payloads (files, vault, memory writes).
  * Used by web/TUI to show in-progress content while tool_delta arrives.
  */
-import { decodePartialJsonStringField, tryExtractJsonStringField } from "./tool_arg_content_stream.js";
+export {
+  decodePartialJsonStringField,
+  isStreamingToolArgsJsonComplete,
+  tryExtractJsonStringField,
+} from "./tool_arg_content_stream.js";
+import {
+  decodePartialJsonStringField,
+  isStreamingToolArgsJsonComplete,
+  tryExtractJsonStringField,
+} from "./tool_arg_content_stream.js";
 
 export interface StreamingWriteToolSpec {
   /** String fields to show as they stream (first match wins). */
@@ -136,4 +145,26 @@ export function extractStreamingWritePreview(
     incomplete: true,
     rawArgsTail: raw.slice(-Math.min(800, raw.length)),
   };
+}
+
+export type StreamingToolCallUiStatus =
+  | "streaming"
+  | "pending_approval"
+  | "running"
+  | "done"
+  | "error";
+
+/** Promote a tool row from argument streaming to execution once args are complete. */
+export function promoteStreamingToolCallStatus(
+  toolName: string,
+  status: StreamingToolCallUiStatus,
+  argsJson: string
+): StreamingToolCallUiStatus {
+  if (status !== "streaming") return status;
+  if (isStreamingWriteTool(toolName)) {
+    const preview = extractStreamingWritePreview(toolName, argsJson);
+    if (preview && !preview.incomplete) return "running";
+    return status;
+  }
+  return isStreamingToolArgsJsonComplete(argsJson) ? "running" : status;
 }

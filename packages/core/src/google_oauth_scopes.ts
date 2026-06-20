@@ -1,6 +1,7 @@
 import {
-  GOOGLE_WORKSPACE_SERVICES,
+  DEFAULT_GOOGLE_SERVICE_IDS,
   apiScopesForGoogleServices,
+  resolveGoogleServices,
   type GoogleServicePreset,
 } from "./connector_catalog.js";
 
@@ -109,9 +110,9 @@ export function missingGoogleScopes(granted: string[], presets: GoogleServicePre
   return required.filter((s) => !grantedIncludesScope(granted, s));
 }
 
-/** API scopes from the full workspace catalog not present on the token. */
+/** API scopes for the default connect bundle (gmail + calendar) not present on the token. */
 export function missingDefaultWorkspaceScopes(granted: string[]): string[] {
-  const required = apiScopesForGoogleServices(GOOGLE_WORKSPACE_SERVICES, "read_write");
+  const required = apiScopesForGoogleServices(resolveGoogleServices(DEFAULT_GOOGLE_SERVICE_IDS), "read_write");
   return required.filter((s) => !grantedIncludesScope(granted, s));
 }
 

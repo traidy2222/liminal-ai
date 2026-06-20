@@ -30,9 +30,9 @@ class IntegrationsHowToStrip extends StatelessWidget {
             children: [
               Expanded(
                 child: _FlowColumn(
-                  title: 'Workspace apps',
-                  subtitle: 'Google · Microsoft · Azure · GitHub',
-                  steps: const ['Sign in', 'Enable tools'],
+                  title: 'Workspace services',
+                  subtitle: 'Gmail · Calendar · Outlook · Azure…',
+                  steps: const ['Pick a service card', 'Connect'],
                   lim: lim,
                 ),
               ),

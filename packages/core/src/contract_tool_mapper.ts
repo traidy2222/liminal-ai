@@ -96,9 +96,44 @@ export const TOOL_FAMILY_DESCRIPTORS: ToolFamilyDescriptor[] = [
     keywords: ["context", "compress", "token", "window", "too long"],
   },
   {
+    family: "google_mail",
+    description: "Google Gmail send draft inbox",
+    keywords: ["gmail", "google mail", "inbox", "send email"],
+  },
+  {
+    family: "google_calendar",
+    description: "Google Calendar events meetings schedule",
+    keywords: ["google calendar", "meeting", "schedule", "freebusy"],
+  },
+  {
+    family: "google_office",
+    description: "Google Docs Sheets Slides spreadsheets documents",
+    keywords: ["docs", "sheets", "slides", "spreadsheet", "gdoc"],
+  },
+  {
     family: "google_workspace",
     description: "Google Gmail calendar drive docs sheets slides workspace",
-    keywords: ["gmail", "google", "calendar", "drive", "docs", "sheets", "slides", "workspace"],
+    keywords: ["google", "workspace", "drive", "calendar", "gmail"],
+  },
+  {
+    family: "microsoft_mail",
+    description: "Microsoft Outlook mail send draft",
+    keywords: ["outlook", "microsoft mail", "send email"],
+  },
+  {
+    family: "microsoft_calendar",
+    description: "Microsoft Outlook calendar meetings",
+    keywords: ["outlook calendar", "meeting", "schedule"],
+  },
+  {
+    family: "microsoft_files",
+    description: "OneDrive SharePoint Excel files",
+    keywords: ["onedrive", "sharepoint", "excel", "files"],
+  },
+  {
+    family: "microsoft_collab",
+    description: "Teams Planner To Do OneNote",
+    keywords: ["teams", "planner", "todo", "onenote"],
   },
   {
     family: "microsoft_365",
@@ -124,6 +159,27 @@ export const TOOL_FAMILY_DESCRIPTORS: ToolFamilyDescriptor[] = [
     family: "linear",
     description: "Linear issues backlog sprint tracking",
     keywords: ["linear", "issue", "backlog", "sprint"],
+  },
+  {
+    family: "ida",
+    description: "IDA Pro reverse engineering decompile disassembly xrefs",
+    keywords: [
+      "ida",
+      "reverse engineering",
+      "disassembly",
+      "decompile",
+      "binary",
+      "crackme",
+      "malware",
+      "xrefs",
+      "patch",
+      "crack",
+      "dll",
+      "exe",
+      "pe",
+      "export",
+      "steam",
+    ],
   },
   {
     family: "github",

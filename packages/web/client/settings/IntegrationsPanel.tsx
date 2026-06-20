@@ -3,6 +3,10 @@ import { webApiFetch } from "../webApiAuth.js";
 import { INTEGRATION_BRANDS } from "./integrationBrands.js";
 import { IntegrationAccountsList } from "./IntegrationAccountsList.js";
 import { IntegrationCard } from "./IntegrationCard.js";
+import {
+  IntegrationCategorySection,
+  ServiceIntegrationCard,
+} from "./ServiceIntegrationCard.js";
 import { buildAuth, useIntegrationsPanel } from "./useIntegrationsPanel.js";
 
 const CYAN = "var(--lim-accent, #00d4ff)";
@@ -54,29 +58,23 @@ export function IntegrationsPanel({ agentBusy }: IntegrationsPanelProps) {
     disabled,
     derived: d,
     modes: m,
-    services: svc,
     advanced: adv,
     actions,
   } = ctrl;
 
   const {
     accounts,
-    sidecar,
-    services,
     msAccounts,
-    msSidecar,
-    msServices,
     azureAccounts,
-    azureSidecar,
     xeroAccounts,
     slackAccounts,
     linearAccounts,
     notionAccounts,
     youtubeAccounts,
     githubAccounts,
-    googleConnected,
-    microsoftConnected,
-    azureConnected,
+    idaSidecar,
+    idaEnabled,
+    idaGuiReachable,
     xeroConnected,
     slackConnected,
     linearConnected,
@@ -84,27 +82,21 @@ export function IntegrationsPanel({ agentBusy }: IntegrationsPanelProps) {
     youtubeConnected,
     youtubeNeedsReconnect,
     githubConnected,
-    googleToolCount,
-    microsoftToolCount,
-    azureToolCount,
+    idaConnected,
+    idaToolCount,
     githubToolCount,
-    googleSignedIn,
-    microsoftSignedIn,
-    azureSignedIn,
     githubSignedIn,
-    googleCalendarAttached,
-    msCalendarAttached,
+    idaSignedIn,
+    googleServiceCards,
+    microsoftServiceCards,
     customMcp,
     openApi,
   } = d;
 
   const { run, toggleExpand } = actions;
-  const { toggleService, toggleMsService } = svc;
   const {
-    googlePrimary,
-    microsoftPrimary,
-    azurePrimary,
     githubPrimary,
+    idaPrimary,
     xeroPrimary,
     xeroReconnect,
     slackPrimary,
@@ -113,6 +105,9 @@ export function IntegrationsPanel({ agentBusy }: IntegrationsPanelProps) {
     youtubePrimary,
     revokeAccount,
     load,
+    connectGoogleService,
+    connectMicrosoftService,
+    connectAzureService,
   } = actions;
 
   const {
@@ -140,8 +135,9 @@ export function IntegrationsPanel({ agentBusy }: IntegrationsPanelProps) {
     setYoutubeMonetary,
     githubMode,
     setGithubMode,
+    idaMode,
+    setIdaMode,
   } = m;
-  const { selectedServices, msSelectedServices } = svc;
   const {
     mcpName,
     setMcpName,
@@ -155,6 +151,8 @@ export function IntegrationsPanel({ agentBusy }: IntegrationsPanelProps) {
     setMcpAuthEnv,
     mcpAuthHeader,
     setMcpAuthHeader,
+    idaMcpUrlOverride,
+    setIdaMcpUrlOverride,
     apiName,
     setApiName,
     apiSpecUrl,
@@ -175,9 +173,8 @@ export function IntegrationsPanel({ agentBusy }: IntegrationsPanelProps) {
         INTEGRATIONS
       </div>
       <p style={{ fontSize: 12, color: "#aab8c4", lineHeight: 1.5, marginBottom: 14 }}>
-        Connect apps your agent can use. Workspace providers (Google, Microsoft, Azure) are two steps: sign in with
-        OAuth, then enable tools for the agent. Slack, Linear, and others attach tools automatically after sign-in. Tap a
-        card for settings.
+        Connect only what you need — each card is one service with its own OAuth scopes. Workspace vendors are grouped
+        below; Slack, Linear, Notion, and YouTube are one card each. Tap a card for read/write mode and account options.
       </p>
 
       {error ? (
@@ -200,530 +197,206 @@ export function IntegrationsPanel({ agentBusy }: IntegrationsPanelProps) {
           alignItems: "stretch",
         }}
       >
-      <IntegrationCard
-        brandId="google"
-        statusLine={
-          googleConnected
-            ? `Ready · ${googleToolCount} tools for your agent`
-            : accounts.length > 0
-              ? busy
-                ? `Finishing sign-in as ${accounts[0]?.email ?? "you"}…`
-                : `Signed in — tap Enable tools`
-              : INTEGRATION_BRANDS.google.tagline
-        }
-        connected={googleConnected}
-        statusMode="oauth_mcp"
-        signedIn={googleSignedIn}
-        toolsAttached={googleConnected}
-        expanded={expanded === "google"}
-        onToggle={() => toggleExpand("google")}
-        primaryLabel={
-          googleConnected ? "Add account" : accounts.length > 0 ? "Enable tools" : "Connect"
-        }
-        primaryDanger={false}
-        primaryDisabled={disabled}
-        onPrimary={() => void run(googlePrimary)}
-      >
-        <p style={{ fontSize: 11, color: "#778899", lineHeight: 1.45, margin: "10px 0" }}>
-          Sign in with Google to let your agent read and send email, manage calendar events, and work with Drive files.
-        </p>
-        <IntegrationAccountsList
-          accounts={accounts.map((a) => ({
-            accountId: a.accountId,
-            label: a.email ?? a.accountId,
-            meta:
-              (a.missingScopes?.length ?? 0) > 0
-                ? `${a.scopes.length} scopes · missing scopes`
-                : `${a.scopes.length} scopes`,
-          }))}
-          disabled={disabled}
-          onRemove={(id) => run(() => revokeAccount("google", id))}
-          onDisconnectAll={() =>
-            run(async () => {
-              const res = await webApiFetch("/api/integrations/google?revoke=1", { method: "DELETE" });
-              const json = (await res.json()) as { error?: string };
-              if (!res.ok) throw new Error(json.error ?? "revoke failed");
-              await load();
-            })
-          }
-        />
-        <div style={{ marginBottom: 8 }}>
-          <label style={{ fontSize: 11, color: "#aabbcc", marginRight: 12 }}>
-            <input type="radio" checked={mode === "read_write"} onChange={() => setMode("read_write")} disabled={disabled} />{" "}
-            Read + write
-          </label>
-          <label style={{ fontSize: 11, color: "#aabbcc" }}>
-            <input type="radio" checked={mode === "read_only"} onChange={() => setMode("read_only")} disabled={disabled} />{" "}
-            Read only
-          </label>
-        </div>
-        {services.length > 0 ? (
-          <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 10 }}>
-            {services.map((s) => (
-              <label
-                key={s}
-                style={{
-                  fontSize: 10,
-                  fontFamily: "monospace",
-                  padding: "4px 8px",
-                  border: `1px solid ${selectedServices.has(s) ? CYAN : "rgba(var(--lim-accent-rgb),0.2)"}`,
-                  borderRadius: 2,
-                  color: selectedServices.has(s) ? CYAN : "#8899aa",
-                  cursor: disabled ? "default" : "pointer",
-                }}
-              >
-                <input
-                  type="checkbox"
-                  checked={selectedServices.has(s)}
-                  onChange={() => toggleService(s)}
-                  disabled={disabled}
-                  style={{ marginRight: 4 }}
-                />
-                {s}
-              </label>
-            ))}
-          </div>
-        ) : null}
-        {sidecar ? (
-          <div style={{ fontSize: 10, fontFamily: "monospace", color: sidecar.running ? GREEN : AMBER, marginBottom: 10 }}>
-            Docs sidecar: {sidecar.running ? sidecar.url : "stopped"}
-          </div>
-        ) : null}
-        {accounts.length > 0 && !googleCalendarAttached ? (
-          <p style={{ fontSize: 11, color: AMBER, lineHeight: 1.35, margin: "0 0 8px" }}>
-            Gmail may work while Calendar MCP is not attached — enable Calendar separately.
-          </p>
-        ) : null}
-        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-          {accounts.length > 0 && !googleCalendarAttached ? (
+      <IntegrationCategorySection
+        title="Google Workspace"
+        subtitle="One Google account — connect Gmail, Calendar, Drive, Docs, and more individually."
+        footer={
+          expanded === "google-accounts" ? (
+            <div>
+              <IntegrationAccountsList
+                accounts={accounts.map((a) => ({
+                  accountId: a.accountId,
+                  label: a.email ?? a.accountId,
+                  meta: `${a.scopes.length} scopes`,
+                }))}
+                disabled={disabled}
+                onRemove={(id) => run(() => revokeAccount("google", id))}
+                onDisconnectAll={() =>
+                  run(async () => {
+                    const res = await webApiFetch("/api/integrations/google?revoke=1", { method: "DELETE" });
+                    const json = (await res.json()) as { error?: string };
+                    if (!res.ok) throw new Error(json.error ?? "revoke failed");
+                    await load();
+                  })
+                }
+              />
+            </div>
+          ) : (
             <button
               type="button"
-              style={{ ...btn, fontSize: 10, padding: "6px 10px", borderColor: CYAN, color: CYAN }}
-              disabled={disabled}
-              onClick={() =>
-                void run(async () => {
-                  const res = await webApiFetch("/api/integrations/google/connect", {
-                    method: "POST",
-                    headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify({ services: ["calendar"], mode }),
-                  });
-                  const json = (await res.json()) as { error?: string };
-                  if (!res.ok) throw new Error(json.error ?? "attach failed");
-                })
-              }
+              style={{ ...btn, fontSize: 10, padding: "4px 8px" }}
+              onClick={() => toggleExpand("google-accounts")}
             >
-              Attach Calendar
+              {accounts.length > 0 ? `Google accounts (${accounts.length})` : "Google accounts"}
             </button>
-          ) : null}
-          <button
-            type="button"
-            style={{ ...btn, fontSize: 10, padding: "6px 10px" }}
-            disabled={disabled || accounts.length === 0}
-            onClick={() =>
-              void run(async () => {
-                const res = await webApiFetch("/api/integrations/google/connect", {
-                  method: "POST",
-                  headers: { "Content-Type": "application/json" },
-                  body: JSON.stringify({ services: [...selectedServices], mode }),
-                });
-                const json = (await res.json()) as { error?: string };
-                if (!res.ok) throw new Error(json.error ?? "attach failed");
-                await load();
-              })
-            }
-          >
-            Re-attach tools
-          </button>
-        </div>
-      </IntegrationCard>
-
-      <IntegrationCard
-        brandId="microsoft"
-        statusLine={
-          microsoftConnected
-            ? `Ready · ${microsoftToolCount} tools for your agent`
-            : msAccounts.length > 0
-              ? `Signed in — tap Connect`
-              : INTEGRATION_BRANDS.microsoft.tagline
-        }
-        connected={microsoftConnected}
-        statusMode="oauth_mcp"
-        signedIn={microsoftSignedIn}
-        toolsAttached={microsoftConnected}
-        expanded={expanded === "microsoft"}
-        onToggle={() => toggleExpand("microsoft")}
-        primaryLabel={microsoftConnected ? "Disconnect" : "Connect"}
-        primaryDanger={microsoftConnected}
-        primaryDisabled={disabled}
-        onPrimary={() => void run(microsoftPrimary)}
-      >
-        <p style={{ fontSize: 11, color: "#778899", lineHeight: 1.45, margin: "10px 0" }}>
-          Sign in with Microsoft to use Outlook, Calendar, OneDrive, and Teams from your agent.
-        </p>
-        {msAccounts.map((a) => (
-          <div key={a.accountId} style={{ fontSize: 11, fontFamily: "monospace", color: GREEN, marginBottom: 6 }}>
-            {a.email ?? a.accountId} — {a.scopes.length} scopes
-            {(a.missingScopes?.length ?? 0) > 0 ? (
-              <span style={{ color: AMBER }}> · missing scopes — revoke & reconnect</span>
-            ) : null}
-          </div>
-        ))}
-        <div style={{ marginBottom: 8 }}>
-          <label style={{ fontSize: 11, color: "#aabbcc", marginRight: 12 }}>
-            <input type="radio" checked={msMode === "read_write"} onChange={() => setMsMode("read_write")} disabled={disabled} />{" "}
-            Read + write
-          </label>
-          <label style={{ fontSize: 11, color: "#aabbcc" }}>
-            <input type="radio" checked={msMode === "read_only"} onChange={() => setMsMode("read_only")} disabled={disabled} />{" "}
-            Read only
-          </label>
-        </div>
-        {msServices.length > 0 ? (
-          <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 10 }}>
-            {msServices.map((s) => (
-              <label
-                key={s}
-                style={{
-                  fontSize: 10,
-                  fontFamily: "monospace",
-                  padding: "4px 8px",
-                  border: `1px solid ${msSelectedServices.has(s) ? CYAN : "rgba(var(--lim-accent-rgb),0.2)"}`,
-                  borderRadius: 2,
-                  color: msSelectedServices.has(s) ? CYAN : "#8899aa",
-                  cursor: disabled ? "default" : "pointer",
-                }}
-              >
-                <input
-                  type="checkbox"
-                  checked={msSelectedServices.has(s)}
-                  onChange={() => toggleMsService(s)}
-                  disabled={disabled}
-                  style={{ marginRight: 4 }}
-                />
-                {s}
-              </label>
-            ))}
-          </div>
-        ) : null}
-        {msSidecar ? (
-          <div style={{ fontSize: 10, fontFamily: "monospace", color: msSidecar.running ? GREEN : AMBER, marginBottom: 10 }}>
-            Graph sidecar: {msSidecar.running ? msSidecar.url : "stopped"}
-          </div>
-        ) : null}
-        {msAccounts.length > 0 && microsoftConnected && !msCalendarAttached ? (
-          <p style={{ fontSize: 11, color: AMBER, lineHeight: 1.35, margin: "0 0 8px" }}>
-            Outlook mail may work while Calendar is not in your attached Graph services — enable Calendar separately.
-          </p>
-        ) : null}
-        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-          {msAccounts.length > 0 && !msCalendarAttached ? (
-            <button
-              type="button"
-              style={{ ...btn, fontSize: 10, padding: "6px 10px", borderColor: CYAN, color: CYAN }}
-              disabled={disabled}
-              onClick={() =>
-                void run(async () => {
-                  const res = await webApiFetch("/api/integrations/microsoft/connect", {
-                    method: "POST",
-                    headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify({ services: ["calendar"], mode: msMode }),
-                  });
-                  const json = (await res.json()) as { error?: string };
-                  if (!res.ok) throw new Error(json.error ?? "attach failed");
-                })
-              }
-            >
-              Attach Calendar
-            </button>
-          ) : null}
-          <button
-            type="button"
-            style={{ ...btn, fontSize: 10, padding: "6px 10px" }}
-            disabled={disabled || msAccounts.length === 0}
-            onClick={() =>
-              void run(async () => {
-                const res = await webApiFetch("/api/integrations/microsoft/connect", {
-                  method: "POST",
-                  headers: { "Content-Type": "application/json" },
-                  body: JSON.stringify({ services: [...msSelectedServices], mode: msMode }),
-                });
-                const json = (await res.json()) as { error?: string };
-                if (!res.ok) throw new Error(json.error ?? "attach failed");
-              })
-            }
-          >
-            Re-attach tools
-          </button>
-          <button
-            type="button"
-            style={{ ...btnDanger, fontSize: 10, padding: "6px 10px" }}
-            disabled={disabled || msAccounts.length === 0}
-            onClick={() =>
-              void run(async () => {
-                const res = await webApiFetch("/api/integrations/microsoft?revoke=1", { method: "DELETE" });
-                const json = (await res.json()) as { error?: string };
-                if (!res.ok) throw new Error(json.error ?? "revoke failed");
-              })
-            }
-          >
-            Revoke Microsoft access
-          </button>
-        </div>
-      </IntegrationCard>
-
-      <IntegrationCard
-        brandId="azure"
-        statusLine={
-          azureConnected
-            ? `Ready · ${azureToolCount} MCP tools`
-            : azureAccounts.length > 0
-              ? `Signed in — tap Connect`
-              : INTEGRATION_BRANDS.azure.tagline
-        }
-        connected={azureConnected || azureAccounts.length > 0}
-        statusMode="oauth_mcp"
-        signedIn={azureSignedIn}
-        toolsAttached={azureConnected}
-        expanded={expanded === "azure"}
-        onToggle={() => toggleExpand("azure")}
-        primaryLabel={azureConnected ? "Disconnect" : "Connect"}
-        primaryDanger={azureConnected}
-        primaryDisabled={disabled}
-        onPrimary={() => void run(azurePrimary)}
-      >
-        <p style={{ fontSize: 11, color: "#778899", lineHeight: 1.45, margin: "10px 0" }}>
-          ARM REST + @azure/mcp sidecar. Run <code style={{ fontFamily: "monospace" }}>az login</code> for full MCP
-          coverage.
-        </p>
-        {azureAccounts.map((a) => (
-          <div key={a.accountId} style={{ fontSize: 11, fontFamily: "monospace", color: GREEN, marginBottom: 6 }}>
-            {a.email ?? a.accountId} — {a.scopes.length} scopes
-            {(a.missingScopes?.length ?? 0) > 0 ? (
-              <span style={{ color: AMBER }}> · missing scopes — revoke & reconnect</span>
-            ) : null}
-          </div>
-        ))}
-        <div style={{ marginBottom: 8 }}>
-          <label style={{ fontSize: 11, color: "#aabbcc", marginRight: 12 }}>
-            <input
-              type="radio"
-              checked={azureMode === "read_write"}
-              onChange={() => setAzureMode("read_write")}
-              disabled={disabled || azureConnected}
-            />{" "}
-            Read + write
-          </label>
-          <label style={{ fontSize: 11, color: "#aabbcc" }}>
-            <input
-              type="radio"
-              checked={azureMode === "read_only"}
-              onChange={() => setAzureMode("read_only")}
-              disabled={disabled || azureConnected}
-            />{" "}
-            Read only
-          </label>
-        </div>
-        {azureSidecar ? (
-          <div
-            style={{
-              fontSize: 10,
-              fontFamily: "monospace",
-              color: azureSidecar.running ? GREEN : AMBER,
-              marginBottom: 10,
-            }}
-          >
-            Azure MCP sidecar: {azureSidecar.running ? azureSidecar.url : "stopped"}
-          </div>
-        ) : null}
-        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-          <button
-            type="button"
-            style={{ ...btn, fontSize: 10, padding: "6px 10px" }}
-            disabled={disabled || azureAccounts.length === 0}
-            onClick={() =>
-              void run(async () => {
-                const res = await webApiFetch("/api/integrations/azure/connect", {
-                  method: "POST",
-                  headers: { "Content-Type": "application/json" },
-                  body: JSON.stringify({ mode: azureMode }),
-                });
-                const json = (await res.json()) as { error?: string };
-                if (!res.ok) throw new Error(json.error ?? "attach failed");
-              })
-            }
-          >
-            Re-attach tools
-          </button>
-          <button
-            type="button"
-            style={{ ...btnDanger, fontSize: 10, padding: "6px 10px" }}
-            disabled={disabled || azureAccounts.length === 0}
-            onClick={() =>
-              void run(async () => {
-                const res = await webApiFetch("/api/integrations/azure?revoke=1", { method: "DELETE" });
-                const json = (await res.json()) as { error?: string };
-                if (!res.ok) throw new Error(json.error ?? "revoke failed");
-              })
-            }
-          >
-            Revoke Azure access
-          </button>
-        </div>
-      </IntegrationCard>
-
-      <IntegrationCard
-        brandId="xero"
-        statusLine={
-          xeroConnected
-            ? (xeroAccounts[0]?.missingCoreScopes?.length ?? 0) > 0
-              ? `Reconnect needed · ${xeroAccounts[0]?.missingCoreScopes?.length} core scopes missing`
-              : (xeroAccounts[0]?.missingFullScopes?.length ?? 0) > 0
-                ? `Connected · enable Full accounting scopes + reconnect for reports/budgets`
-                : (xeroAccounts[0]?.missingExtendedScopes?.length ?? 0) > 0
-                  ? `Accounting ready · enable Extended APIs + reconnect for files/projects/payroll`
-                  : `Ready · ${xeroAccounts[0]?.tenantName ?? xeroAccounts[0]?.email ?? "account linked"}`
-            : INTEGRATION_BRANDS.xero.tagline
-        }
-        connected={xeroConnected}
-        statusMode="oauth_auto_attach"
-        signedIn={xeroConnected}
-        expanded={expanded === "xero"}
-        onToggle={() => toggleExpand("xero")}
-        primaryLabel={
-          xeroConnected &&
-          ((xeroAccounts[0]?.missingCoreScopes?.length ?? 0) > 0 ||
-            (xeroFullScopes && (xeroAccounts[0]?.missingFullScopes?.length ?? 0) > 0) ||
-            (xeroExtended && (xeroAccounts[0]?.missingExtendedScopes?.length ?? 0) > 0))
-            ? "Reconnect"
-            : xeroConnected
-              ? "Disconnect"
-              : "Connect"
-        }
-        primaryDanger={
-          xeroConnected &&
-          (xeroAccounts[0]?.missingCoreScopes?.length ?? 0) === 0 &&
-          !(xeroFullScopes && (xeroAccounts[0]?.missingFullScopes?.length ?? 0) > 0) &&
-          !(xeroExtended && (xeroAccounts[0]?.missingExtendedScopes?.length ?? 0) > 0)
-        }
-        primaryDisabled={disabled}
-        onPrimary={() =>
-          void run(
-            xeroConnected &&
-              ((xeroAccounts[0]?.missingCoreScopes?.length ?? 0) > 0 ||
-                (xeroFullScopes && (xeroAccounts[0]?.missingFullScopes?.length ?? 0) > 0) ||
-                (xeroExtended && (xeroAccounts[0]?.missingExtendedScopes?.length ?? 0) > 0))
-              ? xeroReconnect
-              : xeroPrimary
           )
         }
       >
-        <p style={{ fontSize: 11, color: "#778899", lineHeight: 1.45, margin: "10px 0" }}>
-          Sign in with Xero to look up invoices, contacts, and organisation details.
-        </p>
-        {(xeroAccounts[0]?.missingCoreScopes?.length ?? 0) > 0 ? (
-          <p style={{ fontSize: 11, color: "#e6b84d", lineHeight: 1.45, margin: "0 0 10px" }}>
-            Core accounting scopes are missing. Click <strong>Reconnect</strong> (leave Extended APIs off).
-          </p>
-        ) : (xeroAccounts[0]?.missingFullScopes?.length ?? 0) > 0 ? (
-          <p style={{ fontSize: 11, color: "#e6b84d", lineHeight: 1.45, margin: "0 0 10px" }}>
-            Basic connect succeeded. For reports and budgets: check <strong>Full accounting scopes</strong>,
-            then <strong>Reconnect</strong>.
-          </p>
-        ) : (xeroAccounts[0]?.missingExtendedScopes?.length ?? 0) > 0 ? (
-          <p style={{ fontSize: 11, color: "#e6b84d", lineHeight: 1.45, margin: "0 0 10px" }}>
-            For files, projects, and payroll tools: enable <strong>Extended APIs</strong> below, then{" "}
-            <strong>Reconnect</strong>. Your Xero app must include those products at developer.xero.com.
-          </p>
-        ) : null}
-        {xeroAccounts.map((a) => (
-          <div key={a.accountId} style={{ fontSize: 11, fontFamily: "monospace", color: GREEN, marginBottom: 6 }}>
-            {a.email ?? a.accountId}
-            {a.tenantName ? ` · ${a.tenantName}` : a.tenantId ? ` · tenant ${a.tenantId}` : ""} — {a.scopes.length} scopes
-            {(a.missingScopes?.length ?? 0) > 0 ? (
-              <span style={{ color: "#e6b84d" }}>
-                {" "}
-                · missing: {a.missingScopes!.slice(0, 4).join(", ")}
-                {a.missingScopes!.length > 4 ? ", …" : ""}
-              </span>
-            ) : null}
-          </div>
-        ))}
-        <div style={{ marginBottom: 8 }}>
-          <label style={{ fontSize: 11, color: "#aabbcc", marginRight: 12 }}>
-            <input
-              type="radio"
-              checked={xeroMode === "read_write"}
-              onChange={() => setXeroMode("read_write")}
-              disabled={disabled || xeroConnected}
-            />{" "}
-            Read + write
-          </label>
-          <label style={{ fontSize: 11, color: "#aabbcc" }}>
-            <input
-              type="radio"
-              checked={xeroMode === "read_only"}
-              onChange={() => setXeroMode("read_only")}
-              disabled={disabled || xeroConnected}
-            />{" "}
-            Read only
-          </label>
-        </div>
-        <label style={{ display: "block", fontSize: 11, color: "#aabbcc", marginBottom: 8 }}>
-          <input
-            type="checkbox"
-            checked={xeroFullScopes}
-            onChange={(e) => setXeroFullScopes(e.target.checked)}
-            disabled={disabled || xeroConnected}
-          />{" "}
-          Full accounting scopes (reports, budgets) — enable after a successful basic connect
-        </label>
-        <label style={{ display: "block", fontSize: 11, color: "#aabbcc", marginBottom: 8 }}>
-          <input
-            type="checkbox"
-            checked={xeroExtended}
-            onChange={(e) => setXeroExtended(e.target.checked)}
-            disabled={disabled || xeroConnected}
-          />{" "}
-          Extended APIs (files, projects, payroll) — only if enabled on your Xero app at developer.xero.com
-        </label>
-        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-          <button
-            type="button"
-            style={{ ...btn, fontSize: 10, padding: "6px 10px" }}
-            disabled={disabled}
-            onClick={() => void run(load)}
-          >
-            Refresh status
-          </button>
-          {xeroConnected &&
-          ((xeroAccounts[0]?.missingCoreScopes?.length ?? 0) > 0 ||
-            (xeroAccounts[0]?.missingFullScopes?.length ?? 0) > 0 ||
-            (xeroAccounts[0]?.missingExtendedScopes?.length ?? 0) > 0) ? (
+        {googleServiceCards.map((card) => {
+          const expandId = `google:${card.serviceId}` as const;
+          return (
+            <ServiceIntegrationCard
+              key={card.serviceId}
+              card={{
+                vendor: "google",
+                serviceId: card.serviceId,
+                label: card.label,
+                groupLabel: card.groupLabel,
+                connected: card.connected,
+                signedIn: card.signedIn,
+                toolCount: card.toolCount,
+                needsScopeReconnect: card.needsScopeReconnect,
+                restOnly: card.restOnly,
+              }}
+              expanded={expanded === expandId}
+              disabled={disabled}
+              onToggle={() => toggleExpand(expanded === expandId ? null : expandId)}
+              onConnect={() => void run(() => connectGoogleService(card.serviceId))}
+            >
+              <p style={{ fontSize: 10, color: "#778899", margin: "0 0 8px" }}>
+                OAuth requests only the scopes for <strong>{card.label}</strong>.
+              </p>
+              <label style={{ fontSize: 11, color: "#aabbcc", marginRight: 12 }}>
+                <input type="radio" checked={mode === "read_write"} onChange={() => setMode("read_write")} disabled={disabled} />{" "}
+                Read + write
+              </label>
+              <label style={{ fontSize: 11, color: "#aabbcc" }}>
+                <input type="radio" checked={mode === "read_only"} onChange={() => setMode("read_only")} disabled={disabled} />{" "}
+                Read only
+              </label>
+            </ServiceIntegrationCard>
+          );
+        })}
+      </IntegrationCategorySection>
+
+      <IntegrationCategorySection
+        title="Microsoft"
+        subtitle="Outlook, Teams, OneDrive, and Azure cloud — each service connects with its own scopes."
+        footer={
+          expanded === "microsoft-accounts" ? (
+            <div>
+              {msAccounts.map((a) => (
+                <div key={a.accountId} style={{ fontSize: 11, fontFamily: "monospace", color: GREEN, marginBottom: 6 }}>
+                  M365: {a.email ?? a.accountId} — {a.scopes.length} scopes
+                </div>
+              ))}
+              {azureAccounts.map((a) => (
+                <div key={a.accountId} style={{ fontSize: 11, fontFamily: "monospace", color: GREEN, marginBottom: 6 }}>
+                  Azure: {a.email ?? a.accountId} — {a.scopes.length} scopes
+                </div>
+              ))}
+              <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 8 }}>
+                <button
+                  type="button"
+                  style={{ ...btnDanger, fontSize: 10, padding: "6px 10px" }}
+                  disabled={disabled || msAccounts.length === 0}
+                  onClick={() =>
+                    void run(async () => {
+                      const res = await webApiFetch("/api/integrations/microsoft?revoke=1", { method: "DELETE" });
+                      const json = (await res.json()) as { error?: string };
+                      if (!res.ok) throw new Error(json.error ?? "revoke failed");
+                    })
+                  }
+                >
+                  Revoke Microsoft 365
+                </button>
+                <button
+                  type="button"
+                  style={{ ...btnDanger, fontSize: 10, padding: "6px 10px" }}
+                  disabled={disabled || azureAccounts.length === 0}
+                  onClick={() =>
+                    void run(async () => {
+                      const res = await webApiFetch("/api/integrations/azure?revoke=1", { method: "DELETE" });
+                      const json = (await res.json()) as { error?: string };
+                      if (!res.ok) throw new Error(json.error ?? "revoke failed");
+                    })
+                  }
+                >
+                  Revoke Azure
+                </button>
+              </div>
+            </div>
+          ) : (
             <button
               type="button"
-              style={{ ...btn, fontSize: 10, padding: "6px 10px", borderColor: "#e6b84d", color: "#e6b84d" }}
-              disabled={disabled}
-              onClick={() => void run(xeroReconnect)}
+              style={{ ...btn, fontSize: 10, padding: "4px 8px" }}
+              onClick={() => toggleExpand("microsoft-accounts")}
             >
-              Reconnect for new scopes
+              Microsoft accounts ({msAccounts.length + azureAccounts.length})
             </button>
-          ) : null}
-          <button
-            type="button"
-            style={{ ...btnDanger, fontSize: 10, padding: "6px 10px" }}
-            disabled={disabled || !xeroConnected}
-            onClick={() =>
-              void run(async () => {
-                const res = await webApiFetch("/api/integrations/xero?revoke=1", { method: "DELETE" });
-                const json = (await res.json()) as { error?: string };
-                if (!res.ok) throw new Error(json.error ?? "revoke failed");
-              })
-            }
-          >
-            Revoke Xero access
-          </button>
-        </div>
-      </IntegrationCard>
+          )
+        }
+      >
+        {microsoftServiceCards.map((card) => {
+          const expandId = (card.vendor === "azure" ? `azure:${card.serviceId}` : `microsoft:${card.serviceId}`) as
+            | `azure:${string}`
+            | `microsoft:${string}`;
+          const rwMode = card.vendor === "azure" ? azureMode : msMode;
+          const setRwMode = card.vendor === "azure" ? setAzureMode : setMsMode;
+          const onConnect =
+            card.vendor === "azure"
+              ? () => connectAzureService(card.serviceId)
+              : () => connectMicrosoftService(card.serviceId);
+          return (
+            <ServiceIntegrationCard
+              key={`${card.vendor}-${card.serviceId}`}
+              card={{
+                vendor: card.vendor === "azure" ? "azure" : "microsoft",
+                serviceId: card.serviceId,
+                label: card.label,
+                groupLabel: card.groupLabel,
+                connected: card.connected,
+                signedIn: card.signedIn,
+                toolCount: card.toolCount,
+                needsScopeReconnect: card.needsScopeReconnect,
+                restOnly: card.restOnly,
+              }}
+              expanded={expanded === expandId}
+              disabled={disabled}
+              onToggle={() => toggleExpand(expanded === expandId ? null : expandId)}
+              onConnect={() => void run(onConnect)}
+            >
+              <p style={{ fontSize: 10, color: "#778899", margin: "0 0 8px" }}>
+                {card.vendor === "azure"
+                  ? "Azure Resource Manager scopes for this capability only."
+                  : `Microsoft Graph scopes for ${card.label} only.`}
+              </p>
+              <label style={{ fontSize: 11, color: "#aabbcc", marginRight: 12 }}>
+                <input
+                  type="radio"
+                  checked={rwMode === "read_write"}
+                  onChange={() => setRwMode("read_write")}
+                  disabled={disabled}
+                />{" "}
+                Read + write
+              </label>
+              <label style={{ fontSize: 11, color: "#aabbcc" }}>
+                <input
+                  type="radio"
+                  checked={rwMode === "read_only"}
+                  onChange={() => setRwMode("read_only")}
+                  disabled={disabled}
+                />{" "}
+                Read only
+              </label>
+            </ServiceIntegrationCard>
+          );
+        })}
+      </IntegrationCategorySection>
+
+      <div
+        style={{
+          gridColumn: "1 / -1",
+          fontSize: 12,
+          fontWeight: 700,
+          color: "#dde8f0",
+          letterSpacing: "0.04em",
+          marginTop: 8,
+          marginBottom: 4,
+        }}
+      >
+        Collaboration
+      </div>
 
       <IntegrationCard
         brandId="slack"
@@ -937,6 +610,86 @@ export function IntegrationsPanel({ agentBusy }: IntegrationsPanelProps) {
         </label>
       </IntegrationCard>
 
+      <div
+        style={{
+          gridColumn: "1 / -1",
+          fontSize: 12,
+          fontWeight: 700,
+          color: "#dde8f0",
+          letterSpacing: "0.04em",
+          marginTop: 8,
+          marginBottom: 4,
+        }}
+      >
+        Developer tools
+      </div>
+
+      <IntegrationCard
+        brandId="ida"
+        statusLine={
+          idaConnected
+            ? `Ready · ${idaToolCount} tools for your agent`
+            : !idaEnabled
+              ? "Set AGENT_IDA_MCP=1 in Settings → Harness"
+              : idaSignedIn
+                ? "Server reachable — tap Connect"
+                : idaGuiReachable
+                  ? "IDA GUI plugin detected on :13337"
+                  : idaSidecar?.running
+                    ? `Sidecar on :${idaSidecar.port}`
+                    : INTEGRATION_BRANDS.ida.tagline
+        }
+        connected={idaConnected}
+        statusMode="simple"
+        signedIn={idaSignedIn}
+        toolsAttached={idaConnected}
+        expanded={expanded === "ida"}
+        onToggle={() => toggleExpand("ida")}
+        primaryLabel={idaConnected ? "Disconnect" : "Connect"}
+        primaryDanger={idaConnected}
+        primaryDisabled={disabled || !idaEnabled}
+        onPrimary={() => void run(idaPrimary)}
+      >
+        <p style={{ fontSize: 11, color: "#778899", lineHeight: 1.45, margin: "10px 0" }}>
+          Reverse-engineering via ida-pro-mcp. Headless needs IDA 9.0 SP1+; otherwise start the MCP plugin in IDA
+          (Edit → Plugins → MCP) and connect — Liminal auto-falls back to the GUI plugin when reachable.
+        </p>
+        {idaSidecar && (
+          <div style={{ fontSize: 10, color: "#8899aa", marginBottom: 8 }}>
+            Sidecar: {idaSidecar.running ? `running ${idaSidecar.url}` : "not running"}
+            {idaGuiReachable ? " · GUI plugin :13337 reachable" : ""}
+          </div>
+        )}
+        <FieldLabel>MCP URL override (optional)</FieldLabel>
+        <input
+          style={{ ...input, marginBottom: 8 }}
+          placeholder="http://127.0.0.1:13337/mcp"
+          value={idaMcpUrlOverride}
+          onChange={(e) => setIdaMcpUrlOverride(e.target.value)}
+          disabled={disabled || idaConnected}
+        />
+        <div style={{ marginBottom: 8 }}>
+          <label style={{ fontSize: 11, color: "#aabbcc", marginRight: 12 }}>
+            <input
+              type="radio"
+              checked={idaMode === "read_write"}
+              onChange={() => setIdaMode("read_write")}
+              disabled={disabled || idaConnected}
+            />{" "}
+            Read + write
+          </label>
+          <label style={{ fontSize: 11, color: "#aabbcc" }}>
+            <input
+              type="radio"
+              checked={idaMode === "read_only"}
+              onChange={() => setIdaMode("read_only")}
+              disabled={disabled || idaConnected}
+            />{" "}
+            Read only
+          </label>
+        </div>
+      </IntegrationCard>
+
       <IntegrationCard
         brandId="github"
         statusLine={
@@ -1009,6 +762,109 @@ export function IntegrationsPanel({ agentBusy }: IntegrationsPanelProps) {
             Revoke GitHub access
           </button>
         </div>
+      </IntegrationCard>
+
+      <div
+        style={{
+          gridColumn: "1 / -1",
+          fontSize: 12,
+          fontWeight: 700,
+          color: "#dde8f0",
+          letterSpacing: "0.04em",
+          marginTop: 8,
+          marginBottom: 4,
+        }}
+      >
+        Finance
+      </div>
+
+      <IntegrationCard
+        brandId="xero"
+        statusLine={
+          xeroConnected
+            ? (xeroAccounts[0]?.missingCoreScopes?.length ?? 0) > 0
+              ? `Reconnect needed · ${xeroAccounts[0]?.missingCoreScopes?.length} core scopes missing`
+              : (xeroAccounts[0]?.missingFullScopes?.length ?? 0) > 0
+                ? `Connected · enable Full accounting scopes + reconnect for reports/budgets`
+                : (xeroAccounts[0]?.missingExtendedScopes?.length ?? 0) > 0
+                  ? `Accounting ready · enable Extended APIs + reconnect for files/projects/payroll`
+                  : `Ready · ${xeroAccounts[0]?.tenantName ?? xeroAccounts[0]?.email ?? "account linked"}`
+            : INTEGRATION_BRANDS.xero.tagline
+        }
+        connected={xeroConnected}
+        statusMode="oauth_auto_attach"
+        signedIn={xeroConnected}
+        expanded={expanded === "xero"}
+        onToggle={() => toggleExpand("xero")}
+        primaryLabel={
+          xeroConnected &&
+          ((xeroAccounts[0]?.missingCoreScopes?.length ?? 0) > 0 ||
+            (xeroFullScopes && (xeroAccounts[0]?.missingFullScopes?.length ?? 0) > 0) ||
+            (xeroExtended && (xeroAccounts[0]?.missingExtendedScopes?.length ?? 0) > 0))
+            ? "Reconnect"
+            : xeroConnected
+              ? "Disconnect"
+              : "Connect"
+        }
+        primaryDanger={
+          xeroConnected &&
+          (xeroAccounts[0]?.missingCoreScopes?.length ?? 0) === 0 &&
+          !(xeroFullScopes && (xeroAccounts[0]?.missingFullScopes?.length ?? 0) > 0) &&
+          !(xeroExtended && (xeroAccounts[0]?.missingExtendedScopes?.length ?? 0) > 0)
+        }
+        primaryDisabled={disabled}
+        onPrimary={() =>
+          void run(
+            xeroConnected &&
+              ((xeroAccounts[0]?.missingCoreScopes?.length ?? 0) > 0 ||
+                (xeroFullScopes && (xeroAccounts[0]?.missingFullScopes?.length ?? 0) > 0) ||
+                (xeroExtended && (xeroAccounts[0]?.missingExtendedScopes?.length ?? 0) > 0))
+              ? xeroReconnect
+              : xeroPrimary
+          )
+        }
+      >
+        <p style={{ fontSize: 11, color: "#778899", lineHeight: 1.45, margin: "10px 0" }}>
+          Sign in with Xero to look up invoices, contacts, and organisation details.
+        </p>
+        <div style={{ marginBottom: 8 }}>
+          <label style={{ fontSize: 11, color: "#aabbcc", marginRight: 12 }}>
+            <input
+              type="radio"
+              checked={xeroMode === "read_write"}
+              onChange={() => setXeroMode("read_write")}
+              disabled={disabled || xeroConnected}
+            />{" "}
+            Read + write
+          </label>
+          <label style={{ fontSize: 11, color: "#aabbcc" }}>
+            <input
+              type="radio"
+              checked={xeroMode === "read_only"}
+              onChange={() => setXeroMode("read_only")}
+              disabled={disabled || xeroConnected}
+            />{" "}
+            Read only
+          </label>
+        </div>
+        <label style={{ display: "block", fontSize: 11, color: "#aabbcc", marginBottom: 8 }}>
+          <input
+            type="checkbox"
+            checked={xeroFullScopes}
+            onChange={(e) => setXeroFullScopes(e.target.checked)}
+            disabled={disabled || xeroConnected}
+          />{" "}
+          Full accounting scopes (reports, budgets)
+        </label>
+        <label style={{ display: "block", fontSize: 11, color: "#aabbcc", marginBottom: 8 }}>
+          <input
+            type="checkbox"
+            checked={xeroExtended}
+            onChange={(e) => setXeroExtended(e.target.checked)}
+            disabled={disabled || xeroConnected}
+          />{" "}
+          Extended APIs (files, projects, payroll)
+        </label>
       </IntegrationCard>
 
       <IntegrationCard

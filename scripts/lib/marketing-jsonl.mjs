@@ -181,3 +181,39 @@ export async function resolveSessionJsonlPath(chatId) {
   }
   return null;
 }
+
+/**
+ * True when the most recent send_start in the session log has a matching turn_end.
+ * @param {string} jsonlPath
+ */
+export async function isLatestTurnComplete(jsonlPath) {
+  let raw;
+  try {
+    raw = await fs.readFile(jsonlPath, "utf8");
+  } catch {
+    return false;
+  }
+  const records = raw
+    .split("\n")
+    .filter((l) => l.trim())
+    .map((l) => {
+      try {
+        return JSON.parse(l);
+      } catch {
+        return null;
+      }
+    })
+    .filter(Boolean);
+  let lastSendIdx = -1;
+  for (let i = records.length - 1; i >= 0; i--) {
+    if (records[i].event === "send_start") {
+      lastSendIdx = i;
+      break;
+    }
+  }
+  if (lastSendIdx < 0) return false;
+  for (let i = lastSendIdx + 1; i < records.length; i++) {
+    if (records[i].event === "turn_end") return true;
+  }
+  return false;
+}

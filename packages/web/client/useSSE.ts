@@ -3,7 +3,8 @@ import type { PersonaUiThemeV2 } from "@liminal/core/persona-ui-theme";
 import type { PersonaArtifactPreview } from "@liminal/core/persona-bootstrap-progress";
 import {
   extractStreamingWritePreview,
-  isStreamingWriteTool,
+  isStreamingToolArgsJsonComplete,
+  promoteStreamingToolCallStatus,
 } from "@liminal/core/streaming-write-preview";
 import type { ImageAttachment } from "./imageAttachments.js";
 import { setDictationWebSpeechEnabled } from "./audio/useDictation.js";
@@ -93,6 +94,17 @@ function finalizeStreamingModelReasoning(messages: MessageEntry[]): MessageEntry
   );
 }
 
+/** Move in-progress assistant narration into the working section before tools/reasoning. */
+function freezeInterimAssistant(messages: MessageEntry[]): MessageEntry[] {
+  const last = messages.at(-1);
+  if (last?.kind !== "assistant") return messages;
+  if (!last.text.trim()) return messages.slice(0, -1);
+  return [
+    ...messages.slice(0, -1),
+    { kind: "working_note" as const, text: last.text, streaming: false },
+  ];
+}
+
 function finalizeStreamingReasoningEntries(messages: MessageEntry[]): MessageEntry[] {
   return messages.flatMap((m) => {
     if (m.kind === "think" && m.streaming) {
@@ -139,18 +151,67 @@ function updateStreamingReasonFromArgs(
   });
 }
 
-function promoteWriteToolCallIfArgsComplete(
+function promoteToolCallAfterArgsDelta(
   entry: Extract<MessageEntry, { kind: "tool_call" }>,
   argsJson: string
 ): Extract<MessageEntry, { kind: "tool_call" }> {
-  if (entry.status !== "streaming" || !isStreamingWriteTool(entry.name)) {
-    return { ...entry, argsJson };
+  const status = promoteStreamingToolCallStatus(entry.name, entry.status, argsJson);
+  return status === entry.status ? { ...entry, argsJson } : { ...entry, argsJson, status };
+}
+
+function finalizeStreamingThinkIfArgsComplete(
+  messages: MessageEntry[],
+  callId: string,
+  argsJson: string
+): MessageEntry[] {
+  if (!isStreamingToolArgsJsonComplete(argsJson)) {
+    return updateStreamingThinkFromArgs(messages, callId, argsJson);
   }
-  const preview = extractStreamingWritePreview(entry.name, argsJson);
-  if (preview && !preview.incomplete) {
-    return { ...entry, argsJson, status: "running" };
+  return messages.map((m) => {
+    if (m.kind !== "think" || m.callId !== callId || !m.streaming) return m;
+    const preview = extractStreamingWritePreview("think", argsJson);
+    let content = preview?.content ?? m.content;
+    try {
+      const parsed = JSON.parse(argsJson) as { content?: string };
+      if (typeof parsed.content === "string") content = parsed.content;
+    } catch {
+      /* keep preview */
+    }
+    return { ...m, argsJson, content, streaming: false };
+  });
+}
+
+function finalizeStreamingReasonIfArgsComplete(
+  messages: MessageEntry[],
+  callId: string,
+  argsJson: string
+): MessageEntry[] {
+  if (!isStreamingToolArgsJsonComplete(argsJson)) {
+    return updateStreamingReasonFromArgs(messages, callId, argsJson);
   }
-  return { ...entry, argsJson };
+  return messages.map((m) => {
+    if (m.kind !== "reason" || m.callId !== callId || !m.streaming) return m;
+    const preview = extractStreamingWritePreview("reason", argsJson);
+    let inference = preview?.content ?? m.inference;
+    try {
+      const parsed = JSON.parse(argsJson) as { inference?: string };
+      if (typeof parsed.inference === "string") inference = parsed.inference;
+    } catch {
+      /* keep preview */
+    }
+    return { ...m, argsJson, inference, streaming: false };
+  });
+}
+
+function markToolCallRunning(
+  messages: MessageEntry[],
+  callId: string
+): MessageEntry[] {
+  return messages.map((m) => {
+    if (m.kind !== "tool_call" || m.callId !== callId) return m;
+    if (m.status !== "streaming" && m.status !== "pending_approval") return m;
+    return { ...m, status: "running" as const };
+  });
 }
 
 function updateStreamingPlanFromArgs(
@@ -216,6 +277,7 @@ function parseEventData(e: MessageEvent): unknown {
 export type MessageEntry =
   | { kind: "user"; text: string }
   | { kind: "assistant"; text: string; streaming: boolean }
+  | { kind: "working_note"; text: string; streaming: boolean }
   | { kind: "provider_retry"; text: string }
   | {
       kind: "tool_call";
@@ -506,6 +568,8 @@ type Action =
       };
     }
   | { type: "tool_timing"; payload: { callId: string; durationMs: number } }
+  | { type: "tool_progress"; payload: { callId: string; delta: string } }
+  | { type: "tool_executing"; payload: { callId: string; name: string } }
   | { type: "error"; payload: { message: string } }
   | { type: "subtask_spawned"; payload: { taskId: string; parentTaskId: string; goal: string; depth: number } }
   | { type: "subtask_complete"; payload: { taskId: string; ok: boolean; output?: string; rounds?: number } }
@@ -831,8 +895,8 @@ function reducer(state: SSEState, action: Action): SSEState {
 
     case "tool_start": {
       const { callId, name } = action.payload;
-      const baseAfterReasoning = finalizeStreamingModelReasoning(
-        stripTrailingProviderRetry(state.messages)
+      const baseAfterReasoning = freezeInterimAssistant(
+        finalizeStreamingModelReasoning(stripTrailingProviderRetry(state.messages))
       );
       if (name === "think") {
         return {
@@ -849,7 +913,7 @@ function reducer(state: SSEState, action: Action): SSEState {
           ],
         };
       }
-      if (name === "plan") return state;
+      if (name === "plan") return { ...state, messages: baseAfterReasoning };
       if (name === "reason") {
         return {
           ...state,
@@ -892,7 +956,7 @@ function reducer(state: SSEState, action: Action): SSEState {
         const argsJson = wireArgsJson ?? (thinkEntry.argsJson ?? "") + argsDelta;
         return {
           ...state,
-          messages: updateStreamingThinkFromArgs(state.messages, callId, argsJson),
+          messages: finalizeStreamingThinkIfArgsComplete(state.messages, callId, argsJson),
         };
       }
       const reasonEntry = state.messages.find(
@@ -903,7 +967,7 @@ function reducer(state: SSEState, action: Action): SSEState {
         const argsJson = wireArgsJson ?? (reasonEntry.argsJson ?? "") + argsDelta;
         return {
           ...state,
-          messages: updateStreamingReasonFromArgs(state.messages, callId, argsJson),
+          messages: finalizeStreamingReasonIfArgsComplete(state.messages, callId, argsJson),
         };
       }
       const planEntry = state.messages.find(
@@ -922,8 +986,24 @@ function reducer(state: SSEState, action: Action): SSEState {
         messages: state.messages.map((m) => {
           if (m.kind !== "tool_call" || m.callId !== callId) return m;
           const argsJson = wireArgsJson ?? m.argsJson + argsDelta;
-          return promoteWriteToolCallIfArgsComplete(m, argsJson);
+          return promoteToolCallAfterArgsDelta(m, argsJson);
         }),
+      };
+    }
+
+    case "tool_progress": {
+      const { callId } = action.payload;
+      return {
+        ...state,
+        messages: markToolCallRunning(state.messages, callId),
+      };
+    }
+
+    case "tool_executing": {
+      const { callId } = action.payload;
+      return {
+        ...state,
+        messages: markToolCallRunning(state.messages, callId),
       };
     }
 
@@ -1053,11 +1133,30 @@ function reducer(state: SSEState, action: Action): SSEState {
           executionPreview: hm.workingStatePreview ?? hm.executionState?.mission?.objective?.slice(0, 160),
         });
       }
+      let nextMessages = msgs;
+      if (extra.length > 0) {
+        let lastAssistantIdx = -1;
+        for (let i = msgs.length - 1; i >= 0; i--) {
+          if (msgs[i]?.kind === "assistant") {
+            lastAssistantIdx = i;
+            break;
+          }
+        }
+        if (lastAssistantIdx >= 0) {
+          nextMessages = [
+            ...msgs.slice(0, lastAssistantIdx),
+            ...extra,
+            ...msgs.slice(lastAssistantIdx),
+          ];
+        } else {
+          nextMessages = [...msgs, ...extra];
+        }
+      }
       return {
         ...state,
         busy: false,
         contextSnapshot: action.payload.contextSnapshot,
-        messages: [...msgs, ...extra],
+        messages: nextMessages,
         lastTurnProviderRetries: state.recoveryPendingCount,
         recoveryPendingCount: 0,
       };
@@ -2368,6 +2467,25 @@ export function useSSE(options?: {
         const o = p as Record<string, unknown>;
         if (typeof o.callId !== "string" || typeof o.durationMs !== "number") return;
         dispatch({ type: "tool_timing", payload: { callId: o.callId, durationMs: o.durationMs } });
+      });
+      es.addEventListener("tool_progress", (e: MessageEvent) => {
+        trackId(e);
+        const p = parseEventData(e);
+        if (p == null || typeof p !== "object") return;
+        const o = p as Record<string, unknown>;
+        if (typeof o.callId !== "string") return;
+        dispatch({
+          type: "tool_progress",
+          payload: { callId: o.callId, delta: typeof o.delta === "string" ? o.delta : "" },
+        });
+      });
+      es.addEventListener("tool_executing", (e: MessageEvent) => {
+        trackId(e);
+        const p = parseEventData(e);
+        if (p == null || typeof p !== "object") return;
+        const o = p as Record<string, unknown>;
+        if (typeof o.callId !== "string" || typeof o.name !== "string") return;
+        dispatch({ type: "tool_executing", payload: { callId: o.callId, name: o.name } });
       });
 
       // Ack-only events — no UI effect needed.

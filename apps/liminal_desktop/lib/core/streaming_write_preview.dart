@@ -369,3 +369,26 @@ StreamingWritePreview? extractStreamingWritePreview(
     rawArgsTail: raw.substring(raw.length - tailLen),
   );
 }
+
+bool isStreamingWriteTool(String toolName) =>
+    _streamingWriteToolSpecs.containsKey(toolName);
+
+bool isStreamingToolArgsJsonComplete(String argsJson) {
+  final trimmed = argsJson.trim();
+  if (trimmed.length < 2) return false;
+  try {
+    jsonDecode(trimmed);
+    return true;
+  } catch (_) {
+    return false;
+  }
+}
+
+/// True when streamed args are complete enough to leave "streaming arguments".
+bool shouldPromoteStreamingToolToRunning(String toolName, String argsJson) {
+  if (isStreamingWriteTool(toolName)) {
+    final preview = extractStreamingWritePreview(toolName, argsJson);
+    return preview != null && !preview.incomplete;
+  }
+  return isStreamingToolArgsJsonComplete(argsJson);
+}

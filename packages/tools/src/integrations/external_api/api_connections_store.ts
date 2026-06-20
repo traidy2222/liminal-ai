@@ -103,6 +103,8 @@ export interface McpConnectionRecord {
   toolFilter?: McpToolFilter;
   oauthAccountId?: string;
   sidecarManaged?: boolean;
+  /** Streamable HTTP MCP session id from initialize (required by some servers, e.g. ida-pro-mcp). */
+  mcpSessionId?: string;
 }
 
 export type ConnectionRecord = OpenApiConnectionRecord | McpConnectionRecord;

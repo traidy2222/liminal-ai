@@ -80,11 +80,13 @@ import {
   buildIntegrationsSnapshot,
   connectGithub,
   connectGithubOAuth,
+  connectIda,
   connectGoogleOAuth,
   connectGoogleWorkspace,
   connectIntegrationOpenApi,
   detachIntegrationMcp,
   disconnectGithub,
+  disconnectIda,
   disconnectGoogle,
   disconnectMicrosoft,
   connectMicrosoftOAuth,
@@ -1339,6 +1341,32 @@ export class WsServer {
           const d = data as { revoke?: boolean };
           try {
             const output = await disconnectGithub(this.registry, d.revoke === true);
+            const snap = await buildIntegrationsSnapshot();
+            this.ack(ws, id, true, undefined, { output, integrations: snap });
+          } catch (err) {
+            this.ack(ws, id, false, err instanceof Error ? err.message : String(err));
+          }
+          return;
+        }
+
+        case "connect_ida": {
+          const d = data as { mode?: "read_write" | "read_only"; mcp_url?: string };
+          try {
+            const output = await connectIda(this.registry, {
+              readOnly: d.mode === "read_only",
+              mcpUrl: typeof d.mcp_url === "string" ? d.mcp_url : undefined,
+            });
+            const snap = await buildIntegrationsSnapshot();
+            this.ack(ws, id, true, undefined, { output, integrations: snap });
+          } catch (err) {
+            this.ack(ws, id, false, err instanceof Error ? err.message : String(err));
+          }
+          return;
+        }
+
+        case "disconnect_ida": {
+          try {
+            const output = await disconnectIda(this.registry);
             const snap = await buildIntegrationsSnapshot();
             this.ack(ws, id, true, undefined, { output, integrations: snap });
           } catch (err) {

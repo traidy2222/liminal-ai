@@ -5,6 +5,7 @@ import { PersonaShellSwitcher } from "../persona/shells/ShellSwitcher.js";
 import type { ShellContract, OrbState, ToolResult } from "../persona/ShellContract.js";
 import type { MessageEntry } from "../useSSE.js";
 import { applyPersonaDocumentTheme } from "../applyPersonaDocumentTheme.js";
+import { groupIntoChatTurns } from "../chatTurnLayout.js";
 import { groupToolCalls } from "./groupToolCalls.js";
 import { getMarketingScenario } from "./scenarios.js";
 import { MarketingApprovalOverlay, MarketingPersonaBootstrap } from "./MarketingOverlays.js";
@@ -92,6 +93,7 @@ export function MarketingApp() {
     [messages]
   );
   const groupedMessages = useMemo(() => groupToolCalls(visibleMessages), [visibleMessages]);
+  const chatTurns = useMemo(() => groupIntoChatTurns(groupedMessages, scenario.busy ?? false), [groupedMessages, scenario.busy]);
   const toolResultMap = useMemo(() => buildToolResultMap(messages), [messages]);
 
   const overlay = params.mode === "illustrative" ? scenario.overlay : "none";
@@ -130,6 +132,7 @@ export function MarketingApp() {
     personaDisplayLabel: scenario.displayLabel ?? theme.displayLabel,
     personaName: scenario.personaName ?? "Liminal",
     groupedMessages,
+    chatTurns,
     toolResultMap,
     surface: "clean",
     showRawHarness: false,

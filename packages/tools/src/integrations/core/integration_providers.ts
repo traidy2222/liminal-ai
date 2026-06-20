@@ -12,7 +12,8 @@ export type IntegrationProviderId =
   | "slack"
   | "linear"
   | "notion"
-  | "youtube";
+  | "youtube"
+  | "ida";
 
 export interface IntegrationProviderCatalogEntry {
   id: IntegrationProviderId;
@@ -29,7 +30,7 @@ export const INTEGRATION_PROVIDER_CATALOG: IntegrationProviderCatalogEntry[] = [
     id: "google",
     title: "Google",
     tagline: "Gmail, Calendar, Drive & Docs",
-    connectMode: "oauth_mcp",
+    connectMode: "oauth_auto_attach",
     mcpParentProvider: "google_workspace",
     group: "workspace",
   },
@@ -37,7 +38,7 @@ export const INTEGRATION_PROVIDER_CATALOG: IntegrationProviderCatalogEntry[] = [
     id: "microsoft",
     title: "Microsoft 365",
     tagline: "Outlook, Teams & OneDrive",
-    connectMode: "oauth_mcp",
+    connectMode: "oauth_auto_attach",
     mcpParentProvider: "microsoft_365",
     group: "workspace",
   },
@@ -83,6 +84,14 @@ export const INTEGRATION_PROVIDER_CATALOG: IntegrationProviderCatalogEntry[] = [
     tagline: "Repos, issues & pull requests",
     connectMode: "oauth_mcp",
     mcpParentProvider: "github",
+    group: "dev",
+  },
+  {
+    id: "ida",
+    title: "IDA Pro",
+    tagline: "Reverse engineering via ida-pro-mcp",
+    connectMode: "custom",
+    mcpParentProvider: "ida",
     group: "dev",
   },
   {

@@ -694,6 +694,8 @@ export {
   disconnectAzureFromServer,
   connectGithubFromServer,
   disconnectGithubFromServer,
+  connectIdaFromServer,
+  disconnectIdaFromServer,
   connectXeroFromServer,
   disconnectXeroFromServer,
   connectSlackFromServer,
@@ -719,6 +721,16 @@ export {
   connectGithubMcp,
   disconnectGithubMcp,
 } from "./integrations/github/github_connect.js";
+export {
+  idaMcpEnabled,
+  idaConnectOnBoot,
+  idaMcpUrl,
+  idaMcpReachable,
+  connectIdaMcp,
+  disconnectIdaMcp,
+} from "./integrations/ida/ida_connect.js";
+export { probeIdaMcpInitialize, idaGuiMcpUrl, enrichIdaConnectError } from "./integrations/ida/ida_probe.js";
+export { getIdaSidecarStatus, stopIdaSidecar } from "./integrations/ida/ida_sidecar.js";
 export { getGoogleSidecarStatus, stopGoogleSidecar } from "./integrations/google/google_sidecar.js";
 export {
   listIntegrationConnections,

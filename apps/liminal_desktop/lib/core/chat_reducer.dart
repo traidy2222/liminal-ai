@@ -47,6 +47,8 @@ ChatTranscriptState reduceChatEvent(
       return _onApprovalDecision(state, data);
     case 'tool_progress':
       return _onToolProgress(state, data);
+    case 'tool_executing':
+      return _onToolExecuting(state, data);
     case 'tool_result':
       return _onToolResult(state, data);
     case 'ask_user':
@@ -437,6 +439,10 @@ ChatTranscriptState _onToolDelta(ChatTranscriptState state, Map<String, dynamic>
     }
     if (m is ToolCallMessage && m.callId == callId) {
       m.argsPreview = accumulateArgs(m.argsPreview);
+      if (m.status == ToolCallStatus.streaming &&
+          shouldPromoteStreamingToolToRunning(m.name, m.argsPreview)) {
+        m.status = ToolCallStatus.running;
+      }
       var next = state.copyWith(messages: msgs);
       if (isComposeDockTool(m.name)) {
         final prev = next.fileEditView;
@@ -612,6 +618,30 @@ ChatTranscriptState _onToolProgress(ChatTranscriptState state, Map<String, dynam
       status: nextStatus,
       argsPreview: m.argsPreview,
       output: '${m.output ?? ''}$delta',
+      startedAt: m.startedAt,
+    );
+    return state.copyWith(messages: msgs);
+  }
+  return state;
+}
+
+ChatTranscriptState _onToolExecuting(ChatTranscriptState state, Map<String, dynamic> data) {
+  final callId = data['callId'] as String?;
+  if (callId == null) return state;
+  final msgs = List<MessageEntry>.from(state.messages);
+  for (var i = 0; i < msgs.length; i++) {
+    final m = msgs[i];
+    if (m is! ToolCallMessage || m.callId != callId) continue;
+    if (m.status != ToolCallStatus.streaming &&
+        m.status != ToolCallStatus.pendingApproval) {
+      return state;
+    }
+    msgs[i] = ToolCallMessage(
+      callId: m.callId,
+      name: m.name,
+      status: ToolCallStatus.running,
+      argsPreview: m.argsPreview,
+      output: m.output,
       startedAt: m.startedAt,
     );
     return state.copyWith(messages: msgs);

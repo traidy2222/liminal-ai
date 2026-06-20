@@ -5,6 +5,12 @@ import {
   ALL_AZURE_SERVICE_IDS,
   ALL_GOOGLE_SERVICE_IDS,
   ALL_MICROSOFT_SERVICE_IDS,
+  DEFAULT_GOOGLE_SERVICE_IDS,
+  DEFAULT_MICROSOFT_SERVICE_IDS,
+  GOOGLE_CONNECT_PRESETS,
+  GOOGLE_SERVICE_GROUPS,
+  MICROSOFT_CONNECT_PRESETS,
+  MICROSOFT_SERVICE_GROUPS,
   listAzureOAuthAccounts,
   listGithubOAuthAccounts,
   listGoogleOAuthAccounts,
@@ -17,19 +23,29 @@ import {
   listSlackOAuthAccounts,
   listXeroOAuthAccounts,
   missingDefaultAzureScopes,
-  missingDefaultMicrosoftScopes,
-  missingDefaultWorkspaceScopes,
+  missingGoogleScopes,
+  missingMicrosoftScopes,
   missingSlackScopes,
+  resolveGoogleServices,
+  resolveMicrosoftServices,
   refreshStaleXeroAccounts,
   xeroBundleMissingCoreScopes,
   xeroBundleMissingFullScopes,
   xeroBundleMissingPhase3Scopes,
   xeroBundleMissingScopes,
+  effectiveHarnessEnvRaw,
 } from "@liminal/core";
 import { getAzureSidecarStatus } from "../azure/azure_sidecar.js";
 import { getGoogleSidecarStatus } from "../google/google_sidecar.js";
 import { getMicrosoftSidecarStatus } from "../microsoft/microsoft_sidecar.js";
+import { getIdaSidecarStatus } from "../ida/ida_sidecar.js";
+import { idaMcpEnabled } from "../ida/ida_connect.js";
+import { idaGuiMcpUrl, probeIdaMcpInitialize } from "../ida/ida_probe.js";
 import { listIntegrationConnections, type IntegrationConnectionSummary } from "./integrations_server.js";
+import {
+  buildWorkspaceServiceCards,
+  type IntegrationServiceCard,
+} from "./workspace_service_cards.js";
 
 export type IntegrationConnectMode = "oauth_mcp" | "oauth_auto_attach" | "custom";
 
@@ -79,6 +95,12 @@ export interface IntegrationsSnapshot {
   github: {
     accounts: Array<IntegrationsOAuthAccount & { login?: string }>;
   };
+  ida: {
+    sidecar: IntegrationsSidecarStatus;
+    enabled: boolean;
+    guiReachable: boolean;
+    mcpUrlOverride?: string;
+  };
   xero: {
     accounts: Array<
       IntegrationsOAuthAccount & {
@@ -126,6 +148,10 @@ export interface IntegrationsSnapshot {
   };
   connections: IntegrationConnectionSummary[];
   providerStatus: Record<string, IntegrationProviderStatus>;
+  serviceCards: {
+    google: IntegrationServiceCard[];
+    microsoft: IntegrationServiceCard[];
+  };
 }
 
 function toolsForParent(connections: IntegrationConnectionSummary[], parentProvider: string) {
@@ -134,6 +160,36 @@ function toolsForParent(connections: IntegrationConnectionSummary[], parentProvi
     attached: rows.length > 0,
     toolCount: rows.reduce((n, c) => n + c.toolCount, 0),
   };
+}
+
+function collectAttachedServiceIds(
+  connections: IntegrationConnectionSummary[],
+  parentProvider: string
+): string[] {
+  const ids = new Set<string>();
+  for (const c of connections) {
+    if (c.parentProvider !== parentProvider) continue;
+    for (const s of c.services ?? []) ids.add(s);
+  }
+  return [...ids];
+}
+
+function missingScopesForGoogleAccount(
+  scopes: string[],
+  connections: IntegrationConnectionSummary[]
+): string[] {
+  const attached = collectAttachedServiceIds(connections, "google_workspace");
+  const serviceIds = attached.length > 0 ? attached : DEFAULT_GOOGLE_SERVICE_IDS;
+  return missingGoogleScopes(scopes, resolveGoogleServices(serviceIds));
+}
+
+function missingScopesForMicrosoftAccount(
+  scopes: string[],
+  connections: IntegrationConnectionSummary[]
+): string[] {
+  const attached = collectAttachedServiceIds(connections, "microsoft_365");
+  const serviceIds = attached.length > 0 ? attached : DEFAULT_MICROSOFT_SERVICE_IDS;
+  return missingMicrosoftScopes(scopes, resolveMicrosoftServices(serviceIds));
 }
 
 function accountHasMissingScopes(accounts: IntegrationsOAuthAccount[]): boolean {
@@ -152,6 +208,12 @@ export function deriveIntegrationProviderStatuses(
     linear: { accounts: IntegrationsOAuthAccount[] };
     notion: { accounts: IntegrationsOAuthAccount[] };
     youtube: { accounts: IntegrationsOAuthAccount[] };
+    ida: {
+      sidecar: IntegrationsSidecarStatus;
+      enabled: boolean;
+      guiReachable: boolean;
+      mcpUrlOverride?: string;
+    };
   }
 ): Record<string, IntegrationProviderStatus> {
   const { connections } = snapshot;
@@ -159,6 +221,7 @@ export function deriveIntegrationProviderStatuses(
   const microsoft = toolsForParent(connections, "microsoft_365");
   const azure = toolsForParent(connections, "azure");
   const github = toolsForParent(connections, "github");
+  const ida = toolsForParent(connections, "ida");
 
   const oauthAuto = (id: string, accounts: IntegrationsOAuthAccount[], needsScopeReconnect: boolean) => {
     const signedIn = accounts.length > 0;
@@ -194,9 +257,34 @@ export function deriveIntegrationProviderStatuses(
     };
   };
 
+  const oauthAutoAttachWorkspace = (
+    id: string,
+    accounts: IntegrationsOAuthAccount[],
+    parentProvider: string,
+    needsScopeReconnect: boolean
+  ) => {
+    const tools = toolsForParent(connections, parentProvider);
+    const signedIn = accounts.length > 0;
+    return {
+      id,
+      connectMode: "oauth_auto_attach" as const,
+      signedIn,
+      toolsAttached: signedIn || tools.attached,
+      toolCount: tools.attached ? tools.toolCount : signedIn ? 1 : 0,
+      ready: signedIn && !needsScopeReconnect,
+      accountCount: accounts.length,
+      needsScopeReconnect,
+    };
+  };
+
   return {
-    google: oauthMcp("google", snapshot.google.accounts, "google_workspace", accountHasMissingScopes(snapshot.google.accounts)),
-    microsoft: oauthMcp(
+    google: oauthAutoAttachWorkspace(
+      "google",
+      snapshot.google.accounts,
+      "google_workspace",
+      accountHasMissingScopes(snapshot.google.accounts)
+    ),
+    microsoft: oauthAutoAttachWorkspace(
       "microsoft",
       snapshot.microsoft.accounts,
       "microsoft_365",
@@ -208,6 +296,20 @@ export function deriveIntegrationProviderStatuses(
       ready: github.attached,
       toolsAttached: github.attached,
       toolCount: github.toolCount,
+    },
+    ida: {
+      id: "ida",
+      connectMode: "custom" as const,
+      signedIn:
+        snapshot.ida.enabled &&
+        (snapshot.ida.sidecar.running ||
+          snapshot.ida.guiReachable ||
+          Boolean(snapshot.ida.mcpUrlOverride)),
+      toolsAttached: ida.attached,
+      toolCount: ida.toolCount,
+      ready: ida.attached,
+      accountCount: 0,
+      needsScopeReconnect: false,
     },
     xero: oauthAuto(
       "xero",
@@ -223,24 +325,31 @@ export function deriveIntegrationProviderStatuses(
 
 export async function buildIntegrationsSnapshot(): Promise<IntegrationsSnapshot> {
   await refreshStaleXeroAccounts();
+  const connections = await listIntegrationConnections();
   const accounts = await listGoogleOAuthAccounts();
   const msAccounts = await listMicrosoftOAuthAccounts();
   const body = {
     google: {
       accounts: accounts.map((a) => ({
         ...a,
-        missingScopes: missingDefaultWorkspaceScopes(a.scopes),
+        missingScopes: missingScopesForGoogleAccount(a.scopes, connections),
       })),
       sidecar: await getGoogleSidecarStatus(),
       services: ALL_GOOGLE_SERVICE_IDS,
+      defaultServices: DEFAULT_GOOGLE_SERVICE_IDS,
+      serviceGroups: GOOGLE_SERVICE_GROUPS,
+      connectPresets: GOOGLE_CONNECT_PRESETS,
     },
     microsoft: {
       accounts: msAccounts.map((a) => ({
         ...a,
-        missingScopes: missingDefaultMicrosoftScopes(a.scopes),
+        missingScopes: missingScopesForMicrosoftAccount(a.scopes, connections),
       })),
       sidecar: await getMicrosoftSidecarStatus(),
       services: ALL_MICROSOFT_SERVICE_IDS,
+      defaultServices: DEFAULT_MICROSOFT_SERVICE_IDS,
+      serviceGroups: MICROSOFT_SERVICE_GROUPS,
+      connectPresets: MICROSOFT_CONNECT_PRESETS,
     },
     azure: {
       accounts: (await listAzureOAuthAccounts()).map((a) => ({
@@ -258,6 +367,12 @@ export async function buildIntegrationsSnapshot(): Promise<IntegrationsSnapshot>
         scopes: a.scopes,
         expiresAt: a.expiresAt,
       })),
+    },
+    ida: {
+      sidecar: await getIdaSidecarStatus(),
+      enabled: idaMcpEnabled(),
+      guiReachable: (await probeIdaMcpInitialize(idaGuiMcpUrl())).ok,
+      mcpUrlOverride: effectiveHarnessEnvRaw("AGENT_IDA_MCP_URL")?.trim() || undefined,
     },
     xero: {
       accounts: (await listXeroOAuthAccounts()).map((a) => ({
@@ -323,10 +438,16 @@ export async function buildIntegrationsSnapshot(): Promise<IntegrationsSnapshot>
         customUrl: a.customUrl,
       })),
     },
-    connections: await listIntegrationConnections(),
+    connections,
   };
   return {
     ...body,
+    serviceCards: buildWorkspaceServiceCards({
+      googleAccounts: body.google.accounts,
+      microsoftAccounts: body.microsoft.accounts,
+      azureAccounts: body.azure.accounts,
+      connections,
+    }),
     providerStatus: deriveIntegrationProviderStatuses(body),
   };
 }

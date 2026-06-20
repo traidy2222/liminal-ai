@@ -38,6 +38,8 @@ export function useIntegrationsPanel(agentBusy: boolean) {
   const [youtubeMode, setYoutubeMode] = useState<ReadWriteMode>("read_write");
   const [youtubeMonetary, setYoutubeMonetary] = useState(false);
   const [githubMode, setGithubMode] = useState<ReadWriteMode>("read_write");
+  const [idaMode, setIdaMode] = useState<ReadWriteMode>("read_write");
+  const [idaMcpUrlOverride, setIdaMcpUrlOverride] = useState("");
   const [selectedServices, setSelectedServices] = useState<Set<string>>(new Set());
   const [msSelectedServices, setMsSelectedServices] = useState<Set<string>>(new Set());
 
@@ -63,11 +65,23 @@ export function useIntegrationsPanel(agentBusy: boolean) {
       if (!res.ok) throw new Error(await res.text());
       const json = (await res.json()) as IntegrationsData;
       setData(json);
-      if (selectedServices.size === 0 && json.google.services.length > 0) {
-        setSelectedServices(new Set(json.google.services));
+      if (selectedServices.size === 0) {
+        const defaults =
+          json.google.defaultServices?.length > 0
+            ? json.google.defaultServices
+            : json.google.services.length > 0
+              ? ["gmail", "calendar"]
+              : [];
+        if (defaults.length > 0) setSelectedServices(new Set(defaults));
       }
-      if (msSelectedServices.size === 0 && (json.microsoft?.services.length ?? 0) > 0) {
-        setMsSelectedServices(new Set(json.microsoft!.services));
+      if (msSelectedServices.size === 0) {
+        const msDefaults =
+          json.microsoft?.defaultServices?.length
+            ? json.microsoft.defaultServices
+            : json.microsoft?.services.length
+              ? ["mail", "calendar"]
+              : [];
+        if (msDefaults.length > 0) setMsSelectedServices(new Set(msDefaults));
       }
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
@@ -121,6 +135,14 @@ export function useIntegrationsPanel(agentBusy: boolean) {
     });
   }, []);
 
+  const applyGooglePreset = useCallback((services: string[]) => {
+    setSelectedServices(new Set(services));
+  }, []);
+
+  const applyMicrosoftPreset = useCallback((services: string[]) => {
+    setMsSelectedServices(new Set(services));
+  }, []);
+
   const toggleMsService = useCallback((id: string) => {
     setMsSelectedServices((prev) => {
       const next = new Set(prev);
@@ -136,11 +158,12 @@ export function useIntegrationsPanel(agentBusy: boolean) {
 
   const derived = useMemo(() => {
     const connections = data?.connections ?? [];
-    const curatedParents = new Set(["google_workspace", "microsoft_365", "azure", "github"]);
+    const curatedParents = new Set(["google_workspace", "microsoft_365", "azure", "github", "ida"]);
     const googleMcp = connections.filter((c) => c.kind === "mcp" && c.parentProvider === "google_workspace");
     const microsoftMcp = connections.filter((c) => c.kind === "mcp" && c.parentProvider === "microsoft_365");
     const azureMcp = connections.filter((c) => c.kind === "mcp" && c.parentProvider === "azure");
     const githubMcp = connections.filter((c) => c.kind === "mcp" && c.parentProvider === "github");
+    const idaMcp = connections.filter((c) => c.kind === "mcp" && c.parentProvider === "ida");
     const msGraphConn = microsoftMcp.find((c) => c.name === "microsoft");
 
     const accounts = data?.google.accounts ?? [];
@@ -165,14 +188,22 @@ export function useIntegrationsPanel(agentBusy: boolean) {
       microsoftMcp,
       azureMcp,
       githubMcp,
+      idaMcp,
+      idaSidecar: data?.ida?.sidecar,
+      idaEnabled: data?.ida?.enabled ?? false,
+      idaGuiReachable: data?.ida?.guiReachable ?? false,
       googleCalendarAttached: googleMcp.some((c) => c.name === "google_calendar"),
       msCalendarAttached: msGraphConn?.services?.includes("calendar") ?? false,
       accounts,
       sidecar: data?.google.sidecar,
       services: data?.google.services ?? [],
+      googleServiceGroups: data?.google.serviceGroups ?? [],
+      googleConnectPresets: data?.google.connectPresets ?? [],
       msAccounts,
       msSidecar: data?.microsoft?.sidecar,
       msServices: data?.microsoft?.services ?? [],
+      msServiceGroups: data?.microsoft?.serviceGroups ?? [],
+      msConnectPresets: data?.microsoft?.connectPresets ?? [],
       azureAccounts,
       azureSidecar: data?.azure?.sidecar,
       xeroAccounts,
@@ -181,10 +212,15 @@ export function useIntegrationsPanel(agentBusy: boolean) {
       notionAccounts,
       youtubeAccounts,
       githubAccounts,
-      googleConnected: googleMcp.length > 0,
-      microsoftConnected: microsoftMcp.length > 0,
+      googleConnected: providerStatus?.google?.ready ?? googleMcp.length > 0,
+      microsoftConnected: providerStatus?.microsoft?.ready ?? microsoftMcp.length > 0,
+      googleReady: providerStatus?.google?.ready ?? false,
+      microsoftReady: providerStatus?.microsoft?.ready ?? false,
+      googleMcpAttached: googleMcp.length > 0,
+      microsoftMcpAttached: microsoftMcp.length > 0,
       azureConnected: azureMcp.length > 0,
       githubConnected: githubMcp.length > 0,
+      idaConnected: idaMcp.length > 0,
       xeroConnected: xeroAccounts.length > 0,
       xeroNeedsReconnect: xeroAccounts.some((a) => (a.missingScopes?.length ?? 0) > 0),
       slackConnected: slackAccounts.length > 0,
@@ -196,10 +232,14 @@ export function useIntegrationsPanel(agentBusy: boolean) {
       microsoftToolCount: microsoftMcp.reduce((n, c) => n + c.toolCount, 0),
       azureToolCount: azureMcp.reduce((n, c) => n + c.toolCount, 0),
       githubToolCount: githubMcp.reduce((n, c) => n + c.toolCount, 0),
+      idaToolCount: idaMcp.reduce((n, c) => n + c.toolCount, 0),
       googleSignedIn: providerStatus?.google?.signedIn ?? accounts.length > 0,
       microsoftSignedIn: providerStatus?.microsoft?.signedIn ?? msAccounts.length > 0,
       azureSignedIn: providerStatus?.azure?.signedIn ?? azureAccounts.length > 0,
       githubSignedIn: providerStatus?.github?.signedIn ?? githubAccounts.length > 0,
+      idaSignedIn: providerStatus?.ida?.signedIn ?? (data?.ida?.enabled && (data?.ida?.sidecar?.running || data?.ida?.guiReachable)) ?? false,
+      googleServiceCards: data?.serviceCards?.google ?? [],
+      microsoftServiceCards: data?.serviceCards?.microsoft ?? [],
     };
   }, [data]);
 
@@ -218,9 +258,82 @@ export function useIntegrationsPanel(agentBusy: boolean) {
     [load]
   );
 
+  function findServiceCard(
+    d: IntegrationsData,
+    vendor: "google" | "microsoft" | "azure",
+    serviceId: string
+  ) {
+    if (vendor === "google") {
+      return d.serviceCards?.google.find((c) => c.serviceId === serviceId);
+    }
+    return d.serviceCards?.microsoft.find(
+      (c) =>
+        c.serviceId === serviceId &&
+        (vendor === "azure" ? c.vendor === "azure" : c.vendor === "microsoft")
+    );
+  }
+
+  const connectWorkspaceService = useCallback(
+    async (vendor: "google" | "microsoft" | "azure", serviceId: string) => {
+      const rwMode = vendor === "google" ? mode : vendor === "microsoft" ? msMode : azureMode;
+      const apiRoot = vendor === "azure" ? "azure" : vendor === "google" ? "google" : "microsoft";
+      const snap = data ?? ({} as IntegrationsData);
+      const card = findServiceCard(snap, vendor, serviceId);
+
+      if (!card?.signedIn || card.needsScopeReconnect) {
+        const res = await webApiFetch(
+          `/api/integrations/${apiRoot}/begin?mode=${rwMode}&services=${encodeURIComponent(serviceId)}`
+        );
+        if (!res.ok) throw new Error(await res.text());
+        const { connectUrl } = (await res.json()) as { connectUrl: string };
+        window.open(connectUrl, "_blank", "noopener,noreferrer");
+        await pollIntegrationsUntil((d) => {
+          const c = findServiceCard(d, vendor, serviceId);
+          return Boolean(c?.signedIn) && !c?.needsScopeReconnect;
+        });
+      }
+
+      if (!findServiceCard(data ?? snap, vendor, serviceId)?.connected) {
+        const res = await webApiFetch(`/api/integrations/${apiRoot}/connect`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ services: [serviceId], mode: rwMode }),
+        });
+        const json = (await res.json()) as { error?: string };
+        if (!res.ok) throw new Error(json.error ?? "connect failed");
+        await pollIntegrationsUntil((d) => findServiceCard(d, vendor, serviceId)?.connected ?? false);
+      }
+    },
+    [azureMode, data, mode, msMode, pollIntegrationsUntil]
+  );
+
+  const connectGoogleService = useCallback(
+    (serviceId: string) => connectWorkspaceService("google", serviceId),
+    [connectWorkspaceService]
+  );
+  const connectMicrosoftService = useCallback(
+    (serviceId: string) => connectWorkspaceService("microsoft", serviceId),
+    [connectWorkspaceService]
+  );
+  const connectAzureService = useCallback(
+    (serviceId: string) => connectWorkspaceService("azure", serviceId),
+    [connectWorkspaceService]
+  );
+
   const googlePrimary = useCallback(async () => {
-    const { googleConnected, accounts } = derived;
-    if (googleConnected) {
+    const { googleConnected, accounts, googleReady } = derived;
+    const connectIfNeeded = async () => {
+      if (toolsConnected(data ?? ({} as IntegrationsData), "google_workspace")) return;
+      const res = await webApiFetch("/api/integrations/google/connect", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ services: [...selectedServices], mode }),
+      });
+      const json = (await res.json()) as { error?: string };
+      if (!res.ok) throw new Error(json.error ?? "connect failed");
+      await pollIntegrationsUntil((d) => toolsConnected(d, "google_workspace") || (d.providerStatus?.google?.ready ?? false));
+    };
+    if (googleConnected || googleReady) {
       const svc = [...selectedServices].join(",");
       const res = await webApiFetch(
         `/api/integrations/google/begin?mode=${mode}${svc ? `&services=${encodeURIComponent(svc)}` : ""}`
@@ -230,31 +343,36 @@ export function useIntegrationsPanel(agentBusy: boolean) {
       const before = accounts.length;
       window.open(connectUrl, "_blank", "noopener,noreferrer");
       await pollIntegrationsUntil((d) => (d.google?.accounts.length ?? 0) > before);
+      await connectIfNeeded();
       return;
     }
-    if (accounts.length === 0) {
-      const svc = [...selectedServices].join(",");
-      const res = await webApiFetch(
-        `/api/integrations/google/begin?mode=${mode}${svc ? `&services=${encodeURIComponent(svc)}` : ""}`
-      );
-      if (!res.ok) throw new Error(await res.text());
-      const { connectUrl } = (await res.json()) as { connectUrl: string };
-      window.open(connectUrl, "_blank", "noopener,noreferrer");
-      await pollIntegrationsUntil((d) => toolsConnected(d, "google_workspace"));
-      return;
-    }
-    const res = await webApiFetch("/api/integrations/google/connect", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ services: [...selectedServices], mode }),
-    });
-    const json = (await res.json()) as { error?: string };
-    if (!res.ok) throw new Error(json.error ?? "connect failed");
-  }, [derived, mode, pollIntegrationsUntil, selectedServices]);
+    const svc = [...selectedServices].join(",");
+    const res = await webApiFetch(
+      `/api/integrations/google/begin?mode=${mode}${svc ? `&services=${encodeURIComponent(svc)}` : ""}`
+    );
+    if (!res.ok) throw new Error(await res.text());
+    const { connectUrl } = (await res.json()) as { connectUrl: string };
+    window.open(connectUrl, "_blank", "noopener,noreferrer");
+    await pollIntegrationsUntil((d) => (d.google?.accounts.length ?? 0) > 0);
+    await connectIfNeeded();
+  }, [derived, mode, pollIntegrationsUntil, selectedServices, data]);
 
   const microsoftPrimary = useCallback(async () => {
-    const { microsoftConnected, msAccounts } = derived;
-    if (microsoftConnected) {
+    const { microsoftConnected, msAccounts, microsoftReady } = derived;
+    const connectIfNeeded = async () => {
+      if (toolsConnected(data ?? ({} as IntegrationsData), "microsoft_365")) return;
+      const res = await webApiFetch("/api/integrations/microsoft/connect", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ services: [...msSelectedServices], mode: msMode }),
+      });
+      const json = (await res.json()) as { error?: string };
+      if (!res.ok) throw new Error(json.error ?? "connect failed");
+      await pollIntegrationsUntil(
+        (d) => toolsConnected(d, "microsoft_365") || (d.providerStatus?.microsoft?.ready ?? false)
+      );
+    };
+    if (microsoftConnected || microsoftReady) {
       const svc = [...msSelectedServices].join(",");
       const res = await webApiFetch(
         `/api/integrations/microsoft/begin?mode=${msMode}${svc ? `&services=${encodeURIComponent(svc)}` : ""}`
@@ -264,27 +382,19 @@ export function useIntegrationsPanel(agentBusy: boolean) {
       const before = msAccounts.length;
       window.open(connectUrl, "_blank", "noopener,noreferrer");
       await pollIntegrationsUntil((d) => (d.microsoft?.accounts.length ?? 0) > before);
+      await connectIfNeeded();
       return;
     }
-    if (msAccounts.length === 0) {
-      const svc = [...msSelectedServices].join(",");
-      const res = await webApiFetch(
-        `/api/integrations/microsoft/begin?mode=${msMode}${svc ? `&services=${encodeURIComponent(svc)}` : ""}`
-      );
-      if (!res.ok) throw new Error(await res.text());
-      const { connectUrl } = (await res.json()) as { connectUrl: string };
-      window.open(connectUrl, "_blank", "noopener,noreferrer");
-      await pollIntegrationsUntil((d) => toolsConnected(d, "microsoft_365"));
-      return;
-    }
-    const res = await webApiFetch("/api/integrations/microsoft/connect", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ services: [...msSelectedServices], mode: msMode }),
-    });
-    const json = (await res.json()) as { error?: string };
-    if (!res.ok) throw new Error(json.error ?? "connect failed");
-  }, [derived, msMode, msSelectedServices, pollIntegrationsUntil]);
+    const svc = [...msSelectedServices].join(",");
+    const res = await webApiFetch(
+      `/api/integrations/microsoft/begin?mode=${msMode}${svc ? `&services=${encodeURIComponent(svc)}` : ""}`
+    );
+    if (!res.ok) throw new Error(await res.text());
+    const { connectUrl } = (await res.json()) as { connectUrl: string };
+    window.open(connectUrl, "_blank", "noopener,noreferrer");
+    await pollIntegrationsUntil((d) => (d.microsoft?.accounts.length ?? 0) > 0);
+    await connectIfNeeded();
+  }, [derived, msMode, msSelectedServices, pollIntegrationsUntil, data]);
 
   const azurePrimary = useCallback(async () => {
     const { azureConnected, azureAccounts } = derived;
@@ -343,6 +453,26 @@ export function useIntegrationsPanel(agentBusy: boolean) {
       (d) => toolsConnected(d, "github") || (d.github?.accounts.length ?? 0) > 0
     );
   }, [derived, githubMode, pollIntegrationsUntil]);
+
+  const idaPrimary = useCallback(async () => {
+    const { idaConnected } = derived;
+    if (idaConnected) {
+      const res = await webApiFetch("/api/integrations/ida", { method: "DELETE" });
+      const json = (await res.json()) as { error?: string };
+      if (!res.ok) throw new Error(json.error ?? "IDA disconnect failed");
+      return;
+    }
+    const body: { mode?: string; mcp_url?: string } = { mode: idaMode };
+    const url = idaMcpUrlOverride.trim() || data?.ida?.mcpUrlOverride?.trim();
+    if (url) body.mcp_url = url;
+    const res = await webApiFetch("/api/integrations/ida/connect", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    const json = (await res.json()) as { error?: string };
+    if (!res.ok) throw new Error(json.error ?? "IDA connect failed");
+  }, [data?.ida?.mcpUrlOverride, derived, idaMode, idaMcpUrlOverride]);
 
   const beginXeroOAuth = useCallback(async () => {
     const qs = new URLSearchParams({ mode: xeroMode });
@@ -495,12 +625,16 @@ export function useIntegrationsPanel(agentBusy: boolean) {
       setYoutubeMonetary,
       githubMode,
       setGithubMode,
+      idaMode,
+      setIdaMode,
     },
     services: {
       selectedServices,
       msSelectedServices,
       toggleService,
       toggleMsService,
+      applyGooglePreset,
+      applyMicrosoftPreset,
     },
     advanced: {
       mcpName,
@@ -515,6 +649,8 @@ export function useIntegrationsPanel(agentBusy: boolean) {
       setMcpAuthEnv,
       mcpAuthHeader,
       setMcpAuthHeader,
+      idaMcpUrlOverride,
+      setIdaMcpUrlOverride,
       apiName,
       setApiName,
       apiSpecUrl,
@@ -536,6 +672,7 @@ export function useIntegrationsPanel(agentBusy: boolean) {
       microsoftPrimary,
       azurePrimary,
       githubPrimary,
+      idaPrimary,
       xeroPrimary,
       xeroReconnect,
       slackPrimary,
@@ -543,6 +680,9 @@ export function useIntegrationsPanel(agentBusy: boolean) {
       notionPrimary,
       youtubePrimary,
       revokeAccount,
+      connectGoogleService,
+      connectMicrosoftService,
+      connectAzureService,
     },
   };
 }

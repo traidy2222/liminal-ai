@@ -9,6 +9,14 @@ import {
 } from "./connector_catalog.js";
 
 describe("connector_catalog", () => {
+  it("defaults to gmail+calendar when services omitted", () => {
+    const presets = resolveGoogleServices(undefined);
+    assert.deepEqual(
+      presets.map((p) => p.id),
+      ["gmail", "calendar"]
+    );
+  });
+
   it("resolves drive to official MCP", () => {
     const presets = resolveGoogleServices(["drive"]);
     assert.equal(presets.length, 1);

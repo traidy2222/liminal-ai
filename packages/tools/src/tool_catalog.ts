@@ -172,13 +172,22 @@ export const TOOL_FAMILIES: Record<string, { description: string; tools: readonl
   },
   google_workspace: {
     description:
-      "Google Workspace REST — Gmail send/draft, Calendar, Docs/Sheets/Slides, Analytics (GA4), Search Console. Pair with mcp_google_* / mcp_google_ext_* when MCP is attached.",
+      "Alias — activates all Google Workspace sub-families (google_mail, google_calendar, google_office, google_drive, google_marketing, google_people). Prefer a specific sub-family when the task is narrow.",
+    tools: [],
+  },
+  google_mail: {
+    description: "Google Gmail REST + mcp_google_gmail_* — send, draft, inbox search.",
     tools: [
       "gmail_create_draft",
       "gmail_send_draft",
       "gmail_send_message",
       "mail_search_inboxes",
       "email_style_infer",
+    ],
+  },
+  google_calendar: {
+    description: "Google Calendar REST + mcp_google_calendar_* — events, free/busy, ACL.",
+    tools: [
       "calendar_rest_get_calendar",
       "calendar_rest_list_calendars",
       "calendar_rest_list_settings",
@@ -204,6 +213,11 @@ export const TOOL_FAMILIES: Record<string, { description: string; tools: readonl
       "calendar_rest_move_event",
       "calendar_rest_import_event",
       "calendar_rest_respond_to_event",
+    ],
+  },
+  google_office: {
+    description: "Google Docs/Sheets/Slides REST + mcp_google_ext_* — documents and spreadsheets.",
+    tools: [
       "docs_rest_get_document",
       "docs_rest_extract_text",
       "docs_rest_create_document",
@@ -231,6 +245,15 @@ export const TOOL_FAMILIES: Record<string, { description: string; tools: readonl
       "slides_rest_batch_update",
       "slides_rest_get_page",
       "slides_rest_get_thumbnail",
+    ],
+  },
+  google_drive: {
+    description: "Google Drive MCP (mcp_google_drive_*) — files and folders when Drive service is connected.",
+    tools: [],
+  },
+  google_marketing: {
+    description: "Google Analytics (GA4) + Search Console REST — reports, properties, SEO.",
+    tools: [
       "analytics_rest_list_account_summaries",
       "analytics_rest_list_properties",
       "analytics_rest_get_property",
@@ -250,6 +273,10 @@ export const TOOL_FAMILIES: Record<string, { description: string; tools: readonl
       "search_console_rest_submit_sitemap",
       "search_console_rest_delete_sitemap",
     ],
+  },
+  google_people: {
+    description: "Google People/Chat MCP (mcp_google_people_*, mcp_google_chat_*) when those services are connected.",
+    tools: [],
   },
   youtube: {
     description:
@@ -284,16 +311,30 @@ export const TOOL_FAMILIES: Record<string, { description: string; tools: readonl
   },
   microsoft_365: {
     description:
-      "Microsoft 365 REST — Outlook, Teams, SharePoint, Planner, To Do, OneNote, Excel, Graph search. Pair with mcp_microsoft_* when Graph MCP sidecar is attached.",
+      "Alias — activates all Microsoft 365 sub-families (microsoft_mail, microsoft_calendar, microsoft_files, microsoft_collab, microsoft_search). Prefer a specific sub-family when the task is narrow.",
+    tools: [],
+  },
+  microsoft_mail: {
+    description: "Microsoft Outlook mail REST + mcp_microsoft_* mail tools — send, draft, inbox.",
     tools: [
       "outlook_send_message",
       "outlook_send_draft",
       "outlook_create_draft",
       "email_style_infer",
+    ],
+  },
+  microsoft_calendar: {
+    description: "Microsoft Outlook calendar REST — events, scheduling, free/busy.",
+    tools: [
       "outlook_calendar_rest_list_events",
       "outlook_calendar_rest_create_event",
       "outlook_calendar_rest_find_meeting_times",
       "outlook_calendar_rest_get_schedule",
+    ],
+  },
+  microsoft_files: {
+    description: "OneDrive, SharePoint, Excel, and Office file REST + related Graph MCP tools.",
+    tools: [
       "onedrive_rest_list_children",
       "onedrive_rest_upload_file",
       "onedrive_rest_download_file",
@@ -303,21 +344,34 @@ export const TOOL_FAMILIES: Record<string, { description: string; tools: readonl
       "office_rest_upload_file",
       "excel_rest_read_range",
       "excel_rest_update_range",
-      "graph_search_rest_query",
+      "sharepoint_rest_list_followed_sites",
+    ],
+  },
+  microsoft_collab: {
+    description: "Teams, Planner, To Do, OneNote REST + related Graph MCP tools.",
+    tools: [
       "onenote_rest_create_page",
       "onenote_rest_list_notebooks",
       "planner_rest_create_task",
       "planner_rest_list_my_plans",
-      "sharepoint_rest_list_followed_sites",
       "teams_rest_list_joined_teams",
       "teams_rest_post_channel_message",
       "todo_rest_create_task",
       "todo_rest_list_lists",
     ],
   },
+  microsoft_search: {
+    description: "Microsoft Graph search REST — cross-workspace query.",
+    tools: ["graph_search_rest_query"],
+  },
   github: {
     description:
       "GitHub via MCP — repos, issues, PRs, search (mcp_github_* after connect_provider). No REST tools; MCP registers dynamically.",
+    tools: [],
+  },
+  ida: {
+    description:
+      "IDA Pro reverse engineering via MCP — survey, decompile, patch, apply_patches_to_input (mcp_ida_* after connect_provider). Requires AGENT_IDA_MCP=1.",
     tools: [],
   },
   xero: {

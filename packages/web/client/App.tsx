@@ -39,6 +39,7 @@ import { resolveToolCardsMode } from "./resolveToolCardsMode.js";
 import { useSpeechOutput } from "./audio/useSpeechOutput.js";
 import type { SpeechSsePayload } from "./useSSE.js";
 import { ShellRouter } from "./persona/ShellRouter.js";
+import { groupIntoChatTurns } from "./chatTurnLayout.js";
 import { PersonaShellSwitcher } from "./persona/shells/ShellSwitcher.js";
 import type { ShellContract } from "./persona/ShellContract.js";
 import { SubtaskInspectorModal, SubtaskInlineCard } from "./SubtaskInspectorModal.js";
@@ -1291,6 +1292,28 @@ function MessageView({
         </div>
       );
 
+    case "working_note":
+      return (
+        <div
+          {...entranceProp}
+          style={{
+            margin: "2px 0 6px",
+            padding: "6px 10px",
+            borderRadius: 4,
+            background: "rgba(0, 8, 16, 0.35)",
+            borderLeft: "2px solid rgba(var(--lim-accent-rgb), 0.15)",
+            fontSize: 12,
+            color: "#8899aa",
+            lineHeight: 1.55,
+            whiteSpace: "pre-wrap",
+            fontStyle: "italic",
+          }}
+        >
+          {entry.text}
+          {entry.streaming && <span style={{ color: CYAN, animation: "blink 1s step-end infinite" }}>█</span>}
+        </div>
+      );
+
     case "assistant": {
       const avatarStyle = personaTheme.avatarStyle;
       const showGlyph = avatarStyle === "glyph";
@@ -2298,6 +2321,10 @@ export function App() {
   }, [state.messages]);
 
   const groupedMessages = groupToolCalls(visibleMessages);
+  const chatTurns = useMemo(
+    () => groupIntoChatTurns(groupedMessages, state.busy),
+    [groupedMessages, state.busy]
+  );
 
   const activeToolCall = state.messages.slice().reverse().find(
     (m): m is ToolCallEntry =>
@@ -2363,6 +2390,7 @@ export function App() {
     personaDisplayLabel: state.personaDisplayLabel,
     personaName: state.personaName,
     groupedMessages,
+    chatTurns,
     toolResultMap,
     surface,
     showRawHarness,

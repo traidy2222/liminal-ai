@@ -168,3 +168,15 @@ export function getEstimatedContentLength(state: ContentStreamParseState): numbe
 export function getDecodedContentFromRaw(state: ContentStreamParseState): string {
   return decodePartialJsonStringField(state.raw, "content").value;
 }
+
+/** True when streamed tool-call args form valid JSON (provider finished the object). */
+export function isStreamingToolArgsJsonComplete(argsJson: string): boolean {
+  const trimmed = argsJson.trim();
+  if (trimmed.length < 2) return false;
+  try {
+    JSON.parse(trimmed);
+    return true;
+  } catch {
+    return false;
+  }
+}

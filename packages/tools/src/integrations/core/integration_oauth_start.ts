@@ -34,7 +34,8 @@ export type ConnectProviderId =
   | "slack"
   | "linear"
   | "notion"
-  | "youtube";
+  | "youtube"
+  | "ida";
 
 const PROVIDER_LABEL: Record<ConnectProviderId, string> = {
   google_workspace: "Google Workspace",
@@ -46,6 +47,7 @@ const PROVIDER_LABEL: Record<ConnectProviderId, string> = {
   linear: "Linear",
   notion: "Notion",
   youtube: "YouTube",
+  ida: "IDA Pro",
 };
 
 export function integrationNotConnectedError(provider: ConnectProviderId, label?: string): string {
@@ -76,6 +78,8 @@ export async function isConnectProviderOAuthReady(provider: ConnectProviderId): 
       return (await listYoutubeOAuthAccounts()).length > 0;
     case "github":
       return await githubAuthAvailable();
+    case "ida":
+      return true;
   }
 }
 
@@ -143,6 +147,11 @@ export async function startConnectProviderOAuth(
           | undefined;
         return { ok: true, label: meta?.channelTitle ?? meta?.customUrl ?? r.email ?? r.accountId };
       }
+      case "ida":
+        return {
+          ok: false,
+          error: "IDA Pro MCP does not use OAuth — set AGENT_IDA_MCP=1 and call connect_provider({ provider: \"ida\" }).",
+        };
     }
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
@@ -163,6 +172,7 @@ export function isConnectProviderId(value: string): value is ConnectProviderId {
     value === "slack" ||
     value === "linear" ||
     value === "notion" ||
-    value === "youtube"
+    value === "youtube" ||
+    value === "ida"
   );
 }

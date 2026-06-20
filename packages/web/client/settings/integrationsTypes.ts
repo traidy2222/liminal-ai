@@ -21,16 +21,48 @@ export interface ConnectionSummary {
   services?: string[];
 }
 
+export interface WorkspaceServiceGroupDto {
+  id: string;
+  label: string;
+  services: string[];
+}
+
+export interface WorkspaceConnectPresetDto {
+  id: string;
+  label: string;
+  services: string[];
+}
+
+export interface IntegrationServiceCardDto {
+  category: "google" | "microsoft";
+  vendor: "google" | "microsoft" | "azure";
+  serviceId: string;
+  label: string;
+  groupId: string;
+  groupLabel: string;
+  signedIn: boolean;
+  connected: boolean;
+  toolCount: number;
+  needsScopeReconnect: boolean;
+  restOnly: boolean;
+}
+
 export interface IntegrationsData {
   google: {
     accounts: OAuthAccount[];
     sidecar: { enabled: boolean; running: boolean; port: number; url: string; pid?: number };
     services: string[];
+    defaultServices: string[];
+    serviceGroups: WorkspaceServiceGroupDto[];
+    connectPresets: WorkspaceConnectPresetDto[];
   };
   microsoft?: {
     accounts: OAuthAccount[];
     sidecar: { enabled: boolean; running: boolean; port: number; url: string; pid?: number };
     services: string[];
+    defaultServices: string[];
+    serviceGroups: WorkspaceServiceGroupDto[];
+    connectPresets: WorkspaceConnectPresetDto[];
   };
   azure?: {
     accounts: OAuthAccount[];
@@ -39,6 +71,12 @@ export interface IntegrationsData {
   };
   github?: {
     accounts: Array<OAuthAccount & { login?: string }>;
+  };
+  ida?: {
+    sidecar: { enabled: boolean; running: boolean; port: number; url: string; pid?: number };
+    enabled: boolean;
+    guiReachable: boolean;
+    mcpUrlOverride?: string;
   };
   xero?: {
     accounts: Array<
@@ -67,6 +105,10 @@ export interface IntegrationsData {
     >;
   };
   connections: ConnectionSummary[];
+  serviceCards?: {
+    google: IntegrationServiceCardDto[];
+    microsoft: IntegrationServiceCardDto[];
+  };
   providerStatus?: Record<
     string,
     {
@@ -80,15 +122,18 @@ export interface IntegrationsData {
 }
 
 export type IntegrationExpandedId =
-  | "google"
-  | "microsoft"
-  | "azure"
+  | `google:${string}`
+  | `microsoft:${string}`
+  | `azure:${string}`
+  | "google-accounts"
+  | "microsoft-accounts"
   | "xero"
   | "slack"
   | "linear"
   | "notion"
   | "youtube"
   | "github"
+  | "ida"
   | "advanced"
   | null;
 

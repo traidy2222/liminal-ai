@@ -1,9 +1,84 @@
+class IntegrationServiceCard {
+  const IntegrationServiceCard({
+    required this.category,
+    required this.vendor,
+    required this.serviceId,
+    required this.label,
+    required this.groupId,
+    required this.groupLabel,
+    required this.signedIn,
+    required this.connected,
+    required this.toolCount,
+    required this.needsScopeReconnect,
+    required this.restOnly,
+  });
+
+  final String category;
+  final String vendor;
+  final String serviceId;
+  final String label;
+  final String groupId;
+  final String groupLabel;
+  final bool signedIn;
+  final bool connected;
+  final int toolCount;
+  final bool needsScopeReconnect;
+  final bool restOnly;
+
+  factory IntegrationServiceCard.fromJson(Map<String, dynamic> json) {
+    return IntegrationServiceCard(
+      category: json['category'] as String? ?? 'google',
+      vendor: json['vendor'] as String? ?? 'google',
+      serviceId: json['serviceId'] as String? ?? '',
+      label: json['label'] as String? ?? json['serviceId'] as String? ?? '',
+      groupId: json['groupId'] as String? ?? 'other',
+      groupLabel: json['groupLabel'] as String? ?? 'Other',
+      signedIn: json['signedIn'] as bool? ?? false,
+      connected: json['connected'] as bool? ?? false,
+      toolCount: json['toolCount'] as int? ?? 0,
+      needsScopeReconnect: json['needsScopeReconnect'] as bool? ?? false,
+      restOnly: json['restOnly'] as bool? ?? false,
+    );
+  }
+}
+
+class WorkspaceServiceCards {
+  const WorkspaceServiceCards({
+    this.google = const [],
+    this.microsoft = const [],
+  });
+
+  final List<IntegrationServiceCard> google;
+  final List<IntegrationServiceCard> microsoft;
+
+  factory WorkspaceServiceCards.fromJson(Map<String, dynamic>? json) {
+    if (json == null) return const WorkspaceServiceCards();
+    List<IntegrationServiceCard> parseList(String key) {
+      return (json[key] as List<dynamic>? ?? [])
+          .map(
+            (e) => IntegrationServiceCard.fromJson(
+              Map<String, dynamic>.from(e as Map),
+            ),
+          )
+          .toList();
+    }
+
+    return WorkspaceServiceCards(
+      google: parseList('google'),
+      microsoft: parseList('microsoft'),
+    );
+  }
+
+  static const empty = WorkspaceServiceCards();
+}
+
 class IntegrationsSnapshot {
   IntegrationsSnapshot({
     required this.google,
     required this.microsoft,
     required this.azure,
     required this.github,
+    required this.ida,
     required this.xero,
     required this.slack,
     required this.linear,
@@ -11,12 +86,14 @@ class IntegrationsSnapshot {
     required this.youtube,
     required this.connections,
     this.providerStatus = const {},
+    this.serviceCards = WorkspaceServiceCards.empty,
   });
 
   final GoogleIntegrations google;
   final MicrosoftIntegrations microsoft;
   final MicrosoftIntegrations azure;
   final GithubIntegrations github;
+  final IdaIntegrations ida;
   final XeroIntegrations xero;
   final SlackIntegrations slack;
   final LinearIntegrations linear;
@@ -24,6 +101,11 @@ class IntegrationsSnapshot {
   final YoutubeIntegrations youtube;
   final List<IntegrationConnection> connections;
   final Map<String, IntegrationProviderStatus> providerStatus;
+  final WorkspaceServiceCards serviceCards;
+
+  List<IntegrationServiceCard> get googleServiceCards => serviceCards.google;
+
+  List<IntegrationServiceCard> get microsoftServiceCards => serviceCards.microsoft;
 
   factory IntegrationsSnapshot.fromJson(Map<String, dynamic> json) {
     final rawStatus = json['providerStatus'] as Map<String, dynamic>? ?? {};
@@ -39,6 +121,9 @@ class IntegrationsSnapshot {
       ),
       github: GithubIntegrations.fromJson(
         Map<String, dynamic>.from(json['github'] as Map? ?? {}),
+      ),
+      ida: IdaIntegrations.fromJson(
+        Map<String, dynamic>.from(json['ida'] as Map? ?? {}),
       ),
       xero: XeroIntegrations.fromJson(
         Map<String, dynamic>.from(json['xero'] as Map? ?? {}),
@@ -70,6 +155,9 @@ class IntegrationsSnapshot {
           ),
         ),
       ),
+      serviceCards: WorkspaceServiceCards.fromJson(
+        json['serviceCards'] as Map<String, dynamic>?,
+      ),
     );
   }
 
@@ -78,6 +166,7 @@ class IntegrationsSnapshot {
     microsoft: MicrosoftIntegrations.empty,
     azure: MicrosoftIntegrations.empty,
     github: GithubIntegrations.empty,
+    ida: IdaIntegrations.empty,
     xero: XeroIntegrations.empty,
     slack: SlackIntegrations.empty,
     linear: LinearIntegrations.empty,
@@ -86,7 +175,7 @@ class IntegrationsSnapshot {
     connections: [],
   );
 
-  static const _curatedParents = {'google_workspace', 'microsoft_365', 'azure', 'github'};
+  static const _curatedParents = {'google_workspace', 'microsoft_365', 'azure', 'github', 'ida'};
 
   List<IntegrationConnection> get customMcp => connections
       .where(
@@ -104,6 +193,10 @@ class IntegrationsSnapshot {
       .where((c) => c.kind == 'mcp' && c.parentProvider == 'github')
       .toList();
 
+  List<IntegrationConnection> get idaMcp => connections
+      .where((c) => c.kind == 'mcp' && c.parentProvider == 'ida')
+      .toList();
+
   List<IntegrationConnection> get microsoftMcp => connections
       .where((c) => c.kind == 'mcp' && c.parentProvider == 'microsoft_365')
       .toList();
@@ -115,11 +208,13 @@ class IntegrationsSnapshot {
   List<IntegrationConnection> get openApi =>
       connections.where((c) => c.kind == 'openapi').toList();
 
-  bool get googleConnected => googleMcp.isNotEmpty;
+  bool get googleConnected => providerStatus['google']?.ready ?? googleMcp.isNotEmpty;
 
   bool get googleSignedIn => providerStatus['google']?.signedIn ?? google.accounts.isNotEmpty;
 
   bool get googleToolsAttached => providerStatus['google']?.toolsAttached ?? googleConnected;
+
+  bool get googleMcpAttached => googleMcp.isNotEmpty;
 
   bool get googleCalendarAttached =>
       googleMcp.any((c) => c.name == 'google_calendar');
@@ -135,13 +230,15 @@ class IntegrationsSnapshot {
     return false;
   }
 
-  bool get microsoftConnected => microsoftMcp.isNotEmpty;
+  bool get microsoftConnected => providerStatus['microsoft']?.ready ?? microsoftMcp.isNotEmpty;
 
   bool get microsoftSignedIn =>
       providerStatus['microsoft']?.signedIn ?? microsoft.accounts.isNotEmpty;
 
   bool get microsoftToolsAttached =>
       providerStatus['microsoft']?.toolsAttached ?? microsoftConnected;
+
+  bool get microsoftMcpAttached => microsoftMcp.isNotEmpty;
 
   bool get azureConnected => azureMcp.isNotEmpty || azure.accounts.isNotEmpty;
 
@@ -154,6 +251,14 @@ class IntegrationsSnapshot {
   bool get githubSignedIn => providerStatus['github']?.signedIn ?? github.accounts.isNotEmpty;
 
   bool get githubToolsAttached => providerStatus['github']?.toolsAttached ?? githubConnected;
+
+  bool get idaConnected => idaMcp.isNotEmpty;
+
+  bool get idaSignedIn =>
+      providerStatus['ida']?.signedIn ??
+      (ida.enabled && (ida.sidecar.running || ida.guiReachable));
+
+  bool get idaToolsAttached => providerStatus['ida']?.toolsAttached ?? idaConnected;
 
   bool get xeroConnected => xero.accounts.isNotEmpty;
 
@@ -183,6 +288,8 @@ class IntegrationsSnapshot {
   int get azureToolCount => azureMcp.fold(0, (n, c) => n + c.toolCount);
 
   int get githubToolCount => githubMcp.fold(0, (n, c) => n + c.toolCount);
+
+  int get idaToolCount => idaMcp.fold(0, (n, c) => n + c.toolCount);
 
   String get googleAccountLabel {
     if (google.accounts.isEmpty) return 'Google';
@@ -279,11 +386,17 @@ class MicrosoftIntegrations {
     required this.accounts,
     required this.sidecar,
     required this.services,
+    this.defaultServices = const [],
+    this.serviceGroups = const [],
+    this.connectPresets = const [],
   });
 
   final List<MicrosoftOAuthAccount> accounts;
   final MicrosoftSidecarStatus sidecar;
   final List<String> services;
+  final List<String> defaultServices;
+  final List<WorkspaceServiceGroup> serviceGroups;
+  final List<WorkspaceConnectPreset> connectPresets;
 
   factory MicrosoftIntegrations.fromJson(Map<String, dynamic> json) {
     return MicrosoftIntegrations(
@@ -300,6 +413,15 @@ class MicrosoftIntegrations {
       services: (json['services'] as List<dynamic>? ?? [])
           .map((e) => e.toString())
           .toList(),
+      defaultServices: (json['defaultServices'] as List<dynamic>? ?? ['mail', 'calendar'])
+          .map((e) => e.toString())
+          .toList(),
+      serviceGroups: (json['serviceGroups'] as List<dynamic>? ?? [])
+          .map((e) => WorkspaceServiceGroup.fromJson(Map<String, dynamic>.from(e as Map)))
+          .toList(),
+      connectPresets: (json['connectPresets'] as List<dynamic>? ?? [])
+          .map((e) => WorkspaceConnectPreset.fromJson(Map<String, dynamic>.from(e as Map)))
+          .toList(),
     );
   }
 
@@ -307,6 +429,7 @@ class MicrosoftIntegrations {
     accounts: [],
     sidecar: MicrosoftSidecarStatus.empty,
     services: [],
+    defaultServices: const ['mail', 'calendar'],
   );
 }
 
@@ -383,6 +506,37 @@ class GithubIntegrations {
   }
 
   static final empty = GithubIntegrations(accounts: []);
+}
+
+class IdaIntegrations {
+  IdaIntegrations({
+    required this.sidecar,
+    required this.enabled,
+    required this.guiReachable,
+    this.mcpUrlOverride,
+  });
+
+  final MicrosoftSidecarStatus sidecar;
+  final bool enabled;
+  final bool guiReachable;
+  final String? mcpUrlOverride;
+
+  factory IdaIntegrations.fromJson(Map<String, dynamic> json) {
+    return IdaIntegrations(
+      sidecar: MicrosoftSidecarStatus.fromJson(
+        Map<String, dynamic>.from(json['sidecar'] as Map? ?? {}),
+      ),
+      enabled: json['enabled'] as bool? ?? false,
+      guiReachable: json['guiReachable'] as bool? ?? false,
+      mcpUrlOverride: json['mcpUrlOverride'] as String?,
+    );
+  }
+
+  static final empty = IdaIntegrations(
+    sidecar: MicrosoftSidecarStatus.empty,
+    enabled: false,
+    guiReachable: false,
+  );
 }
 
 class GithubOAuthAccount {
@@ -644,16 +798,62 @@ class YoutubeOAuthAccount {
   }
 }
 
+class WorkspaceServiceGroup {
+  WorkspaceServiceGroup({
+    required this.id,
+    required this.label,
+    required this.services,
+  });
+
+  final String id;
+  final String label;
+  final List<String> services;
+
+  factory WorkspaceServiceGroup.fromJson(Map<String, dynamic> json) {
+    return WorkspaceServiceGroup(
+      id: json['id'] as String? ?? '',
+      label: json['label'] as String? ?? '',
+      services: (json['services'] as List<dynamic>? ?? []).map((e) => e.toString()).toList(),
+    );
+  }
+}
+
+class WorkspaceConnectPreset {
+  WorkspaceConnectPreset({
+    required this.id,
+    required this.label,
+    required this.services,
+  });
+
+  final String id;
+  final String label;
+  final List<String> services;
+
+  factory WorkspaceConnectPreset.fromJson(Map<String, dynamic> json) {
+    return WorkspaceConnectPreset(
+      id: json['id'] as String? ?? '',
+      label: json['label'] as String? ?? '',
+      services: (json['services'] as List<dynamic>? ?? []).map((e) => e.toString()).toList(),
+    );
+  }
+}
+
 class GoogleIntegrations {
   GoogleIntegrations({
     required this.accounts,
     required this.sidecar,
     required this.services,
+    this.defaultServices = const [],
+    this.serviceGroups = const [],
+    this.connectPresets = const [],
   });
 
   final List<GoogleOAuthAccount> accounts;
   final GoogleSidecarStatus sidecar;
   final List<String> services;
+  final List<String> defaultServices;
+  final List<WorkspaceServiceGroup> serviceGroups;
+  final List<WorkspaceConnectPreset> connectPresets;
 
   factory GoogleIntegrations.fromJson(Map<String, dynamic> json) {
     return GoogleIntegrations(
@@ -670,6 +870,15 @@ class GoogleIntegrations {
       services: (json['services'] as List<dynamic>? ?? [])
           .map((e) => e.toString())
           .toList(),
+      defaultServices: (json['defaultServices'] as List<dynamic>? ?? ['gmail', 'calendar'])
+          .map((e) => e.toString())
+          .toList(),
+      serviceGroups: (json['serviceGroups'] as List<dynamic>? ?? [])
+          .map((e) => WorkspaceServiceGroup.fromJson(Map<String, dynamic>.from(e as Map)))
+          .toList(),
+      connectPresets: (json['connectPresets'] as List<dynamic>? ?? [])
+          .map((e) => WorkspaceConnectPreset.fromJson(Map<String, dynamic>.from(e as Map)))
+          .toList(),
     );
   }
 
@@ -677,6 +886,7 @@ class GoogleIntegrations {
     accounts: [],
     sidecar: GoogleSidecarStatus.empty,
     services: [],
+    defaultServices: const ['gmail', 'calendar'],
   );
 }
 

@@ -131,6 +131,46 @@ IntegrationProviderPresentation integrationPresentation({
         toolsAttached: false,
       );
 
+    case IntegrationBrandId.ida:
+      if (snap.idaConnected) {
+        return IntegrationProviderPresentation(
+          nextStep: '${snap.idaToolCount} agent tools active',
+          actionLabel: 'Disconnect',
+          ready: true,
+          highlight: true,
+          statusMode: IntegrationStatusMode.simple,
+          signedIn: true,
+          toolsAttached: true,
+        );
+      }
+      if (!snap.ida.enabled) {
+        return const IntegrationProviderPresentation(
+          nextStep: 'Set AGENT_IDA_MCP=1 in harness settings',
+          actionLabel: 'Connect',
+          statusMode: IntegrationStatusMode.simple,
+          signedIn: false,
+          toolsAttached: false,
+        );
+      }
+      if (snap.idaSignedIn) {
+        return IntegrationProviderPresentation(
+          nextStep: snap.ida.guiReachable
+              ? 'IDA GUI plugin reachable — connect tools'
+              : 'Start idalib-mcp or IDA MCP plugin',
+          actionLabel: 'Connect',
+          statusMode: IntegrationStatusMode.simple,
+          signedIn: true,
+          toolsAttached: false,
+        );
+      }
+      return const IntegrationProviderPresentation(
+        nextStep: 'Install ida-pro-mcp or start IDA plugin',
+        actionLabel: 'Connect',
+        statusMode: IntegrationStatusMode.simple,
+        signedIn: false,
+        toolsAttached: false,
+      );
+
     case IntegrationBrandId.github:
       if (snap.githubConnected) {
         final n = snap.github.accounts.length;
