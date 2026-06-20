@@ -25,6 +25,8 @@ import {
   resolveProviderConfig,
   sanitizeChatId,
 } from "@liminal/core";
+import { weaveNoteIntoGraph } from "../vault/vault_ingest_core.js";
+import { resolveEmbedCreds } from "../vault/vault_embed.js";
 import OpenAI from "openai";
 import { atomicUpdate, loadNotes, makeTypedKey } from "./notes_store.js";
 
@@ -79,15 +81,43 @@ export const consolidateChatTool = defineTool({
     for (const u of upserts) {
       const storageKey = u.type ? makeTypedKey(u.type, u.key as string) : (u.key as string);
       const value = (u.value as string).slice(0, 4000);
-      // Default scope picked by atomicUpdate's auto-classifier — identity-shaped
-      // keys go global, everything else lands as workspace-scoped.
       await atomicUpdate((notes) => ({ ...notes, [storageKey]: value }), chatId);
       writtenLines.push(`  + ${storageKey}: ${value.slice(0, 80)}${value.length > 80 ? "…" : ""}`);
     }
+
+    let vaultPromoted = 0;
+    const creds = await resolveEmbedCreds();
+    for (const u of upserts) {
+      const typ = (u.type ?? "fact").trim().toLowerCase();
+      if (!["entity", "fact", "experience", "belief"].includes(typ)) continue;
+      const key = String(u.key ?? "").trim();
+      const value = String(u.value ?? "").trim();
+      if (!key || value.length < 20) continue;
+      const title = key.charAt(0).toUpperCase() + key.slice(1).replace(/[_-]+/g, " ");
+      const body =
+        typ === "entity"
+          ? `## Identity\n${title}\n\n## Current\n${value}\n`
+          : `## Summary\n${value}\n`;
+      try {
+        await weaveNoteIntoGraph({
+          title,
+          content: body,
+          type: typ === "entity" ? "entity" : "fact",
+          tags: ["liminal-agent", "consolidation"],
+          creds,
+        });
+        vaultPromoted++;
+      } catch {
+        /* non-fatal */
+      }
+    }
+
     return {
       ok: true,
       output:
-        `Consolidated chat ${chatId.slice(0, 8)} — wrote ${upserts.length} note(s).\n` +
+        `Consolidated chat ${chatId.slice(0, 8)} — wrote ${upserts.length} note(s)` +
+        (vaultPromoted > 0 ? ` + ${vaultPromoted} vault dossier(s)` : "") +
+        `.\n` +
         `Summary: ${(result.summary ?? "").slice(0, 400)}\n` +
         writtenLines.join("\n"),
     };

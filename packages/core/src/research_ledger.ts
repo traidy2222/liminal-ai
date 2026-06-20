@@ -350,6 +350,11 @@ export class ResearchLedger {
         const t = u.title ? `${u.title.slice(0, 60)} — ` : "";
         lines.push(`  • ${t}${u.url.slice(0, 120)}`);
       }
+      if (this.getPendingUrls().length >= 3) {
+        lines.push(
+          "→ fetch several pending URLs in parallel before synthesizing — search alone is not enough."
+        );
+      }
     }
     const fetched = this.getUrls({ status: "fetched_ok" }).slice(-4);
     if (fetched.length > 0) {

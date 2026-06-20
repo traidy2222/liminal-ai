@@ -6,6 +6,7 @@ import {
   renderEntityNote,
   entityNoteTypeFor,
   type ExtractedEntity,
+  noteTypeFromKindTags,
 } from "./vault_entity_merge.js";
 
 test("create a fresh entity note from extraction", () => {
@@ -81,8 +82,16 @@ test("parse round-trips a converted plain note into identity", () => {
   assert.deepEqual(s.current, []);
 });
 
-test("entityNoteTypeFor maps event→note, else entity", () => {
-  assert.equal(entityNoteTypeFor("event"), "note");
+test("noteTypeFromKindTags prefers event/concept over entity", () => {
+  assert.equal(noteTypeFromKindTags(["entity", "event", "liminal-agent"]), "episode");
+  assert.equal(noteTypeFromKindTags(["concept", "liminal-agent"]), "concept");
+  assert.equal(noteTypeFromKindTags(["entity", "person", "liminal-agent"]), "entity");
+});
+
+test("entityNoteTypeFor maps kinds to vault type folders", () => {
+  assert.equal(entityNoteTypeFor("event"), "episode");
+  assert.equal(entityNoteTypeFor("concept"), "concept");
   assert.equal(entityNoteTypeFor("person"), "entity");
   assert.equal(entityNoteTypeFor("org"), "entity");
+  assert.equal(entityNoteTypeFor("place"), "entity");
 });

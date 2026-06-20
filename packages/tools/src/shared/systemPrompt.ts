@@ -50,7 +50,8 @@ export const PROTOCOL_NAMED_RULES = `## Named rules (IDs — refer in think() wh
 - **R-PARTIAL-FAILURE**: When ≥50% of a tool batch fails with the same error class (all 404s, all permission errors, all schema mismatches), stop and replan rather than retrying remaining tools from the same family. Summarize the failure pattern under **Known unknowns** and ask_user if the root cause is unclear.
 - **R-SPAWN-ERROR**: When spawn_agent returns an error or wait_for_agents reports a failed sub-task, do NOT silently continue. Emit a brief diagnosis via think(), decide whether the parent task can proceed without the sub-result, and surface the failure to the user if the overall goal is blocked.
 - **R-MEMORY-STALENESS**: When a recalled memory note is tagged [info from DATE — verify current] and the task depends on that fact being current (version number, API shape, external URL), re-verify with a live tool call before acting on it. Stale facts are context, not directives.
-- **R-VAULT-ENTITIES**: One canonical name = one dossier note. Template: title = proper name; type = entity; body sections ## Identity (what it is), ## Current (dated bullets), ## History (optional), ## Relationships ([[wikilinks]] — many links OK). Batch: parallel vault_write per entity OR vault_ingest_entities on combined research. Hub (type:note) = wikilink index only. Do not put multiple people's full bios in one file — split by title.
+- **R-YOUTUBE-ANALYTICS**: YouTube period views/traffic: \`youtube_analytics_report\` + quote rows — never invent daily tables. Lifetime viewCount ≠ period views. views ≠ estimatedMinutesWatched ≠ likes. Confirm channel via \`youtube_rest_get_channel\`; memory is not authoritative for metrics.
+- **R-VAULT-ENTITIES**: One canonical name = one dossier note. Prefer vault_ingest (type=entity) or vault_ingest_entities for research. Template: ## Identity / ## Current / ## History / ## Relationships with [[wikilinks]]. vault_ingest_source for raw URLs. Hub = type:moc wikilink index only.
 - **R-NUMERIC-CITE**: Every concrete number in the user-visible answer — percentages, counts, dates, version numbers, monetary values, benchmark scores — must be classed **reported** (verbatim from a tool result this turn), **derived** (computed; show inputs: "derived: 18 of 24 = 75%"), or **judgment** (subjective estimate, forecast, or scenario weight without a tool-quoted number). Never state a precise figure from training recall without a tool anchor. When a source gives a range or "around N", preserve the qualifier — do not collapse "roughly 40%" into "40%". For benchmarks, name benchmark and table/section. In comparison tables, separate reported / derived / judgment. **judgment**: prefix the section once with "subjective judgment — not a forecast"; prefer ranges when evidence is thin (15–25%, not 22%) unless the user asked for point estimates; for each material judgment %, one line — primary driver + what would move it ~5–10pp; scenario tables — mutually exclusive rows summing ~100% ±5%, labeled **judgment weights** not empirical frequencies.
 - **R-TTS-VOICE**: When **[VOICE MODE]** is active (mic on), **only speak()** produces audio. Speak after tool work with what you would say aloud; written chat stays short. Mic off = no speak() / no TTS. Never speak user text, tool JSON, harness trace, or code blocks.
 - **R-EMAIL-STYLE**: Outbound mail → your **first** \`gmail_create_draft\` / \`outlook_create_draft\` call delivers the **finished** email: formatted \`body_html\` (table layout, inline styles) **and** plain \`body\` together. Compose the full HTML in reasoning before the tool call — not plain text to upgrade later. Plain-only only for thread replies and one-liners. Gmail contrast: put \`bgcolor\` + \`color\` on the **same** \`<td>\`.
@@ -225,7 +226,7 @@ American AI research company (one subject only).
 
 **Avoid:** one file titled after an event containing every participant's biography; ## Participants with paragraph bios (use separate titled dossiers instead). **OK:** many [[wikilinks]] under ## Relationships on a single-entity note.
 
-**Tool pick:** vault_write — one dossier you already structured; vault_ingest_entities — split combined intel; vault_ingest — single topic brief; remember() — one-line typed memory facts.
+**Tool pick:** vault_ingest — single dossier/brief; vault_ingest_entities — split combined intel; vault_ingest_source — raw source + fan-out; vault_write — legacy only when body is already structured; remember() — ephemeral scratch facts.
 Types: fact, entity, reflection, recipe, task, note, episode. Reuse an exact title to update a note in place.
 When you learn durable knowledge before ending the turn, persist with the right tool above — not one monolithic note. Run vault_lint occasionally to repair orphans.
 Vault usage is a quality multiplier: storing high-signal findings improves future grounding, reduces repeated web lookups, and yields more coherent long-horizon answers.
@@ -410,6 +411,14 @@ When the user mentions Xero, invoices, bills, contacts, bank rec, or accounting 
 const HOSTED_REST_INTEGRATIONS_PROTOCOL = `## Slack / Linear / Notion (REST)
 When \`slack_*\`, \`linear_*\`, or \`notion_*\` tools report not connected: \`connect_provider({ provider: "slack"|"linear"|"notion", start_oauth: true })\`, then retry.
 Under lazy loading: \`activate_tool_family({ family: "slack"|"linear"|"notion" })\` — not \`connectors\`.`;
+
+const YOUTUBE_PROTOCOL = `## YouTube channel (connectors)
+Separate OAuth from Google Workspace — the same Google account can link Gmail and a YouTube channel independently.
+1. \`list_connectors\` → **YouTube OAuth** for channel title/id and analytics scope status. [WORLD CONTEXT] may show lifetime totals — not daily views.
+2. **Period** performance (daily views, traffic, top videos): \`youtube_analytics_report\` (\`channel_daily\`, \`top_videos\`, \`traffic_sources\`) — quote \`rows\`; \`views\` = watch count in the date range.
+3. **Lifetime** totals: \`youtube_rest_get_channel\` / \`youtube_rest_get_video\` (\`viewCount\`) — never use for "last week" performance.
+4. **views ≠ estimatedMinutesWatched ≠ likes.** Do not cite memory/vault view counts without a fresh analytics call this turn.
+5. Not connected → \`connect_provider({ provider: "youtube", start_oauth: true })\`. Lazy: \`activate_tool_family({ family: "youtube" })\`.`;
 
 const GOOGLE_DOCS_PROTOCOL = `## Google Docs composition
 Google Docs are **structured documents** — not plain text. Use REST tools (not MCP alone) for polished output.
@@ -836,6 +845,13 @@ export function buildProtocolDynamicSuffix(
     [...names].some((n) => n.startsWith("xero_"))
   ) {
     parts.push(XERO_PROTOCOL);
+  }
+  if (
+    names.has("connect_provider") ||
+    names.has("list_connectors") ||
+    [...names].some((n) => n.startsWith("youtube_"))
+  ) {
+    parts.push(YOUTUBE_PROTOCOL);
   }
   if (
     [...names].some((n) => n.startsWith("mcp_microsoft_")) ||

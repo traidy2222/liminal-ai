@@ -5,7 +5,47 @@
 import type { ToolRegistry } from "./registry.js";
 import type { TaskOrchestrator } from "./orchestrator.js";
 import type { SharedMemoryBus, SharedBusEnvelope } from "./shared_memory_bus.js";
-import type { ChildAgentConfig } from "./types.js";
+import type { ChildAgentConfig, SubagentSpawnContract } from "./types.js";
+
+const DEFAULT_SPAWN_SUCCESS_CRITERIA = [
+  "Address the objective directly with no unnecessary scope expansion.",
+  "Include concrete evidence or repository references for major claims.",
+  "Return output formatted for parent-agent merge.",
+] as const;
+
+/**
+ * Fill missing spawn-contract fields when the model passes a partial object.
+ * Prevents forkChild from throwing on undefined successCriteria / objective.
+ */
+export function normalizeSpawnContract(
+  partial: Partial<SubagentSpawnContract>,
+  fallback: { goal: string; userPrompt?: string; systemPrompt?: string }
+): SubagentSpawnContract {
+  const objective =
+    partial.objective?.trim() ||
+    fallback.userPrompt?.trim() ||
+    fallback.goal.trim() ||
+    "Complete the assigned subtask.";
+  const role = partial.role?.trim() || "specialist_executor";
+  const deliverableFormat =
+    partial.deliverableFormat?.trim() ||
+    (fallback.systemPrompt?.trim()
+      ? "Follow system_prompt output contract exactly."
+      : "Concise markdown with findings, evidence, and explicit caveats.");
+  return {
+    role,
+    objective,
+    deliverableFormat,
+    successCriteria:
+      Array.isArray(partial.successCriteria) && partial.successCriteria.length > 0
+        ? partial.successCriteria.map((s) => String(s))
+        : [...DEFAULT_SPAWN_SUCCESS_CRITERIA],
+    nonGoals: partial.nonGoals,
+    allowedTools: partial.allowedTools,
+    handoffRequirements: partial.handoffRequirements,
+    budget: partial.budget,
+  };
+}
 
 export const SPAWN_DISCOVERY_TOOL_NAMES = ["list_tool_families", "activate_tool_family"] as const;
 export const SPAWN_COLLABORATION_TOOL_NAMES = ["share_agent_context", "read_agent_context"] as const;

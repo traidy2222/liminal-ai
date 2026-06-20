@@ -39,6 +39,9 @@ export type ManagedProviderPreference = "auto" | "bedrock" | "openrouter" | "kim
 /** Request header read by the Vireon inference proxy for upstream routing. */
 export const MANAGED_INFERENCE_PROVIDER_HEADER = "x-vireon-managed-provider";
 
+/** Per-request Bedrock home region (Settings → AGENT_MANAGED_BEDROCK_REGION). */
+export const MANAGED_INFERENCE_BEDROCK_REGION_HEADER = "x-vireon-managed-bedrock-region";
+
 export type ManagedOpenRouterCredentials = {
   route: OpenRouterRoute;
   apiKey: string;
@@ -115,6 +118,15 @@ export function resolveManagedProviderPreference(prefs?: RuntimePreferences | nu
   return parseManagedProviderPreference(resolveHarnessEnvRaw("AGENT_MANAGED_PROVIDER", prefs ?? null));
 }
 
+/** Bedrock invoke region for managed inference (empty = server default). */
+export function resolveManagedBedrockRegion(prefs?: RuntimePreferences | null): string {
+  return (
+    prefs?.harness?.env?.["AGENT_MANAGED_BEDROCK_REGION"]?.trim() ||
+    resolveHarnessEnvRaw("AGENT_MANAGED_BEDROCK_REGION", prefs ?? null)?.trim() ||
+    ""
+  );
+}
+
 /**
  * Effective managed upstream for one request. When preference is `auto`, pick from
  * model id shape so OpenRouter slugs (e.g. `nex-agi/...:free`) do not hit Bedrock.
@@ -135,9 +147,14 @@ export function buildManagedInferenceClientHeaders(
   prefs?: RuntimePreferences | null,
   modelSlug?: string | null
 ): Record<string, string> {
-  return {
+  const headers: Record<string, string> = {
     [MANAGED_INFERENCE_PROVIDER_HEADER]: resolveManagedProviderForRequest(prefs, modelSlug),
   };
+  const region = resolveManagedBedrockRegion(prefs);
+  if (region) {
+    headers[MANAGED_INFERENCE_BEDROCK_REGION_HEADER] = region;
+  }
+  return headers;
 }
 
 function truthyEnv(raw: string | undefined): boolean {
@@ -695,10 +712,18 @@ export async function fetchManagedInferenceModels(opts?: {
   const license = await resolveLicenseTokenForHarness();
   if (!license) return null;
   const base = defaultVireonSiteOriginForInference();
-  const qs = opts?.refresh ? "?refresh=1" : "";
+  const region = resolveManagedBedrockRegion();
+  const refreshQs = opts?.refresh ? "refresh=1" : "";
+  const regionQs = region ? `region=${encodeURIComponent(region)}` : "";
+  const qsParts = [refreshQs, regionQs].filter(Boolean);
+  const qs = qsParts.length ? `?${qsParts.join("&")}` : "";
   const res = await fetch(`${base}/api/inference/models${qs}`, {
     method: "GET",
-    headers: { Authorization: `Bearer ${license}`, Accept: "application/json" },
+    headers: {
+      Authorization: `Bearer ${license}`,
+      Accept: "application/json",
+      ...buildManagedInferenceClientHeaders(),
+    },
   });
   const body = (await res.json().catch(() => ({}))) as {
     error?: string;

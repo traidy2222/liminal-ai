@@ -10,6 +10,9 @@
  * without touching the filesystem, the model, or the embedding index.
  */
 
+import type { WikilinkRef } from "./vault_wikilink.js";
+import { formatWikilink, formatWikilinkRef } from "./vault_wikilink.js";
+
 export interface NeighborCandidate {
   title: string;
   slug: string;
@@ -24,7 +27,16 @@ function escapeRegExp(s: string): string {
 /** True when `body` already contains a [[wikilink]] (optionally aliased) to `title`. */
 export function bodyLinksTo(body: string, title: string): boolean {
   const re = new RegExp(`\\[\\[\\s*${escapeRegExp(title)}\\s*(\\|[^\\]]*)?\\]\\]`, "i");
-  return re.test(body);
+  if (re.test(body)) return true;
+  const slug = title
+    .toLowerCase()
+    .replace(/[^\w\s-]/g, "")
+    .replace(/\s+/g, "-")
+    .replace(/-{2,}/g, "-")
+    .replace(/^-|-$/g, "")
+    .slice(0, 80);
+  const slugRe = new RegExp(`\\[\\[\\s*(?:[^\\]|/]+/)?${escapeRegExp(slug)}\\s*(?:\\|[^\\]]*)?\\]\\]`, "i");
+  return slugRe.test(body);
 }
 
 /**
@@ -52,38 +64,85 @@ export function selectCrossLinks(
   return out;
 }
 
-/** Build a "## Related" wikilink section (empty string when no titles). */
-export function buildRelatedSection(titles: string[]): string {
-  if (titles.length === 0) return "";
-  return `## Related\n${titles.map((t) => `- [[${t}]]`).join("\n")}`;
+/** Build a "## Related" wikilink section (empty string when no links). */
+export function buildRelatedSection(links: WikilinkRef[]): string {
+  if (links.length === 0) return "";
+  return `## Related\n${links.map((l) => `- ${formatWikilinkRef(l)}`).join("\n")}`;
 }
 
 /**
- * Inject [[wikilinks]] to `relatedTitles` into `body`, skipping any already
- * present. Appends to an existing "## Related" section if one exists, otherwise
- * adds a new one at the end. Returns the body unchanged when nothing is new.
+ * Inject path-based [[wikilinks]] into `body`. Prefer {@link injectRelatedLinkRefs}.
  */
 export function injectRelatedLinks(body: string, relatedTitles: string[]): string {
   const fresh = relatedTitles.filter((t) => t.trim() && !bodyLinksTo(body, t));
   if (fresh.length === 0) return body;
+  const refs: WikilinkRef[] = fresh.map((t) => ({ target: t, label: t }));
+  return injectRelatedLinkRefs(body, refs);
+}
 
-  const bullets = fresh.map((t) => `- [[${t}]]`).join("\n");
+/**
+ * Inject Obsidian-correct wikilinks (folder/slug paths with optional aliases).
+ */
+export function injectRelatedLinkRefs(body: string, links: WikilinkRef[]): string {
+  const fresh = links.filter((l) => l.target.trim() && !bodyLinksTo(body, l.label ?? l.target));
+  if (fresh.length === 0) return body;
+
+  const bullets = fresh.map((l) => `- ${formatWikilinkRef(l)}`).join("\n");
   const relatedHeader = /^##\s+Related\s*$/im;
   if (relatedHeader.test(body)) {
-    // Append bullets right under the existing "## Related" header.
     return body.replace(relatedHeader, (h) => `${h}\n${bullets}`);
   }
   return `${body.trimEnd()}\n\n## Related\n${bullets}\n`;
 }
 
+const SOURCES_HEADER = /^##\s+Sources\s*$/im;
+
+/** Inject raw/source wikilinks under ## Sources (Karpathy provenance layer). */
+export function injectSourcesLinks(body: string, sourceLinks: WikilinkRef[]): string {
+  const fresh = sourceLinks.filter(
+    (l) => l.target.trim() && !bodyLinksTo(body, l.label ?? l.target)
+  );
+  if (fresh.length === 0) return body;
+  const bullets = fresh.map((l) => `- ${formatWikilinkRef(l)}`).join("\n");
+  if (SOURCES_HEADER.test(body)) {
+    return body.replace(SOURCES_HEADER, (h) => `${h}\n${bullets}`);
+  }
+  return `${body.trimEnd()}\n\n## Sources\n${bullets}\n`;
+}
+
+/** Titles selected for inbound backlinks (cap to avoid spam). */
+export function selectInboundWeaveTitles(outboundTitles: string[], maxInbound = 3): string[] {
+  return outboundTitles.slice(0, Math.max(0, maxInbound));
+}
+
+/** Format an MOC (map of content) hub body listing member pages. */
+export function buildMocBody(topic: string, memberLinks: WikilinkRef[]): string {
+  const seen = new Set<string>();
+  const unique = memberLinks.filter((l) => {
+    const k = l.target.toLowerCase();
+    if (seen.has(k)) return false;
+    seen.add(k);
+    return Boolean(l.target.trim());
+  });
+  return (
+    `## Overview\nMap of content for **${topic.trim()}** — curated index of related wiki pages.\n\n` +
+    `## Pages\n${unique.map((l) => `- ${formatWikilinkRef(l)}`).join("\n")}\n`
+  );
+}
+
+export function mocTitleForTopic(topic: string): string {
+  const t = topic.trim().slice(0, 80);
+  return t.toLowerCase().startsWith("moc") ? t : `MOC — ${t}`;
+}
+
 /** Format a contradiction callout (Obsidian admonition) preserving both sources. */
 export function buildContradictionCallout(params: {
-  conflictingTitle: string;
+  conflictingLink: WikilinkRef;
   detail: string;
 }): string {
   const detail = params.detail.replace(/\n+/g, " ").trim().slice(0, 300);
   return (
-    `> [!contradiction] Conflicts with [[${params.conflictingTitle}]]\n` +
+    `> [!contradiction] Conflicts with ${formatWikilinkRef(params.conflictingLink)}\n` +
     `> ${detail || "This note disagrees with an existing note — verify which is current."}`
   );
 }
@@ -115,13 +174,16 @@ export interface IndexEntry {
   title: string;
   type: string;
   summary: string;
+  /** Vault-relative path for Obsidian link target (e.g. Entities/iran). */
+  linkTarget?: string;
 }
 
 const INDEX_HEADER = "# Index\n\nContent catalog of the vault — one line per note.\n";
 
 function indexLine(e: IndexEntry): string {
   const summary = e.summary.replace(/\n+/g, " ").trim().slice(0, 160);
-  return `- [[${e.title}]] (${e.type})${summary ? ` — ${summary}` : ""}`;
+  const link = formatWikilink(e.linkTarget ?? e.title, e.title);
+  return `- ${link} (${e.type})${summary ? ` — ${summary}` : ""}`;
 }
 
 /**
@@ -131,9 +193,13 @@ function indexLine(e: IndexEntry): string {
  */
 export function upsertIndexEntry(existing: string, entry: IndexEntry): string {
   const lineRe = new RegExp(`^- \\[\\[\\s*${escapeRegExp(entry.title)}\\s*\\]\\]`, "i");
+  const lineRePath = new RegExp(
+    `^- \\[\\[\\s*${escapeRegExp(entry.linkTarget ?? "")}`,
+    "i"
+  );
   const bodyLines = (existing.trim() ? existing : INDEX_HEADER)
     .split("\n")
-    .filter((l) => !lineRe.test(l));
+    .filter((l) => !lineRe.test(l) && !(entry.linkTarget && lineRePath.test(l)));
 
   // Separate header/prose from the bullet catalog.
   const bullets = bodyLines.filter((l) => /^- \[\[/.test(l));

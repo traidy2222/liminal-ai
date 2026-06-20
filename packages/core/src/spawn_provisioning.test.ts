@@ -8,6 +8,7 @@ import {
   buildUpstreamDependencyContext,
   ensureChildRegistryBaselineFromParent,
   finalizeChildSpawnTools,
+  normalizeSpawnContract,
   spawnObjectiveNeedsFileTools,
 } from "./spawn_provisioning.js";
 
@@ -45,6 +46,17 @@ test("finalizeChildSpawnTools activates discovery and collaboration tools", () =
   assert.ok(registry.isActive("list_tool_families"));
   assert.ok(registry.isActive("share_agent_context"));
   assert.ok(registry.isActive("grep_file"));
+});
+
+test("normalizeSpawnContract fills missing successCriteria and objective", () => {
+  const normalized = normalizeSpawnContract(
+    { role: "researcher" },
+    { goal: "Find competitors", userPrompt: "Research top 3 IDE competitors" }
+  );
+  assert.equal(normalized.role, "researcher");
+  assert.equal(normalized.objective, "Research top 3 IDE competitors");
+  assert.ok(normalized.successCriteria.length >= 1);
+  assert.ok(normalized.deliverableFormat.length > 0);
 });
 
 test("buildUpstreamDependencyContext includes orchestrator results", () => {

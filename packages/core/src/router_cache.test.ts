@@ -91,5 +91,30 @@ test("failed (empty) completions are not cached", async () => {
 
   assert.equal(first.ok, false);
   assert.equal(second.ok, false);
-  assert.equal(calls(), 2, "failures must retry, never serve a cached error");
+  assert.equal(calls(), 4, "each call retries without json format; failures are never cached");
+});
+
+test("completeChatJson retries without json_object when structured mode is empty", async () => {
+  clearJsonResponseCache();
+  let calls = 0;
+  const client = {
+    apiKey: "test-key",
+    baseURL: "https://example.test/v1",
+    chat: {
+      completions: {
+        create: async (params: { response_format?: unknown }) => {
+          calls += 1;
+          if (params.response_format) {
+            return { choices: [{ message: { content: "" } }] };
+          }
+          return { choices: [{ message: { content: '{"summary":"ok"}' } }] };
+        },
+      },
+    },
+  };
+
+  const result = await completeChatJson(client, { ...baseOpts, cache: false });
+  assert.equal(result.ok, true);
+  assert.deepEqual((result as { parsed: unknown }).parsed, { summary: "ok" });
+  assert.equal(calls, 2);
 });

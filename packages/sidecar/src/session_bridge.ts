@@ -266,6 +266,7 @@ export class SessionBridge {
     on("context_compressed", (p) => this.emit("context_compressed", p));
     on("context_snapshot", (p) => this.emit("context_snapshot", p));
     on("tool_timing", (p) => this.emit("tool_timing", p));
+    on("tool_progress", (p) => this.emit("tool_progress", p));
     on("persona_changed", (p) => this.emit("persona_changed", p));
     on("execution_state", (p) => this.emit("execution_state", p));
     on("contract_transition", (p) => this.emit("contract_transition", p));

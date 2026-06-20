@@ -18,6 +18,8 @@ Checks Node 22+, npm 10+, `.env` API key, `packages/core` and `packages/tools` b
 - **`web_fetch` appearing stuck 5+ minutes** — hard wall `AGENT_WEB_FETCH_TOTAL_WALL_MS` (default 55s); readability in worker thread; rebuild `tools`.
 - **Web “stuck processing”** — client uses `lastTurnEndedAt` + consecutive idle polls ([UI streaming](../concepts/ui-streaming.md)).
 - **Persona bootstrap 500 on first load** — server gates API on session ready ([Persona bootstrap](../guides/persona-bootstrap.md)).
+- **Integration tools missing after connect** — `list_connectors`, `activate_tool_family`, or reconnect; see [Connectors](../guides/connectors.md).
+- **Wrong mailbox on reply** — [Multi-account mail](../guides/multi-account-mail.md).
 - **Large file ends mid-function or mid-tag** — `write_file` `mode: create` then `mode: append`; see [below](#file-ends-abruptly-incomplete-write).
 
 ## File ends abruptly (incomplete write) {#file-ends-abruptly-incomplete-write}

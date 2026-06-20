@@ -19,6 +19,10 @@ Mitigation:
 
 Client: `packages/web/client/useSSE.ts`. Server: `packages/web/server/sse.ts`.
 
+### Compose dock
+
+When the agent streams `write_file`, `edit_file`, or mail compose tools, web and desktop open a **right-hand compose dock** with live preview (`compose_preview` + `tool_delta`). See [Compose dock & attachments](../guides/compose-dock-and-attachments.md).
+
 ### Transport vs API vs HUD “STANDBY”
 
 Treat these separately:

@@ -504,8 +504,10 @@ class AppController extends ChangeNotifier {
       notifyListeners();
     }
     if (visibleChatIds.contains(chatId) &&
-        (event == 'tool_start' ||
+        (event == 'text' ||
+            event == 'tool_start' ||
             event == 'tool_delta' ||
+            event == 'tool_progress' ||
             event == 'compose_preview' ||
             event == 'tool_result' ||
             event == 'turn_end')) {
@@ -816,6 +818,52 @@ class AppController extends ChangeNotifier {
     if (result.ok) {
       await loadHarnessSettings();
       await refreshConfig();
+    }
+    return result.ok;
+  }
+
+  /// Apply a Bedrock managed model pack (main + fast + managed routing).
+  Future<bool> applyBedrockPreset(String presetId) async {
+    if (!_protocol.isConnected || presetId.isEmpty || presetId == 'custom') {
+      return false;
+    }
+    final snap = harnessSettings;
+    if (snap == null) return false;
+    BedrockModelPreset? preset;
+    for (final p in snap.bedrockPresets) {
+      if (p.id == presetId) {
+        preset = p;
+        break;
+      }
+    }
+    if (preset == null) return false;
+
+    final envPatch = <String, String>{};
+    final merge = <String, String>{
+      'AGENT_MODEL': preset.main,
+      'AGENT_FAST_MODEL': preset.fast,
+      if (preset.harnessEnvPatch != null) ...preset.harnessEnvPatch!,
+    };
+    for (final entry in merge.entries) {
+      final locked = snap.fields.any((f) => f.key == entry.key && f.lockedByEnv);
+      if (locked) continue;
+      envPatch[entry.key] = entry.value;
+    }
+
+    final result = await _protocol.send('update_settings', {
+      'patch': {
+        'harness': {'env': envPatch},
+        'provider': {
+          'model': preset.main,
+        },
+      },
+    });
+    if (result.ok) {
+      await loadHarnessSettings();
+      await refreshConfig();
+    } else {
+      setupError = result.error ?? 'Failed to apply Bedrock preset';
+      notifyListeners();
     }
     return result.ok;
   }

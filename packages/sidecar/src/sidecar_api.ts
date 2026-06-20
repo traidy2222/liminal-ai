@@ -19,6 +19,7 @@ import {
 } from "@liminal/core";
 import {
   apiKeyEnvVarForBaseUrl,
+  listBedrockModelPresetsForSettings,
   listProviderBackendsForSettings,
   listProviderPresetsForSettings,
   resolveProviderBackendId,
@@ -154,6 +155,7 @@ export function buildSettingsSnapshot(
     tabs: HARNESS_SETTINGS_TABS,
     fields: buildHarnessSettingsApiFields(prefs),
     providerPresets: listProviderPresetsForSettings(),
+    bedrockPresets: listBedrockModelPresetsForSettings(),
     providerBackends: listProviderBackendsForSettings(),
     provider: {
       model,

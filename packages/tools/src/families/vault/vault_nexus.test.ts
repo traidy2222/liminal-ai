@@ -8,6 +8,10 @@ import {
   injectRelatedLinks,
   prependCallout,
   selectCrossLinks,
+  buildMocBody,
+  mocTitleForTopic,
+  injectSourcesLinks,
+  selectInboundWeaveTitles,
   upsertIndexEntry,
   type NeighborCandidate,
 } from "./vault_nexus.js";
@@ -20,10 +24,10 @@ test("selectCrossLinks ranks, dedupes, drops self and sub-threshold", () => {
     "Iran",
     cands([
       ["Israel", 0.8],
-      ["Iran", 0.99], // self — excluded
-      ["israel", 0.7], // dup (case-insensitive)
+      ["Iran", 0.99],
+      ["israel", 0.7],
       ["Hezbollah", 0.5],
-      ["Noise", 0.05], // below minScore
+      ["Noise", 0.05],
     ]),
     { max: 6, minScore: 0.15 }
   );
@@ -46,7 +50,6 @@ test("injectRelatedLinks appends a Related section, skipping existing links", ()
   const out = injectRelatedLinks(body, ["Israel", "Hezbollah"]);
   assert.ok(out.includes("## Related"));
   assert.ok(out.includes("- [[Hezbollah]]"));
-  // Israel already linked in body → not duplicated as a bullet
   assert.equal((out.match(/- \[\[Israel\]\]/g) ?? []).length, 0);
 });
 
@@ -65,10 +68,15 @@ test("injectRelatedLinks is a no-op when nothing is new", () => {
 
 test("buildRelatedSection / contradiction / prepend formatting", () => {
   assert.equal(buildRelatedSection([]), "");
-  assert.ok(buildRelatedSection(["X"]).startsWith("## Related"));
-  const cc = buildContradictionCallout({ conflictingTitle: "Old Note", detail: "claims 10 dead" });
+  assert.ok(
+    buildRelatedSection([{ target: "Entities/x", label: "X" }]).startsWith("## Related")
+  );
+  const cc = buildContradictionCallout({
+    conflictingLink: { target: "Entities/old", label: "Old Note" },
+    detail: "claims 10 dead",
+  });
   assert.ok(cc.includes("[!contradiction]"));
-  assert.ok(cc.includes("[[Old Note]]"));
+  assert.ok(cc.includes("Entities/old"));
   assert.ok(prependCallout("body", cc).startsWith("> [!contradiction]"));
 });
 
@@ -82,14 +90,46 @@ test("appendLogLine creates header then appends parseable lines", () => {
 });
 
 test("upsertIndexEntry replaces same-title line and sorts", () => {
-  let idx = upsertIndexEntry("", { title: "Beta", type: "entity", summary: "second" });
-  idx = upsertIndexEntry(idx, { title: "Alpha", type: "fact", summary: "first" });
-  // Alpha should sort before Beta
-  const aPos = idx.indexOf("[[Alpha]]");
-  const bPos = idx.indexOf("[[Beta]]");
-  assert.ok(aPos > -1 && bPos > -1 && aPos < bPos);
-  // Update Beta — no duplicate line
-  idx = upsertIndexEntry(idx, { title: "Beta", type: "entity", summary: "updated" });
-  assert.equal((idx.match(/\[\[Beta\]\]/g) ?? []).length, 1);
+  let idx = upsertIndexEntry("", {
+    title: "Beta",
+    type: "entity",
+    summary: "second",
+    linkTarget: "Entities/beta",
+  });
+  idx = upsertIndexEntry(idx, {
+    title: "Alpha",
+    type: "fact",
+    summary: "first",
+    linkTarget: "Facts/alpha",
+  });
+  const aPos = idx.indexOf("Entities/beta");
+  const bPos = idx.indexOf("Facts/alpha");
+  assert.ok(aPos > -1 && bPos > -1);
+  idx = upsertIndexEntry(idx, {
+    title: "Beta",
+    type: "entity",
+    summary: "updated",
+    linkTarget: "Entities/beta",
+  });
+  assert.equal((idx.match(/\[\[Entities\/beta/g) ?? []).length, 1);
   assert.ok(idx.includes("updated"));
+});
+
+test("selectInboundWeaveTitles caps inbound backlinks", () => {
+  assert.deepEqual(selectInboundWeaveTitles(["A", "B", "C", "D"], 3), ["A", "B", "C"]);
+  assert.deepEqual(selectInboundWeaveTitles(["A"], 3), ["A"]);
+});
+
+test("injectSourcesLinks appends Sources section", () => {
+  const out = injectSourcesLinks("Body text.", [{ target: "_liminal/raw/2026-06-18-sample", label: "sample" }]);
+  assert.ok(out.includes("## Sources"));
+  assert.ok(out.includes("[[_liminal/raw/2026-06-18-sample"));
+});
+
+test("mocTitleForTopic and buildMocBody", () => {
+  assert.equal(mocTitleForTopic("Iran conflict"), "MOC — Iran conflict");
+  assert.equal(mocTitleForTopic("MOC — existing"), "MOC — existing");
+  const body = buildMocBody("Topic", [{ target: "Entities/a", label: "A" }, { target: "Entities/b", label: "B" }]);
+  assert.ok(body.includes("[[Entities/a]]"));
+  assert.ok(body.includes("[[Entities/b]]"));
 });

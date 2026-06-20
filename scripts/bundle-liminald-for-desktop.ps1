@@ -19,6 +19,62 @@ $BundleRoot = Join-Path $ReleaseDir "liminald"
 $BundleRepo = Join-Path $BundleRoot "repo"
 $Packages = @("core", "protocol", "tools", "sidecar")
 
+function Repair-BundledNativeModules {
+  param(
+    [Parameter(Mandatory = $true)][string]$BundleRepo,
+    [Parameter(Mandatory = $true)][string]$RepoRoot
+  )
+
+  $checks = @(
+    @{
+      Name     = "node-pty"
+      Entry    = "lib\index.js"
+      CopyDirs = @("lib", "build")
+    }
+  )
+
+  foreach ($check in $checks) {
+    $destPkg = Join-Path $BundleRepo "node_modules\$($check.Name)"
+    $destEntry = Join-Path $destPkg $check.Entry
+    if (Test-Path $destEntry) { continue }
+
+    $srcPkg = Join-Path $RepoRoot "node_modules\$($check.Name)"
+    $srcEntry = Join-Path $srcPkg $check.Entry
+    if (-not (Test-Path $srcEntry)) {
+      throw "Monorepo $($check.Name) missing $($check.Entry). Run: npm install (at repo root)."
+    }
+
+    Write-Host "==> Repairing $($check.Name) (missing $($check.Entry) in bundle)..."
+    New-Item -ItemType Directory -Force -Path $destPkg | Out-Null
+    foreach ($dir in $check.CopyDirs) {
+      $srcDir = Join-Path $srcPkg $dir
+      if (-not (Test-Path $srcDir)) { continue }
+      $destDir = Join-Path $destPkg $dir
+      if (Test-Path $destDir) {
+        Remove-Item -Recurse -Force $destDir -ErrorAction SilentlyContinue
+      }
+      Copy-Item $srcDir $destDir -Recurse -Force
+    }
+    foreach ($file in @("package.json", "LICENSE", "README.md", "binding.gyp")) {
+      $srcFile = Join-Path $srcPkg $file
+      if (Test-Path $srcFile) {
+        Copy-Item $srcFile (Join-Path $destPkg $file) -Force
+      }
+    }
+    $srcPrebuilds = Join-Path $srcPkg "prebuilds"
+    if (Test-Path $srcPrebuilds) {
+      $destPrebuilds = Join-Path $destPkg "prebuilds"
+      if (-not (Test-Path $destPrebuilds)) {
+        Copy-Item $srcPrebuilds $destPrebuilds -Recurse -Force
+      }
+    }
+
+    if (-not (Test-Path $destEntry)) {
+      throw "Bundle incomplete: node_modules/$($check.Name)/$($check.Entry) missing after repair"
+    }
+  }
+}
+
 function Initialize-BundleRepo([string]$Path) {
   if (-not (Test-Path $Path)) {
     New-Item -ItemType Directory -Force -Path $Path, (Join-Path $Path "packages") | Out-Null
@@ -120,12 +176,19 @@ if ($CopyNodeModulesFromRepo -and (Test-Path $srcModules)) {
   # Robocopy uses 0-7 for success; do not propagate to callers (npm/CI treat non-zero as failure).
   $global:LASTEXITCODE = 0
 } else {
+  # Stale partial installs (e.g. locked bundle refresh) can leave node-pty without lib/.
+  $stalePty = Join-Path $BundleRepo "node_modules\node-pty"
+  if (Test-Path $stalePty) {
+    Remove-Item -Recurse -Force $stalePty -ErrorAction SilentlyContinue
+  }
   Write-Host "==> npm install --omit=dev (portable runtime, may take a few minutes)..."
   Push-Location $BundleRepo
   npm install --omit=dev --no-audit --no-fund
   if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
   Pop-Location
 }
+
+Repair-BundledNativeModules -BundleRepo $BundleRepo -RepoRoot $RepoRoot
 
 if (-not (Test-Path (Join-Path $BundleRepo "packages\sidecar\dist\index.js"))) {
   throw "Bundle incomplete: sidecar dist missing after install"

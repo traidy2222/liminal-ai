@@ -19,7 +19,7 @@ After editing JSON: `npm run changelog:gen`, commit, push, then in [vireondynami
 
 ## v0.1.2 — 2026-06-18 {#v0-1-2}
 
-**Current alpha.** Multi-account mail, inbox watcher, file attachments, integrations hub polish, managed inference fixes.
+**Current beta tip.** Multi-account mail, inbox watcher, file attachments, integrations hub polish, managed inference fixes.
 
 **Shipped**
 

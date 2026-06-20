@@ -734,6 +734,8 @@ export interface AgentEventMap {
   context_snapshot: { snapshot: ContextSnapshot };
   /** Wall-clock time for a tool handler execution. (#7) */
   tool_timing: { callId: string; name: string; durationMs: number };
+  /** Incremental handler progress (vault ingest, long shell runs) — shown on the tool row. */
+  tool_progress: { callId: string; delta: string };
   /** Inference latency metrics for observability. */
   inference_latency: {
     traceId?: string;
@@ -782,7 +784,7 @@ export interface AgentEventMap {
     driftScore: number;
   };
   vault_activity: {
-    action: "read" | "search" | "write" | "skip_write";
+    action: "read" | "search" | "write" | "skip_write" | "curate";
     ok: boolean;
     noteTitle?: string;
     reason?: string;

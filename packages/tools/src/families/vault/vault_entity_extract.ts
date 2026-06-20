@@ -67,11 +67,15 @@ function parseEntitiesFromJson(parsed: unknown, maxEntities: number): ExtractedE
 }
 
 const EXTRACT_SYSTEM = (maxEntities: number) =>
-  "You extract a knowledge graph from text. Output ONE JSON object per distinct entity — never bundle multiple " +
-  "people/orgs into one entity row.\n" +
-  "Kinds: person, org, place, event, concept. Each row is a future standalone wiki dossier (Identity/Current/History/Relationships).\n" +
-  "EVENT + CAST: the event is ONE row (kind:event) with what happened in summary/current. Every participant " +
-  "(people, orgs, venues, sponsors) is a SEPARATE row. Link them via relationships[] using exact other names.\n" +
+  "You extract a knowledge graph from text. Output ONE JSON object per distinct subject — never bundle multiple " +
+  "people/orgs into one row.\n" +
+  "Kinds (pick the best fit):\n" +
+  "- person, org, place — durable actors/locations (leaders, countries, companies, cities)\n" +
+  "- event — wars, revolutions, treaties, votes, battles, incidents (temporal happenings)\n" +
+  "- concept — doctrines, systems, movements, programs, abstract ideas (Axis of Resistance, nuclear program)\n" +
+  "Each row becomes a standalone wiki dossier (Identity/Current/History/Relationships).\n" +
+  "EVENT + CAST: the event is ONE row (kind:event). Every participant (people, orgs, venues) is a SEPARATE row " +
+  "(person/org/place). Link via relationships[] using exact other names.\n" +
   `Reply JSON ONLY: {"entities":[{"name":"Exact Proper Name","kind":"person|org|place|event|concept",` +
   `"summary":"one line","current":"optional","history":"optional","relationships":["Other Name"]}]}\n` +
   `Rules: canonical proper names; one subject per row; max ${maxEntities} entities.`;

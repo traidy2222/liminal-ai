@@ -130,6 +130,22 @@ function kimchiJsonRetryDelayMs(attempt: number): number {
   return Math.min(30_000, Math.max(750, 1_500 * 2 ** attempt));
 }
 
+/** Pull a JSON object out of a model reply (raw JSON, prose wrapper, or fenced block). */
+function extractJsonCompletionText(raw: string): string {
+  const trimmed = raw.trim();
+  if (!trimmed) return trimmed;
+  const fence = /```(?:json)?\s*([\s\S]*?)```/i.exec(trimmed);
+  if (fence?.[1]?.trim()) return fence[1].trim();
+  const first = trimmed.indexOf("{");
+  const last = trimmed.lastIndexOf("}");
+  if (first >= 0 && last > first) return trimmed.slice(first, last + 1);
+  return trimmed;
+}
+
+function isRetryableJsonSidecarError(msg: string): boolean {
+  return isTransientSidecarError(msg) || msg === "empty completion";
+}
+
 /**
  * Non-streaming chat completion expecting JSON in the message body.
  * Uses `json_object` format (widely supported on OpenRouter).
@@ -179,7 +195,8 @@ export async function completeChatJson(
   const attemptWithModel = async (
     model: string,
     isFast: boolean,
-    retryAttempt = 0
+    retryAttempt = 0,
+    useJsonFormat = true
   ): Promise<JsonCompletionResult> => {
     const orExtras = buildOpenRouterChatRequestExtras({
       baseURL: client.baseURL,
@@ -205,16 +222,30 @@ export async function completeChatJson(
               messages: cachedMessages,
               max_tokens: opts.maxTokens ?? 800,
               temperature: opts.temperature ?? 0.2,
-              response_format: { type: "json_object" },
+              ...(useJsonFormat ? { response_format: { type: "json_object" as const } } : {}),
               ...orExtras,
             },
             opts.signal ? { signal: opts.signal } : undefined
           )
       );
       const raw = res.choices[0]?.message?.content ?? "";
-      if (!raw.trim()) return { ok: false, error: "empty completion", raw };
-      const parsed = JSON.parse(raw) as unknown;
-      return { ok: true, parsed, raw };
+      if (!raw.trim()) {
+        if (useJsonFormat) {
+          return attemptWithModel(model, isFast, retryAttempt, false);
+        }
+        return { ok: false, error: "empty completion", raw };
+      }
+      const jsonText = extractJsonCompletionText(raw);
+      try {
+        const parsed = JSON.parse(jsonText) as unknown;
+        return { ok: true, parsed, raw };
+      } catch (e) {
+        if (useJsonFormat) {
+          return attemptWithModel(model, isFast, retryAttempt, false);
+        }
+        const error = e instanceof Error ? e.message : String(e);
+        return { ok: false, error: `JSON parse failed: ${error}`, raw };
+      }
     } catch (e) {
       const error = e instanceof Error ? e.message : String(e);
       const exhaustedRouting = isExhaustedProviderRoutingError(e);
@@ -275,8 +306,8 @@ export async function completeChatJson(
   const primary = await attemptWithModel(opts.model, opts.isFastModel ?? true);
   if (primary.ok || !opts.fallbackModel || opts.fallbackModel === opts.model) return cacheOk(primary);
 
-  // Retry with fallback model on quota or transient server errors.
-  const isRetryableError = isTransientSidecarError(primary.error);
+  // Retry with fallback model on quota, transient server errors, or empty fast-model bodies.
+  const isRetryableError = isRetryableJsonSidecarError(primary.error);
   if (!isRetryableError) return primary;
 
   console.warn(`[router] fast model "${opts.model}" failed (${primary.error.slice(0, 80)}); retrying with fallback "${opts.fallbackModel}"`);

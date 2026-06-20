@@ -568,8 +568,11 @@ export const TOOL_FAMILIES: Record<string, { description: string; tools: readonl
       "vault_delete",
       "vault_ingest",
       "vault_ingest_entities",
+      "vault_ingest_source",
       "vault_recall",
       "vault_lint",
+      "vault_curate",
+      "vault_migrate_memory",
     ],
   },
   document: {

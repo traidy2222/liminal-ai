@@ -8,18 +8,15 @@ import {
   DEFAULT_AGENT_MODEL_SLUG,
 } from "./harness_default_constants.js";
 import { resolveHarnessEnvRaw } from "./harness_effective_env.js";
-import {
-  buildHarnessModelPackEnvPatch,
-  OPENROUTER_MODEL_SLUG,
-} from "./provider_model_presets.js";
+import { buildHarnessModelPackEnvPatch } from "./provider_model_pack.js";
 import { isOpenRouterFusionModel } from "./openrouter_fusion.js";
 import { isOpenRouterStealthModel } from "./provider_config.js";
 import type { RuntimePreferences } from "./runtime_prefs.js";
 
-export {
-  isInferenceBudgetExceededError,
-  isManagedInferenceAuthError,
-} from "./inference_provider.js";
+/** Default main model when managed credits are exhausted (OpenRouter free router). */
+const MANAGED_FREE_FALLBACK_MAIN_SLUG = "openrouter/free";
+/** Fast sidecar when main is the free router. */
+const MANAGED_FREE_FALLBACK_FAST_SLUG = "nvidia/nemotron-3-ultra-550b-a55b:free";
 
 export function managedFreeFallbackEnabled(prefs?: RuntimePreferences | null): boolean {
   return resolveHarnessEnvRaw("AGENT_MANAGED_FREE_FALLBACK", prefs ?? null) !== "0";
@@ -34,7 +31,7 @@ export function resolveManagedFreeFallbackMainModel(prefs?: RuntimePreferences |
     return userModel;
   }
   const raw = resolveHarnessEnvRaw("AGENT_MANAGED_FREE_FALLBACK_MODEL", prefs ?? null)?.trim();
-  return raw || OPENROUTER_MODEL_SLUG.FREE_ROUTER;
+  return raw || MANAGED_FREE_FALLBACK_MAIN_SLUG;
 }
 
 /** User-picked OpenRouter-only slug (no recursive default-model lookup). */
@@ -109,8 +106,8 @@ export function resolveManagedFreeFallbackFastModel(
 ): string {
   const raw = resolveHarnessEnvRaw("AGENT_MANAGED_FREE_FALLBACK_FAST", prefs ?? null)?.trim();
   if (raw) return raw;
-  if (main === OPENROUTER_MODEL_SLUG.FREE_ROUTER) {
-    return OPENROUTER_MODEL_SLUG.NEMOTRON_3_ULTRA_FREE;
+  if (main === MANAGED_FREE_FALLBACK_MAIN_SLUG) {
+    return MANAGED_FREE_FALLBACK_FAST_SLUG;
   }
   return main;
 }

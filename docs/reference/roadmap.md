@@ -2,11 +2,11 @@
 
 Where Liminal is today and what comes next. **Dates are directional, not commitments** — we ship fast on `main`.
 
-**Current stage:** **beta** (`v0.1.0` public preview, June 2026). [RC](#release-candidate-rc) and **install GA** are [planned](./changelog.md#planned), not shipped yet.
+**Current stage:** **beta** (`v0.1.2` public preview, June 2026). [RC](#release-candidate-rc) and **install GA** are [planned](./changelog.md#planned), not shipped yet.
 
 ---
 
-## Now — Beta (v0.1.0 public preview)
+## Now — Beta (v0.1.2)
 
 What you can run today from [Install](../start/install.md):
 
@@ -14,7 +14,7 @@ What you can run today from [Install](../start/install.md):
 |------|--------|
 | ReAct harness | Retries, circuit breaker, compression, approvals, optional self-heal lint |
 | Interfaces | **Desktop** (Windows / macOS / Linux, Flutter + sidecar) + Web UI (Express + React + SSE, multi-chat) + Terminal UI (Ink) |
-| Tools | 245+ catalog tools (300+ with MCP sidecars); lazy family loading — files, shell, git, web, browser, memory, vault, documents, orchestration, Google/Microsoft/Azure/GitHub connectors, OpenAPI/MCP attach |
+| Tools | 500+ catalog tools (300+ with MCP sidecars); lazy family loading — files, shell, git, web, browser, memory, vault, documents, orchestration, Google/Microsoft/Azure/GitHub/Slack/Linear/Notion/Xero/YouTube connectors, OpenAPI/MCP attach |
 | Inference | **BYOK** (any OpenAI-compatible provider) or **Pro managed** via Vireon proxy — `liminal login`, `AGENT_INFERENCE_MODE` |
 | Provider routing | Price-sorted OpenRouter resellers, Kimchi/Cast AI, sticky sessions, 429-aware rotation (`AGENT_PROVIDER_STRATEGY`) |
 | Licensing | Open-core CE (FSL-1.1-MIT, no account) + offline Ed25519 tiers; EE auto-install on Pro login |

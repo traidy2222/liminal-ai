@@ -105,6 +105,8 @@ export function createWorkflowTools(harness: AgentHarness): {
         maxTokens: 3000,
         temperature: 0.2,
         signal: AbortSignal.timeout(90_000),
+        fallbackModel: harness.config.model,
+        cache: false,
       });
       if (!jr.ok || !jr.parsed) return { ok: false, error: jr.ok ? "planner returned no JSON" : jr.error };
       const parsed = parseWorkflowSpec(jr.parsed);

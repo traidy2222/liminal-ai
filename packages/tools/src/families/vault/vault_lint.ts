@@ -16,7 +16,9 @@ import {
   searchVault,
 } from "./vault_store.js";
 import { semanticVaultHits } from "./vault_embed.js";
-import { selectCrossLinks, injectRelatedLinks, type NeighborCandidate } from "./vault_nexus.js";
+import { selectCrossLinks, injectRelatedLinkRefs, type NeighborCandidate } from "./vault_nexus.js";
+import { noteRelLinkPath } from "./vault_wikilink.js";
+import { isAgentManagedNote, canAutoEditNote } from "./vault_agent_zone.js";
 
 function daysSince(iso: string): number {
   const t = Date.parse(iso);
@@ -52,20 +54,24 @@ export const vaultLintTool = defineTool({
     const staleDays = Math.max(0, (args["stale_days"] as number | undefined) ?? 0);
     const limit = Math.max(1, Math.min(2000, (args["limit"] as number | undefined) ?? 400));
 
-    emit?.(`\nvault_lint${fix ? " (fix)" : ""}\n`);
-    const notes = await listAllNotes({ limit });
-    if (notes.length === 0) return { ok: true, output: "(vault is empty — nothing to lint)" };
+    emit?.(`\nvault_lint${fix ? " (fix, agent zone)" : ""}\n`);
+    const allNotes = await listAllNotes({ limit });
+    if (allNotes.length === 0) return { ok: true, output: "(vault is empty — nothing to lint)" };
 
     const orphans: string[] = [];
     const stale: string[] = [];
     const dupes: string[] = [];
     let fixedCount = 0;
+    let agentOrphanCount = 0;
 
-    for (const note of notes) {
+    for (const note of allNotes) {
       const backlinks = await getBacklinks(note.title);
       const isOrphan = backlinks.length === 0;
+      const agentNote = isAgentManagedNote(note);
+      if (isOrphan && agentNote) agentOrphanCount++;
+
       if (isOrphan) {
-        if (fix) {
+        if (fix && agentNote) {
           // An orphan has no INBOUND links. To de-orphan it, add a [[link]] to it
           // from its nearest neighbor (editing the neighbor, not the orphan).
           const cands = new Map<string, NeighborCandidate>();
@@ -93,10 +99,18 @@ export const vaultLintTool = defineTool({
             minScore: 0.18,
           });
           const neighbor = nearestTitle
-            ? notes.find((n) => n.title.toLowerCase() === nearestTitle.toLowerCase()) ?? null
+            ? allNotes.find((n) => n.title.toLowerCase() === nearestTitle.toLowerCase()) ?? null
             : null;
-          if (neighbor && !extractWikilinks(neighbor.body).some((l) => l.toLowerCase() === note.title.toLowerCase())) {
-            const body = injectRelatedLinks(neighbor.body, [note.title]);
+          if (
+            neighbor &&
+            canAutoEditNote(neighbor) &&
+            !extractWikilinks(neighbor.body).some((l) => {
+              const key = l.split("/").pop()?.toLowerCase() ?? l.toLowerCase();
+              return key === note.slug.toLowerCase() || l.toLowerCase() === note.title.toLowerCase();
+            })
+          ) {
+            const orphanRef = { target: noteRelLinkPath(note), label: note.title };
+            const body = injectRelatedLinkRefs(neighbor.body, [orphanRef]);
             await writeVaultNote({
               title: neighbor.title,
               body,
@@ -109,7 +123,8 @@ export const vaultLintTool = defineTool({
             orphans.push(`[[${note.title}]] (no neighbor to link from)`);
           }
         } else {
-          orphans.push(`[[${note.title}]] (${note.type})`);
+          const suffix = agentNote ? " (agent)" : " (human — not auto-fixed)";
+          orphans.push(`[[${note.title}]] (${note.type})${suffix}`);
         }
       }
 
@@ -120,7 +135,8 @@ export const vaultLintTool = defineTool({
 
     // Near-duplicate / possible-contradiction pairs (bounded scan).
     const checked = new Set<string>();
-    for (const note of notes.slice(0, 120)) {
+    for (const note of allNotes.slice(0, 120)) {
+      if (fix && !isAgentManagedNote(note)) continue;
       const near = await findNearDuplicateNote(note.title, note.body, { limit: 1, threshold: 0.72 });
       for (const d of near) {
         const pairKey = [note.title.toLowerCase(), d.note.title.toLowerCase()].sort().join("::");
@@ -130,7 +146,10 @@ export const vaultLintTool = defineTool({
       }
     }
 
-    const lines: string[] = [`Vault lint — scanned ${notes.length} notes.`];
+    const lines: string[] = [
+      `Vault lint — scanned ${allNotes.length} notes.`,
+      `Agent-zone orphans: ${agentOrphanCount}${fix ? ` (fix attempted on agent notes only)` : ""}`,
+    ];
     lines.push(`\nOrphans (no inbound links): ${orphans.length}${fix ? ` — fixed ${fixedCount}` : ""}`);
     if (orphans.length) lines.push(orphans.slice(0, 30).map((o) => `  • ${o}`).join("\n"));
     lines.push(`\nNear-duplicate/contradiction pairs: ${dupes.length}`);

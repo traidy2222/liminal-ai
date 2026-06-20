@@ -570,7 +570,10 @@ export class ToolDispatcher {
 
       const runHandler = async (): Promise<ToolResult> => {
         const t0 = Date.now();
-        const emit = (text: string) => this.emitter.emit("text", { delta: text, channel: "trace" });
+        const emit = (text: string) => {
+          this.emitter.emit("text", { delta: text, channel: "trace" });
+          this.emitter.emit("tool_progress", { callId, delta: text });
+        };
         const result = await tool.handler(args, emit);
         this.emitter.emit("tool_timing", { callId, name, durationMs: Date.now() - t0 });
         return result;

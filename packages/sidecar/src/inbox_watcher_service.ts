@@ -46,8 +46,16 @@ export class InboxWatcherService {
     const cfg = resolveInboxWatcherConfig(this.registry.getRuntimePreferences());
     if (!cfg.enabled) return;
     this.stop();
-    void this.runOnce("boot");
-    this.timer = setInterval(() => void this.runOnce("interval"), cfg.intervalMs);
+    void this.runOnce("boot").catch((err) => {
+      const message = err instanceof Error ? err.stack ?? err.message : String(err);
+      process.stderr.write(`liminald: inbox_watch boot failed: ${message}\n`);
+    });
+    this.timer = setInterval(() => {
+      void this.runOnce("interval").catch((err) => {
+        const message = err instanceof Error ? err.stack ?? err.message : String(err);
+        process.stderr.write(`liminald: inbox_watch interval failed: ${message}\n`);
+      });
+    }, cfg.intervalMs);
     if (typeof this.timer.unref === "function") this.timer.unref();
   }
 

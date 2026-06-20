@@ -171,6 +171,7 @@ class ChatSessionController extends ChangeNotifier {
       dockRailWidth = null;
     }
     if (event == 'tool_delta' ||
+        event == 'tool_progress' ||
         event == 'compose_preview' ||
         event == 'tool_start' ||
         (event == 'tool_result' &&

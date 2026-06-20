@@ -135,7 +135,21 @@ class _ToolActivityTileState extends State<ToolActivityTile> {
                                 ),
                             ],
                           ),
-                          if (isActive && output.isEmpty && !showArg)
+                          if (isActive && output.isNotEmpty)
+                            Padding(
+                              padding: const EdgeInsets.only(top: 4, left: 34),
+                              child: Text(
+                                _liveProgressSnippet(output),
+                                maxLines: 6,
+                                overflow: TextOverflow.ellipsis,
+                                style: LiminalTheme.mono(
+                                  context,
+                                  fontSize: 10,
+                                  color: lim.textDim,
+                                ).copyWith(height: 1.35),
+                              ),
+                            ),
+                          if (isActive && output.isEmpty)
                             Padding(
                               padding: const EdgeInsets.only(top: 4, left: 34),
                               child: Text(
@@ -222,6 +236,17 @@ class _ToolActivityTileState extends State<ToolActivityTile> {
         ToolCallStatus.running => 'Executing…',
         _ => '',
       };
+
+  /// Last non-empty lines from incremental tool_progress (vault ingest, etc.).
+  static String _liveProgressSnippet(String output) {
+    final lines = output
+        .split('\n')
+        .map((l) => l.trim())
+        .where((l) => l.isNotEmpty)
+        .toList();
+    if (lines.isEmpty) return output.trim();
+    return lines.sublist(lines.length > 3 ? lines.length - 3 : 0).join('\n');
+  }
 
   static Color _statusColor(LiminalTokens lim, ToolCallStatus s) => switch (s) {
         ToolCallStatus.done => lim.success,

@@ -103,6 +103,7 @@ import { microsoftOfficeRestEnabled } from "../microsoft/microsoft_office_rest.j
 import { graphSearchRestEnabled } from "../microsoft/graph_search_rest.js";
 import { xeroRestEnabled } from "../xero/xero_rest.js";
 import { slackRestEnabled } from "../slack/slack_rest.js";
+import { youtubeRestEnabled } from "../youtube/youtube_rest_http.js";
 import { linearRestEnabled } from "../linear/linear_rest.js";
 import { notionRestEnabled } from "../notion/notion_rest.js";
 import {
@@ -904,6 +905,9 @@ export function createConnectorTools(registry: ToolRegistry, _emitter: AgentEmit
       lines.push(
         `Notion: REST workspace tools — ${notionRestEnabled() ? "on" : "off (set AGENT_NOTION_REST=0 to disable)"}, connect via Settings → Integrations or \`liminal connect notion\``
       );
+      lines.push(
+        `YouTube: channel REST + Analytics — ${youtubeRestEnabled() ? "on" : "off (set AGENT_YOUTUBE_REST=1)"}, connect via Settings → Integrations → YouTube`
+      );
       lines.push("");
 
       const xeroAccounts = await listXeroOAuthAccounts();
@@ -1003,6 +1007,36 @@ export function createConnectorTools(registry: ToolRegistry, _emitter: AgentEmit
           lines.push(
             `- ${a.workspaceName ?? a.email ?? a.accountId} (expires ~${exp}, ${a.scopes.length} scopes)`
           );
+        }
+      }
+      lines.push("");
+
+      const ytAccounts = await listYoutubeOAuthAccounts();
+      lines.push("### YouTube OAuth");
+      if (ytAccounts.length === 0) {
+        const onDisk = await countOAuthAccountFiles("youtube");
+        if (onDisk > 0) {
+          lines.push(`- (tokens on disk but unreadable — ${onDisk} file(s))`);
+          lines.push(`  ${oauthDecryptHint("youtube")}`);
+        } else {
+          lines.push("- (not connected — Settings → Integrations → YouTube, or connect_provider({ provider: \"youtube\", start_oauth: true }))");
+        }
+      } else {
+        for (const a of ytAccounts) {
+          const exp = new Date(a.expiresAt).toISOString();
+          const opts = youtubeConnectOptionsFromMetadata(
+            { mode: a.connectMode, monetary: a.monetaryRequested },
+            a.connectMode ?? "read_write"
+          );
+          const missing = missingYoutubeScopes(a.scopes, opts);
+          const label = a.channelTitle ?? a.customUrl ?? a.email ?? a.accountId;
+          const chId = a.channelId ? ` · ${a.channelId}` : "";
+          lines.push(
+            `- ${label}${chId} (expires ~${exp}, ${a.scopes.length} scopes${missing.length > 0 ? ` — reconnect needed (${missing.length} missing)` : ", analytics ok"})`
+          );
+          if (missing.length > 0) {
+            lines.push(`  - missing: ${missing.slice(0, 3).join(", ")}${missing.length > 3 ? ` (+${missing.length - 3} more)` : ""}`);
+          }
         }
       }
       lines.push("");

@@ -6,6 +6,7 @@ class HarnessSettingsSnapshot {
     required this.provider,
     required this.providerPresets,
     required this.providerBackends,
+    this.bedrockPresets = const [],
     this.hint,
   });
 
@@ -14,6 +15,7 @@ class HarnessSettingsSnapshot {
   final HarnessSettingsProvider provider;
   final List<ProviderPreset> providerPresets;
   final List<ProviderBackend> providerBackends;
+  final List<BedrockModelPreset> bedrockPresets;
   final String? hint;
 
   static List<ProviderBackend> defaultBackends() {
@@ -59,6 +61,9 @@ class HarnessSettingsSnapshot {
       ),
       providerPresets: (json['providerPresets'] as List<dynamic>? ?? [])
           .map((e) => ProviderPreset.fromJson(Map<String, dynamic>.from(e as Map)))
+          .toList(),
+      bedrockPresets: (json['bedrockPresets'] as List<dynamic>? ?? [])
+          .map((e) => BedrockModelPreset.fromJson(Map<String, dynamic>.from(e as Map)))
           .toList(),
       providerBackends: backendsRaw.isEmpty
           ? defaultBackends()
@@ -166,6 +171,53 @@ class ProviderPreset {
     return presets
         .where((p) => p.id != 'custom' && inferBackend(p) == backendId)
         .toList();
+  }
+}
+
+class BedrockModelPreset {
+  BedrockModelPreset({
+    required this.id,
+    required this.label,
+    required this.hint,
+    required this.main,
+    required this.fast,
+    this.harnessEnvPatch,
+  });
+
+  final String id;
+  final String label;
+  final String hint;
+  final String main;
+  final String fast;
+  final Map<String, String>? harnessEnvPatch;
+
+  static String resolveSelection(
+    List<BedrockModelPreset> presets,
+    String main,
+    String fast,
+  ) {
+    final m = main.trim();
+    final f = fast.trim();
+    for (final p in presets) {
+      if (p.main == m && p.fast == f) return p.id;
+    }
+    return 'custom';
+  }
+
+  factory BedrockModelPreset.fromJson(Map<String, dynamic> json) {
+    final patchRaw = json['harnessEnvPatch'];
+    Map<String, String>? patch;
+    if (patchRaw is Map) {
+      patch = patchRaw.map((k, v) => MapEntry(k.toString(), v.toString()));
+    }
+    return BedrockModelPreset(
+      id: json['id'] as String? ?? '',
+      label: json['label'] as String? ?? '',
+      hint: json['hint'] as String? ?? '',
+      main: json['main'] as String? ?? '',
+      fast: json['fast'] as String? ?? '',
+      harnessEnvPatch: patch,
+    );
   }
 }
 

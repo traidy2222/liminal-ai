@@ -8,6 +8,7 @@ import {
   effectiveHarnessEnvRaw,
   SPAWN_BASELINE_TOOL_NAMES,
   verifyToolsEnabled,
+  normalizeSpawnContract,
 } from "@liminal/core";
 import { defineTool } from "../../shared/helpers.js";
 import { createContextTools } from "../context/context_tools.js";
@@ -397,7 +398,13 @@ export function createOrchestrationTools(harness: AgentHarness) {
           typeof args["context_bus_prefix"] === "string" ? args["context_bus_prefix"].trim() : undefined;
         const providedSpawnContract = (args["spawn_contract"] as SubagentSpawnContract | undefined) ?? undefined;
 
-        let spawnContract: SubagentSpawnContract | undefined = providedSpawnContract;
+        let spawnContract: SubagentSpawnContract | undefined = providedSpawnContract
+          ? normalizeSpawnContract(providedSpawnContract, {
+              goal: String(args["goal"] ?? ""),
+              userPrompt,
+              systemPrompt,
+            })
+          : undefined;
         let contractSource: ContractSource = "provided";
         if (!spawnContract) {
           const synthesized = synthesizeSpawnContract({

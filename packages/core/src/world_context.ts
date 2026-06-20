@@ -17,6 +17,7 @@
  * 10. Agenda    — session priority list from .agent_session_agenda.json
  * 11. Schedules — overdue recurring tasks from .agent_schedules.json
  * 12. Breakout  — BREAKOUT MANDATE from .agent_independence.json
+ * 13. YouTube   — connected channel id/title + lifetime stats (when OAuth linked)
  */
 import os from "node:os";
 import path from "node:path";
@@ -32,6 +33,10 @@ import { formatRecipeLibraryHints } from "./recipe_library.js";
 import { isEmailComposeTurn } from "./email_compose_context.js";
 import { rankNotesForPriming } from "./memory_priming.js";
 import { loadIdentityNotesFromDisk } from "./user_identity_memory.js";
+import {
+  gatherYoutubeChannelContextLines,
+  isYoutubeMetricsQuery,
+} from "./youtube_world_context.js";
 import {
   gatherGitContext,
   getPlatformIdentity,
@@ -492,6 +497,10 @@ const VAULT_TYPE_FOLDERS = [
   "Tasks",
   "Notes",
   "Episodes",
+  "Concepts",
+  "Sources",
+  "Synthesis",
+  "MOCs",
 ] as const;
 
 interface VaultNoteSummary {
@@ -504,6 +513,9 @@ interface VaultContextSummary {
   totalNotes: number;
   countByType: Record<string, number>;
   recentNotes: VaultNoteSummary[];
+  agentOrphans?: number;
+  mocCount?: number;
+  lastCurateAt?: string;
 }
 
 /** Minimal frontmatter extraction — reads title, type, updated from a .md file header. */
@@ -559,10 +571,54 @@ async function gatherVaultSummary(): Promise<VaultContextSummary | null> {
   if (allNotes.length === 0) return null;
 
   allNotes.sort((a, b) => b.updated.localeCompare(a.updated));
+
+  let agentOrphans = 0;
+  const backlinkTargets = new Set<string>();
+  for (const folder of VAULT_TYPE_FOLDERS) {
+    const dir = path.join(vaultDir, folder);
+    let files: string[];
+    try {
+      files = await readdir(dir);
+    } catch {
+      continue;
+    }
+    for (const file of files) {
+      if (!file.endsWith(".md")) continue;
+      try {
+        const raw = await readFile(path.join(dir, file), "utf8");
+        for (const m of raw.matchAll(/\[\[([^\]|]+)(?:\|[^\]]+)?\]\]/g)) {
+          backlinkTargets.add(m[1]!.trim().toLowerCase());
+        }
+      } catch {
+        /* skip */
+      }
+    }
+  }
+  for (const n of allNotes) {
+    const agentish =
+      n.title.match(/^Knowledge \d{4}-\d{2}-\d{2}/i) ||
+      n.type === "moc" ||
+      n.type === "synthesis" ||
+      n.type === "source";
+    if (agentish && !backlinkTargets.has(n.title.toLowerCase())) agentOrphans++;
+  }
+
+  let lastCurateAt: string | undefined;
+  try {
+    const curateRaw = await readFile(path.join(os.homedir(), ".liminal", "vault_curate_last.json"), "utf8");
+    const st = JSON.parse(curateRaw) as { lastRunAt?: string };
+    lastCurateAt = st.lastRunAt;
+  } catch {
+    /* no curate state yet */
+  }
+
   return {
     totalNotes: allNotes.length,
     countByType,
     recentNotes: allNotes.slice(0, 5),
+    agentOrphans,
+    mocCount: countByType["moc"] ?? 0,
+    lastCurateAt,
   };
 }
 
@@ -1008,7 +1064,7 @@ export async function buildWorldContextMessage(options?: WorldContextOptions): P
   const T_SLOW = 1500;
 
   // Parallel gather — all results degrade to null on timeout/error
-  const [resources, project, git, tools, ports, style, memory, vault, repoMapLines, agendaLines, overdueLines, breakoutLines] = await Promise.all([
+  const [resources, project, git, tools, ports, style, memory, vault, repoMapLines, agendaLines, overdueLines, breakoutLines, youtubeLines] = await Promise.all([
     withDeadline(gatherResources(workspaceRoot), T_SLOW),
     withDeadline(gatherProject(workspaceRoot), T_MED),
     withDeadline(gatherGit(workspaceRoot), T_SLOW),
@@ -1021,6 +1077,7 @@ export async function buildWorldContextMessage(options?: WorldContextOptions): P
     withDeadline(gatherSessionAgendaLines(workspaceRoot), T_FAST),
     withDeadline(gatherOverdueScheduleLines(workspaceRoot), T_FAST),
     withDeadline(gatherBreakoutMandateLines(workspaceRoot), T_FAST),
+    withDeadline(gatherYoutubeChannelContextLines(), T_MED),
   ]);
 
   // ── Core system ──────────────────────────────────────────────────────────────
@@ -1240,6 +1297,12 @@ export async function buildWorldContextMessage(options?: WorldContextOptions): P
     for (const ln of identityLines) lines.push(ln);
   }
 
+  // ── YouTube (connected channel — lifetime stats, not period analytics) ───────
+  if (youtubeLines && youtubeLines.length > 0) {
+    lines.push(sep("YouTube (connected)"));
+    for (const ln of youtubeLines) lines.push(ln);
+  }
+
   // ── Relevant memory (BM25 seed from first user message) ─────────────────────
   if (options?.firstUserMessage?.trim()) {
     const seed = options.firstUserMessage.trim();
@@ -1250,6 +1313,11 @@ export async function buildWorldContextMessage(options?: WorldContextOptions): P
     if (primed && primed.length > 0) {
       lines.push(sep("Relevant memory"));
       for (const ln of primed) lines.push(ln);
+      if (isYoutubeMetricsQuery(seed)) {
+        lines.push(
+          "YouTube view/subscriber numbers in memory above are not authoritative — call youtube_analytics_report (period) or youtube_rest_get_channel (lifetime) before citing metrics."
+        );
+      }
     }
     const failureDig = await withDeadline(formatFailureDigestForWorldContext(), 400);
     if (failureDig) {
@@ -1278,7 +1346,21 @@ export async function buildWorldContextMessage(options?: WorldContextOptions): P
       .map(([t, n]) => `${n} ${t}`)
       .join(", ");
     lines.push(`Vault: ${vault.totalNotes} notes (${breakdown})`);
+    const healthParts: string[] = [];
+    if (vault.agentOrphans !== undefined) {
+      healthParts.push(`${vault.agentOrphans} agent orphans`);
+    }
+    if (vault.mocCount !== undefined && vault.mocCount > 0) {
+      healthParts.push(`${vault.mocCount} MOCs`);
+    }
+    if (vault.lastCurateAt) {
+      healthParts.push(`last curate ${vault.lastCurateAt.slice(0, 16).replace("T", " ")}`);
+    }
+    if (healthParts.length > 0) {
+      lines.push(`Brain health: ${healthParts.join(" · ")}`);
+    }
     lines.push(`Recent: ${vault.recentNotes.map((n) => `[[${n.title}]]`).join("  ·  ")}`);
+    lines.push(`Prefer vault_ingest / vault_recall over vault_write for durable knowledge.`);
   } else if (getExplicitAgentVaultPathFromEnv()) {
     lines.push(sep("Knowledge Vault"));
     lines.push(`Vault: empty — use vault_write() to start building your knowledge base.`);

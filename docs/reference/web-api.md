@@ -39,15 +39,17 @@ Locked fields: keys set in real `process.env` cannot be overridden via PUT. `PUT
 
 ## Integrations (OAuth)
 
-Hosted OAuth for Google, Microsoft, Xero, and GitHub. Status and connect flows from
-`packages/web/client/settings/IntegrationsPanel.tsx`.
+Hosted OAuth for **Google, Microsoft, Azure, GitHub, Slack, Linear, Notion, Xero, and YouTube**. Status and connect flows from
+`packages/web/client/settings/IntegrationsPanel.tsx` (web) and the desktop Integrations hub.
 
 | Method | Path | Purpose |
 |--------|------|---------|
-| `GET` | `/api/integrations` | Snapshot: google, microsoft, github, xero accounts + MCP/OpenAPI connections |
+| `GET` | `/api/integrations` | Snapshot: all provider accounts + MCP/OpenAPI connections |
 | `GET` | `/api/integrations/xero/begin?mode=read_write\|read_only` | Start hosted Xero OAuth — returns `connectUrl` + `state`; opens vireondynamics.com |
 | `POST` | `/api/integrations/oauth/handoff` | Receives token bundle from hosted callback (loopback only, auth-exempt) |
 | `DELETE` | `/api/integrations/xero?revoke=0\|1` | Disconnect Xero; `revoke=1` also revokes tokens at Xero |
+
+Other providers use the same hosted `/connect/<provider>` flow documented in [Connectors](../guides/connectors.md).
 
 See [Xero](../guides/xero.md) for operator setup on vireondynamics.com.
 
@@ -95,7 +97,7 @@ See [Voice](../guides/voice.md). Audio is sent as base64 data URLs (no multer de
 
 | Method | Path | Purpose |
 |--------|------|---------|
-| `POST` | `/api/message` | User message (+ optional image attachments). Awaits session ready. |
+| `POST` | `/api/message` | User message + optional **file attachments** (images and non-image files as data URLs). Awaits session ready. |
 | `POST` | `/api/approve` | Tool approval decision |
 | `POST` | `/api/answer` | `ask_user` response |
 | `POST` | `/api/persona/bootstrap` | Persona bootstrap completion payload. Awaits session ready. |

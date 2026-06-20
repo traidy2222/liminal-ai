@@ -123,6 +123,8 @@ export interface SettingsModalProps {
   providerApiKeyConfigured?: boolean;
   /** Fill model, base URL, and fast-model harness env from a preset (no-op for Custom). */
   onPresetApply: (presetId: string) => void;
+  /** Fill managed Bedrock main + fast from a Bedrock preset pack. */
+  onBedrockPresetApply: (presetId: string) => void;
   onProviderModel: (v: string) => void;
   onProviderBase: (v: string) => void;
   envDraft: Record<string, string>;
@@ -158,6 +160,7 @@ export function SettingsModal({
   providerBaseLocked = false,
   providerApiKeyConfigured = false,
   onPresetApply,
+  onBedrockPresetApply,
   onProviderModel,
   onProviderBase,
   envDraft,
@@ -472,6 +475,7 @@ export function SettingsModal({
                         fastModel={envDraft["AGENT_FAST_MODEL"] ?? ""}
                         managedProvider={envDraft["AGENT_MANAGED_PROVIDER"] ?? "auto"}
                         vireonConnected={Boolean(vireonConnected)}
+                        onBedrockPresetApply={onBedrockPresetApply}
                         onManagedProvider={(v) => onEnvChange("AGENT_MANAGED_PROVIDER", v)}
                         onMainModel={(modelId) => {
                           onProviderModel(modelId);

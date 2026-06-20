@@ -9,8 +9,11 @@ import {
   DEFAULT_AGENT_FAST_MODEL_SLUG,
   DEFAULT_AGENT_MODEL_SLUG,
 } from "./harness_default_constants.js";
-import { KIMCHI_API_BASE_URL, KIMCHI_MODEL_SLUG } from "./kimchi_provider.js";
+import { KIMCHI_API_BASE_URL, KIMCHI_MODEL_SLUG } from "./kimchi_constants.js";
 import type { ProviderBackendId } from "./provider_backends.js";
+import { buildHarnessModelPackEnvPatch } from "./provider_model_pack.js";
+
+export { buildHarnessModelPackEnvPatch } from "./provider_model_pack.js";
 
 export {
   apiKeyEnvVarForBaseUrl,
@@ -65,6 +68,125 @@ export const OPENROUTER_MODEL_SLUG = {
   NEX_N2_PRO_FREE: "nex-agi/nex-n2-pro:free",
 } as const;
 
+/** AWS Bedrock model ids (canonical, no geo prefix — Vireon managed inference). */
+export const BEDROCK_MODEL_SLUG = {
+  GLM_5: "zai.glm-5",
+  GLM_47_FLASH: "zai.glm-4.7-flash",
+  DEEPSEEK_V32: "deepseek.v3.2",
+  QWEN3_CODER_480B: "qwen.qwen3-coder-480b-a35b-v1:0",
+  QWEN3_32B: "qwen.qwen3-32b-v1:0",
+  MISTRAL_LARGE_3: "mistral.mistral-large-3-675b-instruct",
+  MINISTRAL_3_3B: "mistral.ministral-3-3b-instruct",
+  KIMI_K25: "moonshotai.kimi-k2.5",
+  CLAUDE_OPUS_48: "anthropic.claude-opus-4-8",
+  CLAUDE_HAIKU_45: "anthropic.claude-haiku-4-5",
+} as const;
+
+export interface BedrockModelPreset {
+  id: string;
+  label: string;
+  hint: string;
+  main: string;
+  fast: string;
+}
+
+/** Harness env patch for Vireon managed Bedrock (main + fast + managed routing). */
+export function bedrockManagedHarnessEnvPatch(main: string, fast: string): Record<string, string> {
+  return {
+    ...buildHarnessModelPackEnvPatch({
+      main,
+      fast,
+      providerStrategy: "price",
+      providerOrder: "",
+      providerOrderFast: "",
+      providerRouteAuto: "0",
+      allowFallbacks: "0",
+    }),
+    AGENT_INFERENCE_MODE: "managed",
+    AGENT_INFERENCE_PREFER_MANAGED: "1",
+    AGENT_MANAGED_PROVIDER: "bedrock",
+  };
+}
+
+function bedrockPreset(id: string, label: string, hint: string, main: string, fast: string): BedrockModelPreset {
+  return { id, label, hint, main, fast };
+}
+
+/** One-click Bedrock main+fast packs (Settings → managed inference preset dropdown). */
+export const BEDROCK_MODEL_PRESETS: readonly BedrockModelPreset[] = [
+  bedrockPreset(
+    "bedrock-glm-5",
+    "GLM-5 + GLM 4.7 Flash",
+    "Recommended default — strong agentic main (~5s steady) + fast Z.ai sidecars for intent/memory JSON. " +
+      "Benchmark winner on managed Bedrock (Jun 2026).",
+    BEDROCK_MODEL_SLUG.GLM_5,
+    BEDROCK_MODEL_SLUG.GLM_47_FLASH
+  ),
+  bedrockPreset(
+    "bedrock-deepseek-v32",
+    "DeepSeek V3.2 + GLM 4.7 Flash",
+    "DeepSeek reasoning main + ultra-fast GLM sidecars — great quality/$ for long harness runs.",
+    BEDROCK_MODEL_SLUG.DEEPSEEK_V32,
+    BEDROCK_MODEL_SLUG.GLM_47_FLASH
+  ),
+  bedrockPreset(
+    "bedrock-qwen-coder",
+    "Qwen3 Coder 480B + Qwen3 32B",
+    "Code-specialist main (480B MoE) + compact Qwen3 32B fast tier — best for repo edits and tool-heavy loops.",
+    BEDROCK_MODEL_SLUG.QWEN3_CODER_480B,
+    BEDROCK_MODEL_SLUG.QWEN3_32B
+  ),
+  bedrockPreset(
+    "bedrock-mistral-large",
+    "Mistral Large 3 + Ministral 3B",
+    "European frontier main + tiny Ministral sidecar — balanced general agent work on Bedrock.",
+    BEDROCK_MODEL_SLUG.MISTRAL_LARGE_3,
+    BEDROCK_MODEL_SLUG.MINISTRAL_3_3B
+  ),
+  bedrockPreset(
+    "bedrock-kimi-glm",
+    "Kimi K2.5 + GLM 4.7 Flash",
+    "Moonshot Kimi main (agentic CN/EN) + GLM flash sidecars — strong multilingual coding.",
+    BEDROCK_MODEL_SLUG.KIMI_K25,
+    BEDROCK_MODEL_SLUG.GLM_47_FLASH
+  ),
+  bedrockPreset(
+    "bedrock-claude-opus-4.8",
+    "Claude Opus 4.8 + Haiku 4.5",
+    "Anthropic frontier on Bedrock — requires Anthropic/OpenRouter credits on your Vireon account. " +
+      "Use GLM or DeepSeek packs if Opus returns 402.",
+    BEDROCK_MODEL_SLUG.CLAUDE_OPUS_48,
+    BEDROCK_MODEL_SLUG.CLAUDE_HAIKU_45
+  ),
+] as const;
+
+export const BEDROCK_PRESET_CUSTOM_ID = "custom";
+
+export interface BedrockModelPresetWire extends BedrockModelPreset {
+  harnessEnvPatch: Record<string, string>;
+}
+
+export function listBedrockModelPresetsForSettings(): readonly BedrockModelPresetWire[] {
+  return BEDROCK_MODEL_PRESETS.map((p) => ({
+    ...p,
+    harnessEnvPatch: bedrockManagedHarnessEnvPatch(p.main, p.fast),
+  }));
+}
+
+export function findBedrockModelPreset(id: string): BedrockModelPresetWire | undefined {
+  return listBedrockModelPresetsForSettings().find((p) => p.id === id);
+}
+
+/** Match saved main + fast Bedrock slugs to a preset id (managed Settings dropdown). */
+export function resolveBedrockModelPresetId(main: string, fast: string): string {
+  const m = main.trim();
+  const f = fast.trim();
+  for (const p of BEDROCK_MODEL_PRESETS) {
+    if (p.main === m && p.fast === f) return p.id;
+  }
+  return BEDROCK_PRESET_CUSTOM_ID;
+}
+
 /** Shown on NVIDIA free-model presets — matches OpenRouter model card disclaimer. */
 export const NVIDIA_FREE_ENDPOINT_PRIVACY_HINT =
   "NVIDIA free endpoint: do not send confidential or personal data. Use is logged for security and product improvement (not linked to your identity). See NVIDIA Privacy Policy and API Trial ToS on OpenRouter.";
@@ -78,38 +200,6 @@ export interface ProviderModelPreset {
   model: string;
   /** Harness env keys applied with the preset (includes `AGENT_MODEL`). */
   harnessEnvPatch: Record<string, string>;
-}
-
-/**
- * Patch every harness-managed model slot that should track the main/fast tier.
- * Embeddings, vision, and transcription stay on product defaults (cross-model).
- */
-export function buildHarnessModelPackEnvPatch(opts: {
-  main: string;
-  fast: string;
-  baseURL?: string;
-  providerStrategy?: string;
-  providerOrder?: string;
-  providerOrderFast?: string;
-  providerRouteAuto?: string;
-  allowFallbacks?: string;
-}): Record<string, string> {
-  const fast = opts.fast.trim();
-  const main = opts.main.trim();
-  const patch: Record<string, string> = {
-    AGENT_MODEL: main,
-    AGENT_FAST_MODEL: fast,
-    AGENT_SAFETY_JUDGE_MODEL: fast,
-    AGENT_MEMORY_AUTOLINK_MODEL: fast,
-    AGENT_MEMORY_CONSOLIDATE_MODEL: fast,
-  };
-  if (opts.baseURL !== undefined) patch.AGENT_API_BASE_URL = opts.baseURL;
-  if (opts.providerStrategy !== undefined) patch.AGENT_PROVIDER_STRATEGY = opts.providerStrategy;
-  if (opts.providerOrder !== undefined) patch.AGENT_PROVIDER_ORDER = opts.providerOrder;
-  if (opts.providerOrderFast !== undefined) patch.AGENT_PROVIDER_ORDER_FAST = opts.providerOrderFast;
-  if (opts.providerRouteAuto !== undefined) patch.AGENT_PROVIDER_ROUTE_AUTO = opts.providerRouteAuto;
-  if (opts.allowFallbacks !== undefined) patch.AGENT_PROVIDER_ALLOW_FALLBACKS = opts.allowFallbacks;
-  return patch;
 }
 
 /** Price-sorted OpenRouter routing — live benchmark best bang-for-buck on DeepSeek V4 Pro. */
@@ -369,27 +459,6 @@ export const PROVIDER_MODEL_PRESETS: readonly ProviderModelPreset[] = [
       "Replaces deprecated Gemini 2.5 / 3.1-preview packs.",
     OPENROUTER_MODEL_SLUG.GEMINI_35_FLASH,
     openRouterAutoRoutePatch(OPENROUTER_MODEL_SLUG.GEMINI_35_FLASH, OPENROUTER_MODEL_SLUG.GEMINI_31_FLASH_LITE)
-  ),
-  preset(
-    "bedrock-claude-opus-4.8",
-    "AWS Bedrock — Claude Opus 4.8 + Haiku 4.5",
-    "Vireon managed inference via Bedrock Mantle (AWS billing). Main: anthropic.claude-opus-4-8. " +
-      "Fast: anthropic.claude-haiku-4-5. Requires Pro managed inference + Bedrock on api.vireondynamics.com.",
-    "anthropic.claude-opus-4-8",
-    {
-      ...buildHarnessModelPackEnvPatch({
-        main: "anthropic.claude-opus-4-8",
-        fast: "anthropic.claude-haiku-4-5",
-        baseURL: DEFAULT_AGENT_API_BASE_URL,
-        providerStrategy: "price",
-        providerOrder: "",
-        providerOrderFast: "",
-        providerRouteAuto: "0",
-        allowFallbacks: "0",
-      }),
-      AGENT_INFERENCE_MODE: "managed",
-      AGENT_INFERENCE_PREFER_MANAGED: "1",
-    }
   ),
   preset(
     "anthropic-claude-opus-4.7",

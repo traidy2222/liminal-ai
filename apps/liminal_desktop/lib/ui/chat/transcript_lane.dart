@@ -1,19 +1,11 @@
 import 'package:flutter/material.dart';
 
-import '../../state/message_models.dart';
+import '../../core/chat_visibility.dart';
 import '../layout/liminal_spacing.dart';
 import '../theme/liminal_theme_extension.dart';
 
-bool isHarnessLaneMessage(MessageEntry entry) =>
-    entry is ToolCallMessage ||
-    entry is ThinkMessage ||
-    entry is ReasonMessage ||
-    entry is ModelReasoningMessage ||
-    entry is PlanMessage ||
-    entry is SubtaskMessage;
-
-bool isConversationMessage(MessageEntry entry) =>
-    entry is UserMessage || entry is AssistantMessage;
+export '../../core/chat_visibility.dart'
+    show isHarnessLaneMessage, isConversationMessage;
 
 /// Inset rail for tools, reasoning, and agent activity between conversation turns.
 class TranscriptActivityLane extends StatelessWidget {

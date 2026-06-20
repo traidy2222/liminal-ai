@@ -1,11 +1,12 @@
 import 'package:flutter/material.dart';
 
 import '../../core/chat_visibility.dart';
+import '../../core/transcript_grouping.dart';
 import '../../state/message_models.dart';
-import '../chat/transcript_lane.dart';
 import '../layout/liminal_spacing.dart';
 import '../theme/liminal_theme_extension.dart';
 import 'message_tile.dart';
+import 'working_activity_panel.dart';
 
 /// Transcript list that auto-scrolls only when the user is already near the bottom.
 class StickyMessageList extends StatefulWidget {
@@ -83,6 +84,7 @@ class _StickyMessageListState extends State<StickyMessageList> {
       widget.messages,
       showRawHarness: widget.showRawHarness,
     );
+    final segments = groupTranscriptActivity(visible);
     if (visible.isEmpty) {
       return Center(
         child: Text(
@@ -98,17 +100,23 @@ class _StickyMessageListState extends State<StickyMessageList> {
       controller: _scroll,
       padding: widget.padding,
       primary: false,
-      itemCount: visible.length,
+      itemCount: segments.length,
       itemBuilder: (context, i) {
-        final entry = visible[i];
+        final segment = segments[i];
+        if (segment is TranscriptActivityGroupSegment) {
+          return WorkingActivityPanel(
+            entries: segment.entries,
+            verboseTools: widget.showRawHarness,
+            personaLabel: persona,
+            startExpanded: widget.showRawHarness,
+          );
+        }
+        final entry = (segment as TranscriptMessageSegment).entry;
         final tile = MessageTile(
           entry: entry,
           verboseTools: widget.showRawHarness,
           personaLabel: persona,
         );
-        if (isHarnessLaneMessage(entry)) {
-          return TranscriptActivityLane(child: tile);
-        }
         if (isConversationMessage(entry)) {
           return tile;
         }

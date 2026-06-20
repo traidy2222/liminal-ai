@@ -6,7 +6,7 @@ import { applyPersonaDocumentTheme } from "./applyPersonaDocumentTheme.js";
 import { AssistantMessageContent, renderFencedCodeBlock } from "./liminalMarkdown.js";
 import { SettingsModal } from "./settings/SettingsModal.js";
 import { InferenceUsageBanner } from "./InferenceUsageBanner.js";
-import { PROVIDER_PRESETS, PROVIDER_PRESET_CUSTOM_ID } from "./settings/providerPresets.js";
+import { PROVIDER_PRESETS, BEDROCK_PRESETS, PROVIDER_PRESET_CUSTOM_ID } from "./settings/providerPresets.js";
 import { resolveInputShortcut } from "./inputSemantics.js";
 import {
   PERSONA_QUICK_PRESETS,
@@ -1784,6 +1784,31 @@ export function App() {
     [settingsFields, settingsProviderModelLocked, settingsProviderBaseLocked]
   );
 
+  const applyBedrockPreset = useCallback(
+    (presetId: string) => {
+      if (presetId === PROVIDER_PRESET_CUSTOM_ID) return;
+      if (settingsProviderModelLocked) return;
+      const preset = BEDROCK_PRESETS.find((p) => p.id === presetId);
+      if (!preset) return;
+      setSettingsProviderModel(preset.main);
+      setSettingsEnvDraft((prev) => {
+        const next = { ...prev };
+        const merge: Record<string, string> = {
+          AGENT_MODEL: preset.main,
+          AGENT_FAST_MODEL: preset.fast,
+          ...(preset.harnessEnvPatch ?? {}),
+        };
+        for (const [k, v] of Object.entries(merge)) {
+          const f = settingsFields.find((sf) => sf.key === k);
+          if (f?.lockedByEnv) continue;
+          next[k] = v;
+        }
+        return next;
+      });
+    },
+    [settingsFields, settingsProviderModelLocked]
+  );
+
   const saveSettings = useCallback(async () => {
     setSettingsSaving(true);
     setSettingsError(null);
@@ -2468,6 +2493,7 @@ export function App() {
         providerBaseLocked={settingsProviderBaseLocked}
         providerApiKeyConfigured={settingsProviderApiKeyConfigured}
         onPresetApply={applyProviderPreset}
+        onBedrockPresetApply={applyBedrockPreset}
         onProviderModel={setSettingsProviderModel}
         onProviderBase={setSettingsProviderBase}
         envDraft={settingsEnvDraft}

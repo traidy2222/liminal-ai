@@ -5,22 +5,29 @@ import {
 } from "@liminal/core/defaults";
 import {
   inferPresetBackend,
+  listBedrockModelPresetsForSettings,
   listProviderBackendsForSettings,
   listProviderPresetsForBackend,
   listProviderPresetsForSettings,
   PROVIDER_PRESET_CUSTOM_ID,
+  resolveBedrockModelPresetId,
   resolveProviderBackendId,
   resolveProviderPresetId,
+  type BedrockModelPresetWire,
   type ProviderBackendWire,
   type ProviderPresetWire,
 } from "@liminal/core/provider-presets";
 
-export { inferPresetBackend };
+export { inferPresetBackend, resolveBedrockModelPresetId };
 
 export { PROVIDER_PRESET_CUSTOM_ID };
 
 export type ProviderPreset = ProviderPresetWire;
 export type ProviderBackend = ProviderBackendWire;
+export type BedrockModelPreset = BedrockModelPresetWire;
+
+/** Quick-switch Bedrock main+fast packs for managed inference Settings. */
+export const BEDROCK_PRESETS: BedrockModelPreset[] = [...listBedrockModelPresetsForSettings()];
 
 /** Quick-switch targets for Settings → Provider (manual edits still allowed). */
 export const PROVIDER_PRESETS: ProviderPreset[] = [...listProviderPresetsForSettings()];

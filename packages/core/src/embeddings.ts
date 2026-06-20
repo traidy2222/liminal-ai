@@ -3,6 +3,9 @@
  */
 import { withProviderRequestSpacing } from "./provider_request_gate.js";
 import { buildOpenRouterAttributionHeaders } from "./openrouter_attribution.js";
+import { buildManagedInferenceClientHeaders } from "./inference_provider.js";
+import { isManagedInferenceBaseUrl } from "./inference_session.js";
+import type { RuntimePreferences } from "./runtime_prefs.js";
 
 export function cosineSimilarity(a: number[], b: number[]): number {
   if (a.length !== b.length || a.length === 0) return 0;
@@ -32,8 +35,13 @@ export async function fetchEmbeddings(params: {
   model: string;
   inputs: string[];
   signal?: AbortSignal;
+  prefs?: RuntimePreferences | null;
+  extraHeaders?: Record<string, string>;
 }): Promise<EmbedBatchResult> {
   const url = `${params.baseURL.replace(/\/$/, "")}/embeddings`;
+  const managedHeaders = isManagedInferenceBaseUrl(params.baseURL)
+    ? buildManagedInferenceClientHeaders(params.prefs ?? null, params.model)
+    : {};
   return withProviderRequestSpacing(
     { apiKey: params.apiKey, baseURL: params.baseURL },
     async () => {
@@ -43,6 +51,8 @@ export async function fetchEmbeddings(params: {
           Authorization: `Bearer ${params.apiKey}`,
           "Content-Type": "application/json",
           ...buildOpenRouterAttributionHeaders("embeddings"),
+          ...managedHeaders,
+          ...params.extraHeaders,
         },
         body: JSON.stringify({
           model: params.model,

@@ -220,6 +220,32 @@ class _SettingsScreenState extends State<SettingsScreen>
     super.dispose();
   }
 
+  Future<void> _applyBedrockPreset(String presetId) async {
+    if (presetId == 'custom') return;
+    setState(() {
+      _saving = true;
+      _error = null;
+    });
+    final ok = await AppScope.of(context).applyBedrockPreset(presetId);
+    if (!mounted) return;
+    final snap = AppScope.of(context).harnessSettings;
+    final cfg = AppScope.of(context).config;
+    if (ok) {
+      if (cfg != null) {
+        _model.text = cfg.providerModel;
+      } else if (snap != null) {
+        _model.text = snap.provider.model;
+      }
+      _syncFieldControllers();
+    }
+    setState(() {
+      _saving = false;
+      if (!ok) {
+        _error = AppScope.of(context).setupError ?? 'Failed to apply Bedrock preset';
+      }
+    });
+  }
+
   Future<void> _applyProviderPreset(String presetId) async {
     if (presetId == 'custom') return;
     setState(() {
@@ -449,6 +475,13 @@ class _SettingsScreenState extends State<SettingsScreen>
                                 error: host.managedInferenceModelsError,
                                 saving: _saving,
                                 managedProvider: _managedProvider,
+                                bedrockPresets: snap?.bedrockPresets ?? const [],
+                                selectedBedrockPresetId: BedrockModelPreset.resolveSelection(
+                                  snap?.bedrockPresets ?? const [],
+                                  snap?.provider.model ?? _model.text,
+                                  _fastModelFromSnapshot(snap),
+                                ),
+                                onBedrockPresetApply: _applyBedrockPreset,
                                 onManagedProvider: _onManagedProviderChanged,
                                 onMainModel: _onManagedMainModel,
                                 onFastModel: _onManagedFastModel,

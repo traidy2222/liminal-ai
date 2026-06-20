@@ -4,13 +4,17 @@ import assert from "node:assert/strict";
 
 import {
   buildHarnessModelPackEnvPatch,
+  BEDROCK_MODEL_PRESETS,
+  findBedrockModelPreset,
   inferPresetBackend,
   KIMCHI_MODEL_PRESETS,
+  listBedrockModelPresetsForSettings,
   listProviderPresetsForBackend,
   listProviderPresetsForSettings,
   OPENROUTER_MODEL_SLUG,
   PROVIDER_MODEL_PRESETS,
   PROVIDER_PRESET_CUSTOM_ID,
+  resolveBedrockModelPresetId,
   resolveProviderModelPresetId,
   resolveProviderPresetId,
 } from "./provider_model_presets.js";
@@ -229,4 +233,25 @@ test("latest vendor packs use current OpenRouter slugs", () => {
 
 });
 
+test("bedrock presets set managed mode and main+fast slugs", () => {
+  const glm = BEDROCK_MODEL_PRESETS.find((p) => p.id === "bedrock-glm-5")!;
+  assert.equal(glm.main, "zai.glm-5");
+  assert.equal(glm.fast, "zai.glm-4.7-flash");
+  const wire = findBedrockModelPreset("bedrock-glm-5")!;
+  assert.equal(wire.harnessEnvPatch.AGENT_INFERENCE_MODE, "managed");
+  assert.equal(wire.harnessEnvPatch.AGENT_MANAGED_PROVIDER, "bedrock");
+  assert.equal(wire.harnessEnvPatch.AGENT_FAST_MODEL, "zai.glm-4.7-flash");
+});
+
+test("resolveBedrockModelPresetId matches main+fast pair", () => {
+  assert.equal(
+    resolveBedrockModelPresetId("zai.glm-5", "zai.glm-4.7-flash"),
+    "bedrock-glm-5"
+  );
+  assert.equal(resolveBedrockModelPresetId("custom.main", "custom.fast"), "custom");
+});
+
+test("listBedrockModelPresetsForSettings includes six packs", () => {
+  assert.equal(listBedrockModelPresetsForSettings().length, 6);
+});
 

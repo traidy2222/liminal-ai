@@ -11,6 +11,9 @@ import {
   listGoogleOAuthAccounts,
   listMicrosoftOAuthAccounts,
   listGithubOAuthAccounts,
+  listYoutubeOAuthAccounts,
+  getYoutubeAccessToken,
+  fetchPrimaryYoutubeChannel,
   missingGoogleScopes,
   MICROSOFT_GRAPH_CONNECTION,
   resolveGoogleServices,
@@ -36,6 +39,7 @@ import { getGoogleSidecarStatus } from "../integrations/google/google_sidecar.js
 import { getMicrosoftSidecarStatus } from "../integrations/microsoft/microsoft_sidecar.js";
 import { githubAuthAvailable, githubMcpEnabled, githubMcpUrl, githubTokenEnvVar } from "../integrations/github/github_connect.js";
 import { formatSlackScopeProbeLine, probeSlackLiveScopes } from "../integrations/slack/slack_scope_probe.js";
+import { youtubeRestEnabled } from "../integrations/youtube/youtube_rest_http.js";
 
 const GOOGLE_PARENT = "google_workspace";
 const MICROSOFT_PARENT = "microsoft_365";
@@ -284,13 +288,37 @@ function formatMcpProbeLine(label: string, probe: GoogleMcpProbeResult): string 
 function formatRestProbeLine(label: string, probe: GoogleRestProbeResult): string {
   switch (probe.state) {
     case "ok":
-      return `- ${label} REST: **live ok** (calendar.googleapis.com)`;
+      return probe.detail
+        ? `- ${label} REST: **live ok** — ${probe.detail}`
+        : `- ${label} REST: **live ok** (calendar.googleapis.com)`;
     case "off":
       return `- ${label} REST: off (${probe.detail})`;
     case "not_connected":
       return `- ${label} REST: **no OAuth** — ${probe.detail}`;
     case "error":
       return `- ${label} REST: **probe failed** — ${probe.detail}`;
+  }
+}
+
+export async function probeYoutubeChannelRest(): Promise<GoogleRestProbeResult> {
+  if (!youtubeRestEnabled()) {
+    return { state: "off", detail: "AGENT_YOUTUBE_REST=0" };
+  }
+  const accounts = await listYoutubeOAuthAccounts();
+  if (accounts.length === 0) {
+    return {
+      state: "not_connected",
+      detail: "Settings → Integrations → YouTube or connect_provider({ provider: \"youtube\" })",
+    };
+  }
+  try {
+    const token = await getYoutubeAccessToken();
+    if (!token) return { state: "error", detail: "OAuth token unreadable" };
+    const channel = await withTimeout(fetchPrimaryYoutubeChannel(token), PROBE_TIMEOUT_MS);
+    if (!channel) return { state: "error", detail: "channels.list?mine=true failed" };
+    return { state: "ok", detail: `${channel.title} (${channel.channelId})` };
+  } catch (e) {
+    return { state: "error", detail: e instanceof Error ? e.message : String(e) };
   }
 }
 
@@ -444,6 +472,7 @@ export async function buildIntegrationLiveProbeLines(): Promise<string[]> {
       msMcp,
       githubMcp,
       slackScopes,
+      youtubeRest,
     ] = await Promise.all([
       probeGoogleOfficialMcp("gmail"),
       probeGoogleOfficialMcp("drive"),
@@ -457,6 +486,7 @@ export async function buildIntegrationLiveProbeLines(): Promise<string[]> {
       probeMicrosoftGraphMcp(),
       probeGithubMcp(),
       probeSlackLiveScopes(),
+      probeYoutubeChannelRest(),
     ]);
     lines.push(formatMcpProbeLine("Gmail", gmailMcp));
     lines.push(formatMcpProbeLine("Drive", driveMcp));
@@ -470,6 +500,7 @@ export async function buildIntegrationLiveProbeLines(): Promise<string[]> {
     lines.push(formatSidecarProbeLine("Microsoft Graph MCP", msMcp));
     lines.push(formatSidecarProbeLine("GitHub MCP", githubMcp));
     lines.push(formatSlackScopeProbeLine(slackScopes));
+    lines.push(formatRestProbeLine("YouTube channel", youtubeRest));
     lines.push(
       "Note: Gmail/Calendar **MCP** (gmailmcp/calendarmcp) and **classic REST** are separate Cloud APIs — one can work while the other is disabled."
     );

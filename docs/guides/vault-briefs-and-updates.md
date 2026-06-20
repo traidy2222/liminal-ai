@@ -1,8 +1,8 @@
 # Vault briefs and updates
 
-How to maintain situation-room style notes without fighting dedupe or wrong tools.
+How to maintain situation-room style notes without orphans or wrong tools.
 
-## Use vault tools, not workspace paths
+## Use vault ingest, not dumb writes
 
 Notes live in the **Obsidian vault** (`AGENT_VAULT_PATH` or auto-discovered). They are **not** guaranteed to exist at `workspace/situation-room/...`.
 
@@ -10,34 +10,40 @@ Notes live in the **Obsidian vault** (`AGENT_VAULT_PATH` or auto-discovered). Th
 |------|------|
 | Find a brief | `vault_search` |
 | Read full note | `vault_read` with exact title |
-| Create or update | `vault_write` |
+| Single topic / dossier | **`vault_ingest`** (weaves bidirectional links) |
+| Multi-entity research | **`vault_ingest_entities`** or parallel ingest per name |
+| Raw URL / article | **`vault_ingest_source`** → `_liminal/raw/` + wiki fan-out |
+| Legacy simple write | `vault_write` (delegates to ingest when tagged `liminal-agent`) |
 | Wrong | `read_file` on guessed filesystem paths |
 
-See [Memory and vault](../concepts/memory-and-vault.md) for path resolution.
+See [Memory and vault](../concepts/memory-and-vault.md) for path resolution and the safe zone (`_liminal/`, `liminal-agent` tag).
 
-## Update an existing brief (same day / revision)
+## Update an existing brief
 
 1. `vault_search` or `vault_read` to load the current title and body.
-2. `vault_write` with the **same title** as the existing note.
+2. **`vault_ingest`** with the **same title** — overwrites in place and refreshes graph links.
 
-Dedupe is **skipped** when the title already exists, so you can replace the body in place.
+Dedupe (`AGENT_VAULT_DEDUPE=1`, default on) blocks near-duplicate *new* titles; reusing the exact title always updates.
 
-## New dated edition (Day 76 after Day 75)
+## New edition vs merge
 
-If content overlaps heavily and dedupe blocks a new file:
+If content overlaps an older brief:
 
-- **Option A:** `vault_write` with **`ignore_dedupe: true`** and a clearly distinct title (e.g. include the date).
-- **Option B:** Update the existing note in place (same title) and bump the heading/date inside the body.
-- **Option C:** Merge new intel into the prior note via wikilinks instead of parallel near-duplicates.
-
-Error example: `Near-duplicate vault note detected: [[World Situation Brief — May 14 2026 (Day 75)]]` — follow one of the options above; do not retry the same title with overlapping body expecting a second file.
+- **Option A:** Update in place via `vault_ingest` (same title).
+- **Option B:** `vault_ingest` with a distinct title + `[[wikilink]]` to the prior note.
+- **Option C:** Run `vault_lint fix:true` (agent zone only) to repair orphans after bulk ingest.
 
 ## Wikilinks and types
 
-- Use `[[Note Title]]` in the body for graph connectivity.
-- Set `type: note` (or `entity`, `fact`, etc.) and tags for search.
-- Enable `AGENT_MEMORY_AUTOLINK=1` for optional link suggestions after write.
+- Ingest auto-adds `## Related` outbound links and inbound links on up to 3 neighbors.
+- Types: `entity`, `concept`, `source`, `synthesis`, `moc`, `fact`, `note`, …
+- Tag agent writes with `liminal-agent` (added automatically on ingest).
 
 ## Write budget
 
-`AGENT_VAULT_WRITE_BUDGET` limits `vault_write` calls per `send()`. Consolidate into fewer, richer writes when hitting the cap.
+`AGENT_VAULT_WRITE_BUDGET` limits vault ingest/write calls per `send()`. Prefer entity decomposition over monolithic dated blobs.
+
+## One-shot cleanup
+
+`vault_migrate_memory` — promote JSON memory → vault + backfill tags.  
+`vault_curate` — idle lint fix, schema refresh, memory promotion.

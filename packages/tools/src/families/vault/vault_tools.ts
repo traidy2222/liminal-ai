@@ -27,7 +27,40 @@ import {
   titleToSlug,
   getVaultDir,
 } from "./vault_store.js";
+import {
+  loadVaultEmbedIndex,
+  saveVaultEmbedIndex,
+  pruneOrphanVaultEntries,
+} from "./vault_index.js";
+import { weaveNoteIntoGraph } from "./vault_ingest_core.js";
+import { ensureAgentTags, LIMINAL_AGENT_TAG } from "./vault_agent_zone.js";
 import { suggestWikilinkLine } from "../memory/memory_autolink.js";
+
+function vaultDedupeEnabled(): boolean {
+  return effectiveHarnessEnvRaw("AGENT_VAULT_DEDUPE") !== "0";
+}
+
+function shouldDelegateToIngest(tags: string[] | undefined): boolean {
+  if (!tags?.length) return false;
+  return tags.some((t) => {
+    const l = t.toLowerCase();
+    return l === LIMINAL_AGENT_TAG || l === "auto-wiki" || l === "harness";
+  });
+}
+
+const NOTE_TYPE_ENUM = [
+  "fact",
+  "entity",
+  "reflection",
+  "recipe",
+  "task",
+  "note",
+  "episode",
+  "concept",
+  "source",
+  "synthesis",
+  "moc",
+] as const;
 
 // ─── vault_write ──────────────────────────────────────────────────────────────
 
@@ -60,7 +93,7 @@ export const vaultWriteTool = defineTool({
       },
       type: {
         type: "string",
-        enum: ["fact", "entity", "reflection", "recipe", "task", "note", "episode"],
+        enum: [...NOTE_TYPE_ENUM],
         description: "Note type — determines vault subfolder",
       },
       tags: {
@@ -87,14 +120,30 @@ export const vaultWriteTool = defineTool({
       let body = args["content"] as string;
       const title = args["title"] as string;
       const typ = args["type"] as NoteType;
+      const tags = ensureAgentTags((args["tags"] as string[] | undefined) ?? []);
       emit?.(`\nvault_write: "${title}" (${typ})\n`);
       const ignoreDedupe = args["ignore_dedupe"] === true;
       const existing = await findNote(title);
-      if (
-        effectiveHarnessEnvRaw("AGENT_VAULT_DEDUPE") === "1" &&
-        !ignoreDedupe &&
-        !existing
-      ) {
+
+      if (shouldDelegateToIngest(tags)) {
+        const summary = (args["summary"] as string | undefined)?.trim();
+        const result = await weaveNoteIntoGraph({
+          title,
+          content: body,
+          type: typ,
+          tags,
+          summary,
+        });
+        const action = existing ? "Updated" : "Created";
+        return {
+          ok: true,
+          output:
+            `${action} vault note via ingest weave: "${title}" (${typ})\n` +
+            `Slug: ${result.slug}  |  links: ${result.linkTitles.length} outbound, ${result.inboundUpdated.length} inbound`,
+        };
+      }
+
+      if (vaultDedupeEnabled() && !ignoreDedupe && !existing) {
         emit?.(`  checking for duplicates…\n`);
         const dupes = await findNearDuplicateNote(title, body, { limit: 3, threshold: 0.5 });
         if (dupes.length > 0) {
@@ -112,7 +161,7 @@ export const vaultWriteTool = defineTool({
         title,
         body,
         type: typ,
-        tags: args["tags"] as string[] | undefined,
+        tags,
       });
 
       if (effectiveHarnessEnvRaw("AGENT_MEMORY_AUTOLINK") === "1" && !body.includes("[[")) {
@@ -125,7 +174,7 @@ export const vaultWriteTool = defineTool({
         });
         if (extra) {
           body = body + extra;
-          await writeVaultNote({ title, body, type: typ, tags: args["tags"] as string[] | undefined });
+          await writeVaultNote({ title, body, type: typ, tags });
         }
       }
 
@@ -416,6 +465,14 @@ export const vaultDeleteTool = defineTool({
         ok: false,
         error: `Note not found: "${title}". Use vault_list() to see available notes.`,
       };
+    }
+    try {
+      const idx = await loadVaultEmbedIndex();
+      const slugs = new Set((await listAllNotes()).map((n) => n.slug));
+      const removed = pruneOrphanVaultEntries(idx, slugs);
+      if (removed > 0) await saveVaultEmbedIndex(idx);
+    } catch {
+      /* non-fatal */
     }
     return { ok: true, output: `Deleted vault note: "${title}"` };
   },

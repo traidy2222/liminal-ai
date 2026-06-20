@@ -94,6 +94,8 @@ export const HARNESS_ENV_DEFAULTS: Readonly<Record<string, string>> = {
   AGENT_INFERENCE_PREFER_MANAGED: "1",
   /** auto | bedrock | openrouter | kimchi — upstream preference on Vireon managed inference (x-vireon-managed-provider). */
   AGENT_MANAGED_PROVIDER: "auto",
+  /** Bedrock home region for managed inference (sent as x-vireon-managed-bedrock-region). */
+  AGENT_MANAGED_BEDROCK_REGION: "ap-southeast-2",
   AGENT_INFERENCE_BASE_URL: "https://api.vireondynamics.com/v1/inference",
   AGENT_INFERENCE_SESSION_URL: "https://www.vireondynamics.com/api/inference/session",
   AGENT_INFERENCE_SESSION_TOKEN: "",
@@ -256,8 +258,11 @@ export const HARNESS_ENV_DEFAULTS: Readonly<Record<string, string>> = {
   AGENT_CONCURRENCY_COOLDOWN_MS: "60000",
   AGENT_YIELD_EVERY_N: "4",         // crash-recovery snapshot every N ReAct rounds
   AGENT_VAULT_WRITE_BUDGET: "8",
-  AGENT_VAULT_DEDUPE: "0",
-  AGENT_VAULT_REQUIRE_LINKS: "0",
+  AGENT_VAULT_DEDUPE: "1",
+  AGENT_VAULT_REQUIRE_LINKS: "1",
+  AGENT_VAULT_AGENT_PREFIX: "_liminal",
+  AGENT_VAULT_CURATE_ON_IDLE: "1",
+  AGENT_VAULT_CURATE_INTERVAL_MS: "600000",
   /** Decompose vault writes into per-entity notes (people/orgs/places/events)
    *  via vault_ingest_entities instead of one monolithic note. One fast-model
    *  call per qualifying research turn. Set 0 for single-note writes. */

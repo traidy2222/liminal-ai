@@ -486,6 +486,14 @@ const _META_RAW: Record<string, HarnessSettingsFieldMeta> = {
       "When using Vireon managed inference: auto (shape-based routing + failover), bedrock, openrouter, or kimchi (Cast AI). Sent as x-vireon-managed-provider on each request.",
     valueKind: "string",
   },
+  "AGENT_MANAGED_BEDROCK_REGION": {
+    tabId: "models_api",
+    subgroupId: "routing",
+    label: "Managed Bedrock region",
+    description:
+      "AWS region for Bedrock when model ids have no geo prefix (e.g. ap-southeast-2). Sent as x-vireon-managed-bedrock-region on managed inference requests.",
+    valueKind: "string",
+  },
   "AGENT_INFERENCE_BASE_URL": {
     tabId: "harness",
     subgroupId: "harness_misc",
@@ -1493,8 +1501,29 @@ const _META_RAW: Record<string, HarnessSettingsFieldMeta> = {
     tabId: "memory_vault",
     subgroupId: "vault_limits",
     label: "Vault Require Links",
-    description: "Harness environment toggle for Vault Require Links. See docs/configuration.md (memory vault).",
+    description: "Require at least one [[wikilink]] on agent vault_write calls (vault_ingest always weaves links).",
     valueKind: "boolean",
+  },
+  "AGENT_VAULT_AGENT_PREFIX": {
+    tabId: "memory_vault",
+    subgroupId: "vault_limits",
+    label: "Vault agent prefix",
+    description: "Subfolder for agent-owned spine/raw/archive (default _liminal). Human notes outside this path are not auto-edited.",
+    valueKind: "string",
+  },
+  "AGENT_VAULT_CURATE_ON_IDLE": {
+    tabId: "memory_vault",
+    subgroupId: "vault_limits",
+    label: "Vault curate on idle",
+    description: "Run vault_curate (lint fix, memory promotion, schema refresh) on idle after auto_dream.",
+    valueKind: "boolean",
+  },
+  "AGENT_VAULT_CURATE_INTERVAL_MS": {
+    tabId: "memory_vault",
+    subgroupId: "vault_limits",
+    label: "Vault curate interval (ms)",
+    description: "Minimum ms between background vault_curate runs (default 600000).",
+    valueKind: "number",
   },
   "AGENT_VAULT_ENTITY_EXTRACT": {
     tabId: "memory_vault",

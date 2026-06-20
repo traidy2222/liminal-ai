@@ -18,13 +18,33 @@ import {
   getAgentVaultRoot,
   getExplicitAgentVaultPathFromEnv,
   rankDocumentsForQuery,
+  effectiveHarnessEnvRaw,
   type RankableDoc,
 } from "@liminal/core";
+
+import { noteRelLinkPath } from "./vault_wikilink.js";
 
 // ─── Vault path (configurable) ───────────────────────────────────────────────
 
 export function getVaultDir(): string {
   return getAgentVaultRoot();
+}
+
+/** Agent subfolder for typed wiki pages (env AGENT_VAULT_AGENT_PREFIX, default _liminal). */
+export function resolveAgentPrefix(): string {
+  const raw = effectiveHarnessEnvRaw("AGENT_VAULT_AGENT_PREFIX")?.trim();
+  return raw || "_liminal";
+}
+
+/** Root for type folders (Entities/, Concepts/, …) — under agent prefix when set. */
+export function agentTypedNotesRoot(): string {
+  const prefix = resolveAgentPrefix().replace(/^\/+|\/+$/g, "");
+  return prefix ? join(getVaultDir(), prefix) : getVaultDir();
+}
+
+/** Legacy vault root type folders (pre-prefix layout). */
+function legacyTypedNotesRoot(): string {
+  return getVaultDir();
 }
 
 /** Map note type → subfolder name inside vault */
@@ -36,6 +56,10 @@ const TYPE_FOLDER: Record<NoteType, string> = {
   task:       "Tasks",
   note:       "Notes",
   episode:    "Episodes",
+  concept:    "Concepts",
+  source:     "Sources",
+  synthesis:  "Synthesis",
+  moc:        "MOCs",
 };
 
 // ─── Types ───────────────────────────────────────────────────────────────────
@@ -47,7 +71,11 @@ export type NoteType =
   | "recipe"
   | "task"
   | "note"
-  | "episode";
+  | "episode"
+  | "concept"
+  | "source"
+  | "synthesis"
+  | "moc";
 
 export interface NoteFrontmatter {
   title: string;
@@ -75,16 +103,43 @@ export function titleToSlug(title: string): string {
     .slice(0, 80);
 }
 
+function noteFilePathAt(root: string, type: NoteType, slug: string): string {
+  return join(root, TYPE_FOLDER[type], `${slug}.md`);
+}
+
 function noteFilePath(type: NoteType, slug: string): string {
-  return join(getVaultDir(), TYPE_FOLDER[type], `${slug}.md`);
+  return noteFilePathAt(agentTypedNotesRoot(), type, slug);
+}
+
+/** Candidate paths for a slug (agent zone first, then legacy root). */
+function noteFilePathCandidates(type: NoteType, slug: string): string[] {
+  const agent = noteFilePathAt(agentTypedNotesRoot(), type, slug);
+  const legacy = noteFilePathAt(legacyTypedNotesRoot(), type, slug);
+  return agent === legacy ? [agent] : [agent, legacy];
 }
 
 async function ensureVaultFolders(): Promise<void> {
-  const vault = getVaultDir();
+  const root = agentTypedNotesRoot();
   for (const folder of Object.values(TYPE_FOLDER)) {
-    const dir = join(vault, folder);
+    const dir = join(root, folder);
     if (!existsSync(dir)) await mkdir(dir, { recursive: true });
   }
+}
+
+/** Pairs of (directory, inferred type) to scan when listing notes. */
+function listScanDirs(): Array<{ dir: string; type: NoteType }> {
+  const out: Array<{ dir: string; type: NoteType }> = [];
+  const seenDirs = new Set<string>();
+  for (const root of [agentTypedNotesRoot(), legacyTypedNotesRoot()]) {
+    for (const [type, folder] of Object.entries(TYPE_FOLDER) as Array<[NoteType, string]>) {
+      const dir = join(root, folder);
+      const key = dir.toLowerCase();
+      if (seenDirs.has(key)) continue;
+      seenDirs.add(key);
+      out.push({ dir, type });
+    }
+  }
+  return out;
 }
 
 // ─── Frontmatter serialisation ────────────────────────────────────────────────
@@ -140,14 +195,71 @@ function parseFrontmatter(raw: string): { fm: Partial<NoteFrontmatter>; body: st
 
 /** Read a note by its type and slug. Returns null if not found. */
 export async function readNoteBySlug(type: NoteType, slug: string): Promise<VaultNote | null> {
-  const filePath = noteFilePath(type, slug);
+  for (const filePath of noteFilePathCandidates(type, slug)) {
+    try {
+      const raw = await readFile(filePath, "utf8");
+      const { fm, body } = parseFrontmatter(raw);
+      return {
+        title: fm.title ?? slug,
+        type: fm.type ?? type,
+        tags: fm.tags ?? [],
+        created: fm.created ?? new Date().toISOString(),
+        updated: fm.updated ?? new Date().toISOString(),
+        body,
+        slug,
+        filePath,
+      };
+    } catch {
+      /* try next */
+    }
+  }
+  return null;
+}
+
+/** Find a note by title across all type folders (slug match → title match → path). */
+export async function findNote(title: string): Promise<VaultNote | null> {
+  const trimmed = title.trim();
+  if (!trimmed) return null;
+
+  // Path-style lookup: Entities/iran or AI/Entities/iran
+  if (trimmed.includes("/")) {
+    const rel = trimmed.replace(/\.md$/i, "");
+    const filePath = join(getVaultDir(), `${rel}.md`);
+    if (existsSync(filePath)) {
+      const note = await readNoteFromFilePath(filePath);
+      if (note) return note;
+    }
+  }
+
+  const slug = titleToSlug(trimmed);
+
+  // 1. Try exact slug in every type folder
+  for (const type of Object.keys(TYPE_FOLDER) as NoteType[]) {
+    const note = await readNoteBySlug(type, slug);
+    if (note) return note;
+  }
+
+  // 2. Case-insensitive title scan
+  const titleLower = trimmed.toLowerCase();
+  const allNotes = await listAllNotes();
+  return allNotes.find((n) => n.title.toLowerCase() === titleLower) ?? null;
+}
+
+/** Read a note from an absolute .md path (infers type from parent folder name). */
+export async function readNoteFromFilePath(filePath: string): Promise<VaultNote | null> {
   try {
     const raw = await readFile(filePath, "utf8");
     const { fm, body } = parseFrontmatter(raw);
+    const slug = filePath.split(/[/\\]/).pop()!.slice(0, -3);
+    const folder = filePath.split(/[/\\]/).slice(-2, -1)[0] ?? "";
+    const typeFromFolder =
+      (Object.entries(TYPE_FOLDER).find(([, f]) => f === folder)?.[0] as NoteType | undefined) ??
+      (fm.type as NoteType | undefined) ??
+      "note";
     return {
-      title:   fm.title   ?? slug,
-      type:    fm.type    ?? type,
-      tags:    fm.tags    ?? [],
+      title: fm.title ?? slug,
+      type: typeFromFolder,
+      tags: fm.tags ?? [],
       created: fm.created ?? new Date().toISOString(),
       updated: fm.updated ?? new Date().toISOString(),
       body,
@@ -157,22 +269,6 @@ export async function readNoteBySlug(type: NoteType, slug: string): Promise<Vaul
   } catch {
     return null;
   }
-}
-
-/** Find a note by title across all type folders (slug match → title match). */
-export async function findNote(title: string): Promise<VaultNote | null> {
-  const slug = titleToSlug(title);
-
-  // 1. Try exact slug in every type folder
-  for (const type of Object.keys(TYPE_FOLDER) as NoteType[]) {
-    const note = await readNoteBySlug(type, slug);
-    if (note) return note;
-  }
-
-  // 2. Case-insensitive title scan
-  const titleLower = title.toLowerCase();
-  const allNotes = await listAllNotes();
-  return allNotes.find((n) => n.title.toLowerCase() === titleLower) ?? null;
 }
 
 /** Write a note (create or update), preserving `created` timestamp. */
@@ -185,8 +281,15 @@ export async function writeVaultNote(params: {
   await ensureVaultFolders();
 
   const slug = titleToSlug(params.title);
-  const filePath = noteFilePath(params.type, slug);
-  const existing = await readNoteBySlug(params.type, slug);
+  const existingByTitle = await findNote(params.title);
+  let filePath = existingByTitle?.filePath ?? noteFilePath(params.type, slug);
+  const existing = existingByTitle ?? (await readNoteBySlug(params.type, slug));
+
+  // Type/folder changed — write to the correct type folder and drop the old file.
+  if (existingByTitle && existingByTitle.type !== params.type) {
+    filePath = noteFilePath(params.type, slug);
+  }
+
   const now = new Date().toISOString();
 
   const fm: NoteFrontmatter = {
@@ -199,6 +302,10 @@ export async function writeVaultNote(params: {
 
   const fileContent = `${serializeFrontmatter(fm)}\n\n${params.body.trimEnd()}\n`;
   await writeFile(filePath, fileContent, "utf8");
+
+  if (existingByTitle && existingByTitle.filePath !== filePath) {
+    await unlink(existingByTitle.filePath).catch(() => undefined);
+  }
 
   return { slug, filePath, wasCreated: !existing };
 }
@@ -220,26 +327,30 @@ export async function listAllNotes(opts?: {
   limit?: number;
 }): Promise<VaultNote[]> {
   await ensureVaultFolders();
-  const vault = getVaultDir();
-  const notes: VaultNote[] = [];
+  const byTitle = new Map<string, VaultNote>();
+  const agentRoot = agentTypedNotesRoot().toLowerCase();
+  const typesFilter = opts?.type ? new Set<NoteType>([opts.type]) : null;
 
-  const typesToScan: NoteType[] = opts?.type
-    ? [opts.type]
-    : (Object.keys(TYPE_FOLDER) as NoteType[]);
+  const rankPath = (fp: string): number =>
+    fp.toLowerCase().startsWith(agentRoot) ? 2 : 1;
 
-  for (const type of typesToScan) {
-    const dir = join(vault, TYPE_FOLDER[type]);
+  for (const { dir, type } of listScanDirs()) {
+    if (typesFilter && !typesFilter.has(type)) continue;
     const files = await readdir(dir).catch(() => []);
     for (const file of files) {
       if (extname(file) !== ".md") continue;
-      const slug = file.slice(0, -3);
-      const note = await readNoteBySlug(type, slug);
+      const note = await readNoteFromFilePath(join(dir, file));
       if (!note) continue;
       if (opts?.tag && !note.tags.includes(opts.tag)) continue;
-      notes.push(note);
+      const key = note.title.toLowerCase();
+      const prev = byTitle.get(key);
+      if (!prev || rankPath(note.filePath) > rankPath(prev.filePath)) {
+        byTitle.set(key, note);
+      }
     }
   }
 
+  const notes = [...byTitle.values()];
   notes.sort((a, b) => b.updated.localeCompare(a.updated));
   return opts?.limit ? notes.slice(0, opts.limit) : notes;
 }
@@ -340,14 +451,22 @@ export function extractWikilinks(text: string): string[] {
 /** Find all notes that contain a [[Wikilink]] pointing to `title`. */
 export async function getBacklinks(title: string): Promise<VaultNote[]> {
   const notes = await listAllNotes();
-  const titleLower = title.toLowerCase();
+  const titleLower = title.trim().toLowerCase();
   const titleSlug = titleToSlug(title);
+  const targetNote = await findNote(title);
 
   return notes.filter((n) => {
-    const links = extractWikilinks(n.body).map((l) => l.toLowerCase());
-    return links.some(
-      (l) => l === titleLower || titleToSlug(l) === titleSlug
-    );
+    for (const raw of extractWikilinks(n.body)) {
+      const inner = raw.trim();
+      const innerLower = inner.toLowerCase();
+      const innerSlug = titleToSlug(inner.split("/").pop() ?? inner);
+      if (innerLower === titleLower || innerSlug === titleSlug) return true;
+      if (targetNote) {
+        const path = noteRelLinkPath(targetNote).toLowerCase();
+        if (innerLower === path || innerLower.endsWith(`/${titleSlug}`)) return true;
+      }
+    }
+    return false;
   });
 }
 

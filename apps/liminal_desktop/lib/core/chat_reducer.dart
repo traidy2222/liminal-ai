@@ -45,6 +45,8 @@ ChatTranscriptState reduceChatEvent(
       return _onToolApproval(state, data);
     case 'approval_decision':
       return _onApprovalDecision(state, data);
+    case 'tool_progress':
+      return _onToolProgress(state, data);
     case 'tool_result':
       return _onToolResult(state, data);
     case 'ask_user':
@@ -246,12 +248,38 @@ ChatTranscriptState _appendAssistant(ChatTranscriptState state, String delta) {
   if (msgs.isNotEmpty) {
     final last = msgs.last;
     if (last is AssistantMessage && last.streaming) {
-      last.text += delta;
+      msgs[msgs.length - 1] = AssistantMessage(
+        text: last.text + delta,
+        streaming: true,
+      );
       return state.copyWith(messages: msgs);
     }
   }
+  final turnIdx = _currentTurnAssistantIndex(msgs);
+  if (turnIdx != null && state.busy) {
+    final existing = msgs[turnIdx] as AssistantMessage;
+    msgs[turnIdx] = AssistantMessage(
+      text: existing.text + delta,
+      streaming: true,
+    );
+    return state.copyWith(messages: msgs);
+  }
   msgs.add(AssistantMessage(text: delta, streaming: true));
   return state.copyWith(messages: msgs);
+}
+
+/// Last assistant bubble in the current turn (after the latest user message).
+int? _currentTurnAssistantIndex(List<MessageEntry> msgs) {
+  var lastUserIdx = -1;
+  for (var i = 0; i < msgs.length; i++) {
+    if (msgs[i] is UserMessage) lastUserIdx = i;
+  }
+  if (lastUserIdx < 0) return null;
+  int? assistantIdx;
+  for (var i = lastUserIdx + 1; i < msgs.length; i++) {
+    if (msgs[i] is AssistantMessage) assistantIdx = i;
+  }
+  return assistantIdx;
 }
 
 ChatTranscriptState _appendModelReasoning(ChatTranscriptState state, String delta) {
@@ -270,7 +298,9 @@ ChatTranscriptState _appendModelReasoning(ChatTranscriptState state, String delt
 ChatTranscriptState _onToolStart(ChatTranscriptState state, Map<String, dynamic> data) {
   final callId = data['callId'] as String;
   final name = data['name'] as String;
-  final base = _finalizeStreaming(state);
+  // Match web: do not freeze the assistant bubble when tools start — narration
+  // may still stream after tool_start in the same provider completion.
+  final base = _finalizeStreamingForToolStart(state);
   if (name == 'think') {
     return base.copyWith(
       messages: [
@@ -566,6 +596,29 @@ ChatTranscriptState _onApprovalDecision(
   return next;
 }
 
+ChatTranscriptState _onToolProgress(ChatTranscriptState state, Map<String, dynamic> data) {
+  final callId = data['callId'] as String?;
+  final delta = data['delta'] as String? ?? '';
+  if (callId == null || delta.isEmpty) return state;
+  final msgs = List<MessageEntry>.from(state.messages);
+  for (var i = 0; i < msgs.length; i++) {
+    final m = msgs[i];
+    if (m is! ToolCallMessage || m.callId != callId) continue;
+    final nextStatus =
+        m.status == ToolCallStatus.streaming ? ToolCallStatus.running : m.status;
+    msgs[i] = ToolCallMessage(
+      callId: m.callId,
+      name: m.name,
+      status: nextStatus,
+      argsPreview: m.argsPreview,
+      output: '${m.output ?? ''}$delta',
+      startedAt: m.startedAt,
+    );
+    return state.copyWith(messages: msgs);
+  }
+  return state;
+}
+
 ChatTranscriptState _onToolResult(ChatTranscriptState state, Map<String, dynamic> data) {
   final callId = data['callId'] as String;
   final name = data['name'] as String? ?? '';
@@ -839,15 +892,42 @@ ChatTranscriptState _onTurnEnd(ChatTranscriptState state, Map<String, dynamic> d
   return next;
 }
 
+ChatTranscriptState _finalizeStreamingForToolStart(ChatTranscriptState state) {
+  final msgs = _stripEphemeralPlans(List<MessageEntry>.from(state.messages));
+  for (var i = 0; i < msgs.length; i++) {
+    final m = msgs[i];
+    if (m is ModelReasoningMessage && m.streaming) {
+      msgs[i] = ModelReasoningMessage(text: m.text, streaming: false);
+    }
+    if (m is PlanMessage && m.streaming) {
+      msgs[i] = PlanMessage(
+        callId: m.callId,
+        steps: m.steps,
+        streaming: false,
+        argsPreview: m.argsPreview,
+      );
+    }
+  }
+  return state.copyWith(messages: msgs);
+}
+
 ChatTranscriptState _finalizeStreaming(ChatTranscriptState state) {
   final msgs = _stripEphemeralPlans(List<MessageEntry>.from(state.messages));
-  for (final m in msgs) {
-    if (m is AssistantMessage && m.streaming) m.streaming = false;
-    if (m is ModelReasoningMessage && m.streaming) m.streaming = false;
-    if (m is PlanMessage && m.streaming) m.streaming = false;
-    if (m is ToolCallMessage &&
-        (m.status == ToolCallStatus.streaming || m.status == ToolCallStatus.running)) {
-      m.status = ToolCallStatus.done;
+  for (var i = 0; i < msgs.length; i++) {
+    final m = msgs[i];
+    if (m is AssistantMessage && m.streaming) {
+      msgs[i] = AssistantMessage(text: m.text, streaming: false);
+    }
+    if (m is ModelReasoningMessage && m.streaming) {
+      msgs[i] = ModelReasoningMessage(text: m.text, streaming: false);
+    }
+    if (m is PlanMessage && m.streaming) {
+      msgs[i] = PlanMessage(
+        callId: m.callId,
+        steps: m.steps,
+        streaming: false,
+        argsPreview: m.argsPreview,
+      );
     }
   }
   return state.copyWith(messages: msgs);

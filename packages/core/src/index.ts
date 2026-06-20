@@ -179,12 +179,19 @@ export {
 } from "./harness_default_constants.js";
 export {
   OPENROUTER_MODEL_SLUG,
+  BEDROCK_MODEL_SLUG,
+  BEDROCK_MODEL_PRESETS,
+  BEDROCK_PRESET_CUSTOM_ID,
   PROVIDER_MODEL_PRESETS,
   buildHarnessModelPackEnvPatch,
+  bedrockManagedHarnessEnvPatch,
   findProviderModelPreset,
+  findBedrockModelPreset,
   resolveProviderModelPresetId,
+  resolveBedrockModelPresetId,
+  listBedrockModelPresetsForSettings,
 } from "./provider_model_presets.js";
-export type { ProviderModelPreset } from "./provider_model_presets.js";
+export type { ProviderModelPreset, BedrockModelPreset, BedrockModelPresetWire } from "./provider_model_presets.js";
 export {
   HARNESS_SECRET_ENV_KEYS,
   HARNESS_MANAGED_ENV_KEYS,
@@ -416,6 +423,13 @@ export {
 } from "./output_effort.js";
 export type { EffortLevel } from "./output_effort.js";
 export { buildResearchTurnInjection } from "./research_depth.js";
+export {
+  buildResearchContinuationNudge,
+  isActiveResearchSend,
+  isBriefResearchAsk,
+  needsResearchContinuation,
+  researchCoverageLooksThin,
+} from "./research_continuation.js";
 export { buildCodingTurnInjection } from "./coding_autonomy.js";
 export {
   proactiveVerificationEnabled,
@@ -614,6 +628,14 @@ export {
 } from "./consolidate_session.js";
 export type { ConsolidateSessionResult, ConsolidateUpsert } from "./consolidate_session.js";
 export {
+  promoteConsolidationUpsertsToVault,
+} from "./vault_promote.js";
+export type { ConsolidationUpsert } from "./vault_promote.js";
+export {
+  resolveVaultCurateOnIdleConfig,
+  OBSIDIAN_BRAIN_SAFE_ENV,
+} from "./vault_curator.js";
+export {
   resolveInboxWatcherConfig,
   autoLabelConfidenceFloor,
   labelNameForCategory,
@@ -726,6 +748,8 @@ export {
   looksLikeKimchiModelId,
   modelNativeManagedProvider,
   MANAGED_INFERENCE_PROVIDER_HEADER,
+  MANAGED_INFERENCE_BEDROCK_REGION_HEADER,
+  resolveManagedBedrockRegion,
   hasLocalProviderApiKey,
   buildByokRoutingPatchForModel,
   inferencePreferManaged,
@@ -1199,6 +1223,7 @@ export {
   isSpawnBaselineTool,
   spawnObjectiveNeedsFileTools,
   SPAWN_BASELINE_TOOL_NAMES,
+  normalizeSpawnContract,
 } from "./spawn_provisioning.js";
 export {
   ENTITLEMENTS,
@@ -1536,6 +1561,12 @@ export {
 export type { YoutubeConnectMode, YoutubeConnectOptions } from "./youtube_oauth_scopes.js";
 export { fetchPrimaryYoutubeChannel } from "./youtube_channel.js";
 export type { YoutubeChannelSummary } from "./youtube_channel.js";
+export {
+  gatherYoutubeChannelContextLines,
+  isYoutubeAnalyticsTurn,
+  isYoutubeMetricsQuery,
+  YOUTUBE_ANALYTICS_TURN_INJECTION,
+} from "./youtube_world_context.js";
 export { runYoutubeHostedConnectFlow } from "./youtube_hosted_connect.js";
 export type { RunYoutubeHostedConnectOptions } from "./youtube_hosted_connect.js";
 export { runNotionHostedConnectFlow } from "./notion_connect.js";

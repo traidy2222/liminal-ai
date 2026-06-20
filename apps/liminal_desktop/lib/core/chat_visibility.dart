@@ -9,6 +9,17 @@ bool isHarnessInternalMessage(MessageEntry e) =>
     e is ContextCompressedMessage ||
     e is WorkingStateMessage;
 
+bool isHarnessLaneMessage(MessageEntry entry) =>
+    entry is ToolCallMessage ||
+    entry is ThinkMessage ||
+    entry is ReasonMessage ||
+    entry is ModelReasoningMessage ||
+    entry is PlanMessage ||
+    entry is SubtaskMessage;
+
+bool isConversationMessage(MessageEntry entry) =>
+    entry is UserMessage || entry is AssistantMessage;
+
 /// Transcript filter when `showRawHarness` is false (clean chat).
 List<MessageEntry> visibleChatMessages(
   List<MessageEntry> messages, {

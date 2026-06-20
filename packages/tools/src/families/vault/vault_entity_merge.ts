@@ -1,7 +1,9 @@
+import type { NoteType } from "./vault_store.js";
+
 /**
  * Pure entity-note model + merge logic for the vault nexus.
  *
- * A real knowledge graph stores one note PER ENTITY (person, org, place, event,
+ * A real knowledge graph stores one note PER SUBJECT (person, org, place, event,
  * concept), each a small structured dossier that ACCRETES over time rather than
  * being overwritten:
  *
@@ -140,7 +142,39 @@ export function mergeEntity(
   return { body: renderEntityNote(s), changed };
 }
 
-/** Map an entity kind to a vault NoteType + a kind tag. */
-export function entityNoteTypeFor(kind: EntityKind): "entity" | "note" {
-  return kind === "event" ? "note" : "entity";
+/**
+ * Map an extracted kind to the vault folder type.
+ * person/org/place → Entities; event → Episodes; concept → Concepts.
+ */
+export function entityNoteTypeFor(kind: EntityKind): NoteType {
+  switch (kind) {
+    case "concept":
+      return "concept";
+    case "event":
+      return "episode";
+    case "person":
+    case "org":
+    case "place":
+      return "entity";
+    default:
+      return "entity";
+  }
+}
+
+/** Tags for an extracted row (kind + vault type, before ensureAgentTags). */
+export function tagsForExtractedKind(kind: EntityKind): string[] {
+  const noteType = entityNoteTypeFor(kind);
+  return noteType === "entity" ? [kind, "entity"] : [kind, noteType];
+}
+
+const KIND_TAG_PRIORITY: EntityKind[] = ["event", "concept", "person", "org", "place"];
+
+/** Infer vault folder type from kind tags on an existing note (for reclassification). */
+export function noteTypeFromKindTags(tags: string[]): NoteType | null {
+  const lower = new Set(tags.map((t) => t.toLowerCase()));
+  for (const kind of KIND_TAG_PRIORITY) {
+    if (!lower.has(kind)) continue;
+    return entityNoteTypeFor(kind);
+  }
+  return null;
 }

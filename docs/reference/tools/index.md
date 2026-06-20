@@ -1,6 +1,6 @@
 # Tool families
 
-Liminal ships **245+ tools** in the family catalog (100+ more when Google/Microsoft MCP
+Liminal ships **500+ tools** in the family catalog (additional tools when Google/Microsoft MCP
 sidecars attach). With `AGENT_TOOL_LAZY=1` (default) only a baseline subset is
 registered at startup; the model activates more **families** on demand. This keeps the tool
 list the model reasons over small and relevant.
@@ -51,7 +51,7 @@ editing, navigating, and reasoning never wait on activation.
 | `meta` | `suggest_improvement`, `view_insights`, `self_telemetry`, dynamic-tool + connector tools | — |
 | `dynamic_tools` | `create_tool`, `edit_tool`, `remove_tool`, `list_dynamic_tools` | — |
 | `external_api` | `api_<conn>_<op>` (from `api_connect`), `mcp_<conn>_<tool>` (from `mcp_attach`) | — |
-| `connectors` | `connect_provider`, `disconnect_provider`, `list_connectors` (meta only) | OAuth in Settings |
+| `connectors` | `connect_provider`, `disconnect_provider`, `list_connectors`, `integrations_snapshot`, `revoke_integration_account`, `mail_search_inboxes` | OAuth in Integrations hub |
 | `google_workspace` | Google MCP + Calendar/Gmail REST + `email_style_infer` | Google OAuth |
 | `microsoft_365` | Microsoft MCP + Outlook REST + `email_style_infer` | Microsoft OAuth |
 | `github` | GitHub MCP (dynamic) | GitHub OAuth / `GITHUB_TOKEN` |
@@ -59,6 +59,7 @@ editing, navigating, and reasoning never wait on activation.
 | `linear` | Linear REST issues | Linear OAuth |
 | `notion` | Notion REST workspace | Notion OAuth |
 | `xero` | Xero accounting REST | Xero OAuth |
+| `youtube` | YouTube Data + Analytics REST | YouTube OAuth |
 | `reasoning_advanced` | `decompose_goal`, `verify_contract`, `dispatch_graph`, `query_tool_outputs`, `research_state` | harness-scoped |
 | `synthesis` | `synthesis_run` (cross-domain synthesis sub-agent) | harness-scoped |
 | `orchestration` | `spawn_agent`, `wait_for_agents`, `cancel_agent`, `list_agents`, `verify_result`, `evidence_critic`, `path_critic`, `policy_critic`, `reflect_debate`, `branch_explore`, `branch_evaluate` | harness-scoped |
@@ -84,6 +85,10 @@ nest. See [Sub-agents & orchestration](../../guides/sub-agents-and-orchestration
 | Parallel sub-agents | [Sub-agents & orchestration](../../guides/sub-agents-and-orchestration.md) |
 | Multi-phase fan-out | [Dynamic workflows](../../guides/dynamic-workflows.md) |
 | External APIs / MCP | `api_connect` (OpenAPI 3.x) · `mcp_attach` (Streamable-HTTP MCP) |
+| Integrations (OAuth) | [Connectors](../../guides/connectors.md) · per-provider guides |
+| Multi-account mail | [Multi-account mail](../../guides/multi-account-mail.md) |
+| Compose dock & attachments | [Compose dock & attachments](../../guides/compose-dock-and-attachments.md) |
+| Inbox automation | [Inbox watcher](../../guides/inbox-watcher.md) |
 
 ## Troubleshooting inactive tools
 

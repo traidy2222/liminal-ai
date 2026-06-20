@@ -26,6 +26,9 @@ class ManagedInferencePanel extends StatelessWidget {
     required this.onFastModel,
     required this.managedProvider,
     required this.onManagedProvider,
+    this.bedrockPresets = const [],
+    this.selectedBedrockPresetId = 'custom',
+    this.onBedrockPresetApply,
     this.upstream,
   });
 
@@ -39,6 +42,9 @@ class ManagedInferencePanel extends StatelessWidget {
   final ValueChanged<String> onManagedProvider;
   final ValueChanged<String> onMainModel;
   final ValueChanged<String> onFastModel;
+  final List<BedrockModelPreset> bedrockPresets;
+  final String selectedBedrockPresetId;
+  final ValueChanged<String>? onBedrockPresetApply;
   final String? upstream;
 
   List<DropdownMenuItem<String>> _modelItems(
@@ -211,6 +217,45 @@ class ManagedInferencePanel extends StatelessWidget {
             ),
           ),
           const SizedBox(height: LiminalSpacing.md),
+          if (bedrockPresets.isNotEmpty && onBedrockPresetApply != null) ...[
+            Text('Bedrock preset', style: theme.textTheme.titleSmall),
+            const SizedBox(height: LiminalSpacing.xs),
+            DropdownButtonFormField<String>(
+              value: bedrockPresets.any((p) => p.id == selectedBedrockPresetId)
+                  ? selectedBedrockPresetId
+                  : 'custom',
+              decoration: fieldDecoration(),
+              dropdownColor: lim.panel,
+              style: theme.textTheme.bodyMedium?.copyWith(color: lim.text),
+              items: [
+                const DropdownMenuItem(value: 'custom', child: Text('Custom — pick models below')),
+                for (final preset in bedrockPresets)
+                  DropdownMenuItem(value: preset.id, child: Text(preset.label)),
+              ],
+              onChanged: saving
+                  ? null
+                  : (id) {
+                      if (id != null && id != 'custom') onBedrockPresetApply!(id);
+                    },
+            ),
+            if (selectedBedrockPresetId != 'custom')
+              Padding(
+                padding: const EdgeInsets.only(top: LiminalSpacing.xs),
+                child: Text(
+                  () {
+                    for (final p in bedrockPresets) {
+                      if (p.id == selectedBedrockPresetId) return p.hint;
+                    }
+                    return '';
+                  }(),
+                  style: theme.textTheme.bodySmall?.copyWith(
+                    color: lim.textMuted,
+                    height: 1.45,
+                  ),
+                ),
+              ),
+            const SizedBox(height: LiminalSpacing.md),
+          ],
           Text('Upstream preference', style: theme.textTheme.titleSmall),
           const SizedBox(height: LiminalSpacing.xs),
           DropdownButtonFormField<String>(

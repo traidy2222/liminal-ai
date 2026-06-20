@@ -79,6 +79,14 @@ export function inferIntentToolFamilies(
     if (/google|gmail|sheet|spreadsheet|gdoc|drive|calendar|workspace|docs|slides/i.test(trimmed)) {
       if (has("google_workspace")) out.add("google_workspace");
     }
+    if (
+      /youtube|yt studio|channel analytics|video seo|shorts feed|subscriber count|views declined/i.test(
+        trimmed
+      ) &&
+      has("youtube")
+    ) {
+      out.add("youtube");
+    }
     if (isEmailComposeTurn(trimmed)) {
       if (has("google_workspace")) out.add("google_workspace");
       if (has("microsoft_365")) out.add("microsoft_365");

@@ -42,6 +42,7 @@ describe("inference_provider", () => {
     assert.equal(resolveManagedProviderPreference(null), "auto");
     assert.deepEqual(buildManagedInferenceClientHeaders(null), {
       "x-vireon-managed-provider": "auto",
+      "x-vireon-managed-bedrock-region": "ap-southeast-2",
     });
   });
 
@@ -59,6 +60,7 @@ describe("inference_provider", () => {
     );
     assert.deepEqual(buildManagedInferenceClientHeaders(null, "nex-agi/nex-v2-pro:free"), {
       "x-vireon-managed-provider": "openrouter",
+      "x-vireon-managed-bedrock-region": "ap-southeast-2",
     });
   });
 

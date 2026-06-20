@@ -2,8 +2,26 @@
 
 Liminal uses two persistent channels:
 
-- compact typed notes (`remember`)
-- rich markdown knowledge (`vault_*`)
+- **Vault (primary brain)** — Obsidian-compatible markdown with wikilinks, MOCs, and entity dossiers
+- **Typed JSON memory** — ephemeral/session scratch and fast recall (`remember`)
+
+## Vault-primary brain (Karpathy LLM-Wiki pattern)
+
+| Layer | Role |
+|-------|------|
+| `_liminal/raw/` | Immutable ingested sources (`vault_ingest_source`) |
+| Wiki folders | Cross-linked dossiers (`vault_ingest`, `vault_ingest_entities`) |
+| `_liminal/schema.md` | Living conventions for page types and lint rules |
+
+**Safe zone (mixed personal vault):** agent auto-write, lint fix, and merge only touch notes tagged `liminal-agent` or paths under `AGENT_VAULT_AGENT_PREFIX` (default `_liminal`). Your manual notes are never auto-edited.
+
+**Write path:** prefer `vault_ingest` / `vault_ingest_entities` / `vault_ingest_source` over raw `vault_write`. Ingest weaves bidirectional `[[wikilinks]]` (outbound + up to 3 inbound neighbor updates).
+
+**Query path:** `vault_recall` neighborhood + `index.md` — not whole-vault RAG.
+
+**Sleep phase:** `vault_curate` (idle) runs lint fix, promotes durable memory rows, refreshes schema. `auto_dream` and `consolidate_chat` also promote entity/fact upserts into the vault.
+
+**Settings preset:** apply `OBSIDIAN_BRAIN_SAFE_ENV` from core (`AGENT_VAULT_DEDUPE=1`, `AGENT_VAULT_REQUIRE_LINKS=1`, `AGENT_VAULT_CURATE_ON_IDLE=1`, …).
 
 ## Typed Memory
 
@@ -15,6 +33,8 @@ Liminal uses two persistent channels:
 - `belief`
 - `reflection`
 - `recipe`
+
+Durable `entity`/`fact` rows are promoted into the vault by background consolidation. JSON memory shrinks to scratch/archive over time.
 
 Retrieval tools include exact/type/lexical/hybrid/graph paths (`memory_query`, `recall_relevant`, etc.).
 
@@ -35,10 +55,11 @@ The decay is computed by `spacedRepetitionDecay()` in `packages/core/src/memory_
 
 Vault tools manage Obsidian-compatible markdown with frontmatter and wikilinks:
 
-- `vault_search`
-- `vault_read`
-- `vault_write`
-- `vault_list`, `vault_links`, `vault_graph`, `vault_delete`
+- `vault_ingest`, `vault_ingest_entities`, `vault_ingest_source` — connected writes (preferred)
+- `vault_recall`, `vault_lint`, `vault_curate`, `vault_migrate_memory`
+- `vault_search`, `vault_read`, `vault_write` (legacy/simple), `vault_list`, `vault_links`, `vault_graph`, `vault_delete`
+
+Page types include `entity`, `concept`, `source`, `synthesis`, `moc`, plus `fact`, `note`, `episode`, etc.
 
 ### Vault path resolution
 
@@ -52,47 +73,26 @@ Use `AGENT_OBSIDIAN_VAULT_NAME_SUBSTRING` when several vaults are registered. Se
 
 ### Vault vs workspace files
 
-Rich briefs and wikilinked notes live in the **vault**, not under `AGENT_WORKSPACE_ROOT` tree paths like `situation-room/`. Use **`vault_search`** / **`vault_read`** / **`vault_write`** — not **`read_file`** on guessed workspace paths.
+Rich briefs and wikilinked notes live in the **vault**, not under `AGENT_WORKSPACE_ROOT` tree paths like `situation-room/`. Use **`vault_search`** / **`vault_read`** / **`vault_ingest`** — not **`read_file`** on guessed workspace paths.
 
 ## Retrieval Order
 
 Recommended order for factual tasks:
 
-1. memory
-2. vault
+1. vault (`vault_recall`, `vault_search`)
+2. memory (`recall_relevant`)
 3. web
-
-These steps are **suggestions** only. The harness does not block `web_search` based on prior memory or vault calls.
 
 ## Auto-Write Semantics
 
 `AGENT_VAULT_AUTO_WRITE` modes:
 
 - `off` (disabled)
-- `research` (default behavior when unset): persist durable research-style learnings
+- `research` (default): persist durable research-style learnings via `vault_ingest_entities` or `vault_ingest`
 - `aggressive` (broader write behavior)
 
-Deduplication is off by default; set `AGENT_VAULT_DEDUPE=1` to skip writes when body hash matches an existing note.
+Defaults: `AGENT_VAULT_DEDUPE=1`, `AGENT_VAULT_REQUIRE_LINKS=1`, `AGENT_VAULT_ENTITY_EXTRACT=1`.
 
-- **Update in place:** reuse the **exact same** `vault_write` title — dedupe is skipped when that title already exists.
-- **New edition:** when content overlaps an older brief (e.g. Day 76 after Day 75), set **`ignore_dedupe: true`** on `vault_write`, or merge into the existing note instead of creating a parallel file.
+Deduplication skips auto-write when `vault_search` finds an existing note. Entity extraction splits multi-party research into per-entity dossiers with bidirectional links.
 
 See [Vault briefs and updates](../guides/vault-briefs-and-updates.md).
-
-## Growth vs Noise Tradeoff
-
-Auto-write improves long-horizon knowledge reuse but can increase note churn. Use:
-
-- dedupe
-- write budgets
-- note typing/tags
-- periodic consolidation
-
-to keep the vault high-signal.
-
-## Operational Tips
-
-- prefer durable facts and synthesis, not raw transcript dumps
-- keep note titles canonical for linkability
-- include uncertainty markers for rapidly changing topics
-- keep manual curation loops for mission-critical domains

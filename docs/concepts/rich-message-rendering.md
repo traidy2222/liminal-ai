@@ -13,7 +13,7 @@ The harness streams assistant text on the `text` channel (`channel: "assistant"`
 | **` ```html ` fences** | Same as raw HTML; preferred for large blocks; **streams live** on web/desktop |
 | **Images** | `![](https://…)` or `data:image/…` |
 | **Video** | Bare YouTube/Vimeo URLs or links |
-| **User attachments** | ` ```attached_images` block (vision workflow) |
+| **User attachments** | ` ```attached_images` block (vision workflow) + generic files via composer (see [Compose dock & attachments](../guides/compose-dock-and-attachments.md)) |
 
 Tool rows, harness trace, and working-state snapshots are **not** rich-rendered.
 

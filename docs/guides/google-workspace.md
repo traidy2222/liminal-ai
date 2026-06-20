@@ -149,6 +149,8 @@ Requires:
 
 Set `AGENT_GOOGLE_GMAIL_SEND=0` to disable REST send (draft-only via MCP).
 
+**Multiple Gmail accounts.** When more than one Google account is connected, call `mail_search_inboxes` first and pass `account_hint` on compose/send tools. See [Multi-account mail](./multi-account-mail.md).
+
 ## Calendar (hybrid: MCP + REST)
 
 Official Calendar MCP (`calendarmcp.googleapis.com`) covers **list/get/create/update/delete events**, **respond to invites**, and **suggest_time**. Liminal adds classic REST tools when `AGENT_GOOGLE_CALENDAR_REST=1` (default):

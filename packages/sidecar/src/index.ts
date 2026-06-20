@@ -89,11 +89,28 @@ async function main(): Promise<void> {
       .then(() => closeCrashReporter())
       .finally(() => process.exit(0));
   };
+  // Die with the parent when stdin is an active pipe. Ignored/inherited stdin
+  // (Flutter `Process.start` default) must not trigger immediate shutdown.
+  if (process.stdin.readable && !process.stdin.isTTY) {
+    process.stdin.on("close", () => shutdown("stdin_close"));
+    process.stdin.resume();
+  }
+
   process.on("SIGINT", () => shutdown("SIGINT"));
   process.on("SIGTERM", () => shutdown("SIGTERM"));
-  // Die with the parent: if stdin closes (parent exited), shut down.
-  process.stdin.on("close", () => shutdown("stdin_close"));
-  process.stdin.resume();
+
+  process.on("unhandledRejection", (reason) => {
+    const message =
+      reason instanceof Error ? reason.stack ?? reason.message : String(reason);
+    process.stderr.write(`liminald: unhandledRejection: ${message}\n`);
+    captureException(reason, { context: "sidecar_unhandled_rejection" });
+  });
+
+  process.on("uncaughtException", (err) => {
+    process.stderr.write(`liminald: uncaughtException: ${err.stack ?? err.message}\n`);
+    captureException(err, { context: "sidecar_uncaught_exception" });
+    void closeCrashReporter().finally(() => process.exit(1));
+  });
 }
 
 main().catch((err) => {

@@ -3,6 +3,10 @@ export type YoutubeChannelSummary = {
   title: string;
   customUrl?: string;
   thumbnailUrl?: string;
+  /** Lifetime public totals from Data API — NOT period Analytics views. */
+  subscriberCount?: number | null;
+  viewCount?: number | null;
+  videoCount?: number | null;
 };
 
 type ChannelsListResponse = {
@@ -13,15 +17,28 @@ type ChannelsListResponse = {
       customUrl?: string;
       thumbnails?: { default?: { url?: string } };
     };
+    statistics?: {
+      viewCount?: string;
+      subscriberCount?: string;
+      videoCount?: string;
+      hiddenSubscriberCount?: boolean;
+    };
   }>;
 };
 
+function parseCount(raw: unknown): number | null {
+  if (raw == null || raw === "") return null;
+  const n = Number(raw);
+  return Number.isFinite(n) ? n : null;
+}
+
 /** Resolve the authenticated user's primary YouTube channel (OAuth token). */
 export async function fetchPrimaryYoutubeChannel(
-  accessToken: string
+  accessToken: string,
+  opts?: { includeStatistics?: boolean }
 ): Promise<YoutubeChannelSummary | null> {
   const url = new URL("https://www.googleapis.com/youtube/v3/channels");
-  url.searchParams.set("part", "snippet");
+  url.searchParams.set("part", opts?.includeStatistics ? "snippet,statistics" : "snippet");
   url.searchParams.set("mine", "true");
   const res = await fetch(url, {
     headers: { Authorization: `Bearer ${accessToken}`, Accept: "application/json" },
@@ -31,10 +48,14 @@ export async function fetchPrimaryYoutubeChannel(
   const item = data.items?.[0];
   const channelId = item?.id?.trim();
   if (!channelId) return null;
+  const stats = item?.statistics;
   return {
     channelId,
     title: item?.snippet?.title?.trim() || channelId,
     customUrl: item?.snippet?.customUrl?.trim() || undefined,
     thumbnailUrl: item?.snippet?.thumbnails?.default?.url,
+    subscriberCount: opts?.includeStatistics ? parseCount(stats?.subscriberCount) : undefined,
+    viewCount: opts?.includeStatistics ? parseCount(stats?.viewCount) : undefined,
+    videoCount: opts?.includeStatistics ? parseCount(stats?.videoCount) : undefined,
   };
 }

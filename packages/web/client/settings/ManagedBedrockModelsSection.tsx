@@ -2,6 +2,12 @@ import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { filterManagedInferenceCatalog, type ManagedInferenceModel } from "@liminal/core";
 import { webApiFetch } from "../webApiAuth.js";
 import { WEB_SERVER_BASE } from "../useSSE.js";
+import {
+  BEDROCK_PRESETS,
+  PROVIDER_PRESET_CUSTOM_ID,
+  resolveBedrockModelPresetId,
+  type BedrockModelPreset,
+} from "./providerPresets.js";
 
 const CYAN = "var(--lim-accent, #00d4ff)";
 const AMBER = "var(--lim-warning, #ffb347)";
@@ -76,6 +82,8 @@ export interface ManagedBedrockModelsSectionProps {
   onManagedProvider: (value: string) => void;
   onMainModel: (modelId: string) => void;
   onFastModel: (modelId: string) => void;
+  onBedrockPresetApply: (presetId: string) => void;
+  bedrockPresets?: readonly BedrockModelPreset[];
   vireonConnected: boolean;
 }
 
@@ -87,6 +95,8 @@ export function ManagedBedrockModelsSection({
   onManagedProvider,
   onMainModel,
   onFastModel,
+  onBedrockPresetApply,
+  bedrockPresets = BEDROCK_PRESETS,
   vireonConnected,
 }: ManagedBedrockModelsSectionProps) {
   const [models, setModels] = useState<ManagedInferenceModel[]>([]);
@@ -142,6 +152,14 @@ export function ManagedBedrockModelsSection({
 
   const mainValue = filteredModels.some((m) => m.id === mainModel) ? mainModel : "";
   const fastValue = filteredModels.some((m) => m.id === fastModel) ? fastModel : "";
+  const selectedBedrockPresetId = useMemo(
+    () => resolveBedrockModelPresetId(mainModel, fastModel),
+    [mainModel, fastModel]
+  );
+  const selectedBedrockHint = useMemo(
+    () => bedrockPresets.find((p) => p.id === selectedBedrockPresetId)?.hint ?? "",
+    [bedrockPresets, selectedBedrockPresetId]
+  );
   const upstreamLabel =
     upstream === "hybrid" ? "hybrid (Bedrock + OpenRouter + Kimchi)" : upstream || "managed";
 
@@ -182,6 +200,46 @@ export function ManagedBedrockModelsSection({
           ))}
         </select>
       </div>
+      {bedrockPresets.length > 0 ? (
+        <div
+          style={{
+            display: "grid",
+            gridTemplateColumns: "120px 1fr",
+            gap: 8,
+            alignItems: "center",
+            marginBottom: 10,
+          }}
+        >
+          <span style={{ fontSize: 11, color: "#aabbcc" }}>preset</span>
+          <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+            <select
+              disabled={disabled}
+              value={
+                bedrockPresets.some((p) => p.id === selectedBedrockPresetId)
+                  ? selectedBedrockPresetId
+                  : PROVIDER_PRESET_CUSTOM_ID
+              }
+              onChange={(e) => {
+                const id = e.target.value;
+                if (id === PROVIDER_PRESET_CUSTOM_ID) return;
+                onBedrockPresetApply(id);
+              }}
+              aria-label="Bedrock model preset"
+              style={selectStyle}
+            >
+              <option value={PROVIDER_PRESET_CUSTOM_ID}>Custom — pick models below</option>
+              {bedrockPresets.map((p) => (
+                <option key={p.id} value={p.id}>
+                  {p.label}
+                </option>
+              ))}
+            </select>
+            {selectedBedrockHint ? (
+              <span style={{ fontSize: 10, color: "#8899aa", lineHeight: 1.45 }}>{selectedBedrockHint}</span>
+            ) : null}
+          </div>
+        </div>
+      ) : null}
       {!vireonConnected ? (
         <div style={{ fontSize: 11, color: AMBER, lineHeight: 1.45 }}>
           Sign in to Vireon to load the managed model catalog.

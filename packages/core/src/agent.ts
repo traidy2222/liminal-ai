@@ -132,6 +132,10 @@ import {
   type MailSessionContext,
 } from "./mail_account_context.js";
 import {
+  isYoutubeAnalyticsTurn,
+  YOUTUBE_ANALYTICS_TURN_INJECTION,
+} from "./youtube_world_context.js";
+import {
   partitionChatAttachments,
   persistChatAttachmentsToWorkspace,
   resolveUserTurnWithChatAttachments,
@@ -250,6 +254,7 @@ import {
   rollbackConsolidationLock,
   tryAcquireConsolidationLock,
 } from "./auto_dream.js";
+import { resolveVaultCurateOnIdleConfig } from "./vault_curator.js";
 import {
   appendPersonalityHeartbeatLog,
   executePersonalityHeartbeat,
@@ -290,6 +295,7 @@ import {
 import { wireSubtaskEventForwarding } from "./subtask_telemetry.js";
 import {
   buildSpawnContextInjection,
+  normalizeSpawnContract,
   ensureChildRegistryBaselineFromParent,
   finalizeChildSpawnTools,
   isSpawnBaselineTool,
@@ -328,6 +334,10 @@ import {
   scaleMaxCompletionTokensForEffort,
 } from "./output_effort.js";
 import { buildResearchTurnInjection } from "./research_depth.js";
+import {
+  isActiveResearchSend,
+  needsResearchContinuation,
+} from "./research_continuation.js";
 import { buildCodingTurnInjection } from "./coding_autonomy.js";
 import {
   bumpFileRevision,
@@ -439,7 +449,7 @@ function buildSpawnContractPrelude(contract: ChildAgentConfig["spawnContract"]):
     `Objective: ${contract.objective}`,
     `Deliverable Format: ${contract.deliverableFormat}`,
   ];
-  if (contract.successCriteria.length > 0) {
+  if (contract.successCriteria?.length) {
     lines.push("Success Criteria:");
     for (const item of contract.successCriteria) lines.push(`- ${item}`);
   }
@@ -1313,6 +1323,7 @@ export class AgentHarness {
   private managedInferenceCatalog: ManagedInferenceModel[] | null = null;
   private criticConsumedThisSend = false;
   private verificationGateAttemptedThisSend = false;
+  private researchContinuationAttemptedThisSend = false;
   private verificationMidNudgesThisSend = 0;
   private static readonly MAX_VERIFICATION_MID_NUDGES = 3;
   private distillArtifactNudgeThisSend = false;
@@ -1447,6 +1458,8 @@ export class AgentHarness {
   private composePathSeenByCallId = new Map<string, boolean>();
   private lastAutoDreamScanAt = 0;
   private autoDreamBackgroundRunning = false;
+  private vaultCurateBackgroundRunning = false;
+  private lastVaultCurateAt = 0;
 
   /** Idle personality heartbeat (root only; AGENT_HEARTBEAT=1). */
   private personalityHeartbeatIdleTimer: ReturnType<typeof setTimeout> | null = null;
@@ -3132,6 +3145,7 @@ export class AgentHarness {
     this.proactiveCompressedThisSend = false;
     this.criticConsumedThisSend = false;
     this.verificationGateAttemptedThisSend = false;
+    this.researchContinuationAttemptedThisSend = false;
     this.verificationMidNudgesThisSend = 0;
     this.distillArtifactNudgeThisSend = false;
     this.capabilityNudgesInjectedThisSend = false;
@@ -3509,6 +3523,9 @@ export class AgentHarness {
       if (shouldInjectMailAccountGuidance(userMessage)) {
         this.context.appendMessage({ role: "system", content: MAIL_ACCOUNT_TURN_INJECTION });
       }
+      if (!openingTurn && isYoutubeAnalyticsTurn(userMessage)) {
+        this.context.appendMessage({ role: "system", content: YOUTUBE_ANALYTICS_TURN_INJECTION });
+      }
       if (isEmailPrivacyTurn(userMessage)) {
         this.context.appendMessage({ role: "system", content: EMAIL_PRIVACY_TURN_INJECTION });
       }
@@ -3599,8 +3616,12 @@ export class AgentHarness {
     if (
       !openingTurn &&
       this.turnInference &&
-      (this.turnInference.intent === "research" ||
-        (this.turnInference.freshnessSensitive === true && this.turnInference.toolFirstBias === true))
+      isActiveResearchSend({
+        intent: this.turnInference.intent,
+        freshnessSensitive: this.turnInference.freshnessSensitive,
+        toolFirstBias: this.turnInference.toolFirstBias,
+        userMessage,
+      })
     ) {
       this.context.appendMessage({
         role: "system",
@@ -3985,6 +4006,14 @@ export class AgentHarness {
 
     const childId = crypto.randomUUID();
     const abortController = new AbortController();
+
+    if (childConfig.spawnContract) {
+      childConfig.spawnContract = normalizeSpawnContract(childConfig.spawnContract, {
+        goal: childConfig.goal,
+        userPrompt: childConfig.userPrompt,
+        systemPrompt: childConfig.systemPrompt,
+      });
+    }
 
     // ── Build scoped tool registry ───────────────────────────────────────────
     const childRegistry = new ToolRegistry();
@@ -4514,6 +4543,20 @@ export class AgentHarness {
         });
         upsertsApplied++;
       }
+      if (upsertsApplied > 0) {
+        const { promoteConsolidationUpsertsToVault } = await import("./vault_promote.js");
+        await promoteConsolidationUpsertsToVault(
+          (name, args) => this.dispatcher.directCall(name, args),
+          (parsed.upserts ?? []).filter(
+            (u): u is { type?: string; key: string; value: string } =>
+              !!u && typeof u.key === "string" && typeof u.value === "string"
+          ),
+          {
+            hasIngest: this.registry.has("vault_ingest"),
+            hasIngestEntities: this.registry.has("vault_ingest_entities"),
+          }
+        );
+      }
       this.emitter.emit("auto_dream", {
         stage: "progress",
         runId,
@@ -4744,6 +4787,32 @@ export class AgentHarness {
       })
       .finally(() => {
         this.autoDreamBackgroundRunning = false;
+        this.triggerVaultCurateBackground();
+      });
+  }
+
+  /** Run vault curator off the critical response path (env-gated). */
+  private triggerVaultCurateBackground(): void {
+    if (this.vaultCurateBackgroundRunning || this.agentDepth > 0) return;
+    const { enabled, intervalMs } = resolveVaultCurateOnIdleConfig(this.runtimePreferences);
+    if (!enabled || !this.registry.has("vault_curate")) return;
+    if (Date.now() - this.lastVaultCurateAt < intervalMs) return;
+    this.vaultCurateBackgroundRunning = true;
+    void this.dispatcher
+      .directCall("vault_curate", { lint_limit: 200, promote_memory: true })
+      .then((r) => {
+        if (r.ok) this.lastVaultCurateAt = Date.now();
+        this.emitter.emit("vault_activity", {
+          action: "curate",
+          ok: r.ok,
+          ...(r.ok ? {} : { reason: r.error }),
+        });
+      })
+      .catch(() => {
+        /* non-fatal */
+      })
+      .finally(() => {
+        this.vaultCurateBackgroundRunning = false;
       });
   }
 
@@ -4751,8 +4820,7 @@ export class AgentHarness {
     if (this.agentDepth > 0) return;
     const mode = resolveVaultAutoWriteMode();
     if (mode === "off") return;
-    const canIngest = this.registry.has("vault_ingest");
-    if (!canIngest && !this.registry.has("vault_write")) return;
+    if (!this.registry.has("vault_ingest")) return;
     const hasResearchSignals =
       this.isLikelyKnowledgeTask() ||
       this.toolsUsedThisTurn.includes("web_search") ||
@@ -4765,19 +4833,17 @@ export class AgentHarness {
       1,
       Math.min(20, parseInt(resolveHarnessEnvRaw("AGENT_VAULT_WRITE_BUDGET", this.runtimePreferences) ?? "8", 10) || 8)
     );
-    const existingWrites = this.toolsUsedThisTurn.filter((t) => t === "vault_write").length;
+    const existingWrites = this.toolsUsedThisTurn.filter(
+      (t) => t === "vault_write" || t === "vault_ingest" || t === "vault_ingest_entities"
+    ).length;
     if (existingWrites >= budget) return;
 
     const dateKey = new Date().toISOString().slice(0, 10);
-    const title = `Knowledge ${dateKey} ${hashString(this.lastUserMessage).slice(0, 8)}`;
     const evidence = this.evidenceLog
       .slice(-4)
       .map((e) => `- ${e.name}: ${e.excerpt.replace(/\n/g, " ").slice(0, 180)}`)
       .join("\n");
     const tools = [...new Set(this.toolsUsedThisTurn)].slice(0, 12).join(", ");
-    // No stub links here — vault_ingest weaves in real [[Wikilinks]] to the
-    // nearest existing notes, so auto-notes become connected graph nodes rather
-    // than orphans pointing at placeholder pages.
     const body =
       `## Summary\n${assistant.slice(0, 1400)}\n\n` +
       `## Evidence\n${evidence || "- (no explicit evidence excerpts captured)"}\n\n` +
@@ -4799,51 +4865,53 @@ export class AgentHarness {
       }
     }
 
-    // Prefer entity decomposition: turn the answer into a graph of per-entity
-    // notes (people/orgs/places/events) that merge into existing dossiers,
-    // rather than one dated blob. Falls back to a single linked note when
-    // extraction is disabled, unavailable, or finds nothing.
     const entityExtract =
       resolveHarnessEnvRaw("AGENT_VAULT_ENTITY_EXTRACT", this.runtimePreferences) !== "0" &&
       this.registry.has("vault_ingest_entities") &&
       assistant.length >= 200;
 
     let wr: ToolResult | null = null;
+    let noteTitle = "";
     if (entityExtract) {
       wr = await this.dispatcher.directCall("vault_ingest_entities", {
         content: `${assistant}\n\n${evidence}`,
         source: this.lastUserMessage.slice(0, 100) || `Research ${dateKey}`,
         max_entities: 16,
       });
+      noteTitle = this.lastUserMessage.slice(0, 80) || `Research ${dateKey}`;
     }
     if (!wr || !wr.ok) {
-      wr = canIngest
-        ? await this.dispatcher.directCall("vault_ingest", {
-            title,
-            content: body,
-            type: "note",
-            tags: ["auto-wiki", "knowledge", "harness"],
-          })
-        : await this.dispatcher.directCall("vault_write", {
-            title,
-            content: body,
-            type: "note",
-            tags: ["auto-wiki", "knowledge", "harness"],
-          });
+      const topicTitle = this.lastUserMessage.trim().slice(0, 80);
+      if (!topicTitle || topicTitle.length < 8) {
+        this.vaultMetrics.skippedWrites += 1;
+        this.emitter.emit("vault_activity", {
+          action: "skip_write",
+          ok: false,
+          reason: "no_suitable_title_for_vault_ingest",
+        });
+        return;
+      }
+      noteTitle = topicTitle;
+      wr = await this.dispatcher.directCall("vault_ingest", {
+        title: topicTitle,
+        content: body,
+        type: "synthesis",
+        tags: ["liminal-agent", "auto-wiki", "knowledge", "harness"],
+      });
     }
     if (wr.ok) {
       this.vaultMetrics.writes += 1;
       this.emitter.emit("vault_activity", {
         action: "write",
         ok: true,
-        noteTitle: title,
+        noteTitle,
       });
     } else {
       this.vaultMetrics.skippedWrites += 1;
       this.emitter.emit("vault_activity", {
         action: "skip_write",
         ok: false,
-        noteTitle: title,
+        noteTitle,
         reason: wr.error,
       });
     }
@@ -6991,6 +7059,30 @@ export class AgentHarness {
         return;
       }
 
+      const webResearchEnabled =
+        resolveHarnessEnvRaw("AGENT_WEB_RESEARCH", this.runtimePreferences) !== "0";
+      const researchGate = needsResearchContinuation({
+        userMessage: this.lastUserMessage,
+        intent: this.turnInference?.intent,
+        freshnessSensitive: this.turnInference?.freshnessSensitive,
+        toolFirstBias: this.turnInference?.toolFirstBias,
+        toolsUsed: this.toolsUsedThisTurn,
+        summary: this._researchLedger.summary(),
+        pendingUrlSamples: this._researchLedger
+          .getPendingUrls()
+          .slice(0, 5)
+          .map((u) => (u.title ? `${u.title} — ${u.url}` : u.url)),
+        gateAttempted: this.researchContinuationAttemptedThisSend,
+        enabled: webResearchEnabled,
+      });
+      if (researchGate.needed) {
+        this.researchContinuationAttemptedThisSend = true;
+        this.ensureCapabilityToolPreseed(this.lastUserMessage, false);
+        this.context.appendMessage({ role: "user", content: researchGate.message });
+        await this.runReActLoop(round + 1);
+        return;
+      }
+
       if (
         !this.userReplyFinalizeAttempted &&
         needsUserReplyFinalization({
@@ -7061,6 +7153,7 @@ export class AgentHarness {
       void this.maybeAutoExtractMemories();
       if (!this.sessionGreetingThisSend && !this.personaBootstrapPromptThisSend) {
         this.triggerAutoDreamConsolidationBackground();
+        this.triggerVaultCurateBackground();
       }
     }
   }
