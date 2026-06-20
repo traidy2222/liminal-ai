@@ -39,6 +39,11 @@ Web **Settings** writes to (2). See [Configuration basics](../start/configuratio
 | `AGENT_AUTO_DREAM_MIN_HOURS` | `4` | yes | no | session_ui | Harness environment toggle for Auto Dream Min Hours. See docs/configuration.md (session ui). |
 | `AGENT_AUTO_DREAM_MIN_SESSIONS` | `3` | yes | no | session_ui | Harness environment toggle for Auto Dream Min Sessions. See docs/configuration.md (session ui). |
 | `AGENT_AUTO_DREAM_SCAN_INTERVAL_MS` | `30000` | yes | no | session_ui | Harness environment toggle for Auto Dream Scan Interval Ms. See docs/configuration.md (session ui). |
+| `AGENT_AZURE_CONNECT_ON_BOOT` | `0` | yes | no | harness | Auto-attach Azure MCP when OAuth tokens exist at harness startup. |
+| `AGENT_AZURE_REST` | `1` | yes | no | harness | Register azure_list_* and azure_rest_call ARM tools (OAuth or az login). |
+| `AGENT_AZURE_SIDECAR_CMD` | `npx -y @azure/mcp@latest server start` | yes | no | harness | Command to launch @azure/mcp (default: npx -y @azure/mcp@latest server start). |
+| `AGENT_AZURE_SIDECAR_ENABLE` | `1` | yes | no | harness | Spawn @azure/mcp HTTP sidecar for mcp_azure_* tools on connect_provider. |
+| `AGENT_AZURE_SIDECAR_PORT` | `8012` | yes | no | harness | HTTP port for @azure/mcp (default 8012). |
 | `AGENT_BROWSER` | `1` | yes | no | web_research | Harness environment toggle for Browser. See docs/configuration.md (web research). |
 | `AGENT_BROWSER_ALLOW_FILE_ANY` | `0` | yes | no | harness | Harness environment toggle for Browser Allow File Any. See docs/configuration.md (harness). |
 | `AGENT_BROWSER_ALWAYS_ACTIVE` | `0` | yes | no | harness | Harness environment toggle for Browser Always Active. See docs/configuration.md (harness). |
@@ -101,6 +106,7 @@ Web **Settings** writes to (2). See [Configuration basics](../start/configuratio
 | `AGENT_EFFORT` | `medium` | yes | no | harness | Harness environment toggle for Effort. See docs/configuration.md (harness). |
 | `AGENT_EMBED_MODEL` | `qwen/qwen3-embedding-8b` | yes | no | models_api | Harness environment toggle for Embed Model. See docs/configuration.md (models api). |
 | `AGENT_EVAL_JSON_SINK` | `1` | yes | no | advanced | Harness environment toggle for Eval Json Sink. See docs/configuration.md (advanced). |
+| `AGENT_EVAL_OUTCOME_LEARN` | `1` | yes | no | advanced | Feed eval-suite pass/fail into the shared recipe stats file as high-trust golden outcomes. |
 | `AGENT_FAILURE_DIGEST` | `1` | yes | no | advanced | Harness environment toggle for Failure Digest. See docs/configuration.md (advanced). |
 | `AGENT_FAILURE_LOG` | `1` | yes | no | advanced | Harness environment toggle for Failure Log. See docs/configuration.md (advanced). |
 | `AGENT_FAST_MODEL` | `deepseek/deepseek-v4-flash` | yes | no | models_api | Harness environment toggle for Fast Model. See docs/configuration.md (models api). |
@@ -109,11 +115,13 @@ Web **Settings** writes to (2). See [Configuration basics](../start/configuratio
 | `AGENT_FINALIZE_JUDGE` | `0` | yes | no | harness | Harness environment toggle for Finalize Judge. See docs/configuration.md (harness). |
 | `AGENT_FINALIZE_RETRY_BUDGET` | `0` | yes | no | harness | Harness environment toggle for Finalize Retry Budget. See docs/configuration.md (harness). |
 | `AGENT_GOLDEN_EVAL` | `1` | yes | no | advanced | Harness environment toggle for Golden Eval. See docs/configuration.md (advanced). |
+| `AGENT_GOOGLE_ANALYTICS_REST` | `1` | yes | no | harness | Register analytics_rest_* tools (Analytics Admin + Data APIs): list accounts/properties, run reports, realtime, data str |
 | `AGENT_GOOGLE_CALENDAR_REST` | `1` | yes | no | harness | Register calendar_rest_* tools (classic Calendar API): calendars/settings/timezone, colors, subscribe/hide, clear events |
 | `AGENT_GOOGLE_CONNECT_ON_BOOT` | `1` | yes | no | harness | Harness environment toggle for Google Connect On Boot. See docs/configuration.md (harness). |
-| `AGENT_GOOGLE_GMAIL_SEND` | `1` | yes | no | harness | Register gmail_create_draft and gmail_send_message (classic Gmail REST). Official Gmail MCP create_draft is plain-only;  |
+| `AGENT_GOOGLE_GMAIL_SEND` | `1` | yes | no | harness | Register gmail_create_draft, gmail_send_draft, and gmail_send_message (classic Gmail REST). Official Gmail MCP create_dr |
 | `AGENT_GOOGLE_OAUTH_CLIENT_ID` | `` | yes | no | harness | Harness environment toggle for Google Oauth Client Id. See docs/configuration.md (harness). |
 | `AGENT_GOOGLE_OFFICE_REST` | `1` | yes | no | harness | Register docs_rest_*, sheets_rest_*, slides_rest_*, and office_rest_export_file (classic Docs/Sheets/Slides/Drive APIs). |
+| `AGENT_GOOGLE_SEARCH_CONSOLE_REST` | `1` | yes | no | harness | Register search_console_rest_* tools: list sites, search analytics queries, URL inspection, sitemap list/submit/delete.  |
 | `AGENT_GOOGLE_SIDECAR_CMD` | `uvx workspace-mcp` | yes | no | harness | Harness environment toggle for Google Sidecar Cmd. See docs/configuration.md (harness). |
 | `AGENT_GOOGLE_SIDECAR_ENABLE` | `1` | yes | no | harness | Harness environment toggle for Google Sidecar Enable. See docs/configuration.md (harness). |
 | `AGENT_GOOGLE_SIDECAR_PORT` | `8010` | yes | no | harness | Harness environment toggle for Google Sidecar Port. See docs/configuration.md (harness). |
@@ -126,6 +134,19 @@ Web **Settings** writes to (2). See [Configuration basics](../start/configuratio
 | `AGENT_HEARTBEAT_TIMEOUT_MS` | `20000` | yes | no | session_ui | Harness environment toggle for Heartbeat Timeout Ms. See docs/configuration.md (session ui). |
 | `AGENT_HEARTBEAT_UI_STRIP` | `0` | yes | no | session_ui | Harness environment toggle for Heartbeat Ui Strip. See docs/configuration.md (session ui). |
 | `AGENT_HEARTBEAT_USER_NUDGE_CONFIDENCE_MIN` | `0.86` | yes | no | session_ui | Harness environment toggle for Heartbeat User Nudge Confidence Min. See docs/configuration.md (session ui). |
+| `AGENT_INBOX_AUTO_LABEL` | `1` | yes | no | session_ui | Create Liminal/* labels or Outlook categories and sort triaged mail automatically. |
+| `AGENT_INBOX_AUTO_PROCESS` | `1` | yes | no | session_ui | Send urgent/action mail to the agent automatically (drafts still require approval). |
+| `AGENT_INBOX_AUTO_SPAM_LABEL` | `0` | yes | no | session_ui | Apply spam label when triage confidence is high (off by default). |
+| `AGENT_INBOX_BACKFILL_MAX` | `25` | yes | no | session_ui | On first connect, triage up to this many unread (then recent) inbox messages per account. 0 = incremental only. |
+| `AGENT_INBOX_NOTIFY_URGENT` | `1` | yes | no | session_ui | Emit inbox_notify when action/urgent items are triaged. |
+| `AGENT_INBOX_TRIAGE` | `1` | yes | no | session_ui | Use fast-model JSON triage when heuristics do not decide. |
+| `AGENT_INBOX_TRIAGE_CONFIDENCE_MIN` | `0.75` | yes | no | session_ui | Minimum confidence before acting on a triage verdict. |
+| `AGENT_INBOX_TRIAGE_TIMEOUT_MS` | `6000` | yes | no | session_ui | Wall-clock cap for a single inbox triage completion. |
+| `AGENT_INBOX_WATCH` | `0` | yes | no | session_ui | Poll connected Gmail/Outlook inboxes on an interval; triage new mail with a fast model. |
+| `AGENT_INBOX_WATCH_INTERVAL_MS` | `300000` | yes | no | session_ui | How often the sidecar checks for new mail (default 5 minutes). |
+| `AGENT_INBOX_WATCH_MAX_TRIAGE_PER_CYCLE` | `25` | yes | no | session_ui | LLM triage budget per poll cycle. |
+| `AGENT_INBOX_WATCH_MIN_INTERVAL_MS` | `60000` | yes | no | session_ui | Floor between inbox poll cycles (throttle). |
+| `AGENT_INBOX_WATCH_WHILE_BUSY` | `0` | yes | no | session_ui | When on, inbox polls continue during an active harness turn. |
 | `AGENT_INFERENCE_BASE_URL` | `https://api.vireondynamics.com/v1/inference` | yes | no | harness | Harness environment toggle for Inference Base Url. See docs/configuration.md (harness). |
 | `AGENT_INFERENCE_MODE` | `auto` | yes | no | harness | Harness environment toggle for Inference Mode. See docs/configuration.md (harness). |
 | `AGENT_INFERENCE_PREFER_MANAGED` | `1` | yes | no | harness | Harness environment toggle for Inference Prefer Managed. See docs/configuration.md (harness). |
@@ -138,6 +159,9 @@ Web **Settings** writes to (2). See [Configuration basics](../start/configuratio
 | `AGENT_INTENT_OPERATIONAL_MODEL` | `` | yes | no | harness | Harness environment toggle for Intent Operational Model. See docs/configuration.md (harness). |
 | `AGENT_INTENT_REPO_CONTEXT` | `1` | yes | no | harness | Harness environment toggle for Intent Repo Context. See docs/configuration.md (harness). |
 | `AGENT_INTENT_ROUTING` | `1` | yes | no | harness | Harness environment toggle for Intent Routing. See docs/configuration.md (harness). |
+| `AGENT_KIMCHI_MIN_INTERVAL_MS` | `1500` | yes | yes | models_api | Minimum ms between Cast AI completions when AGENT_PROVIDER_MIN_INTERVAL_MS is unset. Lowers RPM/TPM 429s on free tier. |
+| `AGENT_KIMCHI_TRANSIENT_MAX_RETRIES` | `8` | yes | yes | models_api | Retry budget for transient Cast AI / Kimchi errors (opaque HTTP 400, 429, 5xx) per completion before failing the turn. |
+| `AGENT_LATENCY_MODE` | `0` | yes | no | harness | When on, skips world-context gather, intent-inference LLM, proactive verify lint, session JSONL, forced reply-finalize,  |
 | `AGENT_LENGTH_RESUME_MAX` | `8` | yes | no | harness | Harness environment toggle for Length Resume Max. See docs/configuration.md (harness). |
 | `AGENT_LICENSE_PREFER_ENV` | `0` | yes | no | harness | Harness environment toggle for License Prefer Env. See docs/configuration.md (harness). |
 | `AGENT_LIMINAL_APPS` | `0` | yes | no | session_ui | Enable spawn_app / update_app desktop widget tools (off by default — preview only). |
@@ -146,11 +170,13 @@ Web **Settings** writes to (2). See [Configuration basics](../start/configuratio
 | `AGENT_LLM_JSON_CACHE` | `1` | yes | no | harness | Harness environment toggle for Llm Json Cache. See docs/configuration.md (harness). |
 | `AGENT_LLM_JSON_CACHE_TTL_MS` | `300000` | yes | no | harness | Harness environment toggle for Llm Json Cache Ttl Ms. See docs/configuration.md (harness). |
 | `AGENT_LOCATION` | `` | yes | no | session_ui | Harness environment toggle for Location. See docs/configuration.md (session ui). |
-| `AGENT_MANAGED_BUSY_MAX_RETRIES` | `4` | yes | yes | models_api | Bounded local retries (with backoff) when managed inference reports its upstream is busy, before surfacing a 'providers  |
-| `AGENT_MANAGED_BYOK_FALLBACK` | `0` | yes | yes | models_api | When managed inference stays busy, fall back to your local provider API key for the rest of the session. Off by default  |
-| `AGENT_MANAGED_FREE_FALLBACK` | `1` | yes | yes | models_api | When managed inference credits are exhausted (HTTP 402), switch to your OpenRouter API key on a free model (see Free Fal |
+| `AGENT_MANAGED_BEDROCK_REGION` | `ap-southeast-2` | yes | no | models_api | AWS region for Bedrock when model ids have no geo prefix (e.g. ap-southeast-2). Sent as x-vireon-managed-bedrock-region  |
+| `AGENT_MANAGED_BUSY_MAX_RETRIES` | `4` | yes | no | models_api | Bounded local retries (with backoff) when managed inference reports its upstream is busy, before surfacing a 'providers  |
+| `AGENT_MANAGED_BYOK_FALLBACK` | `0` | yes | no | models_api | When managed inference stays busy, fall back to your local provider API key for the rest of the session. Off by default  |
+| `AGENT_MANAGED_FREE_FALLBACK` | `1` | yes | no | models_api | When managed inference credits are exhausted (HTTP 402), switch to your OpenRouter API key on a free model (see Free Fal |
 | `AGENT_MANAGED_FREE_FALLBACK_FAST` | `nvidia/nemotron-3-ultra-550b-a55b:free` | yes | no | models_api | Second free model for sidecars when managed credits are exhausted (default Nemotron 3 Ultra free; main stays Free Fallba |
-| `AGENT_MANAGED_FREE_FALLBACK_MODEL` | `openrouter/free` | yes | yes | models_api | OpenRouter slug when managed credits are exhausted and free fallback is on (default openrouter/free; owl-alpha Stealth i |
+| `AGENT_MANAGED_FREE_FALLBACK_MODEL` | `openrouter/free` | yes | no | models_api | OpenRouter slug when managed credits are exhausted and free fallback is on (default openrouter/free; owl-alpha Stealth i |
+| `AGENT_MANAGED_PROVIDER` | `auto` | yes | no | models_api | When using Vireon managed inference: auto (shape-based routing + failover), bedrock, openrouter, or kimchi (Cast AI). Se |
 | `AGENT_MARKETS_ENABLE` | `1` | yes | no | web_research | Harness environment toggle for Markets Enable. See docs/configuration.md (web research). |
 | `AGENT_MARKETS_MAX_DELAY_MS` | `2000` | yes | no | web_research | Harness environment toggle for Markets Max Delay Ms. See docs/configuration.md (web research). |
 | `AGENT_MARKETS_RETRIES` | `2` | yes | no | web_research | Harness environment toggle for Markets Retries. See docs/configuration.md (web research). |
@@ -177,11 +203,20 @@ Web **Settings** writes to (2). See [Configuration basics](../start/configuratio
 | `AGENT_MISSION_MAX_ITERATIONS` | `20` | yes | no | harness | Harness environment toggle for Mission Max Iterations. See docs/configuration.md (harness). |
 | `AGENT_MISSION_REQUIRES_YOLO` | `0` | yes | no | harness | When 1, mission_continue chained sends require AGENT_YOLO=1. Default 0 allows continuation with normal approval gates. |
 | `AGENT_MODEL` | `deepseek/deepseek-v4-pro` | yes | no | models_api | Harness environment toggle for Model. See docs/configuration.md (models api). |
+| `AGENT_NATIVE_VISION` | `1` | yes | no | models_api | Set 0 to disable routing image attachments as image_url parts on the main chat model. |
+| `AGENT_NATIVE_VISION_SLUGS` | `` | yes | no | models_api | Comma-separated substrings; when AGENT_MODEL matches, attachments use native multimodal input. |
 | `AGENT_OBSIDIAN_DISCOVER` | `1` | yes | no | memory_vault | Harness environment toggle for Obsidian Discover. See docs/configuration.md (memory vault). |
 | `AGENT_OBSIDIAN_REQUIRE_DOT_OBSIDIAN` | `1` | yes | no | memory_vault | Harness environment toggle for Obsidian Require Dot Obsidian. See docs/configuration.md (memory vault). |
 | `AGENT_OBSIDIAN_VAULT_NAME_SUBSTRING` | `` | yes | no | memory_vault | Harness environment toggle for Obsidian Vault Name Substring. See docs/configuration.md (memory vault). |
+| `AGENT_OPENROUTER_FUSION_ANALYSIS_MODELS` | `` | yes | no | models_api | Comma-separated model slugs (1–8) for Fusion when preset=custom. |
+| `AGENT_OPENROUTER_FUSION_JUDGE` | `` | yes | no | models_api | Judge / final writer slug for Fusion (empty = preset default). |
+| `AGENT_OPENROUTER_FUSION_MAX_TOOL_CALLS` | `4` | yes | no | models_api | Max web_search/web_fetch steps per Fusion panel member and judge (1–16). |
+| `AGENT_OPENROUTER_FUSION_PRESET` | `quality` | yes | no | models_api | When AGENT_MODEL is openrouter/fusion: quality (frontier panel), budget (cheaper panel), or custom (AGENT_OPENROUTER_FUS |
 | `AGENT_OPENROUTER_SESSIONS` | `1` | yes | no | session_ui | Harness environment toggle for Openrouter Sessions. See docs/configuration.md (session ui). |
 | `AGENT_OPENROUTER_SESSION_ID` | `` | yes | no | session_ui | Harness environment toggle for Openrouter Session Id. See docs/configuration.md (session ui). |
+| `AGENT_OUTCOME_IMPLICIT_FEEDBACK` | `1` | yes | no | advanced | Defer effort/rule/recipe learning until the user's next message. Corrections and retries lower the prior turn score; tha |
+| `AGENT_OUTCOME_JUDGE` | `1` | yes | no | advanced | Sample a fraction of turns for a fast-model answer-quality score to calibrate heuristic outcomes. |
+| `AGENT_OUTCOME_JUDGE_SAMPLE_RATE` | `0.1` | yes | no | advanced | Fraction of deferred turns (0–1) sent to the fast outcome judge. Default 0.1 (10%). |
 | `AGENT_OVERINFERENCE_GUARD` | `1` | yes | no | harness | Harness environment toggle for Overinference Guard. See docs/configuration.md (harness). |
 | `AGENT_OVERINFERENCE_LLM_CHECK` | `0` | yes | no | harness | Harness environment toggle for Overinference Llm Check. See docs/configuration.md (harness). |
 | `AGENT_PASTE` | `1` | yes | no | session_ui | Harness environment toggle for Paste. See docs/configuration.md (session ui). |
@@ -202,6 +237,8 @@ Web **Settings** writes to (2). See [Configuration basics](../start/configuratio
 | `AGENT_PERSONA_UI_COPY` | `1` | yes | no | harness | Generate in-voice interface microcopy at persona bootstrap (composer placeholder, labels, empty state). Set 0 to use def |
 | `AGENT_PERSONA_UI_THEME_LLM` | `1` | yes | no | harness | Harness environment toggle for Persona Ui Theme Llm. See docs/configuration.md (harness). |
 | `AGENT_PLUGIN_DIR` | `` | yes | no | advanced | Harness environment toggle for Plugin Dir. See docs/configuration.md (advanced). |
+| `AGENT_PROACTIVE_VERIFY` | `1` | yes | no | harness | After file edits or browser tools, inject lint/console [VERIFY RESULT] into context before the next model round (no turn |
+| `AGENT_PROACTIVE_VERIFY_LINT` | `1` | yes | no | harness | Auto run_lint on changed typed files after each edit batch (default on). |
 | `AGENT_PROCESS_HEALTH` | `0` | yes | no | advanced | Harness environment toggle for Process Health. See docs/configuration.md (advanced). |
 | `AGENT_PROMPT_CACHE` | `1` | yes | no | harness | Harness environment toggle for Prompt Cache. See docs/configuration.md (harness). |
 | `AGENT_PROMPT_CACHE_ROLLING` | `1` | yes | no | harness | Harness environment toggle for Prompt Cache Rolling. See docs/configuration.md (harness). |
@@ -233,6 +270,7 @@ Web **Settings** writes to (2). See [Configuration basics](../start/configuratio
 | `AGENT_RECALL_RERANK` | `0` | yes | no | memory_vault | Harness environment toggle for Recall Rerank. See docs/configuration.md (memory vault). |
 | `AGENT_RECALL_RERANK_WEIGHT` | `1.0` | yes | no | memory_vault | Harness environment toggle for Recall Rerank Weight. See docs/configuration.md (memory vault). |
 | `AGENT_RECIPE_LIBRARY` | `1` | yes | no | advanced | Harness environment toggle for Recipe Library. See docs/configuration.md (advanced). |
+| `AGENT_RECIPE_PRIME` | `1` | yes | no | advanced | At round 2, inject the best matching success recipe for the turn intent (zero extra model calls). Low-outcome turns deca |
 | `AGENT_REFLEXION_SEMANTIC` | `1` | yes | no | harness | Harness environment toggle for Reflexion Semantic. See docs/configuration.md (harness). |
 | `AGENT_RETRY_FOREVER` | `0` | yes | no | models_api | Harness environment toggle for Retry Forever. See docs/configuration.md (models api). |
 | `AGENT_RETRY_MAX_DELAY_MS` | `30000` | yes | no | models_api | Harness environment toggle for Retry Max Delay Ms. See docs/configuration.md (models api). |
@@ -256,6 +294,7 @@ Web **Settings** writes to (2). See [Configuration basics](../start/configuratio
 | `AGENT_SESSION_JSONL_TEXT_LOG` | `rollup` | yes | no | session_ui | Harness environment toggle for Session Jsonl Text Log. See docs/configuration.md (session ui). |
 | `AGENT_SESSION_JSONL_TRACE` | `0` | yes | no | session_ui | Harness environment toggle for Session Jsonl Trace. See docs/configuration.md (session ui). |
 | `AGENT_SESSION_MODE` | `` | yes | no | session_ui | Harness environment toggle for Session Mode. See docs/configuration.md (session ui). |
+| `AGENT_SHEETS_AUTO_FIT` | `1` | yes | no | harness | After sheets_rest_update_values / append / batch_update_values, auto-resize columns to content and pin empty spacer colu |
 | `AGENT_SPAWN_TOOL_INFER` | `1` | yes | no | harness | Harness environment toggle for Spawn Tool Infer. See docs/configuration.md (harness). |
 | `AGENT_SPAWN_TOOL_INFER_MODEL` | `` | yes | no | harness | Harness environment toggle for Spawn Tool Infer Model. See docs/configuration.md (harness). |
 | `AGENT_SPAWN_TOOL_INFER_TIMEOUT_MS` | `8000` | yes | no | harness | Harness environment toggle for Spawn Tool Infer Timeout Ms. See docs/configuration.md (harness). |
@@ -291,12 +330,18 @@ Web **Settings** writes to (2). See [Configuration basics](../start/configuratio
 | `AGENT_TTS_VOICE` | `af_sky` | yes | no | harness | Harness environment toggle for Tts Voice. See docs/configuration.md (harness). |
 | `AGENT_UI_VERBOSITY` | `normal` | yes | yes | session_ui | Harness environment toggle for Ui Verbosity. See docs/configuration.md (session ui). |
 | `AGENT_UPSTREAM_429_SUGGESTED_WAIT_MS` | `` | yes | no | models_api | Harness environment toggle for Upstream 429 Suggested Wait Ms. See docs/configuration.md (models api). |
+| `AGENT_USER_REPLY_FINALIZE` | `0` | yes | yes | harness | When on, runs one extra tool-free completion if tools ran but the visible reply was very short (common after read/edit t |
+| `AGENT_VAULT_AGENT_PREFIX` | `_liminal` | yes | no | memory_vault | Subfolder for agent-owned spine/raw/archive (default _liminal). Human notes outside this path are not auto-edited. |
 | `AGENT_VAULT_AUTO_WRITE` | `research` | yes | yes | memory_vault | Harness environment toggle for Vault Auto Write. See docs/configuration.md (memory vault). |
-| `AGENT_VAULT_DEDUPE` | `0` | yes | no | memory_vault | Harness environment toggle for Vault Dedupe. See docs/configuration.md (memory vault). |
+| `AGENT_VAULT_CURATE_INTERVAL_MS` | `600000` | yes | no | memory_vault | Minimum ms between background vault_curate runs (default 600000). |
+| `AGENT_VAULT_CURATE_ON_IDLE` | `1` | yes | no | memory_vault | Run vault_curate (lint fix, memory promotion, schema refresh) on idle after auto_dream. |
+| `AGENT_VAULT_DEDUPE` | `1` | yes | no | memory_vault | Harness environment toggle for Vault Dedupe. See docs/configuration.md (memory vault). |
 | `AGENT_VAULT_ENTITY_EXTRACT` | `1` | yes | no | memory_vault | Decompose vault writes into per-entity notes (people, orgs/businesses, places, events) that merge into existing dossiers |
 | `AGENT_VAULT_PATH` | `` | yes | no | memory_vault | Harness environment toggle for Vault Path. See docs/configuration.md (memory vault). |
-| `AGENT_VAULT_REQUIRE_LINKS` | `0` | yes | no | memory_vault | Harness environment toggle for Vault Require Links. See docs/configuration.md (memory vault). |
+| `AGENT_VAULT_REQUIRE_LINKS` | `1` | yes | no | memory_vault | Require at least one [[wikilink]] on agent vault_write calls (vault_ingest always weaves links). |
 | `AGENT_VAULT_WRITE_BUDGET` | `8` | yes | no | memory_vault | Harness environment toggle for Vault Write Budget. See docs/configuration.md (memory vault). |
+| `AGENT_VERIFY_BEFORE_DONE` | `1` | yes | no | harness | Deprecated — use AGENT_PROACTIVE_VERIFY. When on, verification runs after edit/browser batches, not at turn end. |
+| `AGENT_VERIFY_BEFORE_DONE_AUTO_LINT` | `1` | yes | no | harness | Deprecated — use AGENT_PROACTIVE_VERIFY_LINT. Auto run_lint after edit batches when proactive verify is on. |
 | `AGENT_VERIFY_TOOLS` | `0` | yes | no | harness | When 1, verify_result and critic tools spawn verification sub-agents. Default 0 — skips them for faster turn completion. |
 | `AGENT_VIREON_SITE_URL` | `https://www.vireondynamics.com` | yes | no | harness | Harness environment toggle for Vireon Site Url. See docs/configuration.md (harness). |
 | `AGENT_VISION_BASE_URL` | `https://openrouter.ai/api/v1` | yes | no | models_api | Harness environment toggle for Vision Base Url. See docs/configuration.md (models api). |
@@ -331,28 +376,31 @@ Web **Settings** writes to (2). See [Configuration basics](../start/configuratio
 | `AGENT_WORKFLOW_MAX_CONCURRENT` | `4` | yes | no | harness | Harness environment toggle for Workflow Max Concurrent. See docs/configuration.md (harness). |
 | `AGENT_WORKFLOW_MODEL` | `` | yes | no | harness | Harness environment toggle for Workflow Model. See docs/configuration.md (harness). |
 | `AGENT_WORKFLOW_TIMEOUT_MS` | `1800000` | yes | no | harness | Harness environment toggle for Workflow Timeout Ms. See docs/configuration.md (harness). |
+| `AGENT_WORKSPACE_BOUND` | `0` | yes | no | harness | When on, read_file/grep_file/edit_file and other path tools reject paths outside AGENT_WORKSPACE_ROOT. Off (default): ab |
+| `AGENT_WORLD_CONTEXT` | `1` | yes | no | harness | When on, gather OS/git/tools/vault snapshot on the first turn of a root chat. Set 0 for faster isolated workspaces. |
 | `AGENT_WRITE_INTEGRITY_NUDGE` | `1` | yes | no | harness | Harness environment toggle for Write Integrity Nudge. See docs/configuration.md (harness). |
 | `AGENT_WRITE_PART_MAX_CHARS` | `512000` | yes | no | harness | Harness environment toggle for Write Part Max Chars. See docs/configuration.md (harness). |
 | `AGENT_WRITE_STREAM_SINK` | `1` | yes | no | harness | Harness environment toggle for Write Stream Sink. See docs/configuration.md (harness). |
 | `AGENT_WRITE_STREAM_SINK_MIN_CHARS` | `8000` | yes | no | harness | Harness environment toggle for Write Stream Sink Min Chars. See docs/configuration.md (harness). |
+| `AGENT_XERO_OAUTH_SCOPE_STYLE` | `granular` | yes | no | harness | granular = split scopes for post-2026-03-02 Xero apps (default). legacy = broad scopes for older apps only. |
 | `AGENT_YIELD_EVERY_N` | `4` | yes | no | session_ui | Harness environment toggle for Yield Every N. See docs/configuration.md (session ui). |
 | `AGENT_YOLO` | `0` | yes | no | safety | Harness environment toggle for Yolo. See docs/configuration.md (safety). |
+| `AGENT_YOUTUBE_REST` | `1` | yes | no | harness | Register youtube_rest_* tools (channel metadata, list videos, update snippet). Requires a separate YouTube integration c |
 
 ## Secret keys (.env only)
 
 - `AGENT_API_KEY`
 - `AGENT_APPROVAL_TIMEOUT_MS`
 - `AGENT_CAPTCHA_KEY`
-- `AGENT_MANAGED_BUSY_MAX_RETRIES`
-- `AGENT_MANAGED_BYOK_FALLBACK`
-- `AGENT_MANAGED_FREE_FALLBACK`
-- `AGENT_MANAGED_FREE_FALLBACK_MODEL`
+- `AGENT_KIMCHI_MIN_INTERVAL_MS`
+- `AGENT_KIMCHI_TRANSIENT_MAX_RETRIES`
 - `AGENT_OAUTH_ENCRYPTION_KEY`
 - `AGENT_RATE_LIMIT_MAX_RETRIES`
 - `AGENT_SERPER_API_KEY`
 - `AGENT_TRANSCRIBE_API_KEY`
 - `AGENT_TRANSIENT_5XX_MAX_RETRIES`
 - `AGENT_UI_VERBOSITY`
+- `AGENT_USER_REPLY_FINALIZE`
 - `AGENT_VAULT_AUTO_WRITE`
 - `AGENT_VISION_API_KEY`
 - `ANTHROPIC_API_KEY`
