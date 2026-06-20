@@ -22,6 +22,7 @@ import {
   runYoutubeHostedConnectFlow,
   enrichYoutubeBundleChannel,
   readOAuthBundle,
+  awsCredentialsConfigured,
 } from "@liminal/core";
 import { githubAuthAvailable, githubTokenPresent } from "../github/github_connect.js";
 
@@ -35,7 +36,8 @@ export type ConnectProviderId =
   | "linear"
   | "notion"
   | "youtube"
-  | "ida";
+  | "ida"
+  | "aws";
 
 const PROVIDER_LABEL: Record<ConnectProviderId, string> = {
   google_workspace: "Google Workspace",
@@ -48,6 +50,7 @@ const PROVIDER_LABEL: Record<ConnectProviderId, string> = {
   notion: "Notion",
   youtube: "YouTube",
   ida: "IDA Pro",
+  aws: "AWS",
 };
 
 export function integrationNotConnectedError(provider: ConnectProviderId, label?: string): string {
@@ -80,6 +83,8 @@ export async function isConnectProviderOAuthReady(provider: ConnectProviderId): 
       return await githubAuthAvailable();
     case "ida":
       return true;
+    case "aws":
+      return awsCredentialsConfigured();
   }
 }
 
@@ -151,6 +156,12 @@ export async function startConnectProviderOAuth(
         return {
           ok: false,
           error: "IDA Pro MCP does not use OAuth — set AGENT_IDA_MCP=1 and call connect_provider({ provider: \"ida\" }).",
+        };
+      case "aws":
+        return {
+          ok: false,
+          error:
+            "AWS does not use hosted OAuth — configure AWS CLI (`aws configure` / `aws sso login`) or env keys, then connect_provider({ provider: \"aws\" }).",
         };
     }
   } catch (e) {

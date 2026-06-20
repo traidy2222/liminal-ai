@@ -18,18 +18,23 @@ import {
   resolveGoogleServices,
   resolveMicrosoftServices,
   resolveAzureServices,
+  AWS_MCP_CONNECTION,
+  AWS_SERVICE_GROUPS,
+  AWS_WORKSPACE_SERVICES,
+  getAwsServicePreset,
   type GoogleServiceId,
   type MicrosoftServiceId,
   type AzureServiceId,
+  type AwsServiceId,
 } from "@liminal/core";
 import type { IntegrationConnectionSummary } from "./integrations_server.js";
 import type { IntegrationsOAuthAccount } from "./integrations_snapshot.js";
 
-export type ServiceCardCategory = "google" | "microsoft";
+export type ServiceCardCategory = "google" | "microsoft" | "aws";
 
 export interface IntegrationServiceCard {
   category: ServiceCardCategory;
-  vendor: "google" | "microsoft" | "azure";
+  vendor: "google" | "microsoft" | "azure" | "aws";
   serviceId: string;
   label: string;
   groupId: string;
@@ -263,14 +268,67 @@ export function buildAzureServiceCards(
   );
 }
 
+function awsServiceConnected(
+  serviceId: AwsServiceId,
+  accounts: IntegrationsOAuthAccount[],
+  connections: IntegrationConnectionSummary[]
+): { connected: boolean; needsScopeReconnect: boolean; toolCount: number } {
+  const signedIn = accounts.length > 0;
+  if (!signedIn) {
+    return { connected: false, needsScopeReconnect: false, toolCount: 0 };
+  }
+  const awsConn = connections.find(
+    (c) => c.parentProvider === "aws" && c.name === AWS_MCP_CONNECTION
+  );
+  const attached = Boolean(
+    awsConn &&
+      (awsConn.services?.includes(serviceId) || awsConn.services?.includes("all"))
+  );
+  return {
+    connected: signedIn && attached,
+    needsScopeReconnect: false,
+    toolCount: attached ? awsConn?.toolCount ?? 0 : 0,
+  };
+}
+
+export function buildAwsServiceCards(
+  accounts: IntegrationsOAuthAccount[],
+  connections: IntegrationConnectionSummary[]
+): IntegrationServiceCard[] {
+  const signedIn = accounts.length > 0;
+  return AWS_SERVICE_GROUPS.flatMap((group) =>
+    group.services
+      .map((id) => getAwsServicePreset(id))
+      .filter((p): p is NonNullable<typeof p> => p != null)
+      .map((preset) => {
+        const status = awsServiceConnected(preset.id, accounts, connections);
+        return {
+          category: "aws",
+          vendor: "aws",
+          serviceId: preset.id,
+          label: preset.label,
+          groupId: group.id,
+          groupLabel: group.label,
+          signedIn,
+          connected: status.connected,
+          toolCount: status.toolCount,
+          needsScopeReconnect: status.needsScopeReconnect,
+          restOnly: preset.backend === "aws_rest",
+        };
+      })
+  );
+}
+
 export function buildWorkspaceServiceCards(input: {
   googleAccounts: IntegrationsOAuthAccount[];
   microsoftAccounts: IntegrationsOAuthAccount[];
   azureAccounts: IntegrationsOAuthAccount[];
+  awsAccounts: IntegrationsOAuthAccount[];
   connections: IntegrationConnectionSummary[];
 }): {
   google: IntegrationServiceCard[];
   microsoft: IntegrationServiceCard[];
+  aws: IntegrationServiceCard[];
 } {
   return {
     google: buildGoogleServiceCards(input.googleAccounts, input.connections),
@@ -278,5 +336,6 @@ export function buildWorkspaceServiceCards(input: {
       ...buildMicrosoftServiceCards(input.microsoftAccounts, input.connections),
       ...buildAzureServiceCards(input.azureAccounts, input.connections),
     ],
+    aws: buildAwsServiceCards(input.awsAccounts, input.connections),
   };
 }

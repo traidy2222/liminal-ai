@@ -131,6 +131,38 @@ IntegrationProviderPresentation integrationPresentation({
         toolsAttached: false,
       );
 
+    case IntegrationBrandId.aws:
+      if (snap.awsToolsAttached) {
+        final n = snap.aws.accounts.length;
+        return IntegrationProviderPresentation(
+          nextStep: n > 1
+              ? '$n identities · ${snap.awsToolCount} MCP tools'
+              : '${snap.awsToolCount} MCP tools active',
+          actionLabel: 'Connect service',
+          ready: true,
+          highlight: true,
+          statusMode: IntegrationStatusMode.simple,
+          signedIn: true,
+          toolsAttached: true,
+        );
+      }
+      if (snap.awsSignedIn) {
+        return IntegrationProviderPresentation(
+          nextStep: 'Credentials found — attach AWS MCP tools',
+          actionLabel: 'Enable tools',
+          statusMode: IntegrationStatusMode.simple,
+          signedIn: true,
+          toolsAttached: false,
+        );
+      }
+      return const IntegrationProviderPresentation(
+        nextStep: 'Configure AWS CLI or env keys, then connect',
+        actionLabel: 'Connect',
+        statusMode: IntegrationStatusMode.simple,
+        signedIn: false,
+        toolsAttached: false,
+      );
+
     case IntegrationBrandId.ida:
       if (snap.idaConnected) {
         return IntegrationProviderPresentation(

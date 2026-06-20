@@ -34,8 +34,8 @@ export interface WorkspaceConnectPresetDto {
 }
 
 export interface IntegrationServiceCardDto {
-  category: "google" | "microsoft";
-  vendor: "google" | "microsoft" | "azure";
+  category: "google" | "microsoft" | "aws";
+  vendor: "google" | "microsoft" | "azure" | "aws";
   serviceId: string;
   label: string;
   groupId: string;
@@ -68,6 +68,13 @@ export interface IntegrationsData {
     accounts: OAuthAccount[];
     sidecar: { enabled: boolean; running: boolean; port: number; url: string; pid?: number };
     services: string[];
+  };
+  aws?: {
+    accounts: OAuthAccount[];
+    sidecar: { running: boolean; url?: string; error?: string };
+    services: string[];
+    defaultServices: string[];
+    serviceGroups: WorkspaceServiceGroupDto[];
   };
   github?: {
     accounts: Array<OAuthAccount & { login?: string }>;
@@ -108,6 +115,7 @@ export interface IntegrationsData {
   serviceCards?: {
     google: IntegrationServiceCardDto[];
     microsoft: IntegrationServiceCardDto[];
+    aws: IntegrationServiceCardDto[];
   };
   providerStatus?: Record<
     string,
@@ -125,8 +133,10 @@ export type IntegrationExpandedId =
   | `google:${string}`
   | `microsoft:${string}`
   | `azure:${string}`
+  | `aws:${string}`
   | "google-accounts"
   | "microsoft-accounts"
+  | "aws-accounts"
   | "xero"
   | "slack"
   | "linear"

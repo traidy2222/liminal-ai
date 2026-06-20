@@ -47,6 +47,14 @@ export function deferIntegrationBootstrap(
       });
     }
     try {
+      const { bootstrapAws } = await import("../aws/aws_boot.js");
+      await bootstrapAws(registry);
+    } catch (e) {
+      emitter.emit("error", {
+        err: new Error(`AWS boot: ${e instanceof Error ? e.message : String(e)}`),
+      });
+    }
+    try {
       const { bootstrapIda } = await import("../ida/ida_boot.js");
       await bootstrapIda(registry);
     } catch (e) {

@@ -43,7 +43,8 @@ export type AuthScheme =
   | { kind: "oauth2"; provider: "google"; accountId?: string; scopes: string[] }
   | { kind: "oauth2"; provider: "microsoft"; accountId?: string; scopes: string[] }
   | { kind: "oauth2"; provider: "github"; accountId?: string; scopes: string[] }
-  | { kind: "oauth2"; provider: "azure"; accountId?: string; scopes: string[] };
+  | { kind: "oauth2"; provider: "azure"; accountId?: string; scopes: string[] }
+  | { kind: "aws_iam"; region?: string; service?: string; profile?: string };
 
 export interface McpToolFilter {
   include?: string[];
@@ -161,6 +162,7 @@ export async function listConnections(): Promise<ConnectionRecord[]> {
 export function resolveAuthHeader(auth: AuthScheme): Record<string, string> {
   if (auth.kind === "none") return {};
   if (auth.kind === "oauth2") return {};
+  if (auth.kind === "aws_iam") return {};
   const value = process.env[auth.envVar]?.trim();
   if (!value) return {};
   if (auth.kind === "bearer") return { Authorization: `Bearer ${value}` };
@@ -210,6 +212,14 @@ export function azureOAuthAuthScheme(accountId?: string, scopes: string[] = []):
   return { kind: "oauth2", provider: "azure", accountId, scopes };
 }
 
+export function awsIamAuthSchemeForStore(opts?: {
+  region?: string;
+  service?: string;
+  profile?: string;
+}): AuthScheme {
+  return { kind: "aws_iam", ...opts };
+}
+
 export function listConnectionsByParent(parentProvider: string): Promise<McpConnectionRecord[]> {
   return listConnections().then((all) =>
     all.filter(
@@ -240,6 +250,13 @@ function isAzureMcp(c: McpConnectionRecord): boolean {
   return false;
 }
 
+function isAwsMcp(c: McpConnectionRecord): boolean {
+  if (c.parentProvider === "aws") return true;
+  if (c.auth.kind === "aws_iam") return true;
+  if (c.name === "aws" || c.name.startsWith("aws_")) return true;
+  return false;
+}
+
 /** Curated Google Workspace MCP rows — includes legacy records missing parentProvider. */
 export async function listGoogleWorkspaceConnections(): Promise<McpConnectionRecord[]> {
   const all = await listConnections();
@@ -256,4 +273,10 @@ export async function listMicrosoft365Connections(): Promise<McpConnectionRecord
 export async function listAzureConnections(): Promise<McpConnectionRecord[]> {
   const all = await listConnections();
   return all.filter((c): c is McpConnectionRecord => c.kind === "mcp" && isAzureMcp(c));
+}
+
+/** Curated AWS MCP rows. */
+export async function listAwsConnections(): Promise<McpConnectionRecord[]> {
+  const all = await listConnections();
+  return all.filter((c): c is McpConnectionRecord => c.kind === "mcp" && isAwsMcp(c));
 }

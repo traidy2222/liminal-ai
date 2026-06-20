@@ -159,6 +159,12 @@ export interface ClientCommandMap {
     mode?: "read_write" | "read_only";
   };
   disconnect_azure: { revoke?: boolean };
+  connect_aws: {
+    services?: string[];
+    mode?: "read_write" | "read_only";
+    profile?: string;
+  };
+  disconnect_aws: { clearIdentity?: boolean };
   connect_xero_oauth: {
     mode?: "read_write" | "read_only";
     openBrowser?: boolean;

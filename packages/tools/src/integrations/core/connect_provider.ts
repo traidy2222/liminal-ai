@@ -95,6 +95,8 @@ import {
   getAzureSidecarStatus,
 } from "../azure/azure_sidecar.js";
 import { azureRestEnabled } from "../azure/azure_rest.js";
+import { connectAwsFromServer, disconnectAwsFromServer } from "../aws/aws_connect.js";
+import { awsRestEnabled, awsMcpEnabled } from "../aws/aws_rest.js";
 import { outlookRestEnabled } from "../microsoft/outlook_send.js";
 import { microsoftCalendarRestEnabled } from "../microsoft/microsoft_calendar_rest.js";
 import { onedriveRestEnabled } from "../microsoft/onedrive_rest.js";
@@ -451,7 +453,7 @@ export function createConnectorTools(registry: ToolRegistry, _emitter: AgentEmit
       properties: {
         provider: {
           type: "string",
-          enum: ["google_workspace", "microsoft_365", "azure", "xero", "github", "slack", "linear", "notion", "youtube", "ida"],
+          enum: ["google_workspace", "microsoft_365", "azure", "aws", "xero", "github", "slack", "linear", "notion", "youtube", "ida"],
           description: "Provider preset id.",
         },
         start_oauth: {
@@ -513,6 +515,20 @@ export function createConnectorTools(registry: ToolRegistry, _emitter: AgentEmit
       }
       if (provider === "azure") {
         return connectAzureHandler(registry, args, emit);
+      }
+      if (provider === "aws") {
+        const result = await connectAwsFromServer(registry, {
+          services: Array.isArray(args["services"])
+            ? (args["services"] as unknown[]).map((s) => String(s))
+            : undefined,
+          mode: args["mode"] === "read_only" ? "read_only" : "read_write",
+          profile: typeof args["profile"] === "string" ? args["profile"].trim() : undefined,
+        });
+        if (!result.ok) return { ok: false, error: result.error ?? "AWS connect failed" };
+        return {
+          ok: true,
+          output: (result.output ?? "") + integrationLazyLoadHint(registry, "aws"),
+        };
       }
       if (provider === "xero") {
         const oauthPrep = await prepareProviderOAuth("xero", args, emit);
@@ -762,7 +778,7 @@ export function createConnectorTools(registry: ToolRegistry, _emitter: AgentEmit
       properties: {
         provider: {
           type: "string",
-          enum: ["google_workspace", "microsoft_365", "azure", "xero", "github", "slack", "linear", "notion", "youtube", "ida"],
+          enum: ["google_workspace", "microsoft_365", "azure", "aws", "xero", "github", "slack", "linear", "notion", "youtube", "ida"],
         },
         revoke_oauth: {
           type: "boolean",
@@ -852,6 +868,11 @@ export function createConnectorTools(registry: ToolRegistry, _emitter: AgentEmit
       if (provider === "azure") {
         return disconnectAzureMcp(registry, args["revoke_oauth"] === true);
       }
+      if (provider === "aws") {
+        const result = await disconnectAwsFromServer(registry, args["revoke_oauth"] === true);
+        if (!result.ok) return { ok: false, error: result.error ?? "AWS disconnect failed" };
+        return { ok: true, output: result.output ?? "Disconnected AWS" };
+      }
       if (provider !== "google_workspace") {
         return { ok: false, error: `unsupported provider '${provider}'` };
       }
@@ -929,6 +950,9 @@ export function createConnectorTools(registry: ToolRegistry, _emitter: AgentEmit
       );
       lines.push(
         `Azure: mcp_azure_* (@azure/mcp sidecar) + ARM REST — rest=${azureRestEnabled() ? "on" : "off"}, connect via Settings or connect_provider({ provider: "azure" })`
+      );
+      lines.push(
+        `AWS: mcp_aws_* (AWS MCP Server, SigV4) + CLI REST — rest=${awsRestEnabled() ? "on" : "off"}, mcp=${awsMcpEnabled() ? "on" : "off"}, connect via Settings or connect_provider({ provider: "aws" }); requires AWS CLI + IAM credentials`
       );
       lines.push(
         `Xero: REST accounting tools — ${xeroRestEnabled() ? "on" : "off (set AGENT_XERO_REST=0 to disable)"}, connect via Settings → Integrations (hosted OAuth)`

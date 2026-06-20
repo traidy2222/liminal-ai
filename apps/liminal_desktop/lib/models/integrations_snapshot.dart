@@ -46,10 +46,12 @@ class WorkspaceServiceCards {
   const WorkspaceServiceCards({
     this.google = const [],
     this.microsoft = const [],
+    this.aws = const [],
   });
 
   final List<IntegrationServiceCard> google;
   final List<IntegrationServiceCard> microsoft;
+  final List<IntegrationServiceCard> aws;
 
   factory WorkspaceServiceCards.fromJson(Map<String, dynamic>? json) {
     if (json == null) return const WorkspaceServiceCards();
@@ -66,6 +68,7 @@ class WorkspaceServiceCards {
     return WorkspaceServiceCards(
       google: parseList('google'),
       microsoft: parseList('microsoft'),
+      aws: parseList('aws'),
     );
   }
 
@@ -77,6 +80,7 @@ class IntegrationsSnapshot {
     required this.google,
     required this.microsoft,
     required this.azure,
+    required this.aws,
     required this.github,
     required this.ida,
     required this.xero,
@@ -92,6 +96,7 @@ class IntegrationsSnapshot {
   final GoogleIntegrations google;
   final MicrosoftIntegrations microsoft;
   final MicrosoftIntegrations azure;
+  final MicrosoftIntegrations aws;
   final GithubIntegrations github;
   final IdaIntegrations ida;
   final XeroIntegrations xero;
@@ -107,6 +112,8 @@ class IntegrationsSnapshot {
 
   List<IntegrationServiceCard> get microsoftServiceCards => serviceCards.microsoft;
 
+  List<IntegrationServiceCard> get awsServiceCards => serviceCards.aws;
+
   factory IntegrationsSnapshot.fromJson(Map<String, dynamic> json) {
     final rawStatus = json['providerStatus'] as Map<String, dynamic>? ?? {};
     return IntegrationsSnapshot(
@@ -118,6 +125,9 @@ class IntegrationsSnapshot {
       ),
       azure: MicrosoftIntegrations.fromJson(
         Map<String, dynamic>.from(json['azure'] as Map? ?? {}),
+      ),
+      aws: MicrosoftIntegrations.fromJson(
+        Map<String, dynamic>.from(json['aws'] as Map? ?? {}),
       ),
       github: GithubIntegrations.fromJson(
         Map<String, dynamic>.from(json['github'] as Map? ?? {}),
@@ -165,6 +175,7 @@ class IntegrationsSnapshot {
     google: GoogleIntegrations.empty,
     microsoft: MicrosoftIntegrations.empty,
     azure: MicrosoftIntegrations.empty,
+    aws: MicrosoftIntegrations.empty,
     github: GithubIntegrations.empty,
     ida: IdaIntegrations.empty,
     xero: XeroIntegrations.empty,
@@ -175,7 +186,7 @@ class IntegrationsSnapshot {
     connections: [],
   );
 
-  static const _curatedParents = {'google_workspace', 'microsoft_365', 'azure', 'github', 'ida'};
+  static const _curatedParents = {'google_workspace', 'microsoft_365', 'azure', 'aws', 'github', 'ida'};
 
   List<IntegrationConnection> get customMcp => connections
       .where(
@@ -203,6 +214,10 @@ class IntegrationsSnapshot {
 
   List<IntegrationConnection> get azureMcp => connections
       .where((c) => c.kind == 'mcp' && c.parentProvider == 'azure')
+      .toList();
+
+  List<IntegrationConnection> get awsMcp => connections
+      .where((c) => c.kind == 'mcp' && c.parentProvider == 'aws')
       .toList();
 
   List<IntegrationConnection> get openApi =>
@@ -246,6 +261,12 @@ class IntegrationsSnapshot {
 
   bool get azureSignedIn => providerStatus['azure']?.signedIn ?? azure.accounts.isNotEmpty;
 
+  bool get awsConnected => awsMcp.isNotEmpty || aws.accounts.isNotEmpty;
+
+  bool get awsToolsAttached => awsMcp.isNotEmpty;
+
+  bool get awsSignedIn => providerStatus['aws']?.signedIn ?? aws.accounts.isNotEmpty;
+
   bool get githubConnected => githubMcp.isNotEmpty;
 
   bool get githubSignedIn => providerStatus['github']?.signedIn ?? github.accounts.isNotEmpty;
@@ -286,6 +307,8 @@ class IntegrationsSnapshot {
   int get microsoftToolCount => microsoftMcp.fold(0, (n, c) => n + c.toolCount);
 
   int get azureToolCount => azureMcp.fold(0, (n, c) => n + c.toolCount);
+
+  int get awsToolCount => awsMcp.fold(0, (n, c) => n + c.toolCount);
 
   int get githubToolCount => githubMcp.fold(0, (n, c) => n + c.toolCount);
 

@@ -29,6 +29,7 @@ export function useIntegrationsPanel(agentBusy: boolean) {
   const [mode, setMode] = useState<ReadWriteMode>("read_write");
   const [msMode, setMsMode] = useState<ReadWriteMode>("read_write");
   const [azureMode, setAzureMode] = useState<ReadWriteMode>("read_write");
+  const [awsMode, setAwsMode] = useState<ReadWriteMode>("read_write");
   const [xeroMode, setXeroMode] = useState<ReadWriteMode>("read_write");
   const [xeroExtended, setXeroExtended] = useState(false);
   const [xeroFullScopes, setXeroFullScopes] = useState(false);
@@ -158,10 +159,11 @@ export function useIntegrationsPanel(agentBusy: boolean) {
 
   const derived = useMemo(() => {
     const connections = data?.connections ?? [];
-    const curatedParents = new Set(["google_workspace", "microsoft_365", "azure", "github", "ida"]);
+    const curatedParents = new Set(["google_workspace", "microsoft_365", "azure", "aws", "github", "ida"]);
     const googleMcp = connections.filter((c) => c.kind === "mcp" && c.parentProvider === "google_workspace");
     const microsoftMcp = connections.filter((c) => c.kind === "mcp" && c.parentProvider === "microsoft_365");
     const azureMcp = connections.filter((c) => c.kind === "mcp" && c.parentProvider === "azure");
+    const awsMcp = connections.filter((c) => c.kind === "mcp" && c.parentProvider === "aws");
     const githubMcp = connections.filter((c) => c.kind === "mcp" && c.parentProvider === "github");
     const idaMcp = connections.filter((c) => c.kind === "mcp" && c.parentProvider === "ida");
     const msGraphConn = microsoftMcp.find((c) => c.name === "microsoft");
@@ -169,6 +171,7 @@ export function useIntegrationsPanel(agentBusy: boolean) {
     const accounts = data?.google.accounts ?? [];
     const msAccounts = data?.microsoft?.accounts ?? [];
     const azureAccounts = data?.azure?.accounts ?? [];
+    const awsAccounts = data?.aws?.accounts ?? [];
     const githubAccounts = data?.github?.accounts ?? [];
     const xeroAccounts = data?.xero?.accounts ?? [];
     const slackAccounts = data?.slack?.accounts ?? [];
@@ -187,6 +190,7 @@ export function useIntegrationsPanel(agentBusy: boolean) {
       googleMcp,
       microsoftMcp,
       azureMcp,
+      awsMcp,
       githubMcp,
       idaMcp,
       idaSidecar: data?.ida?.sidecar,
@@ -206,6 +210,8 @@ export function useIntegrationsPanel(agentBusy: boolean) {
       msConnectPresets: data?.microsoft?.connectPresets ?? [],
       azureAccounts,
       azureSidecar: data?.azure?.sidecar,
+      awsAccounts,
+      awsSidecar: data?.aws?.sidecar,
       xeroAccounts,
       slackAccounts,
       linearAccounts,
@@ -219,6 +225,7 @@ export function useIntegrationsPanel(agentBusy: boolean) {
       googleMcpAttached: googleMcp.length > 0,
       microsoftMcpAttached: microsoftMcp.length > 0,
       azureConnected: azureMcp.length > 0,
+      awsConnected: awsMcp.length > 0,
       githubConnected: githubMcp.length > 0,
       idaConnected: idaMcp.length > 0,
       xeroConnected: xeroAccounts.length > 0,
@@ -231,15 +238,18 @@ export function useIntegrationsPanel(agentBusy: boolean) {
       googleToolCount: googleMcp.reduce((n, c) => n + c.toolCount, 0),
       microsoftToolCount: microsoftMcp.reduce((n, c) => n + c.toolCount, 0),
       azureToolCount: azureMcp.reduce((n, c) => n + c.toolCount, 0),
+      awsToolCount: awsMcp.reduce((n, c) => n + c.toolCount, 0),
       githubToolCount: githubMcp.reduce((n, c) => n + c.toolCount, 0),
       idaToolCount: idaMcp.reduce((n, c) => n + c.toolCount, 0),
       googleSignedIn: providerStatus?.google?.signedIn ?? accounts.length > 0,
       microsoftSignedIn: providerStatus?.microsoft?.signedIn ?? msAccounts.length > 0,
       azureSignedIn: providerStatus?.azure?.signedIn ?? azureAccounts.length > 0,
+      awsSignedIn: providerStatus?.aws?.signedIn ?? awsAccounts.length > 0,
       githubSignedIn: providerStatus?.github?.signedIn ?? githubAccounts.length > 0,
       idaSignedIn: providerStatus?.ida?.signedIn ?? (data?.ida?.enabled && (data?.ida?.sidecar?.running || data?.ida?.guiReachable)) ?? false,
       googleServiceCards: data?.serviceCards?.google ?? [],
       microsoftServiceCards: data?.serviceCards?.microsoft ?? [],
+      awsServiceCards: data?.serviceCards?.aws ?? [],
     };
   }, [data]);
 
@@ -318,6 +328,22 @@ export function useIntegrationsPanel(agentBusy: boolean) {
   const connectAzureService = useCallback(
     (serviceId: string) => connectWorkspaceService("azure", serviceId),
     [connectWorkspaceService]
+  );
+
+  const connectAwsService = useCallback(
+    async (serviceId: string) => {
+      const res = await webApiFetch("/api/integrations/aws/connect", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ services: [serviceId], mode: awsMode }),
+      });
+      const json = (await res.json()) as { error?: string };
+      if (!res.ok) throw new Error(json.error ?? "connect failed");
+      await pollIntegrationsUntil((d) =>
+        Boolean(d.serviceCards?.aws.find((c) => c.serviceId === serviceId)?.connected)
+      );
+    },
+    [awsMode, pollIntegrationsUntil]
   );
 
   const googlePrimary = useCallback(async () => {
@@ -607,6 +633,8 @@ export function useIntegrationsPanel(agentBusy: boolean) {
       setMsMode,
       azureMode,
       setAzureMode,
+      awsMode,
+      setAwsMode,
       xeroMode,
       setXeroMode,
       xeroExtended,
@@ -683,6 +711,7 @@ export function useIntegrationsPanel(agentBusy: boolean) {
       connectGoogleService,
       connectMicrosoftService,
       connectAzureService,
+      connectAwsService,
     },
   };
 }

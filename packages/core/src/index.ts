@@ -1430,6 +1430,32 @@ export {
 } from "./azure_connector_catalog.js";
 export type { AzureServiceId, AzureServicePreset, AzureConnectorBackend } from "./azure_connector_catalog.js";
 export {
+  ALL_AWS_SERVICE_IDS,
+  DEFAULT_AWS_SERVICE_IDS,
+  AWS_MCP_CONNECTION,
+  AWS_WORKSPACE_SERVICES,
+  AWS_SERVICE_GROUPS,
+  getAwsServicePreset,
+  resolveAwsServices,
+  needsAwsMcp,
+  defaultAwsMcpEndpoint,
+} from "./aws_connector_catalog.js";
+export type { AwsServiceId, AwsServicePreset, AwsConnectorBackend } from "./aws_connector_catalog.js";
+export {
+  tryAwsStsGetCallerIdentity,
+  awsProfileFromEnv,
+  awsRegionFromEnv,
+  awsCredentialsConfigured,
+} from "./aws_cli_identity.js";
+export type { AwsCallerIdentity } from "./aws_cli_identity.js";
+export {
+  listAwsIdentityAccounts,
+  saveAwsIdentityAccount,
+  removeAwsIdentityAccount,
+  clearAwsIdentityAccounts,
+} from "./aws_identity_store.js";
+export type { AwsIdentityAccount } from "./aws_identity_store.js";
+export {
   missingAzureScopes,
   formatAzureScopeDiagnostics,
   missingDefaultAzureScopes,
@@ -1488,6 +1514,7 @@ export {
   applyHostedOAuthHandoff,
   isHostedOAuthFormHandoffContent,
   parseHostedOAuthHandoffHttpBody,
+  hostedOAuthHandoffCorsHeaders,
   runHostedIntegrationConnectFlow,
 } from "./hosted_oauth_connect.js";
 export type {

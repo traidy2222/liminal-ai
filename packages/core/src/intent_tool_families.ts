@@ -89,6 +89,9 @@ export function inferIntentToolFamilies(
     if (/azure|resource group|key vault|app service|cosmos|aks|blob storage|arm template/i.test(trimmed)) {
       if (has("azure")) out.add("azure");
     }
+    if (/\baws\b|ec2|s3 bucket|lambda function|dynamodb|cloudformation|iam role|route ?53|api gateway|eks cluster|ecs task/i.test(trimmed)) {
+      if (has("aws")) out.add("aws");
+    }
     if (/gmail|inbox|send mail/i.test(trimmed)) {
       if (has("google_mail")) out.add("google_mail");
     }

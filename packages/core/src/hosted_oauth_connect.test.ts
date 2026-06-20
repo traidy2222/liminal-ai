@@ -1,6 +1,6 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { parseHostedOAuthHandoffHttpBody } from "./hosted_oauth_connect.js";
+import { parseHostedOAuthHandoffHttpBody, hostedOAuthHandoffCorsHeaders } from "./hosted_oauth_connect.js";
 
 describe("hosted_oauth_connect handoff parse", () => {
   it("parses form payload= base64url without Content-Type", () => {
@@ -22,5 +22,11 @@ describe("hosted_oauth_connect handoff parse", () => {
       "application/json"
     );
     assert.equal(parsed.state, "s");
+  });
+
+  it("builds PNA-aware CORS headers for vireon origin", () => {
+    const headers = hostedOAuthHandoffCorsHeaders("https://www.vireondynamics.com");
+    assert.equal(headers["Access-Control-Allow-Origin"], "https://www.vireondynamics.com");
+    assert.equal(headers["Access-Control-Allow-Private-Network"], "true");
   });
 });

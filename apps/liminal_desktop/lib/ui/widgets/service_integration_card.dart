@@ -29,6 +29,8 @@ class ServiceIntegrationCard extends StatelessWidget {
     switch (card.vendor) {
       case 'azure':
         return IntegrationBrandId.azure;
+      case 'aws':
+        return IntegrationBrandId.aws;
       case 'microsoft':
         return IntegrationBrandId.microsoft;
       default:

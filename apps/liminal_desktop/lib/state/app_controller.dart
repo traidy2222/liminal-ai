@@ -1704,10 +1704,23 @@ class AppController extends ChangeNotifier {
         'mode': mode,
       });
 
+  Future<bool> connectAws({
+    List<String>? services,
+    String mode = 'read_write',
+    String? profile,
+  }) =>
+      _runIntegrationCommand('connect_aws', {
+        if (services != null) 'services': services,
+        'mode': mode,
+        if (profile != null) 'profile': profile,
+      });
+
   IntegrationServiceCard? _findServiceCard(String vendor, String serviceId) {
-    final list = vendor == 'google'
-        ? integrations.googleServiceCards
-        : integrations.microsoftServiceCards;
+    final list = switch (vendor) {
+      'google' => integrations.googleServiceCards,
+      'aws' => integrations.awsServiceCards,
+      _ => integrations.microsoftServiceCards,
+    };
     for (final card in list) {
       if (card.serviceId != serviceId) continue;
       if (vendor == 'azure') {
@@ -1725,6 +1738,14 @@ class AppController extends ChangeNotifier {
     required String serviceId,
     required String mode,
   }) async {
+    if (vendor == 'aws') {
+      final card = _findServiceCard(vendor, serviceId);
+      if (card?.connected == true) return true;
+      final ok = await connectAws(services: [serviceId], mode: mode);
+      if (ok) await loadIntegrations();
+      return ok;
+    }
+
     var card = _findServiceCard(vendor, serviceId);
     if (card == null || !card.signedIn || card.needsScopeReconnect) {
       final ok = switch (vendor) {
@@ -1762,6 +1783,9 @@ class AppController extends ChangeNotifier {
 
   Future<bool> disconnectAzure({bool revoke = false}) =>
       _runIntegrationCommand('disconnect_azure', {'revoke': revoke});
+
+  Future<bool> disconnectAws({bool clearIdentity = false}) =>
+      _runIntegrationCommand('disconnect_aws', {'clearIdentity': clearIdentity});
 
   Future<bool> connectXeroOAuth({
     String mode = 'read_write',

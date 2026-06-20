@@ -18,6 +18,25 @@ export type HostedOAuthHandoffPayload = {
 
 const DEFAULT_HANDOFF_PATH = "/api/integrations/oauth/handoff";
 
+const VIREON_SITE_ORIGINS = [
+  "https://www.vireondynamics.com",
+  "https://vireondynamics.com",
+] as const;
+
+/** CORS headers for fetch handoff from vireondynamics.com → loopback (Chrome Private Network Access). */
+export function hostedOAuthHandoffCorsHeaders(requestOrigin?: string): Record<string, string> {
+  const origin = requestOrigin?.trim();
+  const allowed = new Set<string>([
+    defaultVireonSiteOrigin().replace(/\/$/, ""),
+    ...VIREON_SITE_ORIGINS,
+  ]);
+  const acao = origin && allowed.has(origin) ? origin : defaultVireonSiteOrigin().replace(/\/$/, "");
+  return {
+    "Access-Control-Allow-Origin": acao,
+    "Access-Control-Allow-Private-Network": "true",
+  };
+}
+
 /** Loopback URIs the hosted site may POST OAuth bundles to. */
 export function isHostedOAuthHandoffUri(uri: string): boolean {
   try {
@@ -162,14 +181,12 @@ export function runHostedIntegrationConnectFlow(
   return new Promise((resolve, reject) => {
     const server = createServer(async (req, res) => {
       const url = new URL(req.url ?? "/", "http://127.0.0.1");
-      const siteOriginHeader = origin;
 
       if (req.method === "OPTIONS") {
         res.writeHead(204, {
-          "Access-Control-Allow-Origin": siteOriginHeader,
+          ...hostedOAuthHandoffCorsHeaders(req.headers.origin),
           "Access-Control-Allow-Methods": "POST, OPTIONS",
           "Access-Control-Allow-Headers": "Content-Type",
-          "Access-Control-Allow-Private-Network": "true",
         });
         res.end();
         return;
@@ -215,10 +232,11 @@ export function runHostedIntegrationConnectFlow(
           },
         });
 
+        const cors = hostedOAuthHandoffCorsHeaders(req.headers.origin);
         if (htmlHandoff) {
           res.writeHead(200, {
             "Content-Type": "text/html; charset=utf-8",
-            "Access-Control-Allow-Origin": siteOriginHeader,
+            ...cors,
           });
           res.end(
             "<!DOCTYPE html><html><body style=\"font-family:system-ui,sans-serif;padding:2rem\"><p><strong>Connected.</strong> Close this tab and return to Liminal.</p></body></html>"
@@ -226,7 +244,7 @@ export function runHostedIntegrationConnectFlow(
         } else {
           res.writeHead(200, {
             "Content-Type": "application/json",
-            "Access-Control-Allow-Origin": siteOriginHeader,
+            ...cors,
           });
           res.end(JSON.stringify({ ok: true }));
         }
@@ -243,7 +261,7 @@ export function runHostedIntegrationConnectFlow(
         const message = err instanceof Error ? err.message : String(err);
         res.writeHead(400, {
           "Content-Type": "application/json",
-          "Access-Control-Allow-Origin": siteOriginHeader,
+          ...hostedOAuthHandoffCorsHeaders(req.headers.origin),
         });
         res.end(JSON.stringify({ error: message }));
       }

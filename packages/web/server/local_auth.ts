@@ -70,9 +70,9 @@ export async function createLocalWebAuth(): Promise<LocalWebAuth> {
       return true;
     }
     if (
-      req.method === "POST" &&
       path === "/api/integrations/oauth/handoff" &&
-      isLoopbackAddress(req.socket.remoteAddress)
+      isLoopbackAddress(req.socket.remoteAddress) &&
+      (req.method === "POST" || req.method === "OPTIONS")
     ) {
       return true;
     }

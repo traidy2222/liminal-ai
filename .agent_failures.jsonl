@@ -1,0 +1,2 @@
+{"t":"2026-06-19T02:04:16.299Z","category":"all_tools_failed","round":7,"errors":"write_file: Refusing HTML append: do not write </body> or </html> while the module <script> is still open. Append JavaScript lines, then close </script></body></html> once in the final chunk."}
+{"t":"2026-06-19T02:05:54.665Z","category":"all_tools_failed","round":14,"errors":"write_file: Refusing HTML append: do not write </body> or </html> while the module <script> is still open. Append JavaScript lines, then close </script></body></html> once in the final chunk."}

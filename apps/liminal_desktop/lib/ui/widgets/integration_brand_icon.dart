@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 
-enum IntegrationBrandId { google, microsoft, azure, xero, slack, linear, notion, youtube, github, ida, advanced }
+enum IntegrationBrandId { google, microsoft, azure, aws, xero, slack, linear, notion, youtube, github, ida, advanced }
 
 class IntegrationBrandMeta {
   const IntegrationBrandMeta({
@@ -39,6 +39,13 @@ const integrationBrands = <IntegrationBrandId, IntegrationBrandMeta>{
     tagline: 'Cloud infra & ARM tools',
     accent: Color(0xFF0078D4),
     accentSoft: Color(0x240078D4),
+  ),
+  IntegrationBrandId.aws: IntegrationBrandMeta(
+    id: IntegrationBrandId.aws,
+    title: 'AWS',
+    tagline: 'EC2, S3, Lambda & MCP',
+    accent: Color(0xFFFF9900),
+    accentSoft: Color(0x24FF9900),
   ),
   IntegrationBrandId.xero: IntegrationBrandMeta(
     id: IntegrationBrandId.xero,
@@ -135,6 +142,8 @@ class _BrandLogo extends StatelessWidget {
         return CustomPaint(size: const Size(28, 28), painter: _MicrosoftLogoPainter());
       case IntegrationBrandId.azure:
         return Icon(Icons.cloud_outlined, size: 26, color: integrationBrands[id]!.accent);
+      case IntegrationBrandId.aws:
+        return Icon(Icons.storage_rounded, size: 26, color: integrationBrands[id]!.accent);
       case IntegrationBrandId.xero:
         return CustomPaint(size: const Size(28, 28), painter: _XeroLogoPainter());
       case IntegrationBrandId.slack:

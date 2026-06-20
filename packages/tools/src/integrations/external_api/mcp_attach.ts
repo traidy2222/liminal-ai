@@ -32,6 +32,7 @@ import { validateOutboundEmailStyle } from "../google/gmail_compose_guard.js";
 import { IDA_PARENT_PROVIDER } from "../ida/ida_connect.js";
 import { registerIdaCompanionTools, unregisterIdaCompanionTools } from "../ida/ida_companion_tools.js";
 import { injectIdaDatabaseArgs, wrapIdaMcpHandler } from "../ida/ida_session.js";
+import { awsSignedFetch } from "../aws/aws_sigv4_fetch.js";
 
 const MCP_PROTOCOL_VERSION = "2025-06-18";
 const MCP_CLIENT_INFO = { name: "liminal-harness", version: "0.1.0" };
@@ -71,12 +72,26 @@ async function postJsonRpc<T>(
     ...(await resolveAuthHeaderAsync(auth)),
   };
   if (sessionId) headers["Mcp-Session-Id"] = sessionId;
-  const res = await fetch(serverUrl, {
-    method: "POST",
-    headers,
-    body: JSON.stringify(body),
-    signal: AbortSignal.timeout(MCP_FETCH_TIMEOUT_MS),
-  });
+  const payload = JSON.stringify(body);
+  const res =
+    auth.kind === "aws_iam"
+      ? await awsSignedFetch(
+          serverUrl,
+          {
+            method: "POST",
+            headers,
+            body: payload,
+            auth,
+            signal: AbortSignal.timeout(MCP_FETCH_TIMEOUT_MS),
+          },
+          MCP_FETCH_TIMEOUT_MS
+        )
+      : await fetch(serverUrl, {
+          method: "POST",
+          headers,
+          body: payload,
+          signal: AbortSignal.timeout(MCP_FETCH_TIMEOUT_MS),
+        });
   const nextSessionId = readMcpSessionId(res) ?? sessionId;
   if (!expectReply) {
     await res.arrayBuffer().catch(() => undefined);

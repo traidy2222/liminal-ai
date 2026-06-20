@@ -94,6 +94,8 @@ import {
   connectAzureOAuth,
   connectAzure,
   disconnectAzure,
+  connectAws,
+  disconnectAws,
   connectXeroOAuth,
   disconnectXero,
   connectSlackOAuth,
@@ -1152,6 +1154,34 @@ export class WsServer {
           const d = data as { revoke?: boolean };
           try {
             const output = await disconnectAzure(this.registry, d.revoke === true);
+            const snap = await buildIntegrationsSnapshot();
+            this.ack(ws, id, true, undefined, { output, integrations: snap });
+          } catch (err) {
+            this.ack(ws, id, false, err instanceof Error ? err.message : String(err));
+          }
+          return;
+        }
+
+        case "connect_aws": {
+          const d = data as {
+            services?: string[];
+            mode?: "read_write" | "read_only";
+            profile?: string;
+          };
+          try {
+            const output = await connectAws(this.registry, d);
+            const snap = await buildIntegrationsSnapshot();
+            this.ack(ws, id, true, undefined, { output, integrations: snap });
+          } catch (err) {
+            this.ack(ws, id, false, err instanceof Error ? err.message : String(err));
+          }
+          return;
+        }
+
+        case "disconnect_aws": {
+          const d = data as { clearIdentity?: boolean };
+          try {
+            const output = await disconnectAws(this.registry, d.clearIdentity === true);
             const snap = await buildIntegrationsSnapshot();
             this.ack(ws, id, true, undefined, { output, integrations: snap });
           } catch (err) {

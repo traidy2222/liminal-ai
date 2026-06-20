@@ -2,6 +2,9 @@
  * Canonical integrations snapshot for web, desktop sidecar, and settings UI.
  */
 import {
+  ALL_AWS_SERVICE_IDS,
+  AWS_SERVICE_GROUPS,
+  DEFAULT_AWS_SERVICE_IDS,
   ALL_AZURE_SERVICE_IDS,
   ALL_GOOGLE_SERVICE_IDS,
   ALL_MICROSOFT_SERVICE_IDS,
@@ -22,6 +25,7 @@ import {
   youtubeConnectOptionsFromMetadata,
   listSlackOAuthAccounts,
   listXeroOAuthAccounts,
+  listAwsIdentityAccounts,
   missingDefaultAzureScopes,
   missingGoogleScopes,
   missingMicrosoftScopes,
@@ -36,6 +40,7 @@ import {
   effectiveHarnessEnvRaw,
 } from "@liminal/core";
 import { getAzureSidecarStatus } from "../azure/azure_sidecar.js";
+import { getAwsIntegrationStatus } from "../aws/aws_connect.js";
 import { getGoogleSidecarStatus } from "../google/google_sidecar.js";
 import { getMicrosoftSidecarStatus } from "../microsoft/microsoft_sidecar.js";
 import { getIdaSidecarStatus } from "../ida/ida_sidecar.js";
@@ -91,6 +96,13 @@ export interface IntegrationsSnapshot {
     accounts: IntegrationsOAuthAccount[];
     sidecar: IntegrationsSidecarStatus;
     services: string[];
+  };
+  aws: {
+    accounts: IntegrationsOAuthAccount[];
+    sidecar: IntegrationsSidecarStatus;
+    services: string[];
+    defaultServices: string[];
+    serviceGroups: typeof AWS_SERVICE_GROUPS;
   };
   github: {
     accounts: Array<IntegrationsOAuthAccount & { login?: string }>;
@@ -151,6 +163,7 @@ export interface IntegrationsSnapshot {
   serviceCards: {
     google: IntegrationServiceCard[];
     microsoft: IntegrationServiceCard[];
+    aws: IntegrationServiceCard[];
   };
 }
 
@@ -202,6 +215,7 @@ export function deriveIntegrationProviderStatuses(
     google: { accounts: IntegrationsOAuthAccount[] };
     microsoft: { accounts: IntegrationsOAuthAccount[] };
     azure: { accounts: IntegrationsOAuthAccount[] };
+    aws: { accounts: IntegrationsOAuthAccount[] };
     github: { accounts: IntegrationsOAuthAccount[] };
     xero: { accounts: Array<IntegrationsOAuthAccount & { missingCoreScopes?: string[] }> };
     slack: { accounts: IntegrationsOAuthAccount[] };
@@ -220,6 +234,7 @@ export function deriveIntegrationProviderStatuses(
   const google = toolsForParent(connections, "google_workspace");
   const microsoft = toolsForParent(connections, "microsoft_365");
   const azure = toolsForParent(connections, "azure");
+  const aws = toolsForParent(connections, "aws");
   const github = toolsForParent(connections, "github");
   const ida = toolsForParent(connections, "ida");
 
@@ -291,6 +306,16 @@ export function deriveIntegrationProviderStatuses(
       accountHasMissingScopes(snapshot.microsoft.accounts)
     ),
     azure: oauthMcp("azure", snapshot.azure.accounts, "azure", accountHasMissingScopes(snapshot.azure.accounts)),
+    aws: {
+      id: "aws",
+      connectMode: "custom" as const,
+      signedIn: snapshot.aws.accounts.length > 0,
+      toolsAttached: aws.attached,
+      toolCount: aws.toolCount,
+      ready: aws.attached,
+      accountCount: snapshot.aws.accounts.length,
+      needsScopeReconnect: false,
+    },
     github: {
       ...oauthMcp("github", snapshot.github.accounts, "github", false),
       ready: github.attached,
@@ -358,6 +383,18 @@ export async function buildIntegrationsSnapshot(): Promise<IntegrationsSnapshot>
       })),
       sidecar: await getAzureSidecarStatus(),
       services: ALL_AZURE_SERVICE_IDS,
+    },
+    aws: {
+      accounts: (await listAwsIdentityAccounts()).map((a) => ({
+        accountId: a.accountId,
+        email: a.label ?? a.arn,
+        scopes: [] as string[],
+        expiresAt: 0,
+      })),
+      sidecar: await getAwsIntegrationStatus(),
+      services: ALL_AWS_SERVICE_IDS,
+      defaultServices: DEFAULT_AWS_SERVICE_IDS,
+      serviceGroups: AWS_SERVICE_GROUPS,
     },
     github: {
       accounts: (await listGithubOAuthAccounts()).map((a) => ({
@@ -446,6 +483,7 @@ export async function buildIntegrationsSnapshot(): Promise<IntegrationsSnapshot>
       googleAccounts: body.google.accounts,
       microsoftAccounts: body.microsoft.accounts,
       azureAccounts: body.azure.accounts,
+      awsAccounts: body.aws.accounts,
       connections,
     }),
     providerStatus: deriveIntegrationProviderStatuses(body),

@@ -66,6 +66,7 @@ export function IntegrationsPanel({ agentBusy }: IntegrationsPanelProps) {
     accounts,
     msAccounts,
     azureAccounts,
+    awsAccounts,
     xeroAccounts,
     slackAccounts,
     linearAccounts,
@@ -89,6 +90,7 @@ export function IntegrationsPanel({ agentBusy }: IntegrationsPanelProps) {
     idaSignedIn,
     googleServiceCards,
     microsoftServiceCards,
+    awsServiceCards,
     customMcp,
     openApi,
   } = d;
@@ -108,6 +110,7 @@ export function IntegrationsPanel({ agentBusy }: IntegrationsPanelProps) {
     connectGoogleService,
     connectMicrosoftService,
     connectAzureService,
+    connectAwsService,
   } = actions;
 
   const {
@@ -117,6 +120,8 @@ export function IntegrationsPanel({ agentBusy }: IntegrationsPanelProps) {
     setMsMode,
     azureMode,
     setAzureMode,
+    awsMode,
+    setAwsMode,
     xeroMode,
     setXeroMode,
     xeroExtended,
@@ -375,6 +380,91 @@ export function IntegrationsPanel({ agentBusy }: IntegrationsPanelProps) {
                   type="radio"
                   checked={rwMode === "read_only"}
                   onChange={() => setRwMode("read_only")}
+                  disabled={disabled}
+                />{" "}
+                Read only
+              </label>
+            </ServiceIntegrationCard>
+          );
+        })}
+      </IntegrationCategorySection>
+
+      <IntegrationCategorySection
+        title="Amazon Web Services"
+        subtitle="IAM credentials via AWS CLI — connect EC2, S3, Lambda, and more through the AWS MCP Server."
+        footer={
+          expanded === "aws-accounts" ? (
+            <div>
+              {awsAccounts.map((a) => (
+                <div key={a.accountId} style={{ fontSize: 11, fontFamily: "monospace", color: GREEN, marginBottom: 6 }}>
+                  AWS: {a.email ?? a.accountId}
+                </div>
+              ))}
+              <button
+                type="button"
+                style={{ ...btnDanger, fontSize: 10, padding: "6px 10px", marginTop: 8 }}
+                disabled={disabled || awsAccounts.length === 0}
+                onClick={() =>
+                  void run(async () => {
+                    const res = await webApiFetch("/api/integrations/aws?revoke=1", { method: "DELETE" });
+                    const json = (await res.json()) as { error?: string };
+                    if (!res.ok) throw new Error(json.error ?? "disconnect failed");
+                    await load();
+                  })
+                }
+              >
+                Disconnect AWS
+              </button>
+            </div>
+          ) : (
+            <button
+              type="button"
+              style={{ ...btn, fontSize: 10, padding: "4px 8px" }}
+              onClick={() => toggleExpand("aws-accounts")}
+            >
+              AWS identities ({awsAccounts.length})
+            </button>
+          )
+        }
+      >
+        {awsServiceCards.map((card) => {
+          const expandId = `aws:${card.serviceId}` as `aws:${string}`;
+          return (
+            <ServiceIntegrationCard
+              key={`aws-${card.serviceId}`}
+              card={{
+                vendor: "aws",
+                serviceId: card.serviceId,
+                label: card.label,
+                groupLabel: card.groupLabel,
+                signedIn: card.signedIn,
+                connected: card.connected,
+                toolCount: card.toolCount,
+                needsScopeReconnect: card.needsScopeReconnect,
+                restOnly: card.restOnly,
+              }}
+              expanded={expanded === expandId}
+              disabled={disabled}
+              onToggle={() => toggleExpand(expanded === expandId ? null : expandId)}
+              onConnect={() => void run(() => connectAwsService(card.serviceId))}
+            >
+              <p style={{ fontSize: 10, color: "#778899", margin: "0 0 8px" }}>
+                Uses your local AWS credential chain (`aws configure`, SSO, or env keys). No hosted OAuth.
+              </p>
+              <label style={{ fontSize: 11, color: "#aabbcc", marginRight: 12 }}>
+                <input
+                  type="radio"
+                  checked={awsMode === "read_write"}
+                  onChange={() => setAwsMode("read_write")}
+                  disabled={disabled}
+                />{" "}
+                Read + write
+              </label>
+              <label style={{ fontSize: 11, color: "#aabbcc" }}>
+                <input
+                  type="radio"
+                  checked={awsMode === "read_only"}
+                  onChange={() => setAwsMode("read_only")}
                   disabled={disabled}
                 />{" "}
                 Read only

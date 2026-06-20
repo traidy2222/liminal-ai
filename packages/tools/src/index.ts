@@ -133,6 +133,8 @@ import { createGraphSearchRestTools, graphSearchRestEnabled } from "./integratio
 import { createMicrosoftOfficeRestTools, microsoftOfficeRestEnabled } from "./integrations/microsoft/microsoft_office_rest.js";
 import { createAzureArmRestTools } from "./integrations/azure/azure_arm_tools.js";
 import { azureRestEnabled } from "./integrations/azure/azure_rest.js";
+import { createAwsRestTools } from "./integrations/aws/aws_sts_tools.js";
+import { awsRestEnabled } from "./integrations/aws/aws_rest.js";
 import { registerXeroRestTools, xeroRestEnabled } from "./integrations/xero/xero_rest.js";
 import { registerXeroRestExtendedTools } from "./integrations/xero/xero_rest_extended.js";
 import { registerXeroRestPhase2Tools } from "./integrations/xero/xero_rest_phase2.js";
@@ -521,6 +523,9 @@ export async function registerAllTools(
   if (azureRestEnabled()) {
     for (const t of createAzureArmRestTools()) registry.register(t);
   }
+  if (awsRestEnabled()) {
+    for (const t of createAwsRestTools()) registry.register(t);
+  }
   if (microsoftOfficeRestEnabled()) {
     for (const t of createMicrosoftOfficeRestTools()) registry.register(t);
   }
@@ -708,11 +713,16 @@ export {
   disconnectYoutubeFromServer,
 } from "./integrations/core/connect_provider.js";
 export {
+  connectAwsFromServer,
+  disconnectAwsFromServer,
+} from "./integrations/aws/aws_connect.js";
+export {
   revokeIntegrationAccountFromServer,
   type IntegrationAccountSlug,
 } from "./integrations/core/revoke_integration_account.js";
 export { getMicrosoftSidecarStatus, stopMicrosoftSidecar } from "./integrations/microsoft/microsoft_sidecar.js";
 export { getAzureSidecarStatus, stopAzureSidecar } from "./integrations/azure/azure_sidecar.js";
+export { getAwsIntegrationStatus } from "./integrations/aws/aws_connect.js";
 export {
   githubMcpEnabled,
   githubTokenPresent,

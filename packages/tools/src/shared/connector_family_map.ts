@@ -24,6 +24,7 @@ const CURATED_PARENT_FAMILIES = new Set([
   "microsoft_collab",
   "microsoft_search",
   "azure",
+  "aws",
   "github",
   "ida",
   "xero",

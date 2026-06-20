@@ -7,6 +7,7 @@ export type IntegrationProviderId =
   | "google"
   | "microsoft"
   | "azure"
+  | "aws"
   | "github"
   | "xero"
   | "slack"
@@ -48,6 +49,14 @@ export const INTEGRATION_PROVIDER_CATALOG: IntegrationProviderCatalogEntry[] = [
     tagline: "ARM resources & @azure/mcp",
     connectMode: "oauth_mcp",
     mcpParentProvider: "azure",
+    group: "workspace",
+  },
+  {
+    id: "aws",
+    title: "AWS",
+    tagline: "EC2, S3, Lambda & AWS MCP Server",
+    connectMode: "custom",
+    mcpParentProvider: "aws",
     group: "workspace",
   },
   {

@@ -4,6 +4,7 @@ export type IntegrationBrandId =
   | "google"
   | "microsoft"
   | "azure"
+  | "aws"
   | "xero"
   | "slack"
   | "linear"
@@ -42,6 +43,13 @@ export const INTEGRATION_BRANDS: Record<IntegrationBrandId, IntegrationBrandMeta
     tagline: "ARM resources & @azure/mcp",
     accent: "#0078D4",
     accentSoft: "rgba(0, 120, 212, 0.14)",
+  },
+  aws: {
+    id: "aws",
+    title: "AWS",
+    tagline: "EC2, S3, Lambda & MCP",
+    accent: "#FF9900",
+    accentSoft: "rgba(255, 153, 0, 0.14)",
   },
   xero: {
     id: "xero",
@@ -125,6 +133,15 @@ function LogoSvg({ id }: { id: IntegrationBrandId }) {
       return (
         <svg viewBox="0 0 24 24" width="28" height="28" aria-hidden>
           <path fill="#0078D4" d="M5.5 18.2 2 6.4h4.1l2.1 8.2 2.4-8.2H15l-3.5 11.8H5.5ZM16.8 6.4h4.2L24 18.2h-4.1l-.9-3.4h-4.5l-.9 3.4h-4.1l3.6-11.8Zm.3 5.2 1.5-5.1.9 3.4h-2.4Z" />
+        </svg>
+      );
+    case "aws":
+      return (
+        <svg viewBox="0 0 24 24" width="28" height="28" aria-hidden>
+          <path
+            fill="#FF9900"
+            d="M6.5 17.2 12 4.8l5.5 12.4h-2.3L12 9.6l-2.2 7.6H6.5Zm8.8 0 1.4-3.2h4.6l1.4 3.2h-2.4l-.3-.7h-3.4l-.3.7h-2.4Zm2.5-5 1.1 2.5h-2.2l1.1-2.5Z"
+          />
         </svg>
       );
     case "xero":

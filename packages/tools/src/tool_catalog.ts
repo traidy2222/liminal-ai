@@ -309,6 +309,16 @@ export const TOOL_FAMILIES: Record<string, { description: string; tools: readonl
       "azure_rest_call",
     ],
   },
+  aws: {
+    description:
+      "AWS — STS/CLI REST helpers + AWS MCP Server (SigV4) for EC2, S3, Lambda, IAM, RDS, and more.",
+    tools: [
+      "aws_check_auth",
+      "aws_sts_get_caller_identity",
+      "aws_list_regions",
+      "aws_cli_invoke",
+    ],
+  },
   microsoft_365: {
     description:
       "Alias — activates all Microsoft 365 sub-families (microsoft_mail, microsoft_calendar, microsoft_files, microsoft_collab, microsoft_search). Prefer a specific sub-family when the task is narrow.",

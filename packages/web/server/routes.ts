@@ -39,6 +39,7 @@ import {
   applyHostedOAuthHandoff,
   isHostedOAuthFormHandoffContent,
   parseHostedOAuthHandoffHttpBody,
+  hostedOAuthHandoffCorsHeaders,
   slackHostedConnectExtra,
 } from "@liminal/core";
 import {
@@ -52,6 +53,8 @@ import {
   disconnectMicrosoft365FromServer,
   connectAzureFromServer,
   disconnectAzureFromServer,
+  connectAwsFromServer,
+  disconnectAwsFromServer,
   connectGithubFromServer,
   disconnectGithubFromServer,
   connectIdaFromServer,
@@ -876,6 +879,42 @@ export function createRouter(
     res.json({ ok: true, output: result.output });
   });
 
+  router.post("/api/integrations/aws/connect", async (req, res) => {
+    const bridge = active();
+    if (bridge.harness.getIsRunning()) {
+      res.status(409).json({ error: "Agent is busy; finish the current turn first." });
+      return;
+    }
+    const body = req.body as {
+      services?: string[];
+      mode?: "read_write" | "read_only";
+      profile?: string;
+    };
+    const result = await connectAwsFromServer(bridge.harness.registry, {
+      services: body.services,
+      mode: body.mode ?? "read_write",
+      profile: body.profile,
+    });
+    if (!result.ok) {
+      res.status(400).json({ error: result.error });
+      return;
+    }
+    bridge.harness.getContext().refreshProtocolDynamic(bridge.harness.registry.getActiveToolNames());
+    res.json({ ok: true, output: result.output });
+  });
+
+  router.delete("/api/integrations/aws", async (req, res) => {
+    const bridge = active();
+    const clearIdentity = req.query["revoke"] === "1" || req.query["revoke"] === "true";
+    const result = await disconnectAwsFromServer(bridge.harness.registry, clearIdentity);
+    if (!result.ok) {
+      res.status(400).json({ error: result.error });
+      return;
+    }
+    bridge.harness.getContext().refreshProtocolDynamic(bridge.harness.registry.getActiveToolNames());
+    res.json({ ok: true, output: result.output });
+  });
+
   router.get("/api/integrations/xero/begin", (req, res) => {
     prunePendingHostedOAuth();
     const state = randomBytes(16).toString("hex");
@@ -1028,12 +1067,24 @@ export function createRouter(
     status: number,
     message: string
   ) => {
+    const cors = hostedOAuthHandoffCorsHeaders(req.get("origin") ?? undefined);
     if (wantsIntegrationHandoffHtml(req)) {
-      res.status(status).type("html").send(vireonCallbackHtml("Connection failed", escapeHtml(message)));
+      res.status(status).set(cors).type("html").send(vireonCallbackHtml("Connection failed", escapeHtml(message)));
       return;
     }
-    res.status(status).json({ error: message });
+    res.status(status).set(cors).json({ error: message });
   };
+
+  router.options("/api/integrations/oauth/handoff", (req, res) => {
+    res
+      .status(204)
+      .set({
+        ...hostedOAuthHandoffCorsHeaders(req.get("origin") ?? undefined),
+        "Access-Control-Allow-Methods": "POST, OPTIONS",
+        "Access-Control-Allow-Headers": "Content-Type",
+      })
+      .end();
+  });
 
   router.post("/api/integrations/oauth/handoff", async (req, res) => {
     prunePendingHostedOAuth();
@@ -1145,6 +1196,7 @@ export function createRouter(
       if (attachWarning && wantsIntegrationHandoffHtml(req)) {
         res
           .status(200)
+          .set(hostedOAuthHandoffCorsHeaders(req.get("origin") ?? undefined))
           .type("html")
           .send(
             integrationHandoffSuccessHtml(provider).replace(
@@ -1158,11 +1210,12 @@ export function createRouter(
         respondIntegrationHandoffError(req, res, 500, attachWarning);
         return;
       }
+      const cors = hostedOAuthHandoffCorsHeaders(req.get("origin") ?? undefined);
       if (wantsIntegrationHandoffHtml(req)) {
-        res.status(200).type("html").send(integrationHandoffSuccessHtml(provider));
+        res.status(200).set(cors).type("html").send(integrationHandoffSuccessHtml(provider));
         return;
       }
-      res.json({ ok: true, provider });
+      res.set(cors).json({ ok: true, provider });
     } catch (e) {
       const message = e instanceof Error ? e.message : String(e);
       respondIntegrationHandoffError(req, res, 400, message);

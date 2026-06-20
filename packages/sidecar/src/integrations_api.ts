@@ -16,6 +16,7 @@ import {
   connectGoogleWorkspaceFromServer,
   connectMicrosoft365FromServer,
   connectAzureFromServer,
+  connectAwsFromServer,
   connectXeroFromServer,
   connectSlackFromServer,
   connectLinearFromServer,
@@ -28,6 +29,7 @@ import {
   disconnectGoogleWorkspaceFromServer,
   disconnectMicrosoft365FromServer,
   disconnectAzureFromServer,
+  disconnectAwsFromServer,
   disconnectXeroFromServer,
   disconnectSlackFromServer,
   disconnectLinearFromServer,
@@ -264,6 +266,26 @@ export async function disconnectAzure(registry: ChatRegistry, revoke: boolean): 
   if (!result.ok) throw new Error(result.error ?? "Azure disconnect failed.");
   await refreshIntegrationsOnAllHarnesses(registry);
   return result.output ?? "Azure disconnected.";
+}
+
+export async function connectAws(
+  registry: ChatRegistry,
+  opts: { services?: string[]; mode?: "read_write" | "read_only"; profile?: string }
+): Promise<string> {
+  assertHarnessesIdle(registry);
+  const bridge = await registry.getOrCreateActive();
+  const result = await connectAwsFromServer(bridge.harness.registry, opts);
+  if (!result.ok) throw new Error(result.error ?? "AWS connect failed.");
+  await refreshIntegrationsOnAllHarnesses(registry);
+  return result.output ?? "AWS tools attached.";
+}
+
+export async function disconnectAws(registry: ChatRegistry, clearIdentity: boolean): Promise<string> {
+  assertHarnessesIdle(registry);
+  const result = await disconnectAwsFromServer(await allHarnessRegistries(registry), clearIdentity);
+  if (!result.ok) throw new Error(result.error ?? "AWS disconnect failed.");
+  await refreshIntegrationsOnAllHarnesses(registry);
+  return result.output ?? "AWS disconnected.";
 }
 
 export async function disconnectGoogle(

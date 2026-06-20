@@ -1,0 +1,234 @@
+INFO:zeromcp.mcp:[MCP] Server started
+INFO:zeromcp.mcp:  Streamable HTTP: http://127.0.0.1:8745/mcp
+INFO:zeromcp.mcp:  SSE: http://127.0.0.1:8745/sse
+DEBUG:zeromcp.jsonrpc:[MCP] >> initialize({"protocolVersion": "2025-06-18", "capabilities": {}, "clientInfo": {"name": "t", "version": "1"}})
+DEBUG:zeromcp.jsonrpc:[MCP] << initialize (0.2ms) {"protocolVersion": "2025-06-18", "capabilities": {"tools": {}, "resources": {"subscribe": false, "listChanged": false}, "prompts": {}}, "serverInfo": {"name": "ida-pro-mcp", "version": "1.0.0"}}
+DEBUG:zeromcp.jsonrpc:[MCP] >> notifications/initialized(null)
+DEBUG:zeromcp.jsonrpc:[MCP] << notifications/initialized (0.1ms) null
+INFO:ida_pro_mcp.idalib_supervisor:Spawning idalib worker on 127.0.0.1:50964
+----------------------------------------
+Exception occurred during processing of request from ('127.0.0.1', 50963)
+Traceback (most recent call last):
+  File "C:\Program Files\Python311\Lib\socketserver.py", line 317, in _handle_request_noblock
+    self.process_request(request, client_address)
+  File "C:\Program Files\Python311\Lib\socketserver.py", line 348, in process_request
+    self.finish_request(request, client_address)
+  File "C:\Program Files\Python311\Lib\socketserver.py", line 361, in finish_request
+    self.RequestHandlerClass(request, client_address, self)
+  File "C:\Users\traid\AppData\Roaming\Python\Python311\site-packages\ida_pro_mcp\ida_mcp\zeromcp\mcp.py", line 240, in __init__
+    super().__init__(request, client_address, server)
+  File "C:\Program Files\Python311\Lib\socketserver.py", line 755, in __init__
+    self.handle()
+  File "C:\Users\traid\AppData\Roaming\Python\Python311\site-packages\ida_pro_mcp\ida_mcp\zeromcp\mcp.py", line 275, in handle
+    super().handle()
+  File "C:\Program Files\Python311\Lib\http\server.py", line 436, in handle
+    self.handle_one_request()
+  File "C:\Program Files\Python311\Lib\http\server.py", line 424, in handle_one_request
+    method()
+  File "C:\Users\traid\AppData\Roaming\Python\Python311\site-packages\ida_pro_mcp\ida_mcp\zeromcp\mcp.py", line 323, in do_POST
+    self._handle_mcp_post(body)
+  File "C:\Users\traid\AppData\Roaming\Python\Python311\site-packages\ida_pro_mcp\ida_mcp\zeromcp\mcp.py", line 530, in _handle_mcp_post
+    response = self.mcp_server.registry.dispatch(body)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\traid\AppData\Roaming\Python\Python311\site-packages\ida_pro_mcp\idalib_supervisor.py", line 1174, in dispatch_supervisor
+    return _handle_tools_list(request_obj)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\traid\AppData\Roaming\Python\Python311\site-packages\ida_pro_mcp\idalib_supervisor.py", line 1102, in _handle_tools_list
+    worker_tools = sup.worker_tools()
+                   ^^^^^^^^^^^^^^^^^^
+  File "C:\Users\traid\AppData\Roaming\Python\Python311\site-packages\ida_pro_mcp\idalib_supervisor.py", line 972, in worker_tools
+    worker = self._schema_or_idle_worker()
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\traid\AppData\Roaming\Python\Python311\site-packages\ida_pro_mcp\idalib_supervisor.py", line 332, in _schema_or_idle_worker
+    self._schema_worker = self._spawn_worker()
+                          ^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\traid\AppData\Roaming\Python\Python311\site-packages\ida_pro_mcp\idalib_supervisor.py", line 256, in _spawn_worker
+    self._wait_worker_ready(worker)
+  File "C:\Users\traid\AppData\Roaming\Python\Python311\site-packages\ida_pro_mcp\idalib_supervisor.py", line 267, in _wait_worker_ready
+    raise RuntimeError(
+RuntimeError: idalib worker exited early with code 1
+----------------------------------------
+DEBUG:zeromcp.jsonrpc:[MCP] >> initialize({"protocolVersion": "2025-06-18", "capabilities": {}, "clientInfo": {"name": "liminal-sidecar-probe", "version": "0.1.0"}})
+DEBUG:zeromcp.jsonrpc:[MCP] << initialize (0.1ms) {"protocolVersion": "2025-06-18", "capabilities": {"tools": {}, "resources": {"subscribe": false, "listChanged": false}, "prompts": {}}, "serverInfo": {"name": "ida-pro-mcp", "version": "1.0.0"}}
+DEBUG:zeromcp.jsonrpc:[MCP] >> initialize({"protocolVersion": "2025-06-18", "capabilities": {}, "clientInfo": {"name": "liminal-harness", "version": "0.1.0"}})
+DEBUG:zeromcp.jsonrpc:[MCP] << initialize (0.0ms) {"protocolVersion": "2025-06-18", "capabilities": {"tools": {}, "resources": {"subscribe": false, "listChanged": false}, "prompts": {}}, "serverInfo": {"name": "ida-pro-mcp", "version": "1.0.0"}}
+DEBUG:zeromcp.jsonrpc:[MCP] >> notifications/initialized(null)
+DEBUG:zeromcp.jsonrpc:[MCP] << notifications/initialized (0.0ms) null
+INFO:ida_pro_mcp.idalib_supervisor:Spawning idalib worker on 127.0.0.1:43822
+----------------------------------------
+Exception occurred during processing of request from ('127.0.0.1', 43821)
+Traceback (most recent call last):
+  File "C:\Program Files\Python311\Lib\socketserver.py", line 317, in _handle_request_noblock
+    self.process_request(request, client_address)
+  File "C:\Program Files\Python311\Lib\socketserver.py", line 348, in process_request
+    self.finish_request(request, client_address)
+  File "C:\Program Files\Python311\Lib\socketserver.py", line 361, in finish_request
+    self.RequestHandlerClass(request, client_address, self)
+  File "C:\Users\traid\AppData\Roaming\Python\Python311\site-packages\ida_pro_mcp\ida_mcp\zeromcp\mcp.py", line 240, in __init__
+    super().__init__(request, client_address, server)
+  File "C:\Program Files\Python311\Lib\socketserver.py", line 755, in __init__
+    self.handle()
+  File "C:\Users\traid\AppData\Roaming\Python\Python311\site-packages\ida_pro_mcp\ida_mcp\zeromcp\mcp.py", line 275, in handle
+    super().handle()
+  File "C:\Program Files\Python311\Lib\http\server.py", line 436, in handle
+    self.handle_one_request()
+  File "C:\Program Files\Python311\Lib\http\server.py", line 424, in handle_one_request
+    method()
+  File "C:\Users\traid\AppData\Roaming\Python\Python311\site-packages\ida_pro_mcp\ida_mcp\zeromcp\mcp.py", line 323, in do_POST
+    self._handle_mcp_post(body)
+  File "C:\Users\traid\AppData\Roaming\Python\Python311\site-packages\ida_pro_mcp\ida_mcp\zeromcp\mcp.py", line 530, in _handle_mcp_post
+    response = self.mcp_server.registry.dispatch(body)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\traid\AppData\Roaming\Python\Python311\site-packages\ida_pro_mcp\idalib_supervisor.py", line 1174, in dispatch_supervisor
+    return _handle_tools_list(request_obj)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\traid\AppData\Roaming\Python\Python311\site-packages\ida_pro_mcp\idalib_supervisor.py", line 1102, in _handle_tools_list
+    worker_tools = sup.worker_tools()
+                   ^^^^^^^^^^^^^^^^^^
+  File "C:\Users\traid\AppData\Roaming\Python\Python311\site-packages\ida_pro_mcp\idalib_supervisor.py", line 972, in worker_tools
+    worker = self._schema_or_idle_worker()
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\traid\AppData\Roaming\Python\Python311\site-packages\ida_pro_mcp\idalib_supervisor.py", line 332, in _schema_or_idle_worker
+    self._schema_worker = self._spawn_worker()
+                          ^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\traid\AppData\Roaming\Python\Python311\site-packages\ida_pro_mcp\idalib_supervisor.py", line 256, in _spawn_worker
+    self._wait_worker_ready(worker)
+  File "C:\Users\traid\AppData\Roaming\Python\Python311\site-packages\ida_pro_mcp\idalib_supervisor.py", line 267, in _wait_worker_ready
+    raise RuntimeError(
+RuntimeError: idalib worker exited early with code 1
+----------------------------------------
+DEBUG:zeromcp.jsonrpc:[MCP] >> initialize({"protocolVersion": "2025-06-18", "capabilities": {}, "clientInfo": {"name": "liminal-sidecar-probe", "version": "0.1.0"}})
+DEBUG:zeromcp.jsonrpc:[MCP] << initialize (0.0ms) {"protocolVersion": "2025-06-18", "capabilities": {"tools": {}, "resources": {"subscribe": false, "listChanged": false}, "prompts": {}}, "serverInfo": {"name": "ida-pro-mcp", "version": "1.0.0"}}
+DEBUG:zeromcp.jsonrpc:[MCP] >> initialize({"protocolVersion": "2025-06-18", "capabilities": {}, "clientInfo": {"name": "liminal-sidecar-probe", "version": "0.1.0"}})
+DEBUG:zeromcp.jsonrpc:[MCP] << initialize (0.0ms) {"protocolVersion": "2025-06-18", "capabilities": {"tools": {}, "resources": {"subscribe": false, "listChanged": false}, "prompts": {}}, "serverInfo": {"name": "ida-pro-mcp", "version": "1.0.0"}}
+DEBUG:zeromcp.jsonrpc:[MCP] >> initialize({"protocolVersion": "2025-06-18", "capabilities": {}, "clientInfo": {"name": "liminal-sidecar-probe", "version": "0.1.0"}})
+DEBUG:zeromcp.jsonrpc:[MCP] << initialize (0.0ms) {"protocolVersion": "2025-06-18", "capabilities": {"tools": {}, "resources": {"subscribe": false, "listChanged": false}, "prompts": {}}, "serverInfo": {"name": "ida-pro-mcp", "version": "1.0.0"}}
+DEBUG:zeromcp.jsonrpc:[MCP] >> initialize({"protocolVersion": "2025-06-18", "capabilities": {}, "clientInfo": {"name": "liminal-harness", "version": "0.1.0"}})
+DEBUG:zeromcp.jsonrpc:[MCP] << initialize (0.0ms) {"protocolVersion": "2025-06-18", "capabilities": {"tools": {}, "resources": {"subscribe": false, "listChanged": false}, "prompts": {}}, "serverInfo": {"name": "ida-pro-mcp", "version": "1.0.0"}}
+DEBUG:zeromcp.jsonrpc:[MCP] >> notifications/initialized(null)
+DEBUG:zeromcp.jsonrpc:[MCP] << notifications/initialized (0.0ms) null
+INFO:ida_pro_mcp.idalib_supervisor:Spawning idalib worker on 127.0.0.1:34488
+----------------------------------------
+Exception occurred during processing of request from ('127.0.0.1', 34487)
+Traceback (most recent call last):
+  File "C:\Program Files\Python311\Lib\socketserver.py", line 317, in _handle_request_noblock
+    self.process_request(request, client_address)
+  File "C:\Program Files\Python311\Lib\socketserver.py", line 348, in process_request
+    self.finish_request(request, client_address)
+  File "C:\Program Files\Python311\Lib\socketserver.py", line 361, in finish_request
+    self.RequestHandlerClass(request, client_address, self)
+  File "C:\Users\traid\AppData\Roaming\Python\Python311\site-packages\ida_pro_mcp\ida_mcp\zeromcp\mcp.py", line 240, in __init__
+    super().__init__(request, client_address, server)
+  File "C:\Program Files\Python311\Lib\socketserver.py", line 755, in __init__
+    self.handle()
+  File "C:\Users\traid\AppData\Roaming\Python\Python311\site-packages\ida_pro_mcp\ida_mcp\zeromcp\mcp.py", line 275, in handle
+    super().handle()
+  File "C:\Program Files\Python311\Lib\http\server.py", line 436, in handle
+    self.handle_one_request()
+  File "C:\Program Files\Python311\Lib\http\server.py", line 424, in handle_one_request
+    method()
+  File "C:\Users\traid\AppData\Roaming\Python\Python311\site-packages\ida_pro_mcp\ida_mcp\zeromcp\mcp.py", line 323, in do_POST
+    self._handle_mcp_post(body)
+  File "C:\Users\traid\AppData\Roaming\Python\Python311\site-packages\ida_pro_mcp\ida_mcp\zeromcp\mcp.py", line 530, in _handle_mcp_post
+    response = self.mcp_server.registry.dispatch(body)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\traid\AppData\Roaming\Python\Python311\site-packages\ida_pro_mcp\idalib_supervisor.py", line 1174, in dispatch_supervisor
+    return _handle_tools_list(request_obj)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\traid\AppData\Roaming\Python\Python311\site-packages\ida_pro_mcp\idalib_supervisor.py", line 1102, in _handle_tools_list
+    worker_tools = sup.worker_tools()
+                   ^^^^^^^^^^^^^^^^^^
+  File "C:\Users\traid\AppData\Roaming\Python\Python311\site-packages\ida_pro_mcp\idalib_supervisor.py", line 972, in worker_tools
+    worker = self._schema_or_idle_worker()
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\traid\AppData\Roaming\Python\Python311\site-packages\ida_pro_mcp\idalib_supervisor.py", line 332, in _schema_or_idle_worker
+    self._schema_worker = self._spawn_worker()
+                          ^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\traid\AppData\Roaming\Python\Python311\site-packages\ida_pro_mcp\idalib_supervisor.py", line 256, in _spawn_worker
+    self._wait_worker_ready(worker)
+  File "C:\Users\traid\AppData\Roaming\Python\Python311\site-packages\ida_pro_mcp\idalib_supervisor.py", line 267, in _wait_worker_ready
+    raise RuntimeError(
+RuntimeError: idalib worker exited early with code 1
+----------------------------------------
+DEBUG:zeromcp.jsonrpc:[MCP] >> initialize({"protocolVersion": "2025-06-18", "capabilities": {}, "clientInfo": {"name": "liminal-sidecar-probe", "version": "0.1.0"}})
+DEBUG:zeromcp.jsonrpc:[MCP] << initialize (0.0ms) {"protocolVersion": "2025-06-18", "capabilities": {"tools": {}, "resources": {"subscribe": false, "listChanged": false}, "prompts": {}}, "serverInfo": {"name": "ida-pro-mcp", "version": "1.0.0"}}
+DEBUG:zeromcp.jsonrpc:[MCP] >> initialize({"protocolVersion": "2025-06-18", "capabilities": {}, "clientInfo": {"name": "liminal-harness", "version": "0.1.0"}})
+DEBUG:zeromcp.jsonrpc:[MCP] << initialize (0.0ms) {"protocolVersion": "2025-06-18", "capabilities": {"tools": {}, "resources": {"subscribe": false, "listChanged": false}, "prompts": {}}, "serverInfo": {"name": "ida-pro-mcp", "version": "1.0.0"}}
+DEBUG:zeromcp.jsonrpc:[MCP] >> notifications/initialized(null)
+DEBUG:zeromcp.jsonrpc:[MCP] << notifications/initialized (0.0ms) null
+INFO:ida_pro_mcp.idalib_supervisor:Spawning idalib worker on 127.0.0.1:13780
+DEBUG:zeromcp.jsonrpc:[MCP] >> initialize({"protocolVersion": "2025-06-18", "capabilities": {}, "clientInfo": {"name": "liminal-sidecar-probe", "version": "0.1.0"}})
+DEBUG:zeromcp.jsonrpc:[MCP] << initialize (0.0ms) {"protocolVersion": "2025-06-18", "capabilities": {"tools": {}, "resources": {"subscribe": false, "listChanged": false}, "prompts": {}}, "serverInfo": {"name": "ida-pro-mcp", "version": "1.0.0"}}
+DEBUG:zeromcp.jsonrpc:[MCP] >> initialize({"protocolVersion": "2025-06-18", "capabilities": {}, "clientInfo": {"name": "liminal-sidecar-probe", "version": "0.1.0"}})
+DEBUG:zeromcp.jsonrpc:[MCP] << initialize (0.0ms) {"protocolVersion": "2025-06-18", "capabilities": {"tools": {}, "resources": {"subscribe": false, "listChanged": false}, "prompts": {}}, "serverInfo": {"name": "ida-pro-mcp", "version": "1.0.0"}}
+DEBUG:zeromcp.jsonrpc:[MCP] >> idb_list({})
+DEBUG:zeromcp.jsonrpc:[MCP] << idb_list (7.5ms) {"sessions": [{"session_id": "", "input_path": "C:\\Users\\traid\\Downloads\\6a30eab0a4b247348ae805c4\\cantcrack.exe.i64", "filename": "cantcrack.exe.i64", "created_at": "2026-06-20T06:59:53.660581+00...
+DEBUG:zeromcp.jsonrpc:[MCP] >> idb_open({"input_path": "C:\\Users\\traid\\Downloads\\6a30eab0a4b247348ae805c4\\cantcrack.exe.i64"})
+DEBUG:zeromcp.jsonrpc:[MCP] << idb_open (37.3ms) {"error": "Failed to open database: C:\\Users\\traid\\Downloads\\6a30eab0a4b247348ae805c4\\cantcrack.exe.i64"}
+DEBUG:zeromcp.jsonrpc:[MCP] >> idb_open({"input_path": "C:\\Users\\traid\\Downloads\\6a30eab0a4b247348ae805c4\\cantcrack.exe"})
+INFO:ida_pro_mcp.idalib_supervisor:Spawning idalib worker on 127.0.0.1:53664
+DEBUG:zeromcp.jsonrpc:[MCP] << idb_open (1048.0ms) {"error": "Failed to open database: C:\\Users\\traid\\Downloads\\6a30eab0a4b247348ae805c4\\cantcrack.exe"}
+DEBUG:zeromcp.jsonrpc:[MCP] >> idb_list({})
+DEBUG:zeromcp.jsonrpc:[MCP] << idb_list (1.0ms) {"sessions": [{"session_id": "", "input_path": "C:\\Users\\traid\\Downloads\\6a30eab0a4b247348ae805c4\\cantcrack.exe.i64", "filename": "cantcrack.exe.i64", "created_at": "2026-06-20T06:59:53.660581+00...
+DEBUG:zeromcp.jsonrpc:[MCP] >> initialize({"protocolVersion": "2025-06-18", "capabilities": {}, "clientInfo": {"name": "liminal-sidecar-probe", "version": "0.1.0"}})
+DEBUG:zeromcp.jsonrpc:[MCP] << initialize (0.0ms) {"protocolVersion": "2025-06-18", "capabilities": {"tools": {}, "resources": {"subscribe": false, "listChanged": false}, "prompts": {}}, "serverInfo": {"name": "ida-pro-mcp", "version": "1.0.0"}}
+DEBUG:zeromcp.jsonrpc:[MCP] >> idb_list({})
+DEBUG:zeromcp.jsonrpc:[MCP] << idb_list (2.1ms) {"sessions": [{"session_id": "", "input_path": "C:\\Users\\traid\\Downloads\\6a30eab0a4b247348ae805c4\\cantcrack.exe.i64", "filename": "cantcrack.exe.i64", "created_at": "2026-06-20T07:22:49.192564+00...
+DEBUG:zeromcp.jsonrpc:[MCP] >> idb_open({"input_path": "C:\\Users\\traid\\Downloads\\6a30eab0a4b247348ae805c4\\cantcrack.exe", "mode": "prefer_gui"})
+INFO:ida_pro_mcp.idalib_supervisor:Using GUI IDA instance 127.0.0.1:13337 for C:\Users\traid\Downloads\6a30eab0a4b247348ae805c4\cantcrack.exe
+DEBUG:zeromcp.jsonrpc:[MCP] << idb_open (5.1ms) {"success": true, "session": {"session_id": "4781f39b", "input_path": "C:\\Users\\traid\\Downloads\\6a30eab0a4b247348ae805c4\\cantcrack.exe.i64", "filename": "cantcrack.exe.i64", "created_at": "2026-0...
+DEBUG:zeromcp.jsonrpc:[MCP] >> initialize({"protocolVersion": "2025-06-18", "capabilities": {}, "clientInfo": {"name": "liminal-sidecar-probe", "version": "0.1.0"}})
+DEBUG:zeromcp.jsonrpc:[MCP] << initialize (0.0ms) {"protocolVersion": "2025-06-18", "capabilities": {"tools": {}, "resources": {"subscribe": false, "listChanged": false}, "prompts": {}}, "serverInfo": {"name": "ida-pro-mcp", "version": "1.0.0"}}
+DEBUG:zeromcp.jsonrpc:[MCP] >> idb_list({})
+DEBUG:zeromcp.jsonrpc:[MCP] << idb_list (3.2ms) {"sessions": [{"session_id": "4781f39b", "input_path": "C:\\Users\\traid\\Downloads\\6a30eab0a4b247348ae805c4\\cantcrack.exe.i64", "filename": "cantcrack.exe.i64", "created_at": "2026-06-20T17:24:33.8...
+DEBUG:zeromcp.jsonrpc:[MCP] >> idb_list({})
+DEBUG:zeromcp.jsonrpc:[MCP] << idb_list (2.0ms) {"sessions": [{"session_id": "4781f39b", "input_path": "C:\\Users\\traid\\Downloads\\6a30eab0a4b247348ae805c4\\cantcrack.exe.i64", "filename": "cantcrack.exe.i64", "created_at": "2026-06-20T17:24:33.8...
+DEBUG:zeromcp.jsonrpc:[MCP] >> idb_list({})
+DEBUG:zeromcp.jsonrpc:[MCP] << idb_list (1.7ms) {"sessions": [{"session_id": "4781f39b", "input_path": "C:\\Users\\traid\\Downloads\\6a30eab0a4b247348ae805c4\\cantcrack.exe.i64", "filename": "cantcrack.exe.i64", "created_at": "2026-06-20T17:24:33.8...
+DEBUG:zeromcp.jsonrpc:[MCP] >> idb_open({"input_path": "G:\\SteamLibrary\\steamapps\\common\\PlagueInc\\PlagueIncEvolved_Data\\Plugins\\x86_64\\steam_api64.dll", "mode": "prefer_gui", "run_auto_analysis": true})
+INFO:ida_pro_mcp.idalib_supervisor:Spawning idalib worker on 127.0.0.1:55355
+DEBUG:zeromcp.jsonrpc:[MCP] << idb_open (5628.0ms) {"success": true, "session": {"session_id": "e8aaba76", "input_path": "G:\\SteamLibrary\\steamapps\\common\\PlagueInc\\PlagueIncEvolved_Data\\Plugins\\x86_64\\steam_api64.dll", "filename": "steam_api6...
+DEBUG:zeromcp.jsonrpc:[MCP] >> initialize({"protocolVersion": "2025-06-18", "capabilities": {}, "clientInfo": {"name": "liminal-sidecar-probe", "version": "0.1.0"}})
+DEBUG:zeromcp.jsonrpc:[MCP] << initialize (0.5ms) {"protocolVersion": "2025-06-18", "capabilities": {"tools": {}, "resources": {"subscribe": false, "listChanged": false}, "prompts": {}}, "serverInfo": {"name": "ida-pro-mcp", "version": "1.0.0"}}
+DEBUG:zeromcp.jsonrpc:[MCP] >> idb_list({})
+DEBUG:zeromcp.jsonrpc:[MCP] << idb_list (14.1ms) {"sessions": [{"session_id": "4781f39b", "input_path": "C:\\Users\\traid\\Downloads\\6a30eab0a4b247348ae805c4\\cantcrack.exe.i64", "filename": "cantcrack.exe.i64", "created_at": "2026-06-20T17:24:33.8...
+DEBUG:zeromcp.jsonrpc:[MCP] >> idb_open({"input_path": "G:\\SteamLibrary\\steamapps\\common\\PlagueInc\\PlagueIncEvolved_Data\\Plugins\\x86_64\\steam_api64.dll", "mode": "prefer_headless"})
+INFO:ida_pro_mcp.idalib_supervisor:Spawning idalib worker on 127.0.0.1:19240
+DEBUG:zeromcp.jsonrpc:[MCP] << idb_open (2488.0ms) {"success": true, "session": {"session_id": "563b1206", "input_path": "G:\\SteamLibrary\\steamapps\\common\\PlagueInc\\PlagueIncEvolved_Data\\Plugins\\x86_64\\steam_api64.dll", "filename": "steam_api6...
+DEBUG:zeromcp.jsonrpc:[MCP] >> initialize({"protocolVersion": "2025-06-18", "capabilities": {}, "clientInfo": {"name": "liminal-sidecar-probe", "version": "0.1.0"}})
+DEBUG:zeromcp.jsonrpc:[MCP] << initialize (0.2ms) {"protocolVersion": "2025-06-18", "capabilities": {"tools": {}, "resources": {"subscribe": false, "listChanged": false}, "prompts": {}}, "serverInfo": {"name": "ida-pro-mcp", "version": "1.0.0"}}
+DEBUG:zeromcp.jsonrpc:[MCP] >> idb_list({})
+DEBUG:zeromcp.jsonrpc:[MCP] << idb_list (512.6ms) {"sessions": [{"session_id": "4781f39b", "input_path": "C:\\Users\\traid\\Downloads\\6a30eab0a4b247348ae805c4\\cantcrack.exe.i64", "filename": "cantcrack.exe.i64", "created_at": "2026-06-20T17:24:33.8...
+DEBUG:zeromcp.jsonrpc:[MCP] >> idb_open({"input_path": "G:\\SteamLibrary\\steamapps\\common\\PlagueInc\\PlagueIncEvolved_Data\\Plugins\\x86_64\\steam_api64.dll", "mode": "prefer_headless", "run_auto_analysis": true, "build_caches": true})
+INFO:ida_pro_mcp.idalib_supervisor:Spawning idalib worker on 127.0.0.1:24023
+DEBUG:zeromcp.jsonrpc:[MCP] << idb_open (4243.9ms) {"success": true, "session": {"session_id": "66fe3996", "input_path": "G:\\SteamLibrary\\steamapps\\common\\PlagueInc\\PlagueIncEvolved_Data\\Plugins\\x86_64\\steam_api64.dll", "filename": "steam_api6...
+DEBUG:zeromcp.jsonrpc:[MCP] >> initialize({"protocolVersion": "2025-06-18", "capabilities": {}, "clientInfo": {"name": "liminal-sidecar-probe", "version": "0.1.0"}})
+DEBUG:zeromcp.jsonrpc:[MCP] << initialize (0.1ms) {"protocolVersion": "2025-06-18", "capabilities": {"tools": {}, "resources": {"subscribe": false, "listChanged": false}, "prompts": {}}, "serverInfo": {"name": "ida-pro-mcp", "version": "1.0.0"}}
+DEBUG:zeromcp.jsonrpc:[MCP] >> initialize({"protocolVersion": "2025-06-18", "capabilities": {}, "clientInfo": {"name": "liminal-sidecar-probe", "version": "0.1.0"}})
+DEBUG:zeromcp.jsonrpc:[MCP] << initialize (0.0ms) {"protocolVersion": "2025-06-18", "capabilities": {"tools": {}, "resources": {"subscribe": false, "listChanged": false}, "prompts": {}}, "serverInfo": {"name": "ida-pro-mcp", "version": "1.0.0"}}
+DEBUG:zeromcp.jsonrpc:[MCP] >> initialize({"protocolVersion": "2025-06-18", "capabilities": {}, "clientInfo": {"name": "liminal-sidecar-probe", "version": "0.1.0"}})
+DEBUG:zeromcp.jsonrpc:[MCP] << initialize (0.0ms) {"protocolVersion": "2025-06-18", "capabilities": {"tools": {}, "resources": {"subscribe": false, "listChanged": false}, "prompts": {}}, "serverInfo": {"name": "ida-pro-mcp", "version": "1.0.0"}}
+DEBUG:zeromcp.jsonrpc:[MCP] >> initialize({"protocolVersion": "2025-06-18", "capabilities": {}, "clientInfo": {"name": "liminal-sidecar-probe", "version": "0.1.0"}})
+DEBUG:zeromcp.jsonrpc:[MCP] << initialize (0.0ms) {"protocolVersion": "2025-06-18", "capabilities": {"tools": {}, "resources": {"subscribe": false, "listChanged": false}, "prompts": {}}, "serverInfo": {"name": "ida-pro-mcp", "version": "1.0.0"}}
+DEBUG:zeromcp.jsonrpc:[MCP] >> initialize({"protocolVersion": "2025-06-18", "capabilities": {}, "clientInfo": {"name": "liminal-sidecar-probe", "version": "0.1.0"}})
+DEBUG:zeromcp.jsonrpc:[MCP] << initialize (0.8ms) {"protocolVersion": "2025-06-18", "capabilities": {"tools": {}, "resources": {"subscribe": false, "listChanged": false}, "prompts": {}}, "serverInfo": {"name": "ida-pro-mcp", "version": "1.0.0"}}
+DEBUG:zeromcp.jsonrpc:[MCP] >> initialize({"protocolVersion": "2025-06-18", "capabilities": {}, "clientInfo": {"name": "liminal-sidecar-probe", "version": "0.1.0"}})
+DEBUG:zeromcp.jsonrpc:[MCP] << initialize (0.0ms) {"protocolVersion": "2025-06-18", "capabilities": {"tools": {}, "resources": {"subscribe": false, "listChanged": false}, "prompts": {}}, "serverInfo": {"name": "ida-pro-mcp", "version": "1.0.0"}}
+DEBUG:zeromcp.jsonrpc:[MCP] >> initialize({"protocolVersion": "2025-06-18", "capabilities": {}, "clientInfo": {"name": "liminal-sidecar-probe", "version": "0.1.0"}})
+DEBUG:zeromcp.jsonrpc:[MCP] << initialize (0.6ms) {"protocolVersion": "2025-06-18", "capabilities": {"tools": {}, "resources": {"subscribe": false, "listChanged": false}, "prompts": {}}, "serverInfo": {"name": "ida-pro-mcp", "version": "1.0.0"}}
+DEBUG:zeromcp.jsonrpc:[MCP] >> initialize({"protocolVersion": "2025-06-18", "capabilities": {}, "clientInfo": {"name": "liminal-sidecar-probe", "version": "0.1.0"}})
+DEBUG:zeromcp.jsonrpc:[MCP] << initialize (0.0ms) {"protocolVersion": "2025-06-18", "capabilities": {"tools": {}, "resources": {"subscribe": false, "listChanged": false}, "prompts": {}}, "serverInfo": {"name": "ida-pro-mcp", "version": "1.0.0"}}
+DEBUG:zeromcp.jsonrpc:[MCP] >> initialize({"protocolVersion": "2025-06-18", "capabilities": {}, "clientInfo": {"name": "liminal-sidecar-probe", "version": "0.1.0"}})
+DEBUG:zeromcp.jsonrpc:[MCP] << initialize (0.0ms) {"protocolVersion": "2025-06-18", "capabilities": {"tools": {}, "resources": {"subscribe": false, "listChanged": false}, "prompts": {}}, "serverInfo": {"name": "ida-pro-mcp", "version": "1.0.0"}}
+DEBUG:zeromcp.jsonrpc:[MCP] >> initialize({"protocolVersion": "2025-06-18", "capabilities": {}, "clientInfo": {"name": "liminal-sidecar-probe", "version": "0.1.0"}})
+DEBUG:zeromcp.jsonrpc:[MCP] << initialize (0.4ms) {"protocolVersion": "2025-06-18", "capabilities": {"tools": {}, "resources": {"subscribe": false, "listChanged": false}, "prompts": {}}, "serverInfo": {"name": "ida-pro-mcp", "version": "1.0.0"}}
+DEBUG:zeromcp.jsonrpc:[MCP] >> initialize({"protocolVersion": "2025-06-18", "capabilities": {}, "clientInfo": {"name": "liminal-sidecar-probe", "version": "0.1.0"}})
+DEBUG:zeromcp.jsonrpc:[MCP] << initialize (0.0ms) {"protocolVersion": "2025-06-18", "capabilities": {"tools": {}, "resources": {"subscribe": false, "listChanged": false}, "prompts": {}}, "serverInfo": {"name": "ida-pro-mcp", "version": "1.0.0"}}
+DEBUG:zeromcp.jsonrpc:[MCP] >> initialize({"protocolVersion": "2025-06-18", "capabilities": {}, "clientInfo": {"name": "liminal-sidecar-probe", "version": "0.1.0"}})
+DEBUG:zeromcp.jsonrpc:[MCP] << initialize (0.2ms) {"protocolVersion": "2025-06-18", "capabilities": {"tools": {}, "resources": {"subscribe": false, "listChanged": false}, "prompts": {}}, "serverInfo": {"name": "ida-pro-mcp", "version": "1.0.0"}}
+DEBUG:zeromcp.jsonrpc:[MCP] >> initialize({"protocolVersion": "2025-06-18", "capabilities": {}, "clientInfo": {"name": "liminal-sidecar-probe", "version": "0.1.0"}})
+DEBUG:zeromcp.jsonrpc:[MCP] << initialize (0.0ms) {"protocolVersion": "2025-06-18", "capabilities": {"tools": {}, "resources": {"subscribe": false, "listChanged": false}, "prompts": {}}, "serverInfo": {"name": "ida-pro-mcp", "version": "1.0.0"}}
+DEBUG:zeromcp.jsonrpc:[MCP] >> initialize({"protocolVersion": "2025-06-18", "capabilities": {}, "clientInfo": {"name": "liminal-sidecar-probe", "version": "0.1.0"}})
+DEBUG:zeromcp.jsonrpc:[MCP] << initialize (0.0ms) {"protocolVersion": "2025-06-18", "capabilities": {"tools": {}, "resources": {"subscribe": false, "listChanged": false}, "prompts": {}}, "serverInfo": {"name": "ida-pro-mcp", "version": "1.0.0"}}
+DEBUG:zeromcp.jsonrpc:[MCP] >> initialize({"protocolVersion": "2025-06-18", "capabilities": {}, "clientInfo": {"name": "liminal-sidecar-probe", "version": "0.1.0"}})
+DEBUG:zeromcp.jsonrpc:[MCP] << initialize (0.0ms) {"protocolVersion": "2025-06-18", "capabilities": {"tools": {}, "resources": {"subscribe": false, "listChanged": false}, "prompts": {}}, "serverInfo": {"name": "ida-pro-mcp", "version": "1.0.0"}}

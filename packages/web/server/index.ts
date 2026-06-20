@@ -67,6 +67,11 @@ const localAuth = await createLocalWebAuth();
 const corsOrigins = allowedWebCorsOrigins(PORT);
 
 const app = express();
+// PNA header must be on preflight responses too — set before cors() handles OPTIONS.
+app.use((_req, res, next) => {
+  res.setHeader("Access-Control-Allow-Private-Network", "true");
+  next();
+});
 app.use(
   cors({
     origin(origin, callback) {
@@ -79,11 +84,6 @@ app.use(
     credentials: true,
   })
 );
-// Chrome Private Network Access — public site (vireondynamics.com) → loopback handoff.
-app.use((_req, res, next) => {
-  res.setHeader("Access-Control-Allow-Private-Network", "true");
-  next();
-});
 app.use(express.urlencoded({ extended: false, limit: "20mb" }));
 app.use(express.json({ limit: "20mb" }));
 

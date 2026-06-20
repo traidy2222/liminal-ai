@@ -33,6 +33,7 @@ class _IntegrationsScreenState extends State<IntegrationsScreen> {
   String _googleMode = 'read_write';
   String _microsoftMode = 'read_write';
   String _azureMode = 'read_write';
+  String _awsMode = 'read_write';
   String _xeroMode = 'read_write';
   bool _xeroExtended = false;
   bool _xeroFullScopes = false;
@@ -100,11 +101,12 @@ class _IntegrationsScreenState extends State<IntegrationsScreen> {
   }
 
   Future<void> _connectService(AppController host, IntegrationServiceCard card) async {
-    final mode = card.vendor == 'azure'
-        ? _azureMode
-        : card.vendor == 'microsoft'
-            ? _microsoftMode
-            : _googleMode;
+    final mode = switch (card.vendor) {
+      'azure' => _azureMode,
+      'aws' => _awsMode,
+      'microsoft' => _microsoftMode,
+      _ => _googleMode,
+    };
     await host.connectWorkspaceService(
       vendor: card.vendor,
       serviceId: card.serviceId,
@@ -118,11 +120,12 @@ class _IntegrationsScreenState extends State<IntegrationsScreen> {
     required String mode,
     required ValueChanged<String> onMode,
   }) {
-    final hint = card.vendor == 'azure'
-        ? 'Azure Resource Manager scopes for this capability only.'
-        : card.vendor == 'microsoft'
-            ? 'Microsoft Graph scopes for ${card.label} only.'
-            : 'OAuth requests only the scopes for ${card.label}.';
+    final hint = switch (card.vendor) {
+      'azure' => 'Azure Resource Manager scopes for this capability only.',
+      'aws' => 'Uses your local AWS credential chain (CLI, SSO, or env keys).',
+      'microsoft' => 'Microsoft Graph scopes for ${card.label} only.',
+      _ => 'OAuth requests only the scopes for ${card.label}.',
+    };
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -450,6 +453,55 @@ class _IntegrationsScreenState extends State<IntegrationsScreen> {
                 child: Text(
                   'Microsoft accounts (${snap.microsoft.accounts.length + snap.azure.accounts.length})',
                 ),
+              ),
+      ),
+      IntegrationCategorySection(
+        title: 'Amazon Web Services',
+        subtitle: 'IAM credentials via AWS CLI — EC2, S3, Lambda, and the AWS MCP Server.',
+        cards: snap.awsServiceCards,
+        expandedId: _expandedId,
+        disabled: disabled,
+        expandIdFor: _serviceExpandId,
+        onToggle: (card) {
+          final id = _serviceExpandId(card);
+          _toggleExpanded(_expandedId == id ? null : id);
+        },
+        onConnect: (card) => unawaited(_connectService(host, card)),
+        detailsFor: (card) => _serviceModeDetails(
+          card: card,
+          disabled: disabled,
+          mode: _awsMode,
+          onMode: (m) => setState(() => _awsMode = m),
+        ),
+        footer: _expandedId == 'aws-accounts'
+            ? Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  for (final a in snap.aws.accounts)
+                    Padding(
+                      padding: const EdgeInsets.only(bottom: 6),
+                      child: Text(
+                        'AWS: ${a.email ?? a.accountId}',
+                        style: TextStyle(color: lim.success, fontSize: 11),
+                      ),
+                    ),
+                  LiminalButton(
+                    label: 'Disconnect AWS',
+                    dense: true,
+                    variant: LiminalButtonVariant.danger,
+                    onPressed: disabled || snap.aws.accounts.isEmpty
+                        ? null
+                        : () => host.disconnectAws(clearIdentity: true),
+                  ),
+                ],
+              )
+            : TextButton(
+                onPressed: disabled
+                    ? null
+                    : () => _toggleExpanded(
+                          _expandedId == 'aws-accounts' ? null : 'aws-accounts',
+                        ),
+                child: Text('AWS identities (${snap.aws.accounts.length})'),
               ),
       ),
       IntegrationProviderGroup(
