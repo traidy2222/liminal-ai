@@ -1,9 +1,10 @@
 /**
  * edit_file — unified tool for targeted changes to EXISTING files.
  *
- * Two modes, pick exactly one:
+ * Three modes, pick exactly one:
  *   replacements  — one or more find/replace pairs (string or regex), applied in order
  *   diff          — unified diff hunk with fuzzy context matching
+ *   insert_at     — insert content at a specific line number (no search required)
  *
  * Whole-file content (create / overwrite / append) belongs to write_file.
  */
@@ -77,12 +78,13 @@ interface Replacement {
 export const editFileTool = defineTool({
   name: "edit_file",
   description:
-    "WHAT: Make a targeted change to an EXISTING file. Two modes — pick exactly one:\n" +
+    "WHAT: Make a targeted change to an EXISTING file. Three modes — pick exactly one:\n" +
     "  replacements: [{search, replace, regex?, flags?}]  — find/replace one or many strings in one write.\n" +
     "  diff: '<unified diff hunk>'                        — patch via @@ hunk; fuzzy search finds context even if line numbers are slightly off.\n" +
+    "  insert_at: {line, content}                         — insert content at a specific line number (no search needed).\n" +
     "WHEN: Changing part of a file that already exists.\n" +
     "NOT WHEN: Creating a new file or replacing a whole file — use write_file (mode=create/overwrite/append).\n" +
-    "WORKFLOW: grep_file first for fresh text (required again after any prior edit on the same path this turn), then edit_file. 0 matches = failure — grep again; do not reuse stale search strings from earlier reads.",
+    "TIP: If your search string fails (0 matches), run grep_file to get fresh line content — file edits earlier this turn make previous reads stale.",
   requiresApproval: true,
   dangerLevel: "cautious",
   resourceLocks: (args) => [`file:write:${args["path"] as string}`],
@@ -116,6 +118,18 @@ export const editFileTool = defineTool({
           "Context lines prefixed with space, removals with -, additions with +. " +
           "Line numbers can be approximate — fuzzy search finds the right location.",
       },
+      insert_at: {
+        type: "object",
+        description:
+          "Insert content at a specific line number. line is 1-based: " +
+          "line=1 inserts before the first line, line=N inserts before line N, " +
+          "line=(total+1) appends at end. No search/context needed.",
+        properties: {
+          line: { type: "number", description: "1-based line number to insert before." },
+          content: { type: "string", description: "Content to insert (can be multiple lines)." },
+        },
+        required: ["line", "content"],
+      },
       preview: {
         type: "boolean",
         description: "Dry run — report what would change without writing.",
@@ -147,24 +161,78 @@ export const editFileTool = defineTool({
 
     const hasReplacements = Array.isArray(args["replacements"]) && (args["replacements"] as Replacement[]).length > 0;
     const hasDiff = typeof args["diff"] === "string" && (args["diff"] as string).trim().length > 0;
+    const hasInsertAt = args["insert_at"] != null && typeof args["insert_at"] === "object";
 
-    const modeCount = [hasReplacements, hasDiff].filter(Boolean).length;
+    const modeCount = [hasReplacements, hasDiff, hasInsertAt].filter(Boolean).length;
     if (modeCount === 0) {
       return {
         ok: false,
-        error: "Provide exactly one of: replacements or diff. For a whole-file write use write_file.",
+        error: "Provide exactly one of: replacements, diff, or insert_at. For a whole-file write use write_file.",
       };
     }
     if (modeCount > 1) {
-      return { ok: false, error: "Provide exactly one of: replacements or diff — not both." };
+      return { ok: false, error: "Provide exactly one of: replacements, diff, or insert_at — not multiple." };
     }
 
-    // ── Read file for replacement/diff modes ─────────────────────────────────
+    // ── Read file for all modes ──────────────────────────────────────────────
     let rawContent: string;
     try {
       rawContent = await readFile(filePath, "utf8");
     } catch (e) {
       return { ok: false, error: `Cannot read file: ${String(e)}` };
+    }
+
+    // ── MODE: insert_at ──────────────────────────────────────────────────────
+    if (hasInsertAt) {
+      const insertObj = args["insert_at"] as { line?: number; content?: string };
+      const line = insertObj.line;
+      const content = insertObj.content;
+      if (typeof line !== "number" || !Number.isFinite(line) || line < 1) {
+        return { ok: false, error: "insert_at.line must be a positive integer (1-based)." };
+      }
+      if (typeof content !== "string" || content.length === 0) {
+        return { ok: false, error: "insert_at.content must be a non-empty string." };
+      }
+
+      const hasCRLF = rawContent.includes("\r\n");
+      const eol = hasCRLF ? "\r\n" : "\n";
+      const fileLines = rawContent.split(eol);
+      const totalLines = fileLines.length;
+      const insertIdx = Math.min(Math.max(0, line - 1), totalLines); // clamp to valid range
+
+      const insertLines = content.split(/\r?\n/);
+      const addedCount = insertLines.length;
+
+      if (preview) {
+        return {
+          ok: true,
+          output: `PREVIEW — would insert ${addedCount} line${addedCount !== 1 ? "s" : ""} at line ${insertIdx + 1} of ${totalLines}`,
+        };
+      }
+
+      // Splice new lines into position
+      fileLines.splice(insertIdx, 0, ...insertLines);
+      const nextContent = fileLines.join(eol);
+
+      // Stream a preview to the UI
+      const previewLines = insertLines.slice(0, 5).map((l) => `  + ${l.slice(0, 180)}`);
+      if (insertLines.length > 5) previewLines.push(`  + …+${insertLines.length - 5} more lines`);
+      emit?.(
+        `\n[insert preview] ${displayPath} at line ${insertIdx + 1} (+${addedCount} lines)\n` +
+          previewLines.join("\n") +
+          "\n"
+      );
+
+      try {
+        await writeFile(filePath, nextContent, "utf8");
+      } catch (e) {
+        return { ok: false, error: `Write failed: ${String(e)}` };
+      }
+
+      return {
+        ok: true,
+        output: `Inserted ${addedCount} line${addedCount !== 1 ? "s" : ""} at line ${insertIdx + 1} in ${path.basename(filePath)} (${totalLines} → ${totalLines + addedCount} lines)`,
+      };
     }
 
     // ── MODE: replacements ───────────────────────────────────────────────────

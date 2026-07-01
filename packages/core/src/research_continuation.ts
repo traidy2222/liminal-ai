@@ -26,6 +26,13 @@ export function isActiveResearchSend(input: {
   );
 }
 
+/**
+ * Minimum assistant reply length (chars) that signals the model already committed
+ * to a substantive answer. When the reply exceeds this threshold the research
+ * continuation gate will NOT fire — the model intentionally stopped researching.
+ */
+export const RESEARCH_GATE_SUBSTANTIVE_REPLY_CHARS = 150;
+
 export interface ResearchContinuationInput {
   userMessage: string;
   intent?: TurnIntentClass | null;
@@ -36,6 +43,8 @@ export interface ResearchContinuationInput {
   pendingUrlSamples?: string[];
   gateAttempted: boolean;
   enabled?: boolean;
+  /** The assistant's accumulated text response this turn. */
+  assistantText?: string;
 }
 
 export function researchCoverageLooksThin(summary: LedgerSummary): boolean {
@@ -76,6 +85,15 @@ export function needsResearchContinuation(
   if (input.enabled === false) return { needed: false };
   if (input.gateAttempted) return { needed: false };
   if (isBriefResearchAsk(input.userMessage)) return { needed: false };
+
+  // If the model already wrote a substantive reply, it intentionally stopped
+  // researching — respect that decision instead of forcing more rounds.
+  if (
+    input.assistantText &&
+    input.assistantText.trim().length >= RESEARCH_GATE_SUBSTANTIVE_REPLY_CHARS
+  ) {
+    return { needed: false };
+  }
 
   const usedWeb =
     input.toolsUsed.includes("web_search") || input.toolsUsed.includes("web_fetch");

@@ -435,6 +435,7 @@ export {
   isBriefResearchAsk,
   needsResearchContinuation,
   researchCoverageLooksThin,
+  RESEARCH_GATE_SUBSTANTIVE_REPLY_CHARS,
 } from "./research_continuation.js";
 export { buildCodingTurnInjection } from "./coding_autonomy.js";
 export {

@@ -7074,6 +7074,7 @@ export class AgentHarness {
           .map((u) => (u.title ? `${u.title} — ${u.url}` : u.url)),
         gateAttempted: this.researchContinuationAttemptedThisSend,
         enabled: webResearchEnabled,
+        assistantText: assistant,
       });
       if (researchGate.needed) {
         this.researchContinuationAttemptedThisSend = true;

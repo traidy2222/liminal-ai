@@ -796,6 +796,12 @@ export const CORE_ALWAYS_TOOLS_BASE: readonly string[] = [
   "write_file",
   "edit_file",
   "list_dir",
+  // Filesystem ops — basic dev needs (move, copy, mkdir, delete, project-wide replace)
+  "move_file",
+  "copy_file",
+  "mkdir_p",
+  "delete_file",
+  "replace_in_files",
   // User interaction
   "ask_user",
   // Lazy loading management — always needed to activate anything else
