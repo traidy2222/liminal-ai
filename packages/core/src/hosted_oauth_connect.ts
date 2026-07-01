@@ -5,7 +5,7 @@ import { createServer, type IncomingMessage } from "node:http";
 import { randomBytes } from "node:crypto";
 import { defaultVireonSiteOrigin } from "./vireon_account.js";
 import { openExternalUrl } from "./open_external_url.js";
-import { type OAuthTokenBundle, writeOAuthBundle } from "./oauth_store.js";
+import { type OAuthTokenBundle, writeOAuthBundle, readOAuthBundle } from "./oauth_store.js";
 
 export type HostedOAuthHandoffPayload = {
   provider: string;
@@ -119,16 +119,37 @@ export async function applyHostedOAuthHandoff(
   payload: HostedOAuthHandoffPayload
 ): Promise<OAuthTokenBundle> {
   const now = Date.now();
+  const provider = payload.bundle.provider;
+  const accountId = payload.bundle.accountId;
+  const existing = await readOAuthBundle(provider, accountId);
+  const incomingScopes = payload.bundle.scopes ?? [];
+  const mergedScopes = existing
+    ? [...new Set([...existing.scopes, ...incomingScopes])]
+    : incomingScopes;
+  const incomingMeta = payload.bundle.metadata ?? {};
+  const existingMeta = existing?.metadata ?? {};
+  const mergedServices = [
+    ...new Set([
+      ...(Array.isArray(existingMeta.services) ? (existingMeta.services as string[]) : []),
+      ...(Array.isArray(incomingMeta.services) ? (incomingMeta.services as string[]) : []),
+    ]),
+  ];
+  const metadata: Record<string, unknown> = {
+    ...existingMeta,
+    ...incomingMeta,
+  };
+  if (mergedServices.length > 0) metadata.services = mergedServices;
+
   const bundle: OAuthTokenBundle = {
-    provider: payload.bundle.provider,
-    accountId: payload.bundle.accountId,
-    email: payload.bundle.email,
+    provider,
+    accountId,
+    email: payload.bundle.email ?? existing?.email,
     accessToken: payload.bundle.accessToken,
-    refreshToken: payload.bundle.refreshToken,
-    expiresAt: payload.bundle.expiresAt,
-    scopes: payload.bundle.scopes,
-    metadata: payload.bundle.metadata,
-    createdAt: payload.bundle.createdAt ?? now,
+    refreshToken: payload.bundle.refreshToken ?? existing?.refreshToken ?? "",
+    expiresAt: payload.bundle.expiresAt ?? existing?.expiresAt ?? now + 3600_000,
+    scopes: mergedScopes,
+    metadata: Object.keys(metadata).length > 0 ? metadata : undefined,
+    createdAt: existing?.createdAt ?? payload.bundle.createdAt ?? now,
     updatedAt: now,
   };
   if (!bundle.refreshToken?.trim()) {

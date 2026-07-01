@@ -17,7 +17,7 @@ import {
   listConnectionsByParent,
   readConnection,
 } from "../external_api/api_connections_store.js";
-import { attachMcpConnection, unregisterMcpConnection } from "../external_api/mcp_attach.js";
+import { attachMcpConnection, readMergedMcpConnectionServices, unregisterMcpConnection } from "../external_api/mcp_attach.js";
 import { awsIamAuthScheme } from "./aws_sigv4_fetch.js";
 import { awsMcpEnabled, awsMcpEndpoint, awsRestEnabled } from "./aws_rest.js";
 
@@ -54,6 +54,10 @@ export async function connectAwsFromServer(
   if (awsMcpEnabled() && presets.some((p) => p.backend === "aws_mcp")) {
     try {
       const endpoint = awsMcpEndpoint(region);
+      const mergedAwsServices = await readMergedMcpConnectionServices(
+        AWS_MCP_CONNECTION,
+        presets.filter((p) => p.backend === "aws_mcp").map((p) => p.id)
+      );
       const { registered } = await attachMcpConnection(registry, {
         name: AWS_MCP_CONNECTION,
         url: endpoint,
@@ -61,7 +65,7 @@ export async function connectAwsFromServer(
         readOnly,
         providerId: "aws_mcp",
         parentProvider: AWS_PARENT_PROVIDER,
-        services: presets.map((p) => p.id),
+        services: mergedAwsServices,
         oauthAccountId: identity.accountId,
       });
       attached.push(AWS_MCP_CONNECTION);

@@ -75,7 +75,7 @@ import {
   listAzureConnections,
   type McpConnectionRecord,
 } from "../external_api/api_connections_store.js";
-import { attachMcpConnection, unregisterMcpConnection } from "../external_api/mcp_attach.js";
+import { attachMcpConnection, readMergedMcpConnectionServices, unregisterMcpConnection } from "../external_api/mcp_attach.js";
 import { gmailSendRestEnabled } from "../google/google_gmail_send.js";
 import { calendarRestEnabled } from "../google/google_calendar_rest.js";
 import { analyticsRestEnabled } from "../google/google_analytics_rest.js";
@@ -244,6 +244,10 @@ async function connectAzureHandler(
         );
       } else {
         try {
+          const mergedAzureServices = await readMergedMcpConnectionServices(
+            AZURE_MCP_CONNECTION,
+            presets.map((p) => p.id)
+          );
           const { registered } = await attachMcpConnection(registry, {
             name: AZURE_MCP_CONNECTION,
             url: sidecar.url,
@@ -251,7 +255,7 @@ async function connectAzureHandler(
             readOnly,
             providerId: "azure_mcp",
             parentProvider: AZURE_PARENT_PROVIDER,
-            services: presets.map((p) => p.id),
+            services: mergedAzureServices,
             oauthAccountId: oauth?.accountId,
             sidecarManaged: true,
           });
@@ -394,6 +398,10 @@ async function connectMicrosoft365Handler(
         );
       } else {
         try {
+          const mergedGraphServices = await readMergedMcpConnectionServices(
+            MICROSOFT_GRAPH_CONNECTION,
+            sidecarPresets.map((p) => p.id)
+          );
           const { registered } = await attachMcpConnection(registry, {
             name: MICROSOFT_GRAPH_CONNECTION,
             url: sidecar.url,
@@ -401,7 +409,7 @@ async function connectMicrosoft365Handler(
             readOnly,
             providerId: "microsoft_graph",
             parentProvider: MICROSOFT_PARENT_PROVIDER,
-            services: sidecarPresets.map((p) => p.id),
+            services: mergedGraphServices,
             oauthAccountId: oauth.accountId,
             sidecarManaged: true,
           });
@@ -665,15 +673,17 @@ export function createConnectorTools(registry: ToolRegistry, _emitter: AgentEmit
 
       if (needsGoogleSidecar(presets)) {
         const sidecarServices = presets.filter((p) => p.backend === "google_sidecar").map((p) => p.id);
-        const sidecarMiss = missingGoogleScopes(granted, presets.filter((p) => p.backend === "google_sidecar"));
+        const mergedSidecarServices = await readMergedMcpConnectionServices("google_ext", sidecarServices);
+        const mergedSidecarPresets = resolveGoogleServices(mergedSidecarServices).filter(
+          (p) => p.backend === "google_sidecar"
+        );
+        const sidecarMiss = missingGoogleScopes(granted, mergedSidecarPresets);
         if (sidecarMiss.length > 0) {
-          attachErrors.push(
-            `google_ext: ${formatGoogleScopeDiagnostics(granted, presets.filter((p) => p.backend === "google_sidecar"))}`
-          );
+          attachErrors.push(`google_ext: ${formatGoogleScopeDiagnostics(granted, mergedSidecarPresets)}`);
         } else {
           const accessToken = await getGoogleAccessToken(oauth.accountId);
           const sidecar = await ensureGoogleSidecarRunning(accessToken ?? undefined, {
-            tools: workspaceMcpToolNamesForServices(sidecarServices),
+            tools: workspaceMcpToolNamesForServices(mergedSidecarPresets.map((p) => p.id)),
             readOnly,
           });
           if (!sidecar.ok) {
@@ -689,7 +699,7 @@ export function createConnectorTools(registry: ToolRegistry, _emitter: AgentEmit
                 readOnly,
                 providerId: "google_ext",
                 parentProvider: PARENT_PROVIDER,
-                services: sidecarServices,
+                services: mergedSidecarServices,
                 oauthAccountId: oauth.accountId,
                 sidecarManaged: true,
               });

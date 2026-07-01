@@ -15,6 +15,8 @@ export interface SidecarState {
   port: number;
   startedAt: number;
   refCount: number;
+  /** workspace-mcp `--tools` ids last used to spawn this process. */
+  tools?: string[];
 }
 
 let managedProcess: ChildProcess | null = null;
@@ -181,13 +183,21 @@ export async function ensureGoogleSidecarRunning(
 
   const port = sidecarPort();
   const url = googleSidecarMcpUrl(port);
+  const requestedTools = opts?.tools?.map((t) => t.trim()).filter(Boolean) ?? [];
   const existing = await readState();
   if (existing && existing.port === port) {
-    localRefCount++;
-    existing.refCount = localRefCount;
-    await writeState(existing);
-    const ready = await waitForSidecarReady(port, 5000, accessToken);
-    if (ready) return { ok: true, url };
+    const currentTools = existing.tools ?? [];
+    const needsMoreTools =
+      requestedTools.length > 0 && requestedTools.some((t) => !currentTools.includes(t));
+    if (!needsMoreTools) {
+      localRefCount++;
+      existing.refCount = localRefCount;
+      await writeState(existing);
+      const ready = await waitForSidecarReady(port, 5000, accessToken);
+      if (ready) return { ok: true, url };
+    } else {
+      await stopGoogleSidecar(true);
+    }
   }
 
   const { bin, args } = buildSidecarArgs(sidecarCmd(), opts);
@@ -247,7 +257,13 @@ export async function ensureGoogleSidecarRunning(
 
   localRefCount = 1;
   const pid = managedProcess.pid ?? 0;
-  await writeState({ pid, port, startedAt: Date.now(), refCount: localRefCount });
+  await writeState({
+    pid,
+    port,
+    startedAt: Date.now(),
+    refCount: localRefCount,
+    tools: requestedTools.length > 0 ? requestedTools : undefined,
+  });
 
   managedProcess.on("exit", () => {
     managedProcess = null;

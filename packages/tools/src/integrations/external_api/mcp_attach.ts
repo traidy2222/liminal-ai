@@ -483,6 +483,29 @@ export interface AttachMcpOptions {
   sidecarManaged?: boolean;
 }
 
+/** Union prior + requested service ids when incrementally linking workspace products. */
+export function mergeMcpConnectionServices(
+  existing: string[] | undefined,
+  requested: string[] | undefined
+): string[] | undefined {
+  const req = requested?.map((s) => s.trim()).filter(Boolean) ?? [];
+  if (req.length === 0) return existing?.length ? [...existing] : undefined;
+  const prior = existing?.map((s) => s.trim()).filter(Boolean) ?? [];
+  return [...new Set([...prior, ...req])];
+}
+
+export async function readMergedMcpConnectionServices(
+  connectionName: string,
+  requested: string[]
+): Promise<string[]> {
+  const existing = await readConnection(connectionName);
+  const merged = mergeMcpConnectionServices(
+    existing?.kind === "mcp" ? existing.services : undefined,
+    requested
+  );
+  return merged ?? requested;
+}
+
 export async function attachMcpConnection(
   registry: ToolRegistry,
   opts: AttachMcpOptions
@@ -491,6 +514,10 @@ export async function attachMcpConnection(
   if (!name) throw new Error("connection name normalized to empty");
 
   const existing = await readConnection(name);
+  const services = mergeMcpConnectionServices(
+    existing?.kind === "mcp" ? existing.services : undefined,
+    opts.services
+  );
   if (existing && existing.kind === "mcp") {
     unregisterMcpConnection(registry, existing);
   }
@@ -529,7 +556,7 @@ export async function attachMcpConnection(
     toolFilter: opts.toolFilter,
     providerId: opts.providerId,
     parentProvider: opts.parentProvider,
-    services: opts.services,
+    services,
     oauthAccountId: opts.oauthAccountId,
     sidecarManaged: opts.sidecarManaged,
     mcpSessionId,
