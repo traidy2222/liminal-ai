@@ -1,7 +1,6 @@
 /**
  * Refresh hosted-integration OAuth tokens via vireondynamics.com when client secrets are not on the harness.
  */
-import { resolveLicenseTokenForHarness } from "./vireon_account.js";
 
 const DEFAULT_REFRESH_URL = "https://www.vireondynamics.com/api/integrations/oauth/refresh";
 
@@ -28,8 +27,8 @@ export function expiresAtFromOAuthExpiresIn(expiresIn?: number): number {
 
 /**
  * Exchange refresh_token through Vireon hosted broker (client secrets on Vercel).
- * Uses license Bearer when signed in; otherwise sends refresh_token only (CE path —
- * same credential the user earned via browser OAuth).
+ * The provider refresh token authenticates this exchange for CE and paid users.
+ * An optional, expired Liminal license must not block an existing provider grant.
  */
 export async function refreshOAuthViaVireonHostedBroker(
   provider: string,
@@ -38,18 +37,17 @@ export async function refreshOAuthViaVireonHostedBroker(
   const rt = refreshToken.trim();
   if (!rt) return null;
 
-  const license = await resolveLicenseTokenForHarness();
   const headers: Record<string, string> = {
     "Content-Type": "application/json",
     Accept: "application/json",
   };
-  if (license) headers.Authorization = `Bearer ${license}`;
 
   try {
     const res = await fetch(hostedOAuthRefreshUrl(), {
       method: "POST",
       headers,
       body: JSON.stringify({ provider, refresh_token: rt }),
+      signal: AbortSignal.timeout(15_000),
     });
     const json = (await res.json().catch(() => ({}))) as {
       error?: string;

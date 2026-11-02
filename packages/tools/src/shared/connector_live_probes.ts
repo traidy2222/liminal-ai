@@ -106,7 +106,7 @@ export async function probeGoogleOfficialMcp(
 
   const token = await getGoogleAccessToken(account.accountId);
   if (!token) {
-    return { state: "not_connected", detail: "OAuth token unreadable (reconnect or fix LIMINAL_OAUTH_KEY)" };
+    return { state: "not_connected", detail: "Saved OAuth account needs a successful token refresh or reconnect." };
   }
 
   const mode = "read_write" as const;
@@ -154,7 +154,7 @@ export async function probeGoogleAnalyticsRest(accountId?: string): Promise<Goog
   }
   const token = await getGoogleAccessToken(account.accountId);
   if (!token) {
-    return { state: "not_connected", detail: "token unreadable" };
+    return { state: "not_connected", detail: "Saved OAuth account needs a successful token refresh or reconnect." };
   }
   try {
     const res = await withTimeout(
@@ -201,7 +201,7 @@ export async function probeGoogleSearchConsoleRest(accountId?: string): Promise<
   }
   const token = await getGoogleAccessToken(account.accountId);
   if (!token) {
-    return { state: "not_connected", detail: "token unreadable" };
+    return { state: "not_connected", detail: "Saved OAuth account needs a successful token refresh or reconnect." };
   }
   try {
     const res = await withTimeout(
@@ -243,7 +243,7 @@ export async function probeGoogleCalendarRest(accountId?: string): Promise<Googl
     : accounts[0]!;
   const token = await getGoogleAccessToken(account.accountId);
   if (!token) {
-    return { state: "not_connected", detail: "token unreadable" };
+    return { state: "not_connected", detail: "Saved OAuth account needs a successful token refresh or reconnect." };
   }
   try {
     const res = await withTimeout(
@@ -322,7 +322,7 @@ export async function probeYoutubeChannelRest(): Promise<GoogleRestProbeResult> 
   }
   try {
     const token = await getYoutubeAccessToken();
-    if (!token) return { state: "error", detail: "OAuth token unreadable" };
+    if (!token) return { state: "error", detail: "No usable OAuth access token; refresh or reconnect the saved account." };
     const channel = await withTimeout(fetchPrimaryYoutubeChannel(token), PROBE_TIMEOUT_MS);
     if (!channel) return { state: "error", detail: "channels.list?mine=true failed" };
     return { state: "ok", detail: `${channel.title} (${channel.channelId})` };
@@ -357,7 +357,7 @@ async function probeSidecarMcp(opts: {
   );
   const auth = await opts.resolveAuth();
   if (!auth) {
-    return { state: "not_connected", detail: "no OAuth token for sidecar probe" };
+    return { state: "not_connected", detail: "No usable OAuth access token for the sidecar probe; check account status and reconnect if refresh fails." };
   }
   try {
     const handshake = await withTimeout(mcpHandshakeAndListTools(status.url, auth), PROBE_TIMEOUT_MS);

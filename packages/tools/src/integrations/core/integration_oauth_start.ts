@@ -2,15 +2,14 @@
  * Hosted OAuth bootstrap for connect_provider({ start_oauth: true }).
  */
 import {
-  listGoogleOAuthAccounts,
-  listMicrosoftOAuthAccounts,
-  listXeroOAuthAccounts,
-  listGithubOAuthAccounts,
-  listSlackOAuthAccounts,
-  listLinearOAuthAccounts,
-  listNotionOAuthAccounts,
-  listYoutubeOAuthAccounts,
-  listAzureOAuthAccounts,
+  getGoogleAccessToken,
+  getMicrosoftAccessToken,
+  getXeroAccessToken,
+  getSlackAccessToken,
+  getLinearAccessToken,
+  getNotionAccessToken,
+  getYoutubeAccessToken,
+  getAzureAccessToken,
   runGoogleHostedConnectFlow,
   runMicrosoftHostedConnectFlow,
   runAzureHostedConnectFlow,
@@ -64,21 +63,21 @@ export function integrationNotConnectedError(provider: ConnectProviderId, label?
 export async function isConnectProviderOAuthReady(provider: ConnectProviderId): Promise<boolean> {
   switch (provider) {
     case "google_workspace":
-      return (await listGoogleOAuthAccounts()).length > 0;
+      return !!(await getGoogleAccessToken());
     case "microsoft_365":
-      return (await listMicrosoftOAuthAccounts()).length > 0;
+      return !!(await getMicrosoftAccessToken());
     case "azure":
-      return (await listAzureOAuthAccounts()).length > 0;
+      return !!(await getAzureAccessToken());
     case "xero":
-      return (await listXeroOAuthAccounts()).length > 0;
+      return !!(await getXeroAccessToken());
     case "slack":
-      return (await listSlackOAuthAccounts()).length > 0;
+      return !!(await getSlackAccessToken());
     case "linear":
-      return (await listLinearOAuthAccounts()).length > 0;
+      return !!(await getLinearAccessToken());
     case "notion":
-      return (await listNotionOAuthAccounts()).length > 0;
+      return !!(await getNotionAccessToken());
     case "youtube":
-      return (await listYoutubeOAuthAccounts()).length > 0;
+      return !!(await getYoutubeAccessToken());
     case "github":
       return await githubAuthAvailable();
     case "ida":

@@ -2,7 +2,7 @@
 
 All notable changes to [Liminal AI](https://github.com/traidy2222/liminal-ai) on the `main` branch.
 
-**Current stage:** **beta** (`v0.1.10`, 2026-11-03). Desktop downloads are published through the public preview release channel.
+**Current stage:** **beta** (`v0.1.11`, 2026-11-03). Desktop downloads are published through the public preview release channel.
 
 Format: **v0.0.x** entries keyed to the last GitHub push in each slice. Dates are real push dates.
 
@@ -17,9 +17,22 @@ After editing JSON: `npm run changelog:gen`, commit, push, then in [vireondynami
 
 ---
 
+## v0.1.11 — 2026-11-03 {#v0-1-11}
+
+**Current beta.** Reliable Google sign-in, token refresh and Workspace tools.
+
+**Shipped**
+
+- **OAuth recovery** — An expired optional Liminal license no longer blocks provider-token renewal. Expired or unusable saved accounts no longer suppress a requested browser sign-in.
+- **Google Workspace tools** — Recover the public Google client ID from verified token metadata when needed and supply process-local signing material required by workspace-mcp. Google authentication remains enabled and the service binds only to loopback.
+- **Clear diagnostics** — Distinguish unavailable or failed token refresh from unreadable encrypted credentials. Includes regressions for expired-token reconnect, license-independent refresh and the hosted form handoff.
+- **Docs** — [Integrations](../guides/google-workspace.md)
+
+---
+
 ## v0.1.10 — 2026-11-03 {#v0-1-10}
 
-**Current beta.** Clean shutdown even after Windows closes desktop output pipes.
+Clean shutdown even after Windows closes desktop output pipes.
 
 **Shipped**
 

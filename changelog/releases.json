@@ -1,7 +1,24 @@
 {
   "stage": "beta",
-  "currentVersion": "0.1.10",
+  "currentVersion": "0.1.11",
   "releases": [
+    {
+      "version": "0.1.11",
+      "date": "2026-11-03",
+      "tagline": "Reliable Google sign-in, token refresh and Workspace tools.",
+      "summary": "Existing Google access refreshes independently of an optional Liminal license. Reconnect checks require usable credentials, and the local Docs, Sheets and Slides service starts with hosted OAuth without requiring a client secret on your computer.",
+      "bullets": [
+        "**OAuth recovery** — An expired optional Liminal license no longer blocks provider-token renewal. Expired or unusable saved accounts no longer suppress a requested browser sign-in.",
+        "**Google Workspace tools** — Recover the public Google client ID from verified token metadata when needed and supply process-local signing material required by workspace-mcp. Google authentication remains enabled and the service binds only to loopback.",
+        "**Clear diagnostics** — Distinguish unavailable or failed token refresh from unreadable encrypted credentials. Includes regressions for expired-token reconnect, license-independent refresh and the hosted form handoff."
+      ],
+      "docs": [
+        {
+          "label": "Integrations",
+          "href": "../guides/google-workspace.md"
+        }
+      ]
+    },
     {
       "version": "0.1.10",
       "date": "2026-11-03",

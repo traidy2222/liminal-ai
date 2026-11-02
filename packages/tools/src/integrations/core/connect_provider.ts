@@ -328,13 +328,13 @@ async function prepareProviderOAuth(
           { mode: account.connectMode ?? mode, monetary: account.monetaryRequested },
           mode
         );
-        if (missingYoutubeScopes(account.scopes, opts).length === 0) {
+        if (missingYoutubeScopes(account.scopes, opts).length === 0 && await isConnectProviderOAuthReady("youtube")) {
           emit?.("youtube: OAuth already has required scopes — continuing…");
           return null;
         }
       }
     } else if (await isConnectProviderOAuthReady(provider)) {
-      emit?.(`${provider}: OAuth already on disk — continuing…`);
+      emit?.(`${provider}: usable OAuth access available — continuing…`);
       return null;
     }
   }
@@ -756,7 +756,9 @@ export function createConnectorTools(registry: ToolRegistry, _emitter: AgentEmit
           ok: false,
           error:
             (attachErrors.length > 0 ? attachErrors.join("\n\n") : "no connections attached") +
-            "\n\nIf Calendar MCP fails with permission errors, enroll the Cloud project in the Workspace Developer Preview: https://developers.google.com/workspace/preview",
+            (presets.some((preset) => preset.id === "calendar")
+              ? "\n\nIf Calendar MCP fails with permission errors, enroll the Cloud project in the Workspace Developer Preview: https://developers.google.com/workspace/preview"
+              : ""),
         };
       }
 
