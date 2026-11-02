@@ -18,6 +18,7 @@ export const HARNESS_SECRET_ENV_KEYS = new Set<string>([
   "AGENT_SERPER_API_KEY",
   "GOOGLE_OAUTH_CLIENT_SECRET",
   "AGENT_OAUTH_ENCRYPTION_KEY",
+  "AGENT_INFERENCE_SESSION_TOKEN",
 ]);
 
 /** Keys editable via Settings modal + `runtimePreferences.harness.env` (non-secret). */

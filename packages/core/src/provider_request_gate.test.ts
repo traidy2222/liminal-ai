@@ -1,19 +1,28 @@
-import test from "node:test";
+import test, { type TestContext } from "node:test";
 import assert from "node:assert/strict";
 import {
   withProviderRequestSpacing,
   resolveProviderMinIntervalMs,
 } from "./provider_request_gate.js";
 
-test("resolveProviderMinIntervalMs reads env", () => {
-  process.env["AGENT_PROVIDER_MIN_INTERVAL_MS"] = "100";
+function setIntervalForTest(t: TestContext, value: string): void {
+  const previous = process.env["AGENT_PROVIDER_MIN_INTERVAL_MS"];
+  t.after(() => {
+    if (previous === undefined) delete process.env["AGENT_PROVIDER_MIN_INTERVAL_MS"];
+    else process.env["AGENT_PROVIDER_MIN_INTERVAL_MS"] = previous;
+  });
+  process.env["AGENT_PROVIDER_MIN_INTERVAL_MS"] = value;
+}
+
+test("resolveProviderMinIntervalMs reads env", (t) => {
+  setIntervalForTest(t, "100");
   assert.equal(resolveProviderMinIntervalMs(), 100);
   delete process.env["AGENT_PROVIDER_MIN_INTERVAL_MS"];
   assert.equal(resolveProviderMinIntervalMs(), 0);
 });
 
-test("withProviderRequestSpacing serializes when interval > 0", async () => {
-  process.env["AGENT_PROVIDER_MIN_INTERVAL_MS"] = "45";
+test("withProviderRequestSpacing serializes starts when interval > 0", async (t) => {
+  setIntervalForTest(t, "45");
   const creds = { apiKey: "test-key-a", baseURL: "https://openrouter.ai/api/v1" };
   const starts: number[] = [];
   const p1 = withProviderRequestSpacing(creds, async () => {
@@ -27,11 +36,10 @@ test("withProviderRequestSpacing serializes when interval > 0", async () => {
   assert.equal(starts.length, 2);
   const delta = starts[1]! - starts[0]!;
   assert.ok(delta >= 25, `expected spacing ~45ms+, got ${delta}ms`);
-  delete process.env["AGENT_PROVIDER_MIN_INTERVAL_MS"];
 });
 
-test("different API keys run in parallel when interval > 0", async () => {
-  process.env["AGENT_PROVIDER_MIN_INTERVAL_MS"] = "80";
+test("different API keys run in parallel when interval > 0", async (t) => {
+  setIntervalForTest(t, "80");
   const order: string[] = [];
   const a = withProviderRequestSpacing(
     { apiKey: "key-a", baseURL: "https://openrouter.ai/api/v1" },
@@ -48,6 +56,6 @@ test("different API keys run in parallel when interval > 0", async () => {
     }
   );
   await Promise.all([a, b]);
-  assert.ok(order.includes("b"));
-  delete process.env["AGENT_PROVIDER_MIN_INTERVAL_MS"];
+  assert.ok(order.indexOf("b") > order.indexOf("a-start"));
+  assert.ok(order.indexOf("b") < order.indexOf("a-end"), "key B must start before key A finishes");
 });

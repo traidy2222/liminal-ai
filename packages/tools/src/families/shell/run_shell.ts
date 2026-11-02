@@ -4,7 +4,7 @@
  * When a UI PTY runtime is available (desktop/web), commands run in the visible
  * agent terminal tab. Otherwise falls back to spawn() + pipes.
  */
-import { spawn } from "node:child_process";
+import { spawn, execFile } from "node:child_process";
 import type { AgentEmitter, AgentHarness } from "@liminal/core";
 import { effectiveHarnessEnvRaw, resolveShellRuntime, resolveWorkspaceRoot } from "@liminal/core";
 import { defineTool } from "../../shared/helpers.js";
@@ -79,10 +79,16 @@ function runShellSpawn(input: {
       cwd,
       shell: false,
       stdio: "pipe",
+      detached: process.platform !== "win32",
+      windowsHide: true,
     });
 
-    const chunks: string[] = [];
+    const outputLimit = 256 * 1024;
+    let outputTail = "", outputChars = 0, traceChars = 0, traceTruncated = false;
     let timedOut = false;
+    let settled = false;
+    let forceTimer: ReturnType<typeof setTimeout> | undefined;
+    let closeDeadline: ReturnType<typeof setTimeout> | undefined;
     let headerEmitted = false;
     const startedAt = Date.now();
 
@@ -91,13 +97,36 @@ function runShellSpawn(input: {
         headerEmitted = true;
         emitter.emit("text", { delta: `\n\`${command}\`\n`, channel: "trace" });
       }
-      emitter.emit("text", { delta: text, channel: "trace" });
-      chunks.push(text);
+      const visible = text.slice(0, Math.max(0, outputLimit - traceChars));
+      if (visible) emitter.emit("text", { delta: visible, channel: "trace" });
+      traceChars += visible.length;
+      if (visible.length < text.length && !traceTruncated) {
+        traceTruncated = true;
+        emitter.emit("text", { delta: "\n[run_shell] Live output limit reached; final result retains the output tail.\n", channel: "trace" });
+      }
+      outputChars += text.length;
+      outputTail = (outputTail + text).slice(-outputLimit);
+    };
+
+    const killTree = (force = false) => {
+      if (!child.pid) return;
+      if (process.platform === "win32") {
+        execFile("taskkill.exe", ["/PID", String(child.pid), "/T", "/F"], { windowsHide: true, timeout: 5000 }, error => {
+          if (error && !settled) { try { child.kill("SIGKILL"); } catch { /* close deadline still applies */ } }
+        });
+      } else {
+        try { process.kill(-child.pid, force ? "SIGKILL" : "SIGTERM"); }
+        catch { try { child.kill(force ? "SIGKILL" : "SIGTERM"); } catch { /* process already exited */ } }
+      }
     };
 
     const killTimer = setTimeout(() => {
       timedOut = true;
-      child.kill("SIGTERM");
+      killTree();
+      if (process.platform !== "win32") forceTimer = setTimeout(() => killTree(true), 1000);
+      closeDeadline = setTimeout(() => {
+        child.stdout?.destroy(); child.stderr?.destroy(); child.unref(); finish(null);
+      }, 5500);
     }, timeout);
 
     const heartbeatMs = 15_000;
@@ -109,13 +138,20 @@ function runShellSpawn(input: {
       });
     }, heartbeatMs);
 
-    child.stdout?.on("data", (data: Buffer) => emitDelta(data.toString()));
-    child.stderr?.on("data", (data: Buffer) => emitDelta(data.toString()));
+    child.stdout?.setEncoding("utf8");
+    child.stderr?.setEncoding("utf8");
+    child.stdout?.on("data", (data: string) => emitDelta(data));
+    child.stderr?.on("data", (data: string) => emitDelta(data));
 
-    child.on("close", (code) => {
+    const finish = (code: number | null) => {
+      if (settled) return;
+      if (timedOut && process.platform !== "win32") killTree(true);
+      settled = true;
       clearTimeout(killTimer);
+      clearTimeout(forceTimer);
+      clearTimeout(closeDeadline);
       clearInterval(heartbeat);
-      const body = chunks.join("").trimEnd() || "(no output)";
+      const body = (outputChars > outputLimit ? "[output truncated — latest characters retained]\n" : "") + (outputTail.trimEnd() || "(no output)");
       const output = cappedNote + body;
       if (timedOut) {
         resolve({
@@ -137,10 +173,14 @@ function runShellSpawn(input: {
       } else {
         resolve({ ok: true, output });
       }
-    });
+    };
+    child.on("close", finish);
 
     child.on("error", (err) => {
+      settled = true;
       clearTimeout(killTimer);
+      clearTimeout(forceTimer);
+      clearTimeout(closeDeadline);
       clearInterval(heartbeat);
       resolve({ ok: false, error: `Failed to spawn: ${err.message}` });
     });

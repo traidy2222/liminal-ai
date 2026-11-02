@@ -2,7 +2,8 @@ import { defineTool } from "../../shared/helpers.js";
 import pdfParse from "pdf-parse";
 import { Worker } from "node:worker_threads";
 import { fileURLToPath } from "node:url";
-import { fetchWithRetry } from "../../shared/network_retry.js";
+import { fetchWithRetry as retryFetch, type RetryHttpConfig } from "../../shared/network_retry.js";
+import { publicWebFetch } from "../../shared/public_web_fetch.js";
 import { effectiveHarnessEnvRaw } from "@liminal/core";
 import {
   buildFallbackFetchUrl,
@@ -16,6 +17,10 @@ import {
   runSerperWebFetch,
   shouldAttemptSerperWebFetch,
 } from "./web_fetch_serper.js";
+
+const fetchWithRetry = (url: string, init: RequestInit, cfg: RetryHttpConfig) =>
+  retryFetch(url, init, { ...cfg, fetchImpl: publicWebFetch });
+
 
 /** Per-request HTTP timeout for web_fetch page fetches. Clamp 3000–120000 ms. */
 export function resolveWebFetchTimeoutMs(): number {

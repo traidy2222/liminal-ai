@@ -38,8 +38,9 @@ type TerminalEnsureHandler = (
 let viewPublisher: TerminalViewPublisher | null = null;
 let ensureHandler: TerminalEnsureHandler | null = null;
 
-export function setTerminalViewPublisher(fn: TerminalViewPublisher | null): void {
+export function setTerminalViewPublisher(fn: TerminalViewPublisher | null): () => void {
   viewPublisher = fn;
+  return () => { if (viewPublisher === fn) viewPublisher = null; };
 }
 
 export function setTerminalEnsureHandler(fn: TerminalEnsureHandler | null): void {

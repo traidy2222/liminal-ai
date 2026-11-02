@@ -29,6 +29,13 @@ interface PtySessionRecord {
 const MAX_OUTPUT_BACKLOG = 512 * 1024;
 const MAX_SESSIONS_PER_CHAT = 8;
 
+/** Keep ordinary shell configuration, but do not copy harness/provider credentials. */
+function terminalEnvironment(extra: NodeJS.ProcessEnv = {}): Record<string, string> {
+  return Object.fromEntries(Object.entries({ ...process.env, ...extra }).filter(([name, value]) =>
+    value !== undefined && !/(api_?key|token|secret|password|passwd|credential|private_?key|access_?key|captcha_?key|_key$)/i.test(name)
+  )) as Record<string, string>;
+}
+
 export interface PtyOneshotInput {
   chatId: string;
   workspaceRoot: string;
@@ -67,6 +74,33 @@ export class PtyManager extends EventEmitter {
   private readonly chatSessions = new Map<string, string[]>();
   /** In-flight open() per chat+source — prevents duplicate agent shells from parallel ensure calls. */
   private readonly openInflight = new Map<string, string>();
+
+  private publishData(record: PtySessionRecord, data: string): void {
+    if (this.sessions.get(record.info.sessionId) !== record) return;
+    record.outputBacklog = (record.outputBacklog + data).slice(-MAX_OUTPUT_BACKLOG);
+    try { this.emit("data", record.info.sessionId, record.info.chatId, data); } catch { /* observer */ }
+    for (const listener of record.dataListeners) {
+      try { listener(data); } catch { /* observer */ }
+    }
+    for (const socket of record.sockets) {
+      try { if (socket.readyState === socket.OPEN) socket.send(data); } catch { /* disconnected */ }
+    }
+  }
+
+  private releaseSession(record: PtySessionRecord, exitCode: number): void {
+    const { sessionId, chatId } = record.info;
+    if (this.sessions.get(sessionId) !== record) return;
+    this.sessions.delete(sessionId);
+    const remaining = (this.chatSessions.get(chatId) ?? []).filter(id => id !== sessionId);
+    if (remaining.length) this.chatSessions.set(chatId, remaining);
+    else this.chatSessions.delete(chatId);
+    for (const socket of record.sockets) {
+      try { socket.close(1000, "pty_exit"); } catch { /* disconnected */ }
+    }
+    record.sockets.clear();
+    record.dataListeners.clear();
+    try { this.emit("exit", sessionId, chatId, exitCode); } catch { /* observer */ }
+  }
 
   list(chatId?: string): PtySessionInfo[] {
     const all = [...this.sessions.values()].map((s) => s.info);
@@ -162,8 +196,7 @@ export class PtyManager extends EventEmitter {
     const shell = launch.executable;
     const args = launch.args.length > 0 ? launch.args : undefined;
     const env = {
-      ...process.env,
-      ...(launch.env ?? {}),
+      ...terminalEnvironment(launch.env),
       TERM: "xterm-256color",
       COLORTERM: "truecolor",
       LIMINAL_CHAT_ID: chatId,
@@ -200,46 +233,8 @@ export class PtyManager extends EventEmitter {
       dataListeners: new Set(),
     };
 
-    proc.onData((data) => {
-      record.outputBacklog += data;
-      if (record.outputBacklog.length > MAX_OUTPUT_BACKLOG) {
-        record.outputBacklog = record.outputBacklog.slice(-MAX_OUTPUT_BACKLOG);
-      }
-      this.emit("data", sessionId, chatId, data);
-      for (const listener of record.dataListeners) {
-        try {
-          listener(data);
-        } catch {
-          /* ignore */
-        }
-      }
-      for (const socket of record.sockets) {
-        if (socket.readyState === socket.OPEN) {
-          socket.send(data);
-        }
-      }
-    });
-
-    proc.onExit(({ exitCode }) => {
-      this.emit("exit", sessionId, chatId, exitCode);
-      for (const socket of record.sockets) {
-        try {
-          socket.close(1000, "pty_exit");
-        } catch {
-          /* ignore */
-        }
-      }
-      record.sockets.clear();
-      this.sessions.delete(sessionId);
-      const ids = this.chatSessions.get(chatId) ?? [];
-      this.chatSessions.set(
-        chatId,
-        ids.filter((id) => id !== sessionId)
-      );
-      if (this.chatSessions.get(chatId)?.length === 0) {
-        this.chatSessions.delete(chatId);
-      }
-    });
+    proc.onData(data => this.publishData(record, data));
+    proc.onExit(({ exitCode }) => this.releaseSession(record, exitCode));
 
     this.sessions.set(sessionId, record);
     const nextOrder = [...(this.chatSessions.get(chatId) ?? []), sessionId];
@@ -274,7 +269,7 @@ export class PtyManager extends EventEmitter {
 
     const sessionId = newSessionId(chatId);
     const env = {
-      ...process.env,
+      ...terminalEnvironment(),
       TERM: "xterm-256color",
       COLORTERM: "truecolor",
       LIMINAL_CHAT_ID: chatId,
@@ -314,14 +309,11 @@ export class PtyManager extends EventEmitter {
 
     const appendOutput = (data: string) => {
       output += data;
-      record.outputBacklog += data;
-      if (record.outputBacklog.length > MAX_OUTPUT_BACKLOG) {
-        record.outputBacklog = record.outputBacklog.slice(-MAX_OUTPUT_BACKLOG);
-      }
+      this.publishData(record, data);
       if (output.length > MAX_OUTPUT_BACKLOG) {
         output = output.slice(-MAX_OUTPUT_BACKLOG);
       }
-      input.onData?.(data);
+      try { input.onData?.(data); } catch { /* observer */ }
     };
 
     proc.onData(appendOutput);
@@ -329,9 +321,6 @@ export class PtyManager extends EventEmitter {
     this.sessions.set(sessionId, record);
     const nextOrder = [...(this.chatSessions.get(chatId) ?? []), sessionId];
     this.chatSessions.set(chatId, nextOrder);
-    this.emit("open", info);
-    input.onSessionStart?.(info);
-
     return new Promise<PtyOneshotResult>((resolve, reject) => {
       let settled = false;
       const finish = (result: PtyOneshotResult) => {
@@ -344,6 +333,7 @@ export class PtyManager extends EventEmitter {
         if (settled) return;
         settled = true;
         clearTimeout(timer);
+        this.releaseSession(record, -1);
         try {
           proc.kill();
         } catch {
@@ -362,22 +352,19 @@ export class PtyManager extends EventEmitter {
       }, input.timeoutMs);
 
       proc.onExit(({ exitCode }) => {
-        this.sessions.delete(sessionId);
-        const ids = this.chatSessions.get(chatId) ?? [];
-        this.chatSessions.set(
-          chatId,
-          ids.filter((id) => id !== sessionId)
-        );
-        if (this.chatSessions.get(chatId)?.length === 0) {
-          this.chatSessions.delete(chatId);
-        }
-        this.emit("exit", sessionId, chatId, exitCode);
+        this.releaseSession(record, exitCode);
         finish({
           exitCode,
           output: normalizePtyOutput(output),
           sessionId,
         });
       });
+      try {
+        this.emit("open", info);
+        input.onSessionStart?.(info);
+      } catch (err) {
+        fail(err instanceof Error ? err : new Error(String(err)));
+      }
     });
   }
 
@@ -451,21 +438,12 @@ export class PtyManager extends EventEmitter {
   close(sessionId: string): boolean {
     const record = this.sessions.get(sessionId);
     if (!record) return false;
-    const chatId = record.info.chatId;
     try {
       record.pty.kill();
     } catch {
       /* ignore */
     }
-    this.sessions.delete(sessionId);
-    const ids = this.chatSessions.get(chatId) ?? [];
-    this.chatSessions.set(
-      chatId,
-      ids.filter((id) => id !== sessionId)
-    );
-    if (this.chatSessions.get(chatId)?.length === 0) {
-      this.chatSessions.delete(chatId);
-    }
+    this.releaseSession(record, -1);
     return true;
   }
 

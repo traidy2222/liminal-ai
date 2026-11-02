@@ -4,7 +4,8 @@
  * budget; optional minimum interval caps request starts per credential pair.
  */
 import { createHash } from "node:crypto";
-import { effectiveHarnessEnvRaw } from "./harness_effective_env.js";
+import { setTimeout as delay } from "node:timers/promises";
+import { effectiveHarnessEnvRaw, currentHarnessPreferences, harnessEnvResolutionMeta } from "./harness_effective_env.js";
 import { isKimchiApiBaseUrl, resolveKimchiMinIntervalMs } from "./kimchi_provider.js";
 
 export interface ProviderCredentials {
@@ -30,24 +31,28 @@ export function providerSpacingKey(creds: ProviderCredentials): string {
 /** Minimum ms between the *start* of consecutive requests sharing the same key. 0 = disabled. */
 export function resolveProviderMinIntervalMs(baseURL?: string): number {
   const raw = effectiveHarnessEnvRaw("AGENT_PROVIDER_MIN_INTERVAL_MS")?.trim();
-  if (raw) {
+  const prefs = currentHarnessPreferences();
+  const meta = harnessEnvResolutionMeta("AGENT_PROVIDER_MIN_INTERVAL_MS", prefs);
+  if (raw && (!isKimchiApiBaseUrl(baseURL) || meta.source !== "product_default")) {
     const n = parseInt(raw, 10);
     if (Number.isFinite(n)) return Math.max(0, Math.min(120_000, n));
   }
   if (isKimchiApiBaseUrl(baseURL)) {
-    return resolveKimchiMinIntervalMs();
+    return resolveKimchiMinIntervalMs(prefs);
   }
   return 0;
 }
 
 /**
  * Runs `fn` after honoring optional global spacing for this API key + base URL.
- * Safe to nest (inner calls extend the same chain).
+ * Only request starts are serialized; responses and nested calls can progress independently.
  */
 export async function withProviderRequestSpacing<T>(
   creds: ProviderCredentials,
-  fn: () => Promise<T>
+  fn: () => Promise<T>,
+  signal?: AbortSignal
 ): Promise<T> {
+  signal?.throwIfAborted();
   const intervalMs = resolveProviderMinIntervalMs(creds.baseURL);
   if (intervalMs <= 0) {
     return fn();
@@ -59,21 +64,31 @@ export async function withProviderRequestSpacing<T>(
     chains.set(key, entry);
   }
   const prev = entry.tail;
-  const run = prev.then(async () => {
+  const start = prev.then(async () => {
+    signal?.throwIfAborted();
     const now = Date.now();
     const wait = Math.max(0, entry!.nextAllowedAt - now);
     if (wait > 0) {
-      await new Promise<void>((r) => setTimeout(r, wait));
+      await delay(wait, undefined, { signal });
     }
-    try {
-      return await fn();
-    } finally {
-      entry!.nextAllowedAt = Date.now() + intervalMs;
-    }
+    signal?.throwIfAborted();
+    entry!.nextAllowedAt = Date.now() + intervalMs;
   });
-  entry.tail = run.then(
+  entry.tail = start.then(
     () => undefined,
     () => undefined
   );
-  return run as Promise<T>;
+  // Return promptly on abort even while earlier start reservations are queued.
+  // The queued start still checks the signal, so cancellation cannot launch fn later.
+  if (signal) {
+    await new Promise<void>((resolve, reject) => {
+      const abort = () => { cleanup(); reject(signal.reason); };
+      const cleanup = () => signal.removeEventListener("abort", abort);
+      signal.addEventListener("abort", abort, { once: true });
+      start.then(() => { cleanup(); resolve(); }, error => { cleanup(); reject(error); });
+      if (signal.aborted) abort();
+    });
+  } else await start;
+  signal?.throwIfAborted();
+  return fn();
 }

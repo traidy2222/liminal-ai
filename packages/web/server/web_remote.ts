@@ -80,6 +80,7 @@ export class WebRemoteService {
       cloudUrl = cloud.cloudUrl;
       result.cloudUrl = cloud.cloudUrl;
       this.cloudRelay.setRelay({
+        chatId: opts.chatId,
         relayHostUrl: cloud.relayHostUrl,
         joinCode: cloud.joinCode,
         joinToken: result.joinToken,

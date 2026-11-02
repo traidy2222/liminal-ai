@@ -33,9 +33,6 @@ import {
   fetchManagedInferenceModels,
   fetchOpenRouterSettingsCatalog,
   resolveInferenceMode,
-  exchangeGoogleCode,
-  scopesForGoogleServices,
-  resolveGoogleServices,
   buildHostedIntegrationConnectUrl,
   hostedOAuthHandoffPath,
   applyHostedOAuthHandoff,
@@ -105,11 +102,6 @@ const pendingHarnessConnect = new Map<
   { exp: number; redirectUri: string }
 >();
 
-const pendingGoogleConnect = new Map<
-  string,
-  { exp: number; redirectUri: string; services?: string[]; mode: "read_write" | "read_only" }
->();
-
 const pendingHostedOAuth = new Map<
   string,
   {
@@ -126,17 +118,6 @@ function prunePendingHostedOAuth(): void {
   for (const [k, v] of pendingHostedOAuth) {
     if (v.exp < now) pendingHostedOAuth.delete(k);
   }
-}
-
-function prunePendingGoogleConnect(): void {
-  const now = Date.now();
-  for (const [k, v] of pendingGoogleConnect) {
-    if (v.exp < now) pendingGoogleConnect.delete(k);
-  }
-}
-
-function googleCallbackRedirectUri(port: number): string {
-  return `http://127.0.0.1:${port}/oauth/google/callback`;
 }
 
 function prunePendingHarnessConnect(): void {
@@ -179,6 +160,7 @@ export function createRouter(
 
   /** Convenience wrapper — every chat-scoped route calls this. */
   const active = () => chatManager.getActive();
+  const pendingMessages = new WeakSet<ReturnType<typeof active>>();
 
   router.get("/api/workflows/:runId/files/:name", async (req,res)=>{
     try {
@@ -584,57 +566,6 @@ export function createRouter(
       extra: Object.keys(extra).length > 0 ? extra : undefined,
     });
     res.json({ connectUrl, authUrl: connectUrl, state });
-  });
-
-  router.get("/oauth/google/callback", async (req, res) => {
-    prunePendingGoogleConnect();
-    const state = String(req.query["state"] ?? "");
-    const pending = pendingGoogleConnect.get(state);
-    const code = String(req.query["code"] ?? "");
-    const err = req.query["error"];
-
-    if (err) {
-      res.status(400).send(vireonCallbackHtml("Google sign-in failed", escapeHtml(String(err))));
-      return;
-    }
-    if (!pending || !code) {
-      res.status(400).send(vireonCallbackHtml("Invalid request", "Missing or expired OAuth state."));
-      return;
-    }
-    pendingGoogleConnect.delete(state);
-
-    try {
-      const presets = resolveGoogleServices(pending.services);
-      const scopes = scopesForGoogleServices(
-        presets.length > 0 ? presets : resolveGoogleServices(undefined),
-        pending.mode
-      );
-      const bundle = await exchangeGoogleCode({ code, redirectUri: pending.redirectUri, scopes });
-      try {
-        const bridge = active();
-        if (!bridge.harness.getIsRunning()) {
-          const attach = await connectGoogleWorkspaceFromServer(bridge.harness.registry, {
-            services: pending.services,
-            mode: pending.mode,
-          });
-          if (attach.ok) {
-            bridge.harness.getContext().refreshProtocolDynamic(bridge.harness.registry.getActiveToolNames());
-          }
-        }
-      } catch {
-        /* attach can be retried from Integrations → Attach MCP tools */
-      }
-      res.send(
-        vireonCallbackSuccessRedirect(bundle.email ?? bundle.accountId, "google_workspace").replace(
-          "vireon=connected",
-          "google=connected"
-        )
-      );
-    } catch (e) {
-      res.status(500).send(
-        vireonCallbackHtml("Token exchange failed", escapeHtml(e instanceof Error ? e.message : String(e)))
-      );
-    }
   });
 
   router.post("/api/integrations/google/connect", async (req, res) => {
@@ -1551,19 +1482,33 @@ export function createRouter(
   });
 
   router.post("/api/message", async (req, res) => {
-    const bridge = active();
+    let bridge: ReturnType<typeof active> | undefined;
+    let reserved = false;
+    let handedOff = false;
+    try {
+    bridge = active();
+    if (pendingMessages.has(bridge) || bridge.isBusy) {
+      res.status(409).json({ error: "Agent is already processing a message" });
+      return;
+    }
+    pendingMessages.add(bridge);
+    reserved = true;
     await bridge.whenSessionReady();
     if (bridge.isAwaitingPersonaBootstrap) {
       res.status(409).json({ error: "Persona bootstrap is pending. Submit via bootstrap modal." });
       return;
     }
-    const { message, freshContext, attachments, liveDictation, workflowPreset } = req.body as {
+    const { message, freshContext, attachments, liveDictation, workflowPreset } = (req.body ?? {}) as {
       message?: string;
       freshContext?: boolean;
       attachments?: IncomingAttachment[];
       liveDictation?: boolean;
       workflowPreset?: import("@liminal/core").SignatureWorkflowPreset;
     };
+    if (attachments != null && !Array.isArray(attachments)) {
+      res.status(400).json({ error: "attachments must be an array" });
+      return;
+    }
     const msg = String(message ?? "").trim();
     const normalizedAttachments: Array<ChatFileAttachment & { dataUrl: string }> = [];
     for (const item of attachments ?? []) {
@@ -1603,18 +1548,24 @@ export function createRouter(
       return;
     }
     const persisted = await persistIncomingAttachments(normalizedAttachments);
-    res.json({ ok: true });
-    bridge
-      .sendUserMessage(msg, {
+    const admittedBridge = bridge;
+    const send = admittedBridge.sendUserMessage(msg, {
         freshContext: Boolean(freshContext),
         liveDictation: Boolean(liveDictation),
         chatAttachments: persisted,
         workflowPreset,
-      })
-      .catch((err) => {
+      });
+    handedOff = true;
+    void send.catch((err) => {
       const message = err instanceof Error ? err.message : "Failed to process message.";
-      sse.send("error", { message }, bridge.chatId);
-    });
+      sse.send("error", { message }, admittedBridge.chatId);
+    }).finally(() => pendingMessages.delete(admittedBridge));
+    res.json({ ok: true });
+    } catch (err) {
+      if (!res.headersSent) res.status(500).json({ error: err instanceof Error ? err.message : "Failed to accept message." });
+    } finally {
+      if (reserved && bridge && !handedOff) pendingMessages.delete(bridge);
+    }
   });
 
   router.post("/api/persona/bootstrap", async (req, res) => {

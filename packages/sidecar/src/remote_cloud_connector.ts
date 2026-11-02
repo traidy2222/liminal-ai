@@ -69,11 +69,11 @@ export async function registerCloudRemoteSession(opts: {
 
 /** Best-effort forward of protocol frames to the Vireon cloud relay (SSE buffer). */
 export class CloudRelayForwarder {
-  private relay: { url: string; joinCode: string; joinToken: string } | null = null;
+  private relay: { url: string; joinCode: string; joinToken: string; chatId: string } | null = null;
 
-  setRelay(opts: { relayHostUrl: string; joinCode: string; joinToken: string }): void {
+  setRelay(opts: { relayHostUrl: string; joinCode: string; joinToken: string; chatId: string }): void {
     const url = opts.relayHostUrl.trim();
-    if (!url) {
+    if (!url || !opts.chatId?.trim()) {
       this.relay = null;
       return;
     }
@@ -81,6 +81,7 @@ export class CloudRelayForwarder {
       url,
       joinCode: opts.joinCode.toUpperCase(),
       joinToken: opts.joinToken,
+      chatId: opts.chatId,
     };
   }
 
@@ -91,6 +92,9 @@ export class CloudRelayForwarder {
   forward(frameJson: string): void {
     const relay = this.relay;
     if (!relay) return;
+    try {
+      if (JSON.parse(frameJson)?.chatId !== relay.chatId) return;
+    } catch { return; }
     void fetch(relay.url, {
       method: "POST",
       headers: {

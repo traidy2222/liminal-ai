@@ -76,6 +76,9 @@ export function prepareToolArgsForValidation(
   args: Record<string, unknown>,
   schema: ToolParameterSchema
 ): ToolArgsPrepResult {
+  if (!args || typeof args !== "object" || Array.isArray(args)) {
+    return { ok: false, error: "Tool arguments must be a JSON object." };
+  }
   let out = normalizeToolArgs(name, args);
 
   if (name.startsWith("linear_")) {

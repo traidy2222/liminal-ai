@@ -1,7 +1,24 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { resolveHarnessEnvRaw } from "./harness_effective_env.js";
+import { resolveHarnessEnvRaw, harnessEnvResolutionMeta } from "./harness_effective_env.js";
+import { buildHarnessSettingsApiFields } from "./harness_settings_api.js";
 import type { RuntimePreferences } from "./runtime_prefs.js";
+
+test("inference session credentials are env-only and absent from settings values", () => {
+  const key = "AGENT_INFERENCE_SESSION_TOKEN";
+  const previous = process.env[key];
+  const prefs: RuntimePreferences = { version: 1, updatedAt: 0, harness: { env: { [key]: "synthetic-persisted-credential" } } };
+  try {
+    process.env[key] = "synthetic-env-credential";
+    assert.deepEqual(harnessEnvResolutionMeta(key, prefs), { value: undefined, lockedByEnv: true, source: "environment" });
+    assert.equal(resolveHarnessEnvRaw(key, prefs), "synthetic-env-credential");
+    assert.equal(JSON.stringify(buildHarnessSettingsApiFields(prefs)).includes("synthetic-env-credential"), false);
+    delete process.env[key];
+    assert.equal(resolveHarnessEnvRaw(key, prefs), undefined);
+    assert.equal(harnessEnvResolutionMeta(key, prefs).lockedByEnv, true);
+    assert.equal(JSON.stringify(buildHarnessSettingsApiFields(prefs)).includes("synthetic-persisted-credential"), false);
+  } finally { if (previous === undefined) delete process.env[key]; else process.env[key] = previous; }
+});
 
 test("resolveHarnessEnvRaw prefers provider.model over process.env and harness.env", () => {
   const prev = {

@@ -8,7 +8,8 @@
  *
  * Whole-file content (create / overwrite / append) belongs to write_file.
  */
-import { readFile, writeFile, access } from "node:fs/promises";
+import { readFile, access } from "node:fs/promises";
+import { atomicWriteText } from "../../shared/atomic_file_write.js";
 import path from "node:path";
 import { resolveWorkspaceRoot } from "@liminal/core";
 import { defineTool } from "../../shared/helpers.js";
@@ -33,7 +34,7 @@ function parseHunk(lines: string[]): ParsedHunk | null {
   const newLines: string[] = [];
   for (let i = 1; i < lines.length; i++) {
     const L = lines[i]!;
-    if (L.startsWith("---") || L.startsWith("+++")) continue;
+    if (L === "\\ No newline at end of file") continue;
     if (L.startsWith("-")) oldLines.push(L.slice(1));
     else if (L.startsWith("+")) newLines.push(L.slice(1));
     else {
@@ -54,8 +55,9 @@ function findContext(haystack: string[], needle: string[], hint: number): number
     if (hint - d >= lo) candidates.push(hint - d);
     if (hint + d <= hi) candidates.push(hint + d);
   }
+  const nearby = new Set(candidates);
   for (let i = 0; i <= haystack.length - needle.length; i++) {
-    if (!candidates.includes(i)) candidates.push(i);
+    if (!nearby.has(i)) candidates.push(i);
   }
   for (const pos of candidates) {
     if (pos < 0 || pos + needle.length > haystack.length) continue;
@@ -87,7 +89,12 @@ export const editFileTool = defineTool({
     "TIP: If your search string fails (0 matches), run grep_file to get fresh line content — file edits earlier this turn make previous reads stale.",
   requiresApproval: true,
   dangerLevel: "cautious",
-  resourceLocks: (args) => [`file:write:${args["path"] as string}`],
+  resourceLocks: (args) => {
+    const safe = resolveWithinWorkspace(String(args["path"] ?? ""));
+    if (!safe.ok || !safe.resolvedPath) return [];
+    const canonical = process.platform === "win32" ? safe.resolvedPath.toLowerCase() : safe.resolvedPath;
+    return [`file:write:${canonical}`];
+  },
   parameters: {
     type: "object",
     properties: {
@@ -224,7 +231,7 @@ export const editFileTool = defineTool({
       );
 
       try {
-        await writeFile(filePath, nextContent, "utf8");
+        await atomicWriteText(filePath, nextContent);
       } catch (e) {
         return { ok: false, error: `Write failed: ${String(e)}` };
       }
@@ -297,7 +304,7 @@ export const editFileTool = defineTool({
           "\n"
       );
       try {
-        await writeFile(filePath, current, "utf8");
+        await atomicWriteText(filePath, current);
       } catch (e) {
         return { ok: false, error: `Write failed: ${String(e)}` };
       }
@@ -306,6 +313,9 @@ export const editFileTool = defineTool({
 
     // ── MODE: diff ───────────────────────────────────────────────────────────
     const diffText = args["diff"] as string;
+    if ((diffText.match(/^@@\s/gm) ?? []).length > 1) {
+      return { ok: false, error: "Supply one diff hunk per edit_file call; multiple hunks were not applied." };
+    }
     const chunks = diffText.split(/\n(?=@@)/);
     const hunkBlock = chunks.find((c) => c.trim().startsWith("@@")) ?? diffText;
     const hunkLines = hunkBlock.trim().split("\n");
@@ -373,7 +383,7 @@ export const editFileTool = defineTool({
     );
 
     try {
-      await writeFile(filePath, nextContent, "utf8");
+      await atomicWriteText(filePath, nextContent);
     } catch (e) {
       return { ok: false, error: `Write failed: ${String(e)}` };
     }

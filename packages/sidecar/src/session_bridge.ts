@@ -43,6 +43,7 @@ export type FrameSink = (frame: ServerFrame) => void;
  * identical — only the transport differs.
  */
 export class SessionBridge {
+  private turnInFlight = false;
   readonly chatId: string;
   readonly workspaceRoot: string;
   readonly harness: AgentHarness;
@@ -74,7 +75,7 @@ export class SessionBridge {
   }
 
   get isBusy(): boolean {
-    return this.harness.getIsRunning();
+    return this.turnInFlight || this.harness.getIsRunning();
   }
   get turnStartTime(): number | null {
     return this.turnStartedAt;
@@ -195,7 +196,7 @@ export class SessionBridge {
     if (this.heartbeatTimer) return;
     if (!this.turnStartedAt) this.turnStartedAt = Date.now();
     const tick = (): void => {
-      if (!this.harness.getIsRunning()) {
+      if (!this.isBusy) {
         this.stopHeartbeat();
         return;
       }
@@ -330,7 +331,10 @@ export class SessionBridge {
     if (this.awaitingPersonaBootstrapInput) {
       throw new Error("Complete persona setup before chatting.");
     }
-    await runWithWorkspaceRoot(this.workspaceRoot, async () => {
+    if (this.isBusy) throw new Error("Agent is busy; finish the current turn first.");
+    this.turnInFlight = true;
+    try {
+      await runWithWorkspaceRoot(this.workspaceRoot, async () => {
       const run = this.harness.send(message, {
         freshContext: opts?.freshContext,
         liveDictation: opts?.liveDictation,
@@ -339,7 +343,11 @@ export class SessionBridge {
       });
       this.startHeartbeat();
       await run;
-    });
+      });
+    } finally {
+      this.turnInFlight = false;
+      this.stopHeartbeat();
+    }
   }
 
   /** Cooperatively abort the in-flight turn, if any. */
@@ -380,13 +388,14 @@ export class SessionBridge {
 
   /** Clear the transcript without disposing the harness. */
   clearSession(): void {
+    if (this.isBusy || this.bootstrapInFlight) throw new Error("Agent is busy; finish the current turn first.");
     this.harness.clearConversation();
-    this.awaitingPersonaBootstrapInput = false;
     this.transcriptHydrated = false;
   }
 
   /** Clear transcript + persona state and reopen bootstrap when enabled. */
   async resetPersonaBootstrapForSession(): Promise<void> {
+    if (this.isBusy || this.bootstrapInFlight) throw new Error("Agent is busy; finish the current turn first.");
     this.harness.clearConversation();
     this.bootstrapInFlight = false;
     this.transcriptHydrated = false;

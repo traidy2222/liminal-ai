@@ -3,6 +3,28 @@
  * Runs after JSON schema validation; returns a human-readable block reason or null.
  */
 import { effectiveHarnessEnvRaw } from "./harness_effective_env.js";
+import { isIP } from "node:net";
+
+function internalLiteral(host: string): boolean {
+  const ip = host.replace(/^\[|\]$/g, "");
+  if (isIP(ip) === 4) {
+    const [a = 0, b = 0] = ip.split(".").map(Number);
+    return a === 0 || a === 10 || a === 127 || a >= 224 ||
+      (a === 169 && b === 254) || (a === 172 && b >= 16 && b <= 31) ||
+      (a === 192 && b === 168) || (a === 100 && b >= 64 && b <= 127) ||
+      (a === 198 && (b === 18 || b === 19));
+  }
+  if (isIP(ip) === 6) {
+    // URL parsing canonicalizes IPv4-mapped addresses to hexadecimal groups.
+    const mapped = ip.match(/^::ffff:([0-9a-f]{1,4}):([0-9a-f]{1,4})$/i);
+    if (mapped) {
+      const hi = parseInt(mapped[1]!, 16), lo = parseInt(mapped[2]!, 16);
+      return internalLiteral(`${hi >> 8}.${hi & 255}.${lo >> 8}.${lo & 255}`);
+    }
+    return ip === "::" || ip === "::1" || /^(?:f[cd]|fe[89ab]|ff)/i.test(ip);
+  }
+  return false;
+}
 
 const DANGEROUS_SHELL =
   /\brm\s+(-\S+\s+)*\/($|[\s;|&])|rm\s+.*--no-preserve-root|:\(\)\{|\|\s*:\s*&|mkfs\.|dd\s+if=\/dev\/|curl\s+.*\|\s*sh|wget\s+.*\|\s*sh|>\s*\/dev\/sd/i;
@@ -53,14 +75,13 @@ export function guardToolArgs(
       if (u.protocol !== "http:" && u.protocol !== "https:") {
         return `Unsupported URL scheme: ${u.protocol}`;
       }
-      const host = u.hostname.toLowerCase();
+      const host = u.hostname.toLowerCase().replace(/\.+$/, "");
       if (
         host === "localhost" ||
-        host === "127.0.0.1" ||
-        host === "::1" ||
+        internalLiteral(host) ||
         host.endsWith(".localhost")
       ) {
-        return "Blocked fetch to loopback URL (SSRF mitigation).";
+        return "Blocked fetch to loopback or internal URL (SSRF mitigation).";
       }
     } catch {
       return "Invalid URL for web_fetch.";

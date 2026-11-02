@@ -219,10 +219,11 @@ export class TaskOrchestrator {
       let allDone = true;
       for (const depId of deps) {
         const dep = this.tasks.get(depId);
-        if (!dep || dep.status === "running") { allDone = false; break; }
+        if (!dep) { failedIds.push(depId); continue; }
+        if (dep.status === "running") { allDone = false; continue; }
         if (dep.status === "error" || dep.status === "cancelled") failedIds.push(depId);
       }
-      if (allDone) return { ok: failedIds.length === 0, failedIds };
+      if (failedIds.length || allDone) return { ok: failedIds.length === 0, failedIds };
       await sleep(200);
     }
     throw new Error(`Dependency timeout for task ${taskId} after ${timeoutMs}ms`);

@@ -249,6 +249,15 @@ export function finalizeChildSpawnTools(
   collaborationActivated: string[];
   contractAllowlist: { families: string[]; tools: string[] };
 } {
+  // Hooks run before this final boundary and can register additional tools.
+  // Enforce the explicit surface after hooks, preserving documented baseline
+  // file/discovery and collaboration tools; lazy activation cannot widen it.
+  if (cfg.toolNames) {
+    const allowed = new Set<string>([...cfg.toolNames, ...SPAWN_BASELINE_TOOL_NAMES, ...SPAWN_COLLABORATION_TOOL_NAMES]);
+    for (const tool of registry.getAll()) {
+      if (!allowed.has(tool.name)) registry.unregister(tool.name);
+    }
+  }
   const contractAllowlist = activateSpawnContractAllowlist(
     registry,
     cfg.spawnContract?.allowedTools

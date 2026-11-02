@@ -50,7 +50,7 @@ import {
 import { tryHandleAppProxyRequest } from "./app_proxy_handler.js";
 import { tryHandleAppHtmlRequest } from "./app_html_handler.js";
 import { tryHandleMediaRequest } from "./media_handler.js";
-import { getBrowserPanelFrame, setTerminalViewPublisher } from "@liminal/tools";
+import { getBrowserPanelFrame, listBrowserSessionIdsForTask, setTerminalViewPublisher } from "@liminal/tools";
 import { buildPtyOpenedPayload, createSidecarEnsureTerminal } from "./pty_terminal.js";
 import { createPtyShellPort } from "./pty_shell_port.js";
 import { normalizeWireAttachments } from "./message_attachments.js";
@@ -146,6 +146,7 @@ export class WsServer {
   private readonly cloudRelay = new CloudRelayForwarder();
   private readonly clientMeta = new Map<WebSocket, RemoteClientMeta>();
   private readonly inboxWatcher: InboxWatcherService;
+  private detachTerminalPublisher?: () => void;
 
   constructor(opts: WsServerOptions) {
     this.token = opts.token;
@@ -206,7 +207,7 @@ export class WsServer {
       );
     });
 
-    setTerminalViewPublisher((payload) => {
+    this.detachTerminalPublisher = setTerminalViewPublisher((payload) => {
       this.broadcast(serverFrame("terminal_view", payload, payload.chatId));
     });
 
@@ -322,6 +323,19 @@ export class WsServer {
       return;
     }
 
+    if (joinToken && (url.pathname === "/pty" || url.pathname === "/browser/stream")) {
+      const sessionId = url.searchParams.get("sessionId")?.trim() ?? "";
+      const taskId = meta.chatId ? this.registry.get(meta.chatId)?.harness.taskId : undefined;
+      const ownsSession = url.pathname === "/pty"
+        ? !!meta.chatId && this.ptyManager.get(sessionId)?.chatId === meta.chatId
+        : !!taskId && listBrowserSessionIdsForTask(taskId).includes(sessionId);
+      if (meta.role !== "control" || !ownsSession) {
+        socket.write("HTTP/1.1 403 Forbidden\r\n\r\n");
+        socket.destroy();
+        return;
+      }
+    }
+
     if (!joinToken) {
       if (
         tryHandlePtyUpgrade(req, socket, head, {
@@ -387,7 +401,14 @@ export class WsServer {
       }
     }
 
-    this.wss.handleUpgrade(req, socket, head, (ws) => this.onConnection(ws, meta));
+    this.wss.handleUpgrade(req, socket, head, (ws) => {
+      void this.onConnection(ws, meta).catch(() => {
+        try { this.sendTo(ws, serverFrame("error", { message: "Session initialization failed." }, meta.chatId)); }
+        catch { /* The peer may already be disconnected. */ }
+        try { ws.close(1011, "initialization_failed"); }
+        catch { ws.terminate(); }
+      });
+    });
   }
 
   private broadcastRemoteSession(status: RemoteSessionStatus): void {
@@ -427,7 +448,7 @@ export class WsServer {
     for (const ws of this.clients) {
       if (ws.readyState !== WebSocket.OPEN) continue;
       const meta = this.clientMeta.get(ws);
-      if (meta?.role !== "owner" && meta?.chatId && frame.chatId && frame.chatId !== meta.chatId) {
+      if (meta?.role !== "owner" && (!meta?.chatId || !frame.chatId || frame.chatId !== meta.chatId)) {
         continue;
       }
       ws.send(payload);
@@ -508,7 +529,7 @@ export class WsServer {
         ws,
         serverFrame("sidecar_ready", {
           activeChatId: guestChatId,
-          chats: this.registry.list(),
+          chats: this.registry.list().filter((chat) => chat.chatId === guestChatId),
           clientRole,
         })
       );
@@ -517,13 +538,14 @@ export class WsServer {
     }
 
     const INIT_TIMEOUT_MS = 120_000;
+    let initTimer: ReturnType<typeof setTimeout> | undefined;
     let initError: string | undefined;
     let bridge: Awaited<ReturnType<typeof this.registry.getOrCreateActive>> | undefined;
     try {
       bridge = await Promise.race([
         this.registry.getOrCreateActive(),
         new Promise<never>((_, reject) =>
-          setTimeout(
+          initTimer = setTimeout(
             () => reject(new Error(`Harness init timed out after ${INIT_TIMEOUT_MS / 1000}s`)),
             INIT_TIMEOUT_MS
           )
@@ -532,6 +554,8 @@ export class WsServer {
     } catch (err) {
       initError = err instanceof Error ? err.message : String(err);
       bridge = undefined;
+    } finally {
+      clearTimeout(initTimer);
     }
 
     let appConfig: Awaited<ReturnType<typeof buildDesktopConfig>> | undefined;
@@ -603,6 +627,22 @@ export class WsServer {
     if (!remoteCommandAllowed(role, command)) {
       this.ack(ws, id, false, `Command "${command}" not allowed for remote role "${role}".`);
       return;
+    }
+    if (role !== "owner" && command !== "ping") {
+      const grantedChat = this.clientMeta.get(ws)?.chatId;
+      if (command === "list_chats" && grantedChat) {
+        this.sendTo(ws, serverFrame("chat_list", {
+          chats: this.registry.list().filter((chat) => chat.chatId === grantedChat),
+          activeChatId: grantedChat,
+        }));
+        this.ack(ws, id, true);
+        return;
+      }
+      const targetChat = (data as { chatId?: unknown } | null)?.chatId;
+      if (!grantedChat || targetChat !== grantedChat) {
+        this.ack(ws, id, false, "Command is outside the shared chat grant.");
+        return;
+      }
     }
     try {
       switch (command) {
@@ -769,7 +809,9 @@ export class WsServer {
         }
 
         case "get_config": {
-          const bridge = await this.registry.getOrCreateActive();
+          const bridge = role === "owner" ? await this.registry.getOrCreateActive()
+            : this.registry.get(this.clientMeta.get(ws)!.chatId!);
+          if (!bridge) return this.ack(ws, id, false, "Shared chat is unavailable.");
           const config = await buildDesktopConfig(bridge, this.repoRoot);
           this.ack(ws, id, true, undefined, wireAppConfig(config));
           return;
@@ -1571,6 +1613,7 @@ export class WsServer {
                 cloudUrl = cloud.cloudUrl;
                 result.cloudUrl = cloud.cloudUrl;
                 this.cloudRelay.setRelay({
+                  chatId,
                   relayHostUrl: cloud.relayHostUrl,
                   joinCode: cloud.joinCode,
                   joinToken: result.joinToken,
@@ -1706,12 +1749,18 @@ export class WsServer {
       }
     }
     this.clients.clear();
+    this.inboxWatcher.stop();
+    this.orchestrator.stop();
+    this.cloudRelay.clear();
+    this.detachTerminalPublisher?.();
+    this.detachTerminalPublisher = undefined;
     this.appManager.stopRefreshLoop();
     this.registry.disposeAll();
     this.ptyManager.disposeAll();
     this.remoteHost.dispose();
     this.ptyWss.close();
     this.browserWss.close();
+    this.remoteUiWss.close();
     this.wss.close();
     this.http.close();
   }

@@ -127,9 +127,7 @@ async function waitForTask(
     }
     await sleep(200);
   }
-  // Timed out — cancel the task
-  orchestrator.cancel(taskId);
-  return { taskId, ok: false, output: `Timed out after ${timeoutMs}ms`, rounds: 0 };
+  return { taskId, ok: false, output: `Wait timed out after ${timeoutMs}ms; task is still running. Wait again or use cancel_agent explicitly.`, rounds: 0 };
 }
 
 // ─── Result fusion ───────────────────────────────────────────────────────────
@@ -871,6 +869,12 @@ export function createOrchestrationTools(harness: AgentHarness) {
     },
     handler: async (args) => {
       if (!verificationToolsEnabled()) return skipVerificationTool();
+      const critics: ReturnType<AgentHarness["forkChild"]>[] = [];
+      const spawnCritic = (config: Parameters<AgentHarness["forkChild"]>[0]) => {
+        const child = harness.forkChild(config);
+        critics.push(child);
+        return child;
+      };
       try {
         const goalText = args["goal"] as string;
         const resultText = args["result"] as string;
@@ -885,8 +889,7 @@ export function createOrchestrationTools(harness: AgentHarness) {
           `End with exactly one line: "${verdict}: [key evidence]"`;
 
         // Spawn all 3 critics in parallel
-        const critics = await Promise.all([
-          harness.forkChild({
+        spawnCritic({
             goal: taskPrompt(
               "Correctness Auditor",
               "Logic correctness, factual accuracy, output matches stated goal",
@@ -895,8 +898,8 @@ export function createOrchestrationTools(harness: AgentHarness) {
             toolNames: ["read_file", "list_dir", "think"],
             maxRounds: 8,
             timeoutMs: 45_000,
-          }),
-          harness.forkChild({
+          });
+        spawnCritic({
             goal: taskPrompt(
               "Security & Risk Reviewer",
               "Security vulnerabilities, dangerous side effects, credential/data exposure, irreversible actions",
@@ -905,8 +908,8 @@ export function createOrchestrationTools(harness: AgentHarness) {
             toolNames: ["read_file", "list_dir", "think"],
             maxRounds: 8,
             timeoutMs: 45_000,
-          }),
-          harness.forkChild({
+          });
+        spawnCritic({
             goal: taskPrompt(
               "Completeness Inspector",
               "Missing edge cases, incomplete implementation, unstated assumptions, coverage gaps",
@@ -915,8 +918,7 @@ export function createOrchestrationTools(harness: AgentHarness) {
             toolNames: ["read_file", "list_dir", "think"],
             maxRounds: 8,
             timeoutMs: 45_000,
-          }),
-        ]);
+          });
 
         // Collect results
         const [correctness, security, completeness] = await Promise.all(
@@ -945,6 +947,10 @@ export function createOrchestrationTools(harness: AgentHarness) {
           ? { ok: true, output }
           : { ok: false, error: output };
       } catch (err) {
+        for (const child of critics) {
+          orchestrator.cancel(child.taskId);
+          void child.promise.catch(() => undefined);
+        }
         return { ok: false, error: err instanceof Error ? err.message : String(err) };
       }
     },
