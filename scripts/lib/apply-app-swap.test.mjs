@@ -46,6 +46,10 @@ function fixture(t, platform = "windows") {
 for (const platform of ["windows", "linux", "macos"])
   test(`${platform} app update preserves local configuration and keeps a recoverable backup`, async (t) => {
     const f = fixture(t, platform);
+    const artifact = path.join("liminald", "repo", ".agent_artifacts", "proposal.html");
+    fs.mkdirSync(path.dirname(path.join(f.exeDir, artifact)), { recursive: true });
+    fs.writeFileSync(path.join(f.exeDir, artifact), "saved proposal");
+    fs.writeFileSync(path.join(f.exeDir, "liminald", "repo", ".agent_runtime_prefs.json"), '{"model":"chosen-model"}');
     let launched = false;
     const result = await applyAppFolderSwap({
       exeDir: f.exeDir,
@@ -53,6 +57,8 @@ for (const platform of ["windows", "linux", "macos"])
       platform,
       launch: async ({ target, exePath }) => {
         launched = true;
+        assert.equal(fs.readFileSync(path.join(path.dirname(exePath), artifact), "utf8"), "saved proposal");
+        assert.equal(fs.readFileSync(path.join(path.dirname(exePath), "liminald", "repo", ".agent_runtime_prefs.json"), "utf8"), '{"model":"chosen-model"}');
         assert.equal(target, f.target);
         assert.equal(fs.readFileSync(exePath, "utf8"), "new");
         assert.equal(

@@ -75,12 +75,22 @@ export async function applyAppFolderSwap({
       preserveTimestamps: true,
       verbatimSymlinks: true,
     });
-    for (const name of [".env", ".agent_runtime_prefs.json"]) {
+    // Portable installs can use the bundled repo as their workspace. Preserve
+    // local memory, sessions, workflow artifacts and preferences along with keys.
+    const localNames = fs.existsSync(runtime(target))
+      ? fs.readdirSync(runtime(target)).filter((name) =>
+          name === ".env" || name.startsWith(".agent_"))
+      : [];
+    for (const name of localNames) {
       const from = path.join(runtime(target), name);
       if (fs.existsSync(from)) {
         const to = path.join(runtime(staging), name);
         fs.mkdirSync(path.dirname(to), { recursive: true });
-        fs.copyFileSync(from, to);
+        fs.cpSync(from, to, {
+          recursive: true,
+          preserveTimestamps: true,
+          verbatimSymlinks: true,
+        });
       }
     }
     if (platform !== "windows")
