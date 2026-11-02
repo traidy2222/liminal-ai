@@ -244,6 +244,11 @@ export function attachSessionEventLog(emitter: AgentEmitter, sessionId: string):
     write({ event: "turn_summary", turnIndex, summary: p });
   };
 
+  const onInferenceLatency = (p: AgentEventMap["inference_latency"]) => {
+    write({ event: "inference_latency", turnIndex, ...p });
+  };
+
+  emitter.on("inference_latency", onInferenceLatency);
   emitter.on("send_start", onSendStart);
   emitter.on("text", onText);
   emitter.on("provider_retry", onProviderRetry);
@@ -256,6 +261,7 @@ export function attachSessionEventLog(emitter: AgentEmitter, sessionId: string):
   emitter.on("approval_decision", onApproval);
 
   return () => {
+    emitter.off("inference_latency", onInferenceLatency);
     emitter.off("send_start", onSendStart);
     emitter.off("text", onText);
     emitter.off("provider_retry", onProviderRetry);

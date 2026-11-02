@@ -1731,7 +1731,7 @@ const _META_RAW: Record<string, HarnessSettingsFieldMeta> = {
     tabId: "harness",
     subgroupId: "harness_misc",
     label: "Provider Strategy",
-    description: "Harness environment toggle for Provider Strategy. See docs/configuration.md (harness).",
+    description: "OpenRouter routing for the selected model. Default latency prioritizes responsive providers; price prioritizes the lowest token price. Changing strategy starts a fresh provider route.",
     valueKind: "string",
   },
   "AGENT_PROVIDER_SORT": {

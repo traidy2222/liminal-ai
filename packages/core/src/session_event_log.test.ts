@@ -191,3 +191,30 @@ test("trace lines omitted unless AGENT_SESSION_JSONL_TRACE=1", async () => {
   else process.env.AGENT_SESSION_JSONL_TRACE = prevTrace;
   await rm(dir2, { recursive: true, force: true });
 });
+
+
+test("session logs retain preparation and first answer latency independently of text logging", async () => {
+  const dir = await mkdtemp(path.join(tmpdir(), "latency-log-"));
+  const previous = process.env.AGENT_GLOBAL_STORAGE_ROOT;
+  process.env.AGENT_GLOBAL_STORAGE_ROOT = dir;
+  const em = new AgentEmitter();
+  const detach = attachSessionEventLog(em, "latency-test");
+  try {
+    em.emit("inference_latency", { model: "test/model", requestStartMs: 100, ttftMs: 20, preRequestMs: 50, firstTextMs: 130, turnToFirstTextMs: 80 });
+    let records: Array<Record<string, unknown>> = [];
+    for (let i = 0; i < 100 && records.length === 0; i++) {
+      try { records = (await readFile(path.join(dir, "chats", "latency-test", "session.jsonl"), "utf8")).trim().split("\n").filter(Boolean).map(s => JSON.parse(s)); } catch {}
+      if (!records.length) await sleep(10);
+    }
+    const row = records.find(r => r.event === "inference_latency");
+    assert.equal(row?.preRequestMs, 50);
+    assert.equal(row?.ttftMs, 20);
+    assert.equal(row?.turnToFirstTextMs, 80);
+    detach();
+  } finally {
+    detach();
+    if (previous === undefined) delete process.env.AGENT_GLOBAL_STORAGE_ROOT;
+    else process.env.AGENT_GLOBAL_STORAGE_ROOT = previous;
+    await rm(dir, { recursive: true, force: true });
+  }
+});
