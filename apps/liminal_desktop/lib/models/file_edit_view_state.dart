@@ -3,6 +3,9 @@ enum FileEditPhase {
   streaming,
   pendingApproval,
   writing,
+  completed,
+  failed,
+  interrupted,
 }
 
 enum ComposeDockKind {
@@ -33,6 +36,7 @@ class FileEditViewState {
   final String callId;
   final String toolName;
   final ComposeDockKind kind;
+
   /// File path, or email subject line for the header subtitle.
   final String? path;
   final String? subject;
@@ -47,6 +51,10 @@ class FileEditViewState {
   final int updatedAt;
 
   bool get isEmail => kind == ComposeDockKind.email;
+  bool get isTerminal =>
+      phase == FileEditPhase.completed ||
+      phase == FileEditPhase.failed ||
+      phase == FileEditPhase.interrupted;
 
   FileEditViewState copyWith({
     bool? open,
