@@ -149,8 +149,8 @@ The launch screen shows progress. Choose **Open current version** to cancel the 
 
 **First upgrade from 0.1.5 or earlier:** download the latest desktop archive once, close Liminal, and extract it over the existing installation while keeping your local `.env`. Older packaged builds can incorrectly classify themselves as development builds, blocking their in-app check.
 
-**Windows 0.1.6–0.1.7:** if an automatic update downloads successfully but closes without reopening, install 0.1.8 once from the release archive. These versions can fail when starting detached PowerShell. Version 0.1.8 starts the Node updater directly and waits for an acknowledgement before closing; future launch updates use that repaired handoff.
+**Windows 0.1.6–0.1.7:** if an automatic update downloads successfully but closes without reopening, install the latest desktop archive once. These versions can fail when starting detached PowerShell. Version 0.1.8 introduced the direct Node handoff; the latest version also includes the subsequent shutdown repairs.
 
-**Desktop versions before 0.1.9:** an old sidecar can remain after its app closes and keep the install folder in use. If replacement reports a file lock, stop the sidecar owned by the closed app before retrying, or install the latest archive after quitting both processes. From 0.1.9, desktop-owned sidecars monitor their launching process and shut down when it exits; standalone servers are unaffected.
+**Desktop versions before 0.1.10:** an old sidecar can remain after its app closes and keep the install folder in use. If replacement reports a file lock, stop the sidecar owned by the closed app before retrying, or install the latest archive after quitting both processes. Version 0.1.9 added desktop-parent monitoring; 0.1.10 also handles Windows closing the output pipes during cleanup. Standalone servers are unaffected.
 
 An app update keeps the installation's `.env` and local runtime preferences. Conversations and global settings under `~/.liminal` remain outside the app folder. Release archives are beta builds; Node.js must remain on PATH for the update helper.

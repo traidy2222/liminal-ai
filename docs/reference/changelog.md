@@ -2,7 +2,7 @@
 
 All notable changes to [Liminal AI](https://github.com/traidy2222/liminal-ai) on the `main` branch.
 
-**Current stage:** **beta** (`v0.1.9`, 2026-11-03). Desktop downloads are published through the public preview release channel.
+**Current stage:** **beta** (`v0.1.10`, 2026-11-03). Desktop downloads are published through the public preview release channel.
 
 Format: **v0.0.x** entries keyed to the last GitHub push in each slice. Dates are real push dates.
 
@@ -17,9 +17,21 @@ After editing JSON: `npm run changelog:gen`, commit, push, then in [vireondynami
 
 ---
 
+## v0.1.10 — 2026-11-03 {#v0-1-10}
+
+**Current beta.** Clean shutdown even after Windows closes desktop output pipes.
+
+**Shipped**
+
+- **Closed-pipe recovery** — Handle EPIPE on desktop-owned output streams before startup or shutdown logging. Other output errors retain their existing error path, and standalone servers are unaffected.
+- **Verified process regression** — A real child process with ignored stdin and both output pipes closed now completes its cleanup after parent termination. The unchanged test fails without the fix and passes with it.
+- **Docs** — [Install and update](../start/install.md)
+
+---
+
 ## v0.1.9 — 2026-11-03 {#v0-1-9}
 
-**Current beta.** Clean desktop shutdowns keep future updates unblocked.
+Clean desktop shutdowns keep future updates unblocked.
 
 **Shipped**
 
