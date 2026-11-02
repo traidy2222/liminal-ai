@@ -2,7 +2,7 @@
 
 All notable changes to [Liminal AI](https://github.com/traidy2222/liminal-ai) on the `main` branch.
 
-**Current stage:** **beta** (`v0.1.6`, 2026-11-02). Desktop downloads are published through the public preview release channel.
+**Current stage:** **beta** (`v0.1.7`, 2026-11-02). Desktop downloads are published through the public preview release channel.
 
 Format: **v0.0.x** entries keyed to the last GitHub push in each slice. Dates are real push dates.
 
@@ -17,9 +17,23 @@ After editing JSON: `npm run changelog:gen`, commit, push, then in [vireondynami
 
 ---
 
+## v0.1.7 — 2026-11-02 {#v0-1-7}
+
+**Current beta.** Faster first answers and accurate file-write status.
+
+**Shipped**
+
+- **Faster first answers** — Stop hidden native thinking on supported DeepSeek hybrid models when external reasoning is selected. Native reasoning budgets and mandatory-reasoning models retain their existing behavior.
+- **Responsive provider routing** — Default new routing to latency, remove the implicit price-sort override, and refresh sticky provider affinity when routing policy or model changes. Existing explicit preferences remain respected.
+- **Accurate write status** — Successful tool results immediately show saved, failed writes show failure, and interrupted turns stop active indicators without claiming success. Late stream or approval events cannot reopen completed writes.
+- **Visible verification** — Keep completed file previews available, preserve another active preview during parallel writes, and record harness preparation and first-answer timings separately in session logs.
+- **Docs** — [Response latency](../guides/response-latency.md), [Install and update](../start/install.md)
+
+---
+
 ## v0.1.6 — 2026-11-02 {#v0-1-6}
 
-**Current beta.** Verified automatic updates before your workspace opens.
+Verified automatic updates before your workspace opens.
 
 **Shipped**
 
