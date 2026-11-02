@@ -2,7 +2,7 @@
 
 All notable changes to [Liminal AI](https://github.com/traidy2222/liminal-ai) on the `main` branch.
 
-**Current stage:** **beta** (`v0.1.10`, 2026-11-03). Desktop downloads are published through the public preview release channel.
+**Current stage:** **beta** (`v0.1.11`, 2026-11-03). Desktop downloads are published through the public preview release channel.
 
 Format: **v0.0.x** entries keyed to the last GitHub push in each slice. Dates are real push dates.
 
@@ -17,9 +17,23 @@ After editing JSON: `npm run changelog:gen`, commit, push, then in [vireondynami
 
 ---
 
+## v0.1.11 — 2026-11-03 {#v0-1-11}
+
+**Current beta.** Optional, content-free usage sharing with a clear off switch.
+
+**Shipped**
+
+- **Your choice** — A one-time hub card offers Share basic usage or No thanks. Change the setting later under About & updates; declining does not restrict the app.
+- **Basic milestones only** — Report app launches, workspace readiness and completed user-started conversation days with app version, platform and a random installation identifier. No prompts, answers, files, paths, account details or provider keys are sent.
+- **Useful activity counts** — Ignore transcript replay, background turns, errors and cancellations. Deduplicate each milestone per UTC day; network failures never block startup or conversations.
+- **Delete and stop** — Turn sharing off immediately or delete that installation’s shared history without an account. Failed deletion stays off and can be retried. Daily records and inactive installation records have a 90-day retention policy.
+- **Docs** — [Optional usage sharing](../concepts/usage-sharing.md)
+
+---
+
 ## v0.1.10 — 2026-11-03 {#v0-1-10}
 
-**Current beta.** Clean shutdown even after Windows closes desktop output pipes.
+Clean shutdown even after Windows closes desktop output pipes.
 
 **Shipped**
 
