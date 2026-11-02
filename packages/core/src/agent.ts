@@ -6041,14 +6041,10 @@ export class AgentHarness {
       if (this.fileWriteStreamSink) {
         for (const tc of toolCalls) {
           if (!isFileWriteToolName(tc.name)) continue;
-          const salvaged = await this.fileWriteStreamSink.salvagePartialToTarget(tc.id);
-          if (salvaged) {
-            resumeMsg +=
-              ` Saved ${salvaged.bytes} bytes to ${salvaged.targetPath} before cutoff — continue with write_file mode=append.`;
-          } else {
-            resumeMsg += this.fileWriteStreamSink.buildLengthResumeHint(tc.id);
-          }
-          this.fileWriteStreamSink.discard(tc.id);
+          await this.fileWriteStreamSink.finalize(tc.id);
+          resumeMsg += this.fileWriteStreamSink.buildLengthResumeHint(tc.id);
+          // Detach the entry but retain the recovery file for a guarded continuation.
+          this.fileWriteStreamSink.takeForDispatch(tc.id);
         }
       }
       this.context.append(assistantMessage);
@@ -8024,14 +8020,10 @@ export class AgentHarness {
       if (isFileWriteToolName(tc.name) && !fileWriteSafeToDispatch(tc, "length")) {
         let extra = "";
         if (this.fileWriteStreamSink) {
-          const salvaged = await this.fileWriteStreamSink.salvagePartialToTarget(tc.id);
-          if (salvaged) {
-            extra =
-              ` Partial progress (${salvaged.bytes} bytes) saved to ${salvaged.targetPath} — continue with write_file mode=append after the stream restarts.`;
-          } else {
-            extra = this.fileWriteStreamSink.buildLengthResumeHint(tc.id);
-          }
-          this.fileWriteStreamSink.discard(tc.id);
+          await this.fileWriteStreamSink.finalize(tc.id);
+          extra += this.fileWriteStreamSink.buildLengthResumeHint(tc.id);
+          // Detach the entry but retain the recovery file for a guarded continuation.
+          this.fileWriteStreamSink.takeForDispatch(tc.id);
         }
         discardFileWriteStreamManifest(tc.id);
         result = {

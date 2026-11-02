@@ -1018,6 +1018,7 @@ export class ContextManager {
   clear(): void {
     this.conversation = [];
     this.workingStateBlock = "";
+    this.executionStateBlock = "";
     this.epistemicState = null;
     this.compressionNotes = [];
     this.protocolDynamicSuffix = "";

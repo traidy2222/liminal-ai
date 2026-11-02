@@ -2,7 +2,27 @@ import { effectiveHarnessEnvRaw } from "@liminal/core";
 import { defineTool } from "../../shared/helpers.js";
 
 function clampInt(value: number, min: number, max: number): number {
+  if (!Number.isFinite(value)) return min;
   return Math.max(min, Math.min(Math.round(value), max));
+}
+
+async function readBoundedBody(response: Response, maxBytes: number): Promise<{ text: string; truncated: boolean }> {
+  if (!response.body) return { text: "", truncated: false };
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let text = "", bytes = 0, truncated = false;
+  try {
+    for (;;) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      const slice = value.subarray(0, maxBytes - bytes);
+      text += decoder.decode(slice, { stream: true });
+      bytes += slice.byteLength;
+      if (bytes >= maxBytes) { truncated = true; await reader.cancel(); break; }
+    }
+    text += decoder.decode();
+    return { text, truncated };
+  } finally { reader.releaseLock(); }
 }
 
 function truncate(value: string, maxChars: number): string {
@@ -103,7 +123,8 @@ export const httpRequestTool = defineTool({
       return { ok: false, error: "url must be an absolute http(s) URL." };
     }
 
-    if (bareIp && !((args["headers"] as Record<string, unknown> | undefined)?.Host)) {
+    if (bareIp && !Object.entries((args["headers"] as Record<string, unknown> | undefined) ?? {})
+      .some(([key, value]) => key.toLowerCase() === "host" && typeof value === "string" && value.trim())) {
       return {
         ok: true,
         output: JSON.stringify(
@@ -131,6 +152,7 @@ export const httpRequestTool = defineTool({
     const timer = setTimeout(() => ac.abort(), timeoutMs);
     try {
       const response = await fetch(url, {
+        redirect: "manual",
         method,
         headers,
         ...(body != null ? { body } : {}),
@@ -139,16 +161,18 @@ export const httpRequestTool = defineTool({
       const contentType = response.headers.get("content-type") ?? "";
       const shouldParseJson = responseFormat === "json" || (responseFormat === "auto" && /json/i.test(contentType));
       let responseBody = "";
+      let bodyTruncated = false;
       if (method !== "HEAD") {
-        if (shouldParseJson) {
+        const body = await readBoundedBody(response, maxResponseChars * 4);
+        responseBody = body.text;
+        bodyTruncated = body.truncated;
+        if (shouldParseJson && !bodyTruncated) {
           try {
-            const parsed = (await response.json()) as unknown;
+            const parsed = JSON.parse(responseBody) as unknown;
             responseBody = JSON.stringify(parsed, null, 2);
           } catch {
-            responseBody = await response.text();
+            // Preserve the original text if the declared JSON is malformed.
           }
-        } else {
-          responseBody = await response.text();
         }
       }
 
@@ -164,7 +188,7 @@ export const httpRequestTool = defineTool({
         url: response.url,
         method,
         headers: outHeaders,
-        body: truncate(responseBody, maxResponseChars),
+        body: truncate(responseBody, maxResponseChars) + (bodyTruncated ? "\n...[truncated at response byte limit]" : ""),
       };
       return { ok: true, output: JSON.stringify(envelope, null, 2) };
     } catch (err) {

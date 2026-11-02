@@ -1,4 +1,5 @@
 import path from "node:path";
+import { realpathSync, lstatSync } from "node:fs";
 import { readFile, stat } from "node:fs/promises";
 import { effectiveHarnessEnvRaw, resolveWorkspaceRoot } from "@liminal/core";
 
@@ -27,6 +28,25 @@ export function isWorkspacePathBound(): boolean {
   return effectiveHarnessEnvRaw("AGENT_WORKSPACE_BOUND") === "1";
 }
 
+/** Resolve existing ancestors too, so new files cannot escape through a link. */
+function canonicalPath(input: string): string {
+  let current = input;
+  const tail: string[] = [];
+  for (;;) {
+    try { return path.join(realpathSync(current), ...tail.reverse()); }
+    catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+      // A dangling symlink must fail closed, rather than look like a new directory.
+      try { if (lstatSync(current).isSymbolicLink()) throw new Error("Dangling symbolic link"); }
+      catch (statError) { if ((statError as NodeJS.ErrnoException).code !== "ENOENT") throw statError; }
+      const parent = path.dirname(current);
+      if (parent === current) throw error;
+      tail.push(path.basename(current));
+      current = parent;
+    }
+  }
+}
+
 export function resolveWithinWorkspace(inputPath: string): GuardResult {
   const trimmed = inputPath.trim();
   if (!trimmed) {
@@ -36,8 +56,17 @@ export function resolveWithinWorkspace(inputPath: string): GuardResult {
   const resolved = path.isAbsolute(trimmed)
     ? path.resolve(trimmed)
     : path.resolve(workspaceRoot, trimmed);
-  if (isWorkspacePathBound() && !isPathInsideWorkspaceRoot(resolved, workspaceRoot)) {
-    return { ok: false, error: `Path escapes workspace root: ${inputPath}` };
+  if (isWorkspacePathBound()) {
+    try {
+      const canonical = canonicalPath(resolved);
+      if (!isPathInsideWorkspaceRoot(resolved, workspaceRoot) ||
+          !isPathInsideWorkspaceRoot(canonical, canonicalPath(workspaceRoot))) {
+        return { ok: false, error: `Path escapes workspace root: ${inputPath}` };
+      }
+      return { ok: true, resolvedPath: canonical };
+    } catch {
+      return { ok: false, error: `Cannot safely resolve workspace path: ${inputPath}` };
+    }
   }
   return { ok: true, resolvedPath: resolved };
 }

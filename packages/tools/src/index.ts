@@ -665,6 +665,7 @@ export { defineTool } from "./shared/helpers.js";
 export {
   getBrowserPanelFrame,
   getBrowserSession,
+  listBrowserSessionIdsForTask,
   getSessionCookies,
   refreshBrowserEmbedView,
   setBrowserViewPublisher,

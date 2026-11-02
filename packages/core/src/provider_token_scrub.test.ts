@@ -16,7 +16,7 @@ test("stripProviderSpecialTokens removes chat control tokens", () => {
 test("scrubMessagesSpecialTokens cleans assistant strings", () => {
   const imEnd = "<|" + "im_end" + "|>";
   const out = scrubMessagesSpecialTokens([
-    { role: "assistant", content: "done $imEnd" },
+    { role: "assistant", content: `done ${imEnd}` },
     { role: "user", content: "hi" },
   ]);
   assert.equal(out[0]?.content, "done ");

@@ -1,8 +1,6 @@
-import { access, appendFile, mkdir, readFile, writeFile } from "node:fs/promises";
-import { createWriteStream } from "node:fs";
-import { dirname } from "node:path";
-import { pipeline } from "node:stream/promises";
-import { Readable } from "node:stream";
+import { access, appendFile, mkdir, readFile, unlink } from "node:fs/promises";
+import { dirname, resolve } from "node:path";
+import { atomicWriteText } from "../../shared/atomic_file_write.js";
 import { resolveWithinWorkspace } from "../../shared/file_path_guard.js";
 import {
   formatIntegrityFooter,
@@ -20,8 +18,6 @@ export const OVERWRITE_GUARD_MIN_BYTES = 400;
 export const TRUNCATED_WRITE_ERROR =
   "Refusing write: content looks truncated (unclosed string/brace). Partial bytes NOT written. " +
   "Re-issue from the cut point or use write_file with mode=append.";
-
-const LARGE_WRITE_BYTES = 256 * 1024;
 
 export function rejectIfLikelyTruncated(content: string): string | null {
   return isLikelyTruncatedContent(content) ? TRUNCATED_WRITE_ERROR : null;
@@ -95,28 +91,15 @@ export async function prepareFileWrite(
   }
 }
 
-async function writeLargeContent(resolvedPath: string, content: string, mode: FileWriteMode): Promise<void> {
-  const stream = createWriteStream(resolvedPath, {
-    encoding: "utf8",
-    flags: mode === "append" ? "a" : "w",
-  });
-  await pipeline(Readable.from([content]), stream);
-}
-
 export async function commitContent(
   resolvedPath: string,
   content: string,
   mode: FileWriteMode
 ): Promise<void> {
-  const bytes = Buffer.byteLength(content, "utf8");
-  if (bytes > LARGE_WRITE_BYTES) {
-    await writeLargeContent(resolvedPath, content, mode);
-    return;
-  }
   if (mode === "append") {
     await appendFile(resolvedPath, content, "utf8");
   } else {
-    await writeFile(resolvedPath, content, mode === "overwrite" ? "utf8" : "utf8");
+    await atomicWriteText(resolvedPath, content, mode === "create");
   }
 }
 
@@ -133,12 +116,17 @@ export async function promoteStagingFile(
   targetPath: string,
   mode: FileWriteMode,
   opts?: { confirmOverwrite?: boolean }
-): Promise<string> {
+): Promise<{ content: string; expectedContent: string }> {
+  if (resolve(stagingPath) === resolve(targetPath)) throw new Error("Staging and target must differ.");
   const staged = await readFile(stagingPath, "utf8");
+  let expectedContent = staged;
   const truncErr = rejectIfLikelyTruncated(staged);
   if (truncErr) {
     throw new Error(truncErr);
   }
+  const prep = await prepareFileWrite(targetPath, mode, opts);
+  if (!prep.ok) throw new Error(prep.error);
+  targetPath = prep.resolvedPath;
   if (mode === "create") {
     try {
       await access(targetPath);
@@ -147,7 +135,7 @@ export async function promoteStagingFile(
       const code = (err as NodeJS.ErrnoException | undefined)?.code;
       if (code !== "ENOENT") throw err;
     }
-    await writeFile(targetPath, staged, "utf8");
+    await commitContent(targetPath, staged, "create");
   } else if (mode === "append") {
     let payload = staged;
     try {
@@ -155,8 +143,9 @@ export async function promoteStagingFile(
       if (prev.length > 0 && !prev.endsWith("\n") && !payload.startsWith("\n")) {
         payload = "\n" + payload;
       }
-    } catch {
-      /* target missing — append creates it */
+      expectedContent = prev + payload;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
     }
     await commitContent(targetPath, payload, "append");
   } else {
@@ -164,5 +153,6 @@ export async function promoteStagingFile(
     if (!guard.ok) throw new Error(guard.error);
     await commitContent(targetPath, staged, "overwrite");
   }
-  return staged;
+  await unlink(stagingPath).catch(() => undefined);
+  return { content: staged, expectedContent };
 }

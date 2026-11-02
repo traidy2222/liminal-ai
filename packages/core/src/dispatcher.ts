@@ -426,32 +426,7 @@ export class ToolDispatcher {
       }
     }
 
-    // Acquire resource locks if declared. Prefix each lock ID with the harness's
-    // workspace root so two sub-agents on different worktrees don't false-share
-    // a `file:write:src/foo.ts` lock just because the relative paths collide.
-    const rawResourceIds = tool.resourceLocks?.(args) ?? [];
-    const wsRoot = resolveWorkspaceRoot();
-    const resourceIds = rawResourceIds.map((id) => `ws:${wsRoot}::${id}`);
-    if (resourceIds.length > 0 && this.orchestrator) {
-      const acquired = await this.orchestrator.locks.acquireAll(
-        resourceIds,
-        this.taskId ?? "root"
-      );
-      if (!acquired) {
-        const holders = resourceIds
-          .map((r) => {
-            const h = this.orchestrator!.locks.getHolders(r);
-            return h.length > 0 ? `${r} (held by: ${h.join(",")})` : r;
-          })
-          .join("; ");
-        const result: ToolResult = {
-          ok: false,
-          error: `Resource locked by another agent: ${holders}. Wait for the other agent to finish, or work on a different resource.`,
-        };
-        this.emitToolResult(callId, name, args, result);
-        return result;
-      }
-    }
+    let resourceIds: string[] = [];
 
     try {
       if (
@@ -568,6 +543,32 @@ export class ToolDispatcher {
         }
       }
 
+      // Acquire resource locks if declared. Prefix each lock ID with the harness's
+      // workspace root so two sub-agents on different worktrees don't false-share
+      // a `file:write:src/foo.ts` lock just because the relative paths collide.
+      const rawResourceIds = tool.resourceLocks?.(args) ?? [];
+      const wsRoot = resolveWorkspaceRoot();
+      resourceIds = rawResourceIds.map((id) => `ws:${wsRoot}::${id}`);
+      if (resourceIds.length > 0 && this.orchestrator) {
+        const acquired = await this.orchestrator.locks.acquireAll(
+          resourceIds,
+          this.taskId ?? "root"
+        );
+        if (!acquired) {
+          const holders = resourceIds
+            .map((r) => {
+              const h = this.orchestrator!.locks.getHolders(r);
+              return h.length > 0 ? `${r} (held by: ${h.join(",")})` : r;
+            })
+            .join("; ");
+          const result: ToolResult = {
+            ok: false,
+            error: `Resource locked by another agent: ${holders}. Wait for the other agent to finish, or work on a different resource.`,
+          };
+          this.emitToolResult(callId, name, args, result);
+          return result;
+        }
+      }
       const runHandler = async (): Promise<ToolResult> => {
         this.emitter.emit("tool_executing", { callId, name });
         const t0 = Date.now();

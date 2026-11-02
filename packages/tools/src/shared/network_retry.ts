@@ -3,8 +3,9 @@ import { effectiveHarnessEnvRaw } from "@liminal/core";
 function sleep(ms: number, abortSignal?: AbortSignal): Promise<void> {
   if (abortSignal?.aborted) return Promise.resolve();
   return new Promise<void>((resolve) => {
-    const t = setTimeout(resolve, ms);
-    abortSignal?.addEventListener("abort", () => { clearTimeout(t); resolve(); }, { once: true });
+    const done = () => { clearTimeout(t); abortSignal?.removeEventListener("abort", done); resolve(); };
+    const t = setTimeout(done, ms);
+    abortSignal?.addEventListener("abort", done, { once: true });
   });
 }
 
@@ -29,6 +30,8 @@ export interface RetryHttpConfig {
   timeoutMs: number;
   maxRetries?: number;
   maxDelayMs?: number;
+  /** Explicit opt-in for replaying methods such as POST/PATCH after ambiguous failures. */
+  retryNonIdempotent?: boolean;
   /** When aborted, in-flight fetch is cancelled (e.g. overall web_fetch wall budget). */
   externalSignal?: AbortSignal;
   /**
@@ -42,13 +45,19 @@ export interface RetryHttpConfig {
 }
 
 export async function fetchWithRetry(url: string, init: RequestInit, cfg: RetryHttpConfig): Promise<Response> {
-  const maxRetries = Math.max(0, cfg.maxRetries ?? Number(effectiveHarnessEnvRaw("AGENT_WEB_FETCH_RETRIES") ?? "2"));
-  const maxDelayMs = Math.max(1000, cfg.maxDelayMs ?? Number(effectiveHarnessEnvRaw("AGENT_RETRY_MAX_DELAY_MS") ?? "30000"));
+  const retries = cfg.maxRetries ?? Number(effectiveHarnessEnvRaw("AGENT_WEB_FETCH_RETRIES") ?? "2");
+  const delay = cfg.maxDelayMs ?? Number(effectiveHarnessEnvRaw("AGENT_RETRY_MAX_DELAY_MS") ?? "30000");
+  const retryableMethod = ["GET", "HEAD", "OPTIONS", "PUT", "DELETE"].includes((init.method ?? "GET").toUpperCase());
+  const maxRetries = !retryableMethod && !cfg.retryNonIdempotent ? 0
+    : Number.isFinite(retries) ? Math.max(0, Math.min(10, Math.floor(retries))) : 2;
+  const maxDelayMs = Number.isFinite(delay) ? Math.max(1000, Math.min(120_000, delay)) : 30_000;
+  const callerSignals = [init.signal, cfg.externalSignal].filter((s): s is AbortSignal => !!s);
+  const callerSignal = callerSignals.length ? AbortSignal.any(callerSignals) : undefined;
   let attempt = 0;
   let lastErr: unknown = null;
 
   while (attempt <= maxRetries) {
-    if (cfg.externalSignal?.aborted) {
+    if (callerSignal?.aborted) {
       throw new DOMException("The operation was aborted.", "AbortError");
     }
     const controller = new AbortController();
@@ -62,19 +71,22 @@ export async function fetchWithRetry(url: string, init: RequestInit, cfg: RetryH
       const res = await doFetch(url, { ...init, signal: reqSignal });
       const tie = cfg.tieTimeoutToFullDownload === true;
       if (res.status === 429 || res.status >= 500) {
+        if (attempt >= maxRetries) {
+          if (!tie) clearTimeout(timeout);
+          return res;
+        }
         clearTimeout(timeout);
         try {
           await res.body?.cancel();
         } catch {
           /* ignore */
         }
-        if (attempt >= maxRetries) return res;
         const retryAfter = parseRetryAfterMs(res.headers.get("retry-after"));
         const exp = Math.min(10, attempt);
         const base = Math.min(maxDelayMs, Math.round(800 * Math.pow(2, exp)));
         const jitter = Math.round(Math.random() * base);
-        await sleep(Math.max(250, Math.min(maxDelayMs, retryAfter ?? base + jitter)), cfg.externalSignal);
-        if (cfg.externalSignal?.aborted) {
+        await sleep(Math.max(250, Math.min(maxDelayMs, retryAfter ?? base + jitter)), callerSignal);
+        if (callerSignal?.aborted) {
           throw new DOMException("The operation was aborted.", "AbortError");
         }
         attempt += 1;
@@ -85,7 +97,7 @@ export async function fetchWithRetry(url: string, init: RequestInit, cfg: RetryH
     } catch (err) {
       clearTimeout(timeout);
       lastErr = err;
-      if (cfg.externalSignal?.aborted) {
+      if (callerSignal?.aborted) {
         throw err;
       }
       if (!isRetryableNetworkError(err) || attempt >= maxRetries) {
@@ -94,8 +106,8 @@ export async function fetchWithRetry(url: string, init: RequestInit, cfg: RetryH
       const exp = Math.min(10, attempt);
       const base = Math.min(maxDelayMs, Math.round(600 * Math.pow(2, exp)));
       const jitter = Math.round(Math.random() * base);
-      await sleep(Math.max(200, Math.min(maxDelayMs, base + jitter)), cfg.externalSignal);
-      if (cfg.externalSignal?.aborted) {
+      await sleep(Math.max(200, Math.min(maxDelayMs, base + jitter)), callerSignal);
+      if (callerSignal?.aborted) {
         throw new DOMException("The operation was aborted.", "AbortError");
       }
       attempt += 1;

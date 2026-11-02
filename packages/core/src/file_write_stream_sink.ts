@@ -1,5 +1,5 @@
 import { createWriteStream } from "node:fs";
-import { appendFile, copyFile, mkdir, readFile, rm, stat } from "node:fs/promises";
+import { mkdir, rm, stat } from "node:fs/promises";
 import path from "node:path";
 import { ensurePerChatDirSync } from "./global_storage.js";
 import { resolveWorkspaceRoot } from "./workspace_root.js";
@@ -29,6 +29,8 @@ type SinkEntry = {
   closed: boolean;
   sinkActive: boolean;
   writeFailed: boolean;
+  pending: Promise<void>;
+  closing: boolean;
 };
 
 export function resolveWriteStreamSinkEnabled(prefs: RuntimePreferences | null): boolean {
@@ -89,6 +91,8 @@ export class FileWriteStreamSink {
         closed: false,
         sinkActive: false,
         writeFailed: false,
+        pending: Promise.resolve(),
+        closing: false,
       });
     }
   }
@@ -97,26 +101,31 @@ export class FileWriteStreamSink {
     if (!this.enabled || !delta) return;
     this.open(callId, toolName);
     const entry = this.entries.get(callId);
-    if (!entry || entry.closed || entry.writeFailed) return;
+    if (!entry || entry.closed || entry.closing || entry.writeFailed) return;
 
-    ingestToolArgJsonDelta(entry.parse, delta);
+    entry.pending = entry.pending.then(async () => {
+      if (entry.closed || entry.writeFailed) return;
 
-    const parsedPath = entry.parse.path ?? tryExtractJsonStringField(entry.parse.raw, "path");
-    if (parsedPath && !entry.targetPath) {
-      entry.targetPath = resolveTargetPath(parsedPath);
-      if (!entry.parse.path) entry.parse.path = parsedPath;
-    }
+      ingestToolArgJsonDelta(entry.parse, delta);
 
-    const modeRaw = tryExtractJsonStringField(entry.parse.raw, "mode");
-    if (modeRaw) entry.mode = parseSinkMode(modeRaw);
+      const parsedPath = entry.parse.path ?? tryExtractJsonStringField(entry.parse.raw, "path");
+      if (parsedPath && !entry.targetPath) {
+        entry.targetPath = resolveTargetPath(parsedPath);
+        if (!entry.parse.path) entry.parse.path = parsedPath;
+      }
 
-    if (!entry.sinkActive && entry.parse.contentEmittedLen >= this.minChars) {
-      entry.sinkActive = true;
-    }
+      const modeRaw = tryExtractJsonStringField(entry.parse.raw, "mode");
+      if (modeRaw) entry.mode = parseSinkMode(modeRaw);
 
-    if (entry.sinkActive && entry.targetPath) {
-      await this.flushDecodedTail(entry);
-    }
+      if (!entry.sinkActive && entry.parse.contentEmittedLen >= this.minChars) {
+        entry.sinkActive = true;
+      }
+
+      if (entry.sinkActive && entry.targetPath) {
+        await this.flushDecodedTail(entry);
+      }
+    }).catch(() => { entry.writeFailed = true; });
+    await entry.pending;
   }
 
   private async flushDecodedTail(entry: SinkEntry): Promise<void> {
@@ -130,19 +139,16 @@ export class FileWriteStreamSink {
   private async writeChunk(entry: SinkEntry, chunk: string): Promise<void> {
     await this.ensureStream(entry);
     if (!entry.stream || entry.closed) return;
-    const ok = entry.stream.write(chunk, "utf8");
+    await new Promise<void>((resolve, reject) => {
+      entry.stream!.write(chunk, "utf8", error => error ? reject(error) : resolve());
+    });
     entry.bytesWritten += Buffer.byteLength(chunk, "utf8");
-    if (!ok) {
-      await new Promise<void>((resolve, reject) => {
-        entry.stream!.once("drain", resolve);
-        entry.stream!.once("error", reject);
-      });
-    }
   }
 
   private async ensureStream(entry: SinkEntry): Promise<void> {
     if (entry.stream) return;
     await mkdir(inflightDir(this.chatId), { recursive: true });
+    if (entry.closed) return;
     entry.stream = createWriteStream(entry.stagingPath, { encoding: "utf8", flags: "w" });
     entry.stream.on("error", () => {
       entry.writeFailed = true;
@@ -152,8 +158,11 @@ export class FileWriteStreamSink {
   async finalize(callId: string): Promise<void> {
     const entry = this.entries.get(callId);
     if (!entry || entry.closed) return;
+    entry.closing = true;
+    await entry.pending;
+    if (entry.closed) return;
     entry.closed = true;
-    if (entry.stream) {
+    if (entry.stream && !entry.writeFailed) {
       await new Promise<void>((resolve, reject) => {
         entry.stream!.end(() => resolve());
         entry.stream!.once("error", reject);
@@ -165,10 +174,13 @@ export class FileWriteStreamSink {
     const entry = this.entries.get(callId);
     if (!entry) return;
     entry.closed = true;
-    if (entry.stream) {
-      entry.stream.destroy();
-    }
-    void rm(entry.stagingPath, { force: true });
+    void entry.pending.then(async () => {
+      const stream = entry.stream;
+      if (stream && !stream.closed) {
+        await new Promise<void>(resolve => { stream.once("close", resolve); stream.destroy(); });
+      }
+      await rm(entry.stagingPath, { force: true });
+    }).catch(() => undefined);
     this.entries.delete(callId);
   }
 
@@ -220,33 +232,12 @@ export class FileWriteStreamSink {
   buildLengthResumeHint(callId: string): string {
     const entry = this.entries.get(callId);
     if (!entry?.targetPath || entry.bytesWritten === 0) return "";
-    return ` Partial bytes (${entry.bytesWritten}) staged at ${entry.stagingPath} for ${entry.targetPath} — continue with write_file mode=append.`;
+    return ` Partial bytes (${entry.bytesWritten}) staged at ${entry.stagingPath} for ${entry.targetPath} — target unchanged. Reissue the complete intended content through write_file with the original mode; do not append only the missing tail.`;
   }
 
+  /** Legacy entry point: retain recovery bytes, never bypass normal tool dispatch. */
   async salvagePartialToTarget(callId: string): Promise<{ targetPath: string; bytes: number } | null> {
-    const entry = this.entries.get(callId);
-    if (!entry?.targetPath || entry.bytesWritten === 0 || entry.writeFailed) return null;
     await this.finalize(callId);
-    try {
-      await mkdir(path.dirname(entry.targetPath), { recursive: true });
-      if (entry.mode === "append") {
-        let staged = await readFile(entry.stagingPath, "utf8");
-        try {
-          const prev = await readFile(entry.targetPath, "utf8");
-          if (prev.length > 0 && !prev.endsWith("\n") && !staged.startsWith("\n")) {
-            staged = "\n" + staged;
-          }
-        } catch {
-          /* new file */
-        }
-        await appendFile(entry.targetPath, staged, "utf8");
-      } else {
-        await copyFile(entry.stagingPath, entry.targetPath);
-      }
-      const s = await stat(entry.targetPath);
-      return { targetPath: entry.targetPath, bytes: s.size };
-    } catch {
-      return null;
-    }
+    return null;
   }
 }

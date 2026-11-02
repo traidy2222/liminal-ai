@@ -16,7 +16,6 @@ import {
   ensureLocalProviderApiKeyInProcess,
   ensureProviderApiKeysInProcess,
   isCastAiApiKey,
-  syncProviderProcessEnvForBase,
 } from "./provider_api_key.js";
 import { isManagedInferenceBaseUrl } from "./inference_session.js";
 import { KIMCHI_API_KEY_ENV_NAMES } from "./kimchi_provider.js";
@@ -409,7 +408,6 @@ export function resolveProviderConfig(
     (overrides?.baseURL ??
       (prefs === undefined ? effectiveHarnessEnvRaw("AGENT_API_BASE_URL") : resolveHarnessEnvRaw("AGENT_API_BASE_URL", prefs))) ||
     DEFAULT_BASE_URL;
-  syncProviderProcessEnvForBase(baseURL);
   const order: Array<ProviderApiKeyEnvName> = overrides?.keySource
     ? [overrides.keySource, ...resolveApiKeyOrderForBaseUrl(baseURL)]
     : resolveApiKeyOrderForBaseUrl(baseURL);

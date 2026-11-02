@@ -6,7 +6,12 @@ const SPECIAL_TOKEN_RE =
   /<\|(?:endoftext|im_start|im_end|eot_id|start_of_text|end_of_text)\|>/gi;
 
 export function stripProviderSpecialTokens(text: string): string {
-  return text.replace(SPECIAL_TOKEN_RE, "");
+  let previous: string;
+  do {
+    previous = text;
+    text = text.replace(SPECIAL_TOKEN_RE, "");
+  } while (text !== previous);
+  return text;
 }
 
 /** Deep-scrub string fields in outbound chat messages before provider calls. */

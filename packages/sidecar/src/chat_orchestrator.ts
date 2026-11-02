@@ -107,6 +107,7 @@ export class ChatOrchestrator {
     if (!chatId || !this.autopilotChats.has(chatId)) return;
 
     if (frame.event === "tool_approval") {
+      if (!this.snapshot.yolo) return;
       const data = frame.data as {
         callId: string;
         approvalNonce: string;
@@ -377,33 +378,36 @@ export class ChatOrchestrator {
     worker.chatId = bridge.chatId;
     this.deps.registry.touch(bridge.chatId, task.title);
     this.autopilotChats.add(bridge.chatId);
-    this.emitStatus();
+    try {
+      this.emitStatus();
 
-    await this.waitForBridgeReady(bridge);
+      await this.waitForBridgeReady(bridge);
 
-    const message = buildWorkerMessage(goal, task, allTasks, upstreamBlock);
+      const message = buildWorkerMessage(goal, task, allTasks, upstreamBlock);
 
-    // sendUserMessage already awaits harness.send() through turn completion.
-    // Do not also wait on turn_end — it fires before running=false is cleared.
-    await bridge.sendUserMessage(message, { freshContext: true });
+      // sendUserMessage already awaits harness.send() through turn completion.
+      // Do not also wait on turn_end — it fires before running=false is cleared.
+      await bridge.sendUserMessage(message, { freshContext: true });
 
-    let handoffResult = parseAndValidateWorkerHandoff(
-      bridge.harness.getLastAssistantMessage().trim()
-    );
-    for (let attempt = 0; !handoffResult.ok && attempt < 2; attempt++) {
-      await bridge.sendUserMessage(buildHandoffRetryMessage(handoffResult.error), {
-        freshContext: false,
-      });
-      handoffResult = parseAndValidateWorkerHandoff(
+      let handoffResult = parseAndValidateWorkerHandoff(
         bridge.harness.getLastAssistantMessage().trim()
       );
-    }
-    if (!handoffResult.ok) {
-      throw new Error(`Invalid worker handoff: ${handoffResult.error}`);
-    }
+      for (let attempt = 0; !handoffResult.ok && attempt < 2; attempt++) {
+        await bridge.sendUserMessage(buildHandoffRetryMessage(handoffResult.error), {
+          freshContext: false,
+        });
+        handoffResult = parseAndValidateWorkerHandoff(
+          bridge.harness.getLastAssistantMessage().trim()
+        );
+      }
+      if (!handoffResult.ok) {
+        throw new Error(`Invalid worker handoff: ${handoffResult.error}`);
+      }
 
-    this.autopilotChats.delete(bridge.chatId);
-    return handoffResult.handoff;
+      return handoffResult.handoff;
+    } finally {
+      this.autopilotChats.delete(bridge.chatId);
+    }
   }
 
   private async runSynthesis(
@@ -415,49 +419,52 @@ export class ChatOrchestrator {
       title: `[Orchestrator] ${goal.slice(0, 48)}`,
     });
     this.autopilotChats.add(bridge.chatId);
-    this.emitStatus();
+    try {
+      this.emitStatus();
 
-    await this.waitForBridgeReady(bridge);
+      await this.waitForBridgeReady(bridge);
 
-    const structuredWorkers = this.snapshot.workers
-      .filter((w) => w.handoff)
-      .map((w) => ({
-        taskId: w.taskId,
-        title: w.title,
-        handoff: w.handoff!,
-      }));
-    const workerDigest = formatHandoffsForSynthesis(structuredWorkers);
+      const structuredWorkers = this.snapshot.workers
+        .filter((w) => w.handoff)
+        .map((w) => ({
+          taskId: w.taskId,
+          title: w.title,
+          handoff: w.handoff!,
+        }));
+      const workerDigest = formatHandoffsForSynthesis(structuredWorkers);
 
-    const message = [
-      "[ORCHESTRATION SYNTHESIS — merge only]",
-      "You are the synthesis agent. Do NOT implement, fix, or extend the project.",
-      "Do NOT spawn workers, run workflows, or redo tasks the workers already completed.",
-      "Your only job: merge the structured worker handoffs (JSON) into one clear final answer.",
-      "",
-      `Original goal (context): ${goal}`,
-      synthesisPrompt?.trim() ? `Merge instructions: ${synthesisPrompt.trim()}` : "",
-      "",
-      "Cross-check each handoff:",
-      "- status=done but artifacts empty when code/files were expected → call out as a gap",
-      "- status=blocked or partial → include blockers and what remains",
-      "- Union artifacts and commandsRun; dedupe paths",
-      "",
-      "Structured worker handoffs (JSON array):",
-      "```json",
-      workerDigest,
-      "```",
-      "",
-      "Deliver: what was accomplished, key artifacts/paths, verification (commandsRun), gaps/blockers, next steps.",
-    ]
-      .filter(Boolean)
-      .join("\n");
+      const message = [
+        "[ORCHESTRATION SYNTHESIS — merge only]",
+        "You are the synthesis agent. Do NOT implement, fix, or extend the project.",
+        "Do NOT spawn workers, run workflows, or redo tasks the workers already completed.",
+        "Your only job: merge the structured worker handoffs (JSON) into one clear final answer.",
+        "",
+        `Original goal (context): ${goal}`,
+        synthesisPrompt?.trim() ? `Merge instructions: ${synthesisPrompt.trim()}` : "",
+        "",
+        "Cross-check each handoff:",
+        "- status=done but artifacts empty when code/files were expected → call out as a gap",
+        "- status=blocked or partial → include blockers and what remains",
+        "- Union artifacts and commandsRun; dedupe paths",
+        "",
+        "Structured worker handoffs (JSON array):",
+        "```json",
+        workerDigest,
+        "```",
+        "",
+        "Deliver: what was accomplished, key artifacts/paths, verification (commandsRun), gaps/blockers, next steps.",
+      ]
+        .filter(Boolean)
+        .join("\n");
 
-    await bridge.sendUserMessage(message, { freshContext: true });
+      await bridge.sendUserMessage(message, { freshContext: true });
 
-    const text = bridge.harness.getLastAssistantMessage().trim();
-    this.autopilotChats.delete(bridge.chatId);
-    if (!text) throw new Error("Synthesis produced no output.");
-    return { chatId: bridge.chatId, text };
+      const text = bridge.harness.getLastAssistantMessage().trim();
+      if (!text) throw new Error("Synthesis produced no output.");
+      return { chatId: bridge.chatId, text };
+    } finally {
+      this.autopilotChats.delete(bridge.chatId);
+    }
   }
 
   private async waitForBridgeReady(bridge: SessionBridge): Promise<void> {

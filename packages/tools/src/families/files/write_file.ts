@@ -11,6 +11,7 @@ import {
 import { validateHtmlAppendChunk } from "./html_write_coherence.js";
 import { rejectWorkspaceEmailStaging } from "./email_staging_guard.js";
 import { takeFileWriteStreamManifest } from "@liminal/core";
+import { resolveWithinWorkspace } from "../../shared/file_path_guard.js";
 
 function resolveMode(raw: unknown): FileWriteMode {
   return raw === "overwrite" || raw === "append" ? raw : "create";
@@ -30,7 +31,12 @@ export const writeFileTool = defineTool({
     "ARGS: path; content; mode (create|overwrite|append); confirm_overwrite; optional expected_lines.",
   requiresApproval: true,
   dangerLevel: "cautious",
-  resourceLocks: (args) => [`file:write:${args["path"] as string}`],
+  resourceLocks: (args) => {
+    const safe = resolveWithinWorkspace(String(args["path"] ?? ""));
+    if (!safe.ok || !safe.resolvedPath) return [];
+    const canonical = process.platform === "win32" ? safe.resolvedPath.toLowerCase() : safe.resolvedPath;
+    return [`file:write:${canonical}`];
+  },
   parameters: {
     type: "object",
     properties: {
@@ -74,6 +80,12 @@ export const writeFileTool = defineTool({
     const verb = mode === "append" ? "Appended" : "Wrote";
 
     if (streamManifest) {
+      const approved = resolveWithinWorkspace(pathArg);
+      const target = resolveWithinWorkspace(streamManifest.targetPath);
+      if (!approved.ok || !target.ok || approved.resolvedPath !== target.resolvedPath || streamManifest.mode !== mode) {
+        return { ok: false, error: "Streamed target does not match the approved workspace path and mode." };
+      }
+      streamManifest.targetPath = target.resolvedPath!;
       try {
         if (mode === "append") {
           try {
@@ -85,17 +97,14 @@ export const writeFileTool = defineTool({
             /* target or staging missing — promote will surface */
           }
         }
-        const content = await promoteStagingFile(
+        const { content, expectedContent } = await promoteStagingFile(
           streamManifest.stagingPath,
           streamManifest.targetPath,
           mode,
           { confirmOverwrite }
         );
-        const full =
-          mode === "append"
-            ? await readFile(streamManifest.targetPath, "utf8")
-            : content;
-        const { footer } = await finishWithIntegrity(streamManifest.targetPath, full);
+        const { footer, report } = await finishWithIntegrity(streamManifest.targetPath, expectedContent);
+        if (report.integrity === "mismatch") return { ok: false, error: `Write completed but verification failed: ${footer}. Inspect the file before retrying.` };
         const preview = content.slice(0, 80).replace(/\n/g, "↵");
         return {
           ok: true,
@@ -119,24 +128,25 @@ export const writeFileTool = defineTool({
     // Append mode: insert a newline separator if the existing file does not end
     // with one and the new content does not start with one.
     let payload = content;
+    let expectedContent = content;
     if (mode === "append") {
       try {
         const prev = await readFile(prep.resolvedPath, "utf8");
         if (prev.length > 0 && !prev.endsWith("\n") && !content.startsWith("\n")) {
           payload = "\n" + content;
         }
+        expectedContent = prev + payload;
         const htmlErr = validateHtmlAppendChunk(prev, payload, prep.resolvedPath);
         if (htmlErr) return { ok: false, error: htmlErr };
-      } catch {
-        /* file does not exist yet — append creates it, no separator needed */
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== "ENOENT") return { ok: false, error: String(error) };
       }
     }
 
     try {
       await commitContent(prep.resolvedPath, payload, mode);
-      const full =
-        mode === "append" ? await readFile(prep.resolvedPath, "utf8") : payload;
-      const { footer, report } = await finishWithIntegrity(prep.resolvedPath, full);
+      const { footer, report } = await finishWithIntegrity(prep.resolvedPath, expectedContent);
+      if (report.integrity === "mismatch") return { ok: false, error: `Write completed but verification failed: ${footer}. Inspect the file before retrying.` };
       const preview = content.slice(0, 80).replace(/\n/g, "↵");
       const expectedLines = args["expected_lines"];
       let lineHint = "";

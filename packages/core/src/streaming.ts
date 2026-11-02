@@ -73,8 +73,13 @@ export class StreamAccumulator {
 
     if (delta.tool_calls) {
       const toolCallDeltas: ToolCallStreamDelta[] = [];
-      for (const tc of delta.tool_calls) {
-        const idx = tc.index;
+      for (const [position, tc] of delta.tool_calls.entries()) {
+        let idx = tc.index;
+        if (!Number.isInteger(idx) || idx < 0) {
+          const byId = tc.id ? [...this.toolCallMap].find(([, call]) => call.id === tc.id)?.[0] : undefined;
+          const atPosition = this.toolCallMap.get(position);
+          idx = byId ?? (tc.id && atPosition?.id && atPosition.id !== tc.id ? this.maxToolIndex + 1 : position);
+        }
 
         // Detect non-contiguous index (provider skipped an index — possible misalignment).
         if (!this.toolCallMap.has(idx) && idx > this.maxToolIndex + 1) {

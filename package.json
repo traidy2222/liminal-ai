@@ -45,7 +45,7 @@
     "test:update-release": "node scripts/lib/update-release.test.mjs",
     "review:loop": "node scripts/review-loop.mjs",
     "test:review-loop": "node --test scripts/review-loop.test.mjs",
-    "test:review-regressions": "node --import tsx --test packages/web/server/local_auth.test.ts packages/web/server/local_auth_http.test.ts packages/core/src/harness_effective_env.test.ts packages/core/src/streaming_completion.test.ts",
+    "test:review-regressions": "node scripts/test-review-regressions.mjs",
     "verify-harness-defaults-no-secrets": "node scripts/verify-harness-defaults-no-secrets.mjs",
     "verify:workflows:live": "node scripts/verify-signature-workflows.mjs",
     "verify:workflows": "node --import tsx --test packages/core/src/signature_workflows.test.ts packages/tools/src/families/code_intel/run_tests.test.ts packages/tools/src/integrations/xero/receipt_workflow.integration.test.ts packages/web/server/workflow_artifacts.test.ts",

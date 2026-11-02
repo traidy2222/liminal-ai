@@ -43,24 +43,12 @@ interface CacheEntry {
   expiresAt: number;
 }
 
+// Keep the heuristic allowlist deliberately exact: shell prefixes are not commands.
 const SHELL_ALLOW_PATTERNS: RegExp[] = [
-  /^git\s+(status|diff|log|branch|show)(\s|$)/i,
-  /^ls(\s|$)/i,
-  /^dir(\s|$)/i,
-  /^get-childitem(\s|$)/i,
-  /^pwd\s*$/i,
-  /^get-location\s*$/i,
-  /^whoami\s*$/i,
-  /^node\s+(-v|--version)(\s|$)/i,
-  /^npm\s+test(\s|$)/i,
-  /^npm\s+run\s+typecheck(\s|$)/i,
-  /^npx\s+tsc\s+--noEmit(\s|$)/i,
-  /^cat\s+/i,
-  /^type\s+/i,
-  /^get-content\s+/i,
-  /^echo\s+/i,
-  /^which\s+/i,
-  /^where(\.exe)?\s+/i,
+  /^git\s+status(?:\s+(?:--short|--branch|-sb))?$/i,
+  /^git\s+(?:diff|log|show|branch)$/i,
+  /^(?:ls|dir|get-childitem|pwd|get-location|whoami)$/i,
+  /^node\s+(?:-v|--version)$/i,
 ];
 
 function stableStringify(obj: Record<string, unknown>): string {
@@ -73,10 +61,12 @@ function stableStringify(obj: Record<string, unknown>): string {
 function heuristicShell(command: string): SafetyJudgeVerdict | null {
   const cmd = command.trim();
   if (!cmd) return "require_human";
+  if (/[;&|<>`$(){}\r\n\x00]/.test(cmd)) return "require_human";
   if (guardToolArgs("run_shell", { command: cmd })) return "require_human";
   for (const re of SHELL_ALLOW_PATTERNS) {
     if (re.test(cmd)) return "safe";
   }
+  if (/^(?:git|cat|type|get-content|echo)\b/i.test(cmd)) return "require_human";
   return null;
 }
 
@@ -214,8 +204,8 @@ export class SafetyJudge {
     batchToolNames?: string[]
   ): Promise<SafetyJudgeVerdict | null> {
     const argsJson = stableStringify(args);
-    const truncated =
-      argsJson.length > 1500 ? `${argsJson.slice(0, 1500)}…(truncated)` : argsJson;
+    // A safe prefix says nothing about omitted arguments. Use the uncertainty policy.
+    if (argsJson.length > 1500) return null;
     const batch = (batchToolNames ?? []).join(", ");
 
     const controller = new AbortController();
@@ -241,13 +231,14 @@ export class SafetyJudge {
                 },
                 {
                   role: "user",
-                  content: `tool: ${toolName}\nargs: ${truncated}\nrecent batch: ${batch || "(none)"}`,
+                  content: `tool: ${toolName}\nargs: ${argsJson}\nrecent batch: ${batch || "(none)"}`,
                 },
               ],
               ...buildOpenRouterSessionExtras(this.client.baseURL),
             },
             { signal: controller.signal }
-          )
+          ),
+        controller.signal
       );
 
       const text = res.choices[0]?.message?.content;

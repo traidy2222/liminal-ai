@@ -338,7 +338,7 @@ function extraFileRootsFromEnv(): string[] {
   const raw = effectiveHarnessEnvRaw("AGENT_BROWSER_FILE_ROOT")?.trim();
   if (!raw) return [];
   return raw
-    .split(/[;:]/)
+    .split(process.platform === "win32" ? /;/ : /[;:]/)
     .map((p) => p.trim())
     .filter(Boolean)
     .map((p) => realpathSafe(p));
@@ -1826,10 +1826,12 @@ export async function startStaticFileServer(options: {
 
   try {
     const server = createServer((req, res) => {
-      let rel = decodeURIComponent((req.url ?? "/").split("?")[0] ?? "/");
+      let rel: string;
+      try { rel = decodeURIComponent((req.url ?? "/").split("?")[0] ?? "/"); }
+      catch { res.statusCode = 400; res.end("Malformed URL"); return; }
       if (rel === "/") rel = options.entryFile ? `/${options.entryFile}` : "/index.html";
-      const filePath = path.resolve(rootDir, rel.replace(/^\//, ""));
-      if (pathEscapesSandbox(rootDir, filePath) || !fs.existsSync(filePath)) {
+      const filePath = realpathSafe(path.resolve(rootDir, rel.replace(/^\//, "")));
+      if (rel.includes("\0") || pathEscapesSandbox(rootDir, filePath) || !fs.existsSync(filePath)) {
         res.statusCode = 404;
         res.end("Not found");
         return;
