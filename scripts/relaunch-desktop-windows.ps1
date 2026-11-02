@@ -5,13 +5,13 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
-$UpdaterDir = Join-Path $ExeDir "liminald\updater"
+$UpdaterDir = $PSScriptRoot
 $ApplyScript = Join-Path $UpdaterDir "apply-desktop-update.mjs"
 
-function Wait-ForProcess([int]$Pid, [int]$TimeoutSec = 120) {
+function Wait-ForProcess([int]$TargetProcessId, [int]$TimeoutSec = 120) {
   $deadline = (Get-Date).AddSeconds($TimeoutSec)
   while ((Get-Date) -lt $deadline) {
-    if (-not (Get-Process -Id $Pid -ErrorAction SilentlyContinue)) { return $true }
+    if (-not (Get-Process -Id $TargetProcessId -ErrorAction SilentlyContinue)) { return $true }
     Start-Sleep -Milliseconds 400
   }
   return $false

@@ -5,7 +5,8 @@ import 'package:http/http.dart' as http;
 import 'semver.dart';
 
 const _githubRepo = 'traidy2222/liminal-ai';
-const _releasesUrl = 'https://api.github.com/repos/$_githubRepo/releases?per_page=100';
+const _releasesUrl =
+    'https://api.github.com/repos/$_githubRepo/releases?per_page=100';
 
 class ReleaseAsset {
   ReleaseAsset({
@@ -56,9 +57,14 @@ class UpdateCheckResult {
 }
 
 class ReleaseClient {
-  ReleaseClient({http.Client? client}) : _client = client ?? http.Client();
+  ReleaseClient(
+      {http.Client? client,
+      Duration requestTimeout = const Duration(seconds: 8)})
+      : _client = client ?? http.Client(),
+        _requestTimeout = requestTimeout;
 
   final http.Client _client;
+  final Duration _requestTimeout;
 
   static String desktopArtifactFile(String platform, String version) {
     switch (platform) {
@@ -86,15 +92,18 @@ class ReleaseClient {
         'Accept': 'application/vnd.github+json',
         'User-Agent': 'liminal-desktop-updater',
       },
-    );
+    ).timeout(_requestTimeout);
     if (res.statusCode != 200) {
       throw Exception('GitHub releases failed: ${res.statusCode}');
     }
 
     final releases = (jsonDecode(res.body) as List<dynamic>)
         .cast<Map<String, dynamic>>()
-        .where((r) => RegExp(r'^v.+-desktop$', caseSensitive: false)
-            .hasMatch(r['tag_name'] as String? ?? ''))
+        .where((r) =>
+            RegExp(r'^v.+-desktop$', caseSensitive: false)
+                .hasMatch(r['tag_name'] as String? ?? '') &&
+            r['draft'] != true &&
+            _isCompleteRelease(r))
         .toList();
 
     releases.sort((a, b) {
@@ -111,7 +120,8 @@ class ReleaseClient {
 
     final latest = releases.first;
     final tag = latest['tag_name'] as String;
-    final match = RegExp(r'^v(.+)-desktop$', caseSensitive: false).firstMatch(tag);
+    final match =
+        RegExp(r'^v(.+)-desktop$', caseSensitive: false).firstMatch(tag);
     final version = normalizeVersion(match?.group(1) ?? '');
 
     ReleaseAsset assetFor(String file) {
@@ -142,6 +152,26 @@ class ReleaseClient {
     );
   }
 
+  bool _isCompleteRelease(Map<String, dynamic> release) {
+    final tag = release['tag_name'] as String? ?? '';
+    final match = RegExp(r'^v(.+)-desktop$').firstMatch(tag);
+    if (match == null) return false;
+    final version = normalizeVersion(match.group(1)!);
+    final files = [
+      for (final platform in ['windows', 'macos', 'linux'])
+        desktopArtifactFile(platform, version),
+      liminaldRuntimeFile(version)
+    ];
+    final names = (release['assets'] as List<dynamic>? ?? [])
+        .cast<Map<String, dynamic>>()
+        .where((a) => a['state'] == 'uploaded')
+        .map((a) => a['name'])
+        .toSet();
+    return files
+            .every((f) => names.contains(f) && names.contains('$f.sha256')) &&
+        names.contains('liminal-desktop-manifest-v$version.json');
+  }
+
   Future<UpdateCheckResult> check({
     required String appVersion,
     required String harnessVersion,
@@ -157,10 +187,12 @@ class ReleaseClient {
   }
 
   Future<String?> fetchSha256(String sha256Url) async {
-    final res = await _client.get(Uri.parse(sha256Url));
+    final res =
+        await _client.get(Uri.parse(sha256Url)).timeout(_requestTimeout);
     if (res.statusCode != 200) return null;
     final line = res.body.trim().split(RegExp(r'\r?\n')).first;
-    final match = RegExp(r'^([a-f0-9]{64})\b', caseSensitive: false).firstMatch(line);
+    final match =
+        RegExp(r'^([a-f0-9]{64})\b', caseSensitive: false).firstMatch(line);
     return match?.group(1)?.toLowerCase();
   }
 

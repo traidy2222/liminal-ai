@@ -19,7 +19,7 @@ Run it on your machine through a native desktop app, a browser, or your terminal
 
 Liminal connects a model to the tools it needs to do useful work: read and edit files, run commands, search the web, create documents, and work with connected services. Its agent loop handles tool execution, approvals, retries, context management, and persistent memory.
 
-**Release status:** Liminal is in beta. [Desktop 0.1.5](https://github.com/traidy2222/liminal-ai/releases/tag/v0.1.5-desktop) adds three guided workflows, saved deliverables, and recovery after interruptions. Searchable OpenRouter selection and single-model mode remain available. Screenshots show the application with demo workspace data.
+**Release status:** Liminal is in beta. [Desktop 0.1.6](https://github.com/traidy2222/liminal-ai/releases/tag/v0.1.6-desktop) adds verified automatic updates on launch, alongside the three guided workflows and saved deliverables. Searchable OpenRouter selection and single-model mode remain available. Screenshots show the application with demo workspace data.
 
 ## Why Liminal
 
@@ -75,7 +75,9 @@ The model picker replaces OpenRouter model bundles with a searchable catalog of 
 2. Extract the complete archive and keep its companion files together.
 3. Follow the [desktop setup guide](docs/start/install.md#liminal-desktop-portable-zip) to configure your provider and launch the app.
 
-Use **Settings → About & updates** to check for desktop and harness updates. Beta builds are published as prereleases.
+From **0.1.6**, portable installs check for complete releases at launch, download and verify updates, then install and restart before opening your workspace. Choose **Open current version** to skip, or disable automatic updates in **Settings → About & updates**. Offline checks and download failures open the current version.
+
+For the initial upgrade from **0.1.5 or earlier**, download 0.1.6 once and extract it over the closed installation, keeping your local `.env`. This fixes the older packaged-app detection and installer issues. Later launch updates are automatic. Beta builds are published as prereleases.
 
 ### Web or terminal
 

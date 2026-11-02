@@ -46,7 +46,8 @@ class UpdateBanner extends StatelessWidget {
                   if (harness) 'Harness update ready',
                   if (app) 'App update requires restart',
                 ].join(' · '),
-                style: theme.textTheme.bodySmall?.copyWith(color: lim.textMuted),
+                style:
+                    theme.textTheme.bodySmall?.copyWith(color: lim.textMuted),
               ),
               if (updates.state.phase == UpdatePhase.downloading &&
                   updates.state.downloadProgress != null)
@@ -64,14 +65,14 @@ class UpdateBanner extends StatelessWidget {
                 children: [
                   if (harness)
                     FilledButton(
-                      onPressed: updates.state.phase == UpdatePhase.applying
+                      onPressed: updates.isBusy
                           ? null
                           : () => host.updates.applyHarnessUpdate(),
                       child: const Text('Update harness'),
                     ),
                   if (app)
                     OutlinedButton(
-                      onPressed: updates.state.phase == UpdatePhase.applying
+                      onPressed: updates.isBusy
                           ? null
                           : () => host.updates.scheduleAppRestart(),
                       child: const Text('Restart to update app'),
