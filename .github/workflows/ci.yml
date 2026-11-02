@@ -40,6 +40,9 @@ jobs:
       - name: Test review repair evidence gates
         run: npm run test:review-loop
 
+      - name: Test confirmed review regressions
+        run: npm run test:review-regressions
+
       - name: Test eval fixtures and trace handling
         run: npm run test:sandbox -w @liminal/eval
 

@@ -1,7 +1,9 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { mkdtemp, mkdir, writeFile, readFile, rm } from "node:fs/promises";
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawn } from "node:child_process";
+import { pathToFileURL } from "node:url";
+import { setTimeout as delay } from "node:timers/promises";
 import os from "node:os";
 import path from "node:path";
 import { parseTap, canVerify, importFindings, snapshot, testPaths, runTests } from "./review-loop.mjs";
@@ -101,4 +103,49 @@ test("CLI records a real repair, rejects stale verification, and enforces attemp
   for (let i = 0; i < 3; i++) assert.throws(() => cli("check"));
   assert.throws(() => cli("check"), /Three repair attempts exhausted/);
   assert.equal((await state()).findings[1].attempts, 3);
+});
+
+test("interrupting the CLI stops its test group and removes the run lock", async (t) => {
+  const scriptUrl = pathToFileURL(path.resolve("scripts/review-loop.mjs")).href;
+  await mkdir(path.join(process.cwd(), ".agent_artifacts"), { recursive: true });
+  const root = await mkdtemp(path.join(process.cwd(), ".agent_artifacts", "review-interrupt-test-"));
+  const git = (...args) => execFileSync("git", args, { cwd: root, stdio: "pipe" });
+  const dir = path.join(root, ".agent_artifacts/review-loop/fixture");
+  await mkdir(dir, { recursive: true }); await mkdir(path.join(root, "scripts"));
+  git("init"); git("checkout", "-b", "codex/fixture");
+  await writeFile(path.join(root, ".gitignore"), ".agent_artifacts/\n");
+  await writeFile(path.join(root, "scripts/hang.test.mjs"), 'import test from "node:test"; import fs from "node:fs"; test("hang",async()=>{fs.writeFileSync(".agent_artifacts/pids.json",JSON.stringify({pid:process.pid,parent:process.ppid})); await new Promise(()=>setInterval(()=>{},1000));});');
+  await writeFile(path.join(root, "scripts/cli.mjs"), `import {main} from ${JSON.stringify(scriptUrl)}; process.on("message",()=>process.emit("SIGTERM")); try {await main(["reproduce","--run","fixture"]);} catch {process.exitCode=1;} finally {process.disconnect?.();}`);
+  git("add", "."); git("-c", "user.name=Test", "-c", "user.email=test@example.invalid", "commit", "-m", "fixture");
+  await writeFile(path.join(dir, "state.json"), JSON.stringify({ id: "fixture", branch: "codex/fixture", review: {}, active: "1", findings: [{ id: "1", state: "selected", startedAt: Date.now(), attempts: 0, tests: ["scripts/hang.test.mjs"] }] }));
+  const child = spawn(process.execPath, ["scripts/cli.mjs"], { cwd: root, stdio: ["ignore", "pipe", "pipe", "ipc"], windowsHide: true });
+  child.stdout.resume(); child.stderr.resume();
+  const exited = new Promise((resolve) => child.on("exit", resolve));
+  let pids;
+  t.after(async () => {
+    if (child.exitCode === null && child.signalCode === null) child.kill("SIGKILL");
+    // The failing (pre-fix) fixture leaves this exact child group behind.
+    if (pids) {
+      if (process.platform === "win32") { try { execFileSync("taskkill", ["/PID", String(pids.parent), "/T", "/F"], { stdio: "ignore", windowsHide: true }); } catch {} }
+      else { try { process.kill(-pids.parent, "SIGKILL"); } catch {} }
+    }
+    await exited;
+    await rm(root, { recursive: true, force: true });
+  });
+  for (let i = 0; i < 100; i++) {
+    try { pids = JSON.parse(await readFile(path.join(root, ".agent_artifacts/pids.json"), "utf8")); break; } catch { await delay(50); }
+  }
+  assert.ok(pids, "test process must be running before the interrupt");
+  if (process.platform === "win32") child.send("interrupt"); // Windows kill() bypasses JS signal handlers.
+  else child.kill("SIGTERM");
+  const closed = await Promise.race([exited.then(() => true), delay(2000).then(() => false)]);
+  assert.equal(closed, true, "CLI should exit promptly after interrupting the test");
+  await assert.rejects(readFile(path.join(dir, "lock")), /ENOENT/);
+  const state = JSON.parse(await readFile(path.join(dir, "state.json"), "utf8"));
+  assert.equal(state.findings[0].history.at(-1).interrupted, true);
+  let alive = true;
+  for (let i = 0; i < 40 && alive; i++) {
+    try { process.kill(pids.pid, 0); await delay(25); } catch { alive = false; }
+  }
+  assert.equal(alive, false, "hanging test must not survive its CLI");
 });

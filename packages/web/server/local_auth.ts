@@ -11,11 +11,27 @@ function isLoopbackAddress(ip: string | undefined): boolean {
   return n === "127.0.0.1" || n === "::1" || n === "localhost";
 }
 
-/** True when the request targets this machine's local harness UI (loopback IP or localhost Host). */
+function isLoopbackHost(hostname: string): boolean {
+  return hostname === "localhost" || hostname === "127.0.0.1" || hostname === "[::1]";
+}
+
+/** Token bootstrap is restricted to local connections with local Host and Origin. */
 export function isLocalHarnessRequest(req: Request): boolean {
-  if (isLoopbackAddress(req.socket.remoteAddress)) return true;
-  const host = (req.headers.host ?? "").split(":")[0]?.trim().toLowerCase();
-  return host === "localhost" || host === "127.0.0.1" || host === "[::1]";
+  if (!isLoopbackAddress(req.socket.remoteAddress)) return false;
+  const host = req.headers.host;
+  // Host is an authority, not a URL: reject userinfo, paths and parser repairs.
+  if (!host || /[\s\\/@?#]/.test(host)) return false;
+  try {
+    if (!isLoopbackHost(new URL(`http://${host}`).hostname)) return false;
+    const origin = req.header("origin");
+    if (origin === undefined) return true;
+    const url = new URL(origin);
+    return (url.protocol === "http:" || url.protocol === "https:") &&
+      !url.username && !url.password && url.pathname === "/" && !url.search && !url.hash &&
+      isLoopbackHost(url.hostname);
+  } catch {
+    return false;
+  }
 }
 
 function readTokenFromRequest(req: Request): string | null {

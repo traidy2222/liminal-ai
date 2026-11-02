@@ -63,17 +63,25 @@ export async function runTests(root, files, timeout = LIMITS.testMs) {
     });
     let output = "", interrupted = false;
     function stop() {
+      if (interrupted) return;
       interrupted = true;
       if (!child.pid) return;
       if (process.platform === "win32") {
         try { execFileSync("taskkill", ["/PID", String(child.pid), "/T", "/F"], { windowsHide: true, stdio: "ignore" }); } catch { child.kill(); }
       } else { try { process.kill(-child.pid, "SIGKILL"); } catch { child.kill("SIGKILL"); } }
     }
+    process.on("SIGINT", stop);
+    process.on("SIGTERM", stop);
     const timer = setTimeout(stop, timeout);
+    const cleanup = () => {
+      clearTimeout(timer);
+      process.off("SIGINT", stop);
+      process.off("SIGTERM", stop);
+    };
     const collect = (chunk) => { if (output.length < 2_000_000) output += chunk.toString(); else if (!interrupted) stop(); };
     child.stdout.on("data", collect); child.stderr.on("data", collect);
-    child.on("error", (error) => { clearTimeout(timer); reject(error); });
-    child.on("close", (code) => { clearTimeout(timer); resolve({ ...parseTap(output, code, interrupted), output }); });
+    child.on("error", (error) => { cleanup(); reject(error); });
+    child.on("close", (code) => { cleanup(); resolve({ ...parseTap(output, code, interrupted), output }); });
   });
 }
 

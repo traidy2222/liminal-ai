@@ -162,9 +162,9 @@ export class StreamAccumulator {
    */
   tryGetCompletedCall(index: number): AccumulatedToolCall | undefined {
     const tc = this.toolCallMap.get(index);
-    if (!tc || !tc.id || !tc.name) return undefined;
+    if (!tc || !tc.id || !tc.name || !tc.argsJson) return undefined;
     try {
-      JSON.parse(tc.argsJson || "{}");
+      JSON.parse(tc.argsJson);
       return tc;
     } catch {
       return undefined;

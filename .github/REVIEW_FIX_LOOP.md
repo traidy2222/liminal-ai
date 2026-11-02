@@ -13,7 +13,7 @@ on or merge the artificial `codex/audit-baseline-*` / `codex/existing-code-revie
 branches: they exist solely to present unchanged existing code for audit.
 
 ```sh
-npm run review:loop -- start --pr 1
+npm run review:loop -- start --pr PR_NUMBER
 npm run review:loop -- refresh --run RUN_ID
 npm run review:loop -- status --run RUN_ID
 ```
@@ -24,6 +24,8 @@ Requires Node, the repository's installed dependencies, Git and authenticated
 findings, review summaries, source commit IDs and check status. A pending review
 or zero findings is **not** a clean bill of health. Summary-only concerns must
 also be read and triaged by the agent; the CLI tracks original inline findings.
+Use the PR whose findings you are addressing: PR 1 was the existing-code pilot;
+the subsequent fixes and loop tooling were reviewed on PR 2.
 On Windows PowerShell use `npm.cmd` instead of `npm` if its PowerShell wrapper
 consumes option names, or call `node scripts/review-loop.mjs` directly.
 
