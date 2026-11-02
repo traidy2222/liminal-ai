@@ -1,3 +1,5 @@
+import { createReceiptReadTool } from "./families/workflow/receipt_read.js";
+import { createWorkPackageTool } from "./families/workflow/work_package.js";
 import type { ToolRegistry, AgentEmitter, AgentHarness } from "@liminal/core";
 import { effectiveHarnessEnvRaw, resolveHarnessEnvRaw, emailStyleInferEnabled } from "@liminal/core";
 import { readFileTool } from "./families/files/read_file.js";
@@ -424,6 +426,9 @@ export async function registerAllTools(
 
     // Upgrade VI: cross-domain synthesis sub-agent
     registry.register(createSynthesisRunTool(harness));
+
+    registry.register(createWorkPackageTool(harness));
+    registry.register(createReceiptReadTool(harness));
 
     // Dynamic workflows (ultracode-equivalent) — root-only; fan out sub-agents
     // per phase with results stored out of context. Excluded from child

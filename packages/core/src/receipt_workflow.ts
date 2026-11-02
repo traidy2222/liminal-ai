@@ -17,7 +17,7 @@ export type ReceiptWorkflowPreset = typeof RECEIPT_WORKFLOW_PRESET;
 
 
 const DEFAULT_USER_MESSAGE =
-  "Process the attached receipt(s) into Xero as draft bill(s).";
+  "Prepare a local expense review of the attached receipt. Do not create a Xero transaction unless I explicitly request it.";
 
 export function isReceiptWorkflowPreset(
   value: string | undefined

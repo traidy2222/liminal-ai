@@ -1633,7 +1633,7 @@ export interface OutgoingChatMessage {
   /** True when the message was sent from live dictation (mic auto-send). */
   liveDictation?: boolean;
   /** Guided preset — e.g. receipt_to_xero (requires image attachments). */
-  workflowPreset?: "receipt_to_xero";
+  workflowPreset?: "receipt_to_xero" | "enquiry_to_proposal" | "bugfix_to_handoff";
 }
 
 export interface SendMessageResult {

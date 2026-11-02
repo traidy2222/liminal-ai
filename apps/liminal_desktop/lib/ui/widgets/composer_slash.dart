@@ -1,6 +1,8 @@
 // Keep in sync with packages/core/src/composer_slash_commands.ts
 
 enum SlashCommandKind {
+  workflowManage,
+  signatureWorkflow,
   receiptWorkflow,
   attach,
   connect,
@@ -120,9 +122,29 @@ const _providers = <({String id, String label})>[
 
 const _commands = <SlashCommandDef>[
   SlashCommandDef(
+      name: 'workflows',
+      summary: 'List saved guided workflows',
+      usage: '/workflows',
+      kind: SlashCommandKind.workflowManage),
+  SlashCommandDef(
+      name: 'resume-work',
+      summary: 'Resume a saved workflow',
+      usage: '/resume-work <run-id>',
+      kind: SlashCommandKind.workflowManage),
+  SlashCommandDef(
+      name: 'proposal',
+      summary: 'Prepare a researched proposal and unsent reply',
+      usage: '/proposal <client enquiry and scope>',
+      kind: SlashCommandKind.signatureWorkflow),
+  SlashCommandDef(
+      name: 'fix',
+      summary: 'Reproduce a bug, verify a patch and save handoff',
+      usage: '/fix <bug report and expected behaviour>',
+      kind: SlashCommandKind.signatureWorkflow),
+  SlashCommandDef(
     name: 'receipt',
     aliases: ['receipts', 'process-receipts'],
-    summary: 'Process attached receipt image(s) into a Xero DRAFT bill',
+    summary: 'Review an attached receipt; optionally create a Xero draft',
     usage: '/receipt [note]',
     kind: SlashCommandKind.receiptWorkflow,
   ),
@@ -166,7 +188,8 @@ const _commands = <SlashCommandDef>[
   ),
   SlashCommandDef(
     name: 'remote',
-    summary: 'Mirror the app window to another device (LAN; /remote cloud for Pro)',
+    summary:
+        'Mirror the app window to another device (LAN; /remote cloud for Pro)',
     usage: '/remote [control|cloud|off|status|revoke CODE]',
     kind: SlashCommandKind.remote,
   ),
@@ -186,7 +209,9 @@ ParsedRemoteSlash? parseRemoteSlashCommand(String text) {
     return const ParsedRemoteSlash.enable(mode: 'control', cloud: false);
   }
   if (sub == 'cloud') {
-    final mode = tokens.length > 2 && tokens[2].toLowerCase() == 'control' ? 'control' : 'view';
+    final mode = tokens.length > 2 && tokens[2].toLowerCase() == 'control'
+        ? 'control'
+        : 'view';
     return ParsedRemoteSlash.enable(mode: mode, cloud: true);
   }
   if (sub == 'off' || sub == 'disable' || sub == 'stop') {
@@ -210,14 +235,19 @@ SlashCommandDef? resolveSlashCommandDef(String name) {
   return null;
 }
 
-({int lineStart, int lineEnd, String line}) lineAtCursor(String text, int cursor) {
+({int lineStart, int lineEnd, String line}) lineAtCursor(
+    String text, int cursor) {
   final safe = cursor.clamp(0, text.length);
   final before = text.substring(0, safe);
   final lineStart = before.lastIndexOf('\n') + 1;
   final after = text.substring(safe);
   final nl = after.indexOf('\n');
   final lineEnd = nl == -1 ? text.length : safe + nl;
-  return (lineStart: lineStart, lineEnd: lineEnd, line: text.substring(lineStart, lineEnd));
+  return (
+    lineStart: lineStart,
+    lineEnd: lineEnd,
+    line: text.substring(lineStart, lineEnd)
+  );
 }
 
 ({int slashStart, List<String> tokens})? tokenizeSlashLine(String line) {
@@ -337,7 +367,9 @@ List<SlashCompletionItem> listSlashCompletions(String text, int cursor) {
   final rebuilt = '/${tokens.join(' ')}';
   final suffix = item.kind == 'flag' ? '' : ' ';
   final newLine = '$lead$rebuilt$suffix';
-  final newText = text.substring(0, state.lineStart) + newLine + text.substring(state.lineEnd);
+  final newText = text.substring(0, state.lineStart) +
+      newLine +
+      text.substring(state.lineEnd);
   return (text: newText, cursor: state.lineStart + newLine.length);
 }
 
@@ -345,7 +377,9 @@ ParsedComposerSlash? parseComposerSlashSubmit(String text) {
   final trimmed = text.trim();
   if (!trimmed.startsWith('/')) return null;
 
-  final receiptRe = RegExp(r'^/(?:receipt|receipts|process-receipts)(?:\s+(.*))?$', caseSensitive: false);
+  final receiptRe = RegExp(
+      r'^/(?:receipt|receipts|process-receipts)(?:\s+([\s\S]*))?$',
+      caseSensitive: false);
   final receiptMatch = receiptRe.firstMatch(trimmed);
   if (receiptMatch != null) {
     return ParsedComposerSlash(
@@ -365,6 +399,15 @@ ParsedComposerSlash? parseComposerSlashSubmit(String text) {
 
   final readOnly = parts.contains('--read-only');
   final rest = parts.skip(1).where((p) => p != '--read-only').toList();
+  if (def.kind == SlashCommandKind.signatureWorkflow ||
+      def.kind == SlashCommandKind.workflowManage)
+    return ParsedComposerSlash(
+        kind: def.kind,
+        command: def.name,
+        args: rest,
+        readOnly: false,
+        raw: trimmed,
+        note: trimmed.substring(parts.first.length).trim());
 
   if (def.kind == SlashCommandKind.attach) {
     var path = rest.join(' ').trim();
@@ -382,7 +425,8 @@ ParsedComposerSlash? parseComposerSlashSubmit(String text) {
     );
   }
 
-  if (def.kind == SlashCommandKind.connect || def.kind == SlashCommandKind.disconnect) {
+  if (def.kind == SlashCommandKind.connect ||
+      def.kind == SlashCommandKind.disconnect) {
     final provider = rest.isNotEmpty ? rest.first.toLowerCase() : '';
     return ParsedComposerSlash(
       kind: def.kind,

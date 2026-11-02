@@ -2,6 +2,21 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:liminal_desktop/ui/widgets/composer_slash.dart';
 
 void main() {
+  test('guided workflow commands preserve multiline input and expose recovery',
+      () {
+    final proposal =
+        parseComposerSlashSubmit('/proposal First line\nSecond line');
+    expect(proposal?.kind, SlashCommandKind.signatureWorkflow);
+    expect(proposal?.note, 'First line\nSecond line');
+    expect(parseComposerSlashSubmit('/fix wrong total')?.command, 'fix');
+    expect(parseComposerSlashSubmit('/workflows')?.kind,
+        SlashCommandKind.workflowManage);
+    expect(parseComposerSlashSubmit('/resume-work abc')?.kind,
+        SlashCommandKind.workflowManage);
+    expect(listSlashCompletions('/pro', 4).any((c) => c.label == '/proposal'),
+        isTrue);
+  });
+
   test('listSlashCompletions suggests connect and xero', () {
     final cmds = listSlashCompletions('/con', 4);
     expect(cmds.any((c) => c.label == '/connect'), isTrue);

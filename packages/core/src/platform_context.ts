@@ -131,11 +131,12 @@ export function buildOneshotPtyLaunch(
 
   if (runtime.kind === "powershell" || runtime.kind === "pwsh") {
     const cd = cwd?.trim()
-      ? `Set-Location -LiteralPath '${cwd.trim().replace(/'/g, "''")}'; `
+      ? `Set-Location -LiteralPath '${cwd.trim().replace(/'/g, "''")}' -ErrorAction Stop; `
       : "";
     return {
       executable: runtime.executable,
-      args: [...runtime.args, `${cd}${cmd}`],
+      // PowerShell -Command otherwise collapses native failure codes (e.g. 7) to 1.
+      args: [...runtime.args, `${cd}${cmd}\n$liminalCommandSucceeded = $?; $liminalNativeExit = $LASTEXITCODE; if ($liminalCommandSucceeded) { exit 0 }; if ($liminalNativeExit -is [int] -and $liminalNativeExit -ne 0) { exit $liminalNativeExit }; exit 1`],
     };
   }
 

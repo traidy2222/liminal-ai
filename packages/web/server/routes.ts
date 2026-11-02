@@ -1,3 +1,4 @@
+import {readWorkflowArtifact} from "./workflow_artifacts.js";
 import { Router } from "express";
 import { randomBytes } from "node:crypto";
 import type { ChatManager } from "./chatManager.js";
@@ -178,6 +179,13 @@ export function createRouter(
 
   /** Convenience wrapper — every chat-scoped route calls this. */
   const active = () => chatManager.getActive();
+
+  router.get("/api/workflows/:runId/files/:name", async (req,res)=>{
+    try {
+      const name=String(req.params.name);const bytes=await readWorkflowArtifact(active().harness.workspaceRoot,String(req.params.runId),name);
+      res.setHeader('Cache-Control','no-store');res.setHeader('X-Content-Type-Options','nosniff');res.attachment(name).send(bytes);
+    }catch{res.status(404).json({error:'Workflow deliverable not found in this workspace.'});}
+  });
 
   router.get("/api/config", async (_req, res) => {
     try {
@@ -1554,7 +1562,7 @@ export function createRouter(
       freshContext?: boolean;
       attachments?: IncomingAttachment[];
       liveDictation?: boolean;
-      workflowPreset?: import("@liminal/core").ReceiptWorkflowPreset;
+      workflowPreset?: import("@liminal/core").SignatureWorkflowPreset;
     };
     const msg = String(message ?? "").trim();
     const normalizedAttachments: Array<ChatFileAttachment & { dataUrl: string }> = [];

@@ -20,7 +20,7 @@
     "dotenv": "^16.4.0",
     "express": "^4.21.0",
     "ghostty-web": "^0.4.0",
-    "node-pty": "^1.0.0",
+    "node-pty": "1.1.0",
     "ws": "^8.18.0",
     "html-to-image": "^1.11.13",
     "html2canvas": "^1.4.1",

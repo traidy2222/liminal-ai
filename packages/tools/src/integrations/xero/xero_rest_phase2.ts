@@ -21,7 +21,7 @@ import {
   xeroPageParams,
   xeroPathWithQuery,
   xeroTenant,
-  xeroUploadAttachment,
+  xeroUploadAttachment as defaultXeroUploadAttachment,
   XERO_ATTACHMENT_PARENTS,
 } from "./xero_api.js";
 import { normalizeXeroLineItems, sanitizeQuoteCreate, todayXeroDate } from "./xero_validation.js";
@@ -70,7 +70,7 @@ async function readAttachmentBytes(args: Record<string, unknown>): Promise<
   return { ok: false, error: "provide file_path or content_base64" };
 }
 
-export function registerXeroRestPhase2Tools(registry: ToolRegistry): void {
+export function registerXeroRestPhase2Tools(registry: ToolRegistry, xeroUploadAttachment: typeof defaultXeroUploadAttachment = defaultXeroUploadAttachment): void {
   registry.register(
     defineTool({
       name: "xero_list_attachments",

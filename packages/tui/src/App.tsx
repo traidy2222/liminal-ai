@@ -201,6 +201,11 @@ export function App({ harness, chatMeta, initialMessages }: Props) {
         setInputStatus(result.message);
         return;
       }
+      if (slashCmd.kind === "signature_workflow") {
+        if(!slashCmd.note.trim()){setInputStatus('Add the enquiry after /proposal or the bug report after /fix.');return;}
+        sendMessage(slashCmd.note,pendingAttachments,{workflowPreset:slashCmd.command==='proposal'?'enquiry_to_proposal':'bugfix_to_handoff'});
+        pushHistory(currentDraft);setDraftText('');setPendingAttachments([]);setInputStatus('');return;
+      }
       if (slashCmd.kind === "receipt_workflow") {
         const validation = validateImageAttachments(
           pendingAttachments,
@@ -215,7 +220,7 @@ export function App({ harness, chatMeta, initialMessages }: Props) {
           return;
         }
         const text =
-          slashCmd.note.trim() || "Process the attached receipt(s) into Xero as draft bill(s).";
+          slashCmd.note.trim() || "Prepare a local expense review of the attached receipt. Do not create a Xero transaction unless I explicitly request it.";
         sendMessage(text, pendingAttachments, { workflowPreset: "receipt_to_xero" });
         pushHistory(currentDraft);
         setDraftText("");

@@ -29,7 +29,7 @@ export interface ClientCommandMap {
     liveDictation?: boolean;
     attachments?: WireChatAttachment[];
     /** Guided preset — e.g. `receipt_to_xero` (requires image attachments). */
-    workflowPreset?: "receipt_to_xero";
+    workflowPreset?: "receipt_to_xero" | "enquiry_to_proposal" | "bugfix_to_handoff";
   };
   /** Cooperatively abort the in-flight turn for a chat. */
   abort: { chatId: string };

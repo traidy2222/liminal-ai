@@ -188,7 +188,7 @@ export class AgentBridge {
     this.detachSessionLog = maybeAttachSessionEventLog(harness.emitter, harness.taskId);
     this.wireEvents();
     this.toolsRegistered = runWithWorkspaceRoot(this.workspaceRoot, async () => {
-      registerAllTools(harness.registry, harness.emitter, harness);
+      await registerAllTools(harness.registry, harness.emitter, harness);
       const { wireEnterpriseWithInstall } = await import("@liminal/core");
       const ee = await wireEnterpriseWithInstall({
         registry: harness.registry,
@@ -514,7 +514,7 @@ export class AgentBridge {
       chatAttachments?: import("@liminal/core").ChatFileAttachment[];
       /** @deprecated use chatAttachments */
       imageAttachments?: import("@liminal/core").ImageAttachment[];
-      workflowPreset?: import("@liminal/core").ReceiptWorkflowPreset;
+      workflowPreset?: import("@liminal/core").SignatureWorkflowPreset;
     }
   ): Promise<void> {
     if (this.awaitingPersonaBootstrapInput) {

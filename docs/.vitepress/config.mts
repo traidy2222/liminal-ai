@@ -67,6 +67,7 @@ export default defineConfig({
       {
         text: "Guides",
         items: [
+          { text: "Guided workflows", link: "/guides/signature-workflows" },
           { text: "Memory & recall", link: "/guides/memory-and-recall" },
           { text: "Web research", link: "/guides/web-research" },
           { text: "Browser automation", link: "/guides/browser-automation" },

@@ -34,6 +34,9 @@ jobs:
       - name: Typecheck all workspaces
         run: npm run typecheck
 
+      - name: Verify guided workflow gates and exports
+        run: npm run verify:workflows
+
       - name: Test eval fixtures and trace handling
         run: npm run test:sandbox -w @liminal/eval
 
@@ -93,3 +96,20 @@ jobs:
       - name: Run desktop tests
         working-directory: apps/liminal_desktop
         run: flutter test
+
+  test-windows-terminal:
+    name: Windows terminal and workflow gates
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+      - run: npm ci
+      - run: npm run build
+      - name: Verify workflow gates with actual Windows test processes
+        run: npm run verify:workflows
+      - name: Verify terminal replay, output, and cleanup
+        timeout-minutes: 3
+        run: node --import tsx --test packages/sidecar/src/pty_manager.test.ts

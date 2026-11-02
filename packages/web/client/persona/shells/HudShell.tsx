@@ -1,3 +1,4 @@
+import {WorkflowDeliverables} from "../../WorkflowDeliverables.js";
 import React, { useState, useRef, useEffect, useCallback, useMemo, memo } from "react";
 import type { ShellContract, ToolCallEntry, ToolCallGroup, ToolResult, ToolSurface } from "../ShellContract.js";
 import { AssistantMessageContent, renderFencedCodeBlock } from "../../liminalMarkdown.js";
@@ -676,6 +677,7 @@ function ToolCard({ entry, result, toolCardsMode }: { entry: ToolCallEntry; resu
           </span>
         </div>
       </div>
+      {entry.name === "work_package" && result?.ok && <WorkflowDeliverables output={result.output} />}
       {showWritePreview && (
         <StreamingWritePreviewBox toolName={entry.name} argsJson={entry.argsJson ?? ""} isActive={isActive} elapsedMs={elapsedMs} compact={isCompact} />
       )}

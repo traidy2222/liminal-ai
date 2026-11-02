@@ -155,9 +155,15 @@ export function createWorkflowTools(harness: AgentHarness): {
     const { gate, command } = input;
     if (gate === "run_tests" || gate === "run_lint") {
       const tool = harness.registry.getAll().find((t) => t.name === gate);
-      if (!tool) return { ok: true, detail: `${gate} not available — gate skipped` };
+      if (!tool) return { ok: false, detail: `${gate} not available — required verification did not run` };
       try {
-        const res = await tool.handler(command ? { command } : {});
+        let args: Record<string, unknown> = { cwd: harness.workspaceRoot };
+        if (gate === "run_tests") {
+          const match = command?.trim().match(/^npm (?:test|run ([a-zA-Z0-9_:@./-]+))$/);
+          if (command && !match) return { ok: false, detail: "run_tests gate accepts npm test or npm run <script>" };
+          args.script = match?.[1] ?? "test";
+        } else if (command) args = { ...args, mode: "command", command };
+        const res = await tool.handler(args);
         return res.ok
           ? { ok: true, detail: res.output.slice(0, 400) }
           : { ok: false, detail: res.error.slice(0, 1500) };
@@ -166,7 +172,7 @@ export function createWorkflowTools(harness: AgentHarness): {
       }
     }
     // critic gate: lightweight — a verify pass is better expressed as a review phase.
-    return { ok: true, detail: "critic gate — express as a review phase; treated as pass" };
+    return { ok: false, detail: "Critic verification is not implemented as a tool gate; use an explicit review phase" };
   }
 
   async function executeSpec(spec: WorkflowSpec, emit?: (t: string) => void): Promise<WorkflowReport> {

@@ -1,7 +1,27 @@
 {
   "stage": "beta",
-  "currentVersion": "0.1.4",
+  "currentVersion": "0.1.5",
   "releases": [
+    {
+      "version": "0.1.5",
+      "date": "2026-11-02",
+      "tagline": "Three guided workflows with saved deliverables and recoverable progress.",
+      "summary": "Turn client enquiries into sourced proposals, receipt images into validated expense reviews, and bug reports into tested patches. Includes desktop and web entry points, downloadable deliverables, resumable runs, and reliable Windows terminal regression checks.",
+      "bullets": [
+        "**Enquiry to proposal** — Research primary sources and save a printable proposal, editable Markdown, source list, and unsent reply draft with `/proposal`.",
+        "**Receipt to expense review** — Local English OCR, date/currency/arithmetic checks, source hashes, and an optional approved Xero DRAFT with an attached receipt. Xero writes are adapter-tested with fixtures; no live-account certification is claimed.",
+        "**Bug report to verified patch** — `/fix` requires a reproduced failure, passing tests after edits, and a fresh Git diff before saving the patch, test output, and handoff.",
+        "**Recoverable work** — List and resume saved runs with `/workflows` and `/resume-work`. Retry interrupted receipt uploads against the existing bill ID; resumed patches require fresh verification.",
+        "**Desktop and web delivery** — New welcome cards, file buttons, safe web downloads, and receipt submission recovery. Completed workflow checks finish with a concise handoff.",
+        "**Windows verification** — Terminal replay checks wait for actual shell output and clean up on failure. A version-pinned node-pty compatibility fix prevents console teardown races and releases the output worker after natural shell exit. Native PowerShell commands preserve their real exit codes. Required npm tests cannot silently pass when scripts are absent; Windows CI covers terminal and workflow checks."
+      ],
+      "docs": [
+        {
+          "label": "Guided workflows",
+          "href": "../guides/signature-workflows.md"
+        }
+      ]
+    },
     {
       "version": "0.1.4",
       "date": "2026-11-02",

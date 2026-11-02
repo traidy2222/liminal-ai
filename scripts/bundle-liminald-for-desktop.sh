@@ -26,6 +26,8 @@ mkdir -p "$BUNDLE_REPO/packages"
 echo "==> Staging portable liminald repo -> $BUNDLE_REPO"
 
 cp "$SCRIPT_DIR/desktop-runtime.package.json" "$BUNDLE_REPO/package.json"
+mkdir -p "$BUNDLE_REPO/scripts"
+cp "$SCRIPT_DIR/patch-node-pty.mjs" "$BUNDLE_REPO/scripts/patch-node-pty.mjs"
 
 for name in "${PACKAGES[@]}"; do
   src_pkg="$REPO_ROOT/packages/$name"
@@ -67,6 +69,8 @@ else
   echo "==> npm install --omit=dev (portable runtime, may take a few minutes)..."
   (cd "$BUNDLE_REPO" && npm install --omit=dev --no-audit --no-fund)
 fi
+
+node "$SCRIPT_DIR/patch-node-pty.mjs" "$BUNDLE_REPO/node_modules/node-pty"
 
 if [[ ! -f "$BUNDLE_REPO/packages/sidecar/dist/index.js" ]]; then
   echo "Bundle incomplete: sidecar dist missing after install" >&2

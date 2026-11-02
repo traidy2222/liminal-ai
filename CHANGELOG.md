@@ -2,7 +2,7 @@
 
 All notable changes to [Liminal AI](https://github.com/traidy2222/liminal-ai) are documented here and on the docs portal: [docs.vireondynamics.com/liminal/reference/changelog](https://docs.vireondynamics.com/liminal/reference/changelog).
 
-**Current stage:** **beta** (`v0.1.4` tip of `main`, 2026-11-02). Desktop downloads are published through the public preview release channel.
+**Current stage:** **beta** (`v0.1.5` tip of `main`, 2026-11-02). Desktop downloads are published through the public preview release channel.
 
 **Single source:** edit [`changelog/releases.json`](changelog/releases.json), then run `npm run changelog:gen`.
 
@@ -10,7 +10,13 @@ Format: **v0.0.x** entries keyed to the last GitHub push in each slice. Dates ar
 
 Marketing (richer notes): [vireondynamics.com/liminal/changelog](https://www.vireondynamics.com/liminal/changelog)
 
-## [v0.1.4] — 2026-11-02 — Current beta
+## [v0.1.5] — 2026-11-02 — Current beta
+
+Turn client enquiries into sourced proposals, receipt images into validated expense reviews, and bug reports into tested patches. Includes desktop and web entry points, downloadable deliverables, resumable runs, and reliable Windows terminal regression checks.
+
+[Full notes](https://docs.vireondynamics.com/liminal/reference/changelog#v0-1-5)
+
+## [v0.1.4] — 2026-11-02
 
 Choose individual OpenRouter models in desktop and web, keep agent work on one selected model, and avoid the extra classifier request before replies. Includes refreshed product screenshots and a rewritten README.
 

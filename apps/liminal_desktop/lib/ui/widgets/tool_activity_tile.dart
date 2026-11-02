@@ -1,3 +1,4 @@
+import 'workflow_deliverables.dart';
 import 'package:flutter/material.dart';
 
 import '../../core/tool_args_format.dart';
@@ -135,6 +136,8 @@ class _ToolActivityTileState extends State<ToolActivityTile> {
                                 ),
                             ],
                           ),
+                          if (m.name == 'work_package' && status == ToolCallStatus.done)
+                            WorkflowDeliverables(output: output),
                           if (isActive && output.isNotEmpty)
                             Padding(
                               padding: const EdgeInsets.only(top: 4, left: 34),

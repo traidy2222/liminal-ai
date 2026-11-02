@@ -728,7 +728,7 @@ export const TOOL_FAMILIES: Record<string, { description: string; tools: readonl
   workflow: {
     description:
       "Dynamic workflows: plan and run a multi-phase plan that fans out sub-agents, keeping intermediate results out of context. Harness-scoped, root-only.",
-    tools: ["plan_workflow", "run_workflow", "workflow_status", "query_workflow"],
+    tools: ["receipt_read", "work_package", "plan_workflow", "run_workflow", "workflow_status", "query_workflow"],
   },
 };
 

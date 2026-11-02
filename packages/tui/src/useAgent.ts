@@ -1121,7 +1121,7 @@ export function useAgent(
     (
       text: string,
       attachments: ImageAttachment[] = [],
-      opts?: { workflowPreset?: "receipt_to_xero" }
+      opts?: { workflowPreset?: "receipt_to_xero" | "enquiry_to_proposal" | "bugfix_to_handoff" }
     ) => {
       if (bootstrapPendingRef.current) {
         dispatch({

@@ -2,7 +2,7 @@
 
 All notable changes to [Liminal AI](https://github.com/traidy2222/liminal-ai) on the `main` branch.
 
-**Current stage:** **beta** (`v0.1.4`, 2026-11-02). Desktop downloads are published through the public preview release channel.
+**Current stage:** **beta** (`v0.1.5`, 2026-11-02). Desktop downloads are published through the public preview release channel.
 
 Format: **v0.0.x** entries keyed to the last GitHub push in each slice. Dates are real push dates.
 
@@ -17,9 +17,25 @@ After editing JSON: `npm run changelog:gen`, commit, push, then in [vireondynami
 
 ---
 
+## v0.1.5 — 2026-11-02 {#v0-1-5}
+
+**Current beta.** Three guided workflows with saved deliverables and recoverable progress.
+
+**Shipped**
+
+- **Enquiry to proposal** — Research primary sources and save a printable proposal, editable Markdown, source list, and unsent reply draft with `/proposal`.
+- **Receipt to expense review** — Local English OCR, date/currency/arithmetic checks, source hashes, and an optional approved Xero DRAFT with an attached receipt. Xero writes are adapter-tested with fixtures; no live-account certification is claimed.
+- **Bug report to verified patch** — `/fix` requires a reproduced failure, passing tests after edits, and a fresh Git diff before saving the patch, test output, and handoff.
+- **Recoverable work** — List and resume saved runs with `/workflows` and `/resume-work`. Retry interrupted receipt uploads against the existing bill ID; resumed patches require fresh verification.
+- **Desktop and web delivery** — New welcome cards, file buttons, safe web downloads, and receipt submission recovery. Completed workflow checks finish with a concise handoff.
+- **Windows verification** — Terminal replay checks wait for actual shell output and clean up on failure. A version-pinned node-pty compatibility fix prevents console teardown races and releases the output worker after natural shell exit. Native PowerShell commands preserve their real exit codes. Required npm tests cannot silently pass when scripts are absent; Windows CI covers terminal and workflow checks.
+- **Docs** — [Guided workflows](../guides/signature-workflows.md)
+
+---
+
 ## v0.1.4 — 2026-11-02 {#v0-1-4}
 
-**Current beta.** Searchable OpenRouter models, single-model operation, and a faster response path.
+Searchable OpenRouter models, single-model operation, and a faster response path.
 
 **Shipped**
 

@@ -44,6 +44,8 @@
     "test": "npm run test --workspace=@liminal/core",
     "test:update-release": "node scripts/lib/update-release.test.mjs",
     "verify-harness-defaults-no-secrets": "node scripts/verify-harness-defaults-no-secrets.mjs",
+    "verify:workflows:live": "node scripts/verify-signature-workflows.mjs",
+    "verify:workflows": "node --import tsx --test packages/core/src/signature_workflows.test.ts packages/tools/src/families/code_intel/run_tests.test.ts packages/tools/src/integrations/xero/receipt_workflow.integration.test.ts packages/web/server/workflow_artifacts.test.ts",
     "verify:repo-secrets": "node scripts/verify-repo-secrets.mjs",
     "keys:generate": "node scripts/generate-license-keys.mjs",
     "docs:gen": "node scripts/gen-docs-env.mjs",
@@ -74,7 +76,8 @@
     "marketing:status": "node scripts/watch-marketing-capture.mjs",
     "marketing:video": "npm run studio -w @liminal/marketing-video",
     "marketing:video:render": "npm run render -w @liminal/marketing-video --",
-    "marketing:video:render:all": "npm run render:all -w @liminal/marketing-video"
+    "marketing:video:render:all": "npm run render:all -w @liminal/marketing-video",
+    "postinstall": "node scripts/patch-node-pty.mjs"
   },
   "devDependencies": {
     "concurrently": "^9.2.1",

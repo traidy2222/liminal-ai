@@ -6,7 +6,7 @@ import { defineTool } from "../../shared/helpers.js";
 import {
   asToolResult,
   xeroCommonProps,
-  xeroFetch,
+  xeroFetch as defaultXeroFetch,
   xeroHint,
   xeroPageParams,
   xeroPathWithQuery,
@@ -21,7 +21,7 @@ function idArg(name: string, label: string): Record<string, PropertySchema> {
   return { [name]: { type: "string", description: label } };
 }
 
-export function registerXeroRestExtendedTools(registry: ToolRegistry): void {
+export function registerXeroRestExtendedTools(registry: ToolRegistry, xeroFetch: typeof defaultXeroFetch = defaultXeroFetch): void {
   registry.register(
     defineTool({
       name: "xero_get_organisation",
@@ -305,6 +305,7 @@ export function registerXeroRestExtendedTools(registry: ToolRegistry): void {
         properties: {
           ...COMMON,
           contact_id: { type: "string" },
+          currency_code: { type: "string", description: "ISO currency code from the source receipt (e.g. AUD)." },
           line_items: { type: "array", items: { type: "object" } },
           reference: { type: "string" },
           due_date: { type: "string", description: "YYYY-MM-DD" },
@@ -314,6 +315,7 @@ export function registerXeroRestExtendedTools(registry: ToolRegistry): void {
         additionalProperties: false,
       },
       requiresApproval: true,
+      dangerLevel: "destructive",
       handler: async (args): Promise<ToolResult> => {
         const contactId = String(args["contact_id"] ?? "").trim();
         const lineItems = args["line_items"];
@@ -329,6 +331,11 @@ export function registerXeroRestExtendedTools(registry: ToolRegistry): void {
           Status: "DRAFT",
           LineAmountTypes: "Exclusive",
         };
+        if (args["currency_code"] != null) {
+          const currency = String(args["currency_code"]).trim().toUpperCase();
+          if (!/^[A-Z]{3}$/.test(currency)) return { ok: false, error: "currency_code must be a three-letter ISO code" };
+          invoice["CurrencyCode"] = currency;
+        }
         if (typeof args["reference"] === "string" && args["reference"].trim()) {
           invoice["Reference"] = args["reference"].trim();
         }

@@ -1,3 +1,4 @@
+import { SignatureWorkflowRun, SIGNATURE_WORKFLOWS, isSignatureWorkflowPreset, parseSignatureCommand, type SignatureWorkflowPreset } from "./signature_workflows.js";
 import { singleModelEnabled, singleModelSlug } from "./harness_effective_env.js";
 import OpenAI from "openai";
 import { InferenceLatencyTracker } from "./inference_latency.js";
@@ -146,6 +147,7 @@ import {
 } from "./chat_attachments.js";
 import {
   buildReceiptWorkflowTurnInjection,
+  parseReceiptSlashCommand,
   isReceiptWorkflowTurn,
   resolveReceiptWorkflowUserMessage,
   stripReceiptWorkflowCommandPrefix,
@@ -1166,6 +1168,8 @@ const ORCHESTRATION_TOOL_NAMES = new Set([
   "dispatch_graph",         // closes over harness._toolDag
   "branch_evaluate",        // closes over harness.forkChild + harness.orchestrator
   "speak",                  // harness-scoped TTS + speech SSE
+  "receipt_read",           // local OCR scoped to this run
+  "work_package",           // evidence-backed deliverables for this harness
   "plan_workflow",          // root-only dynamic workflows — not nested by children
   "run_workflow",           // closes over harness.forkChild + provider config
   "workflow_status",        // closes over the in-process run registry
@@ -1196,6 +1200,8 @@ export class AgentHarness {
   registry: ToolRegistry;           // non-readonly so forkChild can scope it
   readonly config: AgentConfig;     // exposed for child harness creation
   readonly taskId: string;
+  signatureWorkflow: SignatureWorkflowRun | null = null;
+  private signatureDeliverablesReadyThisSend = false;
   /** Per-harness workspace root. Wraps every send() in an AsyncLocalStorage scope. */
   readonly workspaceRoot: string;
   readonly orchestrator: TaskOrchestrator;
@@ -1944,6 +1950,8 @@ export class AgentHarness {
     toolName: string,
     args: Record<string, unknown>
   ): { ok: true } | { ok: false; reason: string; severity: "low" | "med" | "high" } {
+    const workflowBlock = this.signatureWorkflow?.guard(toolName, args);
+    if (workflowBlock) return { ok: false, reason: workflowBlock, severity: "high" };
     if (this.breakdownClarificationGate && EDIT_TOOL_NAMES.has(toolName)) {
       return {
         ok: false,
@@ -2760,6 +2768,14 @@ export class AgentHarness {
     this.approvalTimeoutMs = resolveApprovalTimeoutMs(config);
 
     this.emitter = new AgentEmitter();
+    this.emitter.on("tool_start", e => this.signatureWorkflow?.start(e.name, e.callId));
+    this.emitter.on("tool_result", e => {
+      this.signatureWorkflow?.observe(e.name, e.args, e.result, e.callId);
+      if (e.name === "work_package" && e.result.ok && e.args.action === "complete" &&
+          ["ready_for_review", "verified_patch", "draft_created"].includes(this.signatureWorkflow?.status ?? "")) {
+        this.signatureDeliverablesReadyThisSend = true;
+      }
+    });
     this.registry = new ToolRegistry();
     // Shared memory bus: use provided one (child harness) or create a fresh root bus.
     this.sharedBus = config.sharedBus ?? new SharedMemoryBus();
@@ -2987,7 +3003,7 @@ export class AgentHarness {
       /** @deprecated use chatAttachments */
       imageAttachments?: ImageAttachment[];
       /** Guided preset — e.g. receipt_to_xero (requires image attachments). */
-      workflowPreset?: ReceiptWorkflowPreset;
+      workflowPreset?: SignatureWorkflowPreset;
     }
   ): Promise<void> {
     // Wrap the entire send in an AsyncLocalStorage scope so every file tool,
@@ -3016,7 +3032,7 @@ export class AgentHarness {
       chatAttachments?: ChatFileAttachment[];
       /** @deprecated use chatAttachments */
       imageAttachments?: ImageAttachment[];
-      workflowPreset?: ReceiptWorkflowPreset;
+      workflowPreset?: SignatureWorkflowPreset;
     }
   ): Promise<void> {
     if (this.running) throw new Error("Agent is already processing a message");
@@ -3038,6 +3054,7 @@ export class AgentHarness {
     this.personaBootstrapPromptThisSend = personaBootstrapPrompt;
     this.liveDictationThisSend = Boolean(options?.liveDictation);
     this.voicePostToolsNudgeFired = false;
+    this.signatureDeliverablesReadyThisSend = false;
     this.ttsTurnBudget.reset();
     this.currentTurnController = new AbortController();
     this.currentTurnTraceId = crypto.randomUUID();
@@ -3090,8 +3107,12 @@ export class AgentHarness {
     }
     let chatAttachments: ChatFileAttachment[] =
       options?.chatAttachments ?? (options?.imageAttachments as ChatFileAttachment[] | undefined) ?? [];
+    const signatureCommand = parseSignatureCommand(userMessage);
+    const resumeWorkflowId = /^\/resume-work\s+([a-f0-9-]{36})$/i.exec(userMessage.trim())?.[1];
+    const listWorkflows = /^\/workflows\s*$/i.test(userMessage.trim());
+    let signaturePreset = isSignatureWorkflowPreset(options?.workflowPreset) ? options.workflowPreset : signatureCommand?.preset ?? (parseReceiptSlashCommand(userMessage) ? 'receipt_to_xero' : undefined);
     let receiptWorkflowActive = false;
-    let effectiveUserMessage = userMessage;
+    let effectiveUserMessage = signatureCommand?.note || userMessage;
     const initialImages = partitionChatAttachments(chatAttachments).images;
     if (
       !openingTurn &&
@@ -3102,6 +3123,7 @@ export class AgentHarness {
       })
     ) {
       receiptWorkflowActive = true;
+      signaturePreset = 'receipt_to_xero';
       effectiveUserMessage = stripReceiptWorkflowCommandPrefix(userMessage);
       if (!effectiveUserMessage.trim()) {
         effectiveUserMessage = resolveReceiptWorkflowUserMessage("");
@@ -3392,6 +3414,9 @@ export class AgentHarness {
         reason: `${this.turnInference.reason ?? ""} intent_override=coding_implement_trap`.trim(),
       };
     }
+    if (this.turnInference && !openingTurn && signaturePreset) {
+      this.turnInference = {...this.turnInference, intent:signaturePreset==='bugfix_to_handoff'?'coding':'execution', toolFirstBias:true, workflowSuitable:false};
+    }
     if (this.turnInference && !openingTurn) {
       this.turnInference = applyTurnInferenceHeuristics(userMessage, this.turnInference);
     }
@@ -3550,7 +3575,26 @@ export class AgentHarness {
       if (!openingTurn && isShortContinuationTurn(userMessage)) {
         this.context.appendMessage({ role: "system", content: CONTINUATION_TURN_INJECTION });
       }
-      if (!openingTurn && receiptWorkflowActive) {
+      if (!openingTurn && resumeWorkflowId) this.signatureWorkflow = await SignatureWorkflowRun.resume(this.workspaceRoot, resumeWorkflowId);
+      if (!openingTurn && listWorkflows) {
+        this.registry.activate(["work_package"]);
+        this.context.appendMessage({role:"system",content:"List saved workflows with work_package action=list. Show the run IDs, statuses and /resume-work <id> command. Do not start a new workflow."});
+      }
+      if (!openingTurn && signaturePreset) {
+        if(signaturePreset === 'receipt_to_xero' && partitionChatAttachments(chatAttachments).images.length === 0) throw new Error('Attach a receipt image before starting /receipt.');
+        const attachments = await persistChatAttachmentsToWorkspace(chatAttachments);
+        this.signatureWorkflow = new SignatureWorkflowRun(this.workspaceRoot, signaturePreset,
+          effectiveUserMessage, attachments.flatMap(a => a.filePath ? [a.filePath] : []));
+        await this.signatureWorkflow.initialize();
+      }
+      if (!openingTurn && this.signatureWorkflow) {
+        const definition = SIGNATURE_WORKFLOWS[this.signatureWorkflow.preset];
+        this.registry.activateFamilies([...definition.families]);
+        this.registry.activate(["receipt_read", "work_package", "run_tests", "git_diff", "web_search", "web_fetch"]);
+        this.context.refreshProtocolDynamic(this.registry.getActiveToolNames());
+        this.context.appendMessage({role:"system",content:this.signatureWorkflow.prompt()});
+      }
+      if (!openingTurn && receiptWorkflowActive && !this.signatureWorkflow) {
         if (this.turnInference) {
           this.turnInference = {
             ...this.turnInference,
@@ -5640,8 +5684,11 @@ export class AgentHarness {
         channel: "trace",
       });
     }
+    const finishingSignature = this.signatureDeliverablesReadyThisSend &&
+      ["ready_for_review", "verified_patch", "draft_created"].includes(this.signatureWorkflow?.status ?? "");
+    if (finishingSignature) this.context.appendMessage({role:"system",content:"The guided workflow deliverable checks succeeded and files are saved. Tool execution for this turn is finished. Give a brief handoff with saved file names and any review requirement. Do not repeat the deliverables or start another tool round."});
     let tools =
-      this.sessionGreetingThisSend || this.personaBootstrapPromptThisSend
+      finishingSignature || this.sessionGreetingThisSend || this.personaBootstrapPromptThisSend
         ? []
         : this.registry.toOpenAIFormat(routingProfile.toolFilter ?? undefined);
     // Reasoning-stall breaker: once a reason()-only spiral has been escalated,
@@ -7062,7 +7109,7 @@ export class AgentHarness {
         prefs: this.runtimePreferences,
         gateAttempted: this.verificationGateAttemptedThisSend,
       });
-      if (verificationGate.needed) {
+      if (verificationGate.needed && !finishingSignature) {
         this.verificationGateAttemptedThisSend = true;
         this.ensureCapabilityToolPreseed(this.lastUserMessage, false);
         this.context.appendMessage({ role: "user", content: verificationGate.message });
@@ -7084,7 +7131,7 @@ export class AgentHarness {
           .slice(0, 5)
           .map((u) => (u.title ? `${u.title} — ${u.url}` : u.url)),
         gateAttempted: this.researchContinuationAttemptedThisSend,
-        enabled: webResearchEnabled,
+        enabled: webResearchEnabled && !finishingSignature,
         assistantText: assistant,
       });
       if (researchGate.needed) {
@@ -7096,7 +7143,7 @@ export class AgentHarness {
       }
 
       if (
-        !this.userReplyFinalizeAttempted &&
+        !finishingSignature && !this.userReplyFinalizeAttempted &&
         needsUserReplyFinalization({
           assistantText: assistant,
           toolsUsed: this.toolsUsedThisTurn,
@@ -8139,6 +8186,7 @@ export class AgentHarness {
   }
 
   reset(): void {
+    this.signatureWorkflow = null;
     this.flushPendingTurnLearningProcessOnly();
     this.clearPersonalityHeartbeatSchedule();
     this.personalityHeartbeatNudgeTimestampsMs = [];

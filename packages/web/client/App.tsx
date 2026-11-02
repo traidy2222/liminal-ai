@@ -1,3 +1,4 @@
+import {WorkflowDeliverables} from "./WorkflowDeliverables.js";
 import React, { useState, useRef, useEffect, useCallback, useMemo, memo } from "react";
 import { useSSE, sendAbortTurn, type MessageEntry, type AutoDreamState, type PersonalityPulseRow, type SendMessageResult, WEB_SERVER_BASE, type ApiReachable, type SseTransport } from "./useSSE.js";
 import { webApiFetch } from "./webApiAuth.js";
@@ -948,6 +949,8 @@ function ToolCard({ entry, result, toolCardsMode }: { entry: ToolCallEntry; resu
           </span>
         </div>
       </div>
+
+      {entry.name === "work_package" && result?.ok && <WorkflowDeliverables output={result.output} />}
 
       {showWritePreview && (
         <StreamingWritePreviewBox
@@ -2050,8 +2053,8 @@ export function App() {
     async (
       textToSend: string,
       attachmentsToSend: ImageAttachment[],
-      opts?: { liveDictation?: boolean; workflowPreset?: "receipt_to_xero" }
-    ): Promise<SendMessageResult | { ok: true; slashOnly: true }> => {
+      opts?: { liveDictation?: boolean; workflowPreset?: "receipt_to_xero" | "enquiry_to_proposal" | "bugfix_to_handoff" }
+    ): Promise<SendMessageResult | { ok: true; slashOnly: true; clearInput: boolean }> => {
       const parsed = tryParseComposerSlash(textToSend);
       if (parsed) {
         const slashResult = await runComposerSlashCommand(parsed, {
@@ -2071,7 +2074,7 @@ export function App() {
               liveDictation: opts?.liveDictation,
             });
           }
-          return { ok: true, slashOnly: true };
+          return { ok: true, slashOnly: true, clearInput: slashResult.clearInput };
         }
       }
       return sendMessage({
@@ -2097,11 +2100,18 @@ export function App() {
     slash.dismissMenu();
     void speechOutput.unlockAudio();
     speechOutput.flush();
-    const result = await dispatchComposerSubmit(textToSend, attachmentsToSend, {
-      liveDictation: liveDictationForSend,
-    });
-    if (!result.ok) { submittingRef.current = false; return; }
-    if (!("slashOnly" in result)) pushHistory(textToSend);
+    try {
+      const result = await dispatchComposerSubmit(textToSend, attachmentsToSend, {
+        liveDictation: liveDictationForSend,
+      });
+      if (!result.ok || ("slashOnly" in result && !result.clearInput)) {
+        setInput(textToSend); setAttachments(attachmentsToSend);
+      }
+      if (result.ok && !("slashOnly" in result)) pushHistory(textToSend);
+    } finally {
+      // Local slash commands never enter busy state; they must release this guard too.
+      submittingRef.current = false;
+    }
   };
 
   const applyHistory = (direction: "prev" | "next") => {

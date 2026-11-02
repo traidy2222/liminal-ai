@@ -324,7 +324,7 @@ export class SessionBridge {
       chatAttachments?: import("@liminal/core").ChatFileAttachment[];
       /** @deprecated use chatAttachments */
       imageAttachments?: import("@liminal/core").ImageAttachment[];
-      workflowPreset?: import("@liminal/core").ReceiptWorkflowPreset;
+      workflowPreset?: import("@liminal/core").SignatureWorkflowPreset;
     }
   ): Promise<void> {
     if (this.awaitingPersonaBootstrapInput) {

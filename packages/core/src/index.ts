@@ -1629,3 +1629,6 @@ export type {
 export { fetchOpenRouterSettingsCatalog, parseOpenRouterSettingsCatalog } from "./openrouter_catalog.js";
 export type { OpenRouterCatalogModel } from "./openrouter_catalog.js";
 export { singleModelEnabled, singleModelSlug } from "./harness_effective_env.js";
+
+export { SIGNATURE_WORKFLOWS, SignatureWorkflowRun, isSignatureWorkflowPreset, parseSignatureCommand, validateExpenseReview } from "./signature_workflows.js";
+export type { SignatureWorkflowPreset } from "./signature_workflows.js";

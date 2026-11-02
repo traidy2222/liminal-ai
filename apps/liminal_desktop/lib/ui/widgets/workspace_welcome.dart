@@ -10,24 +10,9 @@ class WorkspaceWelcome extends StatelessWidget {
   final String? title;
   final String? body;
   static const starters = [
-    (
-      Icons.code_rounded,
-      'Build something',
-      'Turn an idea into working code',
-      'Help me build a feature in this workspace. First, explore the project and explain the best place to start.'
-    ),
-    (
-      Icons.explore_outlined,
-      'Explore a question',
-      'Research, connect, and explain',
-      'Help me research a topic. Ask me what I want to understand, then investigate with sources.'
-    ),
-    (
-      Icons.description_outlined,
-      'Make a document',
-      'Give your thinking a useful form',
-      'Help me create a document. Ask me about its audience, purpose, and the material I want to include.'
-    ),
+    (Icons.explore_outlined, 'Enquiry to proposal', 'Research, scope, and an unsent reply', '/proposal '),
+    (Icons.receipt_long_outlined, 'Receipt to expense', 'Attach a receipt and prepare a review', '/receipt '),
+    (Icons.code_rounded, 'Bug to verified patch', 'Reproduce, fix, test, and hand off', '/fix '),
   ];
 
   @override

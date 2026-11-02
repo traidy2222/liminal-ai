@@ -6,6 +6,8 @@ import { parseReceiptSlashCommand } from "./receipt_slash.js";
 import { parseRemoteSlashCommand, type ParsedRemoteSlash } from "./remote_session_format.js";
 
 export type SlashCommandKind =
+  | "workflow_manage"
+  | "signature_workflow"
   | "receipt_workflow"
   | "attach"
   | "connect"
@@ -75,10 +77,14 @@ export const INTEGRATION_SLASH_PROVIDERS = [
 export type IntegrationSlashProviderId = (typeof INTEGRATION_SLASH_PROVIDERS)[number]["id"];
 
 export const COMPOSER_SLASH_COMMANDS: readonly SlashCommandDef[] = [
+  {name:"workflows",summary:"List saved guided workflows in this workspace",usage:"/workflows",kind:"workflow_manage"},
+  {name:"resume-work",summary:"Resume a saved workflow by run ID",usage:"/resume-work <run-id>",kind:"workflow_manage"},
+  { name: "proposal", summary: "Research an enquiry and prepare a proposal plus unsent reply", usage: "/proposal <client enquiry and scope>", kind: "signature_workflow" },
+  { name: "fix", summary: "Reproduce a bug, test the patch, and save a verified handoff", usage: "/fix <bug report and expected behaviour>", kind: "signature_workflow" },
   {
     name: "receipt",
     aliases: ["receipts", "process-receipts"],
-    summary: "Process attached receipt image(s) into a Xero DRAFT bill",
+    summary: "Review an attached receipt; optionally create a Xero draft",
     usage: "/receipt [note]  (attach image first, or use Process receipts button)",
     kind: "receipt_workflow",
   },
@@ -352,6 +358,7 @@ export function parseComposerSlashSubmit(text: string): ParsedComposerSlash | nu
   if (!def) return null;
 
   const { readOnly, args: rest } = parseFlags(parts.slice(1));
+  if(def.kind === "signature_workflow" || def.kind === "workflow_manage") return {kind:def.kind,command:def.name,args:rest,readOnly:false,raw:trimmed,note:trimmed.slice(parts[0]!.length).trim()};
 
   if (def.kind === "attach") {
     let path = rest.join(" ").trim();

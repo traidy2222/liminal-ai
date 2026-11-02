@@ -120,18 +120,19 @@ void main() {
         image.dispose();
       });
     }
-    await tester.tap(find.text('Build something'));
+    await tester.tap(find.text('Bug to verified patch'));
     await tester.pump();
     final composerField = find.descendant(
         of: find.byType(Composer), matching: find.byType(TextField),);
     expect(tester.widget<TextField>(composerField).controller!.text,
-        contains('explore the project'),);
+        contains('/fix'),);
     expect(sent, 0);
+    await tester.enterText(composerField, '/fix sum returns an incorrect total');
     await tester.tap(find.text('Send'));
     await tester.pump();
     expect(sent, 1);
     // Selecting the same starter again must refill a cleared draft.
-    await tester.tap(find.text('Build something'));
+    await tester.tap(find.text('Bug to verified patch'));
     await tester.pump();
     expect(
         tester.widget<TextField>(composerField).controller!.text, isNotEmpty,);
@@ -150,7 +151,7 @@ void main() {
     await tester.pumpWidget(fixture(false));
     await tester.pumpAndSettle();
     expect(tester.takeException(), isNull);
-    expect(find.text('Make a document'), findsOneWidget);
+    expect(find.text('Receipt to expense'), findsOneWidget);
     if (Platform.environment['LIMINAL_CAPTURE_DESIGN'] == '1') {
       await tester.runAsync(() async {
         final image = await (boundary.currentContext!.findRenderObject()!

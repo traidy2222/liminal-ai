@@ -200,28 +200,7 @@ jobs:
           node scripts/generate-desktop-manifest.mjs --version "${{ needs.meta.outputs.version }}" --dist dist
 
       - name: Write release notes
-        run: |
-          ver="${{ needs.meta.outputs.version }}"
-          cat > "$RUNNER_TEMP/release-notes.md" <<EOF
-          ## Liminal Desktop $ver (beta public preview)
-
-          **Requirements (all platforms):** [Node.js 20+](https://nodejs.org/) on PATH.
-
-          | Platform | Download | Run |
-          |----------|----------|-----|
-          | **Windows x64** | \`liminal-desktop-windows-x64-v$ver.zip\` | Unzip; run \`liminal_desktop.exe\` (keep \`liminald\\\` next to the exe) |
-          | **macOS arm64** | \`liminal-desktop-macos-arm64-v$ver.zip\` | Unzip \`liminal_desktop.app\`; right-click → Open if Gatekeeper blocks |
-          | **Linux x64** | \`liminal-desktop-linux-x64-v$ver.tar.gz\` | Extract; run \`./liminal_desktop\` from the bundle folder |
-          | **Harness only** | \`liminald-runtime-v$ver.zip\` | In-app harness update artifact (desktop auto-update) |
-
-          **Auto-update:** Desktop checks GitHub Releases on launch. Harness updates apply in place; app updates restart once.
-
-          **API key:** copy \`liminald/repo/.env.example\` → \`.env\` and set \`AGENT_API_KEY\`, or sign in with Vireon in the app.
-
-          Verify downloads with the matching \`.sha256\` files.
-
-          License: [FSL-1.1-MIT](https://github.com/${{ github.repository }}/blob/main/LICENSE)
-          EOF
+        run: node scripts/write-desktop-release-notes.mjs "${{ needs.meta.outputs.version }}" "${{ runner.temp }}/release-notes.md"
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2

@@ -108,6 +108,8 @@ Write-Host "==> Staging portable liminald repo -> $BundleRepo"
 
 $runtimePkg = Join-Path $PSScriptRoot "desktop-runtime.package.json"
 Copy-Item $runtimePkg (Join-Path $BundleRepo "package.json") -Force
+New-Item -ItemType Directory -Force (Join-Path $BundleRepo "scripts") | Out-Null
+Copy-Item (Join-Path $PSScriptRoot "patch-node-pty.mjs") (Join-Path $BundleRepo "scripts\patch-node-pty.mjs") -Force
 
 foreach ($name in $Packages) {
   $srcPkg = Join-Path $RepoRoot "packages\$name"
@@ -189,6 +191,8 @@ if ($CopyNodeModulesFromRepo -and (Test-Path $srcModules)) {
 }
 
 Repair-BundledNativeModules -BundleRepo $BundleRepo -RepoRoot $RepoRoot
+node (Join-Path $PSScriptRoot "patch-node-pty.mjs") (Join-Path $BundleRepo "node_modules\node-pty")
+if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
 if (-not (Test-Path (Join-Path $BundleRepo "packages\sidecar\dist\index.js"))) {
   throw "Bundle incomplete: sidecar dist missing after install"

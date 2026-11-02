@@ -689,7 +689,7 @@ export class WsServer {
             freshContext?: boolean;
             liveDictation?: boolean;
             attachments?: import("@liminal/protocol").WireImageAttachment[];
-            workflowPreset?: import("@liminal/core").ReceiptWorkflowPreset;
+            workflowPreset?: import("@liminal/core").SignatureWorkflowPreset;
           };
           const bridge = this.registry.get(d.chatId);
           if (!bridge) return this.ack(ws, id, false, "Unknown chatId.");

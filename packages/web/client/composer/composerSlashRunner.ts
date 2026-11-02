@@ -13,7 +13,7 @@ export type SlashRunnerResult =
       handled: true;
       send: {
         text: string;
-        workflowPreset?: "receipt_to_xero";
+        workflowPreset?: "receipt_to_xero" | "enquiry_to_proposal" | "bugfix_to_handoff";
       };
       clearInput: true;
     }
@@ -138,6 +138,14 @@ export async function runComposerSlashCommand(
     case "abort":
       await ctx.abortTurn();
       return { handled: true, message: "Turn abort requested.", clearInput: true };
+    case "workflow_manage": {
+      if(parsed.command === 'resume-work' && !/^[a-f0-9-]{36}$/i.test(parsed.note))return {handled:true,message:'Use /workflows to find a run, then /resume-work <run-id>.',clearInput:false};
+      return {handled:true,send:{text:parsed.raw},clearInput:true};
+    }
+    case "signature_workflow": {
+      if (!parsed.note.trim()) return { handled:true, message:parsed.command === "proposal" ? "Add the client enquiry and scope after /proposal." : "Add the bug report and expected behaviour after /fix.", clearInput:false };
+      return { handled:true, send:{ text:parsed.note, workflowPreset:parsed.command === "proposal" ? "enquiry_to_proposal" : "bugfix_to_handoff" }, clearInput:true };
+    }
     case "receipt_workflow": {
       if (ctx.attachmentCount === 0) {
         return {
@@ -146,7 +154,7 @@ export async function runComposerSlashCommand(
           clearInput: false,
         };
       }
-      const text = parsed.note.trim() || "Process the attached receipt(s) into Xero as draft bill(s).";
+      const text = parsed.note.trim() || "Prepare a local expense review of the attached receipt. Do not create a Xero transaction unless I explicitly request it.";
       return {
         handled: true,
         send: { text, workflowPreset: "receipt_to_xero" },

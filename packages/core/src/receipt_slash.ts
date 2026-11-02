@@ -1,5 +1,5 @@
 /** Browser-safe receipt command parser. */
-const RECEIPT_SLASH_RE = /^\/(?:receipt|receipts|process-receipts)(?:\s+(.*))?$/i;
+const RECEIPT_SLASH_RE = /^\/(?:receipt|receipts|process-receipts)(?:\s+([\s\S]*))?$/i;
 
 /** Parse `/receipt`, `/receipts`, or `/process-receipts [optional note]`. */
 export function parseReceiptSlashCommand(text: string): { note: string } | null {

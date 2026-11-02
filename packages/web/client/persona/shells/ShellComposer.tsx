@@ -228,7 +228,7 @@ function ProcessReceiptsButton({
       type="button"
       disabled={!enabled}
       onClick={onClick}
-      title="Run guided receipt → Xero draft bill workflow (attach image first)"
+      title="Review an attached receipt; Xero draft creation is optional"
       style={{
         flexShrink: 0,
         border: `1px solid ${enabled ? "rgba(var(--lim-accent-rgb),0.28)" : "rgba(var(--lim-accent-rgb),0.08)"}`,

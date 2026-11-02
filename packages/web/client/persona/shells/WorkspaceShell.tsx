@@ -1,3 +1,4 @@
+import {WorkflowDeliverables} from "../../WorkflowDeliverables.js";
 import React, { useRef, useState } from "react";
 import type { ShellContract } from "../ShellContract.js";
 import type { TurnRow } from "../../chatTurnLayout.js";
@@ -27,27 +28,9 @@ function ThresholdMark() {
 }
 
 const starters = [
-  {
-    title: "Build something",
-    detail: "Turn an idea into working code",
-    prompt:
-      "Help me build a feature in this workspace. First, explore the project and explain the best place to start.",
-    icon: "⌘",
-  },
-  {
-    title: "Explore a question",
-    detail: "Research, connect, and explain",
-    prompt:
-      "Help me research a topic. Ask me what I want to understand, then investigate with sources.",
-    icon: "◎",
-  },
-  {
-    title: "Make a document",
-    detail: "Give your thinking a useful form",
-    prompt:
-      "Help me create a document. Ask me about its audience, purpose, and the material I want to include.",
-    icon: "▤",
-  },
+  { title:"Enquiry to proposal", detail:"Research, scope, and an unsent reply", prompt:"/proposal ", icon:"◎" },
+  { title:"Receipt to expense", detail:"Attach a receipt and prepare a review", prompt:"/receipt ", icon:"▤" },
+  { title:"Bug to verified patch", detail:"Reproduce, fix, test, and hand off", prompt:"/fix ", icon:"⌘" },
 ];
 
 /** Uses the existing harness contract; presentation never owns execution state. */
@@ -115,6 +98,10 @@ export function WorkspaceShell({ contract: c }: { contract: ShellContract }) {
       />
     );
   };
+  const workflowOutput = (rows: TurnRow[]) => rows.flatMap(row=>row.kind === 'tool_group' ? row.entries : [row])
+    .filter(row=>row.kind === 'tool_call' && row.name === 'work_package')
+    .map(row=>row.kind === 'tool_call' ? c.toolResultMap.get(row.callId) : undefined)
+    .filter(result=>result?.ok).at(-1)?.output ?? '';
   const chooseStarter = (prompt: string) => {
     c.onInputChange(prompt);
     document.getElementById("chat-message-input")?.focus();
@@ -348,6 +335,7 @@ export function WorkspaceShell({ contract: c }: { contract: ShellContract }) {
                           )}
                         </WorkingPanel>
                       )}
+                      <WorkflowDeliverables output={workflowOutput(turn.working)} />
                       {turn.finalReply && (
                         <div className="workspace-reply">
                           <div className="workspace-reply-label">

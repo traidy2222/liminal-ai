@@ -19,7 +19,7 @@ Run it on your machine through a native desktop app, a browser, or your terminal
 
 Liminal connects a model to the tools it needs to do useful work: read and edit files, run commands, search the web, create documents, and work with connected services. Its agent loop handles tool execution, approvals, retries, context management, and persistent memory.
 
-**Release status:** Liminal is in beta. [Desktop 0.1.4](https://github.com/traidy2222/liminal-ai/releases/tag/v0.1.4-desktop) brings searchable OpenRouter selection, single-model mode, and the updated response path. Screenshots show the current application with demo workspace data.
+**Release status:** Liminal is in beta. [Desktop 0.1.5](https://github.com/traidy2222/liminal-ai/releases/tag/v0.1.5-desktop) adds three guided workflows, saved deliverables, and recovery after interruptions. Searchable OpenRouter selection and single-model mode remain available. Screenshots show the application with demo workspace data.
 
 ## Why Liminal
 
@@ -30,6 +30,20 @@ Liminal connects a model to the tools it needs to do useful work: read and edit 
 - **Use the interface that fits.** The Flutter desktop app, React web UI, and terminal UI share the same harness engine.
 
 Liminal runs tool execution and stores local workspace state on your machine. Hosted models receive the prompts and context you send them; connected services receive requests when used. Choose a local endpoint when you want inference to run locally too.
+
+## Three workflows with a concrete finish
+
+Start from the desktop or web welcome cards, or type a command in any interface:
+
+| Start | What you receive | Completion check |
+|---|---|---|
+| **`/proposal <client enquiry>`** | A printable proposal, research sources, and an unsent email draft | Sources must have been fetched successfully |
+| **Attach a receipt → `/receipt`** | An expense review with reconciled amounts and the original receipt hash | Local OCR plus date, currency, and arithmetic validation |
+| **`/fix <bug report>`** | A patch, captured test output, and a handoff | A reproduced failure, passing tests after edits, and a fresh Git diff |
+
+If requested, the receipt workflow can also create an approved Xero **DRAFT** and attach the source receipt. It checks for duplicates first and resumes an interrupted upload against the existing bill. It does not authorise or pay bills. Xero requires a connected organisation and valid account/tax mappings.
+
+Runs save their progress and deliverables under `.agent_artifacts/workflows/`. Use `/workflows` to find a run and `/resume-work <run-id>` to continue it. These workflows are included in desktop and harness 0.1.5. See the [workflow guide](docs/guides/signature-workflows.md) for examples, prerequisites, and validation scope.
 
 ## A workspace built for doing
 
@@ -126,6 +140,8 @@ Tool availability depends on enabled families, local dependencies, credentials, 
 ## Develop and contribute
 
 Liminal is a TypeScript monorepo with a Flutter desktop frontend. Build dependencies in order: **core → protocol → tools → sidecar**. The root build command handles this sequence.
+
+Installation applies a version-pinned compatibility fix for node-pty 1.1.0 on Windows: terminal cleanup enumerates child processes before console teardown and releases the output worker after natural exit. The same fix ships in desktop and harness archives. Windows CI checks replay, output draining, and exit codes.
 
 ```bash
 npm run build

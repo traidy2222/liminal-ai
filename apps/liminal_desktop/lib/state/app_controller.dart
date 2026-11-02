@@ -1961,6 +1961,13 @@ class AppController extends ChangeNotifier {
       case SlashCommandKind.abort:
         await abortTurn();
         return ComposerSlashOutcome.abort();
+      case SlashCommandKind.workflowManage:
+        if (parsed.command == 'resume-work' && !RegExp(r'^[a-f0-9-]{36}$',caseSensitive:false).hasMatch(parsed.note)) return ComposerSlashOutcome.message('Use /workflows, then /resume-work <run-id>.', clearInput:false);
+        return ComposerSlashOutcome.send(text:parsed.raw);
+      case SlashCommandKind.signatureWorkflow:
+        if (parsed.note.trim().isEmpty) return ComposerSlashOutcome.message(
+          parsed.command == 'proposal' ? 'Add the client enquiry and scope after /proposal.' : 'Add the bug report and expected behaviour after /fix.', clearInput: false);
+        return ComposerSlashOutcome.send(text: parsed.note.trim(), workflowPreset: parsed.command == 'proposal' ? 'enquiry_to_proposal' : 'bugfix_to_handoff');
       case SlashCommandKind.receiptWorkflow:
         if (attachmentCount == 0) {
           return ComposerSlashOutcome.message(
@@ -1969,7 +1976,7 @@ class AppController extends ChangeNotifier {
           );
         }
         final text = parsed.note.trim().isEmpty
-            ? 'Process the attached receipt(s) into Xero as draft bill(s).'
+            ? 'Prepare a local expense review of the attached receipt. Do not create a Xero transaction unless I explicitly request it.'
             : parsed.note.trim();
         return ComposerSlashOutcome.send(
           text: text,
