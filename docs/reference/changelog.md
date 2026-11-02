@@ -2,7 +2,7 @@
 
 All notable changes to [Liminal AI](https://github.com/traidy2222/liminal-ai) on the `main` branch.
 
-**Current stage:** **beta** (`v0.1.8`, 2026-11-02). Desktop downloads are published through the public preview release channel.
+**Current stage:** **beta** (`v0.1.9`, 2026-11-03). Desktop downloads are published through the public preview release channel.
 
 Format: **v0.0.x** entries keyed to the last GitHub push in each slice. Dates are real push dates.
 
@@ -17,9 +17,22 @@ After editing JSON: `npm run changelog:gen`, commit, push, then in [vireondynami
 
 ---
 
+## v0.1.9 — 2026-11-03 {#v0-1-9}
+
+**Current beta.** Clean desktop shutdowns keep future updates unblocked.
+
+**Shipped**
+
+- **No orphaned desktop sidecars** — The app identifies its owned sidecar's parent process. If the desktop closes or crashes, the sidecar shuts down even when stdin does not report closure.
+- **Reliable update preparation** — Release the old runtime's file handles before a future launch update replaces the app folder. Shutdown handles overlapping signals once.
+- **Real process coverage** — A detached child with ignored stdin is tested against actual parent termination, including in Windows CI. Standalone servers and unrelated process IDs opt out.
+- **Docs** — [Install and update](../start/install.md)
+
+---
+
 ## v0.1.8 — 2026-11-02 {#v0-1-8}
 
-**Current beta.** Safer tool recovery and a verified Windows update handoff.
+Safer tool recovery and a verified Windows update handoff.
 
 **Shipped**
 

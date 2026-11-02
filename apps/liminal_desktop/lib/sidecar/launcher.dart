@@ -244,6 +244,7 @@ Future<SidecarProcess> launchSidecar({
   final env = {
     ...Platform.environment,
     'LIMINAL_REPO_ROOT': locations.repoRoot,
+    'LIMINAL_DESKTOP_PARENT_PID': '$pid',
   };
   if (Directory(pwBrowsers).existsSync()) {
     env['PLAYWRIGHT_BROWSERS_PATH'] = pwBrowsers;

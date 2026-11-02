@@ -13,6 +13,7 @@ import {
 } from "@liminal/core";
 import { WsServer } from "./ws_server.js";
 import { clearHandshake, handshakePath, mintToken, writeHandshake } from "./handshake.js";
+import { watchDesktopParent } from "./desktop_parent.js";
 import {
   initCrashReporter,
   captureException,
@@ -82,7 +83,10 @@ async function main(): Promise<void> {
     `LIMINALD_READY ${JSON.stringify({ port, handshake: handshakePath(), protocolVersion: record.protocolVersion })}\n`
   );
 
+  let shuttingDown = false;
   const shutdown = (signal: string): void => {
+    if (shuttingDown) return;
+    shuttingDown = true;
     process.stdout.write(`liminald: shutting down (${signal})\n`);
     server.close();
     void clearHandshake()
@@ -98,6 +102,7 @@ async function main(): Promise<void> {
 
   process.on("SIGINT", () => shutdown("SIGINT"));
   process.on("SIGTERM", () => shutdown("SIGTERM"));
+  watchDesktopParent(Number(process.env['LIMINAL_DESKTOP_PARENT_PID']), () => shutdown('desktop_parent_exit'));
 
   process.on("unhandledRejection", (reason) => {
     const message =
