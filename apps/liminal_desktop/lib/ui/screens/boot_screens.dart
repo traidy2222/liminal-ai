@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../../app/app_scope.dart';
+import '../../core/update/update_coordinator.dart';
 import '../theme/liminal_theme_extension.dart';
 import '../widgets/liminal_brand.dart';
 import '../widgets/liminal_shell.dart';
@@ -10,19 +11,65 @@ class BootScreen extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final updates = AppScope.watch(context).updates;
     return LiminalShell(
-      showConnectionBanner: false,
-      body: Center(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            const LiminalBrandMark(),
-            const SizedBox(height: 24),
-            CircularProgressIndicator(color: LiminalTheme.of(context).accent),
-          ],
-        ),
-      ),
-    );
+        showConnectionBanner: false,
+        body: Center(
+            child: Padding(
+                padding: const EdgeInsets.all(32),
+                child: ConstrainedBox(
+                    constraints: const BoxConstraints(maxWidth: 400),
+                    child: LaunchUpdateProgress(
+                      active: updates.launchUpdateInProgress,
+                      state: updates.state,
+                      onSkip: updates.canSkipLaunchUpdate
+                          ? updates.skipLaunchUpdate
+                          : null,
+                    )))));
+  }
+}
+
+class LaunchUpdateProgress extends StatelessWidget {
+  const LaunchUpdateProgress(
+      {super.key, required this.active, required this.state, this.onSkip});
+  final bool active;
+  final UpdateState state;
+  final VoidCallback? onSkip;
+  @override
+  Widget build(BuildContext context) {
+    final downloading = active && state.phase == UpdatePhase.downloading;
+    final applying = active && state.phase == UpdatePhase.applying;
+    final message = applying
+        ? 'Installing update…'
+        : downloading
+            ? 'Downloading Liminal ${state.checkResult?.latest.version ?? ''}…'
+            : active
+                ? 'Checking for updates…'
+                : 'Opening your workspace…';
+    return Column(mainAxisSize: MainAxisSize.min, children: [
+      const LiminalBrandMark(),
+      const SizedBox(height: 24),
+      if (downloading)
+        LinearProgressIndicator(value: state.downloadProgress)
+      else
+        CircularProgressIndicator(color: LiminalTheme.of(context).accent),
+      const SizedBox(height: 16),
+      Text(message, textAlign: TextAlign.center),
+      if (downloading && state.downloadProgress != null)
+        Padding(
+            padding: const EdgeInsets.only(top: 8),
+            child: Text('${(state.downloadProgress! * 100).round()}%')),
+      if (applying)
+        const Padding(
+            padding: EdgeInsets.only(top: 8),
+            child: Text('Liminal will restart automatically.',
+                textAlign: TextAlign.center)),
+      if (onSkip != null)
+        Padding(
+            padding: const EdgeInsets.only(top: 16),
+            child: TextButton(
+                onPressed: onSkip, child: const Text('Open current version'))),
+    ]);
   }
 }
 
@@ -110,8 +157,17 @@ class ErrorBootScreen extends StatelessWidget {
                       style: Theme.of(context).textTheme.titleMedium,
                     ),
                     const SizedBox(height: 12),
-                    const Text('Check the details below, then try again.', textAlign: TextAlign.center),
-                    ExpansionTile(title: const Text('Technical details'), children: [SizedBox(height: 180, child: SingleChildScrollView(child: SelectableText(host.bootError ?? 'No additional details.')))]),
+                    const Text('Check the details below, then try again.',
+                        textAlign: TextAlign.center),
+                    ExpansionTile(
+                        title: const Text('Technical details'),
+                        children: [
+                          SizedBox(
+                              height: 180,
+                              child: SingleChildScrollView(
+                                  child: SelectableText(host.bootError ??
+                                      'No additional details.')))
+                        ]),
                     const SizedBox(height: 16),
                     FilledButton(
                       onPressed: host.boot,
@@ -143,7 +199,9 @@ class ConfigErrorScreen extends StatelessWidget {
           host.setupError ??
           'Check that liminald is running and try again.',
       child: FilledButton(
-        onPressed: initErr != null && initErr.isNotEmpty ? host.boot : host.refreshConfig,
+        onPressed: initErr != null && initErr.isNotEmpty
+            ? host.boot
+            : host.refreshConfig,
         child: const Text('Retry'),
       ),
     );

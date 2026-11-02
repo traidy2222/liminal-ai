@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
@@ -74,14 +75,131 @@ class UpdateCoordinator extends ChangeNotifier {
     required this.reboot,
     ReleaseClient? releaseClient,
     http.Client? httpClient,
+    Future<LocalVersions> Function()? loadLocalVersions,
+    Future<UpdatePrefs> Function()? readPreferences,
+    Future<void> Function(UpdatePrefs)? writePreferences,
+    Future<Directory> Function()? temporaryDirectory,
+    Future<void> Function(LocalVersions, String)? installAndRestart,
   })  : _client = releaseClient ?? ReleaseClient(client: httpClient),
-        _http = httpClient ?? http.Client();
+        _http = httpClient ?? http.Client(),
+        _readLocal =
+            loadLocalVersions ?? (() => LocalVersions.load(repoRoot: repoRoot)),
+        _readPreferences = readPreferences ?? UpdatePrefsService.load,
+        _writePreferences = writePreferences ?? UpdatePrefsService.save,
+        _temporaryDirectory = temporaryDirectory ?? getTemporaryDirectory,
+        _installAndRestart = installAndRestart;
 
   final String? repoRoot;
   final SidecarShutdown shutdownSidecar;
   final SidecarReboot reboot;
   final ReleaseClient _client;
   final http.Client _http;
+  final Future<LocalVersions> Function() _readLocal;
+  final Future<UpdatePrefs> Function() _readPreferences;
+  final Future<void> Function(UpdatePrefs) _writePreferences;
+  final Future<Directory> Function() _temporaryDirectory;
+  final Future<void> Function(LocalVersions, String)? _installAndRestart;
+  Future<void>? _prefsLoad;
+  Future<void> _preferenceWrites = Future<void>.value();
+  Future<bool>? _launchTask;
+  Completer<bool>? _skipLaunch;
+  Completer<void>? _abortLaunch;
+  bool _launchWorkRunning = false,
+      _launchVisible = false,
+      _launchSkipped = false,
+      _disposed = false;
+  bool get launchUpdateInProgress => _launchVisible;
+  bool get canSkipLaunchUpdate =>
+      _launchVisible && state.phase != UpdatePhase.applying;
+  bool get isBusy =>
+      _launchWorkRunning ||
+      [UpdatePhase.checking, UpdatePhase.downloading, UpdatePhase.applying]
+          .contains(state.phase);
+  void _notify() {
+    if (!_disposed) notifyListeners();
+  }
+
+  Future<bool> runLaunchUpdate() => _launchTask ??= _runLaunchUpdate();
+  Future<bool> _runLaunchUpdate() async {
+    try {
+      await loadPrefs();
+      await refreshLocal();
+    } catch (e) {
+      state = UpdateState(error: e.toString());
+      _notify();
+      return false;
+    }
+    if (!shouldAutoCheck) return false;
+    _launchVisible = true;
+    _launchWorkRunning = true;
+    _skipLaunch = Completer<bool>();
+    _abortLaunch = Completer<void>();
+    _notify();
+    try {
+      return await Future.any([_performLaunchUpdate(), _skipLaunch!.future]);
+    } finally {
+      _launchVisible = false;
+      _notify();
+    }
+  }
+
+  Future<bool> _performLaunchUpdate() async {
+    try {
+      await check(silent: true);
+      _checkLaunchAbort();
+      final result = state.checkResult;
+      if (result == null) return false;
+      if (!result.anyUpdate) {
+        if (prefs.lastAutomaticAttemptVersion != null)
+          await savePrefs(prefs.copyWith(clearAutomaticAttempt: true));
+        return false;
+      }
+      if (!prefs.autoInstallOnLaunch) return false;
+      if (prefs.lastAutomaticAttemptVersion == result.latest.version) {
+        state = state.copyWith(
+            error:
+                'An earlier automatic update needs a manual retry in About & updates.');
+        return false;
+      }
+      // One full app archive updates both the interface and bundled harness.
+      await downloadApp(forLaunch: true);
+      _checkLaunchAbort();
+      if (state.appArchivePath == null) return false;
+      // From this point a durable install attempt is being scheduled; do not skip
+      // between recording the attempt and starting the helper.
+      state = state.copyWith(phase: UpdatePhase.applying);
+      _notify();
+      await savePrefs(
+          prefs.copyWith(lastAutomaticAttemptVersion: result.latest.version));
+      _checkLaunchAbort();
+      return await scheduleAppRestart();
+    } catch (e) {
+      if (!_launchSkipped && !_disposed) {
+        state = state.copyWith(phase: UpdatePhase.error, error: e.toString());
+      }
+      return false;
+    } finally {
+      _launchWorkRunning = false;
+      _notify();
+    }
+  }
+
+  void _checkLaunchAbort() {
+    if (_launchSkipped || _disposed) throw const _LaunchUpdateSkipped();
+  }
+
+  void skipLaunchUpdate() {
+    if (!canSkipLaunchUpdate) return;
+    _launchSkipped = true;
+    if (!(_abortLaunch?.isCompleted ?? true)) _abortLaunch!.complete();
+    if (!(_skipLaunch?.isCompleted ?? true)) _skipLaunch!.complete(false);
+    state = state.copyWith(
+        phase: (state.checkResult?.anyUpdate ?? false)
+            ? UpdatePhase.ready
+            : UpdatePhase.idle,
+        clearError: true);
+    _notify();
+  }
 
   UpdatePrefs prefs = const UpdatePrefs();
   UpdateState state = const UpdateState();
@@ -103,19 +221,24 @@ class UpdateCoordinator extends ChangeNotifier {
         state.hasAppReady;
   }
 
-  Future<void> loadPrefs() async {
-    prefs = await UpdatePrefsService.load();
-    notifyListeners();
+  Future<void> loadPrefs() => _prefsLoad ??= _loadPrefs();
+  Future<void> _loadPrefs() async {
+    prefs = await _readPreferences();
+    _notify();
   }
 
   Future<void> savePrefs(UpdatePrefs next) async {
     prefs = next;
-    await UpdatePrefsService.save(next);
-    notifyListeners();
+    final write = _preferenceWrites
+        .catchError((Object _) {})
+        .then((_) => _writePreferences(next));
+    _preferenceWrites = write;
+    await write;
+    _notify();
   }
 
   Future<void> refreshLocal() async {
-    _local = await LocalVersions.load(repoRoot: repoRoot);
+    _local = await _readLocal();
   }
 
   String get _platform {
@@ -135,13 +258,13 @@ class UpdateCoordinator extends ChangeNotifier {
               ? 'Dev build — updates use git (LIMINAL_REPO_ROOT).'
               : 'Not a portable desktop install.',
         );
-        notifyListeners();
+        _notify();
       }
       return;
     }
 
     state = state.copyWith(phase: UpdatePhase.checking, clearError: true);
-    notifyListeners();
+    _notify();
 
     try {
       final harness = local.harnessVersion ?? local.appVersion;
@@ -149,60 +272,106 @@ class UpdateCoordinator extends ChangeNotifier {
         appVersion: local.appVersion,
         harnessVersion: harness,
       );
-      state = state.copyWith(
+      if (_launchWorkRunning && _launchSkipped) return;
+      state = UpdateState(
         phase: result.anyUpdate ? UpdatePhase.ready : UpdatePhase.idle,
         checkResult: result,
-        clearError: true,
       );
       await savePrefs(prefs.copyWith(lastCheckAt: DateTime.now().toUtc()));
     } catch (e) {
+      if (_launchWorkRunning && _launchSkipped) return;
       state = state.copyWith(
         phase: silent ? UpdatePhase.idle : UpdatePhase.error,
         error: e.toString(),
       );
     }
-    notifyListeners();
+    _notify();
   }
 
-  Future<String> _downloadAsset(ReleaseAsset asset) async {
-    final dir = await getTemporaryDirectory();
+  Future<String> _downloadAsset(ReleaseAsset asset,
+      {bool forLaunch = false}) async {
+    if (p.basename(asset.file) != asset.file)
+      throw Exception('Invalid release filename');
+    final dir = await _temporaryDirectory();
     final dest = p.join(dir.path, 'liminal-updates', asset.file);
     await Directory(p.dirname(dest)).create(recursive: true);
-
     final expected = await _client.fetchSha256(asset.sha256Url);
-    final request = http.Request('GET', Uri.parse(asset.url));
-    final streamed = await _http.send(request);
-    if (streamed.statusCode != 200) {
-      throw Exception('Download failed: ${streamed.statusCode}');
+    if (forLaunch) _checkLaunchAbort();
+    if (expected == null)
+      throw Exception('A valid SHA256 checksum is required for this update.');
+    final cached = File(dest);
+    if (await cached.exists() &&
+        (await sha256.bind(cached.openRead()).first).toString() == expected) {
+      if (forLaunch) _checkLaunchAbort();
+      return dest;
     }
-
-    final total = streamed.contentLength ?? 0;
-    var loaded = 0;
-    final bytes = <int>[];
-
-    await for (final chunk in streamed.stream) {
-      loaded += chunk.length;
-      bytes.addAll(chunk);
-      state = state.copyWith(
-        phase: UpdatePhase.downloading,
-        downloadProgress: total > 0 ? loaded / total : null,
-      );
-      notifyListeners();
+    final part =
+        File('$dest.$pid.${DateTime.now().microsecondsSinceEpoch}.part');
+    final abort = Completer<void>();
+    IOSink? sink;
+    try {
+      final request = http.AbortableRequest('GET', Uri.parse(asset.url),
+          abortTrigger: forLaunch
+              ? Future.any([abort.future, _abortLaunch!.future])
+              : abort.future);
+      final response =
+          await _http.send(request).timeout(const Duration(seconds: 20));
+      if (response.statusCode != 200)
+        throw Exception('Download failed: ${response.statusCode}');
+      sink = part.openWrite();
+      final digest = _DigestCollector();
+      final hash = sha256.startChunkedConversion(digest);
+      var loaded = 0, buffered = 0;
+      final progress = Stopwatch()..start();
+      final wall = Stopwatch()..start();
+      await for (final chunk
+          in response.stream.timeout(const Duration(seconds: 20))) {
+        if (forLaunch) _checkLaunchAbort();
+        if (wall.elapsed > const Duration(minutes: 20))
+          throw TimeoutException('Update download timed out');
+        loaded += chunk.length;
+        buffered += chunk.length;
+        sink.add(chunk);
+        hash.add(chunk);
+        if (buffered >= 1024 * 1024) {
+          await sink.flush();
+          buffered = 0;
+        }
+        if (progress.elapsedMilliseconds >= 100 ||
+            loaded == response.contentLength) {
+          state = state.copyWith(
+              phase: UpdatePhase.downloading,
+              downloadProgress: (response.contentLength ?? 0) > 0
+                  ? (loaded / response.contentLength!).clamp(0, 1).toDouble()
+                  : null);
+          _notify();
+          progress.reset();
+        }
+      }
+      await sink.flush();
+      await sink.close();
+      sink = null;
+      hash.close();
+      if (response.contentLength != null && loaded != response.contentLength)
+        throw Exception('Update download was interrupted');
+      if (digest.value?.toString() != expected)
+        throw Exception('SHA256 mismatch for ${asset.file}');
+      if (forLaunch) _checkLaunchAbort();
+      if (await cached.exists()) await cached.delete();
+      await part.rename(dest);
+      return dest;
+    } finally {
+      if (!abort.isCompleted) abort.complete();
+      if (sink != null) await sink.close();
+      if (await part.exists()) await part.delete();
     }
-
-    final hash = sha256.convert(bytes).toString();
-    if (expected != null && hash != expected) {
-      throw Exception('SHA256 mismatch for ${asset.file}');
-    }
-    await File(dest).writeAsBytes(bytes);
-    return dest;
   }
 
   Future<void> downloadHarness() async {
     final result = state.checkResult;
     if (result == null || !result.harnessUpdate) return;
     state = state.copyWith(phase: UpdatePhase.downloading, clearError: true);
-    notifyListeners();
+    _notify();
     try {
       final path = await _downloadAsset(result.latest.liminaldAsset);
       state = state.copyWith(
@@ -213,27 +382,29 @@ class UpdateCoordinator extends ChangeNotifier {
     } catch (e) {
       state = state.copyWith(phase: UpdatePhase.error, error: e.toString());
     }
-    notifyListeners();
+    _notify();
   }
 
-  Future<void> downloadApp() async {
+  Future<void> downloadApp({bool forLaunch = false}) async {
     final result = state.checkResult;
-    if (result == null || !result.appUpdate) return;
+    if (result == null ||
+        !(result.appUpdate || (forLaunch && result.harnessUpdate))) return;
     final asset = result.latest.platformAssets[_platform];
     if (asset == null) throw Exception('No asset for $_platform');
     state = state.copyWith(phase: UpdatePhase.downloading, clearError: true);
-    notifyListeners();
+    _notify();
     try {
-      final path = await _downloadAsset(asset);
+      final path = await _downloadAsset(asset, forLaunch: forLaunch);
       state = state.copyWith(
         phase: UpdatePhase.ready,
         appArchivePath: path,
         clearError: true,
       );
     } catch (e) {
-      state = state.copyWith(phase: UpdatePhase.error, error: e.toString());
+      if (!forLaunch || !_launchSkipped)
+        state = state.copyWith(phase: UpdatePhase.error, error: e.toString());
     }
-    notifyListeners();
+    _notify();
   }
 
   Future<void> applyHarnessUpdate() async {
@@ -249,7 +420,7 @@ class UpdateCoordinator extends ChangeNotifier {
     if (archive == null) throw Exception('Harness download failed');
 
     state = state.copyWith(phase: UpdatePhase.applying, clearError: true);
-    notifyListeners();
+    _notify();
 
     try {
       await shutdownSidecar();
@@ -266,63 +437,98 @@ class UpdateCoordinator extends ChangeNotifier {
       state = state.copyWith(phase: UpdatePhase.error, error: e.toString());
       await reboot();
     }
-    notifyListeners();
+    _notify();
   }
 
-  Future<void> scheduleAppRestart() async {
-    final local = _local ?? await LocalVersions.load(repoRoot: repoRoot);
-    final exeDir = local.exeDir;
-    if (exeDir == null) throw Exception('Cannot resolve install directory');
-
-    var archive = state.appArchivePath;
-    if (archive == null) {
-      await downloadApp();
-      archive = state.appArchivePath;
+  Future<bool> scheduleAppRestart() async {
+    try {
+      final local = _local ?? await _readLocal();
+      if (local.exeDir == null)
+        throw Exception('Cannot resolve install directory');
+      var archive = state.appArchivePath;
+      if (archive == null) {
+        await downloadApp();
+        archive = state.appArchivePath;
+      }
+      if (archive == null)
+        throw Exception(state.error ?? 'App download failed');
+      state = state.copyWith(phase: UpdatePhase.applying, clearError: true);
+      _notify();
+      final install = _installAndRestart ?? _restartNative;
+      await install(local, archive);
+      return true;
+    } catch (e) {
+      state = state.copyWith(phase: UpdatePhase.error, error: e.toString());
+      _notify();
+      return false;
     }
-    if (archive == null) throw Exception('App download failed');
+  }
 
-    state = state.copyWith(phase: UpdatePhase.applying, clearError: true);
-    notifyListeners();
-
-    await File(p.join(exeDir, 'pending_update.json')).writeAsString(
-      jsonEncode({
-        'archivePath': archive,
-        'platform': _platform,
-        'createdAt': DateTime.now().toUtc().toIso8601String(),
-      }),
-    );
-
-    final parentPid = pid;
-
-    if (Platform.isWindows) {
-      final script =
-          p.join(exeDir, 'liminald', 'updater', 'relaunch-desktop-windows.ps1');
-      await Process.start(
-        'powershell',
-        [
-          '-NoProfile',
-          '-ExecutionPolicy',
-          'Bypass',
-          '-File',
-          script,
-          '-ParentPid',
-          '$parentPid',
-          '-ExeDir',
-          exeDir,
-          '-ArchivePath',
-          archive,
-        ],
-        mode: ProcessStartMode.detached,
-      );
-    } else {
-      final script = p.join(exeDir, 'liminald', 'updater', 'relaunch-desktop.sh');
-      await Process.start(
-        'bash',
-        [script, '$parentPid', exeDir, archive],
-        mode: ProcessStartMode.detached,
-      );
+  Future<void> _restartNative(LocalVersions local, String archive) async {
+    final exeDir = local.exeDir!;
+    final node = await Process.run('node', ['--version']);
+    if (node.exitCode != 0)
+      throw Exception('Node.js is required to install updates.');
+    final temp = await _temporaryDirectory();
+    // The helper must live and run outside the folder it replaces, especially on Windows.
+    final helper = Directory(p.join(temp.path,
+        'liminal-updater-$pid-${DateTime.now().microsecondsSinceEpoch}'));
+    await helper.create(recursive: true);
+    for (final name in [
+      'relaunch-desktop-windows.ps1',
+      'relaunch-desktop.sh',
+      'apply-desktop-update.mjs',
+      'update-release.mjs',
+      'apply-app-swap.mjs',
+      'desktop-release-names.mjs'
+    ]) {
+      await File(p.join(exeDir, 'liminald', 'updater', name))
+          .copy(p.join(helper.path, name));
     }
-
+    await File(p.join(exeDir, 'pending_update.json')).writeAsString(jsonEncode({
+      'archivePath': archive,
+      'platform': _platform,
+      'version': state.checkResult?.latest.version,
+      'createdAt': DateTime.now().toUtc().toIso8601String()
+    }));
+    await shutdownSidecar();
+    try {
+      if (Platform.isWindows) {
+        await Process.start(
+            'powershell',
+            [
+              '-NoProfile',
+              '-WindowStyle',
+              'Hidden',
+              '-ExecutionPolicy',
+              'Bypass',
+              '-File',
+              p.join(helper.path, 'relaunch-desktop-windows.ps1'),
+              '-ParentPid',
+              '$pid',
+              '-ExeDir',
+              exeDir,
+              '-ArchivePath',
+              archive
+            ],
+            workingDirectory: helper.path,
+            mode: ProcessStartMode.detached);
+      } else {
+        await Process.start(
+            'bash',
+            [
+              p.join(helper.path, 'relaunch-desktop.sh'),
+              '$pid',
+              exeDir,
+              archive
+            ],
+            workingDirectory: helper.path,
+            mode: ProcessStartMode.detached);
+      }
+    } catch (_) {
+      await reboot();
+      rethrow;
+    }
     exit(0);
   }
 
@@ -331,7 +537,7 @@ class UpdateCoordinator extends ChangeNotifier {
     if (version != null) {
       await savePrefs(prefs.copyWith(dismissedVersion: version));
     }
-    notifyListeners();
+    _notify();
   }
 
   Future<void> _runNodeApply({
@@ -339,7 +545,8 @@ class UpdateCoordinator extends ChangeNotifier {
     required String exeDir,
     required String archive,
   }) async {
-    final script = p.join(exeDir, 'liminald', 'updater', 'apply-desktop-update.mjs');
+    final script =
+        p.join(exeDir, 'liminald', 'updater', 'apply-desktop-update.mjs');
     if (!File(script).existsSync()) {
       throw Exception('Updater script missing: $script');
     }
@@ -390,8 +597,26 @@ class UpdateCoordinator extends ChangeNotifier {
 
   @override
   void dispose() {
+    _disposed = true;
+    if (!(_abortLaunch?.isCompleted ?? true)) _abortLaunch!.complete();
+    if (!(_skipLaunch?.isCompleted ?? true)) _skipLaunch!.complete(false);
     _client.close();
     _http.close();
     super.dispose();
   }
+}
+
+class _LaunchUpdateSkipped implements Exception {
+  const _LaunchUpdateSkipped();
+}
+
+class _DigestCollector implements Sink<Digest> {
+  Digest? value;
+  @override
+  void add(Digest data) {
+    value = data;
+  }
+
+  @override
+  void close() {}
 }

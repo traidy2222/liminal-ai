@@ -36,6 +36,7 @@ class SidecarProcess {
     if (proc == null) return;
     if (await proc.exitCode.timeout(Duration.zero, onTimeout: () => -1) == -1) {
       proc.kill(ProcessSignal.sigterm);
+      await proc.exitCode.timeout(const Duration(seconds:5));
     }
   }
 }

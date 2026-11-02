@@ -2,7 +2,7 @@
 
 All notable changes to [Liminal AI](https://github.com/traidy2222/liminal-ai) on the `main` branch.
 
-**Current stage:** **beta** (`v0.1.5`, 2026-11-02). Desktop downloads are published through the public preview release channel.
+**Current stage:** **beta** (`v0.1.6`, 2026-11-02). Desktop downloads are published through the public preview release channel.
 
 Format: **v0.0.x** entries keyed to the last GitHub push in each slice. Dates are real push dates.
 
@@ -17,9 +17,24 @@ After editing JSON: `npm run changelog:gen`, commit, push, then in [vireondynami
 
 ---
 
+## v0.1.6 — 2026-11-02 {#v0-1-6}
+
+**Current beta.** Verified automatic updates before your workspace opens.
+
+**Shipped**
+
+- **Automatic launch updates** — Enabled by default for portable installs. Update checks load saved preferences and installed versions before the harness starts, correctly recognize bundled runtimes, and do not interrupt active work after reconnects.
+- **Clear launch progress** — Download progress and an Open current version option let you continue without installing. Automatic updates can be disabled in About & updates.
+- **Verified downloads** — Stream archives to disk, require valid SHA256 checksums, reject incomplete responses and partial releases, and reuse verified cached archives.
+- **Reliable installation** — Run the detached helper outside the install folder, preserve local configuration, prepare the replacement before swapping, and restore the old app if replacement or relaunch fails. Correct the Windows helper PID conflict and macOS bundle destination.
+- **Recovery without restart loops** — Record a durable automatic attempt before restart; an unsuccessful version requires a manual retry. Check failures and download errors leave the current app usable.
+- **Docs** — [Install and update](../start/install.md)
+
+---
+
 ## v0.1.5 — 2026-11-02 {#v0-1-5}
 
-**Current beta.** Three guided workflows with saved deliverables and recoverable progress.
+Three guided workflows with saved deliverables and recoverable progress.
 
 **Shipped**
 

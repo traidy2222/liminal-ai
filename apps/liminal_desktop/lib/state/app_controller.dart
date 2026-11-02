@@ -81,7 +81,7 @@ class AppController extends ChangeNotifier {
       reboot: boot,
     );
     updates.addListener(notifyListeners);
-    unawaited(updates.loadPrefs());
+
   }
 
   late final UpdateCoordinator updates;
@@ -200,6 +200,7 @@ class AppController extends ChangeNotifier {
     notifyListeners();
 
     try {
+      if (!_hasEverConnected && await updates.runLaunchUpdate()) return;
       final proc = await _sidecar.ensureRunning(
         attachToExisting: SidecarLifecycle.attachFromEnv,
       );
@@ -221,9 +222,6 @@ class AppController extends ChangeNotifier {
       }
       if (config == null) {
         await refreshConfig();
-      }
-      if (updates.shouldAutoCheck) {
-        unawaited(updates.check(silent: true));
       }
       notifyListeners();
     } catch (e) {

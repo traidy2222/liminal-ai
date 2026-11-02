@@ -34,6 +34,9 @@ jobs:
       - name: Typecheck all workspaces
         run: npm run typecheck
 
+      - name: Test desktop update installation and rollback
+        run: npm run test:update-release
+
       - name: Verify guided workflow gates and exports
         run: npm run verify:workflows
 
@@ -110,6 +113,8 @@ jobs:
       - run: npm run build
       - name: Verify workflow gates with actual Windows test processes
         run: npm run verify:workflows
+      - name: Test Windows update helper and rollback
+        run: npm run test:update-release
       - name: Verify terminal replay, output, and cleanup
         timeout-minutes: 3
         run: node --import tsx --test packages/sidecar/src/pty_manager.test.ts

@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { compareSemver } from "./lib/update-release.mjs";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -11,6 +12,10 @@ const releases = JSON.parse(
 );
 const entry = releases.releases.find((r) => r.version === version);
 if (!entry) throw Error(`Missing changelog entry for ${version}`);
+const autoUpdates = compareSemver(version, "0.1.6") >= 0;
+const upgrade = autoUpdates
+  ? "From **0.1.6**, portable installs check, download, verify, and install updates on launch by default. Choose **Open current version** to skip, or turn automatic updates off in **Settings → About & updates**.\n\n**Initial upgrade from 0.1.5 or earlier:** download this version once and extract it over the closed installation, preserving your local `.env`. This refreshes the older packaged-app detection and installer. Future launch updates are automatic."
+  : "Existing installations: **Settings → About & updates → Check for updates**. Install the app update to get both the new interface and bundled harness. Updates preserve your local configuration.";
 const body = `## Liminal Desktop ${version} (beta)
 
 ${entry.summary}
@@ -19,7 +24,7 @@ ${entry.bullets.map((b) => "- " + b).join("\n")}
 
 ### Install or update
 
-Existing installations: **Settings → About & updates → Check for updates**. Install the app update to get both the new interface and bundled harness. Updates preserve your local configuration.
+${upgrade}
 
 | Platform | Download | Run |
 |---|---|---|
