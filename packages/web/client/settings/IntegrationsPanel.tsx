@@ -175,11 +175,10 @@ export function IntegrationsPanel({ agentBusy }: IntegrationsPanelProps) {
   return (
     <div style={{ paddingBottom: 16 }}>
       <div style={{ fontSize: 11, color: AMBER, fontWeight: 700, letterSpacing: "0.06em", marginBottom: 8 }}>
-        INTEGRATIONS
+        Connected tools
       </div>
       <p style={{ fontSize: 12, color: "#aab8c4", lineHeight: 1.5, marginBottom: 14 }}>
-        Connect only what you need — each card is one service with its own OAuth scopes. Workspace vendors are grouped
-        below; Slack, Linear, Notion, and YouTube are one card each. Tap a card for read/write mode and account options.
+        Bring your tools into the conversation. Choose a service to connect an account and control what Liminal can access.
       </p>
 
       {error ? (

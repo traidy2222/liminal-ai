@@ -6,12 +6,12 @@ const CYAN = "var(--lim-accent, #00d4ff)";
 const MAGENTA = "var(--lim-secondary, #ff4488)";
 
 const btn: React.CSSProperties = {
-  fontFamily: "monospace",
-  fontSize: 11,
+  fontFamily: "var(--lim-font-body)",
+  fontSize: 12,
   padding: "8px 14px",
-  borderRadius: 2,
+  borderRadius: 8,
   border: "1px solid rgba(var(--lim-accent-rgb),0.25)",
-  background: "rgba(0,12,24,0.8)",
+  background: "var(--lim-surface)",
   color: CYAN,
   cursor: "pointer",
 };
@@ -54,9 +54,9 @@ export function IntegrationCard({
     <div
       style={{
         gridColumn: expanded ? "1 / -1" : undefined,
-        borderRadius: 10,
-        border: `1px solid ${connected ? "rgba(0,255,136,0.35)" : "rgba(var(--lim-accent-rgb),0.14)"}`,
-        background: connected ? "rgba(0,255,136,0.04)" : "rgba(0,12,24,0.65)",
+        borderRadius: 12,
+        border: `1px solid ${connected ? "rgba(var(--lim-success-rgb),0.35)" : "var(--lim-border)"}`,
+        background: connected ? "rgba(var(--lim-success-rgb),0.04)" : "var(--lim-bg)",
         overflow: "hidden",
         display: "flex",
         flexDirection: "column",

@@ -183,7 +183,7 @@ export function traceGetFinalAssistantText(trace: TraceEvent[]): string | null {
   for (let i = trace.length - 1; i >= 0; i--) {
     if (trace[i]?.type === "text") {
       const ch = (trace[i]!.payload as AgentEventMap["text"]).channel;
-      if (ch === "user" || ch === undefined) {
+      if (ch === "user") {
         lastUserIdx = i;
         break;
       }
@@ -194,7 +194,7 @@ export function traceGetFinalAssistantText(trace: TraceEvent[]): string | null {
     const e = trace[i];
     if (!e || e.type !== "text") continue;
     const p = e.payload as AgentEventMap["text"];
-    if (p.channel && p.channel !== "assistant") continue;
+    if (p.channel) continue;
     if (typeof p.delta === "string" && p.delta.length > 0) parts.push(p.delta);
   }
   const joined = parts.join("").trim();
@@ -395,6 +395,7 @@ export async function runSingleHarnessSend(scenario: Scenario, userMessage: stri
   sandboxRoot?: string;
   sandboxCleanup?: () => void;
   modelSlug?: string;
+  parityMeta?: import("./desktopParityRunner.js").DesktopParityRunMeta;
 }> {
   const t0 = Date.now();
   const trace: TraceEvent[] = [];
@@ -507,7 +508,7 @@ export async function runSingleHarnessSend(scenario: Scenario, userMessage: stri
 
   harness.emitter.on("tool_approval", (payload) => {
     if (interaction === "reject_destructive" && destructiveTools.has(payload.name)) {
-      payload.resolve({ decision: "reject" });
+      payload.resolve({ decision: "reject", reason: "Rejected by the eval destructive-tool policy" });
       return;
     }
     payload.resolve({ decision: "approve" });

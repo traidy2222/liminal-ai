@@ -16,6 +16,7 @@
   },
   "exports": {
     ".": "./dist/index.js",
+    "./session-bridge": "./dist/session_bridge.js",
     "./pty": "./dist/pty_manager.js",
     "./pty-stream": "./dist/pty_stream_handler.js",
     "./browser-stream": "./dist/browser_stream_handler.js",

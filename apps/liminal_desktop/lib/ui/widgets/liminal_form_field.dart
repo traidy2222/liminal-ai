@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../../models/harness_settings.dart';
+import '../../models/settings_presentation.dart';
 import '../layout/liminal_spacing.dart';
 import '../theme/liminal_theme_extension.dart';
 
@@ -25,22 +26,22 @@ class LiminalHarnessField extends StatelessWidget {
     final locked = field.lockedByEnv || !enabled;
     final theme = Theme.of(context);
 
-    if (field.valueKind == 'boolean') {
+    if (field.valueKind == 'boolean' || field.key == 'AGENT_TTS_ENABLED') {
       return _SettingCard(
         child: SwitchListTile(
           contentPadding: const EdgeInsets.symmetric(horizontal: 4),
           title: Text(
-            field.label,
+            everydaySettings[field.key]?.label ?? field.label,
             style: theme.textTheme.titleSmall?.copyWith(color: lim.text),
           ),
           subtitle: _descriptionBlock(context, field, locked),
-          value: field.value == '1' || field.value.toLowerCase() == 'on',
+          value: const {'1', 'on', 'true', 'yes'}.contains(field.value.toLowerCase()),
           onChanged: locked ? null : (v) => onApply(v ? '1' : '0'),
         ),
       );
     }
 
-    if (field.valueKind == 'enum') {
+    if (field.valueKind == 'enum' || field.key == 'AGENT_EFFORT') {
       return _SettingCard(
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -129,10 +130,11 @@ class LiminalHarnessField extends StatelessWidget {
     bool locked,
   ) {
     final parts = <String>[];
-    if (field.description != null && field.description!.isNotEmpty) {
-      parts.add(field.description!);
+    final description = everydaySettings[field.key]?.description ?? field.description;
+    if (description != null && description.isNotEmpty) {
+      parts.add(description);
     }
-    if (locked) parts.add('Locked by environment');
+    if (field.lockedByEnv) parts.add('Managed in your environment file');
     if (parts.isEmpty) return null;
     return Padding(
       padding: const EdgeInsets.only(top: 4),
@@ -159,14 +161,14 @@ class LiminalHarnessField extends StatelessWidget {
           children: [
             Expanded(
               child: Text(
-                field.label,
+                everydaySettings[field.key]?.label ?? field.label,
                 style: Theme.of(context).textTheme.titleSmall?.copyWith(
                       color: lim.text,
                       fontWeight: FontWeight.w600,
                     ),
               ),
             ),
-            if (locked)
+            if (field.lockedByEnv)
               Chip(
                 visualDensity: VisualDensity.compact,
                 label: Text('Locked', style: Theme.of(context).textTheme.labelSmall),
@@ -177,7 +179,7 @@ class LiminalHarnessField extends StatelessWidget {
           Padding(
             padding: const EdgeInsets.only(top: 6),
             child: Text(
-              field.description!,
+              everydaySettings[field.key]?.description ?? field.description!,
               style: Theme.of(context).textTheme.bodyMedium?.copyWith(
                     color: lim.textMuted,
                     height: 1.45,
@@ -199,13 +201,13 @@ class _SettingCard extends StatelessWidget {
     final lim = LiminalTheme.of(context);
     return DecoratedBox(
       decoration: BoxDecoration(
-        color: lim.surface.withValues(alpha: 0.5),
-        borderRadius: BorderRadius.circular(lim.radius),
-        border: Border.all(color: lim.border.withValues(alpha: 0.65)),
+        color: lim.surface,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: lim.border),
       ),
       child: Padding(
         padding: const EdgeInsets.all(LiminalSpacing.md),
-        child: child,
+        child: Material(type: MaterialType.transparency, child: child),
       ),
     );
   }
@@ -245,7 +247,9 @@ class _EnumFieldState extends State<_EnumField> {
 
   @override
   Widget build(BuildContext context) {
-    final options = widget.field.enumValues ?? [_value];
+    final options = widget.field.key == 'AGENT_EFFORT'
+        ? ['low', 'medium', 'high', 'xhigh']
+        : widget.field.enumValues ?? [_value];
     final selected = options.contains(_value) ? _value : options.first;
 
     return DropdownButtonFormField<String>(

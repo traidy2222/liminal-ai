@@ -41,9 +41,9 @@ export function ShellControls({
     background: "transparent",
     border: "1px solid rgba(var(--lim-accent-rgb),0.2)",
     borderRadius: mono ? 2 : 8,
-    color: "rgba(var(--lim-accent-rgb),0.55)",
-    padding: mono ? "3px 10px" : "4px 12px",
-    fontSize: mono ? 9 : 11,
+    color: "var(--lim-text-muted)",
+    padding: mono ? "5px 10px" : "6px 12px",
+    fontSize: mono ? 11 : 12,
     cursor: "pointer",
     fontFamily: mono
       ? "var(--lim-font-mono, Consolas, monospace)"
@@ -86,12 +86,12 @@ export function ShellControls({
             : "rgba(var(--lim-accent-rgb),0.2)",
           color: showRawHarness
             ? "var(--lim-accent, #00d4ff)"
-            : "rgba(var(--lim-accent-rgb),0.55)",
+            : "var(--lim-text-muted)",
         }}
         onClick={() => onToggleRaw()}
         title={showRawHarness ? "Hide raw harness trace" : "Show raw harness trace"}
       >
-        {label("Raw")} {showRawHarness ? "●" : "○"}
+        {label("Trace")} {showRawHarness ? "●" : "○"}
       </button>
       <button
         type="button"

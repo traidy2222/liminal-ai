@@ -1,5 +1,3 @@
-import 'dart:async';
-
 /// Voice activity from microphone amplitude (dBFS from the `record` package).
 ///
 /// Two phases:
@@ -14,7 +12,10 @@ class AmplitudeVad {
     this.onSpeechStart,
     this.onSilenceTick,
     this.onSpeechResume,
-  });
+    int Function()? nowMs,
+  }) : _nowMs = nowMs ?? (() => DateTime.now().millisecondsSinceEpoch);
+
+  final int Function() _nowMs;
 
   final double speechGainDb;
   final int calibrationMs;
@@ -31,7 +32,7 @@ class AmplitudeVad {
   bool _calibrated = false;
 
   void resetSession() {
-    _startedAt = DateTime.now().millisecondsSinceEpoch;
+    _startedAt = _nowMs();
     _calibrated = false;
     _noiseFloorDb = -60;
     _utteranceArmed = false;
@@ -60,7 +61,7 @@ class AmplitudeVad {
 
   void ingestAmplitudeDb(double rawDb) {
     final db = sanitizeDb(rawDb);
-    final now = DateTime.now().millisecondsSinceEpoch;
+    final now = _nowMs();
     if (_startedAt == 0) _startedAt = now;
 
     if (!_calibrated) {

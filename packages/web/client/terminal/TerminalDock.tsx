@@ -160,8 +160,11 @@ export function TerminalDock() {
     <div
       style={{
         flexShrink: 0,
-        borderTop: "1px solid rgba(var(--lim-accent-rgb),0.2)",
-        background: "rgba(2,6,14,0.98)",
+        borderTop: "1px solid var(--lim-border)",
+        background: "var(--lim-surface)",
+        borderRadius: 8,
+        marginTop: 8,
+        overflow: "hidden",
       }}
     >
       {open ? (
@@ -173,7 +176,7 @@ export function TerminalDock() {
           alignItems: "center",
           gap: 4,
           padding: "4px 8px",
-          background: "rgba(0,8,18,0.9)",
+          background: "var(--lim-surface)",
           borderBottom: open ? "1px solid rgba(var(--lim-accent-rgb),0.12)" : "none",
         }}
       >
@@ -187,10 +190,10 @@ export function TerminalDock() {
             padding: "4px 8px",
             background: "transparent",
             border: "none",
-            color: "rgba(var(--lim-accent-rgb),0.7)",
-            fontFamily: "var(--lim-font-mono, monospace)",
+            color: "var(--lim-text-muted)",
+            fontFamily: "var(--lim-font-body, system-ui)",
             fontSize: 11,
-            letterSpacing: "0.08em",
+            letterSpacing: "0",
             cursor: "pointer",
           }}
         >

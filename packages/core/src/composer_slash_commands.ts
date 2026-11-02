@@ -2,8 +2,8 @@
  * Composer slash commands — shared catalog, parsing, and tab-completion.
  * Used by web, desktop (Dart mirror), and TUI.
  */
-import { parseReceiptSlashCommand } from "./receipt_workflow.js";
-import { parseRemoteSlashCommand, type ParsedRemoteSlash } from "./remote_session.js";
+import { parseReceiptSlashCommand } from "./receipt_slash.js";
+import { parseRemoteSlashCommand, type ParsedRemoteSlash } from "./remote_session_format.js";
 
 export type SlashCommandKind =
   | "receipt_workflow"

@@ -1,7 +1,7 @@
 import { DEFAULT_AGENT_API_BASE_URL } from "./harness_default_constants.js";
 import { isKimchiApiBaseUrl } from "./kimchi_constants.js";
 import { KIMCHI_API_BASE_URL } from "./kimchi_constants.js";
-import { isOpenRouterApiBaseUrl } from "./openrouter_session.js";
+import { isOpenRouterApiBaseUrl } from "./provider_urls.js";
 
 function normalizeBaseUrl(url: string): string {
   return url.trim().replace(/\/+$/, "");

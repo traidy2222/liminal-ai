@@ -710,7 +710,7 @@ function ToolCard({ entry, result, toolCardsMode }: { entry: ToolCallEntry; resu
 
 // ── ToolGroupCard ─────────────────────────────────────────────────────────────
 
-function ToolGroupCard({ group, toolResultMap, surface, toolCardsMode }: { group: ToolCallGroup; toolResultMap: Map<string, ToolResult>; surface: ToolSurface; toolCardsMode?: PersonaUiToolCards }) {
+export function ToolGroupCard({ group, toolResultMap, surface, toolCardsMode }: { group: ToolCallGroup; toolResultMap: Map<string, ToolResult>; surface: ToolSurface; toolCardsMode?: PersonaUiToolCards }) {
   const cat = categoryForTool(group.name);
   const doneCount    = group.entries.filter(e => e.status === "done").length;
   const errorCount   = group.entries.filter(e => e.status === "error").length;
@@ -852,7 +852,7 @@ function ReasonBlock({ entry }: { entry: Extract<MessageEntry, { kind: "reason" 
 
 // ── MessageView ───────────────────────────────────────────────────────────────
 
-function MessageView({
+export function MessageView({
   entry,
   toolResult,
   surface,

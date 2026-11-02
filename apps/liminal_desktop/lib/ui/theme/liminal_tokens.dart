@@ -65,7 +65,7 @@ class LiminalTokens {
   final String shell;
   final PersonaGradient? gradient;
 
-  static const _bg = Color(0xFF020408);
+  static const _bg = Color(0xFF13151E);
 
   factory LiminalTokens.fromPersona(PersonaUiTheme persona, {LiminalFontSet? fonts}) {
     final f = fonts ?? LiminalFontSet.resolve(persona);
@@ -83,13 +83,13 @@ class LiminalTokens {
       background: _bg,
       surface: surface,
       panel: Color.alphaBlend(Colors.white.withValues(alpha: 0.045), surface),
-      text: const Color(0xFFE7EDF5),
+      text: const Color(0xFFECECF2),
       textMuted: persona.muted,
-      textDim: const Color(0xFF73808F),
+      textDim: const Color(0xFF959BAD),
       border: hairline.withValues(alpha: 0.11),
       userBubble: persona.accent.withValues(alpha: 0.12),
-      assistantAccent: persona.success,
-      codeBackground: const Color(0xFF030810),
+      assistantAccent: persona.accent,
+      codeBackground: const Color(0xFF161923),
       radius: persona.radiusValue,
       displayLabel: persona.displayLabel,
       showGrid: persona.background == 'grid' &&
@@ -100,7 +100,7 @@ class LiminalTokens {
       fontFamilyMono: f.monoFamily,
       fontFamilyHeading: f.headingFamily,
       typeScale: persona.typeScale,
-      glow: persona.glowIntensity ?? 0.35,
+      glow: persona.glowIntensity ?? 0.08,
       messageStyle: persona.messageStyle,
       gradient: persona.gradient,
     );
@@ -113,7 +113,7 @@ class LiminalTokens {
 
   /// Foreground for solid-accent fills — black on bright accents, white on dark.
   Color get onAccent =>
-      accent.computeLuminance() > 0.45 ? const Color(0xFF06090E) : Colors.white;
+      accent.computeLuminance() > 0.18 ? const Color(0xFF06090E) : Colors.white;
 
   /// One step above [surface] — hovered cards, raised tiles.
   Color get surfaceRaised =>

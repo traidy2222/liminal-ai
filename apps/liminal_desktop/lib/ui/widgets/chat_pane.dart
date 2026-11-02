@@ -20,9 +20,10 @@ import 'composer.dart';
 import 'orchestrator_panel.dart';
 import 'sticky_message_list.dart';
 import 'turn_activity_banner.dart';
+import 'workspace_welcome.dart';
 
 /// One chat column in a single- or multi-pane layout.
-class ChatPane extends StatelessWidget {
+class ChatPane extends StatefulWidget {
   const ChatPane({
     super.key,
     required this.chatId,
@@ -51,6 +52,31 @@ class ChatPane extends StatelessWidget {
   final bool showClose;
   final String emptyTitle;
   final String emptyBody;
+
+  @override
+  State<ChatPane> createState() => _ChatPaneState();
+}
+
+class _ChatPaneState extends State<ChatPane> {
+  final _draftController = ComposerDraftController();
+  String get chatId => widget.chatId;
+  AppController get host => widget.host;
+  ChatSessionController get session => widget.session;
+  PersonaLayoutSpec get layout => widget.layout;
+  bool get focused => widget.focused;
+  String? get title => widget.title;
+  bool get busy => widget.busy;
+  VoidCallback? get onFocus => widget.onFocus;
+  VoidCallback? get onClose => widget.onClose;
+  bool get showClose => widget.showClose;
+  String get emptyTitle => widget.emptyTitle;
+  String get emptyBody => widget.emptyBody;
+
+  @override
+  void dispose() {
+    _draftController.dispose();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -108,14 +134,7 @@ class ChatPane extends StatelessWidget {
               builder: (context, _) {
                 final browser = session.browserView;
                 final fileEdit = session.fileEditView;
-                final transcript = session.messages.isEmpty
-                    ? LiminalEmptyState(
-                        title: emptyTitle,
-                        body: emptyBody,
-                        icon: Icons.chat_bubble_outline,
-                        compact: true,
-                      )
-                    : _buildTranscript(context);
+                final transcript = _buildTranscript(context);
 
                 final showBrowser = focused && browser != null && browser.open;
                 final showFileEdit = fileEdit != null && fileEdit.open;
@@ -134,7 +153,8 @@ class ChatPane extends StatelessWidget {
                 final maxRail = math.min(_dockExpandedWidth, screenW * 0.48);
                 const minRail = _dockMinExpandedWidth;
                 final railW = railExpanded
-                    ? (session.dockRailWidth ?? defaultRailW).clamp(minRail, maxRail)
+                    ? (session.dockRailWidth ?? defaultRailW)
+                        .clamp(minRail, maxRail)
                     : defaultRailW;
 
                 return Row(
@@ -197,8 +217,10 @@ class ChatPane extends StatelessWidget {
                   pending: session.pendingApproval!,
                   queueIndex: 1,
                   queueTotal: session.pendingApprovalCount,
-                  onApprove: () => host.resolveApproval('approve', chatId: chatId),
-                  onReject: () => host.resolveApproval('reject', chatId: chatId),
+                  onApprove: () =>
+                      host.resolveApproval('approve', chatId: chatId),
+                  onReject: () =>
+                      host.resolveApproval('reject', chatId: chatId),
                 );
               }
               if (session.pendingAskUser != null) {
@@ -220,6 +242,7 @@ class ChatPane extends StatelessWidget {
                 theme: theme,
                 layout: layout,
                 child: Composer(
+                  draftController: _draftController,
                   enabled: true,
                   busy: session.busy,
                   contextSnapshot: session.contextSnapshot,
@@ -237,8 +260,7 @@ class ChatPane extends StatelessWidget {
                         text,
                         chatId: chatId,
                         attachments: attachments,
-                        liveDictation:
-                            focused && host.dictationSessionActive,
+                        liveDictation: focused && host.dictationSessionActive,
                         workflowPreset: workflowPreset,
                       ),
                     );
@@ -254,14 +276,12 @@ class ChatPane extends StatelessWidget {
             listenable: session,
             builder: (context, _) {
               final panel = session.terminalPanel;
-              final showTerminal =
-                  focused && panel != null && panel.hasTabs;
+              final showTerminal = focused && panel != null && panel.hasTabs;
               if (!showTerminal) return const SizedBox.shrink();
               final screenH = MediaQuery.sizeOf(context).height;
               const minTermH = 120.0;
               final maxTermH = screenH * 0.65;
-              final defaultTermH =
-                  (screenH * 0.34).clamp(200.0, 560.0);
+              final defaultTermH = (screenH * 0.34).clamp(200.0, 560.0);
               final termH = (session.terminalBodyHeight ?? defaultTermH)
                   .clamp(minTermH, maxTermH);
               return TerminalDock(
@@ -291,6 +311,15 @@ class ChatPane extends StatelessWidget {
   }
 
   Widget _buildTranscript(BuildContext context) {
+    if (session.messages.isEmpty && !session.busy) {
+      return WorkspaceWelcome(
+        onStart: _draftController.suggest,
+        title: emptyTitle == 'Ready when you are' ? null : emptyTitle,
+        body: emptyBody == 'Ask anything, or start with a task.'
+            ? null
+            : emptyBody,
+      );
+    }
     final list = StickyMessageList(
       messages: session.messages,
       showRawHarness: host.showRawHarness,
@@ -340,10 +369,8 @@ class _PaneHeader extends StatelessWidget {
           decoration: BoxDecoration(
             border: Border(
               bottom: BorderSide(
-                color: focused || hovered
-                    ? lim.accent.withValues(alpha: 0.45)
-                    : lim.border,
-                width: focused ? 2 : 1,
+                color: hovered ? lim.accent.withValues(alpha: 0.3) : lim.border,
+                width: 1,
               ),
             ),
           ),
@@ -360,7 +387,7 @@ class _PaneHeader extends StatelessWidget {
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                   style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                        color: focused ? lim.accent : lim.text,
+                        color: focused ? lim.text : lim.textMuted,
                         fontWeight: focused ? FontWeight.w600 : FontWeight.w500,
                       ),
                 ),

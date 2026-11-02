@@ -62,7 +62,7 @@ class ServiceIntegrationCard extends StatelessWidget {
     return Material(
       color: bg,
       shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(8),
+        borderRadius: BorderRadius.circular(14),
         side: BorderSide(color: borderColor),
       ),
       clipBehavior: Clip.antiAlias,
@@ -72,7 +72,7 @@ class ServiceIntegrationCard extends StatelessWidget {
           InkWell(
             onTap: disabled ? null : onToggle,
             child: Padding(
-              padding: const EdgeInsets.fromLTRB(10, 10, 10, 8),
+              padding: const EdgeInsets.fromLTRB(18, 18, 18, 14),
               child: Column(
                 children: [
                   IntegrationBrandIcon(id: _brandId, size: 36),
@@ -89,7 +89,7 @@ class ServiceIntegrationCard extends StatelessWidget {
                     _statusLine,
                     textAlign: TextAlign.center,
                     maxLines: 2,
-                    style: TextStyle(color: lim.textMuted, fontSize: 10, height: 1.35),
+                    style: TextStyle(color: lim.textMuted, fontSize: 12, height: 1.4),
                   ),
                   const SizedBox(height: 6),
                   IntegrationConnectionStatus(
@@ -110,7 +110,7 @@ class ServiceIntegrationCard extends StatelessWidget {
                   const SizedBox(height: 4),
                   Text(
                     expanded ? 'Hide ▴' : 'Options ▾',
-                    style: TextStyle(color: lim.textDim, fontSize: 9),
+                    style: TextStyle(color: lim.textDim, fontSize: 11),
                   ),
                 ],
               ),
@@ -162,7 +162,7 @@ class IntegrationCategorySection extends StatelessWidget {
       children: [
         Text(
           title,
-          style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w700, letterSpacing: 0.4),
+          style: const TextStyle(fontFamily: 'Space Grotesk', fontSize: 22, fontWeight: FontWeight.w500, letterSpacing: -0.4),
         ),
         if (subtitle != null) ...[
           const SizedBox(height: 4),
@@ -171,7 +171,8 @@ class IntegrationCategorySection extends StatelessWidget {
         const SizedBox(height: 10),
         LayoutBuilder(
           builder: (context, constraints) {
-            const cardWidth = 152.0;
+            final columns = constraints.maxWidth >= 900 ? 4 : constraints.maxWidth >= 650 ? 3 : constraints.maxWidth >= 420 ? 2 : 1;
+            final cardWidth = (constraints.maxWidth - 12 * (columns - 1)) / columns;
             return Wrap(
               spacing: 12,
               runSpacing: 12,

@@ -2,7 +2,7 @@
 
 All notable changes to [Liminal AI](https://github.com/traidy2222/liminal-ai) on the `main` branch.
 
-**Current stage:** **beta** (`v0.1.2` tip of `main`, 2026-06-18). The workspace package may read `0.1.0`, but **beta**, **RC**, and a **v0.1.0 public preview** have not been declared as product releases yet.
+**Current stage:** **beta** (`v0.1.3`, 2026-11-02). Desktop downloads are published through the public preview release channel.
 
 Format: **v0.0.x** entries keyed to the last GitHub push in each slice. Dates are real push dates.
 
@@ -17,9 +17,23 @@ After editing JSON: `npm run changelog:gen`, commit, push, then in [vireondynami
 
 ---
 
+## v0.1.3 — 2026-11-02 {#v0-1-3}
+
+**Current beta.** A redesigned workspace and simpler settings across desktop and web.
+
+**Shipped**
+
+- **Workspace redesign** — Shared typography, neutral surfaces, clearer navigation, conversation layouts, and composers across desktop and web.
+- **Desktop hub** — Recent conversations, a searchable paginated library, mission editor, connected tools, and inbox navigation.
+- **Simpler settings** — Clear categories, everyday controls, searchable advanced options, and collapsed credentials and technical details.
+- **Connected tools and onboarding** — Categorized integrations and consistent setup, account, and error screens.
+- **Reliable web builds** — Browser-safe core entry points prevent server-only dependencies from entering the web client bundle.
+
+---
+
 ## v0.1.2 — 2026-06-18 {#v0-1-2}
 
-**Current beta tip.** Multi-account mail, inbox watcher, file attachments, integrations hub polish, managed inference fixes.
+Multi-account mail, inbox watcher, file attachments, integrations hub polish, managed inference fixes.
 
 **Shipped**
 

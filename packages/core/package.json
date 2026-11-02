@@ -30,6 +30,18 @@
     "./streaming-write-preview": {
       "types": "./dist/streaming_write_preview.d.ts",
       "import": "./dist/streaming_write_preview.js"
+    },
+    "./composer-slash": {
+      "types": "./dist/composer_slash_commands.d.ts",
+      "import": "./dist/composer_slash_commands.js"
+    },
+    "./remote-slash": {
+      "types": "./dist/remote_slash.d.ts",
+      "import": "./dist/remote_slash.js"
+    },
+    "./managed-catalog": {
+      "types": "./dist/managed_catalog.d.ts",
+      "import": "./dist/managed_catalog.js"
     }
   },
   "scripts": {

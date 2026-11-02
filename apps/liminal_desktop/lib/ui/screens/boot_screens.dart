@@ -106,11 +106,12 @@ class ErrorBootScreen extends StatelessWidget {
                     const LiminalBrandMark(compact: true),
                     const SizedBox(height: 16),
                     Text(
-                      'Could not start liminald',
+                      'Liminal could not start',
                       style: Theme.of(context).textTheme.titleMedium,
                     ),
                     const SizedBox(height: 12),
-                    Text(host.bootError ?? '', textAlign: TextAlign.center),
+                    const Text('Check the details below, then try again.', textAlign: TextAlign.center),
+                    ExpansionTile(title: const Text('Technical details'), children: [SizedBox(height: 180, child: SingleChildScrollView(child: SelectableText(host.bootError ?? 'No additional details.')))]),
                     const SizedBox(height: 16),
                     FilledButton(
                       onPressed: host.boot,

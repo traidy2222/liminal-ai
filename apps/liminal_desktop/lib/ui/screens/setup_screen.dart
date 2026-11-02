@@ -19,6 +19,14 @@ class _SetupScreenState extends State<SetupScreen> {
   final _baseUrl = TextEditingController(text: 'https://openrouter.ai/api/v1');
 
   @override
+  void initState() {
+    super.initState();
+    _apiKey.addListener(_keyChanged);
+  }
+
+  void _keyChanged() => setState(() {});
+
+  @override
   void didChangeDependencies() {
     super.didChangeDependencies();
     final cfg = AppScope.of(context).config;
@@ -30,6 +38,7 @@ class _SetupScreenState extends State<SetupScreen> {
 
   @override
   void dispose() {
+    _apiKey.removeListener(_keyChanged);
     _apiKey.dispose();
     _model.dispose();
     _baseUrl.dispose();
@@ -55,7 +64,7 @@ class _SetupScreenState extends State<SetupScreen> {
     return LiminalOnboardingPage(
       title: 'Connect Liminal',
       subtitle:
-          'Add your OpenRouter (or compatible) API key. It is stored locally in your repo `.env` and never sent back over the desktop socket.',
+          'Choose a model provider to get started. Your API key is stored on this device.',
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [

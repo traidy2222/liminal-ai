@@ -101,6 +101,7 @@ class _HomeScreenState extends State<HomeScreen> {
 
     return LiminalShell(
       drawer: ChatDrawer(
+        embedded: MediaQuery.sizeOf(context).width >= 1100,
         chats: host.chats,
         activeChatId: host.activeChatId,
         visibleChatIds: host.visibleChatIds,
@@ -114,6 +115,8 @@ class _HomeScreenState extends State<HomeScreen> {
         onDelete: host.deleteChat,
       ),
       appBar: AppBar(
+        toolbarHeight: 76,
+        automaticallyImplyLeading: false,
         backgroundColor: shellStyle.appBarBackground(context),
         surfaceTintColor: Colors.transparent,
         shape: shellStyle.appBarBottomSide(context) != null
@@ -122,13 +125,15 @@ class _HomeScreenState extends State<HomeScreen> {
               )
             : null,
         centerTitle: shellStyle.headerCentered,
-        leading: Builder(
-          builder: (context) => LiminalIconButton(
-            icon: Icons.menu,
-            tooltip: 'All chats',
-            onPressed: () => Scaffold.of(context).openDrawer(),
-          ),
-        ),
+        leading: MediaQuery.sizeOf(context).width >= 1100
+            ? null
+            : Builder(
+                builder: (context) => LiminalIconButton(
+                  icon: Icons.menu,
+                  tooltip: 'All chats',
+                  onPressed: () => Scaffold.of(context).openDrawer(),
+                ),
+              ),
         title: LiminalAppBarTitle(
           title: host.config?.personaDisplayLabel ?? 'Liminal',
           subtitle: _subtitle(host),
@@ -142,8 +147,7 @@ class _HomeScreenState extends State<HomeScreen> {
           ListenableBuilder(
             listenable: Listenable.merge(paneListenables),
             builder: (context, _) {
-              final anyBusy =
-                  panes.any((id) => host.sessionFor(id).busy);
+              final anyBusy = panes.any((id) => host.sessionFor(id).busy);
               if (!anyBusy) return const SizedBox.shrink();
               return Padding(
                 padding: const EdgeInsets.only(right: 4),
@@ -156,7 +160,9 @@ class _HomeScreenState extends State<HomeScreen> {
                 ? 'Hide harness internals (trace, working state, retries)'
                 : 'Show harness internals (tools always visible)',
             onPressed: host.toggleShowRawHarness,
-            icon: host.showRawHarness ? Icons.data_object : Icons.data_object_outlined,
+            icon: host.showRawHarness
+                ? Icons.data_object
+                : Icons.data_object_outlined,
             selected: host.showRawHarness,
           ),
           PopupMenuButton<String>(
@@ -177,7 +183,9 @@ class _HomeScreenState extends State<HomeScreen> {
               PopupMenuItem(
                 value: 'raw',
                 child: Text(
-                  host.showRawHarness ? 'Harness internals ●' : 'Harness internals ○',
+                  host.showRawHarness
+                      ? 'Harness internals ●'
+                      : 'Harness internals ○',
                 ),
               ),
               const PopupMenuItem(value: 'settings', child: Text('Settings')),
@@ -231,7 +239,8 @@ class _HomeScreenState extends State<HomeScreen> {
                                 child: SizedBox(
                                   height: MediaQuery.sizeOf(context).height,
                                   child: Row(
-                                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.stretch,
                                     children: _paneRowChildren(
                                       panes: panes,
                                       host: host,
@@ -287,8 +296,7 @@ class _HomeScreenState extends State<HomeScreen> {
         onFocus: () => host.focusChat(panes[i]),
         onClose: () => host.closeChatPane(panes[i]),
         emptyTitle: copy?.emptyTitle ?? 'Ready when you are',
-        emptyBody:
-            copy?.emptyBody ?? 'Ask anything, or start with a task.',
+        emptyBody: copy?.emptyBody ?? 'Ask anything, or start with a task.',
       );
       if (expand) {
         children.add(Expanded(child: pane));

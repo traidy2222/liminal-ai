@@ -7,7 +7,7 @@ import '../theme/liminal_theme_extension.dart';
 import '../theme/liminal_tokens.dart';
 
 const _managedProviderOptions = <MapEntry<String, String>>[
-  MapEntry('auto', 'auto — routing + failover'),
+  MapEntry('auto', 'Automatic'),
   MapEntry('bedrock', 'AWS Bedrock'),
   MapEntry('openrouter', 'OpenRouter'),
   MapEntry('kimchi', 'Cast AI (Kimchi)'),
@@ -142,7 +142,8 @@ class ManagedInferencePanel extends StatelessWidget {
     return resolved;
   }
 
-  String _labelForModelId(List<ManagedInferenceModel> allModels, String modelId) {
+  String _labelForModelId(
+      List<ManagedInferenceModel> allModels, String modelId) {
     for (final row in allModels) {
       if (row.id == modelId) return _optionLabel(row);
       for (final p in row.providers) {
@@ -153,11 +154,15 @@ class ManagedInferencePanel extends StatelessWidget {
   }
 
   String _optionLabel(ManagedInferenceModel row) {
-    final providers = row.providers.map((p) => p.provider).where((p) => p.isNotEmpty).toList();
+    final providers = row.providers
+        .map((p) => p.provider)
+        .where((p) => p.isNotEmpty)
+        .toList();
     final badge = providers.length > 1
         ? providers.join(' + ')
         : (providers.isNotEmpty ? providers.first : '');
-    final base = row.label.isNotEmpty && row.label != row.id ? row.label : row.id;
+    final base =
+        row.label.isNotEmpty && row.label != row.id ? row.label : row.id;
     return badge.isEmpty ? base : '$base · $badge';
   }
 
@@ -168,24 +173,14 @@ class ManagedInferencePanel extends StatelessWidget {
     final allModels = catalog?.models ?? const <ManagedInferenceModel>[];
     final models = filterManagedInferenceCatalog(allModels, managedProvider);
     final catalogSize = catalog?.models.length ?? 0;
-    final catalogRegions = catalog?.catalogRegions ?? const <String>[];
-    final curatedSource = catalog?.curatedBedrockSource;
-    final regionalBedrockCount = models
-        .where((m) => RegExp(r'^(us|eu|global|apac|au|jp)\.', caseSensitive: false).hasMatch(m.id))
-        .length;
-    final upstreamRaw = upstream ?? catalog?.upstream ?? 'managed';
-    final upstreamLabel = upstreamRaw == 'hybrid'
-        ? 'hybrid (Bedrock + OpenRouter + Kimchi)'
-        : upstreamRaw;
-
     InputDecoration fieldDecoration() => InputDecoration(
           isDense: true,
           border: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(4),
+            borderRadius: BorderRadius.circular(10),
             borderSide: BorderSide(color: lim.border),
           ),
           enabledBorder: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(4),
+            borderRadius: BorderRadius.circular(10),
             borderSide: BorderSide(color: lim.border),
           ),
         );
@@ -193,72 +188,82 @@ class ManagedInferencePanel extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.all(LiminalSpacing.md),
       decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(4),
+        borderRadius: BorderRadius.circular(10),
         border: BorderSide(color: lim.border).toBorder(),
-        color: lim.panel.withValues(alpha: 0.65),
+        color: lim.panel,
       ),
-      child: Column(
+      child: Material(
+        color: Colors.transparent,
+        child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           Text(
-            'Managed inference (Vireon · $upstreamLabel)',
-            style: theme.textTheme.titleSmall?.copyWith(color: lim.success),
+            'Models on your plan',
+            style: theme.textTheme.titleMedium,
           ),
           const SizedBox(height: LiminalSpacing.xs),
           Text(
-            managedProvider.trim().isNotEmpty && managedProvider != 'auto'
-                ? 'Models on $managedProvider upstream ($catalogSize in full catalog, ${models.length} shown${regionalBedrockCount > 0 ? ', $regionalBedrockCount regional Bedrock profiles' : ''}).'
-                : catalogRegions.isNotEmpty
-                    ? 'Pick upstream provider and models from the Vireon catalog ($catalogSize loaded${curatedSource != null ? ', $curatedSource regional manifest' : ''}${catalogRegions.isNotEmpty ? ' across ${catalogRegions.length} Bedrock regions' : ''}).'
-                    : 'Pick upstream provider and models from the Vireon catalog ($catalogSize loaded).',
+            'Choose the models Liminal uses with your Vireon credits.',
             style: theme.textTheme.bodySmall?.copyWith(
               color: lim.textMuted,
               height: 1.45,
             ),
           ),
           const SizedBox(height: LiminalSpacing.md),
-          if (bedrockPresets.isNotEmpty && onBedrockPresetApply != null) ...[
-            Text('Bedrock preset', style: theme.textTheme.titleSmall),
-            const SizedBox(height: LiminalSpacing.xs),
-            DropdownButtonFormField<String>(
-              value: bedrockPresets.any((p) => p.id == selectedBedrockPresetId)
-                  ? selectedBedrockPresetId
-                  : 'custom',
-              decoration: fieldDecoration(),
-              dropdownColor: lim.panel,
-              style: theme.textTheme.bodyMedium?.copyWith(color: lim.text),
-              items: [
-                const DropdownMenuItem(value: 'custom', child: Text('Custom — pick models below')),
-                for (final preset in bedrockPresets)
-                  DropdownMenuItem(value: preset.id, child: Text(preset.label)),
-              ],
-              onChanged: saving
-                  ? null
-                  : (id) {
-                      if (id != null && id != 'custom') onBedrockPresetApply!(id);
-                    },
-            ),
-            if (selectedBedrockPresetId != 'custom')
-              Padding(
-                padding: const EdgeInsets.only(top: LiminalSpacing.xs),
-                child: Text(
-                  () {
-                    for (final p in bedrockPresets) {
-                      if (p.id == selectedBedrockPresetId) return p.hint;
-                    }
-                    return '';
-                  }(),
-                  style: theme.textTheme.bodySmall?.copyWith(
-                    color: lim.textMuted,
-                    height: 1.45,
-                  ),
+          if (bedrockPresets.isNotEmpty && onBedrockPresetApply != null)
+            ExpansionTile(
+              tilePadding: EdgeInsets.zero,
+              title: const Text('Bedrock model presets'),
+              children: [
+                Text('Bedrock preset', style: theme.textTheme.titleSmall),
+                const SizedBox(height: LiminalSpacing.xs),
+                DropdownButtonFormField<String>(
+                  isExpanded: true,
+                  value:
+                      bedrockPresets.any((p) => p.id == selectedBedrockPresetId)
+                          ? selectedBedrockPresetId
+                          : 'custom',
+                  decoration: fieldDecoration(),
+                  dropdownColor: lim.panel,
+                  style: theme.textTheme.bodyMedium?.copyWith(color: lim.text),
+                  items: [
+                    const DropdownMenuItem(
+                        value: 'custom',
+                        child: Text('Custom — pick models below')),
+                    for (final preset in bedrockPresets)
+                      DropdownMenuItem(
+                          value: preset.id, child: Text(preset.label)),
+                  ],
+                  onChanged: saving
+                      ? null
+                      : (id) {
+                          if (id != null && id != 'custom')
+                            onBedrockPresetApply!(id);
+                        },
                 ),
-              ),
-            const SizedBox(height: LiminalSpacing.md),
-          ],
-          Text('Upstream preference', style: theme.textTheme.titleSmall),
+                if (selectedBedrockPresetId != 'custom')
+                  Padding(
+                    padding: const EdgeInsets.only(top: LiminalSpacing.xs),
+                    child: Text(
+                      () {
+                        for (final p in bedrockPresets) {
+                          if (p.id == selectedBedrockPresetId) return p.hint;
+                        }
+                        return '';
+                      }(),
+                      style: theme.textTheme.bodySmall?.copyWith(
+                        color: lim.textMuted,
+                        height: 1.45,
+                      ),
+                    ),
+                  ),
+                const SizedBox(height: LiminalSpacing.md),
+              ],
+            ),
+          Text('Model provider', style: theme.textTheme.titleSmall),
           const SizedBox(height: LiminalSpacing.xs),
           DropdownButtonFormField<String>(
+            isExpanded: true,
             value: _managedProviderOptions.any((e) => e.key == managedProvider)
                 ? managedProvider
                 : 'auto',
@@ -282,7 +287,22 @@ class ManagedInferencePanel extends StatelessWidget {
               child: Center(child: CircularProgressIndicator()),
             )
           else if (error != null && error!.isNotEmpty)
-            Text(error!, style: TextStyle(color: theme.colorScheme.error))
+            Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  error!.toLowerCase().contains('expired')
+                      ? 'Your managed-model session has expired. Sign in again from Account.'
+                      : 'Models could not be loaded. Check your account connection and try again.',
+                  style: TextStyle(color: theme.colorScheme.error),
+                ),
+                ExpansionTile(
+                  tilePadding: EdgeInsets.zero,
+                  title: const Text('Technical details'),
+                  children: [SelectableText(error!)],
+                ),
+              ],
+            )
           else if (models.isEmpty)
             Text(
               catalogSize == 0
@@ -294,26 +314,35 @@ class ManagedInferencePanel extends StatelessWidget {
             Text('Main model', style: theme.textTheme.titleSmall),
             const SizedBox(height: LiminalSpacing.xs),
             DropdownButtonFormField<String>(
-              value: _dropdownValue(mainModel, allModels, models, managedProvider),
+              isExpanded: true,
+              value:
+                  _dropdownValue(mainModel, allModels, models, managedProvider),
               decoration: fieldDecoration(),
               dropdownColor: lim.panel,
               style: theme.textTheme.bodyMedium?.copyWith(color: lim.text),
-              items: _modelItems(models, allModels, mainModel, managedProvider, lim, theme.textTheme),
-              onChanged: saving ? null : (id) => id == null ? null : onMainModel(id),
+              items: _modelItems(models, allModels, mainModel, managedProvider,
+                  lim, theme.textTheme),
+              onChanged:
+                  saving ? null : (id) => id == null ? null : onMainModel(id),
             ),
             const SizedBox(height: LiminalSpacing.md),
             Text('Fast model', style: theme.textTheme.titleSmall),
             const SizedBox(height: LiminalSpacing.xs),
             DropdownButtonFormField<String>(
-              value: _dropdownValue(fastModel, allModels, models, managedProvider),
+              isExpanded: true,
+              value:
+                  _dropdownValue(fastModel, allModels, models, managedProvider),
               decoration: fieldDecoration(),
               dropdownColor: lim.panel,
               style: theme.textTheme.bodyMedium?.copyWith(color: lim.text),
-              items: _modelItems(models, allModels, fastModel, managedProvider, lim, theme.textTheme),
-              onChanged: saving ? null : (id) => id == null ? null : onFastModel(id),
+              items: _modelItems(models, allModels, fastModel, managedProvider,
+                  lim, theme.textTheme),
+              onChanged:
+                  saving ? null : (id) => id == null ? null : onFastModel(id),
             ),
           ],
         ],
+      ),
       ),
     );
   }
@@ -326,7 +355,8 @@ class _ManagedModelFamilyGroup {
   final List<ManagedInferenceModel> models;
 }
 
-List<_ManagedModelFamilyGroup> _groupModelsByFamily(List<ManagedInferenceModel> models) {
+List<_ManagedModelFamilyGroup> _groupModelsByFamily(
+    List<ManagedInferenceModel> models) {
   final grouped = <String, List<ManagedInferenceModel>>{};
   for (final row in models) {
     final family = row.family.trim().isEmpty ? 'other' : row.family.trim();
@@ -385,7 +415,9 @@ String _familyLabel(String family) {
     case 'cohere':
       return 'Cohere';
     default:
-      return family.isEmpty ? 'Other' : family[0].toUpperCase() + family.substring(1);
+      return family.isEmpty
+          ? 'Other'
+          : family[0].toUpperCase() + family.substring(1);
   }
 }
 

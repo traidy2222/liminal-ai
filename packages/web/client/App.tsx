@@ -2623,9 +2623,9 @@ export function App() {
           >
             <div
               id="persona-bootstrap-title"
-              style={{ color: CYAN, fontWeight: 700, marginBottom: 6, fontSize: 11, letterSpacing: "0.12em", fontFamily: "monospace" }}
+              style={{ color: "var(--lim-text)", fontWeight: 500, marginBottom: 14, fontSize: 28, letterSpacing: "-.8px", fontFamily: "Liminal Display, sans-serif" }}
             >
-              ◆ WELCOME — PERSONALITY
+              Make Liminal your own
             </div>
             <div style={{ marginBottom: 10, color: "#c8d4e0", lineHeight: 1.65, fontSize: 14 }}>
               Choose how the assistant should <strong style={{ color: "#e8f0ff" }}>sound</strong> (tone, pace, humor). Tools,
@@ -2690,7 +2690,7 @@ export function App() {
                   setBootstrapSubmitting(false);
                 }}
               >
-                SAVE VOICE · START
+                Save voice and start
               </button>
               {state.personaBootstrapAllowSkip && (
                 <button
@@ -2978,7 +2978,7 @@ const styles = {
     fontSize: 13,
     cursor: "pointer",
     fontFamily: "inherit",
-    background: "rgba(0,8,18,0.8)",
+    background: "var(--lim-surface, #191c27)",
   },
   modal: {
     position: "fixed" as const,
@@ -2991,11 +2991,11 @@ const styles = {
     backdropFilter: "blur(6px)",
   },
   modalBox: {
-    background: "rgba(2,6,18,0.99)",
+    background: "var(--lim-surface, #191c27)",
     border: `1px solid rgba(var(--lim-accent-rgb),0.2)`,
-    borderRadius: 4,
-    padding: 22,
-    width: 520,
+    borderRadius: 18,
+    padding: 28,
+    width: 560,
     maxWidth: "90vw",
     maxHeight: "80vh",
     overflowY: "auto" as const,

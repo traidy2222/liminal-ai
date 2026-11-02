@@ -47,3 +47,6 @@ enterprise-bundle.manifest.json
 
 *.txt
 
+
+# Required sandbox fixture (intentional typo for edit-and-verify scenarios).
+!packages/eval/fixtures/sandbox/read-edit-verify/src/greeting.txt

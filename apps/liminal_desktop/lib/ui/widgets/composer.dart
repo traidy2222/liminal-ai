@@ -33,6 +33,15 @@ typedef ComposerSlashCallback = Future<ComposerSlashOutcome> Function(
   int attachmentCount,
 );
 
+/// Task suggestions fill the draft without sending or discarding attachments.
+class ComposerDraftController extends ChangeNotifier {
+  String text = '';
+  void suggest(String value) {
+    text = value;
+    notifyListeners();
+  }
+}
+
 class Composer extends StatefulWidget {
   const Composer({
     super.key,
@@ -48,6 +57,7 @@ class Composer extends StatefulWidget {
     this.dictationNotice,
     this.onDismissDictationNotice,
     this.contextSnapshot,
+    this.draftController,
   });
 
   final bool enabled;
@@ -62,6 +72,7 @@ class Composer extends StatefulWidget {
   final String? dictationNotice;
   final VoidCallback? onDismissDictationNotice;
   final ContextSnapshot? contextSnapshot;
+  final ComposerDraftController? draftController;
 
   @override
   State<Composer> createState() => _ComposerState();
@@ -89,6 +100,7 @@ class _ComposerState extends State<Composer> {
   @override
   void initState() {
     super.initState();
+    widget.draftController?.addListener(_applySuggestedDraft);
     _dictationSpan = ComposerDictationSpan(_controller);
     _controller.addListener(_refreshSlashCompletions);
     _wireDictation();
@@ -97,7 +109,8 @@ class _ComposerState extends State<Composer> {
   }
 
   void _refreshSlashCompletions() {
-    final cursor = _controller.selection.baseOffset.clamp(0, _controller.text.length);
+    final cursor =
+        _controller.selection.baseOffset.clamp(0, _controller.text.length);
     final items = listSlashCompletions(_controller.text, cursor);
     if (!mounted) return;
     setState(() {
@@ -106,8 +119,18 @@ class _ComposerState extends State<Composer> {
     });
   }
 
+  void _applySuggestedDraft() {
+    if (widget.busy || !widget.enabled) return;
+    final text = widget.draftController?.text;
+    if (text == null) return;
+    _controller.value = TextEditingValue(
+        text: text, selection: TextSelection.collapsed(offset: text.length),);
+    _focusNode.requestFocus();
+  }
+
   void _applySlashPick(SlashCompletionItem item) {
-    final cursor = _controller.selection.baseOffset.clamp(0, _controller.text.length);
+    final cursor =
+        _controller.selection.baseOffset.clamp(0, _controller.text.length);
     final next = applySlashCompletion(_controller.text, cursor, item);
     _controller.value = _controller.value.copyWith(
       text: next.text,
@@ -126,11 +149,13 @@ class _ComposerState extends State<Composer> {
       return KeyEventResult.handled;
     }
     if (event.logicalKey == LogicalKeyboardKey.arrowDown) {
-      setState(() => _slashSelected = (_slashSelected + 1).clamp(0, _slashItems.length - 1));
+      setState(() => _slashSelected =
+          (_slashSelected + 1).clamp(0, _slashItems.length - 1),);
       return KeyEventResult.handled;
     }
     if (event.logicalKey == LogicalKeyboardKey.arrowUp) {
-      setState(() => _slashSelected = (_slashSelected - 1).clamp(0, _slashItems.length - 1));
+      setState(() => _slashSelected =
+          (_slashSelected - 1).clamp(0, _slashItems.length - 1),);
       return KeyEventResult.handled;
     }
     if (event.logicalKey == LogicalKeyboardKey.tab) {
@@ -143,6 +168,10 @@ class _ComposerState extends State<Composer> {
   @override
   void didUpdateWidget(covariant Composer oldWidget) {
     super.didUpdateWidget(oldWidget);
+    if (oldWidget.draftController != widget.draftController) {
+      oldWidget.draftController?.removeListener(_applySuggestedDraft);
+      widget.draftController?.addListener(_applySuggestedDraft);
+    }
     if (oldWidget.dictation != widget.dictation) {
       oldWidget.dictation?.removeListener(_onDictationChanged);
       widget.dictation?.addListener(_onDictationChanged);
@@ -172,7 +201,8 @@ class _ComposerState extends State<Composer> {
       final full = _dictationSpan.buildFullMessageForAutoSend();
       final message = full.isNotEmpty ? full : refined;
       if (message.isEmpty) {
-        setState(() => _localDictationNotice = 'Empty transcript — nothing to send.');
+        setState(() =>
+            _localDictationNotice = 'Empty transcript — nothing to send.',);
         return;
       }
       final err = await widget.onDictationAutoSend?.call(message);
@@ -220,7 +250,8 @@ class _ComposerState extends State<Composer> {
     for (final f in result.files) {
       final bytes = f.bytes;
       if (bytes == null || bytes.isEmpty) continue;
-      final mime = lookupMimeType(f.name, headerBytes: bytes) ?? 'application/octet-stream';
+      final mime = lookupMimeType(f.name, headerBytes: bytes) ??
+          'application/octet-stream';
       _tryAdd(
         UserImageAttachment(
           name: f.name,
@@ -243,7 +274,8 @@ class _ComposerState extends State<Composer> {
       final bytes = await xfile.readAsBytes();
       if (bytes.isEmpty) continue;
       final name = xfile.name;
-      final mime = lookupMimeType(name, headerBytes: bytes) ?? 'application/octet-stream';
+      final mime = lookupMimeType(name, headerBytes: bytes) ??
+          'application/octet-stream';
       _tryAdd(
         UserImageAttachment(
           name: name,
@@ -343,13 +375,14 @@ class _ComposerState extends State<Composer> {
       return;
     }
     final name = path.split(RegExp(r'[\\/]')).last;
-    final mime = lookupMimeType(name, headerBytes: bytes) ?? 'application/octet-stream';
+    final mime =
+        lookupMimeType(name, headerBytes: bytes) ?? 'application/octet-stream';
     _tryAdd(UserImageAttachment(
       name: name,
       mimeType: mime,
       bytes: bytes,
       source: 'path',
-    ));
+    ),);
     setState(() => _attachError = null);
   }
 
@@ -362,7 +395,8 @@ class _ComposerState extends State<Composer> {
       return;
     }
 
-    final parsed = workflowPreset == null ? parseComposerSlashSubmit(text) : null;
+    final parsed =
+        workflowPreset == null ? parseComposerSlashSubmit(text) : null;
     if (parsed != null && widget.onSlash != null) {
       final outcome = await widget.onSlash!(parsed, _attachments.length);
       if (outcome.handled) {
@@ -409,10 +443,12 @@ class _ComposerState extends State<Composer> {
     });
   }
 
-  void _submitReceipts() => unawaited(_submit(workflowPreset: 'receipt_to_xero'));
+  void _submitReceipts() =>
+      unawaited(_submit(workflowPreset: 'receipt_to_xero'));
 
   @override
   void dispose() {
+    widget.draftController?.removeListener(_applySuggestedDraft);
     _controller.removeListener(_refreshSlashCompletions);
     HardwareKeyboard.instance.removeHandler(_onKeyEvent);
     widget.dictation?.removeListener(_onDictationChanged);
@@ -421,8 +457,7 @@ class _ComposerState extends State<Composer> {
     super.dispose();
   }
 
-  String? get _notice =>
-      widget.dictationNotice ?? _localDictationNotice;
+  String? get _notice => widget.dictationNotice ?? _localDictationNotice;
 
   @override
   Widget build(BuildContext context) {
@@ -430,8 +465,7 @@ class _ComposerState extends State<Composer> {
     final d = widget.dictation;
     final speech = widget.speechOutput;
     final sessionActive = d?.sessionActive ?? false;
-    final showTtsBanner =
-        sessionActive && widget.config?.ttsEnabled != true;
+    final showTtsBanner = sessionActive && widget.config?.ttsEnabled != true;
 
     return DropTarget(
       onDragEntered: (_) {
@@ -445,11 +479,12 @@ class _ComposerState extends State<Composer> {
         decoration: BoxDecoration(
           borderRadius: BorderRadius.circular(12),
           border: _dragOver
-              ? Border.all(color: lim.accent.withValues(alpha: 0.55), width: 1.5)
+              ? Border.all(
+                  color: lim.accent.withValues(alpha: 0.55), width: 1.5,)
               : null,
         ),
         child: SafeArea(
-        child: Column(
+          child: Column(
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
@@ -483,7 +518,9 @@ class _ComposerState extends State<Composer> {
                     style: TextStyle(color: lim.warn, fontSize: 12),
                   ),
                 ),
-              if (d != null && sessionActive && d.status != DictationStatus.idle)
+              if (d != null &&
+                  sessionActive &&
+                  d.status != DictationStatus.idle)
                 Padding(
                   padding: const EdgeInsets.only(bottom: 6),
                   child: Row(
@@ -571,14 +608,17 @@ class _ComposerState extends State<Composer> {
                                 style: const TextStyle(fontSize: 11),
                               ),
                               onDeleted: widget.enabled
-                                  ? () => setState(() => _attachments.removeAt(i))
+                                  ? () =>
+                                      setState(() => _attachments.removeAt(i))
                                   : null,
                             ),
                         ],
                       ),
                       const SizedBox(height: 6),
                       TextButton.icon(
-                        onPressed: widget.enabled && !widget.busy ? _submitReceipts : null,
+                        onPressed: widget.enabled && !widget.busy
+                            ? _submitReceipts
+                            : null,
                         icon: const Icon(Icons.receipt_long_outlined, size: 16),
                         label: const Text('Process receipts'),
                       ),
@@ -600,75 +640,88 @@ class _ComposerState extends State<Composer> {
                   if (d != null)
                     LiminalIconButton(
                       icon: sessionActive ? Icons.mic : Icons.mic_none_outlined,
-                      tooltip: sessionActive ? 'Stop voice session' : 'Start voice session',
+                      tooltip: sessionActive
+                          ? 'Stop voice session'
+                          : 'Start voice session',
                       onPressed: widget.enabled ? _toggleDictation : null,
                       selected: sessionActive,
                     ),
                   LiminalIconButton(
                     icon: Icons.attach_file_outlined,
-                    tooltip: 'Attach files (drag & drop, or Ctrl+V / Cmd+V paste)',
-                    onPressed: widget.enabled && !widget.busy ? _pickFiles : null,
+                    tooltip:
+                        'Attach files (drag & drop, or Ctrl+V / Cmd+V paste)',
+                    onPressed:
+                        widget.enabled && !widget.busy ? _pickFiles : null,
                   ),
                   Expanded(
                     child: Focus(
                       onKeyEvent: _onComposerKey,
                       child: TextField(
-                      controller: _controller,
-                      focusNode: _focusNode,
-                      enabled: widget.enabled,
-                      minLines: 1,
-                      maxLines: 6,
-                      style: Theme.of(context).textTheme.bodyLarge?.copyWith(color: lim.text),
-                      textInputAction: TextInputAction.send,
-                      onSubmitted: (_) => unawaited(_submit()),
-                      contextMenuBuilder: (context, editableTextState) {
-                        return AdaptiveTextSelectionToolbar.buttonItems(
-                          anchors: editableTextState.contextMenuAnchors,
-                          buttonItems: <ContextMenuButtonItem>[
-                            ContextMenuButtonItem(
-                              onPressed: () {
-                                ContextMenuController.removeAny();
-                                editableTextState.cutSelection(SelectionChangedCause.toolbar);
-                              },
-                              type: ContextMenuButtonType.cut,
-                            ),
-                            ContextMenuButtonItem(
-                              onPressed: () {
-                                ContextMenuController.removeAny();
-                                editableTextState.copySelection(SelectionChangedCause.toolbar);
-                              },
-                              type: ContextMenuButtonType.copy,
-                            ),
-                            ContextMenuButtonItem(
-                              onPressed: () {
-                                ContextMenuController.removeAny();
-                                unawaited(_handlePaste());
-                              },
-                              type: ContextMenuButtonType.paste,
-                            ),
-                            ContextMenuButtonItem(
-                              onPressed: () {
-                                ContextMenuController.removeAny();
-                                editableTextState.selectAll(SelectionChangedCause.toolbar);
-                              },
-                              type: ContextMenuButtonType.selectAll,
-                            ),
-                          ],
-                        );
-                      },
-                      decoration: InputDecoration(
-                        hintText: sessionActive
-                            ? 'Voice session on — speak or type…'
-                            : (widget.config?.resolvedCopy.composerPlaceholder ??
-                                'Message ${lim.displayLabel}…'),
-                        filled: true,
-                        fillColor: lim.surface.withValues(alpha: 0.55),
-                        contentPadding: const EdgeInsets.symmetric(
-                          horizontal: LiminalSpacing.sm,
-                          vertical: LiminalSpacing.sm,
+                        controller: _controller,
+                        focusNode: _focusNode,
+                        enabled: widget.enabled,
+                        minLines: 1,
+                        maxLines: 6,
+                        style: Theme.of(context)
+                            .textTheme
+                            .bodyLarge
+                            ?.copyWith(color: lim.text),
+                        textInputAction: TextInputAction.send,
+                        onSubmitted: (_) => unawaited(_submit()),
+                        contextMenuBuilder: (context, editableTextState) {
+                          return AdaptiveTextSelectionToolbar.buttonItems(
+                            anchors: editableTextState.contextMenuAnchors,
+                            buttonItems: <ContextMenuButtonItem>[
+                              ContextMenuButtonItem(
+                                onPressed: () {
+                                  ContextMenuController.removeAny();
+                                  editableTextState.cutSelection(
+                                      SelectionChangedCause.toolbar,);
+                                },
+                                type: ContextMenuButtonType.cut,
+                              ),
+                              ContextMenuButtonItem(
+                                onPressed: () {
+                                  ContextMenuController.removeAny();
+                                  editableTextState.copySelection(
+                                      SelectionChangedCause.toolbar,);
+                                },
+                                type: ContextMenuButtonType.copy,
+                              ),
+                              ContextMenuButtonItem(
+                                onPressed: () {
+                                  ContextMenuController.removeAny();
+                                  unawaited(_handlePaste());
+                                },
+                                type: ContextMenuButtonType.paste,
+                              ),
+                              ContextMenuButtonItem(
+                                onPressed: () {
+                                  ContextMenuController.removeAny();
+                                  editableTextState
+                                      .selectAll(SelectionChangedCause.toolbar);
+                                },
+                                type: ContextMenuButtonType.selectAll,
+                              ),
+                            ],
+                          );
+                        },
+                        decoration: InputDecoration(
+                          hintText: sessionActive
+                              ? 'Voice session on — speak or type…'
+                              : (widget.config?.resolvedCopy
+                                      .composerPlaceholder ??
+                                  'Message ${lim.displayLabel}…'),
+                            filled: false,
+                            border: InputBorder.none,
+                            enabledBorder: InputBorder.none,
+                            focusedBorder: InputBorder.none,
+                          contentPadding: const EdgeInsets.symmetric(
+                            horizontal: LiminalSpacing.sm,
+                            vertical: LiminalSpacing.sm,
+                          ),
                         ),
                       ),
-                    ),
                     ),
                   ),
                   const SizedBox(width: LiminalSpacing.xs),
@@ -691,14 +744,15 @@ class _ComposerState extends State<Composer> {
                       label: widget.config?.resolvedCopy.sendLabel ?? 'Send',
                       icon: Icons.send,
                       dense: true,
-                      onPressed: widget.enabled ? () => unawaited(_submit()) : null,
+                      onPressed:
+                          widget.enabled ? () => unawaited(_submit()) : null,
                     ),
                 ],
               ),
             ],
+          ),
         ),
       ),
-    ),
     );
   }
 

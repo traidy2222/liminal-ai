@@ -3,24 +3,13 @@
  * multi-step agents, debug chains, and full conversations.
  * @see https://openrouter.ai/docs/api/api-reference/chat/send-chat-completion-request
  */
-import { DEFAULT_AGENT_API_BASE_URL } from "./harness_default_constants.js";
+import { isOpenRouterApiBaseUrl } from "./provider_urls.js";
+export { isOpenRouterApiBaseUrl } from "./provider_urls.js";
 import { effectiveHarnessEnvRaw } from "./harness_effective_env.js";
 import { resolveCurrentChatId } from "./chat_context.js";
 import { isManagedInferenceBaseUrl } from "./inference_session.js";
 
 const OPENROUTER_SESSION_ID_MAX_LEN = 256;
-
-/** True when the configured API base is OpenRouter (or compatible proxy). */
-export function isOpenRouterApiBaseUrl(baseURL: string | undefined | null): boolean {
-  const raw = (baseURL ?? DEFAULT_AGENT_API_BASE_URL).trim();
-  if (!raw) return false;
-  try {
-    const host = new URL(raw).hostname.toLowerCase();
-    return host === "openrouter.ai" || host.endsWith(".openrouter.ai");
-  } catch {
-    return /openrouter\.ai/i.test(raw);
-  }
-}
 
 /** OpenRouter-compatible routing/session extras (direct OR Vireon managed proxy). */
 export function supportsOpenRouterRequestExtras(baseURL: string | undefined | null): boolean {

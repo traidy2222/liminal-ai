@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
-import { filterManagedInferenceCatalog, type ManagedInferenceModel } from "@liminal/core";
+import { filterManagedInferenceCatalog, type ManagedInferenceModel } from "@liminal/core/managed-catalog";
 import { webApiFetch } from "../webApiAuth.js";
 import { WEB_SERVER_BASE } from "../useSSE.js";
 import {
@@ -11,22 +11,22 @@ import {
 
 const CYAN = "var(--lim-accent, #00d4ff)";
 const AMBER = "var(--lim-warning, #ffb347)";
-const GREEN = "var(--lim-success, #00ff88)";
+
 
 const selectStyle: React.CSSProperties = {
   width: "100%",
   maxWidth: 520,
-  fontSize: 12,
+  fontSize: 14,
   padding: "8px 10px",
-  borderRadius: 2,
-  border: "1px solid rgba(var(--lim-accent-rgb),0.2)",
-  background: "rgba(0,10,20,0.95)",
-  color: "#dde8f0",
-  fontFamily: "monospace",
+  borderRadius: 10,
+  border: "1px solid var(--lim-border)",
+  background: "var(--lim-bg)",
+  color: "var(--lim-text)",
+  fontFamily: "inherit",
 };
 
 const MANAGED_PROVIDER_OPTIONS = [
-  { value: "auto", label: "auto — shape-based routing + cross-provider failover" },
+  { value: "auto", label: "Automatic" },
   { value: "bedrock", label: "AWS Bedrock" },
   { value: "openrouter", label: "OpenRouter" },
   { value: "kimchi", label: "Cast AI (Kimchi)" },
@@ -167,25 +167,25 @@ export function ManagedBedrockModelsSection({
     <div
       style={{
         marginBottom: 12,
-        padding: 10,
-        borderRadius: 2,
-        border: "1px solid rgba(var(--lim-accent-rgb),0.15)",
-        background: "rgba(0,12,24,0.6)",
+        padding: 18,
+        borderRadius: 10,
+        border: "1px solid var(--lim-border)",
+        background: "var(--lim-surface)",
       }}
     >
-      <div style={{ fontSize: 11, color: GREEN, marginBottom: 6, fontWeight: 700 }}>
-        Managed inference (Vireon · {upstreamLabel})
+      <div style={{ fontSize: 18, color: "var(--lim-text)", marginBottom: 6, fontWeight: 700 }}>
+        Models on your plan
       </div>
       <div
         style={{
           display: "grid",
-          gridTemplateColumns: "120px 1fr",
+          gridTemplateColumns: "minmax(0, 1fr)",
           gap: 8,
           alignItems: "center",
           marginBottom: 10,
         }}
       >
-        <span style={{ fontSize: 11, color: "#aabbcc" }}>upstream</span>
+        <span style={{ fontSize: 13, color: "var(--lim-text-muted)" }}>Model provider</span>
         <select
           disabled={disabled}
           value={managedProvider || "auto"}
@@ -201,16 +201,18 @@ export function ManagedBedrockModelsSection({
         </select>
       </div>
       {bedrockPresets.length > 0 ? (
+        <details className="settings-technical">
+        <summary>Bedrock model presets</summary>
         <div
           style={{
             display: "grid",
-            gridTemplateColumns: "120px 1fr",
+            gridTemplateColumns: "minmax(0, 1fr)",
             gap: 8,
             alignItems: "center",
             marginBottom: 10,
           }}
         >
-          <span style={{ fontSize: 11, color: "#aabbcc" }}>preset</span>
+          <span style={{ fontSize: 13, color: "var(--lim-text-muted)" }}>preset</span>
           <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
             <select
               disabled={disabled}
@@ -235,26 +237,28 @@ export function ManagedBedrockModelsSection({
               ))}
             </select>
             {selectedBedrockHint ? (
-              <span style={{ fontSize: 10, color: "#8899aa", lineHeight: 1.45 }}>{selectedBedrockHint}</span>
+              <span style={{ fontSize: 12, color: "var(--lim-text-muted)", lineHeight: 1.45 }}>{selectedBedrockHint}</span>
             ) : null}
           </div>
         </div>
+        </details>
       ) : null}
       {!vireonConnected ? (
-        <div style={{ fontSize: 11, color: AMBER, lineHeight: 1.45 }}>
+        <div style={{ fontSize: 13, color: AMBER, lineHeight: 1.45 }}>
           Sign in to Vireon to load the managed model catalog.
         </div>
       ) : loading ? (
-        <div style={{ fontSize: 11, color: CYAN }}>Loading managed models…</div>
+        <div style={{ fontSize: 13, color: CYAN }}>Loading managed models…</div>
       ) : error ? (
-        <div style={{ fontSize: 11, color: AMBER, lineHeight: 1.45 }}>
-          {error}{" "}
+        <div style={{ fontSize: 13, color: AMBER, lineHeight: 1.45 }}>
+          {error.toLowerCase().includes("expired") ? "Your managed-model session has expired. Sign in again from Account." : "Models could not be loaded. Check your account connection and try again."}{" "}
+          <details className="settings-technical"><summary>Technical details</summary>{error}</details>
           <button
             type="button"
             onClick={() => void load()}
             disabled={disabled}
             style={{
-              fontSize: 10,
+              fontSize: 12,
               color: CYAN,
               background: "transparent",
               border: "none",
@@ -266,7 +270,7 @@ export function ManagedBedrockModelsSection({
           </button>
         </div>
       ) : filteredModels.length === 0 ? (
-        <div style={{ fontSize: 11, color: AMBER }}>
+        <div style={{ fontSize: 13, color: AMBER }}>
           {models.length === 0
             ? "No models returned from managed inference."
             : `No models available on ${managedProvider || "auto"} upstream.`}
@@ -276,13 +280,13 @@ export function ManagedBedrockModelsSection({
           <div
             style={{
               display: "grid",
-              gridTemplateColumns: "120px 1fr",
+              gridTemplateColumns: "minmax(0, 1fr)",
               gap: 8,
               alignItems: "center",
               marginBottom: 8,
             }}
           >
-            <span style={{ fontSize: 11, color: "#aabbcc" }}>main model</span>
+            <span style={{ fontSize: 13, color: "var(--lim-text-muted)" }}>Main model</span>
             <select
               disabled={disabled}
               value={mainValue}
@@ -307,12 +311,12 @@ export function ManagedBedrockModelsSection({
           <div
             style={{
               display: "grid",
-              gridTemplateColumns: "120px 1fr",
+              gridTemplateColumns: "minmax(0, 1fr)",
               gap: 8,
               alignItems: "center",
             }}
           >
-            <span style={{ fontSize: 11, color: "#aabbcc" }}>fast model</span>
+            <span style={{ fontSize: 13, color: "var(--lim-text-muted)" }}>Fast model</span>
             <select
               disabled={disabled}
               value={fastValue}
@@ -334,13 +338,12 @@ export function ManagedBedrockModelsSection({
               ))}
             </select>
           </div>
-          <div style={{ fontSize: 10, color: "#6a7a8a", marginTop: 8, lineHeight: 1.45 }}>
+          <div style={{ fontSize: 12, color: "var(--lim-text-muted)", marginTop: 8, lineHeight: 1.45 }}>
             {filteredModels.length}
             {managedProvider && managedProvider !== "auto"
               ? ` models on ${managedProvider}`
               : " models in catalog"}
-            . Save runtime prefs after changes. Set inference mode to <strong>byok</strong> below to
-            use your own API key instead.
+            . Use Save changes to apply your selection.
           </div>
         </>
       )}

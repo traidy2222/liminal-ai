@@ -8,6 +8,7 @@ import {
   resolveBackendSelection,
   resolvePresetSelection,
 } from "./providerPresets.js";
+import { everydaySettings, settingsCategories, settingsCategory } from "./settingsPresentation.js";
 import { IntegrationsPanel } from "./IntegrationsPanel.js";
 import { ManagedBedrockModelsSection } from "./ManagedBedrockModelsSection.js";
 
@@ -50,9 +51,10 @@ function resolutionLabel(source: string): string {
 function groupBySubgroup(rows: HarnessSettingsApiField[]): [string, string, HarnessSettingsApiField[]][] {
   const m = new Map<string, { label: string; rows: HarnessSettingsApiField[] }>();
   for (const f of rows) {
-    const prev = m.get(f.subgroupId);
+    const group = f.key === "AGENT_EFFORT" || f.key === "AGENT_TTS_ENABLED" ? "Response & voice" : f.subgroupLabel;
+    const prev = m.get(group);
     if (prev) prev.rows.push(f);
-    else m.set(f.subgroupId, { label: f.subgroupLabel, rows: [f] });
+    else m.set(group, { label: group, rows: [f] });
   }
   return [...m.entries()]
     .sort(([a], [b]) => a.localeCompare(b))
@@ -80,25 +82,26 @@ const modal: React.CSSProperties = {
 };
 
 const modalInner: React.CSSProperties = {
-  width: "min(960px, 98vw)",
-  height: "min(720px, 90vh)",
-  maxHeight: "90vh",
+  width: "min(1120px, 98vw)",
+  height: "min(840px, 94vh)",
+  maxHeight: "94vh",
   display: "flex",
   flexDirection: "column",
-  background: "rgba(2,6,14,0.96)",
-  border: "1px solid rgba(var(--lim-accent-rgb),0.25)",
-  boxShadow: "0 0 40px rgba(0,0,0,0.5)",
-  borderRadius: 4,
+  background: "var(--lim-surface)",
+  border: "1px solid rgba(190,195,218,0.18)",
+  boxShadow: "0 24px 100px rgba(0,0,0,0.4)",
+  borderRadius: 18,
+  overflow: "hidden",
 };
 
 const btn: React.CSSProperties = {
-  fontFamily: "monospace",
-  fontSize: 11,
-  letterSpacing: "0.08em",
+  fontFamily: "var(--lim-font-body, system-ui)",
+  fontSize: 13,
+  letterSpacing: "0",
   padding: "10px 14px",
-  borderRadius: 2,
+  borderRadius: 8,
   border: "1px solid rgba(var(--lim-accent-rgb),0.25)",
-  background: "rgba(0,20,40,0.85)",
+  background: "var(--lim-surface)",
   color: CYAN,
   cursor: "pointer",
 };
@@ -179,15 +182,15 @@ export function SettingsModal({
 }: SettingsModalProps) {
   const [activeTabId, setActiveTabId] = useState<string>("models_api");
   const [search, setSearch] = useState("");
+  const [advanced, setAdvanced] = useState(false);
+  const navigation = [...settingsCategories, { id: "account", title: "Account" }, { id: "integrations", title: "Connected tools" }];
 
   useEffect(() => {
     if (!open) {
       setSearch("");
       return;
     }
-    if (tabs.length && !tabs.some((t) => t.id === activeTabId)) {
-      setActiveTabId(tabs[0]!.id);
-    }
+    if (!navigation.some((t) => t.id === activeTabId)) setActiveTabId("models_api");
   }, [open, tabs, activeTabId]);
 
   const searchQ = search.trim().toLowerCase();
@@ -195,6 +198,7 @@ export function SettingsModal({
     if (!searchQ) return null;
     return fields.filter(
       (f) =>
+        (everydaySettings[f.key]?.label.toLowerCase().includes(searchQ) ?? false) ||
         f.label.toLowerCase().includes(searchQ) ||
         f.key.toLowerCase().includes(searchQ) ||
         f.description.toLowerCase().includes(searchQ) ||
@@ -217,14 +221,11 @@ export function SettingsModal({
     [fields, searchQ]
   );
 
-  const activeRows = useMemo(() => {
-    if (filtered) return filtered;
-    return fields.filter((f) => f.tabId === activeTabId);
-  }, [fields, activeTabId, filtered]);
-
-  const subgroups = useMemo(() => groupBySubgroup(activeRows), [activeRows]);
-
-  const showProvider = !!filtered || activeTabId === "models_api";
+  const categoryRows = fields.filter((f) => settingsCategory(f.tabId, f.key) === activeTabId && !["AGENT_INFERENCE_MODE", "AGENT_MANAGED_PROVIDER"].includes(f.key));
+  const activeRows = filtered ?? categoryRows.filter((f) => advanced || activeTabId === "advanced" || everydaySettings[f.key]);
+  const hiddenCount = categoryRows.length - activeRows.length;
+  const subgroups = groupBySubgroup(activeRows);
+  const showProvider = !filtered && activeTabId === "models_api";
   const showIntegrations = activeTabId === "integrations" && !filtered;
   const providerPresetLocked = providerModelLocked || providerBaseLocked;
   const resolvedBackendId = useMemo(
@@ -252,39 +253,37 @@ export function SettingsModal({
   }, [resolvedBackendId]);
 
   const providerHintText =
-    "Values reflect the running server harness. API keys are never displayed. ENV = read-only field.";
+    "Choose how Liminal connects to a model. Keys stay on your server.";
 
   if (!open) return null;
 
   return (
     <div style={modal} role="dialog" aria-modal="true" aria-labelledby="settings-modal-title">
-      <div style={modalInner}>
+      <div style={modalInner} className="lim-settings-panel">
         <div
           style={{
             flexShrink: 0,
-            padding: "14px 16px 10px",
+            padding: "24px 24px 18px",
             borderBottom: "1px solid rgba(var(--lim-accent-rgb),0.12)",
           }}
         >
           <div
             id="settings-modal-title"
             style={{
-              color: CYAN,
-              fontWeight: 700,
-              marginBottom: 8,
-              fontSize: 11,
-              letterSpacing: "0.12em",
-              fontFamily: "monospace",
+              color: "var(--lim-text)",
+              fontWeight: 500,
+              marginBottom: 12,
+              fontSize: 28,
+              letterSpacing: "-0.8px",
+              fontFamily: "'Liminal Display', var(--lim-font-body)",
             }}
           >
-            HARNESS SETTINGS
+            Settings
           </div>
-          {hint ? (
-            <div style={{ fontSize: 11, color: "#889aaa", marginBottom: 10, lineHeight: 1.5 }}>{hint}</div>
-          ) : null}
+          <div className="settings-intro">Make Liminal work the way you do. Advanced controls are tucked away until you need them.</div>
           <input
             type="search"
-            placeholder="Search settings…"
+            placeholder="Search all settings, including advanced…"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             disabled={loading || saving}
@@ -293,8 +292,8 @@ export function SettingsModal({
               boxSizing: "border-box",
               padding: "8px 10px",
               fontSize: 12,
-              fontFamily: "monospace",
-              borderRadius: 2,
+              fontFamily: "var(--lim-font-body)",
+              borderRadius: 10,
               border: "1px solid rgba(var(--lim-accent-rgb),0.2)",
               background: "rgba(0,10,20,0.9)",
               color: "#dde8f0",
@@ -304,34 +303,35 @@ export function SettingsModal({
         </div>
 
         {loading ? (
-          <div style={{ padding: 16, color: AMBER, fontSize: 12, fontFamily: "monospace", flex: 1 }}>Loading…</div>
+          <div style={{ padding: 16, color: AMBER, fontSize: 12, fontFamily: "var(--lim-font-body)", flex: 1 }}>Loading…</div>
         ) : (
-          <div style={{ display: "flex", flex: 1, minHeight: 0, flexDirection: "row" }}>
+          <div className="lim-settings-body" style={{ display: "flex", flex: 1, minHeight: 0, flexDirection: "row" }}>
             {!filtered && (
               <nav
                 style={{
-                  width: 168,
+                  width: 190,
                   flexShrink: 0,
                   borderRight: "1px solid rgba(var(--lim-accent-rgb),0.1)",
-                  padding: "10px 0",
+                  padding: "14px 8px",
                   overflowY: "auto",
                 }}
                 aria-label="Settings categories"
               >
-                {tabs.map((t) => {
+                {navigation.map((t) => {
                   const hit = tabHasMatch(t.id);
                   return (
                     <button
                       key={t.id}
                       type="button"
-                      onClick={() => setActiveTabId(t.id)}
+                      onClick={() => { setActiveTabId(t.id); setAdvanced(false); }}
                       style={{
                         display: "block",
                         width: "100%",
                         textAlign: "left",
-                        padding: "8px 12px",
-                        fontSize: 11,
-                        fontFamily: "monospace",
+                        padding: "11px 14px",
+                        fontSize: 13,
+                        fontFamily: "var(--lim-font-body)",
+                        borderRadius: 7,
                         border: "none",
                         borderLeft:
                           activeTabId === t.id ? `3px solid ${CYAN}` : "3px solid transparent",
@@ -355,7 +355,7 @@ export function SettingsModal({
                     padding: "8px 14px",
                     fontSize: 11,
                     color: AMBER,
-                    fontFamily: "monospace",
+                    fontFamily: "var(--lim-font-body)",
                     borderBottom: "1px solid rgba(var(--lim-accent-rgb),0.08)",
                   }}
                 >
@@ -364,29 +364,24 @@ export function SettingsModal({
               ) : null}
 
               <div style={{ flex: 1, overflowY: "auto", padding: "12px 14px 8px" }}>
-                {showProvider ? (
-                  <div style={{ marginBottom: 16, paddingBottom: 12, borderBottom: "1px solid rgba(var(--lim-accent-rgb),0.12)" }}>
-                    <div style={{ color: AMBER, fontWeight: 700, marginBottom: 8, fontSize: 11, letterSpacing: "0.08em" }}>
-                      Provider (live harness)
-                    </div>
-                    <div
+                {activeTabId === "account" && !filtered ? (<div className="settings-account">                    <div
                       style={{
                         marginBottom: 12,
                         padding: 10,
-                        borderRadius: 2,
+                        borderRadius: 10,
                         border: "1px solid rgba(var(--lim-accent-rgb),0.15)",
-                        background: "rgba(0,12,24,0.6)",
+                        background: "var(--lim-bg)",
                       }}
                     >
                       <div style={{ fontSize: 11, color: "#aabbcc", marginBottom: 6 }}>Vireon account</div>
                       {vireonConnected ? (
-                        <div style={{ fontSize: 12, fontFamily: "monospace", color: GREEN, marginBottom: 8 }}>
+                        <div style={{ fontSize: 12, fontFamily: "var(--lim-font-body)", color: GREEN, marginBottom: 8 }}>
                           Signed in{vireonEmail ? ` as ${vireonEmail}` : ""}
                           {vireonTier ? ` (${vireonTier})` : ""} — license in ~/.liminal/
                         </div>
                       ) : (
                         <div style={{ fontSize: 11, color: AMBER, marginBottom: 8, lineHeight: 1.45 }}>
-                          Not connected. Sign in for Pro license + managed inference (no AGENT_LICENSE_KEY in .env).
+                          Sign in to use your Vireon plan. Local workspaces do not require an account.
                         </div>
                       )}
                       <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
@@ -407,7 +402,7 @@ export function SettingsModal({
                             disabled={saving || loading || vireonBusy}
                             onClick={onVireonSignOut}
                           >
-                            Sign out locally
+                            Sign out
                           </button>
                         ) : null}
                       </div>
@@ -417,13 +412,13 @@ export function SettingsModal({
                         style={{
                           marginBottom: 12,
                           padding: 10,
-                          borderRadius: 2,
+                          borderRadius: 10,
                           border: "1px solid rgba(var(--lim-accent-rgb),0.15)",
-                          background: "rgba(0,12,24,0.6)",
+                          background: "var(--lim-bg)",
                         }}
                       >
                         <div style={{ fontSize: 11, color: "#aabbcc", marginBottom: 6 }}>Team shared memory</div>
-                        <div style={{ fontSize: 12, fontFamily: "monospace", color: teamMemoryStatus === "active" ? GREEN : AMBER }}>
+                        <div style={{ fontSize: 12, fontFamily: "var(--lim-font-body)", color: teamMemoryStatus === "active" ? GREEN : AMBER }}>
                           {teamMemoryStatus === "active"
                             ? "Active — org notes sync each turn (EE + AGENT_TEAM_MEMORY_SYNC)"
                             : teamMemoryStatus === "offline"
@@ -441,228 +436,77 @@ export function SettingsModal({
                         )}
                       </div>
                     )}
-                    <div style={{ fontSize: 10, color: "#778899", marginBottom: 8 }}>{providerHintText}</div>
-                    <div style={{ display: "grid", gridTemplateColumns: "120px 1fr", gap: 8, alignItems: "center", marginBottom: 10 }}>
-                      <span style={{ fontSize: 11, color: "#aabbcc" }}>inference</span>
-                      <select
-                        disabled={saving || loading}
-                        value={envDraft["AGENT_INFERENCE_MODE"] ?? "auto"}
-                        onChange={(e) => onEnvChange("AGENT_INFERENCE_MODE", e.target.value)}
-                        aria-label="Inference mode"
-                        style={{
-                          width: "100%",
-                          maxWidth: 520,
-                          fontSize: 12,
-                          padding: "8px 10px",
-                          borderRadius: 2,
-                          border: "1px solid rgba(var(--lim-accent-rgb),0.2)",
-                          background: "rgba(0,10,20,0.95)",
-                          color: "#dde8f0",
-                          fontFamily: "monospace",
-                        }}
-                      >
-                        <option value="auto">
-                          auto — Pro uses Vireon credits when signed in (BYOK fallback if configured)
-                        </option>
-                        <option value="byok">byok — always your API key / chosen base URL</option>
-                        <option value="managed">managed — always Vireon proxy (Pro license)</option>
+</div>) : null}
+                {showProvider ? (
+                  <section className="settings-provider">
+                    <h2>Model & provider</h2>
+                    <p>Choose how Liminal connects to a model.</p>
+                    <label className="settings-control"><span>Connection</span>
+                      <select aria-label="Inference mode" disabled={saving || loading}
+                        value={envDraft["AGENT_INFERENCE_MODE"] ?? "auto"} onChange={(e) => onEnvChange("AGENT_INFERENCE_MODE", e.target.value)}>
+                        <option value="auto">Automatic</option><option value="byok">Use my own API key</option><option value="managed">Use Vireon credits</option>
                       </select>
-                    </div>
-                    {showManagedModels ? (
-                      <ManagedBedrockModelsSection
-                        disabled={saving || loading || providerPresetLocked}
-                        mainModel={providerModel}
-                        fastModel={envDraft["AGENT_FAST_MODEL"] ?? ""}
-                        managedProvider={envDraft["AGENT_MANAGED_PROVIDER"] ?? "auto"}
-                        vireonConnected={Boolean(vireonConnected)}
-                        onBedrockPresetApply={onBedrockPresetApply}
-                        onManagedProvider={(v) => onEnvChange("AGENT_MANAGED_PROVIDER", v)}
-                        onMainModel={(modelId) => {
-                          onProviderModel(modelId);
-                          onEnvChange("AGENT_MODEL", modelId);
-                        }}
-                        onFastModel={(modelId) => onEnvChange("AGENT_FAST_MODEL", modelId)}
-                      />
-                    ) : null}
-                    {showByokPresets ? (
-                    <>
-                    <div style={{ display: "grid", gridTemplateColumns: "120px 1fr", gap: 8, alignItems: "center", marginBottom: 10 }}>
-                      <span style={{ fontSize: 11, color: "#aabbcc" }}>provider</span>
-                      <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-                        <select
-                          disabled={saving || loading || providerPresetLocked}
-                          value={resolvedBackendId}
-                          onChange={(e) => {
-                            const backendId = e.target.value;
-                            const first = presetsForBackend(backendId)[0];
-                            if (first) onPresetApply(first.id);
-                          }}
-                          aria-label="Provider backend"
-                          style={{
-                            width: "100%",
-                            maxWidth: 520,
-                            fontSize: 12,
-                            padding: "8px 10px",
-                            borderRadius: 2,
-                            border: "1px solid rgba(var(--lim-accent-rgb),0.2)",
-                            background: "rgba(0,10,20,0.95)",
-                            color: "#dde8f0",
-                            fontFamily: "monospace",
-                          }}
-                        >
-                          {PROVIDER_BACKENDS.map((b) => (
-                            <option key={b.id} value={b.id}>
-                              {b.label}
-                            </option>
-                          ))}
-                        </select>
-                        {backendHint ? (
-                          <span style={{ fontSize: 10, color: "#8899aa", lineHeight: 1.45 }}>{backendHint}</span>
-                        ) : null}
-                      </div>
-                    </div>
-                    <div style={{ display: "grid", gridTemplateColumns: "120px 1fr", gap: 8, alignItems: "center", marginBottom: 10 }}>
-                      <span style={{ fontSize: 11, color: "#aabbcc" }}>model</span>
-                      <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-                        <select
-                          disabled={saving || loading || providerPresetLocked}
-                          value={modelDropdownValue}
-                          onChange={(e) => {
-                            const id = e.target.value;
-                            if (id === PROVIDER_PRESET_CUSTOM_ID) return;
-                            onPresetApply(id);
-                          }}
-                          aria-label="Provider model"
-                          style={{
-                            width: "100%",
-                            maxWidth: 520,
-                            fontSize: 12,
-                            padding: "8px 10px",
-                            borderRadius: 2,
-                            border: "1px solid rgba(var(--lim-accent-rgb),0.2)",
-                            background: "rgba(0,10,20,0.95)",
-                            color: "#dde8f0",
-                            fontFamily: "monospace",
-                          }}
-                        >
-                          {backendPresets.map((p) => (
-                            <option key={p.id} value={p.id}>
-                              {p.label}
-                            </option>
-                          ))}
-                          <option value={PROVIDER_PRESET_CUSTOM_ID}>Custom…</option>
-                        </select>
-                        {providerPresetLocked ? (
-                          <span style={{ fontSize: 10, color: MAGENTA, fontFamily: "monospace" }}>
-                            Presets disabled — model or base URL is locked by process env (`.env`).
-                          </span>
-                        ) : (
-                          <span style={{ fontSize: 10, color: "#6a7a8a", lineHeight: 1.45 }}>
-                            Chooses main model, base URL, fast model, and sidecar slots (
-                            <code style={{ color: "#99aab8" }}>AGENT_FAST_MODEL</code>, safety judge, memory autolink/consolidate,
-                            provider routing). Still click{" "}
-                            <strong style={{ color: GREEN }}>SAVE TO RUNTIME PREFS</strong>. Local stacks: use any placeholder API key in{" "}
-                            <code style={{ color: "#99aab8" }}>.env</code> (e.g. <code style={{ color: "#99aab8" }}>lm-studio</code>,{" "}
-                            <code style={{ color: "#99aab8" }}>ollama</code>).
-                          </span>
-                        )}
-                        {presetHint ? (
-                          <span style={{ fontSize: 10, color: "#8899aa", lineHeight: 1.45 }}>{presetHint}</span>
-                        ) : null}
-                      </div>
-                    </div>
-                    </>
-                    ) : null}
-                    <div style={{ display: "grid", gridTemplateColumns: "120px 1fr", gap: 8, alignItems: "center", marginBottom: 6, marginTop: 8 }}>
-                      <span style={{ fontSize: 11, color: "#aabbcc", display: "flex", alignItems: "center", gap: 6 }}>
-                        model
-                        {providerModelLocked ? (
-                          <span style={{ fontSize: 9, color: MAGENTA, fontFamily: "monospace" }}>ENV</span>
-                        ) : null}
-                      </span>
-                      <input
-                        style={{
-                          width: "100%",
-                          boxSizing: "border-box",
-                          minHeight: 32,
-                          fontSize: 12,
-                          padding: "6px 8px",
-                          borderRadius: 2,
-                          border: "1px solid rgba(var(--lim-accent-rgb),0.2)",
-                          background: "rgba(0,10,20,0.9)",
-                          color: "#dde8f0",
-                          fontFamily: "monospace",
-                        }}
-                        value={providerModel}
-                        onChange={(e) => onProviderModel(e.target.value)}
-                        disabled={saving || loading || providerModelLocked}
-                      />
-                    </div>
-                    <div style={{ display: "grid", gridTemplateColumns: "120px 1fr", gap: 8, alignItems: "center" }}>
-                      <span style={{ fontSize: 11, color: "#aabbcc", display: "flex", alignItems: "center", gap: 6 }}>
-                        base URL
-                        {providerBaseLocked ? (
-                          <span style={{ fontSize: 9, color: MAGENTA, fontFamily: "monospace" }}>ENV</span>
-                        ) : null}
-                      </span>
-                      <input
-                        style={{
-                          width: "100%",
-                          boxSizing: "border-box",
-                          minHeight: 32,
-                          fontSize: 12,
-                          padding: "6px 8px",
-                          borderRadius: 2,
-                          border: "1px solid rgba(var(--lim-accent-rgb),0.2)",
-                          background: "rgba(0,10,20,0.9)",
-                          color: "#dde8f0",
-                          fontFamily: "monospace",
-                        }}
-                        value={providerBase}
-                        onChange={(e) => onProviderBase(e.target.value)}
-                        disabled={saving || loading || providerBaseLocked}
-                      />
-                    </div>
-                    <div style={{ display: "grid", gridTemplateColumns: "120px 1fr", gap: 8, alignItems: "center", marginTop: 8 }}>
-                      <span style={{ fontSize: 11, color: "#aabbcc" }}>API key</span>
-                      <div
-                        style={{
-                          fontSize: 12,
-                          fontFamily: "monospace",
-                          color: providerApiKeyConfigured ? GREEN : AMBER,
-                          lineHeight: 1.4,
-                        }}
-                      >
-                        {providerApiKeyConfigured
-                          ? "Loaded (value never shown in UI)"
-                          : "Not configured — set AGENT_API_KEY or OPENROUTER_API_KEY in .env"}
-                      </div>
-                    </div>
-                  </div>
+                    </label>
+                    {showManagedModels ? <ManagedBedrockModelsSection
+                      disabled={saving || loading || providerPresetLocked} mainModel={providerModel}
+                      fastModel={envDraft["AGENT_FAST_MODEL"] ?? ""} managedProvider={envDraft["AGENT_MANAGED_PROVIDER"] ?? "auto"}
+                      onManagedProvider={(v) => onEnvChange("AGENT_MANAGED_PROVIDER", v)}
+                      vireonConnected={Boolean(vireonConnected)}
+                      onMainModel={(v) => { onProviderModel(v); onEnvChange("AGENT_MODEL", v); }} onFastModel={(v) => onEnvChange("AGENT_FAST_MODEL", v)}
+                      onBedrockPresetApply={onBedrockPresetApply} /> : null}
+                    {showByokPresets ? <>
+                      <label className="settings-control"><span>Provider</span><select aria-label="Provider" value={resolvedBackendId} disabled={providerPresetLocked || saving || loading}
+                        onChange={(e) => { const first = presetsForBackend(e.target.value)[0]; if (first) onPresetApply(first.id); }}>
+                        {PROVIDER_BACKENDS.map((backend) => <option key={backend.id} value={backend.id}>{backend.label}</option>)}
+                      </select></label>
+                      <label className="settings-control"><span>Model preset</span><select aria-label="Model preset" value={modelDropdownValue} disabled={providerPresetLocked || saving || loading}
+                        onChange={(e) => { if (e.target.value !== PROVIDER_PRESET_CUSTOM_ID) onPresetApply(e.target.value); }}>
+                        {backendPresets.map((preset) => <option key={preset.id} value={preset.id}>{preset.label}</option>)}
+                        {!backendPresets.some((p) => p.id === PROVIDER_PRESET_CUSTOM_ID) ? <option value={PROVIDER_PRESET_CUSTOM_ID}>Custom model</option> : null}
+                      </select></label>
+                      <label className="settings-control"><span>Model ID {providerModelLocked ? '· managed in environment' : ''}</span>
+                        <input aria-label="Model ID" value={providerModel} disabled={providerModelLocked || saving || loading} onChange={(e) => onProviderModel(e.target.value)} />
+                      </label>
+                      <details className="settings-connection-details"><summary>Connection details</summary>
+                        <label className="settings-control"><span>Server address {providerBaseLocked ? '· managed in environment' : ''}</span>
+                          <input aria-label="Server address" value={providerBase} disabled={providerBaseLocked || saving || loading} onChange={(e) => onProviderBase(e.target.value)} />
+                        </label>
+                        <p>{backendHint}</p>{presetHint ? <p>{presetHint}</p> : null}
+                      </details>
+                      <div className="settings-key-status">{providerApiKeyConfigured ? '✓ API key configured' : 'Add your API key to the server’s .env file to connect.'}</div>
+                    </> : null}
+                  </section>
                 ) : null}
 
                 {showIntegrations ? <IntegrationsPanel agentBusy={agentBusy} /> : null}
 
-                {!showIntegrations
+                {!filtered && !["advanced", "account", "integrations"].includes(activeTabId) && (hiddenCount > 0 || advanced) ? (
+                  <label className="settings-advanced-toggle"><input type="checkbox" checked={advanced} onChange={(e) => setAdvanced(e.target.checked)} />
+                    Show advanced options <small>{advanced ? "All options in this category" : `${hiddenCount} more options`}</small>
+                  </label>
+                ) : null}
+                {filtered && filtered.length === 0 ? <p className="settings-empty">No matching settings. Try another name or keyword.</p> : null}
+                {!showIntegrations && (activeTabId !== "account" || !!filtered)
                   ? subgroups.map(([subId, subLabel, subFields]) => (
                   <details
+                    className="settings-group"
                     key={`${activeTabId}-${subId}-${searchQ || "all"}`}
-                    open
+                    open={!!filtered || activeTabId !== "advanced"}
                     style={{ marginBottom: 12, border: "1px solid rgba(var(--lim-accent-rgb),0.1)", borderRadius: 4 }}
                   >
                     <summary
                       style={{
                         cursor: "pointer",
                         padding: "8px 10px",
-                        color: GREEN,
-                        fontWeight: 700,
-                        fontSize: 11,
-                        letterSpacing: "0.06em",
-                        fontFamily: "monospace",
+                        color: "var(--lim-text)",
+                        fontWeight: 500,
+                        fontSize: 14,
+                        letterSpacing: "0",
+                        fontFamily: "var(--lim-font-body)",
                         listStyle: "none",
                       }}
                     >
-                      {subLabel}
+                      {subLabel}<span className="settings-group-count">{subFields.length} options</span>
                     </summary>
                     <div style={{ padding: "4px 10px 12px" }}>
                       {subFields.map((f) => (
@@ -696,25 +540,25 @@ export function SettingsModal({
             flexWrap: "wrap",
             gap: 10,
             alignItems: "center",
-            background: "rgba(0,6,14,0.98)",
+            background: "var(--lim-surface)",
           }}
         >
-          <span style={{ fontSize: 10, color: "#667788", flex: "1 1 200px" }}>
-            Full reference: <code style={{ color: "#99aab8" }}>docs/configuration.md</code> (repo root)
+          <span className="lim-settings-note" style={{ fontSize: 12, color: "var(--lim-text-muted)", flex: "1 1 160px" }}>
+            {agentBusy ? "You can save when the current task finishes." : "Changes apply when you save."}
           </span>
           <button
             type="button"
             style={{
               ...btn,
-              flex: "0 1 200px",
-              background: "rgba(0,30,12,0.8)",
-              borderColor: "rgba(var(--lim-success-rgb),0.3)",
-              color: GREEN,
+              flex: "0 1 160px",
+              background: CYAN,
+              borderColor: "transparent",
+              color: "var(--lim-on-accent, #191c27)",
             }}
             disabled={saving || loading || agentBusy}
             onClick={() => void onSave()}
           >
-            {saving ? "…" : "SAVE TO RUNTIME PREFS"}
+            {saving ? "Saving…" : "Save changes"}
           </button>
           <button
             type="button"
@@ -724,7 +568,7 @@ export function SettingsModal({
               onClose();
             }}
           >
-            CLOSE
+            Close
           </button>
         </div>
       </div>
@@ -744,32 +588,38 @@ function SettingsFieldRow({
   onChange: (v: string) => void;
 }) {
   const descId = `desc-${f.key}`;
+  const presentation = everydaySettings[f.key];
   const sourceHelp = SOURCE_HELP[f.resolutionSource] ?? "";
 
+  const kind = f.key === "AGENT_TTS_ENABLED" ? "boolean" : f.key === "AGENT_EFFORT" ? "enum" : f.valueKind;
+  const enumValues = f.key === "AGENT_EFFORT" ? ["low", "medium", "high", "xhigh"] : f.enumValues;
   let control: React.ReactNode;
-  if (f.valueKind === "boolean") {
+  if (kind === "boolean") {
     const on = parseBool(rawValue);
     control = (
       <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
         <button
           type="button"
+          role="switch"
+          aria-checked={on}
+          aria-label={presentation?.label ?? f.label}
           disabled={disabled}
           onClick={() => onChange(boolToString(!on))}
           style={{
             ...btn,
             minWidth: 72,
-            background: on ? "rgba(0,40,24,0.9)" : "rgba(30,8,8,0.75)",
-            borderColor: on ? "rgba(var(--lim-success-rgb),0.35)" : "rgba(var(--lim-danger-rgb),0.25)",
-            color: on ? GREEN : RED_ERR,
+            background: on ? "rgba(var(--lim-accent-rgb),.12)" : "var(--lim-bg)",
+            borderColor: on ? "var(--lim-accent)" : "var(--lim-border)",
+            color: on ? CYAN : "var(--lim-text-muted)",
           }}
         >
-          {on ? "ON" : "OFF"}
+          {on ? "On" : "Off"}
         </button>
-        <span style={{ fontSize: 10, color: "#778899", fontFamily: "monospace" }}>(1 / 0)</span>
+
       </div>
     );
-  } else if (f.valueKind === "enum" && f.enumValues?.length) {
-    const ev = f.enumValues;
+  } else if (kind === "enum" && enumValues?.length) {
+    const ev = enumValues;
     const inList = ev.includes(rawValue);
     const opts = inList ? [...ev] : [rawValue, ...ev];
     const uniq = [...new Set(opts)];
@@ -783,12 +633,13 @@ function SettingsFieldRow({
           maxWidth: 420,
           fontSize: 12,
           padding: "6px 8px",
-          borderRadius: 2,
+          borderRadius: 10,
           border: "1px solid rgba(var(--lim-accent-rgb),0.2)",
           background: "rgba(0,10,20,0.95)",
           color: "#dde8f0",
-          fontFamily: "monospace",
+          fontFamily: "var(--lim-font-body)",
         }}
+        aria-label={presentation?.label ?? f.label}
         aria-describedby={descId}
       >
         {uniq.map((opt) => (
@@ -815,12 +666,13 @@ function SettingsFieldRow({
           maxWidth: 420,
           fontSize: 12,
           padding: "6px 8px",
-          borderRadius: 2,
+          borderRadius: 10,
           border: "1px solid rgba(var(--lim-accent-rgb),0.2)",
           background: "rgba(0,10,20,0.9)",
           color: "#dde8f0",
-          fontFamily: "monospace",
+          fontFamily: "var(--lim-font-body)",
         }}
+        aria-label={presentation?.label ?? f.label}
         aria-describedby={descId}
       />
     );
@@ -838,13 +690,14 @@ function SettingsFieldRow({
           boxSizing: "border-box",
           fontSize: 11,
           padding: "6px 8px",
-          borderRadius: 2,
+          borderRadius: 10,
           border: "1px solid rgba(var(--lim-accent-rgb),0.2)",
           background: "rgba(0,10,20,0.9)",
           color: "#dde8f0",
-          fontFamily: "monospace",
+          fontFamily: "var(--lim-font-body)",
           resize: "vertical",
         }}
+        aria-label={presentation?.label ?? f.label}
         aria-describedby={descId}
       />
     ) : (
@@ -859,19 +712,20 @@ function SettingsFieldRow({
           boxSizing: "border-box",
           fontSize: 11,
           padding: "6px 8px",
-          borderRadius: 2,
+          borderRadius: 10,
           border: "1px solid rgba(var(--lim-accent-rgb),0.2)",
           background: "rgba(0,10,20,0.9)",
           color: "#dde8f0",
-          fontFamily: "monospace",
+          fontFamily: "var(--lim-font-body)",
         }}
+        aria-label={presentation?.label ?? f.label}
         aria-describedby={descId}
       />
     );
   }
 
   return (
-    <div
+    <div className="settings-field"
       style={{
         marginBottom: 14,
         paddingBottom: 12,
@@ -879,17 +733,17 @@ function SettingsFieldRow({
       }}
     >
       <div style={{ display: "flex", justifyContent: "space-between", gap: 8, alignItems: "baseline", flexWrap: "wrap" }}>
-        <div style={{ fontSize: 13, fontWeight: 600, color: "#d0dce8" }}>{f.label}</div>
+        <div style={{ fontSize: 13, fontWeight: 600, color: "#d0dce8" }}>{presentation?.label ?? f.label}</div>
         {f.lockedByEnv ? (
-          <span style={{ fontSize: 10, color: MAGENTA, fontFamily: "monospace", whiteSpace: "nowrap" }}>ENV LOCK</span>
+          <span style={{ fontSize: 10, color: MAGENTA, fontFamily: "var(--lim-font-body)", whiteSpace: "nowrap" }}>Managed in environment</span>
         ) : null}
       </div>
       <div id={descId} style={{ fontSize: 11, color: "#8899aa", marginTop: 4, lineHeight: 1.45 }}>
-        {f.description}
+        {presentation?.description ?? f.description}
       </div>
-      <code style={{ fontSize: 9, color: "#556677", display: "block", marginTop: 4 }}>{f.key}</code>
+
       <div style={{ marginTop: 8, display: "grid", gridTemplateColumns: "minmax(0,1fr)", gap: 6 }}>{control}</div>
-      <div style={{ fontSize: 10, color: "#6a7a8a", marginTop: 8, lineHeight: 1.5, fontFamily: "monospace" }}>
+      <details className="settings-technical"><summary>Technical details</summary><code>{f.key}</code><div style={{ fontSize: 11, color: "var(--lim-text-muted)", marginTop: 8, lineHeight: 1.5 }}>
         <div>
           Effective: <span style={{ color: "#aabccc" }}>{f.effectiveDisplay}</span>
           {f.resolutionSource === "unset" && rawValue === "" ? (
@@ -907,7 +761,7 @@ function SettingsFieldRow({
             <span style={{ color: AMBER }}>none</span>
           )}
         </div>
-      </div>
+      </div></details>
     </div>
   );
 }

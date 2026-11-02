@@ -35,7 +35,7 @@ test("mergeEvalManagedEnv is no-op when managed defaults disabled", () => {
     process.env["EVAL_MANAGED_DEFAULTS"] = "0";
     const merged = mergeEvalManagedEnv({ foo: "bar" });
     assert.deepEqual(merged, { foo: "bar" });
-    assert.equal(merged["AGENT_MODEL"], undefined);
+    assert.equal(Object.hasOwn(merged, "AGENT_MODEL"), false);
   } finally {
     if (prevParity === undefined) delete process.env["EVAL_DESKTOP_PARITY"];
     else process.env["EVAL_DESKTOP_PARITY"] = prevParity;

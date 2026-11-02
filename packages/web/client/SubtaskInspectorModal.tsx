@@ -149,11 +149,11 @@ const modalBox: React.CSSProperties = {
   maxHeight: "min(82vh, 900px)",
   display: "flex",
   flexDirection: "column",
-  background: "linear-gradient(180deg, rgba(4,12,24,0.98) 0%, rgba(2,8,18,0.99) 100%)",
+  background: "var(--lim-surface, #191c27)",
   border: "1px solid rgba(var(--lim-accent-rgb, 0, 212, 255), 0.18)",
-  borderRadius: 8,
+  borderRadius: 18,
   boxShadow: "0 24px 80px rgba(0,0,0,0.55)",
-  fontFamily: "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace",
+  fontFamily: "var(--lim-font-body, system-ui)",
 };
 
 const headerRow: React.CSSProperties = {
@@ -164,9 +164,10 @@ const headerRow: React.CSSProperties = {
 };
 
 const titleStyle: React.CSSProperties = {
-  fontSize: 13,
-  fontWeight: 700,
-  color: MAGENTA,
+  fontSize: 22,
+  fontWeight: 500,
+  fontFamily: "Liminal Display, sans-serif",
+  color: "var(--lim-text)",
   letterSpacing: "0.04em",
 };
 
@@ -268,7 +269,7 @@ export function SubtaskInlineCard({
         background: "rgba(0,5,14,0.7)",
         borderRadius: 3,
         fontSize: 12,
-        fontFamily: "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace",
+        fontFamily: "var(--lim-font-body, system-ui)",
         border: "1px solid rgba(var(--lim-accent-rgb, 0, 212, 255), 0.1)",
         borderLeft: `2px solid ${statusColor}`,
         color: "#889aaa",

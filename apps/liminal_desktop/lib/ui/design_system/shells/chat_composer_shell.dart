@@ -35,12 +35,18 @@ class ChatComposerShell extends StatelessWidget {
     }
 
     if (dock == 'floating' || style.composerFloating) {
-      return Padding(
-        padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
-        child: LiminalCard(
-          elevation: LiminalElevation.mid,
-          padding: const EdgeInsets.all(LiminalSpacing.sm),
-          child: child,
+      return Align(
+        alignment: Alignment.bottomCenter,
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 880),
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(24, 8, 24, 24),
+            child: LiminalCard(
+              elevation: LiminalElevation.mid,
+              padding: const EdgeInsets.all(LiminalSpacing.sm),
+              child: child,
+            ),
+          ),
         ),
       );
     }

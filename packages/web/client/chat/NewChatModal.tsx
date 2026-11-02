@@ -86,33 +86,41 @@ export const NewChatModal: React.FC<NewChatModalProps> = ({
       onClick={() => !submitting && onClose()}
     >
       <div
+        className="lim-new-chat"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="new-chat-title"
+        onKeyDown={(e) => { if (e.key === "Escape" && !submitting) onClose(); }}
         onClick={(e) => e.stopPropagation()}
         style={{
           width: 460,
           maxWidth: "92vw",
-          background: "var(--lim-bg, #0c1117)",
+          maxHeight: "90dvh",
+          overflowY: "auto",
+          background: "var(--lim-surface, #191c27)",
           color: "var(--lim-fg, #d9e2ec)",
           border: "1px solid rgba(var(--lim-accent-rgb, 0,212,255),0.25)",
-          borderRadius: 8,
-          padding: 20,
+          borderRadius: 18,
+          padding: 26,
           boxShadow: "0 16px 48px rgba(0,0,0,0.7)",
           fontFamily: "system-ui, sans-serif",
         }}
       >
-        <h2 style={{ margin: 0, fontSize: 16, fontWeight: 600, letterSpacing: "0.04em" }}>
+        <h2 id="new-chat-title" style={{ margin: 0, fontSize: 28, fontWeight: 500, letterSpacing: "-0.8px", fontFamily: "'Liminal Display', sans-serif" }}>
           New chat
         </h2>
         <p style={{ fontSize: 12, color: "rgba(217,226,236,0.6)", marginTop: 4, marginBottom: 16 }}>
-          Memories, persona, and learned recipes carry across every chat. The workspace mode only
-          decides where this chat&apos;s files land.
+          Start a conversation and choose where its files belong.
+          Your memories and persona come with you.
         </p>
 
         <label style={{ display: "block", fontSize: 11, marginBottom: 4, color: "rgba(217,226,236,0.7)" }}>
           Title (optional)
         </label>
         <input
+          autoFocus
           type="text"
-          placeholder="e.g. dreamthedream refactor"
+          placeholder="e.g. Explore a new idea"
           value={title}
           onChange={(e) => setTitle(e.target.value)}
           disabled={submitting}

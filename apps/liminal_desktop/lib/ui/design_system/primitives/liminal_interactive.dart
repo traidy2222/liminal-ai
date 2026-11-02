@@ -59,7 +59,9 @@ class _LiminalInteractiveState extends State<LiminalInteractive> {
           onExit: canPress ? (_) => setState(() => _hovered = false) : null,
           cursor: canPress ? SystemMouseCursors.click : SystemMouseCursors.basic,
           child: AnimatedContainer(
-            duration: LiminalMotion.fast,
+            duration: MediaQuery.disableAnimationsOf(context)
+                ? Duration.zero
+                : LiminalMotion.fast,
             decoration: BoxDecoration(
               borderRadius: radius,
               border: _focused

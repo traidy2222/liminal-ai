@@ -1,6 +1,7 @@
 import React from "react";
 import { createRoot } from "react-dom/client";
 import { App } from "./App.js";
+import "./persona/shells/workspace.css";
 import { applyPersonaDocumentTheme } from "./applyPersonaDocumentTheme.js";
 import { readPersonaChromeFromSession } from "./personaChromeSessionCache.js";
 

@@ -66,7 +66,7 @@ function buildDocsChangelog(data) {
     "",
     "All notable changes to [Liminal AI](https://github.com/traidy2222/liminal-ai) on the `main` branch.",
     "",
-    `**Current stage:** **${data.stage ?? "alpha"}** (\`v${current}\` tip of \`main\`, ${data.releases[0]?.date ?? ""}). The workspace package may read \`0.1.0\`, but **beta**, **RC**, and a **v0.1.0 public preview** have not been declared as product releases yet.`,
+    `**Current stage:** **${data.stage ?? "alpha"}** (\`v${current}\`, ${data.releases[0]?.date ?? ""}). Desktop downloads are published through the public preview release channel.`,
     "",
     "Format: **v0.0.x** entries keyed to the last GitHub push in each slice. Dates are real push dates.",
     "",
@@ -88,7 +88,7 @@ function buildDocsChangelog(data) {
     const head = `## v${r.version} — ${r.date} {#${anchorFor(r.version)}}\n\n`;
     let intro = "";
     if (isCurrent) {
-      intro = `**Current alpha.** ${r.tagline}\n\n`;
+      intro = `**Current ${data.stage ?? "alpha"}.** ${r.tagline}\n\n`;
     } else if (r.tagline) {
       intro = `${r.tagline}\n\n`;
     }
@@ -125,7 +125,7 @@ function buildRootChangelog(data) {
     "",
     "All notable changes to [Liminal AI](https://github.com/traidy2222/liminal-ai) are documented here and on the docs portal: [docs.vireondynamics.com/liminal/reference/changelog](https://docs.vireondynamics.com/liminal/reference/changelog).",
     "",
-    `**Current stage:** **${data.stage ?? "alpha"}** (\`v${current}\` tip of \`main\`, ${data.releases[0]?.date ?? ""}). **Beta**, **RC**, and **v0.1.0 public preview** have not been declared as product releases yet.`,
+    `**Current stage:** **${data.stage ?? "alpha"}** (\`v${current}\` tip of \`main\`, ${data.releases[0]?.date ?? ""}). Desktop downloads are published through the public preview release channel.`,
     "",
     "**Single source:** edit [`changelog/releases.json`](changelog/releases.json), then run `npm run changelog:gen`.",
     "",
@@ -138,7 +138,7 @@ function buildRootChangelog(data) {
   for (const r of data.releases) {
     const anchor = anchorFor(r.version);
     const label =
-      r.version === current ? ` — Current alpha` : "";
+      r.version === current ? ` — Current ${data.stage ?? "alpha"}` : "";
     lines.push(`## [v${r.version}] — ${r.date}${label}\n`);
     lines.push(`${r.summary ?? r.tagline}\n`);
     lines.push(

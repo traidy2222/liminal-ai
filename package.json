@@ -18,7 +18,7 @@
     "packages/*"
   ],
   "scripts": {
-    "build": "npm run build -w @liminal/core && npm run build -w @liminal/protocol && npm run build -w @liminal/tools && npm run build -w @liminal/sidecar && npm run build -w @liminal/enterprise",
+    "build": "npm run build -w @liminal/core && npm run build -w @liminal/protocol && npm run build -w @liminal/tools && npm run build -w @liminal/sidecar && node scripts/build-enterprise-if-present.mjs",
     "build:sidecar": "npm run build -w @liminal/core && npm run build -w @liminal/protocol && npm run build -w @liminal/tools && npm run build -w @liminal/sidecar",
     "sidecar": "npm run build:sidecar && npm run start -w @liminal/sidecar",
     "sidecar:dev": "npm run start -w @liminal/sidecar",

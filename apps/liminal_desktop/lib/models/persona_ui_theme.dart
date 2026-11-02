@@ -64,10 +64,10 @@ class PersonaUiTheme {
     this.typography = 'mixed',
     this.fontPair = 'inter-cascadia',
     this.messageStyle = 'bubble',
-    this.background = 'grid',
+    this.background = 'solid',
     this.headerStyle = 'bar',
-    this.panelLayout = 'both',
-    this.inputDock = 'bottom-bar',
+    this.panelLayout = 'right',
+    this.inputDock = 'floating',
     // Open-token overrides (null = derive from the enum above).
     this.densityScaleOverride,
     this.radiusPxOverride,
@@ -107,13 +107,13 @@ class PersonaUiTheme {
   final PersonaGradient? gradient;
 
   static const liminalDefault = PersonaUiTheme(
-    accent: Color(0xFF00D4FF),
-    secondary: Color(0xFFFF4488),
-    warn: Color(0xFFFFB347),
-    danger: Color(0xFFFF2244),
-    success: Color(0xFF00FF88),
-    muted: Color(0xFF778899),
-    surfaceTint: Color(0xFF0A1018),
+    accent: Color(0xFFB5A2F5),
+    secondary: Color(0xFF8CBFC5),
+    warn: Color(0xFFE4BB83),
+    danger: Color(0xFFED919C),
+    success: Color(0xFF91C7AD),
+    muted: Color(0xFFA3A8BA),
+    surfaceTint: Color(0xFF191C27),
     displayLabel: 'Liminal',
   );
 

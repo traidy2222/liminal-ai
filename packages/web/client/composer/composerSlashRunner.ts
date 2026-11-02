@@ -1,11 +1,9 @@
+import { formatRemoteEnableMessage, formatRemoteStatusMessage, remoteSlashToCommand } from "@liminal/core/remote-slash";
 import {
-  formatRemoteEnableMessage,
-  formatRemoteStatusMessage,
   formatSlashHelpText,
   parseComposerSlashSubmit,
-  remoteSlashToCommand,
   type ParsedComposerSlash,
-} from "@liminal/core";
+} from "@liminal/core/composer-slash";
 import { webApiFetch } from "../webApiAuth.js";
 
 export type SlashRunnerResult =

@@ -23,7 +23,7 @@ class PersonaLayoutSpec {
   final double transcriptMaxWidth;
 
   factory PersonaLayoutSpec.fromTheme(PersonaUiTheme theme) {
-    final capped = theme.shell == 'studio' || theme.shell == 'minimal';
+    final capped = theme.shell != 'terminal';
     return PersonaLayoutSpec(
       headerPresent: theme.headerStyle != 'none',
       headerCentered: theme.shell == 'minimal' || theme.shell == 'studio',

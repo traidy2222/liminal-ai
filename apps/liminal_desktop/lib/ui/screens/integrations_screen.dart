@@ -13,7 +13,6 @@ import '../design_system/liminal_design_system.dart';
 import '../widgets/integration_accounts_list.dart';
 import '../widgets/integration_provider_row.dart';
 import '../widgets/integration_provider_ui.dart';
-import '../widgets/integrations_how_to_strip.dart';
 import '../widgets/service_integration_card.dart';
 import '../widgets/integration_brand_icon.dart';
 import '../widgets/integrations_automation_section.dart';
@@ -30,6 +29,7 @@ class IntegrationsScreen extends StatefulWidget {
 
 class _IntegrationsScreenState extends State<IntegrationsScreen> {
   String? _expandedId;
+  int _category = 0;
   String _googleMode = 'read_write';
   String _microsoftMode = 'read_write';
   String _azureMode = 'read_write';
@@ -253,7 +253,8 @@ class _IntegrationsScreenState extends State<IntegrationsScreen> {
           icon: const Icon(Icons.arrow_back),
           onPressed: () => context.pop(),
         ),
-        title: const Text('Integrations'),
+        toolbarHeight: 72,
+        title: const Text('Workspace / Connected tools'),
         actions: [
           IconButton(
             tooltip: 'Refresh',
@@ -268,13 +269,15 @@ class _IntegrationsScreenState extends State<IntegrationsScreen> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              const IntegrationsHowToStrip(),
-              const SizedBox(height: 12),
-              Text(
-                'Connect only what you need — each card is one service with its own OAuth scopes. '
-                'Tap a card for read/write mode and account options.',
-                style: TextStyle(color: lim.textMuted, fontSize: 12, height: 1.45),
-              ),
+              Text('Bring your tools together.', style: Theme.of(context).textTheme.headlineMedium),
+              const SizedBox(height: 10),
+              Text('Connect the services you use. Permissions and account controls stay with each connection.', style: TextStyle(color: lim.textMuted, height: 1.5)),
+              const SizedBox(height: 24),
+              Wrap(spacing: 8, runSpacing: 8, children: [
+                for (final entry in ['Google', 'Microsoft', 'AWS', 'Developer', 'Team & docs', 'Finance', 'Custom', 'Automation'].indexed)
+                  ChoiceChip(label: Text(entry.$2), selected: _category == entry.$1,
+                    onSelected: (_) => setState(() { _category = entry.$1; _expandedId = null; })),
+              ]),
               if (host.integrationsError != null) ...[
                 const SizedBox(height: 12),
                 Text(host.integrationsError!, style: TextStyle(color: lim.danger, fontSize: 13)),
@@ -287,9 +290,9 @@ class _IntegrationsScreenState extends State<IntegrationsScreen> {
                 ),
               ],
               const SizedBox(height: 16),
-              ..._integrationGroups(context, host, snap, disabled, lim),
+              if (_category < 7) _integrationGroups(context, host, snap, disabled, lim)[_category],
               const SizedBox(height: 20),
-              IntegrationsAutomationSection(
+              if (_category == 7) IntegrationsAutomationSection(
                 host: host,
                 integrations: snap,
                 inbox: host.inbox,

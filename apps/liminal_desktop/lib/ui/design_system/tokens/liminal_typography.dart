@@ -5,7 +5,7 @@ import '../../theme/liminal_theme_extension.dart';
 /// Named text styles on top of [ThemeData] + persona tokens.
 abstract final class LiminalTypography {
   static TextStyle pageTitle(BuildContext context) =>
-      Theme.of(context).textTheme.headlineSmall!.copyWith(
+      Theme.of(context).textTheme.headlineMedium!.copyWith(
             color: LiminalTheme.of(context).text,
             fontWeight: FontWeight.w600,
           );

@@ -19,7 +19,7 @@ import {
   type ProtocolIntentHint,
 } from "@liminal/tools";
 import type { ServerFrame } from "@liminal/protocol";
-import { SessionBridge } from "../../sidecar/src/session_bridge.js";
+import { SessionBridge } from "@liminal/sidecar/session-bridge";
 import {
   applyDesktopSidecarBootEnv,
   DESKTOP_PARITY_HARNESS_SNAPSHOT,

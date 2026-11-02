@@ -1,3 +1,5 @@
+import { parseReceiptSlashCommand } from "./receipt_slash.js";
+export { parseReceiptSlashCommand } from "./receipt_slash.js";
 /**
  * Guided receipt → Xero draft bill preset.
  *
@@ -13,19 +15,9 @@ import { persistChatAttachmentsToWorkspace } from "./chat_attachments.js";
 export const RECEIPT_WORKFLOW_PRESET = "receipt_to_xero" as const;
 export type ReceiptWorkflowPreset = typeof RECEIPT_WORKFLOW_PRESET;
 
-const RECEIPT_SLASH_RE = /^\/(?:receipt|receipts|process-receipts)(?:\s+(.*))?$/i;
 
 const DEFAULT_USER_MESSAGE =
   "Process the attached receipt(s) into Xero as draft bill(s).";
-
-/** Parse `/receipt`, `/receipts`, or `/process-receipts [optional note]`. */
-export function parseReceiptSlashCommand(text: string): { note: string } | null {
-  const trimmed = text.trim();
-  if (!trimmed.startsWith("/")) return null;
-  const match = RECEIPT_SLASH_RE.exec(trimmed);
-  if (!match) return null;
-  return { note: (match[1] ?? "").trim() };
-}
 
 export function isReceiptWorkflowPreset(
   value: string | undefined

@@ -81,6 +81,9 @@ class LiminalFontSet {
     if (typo == 'mono') {
       bodyFamily = monoFamily;
     }
+    if (pair == 'system' || pair == 'inter-cascadia') {
+      headingFamily = 'Space Grotesk';
+    }
 
     TextStyle bodyFn({
       double? fontSize,
@@ -161,16 +164,16 @@ class LiminalFontSet {
   TextTheme textTheme(LiminalTokens tokens, double scale) {
     return TextTheme(
       displaySmall: heading(
-        fontSize: 28 * scale,
+        fontSize: 40 * scale,
         fontWeight: FontWeight.w600,
         color: tokens.text,
         letterSpacing: -0.5,
       ),
       headlineMedium: heading(
-        fontSize: 22 * scale,
+        fontSize: 30 * scale,
         fontWeight: FontWeight.w600,
         color: tokens.text,
-        letterSpacing: -0.3,
+        letterSpacing: -0.8,
       ),
       titleLarge: heading(
         fontSize: 18 * scale,

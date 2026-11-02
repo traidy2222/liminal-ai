@@ -59,9 +59,9 @@ export function ServiceIntegrationCard({
     <div
       style={{
         gridColumn: expanded ? "1 / -1" : undefined,
-        borderRadius: 8,
-        border: `1px solid ${card.connected ? "rgba(0,255,136,0.35)" : "rgba(var(--lim-accent-rgb),0.12)"}`,
-        background: card.connected ? "rgba(0,255,136,0.04)" : "rgba(0,12,24,0.55)",
+        borderRadius: 12,
+        border: `1px solid ${card.connected ? "rgba(var(--lim-success-rgb),0.35)" : "var(--lim-border)"}`,
+        background: card.connected ? "rgba(var(--lim-success-rgb),0.04)" : "var(--lim-bg)",
         overflow: "hidden",
         display: "flex",
         flexDirection: "column",
@@ -146,17 +146,17 @@ export function IntegrationCategorySection({
   footer?: React.ReactNode;
 }) {
   return (
-    <section style={{ gridColumn: "1 / -1", marginBottom: 4 }}>
-      <div style={{ marginBottom: 10 }}>
+    <details className="integration-category" style={{ gridColumn: "1 / -1", marginBottom: 4 }}>
+      <summary style={{ marginBottom: 10 }}>
         <div style={{ fontSize: 13, fontWeight: 700, color: "#dde8f0", letterSpacing: "0.04em" }}>{title}</div>
         {subtitle ? (
           <div style={{ fontSize: 11, color: "#8899aa", marginTop: 4, lineHeight: 1.45 }}>{subtitle}</div>
         ) : null}
-      </div>
+      </summary>
       <div
         style={{
           display: "grid",
-          gridTemplateColumns: "repeat(auto-fill, minmax(132px, 1fr))",
+          gridTemplateColumns: "repeat(auto-fill, minmax(180px, 1fr))",
           gap: 10,
           alignItems: "stretch",
         }}
@@ -164,6 +164,6 @@ export function IntegrationCategorySection({
         {children}
       </div>
       {footer ? <div style={{ marginTop: 10 }}>{footer}</div> : null}
-    </section>
+    </details>
   );
 }

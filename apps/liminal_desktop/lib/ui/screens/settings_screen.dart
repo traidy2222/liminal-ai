@@ -15,7 +15,8 @@ import '../layout/liminal_spacing.dart';
 import '../theme/liminal_theme_extension.dart';
 import '../design_system/liminal_design_system.dart';
 import '../widgets/liminal_form_field.dart';
-import '../widgets/liminal_page_canvas.dart';
+import '../widgets/settings_workspace.dart';
+import '../../models/settings_presentation.dart';
 import '../widgets/liminal_shell.dart';
 import '../widgets/managed_inference_panel.dart';
 import '../widgets/about_updates_panel.dart';
@@ -27,7 +28,10 @@ List<HarnessSettingsField> _settingsVisibleHarnessFields(
   List<HarnessSettingsField> fields,
 ) {
   return fields
-      .where((f) => !_integrationsHarnessSubgroups.contains(f.subgroupId))
+      .where((f) =>
+          !_integrationsHarnessSubgroups.contains(f.subgroupId) &&
+          !const {'AGENT_INFERENCE_MODE', 'AGENT_MANAGED_PROVIDER'}
+              .contains(f.key),)
       .toList();
 }
 
@@ -38,14 +42,14 @@ class SettingsScreen extends StatefulWidget {
   State<SettingsScreen> createState() => _SettingsScreenState();
 }
 
-class _SettingsScreenState extends State<SettingsScreen>
-    with SingleTickerProviderStateMixin {
+class _SettingsScreenState extends State<SettingsScreen> {
   final _apiKey = TextEditingController();
   final _model = TextEditingController();
   final _baseUrl = TextEditingController();
   final Map<String, TextEditingController> _fieldControllers = {};
   final _search = TextEditingController();
-  TabController? _tabs;
+  String _selected = 'models_api';
+  bool _advanced = false;
   bool _saving = false;
   String? _error;
   String _inferenceMode = 'auto';
@@ -100,7 +104,8 @@ class _SettingsScreenState extends State<SettingsScreen>
       _saving = true;
       _error = null;
     });
-    final ok = await AppScope.of(context).patchManagedInferenceModels(mainModel: modelId);
+    final ok = await AppScope.of(context)
+        .patchManagedInferenceModels(mainModel: modelId);
     if (!mounted) return;
     if (ok) {
       _syncProviderControllersFromHost();
@@ -116,7 +121,8 @@ class _SettingsScreenState extends State<SettingsScreen>
       _saving = true;
       _error = null;
     });
-    final ok = await AppScope.of(context).patchManagedInferenceModels(fastModel: modelId);
+    final ok = await AppScope.of(context)
+        .patchManagedInferenceModels(fastModel: modelId);
     if (!mounted) return;
     if (!ok) _error = 'Failed to update fast model';
     setState(() => _saving = false);
@@ -174,7 +180,8 @@ class _SettingsScreenState extends State<SettingsScreen>
     setState(() => _saving = false);
   }
 
-  String _readHarnessEnvField(HarnessSettingsSnapshot snap, String key, String fallback) {
+  String _readHarnessEnvField(
+      HarnessSettingsSnapshot snap, String key, String fallback,) {
     for (final f in snap.fields) {
       if (f.key == key && f.value.trim().isNotEmpty) return f.value.trim();
     }
@@ -187,19 +194,17 @@ class _SettingsScreenState extends State<SettingsScreen>
     final fromProvider = snap.provider.inferenceMode?.trim();
     _inferenceMode = (fromProvider != null && fromProvider.isNotEmpty)
         ? fromProvider.toLowerCase()
-        : _readHarnessEnvField(snap, 'AGENT_INFERENCE_MODE', 'auto').toLowerCase();
+        : _readHarnessEnvField(snap, 'AGENT_INFERENCE_MODE', 'auto')
+            .toLowerCase();
     _managedProvider =
-        _readHarnessEnvField(snap, 'AGENT_MANAGED_PROVIDER', 'auto').toLowerCase();
+        _readHarnessEnvField(snap, 'AGENT_MANAGED_PROVIDER', 'auto')
+            .toLowerCase();
     for (final f in snap.fields) {
       if (f.valueKind == 'boolean' || f.valueKind == 'enum') continue;
-      _fieldControllers.putIfAbsent(f.key, () => TextEditingController(text: f.value));
+      _fieldControllers.putIfAbsent(
+          f.key, () => TextEditingController(text: f.value),);
     }
-    if (_tabs == null && snap.tabs.isNotEmpty) {
-      _tabs = TabController(length: snap.tabs.length, vsync: this);
-      setState(() {});
-    } else if (_tabs != null) {
-      setState(() {});
-    }
+    setState(() {});
   }
 
   void _onSearchChanged() {
@@ -209,7 +214,6 @@ class _SettingsScreenState extends State<SettingsScreen>
   @override
   void dispose() {
     _search.removeListener(_onSearchChanged);
-    _tabs?.dispose();
     _search.dispose();
     _apiKey.dispose();
     _model.dispose();
@@ -241,7 +245,8 @@ class _SettingsScreenState extends State<SettingsScreen>
     setState(() {
       _saving = false;
       if (!ok) {
-        _error = AppScope.of(context).setupError ?? 'Failed to apply Bedrock preset';
+        _error =
+            AppScope.of(context).setupError ?? 'Failed to apply Bedrock preset';
       }
     });
   }
@@ -269,7 +274,8 @@ class _SettingsScreenState extends State<SettingsScreen>
     setState(() {
       _saving = false;
       if (!ok) {
-        _error = AppScope.of(context).setupError ?? 'Failed to apply provider preset';
+        _error = AppScope.of(context).setupError ??
+            'Failed to apply provider preset';
       }
     });
   }
@@ -293,7 +299,8 @@ class _SettingsScreenState extends State<SettingsScreen>
     }
   }
 
-  Future<void> _saveHarnessField(HarnessSettingsField field, String value) async {
+  Future<void> _saveHarnessField(
+      HarnessSettingsField field, String value,) async {
     setState(() => _saving = true);
     final ok = await AppScope.of(context).patchHarnessSettings({
       field.key: _envValue(field, value),
@@ -323,326 +330,246 @@ class _SettingsScreenState extends State<SettingsScreen>
     final cfg = host.config;
     final snap = host.harnessSettings;
     final lim = LiminalTheme.of(context);
-    final searchQ = _search.text.trim().toLowerCase();
-    final harnessSearchActive = searchQ.isNotEmpty;
-    final filteredHarnessFields = harnessSearchActive && snap != null
-        ? _settingsVisibleHarnessFields(snap.fields)
-            .where((f) => harnessFieldMatchesSearch(f, searchQ))
+    final query = _search.text.trim().toLowerCase();
+    final searchActive = query.isNotEmpty;
+    final allFields = _settingsVisibleHarnessFields(snap?.fields ?? const []);
+    final categoryFields = allFields
+        .where((f) => settingsCategory(f.tabId, f.key) == _selected)
+        .toList();
+    final fields = searchActive
+        ? allFields
+            .where((f) =>
+                harnessFieldMatchesSearch(f, query) ||
+                (everydaySettings[f.key]?.label.toLowerCase().contains(query) ??
+                    false),)
             .toList()
-        : null;
-
-    if (host.harnessSettingsLoading && snap == null) {
-      return LiminalShell(
-        appBar: _appBar(context),
-        body: LiminalPageCanvas(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              const SizedBox(height: LiminalSpacing.lg),
-              LiminalSection(
-                title: 'Loading settings',
-                subtitle: 'Fetching harness configuration from liminald…',
-                child: const Padding(
-                  padding: EdgeInsets.symmetric(vertical: LiminalSpacing.lg),
-                  child: Center(child: CircularProgressIndicator()),
-                ),
+        : categoryFields
+            .where((f) =>
+                _advanced ||
+                _selected == 'advanced' ||
+                everydaySettings.containsKey(f.key),)
+            .toList();
+    final hidden = categoryFields.length - fields.length;
+    final account = LiminalSection(
+      title: 'Vireon account',
+      subtitle:
+          'Manage your sign-in and plan. A local workspace does not require an account.',
+      child: _VireonAccountPanel(
+        snapshot: host.vireonAccount,
+        loading: host.vireonAccountLoading,
+        busy: host.vireonAuthBusy,
+        error: host.vireonAuthError,
+        onSignIn: () async {
+          setState(() => _error = null);
+          final ok = await AppScope.of(context).signInToVireon();
+          if (!mounted) return;
+          if (ok) {
+            _syncProviderControllersFromHost();
+            _syncFieldControllers();
+          } else {
+            setState(() => _error = AppScope.of(context).vireonAuthError);
+          }
+        },
+        onSignOut: () async {
+          setState(() => _error = null);
+          final ok = await AppScope.of(context).signOutOfVireon();
+          if (mounted && !ok) {
+            setState(() => _error = AppScope.of(context).vireonAuthError);
+          }
+        },
+      ),
+    );
+    final about = LiminalSection(
+      title: 'About & updates',
+      subtitle: 'Your installed version and available updates.',
+      child: const AboutUpdatesPanel(),
+    );
+    final apps = LiminalSection(
+      title: 'Desktop apps',
+      subtitle: 'Separate OS windows spawned by the agent or opened from here. '
+          'Closing a window does not remove the app.',
+      child: _DesktopAppsPanel(
+        apps: host.desktopApps,
+        caches: host.desktopAppCaches,
+        loading: host.desktopAppsLoading,
+        onOpen: (id) => AppScope.of(context).openDesktopAppWindow(id),
+        onRemove: (id) => AppScope.of(context).removeDesktopApp(id),
+        onRefresh: (id) => AppScope.of(context).refreshDesktopApp(id),
+        onUpdate: (id, props, autoOpen) => AppScope.of(context)
+            .updateDesktopApp(appId: id, props: props, autoOpen: autoOpen),
+      ),
+    );
+    final provider = LiminalSection(
+      title: 'Model & provider',
+      subtitle: _inferenceMode == 'byok'
+          ? 'Bring your own key — API keys live in `.env` only.'
+          : _inferenceMode == 'managed'
+              ? 'Pro managed inference — routed through Vireon.'
+              : 'Choose how Liminal connects to a model.',
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Text('How to connect', style: Theme.of(context).textTheme.titleSmall),
+          const SizedBox(height: LiminalSpacing.xs),
+          DropdownButtonFormField<String>(
+            value: _inferenceMode,
+            isExpanded: true,
+            decoration: const InputDecoration(isDense: true),
+            items: const [
+              DropdownMenuItem(
+                value: 'auto',
+                child: Text('Automatic'),
+              ),
+              DropdownMenuItem(
+                value: 'byok',
+                child: Text('Use my own API key'),
+              ),
+              DropdownMenuItem(
+                value: 'managed',
+                child: Text('Use Vireon credits'),
               ),
             ],
+            onChanged: _saving ? null : _onInferenceModeChanged,
           ),
-        ),
-      );
-    }
-
+          if (_inferenceMode != 'byok' && host.vireonAccount.connected) ...[
+            const SizedBox(height: LiminalSpacing.md),
+            ManagedInferencePanel(
+              mainModel: snap?.provider.model ?? _model.text,
+              fastModel: _fastModelFromSnapshot(snap),
+              catalog: host.managedInferenceModels,
+              loading: host.managedInferenceModelsLoading,
+              error: host.managedInferenceModelsError,
+              saving: _saving,
+              managedProvider: _managedProvider,
+              bedrockPresets: snap?.bedrockPresets ?? const [],
+              selectedBedrockPresetId: BedrockModelPreset.resolveSelection(
+                snap?.bedrockPresets ?? const [],
+                snap?.provider.model ?? _model.text,
+                _fastModelFromSnapshot(snap),
+              ),
+              onBedrockPresetApply: _applyBedrockPreset,
+              onManagedProvider: _onManagedProviderChanged,
+              onMainModel: _onManagedMainModel,
+              onFastModel: _onManagedFastModel,
+            ),
+          ],
+          if (_inferenceMode != 'managed') ...[
+            const SizedBox(height: LiminalSpacing.md),
+            _ProviderForm(
+              apiKey: _apiKey,
+              model: _model,
+              baseUrl: _baseUrl,
+              cfg: cfg,
+              provider: snap?.provider,
+              presets: snap?.providerPresets ?? const [],
+              backends: snap?.providerBackends.isNotEmpty == true
+                  ? snap!.providerBackends
+                  : HarnessSettingsSnapshot.defaultBackends(),
+              saving: _saving,
+              onSave: _saveProvider,
+              onPresetApply: _applyProviderPreset,
+            ),
+          ],
+        ],
+      ),
+    );
     return LiminalShell(
       appBar: _appBar(context),
-      body: LiminalPageCanvas(
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            Expanded(
-              child: CustomScrollView(
-                slivers: [
-                  SliverPadding(
-                    padding: const EdgeInsets.only(top: LiminalSpacing.lg),
-                    sliver: SliverToBoxAdapter(
-                      child: LiminalSection(
-                        title: 'Vireon account',
-                        subtitle:
-                            'Sign in for Pro managed inference, cloud sync, and team features. '
-                            'Community Edition works without an account.',
-                        child: _VireonAccountPanel(
-                          snapshot: host.vireonAccount,
-                          loading: host.vireonAccountLoading,
-                          busy: host.vireonAuthBusy,
-                          error: host.vireonAuthError,
-                          onSignIn: () async {
-                            setState(() => _error = null);
-                            final ok = await AppScope.of(context).signInToVireon();
-                            if (!mounted) return;
-                            if (ok) {
-                              _syncProviderControllersFromHost();
-                              _syncFieldControllers();
-                            } else {
-                              setState(() => _error = AppScope.of(context).vireonAuthError);
-                            }
-                          },
-                          onSignOut: () async {
-                            setState(() => _error = null);
-                            final ok = await AppScope.of(context).signOutOfVireon();
-                            if (mounted && !ok) {
-                              setState(() => _error = AppScope.of(context).vireonAuthError);
-                            }
-                          },
-                        ),
-                      ),
-                    ),
-                  ),
-                  SliverPadding(
-                    padding: const EdgeInsets.only(top: LiminalSpacing.lg),
-                    sliver: SliverToBoxAdapter(
-                      child: LiminalSection(
-                        title: 'About & updates',
-                        subtitle:
-                            'Liminal Desktop checks GitHub Releases for harness and app updates. '
-                            'Harness updates reconnect the sidecar; app updates restart once.',
-                        child: const AboutUpdatesPanel(),
-                      ),
-                    ),
-                  ),
-                  if (LiminalFeatureFlags.desktopAppsEnabled)
-                    SliverPadding(
-                      padding: const EdgeInsets.only(top: LiminalSpacing.lg),
-                      sliver: SliverToBoxAdapter(
-                        child: LiminalSection(
-                          title: 'Desktop apps',
-                          subtitle:
-                              'Separate OS windows spawned by the agent or opened from here. '
-                              'Closing a window does not remove the app.',
-                          child: _DesktopAppsPanel(
-                            apps: host.desktopApps,
-                            caches: host.desktopAppCaches,
-                            loading: host.desktopAppsLoading,
-                            onOpen: (id) => AppScope.of(context).openDesktopAppWindow(id),
-                            onRemove: (id) => AppScope.of(context).removeDesktopApp(id),
-                            onRefresh: (id) => AppScope.of(context).refreshDesktopApp(id),
-                            onUpdate: (id, props, autoOpen) => AppScope.of(context)
-                                .updateDesktopApp(appId: id, props: props, autoOpen: autoOpen),
-                          ),
-                        ),
-                      ),
-                    ),
-                  SliverPadding(
-                    padding: const EdgeInsets.only(top: LiminalSpacing.lg),
-                    sliver: SliverToBoxAdapter(
-                      child: LiminalSection(
-                        title: 'Provider',
-                        subtitle: _inferenceMode == 'byok'
-                            ? 'Bring your own key — API keys live in `.env` only.'
-                            : _inferenceMode == 'managed'
-                                ? 'Pro managed inference — routed through Vireon.'
-                                : 'Auto uses Vireon when signed in; BYOK presets available below.',
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.stretch,
-                          children: [
-                            Text('Inference mode', style: Theme.of(context).textTheme.titleSmall),
-                            const SizedBox(height: LiminalSpacing.xs),
-                            DropdownButtonFormField<String>(
-                              value: _inferenceMode,
-                              decoration: const InputDecoration(isDense: true),
-                              items: const [
-                                DropdownMenuItem(
-                                  value: 'auto',
-                                  child: Text('auto — Vireon when signed in, BYOK fallback'),
-                                ),
-                                DropdownMenuItem(
-                                  value: 'byok',
-                                  child: Text('byok — your API key / base URL'),
-                                ),
-                                DropdownMenuItem(
-                                  value: 'managed',
-                                  child: Text('managed — always Vireon proxy'),
-                                ),
-                              ],
-                              onChanged: _saving ? null : _onInferenceModeChanged,
-                            ),
-                            if (_inferenceMode != 'byok' && host.vireonAccount.connected) ...[
-                              const SizedBox(height: LiminalSpacing.md),
-                              ManagedInferencePanel(
-                                mainModel: snap?.provider.model ?? _model.text,
-                                fastModel: _fastModelFromSnapshot(snap),
-                                catalog: host.managedInferenceModels,
-                                loading: host.managedInferenceModelsLoading,
-                                error: host.managedInferenceModelsError,
-                                saving: _saving,
-                                managedProvider: _managedProvider,
-                                bedrockPresets: snap?.bedrockPresets ?? const [],
-                                selectedBedrockPresetId: BedrockModelPreset.resolveSelection(
-                                  snap?.bedrockPresets ?? const [],
-                                  snap?.provider.model ?? _model.text,
-                                  _fastModelFromSnapshot(snap),
-                                ),
-                                onBedrockPresetApply: _applyBedrockPreset,
-                                onManagedProvider: _onManagedProviderChanged,
-                                onMainModel: _onManagedMainModel,
-                                onFastModel: _onManagedFastModel,
-                              ),
-                            ],
-                            if (_inferenceMode != 'managed') ...[
-                              const SizedBox(height: LiminalSpacing.md),
-                              _ProviderForm(
-                                apiKey: _apiKey,
-                                model: _model,
-                                baseUrl: _baseUrl,
-                                cfg: cfg,
-                                provider: snap?.provider,
-                                presets: snap?.providerPresets ?? const [],
-                                backends: snap?.providerBackends.isNotEmpty == true
-                                    ? snap!.providerBackends
-                                    : HarnessSettingsSnapshot.defaultBackends(),
-                                saving: _saving,
-                                onSave: _saveProvider,
-                                onPresetApply: _applyProviderPreset,
-                              ),
-                            ],
-                          ],
-                        ),
-                      ),
-                    ),
-                  ),
-                  if (snap != null && snap.tabs.isNotEmpty && _tabs != null) ...[
-                    SliverPadding(
-                      padding: const EdgeInsets.only(
-                        top: LiminalSpacing.xl,
-                        bottom: LiminalSpacing.sm,
-                      ),
-                      sliver: SliverToBoxAdapter(
-                        child: Text(
-                          'Harness',
-                          style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                                color: lim.accent,
-                                fontWeight: FontWeight.w600,
-                              ),
-                        ),
-                      ),
-                    ),
-                    if (snap.hint != null && snap.hint!.trim().isNotEmpty)
-                      SliverPadding(
-                        padding: const EdgeInsets.only(bottom: LiminalSpacing.sm),
-                        sliver: SliverToBoxAdapter(
-                          child: Text(
-                            snap.hint!,
-                            style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                                  color: lim.textMuted,
-                                  height: 1.45,
-                                ),
-                          ),
-                        ),
-                      ),
-                    SliverPersistentHeader(
-                      pinned: true,
-                      delegate: _HarnessSearchHeader(
-                        search: _search,
-                        searchText: _search.text,
-                        saving: _saving,
-                        background: lim.panel.withValues(alpha: 0.95),
-                      ),
-                    ),
-                    if (!harnessSearchActive)
-                      SliverPersistentHeader(
-                        pinned: true,
-                        delegate: _TabBarHeader(
-                          tabBar: TabBar(
-                            controller: _tabs,
-                            isScrollable: true,
-                            tabAlignment: TabAlignment.start,
-                            labelStyle: Theme.of(context).textTheme.titleSmall,
-                            tabs: [for (final t in snap.tabs) Tab(text: t.title)],
-                          ),
-                          background: lim.panel.withValues(alpha: 0.95),
-                        ),
-                      ),
-                    if (harnessSearchActive)
-                      SliverToBoxAdapter(
-                        child: Padding(
-                          padding: const EdgeInsets.fromLTRB(
-                            LiminalSpacing.md,
-                            LiminalSpacing.sm,
-                            LiminalSpacing.md,
-                            LiminalSpacing.xs,
-                          ),
-                          child: Text(
-                            filteredHarnessFields!.isEmpty
-                                ? 'No settings match "$searchQ".'
-                                : 'Search results (${filteredHarnessFields.length})',
-                            style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                                  color: filteredHarnessFields.isEmpty
-                                      ? Theme.of(context).colorScheme.error
-                                      : lim.warn,
-                                ),
-                          ),
-                        ),
-                      ),
-                    SliverFillRemaining(
-                      hasScrollBody: true,
-                      child: harnessSearchActive
-                          ? _HarnessTabPane(
-                              fields: filteredHarnessFields ?? const [],
-                              controllers: _fieldControllers,
-                              saving: _saving,
-                              onSave: (f, v) => _saveHarnessField(f, v),
-                              showTabContext: true,
-                              tabTitleFor: (field) {
-                                for (final t in snap.tabs) {
-                                  if (t.id == field.tabId) return t.title;
-                                }
-                                return null;
-                              },
-                            )
-                          : TabBarView(
-                              controller: _tabs,
-                              children: [
-                                for (final tab in snap.tabs)
-                                  _HarnessTabPane(
-                                    fields: _settingsVisibleHarnessFields(
-                                      snap.fields.where((f) => f.tabId == tab.id).toList(),
-                                    ),
-                                    controllers: _fieldControllers,
-                                    saving: _saving,
-                                    onSave: (f, v) => _saveHarnessField(f, v),
-                                  ),
-                              ],
-                            ),
-                    ),
-                  ] else
-                    const SliverPadding(
-                      padding: EdgeInsets.only(top: LiminalSpacing.lg),
-                      sliver: SliverToBoxAdapter(
-                        child: Text('Harness settings unavailable.'),
-                      ),
-                    ),
-                ],
-              ),
-            ),
-            if (_error != null)
-              Padding(
-                padding: const EdgeInsets.only(
-                  top: LiminalSpacing.sm,
-                  bottom: LiminalSpacing.md,
-                ),
-                child: Text(
-                  _error!,
-                  style: TextStyle(color: Theme.of(context).colorScheme.error),
-                ),
-              ),
+      body: SettingsWorkspace(
+        selected: _selected,
+        onSelect: (id) => setState(() {
+          _selected = id;
+          _advanced = false;
+          _search.clear();
+        }),
+        search: _search,
+        onSearch: (_) => setState(() {}),
+        child:
+            Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+          if (host.harnessSettingsLoading && snap == null)
+            const LinearProgressIndicator(),
+          if (_error != null)
+            Padding(
+                padding: const EdgeInsets.only(bottom: 16),
+                child: Text(_error!, style: TextStyle(color: lim.danger)),),
+          if (searchActive) ...[
+            Text('Search results · ${fields.length}',
+                style: Theme.of(context).textTheme.headlineSmall,),
+            const SizedBox(height: 8),
+            Text('Includes everyday and advanced settings.',
+                style: TextStyle(color: lim.textMuted),),
+          ] else ...[
+            if (_selected == 'account') account,
+            if (_selected == 'about') about,
+            if (_selected == 'models_api') provider,
+            if (_selected != 'account' &&
+                _selected != 'about' &&
+                _selected != 'models_api') ...[
+              Text(
+                  settingsDestinations
+                      .firstWhere((d) => d.id == _selected)
+                      .title,
+                  style: Theme.of(context).textTheme.headlineMedium,),
+              const SizedBox(height: 8),
+              Text(
+                  _selected == 'advanced'
+                      ? 'Fine-tune tools, execution, and diagnostics. Defaults work for most people.'
+                      : 'The choices you are most likely to need.',
+                  style: TextStyle(color: lim.textMuted, height: 1.5),),
+            ],
           ],
-        ),
+          if (searchActive ||
+              (_selected != 'account' && _selected != 'about')) ...[
+            const SizedBox(height: 24),
+            if (!searchActive &&
+                _selected != 'advanced' &&
+                (hidden > 0 || _advanced))
+              SwitchListTile.adaptive(
+                  contentPadding: EdgeInsets.zero,
+                  title: const Text('Show advanced options'),
+                  subtitle: Text(_advanced
+                      ? 'Showing all options in this category.'
+                      : '$hidden additional options available.',),
+                  value: _advanced,
+                  onChanged: (v) => setState(() => _advanced = v),),
+            if (fields.isEmpty && (searchActive || hidden > 0))
+              Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 20),
+                  child: Text(
+                      searchActive
+                          ? 'No matching settings. Try another name or keyword.'
+                          : 'Use advanced options for more controls.',
+                      style: TextStyle(color: lim.textDim),),),
+            _HarnessTabPane(
+                fields: fields,
+                controllers: _fieldControllers,
+                saving: _saving,
+                onSave: _saveHarnessField,
+                showTabContext: searchActive || _selected == 'advanced',
+                tabTitleFor: (f) =>
+                    snap?.tabs.where((t) => t.id == f.tabId).firstOrNull?.title,
+                collapseGroups: !searchActive && _selected == 'advanced',),
+            if (_selected == 'session_ui' &&
+                !searchActive &&
+                LiminalFeatureFlags.desktopAppsEnabled) ...[
+              const SizedBox(height: 24),
+              ExpansionTile(
+                  title: const Text('Desktop widgets'), children: [apps],),
+            ],
+            const SizedBox(height: 16),
+            Text(
+                'Switches save immediately. Use Apply for text and selection changes.',
+                style: TextStyle(color: lim.textDim, fontSize: 12),),
+          ],
+        ],),
       ),
     );
   }
 
   PreferredSizeWidget _appBar(BuildContext context) {
     return AppBar(
-      title: const Text('Settings'),
+      toolbarHeight: 72,
+      title: const Text('Workspace / Settings'),
       leading: IconButton(
         icon: const Icon(Icons.arrow_back),
         onPressed: () => context.pop(),
@@ -687,7 +614,8 @@ class _VireonAccountPanel extends StatelessWidget {
           _StatusRow(
             label: 'Signed in',
             value: [
-              if (snapshot.email != null && snapshot.email!.isNotEmpty) snapshot.email!,
+              if (snapshot.email != null && snapshot.email!.isNotEmpty)
+                snapshot.email!,
               if (snapshot.tier.isNotEmpty) '(${snapshot.tier})',
             ].join(' '),
             ok: true,
@@ -697,7 +625,8 @@ class _VireonAccountPanel extends StatelessWidget {
               padding: const EdgeInsets.only(bottom: LiminalSpacing.md),
               child: Text(
                 'License active — stored locally in ~/.liminal/',
-                style: theme.textTheme.bodyMedium?.copyWith(color: lim.textMuted),
+                style:
+                    theme.textTheme.bodyMedium?.copyWith(color: lim.textMuted),
               ),
             ),
         ] else
@@ -714,7 +643,8 @@ class _VireonAccountPanel extends StatelessWidget {
         if (error != null && error!.isNotEmpty)
           Padding(
             padding: const EdgeInsets.only(bottom: LiminalSpacing.sm),
-            child: Text(error!, style: TextStyle(color: theme.colorScheme.error)),
+            child:
+                Text(error!, style: TextStyle(color: theme.colorScheme.error)),
           ),
         Wrap(
           spacing: LiminalSpacing.sm,
@@ -807,9 +737,10 @@ class _ProviderForm extends StatelessWidget {
     final resolvedPresetId = presets.isEmpty
         ? 'custom'
         : ProviderPreset.resolveSelection(presets, model.text, baseUrl.text);
-    final modelDropdownValue = backendPresets.any((p) => p.id == resolvedPresetId)
-        ? resolvedPresetId
-        : 'custom';
+    final modelDropdownValue =
+        backendPresets.any((p) => p.id == resolvedPresetId)
+            ? resolvedPresetId
+            : 'custom';
     String? presetHint;
     for (final p in presets) {
       if (p.id == resolvedPresetId) {
@@ -856,12 +787,6 @@ class _ProviderForm extends StatelessWidget {
                   : 'Not configured',
               ok: cfg?.apiKeyConfigured == true,
             ),
-            LiminalTextField(
-              controller: apiKey,
-              label: 'New API key',
-              hint: 'Optional — keys in .env (KIMCHI_API_KEY, OPENROUTER_API_KEY) load automatically',
-              obscure: true,
-            ),
             if (backends.isNotEmpty) ...[
               Text(
                 'Provider',
@@ -869,17 +794,18 @@ class _ProviderForm extends StatelessWidget {
               ),
               const SizedBox(height: LiminalSpacing.xs),
               DropdownButtonFormField<String>(
+                isExpanded: true,
                 value: backends.any((b) => b.id == resolvedBackendId)
                     ? resolvedBackendId
                     : backends.first.id,
                 decoration: InputDecoration(
                   isDense: true,
                   border: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(4),
+                    borderRadius: BorderRadius.circular(10),
                     borderSide: BorderSide(color: lim.border),
                   ),
                   enabledBorder: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(4),
+                    borderRadius: BorderRadius.circular(10),
                     borderSide: BorderSide(color: lim.border),
                   ),
                 ),
@@ -896,7 +822,8 @@ class _ProviderForm extends StatelessWidget {
                     ? null
                     : (backendId) {
                         if (backendId == null) return;
-                        final first = ProviderPreset.forBackend(presets, backendId);
+                        final first =
+                            ProviderPreset.forBackend(presets, backendId);
                         if (first.isNotEmpty) {
                           onPresetApply(first.first.id);
                         }
@@ -922,15 +849,16 @@ class _ProviderForm extends StatelessWidget {
               ),
               const SizedBox(height: LiminalSpacing.xs),
               DropdownButtonFormField<String>(
+                isExpanded: true,
                 value: modelDropdownValue,
                 decoration: InputDecoration(
                   isDense: true,
                   border: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(4),
+                    borderRadius: BorderRadius.circular(10),
                     borderSide: BorderSide(color: lim.border),
                   ),
                   enabledBorder: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(4),
+                    borderRadius: BorderRadius.circular(10),
                     borderSide: BorderSide(color: lim.border),
                   ),
                 ),
@@ -966,9 +894,9 @@ class _ProviderForm extends StatelessWidget {
                 Padding(
                   padding: const EdgeInsets.only(top: LiminalSpacing.xs),
                   child: Text(
-                    'Sets main model, base URL, fast model, and provider routing. '
-                    'Saved to runtime prefs immediately.',
-                    style: theme.textTheme.bodySmall?.copyWith(color: lim.textMuted),
+                    'Choosing a preset saves the model configuration immediately.',
+                    style: theme.textTheme.bodySmall
+                        ?.copyWith(color: lim.textMuted),
                   ),
                 ),
               if (presetHint != null && presetHint.isNotEmpty)
@@ -988,32 +916,47 @@ class _ProviderForm extends StatelessWidget {
               else
                 const SizedBox(height: LiminalSpacing.md),
             ],
-            if (twoCol)
-              Row(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Expanded(child: modelField),
-                  const SizedBox(width: LiminalSpacing.md),
-                  Expanded(child: baseUrlField),
+            ExpansionTile(
+              title: const Text('Credentials & custom connection'),
+              subtitle: const Text(
+                  'Change your API key, model ID, or server address.',),
+              tilePadding: EdgeInsets.zero,
+              children: [
+                LiminalTextField(
+                  controller: apiKey,
+                  label: 'New API key',
+                  hint:
+                      'Optional — keys in .env (KIMCHI_API_KEY, OPENROUTER_API_KEY) load automatically',
+                  obscure: true,
+                ),
+                if (twoCol)
+                  Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Expanded(child: modelField),
+                      const SizedBox(width: LiminalSpacing.md),
+                      Expanded(child: baseUrlField),
+                    ],
+                  )
+                else ...[
+                  modelField,
+                  baseUrlField,
                 ],
-              )
-            else ...[
-              modelField,
-              baseUrlField,
-            ],
-            const SizedBox(height: LiminalSpacing.sm),
-            Align(
-              alignment: Alignment.centerLeft,
-              child: FilledButton(
-                onPressed: saving ? null : onSave,
-                child: saving
-                    ? const SizedBox(
-                        height: 22,
-                        width: 22,
-                        child: CircularProgressIndicator(strokeWidth: 2),
-                      )
-                    : const Text('Save provider'),
-              ),
+                const SizedBox(height: LiminalSpacing.sm),
+                Align(
+                  alignment: Alignment.centerLeft,
+                  child: FilledButton(
+                    onPressed: saving ? null : onSave,
+                    child: saving
+                        ? const SizedBox(
+                            height: 22,
+                            width: 22,
+                            child: CircularProgressIndicator(strokeWidth: 2),
+                          )
+                        : const Text('Save provider'),
+                  ),
+                ),
+              ],
             ),
           ],
         );
@@ -1066,7 +1009,9 @@ LinkedHashMap<String, List<HarnessSettingsField>> _groupBySubgroup(
   final order = <String>[];
   final map = <String, List<HarnessSettingsField>>{};
   for (final f in fields) {
-    final label = f.subgroupLabel.isNotEmpty
+    final label = f.key == 'AGENT_EFFORT' || f.key == 'AGENT_TTS_ENABLED'
+        ? 'Response & voice'
+        : f.subgroupLabel.isNotEmpty
         ? f.subgroupLabel
         : (f.subgroupId.isNotEmpty ? f.subgroupId : '');
     if (!map.containsKey(label)) {
@@ -1116,173 +1061,61 @@ LinkedHashMap<String, List<HarnessSettingsField>> _groupByTabThenSubgroup(
 }
 
 class _HarnessTabPane extends StatelessWidget {
-  const _HarnessTabPane({
-    required this.fields,
-    required this.controllers,
-    required this.saving,
-    required this.onSave,
-    this.showTabContext = false,
-    this.tabTitleFor,
-  });
-
+  const _HarnessTabPane(
+      {required this.fields,
+      required this.controllers,
+      required this.saving,
+      required this.onSave,
+      this.showTabContext = false,
+      this.tabTitleFor,
+      this.collapseGroups = false,});
   final List<HarnessSettingsField> fields;
   final Map<String, TextEditingController> controllers;
   final bool saving;
-  final void Function(HarnessSettingsField field, String value) onSave;
+  final void Function(HarnessSettingsField, String) onSave;
   final bool showTabContext;
-  final String? Function(HarnessSettingsField field)? tabTitleFor;
-
+  final String? Function(HarnessSettingsField)? tabTitleFor;
+  final bool collapseGroups;
   @override
   Widget build(BuildContext context) {
-    if (fields.isEmpty) {
-      return const Center(child: Text('No settings in this tab.'));
-    }
-
     final groups = showTabContext && tabTitleFor != null
         ? _groupByTabThenSubgroup(fields, tabTitleFor!)
         : _groupBySubgroup(fields);
-    final lim = LiminalTheme.of(context);
-
-    return LayoutBuilder(
-      builder: (context, constraints) {
-        final columns = LiminalBreakpoints.settingsColumns(constraints.maxWidth);
-
-        return ListView(
-          padding: const EdgeInsets.symmetric(vertical: LiminalSpacing.md),
-          children: [
-            for (final entry in groups.entries) ...[
-              if (entry.key.isNotEmpty) ...[
-                Padding(
-                  padding: const EdgeInsets.only(
-                    top: LiminalSpacing.md,
-                    bottom: LiminalSpacing.sm,
-                  ),
-                  child: Text(
-                    entry.key,
-                    style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                          color: lim.text,
-                          fontWeight: FontWeight.w600,
-                        ),
-                  ),
-                ),
-              ],
-              if (columns == 1)
-                for (final f in entry.value)
-                  Padding(
-                    padding: const EdgeInsets.only(bottom: LiminalSpacing.md),
-                    child: _fieldTile(f),
-                  )
-              else
-                for (var i = 0; i < entry.value.length; i += 2)
-                  Padding(
-                    padding: const EdgeInsets.only(bottom: LiminalSpacing.md),
-                    child: Row(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Expanded(child: _fieldTile(entry.value[i])),
-                        const SizedBox(width: LiminalSpacing.md),
-                        if (i + 1 < entry.value.length)
-                          Expanded(child: _fieldTile(entry.value[i + 1]))
-                        else
-                          const Expanded(child: SizedBox.shrink()),
-                      ],
-                    ),
-                  ),
-            ],
-          ],
-        );
-      },
-    );
+    return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+      for (final entry in groups.entries)
+        Padding(
+            padding: const EdgeInsets.only(top: 16),
+            child: collapseGroups
+                ? ExpansionTile(
+                    key: PageStorageKey(entry.key),
+                    title: Text(entry.key),
+                    subtitle: Text('${entry.value.length} options'),
+                    children: [_rows(entry.value)],)
+                : Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                        if (entry.key.isNotEmpty)
+                          Padding(
+                              padding: const EdgeInsets.only(bottom: 12),
+                              child: Text(entry.key,
+                                  style:
+                                      Theme.of(context).textTheme.titleMedium,),),
+                        _rows(entry.value),
+                      ],),),
+    ],);
   }
 
-  Widget _fieldTile(HarnessSettingsField f) {
-    return LiminalHarnessField(
-      field: f,
-      controller: controllers[f.key],
-      enabled: !saving,
-      onApply: (v) => onSave(f, v),
-    );
-  }
-}
-
-class _HarnessSearchHeader extends SliverPersistentHeaderDelegate {
-  _HarnessSearchHeader({
-    required this.search,
-    required this.searchText,
-    required this.saving,
-    required this.background,
-  });
-
-  final TextEditingController search;
-  final String searchText;
-  final bool saving;
-  final Color background;
-
-  static const double _height = 56;
-
-  @override
-  double get minExtent => _height;
-
-  @override
-  double get maxExtent => _height;
-
-  @override
-  Widget build(BuildContext context, double shrinkOffset, bool overlapsContent) {
-    return Material(
-      color: background,
-      child: Padding(
-        padding: const EdgeInsets.fromLTRB(
-          LiminalSpacing.md,
-          LiminalSpacing.xs,
-          LiminalSpacing.md,
-          LiminalSpacing.sm,
-        ),
-        child: IgnorePointer(
-          ignoring: saving,
-          child: Opacity(
-            opacity: saving ? 0.6 : 1,
-            child: LiminalSearchField(
-              controller: search,
-              hintText: 'Search settings…',
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-
-  @override
-  bool shouldRebuild(covariant _HarnessSearchHeader oldDelegate) =>
-      oldDelegate.searchText != searchText ||
-      oldDelegate.saving != saving ||
-      oldDelegate.background != background;
-}
-
-class _TabBarHeader extends SliverPersistentHeaderDelegate {
-  _TabBarHeader({required this.tabBar, required this.background});
-
-  final TabBar tabBar;
-  final Color background;
-
-  static const double _height = 52;
-
-  @override
-  double get minExtent => _height;
-
-  @override
-  double get maxExtent => _height;
-
-  @override
-  Widget build(BuildContext context, double shrinkOffset, bool overlapsContent) {
-    return Material(
-      color: background,
-      child: SizedBox(height: _height, child: tabBar),
-    );
-  }
-
-  @override
-  bool shouldRebuild(covariant _TabBarHeader oldDelegate) =>
-      oldDelegate.tabBar != tabBar || oldDelegate.background != background;
+  Widget _rows(List<HarnessSettingsField> rows) => Column(children: [
+        for (final f in rows)
+          Padding(
+              padding: const EdgeInsets.only(bottom: 12),
+              child: LiminalHarnessField(
+                  key: ValueKey(f.key),
+                  field: f,
+                  controller: controllers[f.key],
+                  enabled: !saving,
+                  onApply: (v) => onSave(f, v),),),
+      ],);
 }
 
 class _DesktopAppsPanel extends StatefulWidget {
@@ -1398,7 +1231,8 @@ class _DesktopAppsPanelState extends State<_DesktopAppsPanel> {
                       enabled: _busyId == null,
                       onSave: (props, autoOpen) async {
                         setState(() => _busyId = app.id);
-                        final ok = await widget.onUpdate(app.id, props, autoOpen);
+                        final ok =
+                            await widget.onUpdate(app.id, props, autoOpen);
                         if (mounted) setState(() => _busyId = null);
                         return ok;
                       },
@@ -1460,7 +1294,8 @@ class _WeatherAppEditor extends StatefulWidget {
 
   final LiminalAppSpec app;
   final bool enabled;
-  final Future<bool> Function(String location, String units, bool autoOpen) onSave;
+  final Future<bool> Function(String location, String units, bool autoOpen)
+      onSave;
 
   @override
   State<_WeatherAppEditor> createState() => _WeatherAppEditorState();
@@ -1528,9 +1363,8 @@ class _WeatherAppEditorState extends State<_WeatherAppEditor> {
           contentPadding: EdgeInsets.zero,
           title: const Text('Open at startup'),
           value: _autoOpen,
-          onChanged: widget.enabled
-              ? (v) => setState(() => _autoOpen = v)
-              : null,
+          onChanged:
+              widget.enabled ? (v) => setState(() => _autoOpen = v) : null,
         ),
         Align(
           alignment: Alignment.centerRight,
@@ -1625,12 +1459,14 @@ class _WidgetContentEditorState extends State<_WidgetContentEditor> {
           contentPadding: EdgeInsets.zero,
           title: const Text('Open at startup'),
           value: _autoOpen,
-          onChanged: widget.enabled ? (v) => setState(() => _autoOpen = v) : null,
+          onChanged:
+              widget.enabled ? (v) => setState(() => _autoOpen = v) : null,
         ),
         Align(
           alignment: Alignment.centerRight,
           child: TextButton(
-            onPressed: widget.enabled && !_content.text.startsWith('(content stored')
+            onPressed: widget.enabled &&
+                    !_content.text.startsWith('(content stored')
                 ? () async {
                     await widget.onSave({_fieldKey: _content.text}, _autoOpen);
                   }

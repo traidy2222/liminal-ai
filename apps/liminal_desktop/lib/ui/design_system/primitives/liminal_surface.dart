@@ -50,10 +50,13 @@ class _LiminalSurfaceState extends State<LiminalSurface> {
     final bg = raise
         ? Color.alphaBlend(Colors.white.withValues(alpha: 0.035), restingBg)
         : restingBg;
-    final border = raise ? lim.borderStrong : (widget.borderColor ?? lim.border);
+    final border =
+        raise ? lim.borderStrong : (widget.borderColor ?? lim.border);
 
     Widget content = AnimatedContainer(
-      duration: LiminalMotion.fast,
+      duration: MediaQuery.disableAnimationsOf(context)
+          ? Duration.zero
+          : LiminalMotion.fast,
       curve: LiminalMotion.standard,
       padding: widget.padding,
       decoration: BoxDecoration(
@@ -61,10 +64,11 @@ class _LiminalSurfaceState extends State<LiminalSurface> {
         borderRadius: BorderRadius.circular(r),
         border: Border.all(color: border),
         boxShadow: widget.elevation > 0
-            ? LiminalElevation.shadow(lim.accent, level: widget.elevation, glow: lim.glow)
+            ? LiminalElevation.shadow(lim.accent,
+                level: widget.elevation, glow: lim.glow)
             : null,
       ),
-      child: widget.child,
+      child: Material(type: MaterialType.transparency, child: widget.child),
     );
 
     if (interactive) {

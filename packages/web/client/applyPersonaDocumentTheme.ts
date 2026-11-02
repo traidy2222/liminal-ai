@@ -2,6 +2,7 @@ import {
   migratePersonaUiTheme,
   themeToCssVars,
   FONT_PAIR_GOOGLE_URL,
+  relativeLuminance,
   type PersonaUiThemeV2,
 } from "@liminal/core/persona-ui-theme";
 import { motionPresetToCssMultipliers } from "@liminal/core/persona-ui-theme";
@@ -30,6 +31,13 @@ export function applyPersonaDocumentTheme(theme: PersonaUiThemeV2 | null): void 
   const t = migratePersonaUiTheme(theme);
   const root = document.documentElement;
   const vars = themeToCssVars(t);
+  const accentHex = t.accent.replace("#", "");
+  const accentLuminance = relativeLuminance({
+    r: parseInt(accentHex.slice(0, 2), 16),
+    g: parseInt(accentHex.slice(2, 4), 16),
+    b: parseInt(accentHex.slice(4, 6), 16),
+  });
+  root.style.setProperty("--lim-on-accent", accentLuminance > 0.18 ? "#06090e" : "#ffffff");
 
   for (const [key, value] of Object.entries(vars)) {
     root.style.setProperty(key, value);

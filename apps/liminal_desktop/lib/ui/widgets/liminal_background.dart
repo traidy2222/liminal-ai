@@ -43,6 +43,9 @@ class LiminalBackground extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final lim = LiminalThemeExtension.of(context).tokens;
+    if (lim.shell != 'terminal') {
+      return ColoredBox(color: lim.background, child: child);
+    }
     return Stack(
       fit: StackFit.expand,
       children: [

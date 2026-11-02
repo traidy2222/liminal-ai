@@ -4,7 +4,7 @@ import {
   detectSlashInput,
   listSlashCompletions,
   type SlashCompletionItem,
-} from "@liminal/core";
+} from "@liminal/core/composer-slash";
 
 export function useSlashCommandCompletion(input: string) {
   const [cursor, setCursor] = useState(0);

@@ -1,4 +1,4 @@
-import { formatRemoteStatusMessage, type ParsedRemoteSlash } from "./remote_session.js";
+import { formatRemoteStatusMessage, type ParsedRemoteSlash } from "./remote_session_format.js";
 
 export type RemoteSlashCommandResult =
   | { action: "enable"; chatId: string; mode: "view" | "control"; cloud: boolean }

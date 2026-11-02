@@ -2,7 +2,7 @@
 
 All notable changes to [Liminal AI](https://github.com/traidy2222/liminal-ai) are documented here and on the docs portal: [docs.vireondynamics.com/liminal/reference/changelog](https://docs.vireondynamics.com/liminal/reference/changelog).
 
-**Current stage:** **beta** (`v0.1.2` tip of `main`, 2026-06-18). **Beta**, **RC**, and **v0.1.0 public preview** have not been declared as product releases yet.
+**Current stage:** **beta** (`v0.1.3` tip of `main`, 2026-11-02). Desktop downloads are published through the public preview release channel.
 
 **Single source:** edit [`changelog/releases.json`](changelog/releases.json), then run `npm run changelog:gen`.
 
@@ -10,7 +10,13 @@ Format: **v0.0.x** entries keyed to the last GitHub push in each slice. Dates ar
 
 Marketing (richer notes): [vireondynamics.com/liminal/changelog](https://www.vireondynamics.com/liminal/changelog)
 
-## [v0.1.2] — 2026-06-18 — Current alpha
+## [v0.1.3] — 2026-11-02 — Current beta
+
+A consistent slate-and-iris interface, a rebuilt desktop hub, and streamlined settings with everyday controls first and searchable advanced options.
+
+[Full notes](https://docs.vireondynamics.com/liminal/reference/changelog#v0-1-3)
+
+## [v0.1.2] — 2026-06-18
 
 Scans all connected Gmail/Outlook mailboxes with account-aware replies, automated inbox watcher with Gmail labels, email privacy redaction, composer drag-and-drop for any file type, redesigned integrations panel on web and desktop, and managed inference Settings that stay on managed mode.
 

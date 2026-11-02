@@ -55,11 +55,11 @@ ThemeData buildLiminalTheme({PersonaUiTheme? persona}) {
       centerTitle: false,
       elevation: 0,
       scrolledUnderElevation: 0,
-      backgroundColor: tokens.panel.withValues(alpha: 0.92),
+      backgroundColor: tokens.background,
       foregroundColor: tokens.text,
       shape: Border(bottom: BorderSide(color: tokens.border)),
       titleTextStyle: fonts.heading(
-        fontSize: 16 * scale,
+        fontSize: 17 * scale,
         fontWeight: FontWeight.w600,
         color: tokens.text,
         letterSpacing: -0.2,

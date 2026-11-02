@@ -55,10 +55,10 @@ class ChatMessageFrame extends StatelessWidget {
             const SizedBox(width: 6),
           ],
           Text(
-            roleLabel.toUpperCase(),
+            roleLabel,
             style: LiminalTheme.mono(
               context,
-              fontSize: 10,
+              fontSize: 12,
               fontWeight: FontWeight.w600,
               color: lim.textDim,
             ).copyWith(letterSpacing: 0.4),

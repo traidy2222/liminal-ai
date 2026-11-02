@@ -16,12 +16,13 @@
     "eval:desktop:smoke": "node --env-file=../../.env --import tsx/esm src/index.ts --only desktop-smoke --parallel 1",
     "bench:parity": "node --env-file=../../.env --import tsx/esm src/benchParityCompare.ts",
     "bench:sandbox": "node --env-file=../../.env --import tsx/esm src/benchSingleTurn.ts",
-    "test:sandbox": "node --import tsx/esm --test src/sandboxLabBootstrap.test.ts src/evalProvider.test.ts",
+    "test:sandbox": "node --import tsx/esm --test src/sandboxLabBootstrap.test.ts src/evalProvider.test.ts src/runnerTrace.test.ts",
     "ab:rerank": "node --env-file=../../.env --import tsx/esm src/ab/rerank_ab.ts",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
     "@liminal/core": "*",
+    "@liminal/sidecar": "*",
     "@liminal/tools": "*"
   },
   "devDependencies": {

@@ -27,21 +27,29 @@ class LiminalShell extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return LiminalBackground(
-      child: Scaffold(
-        backgroundColor: Colors.transparent,
-        appBar: appBar,
-        drawer: drawer,
-        body: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            if (showConnectionBanner) const ConnectionStatusStrip(),
-            Expanded(child: body),
-          ],
-        ),
-        floatingActionButton: floatingActionButton,
-        bottomNavigationBar: bottomNavigationBar,
+    final persistentNavigation =
+        drawer != null && MediaQuery.sizeOf(context).width >= 1100;
+    final scaffold = Scaffold(
+      backgroundColor: Colors.transparent,
+      appBar: appBar,
+      drawer: persistentNavigation ? null : drawer,
+      body: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          if (showConnectionBanner) const ConnectionStatusStrip(),
+          Expanded(child: body),
+        ],
       ),
+      floatingActionButton: floatingActionButton,
+      bottomNavigationBar: bottomNavigationBar,
+    );
+    return LiminalBackground(
+      child: persistentNavigation
+          ? Row(children: [
+              SizedBox(width: 272, child: drawer),
+              Expanded(child: scaffold),
+            ],)
+          : scaffold,
     );
   }
 }
@@ -79,7 +87,7 @@ class LiminalOnboardingPage extends StatelessWidget {
                     child: Card(
                       margin: EdgeInsets.zero,
                       child: Padding(
-                        padding: const EdgeInsets.fromLTRB(24, 24, 24, 28),
+                        padding: const EdgeInsets.fromLTRB(32, 32, 32, 36),
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.stretch,
                           mainAxisSize: MainAxisSize.min,
@@ -93,8 +101,14 @@ class LiminalOnboardingPage extends StatelessWidget {
                             const SizedBox(height: 10),
                             Text(
                               subtitle,
-                              style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                                    color: Theme.of(context).colorScheme.outline,
+                              style: Theme.of(context)
+                                  .textTheme
+                                  .bodyMedium
+                                  ?.copyWith(
+                                    color: Theme.of(context)
+                                        .colorScheme
+                                        .onSurface
+                                        .withValues(alpha: 0.7),
                                     height: 1.4,
                                   ),
                             ),
