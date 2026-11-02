@@ -58,7 +58,7 @@ class _UsageAnalyticsPanelState extends State<UsageAnalyticsPanel> {
                   style: Theme.of(context).textTheme.titleMedium,),
               const SizedBox(height: 8),
               const Text(
-                  'Share first launches, workspace readiness and days with completed conversations, linked by a random identifier. Includes app version and platform. No prompts, answers, files or account details. Off by default.',),
+                  'Share app launches, workspace readiness and days with completed conversations, linked by a random identifier. Includes app version and platform. No prompts, answers, files or account details. Off by default.',),
               const SizedBox(height: 8),
               if (!analytics.available)
                 const Text(
