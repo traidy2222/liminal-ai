@@ -299,8 +299,8 @@ export const HARNESS_ENV_DEFAULTS: Readonly<Record<string, string>> = {
   AGENT_PROVIDER_MIN_INTERVAL_MS: "0",
   // Provider routing — adaptive price sort + session_id stickiness (OpenRouter-native cache affinity).
   // Use AGENT_PROVIDER_STRATEGY=cache_first + AGENT_PROVIDER_ORDER=DeepInfra to restore explicit pin.
-  AGENT_PROVIDER_STRATEGY: "price",          // live benchmark winner for cost+cache (see scripts/benchmark-provider-strategies.mjs)
-  AGENT_PROVIDER_SORT: "price",            // override sort axis when strategy is adaptive or price
+  AGENT_PROVIDER_STRATEGY: "latency",        // interactive replies prioritize time to first token; price remains available
+  AGENT_PROVIDER_SORT: "",                 // explicit override only; otherwise follow the selected strategy
   AGENT_PROVIDER_ROUTE_AUTO: "1",          // auto-derive provider order from model slug (cache_first only, when ORDER empty)
   AGENT_PROVIDER_ORDER: "",                // cache_first: pin order; adaptive/price: optional allowlist (OpenRouter `only`)
   AGENT_PROVIDER_ORDER_FAST: "",           // fast-tier variant of AGENT_PROVIDER_ORDER
