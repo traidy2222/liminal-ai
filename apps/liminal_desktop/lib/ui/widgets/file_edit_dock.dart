@@ -49,7 +49,8 @@ class _FileEditDockState extends State<FileEditDock> {
     super.dispose();
   }
 
-  String _streamableContent(FileEditViewState view, {bool preferPlain = false}) {
+  String _streamableContent(FileEditViewState view,
+      {bool preferPlain = false}) {
     if (view.isEmail) {
       final html = view.bodyHtml?.trim() ?? '';
       final plain = view.bodyPlain?.trim() ?? view.content;
@@ -106,7 +107,8 @@ class _FileEditDockState extends State<FileEditDock> {
     });
   }
 
-  String _displayContentFor(FileEditViewState view, {bool preferPlain = false}) {
+  String _displayContentFor(FileEditViewState view,
+      {bool preferPlain = false}) {
     final full = _streamableContent(view, preferPlain: preferPlain);
     if (!view.incomplete || _revealedChars >= full.length) return full;
     if (_revealTarget != full) return full;
@@ -120,7 +122,9 @@ class _FileEditDockState extends State<FileEditDock> {
     final prev = oldWidget.view;
     if (view.updatedAt != prev.updatedAt ||
         view.charCount != prev.charCount ||
-        view.content != prev.content) {
+        view.content != prev.content ||
+        view.phase != prev.phase ||
+        view.incomplete != prev.incomplete) {
       _syncRevealAnimation(view);
       WidgetsBinding.instance.addPostFrameCallback((_) => _scrollToEnd());
     }
@@ -138,6 +142,14 @@ class _FileEditDockState extends State<FileEditDock> {
   String _phaseLabel(FileEditViewState view) {
     if (view.isEmail) {
       switch (view.phase) {
+        case FileEditPhase.completed:
+          return view.toolName.endsWith('_send_message')
+              ? 'sent'
+              : 'draft ready';
+        case FileEditPhase.failed:
+          return 'failed';
+        case FileEditPhase.interrupted:
+          return 'completion unconfirmed';
         case FileEditPhase.streaming:
           return view.incomplete ? 'streaming' : 'ready';
         case FileEditPhase.pendingApproval:
@@ -151,6 +163,12 @@ class _FileEditDockState extends State<FileEditDock> {
       }
     }
     switch (view.phase) {
+      case FileEditPhase.completed:
+        return 'saved';
+      case FileEditPhase.failed:
+        return 'write failed';
+      case FileEditPhase.interrupted:
+        return 'completion unconfirmed';
       case FileEditPhase.streaming:
         return view.incomplete ? 'streaming' : 'args complete';
       case FileEditPhase.pendingApproval:
@@ -162,7 +180,8 @@ class _FileEditDockState extends State<FileEditDock> {
 
   String _headerTitle(FileEditViewState view) {
     if (view.isEmail) {
-      if (view.toolName == 'gmail_create_draft' || view.toolName == 'outlook_create_draft') {
+      if (view.toolName == 'gmail_create_draft' ||
+          view.toolName == 'outlook_create_draft') {
         return 'Email draft';
       }
       return 'Email send';
@@ -187,7 +206,9 @@ class _FileEditDockState extends State<FileEditDock> {
     final content = view.content;
     if (content.isNotEmpty) return content;
     if (view.phase == FileEditPhase.streaming && view.charCount == 0) {
-      return view.isEmail ? 'Waiting for email content…' : 'Waiting for file content…';
+      return view.isEmail
+          ? 'Waiting for email content…'
+          : 'Waiting for file content…';
     }
     return '';
   }
@@ -308,13 +329,15 @@ class _FileEditDockState extends State<FileEditDock> {
                         _headerTitle(view),
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
-                        style: theme.textTheme.titleSmall?.copyWith(color: lim.text),
+                        style: theme.textTheme.titleSmall
+                            ?.copyWith(color: lim.text),
                       ),
                       Text(
                         _headerSubtitle(view),
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
-                        style: theme.textTheme.bodySmall?.copyWith(color: lim.textMuted),
+                        style: theme.textTheme.bodySmall
+                            ?.copyWith(color: lim.textMuted),
                       ),
                       if (view.isEmail &&
                           view.recipients != null &&
@@ -341,7 +364,8 @@ class _FileEditDockState extends State<FileEditDock> {
                 IconButton(
                   tooltip: 'Collapse panel',
                   visualDensity: VisualDensity.compact,
-                  icon: Icon(Icons.chevron_right, color: lim.textMuted, size: 20),
+                  icon:
+                      Icon(Icons.chevron_right, color: lim.textMuted, size: 20),
                   onPressed: widget.onToggleExpanded,
                 ),
               ],
@@ -404,9 +428,8 @@ class _FileEditDockState extends State<FileEditDock> {
           final preferPlainWhileStreaming = view.incomplete &&
               plain.isNotEmpty &&
               (html.isEmpty || plain.length > html.length);
-          final streamHtml = html.isNotEmpty && !preferPlainWhileStreaming
-              ? html
-              : '';
+          final streamHtml =
+              html.isNotEmpty && !preferPlainWhileStreaming ? html : '';
           if (streamHtml.isNotEmpty) {
             return ColoredBox(
               color: const Color(0xFFECECEC),
@@ -417,7 +440,9 @@ class _FileEditDockState extends State<FileEditDock> {
             );
           }
           final streamPlain = plain.isNotEmpty
-              ? (view.incomplete ? _displayContentFor(view, preferPlain: true) : plain)
+              ? (view.incomplete
+                  ? _displayContentFor(view, preferPlain: true)
+                  : plain)
               : '';
           return ColoredBox(
             color: Colors.white,
@@ -430,7 +455,9 @@ class _FileEditDockState extends State<FileEditDock> {
                 child: ConstrainedBox(
                   constraints: BoxConstraints(maxWidth: contentWidth),
                   child: SelectableText(
-                    streamPlain.isNotEmpty ? streamPlain : 'Waiting for styled HTML…',
+                    streamPlain.isNotEmpty
+                        ? streamPlain
+                        : 'Waiting for styled HTML…',
                     style: theme.textTheme.bodyMedium?.copyWith(
                       fontSize: 14,
                       height: 1.5,

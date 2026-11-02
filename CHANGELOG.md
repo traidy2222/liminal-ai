@@ -2,7 +2,7 @@
 
 All notable changes to [Liminal AI](https://github.com/traidy2222/liminal-ai) are documented here and on the docs portal: [docs.vireondynamics.com/liminal/reference/changelog](https://docs.vireondynamics.com/liminal/reference/changelog).
 
-**Current stage:** **beta** (`v0.1.6` tip of `main`, 2026-11-02). Desktop downloads are published through the public preview release channel.
+**Current stage:** **beta** (`v0.1.7` tip of `main`, 2026-11-02). Desktop downloads are published through the public preview release channel.
 
 **Single source:** edit [`changelog/releases.json`](changelog/releases.json), then run `npm run changelog:gen`.
 
@@ -10,7 +10,13 @@ Format: **v0.0.x** entries keyed to the last GitHub push in each slice. Dates ar
 
 Marketing (richer notes): [vireondynamics.com/liminal/changelog](https://www.vireondynamics.com/liminal/changelog)
 
-## [v0.1.6] — 2026-11-02 — Current beta
+## [v0.1.7] — 2026-11-02 — Current beta
+
+DeepSeek hybrid models respect external reasoning mode, latency routing takes effect without stale provider affinity, and desktop file previews finish with clear saved, failed, or unconfirmed states.
+
+[Full notes](https://docs.vireondynamics.com/liminal/reference/changelog#v0-1-7)
+
+## [v0.1.6] — 2026-11-02
 
 Liminal checks for complete releases at launch, downloads and verifies the app bundle, then installs and restarts automatically. Offline checks and skipped updates open the current version, with rollback and configuration preservation for installation failures.
 

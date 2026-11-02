@@ -1,7 +1,29 @@
 {
   "stage": "beta",
-  "currentVersion": "0.1.6",
+  "currentVersion": "0.1.7",
   "releases": [
+    {
+      "version": "0.1.7",
+      "date": "2026-11-02",
+      "tagline": "Faster first answers and accurate file-write status.",
+      "summary": "DeepSeek hybrid models respect external reasoning mode, latency routing takes effect without stale provider affinity, and desktop file previews finish with clear saved, failed, or unconfirmed states.",
+      "bullets": [
+        "**Faster first answers** — Stop hidden native thinking on supported DeepSeek hybrid models when external reasoning is selected. Native reasoning budgets and mandatory-reasoning models retain their existing behavior.",
+        "**Responsive provider routing** — Default new routing to latency, remove the implicit price-sort override, and refresh sticky provider affinity when routing policy or model changes. Existing explicit preferences remain respected.",
+        "**Accurate write status** — Successful tool results immediately show saved, failed writes show failure, and interrupted turns stop active indicators without claiming success. Late stream or approval events cannot reopen completed writes.",
+        "**Visible verification** — Keep completed file previews available, preserve another active preview during parallel writes, and record harness preparation and first-answer timings separately in session logs."
+      ],
+      "docs": [
+        {
+          "label": "Response latency",
+          "href": "../guides/response-latency.md"
+        },
+        {
+          "label": "Install and update",
+          "href": "../start/install.md"
+        }
+      ]
+    },
     {
       "version": "0.1.6",
       "date": "2026-11-02",
