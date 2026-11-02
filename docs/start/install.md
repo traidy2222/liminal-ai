@@ -147,6 +147,8 @@ From **0.1.6**, portable desktop installs update on launch by default. Liminal l
 
 The launch screen shows progress. Choose **Open current version** to cancel the launch update, or disable **Update automatically on launch** in **Settings → About & updates**. Development builds and explicit update opt-outs are respected. Offline checks, unavailable checksums, interrupted downloads, and failed verification open the current version. The updater retains the old installation, preserves its local configuration, and rolls back if replacing or launching the new app fails. After a failed automatic attempt, use About & updates to retry manually.
 
-**First upgrade from 0.1.5 or earlier:** download 0.1.6 once, close Liminal, and extract the archive over the existing installation while keeping your local `.env`. Older packaged builds can incorrectly classify themselves as development builds, blocking their in-app check; the Windows installer helper also needs this refresh. Once 0.1.6 is installed, future launch updates are automatic.
+**First upgrade from 0.1.5 or earlier:** download the latest desktop archive once, close Liminal, and extract it over the existing installation while keeping your local `.env`. Older packaged builds can incorrectly classify themselves as development builds, blocking their in-app check.
+
+**Windows 0.1.6–0.1.7:** if an automatic update downloads successfully but closes without reopening, install 0.1.8 once from the release archive. These versions can fail when starting detached PowerShell. Version 0.1.8 starts the Node updater directly and waits for an acknowledgement before closing; future launch updates use that repaired handoff.
 
 An app update keeps the installation's `.env` and local runtime preferences. Conversations and global settings under `~/.liminal` remain outside the app folder. Release archives are beta builds; Node.js must remain on PATH for the update helper.

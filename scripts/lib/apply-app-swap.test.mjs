@@ -123,3 +123,19 @@ test("incomplete archive leaves the installed application untouched", async (t) 
   );
   assert.equal(fs.readFileSync(path.join(f.target, f.exe), "utf8"), "old");
 });
+
+test('unpackaged workspace files survive without overwriting updated runtime code', async t => {
+  const f=fixture(t);
+  const oldRepo=path.join(f.exeDir,'liminald/repo');
+  const newRepo=path.join(f.source,'liminald/repo');
+  fs.writeFileSync(path.join(oldRepo,'browseros.html'),'user browser app');
+  fs.mkdirSync(path.join(oldRepo,'client work'));
+  fs.writeFileSync(path.join(oldRepo,'client work','proposal.md'),'user proposal');
+  fs.writeFileSync(path.join(oldRepo,'package.json'),'old runtime');
+  fs.writeFileSync(path.join(newRepo,'package.json'),'new runtime');
+  await applyAppFolderSwap({exeDir:f.exeDir,extractedRoot:f.release,platform:'windows',launch:async()=>{
+    assert.equal(fs.readFileSync(path.join(oldRepo,'browseros.html'),'utf8'),'user browser app');
+    assert.equal(fs.readFileSync(path.join(oldRepo,'client work','proposal.md'),'utf8'),'user proposal');
+    assert.equal(fs.readFileSync(path.join(oldRepo,'package.json'),'utf8'),'new runtime');
+  }});
+});

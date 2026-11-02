@@ -1,7 +1,23 @@
 {
   "stage": "beta",
-  "currentVersion": "0.1.7",
+  "currentVersion": "0.1.8",
   "releases": [
+    {
+      "version": "0.1.8",
+      "date": "2026-11-02",
+      "tagline": "Safer tool recovery and a verified Windows update handoff.",
+      "summary": "Windows updates launch the Node helper directly and require a startup acknowledgement before closing the app. Includes the completed harness audit repairs for interrupted tools, concurrent writes, guest isolation and public-web requests.",
+      "bullets": [
+        "**Windows update handoff** — Avoid detached PowerShell startup failures. The app waits for the updater to initialize and stays open if startup fails. The helper waits for the old process to exit before replacing files.",
+        "**Faster Windows extraction** — Use the Windows archive utility for large app bundles, retaining a PowerShell fallback when it is unavailable.",
+        "**Workspace preservation** — Keep extra files and folders created at the bundled workspace root when they are absent from the new release, alongside credentials, preferences and saved workflow artifacts.",
+        "**Safe tool recovery** — Preserve eager tool execution across stream recovery and isolate streamed-write manifests and staging files between concurrent sessions.",
+        "**Access and lifecycle hardening** — Complete the reviewed fixes for guest chat boundaries, public-web destinations, file operations, locks, provider scheduling and terminal/browser cleanup."
+      ],
+      "docs": [
+        { "label": "Install and update", "href": "../start/install.md" }
+      ]
+    },
     {
       "version": "0.1.7",
       "date": "2026-11-02",

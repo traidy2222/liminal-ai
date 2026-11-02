@@ -2,7 +2,7 @@
 
 All notable changes to [Liminal AI](https://github.com/traidy2222/liminal-ai) are documented here and on the docs portal: [docs.vireondynamics.com/liminal/reference/changelog](https://docs.vireondynamics.com/liminal/reference/changelog).
 
-**Current stage:** **beta** (`v0.1.7` tip of `main`, 2026-11-02). Desktop downloads are published through the public preview release channel.
+**Current stage:** **beta** (`v0.1.8` tip of `main`, 2026-11-02). Desktop downloads are published through the public preview release channel.
 
 **Single source:** edit [`changelog/releases.json`](changelog/releases.json), then run `npm run changelog:gen`.
 
@@ -10,7 +10,13 @@ Format: **v0.0.x** entries keyed to the last GitHub push in each slice. Dates ar
 
 Marketing (richer notes): [vireondynamics.com/liminal/changelog](https://www.vireondynamics.com/liminal/changelog)
 
-## [v0.1.7] — 2026-11-02 — Current beta
+## [v0.1.8] — 2026-11-02 — Current beta
+
+Windows updates launch the Node helper directly and require a startup acknowledgement before closing the app. Includes the completed harness audit repairs for interrupted tools, concurrent writes, guest isolation and public-web requests.
+
+[Full notes](https://docs.vireondynamics.com/liminal/reference/changelog#v0-1-8)
+
+## [v0.1.7] — 2026-11-02
 
 DeepSeek hybrid models respect external reasoning mode, latency routing takes effect without stale provider affinity, and desktop file previews finish with clear saved, failed, or unconfirmed states.
 
