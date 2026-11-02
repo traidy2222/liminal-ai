@@ -1,0 +1,81 @@
+# yaml-language-server: $schema=https://coderabbit.ai/integrations/schema.v2.json
+language: en-AU
+early_access: false
+enable_free_tier: true
+tone_instructions: >-
+  Be direct and evidence-led. Prioritise reproducible bugs, security, data loss,
+  concurrency and regressions. Explain the trigger and impact; avoid style-only
+  churn, speculative findings and repeated comments.
+reviews:
+  profile: assertive
+  auto_approvals:
+    enabled: false
+  request_changes_workflow: false
+  high_level_summary: true
+  collapse_walkthrough: true
+  poem: false
+  auto_apply_labels: false
+  auto_assign_reviewers: false
+  path_filters:
+    - '!**/node_modules/**'
+    - '!**/dist/**'
+    - '!**/build/**'
+    - '!**/coverage/**'
+    - '!**/*.min.js'
+    - '!**/*.map'
+    - '!.agent_*/**'
+  auto_review:
+    enabled: true
+    auto_incremental_review: true
+    drafts: false
+  path_instructions:
+    - path: '**/*'
+      instructions: >-
+        Apply REVIEW.md and the relevant AGENTS.md. Read callers, callees and
+        existing tests before reporting a defect. Give a concrete trigger,
+        affected behaviour and focused regression check. Distinguish observed
+        evidence from assumptions. Do not request unrelated refactors or broad
+        test reruns for configuration-only edits.
+    - path: 'packages/core/**'
+      instructions: >-
+        Trace ReAct retries, abort/timeout propagation, streaming completion,
+        approval ordering, directCall trust boundaries and lock cleanup on every
+        exit. Check child harness state isolation, bounded context compression,
+        atomic persistence and partial side-effect recovery. Core must never
+        import tools. Environment overrides prefs, then typed defaults; secrets
+        must never enter prefs, defaults, logs or model-visible error output.
+    - path: 'packages/tools/**'
+      instructions: >-
+        Trace argument validation, traversal/symlink handling, shell injection,
+        network request boundaries, destructive approvals and resource locks.
+        Harness-scoped tools must be recreated for children rather than sharing
+        parent closures. Check lazy registration idempotence and streamed-write
+        integrity. Evaluate new integrations' credential and output handling.
+    - path: 'packages/sidecar/**'
+      instructions: >-
+        Check WebSocket authentication/origins, MCP session boundaries, PTY
+        ownership, process cleanup, cancellation and reconnect races. Do not
+        assume local services are unreachable by other browser origins or hosts.
+    - path: 'packages/web/**'
+      instructions: >-
+        Check session/approval ownership, input validation, XSS, SSE reconnect
+        ordering, listener cleanup and server/client import boundaries. Persona
+        themes must stay validated data rather than executable CSS or scripts.
+    - path: 'apps/liminal_desktop/**'
+      instructions: >-
+        Check Dart/Flutter lifecycle disposal, reconnect and approval state,
+        protocol compatibility, desktop process ownership and Windows paths.
+    - path: '.github/workflows/**'
+      instructions: >-
+        Check token permissions, untrusted PR input, secret exposure, action
+        provenance and build order. Never execute fork code with privileged
+        pull_request_target credentials. Core, protocol, tools and sidecar
+        dependencies must be built before their consumers.
+knowledge_base:
+  code_guidelines:
+    enabled: true
+    filePatterns:
+      - AGENTS.md
+      - REVIEW.md
+chat:
+  auto_reply: true

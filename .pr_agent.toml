@@ -1,0 +1,56 @@
+# Qodo hosted app: on-demand second opinion, alongside automatic CodeRabbit.
+# The independent PR-Agent CLI also consumes the pr_reviewer section below.
+# No provider credentials or paid model selection belong in this file.
+[github_app]
+pr_commands = []
+handle_push_trigger = false
+push_commands = []
+feedback_on_draft_pr = false
+
+[review_agent]
+override_effort = "extended"
+enable_review_md = true
+comments_location_policy = "both"
+inline_comments_severity_threshold = 2
+persistent_comment_notification = false
+approve_pr_on_self_review = false
+enable_cross_repo_agent = false
+issues_user_guidelines = """
+Review Liminal's changed code and affected callers for correctness, security,
+concurrency, cancellation, data loss and provider/protocol regressions. Apply
+REVIEW.md. Require a concrete trigger and evidence for each finding. Prioritise
+approval bypasses, unsafe shell/file/network operations, leaked credentials,
+lock leaks, duplicate side effects on retries and corrupted persistent state.
+Avoid style-only churn and unrelated refactoring. Recommend focused regression
+checks rather than repeating unchanged broad suites.
+"""
+compliance_user_guidelines = """
+Apply REVIEW.md and applicable AGENTS.md. Preserve core -> protocol -> tools ->
+sidecar build ordering and keep core independent of tools. Harness-scoped tools
+must use child-local closures. Secrets stay outside prefs and typed defaults.
+Verify the owning source when documentation and implementation disagree.
+"""
+
+[chat_agent]
+enable_fixer_agent = false
+
+[fixer_agent]
+enable = false
+
+# Independent, self-hosted PR-Agent configuration. No automatic workflow is
+# installed: a local model or separately authorised API budget is required.
+[config]
+enable_auto_approval = false
+
+[pr_reviewer]
+require_security_review = true
+require_tests_review = true
+extra_instructions = """
+Review as a senior maintainer of a self-hosted TypeScript agent harness. Check
+approval/validation/lock ordering, cancellation, retry idempotency, streaming
+integrity, persistence, child-harness isolation, protocol compatibility and
+secret handling. Core must not import tools. Environment overrides persisted
+prefs, then defaults. Identify the concrete input or event sequence that causes
+each defect, affected callers and a focused regression check. Avoid unsupported
+claims, formatting nits and unrelated refactors. Apply REVIEW.md when available.
+"""
