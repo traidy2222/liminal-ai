@@ -763,6 +763,9 @@ export interface AgentEventMap {
     completionMs?: number;
     totalLatencyMs?: number;
     ttftMs?: number;
+    preRequestMs?: number;
+    firstTextMs?: number;
+    turnToFirstTextMs?: number;
   };
   /** Emitted when the agent's persona is changed via set_persona(). */
   persona_changed: { name: string; description: string };

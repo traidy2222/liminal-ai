@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { singleModelEnabled, singleModelSlug, currentHarnessPreferences } from "./harness_effective_env.js";
 import {
   DEFAULT_AGENT_API_BASE_URL,
@@ -296,19 +297,17 @@ export function buildOpenRouterChatRequestExtras(opts: {
   }
 
   const sessionExtras = buildOpenRouterSessionExtras(opts.baseURL, opts.sessionId);
-  if (sessionExtras.session_id && opts.routeState) {
-    const id = opts.routeState.resolveSessionId(sessionExtras.session_id);
-    return {
-      ...(provider ? { provider } : {}),
-      session_id: id,
-      user: id,
-    };
+  if (sessionExtras.session_id) {
+    // Provider affinity must change with routing policy, including after restart.
+    // Otherwise switching from price to latency silently keeps the slow provider.
+    const policy = createHash("sha256")
+      .update(JSON.stringify({ sessionId: sessionExtras.session_id, model: opts.modelSlug, provider }))
+      .digest("hex").slice(0, 12);
+    const routedId = `${sessionExtras.session_id.slice(0, 210)}:route-${policy}`;
+    const id = opts.routeState?.resolveSessionId(routedId) ?? routedId;
+    return { ...(provider ? { provider } : {}), session_id: id, user: id };
   }
-
-  return {
-    ...(provider ? { provider } : {}),
-    ...sessionExtras,
-  };
+  return { ...(provider ? { provider } : {}), ...sessionExtras };
 }
 
 export function sessionEpochBumpOn429Enabled(): boolean {

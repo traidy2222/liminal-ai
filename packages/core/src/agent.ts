@@ -1,3 +1,4 @@
+import { buildReasoningRequestParams } from "./reasoning_request.js";
 import { SignatureWorkflowRun, SIGNATURE_WORKFLOWS, isSignatureWorkflowPreset, parseSignatureCommand, type SignatureWorkflowPreset } from "./signature_workflows.js";
 import { singleModelEnabled, singleModelSlug } from "./harness_effective_env.js";
 import OpenAI from "openai";
@@ -319,7 +320,6 @@ import {
   type RoutingProfile,
 } from "./intent_inference.js";
 import {
-  buildOpenRouterReasoningParam,
   buildReasoningBudgetInjection,
   evaluateReasoningStall,
   formatReasoningBudgetTraceLine,
@@ -7354,10 +7354,12 @@ export class AgentHarness {
         modelSlug,
       });
 
-      const reasoningParam =
-        reasoningBudget != null
-          ? buildOpenRouterReasoningParam(reasoningBudget, reasoningSurface)
-          : {};
+      const reasoningParam = buildReasoningRequestParams({
+        baseURL: this.config.baseURL ?? "",
+        modelSlug,
+        budget: reasoningBudget,
+        surface: reasoningSurface,
+      });
 
       // Prompt cache breakpoint: tag the trailing static system message with
       // `cache_control: { type: "ephemeral" }` so cache-supporting providers
@@ -7369,7 +7371,7 @@ export class AgentHarness {
         provider?: import("./provider_config.js").ProviderRouting;
         session_id?: string;
         user?: string;
-        reasoning?: { effort: string };
+        reasoning?: { effort?: string; enabled?: boolean; max_tokens?: number };
         stream_options?: { include_usage: boolean };
         plugins?: import("./openrouter_fusion.js").OpenRouterFusionPlugin[];
       } = {

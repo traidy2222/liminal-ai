@@ -165,7 +165,7 @@ test("buildOpenRouterChatRequestExtras applies session epoch suffix", () => {
     routeState: state,
     sessionId: "chat-abc",
   });
-  assert.match(extras.session_id ?? "", /chat-abc#1/);
+  assert.match(extras.session_id ?? "", /chat-abc:route-[a-f0-9]{12}#1/);
   assert.equal(extras.user, extras.session_id);
 });
 
@@ -181,7 +181,7 @@ test("openrouter_default strategy omits provider field", () => {
       sessionId: "chat-1",
     });
     assert.equal(extras.provider, undefined);
-    assert.equal(extras.session_id, "chat-1");
+    assert.match(extras.session_id ?? "", /^chat-1:route-/);
   } finally {
     restoreEnv(prev);
   }
@@ -200,7 +200,7 @@ test("buildOpenRouterChatRequestExtras works for managed inference proxy base", 
       modelSlug: "deepseek/deepseek-v4-pro",
       sessionId: "chat-managed",
     });
-    assert.equal(extras.session_id, "chat-managed");
+    assert.match(extras.session_id ?? "", /^chat-managed:route-/);
     assert.equal(extras.provider?.sort, "price");
   } finally {
     restoreEnv(prev);
@@ -223,4 +223,27 @@ test("buildOpenRouterChatRequestExtras softens Stealth pin on managed inference"
   } finally {
     restoreEnv(prev);
   }
+});
+
+
+test("routing changes escape old provider affinity and keep stable cache affinity afterward", () => {
+  const prev = saveEnv(ROUTING_ENV_KEYS);
+  try {
+    for (const k of ROUTING_ENV_KEYS) delete process.env[k];
+    const opts = { baseURL: "https://openrouter.ai/api/v1", modelSlug: "deepseek/deepseek-v4.1-flash-1017", sessionId: "chat-affinity" };
+    process.env.AGENT_PROVIDER_STRATEGY = "price";
+    const price = buildOpenRouterChatRequestExtras(opts);
+    process.env.AGENT_PROVIDER_STRATEGY = "latency";
+    const fast = buildOpenRouterChatRequestExtras(opts);
+    assert.notEqual(price.session_id, fast.session_id);
+    assert.equal(buildOpenRouterChatRequestExtras(opts).session_id, fast.session_id);
+    assert.equal(fast.user, fast.session_id);
+    assert.equal(fast.provider?.sort, "latency");
+    assert.equal(buildOpenRouterChatRequestExtras({ ...opts, routeState: new ProviderRouteState() }).session_id, fast.session_id);
+    assert.ok((buildOpenRouterChatRequestExtras({ ...opts, sessionId: "x".repeat(256) }).session_id?.length ?? 0) <= 256);
+    assert.notEqual(
+      buildOpenRouterChatRequestExtras({ ...opts, sessionId: "x".repeat(240) + "a" }).session_id,
+      buildOpenRouterChatRequestExtras({ ...opts, sessionId: "x".repeat(240) + "b" }).session_id,
+    );
+  } finally { restoreEnv(prev); }
 });
