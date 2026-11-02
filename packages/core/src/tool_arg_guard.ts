@@ -75,7 +75,7 @@ export function guardToolArgs(
       if (u.protocol !== "http:" && u.protocol !== "https:") {
         return `Unsupported URL scheme: ${u.protocol}`;
       }
-      const host = u.hostname.toLowerCase();
+      const host = u.hostname.toLowerCase().replace(/\.+$/, "");
       if (
         host === "localhost" ||
         internalLiteral(host) ||

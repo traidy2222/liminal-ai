@@ -1,4 +1,4 @@
-import type { ToolResult, ToolParameterSchema, PropertySchema, ApprovalDecision } from "./types.js";
+import type { ToolResult, ToolParameterSchema, PropertySchema, ApprovalDecision, ToolExecutionContext } from "./types.js";
 import type { AgentEmitter } from "./events.js";
 import type { ToolRegistry } from "./registry.js";
 import type { TaskOrchestrator } from "./orchestrator.js";
@@ -299,7 +299,8 @@ export class ToolDispatcher {
     name: string,
     argsJson: string,
     /** Names of all tools being called in the same round (for pre-flight checks). */
-    batchToolNames?: string[]
+    batchToolNames?: string[],
+    executionContext?: ToolExecutionContext
   ): Promise<ToolResult> {
     name = resolveToolName(name);
     const tool = this.registry.get(name);
@@ -341,7 +342,8 @@ export class ToolDispatcher {
         ok: false,
         error: `Invalid args for "${name}": ${prep.error}`,
       };
-      this.emitToolResult(callId, name, args, result);
+      const eventArgs = args !== null && typeof args === "object" && !Array.isArray(args) ? args : {};
+      this.emitToolResult(callId, name, eventArgs, result);
       return result;
     }
     args = prep.args;
@@ -412,7 +414,8 @@ export class ToolDispatcher {
       }
     }
 
-    const stableCacheKey = tool.cacheable ? `${name}:${stableArgsJsonKey(JSON.stringify(args))}` : "";
+    const canCache = tool.cacheable && !executionContext?.resolvedDependencies?.length;
+    const stableCacheKey = canCache ? `${name}:${stableArgsJsonKey(JSON.stringify(args))}` : "";
     // Approval policy: only destructive tools require explicit human approval.
     // Cautious tools stay guarded by schema + arg guards + optional safety judge.
     const requiresHumanApproval = tool.requiresApproval && tool.dangerLevel === "destructive";
@@ -548,14 +551,14 @@ export class ToolDispatcher {
       // a `file:write:src/foo.ts` lock just because the relative paths collide.
       const rawResourceIds = tool.resourceLocks?.(args) ?? [];
       const wsRoot = resolveWorkspaceRoot();
-      resourceIds = rawResourceIds.map((id) => `ws:${wsRoot}::${id}`);
-      if (resourceIds.length > 0 && this.orchestrator) {
+      const requestedIds = [...new Set(rawResourceIds.map((id) => `ws:${wsRoot}::${id}`))];
+      if (requestedIds.length > 0 && this.orchestrator) {
         const acquired = await this.orchestrator.locks.acquireAll(
-          resourceIds,
+          requestedIds,
           this.taskId ?? "root"
         );
         if (!acquired) {
-          const holders = resourceIds
+          const holders = requestedIds
             .map((r) => {
               const h = this.orchestrator!.locks.getHolders(r);
               return h.length > 0 ? `${r} (held by: ${h.join(",")})` : r;
@@ -568,6 +571,7 @@ export class ToolDispatcher {
           this.emitToolResult(callId, name, args, result);
           return result;
         }
+        resourceIds = requestedIds;
       }
       const runHandler = async (): Promise<ToolResult> => {
         this.emitter.emit("tool_executing", { callId, name });
@@ -576,12 +580,12 @@ export class ToolDispatcher {
           this.emitter.emit("text", { delta: text, channel: "trace" });
           this.emitter.emit("tool_progress", { callId, delta: text });
         };
-        const result = await tool.handler(args, emit);
+        const result = await tool.handler(args, emit, undefined, executionContext);
         this.emitter.emit("tool_timing", { callId, name, durationMs: Date.now() - t0 });
         return result;
       };
 
-      const cacheKeyForRun = tool.cacheable ? `${name}:${stableArgsJsonKey(JSON.stringify(args))}` : "";
+      const cacheKeyForRun = canCache ? `${name}:${stableArgsJsonKey(JSON.stringify(args))}` : "";
 
       let result: ToolResult;
       if (cacheKeyForRun && !requiresHumanApproval) {

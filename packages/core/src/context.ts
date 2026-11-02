@@ -10,6 +10,8 @@ import { type ContextPolicy } from "./context_policy.js";
 import { stashToolBodyElide, writeArtifact, artifactPathForHash } from "./output_distill.js";
 import { effectiveHarnessEnvRaw } from "./harness_effective_env.js";
 import { extractFactsRaw } from "./fact_extractor.js";
+import { createHash } from "node:crypto";
+import { resolveWorkspaceRoot } from "./workspace_root.js";
 
 /** Prepended to auto / forced compression digests so summaries keep user-critical facts. */
 const COMPRESSION_SUMMARY_RUBRIC =
@@ -266,6 +268,7 @@ function buildTier3SummaryMessage(rounds: Round[], baseRoundIndex: number): Mess
 
 export class ContextManager {
   private conversation: Message[] = [];
+  private compressionCache?: { key: string; value: Promise<Message[]> };
   private readonly config: ContextConfig;
   /**
    * When set, replaces the content of inceptionMessages[0] in all buildMessages calls.
@@ -622,6 +625,25 @@ export class ContextManager {
    * When tiered mode is off (AGENT_CTX_PROVENANCE=0), falls back to the original flat summary.
    */
   private async compressOldRounds(inception: Message[], conv: Message[]): Promise<Message[]> {
+    const key = createHash("sha256").update(JSON.stringify({
+      inception, conv, workspace: resolveWorkspaceRoot(),
+      maxTokens: this.effectiveModelMaxTokens, threshold: this.thresholdFraction(),
+      hot: this.hotRounds(), warm: this.warmRounds(), keep: this.config.keepRecentRounds,
+      provenance: isProvenanceEnabled(), policy: this.compressionPolicyPreamble(),
+    })).digest("hex");
+    let cached = this.compressionCache;
+    if (!cached || cached.key !== key) {
+      cached = { key, value: this.computeCompressedRounds([...inception], [...conv]) };
+      this.compressionCache = cached;
+    }
+    try { return structuredClone(await cached.value); }
+    catch (error) {
+      if (this.compressionCache === cached) this.compressionCache = undefined;
+      throw error;
+    }
+  }
+
+  private async computeCompressedRounds(inception: Message[], conv: Message[]): Promise<Message[]> {
     const hotRounds = this.hotRounds();
     const keepRecent = this.config.keepRecentRounds ?? hotRounds;
     const rounds = extractRounds(conv);
@@ -1016,6 +1038,7 @@ export class ContextManager {
   }
 
   clear(): void {
+    this.compressionCache = undefined;
     this.conversation = [];
     this.workingStateBlock = "";
     this.executionStateBlock = "";

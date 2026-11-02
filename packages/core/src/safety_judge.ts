@@ -209,13 +209,14 @@ export class SafetyJudge {
     const batch = (batchToolNames ?? []).join(", ");
 
     const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), this.timeoutMs);
+    let timer: ReturnType<typeof setTimeout> | undefined;
 
     try {
       const res = await withProviderRequestSpacing(
         { apiKey: this.client.apiKey, baseURL: this.client.baseURL },
-        () =>
-          this.client.chat.completions.create(
+        () => {
+          timer = setTimeout(() => controller.abort(), this.timeoutMs);
+          return this.client.chat.completions.create(
             {
               model: singleModelEnabled() ? singleModelSlug() : this.cfg.model,
               temperature: 0,
@@ -237,8 +238,10 @@ export class SafetyJudge {
               ...buildOpenRouterSessionExtras(this.client.baseURL),
             },
             { signal: controller.signal }
-          ),
-        controller.signal
+          );
+        },
+        // Queue admission has its own bound; HTTP time starts only on admission.
+        AbortSignal.timeout(60_000)
       );
 
       const text = res.choices[0]?.message?.content;

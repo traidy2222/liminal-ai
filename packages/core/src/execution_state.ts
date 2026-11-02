@@ -6,10 +6,11 @@ import type {
   ExecutionContract,
 } from "./types.js";
 import { CompensationLedger, type CompensationAction } from "./compensation_ledger.js";
+import { randomUUID } from "node:crypto";
 
 export function createDefaultExecutionState(goal: string): ExecutionState {
   const mission: MissionPlan = {
-    id: `mission:${Date.now()}`,
+    id: `mission:${randomUUID()}`,
     title: "Primary mission",
     objective: goal.slice(0, 2000),
     horizon: "long",
@@ -63,13 +64,14 @@ export function advanceExecutionStateForPlan(
   steps: string[]
 ): ExecutionState {
   const now = Date.now();
+  const planId = randomUUID();
   const nextMilestones: MilestonePlan[] = [];
   const nextContracts: ExecutionContract[] = [];
   const complexity = estimateComplexityClass(steps.length);
   const bounds = estimateContractBounds(complexity);
   for (let i = 0; i < steps.length; i++) {
-    const id = `m:${now}:${i}`;
-    const cid = `c:${now}:${i}`;
+    const id = `m:${planId}:${i}`;
+    const cid = `c:${planId}:${i}`;
     nextMilestones.push({
       id,
       title: `Milestone ${i + 1}`,
@@ -148,19 +150,23 @@ export function updateDriftScore(
   };
 }
 
-/** Per-plan compensation ledger singleton — shared across the harness lifetime. */
-const _globalLedger = new CompensationLedger();
+/** Ownerless ledger retained for legacy external callers; harnesses always pass their owner. */
+const legacyLedger = new CompensationLedger();
+const ownerLedgers = new WeakMap<object, CompensationLedger>();
 
-export function getCompensationLedger(): CompensationLedger {
-  return _globalLedger;
+export function getCompensationLedger(owner?: object): CompensationLedger {
+  if (!owner) return legacyLedger;
+  let ledger = ownerLedgers.get(owner);
+  if (!ledger) { ledger = new CompensationLedger(); ownerLedgers.set(owner, ledger); }
+  return ledger;
 }
 
-export function recordCompensation(planId: string, stepIndex: number, action: CompensationAction): void {
-  _globalLedger.record(planId, stepIndex, action);
+export function recordCompensation(planId: string, stepIndex: number, action: CompensationAction, owner?: object): void {
+  getCompensationLedger(owner).record(planId, stepIndex, action);
 }
 
-export function commitCompensationPath(planId: string, filePath: string): void {
-  _globalLedger.commitPath(planId, filePath);
+export function commitCompensationPath(planId: string, filePath: string, owner?: object): void {
+  getCompensationLedger(owner).commitPath(planId, filePath);
 }
 
 export function renderExecutionStateBlock(state: ExecutionState): string {

@@ -5,6 +5,7 @@ import type { TaskOrchestrator } from "./orchestrator.js";
 import type { WorldContextOptions } from "./world_context.js";
 import type { RuntimePreferences } from "./runtime_prefs.js";
 import type { RuntimePersonaControls } from "./runtime_prefs.js";
+import type { AgentHarness } from "./agent.js";
 
 export type Message = ChatCompletionMessageParam;
 
@@ -91,9 +92,23 @@ export type ToolResult =
  * Call it for each meaningful milestone so the user can see the tool isn't stalled.
  * Text is appended to the live conversation stream (same channel as run_shell output).
  */
+export interface ResolvedToolDependency {
+  callId: string;
+  ok: boolean;
+  output: string;
+  error?: string;
+}
+
+export interface ToolExecutionContext {
+  /** Untrusted prerequisite output, separate from validated/model-supplied arguments. */
+  resolvedDependencies?: readonly ResolvedToolDependency[];
+}
+
 export type ToolHandler = (
   args: Record<string, unknown>,
-  emit?: (text: string) => void
+  emit?: (text: string) => void,
+  harness?: AgentHarness,
+  context?: ToolExecutionContext
 ) => Promise<ToolResult>;
 
 // ─── Approval ─────────────────────────────────────────────────────────────────

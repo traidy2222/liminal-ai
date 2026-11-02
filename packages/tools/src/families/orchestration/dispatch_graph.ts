@@ -27,6 +27,7 @@ export function createDispatchGraphTool(harness: AgentHarness) {
       "Declare dependency edges between tool calls in the current round. " +
       "The harness will execute independent calls in parallel and sequence dependent " +
       "calls after their prerequisites complete. " +
+      "This declares ordering; it does not substitute outputs into arguments. For output-derived arguments, read the results and issue the dependent call in the next round. " +
       "deps format: { '<dependent_call_id>': ['<prereq_id_1>', '<prereq_id_2>'] }. " +
       "Call this alongside your other tools — not before them in a separate round.",
     parameters: {

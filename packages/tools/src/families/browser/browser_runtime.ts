@@ -181,6 +181,7 @@ export function getBrowserPanelFrame(sessionId: string): Buffer | undefined {
 
 async function capturePanelFrame(page: Page): Promise<Buffer | null> {
   for (let attempt = 0; attempt < 4; attempt++) {
+    assertPageWithinFileRoots(page);
     try {
       if (attempt > 0) {
         await new Promise<void>((r) => setTimeout(r, 180 * attempt));
@@ -200,16 +201,18 @@ async function capturePanelFrame(page: Page): Promise<Buffer | null> {
 }
 
 async function publishBrowserView(session: BrowserSession, open: boolean): Promise<void> {
+  if (open) assertPageWithinFileRoots(session.page);
   if (!browserEmbedEnabled()) return;
   let imagePath: string | undefined;
   let title: string | undefined;
   if (open) {
     title = (await session.page.title().catch(() => "")) || undefined;
     const buf = await capturePanelFrame(session.page);
+    if (!sessions.has(session.sessionId)) return;
     if (buf) {
       panelFrames.set(session.sessionId, buf);
       try {
-        const shotPath = browserArtifactPath("panel", "jpg");
+        const shotPath = panelFramePaths.get(session.sessionId) ?? browserArtifactPath(`panel-${session.sessionId}`, "jpg");
         fs.writeFileSync(shotPath, buf);
         panelFramePaths.set(session.sessionId, shotPath);
         imagePath = workspaceRelativePath(shotPath);
@@ -248,6 +251,8 @@ async function publishBrowserView(session: BrowserSession, open: boolean): Promi
 function publishBrowserViewClosed(sessionId: string): void {
   void stopBrowserScreencastForSession(sessionId);
   panelFrames.delete(sessionId);
+  const framePath = panelFramePaths.get(sessionId);
+  if (framePath) { try { fs.unlinkSync(framePath); } catch { /* best-effort preview cleanup */ } }
   panelFramePaths.delete(sessionId);
   if (!browserEmbedEnabled()) return;
   for (const publisher of browserViewPublishers.values()) {
@@ -312,6 +317,32 @@ export function parseHarnessMs(key: string, fallback: number, max = 600_000): nu
   return Math.min(Math.max(n, 5000), max);
 }
 
+/** Own launches across setup failures and wall timeouts, including late launches. */
+async function withOwnedBrowser<T>(
+  fn: (browser: Browser, signal: AbortSignal) => Promise<{ result: T; keepOpen?: boolean }>
+): Promise<T> {
+  const controller = new AbortController();
+  let browser: Browser | undefined;
+  let keepOpen = false;
+  try {
+    return await withBrowserWall(async () => {
+      const launched = await launchBrowser();
+      if (controller.signal.aborted) {
+        await launched.close().catch(() => undefined);
+        controller.signal.throwIfAborted();
+      }
+      browser = launched;
+      const value = await fn(launched, controller.signal);
+      controller.signal.throwIfAborted();
+      keepOpen = value.keepOpen === true;
+      return value.result;
+    });
+  } finally {
+    controller.abort();
+    if (!keepOpen) await browser?.close().catch(() => undefined);
+  }
+}
+
 export function playwrightInstallHint(original: string): string {
   if (/browserType\.launch|executable doesn|ENOENT|executablePath/i.test(original)) {
     return (
@@ -360,6 +391,13 @@ export function assertFileMayBeOpened(fsPathAbs: string): { ok: true } | { ok: f
       `Refusing file:// outside workspace (${wsCanon}). Set AGENT_BROWSER_FILE_ROOT or AGENT_BROWSER_ALLOW_FILE_ANY=1.\n` +
       `Resolved file: ${cand}`,
   };
+}
+
+function assertPageWithinFileRoots(page: Page): void {
+  const href = page.url();
+  if (!href.startsWith("file:")) return;
+  const gate = resolveBrowseHref(href);
+  if (!gate.ok) throw new Error(gate.error);
 }
 
 export function resolveBrowseHref(
@@ -908,6 +946,7 @@ export async function buildPageSnapshot(
   page: Page,
   maxChars = 10_000
 ): Promise<{ snapshotText: string; refs: Map<string, SnapshotRef> }> {
+  assertPageWithinFileRoots(page);
   const refs = new Map<string, SnapshotRef>();
   const refLines: string[] = [];
   let counter = 0;
@@ -985,9 +1024,9 @@ export async function openBrowserSession(options: {
     };
   }
 
+  let createdSessionId: string | undefined;
   try {
-    return await withBrowserWall(async () => {
-    const browser = await launchBrowser();
+    return await withOwnedBrowser(async (browser, signal) => {
     const context = await buildStealthContext(browser, options.viewport, options.userAgent);
     const page = await context.newPage();
     page.setDefaultTimeout(Math.min(30_000, options.navTimeoutMs));
@@ -1003,8 +1042,11 @@ export async function openBrowserSession(options: {
     if (options.postWaitMs > 0) {
       await new Promise<void>((r) => setTimeout(r, options.postWaitMs));
     }
+    signal.throwIfAborted();
 
     const sessionId = randomUUID();
+    assertPageWithinFileRoots(page);
+    createdSessionId = sessionId;
     const session: BrowserSession = {
       sessionId,
       ownerTaskId: options.ownerTaskId,
@@ -1053,10 +1095,15 @@ export async function openBrowserSession(options: {
       shotLine +
       diag;
 
+    signal.throwIfAborted();
     await publishBrowserView(session, true);
-    return { ok: true, sessionId, output };
+    return { result: { ok: true as const, sessionId, output }, keepOpen: true };
     });
   } catch (err) {
+    if (createdSessionId) {
+      sessions.delete(createdSessionId);
+      publishBrowserViewClosed(createdSessionId);
+    }
     return {
       ok: false,
       error: playwrightInstallHint(err instanceof Error ? err.message : String(err)),
@@ -1117,6 +1164,7 @@ export async function navigateBrowserSession(options: {
         await new Promise<void>((r) => setTimeout(r, postWait));
       }
       if (options.screenshot) {
+        assertPageWithinFileRoots(session.page);
         const shotPath = browserArtifactPath("nav");
         await session.page.screenshot({ path: shotPath, fullPage: true, type: "png", timeout: 45_000 });
         session.lastScreenshotPath = shotPath;
@@ -1528,12 +1576,14 @@ export async function runBrowserActions(
   ops: BrowserActOp[]
 ): Promise<{ urlChanged: boolean }> {
   const page = session.page;
+  assertPageWithinFileRoots(page);
   let urlChanged = false;
   const navTimeoutDefault = parseHarnessMs("AGENT_BROWSER_NAV_TIMEOUT_MS", 45_000, 120_000);
 
   for (let i = 0; i < ops.length; i++) {
     const a = ops[i]!;
     const label = `#${i + 1}:${a.op}`;
+    assertPageWithinFileRoots(page);
     const urlBefore = page.url();
     try {
       switch (a.op) {
@@ -1671,6 +1721,7 @@ export async function runBrowserActions(
       const detail = e instanceof Error ? e.message : String(e);
       throw new Error(`browser_act step ${label} failed: ${detail}`);
     }
+    assertPageWithinFileRoots(page);
     if (page.url() !== urlBefore) urlChanged = true;
   }
   session.currentUrl = page.url();
@@ -1702,6 +1753,7 @@ export async function actOnBrowserSession(options: {
     if (postWait > 0) {
       await new Promise<void>((r) => setTimeout(r, postWait));
     }
+    assertPageWithinFileRoots(session.page);
     const text = (await session.page.innerText("body").catch(() => ""))
       .replace(/\s+/g, " ")
       .slice(0, 8000);
@@ -1738,8 +1790,7 @@ export async function runOneShotBrowserAct(options: {
   includeConsole: boolean;
 }): Promise<{ ok: true; output: string } | { ok: false; error: string }> {
   try {
-    return await withBrowserWall(async () => {
-    const browser = await launchBrowser();
+    return await withOwnedBrowser(async (browser, signal) => {
     const context = await buildStealthContext(browser);
     const page = await context.newPage();
     const diagnostics: DiagnosticBuffers = { consoleMsgs: [], pageErrors: [], failedReqs: [] };
@@ -1748,6 +1799,7 @@ export async function runOneShotBrowserAct(options: {
       waitUntil: options.waitUntil,
       timeout: options.navTimeoutMs,
     });
+    signal.throwIfAborted();
     const session: BrowserSession = {
       sessionId: "oneshot",
       ownerTaskId: "",
@@ -1764,11 +1816,10 @@ export async function runOneShotBrowserAct(options: {
     if (options.postActionWaitMs > 0) {
       await new Promise<void>((r) => setTimeout(r, options.postActionWaitMs));
     }
+    assertPageWithinFileRoots(page);
     const text = (await page.innerText("body").catch(() => "")).replace(/\s+/g, " ").slice(0, 8000);
     const diag = options.includeConsole ? formatDiagnosticsOutput(diagnostics) : "";
-    await context.close().catch(() => undefined);
-    await browser.close().catch(() => undefined);
-    return { ok: true, output: `After act:\n${text}${diag}` };
+    return { result: { ok: true as const, output: `After act:\n${text}${diag}` } };
     });
   } catch (err) {
     return {
@@ -1802,6 +1853,7 @@ export async function closeBrowserSession(options: {
   try {
     await withBrowserWall(async () => {
     if (options.screenshot) {
+      assertPageWithinFileRoots(session.page);
       const shotPath = browserArtifactPath("close");
       await session.page.screenshot({ path: shotPath, fullPage: true, type: "png", timeout: 45_000 });
       shotLine = `\nSCREENSHOT_PATH: ${shotPath}`;
@@ -1905,6 +1957,7 @@ export interface CaptchaSignal {
 }
 
 export async function detectCaptchaSignals(page: Page): Promise<CaptchaSignal | null> {
+  assertPageWithinFileRoots(page);
   try {
     const result = await page.evaluate((): { type: string; siteKey: string | null } | null => {
       // Cloudflare Turnstile — check before generic data-sitekey
@@ -2106,6 +2159,7 @@ export async function extractFromSession(
   if (!session) return { ok: false, error: `Unknown session_id: ${sessionId}` };
   touchSession(session);
   try {
+    assertPageWithinFileRoots(session.page);
     const result = await session.page.evaluate(
       ({ ty, sel, hidden }: { ty: string; sel: string | undefined; hidden: boolean }) => {
         function vis(el: Element): boolean {
@@ -2201,9 +2255,12 @@ export async function extractFromSession(
 function cookieProfilePath(profile: string): string {
   const root = resolveWorkspaceRoot();
   const dir = path.join(root, ".agent_artifacts", "browser_cookies");
-  fs.mkdirSync(dir, { recursive: true });
+  fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
+  fs.chmodSync(dir, 0o700);
   const safe = profile.replace(/[^a-zA-Z0-9_-]/g, "_").slice(0, 64) || "default";
-  return path.join(dir, `${safe}.json`);
+  const file = path.join(dir, `${safe}.json`);
+  if (fs.existsSync(file)) fs.chmodSync(file, 0o600);
+  return file;
 }
 
 export async function getSessionCookies(
@@ -2256,7 +2313,7 @@ export async function saveCookieProfile(
   const got = await getSessionCookies(sessionId);
   if (!got.ok) return got;
   const p = cookieProfilePath(profile);
-  fs.writeFileSync(p, JSON.stringify(got.cookies, null, 2), "utf8");
+  fs.writeFileSync(p, JSON.stringify(got.cookies, null, 2), { encoding: "utf8", mode: 0o600 });
   return { ok: true, output: `COOKIES_SAVED: ${got.cookies.length} cookie(s) → ${p}` };
 }
 

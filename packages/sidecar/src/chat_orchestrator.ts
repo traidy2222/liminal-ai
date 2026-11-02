@@ -162,7 +162,7 @@ export class ChatOrchestrator {
     this.runChain = this.runChain
       .then(() => this.execute(id, trimmed, maxWorkers))
       .catch((err) => {
-        if (this.snapshot.id !== id) return;
+        if (!this.isCurrentRun(id)) return;
         this.snapshot.status = "failed";
         this.snapshot.error = err instanceof Error ? err.message : String(err);
         this.snapshot.finishedAt = Date.now();
@@ -239,8 +239,9 @@ export class ChatOrchestrator {
   }
 
   private async execute(id: string, goal: string, maxWorkers: number): Promise<void> {
+    if (!this.isCurrentRun(id)) return;
     const plan = await this.plan(goal, maxWorkers);
-    if (this.aborted || this.snapshot.id !== id) return;
+    if (!this.isCurrentRun(id)) return;
 
     this.snapshot.status = "running";
     this.snapshot.phase = `Running ${plan.tasks.length} worker chat(s)…`;
@@ -255,11 +256,21 @@ export class ChatOrchestrator {
     const handoffs = new Map<string, WorkerHandoff>();
 
     for (const wave of waves) {
-      if (this.aborted) break;
+      if (!this.isCurrentRun(id)) return;
       await Promise.all(
         wave.map(async (task) => {
           const worker = this.snapshot.workers.find((w) => w.taskId === task.id);
           if (!worker || worker.status === "skipped") return;
+          const unavailable = (task.dependsOn ?? []).filter(depId => {
+            const dep = this.snapshot.workers.find(w => w.taskId === depId);
+            return dep?.status !== "done" || handoffs.get(depId)?.status !== "done";
+          });
+          if (unavailable.length) {
+            worker.status = "skipped";
+            worker.error = `Upstream tasks did not complete: ${unavailable.join(", ")}`;
+            this.emitStatus();
+            return;
+          }
 
           const upstream = (task.dependsOn ?? [])
             .map((depId) => {
@@ -273,11 +284,13 @@ export class ChatOrchestrator {
 
           try {
             const handoff = await this.runWorker(goal, task, plan.tasks, upstream);
+            if (!this.isCurrentRun(id)) return;
             handoffs.set(task.id, handoff);
             worker.status = "done";
             worker.handoff = handoff;
             worker.summary = handoff.summary;
           } catch (err) {
+            if (!this.isCurrentRun(id)) return;
             worker.status = "failed";
             worker.error = err instanceof Error ? err.message : String(err);
           }
@@ -286,7 +299,7 @@ export class ChatOrchestrator {
       );
     }
 
-    if (this.aborted || this.snapshot.id !== id) return;
+    if (!this.isCurrentRun(id)) return;
 
     const anyOk = this.snapshot.workers.some((w) => w.status === "done");
     if (!anyOk) {
@@ -303,11 +316,13 @@ export class ChatOrchestrator {
 
     try {
       const synthesis = await this.runSynthesis(goal, plan.synthesisPrompt, handoffs);
+      if (!this.isCurrentRun(id)) return;
       this.snapshot.summary = synthesis.text;
       this.snapshot.synthesisChatId = synthesis.chatId;
       this.snapshot.status = "completed";
       this.snapshot.phase = "Done";
     } catch (err) {
+      if (!this.isCurrentRun(id)) return;
       this.snapshot.status = "failed";
       this.snapshot.error = err instanceof Error ? err.message : String(err);
     }
@@ -366,6 +381,8 @@ export class ChatOrchestrator {
     allTasks: PlannedTask[],
     upstreamBlock: string
   ): Promise<WorkerHandoff> {
+    const runId = this.snapshot.id;
+    this.assertCurrentRun(runId);
     const worker = this.snapshot.workers.find((w) => w.taskId === task.id);
     if (!worker) throw new Error("Worker state missing");
 
@@ -375,27 +392,32 @@ export class ChatOrchestrator {
     const bridge = await this.deps.registry.create({
       title: `[Worker] ${task.title}`.slice(0, 80),
     });
+    if (!this.isCurrentRun(runId)) { bridge.abort(); throw new Error("Orchestration stopped or replaced"); }
     worker.chatId = bridge.chatId;
     this.deps.registry.touch(bridge.chatId, task.title);
     this.autopilotChats.add(bridge.chatId);
     try {
       this.emitStatus();
 
-      await this.waitForBridgeReady(bridge);
+      await this.waitForBridgeReady(bridge, runId);
+      this.assertCurrentRun(runId);
 
       const message = buildWorkerMessage(goal, task, allTasks, upstreamBlock);
 
       // sendUserMessage already awaits harness.send() through turn completion.
       // Do not also wait on turn_end — it fires before running=false is cleared.
       await bridge.sendUserMessage(message, { freshContext: true });
+      this.assertCurrentRun(runId);
 
       let handoffResult = parseAndValidateWorkerHandoff(
         bridge.harness.getLastAssistantMessage().trim()
       );
       for (let attempt = 0; !handoffResult.ok && attempt < 2; attempt++) {
+        this.assertCurrentRun(runId);
         await bridge.sendUserMessage(buildHandoffRetryMessage(handoffResult.error), {
           freshContext: false,
         });
+        this.assertCurrentRun(runId);
         handoffResult = parseAndValidateWorkerHandoff(
           bridge.harness.getLastAssistantMessage().trim()
         );
@@ -415,14 +437,18 @@ export class ChatOrchestrator {
     synthesisPrompt: string | undefined,
     handoffs: Map<string, WorkerHandoff>
   ): Promise<{ chatId: string; text: string }> {
+    const runId = this.snapshot.id;
+    this.assertCurrentRun(runId);
     const bridge = await this.deps.registry.create({
       title: `[Orchestrator] ${goal.slice(0, 48)}`,
     });
+    if (!this.isCurrentRun(runId)) { bridge.abort(); throw new Error("Orchestration stopped or replaced"); }
     this.autopilotChats.add(bridge.chatId);
     try {
       this.emitStatus();
 
-      await this.waitForBridgeReady(bridge);
+      await this.waitForBridgeReady(bridge, runId);
+      this.assertCurrentRun(runId);
 
       const structuredWorkers = this.snapshot.workers
         .filter((w) => w.handoff)
@@ -458,6 +484,7 @@ export class ChatOrchestrator {
         .join("\n");
 
       await bridge.sendUserMessage(message, { freshContext: true });
+      this.assertCurrentRun(runId);
 
       const text = bridge.harness.getLastAssistantMessage().trim();
       if (!text) throw new Error("Synthesis produced no output.");
@@ -467,10 +494,19 @@ export class ChatOrchestrator {
     }
   }
 
-  private async waitForBridgeReady(bridge: SessionBridge): Promise<void> {
+  private isCurrentRun(id: string): boolean {
+    return !this.aborted && this.snapshot.id === id;
+  }
+
+  private assertCurrentRun(id: string): void {
+    if (!this.isCurrentRun(id)) throw new Error("Orchestration stopped or replaced");
+  }
+
+  private async waitForBridgeReady(bridge: SessionBridge, runId: string): Promise<void> {
+    this.assertCurrentRun(runId);
     await bridge.beginSession();
     for (let i = 0; i < 120; i++) {
-      if (this.aborted) throw new Error("Orchestration stopped");
+      this.assertCurrentRun(runId);
       if (!bridge.isAwaitingPersonaBootstrap && !bridge.harness.getIsRunning()) return;
       await sleep(500);
     }

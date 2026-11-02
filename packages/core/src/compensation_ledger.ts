@@ -204,10 +204,8 @@ export function inferCompensationAction(
     const ref = (args["ref"] as string | undefined)?.trim() || (args["checkpoint_ref"] as string | undefined)?.trim();
     if (ref) return { kind: "git_reset", checkpointRef: ref };
   }
-  if (toolName === "mkdir_p") {
-    const dirPath = (args["path"] as string | undefined)?.trim();
-    if (dirPath) return { kind: "delete_file", path: dirPath };
-  }
+  // mkdir_p may succeed for a pre-existing directory. Without creation
+  // provenance there is no safe inferred undo; unlink is not a directory undo.
   return null;
 }
 

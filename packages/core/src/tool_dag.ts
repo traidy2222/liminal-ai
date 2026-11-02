@@ -5,11 +5,12 @@
  * call-id C must wait for calls A and B to complete before it can execute.
  * The dispatcher reads the active DAG and schedules accordingly:
  *   - Independent calls run in parallel as usual
- *   - Dependent calls receive prior results injected into their args via __resolved_deps
+ *   - Opt-in handlers receive prior results in ToolExecutionContext.resolvedDependencies
  *
  * The DAG is keyed by call-id (the tool_call id from the stream) and lives for
  * exactly one round. It is created fresh each round and discarded after dispatch.
  */
+import type { ResolvedToolDependency } from "./types.js";
 
 export interface DagEdge {
   /** The call-id that depends on the listed call-ids. */
@@ -122,9 +123,16 @@ export class ToolDag {
     callId: string,
     resultsByCallId: Map<string, { ok: boolean; output: string; error?: string }>
   ): Record<string, unknown> {
+    const resolved = this.getResolvedDeps(callId, resultsByCallId);
+    return resolved.length ? { ...args, __resolved_deps: resolved } : args;
+  }
+
+  getResolvedDeps(
+    callId: string,
+    resultsByCallId: Map<string, { ok: boolean; output: string; error?: string }>
+  ): ResolvedToolDependency[] {
     const prereqs = this.getPrereqs(callId);
-    if (prereqs.length === 0) return args;
-    const resolved = prereqs.map((pid) => {
+    return prereqs.map((pid) => {
       const r = resultsByCallId.get(pid);
       return {
         callId: pid,
@@ -133,6 +141,5 @@ export class ToolDag {
         error: r?.ok ? undefined : r?.error ?? "missing prerequisite result",
       };
     });
-    return { ...args, __resolved_deps: resolved };
   }
 }

@@ -55,8 +55,9 @@ function findContext(haystack: string[], needle: string[], hint: number): number
     if (hint - d >= lo) candidates.push(hint - d);
     if (hint + d <= hi) candidates.push(hint + d);
   }
+  const nearby = new Set(candidates);
   for (let i = 0; i <= haystack.length - needle.length; i++) {
-    if (!candidates.includes(i)) candidates.push(i);
+    if (!nearby.has(i)) candidates.push(i);
   }
   for (const pos of candidates) {
     if (pos < 0 || pos + needle.length > haystack.length) continue;

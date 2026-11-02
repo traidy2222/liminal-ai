@@ -16,6 +16,7 @@ import type {
   TurnEndTerminationReason,
   TurnSummary,
   ToolResult,
+  ToolExecutionContext,
   ExecutionState,
   ExecutionContract,
   ContextSnapshot,
@@ -1571,7 +1572,7 @@ export class AgentHarness {
     const planId =
       this.executionState?.activeContractId ?? this.executionState?.mission?.id;
     if (!planId) return;
-    const ledger = getCompensationLedger();
+    const ledger = getCompensationLedger(this);
     const pending = ledger.entriesForPlan(planId);
     if (pending.length === 0) return;
     if (opts?.onlyStepIndex !== undefined) {
@@ -3724,6 +3725,7 @@ export class AgentHarness {
         hypotheses: this.persistedHypotheses.length > 0 ? this.persistedHypotheses : [],
       });
     }
+    getCompensationLedger(this).clearAll();
     this.executionState = createDefaultExecutionState(telemetryUserLabel);
     this.syncExecutionStateToContext();
     this.emitter.emit("execution_state", {
@@ -5199,6 +5201,7 @@ export class AgentHarness {
       if (this.roundCount > 1 && this.roundCount % 4 === 0) {
         const next = updateDriftScore(this.executionState, 0.06);
         const triggeredReplan = next.driftScore >= 0.55;
+        if (triggeredReplan) getCompensationLedger(this).clearAll();
         this.executionState = triggeredReplan ? advanceExecutionStateForPlan(next, [
           "Reconfirm mission objective and constraints",
           "Regenerate milestone contracts from latest evidence",
@@ -5890,7 +5893,6 @@ export class AgentHarness {
           interruptedText.length > 0 || interruptedToolCalls.length > 0;
 
         accumulator.reset();
-        speculativePromises.clear(); // discard PASTE results from failed stream attempt
         finishReason = null;
         receivedStreamChunk = false;
 
@@ -5907,10 +5909,6 @@ export class AgentHarness {
         }
 
         if (interruptedToolCalls.length > 0) {
-          for (const tc of interruptedToolCalls) {
-            if (!isFileWriteToolName(tc.name) && !isLiminalAppHtmlToolName(tc.name)) continue;
-            speculativePromises.delete(tc.id);
-          }
           await this.commitInterruptedStreamAttempt(
             interruptedText,
             interruptedToolCalls,
@@ -5919,6 +5917,9 @@ export class AgentHarness {
           );
           messages = scrubMessagesSpecialTokens(await this.context.buildMessages());
         }
+        // Recovery must await/reuse any eager work before dropping attempt-local IDs.
+        // Clearing this before committing the interrupted calls executes them twice.
+        speculativePromises.clear();
 
         this.emitter.emit("provider_retry", {
           attempt: streamAttempt,
@@ -6043,8 +6044,8 @@ export class AgentHarness {
           if (!isFileWriteToolName(tc.name)) continue;
           await this.fileWriteStreamSink.finalize(tc.id);
           resumeMsg += this.fileWriteStreamSink.buildLengthResumeHint(tc.id);
-          // Detach the entry but retain the recovery file for a guarded continuation.
-          this.fileWriteStreamSink.takeForDispatch(tc.id);
+          // Retry reissues full content, so these partial bytes have no consumer.
+          await this.fileWriteStreamSink.discard(tc.id);
         }
       }
       this.context.append(assistantMessage);
@@ -6131,6 +6132,7 @@ export class AgentHarness {
       })();
 
       const results: ToolResult[] = new Array(toolCalls.length);
+      const dependencyContexts = new Map<number, ToolExecutionContext>();
 
       // ── DAG-aware dispatch ───────────────────────────────────────────────────
       // dispatch_graph tool calls register dependency edges into _toolDag BEFORE
@@ -6170,7 +6172,7 @@ export class AgentHarness {
                     kind: "restore_file_content",
                     path: filePath,
                     originalContent: original,
-                  });
+                  }, this);
                 }
               }
             }
@@ -6209,7 +6211,7 @@ export class AgentHarness {
               if (speculative) return speculative;
               const promoted = this.tryPromotePasteSpeculation(tc.name, tc.argsJson);
               if (promoted) return promoted;
-              return this.dispatcher.dispatch(tc.id, tc.name, tc.argsJson, batchToolNames);
+              return this.dispatcher.dispatch(tc.id, tc.name, tc.argsJson, batchToolNames, dependencyContexts.get(idx));
             };
             if (tc.name === "write_file" || tc.name === "edit_file") {
               const pathKey = this.fileWritePathKeyFromArgs(tc.argsJson);
@@ -6279,14 +6281,7 @@ export class AgentHarness {
         for (const batchIds of batches) {
           for (const id of batchIds) {
             const idx = idToIdx.get(id)!;
-            const tc = toolCalls[idx]!;
-            try {
-              const argsObj = JSON.parse(tc.argsJson) as Record<string, unknown>;
-              const merged = this._toolDag.injectResolvedDeps(argsObj, id, resultsByCallId);
-              toolCalls[idx] = { ...tc, argsJson: JSON.stringify(merged) };
-            } catch {
-              /* keep original args */
-            }
+            dependencyContexts.set(idx, { resolvedDependencies: this._toolDag.getResolvedDeps(id, resultsByCallId) });
           }
           await Promise.all(batchIds.map((id) => dispatchAt(idToIdx.get(id)!)));
           for (const id of batchIds) {
@@ -6420,10 +6415,10 @@ export class AgentHarness {
                 filePath &&
                 (tc.name === "write_file" || tc.name === "edit_file" || tc.name === "mkdir_p")
               ) {
-                commitCompensationPath(planId, filePath);
+                commitCompensationPath(planId, filePath, this);
               } else {
                 const action = inferCompensationAction(tc.name, args);
-                if (action) recordCompensation(planId, this.roundCount, action);
+                if (action) recordCompensation(planId, this.roundCount, action, this);
               }
             } catch { /* non-fatal */ }
           }
@@ -6712,6 +6707,7 @@ export class AgentHarness {
               if (args.steps && args.steps.length > 0) {
                 this.context.patchEpistemicState({ subgoals: subgoalsFromPlanSteps(args.steps) });
                 if (this.executionState) {
+                  getCompensationLedger(this).clearAll();
                   this.executionState = advanceExecutionStateForPlan(this.executionState, args.steps);
                   this.syncExecutionStateToContext();
                   const cid = this.executionState.activeContractId;
@@ -8022,8 +8018,8 @@ export class AgentHarness {
         if (this.fileWriteStreamSink) {
           await this.fileWriteStreamSink.finalize(tc.id);
           extra += this.fileWriteStreamSink.buildLengthResumeHint(tc.id);
-          // Detach the entry but retain the recovery file for a guarded continuation.
-          this.fileWriteStreamSink.takeForDispatch(tc.id);
+          // Retry reissues full content, so these partial bytes have no consumer.
+          await this.fileWriteStreamSink.discard(tc.id);
         }
         discardFileWriteStreamManifest(tc.id);
         result = {

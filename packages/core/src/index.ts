@@ -333,6 +333,8 @@ export type {
   ToolDefinition,
   ToolResult,
   ToolHandler,
+  ToolExecutionContext,
+  ResolvedToolDependency,
   ToolParameterSchema,
   PropertySchema,
   ApprovalDecision,

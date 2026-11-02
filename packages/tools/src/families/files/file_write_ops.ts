@@ -19,8 +19,9 @@ export const TRUNCATED_WRITE_ERROR =
   "Refusing write: content looks truncated (unclosed string/brace). Partial bytes NOT written. " +
   "Re-issue from the cut point or use write_file with mode=append.";
 
-export function rejectIfLikelyTruncated(content: string): string | null {
-  return isLikelyTruncatedContent(content) ? TRUNCATED_WRITE_ERROR : null;
+/** Content alone cannot establish truncation; only a length-limited completion can. */
+export function rejectIfLikelyTruncated(content: string, finishReason?: string): string | null {
+  return finishReason === "length" && isLikelyTruncatedContent(content) ? TRUNCATED_WRITE_ERROR : null;
 }
 
 export type PrepareFileWriteResult =

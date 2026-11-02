@@ -212,19 +212,20 @@ export const ok = 1;
   await rm(abs, { force: true });
 });
 
-test("write_file rejects likely truncated content", async () => {
+test("write_file accepts an intentional text fragment without transport truncation evidence", async () => {
   const root = resolveWorkspaceRoot();
   const rel = ".agent_artifacts/test-trunc-reject.txt";
   const abs = path.resolve(root, rel);
   await rm(abs, { force: true });
   const r = await writeFileTool.handler({ path: rel, content: 'const x = "' });
-  assert.equal(r.ok, false);
-  if (!r.ok) assert.equal(r.error, TRUNCATED_WRITE_ERROR);
+  assert.equal(r.ok, true);
+  assert.equal(await readFile(abs, "utf8"), 'const x = "');
   await rm(abs, { force: true });
 });
 
-test("rejectIfLikelyTruncated matches integrity heuristic", () => {
-  assert.ok(rejectIfLikelyTruncated("export function f() {"));
+test("rejectIfLikelyTruncated requires a length-limited completion", () => {
+  assert.equal(rejectIfLikelyTruncated("export function f() {"), null);
+  assert.equal(rejectIfLikelyTruncated("export function f() {", "length"), TRUNCATED_WRITE_ERROR);
 });
 
 test("write_file mode=create then mode=append builds full file", async () => {

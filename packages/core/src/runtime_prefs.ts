@@ -140,6 +140,16 @@ function withoutPersistedSecrets(prefs: RuntimePreferences): RuntimePreferences 
   return { ...prefs, harness: { ...prefs.harness, env: clean } };
 }
 
+const preferenceOperations = new Map<string, Promise<unknown>>();
+async function withPreferenceFile<T>(filePath: string, operation: () => Promise<T>): Promise<T> {
+  const key = path.resolve(filePath);
+  const previous = preferenceOperations.get(key) ?? Promise.resolve();
+  const pending = previous.catch(() => undefined).then(operation);
+  preferenceOperations.set(key, pending);
+  try { return await pending; }
+  finally { if (preferenceOperations.get(key) === pending) preferenceOperations.delete(key); }
+}
+
 async function writePreferencesFile(filePath: string, prefs: RuntimePreferences): Promise<void> {
   const temporary = `${filePath}.${randomUUID()}.tmp`;
   try {
@@ -173,18 +183,23 @@ export async function loadRuntimePreferences(
   // Phase 1 storage split: prefer ~/.liminal/runtime_prefs.json; fall back to
   // the legacy workspace-local .agent_runtime_prefs.json when global is unset.
   const filePath = await pickReadPath(runtimePrefsPaths(workspaceRoot));
+  return withPreferenceFile(filePath, async () => {
   try {
     const raw = await readFile(filePath, "utf8");
     const parsed: unknown = JSON.parse(raw);
     if (validPreferences(parsed)) {
       const clean = withoutPersistedSecrets(parsed);
-      if (clean !== parsed) await writePreferencesFile(filePath, clean);
+      if (clean !== parsed) {
+        try { await writePreferencesFile(filePath, clean); }
+        catch { /* Read-only storage must not hide valid, sanitized settings. */ }
+      }
       return clean;
     }
     return null;
   } catch {
     return null;
   }
+  });
 }
 
 export async function saveRuntimePreferences(
@@ -195,7 +210,7 @@ export async function saveRuntimePreferences(
   await ensureGlobalStorageRoot();
   const filePath = await pickWritePath(runtimePrefsPaths(workspaceRoot));
   await mkdir(path.dirname(filePath), { recursive: true });
-  await writePreferencesFile(filePath, withoutPersistedSecrets(prefs));
+  await withPreferenceFile(filePath, () => writePreferencesFile(filePath, withoutPersistedSecrets(prefs)));
   return filePath;
 }
 

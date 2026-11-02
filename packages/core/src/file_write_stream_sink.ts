@@ -170,11 +170,11 @@ export class FileWriteStreamSink {
     }
   }
 
-  discard(callId: string): void {
+  discard(callId: string): Promise<void> {
     const entry = this.entries.get(callId);
-    if (!entry) return;
+    if (!entry) return Promise.resolve();
     entry.closed = true;
-    void entry.pending.then(async () => {
+    const cleanup = entry.pending.then(async () => {
       const stream = entry.stream;
       if (stream && !stream.closed) {
         await new Promise<void>(resolve => { stream.once("close", resolve); stream.destroy(); });
@@ -182,6 +182,7 @@ export class FileWriteStreamSink {
       await rm(entry.stagingPath, { force: true });
     }).catch(() => undefined);
     this.entries.delete(callId);
+    return cleanup;
   }
 
   takeForDispatch(callId: string): {
@@ -232,7 +233,7 @@ export class FileWriteStreamSink {
   buildLengthResumeHint(callId: string): string {
     const entry = this.entries.get(callId);
     if (!entry?.targetPath || entry.bytesWritten === 0) return "";
-    return ` Partial bytes (${entry.bytesWritten}) staged at ${entry.stagingPath} for ${entry.targetPath} — target unchanged. Reissue the complete intended content through write_file with the original mode; do not append only the missing tail.`;
+    return ` Partial bytes (${entry.bytesWritten}) for ${entry.targetPath} were not committed — target unchanged. Reissue the complete intended content through write_file with the original mode; do not append only the missing tail.`;
   }
 
   /** Legacy entry point: retain recovery bytes, never bypass normal tool dispatch. */

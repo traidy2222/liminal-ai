@@ -109,7 +109,7 @@ export function fileWriteToolNeedsLengthResume(tc: AccumulatedToolCall, finishRe
     return finishReason === "length" || finishReason === "tool_calls" || finishReason == null;
   }
   const content = parsed.args["content"];
-  if (typeof content === "string" && isLikelyTruncatedFileContent(content)) {
+  if (finishReason === "length" && typeof content === "string" && isLikelyTruncatedFileContent(content)) {
     return true;
   }
   // Valid JSON with complete-looking content may still finish with reason=length when
