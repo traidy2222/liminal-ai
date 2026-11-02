@@ -87,7 +87,8 @@ async function main(): Promise<void> {
   const shutdown = (signal: string): void => {
     if (shuttingDown) return;
     shuttingDown = true;
-    process.stdout.write(`liminald: shutting down (${signal})\n`);
+    // The desktop owned stdout; it may already be a broken pipe when it exits.
+    if (signal !== 'desktop_parent_exit') process.stdout.write(`liminald: shutting down (${signal})\n`);
     server.close();
     void clearHandshake()
       .then(() => closeCrashReporter())
