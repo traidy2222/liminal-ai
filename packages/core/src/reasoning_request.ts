@@ -12,7 +12,9 @@ export function buildReasoningRequestParams(opts: {
   surface: ReasoningSurface;
   budget?: ReasoningBudget | null;
 }): { reasoning?: { enabled?: boolean; effort?: string; max_tokens?: number } } {
-  const hybridDeepSeek = /^deepseek\/(?:deepseek-v(?:3\.[12]|4(?:[.\-/]|$))|deepseek-(?:chat|flash)(?:[:/\-]|$))/i.test(opts.modelSlug);
+  // Match known hybrid families, not dedicated thinking variants such as
+  // v3.2-speciale or :thinking. Unknown variants retain their provider default.
+  const hybridDeepSeek = /^deepseek\/(?:deepseek-v(?:3\.[12](?:-\d{4,8})?|4(?:\.\d+)?-(?:flash|pro)(?:-\d{4,8})?)|deepseek-(?:chat|flash))(?::(?:free|nitro|floor))?$/i.test(opts.modelSlug.trim());
   if (opts.surface === "external" && hybridDeepSeek && supportsOpenRouterRequestExtras(opts.baseURL)) {
     return { reasoning: { enabled: false } };
   }
