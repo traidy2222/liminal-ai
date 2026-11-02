@@ -267,8 +267,8 @@ Web **Settings** writes to (2). See [Configuration basics](../start/configuratio
 | `AGENT_PROVIDER_ORDER_FAST` | `` | yes | no | harness | Harness environment toggle for Provider Order Fast. See docs/configuration.md (harness). |
 | `AGENT_PROVIDER_ROUTE_AUTO` | `1` | yes | no | harness | Harness environment toggle for Provider Route Auto. See docs/configuration.md (harness). |
 | `AGENT_PROVIDER_SESSION_EPOCH_ON_429` | `1` | yes | no | session_ui | Harness environment toggle for Provider Session Epoch On 429. See docs/configuration.md (session ui). |
-| `AGENT_PROVIDER_SORT` | `price` | yes | no | harness | Harness environment toggle for Provider Sort. See docs/configuration.md (harness). |
-| `AGENT_PROVIDER_STRATEGY` | `price` | yes | no | harness | Harness environment toggle for Provider Strategy. See docs/configuration.md (harness). |
+| `AGENT_PROVIDER_SORT` | `` | yes | no | harness | Harness environment toggle for Provider Sort. See docs/configuration.md (harness). |
+| `AGENT_PROVIDER_STRATEGY` | `latency` | yes | no | harness | OpenRouter routing for the selected model. Default latency prioritizes responsive providers; price prioritizes the lowes |
 | `AGENT_PSEUDO_TOOL_RETRY_MAX` | `2` | yes | no | harness | Harness environment toggle for Pseudo Tool Retry Max. See docs/configuration.md (harness). |
 | `AGENT_QUERY_REWRITE` | `0` | yes | no | memory_vault | Harness environment toggle for Query Rewrite. See docs/configuration.md (memory vault). |
 | `AGENT_QUERY_REWRITE_EXPLORATORY` | `0` | yes | no | memory_vault | Harness environment toggle for Query Rewrite Exploratory. See docs/configuration.md (memory vault). |
