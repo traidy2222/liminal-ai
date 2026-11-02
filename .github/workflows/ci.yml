@@ -47,6 +47,9 @@ jobs:
       - name: Typecheck all workspaces
         run: npm run typecheck
 
+      - name: Test OAuth connection recovery
+        run: npm run test:oauth
+
       - name: Test desktop update installation and rollback
         run: npm run test:update-release
 
@@ -130,6 +133,8 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm run build
+      - name: Test OAuth connection recovery on Windows
+        run: npm run test:oauth
       - name: Verify workflow gates with actual Windows test processes
         run: npm run verify:workflows
       - name: Test Windows update helper and rollback

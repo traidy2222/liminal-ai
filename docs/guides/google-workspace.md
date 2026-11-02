@@ -17,6 +17,14 @@ Liminal connects to Google Workspace through **hosted OAuth** on [vireondynamics
 
 CLI: `liminal connect google --attach` uses the same hosted flow.
 
+### Recover a failed connection
+
+Keep Liminal running while completing browser consent. The hosted callback submits a form to the local listener; if automatic submission does not run, select **Finish connecting to Liminal**. If the app restarted or sign-in expired, start a fresh connection from Integrations instead of refreshing the old callback page.
+
+Existing grants renew through the hosted broker using the Google refresh token. This does not require an active paid Liminal license. A saved account without usable access no longer prevents a requested reconnect.
+
+For Docs, Sheets and Slides, install `uv` so Liminal can launch `workspace-mcp`. Hosted users do not need the Google client secret locally: Liminal can recover the public client ID from Google's token metadata and supplies signing material for the local service. If the account is readable but renewal fails, reconnect Google; changing the token encryption key will not repair an expired or revoked grant.
+
 ### Operator setup (Vireon — one time)
 
 In [Google Cloud Console](https://console.cloud.google.com/) for the **Vireon** OAuth project:
