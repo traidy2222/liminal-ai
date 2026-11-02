@@ -139,3 +139,14 @@ Full operator guide: [Troubleshooting](../operations/troubleshooting.md).
 - **Updates:** `liminal update` from the install directory (requires git).
 
 Not in v1: npm global publish, systemd/launchd services, Docker, `.deb`/`.rpm` packages.
+
+
+## Automatic desktop updates
+
+From **0.1.6**, portable desktop installs update on launch by default. Liminal loads your update preferences, checks for a complete release, downloads the app bundle to disk, requires a matching SHA256 checksum, and installs and restarts before opening the workspace. One app update includes the matching harness. It does not automatically restart during active work or after a transport reconnect.
+
+The launch screen shows progress. Choose **Open current version** to cancel the launch update, or disable **Update automatically on launch** in **Settings → About & updates**. Development builds and explicit update opt-outs are respected. Offline checks, unavailable checksums, interrupted downloads, and failed verification open the current version. The updater retains the old installation, preserves its local configuration, and rolls back if replacing or launching the new app fails. After a failed automatic attempt, use About & updates to retry manually.
+
+**First upgrade from 0.1.5 or earlier:** download 0.1.6 once, close Liminal, and extract the archive over the existing installation while keeping your local `.env`. Older packaged builds can incorrectly classify themselves as development builds, blocking their in-app check; the Windows installer helper also needs this refresh. Once 0.1.6 is installed, future launch updates are automatic.
+
+An app update keeps the installation's `.env` and local runtime preferences. Conversations and global settings under `~/.liminal` remain outside the app folder. Release archives are beta builds; Node.js must remain on PATH for the update helper.

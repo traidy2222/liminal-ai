@@ -55,27 +55,31 @@ class _AboutUpdatesPanelState extends State<AboutUpdatesPanel> {
         else if (local != null) ...[
           _row('App', local.appVersion),
           _row('Harness', local.harnessVersion ?? '—'),
-          _row('Sidecar', host.sidecarVersion.isNotEmpty ? host.sidecarVersion : '—'),
+          _row('Sidecar',
+              host.sidecarVersion.isNotEmpty ? host.sidecarVersion : '—'),
           if (local.isDevBuild)
             Padding(
               padding: const EdgeInsets.only(top: LiminalSpacing.sm),
               child: Text(
                 'Dev build — use git pull in the monorepo for harness updates.',
-                style: theme.textTheme.bodySmall?.copyWith(color: lim.textMuted),
+                style:
+                    theme.textTheme.bodySmall?.copyWith(color: lim.textMuted),
               ),
             ),
         ],
         const SizedBox(height: LiminalSpacing.md),
         SwitchListTile(
           contentPadding: EdgeInsets.zero,
-          title: const Text('Check automatically on launch'),
+          title: const Text('Update automatically on launch'),
           subtitle: Text(
-            'Looks for new GitHub Releases when the app starts.',
+            'Downloads verified updates and restarts before opening your workspace.',
             style: theme.textTheme.bodySmall?.copyWith(color: lim.textMuted),
           ),
-          value: updates.prefs.autoCheckOnLaunch,
+          value: updates.prefs.autoCheckOnLaunch &&
+              updates.prefs.autoInstallOnLaunch,
           onChanged: (v) => updates.savePrefs(
-            updates.prefs.copyWith(autoCheckOnLaunch: v),
+            updates.prefs
+                .copyWith(autoCheckOnLaunch: v, autoInstallOnLaunch: v),
           ),
         ),
         SwitchListTile(
@@ -111,17 +115,15 @@ class _AboutUpdatesPanelState extends State<AboutUpdatesPanel> {
             updates.state.downloadProgress != null)
           Padding(
             padding: const EdgeInsets.only(bottom: LiminalSpacing.sm),
-            child: LinearProgressIndicator(value: updates.state.downloadProgress),
+            child:
+                LinearProgressIndicator(value: updates.state.downloadProgress),
           ),
         Wrap(
           spacing: LiminalSpacing.sm,
           runSpacing: LiminalSpacing.sm,
           children: [
             FilledButton(
-              onPressed: updates.state.phase == UpdatePhase.checking ||
-                      updates.state.phase == UpdatePhase.applying
-                  ? null
-                  : () => host.updates.check(),
+              onPressed: updates.isBusy ? null : () => host.updates.check(),
               child: updates.state.phase == UpdatePhase.checking
                   ? const SizedBox(
                       width: 22,
@@ -132,14 +134,14 @@ class _AboutUpdatesPanelState extends State<AboutUpdatesPanel> {
             ),
             if (result?.harnessUpdate == true)
               OutlinedButton(
-                onPressed: updates.state.phase == UpdatePhase.applying
+                onPressed: updates.isBusy
                     ? null
                     : () => host.updates.applyHarnessUpdate(),
                 child: const Text('Update harness'),
               ),
             if (result?.appUpdate == true)
               OutlinedButton(
-                onPressed: updates.state.phase == UpdatePhase.applying
+                onPressed: updates.isBusy
                     ? null
                     : () => host.updates.scheduleAppRestart(),
                 child: const Text('Restart to update app'),
@@ -164,7 +166,9 @@ class _AboutUpdatesPanelState extends State<AboutUpdatesPanel> {
       child: Row(
         children: [
           SizedBox(width: 88, child: Text(label)),
-          Expanded(child: Text(value, style: const TextStyle(fontFamily: 'JetBrains Mono'))),
+          Expanded(
+              child: Text(value,
+                  style: const TextStyle(fontFamily: 'JetBrains Mono'))),
         ],
       ),
     );

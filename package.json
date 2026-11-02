@@ -42,7 +42,7 @@
     "web:dev:bootstrap": "node scripts/run-web-dev.mjs --bootstrap",
     "typecheck": "npm run typecheck --workspaces --if-present",
     "test": "npm run test --workspace=@liminal/core",
-    "test:update-release": "node scripts/lib/update-release.test.mjs",
+    "test:update-release": "node scripts/lib/update-release.test.mjs && node --test scripts/lib/apply-app-swap.test.mjs scripts/relaunch-desktop.test.mjs",
     "verify-harness-defaults-no-secrets": "node scripts/verify-harness-defaults-no-secrets.mjs",
     "verify:workflows:live": "node scripts/verify-signature-workflows.mjs",
     "verify:workflows": "node --import tsx --test packages/core/src/signature_workflows.test.ts packages/tools/src/families/code_intel/run_tests.test.ts packages/tools/src/integrations/xero/receipt_workflow.integration.test.ts packages/web/server/workflow_artifacts.test.ts",

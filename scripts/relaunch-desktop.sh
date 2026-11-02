@@ -6,7 +6,7 @@ PARENT_PID="${1:?parent pid}"
 EXE_DIR="${2:?exe dir}"
 ARCHIVE_PATH="${3:?archive path}"
 
-UPDATER_DIR="$EXE_DIR/liminald/updater"
+UPDATER_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 APPLY_SCRIPT="$UPDATER_DIR/apply-desktop-update.mjs"
 
 wait_for_pid() {

@@ -21,7 +21,9 @@ const {
   extractLiminaldFromArchive,
   waitForProcessExit,
 } = await import(pathToFileURL(libPath("update-release.mjs")).href);
-const { applyAppFolderSwap } = await import(pathToFileURL(libPath("apply-app-swap.mjs")).href);
+const { applyAppFolderSwap, relaunchInstalledApp } = await import(
+  pathToFileURL(libPath("apply-app-swap.mjs")).href
+);
 
 function parseArgs(argv) {
   /** @type {Record<string, string>} */
@@ -39,8 +41,10 @@ function parseArgs(argv) {
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     if (a === "--mode" && argv[i + 1]) out.mode = argv[++i];
-    else if (a === "--exe-dir" && argv[i + 1]) out.exeDir = path.resolve(argv[++i]);
-    else if (a === "--archive" && argv[i + 1]) out.archive = path.resolve(argv[++i]);
+    else if (a === "--exe-dir" && argv[i + 1])
+      out.exeDir = path.resolve(argv[++i]);
+    else if (a === "--archive" && argv[i + 1])
+      out.archive = path.resolve(argv[++i]);
     else if (a === "--platform" && argv[i + 1]) out.platform = argv[++i];
     else if (a === "--relaunch-pid" && argv[i + 1]) out.relaunchPid = argv[++i];
   }
@@ -50,13 +54,18 @@ function parseArgs(argv) {
 async function main() {
   const args = parseArgs(process.argv.slice(2));
   if (!args.mode || !args.exeDir || !args.archive) {
-    console.error("Required: --mode harness|app --exe-dir <dir> --archive <path>");
+    console.error(
+      "Required: --mode harness|app --exe-dir <dir> --archive <path>",
+    );
     process.exit(1);
   }
 
   if (args.mode === "harness") {
     const stagingRoot = path.join(args.exeDir, ".update-staging");
-    const liminaldPath = await extractLiminaldFromArchive(args.archive, stagingRoot);
+    const liminaldPath = await extractLiminaldFromArchive(
+      args.archive,
+      stagingRoot,
+    );
     const result = applyHarnessSwap(args.exeDir, liminaldPath);
     console.log(JSON.stringify({ ok: true, backup: result.backup }));
     return;
@@ -68,12 +77,31 @@ async function main() {
       console.log(`Waiting for parent PID ${pid} to exit…`);
       waitForProcessExit(pid);
     }
-    const extracted = await extractAppArchive(args.exeDir, args.archive, args.platform);
-    await applyAppFolderSwap({
-      exeDir: args.exeDir,
-      extractedRoot: extracted,
-      platform: args.platform,
-    });
+    try {
+      const extracted = await extractAppArchive(
+        args.exeDir,
+        args.archive,
+        args.platform,
+      );
+      await applyAppFolderSwap({
+        exeDir: args.exeDir,
+        extractedRoot: extracted,
+        platform: args.platform,
+      });
+    } catch (error) {
+      try {
+        fs.writeFileSync(
+          path.join(args.exeDir, "last_update_error.txt"),
+          error instanceof Error ? error.message : String(error),
+        );
+      } catch {}
+      if (!error?.updateRecoveryAttempted) {
+        try {
+          await relaunchInstalledApp(args.exeDir, args.platform);
+        } catch {}
+      }
+      throw error;
+    }
     console.log(JSON.stringify({ ok: true }));
     return;
   }
