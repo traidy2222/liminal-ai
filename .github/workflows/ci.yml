@@ -37,6 +37,9 @@ jobs:
       - name: Verify guided workflow gates and exports
         run: npm run verify:workflows
 
+      - name: Test review repair evidence gates
+        run: npm run test:review-loop
+
       - name: Test eval fixtures and trace handling
         run: npm run test:sandbox -w @liminal/eval
 

@@ -1,5 +1,9 @@
 # AI code reviews
 
+For evidence-backed fixes of review findings, use the local
+[review → fix → test loop](REVIEW_FIX_LOOP.md). It records reproduction and
+verification, limits retries and leaves merge decisions to the maintainer.
+
 ## CodeRabbit: automatic PR reviews
 
 The root `.coderabbit.yaml` enables assertive reviews of ready-for-review PRs
