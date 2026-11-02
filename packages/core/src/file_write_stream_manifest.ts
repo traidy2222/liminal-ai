@@ -1,3 +1,5 @@
+import { rm } from "node:fs/promises";
+
 export type FileWriteStreamManifest = {
   callId: string;
   stagingPath: string;
@@ -20,4 +22,12 @@ export function takeFileWriteStreamManifest(callId: string): FileWriteStreamMani
 
 export function discardFileWriteStreamManifest(callId: string): void {
   pending.delete(callId);
+}
+
+/** Remove detached bytes before releasing manifest ownership; retain it on I/O failure. */
+export async function cleanupFileWriteStreamManifest(callId: string): Promise<void> {
+  const manifest = pending.get(callId);
+  if (!manifest) return;
+  await rm(manifest.stagingPath, { force: true });
+  if (pending.get(callId) === manifest) pending.delete(callId);
 }

@@ -1,4 +1,5 @@
 import type { ToolResult, ToolParameterSchema, PropertySchema, ApprovalDecision, ToolExecutionContext } from "./types.js";
+import { cleanupFileWriteStreamManifest } from "./file_write_stream_manifest.js";
 import type { AgentEmitter } from "./events.js";
 import type { ToolRegistry } from "./registry.js";
 import type { TaskOrchestrator } from "./orchestrator.js";
@@ -654,6 +655,8 @@ export class ToolDispatcher {
       if (resourceIds.length > 0 && this.orchestrator) {
         this.orchestrator.locks.releaseAll(resourceIds, this.taskId ?? "root");
       }
+      try { await cleanupFileWriteStreamManifest(callId); }
+      catch { this.emitter.emit("text", { channel: "trace", delta: "Stream staging cleanup failed; manifest retained for recovery.\n" }); }
     }
   }
 

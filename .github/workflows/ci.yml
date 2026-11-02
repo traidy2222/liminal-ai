@@ -10,6 +10,19 @@ permissions:
   contents: read
 
 jobs:
+  test-web-node24:
+    name: Public web transport on Node 24
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: npm
+      - run: npm ci
+      - run: npm run build -w @liminal/core
+      - run: node --import tsx --test packages/tools/src/families/web/fetch_runtime_regression.test.ts packages/tools/src/families/web/web_destination_regression.test.ts
+
   typecheck:
     name: Typecheck
     runs-on: ubuntu-latest

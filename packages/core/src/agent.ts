@@ -3264,7 +3264,7 @@ export class AgentHarness {
         }
         if (isFileWriteToolName(name)) {
           this.fileWriteStreamSink?.discard(callId);
-          discardFileWriteStreamManifest(callId);
+          // Detached manifest bytes are owned by dispatcher terminal cleanup.
         }
       },
     });
