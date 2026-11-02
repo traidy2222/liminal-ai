@@ -14,6 +14,7 @@ import {
 import { WsServer } from "./ws_server.js";
 import { clearHandshake, handshakePath, mintToken, writeHandshake } from "./handshake.js";
 import { watchDesktopParent } from "./desktop_parent.js";
+import { ignoreBrokenParentPipe } from "./parent_output.js";
 import {
   initCrashReporter,
   captureException,
@@ -28,6 +29,12 @@ import {
  * binds a token-gated WebSocket server on 127.0.0.1:<ephemeral>, and writes the
  * port + token to `~/.liminal/sidecar.json` for the UI to discover.
  */
+
+const desktopParentPid = Number(process.env['LIMINAL_DESKTOP_PARENT_PID']);
+if (Number.isSafeInteger(desktopParentPid) && desktopParentPid > 1 && desktopParentPid === process.ppid) {
+  ignoreBrokenParentPipe(process.stdout);
+  ignoreBrokenParentPipe(process.stderr);
+}
 
 // Load secrets before OAuth decrypt / provider resolution (desktop bundle often has no .env until copied).
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -103,7 +110,7 @@ async function main(): Promise<void> {
 
   process.on("SIGINT", () => shutdown("SIGINT"));
   process.on("SIGTERM", () => shutdown("SIGTERM"));
-  watchDesktopParent(Number(process.env['LIMINAL_DESKTOP_PARENT_PID']), () => shutdown('desktop_parent_exit'));
+  watchDesktopParent(desktopParentPid, () => shutdown('desktop_parent_exit'));
 
   process.on("unhandledRejection", (reason) => {
     const message =

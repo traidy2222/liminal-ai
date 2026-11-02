@@ -2,7 +2,7 @@
 
 All notable changes to [Liminal AI](https://github.com/traidy2222/liminal-ai) are documented here and on the docs portal: [docs.vireondynamics.com/liminal/reference/changelog](https://docs.vireondynamics.com/liminal/reference/changelog).
 
-**Current stage:** **beta** (`v0.1.9` tip of `main`, 2026-11-03). Desktop downloads are published through the public preview release channel.
+**Current stage:** **beta** (`v0.1.10` tip of `main`, 2026-11-03). Desktop downloads are published through the public preview release channel.
 
 **Single source:** edit [`changelog/releases.json`](changelog/releases.json), then run `npm run changelog:gen`.
 
@@ -10,7 +10,13 @@ Format: **v0.0.x** entries keyed to the last GitHub push in each slice. Dates ar
 
 Marketing (richer notes): [vireondynamics.com/liminal/changelog](https://www.vireondynamics.com/liminal/changelog)
 
-## [v0.1.9] — 2026-11-03 — Current beta
+## [v0.1.10] — 2026-11-03 — Current beta
+
+Desktop-owned sidecars tolerate closed stdout and stderr pipes so parent-exit cleanup can finish. Prevents recursive EPIPE logging from keeping the old runtime alive and blocking the next update.
+
+[Full notes](https://docs.vireondynamics.com/liminal/reference/changelog#v0-1-10)
+
+## [v0.1.9] — 2026-11-03
 
 Desktop-owned sidecars detect when their launching app exits and shut down, releasing the install folder for updates. Standalone and explicitly attached servers retain their existing lifecycle.
 

@@ -1,7 +1,18 @@
 {
   "stage": "beta",
-  "currentVersion": "0.1.9",
+  "currentVersion": "0.1.10",
   "releases": [
+    {
+      "version": "0.1.10",
+      "date": "2026-11-03",
+      "tagline": "Clean shutdown even after Windows closes desktop output pipes.",
+      "summary": "Desktop-owned sidecars tolerate closed stdout and stderr pipes so parent-exit cleanup can finish. Prevents recursive EPIPE logging from keeping the old runtime alive and blocking the next update.",
+      "bullets": [
+        "**Closed-pipe recovery** — Handle EPIPE on desktop-owned output streams before startup or shutdown logging. Other output errors retain their existing error path, and standalone servers are unaffected.",
+        "**Verified process regression** — A real child process with ignored stdin and both output pipes closed now completes its cleanup after parent termination. The unchanged test fails without the fix and passes with it."
+      ],
+      "docs": [{"label":"Install and update","href":"../start/install.md"}]
+    },
     {
       "version": "0.1.9",
       "date": "2026-11-03",

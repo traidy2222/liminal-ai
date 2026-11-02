@@ -19,7 +19,7 @@ Run it on your machine through a native desktop app, a browser, or your terminal
 
 Liminal connects a model to the tools it needs to do useful work: read and edit files, run commands, search the web, create documents, and work with connected services. Its agent loop handles tool execution, approvals, retries, context management, and persistent memory.
 
-**Release status:** Liminal is in beta. [Desktop 0.1.9](https://github.com/traidy2222/liminal-ai/releases/tag/v0.1.9-desktop) closes orphaned desktop sidecars so future updates can replace the install folder. Includes the repaired Windows update handoff, reviewed harness hardening, faster DeepSeek first answers, accurate file-write status and the three guided workflows. Searchable OpenRouter selection and single-model mode remain available. Screenshots show the application with demo workspace data.
+**Release status:** Liminal is in beta. [Desktop 0.1.10](https://github.com/traidy2222/liminal-ai/releases/tag/v0.1.10-desktop) completes desktop-sidecar cleanup when Windows closes the app's output pipes, keeping the install folder available for future updates. Includes the repaired Windows update handoff, reviewed harness hardening, faster DeepSeek first answers, accurate file-write status and the three guided workflows. Searchable OpenRouter selection and single-model mode remain available. Screenshots show the application with demo workspace data.
 
 ## Why Liminal
 
