@@ -3255,7 +3255,7 @@ export class AgentHarness {
           targetPath: taken.targetPath,
           mode: taken.mode,
           bytesWritten: taken.bytesWritten,
-        });
+        }, this.dispatcher);
         return { ...args, __harness_call_id: callId };
       },
       onRejected: (callId, name) => {
@@ -6036,7 +6036,7 @@ export class AgentHarness {
       for (const tc of toolCalls) {
         if (!isFileWriteToolName(tc.name)) continue;
         speculativePromises.delete(tc.id);
-        discardFileWriteStreamManifest(tc.id);
+        discardFileWriteStreamManifest(tc.id, this.dispatcher);
       }
       let resumeMsg = LENGTH_RESUME_FILE_WRITE_MESSAGE;
       if (this.fileWriteStreamSink) {
@@ -8023,7 +8023,7 @@ export class AgentHarness {
           // Retry reissues full content, so these partial bytes have no consumer.
           await this.fileWriteStreamSink.discard(tc.id);
         }
-        discardFileWriteStreamManifest(tc.id);
+        discardFileWriteStreamManifest(tc.id, this.dispatcher);
         result = {
           ok: false,
           error:
@@ -8046,7 +8046,7 @@ export class AgentHarness {
       } else {
         if (isFileWriteToolName(tc.name)) {
           this.fileWriteStreamSink?.discard(tc.id);
-          discardFileWriteStreamManifest(tc.id);
+          discardFileWriteStreamManifest(tc.id, this.dispatcher);
         }
         if (isLiminalAppHtmlToolName(tc.name)) {
           this.spawnAppHtmlStreamSink?.discard(tc.id);

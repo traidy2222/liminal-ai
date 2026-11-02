@@ -1,5 +1,5 @@
 import type { ToolResult, ToolParameterSchema, PropertySchema, ApprovalDecision, ToolExecutionContext } from "./types.js";
-import { cleanupFileWriteStreamManifest } from "./file_write_stream_manifest.js";
+import { cleanupFileWriteStreamManifest, runWithFileWriteStreamOwner } from "./file_write_stream_manifest.js";
 import type { AgentEmitter } from "./events.js";
 import type { ToolRegistry } from "./registry.js";
 import type { TaskOrchestrator } from "./orchestrator.js";
@@ -289,13 +289,24 @@ export class ToolDispatcher {
     if (guardMsg) return { ok: false, error: `[ARG GUARD] ${guardMsg}` };
     try {
       const emit = (text: string) => this.emitter.emit("text", { delta: text, channel: "trace" });
-      return await tool.handler(args, emit);
+      return await runWithFileWriteStreamOwner(this, () => tool.handler(args, emit));
     } catch (err) {
       return { ok: false, error: err instanceof Error ? err.message : String(err) };
     }
   }
 
   async dispatch(
+    callId: string,
+    name: string,
+    argsJson: string,
+    batchToolNames?: string[],
+    executionContext?: ToolExecutionContext
+  ): Promise<ToolResult> {
+    return runWithFileWriteStreamOwner(this, () =>
+      this.dispatchOwned(callId, name, argsJson, batchToolNames, executionContext));
+  }
+
+  private async dispatchOwned(
     callId: string,
     name: string,
     argsJson: string,

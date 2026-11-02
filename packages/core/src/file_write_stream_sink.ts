@@ -1,6 +1,7 @@
 import { createWriteStream } from "node:fs";
 import { mkdir, rm, stat } from "node:fs/promises";
 import path from "node:path";
+import { randomUUID } from "node:crypto";
 import { ensurePerChatDirSync } from "./global_storage.js";
 import { resolveWorkspaceRoot } from "./workspace_root.js";
 import { resolveHarnessEnvRaw } from "./harness_effective_env.js";
@@ -52,7 +53,7 @@ function inflightDir(chatId: string | null): string {
 
 function stagingPathFor(callId: string, chatId: string | null): string {
   const safe = callId.replace(/[^a-zA-Z0-9_-]/g, "_").slice(0, 80);
-  return path.join(inflightDir(chatId), `${safe}.tmp`);
+  return path.join(inflightDir(chatId), `${safe}-${randomUUID()}.tmp`);
 }
 
 function resolveTargetPath(p: string): string {
