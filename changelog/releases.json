@@ -1,7 +1,19 @@
 {
   "stage": "beta",
-  "currentVersion": "0.1.8",
+  "currentVersion": "0.1.9",
   "releases": [
+    {
+      "version": "0.1.9",
+      "date": "2026-11-03",
+      "tagline": "Clean desktop shutdowns keep future updates unblocked.",
+      "summary": "Desktop-owned sidecars detect when their launching app exits and shut down, releasing the install folder for updates. Standalone and explicitly attached servers retain their existing lifecycle.",
+      "bullets": [
+        "**No orphaned desktop sidecars** — The app identifies its owned sidecar's parent process. If the desktop closes or crashes, the sidecar shuts down even when stdin does not report closure.",
+        "**Reliable update preparation** — Release the old runtime's file handles before a future launch update replaces the app folder. Shutdown handles overlapping signals once.",
+        "**Real process coverage** — A detached child with ignored stdin is tested against actual parent termination, including in Windows CI. Standalone servers and unrelated process IDs opt out."
+      ],
+      "docs": [{ "label": "Install and update", "href": "../start/install.md" }]
+    },
     {
       "version": "0.1.8",
       "date": "2026-11-02",
