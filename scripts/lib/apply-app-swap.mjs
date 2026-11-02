@@ -77,9 +77,12 @@ export async function applyAppFolderSwap({
     });
     // Portable installs can use the bundled repo as their workspace. Preserve
     // local memory, sessions, workflow artifacts and preferences along with keys.
+    // Keep extra workspace entries (e.g. generated HTML) absent from the release;
+    // packaged runtime entries still come from the new bundle.
     const localNames = fs.existsSync(runtime(target))
       ? fs.readdirSync(runtime(target)).filter((name) =>
-          name === ".env" || name.startsWith(".agent_"))
+          name === ".env" || name.startsWith(".agent_") ||
+          (name !== ".git" && !fs.existsSync(path.join(runtime(source), name))))
       : [];
     for (const name of localNames) {
       const from = path.join(runtime(target), name);
