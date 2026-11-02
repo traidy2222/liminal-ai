@@ -1,0 +1,493 @@
+import { singleModelEnabled, singleModelSlug, currentHarnessPreferences } from "./harness_effective_env.js";
+import {
+  DEFAULT_AGENT_API_BASE_URL,
+  DEFAULT_AGENT_MODEL_SLUG,
+  HARNESS_ENV_DEFAULTS,
+} from "./harness_default_constants.js";
+import { effectiveHarnessEnvRaw, resolveHarnessEnvRaw } from "./harness_effective_env.js";
+import { resolveManagedOpenRouterCredentials } from "./inference_provider.js";
+import {
+  buildOpenRouterSessionExtras,
+  supportsOpenRouterRequestExtras,
+} from "./openrouter_session.js";
+import type { ProviderRouteState } from "./provider_route_state.js";
+import type { RuntimePreferences } from "./runtime_prefs.js";
+import {
+  ensureLocalProviderApiKeyInProcess,
+  ensureProviderApiKeysInProcess,
+  isCastAiApiKey,
+  syncProviderProcessEnvForBase,
+} from "./provider_api_key.js";
+import { isManagedInferenceBaseUrl } from "./inference_session.js";
+import { KIMCHI_API_KEY_ENV_NAMES } from "./kimchi_provider.js";
+import { isKimchiApiBaseUrl } from "./kimchi_constants.js";
+import { isOpenRouterApiBaseUrl } from "./openrouter_session.js";
+import { isOpenRouterRouterModel } from "./openrouter_fusion.js";
+
+// ─── Provider routing (OpenRouter sticky cache + dynamic price sort) ─────────
+
+export type ProviderSortAxis = "price" | "throughput" | "latency";
+
+export type ProviderStrategy =
+  | "adaptive"
+  | "price"
+  | "cache_first"
+  | "openrouter_default"
+  | "throughput"
+  | "latency";
+
+/** OpenRouter `provider` preferences object on chat completion requests. */
+export interface ProviderRouting {
+  order?: string[];
+  allow_fallbacks?: boolean;
+  sort?: ProviderSortAxis | { by: ProviderSortAxis; partition?: "model" | "none" };
+  ignore?: string[];
+  only?: string[];
+  max_price?: { prompt?: number; completion?: number };
+  require_parameters?: boolean;
+}
+
+export interface ProviderRoutingContext {
+  modelSlug: string;
+  isFastModel?: boolean;
+  routeState?: ProviderRouteState;
+  retryAttempt?: number;
+}
+
+/** Map model slug prefix → OpenRouter provider display name. */
+const SLUG_PREFIX_TO_PROVIDER: Record<string, string> = {
+  deepseek: "DeepSeek",
+  anthropic: "Anthropic",
+  openai: "OpenAI",
+  google: "Google",
+  qwen: "Qwen",
+  mistralai: "Mistral",
+  meta: "Meta",
+  cohere: "Cohere",
+  "x-ai": "xAI",
+  xai: "xAI",
+  nvidia: "Nvidia",
+  openrouter: "OpenRouter",
+};
+
+/** OpenRouter slugs that only accept the Stealth provider (not DeepInfra / vendor pins). */
+export const OPENROUTER_STEALTH_MODEL_SLUGS: readonly string[] = ["openrouter/owl-alpha"];
+
+export function isOpenRouterStealthModel(modelSlug: string): boolean {
+  const s = (modelSlug ?? "").trim().toLowerCase();
+  return OPENROUTER_STEALTH_MODEL_SLUGS.some((m) => m.toLowerCase() === s);
+}
+
+function deriveProviderFromModelSlug(slug: string): string | null {
+  const prefix = slug.split("/")[0]?.toLowerCase() ?? "";
+  return SLUG_PREFIX_TO_PROVIDER[prefix] ?? null;
+}
+
+function isStealthProviderName(name: string): boolean {
+  return name.trim().toLowerCase() === "stealth";
+}
+
+/**
+ * Drop env/provider pins that do not apply to the active model slug (e.g. Stealth
+ * left over from Owl Alpha while running Nemotron — OpenRouter only offers Nvidia).
+ */
+export function filterProviderOrderForModel(modelSlug: string, order: string[]): string[] {
+  if (order.length === 0) return [];
+  if (isOpenRouterStealthModel(modelSlug)) return order;
+  const filtered = order.filter((name) => !isStealthProviderName(name));
+  if (filtered.length === 0) return [];
+  const slug = modelSlug.trim().toLowerCase();
+  if (slug.startsWith("nvidia/")) {
+    const hasNvidia = filtered.some((n) => n.toLowerCase() === "nvidia");
+    if (!hasNvidia && filtered.length > 0) {
+      // Stale DeepInfra/etc. pins from another preset — prefer OpenRouter auto-route.
+      const derived = deriveProviderFromModelSlug(modelSlug);
+      return derived ? [derived] : [];
+    }
+  }
+  return filtered;
+}
+
+function resolveExplicitProviderOrder(modelSlug: string, isFastModel: boolean): string[] {
+  const fast = parseCsvList(effectiveHarnessEnvRaw("AGENT_PROVIDER_ORDER_FAST"));
+  const main = parseCsvList(effectiveHarnessEnvRaw("AGENT_PROVIDER_ORDER"));
+  const raw = isFastModel && fast.length > 0 ? fast : main;
+  return filterProviderOrderForModel(modelSlug, raw);
+}
+
+function parseCsvList(raw: string | undefined | null): string[] {
+  if (!raw?.trim()) return [];
+  return raw
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean);
+}
+
+export function resolveProviderStrategy(): ProviderStrategy {
+  const raw =
+    effectiveHarnessEnvRaw("AGENT_PROVIDER_STRATEGY")?.trim().toLowerCase() ??
+    HARNESS_ENV_DEFAULTS["AGENT_PROVIDER_STRATEGY"]?.trim().toLowerCase() ??
+    "price";
+  switch (raw) {
+    case "price":
+    case "cache_first":
+    case "openrouter_default":
+    case "throughput":
+    case "latency":
+      return raw;
+    case "adaptive":
+      return "adaptive";
+    default:
+      return "price";
+  }
+}
+
+function resolveSortAxis(strategy: ProviderStrategy): ProviderSortAxis {
+  const override = effectiveHarnessEnvRaw("AGENT_PROVIDER_SORT")?.trim().toLowerCase();
+  if (override === "throughput" || override === "latency" || override === "price") {
+    return override;
+  }
+  if (strategy === "throughput") return "throughput";
+  if (strategy === "latency") return "latency";
+  return "price";
+}
+
+function resolveAllowlist(modelSlug: string, isFastModel: boolean): string[] {
+  return resolveExplicitProviderOrder(modelSlug, isFastModel);
+}
+
+function resolveStaticIgnores(): string[] {
+  return parseCsvList(effectiveHarnessEnvRaw("AGENT_PROVIDER_IGNORE"));
+}
+
+function resolveMaxPrice(): ProviderRouting["max_price"] | undefined {
+  const promptRaw = effectiveHarnessEnvRaw("AGENT_PROVIDER_MAX_PRICE_PROMPT")?.trim();
+  const completionRaw = effectiveHarnessEnvRaw("AGENT_PROVIDER_MAX_PRICE_COMPLETION")?.trim();
+  const prompt = promptRaw ? Number(promptRaw) : NaN;
+  const completion = completionRaw ? Number(completionRaw) : NaN;
+  const out: ProviderRouting["max_price"] = {};
+  if (Number.isFinite(prompt) && prompt > 0) out.prompt = prompt;
+  if (Number.isFinite(completion) && completion > 0) out.completion = completion;
+  return Object.keys(out).length > 0 ? out : undefined;
+}
+
+function mergeIgnores(routeState?: ProviderRouteState): string[] | undefined {
+  const merged = new Set<string>([...resolveStaticIgnores(), ...(routeState?.snapshot().ignore ?? [])]);
+  if (merged.size === 0) return undefined;
+  return [...merged];
+}
+
+function buildCacheFirstRouting(modelSlug: string, isFastModel: boolean): ProviderRouting | null {
+  const allowFallbacks =
+    effectiveHarnessEnvRaw("AGENT_PROVIDER_ALLOW_FALLBACKS")?.trim() !== "0";
+
+  if (isOpenRouterStealthModel(modelSlug)) {
+    return { order: ["Stealth"], allow_fallbacks: allowFallbacks };
+  }
+
+  const order = resolveExplicitProviderOrder(modelSlug, isFastModel);
+  if (order.length > 0) {
+    return { order, allow_fallbacks: allowFallbacks };
+  }
+
+  const auto = effectiveHarnessEnvRaw("AGENT_PROVIDER_ROUTE_AUTO")?.trim();
+  if (auto === "0") return null;
+
+  const derived = deriveProviderFromModelSlug(modelSlug);
+  if (!derived) return null;
+  return { order: [derived], allow_fallbacks: allowFallbacks };
+}
+
+function buildDynamicRouting(
+  modelSlug: string,
+  isFastModel: boolean,
+  strategy: ProviderStrategy,
+  routeState?: ProviderRouteState
+): ProviderRouting | null {
+  if (isOpenRouterStealthModel(modelSlug)) {
+    return { order: ["Stealth"], allow_fallbacks: true };
+  }
+
+  const sort = resolveSortAxis(strategy);
+  const only = resolveAllowlist(modelSlug, isFastModel);
+  const ignore = mergeIgnores(routeState);
+  const max_price = resolveMaxPrice();
+
+  const routing: ProviderRouting = {
+    sort,
+    allow_fallbacks: true,
+  };
+  if (only.length > 0) routing.only = only;
+  if (ignore && ignore.length > 0) routing.ignore = ignore;
+  if (max_price) routing.max_price = max_price;
+  return routing;
+}
+
+/**
+ * Resolve OpenRouter `provider` preferences for a chat completion.
+ * Returns null for `openrouter_default` or non-OpenRouter bases (caller should omit field).
+ */
+export function resolveProviderRouting(ctx: ProviderRoutingContext): ProviderRouting | null {
+  if (isOpenRouterRouterModel(ctx.modelSlug)) return null;
+  const strategy = resolveProviderStrategy();
+  if (strategy === "openrouter_default") return null;
+  if (strategy === "cache_first") {
+    return buildCacheFirstRouting(ctx.modelSlug, ctx.isFastModel ?? false);
+  }
+  return buildDynamicRouting(
+    ctx.modelSlug,
+    ctx.isFastModel ?? false,
+    strategy,
+    ctx.routeState
+  );
+}
+
+/**
+ * @deprecated Prefer {@link resolveProviderRouting} — kept for existing call sites.
+ */
+export function buildProviderRouting(modelSlug: string, isFastModel = false): ProviderRouting | null {
+  return resolveProviderRouting({ modelSlug, isFastModel });
+}
+
+export type OpenRouterChatRequestExtras = {
+  provider?: ProviderRouting;
+  session_id?: string;
+  user?: string;
+};
+
+/**
+ * Vireon managed-inference proxy already coordinates upstream retries. Strict
+ * Stealth-only pins with fallbacks disabled often fail closed with opaque 400s.
+ */
+export function softenProviderRoutingForManagedProxy(
+  routing: ProviderRouting | null,
+  modelSlug: string
+): ProviderRouting | null {
+  if (!routing) return null;
+  if (isOpenRouterStealthModel(modelSlug)) {
+    return { order: ["Stealth"], allow_fallbacks: true };
+  }
+  if (routing.allow_fallbacks === false && (routing.order?.length || routing.only?.length)) {
+    return { ...routing, allow_fallbacks: true };
+  }
+  return routing;
+}
+
+/**
+ * Merge provider routing + session stickiness (with optional epoch suffix) for OpenRouter chat calls.
+ */
+export function buildOpenRouterChatRequestExtras(opts: {
+  baseURL: string;
+  modelSlug: string;
+  isFastModel?: boolean;
+  routeState?: ProviderRouteState;
+  sessionId?: string | null;
+  retryAttempt?: number;
+}): OpenRouterChatRequestExtras {
+  if (!supportsOpenRouterRequestExtras(opts.baseURL)) return {};
+
+  let provider = resolveProviderRouting({
+    modelSlug: opts.modelSlug,
+    isFastModel: opts.isFastModel,
+    routeState: opts.routeState,
+    retryAttempt: opts.retryAttempt,
+  });
+  if (isManagedInferenceBaseUrl(opts.baseURL)) {
+    provider = softenProviderRoutingForManagedProxy(provider, opts.modelSlug);
+  }
+
+  const sessionExtras = buildOpenRouterSessionExtras(opts.baseURL, opts.sessionId);
+  if (sessionExtras.session_id && opts.routeState) {
+    const id = opts.routeState.resolveSessionId(sessionExtras.session_id);
+    return {
+      ...(provider ? { provider } : {}),
+      session_id: id,
+      user: id,
+    };
+  }
+
+  return {
+    ...(provider ? { provider } : {}),
+    ...sessionExtras,
+  };
+}
+
+export function sessionEpochBumpOn429Enabled(): boolean {
+  const raw = effectiveHarnessEnvRaw("AGENT_PROVIDER_SESSION_EPOCH_ON_429")?.trim();
+  if (raw === "0" || raw === "false") return false;
+  return true;
+}
+
+const DEFAULT_BASE_URL = DEFAULT_AGENT_API_BASE_URL;
+const DEFAULT_MODEL = DEFAULT_AGENT_MODEL_SLUG;
+
+export type ProviderApiKeyEnvName =
+  | "AGENT_API_KEY"
+  | "OPENROUTER_API_KEY"
+  | "KIMCHI_API_KEY"
+  | "CASTAI_API_KEY"
+  | "OPENAI_API_KEY"
+  | "ANTHROPIC_API_KEY"
+  | "XAI_API_KEY"
+  | "VIREON_MANAGED";
+
+export interface ProviderConfig {
+  apiKey: string;
+  baseURL: string;
+  model: string;
+  keySource: ProviderApiKeyEnvName;
+}
+
+export interface ProviderConfigOverrides {
+  baseURL?: string;
+  model?: string;
+  keySource?: ProviderConfig["keySource"];
+}
+
+export interface VisionProviderConfig {
+  apiKey: string;
+  baseURL: string;
+  model: string;
+}
+
+function firstNonEmpty(
+  keys: Array<ProviderApiKeyEnvName>
+): { key: ProviderApiKeyEnvName; value: string } | null {
+  ensureLocalProviderApiKeyInProcess();
+  for (const key of keys) {
+    const value = process.env[key]?.trim();
+    if (value) return { key, value };
+  }
+  return null;
+}
+
+const FALLBACK_KEY_ORDER: Array<ProviderApiKeyEnvName> = [
+  "AGENT_API_KEY",
+  "OPENROUTER_API_KEY",
+  "KIMCHI_API_KEY",
+  "CASTAI_API_KEY",
+  "OPENAI_API_KEY",
+  "ANTHROPIC_API_KEY",
+  "XAI_API_KEY",
+];
+
+function resolveApiKeyOrderForBaseUrl(baseURL: string): Array<ProviderApiKeyEnvName> {
+  if (isKimchiApiBaseUrl(baseURL)) {
+    return [...KIMCHI_API_KEY_ENV_NAMES];
+  }
+  if (isOpenRouterApiBaseUrl(baseURL)) {
+    return ["OPENROUTER_API_KEY", "AGENT_API_KEY", "OPENAI_API_KEY", "ANTHROPIC_API_KEY", "XAI_API_KEY"];
+  }
+  return FALLBACK_KEY_ORDER;
+}
+
+function pickKimchiApiKey(): { key: ProviderApiKeyEnvName; value: string } | null {
+  const fromNamed = firstNonEmpty([...KIMCHI_API_KEY_ENV_NAMES]);
+  if (fromNamed) return fromNamed;
+  const agent = process.env["AGENT_API_KEY"]?.trim();
+  if (agent && isCastAiApiKey(agent)) {
+    return { key: "AGENT_API_KEY", value: agent };
+  }
+  return null;
+}
+
+function pickOpenRouterApiKey(): { key: ProviderApiKeyEnvName; value: string } | null {
+  const fromNamed = firstNonEmpty(["OPENROUTER_API_KEY"]);
+  if (fromNamed) return fromNamed;
+  const agent = process.env["AGENT_API_KEY"]?.trim();
+  if (agent && !isCastAiApiKey(agent)) {
+    return { key: "AGENT_API_KEY", value: agent };
+  }
+  return firstNonEmpty(["OPENAI_API_KEY", "ANTHROPIC_API_KEY", "XAI_API_KEY"]);
+}
+
+export function resolveProviderConfig(
+  overrides?: ProviderConfigOverrides,
+  prefs?: RuntimePreferences | null
+): ProviderConfig {
+  const baseURL =
+    (overrides?.baseURL ??
+      (prefs === undefined ? effectiveHarnessEnvRaw("AGENT_API_BASE_URL") : resolveHarnessEnvRaw("AGENT_API_BASE_URL", prefs))) ||
+    DEFAULT_BASE_URL;
+  syncProviderProcessEnvForBase(baseURL);
+  const order: Array<ProviderApiKeyEnvName> = overrides?.keySource
+    ? [overrides.keySource, ...resolveApiKeyOrderForBaseUrl(baseURL)]
+    : resolveApiKeyOrderForBaseUrl(baseURL);
+  const keyOverrideOnly = overrides?.keySource ? [overrides.keySource] : [];
+  const picked = isKimchiApiBaseUrl(baseURL)
+    ? pickKimchiApiKey() ?? firstNonEmpty(keyOverrideOnly)
+    : isOpenRouterApiBaseUrl(baseURL)
+      ? pickOpenRouterApiKey() ?? firstNonEmpty(keyOverrideOnly)
+      : firstNonEmpty([...new Set(order)]);
+  if (!picked) {
+    throw new Error(
+      isKimchiApiBaseUrl(baseURL)
+        ? "No Kimchi API key found. Set KIMCHI_API_KEY (castai_v1_…) in .env or ~/.liminal/.env."
+        : isOpenRouterApiBaseUrl(baseURL)
+          ? "No OpenRouter API key found. Set OPENROUTER_API_KEY or AGENT_API_KEY (sk-or-v1-…) in .env or Settings."
+          : "No API key found. Set AGENT_API_KEY, OPENROUTER_API_KEY, or another provider key in .env."
+    );
+  }
+  const model =
+    (overrides?.model ??
+      (prefs === undefined ? effectiveHarnessEnvRaw("AGENT_MODEL") : resolveHarnessEnvRaw("AGENT_MODEL", prefs))) ||
+    DEFAULT_MODEL;
+  return {
+    apiKey: picked.value,
+    baseURL,
+    model: singleModelEnabled(prefs) ? singleModelSlug(undefined, prefs) : model,
+    keySource: picked.key,
+  };
+}
+
+/** True when a provider API key is available for the given base URL (or default). */
+export function isProviderApiKeyConfigured(opts?: { baseURL?: string }): boolean {
+  ensureProviderApiKeysInProcess();
+  try {
+    return !!resolveProviderConfig({ baseURL: opts?.baseURL }).apiKey?.trim();
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Vision sidecar config — never silently inherit the primary chat model.
+ * Uses effectiveHarnessEnvRaw (env → prefs → product defaults) so local AGENT_MODEL
+ * does not override AGENT_VISION_MODEL when vision keys are unset in .env.
+ */
+export function resolveVisionProviderConfig(): VisionProviderConfig {
+  const base = resolveProviderConfig();
+  if (singleModelEnabled()) return { ...base, model: singleModelSlug() };
+  const defaultModel = HARNESS_ENV_DEFAULTS["AGENT_VISION_MODEL"]?.trim() ?? "";
+  const defaultBase =
+    HARNESS_ENV_DEFAULTS["AGENT_VISION_BASE_URL"]?.trim() || DEFAULT_BASE_URL;
+  return {
+    apiKey: effectiveHarnessEnvRaw("AGENT_VISION_API_KEY")?.trim() || base.apiKey,
+    baseURL: effectiveHarnessEnvRaw("AGENT_VISION_BASE_URL")?.trim() || defaultBase,
+    model: effectiveHarnessEnvRaw("AGENT_VISION_MODEL")?.trim() || defaultModel,
+  };
+}
+
+/** Vision config with managed-inference routing when entitled (unless AGENT_VISION_API_KEY is set). */
+export async function resolveVisionProviderConfigAsync(
+  prefs?: RuntimePreferences | null
+): Promise<VisionProviderConfig> {
+  prefs ??= currentHarnessPreferences();
+  if (singleModelEnabled(prefs)) {
+    const creds = await resolveManagedOpenRouterCredentials(prefs);
+    return { apiKey: creds.apiKey, baseURL: creds.baseURL, model: singleModelSlug(undefined, prefs) };
+  }
+  const sync = resolveVisionProviderConfig();
+  if (effectiveHarnessEnvRaw("AGENT_VISION_API_KEY")?.trim()) {
+    return sync;
+  }
+  const creds = await resolveManagedOpenRouterCredentials(prefs);
+  if (creds.route === "managed") {
+    return {
+      apiKey: creds.apiKey,
+      baseURL: creds.baseURL,
+      model: sync.model,
+    };
+  }
+  return sync;
+}
