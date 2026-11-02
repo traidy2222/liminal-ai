@@ -1,3 +1,4 @@
+import { singleModelEnabled } from "./harness_effective_env.js";
 /**
  * Audio transcription provider abstraction.
  *
@@ -145,6 +146,7 @@ export async function resolveTranscriptionConfigAsync(
   prefs: RuntimePreferences | null
 ): Promise<TranscriptionConfig> {
   const base = resolveTranscriptionConfig(prefs);
+  if (!base.enabled) return base;
   if (process.env["AGENT_TRANSCRIBE_API_KEY"]?.trim()) {
     return base;
   }
@@ -209,6 +211,7 @@ export async function transcribeAudio(
   input: TranscriptionInput,
   config: TranscriptionConfig
 ): Promise<TranscriptionResult> {
+  if (singleModelEnabled()) throw new Error("Separate speech models are disabled in single-model mode.");
   if (!config.enabled) {
     throw new Error("Transcription is disabled (AGENT_TRANSCRIBE_ENABLED=0).");
   }

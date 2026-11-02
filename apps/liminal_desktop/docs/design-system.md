@@ -100,3 +100,19 @@ Run `flutter test test/settings_streamline_test.dart` for category disclosure,
 search, saving, and narrow managed-model errors. Browser review should use the
 full real settings metadata with intercepted APIs, including both own-key and
 managed accounts, so validation does not change a user's live settings.
+
+## Provider model selection
+
+OpenRouter uses the live public catalog, searched by model name or ID, instead
+of bundled presets. Selecting a model changes the main model only. Managed
+OpenRouter and BYOK use the same individual catalog; other managed providers
+retain their provider-filtered catalog. Automatic connection mode shows the
+active provider form rather than duplicating managed and BYOK controls.
+
+Use one model for everything is an explicit runtime policy, off by default.
+It follows the selected model for chat, background completions, and vision;
+separate embeddings and hosted speech are disabled. Memory keeps keyword search.
+Router entries such as Auto, Free, Fusion, Body Builder and Pareto are excluded
+from this mode. A text-only model does not gain vision support; requests never
+silently switch to another model. Disabling the policy restores saved specialist
+settings. The catalog communicates tool and vision capabilities before selection.

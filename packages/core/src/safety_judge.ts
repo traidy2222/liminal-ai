@@ -1,3 +1,4 @@
+import { singleModelEnabled, singleModelSlug } from "./harness_effective_env.js";
 /**
  * Advisory safety classifier: heuristics + optional single-token LLM (0/1)
  * to skip human approval for clearly safe tool calls when enabled.
@@ -226,7 +227,7 @@ export class SafetyJudge {
         () =>
           this.client.chat.completions.create(
             {
-              model: this.cfg.model,
+              model: singleModelEnabled() ? singleModelSlug() : this.cfg.model,
               temperature: 0,
               max_tokens: 2,
               messages: [

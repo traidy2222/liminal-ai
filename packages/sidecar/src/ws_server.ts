@@ -25,6 +25,7 @@ import {
 } from "./vireon_api.js";
 import {
   fetchManagedInferenceModels,
+  fetchOpenRouterSettingsCatalog,
   liminalAppsEnabled,
   loadChatTranscriptFromSessionLog,
   buildTranscriptReplayFromConversation,
@@ -774,6 +775,11 @@ export class WsServer {
           return;
         }
 
+        case "get_openrouter_models": {
+          const models = await fetchOpenRouterSettingsCatalog((data as { refresh?: boolean }).refresh === true);
+          this.ack(ws, id, true, undefined, { models });
+          return;
+        }
         case "get_settings": {
           const bridge = this.registry.getActiveBridge() ?? (await this.registry.getOrCreateActive());
           const snapshot = buildSettingsSnapshot(bridge.harness.getRuntimePreferences(), bridge);

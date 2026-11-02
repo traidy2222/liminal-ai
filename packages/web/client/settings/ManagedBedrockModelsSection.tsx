@@ -1,3 +1,4 @@
+import { OpenRouterModelPicker } from "./OpenRouterModelPicker.js";
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { filterManagedInferenceCatalog, type ManagedInferenceModel } from "@liminal/core/managed-catalog";
 import { webApiFetch } from "../webApiAuth.js";
@@ -76,6 +77,7 @@ function optionLabel(model: ManagedInferenceModel): string {
 
 export interface ManagedBedrockModelsSectionProps {
   disabled?: boolean;
+  singleModel?: boolean;
   mainModel: string;
   fastModel: string;
   managedProvider: string;
@@ -89,6 +91,7 @@ export interface ManagedBedrockModelsSectionProps {
 
 export function ManagedBedrockModelsSection({
   disabled = false,
+  singleModel = false,
   mainModel,
   fastModel,
   managedProvider,
@@ -200,7 +203,7 @@ export function ManagedBedrockModelsSection({
           ))}
         </select>
       </div>
-      {bedrockPresets.length > 0 ? (
+      {!singleModel && managedProvider !== "openrouter" && bedrockPresets.length > 0 ? (
         <details className="settings-technical">
         <summary>Bedrock model presets</summary>
         <div
@@ -243,6 +246,10 @@ export function ManagedBedrockModelsSection({
         </div>
         </details>
       ) : null}
+      {vireonConnected && managedProvider === "openrouter" ? <>
+        <OpenRouterModelPicker value={mainModel} onChange={onMainModel} disabled={disabled} singleModel={singleModel} />
+        {!singleModel ? <details className="settings-technical"><summary>Background model</summary><OpenRouterModelPicker value={fastModel} onChange={onFastModel} disabled={disabled} /></details> : null}
+      </> : null}
       {!vireonConnected ? (
         <div style={{ fontSize: 13, color: AMBER, lineHeight: 1.45 }}>
           Sign in to Vireon to load the managed model catalog.
@@ -269,7 +276,7 @@ export function ManagedBedrockModelsSection({
             Retry
           </button>
         </div>
-      ) : filteredModels.length === 0 ? (
+      ) : managedProvider === "openrouter" ? null : filteredModels.length === 0 ? (
         <div style={{ fontSize: 13, color: AMBER }}>
           {models.length === 0
             ? "No models returned from managed inference."
@@ -308,6 +315,7 @@ export function ManagedBedrockModelsSection({
               ))}
             </select>
           </div>
+          {!singleModel && (
           <div
             style={{
               display: "grid",
@@ -338,6 +346,7 @@ export function ManagedBedrockModelsSection({
               ))}
             </select>
           </div>
+          )}
           <div style={{ fontSize: 12, color: "var(--lim-text-muted)", marginTop: 8, lineHeight: 1.45 }}>
             {filteredModels.length}
             {managedProvider && managedProvider !== "auto"

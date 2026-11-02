@@ -1,3 +1,4 @@
+import { singleModelEnabled, singleModelSlug } from "./harness_effective_env.js";
 import OpenAI from "openai";
 import { InferenceLatencyTracker } from "./inference_latency.js";
 import type { Stream } from "openai/streaming";
@@ -42,6 +43,7 @@ import { TaskOrchestrator } from "./orchestrator.js";
 import {
   buildActiveLlmContextUpdateMessage,
   buildWorldContextMessage,
+    warmWorldContextTools,
 } from "./world_context.js";
 import { gatherRepoMapLines } from "./repo_map.js";
 import {
@@ -305,6 +307,7 @@ import {
   shouldSkipHarnessSecondaryPassesForTurn,
   applyTurnInferenceHeuristics,
   inferTurnInference,
+  isIntentInferenceEnabled,
   neutralTurnInferenceResult,
   resolveMemoryPolicy,
   buildRoutingProfile,
@@ -2297,6 +2300,7 @@ export class AgentHarness {
   private async tryActivateManagedOpenRouterFallback(
     reason: "budget_exceeded" | "upstream_busy" | "provider_error"
   ): Promise<boolean> {
+    if (singleModelEnabled(this.runtimePreferences)) return false;
     if (this.managedByokFallbackActive) return true;
     if (!isManagedInferenceBaseUrl(this.config.baseURL)) return false;
 
@@ -2864,6 +2868,10 @@ export class AgentHarness {
       abortController: new AbortController(),
     });
     this.syncContextWindowForModel().catch(() => {});
+    if (this.agentDepth === 0 && !config.worldContext?.disabled &&
+        resolveHarnessEnvRaw("AGENT_WORLD_CONTEXT", this.runtimePreferences) !== "0") {
+      void warmWorldContextTools().catch(() => {});
+    }
   }
 
   private contextLimitsResolveOpts(): {
@@ -2988,6 +2996,8 @@ export class AgentHarness {
     // operate on isolated trees (e.g. git worktrees). We also bind the chat id
     // so memory recall + writes can attribute provenance without each tool
     // factory needing a harness reference (federation Phase 2).
+    if (this.running) throw new Error("Agent is already processing a message");
+    this.sendStartTime = Date.now();
     const orgCtx = await resolveOrgContextForHarness();
     return runWithWorkspaceRoot(this.workspaceRoot, () =>
       runWithChatId(this.taskId, () =>
@@ -3128,7 +3138,6 @@ export class AgentHarness {
     this.contextAlertFired60 = false;
     this.contextAlertFired85 = false;
     this.lastParallelToolBatchSize = 0;
-    this.sendStartTime = Date.now();
     this.filesReadThisTurn = [];
     this.readFilePathCountsThisTurn = new Map();
     this.fileRevisionThisTurn = new Map();
@@ -3324,7 +3333,7 @@ export class AgentHarness {
             return s.length > 0 ? s.slice(0, 1200) : undefined;
           })(),
         };
-        if (effectiveHarnessEnvRaw("AGENT_INTENT_REPO_CONTEXT") === "1") {
+        if (isIntentInferenceEnabled() && effectiveHarnessEnvRaw("AGENT_INTENT_REPO_CONTEXT") === "1") {
           try {
             intentWorkspace.repoMapLines = await gatherRepoMapLines();
           } catch {
@@ -4691,7 +4700,7 @@ export class AgentHarness {
     try {
       const persona = this.getCurrentPersona();
       const personaLabel = persona?.name?.trim() || "Assistant";
-      const result = await executePersonalityHeartbeat({
+      const result = await runHarnessEffectiveEnvContext(this.runtimePreferences, () => executePersonalityHeartbeat({
         prefs: this.runtimePreferences,
         client: this.client,
         mainModelSlug: this.config.model,
@@ -4703,7 +4712,7 @@ export class AgentHarness {
         toolsUsedThisTurn: [...this.toolsUsedThisTurn],
         registryHas: (name) => this.registry.has(name),
         nudgeTimestampsHour: nudgeWindow,
-      });
+      }));
 
       this.lastPersonalityHeartbeatCompletedAt = Date.now();
 
@@ -5676,7 +5685,8 @@ export class AgentHarness {
     let stream: Stream<OpenAI.Chat.Completions.ChatCompletionChunk>;
     const inferenceLatencyTracker = new InferenceLatencyTracker(
       activeModelSlug,
-      this.currentTurnTraceId
+      this.currentTurnTraceId,
+      round === 0 ? this.sendStartTime : undefined
     );
     inferenceLatencyTracker.markRequestStart();
     try {
@@ -5726,6 +5736,7 @@ export class AgentHarness {
           if (this.abortSignal?.aborted) return;
 
           const parsed = accumulator.processChunk(chunk);
+          if (parsed.textDelta) inferenceLatencyTracker.markFirstText();
           if (
             parsed.textDelta ||
             parsed.reasoningDelta ||
@@ -7283,7 +7294,7 @@ export class AgentHarness {
       }
 
       // OpenRouter provider routing: adaptive price sort + session_id stickiness for cache affinity.
-      const modelSlug = modelOverride ?? this.config.model;
+      const modelSlug = singleModelEnabled(this.runtimePreferences) ? singleModelSlug(this.config.model, this.runtimePreferences) : modelOverride ?? this.config.model;
       const contextWindow =
         this.activeContextLimits?.contextLength ?? resolveModelContextWindowTokens(modelSlug);
       const inputTokens = estimateRequestTokens(currentMessages, useTools ? tools : []);

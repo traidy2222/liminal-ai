@@ -1,3 +1,5 @@
+import '../../models/openrouter_catalog.dart';
+import '../widgets/openrouter_model_picker.dart';
 import 'dart:collection';
 
 import 'package:flutter/material.dart';
@@ -30,7 +32,7 @@ List<HarnessSettingsField> _settingsVisibleHarnessFields(
   return fields
       .where((f) =>
           !_integrationsHarnessSubgroups.contains(f.subgroupId) &&
-          !const {'AGENT_INFERENCE_MODE', 'AGENT_MANAGED_PROVIDER'}
+          !const {'AGENT_INFERENCE_MODE', 'AGENT_MANAGED_PROVIDER', 'AGENT_SINGLE_MODEL'}
               .contains(f.key),)
       .toList();
 }
@@ -281,6 +283,11 @@ class _SettingsScreenState extends State<SettingsScreen> {
   }
 
   Future<void> _saveProvider() async {
+    final single = AppScope.of(context).harnessSettings?.fields.any((f) => f.key == 'AGENT_SINGLE_MODEL' && const {'1', 'on', 'true', 'yes'}.contains(f.value)) ?? false;
+    if (single && OpenRouterCatalogModel.isRouterId(_model.text)) {
+      setState(() => _error = 'Choose a specific model while single-model mode is enabled.');
+      return;
+    }
     setState(() {
       _saving = true;
       _error = null;
@@ -301,6 +308,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
   Future<void> _saveHarnessField(
       HarnessSettingsField field, String value,) async {
+    if (field.key == 'AGENT_SINGLE_MODEL' && value == '1' && OpenRouterCatalogModel.isRouterId(_model.text)) {
+      setState(() => _error = 'Choose a specific model before enabling single-model mode.');
+      return;
+    }
     setState(() => _saving = true);
     final ok = await AppScope.of(context).patchHarnessSettings({
       field.key: _envValue(field, value),
@@ -332,7 +343,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
     final lim = LiminalTheme.of(context);
     final query = _search.text.trim().toLowerCase();
     final searchActive = query.isNotEmpty;
-    final allFields = _settingsVisibleHarnessFields(snap?.fields ?? const []);
+    final singleField = snap?.fields.where((f) => f.key == 'AGENT_SINGLE_MODEL').firstOrNull;
+    final singleModel = const {'1', 'true', 'on', 'yes'}.contains(singleField?.value);
+    final allFields = _settingsVisibleHarnessFields(snap?.fields ?? const []).where((f) => !(singleModel && f.key != 'AGENT_MODEL' && f.key.endsWith('_MODEL'))).toList();
     final categoryFields = allFields
         .where((f) => settingsCategory(f.tabId, f.key) == _selected)
         .toList();
@@ -431,9 +444,16 @@ class _SettingsScreenState extends State<SettingsScreen> {
             ],
             onChanged: _saving ? null : _onInferenceModeChanged,
           ),
-          if (_inferenceMode != 'byok' && host.vireonAccount.connected) ...[
+          if (singleField != null) SwitchListTile(
+            contentPadding: EdgeInsets.zero, title: const Text('Use one model for everything'),
+            subtitle: const Text('Chat, background work, and vision use the selected model. Separate embeddings, speech models, and automatic model fallbacks are off. Previous choices are kept.'),
+            value: singleModel, onChanged: _saving || singleField.lockedByEnv ? null : (v) => _saveHarnessField(singleField, v ? '1' : '0'),
+          ),
+          if ((_inferenceMode == 'managed' || (_inferenceMode == 'auto' && (cfg?.providerBaseUrl ?? snap?.provider.baseURL ?? '').contains('/inference'))) && host.vireonAccount.connected) ...[
             const SizedBox(height: LiminalSpacing.md),
             ManagedInferencePanel(
+              singleModel: singleModel,
+              loadOpenRouter: host.loadOpenRouterModels,
               mainModel: snap?.provider.model ?? _model.text,
               fastModel: _fastModelFromSnapshot(snap),
               catalog: host.managedInferenceModels,
@@ -453,9 +473,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
               onFastModel: _onManagedFastModel,
             ),
           ],
-          if (_inferenceMode != 'managed') ...[
+          if (_inferenceMode != 'managed' && !(_inferenceMode == 'auto' && host.vireonAccount.connected && (cfg?.providerBaseUrl ?? snap?.provider.baseURL ?? '').contains('/inference'))) ...[
             const SizedBox(height: LiminalSpacing.md),
             _ProviderForm(
+              singleModel: singleModel,
               apiKey: _apiKey,
               model: _model,
               baseUrl: _baseUrl,
@@ -699,6 +720,7 @@ class _ProviderForm extends StatelessWidget {
     required this.onSave,
     required this.onPresetApply,
     this.provider,
+    this.singleModel = false,
   });
 
   final TextEditingController apiKey;
@@ -706,6 +728,7 @@ class _ProviderForm extends StatelessWidget {
   final TextEditingController baseUrl;
   final AppConfig? cfg;
   final HarnessSettingsProvider? provider;
+  final bool singleModel;
   final List<ProviderPreset> presets;
   final List<ProviderBackend> backends;
   final bool saving;
@@ -713,10 +736,10 @@ class _ProviderForm extends StatelessWidget {
   final Future<void> Function(String presetId) onPresetApply;
 
   String _resolveBackendId() {
-    if (provider?.resolvedBackendId.isNotEmpty == true) {
+    final b = baseUrl.text.trim().replaceAll(RegExp(r'/+$'), '');
+    if (b.isEmpty && provider?.resolvedBackendId.isNotEmpty == true) {
       return provider!.resolvedBackendId;
     }
-    final b = baseUrl.text.trim().replaceAll(RegExp(r'/+$'), '');
     if (b.contains('llm.cast.ai') || b.contains('llm.kimchi.dev')) {
       return 'kimchi';
     }
@@ -822,11 +845,8 @@ class _ProviderForm extends StatelessWidget {
                     ? null
                     : (backendId) {
                         if (backendId == null) return;
-                        final first =
-                            ProviderPreset.forBackend(presets, backendId);
-                        if (first.isNotEmpty) {
-                          onPresetApply(first.first.id);
-                        }
+                        final backend = backends.where((b) => b.id == backendId).firstOrNull;
+                        if (backend != null) { baseUrl.text = backend.baseURL; onSave(); }
                       },
               ),
               if (backendHint != null && backendHint.isNotEmpty)
@@ -842,7 +862,14 @@ class _ProviderForm extends StatelessWidget {
                 ),
               const SizedBox(height: LiminalSpacing.md),
             ],
-            if (backendPresets.isNotEmpty) ...[
+            if (resolvedBackendId == 'openrouter') ValueListenableBuilder<TextEditingValue>(
+              valueListenable: model, builder: (context, value, _) => OpenRouterModelPicker(
+                value: value.text, enabled: !saving, singleModel: singleModel,
+                load: AppScope.of(context).loadOpenRouterModels,
+                onChanged: (id) { model.text = id; onSave(); },
+              ),
+            ),
+            if (resolvedBackendId != 'openrouter' && backendPresets.isNotEmpty && !singleModel) ...[
               Text(
                 'Model',
                 style: theme.textTheme.titleSmall,

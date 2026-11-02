@@ -103,6 +103,7 @@ export const HARNESS_ENV_DEFAULTS: Readonly<Record<string, string>> = {
   AGENT_VIREON_SITE_URL: "https://www.vireondynamics.com",
   AGENT_LICENSE_PREFER_ENV: "0",
   AGENT_MODEL: DEFAULT_AGENT_MODEL_SLUG,
+  AGENT_SINGLE_MODEL: "0",
   AGENT_FAST_MODEL: DEFAULT_AGENT_FAST_MODEL_SLUG,
   AGENT_SAFETY_JUDGE_MODEL: DEFAULT_AGENT_FAST_MODEL_SLUG,
   AGENT_EMBED_MODEL: "qwen/qwen3-embedding-8b",  // OpenRouter embedding model for hybrid BM25+vector recall; "" = BM25-only
@@ -274,7 +275,7 @@ export const HARNESS_ENV_DEFAULTS: Readonly<Record<string, string>> = {
   AGENT_AUTO_DREAM_ALLOW_DELETE: "0",
   AGENT_RETRY_FOREVER: "0",
   AGENT_INTENT_CONFIDENCE_MIN: "0.65",
-  AGENT_INTENT_INFERENCE: "1",      // LLM-only classification — no keyword/regex fallback
+  AGENT_INTENT_INFERENCE: "0",      // Local routing by default; opt in to an extra blocking LLM classifier
   AGENT_INTENT_INFERENCE_TIMEOUT_MS: "8000", // abort if model stalls; falls back to neutral
   AGENT_INTENT_REPO_CONTEXT: "1",   // shallow repo tree in intent classifier
   AGENT_INTENT_CONTEXT_MAX_CHARS: "12000",

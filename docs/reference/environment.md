@@ -39,6 +39,12 @@ Web **Settings** writes to (2). See [Configuration basics](../start/configuratio
 | `AGENT_AUTO_DREAM_MIN_HOURS` | `4` | yes | no | session_ui | Harness environment toggle for Auto Dream Min Hours. See docs/configuration.md (session ui). |
 | `AGENT_AUTO_DREAM_MIN_SESSIONS` | `3` | yes | no | session_ui | Harness environment toggle for Auto Dream Min Sessions. See docs/configuration.md (session ui). |
 | `AGENT_AUTO_DREAM_SCAN_INTERVAL_MS` | `30000` | yes | no | session_ui | Harness environment toggle for Auto Dream Scan Interval Ms. See docs/configuration.md (session ui). |
+| `AGENT_AWS_CONNECT_ON_BOOT` | `0` | yes | no | harness | Auto-attach AWS MCP when IAM credentials exist at harness startup. |
+| `AGENT_AWS_MCP` | `1` | yes | no | harness | Attach AWS managed MCP endpoint (SigV4) for mcp_aws_* tools on connect. |
+| `AGENT_AWS_MCP_ENDPOINT` | `` | yes | no | harness | Override managed MCP URL (default: aws-mcp.us-east-1.api.aws or eu-central-1). |
+| `AGENT_AWS_MCP_SERVICE` | `aws-mcp` | yes | no | harness | SigV4 service name for MCP requests (default: aws-mcp). |
+| `AGENT_AWS_REGION` | `us-east-1` | yes | no | harness | Default region for STS, CLI tools, and MCP endpoint selection (eu-* uses EU MCP). |
+| `AGENT_AWS_REST` | `1` | yes | no | harness | Register aws_check_auth, aws_sts_get_caller_identity, aws_list_regions, and aws_cli_invoke. |
 | `AGENT_AZURE_CONNECT_ON_BOOT` | `0` | yes | no | harness | Auto-attach Azure MCP when OAuth tokens exist at harness startup. |
 | `AGENT_AZURE_REST` | `1` | yes | no | harness | Register azure_list_* and azure_rest_call ARM tools (OAuth or az login). |
 | `AGENT_AZURE_SIDECAR_CMD` | `npx -y @azure/mcp@latest server start` | yes | no | harness | Command to launch @azure/mcp (default: npx -y @azure/mcp@latest server start). |
@@ -134,6 +140,13 @@ Web **Settings** writes to (2). See [Configuration basics](../start/configuratio
 | `AGENT_HEARTBEAT_TIMEOUT_MS` | `20000` | yes | no | session_ui | Harness environment toggle for Heartbeat Timeout Ms. See docs/configuration.md (session ui). |
 | `AGENT_HEARTBEAT_UI_STRIP` | `0` | yes | no | session_ui | Harness environment toggle for Heartbeat Ui Strip. See docs/configuration.md (session ui). |
 | `AGENT_HEARTBEAT_USER_NUDGE_CONFIDENCE_MIN` | `0.86` | yes | no | session_ui | Harness environment toggle for Heartbeat User Nudge Confidence Min. See docs/configuration.md (session ui). |
+| `AGENT_IDA_CONNECT_ON_BOOT` | `0` | yes | no | harness | Auto-attach IDA MCP at harness startup when AGENT_IDA_MCP=1. |
+| `AGENT_IDA_GUI_MCP_URL` | `` | yes | no | harness | Fallback probe URL for IDA GUI plugin when headless idalib is unavailable (default http://127.0.0.1:13337/mcp). |
+| `AGENT_IDA_MCP` | `0` | yes | no | harness | Enable connect_provider({ provider: \ |
+| `AGENT_IDA_MCP_URL` | `` | yes | no | harness | Override MCP endpoint (e.g. http://127.0.0.1:13337/mcp for IDA GUI plugin). Empty = sidecar URL. |
+| `AGENT_IDA_SIDECAR_CMD` | `idalib-mcp` | yes | no | harness | Command to start idalib-mcp (default: uv run idalib-mcp). |
+| `AGENT_IDA_SIDECAR_ENABLE` | `1` | yes | no | harness | Spawn local idalib-mcp on connect (disable when using IDA GUI plugin + AGENT_IDA_MCP_URL). |
+| `AGENT_IDA_SIDECAR_PORT` | `8745` | yes | no | harness | HTTP port for idalib-mcp (default 8745). |
 | `AGENT_INBOX_AUTO_LABEL` | `1` | yes | no | session_ui | Create Liminal/* labels or Outlook categories and sort triaged mail automatically. |
 | `AGENT_INBOX_AUTO_PROCESS` | `1` | yes | no | session_ui | Send urgent/action mail to the agent automatically (drafts still require approval). |
 | `AGENT_INBOX_AUTO_SPAM_LABEL` | `0` | yes | no | session_ui | Apply spam label when triage confidence is high (off by default). |
@@ -155,7 +168,7 @@ Web **Settings** writes to (2). See [Configuration basics](../start/configuratio
 | `AGENT_INTENT_CONFIDENCE_MIN` | `0.65` | yes | no | harness | Harness environment toggle for Intent Confidence Min. See docs/configuration.md (harness). |
 | `AGENT_INTENT_CONTEXT_MAX_CHARS` | `12000` | yes | no | harness | Harness environment toggle for Intent Context Max Chars. See docs/configuration.md (harness). |
 | `AGENT_INTENT_FAST_THRESHOLD` | `0.6` | yes | no | harness | Harness environment toggle for Intent Fast Threshold. See docs/configuration.md (harness). |
-| `AGENT_INTENT_INFERENCE` | `1` | yes | no | harness | Harness environment toggle for Intent Inference. See docs/configuration.md (harness). |
+| `AGENT_INTENT_INFERENCE` | `0` | yes | no | harness | Optional extra model call before each reply to classify the task. Off by default for faster first tokens; local routing  |
 | `AGENT_INTENT_OPERATIONAL_MODEL` | `` | yes | no | harness | Harness environment toggle for Intent Operational Model. See docs/configuration.md (harness). |
 | `AGENT_INTENT_REPO_CONTEXT` | `1` | yes | no | harness | Harness environment toggle for Intent Repo Context. See docs/configuration.md (harness). |
 | `AGENT_INTENT_ROUTING` | `1` | yes | no | harness | Harness environment toggle for Intent Routing. See docs/configuration.md (harness). |
@@ -295,6 +308,7 @@ Web **Settings** writes to (2). See [Configuration basics](../start/configuratio
 | `AGENT_SESSION_JSONL_TRACE` | `0` | yes | no | session_ui | Harness environment toggle for Session Jsonl Trace. See docs/configuration.md (session ui). |
 | `AGENT_SESSION_MODE` | `` | yes | no | session_ui | Harness environment toggle for Session Mode. See docs/configuration.md (session ui). |
 | `AGENT_SHEETS_AUTO_FIT` | `1` | yes | no | harness | After sheets_rest_update_values / append / batch_update_values, auto-resize columns to content and pin empty spacer colu |
+| `AGENT_SINGLE_MODEL` | `0` | yes | no | models_api | Use the selected model for chat, background reasoning, and vision. Disable separate embedding, speech, and fallback mode |
 | `AGENT_SPAWN_TOOL_INFER` | `1` | yes | no | harness | Harness environment toggle for Spawn Tool Infer. See docs/configuration.md (harness). |
 | `AGENT_SPAWN_TOOL_INFER_MODEL` | `` | yes | no | harness | Harness environment toggle for Spawn Tool Infer Model. See docs/configuration.md (harness). |
 | `AGENT_SPAWN_TOOL_INFER_TIMEOUT_MS` | `8000` | yes | no | harness | Harness environment toggle for Spawn Tool Infer Timeout Ms. See docs/configuration.md (harness). |

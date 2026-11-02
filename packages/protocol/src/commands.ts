@@ -67,6 +67,7 @@ export interface ClientCommandMap {
   get_config: Record<string, never>;
   /** Fetch the effective settings snapshot. */
   get_settings: Record<string, never>;
+  get_openrouter_models: { refresh?: boolean };
   /** Patch managed settings (persisted to runtime prefs by the harness). */
   update_settings: { patch: Record<string, unknown> };
   /**

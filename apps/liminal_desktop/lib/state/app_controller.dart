@@ -1,3 +1,4 @@
+import '../models/openrouter_catalog.dart';
 import 'dart:async';
 import 'dart:io' show Platform;
 
@@ -720,6 +721,13 @@ class AppController extends ChangeNotifier {
       harnessSettingsLoading = false;
       notifyListeners();
     }
+  }
+
+  Future<List<OpenRouterCatalogModel>> loadOpenRouterModels(bool refresh) async {
+    final result = await _protocol.send('get_openrouter_models', {'refresh': refresh}, timeout: const Duration(seconds: 20));
+    if (!result.ok || result.data is! Map) throw StateError(result.error ?? 'Model catalog unavailable');
+    final rows = (result.data as Map)['models'] as List? ?? [];
+    return rows.map((r) => OpenRouterCatalogModel.fromJson(Map<String, dynamic>.from(r as Map))).toList();
   }
 
   Future<void> loadManagedInferenceModels() async {

@@ -1,3 +1,5 @@
+import '../../models/openrouter_catalog.dart';
+import 'openrouter_model_picker.dart';
 import 'package:flutter/material.dart';
 
 import '../../models/harness_settings.dart';
@@ -30,6 +32,8 @@ class ManagedInferencePanel extends StatelessWidget {
     this.selectedBedrockPresetId = 'custom',
     this.onBedrockPresetApply,
     this.upstream,
+    this.singleModel = false,
+    this.loadOpenRouter,
   });
 
   final String mainModel;
@@ -46,6 +50,8 @@ class ManagedInferencePanel extends StatelessWidget {
   final String selectedBedrockPresetId;
   final ValueChanged<String>? onBedrockPresetApply;
   final String? upstream;
+  final bool singleModel;
+  final Future<List<OpenRouterCatalogModel>> Function(bool)? loadOpenRouter;
 
   List<DropdownMenuItem<String>> _modelItems(
     List<ManagedInferenceModel> models,
@@ -195,154 +201,178 @@ class ManagedInferencePanel extends StatelessWidget {
       child: Material(
         color: Colors.transparent,
         child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          Text(
-            'Models on your plan',
-            style: theme.textTheme.titleMedium,
-          ),
-          const SizedBox(height: LiminalSpacing.xs),
-          Text(
-            'Choose the models Liminal uses with your Vireon credits.',
-            style: theme.textTheme.bodySmall?.copyWith(
-              color: lim.textMuted,
-              height: 1.45,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Text(
+              'Models on your plan',
+              style: theme.textTheme.titleMedium,
             ),
-          ),
-          const SizedBox(height: LiminalSpacing.md),
-          if (bedrockPresets.isNotEmpty && onBedrockPresetApply != null)
-            ExpansionTile(
-              tilePadding: EdgeInsets.zero,
-              title: const Text('Bedrock model presets'),
-              children: [
-                Text('Bedrock preset', style: theme.textTheme.titleSmall),
+            const SizedBox(height: LiminalSpacing.xs),
+            Text(
+              'Choose the models Liminal uses with your Vireon credits.',
+              style: theme.textTheme.bodySmall?.copyWith(
+                color: lim.textMuted,
+                height: 1.45,
+              ),
+            ),
+            const SizedBox(height: LiminalSpacing.md),
+            if (!singleModel &&
+                managedProvider != 'openrouter' &&
+                bedrockPresets.isNotEmpty &&
+                onBedrockPresetApply != null)
+              ExpansionTile(
+                tilePadding: EdgeInsets.zero,
+                title: const Text('Bedrock model presets'),
+                children: [
+                  Text('Bedrock preset', style: theme.textTheme.titleSmall),
+                  const SizedBox(height: LiminalSpacing.xs),
+                  DropdownButtonFormField<String>(
+                    isExpanded: true,
+                    value: bedrockPresets
+                            .any((p) => p.id == selectedBedrockPresetId)
+                        ? selectedBedrockPresetId
+                        : 'custom',
+                    decoration: fieldDecoration(),
+                    dropdownColor: lim.panel,
+                    style:
+                        theme.textTheme.bodyMedium?.copyWith(color: lim.text),
+                    items: [
+                      const DropdownMenuItem(
+                          value: 'custom',
+                          child: Text('Custom — pick models below')),
+                      for (final preset in bedrockPresets)
+                        DropdownMenuItem(
+                            value: preset.id, child: Text(preset.label)),
+                    ],
+                    onChanged: saving
+                        ? null
+                        : (id) {
+                            if (id != null && id != 'custom')
+                              onBedrockPresetApply!(id);
+                          },
+                  ),
+                  if (selectedBedrockPresetId != 'custom')
+                    Padding(
+                      padding: const EdgeInsets.only(top: LiminalSpacing.xs),
+                      child: Text(
+                        () {
+                          for (final p in bedrockPresets) {
+                            if (p.id == selectedBedrockPresetId) return p.hint;
+                          }
+                          return '';
+                        }(),
+                        style: theme.textTheme.bodySmall?.copyWith(
+                          color: lim.textMuted,
+                          height: 1.45,
+                        ),
+                      ),
+                    ),
+                  const SizedBox(height: LiminalSpacing.md),
+                ],
+              ),
+            Text('Model provider', style: theme.textTheme.titleSmall),
+            const SizedBox(height: LiminalSpacing.xs),
+            DropdownButtonFormField<String>(
+              isExpanded: true,
+              value:
+                  _managedProviderOptions.any((e) => e.key == managedProvider)
+                      ? managedProvider
+                      : 'auto',
+              decoration: fieldDecoration(),
+              dropdownColor: lim.panel,
+              style: theme.textTheme.bodyMedium?.copyWith(color: lim.text),
+              items: [
+                for (final opt in _managedProviderOptions)
+                  DropdownMenuItem(value: opt.key, child: Text(opt.value)),
+              ],
+              onChanged: saving
+                  ? null
+                  : (v) {
+                      if (v != null) onManagedProvider(v);
+                    },
+            ),
+            const SizedBox(height: LiminalSpacing.md),
+            if (managedProvider == 'openrouter' && loadOpenRouter != null) ...[
+              if (error != null && error!.isNotEmpty) Text('Your managed account could not load its catalog. Check Account before using a model.', style: TextStyle(color: lim.warn)),
+              OpenRouterModelPicker(
+                  value: mainModel,
+                  onChanged: onMainModel,
+                  load: loadOpenRouter!,
+                  enabled: !saving,
+                  singleModel: singleModel),
+              if (!singleModel)
+                ExpansionTile(title: const Text('Background model'), children: [
+                  OpenRouterModelPicker(
+                      value: fastModel,
+                      onChanged: onFastModel,
+                      load: loadOpenRouter!,
+                      enabled: !saving)
+                ]),
+            ] else if (loading)
+              const Padding(
+                padding: EdgeInsets.symmetric(vertical: LiminalSpacing.sm),
+                child: Center(child: CircularProgressIndicator()),
+              )
+            else if (error != null && error!.isNotEmpty)
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    error!.toLowerCase().contains('expired')
+                        ? 'Your managed-model session has expired. Sign in again from Account.'
+                        : 'Models could not be loaded. Check your account connection and try again.',
+                    style: TextStyle(color: theme.colorScheme.error),
+                  ),
+                  ExpansionTile(
+                    tilePadding: EdgeInsets.zero,
+                    title: const Text('Technical details'),
+                    children: [SelectableText(error!)],
+                  ),
+                ],
+              )
+            else if (models.isEmpty)
+              Text(
+                catalogSize == 0
+                    ? 'No managed models returned. Check your license or try again.'
+                    : 'No models available on $managedProvider upstream.',
+                style: theme.textTheme.bodySmall?.copyWith(color: lim.warn),
+              )
+            else ...[
+              Text('Main model', style: theme.textTheme.titleSmall),
+              const SizedBox(height: LiminalSpacing.xs),
+              DropdownButtonFormField<String>(
+                isExpanded: true,
+                value: _dropdownValue(
+                    mainModel, allModels, models, managedProvider),
+                decoration: fieldDecoration(),
+                dropdownColor: lim.panel,
+                style: theme.textTheme.bodyMedium?.copyWith(color: lim.text),
+                items: _modelItems(models, allModels, mainModel,
+                    managedProvider, lim, theme.textTheme),
+                onChanged:
+                    saving ? null : (id) => id == null ? null : onMainModel(id),
+              ),
+              if (!singleModel) ...[
+                const SizedBox(height: LiminalSpacing.md),
+                Text('Fast model', style: theme.textTheme.titleSmall),
                 const SizedBox(height: LiminalSpacing.xs),
                 DropdownButtonFormField<String>(
                   isExpanded: true,
-                  value:
-                      bedrockPresets.any((p) => p.id == selectedBedrockPresetId)
-                          ? selectedBedrockPresetId
-                          : 'custom',
+                  value: _dropdownValue(
+                      fastModel, allModels, models, managedProvider),
                   decoration: fieldDecoration(),
                   dropdownColor: lim.panel,
                   style: theme.textTheme.bodyMedium?.copyWith(color: lim.text),
-                  items: [
-                    const DropdownMenuItem(
-                        value: 'custom',
-                        child: Text('Custom — pick models below')),
-                    for (final preset in bedrockPresets)
-                      DropdownMenuItem(
-                          value: preset.id, child: Text(preset.label)),
-                  ],
+                  items: _modelItems(models, allModels, fastModel,
+                      managedProvider, lim, theme.textTheme),
                   onChanged: saving
                       ? null
-                      : (id) {
-                          if (id != null && id != 'custom')
-                            onBedrockPresetApply!(id);
-                        },
+                      : (id) => id == null ? null : onFastModel(id),
                 ),
-                if (selectedBedrockPresetId != 'custom')
-                  Padding(
-                    padding: const EdgeInsets.only(top: LiminalSpacing.xs),
-                    child: Text(
-                      () {
-                        for (final p in bedrockPresets) {
-                          if (p.id == selectedBedrockPresetId) return p.hint;
-                        }
-                        return '';
-                      }(),
-                      style: theme.textTheme.bodySmall?.copyWith(
-                        color: lim.textMuted,
-                        height: 1.45,
-                      ),
-                    ),
-                  ),
-                const SizedBox(height: LiminalSpacing.md),
               ],
-            ),
-          Text('Model provider', style: theme.textTheme.titleSmall),
-          const SizedBox(height: LiminalSpacing.xs),
-          DropdownButtonFormField<String>(
-            isExpanded: true,
-            value: _managedProviderOptions.any((e) => e.key == managedProvider)
-                ? managedProvider
-                : 'auto',
-            decoration: fieldDecoration(),
-            dropdownColor: lim.panel,
-            style: theme.textTheme.bodyMedium?.copyWith(color: lim.text),
-            items: [
-              for (final opt in _managedProviderOptions)
-                DropdownMenuItem(value: opt.key, child: Text(opt.value)),
             ],
-            onChanged: saving
-                ? null
-                : (v) {
-                    if (v != null) onManagedProvider(v);
-                  },
-          ),
-          const SizedBox(height: LiminalSpacing.md),
-          if (loading)
-            const Padding(
-              padding: EdgeInsets.symmetric(vertical: LiminalSpacing.sm),
-              child: Center(child: CircularProgressIndicator()),
-            )
-          else if (error != null && error!.isNotEmpty)
-            Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  error!.toLowerCase().contains('expired')
-                      ? 'Your managed-model session has expired. Sign in again from Account.'
-                      : 'Models could not be loaded. Check your account connection and try again.',
-                  style: TextStyle(color: theme.colorScheme.error),
-                ),
-                ExpansionTile(
-                  tilePadding: EdgeInsets.zero,
-                  title: const Text('Technical details'),
-                  children: [SelectableText(error!)],
-                ),
-              ],
-            )
-          else if (models.isEmpty)
-            Text(
-              catalogSize == 0
-                  ? 'No managed models returned. Check your license or try again.'
-                  : 'No models available on $managedProvider upstream.',
-              style: theme.textTheme.bodySmall?.copyWith(color: lim.warn),
-            )
-          else ...[
-            Text('Main model', style: theme.textTheme.titleSmall),
-            const SizedBox(height: LiminalSpacing.xs),
-            DropdownButtonFormField<String>(
-              isExpanded: true,
-              value:
-                  _dropdownValue(mainModel, allModels, models, managedProvider),
-              decoration: fieldDecoration(),
-              dropdownColor: lim.panel,
-              style: theme.textTheme.bodyMedium?.copyWith(color: lim.text),
-              items: _modelItems(models, allModels, mainModel, managedProvider,
-                  lim, theme.textTheme),
-              onChanged:
-                  saving ? null : (id) => id == null ? null : onMainModel(id),
-            ),
-            const SizedBox(height: LiminalSpacing.md),
-            Text('Fast model', style: theme.textTheme.titleSmall),
-            const SizedBox(height: LiminalSpacing.xs),
-            DropdownButtonFormField<String>(
-              isExpanded: true,
-              value:
-                  _dropdownValue(fastModel, allModels, models, managedProvider),
-              decoration: fieldDecoration(),
-              dropdownColor: lim.panel,
-              style: theme.textTheme.bodyMedium?.copyWith(color: lim.text),
-              items: _modelItems(models, allModels, fastModel, managedProvider,
-                  lim, theme.textTheme),
-              onChanged:
-                  saving ? null : (id) => id == null ? null : onFastModel(id),
-            ),
           ],
-        ],
-      ),
+        ),
       ),
     );
   }

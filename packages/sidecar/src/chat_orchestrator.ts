@@ -3,7 +3,9 @@ import OpenAI from "openai";
 import {
   completeChatJson,
   getFastModelSlug,
-  resolveProviderConfig,
+  resolveProviderConfigWithInference,
+  loadRuntimePreferences,
+  runHarnessEffectiveEnvContext,
   type ProviderConfig,
 } from "@liminal/core";
 import { serverFrame, type ServerFrame } from "@liminal/protocol";
@@ -313,7 +315,13 @@ export class ChatOrchestrator {
   }
 
   private async plan(goal: string, maxWorkers: number): Promise<PlannedOrchestration> {
-    const provider = resolveProviderConfig();
+    const root = this.deps.registry.resolveWorkspaceForMedia(this.snapshot.parentChatId ?? null) ?? this.deps.repoRoot;
+    const prefs = await loadRuntimePreferences(root);
+    return runHarnessEffectiveEnvContext(prefs, () => this.planWithPreferences(goal, maxWorkers));
+  }
+
+  private async planWithPreferences(goal: string, maxWorkers: number): Promise<PlannedOrchestration> {
+    const provider = await resolveProviderConfigWithInference();
     if (!provider.apiKey) {
       return fallbackPlan(goal, maxWorkers);
     }

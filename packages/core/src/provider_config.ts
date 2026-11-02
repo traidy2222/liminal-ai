@@ -1,3 +1,4 @@
+import { singleModelEnabled, singleModelSlug, currentHarnessPreferences } from "./harness_effective_env.js";
 import {
   DEFAULT_AGENT_API_BASE_URL,
   DEFAULT_AGENT_MODEL_SLUG,
@@ -406,8 +407,7 @@ export function resolveProviderConfig(
 ): ProviderConfig {
   const baseURL =
     (overrides?.baseURL ??
-      resolveHarnessEnvRaw("AGENT_API_BASE_URL", prefs ?? null) ??
-      effectiveHarnessEnvRaw("AGENT_API_BASE_URL")) ||
+      (prefs === undefined ? effectiveHarnessEnvRaw("AGENT_API_BASE_URL") : resolveHarnessEnvRaw("AGENT_API_BASE_URL", prefs))) ||
     DEFAULT_BASE_URL;
   syncProviderProcessEnvForBase(baseURL);
   const order: Array<ProviderApiKeyEnvName> = overrides?.keySource
@@ -430,13 +430,12 @@ export function resolveProviderConfig(
   }
   const model =
     (overrides?.model ??
-      resolveHarnessEnvRaw("AGENT_MODEL", prefs ?? null) ??
-      effectiveHarnessEnvRaw("AGENT_MODEL")) ||
+      (prefs === undefined ? effectiveHarnessEnvRaw("AGENT_MODEL") : resolveHarnessEnvRaw("AGENT_MODEL", prefs))) ||
     DEFAULT_MODEL;
   return {
     apiKey: picked.value,
     baseURL,
-    model,
+    model: singleModelEnabled(prefs) ? singleModelSlug(undefined, prefs) : model,
     keySource: picked.key,
   };
 }
@@ -458,6 +457,7 @@ export function isProviderApiKeyConfigured(opts?: { baseURL?: string }): boolean
  */
 export function resolveVisionProviderConfig(): VisionProviderConfig {
   const base = resolveProviderConfig();
+  if (singleModelEnabled()) return { ...base, model: singleModelSlug() };
   const defaultModel = HARNESS_ENV_DEFAULTS["AGENT_VISION_MODEL"]?.trim() ?? "";
   const defaultBase =
     HARNESS_ENV_DEFAULTS["AGENT_VISION_BASE_URL"]?.trim() || DEFAULT_BASE_URL;
@@ -472,6 +472,11 @@ export function resolveVisionProviderConfig(): VisionProviderConfig {
 export async function resolveVisionProviderConfigAsync(
   prefs?: RuntimePreferences | null
 ): Promise<VisionProviderConfig> {
+  prefs ??= currentHarnessPreferences();
+  if (singleModelEnabled(prefs)) {
+    const creds = await resolveManagedOpenRouterCredentials(prefs);
+    return { apiKey: creds.apiKey, baseURL: creds.baseURL, model: singleModelSlug(undefined, prefs) };
+  }
   const sync = resolveVisionProviderConfig();
   if (effectiveHarnessEnvRaw("AGENT_VISION_API_KEY")?.trim()) {
     return sync;

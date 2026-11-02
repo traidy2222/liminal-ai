@@ -391,6 +391,20 @@ async function probeInstalledTools(): Promise<ToolVersions> {
   return { found, notFound };
 }
 
+// CLI versions rarely change during a session. Start these probes when a root
+// harness opens, rather than making the first Send pay for every process launch.
+let toolsInventory: { key: string; expires: number; promise: Promise<ToolVersions> } | undefined;
+export function warmWorldContextTools(): Promise<ToolVersions> {
+  const key = `${process.cwd()}\n${process.env["PATH"] ?? ""}`;
+  if (!toolsInventory || toolsInventory.key !== key || toolsInventory.expires <= Date.now()) {
+    const promise = probeInstalledTools();
+    const entry = { key, expires: Date.now() + 300_000, promise };
+    toolsInventory = entry;
+    void promise.catch(() => { if (toolsInventory === entry) toolsInventory = undefined; });
+  }
+  return toolsInventory.promise;
+}
+
 // ─── 6. Active ports ──────────────────────────────────────────────────────────
 
 const DEV_PORTS = [3000, 3001, 3002, 4000, 4200, 5000, 5001, 5173, 5174, 8000, 8080, 8888, 9000, 9229];
@@ -1068,7 +1082,7 @@ export async function buildWorldContextMessage(options?: WorldContextOptions): P
     withDeadline(gatherResources(workspaceRoot), T_SLOW),
     withDeadline(gatherProject(workspaceRoot), T_MED),
     withDeadline(gatherGit(workspaceRoot), T_SLOW),
-    withDeadline(probeInstalledTools(), T_SLOW),
+    withDeadline(warmWorldContextTools(), T_SLOW),
     withDeadline(scanActivePorts(), T_MED),
     withDeadline(gatherCodeStyle(workspaceRoot), T_MED),
     withDeadline(gatherSessionMemory(workspaceRoot), T_SLOW),

@@ -1,3 +1,4 @@
+import { isMultiModelRouter } from "./model_policy.js";
 import { AsyncLocalStorage } from "node:async_hooks";
 import type { RuntimePreferences } from "./runtime_prefs.js";
 import { HARNESS_ENV_DEFAULTS } from "./harness_default_constants.js";
@@ -57,7 +58,7 @@ function runtimeSliceEnv(prefs: RuntimePreferences | null, key: string): string 
  * Model/base URL: runtime provider prefs → `.env` fallback → harness prefs → defaults.
  * Everything else: `process.env` → prefs → defaults.
  */
-export function resolveHarnessEnvRaw(key: string, prefs: RuntimePreferences | null): string | undefined {
+function resolveConfiguredHarnessEnvRaw(key: string, prefs: RuntimePreferences | null): string | undefined {
   if (HARNESS_SECRET_ENV_KEYS.has(key)) {
     return process.env[key]?.trim();
   }
@@ -83,6 +84,35 @@ export function resolveHarnessEnvRaw(key: string, prefs: RuntimePreferences | nu
   if (latencyPatch !== undefined) return latencyPatch;
   const d = HARNESS_ENV_DEFAULTS[key];
   return d !== undefined && d !== "" ? d : undefined;
+}
+
+export function currentHarnessPreferences(): RuntimePreferences | null {
+  return harnessEnvAsyncLocal.getStore()?.prefs ?? null;
+}
+
+/** Single-model mode is an execution policy; saved specialist choices remain intact. */
+export function singleModelEnabled(prefs?: RuntimePreferences | null): boolean {
+  const active = prefs === undefined ? harnessEnvAsyncLocal.getStore()?.prefs ?? null : prefs;
+  return ["1", "true", "on", "yes"].includes(resolveConfiguredHarnessEnvRaw("AGENT_SINGLE_MODEL", active)?.toLowerCase() ?? "");
+}
+export function singleModelSlug(fallback?: string, prefs?: RuntimePreferences | null): string {
+  const active = prefs === undefined ? harnessEnvAsyncLocal.getStore()?.prefs ?? null : prefs;
+  const model = active?.provider?.model?.trim() || process.env["AGENT_MODEL"]?.trim()
+    || active?.harness?.env?.["AGENT_MODEL"]?.trim() || fallback
+    || resolveConfiguredHarnessEnvRaw("AGENT_MODEL", active) || "";
+  if (isMultiModelRouter(model)) {
+    throw new Error("Single-model mode requires a specific model. Select a model instead of an OpenRouter router.");
+  }
+  return model;
+}
+export function resolveHarnessEnvRaw(key: string, prefs: RuntimePreferences | null): string | undefined {
+  if (key !== "AGENT_SINGLE_MODEL" && singleModelEnabled(prefs)) {
+    if (key === "AGENT_EMBED_MODEL") return "";
+    if (["AGENT_TTS_ENABLED", "AGENT_TRANSCRIBE_ENABLED", "AGENT_MANAGED_FREE_FALLBACK", "AGENT_MANAGED_BYOK_FALLBACK", "AGENT_OPENROUTER_FUSION"].includes(key)) return "0";
+    if (key !== "AGENT_MODEL" && key.endsWith("_MODEL") && !["AGENT_TTS_MODEL", "AGENT_TRANSCRIBE_MODEL"].includes(key)) return singleModelSlug(undefined, prefs);
+    if (key === "AGENT_VISION_BASE_URL") return resolveConfiguredHarnessEnvRaw("AGENT_API_BASE_URL", prefs);
+  }
+  return resolveConfiguredHarnessEnvRaw(key, prefs);
 }
 
 /** Same as {@link resolveHarnessEnvRaw} but uses async-local prefs from the active `send()` context. */

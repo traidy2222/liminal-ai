@@ -443,6 +443,10 @@ const _META_RAW: Record<string, HarnessSettingsFieldMeta> = {
     description: "Harness environment toggle for Dictation Max Recording Ms. See docs/configuration.md (harness).",
     valueKind: "number",
   },
+  "AGENT_SINGLE_MODEL": {
+    tabId: "models_api", subgroupId: "routing", label: "Use one model",
+    description: "Use the selected model for chat, background reasoning, and vision. Disable separate embedding, speech, and fallback models.", valueKind: "boolean",
+  },
   "AGENT_FAST_MODEL": {
     tabId: "models_api",
     subgroupId: "routing",
@@ -1579,7 +1583,7 @@ const _META_RAW: Record<string, HarnessSettingsFieldMeta> = {
     tabId: "harness",
     subgroupId: "intent",
     label: "Intent Inference",
-    description: "Harness environment toggle for Intent Inference. See docs/configuration.md (harness).",
+    description: "Optional extra model call before each reply to classify the task. Off by default for faster first tokens; local routing still applies. Enabling this can add several seconds before streaming starts.",
     valueKind: "boolean",
   },
   "AGENT_INTENT_REPO_CONTEXT": {

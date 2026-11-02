@@ -1,3 +1,4 @@
+import { singleModelEnabled } from "./harness_effective_env.js";
 /**
  * Text-to-speech via OpenAI-compatible `/audio/speech` (OpenRouter, OpenAI, etc.).
  *
@@ -332,6 +333,7 @@ export async function resolveSpeechSynthesisConfigAsync(
   prefs: RuntimePreferences | null
 ): Promise<SpeechSynthesisConfig> {
   const base = resolveSpeechSynthesisConfig(prefs);
+  if (!base.enabled) return base;
   if (process.env["AGENT_TTS_API_KEY"]?.trim()) {
     return base;
   }
@@ -397,6 +399,7 @@ export async function synthesizeSpeechMulti(
   input: SynthesizeSpeechInput,
   config: SpeechSynthesisConfig
 ): Promise<SynthesizeSpeechMultiResult> {
+  if (singleModelEnabled()) throw new Error("Separate speech models are disabled in single-model mode.");
   if (!config.enabled) {
     throw new Error("Text-to-speech is disabled (AGENT_TTS_ENABLED=0).");
   }

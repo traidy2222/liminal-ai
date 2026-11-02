@@ -4,7 +4,7 @@
 import OpenAI from "openai";
 import type { ChatCompletionMessageParam } from "openai/resources/chat/completions.js";
 import { withProviderRequestSpacing } from "./provider_request_gate.js";
-import { effectiveHarnessEnvRaw } from "./harness_effective_env.js";
+import { effectiveHarnessEnvRaw, singleModelEnabled, singleModelSlug } from "./harness_effective_env.js";
 import {
   buildOpenRouterChatRequestExtras,
   resolveProviderStrategy,
@@ -27,6 +27,7 @@ import type { ProviderRouteState } from "./provider_route_state.js";
 import type { Message } from "./types.js";
 
 export function getFastModelSlug(fallback: string): string {
+  if (singleModelEnabled()) return singleModelSlug(fallback);
   const m = effectiveHarnessEnvRaw("AGENT_FAST_MODEL")?.trim();
   return m && m.length > 0 ? m : fallback;
 }
@@ -175,6 +176,7 @@ export async function completeChatJson(
     routeState?: ProviderRouteState;
   }
 ): Promise<JsonCompletionResult> {
+  if (singleModelEnabled()) opts = { ...opts, model: singleModelSlug(), fallbackModel: undefined };
   const cacheCfg = jsonCacheConfig();
   const useCache = cacheCfg.enabled && opts.cache !== false;
   const cacheKey = useCache

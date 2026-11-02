@@ -1,3 +1,5 @@
+import { isMultiModelRouter } from "@liminal/core/model-policy";
+import { OpenRouterModelPicker } from "./OpenRouterModelPicker.js";
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import type { HarnessSettingsApiField } from "@liminal/core";
 import {
@@ -222,7 +224,10 @@ export function SettingsModal({
   );
 
   const categoryRows = fields.filter((f) => settingsCategory(f.tabId, f.key) === activeTabId && !["AGENT_INFERENCE_MODE", "AGENT_MANAGED_PROVIDER"].includes(f.key));
-  const activeRows = filtered ?? categoryRows.filter((f) => advanced || activeTabId === "advanced" || everydaySettings[f.key]);
+  const singleModel = parseBool(envDraft["AGENT_SINGLE_MODEL"] ?? "0");
+  const activeRows = (filtered ?? categoryRows.filter((f) => advanced || activeTabId === "advanced" || everydaySettings[f.key])).filter(f =>
+    f.key !== "AGENT_SINGLE_MODEL" && !(singleModel && f.key !== "AGENT_MODEL" && f.key.endsWith("_MODEL")));
+
   const hiddenCount = categoryRows.length - activeRows.length;
   const subgroups = groupBySubgroup(activeRows);
   const showProvider = !filtered && activeTabId === "models_api";
@@ -447,7 +452,7 @@ export function SettingsModal({
                         <option value="auto">Automatic</option><option value="byok">Use my own API key</option><option value="managed">Use Vireon credits</option>
                       </select>
                     </label>
-                    {showManagedModels ? <ManagedBedrockModelsSection
+                    {showManagedModels ? <ManagedBedrockModelsSection singleModel={singleModel}
                       disabled={saving || loading || providerPresetLocked} mainModel={providerModel}
                       fastModel={envDraft["AGENT_FAST_MODEL"] ?? ""} managedProvider={envDraft["AGENT_MANAGED_PROVIDER"] ?? "auto"}
                       onManagedProvider={(v) => onEnvChange("AGENT_MANAGED_PROVIDER", v)}
@@ -456,25 +461,34 @@ export function SettingsModal({
                       onBedrockPresetApply={onBedrockPresetApply} /> : null}
                     {showByokPresets ? <>
                       <label className="settings-control"><span>Provider</span><select aria-label="Provider" value={resolvedBackendId} disabled={providerPresetLocked || saving || loading}
-                        onChange={(e) => { const first = presetsForBackend(e.target.value)[0]; if (first) onPresetApply(first.id); }}>
+                        onChange={(e) => { const backend = PROVIDER_BACKENDS.find(b => b.id === e.target.value); if (backend) onProviderBase(backend.baseURL); }}>
                         {PROVIDER_BACKENDS.map((backend) => <option key={backend.id} value={backend.id}>{backend.label}</option>)}
                       </select></label>
-                      <label className="settings-control"><span>Model preset</span><select aria-label="Model preset" value={modelDropdownValue} disabled={providerPresetLocked || saving || loading}
+                      {resolvedBackendId === "openrouter" ? <OpenRouterModelPicker value={providerModel} singleModel={singleModel}
+                        disabled={providerModelLocked || saving || loading} onChange={v => { onProviderModel(v); onEnvChange("AGENT_MODEL", v); }} /> : <>
+                      {!singleModel && <label className="settings-control"><span>Model preset</span><select aria-label="Model preset" value={modelDropdownValue} disabled={providerPresetLocked || saving || loading}
                         onChange={(e) => { if (e.target.value !== PROVIDER_PRESET_CUSTOM_ID) onPresetApply(e.target.value); }}>
                         {backendPresets.map((preset) => <option key={preset.id} value={preset.id}>{preset.label}</option>)}
                         {!backendPresets.some((p) => p.id === PROVIDER_PRESET_CUSTOM_ID) ? <option value={PROVIDER_PRESET_CUSTOM_ID}>Custom model</option> : null}
-                      </select></label>
+                      </select></label>}
                       <label className="settings-control"><span>Model ID {providerModelLocked ? '· managed in environment' : ''}</span>
                         <input aria-label="Model ID" value={providerModel} disabled={providerModelLocked || saving || loading} onChange={(e) => onProviderModel(e.target.value)} />
                       </label>
+                      </>}
                       <details className="settings-connection-details"><summary>Connection details</summary>
                         <label className="settings-control"><span>Server address {providerBaseLocked ? '· managed in environment' : ''}</span>
                           <input aria-label="Server address" value={providerBase} disabled={providerBaseLocked || saving || loading} onChange={(e) => onProviderBase(e.target.value)} />
                         </label>
-                        <p>{backendHint}</p>{presetHint ? <p>{presetHint}</p> : null}
+                        <p>{backendHint}</p>{!singleModel && resolvedBackendId !== "openrouter" && presetHint ? <p>{presetHint}</p> : null}
                       </details>
                       <div className="settings-key-status">{providerApiKeyConfigured ? '✓ API key configured' : 'Add your API key to the server’s .env file to connect.'}</div>
                     </> : null}
+                    <label className="model-single-toggle"><input type="checkbox" aria-label="Use one model for everything" checked={singleModel}
+                      disabled={saving || loading || fields.some(f => f.key === "AGENT_SINGLE_MODEL" && f.lockedByEnv)}
+                      onChange={e => onEnvChange("AGENT_SINGLE_MODEL", e.target.checked ? "1" : "0")} />
+                      <span><strong>Use one model for everything</strong><small>Chat, background work, and vision use the selected model. Separate embeddings, speech models, and automatic model fallbacks are off. Your previous choices are kept.</small></span>
+                    </label>
+                    {singleModel && isMultiModelRouter(providerModel) ? <p role="alert">Choose a specific model. Routers cannot guarantee a single model.</p> : null}
                   </section>
                 ) : null}
 
@@ -555,7 +569,7 @@ export function SettingsModal({
               borderColor: "transparent",
               color: "var(--lim-on-accent, #191c27)",
             }}
-            disabled={saving || loading || agentBusy}
+            disabled={saving || loading || agentBusy || (singleModel && isMultiModelRouter(providerModel))}
             onClick={() => void onSave()}
           >
             {saving ? "Saving…" : "Save changes"}

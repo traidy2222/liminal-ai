@@ -857,3 +857,27 @@
     scroll-behavior: auto !important;
   }
 }
+
+.model-catalog { margin: 22px 0; min-width: 0; }
+.model-catalog-heading, .model-pagination { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.model-catalog-heading small, .model-single-toggle small, .model-current small { display: block; color: var(--lim-text-muted); font-size: 12px; line-height: 1.6; margin-top: 4px; }
+.model-catalog button { background: var(--lim-bg); color: var(--lim-text); border: 1px solid var(--lim-border); border-radius: 9px; padding: 8px 12px; cursor: pointer; }
+.model-catalog button:disabled { opacity: .45; cursor: default; }
+.model-catalog button:focus-visible { outline: 2px solid var(--lim-accent); outline-offset: 2px; }
+.model-current { margin: 14px 0; padding: 14px 16px; background: rgba(var(--lim-accent-rgb),.07); border-left: 2px solid var(--lim-accent); border-radius: 6px; overflow-wrap: anywhere; }
+.model-current strong, .model-current code { display: block; margin-top: 4px; }
+.model-current code, .model-results code { font-size: 11px; color: var(--lim-text-muted); }
+.model-catalog input[type=search] { width: 100%; box-sizing: border-box; padding: 13px; border: 1px solid var(--lim-border); border-radius: 10px; background: var(--lim-bg); color: var(--lim-text); margin-bottom: 10px; }
+.model-results { max-height: 300px; overflow-y: auto; display: grid; gap: 5px; }
+.model-results button { display: flex; text-align: left; flex-direction: column; gap: 7px; padding: 12px 14px; }
+.model-results button.is-selected { border-color: var(--lim-accent); background: rgba(var(--lim-accent-rgb),.08); }
+.model-results strong, .model-results code { display: block; overflow-wrap: anywhere; }
+.model-results small { color: var(--lim-text-muted); font-size: 11px; }
+.model-pagination { font-size: 11px; color: var(--lim-text-muted); margin-top: 10px; }
+.model-single-toggle { display: flex; gap: 12px; align-items: flex-start; padding: 16px; border: 1px solid var(--lim-border); border-radius: 12px; margin: 16px 0; }
+.model-single-toggle input { margin-top: 4px; accent-color: var(--lim-accent); }
+
+@media (min-width: 800px) {
+  .settings-provider:has(> .model-catalog) > .settings-control { display: inline-flex; width: calc(50% - 6px); vertical-align: top; }
+  .settings-provider:has(> .model-catalog) > .settings-control:first-of-type { margin-right: 12px; }
+}

@@ -7,6 +7,11 @@ export type InferenceLatencyEvent = {
   completionMs?: number;
   totalLatencyMs?: number;
   ttftMs?: number;
+  /** Time in the harness before opening the first provider stream. */
+  preRequestMs?: number;
+  /** First answer text, separate from reasoning and tool-call deltas. */
+  firstTextMs?: number;
+  turnToFirstTextMs?: number;
 };
 
 export type InferenceLatencySink = {
@@ -39,11 +44,12 @@ export class InferenceLatencyTracker {
   private requestStartMs: number = 0;
   private responseStartMs: number | null = null;
   private firstTokenMs: number | null = null;
+  private firstTextMs: number | null = null;
   private completionMs: number | null = null;
   private readonly traceId?: string;
   private readonly model: string;
 
-  constructor(model: string, traceId?: string) {
+  constructor(model: string, traceId?: string, private readonly turnStartMs?: number) {
     this.model = model;
     this.traceId = traceId;
   }
@@ -64,6 +70,10 @@ export class InferenceLatencyTracker {
     }
   }
 
+  markFirstText(): void {
+    this.firstTextMs ??= Date.now();
+  }
+
   markCompletion(): InferenceLatencyEvent {
     this.completionMs = Date.now();
     const totalLatencyMs = this.completionMs - this.requestStartMs;
@@ -82,6 +92,10 @@ export class InferenceLatencyTracker {
       completionMs: this.completionMs,
       totalLatencyMs,
       ...(ttftMs !== undefined ? { ttftMs } : {}),
+      ...(this.turnStartMs !== undefined ? { preRequestMs: Math.max(0, this.requestStartMs - this.turnStartMs) } : {}),
+      ...(this.firstTextMs !== null ? { firstTextMs: this.firstTextMs } : {}),
+      ...(this.turnStartMs !== undefined && this.firstTextMs !== null
+        ? { turnToFirstTextMs: Math.max(0, this.firstTextMs - this.turnStartMs) } : {}),
     };
 
     recordInferenceLatency(event);

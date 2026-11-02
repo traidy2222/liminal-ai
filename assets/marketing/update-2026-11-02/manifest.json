@@ -1,0 +1,65 @@
+{
+  "capturedAt": "2026-11-02T04:26:21.480Z",
+  "catalogCount": 452,
+  "publicationStatus": "Not published",
+  "captures": [
+    {
+      "id": "01-web-workspace",
+      "title": "A little space. A lot of possibility.",
+      "source": "Current web UI; isolated demo workspace"
+    },
+    {
+      "id": "02-openrouter-catalog",
+      "title": "Your model. Your choice.",
+      "source": "Current web UI; isolated demo workspace"
+    },
+    {
+      "id": "03-model-search",
+      "title": "Find your model in seconds.",
+      "source": "Current web UI; isolated demo workspace"
+    },
+    {
+      "id": "04-single-model",
+      "title": "One model. Every step.",
+      "source": "Current web UI; isolated demo workspace"
+    },
+    {
+      "id": "05-preferences",
+      "title": "Less setup. More doing.",
+      "source": "Current web UI; isolated demo workspace"
+    },
+    {
+      "id": "06-connected-tools",
+      "title": "Bring your tools together.",
+      "source": "Current web UI; isolated demo workspace"
+    },
+    {
+      "id": "07-mobile-workspace",
+      "title": "Your workspace, on a smaller screen.",
+      "source": "Current web UI; isolated demo workspace"
+    },
+    {
+      "id": "08-social-workspace",
+      "title": "Room for your<br>next idea.",
+      "source": "Designed social card with current web UI in demo workspace",
+      "dimensions": "2400×1260"
+    },
+    {
+      "id": "09-social-model-choice",
+      "title": "Your model.<br>Your choice.",
+      "source": "Designed social card with current web UI in demo workspace",
+      "dimensions": "2400×1260"
+    },
+    {
+      "id": "10-social-single-model",
+      "title": "One model.<br>Every step.",
+      "source": "Designed social card with current web UI in demo workspace",
+      "dimensions": "2400×1260"
+    },
+    {
+      "id": "11-native-hub-crop",
+      "title": "Native Windows hub",
+      "source": "Actual current Release Windows app, welcome area crop; account details and chat history excluded"
+    }
+  ]
+}

@@ -13,6 +13,7 @@ const SECTION_META: Record<string, { title: string }> = {
 
 function sectionIdForKey(key: string): keyof typeof SECTION_META {
   if (
+    key === "AGENT_SINGLE_MODEL" ||
     key === "AGENT_MODEL" ||
     key === "AGENT_API_BASE_URL" ||
     key === "AGENT_FAST_MODEL" ||

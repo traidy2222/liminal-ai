@@ -1625,3 +1625,7 @@ export type {
   VerifyResult,
   ResolveEntitlementsOptions,
 } from "./entitlements.js";
+
+export { fetchOpenRouterSettingsCatalog, parseOpenRouterSettingsCatalog } from "./openrouter_catalog.js";
+export type { OpenRouterCatalogModel } from "./openrouter_catalog.js";
+export { singleModelEnabled, singleModelSlug } from "./harness_effective_env.js";

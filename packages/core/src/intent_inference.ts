@@ -769,9 +769,13 @@ export async function inferTurnInference(
   userMessage: string,
   workspace?: IntentInferenceWorkspaceContext
 ): Promise<TurnInferenceResult> {
+  // Local fast paths must also run when the optional remote classifier is off.
+  // In particular, greetings should not acquire the default knowledge/recall policy.
+  const conversational = tryHeuristicTurnInference(userMessage);
+  if (conversational) return conversational;
+  const toolFirst = tryHeuristicToolFirstTurn(userMessage);
+  if (toolFirst) return toolFirst;
   if (!isIntentInferenceEnabled()) {
-    const toolFirst = tryHeuristicToolFirstTurn(userMessage);
-    if (toolFirst) return toolFirst;
     return applyTurnInferenceHeuristics(
       userMessage,
       neutralTurnInferenceResult("intent_inference_disabled", {
@@ -781,11 +785,6 @@ export async function inferTurnInference(
       })
     );
   }
-
-  const conversational = tryHeuristicTurnInference(userMessage);
-  if (conversational) return conversational;
-  const toolFirst = tryHeuristicToolFirstTurn(userMessage);
-  if (toolFirst) return toolFirst;
 
   const userContent = buildIntentInferenceUserContent(userMessage, workspace);
 

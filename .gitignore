@@ -50,3 +50,6 @@ enterprise-bundle.manifest.json
 
 # Required sandbox fixture (intentional typo for edit-and-verify scenarios).
 !packages/eval/fixtures/sandbox/read-edit-verify/src/greeting.txt
+
+# Generated marketing delivery archives (source PNGs remain versioned).
+/assets/marketing/liminal-update-marketing-*.zip

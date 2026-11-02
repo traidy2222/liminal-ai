@@ -2,7 +2,7 @@
 
 All notable changes to [Liminal AI](https://github.com/traidy2222/liminal-ai) on the `main` branch.
 
-**Current stage:** **beta** (`v0.1.3`, 2026-11-02). Desktop downloads are published through the public preview release channel.
+**Current stage:** **beta** (`v0.1.4`, 2026-11-02). Desktop downloads are published through the public preview release channel.
 
 Format: **v0.0.x** entries keyed to the last GitHub push in each slice. Dates are real push dates.
 
@@ -17,9 +17,24 @@ After editing JSON: `npm run changelog:gen`, commit, push, then in [vireondynami
 
 ---
 
+## v0.1.4 — 2026-11-02 {#v0-1-4}
+
+**Current beta.** Searchable OpenRouter models, single-model operation, and a faster response path.
+
+**Shipped**
+
+- **OpenRouter catalog** — Search the live catalog by name or model ID, inspect tool and vision capabilities, and select individual models without applying model bundles.
+- **Single-model mode** — Keep chat, background completions, and vision on the selected model; disable separate embeddings, hosted speech, and automatic model fallbacks while preserving specialist preferences.
+- **Faster first replies** — Use local intent routing by default, skip unused classifier repo scans, and warm installed-tool inventory at startup. The optional remote classifier remains available.
+- **Latency visibility** — Separate harness preparation, provider output, and first answer text in telemetry; add a reproducible live benchmark and document its limits.
+- **Updated presentation** — New desktop and web marketing images, a clearer README, corrected setup guidance, and explicit beta release information.
+- **Docs** — [Response latency](../guides/response-latency.md)
+
+---
+
 ## v0.1.3 — 2026-11-02 {#v0-1-3}
 
-**Current beta.** A redesigned workspace and simpler settings across desktop and web.
+A redesigned workspace and simpler settings across desktop and web.
 
 **Shipped**
 

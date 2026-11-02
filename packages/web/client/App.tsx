@@ -1592,12 +1592,12 @@ export function App() {
   const showManagedInferenceModels = useMemo(() => {
     if (inferenceModeDraft === "byok") return false;
     if (inferenceModeDraft === "managed") return vireonConnected;
-    return vireonConnected;
-  }, [inferenceModeDraft, vireonConnected]);
+    return vireonConnected && settingsProviderBase.includes("/inference");
+  }, [inferenceModeDraft, vireonConnected, settingsProviderBase]);
 
   const showByokProviderPresets = useMemo(() => {
-    return inferenceModeDraft !== "managed";
-  }, [inferenceModeDraft]);
+    return inferenceModeDraft !== "managed" && !showManagedInferenceModels;
+  }, [inferenceModeDraft, showManagedInferenceModels]);
 
   const submittingRef = useRef(false);
   const sessionStartRef = useRef<number | null>(null);

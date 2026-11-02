@@ -1,3 +1,4 @@
+import { singleModelEnabled, singleModelSlug, currentHarnessPreferences } from "./harness_effective_env.js";
 import { parseManagedProviderPreference, looksLikeKimchiModelId, looksLikeBedrockModelId, modelNativeManagedProvider, filterManagedInferenceCatalog, narrowManagedModelForProvider } from "./managed_catalog.js";
 export { parseManagedProviderPreference, looksLikeKimchiModelId, looksLikeBedrockModelId, modelNativeManagedProvider, filterManagedInferenceCatalog } from "./managed_catalog.js";
 import OpenAI from "openai";
@@ -464,6 +465,7 @@ export async function resolveManagedOpenRouterCredentials(
   prefs?: RuntimePreferences | null,
   opts?: { refreshSession?: boolean }
 ): Promise<ManagedOpenRouterCredentials> {
+  prefs ??= currentHarnessPreferences();
   const managed = await shouldRouteOpenRouterViaManaged(prefs);
   if (managed) {
     if (opts?.refreshSession) {
@@ -484,7 +486,7 @@ export async function resolveManagedOpenRouterCredentials(
       baseURL: session.baseURL.replace(/\/$/, ""),
     };
   }
-  const byok = resolveProviderConfig();
+  const byok = resolveProviderConfig(undefined, prefs);
   return {
     route: "byok",
     apiKey: byok.apiKey,
@@ -499,9 +501,10 @@ export async function resolveProviderConfigWithInference(
   overrides?: ProviderConfigOverrides,
   prefs?: RuntimePreferences | null
 ): Promise<ProviderConfig> {
+  prefs ??= currentHarnessPreferences();
   const mode = resolveInferenceMode(prefs);
   if (mode === "byok") {
-    return resolveProviderConfig(overrides);
+    return resolveProviderConfig(overrides, prefs);
   }
 
   const requestedBase =
@@ -511,12 +514,12 @@ export async function resolveProviderConfigWithInference(
     requestedBase &&
     !isManagedInferenceBaseUrl(requestedBase)
   ) {
-    return resolveProviderConfig({ ...overrides, baseURL: requestedBase });
+    return resolveProviderConfig({ ...overrides, baseURL: requestedBase }, prefs);
   }
 
   const managed = await shouldRouteOpenRouterViaManaged(prefs);
   if (mode === "managed" && !managed) {
-    return resolveProviderConfig(overrides);
+    return resolveProviderConfig(overrides, prefs);
   }
 
   if (managed) {
@@ -527,12 +530,12 @@ export async function resolveProviderConfigWithInference(
     return {
       apiKey: creds.apiKey,
       baseURL: creds.baseURL,
-      model,
+      model: singleModelEnabled(prefs) ? singleModelSlug(undefined, prefs) : model,
       keySource: "VIREON_MANAGED",
     };
   }
 
-  return resolveProviderConfig(overrides);
+  return resolveProviderConfig(overrides, prefs);
 }
 
 export type InferenceUsageStatus = {

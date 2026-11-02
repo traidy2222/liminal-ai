@@ -1,3 +1,4 @@
+import { singleModelEnabled } from "./harness_effective_env.js";
 /**
  * OpenAI-compatible embedding fetch (OpenRouter, OpenAI, etc.).
  */
@@ -38,6 +39,7 @@ export async function fetchEmbeddings(params: {
   prefs?: RuntimePreferences | null;
   extraHeaders?: Record<string, string>;
 }): Promise<EmbedBatchResult> {
+  if (singleModelEnabled(params.prefs ?? undefined)) throw new Error("Embeddings are disabled in single-model mode; use keyword memory search.");
   const url = `${params.baseURL.replace(/\/$/, "")}/embeddings`;
   const managedHeaders = isManagedInferenceBaseUrl(params.baseURL)
     ? buildManagedInferenceClientHeaders(params.prefs ?? null, params.model)

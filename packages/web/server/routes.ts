@@ -30,6 +30,7 @@ import {
   clearVireonAccount,
   fetchInferenceUsageStatus,
   fetchManagedInferenceModels,
+  fetchOpenRouterSettingsCatalog,
   resolveInferenceMode,
   exchangeGoogleCode,
   scopesForGoogleServices,
@@ -256,6 +257,11 @@ export function createRouter(
         configError: err instanceof Error ? err.message : String(err),
       });
     }
+  });
+
+  router.get("/api/models/openrouter", async (req, res) => {
+    try { res.json({ models: await fetchOpenRouterSettingsCatalog(req.query.refresh === "1") }); }
+    catch (e) { res.status(502).json({ error: e instanceof Error ? e.message : "OpenRouter catalog unavailable", models: [] }); }
   });
 
   router.get("/api/settings", (_req, res) => {
