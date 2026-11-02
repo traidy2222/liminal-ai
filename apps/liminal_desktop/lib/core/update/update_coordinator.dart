@@ -12,6 +12,7 @@ import 'package:path_provider/path_provider.dart';
 import '../../models/update_prefs.dart';
 import 'local_versions.dart';
 import 'release_client.dart';
+import 'native_update_helper.dart';
 
 enum UpdatePhase {
   idle,
@@ -494,25 +495,11 @@ class UpdateCoordinator extends ChangeNotifier {
     await shutdownSidecar();
     try {
       if (Platform.isWindows) {
-        await Process.start(
-            'powershell',
-            [
-              '-NoProfile',
-              '-WindowStyle',
-              'Hidden',
-              '-ExecutionPolicy',
-              'Bypass',
-              '-File',
-              p.join(helper.path, 'relaunch-desktop-windows.ps1'),
-              '-ParentPid',
-              '$pid',
-              '-ExeDir',
-              exeDir,
-              '-ArchivePath',
-              archive
-            ],
-            workingDirectory: helper.path,
-            mode: ProcessStartMode.detached);
+        await startWindowsUpdateHelper(
+            helperDirectory: helper.path,
+            exeDir: exeDir,
+            archivePath: archive,
+            parentPid: pid);
       } else {
         await Process.start(
             'bash',

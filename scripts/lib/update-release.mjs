@@ -279,16 +279,20 @@ export async function extractAppArchive(exeDir, archivePath, platform) {
 
   if (archivePath.endsWith(".zip")) {
     if (process.platform === "win32") {
-      const r = spawnSync(
+      // Windows ships bsdtar; Expand-Archive is very slow for bundled dependencies.
+      let r = spawnSync("tar.exe", ["-xf", archivePath, "-C", staging], {
+        encoding: "utf8", windowsHide: true,
+      });
+      if (r.error?.code === "ENOENT") r = spawnSync(
         "powershell",
         [
           "-NoProfile",
           "-Command",
           `Expand-Archive -Path '${archivePath.replace(/'/g, "''")}' -DestinationPath '${staging.replace(/'/g, "''")}' -Force`,
         ],
-        { encoding: "utf8" },
+        { encoding: "utf8", windowsHide: true },
       );
-      if (r.status !== 0) throw new Error(r.stderr || "Expand-Archive failed");
+      if (r.status !== 0) throw new Error(r.stderr || "Windows archive extraction failed");
     } else {
       const r = spawnSync("unzip", ["-q", archivePath, "-d", staging], { encoding: "utf8" });
       if (r.status !== 0) throw new Error(r.stderr || "unzip failed");

@@ -2,7 +2,7 @@
 
 All notable changes to [Liminal AI](https://github.com/traidy2222/liminal-ai) on the `main` branch.
 
-**Current stage:** **beta** (`v0.1.7`, 2026-11-02). Desktop downloads are published through the public preview release channel.
+**Current stage:** **beta** (`v0.1.8`, 2026-11-02). Desktop downloads are published through the public preview release channel.
 
 Format: **v0.0.x** entries keyed to the last GitHub push in each slice. Dates are real push dates.
 
@@ -17,9 +17,23 @@ After editing JSON: `npm run changelog:gen`, commit, push, then in [vireondynami
 
 ---
 
+## v0.1.8 — 2026-11-02 {#v0-1-8}
+
+**Current beta.** Safer tool recovery and a verified Windows update handoff.
+
+**Shipped**
+
+- **Windows update handoff** — Avoid detached PowerShell startup failures. The app waits for the updater to initialize and stays open if startup fails. The helper waits for the old process to exit before replacing files.
+- **Faster Windows extraction** — Use the Windows archive utility for large app bundles, retaining a PowerShell fallback when it is unavailable.
+- **Safe tool recovery** — Preserve eager tool execution across stream recovery and isolate streamed-write manifests and staging files between concurrent sessions.
+- **Access and lifecycle hardening** — Complete the reviewed fixes for guest chat boundaries, public-web destinations, file operations, locks, provider scheduling and terminal/browser cleanup.
+- **Docs** — [Install and update](../start/install.md)
+
+---
+
 ## v0.1.7 — 2026-11-02 {#v0-1-7}
 
-**Current beta.** Faster first answers and accurate file-write status.
+Faster first answers and accurate file-write status.
 
 **Shipped**
 

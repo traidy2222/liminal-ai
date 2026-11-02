@@ -14,7 +14,7 @@ const entry = releases.releases.find((r) => r.version === version);
 if (!entry) throw Error(`Missing changelog entry for ${version}`);
 const autoUpdates = compareSemver(version, "0.1.6") >= 0;
 const upgrade = autoUpdates
-  ? "From **0.1.6**, portable installs check, download, verify, and install updates on launch by default. Choose **Open current version** to skip, or turn automatic updates off in **Settings → About & updates**.\n\n**Initial upgrade from 0.1.5 or earlier:** download this version once and extract it over the closed installation, preserving your local `.env`. This refreshes the older packaged-app detection and installer. Future launch updates are automatic."
+  ? "Portable installs check, download, verify, and install updates on launch by default. Choose **Open current version** to skip, or turn automatic updates off in **Settings → About & updates**.\n\n**Initial upgrade from 0.1.5 or earlier:** install this archive once to refresh packaged-app detection, preserving your local `.env`.\n\n**Windows 0.1.6–0.1.7:** if an update downloads but the app closes without reopening, install 0.1.8 or later once from its archive. The repaired Windows handoff launches Node directly and confirms startup before closing. Keep your local configuration when upgrading."
   : "Existing installations: **Settings → About & updates → Check for updates**. Install the app update to get both the new interface and bundled harness. Updates preserve your local configuration.";
 const body = `## Liminal Desktop ${version} (beta)
 

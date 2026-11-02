@@ -47,6 +47,7 @@ function parseArgs(argv) {
       out.archive = path.resolve(argv[++i]);
     else if (a === "--platform" && argv[i + 1]) out.platform = argv[++i];
     else if (a === "--relaunch-pid" && argv[i + 1]) out.relaunchPid = argv[++i];
+    else if (a === "--ready-file" && argv[i + 1]) out.readyFile = path.resolve(argv[++i]);
   }
   return out;
 }
@@ -72,10 +73,11 @@ async function main() {
   }
 
   if (args.mode === "app") {
+    if (args.readyFile) fs.writeFileSync(args.readyFile, "ready", { flag: "wx" });
     const pid = Number(args.relaunchPid || process.ppid);
     if (pid > 0) {
       console.log(`Waiting for parent PID ${pid} to exit…`);
-      waitForProcessExit(pid);
+      if (!waitForProcessExit(pid)) throw Error("Timed out waiting for the current app to exit");
     }
     try {
       const extracted = await extractAppArchive(
@@ -103,6 +105,7 @@ async function main() {
       throw error;
     }
     console.log(JSON.stringify({ ok: true }));
+    fs.rmSync(path.join(args.exeDir, "pending_update.json"), { force: true });
     return;
   }
 
