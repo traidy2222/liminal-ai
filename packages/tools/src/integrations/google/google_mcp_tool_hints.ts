@@ -6,7 +6,7 @@ const DRIVE_SEARCH_HINT =
   "Drive query dates MUST be ISO8601 UTC inside quotes, e.g. modifiedTime > \"2024-06-05T00:00:00Z\" (not bare 2024-06-05).";
 
 const PAGINATION_HINT =
-  "Pagination: pageSize (int, default 25); aliases page_size, limit. pageToken for next page.";
+  "Pagination, when declared: use the schema's pageSize and pageToken fields. Copy nextPageToken unchanged into the next pageToken.";
 
 const CALENDAR_HINT =
   "calendarId defaults to \"primary\" when omitted. Times must be RFC3339 (2024-06-05T09:00:00Z).";

@@ -27,7 +27,7 @@ Google documents [`search_threads`](https://developers.google.com/workspace/gmai
 
 ## Verification
 
-- Nine reproduced regression cases, then 40 focused checks passed. Workspace build and typecheck passed.
+- Reproduced schema, draft and permission failures, then 41 focused checks passed. Workspace build and typecheck passed.
 - Live Gmail search and thread reads passed without printing message contents.
 - The old dispatcher failed a label request before network access. The repaired dispatcher created one uniquely named empty label through its approval gate; the test then deleted that exact label. No messages were changed or sent.
 - For the account's 23 discovered Gmail tools, parameter definitions decreased from 96 fields / 85,040 characters to the server's 53 fields / 27,241 characters: 68% fewer schema characters. This is measured schema overhead, not a measured first-token latency claim.
