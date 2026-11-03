@@ -53,6 +53,9 @@ jobs:
       - name: Test MCP Gmail contracts
         run: node --import tsx --test packages/tools/src/integrations/external_api/gmail_mcp_contract.test.ts packages/tools/src/integrations/external_api/mcp_tool_classify.test.ts packages/tools/src/integrations/external_api/mcp_description_write_regression.test.ts packages/tools/src/integrations/external_api/mcp_compound_action_regression.test.ts packages/tools/src/integrations/google/gmail_compose_guard.test.ts
 
+      - name: Test file content is not mistaken for outbound mail
+        run: node --import tsx --test packages/tools/src/families/files/email_file_false_positive.test.ts
+
       - name: Test desktop update installation and rollback
         run: npm run test:update-release
 
@@ -141,6 +144,9 @@ jobs:
 
       - name: Test MCP Gmail contracts on Windows
         run: node --import tsx --test packages/core/src/mcp_schema_contract_regression.test.ts packages/core/src/mcp_integer_union_regression.test.ts packages/tools/src/integrations/external_api/gmail_mcp_contract.test.ts packages/tools/src/integrations/external_api/mcp_tool_classify.test.ts packages/tools/src/integrations/external_api/mcp_description_write_regression.test.ts packages/tools/src/integrations/external_api/mcp_compound_action_regression.test.ts packages/tools/src/integrations/google/gmail_compose_guard.test.ts
+
+      - name: Test file content is not mistaken for outbound mail on Windows
+        run: node --import tsx --test packages/tools/src/families/files/email_file_false_positive.test.ts
       - name: Verify workflow gates with actual Windows test processes
         run: npm run verify:workflows
       - name: Test Windows update helper and rollback
