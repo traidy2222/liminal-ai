@@ -1,6 +1,6 @@
 /**
  * Gmail immediate send via classic REST (gmail.googleapis.com).
- * Read/search/draft/label use official mcp_google_gmail_*; this tool covers users.messages.send only.
+ * Complements discovered MCP tools with multipart draft, saved-draft send and direct send helpers.
  */
 import { effectiveHarnessEnvRaw, getGoogleAccessToken, listGoogleMailOAuthAccounts, resolveGoogleMailAccount } from "@liminal/core";
 import type { PropertySchema, ToolDefinition, ToolResult } from "@liminal/core";
@@ -275,7 +275,7 @@ export function createGmailSendTools(): ToolDefinition[] {
     description:
       "WHAT: Create a Gmail draft (users.drafts.create) — this call **is** the finished styled email.\n" +
       "WHEN: Any new outbound mail the user wants drafted or reviewed in Gmail.\n" +
-      "HOW: Plan subject + formatted body_html + plain body **before** calling. Pass all three in **one** invocation — body_html is the real email (nested tables, inline styles). Not mcp_google_gmail_create_draft (plain-only).\n" +
+      "HOW: Plan subject + formatted body_html + plain body **before** calling. Pass all three in **one** invocation — body_html is the real email (nested tables, inline styles). Use this REST helper for attachments, multipart MIME and explicit account selection.\n" +
       "AFTER: gmail_send_draft(draftId) when the user approves send.\n" +
       "STYLE: Neutral professional body_html + body (R-EMAIL-STYLE). email_style_infer only if user named an industry/style this turn. Plain-only for thread replies.\n" +
       "SAFETY: approval-gated — verify recipients before approving.",

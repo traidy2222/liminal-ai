@@ -31,7 +31,6 @@ test("normalizeGoogleMcpToolArgs maps page_size to pageSize without duplicate ke
     type: "object" as const,
     properties: {
       pageSize: { type: "number" as const },
-      page_size: { type: "number" as const },
     },
   };
   const out = normalizeGoogleMcpToolArgs(

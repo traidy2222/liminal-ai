@@ -54,33 +54,27 @@ export function normalizeDriveMcpQuery(query: string): string {
   return out;
 }
 
-function mapAliasesToCanonical(out: Record<string, unknown>): void {
+function mapAliasesToRemoteSchema(out: Record<string, unknown>, properties: Record<string, unknown>): void {
   for (const [canonical, aliases] of Object.entries(MCP_FIELD_ALIASES)) {
-    if (out[canonical] !== undefined) continue;
-    const val = firstDefined(out, aliases);
-    if (val !== undefined) out[canonical] = val;
-  }
-}
-
-/** Drop harness alias keys once canonical is set — Google MCP 400s on duplicate/extra names. */
-function dropMcpAliasKeysAfterMapping(out: Record<string, unknown>): void {
-  for (const [canonical, aliases] of Object.entries(MCP_FIELD_ALIASES)) {
-    if (out[canonical] === undefined) continue;
-    for (const alias of aliases) {
-      if (alias !== canonical) delete out[alias];
+    const group = [canonical, ...aliases];
+    const declared = group.filter(key => Object.hasOwn(properties, key));
+    const target = Object.hasOwn(properties, canonical) ? canonical : declared.length === 1 ? declared[0] : undefined;
+    if (!target) continue;
+    // A field the server actually declares is never another field's alias.
+    const compatibilityKeys = group.filter(key => !Object.hasOwn(properties, key));
+    if (out[target] === undefined) {
+      const value = firstDefined(out, compatibilityKeys);
+      if (value !== undefined) out[target] = value;
     }
+    for (const key of compatibilityKeys) delete out[key];
   }
 }
 
-/** Property keys accepted by the remote MCP server (excludes harness-only aliases). */
+/** Every declared server field is valid, including names used as aliases elsewhere. */
 export function mcpRemotePropertyKeys(
   properties: Record<string, unknown>
 ): string[] {
-  const allAliases = new Set<string>();
-  for (const aliases of Object.values(MCP_FIELD_ALIASES)) {
-    for (const alias of aliases) allAliases.add(alias);
-  }
-  return Object.keys(properties).filter((key) => key in MCP_FIELD_ALIASES || !allAliases.has(key));
+  return Object.keys(properties);
 }
 
 export function pruneMcpArgsToRemoteSchema(
@@ -103,7 +97,6 @@ function coerceIntegerFields(
     const prop = schema?.properties[key];
     const isInt =
       prop?.type === "integer" ||
-      prop?.type === "number" ||
       INTEGER_LIKE_KEYS.has(key);
     if (isInt && out[key] !== undefined) {
       out[key] = coerceMcpInteger(out[key]);
@@ -115,13 +108,10 @@ function coerceIntegerFields(
 }
 
 function normalizeQueryFields(out: Record<string, unknown>, name: string): void {
-  const q = firstDefined(out, ["query", "q", "search", "term", "text", "searchQuery"]);
-  if (q !== undefined && out["query"] === undefined) out["query"] = q;
-
   for (const key of ["query", "q", "searchQuery"]) {
     const val = out[key];
     if (typeof val === "string" && val.trim()) {
-      if (name.includes("drive") || val.includes("modifiedTime") || val.includes("createdTime")) {
+      if (name.includes("drive")) {
         out[key] = normalizeDriveMcpQuery(val);
       }
     }
@@ -139,9 +129,7 @@ function normalizeCalendarFields(
   const hasCalendarId = Boolean(props["calendarId"] || props["calendar_id"]);
   if (hasCalendarId) {
     if (!out["calendarId"] && !out["calendar_id"]) {
-      out["calendarId"] = "primary";
-    } else if (typeof out["calendar_id"] === "string" && !out["calendarId"]) {
-      out["calendarId"] = out["calendar_id"];
+      out[props["calendarId"] ? "calendarId" : "calendar_id"] = "primary";
     }
   }
 
@@ -166,11 +154,10 @@ export function normalizeGoogleMcpToolArgs(
   args: Record<string, unknown>,
   schema?: ToolParameterSchema
 ): Record<string, unknown> {
-  if (!name.startsWith("mcp_google_")) return args;
+  if (!name.startsWith("mcp_google_") || !schema) return args;
 
   const out = { ...args };
-  mapAliasesToCanonical(out);
-  dropMcpAliasKeysAfterMapping(out);
+  mapAliasesToRemoteSchema(out, schema.properties);
   coerceIntegerFields(out, schema);
   normalizeQueryFields(out, name);
   normalizeCalendarFields(out, name, schema);

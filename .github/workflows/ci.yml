@@ -50,6 +50,9 @@ jobs:
       - name: Test OAuth connection recovery
         run: npm run test:oauth
 
+      - name: Test MCP Gmail contracts
+        run: node --import tsx --test packages/tools/src/integrations/external_api/gmail_mcp_contract.test.ts packages/tools/src/integrations/external_api/mcp_tool_classify.test.ts packages/tools/src/integrations/google/gmail_compose_guard.test.ts
+
       - name: Test desktop update installation and rollback
         run: npm run test:update-release
 
@@ -135,6 +138,9 @@ jobs:
       - run: npm run build
       - name: Test OAuth connection recovery on Windows
         run: npm run test:oauth
+
+      - name: Test MCP Gmail contracts on Windows
+        run: node --import tsx --test packages/core/src/mcp_schema_contract_regression.test.ts packages/tools/src/integrations/external_api/gmail_mcp_contract.test.ts packages/tools/src/integrations/external_api/mcp_tool_classify.test.ts packages/tools/src/integrations/google/gmail_compose_guard.test.ts
       - name: Verify workflow gates with actual Windows test processes
         run: npm run verify:workflows
       - name: Test Windows update helper and rollback

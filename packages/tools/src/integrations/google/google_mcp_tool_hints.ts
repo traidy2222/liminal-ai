@@ -11,7 +11,10 @@ const PAGINATION_HINT =
 const CALENDAR_HINT =
   "calendarId defaults to \"primary\" when omitted. Times must be RFC3339 (2024-06-05T09:00:00Z).";
 
-const GMAIL_HINT = "Gmail MCP drafts are plain text only — use gmail_create_draft for HTML.";
+const GMAIL_DRAFT_HINT =
+  "Use the discovered schema: body is plain text; htmlBody is HTML when declared; replyToMessageId targets an existing Gmail message. Use REST helpers for attachments or explicit account_hint. Create one draft per requested email.";
+const GMAIL_ID_HINT =
+  "Copy exact messageId/threadId values from a successful search/get in this connection's mailbox. Message IDs, thread IDs and RFC Message-ID headers are different; never invent or shorten them.";
 
 export function enrichGoogleMcpToolDescription(
   connectionName: string,
@@ -27,7 +30,9 @@ export function enrichGoogleMcpToolDescription(
   }
   if (connectionName === "google_gmail") {
     if (remote.includes("list") || remote.includes("search")) hints.push(PAGINATION_HINT);
-    if (remote.includes("draft") || remote.includes("create")) hints.push(GMAIL_HINT);
+    if (remote === "create_draft") hints.push(GMAIL_DRAFT_HINT);
+    if (remote.includes("message") || remote.includes("thread") || remote === "create_draft") hints.push(GMAIL_ID_HINT);
+    if (remote === "search_threads") hints.push("Search returns thread summaries, not full bodies. Use get_thread for full content. Reuse nextPageToken as pageToken without changing the query.");
   }
   if (connectionName === "google_calendar") {
     hints.push(CALENDAR_HINT);

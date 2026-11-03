@@ -28,7 +28,7 @@ import {
 } from "./api_connections_store.js";
 import { filterMcpToolRecords, isMcpReadTool, isMcpWriteTool } from "./mcp_tool_classify.js";
 import { registerConnectorToolFamilies } from "../../shared/connector_family_map.js";
-import { validateOutboundEmailStyle } from "../google/gmail_compose_guard.js";
+import { validateOutboundEmailFactual } from "../google/gmail_compose_guard.js";
 import { IDA_PARENT_PROVIDER } from "../ida/ida_connect.js";
 import { registerIdaCompanionTools, unregisterIdaCompanionTools } from "../ida/ida_companion_tools.js";
 import { injectIdaDatabaseArgs, wrapIdaMcpHandler } from "../ida/ida_session.js";
@@ -303,6 +303,12 @@ function buildMcpToolHandler(
       .filter(Boolean);
     const text = parts.join("\n").trim() || "[empty MCP response]";
     if (result.isError) {
+      if (record.name === "google_gmail" && /(?:status\s*404|requested entity was not found)/i.test(text)) {
+        return { ok: false, error:
+          `Gmail ${tool.remoteName}: message or thread not found (404). ` +
+          "Search this connection's mailbox again and copy the exact returned message ID or thread ID for the matching operation. " +
+          "Do not retry a guessed ID or substitute a thread ID for a message ID." };
+      }
       return { ok: false, error: enrichGoogleMcpProbeError(record.serverUrl, text) };
     }
     return { ok: true, output: text };
@@ -345,12 +351,10 @@ function buildMcpTool(record: McpConnectionRecord, tool: McpToolRecord): ToolDef
   }
   let handler = buildMcpToolHandler(record, tool, remoteProperties);
   if (record.name === "google_gmail" && tool.remoteName === "create_draft") {
-    description +=
-      " — PLAIN body only. For outbound mail, compose formatted body_html + body in gmail_create_draft before calling any draft tool.";
     const inner = handler;
     handler = async (args) => {
-      const styleErr = validateOutboundEmailStyle(args);
-      if (styleErr) return { ok: false, error: styleErr };
+      const factualError = validateOutboundEmailFactual(args);
+      if (factualError) return { ok: false, error: factualError };
       return inner(args);
     };
   }

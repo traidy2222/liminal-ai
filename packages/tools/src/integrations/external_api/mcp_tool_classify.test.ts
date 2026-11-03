@@ -3,6 +3,11 @@ import assert from "node:assert/strict";
 import { isMcpWriteTool, isMcpReadTool, filterMcpToolRecords } from "./mcp_tool_classify.js";
 
 describe("mcp_tool_classify", () => {
+  it("gates Gmail trash, spam, reply and forward actions as writes", () => {
+    const names = ["trash_message", "trash_thread", "untrash_message", "untrash_thread", "mark_message_spam", "unmark_thread_spam", "reply", "forward"];
+    for (const name of names) assert.equal(isMcpWriteTool(name), true, name);
+    assert.deepEqual(filterMcpToolRecords(names.map(remoteName => ({ remoteName })), { readOnly: true }), []);
+  });
   it("classifies read tools", () => {
     assert.equal(isMcpReadTool("search_files"), true);
     assert.equal(isMcpReadTool("read_sheet_values"), true);

@@ -7,6 +7,7 @@ const HTML_FIELD_KEYS = ["body_html", "html", "htmlBody", "html_body"] as const;
 const PLAIN_FIELD_KEYS = ["body", "body_text", "text", "plain", "message", "plain_body"] as const;
 const REPLY_FIELD_KEYS = [
   "reply_to_message_id",
+  "replyToMessageId",
   "thread_id",
   "threadId",
   "in_reply_to",

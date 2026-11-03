@@ -3,7 +3,7 @@
  */
 
 const WRITE_PATTERNS =
-  /\b(create|update|delete|send|modify|write|post|put|patch|insert|append|clear|remove|move|copy|rename|label|unlabel|publish|execute|run|deploy|share|upload|set_|add_|make_|batch_update|respond_to)\b/i;
+  /\b(create|update|delete|send|modify|write|post|put|patch|insert|append|clear|remove|move|copy|rename|label|unlabel|publish|execute|run|deploy|share|upload|set|add|make|respond|trash|untrash|mark|unmark|reply|forward|archive|restore|subscribe|unsubscribe)\b/i;
 
 const READ_PATTERNS =
   /\b(get|list|search|read|download|fetch|find|describe|metadata|info|recent|query|lookup|export)\b/i;
@@ -14,15 +14,10 @@ function normalizeMcpName(remoteName: string): string {
 }
 
 export function isMcpWriteTool(remoteName: string, description?: string): boolean {
-  const combined = `${normalizeMcpName(remoteName)} ${description ?? ""}`;
-  if (WRITE_PATTERNS.test(combined)) {
-    const normalizedName = normalizeMcpName(remoteName);
-    if (READ_PATTERNS.test(normalizedName) && /\b(get|list|search|read|download|fetch)\b/i.test(normalizedName)) {
-      return false;
-    }
-    return true;
-  }
-  return false;
+  const name = normalizeMcpName(remoteName);
+  if (WRITE_PATTERNS.test(name)) return true;
+  if (/\b(get|list|search|read|download|fetch)\b/i.test(name)) return false;
+  return WRITE_PATTERNS.test(description ?? "");
 }
 
 export function isMcpReadTool(remoteName: string, description?: string): boolean {

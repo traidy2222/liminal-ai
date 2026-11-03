@@ -134,7 +134,7 @@ connect_provider({ provider: "google_workspace", services: ["drive", "sheets"], 
 
 ## Gmail (hybrid: MCP + REST send)
 
-Google's official Gmail MCP (`gmailmcp.googleapis.com`) covers **search, read, drafts, and labels** — it does **not** expose immediate send. Liminal uses a **hybrid**:
+Google's official Gmail MCP (`gmailmcp.googleapis.com`) provides the tools discovered for the connected account, including **search, read, drafts, and labels**. Liminal also provides explicit REST compose and send helpers:
 
 | Task | Tool |
 |------|------|
@@ -143,7 +143,7 @@ Google's official Gmail MCP (`gmailmcp.googleapis.com`) covers **search, read, d
 | **Send an existing draft** | `gmail_send_draft` (`draft_id` from create — no body rewrite) |
 | **Send now** (one step, no prior draft) | `gmail_send_message` (classic `users.messages.send`) |
 
-Google's MCP `create_draft` is **plain text only**. The harness rejects substantive plain-only new mail there and routes styled drafts through `gmail_create_draft` instead.
+Google's MCP `create_draft` supports plain `body`, HTML `htmlBody`, and `replyToMessageId` when declared by the discovered schema. Valid plain-text drafts are accepted. Use the REST helper for attachments, multipart MIME or explicit `account_hint`. Create only one draft for each requested email.
 
 After `liminal connect google --attach` with `gmail` in services, MCP tools register automatically. **`gmail_send_message`** is always registered when `AGENT_GOOGLE_GMAIL_SEND=1` (default) and uses the **same OAuth token** (`gmail.compose` scope).
 
@@ -281,7 +281,7 @@ Connections persist under `~/.liminal/api_connections/`. OAuth tokens are encryp
 | `AGENT_GOOGLE_SIDECAR_CMD` | `uvx workspace-mcp` | Sidecar launch command |
 | `AGENT_GOOGLE_SIDECAR_PORT` | `8010` | Local MCP port |
 | `AGENT_GOOGLE_CONNECT_ON_BOOT` | `1` | Auto-restore connections on harness start |
-| `AGENT_GOOGLE_GMAIL_SEND` | `1` | Register `gmail_create_draft` + `gmail_send_message` (REST); MCP has no HTML draft or send |
+| `AGENT_GOOGLE_GMAIL_SEND` | `1` | Register REST draft/send helpers for multipart HTML, attachments and explicit accounts |
 | `AGENT_GOOGLE_CALENDAR_REST` | `1` | Register full `calendar_rest_*` surface (calendars, timezone, events, freebusy, ACL, Meet, …) alongside Calendar MCP |
 | `AGENT_GOOGLE_OFFICE_REST` | `1` | Register `docs_rest_*`, `sheets_rest_*`, `slides_rest_*`, `office_rest_export_file` alongside workspace-mcp |
 | `AGENT_GOOGLE_ANALYTICS_REST` | `1` | Register `analytics_rest_*` (GA4 Admin + Data APIs) |

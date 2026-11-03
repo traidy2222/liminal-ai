@@ -124,7 +124,7 @@ Web **Settings** writes to (2). See [Configuration basics](../start/configuratio
 | `AGENT_GOOGLE_ANALYTICS_REST` | `1` | yes | no | harness | Register analytics_rest_* tools (Analytics Admin + Data APIs): list accounts/properties, run reports, realtime, data str |
 | `AGENT_GOOGLE_CALENDAR_REST` | `1` | yes | no | harness | Register calendar_rest_* tools (classic Calendar API): calendars/settings/timezone, colors, subscribe/hide, clear events |
 | `AGENT_GOOGLE_CONNECT_ON_BOOT` | `1` | yes | no | harness | Harness environment toggle for Google Connect On Boot. See docs/configuration.md (harness). |
-| `AGENT_GOOGLE_GMAIL_SEND` | `1` | yes | no | harness | Register gmail_create_draft, gmail_send_draft, and gmail_send_message (classic Gmail REST). Official Gmail MCP create_dr |
+| `AGENT_GOOGLE_GMAIL_SEND` | `1` | yes | no | harness | Register gmail_create_draft, gmail_send_draft, and gmail_send_message (classic Gmail REST). REST supports styled multipa |
 | `AGENT_GOOGLE_OAUTH_CLIENT_ID` | `` | yes | no | harness | Harness environment toggle for Google Oauth Client Id. See docs/configuration.md (harness). |
 | `AGENT_GOOGLE_OFFICE_REST` | `1` | yes | no | harness | Register docs_rest_*, sheets_rest_*, slides_rest_*, and office_rest_export_file (classic Docs/Sheets/Slides/Drive APIs). |
 | `AGENT_GOOGLE_SEARCH_CONSOLE_REST` | `1` | yes | no | harness | Register search_console_rest_* tools: list sites, search analytics queries, URL inspection, sitemap list/submit/delete.  |
@@ -163,7 +163,7 @@ Web **Settings** writes to (2). See [Configuration basics](../start/configuratio
 | `AGENT_INFERENCE_BASE_URL` | `https://api.vireondynamics.com/v1/inference` | yes | no | harness | Harness environment toggle for Inference Base Url. See docs/configuration.md (harness). |
 | `AGENT_INFERENCE_MODE` | `auto` | yes | no | harness | Harness environment toggle for Inference Mode. See docs/configuration.md (harness). |
 | `AGENT_INFERENCE_PREFER_MANAGED` | `1` | yes | no | harness | Harness environment toggle for Inference Prefer Managed. See docs/configuration.md (harness). |
-| `AGENT_INFERENCE_SESSION_TOKEN` | `` | yes | no | session_ui | Harness environment toggle for Inference Session Token. See docs/configuration.md (session ui). |
+| `AGENT_INFERENCE_SESSION_TOKEN` | `` | yes | yes | session_ui | Harness environment toggle for Inference Session Token. See docs/configuration.md (session ui). |
 | `AGENT_INFERENCE_SESSION_URL` | `https://www.vireondynamics.com/api/inference/session` | yes | no | session_ui | Harness environment toggle for Inference Session Url. See docs/configuration.md (session ui). |
 | `AGENT_INTENT_CONFIDENCE_MIN` | `0.65` | yes | no | harness | Harness environment toggle for Intent Confidence Min. See docs/configuration.md (harness). |
 | `AGENT_INTENT_CONTEXT_MAX_CHARS` | `12000` | yes | no | harness | Harness environment toggle for Intent Context Max Chars. See docs/configuration.md (harness). |
@@ -172,7 +172,7 @@ Web **Settings** writes to (2). See [Configuration basics](../start/configuratio
 | `AGENT_INTENT_OPERATIONAL_MODEL` | `` | yes | no | harness | Harness environment toggle for Intent Operational Model. See docs/configuration.md (harness). |
 | `AGENT_INTENT_REPO_CONTEXT` | `1` | yes | no | harness | Harness environment toggle for Intent Repo Context. See docs/configuration.md (harness). |
 | `AGENT_INTENT_ROUTING` | `1` | yes | no | harness | Harness environment toggle for Intent Routing. See docs/configuration.md (harness). |
-| `AGENT_KIMCHI_MIN_INTERVAL_MS` | `1500` | yes | yes | models_api | Minimum ms between Cast AI completions when AGENT_PROVIDER_MIN_INTERVAL_MS is unset. Lowers RPM/TPM 429s on free tier. |
+| `AGENT_KIMCHI_MIN_INTERVAL_MS` | `1500` | yes | no | models_api | Minimum ms between Cast AI completions when AGENT_PROVIDER_MIN_INTERVAL_MS is unset. Lowers RPM/TPM 429s on free tier. |
 | `AGENT_KIMCHI_TRANSIENT_MAX_RETRIES` | `8` | yes | yes | models_api | Retry budget for transient Cast AI / Kimchi errors (opaque HTTP 400, 429, 5xx) per completion before failing the turn. |
 | `AGENT_LATENCY_MODE` | `0` | yes | no | harness | When on, skips world-context gather, intent-inference LLM, proactive verify lint, session JSONL, forced reply-finalize,  |
 | `AGENT_LENGTH_RESUME_MAX` | `8` | yes | no | harness | Harness environment toggle for Length Resume Max. See docs/configuration.md (harness). |
@@ -406,7 +406,7 @@ Web **Settings** writes to (2). See [Configuration basics](../start/configuratio
 - `AGENT_API_KEY`
 - `AGENT_APPROVAL_TIMEOUT_MS`
 - `AGENT_CAPTCHA_KEY`
-- `AGENT_KIMCHI_MIN_INTERVAL_MS`
+- `AGENT_INFERENCE_SESSION_TOKEN`
 - `AGENT_KIMCHI_TRANSIENT_MAX_RETRIES`
 - `AGENT_OAUTH_ENCRYPTION_KEY`
 - `AGENT_RATE_LIMIT_MAX_RETRIES`

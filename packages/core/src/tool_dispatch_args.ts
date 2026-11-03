@@ -4,7 +4,6 @@
  */
 import type { ToolParameterSchema } from "./types.js";
 import {
-  mcpRemotePropertyKeys,
   normalizeGoogleMcpToolArgs,
   pruneMcpArgsToRemoteSchema,
 } from "./google_mcp_tool_args.js";
@@ -99,16 +98,7 @@ export function prepareToolArgsForValidation(
   if (googleRestErr) return { ok: false, error: googleRestErr };
 
   if (schema.additionalProperties === false || name.startsWith("mcp_google_")) {
-    const pruneSchema =
-      name.startsWith("mcp_google_")
-        ? {
-            type: "object" as const,
-            properties: Object.fromEntries(
-              mcpRemotePropertyKeys(schema.properties).map((key) => [key, schema.properties[key]!])
-            ),
-          }
-        : schema;
-    out = pruneArgsToSchema(pruneSchema, out);
+    out = pruneArgsToSchema(schema, out);
   }
 
   return { ok: true, args: out };
