@@ -187,7 +187,7 @@ void main() {
     expect(tracker.observe('a', 'turn_end', {}), isFalse);
     tracker.begin('a');
     tracker.observe('a', 'text', {'delta': 'answer'});
-    expect(tracker.observe('a', 'turn_end', {}), isTrue);
+    expect(tracker.observe('a', 'turn_end', {'harnessMetrics': {'terminationReason': 'ok'}}), isTrue);
     expect(tracker.observe('a', 'turn_end', {}), isFalse);
     for (final end in ['error', 'cancel', 'disconnect']) {
       tracker.begin('a');
@@ -196,6 +196,16 @@ void main() {
       if (end == 'cancel') tracker.cancel('a');
       if (end == 'disconnect') tracker.clear();
       expect(tracker.observe('a', 'turn_end', {}), isFalse);
+    }
+  });
+
+  test('partial answers do not count when turn_end precedes a later error frame', () {
+    final tracker = UsageTurnTracker();
+    for (final reason in ['error', 'aborted', 'send_timeout', 'unknown']) {
+      tracker.begin('a');
+      tracker.observe('a', 'text', {'delta': 'partial'});
+      expect(tracker.observe('a', 'turn_end', {'harnessMetrics': {'terminationReason': reason}}), isFalse);
+      tracker.observe('a', 'error', {});
     }
   });
 

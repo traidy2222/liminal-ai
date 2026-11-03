@@ -21,7 +21,13 @@ class UsageTurnTracker {
         (data['delta'] as String).trim().isNotEmpty) {
       _pending[chatId] = true;
     }
-    if (event == 'turn_end') return _pending.remove(chatId) == true;
+    if (event == 'turn_end') {
+      final answered = _pending.remove(chatId) == true;
+      final metrics = data['harnessMetrics'];
+      // turn_end can precede the bridge's error frame. Require the harness's
+      // final outcome, rather than assuming that absence of an error means ok.
+      return answered && metrics is Map && metrics['terminationReason'] == 'ok';
+    }
     return false;
   }
 }
