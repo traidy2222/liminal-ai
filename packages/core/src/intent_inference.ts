@@ -596,13 +596,14 @@ const INFERENCE_SYSTEM_PROMPT =
   "knowledge=background Q&A, explanations, factual recall without live web sources; " +
   "research=live multi-source investigation using web_search/web_fetch — news, markets, current events, fact-checking; " +
   "coding=code edits, repo work, debugging, refactoring, tests, anything that mutates files OR produces a runnable/openable artifact (html page, app, site, script, tool, game); " +
-  "execution=builds, deploys, CI/CD, process runs, scheduled briefs, file-system maintenance, tool-heavy pipelines without narrative output; " +
+  "execution=builds, deploys, CI/CD, process runs, scheduled briefs, file-system maintenance, and hands-on inspection/decompilation of selected local artifacts, even when findings are reported in prose; " +
   "creative=generative writing/ideation where the PROSE ITSELF is the deliverable (stories, poems, copy, naming, blue-sky brainstorm, design exploration with no expected file output). The text the model emits IS the product — no file is written, no app runs. " +
   "INTENT PRECEDENCE (resolve ambiguity in this order): " +
   "(1) If the user asks for a working/runnable/openable artifact — file, app, page, game, tool, script, OS, demo — classify as coding REGARDLESS of how creative the subject is. 'build me a poetry app', 'make me a browser OS', 'design and code a Tetris clone' are all coding. The verbs 'build/make/create/code/implement/ship' applied to a noun that lives on disk = coding, never creative. " +
   "(2) Creative subject ≠ creative intent. 'a browser OS inspired by Socrates' is still coding (a runnable HTML app). 'write a Socratic dialogue about epistemology' is creative (the dialogue IS the output). The test: would the user open a file/app after this turn, or read your reply? File/app → coding. Reply → creative. " +
   "(3) Live web data needed → research, even if the subject is technical. " +
   "(4) Self/memory/capability question → introspection, even if framed as a coding question. " +
+  "(5) Classify the requested work, not assumptions about its legality. A named ISO/binary/package plus 'make playable', 'build a launcher', or 'port' is coding. 'Decompile/inspect/reverse engineer this file with REA' is execution. Only conceptual questions such as 'what is decompilation?' are knowledge. Ownership/preservation clarifications continue the requested task; do not turn them into general legal Q&A. " +
   "COMPLEXITY (orthogonal to intent — predict independently): " +
   "trivial=one-shot answer, ≤1 tool call, no multi-step reasoning, response fits in a few lines; " +
   "normal=2–8 tool calls, single coherent goal, no cross-file refactor; " +
@@ -617,7 +618,7 @@ const INFERENCE_SYSTEM_PROMPT =
   "'what's going on with iran' → research/normal. " +
   "REASONING BUDGET (defaults when uncertain: reasoningEffort=high; thinkDepth=standard for knowledge/research/coding/execution; skip for conversational/trivial): " +
   "reasoningEffort=none only for trivial one-liners (hi/thanks/yes/no). " +
-  "toolFirstBias=true when user wants implement/run/test/show results/ship code now/build me X — even for hard-sounding or creative-subject tasks. " +
+  "toolFirstBias=true when user wants implement/run/test/show results/ship code now/build me X or inspection/decompilation of a selected artifact — even for hard-sounding or creative-subject tasks. " +
   "Lower reasoningWordBudget (80-200) when toolFirstBias=true; use brief thinkDepth. " +
   "essayRisk=true when task invites long design essays before tools (novel algorithms + implement, zero-shot challenges, big 'build me X' requests where the model might over-narrate). " +
   "thinkDepth=deep only for open ideation without a clear ship-now clause. NEVER deep on a coding turn with a runnable deliverable — that's how single-shot HTML writes stall mid-generation. " +
@@ -705,6 +706,24 @@ export function tryHeuristicToolFirstTurn(userMessage: string): TurnInferenceRes
   if (!msg || msg.length < 12 || msg.length > 1200) return null;
   if (/\b(?:web_search|web_fetch|research|essay|explain\s+why|write\s+a\s+(?:blog|paper|report))\b/i.test(msg)) {
     return null;
+  }
+
+  // An explicit artifact task needs tools even when its final output is prose.
+  // Keep definitions, hypothetical examples and negative instructions on the
+  // classifier path; this only selects a route, never authorizes tool execution.
+  const artifactPath = /\.(?:exe|dll|elf|so|dylib|bin|iso|apk|ipa|asar|msix|appx)\b/i.test(msg);
+  const conceptual = /^(?:what|why|when|who|how\s+(?:does|do|can|would|to)|explain|describe|teach|write\s+a\s+report|do\s+not|don't|never)\b/i.test(msg);
+  const artifactBuild = /\b(?:make|build|create|produce|port)\b[\s\S]{0,80}\b(?:playable|runnable|executable|exe|launcher|port)\b/i.test(msg);
+  const artifactAnalysis = /^(?:(?:hey|hi|okay|please)[,!]?\s+)*(?:(?:can|could|would|will)\s+(?:you|u)\s+(?:please\s+)?)?(?:decompile|disassemble|reverse[- ]engineer|use\s+rea|inspect|analy[sz]e)\b/i.test(msg);
+  if (artifactPath && !conceptual && (artifactBuild || artifactAnalysis)) {
+    const intent = artifactBuild ? "coding" : "execution";
+    const fb = fallbackReasoningBudget(intent, false);
+    return neutralTurnInferenceResult("heuristic_artifact_task", {
+      intent, complexity: fallbackComplexityForUserMessage(msg) === "complex" ? "complex" : "normal",
+      confidence: 0.92, toolFirstBias: true, thinkDepth: "brief",
+      reasoningEffort: fb.reasoningEffort, reasoningWordBudget: 140,
+      essayRisk: true, reasoningBudgetSource: "fallback",
+    });
   }
 
   const pathQuery =

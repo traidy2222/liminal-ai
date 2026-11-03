@@ -2,7 +2,7 @@
 
 All notable changes to [Liminal AI](https://github.com/traidy2222/liminal-ai) on the `main` branch.
 
-**Current stage:** **beta** (`v0.1.15`, 2026-11-03). Desktop downloads are published through the public preview release channel.
+**Current stage:** **beta** (`v0.1.16`, 2026-11-03). Desktop downloads are published through the public preview release channel.
 
 Format: **v0.0.x** entries keyed to the last GitHub push in each slice. Dates are real push dates.
 
@@ -17,9 +17,22 @@ After editing JSON: `npm run changelog:gen`, commit, push, then in [vireondynami
 
 ---
 
+## v0.1.16 — 2026-11-03 {#v0-1-16}
+
+**Current beta.** Legitimate artifact work starts with evidence.
+
+**Shipped**
+
+- **Tool-first artifact work** — Route selected binary/package analysis to execution and ISO-to-launcher requests to coding. Keep the normal tool surface available instead of classifying these tasks as background Q&A.
+- **Good-faith task handling** — Inspect the selected artifact, respect stated local-use and ownership context, and distinguish decompilation, emulator launchers and native ports. Avoid unsupported legal claims and accusations; explain actual technical blockers with evidence.
+- **Existing boundaries retained** — Tool approvals and concrete safety limits remain in place. Conceptual questions, quoted examples and explicit negative instructions do not trigger the artifact fast path.
+- **Docs** — [REA and local MCP](../guides/rea.md)
+
+---
+
 ## v0.1.15 — 2026-11-03 {#v0-1-15}
 
-**Current beta.** REA and local MCP tools, ready when you need them.
+REA and local MCP tools, ready when you need them.
 
 **Shipped**
 

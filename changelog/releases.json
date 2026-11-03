@@ -1,7 +1,19 @@
 {
   "stage": "beta",
-  "currentVersion": "0.1.15",
+  "currentVersion": "0.1.16",
   "releases": [
+    {
+      "version": "0.1.16",
+      "date": "2026-11-03",
+      "tagline": "Legitimate artifact work starts with evidence.",
+      "summary": "Treat concrete local inspection, decompilation and preservation requests as hands-on work. Use a reasonable legitimate interpretation instead of assuming piracy from a commercial title or file extension.",
+      "bullets": [
+        "**Tool-first artifact work** — Route selected binary/package analysis to execution and ISO-to-launcher requests to coding. Keep the normal tool surface available instead of classifying these tasks as background Q&A.",
+        "**Good-faith task handling** — Inspect the selected artifact, respect stated local-use and ownership context, and distinguish decompilation, emulator launchers and native ports. Avoid unsupported legal claims and accusations; explain actual technical blockers with evidence.",
+        "**Existing boundaries retained** — Tool approvals and concrete safety limits remain in place. Conceptual questions, quoted examples and explicit negative instructions do not trigger the artifact fast path."
+      ],
+      "docs": [{ "label": "REA and local MCP", "href": "../guides/rea.md" }]
+    },
     {
       "version": "0.1.15",
       "date": "2026-11-03",
