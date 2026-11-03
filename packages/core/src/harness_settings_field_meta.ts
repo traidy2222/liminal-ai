@@ -2261,7 +2261,7 @@ const _META_RAW: Record<string, HarnessSettingsFieldMeta> = {
     subgroupId: "harness_misc",
     label: "Gmail REST Send",
     description:
-      "Register gmail_create_draft, gmail_send_draft, and gmail_send_message (classic Gmail REST). Official Gmail MCP create_draft is plain-only; use REST for styled HTML drafts; gmail_send_draft sends an existing draft without recomposition. Uses the same OAuth token as MCP.",
+      "Register gmail_create_draft, gmail_send_draft, and gmail_send_message (classic Gmail REST). REST supports styled multipart drafts, attachments and explicit accounts; gmail_send_draft sends an existing draft without recomposition. Uses the same OAuth token as MCP.",
     valueKind: "boolean",
   },
   "AGENT_GOOGLE_CALENDAR_REST": {

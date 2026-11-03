@@ -1,10 +1,10 @@
 /**
- * Normalize remote MCP JSON schemas for harness validation.
- * Google MCP servers declare `integer` fields; JSON only has `number`.
+ * Copy remote MCP JSON schemas without changing their field names or types.
+ * The dispatcher supports JSON Schema's integer and number types directly.
  */
 import type { PropertySchema } from "./types.js";
 
-/** Canonical MCP field → common model aliases (also added to schema at registration). */
+/** Compatibility aliases, resolved only against a tool's declared remote fields. */
 export const MCP_FIELD_ALIASES: Record<string, string[]> = {
   pageSize: ["page_size", "limit", "maxResults", "max_results"],
   pageToken: ["page_token", "nextPageToken", "next_page_token"],
@@ -18,21 +18,19 @@ export const MCP_FIELD_ALIASES: Record<string, string[]> = {
   eventId: ["event_id"],
   resourceName: ["resource_name"],
   parentName: ["parent_name"],
-  name: ["displayName", "display_name", "title"],
+  displayName: ["display_name"],
+  draftId: ["draft_id"],
+  replyToMessageId: ["reply_to_message_id"],
+  htmlBody: ["body_html", "html_body", "html"],
 };
 
 export function normalizeMcpPropertyType(schema: PropertySchema): PropertySchema {
   const out: PropertySchema = { ...schema };
-  if (out.type === "integer") {
-    out.type = "number";
-  }
   if (out.items) {
     out.items = normalizeMcpPropertyType(out.items);
   }
   if (out.anyOf?.length) {
-    out.anyOf = out.anyOf.map((branch) =>
-      normalizeMcpPropertyType({ ...branch, anyOf: undefined })
-    );
+    out.anyOf = out.anyOf.map(normalizeMcpPropertyType);
   }
   if (out.properties) {
     const props: Record<string, PropertySchema> = {};
@@ -44,27 +42,13 @@ export function normalizeMcpPropertyType(schema: PropertySchema): PropertySchema
   return out;
 }
 
-/** Rewrite integer→number and register alias keys so models pass validation. */
+/** Copy properties without adding synthetic fields to the server contract. */
 export function expandMcpToolProperties(
   properties: Record<string, PropertySchema>
 ): Record<string, PropertySchema> {
   const out: Record<string, PropertySchema> = {};
   for (const [key, raw] of Object.entries(properties)) {
     out[key] = normalizeMcpPropertyType(raw);
-  }
-  for (const [canonical, aliases] of Object.entries(MCP_FIELD_ALIASES)) {
-    const base = out[canonical];
-    if (!base) continue;
-    for (const alias of aliases) {
-      if (!(alias in out)) {
-        out[alias] = {
-          ...base,
-          description: base.description
-            ? `${base.description} (alias for ${canonical})`
-            : `Alias for ${canonical}.`,
-        };
-      }
-    }
   }
   return out;
 }

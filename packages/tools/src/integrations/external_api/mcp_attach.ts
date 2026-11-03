@@ -28,7 +28,7 @@ import {
 } from "./api_connections_store.js";
 import { filterMcpToolRecords, isMcpReadTool, isMcpWriteTool } from "./mcp_tool_classify.js";
 import { registerConnectorToolFamilies } from "../../shared/connector_family_map.js";
-import { validateOutboundEmailStyle } from "../google/gmail_compose_guard.js";
+import { validateOutboundEmailFactual } from "../google/gmail_compose_guard.js";
 import { IDA_PARENT_PROVIDER } from "../ida/ida_connect.js";
 import { registerIdaCompanionTools, unregisterIdaCompanionTools } from "../ida/ida_companion_tools.js";
 import { injectIdaDatabaseArgs, wrapIdaMcpHandler } from "../ida/ida_session.js";
@@ -303,6 +303,13 @@ function buildMcpToolHandler(
       .filter(Boolean);
     const text = parts.join("\n").trim() || "[empty MCP response]";
     if (result.isError) {
+      if (record.name === "google_gmail" && (remoteProperties.messageId || remoteProperties.threadId) &&
+          /(?:status\s*404|requested entity was not found)/i.test(text)) {
+        return { ok: false, error:
+          `Gmail ${tool.remoteName}: message or thread not found (404). ` +
+          "Search this connection's mailbox again and copy the exact returned message ID or thread ID for the matching operation. " +
+          "Do not retry a guessed ID or substitute a thread ID for a message ID." };
+      }
       return { ok: false, error: enrichGoogleMcpProbeError(record.serverUrl, text) };
     }
     return { ok: true, output: text };
@@ -335,6 +342,14 @@ function buildMcpTool(record: McpConnectionRecord, tool: McpToolRecord): ToolDef
   const remoteProperties = rawProperties as Record<string, unknown>;
   const isWrite = isMcpWriteTool(tool.remoteName, tool.description);
   const isRead = isMcpReadTool(tool.remoteName, tool.description);
+  // Mailbox state changes between calls, including after our own mutations.
+  let isGmail = record.name === "google_gmail";
+  try {
+    isGmail ||= new URL(record.serverUrl).hostname === "gmailmcp.googleapis.com";
+  } catch {
+    // Non-URL transports retain the connection-name fallback.
+  }
+  const cacheable = isRead && !isWrite && !isGmail;
   let description = enrichGoogleMcpToolDescription(
     record.name,
     tool.remoteName,
@@ -345,12 +360,10 @@ function buildMcpTool(record: McpConnectionRecord, tool: McpToolRecord): ToolDef
   }
   let handler = buildMcpToolHandler(record, tool, remoteProperties);
   if (record.name === "google_gmail" && tool.remoteName === "create_draft") {
-    description +=
-      " — PLAIN body only. For outbound mail, compose formatted body_html + body in gmail_create_draft before calling any draft tool.";
     const inner = handler;
     handler = async (args) => {
-      const styleErr = validateOutboundEmailStyle(args);
-      if (styleErr) return { ok: false, error: styleErr };
+      const factualError = validateOutboundEmailFactual(args);
+      if (factualError) return { ok: false, error: factualError };
       return inner(args);
     };
   }
@@ -368,8 +381,8 @@ function buildMcpTool(record: McpConnectionRecord, tool: McpToolRecord): ToolDef
     },
     requiresApproval: isWrite,
     dangerLevel: isWrite ? "destructive" : "safe",
-    cacheable: isRead && !isWrite,
-    cacheTtlMs: isRead ? 30_000 : undefined,
+    cacheable,
+    cacheTtlMs: cacheable ? 30_000 : undefined,
     handler,
   });
 }
@@ -383,7 +396,8 @@ export function assignMcpToolNames(tools: McpToolRecord[], connName: string): vo
 
 export function registerMcpConnection(registry: ToolRegistry, record: McpConnectionRecord): string[] {
   const registered: string[] = [];
-  for (const t of record.tools) {
+  const tools = filterMcpToolRecords(record.tools, { readOnly: record.readOnly, toolFilter: record.toolFilter });
+  for (const t of tools) {
     if (registry.has(t.toolName)) registry.unregister(t.toolName);
     registry.register(buildMcpTool(record, t));
     registered.push(t.toolName);

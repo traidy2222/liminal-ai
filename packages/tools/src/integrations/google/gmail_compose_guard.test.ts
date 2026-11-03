@@ -87,6 +87,12 @@ test("isGmailThreadReply detects thread_id", () => {
   assert.equal(isGmailThreadReply({ to: ["a@b.com"] }), false);
 });
 
+test("official Gmail MCP replyToMessageId is recognized as a thread reply", () => {
+  const args = { replyToMessageId: "existing-api-message-id", body: "Thank you for the update.\n\nI have reviewed the details and will follow up tomorrow with the requested information." };
+  assert.equal(isGmailThreadReply(args), true);
+  assert.equal(validateOutboundEmailStyle(args), null);
+});
+
 test("isSubstantivePlainBody allows one-liners", () => {
   assert.equal(isSubstantivePlainBody("Tuesday works"), false);
   assert.equal(isSubstantivePlainBody("Dear team,\n\nLong paragraph here."), true);

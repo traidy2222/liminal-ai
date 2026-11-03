@@ -29,14 +29,14 @@ export function shouldInjectEmailComposeGuidance(text: string): boolean {
  * before any tool call (not only after validation failures).
  */
 export const EMAIL_COMPOSE_MENTAL_MODEL = `## Outbound email (default)
-When the user wants mail sent or drafted, your **first** \`gmail_create_draft\` / \`outlook_create_draft\` call is the finished product: **subject + formatted \`body_html\` + plain \`body\` together**. Compose the full styled HTML in your reasoning first; the tool call delivers it — not plain text to upgrade later. Plain-only is only for thread replies (\`thread_id\` / \`reply_to_message_id\`) and one-liners. Never draft the letter in chat prose, never \`write_file\` workspace HTML, never \`mcp_google_gmail_create_draft\` for styled outbound mail.`;
+When the user wants mail sent or drafted, your **first** \`gmail_create_draft\` / \`outlook_create_draft\` call is the finished product: **subject + formatted \`body_html\` + plain \`body\` together**. Compose the full styled HTML in your reasoning first; the tool call delivers it — not plain text to upgrade later. Plain-only is only for thread replies (\`thread_id\` / \`reply_to_message_id\`) and one-liners. Never draft the letter in chat prose, never \`write_file\` workspace HTML, prefer REST compose helpers for attachments, multipart MIME and explicit account selection; discovered MCP drafts may also support \`htmlBody\`.`;
 
 /** Per-turn planning injection — what to produce before invoking compose tools. */
 export const EMAIL_COMPOSE_TURN_INJECTION =
   "[EMAIL COMPOSE] Plan the **finished HTML email** before any tool call. " +
   "Your **first** gmail_create_draft / outlook_create_draft must already contain: `subject`, formatted `body_html` (nested `<table>` / inline styles, R-EMAIL-STYLE), and plain `body` fallback. " +
   "The tool call **is** the email — not a rough draft to fix later. " +
-  "Use gmail_create_draft (REST), not mcp_google_gmail_create_draft (plain-only). " +
+  "Prefer gmail_create_draft (REST) for explicit accounts, attachments and multipart mail. The discovered MCP create_draft schema may also support htmlBody. " +
   "Do not write the letter in chat. Do not write_file workspace .html/.md. " +
   "Write about **only what the user asked this turn** — not recipes, memory verticals, persona, or vault unless they named that industry. " +
   "Signer name from memory is OK. Skip email_style_infer unless they asked for a specific visual style; default neutral professional B2B HTML. " +

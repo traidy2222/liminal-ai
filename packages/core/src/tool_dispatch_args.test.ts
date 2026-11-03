@@ -137,7 +137,6 @@ test("prepareToolArgsForValidation strips hallucinated mcp_google fields", () =>
     additionalProperties: false,
     properties: {
       pageSize: { type: "number" },
-      page_size: { type: "number" },
       pageToken: { type: "string" },
     },
   };
