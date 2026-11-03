@@ -24,10 +24,11 @@ Google documents [`search_threads`](https://developers.google.com/workspace/gmai
 - Retain JSON Schema integer types and fractional number values. The dispatcher already understands both.
 - Recognize the official MCP reply field and remove obsolete claims that MCP drafts are plain-text only. Plain-text drafts remain valid without decorative HTML; factual-content and approval checks remain in place. REST helpers remain available for account-specific compose, attachments and sending saved drafts.
 - Treat trash, spam, reply and forward actions as writes, including in read-only filtering. Copy exact IDs from the bound mailbox's search/read results; a 404 now requests refreshed IDs rather than returning Google's backend stack trace.
+- Fetch Gmail reads freshly. A dispatcher regression showed that the old 30-second cache hid a newly created label from the next read; caching could also outlive a rebound account connection.
 
 ## Verification
 
-- Reproduced schema, draft and permission failures, then 41 focused checks passed. Workspace build and typecheck passed.
+- Reproduced schema, draft, permission and stale-read failures, then 42 focused checks passed. Workspace build and typecheck passed.
 - Live Gmail search and thread reads passed without printing message contents.
 - The old dispatcher failed a label request before network access. The repaired dispatcher created one uniquely named empty label through its approval gate; the test then deleted that exact label. No messages were changed or sent.
 - For the account's 23 discovered Gmail tools, parameter definitions decreased from 96 fields / 85,040 characters to the server's 53 fields / 27,241 characters: 68% fewer schema characters. This is measured schema overhead, not a measured first-token latency claim.

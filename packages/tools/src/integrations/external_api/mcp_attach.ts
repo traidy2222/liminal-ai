@@ -342,6 +342,8 @@ function buildMcpTool(record: McpConnectionRecord, tool: McpToolRecord): ToolDef
   const remoteProperties = rawProperties as Record<string, unknown>;
   const isWrite = isMcpWriteTool(tool.remoteName, tool.description);
   const isRead = isMcpReadTool(tool.remoteName, tool.description);
+  // Mailbox state changes between calls, including after our own mutations.
+  const cacheable = isRead && !isWrite && record.name !== "google_gmail";
   let description = enrichGoogleMcpToolDescription(
     record.name,
     tool.remoteName,
@@ -373,8 +375,8 @@ function buildMcpTool(record: McpConnectionRecord, tool: McpToolRecord): ToolDef
     },
     requiresApproval: isWrite,
     dangerLevel: isWrite ? "destructive" : "safe",
-    cacheable: isRead && !isWrite,
-    cacheTtlMs: isRead ? 30_000 : undefined,
+    cacheable,
+    cacheTtlMs: cacheable ? 30_000 : undefined,
     handler,
   });
 }

@@ -24,7 +24,7 @@ After editing JSON: `npm run changelog:gen`, commit, push, then in [vireondynami
 **Shipped**
 
 - **Correct MCP arguments** — Preserve declared fields such as Gmail displayName, native snake_case keys and fractional numeric values. Compatibility aliases are resolved against the current tool, without adding extra model-facing fields.
-- **Accurate Gmail behavior** — Recognize replyToMessageId, accept valid plain-text MCP drafts, describe HTML-capable drafts correctly and recover from unknown message IDs with a fresh search instead of replaying backend stack traces. Trash, spam, reply and forward actions are classified as writes.
+- **Accurate Gmail behavior** — Recognize replyToMessageId, accept valid plain-text MCP drafts, describe HTML-capable drafts correctly and recover from unknown message IDs with a fresh search instead of replaying backend stack traces. Trash, spam, reply and forward actions are classified as writes. Gmail reads stay fresh after mailbox changes.
 - **Verified live** — Reproduced the old dispatcher failure, created one uniquely named empty label with the repaired dispatcher and removed it. Gmail search and thread reads passed; no messages were changed or sent. The connected Gmail parameter schemas shrank by 68%.
 - **Docs** — [Gmail MCP review](../reviews/gmail-mcp.md)
 
