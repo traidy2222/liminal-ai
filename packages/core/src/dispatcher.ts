@@ -15,6 +15,7 @@ import {
 } from "./integration_connect.js";
 import { resolveWorkspaceRoot } from "./workspace_root.js";
 import { isRecoverableToolFailure } from "./tool_circuit.js";
+import { localValidationSchema } from "./local_schema_ref.js";
 
 function autoApproveToolSet(): Set<string> {
   const raw = effectiveHarnessEnvRaw("AGENT_AUTO_APPROVE_TOOLS")?.trim();
@@ -127,7 +128,7 @@ function validateArgs(
   for (const [key, val] of Object.entries(args)) {
     const propSchema = schema.properties[key];
     if (!propSchema) continue;
-    const err = validateValue(key, val, propSchema);
+    const err = validateValue(key, val, localValidationSchema(propSchema, schema));
     if (err) return err;
   }
   return null;

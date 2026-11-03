@@ -1,4 +1,5 @@
 import type { PropertySchema, ToolParameterSchema } from "./types.js";
+import { localValidationSchema } from "./local_schema_ref.js";
 
 /** Parse model-emitted JSON that may be double-encoded or a single object. */
 export function coerceJsonArrayValue(val: unknown): unknown {
@@ -97,7 +98,7 @@ export function coerceArgsToSchema(
 ): Record<string, unknown> {
   const out: Record<string, unknown> = { ...args };
   for (const [key, propSchema] of Object.entries(schema.properties)) {
-    if (key in out) out[key] = coerceValueToSchema(out[key], propSchema);
+    if (key in out) out[key] = coerceValueToSchema(out[key], localValidationSchema(propSchema, schema));
   }
   return out;
 }

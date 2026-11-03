@@ -86,6 +86,11 @@ interface JsonRpcResponse<T> {
   error?: { code: number; message: string; data?: unknown };
 }
 
+function describeRpcError(error: { code: number; message: string; data?: unknown }): string {
+  return `MCP error ${error.code}: ${error.message}` +
+    (error.data === undefined ? "" : `\n${JSON.stringify({ error })}`);
+}
+
 function readMcpSessionId(res: Response): string | undefined {
   return res.headers.get("mcp-session-id")?.trim() || undefined;
 }
@@ -95,13 +100,62 @@ interface McpJsonRpcResult<T> {
   sessionId?: string;
 }
 
+function isExpectedRpcReply<T>(value: unknown, id: unknown): value is JsonRpcResponse<T> {
+  if (!value || typeof value !== "object") return false;
+  const reply = value as JsonRpcResponse<T>;
+  return reply.jsonrpc === "2.0" && reply.id === id &&
+    (Object.hasOwn(reply, "result") || Object.hasOwn(reply, "error"));
+}
+
+/** Read complete SSE events, not individual data lines or the stream's EOF. */
+async function readSseRpcReply<T>(res: Response, id: unknown): Promise<JsonRpcResponse<T>> {
+  if (!res.body) throw new Error("MCP SSE response has no body");
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  let buffered = "";
+  function eventReply(event: string): JsonRpcResponse<T> | undefined {
+    const data = event.split(/\r\n|\r|\n/).filter(line => line.startsWith("data:"))
+      .map(line => line.slice(5).replace(/^ /, "")).join("\n");
+    if (!data || data === "[DONE]") return;
+    try {
+      const parsed: unknown = JSON.parse(data);
+      if (isExpectedRpcReply<T>(parsed, id)) return parsed;
+    } catch { /* Heartbeats, notifications and unrelated messages are not this response. */ }
+  }
+  try {
+    for (;;) {
+      const { value, done } = await reader.read();
+      buffered += done ? decoder.decode() : decoder.decode(value, { stream: true });
+      let boundary: RegExpExecArray | null;
+      while ((boundary = /\r\n\r\n|\n\n|\r\r/.exec(buffered))) {
+        const event = buffered.slice(0, boundary.index);
+        buffered = buffered.slice(boundary.index + boundary[0].length);
+        const reply = eventReply(event);
+        if (reply) return reply;
+      }
+      if (done) {
+        const reply = eventReply(buffered);
+        if (reply) return reply;
+        throw new Error("MCP SSE response contained no matching JSON-RPC response ID");
+      }
+    }
+  } finally {
+    // MCP may keep a stream open after its response. Release this request only;
+    // never close the connector session or retry a possibly completed operation.
+    await reader.cancel().catch(() => undefined);
+    reader.releaseLock();
+  }
+}
+
 async function postJsonRpc<T>(
   serverUrl: string,
   body: object,
   auth: AuthScheme,
   expectReply: boolean,
-  sessionId?: string
+  sessionId?: string,
+  signal?: AbortSignal,
 ): Promise<McpJsonRpcResult<T>> {
+  signal?.throwIfAborted();
   const headers: Record<string, string> = {
     "Content-Type": "application/json",
     Accept: "application/json, text/event-stream",
@@ -109,6 +163,8 @@ async function postJsonRpc<T>(
   };
   if (sessionId) headers["Mcp-Session-Id"] = sessionId;
   const payload = JSON.stringify(body);
+  const requestSignal = signal ? AbortSignal.any([signal, AbortSignal.timeout(MCP_FETCH_TIMEOUT_MS)])
+    : AbortSignal.timeout(MCP_FETCH_TIMEOUT_MS);
   const res =
     auth.kind === "aws_iam"
       ? await awsSignedFetch(
@@ -118,7 +174,7 @@ async function postJsonRpc<T>(
             headers,
             body: payload,
             auth,
-            signal: AbortSignal.timeout(MCP_FETCH_TIMEOUT_MS),
+            signal: requestSignal,
           },
           MCP_FETCH_TIMEOUT_MS
         )
@@ -126,7 +182,7 @@ async function postJsonRpc<T>(
           method: "POST",
           headers,
           body: payload,
-          signal: AbortSignal.timeout(MCP_FETCH_TIMEOUT_MS),
+          signal: requestSignal,
         });
   const nextSessionId = readMcpSessionId(res) ?? sessionId;
   if (!expectReply) {
@@ -137,24 +193,13 @@ async function postJsonRpc<T>(
     throw new Error(`HTTP ${res.status} ${res.statusText}`);
   }
   const ct = res.headers.get("content-type") ?? "";
+  const requestId = (body as { id?: number | string }).id;
   if (ct.includes("text/event-stream")) {
-    const text = await res.text();
-    for (const line of text.split(/\r?\n/)) {
-      if (!line.startsWith("data:")) continue;
-      const payload = line.slice(5).trim();
-      if (!payload || payload === "[DONE]") continue;
-      try {
-        const parsed = JSON.parse(payload) as JsonRpcResponse<T>;
-        if (parsed && parsed.jsonrpc === "2.0") {
-          return { reply: parsed, sessionId: nextSessionId };
-        }
-      } catch {
-        /* continue */
-      }
-    }
-    throw new Error("SSE response contained no JSON-RPC payload");
+    return { reply: await readSseRpcReply<T>(res, requestId), sessionId: nextSessionId };
   }
-  return { reply: (await res.json()) as JsonRpcResponse<T>, sessionId: nextSessionId };
+  const reply: unknown = await res.json();
+  if (!isExpectedRpcReply<T>(reply, requestId)) throw new Error("MCP JSON-RPC response ID did not match the request or response shape is invalid");
+  return { reply, sessionId: nextSessionId };
 }
 
 interface McpToolsListResult {
@@ -339,17 +384,25 @@ function buildMcpToolHandler(
         },
         record.auth,
         true,
-        record.mcpSessionId
+        record.mcpSessionId,
+        context?.signal,
       );
       if (rpc.sessionId) record.mcpSessionId = rpc.sessionId;
       reply = rpc.reply;
       }
     } catch (e) {
+      // The stdio SDK rejects JSON-RPC errors. Preserve the server's structured
+      // diagnostics just as for HTTP; they may contain retained Evidence IDs.
+      if (e && typeof e === "object" && "code" in e && typeof e.code === "number" &&
+          "message" in e && typeof e.message === "string") {
+        return { ok: false, error: describeRpcError({ code: e.code, message: e.message,
+          ...("data" in e ? { data: e.data } : {}) }) };
+      }
       const raw = e instanceof Error ? e.message : String(e);
       return { ok: false, error: enrichGoogleMcpProbeError(record.serverUrl ?? "", `transport error: ${raw}`) };
     }
     if (!reply) return { ok: false, error: "no response" };
-    if (reply.error) return { ok: false, error: `MCP error ${reply.error.code}: ${reply.error.message}` };
+    if (reply.error) return { ok: false, error: describeRpcError(reply.error) };
     const result = reply.result ?? {};
     const text = await renderMcpResult(result, record.name);
     if (result.isError) {

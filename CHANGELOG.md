@@ -2,7 +2,7 @@
 
 All notable changes to [Liminal AI](https://github.com/traidy2222/liminal-ai) are documented here and on the docs portal: [docs.vireondynamics.com/liminal/reference/changelog](https://docs.vireondynamics.com/liminal/reference/changelog).
 
-**Current stage:** **beta** (`v0.1.21` tip of `main`, 2026-11-03). Desktop downloads are published through the public preview release channel.
+**Current stage:** **beta** (`v0.1.22` tip of `main`, 2026-11-04). Desktop downloads are published through the public preview release channel.
 
 **Single source:** edit [`changelog/releases.json`](changelog/releases.json), then run `npm run changelog:gen`.
 
@@ -10,7 +10,13 @@ Format: **v0.0.x** entries keyed to the last GitHub push in each slice. Dates ar
 
 Marketing (richer notes): [vireondynamics.com/liminal/changelog](https://www.vireondynamics.com/liminal/changelog)
 
-## [v0.1.21] — 2026-11-03 — Current beta
+## [v0.1.22] — 2026-11-04 — Current beta
+
+Repair the observed REA 6.4/IDA headless readiness and cleanup failures, add complete validation for the observed recursive archive profile, preserve exact native code evidence, and verify saved findings before handing work back. Unknown formats and undecoded asset structures remain explicit.
+
+[Full notes](https://docs.vireondynamics.com/liminal/reference/changelog#v0-1-22)
+
+## [v0.1.21] — 2026-11-03
 
 Repair failures found while benchmarking local PS2 and PC game analysis: bounded binary and disc-image tools, raw-byte metadata, useful retries after script repairs, reliable PowerShell modules and foreground cancellation. Explicitly requested artifact providers must be attempted before a run can claim completion.
 

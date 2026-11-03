@@ -8,6 +8,45 @@ import os from "node:os";
 import { AgentEmitter, ToolDispatcher, ToolRegistry } from "@liminal/core";
 import { readBinaryTool } from "./read_binary.js";
 
+test("bounded binary reads expose documented header fields without inventing a global table or full object decode", async (t) => {
+  const line = Buffer.from(
+    "NetImmerse File Format, Version 4.0.0.2\n",
+    "ascii",
+  );
+  const fields = Buffer.alloc(12);
+  fields.writeUInt32LE(0x04000002, 0);
+  fields.writeUInt32LE(3, 4);
+  fields.writeUInt32LE(6, 8);
+  const { source } = await fixture(
+    t,
+    Buffer.concat([line, fields, Buffer.from("NiNode"), Buffer.alloc(16)]),
+  );
+  const result = await readBinaryTool.handler({ path: source, length: 256 });
+  assert(result.ok);
+  const value = JSON.parse(result.output);
+  assert.equal(value.format_observation.status, "header_fields_observed");
+  assert.equal(value.format_observation.ascii_version, "4.0.0.2");
+  assert.equal(
+    value.format_observation.fields.declared_num_blocks.offset,
+    line.length + 4,
+  );
+  assert.equal(value.format_observation.fields.declared_num_blocks.value, 3);
+  assert.equal(value.format_observation.first_inline_block.type, "NiNode");
+  assert.match(value.format_observation.next_check, /inline.*not a global/);
+  assert(
+    value.format_observation.limitations.some((text: string) =>
+      /have not been validated/.test(text),
+    ),
+  );
+  const later = await readBinaryTool.handler({
+    path: source,
+    offset: 1,
+    length: 64,
+  });
+  assert(later.ok);
+  assert.equal(JSON.parse(later.output).format_observation, undefined);
+});
+
 async function fixture(t: TestContext, bytes = Buffer.alloc(0)) {
   const root = await mkdtemp(path.join(os.tmpdir(), "liminal-read-binary-"));
   const source = path.join(root, "selected binary.dat");

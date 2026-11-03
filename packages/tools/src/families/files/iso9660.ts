@@ -5,6 +5,7 @@
  * UDF, Joliet, Rock Ridge, interleaving and multi-extent files are not decoded.
  */
 import { open, type FileHandle } from "node:fs/promises";
+import { observeNativeBinaryHeader } from "@liminal/core";
 
 const SECTOR = 2048;
 const MAX_DIRECTORY_BYTES = 4 * 1024 * 1024;
@@ -348,7 +349,7 @@ export class Iso9660Image {
   }
 }
 
-export function observeDiscFileHeader(bytes: Buffer): Record<string, unknown> {
+export function observeDiscFileHeader(bytes: Buffer, sourceSize?: number): Record<string, unknown> {
   const result: Record<string, unknown> = {
     header_hex: bytes.subarray(0, 64).toString("hex"),
   };
@@ -377,5 +378,9 @@ export function observeDiscFileHeader(bytes: Buffer): Record<string, unknown> {
       }
     }
   } else result.format = "unknown from bounded header";
+  if (sourceSize !== undefined) {
+    const native = observeNativeBinaryHeader(bytes, sourceSize);
+    if (native) result.native_header = native;
+  }
   return result;
 }

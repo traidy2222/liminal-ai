@@ -62,7 +62,7 @@ ordinary writes/cleanup only in their isolated output directory.
 | MCP initialize guidance was discarded | Preserve connector-scoped untrusted guidance, with retained full text for long instructions and lazy legacy-record recovery |
 | An explicitly requested artifact provider could be silently skipped | A bounded completion check for grounded local artifact actions, excluding conceptual/documentation/negative requests |
 
-## Observed runs
+## Initial observed runs (0.1.21 investigation)
 
 | Probe | Runtime | Seconds | Tool calls / failures | Independently checked result |
 | --- | --- | ---: | ---: | --- |
@@ -83,13 +83,11 @@ export was produced. The saved Fry container matches the independent digest, but
 its inventory and parser are not certified solely by that one successful extract.
 
 The focused launcher probe reached real IDA/Hex-Rays analysis, then subsequent
-operations returned `unreadable_output`. This backend instability remains
-unresolved. The saved pseudocode covers an MFC WinMain body, not a reconstruction
-of the game engine. Unsupported PS2 MIPS decompilation on the available Windows
-provider also remains a technical limit. These probes demonstrate usable tool
+operations returned `unreadable_output`. This was still unresolved in the initial 0.1.21 investigation; the follow-up below reproduces and repairs it. The saved pseudocode covers an MFC WinMain body, not a reconstruction
+of the game engine. At that stage the available Windows provider also rejected PS2 MIPS; the follow-up verifies a narrow static profile instead of assuming all MIPS variants work. These probes demonstrate usable tool
 execution and some completed evidence, not error-free reverse engineering.
 
-## Validation
+## Initial validation
 
 Synthetic regressions cover malformed indexes, byte accuracy, sparse large files,
 pagination, no overwrite, path/junction escapes, cancellation, late results,
@@ -105,3 +103,134 @@ real PowerShell/cancellation fixtures on Windows.
 A provider's unsupported architecture or operation is reported as a technical
 limit. A complete inventory or recovered container does not establish original
 source recovery, a runnable port, or a validated character/animation conversion.
+
+
+## REA backend and unfamiliar-format follow-up (0.1.22)
+
+The follow-up retained the configured model and provider. Source images and the
+nine existing Futurama tool scripts were not modified. No target was executed,
+installed or downloaded. Fresh model runs had isolated output/memory profiles;
+independent validators checked source bytes and complete outputs rather than
+accepting `terminationReason:ok` as proof of correct interpretation.
+
+### Reproduced backend failures
+
+The failures were reproduced directly through the installed REA SDK, outside
+Liminal's MCP adapter. REA 6.4.0 rejected valid busy IDA health, and headless IDA
+did not advance queued automatic analysis after decompilation. Acknowledged
+worker cleanup could race registry settlement. Valid decompiler limitations and
+function lookup misses were erased into generic unreadable-output errors.
+
+The explicit local repair is pinned to REA 6.4.0 and ida-pro-mcp 2.0.0 versions
+and exact original/patched fingerprints. It creates immutable original backups,
+refuses unknown layouts, and restores previous bytes if application fails.
+Health-only polling is bounded; analysis operations are never replayed. Owned
+headless analysis advances in bounded steps without forcing readiness. Cleanup
+polls only the inventory after acknowledged close and never ignores active or
+owned rows. Model settings, keys, registrations and approval policy are unchanged.
+See [REA compatibility guidance](../guides/rea.md) and the repository's
+[repair implementation](https://github.com/traidy2222/liminal-ai/tree/main/scripts/rea-ida-backend).
+
+Actual direct native checks completed all 12 operations in the original
+readiness reproducer and released the owned database. Both supplied PS2 boot
+executables also completed real health, procedure list, pseudocode, assembly and
+dossier operations. The verified admission extension is limited to their
+ELF32 little-endian executable MIPS profile (`e_flags=0x20924001`); installed
+engines and licenses still determine availability. Other MIPS variants are not
+silently admitted.
+
+### Complete archive evidence
+
+Two independently implemented readers agree on the complete observed Futurama
+IMG index: **4,377 records, 4,124 files and 253 directories**, consuming exactly
+99,676 index bytes. Directory tags, recursive span boundaries, absolute name
+alignment and size/offset ordering are validated. All file extents are in
+bounds, sector-aligned and nonoverlapping. The index SHA-256 is
+`03ce325d9840c4731b470ff96c5d1efa66c66583703c61ec3c005f104b7d41b4`.
+The production inspection reads 99,936 bytes of the 808,962,128-byte archive for
+this index/prefix check; it does not hash or decode every payload.
+
+`inspect_binary_archive` supplies the full inventory and a standalone,
+parameterized, read-only Python reference parser. Its actual complete output was
+rerun and compared record by record against the independent oracle.
+`extract_archive_file` validates an exact member and saves its streamed byte
+hash. For `chars/fry.ucf`, offset 17,006,592 and size 2,989,668 produce SHA-256
+`c33c61af38c135687aaf93c48be2f25f2ecc98ba1cbc6c085eaa3def72fe7af9`.
+Other verified Fry-family members also satisfy a request for one related record.
+This profile is explicit and structural; `.img` alone does not identify it.
+
+The NetImmerse 4.x header decoder observes version-specific fields and the first
+inline type prefix only. In this `fry.ucf`, binary version is a little-endian u32
+at byte 40, declared block count is 8,831 at byte 44, and the first inline type is
+`NiSequence`. The four binary version bytes are not a NUL plus an unknown
+constant; the declared block count is not a first-object payload size. No mesh,
+bone hierarchy, skin weights or animation keyframes were structurally decoded.
+
+### Model workflow findings and completed probes
+
+Intermediate failures remain part of the result. Earlier probes saved a partial
+4,370-record inventory with thousands of invalid extents, omitted requested
+reports at the actual round/time limit, or ignored a correctly validated index
+and rewrote obsolete layouts. A native probe retyped one identifier while
+claiming verbatim code. Another used incorrect entry arithmetic despite correct
+segment fields. A later archive probe completed the inventory, reference parser,
+extraction and reports but falsely interpreted known NIF header fields and
+misstated the byte range containing some strings. Those are failed interpretations,
+not passing whole workflows.
+
+The repairs preserve validated index milestones and partial checkpoints, allow a
+useful diagnostic reasoning budget after fallback resolution, retain exact MCP
+responses and code artifacts, provide bounded JSON-pointer views, and expose
+native address mappings plus measured entry bytes directly from ISO tools.
+Requested JSON/Markdown destinations are checked on disk. Explicit source-bound
+JSON entry-offset contradictions are rejected. One same-model final evidence
+review checks measured header facts, inferred semantics and owned cleanup; it is
+not an independent semantic certification.
+
+| Follow-up probe | Seconds | Calls / failures | Independently checked result |
+| --- | ---: | ---: | --- |
+| Futurama, final archive run | 288 | 57 / 3 | All index records, exact reference parser rerun, Fry byte hash, correct version/count fields, both reports and explicit payload-decoder limit verified |
+| Ghost Rider, final native run | 284 | 47 / 9 | Boot identity, mapped entry bytes, exact IDA start pseudocode, both reports and acknowledged session close verified |
+| NFS launcher, final focused run | 170 | 25 / 2 | Exact provider code and evidence identifiers saved, conservative report, final handoff and owned close verified |
+| NFS actual game executable, earlier focused run | 551 | 100 / 18 | Verified saved provider code; observed loader/protection boundary rather than invented game logic |
+
+Ghost Rider's entry VA `0x25b718` maps through its PT_LOAD segment to file offset
+`0x15c718` (1,427,224), including `p_offset=0x1000`. Its measured first entry bytes
+are `280c007028140070281c007028240070`. The final native run had no unreadable-output
+or cleanup errors. Its broader report still shortened one ancillary module path
+incorrectly; the table certifies the named critical checks, not every prose claim.
+The NFS launcher is an MFC/CRT launcher, not the game engine. Its final run likewise
+had no unreadable-output or cleanup errors, but tried one unavailable operation.
+
+The final archive run was also checked against raw source bytes for the saved
+header fields, reported identifier strings and pattern counts. Its detailed
+findings correctly separate those observations from decoded objects. Any short
+headline about locating skeleton/animation content should be read as candidate
+strings, not recovered hierarchy or clips. The validated milestone is the archive,
+parser, inventory and Fry record; payload conversion remains unresolved.
+
+These are diagnostic observations across changing candidates, not repeated
+identical trials or a statistically established reliability rate. Unsupported
+operations, model argument mistakes, local program errors and backend failures
+are counted separately by the private validator. Completed static evidence does
+not establish original source recovery, a runnable port, protection removal or
+full character/animation conversion. Arbitrary unfamiliar formats still require
+measured hypotheses, a matching schema or an honest partial handoff.
+
+### Follow-up validation
+
+The compiled package build and workspace typecheck pass. The affected source
+checks cover 109 focused regressions; the pinned compatibility repair additionally
+passes 27 JavaScript and four Python checks. CI runs the relevant archive, header,
+MCP, argument-contract and persistence checks on Linux and Windows. Private game
+bytes, model traces, generated game code and credentials are excluded from Git.
+
+
+Windows CI additionally reproduced a newer Python timestamp portability issue in
+the reference parser: path-based `stat` and descriptor-based `fstat` can expose
+different `st_ctime_ns` conventions for the same unchanged file. The parser now
+binds file identity/size/mtime across APIs on open, then compares each final
+observation against its own initial API observation. Timestamp changes and file
+replacement still fail. The regression reproduces the mismatched conventions
+and separately checks real drift/replacement; see the
+[CPython issue](https://github.com/python/cpython/issues/157671).

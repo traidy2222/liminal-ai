@@ -1,5 +1,7 @@
 import { buildReasoningRequestParams } from "./reasoning_request.js";
 import { requestedArtifactConnectors, missingArtifactConnectors } from "./artifact_connector_requirements.js";
+import { ArtifactInvestigationLedger } from "./artifact_investigation.js";
+import { archiveLargeMcpOutput } from "./mcp_output_view.js";
 import { isRecoverableToolFailure } from "./tool_circuit.js";
 import { createHash } from "node:crypto";
 import { SignatureWorkflowRun, SIGNATURE_WORKFLOWS, isSignatureWorkflowPreset, parseSignatureCommand, type SignatureWorkflowPreset } from "./signature_workflows.js";
@@ -319,6 +321,8 @@ import {
   resolveMemoryPolicy,
   buildRoutingProfile,
   classifyLocalArtifactTask,
+  withArtifactDiagnosticBudget,
+  isUnfamiliarArtifactInvestigation,
   type IntentInferenceWorkspaceContext,
   type TurnInferenceResult,
   type RoutingProfile,
@@ -1372,6 +1376,10 @@ export class AgentHarness {
   private pendingToolCallsThisSend = new Map<string, string>();
   private requestedArtifactConnectorsThisSend: string[] = [];
   private artifactConnectorContinuationAttempted = false;
+  private artifactInvestigation: ArtifactInvestigationLedger | null = null;
+  private artifactReportContinuationAttempted = false;
+  private artifactEvidenceReviewAttempted = false;
+  private artifactCleanupContinuationAttempted = false;
   private programFailuresThisSend = 0;
   private recoveryReasoningBroadenedThisSend = false;
   /** Last tool list passed to the provider stream — used for live context snapshots. */
@@ -3240,6 +3248,13 @@ export class AgentHarness {
     this.pendingToolCallsThisSend.clear();
     this.requestedArtifactConnectorsThisSend = [];
     this.artifactConnectorContinuationAttempted = false;
+    this.artifactInvestigation = !openingTurn && classifyLocalArtifactTask(userMessage)
+      ? new ArtifactInvestigationLedger({workspaceRoot: resolveWorkspaceRoot(), taskId: `${this.taskId}:${this.currentTurnTraceId}`, goal: userMessage,
+          allowExternalSourceDiscovery: effectiveHarnessEnvRaw("AGENT_WORKSPACE_BOUND") !== "1"})
+      : null;
+    this.artifactReportContinuationAttempted = false;
+    this.artifactEvidenceReviewAttempted = false;
+    this.artifactCleanupContinuationAttempted = false;
     this.programFailuresThisSend = 0;
     this.recoveryReasoningBroadenedThisSend = false;
     this.lastStreamTools = [];
@@ -3519,13 +3534,17 @@ export class AgentHarness {
               essayRisk: this.turnInference.essayRisk === true,
             }
           : undefined;
-      let budget = tightenReasoningBudgetForUserMessage(
-        resolveReasoningBudget(this.turnInference, learnedEffort),
-        userMessage,
-        llmSignals
-      );
+      const inferredBudget = resolveReasoningBudget(this.turnInference, learnedEffort);
+      let budget = isUnfamiliarArtifactInvestigation(userMessage)
+        ? withArtifactDiagnosticBudget(inferredBudget, userMessage)
+        : tightenReasoningBudgetForUserMessage(inferredBudget, userMessage, llmSignals);
       budget = applySurfaceToBudget(budget, this._turnReasoningSurface);
       this._turnReasoningBudget = budget;
+      if (this.artifactInvestigation) {
+        const priorWork = await this.artifactInvestigation.discoverPriorWork();
+        if (priorWork) this.context.appendMessage({role: "user", content: priorWork});
+        this.context.appendMessage({role: "system", content: this.artifactInvestigation.formatContextBlock()});
+      }
       this.context.appendMessage({
         role: "system",
         content: buildReasoningSurfaceInjection(surfaceRes, routingModel),
@@ -4002,9 +4021,16 @@ export class AgentHarness {
           this.pendingAssistantTextThisSend = "";
         }
         const timedOut = this.currentTurnController?.signal.reason?.name === "TimeoutError";
-        const handoff = timedOut
+        let checkpointNote = "";
+        if (this.artifactInvestigation) {
+          try {
+            const checkpoint = await this.artifactInvestigation.persistCheckpoint();
+            checkpointNote = ` Partial investigation checkpoint: ${checkpoint.jsonPath}.`;
+          } catch { checkpointNote = " The investigation checkpoint could not be saved; inspect existing outputs."; }
+        }
+        const handoff = (timedOut
           ? "Stopped at the turn time limit before completion. Saved outputs are retained; remaining work is incomplete."
-          : "Stopped before completion. Saved outputs are retained; remaining work is incomplete.";
+          : "Stopped before completion. Saved outputs are retained; remaining work is incomplete.") + checkpointNote;
         this.context.appendMessage({role: "assistant", content: handoff});
         this.emitter.emit("text", {channel: "user", delta: `\n\n${handoff}`});
         this.emitTurnEnd(timedOut ? "timeout" : "aborted");
@@ -5209,6 +5235,7 @@ export class AgentHarness {
     // Capture this send's signal: timeout cleanup may clear the controller
     // while an already-running operation is still settling.
     const turnSignal = this.currentTurnController?.signal;
+    const artifactInvestigation = this.artifactInvestigation;
     const turnStopped = () => this.abortSignal?.aborted === true || turnSignal?.aborted === true;
     const assertTurnActive = () => {
       if (!turnStopped()) return;
@@ -5219,6 +5246,17 @@ export class AgentHarness {
     assertTurnActive();
 
     if (round >= this.config.maxToolRoundsPerTurn) {
+      if (artifactInvestigation) {
+        let checkpointNote = "";
+        try {
+          const checkpoint = await artifactInvestigation.persistCheckpoint();
+          assertTurnActive();
+          checkpointNote = ` Partial investigation checkpoint: ${checkpoint.jsonPath}.`;
+        } catch { assertTurnActive(); }
+        const handoff = `Reached the configured tool-round limit (${this.config.maxToolRoundsPerTurn}) before completion. Saved outputs are retained; remaining work is incomplete.${checkpointNote}`;
+        this.context.appendMessage({role: "assistant", content: handoff});
+        this.emitter.emit("text", {channel: "user", delta: `\n\n${handoff}`});
+      }
       this.emitTurnEnd("round_cap");
       this.emitter.emit("error", {
         err: new Error(
@@ -6463,6 +6501,11 @@ export class AgentHarness {
       for (let i = 0; i < toolCalls.length; i++) {
         const tc = toolCalls[i]!;
         const r = results[i]!;
+        if (artifactInvestigation) {
+          try {
+            artifactInvestigation.observeToolResult({name: tc.name, args: JSON.parse(tc.argsJson || "{}"), result: r, callId: tc.id});
+          } catch { /* Invalid tool arguments are already reported by dispatch. */ }
+        }
         this.rememberChangedPathFromToolCall(tc.name, tc.argsJson, r.ok);
         this.noteVerificationToolOutcome(tc.name, tc.argsJson, r.ok);
         if (r.ok && EDIT_TOOL_NAMES.has(tc.name)) {
@@ -6944,6 +6987,17 @@ export class AgentHarness {
           });
         }
         let content = result.ok ? result.output : `ERROR: ${result.error}`;
+        if (result.ok && tc.name.startsWith("mcp_")) {
+          try {
+            const retainedView = await archiveLargeMcpOutput(tc.name, content);
+            assertTurnActive();
+            if (retainedView) {
+              content = retainedView;
+              if (this.registry.has("read_artifact")) this.registry.activate(["read_artifact"]);
+              this.context.refreshProtocolDynamic(this.registry.getActiveToolNames());
+            }
+          } catch { assertTurnActive(); /* Keep the original result if archival is unavailable. */ }
+        }
         if (result.ok && shouldDistillToolOutput(tc.name, content)) {
           try {
             const d = await distillToolOutput(
@@ -7180,6 +7234,17 @@ export class AgentHarness {
 
       this.updateReasoningStallState(toolCalls);
 
+      if (artifactInvestigation?.checkpointDue()) {
+        try {
+          const checkpoint = await artifactInvestigation.persistCheckpoint();
+          assertTurnActive();
+          this.context.appendMessage({role: "system", content: `${artifactInvestigation.formatContextBlock()}\nSaved partial checkpoint: ${checkpoint.jsonPath}. Keep the next step within the user's requested milestone; container extraction does not require a full asset conversion unless requested.`});
+        } catch (error) {
+          assertTurnActive();
+          this.context.appendMessage({role: "system", content: "[ARTIFACT CHECKPOINT UNAVAILABLE] Durable progress could not be saved. Write the requested findings to an ordinary workspace file and verify it before continuing optional probes."});
+        }
+      }
+
       const hadEditsThisBatch = this.changedFilesThisTurn.size > changedPathsCountBeforeBatch;
       const hadBrowserToolsThisBatch = toolCalls.some((tc) =>
         BROWSER_VERIFY_TOOL_NAMES.has(tc.name)
@@ -7261,6 +7326,23 @@ export class AgentHarness {
       }
 
       assertTurnActive();
+      if (artifactInvestigation?.requiredReports.length) {
+        const reportVerification = await artifactInvestigation.verifyReports();
+        assertTurnActive();
+        if (!reportVerification.allPersistedValid) {
+          if (!this.artifactReportContinuationAttempted) {
+            this.artifactReportContinuationAttempted = true;
+            this.context.appendMessage({role: "user", content: artifactInvestigation.finalizationGuidance(reportVerification)});
+            await this.runReActLoop(round + 1);
+            return;
+          }
+          const incomplete = `Artifact work is incomplete: requested findings are missing or invalid (${reportVerification.reports.filter(report => report.status !== "persisted_valid").map(report => report.path).join(", ")}). Inspect saved outputs before continuing.`;
+          this.context.appendMessage({role: "assistant", content: incomplete});
+          this.emitter.emit("text", {channel: "user", delta: `\n\n${incomplete}`});
+          this.emitTurnEnd("error");
+          return;
+        }
+      }
       const missingConnectors = missingArtifactConnectors(this.requestedArtifactConnectorsThisSend, this.toolsUsedThisTurn, this.registry);
       if (missingConnectors.length) {
         if (!this.artifactConnectorContinuationAttempted) {
@@ -7270,6 +7352,27 @@ export class AgentHarness {
           return;
         }
         const incomplete = `The requested ${missingConnectors.join(", ")} tool step is still incomplete. Saved findings are partial; provider analysis has not been verified.`;
+        this.context.appendMessage({role: "assistant", content: incomplete});
+        this.emitter.emit("text", {channel: "user", delta: `\n\n${incomplete}`});
+        this.emitTurnEnd("error");
+        return;
+      }
+      if (artifactInvestigation && !this.artifactEvidenceReviewAttempted &&
+        (artifactInvestigation.requiredReports.length || artifactInvestigation.pendingNativeCleanup().length)) {
+        this.artifactEvidenceReviewAttempted = true;
+        this.context.appendMessage({role: "user", content: artifactInvestigation.evidenceReviewGuidance()});
+        await this.runReActLoop(round + 1);
+        return;
+      }
+      const pendingNativeCleanup = artifactInvestigation?.pendingNativeCleanup() ?? [];
+      if (pendingNativeCleanup.length) {
+        if (!this.artifactCleanupContinuationAttempted) {
+          this.artifactCleanupContinuationAttempted = true;
+          this.context.appendMessage({role: "user", content: `[UNFINISHED NATIVE CLEANUP] A successful close has not been observed for the native session opened by this turn. Use ${pendingNativeCleanup.join(", ")} and verify its result. Do not start further analysis. If close fails, report the actual error and leave the handoff explicitly incomplete.`});
+          await this.runReActLoop(round + 1);
+          return;
+        }
+        const incomplete = `Artifact handoff is incomplete: native session cleanup has not been verified (${pendingNativeCleanup.join(", ")}). Saved findings remain available; the analysis session may still be open.`;
         this.context.appendMessage({role: "assistant", content: incomplete});
         this.emitter.emit("text", {channel: "user", delta: `\n\n${incomplete}`});
         this.emitTurnEnd("error");

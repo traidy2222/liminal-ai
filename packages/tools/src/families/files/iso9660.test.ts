@@ -135,6 +135,56 @@ test("primary ISO inventory reads bounded metadata and preserves boot/header evi
   assert(output.bytes_read < 16_384);
 });
 
+test("actual ISO inspect and extraction expose member-sized native mapping and measured entry bytes", async (t) => {
+  const payload = Buffer.alloc(0x1800), fileOffset = 0x1010;
+  payload.set([0x7f,0x45,0x4c,0x46,1,1,1]);
+  payload.writeUInt16LE(2,16); payload.writeUInt16LE(8,18); payload.writeUInt32LE(1,20);
+  payload.writeUInt32LE(0x200010,24); payload.writeUInt32LE(52,28);
+  payload.writeUInt16LE(52,40); payload.writeUInt16LE(32,42); payload.writeUInt16LE(1,44);
+  payload.writeUInt32LE(1,52); payload.writeUInt32LE(0x1000,56); payload.writeUInt32LE(0x200000,60);
+  payload.writeUInt32LE(0x100,68); payload.writeUInt32LE(0x100,72);
+  const expected = Buffer.from("280c007028140070281c007028240070", "hex");
+  expected.copy(payload, fileOffset);
+  const { source, workspace } = await setup(t, fixture(payload));
+  const destination = "extracted/boot.elf";
+  const outputs = await runWithWorkspaceRoot(workspace, async () => {
+    const inspect = await inspectDiscImageTool.handler({ path: source, search: "PAYLOAD.BIN", limit:1 });
+    assert(inspect.ok); const inventory = JSON.parse(inspect.output);
+    const extracted = await extractDiscFileTool.handler({ path:source, member_path:"/ASSETS/PAYLOAD.BIN", destination });
+    assert(extracted.ok);
+    return [inventory.entries[0].observations, JSON.parse(extracted.output).observations];
+  });
+  for (const observation of outputs) {
+    assert.equal(observation.native_header.source_size,payload.length);
+    assert.equal(observation.native_header.entry.virtual_address,"0x200010");
+    assert.equal(observation.native_header.entry.file_offset,fileOffset);
+    assert.equal(observation.native_header.entry.mapping_status,"mapped");
+    assert.equal(observation.native_header.entry.bytes_hex,expected.toString("hex"));
+    assert.equal(observation.mapped_entry_bytes.file_offset,fileOffset);
+    assert.equal(observation.mapped_entry_bytes.iso_source_offset,24*SECTOR+fileOffset);
+    assert.equal(observation.mapped_entry_bytes.length,16);
+    assert.equal(observation.mapped_entry_bytes.hex,expected.toString("hex"));
+  }
+  assert.deepEqual(await readFile(path.join(workspace,destination)),payload);
+});
+
+test("actual ISO inspection leaves BSS entry bytes unknown instead of reading beyond a file-backed segment", async (t) => {
+  const payload = Buffer.alloc(0x1800);
+  payload.set([0x7f,0x45,0x4c,0x46,1,1,1]);
+  payload.writeUInt16LE(2,16); payload.writeUInt16LE(8,18); payload.writeUInt32LE(1,20);
+  payload.writeUInt32LE(0x200010,24); payload.writeUInt32LE(52,28);
+  payload.writeUInt16LE(52,40); payload.writeUInt16LE(32,42); payload.writeUInt16LE(1,44);
+  payload.writeUInt32LE(1,52); payload.writeUInt32LE(0x1000,56); payload.writeUInt32LE(0x200000,60);
+  payload.writeUInt32LE(0x10,68); payload.writeUInt32LE(0x100,72);
+  const { source,workspace } = await setup(t,fixture(payload));
+  const result = await runWithWorkspaceRoot(workspace,()=>inspectDiscImageTool.handler({path:source,search:"PAYLOAD.BIN",limit:1}));
+  assert(result.ok); const observation = JSON.parse(result.output).entries[0].observations;
+  assert.equal(observation.native_header.entry.file_offset,null);
+  assert.equal(observation.native_header.entry.bytes_hex,undefined);
+  assert.match(observation.native_header.entry.reason,/BSS/);
+  assert.equal(observation.mapped_entry_bytes,undefined);
+});
+
 test("inventory pagination filters paths without reporting nonexistent namespaces", async (t) => {
   const { source, workspace } = await setup(t);
   const reply = await runWithWorkspaceRoot(workspace, () =>

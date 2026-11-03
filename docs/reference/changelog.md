@@ -2,7 +2,7 @@
 
 All notable changes to [Liminal AI](https://github.com/traidy2222/liminal-ai) on the `main` branch.
 
-**Current stage:** **beta** (`v0.1.21`, 2026-11-03). Desktop downloads are published through the public preview release channel.
+**Current stage:** **beta** (`v0.1.22`, 2026-11-04). Desktop downloads are published through the public preview release channel.
 
 Format: **v0.0.x** entries keyed to the last GitHub push in each slice. Dates are real push dates.
 
@@ -17,9 +17,25 @@ After editing JSON: `npm run changelog:gen`, commit, push, then in [vireondynami
 
 ---
 
+## v0.1.22 — 2026-11-04 {#v0-1-22}
+
+**Current beta.** Grounded artifact analysis, with a repaired REA backend.
+
+**Shipped**
+
+- **Native backend recovery** — An explicit, version- and fingerprint-pinned local repair handles valid busy health, advances owned headless analysis, waits for acknowledged worker cleanup, and distinguishes decompiler limits from malformed responses. Original files are backed up. The verified PS2 ELF32 little-endian MIPS profile is admitted while engine and license requirements remain in force.
+- **Complete archive validation** — Inspect and extract the observed tagged recursive name-table profile with full index coverage, directory boundaries, alignment and extent checks. Return a complete inventory and portable read-only Python reference parser; do not guess formats from extensions or claim decoded meshes from strings.
+- **Evidence that survives long work** — Preserve partial investigation checkpoints, measured header fields and validated index milestones. Keep exact MCP responses and verbatim pseudocode artifacts with hashes and evidence identifiers; bounded JSON-pointer views retrieve saved details without replaying analysis.
+- **Accurate native metadata** — Distinguish virtual addresses, RVAs and file offsets from ELF load segments or PE sections. Expose mapped entry bytes and report ambiguous, truncated or zero-filled mappings as unknown.
+- **Finished handoffs** — Verify explicitly requested JSON/Markdown files on disk, allow one evidence correction pass, and require acknowledged cleanup of native sessions opened by the turn unless the user requested they remain open. Real timeout and round limits preserve an explicit incomplete handoff.
+- **Faithful tools** — Coerce and validate plain local schema references without changing provider contracts, match HTTP MCP response IDs and finish SSE responses promptly, and resolve directory listings against the active workspace.
+- **Docs** — [Game workflow evidence and limits](../reviews/game-re-benchmark.md), [REA setup and compatibility repair](../guides/rea.md)
+
+---
+
 ## v0.1.21 — 2026-11-03 {#v0-1-21}
 
-**Current beta.** Artifact work with fewer detours and honest completion.
+Artifact work with fewer detours and honest completion.
 
 **Shipped**
 

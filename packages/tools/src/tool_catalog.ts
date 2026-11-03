@@ -62,8 +62,8 @@ export const TOOL_FAMILIES: Record<string, { description: string; tools: readonl
     ],
   },
   archives: {
-    description: "ISO9660 disc image inventory, boot executables and exact member extraction without mounting or executing games. Bounded reads; primary namespace only, with explicit unsupported-format and damaged-member limits.",
-    tools: ["inspect_disc_image", "extract_disc_file", "read_binary"],
+    description: "Bounded ISO9660 disc inspection and exact extraction, binary windows, and explicitly selected recursive name-table IMG archive inspection/extraction (including PS2 Futurama). Known layout profiles validate every record and extent; unsupported formats remain explicit. No target execution.",
+    tools: ["inspect_disc_image", "extract_disc_file", "read_binary", "inspect_binary_archive", "extract_archive_file"],
   },
   git: {
     description: "Git inspection, commits, checkpoints, rollback, and isolated worktrees.",

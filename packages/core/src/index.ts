@@ -1635,3 +1635,8 @@ export { singleModelEnabled, singleModelSlug } from "./harness_effective_env.js"
 
 export { SIGNATURE_WORKFLOWS, SignatureWorkflowRun, isSignatureWorkflowPreset, parseSignatureCommand, validateExpenseReview } from "./signature_workflows.js";
 export type { SignatureWorkflowPreset } from "./signature_workflows.js";
+export { decodeKnownBinaryHeader } from "./binary_format_header.js";
+export { readArtifactJsonView, selectArtifactJsonView, isValidArtifactHash, MAX_ARTIFACT_JSON_VIEW_BYTES } from "./artifact_json_view.js";
+export type { ArtifactJsonViewOptions } from "./artifact_json_view.js";
+export { observeNativeBinaryHeader } from "./native_binary_header.js";
+export type { NativeBinaryHeaderObservation, NativeEntryObservation } from "./native_binary_header.js";
