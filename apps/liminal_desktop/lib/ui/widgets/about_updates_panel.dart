@@ -6,6 +6,7 @@ import '../../core/update/local_versions.dart';
 import '../../core/update/update_coordinator.dart';
 import '../layout/liminal_spacing.dart';
 import '../theme/liminal_theme_extension.dart';
+import 'usage_analytics_panel.dart';
 
 class AboutUpdatesPanel extends StatefulWidget {
   const AboutUpdatesPanel({super.key});
@@ -56,7 +57,7 @@ class _AboutUpdatesPanelState extends State<AboutUpdatesPanel> {
           _row('App', local.appVersion),
           _row('Harness', local.harnessVersion ?? '—'),
           _row('Sidecar',
-              host.sidecarVersion.isNotEmpty ? host.sidecarVersion : '—'),
+              host.sidecarVersion.isNotEmpty ? host.sidecarVersion : '—',),
           if (local.isDevBuild)
             Padding(
               padding: const EdgeInsets.only(top: LiminalSpacing.sm),
@@ -67,6 +68,8 @@ class _AboutUpdatesPanelState extends State<AboutUpdatesPanel> {
               ),
             ),
         ],
+        const SizedBox(height: LiminalSpacing.md),
+        UsageAnalyticsPanel(analytics: host.usage, onChoice: host.setUsageConsent),
         const SizedBox(height: LiminalSpacing.md),
         SwitchListTile(
           contentPadding: EdgeInsets.zero,
@@ -168,7 +171,7 @@ class _AboutUpdatesPanelState extends State<AboutUpdatesPanel> {
           SizedBox(width: 88, child: Text(label)),
           Expanded(
               child: Text(value,
-                  style: const TextStyle(fontFamily: 'JetBrains Mono'))),
+                  style: const TextStyle(fontFamily: 'JetBrains Mono'),),),
         ],
       ),
     );

@@ -2,7 +2,7 @@
 
 All notable changes to [Liminal AI](https://github.com/traidy2222/liminal-ai) are documented here and on the docs portal: [docs.vireondynamics.com/liminal/reference/changelog](https://docs.vireondynamics.com/liminal/reference/changelog).
 
-**Current stage:** **beta** (`v0.1.11` tip of `main`, 2026-11-03). Desktop downloads are published through the public preview release channel.
+**Current stage:** **beta** (`v0.1.12` tip of `main`, 2026-11-03). Desktop downloads are published through the public preview release channel.
 
 **Single source:** edit [`changelog/releases.json`](changelog/releases.json), then run `npm run changelog:gen`.
 
@@ -10,9 +10,15 @@ Format: **v0.0.x** entries keyed to the last GitHub push in each slice. Dates ar
 
 Marketing (richer notes): [vireondynamics.com/liminal/changelog](https://www.vireondynamics.com/liminal/changelog)
 
-## [v0.1.11] — 2026-11-03 — Current beta
+## [v0.1.12] — 2026-11-03 — Current beta
 
 Existing Google access refreshes independently of an optional Liminal license. Reconnect checks require usable credentials, and the local Docs, Sheets and Slides service starts with hosted OAuth without requiring a client secret on your computer.
+
+[Full notes](https://docs.vireondynamics.com/liminal/reference/changelog#v0-1-12)
+
+## [v0.1.11] — 2026-11-03
+
+Desktop users can choose to share basic adoption and repeat-use milestones with Vireon. Sharing is off by default and is separate from website analytics and model connections.
 
 [Full notes](https://docs.vireondynamics.com/liminal/reference/changelog#v0-1-11)
 

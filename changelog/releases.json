@@ -1,9 +1,9 @@
 {
   "stage": "beta",
-  "currentVersion": "0.1.11",
+  "currentVersion": "0.1.12",
   "releases": [
     {
-      "version": "0.1.11",
+      "version": "0.1.12",
       "date": "2026-11-03",
       "tagline": "Reliable Google sign-in, token refresh and Workspace tools.",
       "summary": "Existing Google access refreshes independently of an optional Liminal license. Reconnect checks require usable credentials, and the local Docs, Sheets and Slides service starts with hosted OAuth without requiring a client secret on your computer.",
@@ -20,6 +20,24 @@
       ]
     },
     {
+      "version": "0.1.11",
+      "date": "2026-11-03",
+      "tagline": "Optional, content-free usage sharing with a clear off switch.",
+      "summary": "Desktop users can choose to share basic adoption and repeat-use milestones with Vireon. Sharing is off by default and is separate from website analytics and model connections.",
+      "bullets": [
+        "**Your choice** — A one-time hub card offers Share basic usage or No thanks. Change the setting later under About & updates; declining does not restrict the app.",
+        "**Basic milestones only** — Report app launches, workspace readiness and completed user-started conversation days with app version, platform and a random installation identifier. No prompts, answers, files, paths, account details or provider keys are sent.",
+        "**Useful activity counts** — Ignore transcript replay, background turns, errors and cancellations. Deduplicate each milestone per UTC day; network failures never block startup or conversations.",
+        "**Delete and stop** — Turn sharing off immediately or delete that installation’s shared history without an account. Failed deletion stays off and can be retried. Daily records and inactive installation records have a 90-day retention policy."
+      ],
+      "docs": [
+        {
+          "label": "Optional usage sharing",
+          "href": "../concepts/usage-sharing.md"
+        }
+      ]
+    },
+    {
       "version": "0.1.10",
       "date": "2026-11-03",
       "tagline": "Clean shutdown even after Windows closes desktop output pipes.",
@@ -28,7 +46,12 @@
         "**Closed-pipe recovery** — Handle EPIPE on desktop-owned output streams before startup or shutdown logging. Other output errors retain their existing error path, and standalone servers are unaffected.",
         "**Verified process regression** — A real child process with ignored stdin and both output pipes closed now completes its cleanup after parent termination. The unchanged test fails without the fix and passes with it."
       ],
-      "docs": [{"label":"Install and update","href":"../start/install.md"}]
+      "docs": [
+        {
+          "label": "Install and update",
+          "href": "../start/install.md"
+        }
+      ]
     },
     {
       "version": "0.1.9",
@@ -40,7 +63,12 @@
         "**Reliable update preparation** — Release the old runtime's file handles before a future launch update replaces the app folder. Shutdown handles overlapping signals once.",
         "**Real process coverage** — A detached child with ignored stdin is tested against actual parent termination, including in Windows CI. Standalone servers and unrelated process IDs opt out."
       ],
-      "docs": [{ "label": "Install and update", "href": "../start/install.md" }]
+      "docs": [
+        {
+          "label": "Install and update",
+          "href": "../start/install.md"
+        }
+      ]
     },
     {
       "version": "0.1.8",
@@ -55,7 +83,10 @@
         "**Access and lifecycle hardening** — Complete the reviewed fixes for guest chat boundaries, public-web destinations, file operations, locks, provider scheduling and terminal/browser cleanup."
       ],
       "docs": [
-        { "label": "Install and update", "href": "../start/install.md" }
+        {
+          "label": "Install and update",
+          "href": "../start/install.md"
+        }
       ]
     },
     {
