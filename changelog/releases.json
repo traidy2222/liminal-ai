@@ -1,7 +1,20 @@
 {
   "stage": "beta",
-  "currentVersion": "0.1.16",
+  "currentVersion": "0.1.17",
   "releases": [
+    {
+      "version": "0.1.17",
+      "date": "2026-11-03",
+      "tagline": "Long tasks keep their plan and their actual command results.",
+      "summary": "Remove a timer-generated recovery plan that could silently stop successful work at round 40. PowerShell foreground jobs now return their own output and real exit status instead of relying on interactive prompt detection.",
+      "bullets": [
+        "**Progress without phantom budgets** — Elapsed rounds no longer invent a replacement plan or discard compensation history. Real contract budgets count from contract activation, and a hard stop leaves an explicit incomplete-work handoff.",
+        "**Reliable Windows commands** — Run PowerShell foreground commands as owned noninteractive PTY jobs, preserving live terminal output while isolating each command from stale prompts and prior scrollback. Multiline scripts execute as complete commands.",
+        "**Honest failure status** — Non-zero exits remain failures even when diagnostic output is long. Interactive terminal tools and background jobs remain available for explicitly persistent workflows.",
+        "**Regression evidence** — A 45-round harness fixture, late-plan budget checks, visible pause handoff and real Windows PTY commands cover the reported failure and its fixes."
+      ],
+      "docs": [{ "label": "Harness architecture", "href": "../concepts/architecture.md" }]
+    },
     {
       "version": "0.1.16",
       "date": "2026-11-03",

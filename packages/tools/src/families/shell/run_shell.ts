@@ -162,14 +162,7 @@ function runShellSpawn(input: {
             `Output so far:\n${output}`,
         });
       } else if (code !== 0) {
-        if (body.length >= 120) {
-          resolve({
-            ok: true,
-            output: `[exit ${code ?? "null"} — output captured; treat as diagnostic, not necessarily total failure]\n${output}`,
-          });
-        } else {
-          resolve({ ok: false, error: `Exit code ${code ?? "null"}.\n${output}` });
-        }
+        resolve({ ok: false, error: `Exit code ${code ?? "null"}.\n${output}` });
       } else {
         resolve({ ok: true, output });
       }
@@ -193,7 +186,7 @@ export function createRunShellTool(emitter: AgentEmitter, harness?: AgentHarness
     name: "run_shell",
     description:
       "WHAT: Execute a shell command and return its stdout and stderr. Output streams live in the Terminal panel and chat trace. Requires user approval.\n" +
-      "UI TERMINAL: One shared Agent shell tab — commands are pasted into that shell stdin (visible in Terminal). NEVER batch multiple run_shell in one turn. Output lives in Terminal; tool result is a summary only.\n" +
+      "UI TERMINAL: Output streams in Terminal. PowerShell foreground commands run as isolated noninteractive jobs, with their actual exit status; include cwd and any environment setup in the same call. Use run_command_with_pty for an explicitly persistent interactive shell.\n" +
       "WHEN: Installing packages, running build/test scripts, or any system task with no dedicated tool.\n" +
       "NOT WHEN: A dedicated tool already covers the task (read_file, edit_file, list_dir, web_fetch, web_search, git_*).\n" +
       "NOT WHEN: A process runs indefinitely (dev server, watcher) — use run_background; poll with read_process_output (session_id).\n" +

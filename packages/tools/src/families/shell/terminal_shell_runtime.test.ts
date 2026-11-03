@@ -3,6 +3,7 @@ import { beforeEach, test } from "node:test";
 import type { AgentHarness } from "@liminal/core";
 import type { PtyManagerPort } from "./pty_shell_port.js";
 import { setPtyShellPort } from "./pty_shell_port.js";
+import { getAgentShellSession } from "./agent_shell_session.js";
 import {
   resetTerminalShellRuntimeForTests,
   runShellInTerminal,
@@ -73,6 +74,7 @@ test("runShellInTerminal serializes parallel calls on one chat", async () => {
   const prompt = process.platform === "win32" ? "PS C:\\repo> " : "user@host:~$ ";
   let backlog = prompt;
   const writes: string[] = [];
+  let foregroundActive = 0, maxForegroundActive = 0;
 
   const port: PtyManagerPort = {
     ensure: async () => ({ sessionId: "s1", label: "Agent shell", cwd: "/repo" }),
@@ -96,7 +98,13 @@ test("runShellInTerminal serializes parallel calls on one chat", async () => {
     isAlive: () => true,
     close: () => true,
     list: () => [],
-    runOneshot: async () => ({ exitCode: 0, output: "", sessionId: "s1" }),
+    runOneshot: async opts => {
+      writes.push(opts.command);
+      maxForegroundActive = Math.max(maxForegroundActive, ++foregroundActive);
+      await new Promise(resolve => setTimeout(resolve, 25));
+      foregroundActive--;
+      return { exitCode: 0, output: "ok", sessionId: "s1" };
+    },
   };
   const dataListeners = new Set<(chunk: string) => void>();
   setPtyShellPort(port);
@@ -112,16 +120,17 @@ test("runShellInTerminal serializes parallel calls on one chat", async () => {
 
   await Promise.all([mk("echo one"), mk("echo two"), mk("echo three")]);
 
-  const cmdWrites = writes.filter((w) => w.includes("\x1b[200~"));
+  const cmdWrites = writes.filter((w) => /echo (one|two|three)/.test(w));
   assert.equal(cmdWrites.length, 3);
   assert.ok(cmdWrites[0]!.includes("echo one"));
   assert.ok(cmdWrites[1]!.includes("echo two"));
   assert.ok(cmdWrites[2]!.includes("echo three"));
+  assert.ok(maxForegroundActive <= 1);
 
   setPtyShellPort(null);
 });
 
-test("runShellInTerminal waits for delayed shell boot before writing", async () => {
+test("interactive agent session waits for delayed shell boot before writing", async () => {
   const prompt = process.platform === "win32" ? "PS C:\\repo> " : "user@host:~$ ";
   let backlog = "";
   const writes: string[] = [];
@@ -155,9 +164,7 @@ test("runShellInTerminal waits for delayed shell boot before writing", async () 
 
   setPtyShellPort(port);
 
-  const harness = { taskId: "chat-boot" } as AgentHarness;
-  const result = await runShellInTerminal({
-    harness,
+  const result = await getAgentShellSession("chat-boot").exec({
     command: "echo hi",
     timeoutMs: 5000,
     cappedNote: "",
