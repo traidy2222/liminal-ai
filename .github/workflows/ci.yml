@@ -77,6 +77,9 @@ jobs:
       - name: Test eval fixtures and trace handling
         run: npm run test:sandbox -w @liminal/eval
 
+      - name: Test chronological web chat layout
+        run: node --import tsx --test packages/web/client/chatTurnLayout.test.ts
+
       - name: Build web client (check browser-safe imports)
         run: npm run build:client -w @liminal/web
 

@@ -1,5 +1,13 @@
 # Architecture
 
+Assistant narration, tool activity and final replies retain their chronological
+positions in desktop and web chat. Tool activity seals the current assistant
+bubble; later narration opens a new bubble after it. Session logs write events
+in order per chat, with text rollups at tool boundaries and turn end. Replay
+keeps completed tools at their start positions even when results finish out of
+order. Model-context hydration joins segments within each user turn while
+retaining the latest turns.
+
 This document describes Liminal's runtime architecture and core invariants.
 
 ## System Topology

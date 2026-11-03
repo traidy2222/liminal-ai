@@ -3,8 +3,8 @@
  * Enable with AGENT_SESSION_JSONL=1; files under .agent_sessions/<sessionId>.jsonl
  *
  * Text logging modes (AGENT_SESSION_JSONL_TEXT_LOG):
- * - `rollup` (default): accumulate streamed assistant text (`channel: "user"`) and emit one
- *   `text_rollup` record on `turn_end` (and `text_rollup_partial` on `error`). Avoids thousands
+ * - `rollup` (default): accumulate streamed assistant text (`channel: "user"`) and emit a
+ *   `text_rollup` at tool boundaries and `turn_end` (partial on `error`). Avoids thousands
  *   of per-token JSONL lines.
  * - `delta`: legacy — one `text` line per stream delta (noisy; large files).
  * - `both`: rollup + per-delta lines.
@@ -78,10 +78,13 @@ async function appendLine(sessionId: string, record: Record<string, unknown>): P
   await appendFile(target, line, "utf8");
 }
 
+const pendingSessionWrites = new Map<string, Promise<void>>();
 function writeFireAndForget(sessionId: string, record: Record<string, unknown>): void {
-  void appendLine(sessionId, record).catch(() => {
-    /* avoid throwing into emitter */
-  });
+  const stamped = { ts: new Date().toISOString(), ...record };
+  const pending = (pendingSessionWrites.get(sessionId) ?? Promise.resolve())
+    .then(() => appendLine(sessionId, stamped)).catch(() => { /* non-fatal */ });
+  pendingSessionWrites.set(sessionId, pending);
+  void pending.finally(() => { if (pendingSessionWrites.get(sessionId) === pending) pendingSessionWrites.delete(sessionId); });
 }
 
 /**
@@ -96,6 +99,13 @@ export function attachSessionEventLog(emitter: AgentEmitter, sessionId: string):
     writeFireAndForget(sessionId, record);
   };
 
+  const flushAssistant = (event = "text_rollup") => {
+    if (!assistantRollup) return;
+    const text = assistantRollup;
+    assistantRollup = "";
+    write({ event, turnIndex, charCount: text.length, text: truncate(text, resolveMaxRollupChars()) });
+  };
+
   const onSendStart = (p: AgentEventMap["send_start"]) => {
     assistantRollup = "";
     turnIndex += 1;
@@ -108,10 +118,12 @@ export function attachSessionEventLog(emitter: AgentEmitter, sessionId: string):
   };
 
   const onToolStart = (p: AgentEventMap["tool_start"]) => {
+    flushAssistant();
     write({ event: "tool_start", turnIndex, callId: p.callId, name: p.name });
   };
 
   const onToolResult = (p: AgentEventMap["tool_result"]) => {
+    flushAssistant();
     const out =
       p.result.ok === true
         ? truncate(p.result.output, MAX_TOOL_OUT_CHARS)
@@ -139,56 +151,15 @@ export function attachSessionEventLog(emitter: AgentEmitter, sessionId: string):
   };
 
   const onTurnEnd = (p: AgentEventMap["turn_end"]) => {
-    const snapRollup = assistantRollup;
-    const rollupTurnIndex = turnIndex;
-    assistantRollup = "";
-    void (async () => {
-      try {
-        if (snapRollup) {
-          await appendLine(sessionId, {
-            event: "text_rollup",
-            turnIndex: rollupTurnIndex,
-            charCount: snapRollup.length,
-            text: truncate(snapRollup, resolveMaxRollupChars()),
-          });
-        }
-        await appendLine(sessionId, {
-          event: "turn_end",
-          turnIndex: rollupTurnIndex,
-          durationMs: p.durationMs,
-          tokenCount: p.contextSnapshot.tokenCount,
-          usageFraction: p.contextSnapshot.usageFraction,
-          harnessMetrics: p.harnessMetrics,
-        });
-      } catch {
-        /* non-fatal */
-      }
-    })();
+    flushAssistant();
+    write({event: "turn_end", turnIndex, durationMs: p.durationMs,
+      tokenCount: p.contextSnapshot.tokenCount, usageFraction: p.contextSnapshot.usageFraction,
+      harnessMetrics: p.harnessMetrics});
   };
 
   const onError = (p: AgentEventMap["error"]) => {
-    const snapRollup = assistantRollup;
-    const rollupTurnIndex = turnIndex;
-    assistantRollup = "";
-    void (async () => {
-      try {
-        if (snapRollup) {
-          await appendLine(sessionId, {
-            event: "text_rollup_partial",
-            turnIndex: rollupTurnIndex,
-            charCount: snapRollup.length,
-            text: truncate(snapRollup, resolveMaxRollupChars()),
-          });
-        }
-        await appendLine(sessionId, {
-          event: "error",
-          turnIndex: rollupTurnIndex,
-          message: truncate(p.err.message, 4000),
-        });
-      } catch {
-        /* non-fatal */
-      }
-    })();
+    flushAssistant("text_rollup_partial");
+    write({event: "error", turnIndex, message: truncate(p.err.message, 4000)});
   };
 
   const onText = (p: AgentEventMap["text"]) => {
@@ -199,7 +170,7 @@ export function attachSessionEventLog(emitter: AgentEmitter, sessionId: string):
       return;
     }
 
-    if (channel !== "trace") {
+    if (channel === "user") {
       assistantRollup += p.delta;
     }
 

@@ -2,7 +2,7 @@
 
 All notable changes to [Liminal AI](https://github.com/traidy2222/liminal-ai) on the `main` branch.
 
-**Current stage:** **beta** (`v0.1.19`, 2026-11-03). Desktop downloads are published through the public preview release channel.
+**Current stage:** **beta** (`v0.1.20`, 2026-11-03). Desktop downloads are published through the public preview release channel.
 
 Format: **v0.0.x** entries keyed to the last GitHub push in each slice. Dates are real push dates.
 
@@ -17,12 +17,13 @@ After editing JSON: `npm run changelog:gen`, commit, push, then in [vireondynami
 
 ---
 
-## v0.1.19 — 2026-11-03 {#v0-1-19}
+## v0.1.20 — 2026-11-03 {#v0-1-20}
 
-**Current beta.** Long tasks keep their plan and their actual command results.
+**Current beta.** Long tasks keep working, with each reply in its proper place.
 
 **Shipped**
 
+- **Chronological conversations** — Keep each assistant update before its corresponding tool activity. Later narration and the final reply appear as separate bubbles. Saved logs retain these boundaries without mixing model reasoning into visible replies.
 - **Progress without phantom budgets** — Elapsed rounds no longer invent a replacement plan or discard compensation history. Real contract budgets count from contract activation, and a hard stop leaves an explicit incomplete-work handoff.
 - **Reliable Windows commands** — Run PowerShell foreground commands as owned noninteractive PTY jobs, surface each live job in the terminal, and isolate each command from stale prompts and prior scrollback. Multiline scripts execute as complete commands. UI observer errors do not fail or replay running jobs.
 - **Honest failure status** — Non-zero exits remain failures even when diagnostic output is long. Interactive terminal tools and background jobs remain available for explicitly persistent workflows.
