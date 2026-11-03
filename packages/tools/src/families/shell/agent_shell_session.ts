@@ -48,6 +48,7 @@ export interface AgentShellExecOptions {
   cwd?: string;
   timeoutMs: number;
   cappedNote?: string;
+  signal?: AbortSignal;
 }
 
 interface SessionHandle {
@@ -188,6 +189,7 @@ export async function waitForStablePrompt(
   sessionId: string,
   opts?: StablePromptOptions
 ): Promise<void> {
+  if (opts?.signal?.aborted) return Promise.reject(new Error("Command cancelled."));
   const timeoutMs = opts?.timeoutMs ?? shellBootTimeoutMs();
   const stableMs = opts?.stableMs ?? shellPromptStableMs();
   const minBytes = opts?.minBytes ?? SHELL_MIN_BOOT_BYTES;
@@ -503,6 +505,7 @@ function waitForMarkerPrompt(
   timeoutMs: number,
   signal?: AbortSignal
 ): Promise<void> {
+  if (signal?.aborted) return Promise.reject(new Error("Command cancelled."));
   if (tracker.atPrompt) return Promise.resolve();
   return new Promise((resolve, reject) => {
     let settled = false;
@@ -630,7 +633,23 @@ export class AgentShellSession {
   }
 
   exec(opts: AgentShellExecOptions): Promise<ToolResult> {
-    return enqueueAgentShell(this.chatId, () => this.execInner(opts));
+    const cancelled = (): ToolResult => ({ ok: false, error: "Command cancelled." });
+    if (opts.signal?.aborted) return Promise.resolve(cancelled());
+    let started = false;
+    const pending = enqueueAgentShell(this.chatId, () => {
+      if (opts.signal?.aborted) return Promise.resolve(cancelled());
+      started = true;
+      return this.execInner(opts);
+    });
+    const signal = opts.signal;
+    if (!signal) return pending;
+    return new Promise((resolve) => {
+      const finish = (result: ToolResult) => { signal.removeEventListener("abort", onAbort); resolve(result); };
+      const onAbort = () => { if (!started) finish(cancelled()); };
+      signal.addEventListener("abort", onAbort, { once: true });
+      if (signal.aborted) onAbort();
+      void pending.then(finish, (err) => finish({ ok: false, error: errorMessage(err) }));
+    });
   }
 
   private get markerMode(): boolean {
@@ -638,32 +657,41 @@ export class AgentShellSession {
   }
 
   private async execInner(opts: AgentShellExecOptions): Promise<ToolResult> {
+    // During replacement-shell boot, this.handle may change from a dead prior
+    // session to the new owned session. Snapshot only after attach completes.
+    let foregroundSessionId: string | undefined;
+    let cancellationCleanup: Promise<void> | undefined;
+    const onAbort = () => {
+      const id = foregroundSessionId ?? this.handle?.sessionId;
+      const port = getPtyShellPort();
+      if (id && port) {
+        if (port.cancelForeground) cancellationCleanup = port.cancelForeground(id);
+        else port.close(id);
+      }
+    };
+    opts.signal?.addEventListener("abort", onAbort, { once: true });
     try {
-      await this.attach();
-      await this.waitIdle();
+      if (opts.signal?.aborted) return { ok: false, error: "Command cancelled." };
+      await this.attach(opts.signal);
+      foregroundSessionId = this.handle?.sessionId;
+      await this.waitIdle(opts.signal);
+      if (opts.signal?.aborted) return { ok: false, error: "Command cancelled." };
+
+      const port = getPtyShellPort();
+      if (!port || !this.handle) return { ok: false, error: "PTY shell port is not available." };
+      await ensureChatTerminal({ chatId: this.chatId, label: "Agent shell", source: "agent", forceNew: false, focus: true });
+      if (opts.signal?.aborted) return { ok: false, error: "Command cancelled." };
+      const result = await (this.markerMode ? this.execWithMarkers(port, opts) : this.execLegacy(port, opts));
+      return opts.signal?.aborted ? { ok: false, error: "Command cancelled." } : result;
     } catch (err) {
       return {
         ok: false,
-        error: `Agent terminal is not ready.\n${errorMessage(err)}`,
+        error: opts.signal?.aborted ? "Command cancelled." : `Agent terminal is not ready.\n${errorMessage(err)}`,
       };
+    } finally {
+      opts.signal?.removeEventListener("abort", onAbort);
+      await cancellationCleanup?.catch(() => undefined);
     }
-
-    const port = getPtyShellPort();
-    if (!port || !this.handle) {
-      return { ok: false, error: "PTY shell port is not available." };
-    }
-
-    await ensureChatTerminal({
-      chatId: this.chatId,
-      label: "Agent shell",
-      source: "agent",
-      forceNew: false,
-      focus: true,
-    });
-
-    return this.markerMode
-      ? this.execWithMarkers(port, opts)
-      : this.execLegacy(port, opts);
   }
 
   /** Marker path: type the command, wait for the shell's completion marker. */
@@ -682,18 +710,25 @@ export class AgentShellSession {
       return { ok: false, error: "Failed to write to agent terminal stdin." };
     }
 
+    const onAbort = () => waiter.cancel();
+    opts.signal?.addEventListener("abort", onAbort, { once: true });
+    if (opts.signal?.aborted) onAbort();
     try {
       const { slice, exitCode: markerCode } = await waiter.promise;
+      if (opts.signal?.aborted) return { ok: false, error: "Command cancelled." };
       const plain = normalizeNewlines(stripAnsi(slice));
       const output = stripEchoedCommand(plain, typedLine);
       const exitCode =
         markerCode ?? (await probeExitCode(port, sessionId, this.detector, this.tracker)) ?? 0;
       return this.formatResult(output, exitCode, opts.cappedNote);
     } catch (err) {
+      if (opts.signal?.aborted) return { ok: false, error: "Command cancelled." };
       await recoverShellToPrompt(port, sessionId, this.detector, this.tracker).catch(
         () => undefined
       );
       return { ok: false, error: errorMessage(err) };
+    } finally {
+      opts.signal?.removeEventListener("abort", onAbort);
     }
   }
 
@@ -718,8 +753,12 @@ export class AgentShellSession {
       return { ok: false, error: "Failed to write to agent terminal stdin." };
     }
 
+    const onAbort = () => waiter.cancel();
+    opts.signal?.addEventListener("abort", onAbort, { once: true });
+    if (opts.signal?.aborted) onAbort();
     try {
       const raw = await waiter.promise;
+      if (opts.signal?.aborted) return { ok: false, error: "Command cancelled." };
       // Extract with the pre-command prompt (the echoed input line used it),
       // THEN learn the new prompt (cwd may have changed) before probing.
       const output = extractCommandOutput(raw, this.detector);
@@ -727,8 +766,11 @@ export class AgentShellSession {
       const exitCode = (await probeExitCode(port, sessionId, this.detector)) ?? 0;
       return this.formatResult(output, exitCode, opts.cappedNote);
     } catch (err) {
+      if (opts.signal?.aborted) return { ok: false, error: "Command cancelled." };
       await recoverShellToPrompt(port, sessionId, this.detector).catch(() => undefined);
       return { ok: false, error: errorMessage(err) };
+    } finally {
+      opts.signal?.removeEventListener("abort", onAbort);
     }
   }
 
@@ -752,12 +794,13 @@ export class AgentShellSession {
     });
   }
 
-  private async attach(): Promise<void> {
+  private async attach(signal?: AbortSignal): Promise<void> {
+    if (signal?.aborted) throw new Error("Command cancelled.");
     const port = getPtyShellPort();
     if (!port) throw new Error("PTY shell port is not available.");
 
     if (this.handle && port.isAlive(this.handle.sessionId)) {
-      if (!this.booted) await this.ensureBooted(port);
+      if (!this.booted) await this.ensureBooted(port, signal);
       return;
     }
 
@@ -775,6 +818,10 @@ export class AgentShellSession {
       forceNew: false,
       focus: false,
     });
+    if (signal?.aborted) {
+      if (viaEnsure) port.close(viaEnsure.sessionId);
+      throw new Error("Command cancelled.");
+    }
     const opened =
       viaEnsure ??
       (await port.ensure({
@@ -786,12 +833,14 @@ export class AgentShellSession {
       }));
 
     if (!opened) throw new Error("Failed to open agent terminal session.");
+    if (signal?.aborted) { port.close(opened.sessionId); throw new Error("Command cancelled."); }
     this.handle = opened;
     this.startTrackerFeed(port, opened.sessionId);
-    await this.ensureBooted(port);
+    await this.ensureBooted(port, signal);
   }
 
-  private async ensureBooted(port: PtyManagerPort): Promise<void> {
+  private async ensureBooted(port: PtyManagerPort, signal?: AbortSignal): Promise<void> {
+    if (signal?.aborted) throw new Error("Command cancelled.");
     if (!this.handle || this.booted) return;
     if (this.bootPromise) return this.bootPromise;
 
@@ -803,6 +852,8 @@ export class AgentShellSession {
     // shells without integration. Whichever resolves first wins; the loser
     // is aborted so no timers linger.
     const ac = new AbortController();
+    const onAbort = () => ac.abort();
+    signal?.addEventListener("abort", onAbort, { once: true });
     const markerBoot = waitForMarkerPrompt(
       port,
       sessionId,
@@ -820,6 +871,7 @@ export class AgentShellSession {
     });
     markerBoot.catch(() => undefined);
     legacyBoot.catch(() => undefined);
+    if (signal?.aborted) ac.abort();
 
     this.bootPromise = Promise.any([markerBoot, legacyBoot])
       .catch((err: unknown) => {
@@ -835,26 +887,29 @@ export class AgentShellSession {
       .finally(() => {
         this.bootPromise = null;
         ac.abort();
+        signal?.removeEventListener("abort", onAbort);
       });
 
     return this.bootPromise;
   }
 
-  private async waitIdle(): Promise<void> {
+  private async waitIdle(signal?: AbortSignal): Promise<void> {
+    if (signal?.aborted) throw new Error("Command cancelled.");
     const port = getPtyShellPort();
     if (!port || !this.handle) throw new Error("No agent shell session.");
     const sessionId = this.handle.sessionId;
 
     if (this.markerMode) {
       try {
-        await waitForMarkerPrompt(port, sessionId, this.tracker, SHELL_READY_TIMEOUT_MS);
+        await waitForMarkerPrompt(port, sessionId, this.tracker, SHELL_READY_TIMEOUT_MS, signal);
       } catch {
+        if (signal?.aborted) throw new Error("Command cancelled.");
         // A previous command may have left a pager or stuck process — Ctrl+C
         // once and retry briefly instead of failing every run_shell.
         await recoverShellToPrompt(port, sessionId, this.detector, this.tracker).catch(
           () => undefined
         );
-        await waitForMarkerPrompt(port, sessionId, this.tracker, 5_000);
+        await waitForMarkerPrompt(port, sessionId, this.tracker, 5_000, signal);
       }
       return;
     }
@@ -864,10 +919,12 @@ export class AgentShellSession {
       stableMs: Math.min(shellPromptStableMs(), IDLE_STABLE_MS),
       requireMinBytes: false,
       detector: this.detector,
+      signal,
     };
     try {
       await waitForStablePrompt(port, sessionId, opts);
     } catch {
+      if (signal?.aborted) throw new Error("Command cancelled.");
       await recoverShellToPrompt(port, sessionId, this.detector).catch(() => undefined);
       await waitForStablePrompt(port, sessionId, { ...opts, timeoutMs: 5_000 });
     }

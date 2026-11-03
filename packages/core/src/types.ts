@@ -414,7 +414,7 @@ export interface SubtaskResult {
 }
 
 /** Why this send() ended (present on reliable turn_end emissions). */
-export type TurnEndTerminationReason = "ok" | "round_cap" | "timeout" | "error" | "contract_budget";
+export type TurnEndTerminationReason = "ok" | "round_cap" | "timeout" | "error" | "aborted" | "contract_budget";
 
 /** Emitted on turn_end for orchestration / eval surfaces (arXiv:2512.08296, 2601.06112). */
 export interface TurnEndHarnessMetrics {

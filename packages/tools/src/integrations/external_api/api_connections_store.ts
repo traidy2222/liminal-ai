@@ -104,6 +104,8 @@ interface McpConnectionBase {
   name: string;
   auth: AuthScheme;
   tools: McpToolRecord[];
+  /** Untrusted connector-scoped guidance returned by MCP initialize. */
+  instructions?: string;
   attachedAt: number;
   providerId?: string;
   parentProvider?: string;

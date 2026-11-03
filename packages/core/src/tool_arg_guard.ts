@@ -29,7 +29,34 @@ function internalLiteral(host: string): boolean {
 const DANGEROUS_SHELL =
   /\brm\s+(-\S+\s+)*\/($|[\s;|&])|rm\s+.*--no-preserve-root|:\(\)\{|\|\s*:\s*&|mkfs\.|dd\s+if=\/dev\/|curl\s+.*\|\s*sh|wget\s+.*\|\s*sh|>\s*\/dev\/sd/i;
 const DANGEROUS_EXECUTE_CODE =
-  /\b(import\s+os|from\s+os\s+import|import\s+subprocess|from\s+subprocess\s+import|__import__\s*\(|child_process|require\s*\(\s*["']child_process["']\s*\)|process\.binding\s*\(|Deno\.run\s*\()/i;
+  /\b(import\s+subprocess|from\s+subprocess\s+import|__import__\s*\(|child_process|require\s*\(\s*["']child_process["']\s*\)|process\.binding\s*\(|Deno\.run\s*\()/i;
+const OS_PROCESS_PRIMITIVE = /^(?:system|popen|exec\w*|spawn\w*)$/i;
+
+/** Heuristic process-launch guard, not a Python sandbox or general code parser. */
+function hasExecuteCodeProcessPattern(code: string, language: string): boolean {
+  if (DANGEROUS_EXECUTE_CODE.test(code)) return true;
+  if (language !== "python") return false;
+
+  // Importing os for paths/stat is ordinary file inspection. Guard its process
+  // APIs instead, including straightforward module aliases and from-imports.
+  const osNames = new Set(["os"]);
+  for (const match of code.matchAll(/\bimport\s+([^\n;#]+)/g)) {
+    for (const binding of match[1]!.split(",")) {
+      if (/^\s*subprocess(?:\s+as\s+\w+)?\s*$/.test(binding)) return true;
+      const osBinding = binding.match(/^\s*os(?:\s+as\s+([A-Za-z_]\w*))?\s*$/);
+      if (osBinding) osNames.add(osBinding[1] ?? "os");
+    }
+  }
+  for (const match of code.matchAll(/\bfrom\s+os\s+import\s*(?:\(([^)]*)\)|([^\n;#]*))/g)) {
+    const imports = match[1] ?? match[2] ?? "";
+    for (const binding of imports.split(",")) {
+      const name = binding.trim().split(/\s+/)[0] ?? "";
+      if (name === "*" || OS_PROCESS_PRIMITIVE.test(name)) return true;
+    }
+  }
+  const processAccess = new RegExp(`\\b(?:${[...osNames].join("|")})\\s*\\.\\s*(system|popen|exec\\w*|spawn\\w*)\\b`, "i");
+  return processAccess.test(code);
+}
 
 export function guardToolArgs(
   toolName: string,
@@ -150,15 +177,16 @@ export function guardToolArgs(
   }
 
   if (toolName === "execute_code") {
-    const language = String(args["language"] ?? "");
+    const language = String(args["language"] ?? "python");
     if (language !== "python" && language !== "javascript") {
       return 'execute_code language must be "python" or "javascript".';
     }
     const code = String(args["code"] ?? "");
     if (code.length < 1) return "execute_code code must be non-empty.";
     if (code.length > 100_000) return "execute_code code exceeds max length (100k).";
-    if (DANGEROUS_EXECUTE_CODE.test(code)) {
-      return "execute_code blocked potentially dangerous process/shell escape pattern.";
+    if (hasExecuteCodeProcessPattern(code, language)) {
+      return "execute_code blocked a potentially dangerous process-launch or dynamic-import pattern. " +
+        "File reads, os.path and os.stat are supported; use run_shell for process orchestration.";
     }
     const timeoutMs = Number(args["timeout_ms"] ?? 30_000);
     if (!Number.isFinite(timeoutMs) || timeoutMs < 1 || timeoutMs > 120_000) {

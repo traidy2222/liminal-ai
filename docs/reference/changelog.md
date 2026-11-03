@@ -2,7 +2,7 @@
 
 All notable changes to [Liminal AI](https://github.com/traidy2222/liminal-ai) on the `main` branch.
 
-**Current stage:** **beta** (`v0.1.20`, 2026-11-03). Desktop downloads are published through the public preview release channel.
+**Current stage:** **beta** (`v0.1.21`, 2026-11-03). Desktop downloads are published through the public preview release channel.
 
 Format: **v0.0.x** entries keyed to the last GitHub push in each slice. Dates are real push dates.
 
@@ -17,9 +17,25 @@ After editing JSON: `npm run changelog:gen`, commit, push, then in [vireondynami
 
 ---
 
+## v0.1.21 — 2026-11-03 {#v0-1-21}
+
+**Current beta.** Artifact work with fewer detours and honest completion.
+
+**Shipped**
+
+- **Direct artifact inspection** — List ISO9660 members and extract a selected file with exact offsets, size and SHA-256. Read bounded hex, typed words and strings without inventing dump scripts. Damaged members and unsupported namespaces stay explicit; originals are read-only and extraction never overwrites files.
+- **Useful recovery** — Harmless Python os/path inspection works, with a documented Python default for short snippets. Re-activating an active family succeeds. Failed programs do not disable corrected commands. Full canonical arguments, ranges and successful mutations distinguish repetition from progress; repeated program failures get one bounded diagnostic window without changing model or settings.
+- **Faithful MCP discovery** — Explicit tool names rank ahead of descriptive matches, including queries naming multiple operations. Connector guidance remains scoped untrusted reference data; older stdio connections recover it lazily without replaying calls or changing saved credentials.
+- **Windows command reliability** — Remove incompatible PowerShell Core system-module roots from classic PowerShell child environments while retaining custom locations. Foreground PTY, pipe and snippet cancellation terminates owned work; intentional background tabs remain available.
+- **Honest turn state** — Stop and timeout cannot report success or start queued work. Partial narration and unfinished tool pairing survive interruption, and late results cannot corrupt a subsequent turn. A requested named artifact connector gets a bounded completion check rather than being silently skipped.
+- **Binary-safe metadata** — Hash original bytes in bounded streams; hash-off inspection never decodes or buffers a whole game image. Binary and large-file line-count limits are stated explicitly.
+- **Docs** — [Artifact workflow benchmark](../reviews/game-re-benchmark.md)
+
+---
+
 ## v0.1.20 — 2026-11-03 {#v0-1-20}
 
-**Current beta.** Long tasks keep working, with each reply in its proper place.
+Long tasks keep working, with each reply in its proper place.
 
 **Shipped**
 

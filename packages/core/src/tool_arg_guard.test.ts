@@ -33,6 +33,46 @@ test("execute_code allows valid python snippet", () => {
   );
 });
 
+test("execute_code permits ordinary binary reads and os metadata imports", () => {
+  for (const code of [
+    "import os, struct\np = r'C:\\games\\Ghost Rider.iso'\nprint(os.path.exists(p), os.path.getsize(p))\nwith open(p, 'rb') as f:\n    print(struct.unpack('<I', f.read(4)))",
+    "from os import path, stat\nprint(path.exists('game.iso'), stat('game.iso').st_size)",
+    "from os import (path,\n stat)\nprint(path.basename('game.iso'))",
+    "import os as operating\nprint(operating.path.getsize('game.iso'))",
+    "from os.path import exists, getsize\nprint(exists('game.iso'))",
+  ]) {
+    assert.equal(guardToolArgs("execute_code", { language: "python", code }), null, code);
+  }
+  assert.equal(guardToolArgs("execute_code", {
+    language: "javascript",
+    code: "const fs = require('node:fs'); console.log(fs.statSync('game.iso').size); /iso/.exec('game.iso');",
+  }), null);
+});
+
+test("execute_code still guards explicit process primitives and dynamic imports", () => {
+  for (const code of [
+    "import os\nos.system('whoami')",
+    "os . popen ('whoami')",
+    "import os\nos.execl('/bin/sh', 'sh')",
+    "import os\nos.execvp('sh', ['sh'])",
+    "import os\nos.spawnve(0, '/bin/sh', ['sh'], {})",
+    "import os as operating\noperating.system('whoami')",
+    "import struct, os as operating\noperating.popen('whoami')",
+    "from os import system as launch\nlaunch('whoami')",
+    "from os import path, spawnlp",
+    "from os import (\n path, system\n)",
+    "from os import *",
+    "import subprocess\nsubprocess.run(['whoami'])",
+    "from subprocess import run\nrun(['whoami'])",
+    "__import__('os').system('whoami')",
+  ]) {
+    assert.match(guardToolArgs("execute_code", { language: "python", code }) ?? "", /dangerous/i, code);
+  }
+  for (const code of ["require('child_process').exec('whoami')", "process.binding('spawn_sync')", "Deno.run({cmd:['whoami']})"]) {
+    assert.match(guardToolArgs("execute_code", { language: "javascript", code }) ?? "", /dangerous/i, code);
+  }
+});
+
 test("execute_code blocks dangerous process escape pattern", () => {
   assert.match(
     guardToolArgs("execute_code", {
@@ -62,6 +102,12 @@ test("execute_code blocks invalid timeout and cwd escape", () => {
     }) ?? "",
     /workspace-relative/i
   );
+});
+
+test("execute_code supports its documented Python default without guessing another language", () => {
+  assert.equal(guardToolArgs("execute_code", {code: "print('fixture')"}), null);
+  assert.match(guardToolArgs("execute_code", {language: "", code: "print('fixture')"}) ?? "", /language/);
+  assert.match(guardToolArgs("execute_code", {code: "import os; os.system('whoami')"}) ?? "", /dangerous/);
 });
 
 test("markets_quote validates symbols and asset_type", () => {

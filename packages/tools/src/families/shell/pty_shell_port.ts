@@ -8,6 +8,7 @@ export interface PtyOneshotOptions {
   cols?: number;
   rows?: number;
   timeoutMs: number;
+  signal?: AbortSignal;
   onData?: (chunk: string) => void;
   onSessionStart?: (info: {
     sessionId: string;
@@ -30,6 +31,8 @@ export interface PtyManagerPort {
   onData(sessionId: string, listener: (chunk: string) => void): () => void;
   isAlive(sessionId: string): boolean;
   close(sessionId: string): boolean;
+  /** Stop only the owned foreground session and await its process-tree cleanup. */
+  cancelForeground?(sessionId: string): Promise<void>;
   list(chatId: string): Array<{
     sessionId: string;
     label: string;

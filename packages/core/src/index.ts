@@ -1134,6 +1134,7 @@ export type {
   PortContext,
 } from "./platform_context.js";
 export type { InteractivePtyLaunch } from "./shell_integration_launch.js";
+export { prepareShellChildEnvironment } from "./shell_child_environment.js";
 export { gatherExternalTerminalSnapshots } from "./terminal_snapshot.js";
 export type { TerminalSnapshotSummary } from "./terminal_snapshot.js";
 export {

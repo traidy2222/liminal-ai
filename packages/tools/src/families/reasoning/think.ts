@@ -35,7 +35,8 @@ export const thinkTool = defineTool({
           "Tool families needed for this task. Declaring them here pre-activates them — " +
           "no separate activate_tool_family calls needed. Valid: shell, git, code_intel, web, " +
       "reasoning, context, memory_advanced, vault, files_edit, tasks, vision, browser, document, markets, " +
-      "harness_ui, orchestration, navigation, meta, dynamic_tools, captcha, agenda_scheduler",
+      "harness_ui, orchestration, navigation, archives, meta, dynamic_tools, captcha, agenda_scheduler. " +
+      "For external MCP connectors, prefer mcp_search_tools with a focused task query over activating a broad connector family; broad families load many schemas.",
       },
       scope: {
         type: "string",

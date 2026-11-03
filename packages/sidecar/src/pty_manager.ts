@@ -1,8 +1,10 @@
 import { EventEmitter } from "node:events";
 import os from "node:os";
 import path from "node:path";
+import { statSync } from "node:fs";
+import { execFile } from "node:child_process";
 import * as pty from "node-pty";
-import { buildInteractivePtyLaunch, buildOneshotPtyLaunch } from "@liminal/core";
+import { buildInteractivePtyLaunch, buildOneshotPtyLaunch, prepareShellChildEnvironment } from "@liminal/core";
 
 export type PtySessionSource = "agent" | "user";
 
@@ -29,9 +31,29 @@ interface PtySessionRecord {
 const MAX_OUTPUT_BACKLOG = 512 * 1024;
 const MAX_SESSIONS_PER_CHAT = 8;
 
+function validateRequestedCwd(cwd: string): void {
+  try {
+    if (statSync(cwd).isDirectory()) return;
+  } catch { /* Provide the requested directory rather than a native error code. */ }
+  throw new Error(`Terminal cwd is not an existing directory: "${cwd}". Use an existing directory, or omit cwd to use the workspace.`);
+}
+
+function terminateOwnedPty(proc: pty.IPty, done: () => void = () => undefined): void {
+  const close = () => { try { proc.kill(); } catch { /* already exited */ } done(); };
+  const pid = proc.pid;
+  if (!Number.isSafeInteger(pid) || pid <= 0) { close(); return; }
+  if (process.platform === "win32") {
+    execFile("taskkill.exe", ["/PID", String(pid), "/T", "/F"], { windowsHide: true, timeout: 5000 }, close);
+  } else {
+    try { process.kill(-pid, "SIGKILL"); } catch { /* already exited */ }
+    close();
+  }
+}
+
 /** Keep ordinary shell configuration, but do not copy harness/provider credentials. */
-function terminalEnvironment(extra: NodeJS.ProcessEnv = {}): Record<string, string> {
-  return Object.fromEntries(Object.entries({ ...process.env, ...extra }).filter(([name, value]) =>
+function terminalEnvironment(executable: string, extra: NodeJS.ProcessEnv = {}): Record<string, string> {
+  const environment = prepareShellChildEnvironment(executable, { ...process.env, ...extra });
+  return Object.fromEntries(Object.entries(environment).filter(([name, value]) =>
     value !== undefined && !/(api_?key|token|secret|password|passwd|credential|private_?key|access_?key|captcha_?key|_key$)/i.test(name)
   )) as Record<string, string>;
 }
@@ -45,6 +67,7 @@ export interface PtyOneshotInput {
   cols?: number;
   rows?: number;
   timeoutMs: number;
+  signal?: AbortSignal;
   onData?: (chunk: string) => void;
   onSessionStart?: (info: PtySessionInfo) => void;
 }
@@ -182,6 +205,7 @@ export class PtyManager extends EventEmitter {
     const spawnCwd = input.cwd?.trim()
       ? path.resolve(input.cwd.trim())
       : workspaceRoot;
+    if (input.cwd?.trim()) validateRequestedCwd(spawnCwd);
     const cols = Math.max(20, Math.min(500, input.cols ?? 80));
     const rows = Math.max(5, Math.min(200, input.rows ?? 24));
     const index = (this.chatSessions.get(chatId) ?? []).length;
@@ -196,7 +220,7 @@ export class PtyManager extends EventEmitter {
     const shell = launch.executable;
     const args = launch.args.length > 0 ? launch.args : undefined;
     const env = {
-      ...terminalEnvironment(launch.env),
+      ...terminalEnvironment(shell, launch.env),
       TERM: "xterm-256color",
       COLORTERM: "truecolor",
       LIMINAL_CHAT_ID: chatId,
@@ -257,11 +281,13 @@ export class PtyManager extends EventEmitter {
    * command completes — exit code comes from `onExit`, not injected markers.
    */
   runOneshot(input: PtyOneshotInput): Promise<PtyOneshotResult> {
+    if (input.signal?.aborted) return Promise.reject(new Error("Terminal command cancelled before execution."));
     const chatId = input.chatId.trim();
     const workspaceRoot = path.resolve(input.workspaceRoot.trim() || process.cwd());
     const spawnCwd = input.cwd?.trim()
       ? path.resolve(input.cwd.trim())
       : workspaceRoot;
+    if (input.cwd?.trim()) validateRequestedCwd(spawnCwd);
     const cols = Math.max(20, Math.min(500, input.cols ?? 80));
     const rows = Math.max(5, Math.min(200, input.rows ?? 24));
     const label = input.label?.trim() || truncateCommandLabel(input.command);
@@ -269,7 +295,7 @@ export class PtyManager extends EventEmitter {
 
     const sessionId = newSessionId(chatId);
     const env = {
-      ...terminalEnvironment(),
+      ...terminalEnvironment(executable),
       TERM: "xterm-256color",
       COLORTERM: "truecolor",
       LIMINAL_CHAT_ID: chatId,
@@ -327,20 +353,20 @@ export class PtyManager extends EventEmitter {
         if (settled) return;
         settled = true;
         clearTimeout(timer);
+        input.signal?.removeEventListener("abort", onAbort);
         resolve(result);
       };
       const fail = (err: Error) => {
         if (settled) return;
         settled = true;
         clearTimeout(timer);
+        input.signal?.removeEventListener("abort", onAbort);
         this.releaseSession(record, -1);
-        try {
-          proc.kill();
-        } catch {
-          /* ignore */
-        }
-        reject(err);
+        // Enumerate the owned shell tree before terminating its root. Killing
+        // only the console/shell first can orphan native children on Windows.
+        terminateOwnedPty(proc, () => reject(err));
       };
+      const onAbort = () => fail(new Error("Terminal command cancelled."));
 
       const timer = setTimeout(() => {
         const tail = output.slice(-4000) || "(none)";
@@ -359,6 +385,8 @@ export class PtyManager extends EventEmitter {
           sessionId,
         });
       });
+      input.signal?.addEventListener("abort", onAbort, { once: true });
+      if (input.signal?.aborted) { onAbort(); return; }
       try {
         this.emit("open", info);
         input.onSessionStart?.(info);
@@ -438,13 +466,16 @@ export class PtyManager extends EventEmitter {
   close(sessionId: string): boolean {
     const record = this.sessions.get(sessionId);
     if (!record) return false;
-    try {
-      record.pty.kill();
-    } catch {
-      /* ignore */
-    }
+    try { record.pty.kill(); } catch { /* already exited */ }
     this.releaseSession(record, -1);
     return true;
+  }
+
+  cancelForeground(sessionId: string): Promise<void> {
+    const record = this.sessions.get(sessionId);
+    if (!record) return Promise.resolve();
+    this.releaseSession(record, -1);
+    return new Promise((resolve) => terminateOwnedPty(record.pty, resolve));
   }
 
   closeForChat(chatId: string): void {

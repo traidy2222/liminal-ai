@@ -34,6 +34,17 @@ export {
 
 const MAX_CAPTURE = 512 * 1024;
 
+function waitForForegroundCommand(pending: Promise<ToolResult>, signal: AbortSignal | undefined, started: () => boolean): Promise<ToolResult> {
+  if (!signal) return pending;
+  return new Promise((resolve) => {
+    const finish = (result: ToolResult) => { signal.removeEventListener("abort", onAbort); resolve(result); };
+    const onAbort = () => { if (!started()) finish({ ok: false, error: "Terminal command cancelled." }); };
+    signal.addEventListener("abort", onAbort, { once: true });
+    if (signal.aborted) onAbort();
+    void pending.then(finish, (err) => finish({ ok: false, error: err instanceof Error ? err.message : String(err) }));
+  });
+}
+
 export interface TerminalBackgroundJob {
   sessionId: string;
   chatId: string;
@@ -154,7 +165,9 @@ export async function runShellInTerminal(input: {
   timeoutMs: number;
   cappedNote: string;
   onChunk?: (chunk: string) => void;
+  signal?: AbortSignal;
 }): Promise<ToolResult> {
+  if (input.signal?.aborted) return { ok: false, error: "Terminal command cancelled before execution." };
   const chatId = input.harness.taskId?.trim();
   if (!chatId) {
     return { ok: false, error: "No chat context for terminal shell execution." };
@@ -168,18 +181,23 @@ export async function runShellInTerminal(input: {
     // Foreground commands are noninteractive jobs. Sending a multiline paste
     // through PSReadLine can accept a repainted/empty prompt as completion and
     // return stale output while the actual command is still being entered.
-    return enqueueAgentShell(chatId, async () => {
+    let commandStarted = false;
+    const pending = enqueueAgentShell<ToolResult>(chatId, async () => {
+      if (input.signal?.aborted) return { ok: false, error: "Terminal command cancelled before execution." };
       const port = getPtyShellPort();
       if (!port) return { ok: false, error: "PTY shell port is not available." };
       try {
+        commandStarted = true;
         const result = await port.runOneshot({ chatId, command: input.command, cwd: input.cwd,
           timeoutMs: input.timeoutMs, label: "Agent command", onData: input.onChunk,
+          signal: input.signal,
           onSessionStart: info => {
             try {
               publishTerminalView({chatId, ...info, source: "agent", open: true, focus: true, updatedAt: Date.now()});
             } catch { /* A UI observer must not fail or replay an executing job. */ }
           },
         });
+        if (input.signal?.aborted) return { ok: false, error: "Terminal command cancelled." };
         const captured = normalizeNewlines(stripAnsi(result.output)).trimEnd() || "(no output)";
         let preview = formatShellResultBody(captured);
         if (preview !== captured) {
@@ -201,6 +219,7 @@ export async function runShellInTerminal(input: {
         return { ok: false, error: error instanceof Error ? error.message : String(error) };
       }
     });
+    return waitForForegroundCommand(pending, input.signal, () => commandStarted);
   }
 
   return getAgentShellSession(chatId).exec({
@@ -208,6 +227,7 @@ export async function runShellInTerminal(input: {
     cwd: input.cwd,
     timeoutMs: input.timeoutMs,
     cappedNote: input.cappedNote,
+    signal: input.signal,
   });
 }
 

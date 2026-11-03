@@ -14,6 +14,7 @@ export function createPtyShellPort(
     onData: (sessionId, listener) => mgr.onSessionData(sessionId, listener),
     isAlive: (sessionId) => mgr.isAlive(sessionId),
     close: (sessionId) => mgr.close(sessionId),
+    cancelForeground: (sessionId) => mgr.cancelForeground(sessionId),
     list: (chatId) =>
       mgr.list(chatId).map((s) => ({
         sessionId: s.sessionId,

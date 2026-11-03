@@ -1,7 +1,7 @@
 import type { ToolRegistry } from "@liminal/core";
 import { isFamilyEntitled, loadHarnessEntitlements, ENTITLEMENT_GATED_FAMILIES } from "@liminal/core";
 import { defineTool } from "./shared/helpers.js";
-import { WORKSPACE_TOOL_FAMILY_ALIASES } from "@liminal/core";
+import { registryHasToolFamily, WORKSPACE_TOOL_FAMILY_ALIASES } from "@liminal/core";
 import { TOOL_FAMILIES, summarizeFamilyActivity } from "./tool_catalog.js";
 import { matchesAgentcardIntent } from "./integrations/agentcard/agentcard_cli.js";
 
@@ -139,7 +139,6 @@ export function createToolDiscoveryTools(registry: ToolRegistry) {
       const family = String(args["family"] ?? "").trim().toLowerCase();
       if (!family) return { ok: false, error: "family is required" };
       const aliasTargets = WORKSPACE_TOOL_FAMILY_ALIASES[family];
-      const def = TOOL_FAMILIES[family];
       const knownStatic = family in TOOL_FAMILIES;
       const isDynamicConnector = family.startsWith("connector:");
       if (!knownStatic && !isDynamicConnector) {
@@ -168,7 +167,12 @@ export function createToolDiscoveryTools(registry: ToolRegistry) {
           newly = [...new Set([...newly, ...fromCatalog])];
         }
       }
-      if (newly.length === 0) {
+      // No newly activated tools can mean the family is already active (or
+      // lazy loading is off), rather than that its tools are unavailable.
+      const hasRegisteredTools =
+        registryHasToolFamily(family, registry.getToolNames(), (name) => registry.getSuggestedFamilyForTool(name)) ||
+        familiesToActivate.some((fam) => TOOL_FAMILIES[fam]?.tools.some((name) => registry.has(name)));
+      if (!hasRegisteredTools) {
         const hint =
           family === "github"
             ? ' Connect GitHub first (connect_provider start_oauth), then activate family "github".'

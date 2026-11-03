@@ -1,7 +1,7 @@
 /**
  * execute_code — run short Python/JavaScript snippets with bounded resources.
  */
-import { spawn } from "node:child_process";
+import { spawn, execFile } from "node:child_process";
 import path from "node:path";
 import { resolveWorkspaceRoot, type ToolResult } from "@liminal/core";
 import { defineTool } from "../../shared/helpers.js";
@@ -33,49 +33,87 @@ function executeSnippet(
   command: string,
   cmdArgs: string[],
   cwd: string,
-  timeoutMs: number
+  timeoutMs: number,
+  signal?: AbortSignal
 ): Promise<ToolResult> {
+  if (signal?.aborted) return Promise.resolve({ ok: false, error: "Runtime cancelled before execution." });
   return new Promise((resolve) => {
     const child = spawn(command, cmdArgs, {
       cwd,
       stdio: "pipe",
       shell: false,
       windowsHide: true,
+      detached: process.platform !== "win32",
     });
     const startedAt = Date.now();
     let stdout = "";
     let stderr = "";
     let timedOut = false;
     let killedByOutputCap = false;
+    let cancelled = false;
+    let settled = false;
+    let forceTimer: ReturnType<typeof setTimeout> | undefined;
+    let closeDeadline: ReturnType<typeof setTimeout> | undefined;
+
+    const killTree = (force = false) => {
+      if (!child.pid) return;
+      if (process.platform === "win32") {
+        execFile("taskkill.exe", ["/PID", String(child.pid), "/T", "/F"], { windowsHide: true, timeout: 5000 }, (error) => {
+          if (error && !settled) { try { child.kill("SIGKILL"); } catch {} }
+        });
+      } else {
+        try { process.kill(-child.pid, force ? "SIGKILL" : "SIGTERM"); }
+        catch { try { child.kill(force ? "SIGKILL" : "SIGTERM"); } catch {} }
+      }
+    };
+    const stopChild = () => {
+      if (closeDeadline) return;
+      killTree();
+      if (process.platform !== "win32") forceTimer = setTimeout(() => killTree(true), 1000);
+      closeDeadline = setTimeout(() => {
+        child.stdout?.destroy(); child.stderr?.destroy(); child.unref(); finish(null);
+      }, 5500);
+    };
 
     const timer = setTimeout(() => {
       timedOut = true;
-      child.kill("SIGTERM");
+      stopChild();
     }, timeoutMs);
 
     const appendBounded = (current: string, chunk: Buffer): string => {
       const next = current + chunk.toString();
       if (Buffer.byteLength(next, "utf8") > MAX_OUTPUT_BYTES) {
         killedByOutputCap = true;
-        child.kill("SIGTERM");
+        stopChild();
       }
       return next;
     };
 
     child.stdout?.on("data", (chunk: Buffer) => {
+      if (settled || cancelled) return;
       stdout = appendBounded(stdout, chunk);
     });
     child.stderr?.on("data", (chunk: Buffer) => {
+      if (settled || cancelled) return;
       stderr = appendBounded(stderr, chunk);
     });
 
     child.on("error", (err) => {
+      if (settled) return;
+      settled = true;
       clearTimeout(timer);
-      resolve({ ok: false, error: `Failed to start runtime: ${err.message}` });
+      clearTimeout(forceTimer); clearTimeout(closeDeadline);
+      signal?.removeEventListener("abort", onAbort);
+      resolve({ ok: false, error: cancelled ? "Runtime cancelled." : `Failed to start runtime: ${err.message}` });
     });
 
-    child.on("close", (exitCode) => {
+    const finish = (exitCode: number | null) => {
+      if (settled) return;
+      if ((cancelled || timedOut || killedByOutputCap) && process.platform !== "win32") killTree(true);
+      settled = true;
       clearTimeout(timer);
+      clearTimeout(forceTimer); clearTimeout(closeDeadline);
+      signal?.removeEventListener("abort", onAbort);
       const elapsedMs = Date.now() - startedAt;
       const out = trimOutput(stdout);
       const err = trimOutput(stderr);
@@ -84,12 +122,13 @@ function executeSnippet(
         exit_code: exitCode ?? -1,
         elapsed_ms: elapsedMs,
         timed_out: timedOut,
+        cancelled,
         output_capped: killedByOutputCap || out.truncated || err.truncated,
         stdout: out.text,
         stderr: err.text,
       };
       const serialized = JSON.stringify(envelope, null, 2);
-      if (timedOut) {
+      if (cancelled || timedOut) {
         resolve({ ok: false, error: serialized });
         return;
       }
@@ -102,7 +141,16 @@ function executeSnippet(
         return;
       }
       resolve({ ok: true, output: serialized });
-    });
+    };
+    child.on("close", finish);
+    const onAbort = () => {
+      if (settled || cancelled) return;
+      cancelled = true;
+      clearTimeout(timer);
+      stopChild();
+    };
+    signal?.addEventListener("abort", onAbort, { once: true });
+    if (signal?.aborted) onAbort();
   });
 }
 
@@ -110,10 +158,10 @@ export const executeCodeTool = defineTool({
   name: "execute_code",
   description:
     "WHAT: Execute short Python or JavaScript snippets and return structured stdout/stderr JSON.\n" +
-    "WHEN: Numeric calculations, simulation snippets, quick data transforms.\n" +
+    "WHEN: Numeric calculations, simulation snippets, quick data transforms, binary/header inspection and file metadata (including Python os.path/os.stat).\n" +
     "NOT WHEN: You need package installs, process orchestration, or broader shell access (use run_shell/run_background).\n" +
     "Requires user approval.\n" +
-    "ARGS: language (python|javascript), code, optional timeout_ms, optional cwd (workspace-relative).",
+    "ARGS: code, optional language (python by default; javascript must be explicit), optional timeout_ms, optional cwd (workspace-relative).",
   requiresApproval: true,
   dangerLevel: "destructive",
   resourceLocks: (args) => {
@@ -126,7 +174,7 @@ export const executeCodeTool = defineTool({
       language: {
         type: "string",
         enum: ["python", "javascript"],
-        description: "Runtime language",
+        description: "Runtime language, default python. Use javascript explicitly for Node.js snippets.",
       },
       code: {
         type: "string",
@@ -145,11 +193,12 @@ export const executeCodeTool = defineTool({
         description: "Optional workspace-relative working directory",
       },
     },
-    required: ["language", "code"],
+    required: ["code"],
     additionalProperties: false,
   },
-  handler: async (args, emit) => {
-    const language = args["language"] as "python" | "javascript";
+  handler: async (args, emit, _harness, context) => {
+    if (context?.signal?.aborted) return { ok: false, error: "Runtime cancelled before execution." };
+    const language = (args["language"] ?? "python") as "python" | "javascript";
     const code = String(args["code"] ?? "");
     const preview = code.trim().split("\n")[0]?.slice(0, 60) ?? "";
     emit?.(`\nexecute_code (${language}): ${preview}…\n`);
@@ -160,14 +209,14 @@ export const executeCodeTool = defineTool({
     const cwd = resolveCwd(args["cwd"] as string | undefined);
 
     if (language === "javascript") {
-      return executeSnippet("node", ["-e", code], cwd, timeoutMs);
+      return executeSnippet("node", ["-e", code], cwd, timeoutMs, context?.signal);
     }
     if (process.platform === "win32") {
-      const pyLauncher = await executeSnippet("py", ["-3", "-c", code], cwd, timeoutMs);
+      const pyLauncher = await executeSnippet("py", ["-3", "-c", code], cwd, timeoutMs, context?.signal);
       if (pyLauncher.ok || !/Failed to start runtime/i.test(pyLauncher.error)) {
         return pyLauncher;
       }
     }
-    return executeSnippet("python", ["-c", code], cwd, timeoutMs);
+    return executeSnippet("python", ["-c", code], cwd, timeoutMs, context?.signal);
   },
 });
