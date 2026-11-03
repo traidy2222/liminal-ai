@@ -8,6 +8,7 @@ import {
   rm,
   symlink,
   readdir,
+  realpath,
 } from "node:fs/promises";
 import path from "node:path";
 import os from "node:os";
@@ -335,8 +336,8 @@ test("continued artifact work discovers nearby existing script paths without rea
   });
   const context = await ledger.discoverPriorWork();
   assert.match(context, /UNTRUSTED PREVIOUS ARTIFACT WORK/);
-  assert(context.includes(JSON.stringify(prior)));
-  assert(context.includes(JSON.stringify(local)));
+  assert(context.includes(JSON.stringify(await realpath(prior))));
+  assert(context.includes(JSON.stringify(await realpath(local))));
   assert.match(context, /verify.*byte ranges/);
   assert.doesNotMatch(
     context,
@@ -544,12 +545,14 @@ test("checkpoint observes new extracted binary prefixes proactively and caches u
   const source = path.join(workspace, "extracted", "character.ucf");
   await writeFile(source, syntheticScene());
   await writeFile(path.join(workspace, "not_binary.py"), syntheticScene());
+  // Windows runner temp paths can use an 8.3 alias; production opens the canonical path.
+  const canonicalSource = await realpath(source);
   const actualOpen = fs.promises.open;
   let binaryOpens = 0,
     readBytes = 0;
   t.mock.method(fs.promises, "open", async (...args: unknown[]) => {
     const file = await (actualOpen as any)(...args);
-    if (args[0] === source) {
+    if (args[0] === canonicalSource) {
       binaryOpens++;
       const actualRead = file.read.bind(file);
       t.mock.method(file, "read", async (...readArgs: unknown[]) => {
