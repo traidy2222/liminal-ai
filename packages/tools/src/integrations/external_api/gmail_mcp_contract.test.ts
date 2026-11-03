@@ -60,9 +60,12 @@ test("Gmail MCP camelCase reply IDs allow normal plain-text replies", async () =
 test("Gmail entity-not-found errors request fresh IDs without leaking backend stack traces", async () => {
   const original = globalThis.fetch;
   try {
-    globalThis.fetch = async () => Response.json({ jsonrpc: "2.0", id: 1, result: {
+    globalThis.fetch = async (_url, init) => {
+      const rpc = JSON.parse(String(init?.body));
+      return Response.json({ jsonrpc: "2.0", id: rpc.id, result: {
       isError: true, content: [{ type: "text", text: 'Failed to label message: Status 404, Body: {"error":{"message":"Requested entity was not found.","debugInfo":"backend-stack-fixture"}}' }],
     } });
+    };
     const registry = new ToolRegistry();
     registerMcpConnection(registry, connection("get_message", { messageId: { type: "string" } }));
     const result = await registry.get("mcp_google_gmail_get_message")!.handler({ messageId: "missing-fixture" });
@@ -92,9 +95,12 @@ test("a valid plain-text MCP draft is not rejected for lacking decorative HTML",
 test("a label API failure does not incorrectly request message IDs", async () => {
   const original = globalThis.fetch;
   try {
-    globalThis.fetch = async () => Response.json({ jsonrpc: "2.0", id: 1, result: {
+    globalThis.fetch = async (_url, init) => {
+      const rpc = JSON.parse(String(init?.body));
+      return Response.json({ jsonrpc: "2.0", id: rpc.id, result: {
       isError: true, content: [{ type: "text", text: "Status 404: Requested entity was not found." }],
     } });
+    };
     const registry = new ToolRegistry();
     registerMcpConnection(registry, connection("create_label", { displayName: { type: "string" } }));
     const result = await registry.get("mcp_google_gmail_create_label")!.handler({ displayName: "Fixture" });
