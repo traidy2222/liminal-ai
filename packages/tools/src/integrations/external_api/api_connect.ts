@@ -467,7 +467,7 @@ export function createApiConnectionTools(registry: ToolRegistry, _emitter: Agent
         if (c.kind === "openapi") {
           lines.push(`• openapi:${c.name} — ${c.operations.length} ops — base=${c.baseUrl} — auth=${c.auth.kind}`);
         } else {
-          lines.push(`• mcp:${c.name} — ${c.tools.length} tools — url=${c.serverUrl} — auth=${c.auth.kind}`);
+          lines.push(`• mcp:${c.name} — ${c.tools.length} tools — ${c.transport === "stdio" ? "local stdio" : `url=${c.serverUrl}`} — auth=${c.auth.kind}`);
         }
       }
       return { ok: true, output: lines.join("\n") };

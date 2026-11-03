@@ -2,7 +2,7 @@
 
 All notable changes to [Liminal AI](https://github.com/traidy2222/liminal-ai) on the `main` branch.
 
-**Current stage:** **beta** (`v0.1.14`, 2026-11-03). Desktop downloads are published through the public preview release channel.
+**Current stage:** **beta** (`v0.1.15`, 2026-11-03). Desktop downloads are published through the public preview release channel.
 
 Format: **v0.0.x** entries keyed to the last GitHub push in each slice. Dates are real push dates.
 
@@ -17,9 +17,23 @@ After editing JSON: `npm run changelog:gen`, commit, push, then in [vireondynami
 
 ---
 
+## v0.1.15 — 2026-11-03 {#v0-1-15}
+
+**Current beta.** REA and local MCP tools, ready when you need them.
+
+**Shipped**
+
+- **Full REA catalog** — Discover all 170 tools from the installed REA 6.4 server. Search and load the relevant tools instead of sending every schema with ordinary conversations. Native and platform-specific operations retain their provider prerequisites.
+- **Native local MCP** — Persist executable and argument settings, keep secrets in environment variables, and run helpers outside the installation folder. Conversations and child dispatchers use independent sessions; stopped turns cancel their active MCP requests.
+- **Faithful tool contracts** — Preserve root schema definitions, nested references, full descriptions, structured results and binary media. Honor mutation annotations and normal approvals; never replay a failed write automatically.
+- **Verification** — Linux and Windows CI cover paginated discovery, schema preservation, lazy search, independent sessions, denied writes, cancellation and disconnect handling. The real installed REA server passed static JavaScript and headless IDA native fixture analysis, with owned database cleanup and no target execution.
+- **Docs** — [REA and local MCP](../guides/rea.md)
+
+---
+
 ## v0.1.14 — 2026-11-03 {#v0-1-14}
 
-**Current beta.** Windows updates without Google helper directory locks.
+Windows updates without Google helper directory locks.
 
 **Shipped**
 

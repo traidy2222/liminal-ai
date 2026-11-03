@@ -36,7 +36,7 @@ export interface McpToolFilter {
   exclude?: string[];
 }
 
-export function filterMcpToolRecords<T extends { remoteName: string }>(
+export function filterMcpToolRecords<T extends { remoteName: string; description?: string; annotations?: { readOnlyHint?: boolean; destructiveHint?: boolean } }>(
   tools: T[],
   opts: { readOnly?: boolean; toolFilter?: McpToolFilter }
 ): T[] {
@@ -51,7 +51,7 @@ export function filterMcpToolRecords<T extends { remoteName: string }>(
     out = out.filter((t) => !skip.has(t.remoteName.toLowerCase()));
   }
   if (opts.readOnly) {
-    out = out.filter((t) => !isMcpWriteTool(t.remoteName));
+    out = out.filter((t) => t.annotations?.readOnlyHint !== false && t.annotations?.destructiveHint !== true && !isMcpWriteTool(t.remoteName, t.description));
   }
   return out;
 }

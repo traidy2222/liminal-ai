@@ -190,6 +190,12 @@ export class ToolDispatcher {
     this.fileWriteHooks = hooks;
   }
 
+  private turnAbortSignal?: AbortSignal;
+
+  setTurnAbortSignal(signal: AbortSignal | undefined): void {
+    this.turnAbortSignal = signal;
+  }
+
   /** Set per-turn trace ID and initial round index. Call at send() start; clear with undefined on finish. */
   setTurnTraceId(id: string | undefined): void {
     this.turnTraceId = id;
@@ -289,7 +295,7 @@ export class ToolDispatcher {
     if (guardMsg) return { ok: false, error: `[ARG GUARD] ${guardMsg}` };
     try {
       const emit = (text: string) => this.emitter.emit("text", { delta: text, channel: "trace" });
-      return await runWithFileWriteStreamOwner(this, () => tool.handler(args, emit));
+      return await runWithFileWriteStreamOwner(this, () => tool.handler(args, emit, undefined, { scope: this, signal: this.turnAbortSignal }));
     } catch (err) {
       return { ok: false, error: err instanceof Error ? err.message : String(err) };
     }
@@ -592,7 +598,7 @@ export class ToolDispatcher {
           this.emitter.emit("text", { delta: text, channel: "trace" });
           this.emitter.emit("tool_progress", { callId, delta: text });
         };
-        const result = await tool.handler(args, emit, undefined, executionContext);
+        const result = await tool.handler(args, emit, undefined, { ...executionContext, scope: this, signal: executionContext?.signal ?? this.turnAbortSignal });
         this.emitter.emit("tool_timing", { callId, name, durationMs: Date.now() - t0 });
         return result;
       };

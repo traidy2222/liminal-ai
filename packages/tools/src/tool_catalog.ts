@@ -618,7 +618,7 @@ export const TOOL_FAMILIES: Record<string, { description: string; tools: readonl
       "Connect external services by spec: OpenAPI/Swagger via api_connect, MCP servers via mcp_attach. " +
       "Each connection auto-registers one tool per remote operation (e.g. api_linear_issues_create). " +
       "Connections persist across restarts under ~/.liminal/api_connections/.",
-    tools: ["api_connect", "api_disconnect", "api_list", "mcp_attach", "mcp_detach"],
+    tools: ["api_connect", "api_disconnect", "api_list", "mcp_attach", "mcp_detach", "mcp_attach_stdio", "mcp_search_tools", "mcp_close_session"],
   },
   vault: {
     description: "Obsidian vault read/write/search.",

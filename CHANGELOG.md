@@ -2,7 +2,7 @@
 
 All notable changes to [Liminal AI](https://github.com/traidy2222/liminal-ai) are documented here and on the docs portal: [docs.vireondynamics.com/liminal/reference/changelog](https://docs.vireondynamics.com/liminal/reference/changelog).
 
-**Current stage:** **beta** (`v0.1.14` tip of `main`, 2026-11-03). Desktop downloads are published through the public preview release channel.
+**Current stage:** **beta** (`v0.1.15` tip of `main`, 2026-11-03). Desktop downloads are published through the public preview release channel.
 
 **Single source:** edit [`changelog/releases.json`](changelog/releases.json), then run `npm run changelog:gen`.
 
@@ -10,7 +10,13 @@ Format: **v0.0.x** entries keyed to the last GitHub push in each slice. Dates ar
 
 Marketing (richer notes): [vireondynamics.com/liminal/changelog](https://www.vireondynamics.com/liminal/changelog)
 
-## [v0.1.14] — 2026-11-03 — Current beta
+## [v0.1.15] — 2026-11-03 — Current beta
+
+Connect installed local MCP servers over native stdio. REA's complete catalog is available through on-demand search, with independent conversation sessions, full schemas, structured Evidence and media artifacts.
+
+[Full notes](https://docs.vireondynamics.com/liminal/reference/changelog#v0-1-15)
+
+## [v0.1.14] — 2026-11-03
 
 The Google Workspace helper runs from user data rather than the app installation folder, allowing Windows to replace the desktop while the helper remains available. Ordinary HTML tables and document examples are no longer misclassified as outbound email.
 
