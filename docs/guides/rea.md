@@ -58,6 +58,9 @@ availability. Open the user's native or archive target with `open_binary`.
 Target-free JavaScript, managed, resource and capture operations use their own
 declared paths or endpoints. REA tool arguments follow the server's original
 schema, including nested references and definitions.
+With IDA, proceed to available function tools such as `list_procedures`,
+`analyze_function` or `procedure_pseudo_code` after opening. `binary_overview`
+is unsupported by the IDA provider and is not a prerequisite for decompilation.
 
 Full catalog access does not install engines or bypass host requirements.
 Native analysis can use an existing supported IDA or Ghidra configuration;
