@@ -16,6 +16,8 @@ import '../core/protocol_client.dart';
 import '../core/session_registry.dart';
 import '../core/sidecar_lifecycle.dart';
 import '../core/update/update_coordinator.dart';
+import '../core/usage/usage_analytics.dart';
+import '../core/usage/usage_turn_tracker.dart';
 import '../models/user_image_attachment.dart';
 import '../ui/rich_message/asset_url_resolver.dart';
 import '../models/app_config.dart';
@@ -81,10 +83,21 @@ class AppController extends ChangeNotifier {
       reboot: boot,
     );
     updates.addListener(notifyListeners);
+    usage.addListener(notifyListeners);
+    unawaited(usage.initialize());
 
   }
 
   late final UpdateCoordinator updates;
+  final UsageAnalytics usage = UsageAnalytics();
+  final UsageTurnTracker _usageTurns = UsageTurnTracker();
+
+  Future<void> setUsageConsent(bool consent) async {
+    await usage.choose(consent);
+    if (usage.sharing && sidecarReady) {
+      unawaited(usage.record(UsageMilestone.appReady));
+    }
+  }
 
   final String? repoRoot;
 
@@ -216,6 +229,7 @@ class AppController extends ChangeNotifier {
 
       phase = ConnectionPhase.connected;
       _hasEverConnected = true;
+      unawaited(usage.record(UsageMilestone.appReady));
       _startConnectionHealthMonitor();
       if (LiminalFeatureFlags.desktopAppsEnabled) {
         await _appWindows.ensureChannelReady();
@@ -253,6 +267,7 @@ class AppController extends ChangeNotifier {
   }
 
   void _onTransportDisconnect(String reason) {
+    _usageTurns.clear();
     if (phase == ConnectionPhase.booting || !_hasEverConnected) return;
     unawaited(_scheduleReconnect(reason));
   }
@@ -467,6 +482,9 @@ class AppController extends ChangeNotifier {
   }
 
   void _onChatFrame(String chatId, String event, Map<String, dynamic> data) {
+    if (_usageTurns.observe(chatId, event, data)) {
+      unawaited(usage.record(UsageMilestone.conversationCompleted));
+    }
     if (event == 'terminal_view') {
       _applyTerminalView(chatId, data);
     }
@@ -1244,6 +1262,7 @@ class AppController extends ChangeNotifier {
       trimmed,
       attachmentPreviews: previews,
     );
+    _usageTurns.begin(targetChatId);
     final result = await _protocol.send('send_message', {
       'chatId': targetChatId,
       'message': trimmed,
@@ -1254,6 +1273,7 @@ class AppController extends ChangeNotifier {
         'attachments': attachments.map((a) => a.toWire()).toList(),
     });
     if (!result.ok) {
+      _usageTurns.cancel(targetChatId);
       _sessions.sessionFor(targetChatId).setConnectionError(
         result.error ?? 'send_message failed',
       );
@@ -1265,6 +1285,7 @@ class AppController extends ChangeNotifier {
   Future<void> abortTurn({String? chatId}) async {
     final id = chatId ?? activeChatId;
     if (id == null || !_protocol.isConnected) return;
+    _usageTurns.cancel(id);
     await _protocol.send('abort', {'chatId': id});
   }
 
@@ -2475,6 +2496,8 @@ class AppController extends ChangeNotifier {
 
   @override
   void dispose() {
+    usage.removeListener(notifyListeners);
+    usage.dispose();
     _stopConnectionHealthMonitor();
     _connectionNoticeTimer?.cancel();
     _stopIntegrationsPolling();

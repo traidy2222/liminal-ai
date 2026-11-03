@@ -16,6 +16,7 @@ import '../theme/liminal_theme_extension.dart';
 import '../widgets/inbox_panel.dart';
 import '../widgets/orchestrator_panel.dart';
 import '../widgets/update_banner.dart';
+import '../widgets/usage_analytics_panel.dart';
 
 class VireonHubScreen extends StatefulWidget {
   const VireonHubScreen({super.key});
@@ -209,7 +210,10 @@ class _VireonHubScreenState extends State<VireonHubScreen> {
         inboxCount: host.inbox.pendingCount,
         inboxNeedsAction: host.inbox.needsActionCount,
         missionActive: host.orchestration.isActive,
-        banner: const UpdateBanner(),
+        banner: Column(children: [
+          const UpdateBanner(),
+          UsageAnalyticsPanel(analytics: host.usage, compact: true, onChoice: host.setUsageConsent),
+        ],),
         mission: _HubMissionSection(
           host: host,
           opening: _openingChat,
