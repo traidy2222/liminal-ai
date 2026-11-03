@@ -5205,7 +5205,7 @@ export class AgentHarness {
         this.roundCount >= this.config.maxToolRoundsPerTurn - 1
       ) {
         const handoff = `Work is paused and is not complete: ${contractBudgetMsg} ` +
-          `The remaining work for "${this.lastUserMessage.slice(0, 240)}" is still pending. ` +
+          "The remaining work is still pending. " +
           "Changes already saved remain available. Continue this chat to resume from the recorded results.";
         this.context.appendMessage({ role: "assistant", content: handoff });
         this.emitter.emit("text", { delta: handoff });

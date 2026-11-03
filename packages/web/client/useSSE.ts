@@ -18,6 +18,7 @@ import {
 } from "./webApiAuth.js";
 import { replayEntriesToMessages } from "./replayTranscript.js";
 import { applyPlanStepDone, upsertPlanSteps } from "./planTranscript.js";
+import { sealAssistantSegment as freezeInterimAssistant } from "./chatTurnLayout.js";
 
 /** Set only after a successful auto-greet reset (survives remount within the tab). */
 const SS_AUTO_GREET_DONE = "liminal:auto_greet_done_v1";
@@ -92,17 +93,6 @@ function finalizeStreamingModelReasoning(messages: MessageEntry[]): MessageEntry
   return messages.map((m) =>
     m.kind === "model_reasoning" && m.streaming ? { ...m, streaming: false } : m
   );
-}
-
-/** Move in-progress assistant narration into the working section before tools/reasoning. */
-function freezeInterimAssistant(messages: MessageEntry[]): MessageEntry[] {
-  const last = messages.at(-1);
-  if (last?.kind !== "assistant") return messages;
-  if (!last.text.trim()) return messages.slice(0, -1);
-  return [
-    ...messages.slice(0, -1),
-    { kind: "working_note" as const, text: last.text, streaming: false },
-  ];
 }
 
 function finalizeStreamingReasoningEntries(messages: MessageEntry[]): MessageEntry[] {
@@ -929,7 +919,7 @@ function reducer(state: SSEState, action: Action): SSEState {
           ],
         };
       }
-      if (ORCH_TOOLS.has(name)) return state;
+      if (ORCH_TOOLS.has(name)) return { ...state, messages: baseAfterReasoning };
       return {
         ...state,
         messages: [
@@ -995,7 +985,7 @@ function reducer(state: SSEState, action: Action): SSEState {
       const { callId } = action.payload;
       return {
         ...state,
-        messages: markToolCallRunning(state.messages, callId),
+        messages: markToolCallRunning(freezeInterimAssistant(state.messages), callId),
       };
     }
 
@@ -1039,6 +1029,7 @@ function reducer(state: SSEState, action: Action): SSEState {
 
     case "tool_result": {
       const { callId, name, args, ok, output } = action.payload;
+      state = { ...state, messages: freezeInterimAssistant(state.messages) };
       if (name === "think" && ok) {
         const finalized = {
           kind: "think" as const,

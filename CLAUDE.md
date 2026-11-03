@@ -153,7 +153,7 @@ Full design in the **Dynamic workflows** paragraph under the tool-families list 
 | `AGENT_SEND_TIMEOUT_MS`                | `1800000` | Wall-clock cap for one full `send()` / ReAct run                      |
 | `AGENT_CTX_HOT_ROUNDS` / `AGENT_CTX_WARM_ROUNDS` | `4` / `8` | Verbatim rounds kept / tier-2 provenance rounds            |
 | `AGENT_SESSION_JSONL`                  | on        | Append-only event trace → `.agent_sessions/<taskId>.jsonl`            |
-| `AGENT_SESSION_JSONL_TEXT_LOG`         | `rollup`  | `rollup` (one `text_rollup`/turn), `delta` (per-token), `both`        |
+| `AGENT_SESSION_JSONL_TEXT_LOG`         | `rollup`  | `rollup` (one `text_rollup` per narration segment), `delta` (per-token), `both` |
 | `AGENT_SESSION_JSONL_TRACE`            | off       | Log `channel: "trace"` harness lines to JSONL (noisy)                |
 | `AGENT_SELF_HEAL_LINT`                 | off       | Bounded post-edit lint self-heal loop in `AgentHarness`              |
 | `AGENT_SELF_HEAL_MAX_PASSES`           | `4`       | Max diagnose→fix→verify passes per send                              |

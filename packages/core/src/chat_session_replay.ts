@@ -55,12 +55,12 @@ export function parseSessionJsonlForReplay(
   const out: ReplayTranscriptEntry[] = [];
   const pendingTools = new Map<
     string,
-    { turnIndex: number; name: string; args?: Record<string, unknown> }
+    ReplayTranscriptEntry
   >();
 
   const lines = raw.split("\n");
   for (const line of lines) {
-    if (!line.trim() || out.length >= maxEntries) continue;
+    if (!line.trim()) continue;
     let row: SessionLogRow;
     try {
       row = JSON.parse(line) as SessionLogRow;
@@ -68,6 +68,7 @@ export function parseSessionJsonlForReplay(
       continue;
     }
     const event = row.event ?? "";
+    if (out.length >= maxEntries && event !== "tool_result") continue;
     const turnIndex = typeof row.turnIndex === "number" ? row.turnIndex : 0;
 
     if (event === "send_start" && row.userMessage) {
@@ -81,28 +82,35 @@ export function parseSessionJsonlForReplay(
     }
 
     if (event === "tool_start" && row.callId && row.name) {
-      pendingTools.set(row.callId, {
+      const entry: ReplayTranscriptEntry = {
+        id: entryId("tool", turnIndex, row.callId),
+        kind: "tool_call",
         turnIndex,
-        name: row.name,
-        args: row.args,
-      });
+        toolCallId: row.callId,
+        toolName: row.name,
+        toolArgs: row.args,
+      };
+      pendingTools.set(row.callId, entry);
+      out.push(entry);
       continue;
     }
 
     if (event === "tool_result" && row.callId) {
       const pending = pendingTools.get(row.callId);
       pendingTools.delete(row.callId);
-      out.push({
+      const result: ReplayTranscriptEntry = {
         id: entryId("tool", turnIndex, row.callId),
         kind: "tool_call",
         turnIndex,
         toolCallId: row.callId,
-        toolName: row.name ?? pending?.name ?? "tool",
-        toolArgs: row.args ?? pending?.args,
+        toolName: row.name ?? pending?.toolName ?? "tool",
+        toolArgs: row.args ?? pending?.toolArgs,
         toolOk: row.ok === true,
         toolOutput: row.ok === true ? row.output : row.error,
         text: row.ok === true ? row.output : row.error,
-      });
+      };
+      if (pending) Object.assign(pending, result);
+      else if (out.length < maxEntries) out.push(result);
       continue;
     }
 
@@ -126,7 +134,11 @@ export function parseSessionJsonlForReplay(
     }
   }
 
-  return out;
+  // Keep completed tools in their start position even if narration or parallel
+  // results arrived between start and finish. Never invent success for a tool
+  // whose result is absent from the saved log.
+  const incomplete = new Set(pendingTools.values());
+  return out.filter(entry => !incomplete.has(entry));
 }
 
 const DEFAULT_WIRE_TOOL_OUTPUT_CHARS = 4000;
@@ -268,14 +280,22 @@ export function conversationEntriesForHydration(
   opts?: { maxTurns?: number }
 ): Array<{ role: "user" | "assistant"; content: string }> {
   const maxTurns = opts?.maxTurns ?? 24;
-  const pairs: Array<{ role: "user" | "assistant"; content: string }> = [];
+  const turns: Array<{ user?: string; assistant: string[] }> = [];
+  let current: { user?: string; assistant: string[] } | undefined;
   for (const e of entries) {
     if (e.kind === "user" && e.text?.trim()) {
-      pairs.push({ role: "user", content: e.text });
+      current = { user: e.text, assistant: [] };
+      turns.push(current);
     } else if (e.kind === "assistant" && e.text?.trim()) {
-      pairs.push({ role: "assistant", content: e.text });
+      if (!current) { current = { assistant: [] }; turns.push(current); }
+      current.assistant.push(e.text);
     }
-    if (pairs.length >= maxTurns * 2) break;
   }
-  return pairs.slice(-maxTurns * 2);
+  if (maxTurns <= 0) return [];
+  return turns.slice(-maxTurns).flatMap(turn => {
+    const messages: Array<{ role: "user" | "assistant"; content: string }> = [];
+    if (turn.user) messages.push({role: "user", content: turn.user});
+    if (turn.assistant.length) messages.push({role: "assistant", content: turn.assistant.join("\n\n")});
+    return messages;
+  });
 }

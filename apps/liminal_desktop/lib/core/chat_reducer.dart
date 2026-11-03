@@ -268,7 +268,9 @@ ChatTranscriptState _appendAssistant(ChatTranscriptState state, String delta) {
     }
   }
   final turnIdx = _currentTurnAssistantIndex(msgs);
-  if (turnIdx != null && state.busy) {
+  if (turnIdx != null &&
+      state.busy &&
+      (msgs[turnIdx] as AssistantMessage).streaming) {
     final existing = msgs[turnIdx] as AssistantMessage;
     msgs[turnIdx] = AssistantMessage(
       text: existing.text + delta,
@@ -312,8 +314,8 @@ ChatTranscriptState _onToolStart(
     ChatTranscriptState state, Map<String, dynamic> data) {
   final callId = data['callId'] as String;
   final name = data['name'] as String;
-  // Match web: do not freeze the assistant bubble when tools start — narration
-  // may still stream after tool_start in the same provider completion.
+  // Tool activity closes the preceding narration segment. Later text belongs
+  // at its current position, rather than back inside an earlier chat bubble.
   final previousTool = _toolCallById(state.messages, callId);
   if (previousTool != null) return state;
   final base = _finalizeStreamingForToolStart(state);
@@ -657,6 +659,7 @@ ChatTranscriptState _onToolExecuting(
     ChatTranscriptState state, Map<String, dynamic> data) {
   final callId = data['callId'] as String?;
   if (callId == null) return state;
+  state = _sealAssistantSegment(state);
   final msgs = List<MessageEntry>.from(state.messages);
   for (var i = 0; i < msgs.length; i++) {
     final m = msgs[i];
@@ -697,6 +700,8 @@ ChatTranscriptState _onToolResult(
   final output = parsed.output;
   final args = Map<String, dynamic>.from(data['args'] as Map? ?? {});
   final argsJson = args.isNotEmpty ? jsonEncode(args) : '';
+
+  state = _sealAssistantSegment(state);
 
   if (name == 'think' && ok) {
     return _replaceStreamingThink(state, callId, args);
@@ -967,7 +972,8 @@ ChatTranscriptState _onTurnEnd(
 }
 
 ChatTranscriptState _finalizeStreamingForToolStart(ChatTranscriptState state) {
-  final msgs = _stripEphemeralPlans(List<MessageEntry>.from(state.messages));
+  final msgs = _stripEphemeralPlans(
+      List<MessageEntry>.from(_sealAssistantSegment(state).messages));
   for (var i = 0; i < msgs.length; i++) {
     final m = msgs[i];
     if (m is ModelReasoningMessage && m.streaming) {
@@ -983,6 +989,16 @@ ChatTranscriptState _finalizeStreamingForToolStart(ChatTranscriptState state) {
     }
   }
   return state.copyWith(messages: msgs);
+}
+
+ChatTranscriptState _sealAssistantSegment(ChatTranscriptState state) {
+  return state.copyWith(
+      messages: state.messages.map((m) {
+    if (m is AssistantMessage && m.streaming) {
+      return AssistantMessage(text: m.text, streaming: false);
+    }
+    return m;
+  }).toList());
 }
 
 ChatTranscriptState _finalizeStreaming(ChatTranscriptState state) {
