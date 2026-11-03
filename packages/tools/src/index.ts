@@ -40,6 +40,8 @@ import {
 import { readFileChunkedTool } from "./families/navigation/read_file_chunked.js";
 import { readFileWithImportsTool } from "./families/navigation/read_file_with_imports.js";
 import { fileMetadataTool } from "./families/files/file_metadata.js";
+import { readBinaryTool } from "./families/files/read_binary.js";
+import { inspectDiscImageTool, extractDiscFileTool } from "./families/files/iso9660_tools.js";
 import { workspaceSnapshotTool } from "./families/navigation/workspace_snapshot.js";
 import { grepFileTool } from "./families/files/grep_file.js";
 import { editFileTool } from "./families/files/edit_file.js";
@@ -229,6 +231,9 @@ export async function registerAllTools(
   registry.register(readFileChunkedTool);
   registry.register(readFileWithImportsTool);
   registry.register(fileMetadataTool);
+  registry.register(readBinaryTool);
+  registry.register(inspectDiscImageTool);
+  registry.register(extractDiscFileTool);
   registry.register(workspaceSnapshotTool);
   registry.register(writeFileTool);
   registry.register(editFileTool);

@@ -2,7 +2,7 @@
 
 All notable changes to [Liminal AI](https://github.com/traidy2222/liminal-ai) are documented here and on the docs portal: [docs.vireondynamics.com/liminal/reference/changelog](https://docs.vireondynamics.com/liminal/reference/changelog).
 
-**Current stage:** **beta** (`v0.1.20` tip of `main`, 2026-11-03). Desktop downloads are published through the public preview release channel.
+**Current stage:** **beta** (`v0.1.21` tip of `main`, 2026-11-03). Desktop downloads are published through the public preview release channel.
 
 **Single source:** edit [`changelog/releases.json`](changelog/releases.json), then run `npm run changelog:gen`.
 
@@ -10,7 +10,13 @@ Format: **v0.0.x** entries keyed to the last GitHub push in each slice. Dates ar
 
 Marketing (richer notes): [vireondynamics.com/liminal/changelog](https://www.vireondynamics.com/liminal/changelog)
 
-## [v0.1.20] — 2026-11-03 — Current beta
+## [v0.1.21] — 2026-11-03 — Current beta
+
+Repair failures found while benchmarking local PS2 and PC game analysis: bounded binary and disc-image tools, raw-byte metadata, useful retries after script repairs, reliable PowerShell modules and foreground cancellation. Explicitly requested artifact providers must be attempted before a run can claim completion.
+
+[Full notes](https://docs.vireondynamics.com/liminal/reference/changelog#v0-1-21)
+
+## [v0.1.20] — 2026-11-03
 
 Remove a timer-generated recovery plan that could silently stop successful work at round 40. PowerShell foreground jobs return their own output and real exit status. Desktop and web conversations show narration, tool activity and final replies in chronological order, including saved replay.
 

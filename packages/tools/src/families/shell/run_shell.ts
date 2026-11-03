@@ -6,7 +6,7 @@
  */
 import { spawn, execFile } from "node:child_process";
 import type { AgentEmitter, AgentHarness } from "@liminal/core";
-import { effectiveHarnessEnvRaw, resolveShellRuntime, resolveWorkspaceRoot } from "@liminal/core";
+import { effectiveHarnessEnvRaw, prepareShellChildEnvironment, resolveShellRuntime, resolveWorkspaceRoot } from "@liminal/core";
 import { defineTool } from "../../shared/helpers.js";
 import { resolveWithinWorkspace } from "../../shared/file_path_guard.js";
 import { runShellInTerminal, shellUseUiPty } from "./terminal_shell_runtime.js";
@@ -69,7 +69,9 @@ function runShellSpawn(input: {
   timeout: number;
   cappedNote: string;
   limitLabel: string;
+  signal?: AbortSignal;
 }): Promise<import("@liminal/core").ToolResult> {
+  if (input.signal?.aborted) return Promise.resolve({ ok: false, error: "Command cancelled before execution." });
   const { emitter, command, cwd, timeout, cappedNote, limitLabel } = input;
   return new Promise<import("@liminal/core").ToolResult>((resolve) => {
     const runtime = resolveShellRuntime();
@@ -79,6 +81,7 @@ function runShellSpawn(input: {
       cwd,
       shell: false,
       stdio: "pipe",
+      env: prepareShellChildEnvironment(runtime.executable),
       detached: process.platform !== "win32",
       windowsHide: true,
     });
@@ -86,6 +89,7 @@ function runShellSpawn(input: {
     const outputLimit = 256 * 1024;
     let outputTail = "", outputChars = 0, traceChars = 0, traceTruncated = false;
     let timedOut = false;
+    let cancelled = false;
     let settled = false;
     let forceTimer: ReturnType<typeof setTimeout> | undefined;
     let closeDeadline: ReturnType<typeof setTimeout> | undefined;
@@ -93,6 +97,7 @@ function runShellSpawn(input: {
     const startedAt = Date.now();
 
     const emitDelta = (text: string) => {
+      if (cancelled || settled) return;
       if (!headerEmitted) {
         headerEmitted = true;
         emitter.emit("text", { delta: `\n\`${command}\`\n`, channel: "trace" });
@@ -120,14 +125,15 @@ function runShellSpawn(input: {
       }
     };
 
-    const killTimer = setTimeout(() => {
-      timedOut = true;
+    const stopChild = () => {
+      if (closeDeadline) return;
       killTree();
       if (process.platform !== "win32") forceTimer = setTimeout(() => killTree(true), 1000);
       closeDeadline = setTimeout(() => {
         child.stdout?.destroy(); child.stderr?.destroy(); child.unref(); finish(null);
       }, 5500);
-    }, timeout);
+    };
+    const killTimer = setTimeout(() => { timedOut = true; stopChild(); }, timeout);
 
     const heartbeatMs = 15_000;
     const heartbeat = setInterval(() => {
@@ -151,9 +157,12 @@ function runShellSpawn(input: {
       clearTimeout(forceTimer);
       clearTimeout(closeDeadline);
       clearInterval(heartbeat);
+      input.signal?.removeEventListener("abort", onAbort);
       const body = (outputChars > outputLimit ? "[output truncated — latest characters retained]\n" : "") + (outputTail.trimEnd() || "(no output)");
       const output = cappedNote + body;
-      if (timedOut) {
+      if (cancelled) {
+        resolve({ ok: false, error: `Command cancelled.\nOutput so far:\n${output}` });
+      } else if (timedOut) {
         resolve({
           ok: false,
           error:
@@ -175,8 +184,18 @@ function runShellSpawn(input: {
       clearTimeout(forceTimer);
       clearTimeout(closeDeadline);
       clearInterval(heartbeat);
+      input.signal?.removeEventListener("abort", onAbort);
       resolve({ ok: false, error: `Failed to spawn: ${err.message}` });
     });
+    const onAbort = () => {
+      if (settled || cancelled) return;
+      cancelled = true;
+      clearTimeout(killTimer);
+      clearInterval(heartbeat);
+      stopChild();
+    };
+    input.signal?.addEventListener("abort", onAbort, { once: true });
+    if (input.signal?.aborted) onAbort();
   });
 }
 
@@ -229,7 +248,7 @@ export function createRunShellTool(emitter: AgentEmitter, harness?: AgentHarness
       required: ["command"],
       additionalProperties: false,
     },
-    handler: async (args) => {
+    handler: async (args, _emit, _harness, context) => {
       const command = args["command"] as string;
       const cwdArg = args["cwd"] as string | undefined;
       let cwd: string;
@@ -257,6 +276,7 @@ export function createRunShellTool(emitter: AgentEmitter, harness?: AgentHarness
           cwd,
           timeoutMs: timeout,
           cappedNote,
+          signal: context?.signal,
         });
       }
 
@@ -267,6 +287,7 @@ export function createRunShellTool(emitter: AgentEmitter, harness?: AgentHarness
         timeout,
         cappedNote,
         limitLabel,
+        signal: context?.signal,
       });
     },
   });

@@ -48,7 +48,7 @@ function createMarkerPort(opts: { exitCode: number; output: string }) {
     list: () => [],
     runOneshot: async () => ({ exitCode: 0, output: "", sessionId: "s1" }),
   };
-  return { port, writes };
+  return { port, writes, emit };
 }
 
 test("marker mode: exec returns output + exit code from D marker, no probe typed", async () => {
@@ -76,6 +76,49 @@ test("marker mode: non-zero exit code surfaces from the D marker", async () => {
   });
   assert.equal(result.ok, false);
   assert.match(result.error ?? "", /Exit code 2/);
+  assert.equal(writes.length, 1);
+  setPtyShellPort(null);
+});
+
+test("cancelling an interactive foreground command closes only its session", async () => {
+  const { port } = createMarkerPort({ exitCode: 0, output: "unused" });
+  const closed: string[] = [];
+  let started!: () => void;
+  const ready = new Promise<void>((resolve) => { started = resolve; });
+  port.write = () => { started(); return true; }; // Hold the command without a completion marker.
+  port.close = (id) => { closed.push(id); return true; };
+  port.isAlive = (id) => !closed.includes(id);
+  setPtyShellPort(port);
+  const controller = new AbortController();
+  const pending = getAgentShellSession("chat-cancel").exec({ command: "owned-long-command", timeoutMs: 5000, signal: controller.signal });
+  await ready;
+  controller.abort();
+  const result = await pending;
+  assert.equal(result.ok, false);
+  if (!result.ok) assert.match(result.error, /cancel/i);
+  assert.deepEqual(closed, ["s1"]);
+  assert.equal(port.isAlive("dedicated-background"), true);
+  setPtyShellPort(null);
+});
+
+test("a cancelled queued interactive command is never written to the terminal", async () => {
+  const { port, writes, emit } = createMarkerPort({ exitCode: 0, output: "unused" });
+  let started!: () => void;
+  const ready = new Promise<void>((resolve) => { started = resolve; });
+  port.write = (_id, data) => { writes.push(data); started(); return true; };
+  setPtyShellPort(port);
+  const session = getAgentShellSession("chat-queued-cancel");
+  const first = session.exec({ command: "first-command", timeoutMs: 5000 });
+  await ready;
+  const controller = new AbortController();
+  const queued = session.exec({ command: "must-never-run", timeoutMs: 5000, signal: controller.signal });
+  controller.abort();
+  const result = await queued;
+  assert.equal(result.ok, false);
+  assert.equal(writes.length, 1);
+  emit(`first completed\r\n${D(0)}${A}PS C:\\repo> ${B}`);
+  assert.equal((await first).ok, true);
+  await new Promise((resolve) => setImmediate(resolve));
   assert.equal(writes.length, 1);
   setPtyShellPort(null);
 });

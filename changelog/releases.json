@@ -1,7 +1,22 @@
 {
   "stage": "beta",
-  "currentVersion": "0.1.20",
+  "currentVersion": "0.1.21",
   "releases": [
+    {
+      "version": "0.1.21",
+      "date": "2026-11-03",
+      "tagline": "Artifact work with fewer detours and honest completion.",
+      "summary": "Repair failures found while benchmarking local PS2 and PC game analysis: bounded binary and disc-image tools, raw-byte metadata, useful retries after script repairs, reliable PowerShell modules and foreground cancellation. Explicitly requested artifact providers must be attempted before a run can claim completion.",
+      "bullets": [
+        "**Direct artifact inspection** — List ISO9660 members and extract a selected file with exact offsets, size and SHA-256. Read bounded hex, typed words and strings without inventing dump scripts. Damaged members and unsupported namespaces stay explicit; originals are read-only and extraction never overwrites files.",
+        "**Useful recovery** — Harmless Python os/path inspection works, with a documented Python default for short snippets. Re-activating an active family succeeds. Failed programs do not disable corrected commands. Full canonical arguments, ranges and successful mutations distinguish repetition from progress; repeated program failures get one bounded diagnostic window without changing model or settings.",
+        "**Faithful MCP discovery** — Explicit tool names rank ahead of descriptive matches, including queries naming multiple operations. Connector guidance remains scoped untrusted reference data; older stdio connections recover it lazily without replaying calls or changing saved credentials.",
+        "**Windows command reliability** — Remove incompatible PowerShell Core system-module roots from classic PowerShell child environments while retaining custom locations. Foreground PTY, pipe and snippet cancellation terminates owned work; intentional background tabs remain available.",
+        "**Honest turn state** — Stop and timeout cannot report success or start queued work. Partial narration and unfinished tool pairing survive interruption, and late results cannot corrupt a subsequent turn. A requested named artifact connector gets a bounded completion check rather than being silently skipped.",
+        "**Binary-safe metadata** — Hash original bytes in bounded streams; hash-off inspection never decodes or buffers a whole game image. Binary and large-file line-count limits are stated explicitly."
+      ],
+      "docs": [{"label": "Artifact workflow benchmark", "href": "../reviews/game-re-benchmark.md"}]
+    },
     {
       "version": "0.1.20",
       "date": "2026-11-03",

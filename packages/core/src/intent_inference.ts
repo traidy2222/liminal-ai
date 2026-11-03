@@ -697,6 +697,17 @@ export function tryHeuristicTurnInference(userMessage: string): TurnInferenceRes
 const FILE_EXT_RE =
   /(?:[`'"][\w./\\-]+\.(?:ts|tsx|js|jsx|mjs|cjs|txt|md|json|py|rs|go|css|html)[`'"]|[\w./\\-]+\.(?:ts|tsx|js|jsx|mjs|cjs|txt|md|json|py|rs|go|css|html))/i;
 
+/** Grounded artifact action, independent of the fast classifier's length cap. */
+export function classifyLocalArtifactTask(userMessage: string): "coding" | "execution" | null {
+  const msg = userMessage.trim();
+  if (/^(?:write|create|draft|edit|update|generate|build)\s+(?:(?:a|an|the|my)\s+)?(?:readme|documentation|guide|report|tutorial|example|explanation)\b/i.test(msg)) return null;
+  const artifactPath = /\.(?:exe|dll|elf|so|dylib|bin|iso|img|nif|ucf|apk|ipa|asar|msix|appx)\b/i.test(msg);
+  const conceptual = /^(?:what|why|when|who|how\s+(?:does|do|can|would|to)|explain|describe|teach|write\s+a\s+report|do\s+not|don't|never)\b/i.test(msg);
+  const artifactBuild = /\b(?:make|build|create|produce|port)\b[\s\S]{0,80}\b(?:playable|runnable|executable|exe|launcher|port)\b/i.test(msg);
+  const artifactAnalysis = /^(?:(?:hey|hi|okay|please)[,!]?\s+)*(?:(?:can|could|would|will)\s+(?:you|u)\s+(?:please\s+)?)?(?:decompile|disassemble|reverse[- ]engineer|use\s+rea|inspect|analy[sz]e)\b/i.test(msg);
+  return artifactPath && !conceptual && (artifactBuild || artifactAnalysis) ? (artifactBuild ? "coding" : "execution") : null;
+}
+
 /**
  * Skip the classifier for obvious file read/edit/fix turns — keeps fast-model routing
  * when AGENT_INTENT_INFERENCE=0 (latency mode) without a sidecar LLM pass.
@@ -711,12 +722,9 @@ export function tryHeuristicToolFirstTurn(userMessage: string): TurnInferenceRes
   // An explicit artifact task needs tools even when its final output is prose.
   // Keep definitions, hypothetical examples and negative instructions on the
   // classifier path; this only selects a route, never authorizes tool execution.
-  const artifactPath = /\.(?:exe|dll|elf|so|dylib|bin|iso|apk|ipa|asar|msix|appx)\b/i.test(msg);
-  const conceptual = /^(?:what|why|when|who|how\s+(?:does|do|can|would|to)|explain|describe|teach|write\s+a\s+report|do\s+not|don't|never)\b/i.test(msg);
-  const artifactBuild = /\b(?:make|build|create|produce|port)\b[\s\S]{0,80}\b(?:playable|runnable|executable|exe|launcher|port)\b/i.test(msg);
-  const artifactAnalysis = /^(?:(?:hey|hi|okay|please)[,!]?\s+)*(?:(?:can|could|would|will)\s+(?:you|u)\s+(?:please\s+)?)?(?:decompile|disassemble|reverse[- ]engineer|use\s+rea|inspect|analy[sz]e)\b/i.test(msg);
-  if (artifactPath && !conceptual && (artifactBuild || artifactAnalysis)) {
-    const intent = artifactBuild ? "coding" : "execution";
+  const artifactIntent = classifyLocalArtifactTask(msg);
+  if (artifactIntent) {
+    const intent = artifactIntent;
     const fb = fallbackReasoningBudget(intent, false);
     return neutralTurnInferenceResult("heuristic_artifact_task", {
       intent, complexity: fallbackComplexityForUserMessage(msg) === "complex" ? "complex" : "normal",

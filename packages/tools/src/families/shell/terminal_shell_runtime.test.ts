@@ -70,6 +70,36 @@ test("waitForShellReady resolves when prompt is visible", async () => {
   await waitForShellReady(port, "s1", 1000);
 });
 
+test("cancelled queued or pre-aborted PowerShell jobs never spawn", { skip: process.platform !== "win32" }, async () => {
+  let start!: () => void;
+  let release!: () => void;
+  const started = new Promise<void>((resolve) => { start = resolve; });
+  let calls = 0;
+  const port: PtyManagerPort = {
+    ensure: async () => null, write: () => false, readTail: () => "", onData: () => () => undefined,
+    isAlive: () => false, close: () => true, list: () => [],
+    runOneshot: async () => {
+      calls++; start(); await new Promise<void>((resolve) => { release = resolve; });
+      return { exitCode: 0, output: "first complete", sessionId: "owned-first" };
+    },
+  };
+  setPtyShellPort(port);
+  try {
+    const harness = { taskId: "queued-powershell-cancel" } as AgentHarness;
+    const input = { harness, command: "owned-first", timeoutMs: 5000, cappedNote: "" };
+    const first = runShellInTerminal(input);
+    await started;
+    const controller = new AbortController();
+    const queued = runShellInTerminal({ ...input, command: "never-run", signal: controller.signal });
+    controller.abort();
+    assert.equal((await queued).ok, false);
+    release(); assert.equal((await first).ok, true);
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.equal((await runShellInTerminal({ ...input, signal: controller.signal })).ok, false);
+    assert.equal(calls, 1);
+  } finally { setPtyShellPort(null); }
+});
+
 test("runShellInTerminal serializes parallel calls on one chat", async () => {
   const prompt = process.platform === "win32" ? "PS C:\\repo> " : "user@host:~$ ";
   let backlog = prompt;

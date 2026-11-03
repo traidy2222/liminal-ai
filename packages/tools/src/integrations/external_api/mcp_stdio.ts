@@ -85,8 +85,10 @@ async function sessionFor(name: string, config: McpStdioOptions, context?: ToolE
 export async function callStdioMcp(
   name: string, config: McpStdioOptions, tool: string, args: Record<string, unknown>,
   context?: ToolExecutionContext, emit?: (text: string) => void,
+  onInstructions?: (instructions: string | undefined) => void,
 ) {
   const session = await sessionFor(name, config, context);
+  try { onInstructions?.(session.instructions); } catch { /* Optional metadata must not fail or replay a native call. */ }
   // Never replay a failed call automatically: it may already have changed a target.
   return session.client.callTool({ name: tool, arguments: args }, {
     timeout: 1_800_000, signal: context?.signal,

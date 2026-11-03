@@ -1,7 +1,7 @@
 import { spawn } from "node:child_process";
 import type { ChildProcess } from "node:child_process";
 import type { AgentHarness, ToolResult } from "@liminal/core";
-import { resolveShellRuntime, effectiveHarnessEnvRaw } from "@liminal/core";
+import { resolveShellRuntime, effectiveHarnessEnvRaw, prepareShellChildEnvironment } from "@liminal/core";
 import { defineTool } from "../../shared/helpers.js";
 import {
   killTerminalSession,
@@ -83,6 +83,7 @@ async function runBackgroundSpawn(args: Record<string, unknown>): Promise<ToolRe
     const runtime = resolveShellRuntime();
     const child = spawn(runtime.executable, [...runtime.args, command], {
       shell: false,
+      env: prepareShellChildEnvironment(runtime.executable),
       cwd,
       detached: false,
       stdio: ["ignore", "pipe", "pipe"],

@@ -43,6 +43,12 @@ export interface ReasoningBudget {
   source: "llm" | "fallback";
 }
 
+/** Bounded diagnosis after repeated failures; preserve model/surface/effort. */
+export function broadenReasoningForRecovery(budget: ReasoningBudget | null): ReasoningBudget | null {
+  if (!budget || budget.thinkDepth === "skip" || budget.reasoningWordBudget >= 400) return null;
+  return {...budget, thinkDepth: budget.thinkDepth === "deep" ? "deep" : "standard", reasoningWordBudget: 400};
+}
+
 const EFFORT_SET = new Set<ReasoningEffort>(["none", "low", "medium", "high", "xhigh"]);
 const DEPTH_SET = new Set<ThinkDepth>(["skip", "brief", "standard", "deep"]);
 

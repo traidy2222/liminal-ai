@@ -1,4 +1,7 @@
 import { buildReasoningRequestParams } from "./reasoning_request.js";
+import { requestedArtifactConnectors, missingArtifactConnectors } from "./artifact_connector_requirements.js";
+import { isRecoverableToolFailure } from "./tool_circuit.js";
+import { createHash } from "node:crypto";
 import { SignatureWorkflowRun, SIGNATURE_WORKFLOWS, isSignatureWorkflowPreset, parseSignatureCommand, type SignatureWorkflowPreset } from "./signature_workflows.js";
 import { singleModelEnabled, singleModelSlug } from "./harness_effective_env.js";
 import OpenAI from "openai";
@@ -315,12 +318,14 @@ import {
   neutralTurnInferenceResult,
   resolveMemoryPolicy,
   buildRoutingProfile,
+  classifyLocalArtifactTask,
   type IntentInferenceWorkspaceContext,
   type TurnInferenceResult,
   type RoutingProfile,
 } from "./intent_inference.js";
 import {
   buildReasoningBudgetInjection,
+  broadenReasoningForRecovery,
   evaluateReasoningStall,
   formatReasoningBudgetTraceLine,
   resolveReasoningBudget,
@@ -828,6 +833,11 @@ function hashString(s: string): string {
   return (h >>> 0).toString(16);
 }
 
+/** Full canonical arguments: formatting and long shared prefixes are not identity. */
+function toolArgsFingerprint(argsJson: string): string {
+  return createHash("sha256").update(stableArgsJsonKey(argsJson)).digest("hex");
+}
+
 function normalizeIntentText(text: string): string {
   return text.toLowerCase().replace(/[^a-z0-9\s]/g, " ").replace(/\s+/g, " ").trim();
 }
@@ -1291,7 +1301,8 @@ export class AgentHarness {
   /** Paths successfully read_file'd this send (working state). */
   private filesReadThisTurn: string[] = [];
   /** Count repeated full read_file calls per path in this send. */
-  private readFilePathCountsThisTurn = new Map<string, number>();
+  private readFileObservationCountsThisTurn = new Map<string, number>();
+  private toolObservationRevisionThisSend = 0;
   /** Per-path edit/write revision counter — drives [FILE REVISION] stale-read hints. */
   private fileRevisionThisTurn = new Map<string, number>();
   /** Paths that already received an [EDIT STALE] recovery hint this send. */
@@ -1301,21 +1312,21 @@ export class AgentHarness {
   /** Last few tool outcome one-liners for working state. */
   private recentToolOutcomeLines: string[] = [];
   /**
-   * Track consecutive (tool_name, args_hash, ok) triples to detect call loops.
+   * Track equivalent failures across intervening reasoning and discovery calls.
    * When the same failing call repeats N times the harness injects a strong
    * corrective system message and adds the (name, hash) to a per-send banlist
    * so subsequent identical calls are short-circuited with a clear "try
    * something else" error instead of dispatching again.
    */
-  private toolCallStreak: { name: string; argsHash: string; failures: number } | null = null;
+  private toolCallFailures = new Map<string, { errorHash: string; failures: number }>();
   private bannedToolCallShapesThisSend = new Set<string>();
   /** Successful tool intents keyed for within-send dedup (tools opt in via intentDedupArgs). */
   private intentResultsThisSend = new Map<string, IntentResultRecord>();
   private loopBreakNudgeFiredThisSend = false;
   /**
-   * Reasoning-stall breaker. The failure-gated {@link toolCallStreak} detector
+   * Reasoning-stall breaker. The failure-gated tool-call detector
    * above cannot catch a reason()-only spiral because reasoning tools always
-   * succeed (and any success resets the streak). These track consecutive rounds
+   * succeed and therefore do not produce failure evidence. These track consecutive rounds
    * whose dispatched batch was ONLY reasoning tools, plus the accumulated
    * reasoning-arg chars across that spiral. When either crosses the budget-aware
    * threshold (resolveReasoningStallNudgeThresholdChars / toolFirstBias) the
@@ -1357,6 +1368,12 @@ export class AgentHarness {
 
   /** At most one turn_end per send() — round cap / timeout / error paths share this. */
   private turnEndEmittedThisSend = false;
+  private pendingAssistantTextThisSend = "";
+  private pendingToolCallsThisSend = new Map<string, string>();
+  private requestedArtifactConnectorsThisSend: string[] = [];
+  private artifactConnectorContinuationAttempted = false;
+  private programFailuresThisSend = 0;
+  private recoveryReasoningBroadenedThisSend = false;
   /** Last tool list passed to the provider stream — used for live context snapshots. */
   private lastStreamTools: OpenAI.Chat.Completions.ChatCompletionTool[] = [];
   /** One-shot rule recall suffix (named protocol rules) at round 2. */
@@ -1861,6 +1878,8 @@ export class AgentHarness {
     if (this.agentDepth > 0) return;
     const emailCompose = shouldInjectEmailComposeGuidance(userMessage);
     if (openingTurn && !emailCompose) return;
+    this.requestedArtifactConnectorsThisSend = requestedArtifactConnectors(
+      userMessage, this.registry, classifyLocalArtifactTask(userMessage) !== null);
 
     const families = new Set<string>();
     if (verificationToolsNeeded(userMessage, this.runtimePreferences)) {
@@ -1906,6 +1925,9 @@ export class AgentHarness {
 
     if (!this.capabilityNudgesInjectedThisSend) {
       const nudges: string[] = [];
+      if (this.requestedArtifactConnectorsThisSend.length) {
+        nudges.push(`[REQUESTED ARTIFACT TOOLS] The user explicitly requested ${this.requestedArtifactConnectorsThisSend.join(", ")} for this local artifact action. Use mcp_search_tools to discover a relevant operation, then use the requested provider. Manual parsing does not complete that requested tool step. If the provider is unavailable, report the actual attempted operation and technical limit.`);
+      }
       if (userRequestsOrderedSteps(userMessage)) {
         nudges.push(buildOrderedStepsNudge(userMessage));
       }
@@ -3177,12 +3199,13 @@ export class AgentHarness {
     this.contextAlertFired85 = false;
     this.lastParallelToolBatchSize = 0;
     this.filesReadThisTurn = [];
-    this.readFilePathCountsThisTurn = new Map();
+    this.readFileObservationCountsThisTurn = new Map();
+    this.toolObservationRevisionThisSend = 0;
     this.fileRevisionThisTurn = new Map();
     this.editStaleHintsSentThisTurn = new Set();
     this.largeReadPivotNudgeThisSend = false;
     this.recentToolOutcomeLines = [];
-    this.toolCallStreak = null;
+    this.toolCallFailures.clear();
     this.bannedToolCallShapesThisSend.clear();
     this.loopBreakNudgeFiredThisSend = false;
     this.consecutiveReasoningOnlyRounds = 0;
@@ -3213,6 +3236,12 @@ export class AgentHarness {
     this.composePathSeenByCallId.clear();
     this.evidenceLog = [];
     this.turnEndEmittedThisSend = false;
+    this.pendingAssistantTextThisSend = "";
+    this.pendingToolCallsThisSend.clear();
+    this.requestedArtifactConnectorsThisSend = [];
+    this.artifactConnectorContinuationAttempted = false;
+    this.programFailuresThisSend = 0;
+    this.recoveryReasoningBroadenedThisSend = false;
     this.lastStreamTools = [];
     this.voicePostToolsNudgeFired = false;
     this.userReplyFinalizeAttempted = false;
@@ -3929,14 +3958,17 @@ export class AgentHarness {
       if (sendTimeoutMs > 0) {
         let sendTimeoutId: ReturnType<typeof setTimeout> | undefined;
         const sendTimeoutPromise = new Promise<never>((_, reject) => {
+          const turnController = this.currentTurnController;
           sendTimeoutId = setTimeout(
-            () =>
-              reject(
-                new Error(
+            () => {
+              const timeoutError = new Error(
                   `Send timeout after ${Math.round(sendTimeoutMs / 1000)}s. ` +
                     "For large file generation, use write_file mode=create then mode=append, or run_shell with a heredoc."
-                )
-              ),
+              );
+              timeoutError.name = "TimeoutError";
+              turnController?.abort(timeoutError);
+              reject(timeoutError);
+            },
             sendTimeoutMs
           );
         });
@@ -3959,11 +3991,28 @@ export class AgentHarness {
         this.personaBootstrapPromptSentThisHarness = true;
       }
     } catch (err) {
-      const msg = describeError(err);
-      this.emitter.emit("error", {
-        err: new Error(msg),
-      });
-      this.emitTurnEnd("error");
+      if (this.currentTurnController?.signal.aborted || this.abortSignal?.aborted) {
+        for (const [callId, name] of this.pendingToolCallsThisSend) {
+          this.context.append({role: "tool", tool_call_id: callId,
+            content: `ERROR: ${name} was interrupted before its result was confirmed. Inspect saved outputs before repeating a state-changing action.`});
+        }
+        this.pendingToolCallsThisSend.clear();
+        if (this.pendingAssistantTextThisSend.trim()) {
+          this.context.appendMessage({role: "assistant", content: this.pendingAssistantTextThisSend});
+          this.pendingAssistantTextThisSend = "";
+        }
+        const timedOut = this.currentTurnController?.signal.reason?.name === "TimeoutError";
+        const handoff = timedOut
+          ? "Stopped at the turn time limit before completion. Saved outputs are retained; remaining work is incomplete."
+          : "Stopped before completion. Saved outputs are retained; remaining work is incomplete.";
+        this.context.appendMessage({role: "assistant", content: handoff});
+        this.emitter.emit("text", {channel: "user", delta: `\n\n${handoff}`});
+        this.emitTurnEnd(timedOut ? "timeout" : "aborted");
+      } else {
+        const msg = describeError(err);
+        this.emitter.emit("error", {err: new Error(msg)});
+        this.emitTurnEnd("error");
+      }
     } finally {
       if (!this.turnEndEmittedThisSend) {
         this.emitTurnEnd("error");
@@ -5014,7 +5063,7 @@ export class AgentHarness {
       prefs: this.runtimePreferences,
       yolo,
       chainedSendsThisMission: this.missionChainedSendsThisSession,
-      userAborted: this.abortSignal?.aborted === true,
+      userAborted: this.abortSignal?.aborted === true || this.currentTurnController?.signal.aborted === true,
       terminationReason: reason,
     });
     if (!decision.continue || !decision.userMessage) return;
@@ -5157,8 +5206,17 @@ export class AgentHarness {
   }
 
   private async runReActLoop(round = 0): Promise<void> {
-    // Check abort signal (set when orchestrator cancels this task)
-    if (this.abortSignal?.aborted) return;
+    // Capture this send's signal: timeout cleanup may clear the controller
+    // while an already-running operation is still settling.
+    const turnSignal = this.currentTurnController?.signal;
+    const turnStopped = () => this.abortSignal?.aborted === true || turnSignal?.aborted === true;
+    const assertTurnActive = () => {
+      if (!turnStopped()) return;
+      const error = new Error("Turn stopped before completion.");
+      error.name = "AbortError";
+      throw error;
+    };
+    assertTurnActive();
 
     if (round >= this.config.maxToolRoundsPerTurn) {
       this.emitTurnEnd("round_cap");
@@ -5728,6 +5786,7 @@ export class AgentHarness {
     let streamAbort = new AbortController();
     const openStream = async () => {
       const prepared = await this.prepareMessagesForContextLimit(messages, activeModelSlug, tools);
+      assertTurnActive();
       return this.streamWithRetry(
         prepared,
         tools,
@@ -5792,9 +5851,10 @@ export class AgentHarness {
         for await (const chunk of withChunkTimeout(stream, streamChunkTimeoutMs)) {
           receivedStreamChunk = true;
           // Check abort between chunks
-          if (this.abortSignal?.aborted) return;
+          assertTurnActive();
 
           const parsed = accumulator.processChunk(chunk);
+          this.pendingAssistantTextThisSend = accumulator.accumulatedText;
           if (parsed.textDelta) inferenceLatencyTracker.markFirstText();
           if (
             parsed.textDelta ||
@@ -5842,6 +5902,7 @@ export class AgentHarness {
             finishReason = parsed.finishReason;
           }
         }
+        assertTurnActive();
         // Surface prompt-cache hit rate so we can verify caching is firing.
         // Quiet under AGENT_UI_VERBOSITY=quiet; trace channel either way.
         try {
@@ -5872,7 +5933,7 @@ export class AgentHarness {
         break streamLoop; // stream completed successfully
       } catch (streamErr) {
         // Never retry if the task was externally cancelled
-        if (this.abortSignal?.aborted) return;
+        assertTurnActive();
 
         const streamErrMsg = describeError(streamErr, this.config.baseURL);
         const isChunkTimeout = streamErrMsg.includes("STREAM_CHUNK_TIMEOUT");
@@ -5948,6 +6009,7 @@ export class AgentHarness {
         }
         streamAbort = new AbortController();
         messages = await this.prepareMessagesForContextLimit(messages, activeModelSlug, tools);
+        assertTurnActive();
         stream = await this.streamWithRetry(
           messages,
           tools,
@@ -5963,6 +6025,7 @@ export class AgentHarness {
       }
     }
 
+    assertTurnActive();
     emitProcessedStreamText(this.emitter, accumulator.finishInlineReasoning(), {
       reasoningSurface: this._turnReasoningSurface,
     });
@@ -5989,6 +6052,7 @@ export class AgentHarness {
     }
 
     const toolCalls = accumulator.accumulatedToolCalls;
+    assertTurnActive();
     const accumulatedText = accumulator.accumulatedText;
 
     const skipStreamContinuationsForIntro =
@@ -6026,7 +6090,9 @@ export class AgentHarness {
           this.spawnAppHtmlStreamSink.discard(tc.id);
         }
       }
+      assertTurnActive();
       this.context.append(assistantMessage);
+      this.pendingAssistantTextThisSend = "";
       this.context.appendMessage({
         role: "user",
         content: resumeMsg,
@@ -6057,7 +6123,9 @@ export class AgentHarness {
           await this.fileWriteStreamSink.discard(tc.id);
         }
       }
+      assertTurnActive();
       this.context.append(assistantMessage);
+      this.pendingAssistantTextThisSend = "";
       this.context.appendMessage({
         role: "user",
         content: resumeMsg,
@@ -6077,7 +6145,9 @@ export class AgentHarness {
         if (!isComposeDockTool(tc.name)) continue;
         speculativePromises.delete(tc.id);
       }
+      assertTurnActive();
       this.context.append(assistantMessage);
+      this.pendingAssistantTextThisSend = "";
       this.context.appendMessage({
         role: "user",
         content: LENGTH_RESUME_EMAIL_COMPOSE_MESSAGE,
@@ -6116,9 +6186,12 @@ export class AgentHarness {
       this.pseudoMarkupSuppressCountThisSend = 0;
     }
 
+    assertTurnActive();
     this.context.append(assistantMessage);
+    this.pendingAssistantTextThisSend = "";
 
     if (shouldDispatchToolBatch(toolCalls, finishReason)) {
+      for (const call of toolCalls) this.pendingToolCallsThisSend.set(call.id, call.name);
       this.toolCallsDispatchedThisSend += toolCalls.length;
       // Collect tool names for pre-flight dangerLevel checks
       const batchToolNames = toolCalls.map((tc) => tc.name);
@@ -6190,15 +6263,17 @@ export class AgentHarness {
           }
         }
         // Loop-break: short-circuit any (tool, args) shape that has already
-        // been banned this send because it failed 3+ times in a row. Returning
+        // been banned because it failed equivalently 3+ times. Returning
         // a synthetic failure here keeps the loop-detector message in context
         // without burning another round on the same broken call.
-        const bannedShapeKey = `${tc.name}::${hashString(tc.argsJson || "")}`;
+        const bannedShapeKey = `${tc.name}::${toolArgsFingerprint(tc.argsJson || "")}`;
         let result: import("./types.js").ToolResult;
-        if (this.bannedToolCallShapesThisSend.has(bannedShapeKey)) {
+        if (turnStopped()) {
+          result = {ok: false, error: "Turn stopped before tool execution."};
+        } else if (this.bannedToolCallShapesThisSend.has(bannedShapeKey)) {
           result = {
             ok: false,
-            error: `[loop_break] This (${tc.name}, args) combination was blocked after 3 consecutive failures earlier this turn. Try a different tool or change the arguments meaningfully.`,
+            error: `[loop_break] This (${tc.name}, args) combination was blocked after 3 equivalent failures earlier this turn. Change the approach or repair the cause before retrying.`,
           };
         } else {
           const intentFields = this.registry.getIntentDedupArgs(tc.name);
@@ -6216,6 +6291,7 @@ export class AgentHarness {
             };
           } else {
             const runDispatch = async () => {
+              if (turnStopped()) return {ok: false as const, error: "Turn stopped before queued tool execution."};
               const speculative = speculativePromises.get(tc.id);
               if (speculative) return speculative;
               const promoted = this.tryPromotePasteSpeculation(tc.name, tc.argsJson);
@@ -6230,6 +6306,7 @@ export class AgentHarness {
             } else {
               result = await runDispatch();
             }
+            if (turnStopped()) { results[idx] = result; return; }
             if (result.ok && intentFields?.length) {
               const toolDef = this.registry.get(tc.name);
               this.intentResultsThisSend.set(intentKey, {
@@ -6247,8 +6324,9 @@ export class AgentHarness {
           }
         }
         results[idx] = result;
+        if (turnStopped()) return;
         // Index output for query_tool_outputs + flag identical cross-round re-calls.
-        const argsKey = tc.argsJson.slice(0, 200);
+        const argsKey = `${stableArgsJsonKey(tc.argsJson).slice(0, 200)}#${toolArgsFingerprint(tc.argsJson)}:${this.toolObservationRevisionThisSend}`;
         const prior = this._sessionToolIndex.findPriorCall(tc.name, argsKey, tc.id);
         this._sessionToolIndex.add({
           callId: tc.id,
@@ -6278,6 +6356,7 @@ export class AgentHarness {
 
       // 1. Run dispatch_graph calls first so the DAG is populated.
       await Promise.all(dagCallIndices.map(dispatchAt));
+      assertTurnActive();
 
       // 2. Execute remaining calls in topological order if DAG has edges.
       if (!this._toolDag.isEmpty() && regularCallIndices.length > 0) {
@@ -6293,6 +6372,7 @@ export class AgentHarness {
             dependencyContexts.set(idx, { resolvedDependencies: this._toolDag.getResolvedDeps(id, resultsByCallId) });
           }
           await Promise.all(batchIds.map((id) => dispatchAt(idToIdx.get(id)!)));
+          assertTurnActive();
           for (const id of batchIds) {
             const idx = idToIdx.get(id)!;
             const r = results[idx]!;
@@ -6305,6 +6385,7 @@ export class AgentHarness {
         }
       } else {
         await Promise.all(regularCallIndices.map(dispatchAt));
+        assertTurnActive();
       }
 
       // Clear DAG for next round.
@@ -6358,6 +6439,7 @@ export class AgentHarness {
         });
       }
 
+      assertTurnActive();
       // Track tools used this turn (for recipe recording)
       for (const tc of toolCalls) {
         this.toolsUsedThisTurn.push(tc.name);
@@ -6452,24 +6534,32 @@ export class AgentHarness {
         if (this.recentToolOutcomeLines.length > 3) this.recentToolOutcomeLines.shift();
 
         // ── Loop detection ──────────────────────────────────────────────────
-        // When the same (tool_name, normalized_args) call fails 3+ times in a
-        // row, the model has clearly mis-mapped the situation onto the wrong
+        if (!r.ok && (tc.name === "run_shell" || tc.name === "execute_code") && isRecoverableToolFailure(tc.name, r)) {
+          this.programFailuresThisSend += 1;
+          if (this.programFailuresThisSend >= 2 && !this.recoveryReasoningBroadenedThisSend && resolveHarnessEnvRaw("AGENT_REASONING_BUDGET", this.runtimePreferences) !== "0") {
+            const diagnosticBudget = broadenReasoningForRecovery(this._turnReasoningBudget);
+            if (diagnosticBudget) {
+              this.recoveryReasoningBroadenedThisSend = true;
+              this._turnReasoningBudget = diagnosticBudget;
+              this.context.appendMessage({role: "system", content: buildReasoningBudgetInjection(diagnosticBudget, this._turnReasoningSurface) +
+                "\n[DIAGNOSTIC RECOVERY] Repeated program failures show that the current assumptions need checking. Use one focused diagnosis: inspect the exact error and a small relevant data sample, state a testable hypothesis, and validate it before another rewrite. Continue the authorized task; do not repeat setup, broad dumps or permission questions."});
+            }
+          }
+        }
+        // When the same (tool_name, normalized_args) fails with the same error
+        // 3+ times, reasoning/discovery successes are not evidence of repair.
+        // The model may have mis-mapped the situation onto the wrong
         // tool (classic: calling read_file on a directory path repeatedly when
         // list_dir is what's needed). Ban the shape for the rest of this send
         // and inject a corrective system message naming the wrong tool.
-        const argsHash = hashString(tc.argsJson || "");
+        const argsHash = toolArgsFingerprint(tc.argsJson || "");
         const shapeKey = `${tc.name}::${argsHash}`;
         if (!r.ok) {
-          if (
-            this.toolCallStreak &&
-            this.toolCallStreak.name === tc.name &&
-            this.toolCallStreak.argsHash === argsHash
-          ) {
-            this.toolCallStreak.failures += 1;
-          } else {
-            this.toolCallStreak = { name: tc.name, argsHash, failures: 1 };
-          }
-          if (this.toolCallStreak.failures >= 3 && !this.bannedToolCallShapesThisSend.has(shapeKey)) {
+          const errorHash = hashString(r.error ?? "");
+          const previous = this.toolCallFailures.get(shapeKey);
+          const failures = previous?.errorHash === errorHash ? previous.failures + 1 : 1;
+          this.toolCallFailures.set(shapeKey, { errorHash, failures });
+          if (failures >= 3 && !this.bannedToolCallShapesThisSend.has(shapeKey)) {
             this.bannedToolCallShapesThisSend.add(shapeKey);
             const argsPreview = tc.argsJson.slice(0, 200);
             const errSnippet = r.error ? r.error.slice(0, 240) : "(no error)";
@@ -6478,22 +6568,28 @@ export class AgentHarness {
             this.context.appendMessage({
               role: "user",
               content:
-                `[LOOP DETECTED] You called \`${tc.name}\` with the same args ${this.toolCallStreak.failures} times in a row and each call failed with: ${errSnippet}\n\n` +
+                `[LOOP DETECTED] You called \`${tc.name}\` with equivalent args ${failures} times and each call failed with: ${errSnippet}\n\n` +
                 `Args (preview): ${argsPreview}\n\n` +
                 (suggestion
                   ? `Try a different tool. Specifically: ${suggestion}\n\n`
                   : "Stop calling this exact tool+args combination. Pick a different tool or change the arguments meaningfully.\n\n") +
-                `This (tool, args) shape is now blocked for the rest of this turn — further identical calls will be rejected without dispatch.`,
+                `This (tool, args) shape is blocked until a successful repair or other state-changing action. Further identical calls will be rejected without dispatch.`,
             });
             this.loopBreakNudgeFiredThisSend = true;
             this.emitter.emit("recovery_action", {
               strategy: "replan",
-              reason: `loop_break:${tc.name} ${this.toolCallStreak.failures}x — ${errSnippet.slice(0, 120)}`,
+              reason: `loop_break:${tc.name} ${failures}x — ${errSnippet.slice(0, 120)}`,
             });
           }
         } else {
-          // Any successful call resets the streak — model is making progress.
-          this.toolCallStreak = null;
+          this.toolCallFailures.delete(shapeKey);
+          // A successful mutation can repair a missing file/provider. Merely
+          // thinking or listing tools does not change that failed precondition.
+          if (this.registry.get(tc.name)?.dangerLevel === "destructive") {
+            this.toolObservationRevisionThisSend += 1;
+            this.toolCallFailures.clear();
+            this.bannedToolCallShapesThisSend.clear();
+          }
         }
         if (r.ok && tc.name === "read_file") {
           try {
@@ -6501,19 +6597,19 @@ export class AgentHarness {
             if (a.path) {
               this.filesReadThisTurn.push(a.path);
               if (this.filesReadThisTurn.length > 24) this.filesReadThisTurn.shift();
-              const key = a.path.replace(/\\/g, "/").toLowerCase();
-              // Count by path regardless of offset/limit — re-reads with different
-              // slices on the same file are the most common stall pattern when
-              // distillation is on or context has rolled over.
-              const nextCount = (this.readFilePathCountsThisTurn.get(key) ?? 0) + 1;
-              this.readFilePathCountsThisTurn.set(key, nextCount);
+              const pathKey = normalizeFilePathKey(a.path);
+              const key = `${pathKey}:${getFileRevision(this.fileRevisionThisTurn, a.path)}:${toolArgsFingerprint(tc.argsJson)}:${hashString(r.output)}`;
+              // Different ranges and changed file contents are useful progress,
+              // not rereads of the same observation.
+              const nextCount = (this.readFileObservationCountsThisTurn.get(key) ?? 0) + 1;
+              this.readFileObservationCountsThisTurn.set(key, nextCount);
               if (nextCount === 2) {
                 const ext = key.split(".").pop() ?? "";
                 const browserRelevant = ["html", "htm", "js", "jsx", "ts", "tsx", "css"].includes(ext);
                 this.context.appendMessage({
                   role: "user",
                   content:
-                    "[SYSTEM NOTE] Repeated full read_file on the same path detected. Avoid looping on full-file reads. " +
+                    "[SYSTEM NOTE] Repeated identical read_file range and content detected. Avoid looping on the same observation. " +
                     "Use targeted checks instead: read_file_chunked for large files, file_metadata/workspace_snapshot for integrity, " +
                     "run_lint/run_tests for static verification, and browser_open/browser_act(include_console=true) for browser runtime errors " +
                     (browserRelevant ? "on this frontend file." : "when reviewing web behavior."),
@@ -6524,10 +6620,10 @@ export class AgentHarness {
                 this.context.appendMessage({
                   role: "user",
                   content:
-                    `[SYSTEM NOTE] read_file on "${a.path}" has now been called ${nextCount}× this turn. ` +
+                    `[SYSTEM NOTE] The same read_file range and content on "${a.path}" has now been returned ${nextCount}× this turn. ` +
                     `The content from earlier reads is still in your conversation history above — scroll back rather than re-reading. ` +
                     `If you cannot see it, call compress_context() once to consolidate and continue with what you remember; ` +
-                    `do not call read_file on this path again this turn.`,
+                    `reuse this observation until the file changes, or read a different range.`,
                 });
               }
             }
@@ -6866,11 +6962,13 @@ export class AgentHarness {
             });
           }
         }
+        assertTurnActive();
         this.context.append({
           role: "tool",
           tool_call_id: tc.id,
           content,
         });
+        this.pendingToolCallsThisSend.delete(tc.id);
         if (
           tc.name === "read_file" &&
           !this.largeReadPivotNudgeThisSend &&
@@ -6921,6 +7019,7 @@ export class AgentHarness {
         }
       }
 
+      assertTurnActive();
       await this.context.elideStaleToolResults();
 
       // Per-tool error tracking + adaptive hints (#8)
@@ -7161,6 +7260,21 @@ export class AgentHarness {
         return;
       }
 
+      assertTurnActive();
+      const missingConnectors = missingArtifactConnectors(this.requestedArtifactConnectorsThisSend, this.toolsUsedThisTurn, this.registry);
+      if (missingConnectors.length) {
+        if (!this.artifactConnectorContinuationAttempted) {
+          this.artifactConnectorContinuationAttempted = true;
+          this.context.appendMessage({role: "user", content: `[UNFINISHED REQUESTED TOOL STEP] The user requested ${missingConnectors.join(", ")} for this artifact, but no operation from that provider has been attempted. Discover the relevant tool with mcp_search_tools and perform the requested static inspection before finalizing. Update the saved findings with actual evidence or an observed provider blocker; do not ask whether to start work already requested.`});
+          await this.runReActLoop(round + 1);
+          return;
+        }
+        const incomplete = `The requested ${missingConnectors.join(", ")} tool step is still incomplete. Saved findings are partial; provider analysis has not been verified.`;
+        this.context.appendMessage({role: "assistant", content: incomplete});
+        this.emitter.emit("text", {channel: "user", delta: `\n\n${incomplete}`});
+        this.emitTurnEnd("error");
+        return;
+      }
       // Per-turn outcome score (used by summary + root-only learning paths).
       const turnOutcome = scoreTurnOutcome({
         toolsUsed: this._toolOutcomesThisTurn,
@@ -7221,7 +7335,7 @@ export class AgentHarness {
   /**
    * Reasoning-stall breaker. Invoked after each dispatched tool batch.
    *
-   * The failure-gated {@link toolCallStreak} detector cannot catch a reason()-only
+   * The failure-gated tool-call detector cannot catch a reason()-only
    * spiral: reasoning tools always succeed, and any success resets that streak.
    * Here we track consecutive rounds whose batch was ONLY reasoning tools, plus
    * accumulated reasoning-arg chars. When either crosses the budget-aware
@@ -7754,6 +7868,7 @@ export class AgentHarness {
     speculativePromises: Map<string, Promise<ToolResult>>,
     pasteEnabled: boolean
   ): void {
+    if (this.abortSignal?.aborted || this.currentTurnController?.signal.aborted) return;
     if (accumulator.isToolCallIndexFrozen(index)) return;
     const completed = accumulator.tryGetCompletedCall(index);
     if (!completed || speculativePromises.has(completed.id)) return;
@@ -8017,6 +8132,7 @@ export class AgentHarness {
 
     const assistantMessage = this.buildAssistantMessage(interruptedText, toolCalls);
     this.context.append(assistantMessage);
+    this.pendingAssistantTextThisSend = "";
 
     const batchToolNames = toolCalls.map((tc) => tc.name);
     let anyFileWriteOk = false;

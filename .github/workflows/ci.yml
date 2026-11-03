@@ -56,11 +56,14 @@ jobs:
       - name: Test file content is not mistaken for outbound mail
         run: node --import tsx --test packages/tools/src/families/files/email_file_false_positive.test.ts
 
+      - name: Test artifact inspection and tool activation
+        run: node --import tsx --test packages/tools/src/tool_activation.test.ts packages/tools/src/families/files/file_metadata.test.ts packages/tools/src/families/files/iso9660.test.ts packages/tools/src/families/files/read_binary.test.ts packages/tools/src/families/code_intel/execute_code.test.ts
+
       - name: Test Google helper permits desktop updates
         run: node --import tsx --test packages/tools/src/integrations/google/google_sidecar_update_lock.test.ts
 
       - name: Test native local MCP tool catalogs and lifecycle
-        run: node --import tsx --test packages/tools/src/integrations/external_api/mcp_stdio.test.ts packages/tools/src/integrations/external_api/mcp_catalog.test.ts
+        run: node --import tsx --test packages/tools/src/integrations/external_api/mcp_stdio.test.ts packages/tools/src/integrations/external_api/mcp_catalog.test.ts packages/tools/src/integrations/external_api/mcp_guidance_search.test.ts
 
       - name: Test desktop update installation and rollback
         run: npm run test:update-release
@@ -157,15 +160,18 @@ jobs:
       - name: Test file content is not mistaken for outbound mail on Windows
         run: node --import tsx --test packages/tools/src/families/files/email_file_false_positive.test.ts
 
+      - name: Test artifact inspection and tool activation on Windows
+        run: node --import tsx --test packages/tools/src/tool_activation.test.ts packages/tools/src/families/files/file_metadata.test.ts packages/tools/src/families/files/iso9660.test.ts packages/tools/src/families/files/read_binary.test.ts packages/tools/src/families/code_intel/execute_code.test.ts
+
       - name: Test live Google helper permits Windows folder swaps
         run: node --import tsx --test packages/tools/src/integrations/google/google_sidecar_update_lock.test.ts
 
       - name: Test local MCP process isolation and cancellation on Windows
-        run: node --import tsx --test packages/tools/src/integrations/external_api/mcp_stdio.test.ts packages/tools/src/integrations/external_api/mcp_catalog.test.ts
+        run: node --import tsx --test packages/tools/src/integrations/external_api/mcp_stdio.test.ts packages/tools/src/integrations/external_api/mcp_catalog.test.ts packages/tools/src/integrations/external_api/mcp_guidance_search.test.ts
       - name: Verify workflow gates with actual Windows test processes
         run: npm run verify:workflows
       - name: Test Windows update helper and rollback
         run: npm run test:update-release
       - name: Verify terminal replay, output, and cleanup
         timeout-minutes: 3
-        run: node --import tsx --test packages/sidecar/src/pty_manager.test.ts packages/sidecar/src/desktop_parent_regression.test.ts packages/sidecar/src/foreground_shell_regression.test.ts packages/tools/src/families/shell/foreground_output_retention.test.ts
+        run: node --import tsx --test packages/sidecar/src/pty_manager.test.ts packages/sidecar/src/desktop_parent_regression.test.ts packages/sidecar/src/foreground_shell_regression.test.ts packages/sidecar/src/powershell_module_path_regression.test.ts packages/sidecar/src/foreground_cancellation_regression.test.ts packages/tools/src/families/shell/foreground_output_retention.test.ts

@@ -61,6 +61,10 @@ export const TOOL_FAMILIES: Record<string, { description: string; tools: readonl
       "read_process_output",
     ],
   },
+  archives: {
+    description: "ISO9660 disc image inventory, boot executables and exact member extraction without mounting or executing games. Bounded reads; primary namespace only, with explicit unsupported-format and damaged-member limits.",
+    tools: ["inspect_disc_image", "extract_disc_file", "read_binary"],
+  },
   git: {
     description: "Git inspection, commits, checkpoints, rollback, and isolated worktrees.",
     tools: ["git_status", "git_diff", "git_log", "git_branch", "git_commit", "git_checkpoint", "git_rollback", "git_worktree"],
