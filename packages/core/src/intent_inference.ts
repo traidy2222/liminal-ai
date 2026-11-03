@@ -9,6 +9,7 @@ import {
   type ReasoningEffort,
   type ThinkDepth,
   type TurnComplexity,
+  type ReasoningBudget,
 } from "./reasoning_profile.js";
 import {
   isBuildDeliverableUserMessage,
@@ -704,8 +705,24 @@ export function classifyLocalArtifactTask(userMessage: string): "coding" | "exec
   const artifactPath = /\.(?:exe|dll|elf|so|dylib|bin|iso|img|nif|ucf|apk|ipa|asar|msix|appx)\b/i.test(msg);
   const conceptual = /^(?:what|why|when|who|how\s+(?:does|do|can|would|to)|explain|describe|teach|write\s+a\s+report|do\s+not|don't|never)\b/i.test(msg);
   const artifactBuild = /\b(?:make|build|create|produce|port)\b[\s\S]{0,80}\b(?:playable|runnable|executable|exe|launcher|port)\b/i.test(msg);
-  const artifactAnalysis = /^(?:(?:hey|hi|okay|please)[,!]?\s+)*(?:(?:can|could|would|will)\s+(?:you|u)\s+(?:please\s+)?)?(?:decompile|disassemble|reverse[- ]engineer|use\s+rea|inspect|analy[sz]e)\b/i.test(msg);
+  const artifactAnalysis = /^(?:(?:hey|hi|okay|please)[,!]?\s+)*(?:(?:can|could|would|will)\s+(?:you|u)\s+(?:please\s+)?)?(?:decompile|disassemble|reverse[- ]engineer|use\s+rea|inspect|analy[sz]e|(?:continue|resume)\s+(?:(?:local|my|the)\s+)*(?:reverse[- ]engineering|analysis|investigat(?:ion|ing)|decoding))\b/i.test(msg);
   return artifactPath && !conceptual && (artifactBuild || artifactAnalysis) ? (artifactBuild ? "coding" : "execution") : null;
+}
+
+/** A grounded request to infer a representation needs diagnosis, not a tiny
+ * command-execution budget. Provider/model/effort selection remains unchanged. */
+export function isUnfamiliarArtifactInvestigation(userMessage: string): boolean {
+  if (!classifyLocalArtifactTask(userMessage)) return false;
+  return /\b(?:undocumented|unfamiliar|unknown|custom|proprietary)\s+(?:binary\s+)?(?:format|archive|layout|container)\b|\b(?:infer|decode|decoding|parse|parsing|parser|reverse[- ]engineering)\b[\s\S]{0,140}\b(?:format|archive|index|structure|layout|skeleton|animation|assets?)\b|\b(?:archive|index|container)\b[\s\S]{0,80}\b(?:structure|layout|parser)\b/i.test(userMessage);
+}
+
+/** Heuristic routing fields are intentionally not treated as LLM budget fields
+ * by resolveReasoningBudget. Preserve this narrow diagnostic allowance after
+ * that fallback has been resolved, without changing model/effort selection. */
+export function withArtifactDiagnosticBudget(budget: ReasoningBudget, userMessage: string): ReasoningBudget {
+  if (!isUnfamiliarArtifactInvestigation(userMessage)) return budget;
+  return {...budget, thinkDepth: budget.thinkDepth === "skip" || budget.thinkDepth === "brief" ? "standard" : budget.thinkDepth,
+    reasoningWordBudget: Math.max(400, budget.reasoningWordBudget)};
 }
 
 /**
@@ -726,10 +743,11 @@ export function tryHeuristicToolFirstTurn(userMessage: string): TurnInferenceRes
   if (artifactIntent) {
     const intent = artifactIntent;
     const fb = fallbackReasoningBudget(intent, false);
+    const investigateFormat = isUnfamiliarArtifactInvestigation(msg);
     return neutralTurnInferenceResult("heuristic_artifact_task", {
       intent, complexity: fallbackComplexityForUserMessage(msg) === "complex" ? "complex" : "normal",
-      confidence: 0.92, toolFirstBias: true, thinkDepth: "brief",
-      reasoningEffort: fb.reasoningEffort, reasoningWordBudget: 140,
+      confidence: 0.92, toolFirstBias: true, thinkDepth: investigateFormat ? "standard" : "brief",
+      reasoningEffort: fb.reasoningEffort, reasoningWordBudget: investigateFormat ? 400 : 140,
       essayRisk: true, reasoningBudgetSource: "fallback",
     });
   }
@@ -882,6 +900,19 @@ export function applyTurnInferenceHeuristics(
 ): TurnInferenceResult {
   const msg = userMessage.trim();
   if (!msg) return inference;
+
+  if (isUnfamiliarArtifactInvestigation(msg)) {
+    return {
+      ...inference,
+      intent: classifyLocalArtifactTask(msg)!,
+      toolFirstBias: true,
+      exploratoryCreative: false,
+      thinkDepth: inference.thinkDepth === "deep" ? "deep" : "standard",
+      reasoningWordBudget: Math.max(inference.reasoningWordBudget ?? 0, 400),
+      essayRisk: true,
+      reason: `${inference.reason ?? ""} artifact_format_diagnosis`.trim(),
+    };
+  }
 
   const trustLlm = inference.source === "llm";
 

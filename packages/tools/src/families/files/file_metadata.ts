@@ -4,6 +4,7 @@ import { isUtf8 } from "node:buffer";
 import crypto from "node:crypto";
 import { defineTool } from "../../shared/helpers.js";
 import { resolveWithinWorkspace } from "../../shared/file_path_guard.js";
+import { observeNativeBinaryHeader } from "@liminal/core";
 
 const TEXT_LINE_COUNT_MAX_BYTES = 1024 * 1024;
 const HEADER_SAMPLE_BYTES = 4096;
@@ -39,7 +40,7 @@ async function rawFileHash(file: string): Promise<string> {
 export const fileMetadataTool = defineTool({
   name: "file_metadata",
   description:
-    "WHAT: Return file/directory metadata, a bounded hex header and signature hint. Count lines only for UTF-8 text up to 1 MiB; otherwise return null with a coverage note. Optional SHA-256 streams raw bytes with bounded memory.\n" +
+    "WHAT: Return file/directory metadata, a bounded hex header and signature hint. For complete supported ELF32/PE headers, distinguish entry virtual/RVA/file offsets using segment/section tables and read at most16 mapped entry bytes. Count lines only for UTF-8 text up to 1 MiB; otherwise return null with a coverage note. Optional SHA-256 streams raw bytes with bounded memory.\n" +
     "WHEN: Verification, binary/header inspection, drift checks or chunking strategy. Set include_hash:false for quick metadata on large game images; hashing reads the entire file.",
   requiresApproval: false,
   cacheable: true,
@@ -83,6 +84,17 @@ export const fileMetadataTool = defineTool({
         const fullTextCandidate = s.size <= TEXT_LINE_COUNT_MAX_BYTES;
         sample = await readBounded(handle, fullTextCandidate ? s.size : HEADER_SAMPLE_BYTES);
         format = signatureFormat(sample);
+        const native = observeNativeBinaryHeader(sample.subarray(0, HEADER_SAMPLE_BYTES), s.size);
+        if (native) {
+          out.native_header = native;
+          if (native.entry.mapping_status === "mapped" && native.entry.file_offset !== null) {
+            const mapped = await readBounded(handle, native.entry.entry_bytes_length ?? 0, native.entry.file_offset);
+            out.mapped_entry_bytes = {
+              file_offset: native.entry.file_offset, length: mapped.length, hex: mapped.toString("hex"),
+              coverage: "File-backed bytes at the entry offset established by the native header table; no instruction decoding or execution.",
+            };
+          }
+        }
         if (!format && s.size >= ISO_SIGNATURE_OFFSET + 5) {
           const isoSignature = await readBounded(handle, 5, ISO_SIGNATURE_OFFSET);
           if (isoSignature.toString("latin1") === "CD001") format = "iso9660";
@@ -102,7 +114,7 @@ export const fileMetadataTool = defineTool({
       }
       out["header_hex"] = sample.subarray(0, 64).toString("hex");
       out["detected_format"] = format;
-      out["format_note"] = "Signature hint only; no structural parsing or execution was performed.";
+      out["format_note"] = "detected_format is a signature hint. native_header, when present, records bounded supported header/table facts and explicit mapping limits; no execution or disassembly was performed.";
       if (includeHash) out["sha256"] = await rawFileHash(safe.resolvedPath);
       return { ok: true, output: JSON.stringify(out, null, 2) };
     } catch (err) {

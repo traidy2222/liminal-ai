@@ -1,7 +1,31 @@
 {
   "stage": "beta",
-  "currentVersion": "0.1.21",
+  "currentVersion": "0.1.22",
   "releases": [
+    {
+      "version": "0.1.22",
+      "date": "2026-11-04",
+      "tagline": "Grounded artifact analysis, with a repaired REA backend.",
+      "summary": "Repair the observed REA 6.4/IDA headless readiness and cleanup failures, add complete validation for the observed recursive archive profile, preserve exact native code evidence, and verify saved findings before handing work back. Unknown formats and undecoded asset structures remain explicit.",
+      "bullets": [
+        "**Native backend recovery** — An explicit, version- and fingerprint-pinned local repair handles valid busy health, advances owned headless analysis, waits for acknowledged worker cleanup, and distinguishes decompiler limits from malformed responses. Original files are backed up. The verified PS2 ELF32 little-endian MIPS profile is admitted while engine and license requirements remain in force.",
+        "**Complete archive validation** — Inspect and extract the observed tagged recursive name-table profile with full index coverage, directory boundaries, alignment and extent checks. Return a complete inventory and portable read-only Python reference parser; do not guess formats from extensions or claim decoded meshes from strings.",
+        "**Evidence that survives long work** — Preserve partial investigation checkpoints, measured header fields and validated index milestones. Keep exact MCP responses and verbatim pseudocode artifacts with hashes and evidence identifiers; bounded JSON-pointer views retrieve saved details without replaying analysis.",
+        "**Accurate native metadata** — Distinguish virtual addresses, RVAs and file offsets from ELF load segments or PE sections. Expose mapped entry bytes and report ambiguous, truncated or zero-filled mappings as unknown.",
+        "**Finished handoffs** — Verify explicitly requested JSON/Markdown files on disk, allow one evidence correction pass, and require acknowledged cleanup of native sessions opened by the turn unless the user requested they remain open. Real timeout and round limits preserve an explicit incomplete handoff.",
+        "**Faithful tools** — Coerce and validate plain local schema references without changing provider contracts, match HTTP MCP response IDs and finish SSE responses promptly, and resolve directory listings against the active workspace."
+      ],
+      "docs": [
+        {
+          "label": "Game workflow evidence and limits",
+          "href": "../reviews/game-re-benchmark.md"
+        },
+        {
+          "label": "REA setup and compatibility repair",
+          "href": "../guides/rea.md"
+        }
+      ]
+    },
     {
       "version": "0.1.21",
       "date": "2026-11-03",
@@ -15,7 +39,12 @@
         "**Honest turn state** — Stop and timeout cannot report success or start queued work. Partial narration and unfinished tool pairing survive interruption, and late results cannot corrupt a subsequent turn. A requested named artifact connector gets a bounded completion check rather than being silently skipped.",
         "**Binary-safe metadata** — Hash original bytes in bounded streams; hash-off inspection never decodes or buffers a whole game image. Binary and large-file line-count limits are stated explicitly."
       ],
-      "docs": [{"label": "Artifact workflow benchmark", "href": "../reviews/game-re-benchmark.md"}]
+      "docs": [
+        {
+          "label": "Artifact workflow benchmark",
+          "href": "../reviews/game-re-benchmark.md"
+        }
+      ]
     },
     {
       "version": "0.1.20",
@@ -30,7 +59,12 @@
         "**Retained command output** — Large or filtered foreground output is saved as a retrievable artifact before the completed terminal tab closes. If saving fails, return the captured output directly without repeating the command.",
         "**Regression evidence** — A 45-round harness fixture, late-plan budget checks, visible pause handoff and real Windows PTY commands cover the reported failure and its fixes."
       ],
-      "docs": [{ "label": "Harness architecture", "href": "../concepts/architecture.md" }]
+      "docs": [
+        {
+          "label": "Harness architecture",
+          "href": "../concepts/architecture.md"
+        }
+      ]
     },
     {
       "version": "0.1.16",
@@ -42,7 +76,12 @@
         "**Good-faith task handling** — Inspect the selected artifact, respect stated local-use and ownership context, and distinguish decompilation, emulator launchers and native ports. Avoid unsupported legal claims and accusations; explain actual technical blockers with evidence.",
         "**Existing boundaries retained** — Tool approvals and concrete safety limits remain in place. Conceptual questions, quoted examples and explicit negative instructions do not trigger the artifact fast path."
       ],
-      "docs": [{ "label": "REA and local MCP", "href": "../guides/rea.md" }]
+      "docs": [
+        {
+          "label": "REA and local MCP",
+          "href": "../guides/rea.md"
+        }
+      ]
     },
     {
       "version": "0.1.15",
@@ -55,7 +94,12 @@
         "**Faithful tool contracts** — Preserve root schema definitions, nested references, full descriptions, structured results and binary media. Honor mutation annotations and normal approvals; never replay a failed write automatically.",
         "**Verification** — Linux and Windows CI cover paginated discovery, schema preservation, lazy search, independent sessions, denied writes, cancellation and disconnect handling. The real installed REA server passed static JavaScript and headless IDA native fixture analysis, with owned database cleanup and no target execution."
       ],
-      "docs": [{ "label": "REA and local MCP", "href": "../guides/rea.md" }]
+      "docs": [
+        {
+          "label": "REA and local MCP",
+          "href": "../guides/rea.md"
+        }
+      ]
     },
     {
       "version": "0.1.14",

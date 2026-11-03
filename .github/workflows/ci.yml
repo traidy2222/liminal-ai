@@ -57,13 +57,18 @@ jobs:
         run: node --import tsx --test packages/tools/src/families/files/email_file_false_positive.test.ts
 
       - name: Test artifact inspection and tool activation
-        run: node --import tsx --test packages/tools/src/tool_activation.test.ts packages/tools/src/families/files/file_metadata.test.ts packages/tools/src/families/files/iso9660.test.ts packages/tools/src/families/files/read_binary.test.ts packages/tools/src/families/code_intel/execute_code.test.ts
+        run: node --import tsx --test packages/tools/src/tool_activation.test.ts packages/tools/src/families/files/file_metadata.test.ts packages/tools/src/families/files/iso9660.test.ts packages/tools/src/families/files/read_binary.test.ts packages/tools/src/families/files/list_dir.test.ts packages/tools/src/families/files/recursive_name_table.test.ts packages/tools/src/families/files/recursive_archive_reference.test.ts packages/tools/src/families/files/native_header_tools.test.ts packages/tools/src/families/memory/read_artifact_json.test.ts packages/tools/src/families/code_intel/execute_code.test.ts
+
+      - name: Test explicit REA compatibility repair
+        run: |
+          node --test scripts/rea-ida-backend/health-readiness.test.mjs scripts/rea-ida-backend/repair.test.mjs scripts/rea-ida-backend/coverage-cleanup.test.mjs scripts/rea-ida-backend/mips-profile.test.mjs scripts/rea-ida-backend/cleanup-settlement.test.mjs scripts/rea-ida-backend/provider-guard.test.mjs
+          python -B -m unittest discover -s scripts/rea-ida-backend -p test_headless_health.py
 
       - name: Test Google helper permits desktop updates
         run: node --import tsx --test packages/tools/src/integrations/google/google_sidecar_update_lock.test.ts
 
       - name: Test native local MCP tool catalogs and lifecycle
-        run: node --import tsx --test packages/tools/src/integrations/external_api/mcp_stdio.test.ts packages/tools/src/integrations/external_api/mcp_catalog.test.ts packages/tools/src/integrations/external_api/mcp_guidance_search.test.ts
+        run: node --import tsx --test packages/tools/src/integrations/external_api/mcp_stdio.test.ts packages/tools/src/integrations/external_api/mcp_catalog.test.ts packages/tools/src/integrations/external_api/mcp_guidance_search.test.ts packages/tools/src/integrations/external_api/mcp_transport_fidelity.test.ts
 
       - name: Test desktop update installation and rollback
         run: npm run test:update-release
@@ -161,13 +166,21 @@ jobs:
         run: node --import tsx --test packages/tools/src/families/files/email_file_false_positive.test.ts
 
       - name: Test artifact inspection and tool activation on Windows
-        run: node --import tsx --test packages/tools/src/tool_activation.test.ts packages/tools/src/families/files/file_metadata.test.ts packages/tools/src/families/files/iso9660.test.ts packages/tools/src/families/files/read_binary.test.ts packages/tools/src/families/code_intel/execute_code.test.ts
+        run: node --import tsx --test packages/tools/src/tool_activation.test.ts packages/tools/src/families/files/file_metadata.test.ts packages/tools/src/families/files/iso9660.test.ts packages/tools/src/families/files/read_binary.test.ts packages/tools/src/families/files/list_dir.test.ts packages/tools/src/families/files/recursive_name_table.test.ts packages/tools/src/families/files/recursive_archive_reference.test.ts packages/tools/src/families/files/native_header_tools.test.ts packages/tools/src/families/memory/read_artifact_json.test.ts packages/tools/src/families/code_intel/execute_code.test.ts
+
+      - name: Test artifact reasoning and persistence on Windows
+        run: node --import tsx --test packages/core/src/artifact_completion_regression.test.ts packages/core/src/artifact_reasoning_regression.test.ts packages/core/src/artifact_investigation.test.ts packages/core/src/binary_format_header.test.ts packages/core/src/native_binary_header.test.ts packages/core/src/artifact_json_view.test.ts packages/core/src/mcp_output_view.test.ts packages/core/src/mcp_local_ref_regression.test.ts
+
+      - name: Test explicit REA compatibility repair on Windows
+        run: |
+          node --test scripts/rea-ida-backend/health-readiness.test.mjs scripts/rea-ida-backend/repair.test.mjs scripts/rea-ida-backend/coverage-cleanup.test.mjs scripts/rea-ida-backend/mips-profile.test.mjs scripts/rea-ida-backend/cleanup-settlement.test.mjs scripts/rea-ida-backend/provider-guard.test.mjs
+          python -B -m unittest discover -s scripts/rea-ida-backend -p test_headless_health.py
 
       - name: Test live Google helper permits Windows folder swaps
         run: node --import tsx --test packages/tools/src/integrations/google/google_sidecar_update_lock.test.ts
 
       - name: Test local MCP process isolation and cancellation on Windows
-        run: node --import tsx --test packages/tools/src/integrations/external_api/mcp_stdio.test.ts packages/tools/src/integrations/external_api/mcp_catalog.test.ts packages/tools/src/integrations/external_api/mcp_guidance_search.test.ts
+        run: node --import tsx --test packages/tools/src/integrations/external_api/mcp_stdio.test.ts packages/tools/src/integrations/external_api/mcp_catalog.test.ts packages/tools/src/integrations/external_api/mcp_guidance_search.test.ts packages/tools/src/integrations/external_api/mcp_transport_fidelity.test.ts
       - name: Verify workflow gates with actual Windows test processes
         run: npm run verify:workflows
       - name: Test Windows update helper and rollback

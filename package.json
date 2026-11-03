@@ -74,6 +74,7 @@
     "marketing:capture:desktop:test": "node scripts/capture-marketing-desktop.mjs --id desktop-code-ship-test",
     "ida:patch-compat": "node scripts/patch-ida-pro-mcp-compat.mjs",
     "ida:patch-liminal": "node scripts/patch-ida-pro-mcp-liminal.mjs",
+    "rea:repair": "node scripts/repair-rea-ida-backend.mjs",
     "marketing:publish": "node scripts/publish-marketing.mjs",
     "marketing:publish:desktop": "node scripts/publish-marketing.mjs --desktop-only",
     "marketing:publish:all": "node scripts/publish-marketing.mjs --with-desktop",

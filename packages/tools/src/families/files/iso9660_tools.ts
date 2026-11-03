@@ -1,16 +1,39 @@
 import path from "node:path";
 import { createHash } from "node:crypto";
 import { lstat, mkdir, open, realpath, unlink } from "node:fs/promises";
-import { resolveWorkspaceRoot } from "@liminal/core";
+import { resolveWorkspaceRoot, type NativeBinaryHeaderObservation } from "@liminal/core";
 import { defineTool } from "../../shared/helpers.js";
 import {
   isPathInsideWorkspaceRoot,
   resolveWithinWorkspace,
 } from "../../shared/file_path_guard.js";
-import { Iso9660Image, observeDiscFileHeader } from "./iso9660.js";
+import { Iso9660Image, observeDiscFileHeader, type Iso9660Entry } from "./iso9660.js";
 
 const COVERAGE =
   "ISO9660 primary namespace only. UDF, Joliet and Rock Ridge names/metadata are not decoded. Multi-extent, interleaved and extended-attribute files are unsupported. No target execution or whole-image hashing.";
+
+async function observeMemberHeader(image: Iso9660Image, member: Iso9660Entry, header?: Buffer): Promise<Record<string, unknown>> {
+  const observations = observeDiscFileHeader(
+    header ?? await image.read(member.offset, Math.min(member.size, 4096)),
+    member.size,
+  );
+  const native = observations.native_header as NativeBinaryHeaderObservation | undefined;
+  const entry = native?.entry;
+  if (entry?.mapping_status === "mapped" && entry.file_offset !== null) {
+    const offset = entry.file_offset, count = entry.entry_bytes_length;
+    if (!Number.isSafeInteger(offset) || offset < 0 || !Number.isSafeInteger(count) ||
+        count === undefined || count < 1 || count > 16 || offset > member.size || count > member.size - offset)
+      throw new Error("Native entry observation exceeds the selected ISO member extent");
+    const bytes = await image.read(member.offset + offset, count);
+    entry.bytes_hex = bytes.toString("hex");
+    observations.mapped_entry_bytes = {
+      file_offset: offset, iso_source_offset: member.offset + offset, length: bytes.length,
+      hex: entry.bytes_hex,
+      coverage: "Measured file-backed bytes at the uniquely mapped native entry within this exact ISO member. No instruction decoding or target execution.",
+    };
+  }
+  return observations;
+}
 
 function integer(value: unknown, fallback: number, max: number): number {
   if (value === undefined) return fallback;
@@ -24,7 +47,7 @@ function integer(value: unknown, fallback: number, max: number): number {
   return value;
 }
 
-async function prepareDestination(input: string): Promise<string> {
+export async function prepareDestination(input: string): Promise<string> {
   if (!input.trim()) throw new Error("A new destination path is required");
   const root = path.resolve(resolveWorkspaceRoot());
   const canonicalRoot = await realpath(root);
@@ -143,9 +166,7 @@ export const inspectDiscImageTool = defineTool({
           entry.kind === "file"
             ? {
                 ...entry,
-                observations: observeDiscFileHeader(
-                  await image.read(entry.offset, Math.min(entry.size, 4096)),
-                ),
+                observations: await observeMemberHeader(image, entry),
               }
             : entry,
         );
@@ -290,6 +311,7 @@ export const extractDiscFileTool = defineTool({
         }
         done += chunk.length;
       }
+      const observations = await observeMemberHeader(image, member, header);
       await image.assertUnchanged();
       await output.sync();
       complete = true;
@@ -305,7 +327,7 @@ export const extractDiscFileTool = defineTool({
             size: done,
             destination,
             sha256: hash.digest("hex"),
-            observations: observeDiscFileHeader(header),
+            observations,
           },
           null,
           2,

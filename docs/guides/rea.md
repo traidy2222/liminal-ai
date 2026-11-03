@@ -88,3 +88,47 @@ The integration was checked against the full installed REA 6.4.0 catalog, a
 static JavaScript fixture and native IDA analysis of a locally compiled fixture.
 The native check recovered the expected function logic, closed its owned
 database and did not execute the input binary.
+
+
+## REA 6.4 / IDA headless compatibility
+
+The game workflow investigation reproduced backend failures outside Liminal:
+valid busy health was rejected, headless automatic analysis stopped advancing
+after decompilation, and acknowledged worker teardown briefly remained in the
+session registry. Valid decompiler limitations were also being reported as
+malformed output. These are separate from MCP transport failures.
+
+An **explicit local repair** is provided for the exact observed REA 6.4.0 and
+ida-pro-mcp 2.0.0 byte layout. From a source checkout, first inspect the dry-run:
+
+```powershell
+npm run rea:repair
+```
+
+Once your owned native requests have finished, apply the reviewed plan:
+
+```powershell
+npm run rea:repair -- --apply
+```
+
+This is not an automatic launch hook or an engine upgrade. It checks versions
+and original source fingerprints, backs up original files, and refuses unknown
+layouts. Model, keys, registrations and approvals are unchanged. It admits the
+narrow PS2 ELF32 little-endian MIPS profile actually checked on the supplied game
+executables; other MIPS variants and missing engines remain explicit limits.
+See the repository's [repair implementation and rollback instructions](https://github.com/traidy2222/liminal-ai/tree/main/scripts/rea-ida-backend).
+
+Large MCP results are preserved as exact local artifacts. Use the returned
+`read_artifact` JSON-pointer views rather than guessing response wrappers or
+repeating producer operations. Native pseudocode also receives an exact
+`verbatim_code_artifact`; copy it when saving code and retain its evidence ID.
+A preview is not the canonical complete code. Native header observations
+separate entry virtual addresses from file offsets; ELF mappings include the
+load segment's file offset.
+
+For unfamiliar assets, preserve source ranges and falsifiable layout hypotheses.
+The built-in `recursive_name_table_v1` profile validates the observed Futurama
+IMG directory/file grammar and provides a complete inventory and parameterized
+read-only reference parser. It is selected explicitly, never inferred solely
+from a filename extension. Validated extraction does not establish a decoded
+skeleton, animation, native port or recovered original source.

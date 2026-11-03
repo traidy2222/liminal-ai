@@ -1,4 +1,5 @@
 import { open } from "node:fs/promises";
+import { decodeKnownBinaryHeader, observeNativeBinaryHeader } from "@liminal/core";
 import { defineTool } from "../../shared/helpers.js";
 import { resolveWithinWorkspace } from "../../shared/file_path_guard.js";
 
@@ -36,7 +37,7 @@ function ascii(bytes: Buffer): string {
 export const readBinaryTool = defineTool({
   name: "read_binary",
   description:
-    "Read a bounded byte window from a local binary without generating scripts, decoding UTF-8, executing it or reading the whole file. Views: hex+ASCII rows, unsigned u32le words, or printable ASCII string runs. Length defaults to256 and is at most65536 bytes. Results default to64 rows/words/strings, maximum200, within a24000-byte serialized JSON budget. next_offset resumes first undisplayed data when either result cap applies; read_end_offset and bytes_read describe the actual read window. String text is clipped at256 characters with original offset/observed length retained. These are byte observations, not inferred format semantics.",
+    "Read a bounded byte window from a local binary without generating scripts, decoding UTF-8, executing it or reading the whole file. Views: hex+ASCII rows, unsigned u32le words, or printable ASCII string runs. Length defaults to256 and is at most65536 bytes. Results default to64 rows/words/strings, maximum200, within a24000-byte serialized JSON budget. next_offset resumes first undisplayed data when either result cap applies; read_end_offset and bytes_read describe the actual read window. String text is clipped at256 characters with original offset/observed length retained. At offset0, native_header_observation maps supported ELF32/PE entry virtual/RVA addresses to file offsets only when the complete bounded tables prove a unique file-backed mapping. Instruction semantics are not inferred.",
   requiresApproval: false,
   maxOutputTokens: 8192,
   parameters: {
@@ -133,6 +134,10 @@ export const readBinaryTool = defineTool({
 
       let consumed = done;
       const observations: Record<string, unknown> = {};
+      const knownHeader = decodeKnownBinaryHeader(bytes, offset);
+      if (knownHeader) observations.format_observation = knownHeader;
+      const nativeHeader = observeNativeBinaryHeader(bytes, before.size, offset);
+      if (nativeHeader) observations.native_header_observation = nativeHeader;
       if (view === "hex") {
         const rows = [];
         for (let i = 0; i < done && rows.length < limit; i += 16) {
