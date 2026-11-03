@@ -220,7 +220,17 @@ measured hypotheses, a matching schema or an honest partial handoff.
 ### Follow-up validation
 
 The compiled package build and workspace typecheck pass. The affected source
-checks cover 108 focused regressions; the pinned compatibility repair additionally
+checks cover 109 focused regressions; the pinned compatibility repair additionally
 passes 27 JavaScript and four Python checks. CI runs the relevant archive, header,
 MCP, argument-contract and persistence checks on Linux and Windows. Private game
 bytes, model traces, generated game code and credentials are excluded from Git.
+
+
+Windows CI additionally reproduced a newer Python timestamp portability issue in
+the reference parser: path-based `stat` and descriptor-based `fstat` can expose
+different `st_ctime_ns` conventions for the same unchanged file. The parser now
+binds file identity/size/mtime across APIs on open, then compares each final
+observation against its own initial API observation. Timestamp changes and file
+replacement still fail. The regression reproduces the mismatched conventions
+and separately checks real drift/replacement; see the
+[CPython issue](https://github.com/python/cpython/issues/157671).

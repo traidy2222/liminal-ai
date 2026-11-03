@@ -34,6 +34,11 @@ def parse_archive(source):
         before = os.fstat(handle.fileno())
         if not stat.S_ISREG(before.st_mode) or before.st_size < 4:
             raise ValueError("Source must be an ordinary file with an index boundary")
+        before_path = os.stat(source)
+        if (not os.path.samestat(before, before_path)
+                or before.st_size != before_path.st_size
+                or before.st_mtime_ns != before_path.st_mtime_ns):
+            raise ValueError("Source changed during inspection")
         header = handle.read(4)
         if len(header) != 4:
             raise ValueError("Missing index boundary")
@@ -120,7 +125,11 @@ def parse_archive(source):
         def identity(value):
             return (value.st_dev, value.st_ino, value.st_size,
                     value.st_mtime_ns, value.st_ctime_ns)
-        if identity(before) != identity(os.fstat(handle.fileno())) or identity(before) != identity(os.stat(source)):
+        # Newer Windows Python versions use different st_ctime conventions in
+        # stat and fstat. Compare each channel with its own initial observation;
+        # samestat above still binds the opened file to the selected pathname.
+        if (identity(before) != identity(os.fstat(handle.fileno()))
+                or identity(before_path) != identity(os.stat(source))):
             raise ValueError("Source changed during inspection")
         return {"format": PROFILE, "source": os.path.abspath(source),
                 "source_size": before.st_size, "index_end": index_end,

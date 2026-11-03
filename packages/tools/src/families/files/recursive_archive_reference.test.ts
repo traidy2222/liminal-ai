@@ -55,3 +55,39 @@ test('the reference rejects malformed indexes and requires an explicit source ar
     await assert.rejects(RecursiveNameTableArchive.open(source));
   }
 });
+
+
+test('path and descriptor timestamp conventions can differ without hiding actual source changes',async(t)=>{
+ const {root,source,command}=await setup(t),script=path.join(root,'parser.py');await fs.writeFile(script,RECURSIVE_ARCHIVE_PYTHON_REFERENCE);
+ const wrapper=String.raw`import json, os, runpy, sys, types
+module=runpy.run_path(sys.argv[1])
+real_stat, real_fstat=os.stat, os.fstat
+path_calls=0
+fd_calls=0
+mode=sys.argv[3]
+def project(value, **changes):
+    fields={name:getattr(value,name) for name in ('st_mode','st_dev','st_ino','st_size','st_mtime_ns','st_ctime_ns')}
+    fields.update(changes)
+    return types.SimpleNamespace(**fields)
+def path_stat(*args, **kwargs):
+    global path_calls
+    path_calls+=1
+    value=real_stat(*args, **kwargs)
+    return project(value,st_ctime_ns=value.st_ctime_ns+100000+(1 if mode=='path-change' and path_calls>1 else 0),st_ino=value.st_ino+(1 if mode=='replacement' and path_calls>1 else 0))
+def descriptor_stat(*args, **kwargs):
+    global fd_calls
+    fd_calls+=1
+    value=real_fstat(*args, **kwargs)
+    return project(value,st_ctime_ns=value.st_ctime_ns+(1 if mode=='descriptor-change' and fd_calls>1 else 0))
+os.stat=path_stat
+os.fstat=descriptor_stat
+try:
+    result=module['parse_archive'](sys.argv[2])
+    print(json.dumps({'record_count':result['record_count']}))
+except ValueError as error:
+    print(str(error),file=sys.stderr)
+    raise SystemExit(1)
+`;
+ const stable=spawnSync(command,['-c',wrapper,script,source,'stable'],{encoding:'utf8',windowsHide:true,timeout:10000});assert.equal(stable.status,0,stable.stderr);assert.equal(JSON.parse(stable.stdout).record_count,6);
+ for(const mode of ['path-change','descriptor-change','replacement']){const changed=spawnSync(command,['-c',wrapper,script,source,mode],{encoding:'utf8',windowsHide:true,timeout:10000});assert.equal(changed.status,1,mode);assert.match(changed.stderr,/Source changed/);}
+});
