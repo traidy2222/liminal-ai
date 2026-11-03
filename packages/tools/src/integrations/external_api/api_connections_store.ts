@@ -86,13 +86,22 @@ export interface McpToolRecord {
   remoteName: string;
   description: string;
   inputSchema: Record<string, unknown>;
+  outputSchema?: Record<string, unknown>;
+  annotations?: { readOnlyHint?: boolean; destructiveHint?: boolean; [key: string]: unknown };
 }
 
-export interface McpConnectionRecord {
+export interface McpStdioOptions {
+  command: string;
+  args?: string[];
+  /** Child environment name -> existing environment variable name. Never secret values. */
+  envRefs?: Record<string, string>;
+  /** Non-secret absolute provider/configuration paths, not file contents. */
+  envPaths?: Record<string, string>;
+}
+
+interface McpConnectionBase {
   kind: "mcp";
   name: string;
-  serverUrl: string;
-  transport: "http";
   auth: AuthScheme;
   tools: McpToolRecord[];
   attachedAt: number;
@@ -107,6 +116,11 @@ export interface McpConnectionRecord {
   /** Streamable HTTP MCP session id from initialize (required by some servers, e.g. ida-pro-mcp). */
   mcpSessionId?: string;
 }
+
+export type McpConnectionRecord = McpConnectionBase & (
+  | { transport: "http"; serverUrl: string; stdio?: never }
+  | { transport: "stdio"; stdio: McpStdioOptions; serverUrl?: never }
+);
 
 export type ConnectionRecord = OpenApiConnectionRecord | McpConnectionRecord;
 

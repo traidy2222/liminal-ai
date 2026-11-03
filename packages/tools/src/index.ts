@@ -475,9 +475,12 @@ export async function registerAllTools(
   registry.register(apiConnectTool);
   registry.register(apiDisconnectTool);
   registry.register(apiListTool);
-  const { mcpAttachTool, mcpDetachTool } = createMcpAttachTools(registry, emitter);
+  const { mcpAttachTool, mcpDetachTool, mcpAttachStdioTool, mcpSearchToolsTool, mcpCloseSessionTool } = createMcpAttachTools(registry, emitter);
   registry.register(mcpAttachTool);
   registry.register(mcpDetachTool);
+  registry.register(mcpAttachStdioTool);
+  registry.register(mcpSearchToolsTool);
+  registry.register(mcpCloseSessionTool);
   const connectorTools = createConnectorTools(registry, emitter);
   registry.register(connectorTools.connectProviderTool);
   registry.register(connectorTools.disconnectProviderTool);
@@ -748,6 +751,7 @@ export {
 export { probeIdaMcpInitialize, idaGuiMcpUrl, enrichIdaConnectError } from "./integrations/ida/ida_probe.js";
 export { getIdaSidecarStatus, stopIdaSidecar } from "./integrations/ida/ida_sidecar.js";
 export { getGoogleSidecarStatus, stopGoogleSidecar } from "./integrations/google/google_sidecar.js";
+export { closeStdioMcp } from "./integrations/external_api/mcp_stdio.js";
 export {
   listIntegrationConnections,
   attachCustomMcpFromServer,

@@ -18,6 +18,7 @@ import {
   type McpConnectionRecord,
   type McpToolFilter,
   type McpToolRecord,
+  type McpStdioOptions,
   deleteConnection,
   googleOAuthAuthScheme,
   listConnections,
@@ -33,6 +34,8 @@ import { IDA_PARENT_PROVIDER } from "../ida/ida_connect.js";
 import { registerIdaCompanionTools, unregisterIdaCompanionTools } from "../ida/ida_companion_tools.js";
 import { injectIdaDatabaseArgs, wrapIdaMcpHandler } from "../ida/ida_session.js";
 import { awsSignedFetch } from "../aws/aws_sigv4_fetch.js";
+import { callStdioMcp, closeStdioMcp, discoverStdioMcp } from "./mcp_stdio.js";
+import { renderMcpResult, type McpCallResult } from "./mcp_result.js";
 
 const MCP_PROTOCOL_VERSION = "2025-06-18";
 const MCP_CLIENT_INFO = { name: "liminal-harness", version: "0.1.0" };
@@ -126,13 +129,13 @@ interface McpToolsListResult {
     name: string;
     description?: string;
     inputSchema?: Record<string, unknown>;
+    outputSchema?: Record<string, unknown>;
+    annotations?: McpToolRecord["annotations"];
   }>;
+  nextCursor?: string;
 }
 
-interface McpToolCallResult {
-  content?: Array<{ type: string; text?: string }>;
-  isError?: boolean;
-}
+type McpToolCallResult = McpCallResult;
 
 export async function mcpHandshakeAndListTools(
   serverUrl: string,
@@ -166,9 +169,13 @@ export async function mcpHandshakeAndListTools(
   } catch {
     /* tolerate */
   }
+  const allTools: McpToolsListResult["tools"] = [];
+  const cursors = new Set<string>();
+  let cursor: string | undefined;
+  do {
   const listed = await postJsonRpc<McpToolsListResult>(
     serverUrl,
-    { jsonrpc: "2.0", id: nextJsonRpcId(), method: "tools/list" },
+    { jsonrpc: "2.0", id: nextJsonRpcId(), method: "tools/list", ...(cursor ? { params: { cursor } } : {}) },
     auth,
     true,
     sessionId
@@ -178,14 +185,20 @@ export async function mcpHandshakeAndListTools(
   if (!reply || reply.error) {
     throw new Error(`tools/list failed: ${reply?.error?.message ?? "no response"}`);
   }
-  const list = reply.result?.tools ?? [];
+  allTools.push(...(reply.result?.tools ?? []));
+  cursor = reply.result?.nextCursor;
+  if (cursor && cursors.has(cursor)) throw new Error("MCP server repeated its pagination cursor");
+  if (cursor) cursors.add(cursor);
+  } while (cursor);
   return {
     mcpSessionId: sessionId,
-    tools: list.map((t) => ({
+    tools: allTools.map((t) => ({
       remoteName: t.name,
       toolName: "",
-      description: (t.description ?? "").slice(0, 800),
+      description: t.description ?? "",
       inputSchema: t.inputSchema ?? { type: "object", properties: {}, additionalProperties: true },
+      outputSchema: t.outputSchema,
+      annotations: t.annotations,
     })),
   };
 }
@@ -271,9 +284,13 @@ function buildMcpToolHandler(
   tool: McpToolRecord,
   remoteProperties: Record<string, unknown>
 ): ToolDefinition["handler"] {
-  return async (args): Promise<ToolResult> => {
+  return async (args, emit, _harness, context): Promise<ToolResult> => {
     let reply: JsonRpcResponse<McpToolCallResult> | null;
     try {
+      if (record.transport === "stdio") {
+        const result = await callStdioMcp(record.name, record.stdio, tool.remoteName, args, context, emit);
+        reply = { jsonrpc: "2.0", result: result as McpCallResult };
+      } else {
       const rpc = await postJsonRpc<McpToolCallResult>(
         record.serverUrl,
         {
@@ -291,17 +308,15 @@ function buildMcpToolHandler(
       );
       if (rpc.sessionId) record.mcpSessionId = rpc.sessionId;
       reply = rpc.reply;
+      }
     } catch (e) {
       const raw = e instanceof Error ? e.message : String(e);
-      return { ok: false, error: enrichGoogleMcpProbeError(record.serverUrl, `transport error: ${raw}`) };
+      return { ok: false, error: enrichGoogleMcpProbeError(record.serverUrl ?? "", `transport error: ${raw}`) };
     }
     if (!reply) return { ok: false, error: "no response" };
     if (reply.error) return { ok: false, error: `MCP error ${reply.error.code}: ${reply.error.message}` };
     const result = reply.result ?? {};
-    const parts = (result.content ?? [])
-      .map((c) => (typeof c.text === "string" ? c.text : ""))
-      .filter(Boolean);
-    const text = parts.join("\n").trim() || "[empty MCP response]";
+    const text = await renderMcpResult(result, record.name);
     if (result.isError) {
       if (record.name === "google_gmail" && (remoteProperties.messageId || remoteProperties.threadId) &&
           /(?:status\s*404|requested entity was not found)/i.test(text)) {
@@ -310,7 +325,7 @@ function buildMcpToolHandler(
           "Search this connection's mailbox again and copy the exact returned message ID or thread ID for the matching operation. " +
           "Do not retry a guessed ID or substitute a thread ID for a message ID." };
       }
-      return { ok: false, error: enrichGoogleMcpProbeError(record.serverUrl, text) };
+      return { ok: false, error: enrichGoogleMcpProbeError(record.serverUrl ?? "", text) };
     }
     return { ok: true, output: text };
   };
@@ -340,16 +355,16 @@ function buildMcpTool(record: McpConnectionRecord, tool: McpToolRecord): ToolDef
   const { properties: rawProperties, required } = ensureToolParameterShape(tool.inputSchema);
   const properties = expandMcpToolProperties(rawProperties);
   const remoteProperties = rawProperties as Record<string, unknown>;
-  const isWrite = isMcpWriteTool(tool.remoteName, tool.description);
+  const isWrite = tool.annotations?.readOnlyHint === false || tool.annotations?.destructiveHint === true || isMcpWriteTool(tool.remoteName, tool.description);
   const isRead = isMcpReadTool(tool.remoteName, tool.description);
   // Mailbox state changes between calls, including after our own mutations.
   let isGmail = record.name === "google_gmail";
   try {
-    isGmail ||= new URL(record.serverUrl).hostname === "gmailmcp.googleapis.com";
+    isGmail ||= record.transport === "http" && new URL(record.serverUrl).hostname === "gmailmcp.googleapis.com";
   } catch {
     // Non-URL transports retain the connection-name fallback.
   }
-  const cacheable = isRead && !isWrite && !isGmail;
+  const cacheable = record.transport === "http" && isRead && !isWrite && !isGmail;
   let description = enrichGoogleMcpToolDescription(
     record.name,
     tool.remoteName,
@@ -374,15 +389,17 @@ function buildMcpTool(record: McpConnectionRecord, tool: McpToolRecord): ToolDef
     name: tool.toolName,
     description,
     parameters: {
+      ...tool.inputSchema,
       type: "object",
       properties,
       required: required.length > 0 ? required : undefined,
-      additionalProperties: false,
+      additionalProperties: record.transport === "stdio" ? tool.inputSchema.additionalProperties as boolean | PropertySchema | undefined : false,
     },
     requiresApproval: isWrite,
     dangerLevel: isWrite ? "destructive" : "safe",
     cacheable,
     cacheTtlMs: cacheable ? 30_000 : undefined,
+    resourceLocks: record.transport === "stdio" ? () => [`mcp:stdio:${record.name}`] : undefined,
     handler,
   });
 }
@@ -405,6 +422,8 @@ export function registerMcpConnection(registry: ToolRegistry, record: McpConnect
   registerConnectorToolFamilies(registry, record.name, registered, record.parentProvider, {
     services: record.services,
   });
+  // A small catalog search stays visible; the full external schema set stays lazy.
+  if (registry.has("mcp_search_tools")) registry.activate(["mcp_search_tools"]);
   if (record.parentProvider === IDA_PARENT_PROVIDER || record.name === "ida") {
     registered.push(...registerIdaCompanionTools(registry, record));
   }
@@ -586,7 +605,89 @@ export async function attachMcpConnection(
   return { record, registered };
 }
 
+export async function attachStdioMcpConnection(
+  registry: ToolRegistry,
+  opts: { name: string; stdio: McpStdioOptions; readOnly?: boolean; autoActivate?: boolean },
+): Promise<{ record: McpConnectionRecord; registered: string[] }> {
+  const name = sanitizeConnectionName(opts.name);
+  if (!name) throw new Error("connection name normalized to empty");
+  const discovered = await discoverStdioMcp(name, opts.stdio);
+  const tools = filterMcpToolRecords(discovered.tools, { readOnly: opts.readOnly });
+  if (!tools.length) throw new Error("no tools after filter");
+  assignMcpToolNames(tools, name);
+  const old = await readConnection(name);
+  if (old?.kind === "mcp") unregisterMcpConnection(registry, old);
+  await closeStdioMcp(name);
+  const record: McpConnectionRecord = {
+    kind: "mcp", name, transport: "stdio", stdio: opts.stdio, auth: { kind: "none" },
+    tools, attachedAt: Date.now(), readOnly: opts.readOnly,
+    autoActivate: resolveMcpAutoActivate(registry, { explicit: opts.autoActivate }),
+  };
+  await writeConnection(record);
+  const registered = registerMcpConnection(registry, record);
+  if (record.autoActivate) registry.activate(registered);
+  return { record, registered };
+}
+
 export function createMcpAttachTools(registry: ToolRegistry, _emitter: AgentEmitter) {
+  const mcpAttachStdioTool = defineTool({
+    name: "mcp_attach_stdio",
+    description: "Connect an installed local MCP server such as REA. Starts a command directly, discovers its complete tool catalog and saves the connection. Use absolute script paths; tools load on demand with mcp_search_tools.",
+    parameters: { type: "object", properties: {
+      name: { type: "string" }, command: { type: "string" }, args: { type: "array", items: { type: "string" } },
+      env_refs: { type: "object", description: "Child environment names mapped to existing environment variable names, never secret values." },
+      env_paths: { type: "object", description: "Non-secret environment configuration paths, e.g. REA_IDA_MCP_CONFIG. Values must be existing absolute paths." },
+      read_only: { type: "boolean" },
+    }, required: ["name", "command"], additionalProperties: false },
+    requiresApproval: true, dangerLevel: "cautious",
+    handler: async args => {
+      try {
+        const { record, registered } = await attachStdioMcpConnection(registry, {
+          name: String(args.name), stdio: { command: String(args.command), args: args.args as string[] | undefined, envRefs: args.env_refs as Record<string, string> | undefined, envPaths: args.env_paths as Record<string, string> | undefined },
+          readOnly: args.read_only === true,
+        });
+        return { ok: true, output: `Connected local MCP '${record.name}': ${registered.length} tools available. Use mcp_search_tools to find and load tools.` };
+      } catch (error) { return { ok: false, error: error instanceof Error ? error.message : String(error) }; }
+    },
+  });
+  const mcpSearchToolsTool = defineTool({
+    name: "mcp_search_tools",
+    description: "Search the complete connected MCP catalog, including REA reverse-engineering tools. Loads only matching tools for the next round, keeping prompts small. For REA start with binary_session, then choose tools for the user's actual target. Search again to switch capabilities.",
+    parameters: { type: "object", properties: {
+      query: { type: "string", description: "Tool name or capability, e.g. binary_session, decompile, javascript, evidence, Android." },
+      connection: { type: "string", description: "Optional connection id, e.g. rea." },
+      limit: { type: "integer", minimum: 1, maximum: 12 },
+      activate: { type: "boolean", description: "Load matches for use; defaults true." },
+    }, required: ["query"], additionalProperties: false },
+    requiresApproval: false,
+    handler: async args => {
+      const query = String(args.query).trim().toLowerCase();
+      const terms = query.replace(/_/g, " ").split(/\s+/).filter(Boolean);
+      const records = (await listConnections()).filter((c): c is McpConnectionRecord => c.kind === "mcp" && (!args.connection || c.name === args.connection));
+      const matches = records.flatMap(record => record.tools.filter(tool => registry.has(tool.toolName)).map(tool => {
+        const text = (record.name + " " + tool.remoteName + " " + tool.description).replace(/_/g, " ").toLowerCase();
+        const score = tool.remoteName.toLowerCase() === query || tool.toolName.toLowerCase() === query ? 1000 : terms.reduce((n, term) => n + (text.includes(term) ? 1 : 0), 0);
+        return { record, tool, score };
+      })).filter(m => !query || m.score > 0).sort((a, b) => b.score - a.score || a.tool.remoteName.localeCompare(b.tool.remoteName)).slice(0, Math.min(12, Math.max(1, Number(args.limit) || 6)));
+      if (args.activate !== false && matches.length) {
+        for (const record of records.filter(r => matches.some(m => m.record === r))) {
+          const names = new Set(record.tools.map(t => t.toolName));
+          registry.seedActiveTools(registry.getActiveToolNames().filter(name => !names.has(name)));
+        }
+        registry.activate(matches.map(m => m.tool.toolName));
+      }
+      return { ok: true, output: JSON.stringify({ availableTools: records.reduce((n, r) => n + r.tools.filter(t => registry.has(t.toolName)).length, 0), matches: matches.map(m => ({ name: m.tool.toolName, connection: m.record.name, description: m.tool.description, required: m.tool.inputSchema.required ?? [], loaded: registry.isActive(m.tool.toolName) })) }) };
+    },
+  });
+  const mcpCloseSessionTool = defineTool({
+    name: "mcp_close_session", description: "Close this conversation's local MCP process and its owned analysis session; keep the saved connection available for later use.",
+    parameters: { type: "object", properties: { name: { type: "string" } }, required: ["name"], additionalProperties: false },
+    requiresApproval: false,
+    handler: async (args, _emit, _harness, context) => {
+      await closeStdioMcp(String(args.name), context?.scope);
+      return { ok: true, output: `Closed local MCP session '${args.name}'.` };
+    },
+  });
   const mcpAttachTool = defineTool({
     name: "mcp_attach",
     description:
@@ -655,12 +756,13 @@ export function createMcpAttachTools(registry: ToolRegistry, _emitter: AgentEmit
         return { ok: false, error: `no MCP connection named '${name}'` };
       }
       const removed = unregisterMcpConnection(registry, record);
+      await closeStdioMcp(name);
       await deleteConnection(name);
       return { ok: true, output: `Detached MCP '${name}'. Unregistered ${removed} tools.` };
     },
   });
 
-  return { mcpAttachTool, mcpDetachTool };
+  return { mcpAttachTool, mcpDetachTool, mcpAttachStdioTool, mcpSearchToolsTool, mcpCloseSessionTool };
 }
 
 export function restoreMcpConnectionsFromRecords(

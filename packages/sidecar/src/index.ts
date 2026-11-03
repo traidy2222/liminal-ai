@@ -2,6 +2,7 @@
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { homedir } from "node:os";
+import { closeStdioMcp } from "@liminal/tools";
 import {
   ensureLocalProviderApiKeyInProcess,
   ensureProviderApiKeysInProcess,
@@ -97,7 +98,7 @@ async function main(): Promise<void> {
     // The desktop owned stdout; it may already be a broken pipe when it exits.
     if (signal !== 'desktop_parent_exit') process.stdout.write(`liminald: shutting down (${signal})\n`);
     server.close();
-    void clearHandshake()
+    void Promise.allSettled([clearHandshake(), closeStdioMcp()])
       .then(() => closeCrashReporter())
       .finally(() => process.exit(0));
   };

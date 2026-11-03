@@ -1487,6 +1487,11 @@ export class AgentHarness {
     return this.context;
   }
 
+  /** Identity used to release stateful tool resources when this harness is disposed. */
+  getToolExecutionScope(): object {
+    return this.dispatcher;
+  }
+
   getExecutionState(): ExecutionState | null {
     return this.executionState;
   }
@@ -3060,6 +3065,7 @@ export class AgentHarness {
     this.currentTurnController = new AbortController();
     this.currentTurnTraceId = crypto.randomUUID();
     this.dispatcher.setTurnTraceId(this.currentTurnTraceId);
+    this.dispatcher.setTurnAbortSignal(this.mergeStreamAbortSignals());
     this.running = true;
     this.clearPersonalityHeartbeatSchedule();
     this.lastTurnTerminationReason = null;
@@ -3958,6 +3964,7 @@ export class AgentHarness {
       this.currentTurnController = undefined;
       this.currentTurnTraceId = undefined;
       this.dispatcher.setTurnTraceId(undefined);
+      this.dispatcher.setTurnAbortSignal(undefined);
       const term = this.lastTurnTerminationReason;
       this.running = false;
       if (term === "ok" && !openingTurn && this.agentDepth === 0) {

@@ -10,6 +10,7 @@ import {
   slimReplayEntriesForWire,
 } from "@liminal/core";
 import {
+  closeStdioMcp,
   applyPersonaProfileToHarness,
   clearPersistedPersonaArtifacts,
   resetPersonaBootstrapState,
@@ -405,6 +406,7 @@ export class SessionBridge {
 
   /** Detach all emitter subscriptions and reject any in-flight gates. */
   dispose(): void {
+    void closeStdioMcp(undefined, this.harness.getToolExecutionScope()).catch(() => undefined);
     this.stopHeartbeat();
     for (const off of this.detachers) {
       try {

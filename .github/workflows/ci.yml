@@ -59,6 +59,9 @@ jobs:
       - name: Test Google helper permits desktop updates
         run: node --import tsx --test packages/tools/src/integrations/google/google_sidecar_update_lock.test.ts
 
+      - name: Test native local MCP tool catalogs and lifecycle
+        run: node --import tsx --test packages/tools/src/integrations/external_api/mcp_stdio.test.ts packages/tools/src/integrations/external_api/mcp_catalog.test.ts
+
       - name: Test desktop update installation and rollback
         run: npm run test:update-release
 
@@ -153,6 +156,9 @@ jobs:
 
       - name: Test live Google helper permits Windows folder swaps
         run: node --import tsx --test packages/tools/src/integrations/google/google_sidecar_update_lock.test.ts
+
+      - name: Test local MCP process isolation and cancellation on Windows
+        run: node --import tsx --test packages/tools/src/integrations/external_api/mcp_stdio.test.ts packages/tools/src/integrations/external_api/mcp_catalog.test.ts
       - name: Verify workflow gates with actual Windows test processes
         run: npm run verify:workflows
       - name: Test Windows update helper and rollback

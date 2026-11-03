@@ -10,6 +10,7 @@ import {
   type ConnectionRecord,
 } from "../external_api/api_connections_store.js";
 import { attachMcpConnection, restoreMcpConnections, unregisterMcpConnection } from "../external_api/mcp_attach.js";
+import { closeStdioMcp } from "../external_api/mcp_stdio.js";
 import {
   createApiConnectionTools,
   restoreOpenApiConnections,
@@ -26,6 +27,7 @@ export interface IntegrationConnectionSummary {
   /** Curated provider (e.g. google_workspace) — hide from custom MCP form list. */
   parentProvider?: string;
   serverUrl?: string;
+  transport?: "http" | "stdio";
   specUrl?: string;
   baseUrl?: string;
   readOnly?: boolean;
@@ -58,6 +60,7 @@ function summarizeConnection(c: ConnectionRecord): IntegrationConnectionSummary 
     attachedAt: c.attachedAt,
     parentProvider: c.parentProvider,
     serverUrl: c.serverUrl,
+    transport: c.transport,
     readOnly: c.readOnly,
     services: c.services,
   };
@@ -114,6 +117,7 @@ export async function detachCustomMcpFromServer(
     return { ok: false, error: `no MCP connection named '${name}'` };
   }
   const removed = unregisterMcpConnection(registry, record);
+  await closeStdioMcp(name);
   await deleteConnection(name);
   return { ok: true, output: `Detached MCP '${name}' (${removed} tools).` };
 }

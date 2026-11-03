@@ -33,7 +33,7 @@ export interface ToolParameterSchema {
   type: "object";
   properties: Record<string, PropertySchema>;
   required?: string[];
-  additionalProperties?: false;
+  additionalProperties?: boolean | PropertySchema;
 }
 
 export interface ToolDefinition {
@@ -100,6 +100,10 @@ export interface ResolvedToolDependency {
 }
 
 export interface ToolExecutionContext {
+  /** Stable per-dispatcher identity for stateful, conversation-local tool clients. */
+  scope?: object;
+  /** Cancels a running operation when its owning harness turn is stopped. */
+  signal?: AbortSignal;
   /** Untrusted prerequisite output, separate from validated/model-supplied arguments. */
   resolvedDependencies?: readonly ResolvedToolDependency[];
 }

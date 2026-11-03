@@ -50,6 +50,16 @@ function resolveConnectorToolFamily(
   parentProvider?: string,
   services?: string[]
 ): string {
+  if (connectionName === "rea") {
+    const name = toolName.replace(/^mcp_rea_/, "");
+    const group = /^(binary_session|open_binary|close_binary)$/.test(name) ? "session"
+      : /adb|android|apktool|jeb/.test(name) ? "android"
+      : /evidence|unknown|reconstruction|compare_bundles|build_call_path/.test(name) ? "evidence"
+      : /javascript|source_to_bundle|web_module|web_source/.test(name) ? "javascript"
+      : /browser|web|electron|process_capture|process_scenario|native_ui/.test(name) ? "runtime"
+      : /artifact|macho|plist|firmware|managed|pe_resources|architectures|signature|swift|keyed|interface_builder|asset_catalog|evm|binary_layout|recorded_crash/.test(name) ? "artifacts" : "native";
+    return `connector:rea:${group}`;
+  }
   if (parentProvider === "google_workspace") {
     return (
       googleRestToolSubFamily(toolName) ??

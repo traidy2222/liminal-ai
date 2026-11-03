@@ -19,6 +19,7 @@ import {
 } from "@liminal/core";
 import {
   registerAllTools,
+  closeStdioMcp,
   INCEPTION_MESSAGES,
   buildProtocolDynamicSuffix,
   applyPersonaProfileToHarness,
@@ -638,6 +639,7 @@ export class AgentBridge {
    * promises so the harness can be garbage-collected.
    */
   dispose(): void {
+    void closeStdioMcp(undefined, this.harness.getToolExecutionScope()).catch(() => undefined);
     try {
       this.stopHeartbeat();
       this.detachSessionLog();
