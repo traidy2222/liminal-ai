@@ -5,6 +5,7 @@ import { spawn, type ChildProcess } from "node:child_process";
 import { readFile, writeFile, unlink, mkdir } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import path from "node:path";
+import { randomBytes } from "node:crypto";
 import { globalPath, ensureGlobalStorageRoot } from "@liminal/core";
 import { effectiveHarnessEnvRaw } from "@liminal/core";
 
@@ -21,6 +22,10 @@ export interface SidecarState {
 
 let managedProcess: ChildProcess | null = null;
 let localRefCount = 0;
+// FastMCP's public-client constructor needs signing material even in resource-
+// server-only mode. Its memory sessions are process-local; never reuse API keys
+// or copy the hosted Google client secret to the desktop for this purpose.
+const localSigningKey = randomBytes(32).toString("base64url");
 
 function statePath(): string {
   return globalPath(SIDECAR_STATE_SEG);
@@ -58,7 +63,23 @@ export function googleSidecarMcpUrl(port = sidecarPort()): string {
 }
 
 /** workspace-mcp listens on WORKSPACE_MCP_PORT (not --port CLI flags). */
-export function buildSidecarEnv(port: number, accessToken?: string): NodeJS.ProcessEnv {
+export async function resolveGoogleSidecarClientId(accessToken?: string): Promise<string> {
+  const configured = googleOAuthClientId();
+  if (configured || !accessToken) return configured;
+  // A hosted OAuth grant already identifies its public client. Recover that ID
+  // from Google rather than requiring the hosted client secret on the desktop.
+  try {
+    const url = new URL("https://oauth2.googleapis.com/tokeninfo");
+    url.searchParams.set("access_token", accessToken);
+    const response = await fetch(url, { signal: AbortSignal.timeout(5000) });
+    if (!response.ok) return "";
+    const info = await response.json() as Record<string, unknown>;
+    return [info.aud, info.audience, info.issued_to].find((value): value is string =>
+      typeof value === "string" && /^\d+-[a-z0-9]+\.apps\.googleusercontent\.com$/i.test(value)) ?? "";
+  } catch { return ""; }
+}
+
+export function buildSidecarEnv(port: number, accessToken?: string, inferredClientId?: string): NodeJS.ProcessEnv {
   const env: NodeJS.ProcessEnv = { ...process.env };
   env.WORKSPACE_MCP_PORT = String(port);
   env.WORKSPACE_MCP_HOST = "127.0.0.1";
@@ -66,9 +87,11 @@ export function buildSidecarEnv(port: number, accessToken?: string): NodeJS.Proc
   // Liminal owns OAuth — pass bearer tokens on each MCP request (mcp_attach).
   env.MCP_ENABLE_OAUTH21 = "true";
   env.EXTERNAL_OAUTH21_PROVIDER = "true";
+  env.FASTMCP_SERVER_AUTH_GOOGLE_JWT_SIGNING_KEY =
+    process.env.FASTMCP_SERVER_AUTH_GOOGLE_JWT_SIGNING_KEY?.trim() || localSigningKey;
   env.WORKSPACE_MCP_STATELESS_MODE = "true";
   env.OAUTHLIB_INSECURE_TRANSPORT = "1";
-  const clientId = googleOAuthClientId();
+  const clientId = googleOAuthClientId() || inferredClientId;
   if (clientId) env.GOOGLE_OAUTH_CLIENT_ID = clientId;
   const secret = googleOAuthClientSecret();
   if (secret) env.GOOGLE_OAUTH_CLIENT_SECRET = secret;
@@ -204,16 +227,17 @@ export async function ensureGoogleSidecarRunning(
   if (!bin) {
     return { ok: false, url, error: "AGENT_GOOGLE_SIDECAR_CMD is empty" };
   }
-  if (!googleOAuthClientId()) {
+  const clientId = await resolveGoogleSidecarClientId(accessToken);
+  if (!clientId) {
     return {
       ok: false,
       url,
       error:
-        "GOOGLE_OAUTH_CLIENT_ID is required for workspace-mcp sidecar (set in .env or AGENT_GOOGLE_OAUTH_CLIENT_ID).",
+        "Could not determine the Google OAuth client ID. Reconnect Google, or configure AGENT_GOOGLE_OAUTH_CLIENT_ID for the workspace-mcp sidecar.",
     };
   }
 
-  const env = buildSidecarEnv(port, accessToken);
+  const env = buildSidecarEnv(port, accessToken, clientId);
   let stderr = "";
 
   try {

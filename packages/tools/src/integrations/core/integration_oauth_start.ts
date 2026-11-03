@@ -3,6 +3,7 @@
  */
 import {
   listGoogleOAuthAccounts,
+  getGoogleAccessToken,
   listMicrosoftOAuthAccounts,
   listXeroOAuthAccounts,
   listGithubOAuthAccounts,
@@ -61,10 +62,14 @@ export function integrationNotConnectedError(provider: ConnectProviderId, label?
   );
 }
 
-export async function isConnectProviderOAuthReady(provider: ConnectProviderId): Promise<boolean> {
+export async function isConnectProviderOAuthReady(provider: ConnectProviderId, accountHint?: string): Promise<boolean> {
   switch (provider) {
-    case "google_workspace":
-      return (await listGoogleOAuthAccounts()).length > 0;
+    case "google_workspace": {
+      if (!accountHint) return !!(await getGoogleAccessToken());
+      const accounts = await listGoogleOAuthAccounts();
+      const selected = accounts.find((account) => account.accountId === accountHint || account.email === accountHint);
+      return selected ? !!(await getGoogleAccessToken(selected.accountId)) : false;
+    }
     case "microsoft_365":
       return (await listMicrosoftOAuthAccounts()).length > 0;
     case "azure":

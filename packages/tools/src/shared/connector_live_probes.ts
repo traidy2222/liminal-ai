@@ -106,7 +106,7 @@ export async function probeGoogleOfficialMcp(
 
   const token = await getGoogleAccessToken(account.accountId);
   if (!token) {
-    return { state: "not_connected", detail: "OAuth token unreadable (reconnect or fix LIMINAL_OAUTH_KEY)" };
+    return { state: "not_connected", detail: "Saved OAuth account needs a successful token refresh or reconnect." };
   }
 
   const mode = "read_write" as const;
@@ -154,7 +154,7 @@ export async function probeGoogleAnalyticsRest(accountId?: string): Promise<Goog
   }
   const token = await getGoogleAccessToken(account.accountId);
   if (!token) {
-    return { state: "not_connected", detail: "token unreadable" };
+    return { state: "not_connected", detail: "Saved OAuth account needs a successful token refresh or reconnect." };
   }
   try {
     const res = await withTimeout(
@@ -201,7 +201,7 @@ export async function probeGoogleSearchConsoleRest(accountId?: string): Promise<
   }
   const token = await getGoogleAccessToken(account.accountId);
   if (!token) {
-    return { state: "not_connected", detail: "token unreadable" };
+    return { state: "not_connected", detail: "Saved OAuth account needs a successful token refresh or reconnect." };
   }
   try {
     const res = await withTimeout(
@@ -243,7 +243,7 @@ export async function probeGoogleCalendarRest(accountId?: string): Promise<Googl
     : accounts[0]!;
   const token = await getGoogleAccessToken(account.accountId);
   if (!token) {
-    return { state: "not_connected", detail: "token unreadable" };
+    return { state: "not_connected", detail: "Saved OAuth account needs a successful token refresh or reconnect." };
   }
   try {
     const res = await withTimeout(

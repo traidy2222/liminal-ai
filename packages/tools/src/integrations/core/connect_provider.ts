@@ -333,8 +333,10 @@ async function prepareProviderOAuth(
           return null;
         }
       }
-    } else if (await isConnectProviderOAuthReady(provider)) {
-      emit?.(`${provider}: OAuth already on disk — continuing…`);
+    } else if (await isConnectProviderOAuthReady(
+      provider, typeof args["account_hint"] === "string" ? args["account_hint"].trim() || undefined : undefined
+    )) {
+      emit?.(`${provider}: OAuth available — continuing…`);
       return null;
     }
   }
@@ -756,7 +758,9 @@ export function createConnectorTools(registry: ToolRegistry, _emitter: AgentEmit
           ok: false,
           error:
             (attachErrors.length > 0 ? attachErrors.join("\n\n") : "no connections attached") +
-            "\n\nIf Calendar MCP fails with permission errors, enroll the Cloud project in the Workspace Developer Preview: https://developers.google.com/workspace/preview",
+            (presets.some((preset) => preset.id === "calendar")
+              ? "\n\nIf Calendar MCP fails with permission errors, enroll the Cloud project in the Workspace Developer Preview: https://developers.google.com/workspace/preview"
+              : ""),
         };
       }
 
