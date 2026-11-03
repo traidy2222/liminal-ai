@@ -126,6 +126,15 @@ Two major state tracks:
 - **Execution state**: mission, milestones, contracts, commitments, drift score, recovery log
 
 Execution state powers long-horizon coherence and anti-drift behavior.
+Actual tool failures contribute recovery evidence; elapsed rounds alone do not
+replace the user's plan. Contract tool, round and time budgets start when the
+contract becomes active, so earlier work is not charged to a later plan. A hard
+contract stop produces an explicit incomplete-work handoff in the conversation.
+
+On Windows, PowerShell `run_shell` foreground commands use noninteractive PTY
+jobs and the shell process's actual exit status. Each job returns its own output;
+environment setup must be included in the same call. Explicit interactive and
+background tools remain available when a persistent process is required.
 
 ## Rule Effectiveness Tracking
 

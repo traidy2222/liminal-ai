@@ -736,12 +736,6 @@ export class AgentShellSession {
     const body = capShellToolOutput(output.trimEnd() || "(no output)");
     const full = (cappedNote ?? "") + body;
     if (exitCode !== 0) {
-      if (body.length >= 120) {
-        return {
-          ok: true,
-          output: `[exit ${exitCode} — see Terminal panel for full scrollback]\n${full}`,
-        };
-      }
       return { ok: false, error: `Exit code ${exitCode}.\n${full}` };
     }
     return { ok: true, output: full };

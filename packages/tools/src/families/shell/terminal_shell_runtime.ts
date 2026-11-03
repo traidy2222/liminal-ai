@@ -1,16 +1,17 @@
 /**
  * Terminal-backed run_shell / run_background runtime.
  *
- * Foreground command execution lives in agent_shell_session.ts (one PTY per
- * chat, OSC 133 marker-driven completion). This module keeps the surrounding
- * plumbing: background job tabs, session read/kill/list, and raw PTY send/read.
+ * PowerShell foreground commands use owned noninteractive PTYs and actual
+ * process exit status. Other interactive shells use agent_shell_session.ts.
+ * Background tabs and explicit interactive sessions keep their existing ports.
  */
 import type { AgentHarness, RuntimePreferences, ToolResult } from "@liminal/core";
-import { effectiveHarnessEnvRaw, resolveHarnessEnvRaw } from "@liminal/core";
+import { effectiveHarnessEnvRaw, resolveHarnessEnvRaw, resolveShellRuntime } from "@liminal/core";
 import {
   buildHumanShellInput,
   buildShellCommandLine,
   getAgentShellSession,
+  enqueueAgentShell,
   resetAgentShellSessionsForTests,
   startAgentTerminalWarmup,
   waitForShellBoot,
@@ -18,6 +19,7 @@ import {
 } from "./agent_shell_session.js";
 import { getPtyShellPort, type PtyManagerPort } from "./pty_shell_port.js";
 import { capShellToolOutput } from "./shell_tool_output.js";
+import { normalizeNewlines, stripAnsi } from "./shell_prompt.js";
 import { ensureChatTerminal } from "./terminal_runtime.js";
 
 export {
@@ -152,13 +154,31 @@ export async function runShellInTerminal(input: {
   cappedNote: string;
   onChunk?: (chunk: string) => void;
 }): Promise<ToolResult> {
-  void input.onChunk;
   const chatId = input.harness.taskId?.trim();
   if (!chatId) {
     return { ok: false, error: "No chat context for terminal shell execution." };
   }
   if (!getPtyShellPort()) {
     return { ok: false, error: "PTY shell port is not available." };
+  }
+
+  const runtime = resolveShellRuntime();
+  if (runtime.kind === "powershell" || runtime.kind === "pwsh") {
+    // Foreground commands are noninteractive jobs. Sending a multiline paste
+    // through PSReadLine can accept a repainted/empty prompt as completion and
+    // return stale output while the actual command is still being entered.
+    return enqueueAgentShell(chatId, async () => {
+      const port = getPtyShellPort();
+      if (!port) return { ok: false, error: "PTY shell port is not available." };
+      try {
+        const result = await port.runOneshot({ chatId, command: input.command, cwd: input.cwd,
+          timeoutMs: input.timeoutMs, label: "Agent command", onData: input.onChunk });
+        const body = (input.cappedNote ?? "") + formatShellResultBody(normalizeNewlines(stripAnsi(result.output)));
+        return result.exitCode === 0 ? { ok: true, output: body } : { ok: false, error: `Exit code ${result.exitCode}.\n${body}` };
+      } catch (error) {
+        return { ok: false, error: error instanceof Error ? error.message : String(error) };
+      }
+    });
   }
 
   return getAgentShellSession(chatId).exec({

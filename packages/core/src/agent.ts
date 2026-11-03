@@ -1455,6 +1455,7 @@ export class AgentHarness {
   private _turnReasoningBudget: ReasoningBudget | null = null;
   private _turnReasoningSurface: ReasoningSurface = "external";
   private toolCallsDispatchedThisSend = 0;
+  private contractBudgetUsage: { id: string; tools: number; round: number; startedAt: number } | null = null;
   /** When set, blocks side-effecting tools until ask_user resolves clarification. */
   private breakdownClarificationGate: string | null = null;
   private streamingToolNamesByCallId = new Map<string, string>();
@@ -1556,15 +1557,23 @@ export class AgentHarness {
   private checkContractBudgetExceeded(): string | null {
     const contract = this.getActiveContract();
     if (!contract) return null;
-    if (this.toolCallsDispatchedThisSend > contract.maxToolCalls) {
-      return `Tool call budget exceeded (${this.toolCallsDispatchedThisSend}/${contract.maxToolCalls}).`;
+    if (this.contractBudgetUsage?.id !== contract.id) {
+      this.contractBudgetUsage = {
+        id: contract.id, tools: this.toolCallsDispatchedThisSend,
+        round: Math.max(0, this.roundCount - 1), startedAt: Date.now(),
+      };
     }
-    const elapsedMin = (Date.now() - this.sendStartTime) / 60_000;
+    const usedTools = this.toolCallsDispatchedThisSend - this.contractBudgetUsage.tools;
+    const usedRounds = this.roundCount - this.contractBudgetUsage.round;
+    if (usedTools >= contract.maxToolCalls) {
+      return `Tool call budget reached (${usedTools}/${contract.maxToolCalls}).`;
+    }
+    const elapsedMin = (Date.now() - this.contractBudgetUsage.startedAt) / 60_000;
     if (elapsedMin > contract.maxMinutes) {
       return `Wall-clock budget exceeded (${elapsedMin.toFixed(1)}/${contract.maxMinutes} min).`;
     }
-    if (this.roundCount > contract.maxSteps) {
-      return `Round budget exceeded (${this.roundCount}/${contract.maxSteps}).`;
+    if (usedRounds > contract.maxSteps) {
+      return `Round budget exceeded (${usedRounds}/${contract.maxSteps}).`;
     }
     return null;
   }
@@ -3194,6 +3203,7 @@ export class AgentHarness {
     this._turnReasoningBudget = null;
     this._turnReasoningSurface = "external";
     this.toolCallsDispatchedThisSend = 0;
+    this.contractBudgetUsage = null;
     this.intentResultsThisSend.clear();
     this.breakdownClarificationGate = null;
     this.streamingToolNamesByCallId.clear();
@@ -5194,6 +5204,11 @@ export class AgentHarness {
         !this.registry.has("verify_contract") ||
         this.roundCount >= this.config.maxToolRoundsPerTurn - 1
       ) {
+        const handoff = `Work is paused and is not complete: ${contractBudgetMsg} ` +
+          `The remaining work for "${this.lastUserMessage.slice(0, 240)}" is still pending. ` +
+          "Changes already saved remain available. Continue this chat to resume from the recorded results.";
+        this.context.appendMessage({ role: "assistant", content: handoff });
+        this.emitter.emit("text", { delta: handoff });
         this.emitTurnEnd("contract_budget");
         return;
       }
@@ -5205,21 +5220,8 @@ export class AgentHarness {
         activeContractId: this.executionState.activeContractId,
         driftScore: this.executionState.driftScore,
       });
-      if (this.roundCount > 1 && this.roundCount % 4 === 0) {
-        const next = updateDriftScore(this.executionState, 0.06);
-        const triggeredReplan = next.driftScore >= 0.55;
-        if (triggeredReplan) getCompensationLedger(this).clearAll();
-        this.executionState = triggeredReplan ? advanceExecutionStateForPlan(next, [
-          "Reconfirm mission objective and constraints",
-          "Regenerate milestone contracts from latest evidence",
-          "Continue execution under refreshed contracts",
-        ]) : next;
-        this.emitter.emit("drift_detected", {
-          score: this.executionState.driftScore,
-          reason: "periodic anti-drift cadence",
-          triggeredReplan,
-        });
-      }
+      // Elapsed rounds alone are not evidence of drift. Keep the user's plan
+      // and compensation history; actual tool failures drive recovery below.
     }
 
     // Session yield point — crash-recovery snapshot every AGENT_YIELD_EVERY_N rounds.

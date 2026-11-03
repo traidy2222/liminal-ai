@@ -165,4 +165,4 @@ jobs:
         run: npm run test:update-release
       - name: Verify terminal replay, output, and cleanup
         timeout-minutes: 3
-        run: node --import tsx --test packages/sidecar/src/pty_manager.test.ts packages/sidecar/src/desktop_parent_regression.test.ts
+        run: node --import tsx --test packages/sidecar/src/pty_manager.test.ts packages/sidecar/src/desktop_parent_regression.test.ts packages/sidecar/src/foreground_shell_regression.test.ts

@@ -80,6 +80,16 @@ test("marker mode: non-zero exit code surfaces from the D marker", async () => {
   setPtyShellPort(null);
 });
 
+test("long diagnostic output does not turn a failed interactive command into success", async () => {
+  const { port } = createMarkerPort({ exitCode: 7, output: "diagnostic-".repeat(30) });
+  setPtyShellPort(port);
+  try {
+    const result = await getAgentShellSession("chat-long-error").exec({ command: "failing-command", timeoutMs: 5000 });
+    assert.equal(result.ok, false);
+    if (!result.ok) { assert.match(result.error, /Exit code 7/); assert.match(result.error, /diagnostic-/); }
+  } finally { setPtyShellPort(null); }
+});
+
 test("buildHumanShellInput uses bracketed paste and newline", () => {
   const input = buildHumanShellInput("echo hi");
   assert.ok(input.startsWith("\x1b[200~"));
