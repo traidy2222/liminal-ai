@@ -303,7 +303,8 @@ function buildMcpToolHandler(
       .filter(Boolean);
     const text = parts.join("\n").trim() || "[empty MCP response]";
     if (result.isError) {
-      if (record.name === "google_gmail" && /(?:status\s*404|requested entity was not found)/i.test(text)) {
+      if (record.name === "google_gmail" && (remoteProperties.messageId || remoteProperties.threadId) &&
+          /(?:status\s*404|requested entity was not found)/i.test(text)) {
         return { ok: false, error:
           `Gmail ${tool.remoteName}: message or thread not found (404). ` +
           "Search this connection's mailbox again and copy the exact returned message ID or thread ID for the matching operation. " +

@@ -88,3 +88,18 @@ test("a valid plain-text MCP draft is not rejected for lacking decorative HTML",
     assert.equal((await tool.handler({ body: "Hello team,\n\nPlease find the meeting notes below. We will review the outstanding items tomorrow and confirm the next steps together." })).ok, true);
   } finally { globalThis.fetch = original; }
 });
+
+test("a label API failure does not incorrectly request message IDs", async () => {
+  const original = globalThis.fetch;
+  try {
+    globalThis.fetch = async () => Response.json({ jsonrpc: "2.0", id: 1, result: {
+      isError: true, content: [{ type: "text", text: "Status 404: Requested entity was not found." }],
+    } });
+    const registry = new ToolRegistry();
+    registerMcpConnection(registry, connection("create_label", { displayName: { type: "string" } }));
+    const result = await registry.get("mcp_google_gmail_create_label")!.handler({ displayName: "Fixture" });
+    assert.equal(result.ok, false);
+    assert.match(result.error ?? "", /404/);
+    assert.doesNotMatch(result.error ?? "", /message ID|thread ID/);
+  } finally { globalThis.fetch = original; }
+});
