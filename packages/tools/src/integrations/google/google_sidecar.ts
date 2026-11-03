@@ -238,11 +238,16 @@ export async function ensureGoogleSidecarRunning(
   }
 
   const env = buildSidecarEnv(port, accessToken, clientId);
+  // Shared helpers outlive the desktop. Inheriting its install directory keeps
+  // that folder open on Windows and prevents the updater's directory swap.
+  const cwd = globalPath("sidecars", "google_workspace");
+  await mkdir(cwd, { recursive: true });
   let stderr = "";
 
   try {
     managedProcess = spawn(bin, args, {
       env,
+      cwd,
       detached: false,
       stdio: ["ignore", "ignore", "pipe"],
       shell: process.platform === "win32",

@@ -56,6 +56,9 @@ jobs:
       - name: Test file content is not mistaken for outbound mail
         run: node --import tsx --test packages/tools/src/families/files/email_file_false_positive.test.ts
 
+      - name: Test Google helper permits desktop updates
+        run: node --import tsx --test packages/tools/src/integrations/google/google_sidecar_update_lock.test.ts
+
       - name: Test desktop update installation and rollback
         run: npm run test:update-release
 
@@ -147,6 +150,9 @@ jobs:
 
       - name: Test file content is not mistaken for outbound mail on Windows
         run: node --import tsx --test packages/tools/src/families/files/email_file_false_positive.test.ts
+
+      - name: Test live Google helper permits Windows folder swaps
+        run: node --import tsx --test packages/tools/src/integrations/google/google_sidecar_update_lock.test.ts
       - name: Verify workflow gates with actual Windows test processes
         run: npm run verify:workflows
       - name: Test Windows update helper and rollback
