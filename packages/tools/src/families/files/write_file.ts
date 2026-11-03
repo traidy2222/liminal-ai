@@ -9,7 +9,6 @@ import {
   type FileWriteMode,
 } from "./file_write_ops.js";
 import { validateHtmlAppendChunk } from "./html_write_coherence.js";
-import { rejectWorkspaceEmailStaging } from "./email_staging_guard.js";
 import { takeFileWriteStreamManifest } from "@liminal/core";
 import { resolveWithinWorkspace } from "../../shared/file_path_guard.js";
 
@@ -71,9 +70,6 @@ export const writeFileTool = defineTool({
   handler: async (args) => {
     const pathArg = args["path"] as string;
     const mode = resolveMode(args["mode"]);
-    const contentArg = typeof args["content"] === "string" ? args["content"] : "";
-    const stagingErr = rejectWorkspaceEmailStaging(pathArg, contentArg);
-    if (stagingErr) return { ok: false, error: stagingErr };
     const confirmOverwrite = args["confirm_overwrite"] === true;
     const callId = typeof args["__harness_call_id"] === "string" ? args["__harness_call_id"] : "";
     const streamManifest = callId ? takeFileWriteStreamManifest(callId) : undefined;
