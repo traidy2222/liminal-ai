@@ -322,7 +322,7 @@ export async function probeYoutubeChannelRest(): Promise<GoogleRestProbeResult> 
   }
   try {
     const token = await getYoutubeAccessToken();
-    if (!token) return { state: "error", detail: "No usable OAuth access token; refresh or reconnect the saved account." };
+    if (!token) return { state: "error", detail: "OAuth token unreadable" };
     const channel = await withTimeout(fetchPrimaryYoutubeChannel(token), PROBE_TIMEOUT_MS);
     if (!channel) return { state: "error", detail: "channels.list?mine=true failed" };
     return { state: "ok", detail: `${channel.title} (${channel.channelId})` };
@@ -357,7 +357,7 @@ async function probeSidecarMcp(opts: {
   );
   const auth = await opts.resolveAuth();
   if (!auth) {
-    return { state: "not_connected", detail: "No usable OAuth access token for the sidecar probe; check account status and reconnect if refresh fails." };
+    return { state: "not_connected", detail: "no OAuth token for sidecar probe" };
   }
   try {
     const handshake = await withTimeout(mcpHandshakeAndListTools(status.url, auth), PROBE_TIMEOUT_MS);

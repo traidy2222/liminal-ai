@@ -2,14 +2,16 @@
  * Hosted OAuth bootstrap for connect_provider({ start_oauth: true }).
  */
 import {
+  listGoogleOAuthAccounts,
   getGoogleAccessToken,
-  getMicrosoftAccessToken,
-  getXeroAccessToken,
-  getSlackAccessToken,
-  getLinearAccessToken,
-  getNotionAccessToken,
-  getYoutubeAccessToken,
-  getAzureAccessToken,
+  listMicrosoftOAuthAccounts,
+  listXeroOAuthAccounts,
+  listGithubOAuthAccounts,
+  listSlackOAuthAccounts,
+  listLinearOAuthAccounts,
+  listNotionOAuthAccounts,
+  listYoutubeOAuthAccounts,
+  listAzureOAuthAccounts,
   runGoogleHostedConnectFlow,
   runMicrosoftHostedConnectFlow,
   runAzureHostedConnectFlow,
@@ -60,24 +62,28 @@ export function integrationNotConnectedError(provider: ConnectProviderId, label?
   );
 }
 
-export async function isConnectProviderOAuthReady(provider: ConnectProviderId): Promise<boolean> {
+export async function isConnectProviderOAuthReady(provider: ConnectProviderId, accountHint?: string): Promise<boolean> {
   switch (provider) {
-    case "google_workspace":
-      return !!(await getGoogleAccessToken());
+    case "google_workspace": {
+      if (!accountHint) return !!(await getGoogleAccessToken());
+      const accounts = await listGoogleOAuthAccounts();
+      const selected = accounts.find((account) => account.accountId === accountHint || account.email === accountHint);
+      return selected ? !!(await getGoogleAccessToken(selected.accountId)) : false;
+    }
     case "microsoft_365":
-      return !!(await getMicrosoftAccessToken());
+      return (await listMicrosoftOAuthAccounts()).length > 0;
     case "azure":
-      return !!(await getAzureAccessToken());
+      return (await listAzureOAuthAccounts()).length > 0;
     case "xero":
-      return !!(await getXeroAccessToken());
+      return (await listXeroOAuthAccounts()).length > 0;
     case "slack":
-      return !!(await getSlackAccessToken());
+      return (await listSlackOAuthAccounts()).length > 0;
     case "linear":
-      return !!(await getLinearAccessToken());
+      return (await listLinearOAuthAccounts()).length > 0;
     case "notion":
-      return !!(await getNotionAccessToken());
+      return (await listNotionOAuthAccounts()).length > 0;
     case "youtube":
-      return !!(await getYoutubeAccessToken());
+      return (await listYoutubeOAuthAccounts()).length > 0;
     case "github":
       return await githubAuthAvailable();
     case "ida":

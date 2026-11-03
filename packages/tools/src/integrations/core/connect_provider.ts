@@ -328,13 +328,15 @@ async function prepareProviderOAuth(
           { mode: account.connectMode ?? mode, monetary: account.monetaryRequested },
           mode
         );
-        if (missingYoutubeScopes(account.scopes, opts).length === 0 && await isConnectProviderOAuthReady("youtube")) {
+        if (missingYoutubeScopes(account.scopes, opts).length === 0) {
           emit?.("youtube: OAuth already has required scopes — continuing…");
           return null;
         }
       }
-    } else if (await isConnectProviderOAuthReady(provider)) {
-      emit?.(`${provider}: usable OAuth access available — continuing…`);
+    } else if (await isConnectProviderOAuthReady(
+      provider, typeof args["account_hint"] === "string" ? args["account_hint"].trim() || undefined : undefined
+    )) {
+      emit?.(`${provider}: OAuth available — continuing…`);
       return null;
     }
   }
