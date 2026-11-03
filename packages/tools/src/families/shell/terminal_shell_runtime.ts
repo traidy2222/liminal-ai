@@ -6,7 +6,8 @@
  * Background tabs and explicit interactive sessions keep their existing ports.
  */
 import type { AgentHarness, RuntimePreferences, ToolResult } from "@liminal/core";
-import { effectiveHarnessEnvRaw, resolveHarnessEnvRaw, resolveShellRuntime } from "@liminal/core";
+import { effectiveHarnessEnvRaw, resolveHarnessEnvRaw, resolveShellRuntime, writeArtifact } from "@liminal/core";
+import { createHash } from "node:crypto";
 import {
   buildHumanShellInput,
   buildShellCommandLine,
@@ -173,7 +174,22 @@ export async function runShellInTerminal(input: {
       try {
         const result = await port.runOneshot({ chatId, command: input.command, cwd: input.cwd,
           timeoutMs: input.timeoutMs, label: "Agent command", onData: input.onChunk });
-        const body = (input.cappedNote ?? "") + formatShellResultBody(normalizeNewlines(stripAnsi(result.output)));
+        const captured = normalizeNewlines(stripAnsi(result.output)).trimEnd() || "(no output)";
+        let preview = formatShellResultBody(captured);
+        if (preview !== captured) {
+          // Completed job tabs close; omitted text must remain retrievable.
+          // Archiving failure must never cause a completed command to replay.
+          try {
+            const hash = createHash("sha256").update(captured).digest("hex");
+            const pointer = await writeArtifact(hash, captured);
+            preview = preview.replaceAll("see Terminal panel for full scrollback", "read saved output below")
+              .replaceAll("full output in Terminal panel", "read saved output below") +
+              `\nFull command output: ${pointer}\nread_artifact hash=${hash}`;
+          } catch {
+            preview = captured + "\n[Output archive unavailable; complete captured output is returned above. Do not repeat the command for this.]";
+          }
+        }
+        const body = (input.cappedNote ?? "") + preview;
         return result.exitCode === 0 ? { ok: true, output: body } : { ok: false, error: `Exit code ${result.exitCode}.\n${body}` };
       } catch (error) {
         return { ok: false, error: error instanceof Error ? error.message : String(error) };

@@ -2,7 +2,7 @@
 
 All notable changes to [Liminal AI](https://github.com/traidy2222/liminal-ai) on the `main` branch.
 
-**Current stage:** **beta** (`v0.1.17`, 2026-11-03). Desktop downloads are published through the public preview release channel.
+**Current stage:** **beta** (`v0.1.18`, 2026-11-03). Desktop downloads are published through the public preview release channel.
 
 Format: **v0.0.x** entries keyed to the last GitHub push in each slice. Dates are real push dates.
 
@@ -17,7 +17,7 @@ After editing JSON: `npm run changelog:gen`, commit, push, then in [vireondynami
 
 ---
 
-## v0.1.17 — 2026-11-03 {#v0-1-17}
+## v0.1.18 — 2026-11-03 {#v0-1-18}
 
 **Current beta.** Long tasks keep their plan and their actual command results.
 
@@ -26,6 +26,7 @@ After editing JSON: `npm run changelog:gen`, commit, push, then in [vireondynami
 - **Progress without phantom budgets** — Elapsed rounds no longer invent a replacement plan or discard compensation history. Real contract budgets count from contract activation, and a hard stop leaves an explicit incomplete-work handoff.
 - **Reliable Windows commands** — Run PowerShell foreground commands as owned noninteractive PTY jobs, preserving live terminal output while isolating each command from stale prompts and prior scrollback. Multiline scripts execute as complete commands.
 - **Honest failure status** — Non-zero exits remain failures even when diagnostic output is long. Interactive terminal tools and background jobs remain available for explicitly persistent workflows.
+- **Retained command output** — Large or filtered foreground output is saved as a retrievable artifact before the completed terminal tab closes. If saving fails, return the captured output directly without repeating the command.
 - **Regression evidence** — A 45-round harness fixture, late-plan budget checks, visible pause handoff and real Windows PTY commands cover the reported failure and its fixes.
 - **Docs** — [Harness architecture](../concepts/architecture.md)
 

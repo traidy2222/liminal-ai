@@ -135,6 +135,9 @@ On Windows, PowerShell `run_shell` foreground commands use noninteractive PTY
 jobs and the shell process's actual exit status. Each job returns its own output;
 environment setup must be included in the same call. Explicit interactive and
 background tools remain available when a persistent process is required.
+When a completed job's output exceeds the tool preview, the full captured text
+is saved under `.agent_artifacts/` with a `read_artifact` hash. An archive failure
+returns the captured output directly; it never re-executes the command.
 
 ## Rule Effectiveness Tracking
 
