@@ -2,13 +2,15 @@ import test from 'node:test';import assert from 'node:assert/strict';import {mkd
 import {runWithWorkspaceRoot,type AgentHarness}from'@liminal/core';
 import {setPtyShellPort,type PtyManagerPort}from'./pty_shell_port.js';
 import {runShellInTerminal,resetTerminalShellRuntimeForTests}from'./terminal_shell_runtime.js';
+import {setTerminalViewPublisher}from'./terminal_runtime.js';
 
 for(const archiveAvailable of [true,false])test(`completed PowerShell output survives truncation (archive ${archiveAvailable?'available':'unavailable'})`,{skip:process.platform!=='win32'},async t=>{
  const root=await mkdtemp(path.join(os.tmpdir(),'liminal-output-retention-'));const previous=process.env.AGENT_SHELL;process.env.AGENT_SHELL='powershell';
  resetTerminalShellRuntimeForTests();let calls=0;const captured=JSON.stringify({records:Array.from({length:500},(_,i)=>({id:i,label:'fixture-record-'+i}))});
- const port:PtyManagerPort={ensure:async()=>null,write:()=>false,readTail:()=>'',onData:()=>()=>{},isAlive:()=>false,close:()=>false,list:()=>[],runOneshot:async()=>{calls++;return{exitCode:0,output:captured,sessionId:'completed'};}};
+ const detach=setTerminalViewPublisher(()=>{throw Error('fixture observer unavailable');});
+ const port:PtyManagerPort={ensure:async()=>null,write:()=>false,readTail:()=>'',onData:()=>()=>{},isAlive:()=>false,close:()=>false,list:()=>[],runOneshot:async opts=>{calls++;opts.onSessionStart?.({sessionId:'completed',label:'Agent command',cwd:root});return{exitCode:0,output:captured,sessionId:'completed'};}};
  setPtyShellPort(port);
- t.after(async()=>{setPtyShellPort(null);if(previous===undefined)delete process.env.AGENT_SHELL;else process.env.AGENT_SHELL=previous;assert(path.basename(root).startsWith('liminal-output-retention-'));await rm(root,{recursive:true,force:true});});
+ t.after(async()=>{detach();setPtyShellPort(null);if(previous===undefined)delete process.env.AGENT_SHELL;else process.env.AGENT_SHELL=previous;assert(path.basename(root).startsWith('liminal-output-retention-'));await rm(root,{recursive:true,force:true});});
  if(!archiveAvailable)await writeFile(path.join(root,'.agent_artifacts'),'blocked archive directory');
  const result=await runWithWorkspaceRoot(root,()=>runShellInTerminal({harness:{taskId:'retention-fixture'}as AgentHarness,command:'fixture',timeoutMs:1000,cappedNote:''}));
  assert(result.ok);assert.equal(calls,1,'never repeat a completed command to repair output capture');

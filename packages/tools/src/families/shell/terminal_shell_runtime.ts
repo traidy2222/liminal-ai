@@ -21,7 +21,7 @@ import {
 import { getPtyShellPort, type PtyManagerPort } from "./pty_shell_port.js";
 import { capShellToolOutput } from "./shell_tool_output.js";
 import { normalizeNewlines, stripAnsi } from "./shell_prompt.js";
-import { ensureChatTerminal } from "./terminal_runtime.js";
+import { ensureChatTerminal, publishTerminalView } from "./terminal_runtime.js";
 
 export {
   buildHumanShellInput,
@@ -173,7 +173,13 @@ export async function runShellInTerminal(input: {
       if (!port) return { ok: false, error: "PTY shell port is not available." };
       try {
         const result = await port.runOneshot({ chatId, command: input.command, cwd: input.cwd,
-          timeoutMs: input.timeoutMs, label: "Agent command", onData: input.onChunk });
+          timeoutMs: input.timeoutMs, label: "Agent command", onData: input.onChunk,
+          onSessionStart: info => {
+            try {
+              publishTerminalView({chatId, ...info, source: "agent", open: true, focus: true, updatedAt: Date.now()});
+            } catch { /* A UI observer must not fail or replay an executing job. */ }
+          },
+        });
         const captured = normalizeNewlines(stripAnsi(result.output)).trimEnd() || "(no output)";
         let preview = formatShellResultBody(captured);
         if (preview !== captured) {
