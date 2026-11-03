@@ -131,3 +131,13 @@ test("Gmail reads refresh immediately after mailbox changes", async () => {
     assert.equal(reads, 2);
   } finally { globalThis.fetch = original; }
 });
+
+test("restoring older read-only Gmail records hides newly recognized write actions", () => {
+  const registry = new ToolRegistry();
+  const record = connection("list_labels", {});
+  record.readOnly = true;
+  record.tools.push(...connection("trash_message", { messageId: { type: "string" } }).tools);
+  const registered = registerMcpConnection(registry, record);
+  assert.deepEqual(registered, ["mcp_google_gmail_list_labels"]);
+  assert.equal(registry.has("mcp_google_gmail_trash_message"), false);
+});

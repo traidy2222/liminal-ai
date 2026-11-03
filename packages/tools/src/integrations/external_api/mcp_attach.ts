@@ -390,7 +390,8 @@ export function assignMcpToolNames(tools: McpToolRecord[], connName: string): vo
 
 export function registerMcpConnection(registry: ToolRegistry, record: McpConnectionRecord): string[] {
   const registered: string[] = [];
-  for (const t of record.tools) {
+  const tools = filterMcpToolRecords(record.tools, { readOnly: record.readOnly, toolFilter: record.toolFilter });
+  for (const t of tools) {
     if (registry.has(t.toolName)) registry.unregister(t.toolName);
     registry.register(buildMcpTool(record, t));
     registered.push(t.toolName);
