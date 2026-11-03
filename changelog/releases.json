@@ -1,15 +1,15 @@
 {
   "stage": "beta",
-  "currentVersion": "0.1.18",
+  "currentVersion": "0.1.19",
   "releases": [
     {
-      "version": "0.1.18",
+      "version": "0.1.19",
       "date": "2026-11-03",
       "tagline": "Long tasks keep their plan and their actual command results.",
       "summary": "Remove a timer-generated recovery plan that could silently stop successful work at round 40. PowerShell foreground jobs now return their own output and real exit status instead of relying on interactive prompt detection.",
       "bullets": [
         "**Progress without phantom budgets** — Elapsed rounds no longer invent a replacement plan or discard compensation history. Real contract budgets count from contract activation, and a hard stop leaves an explicit incomplete-work handoff.",
-        "**Reliable Windows commands** — Run PowerShell foreground commands as owned noninteractive PTY jobs, preserving live terminal output while isolating each command from stale prompts and prior scrollback. Multiline scripts execute as complete commands.",
+        "**Reliable Windows commands** — Run PowerShell foreground commands as owned noninteractive PTY jobs, surface each live job in the terminal, and isolate each command from stale prompts and prior scrollback. Multiline scripts execute as complete commands. UI observer errors do not fail or replay running jobs.",
         "**Honest failure status** — Non-zero exits remain failures even when diagnostic output is long. Interactive terminal tools and background jobs remain available for explicitly persistent workflows.",
         "**Retained command output** — Large or filtered foreground output is saved as a retrievable artifact before the completed terminal tab closes. If saving fails, return the captured output directly without repeating the command.",
         "**Regression evidence** — A 45-round harness fixture, late-plan budget checks, visible pause handoff and real Windows PTY commands cover the reported failure and its fixes."
