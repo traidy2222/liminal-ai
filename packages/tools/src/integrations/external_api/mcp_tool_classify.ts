@@ -16,10 +16,13 @@ function normalizeMcpName(remoteName: string): string {
 export function isMcpWriteTool(remoteName: string, description?: string): boolean {
   const name = normalizeMcpName(remoteName);
   // "run" in get_workflow_run is a resource noun; mark_read is still a write.
-  if (/^(get|list|search|read|download|fetch)\b/i.test(name)) return false;
+  if (/^(get|list|search|read|download|fetch)\b/i.test(name)) {
+    return [...name.matchAll(/\b(?:and|or|then)\s+(?:batch\s+)?(\w+)/gi)]
+      .some(match => WRITE_PATTERNS.test(match[1]!));
+  }
   if (WRITE_PATTERNS.test(name)) return true;
   if (/\b(get|list|search|read|download|fetch)\b/i.test(name)) return false;
-  return WRITE_PATTERNS.test(description ?? "");
+  return WRITE_PATTERNS.test(normalizeMcpName(description ?? ""));
 }
 
 export function isMcpReadTool(remoteName: string, description?: string): boolean {

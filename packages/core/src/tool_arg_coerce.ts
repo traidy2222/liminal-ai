@@ -47,6 +47,7 @@ export function coerceValueToSchema(val: unknown, schema: PropertySchema): unkno
     for (const branch of schema.anyOf) {
       const coerced = coerceValueToSchema(val, { ...branch, anyOf: undefined });
       const actual = Array.isArray(coerced) ? "array" : typeof coerced;
+      if (branch.type === "integer" && typeof coerced === "number" && Number.isInteger(coerced)) return coerced;
       if (branch.type && actual === branch.type) return coerced;
       if (!branch.type) return coerced;
     }

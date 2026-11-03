@@ -4,11 +4,11 @@ import { AgentEmitter, ToolDispatcher, ToolRegistry, prepareToolArgsForValidatio
 import type { McpConnectionRecord, McpToolRecord } from "./api_connections_store.js";
 import { registerMcpConnection } from "./mcp_attach.js";
 
-function connection(remoteName: string, properties: Record<string, unknown>, required: string[] = []): McpConnectionRecord {
+function connection(remoteName: string, properties: Record<string, unknown>, required: string[] = [], connectionName = "google_gmail"): McpConnectionRecord {
   return {
-    kind: "mcp", name: "google_gmail", serverUrl: "https://gmailmcp.googleapis.com/mcp/v1",
+    kind: "mcp", name: connectionName, serverUrl: "https://gmailmcp.googleapis.com/mcp/v1",
     transport: "http", auth: { kind: "none" }, attachedAt: 0, parentProvider: "google_workspace",
-    tools: [{ toolName: `mcp_google_gmail_${remoteName}`, remoteName, description: remoteName,
+    tools: [{ toolName: `mcp_${connectionName}_${remoteName}`, remoteName, description: remoteName,
       inputSchema: { type: "object", properties, required } } satisfies McpToolRecord],
   };
 }
@@ -104,7 +104,7 @@ test("a label API failure does not incorrectly request message IDs", async () =>
   } finally { globalThis.fetch = original; }
 });
 
-test("Gmail reads refresh immediately after mailbox changes", async () => {
+for (const connectionName of ["google_gmail", "mail_team"]) test(`Gmail reads refresh immediately after mailbox changes (${connectionName})`, async () => {
   const original = globalThis.fetch;
   const labels: Array<{ id: string; name: string }> = [];
   let reads = 0;
@@ -117,15 +117,15 @@ test("Gmail reads refresh immediately after mailbox changes", async () => {
       return Response.json({ jsonrpc: "2.0", id: rpc.id, result: { content: [{ type: "text", text: JSON.stringify(output) }] } });
     };
     const registry = new ToolRegistry();
-    const record = connection("list_labels", {});
-    record.tools.push(...connection("create_label", { displayName: { type: "string" } }, ["displayName"]).tools);
+    const record = connection("list_labels", {}, [], connectionName);
+    record.tools.push(...connection("create_label", { displayName: { type: "string" } }, ["displayName"], connectionName).tools);
     registerMcpConnection(registry, record);
     const emitter = new AgentEmitter();
-    emitter.on("tool_approval", event => event.resolve({ decision: event.name === "mcp_google_gmail_create_label" && event.args.displayName === "Fixture" ? "approve" : "reject" }));
+    emitter.on("tool_approval", event => event.resolve({ decision: event.name === `mcp_${connectionName}_create_label` && event.args.displayName === "Fixture" ? "approve" : "reject" }));
     const dispatcher = new ToolDispatcher(registry, emitter);
-    assert.equal((await dispatcher.dispatch("before", "mcp_google_gmail_list_labels", "{}")).ok, true);
-    assert.equal((await dispatcher.dispatch("write", "mcp_google_gmail_create_label", '{"displayName":"Fixture"}')).ok, true);
-    const after = await dispatcher.dispatch("after", "mcp_google_gmail_list_labels", "{}");
+    assert.equal((await dispatcher.dispatch("before", `mcp_${connectionName}_list_labels`, "{}")).ok, true);
+    assert.equal((await dispatcher.dispatch("write", `mcp_${connectionName}_create_label`, '{"displayName":"Fixture"}')).ok, true);
+    const after = await dispatcher.dispatch("after", `mcp_${connectionName}_list_labels`, "{}");
     assert.equal(after.ok, true);
     assert.equal(JSON.parse(after.output!).labels.length, 1);
     assert.equal(reads, 2);

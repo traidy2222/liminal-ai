@@ -343,7 +343,13 @@ function buildMcpTool(record: McpConnectionRecord, tool: McpToolRecord): ToolDef
   const isWrite = isMcpWriteTool(tool.remoteName, tool.description);
   const isRead = isMcpReadTool(tool.remoteName, tool.description);
   // Mailbox state changes between calls, including after our own mutations.
-  const cacheable = isRead && !isWrite && record.name !== "google_gmail";
+  let isGmail = record.name === "google_gmail";
+  try {
+    isGmail ||= new URL(record.serverUrl).hostname === "gmailmcp.googleapis.com";
+  } catch {
+    // Non-URL transports retain the connection-name fallback.
+  }
+  const cacheable = isRead && !isWrite && !isGmail;
   let description = enrichGoogleMcpToolDescription(
     record.name,
     tool.remoteName,

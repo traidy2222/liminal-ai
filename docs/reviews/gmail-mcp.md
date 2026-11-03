@@ -28,9 +28,21 @@ Google documents [`search_threads`](https://developers.google.com/workspace/gmai
 
 ## Verification
 
-- Reproduced schema, draft, permission and stale-read failures, then 43 focused checks passed. Workspace build and typecheck passed.
+- Reproduced schema, draft, permission and stale-read failures, then 47 focused checks passed. Workspace build and typecheck passed.
 - Live Gmail search and thread reads passed without printing message contents.
 - The old dispatcher failed a label request before network access. The repaired dispatcher created one uniquely named empty label through its approval gate; the test then deleted that exact label. No messages were changed or sent.
 - For the account's 23 discovered Gmail tools, parameter definitions decreased from 96 fields / 85,040 characters to the server's 53 fields / 27,241 characters: 68% fewer schema characters. This is measured schema overhead, not a measured first-token latency claim.
 
 Outbound sends are validated with local fixtures, not test emails to other people. This review does not claim that unavailable tools from another account's catalog are available here.
+
+## Independent review
+
+| Finding | Resolution |
+| --- | --- |
+| [4449743058](https://github.com/traidy2222/liminal-ai/pull/12#discussion_r4449743058) | Integer union branches now recognize coerced integer numbers. The regression checks numeric-string preparation through the dispatcher pipeline. |
+| [4449743069](https://github.com/traidy2222/liminal-ai/pull/12#discussion_r4449743069) | Already addressed by restricting message-ID recovery to schemas declaring message/thread targets; the label-error boundary has a regression. |
+| [4449743075](https://github.com/traidy2222/liminal-ai/pull/12#discussion_r4449743075) | Normalize underscore-form descriptions before classifying unknown operations, preserving write approval. |
+| [4449743085](https://github.com/traidy2222/liminal-ai/pull/12#discussion_r4449743085) | Distinguish read-resource nouns from compound actions such as get_or_create and get_and_delete. |
+| [4449850776](https://github.com/traidy2222/liminal-ai/pull/12#discussion_r4449850776) | Disable caching for the official Gmail endpoint even when the saved connection has a custom name. A dispatcher regression covers list, mutate, list on both default and custom names. |
+
+The first three actionable findings have separate bounded review ledgers with unchanged regressions checked against the same repair snapshot: `1793669027268-c50d1c13`, `1793669196602-6cccdb57`, and `1793669198295-a0bf323b`. The custom-name cache regression is recorded in `1793669705578-11c4c5d6`. These record local verification; the combined focused tests and final CI cover subsequent changes before merging.
