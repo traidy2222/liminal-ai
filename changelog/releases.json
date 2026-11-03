@@ -1,7 +1,19 @@
 {
   "stage": "beta",
-  "currentVersion": "0.1.13",
+  "currentVersion": "0.1.14",
   "releases": [
+    {
+      "version": "0.1.14",
+      "date": "2026-11-03",
+      "tagline": "Windows updates without Google helper directory locks.",
+      "summary": "The Google Workspace helper runs from user data rather than the app installation folder, allowing Windows to replace the desktop while the helper remains available. Ordinary HTML tables and document examples are no longer misclassified as outbound email.",
+      "bullets": [
+        "**Windows updates** — Start the Google Workspace helper from a dedicated user-data directory. Its child processes no longer hold the app folder open after the desktop exits, blocking the update's directory swap.",
+        "**File writing** — Remove content-based email guessing from write_file. Schematics, dashboards, documentation and email-template assets save normally; file-write approvals, overwrite protection and mail-tool validation remain in place.",
+        "**Regression coverage** — A live helper fixture reproduces the Windows EPERM before the fix, then permits the app-folder rename while remaining alive. Linux and Windows CI cover this behavior and the HTML file-writing regression."
+      ],
+      "docs": []
+    },
     {
       "version": "0.1.13",
       "date": "2026-11-03",

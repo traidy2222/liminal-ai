@@ -2,7 +2,7 @@
 
 All notable changes to [Liminal AI](https://github.com/traidy2222/liminal-ai) on the `main` branch.
 
-**Current stage:** **beta** (`v0.1.13`, 2026-11-03). Desktop downloads are published through the public preview release channel.
+**Current stage:** **beta** (`v0.1.14`, 2026-11-03). Desktop downloads are published through the public preview release channel.
 
 Format: **v0.0.x** entries keyed to the last GitHub push in each slice. Dates are real push dates.
 
@@ -17,9 +17,21 @@ After editing JSON: `npm run changelog:gen`, commit, push, then in [vireondynami
 
 ---
 
+## v0.1.14 — 2026-11-03 {#v0-1-14}
+
+**Current beta.** Windows updates without Google helper directory locks.
+
+**Shipped**
+
+- **Windows updates** — Start the Google Workspace helper from a dedicated user-data directory. Its child processes no longer hold the app folder open after the desktop exits, blocking the update's directory swap.
+- **File writing** — Remove content-based email guessing from write_file. Schematics, dashboards, documentation and email-template assets save normally; file-write approvals, overwrite protection and mail-tool validation remain in place.
+- **Regression coverage** — A live helper fixture reproduces the Windows EPERM before the fix, then permits the app-folder rename while remaining alive. Linux and Windows CI cover this behavior and the HTML file-writing regression.
+
+---
+
 ## v0.1.13 — 2026-11-03 {#v0-1-13}
 
-**Current beta.** Gmail tools that preserve the server contract.
+Gmail tools that preserve the server contract.
 
 **Shipped**
 
