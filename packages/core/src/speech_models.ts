@@ -2,5 +2,5 @@
 export const LOCAL_WARM_VOICE_MODEL = "local/jarvis-warm";
 export const LOCAL_WARM_VOICE_ID = "jarvis-warm-v1";
 export function isLocalSpeechModel(model: string): boolean {
-  return model.trim() === LOCAL_WARM_VOICE_MODEL;
+  return model.trim().toLowerCase() === LOCAL_WARM_VOICE_MODEL;
 }

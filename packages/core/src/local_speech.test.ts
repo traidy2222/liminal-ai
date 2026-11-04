@@ -57,6 +57,9 @@ test("explicit local speech works with one chat model, without cloud credentials
     const config=resolveSpeechSynthesisConfig(prefs);
     assert.equal(config.enabled,true);
     assert.equal(config.voice,"jarvis-warm-v1");
+    const mixedCase = resolveSpeechSynthesisConfig({...prefs,harness:{env:{...prefs.harness?.env,AGENT_TTS_MODEL:" LOCAL/JARVIS-WARM "}}});
+    assert.equal(mixedCase.enabled,true);
+    assert.equal(mixedCase.model,"local/jarvis-warm");
     const resolved=await resolveSpeechSynthesisConfigAsync(prefs);
     assert.equal(resolved.model,"local/jarvis-warm");
     assert.equal(coerceTtsVoiceForModel(config.model,"af_sky"),"jarvis-warm-v1");
