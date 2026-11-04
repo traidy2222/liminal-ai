@@ -19,6 +19,8 @@
 
 export interface VadOptions {
   stream: MediaStream;
+  /** Continuous PCM tap for the local provisional transcript. */
+  onPcm?: (samples: Float32Array, sampleRate: number) => void;
   /**
    * RMS gain above the calibrated noise floor that counts as speech. Range
    * 0..1; defaults to 0.015 (works well for typical headset / built-in mic
@@ -88,6 +90,7 @@ export function createVad(opts: VadOptions): VadHandle {
   let ctx: AudioContext | null = null;
   let analyser: AnalyserNode | null = null;
   let source: MediaStreamAudioSourceNode | null = null;
+  let tap: ScriptProcessorNode | null = null;
   let bufferF32: Float32Array | null = null;
   let timer: number | null = null;
 
@@ -114,6 +117,7 @@ export function createVad(opts: VadOptions): VadHandle {
       /* ignore */
     }
     try {
+      if (tap) { tap.onaudioprocess = null; tap.disconnect(); tap = null; }
       source?.disconnect();
     } catch {
       /* ignore */
@@ -143,6 +147,16 @@ export function createVad(opts: VadOptions): VadHandle {
     analyser.fftSize = 2048;
     analyser.smoothingTimeConstant = 0.4;
     source.connect(analyser);
+    if (opts.onPcm) {
+      // ScriptProcessor is retained for browsers without AudioWorklet deployment
+      // support. Output is explicitly silent; microphone audio is never played.
+      tap = ctx.createScriptProcessor(4096, 1, 1);
+      tap.onaudioprocess = event => {
+        if (!stopped) opts.onPcm?.(event.inputBuffer.getChannelData(0), event.inputBuffer.sampleRate);
+        event.outputBuffer.getChannelData(0).fill(0);
+      };
+      source.connect(tap); tap.connect(ctx.destination);
+    }
     bufferF32 = new Float32Array(analyser.fftSize);
 
     timer = window.setInterval(() => {

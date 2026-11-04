@@ -35,7 +35,8 @@ class LiminalHarnessField extends StatelessWidget {
             style: theme.textTheme.titleSmall?.copyWith(color: lim.text),
           ),
           subtitle: _descriptionBlock(context, field, locked),
-          value: const {'1', 'on', 'true', 'yes'}.contains(field.value.toLowerCase()),
+          value: const {'1', 'on', 'true', 'yes'}
+              .contains(field.value.toLowerCase()),
           onChanged: locked ? null : (v) => onApply(v ? '1' : '0'),
         ),
       );
@@ -98,14 +99,22 @@ class LiminalHarnessField extends StatelessWidget {
             Align(
               alignment: Alignment.centerLeft,
               child: OutlinedButton(
-                onPressed: locked || field.value == 'local/jarvis-warm' ? null : () {
-                  controller?.text = 'local/jarvis-warm';
-                  onApply('local/jarvis-warm');
-                },
-                child: Text(field.value == 'local/jarvis-warm' ? 'JARVIS Warm selected' : 'Use JARVIS Warm — local'),
+                onPressed: locked || field.value == 'local/jarvis-warm'
+                    ? null
+                    : () {
+                        controller?.text = 'local/jarvis-warm';
+                        onApply('local/jarvis-warm');
+                      },
+                child: Text(
+                  field.value == 'local/jarvis-warm'
+                      ? 'JARVIS Warm selected'
+                      : 'Use JARVIS Warm — local',
+                ),
               ),
             ),
-            const Text('Install once with liminal voice install (about 3 GB of models). No speech API key required.'),
+            const Text(
+              'Install once with liminal voice install (about 3 GB of models). No speech API key required.',
+            ),
           ],
           if (_showEffectiveChip(field))
             Padding(
@@ -144,7 +153,8 @@ class LiminalHarnessField extends StatelessWidget {
     bool locked,
   ) {
     final parts = <String>[];
-    final description = everydaySettings[field.key]?.description ?? field.description;
+    final description =
+        everydaySettings[field.key]?.description ?? field.description;
     if (description != null && description.isNotEmpty) {
       parts.add(description);
     }
@@ -185,7 +195,10 @@ class LiminalHarnessField extends StatelessWidget {
             if (field.lockedByEnv)
               Chip(
                 visualDensity: VisualDensity.compact,
-                label: Text('Locked', style: Theme.of(context).textTheme.labelSmall),
+                label: Text(
+                  'Locked',
+                  style: Theme.of(context).textTheme.labelSmall,
+                ),
               ),
           ],
         ),
@@ -279,7 +292,17 @@ class _EnumFieldState extends State<_EnumField> {
         for (final o in options)
           DropdownMenuItem(
             value: o,
-            child: Text(o, overflow: TextOverflow.ellipsis),
+            child: Text(
+              widget.field.key == 'AGENT_TRANSCRIBE_MODEL'
+                  ? (const {
+                        'local/whisper-large-v3-turbo':
+                            'Whisper — Fast · local',
+                        'local/qwen3-asr-1.7b': 'Qwen — Accuracy · local',
+                      }[o] ??
+                      o)
+                  : o,
+              overflow: TextOverflow.ellipsis,
+            ),
           ),
       ],
       onChanged: widget.locked
@@ -348,7 +371,10 @@ class LiminalTextField extends StatelessWidget {
             enabled: enabled,
             minLines: minLines,
             maxLines: maxLines,
-            style: Theme.of(context).textTheme.bodyLarge?.copyWith(color: lim.text),
+            style: Theme.of(context)
+                .textTheme
+                .bodyLarge
+                ?.copyWith(color: lim.text),
             decoration: InputDecoration(
               hintText: hint,
               floatingLabelBehavior: FloatingLabelBehavior.never,

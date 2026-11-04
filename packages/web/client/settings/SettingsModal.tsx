@@ -658,7 +658,7 @@ function SettingsFieldRow({
       >
         {uniq.map((opt) => (
           <option key={opt} value={opt}>
-            {opt}
+            {f.key === "AGENT_TRANSCRIBE_MODEL" ? ({ "local/whisper-large-v3-turbo": "Whisper — Fast · local", "local/qwen3-asr-1.7b": "Qwen — Accuracy · local" }[opt] ?? opt) : opt}
             {!ev.includes(opt) ? " (non-standard)" : ""}
           </option>
         ))}

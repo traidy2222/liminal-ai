@@ -78,8 +78,8 @@ export function createTranscribeAudioTool(harness: AgentHarness) {
         model: {
           type: "string",
           description:
-            "Override the configured AGENT_TRANSCRIBE_MODEL (default nvidia/parakeet-tdt-0.6b-v3). " +
-            "Alternatives: openai/whisper-large-v3-turbo (99 languages), qwen/qwen3-asr-flash (Chinese dialects).",
+            "Override the configured AGENT_TRANSCRIBE_MODEL (default local/whisper-large-v3-turbo). " +
+            "Optional accuracy: local/qwen3-asr-1.7b. Local models require one-time installation, no API key.",
         },
       },
       additionalProperties: false,
@@ -98,14 +98,6 @@ export function createTranscribeAudioTool(harness: AgentHarness) {
       const config = await resolveTranscriptionConfigAsync(harness.getRuntimePreferences());
       if (!config.enabled) {
         return { ok: false, error: "Transcription disabled via AGENT_TRANSCRIBE_ENABLED=0." };
-      }
-      if (!config.apiKey) {
-        return {
-          ok: false,
-          error:
-            "No transcription API key configured. Set AGENT_TRANSCRIBE_API_KEY, AGENT_API_KEY, " +
-            "or OPENROUTER_API_KEY in your .env.",
-        };
       }
 
       let bytes: Buffer;

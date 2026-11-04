@@ -122,6 +122,7 @@ foreach ($name in $Packages) {
   Copy-Item (Join-Path $srcPkg "dist") $destPkg -Recurse -Force
   if ($name -eq "core") {
     Copy-Item (Join-Path $srcPkg "local-voice") $destPkg -Recurse -Force
+    Copy-Item (Join-Path $srcPkg "local-asr") $destPkg -Recurse -Force
   }
 }
 

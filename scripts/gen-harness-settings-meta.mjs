@@ -22,6 +22,18 @@ function titleCase(s) {
 }
 
 const metadataOverrides = {
+  AGENT_TRANSCRIBE_MODEL: {
+    tabId: "session_ui", subgroupId: "voice", label: "Transcription mode", valueKind: "enum", enumValues: ["local/whisper-large-v3-turbo", "local/qwen3-asr-1.7b"],
+    description: "Whisper fast is the offline default (1.6 GB). Qwen accuracy is optional (4.7 GB), uses more memory, and supports fewer languages. Install once: liminal transcription install whisper --cuda, or qwen --cuda. Omit --cuda without an NVIDIA GPU. No speech API key required.",
+  },
+  AGENT_TRANSCRIBE_LANGUAGE: {
+    tabId: "session_ui", subgroupId: "voice", label: "Transcription language",
+    description: "auto detects the spoken language from speech, not browser locale. Set an ISO language code for consistent results: en, hi, zh, ja, ar, etc. An explicit language avoids confusions such as Hindi versus Urdu. Qwen supports 30 languages; use Whisper for broader coverage.",
+  },
+  AGENT_TRANSCRIBE_ENABLED: {
+    tabId: "session_ui", subgroupId: "voice", label: "Voice transcription", valueKind: "boolean",
+    description: "Transcribe microphone and audio attachments on this computer. Local transcription also works in single-model chat mode.",
+  },
   AGENT_TTS_MODEL: {
     tabId: "session_ui", subgroupId: "voice", label: "Speech model",
     description: "Choose local/jarvis-warm for the warmer, original-pitch JARVIS voice running on this computer. Install once with liminal voice install (about 3 GB of models). No speech API key. Cloud default: hexgrad/kokoro-82m (~$0.62/M characters).",
@@ -340,7 +352,7 @@ const _META_RAW: Record<string, HarnessSettingsFieldMeta> = {
 for (const key of keys) {
   const tab = tabFor(key);
   const subgroup = subgroupFor(key, tab);
-  const kdef = metadataOverrides[key]?.valueKind ? { valueKind: metadataOverrides[key].valueKind } : kindFor(key);
+  const kdef = metadataOverrides[key]?.valueKind ? { valueKind: metadataOverrides[key].valueKind, enumValues: metadataOverrides[key].enumValues } : kindFor(key);
   const label = metadataOverrides[key]?.label ?? titleCase(key);
   const description = metadataOverrides[key]?.description ?? desc(key, tab);
   const parts = [

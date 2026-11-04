@@ -19,7 +19,7 @@ export function run(command, args, options = {}) {
   });
 }
 
-async function pinnedUv(home) {
+export async function pinnedUv(home) {
   const platform = { win32: 'pc-windows-msvc.zip', darwin: 'apple-darwin.tar.gz', linux: 'unknown-linux-gnu.tar.gz' }[process.platform];
   const arch = { x64: 'x86_64', arm64: 'aarch64' }[process.arch];
   if (!platform || !arch) throw new Error('Local voice supports Windows, macOS and Linux on x64/arm64.');

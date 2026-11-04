@@ -1,36 +1,8 @@
-/**
- * Live browser dictation — pause detection sends to the agent by default.
- *
- * THREE PARALLEL SUBSYSTEMS while recording:
- *
- *   1. **Web Speech API** (Chrome / Edge / Safari) — streams interim + final
- *      transcripts as the user speaks. Zero cost, near-zero latency.
- *
- *   2. **MediaRecorder + Whisper** — captures the full clip in the background.
- *      On stop, uploads to /api/transcribe for a high-accuracy refinement.
- *
- *   3. **VAD** (Web Audio API RMS analyzer) — detects end-of-speech and triggers
- *      send when you pause (50ms resolution).
- *
- * ENDPOINT STATE MACHINE (always on while recording):
- *
- *     listening → speaking → (silence) → countdown chip → onAutoSend + stop
- *
- * Cancel paths:
- *   - Resume talking during countdown → reset timer
- *   - Escape once → cancel pending send, keep recording
- *   - Escape twice / ✕ → discard recording
- *   - Click ⏹ while recording → send now (force) if there is transcript audio
- *
- * EDGE CASES:
- *   - Tab hidden: pause countdown only (recording continues)
- *   - No Web Speech (Firefox): send after Whisper on silence or forced stop
- *   - Recording < minRecordingMs: ignore brief noise
- *   - maxRecordingMs: hard-stop and send when possible
- */
+/** Local dictation: neural-gated ASR previews, VAD endpoints, one authoritative final take. */
 import { useCallback, useEffect, useRef, useState } from "react";
 import { WEB_SERVER_BASE } from "../useSSE.js";
 import { webApiFetch } from "../webApiAuth.js";
+import { LocalPreview } from "./localPreview.js";
 import { createVad, type VadHandle } from "./vad.js";
 
 export type DictationStatus =
@@ -100,11 +72,11 @@ export interface DictationState {
 
 export interface UseDictationOptions {
   /**
-   * Web Speech committed a final segment. Append to the input draft.
+   * The complete local transcript is ready. Append to the input draft.
    * `cost` is null during recording; only populated for the very last final.
    */
   onFinal: (text: string, cost: DictationCost | null) => void;
-  /** Web Speech interim hypothesis. Show as preview / replace last preview. */
+  /** Provisional local hypothesis. Show as preview; never send it as final. */
   onInterim?: (text: string) => void;
   /**
    * Whisper returned a refined high-accuracy transcript. Consumer should
@@ -138,59 +110,15 @@ export interface UseDictationOptions {
   prompt?: string;
 }
 
-/** Web Speech API surface (typed inline — lib.dom doesn't ship globals). */
-interface SpeechRecognitionLike extends EventTarget {
-  lang: string;
-  continuous: boolean;
-  interimResults: boolean;
-  maxAlternatives: number;
-  start(): void;
-  stop(): void;
-  abort(): void;
-  onresult: ((ev: SpeechRecognitionEventLike) => void) | null;
-  onerror: ((ev: { error: string; message?: string }) => void) | null;
-  onend: (() => void) | null;
-}
-interface SpeechRecognitionEventLike {
-  resultIndex: number;
-  results: ArrayLike<SpeechRecognitionResultLike> & Iterable<SpeechRecognitionResultLike>;
-}
-interface SpeechRecognitionResultLike {
-  isFinal: boolean;
-  0: { transcript: string; confidence: number };
-  length: number;
-}
-
-/**
- * Whether dictation may use the browser's built-in Web Speech API for the live
- * transcript. When false (`AGENT_DICTATION_WEB_SPEECH=0`), dictation records
- * audio and transcribes it server-side via `AGENT_TRANSCRIBE_MODEL` instead —
- * so speech never goes to the browser vendor's cloud (e.g. Chrome → Google).
- * Set from `/api/config` via {@link setDictationWebSpeechEnabled}.
- */
-let webSpeechEnabled = true;
-
-/** Toggle the browser Web Speech path on/off (driven by `AGENT_DICTATION_WEB_SPEECH`). */
-export function setDictationWebSpeechEnabled(on: boolean): void {
-  webSpeechEnabled = on;
-}
-
-function getSpeechRecognitionCtor(): (new () => SpeechRecognitionLike) | null {
-  if (typeof window === "undefined") return null;
-  if (!webSpeechEnabled) return null;
-  const w = window as unknown as {
-    SpeechRecognition?: new () => SpeechRecognitionLike;
-    webkitSpeechRecognition?: new () => SpeechRecognitionLike;
-  };
-  return w.SpeechRecognition ?? w.webkitSpeechRecognition ?? null;
-}
+/** @deprecated Browser-vendor speech has been replaced by local transcription. */
+export function setDictationWebSpeechEnabled(_on: boolean): void {}
 
 const DEFAULT_ENDPOINT: Required<DictationEndpointOptions> = {
   minRecordingMs: 1500,
   silenceMsShort: 1500,
   silenceMsLong: 2500,
   maxRecordingMs: 60_000,
-  requireWebSpeechFinal: true,
+  requireWebSpeechFinal: false,
   audioCue: false,
   minWordCount: 2,
 };
@@ -240,7 +168,6 @@ export function useDictation(opts: UseDictationOptions): {
   cancel: () => void;
   cancelPendingAutoSend: () => void;
 } {
-  const speechCtor = getSpeechRecognitionCtor();
   const [state, setState] = useState<DictationState>({
     status: "idle",
     elapsedMs: 0,
@@ -252,7 +179,7 @@ export function useDictation(opts: UseDictationOptions): {
       typeof window !== "undefined" &&
       typeof window.MediaRecorder !== "undefined" &&
       !!navigator.mediaDevices?.getUserMedia,
-    liveTranscriptionSupported: speechCtor != null,
+    liveTranscriptionSupported: true,
     liveText: "",
     sessionActive: false,
     autoSendCountdownMs: null,
@@ -265,20 +192,30 @@ export function useDictation(opts: UseDictationOptions): {
   const streamRef = useRef<MediaStream | null>(null);
   const startedAtRef = useRef<number>(0);
   const tickerRef = useRef<number | null>(null);
-  const speechRef = useRef<SpeechRecognitionLike | null>(null);
   const vadRef = useRef<VadHandle | null>(null);
-  const committedTextRef = useRef("");
-  /** Latest Web Speech interim — often ahead of `isFinal` when VAD fires. */
-  const interimTextRef = useRef("");
-  const hasWebSpeechFinalRef = useRef(false);
   const autoSentRef = useRef(false);
-  const whisperPendingSendRef = useRef(false);
   const sessionActiveRef = useRef(false);
   const utteranceActiveRef = useRef(false);
   const utteranceCancelledRef = useRef(false);
   const beginningUtteranceRef = useRef(false);
   const mimeTypeRef = useRef("");
   const optsRef = useRef(opts);
+  const sessionAbortRef = useRef(new AbortController());
+  const previewRef = useRef<LocalPreview | null>(null);
+  if (!previewRef.current) previewRef.current = new LocalPreview(async (previewWav, signal) => {
+    const response = await webApiFetch(`${WEB_SERVER_BASE}/api/transcribe`, {
+      method: "POST", headers: { "Content-Type": "application/json" }, signal,
+      body: JSON.stringify({ previewWav, language: optsRef.current.language }),
+    });
+    if (!response.ok) throw new Error(`Preview HTTP ${response.status}`);
+    const result = await response.json() as { text: string };
+    return result.text;
+  }, text => {
+    if (utteranceActiveRef.current && !autoSentRef.current) {
+      setState(s => ({ ...s, liveText: text })); optsRef.current.onInterim?.(text);
+    }
+  });
+
   const maxRecordingTimerRef = useRef<number | null>(null);
   const visibilityHandlerRef = useRef<(() => void) | null>(null);
   /**
@@ -317,21 +254,8 @@ export function useDictation(opts: UseDictationOptions): {
     recorderRef.current = null;
   }, []);
 
-  const stopSpeech = useCallback(() => {
-    if (speechRef.current) {
-      try {
-        speechRef.current.onresult = null;
-        speechRef.current.onerror = null;
-        speechRef.current.onend = null;
-        speechRef.current.stop();
-      } catch {
-        /* ignore */
-      }
-      speechRef.current = null;
-    }
-  }, []);
-
   const stopVad = useCallback(() => {
+    previewRef.current?.reset(true);
     if (vadRef.current) {
       try {
         vadRef.current.stop();
@@ -351,19 +275,17 @@ export function useDictation(opts: UseDictationOptions): {
 
   useEffect(() => {
     return () => {
+      sessionActiveRef.current = false;
+      sessionAbortRef.current.abort();
       cleanupStream();
-      stopSpeech();
       stopVad();
       detachVisibilityHandler();
     };
-  }, [cleanupStream, stopSpeech, stopVad, detachVisibilityHandler]);
+  }, [cleanupStream, stopVad, detachVisibilityHandler]);
 
   function resetUtteranceDraftRefs(): void {
-    committedTextRef.current = "";
-    interimTextRef.current = "";
-    hasWebSpeechFinalRef.current = false;
+    previewRef.current?.reset();
     autoSentRef.current = false;
-    whisperPendingSendRef.current = false;
   }
 
   function returnToListening(): void {
@@ -402,16 +324,6 @@ export function useDictation(opts: UseDictationOptions): {
         /* ignore */
       }
     }
-    stopSpeech();
-  }
-
-  /** Committed finals + trailing interim (what the user sees in the composer). */
-  function draftTranscript(): string {
-    const committed = committedTextRef.current.trim();
-    const interim = interimTextRef.current.trim();
-    if (!interim) return committed;
-    if (!committed) return interim;
-    return committed + (/\s$/.test(committed) ? "" : " ") + interim;
   }
 
   // ── Pause detection → send ──────────────────────────────────────────────
@@ -425,55 +337,16 @@ export function useDictation(opts: UseDictationOptions): {
    * End the take and send to the agent when pause thresholds are met, or when
    * `force` (mic stop click). Returns true if recording was ended for send.
    */
-  function tryEndpointSend(opts?: { force?: boolean; silenceDeadline?: boolean }): boolean {
+  function tryEndpointSend(options?: { force?: boolean; silenceDeadline?: boolean }): boolean {
     if (autoSentRef.current) return true;
-    const a = mergeEndpointOptions(optsRef.current);
-    const force = opts?.force ?? false;
-    const silenceDeadline = opts?.silenceDeadline ?? false;
-    const recordingMs = Date.now() - startedAtRef.current;
-
-    if (!force && recordingMs < a.minRecordingMs) return false;
-
-    const text = draftTranscript();
-    const hasFinal = hasWebSpeechFinalRef.current;
-    const hasDraft = text.length > 0;
-
-    if (!force) {
-      if (a.requireWebSpeechFinal && speechCtor && !hasFinal && !hasDraft) {
-        if (recordingMs >= a.minRecordingMs) {
-          whisperPendingSendRef.current = true;
-          autoSentRef.current = true;
-          setState((s) => ({ ...s, autoSendCountdownMs: null }));
-          optsRef.current.onCountdown?.(null);
-          if (a.audioCue) playSendCue();
-          stopRecorderForEndpoint();
-          return true;
-        }
-        return false;
-      }
-      if (a.requireWebSpeechFinal && speechCtor && hasDraft) {
-        const words = text.split(/\s+/).filter(Boolean);
-        if (words.length < a.minWordCount && !silenceDeadline) return false;
-      }
-      if (!hasDraft) return false;
-    } else if (!hasDraft) {
-      if (speechCtor && !hasFinal && recordingMs >= a.minRecordingMs) {
-        whisperPendingSendRef.current = true;
-        autoSentRef.current = true;
-        setState((s) => ({ ...s, autoSendCountdownMs: null }));
-        optsRef.current.onCountdown?.(null);
-        stopRecorderForEndpoint();
-        return true;
-      }
-      return false;
-    }
-
+    const endpoint = mergeEndpointOptions(optsRef.current);
+    const elapsed = Date.now() - startedAtRef.current;
+    if (!options?.force && elapsed < endpoint.minRecordingMs) return false;
+    if (elapsed < 250) return false;
     autoSentRef.current = true;
-    setState((s) => ({ ...s, autoSendCountdownMs: null }));
+    setState(s => ({ ...s, autoSendCountdownMs: null }));
     optsRef.current.onCountdown?.(null);
-    if (a.audioCue) playSendCue();
-    optsRef.current.onAutoSend?.(text);
-    console.debug("[dictation] endpoint send at +" + recordingMs + "ms");
+    if (endpoint.audioCue) playSendCue();
     stopRecorderForEndpoint();
     return true;
   }
@@ -518,70 +391,9 @@ export function useDictation(opts: UseDictationOptions): {
     optsRef.current.onCountdown?.(null);
   }
 
-  // ── Web Speech wiring ───────────────────────────────────────────────────
-  function startSpeechRecognition(language: string | undefined): void {
-    if (!speechCtor) return;
-    try {
-      const rec = new speechCtor();
-      rec.continuous = true;
-      rec.interimResults = true;
-      rec.maxAlternatives = 1;
-      if (language) rec.lang = language;
-      rec.onresult = (ev) => {
-        let interim = "";
-        let newFinals = "";
-        for (let i = ev.resultIndex; i < ev.results.length; i++) {
-          const r = ev.results[i]!;
-          const txt = r[0]?.transcript ?? "";
-          if (r.isFinal) newFinals += txt;
-          else interim += txt;
-        }
-        if (newFinals) {
-          const trimmed = newFinals.trim();
-          if (trimmed) {
-            interimTextRef.current = "";
-            const sep = committedTextRef.current && !/\s$/.test(committedTextRef.current) ? " " : "";
-            committedTextRef.current = committedTextRef.current + sep + trimmed;
-            hasWebSpeechFinalRef.current = true;
-            optsRef.current.onFinal(trimmed, null);
-            setState((s) => ({ ...s, liveText: committedTextRef.current }));
-          }
-        }
-        if (interim) {
-          interimTextRef.current = interim.trim();
-          setState((s) => ({ ...s, liveText: committedTextRef.current + " " + interim }));
-          optsRef.current.onInterim?.(interim);
-        }
-      };
-      rec.onerror = (ev) => {
-        if (ev.error === "no-speech" || ev.error === "aborted") return;
-        // Other errors (network, not-allowed): MediaRecorder will salvage the
-        // clip and Whisper can still transcribe.
-      };
-      rec.onend = () => {
-        // Browser will auto-end after extended silence even with continuous=true.
-        // Restart if we're still recording AND haven't auto-sent.
-        if (
-          utteranceActiveRef.current &&
-          recorderRef.current?.state === "recording" &&
-          !autoSentRef.current
-        ) {
-          try {
-            rec.start();
-          } catch {
-            /* already ended */
-          }
-        }
-      };
-      speechRef.current = rec;
-      rec.start();
-    } catch {
-      // NotAllowedError on some browsers — skip Web Speech; Whisper still works.
-    }
-  }
-
-  function wireRecorderOnStop(recorder: MediaRecorder, mimeType: string): void {
+  function wireRecorderOnStop(recorder: MediaRecorder, mimeType: string, chunks: BlobPart[], sessionSignal: AbortSignal): void {
     recorder.onstop = () => {
+      if (sessionSignal.aborted) return;
       const elapsed = Date.now() - startedAtRef.current;
       console.warn("[dictation] recorder ONSTOP fired", {
         elapsedMs: elapsed,
@@ -589,14 +401,13 @@ export function useDictation(opts: UseDictationOptions): {
         wasAutoSent: autoSentRef.current,
         sessionActive: sessionActiveRef.current,
       });
-      stopSpeech();
       if (utteranceCancelledRef.current) {
         utteranceCancelledRef.current = false;
         returnToListening();
         return;
       }
       const finalMime = recorder.mimeType || mimeType || "audio/webm";
-      const blob = new Blob(chunksRef.current, { type: finalMime });
+      const blob = new Blob(chunks, { type: finalMime });
       const wasSent = autoSentRef.current;
       if (sessionActiveRef.current) {
         returnToListening();
@@ -612,10 +423,8 @@ export function useDictation(opts: UseDictationOptions): {
           },
           (err) => {
             if (!sessionActiveRef.current) return;
-            setState((s) => ({
-              ...s,
-              error: err instanceof Error ? err.message : String(err),
-            }));
+            endSessionRef.current();
+            setState((s) => ({ ...s, status: "error", error: err instanceof Error ? err.message : String(err) }));
           }
         );
         return;
@@ -674,17 +483,18 @@ export function useDictation(opts: UseDictationOptions): {
         ? new MediaRecorder(stream, { mimeType })
         : new MediaRecorder(stream);
       recorderRef.current = recorder;
-      chunksRef.current = [];
+      const chunks: BlobPart[] = [];
+      chunksRef.current = chunks;
       recorder.ondataavailable = (e) => {
-        if (e.data && e.data.size > 0) chunksRef.current.push(e.data);
+        if (e.data && e.data.size > 0) chunks.push(e.data);
       };
       recorder.onerror = (ev) => {
         const errEvent = ev as Event & { error?: { name?: string; message?: string } };
         const msg = errEvent.error?.message ?? errEvent.error?.name ?? "MediaRecorder error";
-        setState((s) => ({ ...s, status: "error", error: `Recording error: ${msg}` }));
         endSessionRef.current();
+        setState((s) => ({ ...s, status: "error", error: `Recording error: ${msg}` }));
       };
-      wireRecorderOnStop(recorder, mimeType);
+      wireRecorderOnStop(recorder, mimeType, chunks, sessionAbortRef.current.signal);
       try {
         recorder.start(1000);
       } catch (err) {
@@ -728,7 +538,8 @@ export function useDictation(opts: UseDictationOptions): {
         autoSendCountdownMs: null,
       }));
       optsRef.current.onUtteranceStart?.();
-      startSpeechRecognition(optsRef.current.language);
+      // Local preview is provisional. Only the complete take may auto-send.
+      // Browser Web Speech is no longer used by the default local pipeline.
     } finally {
       beginningUtteranceRef.current = false;
     }
@@ -737,6 +548,7 @@ export function useDictation(opts: UseDictationOptions): {
   const endSessionRef = useRef<() => void>(() => {});
 
   const endSession = useCallback(() => {
+    sessionAbortRef.current.abort();
     sessionActiveRef.current = false;
     utteranceActiveRef.current = false;
     utteranceCancelledRef.current = false;
@@ -750,7 +562,6 @@ export function useDictation(opts: UseDictationOptions): {
       }
     }
     cleanupStream();
-    stopSpeech();
     stopVad();
     detachVisibilityHandler();
     setState((s) => ({
@@ -763,7 +574,7 @@ export function useDictation(opts: UseDictationOptions): {
       autoSendCountdownMs: null,
       warmingUp: false,
     }));
-  }, [cleanupStream, stopSpeech, stopVad, detachVisibilityHandler]);
+  }, [cleanupStream, stopVad, detachVisibilityHandler]);
 
   endSessionRef.current = endSession;
 
@@ -789,6 +600,7 @@ export function useDictation(opts: UseDictationOptions): {
     }));
     resetUtteranceDraftRefs();
     sessionActiveRef.current = true;
+    sessionAbortRef.current = new AbortController();
 
     let stream: MediaStream;
     try {
@@ -866,6 +678,9 @@ export function useDictation(opts: UseDictationOptions): {
     mimeTypeRef.current = candidates.find((c) => window.MediaRecorder.isTypeSupported?.(c)) ?? "";
 
     vadRef.current = createVad({
+      onPcm: (samples, sampleRate) => {
+        if (utteranceActiveRef.current && !autoSentRef.current && !optsRef.current.shouldBlockSpeechCapture?.()) previewRef.current?.push(samples, sampleRate);
+      },
       stream,
       onSpeechStart: () => {
         if (optsRef.current.shouldBlockSpeechCapture?.()) {
@@ -895,7 +710,7 @@ export function useDictation(opts: UseDictationOptions): {
       warmingUp: false,
       autoSendCountdownMs: null,
     }));
-  }, [state.supported, state.status, beginUtterance, cleanupStream, stopSpeech, stopVad, detachVisibilityHandler]);
+  }, [state.supported, state.status, beginUtterance, cleanupStream, stopVad, detachVisibilityHandler]);
 
   const stop = useCallback(async () => {
     const r = recorderRef.current;
@@ -908,7 +723,6 @@ export function useDictation(opts: UseDictationOptions): {
     }
     if (tryEndpointSend({ force: true })) return;
     setState((s) => ({ ...s, status: "uploading", autoSendCountdownMs: null }));
-    stopSpeech();
     r.stop();
   }, []);
 
@@ -916,7 +730,6 @@ export function useDictation(opts: UseDictationOptions): {
     if (utteranceActiveRef.current) {
       utteranceCancelledRef.current = true;
       autoSentRef.current = false;
-      whisperPendingSendRef.current = false;
       const r = recorderRef.current;
       if (r && r.state !== "inactive") {
         try {
@@ -939,14 +752,15 @@ export function useDictation(opts: UseDictationOptions): {
     }
   }, [state.autoSendCountdownMs]);
 
-  // Whisper upload + refinement. `wasAutoSent` propagates through so the
-  // consumer can update a sent message's displayed text without re-sending.
+  // One authoritative final transcription. Provisional text is never sent.
   async function uploadAndRefine(
     blob: Blob,
     mimeType: string,
     o: UseDictationOptions,
-    wasAutoSent: boolean
+    _wasAutoSent: boolean
   ): Promise<DictationCost | null> {
+    const signal = sessionAbortRef.current.signal;
+    signal.throwIfAborted();
     if (blob.size < 500) return null; // too short for Whisper
     const keepListening = sessionActiveRef.current;
     if (!keepListening) setState((s) => ({ ...s, status: "uploading" }));
@@ -954,7 +768,7 @@ export function useDictation(opts: UseDictationOptions): {
     const filename = `dictation-${Date.now()}.${extForMime(mimeType)}`;
     const baseMime = mimeType.split(";")[0]?.trim().toLowerCase() || "audio/webm";
     const uploadResp = await webApiFetch(`${WEB_SERVER_BASE}/api/audio/upload`, {
-      method: "POST",
+      method: "POST", signal,
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ dataUrl, filename, mimeType: baseMime }),
     });
@@ -965,7 +779,7 @@ export function useDictation(opts: UseDictationOptions): {
     const uploadBody = (await uploadResp.json()) as { attachmentId: string };
     if (!sessionActiveRef.current) setState((s) => ({ ...s, status: "transcribing" }));
     const tResp = await webApiFetch(`${WEB_SERVER_BASE}/api/transcribe`, {
-      method: "POST",
+      method: "POST", signal,
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         attachmentId: uploadBody.attachmentId,
@@ -975,7 +789,7 @@ export function useDictation(opts: UseDictationOptions): {
     });
     if (!tResp.ok) {
       const j = (await tResp.json().catch(() => ({}))) as { error?: string };
-      if (tResp.status === 503) return null; // no API key — Web Speech text stands
+      // Setup/runtime errors must reach the user; never silently discard dictation.
       throw new Error(j.error ?? `Transcription failed: HTTP ${tResp.status}`);
     }
     const tBody = (await tResp.json()) as {
@@ -992,13 +806,14 @@ export function useDictation(opts: UseDictationOptions): {
       language: tBody.language,
     };
     const refined = tBody.text.trim();
-    if (refined) {
-      if (whisperPendingSendRef.current) {
-        whisperPendingSendRef.current = false;
-        o.onAutoSend?.(refined);
+    if (refined && sessionActiveRef.current && !signal.aborted) {
+      if (o.onAutoSend) {
+        o.onAutoSend(refined);
         o.onWhisperRefinement?.(refined, cost, true);
+      } else if (o.onWhisperRefinement) {
+        o.onWhisperRefinement(refined, cost, false);
       } else {
-        o.onWhisperRefinement?.(refined, cost, wasAutoSent);
+        o.onFinal(refined, cost);
       }
     }
     return cost;

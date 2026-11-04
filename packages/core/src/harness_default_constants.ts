@@ -58,7 +58,8 @@ export const HARNESS_ENV_DEFAULTS: Readonly<Record<string, string>> = {
   AGENT_VISION_RETRY_BASE_MS: "800",
   /** Audio transcription — defaults to NVIDIA Parakeet TDT 0.6B v3 (@ $0.0015/minute, English + EU). */
   AGENT_TRANSCRIBE_ENABLED: "1",
-  AGENT_TRANSCRIBE_MODEL: "nvidia/parakeet-tdt-0.6b-v3",
+  AGENT_TRANSCRIBE_MODEL: "local/whisper-large-v3-turbo",
+  AGENT_TRANSCRIBE_LANGUAGE: "auto",
   AGENT_TRANSCRIBE_BASE_URL: "https://openrouter.ai/api/v1",
   AGENT_TRANSCRIBE_MAX_BYTES: "26214400", // 25 MB, matches Whisper-1 historical cap
   AGENT_TRANSCRIBE_TIMEOUT_MS: "120000",
@@ -77,7 +78,7 @@ export const HARNESS_ENV_DEFAULTS: Readonly<Record<string, string>> = {
   AGENT_TTS_MIN_INTERVAL_MS: "800",
   AGENT_TTS_RESPONSE_FORMAT: "mp3",
   AGENT_DICTATION_AUDIO_CUE: "0",
-  /** 0 = no browser Web Speech (Chrome→Google); dictation transcribes server-side via AGENT_TRANSCRIBE_MODEL. 1 = use the browser recognizer for a live preview. */
+  /** Deprecated compatibility setting. Dictation now uses local ASR previews and finalization. */
   AGENT_DICTATION_WEB_SPEECH: "0",
   /** ms — minimum recording length before auto-send is considered (filters coughs). */
   AGENT_DICTATION_MIN_RECORDING_MS: "1500",

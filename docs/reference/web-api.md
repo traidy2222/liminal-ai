@@ -89,9 +89,19 @@ See [Voice](../guides/voice.md). Audio is sent as base64 data URLs (no multer de
 | Method | Path | Purpose |
 |--------|------|---------|
 | `POST` | `/api/audio/upload` | Persist an audio clip under the chat → returns `attachmentId` |
-| `POST` | `/api/transcribe` | Run ASR on a previously uploaded clip |
+| `POST` | `/api/transcribe` | Transcribe an uploaded clip; or a bounded local PCM preview |
 | `POST` | `/api/tts` | Synthesize speech (segmented); returns clip ids + cost |
 | `GET` | `/api/tts/clip/:clipId` | Fetch a synthesized clip's audio bytes |
+
+`POST /api/transcribe` accepts `{ attachmentId, language?, prompt?, timestamps?, model? }`.
+Local Whisper is the default; local Qwen accuracy is optional. The result includes
+`text`, `language`, `durationSec`, `model`, `provider: "local"`, `costUsd: 0`, and `noSpeech`.
+An empty/no-speech result must never be auto-sent as a chat message.
+
+For provisional microphone previews, send `{ previewWav, language? }`, where `previewWav`
+is base64-encoded mono PCM16 WAV at 16 kHz (up to 12 seconds). The response includes
+`provisional: true`; snapshots are not saved as attachments and never replace final decoding.
+Cancelling either web or desktop HTTP requests cancels queued/active local inference.
 
 ## Messaging and approvals
 

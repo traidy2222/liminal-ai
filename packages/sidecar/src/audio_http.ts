@@ -69,7 +69,7 @@ export function tryHandleAudioRequest(
     return true;
   }
 
-  const cancellation = isTtsPost ? audioRequestCancellation(req, res) : undefined;
+  const cancellation = (isTtsPost || isTranscribe) ? audioRequestCancellation(req, res) : undefined;
   const ctx = { ...bridgeContext(bridge), signal: cancellation?.signal };
 
   if (isTtsClip) {

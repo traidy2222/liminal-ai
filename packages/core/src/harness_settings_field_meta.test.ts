@@ -17,7 +17,7 @@ test("metadata regeneration retains the local voice fields and single-model expl
     const root=fileURLToPath(new URL("../../../",import.meta.url));
     execFileSync(process.execPath,[path.join(root,"scripts/gen-harness-settings-meta.mjs"),"--output",output],{cwd:root});
     const source=readFileSync(output,"utf8");
-    for(const key of ["AGENT_TTS_MODEL","AGENT_TTS_VOICE","AGENT_SINGLE_MODEL"] as const){
+    for(const key of ["AGENT_TTS_MODEL","AGENT_TTS_VOICE","AGENT_SINGLE_MODEL","AGENT_TRANSCRIBE_MODEL","AGENT_TRANSCRIBE_LANGUAGE"] as const){
       const block=source.split(`  "${key}": {`)[1]?.split("\n  },")[0];
       assert.ok(block,`Missing generated ${key}`);
       for(const field of ["tabId","subgroupId","label","description","valueKind"] as const){

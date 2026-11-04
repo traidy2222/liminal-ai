@@ -1,3 +1,4 @@
+import { runLocalAudio } from "./local_audio_runtime.js";
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { existsSync } from "node:fs";
 import { readFileSync } from "node:fs";
@@ -95,6 +96,14 @@ export class LocalSpeechClient {
     });
   }
 
+  async closeAndWait(): Promise<void> {
+    const child = this.child;
+    if (!child) return;
+    const exited = new Promise<void>(resolve => child.once("close", () => resolve()));
+    this.close();
+    await exited;
+  }
+
   close(error = new Error("Local speech worker closed.")): void {
     const child = this.child; this.child = undefined;
     if (this.idle) { clearTimeout(this.idle); this.idle = undefined; }
@@ -109,7 +118,10 @@ let clientHome: string | undefined;
 export function closeLocalSpeech(): void { client?.close(); client = undefined; }
 process.once("exit", closeLocalSpeech);
 
-export async function synthesizeLocalSpeech(text: string, timeoutMs: number, signal?: AbortSignal): Promise<Uint8Array> {
+export function synthesizeLocalSpeech(text: string, timeoutMs: number, signal?: AbortSignal): Promise<Uint8Array> {
+  return runLocalAudio("speech", async () => { await client?.closeAndWait(); }, () => synthesizeLocalSpeechRequest(text, timeoutMs, signal), signal);
+}
+async function synthesizeLocalSpeechRequest(text: string, timeoutMs: number, signal?: AbortSignal): Promise<Uint8Array> {
   const root = home();
   const python = path.join(root, ".venv", process.platform === "win32" ? "Scripts/python.exe" : "bin/python");
   let installed = false;

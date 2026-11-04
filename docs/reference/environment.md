@@ -308,7 +308,7 @@ Web **Settings** writes to (2). See [Configuration basics](../start/configuratio
 | `AGENT_SESSION_JSONL_TRACE` | `0` | yes | no | session_ui | Harness environment toggle for Session Jsonl Trace. See docs/configuration.md (session ui). |
 | `AGENT_SESSION_MODE` | `` | yes | no | session_ui | Harness environment toggle for Session Mode. See docs/configuration.md (session ui). |
 | `AGENT_SHEETS_AUTO_FIT` | `1` | yes | no | harness | After sheets_rest_update_values / append / batch_update_values, auto-resize columns to content and pin empty spacer colu |
-| `AGENT_SINGLE_MODEL` | `0` | yes | no | models_api | Use the selected model for chat, background reasoning, and vision. Disable separate embedding, speech, and fallback mode |
+| `AGENT_SINGLE_MODEL` | `0` | yes | no | models_api | Use the selected model for chat, background reasoning, and vision. Disable separate embedding, cloud speech, and fallbac |
 | `AGENT_SPAWN_TOOL_INFER` | `1` | yes | no | harness | Harness environment toggle for Spawn Tool Infer. See docs/configuration.md (harness). |
 | `AGENT_SPAWN_TOOL_INFER_MODEL` | `` | yes | no | harness | Harness environment toggle for Spawn Tool Infer Model. See docs/configuration.md (harness). |
 | `AGENT_SPAWN_TOOL_INFER_TIMEOUT_MS` | `8000` | yes | no | harness | Harness environment toggle for Spawn Tool Infer Timeout Ms. See docs/configuration.md (harness). |
@@ -325,9 +325,10 @@ Web **Settings** writes to (2). See [Configuration basics](../start/configuratio
 | `AGENT_TOOL_LAZY` | `1` | yes | no | harness | Harness environment toggle for Tool Lazy. See docs/configuration.md (harness). |
 | `AGENT_TRANSCRIBE_AUTO_ON_UPLOAD` | `1` | yes | no | harness | Harness environment toggle for Transcribe Auto On Upload. See docs/configuration.md (harness). |
 | `AGENT_TRANSCRIBE_BASE_URL` | `https://openrouter.ai/api/v1` | yes | no | harness | Harness environment toggle for Transcribe Base Url. See docs/configuration.md (harness). |
-| `AGENT_TRANSCRIBE_ENABLED` | `1` | yes | no | harness | Harness environment toggle for Transcribe Enabled. See docs/configuration.md (harness). |
+| `AGENT_TRANSCRIBE_ENABLED` | `1` | yes | no | session_ui | Transcribe microphone and audio attachments on this computer. Local transcription also works in single-model chat mode. |
+| `AGENT_TRANSCRIBE_LANGUAGE` | `auto` | yes | no | session_ui | auto detects the spoken language from speech, not browser locale. Set an ISO language code for consistent results: en, h |
 | `AGENT_TRANSCRIBE_MAX_BYTES` | `26214400` | yes | no | harness | Harness environment toggle for Transcribe Max Bytes. See docs/configuration.md (harness). |
-| `AGENT_TRANSCRIBE_MODEL` | `nvidia/parakeet-tdt-0.6b-v3` | yes | no | harness | Harness environment toggle for Transcribe Model. See docs/configuration.md (harness). |
+| `AGENT_TRANSCRIBE_MODEL` | `local/whisper-large-v3-turbo` | yes | no | session_ui | Whisper fast is the offline default (1.6 GB). Qwen accuracy is optional (4.7 GB), uses more memory, and supports fewer l |
 | `AGENT_TRANSCRIBE_TIMEOUT_MS` | `120000` | yes | no | harness | Harness environment toggle for Transcribe Timeout Ms. See docs/configuration.md (harness). |
 | `AGENT_TRANSCRIBE_TIMESTAMPS` | `segment` | yes | no | harness | Harness environment toggle for Transcribe Timestamps. See docs/configuration.md (harness). |
 | `AGENT_TRANSIENT_5XX_MAX_RETRIES` | `8` | yes | yes | models_api | Harness environment toggle for Transient 5xx Max Retries. See docs/configuration.md (models api). |
@@ -338,10 +339,10 @@ Web **Settings** writes to (2). See [Configuration basics](../start/configuratio
 | `AGENT_TTS_MAX_CHARS_PER_CALL` | `4096` | yes | no | harness | Harness environment toggle for Tts Max Chars Per Call. See docs/configuration.md (harness). |
 | `AGENT_TTS_MAX_OUTPUT_TOKENS` | `4096` | yes | no | harness | Harness environment toggle for Tts Max Output Tokens. See docs/configuration.md (harness). |
 | `AGENT_TTS_MIN_INTERVAL_MS` | `800` | yes | no | harness | Harness environment toggle for Tts Min Interval Ms. See docs/configuration.md (harness). |
-| `AGENT_TTS_MODEL` | `hexgrad/kokoro-82m` | yes | no | harness | OpenRouter speech model slug. Default hexgrad/kokoro-82m (~$0.62/M chars).  |
+| `AGENT_TTS_MODEL` | `hexgrad/kokoro-82m` | yes | no | session_ui | Choose local/jarvis-warm for the warmer, original-pitch JARVIS voice running on this computer.  |
 | `AGENT_TTS_RESPONSE_FORMAT` | `mp3` | yes | no | harness | Harness environment toggle for Tts Response Format. See docs/configuration.md (harness). |
 | `AGENT_TTS_TIMEOUT_MS` | `45000` | yes | no | harness | Harness environment toggle for Tts Timeout Ms. See docs/configuration.md (harness). |
-| `AGENT_TTS_VOICE` | `af_sky` | yes | no | harness | Harness environment toggle for Tts Voice. See docs/configuration.md (harness). |
+| `AGENT_TTS_VOICE` | `af_sky` | yes | no | harness | Cloud voice preset. JARVIS Warm always uses its bundled original-pitch voice profile. |
 | `AGENT_UI_VERBOSITY` | `normal` | yes | yes | session_ui | Harness environment toggle for Ui Verbosity. See docs/configuration.md (session ui). |
 | `AGENT_UPSTREAM_429_SUGGESTED_WAIT_MS` | `` | yes | no | models_api | Harness environment toggle for Upstream 429 Suggested Wait Ms. See docs/configuration.md (models api). |
 | `AGENT_USER_REPLY_FINALIZE` | `0` | yes | yes | harness | When on, runs one extra tool-free completion if tools ran but the visible reply was very short (common after read/edit t |

@@ -41,6 +41,7 @@ for name in "${PACKAGES[@]}"; do
   cp -R "$src_pkg/dist" "$dest_pkg/"
   if [[ "$name" == "core" ]]; then
     cp -R "$src_pkg/local-voice" "$dest_pkg/"
+    cp -R "$src_pkg/local-asr" "$dest_pkg/"
   fi
 done
 
