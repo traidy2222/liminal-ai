@@ -46,6 +46,7 @@ import {
   handleAudioUpload,
   handleTranscribe,
   handleTtsPost,
+  audioRequestCancellation,
   readTtsClipBytes,
   connectGoogleWorkspaceFromServer,
   disconnectGoogleWorkspaceFromServer,
@@ -1818,18 +1819,22 @@ export function createRouter(
   });
 
   router.post("/api/tts", async (req, res) => {
+    const cancellation = audioRequestCancellation(req, res);
     try {
       const bridge = active();
       const result = await handleTtsPost(
         {
           chatId: bridge.chatId,
           getRuntimePreferences: () => bridge.harness.getRuntimePreferences(),
+          signal: cancellation.signal,
         },
         req.body as Parameters<typeof handleTtsPost>[1]
       );
-      res.status(result.status).json(result.body);
+      if (!cancellation.signal.aborted) res.status(result.status).json(result.body);
     } catch (err) {
-      res.status(500).json({ error: (err as Error).message });
+      if (!cancellation.signal.aborted) res.status(500).json({ error: (err as Error).message });
+    } finally {
+      cancellation.dispose();
     }
   });
 

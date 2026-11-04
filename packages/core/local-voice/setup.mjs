@@ -1,13 +1,13 @@
 import { spawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { existsSync } from 'node:fs';
-import { mkdir, readFile, readdir, rename, writeFile, chmod, open } from 'node:fs/promises';
+import { mkdir, readFile, readdir, rename, writeFile, chmod, open, unlink } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
 export const voiceAssetsDir = path.dirname(fileURLToPath(import.meta.url));
-export const voiceHome = () => process.env.LIMINAL_LOCAL_VOICE_HOME || path.join(os.homedir(), '.liminal', 'voices', 'jarvis-warm-v1');
+export const voiceHome = () => process.env.LIMINAL_LOCAL_VOICE_HOME || path.join(os.homedir(), '.liminal', 'voices', manifest.id);
 export const voicePython = (home = voiceHome()) => path.join(home, '.venv', process.platform === 'win32' ? 'Scripts/python.exe' : 'bin/python');
 export const manifest = JSON.parse(await readFile(path.join(voiceAssetsDir, 'manifest.json'), 'utf8'));
 
@@ -59,6 +59,15 @@ export async function localVoiceStatus() {
   return { installed, home, model: manifest.model, label: manifest.label, downloadBytes: Object.values(manifest.models).reduce((sum, f) => sum + f.bytes, 0) };
 }
 
+export function torchInstallArgs(python, cuda, previousVariant, wasReady) {
+  const variant = cuda ? 'cuda124' : 'cpu';
+  const args = ['pip', 'install', '--python', python, 'torch==2.6.0', 'torchaudio==2.6.0', '--index-url',
+    cuda ? 'https://download.pytorch.org/whl/cu124' : 'https://download.pytorch.org/whl/cpu'];
+  // +cpu and +cu124 both satisfy torch==2.6.0; an index change alone will not switch them.
+  if (previousVariant !== variant || !wasReady) args.push('--reinstall-package', 'torch', '--reinstall-package', 'torchaudio');
+  return args;
+}
+
 export async function installLocalVoice({ cuda = false, uv: suppliedUv } = {}) {
   if ((process.platform === 'win32' && process.arch !== 'x64') || (process.platform === 'darwin' && process.arch !== 'arm64')) {
     throw new Error('This voice runtime requires x64 Node on Windows or Apple Silicon on macOS. PyTorch 2.6 has no native Windows ARM64 or Intel Mac wheels.');
@@ -71,12 +80,19 @@ export async function installLocalVoice({ cuda = false, uv: suppliedUv } = {}) {
   catch { throw new Error('Another local voice installation is running. If it was interrupted, remove install.lock from the voice folder and retry.'); }
   try {
     console.log('Installing JARVIS Warm locally. Models require about 3 GB; Python and dependencies need additional space.');
+    let previousVariant, ready;
+    try { ready = JSON.parse(await readFile(path.join(home, 'ready.json'), 'utf8')); } catch { /* first install */ }
+    try { previousVariant = JSON.parse(await readFile(path.join(home, 'torch-variant.json'), 'utf8')).variant; } catch {
+      if (typeof ready?.cuda === 'boolean') previousVariant = ready.cuda ? 'cuda124' : 'cpu';
+    }
+    await unlink(path.join(home, 'ready.json')).catch(error => { if (error.code !== 'ENOENT') throw error; });
     const uv = suppliedUv || await pinnedUv(home);
     // Managed Python avoids requiring a system Python, pip, Git, FFmpeg or a user-specific environment.
     await run(uv, ['venv', '--python', '3.11', '--managed-python', '--allow-existing', path.join(home, '.venv')]);
     const python = voicePython(home);
-    const torchIndex = cuda ? 'https://download.pytorch.org/whl/cu124' : 'https://download.pytorch.org/whl/cpu';
-    await run(uv, ['pip', 'install', '--python', python, 'torch==2.6.0', 'torchaudio==2.6.0', '--index-url', torchIndex]);
+    await run(uv, torchInstallArgs(python, cuda, previousVariant, Boolean(ready)));
+    // Keep actual installed variant even if a later dependency/model step fails.
+    await writeFile(path.join(home, 'torch-variant.json'), JSON.stringify({ variant: cuda ? 'cuda124' : 'cpu' }));
     await run(uv, ['pip', 'install', '--python', python, '-r', path.join(voiceAssetsDir, 'requirements.txt')]);
     // Install only the pinned inference source. Its optional Gradio and multilingual extras are unused.
     await run(uv, ['pip', 'install', '--python', python, '--no-deps', 'https://github.com/resemble-ai/chatterbox/archive/5de7a54aa4e5e2baadb0182dde554908b48b85c2.zip']);
@@ -87,7 +103,6 @@ export async function installLocalVoice({ cuda = false, uv: suppliedUv } = {}) {
   } finally {
     await lock.close();
     // Only our exact lock file is removed; downloaded models and existing settings are retained.
-    const { unlink } = await import('node:fs/promises');
     await unlink(path.join(home, 'install.lock'));
   }
 }

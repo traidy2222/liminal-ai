@@ -4,9 +4,10 @@ import { readFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { LOCAL_WARM_VOICE_ID } from "./speech_models.js";
 
 const assets = fileURLToPath(new URL("../local-voice/", import.meta.url));
-const home = () => process.env["LIMINAL_LOCAL_VOICE_HOME"] || path.join(os.homedir(), ".liminal", "voices", "jarvis-warm-v1");
+const home = () => process.env["LIMINAL_LOCAL_VOICE_HOME"] || path.join(os.homedir(), ".liminal", "voices", LOCAL_WARM_VOICE_ID);
 const installHelp = "Install the local voice first: liminal voice install (or node packages/core/local-voice/setup.mjs install in a desktop runtime).";
 
 /** One warm process per daemon. Requests are serialized; cancellation discards the active worker. */
@@ -108,8 +109,9 @@ export async function synthesizeLocalSpeech(text: string, timeoutMs: number, sig
   const python = path.join(root, ".venv", process.platform === "win32" ? "Scripts/python.exe" : "bin/python");
   let installed = false;
   try {
+    const manifest = JSON.parse(readFileSync(path.join(assets, "manifest.json"), "utf8")) as { id: string; baseRevision: string };
     const marker = JSON.parse(readFileSync(path.join(root, "ready.json"), "utf8")) as { id?: string; baseRevision?: string };
-    installed = marker.id === "jarvis-warm-v1" && marker.baseRevision === "749d1c1a46eb10492095d68fbcf55691ccf137cd";
+    installed = marker.id === manifest.id && marker.baseRevision === manifest.baseRevision;
   } catch { /* helpful setup error below */ }
   if (!installed || !existsSync(python)) throw new Error(installHelp);
   if (!client || clientHome !== root) {

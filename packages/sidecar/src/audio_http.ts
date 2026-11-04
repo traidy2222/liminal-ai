@@ -4,6 +4,7 @@ import {
   handleTranscribe,
   handleTtsPost,
   readTtsClipBytes,
+  audioRequestCancellation,
   type AudioBridgeContext,
 } from "@liminal/tools/audio-http-handlers";
 import type { SessionBridge } from "./session_bridge.js";
@@ -68,7 +69,8 @@ export function tryHandleAudioRequest(
     return true;
   }
 
-  const ctx = bridgeContext(bridge);
+  const cancellation = isTtsPost ? audioRequestCancellation(req, res) : undefined;
+  const ctx = { ...bridgeContext(bridge), signal: cancellation?.signal };
 
   if (isTtsClip) {
     const clipId = decodeURIComponent(clipMatch![1] ?? "");
@@ -106,9 +108,11 @@ export function tryHandleAudioRequest(
       } else {
         result = await handleTtsPost(ctx, body as Parameters<typeof handleTtsPost>[1]);
       }
-      sendJson(res, result.status, result.body);
+      if (!cancellation?.signal.aborted) sendJson(res, result.status, result.body);
     } catch (err) {
-      sendJson(res, 500, { error: (err as Error).message });
+      if (!cancellation?.signal.aborted) sendJson(res, 500, { error: (err as Error).message });
+    } finally {
+      cancellation?.dispose();
     }
   })();
 

@@ -1,9 +1,34 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { execFileSync } from "node:child_process";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { HARNESS_MANAGED_ENV_KEYS } from "./harness_env_inventory.js";
 import { HARNESS_ENV_DEFAULTS } from "./harness_default_constants.js";
 import { HARNESS_SETTINGS_FIELD_META } from "./harness_settings_field_meta.js";
 import { buildHarnessSettingsApiFields } from "./harness_settings_api.js";
+
+test("metadata regeneration retains the local voice fields and single-model explanation", () => {
+  const directory=mkdtempSync(path.join(tmpdir(),"liminal-voice-metadata-"));
+  try {
+    const output=path.join(directory,"generated.ts");
+    const root=fileURLToPath(new URL("../../../",import.meta.url));
+    execFileSync(process.execPath,[path.join(root,"scripts/gen-harness-settings-meta.mjs"),"--output",output],{cwd:root});
+    const source=readFileSync(output,"utf8");
+    for(const key of ["AGENT_TTS_MODEL","AGENT_TTS_VOICE","AGENT_SINGLE_MODEL"] as const){
+      const block=source.split(`  "${key}": {`)[1]?.split("\n  },")[0];
+      assert.ok(block,`Missing generated ${key}`);
+      for(const field of ["tabId","subgroupId","label","description","valueKind"] as const){
+        const value=block.match(new RegExp(`${field}: ("(?:[^"\\\\]|\\\\.)*")`))?.[1];
+        assert.ok(value,`${key}.${field}`);
+        assert.equal(JSON.parse(value),HARNESS_SETTINGS_FIELD_META[key]![field]);
+      }
+    }
+    assert.ok(source.includes('voice: "Response & voice"'));
+  } finally { rmSync(directory,{recursive:true,force:true}); }
+});
 
 test("every managed env key has settings field metadata", () => {
   for (const k of HARNESS_MANAGED_ENV_KEYS) {
