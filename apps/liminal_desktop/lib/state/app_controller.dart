@@ -63,6 +63,7 @@ class AppController extends ChangeNotifier {
     _protocol.onGlobalFrame = _onGlobalFrame;
     _protocol.onChatFrame = _onChatFrame;
     _protocol.onConnectionLost = _onTransportDisconnect;
+    _sessions.onTurnSettled = (chatId) => unawaited(_flushPendingDictationSend(chatId));
     dictation.onSessionActiveChange = _onDictationSessionChange;
     dictation.onCaptureActiveChange = _onDictationCaptureChange;
     dictation.shouldBlockSpeechCapture = () => speechOutput.shouldBlockMicCapture();
@@ -150,7 +151,8 @@ class AppController extends ChangeNotifier {
   bool dictationSessionActive = false;
   bool dictationCaptureActive = false;
   String? dictationNotice;
-  String? _pendingDictationMessage;
+  final Map<String, List<String>> _pendingDictationMessages = {};
+  final Set<String> _flushingDictation = {};
   Future<void> _ttsHoldChain = Future.value();
 
   int? get sidecarPort => _sidecarPort;
@@ -500,7 +502,6 @@ class AppController extends ChangeNotifier {
       }
     }
     if (event == 'turn_end' && chatId == activeChatId) {
-      unawaited(_flushPendingDictationSend());
       if (dictationSessionActive) {
         unawaited(dictation.reconcileListening());
         Future.delayed(const Duration(milliseconds: 1400), () {
@@ -553,10 +554,14 @@ class AppController extends ChangeNotifier {
   Future<String?> handleDictationAutoSend(String fullMessage) async {
     final trimmed = fullMessage.trim();
     if (trimmed.isEmpty) return 'Empty transcript — nothing to send.';
-    if (activeSession?.busy == true) {
-      _pendingDictationMessage = trimmed;
+    final chatId = activeChatId;
+    if (chatId == null) return 'Select a chat before sending.';
+    if (activeSession?.busy == true || _flushingDictation.contains(chatId) ||
+        _pendingDictationMessages[chatId]?.isNotEmpty == true) {
+      _pendingDictationMessages.putIfAbsent(chatId, () => []).add(trimmed);
       dictationNotice = 'Agent busy — message queued.';
       notifyListeners();
+      if (activeSession?.busy != true) unawaited(_flushPendingDictationSend(chatId));
       return 'queued';
     }
     dictationNotice = null;
@@ -565,14 +570,38 @@ class AppController extends ChangeNotifier {
     return null;
   }
 
-  Future<void> _flushPendingDictationSend() async {
-    final pending = _pendingDictationMessage;
-    if (pending == null) return;
-    if (activeSession?.busy == true) return;
-    _pendingDictationMessage = null;
-    dictationNotice = null;
-    notifyListeners();
-    await sendMessage(pending, liveDictation: dictationSessionActive);
+  Future<void> _flushPendingDictationSend(String chatId) async {
+    final pending = _pendingDictationMessages[chatId];
+    if (pending == null ||
+        pending.isEmpty ||
+        _flushingDictation.contains(chatId)) return;
+    if (_sessions.get(chatId)?.busy == true) return;
+    _flushingDictation.add(chatId);
+    var delivered = false;
+    try {
+      final ok =
+          await sendMessage(pending.first, chatId: chatId, liveDictation: true);
+      if (ok) {
+        delivered = true;
+        pending.removeAt(0);
+        if (pending.isEmpty) _pendingDictationMessages.remove(chatId);
+      }
+      if (chatId == activeChatId) {
+        dictationNotice = !ok
+            ? 'Send failed — spoken message is still queued.'
+            : pending.isEmpty
+                ? null
+                : 'Agent busy — message queued.';
+        notifyListeners();
+      }
+    } finally {
+      _flushingDictation.remove(chatId);
+      // A very fast turn can finish before its send acknowledgement resumes us.
+      // Its settlement callback saw the in-flight guard; drain the next item now.
+      if (delivered && pending.isNotEmpty && _sessions.get(chatId)?.busy != true) {
+        unawaited(_flushPendingDictationSend(chatId));
+      }
+    }
   }
 
   Future<void> refreshConfig({bool background = false}) async {

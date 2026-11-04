@@ -2,7 +2,7 @@
 
 All notable changes to [Liminal AI](https://github.com/traidy2222/liminal-ai) on the `main` branch.
 
-**Current stage:** **beta** (`v0.1.24`, 2026-11-04). Desktop downloads are published through the public preview release channel.
+**Current stage:** **beta** (`v0.1.25`, 2026-11-05). Desktop downloads are published through the public preview release channel.
 
 Format: **v0.0.x** entries keyed to the last GitHub push in each slice. Dates are real push dates.
 
@@ -17,9 +17,24 @@ After editing JSON: `npm run changelog:gen`, commit, push, then in [vireondynami
 
 ---
 
+## v0.1.25 — 2026-11-05 {#v0-1-25}
+
+**Current beta.** Warm transcription, reliable hands-free conversations.
+
+**Shipped**
+
+- **Startup warmup** — Desktop and web load and exercise the selected installed local decoder in the background without opening the microphone, downloading models or calling a cloud provider. A startup-warmed decoder stays resident instead of expiring after two idle minutes.
+- **Reliable pause-send** — Queued desktop speech is delivered after the agent state clears, in order and to the originating chat. Queued text no longer remains in the composer and gets combined with the next message.
+- **Continuous dictation recovery** — A failed decode leaves the mic session armed. Uploads and decodes have bounded connections and can be cancelled. Old-session completions cannot reset a newly started session.
+- **Correct final messages** — The web composer sends the complete final transcript, replacing provisional previews. Final decodes cannot overlap new takes, and speech detection re-arms after completion.
+- **Windows microphone repair** — Upgrade the recorder backend to include upstream amplitude, streaming and disposal fixes. Pause TTS during actual speech capture as well as transcription. The desktop source build now requires Flutter 3.44 / Dart 3.12; app runtime requirements are unchanged.
+- **Docs** — [Voice and local transcription](../guides/voice.md)
+
+---
+
 ## v0.1.24 — 2026-11-04 {#v0-1-24}
 
-**Current beta.** Local transcription: Whisper speed, optional Qwen accuracy.
+Local transcription: Whisper speed, optional Qwen accuracy.
 
 **Shipped**
 

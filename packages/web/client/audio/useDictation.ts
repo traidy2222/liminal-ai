@@ -290,6 +290,7 @@ export function useDictation(opts: UseDictationOptions): {
 
   function returnToListening(): void {
     utteranceActiveRef.current = false;
+    vadRef.current?.resetUtterance();
     resetUtteranceDraftRefs();
     if (maxRecordingTimerRef.current != null) {
       window.clearTimeout(maxRecordingTimerRef.current);
@@ -410,10 +411,13 @@ export function useDictation(opts: UseDictationOptions): {
       const blob = new Blob(chunks, { type: finalMime });
       const wasSent = autoSentRef.current;
       if (sessionActiveRef.current) {
-        returnToListening();
-        void uploadAndRefine(blob, finalMime, optsRef.current, wasSent).then(
+        previewRef.current?.reset();
+        if (maxRecordingTimerRef.current != null) window.clearTimeout(maxRecordingTimerRef.current);
+        if (tickerRef.current != null) window.clearInterval(tickerRef.current);
+        setState(s => ({ ...s, status: "uploading", liveText: "", autoSendCountdownMs: null, warmingUp: false }));
+        void uploadAndRefine(blob, finalMime, optsRef.current, wasSent, sessionSignal).then(
           (cost) => {
-            if (!cost) return;
+            if (!cost || sessionSignal.aborted) return;
             setState((s) => ({
               ...s,
               lastCost: cost,
@@ -422,15 +426,16 @@ export function useDictation(opts: UseDictationOptions): {
             }));
           },
           (err) => {
-            if (!sessionActiveRef.current) return;
-            endSessionRef.current();
+            if (!sessionActiveRef.current || sessionSignal.aborted) return;
             setState((s) => ({ ...s, status: "error", error: err instanceof Error ? err.message : String(err) }));
           }
-        );
+        ).finally(() => {
+          if (sessionActiveRef.current && !sessionSignal.aborted) returnToListening();
+        });
         return;
       }
       cleanupStream();
-      void uploadAndRefine(blob, finalMime, optsRef.current, wasSent).then(
+      void uploadAndRefine(blob, finalMime, optsRef.current, wasSent, sessionSignal).then(
         (cost) => {
           setState((s) => ({
             ...s,
@@ -549,6 +554,7 @@ export function useDictation(opts: UseDictationOptions): {
 
   const endSession = useCallback(() => {
     sessionAbortRef.current.abort();
+    previewRef.current?.reset(true);
     sessionActiveRef.current = false;
     utteranceActiveRef.current = false;
     utteranceCancelledRef.current = false;
@@ -757,9 +763,10 @@ export function useDictation(opts: UseDictationOptions): {
     blob: Blob,
     mimeType: string,
     o: UseDictationOptions,
-    _wasAutoSent: boolean
+    _wasAutoSent: boolean,
+    sessionSignal: AbortSignal
   ): Promise<DictationCost | null> {
-    const signal = sessionAbortRef.current.signal;
+    const signal = AbortSignal.any([sessionSignal, AbortSignal.timeout(150_000)]);
     signal.throwIfAborted();
     if (blob.size < 500) return null; // too short for Whisper
     const keepListening = sessionActiveRef.current;
@@ -777,7 +784,8 @@ export function useDictation(opts: UseDictationOptions): {
       throw new Error(j.error ?? `Upload failed: HTTP ${uploadResp.status}`);
     }
     const uploadBody = (await uploadResp.json()) as { attachmentId: string };
-    if (!sessionActiveRef.current) setState((s) => ({ ...s, status: "transcribing" }));
+    signal.throwIfAborted();
+    setState((s) => ({ ...s, status: "transcribing" }));
     const tResp = await webApiFetch(`${WEB_SERVER_BASE}/api/transcribe`, {
       method: "POST", signal,
       headers: { "Content-Type": "application/json" },

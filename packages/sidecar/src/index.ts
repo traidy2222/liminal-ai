@@ -11,6 +11,7 @@ import {
   resolveProviderConfigWithInference,
   resolveWorkspaceRoot,
   refreshStaleXeroAccounts,
+  warmupConfiguredTranscription,
 } from "@liminal/core";
 import { WsServer } from "./ws_server.js";
 import { clearHandshake, handshakePath, mintToken, writeHandshake } from "./handshake.js";
@@ -84,6 +85,7 @@ async function main(): Promise<void> {
   const server = new WsServer({ token, provider, runtimePreferences, repoRoot });
   const port = await server.listen();
   const record = await writeHandshake({ port, token, pid: process.pid });
+  void warmupConfiguredTranscription(runtimePreferences);
 
   // Machine-readable boot line for the parent (the Flutter app reads stdout
   // first, then falls back to polling the handshake file).

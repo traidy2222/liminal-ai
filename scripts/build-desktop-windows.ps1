@@ -1,5 +1,5 @@
 # Build Liminal Desktop for Windows (Release .exe + bundled data folder).
-# Requires: Node 20+, Git, Visual Studio 2022 with "Desktop development with C++", Flutter 3.22+.
+# Requires: Node 20+, Git, Visual Studio 2022 with "Desktop development with C++", Flutter 3.44+.
 #
 # Usage (from repo root):
 #   .\scripts\build-desktop-windows.ps1

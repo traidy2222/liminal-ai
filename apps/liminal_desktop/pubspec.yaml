@@ -1,11 +1,11 @@
 name: liminal_desktop
 description: "Liminal — the native desktop app for the Liminal agent harness."
 publish_to: "none"
-version: 0.1.24
+version: 0.1.25
 
 environment:
-  sdk: ">=3.4.0 <4.0.0"
-  flutter: ">=3.22.0"
+  sdk: ">=3.12.0 <4.0.0"
+  flutter: ">=3.44.0"
 
 dependencies:
   flutter:
@@ -28,7 +28,7 @@ dependencies:
   file_picker: ^8.1.6
   pasteboard: ^0.5.0
   mime: ^2.0.0
-  record: ^5.2.1
+  record: ^7.1.2
   just_audio: ^0.9.42
   permission_handler: ^11.3.1
   path_provider: ^2.1.5
@@ -52,10 +52,6 @@ dev_dependencies:
   flutter_test:
     sdk: flutter
   flutter_lints: ^4.0.0
-
-# record 5.2.x + record_linux 0.7.x mismatch on record_platform_interface 1.6
-dependency_overrides:
-  record_linux: ^1.2.2
 
 flutter:
   uses-material-design: true

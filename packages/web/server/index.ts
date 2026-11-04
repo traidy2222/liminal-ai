@@ -7,7 +7,7 @@ import { readFile } from "node:fs/promises";
 import { createServer } from "node:http";
 import express from "express";
 import cors from "cors";
-import { effectiveHarnessEnvRaw } from "@liminal/core";
+import { effectiveHarnessEnvRaw, warmupConfiguredTranscription } from "@liminal/core";
 import { SSEManager } from "./sse.js";
 import { ChatManager } from "./chatManager.js";
 import { createRouter } from "./routes.js";
@@ -267,7 +267,9 @@ server.requestTimeout = 0;
 
 // Greeting / bootstrap can take a model round — do not block `listen()` on that or
 // `web:dev` clients on :5173 see ECONNREFUSED while Vite is already up.
-void chatManager.getActive().whenSessionReady().catch((err) => {
+void chatManager.getActive().whenSessionReady().then(() => {
+  void warmupConfiguredTranscription(chatManager.getActive().harness.getRuntimePreferences());
+}).catch((err) => {
   console.error(
     "Agent session initialization failed:",
     err instanceof Error ? err.message : String(err)

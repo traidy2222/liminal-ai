@@ -1,4 +1,5 @@
 import { useCallback, useRef, useState, type RefObject } from "react";
+import { dictationMessage } from "./audio/dictationMessage.js";
 import type { DictationButtonProps } from "./audio/DictationButton.js";
 import type { DictationCost } from "./audio/useDictation.js";
 
@@ -87,28 +88,24 @@ export function useComposerDictation(opts: {
   );
 
   const onAutoSend = useCallback(
-    (_committedFromHook: string) => {
+    (finalText: string) => {
       const prev = readInput();
-      const dictated = prev
-        .slice(
-          spanStartRef.current,
-          spanStartRef.current + committedLenRef.current + previewLenRef.current
-        )
-        .trim();
-      const trimmed = dictated || _committedFromHook.trim();
+      const trimmed = finalText.trim();
       if (!trimmed) {
         setAutoSendNotice("Empty transcript — nothing to send.");
         return;
       }
-      const preDictation = prev.slice(0, spanStartRef.current);
-      const sep = preDictation && !/\s$/.test(preDictation) ? " " : "";
-      const fullMessage = (preDictation + sep + trimmed).trim();
+      const fullMessage = dictationMessage(prev, spanStartRef.current,
+        committedLenRef.current + previewLenRef.current, trimmed);
       if (!fullMessage) {
         setAutoSendNotice("Empty transcript — nothing to send.");
         return;
       }
       const err = opts.onAutoSendSubmit(fullMessage);
       if (typeof err === "string") {
+        writeInput(fullMessage);
+        committedLenRef.current = fullMessage.length - spanStartRef.current;
+        previewLenRef.current = 0;
         setAutoSendNotice(err);
         return;
       }
@@ -117,7 +114,7 @@ export function useComposerDictation(opts: {
       previewLenRef.current = 0;
       setAutoSendNotice(null);
     },
-    [readInput, opts]
+    [readInput, writeInput, opts]
   );
 
   const dictationProps: DictationButtonProps = {

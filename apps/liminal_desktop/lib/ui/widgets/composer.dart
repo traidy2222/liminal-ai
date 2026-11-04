@@ -208,7 +208,10 @@ class _ComposerState extends State<Composer> {
       final err = await widget.onDictationAutoSend?.call(message);
       if (!mounted) return;
       if (err == 'queued') {
-        setState(() => _localDictationNotice = widget.dictationNotice);
+        _controller.clear();
+        _dictationSpan.clearAfterSend();
+        _dictationSpan.onStart();
+        setState(() => _localDictationNotice = null);
         return;
       }
       if (err != null) {
@@ -457,7 +460,7 @@ class _ComposerState extends State<Composer> {
     super.dispose();
   }
 
-  String? get _notice => widget.dictationNotice ?? _localDictationNotice;
+  String? get _notice => widget.dictationNotice ?? _localDictationNotice ?? widget.dictation?.error;
 
   @override
   Widget build(BuildContext context) {

@@ -46,7 +46,12 @@ node packages/core/local-asr/setup.mjs install qwen --cuda
 
 Models live in `~/.liminal/transcription` and survive app updates. Files are pinned to
 model revisions and verified with SHA-256 during installation. Inference runs offline.
-Switching transcription modes unloads the old worker; idle workers exit after two minutes.
+Desktop and web preload the selected installed local decoder in the background at launch,
+including an internal inference check. This does not open the microphone or download models.
+A startup-warmed decoder remains resident rather than expiring after two idle minutes.
+Switching transcription modes or using local speech synthesis can release it to bound GPU memory;
+loading again after these transitions, a cancellation or a decoder crash can still take time.
+Disabled or explicitly configured cloud transcription is not preloaded.
 
 The microphone shows **provisional local previews** while recording. Previews use a rolling
 12-second window with one request in flight to bound memory and decoding time; long takes

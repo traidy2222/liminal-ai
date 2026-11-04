@@ -79,7 +79,7 @@ export const DictationButton: React.FC<DictationButtonProps> = ({
   }, [sessionActive, onSessionActiveChange]);
 
   useEffect(() => {
-    const capture = state.status === "uploading" || state.status === "transcribing";
+    const capture = state.status === "recording" || state.status === "uploading" || state.status === "transcribing";
     onCaptureActiveChange?.(capture);
   }, [state.status, onCaptureActiveChange]);
 
