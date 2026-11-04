@@ -1,0 +1,20 @@
+{
+  "version": "0.1.25",
+  "date": "2026-11-05",
+  "findings": [
+    {"issue": "The desktop queue checked busy before reducing turn_end, then never retried.", "fix": "SessionRegistry notifies settlement after reduction. Spoken messages queue FIFO per originating chat; acknowledged queued text clears the composer."},
+    {"issue": "A decode error ended the whole microphone session; outstanding uploads were not cancelled.", "fix": "Bound and cancel upload/decode HTTP operations, release endpoint gates in finally, retain an armed session after errors, and reject old-session completions."},
+    {"issue": "The web composer preferred the provisional span over final ASR, and could start another take during final decoding.", "fix": "Use final ASR text, serialize the recording/finalization lifecycle, re-arm VAD after completion, and bind every upload/decode to its original session signal."},
+    {"issue": "The old Windows recorder amplitude loop indexed PCM samples using the byte count, reading beyond the sample buffer.", "fix": "Upgrade record 5.2.1 / record_windows 1.0.7 to record 7.1.2 / record_windows 2.3.0, which uses a bounded sample loop and includes stream/disposal fixes. Remove the obsolete record_linux override."},
+    {"issue": "The decoder initialized on first speech and expired after two idle minutes.", "fix": "Background startup warmup loads and exercises the installed local decoder without microphone access or downloads. A startup-warmed worker is retained until shutdown or an explicit resource transition."}
+  ],
+  "validation": {
+    "desktop": "86 full-suite tests passed, followed by 5 targeted recovery tests including the added composer widget regression.",
+    "browser": "DOM-mounted useDictation regression passes repeated pause-send, transient decode failure, finalization backpressure, and session restart during upload.",
+    "core": "Warmup/routing/worker/queue regressions pass. Initial broad core run: 573 passed, one existing session_event_log timing failure during concurrent native compilation; that unchanged six-test file passes separately.",
+    "python": "Four speech-gate/warmup tests passed without downloading ASR weights.",
+    "build": "Full TypeScript build, workspace typecheck, browser production build and repository secret verification passed. Required PR checks and packaged builds must pass before publication.",
+    "hardware": "RTX 3080 Windows CUDA: explicit background warmup 12884 ms; subsequent 4-second English decodes 212, 190 and 180 ms. These measurements exclude microphone endpoint silence thresholds.",
+    "limits": "Physical microphone and speaker acoustics require user confirmation. Local speech synthesis, model switching, cancellation or a decoder crash may release the warm ASR worker and require loading again. No claim of zero latency immediately after launching is made."
+  }
+}

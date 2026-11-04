@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
@@ -96,80 +97,64 @@ class SidecarAudioClient {
     Uint8List bytes, {
     String filename = 'dictation.wav',
   }) async {
-    final b64 = base64Encode(bytes);
-    final dataUrl = 'data:audio/wav;base64,$b64';
-    final client = HttpClient();
-    try {
-      final req = await client.postUrl(_uri('/api/audio/upload'));
-      req.headers.contentType = ContentType.json;
-      req.write(
-        jsonEncode({
-          'dataUrl': dataUrl,
+    final json = await _postJson(
+        '/api/audio/upload',
+        {
+          'dataUrl': 'data:audio/wav;base64,${base64Encode(bytes)}',
           'filename': filename,
           'mimeType': 'audio/wav',
-        }),
-      );
-      final resp = await req.close();
-      final body = await resp.transform(utf8.decoder).join();
-      if (resp.statusCode < 200 || resp.statusCode >= 300) {
-        final err =
-            _parseError(body) ?? 'Upload failed HTTP ${resp.statusCode}';
-        throw HttpException(err);
-      }
-      final json = jsonDecode(body) as Map<String, dynamic>;
-      final id = json['attachmentId'] as String?;
-      if (id == null || id.isEmpty) {
-        throw const HttpException('Upload response missing attachmentId');
-      }
-      return id;
-    } finally {
-      client.close(force: true);
+        },
+        timeout: const Duration(seconds: 30));
+    final id = json['attachmentId'] as String?;
+    if (id == null || id.isEmpty) {
+      throw const HttpException('Upload response missing attachmentId');
     }
+    return id;
   }
 
   Future<String> preview(Uint8List wav) async {
-    final client = HttpClient();
-    _transcriptionClients.add(client);
-    try {
-      final req = await client.postUrl(_uri('/api/transcribe'));
-      req.headers.contentType = ContentType.json;
-      req.write(jsonEncode({'previewWav': base64Encode(wav)}));
-      final resp = await req.close();
-      final body = await resp.transform(utf8.decoder).join();
-      if (resp.statusCode != 200) {
-        throw HttpException(_parseError(body) ?? 'Local preview failed');
-      }
-      return (jsonDecode(body) as Map<String, dynamic>)['text'] as String? ??
-          '';
-    } finally {
-      _transcriptionClients.remove(client);
-      client.close(force: true);
-    }
+    final json =
+        await _postJson('/api/transcribe', {'previewWav': base64Encode(wav)});
+    return json['text'] as String? ?? '';
   }
 
   Future<TranscribeResult?> transcribe(String attachmentId) async {
-    final client = HttpClient();
+    final json =
+        await _postJson('/api/transcribe', {'attachmentId': attachmentId});
+    return TranscribeResult(
+      text: (json['text'] as String? ?? '').trim(),
+      language: json['language'] as String?,
+      durationSec: (json['durationSec'] as num?)?.toDouble(),
+      costUsd: (json['costUsd'] as num?)?.toDouble() ?? 0,
+      model: json['model'] as String? ?? '',
+    );
+  }
+
+  Future<Map<String, dynamic>> _postJson(
+      String route, Map<String, dynamic> data,
+      {Duration timeout = const Duration(seconds: 150)}) async {
+    final client = HttpClient()
+      ..connectionTimeout = const Duration(seconds: 10);
     _transcriptionClients.add(client);
-    try {
-      final req = await client.postUrl(_uri('/api/transcribe'));
+    Future<Map<String, dynamic>> post() async {
+      final req = await client.postUrl(_uri(route));
       req.headers.contentType = ContentType.json;
-      req.write(jsonEncode({'attachmentId': attachmentId}));
-      final resp = await req.close();
-      final body = await resp.transform(utf8.decoder).join();
-      // Surface missing runtime/setup failures instead of silently dropping speech.
-      if (resp.statusCode < 200 || resp.statusCode >= 300) {
-        final err =
-            _parseError(body) ?? 'Transcribe failed HTTP ${resp.statusCode}';
-        throw HttpException(err);
+      req.write(jsonEncode(data));
+      final response = await req.close();
+      final body = await response.transform(utf8.decoder).join();
+      if (response.statusCode < 200 || response.statusCode >= 300) {
+        throw HttpException(_parseError(body) ??
+            'Audio request failed HTTP ${response.statusCode}');
       }
-      final json = jsonDecode(body) as Map<String, dynamic>;
-      return TranscribeResult(
-        text: (json['text'] as String? ?? '').trim(),
-        language: json['language'] as String?,
-        durationSec: (json['durationSec'] as num?)?.toDouble(),
-        costUsd: (json['costUsd'] as num?)?.toDouble() ?? 0,
-        model: json['model'] as String? ?? '',
-      );
+      return jsonDecode(body) as Map<String, dynamic>;
+    }
+
+    try {
+      return await post().timeout(timeout, onTimeout: () {
+        client.close(force: true);
+        throw TimeoutException(
+            'Transcription connection timed out. Please try again.');
+      });
     } finally {
       _transcriptionClients.remove(client);
       client.close(force: true);

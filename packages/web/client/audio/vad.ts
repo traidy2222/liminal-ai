@@ -61,6 +61,8 @@ export interface VadOptions {
 }
 
 export interface VadHandle {
+  /** Re-arm speech onset after a completed/cancelled take without recalibrating. */
+  resetUtterance: () => void;
   /** Stop sampling, disconnect nodes, close AudioContext. Idempotent. */
   stop: () => void;
   /** Current calibrated noise floor (or 0 if still calibrating). */
@@ -219,6 +221,9 @@ export function createVad(opts: VadOptions): VadHandle {
   }
 
   return {
+    resetUtterance: () => {
+      speaking = false; aboveCount = 0; belowCount = 0; speechEndedAt = null;
+    },
     stop: cleanup,
     getNoiseFloor: () => noiseFloor,
     isSpeaking: () => speaking,

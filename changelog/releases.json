@@ -1,7 +1,26 @@
 {
   "stage": "beta",
-  "currentVersion": "0.1.24",
+  "currentVersion": "0.1.25",
   "releases": [
+    {
+      "version": "0.1.25",
+      "date": "2026-11-05",
+      "tagline": "Warm transcription, reliable hands-free conversations.",
+      "summary": "Preload the selected local transcription model at startup and repair pause-send, queued speech, recorder lifecycle and recovery across repeated dictation turns.",
+      "bullets": [
+        "**Startup warmup** — Desktop and web load and exercise the selected installed local decoder in the background without opening the microphone, downloading models or calling a cloud provider. A startup-warmed decoder stays resident instead of expiring after two idle minutes.",
+        "**Reliable pause-send** — Queued desktop speech is delivered after the agent state clears, in order and to the originating chat. Queued text no longer remains in the composer and gets combined with the next message.",
+        "**Continuous dictation recovery** — A failed decode leaves the mic session armed. Uploads and decodes have bounded connections and can be cancelled. Old-session completions cannot reset a newly started session.",
+        "**Correct final messages** — The web composer sends the complete final transcript, replacing provisional previews. Final decodes cannot overlap new takes, and speech detection re-arms after completion.",
+        "**Windows microphone repair** — Upgrade the recorder backend to include upstream amplitude, streaming and disposal fixes. Pause TTS during actual speech capture as well as transcription. The desktop source build now requires Flutter 3.44 / Dart 3.12; app runtime requirements are unchanged."
+      ],
+      "docs": [
+        {
+          "label": "Voice and local transcription",
+          "href": "../guides/voice.md"
+        }
+      ]
+    },
     {
       "version": "0.1.24",
       "date": "2026-11-04",

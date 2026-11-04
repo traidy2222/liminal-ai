@@ -133,6 +133,15 @@ class DictationController extends ChangeNotifier {
   static int get _preRollMaxBytes => _sampleRate * 2 * _preRollMs ~/ 1000;
 
   void bindAudioClient(SidecarAudioClient? client) {
+    final previous = _audioClient;
+    if (previous != null &&
+        (client == null ||
+            previous.chatId != client.chatId ||
+            previous.port != client.port ||
+            previous.token != client.token)) {
+      previous.cancelTranscriptionRequests();
+      unawaited(endSession());
+    }
     _audioClient = client;
   }
 
@@ -460,7 +469,9 @@ class DictationController extends ChangeNotifier {
       return;
     }
     onBargeIn?.call();
+    error = null;
     _utteranceActive = true;
+    onCaptureActiveChange?.call(true);
     _resetPreview();
     _utterancePcm = BytesBuilder(copy: false);
     for (final chunk in _preRollChunks) {
@@ -532,12 +543,14 @@ class DictationController extends ChangeNotifier {
 
     if (pcm.length < _minPcmBytes && !force) {
       _finishEndpoint(clearError: true);
+      onCaptureActiveChange?.call(false);
       return;
     }
 
     final wav = buildWavFromPcm16(pcm, sampleRate: _sampleRate);
     if (wav.length < 1200 && !force) {
       _finishEndpoint(clearError: true);
+      onCaptureActiveChange?.call(false);
       return;
     }
 
@@ -546,6 +559,7 @@ class DictationController extends ChangeNotifier {
       status = DictationStatus.error;
       error = 'Audio client not configured.';
       _finishEndpoint();
+      onCaptureActiveChange?.call(false);
       notifyListeners();
       return;
     }
@@ -564,12 +578,12 @@ class DictationController extends ChangeNotifier {
       status = DictationStatus.transcribing;
       notifyListeners();
       final result = await client.transcribe(attachmentId);
-      onCaptureActiveChange?.call(false);
       if (_disposed ||
           !sessionActive ||
           sessionGeneration != _sessionGeneration) {
         return;
       }
+      onCaptureActiveChange?.call(false);
       final text = result?.text.trim() ?? '';
       if (text.isNotEmpty) {
         liveText = text;
@@ -580,25 +594,28 @@ class DictationController extends ChangeNotifier {
         liveText = '';
       }
     } catch (e) {
-      if (_disposed || sessionGeneration != _sessionGeneration) return;
-      onCaptureActiveChange?.call(false);
+      if (_disposed ||
+          !sessionActive ||
+          sessionGeneration != _sessionGeneration) return;
       liveText = '';
       final message = e is HttpException ? e.message : e.toString();
-      await endSession();
-      if (_disposed) return;
       error = message;
-      status = DictationStatus.error;
-    }
-
-    _finishEndpoint();
-    if (sessionActive && status != DictationStatus.error) {
-      status = _streamLive ? DictationStatus.listening : DictationStatus.paused;
-      liveText = '';
-      if (!_streamLive && !_suspendedForTts) {
-        unawaited(reconcileListening());
+    } finally {
+      // An old upload/decode must never reset a newly started session.
+      if (!_disposed && sessionGeneration == _sessionGeneration) {
+        onCaptureActiveChange?.call(false);
+        _finishEndpoint();
+        if (sessionActive) {
+          status =
+              _streamLive ? DictationStatus.listening : DictationStatus.paused;
+          liveText = '';
+          if (!_streamLive && !_suspendedForTts) {
+            unawaited(reconcileListening());
+          }
+        }
+        notifyListeners();
       }
     }
-    notifyListeners();
   }
 
   void _finishEndpoint({bool clearError = false}) {

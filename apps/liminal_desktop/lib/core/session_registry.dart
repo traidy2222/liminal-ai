@@ -2,6 +2,7 @@ import '../state/chat_session_controller.dart';
 
 /// Owns per-chat transcript controllers; chat events do not fan out to the app shell.
 class SessionRegistry {
+  void Function(String chatId)? onTurnSettled;
   final Map<String, ChatSessionController> _sessions = {};
 
   ChatSessionController sessionFor(String chatId) {
@@ -19,6 +20,9 @@ class SessionRegistry {
 
   void dispatch(String chatId, String event, Map<String, dynamic> data) {
     sessionFor(chatId).applyServerEvent(event, data);
+    if (event == 'turn_end' || event == 'error') {
+      onTurnSettled?.call(chatId);
+    }
   }
 
   void disposeAll() {

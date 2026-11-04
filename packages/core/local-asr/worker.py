@@ -91,6 +91,7 @@ class Recognizer:
         self.profile = profile
         self.home = home
         self.model = None  # Load only after the neural gate finds speech.
+        self.warmed = False
         if cuda is not None: self.cuda = cuda
         elif (home / "ready.json").exists(): self.cuda = json.loads((home / "ready.json").read_text())["cuda"]
         else: self.cuda = False
@@ -112,6 +113,23 @@ class Recognizer:
                 device_map="cuda:0" if self.cuda else "cpu", attn_implementation="sdpa",
                 max_inference_batch_size=1, max_new_tokens=512,
             )
+
+    def warmup(self):
+        if not self.warmed:
+            import numpy as np
+            self.load()
+            # Exercise the decoder and neural gate as well as loading weights.
+            # Silence is internal warmup input and is never emitted as a transcript.
+            speech_regions(np.zeros(16000, dtype=np.float32) + .001)
+            if self.profile == "whisper":
+                list(self.model.transcribe(np.zeros(16000, dtype=np.float32), language="en", beam_size=1)[0])
+            else:
+                self.model.transcribe(audio=(np.zeros(16000, dtype=np.float32), 16000), language="English")
+            self.warmed = True
+        return dict(text="", noSpeech=True, durationSec=0)
+
+    def handle(self, request):
+        return self.warmup() if request.get("op") == "warmup" else self.transcribe(request)
 
     def transcribe(self, request):
         audio = decode_audio(base64.b64decode(request["audio"], validate=True))
@@ -185,7 +203,7 @@ def main():
         request = {}
         try:
             request = json.loads(line)
-            result = recognizer.transcribe(request)
+            result = recognizer.handle(request)
             OUT.write(json.dumps(dict(id=request["id"], result=result), ensure_ascii=False) + "\n")
         except Exception as error:
             OUT.write(json.dumps(dict(id=request.get("id"), error=str(error))) + "\n")

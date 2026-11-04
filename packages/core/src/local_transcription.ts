@@ -20,6 +20,7 @@ export class LocalTranscriptionClient {
   private stderr = "";
   private pending?: { id: number; resolve: (audio: LocalTranscript) => void; reject: (error: Error) => void };
   private idle?: ReturnType<typeof setTimeout>;
+  private keepWarm = false;
 
   constructor(
     private readonly command: string,
@@ -64,6 +65,7 @@ export class LocalTranscriptionClient {
   }
 
   transcribe(payload: Record<string, unknown>, timeoutMs: number, signal?: AbortSignal): Promise<LocalTranscript> {
+    if (payload["op"] === "warmup") this.keepWarm = true;
     if (signal?.aborted) return Promise.reject(new Error("Local transcription cancelled."));
     const operation = this.queue.catch(() => {}).then(() => this.request(payload, timeoutMs, signal));
     this.queue = operation;
@@ -87,7 +89,9 @@ export class LocalTranscriptionClient {
       const timer = setTimeout(() => this.close(new Error("Local transcription timed out. Try a shorter recording or install the CUDA runtime.")), timeoutMs);
       const done = () => {
         clearTimeout(timer); signal?.removeEventListener("abort", abort);
-        this.idle = setTimeout(() => this.close(), 120_000); this.idle.unref();
+        if (!this.keepWarm) {
+          this.idle = setTimeout(() => this.close(), 120_000); this.idle.unref();
+        }
       };
       this.pending = { id, resolve: audio => { done(); resolve(audio); }, reject: error => { done(); reject(error); } };
       signal?.addEventListener("abort", abort, { once: true });
@@ -125,6 +129,11 @@ let client: LocalTranscriptionClient | undefined;
 let activeHome: string | undefined;
 export function closeLocalTranscription(): void { client?.close(); client = undefined; }
 process.once("exit", closeLocalTranscription);
+
+/** Explicit warmup loads the selected installed decoder without recording audio. */
+export async function warmupLocalTranscription(model: string, timeoutMs = 120_000, signal?: AbortSignal): Promise<void> {
+  await transcribeLocalAudio(model, { op: "warmup" }, timeoutMs, signal);
+}
 
 /** Switching modes releases the old model before loading another; never keep both on the GPU. */
 export function transcribeLocalAudio(model: string, payload: Record<string, unknown>, timeoutMs: number, signal?: AbortSignal): Promise<LocalTranscript> {
