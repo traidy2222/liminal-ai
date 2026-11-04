@@ -1,0 +1,104 @@
+{
+  "id": "jarvis-warm-v1",
+  "model": "local/jarvis-warm",
+  "label": "JARVIS Warm \u2014 local",
+  "baseRepo": "ResembleAI/chatterbox-turbo",
+  "baseRevision": "749d1c1a46eb10492095d68fbcf55691ccf137cd",
+  "adapterRank": 8,
+  "adapterAlpha": 16,
+  "assets": {
+    "adapter.safetensors": {
+      "sha256": "09e5e5a74a21a9db78cccaf543f80f7adc1b3d35479683e634c512935a0509cc",
+      "bytes": 12600360
+    },
+    "reference.wav": {
+      "sha256": "dff7373bb3212b4c8c855cc22ce319199c44a9a4c04c9e3304e09177d1041daf",
+      "bytes": 297644
+    }
+  },
+  "models": {
+    "t3_turbo_v1.safetensors": {
+      "sha256": "fcf1f8c1d651bb7e3acd69ee5be269b4ac10c02980b7708213d598bc9f7cdf87",
+      "bytes": 1915480052
+    },
+    "s3gen_meanflow.safetensors": {
+      "sha256": "d65cb687a2ed581ee6cc297e919ffefa63386944f42364ae13b78a594945514f",
+      "bytes": 1064875036
+    },
+    "ve.safetensors": {
+      "sha256": "f0921cab452fa278bc25cd23ffd59d36f816d7dc5181dd1bef9751a7fb61f63c",
+      "bytes": 5695784
+    },
+    "tokenizer_config.json": {
+      "sha256": "bca16a2ac1ddbd78b8d6228f0031884cc74b6ea54b967d6f6d2ebae9ccde23e6",
+      "bytes": 3878
+    },
+    "special_tokens_map.json": {
+      "sha256": "92ba8063bf40aa163eadebbfe0de07c2aebe44cf0d4a9e8726580b0781fd2640",
+      "bytes": 470
+    },
+    "added_tokens.json": {
+      "sha256": "72e4ab6acb0d9309ac3df4b526ae5fd80a2da5bc5ab7bb02d85096a374f69193",
+      "bytes": 418
+    },
+    "merges.txt": {
+      "sha256": "1ce1664773c50f3e0cc8842619a93edc4624525b728b188a9e0be33b7726adc5",
+      "bytes": 456318
+    },
+    "vocab.json": {
+      "sha256": "f6bd25a65e4e63ca31360e9fb11c7e4f9a391a78385d640acd814092dd6eee4f",
+      "bytes": 999186
+    }
+  },
+  "tone": {
+    "pitchSemitones": 0,
+    "presenceHz": 3200,
+    "presenceGainDb": -4,
+    "presenceQ": 0.8,
+    "shelfHz": 5500,
+    "shelfGainDb": -4,
+    "shelfQ": 0.707,
+    "lowpassHz": 8000,
+    "loudnessLufs": -23,
+    "truePeakDb": -3
+  },
+  "uvVersion": "0.11.3",
+  "uvAssets": [
+    {
+      "name": "uv-aarch64-apple-darwin.tar.gz",
+      "digest": "sha256:2bc3d0c7bf2bd08325b1e170abac6f7e5b3346e1d4eab3370d17cefec934996f",
+      "size": 20546171,
+      "browser_download_url": "https://github.com/astral-sh/uv/releases/download/0.11.3/uv-aarch64-apple-darwin.tar.gz"
+    },
+    {
+      "name": "uv-aarch64-pc-windows-msvc.zip",
+      "digest": "sha256:e99c56f9ab5e1e1ddcaea3e2389990c94baf38e0d7cb2148de08baf2d3261d49",
+      "size": 21718471,
+      "browser_download_url": "https://github.com/astral-sh/uv/releases/download/0.11.3/uv-aarch64-pc-windows-msvc.zip"
+    },
+    {
+      "name": "uv-aarch64-unknown-linux-gnu.tar.gz",
+      "digest": "sha256:711382e3158433f06b11d99afb440f4416359fc3c84558886d8ed8826a921bff",
+      "size": 22272059,
+      "browser_download_url": "https://github.com/astral-sh/uv/releases/download/0.11.3/uv-aarch64-unknown-linux-gnu.tar.gz"
+    },
+    {
+      "name": "uv-x86_64-apple-darwin.tar.gz",
+      "digest": "sha256:b0e05e0b43a000fdc2132ee3f3400ba5dee427bc2337d3ec4eb8cf4f3d5722af",
+      "size": 22276790,
+      "browser_download_url": "https://github.com/astral-sh/uv/releases/download/0.11.3/uv-x86_64-apple-darwin.tar.gz"
+    },
+    {
+      "name": "uv-x86_64-pc-windows-msvc.zip",
+      "digest": "sha256:ae681c0aaec7cc96af184648cb88d73f8393ed60fa5880abdd6bdb910f9b227c",
+      "size": 23128087,
+      "browser_download_url": "https://github.com/astral-sh/uv/releases/download/0.11.3/uv-x86_64-pc-windows-msvc.zip"
+    },
+    {
+      "name": "uv-x86_64-unknown-linux-gnu.tar.gz",
+      "digest": "sha256:c0f3236f146e55472663cfbcc9be3042a9f1092275bbe3fe2a56a6cbfd3da5ce",
+      "size": 23914165,
+      "browser_download_url": "https://github.com/astral-sh/uv/releases/download/0.11.3/uv-x86_64-unknown-linux-gnu.tar.gz"
+    }
+  ]
+}

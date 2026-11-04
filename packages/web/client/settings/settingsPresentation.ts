@@ -1,5 +1,9 @@
 /** Everyday setting copy. Unlisted fields remain available under Advanced and search. */
 export const everydaySettings: Record<string, { label: string; description: string }> = {
+  "AGENT_TTS_MODEL": {
+    label: "Speech model",
+    description: "Choose JARVIS Warm for a warmer voice at its original pitch, running on this computer after a one-time download."
+  },
   "AGENT_FAST_MODEL": {
     "label": "Background model",
     "description": "Model used for quick background tasks."
@@ -68,6 +72,6 @@ export const everydaySettings: Record<string, { label: string; description: stri
 export const settingsCategories = [{id:"models_api",title:"Model & provider"},{id:"session_ui",title:"Preferences"},{id:"memory_vault",title:"Memory"},{id:"safety",title:"Permissions"},{id:"advanced",title:"Advanced"}];
 export function settingsCategory(tabId: string, key?: string): string {
   if (key === "AGENT_AUTO_DREAM") return "memory_vault";
-  if (key === "AGENT_EFFORT" || key === "AGENT_TTS_ENABLED") return "session_ui";
+  if (key === "AGENT_EFFORT" || key === "AGENT_TTS_ENABLED" || key === "AGENT_TTS_MODEL") return "session_ui";
   if (key === "AGENT_BROWSER") return "safety";
   return ["models_api","session_ui","memory_vault","safety"].includes(tabId) ? tabId : "advanced"; }

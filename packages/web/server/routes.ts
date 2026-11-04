@@ -18,6 +18,7 @@ import {
   HARNESS_MANAGED_ENV_KEY_SET,
   harnessEnvResolutionMeta,
   resolveHarnessEnvRaw,
+  resolveSpeechSynthesisConfig,
   resolvePersonalityHeartbeatConfig,
   listChats,
   listOrphanChatIds,
@@ -45,6 +46,7 @@ import {
   handleAudioUpload,
   handleTranscribe,
   handleTtsPost,
+  audioRequestCancellation,
   readTtsClipBytes,
   connectGoogleWorkspaceFromServer,
   disconnectGoogleWorkspaceFromServer,
@@ -215,7 +217,7 @@ export function createRouter(
         dictationAudioCue: resolveHarnessEnvRaw("AGENT_DICTATION_AUDIO_CUE", prefs) === "1",
         dictationWebSpeech: resolveHarnessEnvRaw("AGENT_DICTATION_WEB_SPEECH", prefs) !== "0",
         ttsEnabled: resolveHarnessEnvRaw("AGENT_TTS_ENABLED", prefs) === "1",
-        ttsVoice: resolveHarnessEnvRaw("AGENT_TTS_VOICE", prefs)?.trim() || "af_sky",
+        ttsVoice: resolveSpeechSynthesisConfig(prefs).voice,
         sessionGreetEnabled: resolveHarnessEnvRaw("AGENT_SESSION_GREET", prefs) === "1",
         // New in Phase 2: which chat is the SSE stream currently bound to.
         activeChat: activeMeta
@@ -1817,18 +1819,22 @@ export function createRouter(
   });
 
   router.post("/api/tts", async (req, res) => {
+    const cancellation = audioRequestCancellation(req, res);
     try {
       const bridge = active();
       const result = await handleTtsPost(
         {
           chatId: bridge.chatId,
           getRuntimePreferences: () => bridge.harness.getRuntimePreferences(),
+          signal: cancellation.signal,
         },
         req.body as Parameters<typeof handleTtsPost>[1]
       );
-      res.status(result.status).json(result.body);
+      if (!cancellation.signal.aborted) res.status(result.status).json(result.body);
     } catch (err) {
-      res.status(500).json({ error: (err as Error).message });
+      if (!cancellation.signal.aborted) res.status(500).json({ error: (err as Error).message });
+    } finally {
+      cancellation.dispose();
     }
   });
 

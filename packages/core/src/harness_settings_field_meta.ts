@@ -55,6 +55,7 @@ export const HARNESS_SETTINGS_SUBGROUP_LABELS: Record<
     resilience: "Retries & circuit breaker",
   },
   session_ui: {
+    voice: "Response & voice",
     session_ui: "Session surface",
     session_recording: "Session recording (JSONL)",
     heartbeat: "Personality heartbeat",
@@ -330,19 +331,20 @@ const _META_RAW: Record<string, HarnessSettingsFieldMeta> = {
     valueKind: "string",
   },
   "AGENT_TTS_MODEL": {
-    tabId: "harness",
-    subgroupId: "harness_misc",
-    label: "Tts Model",
+    tabId: "session_ui",
+    subgroupId: "voice",
+    label: "Speech model",
     description:
-      "OpenRouter speech model slug. Default hexgrad/kokoro-82m (~$0.62/M chars). " +
-      "GPT-4o Mini TTS slugs are remapped to Kokoro automatically.",
+      "Choose local/jarvis-warm for the warmer, original-pitch JARVIS voice running on this computer. " +
+      "Install once with liminal voice install (about 3 GB of models). No speech API key. " +
+      "Cloud default: hexgrad/kokoro-82m (~$0.62/M characters).",
     valueKind: "string",
   },
   "AGENT_TTS_VOICE": {
     tabId: "harness",
     subgroupId: "harness_misc",
     label: "Tts Voice",
-    description: "Harness environment toggle for Tts Voice. See docs/configuration.md (harness).",
+    description: "Cloud voice preset. JARVIS Warm always uses its bundled original-pitch voice profile.",
     valueKind: "string",
   },
   "AGENT_TTS_BASE_URL": {
@@ -445,7 +447,7 @@ const _META_RAW: Record<string, HarnessSettingsFieldMeta> = {
   },
   "AGENT_SINGLE_MODEL": {
     tabId: "models_api", subgroupId: "routing", label: "Use one model",
-    description: "Use the selected model for chat, background reasoning, and vision. Disable separate embedding, speech, and fallback models.", valueKind: "boolean",
+    description: "Use the selected model for chat, background reasoning, and vision. Disable separate embedding, cloud speech, and fallback models. An explicitly enabled local voice remains available.", valueKind: "boolean",
   },
   "AGENT_FAST_MODEL": {
     tabId: "models_api",

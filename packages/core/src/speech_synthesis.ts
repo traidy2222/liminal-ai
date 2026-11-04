@@ -8,6 +8,8 @@ import { singleModelEnabled } from "./harness_effective_env.js";
 import { resolveHarnessEnvRaw } from "./harness_effective_env.js";
 import type { RuntimePreferences } from "./runtime_prefs.js";
 import { resolveManagedOpenRouterCredentials } from "./inference_provider.js";
+import { isLocalSpeechModel, LOCAL_WARM_VOICE_ID, LOCAL_WARM_VOICE_MODEL } from "./speech_models.js";
+import { synthesizeLocalSpeech } from "./local_speech.js";
 
 // ─── Model registry ──────────────────────────────────────────────────────────
 
@@ -18,6 +20,7 @@ export interface TtsModelRate {
 }
 
 export const TTS_MODEL_RATES: Readonly<Record<string, TtsModelRate>> = {
+  [LOCAL_WARM_VOICE_MODEL]: { perCharUsd: 0, label: "JARVIS Warm — local" },
   "hexgrad/kokoro-82m": {
     perCharUsd: 0.62 / 1_000_000,
     label: "Kokoro 82M",
@@ -54,6 +57,9 @@ const TTS_MODEL_SLUG_ALIASES: Readonly<Record<string, string>> = {
 export function normalizeTtsModelSlug(model: string): string {
   const trimmed = model.trim();
   if (!trimmed) return AFFORDABLE_TTS_MODEL;
+  // Keep unknown on-device routes intact so the local allowlist rejects them, even if
+  // their suffix resembles a legacy cloud alias (for example local/gpt-4o-tts).
+  if (trimmed.toLowerCase().startsWith("local/")) return trimmed.toLowerCase();
   const alias = TTS_MODEL_SLUG_ALIASES[trimmed];
   if (alias) return alias;
   const lower = trimmed.toLowerCase();
@@ -116,6 +122,7 @@ function isOpenAiTtsModel(model: string): boolean {
 }
 
 export function defaultTtsVoiceForModel(model: string): string {
+  if (isLocalSpeechModel(model)) return LOCAL_WARM_VOICE_ID;
   return isKokoroModel(model) ? DEFAULT_KOKORO_TTS_VOICE : DEFAULT_OPENAI_TTS_VOICE;
 }
 
@@ -134,6 +141,7 @@ export function wireTtsResponseFormat(
  * Pick a voice id valid for the configured TTS model (Kokoro vs OpenAI slugs differ).
  */
 export function coerceTtsVoiceForModel(model: string, voice: string): string {
+  if (isLocalSpeechModel(model)) return LOCAL_WARM_VOICE_ID;
   const lower = voice.trim().toLowerCase();
   if (isKokoroModel(model)) {
     if (!lower) return DEFAULT_KOKORO_TTS_VOICE;
@@ -316,8 +324,8 @@ export function resolveSpeechSynthesisConfig(
     enabled,
     model,
     voice,
-    baseURL,
-    apiKey,
+    baseURL: model.startsWith("local/") ? "" : baseURL,
+    apiKey: model.startsWith("local/") ? "" : apiKey,
     timeoutMs,
     maxCharsPerCall,
     maxCallsPerTurn,
@@ -333,7 +341,7 @@ export async function resolveSpeechSynthesisConfigAsync(
   prefs: RuntimePreferences | null
 ): Promise<SpeechSynthesisConfig> {
   const base = resolveSpeechSynthesisConfig(prefs);
-  if (!base.enabled) return base;
+  if (!base.enabled || base.model.startsWith("local/")) return base;
   if (process.env["AGENT_TTS_API_KEY"]?.trim()) {
     return base;
   }
@@ -399,11 +407,16 @@ export async function synthesizeSpeechMulti(
   input: SynthesizeSpeechInput,
   config: SpeechSynthesisConfig
 ): Promise<SynthesizeSpeechMultiResult> {
-  if (singleModelEnabled()) throw new Error("Separate speech models are disabled in single-model mode.");
+  const requestedModel = normalizeTtsModelSlug(input.model ?? config.model);
+  const local = isLocalSpeechModel(requestedModel);
+  if (requestedModel.startsWith("local/") && !local) {
+    throw new Error(`Unknown local speech model: ${requestedModel}. Select local/jarvis-warm.`);
+  }
+  if (singleModelEnabled() && !local) throw new Error("Separate speech models are disabled in single-model mode.");
   if (!config.enabled) {
     throw new Error("Text-to-speech is disabled (AGENT_TTS_ENABLED=0).");
   }
-  if (!config.apiKey) {
+  if (!local && !config.apiKey) {
     throw new Error(
       "No TTS API key. Set AGENT_TTS_API_KEY, AGENT_API_KEY, or OPENROUTER_API_KEY."
     );
@@ -412,7 +425,7 @@ export async function synthesizeSpeechMulti(
   if (!sanitized) {
     throw new Error("TTS text is empty after sanitization.");
   }
-  const chunks = splitTextForTtsChunks(sanitized, config.chunkChars);
+  const chunks = splitTextForTtsChunks(sanitized, local ? Math.min(300, config.chunkChars) : config.chunkChars);
   const segments: SynthesizeSpeechResult[] = [];
   for (const chunk of chunks) {
     segments.push(
@@ -450,6 +463,14 @@ async function synthesizeSpeechSegment(
     (input.model ?? config.model).trim() || AFFORDABLE_TTS_MODEL
   );
   const requestedVoice = (input.voice ?? config.voice).trim() || DEFAULT_TTS_VOICE;
+  if (isLocalSpeechModel(requestedModel)) {
+    const audio = await synthesizeLocalSpeech(sanitized, config.timeoutMs, input.signal);
+    return {
+      audio, mimeType: "audio/wav", charCount: sanitized.length, spokenText: sanitized,
+      maxOutputTokens: 0, costUsd: 0, model: LOCAL_WARM_VOICE_MODEL,
+      voice: LOCAL_WARM_VOICE_ID, provider: "local",
+    };
+  }
   try {
     return await synthesizeSpeechSegmentWithModel(
       input,

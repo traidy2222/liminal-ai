@@ -21,7 +21,22 @@ function titleCase(s) {
     .join(" ");
 }
 
+const metadataOverrides = {
+  AGENT_TTS_MODEL: {
+    tabId: "session_ui", subgroupId: "voice", label: "Speech model",
+    description: "Choose local/jarvis-warm for the warmer, original-pitch JARVIS voice running on this computer. Install once with liminal voice install (about 3 GB of models). No speech API key. Cloud default: hexgrad/kokoro-82m (~$0.62/M characters).",
+  },
+  AGENT_TTS_VOICE: {
+    description: "Cloud voice preset. JARVIS Warm always uses its bundled original-pitch voice profile.",
+  },
+  AGENT_SINGLE_MODEL: {
+    tabId: "models_api", subgroupId: "routing", label: "Use one model", valueKind: "boolean",
+    description: "Use the selected model for chat, background reasoning, and vision. Disable separate embedding, cloud speech, and fallback models. An explicitly enabled local voice remains available.",
+  },
+};
+
 function tabFor(key) {
+  if (metadataOverrides[key]?.tabId) return metadataOverrides[key].tabId;
   if (
     key === "AGENT_MEMORY_AUTOLINK_MODEL" ||
     key === "AGENT_MEMORY_CONSOLIDATE_MODEL" ||
@@ -97,6 +112,7 @@ function tabFor(key) {
 }
 
 function subgroupFor(key, tab) {
+  if (metadataOverrides[key]?.subgroupId) return metadataOverrides[key].subgroupId;
   if (tab === "models_api") {
     if (key.startsWith("AGENT_VISION_")) return "vision";
     if (key === "AGENT_MEMORY_AUTOLINK_MODEL" || key === "AGENT_MEMORY_CONSOLIDATE_MODEL") return "memory_models";
@@ -274,6 +290,7 @@ export const HARNESS_SETTINGS_SUBGROUP_LABELS: Record<
     resilience: "Retries & circuit breaker",
   },
   session_ui: {
+    voice: "Response & voice",
     session_ui: "Session surface",
     session_recording: "Session recording (JSONL)",
     heartbeat: "Personality heartbeat",
@@ -323,9 +340,9 @@ const _META_RAW: Record<string, HarnessSettingsFieldMeta> = {
 for (const key of keys) {
   const tab = tabFor(key);
   const subgroup = subgroupFor(key, tab);
-  const kdef = kindFor(key);
-  const label = titleCase(key);
-  const description = desc(key, tab);
+  const kdef = metadataOverrides[key]?.valueKind ? { valueKind: metadataOverrides[key].valueKind } : kindFor(key);
+  const label = metadataOverrides[key]?.label ?? titleCase(key);
+  const description = metadataOverrides[key]?.description ?? desc(key, tab);
   const parts = [
     `  ${JSON.stringify(key)}: {`,
     `    tabId: ${JSON.stringify(tab)},`,
@@ -353,5 +370,8 @@ export const HARNESS_SETTINGS_FIELD_META: Record<ManagedHarnessEnvKey, HarnessSe
   })();
 `);
 
-fs.writeFileSync("packages/core/src/harness_settings_field_meta.ts", lines.join("\n"));
+const outputIndex = process.argv.indexOf("--output");
+const output = outputIndex >= 0 ? process.argv[outputIndex + 1] : "packages/core/src/harness_settings_field_meta.ts";
+if (!output) throw new Error("--output requires a filename");
+fs.writeFileSync(output, lines.join("\n"));
 console.log("Wrote", keys.length, "keys");

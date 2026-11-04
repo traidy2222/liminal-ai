@@ -668,6 +668,7 @@ export {
   handleTtsPost,
   readTtsClipBytes,
   sanitizeAudioFilename,
+  audioRequestCancellation,
   type AudioBridgeContext,
   type AudioHandlerResult,
 } from "./families/audio/audio_http_handlers.js";

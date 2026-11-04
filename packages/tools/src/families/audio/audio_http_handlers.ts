@@ -2,6 +2,7 @@
  * Shared audio upload / transcribe / TTS handlers for web Express and sidecar HTTP.
  */
 import path from "node:path";
+import type { IncomingMessage, ServerResponse } from "node:http";
 import {
   coerceTtsConfigForBrowserPlayback,
   resolveSpeechSynthesisConfigAsync,
@@ -23,6 +24,17 @@ import { readTtsClip, saveTtsClip, ttsClipAudioUrl } from "./tts_clips.js";
 export interface AudioBridgeContext {
   chatId: string;
   getRuntimePreferences: () => RuntimePreferences | null;
+  signal?: AbortSignal;
+}
+
+/** Response close means cancellation; request close alone also happens after a normal POST body. */
+export function audioRequestCancellation(req: IncomingMessage, res: ServerResponse): { signal: AbortSignal; dispose: () => void } {
+  const controller = new AbortController();
+  const abort = () => controller.abort();
+  const close = () => { if (!res.writableEnded) abort(); };
+  req.once("aborted", abort); res.once("close", close);
+  if (req.aborted || res.destroyed) abort();
+  return { signal: controller.signal, dispose: () => { req.off("aborted", abort); res.off("close", close); } };
 }
 
 export type AudioHandlerResult =
@@ -160,6 +172,7 @@ export async function handleTtsPost(
   bridge: AudioBridgeContext,
   body: { text?: string; voice?: string }
 ): Promise<AudioHandlerResult> {
+  bridge.signal?.throwIfAborted();
   const raw = String(body.text ?? "").trim();
   if (!raw) {
     return { ok: false, status: 400, body: { error: "text required" } };
@@ -173,12 +186,14 @@ export async function handleTtsPost(
     return { ok: false, status: 400, body: { error: "Nothing to speak after sanitization." } };
   }
   const multi = await synthesizeSpeechMulti(
-    { text: sanitized, voice: body.voice?.trim() || undefined },
+    { text: sanitized, voice: body.voice?.trim() || undefined, signal: bridge.signal },
     coerceTtsConfigForBrowserPlayback(config)
   );
   const clips = [];
   for (const seg of multi.segments) {
-    const saved = await saveTtsClip(bridge.chatId, seg.audio, seg.mimeType, seg.spokenText);
+    bridge.signal?.throwIfAborted();
+    const saved = await saveTtsClip(bridge.chatId, seg.audio, seg.mimeType, seg.spokenText, JSON.stringify([seg.provider, seg.model, seg.voice]));
+    bridge.signal?.throwIfAborted();
     clips.push({
       clipId: saved.clipId,
       audioUrl: ttsClipAudioUrl(saved.clipId),

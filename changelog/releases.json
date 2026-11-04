@@ -1,7 +1,26 @@
 {
   "stage": "beta",
-  "currentVersion": "0.1.22",
+  "currentVersion": "0.1.23",
   "releases": [
+    {
+      "version": "0.1.23",
+      "date": "2026-11-04",
+      "tagline": "A warmer JARVIS voice, running on your computer.",
+      "summary": "Add optional offline JARVIS Warm speech to desktop and web, preserving the original pitch while softening sharp upper frequencies. A one-time installer manages Python, pinned dependencies and verified model downloads.",
+      "bullets": [
+        "**JARVIS Warm, original pitch** — The approved warmer voice profile softens upper frequencies and targets a comfortable -23 LUFS output without pitch shifting.",
+        "**Optional local setup** — Install once with `liminal voice install`, or add `--cuda` for NVIDIA acceleration. Managed Python avoids requiring a system Python, Git or FFmpeg. Model weights download once (about 3 GB) and remain separate from app updates.",
+        "**Offline playback** — Desktop and web use the same local speech backend, with no speech API key and no cloud speech fallback. Explicit local playback remains available with single-model chat.",
+        "**Reliable voice changes** — A serialized warm worker handles cancellation, timeouts, closed input pipes and idle cleanup. Voice/model-aware caching prevents replaying old cloud voice clips after switching.",
+        "**Clear limits** — This is an experimental small-data voice adapter. CPU inference can be slow; CUDA is optional. Source provenance, upstream model licensing and the normal Chatterbox watermark are retained."
+      ],
+      "docs": [
+        {
+          "label": "Local voice setup",
+          "href": "../guides/voice.md"
+        }
+      ]
+    },
     {
       "version": "0.1.22",
       "date": "2026-11-04",

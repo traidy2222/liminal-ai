@@ -120,6 +120,9 @@ foreach ($name in $Packages) {
   New-Item -ItemType Directory -Force $destPkg | Out-Null
   Copy-Item (Join-Path $srcPkg "package.json") $destPkg -Force
   Copy-Item (Join-Path $srcPkg "dist") $destPkg -Recurse -Force
+  if ($name -eq "core") {
+    Copy-Item (Join-Path $srcPkg "local-voice") $destPkg -Recurse -Force
+  }
 }
 
 $hostedConnect = Join-Path $BundleRepo "packages\core\dist\hosted_oauth_connect.js"
@@ -162,6 +165,11 @@ First run:
   3. Run ``liminal_desktop.exe`` from the parent Release folder (not this directory).
 
 Pro users can sign in inside the app instead of using a local API key.
+
+Optional offline voice:
+  From this repo folder run ``npm run voice:install`` (CPU), or
+  ``npm run voice:install -- --cuda`` (NVIDIA). Models download once (about 3 GB).
+  Then choose JARVIS Warm - local in Settings and enable Spoken responses.
 "@
 Set-Content -Path (Join-Path $BundleRepo "README.txt") -Value $readme -Encoding utf8
 

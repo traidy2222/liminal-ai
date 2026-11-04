@@ -1443,7 +1443,8 @@ export class AgentHarness {
   /** Per-send TTS budget for speak() and harness fallback dedupe. */
   readonly ttsTurnBudget = new TtsTurnBudget();
   /** Wired from tools/speak.ts — synthesize when the model omits speak() in voice mode. */
-  voiceTtsFallback?: (text: string) => Promise<void>;
+  voiceTtsFallback?: (text: string, signal?: AbortSignal) => Promise<void>;
+  private voiceTtsController?: AbortController;
 
   /** Active persona. Set via setPersona(); defaults to config.persona or unnamed default. */
   private currentPersona?: PersonaConfig;
@@ -5179,7 +5180,18 @@ export class AgentHarness {
       !this.sessionGreetingThisSend &&
       !this.personaBootstrapPromptThisSend;
     if (shouldAutoSpeak && this.voiceTtsFallback) {
-      void this.voiceTtsFallback(this.context.getLastAssistantMessage() ?? "").finally(finish);
+      const controller = new AbortController();
+      this.voiceTtsController?.abort();
+      this.voiceTtsController = controller;
+      const signal = this.mergeStreamAbortSignals(controller);
+      void this.voiceTtsFallback(this.context.getLastAssistantMessage() ?? "", signal)
+        .catch((error) => {
+          if (!signal?.aborted) this.emitter.emit("text", { delta: `\n[HARNESS] Speech playback failed: ${String(error)}\n`, channel: "trace" });
+        })
+        .finally(() => {
+          if (this.voiceTtsController === controller) this.voiceTtsController = undefined;
+          finish();
+        });
     } else {
       finish();
     }
@@ -5191,6 +5203,8 @@ export class AgentHarness {
    */
   abortCurrentTurn(): void {
     this.currentTurnController?.abort();
+    // Fallback playback can outlive send()'s controller while turn_end waits for speech.
+    this.voiceTtsController?.abort();
   }
 
   private mergeStreamAbortSignals(streamAbort?: AbortController): AbortSignal | undefined {

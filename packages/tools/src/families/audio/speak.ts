@@ -18,19 +18,23 @@ import { saveTtsClip, ttsClipAudioUrl } from "./tts_clips.js";
 export async function emitSpokenClips(
   harness: AgentHarness,
   rawText: string,
-  cfg: SpeechSynthesisConfig
+  cfg: SpeechSynthesisConfig,
+  signal?: AbortSignal
 ): Promise<{ ok: true; segments: number; charCount: number; costUsd: number } | { ok: false; reason: string }> {
+  signal?.throwIfAborted();
   const gate = harness.ttsTurnBudget.tryConsume(rawText, cfg);
   if (!gate.ok) {
     return { ok: false, reason: gate.reason ?? "TTS budget rejected this line." };
   }
   const chatId = resolveCurrentChatId() ?? harness.taskId;
   const multi = await synthesizeSpeechMulti(
-    { text: gate.sanitizedText! },
+    { text: gate.sanitizedText!, signal },
     coerceTtsConfigForBrowserPlayback(cfg)
   );
   for (const seg of multi.segments) {
-    const saved = await saveTtsClip(chatId, seg.audio, seg.mimeType, seg.spokenText);
+    signal?.throwIfAborted();
+    const saved = await saveTtsClip(chatId, seg.audio, seg.mimeType, seg.spokenText, JSON.stringify([seg.provider, seg.model, seg.voice]));
+    signal?.throwIfAborted();
     harness.emitter.emit("speech", {
       clipId: saved.clipId,
       text: seg.spokenText,
@@ -48,13 +52,14 @@ export async function emitSpokenClips(
 
 /** Turn-end fallback when the model skips speak() during a mic session. */
 export function installVoiceTtsFallback(harness: AgentHarness): void {
-  harness.voiceTtsFallback = async (text: string) => {
+  harness.voiceTtsFallback = async (text: string, signal?: AbortSignal) => {
+    signal?.throwIfAborted();
     const trimmed = text.trim();
     if (trimmed.length < 12) return;
     if (/^```|^#\s|^\[HARNESS\]/m.test(trimmed)) return;
     const cfg = await resolveSpeechSynthesisConfigAsync(harness.getRuntimePreferences());
     if (!cfg.enabled || !harness.isLiveDictationTurn()) return;
-    await emitSpokenClips(harness, trimmed, cfg);
+    await emitSpokenClips(harness, trimmed, cfg, signal);
   };
 }
 
@@ -75,7 +80,7 @@ export function createSpeakTool(harness: AgentHarness) {
       required: ["text"],
       additionalProperties: false,
     },
-    handler: async (args) => {
+    handler: async (args, _emit, _harness, context) => {
       const raw = String(args["text"] ?? args["content"] ?? "").trim();
       if (!raw) {
         return { ok: false, error: "text is required" };
@@ -92,7 +97,7 @@ export function createSpeakTool(harness: AgentHarness) {
         };
       }
       try {
-        const spoken = await emitSpokenClips(harness, raw, cfg);
+        const spoken = await emitSpokenClips(harness, raw, cfg, context?.signal);
         if (!spoken.ok) {
           return { ok: false, error: spoken.reason };
         }

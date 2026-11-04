@@ -4,6 +4,7 @@ import type { RuntimePreferences } from "./runtime_prefs.js";
 import { HARNESS_ENV_DEFAULTS } from "./harness_default_constants.js";
 import { HARNESS_SECRET_ENV_KEYS } from "./harness_env_inventory.js";
 import { latencyModePatchForKey } from "./latency_mode.js";
+import { isLocalSpeechModel } from "./speech_models.js";
 
 const harnessEnvAsyncLocal = new AsyncLocalStorage<{ prefs: RuntimePreferences | null }>();
 
@@ -107,6 +108,10 @@ export function singleModelSlug(fallback?: string, prefs?: RuntimePreferences | 
 }
 export function resolveHarnessEnvRaw(key: string, prefs: RuntimePreferences | null): string | undefined {
   if (key !== "AGENT_SINGLE_MODEL" && singleModelEnabled(prefs)) {
+    // Explicitly enabled on-device playback does not route the user's text to another LLM/provider.
+    if (key === "AGENT_TTS_ENABLED" && isLocalSpeechModel(resolveConfiguredHarnessEnvRaw("AGENT_TTS_MODEL", prefs) ?? "")) {
+      return resolveConfiguredHarnessEnvRaw(key, prefs);
+    }
     if (key === "AGENT_EMBED_MODEL") return "";
     if (["AGENT_TTS_ENABLED", "AGENT_TRANSCRIBE_ENABLED", "AGENT_MANAGED_FREE_FALLBACK", "AGENT_MANAGED_BYOK_FALLBACK", "AGENT_OPENROUTER_FUSION"].includes(key)) return "0";
     if (key !== "AGENT_MODEL" && key.endsWith("_MODEL") && !["AGENT_TTS_MODEL", "AGENT_TRANSCRIBE_MODEL"].includes(key)) return singleModelSlug(undefined, prefs);

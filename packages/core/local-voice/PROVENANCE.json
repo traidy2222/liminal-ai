@@ -1,0 +1,40 @@
+{
+  "datasetUrl": "https://huggingface.co/datasets/lucasjin/jarvis_voice",
+  "datasetRevision": "056091c874619a11aa8233b72fde9a048c2a412d",
+  "retrievedDate": "2026-11-04",
+  "description": "Community-hosted JARVIS app recordings; not an authenticated studio release.",
+  "speakerIdentityIndependentlyVerified": false,
+  "transcription": "Whisper small and base agreement <=15% normalized word edit distance; obvious uncertain lines excluded; voice-encoder cosine >=0.75 against independent reference.",
+  "humanListeningReview": false,
+  "processing": "Phrase-only filtering, decoded-PCM SHA256 deduplication, edge silence trim with 100/150 ms padding; no internal gap cuts; highpass65Hz/lowpass10500Hz; -23LUFS/-3dBTP; mono24kHz PCM16.",
+  "hashNote": "sourceSha256 in the training manifest hashes decoded float32 PCM, not the source container bytes.",
+  "trainClips": 59,
+  "validationClips": 9,
+  "totalSeconds": 285.20287499999995,
+  "referenceExcludedFromTraining": "caged_weather_sunny_2.wav",
+  "originalArchiveSha256": "5fc1d521031020e871ca91bb63966e53f0c604f127bc9113972fb14049873b48",
+  "baseModel": "https://huggingface.co/ResembleAI/chatterbox-turbo",
+  "baseRevision": "749d1c1a46eb10492095d68fbcf55691ccf137cd",
+  "fineTune": "Actual rank8/alpha16 LoRA adapters on GPT2 Conv1D attention and MLP projections. Base transformer, tokenizer, voice encoder and acoustic decoder frozen. Speech next-token loss matches inference layout, no text vocabulary changes.",
+  "referencePrompt": "Independent utterance; never target-audio prompt leakage.",
+  "evaluation": "Same reference, seeds, texts and generation settings for base and adapted. Automated metrics do not establish human-perceived naturalness.",
+  "watermark": "Original Chatterbox Perth watermark retained.",
+  "cloudTraining": false,
+  "experimental": true,
+  "evaluationNote": "Experimental voice adapter: 59 training / 9 validation clips. No guarantee of exact speaker likeness. Original-pitch warm equalization; no pitch shifting.",
+  "distributionPermission": {
+    "status": "project-owner-attested",
+    "confirmedDate": "2026-11-04",
+    "scope": "Project owner confirmed permission to redistribute the JARVIS recording and voice trained from it as part of Liminal, including the bundled reference and adapter.",
+    "independentlyVerified": false,
+    "datasetPublishedLicense": null,
+    "likenessRights": "Covered by the project owner attestation; not independently verified.",
+    "baseCodeAndModelLicense": "MIT; see LICENSE.chatterbox. This does not itself license the source recordings."
+  },
+  "referenceIdentity": {
+    "sourceFile": "caged_weather_sunny_2.wav",
+    "sha256": "dff7373bb3212b4c8c855cc22ce319199c44a9a4c04c9e3304e09177d1041daf",
+    "processedCorpusClipMatchConfirmed": true,
+    "excludedFromTrainingConfirmed": true
+  }
+}
