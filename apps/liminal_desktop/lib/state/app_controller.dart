@@ -577,10 +577,12 @@ class AppController extends ChangeNotifier {
         _flushingDictation.contains(chatId)) return;
     if (_sessions.get(chatId)?.busy == true) return;
     _flushingDictation.add(chatId);
+    var delivered = false;
     try {
       final ok =
           await sendMessage(pending.first, chatId: chatId, liveDictation: true);
       if (ok) {
+        delivered = true;
         pending.removeAt(0);
         if (pending.isEmpty) _pendingDictationMessages.remove(chatId);
       }
@@ -594,6 +596,11 @@ class AppController extends ChangeNotifier {
       }
     } finally {
       _flushingDictation.remove(chatId);
+      // A very fast turn can finish before its send acknowledgement resumes us.
+      // Its settlement callback saw the in-flight guard; drain the next item now.
+      if (delivered && pending.isNotEmpty && _sessions.get(chatId)?.busy != true) {
+        unawaited(_flushPendingDictationSend(chatId));
+      }
     }
   }
 
