@@ -34,6 +34,14 @@ test("malformed worker output and worker crashes fail cleanly", async () => {
     assert.equal((await client.synthesize("recovered",5000)).length,48);
   } finally { client.close(); }
 });
+test("a closed worker input pipe cannot crash the daemon", async () => {
+  const client=worker();
+  try {
+    await client.synthesize("break-pipe",5000);
+    await assert.rejects(client.synthesize("closed input",1000));
+    assert.equal((await client.synthesize("recovered",5000)).length,48);
+  } finally { client.close(); }
+});
 test("explicit local speech works with one chat model, without cloud credentials or routing", async () => {
   const prefs: RuntimePreferences = {version:1,updatedAt:0,harness:{env:{AGENT_SINGLE_MODEL:"1",AGENT_TTS_ENABLED:"1",AGENT_TTS_MODEL:"local/jarvis-warm"}}};
   await runHarnessEffectiveEnvContext(prefs,async()=>{

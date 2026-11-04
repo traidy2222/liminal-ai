@@ -25,6 +25,9 @@ export class LocalSpeechClient {
     if (this.child) return;
     const child = spawn(this.command, this.args, { stdio: "pipe", windowsHide: true });
     this.child = child; this.buffer = ""; this.stderr = "";
+    // A decoder crash can close stdin between two requests. Handle the stream's error event
+    // as well as the write callback so EPIPE cannot crash the parent daemon.
+    child.stdin.on("error", error => { if (this.child === child) this.close(error); });
     child.stdout.setEncoding("utf8"); child.stderr.setEncoding("utf8");
     child.stderr.on("data", (data: string) => { this.stderr = (this.stderr + data).slice(-1200); });
     child.stdout.on("data", (data: string) => {
