@@ -1,7 +1,7 @@
 # Voice (TTS &amp; dictation)
 
 The web UI can **speak its replies** (text-to-speech) and **listen** (dictation/transcription),
-so you can drive the agent hands-free. Both are sidecar model calls you control via env.
+so you can drive the agent hands-free. Local transcription and speech settings are shared by desktop and web.
 
 ## Dictation (speech → text)
 
@@ -14,26 +14,66 @@ Record in the browser and send the clip for transcription:
 
 In the agent loop, `transcribe_audio` (the `audio` family) does the same server-side.
 
-### Where dictation gets transcribed (server model vs browser)
+### Local transcription: fast or accuracy
 
-By default (`AGENT_DICTATION_WEB_SPEECH=0`) dictation records audio and transcribes it
-**server-side** with your `AGENT_TRANSCRIBE_MODEL` — so speech never leaves for the browser
-vendor's cloud (Chrome's recognizer sends audio to Google). Set `AGENT_DICTATION_WEB_SPEECH=1`
-to use the browser's built-in Web Speech API for an instant live preview while you talk
-(Chrome/Edge); the recorded audio is still sent to the server model for the final transcript.
+Both desktop and web now default to **Whisper Large V3 Turbo on this computer**.
+Qwen3-ASR 1.7B is an optional accuracy mode. Neither needs an API key, and neither
+silently falls back to a cloud provider. Existing Parakeet default selections migrate to Whisper.
+Explicit alternative cloud models remain available for compatibility.
 
-The default ASR model is **`nvidia/parakeet-tdt-0.6b-v3`** ($0.0015/min, English + EU). For
-99-language coverage set `AGENT_TRANSCRIBE_MODEL=openai/whisper-large-v3-turbo`; for Chinese
-dialects, `qwen/qwen3-asr-flash`.
+Install once, then choose **Settings → Preferences → Transcription mode**:
+
+```bash
+liminal transcription install whisper --cuda   # NVIDIA, about 1.6 GB of models
+liminal transcription install qwen --cuda      # Optional accuracy, about 4.7 GB
+liminal transcription status whisper
+liminal transcription status qwen
+```
+
+Omit `--cuda` for CPU inference. Python and dependencies need additional disk space.
+CPU mode is supported but may be too slow for live dictation, particularly Qwen.
+Installers use separate managed Python environments; they do not modify system Python
+or the local voice environment. NVIDIA mode uses CUDA 12.4 for Whisper and CUDA 12.8
+for Qwen; install a compatible NVIDIA driver first. Windows uses the native Transformers
+backend for Qwen, so its latency differs from the vLLM benchmark run under WSL.
+
+For portable desktop bundles, run from `liminald/repo`:
+
+```bash
+node packages/core/local-asr/setup.mjs install whisper --cuda
+node packages/core/local-asr/setup.mjs install qwen --cuda
+```
+
+Models live in `~/.liminal/transcription` and survive app updates. Files are pinned to
+model revisions and verified with SHA-256 during installation. Inference runs offline.
+Switching transcription modes unloads the old worker; idle workers exit after two minutes.
+
+The microphone shows **provisional local previews** while recording. Previews use a rolling
+12-second window with one request in flight to bound memory and decoding time; long takes
+show the most recent window. The final transcript always uses the complete recording and
+is sent once, after a pause or manual send. Previews are not persisted as chat attachments.
+Browser-vendor Web Speech has been removed from this path; `AGENT_DICTATION_WEB_SPEECH`
+is retained only as a deprecated compatibility setting.
+
+A neural Silero speech gate rejects silence and stationary noise before decoding. Empty
+results are marked `noSpeech` and are never auto-sent. This reduces hallucinations; it cannot
+guarantee rejection of every kind of music, background speech, or unfamiliar noise.
+
+**Language:** `auto` detects from actual speech, not browser locale. Set an ISO code such
+as `hi` when you want Hindi, or `ur` for Urdu. Explicit language always wins. Whisper can
+still confuse closely related languages even with high detection confidence; use an explicit
+language or Qwen accuracy mode in that case. Whisper has broader language coverage; Qwen
+supports 30 languages and returns a clear error for unsupported selections. Qwen does not
+return word timestamps without a separately installed forced aligner; Liminal does not invent them.
 
 | Variable | Default | Purpose |
 | -------- | ------- | ------- |
-| `AGENT_TRANSCRIBE_ENABLED` | `1` | Master switch for transcription |
-| `AGENT_TRANSCRIBE_MODEL` | `nvidia/parakeet-tdt-0.6b-v3` | ASR model slug |
-| `AGENT_TRANSCRIBE_API_KEY` | — | ASR key (falls back to `AGENT_API_KEY` / `OPENROUTER_API_KEY`) |
-| `AGENT_TRANSCRIBE_MAX_BYTES` | `26214400` | Per-clip size limit (25 MB) |
-| `AGENT_DICTATION_WEB_SPEECH` | `0` | `1` = browser live preview; `0` = server model only |
-| `AGENT_DICTATION_AUDIO_CUE` | `0` | Play a start/stop cue in the UI |
+| `AGENT_TRANSCRIBE_ENABLED` | `1` | Master switch; local ASR works in single-model chat mode |
+| `AGENT_TRANSCRIBE_MODEL` | `local/whisper-large-v3-turbo` | Fast default; optional `local/qwen3-asr-1.7b` |
+| `AGENT_TRANSCRIBE_LANGUAGE` | `auto` | Explicit ISO language code or speech-based detection |
+| `AGENT_TRANSCRIBE_MAX_BYTES` | `26214400` | Compressed file limit; decoded recordings are capped at 30 minutes |
+| `AGENT_TRANSCRIBE_API_KEY` | — | Only used by explicitly selected legacy cloud providers |
+| `AGENT_DICTATION_AUDIO_CUE` | `0` | Optional send cue |
 
 ## Text-to-speech (text → speech)
 

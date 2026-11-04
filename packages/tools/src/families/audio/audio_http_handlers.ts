@@ -110,12 +110,30 @@ export async function handleTranscribe(
   bridge: AudioBridgeContext,
   body: {
     attachmentId?: string;
+    /** Provisional PCM WAV snapshots: never persisted as chat attachments. */
+    previewWav?: string;
     language?: string;
     prompt?: string;
     timestamps?: "none" | "segment" | "word";
     model?: string;
   }
 ): Promise<AudioHandlerResult> {
+  const language = typeof body.language === "string" ? body.language.trim() || undefined : undefined;
+  if (typeof body.previewWav === "string") {
+    if (body.previewWav.length > 512_060) return { ok: false, status: 413, body: { error: "Preview is limited to 12 seconds of mono 16 kHz PCM WAV." } };
+    const audio = Buffer.from(body.previewWav, "base64");
+    if (audio.length < 44 || audio.length > 384_044 || audio.toString("ascii", 0, 4) !== "RIFF" ||
+        audio.toString("ascii", 8, 16) !== "WAVEfmt " || audio.readUInt32LE(16) !== 16 ||
+        audio.readUInt16LE(20) !== 1 || audio.readUInt16LE(22) !== 1 || audio.readUInt32LE(24) !== 16000 ||
+        audio.readUInt16LE(34) !== 16 || audio.toString("ascii", 36, 40) !== "data" ||
+        audio.readUInt32LE(40) !== audio.length - 44 || (audio.length - 44) % 2 !== 0) {
+      return { ok: false, status: 400, body: { error: "Preview requires mono PCM16 WAV at 16 kHz, up to 12 seconds." } };
+    }
+    const config = await resolveTranscriptionConfigAsync(bridge.getRuntimePreferences());
+    if (!config.model.startsWith("local/")) return { ok: false, status: 400, body: { error: "Live previews require a local transcription model." } };
+    const result = await transcribeAudio({ audio, filename: "preview.wav", language, timestamps: "none", signal: bridge.signal }, config);
+    return { ok: true, status: 200, body: { ok: true, ...result, provisional: true } };
+  }
   const id = String(body.attachmentId ?? "").trim();
   if (!id) {
     return { ok: false, status: 400, body: { error: "attachmentId required (upload first via /api/audio/upload)" } };
@@ -129,20 +147,12 @@ export async function handleTranscribe(
   if (!config.enabled) {
     return { ok: false, status: 503, body: { error: "Transcription disabled (AGENT_TRANSCRIBE_ENABLED=0)." } };
   }
-  if (!config.apiKey) {
-    return {
-      ok: false,
-      status: 503,
-      body: {
-        error: "No transcription API key. Set AGENT_TRANSCRIBE_API_KEY, AGENT_API_KEY, or OPENROUTER_API_KEY.",
-      },
-    };
-  }
   const result = await transcribeAudio(
     {
+      signal: bridge.signal,
       audio: bytes,
       filename: record.filename,
-      language: body.language?.trim() || undefined,
+      language,
       prompt: body.prompt?.slice(0, 1500),
       timestamps:
         body.timestamps === "none" || body.timestamps === "word" || body.timestamps === "segment"
@@ -159,6 +169,10 @@ export async function handleTranscribe(
       ok: true,
       attachmentId: id,
       text: result.text,
+      noSpeech: result.noSpeech ?? !result.text,
+      languageConfidence: result.languageConfidence,
+      segments: result.segments,
+      words: result.words,
       language: result.language,
       durationSec: result.durationSec,
       costUsd: result.costUsd,

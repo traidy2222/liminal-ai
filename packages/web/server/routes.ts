@@ -1788,16 +1788,18 @@ export function createRouter(
   });
 
   router.post("/api/transcribe", async (req, res) => {
+    const cancellation = audioRequestCancellation(req, res);
     try {
       const bridge = active();
       const result = await handleTranscribe(
         {
+          signal: cancellation.signal,
           chatId: bridge.chatId,
           getRuntimePreferences: () => bridge.harness.getRuntimePreferences(),
         },
         req.body as Parameters<typeof handleTranscribe>[1]
       );
-      if (result.ok && typeof result.body.durationSec === "number") {
+      if (!req.body?.previewWav && result.ok && typeof result.body.durationSec === "number") {
         sse.send(
           "transcription",
           {
@@ -1812,9 +1814,11 @@ export function createRouter(
           bridge.chatId
         );
       }
-      res.status(result.status).json(result.body);
+      if (!cancellation.signal.aborted) res.status(result.status).json(result.body);
     } catch (err) {
-      res.status(500).json({ error: (err as Error).message });
+      if (!cancellation.signal.aborted) res.status(500).json({ error: (err as Error).message });
+    } finally {
+      cancellation.dispose();
     }
   });
 

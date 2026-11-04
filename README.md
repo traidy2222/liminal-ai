@@ -19,7 +19,7 @@ Run it on your machine through a native desktop app, a browser, or your terminal
 
 Liminal connects a model to the tools it needs to do useful work: read and edit files, run commands, search the web, create documents, and work with connected services. Its agent loop handles tool execution, approvals, retries, context management, and persistent memory.
 
-**Release status:** Liminal is in beta. [Desktop 0.1.23](https://github.com/traidy2222/liminal-ai/releases/tag/v0.1.23-desktop) adds optional offline JARVIS Warm speech with a softer tone at its original pitch and a one-time local model installer. Includes grounded artifact analysis, the full REA catalog, Google Workspace, guided workflows, searchable OpenRouter selection and single-model mode. Screenshots show the application with demo workspace data.
+**Release status:** Liminal is in beta. [Desktop 0.1.24](https://github.com/traidy2222/liminal-ai/releases) adds local Whisper transcription by default, optional Qwen accuracy mode, speech gating and language controls in desktop and web. Includes the warmer local JARVIS voice, grounded artifact analysis, REA tools, Google Workspace, guided workflows and searchable model selection. Screenshots show the application with demo workspace data.
 
 ## Why Liminal
 

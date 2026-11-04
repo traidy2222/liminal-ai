@@ -35,7 +35,7 @@ export function createTranscribeAudioTool(harness: AgentHarness) {
     name: "transcribe_audio",
     description:
       "WHAT: Transcribe an audio (or audio track from video) file to text using the configured ASR model.\n" +
-      "Cheapest model by default (Whisper Large V3 Turbo @ $0.04/hour). Supports mp3, wav, m4a, " +
+      "Local Whisper Large V3 Turbo by default (no ASR API fee), with optional local Qwen accuracy. Supports mp3, wav, m4a, " +
       "webm, ogg, flac, mp4, aac.\n" +
       "WHEN: User uploads a voice note / meeting / podcast / lecture; or `web_fetch` returns an audio URL.\n" +
       "NOT WHEN: The audio is music-only with no speech (returns lyrics or empty), or the file is > 25 MB " +
@@ -78,8 +78,8 @@ export function createTranscribeAudioTool(harness: AgentHarness) {
         model: {
           type: "string",
           description:
-            "Override the configured AGENT_TRANSCRIBE_MODEL (default nvidia/parakeet-tdt-0.6b-v3). " +
-            "Alternatives: openai/whisper-large-v3-turbo (99 languages), qwen/qwen3-asr-flash (Chinese dialects).",
+            "Override the configured AGENT_TRANSCRIBE_MODEL (default local/whisper-large-v3-turbo). " +
+            "Optional accuracy: local/qwen3-asr-1.7b. Local models require one-time installation, no API key. When configured locally, overrides must also be local; choose a cloud model in Settings before using cloud overrides.",
         },
       },
       additionalProperties: false,
@@ -98,14 +98,6 @@ export function createTranscribeAudioTool(harness: AgentHarness) {
       const config = await resolveTranscriptionConfigAsync(harness.getRuntimePreferences());
       if (!config.enabled) {
         return { ok: false, error: "Transcription disabled via AGENT_TRANSCRIBE_ENABLED=0." };
-      }
-      if (!config.apiKey) {
-        return {
-          ok: false,
-          error:
-            "No transcription API key configured. Set AGENT_TRANSCRIBE_API_KEY, AGENT_API_KEY, " +
-            "or OPENROUTER_API_KEY in your .env.",
-        };
       }
 
       let bytes: Buffer;
@@ -191,7 +183,7 @@ export function createTranscribeAudioTool(harness: AgentHarness) {
         );
         const durationStr = result.durationSec ? formatDuration(result.durationSec) : "?";
         const costStr =
-          result.costUsd > 0 ? `$${result.costUsd.toFixed(5)}` : "(cost unknown)";
+          result.provider === "local" || result.costUsd > 0 ? `$${result.costUsd.toFixed(5)}` : "(cost unknown)";
         emit?.(`✓ Transcribed ${durationStr} via ${result.model} · ${costStr}`);
         const body: Record<string, unknown> = {
           text: result.text,

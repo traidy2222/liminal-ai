@@ -590,7 +590,7 @@ export function SettingsModal({
   );
 }
 
-function SettingsFieldRow({
+export function SettingsFieldRow({
   field: f,
   rawValue,
   disabled,
@@ -658,7 +658,7 @@ function SettingsFieldRow({
       >
         {uniq.map((opt) => (
           <option key={opt} value={opt}>
-            {opt}
+            {f.key === "AGENT_TRANSCRIBE_MODEL" ? ({ "local/whisper-large-v3-turbo": "Whisper — Fast · local", "local/qwen3-asr-1.7b": "Qwen — Accuracy · local" }[opt] ?? opt) : opt}
             {!ev.includes(opt) ? " (non-standard)" : ""}
           </option>
         ))}
@@ -766,7 +766,14 @@ function SettingsFieldRow({
           Install once with <code>liminal voice install</code> (about 3 GB of models). No speech API key required.
         </p>
       </div>}
-      <details className="settings-technical"><summary>Technical details</summary><code>{f.key}</code><div style={{ fontSize: 11, color: "var(--lim-text-muted)", marginTop: 8, lineHeight: 1.5 }}>
+      <details className="settings-technical"><summary>Technical details</summary><code>{f.key}</code>
+        {f.key === "AGENT_TRANSCRIBE_MODEL" && <label style={{ display: "grid", gap: 6, marginTop: 8 }}>
+          Custom provider model
+          <input aria-label="Custom transcription model" type="text" value={rawValue} disabled={disabled}
+            onChange={event => onChange(event.target.value)} placeholder="openai/whisper-large-v3-turbo" />
+          <small>Cloud models use your configured provider.</small>
+        </label>}
+      <div style={{ fontSize: 11, color: "var(--lim-text-muted)", marginTop: 8, lineHeight: 1.5 }}>
         <div>
           Effective: <span style={{ color: "#aabccc" }}>{f.effectiveDisplay}</span>
           {f.resolutionSource === "unset" && rawValue === "" ? (

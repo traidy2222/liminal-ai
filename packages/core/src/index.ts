@@ -89,6 +89,7 @@ export type {
   LiminalAppShell,
   LiminalAppShellMode,
 } from "./liminal_apps/index.js";
+export { LOCAL_WHISPER_MODEL, LOCAL_QWEN_MODEL, isLocalTranscriptionModel } from "./transcription_models.js";
 export {
   TRANSCRIPTION_MODEL_RATES,
   DEFAULT_TRANSCRIBE_MODEL,

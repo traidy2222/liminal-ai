@@ -19,15 +19,13 @@ test("default transcription model is the cheapest in the registry", () => {
     (acc, [slug, rate]) => (rate.perSecondUsd < acc[1] ? [slug, rate.perSecondUsd] : acc),
     ["", Infinity]
   );
-  // We default to nvidia/parakeet-tdt-0.6b-v3: cheap ($0.0015/min), accurate
-  // (6.34% avg WER), English + EU. Whisper Turbo remains the broad-multilingual
-  // fallback. The assertion documents the chosen default, not the lowest rate.
+  // The default is on-device and incurs no provider transcription charges.
   assert.equal(
     DEFAULT_TRANSCRIBE_MODEL,
-    "nvidia/parakeet-tdt-0.6b-v3",
-    "default should be NVIDIA Parakeet TDT 0.6B v3"
+    "local/whisper-large-v3-turbo",
+    "default should be local Whisper fast"
   );
-  assert.ok(cheapest[1] > 0, "expected a finite cheapest rate");
+  assert.ok(cheapest[1] === 0, "expected a finite cheapest rate");
 });
 
 test("estimateTranscriptionCostUsd returns 0 for unknown models", () => {
@@ -60,7 +58,7 @@ test("resolveTranscriptionConfig falls back to defaults when env is unset", () =
   try {
     const cfg = resolveTranscriptionConfig(null);
     assert.equal(cfg.enabled, true);
-    assert.equal(cfg.model, "nvidia/parakeet-tdt-0.6b-v3");
+    assert.equal(cfg.model, "local/whisper-large-v3-turbo");
     assert.equal(cfg.timestamps, "segment");
     assert.ok(cfg.maxBytes > 0);
     assert.ok(cfg.timeoutMs > 0);
@@ -109,5 +107,19 @@ test("resolveTranscriptionConfig clamps invalid timestamps to segment", () => {
   } finally {
     if (prevTs === undefined) delete process.env["AGENT_TRANSCRIBE_TIMESTAMPS"];
     else process.env["AGENT_TRANSCRIBE_TIMESTAMPS"] = prevTs;
+  }
+});
+
+
+test("the former Parakeet default migrates to local Whisper, while explicit accuracy mode is retained", () => {
+  const previous = process.env["AGENT_TRANSCRIBE_MODEL"];
+  try {
+    process.env["AGENT_TRANSCRIBE_MODEL"] = "nvidia/parakeet-tdt-0.6b-v3";
+    assert.equal(resolveTranscriptionConfig(null).model, "local/whisper-large-v3-turbo");
+    process.env["AGENT_TRANSCRIBE_MODEL"] = " LOCAL/QWEN3-ASR-1.7B ";
+    assert.equal(resolveTranscriptionConfig(null).model, "local/qwen3-asr-1.7b");
+  } finally {
+    if (previous === undefined) delete process.env["AGENT_TRANSCRIBE_MODEL"];
+    else process.env["AGENT_TRANSCRIBE_MODEL"] = previous;
   }
 });

@@ -19,7 +19,7 @@ export function run(command, args, options = {}) {
   });
 }
 
-async function pinnedUv(home) {
+export async function pinnedUv(home, runCommand = run) {
   const platform = { win32: 'pc-windows-msvc.zip', darwin: 'apple-darwin.tar.gz', linux: 'unknown-linux-gnu.tar.gz' }[process.platform];
   const arch = { x64: 'x86_64', arm64: 'aarch64' }[process.arch];
   if (!platform || !arch) throw new Error('Local voice supports Windows, macOS and Linux on x64/arm64.');
@@ -38,7 +38,7 @@ async function pinnedUv(home) {
   }
   const archive = path.join(binDir, asset.name);
   await writeFile(archive, data);
-  await run(process.platform === 'win32' ? 'tar.exe' : 'tar', ['-xf', archive, '-C', binDir]);
+  await runCommand(process.platform === 'win32' ? 'tar.exe' : 'tar', ['-xf', archive, '-C', binDir]);
   // Unix archives contain a single platform directory; Windows places uv.exe at the root.
   if (!existsSync(binary)) {
     const entries = await readdir(binDir, { withFileTypes: true });

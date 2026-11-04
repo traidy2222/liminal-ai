@@ -21,7 +21,7 @@ test("single-model policy follows selected model and preserves specialist settin
   assert.equal(resolveHarnessEnvRaw("AGENT_EMBED_MODEL", p), "");
   assert.equal(resolveHarnessEnvRaw("AGENT_MANAGED_FREE_FALLBACK", p), "0");
   assert.equal(resolveSpeechSynthesisConfig(p).enabled, false);
-  assert.equal(resolveTranscriptionConfig(p).enabled, false);
+  assert.equal(resolveTranscriptionConfig(p).enabled, true); // On-device ASR is independent of chat routing.
   assert.equal(p.harness!.env!.AGENT_FAST_MODEL, "vendor/fast");
   assert.equal(resolveHarnessEnvRaw("AGENT_FAST_MODEL", prefs("vendor/chosen", "0")), "vendor/fast");
   assert.equal(resolveHarnessEnvRaw("AGENT_FAST_MODEL", prefs("vendor/new")), "vendor/new");

@@ -1,5 +1,9 @@
 /** Everyday setting copy. Unlisted fields remain available under Advanced and search. */
 export const everydaySettings: Record<string, { label: string; description: string }> = {
+  "AGENT_TRANSCRIBE_MODEL": {label: "Transcription mode", description: "Whisper fast runs locally by default. Optional Qwen accuracy uses more memory and supports fewer languages. Install once with liminal transcription install whisper --cuda or qwen --cuda; omit --cuda without an NVIDIA GPU."},
+  "AGENT_TRANSCRIBE_LANGUAGE": {label: "Transcription language", description: "Use auto to detect speech language, or an ISO code such as en, hi, zh, ja or ar. Explicit selection prevents related-language and script mixups."},
+  "AGENT_TRANSCRIBE_ENABLED": {label: "Voice transcription", description: "Transcribe microphone and audio attachments locally without a speech API key."},
+
   "AGENT_TTS_MODEL": {
     label: "Speech model",
     description: "Choose JARVIS Warm for a warmer voice at its original pitch, running on this computer after a one-time download."
@@ -72,6 +76,6 @@ export const everydaySettings: Record<string, { label: string; description: stri
 export const settingsCategories = [{id:"models_api",title:"Model & provider"},{id:"session_ui",title:"Preferences"},{id:"memory_vault",title:"Memory"},{id:"safety",title:"Permissions"},{id:"advanced",title:"Advanced"}];
 export function settingsCategory(tabId: string, key?: string): string {
   if (key === "AGENT_AUTO_DREAM") return "memory_vault";
-  if (key === "AGENT_EFFORT" || key === "AGENT_TTS_ENABLED" || key === "AGENT_TTS_MODEL") return "session_ui";
+  if (key === "AGENT_EFFORT" || key === "AGENT_TTS_ENABLED" || key === "AGENT_TTS_MODEL" || ["AGENT_TRANSCRIBE_MODEL", "AGENT_TRANSCRIBE_LANGUAGE", "AGENT_TRANSCRIBE_ENABLED"].includes(key ?? "")) return "session_ui";
   if (key === "AGENT_BROWSER") return "safety";
   return ["models_api","session_ui","memory_vault","safety"].includes(tabId) ? tabId : "advanced"; }

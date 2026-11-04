@@ -1,5 +1,9 @@
 // Presentation only; advanced fields remain searchable and editable.
 const everydaySettings = <String, ({String label, String description})>{
+  'AGENT_TRANSCRIBE_MODEL': (label: 'Transcription mode', description: 'Whisper fast runs locally by default. Optional Qwen accuracy uses more memory and supports fewer languages. Install once with liminal transcription install whisper --cuda or qwen --cuda; omit --cuda without an NVIDIA GPU.'),
+  'AGENT_TRANSCRIBE_LANGUAGE': (label: 'Transcription language', description: 'Use auto to detect speech language, or an ISO code such as en, hi, zh, ja or ar. Explicit selection prevents related-language and script mixups.'),
+  'AGENT_TRANSCRIBE_ENABLED': (label: 'Voice transcription', description: 'Transcribe microphone and audio attachments locally without a speech API key.'),
+
   'AGENT_TTS_MODEL': (
     label: 'Speech model',
     description: 'Choose JARVIS Warm for a warmer voice at its original pitch, running on this computer after a one-time download.'
@@ -72,7 +76,7 @@ const everydaySettings = <String, ({String label, String description})>{
 };
 String settingsCategory(String tabId, [String? key]) {
   if (key == 'AGENT_AUTO_DREAM') return 'memory_vault';
-  if (key == 'AGENT_EFFORT' || key == 'AGENT_TTS_ENABLED' || key == 'AGENT_TTS_MODEL') return 'session_ui';
+  if (key == 'AGENT_EFFORT' || key == 'AGENT_TTS_ENABLED' || key == 'AGENT_TTS_MODEL' || const {'AGENT_TRANSCRIBE_MODEL', 'AGENT_TRANSCRIBE_LANGUAGE', 'AGENT_TRANSCRIBE_ENABLED'}.contains(key)) return 'session_ui';
   if (key == 'AGENT_BROWSER') return 'safety';
   return const ['models_api', 'session_ui', 'memory_vault', 'safety']
           .contains(tabId)

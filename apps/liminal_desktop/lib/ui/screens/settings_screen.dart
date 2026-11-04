@@ -1036,7 +1036,7 @@ LinkedHashMap<String, List<HarnessSettingsField>> _groupBySubgroup(
   final order = <String>[];
   final map = <String, List<HarnessSettingsField>>{};
   for (final f in fields) {
-    final label = f.key == 'AGENT_EFFORT' || f.key == 'AGENT_TTS_ENABLED' || f.key == 'AGENT_TTS_MODEL'
+    final label = f.key == 'AGENT_EFFORT' || f.key == 'AGENT_TTS_ENABLED' || f.key == 'AGENT_TTS_MODEL' || const {'AGENT_TRANSCRIBE_MODEL', 'AGENT_TRANSCRIBE_LANGUAGE', 'AGENT_TRANSCRIBE_ENABLED'}.contains(f.key)
         ? 'Response & voice'
         : f.subgroupLabel.isNotEmpty
         ? f.subgroupLabel

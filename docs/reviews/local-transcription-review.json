@@ -1,0 +1,78 @@
+{
+  "pullRequest": "https://github.com/traidy2222/liminal-ai/pull/25",
+  "reviewedCommit": "e5b8e8a8a74fae9fff9096692d58e1b3d3743986",
+  "reviewLoop": "1793796300849-75b497fc",
+  "findings": [
+    {
+      "id": "4467566666",
+      "test": "apps/liminal_desktop/test/asr_review_test.dart",
+      "before": "Ending a session during upload started one stale decode.",
+      "after": "Generation guard prevents the decode from being enqueued."
+    },
+    {
+      "id": "4467566677",
+      "test": "scripts/asr_api_docs_review.test.mjs",
+      "before": "API docs promised local provider and zero cost for all model types.",
+      "after": "Document local versus explicitly configured cloud fields and provisional attachment ownership."
+    },
+    {
+      "id": "4467566687",
+      "test": "packages/core/local-asr/setup.test.mjs",
+      "before": "Installer had no recorded owner and an interrupted install blocked retries.",
+      "after": "Unique PID owner entries reject live contenders, reclaim dead owners safely, terminate owned subprocesses on signals, and publish readiness only after decoding succeeds."
+    },
+    {
+      "id": "4467566700",
+      "test": "packages/core/src/transcription_override_review.test.ts",
+      "before": "Cloud override under a local configuration incorrectly reported missing credentials.",
+      "after": "Local configuration explicitly rejects cloud overrides and explains selecting a cloud model in Settings first."
+    },
+    {
+      "id": "4467566779",
+      "test": "packages/tools/src/families/audio/transcription_language_review.test.ts",
+      "before": "Blank and non-string preview language values overrode the Hindi preference.",
+      "after": "Preview and attachment language normalization match."
+    },
+    {
+      "id": "review-summary-desktop-dropdown",
+      "test": "apps/liminal_desktop/test/asr_review_test.dart",
+      "before": "An explicit cloud selection displayed the first local enum choice.",
+      "after": "The current saved value remains visible in enum options."
+    }
+  ],
+  "validation": "Focused failing regressions reproduced before repairs; the same assertions passed after repairs. Final build/typecheck, integration tests and CI validate the combined patch. Local ledger contains per-finding red/green TAP logs; it is collaborator evidence, not a tamper-proof audit.",
+  "followUpReview": {
+    "commit": "a22306f6a16ae899dbc4f2ab68dc93699332ffc8",
+    "reviewLoop": "1793798543704-ba71d56f",
+    "findings": [
+      {
+        "id": "4467963621",
+        "test": "packages/core/local-asr/shutdown_review.test.mjs",
+        "fix": "Retain the lock until tracked child close events, reject new subprocess launches during shutdown, and preserve signal exit status."
+      },
+      {
+        "id": "4467963652",
+        "test": "scripts/asr_release_link_review.test.mjs",
+        "fix": "Use the stable Releases page during publication."
+      },
+      {
+        "id": "summary-legacy-case",
+        "test": "packages/core/src/transcription_legacy_review.test.ts",
+        "fix": "Normalize the legacy model slug before single-model gating."
+      },
+      {
+        "id": "summary-local-cost",
+        "test": "packages/tools/src/families/audio/transcription_status_review.test.ts",
+        "fix": "Distinguish known zero local cost from unknown cloud estimates."
+      },
+      {
+        "id": "summary-custom-model-entry",
+        "tests": [
+          "packages/web/client/settings/customAsrModel.test.ts",
+          "apps/liminal_desktop/test/asr_custom_model_review_test.dart"
+        ],
+        "fix": "Keep local mode choices and provide an explicit custom provider entry in both interfaces."
+      }
+    ]
+  }
+}

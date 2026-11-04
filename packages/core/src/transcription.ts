@@ -1,16 +1,7 @@
+import { transcribeLocalAudio } from "./local_transcription.js";
+import { isLocalTranscriptionModel, LOCAL_WHISPER_MODEL } from "./transcription_models.js";
 import { singleModelEnabled } from "./harness_effective_env.js";
-/**
- * Audio transcription provider abstraction.
- *
- * Two wire formats for `/audio/transcriptions`:
- * - **OpenRouter** (`openrouter.ai`): JSON + base64 `input_audio` (Parakeet, Whisper, …).
- * - **Direct OpenAI** (`api.openai.com`): multipart upload + `verbose_json`.
- *
- * Model registry — defaults to `nvidia/parakeet-tdt-0.6b-v3` at $0.0015/minute
- * (English + EU languages). Falls back to `openai/whisper-large-v3-turbo` for
- * broad 99-language coverage. Per-model rates live next to the registry so cost
- * can be computed locally from the duration the API returns, without a second call.
- */
+/** Local Whisper is the default; Qwen accuracy is optional. Explicit legacy cloud choices remain supported. */
 import { resolveHarnessEnvRaw } from "./harness_effective_env.js";
 import type { RuntimePreferences } from "./runtime_prefs.js";
 import { resolveManagedOpenRouterCredentials } from "./inference_provider.js";
@@ -31,7 +22,9 @@ export interface TranscriptionModelRate {
 }
 
 export const TRANSCRIPTION_MODEL_RATES: Readonly<Record<string, TranscriptionModelRate>> = {
-  // Tier 1 — default. NVIDIA Parakeet: cheapest accurate option, English + EU.
+  "local/whisper-large-v3-turbo": { perSecondUsd: 0, label: "Whisper — Fast (local)", notes: "Default. Offline, multilingual transcription; NVIDIA CUDA or CPU." },
+  "local/qwen3-asr-1.7b": { perSecondUsd: 0, label: "Qwen — Accuracy (local)", notes: "Optional. Better accuracy on several tested languages; more memory and slower startup. Separate installation required." },
+  // Legacy cloud provider. NVIDIA Parakeet: cheapest accurate option, English + EU.
   "nvidia/parakeet-tdt-0.6b-v3": {
     perSecondUsd: 0.0015 / 60,
     label: "NVIDIA Parakeet TDT 0.6B v3",
@@ -75,7 +68,7 @@ export const TRANSCRIPTION_MODEL_RATES: Readonly<Record<string, TranscriptionMod
 };
 
 /** Default model when `AGENT_TRANSCRIBE_MODEL` is unset. */
-export const DEFAULT_TRANSCRIBE_MODEL = "nvidia/parakeet-tdt-0.6b-v3";
+export const DEFAULT_TRANSCRIBE_MODEL = LOCAL_WHISPER_MODEL;
 
 /**
  * Estimate USD cost for a transcription run. Returns 0 when the model isn't in
@@ -91,6 +84,7 @@ export function estimateTranscriptionCostUsd(model: string, durationSec: number)
 
 /** All defaults match the cheapest viable production setup out of the box. */
 export interface TranscriptionConfig {
+  language?: string;
   enabled: boolean;
   model: string;
   baseURL: string;
@@ -109,8 +103,10 @@ export function resolveTranscriptionConfig(
   prefs: RuntimePreferences | null
 ): TranscriptionConfig {
   const enabled = resolveHarnessEnvRaw("AGENT_TRANSCRIBE_ENABLED", prefs) !== "0";
-  const model =
-    resolveHarnessEnvRaw("AGENT_TRANSCRIBE_MODEL", prefs)?.trim() || DEFAULT_TRANSCRIBE_MODEL;
+  const configuredModel = resolveHarnessEnvRaw("AGENT_TRANSCRIBE_MODEL", prefs)?.trim().toLowerCase();
+  // Migrate the former shipped default; explicit alternative cloud providers remain opt-in.
+  const model = !configuredModel || configuredModel === "nvidia/parakeet-tdt-0.6b-v3" ? DEFAULT_TRANSCRIBE_MODEL : configuredModel;
+  const language = resolveHarnessEnvRaw("AGENT_TRANSCRIBE_LANGUAGE", prefs)?.trim() || "auto";
   const baseURL =
     resolveHarnessEnvRaw("AGENT_TRANSCRIBE_BASE_URL", prefs)?.trim() ||
     resolveHarnessEnvRaw("AGENT_API_BASE_URL", prefs)?.trim() ||
@@ -138,7 +134,7 @@ export function resolveTranscriptionConfig(
     resolveHarnessEnvRaw("AGENT_TRANSCRIBE_TIMESTAMPS", prefs)?.trim().toLowerCase() ?? "segment";
   const timestamps: TranscriptionConfig["timestamps"] =
     timestampsRaw === "none" || timestampsRaw === "word" ? timestampsRaw : "segment";
-  return { enabled, model, baseURL, apiKey, maxBytes, timeoutMs, autoOnUpload, timestamps };
+  return { enabled, model, language, baseURL, apiKey: isLocalTranscriptionModel(model) ? "" : apiKey, maxBytes, timeoutMs, autoOnUpload, timestamps };
 }
 
 /** Transcription config with managed-inference routing when entitled (unless AGENT_TRANSCRIBE_API_KEY is set). */
@@ -146,7 +142,7 @@ export async function resolveTranscriptionConfigAsync(
   prefs: RuntimePreferences | null
 ): Promise<TranscriptionConfig> {
   const base = resolveTranscriptionConfig(prefs);
-  if (!base.enabled) return base;
+  if (!base.enabled || isLocalTranscriptionModel(base.model) || base.model.startsWith("local/")) return base;
   if (process.env["AGENT_TRANSCRIBE_API_KEY"]?.trim()) {
     return base;
   }
@@ -166,6 +162,9 @@ export interface TranscriptionSegment {
 }
 
 export interface TranscriptionResult {
+  noSpeech?: boolean;
+  languageConfidence?: number;
+  words?: Array<{ start: number; end: number; word: string; probability: number }>;
   text: string;
   language?: string;
   durationSec?: number;
@@ -182,7 +181,7 @@ export interface TranscriptionInput {
   audio: Buffer | Uint8Array;
   /** Filename including extension — used for content-type detection by the API. */
   filename: string;
-  /** Override the configured model. */
+  /** Override a model within the configured provider; local configs accept local models only. */
   model?: string;
   /** Optional ISO-639 language hint (skip for auto-detect). */
   language?: string;
@@ -211,21 +210,26 @@ export async function transcribeAudio(
   input: TranscriptionInput,
   config: TranscriptionConfig
 ): Promise<TranscriptionResult> {
-  if (singleModelEnabled()) throw new Error("Separate speech models are disabled in single-model mode.");
+  const model = (input.model ?? config.model).trim().toLowerCase() || DEFAULT_TRANSCRIBE_MODEL;
+  input.signal?.throwIfAborted();
   if (!config.enabled) {
     throw new Error("Transcription is disabled (AGENT_TRANSCRIBE_ENABLED=0).");
-  }
-  if (!config.apiKey) {
-    throw new Error(
-      "No transcription API key. Set AGENT_TRANSCRIBE_API_KEY, AGENT_API_KEY, or OPENROUTER_API_KEY."
-    );
   }
   if (input.audio.byteLength > config.maxBytes) {
     throw new Error(
       `Audio file exceeds AGENT_TRANSCRIBE_MAX_BYTES (${config.maxBytes} bytes). Split it first.`
     );
   }
-  const model = (input.model ?? config.model).trim() || DEFAULT_TRANSCRIBE_MODEL;
+  if (model.startsWith("local/")) {
+    if (!isLocalTranscriptionModel(model)) throw new Error(`Unknown local transcription model: ${model}`);
+    const result = await transcribeLocalAudio(model, { audio: Buffer.from(input.audio).toString("base64"),
+      language: input.language ?? config.language, prompt: input.prompt, timestamps: input.timestamps ?? config.timestamps }, config.timeoutMs, input.signal);
+    return { ...result, costUsd: 0, model, provider: "local" };
+  }
+  if (config.model.trim().toLowerCase().startsWith("local/")) throw new Error("Select the cloud transcription model in Settings first. Local configurations accept only local model overrides; audio is never implicitly routed to a cloud provider.");
+  if (singleModelEnabled()) throw new Error("Separate cloud speech models are disabled in single-model mode.");
+  if (!config.apiKey) throw new Error("No transcription API key for the explicitly selected cloud model.");
+  input = { ...input, language: input.language ?? (config.language === "auto" ? undefined : config.language) };
   const timestamps = input.timestamps ?? config.timestamps;
 
   const url = `${config.baseURL.replace(/\/$/, "")}/audio/transcriptions`;

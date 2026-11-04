@@ -35,7 +35,8 @@ class LiminalHarnessField extends StatelessWidget {
             style: theme.textTheme.titleSmall?.copyWith(color: lim.text),
           ),
           subtitle: _descriptionBlock(context, field, locked),
-          value: const {'1', 'on', 'true', 'yes'}.contains(field.value.toLowerCase()),
+          value: const {'1', 'on', 'true', 'yes'}
+              .contains(field.value.toLowerCase()),
           onChanged: locked ? null : (v) => onApply(v ? '1' : '0'),
         ),
       );
@@ -98,14 +99,22 @@ class LiminalHarnessField extends StatelessWidget {
             Align(
               alignment: Alignment.centerLeft,
               child: OutlinedButton(
-                onPressed: locked || field.value == 'local/jarvis-warm' ? null : () {
-                  controller?.text = 'local/jarvis-warm';
-                  onApply('local/jarvis-warm');
-                },
-                child: Text(field.value == 'local/jarvis-warm' ? 'JARVIS Warm selected' : 'Use JARVIS Warm — local'),
+                onPressed: locked || field.value == 'local/jarvis-warm'
+                    ? null
+                    : () {
+                        controller?.text = 'local/jarvis-warm';
+                        onApply('local/jarvis-warm');
+                      },
+                child: Text(
+                  field.value == 'local/jarvis-warm'
+                      ? 'JARVIS Warm selected'
+                      : 'Use JARVIS Warm — local',
+                ),
               ),
             ),
-            const Text('Install once with liminal voice install (about 3 GB of models). No speech API key required.'),
+            const Text(
+              'Install once with liminal voice install (about 3 GB of models). No speech API key required.',
+            ),
           ],
           if (_showEffectiveChip(field))
             Padding(
@@ -144,7 +153,8 @@ class LiminalHarnessField extends StatelessWidget {
     bool locked,
   ) {
     final parts = <String>[];
-    final description = everydaySettings[field.key]?.description ?? field.description;
+    final description =
+        everydaySettings[field.key]?.description ?? field.description;
     if (description != null && description.isNotEmpty) {
       parts.add(description);
     }
@@ -185,7 +195,10 @@ class LiminalHarnessField extends StatelessWidget {
             if (field.lockedByEnv)
               Chip(
                 visualDensity: VisualDensity.compact,
-                label: Text('Locked', style: Theme.of(context).textTheme.labelSmall),
+                label: Text(
+                  'Locked',
+                  style: Theme.of(context).textTheme.labelSmall,
+                ),
               ),
           ],
         ),
@@ -244,11 +257,13 @@ class _EnumField extends StatefulWidget {
 
 class _EnumFieldState extends State<_EnumField> {
   late String _value;
+  late String _customValue;
 
   @override
   void initState() {
     super.initState();
     _value = widget.field.value;
+    _customValue = _value;
   }
 
   @override
@@ -256,6 +271,7 @@ class _EnumFieldState extends State<_EnumField> {
     super.didUpdateWidget(oldWidget);
     if (oldWidget.field.value != widget.field.value) {
       _value = widget.field.value;
+      _customValue = _value;
     }
   }
 
@@ -264,9 +280,10 @@ class _EnumFieldState extends State<_EnumField> {
     final options = widget.field.key == 'AGENT_EFFORT'
         ? ['low', 'medium', 'high', 'xhigh']
         : widget.field.enumValues ?? [_value];
-    final selected = options.contains(_value) ? _value : options.first;
+    final choices = <String>{...options, _value}.toList();
+    final selected = _value;
 
-    return DropdownButtonFormField<String>(
+    final dropdown = DropdownButtonFormField<String>(
       key: ValueKey('${widget.field.key}-$selected'),
       initialValue: selected,
       isExpanded: true,
@@ -276,20 +293,67 @@ class _EnumFieldState extends State<_EnumField> {
         isDense: false,
       ),
       items: [
-        for (final o in options)
+        for (final o in choices)
           DropdownMenuItem(
             value: o,
-            child: Text(o, overflow: TextOverflow.ellipsis),
+            child: Text(
+              widget.field.key == 'AGENT_TRANSCRIBE_MODEL'
+                  ? (const {
+                        'local/whisper-large-v3-turbo':
+                            'Whisper — Fast · local',
+                        'local/qwen3-asr-1.7b': 'Qwen — Accuracy · local',
+                      }[o] ??
+                      o)
+                  : o,
+              overflow: TextOverflow.ellipsis,
+            ),
           ),
       ],
       onChanged: widget.locked
           ? null
           : (v) {
               if (v == null) return;
-              setState(() => _value = v);
+              setState(() {
+                _value = v;
+                _customValue = v;
+              });
               widget.onApply(v);
             },
     );
+    if (widget.field.key != 'AGENT_TRANSCRIBE_MODEL') return dropdown;
+    return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+      dropdown,
+      ExpansionTile(
+          title: const Text('Custom provider model'),
+          tilePadding: EdgeInsets.zero,
+          children: [
+            TextFormField(
+                key: ValueKey('custom-$_value'),
+                initialValue: _value,
+                enabled: !widget.locked,
+                decoration: const InputDecoration(
+                    labelText: 'Custom transcription model',
+                    helperText: 'Cloud models use your configured provider.'),
+                onChanged: (value) {
+                  _customValue = value;
+                }),
+            Align(
+                alignment: Alignment.centerLeft,
+                child: TextButton(
+                    onPressed: widget.locked
+                        ? null
+                        : () {
+                            final value = _customValue.trim();
+                            if (value.isEmpty) return;
+                            setState(() {
+                              _value = value;
+                              _customValue = value;
+                            });
+                            widget.onApply(value);
+                          },
+                    child: const Text('Use custom model'))),
+          ]),
+    ]);
   }
 }
 
@@ -348,7 +412,10 @@ class LiminalTextField extends StatelessWidget {
             enabled: enabled,
             minLines: minLines,
             maxLines: maxLines,
-            style: Theme.of(context).textTheme.bodyLarge?.copyWith(color: lim.text),
+            style: Theme.of(context)
+                .textTheme
+                .bodyLarge
+                ?.copyWith(color: lim.text),
             decoration: InputDecoration(
               hintText: hint,
               floatingLabelBehavior: FloatingLabelBehavior.never,

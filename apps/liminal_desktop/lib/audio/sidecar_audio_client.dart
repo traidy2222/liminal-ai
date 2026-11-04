@@ -31,6 +31,13 @@ class SidecarAudioClient {
   final int port;
   final String token;
   final String chatId;
+  final Set<HttpClient> _transcriptionClients = {};
+  void cancelTranscriptionRequests() {
+    for (final client in _transcriptionClients.toList()) {
+      client.close(force: true);
+    }
+    _transcriptionClients.clear();
+  }
 
   Uri _uri(String path, {Map<String, String>? query}) {
     final q = <String, String>{
@@ -85,22 +92,28 @@ class SidecarAudioClient {
     }
   }
 
-  Future<String> uploadWavBytes(Uint8List bytes, {String filename = 'dictation.wav'}) async {
+  Future<String> uploadWavBytes(
+    Uint8List bytes, {
+    String filename = 'dictation.wav',
+  }) async {
     final b64 = base64Encode(bytes);
     final dataUrl = 'data:audio/wav;base64,$b64';
     final client = HttpClient();
     try {
       final req = await client.postUrl(_uri('/api/audio/upload'));
       req.headers.contentType = ContentType.json;
-      req.write(jsonEncode({
-        'dataUrl': dataUrl,
-        'filename': filename,
-        'mimeType': 'audio/wav',
-      }));
+      req.write(
+        jsonEncode({
+          'dataUrl': dataUrl,
+          'filename': filename,
+          'mimeType': 'audio/wav',
+        }),
+      );
       final resp = await req.close();
       final body = await resp.transform(utf8.decoder).join();
       if (resp.statusCode < 200 || resp.statusCode >= 300) {
-        final err = _parseError(body) ?? 'Upload failed HTTP ${resp.statusCode}';
+        final err =
+            _parseError(body) ?? 'Upload failed HTTP ${resp.statusCode}';
         throw HttpException(err);
       }
       final json = jsonDecode(body) as Map<String, dynamic>;
@@ -114,17 +127,39 @@ class SidecarAudioClient {
     }
   }
 
+  Future<String> preview(Uint8List wav) async {
+    final client = HttpClient();
+    _transcriptionClients.add(client);
+    try {
+      final req = await client.postUrl(_uri('/api/transcribe'));
+      req.headers.contentType = ContentType.json;
+      req.write(jsonEncode({'previewWav': base64Encode(wav)}));
+      final resp = await req.close();
+      final body = await resp.transform(utf8.decoder).join();
+      if (resp.statusCode != 200) {
+        throw HttpException(_parseError(body) ?? 'Local preview failed');
+      }
+      return (jsonDecode(body) as Map<String, dynamic>)['text'] as String? ??
+          '';
+    } finally {
+      _transcriptionClients.remove(client);
+      client.close(force: true);
+    }
+  }
+
   Future<TranscribeResult?> transcribe(String attachmentId) async {
     final client = HttpClient();
+    _transcriptionClients.add(client);
     try {
       final req = await client.postUrl(_uri('/api/transcribe'));
       req.headers.contentType = ContentType.json;
       req.write(jsonEncode({'attachmentId': attachmentId}));
       final resp = await req.close();
       final body = await resp.transform(utf8.decoder).join();
-      if (resp.statusCode == 503) return null;
+      // Surface missing runtime/setup failures instead of silently dropping speech.
       if (resp.statusCode < 200 || resp.statusCode >= 300) {
-        final err = _parseError(body) ?? 'Transcribe failed HTTP ${resp.statusCode}';
+        final err =
+            _parseError(body) ?? 'Transcribe failed HTTP ${resp.statusCode}';
         throw HttpException(err);
       }
       final json = jsonDecode(body) as Map<String, dynamic>;
@@ -136,6 +171,7 @@ class SidecarAudioClient {
         model: json['model'] as String? ?? '',
       );
     } finally {
+      _transcriptionClients.remove(client);
       client.close(force: true);
     }
   }

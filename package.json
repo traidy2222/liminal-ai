@@ -19,6 +19,8 @@
   ],
   "scripts": {
     "voice:install": "node packages/core/local-voice/setup.mjs install",
+    "transcription:install": "node packages/core/local-asr/setup.mjs install",
+    "transcription:status": "node packages/core/local-asr/setup.mjs status",
     "voice:status": "node packages/core/local-voice/setup.mjs status",
     "pretest:oauth": "npm run build -w @liminal/core",
     "test:oauth": "node --import tsx --test packages/core/src/hosted_oauth_connect.test.ts packages/core/src/hosted_oauth_license_regression.test.ts packages/tools/src/integrations/core/oauth_readiness_regression.test.ts packages/tools/src/integrations/google/google_sidecar.test.ts",
