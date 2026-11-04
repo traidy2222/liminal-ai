@@ -53,7 +53,7 @@ function resolutionLabel(source: string): string {
 function groupBySubgroup(rows: HarnessSettingsApiField[]): [string, string, HarnessSettingsApiField[]][] {
   const m = new Map<string, { label: string; rows: HarnessSettingsApiField[] }>();
   for (const f of rows) {
-    const group = f.key === "AGENT_EFFORT" || f.key === "AGENT_TTS_ENABLED" ? "Response & voice" : f.subgroupLabel;
+    const group = f.key === "AGENT_EFFORT" || f.key === "AGENT_TTS_ENABLED" || f.key === "AGENT_TTS_MODEL" ? "Response & voice" : f.subgroupLabel;
     const prev = m.get(group);
     if (prev) prev.rows.push(f);
     else m.set(group, { label: group, rows: [f] });
@@ -757,6 +757,15 @@ function SettingsFieldRow({
       </div>
 
       <div style={{ marginTop: 8, display: "grid", gridTemplateColumns: "minmax(0,1fr)", gap: 6 }}>{control}</div>
+      {f.key === "AGENT_TTS_MODEL" && <div style={{ marginTop: 8 }}>
+        <button type="button" style={btn} disabled={disabled || rawValue === "local/jarvis-warm"}
+          onClick={() => onChange("local/jarvis-warm")}>
+          {rawValue === "local/jarvis-warm" ? "JARVIS Warm selected" : "Use JARVIS Warm — local"}
+        </button>
+        <p style={{ fontSize: 12, color: "var(--lim-text-muted)" }}>
+          Install once with <code>liminal voice install</code> (about 3 GB of models). No speech API key required.
+        </p>
+      </div>}
       <details className="settings-technical"><summary>Technical details</summary><code>{f.key}</code><div style={{ fontSize: 11, color: "var(--lim-text-muted)", marginTop: 8, lineHeight: 1.5 }}>
         <div>
           Effective: <span style={{ color: "#aabccc" }}>{f.effectiveDisplay}</span>

@@ -1,5 +1,9 @@
 // Presentation only; advanced fields remain searchable and editable.
 const everydaySettings = <String, ({String label, String description})>{
+  'AGENT_TTS_MODEL': (
+    label: 'Speech model',
+    description: 'Choose JARVIS Warm for a warmer voice at its original pitch, running on this computer after a one-time download.'
+  ),
   'AGENT_FAST_MODEL': (
     label: "Background model",
     description: "Model used for quick background tasks."
@@ -68,7 +72,7 @@ const everydaySettings = <String, ({String label, String description})>{
 };
 String settingsCategory(String tabId, [String? key]) {
   if (key == 'AGENT_AUTO_DREAM') return 'memory_vault';
-  if (key == 'AGENT_EFFORT' || key == 'AGENT_TTS_ENABLED') return 'session_ui';
+  if (key == 'AGENT_EFFORT' || key == 'AGENT_TTS_ENABLED' || key == 'AGENT_TTS_MODEL') return 'session_ui';
   if (key == 'AGENT_BROWSER') return 'safety';
   return const ['models_api', 'session_ui', 'memory_vault', 'safety']
           .contains(tabId)

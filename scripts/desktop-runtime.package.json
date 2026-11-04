@@ -9,6 +9,8 @@
     "packages/sidecar"
   ],
   "scripts": {
+    "voice:install": "node packages/core/local-voice/setup.mjs install",
+    "voice:status": "node packages/core/local-voice/setup.mjs status",
     "postinstall": "node scripts/patch-node-pty.mjs"
   }
 }

@@ -15,6 +15,8 @@ const USAGE = `Liminal — one-command setup and launcher
 Usage:
   liminal setup [options]     Interactive first-run wizard (writes .env, install, build)
   liminal doctor              Verify Node, build artifacts, API key, port
+  liminal voice install       Install the optional local JARVIS Warm voice (--cuda for NVIDIA)
+  liminal voice status        Check whether the local voice is installed
   liminal web [options]       Start web UI (production — same as customers)
   liminal tui [options]       Start terminal UI
   liminal update              git pull + npm install + build (git) or check desktop release (portable)
@@ -63,6 +65,10 @@ async function main(argv) {
   }
 
   switch (command) {
+    case "voice": {
+      const { runVoiceCli } = await import("../packages/core/local-voice/setup.mjs");
+      return runVoiceCli(rest);
+    }
     case "setup":
       return runSetup(rest);
     case "doctor": {

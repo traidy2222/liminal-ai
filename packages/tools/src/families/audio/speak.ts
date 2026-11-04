@@ -30,7 +30,7 @@ export async function emitSpokenClips(
     coerceTtsConfigForBrowserPlayback(cfg)
   );
   for (const seg of multi.segments) {
-    const saved = await saveTtsClip(chatId, seg.audio, seg.mimeType, seg.spokenText);
+    const saved = await saveTtsClip(chatId, seg.audio, seg.mimeType, seg.spokenText, JSON.stringify([seg.provider, seg.model, seg.voice]));
     harness.emitter.emit("speech", {
       clipId: saved.clipId,
       text: seg.spokenText,

@@ -10,7 +10,7 @@ import { normalizeTtsBytesForBrowserPlayback, perChatPath } from "@liminal/core"
 const TTS_SUBDIR = "tts";
 const TTS_CACHE_INDEX = "cache.json";
 /** Bump when clip hashing or synthesis semantics change (invalidates stale truncated cache). */
-const TTS_CLIP_CACHE_VERSION = 2;
+const TTS_CLIP_CACHE_VERSION = 3;
 
 function extForMime(mimeType: string): string {
   const m = mimeType.toLowerCase();
@@ -22,15 +22,15 @@ function extForMime(mimeType: string): string {
   return "bin";
 }
 
-function contentHashFor(spokenText: string): string {
+function contentHashFor(spokenText: string, voiceIdentity: string): string {
   return createHash("sha256")
-    .update(`v${TTS_CLIP_CACHE_VERSION}:${spokenText.trim().toLowerCase()}`)
+    .update(JSON.stringify([TTS_CLIP_CACHE_VERSION, voiceIdentity, spokenText.trim()]))
     .digest("hex")
     .slice(0, 16);
 }
 
 interface TtsCacheIndex {
-  version: 2;
+  version: 3;
   byContentHash: Record<string, { clipId: string; ext: string }>;
 }
 
@@ -45,13 +45,13 @@ async function readCacheIndex(chatId: string): Promise<TtsCacheIndex> {
   try {
     const raw = await readFile(indexPath, "utf8");
     const parsed = JSON.parse(raw) as TtsCacheIndex;
-    if (parsed?.version === 2 && parsed.byContentHash && typeof parsed.byContentHash === "object") {
+    if (parsed?.version === 3 && parsed.byContentHash && typeof parsed.byContentHash === "object") {
       return parsed;
     }
   } catch {
     /* fresh index */
   }
-  return { version: 2, byContentHash: {} };
+  return { version: 3, byContentHash: {} };
 }
 
 async function writeCacheIndex(chatId: string, index: TtsCacheIndex): Promise<void> {
@@ -75,9 +75,10 @@ export async function saveTtsClip(
   chatId: string,
   audio: Uint8Array,
   mimeType: string,
-  spokenText: string
+  spokenText: string,
+  voiceIdentity = "legacy"
 ): Promise<SavedTtsClip> {
-  const hash = contentHashFor(spokenText);
+  const hash = contentHashFor(spokenText, voiceIdentity);
   const dir = await ttsDirFor(chatId);
   const index = await readCacheIndex(chatId);
   const cached = index.byContentHash[hash];

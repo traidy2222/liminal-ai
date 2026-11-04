@@ -39,6 +39,9 @@ for name in "${PACKAGES[@]}"; do
   mkdir -p "$dest_pkg"
   cp "$src_pkg/package.json" "$dest_pkg/"
   cp -R "$src_pkg/dist" "$dest_pkg/"
+  if [[ "$name" == "core" ]]; then
+    cp -R "$src_pkg/local-voice" "$dest_pkg/"
+  fi
 done
 
 [[ -f "$REPO_ROOT/LICENSE" ]] && cp "$REPO_ROOT/LICENSE" "$BUNDLE_REPO/LICENSE"
@@ -59,6 +62,11 @@ First run:
   3. Run the Liminal Desktop app from its release folder (not this directory).
 
 Pro users can sign in inside the app instead of using a local API key.
+
+Optional offline voice:
+  From this repo folder run `npm run voice:install` (CPU), or
+  `npm run voice:install -- --cuda` (NVIDIA). Models download once (about 3 GB).
+  Then choose JARVIS Warm - local in Settings and enable Spoken responses.
 EOF
 
 if [[ "${COPY_NODE_MODULES_FROM_REPO:-0}" == "1" && -d "$REPO_ROOT/node_modules" ]]; then

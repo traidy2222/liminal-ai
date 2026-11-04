@@ -93,6 +93,20 @@ class LiminalHarnessField extends StatelessWidget {
               ),
             ],
           ),
+          if (field.key == 'AGENT_TTS_MODEL') ...[
+            const SizedBox(height: LiminalSpacing.sm),
+            Align(
+              alignment: Alignment.centerLeft,
+              child: OutlinedButton(
+                onPressed: locked || field.value == 'local/jarvis-warm' ? null : () {
+                  controller?.text = 'local/jarvis-warm';
+                  onApply('local/jarvis-warm');
+                },
+                child: Text(field.value == 'local/jarvis-warm' ? 'JARVIS Warm selected' : 'Use JARVIS Warm — local'),
+              ),
+            ),
+            const Text('Install once with liminal voice install (about 3 GB of models). No speech API key required.'),
+          ],
           if (_showEffectiveChip(field))
             Padding(
               padding: const EdgeInsets.only(top: LiminalSpacing.xs),

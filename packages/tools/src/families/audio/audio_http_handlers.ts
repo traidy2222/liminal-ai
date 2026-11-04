@@ -178,7 +178,7 @@ export async function handleTtsPost(
   );
   const clips = [];
   for (const seg of multi.segments) {
-    const saved = await saveTtsClip(bridge.chatId, seg.audio, seg.mimeType, seg.spokenText);
+    const saved = await saveTtsClip(bridge.chatId, seg.audio, seg.mimeType, seg.spokenText, JSON.stringify([seg.provider, seg.model, seg.voice]));
     clips.push({
       clipId: saved.clipId,
       audioUrl: ttsClipAudioUrl(saved.clipId),
