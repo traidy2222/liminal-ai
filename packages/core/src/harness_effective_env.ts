@@ -114,7 +114,7 @@ export function resolveHarnessEnvRaw(key: string, prefs: RuntimePreferences | nu
       return resolveConfiguredHarnessEnvRaw(key, prefs);
     }
     if (key === "AGENT_TRANSCRIBE_ENABLED") {
-      const model = resolveConfiguredHarnessEnvRaw("AGENT_TRANSCRIBE_MODEL", prefs) ?? "";
+      const model = resolveConfiguredHarnessEnvRaw("AGENT_TRANSCRIBE_MODEL", prefs)?.trim().toLowerCase() ?? "";
       if (isLocalTranscriptionModel(model) || model === "nvidia/parakeet-tdt-0.6b-v3") return resolveConfiguredHarnessEnvRaw(key, prefs);
     }
     if (key === "AGENT_EMBED_MODEL") return "";

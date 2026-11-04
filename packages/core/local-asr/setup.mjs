@@ -33,7 +33,9 @@ export async function installTranscription({ profile = 'whisper', cuda = false, 
   await mkdir(home, { recursive: true });
   const releaseLock = await acquireInstallLock(home);
   const children = new Set();
+  let stopping;
   const run = (command, args) => new Promise((resolve, reject) => {
+    if (stopping) { reject(new Error("Installation cancelled.")); return; }
     const child = spawn(command, args, { stdio: 'inherit', windowsHide: true, detached: process.platform !== 'win32' });
     children.add(child);
     child.once('error', reject);
@@ -43,15 +45,21 @@ export async function installTranscription({ profile = 'whisper', cuda = false, 
     });
   });
   const stop = code => {
-    // Terminate only processes spawned by this installation before releasing ownership.
-    for (const child of children) {
-      if (!child.pid) continue;
-      try {
-        if (process.platform === 'win32') execFileSync('taskkill.exe', ['/PID', String(child.pid), '/T', '/F'], { stdio: 'ignore', windowsHide: true });
-        else process.kill(-child.pid, 'SIGKILL');
-      } catch { /* already exited */ }
-    }
-    releaseLock(); process.exit(code);
+    if (stopping) return stopping;
+    stopping = (async () => {
+      const tracked = [...children];
+      const closed = tracked.map(child => new Promise(resolve => child.once('close', resolve)));
+      for (const child of tracked) {
+        if (!child.pid) continue;
+        try {
+          if (process.platform === 'win32') execFileSync('taskkill.exe', ['/PID', String(child.pid), '/T', '/F'], { stdio: 'ignore', windowsHide: true });
+          else process.kill(-child.pid, 'SIGKILL');
+        } catch { /* already exited */ }
+      }
+      await Promise.all(closed);
+      releaseLock(); process.exit(code);
+    })();
+    return stopping;
   };
   const interrupt = () => stop(130), terminate = () => stop(143);
   process.once('SIGINT', interrupt); process.once('SIGTERM', terminate);
@@ -79,6 +87,7 @@ export async function installTranscription({ profile = 'whisper', cuda = false, 
     await writeFile(path.join(home, 'ready.json'), JSON.stringify(marker));
     console.log('Ready. Select Whisper fast or Qwen accuracy in Settings → Preferences → Voice. Inference now runs offline.');
   } finally {
+    if (stopping) await stopping;
     process.off('SIGINT', interrupt); process.off('SIGTERM', terminate); releaseLock();
   }
 }

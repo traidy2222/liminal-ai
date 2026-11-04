@@ -64,7 +64,11 @@ void main() {
       await controller.startSession();
       await Future<void>.delayed(const Duration(milliseconds: 750));
       recorder.amplitude = -10;
-      await Future<void>.delayed(const Duration(milliseconds: 160));
+      for (var i = 0;
+          i < 40 && controller.status != DictationStatus.recording;
+          i++) {
+        await Future<void>.delayed(const Duration(milliseconds: 50));
+      }
       expect(controller.status, DictationStatus.recording);
       recorder.pcm.add(Uint8List(48000));
       await Future<void>.delayed(const Duration(milliseconds: 20));

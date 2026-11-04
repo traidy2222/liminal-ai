@@ -257,11 +257,13 @@ class _EnumField extends StatefulWidget {
 
 class _EnumFieldState extends State<_EnumField> {
   late String _value;
+  late String _customValue;
 
   @override
   void initState() {
     super.initState();
     _value = widget.field.value;
+    _customValue = _value;
   }
 
   @override
@@ -269,6 +271,7 @@ class _EnumFieldState extends State<_EnumField> {
     super.didUpdateWidget(oldWidget);
     if (oldWidget.field.value != widget.field.value) {
       _value = widget.field.value;
+      _customValue = _value;
     }
   }
 
@@ -280,7 +283,7 @@ class _EnumFieldState extends State<_EnumField> {
     final choices = <String>{...options, _value}.toList();
     final selected = _value;
 
-    return DropdownButtonFormField<String>(
+    final dropdown = DropdownButtonFormField<String>(
       key: ValueKey('${widget.field.key}-$selected'),
       initialValue: selected,
       isExpanded: true,
@@ -310,10 +313,47 @@ class _EnumFieldState extends State<_EnumField> {
           ? null
           : (v) {
               if (v == null) return;
-              setState(() => _value = v);
+              setState(() {
+                _value = v;
+                _customValue = v;
+              });
               widget.onApply(v);
             },
     );
+    if (widget.field.key != 'AGENT_TRANSCRIBE_MODEL') return dropdown;
+    return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+      dropdown,
+      ExpansionTile(
+          title: const Text('Custom provider model'),
+          tilePadding: EdgeInsets.zero,
+          children: [
+            TextFormField(
+                key: ValueKey('custom-$_value'),
+                initialValue: _value,
+                enabled: !widget.locked,
+                decoration: const InputDecoration(
+                    labelText: 'Custom transcription model',
+                    helperText: 'Cloud models use your configured provider.'),
+                onChanged: (value) {
+                  _customValue = value;
+                }),
+            Align(
+                alignment: Alignment.centerLeft,
+                child: TextButton(
+                    onPressed: widget.locked
+                        ? null
+                        : () {
+                            final value = _customValue.trim();
+                            if (value.isEmpty) return;
+                            setState(() {
+                              _value = value;
+                              _customValue = value;
+                            });
+                            widget.onApply(value);
+                          },
+                    child: const Text('Use custom model'))),
+          ]),
+    ]);
   }
 }
 

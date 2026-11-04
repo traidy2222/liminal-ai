@@ -40,5 +40,39 @@
       "after": "The current saved value remains visible in enum options."
     }
   ],
-  "validation": "Focused failing regressions reproduced before repairs; the same assertions passed after repairs. Final build/typecheck, integration tests and CI validate the combined patch. Local ledger contains per-finding red/green TAP logs; it is collaborator evidence, not a tamper-proof audit."
+  "validation": "Focused failing regressions reproduced before repairs; the same assertions passed after repairs. Final build/typecheck, integration tests and CI validate the combined patch. Local ledger contains per-finding red/green TAP logs; it is collaborator evidence, not a tamper-proof audit.",
+  "followUpReview": {
+    "commit": "a22306f6a16ae899dbc4f2ab68dc93699332ffc8",
+    "reviewLoop": "1793798543704-ba71d56f",
+    "findings": [
+      {
+        "id": "4467963621",
+        "test": "packages/core/local-asr/shutdown_review.test.mjs",
+        "fix": "Retain the lock until tracked child close events, reject new subprocess launches during shutdown, and preserve signal exit status."
+      },
+      {
+        "id": "4467963652",
+        "test": "scripts/asr_release_link_review.test.mjs",
+        "fix": "Use the stable Releases page during publication."
+      },
+      {
+        "id": "summary-legacy-case",
+        "test": "packages/core/src/transcription_legacy_review.test.ts",
+        "fix": "Normalize the legacy model slug before single-model gating."
+      },
+      {
+        "id": "summary-local-cost",
+        "test": "packages/tools/src/families/audio/transcription_status_review.test.ts",
+        "fix": "Distinguish known zero local cost from unknown cloud estimates."
+      },
+      {
+        "id": "summary-custom-model-entry",
+        "tests": [
+          "packages/web/client/settings/customAsrModel.test.ts",
+          "apps/liminal_desktop/test/asr_custom_model_review_test.dart"
+        ],
+        "fix": "Keep local mode choices and provide an explicit custom provider entry in both interfaces."
+      }
+    ]
+  }
 }

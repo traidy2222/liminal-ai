@@ -35,7 +35,7 @@ export function createTranscribeAudioTool(harness: AgentHarness) {
     name: "transcribe_audio",
     description:
       "WHAT: Transcribe an audio (or audio track from video) file to text using the configured ASR model.\n" +
-      "Cheapest model by default (Whisper Large V3 Turbo @ $0.04/hour). Supports mp3, wav, m4a, " +
+      "Local Whisper Large V3 Turbo by default (no ASR API fee), with optional local Qwen accuracy. Supports mp3, wav, m4a, " +
       "webm, ogg, flac, mp4, aac.\n" +
       "WHEN: User uploads a voice note / meeting / podcast / lecture; or `web_fetch` returns an audio URL.\n" +
       "NOT WHEN: The audio is music-only with no speech (returns lyrics or empty), or the file is > 25 MB " +
@@ -183,7 +183,7 @@ export function createTranscribeAudioTool(harness: AgentHarness) {
         );
         const durationStr = result.durationSec ? formatDuration(result.durationSec) : "?";
         const costStr =
-          result.costUsd > 0 ? `$${result.costUsd.toFixed(5)}` : "(cost unknown)";
+          result.provider === "local" || result.costUsd > 0 ? `$${result.costUsd.toFixed(5)}` : "(cost unknown)";
         emit?.(`✓ Transcribed ${durationStr} via ${result.model} · ${costStr}`);
         const body: Record<string, unknown> = {
           text: result.text,
