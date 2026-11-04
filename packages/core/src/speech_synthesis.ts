@@ -404,7 +404,11 @@ export async function synthesizeSpeechMulti(
   input: SynthesizeSpeechInput,
   config: SpeechSynthesisConfig
 ): Promise<SynthesizeSpeechMultiResult> {
-  const local = isLocalSpeechModel(normalizeTtsModelSlug(input.model ?? config.model));
+  const requestedModel = normalizeTtsModelSlug(input.model ?? config.model);
+  const local = isLocalSpeechModel(requestedModel);
+  if (requestedModel.startsWith("local/") && !local) {
+    throw new Error(`Unknown local speech model: ${requestedModel}. Select local/jarvis-warm.`);
+  }
   if (singleModelEnabled() && !local) throw new Error("Separate speech models are disabled in single-model mode.");
   if (!config.enabled) {
     throw new Error("Text-to-speech is disabled (AGENT_TTS_ENABLED=0).");

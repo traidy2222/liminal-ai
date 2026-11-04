@@ -2,7 +2,7 @@
 
 All notable changes to [Liminal AI](https://github.com/traidy2222/liminal-ai) on the `main` branch.
 
-**Current stage:** **beta** (`v0.1.22`, 2026-11-04). Desktop downloads are published through the public preview release channel.
+**Current stage:** **beta** (`v0.1.23`, 2026-11-04). Desktop downloads are published through the public preview release channel.
 
 Format: **v0.0.x** entries keyed to the last GitHub push in each slice. Dates are real push dates.
 
@@ -17,9 +17,24 @@ After editing JSON: `npm run changelog:gen`, commit, push, then in [vireondynami
 
 ---
 
+## v0.1.23 — 2026-11-04 {#v0-1-23}
+
+**Current beta.** A warmer JARVIS voice, running on your computer.
+
+**Shipped**
+
+- **JARVIS Warm, original pitch** — The approved warmer voice profile softens upper frequencies and targets a comfortable -23 LUFS output without pitch shifting.
+- **Optional local setup** — Install once with `liminal voice install`, or add `--cuda` for NVIDIA acceleration. Managed Python avoids requiring a system Python, Git or FFmpeg. Model weights download once (about 3 GB) and remain separate from app updates.
+- **Offline playback** — Desktop and web use the same local speech backend, with no speech API key and no cloud speech fallback. Explicit local playback remains available with single-model chat.
+- **Reliable voice changes** — A serialized warm worker handles cancellation, timeouts, closed input pipes and idle cleanup. Voice/model-aware caching prevents replaying old cloud voice clips after switching.
+- **Clear limits** — This is an experimental small-data voice adapter. CPU inference can be slow; CUDA is optional. Source provenance, upstream model licensing and the normal Chatterbox watermark are retained.
+- **Docs** — [Local voice setup](../guides/voice.md)
+
+---
+
 ## v0.1.22 — 2026-11-04 {#v0-1-22}
 
-**Current beta.** Grounded artifact analysis, with a repaired REA backend.
+Grounded artifact analysis, with a repaired REA backend.
 
 **Shipped**
 

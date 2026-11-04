@@ -56,7 +56,10 @@ test("explicit local speech works with one chat model, without cloud credentials
     const originalFetch=globalThis.fetch;
     process.env["LIMINAL_LOCAL_VOICE_HOME"]=fileURLToPath(new URL("./fixtures/no-voice-installed",import.meta.url));
     globalThis.fetch=async()=>{throw new Error("Unexpected network request");};
-    try {await assert.rejects(synthesizeSpeechMulti({text:"Hello sir."},{...resolved,apiKey:""}),/Install the local voice first/);}
+    try {
+      await assert.rejects(synthesizeSpeechMulti({text:"Hello sir."},{...resolved,apiKey:""}),/Install the local voice first/);
+      await assert.rejects(synthesizeSpeechMulti({text:"Keep this on device."},{...resolved,model:"local/unknown",apiKey:"never-send"}),/Unknown local speech model/);
+    }
     finally {
       globalThis.fetch=originalFetch;
       if(previous===undefined)delete process.env["LIMINAL_LOCAL_VOICE_HOME"];else process.env["LIMINAL_LOCAL_VOICE_HOME"]=previous;
