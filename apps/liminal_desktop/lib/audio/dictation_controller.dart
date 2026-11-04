@@ -558,6 +558,9 @@ class DictationController extends ChangeNotifier {
 
     try {
       final attachmentId = await client.uploadWavBytes(wav);
+      if (_disposed ||
+          !sessionActive ||
+          sessionGeneration != _sessionGeneration) return;
       status = DictationStatus.transcribing;
       notifyListeners();
       final result = await client.transcribe(attachmentId);

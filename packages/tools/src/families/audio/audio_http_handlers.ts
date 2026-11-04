@@ -118,6 +118,7 @@ export async function handleTranscribe(
     model?: string;
   }
 ): Promise<AudioHandlerResult> {
+  const language = typeof body.language === "string" ? body.language.trim() || undefined : undefined;
   if (typeof body.previewWav === "string") {
     if (body.previewWav.length > 512_060) return { ok: false, status: 413, body: { error: "Preview is limited to 12 seconds of mono 16 kHz PCM WAV." } };
     const audio = Buffer.from(body.previewWav, "base64");
@@ -130,7 +131,7 @@ export async function handleTranscribe(
     }
     const config = await resolveTranscriptionConfigAsync(bridge.getRuntimePreferences());
     if (!config.model.startsWith("local/")) return { ok: false, status: 400, body: { error: "Live previews require a local transcription model." } };
-    const result = await transcribeAudio({ audio, filename: "preview.wav", language: body.language, timestamps: "none", signal: bridge.signal }, config);
+    const result = await transcribeAudio({ audio, filename: "preview.wav", language, timestamps: "none", signal: bridge.signal }, config);
     return { ok: true, status: 200, body: { ok: true, ...result, provisional: true } };
   }
   const id = String(body.attachmentId ?? "").trim();
@@ -151,7 +152,7 @@ export async function handleTranscribe(
       signal: bridge.signal,
       audio: bytes,
       filename: record.filename,
-      language: body.language?.trim() || undefined,
+      language,
       prompt: body.prompt?.slice(0, 1500),
       timestamps:
         body.timestamps === "none" || body.timestamps === "word" || body.timestamps === "segment"

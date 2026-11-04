@@ -277,7 +277,8 @@ class _EnumFieldState extends State<_EnumField> {
     final options = widget.field.key == 'AGENT_EFFORT'
         ? ['low', 'medium', 'high', 'xhigh']
         : widget.field.enumValues ?? [_value];
-    final selected = options.contains(_value) ? _value : options.first;
+    final choices = <String>{...options, _value}.toList();
+    final selected = _value;
 
     return DropdownButtonFormField<String>(
       key: ValueKey('${widget.field.key}-$selected'),
@@ -289,7 +290,7 @@ class _EnumFieldState extends State<_EnumField> {
         isDense: false,
       ),
       items: [
-        for (final o in options)
+        for (final o in choices)
           DropdownMenuItem(
             value: o,
             child: Text(

@@ -181,7 +181,7 @@ export interface TranscriptionInput {
   audio: Buffer | Uint8Array;
   /** Filename including extension — used for content-type detection by the API. */
   filename: string;
-  /** Override the configured model. */
+  /** Override a model within the configured provider; local configs accept local models only. */
   model?: string;
   /** Optional ISO-639 language hint (skip for auto-detect). */
   language?: string;
@@ -226,6 +226,7 @@ export async function transcribeAudio(
       language: input.language ?? config.language, prompt: input.prompt, timestamps: input.timestamps ?? config.timestamps }, config.timeoutMs, input.signal);
     return { ...result, costUsd: 0, model, provider: "local" };
   }
+  if (config.model.trim().toLowerCase().startsWith("local/")) throw new Error("Select the cloud transcription model in Settings first. Local configurations accept only local model overrides; audio is never implicitly routed to a cloud provider.");
   if (singleModelEnabled()) throw new Error("Separate cloud speech models are disabled in single-model mode.");
   if (!config.apiKey) throw new Error("No transcription API key for the explicitly selected cloud model.");
   input = { ...input, language: input.language ?? (config.language === "auto" ? undefined : config.language) };

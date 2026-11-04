@@ -1,9 +1,11 @@
 import { existsSync } from 'node:fs';
-import { mkdir, open, readFile, unlink, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, unlink, writeFile } from 'node:fs/promises';
+import { spawn, execFileSync } from 'node:child_process';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { pinnedUv, run } from '../local-voice/setup.mjs';
+import { pinnedUv } from '../local-voice/setup.mjs';
+import { acquireInstallLock } from './install_lock.mjs';
 
 const assets = path.dirname(fileURLToPath(import.meta.url));
 export const asrHome = () => process.env.LIMINAL_LOCAL_ASR_HOME || path.join(os.homedir(), '.liminal', 'transcription');
@@ -29,13 +31,34 @@ export async function installTranscription({ profile = 'whisper', cuda = false, 
   if (cuda && (process.platform === 'darwin' || process.arch !== 'x64')) throw new Error('--cuda requires x64 Windows/Linux with an NVIDIA GPU.');
   const home = path.join(asrHome(), profile);
   await mkdir(home, { recursive: true });
-  let lock;
-  try { lock = await open(path.join(home, 'install.lock'), 'wx'); }
-  catch { throw new Error('Transcription installation already running. If it was interrupted, remove install.lock in ' + home); }
+  const releaseLock = await acquireInstallLock(home);
+  const children = new Set();
+  const run = (command, args) => new Promise((resolve, reject) => {
+    const child = spawn(command, args, { stdio: 'inherit', windowsHide: true, detached: process.platform !== 'win32' });
+    children.add(child);
+    child.once('error', reject);
+    child.once('close', (code, signal) => {
+      children.delete(child);
+      if (code === 0) resolve(); else reject(new Error(`${path.basename(command)} failed (${signal || code}).`));
+    });
+  });
+  const stop = code => {
+    // Terminate only processes spawned by this installation before releasing ownership.
+    for (const child of children) {
+      if (!child.pid) continue;
+      try {
+        if (process.platform === 'win32') execFileSync('taskkill.exe', ['/PID', String(child.pid), '/T', '/F'], { stdio: 'ignore', windowsHide: true });
+        else process.kill(-child.pid, 'SIGKILL');
+      } catch { /* already exited */ }
+    }
+    releaseLock(); process.exit(code);
+  };
+  const interrupt = () => stop(130), terminate = () => stop(143);
+  process.once('SIGINT', interrupt); process.once('SIGTERM', terminate);
   try {
     console.log(`Installing local ${profile}: ${(Object.values(entry.models).reduce((n, f) => n + f.bytes, 0) / 1e9).toFixed(1)} GB of models plus runtime. No API key required.`);
     await unlink(path.join(home, 'ready.json')).catch(error => { if (error.code !== 'ENOENT') throw error; });
-    const uv = suppliedUv || await pinnedUv(asrHome());
+    const uv = suppliedUv || await pinnedUv(asrHome(), run);
     await run(uv, ['venv', '--python', '3.12', '--managed-python', '--allow-existing', path.join(home, '.venv')]);
     const python = pythonAt(home);
     const deps = ['faster-whisper==1.2.1', 'ctranslate2==4.8.5', 'numpy==1.26.4', 'requests==2.32.5'];
@@ -50,12 +73,14 @@ export async function installTranscription({ profile = 'whisper', cuda = false, 
     await run(uv, ['pip', 'install', '--python', python, ...deps]);
     await run(python, ['-X', 'utf8', '-B', '-u', path.join(assets, 'download_models.py'), '--home', home, '--profile', profile]);
     const marker = { runtimeVersion: manifest.runtimeVersion, revision: entry.baseRevision, cuda };
-    // The check needs device settings but failure must never leave a ready installation.
+    // Publish readiness only after a successful decode; interrupted checks cannot
+    // leave a false-ready marker after the installation lock is reclaimed.
+    await run(python, ['-X', 'utf8', '-B', '-u', path.join(assets, 'worker.py'), '--home', home, '--profile', profile, '--check', ...(cuda ? ['--cuda'] : [])]);
     await writeFile(path.join(home, 'ready.json'), JSON.stringify(marker));
-    try { await run(python, ['-X', 'utf8', '-B', '-u', path.join(assets, 'worker.py'), '--home', home, '--profile', profile, '--check']); }
-    catch (error) { await unlink(path.join(home, 'ready.json')); throw error; }
     console.log('Ready. Select Whisper fast or Qwen accuracy in Settings → Preferences → Voice. Inference now runs offline.');
-  } finally { await lock.close(); await unlink(path.join(home, 'install.lock')); }
+  } finally {
+    process.off('SIGINT', interrupt); process.off('SIGTERM', terminate); releaseLock();
+  }
 }
 
 export async function runTranscriptionCli(args) {

@@ -2,7 +2,7 @@
 
 All notable changes to [Liminal AI](https://github.com/traidy2222/liminal-ai) on the `main` branch.
 
-**Current stage:** **beta** (`v0.1.23`, 2026-11-04). Desktop downloads are published through the public preview release channel.
+**Current stage:** **beta** (`v0.1.24`, 2026-11-04). Desktop downloads are published through the public preview release channel.
 
 Format: **v0.0.x** entries keyed to the last GitHub push in each slice. Dates are real push dates.
 
@@ -17,9 +17,25 @@ After editing JSON: `npm run changelog:gen`, commit, push, then in [vireondynami
 
 ---
 
+## v0.1.24 — 2026-11-04 {#v0-1-24}
+
+**Current beta.** Local transcription: Whisper speed, optional Qwen accuracy.
+
+**Shipped**
+
+- **Fast local default** — Whisper Large V3 Turbo runs on your computer. Optional Qwen3-ASR 1.7B provides an accuracy choice with higher memory and startup costs. Both support managed CPU or NVIDIA installation.
+- **Speech before decoding** — Neural Silero gating rejects silence and stationary noise. Empty results do not auto-send. Explicit language selection takes precedence over detection; closely related languages can still require a language choice.
+- **Live local previews** — Desktop and web show bounded provisional microphone transcripts, then decode the full recording once for the final message. Browser-vendor speech recognition is removed from this path.
+- **Install once** — Use `liminal transcription install whisper --cuda`, or `qwen --cuda`; omit `--cuda` without an NVIDIA GPU. Pinned, verified model downloads persist across updates. Interrupted installers recover dead-owner locks and cancel their owned subprocesses.
+- **Reliable cancellation and routing** — Ended desktop sessions cannot enqueue a decode after upload. Preview and final language settings agree. Cloud selections remain visible, and local configurations never route to cloud through a per-request override.
+- **Clear limits** — Models require separate downloads (about 1.6 GB for Whisper, 4.7 GB for Qwen, plus Python dependencies). CPU can be slow. Native Windows Qwen uses Transformers; its timing differs from WSL/vLLM benchmarks. Qwen word timestamps require a separate aligner.
+- **Docs** — [Voice and local transcription](../guides/voice.md)
+
+---
+
 ## v0.1.23 — 2026-11-04 {#v0-1-23}
 
-**Current beta.** A warmer JARVIS voice, running on your computer.
+A warmer JARVIS voice, running on your computer.
 
 **Shipped**
 

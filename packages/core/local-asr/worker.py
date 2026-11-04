@@ -87,11 +87,13 @@ QWEN_LANGUAGES = dict(zip(
 
 
 class Recognizer:
-    def __init__(self, home, profile):
+    def __init__(self, home, profile, cuda=None):
         self.profile = profile
         self.home = home
         self.model = None  # Load only after the neural gate finds speech.
-        self.cuda = json.loads((home / "ready.json").read_text())["cuda"]
+        if cuda is not None: self.cuda = cuda
+        elif (home / "ready.json").exists(): self.cuda = json.loads((home / "ready.json").read_text())["cuda"]
+        else: self.cuda = False
 
     def load(self):
         if self.model is not None: return
@@ -163,9 +165,10 @@ def main():
     parser.add_argument("--home", type=pathlib.Path, required=True)
     parser.add_argument("--profile", choices=["whisper", "qwen"], required=True)
     parser.add_argument("--check", action="store_true")
+    parser.add_argument("--cuda", action="store_true", default=None)
     args = parser.parse_args()
     configure_cuda()
-    recognizer = Recognizer(args.home, args.profile)
+    recognizer = Recognizer(args.home, args.profile, args.cuda)
     if args.check:
         recognizer.load()
         import numpy as np

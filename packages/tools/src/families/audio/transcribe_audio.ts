@@ -79,7 +79,7 @@ export function createTranscribeAudioTool(harness: AgentHarness) {
           type: "string",
           description:
             "Override the configured AGENT_TRANSCRIBE_MODEL (default local/whisper-large-v3-turbo). " +
-            "Optional accuracy: local/qwen3-asr-1.7b. Local models require one-time installation, no API key.",
+            "Optional accuracy: local/qwen3-asr-1.7b. Local models require one-time installation, no API key. When configured locally, overrides must also be local; choose a cloud model in Settings before using cloud overrides.",
         },
       },
       additionalProperties: false,
