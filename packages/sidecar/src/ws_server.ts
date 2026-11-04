@@ -739,6 +739,12 @@ export class WsServer {
           if (!msg && att.attachments.length === 0) {
             return this.ack(ws, id, false, "message or attachments required");
           }
+            if (bridge.isAwaitingPersonaBootstrap) {
+              return this.ack(ws, id, false, "Complete persona setup before chatting.");
+            }
+            if (bridge.isBusy) {
+              return this.ack(ws, id, false, "Agent is busy; finish the current turn first.");
+            }
           this.registry.touch(d.chatId, msg.slice(0, 60) || "Image attachment");
           this.broadcastChatList();
           this.ack(ws, id, true);
