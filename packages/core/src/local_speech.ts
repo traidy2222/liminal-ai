@@ -20,11 +20,16 @@ export class LocalSpeechClient {
   private pending?: { id: number; resolve: (audio: Uint8Array) => void; reject: (error: Error) => void };
   private idle?: ReturnType<typeof setTimeout>;
 
-  constructor(private readonly command: string, private readonly args: string[]) {}
+  constructor(
+    private readonly command: string,
+    private readonly args: string[],
+    private readonly spawnWorker: (command: string, args: string[]) => ChildProcessWithoutNullStreams =
+      (command, args) => spawn(command, args, { stdio: "pipe", windowsHide: true })
+  ) {}
 
   private start(): void {
     if (this.child) return;
-    const child = spawn(this.command, this.args, { stdio: "pipe", windowsHide: true });
+    const child = this.spawnWorker(this.command, this.args);
     this.child = child; this.buffer = ""; this.stderr = "";
     // A decoder crash can close stdin between two requests. Handle the stream's error event
     // as well as the write callback so EPIPE cannot crash the parent daemon.

@@ -57,6 +57,9 @@ const TTS_MODEL_SLUG_ALIASES: Readonly<Record<string, string>> = {
 export function normalizeTtsModelSlug(model: string): string {
   const trimmed = model.trim();
   if (!trimmed) return AFFORDABLE_TTS_MODEL;
+  // Keep unknown on-device routes intact so the local allowlist rejects them, even if
+  // their suffix resembles a legacy cloud alias (for example local/gpt-4o-tts).
+  if (trimmed.toLowerCase().startsWith("local/")) return trimmed.toLowerCase();
   const alias = TTS_MODEL_SLUG_ALIASES[trimmed];
   if (alias) return alias;
   const lower = trimmed.toLowerCase();
@@ -321,8 +324,8 @@ export function resolveSpeechSynthesisConfig(
     enabled,
     model,
     voice,
-    baseURL: isLocalSpeechModel(model) ? "" : baseURL,
-    apiKey: isLocalSpeechModel(model) ? "" : apiKey,
+    baseURL: model.startsWith("local/") ? "" : baseURL,
+    apiKey: model.startsWith("local/") ? "" : apiKey,
     timeoutMs,
     maxCharsPerCall,
     maxCallsPerTurn,
@@ -338,7 +341,7 @@ export async function resolveSpeechSynthesisConfigAsync(
   prefs: RuntimePreferences | null
 ): Promise<SpeechSynthesisConfig> {
   const base = resolveSpeechSynthesisConfig(prefs);
-  if (!base.enabled || isLocalSpeechModel(base.model)) return base;
+  if (!base.enabled || base.model.startsWith("local/")) return base;
   if (process.env["AGENT_TTS_API_KEY"]?.trim()) {
     return base;
   }

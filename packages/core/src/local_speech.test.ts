@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { fileURLToPath } from "node:url";
+import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { LocalSpeechClient } from "./local_speech.js";
 import { resolveSpeechSynthesisConfig, resolveSpeechSynthesisConfigAsync, synthesizeSpeechMulti, coerceTtsVoiceForModel } from "./speech_synthesis.js";
 import { runHarnessEffectiveEnvContext } from "./harness_effective_env.js";
@@ -35,10 +36,18 @@ test("malformed worker output and worker crashes fail cleanly", async () => {
   } finally { client.close(); }
 });
 test("a closed worker input pipe cannot crash the daemon", async () => {
-  const client=worker();
+  let child: ChildProcessWithoutNullStreams | undefined;
+  const client=new LocalSpeechClient(process.execPath,[fileURLToPath(new URL("./fixtures/local_speech_worker.mjs",import.meta.url))],(command,args)=>{
+    child=spawn(command,args,{stdio:"pipe",windowsHide:true});return child;
+  });
   try {
-    await client.synthesize("break-pipe",5000);
-    await assert.rejects(client.synthesize("closed input",1000));
+    await client.synthesize("ready",5000);
+    const pending=client.synthesize("hang",5000);
+    await new Promise<void>(resolve=>setImmediate(resolve));
+    assert.ok(child);
+    // Exercise the real Writable error event independently of OS-specific pipe-close races.
+    child.stdin.destroy(Object.assign(new Error("write EPIPE"),{code:"EPIPE"}));
+    await assert.rejects(pending,/EPIPE/);
     assert.equal((await client.synthesize("recovered",5000)).length,48);
   } finally { client.close(); }
 });
@@ -59,6 +68,8 @@ test("explicit local speech works with one chat model, without cloud credentials
     try {
       await assert.rejects(synthesizeSpeechMulti({text:"Hello sir."},{...resolved,apiKey:""}),/Install the local voice first/);
       await assert.rejects(synthesizeSpeechMulti({text:"Keep this on device."},{...resolved,model:"local/unknown",apiKey:"never-send"}),/Unknown local speech model/);
+      await assert.rejects(synthesizeSpeechMulti({text:"Keep this on device."},{...resolved,model:"local/gpt-4o-tts",apiKey:"never-send"}),/Unknown local speech model/);
+      await assert.rejects(synthesizeSpeechMulti({text:"Keep this on device."},{...resolved,model:"LOCAL/gpt-4o-tts",apiKey:"never-send"}),/Unknown local speech model/);
     }
     finally {
       globalThis.fetch=originalFetch;

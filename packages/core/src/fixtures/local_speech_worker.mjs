@@ -9,8 +9,4 @@ for await (const line of readline.createInterface({ input: process.stdin })) {
   bytes.writeUInt32LE(48000,28);bytes.writeUInt16LE(2,32);bytes.writeUInt16LE(16,34);bytes.write('data',36);
   bytes.writeUInt32LE(4,40);bytes.writeUInt32LE(process.pid,44);
   console.log(JSON.stringify({ id, audio: bytes.toString('base64') }));
-  if (text === 'break-pipe') {
-    process.stdin.destroy();
-    await new Promise(() => setInterval(() => {}, 1000));
-  }
 }
