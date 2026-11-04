@@ -50,7 +50,7 @@ jobs:
       - name: Test local audio routing and playback cache (no model download)
         run: |
           node --import tsx --test packages/core/src/local_speech.test.ts packages/tools/src/families/audio/tts_clips.test.ts packages/tools/src/families/audio/audio_cancellation.test.ts packages/sidecar/src/audio_http.test.ts packages/web/server/local_voice_routes.test.ts packages/core/src/local_transcription.test.ts packages/core/src/local_audio_runtime.test.ts packages/web/client/audio/localPreview.test.ts packages/web/server/local_transcription_routes.test.ts packages/core/src/transcription_override_review.test.ts packages/tools/src/families/audio/transcription_language_review.test.ts scripts/asr_api_docs_review.test.mjs
-          node --test packages/core/local-voice/setup.test.mjs packages/core/local-asr/setup.test.mjs
+          node --test packages/core/local-voice/setup.test.mjs packages/core/local-asr/setup.test.mjs packages/core/local-asr/install_lock.test.mjs
 
       - uses: actions/setup-python@v5
         with:
