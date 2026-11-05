@@ -9,18 +9,23 @@ class PlayerFixture implements AudioPlayer {
   int stops = 0;
   var playback = Completer<void>();
   bool nativePlaying = false;
+  bool completePlayEarly = false;
+  void Function()? onPlay;
   final states = StreamController<ProcessingState>.broadcast();
   @override
   dynamic noSuchMethod(Invocation invocation) {
     switch (invocation.memberName) {
       case #setVolume: case #dispose: return Future<void>.value();
-      case #setUrl: return Future<Duration?>.value(const Duration(milliseconds: 100));
+      case #setUrl:
+        if (state == ProcessingState.completed) state = ProcessingState.ready;
+        return Future<Duration?>.value(const Duration(milliseconds: 100));
       case #processingState: return state;
       case #processingStateStream: return states.stream;
       case #duration: return const Duration(milliseconds: 100);
       case #play:
+        onPlay?.call();
         if (nativePlaying) return Future<void>.value();
-        nativePlaying = true; return playback.future;
+        nativePlaying = true; return completePlayEarly ? Future<void>.value() : playback.future;
       case #stop: nativePlaying = false; stops++; return Future<void>.value();
     }
     return super.noSuchMethod(invocation);
@@ -55,7 +60,7 @@ void main() {
   testWidgets('normal playback releases the mic as soon as playback finishes', (tester) async {
     final player = PlayerFixture();final output = SpeechOutput(player: player);
     output.enqueue(SpeechQueueItem(clipId: 'abc', text: 'reply', audioUrl: 'fixture.wav'));
-    await tester.pump();player.playback.complete();await tester.pump();
+    await tester.pump();player.state=ProcessingState.completed;player.states.add(ProcessingState.completed);player.playback.complete();await tester.pump();
     expect(output.isTtsPipelineActive, isFalse);
     await tester.pump(const Duration(seconds: 2));
     output.dispose();await player.states.close();
@@ -66,7 +71,7 @@ void main() {
       player.playback = Completer<void>();
       output.enqueue(SpeechQueueItem(clipId: 'clip$i', text: 'reply', audioUrl: 'fixture.wav'));
       await tester.pump();expect(output.isTtsPipelineActive, isTrue);
-      player.playback.complete();await tester.pump();
+      player.state=ProcessingState.completed;player.states.add(ProcessingState.completed);player.playback.complete();await tester.pump();
       expect(output.isTtsPipelineActive, isFalse);
       expect(player.nativePlaying, isFalse, reason: 'just_audio playing stays true at completion until stop/pause');
     }

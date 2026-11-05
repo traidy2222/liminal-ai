@@ -43,6 +43,32 @@
     "build": "Full TypeScript build, workspace typecheck, browser production build and repository secret verification passed. Required PR checks and packaged builds must pass before publication.",
     "hardware": "RTX 3080 Windows CUDA: explicit background warmup 12884 ms; subsequent 4-second English decodes 212, 190 and 180 ms. These measurements exclude microphone endpoint silence thresholds.",
     "limits": "Physical microphone and speaker acoustics require user confirmation. Local speech synthesis, model switching, cancellation or a decoder crash may release the warm ASR worker and require loading again. No claim of zero latency immediately after launching is made.",
-    "playback": "Five playback regressions plus five dictation recovery tests pass together. Publication was held for this final repair."
+    "playback": "Thirteen combined playback, review-resource and dictation recovery tests pass. The pinned media-kit backend returns after playback startup; completion is observed separately under a single deadline."
+  },
+  "reviewFollowups": {
+    "pr": 27,
+    "run": "1793837836184-51cf7fb4",
+    "findings": [
+      {
+        "id": "4474996746",
+        "state": "verified",
+        "repairChecks": 1,
+        "fix": "Filtered readiness stream times out before first, cancelling its listener."
+      },
+      {
+        "id": "4474996756",
+        "state": "verified",
+        "repairChecks": 2,
+        "fix": "Subscribe before play and hold until actual completion under one deadline; detach on completion or cancellation and stop native playback before the next clip."
+      },
+      {
+        "id": "4474996766",
+        "state": "verified",
+        "repairChecks": 1,
+        "fix": "Clip download owns its timeout and closes its HttpClient, verified against a stalled real socket."
+      }
+    ],
+    "finalRegressionCommand": "flutter test test/speech_review_test.dart test/speech_recovery_test.dart test/dictation_recovery_test.dart --no-pub",
+    "finalRegressionTests": 13
   }
 }

@@ -36,6 +36,7 @@ class SpeechOutput extends ChangeNotifier {
   bool _playbackHold = false;
   int _micBlockUntil = 0;
   int _playGen = 0;
+  void Function()? _cancelPlaybackWait;
   TtsClipFetcher? _clipFetcher;
 
   String? lastSpoken;
@@ -169,6 +170,7 @@ class SpeechOutput extends ChangeNotifier {
 
   void _stopActivePlayback() {
     _playGen++;
+    _cancelPlaybackWait?.call();
     _playing = false;
     isSpeaking = false;
     unawaited(_player.stop());
@@ -231,9 +233,9 @@ class SpeechOutput extends ChangeNotifier {
 
   Future<void> _waitUntilReady() async {
     if (_player.processingState == ProcessingState.ready) return;
-    await _player.processingStateStream.firstWhere(
-      (s) => s == ProcessingState.ready || s == ProcessingState.completed,
-    ).timeout(const Duration(seconds: 15));
+    await _player.processingStateStream
+        .where((s) => s == ProcessingState.ready || s == ProcessingState.completed)
+        .timeout(const Duration(seconds: 15)).first;
   }
 
   /// Windows/media_kit can miss `completed`; a hung wait leaves `_playing` true and
@@ -243,11 +245,33 @@ class SpeechOutput extends ChangeNotifier {
     final maxWait = duration != null && duration > Duration.zero
         ? duration + const Duration(milliseconds: 750)
         : const Duration(seconds: 90);
+    final completed = Completer<void>();
+    void cancel() { if (!completed.isCompleted) completed.complete(); }
+    _cancelPlaybackWait = cancel;
+    final deadline = Timer(maxWait, () {
+      if (!completed.isCompleted) {
+        completed.completeError(TimeoutException('Speech playback timed out.'));
+      }
+    });
+    StreamSubscription<ProcessingState>? subscription;
     try {
-      // play() completes at playback end, not playback start. The deadline must
-      // cover that future, including a missing native completion signal.
-      await _player.play().timeout(maxWait);
+      // Subscribe before play: media-kit can return after startup, whereas other
+      // backends return at completion. Neither may release the hold too early.
+      subscription = _player.processingStateStream.listen((state) {
+        if (state == ProcessingState.completed && !completed.isCompleted) completed.complete();
+      }, onError: (Object error, StackTrace stack) {
+        if (!completed.isCompleted) completed.completeError(error, stack);
+      });
+      unawaited(Future<void>.sync(_player.play).catchError((Object error, StackTrace stack) {
+        if (!completed.isCompleted) completed.completeError(error, stack);
+      }));
+      await completed.future;
     } finally {
+      deadline.cancel();
+      if (identical(_cancelPlaybackWait, cancel)) _cancelPlaybackWait = null;
+      // Detach immediately; asynchronous stream cleanup must not gate the mic.
+      final cleanup = subscription?.cancel();
+      if (cleanup != null) unawaited(cleanup.catchError((Object _) {}));
       // just_audio keeps playing=true after natural completion. Stop before the
       // next source is loaded so its play() cannot return early or auto-start.
       if (gen == _playGen) {
@@ -293,6 +317,8 @@ class SpeechOutput extends ChangeNotifier {
 
   @override
   void dispose() {
+    _playGen++;
+    _cancelPlaybackWait?.call();
     unawaited(_player.dispose());
     super.dispose();
   }
