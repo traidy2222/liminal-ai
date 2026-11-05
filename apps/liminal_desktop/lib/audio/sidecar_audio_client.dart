@@ -27,11 +27,13 @@ class SidecarAudioClient {
     required this.port,
     required this.token,
     required this.chatId,
+    this.clipTimeout = const Duration(seconds: 25),
   });
 
   final int port;
   final String token;
   final String chatId;
+  final Duration clipTimeout;
   final Set<HttpClient> _transcriptionClients = {};
   void cancelTranscriptionRequests() {
     for (final client in _transcriptionClients.toList()) {
@@ -67,7 +69,7 @@ class SidecarAudioClient {
   Future<TtsClipBytes> fetchTtsClip(String audioUrl) async {
     final resolved = resolveAudioUrl(audioUrl);
     final client = HttpClient();
-    try {
+    Future<TtsClipBytes> download() async {
       final req = await client.getUrl(Uri.parse(resolved));
       final resp = await req.close();
       final chunks = <List<int>>[];
@@ -88,6 +90,9 @@ class SidecarAudioClient {
       }
       final mime = resp.headers.contentType?.mimeType ?? 'audio/mpeg';
       return TtsClipBytes(bytes: bytes, mimeType: mime);
+    }
+    try {
+      return await download().timeout(clipTimeout);
     } finally {
       client.close(force: true);
     }

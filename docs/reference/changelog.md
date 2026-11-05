@@ -28,6 +28,7 @@ After editing JSON: `npm run changelog:gen`, commit, push, then in [vireondynami
 - **Continuous dictation recovery** — A failed decode leaves the mic session armed. Uploads and decodes have bounded connections and can be cancelled. Old-session completions cannot reset a newly started session.
 - **Correct final messages** — The web composer sends the complete final transcript, replacing provisional previews. Final decodes cannot overlap new takes, and speech detection re-arms after completion.
 - **Windows microphone repair** — Upgrade the recorder backend to include upstream amplitude, streaming and disposal fixes. Pause TTS during actual speech capture as well as transcription. The desktop source build now requires Flutter 3.44 / Dart 3.12; app runtime requirements are unchanged.
+- **Playback cannot hold the mic forever** — Bound clip loading, player readiness and the playback future itself. Missing native completion signals release dictation instead of leaving it paused after the first reply.
 - **Docs** — [Voice and local transcription](../guides/voice.md)
 
 ---

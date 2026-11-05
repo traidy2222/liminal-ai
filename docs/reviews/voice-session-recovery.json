@@ -25,6 +25,14 @@
     {
       "issue": "The sidecar acknowledged send_message before checking busy or persona admission, so rejected speech appeared accepted.",
       "fix": "Reject busy/setup-gated sends before acknowledgement. A real-dispatcher regression failed before the fix and passes after, including concurrent admission."
+    },
+    {
+      "issue": "The TTS completion deadline started only after awaiting play(), which can itself wait forever; clip download and readiness were also unbounded.",
+      "fix": "Bound actual playback, clip loading and player readiness. Four unchanged regression cases failed before repair and passed after: missing completion, never-ready player, stalled download, and normal completion."
+    },
+    {
+      "issue": "just_audio retains playing=true after natural completion, so a subsequent source can auto-play while play() returns immediately.",
+      "fix": "Stop the native player in the guarded playback finally block before loading the next clip. An additional consecutive-reply test failed before this cleanup and passes after."
     }
   ],
   "validation": {
@@ -34,6 +42,33 @@
     "python": "Four speech-gate/warmup tests passed without downloading ASR weights.",
     "build": "Full TypeScript build, workspace typecheck, browser production build and repository secret verification passed. Required PR checks and packaged builds must pass before publication.",
     "hardware": "RTX 3080 Windows CUDA: explicit background warmup 12884 ms; subsequent 4-second English decodes 212, 190 and 180 ms. These measurements exclude microphone endpoint silence thresholds.",
-    "limits": "Physical microphone and speaker acoustics require user confirmation. Local speech synthesis, model switching, cancellation or a decoder crash may release the warm ASR worker and require loading again. No claim of zero latency immediately after launching is made."
+    "limits": "Physical microphone and speaker acoustics require user confirmation. Local speech synthesis, model switching, cancellation or a decoder crash may release the warm ASR worker and require loading again. No claim of zero latency immediately after launching is made.",
+    "playback": "Thirteen combined playback, review-resource and dictation recovery tests pass. The pinned media-kit backend returns after playback startup; completion is observed separately under a single deadline."
+  },
+  "reviewFollowups": {
+    "pr": 27,
+    "run": "1793837836184-51cf7fb4",
+    "findings": [
+      {
+        "id": "4474996746",
+        "state": "verified",
+        "repairChecks": 1,
+        "fix": "Filtered readiness stream times out before first, cancelling its listener."
+      },
+      {
+        "id": "4474996756",
+        "state": "verified",
+        "repairChecks": 2,
+        "fix": "Subscribe before play and hold until actual completion under one deadline; detach on completion or cancellation and stop native playback before the next clip."
+      },
+      {
+        "id": "4474996766",
+        "state": "verified",
+        "repairChecks": 1,
+        "fix": "Clip download owns its timeout and closes its HttpClient, verified against a stalled real socket."
+      }
+    ],
+    "finalRegressionCommand": "flutter test test/speech_review_test.dart test/speech_recovery_test.dart test/dictation_recovery_test.dart --no-pub",
+    "finalRegressionTests": 13
   }
 }
