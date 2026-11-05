@@ -2,7 +2,7 @@
 
 All notable changes to [Liminal AI](https://github.com/traidy2222/liminal-ai) on the `main` branch.
 
-**Current stage:** **beta** (`v0.1.25`, 2026-11-05). Desktop downloads are published through the public preview release channel.
+**Current stage:** **beta** (`v0.1.26`, 2026-11-05). Desktop downloads are published through the public preview release channel.
 
 Format: **v0.0.x** entries keyed to the last GitHub push in each slice. Dates are real push dates.
 
@@ -17,9 +17,22 @@ After editing JSON: `npm run changelog:gen`, commit, push, then in [vireondynami
 
 ---
 
+## v0.1.26 — 2026-11-05 {#v0-1-26}
+
+**Current beta.** Keep conversations ready after every reply.
+
+**Shipped**
+
+- **Terminal busy status** — Desktop and web stop emitting running heartbeats once a turn ends or errors, even while background cleanup is still unwinding. The next real send starts a fresh heartbeat.
+- **Web chat reactivation** — Reopening a completed chat cannot resurrect its busy indicator during post-turn cleanup.
+- **Repeated-turn verification** — Regression coverage reproduces late trace ordering and checks subsequent sends. Two consecutive turns against the installed app completed without stale busy events; local Whisper speech and silence checks also passed.
+- **Docs** — [Voice and local transcription](../guides/voice.md)
+
+---
+
 ## v0.1.25 — 2026-11-05 {#v0-1-25}
 
-**Current beta.** Warm transcription, reliable hands-free conversations.
+Warm transcription, reliable hands-free conversations.
 
 **Shipped**
 

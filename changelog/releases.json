@@ -1,7 +1,21 @@
 {
   "stage": "beta",
-  "currentVersion": "0.1.25",
+  "currentVersion": "0.1.26",
   "releases": [
+    {
+      "version": "0.1.26",
+      "date": "2026-11-05",
+      "tagline": "Keep conversations ready after every reply.",
+      "summary": "Fix a late background trace that could mark a completed reply busy again, leaving subsequent spoken messages queued indefinitely.",
+      "bullets": [
+        "**Terminal busy status** — Desktop and web stop emitting running heartbeats once a turn ends or errors, even while background cleanup is still unwinding. The next real send starts a fresh heartbeat.",
+        "**Web chat reactivation** — Reopening a completed chat cannot resurrect its busy indicator during post-turn cleanup.",
+        "**Repeated-turn verification** — Regression coverage reproduces late trace ordering and checks subsequent sends. Two consecutive turns against the installed app completed without stale busy events; local Whisper speech and silence checks also passed."
+      ],
+      "docs": [
+        { "label": "Voice and local transcription", "href": "../guides/voice.md" }
+      ]
+    },
     {
       "version": "0.1.25",
       "date": "2026-11-05",

@@ -102,6 +102,8 @@ export class AgentBridge {
   >();
   private pendingAskUser: ((answer: string) => void) | null = null;
   private harnessHeartbeatTimer: NodeJS.Timeout | null = null;
+  // send() can still be unwinding after turn_end; background trace is not a new turn.
+  private turnEnded = true;
   private turnStartedAt: number | null = null;
   private awaitingPersonaBootstrapInput = false;
   private bootstrapInFlight = false;
@@ -235,7 +237,7 @@ export class AgentBridge {
     await touchChatMetadata(this.chatId).catch(() => undefined);
     // If the harness is mid-turn at activation, surface a fresh heartbeat so
     // the client UI immediately sees the busy state.
-    if (this.harness.getIsRunning()) {
+    if (!this.turnEnded && this.harness.getIsRunning()) {
       this.sse.send(
         "harness_running",
         {
@@ -330,10 +332,11 @@ export class AgentBridge {
   }
 
   private startHeartbeat(): void {
+    if (this.turnEnded || !this.harness.getIsRunning()) return;
     if (this.harnessHeartbeatTimer) return;
     if (!this.turnStartedAt) this.turnStartedAt = Date.now();
     const tick = (): void => {
-      if (!this.harness.getIsRunning()) {
+      if (this.turnEnded || !this.harness.getIsRunning()) {
         this.stopHeartbeat();
         return;
       }
@@ -369,6 +372,10 @@ export class AgentBridge {
       this.emitterDetachers.push(() => emitter.off(event, handler));
     };
 
+    on("send_start", () => {
+      this.turnEnded = false;
+      this.startHeartbeat();
+    });
     on("text", (p) => { this.startHeartbeat(); this.maybeSend("text", p); });
     on("provider_retry", (p) => { this.startHeartbeat(); this.maybeSend("provider_retry", p); });
     on("tool_start", (p) => { this.startHeartbeat(); this.maybeSend("tool_start", p); });
@@ -385,12 +392,17 @@ export class AgentBridge {
     );
     on("turn_summary", (p) => this.maybeSend("turn_summary", p));
     on("turn_end", (p) => {
+      this.turnEnded = true;
       this.lastTurnEndedAtMs = Date.now();
       this.stopHeartbeat();
       this.maybeSend("turn_end", p);
       void this.emitInferenceWalletIfManaged();
     });
-    on("error", (p) => { this.stopHeartbeat(); this.maybeSend("error", { message: p.err.message }); });
+    on("error", (p) => {
+      this.turnEnded = true;
+      this.stopHeartbeat();
+      this.maybeSend("error", { message: p.err.message });
+    });
 
     on("subtask_spawned", (p) => this.maybeSend("subtask_spawned", p));
     on("subtask_complete", (p) => this.maybeSend("subtask_complete", p));
