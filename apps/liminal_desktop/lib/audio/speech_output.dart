@@ -22,13 +22,13 @@ class SpeechQueueItem {
 
 /// TTS playback queue — mirrors web `useSpeechOutput` (fetch clip, then play).
 class SpeechOutput extends ChangeNotifier {
-  SpeechOutput() {
+  SpeechOutput({AudioPlayer? player}) : _player = player ?? AudioPlayer() {
     unawaited(_player.setVolume(1));
   }
 
   static const micBlockAfterTtsMs = 1200;
 
-  final AudioPlayer _player = AudioPlayer();
+  final AudioPlayer _player;
   final List<SpeechQueueItem> _queue = [];
   bool _playing = false;
   bool _unlocked = false;
@@ -204,9 +204,9 @@ class SpeechOutput extends ChangeNotifier {
     _syncPlaybackHold();
     notifyListeners();
     try {
-      await _loadAndPlayClip(item, gen);
+      await _loadClip(item, gen);
       if (gen != _playGen) return;
-      await _waitForClipCompletion(gen);
+      await _playUntilCompleted(gen);
       if (gen != _playGen) return;
     } catch (e) {
       if (gen == _playGen) {
@@ -233,30 +233,30 @@ class SpeechOutput extends ChangeNotifier {
     if (_player.processingState == ProcessingState.ready) return;
     await _player.processingStateStream.firstWhere(
       (s) => s == ProcessingState.ready || s == ProcessingState.completed,
-    );
+    ).timeout(const Duration(seconds: 15));
   }
 
   /// Windows/media_kit can miss `completed`; a hung wait leaves `_playing` true and
   /// dictation suspended forever while the UI still shows "listening".
-  Future<void> _waitForClipCompletion(int gen) async {
+  Future<void> _playUntilCompleted(int gen) async {
     final duration = _player.duration;
     final maxWait = duration != null && duration > Duration.zero
         ? duration + const Duration(milliseconds: 750)
         : const Duration(seconds: 90);
     try {
-      await _player.processingStateStream
-          .firstWhere((s) => s == ProcessingState.completed)
-          .timeout(maxWait);
+      // play() completes at playback end, not playback start. The deadline must
+      // cover that future, including a missing native completion signal.
+      await _player.play().timeout(maxWait);
     } on TimeoutException {
       if (gen != _playGen) return;
-      await _player.stop();
+      await _player.stop().timeout(const Duration(seconds: 3));
     }
   }
 
-  Future<void> _loadAndPlayClip(SpeechQueueItem item, int gen) async {
+  Future<void> _loadClip(SpeechQueueItem item, int gen) async {
     final fetcher = _clipFetcher;
     if (fetcher != null) {
-      final clip = await fetcher(item.audioUrl);
+      final clip = await fetcher(item.audioUrl).timeout(const Duration(seconds: 30));
       if (gen != _playGen) return;
       if (clip.bytes.isEmpty) {
         throw const HttpException('TTS clip is empty');
@@ -267,9 +267,9 @@ class SpeechOutput extends ChangeNotifier {
       final file = File('${dir.path}/liminal_tts_$safeId.$ext');
       await file.writeAsBytes(clip.bytes, flush: true);
       if (gen != _playGen) return;
-      await _player.setAudioSource(AudioSource.file(file.path));
+      await _player.setAudioSource(AudioSource.file(file.path)).timeout(const Duration(seconds: 20));
     } else {
-      await _player.setUrl(item.audioUrl);
+      await _player.setUrl(item.audioUrl).timeout(const Duration(seconds: 20));
     }
     if (gen != _playGen) return;
     await _waitUntilReady();
@@ -277,7 +277,6 @@ class SpeechOutput extends ChangeNotifier {
     if (duration == null || duration <= Duration.zero) {
       throw const HttpException('TTS clip has zero duration');
     }
-    await _player.play();
   }
 
   String _extForMime(String mimeType) {

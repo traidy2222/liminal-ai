@@ -25,6 +25,10 @@
     {
       "issue": "The sidecar acknowledged send_message before checking busy or persona admission, so rejected speech appeared accepted.",
       "fix": "Reject busy/setup-gated sends before acknowledgement. A real-dispatcher regression failed before the fix and passes after, including concurrent admission."
+    },
+    {
+      "issue": "The TTS completion deadline started only after awaiting play(), which can itself wait forever; clip download and readiness were also unbounded.",
+      "fix": "Bound actual playback, clip loading and player readiness. Four unchanged regression cases failed before repair and passed after: missing completion, never-ready player, stalled download, and normal completion."
     }
   ],
   "validation": {
@@ -34,6 +38,7 @@
     "python": "Four speech-gate/warmup tests passed without downloading ASR weights.",
     "build": "Full TypeScript build, workspace typecheck, browser production build and repository secret verification passed. Required PR checks and packaged builds must pass before publication.",
     "hardware": "RTX 3080 Windows CUDA: explicit background warmup 12884 ms; subsequent 4-second English decodes 212, 190 and 180 ms. These measurements exclude microphone endpoint silence thresholds.",
-    "limits": "Physical microphone and speaker acoustics require user confirmation. Local speech synthesis, model switching, cancellation or a decoder crash may release the warm ASR worker and require loading again. No claim of zero latency immediately after launching is made."
+    "limits": "Physical microphone and speaker acoustics require user confirmation. Local speech synthesis, model switching, cancellation or a decoder crash may release the warm ASR worker and require loading again. No claim of zero latency immediately after launching is made.",
+    "playback": "Four playback regressions plus five dictation recovery tests pass together. Publication was held for this final repair."
   }
 }
