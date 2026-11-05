@@ -56,6 +56,9 @@ jobs:
         with:
           python-version: "3.11"
 
+      - name: Test terminal voice status over WebSocket and SSE
+        run: node --import tsx --test packages/sidecar/src/voice_idle_heartbeat.test.ts packages/sidecar/src/voice_preflight_review.test.ts packages/web/server/voice_idle_heartbeat.test.ts
+
       - name: Test original-pitch warm tone (no speech model required)
         run: |
           python -m pip install numpy==1.26.4 scipy==1.17.1 pyloudnorm==0.2.0

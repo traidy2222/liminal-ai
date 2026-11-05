@@ -57,6 +57,8 @@ export class SessionBridge {
   private pendingAskUser: ((answer: string) => void) | null = null;
   private turnStartedAt: number | null = null;
   private heartbeatTimer: NodeJS.Timeout | null = null;
+  // send() can still be unwinding after turn_end; background trace is not a new turn.
+  private turnEnded = true;
   private detachers: Array<() => void> = [];
   private awaitingPersonaBootstrapInput = false;
   private bootstrapInFlight = false;
@@ -194,10 +196,11 @@ export class SessionBridge {
   }
 
   private startHeartbeat(): void {
+    if (this.turnEnded || !this.isBusy) return;
     if (this.heartbeatTimer) return;
     if (!this.turnStartedAt) this.turnStartedAt = Date.now();
     const tick = (): void => {
-      if (!this.isBusy) {
+      if (this.turnEnded || !this.isBusy) {
         this.stopHeartbeat();
         return;
       }
@@ -226,6 +229,10 @@ export class SessionBridge {
     };
 
     // Streaming + lifecycle — forwarded verbatim (already wire-safe).
+    on("send_start", () => {
+      this.turnEnded = false;
+      this.startHeartbeat();
+    });
     on("text", (p) => {
       this.startHeartbeat();
       this.emit("text", p);
@@ -246,10 +253,12 @@ export class SessionBridge {
     on("tool_result", (p) => this.emit("tool_result", wireToolResult(p)));
     on("turn_summary", (p) => this.emit("turn_summary", p));
     on("turn_end", (p) => {
+      this.turnEnded = true;
       this.stopHeartbeat();
       this.emit("turn_end", p);
     });
     on("error", (p) => {
+      this.turnEnded = true;
       this.stopHeartbeat();
       this.emit("error", wireError(p));
     });
@@ -334,6 +343,7 @@ export class SessionBridge {
     }
     if (this.isBusy) throw new Error("Agent is busy; finish the current turn first.");
     this.turnInFlight = true;
+    this.turnEnded = false;
     try {
       await runWithWorkspaceRoot(this.workspaceRoot, async () => {
       const run = this.harness.send(message, {
@@ -346,6 +356,7 @@ export class SessionBridge {
       await run;
       });
     } finally {
+      this.turnEnded = true;
       this.turnInFlight = false;
       this.stopHeartbeat();
     }

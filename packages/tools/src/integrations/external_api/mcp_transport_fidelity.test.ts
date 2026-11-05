@@ -108,7 +108,7 @@ test("stdio concurrent replies retain correlation, complete Unicode evidence and
   const scope = {};
   const script = path.join(root, "fixture.cjs");
   await fs.writeFile(script, `
-const rl=require('node:readline');let calls=0;
+const rl=require('node:readline');let calls=0;const pending=[];
 function send(id,fields){process.stdout.write(JSON.stringify({jsonrpc:'2.0',id,...fields})+'\\n');}
 rl.createInterface({input:process.stdin}).on('line',line=>{
  const r=JSON.parse(line);if(r.id===undefined)return;
@@ -116,8 +116,10 @@ rl.createInterface({input:process.stdin}).on('line',line=>{
  if(r.method==='tools/list')return send(r.id,{result:{tools:[{name:'read',inputSchema:{type:'object',properties:{}}}]}});
  if(r.method==='tools/call'){
   calls++;const args=r.params.arguments;
-  if(args.fail)return send(r.id,{error:{code:-32001,message:'analysis pending',data:{reason:'health_not_ready',evidence_id:'ev_stdio_fixture',retryable:false}}});
-  setTimeout(()=>send(r.id,{result:{content:[],structuredContent:{token:args.token,payload:'🧪Evidence'.repeat(20000),pid:process.pid,calls}}}),args.delay);
+  if(args.fail)send(r.id,{error:{code:-32001,message:'analysis pending',data:{reason:'health_not_ready',evidence_id:'ev_stdio_fixture',retryable:false}}});
+  else pending.push({id:r.id,args});
+  // Wait for all three requests before replying. Pipe delivery need not fit in 1ms.
+  if(calls===3)for(const {id,args} of pending)setTimeout(()=>send(id,{result:{content:[],structuredContent:{token:args.token,payload:'🧪Evidence'.repeat(20000),pid:process.pid,calls}}}),args.delay);
  }
 });process.stdin.on('end',()=>process.exit(0));`);
   const registry = new ToolRegistry();

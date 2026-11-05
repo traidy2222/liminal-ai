@@ -1467,7 +1467,7 @@ export function createRouter(
       // Do NOT emit `chat_switched` here — that event clears the client transcript.
       // Chat switches are announced only from ChatManager.activate(). New stream
       // clients load active chat via GET /api/config and /api/chats.
-      if (bridge.isBusy) {
+      if (bridge.isTurnActive) {
         res.write(
           `event: harness_running\ndata: ${JSON.stringify({ startedAt: bridge.turnStartTime })}\n\n`
         );

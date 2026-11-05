@@ -2,7 +2,7 @@
 
 All notable changes to [Liminal AI](https://github.com/traidy2222/liminal-ai) are documented here and on the docs portal: [docs.vireondynamics.com/liminal/reference/changelog](https://docs.vireondynamics.com/liminal/reference/changelog).
 
-**Current stage:** **beta** (`v0.1.25` tip of `main`, 2026-11-05). Desktop downloads are published through the public preview release channel.
+**Current stage:** **beta** (`v0.1.26` tip of `main`, 2026-11-05). Desktop downloads are published through the public preview release channel.
 
 **Single source:** edit [`changelog/releases.json`](changelog/releases.json), then run `npm run changelog:gen`.
 
@@ -10,7 +10,13 @@ Format: **v0.0.x** entries keyed to the last GitHub push in each slice. Dates ar
 
 Marketing (richer notes): [vireondynamics.com/liminal/changelog](https://www.vireondynamics.com/liminal/changelog)
 
-## [v0.1.25] — 2026-11-05 — Current beta
+## [v0.1.26] — 2026-11-05 — Current beta
+
+Fix a late background trace that could mark a completed reply busy again, leaving subsequent spoken messages queued indefinitely.
+
+[Full notes](https://docs.vireondynamics.com/liminal/reference/changelog#v0-1-26)
+
+## [v0.1.25] — 2026-11-05
 
 Preload the selected local transcription model at startup and repair pause-send, queued speech, recorder lifecycle and recovery across repeated dictation turns.
 
