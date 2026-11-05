@@ -31,11 +31,14 @@ test("web terminal events retire busy despite late trace and chat reactivation",
   const { bridge, emitter, events } = fixture(t);
   emitter.emit("send_start", { userMessage: "hello", agentDepth: 0 });
   assert.ok(events.includes("harness_running"));
+  assert.equal(bridge.isTurnActive, true);
   emitter.emit("turn_end", {
     contextSnapshot: { tokenCount: 10, maxTokens: 1000, usageFraction: .01, masked: false },
     durationMs: 1,
   });
   const terminal = events.lastIndexOf("turn_end");
+  assert.equal(bridge.isBusy, true, "admission still waits for cleanup");
+  assert.equal(bridge.isTurnActive, false, "SSE reconnect must not reopen finished work");
   emitter.emit("text", { channel: "trace", delta: "Post-turn cleanup." });
   await bridge.resumeSSE();
   assert.deepEqual(events.slice(terminal + 1), ["text"]);

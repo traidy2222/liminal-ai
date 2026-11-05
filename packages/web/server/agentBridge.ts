@@ -237,7 +237,7 @@ export class AgentBridge {
     await touchChatMetadata(this.chatId).catch(() => undefined);
     // If the harness is mid-turn at activation, surface a fresh heartbeat so
     // the client UI immediately sees the busy state.
-    if (!this.turnEnded && this.harness.getIsRunning()) {
+    if (this.isTurnActive) {
       this.sse.send(
         "harness_running",
         {
@@ -353,6 +353,8 @@ export class AgentBridge {
 
   /** Current busy state — exposed for /api/status. */
   get isBusy(): boolean { return this.harness.getIsRunning(); }
+  /** Visible turn state; admission still waits for send() cleanup via isBusy. */
+  get isTurnActive(): boolean { return !this.turnEnded && this.isBusy; }
   get turnStartTime(): number | null { return this.turnStartedAt; }
   get lastTurnEndedAt(): number | null {
     return this.lastTurnEndedAtMs;
