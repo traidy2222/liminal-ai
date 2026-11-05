@@ -29,6 +29,10 @@
     {
       "issue": "The TTS completion deadline started only after awaiting play(), which can itself wait forever; clip download and readiness were also unbounded.",
       "fix": "Bound actual playback, clip loading and player readiness. Four unchanged regression cases failed before repair and passed after: missing completion, never-ready player, stalled download, and normal completion."
+    },
+    {
+      "issue": "just_audio retains playing=true after natural completion, so a subsequent source can auto-play while play() returns immediately.",
+      "fix": "Stop the native player in the guarded playback finally block before loading the next clip. An additional consecutive-reply test failed before this cleanup and passes after."
     }
   ],
   "validation": {
@@ -39,6 +43,6 @@
     "build": "Full TypeScript build, workspace typecheck, browser production build and repository secret verification passed. Required PR checks and packaged builds must pass before publication.",
     "hardware": "RTX 3080 Windows CUDA: explicit background warmup 12884 ms; subsequent 4-second English decodes 212, 190 and 180 ms. These measurements exclude microphone endpoint silence thresholds.",
     "limits": "Physical microphone and speaker acoustics require user confirmation. Local speech synthesis, model switching, cancellation or a decoder crash may release the warm ASR worker and require loading again. No claim of zero latency immediately after launching is made.",
-    "playback": "Four playback regressions plus five dictation recovery tests pass together. Publication was held for this final repair."
+    "playback": "Five playback regressions plus five dictation recovery tests pass together. Publication was held for this final repair."
   }
 }

@@ -7,7 +7,8 @@ import 'package:liminal_desktop/audio/tts_clip.dart';
 class PlayerFixture implements AudioPlayer {
   ProcessingState state = ProcessingState.ready;
   int stops = 0;
-  final playback = Completer<void>();
+  var playback = Completer<void>();
+  bool nativePlaying = false;
   final states = StreamController<ProcessingState>.broadcast();
   @override
   dynamic noSuchMethod(Invocation invocation) {
@@ -17,8 +18,10 @@ class PlayerFixture implements AudioPlayer {
       case #processingState: return state;
       case #processingStateStream: return states.stream;
       case #duration: return const Duration(milliseconds: 100);
-      case #play: return playback.future;
-      case #stop: stops++; return Future<void>.value();
+      case #play:
+        if (nativePlaying) return Future<void>.value();
+        nativePlaying = true; return playback.future;
+      case #stop: nativePlaying = false; stops++; return Future<void>.value();
     }
     return super.noSuchMethod(invocation);
   }
@@ -54,6 +57,19 @@ void main() {
     output.enqueue(SpeechQueueItem(clipId: 'abc', text: 'reply', audioUrl: 'fixture.wav'));
     await tester.pump();player.playback.complete();await tester.pump();
     expect(output.isTtsPipelineActive, isFalse);
+    await tester.pump(const Duration(seconds: 2));
+    output.dispose();await player.states.close();
+  });
+  testWidgets('consecutive replies stop native playback state before loading the next clip', (tester) async {
+    final player = PlayerFixture();final output = SpeechOutput(player: player);
+    for (var i=0;i<2;i++) {
+      player.playback = Completer<void>();
+      output.enqueue(SpeechQueueItem(clipId: 'clip$i', text: 'reply', audioUrl: 'fixture.wav'));
+      await tester.pump();expect(output.isTtsPipelineActive, isTrue);
+      player.playback.complete();await tester.pump();
+      expect(output.isTtsPipelineActive, isFalse);
+      expect(player.nativePlaying, isFalse, reason: 'just_audio playing stays true at completion until stop/pause');
+    }
     await tester.pump(const Duration(seconds: 2));
     output.dispose();await player.states.close();
   });

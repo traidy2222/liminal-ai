@@ -247,9 +247,12 @@ class SpeechOutput extends ChangeNotifier {
       // play() completes at playback end, not playback start. The deadline must
       // cover that future, including a missing native completion signal.
       await _player.play().timeout(maxWait);
-    } on TimeoutException {
-      if (gen != _playGen) return;
-      await _player.stop().timeout(const Duration(seconds: 3));
+    } finally {
+      // just_audio keeps playing=true after natural completion. Stop before the
+      // next source is loaded so its play() cannot return early or auto-start.
+      if (gen == _playGen) {
+        await _player.stop().timeout(const Duration(seconds: 3));
+      }
     }
   }
 
