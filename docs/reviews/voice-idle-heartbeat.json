@@ -1,0 +1,12 @@
+{
+  "pr": "https://github.com/traidy2222/liminal-ai/pull/28",
+  "finding": 4475379080,
+  "reviewRun": "1793841002593-3306616d",
+  "trigger": "A newly accepted voice send waits for preflight before emitting send_start.",
+  "impact": "Without an early heartbeat, reconnecting clients can show idle while the send is already reserved.",
+  "regression": "packages/sidecar/src/voice_preflight_review.test.ts",
+  "reproduced": "Both completion and failure cases failed: no running event before send_start.",
+  "fix": "Mark the accepted send active immediately and retire it in finally; terminal events continue to retire the heartbeat before background cleanup.",
+  "verification": "Identical tests passed on the first repair check; review loop verified. All seven focused transport and admission tests passed.",
+  "remainingFindings": []
+}

@@ -343,6 +343,7 @@ export class SessionBridge {
     }
     if (this.isBusy) throw new Error("Agent is busy; finish the current turn first.");
     this.turnInFlight = true;
+    this.turnEnded = false;
     try {
       await runWithWorkspaceRoot(this.workspaceRoot, async () => {
       const run = this.harness.send(message, {
@@ -355,6 +356,7 @@ export class SessionBridge {
       await run;
       });
     } finally {
+      this.turnEnded = true;
       this.turnInFlight = false;
       this.stopHeartbeat();
     }
