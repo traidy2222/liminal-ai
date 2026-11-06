@@ -5167,7 +5167,7 @@ export class AgentHarness {
 
   /** End a bounded run with an evidence-grounded handoff, never extra effects.
    * The termination remains round_cap; a summary is not proof of completion. */
-  private async finalizeAtToolRoundLimit(): Promise<void> {
+  private async finalizeAtToolRoundLimit(requiredHandoff?: string): Promise<void> {
     if (this.abortSignal?.aborted || this.currentTurnController?.signal.aborted) {
       this.emitTurnEnd("error");
       return;
@@ -5191,7 +5191,8 @@ export class AgentHarness {
       if (this.abortSignal?.aborted || this.currentTurnController?.signal.aborted) { this.emitTurnEnd("error"); return; }
       this.emitter.emit("text", { channel: "trace", delta: `\n[HARNESS] Budget handoff unavailable: ${(error as Error).message}\n` });
     }
-    text ||= "The tool-round limit was reached. Tool work has stopped; completion and any outstanding checks must be assessed from the recorded results.";
+    if (text && requiredHandoff) text += `\n\n${requiredHandoff}`;
+    text ||= requiredHandoff ?? "The tool-round limit was reached. Tool work has stopped; completion and any outstanding checks must be assessed from the recorded results.";
     this.context.appendMessage({ role: "assistant", content: text });
     this.emitter.emit("text", { delta: text, channel: "user" });
     this.emitTurnEnd("round_cap");
@@ -5212,6 +5213,7 @@ export class AgentHarness {
     assertTurnActive();
 
     if (round >= this.config.maxToolRoundsPerTurn) {
+      let requiredHandoff: string | undefined;
       if (artifactInvestigation) {
         let checkpointNote = "";
         try {
@@ -5219,14 +5221,17 @@ export class AgentHarness {
           assertTurnActive();
           checkpointNote = ` Partial investigation checkpoint: ${checkpoint.jsonPath}.`;
         } catch { assertTurnActive(); }
-        const handoff = `Reached the configured tool-round limit (${this.config.maxToolRoundsPerTurn}) before completion. Saved outputs are retained; remaining work is incomplete.${checkpointNote}`;
-        this.context.appendMessage({role: "assistant", content: handoff});
-        this.emitter.emit("text", {channel: "user", delta: `\n\n${handoff}`});
+        requiredHandoff = `Reached the configured tool-round limit (${this.config.maxToolRoundsPerTurn}) before completion. Saved outputs are retained; remaining work is incomplete.${checkpointNote}`;
+        this.context.appendMessage({role: "system", content: requiredHandoff});
       }
       if (this.toolsUsedThisTurn.length && !this.roundBudgetFinalizeAttempted) {
         this.roundBudgetFinalizeAttempted = true;
-        await this.finalizeAtToolRoundLimit();
+        await this.finalizeAtToolRoundLimit(requiredHandoff);
         return;
+      }
+      if (requiredHandoff) {
+        this.context.appendMessage({role: "assistant", content: requiredHandoff});
+        this.emitter.emit("text", {channel: "user", delta: requiredHandoff});
       }
       this.emitTurnEnd("round_cap");
       this.emitter.emit("error", {
