@@ -36,6 +36,65 @@ void main() {
   });
 
   test(
+    'disable closes the microphone despite a stalled sleep acknowledgement',
+    () async {
+      final acknowledgement = Completer<void>();
+      final voice = WakeVoiceController(
+        recorder: Capture(),
+        onWake: (_) async {},
+        onAwakeChanged: (_, active) =>
+            active ? Future.value() : acknowledgement.future,
+        isBusy: (_) => false,
+        isPlaying: () => false,
+        send: (_, __) async => const WakeSendResult(accepted: true),
+      );
+      await voice.configure(const WakeVoiceSettings(enabled: true));
+      await voice.start(
+        SidecarAudioClient(port: 1, token: '', chatId: 'orchestrator'),
+      );
+      await voice.acceptTranscript('Hey Jarvis');
+      await voice
+          .configure(const WakeVoiceSettings(enabled: false))
+          .timeout(const Duration(seconds: 1));
+      expect(voice.listening, isFalse);
+      acknowledgement.complete();
+      voice.dispose();
+      await Future<void>.delayed(Duration.zero);
+    },
+  );
+
+  test('sleep clears queued speech even when acknowledgement fails', () async {
+    var busy = true;
+    final sent = <String>[];
+    final voice = WakeVoiceController(
+      recorder: Capture(),
+      onWake: (_) async {},
+      onAwakeChanged: (_, active) async {
+        if (!active) throw StateError('offline');
+      },
+      isBusy: (_) => busy,
+      isPlaying: () => false,
+      send: (_, text) async {
+        sent.add(text);
+        return const WakeSendResult(accepted: true);
+      },
+    );
+    await voice.configure(const WakeVoiceSettings(enabled: true));
+    await voice.start(
+      SidecarAudioClient(port: 1, token: '', chatId: 'orchestrator'),
+    );
+    await voice.acceptTranscript('Hey Jarvis, queue this');
+    await voice.acceptTranscript('go to sleep');
+    busy = false;
+    await voice.drain();
+    expect(sent, isEmpty);
+    expect(voice.awake, isFalse);
+    await voice.stop();
+    voice.dispose();
+    await Future<void>.delayed(Duration.zero);
+  });
+
+  test(
     'only wake requests route to Mission Control; queued followups drain once after busy',
     () async {
       var busy = false, now = 100;

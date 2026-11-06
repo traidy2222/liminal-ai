@@ -1,6 +1,5 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { chromium } from "playwright";
 import { clickBrowserControl, buildPageSnapshot, navigateWithRenderedContent } from "../../../dist/families/browser/browser_runtime.js";
 import { googleSearchUrl } from "../../../dist/families/browser/browser_tools.js";
 
@@ -10,7 +9,8 @@ test("Google queries preserve exact phrases, source and date operators", () => {
   assert.equal(url.origin,'https://www.google.com');assert.equal(url.searchParams.get('q'),query);
 });
 
-test('missing and ambiguous click targets fail promptly with available candidates',async()=>{
+test('missing and ambiguous click targets fail promptly with available candidates',{skip:process.env.AGENT_BROWSER_INTEGRATION!=="1"},async()=>{
+ const {chromium}=await import("playwright");
  const browser=await chromium.launch({headless:true});
  try{
   const page=await browser.newPage();await page.setContent('<main><a href="https://example.com/a">Example GPU</a><a href="https://example.com/b">Example GPU</a></main>');
@@ -20,7 +20,8 @@ test('missing and ambiguous click targets fail promptly with available candidate
  }finally{await browser.close();}
 });
 
-test("slow secondary resources preserve a readable document, while missing documents stay failures",async()=>{
+test("slow secondary resources preserve a readable document, while missing documents stay failures",{skip:process.env.AGENT_BROWSER_INTEGRATION!=="1"},async()=>{
+  const {chromium}=await import("playwright");
   const browser=await chromium.launch({headless:true});
   try{
     const page=await browser.newPage();const held:any[]=[];
@@ -36,7 +37,8 @@ test("slow secondary resources preserve a readable document, while missing docum
   }finally{await browser.close();}
 });
 
-test("equivalent overlaid news links click normally without forcing unrelated overlays", async () => {
+test("equivalent overlaid news links click normally without forcing unrelated overlays", {skip:process.env.AGENT_BROWSER_INTEGRATION!=="1"}, async () => {
+  const {chromium}=await import("playwright");
   const browser=await chromium.launch({headless:true});
   try {
     const page=await browser.newPage();

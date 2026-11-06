@@ -66,9 +66,10 @@ test("round cap produces one tool-free grounded handoff", async () => {
   harness.emitter.on("drift_detected", (e) => drifts.push(e));
   harness.emitter.on("runtime_heartbeat", (e) => heartbeats.push(e.driftScore));
   (harness as any).streamWithRetry = async (
-    _messages: unknown,
+    messages: {role: string; content: unknown}[],
     tools: unknown[],
   ) => {
+    assert.ok(messages.some(message => String(message.content).includes('The tool-round budget is exhausted')));
     requests.push(tools.length);
     return (async function* () {
       yield {
@@ -90,6 +91,7 @@ test("round cap produces one tool-free grounded handoff", async () => {
   assert.equal(effects(), 0);
   assert.match(text, /remains incomplete/);
   assert.equal(termination, "round_cap");
+  assert.ok(!(await (harness as any).context.buildMessages()).some((message: {content: unknown}) => String(message.content).includes('The tool-round budget is exhausted')));
   assert.equal(drifts.length, 0);
   assert(heartbeats.every((score) => score === 0));
 });

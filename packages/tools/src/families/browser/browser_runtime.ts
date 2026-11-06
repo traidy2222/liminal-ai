@@ -14,7 +14,9 @@ import { acquireBrowserPage, releaseBrowserPage, shutdownBrowserProfile, browser
   readBrowserWorkspace, saveBrowserWorkspace, ownsBrowserProfile, lockBrowserProfile, type BrowserTabRecord } from "./browser_profile.js";
 import { prepareBrowserLogin, savedBrowserLogins, readBrowserLoginForFill } from "./browser_credentials.js";
 import { BrowserObservations, formatBrowserSnapshot } from "./browser_observation.js";
-import { pageExtractedItems } from "./browser_extraction.js";
+import { pageExtractedItems, pageExtractedText, compactExtractedLinks } from "./browser_extraction.js";
+import { browserDeadline } from "./browser_deadline.js";
+import { saveBrowserResearchCheckpoint } from "./browser_research_checkpoint.js";
 import {withBrowserTask,browserTaskIsActive} from './browser_queue.js';
 import {
   startBrowserScreencast,
@@ -31,6 +33,8 @@ export interface SnapshotRef {
   /** CSS selector from DOM fallback (preferred for click_ref when present). */
   selector?: string;
   frame?: Frame;
+  href?: string;
+  observedUrl?: string;
 }
 
 
@@ -230,6 +234,20 @@ export function getBrowserSession(sessionId: string): BrowserSessionHandle | und
   return { sessionId: s.sessionId, currentUrl: s.currentUrl, page: s.page };
 }
 
+/** Navigate only an observed link from this still-current document. Exact query
+ * strings (dates, occupancy and currency) remain in the cached destination. */
+export function browserObservedDestination(sessionId:string,ref:string):string {
+  const session=sessions.get(sessionId),link=session?.refs.get(ref);
+  if(!session||!link?.href||link.role!=='link')throw new Error(`Unknown link ref ${ref}. Read the current page's link refs.`);
+  if(link.frame?.isDetached()||link.observedUrl!==(link.frame??session.page).url())throw new Error(`Stale link ref ${ref}. The source document changed; refresh its links.`);
+  return link.href;
+}
+
+export function browserSessionContainsRefs(sessionId:string,refs:string[]):boolean {
+  const session=sessions.get(sessionId);
+  return !!session&&refs.length>0&&refs.every(ref=>session.refs.has(ref));
+}
+
 export function syncBrowserSessionUrl(sessionId: string): void {
   const s = sessions.get(sessionId);
   if (s) s.currentUrl = s.page.url();
@@ -325,7 +343,7 @@ async function publishBrowserView(session: BrowserSession, open: boolean): Promi
   let imagePath: string | undefined;
   let title: string | undefined;
   if (open) {
-    title = (await session.page.title().catch(() => "")) || undefined;
+    title = (await browserDeadline(() => session.page.title(), 1200, 'Page title').catch(() => session.title ?? "")) || undefined;
     session.title = title;
     session.currentUrl = session.restoreUrl ?? session.page.url();
     persistBrowserTabs({ url: session.currentUrl, title: title || "Browser" });
@@ -977,6 +995,27 @@ async function buildDomSnapshotRefs(target: Page | Frame, maxItems = 48): Promis
       }
       return true;
     };
+    function renderedText(root:Element):string {
+      const walker=document.createTreeWalker(root,NodeFilter.SHOW_TEXT),pieces:string[]=[],seen=new WeakMap<Element,boolean>();
+      let previous:Element|null=null,lastStrike:Element|null=null;
+      for(let node=walker.nextNode();node;node=walker.nextNode()){
+        const parent=node.parentElement,text=node.textContent?.replace(/\s+/g,' ').trim();
+        if(!parent||!text||parent.closest('select,option,script,style,noscript'))continue;
+        let shown=seen.get(parent);
+        if(shown===undefined){
+          shown=parent.getClientRects().length>0||getComputedStyle(parent).display==='contents';
+          for(let el:Element|null=parent;shown&&el;el=el.parentElement){const s=getComputedStyle(el);if(el.matches('[hidden],[inert]')||s.display==='none'||s.visibility==='hidden'||s.opacity==='0')shown=false;}
+          seen.set(parent,shown);
+        }
+        if(!shown)continue;
+        const block=parent.closest('p,div,li,tr,td,th,h1,h2,h3,h4,h5,h6,article,section,main,body');
+        let strike=parent.closest('del,s,strike');
+        if(!strike)for(let el:Element|null=parent;el;el=el.parentElement){if(getComputedStyle(el).textDecorationLine.includes('line-through')){strike=el;break;}}
+        pieces.push((pieces.length?(block===previous?' ':'\n'):'')+(strike&&strike!==lastStrike?'[struck through] ':'')+text);
+        previous=block;lastStrike=strike;
+      }
+      return pieces.join('');
+    }
     const modal=[...document.querySelectorAll('dialog[open],[role="dialog"][aria-modal="true"],[role="alertdialog"][aria-modal="true"]')].filter(visible).at(-1);
     const root=modal??document.body;
     root.setAttribute("data-liminal-context",token);
@@ -987,8 +1026,22 @@ async function buildDomSnapshotRefs(target: Page | Frame, maxItems = 48): Promis
       for(const el of scope.querySelectorAll('*'))if(el.shadowRoot)collect(el.shadowRoot);
     };
     collect(root);
+    // Listings often put a large filter form before the actual result cards.
+    // Prefer semantic result rows and their title links without site-specific CSS.
+    const resultCandidates=[...root.querySelectorAll('article,[role="listitem"],li')].filter(el=>
+      visible(el)&&!el.closest('nav,header,footer,aside,[role="navigation"]')&&
+      !!el.querySelector('h2 a[href],h3 a[href],a[href] h2,a[href] h3,[role="heading"] a[href]')&&
+      (el as HTMLElement).innerText.trim().length>=80
+    );
+    const resultCards=resultCandidates.filter(el=>!resultCandidates.some(child=>child!==el&&el.contains(child)));
+    const contentRoot=(modal??[...root.querySelectorAll('main,[role="main"]')].find(visible)??root) as HTMLElement;
+    const resultChars=resultCards.reduce((sum,card)=>sum+(card as HTMLElement).innerText.trim().length,0);
+    // A few related products/hotels at the foot of a detail page are not its
+    // primary content. Cards must dominate before replacing the document view.
+    const listing=resultCards.length>=2&&resultChars>=contentRoot.innerText.trim().length*.35;
+    const resultLinks=new Set(listing?resultCards.flatMap(card=>[...card.querySelectorAll('h2 a[href],h3 a[href],a[href]:has(h2),a[href]:has(h3),[role="heading"] a[href]')]):[]);
     // Form/main controls must not disappear behind dozens of navigation links.
-    const priority=(el:Element)=>el.closest('form,main,[role="main"],[role="dialog"],dialog')||el.matches('input,textarea,select,[contenteditable="true"]')?0:el.closest('nav,header,footer,[role="navigation"]')?2:1;
+    const priority=(el:Element)=>listing?(resultLinks.has(el)?0:el.closest('nav,header,footer,aside,[role="navigation"]')?3:el.matches('input[type="checkbox"],input[type="radio"]')?2:1):el.closest('form,main,[role="main"],[role="dialog"],dialog')||el.matches('input,textarea,select,[contenteditable="true"]')?0:el.closest('nav,header,footer,[role="navigation"]')?2:1;
     nodes.sort((a,b)=>priority(a)-priority(b));
     const items:DomSnapshotItem[]=[];
     for(const el of nodes){
@@ -1000,12 +1053,12 @@ async function buildDomSnapshotRefs(target: Page | Frame, maxItems = 48): Promis
       const control=el instanceof HTMLInputElement||el instanceof HTMLSelectElement||el instanceof HTMLTextAreaElement?el:null;
       const labelled=el.getAttribute('aria-labelledby')?.split(/\s+/).map(id=>(el.getRootNode() as Document|ShadowRoot).getElementById(id)?.textContent?.trim()||'').join(' ').trim();
       const labels=control?[...(control.labels??[])].map(label=>{const copy=label.cloneNode(true) as HTMLElement;copy.querySelectorAll('input,select,textarea,[contenteditable]').forEach(child=>child.remove());return copy.textContent?.trim()||'';}).join(' '):'';
-      const name=(el.getAttribute('aria-label')?.trim()||labelled||labels||el.getAttribute('placeholder')||el.getAttribute('title')||((el as HTMLElement).isContentEditable?'':(el as HTMLElement).innerText?.trim())||el.getAttribute('name')||el.id||'Unlabelled control').replace(/\s+/g,' ').slice(0,160);
+      const name=(el.getAttribute('aria-label')?.trim()||labelled||labels||el.getAttribute('placeholder')||el.getAttribute('title')||((el as HTMLElement).isContentEditable||el instanceof HTMLSelectElement?'':(el as HTMLElement).innerText?.trim())||el.getAttribute('name')||el.id||'Unlabelled control').replace(/\s+/g,' ').slice(0,160);
       const role=el.getAttribute('role')|| (tag==='select'?'combobox':tag==='textarea'||(el as HTMLElement).isContentEditable?'textbox':input?['checkbox','radio'].includes(input.type)?input.type:input.type==='search'?'searchbox':['submit','button','reset'].includes(input.type)?'button':'textbox':tag==='a'?'link':tag==='label'?'text':'button');
       const state:string[]=[];
       if(el.matches(':focus'))state.push('focused=true');
       const row=el.closest('li,tr,[role="row"],[role="listitem"]');
-      if(row&&row!==el){const context=(row as HTMLElement).innerText?.replace(/\s+/g,' ').trim().slice(0,220);if(context)state.push('row='+JSON.stringify(context));}
+      if(row&&row!==el){const context=renderedText(row).replace(/\s+/g,' ').trim().slice(0,220);if(context)state.push('row='+JSON.stringify(context));}
       if(el.matches(':disabled')||el.getAttribute('aria-disabled')==='true')state.push('disabled');
       if(control?.required||el.getAttribute('aria-required')==='true')state.push('required');
       if((el as HTMLElement).isContentEditable||input&&role==='combobox'&&!input.readOnly)state.push('editable');
@@ -1028,17 +1081,28 @@ async function buildDomSnapshotRefs(target: Page | Frame, maxItems = 48): Promis
     const content=(modal??[...document.querySelectorAll('main,[role="main"]')].find(visible)??root) as HTMLElement;
     const articles=[...content.querySelectorAll('article')].filter(visible);
     const readingRoot=(articles.length===1?articles[0]:content) as HTMLElement;
-    const readable=(readingRoot.innerText??'').replace(/\r/g,'').replace(/[ \t]+/g,' ').replace(/\n{3,}/g,'\n\n').trim();
+    const readable=listing?'RESULT_ITEMS:\n'+resultCards.slice(0,6).map((card,i)=>{
+      const text=renderedText(card).replace(/\s+/g,' ').trim();
+      return `[${i+1}] ${text.length>900?text.slice(0,550)+' … '+text.slice(-340):text}`;
+    }).join('\n\n'):renderedText(readingRoot).replace(/\r/g,'').replace(/[ \t]+/g,' ').replace(/\n{3,}/g,'\n\n').trim();
     const canvas=[...root.querySelectorAll('canvas')].filter(visible).length;
     const unlabeledImages=[...root.querySelectorAll('img')].filter(el=>visible(el)&&!el.alt).length;
     const timestamps=[...root.querySelectorAll('time[datetime],relative-time[datetime],local-time[datetime]')].filter(visible).slice(0,24).map(el=>({text:(el as HTMLElement).innerText?.trim(),datetime:el.getAttribute('datetime'),context:el.parentElement?.innerText?.replace(/\s+/g,' ').slice(0,180)}));
     const searchPage=/(^|\.)(google\.[a-z.]+|bing\.com|duckduckgo\.com)$/.test(location.hostname)&&(new URL(location.href).searchParams.has('q')||location.pathname.includes('/search'));
-    const reading={page_kind:searchPage?'search_results':articles.length>1?'listing':articles.length===1?'article':'page',rendered_chars:readable.length,excerpt_chars:Math.min(readable.length,5000),truncated:readable.length>5000};
+    const reading={page_kind:searchPage?'search_results':listing||articles.length>1?'listing':articles.length===1?'article':'page',...(listing?{result_count:resultCards.length,excerpted_results:Math.min(resultCards.length,6)}:{}),rendered_chars:readable.length,excerpt_chars:Math.min(readable.length,5000),truncated:readable.length>5000||listing&&(resultCards.length>6||resultCards.some(card=>(card as HTMLElement).innerText.replace(/\s+/g,' ').trim().length>900))};
     return {items,readable:readable.slice(0,5000)+(readable.length>5000?'\n…(readable excerpt truncated; use browser_extract for the needed section)':''),contextSelector:'[data-liminal-context="'+token+'"]',context:JSON.stringify({focus:modal?'dialog':'page',reading,text:content.innerText?.replace(/\s+/g,' ').trim().slice(0,300),...(feedback?{feedback}:{}),...(timestamps.length?{timestamps}:{}),...(canvas||unlabeledImages?{visual_content:{canvas,unlabeledImages,note:'Use a screenshot for visual content that has no DOM text.'}}:{})})};
   },{limit:maxItems,token:randomUUID(),namespace:domRefNamespace});
 }
 
-export async function buildPageSnapshot(page:Page,maxChars=8_000):Promise<{snapshotText:string;refs:Map<string,SnapshotRef>}> {
+export async function buildPageSnapshot(page:Page,maxChars=8_000,timeoutMs=5000):Promise<{snapshotText:string;refs:Map<string,SnapshotRef>}> {
+  assertPageWithinFileRoots(page);
+  return browserDeadline(() => collectPageSnapshot(page,maxChars), timeoutMs, 'Page observation').catch(error => ({
+    snapshotText: `URL: ${page.url()}\nOBSERVATION_WARNING: ${error.message} No fresh text or controls were observed.`,
+    refs: new Map<string,SnapshotRef>(),
+  }));
+}
+
+async function collectPageSnapshot(page:Page,maxChars:number):Promise<{snapshotText:string;refs:Map<string,SnapshotRef>}> {
   assertPageWithinFileRoots(page);
   const refs=new Map<string,SnapshotRef>(), lines:string[]=[],contexts:string[]=[],readable:string[]=[],trees:string[]=[],passwords:string[]=[];
   const nextRef=()=> 'e'+(++snapshotRefCounter);
@@ -1061,7 +1125,7 @@ export async function buildPageSnapshot(page:Page,maxChars=8_000):Promise<{snaps
         if(!known){known=new Map();frameNodeRefs.set(frame,known);}
         const id=known.get(item.selector)??nextRef();known.set(item.selector,id);
         if(known.size>10000){known.clear();known.set(item.selector,id);}
-        refs.set(id,{role:item.role,name:item.name,exact:true,selector:item.selector,frame});
+        refs.set(id,{role:item.role,name:item.name,exact:true,selector:item.selector,frame,href:item.href,observedUrl:frame.url()});
         const destination=item.href&&item.href.length<=Math.min(300,destinationBudget)?' href='+JSON.stringify(item.href):'';
         destinationBudget-=destination.length;
         lines.push(`  ${id} ${item.role} ${JSON.stringify(item.name)}${item.state?' '+item.state:''}${destination}${frame===page.mainFrame()?'':' [embedded frame]'}`);
@@ -1085,16 +1149,16 @@ function touchSession(s: BrowserSession): void {
 }
 
 export async function navigateWithRenderedContent(page:Page, href:string, options:{waitUntil:WaitUntilNav;timeout:number}):Promise<string|undefined>{
-  try {await page.goto(href,options);return undefined;}
+  try {await browserDeadline(() => page.goto(href,options), options.timeout + 1000, 'Page navigation');return undefined;}
   catch(error){
-    if(!(error instanceof Error)||!/timeout/i.test(error.message))throw error;
+    if(!(error instanceof Error)||!/timeout|timed out/i.test(error.message))throw error;
     const current=page.url();
     const expected=new URL(href),observed=new URL(current);
     const sameSource=expected.origin===observed.origin&&expected.pathname===observed.pathname;
-    const readable=sameSource&&await page.evaluate(()=>{
+    const readable=sameSource&&await browserDeadline(() => page.evaluate(()=>{
       const main=document.querySelector('article,main,[role="main"]') as HTMLElement|null;
       return document.readyState!=='loading'&&!!document.title.trim()&&!!main&&main.innerText.trim().length>400;
-    }).catch(()=>false);
+    }), 1200, 'Rendered document check').catch(()=>false);
     if(!readable)throw error;
     return `Requested ${options.waitUntil} did not finish within ${options.timeout}ms. Showing the rendered source document; some resources may still be loading.`;
   }
@@ -1183,8 +1247,8 @@ export async function openBrowserSession(options: {
     if (!options.restore) selectedTaskTabs.set(options.ownerTaskId, sessionId);
     attachSessionLifecycle(session);
 
-    const title = await page.title();
-    const body = (await page.innerText("body").catch(() => ""))
+    const title = await browserDeadline(() => page.title(), 1200, 'Page title').catch(() => '');
+    const body = options.includeSnapshot ? '' : (await browserDeadline(() => page.innerText("body", {timeout:1200}), 1500, 'Body excerpt').catch(() => ""))
       .replace(/\s+/g, " ")
       .slice(0, 4000);
 
@@ -1251,7 +1315,7 @@ export async function snapshotBrowserSession(
     const { snapshotText, refs } = await buildPageSnapshot(session.page);
     session.refs = refs;
     session.currentUrl = session.page.url();
-    const title = await session.page.title();
+    const title = await browserDeadline(() => session.page.title(), 1200, 'Page title').catch(() => session.title ?? '');
     const captcha = await detectCaptchaSignals(session.page);
     const captchaHint = captcha ? formatCaptchaHint(captcha) : "";
     const diag = includeConsole ? formatDiagnosticsOutput(session.diagnostics) : "";
@@ -1301,10 +1365,7 @@ export async function navigateBrowserSession(options: {
       const { snapshotText, refs } = await buildPageSnapshot(session.page);
       session.refs = refs;
       session.currentUrl = session.page.url();
-      const title = await session.page.title();
-      const body = (await session.page.innerText("body").catch(() => ""))
-        .replace(/\s+/g, " ")
-        .slice(0, 4000);
+      const title = await browserDeadline(() => session.page.title(), 1200, 'Page title').catch(() => session.title ?? '');
       const diag = options.includeConsole ? formatDiagnosticsOutput(session.diagnostics) : "";
       const shotLine = session.lastScreenshotPath ? `\nSCREENSHOT_PATH: ${session.lastScreenshotPath}` : "";
       await publishBrowserView(session, true);
@@ -1360,6 +1421,23 @@ function resolveRefLocator(page: Page, ref: string, refs: Map<string, SnapshotRe
     name: meta.name,
     exact: meta.exact ?? true,
   });
+}
+
+/** React may replace a link node while retaining the exact observed destination.
+ * Recover only that labelled link on the same document; input/button refs expire. */
+async function resolveClickRef(page:Page,ref:string,refs:Map<string,SnapshotRef>):Promise<Locator>{
+  const locator=resolveRefLocator(page,ref,refs),meta=refs.get(ref)!;
+  const frame=meta.frame??page;
+  if(await locator.count()||meta.role!=='link'||!meta.href||meta.observedUrl!==frame.url())return locator;
+  const token=randomUUID();
+  const found=await browserDeadline(()=>frame.evaluate(({href,name,token})=>{
+    const link=[...document.querySelectorAll<HTMLAnchorElement>('a[href]')].find(a=>
+      a.href===href&&!a.hasAttribute('download')&&a.getClientRects().length>0&&
+      (a.getAttribute('aria-label')||a.innerText||a.getAttribute('title')||'').trim().replace(/\s+/g,' ')===name);
+    if(!link)return false;
+    link.setAttribute('data-liminal-click-target',token);return true;
+  },{href:meta.href,name:meta.name,token}),1200,'Link refresh').catch(()=>false);
+  return found?frame.locator(`[data-liminal-click-target="${token}"]`):locator;
 }
 
 async function selectBrowserOption(page:Page|Frame,locator:Locator,value:string,timeoutMs=15000):Promise<void>{
@@ -1855,7 +1933,7 @@ export async function runBrowserActions(
           await page.getByText(a.text,{exact:a.exact??true}).dblclick({timeout:a.timeout_ms??15000});
           break;
         case "click_ref":
-          await clickBrowserControl(session.refs.get(a.ref)?.frame??page,resolveRefLocator(page, a.ref, session.refs),a.timeout_ms??15000);
+          await clickBrowserControl(session.refs.get(a.ref)?.frame??page,await resolveClickRef(page, a.ref, session.refs),a.timeout_ms??15000);
           break;
         case "check_ref":
         case "uncheck_ref":
@@ -2534,43 +2612,109 @@ export async function extractFromSession(
       }
       return {ok:true,output:JSON.stringify(forms,null,2)};
     }
-    const observed = await session.page.evaluate(
-      ({ ty, sel, hidden, query, sourced }: { ty: string; sel: string | undefined; hidden: boolean; query?:string;sourced:boolean }) => {
+    const observed = await browserDeadline(() => session.page.evaluate(
+      ({ ty, sel, hidden, query, sourced, namespace, token }: { ty: string; sel: string | undefined; hidden: boolean; query?:string;sourced:boolean;namespace:string;token:string }) => {
         function extract() {
+        const visibility=new WeakMap<Element,boolean>();
         function vis(el: Element): boolean {
           if (hidden) return true;
+          const cached=visibility.get(el);if(cached!==undefined)return cached;
           const s = window.getComputedStyle(el);
-          return el.getClientRects().length > 0 && !el.closest('[hidden],[inert],[aria-hidden="true"]') && s.display !== "none" && s.visibility !== "hidden" && s.opacity !== "0";
+          const shown=(el.getClientRects().length>0||s.display==='contents')&&!el.matches('[hidden],[inert],[aria-hidden="true"]')&&s.display!=='none'&&s.visibility!=='hidden'&&s.opacity!=='0'&&(!el.parentElement||vis(el.parentElement));
+          visibility.set(el,shown);return shown;
+        }
+        const textVisibility=new WeakMap<Element,boolean>();
+        function textVisible(el:Element):boolean{
+          if(hidden)return true;
+          const cached=textVisibility.get(el);if(cached!==undefined)return cached;
+          const s=getComputedStyle(el);
+          const shown=(el.getClientRects().length>0||s.display==='contents')&&!el.matches('[hidden],[inert]')&&s.display!=='none'&&s.visibility!=='hidden'&&s.opacity!=='0'&&(!el.parentElement||textVisible(el.parentElement));
+          textVisibility.set(el,shown);return shown;
+        }
+        const folded=(text:string)=>text.normalize('NFKC').replace(/[\u2010-\u2015\u2212-]/g,' ').replace(/\s+/g,' ').trim().toLowerCase();
+        const queryTerms=[...new Set(folded(query??'').match(/[\p{L}\p{N}]+/gu)??[])];
+        const allTerms=(text:string)=>{
+          const words=new Set(folded(text).match(/[\p{L}\p{N}]+/gu)??[]);
+          return queryTerms.length>=2&&queryTerms.every(term=>words.has(term));
+        };
+        function renderedText(root:Node,range?:Range):string {
+          const walker=document.createTreeWalker(root,NodeFilter.SHOW_TEXT),pieces:string[]=[];
+          let previous:Element|null=null,lastStrike:Element|null=null;
+          for(let node=walker.nextNode();node;node=walker.nextNode()){
+            const parent=node.parentElement,text=node.textContent?.replace(/\s+/g,' ').trim();
+            if(!parent||!text||parent.closest('select,option,script,style,noscript')||!textVisible(parent)||range&&!range.intersectsNode(node))continue;
+            const block=parent.closest('p,div,li,tr,td,th,h1,h2,h3,h4,h5,h6,article,section,main,body');
+            let strike=parent.closest('del,s,strike');
+            if(!strike)for(let el:Element|null=parent;el;el=el.parentElement){if(getComputedStyle(el).textDecorationLine.includes('line-through')){strike=el;break;}}
+            pieces.push((pieces.length?(block===previous?' ':'\n'):'')+(strike&&strike!==lastStrike?'[struck through] ':'')+text);
+            previous=block;lastStrike=strike;
+          }
+          return pieces.join('');
+        }
+        let linkIndex = 0;
+        function linksFrom(elements: HTMLAnchorElement[]) {
+          const unique = new Map<string, {text:string;href:string;context?:string;selector?:string}>();
+          const state = window as unknown as Record<string,WeakMap<Element,string>>;
+          if (sourced && !state[namespace]) Object.defineProperty(state,namespace,{value:new WeakMap<Element,string>()});
+          for (const a of elements.filter(vis)) {
+            const text=a.innerText.trim().replace(/\s+/g,' ').slice(0,160), href=a.href;
+            const before=unique.get(href);
+            if (before) { if(!before.text && text)before.text=text; continue; }
+            let selector: string | undefined;
+            if(sourced){
+              const marker=state[namespace]!.get(a)??token+'-'+(linkIndex++);
+              state[namespace]!.set(a,marker);a.setAttribute('data-liminal-ref',marker);
+              selector='[data-liminal-ref="'+marker+'"]';
+            }
+            unique.set(href,{text,href,...(selector?{selector}:{}),context:a.closest('p,li')?.textContent?.trim().replace(/\s+/g,' ').slice(0,240)});
+          }
+          return [...unique.values()];
         }
         if (ty === "tables") {
-          const tables = Array.from(document.querySelectorAll("table")).filter(vis);
-          return tables.map((t) => {
-            const rows = Array.from(t.querySelectorAll("tr")).filter(vis).map((r) =>
-              Array.from(r.querySelectorAll("th,td")).filter(vis).map((c) => (c as HTMLElement).innerText.trim().replace(/\s+/g, " "))
-            );
-            const caption = t.querySelector("caption")?.textContent?.trim() ?? null;
-            return { caption, rows };
-          });
+          const scope=sel?document.querySelector(sel):document;
+          const tables=(scope instanceof HTMLTableElement?[scope]:[...scope?.querySelectorAll('table')??[]]).filter(textVisible);
+          const results:unknown[]=[];
+          for(const [tableIndex,table]of tables.entries()){
+            const rows=[...table.rows].filter(textVisible),grid:string[][]=[];
+            const caption=table.caption?.textContent?.trim()??null;
+            let headers:string[]=[];
+            for(const [rowIndex,row]of rows.entries()){
+              const values=grid[rowIndex]??(grid[rowIndex]=[]);let column=0;
+              for(const cell of [...row.cells].filter(textVisible)){
+                while(values[column]!==undefined)column++;
+                const text=renderedText(cell).trim().replace(/\s+/g,' ');
+                const height=cell.rowSpan===0?rows.length-rowIndex:Math.min(cell.rowSpan,rows.length-rowIndex);
+                const width=Math.min(cell.colSpan,64);
+                for(let down=0;down<height;down++)for(let across=0;across<width;across++)(grid[rowIndex+down]??(grid[rowIndex+down]=[]))[column+across]=text;
+                column+=width;
+              }
+              const header=table.tHead?.contains(row)||rowIndex===0&&[...row.cells].every(cell=>cell.tagName==='TH');
+              if(header){headers=[...values];continue;}
+              const text=values.map((value,i)=>`${headers[i]||'Column '+(i+1)}: ${value??''}`).join('\n');
+              const exact=!query?.trim()||folded(text).includes(folded(query));
+              if(sourced&&(exact||allTerms(text)))results.push({table:tableIndex,caption,row:rowIndex,text,...(!exact?{match_kind:'all_terms'}:{})});
+            }
+            if(!sourced)results.push({caption,rows:grid});
+          }
+          if(sourced&&query?.trim()&&results.some(row=>!(row as {match_kind?:string}).match_kind))
+            return results.filter(row=>!(row as {match_kind?:string}).match_kind);
+          return results;
         }
         if (ty === "links") {
-          return Array.from((sel?document.querySelector(sel):document)?.querySelectorAll("a[href]")??[])
-            .filter(vis)
-            .map((a) => ({
-              text: (a as HTMLAnchorElement).innerText.trim().replace(/\s+/g, " ").slice(0, 200),
-              href: (a as HTMLAnchorElement).href,
-              context: a.closest('p,li')?.textContent?.trim().replace(/\s+/g,' ').slice(0,240),
-            }))
+          return linksFrom(Array.from((sel?document.querySelector(sel):document)?.querySelectorAll<HTMLAnchorElement>("a[href]")??[]))
             .filter((l) => (l.text || l.href)&&(!query?.trim()||[l.text,l.href,l.context].join(' ').toLowerCase().includes(query.trim().toLowerCase())));
         }
         if (ty === "text") {
-          const root = sel ? document.querySelector(sel) : document.querySelector('article,main,[role="main"]')??document.body;
+          const root = sel ? document.querySelector(sel) : [...document.querySelectorAll('main,[role="main"]')].find(vis)??[...document.querySelectorAll('article')].find(vis)??document.body;
           if(!root)return "";
-          const raw=(root as HTMLElement).innerText?.replace(/[^\S\r\n]+/g," ").trim()??"";
-          const headings=[...root.querySelectorAll('h1,h2,h3,h4,h5,h6,[role="heading"]')].filter(vis);
+          const raw=renderedText(root).replace(/[^\S\r\n]+/g," ").trim();
+          const headings=[...root.querySelectorAll('h1,h2,h3,h4,h5,h6,[role="heading"]')].filter(textVisible);
           if(query?.trim()){
-            const needle=query.trim().toLowerCase();
-            const headingMatches=headings.filter(el=>(el as HTMLElement).innerText.toLowerCase().includes(needle));
-            const matches=(headingMatches.length?headingMatches:[...root.querySelectorAll('*')].filter(el=>vis(el)&&(el as HTMLElement).innerText?.toLowerCase().includes(needle)&&![...el.children].some(child=>(child as HTMLElement).innerText?.toLowerCase().includes(needle)))).slice(0,20);
+            const needle=folded(query);
+            const headingMatches=headings.filter(el=>folded((el as HTMLElement).innerText).includes(needle));
+            let matches=(headingMatches.length?headingMatches:[...root.querySelectorAll('*')].filter(el=>textVisible(el)&&!el.closest('select,option,script,style')&&folded(renderedText(el)).includes(needle)&&![...el.children].some(child=>folded(renderedText(child)).includes(needle)))).slice(0,20);
+            const fallback=matches.length===0;
+            if(fallback)matches=[...root.querySelectorAll('p,td,th,li,h1,h2,h3,h4,h5,h6,[role="paragraph"]')].filter(el=>textVisible(el)&&allTerms(renderedText(el))&&![...el.querySelectorAll('p,td,th,li')].some(child=>allTerms(renderedText(child)))).slice(0,20);
             if(!matches.length)return {matches:[],available_headings:headings.slice(0,30).map(h=>(h as HTMLElement).innerText.trim())};
             return matches.map(el=>{
               const hierarchy:{level:number;heading:string}[]=[];
@@ -2580,15 +2724,16 @@ export async function extractFromSession(
                 while(hierarchy.length&&hierarchy.at(-1)!.level>=level)hierarchy.pop();
                 hierarchy.push({level,heading:(heading as HTMLElement).innerText.trim()});
               }
-              const local=(el.parentElement?.parentElement??el.parentElement??el) as HTMLElement;
+              const local=(el.closest('tr,[role="row"],article,[role="listitem"],li')??el.parentElement?.parentElement??el.parentElement??el) as HTMLElement;
               if(headings.includes(el)){
                 const level=Number(el.getAttribute('aria-level')??el.tagName.slice(1))||2;
                 const next=headings.find(h=>(el.compareDocumentPosition(h)&Node.DOCUMENT_POSITION_FOLLOWING)&&Number(h.getAttribute('aria-level')??h.tagName.slice(1))<=level);
                 const range=document.createRange();range.setStartAfter(el);if(next)range.setEndBefore(next);else range.setEnd(root,root.childNodes.length);
                 const fragment=range.cloneContents();
-                return {headingPath:[...hierarchy.map(h=>h.heading),(el as HTMLElement).innerText.trim()],text:(el as HTMLElement).innerText.trim(),nearbyText:range.toString().slice(0,4000),links:[...fragment.querySelectorAll<HTMLAnchorElement>('a[href]')].slice(0,8).map(a=>({text:a.textContent?.trim(),href:a.href}))};
+                const section=renderedText(range.commonAncestorContainer,range);
+                return {headingPath:[...hierarchy.map(h=>h.heading),(el as HTMLElement).innerText.trim()],text:(el as HTMLElement).innerText.trim(),nearbyText:sourced?section:section.slice(0,4000),links:linksFrom([...root.querySelectorAll<HTMLAnchorElement>('a[href]')].filter(a=>range.intersectsNode(a))).slice(0,4)};
               }
-              return {headingPath:hierarchy.map(h=>h.heading),text:(el as HTMLElement).innerText.trim(),nearbyText:local.innerText.slice(0,1600),links:[...local.querySelectorAll<HTMLAnchorElement>('a[href]')].slice(0,8).map(a=>({text:a.textContent?.trim(),href:a.href}))};
+              return {headingPath:hierarchy.map(h=>h.heading),text:renderedText(el).trim(),nearbyText:sourced?renderedText(local):renderedText(local).slice(0,1600),...(fallback?{match_kind:'all_terms'}:{}),links:linksFrom([...local.querySelectorAll<HTMLAnchorElement>('a[href]')]).slice(0,4)};
             });
           }
           const labels=new Map(headings.map(el=>[(el as HTMLElement).innerText.trim(),Number(el.getAttribute('aria-level')??el.tagName.slice(1))||2]));
@@ -2596,11 +2741,11 @@ export async function extractFromSession(
         }
         if (ty === "selector_text") {
           if (!sel) return null;
-          const els = Array.from(document.querySelectorAll(sel)).filter(vis);
+          const els = Array.from(document.querySelectorAll(sel)).filter(textVisible);
           return els.map((e) => {
-            const text=(e as HTMLElement).innerText.trim().replace(/\s+/g, " ").slice(0,5000);
+            const text=renderedText(e).trim().replace(/\s+/g, " ");
             if(!sourced)return text;
-            const links=[...(e.matches('a[href]')?[e as HTMLAnchorElement]:[]),...e.querySelectorAll<HTMLAnchorElement>('a[href]')].slice(0,8).map(a=>({text:a.innerText.trim().slice(0,160),href:a.href}));
+            const links=linksFrom([...(e.matches('a[href]')?[e as HTMLAnchorElement]:[]),...e.querySelectorAll<HTMLAnchorElement>('a[href]')]).slice(0,4);
             return {text,links};
           });
         }
@@ -2637,22 +2782,34 @@ export async function extractFromSession(
         const search=/(^|\.)(google\.[a-z.]+|bing\.com|duckduckgo\.com)$/.test(location.hostname)&&(new URL(location.href).searchParams.has('q')||location.pathname.includes('/search'));
         return {source:{url:location.href,title:document.title,observed_at:new Date().toISOString(),kind:search?'search_lead':'page_observation'},data};
       },
-      { ty: type, sel: selector, hidden: includeHidden, query,sourced:readingWindow?.includeSource===true }
-    );
-    const result=observed.data;
-    const output=(data:unknown)=>JSON.stringify(readingWindow?.includeSource?{source:observed.source,data}:data,null,2);
+      { ty: type, sel: selector, hidden: includeHidden, query,sourced:readingWindow?.includeSource===true,namespace:domRefNamespace,token:randomUUID() }
+    ), 5000, 'Page extraction');
+    const result=readingWindow?.includeSource ? compactExtractedLinks(observed.data,(selector,name,href)=>{
+      const frame=session.page.mainFrame();let known=frameNodeRefs.get(frame);
+      if(!known){known=new Map();frameNodeRefs.set(frame,known);}
+      const id=known.get(selector)??'e'+(++snapshotRefCounter);known.set(selector,id);
+      session.refs.set(id,{role:'link',name,exact:true,selector,frame,href,observedUrl:frame.url()});return id;
+    }) : observed.data;
+    const output=(data:unknown)=>{
+      if(!readingWindow?.includeSource)return JSON.stringify(data);
+      let checkpoint: string | undefined;
+      try{checkpoint=saveBrowserResearchCheckpoint(session.ownerTaskId,{source:observed.source,data});}catch{/* Keep reading usable in a read-only workspace. */}
+      return JSON.stringify({source:observed.source,data,...(checkpoint?{checkpoint}:{})});
+    };
     if(readingWindow&&type==='text'&&!query&&typeof result==='string'){
+      if(readingWindow.includeSource)return {ok:true,output:output(pageExtractedText(result,readingWindow))};
       const offset=Math.max(0,Math.floor(readingWindow.offset??0));
       const limit=Math.max(500,Math.min(6000,Math.floor(readingWindow.maxChars??5000)));
       const text=result.slice(offset,offset+limit),next=offset+text.length;
-      return {ok:true,output:output({url:observed.source.url,offset,total_chars:result.length,next_offset:next<result.length?next:null,text})};
+      if(offset>0&&offset>=result.length)throw new Error(`offset=${offset} is outside ${result.length} characters. Start at 0 or use next_offset.`);
+      return {ok:true,output:output({url:observed.source.url,offset,offset_unit:'characters',total_chars:result.length,next_offset:next<result.length?next:null,text})};
     }
     if(readingWindow&&type==='links'&&Array.isArray(result)){
-      const offset=Math.max(0,Math.floor(readingWindow.offset??0));let links=result.slice(offset,offset+10);
-      while(links.length>1&&JSON.stringify(links).length>6000)links.pop();
-      return {ok:true,output:output({url:observed.source.url,offset,total_matches:result.length,next_offset:offset+links.length<result.length?offset+links.length:null,links})};
+      const page=pageExtractedItems(result,readingWindow);
+      const {items:links,...metadata}=page;
+      return {ok:true,output:output({...metadata,links})};
     }
-    if(readingWindow?.includeSource&&Array.isArray(result)&&['text','selector_text','selector_html','headings'].includes(type))
+    if(readingWindow?.includeSource&&Array.isArray(result)&&['text','selector_text','selector_html','headings','tables'].includes(type))
       return {ok:true,output:output(pageExtractedItems(result,readingWindow,type==='selector_text'))};
     return { ok: true, output: output(result) };
   } catch (err) {

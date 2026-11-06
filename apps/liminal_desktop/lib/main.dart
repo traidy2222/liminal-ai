@@ -33,7 +33,9 @@ Future<void> main(List<String> args) async {
   }
 
   await windowManager.ensureInitialized();
-  final windowPositionManager = WindowPositionManager();
+  final windowPositionManager = WindowPositionManager(
+    showInactive: args.contains('--liminal-background'),
+  );
   await windowPositionManager.initialize();
   await BrowserWorkspace.instance.initialize();
 

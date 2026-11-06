@@ -11,6 +11,7 @@ test("wake settings are opt-in, bounded and preserve configurable phrases", () =
     { enabled: true, phrase: "Okay Liminal", idleTimeoutMs: 60000 });
   assert.equal(resolveWakeVoiceConfig(prefs({ AGENT_WAKE_WORD_PHRASE: "???", AGENT_WAKE_WORD_IDLE_SECONDS: "-1" })).phrase, "Hey Jarvis");
   assert.equal(resolveWakeVoiceConfig(prefs({ AGENT_WAKE_WORD_IDLE_SECONDS: "100000" })).idleTimeoutMs, 300000);
+  for (const value of ["", "   "]) assert.equal(resolveWakeVoiceConfig(prefs({ AGENT_WAKE_WORD_IDLE_SECONDS: value })).idleTimeoutMs, 45000);
 });
 test("wake-enabled startup warms local Whisper even when manual dictation selects Qwen", async () => {
   const calls: string[] = [];

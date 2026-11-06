@@ -32,4 +32,10 @@ CI runs `npm run verify:repo-secrets` and `npm run verify-harness-defaults-no-se
 
 ## Self-hosters
 
+### Local desktop browser boundary
+
+The Windows native browser uses WebView2's Chromium debugging protocol on a random IPv4 loopback port. This port is not authenticated: other software and OS users on the same computer can inspect or control its browser sessions, including logged-in pages. The authenticated sidecar API does not protect this separate port. Treat the machine and its local users as trusted; never expose the debugging port to a network or port forwarding service.
+
+On shared or untrusted computers, set `LIMINAL_BROWSER_NATIVE=0` in the desktop process environment before launching Liminal. This uses the shared browser stream with Playwright's process pipe instead of the native WebView2 debugging port. Separate OS accounts alone do not isolate a loopback debugging port. Per-user authenticated native browser transport remains a limitation.
+
 Run billing on infrastructure you control. Keep the signing private key in server env only. Apply RLS migrations from the operator repo; use the service role only on the server, never in the browser.

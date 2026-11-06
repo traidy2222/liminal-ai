@@ -8,6 +8,23 @@ import {runHarnessEffectiveEnvContext} from './harness_effective_env.js';
 import {getFastModelSlug} from './router.js';
 import {resolveProviderConfig} from './provider_config.js';
 
+test('stored generic credentials are bound to their configured endpoint',async()=>{
+ const before={...process.env}, original=globalThis.fetch;
+ try {
+  process.env.AGENT_API_BASE_URL='https://provider.example/v1';
+  process.env.AGENT_API_KEY='synthetic-endpoint-secret';
+  delete process.env.OPENROUTER_API_KEY;
+  assert.equal(normalizeProviderSetup({baseURL:'https://provider.example/v1/'}).apiKey,'synthetic-endpoint-secret');
+  assert.equal(normalizeProviderSetup({baseURL:'https://unrelated.example/v1'}).apiKey,'');
+  assert.equal(normalizeProviderSetup({baseURL:'https://openrouter.ai/api/v1'}).apiKey,'');
+  globalThis.fetch=async(_url,options)=>{
+   assert.ok(!JSON.stringify(options?.headers).includes('synthetic-endpoint-secret'));
+   return new Response(JSON.stringify({data:[{id:'fixture'}]}));
+  };
+  await discoverProviderModels({baseURL:'https://unrelated.example/v1'});
+ }finally{process.env=before;globalThis.fetch=original;}
+});
+
 test('local credentials preserve explicit server configuration and isolate cloud keys',()=>{
  const before={...process.env};const baseURL='http://localhost:1234/v1';
  try{

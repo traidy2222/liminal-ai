@@ -2,7 +2,7 @@ import OpenAI, { type ClientOptions } from "openai";
 import type { AgentHarness } from "./agent.js";
 import type { ChatMetadata } from "./chat_metadata.js";
 import { updateChatMetadata } from "./chat_metadata.js";
-import { effectiveHarnessEnvRaw } from "./harness_effective_env.js";
+import { effectiveHarnessEnvRaw, runHarnessEffectiveEnvContext } from "./harness_effective_env.js";
 import { isOpenRouterApiBaseUrl } from "./openrouter_session.js";
 import { redactSensitiveEmailContent } from "./email_redaction.js";
 import type { Message } from "./types.js";
@@ -114,10 +114,10 @@ export function autoTitleAfterTurn(harness: AgentHarness, userMessage: string): 
   const history = harness.getContext().getConversationMessages();
   const answer = [...history].reverse().find(m => m.role === "assistant" && typeof m.content === "string" && m.content.trim());
   const firstUser = history.find(m => m.role === "user" && typeof m.content === "string");
-  return titler.recordTurn(harness.taskId, [
+  return runHarnessEffectiveEnvContext(harness.getRuntimePreferences(), () => titler.recordTurn(harness.taskId, [
     { role: "user", content: userMessage },
     ...(answer ? [{ role: "assistant" as const, content: String(answer.content) }] : []),
   ], {
     baseURL: harness.config.baseURL ?? "", apiKey: harness.config.openRouterApiKey,
-  }, typeof firstUser?.content === "string" ? firstUser.content : undefined);
+  }, typeof firstUser?.content === "string" ? firstUser.content : undefined));
 }

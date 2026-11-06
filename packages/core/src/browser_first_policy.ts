@@ -15,7 +15,7 @@ export function browserFirstSuppressedTools(userMessage: string, standaloneEnabl
     if (explicit(new RegExp(`\\b(?:use|call|run|invoke|execute)\\s+(?:the\\s+)?${name}\\b`, "gi"))) allowed.add(name);
   }
   if (explicit(/\b(?:make|send|issue|perform|test|use)\s+(?:(?:a|an|the|raw)\s+)?https?\s+requests?\b/gi) ||
-      explicit(/\b(?:use|call|query|test|invoke)\s+(?:(?:the|this|an?|rest|json|graphql|[a-z0-9_-]+)\s+){0,3}api\b/gi)) allowed.add("http_request");
+      explicit(/\b(?:use|call|query|test|invoke)\s+(?:(?:the|this|an?|rest|json|graphql)\s+){0,3}api\b/gi)) allowed.add("http_request");
   if (explicit(/\buse\s+(?:the\s+)?markets?\s+quotes?(?:\s+tool)?\b/gi)) allowed.add("markets_quote");
   if (explicit(/\buse\s+(?:the\s+)?weather\s+lookup\s+tool\b/gi)) allowed.add("weather_lookup");
   return DIRECT_LOOKUP_TOOLS.filter(name => !allowed.has(name));

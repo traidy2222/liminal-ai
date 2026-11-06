@@ -18,6 +18,8 @@ import { resolveWorkspaceRoot } from "./workspace_root.js";
 import { isRecoverableToolFailure } from "./tool_circuit.js";
 import { localValidationSchema } from "./local_schema_ref.js";
 
+class ToolExecutionGuardError extends Error {}
+
 function autoApproveToolSet(): Set<string> {
   const raw = effectiveHarnessEnvRaw("AGENT_AUTO_APPROVE_TOOLS")?.trim();
   if (!raw) return new Set();
@@ -625,7 +627,8 @@ export class ToolDispatcher {
       const runHandler = async (): Promise<ToolResult> => {
         // Feature-specific guards run after locks, approval and edited arguments.
         // Stored procedures cannot treat an old approval as current authority.
-        await this.executionGuard?.(name,args);
+        try { await this.executionGuard?.(name,args); }
+        catch(error) { throw new ToolExecutionGuardError(error instanceof Error ? error.message : String(error)); }
         this.emitter.emit("tool_executing", { callId, name });
         const t0 = Date.now();
         const emit = (text: string) => {
@@ -645,9 +648,10 @@ export class ToolDispatcher {
         if (!work) {
           work = runHandler();
           this.inflight.set(cacheKeyForRun, work);
-          work.finally(() => {
+          const clearInflight = () => {
             if (this.inflight.get(cacheKeyForRun) === work) this.inflight.delete(cacheKeyForRun);
-          });
+          };
+          void work.then(clearInflight, clearInflight);
         }
         result = await work;
       } else {
@@ -694,6 +698,7 @@ export class ToolDispatcher {
       const error = err instanceof Error ? err.message : String(err);
       const result: ToolResult = { ok: false, error };
       this.emitToolResult(callId, name, args, result);
+      if (err instanceof ToolExecutionGuardError) return result;
       const streak = (this.failStreaks.get(name) ?? 0) + 1;
       this.failStreaks.set(name, streak);
       if (streak >= CIRCUIT_FAIL_THRESHOLD) {

@@ -9,6 +9,11 @@ from worker import speech_regions, decode_audio, language_code, Recognizer
 
 
 class SpeechGateTests(unittest.TestCase):
+    def test_unloaded_decoder_cannot_claim_gpu_residency(self):
+        recognizer = Recognizer(pathlib.Path('.'), 'whisper', cuda=True)
+        with patch('worker.gpu_has_audio_headroom', return_value=True):
+            self.assertFalse(recognizer.handle({'op':'release','allow_resident':True}).get('residentGpu', False))
+
     def test_residency_requires_opt_in_and_current_memory_headroom(self):
         recognizer = Recognizer(pathlib.Path('.'), 'whisper', cuda=True)
         recognizer.model = Mock()

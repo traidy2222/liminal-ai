@@ -16,6 +16,9 @@ class TranscriptActivityGroupSegment extends TranscriptSegment {
 
 /// Groups back-to-back activity rows into one collapsible working block.
 List<TranscriptSegment> groupTranscriptActivity(List<MessageEntry> messages) {
+  messages = messages
+      .where((m) => m is! AssistantMessage || m.text.trim().isNotEmpty)
+      .toList();
   final out = <TranscriptSegment>[];
   var i = 0;
   while (i < messages.length) {
@@ -92,9 +95,7 @@ String activityGroupSubtitle(ActivityGroupSummary summary) {
   }
   final parts = <String>[];
   if (summary.toolCount > 0) {
-    parts.add(
-      summary.toolCount == 1 ? '1 tool' : '${summary.toolCount} tools',
-    );
+    parts.add(summary.toolCount == 1 ? '1 tool' : '${summary.toolCount} tools');
   }
   if (summary.runningCount > 0) {
     parts.add('${summary.runningCount} running');

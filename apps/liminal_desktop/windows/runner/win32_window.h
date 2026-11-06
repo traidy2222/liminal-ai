@@ -38,6 +38,7 @@ class Win32Window {
 
   // Show the current window. Returns true if the window was successfully shown.
   bool Show();
+  void SetShowInactive(bool inactive) { show_inactive_ = inactive; }
 
   // Release OS resources associated with window.
   void Destroy();
@@ -91,6 +92,7 @@ class Win32Window {
   static void UpdateTheme(HWND const window);
 
   bool quit_on_close_ = false;
+  bool show_inactive_ = false;
 
   // window handle for top level window.
   HWND window_handle_ = nullptr;

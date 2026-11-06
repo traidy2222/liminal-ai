@@ -54,7 +54,7 @@ export interface ClientCommandMap {
   /** Voice conversation ownership lasts until sleep, disconnect, or application exit. */
   set_voice_session: { chatId: string; active: boolean };
   /** Make a chat the live event source. */
-  activate_chat: { chatId: string };
+  activate_chat: { chatId: string; show?: boolean };
   /** Open harness + hydrate transcript without changing the active chat. */
   open_chat: { chatId: string };
   /** Permanently dispose a chat and its harness. */

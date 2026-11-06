@@ -45,13 +45,18 @@ def load_engine(home, cpu_only=False):
     prepare_decoder_precision(engine, preload=cpu_only)
     return engine
 
+def native_bf16_supported(torch):
+    """Emulated bf16 on pre-Ampere GPUs is not a fast decoder path."""
+    return torch.cuda.is_available() and torch.cuda.get_device_capability()[0] >= 8
+
+
 def prepare_decoder_precision(engine, preload=False):
     """Keep decoder weights and reference embeddings in the inference dtype."""
     import torch
     # CPU preload stores the decoder in its eventual GPU dtype; actual CPU
     # synthesis still restores float32. Avoid keeping a second full-size FP32
     # decoder in RAM just to transfer and convert it on the first spoken reply.
-    dtype = torch.bfloat16 if (engine.device == 'cuda' or preload) and torch.cuda.is_available() and torch.cuda.is_bf16_supported() else torch.float32
+    dtype = torch.bfloat16 if (engine.device == 'cuda' or preload) and native_bf16_supported(torch) else torch.float32
     changed = next(engine.t3.parameters()).dtype != dtype
     if changed: engine.t3.to(dtype=dtype)
     engine.conds.t3.to(dtype=dtype)
@@ -99,7 +104,10 @@ def resume_engine(engine):
         free, total = torch.cuda.mem_get_info()
         if total >= 8 * 1024**3 and free >= 4 * 1024**3:
             torch.cuda.set_per_process_memory_fraction(min(.7, 5 * 1024**3 / total))
-            move_engine(engine, 'cuda')
+            try:
+                move_engine(engine, 'cuda')
+            except RuntimeError:
+                move_engine(engine, 'cpu')
 
 def can_keep_gpu(engine, next_resident_ready=False):
     import torch
@@ -126,7 +134,7 @@ def synthesize(engine,text):
         # Autocast just the autoregressive decoder on supported NVIDIA GPUs.
         # Integer speech tokens cross the boundary; the vocoder and approved tone
         # processing retain their original precision and reference conditioning.
-        mixed = engine.device == 'cuda' and torch.cuda.is_bf16_supported()
+        mixed = engine.device == 'cuda' and native_bf16_supported(torch)
         with torch.autocast('cuda', dtype=torch.bfloat16, enabled=mixed):
             speech=engine.t3.inference_turbo(t3_cond=engine.conds.t3,text_tokens=tokens,temperature=.65,top_p=.9,repetition_penalty=1.2)
         if speech.numel()>=1000:raise RuntimeError('Speech generation reached its limit; shorten the spoken passage and retry')

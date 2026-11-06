@@ -5,7 +5,7 @@ import { ToolRegistry } from "./registry.js";
 import type { ToolDefinition } from "./types.js";
 
 test("ordinary web, stock and weather research cannot substitute direct lookup tools", () => {
-  for (const message of ["Research promising stocks", "Find NVIDIA's current stock price", "Get Brisbane's weather", "It is just doing HTTP requests instead of using the browser", "Don't use http_request; use the browser"]) {
+  for (const message of ["Use the browser for API pricing research", "Research promising stocks", "Find NVIDIA's current stock price", "Get Brisbane's weather", "It is just doing HTTP requests instead of using the browser", "Don't use http_request; use the browser"]) {
     const hidden = browserFirstSuppressedTools(message, false);
     for (const name of ["http_request", "markets_quote", "weather_lookup", "web_search", "web_fetch"]) assert.ok(hidden.includes(name), message);
   }

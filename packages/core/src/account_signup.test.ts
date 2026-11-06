@@ -12,7 +12,7 @@ test("account creation routes to execution, not coding, conversation or inbox op
   }
 });
 test("does not reinterpret account advice, code changes or unrelated privileged activity as signup", () => {
-  for (const text of ["how do I create a Gmail account?", "fix the signup page", "implement account creation", "check my Gmail inbox", "create a bank account", "create 100 spam accounts", "create fake identity accounts to bypass a ban"]) {
+  for (const text of ["create a login page", "create a signup form", "build an account component", "how do I create a Gmail account?", "fix the signup page", "implement account creation", "check my Gmail inbox", "create a bank account", "create 100 spam accounts", "create fake identity accounts to bypass a ban"]) {
     assert.equal(isAccountSignupTurn(text), false, text);
   }
 });

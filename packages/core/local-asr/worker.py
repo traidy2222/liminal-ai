@@ -169,7 +169,7 @@ class Recognizer:
 
     def handle(self, request):
         if request.get("op") == "release":
-            if request.get('allow_resident') and self.profile == 'whisper' and self.cuda and not self.parked and gpu_has_audio_headroom(request.get('next_resident_ready', False)):
+            if request.get('allow_resident') and self.model is not None and self.profile == 'whisper' and self.cuda and not self.parked and gpu_has_audio_headroom(request.get('next_resident_ready', False)):
                 return dict(text='', noSpeech=True, durationSec=0, released=True, residentGpu=True)
             if self.model is not None and self.cuda and not self.parked:
                 if self.profile != "whisper": raise ValueError("This decoder must close to release GPU memory")

@@ -185,6 +185,7 @@ function BrowserStreamPane({
       onPointerDown={event => { event.currentTarget.focus(); onPointer(event); }}
       onKeyDown={event => {
         if (["Control", "Shift", "Alt", "Meta"].includes(event.key)) return;
+        if (event.key === "Tab" || ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "v")) return;
         event.preventDefault();
         if (event.key.length === 1 && !event.ctrlKey && !event.metaKey && !event.altKey) sendInput({type: "type", text: event.key});
         else sendInput({type: "keydown", key: [event.ctrlKey ? "Control" : "", event.metaKey ? "Meta" : "", event.altKey ? "Alt" : "", event.shiftKey ? "Shift" : "", event.key === " " ? "Space" : event.key].filter(Boolean).join("+")});
@@ -239,6 +240,7 @@ function ChatBrowserDock({ chatId }: { chatId: string }) {
       const response = await webApiFetch("/api/browser/control", { method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify({action: "state", chatId}) });
       const data = await response.json();
       if (!data.ok) throw new Error(data.error || "Browser unavailable");
+      setError(null);
       const fingerprint = JSON.stringify(data);
       if (lastState.current === fingerprint) return;
       lastState.current = fingerprint;

@@ -26,8 +26,17 @@ ChatTranscriptState reduceChatEvent(
   switch (event) {
     case 'procedure_activity':
       final activity = ProcedureActivity.fromJson(data);
-      final activities = [...state.procedureActivities.where((p)=>p.identity!=activity.identity),activity];
-      return state.copyWith(procedureActivities:activities.skip(activities.length>24?activities.length-24:0).toList());
+      final activities = [
+        ...state.procedureActivities.where(
+          (p) => p.identity != activity.identity,
+        ),
+        activity,
+      ];
+      return state.copyWith(
+        procedureActivities: activities
+            .skip(activities.length > 24 ? activities.length - 24 : 0)
+            .toList(),
+      );
     case 'text':
       return _onText(state, data);
     case 'provider_retry':
@@ -216,7 +225,7 @@ ChatTranscriptState _onTranscriptReplay(
     final text = map['text'] as String? ?? '';
     if (kind == 'user' && text.isNotEmpty) {
       messages.add(UserMessage(text));
-    } else if (kind == 'assistant' && text.isNotEmpty) {
+    } else if (kind == 'assistant' && text.trim().isNotEmpty) {
       messages.add(AssistantMessage(text: text, streaming: false));
     } else if (kind == 'tool_call') {
       messages.add(
@@ -289,6 +298,9 @@ ChatTranscriptState _appendAssistant(ChatTranscriptState state, String delta) {
     );
     return state.copyWith(messages: msgs);
   }
+  // A separator chunk between tool calls is not narration. Preserve whitespace
+  // inside a live sentence above, but do not create an empty conversation row.
+  if (delta.trim().isEmpty) return state;
   msgs.add(AssistantMessage(text: delta, streaming: true));
   return state.copyWith(messages: msgs);
 }
@@ -1047,17 +1059,24 @@ ChatTranscriptState _finalizeStreamingForToolStart(ChatTranscriptState state) {
 
 ChatTranscriptState _sealAssistantSegment(ChatTranscriptState state) {
   return state.copyWith(
-    messages: state.messages.map((m) {
-      if (m is AssistantMessage && m.streaming) {
-        return AssistantMessage(text: m.text, streaming: false);
-      }
-      return m;
-    }).toList(),
+    messages: state.messages
+        .where((m) => m is! AssistantMessage || m.text.trim().isNotEmpty)
+        .map((m) {
+          if (m is AssistantMessage && m.streaming) {
+            return AssistantMessage(text: m.text, streaming: false);
+          }
+          return m;
+        })
+        .toList(),
   );
 }
 
 ChatTranscriptState _finalizeStreaming(ChatTranscriptState state) {
-  final msgs = _stripEphemeralPlans(List<MessageEntry>.from(state.messages));
+  final msgs = _stripEphemeralPlans(
+    state.messages
+        .where((m) => m is! AssistantMessage || m.text.trim().isNotEmpty)
+        .toList(),
+  );
   for (var i = 0; i < msgs.length; i++) {
     final m = msgs[i];
     if (m is ToolCallMessage &&
@@ -1068,6 +1087,23 @@ ChatTranscriptState _finalizeStreaming(ChatTranscriptState state) {
     }
     if (m is AssistantMessage && m.streaming) {
       msgs[i] = AssistantMessage(text: m.text, streaming: false);
+    }
+    if (m is ThinkMessage && m.streaming) {
+      msgs[i] = ThinkMessage(
+        callId: m.callId,
+        content: m.content,
+        argsPreview: m.argsPreview,
+        streaming: false,
+      );
+    }
+    if (m is ReasonMessage && m.streaming) {
+      msgs[i] = ReasonMessage(
+        callId: m.callId,
+        inference: m.inference,
+        argsPreview: m.argsPreview,
+        confidence: m.confidence,
+        streaming: false,
+      );
     }
     if (m is ModelReasoningMessage && m.streaming) {
       msgs[i] = ModelReasoningMessage(text: m.text, streaming: false);

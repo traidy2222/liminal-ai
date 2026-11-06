@@ -103,6 +103,7 @@ export function attachSessionEventLog(emitter: AgentEmitter, sessionId: string):
     if (!assistantRollup) return;
     const text = assistantRollup;
     assistantRollup = "";
+    if (!text.trim()) return;
     write({ event, turnIndex, charCount: text.length, text: truncate(text, resolveMaxRollupChars()) });
   };
 

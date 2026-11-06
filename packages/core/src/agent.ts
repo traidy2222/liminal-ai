@@ -5172,12 +5172,12 @@ export class AgentHarness {
       this.emitTurnEnd("error");
       return;
     }
-    this.context.appendMessage({ role: "system", content: "The tool-round budget is exhausted. No more tools are available. Give a brief final handoff from observed results: what was actually completed/verified, what remains incomplete, and any adoption or approval gap. Do not audit, plan more work, invent success or imply blocked checks passed." });
+    const handoffNotice: Message = { role: "system", content: "The tool-round budget is exhausted. No more tools are available. Give a brief final handoff from observed results: what was actually completed/verified, what remains incomplete, and any adoption or approval gap. Do not audit, plan more work, invent success or imply blocked checks passed." };
     this.emitter.emit("recovery_action", { strategy: "escalate", reason: "tool_round_budget", notes: "One tool-free handoff; termination remains round_cap" });
     const accumulator = new StreamAccumulator();
     let text = "";
     try {
-      const messages = await this.prepareMessagesForContextLimit(await this.context.buildMessages(), this.config.model, []);
+      const messages = await this.prepareMessagesForContextLimit([...await this.context.buildMessages(), handoffNotice], this.config.model, []);
       const stream = await this.streamWithRetry(messages, [], undefined, this._turnReasoningBudget, undefined, this._turnReasoningSurface);
       this.lastStreamTools = [];
       for await (const chunk of withChunkTimeout(stream, () => resolveStreamChunkTimeoutMs({ baseURL: this.config.baseURL, reasoningEffort: this._turnReasoningBudget?.reasoningEffort ?? null, fileWriteSinkActive: false, largeToolArgInFlight: false }))) {

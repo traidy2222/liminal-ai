@@ -7,8 +7,13 @@ and the standalone web interface, the panel streams the same persistent Chromium
 the tools control. The browser family is gated by `AGENT_BROWSER` (on) and lazy activation unless
 `AGENT_BROWSER_ALWAYS_ACTIVE` is set.
 
-Use `web_fetch` for static pages (faster, cheaper) — see [Web research](./web-research.md) —
-and the browser only when the page is client-rendered or interactive.
+The Windows native browser's debugging port trusts other software and users on the
+same computer. On shared computers, launch with `LIMINAL_BROWSER_NATIVE=0` to use
+the shared browser stream instead. See [the local browser security boundary](https://github.com/traidy2222/liminal-ai/blob/main/SECURITY.md#local-desktop-browser-boundary).
+
+Normal research uses the browser, including readable static pages. `web_search` and
+`web_fetch` are hidden by default; enable `AGENT_WEB_SEARCH_FETCH=1` to opt into the
+standalone web tools. See [Web research](./web-research.md).
 
 ## One-time setup
 
@@ -131,7 +136,9 @@ public release notes, documentation, product comparison, weather, a checksum-fil
 and a live TodoMVC task workflow. Optional trailing case IDs select a subset, for example
 `npm run benchmark:browser -- verify weather tasklist`. It uses the model configured in
 the installed app and incurs normal provider usage. On Windows the native browser port
-is discovered automatically; `LIMINAL_BENCH_CDP_PORT` overrides discovery.
+is discovered automatically; `LIMINAL_BENCH_CDP_PORT` overrides discovery. The command
+is Windows-ready. On other platforms, set `LIMINAL_BENCH_CDP_PORT` to an existing
+app-owned browser CDP port; automatic port discovery is not implemented there.
 
 Results, tool traces, public-page evidence and artifacts are saved under
 `.agent_artifacts/real-world-browser/<run-name>/`. Checks compare the release against

@@ -10,6 +10,7 @@ import 'package:webview_win_floating/webview_plugin.dart';
 import '../ui/rich_message/asset_url_resolver.dart';
 import '../ui/widgets/desktop_webview_lifecycle.dart';
 import 'browser_chat_tabs.dart';
+import 'native_tab_creation.dart';
 
 /// Owns native tabs independently of widgets/chats. Sidecar attaches to these exact pages.
 class BrowserWorkspace extends ChangeNotifier {
@@ -41,6 +42,8 @@ class BrowserWorkspace extends ChangeNotifier {
 
   Timer? _refreshTimer;
   bool _refreshing = false;
+  int _refreshIssued = 0;
+  int _refreshApplied = 0;
   bool _browserReady = false;
   bool get nativeAvailable => _debugPort != null;
   WebViewController? controllerFor(String id) => _controllers[id];
@@ -68,11 +71,12 @@ class BrowserWorkspace extends ChangeNotifier {
   Future<void> initialize() async {
     if (_started) return;
     _started = true;
-    if (Platform.isWindows) {
-      final socket = await ServerSocket.bind(InternetAddress.loopbackIPv4, 0);
-      final port = socket.port;
-      await socket.close();
+    if (Platform.isWindows &&
+        Platform.environment['LIMINAL_BROWSER_NATIVE'] != '0') {
       try {
+        final socket = await ServerSocket.bind(InternetAddress.loopbackIPv4, 0);
+        final port = socket.port;
+        await socket.close();
         final home =
             Platform.environment['LOCALAPPDATA'] ??
             p.join(Platform.environment['USERPROFILE']!, 'AppData', 'Local');
@@ -88,6 +92,10 @@ class BrowserWorkspace extends ChangeNotifier {
         _debugPort = port;
       } on MissingPluginException {
         /* Non-native test hosts use the shared stream. */
+      } catch (e) {
+        _debugPort = null;
+        error =
+            'Native browser setup unavailable; using the shared browser: $e';
       }
     }
     assetUrlResolver.addListener(_onConnection);
@@ -222,19 +230,29 @@ class BrowserWorkspace extends ChangeNotifier {
             p.join(home, 'Liminal', 'Browser');
         final directory = p.join(root, 'profiles', 'default', 'webview2');
         await Directory(directory).create(recursive: true);
-        final controller = WebViewController.fromPlatformCreationParams(
-          WindowsWebViewControllerCreationParams(
-            userDataFolder: directory,
-            profileName: 'LiminalBrowser',
-            suspendDuringDeactive: false,
-          ),
-        );
+        final controller = await createNativeBrowserTab(() async {
+          final controller = WebViewController.fromPlatformCreationParams(
+            WindowsWebViewControllerCreationParams(
+              userDataFolder: directory,
+              profileName: 'LiminalBrowser',
+              suspendDuringDeactive: false,
+            ),
+          );
+          try {
+            await controller.setJavaScriptMode(JavaScriptMode.unrestricted);
+            await controller.loadRequest(
+              Uri.parse('about:blank#liminal-tab=$id'),
+            );
+            final platform =
+                controller.platform as WindowsPlatformWebViewController;
+            await platform.controller.setVisibility(false);
+            return controller;
+          } catch (_) {
+            await disposeDesktopWebView(controller);
+            rethrow;
+          }
+        });
         _controllers[id] = controller;
-        await controller.setJavaScriptMode(JavaScriptMode.unrestricted);
-        await controller.loadRequest(Uri.parse('about:blank#liminal-tab=$id'));
-        final platform =
-            controller.platform as WindowsPlatformWebViewController;
-        await platform.controller.setVisibility(false);
       }
     } catch (e) {
       failure = '$e';
@@ -278,8 +296,18 @@ class BrowserWorkspace extends ChangeNotifier {
     }
   }
 
-  Future<void> refresh() async =>
-      _apply(await _post('control', {'action': 'state'}));
+  Future<void> refresh() async {
+    final generation = ++_refreshIssued;
+    final port = assetUrlResolver.sidecarPort;
+    final state = await _post('control', {'action': 'state'});
+    if (_disposed ||
+        port != assetUrlResolver.sidecarPort ||
+        generation < _refreshApplied)
+      return;
+    _refreshApplied = generation;
+    _apply(state);
+  }
+
   void _apply(Map<String, dynamic> state) {
     final fingerprint = jsonEncode(state);
     if (fingerprint == _lastState) return;

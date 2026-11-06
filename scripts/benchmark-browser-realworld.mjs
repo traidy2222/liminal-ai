@@ -278,7 +278,7 @@ function grade(c, pages) {
     return {
       passed:
         /forecast/i.test(reply) &&
-        /\d+\s*Â°|\d+\s*degrees/i.test(reply) &&
+        /\d+\s*\u00b0|\d+\s*degrees/i.test(reply) &&
         /\d+\s*%/.test(reply) &&
         /issued|updated|issue time|update time/i.test(reply) &&
         (pages.some((p) => new URL(p.url).hostname.endsWith("bom.gov.au")) ||

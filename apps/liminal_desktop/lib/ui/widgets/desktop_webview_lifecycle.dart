@@ -15,7 +15,6 @@ Future<void> disposeDesktopWebView(WebViewController? controller) async {
   try {
     final platform = controller.platform;
     if (platform is WindowsPlatformWebViewController) {
-      await platform.controller.setVisibility(false);
       await platform.controller.dispose();
     }
   } catch (_) {

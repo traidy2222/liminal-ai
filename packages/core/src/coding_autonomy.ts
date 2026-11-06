@@ -15,7 +15,7 @@ export function buildCodingTurnInjection(input: { userMessage: string }): string
   return (
     "[CODING TURN] Ship working code with tools — not a long reasoning essay or checklist you never execute.\n" +
     "**Loop:** (1) **Locate** — grep_file / read_file(offset+limit) / list_dir for paths you will touch. " +
-    "(2) **Mutate** — edit_file replacements from fresh grep/read text; write_file mode=create for new files only. " +
+    "(2) **Mutate** — edit_file replacements from known current content; write_file mode=create for new files only. " +
     "(3) **Verify** — after edits the harness auto-runs run_lint and injects [VERIFY RESULT]; read it before your summary. For UIs use browser_open (include_console:true). Run run_tests when needed.\n" +
     "**File currency:** Reuse known current content and successful edit results. Reread on an external change, version mismatch or replacement failure, not after every successful edit.\n" +
     "**Execution:** On Windows the shell is PowerShell (see protocol). One run_shell at a time; long builds need explicit timeout_ms.\n" +

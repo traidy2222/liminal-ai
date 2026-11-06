@@ -1,9 +1,9 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { chromium } from "playwright";
 import { buildPageSnapshot } from "../../../dist/families/browser/browser_runtime.js";
 
-test("page observations return readable rendered content without a second fetch", async () => {
+test("page observations return readable rendered content without a second fetch", { skip: process.env.AGENT_BROWSER_INTEGRATION !== "1" }, async () => {
+  const {chromium} = await import("playwright");
   const browser = await chromium.launch({ headless: true });
   try {
     const page = await browser.newPage();

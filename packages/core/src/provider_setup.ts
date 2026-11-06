@@ -22,7 +22,13 @@ export function normalizeProviderSetup(input:ProviderSetupInput){
  const baseURL=u.href.replace(/\/+$/,'');const model=input.model?.trim()??'';
  let apiKey=input.apiKey?.trim()??'';
  if(/[\s"'\\]/.test(apiKey)||apiKey.length>8192)throw Error('Invalid API key. Paste the key without quotes or whitespace.');
- if(!apiKey){try{apiKey=resolveProviderConfig({baseURL,model:model||undefined}).apiKey;}catch{}}
+ if(!apiKey){
+  const configured=(process.env.AGENT_API_BASE_URL||'https://openrouter.ai/api/v1').trim().replace(/\/+$/,'');
+  if(isLocalProviderUrl(baseURL)){try{apiKey=resolveProviderConfig({baseURL,model:model||undefined}).apiKey;}catch{}}
+  else if(isOpenRouterApiBaseUrl(baseURL))apiKey=process.env.OPENROUTER_API_KEY?.trim()|| (configured===baseURL?process.env.AGENT_API_KEY?.trim():'')||'';
+  else if(isKimchiApiBaseUrl(baseURL))apiKey=process.env.KIMCHI_API_KEY?.trim()||process.env.CASTAI_API_KEY?.trim()||(configured===baseURL?process.env.AGENT_API_KEY?.trim():'')||'';
+  else if(configured===baseURL)apiKey=process.env.AGENT_API_KEY?.trim()||'';
+ }
  if(!apiKey&&isLocalProviderUrl(baseURL))apiKey='liminal-local';
  return {baseURL,model,apiKey,local:isLocalProviderUrl(baseURL)};
 }
@@ -52,7 +58,13 @@ let credentialWrite=Promise.resolve();
 export async function persistValidatedProvider(cfg:Awaited<ReturnType<typeof validateProviderSetup>>):Promise<Partial<RuntimePreferences>>{
  const envKey=cfg.local?'AGENT_LOCAL_API_KEY':isOpenRouterApiBaseUrl(cfg.baseURL)?'OPENROUTER_API_KEY':isKimchiApiBaseUrl(cfg.baseURL)?'KIMCHI_API_KEY':'AGENT_API_KEY';
  if(cfg.apiKey&&cfg.apiKey!=='liminal-local'){
-  const save=credentialWrite.catch(()=>{}).then(async()=>{const target=globalPath('.env');await mkdir(path.dirname(target),{recursive:true});let text=await readFile(target,'utf8').catch(()=>'');const line=envKey+'='+JSON.stringify(cfg.apiKey);const pattern=new RegExp('^'+envKey+'=.*$','m');text=pattern.test(text)?text.replace(pattern,()=>line):text.trimEnd()+'\n'+line+'\n';const temp=target+'.'+randomUUID()+'.tmp';await writeFile(temp,text,{mode:0o600});await rename(temp,target);process.env[envKey]=cfg.apiKey;});credentialWrite=save;await save;
+  const save=credentialWrite.catch(()=>{}).then(async()=>{
+   const target=globalPath('.env');await mkdir(path.dirname(target),{recursive:true});let text=await readFile(target,'utf8').catch(()=>'');
+   const values:Record<string,string>={[envKey]:cfg.apiKey,...(envKey==='AGENT_API_KEY'?{AGENT_API_BASE_URL:cfg.baseURL}:{})};
+   for(const [key,value]of Object.entries(values)){const line=key+'='+JSON.stringify(value),pattern=new RegExp('^'+key+'=.*$','m');text=pattern.test(text)?text.replace(pattern,()=>line):text.trimEnd()+'\n'+line+'\n';}
+   const temp=target+'.'+randomUUID()+'.tmp';await writeFile(temp,text,{mode:0o600});await rename(temp,target);
+   Object.assign(process.env,values);
+  });credentialWrite=save;await save;
  }
  return {provider:{baseURL:cfg.baseURL,model:cfg.model,inferenceMode:'byok'},harness:{env:{AGENT_INFERENCE_MODE:'byok',AGENT_INFERENCE_PREFER_MANAGED:'0',AGENT_API_BASE_URL:cfg.baseURL,AGENT_MODEL:cfg.model,AGENT_SINGLE_MODEL:'1',AGENT_FAST_MODEL:cfg.model,AGENT_PERSONA_INFER_MODEL:cfg.model}}};
 }

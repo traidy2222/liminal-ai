@@ -723,9 +723,14 @@ export class WsServer {
         }
 
         case "activate_chat": {
-          const d = data as { chatId: string };
+          const d = data as { chatId: string; show?: boolean };
           const ok = await this.registry.activate(d.chatId);
-          if (ok) this.broadcastChatList();
+          if (ok) {
+            this.broadcastChatList();
+            if (d.show === true && role === "owner") {
+              this.broadcast(serverFrame("chat_focus_requested", {chatId: d.chatId}));
+            }
+          }
           this.ack(ws, id, ok, ok ? undefined : "Unknown chatId.");
           return;
         }

@@ -3,9 +3,29 @@ import sys
 import unittest
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
-from worker import move_engine, resume_engine, can_keep_gpu
+from worker import move_engine, resume_engine, can_keep_gpu, native_bf16_supported
 
 class ParkingTests(unittest.TestCase):
+    def test_bf16_requires_native_ampere_or_newer(self):
+        _, _, torch = self.fixture()
+        torch.cuda.get_device_capability = lambda: (7, 5)
+        self.assertFalse(native_bf16_supported(torch))
+        torch.cuda.get_device_capability = lambda: (8, 0)
+        self.assertTrue(native_bf16_supported(torch))
+
+    def test_partial_gpu_resume_is_rolled_back_to_cpu(self):
+        engine, events, torch = self.fixture()
+        engine.device = 'cpu'
+        def move_s3gen(device):
+            events.append(('s3gen', device))
+            if device == 'cuda': raise RuntimeError('CUDA out of memory')
+        engine.s3gen.to = move_s3gen
+        with patch.dict(sys.modules, {'torch': torch}):
+            resume_engine(engine)
+        self.assertEqual(engine.device, 'cpu')
+        for name in ('t3', 's3gen', 've', 'conds'):
+            self.assertIn((name, 'cpu'), events)
+
     def test_resident_switch_needs_workspace_but_cold_load_needs_weight_headroom(self):
         engine, _, torch = self.fixture()
         torch.cuda.mem_get_info = lambda: (2 * 1024**3, 10 * 1024**3)

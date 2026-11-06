@@ -7,6 +7,8 @@ import {
   browserEnabled,
   browserWorkspaceState,
   getBrowserSession,
+  browserObservedDestination,
+  browserSessionContainsRefs,
   ensureBrowserSessionActive,
   selectBrowserTaskTab,
   checkBrowserSessionOwner,
@@ -41,6 +43,27 @@ import fs from "node:fs";
 import { resolveWorkspaceRoot } from "@liminal/core";
 import { findingsForTask, type BrowserFindingInput } from "./browser_findings.js";
 import {withBrowserTask} from './browser_queue.js';
+import {browserResearchCheckpointPath} from './browser_research_checkpoint.js';
+import {requestedBrowserDates,applyBrowserDateContext,isCurrentBrowserTabHandle,browserPageMatches} from './browser_navigation_context.js';
+
+function dateContextFor(harness?:AgentHarness){
+  const messages=harness?.getContext?.().getConversationMessages();
+  const message=messages&&[...messages].reverse().find(m=>m.role==='user');
+  const content=message?.content;
+  const text=typeof content==='string'?content:Array.isArray(content)?content.map(p=>p.type==='text'?p.text:'').join('\n'):'';
+  return requestedBrowserDates(text);
+}
+
+function contextualNavigationArgs(args:Record<string,unknown>,harness?:AgentHarness){
+  const dates=dateContextFor(harness),changes:string[]=[];
+  const selected=harness?browserWorkspaceState(harness.taskId).selectedTabId:undefined;
+  const current=getBrowserSession(String(args.session_id??selected??''))?.page.url();
+  const apply=(url:string)=>{try{const result=applyBrowserDateContext(url,dates,current);changes.push(...result.changes);return result.url;}catch{return url;}};
+  let adjusted=args;
+  if(typeof args.url==='string')adjusted={...adjusted,url:apply(args.url)};
+  if(Array.isArray(args.actions))adjusted={...adjusted,actions:args.actions.map(a=>a&&typeof a==='object'&&a.op==='goto'&&typeof a.url==='string'?{...a,url:apply(a.url)}:a)};
+  return {args:adjusted,changes};
+}
 
 function browserGate(): { ok: true } | { ok: false; error: string } {
   if (!browserEnabled()) {
@@ -174,7 +197,7 @@ export const browserSnapshotTool = defineTool({
 export const browserNavigateTool = defineTool({
   name: "browser_navigate",
   description:
-    "WHAT: Navigate an existing browser session to a new URL (same session_id, keeps cookies).\n" +
+    "WHAT: Navigate this chat's selected tab, keeping cookies. Prefer ref from an observed link to retain its exact dates and other query fields; use url for a known destination.\n" +
     "WHEN: Change page without browser_close + browser_open. Alternative: browser_act goto op.\n" +
     "Returns fresh SNAPSHOT_REFS and READABLE_CONTENT after navigation. Follow observed destinations; use browser_search when the exact source URL is unknown instead of guessing article IDs or paths.",
   requiresApproval: true,
@@ -184,6 +207,7 @@ export const browserNavigateTool = defineTool({
     properties: {
       session_id: { type: "string" },
       url: { type: "string" },
+      ref: {type:'string',description:'Observed link ref, e.g. e12. Use instead of url; survives replacement of the same link node.'},
       wait_ms: { type: "number", description: "Idle wait after navigation (0–30000)" },
       wait_until: {
         type: "string",
@@ -193,15 +217,20 @@ export const browserNavigateTool = defineTool({
       include_console: { type: "boolean" },
       screenshot: { type: "boolean", description: "Save PNG under .agent_artifacts/browser/ after navigation" },
     },
-    required: ["url"],
+    required: [],
     additionalProperties: false,
   },
-  handler: async (args) => {
+  handler: async (args, _emit, harness) => {
     const gate = browserGate();
     if (!gate.ok) return gate;
     const sessionId = String(args["session_id"] ?? "").trim();
     if (!sessionId) return { ok: false, error: "session_id is required" };
-    const resolved = resolveBrowseHref(String(args["url"] ?? ""));
+    if(args.url&&args.ref)return {ok:false,error:'Provide either an observed link ref or url, not both.'};
+    let href=String(args.url??'');
+    if(args.ref){try{href=browserObservedDestination(sessionId,String(args.ref));}catch(error){return {ok:false,error:error instanceof Error?error.message:String(error)};}}
+    const initial=resolveBrowseHref(href);if(!initial.ok)return initial;
+    const contextual=applyBrowserDateContext(initial.href,dateContextFor(harness),getBrowserSession(sessionId)?.page.url());
+    const resolved = resolveBrowseHref(contextual.url);
     if (!resolved.ok) return { ok: false, error: resolved.error };
     const wu = parseWaitUntil(args["wait_until"]);
     if (typeof wu === "object" && wu !== null && "error" in wu) return { ok: false, error: wu.error };
@@ -217,7 +246,7 @@ export const browserNavigateTool = defineTool({
       screenshot: args["screenshot"] === true,
     });
     if (!res.ok) return res;
-    return { ok: true, output: res.output + (res.output.includes('SCREENSHOT_PATH:')?visionHintLine():'') };
+    return { ok: true, output: (contextual.changes.length?'NAVIGATION_CONTEXT_APPLIED: '+contextual.changes.join(', ')+'\n':'')+res.output + (res.output.includes('SCREENSHOT_PATH:')?visionHintLine():'') };
   },
 });
 
@@ -249,7 +278,7 @@ export const BROWSER_ACTION_SCHEMA: PropertySchema = { anyOf: [
 export const browserActTool = defineTool({
   name: "browser_act",
   description:
-    "WHAT: Run structured actions on a shared browser tab (session_id preferred), or open a new tab with url.\n" +
+    "WHAT: Run structured actions on this chat's selected browser tab. Omit session_id unless switching to another observed tab; url opens a new tab.\n" +
     "Ops: reload (refresh the current tab and preserve its URL), double_click_ref / double_click_text (native double-click, e.g. inline editing), select_option_ref (native or custom dropdown; value is its option label), goto, wait_ms, scroll, click_ref, fill_ref, focus_ref, clear_ref, type_ref, press_key_ref, press_key, click_selector (selector field), wait_navigation, screenshot, …\n" +
     "Examples: { op:'goto', url:'https://news.ycombinator.com/ask' }; { op:'type_ref', ref:'e2', value:'query' }; { op:'press_key', key:'Enter' }.\n" +
     "fill_ref replaces a field value; use type_ref when key-by-key events are needed. check_ref/uncheck_ref set checkbox state idempotently. SNAPSHOT_REFS include row context, focus, values, validation and checked state.\n" +
@@ -507,7 +536,9 @@ const modelSessionResult=(result: Awaited<ReturnType<typeof browserOpenTool.hand
 };
 const openHandler=browserOpenTool.handler;
 browserOpenTool.handler=async(args,emit,harness,context)=>{
-  const result=await openHandler(args,emit,harness,context);
+  const navigation=contextualNavigationArgs(args,harness);
+  let result=await openHandler(navigation.args,emit,harness,context);
+  if(result.ok&&navigation.changes.length)result={...result,output:'NAVIGATION_CONTEXT_APPLIED: '+navigation.changes.join(', ')+'\n'+result.output};
   if(result.ok&&harness){const id=result.output.match(/SESSION_ID: ([^\s]+)/)?.[1];if(id)focusedTaskTabs.set(harness,id);}
   return modelSessionResult(result,harness);
 };
@@ -566,9 +597,9 @@ export const browserExtractTool = defineTool({
   name: "browser_extract",
   description:
     "WHAT: Extract structured data from the current browser session without reading raw HTML.\n" +
-    "Types: tables (→ JSON array), links (→ href+text), text (→ cleaned body text), forms (→ field schema, including inputs outside forms, open shadow roots and visible embedded frames),\n" +
+    "Types: tables (→ bounded rows with headers and inherited rowspan cells; query filters complete rows), links (→ href+text), text (→ rendered text with whitespace/hyphen tolerant query), forms (→ field schema, including inputs outside forms, open shadow roots and visible embedded frames),\n" +
     "selector_text / selector_html (→ matched elements), meta (→ title/desc/canonical), headings (→ h1-h6 list), findings (record or list quote-backed observations/inferences for this chat).\n" +
-    "Research results carry {source:{url,title,observed_at,kind:page_observation},data}; source identifies where text was observed, not independent truth. For research, use text+query for a relevant passage or links+query to find its original citations; narrow by visible heading/title/domain. Read long text with offset/next_offset. Avoid selector_html and guessed CSS for reading articles.",
+    "Research results carry {source:{url,title,observed_at,kind:page_observation},data,checkpoint}; checkpoint saves progress locally. Long links return a ref for browser_act click_ref, preserving the exact destination. For research, use text+query for passages or links+query for citations. offset_unit identifies character versus item pagination; continue with next_offset. Avoid selector_html and guessed CSS for reading articles.",
   requiresApproval: true,
   dangerLevel: "cautious",
   parameters: {
@@ -580,9 +611,10 @@ export const browserExtractTool = defineTool({
         enum: ["tables", "links", "text", "forms", "selector_text", "selector_html", "meta", "headings", "findings"],
         description: "What to extract",
       },
-      query: {type:"string",description:"text: find a literal phrase or section heading and nearby passages. links: filter URL, label or surrounding citation text (e.g. a claim, source name or domain)."},
-      offset: {type:"number",description:"Start offset for text, or item index for matched passages, selectors, links and headings; use returned next_offset to continue"},
-      max_chars: {type:"number",description:"Text window size, 500–6000 characters (default 5000)"},
+      query: {type:"string",description:"text: phrase/heading with whitespace/hyphen tolerance; falls back to all words within one passage or cell. tables: filter complete rows including inherited cells. links: filter URL, label or citation context."},
+      offset: {type:"number",minimum:0,description:"Zero-based character position ONLY for text without query. Otherwise zero-based item index. Copy returned next_offset to continue; null means finished."},
+      max_chars: {type:"number",minimum:500,maximum:6000,description:"Extraction data budget, 500–6000 characters (default 5000); source metadata is additional"},
+      expected_url: {type:'string',description:'Optional expected page URL. Origin, path and any supplied query values must match; extra tracking fields are allowed.'},
       findings: {type:"array",description:"For type=findings: batch up to 12 key conclusions from the current page, with copied supporting quotes. Omit to list saved findings.",items:{type:"object",properties:{statement:{type:"string"},quote:{type:"string",description:"Supporting text copied from this rendered page"},kind:{type:"string",enum:["observation","inference"]}},required:["statement","quote"],additionalProperties:false}},
       selector: {
         type: "string",
@@ -599,11 +631,17 @@ export const browserExtractTool = defineTool({
   handler: async (args, _emit, harness) => {
     const gate = browserGate();
     if (!gate.ok) return gate;
-    if(args.type==='findings'&&harness&&(args.findings===undefined||Array.isArray(args.findings)&&args.findings.length===0))
-      return {ok:true,output:JSON.stringify({findings:findingsForTask(harness.taskId).list(),provenance_only:true})};
+    if(args.type==='findings'&&harness&&(args.findings===undefined||Array.isArray(args.findings)&&args.findings.length===0)){
+      const checkpoint=browserResearchCheckpointPath(harness.taskId);
+      return {ok:true,output:JSON.stringify({findings:findingsForTask(harness.taskId).list(),...(fs.existsSync(path.join(resolveWorkspaceRoot(),checkpoint))?{checkpoint}:{}),provenance_only:true})};
+    }
     const sessionId = String(args["session_id"] ?? "").trim();
     if (!sessionId) return { ok: false, error: "session_id is required" };
     const type = String(args["type"] ?? "") as ExtractType;
+    if(typeof args.expected_url==='string'){
+      const actual=getBrowserSession(sessionId)?.page.url();
+      if(!actual||!browserPageMatches(args.expected_url,actual))return {ok:false,error:`PAGE_CHANGED: expected ${args.expected_url}, current ${actual?.split('?')[0]??'unavailable'}. The requested page or query fields do not match; no content extracted.`};
+    }
     if (String(args.type) === 'findings') {
       const session=getBrowserSession(sessionId); if(!session)return {ok:false,error:'Unknown browser session'};
       const ledger=findingsForTask(harness?.taskId??'session:'+sessionId);
@@ -714,6 +752,7 @@ for (const tool of [browserSnapshotTool, browserNavigateTool, browserActTool, br
       return handler(args,emit,harness,context);
     const newTabAction=tool===browserActTool&&!!args.url;
     const closeAll=tool===browserCloseTool&&args.close_all===true;
+    if(harness&&isCurrentBrowserTabHandle(args.session_id))args={...args,session_id:undefined};
     if(harness&&!args.session_id&&!newTabAction&&!closeAll){
       const tabs=browserWorkspaceState().tabs;
       const focused=browserWorkspaceState(harness.taskId).selectedTabId ?? focusedTaskTabs.get(harness);
@@ -726,11 +765,15 @@ for (const tool of [browserSnapshotTool, browserNavigateTool, browserActTool, br
     }
     if(args.session_id&&harness){
       const requested=String(args.session_id).trim(),tabs=browserWorkspaceState().tabs;
-      const matches=tabs.filter(tab=>tab.sessionId===requested||modelSessionId(tab.sessionId)===requested);
+      let matches=tabs.filter(tab=>tab.sessionId===requested||modelSessionId(tab.sessionId)===requested);
+      if(matches.length===0){
+        const refs=typeof args.ref==='string'?[args.ref]:Array.isArray(args.actions)?args.actions.flatMap(a=>a&&typeof a==='object'&&typeof a.ref==='string'?[a.ref]:[]):[];
+        matches=tabs.filter(tab=>tab.ownerTaskId===harness.taskId&&browserSessionContainsRefs(tab.sessionId,refs));
+      }
       if(matches.length!==1){
         const own=tabs.filter(tab=>tab.ownerTaskId===harness.taskId);
         const available=own.map(tab=>({session_id:modelSessionId(tab.sessionId),title:tab.title,paused:tab.paused}));
-        return {ok:false,error:'Unknown browser session_id. No action executed. Current task tabs: '+JSON.stringify(available)};
+        return {ok:false,error:'Unknown browser session_id. No action executed. Omit session_id to use this chat\'s selected tab. Current task tabs: '+JSON.stringify(available)};
       }
       args={...args,session_id:matches[0]!.sessionId};
     }
@@ -740,7 +783,9 @@ for (const tool of [browserSnapshotTool, browserNavigateTool, browserActTool, br
       if (error) return { ok: false, error };
     }
     if(id&&tool!==browserCloseTool){const restored=await ensureBrowserSessionActive(id);if(!restored.ok)return restored;}
-    const result=await handler(args,emit,harness,context);
+    const navigation=tool===browserNavigateTool||tool===browserActTool?contextualNavigationArgs(args,harness):{args,changes:[]};
+    let result=await handler(navigation.args,emit,harness,context);
+    if(result.ok&&navigation.changes.length)result={...result,output:'NAVIGATION_CONTEXT_APPLIED: '+navigation.changes.join(', ')+'\n'+result.output};
     if(result.ok&&harness&&id){
       if(tool===browserCloseTool)focusedTaskTabs.delete(harness);
       else { focusedTaskTabs.set(harness,id); selectBrowserTaskTab(harness.taskId,id); }
@@ -755,5 +800,7 @@ for(const tool of [browserOpenTool,browserSearchTool,browserTabsTool,browserSnap
  browserNavigateTool,browserActTool,browserCloseTool,browserWaitForTool,browserExtractTool,
  browserCookiesTool,browserCredentialsTool]){
  const handler=tool.handler;
+ const sessionProperty=tool.parameters.properties?.session_id;
+ if(sessionProperty)sessionProperty.description="Optional observed tab ID. Omit, or use 'current', for this chat's selected tab.";
  tool.handler=(args,emit,harness,context)=>withBrowserTask(harness?.taskId??'anonymous',()=>handler(args,emit,harness,context));
 }

@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { ChatAutoTitler } from "./chat_auto_title.js";
+import { ChatAutoTitler, autoTitleAfterTurn } from "./chat_auto_title.js";
 import { createChatMetadata, readChatMetadata, touchChatMetadata, updateChatMetadata } from "./chat_metadata.js";
 import type { Message } from "./types.js";
 import { readCacheStats } from "./cache_telemetry.js";
@@ -107,4 +107,19 @@ test("background chat titles are bounded, throttled, persistent and preserve use
     assert.equal(path.dirname(root), path.resolve(os.tmpdir()));
     await fs.rm(root, { recursive: true, force: true });
   }
+});
+
+
+test("background title calls honor persisted disabling preferences", async () => {
+  const before={...process.env}, original=globalThis.fetch;
+  let requests=0;
+  try {
+    delete process.env.AGENT_CHAT_AUTO_TITLE;
+    globalThis.fetch=async()=>{requests++;throw Error('Unexpected title call');};
+    const harness={taskId:'disabled-title',config:{baseURL:'https://openrouter.ai/api/v1',openRouterApiKey:'fixture-only'},
+      getRuntimePreferences:()=>({version:1,updatedAt:0,harness:{env:{AGENT_CHAT_AUTO_TITLE:'0'}}}),
+      getContext:()=>({getConversationMessages:()=>[{role:'user',content:'Investigate browser isolation'}]})};
+    assert.equal(await autoTitleAfterTurn(harness as never,'Investigate browser isolation'),null);
+    assert.equal(requests,0);
+  } finally {process.env=before;globalThis.fetch=original;}
 });

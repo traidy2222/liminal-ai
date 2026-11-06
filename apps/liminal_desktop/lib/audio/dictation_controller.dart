@@ -176,7 +176,16 @@ class DictationController extends ChangeNotifier {
     final generation = ++_sessionGeneration;
     status = DictationStatus.permissionPending;
     notifyListeners();
-    await beforeStartSession?.call();
+    try {
+      await beforeStartSession?.call();
+    } catch (e) {
+      if (!_disposed && generation == _sessionGeneration) {
+        status = DictationStatus.error;
+        error = e.toString();
+        notifyListeners();
+      }
+      return;
+    }
     if (_disposed || sessionActive || generation != _sessionGeneration) return;
     error = null;
     status = DictationStatus.permissionPending;

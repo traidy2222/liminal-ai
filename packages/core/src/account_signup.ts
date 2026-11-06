@@ -5,8 +5,9 @@ export function isAccountSignupTurn(message: string): boolean {
     .replace(/^(?:(?:can|could|would|will)\s+(?:you|u)\s+)?(?:please\s+)?/, "");
   if (/\b(?:bulk|mass|spam|ban evasion|bypass|fake identity|stolen|bank|brokerage|credit card|loan|government|insurance)\b/.test(text)) return false;
   if (/\b\d+\s+(?:\w+\s+){0,3}accounts\b/.test(text)) return false;
+  if (/\b(?:login|sign[ -]?up|account)\s+(?:page|form|component|screen|ui|route|endpoint|flow|system)\b/.test(text)) return false;
   if (/^(?:sign\s+(?:(?:me|us|yourself)\s+)?up|sign\s*up)\b/.test(text)) return true;
-  return /^(?:create|make|register|open|set\s+up)\b[^.!?\n]{0,140}\b(?:account|login)\b/.test(text);
+  return /^(?:create|make|register|open|set\s+up)\b[^.!?\n]{0,140}\baccount\b/.test(text);
 }
 
 const OBSERVED_BROWSER_TOOLS = new Set([

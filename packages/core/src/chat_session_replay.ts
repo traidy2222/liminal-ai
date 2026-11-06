@@ -114,7 +114,7 @@ export function parseSessionJsonlForReplay(
       continue;
     }
 
-    if ((event === "text_rollup" || event === "text_rollup_partial") && row.text) {
+    if ((event === "text_rollup" || event === "text_rollup_partial") && row.text?.trim()) {
       out.push({
         id: entryId("assistant", turnIndex, String(out.length)),
         kind: "assistant",

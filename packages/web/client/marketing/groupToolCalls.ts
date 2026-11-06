@@ -10,6 +10,7 @@ function parallelGroupMin(toolName: string): number {
 
 /** Same grouping rules as App.tsx — keeps marketing captures aligned with production UI. */
 export function groupToolCalls(messages: MessageEntry[]): (MessageEntry | ToolCallGroup)[] {
+  messages = messages.filter(m => (m.kind !== "assistant" && m.kind !== "working_note") || m.text.trim().length > 0);
   const out: (MessageEntry | ToolCallGroup)[] = [];
   let i = 0;
   while (i < messages.length) {

@@ -1431,6 +1431,14 @@ class AppController extends ChangeNotifier {
         _syncPersonaPendingFromActiveChat();
         notifyListeners();
         return;
+      case 'chat_focus_requested':
+        {
+          final chatId = frame.data['chatId'] as String?;
+          if (chatId != null && chats.any((chat) => chat.chatId == chatId)) {
+            unawaited(enterChatWorkspace(chatId));
+          }
+          return;
+        }
       case 'settings':
         final values = frame.data['values'];
         if (values is Map) {
@@ -1468,6 +1476,7 @@ class AppController extends ChangeNotifier {
           }
           inboxScanBusy = false;
           unawaited(loadInboxStatus());
+          notifyListeners();
           notifyListeners();
           return;
         }
@@ -1572,7 +1581,7 @@ class AppController extends ChangeNotifier {
 
     _syncAssetResolver(chatId: targetChatId);
     unawaited(speechOutput.unlockAudio());
-    if (liveDictation || dictationSessionActive) {
+    if ((liveDictation || dictationSessionActive) && _speechChatId == targetChatId) {
       speechOutput.flush();
     }
 

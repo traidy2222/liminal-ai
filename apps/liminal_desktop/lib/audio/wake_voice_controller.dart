@@ -87,10 +87,10 @@ class WakeVoiceController extends ChangeNotifier {
     final changedEnabled = settings.enabled != enabled;
     gate.settings = settings;
     if (changedEnabled) paused = false;
-    if (!settings.enabled || changedPhrase) await sleep();
-    if (!settings.enabled &&
-        (listening || dictation.status == DictationStatus.permissionPending)) {
+    if (!settings.enabled) {
       await stop();
+    } else if (changedPhrase) {
+      await sleep();
     }
     _changed();
   }
@@ -169,10 +169,16 @@ class WakeVoiceController extends ChangeNotifier {
     });
     if (decision.slept) {
       _generation++;
-      await onAwakeChanged(chatId!, false);
       _pending.clear();
       _retryBlocked = false;
+      _busyRetries = 0;
+      _nextRetry = 0;
       _changed();
+      try {
+        await onAwakeChanged(chatId!, false);
+      } catch (e) {
+        reportError(e.toString());
+      }
       return;
     }
     if (decision.woke) {

@@ -10,7 +10,8 @@ export interface WakeVoiceConfig {
 export function resolveWakeVoiceConfig(prefs: RuntimePreferences | null): WakeVoiceConfig {
   const raw = resolveHarnessEnvRaw("AGENT_WAKE_WORD_PHRASE", prefs)?.trim().replace(/\s+/g, " ") ?? "";
   const phrase = raw.length >= 2 && raw.length <= 80 && /[\p{L}\p{N}]/u.test(raw) ? raw : "Hey Jarvis";
-  const timeout = Number(resolveHarnessEnvRaw("AGENT_WAKE_WORD_IDLE_SECONDS", prefs));
+  const timeoutRaw = resolveHarnessEnvRaw("AGENT_WAKE_WORD_IDLE_SECONDS", prefs)?.trim();
+  const timeout = timeoutRaw ? Number(timeoutRaw) : NaN;
   return {
     enabled: resolveHarnessEnvRaw("AGENT_WAKE_WORD_ENABLED", prefs) === "1",
     phrase,

@@ -85,7 +85,8 @@ class WindowPosition {
 }
 
 class WindowPositionManager with WindowListener {
-  WindowPositionManager();
+  WindowPositionManager({this.showInactive = false});
+  final bool showInactive;
 
   WindowPosition? _lastPosition;
   bool _initialized = false;
@@ -103,13 +104,13 @@ class WindowPositionManager with WindowListener {
       _ignoreNextMove = true;
       await windowManager.setPosition(saved.offset);
       await windowManager.setSize(saved.size);
-      if (saved.isMaximized) {
+      if (saved.isMaximized && !showInactive) {
         await windowManager.maximize();
       }
-      await windowManager.show();
+      await windowManager.show(inactive: showInactive);
     } else {
       await windowManager.center();
-      await windowManager.show();
+      await windowManager.show(inactive: showInactive);
     }
 
     windowManager.addListener(this);

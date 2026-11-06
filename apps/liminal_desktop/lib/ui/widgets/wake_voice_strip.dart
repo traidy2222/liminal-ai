@@ -9,6 +9,11 @@ import '../theme/liminal_theme_extension.dart';
 /// Visible on every app screen, including when Mission Control is not focused.
 class WakeVoiceStrip extends StatelessWidget {
   const WakeVoiceStrip({super.key});
+  void _openSettings(BuildContext context) {
+    if (GoRouterState.of(context).uri.path == AppRoutes.settings) return;
+    context.push('${AppRoutes.settings}?section=session_ui');
+  }
+
   @override
   Widget build(BuildContext context) {
     final host = context.watch<AppController?>();
@@ -64,8 +69,7 @@ class WakeVoiceStrip extends StatelessWidget {
                 ),
               if (host.config?.ttsEnabled != true)
                 TextButton(
-                  onPressed: () =>
-                      context.go('${AppRoutes.settings}?section=session_ui'),
+                  onPressed: () => _openSettings(context),
                   child: const Text('Spoken replies off · Voice settings'),
                 ),
               if (speaking)
@@ -93,8 +97,7 @@ class WakeVoiceStrip extends StatelessWidget {
               ),
               IconButton(
                 tooltip: 'Configure wake phrase',
-                onPressed: () =>
-                    context.go('${AppRoutes.settings}?section=session_ui'),
+                onPressed: () => _openSettings(context),
                 icon: const Icon(Icons.tune, size: 17),
               ),
             ],

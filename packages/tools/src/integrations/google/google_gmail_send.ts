@@ -209,14 +209,12 @@ const composeProperties: Record<string, PropertySchema> = {
   body_html: {
     type: "string",
     description:
-      "The finished HTML email (required for new outbound mail, with body). Nested tables + inline styles. " +
-      "Compose this fully before calling the tool — it is the deliverable, not a later upgrade.",
+      "Optional HTML body when requested formatting needs it. Use inline styles for email compatibility.",
   },
   body: {
     type: "string",
     description:
-      "Plain-text fallback (required alongside body_html for new outbound mail). " +
-      "Thread replies and one-liners may omit body_html and use body alone.",
+      "Plain-text message body, or fallback alongside optional body_html. Ordinary mail can use body alone.",
   },
   inline_images: {
     type: "array",
@@ -273,7 +271,7 @@ export function createGmailSendTools(): ToolDefinition[] {
   const gmailCreateDraft = defineTool({
     name: "gmail_create_draft",
     description:
-      "WHAT: Create a Gmail draft (users.drafts.create) — this call **is** the finished styled email.\n" +
+      "WHAT: Create a Gmail draft (users.drafts.create) — this call creates the finished email.\n" +
       "WHEN: Any new outbound mail the user wants drafted or reviewed in Gmail.\n" +
       "HOW: Pass subject and plain body; body_html is optional for requested or useful formatting. Use this REST helper for attachments, multipart MIME and explicit account selection.\n" +
       "AFTER: gmail_send_draft(draftId) when the user approves send.\n" +

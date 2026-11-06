@@ -1217,6 +1217,7 @@ const _META_RAW: Record<string, HarnessSettingsFieldMeta> = {
     label: "Live Browser Tab Limit",
     description: "Maximum live browser pages across all chats (1–12, default 4). Eligible background tabs sleep to free memory and load again when needed.",
     valueKind: "number",
+    numericBounds: { min: 1, max: 12 },
   },
   "AGENT_BROWSER_TYPE_DELAY_MS": {
     tabId: "harness",
