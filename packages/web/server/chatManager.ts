@@ -34,7 +34,7 @@ import {
   globalChatsRoot,
   loadRuntimePreferences,
   resolveChatBoot,
-  resolveProviderConfigWithInference,
+  resolveProviderForStartup,
   saveLastActiveChatId,
   type ChatMetadata,
   type ChatWorkspaceMode,
@@ -43,6 +43,7 @@ import {
 import { rm } from "node:fs/promises";
 import path from "node:path";
 import { AgentBridge } from "./agentBridge.js";
+import {closeAllBrowserSessionsForTask} from '@liminal/tools';
 import type { SSEManager } from "./sse.js";
 
 /** How long a bridge can sit idle before we dispose it to free memory. */
@@ -157,7 +158,7 @@ export class ChatManager {
       // Ensure the per-chat directory exists so session.jsonl and meta.json can
       // land there without the harness having to mkdir on its first emit.
       await ensurePerChatDir(chatId);
-      const provider = await resolveProviderConfigWithInference(
+      const provider = await resolveProviderForStartup(
         this.cachedRuntimePrefs?.provider,
         this.cachedRuntimePrefs
       );
@@ -234,6 +235,7 @@ export class ChatManager {
    * the UI doesn't end up with a dead pointer.
    */
   async delete(chatId: string): Promise<{ newActiveId: string | null }> {
+    await closeAllBrowserSessionsForTask(chatId,{includePaused:true});
     const slot = this.bridges.get(chatId);
     if (slot) {
       slot.bridge.dispose();

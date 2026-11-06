@@ -119,4 +119,13 @@ export function registerOrchestratorChatTools(
       },
     })
   );
+
+  // These chat-scoped tools are registered after the static lazy-tool catalog.
+  // Expose them immediately; otherwise discovery advertises an unactivatable
+  // "unmapped" family and Mission Control cannot dispatch any work.
+  const names = ["start_mission", "mission_status", "stop_mission"];
+  const families = registry.cloneToolFamilyMap();
+  for (const name of names) families.set(name, "orchestration");
+  registry.setToolFamilyLookup(families);
+  registry.activate(names);
 }

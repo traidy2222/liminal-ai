@@ -33,6 +33,7 @@ const patterns = [
   { name: "private_key_block", re: /-----BEGIN (?:RSA |EC )?PRIVATE KEY-----/ },
   { name: "supabase_service_role_jwt", re: /eyJ[a-zA-Z0-9_-]+\.[a-zA-Z0-9_-]+\.[a-zA-Z0-9_-]+.*"role":"service_role"/ },
   { name: "openai_key", re: /sk-[a-zA-Z0-9]{20,}/ },
+  { name: "openrouter_key", re: /sk-or-v1-[a-zA-Z0-9]{32,}/ },
   { name: "resend_key", re: /re_[a-zA-Z0-9]{20,}/ },
 ];
 
@@ -52,7 +53,7 @@ for (const rel of listTrackedFiles()) {
     if (allowPaths.has(rel) && name === "private_key_block") continue;
     const m = text.match(re);
     if (m) {
-      hits.push({ file: rel, pattern: name, sample: m[0].slice(0, 48) + "…" });
+      hits.push({ file: rel, pattern: name });
     }
   }
 }
@@ -60,7 +61,7 @@ for (const rel of listTrackedFiles()) {
 if (hits.length > 0) {
   console.error("verify-repo-secrets: forbidden patterns in tracked files:\n");
   for (const h of hits) {
-    console.error(`  ${h.file} [${h.pattern}] ${h.sample}`);
+    console.error(`  ${h.file} [${h.pattern}]`);
   }
   process.exit(1);
 }

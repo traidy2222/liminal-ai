@@ -10,7 +10,8 @@
  * The chat id doubles as the harness `taskId` so SessionEventLog jsonl,
  * artifacts, write_staging, and meta.json all live in the same per-chat dir.
  */
-import { mkdir, readFile, readdir, stat, writeFile } from "node:fs/promises";
+import { mkdir, readFile, readdir, stat, writeFile, rename, unlink } from "node:fs/promises";
+import { randomUUID } from "node:crypto";
 import path from "node:path";
 import {
   ensurePerChatDir,
@@ -28,6 +29,8 @@ export interface ChatMetadata {
   chatId: string;
   /** Human-readable title (user-set, AI-summarized, or "Chat <id-prefix>"). */
   title: string;
+  titleSource?: "placeholder" | "manual" | "auto";
+  autoTitle?: { completedTurns: number; lastAttemptTurn: number; lastAttemptAt: number; lastUpdatedAt?: number };
   /** When `orchestrator`, this chat is Mission Control (multi-worker coordinator). */
   kind?: ChatKind;
   /** Which mode the chat was created with. */
@@ -76,14 +79,40 @@ export async function writeChatMetadata(meta: ChatMetadata): Promise<void> {
   await ensurePerChatDir(meta.chatId);
   const target = metaPath(meta.chatId);
   await mkdir(path.dirname(target), { recursive: true });
-  await writeFile(target, JSON.stringify({ ...meta, updatedAt: Date.now() }, null, 2), "utf8");
+  await writeMetadataFile({ ...meta, updatedAt: Date.now() });
+}
+
+async function writeMetadataFile(meta: ChatMetadata): Promise<void> {
+  const target = metaPath(meta.chatId);
+  const temporary = `${target}.${randomUUID()}.tmp`;
+  try {
+    await writeFile(temporary, JSON.stringify(meta, null, 2), "utf8");
+    await rename(temporary, target);
+  } finally { await unlink(temporary).catch(() => undefined); }
 }
 
 /** Touch the updatedAt for an existing chat — call when a chat is reopened. */
 export async function touchChatMetadata(chatId: string): Promise<void> {
-  const cur = await readChatMetadata(chatId);
-  if (!cur) return;
-  await writeChatMetadata({ ...cur, updatedAt: Date.now() });
+  await updateChatMetadata(chatId, cur => ({ ...cur, updatedAt: Date.now() }));
+}
+
+const metadataUpdates = new Map<string, Promise<unknown>>();
+/** Serialize read/modify/write operations so background titles cannot undo activity or manual edits. */
+export async function updateChatMetadata(chatId: string, update: (current: ChatMetadata) => ChatMetadata | null): Promise<ChatMetadata | null> {
+  const previous = metadataUpdates.get(chatId) ?? Promise.resolve();
+  const next = previous.catch(() => undefined).then(async () => {
+    const current = await readChatMetadata(chatId);
+    if (!current) return null;
+    const changed = update(current);
+    if (!changed) return null;
+    // No mkdir here: an in-flight background operation must not recreate a deleted chat.
+    try { await writeMetadataFile(changed); }
+    catch (error) { if ((error as NodeJS.ErrnoException).code === "ENOENT") return null; throw error; }
+    return changed;
+  });
+  metadataUpdates.set(chatId, next);
+  try { return await next; }
+  finally { if (metadataUpdates.get(chatId) === next) metadataUpdates.delete(chatId); }
 }
 
 /**
@@ -102,6 +131,7 @@ export async function createChatMetadata(input: {
   const meta: ChatMetadata = {
     chatId: sanitizeChatId(input.chatId),
     title: input.title?.trim() || `Chat ${input.chatId.slice(0, 8)}`,
+    titleSource: input.title?.trim() && !/^New chat$/i.test(input.title.trim()) ? "manual" : "placeholder",
     kind: input.kind,
     workspaceMode: input.workspaceMode,
     workspaceRoot: path.resolve(input.workspaceRoot),

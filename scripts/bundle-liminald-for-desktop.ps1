@@ -200,6 +200,8 @@ if ($CopyNodeModulesFromRepo -and (Test-Path $srcModules)) {
 }
 
 Repair-BundledNativeModules -BundleRepo $BundleRepo -RepoRoot $RepoRoot
+node (Join-Path $PSScriptRoot "verify-procedure-native-runtime.mjs") $BundleRepo
+if ($LASTEXITCODE -ne 0) { throw "SQLite native dependency does not match the packaging Node ABI. Install runtime dependencies with the target platform/Node before bundling." }
 node (Join-Path $PSScriptRoot "patch-node-pty.mjs") (Join-Path $BundleRepo "node_modules\node-pty")
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 

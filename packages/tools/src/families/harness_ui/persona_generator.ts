@@ -1,7 +1,9 @@
 import OpenAI from "openai";
+import {personaGenerationSignal,checkPersonaCancellation} from './persona_transaction.js';
 import {
   completeChatJson,
   getFastModelSlug,
+  isLocalProviderUrl,
   normalizePersonaControlsPatch,
   withProviderRequestSpacing,
   effectiveHarnessEnvRaw,
@@ -139,6 +141,7 @@ function invokePersonaModel(
 
 /** Fast sidecar model for soul batch, voice infer, and optional UI theme. */
 export function personaInferModel(mainModel: string): string {
+  if(isLocalProviderUrl(effectiveHarnessEnvRaw('AGENT_API_BASE_URL')??''))return mainModel;
   const infer = effectiveHarnessEnvRaw("AGENT_PERSONA_INFER_MODEL")?.trim();
   if (infer) return infer;
   return getFastModelSlug(mainModel);
@@ -217,8 +220,8 @@ export async function generatePersonaProfile(
       harnessCapabilityHint,
     });
   } catch {
-    onProgress?.("profile_scaffold", "Model draft unavailable; building persona from your description locally...");
-    draftRaw = buildFallbackDraftRaw(input, strength, modifier, voiceEnvelope);
+    checkPersonaCancellation();
+    throw new Error('The selected model could not generate a personality. Check the connection and credits, then retry or use the built-in personality.');
   }
 
   let profile: PersonaProfile;
@@ -1493,7 +1496,7 @@ async function inferPersonaVoiceEnvelope(args: {
   if (!trimmed) return null;
 
   const inferModel =
-    effectiveHarnessEnvRaw("AGENT_PERSONA_INFER_MODEL")?.trim() || getFastModelSlug(args.model);
+    isLocalProviderUrl(args.baseURL)?args.model:effectiveHarnessEnvRaw("AGENT_PERSONA_INFER_MODEL")?.trim() || getFastModelSlug(args.model);
   const client = new OpenAI({ apiKey: args.apiKey, baseURL: args.baseURL });
   const systemPrompt =
     "You extract structured voice context for **typed assistant replies** (diction, register, rhythm). " +
@@ -1521,6 +1524,7 @@ Return a JSON object with exactly these keys:
 VOICE vs THEATRE: lexicalSeeds and voiceNotes should describe **how this voice types** in a task-first assistant chat—not stage directions, not narrated physical performance, not anthropomorphizing software as a body or inner life, unless the user explicitly asked for that conceit.`;
 
   const res = await completeChatJson(client, {
+    signal: personaGenerationSignal(),
     model: inferModel,
     messages: [
       { role: "system", content: systemPrompt },
@@ -1910,7 +1914,7 @@ async function callPersonaModel(
               temperature,
               stream: false,
             }),
-            signal: controller.signal,
+            signal: personaGenerationSignal()?AbortSignal.any([controller.signal,personaGenerationSignal()!]):controller.signal,
           })
       );
       if (!response.ok) throw new Error(`LLM API returned HTTP ${response.status}`);
@@ -2117,6 +2121,7 @@ OPEN TOKENS (optional — continuous values that override the coarse enums; omit
   }
 
   const res = await completeChatJson(client, {
+    signal: personaGenerationSignal(),
     model: inferModel,
     messages: [
       { role: "system", content: systemPrompt },
@@ -2205,6 +2210,7 @@ Return JSON with these keys (each a short in-voice string):
 
   try {
     const res = await completeChatJson(client, {
+    signal: personaGenerationSignal(),
       model: inferModel,
       messages: [
         { role: "system", content: systemPrompt },

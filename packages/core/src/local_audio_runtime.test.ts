@@ -22,3 +22,11 @@ test("queued cancellation returns immediately and never starts a cancelled decod
   controller.abort(); await assert.rejects(queued, /cancelled/);
   complete(); await first; await new Promise(resolve => setImmediate(resolve)); assert.equal(started, false);
 });
+
+test("GPU handoff distinguishes loaded incoming weights from a cold model", async () => {
+  const handoffs: unknown[] = [];
+  await runLocalAudio("test-resident-voice", async (...args) => { handoffs.push(args); }, async () => {});
+  await runLocalAudio("test-resident-whisper", async (...args) => { handoffs.push(args); }, async () => {}, undefined, {allowResident:true, residentReady:true});
+  await runLocalAudio("test-cold-voice", async () => {}, async () => {}, undefined, {allowResident:true, residentReady:false});
+  assert.deepEqual(handoffs, [["test-resident-whisper", true, true], ["test-cold-voice", true, false]]);
+});

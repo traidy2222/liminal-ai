@@ -19,14 +19,13 @@ test("looksLikeFormattedEmailHtml accepts minimal tier styled paragraphs", () =>
   assert.equal(looksLikeFormattedEmailHtml(html), true);
 });
 
-test("validateOutboundEmailStyle rejects substantive plain new mail", () => {
+test("validateOutboundEmailStyle accepts substantive plain new mail", () => {
   const err = validateOutboundEmailStyle({
     to: ["a@b.com"],
     subject: "Hello",
     body: "Dear team,\n\nThanks for your time yesterday.\n\nBest,\nAlex",
   });
-  assert.ok(err);
-  assert.match(err!, /body_html/i);
+  assert.equal(err,null);
 });
 
 test("validateOutboundEmailStyle allows thread reply plain", () => {
@@ -39,15 +38,14 @@ test("validateOutboundEmailStyle allows thread reply plain", () => {
   assert.equal(err, null);
 });
 
-test("validateOutboundEmailStyle rejects bare unstyled html", () => {
+test("validateOutboundEmailStyle accepts simple unstyled html", () => {
   const err = validateOutboundEmailStyle({
     to: ["a@b.com"],
     subject: "Hello",
     body: "Hello",
     body_html: "<p>Hello world</p><p>Thanks for your time.</p>",
   });
-  assert.ok(err);
-  assert.match(err!, /body_html/i);
+  assert.equal(err,null);
 });
 
 test("validateOutboundEmailStyle allows formatted html", () => {

@@ -123,6 +123,12 @@ class SidecarAudioClient {
     return json['text'] as String? ?? '';
   }
 
+  /// Local Whisper only; no disk upload or attachment for background listening.
+  Future<TranscribeResult> transcribeWake(Uint8List wav) async {
+    final json = await _postJson('/api/transcribe', {'wakeWav': base64Encode(wav)});
+    return TranscribeResult(text: (json['text'] as String? ?? '').trim());
+  }
+
   Future<TranscribeResult?> transcribe(String attachmentId) async {
     final json =
         await _postJson('/api/transcribe', {'attachmentId': attachmentId});

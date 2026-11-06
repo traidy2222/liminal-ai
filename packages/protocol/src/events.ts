@@ -90,6 +90,7 @@ export interface WireAppConfig {
   dictationSilenceMsShort?: number;
   dictationSilenceMsLong?: number;
   dictationMaxRecordingMs?: number;
+  wakeVoice?: { enabled: boolean; phrase: string; idleTimeoutMs: number };
 }
 
 /** One inbox poll cycle entry for activity log UI. */
@@ -136,6 +137,8 @@ export interface TransportEventMap {
   harness_running: { chatId: string; startedAt: number };
   /** Pushed whenever the chat set or active chat changes; also answers `list_chats`. */
   chat_list: { chats: ChatSummary[]; activeChatId: string };
+  /** Owner explicitly asks desktop clients to display an activated chat. */
+  chat_focus_requested: { chatId: string };
   /** Prior turns rebuilt from `session.jsonl` after restart or chat activation. */
   transcript_replay: {
     chatId: string;

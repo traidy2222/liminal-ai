@@ -89,8 +89,20 @@ export function useChats(): {
       void refresh();
     };
     window.addEventListener("liminal:chat_switched", handler as EventListener);
-    return () => window.removeEventListener("liminal:chat_switched", handler as EventListener);
+    const activity=()=>{void refresh();};
+    window.addEventListener('liminal:chat_activity',activity);
+    return () => {window.removeEventListener("liminal:chat_switched", handler as EventListener);window.removeEventListener('liminal:chat_activity',activity);};
   }, [refresh]);
+
+  useEffect(() => {
+    const handler = (event: Event) => {
+      const detail = (event as CustomEvent<{ chatId?: string; title?: string }>).detail;
+      if (!detail || typeof detail.chatId !== "string" || typeof detail.title !== "string") return;
+      setState(current => ({ ...current, chats: current.chats.map(chat => chat.chatId === detail.chatId ? { ...chat, title: detail.title! } : chat) }));
+    };
+    window.addEventListener("liminal:chat_title_updated", handler);
+    return () => window.removeEventListener("liminal:chat_title_updated", handler);
+  }, []);
 
   const create = useCallback(
     async (input: {

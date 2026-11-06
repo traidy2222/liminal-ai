@@ -102,34 +102,24 @@ export function buildHarnessToolManifest(registry: ToolRegistry): string {
     .map(([fam, tools]) => {
       const sorted = [...tools].sort();
       const active = sorted.filter((t) => activeSet.has(t));
-      const inactive = sorted.filter((t) => !activeSet.has(t));
-      const desc = TOOL_FAMILIES[fam]?.description;
-      const descLine = desc ? `  about: ${desc.split("\n")[0]}` : "";
-      return (
-        `- ${fam}: active=${active.length}/${sorted.length}\n` +
-        `  tools: ${sorted.join(", ")}\n` +
-        `  inactive_tools: ${inactive.length > 0 ? inactive.join(", ") : "(none)"}` +
-        (descLine ? `\n${descLine}` : "")
-      );
+      // Function schemas already describe active tools. Catalog discovery tools
+      // expose inactive names on demand; do not serialize that catalog twice.
+      return `- ${fam}: active=${active.length}/${sorted.length}`;
     });
 
   if (unmapped.length > 0) {
     famLines.push(
       `- unmapped: active=${unmapped.filter((t) => activeSet.has(t)).length}/${unmapped.length}\n` +
-        `  tools: ${unmapped.sort().join(", ")}`
+        `  (discover names through tool search)`
     );
   }
-
-  const domains = buildHarnessCapabilityDomains(allTools);
-  const domainLine = domains ? `Capability domains (registered): ${domains}\n` : "";
 
   return (
     `## TOOL CAPABILITY MANIFEST (live — authoritative over static prose)\n` +
     `lazy_mode=${registry.isLazyToolLoading() ? "on" : "off"}; ` +
     `registered_total=${allTools.length}; active_total=${activeSet.size}\n` +
-    `${domainLine}` +
-    `Families and tools:\n${famLines.join("\n")}\n` +
-    `Activation: list_tool_families (optional task_hint) → activate_tool_family({family}) → retry the tool.`
+    `Families (active/registered counts):\n${famLines.join("\n")}\n` +
+    `Discover missing tools with list_tool_families(task_hint) or mcp_search_tools; activate only the family or operations needed.`
   );
 }
 

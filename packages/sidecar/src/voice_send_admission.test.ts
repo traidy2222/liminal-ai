@@ -30,5 +30,7 @@ test("send_message rejects busy/setup-gated speech before acknowledging or consu
   bootstrap = false;
   await send("accepted"); await send("concurrent");
   assert.deepEqual(acknowledgements.slice(-2).map(a => a.ok), [true, false]);
-  assert.equal(starts, 1); assert.equal(touches, 1);
+  // The bridge records accepted conversation activity. Transport admission must
+  // not optimistically change recency before the bridge accepts the message.
+  assert.equal(starts, 1); assert.equal(touches, 0);
 });

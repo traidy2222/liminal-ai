@@ -9,14 +9,42 @@ from worker import speech_regions, decode_audio, language_code, Recognizer
 
 
 class SpeechGateTests(unittest.TestCase):
+    def test_unloaded_decoder_cannot_claim_gpu_residency(self):
+        recognizer = Recognizer(pathlib.Path('.'), 'whisper', cuda=True)
+        with patch('worker.gpu_has_audio_headroom', return_value=True):
+            self.assertFalse(recognizer.handle({'op':'release','allow_resident':True}).get('residentGpu', False))
+
+    def test_residency_requires_opt_in_and_current_memory_headroom(self):
+        recognizer = Recognizer(pathlib.Path('.'), 'whisper', cuda=True)
+        recognizer.model = Mock()
+        with patch('worker.gpu_has_audio_headroom', return_value=True):
+            self.assertTrue(recognizer.handle({'op':'release','allow_resident':True})['residentGpu'])
+            recognizer.model.model.unload_model.assert_not_called()
+        with patch('worker.gpu_has_audio_headroom', return_value=False):
+            recognizer.handle({'op':'release','allow_resident':True})
+            recognizer.model.model.unload_model.assert_called_once_with(to_cpu=True)
+    def test_parked_whisper_resumes_without_loading_a_new_decoder(self):
+        recognizer = Recognizer(pathlib.Path('.'), 'whisper', cuda=True)
+        recognizer.model = Mock()
+        recognizer.warmed = True
+        result = recognizer.handle({'op': 'release'})
+        self.assertTrue(result['released'])
+        self.assertTrue(recognizer.handle({'op': 'release'})['released'])
+        recognizer.model.model.unload_model.assert_called_once_with(to_cpu=True)
+        self.assertTrue(recognizer.parked)
+        recognizer.handle({'op': 'warmup'})
+        recognizer.model.model.load_model.assert_called_once()
+        self.assertFalse(recognizer.parked)
+        recognizer.model.transcribe.assert_not_called()
+
     def test_warmup_exercises_decoder_once_without_creating_user_text(self):
         recognizer = Recognizer(pathlib.Path('.'), 'whisper', cuda=False)
         recognizer.model = Mock()
         recognizer.model.transcribe.return_value = (iter([]), None)
         recognizer.load = Mock()
         with patch('worker.speech_regions', return_value=[]) as gate:
-            self.assertEqual(recognizer.handle({'op': 'warmup'}), dict(text='', noSpeech=True, durationSec=0))
-            self.assertEqual(recognizer.handle({'op': 'warmup'}), dict(text='', noSpeech=True, durationSec=0))
+            self.assertEqual(recognizer.handle({'op': 'warmup'}), dict(text='', noSpeech=True, durationSec=0, residentGpu=False))
+            self.assertEqual(recognizer.handle({'op': 'warmup'}), dict(text='', noSpeech=True, durationSec=0, residentGpu=False))
             recognizer.load.assert_called_once()
             recognizer.model.transcribe.assert_called_once()
             gate.assert_called_once()

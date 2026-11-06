@@ -55,6 +55,7 @@ describe("workspace_service_cards", () => {
       "https://www.googleapis.com/auth/documents",
       "https://www.googleapis.com/auth/spreadsheets",
       "https://www.googleapis.com/auth/drive.readonly",
+      "https://www.googleapis.com/auth/drive.file",
     ];
     const cards = buildGoogleServiceCards(
       [{ accountId: "a1", email: "u@x.com", scopes, expiresAt: 0 }],

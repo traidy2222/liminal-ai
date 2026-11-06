@@ -104,8 +104,12 @@ export function buildReasoningSurfaceInjection(
 
 /** User message matches implement-and-ship pattern (TSP trap, zero-shot code). */
 export function isImplementShipUserMessage(userMessage: string): boolean {
-  const t = userMessage.toLowerCase();
-  return /\b(implement|write\b.*\b(python|code)|runnable|run it|test it|zero-?shot|from scratch|make it runnable|show the results)\b/.test(
+  const t = userMessage.toLowerCase().split(/[.!?;\n]/)
+    .filter(clause => !/^\s*(?:please\s+)?(?:do not|don't|never|avoid)\b/.test(clause))
+    .join("\n");
+  // Do not join an ordinary writing request to a later sentence about code
+  // (e.g. "Write an explanation. Do not browse or run code.").
+  return /\b(implement|write\b[^.!?;\n]*\b(python|code)|runnable|run it|test it|zero-?shot|from scratch|make it runnable|show the results)\b/.test(
     t
   );
 }

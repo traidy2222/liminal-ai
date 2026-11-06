@@ -86,7 +86,7 @@ class _WorkingActivityPanelState extends State<WorkingActivityPanel> {
                   color: summary.errorCount > 0 ? lim.danger : lim.textDim,
                 ),
           title: Text(
-            'Working',
+            summary.isActive ? 'Working' : 'Finished',
             style: Theme.of(context).textTheme.bodyMedium?.copyWith(
                   color: lim.text,
                   fontWeight: FontWeight.w600,

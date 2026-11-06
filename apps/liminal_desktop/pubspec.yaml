@@ -1,7 +1,7 @@
 name: liminal_desktop
 description: "Liminal — the native desktop app for the Liminal agent harness."
 publish_to: "none"
-version: 0.1.26
+version: 0.1.27
 
 environment:
   sdk: ">=3.12.0 <4.0.0"
@@ -20,7 +20,8 @@ dependencies:
   fwfh_url_launcher: ^0.9.1
   webview_flutter: ^4.10.0
   webview_flutter_wkwebview: ^3.16.0
-  webview_win_floating: ^3.0.3
+  webview_win_floating:
+    path: packages/webview_win_floating
   flutter_highlight: ^0.7.0
   highlight: ^0.7.0
   url_launcher: ^6.3.1

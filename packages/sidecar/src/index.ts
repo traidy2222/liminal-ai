@@ -8,10 +8,11 @@ import {
   ensureProviderApiKeysInProcess,
   loadHarnessEnvFiles,
   loadRuntimePreferences,
-  resolveProviderConfigWithInference,
+  resolveProviderForStartup,
   resolveWorkspaceRoot,
   refreshStaleXeroAccounts,
   warmupConfiguredTranscription,
+  providerConnectionConfigured,
 } from "@liminal/core";
 import { WsServer } from "./ws_server.js";
 import { clearHandshake, handshakePath, mintToken, writeHandshake } from "./handshake.js";
@@ -74,7 +75,7 @@ const workspaceRoot = resolveWorkspaceRoot();
 
 async function main(): Promise<void> {
   const runtimePreferences = await loadRuntimePreferences(workspaceRoot);
-  const provider = await resolveProviderConfigWithInference(
+  const provider = await resolveProviderForStartup(
     runtimePreferences?.provider?.model
       ? { model: runtimePreferences.provider.model }
       : undefined,
@@ -85,7 +86,7 @@ async function main(): Promise<void> {
   const server = new WsServer({ token, provider, runtimePreferences, repoRoot });
   const port = await server.listen();
   const record = await writeHandshake({ port, token, pid: process.pid });
-  void warmupConfiguredTranscription(runtimePreferences);
+  if(providerConnectionConfigured(provider.apiKey))void warmupConfiguredTranscription(runtimePreferences);
 
   // Machine-readable boot line for the parent (the Flutter app reads stdout
   // first, then falls back to polling the handshake file).
@@ -99,8 +100,8 @@ async function main(): Promise<void> {
     shuttingDown = true;
     // The desktop owned stdout; it may already be a broken pipe when it exits.
     if (signal !== 'desktop_parent_exit') process.stdout.write(`liminald: shutting down (${signal})\n`);
-    server.close();
-    void Promise.allSettled([clearHandshake(), closeStdioMcp()])
+    const browserShutdown = server.close();
+    void Promise.allSettled([browserShutdown, clearHandshake(), closeStdioMcp()])
       .then(() => closeCrashReporter())
       .finally(() => process.exit(0));
   };

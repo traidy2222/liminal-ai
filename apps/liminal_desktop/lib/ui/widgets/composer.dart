@@ -497,7 +497,7 @@ class _ComposerState extends State<Composer> {
                 Padding(
                   padding: const EdgeInsets.only(bottom: 6),
                   child: Text(
-                    'Spoken replies are off — enable AGENT_TTS_ENABLED in Settings.',
+                    'Spoken replies are unavailable. In Preferences, enable Spoken responses and select JARVIS Warm if single-model mode is on.',
                     style: TextStyle(color: lim.warn, fontSize: 12),
                   ),
                 ),

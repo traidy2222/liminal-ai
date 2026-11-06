@@ -22,19 +22,12 @@ export function buildFileRevisionBatchNotice(
   paths: ReadonlyArray<{ path: string; rev: number }>
 ): string {
   if (paths.length === 0) return "";
-  const lines = paths.map(
-    ({ path, rev }) =>
-      `- \`${path}\` → revision ${rev} (read_file/grep output from before this edit is STALE)`
-  );
-  return (
-    `[FILE REVISION] Workspace files changed this round:\n${lines.join("\n")}\n` +
-    `Before the next edit_file on any path above: run grep_file for the target text, or read_file with a narrow offset/limit — ` +
-    `do not reuse search/replace strings from tool results captured before the revision line.`
-  );
+  const lines = paths.map(({path,rev})=>`- ${path}: revision ${rev}`);
+  return `[FILE REVISION] Successful edits this round:\n${lines.join("\n")}\nReuse the known post-edit content and returned SHA256. Reread only after an external change, version mismatch or failed replacement context.`;
 }
 
 export function isEditStaleFailure(error: string): boolean {
-  return /0 match|no changes|context mismatch|could not find the \d+ old lines|not found/i.test(
+  return /version changed|file changed during editing|0 match|no changes|context mismatch|could not find the \d+ old lines|not found/i.test(
     error
   );
 }

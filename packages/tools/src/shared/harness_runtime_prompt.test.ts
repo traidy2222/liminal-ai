@@ -52,7 +52,24 @@ test("buildHarnessToolManifest groups tools by family", () => {
   assert.match(manifest, /TOOL CAPABILITY MANIFEST/);
   assert.match(manifest, /files_read: active=1\/1/);
   assert.match(manifest, /web: active=0\/1/);
-  assert.match(manifest, /inactive_tools: web_search/);
+  assert.doesNotMatch(manifest, /web_search|read_file|inactive_tools:/);
+});
+
+test("a large inactive MCP catalog does not expand the model prompt", () => {
+  const registry = new ToolRegistry();
+  const families = new Map<string, string>();
+  for (let i = 0; i < 1000; i++) {
+    const name = `mcp_fixture_unloaded_${i}`;
+    registry.register({ name, description: "fixture", parameters: { type: "object", properties: {} }, handler: async () => ({ ok: true, output: "" }) });
+    families.set(name, "connector:fixture");
+  }
+  registry.setToolFamilyLookup(families);
+  registry.setLazyToolLoading(true);
+  const manifest = buildHarnessToolManifest(registry);
+  assert.match(manifest, /registered_total=1000; active_total=0/);
+  assert.match(manifest, /connector:fixture: active=0\/1000/);
+  assert.doesNotMatch(manifest, /mcp_fixture_unloaded_/);
+  assert.ok(manifest.length < 1000);
 });
 
 test("buildHarnessCapabilityDomains reflects registered tools", () => {

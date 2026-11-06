@@ -88,6 +88,39 @@ test("every registered tool is reachable via the always-set or a family", async 
   );
 });
 
+test("balanced lazy startup keeps basic memory usable without loading advanced catalogs", async () => {
+  const keys = ["AGENT_TOOL_LAZY", "AGENT_ALWAYS_TOOLS_PROFILE", "AGENT_BROWSER_ALWAYS_ACTIVE"];
+  const before = keys.map(key => process.env[key]);
+  try {
+    process.env.AGENT_TOOL_LAZY = "1"; process.env.AGENT_ALWAYS_TOOLS_PROFILE = "balanced";
+    process.env.AGENT_BROWSER_ALWAYS_ACTIVE = "0";
+    const harness = buildHarness(); await registerAllTools(harness.registry, harness.emitter, harness);
+    assert.ok(harness.registry.isActive("remember")); assert.ok(harness.registry.isActive("search_memory"));
+    for (const name of ["vault_write", "doc_compose_chunk", "memory_graph", "browser_open"]) {
+      assert.ok(harness.registry.has(name), `${name} remains registered`);
+      assert.equal(harness.registry.isActive(name), false, `${name} loads on demand`);
+    }
+    assert.ok(harness.registry.getActiveToolNames().length < 20, "startup stays small before a task requests more capabilities");
+  } finally { keys.forEach((key, i) => { if (before[i] === undefined) delete process.env[key]; else process.env[key] = before[i]; }); }
+});
+
+test("disabled standalone search/fetch cannot be restored by activating a family", async () => {
+  const previous = process.env.AGENT_WEB_SEARCH_FETCH;
+  try {
+    const harness = buildHarness();
+    process.env.AGENT_WEB_SEARCH_FETCH = "1";
+    await registerAllTools(harness.registry, harness.emitter, harness);
+    assert.ok(harness.registry.has("web_search")); assert.ok(harness.registry.has("web_fetch"));
+    process.env.AGENT_WEB_SEARCH_FETCH = "0";
+    await registerAllTools(harness.registry, harness.emitter, harness);
+    harness.registry.activateFamilies(["web"]);
+    assert.equal(harness.registry.has("web_search"), false); assert.equal(harness.registry.has("web_fetch"), false);
+    assert.ok(harness.registry.has("browser_open")); assert.equal(harness.registry.has("http_request"), false);
+    assert.equal(harness.registry.has("markets_quote"), false); assert.equal(harness.registry.has("weather_lookup"), false);
+    assert.ok(!harness.registry.toOpenAIFormat().some(tool => ["web_search", "web_fetch"].includes(tool.function.name)));
+  } finally { if (previous === undefined) delete process.env.AGENT_WEB_SEARCH_FETCH; else process.env.AGENT_WEB_SEARCH_FETCH = previous; }
+});
+
 test("speak is registered when TTS is enabled but not in static always-set", async () => {
   const prevTts = process.env["AGENT_TTS_ENABLED"];
   const prevLazy = process.env["AGENT_TOOL_LAZY"];

@@ -57,9 +57,11 @@ test("single-model background failure never substitutes a fallback model", async
 test("vision inherits active single-model provider even when callers pass null preferences", async () => {
   const previousKey = process.env["AGENT_API_KEY"];
   const previousMode = process.env["AGENT_INFERENCE_MODE"];
+  const previousBase = process.env["AGENT_API_BASE_URL"];
   try {
     process.env["AGENT_API_KEY"] = "test-local-key";
     process.env["AGENT_INFERENCE_MODE"] = "byok";
+    process.env["AGENT_API_BASE_URL"] = "http://localhost:1234/v1";
     const p = prefs();
     p.provider = { model: "local/selected", baseURL: "http://localhost:1234/v1", inferenceMode: "byok" };
     await runHarnessEffectiveEnvContext(p, async () => {
@@ -71,5 +73,6 @@ test("vision inherits active single-model provider even when callers pass null p
   } finally {
     if (previousKey === undefined) delete process.env["AGENT_API_KEY"]; else process.env["AGENT_API_KEY"] = previousKey;
     if (previousMode === undefined) delete process.env["AGENT_INFERENCE_MODE"]; else process.env["AGENT_INFERENCE_MODE"] = previousMode;
+    if (previousBase === undefined) delete process.env["AGENT_API_BASE_URL"]; else process.env["AGENT_API_BASE_URL"] = previousBase;
   }
 });

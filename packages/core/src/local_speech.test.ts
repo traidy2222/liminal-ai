@@ -15,6 +15,19 @@ test("local speech serializes requests and reuses its warm process", async () =>
     assert.equal(Buffer.from(a).readUInt32LE(44),Buffer.from(b).readUInt32LE(44));
   } finally { client.close(); }
 });
+
+test("stream interruption discards the active phrase but keeps the voice warm for the next reply", async () => {
+  const client = worker();
+  try {
+    const before = Buffer.from(await client.synthesize("ready", 5000)).readUInt32LE(44);
+    const controller = new AbortController();
+    const active = client.synthesize("delayed", 5000, controller.signal, true);
+    await new Promise(r => setTimeout(r, 30)); controller.abort();
+    await assert.rejects(active, /cancelled/);
+    const after = Buffer.from(await client.synthesize("next reply", 5000)).readUInt32LE(44);
+    assert.equal(after, before, "interrupt must not introduce another cold model load");
+  } finally { client.close(); }
+});
 test("local speech timeout and cancellation release the worker and allow recovery", async () => {
   const client=worker();
   try {

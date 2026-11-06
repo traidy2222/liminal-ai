@@ -8,6 +8,7 @@ import 'package:record/record.dart';
 
 import 'sidecar_audio_client.dart';
 import 'vad.dart';
+import 'voice_timing.dart';
 import 'wav_pcm.dart';
 
 enum DictationStatus {
@@ -32,11 +33,14 @@ class DictationController extends ChangeNotifier {
   DictationController({
     DictationEndpointOptions? endpointOptions,
     this.shouldBlockSpeechCapture,
+    this.wakeListening = false,
   }) : endpointOptions = endpointOptions ?? const DictationEndpointOptions();
 
   DictationEndpointOptions endpointOptions;
   bool Function()? shouldBlockSpeechCapture;
+  final bool wakeListening;
   bool Function()? isTtsPipelineActive;
+  Future<void> Function()? beforeStartSession;
 
   AudioRecorder _recorder = AudioRecorder();
 
@@ -53,6 +57,9 @@ class DictationController extends ChangeNotifier {
   Timer? _micWatchdog;
   AmplitudeVad? _vad;
   int _recordingStartedAt = 0;
+  int _lastPcmLevelAt = 0;
+  int _lastLevelDiagnosticAt = 0;
+  int? _lastVadSpeechEndMs;
   bool _utteranceActive = false;
   bool _endpointInFlight = false;
   bool _suspendedForTts = false;
@@ -80,6 +87,7 @@ class DictationController extends ChangeNotifier {
   }
 
   void _pushPreview(Uint8List chunk) {
+    if (wakeListening) return;
     _previewChunks.add(chunk);
     _previewBytes += chunk.length;
     const maximum = 12 * 16000 * 2;
@@ -109,20 +117,24 @@ class DictationController extends ChangeNotifier {
     _previewBusy = true;
     _lastPreviewAt = now;
     unawaited(
-      client.preview(buildWavFromPcm16(pcm.toBytes())).then((text) {
-        if (!_disposed &&
-            sessionActive &&
-            _utteranceActive &&
-            generation == _previewGeneration) {
-          liveText = text;
-          onInterim?.call(text);
-          notifyListeners();
-        }
-      }).catchError((Object _) {
-        /* Final transcription surfaces errors once. */
-      }).whenComplete(() {
-        _previewBusy = false;
-      }),
+      client
+          .preview(buildWavFromPcm16(pcm.toBytes()))
+          .then((text) {
+            if (!_disposed &&
+                sessionActive &&
+                _utteranceActive &&
+                generation == _previewGeneration) {
+              liveText = text;
+              onInterim?.call(text);
+              notifyListeners();
+            }
+          })
+          .catchError((Object _) {
+            /* Final transcription surfaces errors once. */
+          })
+          .whenComplete(() {
+            _previewBusy = false;
+          }),
     );
   }
 
@@ -130,7 +142,8 @@ class DictationController extends ChangeNotifier {
 
   static const _sampleRate = 16000;
   static const _preRollMs = 450;
-  static int get _preRollMaxBytes => _sampleRate * 2 * _preRollMs ~/ 1000;
+  int get _preRollMaxBytes =>
+      _sampleRate * 2 * (wakeListening ? 900 : _preRollMs) ~/ 1000;
 
   void bindAudioClient(SidecarAudioClient? client) {
     final previous = _audioClient;
@@ -140,7 +153,9 @@ class DictationController extends ChangeNotifier {
             previous.port != client.port ||
             previous.token != client.token)) {
       previous.cancelTranscriptionRequests();
-      unawaited(endSession());
+      if (sessionActive || status == DictationStatus.permissionPending) {
+        unawaited(endSession());
+      }
     }
     _audioClient = client;
   }
@@ -153,18 +168,47 @@ class DictationController extends ChangeNotifier {
   }
 
   Future<void> startSession() async {
-    if (sessionActive) return;
+    if (_disposed ||
+        sessionActive ||
+        status == DictationStatus.permissionPending) {
+      return;
+    }
+    final generation = ++_sessionGeneration;
+    status = DictationStatus.permissionPending;
+    notifyListeners();
+    try {
+      await beforeStartSession?.call();
+    } catch (e) {
+      if (!_disposed && generation == _sessionGeneration) {
+        status = DictationStatus.error;
+        error = e.toString();
+        notifyListeners();
+      }
+      return;
+    }
+    if (_disposed || sessionActive || generation != _sessionGeneration) return;
     error = null;
     status = DictationStatus.permissionPending;
     notifyListeners();
-    if (!await _ensureMicPermission()) {
+    bool granted;
+    try {
+      granted = await _ensureMicPermission();
+    } catch (e) {
+      if (!_disposed && generation == _sessionGeneration) {
+        status = DictationStatus.error;
+        error = e.toString();
+        notifyListeners();
+      }
+      return;
+    }
+    if (_disposed || generation != _sessionGeneration) return;
+    if (!granted) {
       status = DictationStatus.error;
       error = 'Microphone permission denied.';
       notifyListeners();
       return;
     }
     sessionActive = true;
-    _sessionGeneration++;
     _autoSentLatch = false;
     _vadNeedsSessionReset = true;
     _clearPreRoll();
@@ -331,6 +375,8 @@ class DictationController extends ChangeNotifier {
       }
 
       _streamLive = true;
+      _lastPcmLevelAt = 0;
+      voiceTiming('mic_open', {'wake': wakeListening});
       _pcmSub = stream.listen(
         _onPcmChunk,
         onError: (_) => unawaited(_handleStreamLost()),
@@ -373,6 +419,7 @@ class DictationController extends ChangeNotifier {
   }
 
   Future<void> _pollAmplitude() async {
+    if (DateTime.now().millisecondsSinceEpoch - _lastPcmLevelAt < 400) return;
     if (!_streamLive || _suspendedForTts || !sessionActive) return;
     try {
       if (!await _recorder.isRecording()) return;
@@ -446,6 +493,23 @@ class DictationController extends ChangeNotifier {
 
   void _onPcmChunk(Uint8List chunk) {
     if (chunk.isEmpty) return;
+    final now = DateTime.now().millisecondsSinceEpoch;
+    _lastPcmLevelAt = now;
+    final db = AmplitudeVad.pcmDb(chunk);
+    if (!_suspendedForTts &&
+        !_endpointInFlight &&
+        shouldBlockSpeechCapture?.call() != true) {
+      _vad?.ingestAmplitudeDb(db);
+    }
+    if (voiceTimingEnabled && now - _lastLevelDiagnosticAt >= 1000) {
+      _lastLevelDiagnosticAt = now;
+      voiceTiming('mic_level', {
+        'db': db,
+        'noiseFloorDb': _vad?.noiseFloorDb,
+        'wake': wakeListening,
+        'status': status.name,
+      });
+    }
     if (_utteranceActive) {
       _utterancePcm ??= BytesBuilder(copy: false);
       _utterancePcm!.add(chunk);
@@ -468,7 +532,7 @@ class DictationController extends ChangeNotifier {
         !_streamLive) {
       return;
     }
-    onBargeIn?.call();
+    if (!wakeListening) onBargeIn?.call();
     error = null;
     _utteranceActive = true;
     onCaptureActiveChange?.call(true);
@@ -480,6 +544,8 @@ class DictationController extends ChangeNotifier {
     _clearPreRoll();
 
     _recordingStartedAt = DateTime.now().millisecondsSinceEpoch;
+    _lastVadSpeechEndMs = null;
+    voiceTiming('speech_start');
     _vad?.armUtterance();
     _maxRecordingTimer?.cancel();
     _maxRecordingTimer = Timer(
@@ -494,6 +560,8 @@ class DictationController extends ChangeNotifier {
 
   void _onSilenceTick(int msSinceSpeechEnded) {
     if (!_utteranceActive || _endpointInFlight || _autoSentLatch) return;
+    _lastVadSpeechEndMs =
+        DateTime.now().millisecondsSinceEpoch - msSinceSpeechEnded;
     final recordingMs =
         DateTime.now().millisecondsSinceEpoch - _recordingStartedAt;
     if (recordingMs < endpointOptions.minRecordingMs) return;
@@ -525,6 +593,7 @@ class DictationController extends ChangeNotifier {
     if (!force && recordingMs < endpointOptions.minRecordingMs) return;
 
     final sessionGeneration = _sessionGeneration;
+    voiceTiming('endpoint', {'speechEndMs': _lastVadSpeechEndMs});
     _resetPreview();
     _endpointInFlight = true;
     _autoSentLatch = true;
@@ -571,13 +640,21 @@ class DictationController extends ChangeNotifier {
     notifyListeners();
 
     try {
-      final attachmentId = await client.uploadWavBytes(wav);
+      final attachmentId = wakeListening
+          ? null
+          : await client.uploadWavBytes(wav);
       if (_disposed ||
           !sessionActive ||
-          sessionGeneration != _sessionGeneration) return;
+          sessionGeneration != _sessionGeneration) {
+        return;
+      }
       status = DictationStatus.transcribing;
       notifyListeners();
-      final result = await client.transcribe(attachmentId);
+      voiceTiming('asr_start');
+      final result = wakeListening
+          ? await client.transcribeWake(wav)
+          : await client.transcribe(attachmentId!);
+      voiceTiming('asr_end');
       if (_disposed ||
           !sessionActive ||
           sessionGeneration != _sessionGeneration) {
@@ -585,6 +662,11 @@ class DictationController extends ChangeNotifier {
       }
       onCaptureActiveChange?.call(false);
       final text = result?.text.trim() ?? '';
+      voiceTiming('asr_result', {
+        'wake': wakeListening,
+        'characters': text.length,
+        'hasText': text.isNotEmpty,
+      });
       if (text.isNotEmpty) {
         liveText = text;
         onRefined?.call(text, wasAutoSent: true);
@@ -596,7 +678,9 @@ class DictationController extends ChangeNotifier {
     } catch (e) {
       if (_disposed ||
           !sessionActive ||
-          sessionGeneration != _sessionGeneration) return;
+          sessionGeneration != _sessionGeneration) {
+        return;
+      }
       liveText = '';
       final message = e is HttpException ? e.message : e.toString();
       error = message;
@@ -606,8 +690,9 @@ class DictationController extends ChangeNotifier {
         onCaptureActiveChange?.call(false);
         _finishEndpoint();
         if (sessionActive) {
-          status =
-              _streamLive ? DictationStatus.listening : DictationStatus.paused;
+          status = _streamLive
+              ? DictationStatus.listening
+              : DictationStatus.paused;
           liveText = '';
           if (!_streamLive && !_suspendedForTts) {
             unawaited(reconcileListening());

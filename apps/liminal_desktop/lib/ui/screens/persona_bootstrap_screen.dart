@@ -14,6 +14,7 @@ class PersonaBootstrapScreen extends StatefulWidget {
 
 class _PersonaBootstrapScreenState extends State<PersonaBootstrapScreen> {
   final _input = TextEditingController();
+  bool _spoken = false;
 
   @override
   void dispose() {
@@ -22,10 +23,13 @@ class _PersonaBootstrapScreenState extends State<PersonaBootstrapScreen> {
   }
 
   Future<void> _submit({bool skip = false}) async {
-    await AppScope.of(context).submitPersonaBootstrap(
-      skip ? 'skip' : _input.text,
-      skip: skip,
-    );
+    final host = AppScope.of(context);
+    if (_spoken && !await host.patchHarnessSettings({'AGENT_TTS_ENABLED': '1'}))
+      return;
+    if (!mounted) return;
+    await AppScope.of(
+      context,
+    ).submitPersonaBootstrap(skip ? 'skip' : _input.text, skip: skip);
   }
 
   @override
@@ -34,9 +38,9 @@ class _PersonaBootstrapScreenState extends State<PersonaBootstrapScreen> {
     final session = c.activeSession;
 
     return LiminalOnboardingPage(
-      title: 'How should I sound?',
+      title: 'Make it your own',
       subtitle:
-          'Describe the assistant personality you want — tone, style, name. Liminal will generate a persona profile before your first chat.',
+          '2 · Choose a writing personality. Describe a name, tone and style, or start immediately with the built-in personality. This is separate from the spoken voice.',
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
@@ -47,7 +51,7 @@ class _PersonaBootstrapScreenState extends State<PersonaBootstrapScreen> {
             minLines: 4,
             maxLines: 8,
             decoration: const InputDecoration(
-              labelText: 'Persona description',
+              labelText: 'Writing personality',
               hintText: 'e.g. Sharp, concise coding partner named Aria…',
               alignLabelWithHint: true,
             ),
@@ -67,7 +71,31 @@ class _PersonaBootstrapScreenState extends State<PersonaBootstrapScreen> {
                     children: [
                       const LinearProgressIndicator(),
                       const SizedBox(height: LiminalSpacing.xs),
-                      Text(progress, style: Theme.of(context).textTheme.bodySmall),
+                      Text(
+                        progress,
+                        style: Theme.of(context).textTheme.bodySmall,
+                      ),
+                      ...session.personaBootstrapArtifacts
+                          .where(
+                            (a) => (a['content'] as String? ?? '').isNotEmpty,
+                          )
+                          .map(
+                            (a) => ExpansionTile(
+                              title: Text(
+                                '${a['label'] ?? a['id']} · ${a['status']}',
+                              ),
+                              children: [
+                                SelectableText(
+                                  (a['content'] as String).length > 4000
+                                      ? (a['content'] as String).substring(
+                                          0,
+                                          4000,
+                                        )
+                                      : a['content'] as String,
+                                ),
+                              ],
+                            ),
+                          ),
                     ],
                   ),
                 );
@@ -93,13 +121,29 @@ class _PersonaBootstrapScreenState extends State<PersonaBootstrapScreen> {
                     width: 22,
                     child: CircularProgressIndicator(strokeWidth: 2),
                   )
-                : const Text('Create persona'),
+                : const Text('Generate personality and start'),
+          ),
+          if (c.setupSaving)
+            TextButton(
+              onPressed: () => c.cancelPersonaBootstrap(),
+              child: const Text('Cancel generation'),
+            ),
+          SwitchListTile(
+            contentPadding: EdgeInsets.zero,
+            title: const Text('Spoken replies (optional)'),
+            subtitle: const Text(
+              'Enable the configured speech voice. Microphone and wake word can be set up later in Settings.',
+            ),
+            value: _spoken,
+            onChanged: c.setupSaving
+                ? null
+                : (value) => setState(() => _spoken = value),
           ),
           if (c.config?.personaBootstrapAllowSkip ?? true) ...[
             const SizedBox(height: LiminalSpacing.xs),
             TextButton(
               onPressed: c.setupSaving ? null : () => _submit(skip: true),
-              child: const Text('Skip — use default voice'),
+              child: const Text('Use built-in personality'),
             ),
           ],
         ],

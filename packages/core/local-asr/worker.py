@@ -8,6 +8,11 @@ import pathlib
 import sys
 
 os.environ.update(HF_HUB_OFFLINE="1", TRANSFORMERS_OFFLINE="1", HF_HUB_DISABLE_TELEMETRY="1")
+# Each worker serializes individual recordings. NumPy's default OpenBLAS pool
+# reserves hundreds of MB on many-core PCs for these small feature matrices.
+# CTranslate2/PyTorch retain their own inference thread settings; an explicit
+# OpenBLAS setting from the user still takes precedence.
+os.environ.setdefault("OPENBLAS_NUM_THREADS", "1")
 OUT = sys.stdout
 sys.stdout = sys.stderr
 DLL_HANDLES = []
@@ -86,18 +91,51 @@ QWEN_LANGUAGES = dict(zip(
 ))
 
 
+def gpu_has_audio_headroom(next_resident_ready=False):
+    """Read driver memory without importing PyTorch into the Whisper runtime."""
+    if os.environ.get('CUDA_VISIBLE_DEVICES', '').strip() not in ('', '0'): return False
+    import ctypes
+    class Memory(ctypes.Structure):
+        _fields_ = [('total', ctypes.c_ulonglong), ('free', ctypes.c_ulonglong), ('used', ctypes.c_ulonglong)]
+    driver = None
+    try:
+        driver = ctypes.CDLL('nvml.dll' if sys.platform == 'win32' else 'libnvidia-ml.so.1')
+        if driver.nvmlInit_v2() != 0: return False
+        device = ctypes.c_void_p()
+        driver.nvmlDeviceGetHandleByIndex_v2.argtypes = [ctypes.c_uint, ctypes.POINTER(ctypes.c_void_p)]
+        driver.nvmlDeviceGetMemoryInfo.argtypes = [ctypes.c_void_p, ctypes.POINTER(Memory)]
+        if driver.nvmlDeviceGetHandleByIndex_v2(0, ctypes.byref(device)) != 0: return False
+        memory = Memory()
+        if driver.nvmlDeviceGetMemoryInfo(device, ctypes.byref(memory)) != 0: return False
+        # Loading the next model needs weight space; switching to weights already
+        # on the GPU needs only inference workspace. Do not repeatedly offload
+        # both models merely because the loaded weights reduced free VRAM.
+        required = (1.5 if next_resident_ready else 4) * 1024**3
+        return memory.total >= 9 * 1024**3 and memory.free >= required
+    except (OSError, AttributeError): return False
+    finally:
+        if driver is not None:
+            try: driver.nvmlShutdown()
+            except (OSError, AttributeError): pass
+
+
 class Recognizer:
     def __init__(self, home, profile, cuda=None):
         self.profile = profile
         self.home = home
         self.model = None  # Load only after the neural gate finds speech.
         self.warmed = False
+        self.parked = False
         if cuda is not None: self.cuda = cuda
         elif (home / "ready.json").exists(): self.cuda = json.loads((home / "ready.json").read_text())["cuda"]
         else: self.cuda = False
 
     def load(self):
-        if self.model is not None: return
+        if self.model is not None:
+            if self.parked:
+                self.model.model.load_model()
+                self.parked = False
+            return
         models = str(self.home / "models")
         if self.profile == "whisper":
             from faster_whisper import WhisperModel
@@ -115,6 +153,7 @@ class Recognizer:
             )
 
     def warmup(self):
+        if self.parked: self.load()
         if not self.warmed:
             import numpy as np
             self.load()
@@ -129,7 +168,17 @@ class Recognizer:
         return dict(text="", noSpeech=True, durationSec=0)
 
     def handle(self, request):
-        return self.warmup() if request.get("op") == "warmup" else self.transcribe(request)
+        if request.get("op") == "release":
+            if request.get('allow_resident') and self.model is not None and self.profile == 'whisper' and self.cuda and not self.parked and gpu_has_audio_headroom(request.get('next_resident_ready', False)):
+                return dict(text='', noSpeech=True, durationSec=0, released=True, residentGpu=True)
+            if self.model is not None and self.cuda and not self.parked:
+                if self.profile != "whisper": raise ValueError("This decoder must close to release GPU memory")
+                self.model.model.unload_model(to_cpu=True)
+                self.parked = True
+            return dict(text="", noSpeech=True, durationSec=0, released=True)
+        result = self.warmup() if request.get("op") == "warmup" else self.transcribe(request)
+        result['residentGpu'] = bool(self.model is not None and self.cuda and not self.parked)
+        return result
 
     def transcribe(self, request):
         audio = decode_audio(base64.b64decode(request["audio"], validate=True))

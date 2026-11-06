@@ -307,7 +307,7 @@ export class SidecarWsClient {
   /** Fresh chat for capture — no transcript replay (avoids stale "tools done" UI). */
   async prepareMarketingChat(chatId) {
     await this.sendCommand("open_chat", { chatId });
-    const activated = await this.sendCommand("activate_chat", { chatId });
+    const activated = await this.sendCommand("activate_chat", { chatId, show: true });
     if (!activated.ok) throw new Error(activated.error ?? "activate_chat failed");
     if (activated.data?.activeChatId) {
       this.activeChatId = activated.data.activeChatId;
@@ -340,7 +340,7 @@ export class SidecarWsClient {
   }
 
   async activateChat(chatId) {
-    const result = await this.sendCommand("activate_chat", { chatId });
+    const result = await this.sendCommand("activate_chat", { chatId, show: true });
     if (!result.ok) throw new Error(result.error ?? "activate_chat failed");
     if (result.data?.activeChatId) this.activeChatId = result.data.activeChatId;
     await this.waitHarnessIdle(120_000, chatId);

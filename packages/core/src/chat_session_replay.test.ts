@@ -7,6 +7,17 @@ import {
 } from "./chat_session_replay.js";
 
 describe("parseSessionJsonlForReplay", () => {
+  it("ignores whitespace-only historical narration between completed tool calls", () => {
+    const raw = [
+      {event:'send_start',turnIndex:1,userMessage:'Plan the trip'},
+      {event:'tool_start',turnIndex:1,callId:'one',name:'browser_open'},
+      {event:'tool_result',turnIndex:1,callId:'one',name:'browser_open',ok:true,output:'Opened'},
+      {event:'text_rollup',turnIndex:1,text:' \n\n'},
+      {event:'tool_start',turnIndex:1,callId:'two',name:'browser_extract'},
+      {event:'tool_result',turnIndex:1,callId:'two',name:'browser_extract',ok:true,output:'Read'},
+    ].map(row=>JSON.stringify(row)).join('\n');
+    assert.deepEqual(parseSessionJsonlForReplay(raw).map(entry=>entry.kind), ['user','tool_call','tool_call']);
+  });
   it("reconstructs user, assistant, and tool rows", () => {
     const raw = [
       JSON.stringify({

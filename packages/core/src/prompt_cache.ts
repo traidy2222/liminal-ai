@@ -2,7 +2,8 @@
  * OpenRouter prompt-cache breakpoints.
  *
  * Every ReAct round resends the same static prefix (persona + PROTOCOL_CORE +
- * named rules + dynamic suffix). On cache-supporting providers (DeepInfra,
+ * concise policy). Changing capabilities and permissions stay in the runtime tail.
+ * On cache-supporting providers (DeepInfra,
  * GMICloud, NovitaAI, …), tagging the trailing static system message with
  * `cache_control: { type: "ephemeral" }` lets the provider serve cached input
  * tokens at ~1/10× the normal rate. The helper is a no-op when the input has
@@ -16,13 +17,19 @@
  *
  * A second, optional *rolling* breakpoint (AGENT_PROMPT_CACHE_ROLLING, default
  * on) is placed on the last stable conversation message so the cache extends
- * across the growing tool-result history — not just the ~14k static prefix —
+ * across the growing tool-result history, beyond the small static prefix,
  * which is the dominant token cost in long ReAct turns. Up to 2 breakpoints,
  * well under the 4-breakpoint provider limit.
  */
 
 import type { Message } from "./types.js";
 import { effectiveHarnessEnvRaw } from "./harness_effective_env.js";
+
+/** Recomputed state belongs after the reusable history boundary, even in an empty chat. */
+export function isVolatileRuntimeMessage(message: Message): boolean {
+  return message.role === "system" && typeof message.content === "string" &&
+    /^\[(WORKING STATE|EXECUTION STATE|RUNTIME CAPABILITIES|RUNTIME PERMISSIONS|TURN CONTEXT)/.test(message.content);
+}
 
 /** Returns true when prompt caching breakpoints should be added to requests. */
 export function isPromptCacheEnabled(): boolean {
@@ -72,16 +79,19 @@ function wrapWithCacheControl(m: Message): Message | null {
  *
  * If caching is disabled, returns the input unchanged (same reference).
  */
-export function applyPromptCacheBreakpoints(messages: Message[]): Message[] {
+export function applyPromptCacheBreakpoints(messages: Message[], staticPrefixLength?: number): Message[] {
   if (!isPromptCacheEnabled()) return messages;
   if (messages.length === 0) return messages;
 
   // Find the last index of the leading static system block.
   let lastStaticIdx = -1;
-  for (let i = 0; i < messages.length; i++) {
+  const prefixLimit = staticPrefixLength === undefined ? messages.length
+    : Math.max(0, Math.min(messages.length, Math.floor(staticPrefixLength)));
+  for (let i = 0; i < prefixLimit; i++) {
     const m = messages[i];
     if (!m) break;
     if (m.role === "system") {
+      if (isVolatileRuntimeMessage(m)) break;
       lastStaticIdx = i;
       continue;
     }
@@ -103,7 +113,7 @@ export function applyPromptCacheBreakpoints(messages: Message[]): Message[] {
   const target = messages[lastStaticIdx];
   if (!target) return messages;
 
-  // Breakpoint #1 — static prefix (persona + protocol + named rules + suffix).
+  // Breakpoint #1 — stable identity/protocol; runtime state is deliberately excluded.
   const wrappedPrefix = wrapWithCacheControl(target);
   if (!wrappedPrefix) return messages; // multimodal/empty prefix — skip entirely.
 
@@ -121,12 +131,7 @@ export function applyPromptCacheBreakpoints(messages: Message[]): Message[] {
     let rollingIdx = messages.length - 1;
     while (rollingIdx > lastStaticIdx) {
       const m = messages[rollingIdx];
-      if (
-        m &&
-        m.role === "system" &&
-        typeof m.content === "string" &&
-        /^\[(WORKING STATE|EXECUTION STATE)/.test(m.content)
-      ) {
+      if (m && isVolatileRuntimeMessage(m)) {
         rollingIdx -= 1;
         continue;
       }
@@ -155,11 +160,13 @@ export function extractCachedTokens(usage: unknown): number {
     prompt_tokens_details?: { cached_tokens?: number };
     cached_tokens?: number;
     cache_read_input_tokens?: number;
+    prompt_cache_hit_tokens?: number;
   };
   const v =
     u.prompt_tokens_details?.cached_tokens ??
     u.cached_tokens ??
     u.cache_read_input_tokens ??
+    u.prompt_cache_hit_tokens ??
     0;
   return typeof v === "number" && Number.isFinite(v) ? v : 0;
 }

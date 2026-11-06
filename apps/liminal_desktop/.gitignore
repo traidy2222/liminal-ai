@@ -14,7 +14,7 @@ android/
 ios/
 linux/
 macos/
-windows/
+# Windows runner contains app identity and packaging configuration.
 web/
 
 # Federated plugins ship their own native implementations.
@@ -25,5 +25,5 @@ web/
 !packages/**/windows/
 !packages/**/windows/**
 
-# Keep lib/ and pubspec — app runners are local-only until `flutter create`.
+# Other platform runners remain generated locally until `flutter create`.
 .idea/

@@ -50,7 +50,7 @@ export const rememberTool = defineTool({
   description:
     "WHAT: Persist a key-value note that survives across turns and sessions.\n" +
     "WHEN: Important facts, user preferences, project-specific constants, or any info you'll need later.\n" +
-    "NOT WHEN: Ephemeral per-turn state, intermediate calculation results, info already in context, or runtime/persona control dials.\n" +
+    "NOT WHEN: Temporary details already available in chat history, intermediate calculation results, or runtime/persona control dials. Persist information intended for retrieval beyond the available conversation history.\n" +
     "If the user asks to change humor/formality/confidence/verbosity/persona strength, use set_runtime_settings instead.\n" +
     "ARGS: key — short identifier; value — the text to store; type — optional category: fact, experience, entity, belief, reflection, recipe, hypothesis, trajectory; actor_id — optional agent task ID for multi-agent attribution.",
   requiresApproval: false,

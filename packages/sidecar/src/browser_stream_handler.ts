@@ -53,18 +53,20 @@ export function tryHandleBrowserStreamUpgrade(
 
   browserWss.handleUpgrade(req, socket, head, (ws) => {
     void startBrowserScreencast(sessionId).then(() => {
+      if (ws.readyState !== 1) { unsubscribeBrowserScreencast(sessionId, ws); return; }
       subscribeBrowserScreencast(sessionId, ws);
+      let inputQueue = Promise.resolve();
       ws.on("message", (data) => {
         try {
           const raw = JSON.parse(String(data));
-          void handleBrowserStreamInput(sessionId, raw);
+          inputQueue = inputQueue.then(() => handleBrowserStreamInput(sessionId, raw)).catch(() => undefined);
         } catch {
           /* ignore malformed input */
         }
       });
       ws.on("close", () => unsubscribeBrowserScreencast(sessionId, ws));
       ws.on("error", () => unsubscribeBrowserScreencast(sessionId, ws));
-    });
+    }).catch(() => ws.close(1011, "Browser stream unavailable"));
   });
   return true;
 }

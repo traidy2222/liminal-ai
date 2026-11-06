@@ -16,6 +16,8 @@ dist/
 .claude/worktrees/
 
 # Agent-generated test artifacts (written during live sessions)
+__pycache__/
+*.py[cod]
 .agent_rule_stats.json
 marketing-capture/
 assets/marketing/live-capture.log

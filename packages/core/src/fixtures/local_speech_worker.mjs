@@ -1,7 +1,13 @@
 import readline from 'node:readline';
 for await (const line of readline.createInterface({ input: process.stdin })) {
-  const { id, text } = JSON.parse(line);
+  const { id, text, op } = JSON.parse(line);
+  if (op === 'release') { console.log(JSON.stringify({id, released: !process.argv.includes('--bad-release')})); continue; }
+  if (op === 'warmup') { console.log(JSON.stringify({id, ready: true})); continue; }
   if (text === 'hang') continue;
+  if (text === 'delayed') {
+    console.log(JSON.stringify({id,started:true,device:'cuda'}));
+    await new Promise(r => setTimeout(r, 180));
+  }
   if (text === 'crash') process.exit(2);
   if (text === 'invalid') { console.log('invalid json'); continue; }
   const bytes=Buffer.alloc(48);bytes.write('RIFF');bytes.writeUInt32LE(40,4);bytes.write('WAVEfmt ',8);

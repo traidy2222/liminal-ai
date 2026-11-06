@@ -1,4 +1,7 @@
 import { createHash } from "node:crypto";
+import { selectProviderValueEndpoint } from "./provider_value_routing.js";
+import {isLocalProviderUrl} from './provider_setup.js';
+export class ProviderNotConfiguredError extends Error {}
 import { singleModelEnabled, singleModelSlug, currentHarnessPreferences } from "./harness_effective_env.js";
 import {
   DEFAULT_AGENT_API_BASE_URL,
@@ -44,6 +47,8 @@ export interface ProviderRouting {
   ignore?: string[];
   only?: string[];
   max_price?: { prompt?: number; completion?: number };
+  preferred_max_latency?: number;
+  preferred_min_throughput?: number;
   require_parameters?: boolean;
 }
 
@@ -217,6 +222,14 @@ function buildDynamicRouting(
     sort,
     allow_fallbacks: true,
   };
+  // OpenRouter ranks endpoints meeting these soft performance preferences first,
+  // then applies price sorting. Keep plain price/latency modes available explicitly.
+  if (strategy === "adaptive") {
+    const latency = Number(effectiveHarnessEnvRaw("AGENT_PROVIDER_PREFERRED_MAX_LATENCY"));
+    const throughput = Number(effectiveHarnessEnvRaw("AGENT_PROVIDER_PREFERRED_MIN_THROUGHPUT"));
+    if (Number.isFinite(latency) && latency > 0) routing.preferred_max_latency = latency;
+    if (Number.isFinite(throughput) && throughput > 0) routing.preferred_min_throughput = throughput;
+  }
   if (only.length > 0) routing.only = only;
   if (ignore && ignore.length > 0) routing.ignore = ignore;
   if (max_price) routing.max_price = max_price;
@@ -255,6 +268,10 @@ export type OpenRouterChatRequestExtras = {
   user?: string;
 };
 
+export function providerAffinityPolicy(model: string, provider: ProviderRouting | null): string {
+  return createHash("sha256").update(JSON.stringify({ model, provider })).digest("hex").slice(0, 12);
+}
+
 /**
  * Vireon managed-inference proxy already coordinates upstream retries. Strict
  * Stealth-only pins with fallbacks disabled often fail closed with opaque 400s.
@@ -283,6 +300,8 @@ export function buildOpenRouterChatRequestExtras(opts: {
   routeState?: ProviderRouteState;
   sessionId?: string | null;
   retryAttempt?: number;
+  inputTokens?: number;
+  requireTools?: boolean;
 }): OpenRouterChatRequestExtras {
   if (!supportsOpenRouterRequestExtras(opts.baseURL)) return {};
 
@@ -295,6 +314,18 @@ export function buildOpenRouterChatRequestExtras(opts: {
   if (isManagedInferenceBaseUrl(opts.baseURL)) {
     provider = softenProviderRoutingForManagedProxy(provider, opts.modelSlug);
   }
+  if(resolveProviderStrategy()==="adaptive"&&isOpenRouterApiBaseUrl(opts.baseURL)&&!provider?.order?.length&&opts.sessionId){
+    const selected=selectProviderValueEndpoint({model:opts.modelSlug,sessionId:opts.sessionId,
+      inputTokens:opts.inputTokens??8000,requireTools:opts.requireTools,
+      minTps:Number(effectiveHarnessEnvRaw("AGENT_PROVIDER_PREFERRED_MIN_THROUGHPUT"))||0,
+      maxLatencySeconds:Number(effectiveHarnessEnvRaw("AGENT_PROVIDER_PREFERRED_MAX_LATENCY"))||0,
+      only:provider?.only,ignore:provider?.ignore,maxPrice:provider?.max_price,policy:provider});
+    if(selected)provider={...provider,order:[selected.tag],allow_fallbacks:true};
+  }
+  // session_id pins the exact upstream endpoint. Synthesizing provider.order
+  // from a display name disables OpenRouter's native endpoint stickiness and
+  // can send warm requests to another endpoint of the same provider.
+  // Explicit user order or a measured, exact endpoint can override it safely.
 
   const sessionExtras = buildOpenRouterSessionExtras(opts.baseURL, opts.sessionId);
   if (sessionExtras.session_id) {
@@ -321,6 +352,7 @@ const DEFAULT_MODEL = DEFAULT_AGENT_MODEL_SLUG;
 
 export type ProviderApiKeyEnvName =
   | "AGENT_API_KEY"
+  | "AGENT_LOCAL_API_KEY"
   | "OPENROUTER_API_KEY"
   | "KIMCHI_API_KEY"
   | "CASTAI_API_KEY"
@@ -411,13 +443,23 @@ export function resolveProviderConfig(
     ? [overrides.keySource, ...resolveApiKeyOrderForBaseUrl(baseURL)]
     : resolveApiKeyOrderForBaseUrl(baseURL);
   const keyOverrideOnly = overrides?.keySource ? [overrides.keySource] : [];
+  if(isLocalProviderUrl(baseURL)){
+    ensureProviderApiKeysInProcess();
+    const localKey = process.env.AGENT_LOCAL_API_KEY?.trim();
+    // Preserve manual local configurations, but do not carry a cloud key into a
+    // different server merely because the user selected it in first-run setup.
+    const configuredBase = process.env.AGENT_API_BASE_URL?.trim().replace(/\/+$/, "");
+    const legacyKey = configuredBase === baseURL.replace(/\/+$/, "")
+      ? process.env.AGENT_API_KEY?.trim() : undefined;
+    return {apiKey:localKey||legacyKey||'liminal-local',baseURL,model:overrides?.model|| (prefs===undefined?effectiveHarnessEnvRaw('AGENT_MODEL'):resolveHarnessEnvRaw('AGENT_MODEL',prefs))||DEFAULT_MODEL,keySource:localKey||!legacyKey?'AGENT_LOCAL_API_KEY':'AGENT_API_KEY'};
+  }
   const picked = isKimchiApiBaseUrl(baseURL)
     ? pickKimchiApiKey() ?? firstNonEmpty(keyOverrideOnly)
     : isOpenRouterApiBaseUrl(baseURL)
       ? pickOpenRouterApiKey() ?? firstNonEmpty(keyOverrideOnly)
       : firstNonEmpty([...new Set(order)]);
   if (!picked) {
-    throw new Error(
+    throw new ProviderNotConfiguredError(
       isKimchiApiBaseUrl(baseURL)
         ? "No Kimchi API key found. Set KIMCHI_API_KEY (castai_v1_…) in .env or ~/.liminal/.env."
         : isOpenRouterApiBaseUrl(baseURL)

@@ -1,3 +1,4 @@
+import '../widgets/procedure_panel.dart';
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 
@@ -169,6 +170,8 @@ class _HomeScreenState extends State<HomeScreen> {
             tooltip: 'More',
             onSelected: (v) {
               switch (v) {
+                case 'procedures':
+                  if(chatId!=null) showDialog<void>(context:context,builder:(context)=>Dialog(child:SizedBox(width:1040,height:760,child:ProcedurePanel(command:(action,data)=>host.manageProcedures(chatId,action,data)))));
                 case 'settings':
                   context.push(AppRoutes.settings);
                 case 'raw':
@@ -188,6 +191,7 @@ class _HomeScreenState extends State<HomeScreen> {
                       : 'Harness internals ○',
                 ),
               ),
+              if(chatId!=null) const PopupMenuItem(value:'procedures',child:Text('Procedures')),
               const PopupMenuItem(value: 'settings', child: Text('Settings')),
               const PopupMenuItem(value: 'reset', child: Text('Reset session')),
               const PopupMenuItem(
@@ -201,6 +205,10 @@ class _HomeScreenState extends State<HomeScreen> {
       body: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
+          if(chatId!=null) ListenableBuilder(listenable:host.sessionFor(chatId),builder:(context,_) {
+            final activities=host.sessionFor(chatId).procedureActivities;if(activities.isEmpty)return const SizedBox.shrink();final last=activities.last;
+            return ListTile(dense:true,leading:const Icon(Icons.psychology_outlined),title:Text('${last.label}: ${last.name}'),subtitle:Text(last.reason,maxLines:2,overflow:TextOverflow.ellipsis),trailing:const Icon(Icons.chevron_right),onTap:()=>showDialog<void>(context:context,builder:(context)=>Dialog(child:SizedBox(width:1040,height:760,child:ProcedurePanel(command:(action,data)=>host.manageProcedures(chatId,action,data))))));
+          }),
           InboxStrip(
             snapshot: host.inbox,
             onTap: () => _openInboxPanel(host),

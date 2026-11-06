@@ -376,6 +376,8 @@ export function sanitizeTextForTts(raw: string, maxChars: number): string {
 // ─── Synthesis call ──────────────────────────────────────────────────────────
 
 export interface SynthesizeSpeechInput {
+  /** Drop an interrupted short phrase without unloading the local voice model. */
+  keepWorkerOnCancel?: boolean;
   text: string;
   voice?: string;
   model?: string;
@@ -405,7 +407,8 @@ export interface SynthesizeSpeechMultiResult {
 
 export async function synthesizeSpeechMulti(
   input: SynthesizeSpeechInput,
-  config: SpeechSynthesisConfig
+  config: SpeechSynthesisConfig,
+  onSegment?: (segment: SynthesizeSpeechResult) => Promise<void> | void
 ): Promise<SynthesizeSpeechMultiResult> {
   const requestedModel = normalizeTtsModelSlug(input.model ?? config.model);
   const local = isLocalSpeechModel(requestedModel);
@@ -428,13 +431,13 @@ export async function synthesizeSpeechMulti(
   const chunks = splitTextForTtsChunks(sanitized, local ? Math.min(300, config.chunkChars) : config.chunkChars);
   const segments: SynthesizeSpeechResult[] = [];
   for (const chunk of chunks) {
-    segments.push(
-      await synthesizeSpeechSegment(
+    const segment = await synthesizeSpeechSegment(
         { ...input, text: chunk },
         config,
         chunk
-      )
-    );
+      );
+    segments.push(segment);
+    await onSegment?.(segment);
   }
   return {
     segments,
@@ -464,7 +467,7 @@ async function synthesizeSpeechSegment(
   );
   const requestedVoice = (input.voice ?? config.voice).trim() || DEFAULT_TTS_VOICE;
   if (isLocalSpeechModel(requestedModel)) {
-    const audio = await synthesizeLocalSpeech(sanitized, config.timeoutMs, input.signal);
+    const audio = await synthesizeLocalSpeech(sanitized, config.timeoutMs, input.signal, input.keepWorkerOnCancel);
     return {
       audio, mimeType: "audio/wav", charCount: sanitized.length, spokenText: sanitized,
       maxOutputTokens: 0, costUsd: 0, model: LOCAL_WARM_VOICE_MODEL,

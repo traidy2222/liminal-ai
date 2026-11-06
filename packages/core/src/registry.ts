@@ -31,6 +31,12 @@ function compareToolNames(a: string, b: string): number {
 
 export class ToolRegistry {
   private readonly tools = new Map<string, ToolDefinition>();
+  private suppressedTools = new Set<string>();
+
+  /** Hide capabilities without losing their definitions or bypassing dispatch checks. */
+  setSuppressedTools(names: readonly string[]): void {
+    this.suppressedTools = new Set(names);
+  }
   /** When true, only tools in activeToolNames are sent to the model API. */
   private lazyToolLoading = false;
   private readonly activeToolNames = new Set<string>();
@@ -64,7 +70,7 @@ export class ToolRegistry {
   }
 
   get(name: string): ToolDefinition | undefined {
-    return this.tools.get(name);
+    return this.suppressedTools.has(name) ? undefined : this.tools.get(name);
   }
 
   getIntentDedupArgs(name: string): string[] | undefined {
@@ -72,16 +78,16 @@ export class ToolRegistry {
   }
 
   has(name: string): boolean {
-    return this.tools.has(name);
+    return !this.suppressedTools.has(name) && this.tools.has(name);
   }
 
   getAll(): ToolDefinition[] {
-    return [...this.tools.values()];
+    return [...this.tools.values()].filter(tool => !this.suppressedTools.has(tool.name));
   }
 
   /** Tool names currently registered (stable order). */
   getToolNames(): string[] {
-    return [...this.tools.keys()].sort(compareToolNames);
+    return [...this.tools.keys()].filter(name => !this.suppressedTools.has(name)).sort(compareToolNames);
   }
 
   /** When lazy loading is off, all registered tools are active. */
@@ -117,7 +123,7 @@ export class ToolRegistry {
   getActiveFamilySummary(limit = 6): Array<{ family: string; active: number; total: number }> {
     const counts = new Map<string, { active: number; total: number }>();
     for (const [tool, family] of this.toolFamilyByName.entries()) {
-      if (!this.tools.has(tool)) continue;
+      if (!this.has(tool)) continue;
       const row = counts.get(family) ?? { active: 0, total: 0 };
       row.total += 1;
       if (this.isActive(tool)) row.active += 1;
@@ -135,6 +141,7 @@ export class ToolRegistry {
    * Child active set = intersection(parent active, child registered names).
    */
   copyLazyPolicyFromParent(parent: ToolRegistry): void {
+    this.suppressedTools = new Set(parent.suppressedTools);
     this.lazyToolLoading = parent.lazyToolLoading;
     this.copyToolFamiliesFrom(parent);
     if (!parent.lazyToolLoading) {
@@ -147,6 +154,7 @@ export class ToolRegistry {
   }
 
   isActive(name: string): boolean {
+    if (!this.has(name)) return false;
     if (!this.lazyToolLoading) return true;
     return this.activeToolNames.has(name);
   }
@@ -154,7 +162,7 @@ export class ToolRegistry {
   /** Names of tools currently exposed to the model (lazy) or all (non-lazy). */
   getActiveToolNames(): string[] {
     if (!this.lazyToolLoading) return this.getToolNames();
-    return [...this.activeToolNames].sort(compareToolNames);
+    return [...this.activeToolNames].filter(name => this.has(name)).sort(compareToolNames);
   }
 
   /** Replace active set (lazy mode only). */
@@ -172,7 +180,7 @@ export class ToolRegistry {
     const want = new Set(expandWorkspaceToolFamilies(familyIds));
     const toolNames: string[] = [];
     for (const [tool, family] of this.toolFamilyByName) {
-      if (want.has(family.toLowerCase()) && this.tools.has(tool)) {
+      if (want.has(family.toLowerCase()) && this.has(tool)) {
         toolNames.push(tool);
       }
     }
@@ -184,7 +192,7 @@ export class ToolRegistry {
     if (!this.lazyToolLoading) return [];
     const newly: string[] = [];
     for (const n of names) {
-      if (!this.tools.has(n)) continue;
+      if (!this.has(n)) continue;
       if (!this.activeToolNames.has(n)) {
         this.activeToolNames.add(n);
         newly.push(n);
@@ -196,7 +204,7 @@ export class ToolRegistry {
   toOpenAIFormat(filter?: (name: string) => boolean): OpenAI.Chat.Completions.ChatCompletionTool[] {
     const defs = !this.lazyToolLoading
       ? this.getAll()
-      : [...this.activeToolNames]
+      : this.getActiveToolNames()
           .sort(compareToolNames)
           .map((n) => this.tools.get(n))
           .filter((t): t is ToolDefinition => t !== undefined);

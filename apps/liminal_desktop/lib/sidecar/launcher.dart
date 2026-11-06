@@ -21,10 +21,12 @@ class SidecarProcess {
     required this.token,
     required this.pid,
     this.process,
+    this.detached = false,
   });
 
   /// Non-null when this UI spawned the sidecar (kill on quit).
   final Process? process;
+  final bool detached;
   final int port;
   final String token;
   final int pid;
@@ -34,9 +36,15 @@ class SidecarProcess {
   Future<void> kill() async {
     final proc = process;
     if (proc == null) return;
+    if (detached) {
+      // Windows detachedWithStdio has no exitCode future. Kill only this owned
+      // process tree so warm speech workers cannot outlive the desktop.
+      await Process.run('taskkill', ['/PID', '$pid', '/T', '/F']);
+      return;
+    }
     if (await proc.exitCode.timeout(Duration.zero, onTimeout: () => -1) == -1) {
       proc.kill(ProcessSignal.sigterm);
-      await proc.exitCode.timeout(const Duration(seconds:5));
+      await proc.exitCode.timeout(const Duration(seconds: 5));
     }
   }
 }
@@ -64,13 +72,18 @@ String? _resolveBundledPath(String exeDir, String? raw) {
 bool isPortableBundleRootComplete(String repoRoot) {
   return File(p.join(repoRoot, 'package.json')).existsSync() &&
       Directory(p.join(repoRoot, 'node_modules')).existsSync() &&
-      File(p.join(repoRoot, 'packages', 'sidecar', 'dist', 'index.js')).existsSync();
+      File(
+        p.join(repoRoot, 'packages', 'sidecar', 'dist', 'index.js'),
+      ).existsSync();
 }
 
 SidecarLocations? _locationsIfComplete(String scriptPath, String repoRoot) {
   if (!File(scriptPath).existsSync()) return null;
   if (!isPortableBundleRootComplete(repoRoot)) return null;
-  return SidecarLocations(scriptPath: p.normalize(scriptPath), repoRoot: p.normalize(repoRoot));
+  return SidecarLocations(
+    scriptPath: p.normalize(scriptPath),
+    repoRoot: p.normalize(repoRoot),
+  );
 }
 
 /// Read `liminald/bundle.json` written by the desktop bundle scripts.
@@ -78,8 +91,12 @@ SidecarLocations? readBundledLocations(String exeDir) {
   final manifest = File(p.join(exeDir, 'liminald', 'bundle.json'));
   if (!manifest.existsSync()) return null;
   try {
-    final json = jsonDecode(manifest.readAsStringSync()) as Map<String, dynamic>;
-    final script = _resolveBundledPath(exeDir, json['sidecarScript'] as String?);
+    final json =
+        jsonDecode(manifest.readAsStringSync()) as Map<String, dynamic>;
+    final script = _resolveBundledPath(
+      exeDir,
+      json['sidecarScript'] as String?,
+    );
     final root = _resolveBundledPath(exeDir, json['repoRoot'] as String?);
     if (script == null || root == null) return null;
     return _locationsIfComplete(script, root);
@@ -91,14 +108,20 @@ SidecarLocations? readBundledLocations(String exeDir) {
 SidecarLocations? _locationsFromRepoRoot(String root) {
   final script = p.join(root, 'packages', 'sidecar', 'dist', 'index.js');
   if (!File(script).existsSync()) return null;
-  return SidecarLocations(scriptPath: p.normalize(script), repoRoot: p.normalize(root));
+  return SidecarLocations(
+    scriptPath: p.normalize(script),
+    repoRoot: p.normalize(root),
+  );
 }
 
 /// Resolve the compiled sidecar entry and its repo/bundle root.
 SidecarLocations? resolveSidecarLocations({String? repoRoot}) {
   final fromEnvScript = Platform.environment['LIMINALD_SCRIPT']?.trim();
-  if (fromEnvScript != null && fromEnvScript.isNotEmpty && File(fromEnvScript).existsSync()) {
-    final root = Platform.environment['LIMINAL_REPO_ROOT']?.trim() ??
+  if (fromEnvScript != null &&
+      fromEnvScript.isNotEmpty &&
+      File(fromEnvScript).existsSync()) {
+    final root =
+        Platform.environment['LIMINAL_REPO_ROOT']?.trim() ??
         p.normalize(p.join(p.dirname(fromEnvScript), '..', '..', '..'));
     return SidecarLocations(scriptPath: fromEnvScript, repoRoot: root);
   }
@@ -115,7 +138,15 @@ SidecarLocations? resolveSidecarLocations({String? repoRoot}) {
     final bundled = readBundledLocations(exeDir);
     if (bundled != null) return bundled;
 
-    final bundledScript = p.join(exeDir, 'liminald', 'repo', 'packages', 'sidecar', 'dist', 'index.js');
+    final bundledScript = p.join(
+      exeDir,
+      'liminald',
+      'repo',
+      'packages',
+      'sidecar',
+      'dist',
+      'index.js',
+    );
     final bundledRoot = p.join(exeDir, 'liminald', 'repo');
     final nextToExe = _locationsIfComplete(bundledScript, bundledRoot);
     if (nextToExe != null) return nextToExe;
@@ -170,7 +201,8 @@ SidecarReadyLine? parseReadyLine(String line) {
   const prefix = 'LIMINALD_READY ';
   if (!line.startsWith(prefix)) return null;
   try {
-    final json = jsonDecode(line.substring(prefix.length)) as Map<String, dynamic>;
+    final json =
+        jsonDecode(line.substring(prefix.length)) as Map<String, dynamic>;
     return SidecarReadyLine(
       port: (json['port'] as num).toInt(),
       protocolVersion: (json['protocolVersion'] as num?)?.toInt() ?? 1,
@@ -192,11 +224,12 @@ Future<void> killStaleSidecarFromHandshake() async {
   if (existing == null) return;
   try {
     if (Platform.isWindows) {
-      await Process.run(
-        'taskkill',
-        ['/PID', '${existing.pid}', '/T', '/F'],
-        runInShell: true,
-      );
+      await Process.run('taskkill', [
+        '/PID',
+        '${existing.pid}',
+        '/T',
+        '/F',
+      ], runInShell: true);
     } else {
       await Process.run('kill', ['-TERM', '${existing.pid}']);
     }
@@ -254,33 +287,55 @@ Future<SidecarProcess> launchSidecar({
     [locations.scriptPath],
     workingDirectory: locations.repoRoot,
     environment: env,
+    // Keep handshake pipes without allocating a Windows console host. The
+    // sidecar also watches LIMINAL_DESKTOP_PARENT_PID for unexpected UI exits.
+    mode: Platform.isWindows
+        ? ProcessStartMode.detachedWithStdio
+        : ProcessStartMode.normal,
   );
 
   final stdoutSub = process.stdout
       .transform(utf8.decoder)
       .transform(const LineSplitter())
       .listen((line) {
-    final ready = parseReadyLine(line.trim());
-    if (ready != null && !completer.isCompleted) {
-      completer.complete(ready);
-    }
-  });
+        final ready = parseReadyLine(line.trim());
+        if (ready != null && !completer.isCompleted) {
+          completer.complete(ready);
+        }
+      });
 
   process.stderr.transform(utf8.decoder).listen((chunk) {
     stderrBuffer.write(chunk);
-  });
-
-  process.exitCode.then((code) {
-    if (!completer.isCompleted && code != 0) {
-      final detail = stderrBuffer.toString().trim();
-      completer.completeError(
-        StateError(
-          'liminald exited with code $code before ready.'
-          '${detail.isNotEmpty ? "\nliminald stderr:\n$detail" : ""}',
-        ),
-      );
+    if (stderrBuffer.length > 32768) {
+      final tail = stderrBuffer.toString();
+      stderrBuffer.clear();
+      stderrBuffer.write(tail.substring(tail.length - 16384));
     }
   });
+
+  if (Platform.isWindows) {
+    stdoutSub.onDone(() {
+      if (!completer.isCompleted) {
+        completer.completeError(
+          StateError(
+            'liminald closed its startup pipe before ready.\n${stderrBuffer.toString()}',
+          ),
+        );
+      }
+    });
+  } else {
+    process.exitCode.then((code) {
+      if (!completer.isCompleted && code != 0) {
+        final detail = stderrBuffer.toString().trim();
+        completer.completeError(
+          StateError(
+            'liminald exited with code $code before ready.'
+            '${detail.isNotEmpty ? "\nliminald stderr:\n$detail" : ""}',
+          ),
+        );
+      }
+    });
+  }
 
   SidecarReadyLine ready;
   try {
@@ -312,5 +367,6 @@ Future<SidecarProcess> launchSidecar({
     port: ready.port,
     token: token,
     pid: handshake?.pid ?? process.pid,
+    detached: Platform.isWindows,
   );
 }

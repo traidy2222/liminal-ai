@@ -7,6 +7,8 @@ import 'package:just_audio/just_audio.dart';
 import 'package:path_provider/path_provider.dart';
 
 import 'tts_clip.dart';
+import 'voice_timing.dart';
+import 'wav_pcm.dart';
 
 class SpeechQueueItem {
   SpeechQueueItem({
@@ -22,13 +24,20 @@ class SpeechQueueItem {
 
 /// TTS playback queue — mirrors web `useSpeechOutput` (fetch clip, then play).
 class SpeechOutput extends ChangeNotifier {
-  SpeechOutput({AudioPlayer? player}) : _player = player ?? AudioPlayer() {
+  SpeechOutput({AudioPlayer? player, bool? gapless}) : _player = player ?? AudioPlayer(), _canNativeWarm = player == null && !kIsWeb, _gapless = gapless ?? (player == null && !kIsWeb) {
     unawaited(_player.setVolume(1));
   }
 
   static const micBlockAfterTtsMs = 1200;
 
   final AudioPlayer _player;
+  final bool _canNativeWarm;
+  final bool _gapless;
+  Future<bool>? _nativeWarmTask;
+  ConcatenatingAudioSource? _playlist;
+  final List<SpeechQueueItem> _playlistItems = [];
+  final Map<String, Future<AudioSource>> _prepared = {};
+  Future<void> _appendChain = Future.value();
   final List<SpeechQueueItem> _queue = [];
   bool _playing = false;
   bool _unlocked = false;
@@ -52,6 +61,8 @@ class SpeechOutput extends ChangeNotifier {
 
   /// Fired when post-playback mic cooldown ends — dictation can re-arm VAD.
   void Function()? onMicCaptureUnblocked;
+  /// Cancel not-yet-delivered server chunks as well as local playback.
+  void Function()? onInterrupted;
 
   void setClipFetcher(TtsClipFetcher? fetcher) {
     _clipFetcher = fetcher;
@@ -59,6 +70,7 @@ class SpeechOutput extends ChangeNotifier {
 
   void setTtsConfigured(bool value) {
     _ttsConfigured = value;
+    if (value && _canNativeWarm) unawaited(unlockAudio());
   }
 
   void setPauseWhenCapture(bool value) {
@@ -111,6 +123,7 @@ class SpeechOutput extends ChangeNotifier {
     // Native desktop has no browser autoplay gate — data: URIs also fail on
     // just_audio_media_kit/Windows, which blocked all TTS until "unlock" passed.
     if (!kIsWeb) {
+      if (_canNativeWarm) return _nativeWarmTask ??= _warmNativeAudio();
       _unlocked = true;
       playError = null;
       notifyListeners();
@@ -137,6 +150,26 @@ class SpeechOutput extends ChangeNotifier {
     }
   }
 
+  Future<bool> _warmNativeAudio() async {
+    final generation = _playGen;
+    try {
+      final dir = await getTemporaryDirectory();
+      final file = File('${dir.path}/liminal_player_warmup.wav');
+      await file.writeAsBytes(buildWavFromPcm16(Uint8List(960), sampleRate: 24000));
+      if (generation != _playGen) return true;
+      await _player.setAudioSource(AudioSource.file(file.path)).timeout(const Duration(seconds: 3));
+      await _waitUntilReady();
+      if (generation != _playGen) return true;
+      unawaited(_player.play().catchError((Object _) {}));
+      await Future<void>.delayed(const Duration(milliseconds: 80));
+      if (generation == _playGen) await _player.stop();
+      voiceTiming('player_warmed');
+    } catch (_) {
+      // Priming is best effort: real clips retain their normal error handling.
+    } finally { _unlocked = true; }
+    return true;
+  }
+
   static final _silentWavBytes = Uint8List.fromList([
     0x52, 0x49, 0x46, 0x46, 0x24, 0x00, 0x00, 0x00, 0x57, 0x41, 0x56, 0x45,
     0x66, 0x6d, 0x74, 0x20, 0x10, 0x00, 0x00, 0x00, 0x01, 0x00, 0x01, 0x00,
@@ -149,14 +182,16 @@ class SpeechOutput extends ChangeNotifier {
     queueLength = _queue.length;
     _syncPlaybackHold();
     notifyListeners();
+    if (_playing && _playlist != null) _appendQueued(_playGen);
     if (!_pauseWhenCapture && !_playing) {
       unawaited(unlockAudio().then((_) {
-        if (!_pauseWhenCapture) unawaited(_playNext());
+        if (!_pauseWhenCapture && !_playing) unawaited(_playNext());
       }));
     }
   }
 
   void interrupt() {
+    onInterrupted?.call();
     _queue.clear();
     queueLength = 0;
     _stopActivePlayback();
@@ -172,6 +207,10 @@ class SpeechOutput extends ChangeNotifier {
     _playGen++;
     _cancelPlaybackWait?.call();
     _playing = false;
+    _playlist = null;
+    _playlistItems.clear();
+    _prepared.clear();
+    _appendChain = Future.value();
     isSpeaking = false;
     unawaited(_player.stop());
     _syncPlaybackHold();
@@ -207,6 +246,7 @@ class SpeechOutput extends ChangeNotifier {
     notifyListeners();
     try {
       await _loadClip(item, gen);
+      voiceTiming('playback_ready', {'clipId': item.clipId});
       if (gen != _playGen) return;
       await _playUntilCompleted(gen);
       if (gen != _playGen) return;
@@ -216,6 +256,9 @@ class SpeechOutput extends ChangeNotifier {
       }
     } finally {
       if (gen == _playGen) {
+        _playlist = null;
+        _playlistItems.clear();
+        if (_queue.isEmpty) _prepared.clear();
         _playing = false;
         isSpeaking = false;
         _micBlockUntil =
@@ -248,13 +291,33 @@ class SpeechOutput extends ChangeNotifier {
     final completed = Completer<void>();
     void cancel() { if (!completed.isCompleted) completed.complete(); }
     _cancelPlaybackWait = cancel;
-    final deadline = Timer(maxWait, () {
+    void timeout() {
       if (!completed.isCompleted) {
         completed.completeError(TimeoutException('Speech playback timed out.'));
       }
-    });
+    }
+    var deadline = Timer(maxWait, timeout);
     StreamSubscription<ProcessingState>? subscription;
+    StreamSubscription<Duration>? positionSubscription;
+    StreamSubscription<int?>? indexSubscription;
+    StreamSubscription<Duration?>? durationSubscription;
     try {
+      if (_gapless) {
+        void rearm() {
+          deadline.cancel();
+          final remaining = (_player.duration ?? const Duration(seconds: 90)) - _player.position;
+          deadline = Timer((remaining > Duration.zero ? remaining : Duration.zero) + const Duration(milliseconds: 750), timeout);
+        }
+        indexSubscription = _player.currentIndexStream.listen((index) {
+          rearm();
+          if (index != null && index >= 0 && index < _playlistItems.length) {
+            lastSpoken = _playlistItems[index].text;
+            voiceTiming('playback_segment', {'clipId': _playlistItems[index].clipId, 'index': index});
+            notifyListeners();
+          }
+        });
+        durationSubscription = _player.durationStream.listen((_) => rearm());
+      }
       // Subscribe before play: media-kit can return after startup, whereas other
       // backends return at completion. Neither may release the hold too early.
       subscription = _player.processingStateStream.listen((state) {
@@ -262,12 +325,25 @@ class SpeechOutput extends ChangeNotifier {
       }, onError: (Object error, StackTrace stack) {
         if (!completed.isCompleted) completed.completeError(error, stack);
       });
+      if (voiceTimingEnabled) {
+        var reported = false;
+        positionSubscription = _player.positionStream.listen((position) {
+          if (!reported && position > Duration.zero && gen == _playGen) {
+            reported = true;
+            voiceTiming('playback_started', {'positionMs': position.inMilliseconds});
+          }
+        });
+      }
+      voiceTiming('play_requested');
       unawaited(Future<void>.sync(_player.play).catchError((Object error, StackTrace stack) {
         if (!completed.isCompleted) completed.completeError(error, stack);
       }));
       await completed.future;
     } finally {
       deadline.cancel();
+      unawaited(positionSubscription?.cancel());
+      unawaited(indexSubscription?.cancel());
+      unawaited(durationSubscription?.cancel());
       if (identical(_cancelPlaybackWait, cancel)) _cancelPlaybackWait = null;
       // Detach immediately; asynchronous stream cleanup must not gate the mic.
       final cleanup = subscription?.cancel();
@@ -281,10 +357,53 @@ class SpeechOutput extends ChangeNotifier {
   }
 
   Future<void> _loadClip(SpeechQueueItem item, int gen) async {
+    final source = await _prepareClip(item);
+    if (gen != _playGen) return;
+    if (_gapless) {
+      final playlist = ConcatenatingAudioSource(useLazyPreparation: false, children: [source]);
+      _playlist = playlist;
+      _playlistItems.add(item);
+      await _player.setAudioSource(playlist).timeout(const Duration(seconds: 20));
+      _appendQueued(gen);
+    } else {
+      await _player.setAudioSource(source).timeout(const Duration(seconds: 20));
+    }
+    if (gen != _playGen) return;
+    await _waitUntilReady();
+    final duration = _player.duration;
+    if (duration == null || duration <= Duration.zero) throw const HttpException('TTS clip has zero duration');
+  }
+
+  void _appendQueued(int gen) {
+    final playlist = _playlist;
+    if (playlist == null) return;
+    _appendChain = _appendChain.catchError((Object _) {}).then((_) async {
+      while (gen == _playGen && identical(playlist, _playlist) && _queue.isNotEmpty) {
+        final item = _queue.first;
+        try {
+          final source = await _prepareClip(item);
+          if (gen != _playGen || !identical(playlist, _playlist) || _player.processingState == ProcessingState.completed) return;
+          await playlist.add(source);
+          if (gen != _playGen) return;
+          _playlistItems.add(item);
+        } catch (error) {
+          if (gen != _playGen) return;
+          playError = error.toString();
+        }
+        if (_queue.isNotEmpty && identical(_queue.first, item)) _queue.removeAt(0);
+        queueLength = _queue.length;
+        notifyListeners();
+      }
+    });
+  }
+
+  Future<AudioSource> _prepareClip(SpeechQueueItem item) =>
+      _prepared.putIfAbsent(item.clipId, () => _prepareClipBytes(item));
+
+  Future<AudioSource> _prepareClipBytes(SpeechQueueItem item) async {
     final fetcher = _clipFetcher;
     if (fetcher != null) {
       final clip = await fetcher(item.audioUrl).timeout(const Duration(seconds: 30));
-      if (gen != _playGen) return;
       if (clip.bytes.isEmpty) {
         throw const HttpException('TTS clip is empty');
       }
@@ -292,17 +411,10 @@ class SpeechOutput extends ChangeNotifier {
       final dir = await getTemporaryDirectory();
       final safeId = item.clipId.replaceAll(RegExp(r'[^a-f0-9]'), '');
       final file = File('${dir.path}/liminal_tts_$safeId.$ext');
-      await file.writeAsBytes(clip.bytes, flush: true);
-      if (gen != _playGen) return;
-      await _player.setAudioSource(AudioSource.file(file.path)).timeout(const Duration(seconds: 20));
+      await file.writeAsBytes(clip.bytes);
+      return AudioSource.file(file.path);
     } else {
-      await _player.setUrl(item.audioUrl).timeout(const Duration(seconds: 20));
-    }
-    if (gen != _playGen) return;
-    await _waitUntilReady();
-    final duration = _player.duration;
-    if (duration == null || duration <= Duration.zero) {
-      throw const HttpException('TTS clip has zero duration');
+      return AudioSource.uri(Uri.parse(item.audioUrl));
     }
   }
 

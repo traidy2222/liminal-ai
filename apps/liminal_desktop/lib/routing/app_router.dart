@@ -7,7 +7,7 @@ import '../ui/screens/boot_screens.dart';
 import '../ui/screens/home_screen.dart';
 import '../ui/screens/persona_bootstrap_screen.dart';
 import '../ui/screens/settings_screen.dart';
-import '../ui/screens/setup_screen.dart';
+import '../ui/screens/provider_setup_screen.dart';
 import '../ui/screens/integrations_screen.dart';
 import '../ui/screens/vireon_hub_screen.dart';
 import '../ui/theme/liminal_theme_extension.dart';
@@ -101,7 +101,7 @@ GoRouter createAppRouter(AppController controller) {
       ),
       GoRoute(
         path: AppRoutes.settings,
-        builder: (_, __) => const SettingsScreen(),
+        builder: (_, state) => SettingsScreen(initialSection: state.uri.queryParameters['section'] ?? 'models_api'),
       ),
       GoRoute(
         path: AppRoutes.integrations,

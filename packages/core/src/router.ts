@@ -2,6 +2,9 @@
  * Small-model routing + JSON chat completions for distill / rewrite / critic.
  */
 import OpenAI from "openai";
+import {isLocalProviderUrl} from './provider_setup.js';
+import { normalizeCacheUsage, recordCacheUsage } from "./cache_telemetry.js";
+import { resolveCurrentChatId } from "./chat_context.js";
 import type { ChatCompletionMessageParam } from "openai/resources/chat/completions.js";
 import { withProviderRequestSpacing } from "./provider_request_gate.js";
 import { effectiveHarnessEnvRaw, singleModelEnabled, singleModelSlug } from "./harness_effective_env.js";
@@ -27,6 +30,7 @@ import type { ProviderRouteState } from "./provider_route_state.js";
 import type { Message } from "./types.js";
 
 export function getFastModelSlug(fallback: string): string {
+  if(isLocalProviderUrl(effectiveHarnessEnvRaw('AGENT_API_BASE_URL')??''))return fallback;
   if (singleModelEnabled()) return singleModelSlug(fallback);
   const m = effectiveHarnessEnvRaw("AGENT_FAST_MODEL")?.trim();
   return m && m.length > 0 ? m : fallback;
@@ -231,6 +235,9 @@ export async function completeChatJson(
           )
       );
       const raw = res.choices[0]?.message?.content ?? "";
+      void recordCacheUsage({ ts: new Date().toISOString(), chatId: opts.sessionId ?? opts.userId ?? resolveCurrentChatId() ?? "auxiliary",
+        scope: "auxiliary", model, provider: typeof (res as any).provider === "string" ? (res as any).provider : null,
+        requestId: res.id ?? null, ...normalizeCacheUsage(res.usage) }).catch(() => undefined);
       if (!raw.trim()) {
         if (useJsonFormat) {
           return attemptWithModel(model, isFast, retryAttempt, false);

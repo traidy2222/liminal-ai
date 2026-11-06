@@ -79,6 +79,8 @@ else
   (cd "$BUNDLE_REPO" && npm install --omit=dev --no-audit --no-fund)
 fi
 
+node "$SCRIPT_DIR/verify-procedure-native-runtime.mjs" "$BUNDLE_REPO"
+
 node "$SCRIPT_DIR/patch-node-pty.mjs" "$BUNDLE_REPO/node_modules/node-pty"
 
 if [[ ! -f "$BUNDLE_REPO/packages/sidecar/dist/index.js" ]]; then

@@ -121,9 +121,9 @@ export function fallbackReasoningBudget(
     case "research":
       return {
         reasoningEffort: defaultEffort,
-        thinkDepth: "brief",
-        toolFirstBias: true,
-        reasoningWordBudget: 140,
+        thinkDepth: "standard",
+        toolFirstBias: false,
+        reasoningWordBudget: 350,
         essayRisk: false,
         source: "fallback",
       };
@@ -267,6 +267,10 @@ export function tightenReasoningBudgetForUserMessage(
 
   if (!wantsShip && !essayTrap && !wantsResearch && !wantsBuild) return budget;
 
+  // Freshness requires evidence, not a build-style rush-to-execute clamp.
+  // Retain room to interpret claims and revise searches after new observations.
+  if (wantsResearch && !wantsShip && !wantsBuild) return { ...budget, toolFirstBias: false };
+
   const wordCap = essayTrap ? 90 : wantsResearch ? 140 : wantsBuild ? 130 : 120;
   const effort: ReasoningEffort =
     essayTrap && budget.reasoningEffort === "xhigh"
@@ -308,16 +312,9 @@ export function buildOpenRouterReasoningParam(
   if (budget.reasoningEffort === "none") {
     return { reasoning: { effort: "none" } };
   }
-  const reasoning: { effort: ReasoningEffort; max_tokens?: number } = {
-    effort: budget.reasoningEffort,
-  };
-  if (budget.toolFirstBias || budget.essayRisk) {
-    reasoning.max_tokens = Math.max(
-      192,
-      Math.min(1536, Math.round(budget.reasoningWordBudget * 10))
-    );
-  }
-  return { reasoning };
+  // OpenRouter rejects requests containing both effort and max_tokens.
+  // Keep the task's selected effort; the completion cap remains separate.
+  return { reasoning: { effort: budget.reasoningEffort } };
 }
 
 export function buildReasoningBudgetInjection(
@@ -340,7 +337,7 @@ export function buildReasoningBudgetInjection(
   const toolNote = budget.toolFirstBias
     ? "Tool-first HARD LIMIT: ≤" +
       String(budget.reasoningWordBudget) +
-      " words total in think()+reason() combined, then you MUST call tools (web_search/web_fetch for research; write_file/run_shell for builds). " +
+      " words total in think()+reason() combined, then use the available task tools. " +
       "Do not narrate planned tool calls in think/reason — execute them. One feasibility sentence max, then tools."
     : "Use tools for implementation; do not substitute think()/reason() for execution.";
 

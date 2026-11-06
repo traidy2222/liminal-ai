@@ -129,7 +129,7 @@ async function launchDesktop(exe, launchStartedAt) {
   await killStaleSidecar();
   await killExistingDesktop();
   console.log(`[desktop] Launching ${exe} (LIMINALD_ATTACH=1 — sidecar survives reconnect)`);
-  const child = spawn(exe, [], {
+  const child = spawn(exe, process.env.MARKETING_CAPTURE_NO_FOCUS === "1" ? ["--liminal-background"] : [], {
     detached: true,
     stdio: "ignore",
     cwd: path.dirname(exe),

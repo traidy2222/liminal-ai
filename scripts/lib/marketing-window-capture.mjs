@@ -196,7 +196,7 @@ export async function ensureWindowVisibleForCapture(opts = {}) {
   if (process.platform !== "win32") return;
   const win = await resolveDesktopWindow();
   if (!win) return;
-  const activate = opts.activate ?? !NO_FOCUS;
+  const activate = opts.activate ?? process.env.MARKETING_CAPTURE_NO_FOCUS !== "1";
   const ps = `
 Add-Type @"
 using System;
@@ -223,7 +223,7 @@ if (${activate ? "$true" : "$false"}) {
  * @param {string} [_title]
  */
 export async function focusWindow(_title = DEFAULT_TITLE) {
-  if (process.platform !== "win32" || NO_FOCUS) return;
+  if (process.platform !== "win32" || process.env.MARKETING_CAPTURE_NO_FOCUS === "1") return;
   await ensureWindowVisibleForCapture({ activate: true });
 }
 
@@ -237,7 +237,7 @@ export async function captureWindowPng(outPath, _title = DEFAULT_TITLE) {
   if (!win) {
     throw new Error(`Window not found: no capturable HWND for ${PROCESS_NAME}`);
   }
-  await ensureWindowVisibleForCapture({ activate: !NO_FOCUS });
+  await ensureWindowVisibleForCapture({ activate: process.env.MARKETING_CAPTURE_NO_FOCUS !== "1" });
 
   // gdigrab when visible often tracks Flutter GPU updates better than PrintWindow.
   try {

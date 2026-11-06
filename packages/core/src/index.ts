@@ -146,6 +146,7 @@ export {
   readChatMetadata,
   writeChatMetadata,
   touchChatMetadata,
+  updateChatMetadata,
   createChatMetadata,
   listChats,
   listOrphanChatIds,
@@ -154,6 +155,10 @@ export {
   scratchWorkspaceRoot,
 } from "./chat_metadata.js";
 export type { ChatMetadata, ChatKind, ChatWorkspaceMode } from "./chat_metadata.js";
+export { ChatAutoTitler, autoTitleAfterTurn } from "./chat_auto_title.js";
+export { normalizeCacheUsage, summarizeCacheUsage, recordCacheUsage, readCacheStats } from "./cache_telemetry.js";
+export { browserFirstSuppressedTools } from "./browser_first_policy.js";
+export type { CacheUsageRecord } from "./cache_telemetry.js";
 export { readLastActiveChatId, saveLastActiveChatId } from "./active_chat_state.js";
 export type { ActiveChatState } from "./active_chat_state.js";
 export { resolveChatBoot } from "./chat_boot.js";
@@ -440,7 +445,6 @@ export {
   isBriefResearchAsk,
   needsResearchContinuation,
   researchCoverageLooksThin,
-  RESEARCH_GATE_SUBSTANTIVE_REPLY_CHARS,
 } from "./research_continuation.js";
 export { buildCodingTurnInjection } from "./coding_autonomy.js";
 export {
@@ -1319,6 +1323,8 @@ export {
   listOAuthAccounts,
   deleteOAuthBundle,
   sanitizeOAuthAccountId,
+    protectLocalSecret,
+    unprotectLocalSecret,
 } from "./oauth_store.js";
 export type { OAuthTokenBundle } from "./oauth_store.js";
 export {
@@ -1331,6 +1337,8 @@ export {
   listGoogleOAuthAccounts,
 } from "./oauth_broker.js";
 export { loadHarnessEnvFiles } from "./load_harness_env.js";
+export {resolveProviderForStartup} from './inference_provider.js';
+export {UNCONFIGURED_PROVIDER_KEY,providerConnectionConfigured,isLocalProviderUrl,normalizeProviderSetup,discoverProviderModels,validateProviderSetup,persistValidatedProvider,type ProviderSetupInput} from './provider_setup.js';
 export { countOAuthAccountFiles, oauthDecryptHint } from "./oauth_diagnostics.js";
 export {
   oauthMailboxQualityScore,
@@ -1642,4 +1650,13 @@ export { decodeKnownBinaryHeader } from "./binary_format_header.js";
 export { readArtifactJsonView, selectArtifactJsonView, isValidArtifactHash, MAX_ARTIFACT_JSON_VIEW_BYTES } from "./artifact_json_view.js";
 export type { ArtifactJsonViewOptions } from "./artifact_json_view.js";
 export { observeNativeBinaryHeader } from "./native_binary_header.js";
+export { resolveWakeVoiceConfig } from "./wake_voice.js";
+export { VoiceTextStream } from "./voice_text_stream.js";
+export type { WakeVoiceConfig } from "./wake_voice.js";
 export type { NativeBinaryHeaderObservation, NativeEntryObservation } from "./native_binary_header.js";
+
+export * from "./procedural_memory/model.js";
+export * from "./procedural_memory/store.js";
+export * from "./procedural_memory/runtime.js";
+export * from "./procedural_memory/workspace.js";
+export * from "./procedural_memory/validation.js";

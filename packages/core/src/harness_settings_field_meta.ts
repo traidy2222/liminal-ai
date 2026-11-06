@@ -418,6 +418,24 @@ const _META_RAW: Record<string, HarnessSettingsFieldMeta> = {
     description: "Harness environment toggle for Dictation Audio Cue. See docs/configuration.md (harness).",
     valueKind: "string",
   },
+  "AGENT_WAKE_WORD_ENABLED": {
+    tabId: "session_ui", subgroupId: "voice",
+    label: "Always-on wake word",
+    description: "Desktop: listen locally while Liminal is open, including minimized. Wake requests go to Mission Control. Enable spoken replies to hear answers. Requires installed local Whisper; no idle audio is saved or sent to a model provider.",
+    valueKind: "boolean",
+  },
+  "AGENT_WAKE_WORD_PHRASE": {
+    tabId: "session_ui", subgroupId: "voice",
+    label: "Wake phrase",
+    description: "Say this phrase first, followed by your request, or pause and give your request next. Default: Hey Jarvis. Use a distinctive phrase of 2–80 characters.",
+    valueKind: "string",
+  },
+  "AGENT_WAKE_WORD_IDLE_SECONDS": {
+    tabId: "session_ui", subgroupId: "voice",
+    label: "Conversation idle timeout (seconds)",
+    description: "Return to wake listening after this much quiet time. Follow-ups need no wake phrase while awake. Agent replies and playback do not consume the timeout. Say go to sleep to return immediately.",
+    valueKind: "number", numericBounds: { min: 10, max: 300, step: 5 },
+  },
   "AGENT_DICTATION_WEB_SPEECH": {
     tabId: "web_research",
     subgroupId: "http_client",
@@ -463,6 +481,14 @@ const _META_RAW: Record<string, HarnessSettingsFieldMeta> = {
     label: "Fast Model",
     description: "Harness environment toggle for Fast Model. See docs/configuration.md (models api).",
     valueKind: "string",
+  },
+  "AGENT_CHAT_AUTO_TITLE": {
+    tabId: "models_api", subgroupId: "routing", label: "Automatic chat titles",
+    description: "Generate and periodically refresh chat labels in the background using a separate inexpensive OpenRouter model. Manual titles stay fixed.", valueKind: "boolean",
+  },
+  "AGENT_CHAT_TITLE_MODEL": {
+    tabId: "models_api", subgroupId: "routing", label: "Chat title model",
+    description: "OpenRouter model for chat labels only; defaults to inclusionai/ling-3.0-tiny. Does not change the main agent model.", valueKind: "string",
   },
   "AGENT_MODEL": {
     tabId: "models_api",
@@ -1002,6 +1028,13 @@ const _META_RAW: Record<string, HarnessSettingsFieldMeta> = {
     description: "When serper is selected and fails, retry once via DuckDuckGo (1 = on).",
     valueKind: "boolean",
   },
+  "AGENT_WEB_SEARCH_FETCH": {
+    tabId: "web_research",
+    subgroupId: "search_provider",
+    label: "Direct web and data tools",
+    description: "Off for browser-first research: search/fetch are disabled and generic HTTP, market quotes and weather lookups are hidden for ordinary tasks. Explicit API or named-tool requests can expose that utility for the turn. Enable to restore unrestricted direct web tools. Internal integration HTTP helpers are unaffected.",
+    valueKind: "boolean",
+  },
   "AGENT_WEB_FETCH_SERPER": {
     tabId: "web_research",
     subgroupId: "search_provider",
@@ -1167,8 +1200,8 @@ const _META_RAW: Record<string, HarnessSettingsFieldMeta> = {
   "AGENT_BROWSER_SESSION_TTL_MS": {
     tabId: "session_ui",
     subgroupId: "session_ui",
-    label: "Browser Session Ttl Ms",
-    description: "Harness environment toggle for Browser Session Ttl Ms. See docs/configuration.md (session ui).",
+    label: "Browser Idle Timeout (ms)",
+    description: "Park inactive browser pages after this interval. Tab locations and logins are retained; visible pages, active work, media and unsaved edits stay live.",
     valueKind: "number",
   },
   "AGENT_BROWSER_MAX_SESSIONS": {
@@ -1177,6 +1210,14 @@ const _META_RAW: Record<string, HarnessSettingsFieldMeta> = {
     label: "Browser Max Sessions",
     description: "Harness environment toggle for Browser Max Sessions. See docs/configuration.md (session ui).",
     valueKind: "string",
+  },
+  "AGENT_BROWSER_MAX_LIVE_TABS": {
+    tabId: "session_ui",
+    subgroupId: "session_ui",
+    label: "Live Browser Tab Limit",
+    description: "Maximum live browser pages across all chats (1–12, default 4). Eligible background tabs sleep to free memory and load again when needed.",
+    valueKind: "number",
+    numericBounds: { min: 1, max: 12 },
   },
   "AGENT_BROWSER_TYPE_DELAY_MS": {
     tabId: "harness",
@@ -1346,7 +1387,7 @@ const _META_RAW: Record<string, HarnessSettingsFieldMeta> = {
     tabId: "memory_vault",
     subgroupId: "retrieval",
     label: "Rule Recall",
-    description: "Harness environment toggle for Rule Recall. See docs/configuration.md (memory vault).",
+    description: "Legacy compatibility setting. Automatic round-two rule reminders are retired; stable protocol guidance remains active.",
     valueKind: "boolean",
   },
   "AGENT_YOLO": {
@@ -1741,7 +1782,7 @@ const _META_RAW: Record<string, HarnessSettingsFieldMeta> = {
     tabId: "harness",
     subgroupId: "harness_misc",
     label: "Provider Strategy",
-    description: "OpenRouter routing for the selected model. Default latency prioritizes responsive providers; price prioritizes the lowest token price. Changing strategy starts a fresh provider route.",
+    description: "Default adaptive ranks standard endpoints by current input/output/cache cost and TPS/latency, including recent local measurements. Keeps a healthy exact endpoint warm instead of rerouting every request. Price uses cheapest-first routing; latency prioritizes speed. Changing policy starts a fresh route.",
     valueKind: "string",
   },
   "AGENT_PROVIDER_SORT": {
@@ -1750,6 +1791,20 @@ const _META_RAW: Record<string, HarnessSettingsFieldMeta> = {
     label: "Provider Sort",
     description: "Harness environment toggle for Provider Sort. See docs/configuration.md (harness).",
     valueKind: "string",
+  },
+  "AGENT_PROVIDER_PREFERRED_MAX_LATENCY": {
+    tabId: "models_api",
+    subgroupId: "resilience",
+    label: "Preferred provider latency (seconds)",
+    description: "Adaptive routing prefers endpoints with median latency at or below this value, then sorts by price. A soft preference, not a request deadline; 0 disables it.",
+    valueKind: "number",
+  },
+  "AGENT_PROVIDER_PREFERRED_MIN_THROUGHPUT": {
+    tabId: "models_api",
+    subgroupId: "resilience",
+    label: "Preferred provider speed (tokens/sec)",
+    description: "Adaptive routing prefers endpoints meeting this median output speed, then sorts by price. Slower endpoints remain available as fallbacks; 0 disables it.",
+    valueKind: "number",
   },
   "AGENT_PROVIDER_ROUTE_AUTO": {
     tabId: "harness",
@@ -2066,7 +2121,7 @@ const _META_RAW: Record<string, HarnessSettingsFieldMeta> = {
     subgroupId: "telemetry",
     label: "Recipe Prime",
     description:
-      "At round 2, inject the best matching success recipe for the turn intent (zero extra model calls). Low-outcome turns decay bad recipes.",
+      "Legacy compatibility setting. Automatic recipe priming is retired; relevant history is optional evidence, not a required plan.",
     valueKind: "boolean",
   },
   "AGENT_OUTCOME_IMPLICIT_FEEDBACK": {

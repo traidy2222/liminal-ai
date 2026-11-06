@@ -20,9 +20,11 @@ import {
 import type { RuntimePreferences } from "./runtime_prefs.js";
 import {
   resolveProviderConfig,
+  ProviderNotConfiguredError,
   type ProviderConfig,
   type ProviderConfigOverrides,
 } from "./provider_config.js";
+import {UNCONFIGURED_PROVIDER_KEY} from './provider_setup.js';
 import {
   ensureManagedInferenceSession,
   isManagedInferenceBaseUrl,
@@ -536,6 +538,14 @@ export async function resolveProviderConfigWithInference(
   }
 
   return resolveProviderConfig(overrides, prefs);
+}
+
+/** Start the setup UI without inventing a usable provider or swallowing connection errors. */
+export async function resolveProviderForStartup(overrides?:ProviderConfigOverrides,prefs?:RuntimePreferences|null):Promise<ProviderConfig>{
+ try{return await resolveProviderConfigWithInference(overrides,prefs);}catch(error){
+  if(!(error instanceof ProviderNotConfiguredError))throw error;
+  return {apiKey:UNCONFIGURED_PROVIDER_KEY,baseURL:overrides?.baseURL||prefs?.provider?.baseURL||DEFAULT_AGENT_API_BASE_URL,model:overrides?.model||prefs?.provider?.model||DEFAULT_AGENT_MODEL_SLUG,keySource:'AGENT_API_KEY'};
+ }
 }
 
 export type InferenceUsageStatus = {

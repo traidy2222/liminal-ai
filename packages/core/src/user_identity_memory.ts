@@ -66,6 +66,12 @@ export interface IdentityNameExtraction {
   storageKey: string;
 }
 
+/** Memory reads/writes already have their own persistence; do not re-extract them. */
+export function shouldAutoExtractMemoriesFromTools(toolsUsed: readonly string[]): boolean {
+  const housekeeping = /^(?:think|plan|reason|remember|forget(?:_.*)?|recall(?:_.*)?|search_memory|memory_.*|check_context|list_tool_families|activate_tool_family|read_artifact)$/;
+  return toolsUsed.some(name => !housekeeping.test(name));
+}
+
 /**
  * Fast-model extraction when the user states how to address them.
  * Returns null when they did not provide a storable name.

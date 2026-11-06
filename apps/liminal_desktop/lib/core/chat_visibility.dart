@@ -25,9 +25,12 @@ List<MessageEntry> visibleChatMessages(
   List<MessageEntry> messages, {
   required bool showRawHarness,
 }) {
-  if (showRawHarness) return messages;
+  final nonempty = messages
+      .where((e) => e is! AssistantMessage || e.text.trim().isNotEmpty)
+      .toList();
+  if (showRawHarness) return nonempty;
   return [
-    for (final e in messages)
+    for (final e in nonempty)
       if (e is! ToolResultMessage &&
           (!isHarnessInternalMessage(e) || e is ProviderRetryMessage))
         e,

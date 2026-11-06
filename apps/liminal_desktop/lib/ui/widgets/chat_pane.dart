@@ -12,7 +12,6 @@ import '../design_system/liminal_design_system.dart';
 import '../theme/liminal_theme_extension.dart';
 import 'approval_sheet.dart';
 import 'ask_user_sheet.dart';
-import 'browser_dock.dart';
 import 'terminal_dock.dart';
 import 'file_edit_dock.dart';
 import 'panel_resize_handle.dart';
@@ -132,11 +131,10 @@ class _ChatPaneState extends State<ChatPane> {
             child: ListenableBuilder(
               listenable: Listenable.merge([session, host]),
               builder: (context, _) {
-                final browser = session.browserView;
                 final fileEdit = session.fileEditView;
                 final transcript = _buildTranscript(context);
 
-                final showBrowser = focused && browser != null && browser.open;
+                const showBrowser = false; // Browser tabs now live in the app-level workspace.
                 final showFileEdit = fileEdit != null && fileEdit.open;
                 if (!showBrowser && !showFileEdit) {
                   return transcript;
@@ -182,14 +180,6 @@ class _ChatPaneState extends State<ChatPane> {
                                 view: fileEdit,
                                 expanded: session.fileEditDockExpanded,
                                 onToggleExpanded: session.toggleFileEditDock,
-                              ),
-                            ),
-                          if (showBrowser)
-                            Expanded(
-                              child: BrowserDock(
-                                view: browser,
-                                expanded: session.browserDockExpanded,
-                                onToggleExpanded: session.toggleBrowserDock,
                               ),
                             ),
                         ],

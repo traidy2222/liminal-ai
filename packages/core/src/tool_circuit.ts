@@ -6,7 +6,11 @@ import type { ToolResult } from "./types.js";
  */
 export function isRecoverableToolFailure(name: string, result: ToolResult): boolean {
   if (result.ok) return false;
-  const err = result.error.toLowerCase();
+  const err = result.error.toLowerCase().split("\naction_progress:")[0]!;
+  // Bad browser arguments, stale DOM refs and unavailable selectors are a
+  // correction/observation problem, not a browser backend outage.
+  if (name.startsWith("browser_") && /unknown (?:action op|ref|(?:browser )?session)|each action needs|pass `actions`|wait_ms:|select_option_ref:|locator\.(?:click|fill|clear|selectoption|waitfor):|browser_act step/.test(err) &&
+      !/browser has been closed|target.*closed|connection.*closed|crash/.test(err)) return true;
 
   // A program exited unsuccessfully, but the execution tool is healthy. A new
   // script/offset/argument must remain runnable; the harness bounds repeated

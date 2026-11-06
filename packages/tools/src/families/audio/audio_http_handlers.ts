@@ -7,6 +7,9 @@ import {
   coerceTtsConfigForBrowserPlayback,
   resolveSpeechSynthesisConfigAsync,
   resolveTranscriptionConfigAsync,
+  resolveTranscriptionConfig,
+  resolveWakeVoiceConfig,
+  LOCAL_WHISPER_MODEL,
   sanitizeTextForTts,
   synthesizeSpeechMulti,
   transcribeAudio,
@@ -112,6 +115,8 @@ export async function handleTranscribe(
     attachmentId?: string;
     /** Provisional PCM WAV snapshots: never persisted as chat attachments. */
     previewWav?: string;
+    /** Desktop wake listening: local-only PCM, never stored as an attachment. */
+    wakeWav?: string;
     language?: string;
     prompt?: string;
     timestamps?: "none" | "segment" | "word";
@@ -119,20 +124,30 @@ export async function handleTranscribe(
   }
 ): Promise<AudioHandlerResult> {
   const language = typeof body.language === "string" ? body.language.trim() || undefined : undefined;
-  if (typeof body.previewWav === "string") {
-    if (body.previewWav.length > 512_060) return { ok: false, status: 413, body: { error: "Preview is limited to 12 seconds of mono 16 kHz PCM WAV." } };
-    const audio = Buffer.from(body.previewWav, "base64");
-    if (audio.length < 44 || audio.length > 384_044 || audio.toString("ascii", 0, 4) !== "RIFF" ||
+  const wake = typeof body.wakeWav === "string";
+  if (wake || typeof body.previewWav === "string") {
+    const encoded = wake ? body.wakeWav! : body.previewWav!;
+    // Desktop caps at 60s; allow bounded pre-roll and endpoint scheduling slack.
+    const maxSeconds = wake ? 64 : 12;
+    const maxBytes = maxSeconds * 32000 + 44;
+    if (encoded.length > Math.ceil(maxBytes / 3) * 4) return { ok: false, status: 413, body: { error: `Local audio is limited to ${maxSeconds} seconds.` } };
+    const audio = Buffer.from(encoded, "base64");
+    if (audio.length < 44 || audio.length > maxBytes || audio.toString("ascii", 0, 4) !== "RIFF" ||
         audio.toString("ascii", 8, 16) !== "WAVEfmt " || audio.readUInt32LE(16) !== 16 ||
         audio.readUInt16LE(20) !== 1 || audio.readUInt16LE(22) !== 1 || audio.readUInt32LE(24) !== 16000 ||
         audio.readUInt16LE(34) !== 16 || audio.toString("ascii", 36, 40) !== "data" ||
         audio.readUInt32LE(40) !== audio.length - 44 || (audio.length - 44) % 2 !== 0) {
-      return { ok: false, status: 400, body: { error: "Preview requires mono PCM16 WAV at 16 kHz, up to 12 seconds." } };
+      return { ok: false, status: 400, body: { error: `Local audio requires mono PCM16 WAV at 16 kHz, up to ${maxSeconds} seconds.` } };
     }
-    const config = await resolveTranscriptionConfigAsync(bridge.getRuntimePreferences());
+    // Wake listening must not resolve cloud credentials or route idle audio remotely.
+    const config = wake
+      ? { ...resolveTranscriptionConfig(bridge.getRuntimePreferences()), model: LOCAL_WHISPER_MODEL, apiKey: "" }
+      : await resolveTranscriptionConfigAsync(bridge.getRuntimePreferences());
+    if (!config.enabled) return { ok: false, status: 503, body: { error: "Transcription is disabled. Enable local transcription in Settings." } };
     if (!config.model.startsWith("local/")) return { ok: false, status: 400, body: { error: "Live previews require a local transcription model." } };
-    const result = await transcribeAudio({ audio, filename: "preview.wav", language, timestamps: "none", signal: bridge.signal }, config);
-    return { ok: true, status: 200, body: { ok: true, ...result, provisional: true } };
+    const prompt = wake ? resolveWakeVoiceConfig(bridge.getRuntimePreferences()).phrase : undefined;
+    const result = await transcribeAudio({ audio, filename: "preview.wav", language, prompt, timestamps: "none", signal: bridge.signal }, config);
+    return { ok: true, status: 200, body: { ok: true, ...result, provisional: !wake } };
   }
   const id = String(body.attachmentId ?? "").trim();
   if (!id) {
@@ -193,7 +208,7 @@ export async function handleTtsPost(
   }
   const config = await resolveSpeechSynthesisConfigAsync(bridge.getRuntimePreferences());
   if (!config.enabled) {
-    return { ok: false, status: 400, body: { error: "TTS is disabled (AGENT_TTS_ENABLED=0)." } };
+    return { ok: false, status: 400, body: { error: "Spoken replies are unavailable. Enable Spoken responses in Preferences and select JARVIS Warm when single-model mode is on." } };
   }
   const sanitized = sanitizeTextForTts(raw, config.maxCharsPerCall);
   if (!sanitized) {

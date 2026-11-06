@@ -2,6 +2,7 @@
  * Email compose turn detection + style-infer input guards.
  * Prevents recipes, memory, and vault context from steering outbound mail vertical/tone.
  */
+import { browserChannelRequested } from "./requested_tool_channel.js";
 import type { EmailStyleInferInput } from "./email_style_infer.js";
 
 /** User turn that asks to compose, draft, or send email (including outreach with explicit addresses). */
@@ -9,8 +10,12 @@ export function isEmailComposeTurn(text: string): boolean {
   const t = text.trim();
   if (t.length < 4) return false;
   return (
-    /\b(send|draft|compose|write)\b[\s\S]{0,96}\b(e-?mail|gmail|outlook|mail)\b/i.test(t) ||
-    /\b(e-?mail|gmail|outlook)\b[\s\S]{0,96}\b(send|draft|compose|write)\b/i.test(t) ||
+    /\b(send|draft|compose|write)\b[\s\S]{0,96}\b(e-?mail|gmail|outlook|mail)\b/i.test(
+      t,
+    ) ||
+    /\b(e-?mail|gmail|outlook)\b[\s\S]{0,96}\b(send|draft|compose|write)\b/i.test(
+      t,
+    ) ||
     /\bmail\s+to\b/i.test(t) ||
     /\b(reach\s+out|outreach|cold\s+(?:email|mail))\b/i.test(t) ||
     (/\b(send|draft|compose|write|email|e-?mail|outreach)\b/i.test(t) &&
@@ -21,38 +26,29 @@ export function isEmailComposeTurn(text: string): boolean {
 }
 
 export function shouldInjectEmailComposeGuidance(text: string): boolean {
-  return isEmailComposeTurn(text);
+  return isEmailComposeTurn(text) && !browserChannelRequested(text);
 }
 
 /**
  * Always-on mental model — appended to PROTOCOL_CORE so the model knows the default
  * before any tool call (not only after validation failures).
  */
-export const EMAIL_COMPOSE_MENTAL_MODEL = `## Outbound email (default)
-When the user wants mail sent or drafted, your **first** \`gmail_create_draft\` / \`outlook_create_draft\` call is the finished product: **subject + formatted \`body_html\` + plain \`body\` together**. Compose the full styled HTML in your reasoning first; the tool call delivers it — not plain text to upgrade later. Plain-only is only for thread replies (\`thread_id\` / \`reply_to_message_id\`) and one-liners. Never draft the letter in chat prose, never \`write_file\` workspace HTML, prefer REST compose helpers for attachments, multipart MIME and explicit account selection; discovered MCP drafts may also support \`htmlBody\`.`;
+export const EMAIL_COMPOSE_MENTAL_MODEL = `## Outbound email
+Use mailbox tools for requested drafts or sends. Plain text is suitable for ordinary mail; use HTML when requested or useful. Verify recipients and the sending account. A draft request creates a draft; an explicit send request authorizes sending subject to the active approval policy. Do not require an extra draft/review cycle. Never claim delivery without a successful tool result.`;
 
-/** Per-turn planning injection — what to produce before invoking compose tools. */
-export const EMAIL_COMPOSE_TURN_INJECTION =
-  "[EMAIL COMPOSE] Plan the **finished HTML email** before any tool call. " +
-  "Your **first** gmail_create_draft / outlook_create_draft must already contain: `subject`, formatted `body_html` (nested `<table>` / inline styles, R-EMAIL-STYLE), and plain `body` fallback. " +
-  "The tool call **is** the email — not a rough draft to fix later. " +
-  "Prefer gmail_create_draft (REST) for explicit accounts, attachments and multipart mail. The discovered MCP create_draft schema may also support htmlBody. " +
-  "Do not write the letter in chat. Do not write_file workspace .html/.md. " +
-  "Write about **only what the user asked this turn** — not recipes, memory verticals, persona, or vault unless they named that industry. " +
-  "Signer name from memory is OK. Skip email_style_infer unless they asked for a specific visual style; default neutral professional B2B HTML. " +
-  "Minimal shell to fill: `<table width=\"600\" role=\"presentation\"><tr><td style=\"padding:24px;font-family:Arial,Helvetica,sans-serif;color:#333;background:#fff\">…copy with inline styles…</td></tr></table>`";
-
-/** Paired with google_workspace family preseed — reinforces tool choice. */
-export const EMAIL_COMPOSE_CAPABILITY_NUDGE =
-  "[EMAIL COMPOSE] gmail_create_draft carries the full styled email in body_html + body on the first call. " +
-  "Gather signer/recipient if needed, then compose — do not plain-draft first.";
+// The stable protocol is authoritative; avoid repeating a style mandate each turn.
+export const EMAIL_COMPOSE_TURN_INJECTION = "";
+export const EMAIL_COMPOSE_CAPABILITY_NUDGE = "";
 
 function messageContentLower(text: string): string {
   return text.trim().toLowerCase();
 }
 
 /** True when a style field's substance appears in the user's message (not invented). */
-export function isEmailStyleFieldGroundedInUserMessage(value: string, userMessage: string): boolean {
+export function isEmailStyleFieldGroundedInUserMessage(
+  value: string,
+  userMessage: string,
+): boolean {
   const v = value.trim();
   if (!v) return false;
   const um = messageContentLower(userMessage);
@@ -69,10 +65,12 @@ export function isEmailStyleFieldGroundedInUserMessage(value: string, userMessag
  */
 export function sanitizeEmailStyleInferInput(
   input: EmailStyleInferInput,
-  userMessage: string
+  userMessage: string,
 ): EmailStyleInferInput {
   const grounded = (value?: string) =>
-    value?.trim() && isEmailStyleFieldGroundedInUserMessage(value, userMessage) ? value.trim() : undefined;
+    value?.trim() && isEmailStyleFieldGroundedInUserMessage(value, userMessage)
+      ? value.trim()
+      : undefined;
 
   return {
     purpose: input.purpose,

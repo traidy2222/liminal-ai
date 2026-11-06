@@ -1,3 +1,4 @@
+import '../models/procedure_activity.dart';
 import 'dart:convert';
 
 import '../models/browser_view_state.dart';
@@ -23,6 +24,19 @@ ChatTranscriptState reduceChatEvent(
   Map<String, dynamic> data,
 ) {
   switch (event) {
+    case 'procedure_activity':
+      final activity = ProcedureActivity.fromJson(data);
+      final activities = [
+        ...state.procedureActivities.where(
+          (p) => p.identity != activity.identity,
+        ),
+        activity,
+      ];
+      return state.copyWith(
+        procedureActivities: activities
+            .skip(activities.length > 24 ? activities.length - 24 : 0)
+            .toList(),
+      );
     case 'text':
       return _onText(state, data);
     case 'provider_retry':
@@ -68,7 +82,8 @@ ChatTranscriptState reduceChatEvent(
             outcomeScore: (data['outcomeScore'] as num?)?.toDouble() ?? 0,
             toolCount: (data['toolCount'] as num?)?.toInt() ?? 0,
             durationMs: (data['durationMs'] as num?)?.toInt() ?? 0,
-            keyTools: (data['keyTools'] as List<dynamic>?)
+            keyTools:
+                (data['keyTools'] as List<dynamic>?)
                     ?.map((e) => e.toString())
                     .toList() ??
                 const [],
@@ -123,7 +138,7 @@ ChatTranscriptState reduceChatEvent(
       }
     case 'persona_bootstrap_progress':
       return state.copyWith(
-        busy: true,
+        busy: !const {'done', 'failed', 'cancelled'}.contains(data['stage']),
         personaBootstrapStage: data['stage'] as String?,
         personaBootstrapProgress: data['message'] as String? ?? '',
       );
@@ -132,13 +147,16 @@ ChatTranscriptState reduceChatEvent(
         messages: [
           ...state.messages,
           ContextCompressedMessage(
-            beforePct: ((data['beforePct'] ?? data['beforeFraction']) as num?)
+            beforePct:
+                ((data['beforePct'] ?? data['beforeFraction']) as num?)
                     ?.toDouble() ??
                 0,
-            afterPct: ((data['afterPct'] ?? data['afterFraction']) as num?)
+            afterPct:
+                ((data['afterPct'] ?? data['afterFraction']) as num?)
                     ?.toDouble() ??
                 0,
-            rounds: ((data['rounds'] ?? data['roundsCompressed']) as num?)
+            rounds:
+                ((data['rounds'] ?? data['roundsCompressed']) as num?)
                     ?.toInt() ??
                 0,
           ),
@@ -207,7 +225,7 @@ ChatTranscriptState _onTranscriptReplay(
     final text = map['text'] as String? ?? '';
     if (kind == 'user' && text.isNotEmpty) {
       messages.add(UserMessage(text));
-    } else if (kind == 'assistant' && text.isNotEmpty) {
+    } else if (kind == 'assistant' && text.trim().isNotEmpty) {
       messages.add(AssistantMessage(text: text, streaming: false));
     } else if (kind == 'tool_call') {
       messages.add(
@@ -242,7 +260,9 @@ ChatTranscriptState applyUserMessage(
 }
 
 ChatTranscriptState _onText(
-    ChatTranscriptState state, Map<String, dynamic> data) {
+  ChatTranscriptState state,
+  Map<String, dynamic> data,
+) {
   final delta = data['delta'] as String? ?? '';
   final channel = data['channel'] as String? ?? 'user';
   if (delta.isEmpty) return state;
@@ -278,6 +298,9 @@ ChatTranscriptState _appendAssistant(ChatTranscriptState state, String delta) {
     );
     return state.copyWith(messages: msgs);
   }
+  // A separator chunk between tool calls is not narration. Preserve whitespace
+  // inside a live sentence above, but do not create an empty conversation row.
+  if (delta.trim().isEmpty) return state;
   msgs.add(AssistantMessage(text: delta, streaming: true));
   return state.copyWith(messages: msgs);
 }
@@ -297,7 +320,9 @@ int? _currentTurnAssistantIndex(List<MessageEntry> msgs) {
 }
 
 ChatTranscriptState _appendModelReasoning(
-    ChatTranscriptState state, String delta) {
+  ChatTranscriptState state,
+  String delta,
+) {
   final msgs = List<MessageEntry>.from(state.messages);
   if (msgs.isNotEmpty) {
     final last = msgs.last;
@@ -311,7 +336,9 @@ ChatTranscriptState _appendModelReasoning(
 }
 
 ChatTranscriptState _onToolStart(
-    ChatTranscriptState state, Map<String, dynamic> data) {
+  ChatTranscriptState state,
+  Map<String, dynamic> data,
+) {
   final callId = data['callId'] as String;
   final name = data['name'] as String;
   // Tool activity closes the preceding narration segment. Later text belongs
@@ -374,8 +401,11 @@ ChatTranscriptState _onToolStart(
   );
   if (isComposeDockTool(name)) {
     return withTool.copyWith(
-      fileEditView:
-          _openComposeDockView(callId: callId, toolName: name, argsJson: ''),
+      fileEditView: _openComposeDockView(
+        callId: callId,
+        toolName: name,
+        argsJson: '',
+      ),
     );
   }
   return withTool;
@@ -388,8 +418,9 @@ ChatTranscriptState _onComposePreview(
   final callId = data['callId'] as String? ?? '';
   final toolName = data['name'] as String? ?? '';
   final rawCompose = data['compose'];
-  final compose =
-      rawCompose is Map ? Map<String, dynamic>.from(rawCompose) : null;
+  final compose = rawCompose is Map
+      ? Map<String, dynamic>.from(rawCompose)
+      : null;
   final argsJson = data['argsJson'] as String? ?? '';
   if (callId.isEmpty || toolName.isEmpty || compose == null) return state;
   if (!isComposeDockTool(toolName)) return state;
@@ -397,7 +428,8 @@ ChatTranscriptState _onComposePreview(
   final msgs = List<MessageEntry>.from(state.messages);
   final existing = _toolCallById(msgs, callId);
   if (existing?.status == ToolCallStatus.done ||
-      existing?.status == ToolCallStatus.error) return state;
+      existing?.status == ToolCallStatus.error)
+    return state;
   if (existing == null) {
     msgs.add(
       ToolCallMessage(
@@ -409,8 +441,9 @@ ChatTranscriptState _onComposePreview(
       ),
     );
   } else {
-    existing.argsPreview =
-        argsJson.isNotEmpty ? argsJson : existing.argsPreview;
+    existing.argsPreview = argsJson.isNotEmpty
+        ? argsJson
+        : existing.argsPreview;
   }
 
   final prev = state.fileEditView;
@@ -428,14 +461,17 @@ ChatTranscriptState _onComposePreview(
 }
 
 ChatTranscriptState _onToolDelta(
-    ChatTranscriptState state, Map<String, dynamic> data) {
+  ChatTranscriptState state,
+  Map<String, dynamic> data,
+) {
   final callId = data['callId'] as String;
   final argsDelta = data['argsDelta'] as String? ?? '';
   final wireArgsJson = data['argsJson'] as String?;
   final wireName = data['name'] as String?;
   final rawCompose = data['compose'];
-  final wireCompose =
-      rawCompose is Map ? Map<String, dynamic>.from(rawCompose) : null;
+  final wireCompose = rawCompose is Map
+      ? Map<String, dynamic>.from(rawCompose)
+      : null;
   final msgs = List<MessageEntry>.from(state.messages);
 
   String accumulateArgs(String current) =>
@@ -469,8 +505,9 @@ ChatTranscriptState _onToolDelta(
       var next = state.copyWith(messages: msgs);
       if (isComposeDockTool(m.name)) {
         final prev = next.fileEditView;
-        final phase =
-            prev?.callId == callId ? prev!.phase : FileEditPhase.streaming;
+        final phase = prev?.callId == callId
+            ? prev!.phase
+            : FileEditPhase.streaming;
         next = next.copyWith(
           fileEditView: wireCompose != null
               ? _fileEditViewFromWireCompose(
@@ -512,8 +549,9 @@ ChatTranscriptState _onToolDelta(
           )
         : state.copyWith(messages: msgs);
     final prev = withTool.fileEditView;
-    final phase =
-        prev?.callId == callId ? prev!.phase : FileEditPhase.streaming;
+    final phase = prev?.callId == callId
+        ? prev!.phase
+        : FileEditPhase.streaming;
     return withTool.copyWith(
       fileEditView: wireCompose != null
           ? _fileEditViewFromWireCompose(
@@ -535,11 +573,14 @@ ChatTranscriptState _onToolDelta(
 }
 
 ChatTranscriptState _onToolApproval(
-    ChatTranscriptState state, Map<String, dynamic> data) {
+  ChatTranscriptState state,
+  Map<String, dynamic> data,
+) {
   final callId = data['callId'] as String;
   final completed = _toolCallById(state.messages, callId);
   if (completed?.status == ToolCallStatus.done ||
-      completed?.status == ToolCallStatus.error) return state;
+      completed?.status == ToolCallStatus.error)
+    return state;
   final msgs = List<MessageEntry>.from(state.messages);
   for (final m in msgs) {
     if (m is ToolCallMessage && m.callId == callId) {
@@ -551,8 +592,9 @@ ChatTranscriptState _onToolApproval(
     final tool = _toolCallById(msgs, callId);
     if (tool != null && isComposeDockTool(tool.name)) {
       final argsMap = Map<String, dynamic>.from(data['args'] as Map? ?? {});
-      final argsJson =
-          argsMap.isNotEmpty ? jsonEncode(argsMap) : tool.argsPreview;
+      final argsJson = argsMap.isNotEmpty
+          ? jsonEncode(argsMap)
+          : tool.argsPreview;
       if (argsJson.isNotEmpty) tool.argsPreview = argsJson;
       next = state.copyWith(
         fileEditView: _refreshComposeDockView(
@@ -631,7 +673,9 @@ ChatTranscriptState _onApprovalDecision(
 }
 
 ChatTranscriptState _onToolProgress(
-    ChatTranscriptState state, Map<String, dynamic> data) {
+  ChatTranscriptState state,
+  Map<String, dynamic> data,
+) {
   final callId = data['callId'] as String?;
   final delta = data['delta'] as String? ?? '';
   if (callId == null || delta.isEmpty) return state;
@@ -656,7 +700,9 @@ ChatTranscriptState _onToolProgress(
 }
 
 ChatTranscriptState _onToolExecuting(
-    ChatTranscriptState state, Map<String, dynamic> data) {
+  ChatTranscriptState state,
+  Map<String, dynamic> data,
+) {
   final callId = data['callId'] as String?;
   if (callId == null) return state;
   state = _sealAssistantSegment(state);
@@ -684,7 +730,8 @@ ChatTranscriptState _onToolExecuting(
           ? view!.copyWith(
               phase: FileEditPhase.writing,
               incomplete: false,
-              updatedAt: DateTime.now().millisecondsSinceEpoch)
+              updatedAt: DateTime.now().millisecondsSinceEpoch,
+            )
           : null,
     );
   }
@@ -692,7 +739,9 @@ ChatTranscriptState _onToolExecuting(
 }
 
 ChatTranscriptState _onToolResult(
-    ChatTranscriptState state, Map<String, dynamic> data) {
+  ChatTranscriptState state,
+  Map<String, dynamic> data,
+) {
   final callId = data['callId'] as String;
   final name = data['name'] as String? ?? '';
   final parsed = parseWireToolResult(data);
@@ -761,7 +810,7 @@ ChatTranscriptState _onToolResult(
   var next = state.copyWith(
     messages: [
       ...msgs,
-      ToolResultMessage(callId: callId, output: output, ok: ok)
+      ToolResultMessage(callId: callId, output: output, ok: ok),
     ],
   );
   if (name.startsWith('browser_') && ok && output.isNotEmpty) {
@@ -791,15 +840,20 @@ ChatTranscriptState _onToolResult(
     final phase = ok ? FileEditPhase.completed : FileEditPhase.failed;
     final view = finalArgs.isNotEmpty
         ? _refreshComposeDockView(
-            callId: callId, toolName: name, argsJson: finalArgs, phase: phase)
+            callId: callId,
+            toolName: name,
+            argsJson: finalArgs,
+            phase: phase,
+          )
         : (prev?.callId == callId ? prev : null);
     if (view != null) {
       next = next.copyWith(
-          fileEditView: view.copyWith(
-        phase: phase,
-        incomplete: false,
-        updatedAt: DateTime.now().millisecondsSinceEpoch,
-      ));
+        fileEditView: view.copyWith(
+          phase: phase,
+          incomplete: false,
+          updatedAt: DateTime.now().millisecondsSinceEpoch,
+        ),
+      );
     }
   }
   return next;
@@ -861,21 +915,28 @@ ChatTranscriptState _replaceStreamingPlan(
 ) {
   if (args['step_index'] is num) {
     return _applyPlanStepDone(
-        state, (args['step_index'] as num).toInt(), callId);
+      state,
+      (args['step_index'] as num).toInt(),
+      callId,
+    );
   }
   final steps = args['steps'] is List
       ? (args['steps'] as List).map((e) => e.toString()).toList()
       : <String>[];
   if (steps.isEmpty) {
     return state.copyWith(
-        messages: _stripEphemeralPlans(state.messages, callId));
+      messages: _stripEphemeralPlans(state.messages, callId),
+    );
   }
   return state.copyWith(
-      messages: _upsertPlanSteps(state.messages, steps, callId));
+    messages: _upsertPlanSteps(state.messages, steps, callId),
+  );
 }
 
-List<MessageEntry> _stripEphemeralPlans(List<MessageEntry> messages,
-    [String? callId]) {
+List<MessageEntry> _stripEphemeralPlans(
+  List<MessageEntry> messages, [
+  String? callId,
+]) {
   return messages.where((m) {
     if (m is! PlanMessage) return true;
     if (m.steps.isEmpty && m.argsPreview.trim().isEmpty) return false;
@@ -901,7 +962,7 @@ List<MessageEntry> _upsertPlanSteps(
   }
   return [
     ...cleaned,
-    PlanMessage(callId: callId, steps: steps, streaming: false)
+    PlanMessage(callId: callId, steps: steps, streaming: false),
   ];
 }
 
@@ -935,26 +996,30 @@ ChatTranscriptState _applyPlanStepDone(
 }
 
 ChatTranscriptState _onTurnEnd(
-    ChatTranscriptState state, Map<String, dynamic> data) {
+  ChatTranscriptState state,
+  Map<String, dynamic> data,
+) {
   final snap = ContextSnapshot.fromWire(
     data['contextSnapshot'] is Map
         ? Map<String, dynamic>.from(data['contextSnapshot'] as Map)
         : null,
   );
-  var next = _finalizeStreaming(state).copyWith(
-    busy: false,
-    contextSnapshot: snap ?? state.contextSnapshot,
-  );
+  var next = _finalizeStreaming(
+    state,
+  ).copyWith(busy: false, contextSnapshot: snap ?? state.contextSnapshot);
   final hm = data['harnessMetrics'] as Map<String, dynamic>?;
   if (hm != null) {
     final ep = hm['epistemicState'] as Map<String, dynamic>?;
     final ex = hm['executionState'] as Map<String, dynamic>?;
     if (ep != null || ex != null) {
       final subgoals = ep?['subgoals'] as List<dynamic>?;
-      final subPreview = subgoals?.take(4).map((g) {
-        final m = g as Map<String, dynamic>;
-        return '[${m['status']}] ${m['id']}';
-      }).join(' · ');
+      final subPreview = subgoals
+          ?.take(4)
+          .map((g) {
+            final m = g as Map<String, dynamic>;
+            return '[${m['status']}] ${m['id']}';
+          })
+          .join(' · ');
       next = next.copyWith(
         messages: [
           ...next.messages,
@@ -973,7 +1038,8 @@ ChatTranscriptState _onTurnEnd(
 
 ChatTranscriptState _finalizeStreamingForToolStart(ChatTranscriptState state) {
   final msgs = _stripEphemeralPlans(
-      List<MessageEntry>.from(_sealAssistantSegment(state).messages));
+    List<MessageEntry>.from(_sealAssistantSegment(state).messages),
+  );
   for (var i = 0; i < msgs.length; i++) {
     final m = msgs[i];
     if (m is ModelReasoningMessage && m.streaming) {
@@ -993,16 +1059,24 @@ ChatTranscriptState _finalizeStreamingForToolStart(ChatTranscriptState state) {
 
 ChatTranscriptState _sealAssistantSegment(ChatTranscriptState state) {
   return state.copyWith(
-      messages: state.messages.map((m) {
-    if (m is AssistantMessage && m.streaming) {
-      return AssistantMessage(text: m.text, streaming: false);
-    }
-    return m;
-  }).toList());
+    messages: state.messages
+        .where((m) => m is! AssistantMessage || m.text.trim().isNotEmpty)
+        .map((m) {
+          if (m is AssistantMessage && m.streaming) {
+            return AssistantMessage(text: m.text, streaming: false);
+          }
+          return m;
+        })
+        .toList(),
+  );
 }
 
 ChatTranscriptState _finalizeStreaming(ChatTranscriptState state) {
-  final msgs = _stripEphemeralPlans(List<MessageEntry>.from(state.messages));
+  final msgs = _stripEphemeralPlans(
+    state.messages
+        .where((m) => m is! AssistantMessage || m.text.trim().isNotEmpty)
+        .toList(),
+  );
   for (var i = 0; i < msgs.length; i++) {
     final m = msgs[i];
     if (m is ToolCallMessage &&
@@ -1013,6 +1087,23 @@ ChatTranscriptState _finalizeStreaming(ChatTranscriptState state) {
     }
     if (m is AssistantMessage && m.streaming) {
       msgs[i] = AssistantMessage(text: m.text, streaming: false);
+    }
+    if (m is ThinkMessage && m.streaming) {
+      msgs[i] = ThinkMessage(
+        callId: m.callId,
+        content: m.content,
+        argsPreview: m.argsPreview,
+        streaming: false,
+      );
+    }
+    if (m is ReasonMessage && m.streaming) {
+      msgs[i] = ReasonMessage(
+        callId: m.callId,
+        inference: m.inference,
+        argsPreview: m.argsPreview,
+        confidence: m.confidence,
+        streaming: false,
+      );
     }
     if (m is ModelReasoningMessage && m.streaming) {
       msgs[i] = ModelReasoningMessage(text: m.text, streaming: false);
@@ -1034,7 +1125,8 @@ ChatTranscriptState _finalizeStreaming(ChatTranscriptState state) {
         ? view.copyWith(
             phase: FileEditPhase.interrupted,
             incomplete: false,
-            updatedAt: DateTime.now().millisecondsSinceEpoch)
+            updatedAt: DateTime.now().millisecondsSinceEpoch,
+          )
         : null,
   );
 }
@@ -1190,8 +1282,11 @@ FileEditViewState _refreshComposeDockView({
     );
   }
 
-  final preview =
-      extractStreamingWritePreview(toolName, argsJson, fullContent: true);
+  final preview = extractStreamingWritePreview(
+    toolName,
+    argsJson,
+    fullContent: true,
+  );
   if (preview == null) {
     return FileEditViewState(
       open: true,

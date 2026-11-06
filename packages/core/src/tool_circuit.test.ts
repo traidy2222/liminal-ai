@@ -5,6 +5,23 @@ import {ToolRegistry} from './registry.js';
 import {ToolDispatcher} from './dispatcher.js';
 import {AgentEmitter} from './events.js';
 
+test('procedure preflight rejection does not disable a healthy write tool', async () => {
+ const registry = new ToolRegistry(); let calls = 0;
+ registry.register({name:'write_file',description:'fixture',parameters:{type:'object',properties:{path:{type:'string'}}},requiresApproval:false,handler:async()=>{calls++;return {ok:true,output:'written'};}});
+ const dispatcher = new ToolDispatcher(registry,new AgentEmitter());
+ dispatcher.setExecutionGuard(async()=>{throw new Error('Procedure adoption required');});
+ for(let i=0;i<3;i++) assert.equal((await dispatcher.dispatch(`guard-${i}`,'write_file',JSON.stringify({path:`file-${i}`}))).ok,false);
+ dispatcher.setExecutionGuard(undefined);
+ assert.equal((await dispatcher.dispatch('corrected-write','write_file','{"path":"approved-file"}')).ok,true);
+ assert.equal(calls,1);
+});
+
+test('correctable browser actions do not trip the backend circuit; closed targets do',()=>{
+ for(const error of ['Unknown ref "e1"','browser_act step 2: locator.click: Timeout 500ms exceeded','wait_ms: ms is required'])
+  assert.equal(isRecoverableToolFailure('browser_act',{ok:false,error}),true);
+ assert.equal(isRecoverableToolFailure('browser_act',{ok:false,error:'browser_act step 2: Target page, context or browser has been closed'}),false);
+});
+
 test("recoverable recall miss does not count as circuit failure", () => {
   assert.equal(
     isRecoverableToolFailure("recall", {

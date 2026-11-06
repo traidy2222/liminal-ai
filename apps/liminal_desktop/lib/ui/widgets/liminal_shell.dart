@@ -5,6 +5,9 @@ import '../layout/liminal_spacing.dart';
 import 'connection_status_strip.dart';
 import 'liminal_background.dart';
 import 'liminal_brand.dart';
+import 'wake_voice_strip.dart';
+import 'browser_dock.dart';
+import '../../browser/browser_workspace.dart';
 
 /// Root chrome: branded background behind every screen.
 class LiminalShell extends StatelessWidget {
@@ -37,7 +40,36 @@ class LiminalShell extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           if (showConnectionBanner) const ConnectionStatusStrip(),
-          Expanded(child: body),
+          const WakeVoiceStrip(),
+          const BrowserWorkspaceStrip(),
+          Expanded(
+            child: ListenableBuilder(
+              listenable: BrowserWorkspace.instance,
+              builder: (context, _) {
+                return LayoutBuilder(
+                  builder: (context, constraints) {
+                    final show = BrowserWorkspace.instance.showPanel;
+                    return Row(
+                      children: [
+                        if (!show || constraints.maxWidth >= 800)
+                          Expanded(child: body),
+                        if (show)
+                          SizedBox(
+                            width: constraints.maxWidth < 800
+                                ? constraints.maxWidth
+                                : (constraints.maxWidth * 0.48).clamp(
+                                    400.0,
+                                    900.0,
+                                  ),
+                            child: const BrowserDock(),
+                          ),
+                      ],
+                    );
+                  },
+                );
+              },
+            ),
+          ),
         ],
       ),
       floatingActionButton: floatingActionButton,
@@ -45,10 +77,12 @@ class LiminalShell extends StatelessWidget {
     );
     return LiminalBackground(
       child: persistentNavigation
-          ? Row(children: [
-              SizedBox(width: 272, child: drawer),
-              Expanded(child: scaffold),
-            ],)
+          ? Row(
+              children: [
+                SizedBox(width: 272, child: drawer),
+                Expanded(child: scaffold),
+              ],
+            )
           : scaffold,
     );
   }
@@ -101,9 +135,7 @@ class LiminalOnboardingPage extends StatelessWidget {
                             const SizedBox(height: 10),
                             Text(
                               subtitle,
-                              style: Theme.of(context)
-                                  .textTheme
-                                  .bodyMedium
+                              style: Theme.of(context).textTheme.bodyMedium
                                   ?.copyWith(
                                     color: Theme.of(context)
                                         .colorScheme

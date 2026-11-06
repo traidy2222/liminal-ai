@@ -1,4 +1,5 @@
 import { rm } from "node:fs/promises";
+import { randomUUID } from "node:crypto";
 import path from "node:path";
 import {
   AgentHarness,
@@ -28,6 +29,7 @@ import {
 } from "@liminal/core";
 import {
   registerAllTools,
+  closeAllBrowserSessionsForTask,
   INCEPTION_MESSAGES,
   buildProtocolDynamicSuffix,
   applyPersonaProfileToHarness,
@@ -37,9 +39,13 @@ import {
 } from "@liminal/tools";
 import { serverFrame, type ChatSummary } from "@liminal/protocol";
 import { SessionBridge, type FrameSink } from "./session_bridge.js";
-import { buildOrchestratorInceptionMessages } from "./orchestrator_chat_prompt.js";
+import { buildOrchestratorInceptionMessages, buildOrchestratorRuntimeStatus } from "./orchestrator_chat_prompt.js";
 import { registerOrchestratorChatTools } from "./orchestrator_chat_tools.js";
 import type { ChatOrchestrator } from "./chat_orchestrator.js";
+
+export function createDesktopChatId(kind: ChatKind, now = Date.now()): string {
+  return `${kind === "orchestrator" ? "orch" : "chat"}_${now.toString(36)}_${randomUUID()}`;
+}
 
 interface ChatSlot {
   bridge: SessionBridge;
@@ -201,8 +207,12 @@ export class ChatRegistry {
           inceptionMessages: isOrchestrator
             ? buildOrchestratorInceptionMessages()
             : INCEPTION_MESSAGES,
-          protocolDynamicBuilder: (names, hint, registry) =>
-            buildProtocolDynamicSuffix(names, (hint ?? "any") as ProtocolIntentHint, registry),
+          protocolDynamicBuilder: (names, hint, registry) => {
+            const protocol = buildProtocolDynamicSuffix(names, (hint ?? "any") as ProtocolIntentHint, registry);
+            return isOrchestrator
+              ? `${protocol}\n\n${buildOrchestratorRuntimeStatus(this.getOrchestrator?.().getSnapshot())}`
+              : protocol;
+          },
         },
       })
     );
@@ -247,6 +257,17 @@ export class ChatRegistry {
       workspaceRoot,
       updatedAt: meta.updatedAt,
     });
+    bridge.onUserMessageAccepted = message => {
+      this.touch(meta.chatId, message.slice(0,60) || 'Image attachment');
+      this.deps.sink(serverFrame('chat_list',this.chatListPayload()));
+    };
+    bridge.onTitleUpdated = updated => {
+      const slot = this.slots.get(updated.chatId);
+      if (!slot || slot.bridge !== bridge) return;
+      slot.title = updated.title;
+      this.diskMetas = this.diskMetas.map(saved => saved.chatId === updated.chatId ? updated : saved);
+      this.deps.sink(serverFrame("chat_list", this.chatListPayload()));
+    };
     void bridge.beginSession().then(() => this.deps.sink(serverFrame("chat_list", this.chatListPayload())));
     return bridge;
   }
@@ -256,14 +277,12 @@ export class ChatRegistry {
     workspaceRoot?: string;
     title?: string;
     kind?: ChatKind;
+    activate?: boolean;
   }): Promise<SessionBridge> {
     await this.boot();
     const workspaceRoot = input?.workspaceRoot?.trim() || this.deps.repoRoot || resolveWorkspaceRoot();
     const kind = input?.kind ?? "default";
-    const chatId =
-      kind === "orchestrator"
-        ? `orch_${Date.now().toString(36)}`
-        : `chat_${Date.now().toString(36)}`;
+    const chatId = createDesktopChatId(kind);
     const meta = await createChatMetadata({
       chatId,
       title: input?.title?.trim() || (kind === "orchestrator" ? "Mission Control" : "New chat"),
@@ -274,23 +293,27 @@ export class ChatRegistry {
     });
     await this.refreshDiskMetas();
     const bridge = await this.openBridgeFromMeta(meta);
-    this.activeChatId = meta.chatId;
-    await saveLastActiveChatId(meta.chatId);
+    if (input?.activate !== false) {
+      this.activeChatId = meta.chatId;
+      await saveLastActiveChatId(meta.chatId);
+    }
     return bridge;
   }
 
   /** Persistent Mission Control chat — created once per install, reused thereafter. */
-  async getOrCreateOrchestratorChat(): Promise<SessionBridge> {
+  async getOrCreateOrchestratorChat(options?: { activate?: boolean }): Promise<SessionBridge> {
     await this.boot();
     await this.refreshDiskMetas();
     const existing = this.diskMetas.find((m) => m.kind === "orchestrator");
     if (existing) {
       const bridge = await this.openBridgeFromMeta(existing);
-      this.activeChatId = existing.chatId;
-      await saveLastActiveChatId(existing.chatId);
+      if (options?.activate !== false) {
+        this.activeChatId = existing.chatId;
+        await saveLastActiveChatId(existing.chatId);
+      }
       return bridge;
     }
-    return this.create({ kind: "orchestrator", title: "Mission Control" });
+    return this.create({ kind: "orchestrator", title: "Mission Control", activate: options?.activate });
   }
 
   private chatListPayload(): { chats: ChatSummary[]; activeChatId: string } {
@@ -356,9 +379,6 @@ export class ChatRegistry {
     const meta = await readChatMetadata(chatId);
     if (!meta) return false;
     await this.openBridgeFromMeta(meta);
-    await touchChatMetadata(chatId);
-    const slot = this.slots.get(chatId);
-    if (slot) slot.updatedAt = Date.now();
     return true;
   }
 
@@ -369,14 +389,13 @@ export class ChatRegistry {
     await this.openBridgeFromMeta(meta);
     this.activeChatId = chatId;
     await saveLastActiveChatId(chatId);
-    await touchChatMetadata(chatId);
     const slot = this.slots.get(chatId);
-    if (slot) slot.updatedAt = Date.now();
     await slot?.bridge.replayPersistedTranscript({ uiOnly: true });
     return true;
   }
 
   async delete(chatId: string): Promise<string | null> {
+    await closeAllBrowserSessionsForTask(chatId,{includePaused:true});
     const slot = this.slots.get(chatId);
     if (slot) {
       slot.bridge.dispose();

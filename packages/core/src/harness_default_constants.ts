@@ -78,6 +78,9 @@ export const HARNESS_ENV_DEFAULTS: Readonly<Record<string, string>> = {
   AGENT_TTS_MIN_INTERVAL_MS: "800",
   AGENT_TTS_RESPONSE_FORMAT: "mp3",
   AGENT_DICTATION_AUDIO_CUE: "0",
+  AGENT_WAKE_WORD_ENABLED: "0",
+  AGENT_WAKE_WORD_PHRASE: "Hey Jarvis",
+  AGENT_WAKE_WORD_IDLE_SECONDS: "45",
   /** Deprecated compatibility setting. Dictation now uses local ASR previews and finalization. */
   AGENT_DICTATION_WEB_SPEECH: "0",
   /** ms — minimum recording length before auto-send is considered (filters coughs). */
@@ -106,6 +109,8 @@ export const HARNESS_ENV_DEFAULTS: Readonly<Record<string, string>> = {
   AGENT_MODEL: DEFAULT_AGENT_MODEL_SLUG,
   AGENT_SINGLE_MODEL: "0",
   AGENT_FAST_MODEL: DEFAULT_AGENT_FAST_MODEL_SLUG,
+  AGENT_CHAT_AUTO_TITLE: "1",
+  AGENT_CHAT_TITLE_MODEL: "inclusionai/ling-3.0-tiny",
   AGENT_SAFETY_JUDGE_MODEL: DEFAULT_AGENT_FAST_MODEL_SLUG,
   AGENT_EMBED_MODEL: "qwen/qwen3-embedding-8b",  // OpenRouter embedding model for hybrid BM25+vector recall; "" = BM25-only
   AGENT_SESSION_GREET: "0",
@@ -179,6 +184,7 @@ export const HARNESS_ENV_DEFAULTS: Readonly<Record<string, string>> = {
   AGENT_SAFETY_JUDGE: "0",          // was "1": LLM single-token call on every approval gate
   AGENT_WEB_READABILITY: "1",
   AGENT_WEB_RESEARCH: "1",
+  AGENT_WEB_SEARCH_FETCH: "0", // direct web/data tools opt-in; ordinary research is browser-first
   AGENT_WEB_SEARCH_PROVIDER: "duckduckgo",
   AGENT_WEB_SEARCH_FALLBACK: "1",
   AGENT_WEB_FETCH_SERPER: "1",
@@ -194,9 +200,10 @@ export const HARNESS_ENV_DEFAULTS: Readonly<Record<string, string>> = {
   AGENT_WEB_FETCH_ASSETS_MAX_CHARS: "4000",
   AGENT_BROWSER: "1",
   AGENT_BROWSER_WALL_MS: "120000",
-  AGENT_BROWSER_NAV_TIMEOUT_MS: "45000",
+  AGENT_BROWSER_NAV_TIMEOUT_MS: "20000",
   AGENT_BROWSER_SESSION_TTL_MS: "120000",
-  AGENT_BROWSER_MAX_SESSIONS: "2",
+  AGENT_BROWSER_MAX_SESSIONS: "8",
+  AGENT_BROWSER_MAX_LIVE_TABS: "4",       // global live-page budget; idle tabs retain metadata
   AGENT_BROWSER_TYPE_DELAY_MS: "30",
   AGENT_BROWSER_ALWAYS_ACTIVE: "0",
   AGENT_BROWSER_STEALTH: "1",             // addInitScript patches + AutomationControlled disabled
@@ -238,7 +245,7 @@ export const HARNESS_ENV_DEFAULTS: Readonly<Record<string, string>> = {
   AGENT_CRITIC: "0",
   AGENT_CRITIC_EVIDENCE: "1",
   AGENT_EVAL_JSON_SINK: "1",
-  AGENT_RULE_RECALL: "1",
+  AGENT_RULE_RECALL: "0",
   AGENT_COMPRESS_SEMANTIC: "0",
   AGENT_LENGTH_RESUME_MAX: "8",
   AGENT_MAX_COMPLETION_TOKENS: "16000",
@@ -300,8 +307,10 @@ export const HARNESS_ENV_DEFAULTS: Readonly<Record<string, string>> = {
   AGENT_PROVIDER_MIN_INTERVAL_MS: "0",
   // Provider routing — adaptive price sort + session_id stickiness (OpenRouter-native cache affinity).
   // Use AGENT_PROVIDER_STRATEGY=cache_first + AGENT_PROVIDER_ORDER=DeepInfra to restore explicit pin.
-  AGENT_PROVIDER_STRATEGY: "latency",        // interactive replies prioritize time to first token; price remains available
+  AGENT_PROVIDER_STRATEGY: "adaptive",      // price/TPS value selection, then keep a healthy exact endpoint warm
   AGENT_PROVIDER_SORT: "",                 // explicit override only; otherwise follow the selected strategy
+  AGENT_PROVIDER_PREFERRED_MAX_LATENCY: "1", // adaptive: preferred median provider latency in seconds (soft limit)
+  AGENT_PROVIDER_PREFERRED_MIN_THROUGHPUT: "80", // adaptive: preferred median output tokens/sec (soft limit)
   AGENT_PROVIDER_ROUTE_AUTO: "1",          // auto-derive provider order from model slug (cache_first only, when ORDER empty)
   AGENT_PROVIDER_ORDER: "",                // cache_first: pin order; adaptive/price: optional allowlist (OpenRouter `only`)
   AGENT_PROVIDER_ORDER_FAST: "",           // fast-tier variant of AGENT_PROVIDER_ORDER
@@ -327,7 +336,7 @@ export const HARNESS_ENV_DEFAULTS: Readonly<Record<string, string>> = {
   AGENT_GOLDEN_EVAL: "1",
   AGENT_FAILURE_DIGEST: "1",
   AGENT_RECIPE_LIBRARY: "1",
-  AGENT_RECIPE_PRIME: "1",
+  AGENT_RECIPE_PRIME: "0",
   AGENT_YOLO: "0",
   AGENT_AUTO_DREAM_MIN_HOURS: "4",
   AGENT_AUTO_DREAM_MIN_SESSIONS: "3",

@@ -277,8 +277,11 @@ export class ContextManager {
   private personaBlock?: string;
   /** When set, replaces config.inceptionMessages entirely (e.g. child agents after tools registered). */
   private inceptionOverride?: Message[];
-  /** Appended to inception protocol (message[1]) from `protocolDynamicBuilder`. */
+  /** Current capabilities rendered after history; never merged into inception. */
   private protocolDynamicSuffix = "";
+  private runtimePermissionsBlock = "";
+  /** Current-turn runtime data, replaced in the request tail rather than history. */
+  private turnContext = new Map<string, string>();
   /** Current turn intent hint forwarded to protocolDynamicBuilder to suppress irrelevant sections. */
   private currentIntentHint = "any";
   /** ZipAct-style bounded summary injected after inception (not stored in conversation). */
@@ -422,6 +425,10 @@ export class ContextManager {
     this.executionStateBlock = block.trim().slice(0, 800);
   }
 
+  setRuntimePermissions(state: unknown): void {
+    this.runtimePermissionsBlock = JSON.stringify(state);
+  }
+
   getExecutionStateBlock(): string {
     return this.executionStateBlock;
   }
@@ -476,15 +483,9 @@ export class ContextManager {
     if (!second || second.role !== "system") {
       return firstOut ? [firstOut, ...base.slice(1)] : base;
     }
-    const protocolBody =
-      typeof second.content === "string"
-        ? second.content +
-          (this.protocolDynamicSuffix.trim()
-            ? `\n\n${this.protocolDynamicSuffix.trim()}`
-            : "")
-        : second.content;
-    const secondOut = { ...second, content: protocolBody } as Message;
-    return [firstOut, secondOut, ...tail] as Message[];
+    // Tool activation, intent and permissions change while a chat runs. Keep
+    // them out of the cached inception prefix; buildVolatileBlocks renders them.
+    return [firstOut, second, ...tail] as Message[];
   }
 
   append(message: Message): void {
@@ -496,6 +497,15 @@ export class ContextManager {
     this.conversation.push(message);
   }
 
+  setTurnContext(key: string, content: string): void {
+    if (content.trim()) this.turnContext.set(key, content.trim());
+    else this.turnContext.delete(key);
+  }
+
+  clearTurnContext(): void {
+    this.turnContext.clear();
+  }
+
   /**
    * Build the volatile per-round system blocks (working-state snapshot +
    * execution-state contract budgets). Recomputed every round, so these must be
@@ -504,6 +514,15 @@ export class ContextManager {
    */
   private buildVolatileBlocks(): Message[] {
     const blocks: Message[] = [];
+    if (!this.inceptionOverride && this.protocolDynamicSuffix.trim()) blocks.push({
+      role: "system", content: `[RUNTIME CAPABILITIES]\n${this.protocolDynamicSuffix.trim()}`,
+    });
+    if (this.runtimePermissionsBlock) blocks.push({
+      role: "system", content: `[RUNTIME PERMISSIONS]\n${this.runtimePermissionsBlock}`,
+    });
+    if (this.turnContext.size) blocks.push({
+      role: "system", content: `[TURN CONTEXT]\n${[...this.turnContext.values()].join("\n")}`,
+    });
     const ws = this.epistemicState
       ? renderEpistemicStateBlock(this.epistemicState)
       : this.workingStateBlock.trim();
@@ -544,6 +563,7 @@ export class ContextManager {
     const snap = this.computeSnapshot(messages);
     if (snap.usageFraction >= this.thresholdFraction()) {
       messages = await this.compressOldRounds(inception, this.conversation);
+      messages.splice(inception.length, 0, ...working);
     }
     return messages;
   }
@@ -1045,6 +1065,8 @@ export class ContextManager {
     this.epistemicState = null;
     this.compressionNotes = [];
     this.protocolDynamicSuffix = "";
+    this.runtimePermissionsBlock = "";
+    this.clearTurnContext();
     this.inceptionOverride = undefined;
   }
 }

@@ -36,7 +36,7 @@ export function WorkingPanel({
           listStyle: "none",
         }}
       >
-        {summarizeWorkingPanel(working)}
+        {summarizeWorkingPanel(working, isActive)}
         {isActive && (
           <span style={{ marginLeft: 8, color: "rgba(var(--lim-accent-rgb), 0.45)", animation: "blink 1s step-end infinite" }}>
             …

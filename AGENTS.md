@@ -1,5 +1,13 @@
 # AGENTS.md
 
+## Local iteration workflow
+
+Work locally by default. Batch related improvements before opening a pull request.
+Do not commit, push, open a PR, or publish a release until the user asks.
+Use focused checks for changed behavior and reuse passing results when inputs are
+unchanged. Build only when required to validate or run the current changes; do not
+start CI or repeat full build/test cycles for each small edit.
+
 This file provides comprehensive guidance for AI coding agents (Codex, Claude Code, Cursor, etc.) when working with the Liminal AI codebase.
 
 ## Project Identity

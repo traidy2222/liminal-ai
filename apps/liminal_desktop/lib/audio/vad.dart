@@ -1,4 +1,7 @@
-/// Voice activity from microphone amplitude (dBFS from the `record` package).
+import 'dart:math' as math;
+import 'dart:typed_data';
+
+/// Voice activity from microphone amplitude (dBFS).
 ///
 /// Two phases:
 /// - **Idle** (session listening): detect speech onset → [onSpeechStart]
@@ -30,6 +33,22 @@ class AmplitudeVad {
   double _noiseFloorDb = -60;
   int _startedAt = 0;
   bool _calibrated = false;
+  double get noiseFloorDb => _noiseFloorDb;
+
+  /// Measure the audio actually captured, rather than relying on a platform
+  /// amplitude meter that may stop updating while PCM streaming on Windows.
+  static double pcmDb(Uint8List pcm) {
+    final samples = pcm.length ~/ 2;
+    if (samples == 0) return -90;
+    final data = ByteData.sublistView(pcm);
+    var squares = 0.0;
+    for (var i = 0; i < samples; i++) {
+      final sample = data.getInt16(i * 2, Endian.little) / 32768;
+      squares += sample * sample;
+    }
+    if (squares == 0) return -90;
+    return sanitizeDb(10 * math.log(squares / samples) / math.ln10);
+  }
 
   void resetSession() {
     _startedAt = _nowMs();

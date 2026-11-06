@@ -1,4 +1,7 @@
+import {fingerprint as procedureFingerprint} from "./procedural_memory/model.js";
+import {ProcedureRuntime} from "./procedural_memory/runtime.js";
 import { buildReasoningRequestParams } from "./reasoning_request.js";
+import { warmProviderValueCatalog, observeProviderPerformance, selectedProviderEndpoint } from "./provider_value_routing.js";
 import { requestedArtifactConnectors, missingArtifactConnectors } from "./artifact_connector_requirements.js";
 import { ArtifactInvestigationLedger } from "./artifact_investigation.js";
 import { archiveLargeMcpOutput } from "./mcp_output_view.js";
@@ -77,11 +80,8 @@ import {
   type ModelContextLimits,
 } from "./model_context_registry.js";
 import { stableArgsJsonKey } from "./json_stable.js";
-import {
-  buildHarnessRuleRecallMessage,
-  buildHarnessRuleRecallMessageForIntent,
-} from "./harness_rules.js";
 import { inferIntentToolFamilies } from "./intent_tool_families.js";
+import { browserFirstSuppressedTools } from "./browser_first_policy.js";
 import { registryHasToolFamily } from "./workspace_tool_families.js";
 import {
   batchHasUndispatchableFileWrites,
@@ -124,12 +124,7 @@ import {
   SpawnAppHtmlStreamSink,
   resolveSpawnAppHtmlStreamSinkEnabled,
 } from "./spawn_app_html_stream_sink.js";
-import {
-  formatRecipeLibraryHints,
-  findBestRecipeForPrime,
-  formatRecipePrimeMessage,
-} from "./recipe_library.js";
-import { EMAIL_COMPOSE_CAPABILITY_NUDGE, EMAIL_COMPOSE_TURN_INJECTION, isEmailComposeTurn, shouldInjectEmailComposeGuidance } from "./email_compose_context.js";
+import { isEmailComposeTurn, shouldInjectEmailComposeGuidance } from "./email_compose_context.js";
 import {
   EMAIL_PRIVACY_TURN_INJECTION,
   isEmailPrivacyTurn,
@@ -161,7 +156,7 @@ import {
   type ReceiptWorkflowPreset,
 } from "./receipt_workflow.js";
 import { addCompressionGuideline, formatCompressionGuidelines } from "./compression_guidelines.js";
-import { bumpRuleHits, getRuleHitCounts, extractRuleIds, recordRuleOutcomes, getDemotedRuleIds } from "./rule_stats.js";
+import { bumpRuleHits, recordRuleOutcomes } from "./rule_stats.js";
 import { readYieldSnapshot, writeYieldSnapshot } from "./session_event_log.js";
 import {
   buildResumeMissionBlock,
@@ -180,6 +175,7 @@ import {
   resolveProviderStrategy,
   sessionEpochBumpOn429Enabled,
 } from "./provider_config.js";
+import { cacheRequestShape, normalizeCacheUsage, recordCacheUsage } from "./cache_telemetry.js";
 import {
   formatOpenRouterStealthOwlUnavailableMessage,
   isExhaustedProviderRoutingError,
@@ -319,7 +315,7 @@ import {
   isIntentInferenceEnabled,
   neutralTurnInferenceResult,
   resolveMemoryPolicy,
-  buildRoutingProfile,
+  buildCacheAwareRoutingProfile,
   classifyLocalArtifactTask,
   withArtifactDiagnosticBudget,
   isUnfamiliarArtifactInvestigation,
@@ -339,22 +335,20 @@ import {
 } from "./reasoning_profile.js";
 import {
   applySurfaceToBudget,
-  buildReasoningSurfaceInjection,
   isImplementShipUserMessage,
   resolveReasoningSurface,
   type ReasoningSurface,
 } from "./reasoning_surface.js";
 import {
-  buildEffortTurnInjection,
   formatOutputEffortTraceLine,
+  resolveEffortLevel,
   scaleMaxCompletionTokensForEffort,
 } from "./output_effort.js";
-import { buildResearchTurnInjection } from "./research_depth.js";
 import {
   isActiveResearchSend,
   needsResearchContinuation,
 } from "./research_continuation.js";
-import { buildCodingTurnInjection } from "./coding_autonomy.js";
+import { isAccountSignupTurn } from "./account_signup.js";
 import {
   bumpFileRevision,
   buildEditStaleRecoveryMessage,
@@ -388,6 +382,7 @@ import {
   formatIdentityRecallBlock,
   loadIdentityNotesFromDisk,
   shouldPrimeMemoryThisRound,
+  shouldAutoExtractMemoriesFromTools,
 } from "./user_identity_memory.js";
 import { PasteScheduler } from "./paste_scheduler.js";
 import { predictNextTools } from "./paste_pattern_store.js";
@@ -423,10 +418,6 @@ import {
 } from "./proactive_verification.js";
 import {
   buildDistillArtifactNudge,
-  buildExplicitPathReadNudge,
-  buildOrderedStepsNudge,
-  buildSymbolIndexNudge,
-  buildVaultToolsNudge,
   distillArtifactHashFromOutput,
   extractExplicitRepoPaths,
   isCriticToolName,
@@ -435,7 +426,6 @@ import {
   criticMinTools,
   needsVerificationContinuation,
   buildVerificationToolsNudge,
-  userRequestsOrderedSteps,
   userRequestsSpawnOrchestration,
   userRequestsSymbolTools,
   userRequestsVaultTools,
@@ -674,25 +664,12 @@ function hasRuntimePreferenceChange(patch: Partial<RuntimePreferences>): boolean
 }
 
 function buildToolAwarenessSnapshot(registry: ToolRegistry, recentTools: string[] = []): string {
-  const active = registry.getActiveToolNames();
-  const total = registry.getToolNames().length;
-  const inactive = Math.max(0, total - active.length);
-  const fam = registry
-    .getActiveFamilySummary(24)
-    .map((f) => `${f.family}(${f.active}/${f.total})`)
-    .join(", ");
-  const tail = active.slice(0, 16).join(", ") || "(none)";
-  const recent = [...new Set(recentTools)].slice(-12).join(", ") || "(none)";
-  const lazyHint = registry.isLazyToolLoading()
-    ? "REMINDER: when capability is missing, call list_tool_families then activate_tool_family for the nearest family."
-    : "REMINDER: lazy loading off; all registered tools are available.";
-  return (
-    `TOOL STATE: lazy=${registry.isLazyToolLoading() ? "on" : "off"}, active_count=${active.length}, inactive_count=${inactive}, registered_total=${total}\n` +
-    `ACTIVE FAMILIES: ${fam || "(none)"}\n` +
-    `ACTIVE TOOLS (sample): ${tail}\n` +
-    `RECENT TOOLS THIS TURN: ${recent}\n` +
-    `${lazyHint}`
-  );
+  // The capability manifest owns availability; working state needs only recent usage.
+  return "TOOL USAGE: " + JSON.stringify({
+    lazy: registry.isLazyToolLoading(),
+    active: registry.getActiveToolNames().length,
+    recent: [...new Set(recentTools)].slice(-12),
+  });
 }
 
 /**
@@ -1159,6 +1136,9 @@ const ORCHESTRATION_TOOL_NAMES = new Set([
   "wait_for_agents",
   "cancel_agent",
   "list_agents",
+  "start_mission",          // parent Mission Control owns the multi-chat mission
+  "mission_status",
+  "stop_mission",
   "verify_result",          // closes over harness.forkChild
   "evidence_critic",
   "path_critic",
@@ -1224,6 +1204,9 @@ export class AgentHarness {
 
   private readonly context: ContextManager;
   private readonly dispatcher: ToolDispatcher;
+  private procedureRuntime?: ProcedureRuntime;
+  private procedureRuntimePending?: Promise<ProcedureRuntime>;
+  private procedureFeatureClosed = false;
   private client: OpenAI;
   private readonly maxAgentDepth: number;
   private readonly maxConcurrentAgents: number;
@@ -1353,7 +1336,6 @@ export class AgentHarness {
   private verificationMidNudgesThisSend = 0;
   private static readonly MAX_VERIFICATION_MID_NUDGES = 3;
   private distillArtifactNudgeThisSend = false;
-  private capabilityNudgesInjectedThisSend = false;
   /** Timestamp of the last compression event in this send (for ACON failure analysis). */
   private lastCompressionTimestampThisSend = 0;
   /** Whether ACON guideline analysis has fired this send (one-shot). */
@@ -1384,14 +1366,8 @@ export class AgentHarness {
   private recoveryReasoningBroadenedThisSend = false;
   /** Last tool list passed to the provider stream — used for live context snapshots. */
   private lastStreamTools: OpenAI.Chat.Completions.ChatCompletionTool[] = [];
-  /** One-shot rule recall suffix (named protocol rules) at round 2. */
-  private ruleRecallInjectedThisSend = false;
   /** Rule IDs injected by the round-2 rule recall this send (for effectiveness scoring at turn end). */
   private injectedRuleIdsThisSend: string[] = [];
-  /** One-shot recipe prime at round 2 (positive channel — complements rule recall). */
-  private recipePrimeInjectedThisSend = false;
-  /** Recipe key primed this send (for outcome decay at turn end). */
-  private injectedRecipeKeyThisSend: string | null = null;
   /** Prior turn awaiting implicit follow-up feedback before learning loops run. */
   private pendingTurnLearning: PendingTurnLearningRecord | null = null;
   /** Raw user goal for the in-flight send (for deferred outcome learning). */
@@ -1434,6 +1410,7 @@ export class AgentHarness {
   private voicePostToolsNudgeFired = false;
   /** One tool-free finalize completion when tools ran but chat answer is missing. */
   private userReplyFinalizeAttempted = false;
+  private roundBudgetFinalizeAttempted = false;
   /** Tool calls with args — used for verify-before-done heuristics (run_shell test commands). */
   private toolCallsWithArgsThisTurn: Array<{ name: string; argsJson: string }> = [];
   /** Set when run_lint/run_tests (or equivalent) succeeded this send. */
@@ -1444,6 +1421,8 @@ export class AgentHarness {
   readonly ttsTurnBudget = new TtsTurnBudget();
   /** Wired from tools/speak.ts — synthesize when the model omits speak() in voice mode. */
   voiceTtsFallback?: (text: string, signal?: AbortSignal) => Promise<void>;
+  /** Installed by the audio tools; core owns lifecycle but never imports tools. */
+  voiceTtsStream?: { readonly id?: string; reset(signal: AbortSignal): void; finish(fallbackText: string): Promise<void>; cancel(): void };
   private voiceTtsController?: AbortController;
 
   /** Active persona. Set via setPersona(); defaults to config.persona or unnamed default. */
@@ -1573,6 +1552,7 @@ export class AgentHarness {
   }
 
   private syncExecutionStateToContext(): void {
+    this.context.setRuntimePermissions(this.dispatcher.approvalState());
     if (!this.executionState) {
       this.context.setExecutionStateBlock("");
       return;
@@ -1882,15 +1862,17 @@ export class AgentHarness {
     }
   }
 
-  /** Pre-activate tool families + inject turn nudges for explicit multi-step / verify / vault / email asks. */
+  /** Pre-activate relevant tools; record requested providers as current-turn data. */
   private ensureCapabilityToolPreseed(userMessage: string, openingTurn: boolean): void {
     if (this.agentDepth > 0) return;
     const emailCompose = shouldInjectEmailComposeGuidance(userMessage);
-    if (openingTurn && !emailCompose) return;
+    const accountSignup = isAccountSignupTurn(userMessage);
+    if (openingTurn && !emailCompose && !accountSignup) return;
     this.requestedArtifactConnectorsThisSend = requestedArtifactConnectors(
       userMessage, this.registry, classifyLocalArtifactTask(userMessage) !== null);
 
     const families = new Set<string>();
+    if (accountSignup) families.add("browser");
     if (verificationToolsNeeded(userMessage, this.runtimePreferences)) {
       families.add("orchestration");
     }
@@ -1932,40 +1914,9 @@ export class AgentHarness {
       }
     }
 
-    if (!this.capabilityNudgesInjectedThisSend) {
-      const nudges: string[] = [];
-      if (this.requestedArtifactConnectorsThisSend.length) {
-        nudges.push(`[REQUESTED ARTIFACT TOOLS] The user explicitly requested ${this.requestedArtifactConnectorsThisSend.join(", ")} for this local artifact action. Use mcp_search_tools to discover a relevant operation, then use the requested provider. Manual parsing does not complete that requested tool step. If the provider is unavailable, report the actual attempted operation and technical limit.`);
-      }
-      if (userRequestsOrderedSteps(userMessage)) {
-        nudges.push(buildOrderedStepsNudge(userMessage));
-      }
-      const paths = extractExplicitRepoPaths(userMessage);
-      if (paths.length > 0) {
-        nudges.push(buildExplicitPathReadNudge(paths));
-      }
-      if (userRequestsSymbolTools(userMessage)) {
-        nudges.push(buildSymbolIndexNudge());
-      }
-      if (userRequestsVaultTools(userMessage)) {
-        nudges.push(buildVaultToolsNudge());
-      }
-      if (verificationToolsNeeded(userMessage, this.runtimePreferences)) {
-        nudges.push(
-          "[VERIFICATION TOOLS ACTIVE] verify_result and critic tools are enabled for this turn — " +
-            "call them when the user sequence or harness critic gate requires verification (R-VERIFY-READ)."
-        );
-      }
-      if (shouldInjectEmailComposeGuidance(userMessage)) {
-        nudges.push(EMAIL_COMPOSE_CAPABILITY_NUDGE);
-      }
-      for (const content of nudges) {
-        this.context.appendMessage({ role: "system", content });
-      }
-      if (nudges.length > 0) {
-        this.capabilityNudgesInjectedThisSend = true;
-      }
-    }
+    this.context.setTurnContext("requested_artifact_connectors",
+      this.requestedArtifactConnectorsThisSend.length
+        ? `Requested artifact providers: ${this.requestedArtifactConnectorsThisSend.join(", ")}` : "");
   }
 
   /** Mid-turn nudge when verification/critics are required but still missing. */
@@ -2535,44 +2486,12 @@ export class AgentHarness {
     });
   }
 
-  private maybeInjectRuntimePreferenceRouting(userMessage: string): void {
-    if (this.agentDepth > 0) return;
-    const inf = this.turnInference;
-    if (!inf?.runtimePreferenceIntent && !inf?.runtimeSettingsQuery) return;
-    if (inf.runtimeSettingsQuery) {
-      this.context.appendMessage({
-        role: "system",
-        content:
-          "[RUNTIME ROUTING] The user asked to check current runtime/persona settings. " +
-          "Call get_runtime_settings (fields: persona_controls for dial checks) before stating values.",
-      });
-    }
-    if (!inf.runtimePreferenceIntent) return;
-    const lower = userMessage.toLowerCase();
-    const personaDialIntent =
-      /\b(humou?r|formality|confidence|verbosity|persona\s*strength|tone|style)\b/.test(lower);
-    const routing =
-      personaDialIntent
-        ? "[RUNTIME ROUTING] The user requested persona control changes. Apply via set_runtime_settings(persona_controls). Do not use remember for this."
-        : "[RUNTIME ROUTING] The user requested runtime preference changes. Apply via explicit runtime tools and report tool-backed outcomes only.";
-    this.context.appendMessage({ role: "system", content: routing });
-  }
-
   private maybeInjectRuntimeSettingsSnapshot(): void {
     if (this.agentDepth > 0) return;
     const controls = this.runtimePreferences?.persona?.controls;
     if (!controls) return;
-    this.context.appendMessage({
-      role: "system",
-      content:
-        "[RUNTIME SETTINGS SNAPSHOT]\n" +
-        `humorPercent=${controls.humorPercent ?? "n/a"}, ` +
-        `formality=${controls.formality ?? "n/a"}, ` +
-        `confidence=${controls.confidence ?? "n/a"}, ` +
-        `verbosity=${controls.verbosity ?? "n/a"}, ` +
-        `personaStrength=${controls.personaStrength ?? "n/a"}\n` +
-        "If these conflict with persona style or examples, treat this snapshot as source of truth.",
-    });
+    this.context.setTurnContext("persona_controls", "Persona controls: " + JSON.stringify(controls));
+
   }
 
   private async applyRuntimePreferencePatch(patch: Partial<RuntimePreferences>): Promise<void> {
@@ -2774,6 +2693,37 @@ export class AgentHarness {
     return 45_000;
   }
 
+  async getProcedureRuntime(create = true): Promise<ProcedureRuntime | null> {
+    if (this.procedureFeatureClosed || this.config.proceduralMemory?.enabled === false) return null;
+    if (this.procedureRuntime) return this.procedureRuntime;
+    const file = this.config.proceduralMemory?.databasePath;
+    if (!create && this.config.proceduralMemory?.enabled !== true && !ProcedureRuntime.exists(file)) return null;
+    const runtimeSources=await Promise.all(['agent','dispatcher','procedural_memory/runtime','procedural_memory/validation'].map(async file=>{
+      const extension=import.meta.url.endsWith('.ts')?'.ts':'.js';return readFileFs(new URL('./'+file+extension,import.meta.url));
+    }));
+    const runtimeBuild='sha256:'+procedureFingerprint(Buffer.concat(runtimeSources));
+    if (this.procedureFeatureClosed) return null;
+    this.procedureRuntimePending ??= ProcedureRuntime.open({workspaceRoot:this.workspaceRoot,databasePath:file,
+      registry:this.registry,emitter:this.emitter,chatId:this.taskId,model:this.config.model,harnessVersion:runtimeBuild,consolidate:this.config.proceduralMemory?.consolidate===true,
+      dispatch:(id,name,args)=>this.dispatcher.dispatch(id,name,args),
+      explain:async(evidence)=>{
+        const controller=new AbortController(),timer=setTimeout(()=>controller.abort(),20000);
+        const stop=()=>controller.abort();this.currentTurnController?.signal.addEventListener("abort",stop,{once:true});
+        try{const model=getFastModelSlug(this.config.model);const result=await completeChatJson(this.client,{model,isFastModel:true,routeState:this.providerRouteState,
+          maxTokens:600,temperature:0.1,signal:controller.signal,messages:[{role:"system",content:'Explain the supplied ordered development episode as an unverified hypothesis. Return JSON with short name, purpose and explanation. Do not claim causality or general utility. Do not copy credentials, absolute paths or task-specific identifiers. This output never changes executable steps or validation criteria.'},{role:"user",content:evidence.slice(0,12000)}]});
+          if(!result.ok)throw new Error(result.error);const value=result.parsed as Record<string,unknown>;
+          return{model,name:typeof value.name==='string'?value.name.slice(0,120):undefined,purpose:typeof value.purpose==='string'?value.purpose.slice(0,1000):undefined,explanation:typeof value.explanation==='string'?value.explanation.slice(0,2000):undefined};
+        }finally{clearTimeout(timer);this.currentTurnController?.signal.removeEventListener("abort",stop);}
+      }});
+    try {
+      const runtime = await this.procedureRuntimePending;
+      if (this.procedureFeatureClosed) { runtime.close(); return null; }
+      this.procedureRuntime = runtime;
+      return runtime;
+    } catch(error) { this.procedureRuntimePending=undefined; throw error; }
+  }
+  closeProcedureRuntime(): void {this.procedureFeatureClosed=true;this.procedureRuntime?.close();}
+
   constructor(config: AgentConfig) {
     this.config = config;
     this.workspaceRoot = config.workspaceRoot
@@ -2823,6 +2773,7 @@ export class AgentHarness {
       }
     });
     this.registry = new ToolRegistry();
+    this.registry.setSuppressedTools(browserFirstSuppressedTools("", resolveHarnessEnvRaw("AGENT_WEB_SEARCH_FETCH", this.runtimePreferences) === "1"));
     // Shared memory bus: use provided one (child harness) or create a fresh root bus.
     this.sharedBus = config.sharedBus ?? new SharedMemoryBus();
     // Wire onCompressed callback so context compression fires a structured event (#7)
@@ -2918,6 +2869,9 @@ export class AgentHarness {
       (toolName, args) => this.checkContractAndCommitments(toolName, args),
       config.dryRunApprovals === true,
     );
+    this.dispatcher.bindHarness(this);
+
+    this.dispatcher.setExecutionGuard(async(name,args)=>{await this.procedureRuntime?.beforeToolExecution(name,args);});
 
     // Register self in orchestrator
     this.orchestrator.register({
@@ -2930,6 +2884,7 @@ export class AgentHarness {
       abortController: new AbortController(),
     });
     this.syncContextWindowForModel().catch(() => {});
+    if(isOpenRouterApiBaseUrl(this.config.baseURL))void warmProviderValueCatalog(this.config.model,this.config.openRouterApiKey).catch(()=>{});
     if (this.agentDepth === 0 && !config.worldContext?.disabled &&
         resolveHarnessEnvRaw("AGENT_WORLD_CONTEXT", this.runtimePreferences) !== "0") {
       void warmWorldContextTools().catch(() => {});
@@ -3052,13 +3007,14 @@ export class AgentHarness {
       workflowPreset?: SignatureWorkflowPreset;
     }
   ): Promise<void> {
+    if(this.config.openRouterApiKey==='liminal-provider-not-configured')throw new Error('Choose and verify a provider in setup before chatting.');
     // Wrap the entire send in an AsyncLocalStorage scope so every file tool,
     // background persist, and post-turn write resolves this harness's
     // workspace root (instead of the process-global). Lets parallel sub-agents
     // operate on isolated trees (e.g. git worktrees). We also bind the chat id
     // so memory recall + writes can attribute provenance without each tool
     // factory needing a harness reference (federation Phase 2).
-    if (this.running) throw new Error("Agent is already processing a message");
+    if (this.running) { this.procedureRuntime?.invalidateTask(); throw new Error("Agent is already processing a message"); }
     this.sendStartTime = Date.now();
     const orgCtx = await resolveOrgContextForHarness();
     return runWithWorkspaceRoot(this.workspaceRoot, () =>
@@ -3081,7 +3037,7 @@ export class AgentHarness {
       workflowPreset?: SignatureWorkflowPreset;
     }
   ): Promise<void> {
-    if (this.running) throw new Error("Agent is already processing a message");
+    if (this.running) { this.procedureRuntime?.invalidateTask(); throw new Error("Agent is already processing a message"); }
     await this.maybeRecoverManagedInferenceRoute();
     await this.maybePreemptManagedCreditExhaustion();
     void this.refreshManagedInferenceCatalog().then(() => this.syncContextWindowForModel());
@@ -3103,10 +3059,18 @@ export class AgentHarness {
     this.signatureDeliverablesReadyThisSend = false;
     this.ttsTurnBudget.reset();
     this.currentTurnController = new AbortController();
+    this.voiceTtsController?.abort();
+    if (this.voiceTtsStream) {
+      this.voiceTtsController = new AbortController();
+      this.voiceTtsStream.reset(this.mergeStreamAbortSignals(this.voiceTtsController)!);
+    }
     this.currentTurnTraceId = crypto.randomUUID();
     this.dispatcher.setTurnTraceId(this.currentTurnTraceId);
     this.dispatcher.setTurnAbortSignal(this.mergeStreamAbortSignals());
     this.running = true;
+    if (this.agentDepth === 0) {
+      this.registry.setSuppressedTools(browserFirstSuppressedTools(userMessage, resolveHarnessEnvRaw("AGENT_WEB_SEARCH_FETCH", this.runtimePreferences) === "1"));
+    }
     this.clearPersonalityHeartbeatSchedule();
     this.lastTurnTerminationReason = null;
 
@@ -3227,7 +3191,7 @@ export class AgentHarness {
     this.researchContinuationAttemptedThisSend = false;
     this.verificationMidNudgesThisSend = 0;
     this.distillArtifactNudgeThisSend = false;
-    this.capabilityNudgesInjectedThisSend = false;
+    this.context.clearTurnContext();
     this.lastCompressionTimestampThisSend = 0;
     this.aconGuidelineAnalyzedThisSend = false;
     this.recallRewriteThisSend = null;
@@ -3261,10 +3225,8 @@ export class AgentHarness {
     this.lastStreamTools = [];
     this.voicePostToolsNudgeFired = false;
     this.userReplyFinalizeAttempted = false;
-    this.ruleRecallInjectedThisSend = false;
+    this.roundBudgetFinalizeAttempted = false;
     this.injectedRuleIdsThisSend = [];
-    this.recipePrimeInjectedThisSend = false;
-    this.injectedRecipeKeyThisSend = null;
     this.writeIntegrityNudgeThisSend = false;
     this.fileWritePathTail.clear();
     this.fileWriteStreamSink = new FileWriteStreamSink(
@@ -3428,7 +3390,8 @@ export class AgentHarness {
           this.client,
           this.config.model,
           userMessage,
-          intentWorkspace
+          intentWorkspace,
+          { interactiveVoice: this.liveDictationThisSend && Boolean(this.voiceTtsStream) }
         );
         if (worldCtxPromise) {
           const [inference, worldCtx] = await Promise.all([intentP, worldCtxPromise]);
@@ -3512,7 +3475,7 @@ export class AgentHarness {
         /* non-fatal */
       }
     }
-    this._turnRoutingProfile = buildRoutingProfile(this.turnInference ?? null, this.config.model);
+    this._turnRoutingProfile = buildCacheAwareRoutingProfile(this.turnInference ?? null, this.config.model);
     if (!openingTurn) {
       const routingModel = this._turnRoutingProfile.modelSlug;
       const surfaceRes = resolveReasoningSurface(routingModel);
@@ -3546,18 +3509,12 @@ export class AgentHarness {
         if (priorWork) this.context.appendMessage({role: "user", content: priorWork});
         this.context.appendMessage({role: "system", content: this.artifactInvestigation.formatContextBlock()});
       }
-      this.context.appendMessage({
-        role: "system",
-        content: buildReasoningSurfaceInjection(surfaceRes, routingModel),
-      });
-      this.context.appendMessage({
-        role: "system",
-        content: buildReasoningBudgetInjection(this._turnReasoningBudget, this._turnReasoningSurface),
-      });
-      this.context.appendMessage({
-        role: "system",
-        content: buildEffortTurnInjection(),
-      });
+      this.context.setTurnContext("settings", JSON.stringify({
+        reasoning_surface: this._turnReasoningSurface,
+        output_effort: resolveEffortLevel(),
+        ...(this._turnReasoningSurface === "external"
+          ? { suggested_think_depth: budget.thinkDepth } : {}),
+      }));
       // Workflow opportunity detection (ultracode-style): recognize tasks where
       // a dynamic workflow is the right tool. The fast-model intent classifier's
       // `workflowSuitable` field is authoritative when it ran (handles paraphrases
@@ -3572,9 +3529,6 @@ export class AgentHarness {
           ? this.turnInference!.workflowSuitable === true
           : regexSignal?.match === true;
         if (wfMatch) {
-          const reason = trustLlm
-            ? "a task that fans out into many independent sub-tasks"
-            : regexSignal?.reason || "a parallelizable task";
           const toActivate = ["plan_workflow", "run_workflow", "workflow_status", "query_workflow"].filter(
             (n) => this.registry.has(n) && !this.registry.isActive(n)
           );
@@ -3582,14 +3536,7 @@ export class AgentHarness {
             this.registry.activate(toActivate);
             this.context.refreshProtocolDynamic(this.registry.getActiveToolNames());
           }
-          this.context.appendMessage({
-            role: "system",
-            content:
-              `[WORKFLOW OPPORTUNITY] This turn looks like ${reason} — exactly where a dynamic workflow is powerful: ` +
-              "many INDEPENDENT sub-agents fan out in parallel and their intermediate results stay OUT of your context (only a distilled per-phase summary returns), so you can coordinate far more work without context blow-up. " +
-              "The workflow tools are now active. Prefer plan_workflow (draft the phases) → run_workflow (execute; approval-gated) over orchestrating spawn_agent calls yourself; use query_workflow to pull any per-agent detail afterward. " +
-              "If on reflection this is actually a small, single-step task, ignore this and proceed directly.",
-          });
+
         }
       }
       // Intent-scoped family pre-seed (coding/research/etc.) — same pattern as workflow activation.
@@ -3617,9 +3564,7 @@ export class AgentHarness {
         }
       }
       this.ensureCapabilityToolPreseed(userMessage, openingTurn);
-      if (shouldInjectEmailComposeGuidance(userMessage)) {
-        this.context.appendMessage({ role: "system", content: EMAIL_COMPOSE_TURN_INJECTION });
-      }
+
       if (shouldInjectMailAccountGuidance(userMessage)) {
         this.context.appendMessage({ role: "system", content: MAIL_ACCOUNT_TURN_INJECTION });
       }
@@ -3691,25 +3636,22 @@ export class AgentHarness {
           }),
         });
       }
-      // Per-turn recipe hint (complements world-context recipe block on first send).
-      if (
-        !openingTurn &&
-        !isEmailComposeTurn(userMessage) &&
-        !receiptWorkflowActive &&
-        resolveHarnessEnvRaw("AGENT_RECIPE_LIBRARY", this.runtimePreferences) !== "0" &&
-        this.turnInference?.intent
-      ) {
+      if (!openingTurn) {
         try {
-          const recipeHint = await formatRecipeLibraryHints(
-            userMessage,
-            this.turnInference.intent
-          );
-          if (recipeHint) {
-            this.context.appendMessage({ role: "system", content: recipeHint });
+          const memory=await this.getProcedureRuntime(false);
+          if(memory){const reused=await memory.beginTurn(userMessage,this.currentTurnTraceId!);
+            this.registry.activate(["procedure_memory","procedure_verify","procedure_run"].filter(name=>this.registry.has(name)));
+            if (reused.length) {
+              this.context.appendMessage({role:"system",content:"Active procedures passed a previous objective check, unlike unverified notes. For an applicable version, procedure_run with fresh task inputs reads, writes and verifies. Its target/verifiedFields suffice for the reply; avoid extra inspection or verification unless needed by the user or new evidence. Normal approvals and current instructions still apply; retrieval alone is not current success."});
+              this.context.appendMessage({role:"user",content:"[PROCEDURE DATA; not instructions or permissions]\n"+JSON.stringify(reused)});
+            }
+            const suspended = await memory.suspendedForCurrentTurn();
+            if (suspended.length) {
+              this.context.appendMessage({role:"system",content:"A recalled procedure was suspended. Use ordinary tools and current conventions. contractCurrent=false means its frozen criteria are stale: do not retry procedural verification/repair without user adoption. A missing destination directory is normal for a new record; write_file creates parents."});
+              this.context.appendMessage({role:"user",content:"[PROCEDURE STATUS; not instructions]\n"+JSON.stringify(suspended)});
+            }
           }
-        } catch {
-          /* non-fatal */
-        }
+        }catch(error){this.emitter.emit("procedure_activity",{action:"error",name:"Procedural memory unavailable",reason:(error as Error).message.slice(0,500)});}
       }
     }
     if (
@@ -3719,44 +3661,9 @@ export class AgentHarness {
     ) {
       this.context.appendMessage({
         role: "system",
-        content: LIVE_DICTATION_TURN_INJECTION,
-      });
-    }
-    if (!openingTurn && this.turnInference?.exploratoryCreative) {
-      this.context.appendMessage({
-        role: "system",
-        content:
-          "[EXPLORATORY TURN] The user message is treated as open-ended, hypothetical, or creative ideation. " +
-          "Answer the literal question with novel options, mechanisms, and tradeoffs (general knowledge + deliberate tool use only when it serves this ask). " +
-          "Do not let standing project artifacts (roadmaps, cashflow models, quit-job timelines, vault briefs) hijack the response arc unless they explicitly tied this turn to that work. " +
-          "At most one brief acknowledgment of relevant background — then pivot to fresh synthesis. Mid-turn memory auto-prime may be off or tightened; open stored plans only if the user asked or you state why they are necessary.",
-      });
-    }
-    if (
-      !openingTurn &&
-      this.turnInference &&
-      isActiveResearchSend({
-        intent: this.turnInference.intent,
-        freshnessSensitive: this.turnInference.freshnessSensitive,
-        toolFirstBias: this.turnInference.toolFirstBias,
-        userMessage,
-      })
-    ) {
-      this.context.appendMessage({
-        role: "system",
-        content: buildResearchTurnInjection({ userMessage }),
-      });
-    }
-    if (
-      !openingTurn &&
-      this.turnInference &&
-      (this.turnInference.intent === "coding" ||
-        this.turnInference.intent === "execution" ||
-        this.turnInference.implementShip === true)
-    ) {
-      this.context.appendMessage({
-        role: "system",
-        content: buildCodingTurnInjection({ userMessage }),
+        content: this.voiceTtsStream
+          ? "[STREAMED VOICE MODE] The user is listening. Write your natural spoken answer directly in short, complete sentences; the harness speaks each sentence as it arrives. Keep the answer concise. After tool work, state the result in your reply. Do not call speak(), duplicate a spoken/written answer, read code/JSON aloud, or add filler acknowledgements."
+          : LIVE_DICTATION_TURN_INJECTION,
       });
     }
     if (
@@ -3764,15 +3671,11 @@ export class AgentHarness {
       this.turnInference?.likelyEditPaths &&
       this.turnInference.likelyEditPaths.length > 0
     ) {
-      this.context.appendMessage({
-        role: "system",
-        content:
-          "[INTENT EDIT HINTS] Classifier-suggested repo paths for this turn (prefer opening these first when relevant; ignore if the user contradicts):\n" +
-          this.turnInference.likelyEditPaths.map((p) => `- ${p}`).join("\n"),
-      });
+      this.context.setTurnContext("edit_hints",
+        "Suggested paths: " + this.turnInference.likelyEditPaths.join(", "));
+
     }
     this.maybeInjectRuntimeSettingsSnapshot();
-    this.maybeInjectRuntimePreferenceRouting(userMessage);
 
     if (this.config.workingStateEnabled !== false) {
       this.context.initEpistemicState(telemetryUserLabel);
@@ -4044,6 +3947,7 @@ export class AgentHarness {
       if (!this.turnEndEmittedThisSend) {
         this.emitTurnEnd("error");
       }
+      try{await this.procedureRuntime?.finishTurn(this.lastTurnTerminationReason??"error");}catch(error){this.emitter.emit("procedure_activity",{action:"error",name:"Procedure evidence",reason:(error as Error).message.slice(0,500)});}
       this.sessionGreetingThisSend = false;
       this.personaBootstrapPromptThisSend = false;
       this.liveDictationThisSend = false;
@@ -4207,13 +4111,9 @@ export class AgentHarness {
     if (contractPrelude) {
       subtaskTail.unshift({ role: "user" as const, content: contractPrelude });
     }
-    const protocolWithEffort =
-      coreStr.trim().length > 0
-        ? `${coreStr}\n\n${buildEffortTurnInjection()}`
-        : buildEffortTurnInjection();
     const childInceptionBase: Message[] = [
       personaMsg,
-      { role: "system" as const, content: protocolWithEffort },
+      { role: "system" as const, content: coreStr },
       ...subtaskTail,
     ];
 
@@ -4508,7 +4408,7 @@ export class AgentHarness {
     if (resolveHarnessEnvRaw("AGENT_MEMORY_AUTO_EXTRACT", this.runtimePreferences) === "0") return;
     if (this.agentDepth > 0) return;
     if (!this.registry.has("remember")) return;
-    if (this.toolsUsedThisTurn.length === 0) return;
+    if (!shouldAutoExtractMemoriesFromTools(this.toolsUsedThisTurn)) return;
 
     const payload =
       `User:\n${this.lastUserMessage.slice(0, 2000)}\n\n` +
@@ -5179,7 +5079,19 @@ export class AgentHarness {
       !this.toolsUsedThisTurn.includes("speak") &&
       !this.sessionGreetingThisSend &&
       !this.personaBootstrapPromptThisSend;
-    if (shouldAutoSpeak && this.voiceTtsFallback) {
+    if (shouldAutoSpeak && this.voiceTtsStream) {
+      const controller = this.voiceTtsController;
+      void this.voiceTtsStream.finish(this.context.getLastAssistantMessage() ?? "")
+        .catch(error => {
+          if (!controller?.signal.aborted) this.emitter.emit("text", {channel: "trace", delta: `\n[HARNESS] Speech playback failed: ${String(error)}\n`});
+        })
+        .finally(() => {
+          if (this.voiceTtsController === controller) this.voiceTtsController = undefined;
+        });
+      // Audio is independent of agent admission. Never leave the chat busy while
+      // sentence synthesis drains in the background.
+      finish();
+    } else if (shouldAutoSpeak && this.voiceTtsFallback) {
       const controller = new AbortController();
       this.voiceTtsController?.abort();
       this.voiceTtsController = controller;
@@ -5193,6 +5105,7 @@ export class AgentHarness {
           finish();
         });
     } else {
+      if (!shouldAutoSpeak) this.voiceTtsStream?.cancel();
       finish();
     }
   }
@@ -5202,9 +5115,16 @@ export class AgentHarness {
    * Triggers the stream abort path — the harness will emit turn_end with reason "error".
    */
   abortCurrentTurn(): void {
+    this.procedureRuntime?.invalidateTask();
     this.currentTurnController?.abort();
-    // Fallback playback can outlive send()'s controller while turn_end waits for speech.
+    this.cancelVoiceSpeech();
+  }
+
+  /** Stop audio generation without aborting the user's background work. */
+  cancelVoiceSpeech(voiceId?: string): void {
+    if (voiceId && this.voiceTtsStream?.id !== voiceId) return;
     this.voiceTtsController?.abort();
+    this.voiceTtsStream?.cancel();
   }
 
   private mergeStreamAbortSignals(streamAbort?: AbortController): AbortSignal | undefined {
@@ -5230,7 +5150,7 @@ export class AgentHarness {
    */
   private syncVoiceModeTools(): void {
     const ttsOn = resolveSpeechSynthesisConfig(this.runtimePreferences).enabled;
-    const voiceOn = this.liveDictationThisSend && ttsOn;
+    const voiceOn = this.liveDictationThisSend && ttsOn && !this.voiceTtsStream;
     if (!this.registry.has("speak")) return;
     if (this.registry.isLazyToolLoading()) {
       if (voiceOn) {
@@ -5243,6 +5163,39 @@ export class AgentHarness {
       }
     }
     this.context.refreshProtocolDynamic(this.registry.getActiveToolNames());
+  }
+
+  /** End a bounded run with an evidence-grounded handoff, never extra effects.
+   * The termination remains round_cap; a summary is not proof of completion. */
+  private async finalizeAtToolRoundLimit(requiredHandoff?: string): Promise<void> {
+    if (this.abortSignal?.aborted || this.currentTurnController?.signal.aborted) {
+      this.emitTurnEnd("error");
+      return;
+    }
+    const handoffNotice: Message = { role: "system", content: "The tool-round budget is exhausted. No more tools are available. Give a brief final handoff from observed results: what was actually completed/verified, what remains incomplete, and any adoption or approval gap. Do not audit, plan more work, invent success or imply blocked checks passed." };
+    this.emitter.emit("recovery_action", { strategy: "escalate", reason: "tool_round_budget", notes: "One tool-free handoff; termination remains round_cap" });
+    const accumulator = new StreamAccumulator();
+    let text = "";
+    try {
+      const messages = await this.prepareMessagesForContextLimit([...await this.context.buildMessages(), handoffNotice], this.config.model, []);
+      const stream = await this.streamWithRetry(messages, [], undefined, this._turnReasoningBudget, undefined, this._turnReasoningSurface);
+      this.lastStreamTools = [];
+      for await (const chunk of withChunkTimeout(stream, () => resolveStreamChunkTimeoutMs({ baseURL: this.config.baseURL, reasoningEffort: this._turnReasoningBudget?.reasoningEffort ?? null, fileWriteSinkActive: false, largeToolArgInFlight: false }))) {
+        if (this.abortSignal?.aborted || this.currentTurnController?.signal.aborted) { this.emitTurnEnd("error"); return; }
+        accumulator.processChunk(chunk);
+      }
+      accumulator.finishInlineReasoning();
+      if (accumulator.accumulatedToolCalls.length) throw new Error("Final handoff attempted a tool call");
+      text = accumulator.accumulatedText.trim();
+    } catch (error) {
+      if (this.abortSignal?.aborted || this.currentTurnController?.signal.aborted) { this.emitTurnEnd("error"); return; }
+      this.emitter.emit("text", { channel: "trace", delta: `\n[HARNESS] Budget handoff unavailable: ${(error as Error).message}\n` });
+    }
+    if (text && requiredHandoff) text += `\n\n${requiredHandoff}`;
+    text ||= requiredHandoff ?? "The tool-round limit was reached. Tool work has stopped; completion and any outstanding checks must be assessed from the recorded results.";
+    this.context.appendMessage({ role: "assistant", content: text });
+    this.emitter.emit("text", { delta: text, channel: "user" });
+    this.emitTurnEnd("round_cap");
   }
 
   private async runReActLoop(round = 0): Promise<void> {
@@ -5260,6 +5213,7 @@ export class AgentHarness {
     assertTurnActive();
 
     if (round >= this.config.maxToolRoundsPerTurn) {
+      let requiredHandoff: string | undefined;
       if (artifactInvestigation) {
         let checkpointNote = "";
         try {
@@ -5267,9 +5221,17 @@ export class AgentHarness {
           assertTurnActive();
           checkpointNote = ` Partial investigation checkpoint: ${checkpoint.jsonPath}.`;
         } catch { assertTurnActive(); }
-        const handoff = `Reached the configured tool-round limit (${this.config.maxToolRoundsPerTurn}) before completion. Saved outputs are retained; remaining work is incomplete.${checkpointNote}`;
-        this.context.appendMessage({role: "assistant", content: handoff});
-        this.emitter.emit("text", {channel: "user", delta: `\n\n${handoff}`});
+        requiredHandoff = `Reached the configured tool-round limit (${this.config.maxToolRoundsPerTurn}) before completion. Saved outputs are retained; remaining work is incomplete.${checkpointNote}`;
+        this.context.appendMessage({role: "system", content: requiredHandoff});
+      }
+      if (this.toolsUsedThisTurn.length && !this.roundBudgetFinalizeAttempted) {
+        this.roundBudgetFinalizeAttempted = true;
+        await this.finalizeAtToolRoundLimit(requiredHandoff);
+        return;
+      }
+      if (requiredHandoff) {
+        this.context.appendMessage({role: "assistant", content: requiredHandoff});
+        this.emitter.emit("text", {channel: "user", delta: requiredHandoff});
       }
       this.emitTurnEnd("round_cap");
       this.emitter.emit("error", {
@@ -5357,57 +5319,8 @@ export class AgentHarness {
     }
 
     if (
-      round === 1 &&
-      resolveHarnessEnvRaw("AGENT_RULE_RECALL", this.runtimePreferences) !== "0" &&
-      !this.ruleRecallInjectedThisSend &&
-      !this.sessionGreetingThisSend &&
-      !this.personaBootstrapPromptThisSend
-    ) {
-      this.ruleRecallInjectedThisSend = true;
-      let ruleMsg: string;
-      try {
-        const [hitCounts, demoted] = await Promise.all([
-          getRuleHitCounts(),
-          getDemotedRuleIds(),
-        ]);
-        const intent = this.turnInference?.intent ?? "knowledge";
-        ruleMsg = buildHarnessRuleRecallMessageForIntent(intent, hitCounts, demoted);
-      } catch {
-        ruleMsg = buildHarnessRuleRecallMessageForIntent(
-          this.turnInference?.intent ?? "knowledge",
-          new Map()
-        );
-      }
-      this.context.appendMessage({ role: "system", content: ruleMsg });
-      this.injectedRuleIdsThisSend = extractRuleIds(ruleMsg);
-    }
-
-    if (
-      round === 1 &&
-      resolveHarnessEnvRaw("AGENT_RECIPE_PRIME", this.runtimePreferences) !== "0" &&
-      resolveHarnessEnvRaw("AGENT_RECIPE_LIBRARY", this.runtimePreferences) !== "0" &&
-      !this.recipePrimeInjectedThisSend &&
-      !this.sessionGreetingThisSend &&
-      !this.personaBootstrapPromptThisSend
-    ) {
-      this.recipePrimeInjectedThisSend = true;
-      try {
-        const intent = this.turnInference?.intent ?? "knowledge";
-        const recipe = await findBestRecipeForPrime(intent);
-        if (recipe) {
-          this.context.appendMessage({
-            role: "system",
-            content: formatRecipePrimeMessage(recipe),
-          });
-          this.injectedRecipeKeyThisSend = recipe.key;
-        }
-      } catch {
-        /* non-fatal */
-      }
-    }
-
-    if (
       round === 0 &&
+      !this.voiceTtsStream &&
       this.liveDictationThisSend &&
       resolveSpeechSynthesisConfig(this.runtimePreferences).enabled &&
       !this.toolsUsedThisTurn.includes("speak")
@@ -5420,6 +5333,7 @@ export class AgentHarness {
 
     if (
       round >= 1 &&
+      !this.voiceTtsStream &&
       this.liveDictationThisSend &&
       resolveSpeechSynthesisConfig(this.runtimePreferences).enabled &&
       this.toolsUsedThisTurn.length > 0 &&
@@ -5776,7 +5690,7 @@ export class AgentHarness {
     // execution intents carry toolFilter=null and heuristic classifications never
     // activate filters (applyToolFilter requires source==="llm" + high confidence).
     if (!this._turnRoutingProfile) {
-      this._turnRoutingProfile = buildRoutingProfile(
+      this._turnRoutingProfile = buildCacheAwareRoutingProfile(
         this.turnInference ?? null,
         this.config.model
       );
@@ -5813,6 +5727,12 @@ export class AgentHarness {
       finishingSignature || this.sessionGreetingThisSend || this.personaBootstrapPromptThisSend
         ? []
         : this.registry.toOpenAIFormat(routingProfile.toolFilter ?? undefined);
+    if (this.voiceTtsStream) tools = tools.filter(t => t.type !== 'function' || t.function.name !== 'speak');
+    if (this.procedureRuntime && tools.some((tool) => tool.function.name.startsWith("procedure_"))) {
+      let available = { run: false, verify: false };
+      try { available = await this.procedureRuntime.modelToolAvailability(); } catch { /* Ordinary tools remain available if procedure storage fails. */ }
+      tools = tools.filter((tool) => (tool.function.name !== "procedure_run" || available.run) && (tool.function.name !== "procedure_verify" || available.verify));
+    }
     // Reasoning-stall breaker: once a reason()-only spiral has been escalated,
     // drop the reasoning tools from the tool list so the model must call a real
     // tool or finalize. Cleared the moment any action tool runs (see below).
@@ -5963,9 +5883,9 @@ export class AgentHarness {
             | null
             | undefined;
           if (usage && typeof usage === "object") {
-            const cached = extractCachedTokens(usage);
+            const cached = normalizeCacheUsage(usage).cachedTokens;
             const prompt = (usage.prompt_tokens ?? 0) as number;
-            if (prompt > 0) {
+            if (prompt > 0 && cached !== null) {
               const pct = prompt > 0 ? Math.round((cached / prompt) * 100) : 0;
               const snap = this.providerRouteState.snapshot();
               const strategy = resolveProviderStrategy();
@@ -5982,6 +5902,17 @@ export class AgentHarness {
         }
         const latencyMetrics = inferenceLatencyTracker.markCompletion();
         this.emitter.emit("inference_latency", latencyMetrics);
+        const provider = accumulator.provider;
+        const cacheUsage = {
+          ts: new Date().toISOString(), chatId: this.taskId, scope: "agent" as const,
+          model: activeModelSlug, provider, requestId: accumulator.responseId,
+          ...normalizeCacheUsage(accumulator.usage), ...cacheRequestShape(this.taskId, activeModelSlug, messages, tools),
+          ttftMs: latencyMetrics.ttftMs, latencyMs: latencyMetrics.totalLatencyMs,
+          providerEndpoint: selectedProviderEndpoint(activeModelSlug,this.taskId,provider),
+        };
+        observeProviderPerformance(cacheUsage);
+        this.emitter.emit("cache_usage", cacheUsage);
+        void recordCacheUsage(cacheUsage).catch(() => undefined);
         break streamLoop; // stream completed successfully
       } catch (streamErr) {
         // Never retry if the task was externally cancelled
@@ -6116,7 +6047,10 @@ export class AgentHarness {
     }
     this.repairEmailComposeToolCallArgs(toolCalls);
 
-    const assistantMessage = this.buildAssistantMessage(accumulatedText, toolCalls);
+    const assistantMessage = {
+      ...this.buildAssistantMessage(accumulatedText, toolCalls),
+      ...(this._turnReasoningSurface === "native" ? accumulator.accumulatedProviderReasoning : {}),
+    };
 
     if (
       !skipStreamContinuationsForIntro &&
@@ -6543,7 +6477,7 @@ export class AgentHarness {
               if (path && !this.editStaleHintsSentThisTurn.has(hintKey)) {
                 this.editStaleHintsSentThisTurn.add(hintKey);
                 this.context.appendMessage({
-                  role: "user",
+                  role: "system",
                   content: buildEditStaleRecoveryMessage(path, getFileRevision(this.fileRevisionThisTurn, path)),
                 });
               }
@@ -6580,10 +6514,9 @@ export class AgentHarness {
         ) {
           this.writeIntegrityNudgeThisSend = true;
           this.context.appendMessage({
-            role: "user",
-            content:
-              "[SYSTEM NOTE] The last file write may be incomplete (likely_truncated). " +
-              "Continue with write_file mode=append before answering the user.",
+            role: "system",
+            content: "[WRITE INTEGRITY] " + JSON.stringify({ path: (() => { try { return JSON.parse(tc.argsJson).path ?? null; } catch { return null; } })(), signal: "possible_truncation", tool: tc.name, evidence: r.output }) +
+              "\nInspect the relevant file state if repair is needed. Choose the repair from evidence; do not blindly append or duplicate existing content.",
           });
         }
         const line = `${tc.name}:${r.ok ? "ok" : "fail"}`;
@@ -6847,7 +6780,7 @@ export class AgentHarness {
       if (fileRevisionsThisBatch.length > 0) {
         const revisionMsg = buildFileRevisionBatchNotice(fileRevisionsThisBatch);
         if (revisionMsg) {
-          this.context.appendMessage({ role: "user", content: revisionMsg });
+          this.context.appendMessage({ role: "system", content: revisionMsg });
         }
       }
       if (this.changedFilesThisTurn.size > changedPathsCountBeforeBatch) {
@@ -7088,7 +7021,8 @@ export class AgentHarness {
       }
 
       assertTurnActive();
-      await this.context.elideStaleToolResults();
+      // Preserve history between cache hits. Elision remains available in
+      // context-pressure/overflow recovery instead of rewriting it every round.
 
       // Per-tool error tracking + adaptive hints (#8)
       for (let i = 0; i < toolCalls.length; i++) {
@@ -7281,6 +7215,7 @@ export class AgentHarness {
       // Text-only completion — end only when the model stops with a real answer.
       const openingTurn = this.sessionGreetingThisSend || this.personaBootstrapPromptThisSend;
       const assistant = (this.context.getLastAssistantMessage() ?? "").trim();
+
 
       const verificationGate = needsVerificationContinuation({
         userMessage: this.lastUserMessage,
@@ -7582,12 +7517,15 @@ export class AgentHarness {
         cappedScaledMax,
         contextWindow
       );
+      if(resolveProviderStrategy()==="adaptive"&&isOpenRouterApiBaseUrl(this.config.baseURL))await warmProviderValueCatalog(modelSlug,this.config.openRouterApiKey);
       const orExtras = buildOpenRouterChatRequestExtras({
         baseURL: this.config.baseURL,
         modelSlug,
         routeState: this.providerRouteState,
         sessionId: this.taskId,
         retryAttempt: attempt,
+        inputTokens,
+        requireTools:useTools&&tools.length>0,
       });
       const fusionExtras = buildOpenRouterFusionRequestExtras({
         baseURL: this.config.baseURL,
@@ -7605,7 +7543,7 @@ export class AgentHarness {
       // `cache_control: { type: "ephemeral" }` so cache-supporting providers
       // (DeepInfra, GMICloud, NovitaAI, …) serve the prefix at ~1/10× cost on
       // every round after the first. No-op when AGENT_PROMPT_CACHE=0.
-      const cachedMessages = applyPromptCacheBreakpoints(currentMessages);
+      const cachedMessages = applyPromptCacheBreakpoints(currentMessages, this.context.getEffectiveInception().length);
 
       const params: OpenAI.Chat.Completions.ChatCompletionCreateParamsStreaming & {
         provider?: import("./provider_config.js").ProviderRouting;
@@ -8403,7 +8341,6 @@ export class AgentHarness {
       intentClass: intent,
       effort,
       ruleIds: this.injectedRuleIdsThisSend,
-      recipeKey: this.injectedRecipeKeyThisSend ?? undefined,
       userGoal,
       assistantPreview: finalAnswer.replace(/\s+/g, " ").trim().slice(0, 400),
       toolOutcomes: this._toolOutcomesThisTurn,
@@ -8418,6 +8355,7 @@ export class AgentHarness {
   }
 
   reset(): void {
+    this.procedureRuntime?.invalidateTask();
     this.signatureWorkflow = null;
     this.flushPendingTurnLearningProcessOnly();
     this.clearPersonalityHeartbeatSchedule();

@@ -12,7 +12,7 @@
  */
 import { readFile, writeFile, mkdir } from "node:fs/promises";
 import { join } from "node:path";
-import { rankDocumentsForQuery, type RankableDoc } from "./memory_rank.js";
+import { rankDocumentsForQuery, tokenize, type RankableDoc } from "./memory_rank.js";
 import {
   ensureGlobalStorageRoot,
   pickReadPath,
@@ -24,10 +24,6 @@ import { isEmailComposeTurn } from "./email_compose_context.js";
 
 /** A turn must score at least this (scoreTurnOutcome, 0–1) to become a recipe. */
 const RECIPE_OUTCOME_FLOOR = 0.6;
-
-/** A recipe is "promoted" to a default plan when it has compounded enough times AND its avg outcome is high. */
-const PROMOTE_MIN_COUNT = 5;
-const PROMOTE_MIN_OUTCOME = 0.8;
 
 /** Round-2 recipe prime — must clear these before injection (zero extra model calls). */
 const PRIME_MIN_COUNT = 2;
@@ -275,9 +271,9 @@ export function formatRecipePrimeMessage(entry: RecipeEntry): string {
   const seq = compactToolSequenceForPrime(entry.bestExample.toolSequence);
   const avg = avgOutcome(entry);
   return (
-    `[RECIPE PRIME] Similar past turns succeeded with: ${seq} ` +
-    `(reused ×${entry.count}, avg outcome ${avg.toFixed(2)}). ` +
-    `Use as the plan skeleton unless this task clearly differs.`
+    `[RECIPE EVIDENCE] Past tool execution: ${seq} ` +
+    `(reused ×${entry.count}, process score ${avg.toFixed(2)}). ` +
+    `Optional history only; process success does not verify correctness or relevance.`
   );
 }
 
@@ -293,7 +289,7 @@ export async function findBestRecipeForPrime(intentClass: string): Promise<Recip
 
   const intent = normalizeIntentClass(intentClass);
   const pool = all.filter((r) => r.intentClass === intent);
-  const candidates = pool.length > 0 ? pool : all;
+  const candidates = pool;
 
   const eligible = candidates.filter((r) => {
     if (isRecipeDemotedForPrime(r)) return false;
@@ -340,14 +336,13 @@ export async function formatRecipeLibraryHints(
   intentClass?: string
 ): Promise<string | null> {
   if (effectiveHarnessEnvRaw("AGENT_RECIPE_LIBRARY") === "0") return null;
-  if (isEmailComposeTurn(seed)) return null;
+  if (isEmailComposeTurn(seed) || !seed.trim()) return null;
   const file = await loadFile();
   const all = Object.values(file.recipes ?? {});
   if (all.length === 0) return null;
 
   const intent = intentClass?.trim().toLowerCase();
-  const pool = intent ? all.filter((r) => r.intentClass === intent) : [];
-  const candidates = pool.length > 0 ? pool : all;
+  const candidates = intent ? all.filter((r) => r.intentClass === intent) : all;
 
   const trimmed = seed.trim();
   const relevance = new Map<number, number>();
@@ -361,27 +356,28 @@ export async function formatRecipeLibraryHints(
     }
   }
 
+  const common = new Set(["the","and","for","with","this","that","from","please","help","find","make","have","can","you","our","how","what","using","use"]);
+  const queryTerms = new Set(tokenize(trimmed).filter(word=>word.length>2&&!common.has(word)));
+  const hasLexicalRelevance = (goal: string) => {
+    if(!queryTerms.size) return false;
+    const terms=new Set(tokenize(goal));
+    return [...queryTerms].filter(word=>terms.has(word)).length >= Math.min(2,queryTerms.size);
+  };
   const scored = candidates
     .map((r, i) => {
       const avg = avgOutcome(r);
       const rel = relevance.get(i) ?? 0;
-      return { r, avg, score: Math.log1p(r.count) * avg * (1 + rel) };
+      return { r, avg, rel, score: Math.log1p(r.count) * avg * rel };
     })
+    .filter(({r,rel}) => rel > 0 && hasLexicalRelevance(r.bestExample.goal))
     .sort((a, b) => b.score - a.score)
     .slice(0, 2);
 
   if (scored.length === 0) return null;
-  const isPromoted = (r: RecipeEntry, avg: number): boolean =>
-    r.count >= PROMOTE_MIN_COUNT && avg >= PROMOTE_MIN_OUTCOME;
-  const topPromoted = isPromoted(scored[0]!.r, scored[0]!.avg);
-  const header = topPromoted
-    ? "[DEFAULT PLAN] established play for this kind of task — follow it unless the task is structurally different:"
-    : "[KNOWN RECIPE] proven strategy for this kind of task — use as the plan skeleton unless the task clearly differs:";
-  const lines = [header];
+  const lines = ["[RECIPE EVIDENCE] Optional historical examples. Process scores measure tool execution, not answer correctness; choose a plan from the current task."];
   for (const { r, avg } of scored) {
-    const tag = isPromoted(r, avg) ? " [DEFAULT]" : "";
-    lines.push(`  • ${r.phaseShape.join(" → ")}  (reused ×${r.count}, avg outcome ${avg.toFixed(2)})${tag}`);
-    lines.push(`    e.g. "${r.bestExample.goal}" → ${r.bestExample.toolSequence}`);
+    lines.push(`  • ${r.phaseShape.join(" → ")} (reused ×${r.count}, process score ${avg.toFixed(2)})`);
+    lines.push(`    Prior goal: ${JSON.stringify(r.bestExample.goal)}; tools: ${r.bestExample.toolSequence}`);
   }
   return lines.join("\n");
 }

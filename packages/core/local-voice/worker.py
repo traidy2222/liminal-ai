@@ -3,6 +3,7 @@ import os
 os.environ['HF_HUB_OFFLINE']='1'
 os.environ['TRANSFORMERS_OFFLINE']='1'
 os.environ['HF_HUB_DISABLE_XET']='1'
+os.environ.setdefault('OPENBLAS_NUM_THREADS', '1')
 import argparse, base64, contextlib, hashlib, io, json, pathlib, sys
 
 ASSETS=pathlib.Path(__file__).resolve().parent
@@ -13,14 +14,17 @@ def verify_assets():
         with (ASSETS/name).open('rb') as reader:actual=hashlib.file_digest(reader,'sha256').hexdigest()
         if actual!=entry['sha256']:raise RuntimeError(f'Bundled voice asset checksum mismatch: {name}')
 
-def load_engine(home):
+def load_engine(home, cpu_only=False):
     import torch
     from safetensors.torch import load_file
     from chatterbox.tts_turbo import ChatterboxTurboTTS
     verify_assets()
     torch.set_num_threads(max(1,min(4,os.cpu_count() or 1)))
+    # Ampere+ can accelerate FP32 GEMMs using TF32 without converting the model
+    # or its reference conditioning to a different dtype.
+    if torch.cuda.is_available(): torch.set_float32_matmul_precision('high')
     device='cpu'
-    if torch.cuda.is_available():
+    if not cpu_only and torch.cuda.is_available():
         free,total=torch.cuda.mem_get_info()
         if total>=8*1024**3 and free>=4*1024**3:
             device='cuda'
@@ -38,7 +42,81 @@ def load_engine(home):
             module.weight.add_(delta.to(device)*MANIFEST['adapterAlpha']/MANIFEST['adapterRank'])
     engine.t3.eval()
     engine.prepare_conditionals(str(ASSETS/'reference.wav'))
+    prepare_decoder_precision(engine, preload=cpu_only)
     return engine
+
+def native_bf16_supported(torch):
+    """Emulated bf16 on pre-Ampere GPUs is not a fast decoder path."""
+    return torch.cuda.is_available() and torch.cuda.get_device_capability()[0] >= 8
+
+
+def prepare_decoder_precision(engine, preload=False):
+    """Keep decoder weights and reference embeddings in the inference dtype."""
+    import torch
+    # CPU preload stores the decoder in its eventual GPU dtype; actual CPU
+    # synthesis still restores float32. Avoid keeping a second full-size FP32
+    # decoder in RAM just to transfer and convert it on the first spoken reply.
+    dtype = torch.bfloat16 if (engine.device == 'cuda' or preload) and native_bf16_supported(torch) else torch.float32
+    changed = next(engine.t3.parameters()).dtype != dtype
+    if changed: engine.t3.to(dtype=dtype)
+    engine.conds.t3.to(dtype=dtype)
+    if changed and engine.device == 'cuda': torch.cuda.empty_cache()
+
+def move_engine(engine, device):
+    """Move all modules and reference tensors together before acknowledging release."""
+    import torch
+    # A failed resume can leave some modules on CUDA even while device says CPU.
+    if engine.device == device and device != 'cpu': return
+    engine.t3.to(device)
+    engine.s3gen.to(device)
+    engine.ve.to(device)
+    # Chatterbox's positional encoders store plain Tensor attributes (not buffers).
+    # Module.to() leaves these on their original device, causing stale CUDA state.
+    parked = getattr(engine, '_parked_tensor_attrs', [])
+    if device == 'cpu':
+        for network in (engine.t3, engine.s3gen, engine.ve):
+            for module in network.modules():
+                for name, value in list(vars(module).items()):
+                    if torch.is_tensor(value) and value.device.type == 'cuda':
+                        if not any(owner is module and attr == name for owner, attr in parked): parked.append((module, name))
+                        setattr(module, name, value.to(device))
+        engine._parked_tensor_attrs = parked
+    else:
+        # Restore only attributes parked from CUDA; intentional CPU metadata stays CPU.
+        for module, name in parked: setattr(module, name, getattr(module, name).to(device))
+        engine._parked_tensor_attrs = []
+    engine.conds.to(device)
+    engine.device = device
+    if device == 'cpu' and torch.cuda.is_available():
+        import gc
+        gc.collect()
+        torch.cuda.synchronize()
+        torch.cuda.empty_cache()
+        # Small CUDA runtime caches can survive empty_cache. Bound the overhead;
+        # model-sized retained allocations still force process exit.
+        if torch.cuda.memory_allocated() > 256 * 1024**2:
+            raise RuntimeError('Local voice retained GPU allocations after parking')
+
+def resume_engine(engine):
+    import torch
+    if engine.device == 'cuda': return
+    if torch.cuda.is_available():
+        free, total = torch.cuda.mem_get_info()
+        if total >= 8 * 1024**3 and free >= 4 * 1024**3:
+            torch.cuda.set_per_process_memory_fraction(min(.7, 5 * 1024**3 / total))
+            try:
+                move_engine(engine, 'cuda')
+            except RuntimeError:
+                move_engine(engine, 'cpu')
+
+def can_keep_gpu(engine, next_resident_ready=False):
+    import torch
+    if engine.device != 'cuda': return False
+    # Release unused allocator cache before making a conservative shared-memory
+    # decision. Inference remains serialized even when both weights stay resident.
+    torch.cuda.empty_cache()
+    free, total = torch.cuda.mem_get_info()
+    return total >= 9 * 1024**3 and free >= (1.5 if next_resident_ready else 4) * 1024**3
 
 def synthesize(engine,text):
     import numpy as np
@@ -47,12 +125,18 @@ def synthesize(engine,text):
     from chatterbox.tts_turbo import punc_norm
     from chatterbox.models.s3gen.const import S3GEN_SIL
     from tone import warm_original_pitch
+    prepare_decoder_precision(engine)
     if not text.strip() or len(text)>800:raise ValueError('Local speech requires 1–800 characters per segment')
     # Stable sampling for a consistent voice. Generate full phrases, never per-word fragments.
     torch.manual_seed(100)
     tokens=engine.tokenizer(punc_norm(text),return_tensors='pt').input_ids.to(engine.device)
     with torch.inference_mode():
-        speech=engine.t3.inference_turbo(t3_cond=engine.conds.t3,text_tokens=tokens,temperature=.65,top_p=.9,repetition_penalty=1.2)
+        # Autocast just the autoregressive decoder on supported NVIDIA GPUs.
+        # Integer speech tokens cross the boundary; the vocoder and approved tone
+        # processing retain their original precision and reference conditioning.
+        mixed = engine.device == 'cuda' and native_bf16_supported(torch)
+        with torch.autocast('cuda', dtype=torch.bfloat16, enabled=mixed):
+            speech=engine.t3.inference_turbo(t3_cond=engine.conds.t3,text_tokens=tokens,temperature=.65,top_p=.9,repetition_penalty=1.2)
         if speech.numel()>=1000:raise RuntimeError('Speech generation reached its limit; shorten the spoken passage and retry')
         speech=speech[speech<6561]
         speech=torch.cat([speech,torch.tensor([S3GEN_SIL]*3,device=engine.device)])
@@ -84,7 +168,20 @@ def main():
         try:
             request=json.loads(line)
             with contextlib.redirect_stdout(sys.stderr):
+                if request.get('op') == 'release':
+                    if engine is not None and request.get('allow_resident') and can_keep_gpu(engine, request.get('next_resident_ready', False)):
+                        print(json.dumps({'id':request['id'],'released':True,'residentGpu':True}),file=sys.__stdout__,flush=True)
+                        continue
+                    if engine is not None: move_engine(engine, 'cpu')
+                    print(json.dumps({'id':request['id'],'released':True}),file=sys.__stdout__,flush=True)
+                    continue
+                if request.get('op') == 'warmup':
+                    if engine is None: engine=load_engine(args.home,cpu_only=True)
+                    print(json.dumps({'id':request['id'],'ready':True}),file=sys.__stdout__,flush=True)
+                    continue
                 if engine is None:engine=load_engine(args.home)
+                else:resume_engine(engine)
+                print(json.dumps({'id':request['id'],'started':True,'device':str(engine.device)}),file=sys.__stdout__,flush=True)
                 audio=synthesize(engine,str(request.get('text','')))
             print(json.dumps({'id':request['id'],'audio':audio}),flush=True)
         except Exception as error:

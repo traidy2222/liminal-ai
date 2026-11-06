@@ -17,8 +17,9 @@ export function createToolDiscoveryTools(registry: ToolRegistry) {
     if (/(write|edit|patch|create file|rewrite|modify file)/.test(hint)) return "files_edit";
     if (/(shell|terminal|command|npm|build|test|install|process)/.test(hint)) return "shell";
     if (/(git|commit|branch|diff|status|log)/.test(hint)) return "git";
-    if (/(weather|news|search|fetch|research|web)/.test(hint)) return "web";
-    if (/(price|stock|fx|crypto|commodity|market)/.test(hint)) return "markets";
+    if (/(weather|news|search|fetch|research|web)/.test(hint))
+      return registry.has("web_search") || registry.has("web_fetch") || registry.has("http_request") ? "web" : "browser";
+    if (/(price|stock|fx|crypto|commodity|market)/.test(hint)) return registry.has("markets_quote") ? "markets" : "browser";
     if (/(vision|image|screenshot|ocr|diagram)/.test(hint)) return "vision";
     if (/(memory|recall|remember|vault|obsidian|notes)/.test(hint)) return "memory_advanced";
     if (/(slack|channel|workspace chat)/.test(hint)) return "slack";
@@ -79,34 +80,34 @@ export function createToolDiscoveryTools(registry: ToolRegistry) {
       const active = new Set(registry.getActiveToolNames());
       const families = summarizeFamilyActivity(registry);
       const taskHint = String(args["task_hint"] ?? "");
+      const recommendation = recommendFamilyFromHint(taskHint);
+      const selected = recommendation ? families.filter(f=>f.family===recommendation) : families;
       const lines: string[] = [];
       lines.push(`Lazy tool loading: ${registry.isLazyToolLoading() ? "ON" : "OFF"}`);
       lines.push(`Active tool count: ${active.size}`);
       lines.push("");
       lines.push("Families (call activate_tool_family with { family: \"<id>\" }):");
-      for (const f of families) {
+      for (const f of selected.length?selected:families) {
         lines.push(`- ${f.family}: ${f.description} (${f.active}/${f.total} active here)`);
       }
-      if (families.some((f) => f.family === "document")) {
+      if (!recommendation&&families.some((f) => f.family === "document")) {
         lines.push("");
         lines.push(`Note: "ppx" means PowerPoint/PPTX. Use document family + doc_render_pptx for deck artifacts.`);
       }
-      if (families.some((f) => f.family === "vision")) {
+      if (!recommendation&&families.some((f) => f.family === "vision")) {
         lines.push(`Note: Vision sidecar available via "vision" family. Use vision_analyze when seeing an image would improve accuracy.`);
       }
-      if (families.some((f) => f.family === "markets")) {
+      if (!recommendation&&families.some((f) => f.family === "markets")) {
         lines.push(`Note: Use "markets_quote" from markets family for prices/costing with as-of + source metadata.`);
       }
-      if (families.some((f) => f.family === "agentcard")) {
+      if (!recommendation&&families.some((f) => f.family === "agentcard")) {
         lines.push(
           `Note: AgentCard payments — activate_tool_family({ family: "agentcard" }) or mention payments/checkout in task_hint.`
         );
       }
       lines.push("");
-      lines.push("Active tools:");
-      lines.push([...active].sort().join(", ") || "(none)");
-      const recommendation = recommendFamilyFromHint(taskHint);
-      if (recommendation) {
+      if(!recommendation){lines.push("Active tools:");lines.push([...active].sort().join(", ") || "(none)");}
+      if (recommendation && families.some(f => f.family === recommendation)) {
         lines.push("");
         lines.push(`Recommended next family for this task_hint: ${recommendation}`);
       }
@@ -136,7 +137,9 @@ export function createToolDiscoveryTools(registry: ToolRegistry) {
       additionalProperties: false,
     },
     handler: async (args) => {
-      const family = String(args["family"] ?? "").trim().toLowerCase();
+      const requested = String(args["family"] ?? "").trim().toLowerCase();
+      const browserFirst=requested==='web'&&registry.has('browser_search')&&!['web_search','web_fetch','http_request'].some(name=>registry.has(name));
+      const family = browserFirst?'browser':requested;
       if (!family) return { ok: false, error: "family is required" };
       const aliasTargets = WORKSPACE_TOOL_FAMILY_ALIASES[family];
       const knownStatic = family in TOOL_FAMILIES;
@@ -192,6 +195,7 @@ export function createToolDiscoveryTools(registry: ToolRegistry) {
         ok: true,
         output:
           `Family "${family}" activated. Newly visible: ${newly.length ? newly.sort().join(", ") : "(already active)"}\n` +
+          (browserFirst?'Direct web tools are disabled; use the browser for search and reading.\n':'')+
           `Total active tools: ${registry.getActiveToolNames().length}${browserHint}`,
       };
     },

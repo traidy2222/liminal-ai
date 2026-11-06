@@ -48,7 +48,7 @@ describe("AgentHarness.isPersonaBootstrapCompleted", () => {
     process.env["AGENT_GLOBAL_STORAGE_ROOT"] = globalRoot;
     process.env["AGENT_STORAGE_LAYOUT"] = "";
     const harness = new AgentHarness({
-      apiKey: "test-key",
+      openRouterApiKey: "test-key",
       runtimePreferences: {
         version: 1,
         updatedAt: Date.now(),
@@ -66,7 +66,7 @@ describe("AgentHarness.isPersonaBootstrapCompleted", () => {
     const globalRoot = tempRoot();
     process.env["AGENT_GLOBAL_STORAGE_ROOT"] = globalRoot;
     const harness = new AgentHarness({
-      apiKey: "test-key",
+      openRouterApiKey: "test-key",
       runtimePreferences: {
         version: 1,
         updatedAt: Date.now(),
@@ -82,7 +82,7 @@ describe("AgentHarness.isPersonaBootstrapCompleted", () => {
 
   it("allows default completion without persona file", () => {
     const harness = new AgentHarness({
-      apiKey: "test-key",
+      openRouterApiKey: "test-key",
       runtimePreferences: {
         version: 1,
         updatedAt: Date.now(),

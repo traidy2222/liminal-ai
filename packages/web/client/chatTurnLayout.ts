@@ -91,7 +91,7 @@ export function groupIntoChatTurns(
   return turns;
 }
 
-export function summarizeWorkingPanel(working: TurnRow[]): string {
+export function summarizeWorkingPanel(working: TurnRow[], isActive = false): string {
   let tools = 0;
   let notes = 0;
   for (const row of working) {
@@ -107,7 +107,7 @@ export function summarizeWorkingPanel(working: TurnRow[]): string {
     )
       notes++;
   }
-  const parts: string[] = ["Working"];
+  const parts: string[] = [isActive ? "Working" : "Finished"];
   if (tools > 0) parts.push(`${tools} tool${tools === 1 ? "" : "s"}`);
   if (notes > 0) parts.push(`${notes} note${notes === 1 ? "" : "s"}`);
   return parts.join(" · ");

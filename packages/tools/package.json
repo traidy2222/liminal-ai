@@ -12,7 +12,7 @@
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc --noEmit",
-    "pretest": "npm run build -w @liminal/core",
+    "pretest": "npm run build -w @liminal/core && npm run build -w @liminal/protocol && npm run build -w @liminal/tools",
     "test": "tsx --test \"src/**/*.test.ts\"",
     "browser:install": "playwright install chromium"
   },

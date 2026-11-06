@@ -21,6 +21,8 @@ export type WireImageAttachment = WireChatAttachment;
  * independent server events, not as the command's return value.
  */
 export interface ClientCommandMap {
+  /** Local desktop management; verifier adoption is never exposed as a model tool. */
+  procedure_manage: {chatId:string;action:"list"|"inspect"|"evidence"|"preview_contract"|"adopt_contract"|"learn"|"validate"|"correct"|"retire"|"recover"|"disable";versionId?:string;contractPath?:string;expectedSourceHash?:string;eventId?:string;offset?:number;contractId?:string;runId?:string;inputs?:Record<string,unknown>;correction?:string;disabled?:boolean};
   /** Start a turn. Resolves (command_result) once the send has been accepted, not when the turn ends. */
   send_message: {
     chatId: string;
@@ -33,6 +35,8 @@ export interface ClientCommandMap {
   };
   /** Cooperatively abort the in-flight turn for a chat. */
   abort: { chatId: string };
+  /** Cancel pending voice audio while leaving agent/tool work running. */
+  cancel_speech: { chatId: string; voiceId?: string };
   /** Resolve a pending `tool_approval`. `approvalNonce` must match the one from the event. */
   resolve_approval: {
     chatId: string;
@@ -46,9 +50,11 @@ export interface ClientCommandMap {
   /** Create a new chat (optionally bound to a workspace folder) and return its summary. */
   create_chat: { workspaceRoot?: string; title?: string; kind?: "default" | "orchestrator" };
   /** Return the persistent Mission Control chat (create if missing). */
-  get_or_create_orchestrator_chat: Record<string, never>;
+  get_or_create_orchestrator_chat: { activate?: boolean };
+  /** Voice conversation ownership lasts until sleep, disconnect, or application exit. */
+  set_voice_session: { chatId: string; active: boolean };
   /** Make a chat the live event source. */
-  activate_chat: { chatId: string };
+  activate_chat: { chatId: string; show?: boolean };
   /** Open harness + hydrate transcript without changing the active chat. */
   open_chat: { chatId: string };
   /** Permanently dispose a chat and its harness. */
@@ -67,6 +73,7 @@ export interface ClientCommandMap {
   get_config: Record<string, never>;
   /** Fetch the effective settings snapshot. */
   get_settings: Record<string, never>;
+  get_cache_stats: { chatId?: string };
   get_openrouter_models: { refresh?: boolean };
   /** Patch managed settings (persisted to runtime prefs by the harness). */
   update_settings: { patch: Record<string, unknown> };
@@ -74,7 +81,9 @@ export interface ClientCommandMap {
    * Persist BYOK provider credentials (writes `AGENT_API_KEY` to repo `.env`) and
    * refresh every live harness. Secrets are never returned on the wire.
    */
-  save_provider: { apiKey: string; model?: string; baseURL?: string };
+  save_provider: { apiKey?: string; model?: string; baseURL?: string };
+  discover_provider_models: {apiKey?:string;baseURL?:string};
+  cancel_persona_bootstrap: {chatId:string};
 
   /** Vireon account + license snapshot (`~/.liminal/account.json`). */
   get_vireon_account: Record<string, never>;

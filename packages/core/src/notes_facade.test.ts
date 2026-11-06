@@ -1,6 +1,7 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { getNotesFacade, runWithOrgContext, LocalNotesFacade } from "./notes_facade.js";
+import { getNotesFacade, LocalNotesFacade } from "./notes_facade.js";
+import { runWithOrgContext } from "./org_context.js";
 
 describe("notes_facade", () => {
   it("LocalNotesFacade stamps orgId on write", async () => {

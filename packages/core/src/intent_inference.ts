@@ -1,4 +1,5 @@
 import OpenAI from "openai";
+import { isPromptCacheEnabled } from "./prompt_cache.js";
 import { completeChatJson, getFastModelSlug } from "./router.js";
 import { effectiveHarnessEnvRaw } from "./harness_effective_env.js";
 import { isOpenRouterFusionModel } from "./openrouter_fusion.js";
@@ -16,6 +17,7 @@ import {
   isImplementShipUserMessage,
   isResearchFreshnessUserMessage,
 } from "./reasoning_surface.js";
+import { isAccountSignupTurn } from "./account_signup.js";
 
 export type TurnIntentClass =
   | "introspection"
@@ -103,6 +105,11 @@ function isComplexityFastRoutingEnabled(): boolean {
  * Produce a routing profile for the given intent inference result.
  * When AGENT_INTENT_ROUTING is not "1", returns a no-op profile.
  */
+export function buildCacheAwareRoutingProfile(inference: TurnInferenceResult | null, mainModel: string): RoutingProfile {
+  const profile = buildRoutingProfile(inference, mainModel);
+  return isPromptCacheEnabled() ? { ...profile, modelSlug: mainModel, toolFilter: null, toolFilterActive: false, applied: false, routingReason: "cache_affinity" } : profile;
+}
+
 export function buildRoutingProfile(
   inference: TurnInferenceResult | null,
   mainModel: string
@@ -121,6 +128,8 @@ export function buildRoutingProfile(
   };
 
   if (effectiveHarnessEnvRaw("AGENT_INTENT_ROUTING") !== "1") return noOp;
+  // Keep the full conversation on the user's selected model and tool surface.
+  // Auxiliary classifiers still use their own small independent requests.
   if (!inference) return noOp;
 
   // Fusion is a deliberate multi-model router — never downgrade to the fast tier.
@@ -597,7 +606,7 @@ const INFERENCE_SYSTEM_PROMPT =
   "knowledge=background Q&A, explanations, factual recall without live web sources; " +
   "research=live multi-source investigation using web_search/web_fetch — news, markets, current events, fact-checking; " +
   "coding=code edits, repo work, debugging, refactoring, tests, anything that mutates files OR produces a runnable/openable artifact (html page, app, site, script, tool, game); " +
-  "execution=builds, deploys, CI/CD, process runs, scheduled briefs, file-system maintenance, and hands-on inspection/decompilation of selected local artifacts, even when findings are reported in prose; " +
+  "execution=builds, deploys, CI/CD, process runs, scheduled briefs, file-system maintenance, browser/service actions such as setting up an account, and hands-on inspection/decompilation of selected local artifacts, even when findings are reported in prose; " +
   "creative=generative writing/ideation where the PROSE ITSELF is the deliverable (stories, poems, copy, naming, blue-sky brainstorm, design exploration with no expected file output). The text the model emits IS the product — no file is written, no app runs. " +
   "INTENT PRECEDENCE (resolve ambiguity in this order): " +
   "(1) If the user asks for a working/runnable/openable artifact — file, app, page, game, tool, script, OS, demo — classify as coding REGARDLESS of how creative the subject is. 'build me a poetry app', 'make me a browser OS', 'design and code a Tetris clone' are all coding. The verbs 'build/make/create/code/implement/ship' applied to a noun that lives on disk = coding, never creative. " +
@@ -812,7 +821,8 @@ export async function inferTurnInference(
   client: OpenAI,
   model: string,
   userMessage: string,
-  workspace?: IntentInferenceWorkspaceContext
+  workspace?: IntentInferenceWorkspaceContext,
+  options?: { interactiveVoice?: boolean }
 ): Promise<TurnInferenceResult> {
   // Local fast paths must also run when the optional remote classifier is off.
   // In particular, greetings should not acquire the default knowledge/recall policy.
@@ -820,6 +830,16 @@ export async function inferTurnInference(
   if (conversational) return conversational;
   const toolFirst = tryHeuristicToolFirstTurn(userMessage);
   if (toolFirst) return toolFirst;
+  if (options?.interactiveVoice) {
+    // The main model can decide how to answer or which tools to use. An advisory
+    // classifier (up to 8 seconds) must not sit ahead of a real-time voice turn.
+    // Keep the execution tool surface available for delegation and complex asks.
+    return applyTurnInferenceHeuristics(userMessage, neutralTurnInferenceResult("interactive_voice", {
+      intent: "execution", confidence: 0.51,
+      complexity: fallbackComplexityForUserMessage(userMessage),
+      skipHarnessSecondaryPasses: true,
+    }));
+  }
   if (!isIntentInferenceEnabled()) {
     return applyTurnInferenceHeuristics(
       userMessage,
@@ -901,6 +921,14 @@ export function applyTurnInferenceHeuristics(
   const msg = userMessage.trim();
   if (!msg) return inference;
 
+  if (isAccountSignupTurn(msg)) return {
+    ...inference, intent: "execution", toolFirstBias: true, exploratoryCreative: false,
+    buildDeliverable: false, implementShip: false, likelyEditPaths: [],
+    thinkDepth: "brief", essayRisk: false, reasoningWordBudget: Math.min(inference.reasoningWordBudget ?? 120, 120),
+    complexity: inference.complexity === "trivial" ? "normal" : inference.complexity,
+    reason: `${inference.reason ?? ""} account_signup_execution`.trim(),
+  };
+
   if (isUnfamiliarArtifactInvestigation(msg)) {
     return {
       ...inference,
@@ -927,14 +955,14 @@ export function applyTurnInferenceHeuristics(
     : isImplementShipUserMessage(msg);
 
   if (researchFresh && !implementShip && !buildDeliverable) {
-    const wordBudget = Math.min(inference.reasoningWordBudget ?? 350, 140);
+    const wordBudget = inference.reasoningWordBudget ?? 350;
     return {
       ...inference,
       intent: "research",
       exploratoryCreative: false,
       freshnessSensitive: true,
-      toolFirstBias: true,
-      thinkDepth: "brief",
+      toolFirstBias: false,
+      thinkDepth: inference.thinkDepth ?? "standard",
       reasoningWordBudget: wordBudget,
       essayRisk: false,
       reason: `${inference.reason ?? ""} heuristic=research_freshness`.trim(),

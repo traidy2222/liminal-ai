@@ -1,7 +1,8 @@
+import {createProcedureTools} from "./families/memory/procedure_memory.js";
 import { createReceiptReadTool } from "./families/workflow/receipt_read.js";
 import { createWorkPackageTool } from "./families/workflow/work_package.js";
 import type { ToolRegistry, AgentEmitter, AgentHarness } from "@liminal/core";
-import { effectiveHarnessEnvRaw, resolveHarnessEnvRaw, emailStyleInferEnabled } from "@liminal/core";
+import { effectiveHarnessEnvRaw, resolveHarnessEnvRaw, emailStyleInferEnabled, browserFirstSuppressedTools } from "@liminal/core";
 import { readFileTool } from "./families/files/read_file.js";
 import { writeFileTool } from "./families/files/write_file.js";
 import { listDirTool } from "./families/files/list_dir.js";
@@ -56,6 +57,9 @@ import { multiFileApplyTool } from "./families/files/multi_file_apply.js";
 import { pathGuardTool } from "./families/files/path_guard.js";
 import {
   browserOpenTool,
+  browserSearchTool,
+  browserTabsTool,
+  browserCredentialsTool,
   browserNavigateTool,
   browserActTool,
   browserSnapshotTool,
@@ -224,6 +228,7 @@ export async function registerAllTools(
   harness?: AgentHarness,
   deps?: RegisterAllToolsDeps
 ): Promise<void> {
+  if (harness) for (const tool of createProcedureTools(harness)) registry.register(tool);
   registry.register(thinkTool);
   registry.register(breakdownTool);
   registry.register(reasonTool);
@@ -269,8 +274,15 @@ export async function registerAllTools(
       registry.register(runCommandWithPtyTool);
     }
   }
-  registry.register(webFetchTool);
-  registry.register(webSearchTool);
+  if (resolveHarnessEnvRaw("AGENT_WEB_SEARCH_FETCH", harness?.getRuntimePreferences() ?? null) === "1") {
+    registry.register(webFetchTool);
+    registry.register(webSearchTool);
+  } else {
+    // Also handles settings changes on an already populated registry.
+    registry.unregister("web_fetch");
+    registry.unregister("web_search");
+  }
+  registry.setSuppressedTools(browserFirstSuppressedTools("", resolveHarnessEnvRaw("AGENT_WEB_SEARCH_FETCH", harness?.getRuntimePreferences() ?? null) === "1"));
   registry.register(weatherLookupTool);
   const prefs = harness?.getRuntimePreferences() ?? null;
   if (resolveHarnessEnvRaw("AGENT_MARKETS_ENABLE", prefs) !== "0") {
@@ -316,6 +328,9 @@ export async function registerAllTools(
   registry.register(executeCodeTool);
   registry.register(httpRequestTool);
   registry.register(browserOpenTool);
+  registry.register(browserSearchTool);
+  registry.register(browserTabsTool);
+  registry.register(browserCredentialsTool);
   registry.register(browserNavigateTool);
   registry.register(browserSnapshotTool);
   registry.register(browserActTool);
@@ -677,6 +692,9 @@ export { defineTool } from "./shared/helpers.js";
 export {
   getBrowserPanelFrame,
   getBrowserSession,
+  browserWorkspaceState,
+  controlBrowserWorkspace,
+  shutdownBrowserWorkspace,
   listBrowserSessionIdsForTask,
   getSessionCookies,
   refreshBrowserEmbedView,
@@ -684,6 +702,9 @@ export {
   setBrowserViewPublisherForTask,
   userNavigateBrowserSession,
 } from "./families/browser/browser_runtime.js";
+export {closeAllBrowserSessionsForTask} from './families/browser/browser_runtime.js';
+export { registerDesktopBrowser, pollDesktopBrowser, completeDesktopBrowserCommand,
+  disconnectDesktopBrowser } from "./families/browser/browser_desktop.js";
 export {
   startBrowserScreencast,
   stopBrowserScreencastForSession,
