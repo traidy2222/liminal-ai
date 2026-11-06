@@ -25,7 +25,8 @@ jobs:
 
   typecheck:
     name: Typecheck
-    runs-on: ubuntu-latest
+    # Keep browser fixture dependencies on a Playwright-supported runner image.
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
 
